@@ -269,6 +269,9 @@ struct ClumpInputs {
     // With `chosen`: per center how far its curve lies from that strand (a Clump's centers on the
     // scalp: ClumpState::offsets), the curve the strand moved by it; null: none (every curve its strand).
     std::shared_ptr<const std::vector<Vec3f>> offsets;
+    // A Clump's centers on the scalp (version 2: ClumpState::offsets): a strand rooted a hair from its
+    // center takes its own way round the lock as its root nears it (look.slang ClumpCS, gFlag2.w).
+    bool spots = false;
     // centersFrom inputCurves, the centers made by a branch the run moves (a Scatter's strands
     // through an Interpolate of the stroke's guides, a Noise): that branch's own run, made on the
     // GPU before the Clump; `chosen` then names each center's strand of its result.

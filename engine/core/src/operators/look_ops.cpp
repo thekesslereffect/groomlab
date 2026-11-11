@@ -1784,7 +1784,9 @@ private:
         for (std::size_t c = 0; c < used.size(); ++c) ids[c] = used[c]->id;
         gpu::StageInputs taken;
         if (!last) {
-            taken.clump = gpu::clumpInputs(assigned, curvesMade, normalsMade, ids, seed);
+            auto inputs = gpu::clumpInputs(assigned, curvesMade, normalsMade, ids, seed);
+            inputs->spots = !axisOffsets.empty();  // centers on the scalp (ClumpInputs::spots)
+            taken.clump = std::move(inputs);
             gpu::runStageInto(gpu::StageKind::Clump, params(), in, scalp, *out, std::move(taken));
             if (clumpIds) {
                 parallelFor(0, assigned->size(), [&](std::size_t s) {
@@ -1795,7 +1797,9 @@ private:
         } else {
             auto theirs = std::make_shared<std::vector<std::uint32_t>>(dirty.size());
             for (std::size_t k = 0; k < dirty.size(); ++k) (*theirs)[k] = (*assigned)[dirty[k]];
-            taken.clump = gpu::clumpInputs(theirs, curvesMade, normalsMade, ids, seed);
+            auto inputs = gpu::clumpInputs(theirs, curvesMade, normalsMade, ids, seed);
+            inputs->spots = !axisOffsets.empty();  // centers on the scalp (ClumpInputs::spots)
+            taken.clump = std::move(inputs);
             gpu::runStageOnStrands(gpu::StageKind::Clump, params(), in, dirty, scalp, *out, std::move(taken));
             if (clumpIds) {
                 for (const std::uint32_t s : dirty) (*clumpIds)[s] = (*assigned)[s] != kNoCenter ? (*numbers)[(*assigned)[s]] : -1.0f;

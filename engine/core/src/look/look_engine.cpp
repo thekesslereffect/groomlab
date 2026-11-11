@@ -2167,6 +2167,7 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
             case StageKind::Clump: {
                 kernel = Kernel::Clump;
                 const ClumpInputs& in = *r.inputs[k].clump;
+                c.flag2[3] = in.spots ? 1u : 0u;  // centers on the scalp (ClumpInputs::spots)
                 const bool made = !in.curves;
                 // Frames for a lock radius or a flatness.
                 const bool framed = p.value[3] > 0.0f || p.value[2] > 0.0f;

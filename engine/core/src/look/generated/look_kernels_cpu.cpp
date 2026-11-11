@@ -12009,14 +12009,14 @@ void _ClumpCS(void* _S991, void* entryPointParams_4, void* globalParams_5)
     Vector<float, 3>  _S1036 = centerPoint_0(_S996, 0U, &kernelContext_88);
     Vector<float, 3>  rootOffset_1 = _S1035 - _S1036;
 
+    Vector<float, 2>  lockWay_0 = Vector<float, 2> ((groomlab_pm_cos((angle_2))), (groomlab_pm_sin((angle_2))));
+    bool _S1037 = radius_1 > 0.0f;
 
+    Vector<float, 2>  lockWay_1;
 
-    Vector<float, 2>  _S1037 = Vector<float, 2> ((groomlab_pm_cos((angle_2))), (groomlab_pm_sin((angle_2))));
-    bool _S1038 = radius_1 > 0.0f;
+    bool _S1038;
 
-    Vector<float, 2>  lockWay_0;
-
-    if(_S1038)
+    if(_S1037)
     {
 
         Frame_0 _S1039 = centerFrame_0(_S996, 0U, &kernelContext_88);
@@ -12027,16 +12027,63 @@ void _ClumpCS(void* _S991, void* entryPointParams_4, void* globalParams_5)
 
         Vector<float, 2>  inFrame_1 = Vector<float, 2> (_S1040, _S1041);
         float l_8 = (F32_sqrt((_S1040 * _S1040 + _S1041 * _S1041)));
-        if(l_8 > (9.99999997475242708e-07f * (1.0f + len3_0(rootOffset_1))))
+        bool _S1042 = l_8 > (9.99999997475242708e-07f * (1.0f + len3_0(rootOffset_1)));
+
+        if(_S1042)
         {
 
-            lockWay_0 = inFrame_1 / (Vector<float, 2> )l_8;
+            _S1038 = ((&kernelContext_88)->globalParams_0->Look_0->gFlag2_0.w) == 0U;
 
         }
         else
         {
 
-            lockWay_0 = _S1037;
+            _S1038 = false;
+
+        }
+
+        if(_S1038)
+        {
+
+            lockWay_1 = inFrame_1 / (Vector<float, 2> )l_8;
+
+        }
+        else
+        {
+
+            if(_S1042)
+            {
+
+                float near_1 = 0.00999999977648258f * radius_1;
+                float _S1043 = near_1 * near_1;
+
+                float own_4 = _S1043 / (l_8 * l_8 + _S1043);
+                Vector<float, 2>  blended_2 = inFrame_1 / (Vector<float, 2> )l_8 * (Vector<float, 2> )(1.0f - own_4) + lockWay_0 * (Vector<float, 2> )own_4;
+                float _S1044 = blended_2.x;
+
+                float _S1045 = blended_2.y;
+
+                float b_36 = (F32_sqrt((_S1044 * _S1044 + _S1045 * _S1045)));
+                if(b_36 > 9.99999997475242708e-07f)
+                {
+
+                    lockWay_1 = blended_2 / (Vector<float, 2> )b_36;
+
+                }
+                else
+                {
+
+                    lockWay_1 = lockWay_0;
+
+                }
+
+            }
+            else
+            {
+
+                lockWay_1 = lockWay_0;
+
+            }
 
         }
 
@@ -12044,15 +12091,15 @@ void _ClumpCS(void* _S991, void* entryPointParams_4, void* globalParams_5)
     else
     {
 
-        lockWay_0 = _S1037;
+        lockWay_1 = lockWay_0;
 
     }
 
-    Vector<float, 3>  _S1042 = centerPoint_0(_S996, 31U, &kernelContext_88);
+    Vector<float, 3>  _S1046 = centerPoint_0(_S996, 31U, &kernelContext_88);
 
-    Vector<float, 3>  _S1043 = centerPoint_0(_S996, 30U, &kernelContext_88);
+    Vector<float, 3>  _S1047 = centerPoint_0(_S996, 30U, &kernelContext_88);
 
-    Vector<float, 3>  _S1044 = normalized_0(_S1042 - _S1043);
+    Vector<float, 3>  _S1048 = normalized_0(_S1046 - _S1047);
 
     uint32_t k_22 = 0U;
 
@@ -12074,15 +12121,15 @@ void _ClumpCS(void* _S991, void* entryPointParams_4, void* globalParams_5)
             break;
         }
 
-        bool _S1045 = fieldPerPoint_0(0U, &kernelContext_88);
+        bool _S1049 = fieldPerPoint_0(0U, &kernelContext_88);
 
         float amount_1;
-        if(_S1045)
+        if(_S1049)
         {
 
-            float _S1046 = fieldAt_0(0U, (&kernelContext_88)->globalParams_0->Look_0->gValue_0.x, _S993, _S994 + i_43, &kernelContext_88);
+            float _S1050 = fieldAt_0(0U, (&kernelContext_88)->globalParams_0->Look_0->gValue_0.x, _S993, _S994 + i_43, &kernelContext_88);
 
-            amount_1 = _S1046 * escape_0;
+            amount_1 = _S1050 * escape_0;
 
         }
         else
@@ -12092,32 +12139,30 @@ void _ClumpCS(void* _S991, void* entryPointParams_4, void* globalParams_5)
 
         }
 
-        float _S1047 = rampAlong_0(i_43, _S995, &kernelContext_88);
-        float raw_2 = amount_1 * _S1047;
+        float _S1051 = rampAlong_0(i_43, _S995, &kernelContext_88);
+        float raw_2 = amount_1 * _S1051;
         float t_25 = paramAt_0(i_43, _S995);
-        uint32_t _S1048 = _S994 + i_43;
+        uint32_t _S1052 = _S994 + i_43;
 
-        Vector<float, 3>  _S1049 = loadPoint_0(_S1048, &kernelContext_88);
+        Vector<float, 3>  _S1053 = loadPoint_0(_S1052, &kernelContext_88);
 
-        Vector<float, 3>  _S1050 = loadPoint_0(_S1048 - 1U, &kernelContext_88);
-        Vector<float, 3>  _S1051 = _S1049 - _S1050;
+        Vector<float, 3>  _S1054 = loadPoint_0(_S1052 - 1U, &kernelContext_88);
+        Vector<float, 3>  _S1055 = _S1053 - _S1054;
 
-        float _S1052 = len3_0(_S1051);
+        float _S1056 = len3_0(_S1055);
 
-        float arc_11 = arc_10 + _S1052;
-
-        bool _S1053;
+        float arc_11 = arc_10 + _S1056;
 
         if(raw_2 < 0.0f)
         {
 
-            _S1053 = _S1022;
+            _S1038 = _S1022;
 
         }
         else
         {
 
-            _S1053 = false;
+            _S1038 = false;
 
         }
 
@@ -12127,12 +12172,12 @@ void _ClumpCS(void* _S991, void* entryPointParams_4, void* globalParams_5)
 
         Vector<float, 3>  moved_8;
 
-        if(_S1053)
+        if(_S1038)
         {
 
-            Vector<float, 3>  _S1054 = repelled_0(_S1049, _S996, _S1034, arc_11, (groomlab_min((- raw_2), (1.0f))), repelRadius_0, rootOffset_1, angle_2, skin_1, t_25, &kernelContext_88);
+            Vector<float, 3>  _S1057 = repelled_0(_S1053, _S996, _S1034, arc_11, (groomlab_min((- raw_2), (1.0f))), repelRadius_0, rootOffset_1, angle_2, skin_1, t_25, &kernelContext_88);
 
-            moved_7 = _S1054;
+            moved_7 = _S1057;
 
         }
         else
@@ -12140,36 +12185,36 @@ void _ClumpCS(void* _S991, void* entryPointParams_4, void* globalParams_5)
             float w_25 = clamp_0(raw_2, 0.0f, 1.0f);
             float f_12 = 0.0f;
 
-            FixedArray<float, 32>  _S1055 = arcs_1;
+            FixedArray<float, 32>  _S1058 = arcs_1;
 
-            centerSampleAt_0(&_S1055, arc_11, &k_22, &f_12);
+            centerSampleAt_0(&_S1058, arc_11, &k_22, &f_12);
 
-            Vector<float, 3>  _S1056 = centerPoint_0(_S996, k_22, &kernelContext_88);
+            Vector<float, 3>  _S1059 = centerPoint_0(_S996, k_22, &kernelContext_88);
 
-            Vector<float, 3>  _S1057 = _S1056 * (Vector<float, 3> )(1.0f - f_12);
+            Vector<float, 3>  _S1060 = _S1059 * (Vector<float, 3> )(1.0f - f_12);
 
-            Vector<float, 3>  _S1058 = centerPoint_0(_S996, k_22 + 1U, &kernelContext_88);
+            Vector<float, 3>  _S1061 = centerPoint_0(_S996, k_22 + 1U, &kernelContext_88);
 
-            Vector<float, 3>  at_16 = _S1057 + _S1058 * (Vector<float, 3> )f_12;
+            Vector<float, 3>  at_16 = _S1060 + _S1061 * (Vector<float, 3> )f_12;
 
-            bool _S1059;
+            bool _S1062;
             if(((&kernelContext_88)->globalParams_0->Look_0->gFlag_0.y) != 0U)
             {
 
-                _S1059 = arc_11 > _S1034;
+                _S1062 = arc_11 > _S1034;
 
             }
             else
             {
 
-                _S1059 = false;
+                _S1062 = false;
 
             }
 
-            if(_S1059)
+            if(_S1062)
             {
 
-                at_15 = at_16 + _S1044 * (Vector<float, 3> )(arc_11 - _S1034);
+                at_15 = at_16 + _S1048 * (Vector<float, 3> )(arc_11 - _S1034);
 
             }
             else
@@ -12178,30 +12223,30 @@ void _ClumpCS(void* _S991, void* entryPointParams_4, void* globalParams_5)
                 at_15 = at_16;
 
             }
-            if(_S1038)
+            if(_S1037)
             {
 
-                Frame_0 _S1060 = centerFrame_0(_S996, k_22, &kernelContext_88);
+                Frame_0 _S1063 = centerFrame_0(_S996, k_22, &kernelContext_88);
 
-                Frame_0 _S1061 = centerFrame_0(_S996, k_22 + 1U, &kernelContext_88);
+                Frame_0 _S1064 = centerFrame_0(_S996, k_22 + 1U, &kernelContext_88);
 
-                Frame_0 _S1062 = _S1060;
+                Frame_0 _S1065 = _S1063;
 
-                Frame_0 _S1063 = _S1061;
+                Frame_0 _S1066 = _S1064;
 
-                Frame_0 _S1064 = frameBetween_0(&_S1062, &_S1063, f_12);
+                Frame_0 _S1067 = frameBetween_0(&_S1065, &_S1066, f_12);
 
 
 
-                Vector<float, 3>  moved_9 = _S1049 + (at_15 + (_S1064.n_0 * (Vector<float, 3> )(_S1010 * lockWay_0.x) + _S1064.b_0 * (Vector<float, 3> )(_S1010 * lockWay_0.y) + _S1064.t_0 * (Vector<float, 3> )0.0f) - _S1049) * (Vector<float, 3> )w_25;
+                Vector<float, 3>  moved_9 = _S1053 + (at_15 + (_S1067.n_0 * (Vector<float, 3> )(_S1010 * lockWay_1.x) + _S1067.b_0 * (Vector<float, 3> )(_S1010 * lockWay_1.y) + _S1067.t_0 * (Vector<float, 3> )0.0f) - _S1053) * (Vector<float, 3> )w_25;
                 if(shaped_0)
                 {
 
-                    Frame_0 _S1065 = _S1064;
+                    Frame_0 _S1068 = _S1067;
 
-                    Vector<float, 3>  _S1066 = flattened_0(moved_9, at_15, &_S1065, thin_1, w_25, &kernelContext_88);
+                    Vector<float, 3>  _S1069 = flattened_0(moved_9, at_15, &_S1068, thin_1, w_25, &kernelContext_88);
 
-                    moved_7 = _S1066;
+                    moved_7 = _S1069;
 
                 }
                 else
@@ -12215,25 +12260,25 @@ void _ClumpCS(void* _S991, void* entryPointParams_4, void* globalParams_5)
             else
             {
 
-                Vector<float, 3>  moved_10 = _S1049 + (at_15 - _S1049) * (Vector<float, 3> )w_25;
+                Vector<float, 3>  moved_10 = _S1053 + (at_15 - _S1053) * (Vector<float, 3> )w_25;
                 if(shaped_0)
                 {
 
-                    Frame_0 _S1067 = centerFrame_0(_S996, k_22, &kernelContext_88);
+                    Frame_0 _S1070 = centerFrame_0(_S996, k_22, &kernelContext_88);
 
-                    Frame_0 _S1068 = centerFrame_0(_S996, k_22 + 1U, &kernelContext_88);
+                    Frame_0 _S1071 = centerFrame_0(_S996, k_22 + 1U, &kernelContext_88);
 
-                    Frame_0 _S1069 = _S1067;
+                    Frame_0 _S1072 = _S1070;
 
-                    Frame_0 _S1070 = _S1068;
+                    Frame_0 _S1073 = _S1071;
 
-                    Frame_0 _S1071 = frameBetween_0(&_S1069, &_S1070, f_12);
+                    Frame_0 _S1074 = frameBetween_0(&_S1072, &_S1073, f_12);
 
-                    Frame_0 _S1072 = _S1071;
+                    Frame_0 _S1075 = _S1074;
 
-                    Vector<float, 3>  _S1073 = flattened_0(moved_10, at_15, &_S1072, thin_1, w_25, &kernelContext_88);
+                    Vector<float, 3>  _S1076 = flattened_0(moved_10, at_15, &_S1075, thin_1, w_25, &kernelContext_88);
 
-                    moved_7 = _S1073;
+                    moved_7 = _S1076;
 
                 }
                 else
@@ -12248,16 +12293,16 @@ void _ClumpCS(void* _S991, void* entryPointParams_4, void* globalParams_5)
             if(_S1011 != 0.0f)
             {
 
-                float _S1074 = rampAlong2_0(i_43, _S995, &kernelContext_88);
+                float _S1077 = rampAlong2_0(i_43, _S995, &kernelContext_88);
 
-                float v_21 = _S1011 * _S1074;
+                float v_21 = _S1011 * _S1077;
                 if(v_21 != 0.0f)
                 {
 
-                    Vector<float, 3>  _S1075 = centerPoint_0(_S996, k_22 + 1U, &kernelContext_88);
+                    Vector<float, 3>  _S1078 = centerPoint_0(_S996, k_22 + 1U, &kernelContext_88);
 
-                    Vector<float, 3>  _S1076 = centerPoint_0(_S996, k_22, &kernelContext_88);
-                    Vector<float, 3>  tangent_2 = normalized_0(_S1075 - _S1076);
+                    Vector<float, 3>  _S1079 = centerPoint_0(_S996, k_22, &kernelContext_88);
+                    Vector<float, 3>  tangent_2 = normalized_0(_S1078 - _S1079);
                     Vector<float, 3>  across_4 = moved_7 - at_15;
 
                     moved_8 = moved_7 + (across_4 - tangent_2 * (Vector<float, 3> )dot_0(across_4, tangent_2)) * (Vector<float, 3> )v_21;
@@ -12289,19 +12334,19 @@ void _ClumpCS(void* _S991, void* entryPointParams_4, void* globalParams_5)
             float len_4 = len3_0(step_1);
 
 
-            if(len_4 != _S1052)
+            if(len_4 != _S1056)
             {
 
                 if(len_4 > 9.999999960041972e-13f)
                 {
 
-                    at_15 = previous_2 + step_1 * (Vector<float, 3> )(_S1052 / len_4);
+                    at_15 = previous_2 + step_1 * (Vector<float, 3> )(_S1056 / len_4);
 
                 }
                 else
                 {
 
-                    at_15 = previous_2 + _S1051;
+                    at_15 = previous_2 + _S1055;
 
                 }
 
@@ -12323,7 +12368,7 @@ void _ClumpCS(void* _S991, void* entryPointParams_4, void* globalParams_5)
 
         }
 
-        storePoint_0((&kernelContext_88)->globalParams_0->gOut_0, _S1048, moved_8);
+        storePoint_0((&kernelContext_88)->globalParams_0->gOut_0, _S1052, moved_8);
 
         uint32_t i_44 = i_43 + 1U;
 
@@ -12342,53 +12387,53 @@ void _ClumpCS(void* _S991, void* entryPointParams_4, void* globalParams_5)
 static float noiseAmplitude_0(uint32_t s_25, uint32_t i_45, uint32_t n_24, uint32_t p_33, KernelContext_0 * kernelContext_89)
 {
 
-    float _S1077 = fieldAt_0(1U, kernelContext_89->globalParams_0->Look_0->gValue_0.z, s_25, 0U, kernelContext_89);
+    float _S1080 = fieldAt_0(1U, kernelContext_89->globalParams_0->Look_0->gValue_0.z, s_25, 0U, kernelContext_89);
 
-    bool _S1078;
+    bool _S1081;
 
-    if(_S1077 < 1.0f)
+    if(_S1080 < 1.0f)
     {
 
-        Vector<float, 4>  _S1079 = strandData_0(s_25, kernelContext_89);
+        Vector<float, 4>  _S1082 = strandData_0(s_25, kernelContext_89);
 
-        _S1078 = (_S1079.w) >= _S1077;
+        _S1081 = (_S1082.w) >= _S1080;
 
     }
     else
     {
 
-        _S1078 = false;
+        _S1081 = false;
 
     }
 
-    if(_S1078)
+    if(_S1081)
     {
 
         return 0.0f;
     }
 
-    bool _S1080 = fieldPerPoint_0(0U, kernelContext_89);
+    bool _S1083 = fieldPerPoint_0(0U, kernelContext_89);
 
     float amplitude_0;
-    if(_S1080)
+    if(_S1083)
     {
 
-        float _S1081 = fieldAt_0(0U, kernelContext_89->globalParams_0->Look_0->gValue_0.x, s_25, p_33, kernelContext_89);
+        float _S1084 = fieldAt_0(0U, kernelContext_89->globalParams_0->Look_0->gValue_0.x, s_25, p_33, kernelContext_89);
 
-        amplitude_0 = _S1081;
+        amplitude_0 = _S1084;
 
     }
     else
     {
 
-        float _S1082 = fieldAt_0(0U, kernelContext_89->globalParams_0->Look_0->gValue_0.x, s_25, 0U, kernelContext_89);
+        float _S1085 = fieldAt_0(0U, kernelContext_89->globalParams_0->Look_0->gValue_0.x, s_25, 0U, kernelContext_89);
 
-        amplitude_0 = _S1082;
+        amplitude_0 = _S1085;
 
     }
 
-    float _S1083 = rampAlong_0(i_45, n_24, kernelContext_89);
-    return amplitude_0 * _S1083;
+    float _S1086 = rampAlong_0(i_45, n_24, kernelContext_89);
+    return amplitude_0 * _S1086;
 }
 
 
@@ -12398,22 +12443,22 @@ static float smoothstepStd_0(float e0_0, float e1_0, float x_26)
     if(e1_0 == e0_0)
     {
 
-        float _S1084;
+        float _S1087;
 
         if(x_26 < e0_0)
         {
 
-            _S1084 = 0.0f;
+            _S1087 = 0.0f;
 
         }
         else
         {
 
-            _S1084 = 1.0f;
+            _S1087 = 1.0f;
 
         }
 
-        return _S1084;
+        return _S1087;
     }
 
     float t_26 = clamp_0((x_26 - e0_0) / (e1_0 - e0_0), 0.0f, 1.0f);
@@ -12433,90 +12478,90 @@ static Vector<uint32_t, 2>  octaveSeed_0(uint32_t o_5, KernelContext_0 * kernelC
 
     Vector<uint32_t, 4>  v_22 = kernelContext_90->globalParams_0->Look_0->gOctaveSeeds_0[o_5 >> int(1)];
 
-    Vector<uint32_t, 2>  _S1085;
+    Vector<uint32_t, 2>  _S1088;
     if((o_5 & 1U) != 0U)
     {
 
-        _S1085 = Vector<uint32_t, 2> {v_22.z, v_22.w};
+        _S1088 = Vector<uint32_t, 2> {v_22.z, v_22.w};
 
     }
     else
     {
 
-        _S1085 = Vector<uint32_t, 2> {v_22.x, v_22.y};
+        _S1088 = Vector<uint32_t, 2> {v_22.x, v_22.y};
 
     }
 
-    return _S1085;
+    return _S1088;
 }
 
 
 static Vector<uint32_t, 2>  fromLattice_0(int32_t i_46)
 {
 
-    uint32_t _S1086 = (I32_asuint((i_46)));
+    uint32_t _S1089 = (I32_asuint((i_46)));
 
-    uint32_t _S1087;
+    uint32_t _S1090;
 
     if(i_46 < int(0))
     {
 
-        _S1087 = 4294967295U;
+        _S1090 = 4294967295U;
 
     }
     else
     {
 
-        _S1087 = 0U;
+        _S1090 = 0U;
 
     }
 
-    return Vector<uint32_t, 2> (_S1086, _S1087);
+    return Vector<uint32_t, 2> (_S1089, _S1090);
 }
 
 
 static Vector<uint32_t, 2>  cornerHashXY_0(Vector<uint32_t, 2>  seed_1, int32_t ix_0, int32_t iy_0)
 {
 
-    Vector<uint32_t, 2>  _S1088 = (groomlab_mul64((fromLattice_0(ix_0)), (Vector<uint32_t, 2> (2246822535U, 2654435761U))));
+    Vector<uint32_t, 2>  _S1091 = (groomlab_mul64((fromLattice_0(ix_0)), (Vector<uint32_t, 2> (2246822535U, 2654435761U))));
 
-    Vector<uint32_t, 2>  _S1089 = seed_1 ^ _S1088;
+    Vector<uint32_t, 2>  _S1092 = seed_1 ^ _S1091;
 
-    Vector<uint32_t, 2>  _S1090 = (groomlab_mul64((fromLattice_0(iy_0)), (Vector<uint32_t, 2> (668265295U, 3266489917U))));
+    Vector<uint32_t, 2>  _S1093 = (groomlab_mul64((fromLattice_0(iy_0)), (Vector<uint32_t, 2> (668265295U, 3266489917U))));
 
-    return _S1089 ^ _S1090;
+    return _S1092 ^ _S1093;
 }
 
 
 static Vector<uint32_t, 2>  shr64_0(Vector<uint32_t, 2>  a_37, uint32_t n_25)
 {
 
-    Vector<uint32_t, 2>  _S1091;
+    Vector<uint32_t, 2>  _S1094;
     if(n_25 < 32U)
     {
 
-        uint32_t _S1092 = a_37.y;
+        uint32_t _S1095 = a_37.y;
 
-        _S1091 = Vector<uint32_t, 2> (((a_37.x) >> n_25) | (_S1092 << (32U - n_25)), _S1092 >> n_25);
+        _S1094 = Vector<uint32_t, 2> (((a_37.x) >> n_25) | (_S1095 << (32U - n_25)), _S1095 >> n_25);
 
     }
     else
     {
 
-        _S1091 = Vector<uint32_t, 2> ((a_37.y) >> (n_25 - 32U), 0U);
+        _S1094 = Vector<uint32_t, 2> ((a_37.y) >> (n_25 - 32U), 0U);
 
     }
 
-    return _S1091;
+    return _S1094;
 }
 
 
 static Vector<uint32_t, 2>  cornerHashZ_0(Vector<uint32_t, 2>  xy_0, int32_t iz_0)
 {
 
-    Vector<uint32_t, 2>  _S1093 = (groomlab_mul64((fromLattice_0(iz_0)), (Vector<uint32_t, 2> (2654435833U, 374761393U))));
+    Vector<uint32_t, 2>  _S1096 = (groomlab_mul64((fromLattice_0(iz_0)), (Vector<uint32_t, 2> (2654435833U, 374761393U))));
 
-    Vector<uint32_t, 2>  h_9 = xy_0 ^ _S1093;
+    Vector<uint32_t, 2>  h_9 = xy_0 ^ _S1096;
 
     Vector<uint32_t, 2>  h_10 = (groomlab_mul64((h_9 ^ (shr64_0(h_9, 29U))), (Vector<uint32_t, 2> (484763065U, 3210233709U))));
 
@@ -12541,12 +12586,12 @@ static uint32_t hi32_0(Vector<uint32_t, 2>  h_12)
 static uint32_t gradientBits_0(Vector<uint32_t, 2>  h_13, uint32_t k_23)
 {
 
-    uint32_t _S1094;
+    uint32_t _S1097;
 
     if(k_23 == 0U)
     {
 
-        _S1094 = lo32_0(h_13);
+        _S1097 = lo32_0(h_13);
 
     }
     else
@@ -12555,19 +12600,19 @@ static uint32_t gradientBits_0(Vector<uint32_t, 2>  h_13, uint32_t k_23)
         if(k_23 == 1U)
         {
 
-            _S1094 = (lo32_0(h_13)) >> int(16);
+            _S1097 = (lo32_0(h_13)) >> int(16);
 
         }
         else
         {
 
-            _S1094 = hi32_0(h_13);
+            _S1097 = hi32_0(h_13);
 
         }
 
     }
 
-    return _S1094 & 65535U;
+    return _S1097 & 65535U;
 }
 
 
@@ -12578,286 +12623,286 @@ static Vector<float, 3>  gradientOf_0(Vector<uint32_t, 2>  h_14, uint32_t k_24)
 }
 
 
-static float mix1_0(float a_38, float b_36, float t_27)
+static float mix1_0(float a_38, float b_37, float t_27)
 {
 
-    return a_38 + (b_36 - a_38) * t_27;
+    return a_38 + (b_37 - a_38) * t_27;
 }
 
 
 static Vector<float, 3>  latticeNoise_0(Vector<float, 3>  q_6, Vector<uint32_t, 2>  seed_2, uint32_t channels_0)
 {
 
-    float _S1095 = q_6.x;
+    float _S1098 = q_6.x;
 
-    float fx_0 = (groomlab_floor((_S1095)));
+    float fx_0 = (groomlab_floor((_S1098)));
 
-    float _S1096 = q_6.y;
+    float _S1099 = q_6.y;
 
-    float fy_0 = (groomlab_floor((_S1096)));
+    float fy_0 = (groomlab_floor((_S1099)));
 
-    float _S1097 = q_6.z;
+    float _S1100 = q_6.z;
 
-    float fz_0 = (groomlab_floor((_S1097)));
-    int32_t _S1098 = int32_t(fx_0);
+    float fz_0 = (groomlab_floor((_S1100)));
+    int32_t _S1101 = int32_t(fx_0);
 
-    int32_t _S1099 = int32_t(fy_0);
+    int32_t _S1102 = int32_t(fy_0);
 
-    int32_t _S1100 = int32_t(fz_0);
-    float dx_0 = _S1095 - fx_0;
+    int32_t _S1103 = int32_t(fz_0);
+    float dx_0 = _S1098 - fx_0;
 
-    float dy_0 = _S1096 - fy_0;
+    float dy_0 = _S1099 - fy_0;
 
-    float dz_0 = _S1097 - fz_0;
-    float _S1101 = fade_0(dx_0);
+    float dz_0 = _S1100 - fz_0;
+    float _S1104 = fade_0(dx_0);
 
-    float _S1102 = fade_0(dy_0);
+    float _S1105 = fade_0(dy_0);
 
-    float _S1103 = fade_0(dz_0);
+    float _S1106 = fade_0(dz_0);
     FixedArray<FixedArray<float, 8> , 3>  corner_0;
 
 
-    Vector<uint32_t, 2>  _S1104 = cornerHashXY_0(seed_2, _S1098, _S1099);
+    Vector<uint32_t, 2>  _S1107 = cornerHashXY_0(seed_2, _S1101, _S1102);
 
-    Vector<uint32_t, 2>  _S1105 = cornerHashZ_0(_S1104, _S1100);
+    Vector<uint32_t, 2>  _S1108 = cornerHashZ_0(_S1107, _S1103);
 
 
-    bool _S1106 = 0U < channels_0;
+    bool _S1109 = 0U < channels_0;
 
-    if(_S1106)
+    if(_S1109)
     {
 
-        Vector<float, 3>  g_8 = gradientOf_0(_S1105, 0U);
+        Vector<float, 3>  g_8 = gradientOf_0(_S1108, 0U);
         corner_0[0U][0U] = g_8.x * dx_0 + g_8.y * dy_0 + g_8.z * dz_0;
 
     }
 
-    bool _S1107 = 1U < channels_0;
+    bool _S1110 = 1U < channels_0;
 
-    if(_S1107)
+    if(_S1110)
     {
 
-        Vector<float, 3>  g_9 = gradientOf_0(_S1105, 1U);
+        Vector<float, 3>  g_9 = gradientOf_0(_S1108, 1U);
         corner_0[1U][0U] = g_9.x * dx_0 + g_9.y * dy_0 + g_9.z * dz_0;
 
     }
 
-    bool _S1108 = 2U < channels_0;
+    bool _S1111 = 2U < channels_0;
 
-    if(_S1108)
+    if(_S1111)
     {
 
-        Vector<float, 3>  g_10 = gradientOf_0(_S1105, 2U);
+        Vector<float, 3>  g_10 = gradientOf_0(_S1108, 2U);
         corner_0[2U][0U] = g_10.x * dx_0 + g_10.y * dy_0 + g_10.z * dz_0;
 
     }
 
-    int32_t _S1109 = _S1098 + int(1);
+    int32_t _S1112 = _S1101 + int(1);
 
-    Vector<uint32_t, 2>  _S1110 = cornerHashXY_0(seed_2, _S1109, _S1099);
+    Vector<uint32_t, 2>  _S1113 = cornerHashXY_0(seed_2, _S1112, _S1102);
 
-    Vector<uint32_t, 2>  _S1111 = cornerHashZ_0(_S1110, _S1100);
-    float _S1112 = dx_0 - 1.0f;
+    Vector<uint32_t, 2>  _S1114 = cornerHashZ_0(_S1113, _S1103);
+    float _S1115 = dx_0 - 1.0f;
 
-    if(_S1106)
+    if(_S1109)
     {
 
-        Vector<float, 3>  g_11 = gradientOf_0(_S1111, 0U);
-        corner_0[0U][1U] = g_11.x * _S1112 + g_11.y * dy_0 + g_11.z * dz_0;
+        Vector<float, 3>  g_11 = gradientOf_0(_S1114, 0U);
+        corner_0[0U][1U] = g_11.x * _S1115 + g_11.y * dy_0 + g_11.z * dz_0;
 
     }
 
-    if(_S1107)
+    if(_S1110)
     {
 
-        Vector<float, 3>  g_12 = gradientOf_0(_S1111, 1U);
-        corner_0[1U][1U] = g_12.x * _S1112 + g_12.y * dy_0 + g_12.z * dz_0;
+        Vector<float, 3>  g_12 = gradientOf_0(_S1114, 1U);
+        corner_0[1U][1U] = g_12.x * _S1115 + g_12.y * dy_0 + g_12.z * dz_0;
 
     }
 
-    if(_S1108)
+    if(_S1111)
     {
 
-        Vector<float, 3>  g_13 = gradientOf_0(_S1111, 2U);
-        corner_0[2U][1U] = g_13.x * _S1112 + g_13.y * dy_0 + g_13.z * dz_0;
+        Vector<float, 3>  g_13 = gradientOf_0(_S1114, 2U);
+        corner_0[2U][1U] = g_13.x * _S1115 + g_13.y * dy_0 + g_13.z * dz_0;
 
     }
 
-    int32_t _S1113 = _S1099 + int(1);
+    int32_t _S1116 = _S1102 + int(1);
 
-    Vector<uint32_t, 2>  _S1114 = cornerHashXY_0(seed_2, _S1098, _S1113);
+    Vector<uint32_t, 2>  _S1117 = cornerHashXY_0(seed_2, _S1101, _S1116);
 
-    Vector<uint32_t, 2>  _S1115 = cornerHashZ_0(_S1114, _S1100);
-    float _S1116 = dy_0 - 1.0f;
+    Vector<uint32_t, 2>  _S1118 = cornerHashZ_0(_S1117, _S1103);
+    float _S1119 = dy_0 - 1.0f;
 
-    if(_S1106)
+    if(_S1109)
     {
 
-        Vector<float, 3>  g_14 = gradientOf_0(_S1115, 0U);
-        corner_0[0U][2U] = g_14.x * dx_0 + g_14.y * _S1116 + g_14.z * dz_0;
+        Vector<float, 3>  g_14 = gradientOf_0(_S1118, 0U);
+        corner_0[0U][2U] = g_14.x * dx_0 + g_14.y * _S1119 + g_14.z * dz_0;
 
     }
 
-    if(_S1107)
+    if(_S1110)
     {
 
-        Vector<float, 3>  g_15 = gradientOf_0(_S1115, 1U);
-        corner_0[1U][2U] = g_15.x * dx_0 + g_15.y * _S1116 + g_15.z * dz_0;
+        Vector<float, 3>  g_15 = gradientOf_0(_S1118, 1U);
+        corner_0[1U][2U] = g_15.x * dx_0 + g_15.y * _S1119 + g_15.z * dz_0;
 
     }
 
-    if(_S1108)
+    if(_S1111)
     {
 
-        Vector<float, 3>  g_16 = gradientOf_0(_S1115, 2U);
-        corner_0[2U][2U] = g_16.x * dx_0 + g_16.y * _S1116 + g_16.z * dz_0;
+        Vector<float, 3>  g_16 = gradientOf_0(_S1118, 2U);
+        corner_0[2U][2U] = g_16.x * dx_0 + g_16.y * _S1119 + g_16.z * dz_0;
 
     }
 
-    Vector<uint32_t, 2>  _S1117 = cornerHashXY_0(seed_2, _S1109, _S1113);
+    Vector<uint32_t, 2>  _S1120 = cornerHashXY_0(seed_2, _S1112, _S1116);
 
-    Vector<uint32_t, 2>  _S1118 = cornerHashZ_0(_S1117, _S1100);
+    Vector<uint32_t, 2>  _S1121 = cornerHashZ_0(_S1120, _S1103);
 
 
-    if(_S1106)
+    if(_S1109)
     {
 
-        Vector<float, 3>  g_17 = gradientOf_0(_S1118, 0U);
-        corner_0[0U][3U] = g_17.x * _S1112 + g_17.y * _S1116 + g_17.z * dz_0;
+        Vector<float, 3>  g_17 = gradientOf_0(_S1121, 0U);
+        corner_0[0U][3U] = g_17.x * _S1115 + g_17.y * _S1119 + g_17.z * dz_0;
 
     }
 
-    if(_S1107)
+    if(_S1110)
     {
 
-        Vector<float, 3>  g_18 = gradientOf_0(_S1118, 1U);
-        corner_0[1U][3U] = g_18.x * _S1112 + g_18.y * _S1116 + g_18.z * dz_0;
+        Vector<float, 3>  g_18 = gradientOf_0(_S1121, 1U);
+        corner_0[1U][3U] = g_18.x * _S1115 + g_18.y * _S1119 + g_18.z * dz_0;
 
     }
 
-    if(_S1108)
+    if(_S1111)
     {
 
-        Vector<float, 3>  g_19 = gradientOf_0(_S1118, 2U);
-        corner_0[2U][3U] = g_19.x * _S1112 + g_19.y * _S1116 + g_19.z * dz_0;
+        Vector<float, 3>  g_19 = gradientOf_0(_S1121, 2U);
+        corner_0[2U][3U] = g_19.x * _S1115 + g_19.y * _S1119 + g_19.z * dz_0;
 
     }
 
-    Vector<uint32_t, 2>  _S1119 = cornerHashXY_0(seed_2, _S1098, _S1099);
+    Vector<uint32_t, 2>  _S1122 = cornerHashXY_0(seed_2, _S1101, _S1102);
 
-    int32_t _S1120 = _S1100 + int(1);
+    int32_t _S1123 = _S1103 + int(1);
 
-    Vector<uint32_t, 2>  _S1121 = cornerHashZ_0(_S1119, _S1120);
-    float _S1122 = dz_0 - 1.0f;
+    Vector<uint32_t, 2>  _S1124 = cornerHashZ_0(_S1122, _S1123);
+    float _S1125 = dz_0 - 1.0f;
 
-    if(_S1106)
+    if(_S1109)
     {
 
-        Vector<float, 3>  g_20 = gradientOf_0(_S1121, 0U);
-        corner_0[0U][4U] = g_20.x * dx_0 + g_20.y * dy_0 + g_20.z * _S1122;
+        Vector<float, 3>  g_20 = gradientOf_0(_S1124, 0U);
+        corner_0[0U][4U] = g_20.x * dx_0 + g_20.y * dy_0 + g_20.z * _S1125;
 
     }
 
-    if(_S1107)
+    if(_S1110)
     {
 
-        Vector<float, 3>  g_21 = gradientOf_0(_S1121, 1U);
-        corner_0[1U][4U] = g_21.x * dx_0 + g_21.y * dy_0 + g_21.z * _S1122;
+        Vector<float, 3>  g_21 = gradientOf_0(_S1124, 1U);
+        corner_0[1U][4U] = g_21.x * dx_0 + g_21.y * dy_0 + g_21.z * _S1125;
 
     }
 
-    if(_S1108)
+    if(_S1111)
     {
 
-        Vector<float, 3>  g_22 = gradientOf_0(_S1121, 2U);
-        corner_0[2U][4U] = g_22.x * dx_0 + g_22.y * dy_0 + g_22.z * _S1122;
+        Vector<float, 3>  g_22 = gradientOf_0(_S1124, 2U);
+        corner_0[2U][4U] = g_22.x * dx_0 + g_22.y * dy_0 + g_22.z * _S1125;
 
     }
 
-    Vector<uint32_t, 2>  _S1123 = cornerHashXY_0(seed_2, _S1109, _S1099);
+    Vector<uint32_t, 2>  _S1126 = cornerHashXY_0(seed_2, _S1112, _S1102);
 
-    Vector<uint32_t, 2>  _S1124 = cornerHashZ_0(_S1123, _S1120);
+    Vector<uint32_t, 2>  _S1127 = cornerHashZ_0(_S1126, _S1123);
 
 
-    if(_S1106)
+    if(_S1109)
     {
 
-        Vector<float, 3>  g_23 = gradientOf_0(_S1124, 0U);
-        corner_0[0U][5U] = g_23.x * _S1112 + g_23.y * dy_0 + g_23.z * _S1122;
+        Vector<float, 3>  g_23 = gradientOf_0(_S1127, 0U);
+        corner_0[0U][5U] = g_23.x * _S1115 + g_23.y * dy_0 + g_23.z * _S1125;
 
     }
 
-    if(_S1107)
+    if(_S1110)
     {
 
-        Vector<float, 3>  g_24 = gradientOf_0(_S1124, 1U);
-        corner_0[1U][5U] = g_24.x * _S1112 + g_24.y * dy_0 + g_24.z * _S1122;
+        Vector<float, 3>  g_24 = gradientOf_0(_S1127, 1U);
+        corner_0[1U][5U] = g_24.x * _S1115 + g_24.y * dy_0 + g_24.z * _S1125;
 
     }
 
-    if(_S1108)
+    if(_S1111)
     {
 
-        Vector<float, 3>  g_25 = gradientOf_0(_S1124, 2U);
-        corner_0[2U][5U] = g_25.x * _S1112 + g_25.y * dy_0 + g_25.z * _S1122;
+        Vector<float, 3>  g_25 = gradientOf_0(_S1127, 2U);
+        corner_0[2U][5U] = g_25.x * _S1115 + g_25.y * dy_0 + g_25.z * _S1125;
 
     }
 
-    Vector<uint32_t, 2>  _S1125 = cornerHashXY_0(seed_2, _S1098, _S1113);
+    Vector<uint32_t, 2>  _S1128 = cornerHashXY_0(seed_2, _S1101, _S1116);
 
-    Vector<uint32_t, 2>  _S1126 = cornerHashZ_0(_S1125, _S1120);
+    Vector<uint32_t, 2>  _S1129 = cornerHashZ_0(_S1128, _S1123);
 
 
-    if(_S1106)
+    if(_S1109)
     {
 
-        Vector<float, 3>  g_26 = gradientOf_0(_S1126, 0U);
-        corner_0[0U][6U] = g_26.x * dx_0 + g_26.y * _S1116 + g_26.z * _S1122;
+        Vector<float, 3>  g_26 = gradientOf_0(_S1129, 0U);
+        corner_0[0U][6U] = g_26.x * dx_0 + g_26.y * _S1119 + g_26.z * _S1125;
 
     }
 
-    if(_S1107)
+    if(_S1110)
     {
 
-        Vector<float, 3>  g_27 = gradientOf_0(_S1126, 1U);
-        corner_0[1U][6U] = g_27.x * dx_0 + g_27.y * _S1116 + g_27.z * _S1122;
+        Vector<float, 3>  g_27 = gradientOf_0(_S1129, 1U);
+        corner_0[1U][6U] = g_27.x * dx_0 + g_27.y * _S1119 + g_27.z * _S1125;
 
     }
 
-    if(_S1108)
+    if(_S1111)
     {
 
-        Vector<float, 3>  g_28 = gradientOf_0(_S1126, 2U);
-        corner_0[2U][6U] = g_28.x * dx_0 + g_28.y * _S1116 + g_28.z * _S1122;
+        Vector<float, 3>  g_28 = gradientOf_0(_S1129, 2U);
+        corner_0[2U][6U] = g_28.x * dx_0 + g_28.y * _S1119 + g_28.z * _S1125;
 
     }
 
-    Vector<uint32_t, 2>  _S1127 = cornerHashXY_0(seed_2, _S1109, _S1113);
+    Vector<uint32_t, 2>  _S1130 = cornerHashXY_0(seed_2, _S1112, _S1116);
 
-    Vector<uint32_t, 2>  _S1128 = cornerHashZ_0(_S1127, _S1120);
+    Vector<uint32_t, 2>  _S1131 = cornerHashZ_0(_S1130, _S1123);
 
 
-    if(_S1106)
+    if(_S1109)
     {
 
-        Vector<float, 3>  g_29 = gradientOf_0(_S1128, 0U);
-        corner_0[0U][7U] = g_29.x * _S1112 + g_29.y * _S1116 + g_29.z * _S1122;
+        Vector<float, 3>  g_29 = gradientOf_0(_S1131, 0U);
+        corner_0[0U][7U] = g_29.x * _S1115 + g_29.y * _S1119 + g_29.z * _S1125;
 
     }
 
-    if(_S1107)
+    if(_S1110)
     {
 
-        Vector<float, 3>  g_30 = gradientOf_0(_S1128, 1U);
-        corner_0[1U][7U] = g_30.x * _S1112 + g_30.y * _S1116 + g_30.z * _S1122;
+        Vector<float, 3>  g_30 = gradientOf_0(_S1131, 1U);
+        corner_0[1U][7U] = g_30.x * _S1115 + g_30.y * _S1119 + g_30.z * _S1125;
 
     }
 
-    if(_S1108)
+    if(_S1111)
     {
 
-        Vector<float, 3>  g_31 = gradientOf_0(_S1128, 2U);
-        corner_0[2U][7U] = g_31.x * _S1112 + g_31.y * _S1116 + g_31.z * _S1122;
+        Vector<float, 3>  g_31 = gradientOf_0(_S1131, 2U);
+        corner_0[2U][7U] = g_31.x * _S1115 + g_31.y * _S1119 + g_31.z * _S1125;
 
     }
 
@@ -12869,30 +12914,30 @@ static Vector<float, 3>  latticeNoise_0(Vector<float, 3>  q_6, Vector<uint32_t, 
 
     n_26[int(2)] = 0.0f;
 
-    if(_S1106)
+    if(_S1109)
     {
 
 
 
-        n_26[0U] = mix1_0(mix1_0(mix1_0(corner_0[0U][int(0)], corner_0[0U][int(1)], _S1101), mix1_0(corner_0[0U][int(2)], corner_0[0U][int(3)], _S1101), _S1102), mix1_0(mix1_0(corner_0[0U][int(4)], corner_0[0U][int(5)], _S1101), mix1_0(corner_0[0U][int(6)], corner_0[0U][int(7)], _S1101), _S1102), _S1103);
+        n_26[0U] = mix1_0(mix1_0(mix1_0(corner_0[0U][int(0)], corner_0[0U][int(1)], _S1104), mix1_0(corner_0[0U][int(2)], corner_0[0U][int(3)], _S1104), _S1105), mix1_0(mix1_0(corner_0[0U][int(4)], corner_0[0U][int(5)], _S1104), mix1_0(corner_0[0U][int(6)], corner_0[0U][int(7)], _S1104), _S1105), _S1106);
 
     }
 
-    if(_S1107)
+    if(_S1110)
     {
 
 
 
-        n_26[1U] = mix1_0(mix1_0(mix1_0(corner_0[1U][int(0)], corner_0[1U][int(1)], _S1101), mix1_0(corner_0[1U][int(2)], corner_0[1U][int(3)], _S1101), _S1102), mix1_0(mix1_0(corner_0[1U][int(4)], corner_0[1U][int(5)], _S1101), mix1_0(corner_0[1U][int(6)], corner_0[1U][int(7)], _S1101), _S1102), _S1103);
+        n_26[1U] = mix1_0(mix1_0(mix1_0(corner_0[1U][int(0)], corner_0[1U][int(1)], _S1104), mix1_0(corner_0[1U][int(2)], corner_0[1U][int(3)], _S1104), _S1105), mix1_0(mix1_0(corner_0[1U][int(4)], corner_0[1U][int(5)], _S1104), mix1_0(corner_0[1U][int(6)], corner_0[1U][int(7)], _S1104), _S1105), _S1106);
 
     }
 
-    if(_S1108)
+    if(_S1111)
     {
 
 
 
-        n_26[2U] = mix1_0(mix1_0(mix1_0(corner_0[2U][int(0)], corner_0[2U][int(1)], _S1101), mix1_0(corner_0[2U][int(2)], corner_0[2U][int(3)], _S1101), _S1102), mix1_0(mix1_0(corner_0[2U][int(4)], corner_0[2U][int(5)], _S1101), mix1_0(corner_0[2U][int(6)], corner_0[2U][int(7)], _S1101), _S1102), _S1103);
+        n_26[2U] = mix1_0(mix1_0(mix1_0(corner_0[2U][int(0)], corner_0[2U][int(1)], _S1104), mix1_0(corner_0[2U][int(2)], corner_0[2U][int(3)], _S1104), _S1105), mix1_0(mix1_0(corner_0[2U][int(4)], corner_0[2U][int(5)], _S1104), mix1_0(corner_0[2U][int(6)], corner_0[2U][int(7)], _S1104), _S1105), _S1106);
 
     }
 
@@ -12903,7 +12948,7 @@ static Vector<float, 3>  latticeNoise_0(Vector<float, 3>  q_6, Vector<uint32_t, 
 static Vector<float, 3>  vectorNoise_0(Vector<float, 3>  p_34, float spacing_0, KernelContext_0 * kernelContext_91)
 {
 
-    Vector<float, 3>  _S1129 = Vector<float, 3> (0.0f, 0.0f, 0.0f);
+    Vector<float, 3>  _S1132 = Vector<float, 3> (0.0f, 0.0f, 0.0f);
 
     Vector<float, 3>  q_7 = p_34;
 
@@ -12915,7 +12960,7 @@ static Vector<float, 3>  vectorNoise_0(Vector<float, 3>  p_34, float spacing_0, 
 
     float norm_0 = 0.0f;
 
-    Vector<float, 3>  sum_6 = _S1129;
+    Vector<float, 3>  sum_6 = _S1132;
 
 
 
@@ -12964,9 +13009,9 @@ static Vector<float, 3>  vectorNoise_0(Vector<float, 3>  p_34, float spacing_0, 
             continue;
         }
 
-        Vector<uint32_t, 2>  _S1130 = octaveSeed_0(o_6, kernelContext_91);
+        Vector<uint32_t, 2>  _S1133 = octaveSeed_0(o_6, kernelContext_91);
 
-        Vector<float, 3>  n_27 = latticeNoise_0(q_7, _S1130, 3U);
+        Vector<float, 3>  n_27 = latticeNoise_0(q_7, _S1133, 3U);
         Vector<float, 3>  sum_7 = sum_6 + n_27 * (Vector<float, 3> )(amplitude_1 * weight_0);
         float norm_2 = norm_0 + amplitude_1;
         float amplitude_3 = amplitude_1 * 0.5f;
@@ -12992,9 +13037,9 @@ static Vector<float, 3>  vectorNoise_0(Vector<float, 3>  p_34, float spacing_0, 
 static Vector<float, 3>  kinkKnot_0(Vector<float, 3>  base_3, float k_25, KernelContext_0 * kernelContext_92)
 {
 
-    Vector<float, 3>  _S1131 = vectorNoise_0(base_3 + Vector<float, 3> (0.0f, 0.0f, k_25 * 1.6180340051651001f), 0.0f, kernelContext_92);
+    Vector<float, 3>  _S1134 = vectorNoise_0(base_3 + Vector<float, 3> (0.0f, 0.0f, k_25 * 1.6180340051651001f), 0.0f, kernelContext_92);
 
-    return _S1131;
+    return _S1134;
 }
 
 
@@ -13003,22 +13048,22 @@ static Vector<float, 3>  kinkAt_0(Vector<float, 3>  base_4, float u_9, KernelCon
 
     float k_26 = (groomlab_floor((u_9)));
 
-    Vector<float, 3>  _S1132 = kinkKnot_0(base_4, k_26, kernelContext_93);
+    Vector<float, 3>  _S1135 = kinkKnot_0(base_4, k_26, kernelContext_93);
 
-    Vector<float, 3>  _S1133 = kinkKnot_0(base_4, k_26 + 1.0f, kernelContext_93);
+    Vector<float, 3>  _S1136 = kinkKnot_0(base_4, k_26 + 1.0f, kernelContext_93);
 
-    return _S1132 + (_S1133 - _S1132) * (Vector<float, 3> )(u_9 - k_26);
+    return _S1135 + (_S1136 - _S1135) * (Vector<float, 3> )(u_9 - k_26);
 }
 
 
 static void noiseKinkyWorld_0(uint32_t s_26, uint32_t begin_12, uint32_t n_28, KernelContext_0 * kernelContext_94)
 {
 
-    Vector<float, 3>  _S1134 = loadPoint_0(begin_12, kernelContext_94);
+    Vector<float, 3>  _S1137 = loadPoint_0(begin_12, kernelContext_94);
 
-    Vector<float, 3>  _S1135 = _S1134 * (Vector<float, 3> )kernelContext_94->globalParams_0->Look_0->gValue_0.y;
+    Vector<float, 3>  _S1138 = _S1137 * (Vector<float, 3> )kernelContext_94->globalParams_0->Look_0->gValue_0.y;
 
-    Vector<float, 3>  previous_3 = _S1134;
+    Vector<float, 3>  previous_3 = _S1137;
 
     uint32_t i_47 = 1U;
 
@@ -13036,36 +13081,36 @@ static void noiseKinkyWorld_0(uint32_t s_26, uint32_t begin_12, uint32_t n_28, K
             break;
         }
 
-        uint32_t _S1136 = begin_12 + i_47;
+        uint32_t _S1139 = begin_12 + i_47;
 
-        Vector<float, 3>  _S1137 = loadPoint_0(_S1136, kernelContext_94);
-        float arc_13 = arc_12 + len3_0(_S1137 - previous_3);
+        Vector<float, 3>  _S1140 = loadPoint_0(_S1139, kernelContext_94);
+        float arc_13 = arc_12 + len3_0(_S1140 - previous_3);
 
-        float _S1138 = noiseAmplitude_0(s_26, i_47, n_28, _S1136, kernelContext_94);
+        float _S1141 = noiseAmplitude_0(s_26, i_47, n_28, _S1139, kernelContext_94);
 
-        Vector<float, 3>  _S1139;
+        Vector<float, 3>  _S1142;
 
 
-        if(_S1138 == 0.0f)
+        if(_S1141 == 0.0f)
         {
 
-            _S1139 = _S1137;
+            _S1142 = _S1140;
 
         }
         else
         {
 
-            Vector<float, 3>  _S1140 = kinkAt_0(_S1135, arc_13 * kernelContext_94->globalParams_0->Look_0->gValue_0.y, kernelContext_94);
+            Vector<float, 3>  _S1143 = kinkAt_0(_S1138, arc_13 * kernelContext_94->globalParams_0->Look_0->gValue_0.y, kernelContext_94);
 
-            _S1139 = _S1137 + _S1140 * (Vector<float, 3> )_S1138;
+            _S1142 = _S1140 + _S1143 * (Vector<float, 3> )_S1141;
 
         }
 
-        storePoint_0(kernelContext_94->globalParams_0->gOut_0, _S1136, _S1139);
+        storePoint_0(kernelContext_94->globalParams_0->gOut_0, _S1139, _S1142);
 
         uint32_t i_48 = i_47 + 1U;
 
-        previous_3 = _S1137;
+        previous_3 = _S1140;
 
         i_47 = i_48;
 
@@ -13080,9 +13125,9 @@ static void noiseKinkyWorld_0(uint32_t s_26, uint32_t begin_12, uint32_t n_28, K
 static Vector<float, 3>  noiseAt_0(uint32_t s_27, uint32_t i_49, uint32_t n_29, uint32_t p_35, Vector<float, 3>  v_23, KernelContext_0 * kernelContext_95)
 {
 
-    float _S1141 = noiseAmplitude_0(s_27, i_49, n_29, p_35, kernelContext_95);
+    float _S1144 = noiseAmplitude_0(s_27, i_49, n_29, p_35, kernelContext_95);
 
-    if(_S1141 == 0.0f)
+    if(_S1144 == 0.0f)
     {
 
         return v_23;
@@ -13092,11 +13137,11 @@ static Vector<float, 3>  noiseAt_0(uint32_t s_27, uint32_t i_49, uint32_t n_29, 
     if((kernelContext_95->globalParams_0->Look_0->gFlag_0.z) != 0U)
     {
 
-        Vector<float, 4>  _S1142 = strandData_0(s_27, kernelContext_95);
+        Vector<float, 4>  _S1145 = strandData_0(s_27, kernelContext_95);
 
-        Vector<float, 3>  _S1143 = kinkAt_0(Vector<float, 3> {_S1142.x, _S1142.y, _S1142.z}, t_28 * kernelContext_95->globalParams_0->Look_0->gValue_0.y, kernelContext_95);
+        Vector<float, 3>  _S1146 = kinkAt_0(Vector<float, 3> {_S1145.x, _S1145.y, _S1145.z}, t_28 * kernelContext_95->globalParams_0->Look_0->gValue_0.y, kernelContext_95);
 
-        return v_23 + _S1143 * (Vector<float, 3> )_S1141;
+        return v_23 + _S1146 * (Vector<float, 3> )_S1144;
     }
 
     Vector<float, 3>  q_8;
@@ -13109,9 +13154,9 @@ static Vector<float, 3>  noiseAt_0(uint32_t s_27, uint32_t i_49, uint32_t n_29, 
     else
     {
 
-        Vector<float, 4>  _S1144 = strandData_0(s_27, kernelContext_95);
+        Vector<float, 4>  _S1147 = strandData_0(s_27, kernelContext_95);
 
-        q_8 = Vector<float, 3> {_S1144.x, _S1144.y, _S1144.z} + Vector<float, 3> (0.0f, 0.0f, t_28 * kernelContext_95->globalParams_0->Look_0->gValue_0.y);
+        q_8 = Vector<float, 3> {_S1147.x, _S1147.y, _S1147.z} + Vector<float, 3> (0.0f, 0.0f, t_28 * kernelContext_95->globalParams_0->Look_0->gValue_0.y);
 
     }
     float segments_0 = float(n_29 - 1U);
@@ -13120,11 +13165,11 @@ static Vector<float, 3>  noiseAt_0(uint32_t s_27, uint32_t i_49, uint32_t n_29, 
     if((kernelContext_95->globalParams_0->Look_0->gFlag_0.y) != 0U)
     {
 
-        uint32_t _S1145 = strandBegin_0(s_27, kernelContext_95);
+        uint32_t _S1148 = strandBegin_0(s_27, kernelContext_95);
 
-        float _S1146 = strandLength_0(_S1145, n_29, kernelContext_95);
+        float _S1149 = strandLength_0(_S1148, n_29, kernelContext_95);
 
-        spacing_1 = _S1146 * kernelContext_95->globalParams_0->Look_0->gValue_0.y / segments_0;
+        spacing_1 = _S1149 * kernelContext_95->globalParams_0->Look_0->gValue_0.y / segments_0;
 
     }
     else
@@ -13134,44 +13179,44 @@ static Vector<float, 3>  noiseAt_0(uint32_t s_27, uint32_t i_49, uint32_t n_29, 
 
     }
 
-    Vector<float, 3>  _S1147 = vectorNoise_0(q_8, spacing_1, kernelContext_95);
-    return v_23 + _S1147 * (Vector<float, 3> )_S1141;
+    Vector<float, 3>  _S1150 = vectorNoise_0(q_8, spacing_1, kernelContext_95);
+    return v_23 + _S1150 * (Vector<float, 3> )_S1144;
 }
 
 
 static void noiseStrandAlone_0(uint32_t s_28, uint32_t begin_13, uint32_t n_30, KernelContext_0 * kernelContext_96)
 {
 
-    bool _S1148;
+    bool _S1151;
     if((kernelContext_96->globalParams_0->Look_0->gFlag_0.z) != 0U)
     {
 
-        _S1148 = true;
+        _S1151 = true;
 
     }
     else
     {
 
-        _S1148 = (kernelContext_96->globalParams_0->Look_0->gFlag_0.y) != 0U;
+        _S1151 = (kernelContext_96->globalParams_0->Look_0->gFlag_0.y) != 0U;
 
     }
 
-    if(_S1148)
+    if(_S1151)
     {
 
-        _S1148 = true;
+        _S1151 = true;
 
     }
     else
     {
 
-        _S1148 = n_30 < 2U;
+        _S1151 = n_30 < 2U;
 
     }
 
     uint32_t i_50;
 
-    if(_S1148)
+    if(_S1151)
     {
 
         i_50 = 1U;
@@ -13187,13 +13232,13 @@ static void noiseStrandAlone_0(uint32_t s_28, uint32_t begin_13, uint32_t n_30, 
                 break;
             }
 
-            uint32_t _S1149 = begin_13 + i_50;
+            uint32_t _S1152 = begin_13 + i_50;
 
-            Vector<float, 3>  _S1150 = loadPoint_0(_S1149, kernelContext_96);
+            Vector<float, 3>  _S1153 = loadPoint_0(_S1152, kernelContext_96);
 
-            Vector<float, 3>  _S1151 = noiseAt_0(s_28, i_50, n_30, _S1149, _S1150, kernelContext_96);
+            Vector<float, 3>  _S1154 = noiseAt_0(s_28, i_50, n_30, _S1152, _S1153, kernelContext_96);
 
-            storePoint_0(kernelContext_96->globalParams_0->gOut_0, _S1149, _S1151);
+            storePoint_0(kernelContext_96->globalParams_0->gOut_0, _S1152, _S1154);
 
             i_50 = i_50 + 1U;
 
@@ -13221,39 +13266,39 @@ static void noiseStrandAlone_0(uint32_t s_28, uint32_t begin_13, uint32_t n_30, 
             break;
         }
 
-        Vector<uint32_t, 2>  _S1152;
+        Vector<uint32_t, 2>  _S1155;
         if(o_7 < (kernelContext_96->globalParams_0->Look_0->gFlag_0.x))
         {
 
-            Vector<uint32_t, 2>  _S1153 = octaveSeed_0(o_7, kernelContext_96);
+            Vector<uint32_t, 2>  _S1156 = octaveSeed_0(o_7, kernelContext_96);
 
-            _S1152 = _S1153;
+            _S1155 = _S1156;
 
         }
         else
         {
 
-            _S1152 = Vector<uint32_t, 2> (0U, 0U);
+            _S1155 = Vector<uint32_t, 2> (0U, 0U);
 
         }
 
-        seeds_2[o_7] = _S1152;
+        seeds_2[o_7] = _S1155;
 
-        float _S1154;
+        float _S1157;
         if(spacing_2 > 0.0f)
         {
 
-            _S1154 = octaveWeightAt_0(cells_3);
+            _S1157 = octaveWeightAt_0(cells_3);
 
         }
         else
         {
 
-            _S1154 = 1.0f;
+            _S1157 = 1.0f;
 
         }
 
-        weights_0[o_7] = _S1154;
+        weights_0[o_7] = _S1157;
         float cells_4 = cells_3 * 2.0f;
 
         o_7 = o_7 + 1U;
@@ -13265,8 +13310,8 @@ static void noiseStrandAlone_0(uint32_t s_28, uint32_t begin_13, uint32_t n_30, 
     NoiseCache_0 cache_0;
     groomlab_noise_start((&cache_0), (kernelContext_96->globalParams_0->Look_0->gFlag_0.x), (seeds_2), (weights_0));
 
-    Vector<float, 4>  _S1155 = strandData_0(s_28, kernelContext_96);
-    Vector<float, 3>  _S1156 = Vector<float, 3> {_S1155.x, _S1155.y, _S1155.z};
+    Vector<float, 4>  _S1158 = strandData_0(s_28, kernelContext_96);
+    Vector<float, 3>  _S1159 = Vector<float, 3> {_S1158.x, _S1158.y, _S1158.z};
 
     i_50 = 1U;
     for(;;)
@@ -13281,24 +13326,24 @@ static void noiseStrandAlone_0(uint32_t s_28, uint32_t begin_13, uint32_t n_30, 
             break;
         }
 
-        uint32_t _S1157 = begin_13 + i_50;
+        uint32_t _S1160 = begin_13 + i_50;
 
-        Vector<float, 3>  _S1158 = loadPoint_0(_S1157, kernelContext_96);
+        Vector<float, 3>  _S1161 = loadPoint_0(_S1160, kernelContext_96);
 
-        float _S1159 = noiseAmplitude_0(s_28, i_50, n_30, _S1157, kernelContext_96);
+        float _S1162 = noiseAmplitude_0(s_28, i_50, n_30, _S1160, kernelContext_96);
 
-        if(_S1159 == 0.0f)
+        if(_S1162 == 0.0f)
         {
 
-            storePoint_0(kernelContext_96->globalParams_0->gOut_0, _S1157, _S1158);
+            storePoint_0(kernelContext_96->globalParams_0->gOut_0, _S1160, _S1161);
             i_50 = i_50 + 1U;
 
             continue;
         }
 
-        Vector<float, 3>  _S1160 = (groomlab_noise_at((&cache_0), (_S1156 + Vector<float, 3> (0.0f, 0.0f, paramAt_0(i_50, n_30) * kernelContext_96->globalParams_0->Look_0->gValue_0.y))));
+        Vector<float, 3>  _S1163 = (groomlab_noise_at((&cache_0), (_S1159 + Vector<float, 3> (0.0f, 0.0f, paramAt_0(i_50, n_30) * kernelContext_96->globalParams_0->Look_0->gValue_0.y))));
 
-        storePoint_0(kernelContext_96->globalParams_0->gOut_0, _S1157, _S1158 + _S1160 * (Vector<float, 3> )_S1159);
+        storePoint_0(kernelContext_96->globalParams_0->gOut_0, _S1160, _S1161 + _S1163 * (Vector<float, 3> )_S1162);
 
         i_50 = i_50 + 1U;
 
@@ -13308,10 +13353,10 @@ static void noiseStrandAlone_0(uint32_t s_28, uint32_t begin_13, uint32_t n_30, 
 }
 
 
-void _NoiseCS(void* _S1161, void* entryPointParams_5, void* globalParams_6)
+void _NoiseCS(void* _S1164, void* entryPointParams_5, void* globalParams_6)
 {
 
-    ComputeThreadVaryingInput * _S1162 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S1161));
+    ComputeThreadVaryingInput * _S1165 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S1164));
 
     KernelContext_0 kernelContext_97;
 
@@ -13321,51 +13366,51 @@ void _NoiseCS(void* _S1161, void* entryPointParams_5, void* globalParams_6)
 
     (&kernelContext_97)->sTableBase_0 = 0U;
 
-    uint32_t _S1163 = threadIndex_0(_S1162->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S1162->groupThreadID, 64U, &kernelContext_97);
+    uint32_t _S1166 = threadIndex_0(_S1165->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S1165->groupThreadID, 64U, &kernelContext_97);
 
-    if(_S1163 >= ((&kernelContext_97)->globalParams_0->Look_0->gStrandCount_0))
+    if(_S1166 >= ((&kernelContext_97)->globalParams_0->Look_0->gStrandCount_0))
     {
 
         return;
     }
 
-    uint32_t _S1164 = strandBegin_0(_S1163, &kernelContext_97);
+    uint32_t _S1167 = strandBegin_0(_S1166, &kernelContext_97);
 
-    uint32_t _S1165 = strandCountOf_0(_S1163, &kernelContext_97);
+    uint32_t _S1168 = strandCountOf_0(_S1166, &kernelContext_97);
 
 
-    if(_S1165 > 0U)
+    if(_S1168 > 0U)
     {
 
-        Vector<float, 3>  _S1166 = loadPoint_0(_S1164, &kernelContext_97);
+        Vector<float, 3>  _S1169 = loadPoint_0(_S1167, &kernelContext_97);
 
-        storePoint_0((&kernelContext_97)->globalParams_0->gOut_0, _S1164, _S1166);
+        storePoint_0((&kernelContext_97)->globalParams_0->gOut_0, _S1167, _S1169);
 
     }
 
-    bool _S1167;
+    bool _S1170;
     if(((&kernelContext_97)->globalParams_0->Look_0->gFlag_0.z) != 0U)
     {
 
-        _S1167 = ((&kernelContext_97)->globalParams_0->Look_0->gFlag_0.y) != 0U;
+        _S1170 = ((&kernelContext_97)->globalParams_0->Look_0->gFlag_0.y) != 0U;
 
     }
     else
     {
 
-        _S1167 = false;
+        _S1170 = false;
 
     }
 
-    if(_S1167)
+    if(_S1170)
     {
 
-        noiseKinkyWorld_0(_S1163, _S1164, _S1165, &kernelContext_97);
+        noiseKinkyWorld_0(_S1166, _S1167, _S1168, &kernelContext_97);
 
         return;
     }
 
-    noiseStrandAlone_0(_S1163, _S1164, _S1165, &kernelContext_97);
+    noiseStrandAlone_0(_S1166, _S1167, _S1168, &kernelContext_97);
 
     return;
 }
@@ -13378,28 +13423,28 @@ static PointAt_0 pointAt_0(uint32_t p_36, KernelContext_0 * kernelContext_98)
     if((kernelContext_98->globalParams_0->Look_0->gUniformCount_0) != 0U)
     {
 
-        uint32_t _S1168 = kernelContext_98->globalParams_0->Look_0->gUniformCount_0;
+        uint32_t _S1171 = kernelContext_98->globalParams_0->Look_0->gUniformCount_0;
 
         (&a_39)->n_3 = kernelContext_98->globalParams_0->Look_0->gUniformCount_0;
-        uint32_t _S1169 = p_36 / _S1168;
+        uint32_t _S1172 = p_36 / _S1171;
 
-        (&a_39)->s_0 = _S1169;
-        (&a_39)->begin_3 = _S1169 * (&a_39)->n_3;
+        (&a_39)->s_0 = _S1172;
+        (&a_39)->begin_3 = _S1172 * (&a_39)->n_3;
 
     }
     else
     {
 
 
-        uint32_t _S1170 = (kernelContext_98->globalParams_0->gPointStrands_0).Load<uint32_t >(uint32_t(int32_t(p_36 * 4U)));
+        uint32_t _S1173 = (kernelContext_98->globalParams_0->gPointStrands_0).Load<uint32_t >(uint32_t(int32_t(p_36 * 4U)));
 
-        (&a_39)->s_0 = _S1170;
+        (&a_39)->s_0 = _S1173;
 
-        uint32_t _S1171 = strandBegin_0(_S1170, kernelContext_98);
-        (&a_39)->begin_3 = _S1171;
+        uint32_t _S1174 = strandBegin_0(_S1173, kernelContext_98);
+        (&a_39)->begin_3 = _S1174;
 
-        uint32_t _S1172 = strandCountOf_0(_S1170, kernelContext_98);
-        (&a_39)->n_3 = _S1172;
+        uint32_t _S1175 = strandCountOf_0(_S1173, kernelContext_98);
+        (&a_39)->n_3 = _S1175;
 
     }
 
@@ -13408,10 +13453,10 @@ static PointAt_0 pointAt_0(uint32_t p_36, KernelContext_0 * kernelContext_98)
 }
 
 
-void _NoisePointsCS(void* _S1173, void* entryPointParams_6, void* globalParams_7)
+void _NoisePointsCS(void* _S1176, void* entryPointParams_6, void* globalParams_7)
 {
 
-    ComputeThreadVaryingInput * _S1174 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S1173));
+    ComputeThreadVaryingInput * _S1177 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S1176));
 
     KernelContext_0 kernelContext_99;
 
@@ -13421,37 +13466,37 @@ void _NoisePointsCS(void* _S1173, void* entryPointParams_6, void* globalParams_7
 
     (&kernelContext_99)->sTableBase_0 = 0U;
 
-    uint32_t _S1175 = threadIndex_0(_S1174->groupID * Vector<uint32_t, 3> (256U, 1U, 1U) + _S1174->groupThreadID, 256U, &kernelContext_99);
+    uint32_t _S1178 = threadIndex_0(_S1177->groupID * Vector<uint32_t, 3> (256U, 1U, 1U) + _S1177->groupThreadID, 256U, &kernelContext_99);
 
-    if(_S1175 >= ((&kernelContext_99)->globalParams_0->Look_0->gPointCount_0))
+    if(_S1178 >= ((&kernelContext_99)->globalParams_0->Look_0->gPointCount_0))
     {
 
         return;
     }
 
-    PointAt_0 _S1176 = pointAt_0(_S1175, &kernelContext_99);
+    PointAt_0 _S1179 = pointAt_0(_S1178, &kernelContext_99);
 
-    Vector<float, 3>  _S1177 = loadPoint_0(_S1175, &kernelContext_99);
+    Vector<float, 3>  _S1180 = loadPoint_0(_S1178, &kernelContext_99);
 
-    Vector<float, 3>  _S1178;
+    Vector<float, 3>  _S1181;
 
 
-    if((_S1176.i_0) > 0U)
+    if((_S1179.i_0) > 0U)
     {
 
-        Vector<float, 3>  _S1179 = noiseAt_0(_S1176.s_0, _S1176.i_0, _S1176.n_3, _S1175, _S1177, &kernelContext_99);
+        Vector<float, 3>  _S1182 = noiseAt_0(_S1179.s_0, _S1179.i_0, _S1179.n_3, _S1178, _S1180, &kernelContext_99);
 
-        _S1178 = _S1179;
+        _S1181 = _S1182;
 
     }
     else
     {
 
-        _S1178 = _S1177;
+        _S1181 = _S1180;
 
     }
 
-    storePoint_0((&kernelContext_99)->globalParams_0->gOut_0, _S1175, _S1178);
+    storePoint_0((&kernelContext_99)->globalParams_0->gOut_0, _S1178, _S1181);
     return;
 }
 
@@ -13459,26 +13504,26 @@ void _NoisePointsCS(void* _S1173, void* entryPointParams_6, void* globalParams_7
 static bool curlSpaced_0(KernelContext_0 * kernelContext_100)
 {
 
-    bool _S1180 = curlProfiled_0(kernelContext_100);
+    bool _S1183 = curlProfiled_0(kernelContext_100);
 
-    bool _S1181;
+    bool _S1184;
 
-    if(_S1180)
+    if(_S1183)
     {
 
-        _S1181 = true;
+        _S1184 = true;
 
     }
     else
     {
 
-        bool _S1182 = curlWeighed_0(kernelContext_100);
+        bool _S1185 = curlWeighed_0(kernelContext_100);
 
-        _S1181 = _S1182;
+        _S1184 = _S1185;
 
     }
 
-    return _S1181;
+    return _S1184;
 }
 
 
@@ -13488,17 +13533,17 @@ static Vector<float, 3>  strandSlopeExact_0(uint32_t begin_14, uint32_t n_31, ui
     if(n_31 == 2U)
     {
 
-        Vector<float, 3>  _S1183 = loadPoint_0(begin_14, kernelContext_101);
+        Vector<float, 3>  _S1186 = loadPoint_0(begin_14, kernelContext_101);
 
-        Vector<float, 3>  _S1184 = loadPoint_0(begin_14 + 1U, kernelContext_101);
+        Vector<float, 3>  _S1187 = loadPoint_0(begin_14 + 1U, kernelContext_101);
         float h_15;
-        return secantOfExact_0(_S1183, _S1184, &h_15);
+        return secantOfExact_0(_S1186, _S1187, &h_15);
     }
-    bool _S1185 = i_51 == 0U;
+    bool _S1188 = i_51 == 0U;
 
     uint32_t a_40;
 
-    if(_S1185)
+    if(_S1188)
     {
 
         a_40 = 0U;
@@ -13523,7 +13568,7 @@ static Vector<float, 3>  strandSlopeExact_0(uint32_t begin_14, uint32_t n_31, ui
     }
 
     uint32_t which_2;
-    if(_S1185)
+    if(_S1188)
     {
 
         which_2 = 0U;
@@ -13546,15 +13591,15 @@ static Vector<float, 3>  strandSlopeExact_0(uint32_t begin_14, uint32_t n_31, ui
         }
 
     }
-    uint32_t _S1186 = begin_14 + a_40;
+    uint32_t _S1189 = begin_14 + a_40;
 
-    Vector<float, 3>  _S1187 = loadPoint_0(_S1186, kernelContext_101);
+    Vector<float, 3>  _S1190 = loadPoint_0(_S1189, kernelContext_101);
 
-    Vector<float, 3>  _S1188 = loadPoint_0(_S1186 + 1U, kernelContext_101);
+    Vector<float, 3>  _S1191 = loadPoint_0(_S1189 + 1U, kernelContext_101);
 
-    Vector<float, 3>  _S1189 = loadPoint_0(_S1186 + 2U, kernelContext_101);
+    Vector<float, 3>  _S1192 = loadPoint_0(_S1189 + 2U, kernelContext_101);
 
-    return slopeOf3Exact_0(_S1187, _S1188, _S1189, which_2);
+    return slopeOf3Exact_0(_S1190, _S1191, _S1192, which_2);
 }
 
 
@@ -13579,9 +13624,9 @@ static Vector<float, 3>  curvePointAtExact_0(uint32_t begin_15, uint32_t n_32, f
     if(n_32 == 1U)
     {
 
-        Vector<float, 3>  _S1190 = loadPoint_0(begin_15, kernelContext_102);
+        Vector<float, 3>  _S1193 = loadPoint_0(begin_15, kernelContext_102);
 
-        return _S1190;
+        return _S1193;
     }
 
     float x_27 = t_29 * float(n_32 - 1U);
@@ -13600,49 +13645,49 @@ static Vector<float, 3>  curvePointAtExact_0(uint32_t begin_15, uint32_t n_32, f
 
     }
     float u_11 = x_27 - float(i_52);
-    uint32_t _S1191 = begin_15 + i_52;
+    uint32_t _S1194 = begin_15 + i_52;
 
-    Vector<float, 3>  _S1192 = loadPoint_0(_S1191, kernelContext_102);
+    Vector<float, 3>  _S1195 = loadPoint_0(_S1194, kernelContext_102);
     if(u_11 == 0.0f)
     {
 
-        return _S1192;
+        return _S1195;
     }
 
-    Vector<float, 3>  _S1193 = loadPoint_0(_S1191 + 1U, kernelContext_102);
+    Vector<float, 3>  _S1196 = loadPoint_0(_S1194 + 1U, kernelContext_102);
 
     float h_17;
-    Vector<float, 3>  _S1194 = secantOfExact_0(_S1192, _S1193, &h_17);
+    Vector<float, 3>  _S1197 = secantOfExact_0(_S1195, _S1196, &h_17);
 
-    Vector<float, 3>  _S1195 = strandSlopeExact_0(begin_15, n_32, i_52, kernelContext_102);
+    Vector<float, 3>  _S1198 = strandSlopeExact_0(begin_15, n_32, i_52, kernelContext_102);
 
-    Vector<float, 3>  _S1196 = strandSlopeExact_0(begin_15, n_32, i_52 + 1U, kernelContext_102);
-    return hermiteAtExact_0(_S1192, _S1193, _S1195, _S1196, h_17, u_11);
+    Vector<float, 3>  _S1199 = strandSlopeExact_0(begin_15, n_32, i_52 + 1U, kernelContext_102);
+    return hermiteAtExact_0(_S1195, _S1196, _S1198, _S1199, h_17, u_11);
 }
 
 
 static Vector<float, 3>  ownAxisSampleExact_0(uint32_t begin_16, uint32_t n_33, uint32_t samples_8, uint32_t k_27, KernelContext_0 * kernelContext_103)
 {
 
-    Vector<float, 3>  _S1197;
+    Vector<float, 3>  _S1200;
     if(samples_8 == n_33)
     {
 
-        Vector<float, 3>  _S1198 = loadPoint_0(begin_16 + k_27, kernelContext_103);
+        Vector<float, 3>  _S1201 = loadPoint_0(begin_16 + k_27, kernelContext_103);
 
-        _S1197 = _S1198;
+        _S1200 = _S1201;
 
     }
     else
     {
 
-        Vector<float, 3>  _S1199 = curvePointAtExact_0(begin_16, n_33, divExact_0(float(k_27), float(samples_8 - 1U)), kernelContext_103);
+        Vector<float, 3>  _S1202 = curvePointAtExact_0(begin_16, n_33, divExact_0(float(k_27), float(samples_8 - 1U)), kernelContext_103);
 
-        _S1197 = _S1199;
+        _S1200 = _S1202;
 
     }
 
-    return _S1197;
+    return _S1200;
 }
 
 
@@ -13651,24 +13696,24 @@ static Vector<float, 3>  slopeFrom_0(Vector<float, 3>  s0_1, float h0_1, Vector<
 
     float w_26 = h0_1 + h1_1;
 
-    Vector<float, 3>  _S1200;
+    Vector<float, 3>  _S1203;
     if(which_3 == 1U)
     {
 
         if(w_26 > 0.0f)
         {
 
-            _S1200 = (s0_1 * (Vector<float, 3> )h1_1 + s1_2 * (Vector<float, 3> )h0_1) * (Vector<float, 3> )(1.0f / w_26);
+            _S1203 = (s0_1 * (Vector<float, 3> )h1_1 + s1_2 * (Vector<float, 3> )h0_1) * (Vector<float, 3> )(1.0f / w_26);
 
         }
         else
         {
 
-            _S1200 = Vector<float, 3> (0.0f, 0.0f, 0.0f);
+            _S1203 = Vector<float, 3> (0.0f, 0.0f, 0.0f);
 
         }
 
-        return _S1200;
+        return _S1203;
     }
 
     if(which_3 == 0U)
@@ -13677,43 +13722,43 @@ static Vector<float, 3>  slopeFrom_0(Vector<float, 3>  s0_1, float h0_1, Vector<
         if(w_26 > 0.0f)
         {
 
-            _S1200 = s0_1 + (s0_1 - s1_2) * (Vector<float, 3> )(h0_1 / w_26);
+            _S1203 = s0_1 + (s0_1 - s1_2) * (Vector<float, 3> )(h0_1 / w_26);
 
         }
         else
         {
 
-            _S1200 = s0_1;
+            _S1203 = s0_1;
 
         }
 
-        return _S1200;
+        return _S1203;
     }
 
     if(w_26 > 0.0f)
     {
 
-        _S1200 = s1_2 + (s1_2 - s0_1) * (Vector<float, 3> )(h1_1 / w_26);
+        _S1203 = s1_2 + (s1_2 - s0_1) * (Vector<float, 3> )(h1_1 / w_26);
 
     }
     else
     {
 
-        _S1200 = s1_2;
+        _S1203 = s1_2;
 
     }
 
-    return _S1200;
+    return _S1203;
 }
 
-static Vector<float, 3>  slopeOf3_0(Vector<float, 3>  a_41, Vector<float, 3>  b_37, Vector<float, 3>  c_29, uint32_t which_4)
+static Vector<float, 3>  slopeOf3_0(Vector<float, 3>  a_41, Vector<float, 3>  b_38, Vector<float, 3>  c_29, uint32_t which_4)
 {
 
     float h0_2;
-    Vector<float, 3>  s0_2 = secantOf_0(a_41, b_37, &h0_2);
+    Vector<float, 3>  s0_2 = secantOf_0(a_41, b_38, &h0_2);
 
     float h1_2;
-    Vector<float, 3>  s1_3 = secantOf_0(b_37, c_29, &h1_2);
+    Vector<float, 3>  s1_3 = secantOf_0(b_38, c_29, &h1_2);
     return slopeFrom_0(s0_2, h0_2, s1_3, h1_2, which_4);
 }
 
@@ -13721,7 +13766,7 @@ static Vector<float, 3>  slopeOf3_0(Vector<float, 3>  a_41, Vector<float, 3>  b_
 static Vector<float, 3>  walkSlope_0(AxisWalk_0 * w_27, uint32_t j_22)
 {
 
-    uint32_t _S1201 = w_27->samples_0;
+    uint32_t _S1204 = w_27->samples_0;
     if((w_27->samples_0) == 2U)
     {
 
@@ -13736,7 +13781,7 @@ static Vector<float, 3>  walkSlope_0(AxisWalk_0 * w_27, uint32_t j_22)
         return slopeOf3_0(w_27->x0_0, w_27->x1_0, w_27->x2_0, 0U);
     }
 
-    if((j_22 + 1U) == _S1201)
+    if((j_22 + 1U) == _S1204)
     {
 
         return slopeOf3_0(w_27->xm_0, w_27->x0_0, w_27->x1_0, 2U);
@@ -13752,34 +13797,34 @@ static AxisWalk_0 ownAxisStart_0(uint32_t begin_17, uint32_t n_34, Vector<float,
 {
 
     AxisWalk_0 w_28;
-    uint32_t _S1202 = (U32_min((n_34), (32U)));
+    uint32_t _S1205 = (U32_min((n_34), (32U)));
 
-    (&w_28)->samples_0 = _S1202;
+    (&w_28)->samples_0 = _S1205;
     (&w_28)->k_0 = 0U;
 
-    Vector<float, 3>  _S1203 = ownAxisSampleExact_0(begin_17, n_34, _S1202, 0U, kernelContext_104);
-    (&w_28)->x0_0 = _S1203;
+    Vector<float, 3>  _S1206 = ownAxisSampleExact_0(begin_17, n_34, _S1205, 0U, kernelContext_104);
+    (&w_28)->x0_0 = _S1206;
 
-    Vector<float, 3>  _S1204 = ownAxisSampleExact_0(begin_17, n_34, _S1202, 1U, kernelContext_104);
-    (&w_28)->x1_0 = _S1204;
+    Vector<float, 3>  _S1207 = ownAxisSampleExact_0(begin_17, n_34, _S1205, 1U, kernelContext_104);
+    (&w_28)->x1_0 = _S1207;
 
-    Vector<float, 3>  _S1205;
-    if(_S1202 > 2U)
+    Vector<float, 3>  _S1208;
+    if(_S1205 > 2U)
     {
 
-        Vector<float, 3>  _S1206 = ownAxisSampleExact_0(begin_17, n_34, (&w_28)->samples_0, 2U, kernelContext_104);
+        Vector<float, 3>  _S1209 = ownAxisSampleExact_0(begin_17, n_34, (&w_28)->samples_0, 2U, kernelContext_104);
 
-        _S1205 = _S1206;
+        _S1208 = _S1209;
 
     }
     else
     {
 
-        _S1205 = (&w_28)->x1_0;
+        _S1208 = (&w_28)->x1_0;
 
     }
 
-    (&w_28)->x2_0 = _S1205;
+    (&w_28)->x2_0 = _S1208;
     (&w_28)->xm_0 = (&w_28)->x0_0;
     if(((&w_28)->samples_0) == 2U)
     {
@@ -13795,38 +13840,38 @@ static AxisWalk_0 ownAxisStart_0(uint32_t begin_17, uint32_t n_34, Vector<float,
 
     }
 
-    AxisWalk_0 _S1207 = w_28;
+    AxisWalk_0 _S1210 = w_28;
 
-    Vector<float, 3>  _S1208 = walkSlope_0(&_S1207, 1U);
+    Vector<float, 3>  _S1211 = walkSlope_0(&_S1210, 1U);
 
-    (&w_28)->d1_0 = _S1208;
+    (&w_28)->d1_0 = _S1211;
 
     Vector<float, 3>  t0_1 = tangentOfExact_0((&w_28)->d0_0, Vector<float, 3> (0.0f, 0.0f, 1.0f));
 
-    Vector<float, 3>  _S1209 = curvePointAtExact_0(begin_17, n_34, divExact_0(1.0f, 31.0f), kernelContext_104);
+    Vector<float, 3>  _S1212 = curvePointAtExact_0(begin_17, n_34, divExact_0(1.0f, 31.0f), kernelContext_104);
 
-    (&w_28)->f_0 = curlFirstFrame_0(normal_3, t0_1, tangentOfExact_0(sub3Exact_0(_S1209, (&w_28)->x0_0), t0_1));
+    (&w_28)->f_0 = curlFirstFrame_0(normal_3, t0_1, tangentOfExact_0(sub3Exact_0(_S1212, (&w_28)->x0_0), t0_1));
     (&w_28)->arc_0 = 0.0f;
     (&w_28)->parc_0 = 0.0f;
     return w_28;
 }
 
 
-static Lanes3_0 subLanes_0(Lanes3_0 * a_42, Lanes3_0 * b_38)
+static Lanes3_0 subLanes_0(Lanes3_0 * a_42, Lanes3_0 * b_39)
 {
 
     Lanes3_0 r_26;
-    (&r_26)->x_0 = a_42->x_0 - b_38->x_0;
-    (&r_26)->y_0 = a_42->y_0 - b_38->y_0;
-    (&r_26)->z_0 = a_42->z_0 - b_38->z_0;
+    (&r_26)->x_0 = a_42->x_0 - b_39->x_0;
+    (&r_26)->y_0 = a_42->y_0 - b_39->y_0;
+    (&r_26)->z_0 = a_42->z_0 - b_39->z_0;
     return r_26;
 }
 
 
-static Vector<float, 4>  dotLanes_0(Lanes3_0 * a_43, Lanes3_0 * b_39)
+static Vector<float, 4>  dotLanes_0(Lanes3_0 * a_43, Lanes3_0 * b_40)
 {
 
-    return a_43->x_0 * b_39->x_0 + a_43->y_0 * b_39->y_0 + a_43->z_0 * b_39->z_0;
+    return a_43->x_0 * b_40->x_0 + a_43->y_0 * b_40->y_0 + a_43->z_0 * b_40->z_0;
 }
 
 
@@ -13841,13 +13886,13 @@ static Lanes3_0 scaleLanes_0(Lanes3_0 * a_44, Vector<float, 4>  s_29)
 }
 
 
-static Lanes3_0 pickLanes_0(Vector<bool, 4>  m_8, Lanes3_0 * a_45, Lanes3_0 * b_40)
+static Lanes3_0 pickLanes_0(Vector<bool, 4>  m_8, Lanes3_0 * a_45, Lanes3_0 * b_41)
 {
 
     Lanes3_0 r_28;
-    (&r_28)->x_0 = _slang_select(m_8, a_45->x_0,b_40->x_0);
-    (&r_28)->y_0 = _slang_select(m_8, a_45->y_0,b_40->y_0);
-    (&r_28)->z_0 = _slang_select(m_8, a_45->z_0,b_40->z_0);
+    (&r_28)->x_0 = _slang_select(m_8, a_45->x_0,b_41->x_0);
+    (&r_28)->y_0 = _slang_select(m_8, a_45->y_0,b_41->y_0);
+    (&r_28)->z_0 = _slang_select(m_8, a_45->z_0,b_41->z_0);
     return r_28;
 }
 
@@ -13855,25 +13900,25 @@ static Lanes3_0 pickLanes_0(Vector<bool, 4>  m_8, Lanes3_0 * a_45, Lanes3_0 * b_
 static Lanes3_0 unitLanesOr_0(Lanes3_0 * v_24, Vector<float, 4>  l_9, Lanes3_0 * other_0)
 {
 
-    Vector<bool, 4>  _S1210 = l_9 > ((Vector<float, 4> )0.0f);
+    Vector<bool, 4>  _S1213 = l_9 > ((Vector<float, 4> )0.0f);
 
-    Lanes3_0 _S1211 = scaleLanes_0(v_24, (Vector<float, 4> )1.0f / l_9);
+    Lanes3_0 _S1214 = scaleLanes_0(v_24, (Vector<float, 4> )1.0f / l_9);
 
-    Lanes3_0 _S1212 = _S1211;
+    Lanes3_0 _S1215 = _S1214;
 
-    Lanes3_0 _S1213 = pickLanes_0(_S1210, &_S1212, other_0);
+    Lanes3_0 _S1216 = pickLanes_0(_S1213, &_S1215, other_0);
 
-    return _S1213;
+    return _S1216;
 }
 
 
-static Lanes3_0 addLanes_0(Lanes3_0 * a_46, Lanes3_0 * b_41)
+static Lanes3_0 addLanes_0(Lanes3_0 * a_46, Lanes3_0 * b_42)
 {
 
     Lanes3_0 r_29;
-    (&r_29)->x_0 = a_46->x_0 + b_41->x_0;
-    (&r_29)->y_0 = a_46->y_0 + b_41->y_0;
-    (&r_29)->z_0 = a_46->z_0 + b_41->z_0;
+    (&r_29)->x_0 = a_46->x_0 + b_42->x_0;
+    (&r_29)->y_0 = a_46->y_0 + b_42->y_0;
+    (&r_29)->z_0 = a_46->z_0 + b_42->z_0;
     return r_29;
 }
 
@@ -13886,73 +13931,73 @@ static Lanes3_0 slopeLanes_0(Lanes3_0 * s0_3, Vector<float, 4>  h0_3, Lanes3_0 *
     if(which_5 == 1U)
     {
 
-        Lanes3_0 _S1214 = scaleLanes_0(s0_3, h1_3);
+        Lanes3_0 _S1217 = scaleLanes_0(s0_3, h1_3);
 
-        Lanes3_0 _S1215 = scaleLanes_0(s1_4, h0_3);
+        Lanes3_0 _S1218 = scaleLanes_0(s1_4, h0_3);
 
-        Lanes3_0 _S1216 = _S1214;
-
-        Lanes3_0 _S1217 = _S1215;
-
-        Lanes3_0 _S1218 = addLanes_0(&_S1216, &_S1217);
-
-        Vector<float, 4>  _S1219 = (Vector<float, 4> )1.0f / w_29;
+        Lanes3_0 _S1219 = _S1217;
 
         Lanes3_0 _S1220 = _S1218;
 
-        Lanes3_0 _S1221 = scaleLanes_0(&_S1220, _S1219);
+        Lanes3_0 _S1221 = addLanes_0(&_S1219, &_S1220);
 
-        Vector<float, 3>  _S1222 = (Vector<float, 3> )0.0f;
+        Vector<float, 4>  _S1222 = (Vector<float, 4> )1.0f / w_29;
 
-        Lanes3_0 _S1223 = lanes3_0(_S1222, _S1222, _S1222, _S1222);
+        Lanes3_0 _S1223 = _S1221;
 
-        Lanes3_0 _S1224 = _S1221;
+        Lanes3_0 _S1224 = scaleLanes_0(&_S1223, _S1222);
 
-        Lanes3_0 _S1225 = _S1223;
+        Vector<float, 3>  _S1225 = (Vector<float, 3> )0.0f;
 
-        Lanes3_0 _S1226 = pickLanes_0(spaced_0, &_S1224, &_S1225);
+        Lanes3_0 _S1226 = lanes3_0(_S1225, _S1225, _S1225, _S1225);
 
-        return _S1226;
+        Lanes3_0 _S1227 = _S1224;
+
+        Lanes3_0 _S1228 = _S1226;
+
+        Lanes3_0 _S1229 = pickLanes_0(spaced_0, &_S1227, &_S1228);
+
+        return _S1229;
     }
 
     if(which_5 == 0U)
     {
 
-        Lanes3_0 _S1227 = subLanes_0(s0_3, s1_4);
+        Lanes3_0 _S1230 = subLanes_0(s0_3, s1_4);
 
-        Vector<float, 4>  _S1228 = h0_3 / w_29;
+        Vector<float, 4>  _S1231 = h0_3 / w_29;
 
-        Lanes3_0 _S1229 = _S1227;
+        Lanes3_0 _S1232 = _S1230;
 
-        Lanes3_0 _S1230 = scaleLanes_0(&_S1229, _S1228);
+        Lanes3_0 _S1233 = scaleLanes_0(&_S1232, _S1231);
 
-        Lanes3_0 _S1231 = _S1230;
+        Lanes3_0 _S1234 = _S1233;
 
-        Lanes3_0 _S1232 = addLanes_0(s0_3, &_S1231);
+        Lanes3_0 _S1235 = addLanes_0(s0_3, &_S1234);
 
-        Lanes3_0 _S1233 = _S1232;
+        Lanes3_0 _S1236 = _S1235;
 
-        Lanes3_0 _S1234 = pickLanes_0(spaced_0, &_S1233, s0_3);
+        Lanes3_0 _S1237 = pickLanes_0(spaced_0, &_S1236, s0_3);
 
-        return _S1234;
+        return _S1237;
     }
 
-    Lanes3_0 _S1235 = subLanes_0(s1_4, s0_3);
-    Vector<float, 4>  _S1236 = h1_3 / w_29;
+    Lanes3_0 _S1238 = subLanes_0(s1_4, s0_3);
+    Vector<float, 4>  _S1239 = h1_3 / w_29;
 
-    Lanes3_0 _S1237 = _S1235;
+    Lanes3_0 _S1240 = _S1238;
 
-    Lanes3_0 _S1238 = scaleLanes_0(&_S1237, _S1236);
+    Lanes3_0 _S1241 = scaleLanes_0(&_S1240, _S1239);
 
-    Lanes3_0 _S1239 = _S1238;
+    Lanes3_0 _S1242 = _S1241;
 
-    Lanes3_0 _S1240 = addLanes_0(s1_4, &_S1239);
+    Lanes3_0 _S1243 = addLanes_0(s1_4, &_S1242);
 
-    Lanes3_0 _S1241 = _S1240;
+    Lanes3_0 _S1244 = _S1243;
 
-    Lanes3_0 _S1242 = pickLanes_0(spaced_0, &_S1241, s1_4);
+    Lanes3_0 _S1245 = pickLanes_0(spaced_0, &_S1244, s1_4);
 
-    return _S1242;
+    return _S1245;
 }
 
 
@@ -13963,78 +14008,78 @@ static Lanes3_0 lanes3_1(FixedArray<Vector<float, 3> , 4>  * v_25)
 }
 
 
-static Vector<float, 4>  hermiteSpeedLanes_0(Lanes3_0 * dd_12, Lanes3_0 * a_47, Lanes3_0 * b_42, float v_26)
+static Vector<float, 4>  hermiteSpeedLanes_0(Lanes3_0 * dd_12, Lanes3_0 * a_47, Lanes3_0 * b_43, float v_26)
 {
 
-    float _S1243 = 1.0f - v_26;
+    float _S1246 = 1.0f - v_26;
 
-    Lanes3_0 _S1244 = scaleLanes_0(dd_12, (Vector<float, 4> )(6.0f * v_26 * _S1243));
+    Lanes3_0 _S1247 = scaleLanes_0(dd_12, (Vector<float, 4> )(6.0f * v_26 * _S1246));
 
-    float _S1245 = 3.0f * v_26;
+    float _S1248 = 3.0f * v_26;
 
-    Lanes3_0 _S1246 = scaleLanes_0(a_47, (Vector<float, 4> )(_S1243 * (1.0f - _S1245)));
+    Lanes3_0 _S1249 = scaleLanes_0(a_47, (Vector<float, 4> )(_S1246 * (1.0f - _S1248)));
 
-    Lanes3_0 _S1247 = _S1244;
-
-    Lanes3_0 _S1248 = _S1246;
-
-    Lanes3_0 _S1249 = addLanes_0(&_S1247, &_S1248);
-
-    Lanes3_0 _S1250 = scaleLanes_0(b_42, (Vector<float, 4> )(v_26 * (_S1245 - 2.0f)));
+    Lanes3_0 _S1250 = _S1247;
 
     Lanes3_0 _S1251 = _S1249;
 
-    Lanes3_0 _S1252 = _S1250;
+    Lanes3_0 _S1252 = addLanes_0(&_S1250, &_S1251);
 
-    Lanes3_0 _S1253 = addLanes_0(&_S1251, &_S1252);
+    Lanes3_0 _S1253 = scaleLanes_0(b_43, (Vector<float, 4> )(v_26 * (_S1248 - 2.0f)));
 
-    Lanes3_0 _S1254 = _S1253;
+    Lanes3_0 _S1254 = _S1252;
 
     Lanes3_0 _S1255 = _S1253;
 
-    Vector<float, 4>  _S1256 = dotLanes_0(&_S1254, &_S1255);
+    Lanes3_0 _S1256 = addLanes_0(&_S1254, &_S1255);
 
-    return sqrt_0(_S1256);
+    Lanes3_0 _S1257 = _S1256;
+
+    Lanes3_0 _S1258 = _S1256;
+
+    Vector<float, 4>  _S1259 = dotLanes_0(&_S1257, &_S1258);
+
+    return sqrt_0(_S1259);
 }
 
 
 static Vector<float, 4>  wholeArcLanes_0(Lanes3_0 * p0_3, Lanes3_0 * p1_3, Lanes3_0 * d0_4, Lanes3_0 * d1_5, Vector<float, 4>  h_20)
 {
 
-    Lanes3_0 _S1257 = subLanes_0(p1_3, p0_3);
+    Lanes3_0 _S1260 = subLanes_0(p1_3, p0_3);
 
-    Lanes3_0 _S1258 = scaleLanes_0(d0_4, h_20);
+    Lanes3_0 _S1261 = scaleLanes_0(d0_4, h_20);
 
-    Lanes3_0 _S1259 = scaleLanes_0(d1_5, h_20);
+    Lanes3_0 _S1262 = scaleLanes_0(d1_5, h_20);
 
-    Lanes3_0 _S1260 = _S1257;
+    Lanes3_0 _S1263 = _S1260;
 
-    Lanes3_0 _S1261 = _S1258;
+    Lanes3_0 _S1264 = _S1261;
 
-    Lanes3_0 _S1262 = _S1259;
+    Lanes3_0 _S1265 = _S1262;
 
-    Vector<float, 4>  _S1263 = hermiteSpeedLanes_0(&_S1260, &_S1261, &_S1262, 0.21132487058639526f);
+    Vector<float, 4>  _S1266 = hermiteSpeedLanes_0(&_S1263, &_S1264, &_S1265, 0.21132487058639526f);
 
-    Lanes3_0 _S1264 = _S1257;
+    Lanes3_0 _S1267 = _S1260;
 
-    Lanes3_0 _S1265 = _S1258;
+    Lanes3_0 _S1268 = _S1261;
 
-    Lanes3_0 _S1266 = _S1259;
+    Lanes3_0 _S1269 = _S1262;
 
-    Vector<float, 4>  _S1267 = hermiteSpeedLanes_0(&_S1264, &_S1265, &_S1266, 0.78867512941360474f);
+    Vector<float, 4>  _S1270 = hermiteSpeedLanes_0(&_S1267, &_S1268, &_S1269, 0.78867512941360474f);
 
 
-    return (Vector<float, 4> )0.5f * (_S1263 + _S1267);
+    return (Vector<float, 4> )0.5f * (_S1266 + _S1270);
 }
 
 
-static Lanes3_0 crossLanes_0(Lanes3_0 * a_48, Lanes3_0 * b_43)
+static Lanes3_0 crossLanes_0(Lanes3_0 * a_48, Lanes3_0 * b_44)
 {
 
     Lanes3_0 r_30;
-    (&r_30)->x_0 = a_48->y_0 * b_43->z_0 - a_48->z_0 * b_43->y_0;
-    (&r_30)->y_0 = a_48->z_0 * b_43->x_0 - a_48->x_0 * b_43->z_0;
-    (&r_30)->z_0 = a_48->x_0 * b_43->y_0 - a_48->y_0 * b_43->x_0;
+    (&r_30)->x_0 = a_48->y_0 * b_44->z_0 - a_48->z_0 * b_44->y_0;
+    (&r_30)->y_0 = a_48->z_0 * b_44->x_0 - a_48->x_0 * b_44->z_0;
+    (&r_30)->z_0 = a_48->x_0 * b_44->y_0 - a_48->y_0 * b_44->x_0;
     return r_30;
 }
 
@@ -14042,90 +14087,90 @@ static Lanes3_0 crossLanes_0(Lanes3_0 * a_48, Lanes3_0 * b_43)
 static FrameLanes_0 reflectLanes_0(FrameLanes_0 * f_13, Lanes3_0 * v1_3, Lanes3_0 * t1_2)
 {
 
-    Vector<float, 4>  _S1268 = dotLanes_0(v1_3, v1_3);
+    Vector<float, 4>  _S1271 = dotLanes_0(v1_3, v1_3);
 
-    Vector<float, 4>  k1_2 = (Vector<float, 4> )2.0f / _S1268;
+    Vector<float, 4>  k1_2 = (Vector<float, 4> )2.0f / _S1271;
 
-    Vector<float, 4>  _S1269 = dotLanes_0(v1_3, &f_13->n_4);
+    Vector<float, 4>  _S1272 = dotLanes_0(v1_3, &f_13->n_4);
 
-    Lanes3_0 _S1270 = scaleLanes_0(v1_3, k1_2 * _S1269);
+    Lanes3_0 _S1273 = scaleLanes_0(v1_3, k1_2 * _S1272);
 
-    Lanes3_0 _S1271 = _S1270;
+    Lanes3_0 _S1274 = _S1273;
 
-    Lanes3_0 _S1272 = subLanes_0(&f_13->n_4, &_S1271);
+    Lanes3_0 _S1275 = subLanes_0(&f_13->n_4, &_S1274);
 
-    Vector<float, 4>  _S1273 = dotLanes_0(v1_3, &f_13->t_1);
+    Vector<float, 4>  _S1276 = dotLanes_0(v1_3, &f_13->t_1);
 
-    Lanes3_0 _S1274 = scaleLanes_0(v1_3, k1_2 * _S1273);
+    Lanes3_0 _S1277 = scaleLanes_0(v1_3, k1_2 * _S1276);
 
-    Lanes3_0 _S1275 = _S1274;
+    Lanes3_0 _S1278 = _S1277;
 
-    Lanes3_0 _S1276 = subLanes_0(&f_13->t_1, &_S1275);
+    Lanes3_0 _S1279 = subLanes_0(&f_13->t_1, &_S1278);
 
-    Lanes3_0 _S1277 = _S1276;
+    Lanes3_0 _S1280 = _S1279;
 
-    Lanes3_0 _S1278 = subLanes_0(t1_2, &_S1277);
+    Lanes3_0 _S1281 = subLanes_0(t1_2, &_S1280);
 
-    Lanes3_0 _S1279 = _S1278;
+    Lanes3_0 _S1282 = _S1281;
 
-    Lanes3_0 _S1280 = _S1278;
+    Lanes3_0 _S1283 = _S1281;
 
-    Vector<float, 4>  _S1281 = dotLanes_0(&_S1279, &_S1280);
+    Vector<float, 4>  _S1284 = dotLanes_0(&_S1282, &_S1283);
 
-    Vector<bool, 4>  _S1282 = _S1281 < ((Vector<float, 4> )9.999999960041972e-13f);
+    Vector<bool, 4>  _S1285 = _S1284 < ((Vector<float, 4> )9.999999960041972e-13f);
 
-    Vector<float, 4>  _S1283 = (Vector<float, 4> )2.0f / _S1281;
+    Vector<float, 4>  _S1286 = (Vector<float, 4> )2.0f / _S1284;
 
-    Lanes3_0 _S1284 = _S1278;
+    Lanes3_0 _S1287 = _S1281;
 
-    Lanes3_0 _S1285 = _S1272;
+    Lanes3_0 _S1288 = _S1275;
 
-    Vector<float, 4>  _S1286 = dotLanes_0(&_S1284, &_S1285);
+    Vector<float, 4>  _S1289 = dotLanes_0(&_S1287, &_S1288);
 
-    Vector<float, 4>  _S1287 = _S1283 * _S1286;
+    Vector<float, 4>  _S1290 = _S1286 * _S1289;
 
-    Lanes3_0 _S1288 = _S1278;
+    Lanes3_0 _S1291 = _S1281;
 
-    Lanes3_0 _S1289 = scaleLanes_0(&_S1288, _S1287);
+    Lanes3_0 _S1292 = scaleLanes_0(&_S1291, _S1290);
 
-    Lanes3_0 _S1290 = _S1272;
-
-    Lanes3_0 _S1291 = _S1289;
-
-    Lanes3_0 _S1292 = subLanes_0(&_S1290, &_S1291);
-
-    Lanes3_0 _S1293 = _S1272;
+    Lanes3_0 _S1293 = _S1275;
 
     Lanes3_0 _S1294 = _S1292;
 
-    Lanes3_0 _S1295 = pickLanes_0(_S1282, &_S1293, &_S1294);
+    Lanes3_0 _S1295 = subLanes_0(&_S1293, &_S1294);
 
-    Lanes3_0 _S1296 = _S1295;
+    Lanes3_0 _S1296 = _S1275;
 
-    Vector<float, 4>  _S1297 = dotLanes_0(&_S1296, t1_2);
+    Lanes3_0 _S1297 = _S1295;
 
-    Lanes3_0 _S1298 = scaleLanes_0(t1_2, _S1297);
+    Lanes3_0 _S1298 = pickLanes_0(_S1285, &_S1296, &_S1297);
 
-    Lanes3_0 _S1299 = _S1295;
+    Lanes3_0 _S1299 = _S1298;
 
-    Lanes3_0 _S1300 = _S1298;
+    Vector<float, 4>  _S1300 = dotLanes_0(&_S1299, t1_2);
 
-    Lanes3_0 _S1301 = subLanes_0(&_S1299, &_S1300);
+    Lanes3_0 _S1301 = scaleLanes_0(t1_2, _S1300);
 
-    Lanes3_0 _S1302 = _S1301;
+    Lanes3_0 _S1302 = _S1298;
 
     Lanes3_0 _S1303 = _S1301;
 
-    Vector<float, 4>  _S1304 = dotLanes_0(&_S1302, &_S1303);
+    Lanes3_0 _S1304 = subLanes_0(&_S1302, &_S1303);
 
-    Vector<float, 4>  l_10 = sqrt_0(_S1304);
-    Vector<float, 4>  _S1305 = (Vector<float, 4> )1.0f / l_10;
+    Lanes3_0 _S1305 = _S1304;
 
-    Lanes3_0 _S1306 = _S1301;
+    Lanes3_0 _S1306 = _S1304;
 
-    Lanes3_0 _S1307 = scaleLanes_0(&_S1306, _S1305);
+    Vector<float, 4>  _S1307 = dotLanes_0(&_S1305, &_S1306);
 
-    Lanes3_0 n_35 = _S1307;
+    Vector<float, 4>  l_10 = sqrt_0(_S1307);
+    Vector<float, 4>  _S1308 = (Vector<float, 4> )1.0f / l_10;
+
+    Lanes3_0 _S1309 = _S1304;
+
+    Lanes3_0 _S1310 = scaleLanes_0(&_S1309, _S1308);
+
+    Lanes3_0 n_35 = _S1310;
 
     uint32_t lane_3 = 0U;
     for(;;)
@@ -14143,8 +14188,8 @@ static FrameLanes_0 reflectLanes_0(FrameLanes_0 * f_13, Lanes3_0 * v1_3, Lanes3_
         if(!(_slang_vector_get_element(l_10, lane_3) > 0.0f))
         {
 
-            Vector<float, 3>  _S1308 = laneOf_0(t1_2, lane_3);
-            Vector<float, 3>  p_37 = anyPerpendicular_0(_S1308);
+            Vector<float, 3>  _S1311 = laneOf_0(t1_2, lane_3);
+            Vector<float, 3>  p_37 = anyPerpendicular_0(_S1311);
             (&n_35)->x_0[lane_3] = p_37.x;
             (&n_35)->y_0[lane_3] = p_37.y;
             (&n_35)->z_0[lane_3] = p_37.z;
@@ -14155,25 +14200,25 @@ static FrameLanes_0 reflectLanes_0(FrameLanes_0 * f_13, Lanes3_0 * v1_3, Lanes3_
 
     }
 
-    Vector<bool, 4>  keep_1 = _S1268 < ((Vector<float, 4> )9.999999960041972e-13f);
+    Vector<bool, 4>  keep_1 = _S1271 < ((Vector<float, 4> )9.999999960041972e-13f);
     FrameLanes_0 o_8;
 
-    Lanes3_0 _S1309 = pickLanes_0(keep_1, &f_13->t_1, t1_2);
-    (&o_8)->t_1 = _S1309;
+    Lanes3_0 _S1312 = pickLanes_0(keep_1, &f_13->t_1, t1_2);
+    (&o_8)->t_1 = _S1312;
 
-    Lanes3_0 _S1310 = n_35;
+    Lanes3_0 _S1313 = n_35;
 
-    Lanes3_0 _S1311 = pickLanes_0(keep_1, &f_13->n_4, &_S1310);
-    (&o_8)->n_4 = _S1311;
+    Lanes3_0 _S1314 = pickLanes_0(keep_1, &f_13->n_4, &_S1313);
+    (&o_8)->n_4 = _S1314;
 
-    Lanes3_0 _S1312 = n_35;
+    Lanes3_0 _S1315 = n_35;
 
-    Lanes3_0 _S1313 = crossLanes_0(t1_2, &_S1312);
+    Lanes3_0 _S1316 = crossLanes_0(t1_2, &_S1315);
 
-    Lanes3_0 _S1314 = _S1313;
+    Lanes3_0 _S1317 = _S1316;
 
-    Lanes3_0 _S1315 = pickLanes_0(keep_1, &f_13->b_2, &_S1314);
-    (&o_8)->b_2 = _S1315;
+    Lanes3_0 _S1318 = pickLanes_0(keep_1, &f_13->b_2, &_S1317);
+    (&o_8)->b_2 = _S1318;
     return o_8;
 }
 
@@ -14181,8 +14226,8 @@ static FrameLanes_0 reflectLanes_0(FrameLanes_0 * f_13, Lanes3_0 * v1_3, Lanes3_
 static float curlEase_0(float arc_14, float t_30, float frequency_1)
 {
 
-    float _S1316 = (groomlab_min((1.0f), ((groomlab_max((4.0f * (F32_abs((frequency_1))) * arc_14), (4.0f * t_30))))));
-    return _S1316 * _S1316 * (3.0f - 2.0f * _S1316);
+    float _S1319 = (groomlab_min((1.0f), ((groomlab_max((4.0f * (F32_abs((frequency_1))) * arc_14), (4.0f * t_30))))));
+    return _S1319 * _S1319 * (3.0f - 2.0f * _S1319);
 }
 
 
@@ -14243,21 +14288,21 @@ static float curlLocalFrequency_0(float frequency_2, float profileValue_0, float
 static float curlStretchedShare_0(float r_31, float q_9, float f_14)
 {
 
-    bool _S1317;
+    bool _S1320;
     if(!(q_9 > 1.0f))
     {
 
-        _S1317 = true;
+        _S1320 = true;
 
     }
     else
     {
 
-        _S1317 = r_31 == 0.0f;
+        _S1320 = r_31 == 0.0f;
 
     }
 
-    if(_S1317)
+    if(_S1320)
     {
 
         return 1.0f;
@@ -14345,21 +14390,21 @@ static Vector<float, 3>  curlOffset_0(uint32_t s_30, uint32_t begin_18, uint32_t
     if((kernelContext_105->globalParams_0->Look_0->gFlag_0.w) != 0U)
     {
 
-        uint32_t _S1318 = (kernelContext_105->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t((begin_18 + i_54) * 4U)));
+        uint32_t _S1321 = (kernelContext_105->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t((begin_18 + i_54) * 4U)));
 
-        base_5 = (U32_asfloat((_S1318))) * kernelContext_105->globalParams_0->Look_0->gValue_0.x;
+        base_5 = (U32_asfloat((_S1321))) * kernelContext_105->globalParams_0->Look_0->gValue_0.x;
 
     }
     else
     {
 
-        bool _S1319 = fieldPerPoint_0(0U, kernelContext_105);
-        if(_S1319)
+        bool _S1322 = fieldPerPoint_0(0U, kernelContext_105);
+        if(_S1322)
         {
 
-            float _S1320 = fieldAt_0(0U, kernelContext_105->globalParams_0->Look_0->gValue_0.x, s_30, begin_18 + i_54, kernelContext_105);
+            float _S1323 = fieldAt_0(0U, kernelContext_105->globalParams_0->Look_0->gValue_0.x, s_30, begin_18 + i_54, kernelContext_105);
 
-            base_5 = _S1320;
+            base_5 = _S1323;
 
         }
         else
@@ -14371,24 +14416,24 @@ static Vector<float, 3>  curlOffset_0(uint32_t s_30, uint32_t begin_18, uint32_t
 
     }
 
-    float _S1321 = base_5 * vary_0;
+    float _S1324 = base_5 * vary_0;
 
-    float _S1322 = rampAlong_0(i_54, n_37, kernelContext_105);
+    float _S1325 = rampAlong_0(i_54, n_37, kernelContext_105);
 
-    float r_32 = _S1321 * _S1322 * curlEase_0(w_33, t_31, frequency_4);
+    float r_32 = _S1324 * _S1325 * curlEase_0(w_33, t_31, frequency_4);
 
     float r_33;
     if(stretch_4 > 0.0f)
     {
 
-        bool _S1323 = curlProfiled_0(kernelContext_105);
+        bool _S1326 = curlProfiled_0(kernelContext_105);
 
-        if(_S1323)
+        if(_S1326)
         {
 
-            float _S1324 = rampAtOf_0(kernelContext_105->globalParams_0->Look_0->gRamp2_0, t_31, kernelContext_105);
+            float _S1327 = rampAtOf_0(kernelContext_105->globalParams_0->Look_0->gRamp2_0, t_31, kernelContext_105);
 
-            base_5 = _S1324;
+            base_5 = _S1327;
 
         }
         else
@@ -14398,7 +14443,7 @@ static Vector<float, 3>  curlOffset_0(uint32_t s_30, uint32_t begin_18, uint32_t
 
         }
 
-        r_33 = r_32 * curlStretchedShare_0(_S1321, stretch_4, curlLocalFrequency_0(frequency_4, base_5, w_33, kernelContext_105->globalParams_0->Look_0->gValue2_0.x, key_9));
+        r_33 = r_32 * curlStretchedShare_0(_S1324, stretch_4, curlLocalFrequency_0(frequency_4, base_5, w_33, kernelContext_105->globalParams_0->Look_0->gValue2_0.x, key_9));
 
     }
     else
@@ -14410,21 +14455,21 @@ static Vector<float, 3>  curlOffset_0(uint32_t s_30, uint32_t begin_18, uint32_t
 
     float angle_6 = curlAngle_0(frequency_4, w_33, phase_1, kernelContext_105->globalParams_0->Look_0->gValue2_0.x, key_9);
 
-    bool _S1325;
+    bool _S1328;
     if((kernelContext_105->globalParams_0->Look_0->gFlag_0.x) == 0U)
     {
 
-        _S1325 = true;
+        _S1328 = true;
 
     }
     else
     {
 
-        _S1325 = (kernelContext_105->globalParams_0->Look_0->gFlag_0.x) == 3U;
+        _S1328 = (kernelContext_105->globalParams_0->Look_0->gFlag_0.x) == 3U;
 
     }
 
-    if(_S1325)
+    if(_S1328)
     {
 
         return fr_2->n_0 * (Vector<float, 3> )(r_33 * (groomlab_pm_cos((angle_6)))) + fr_2->b_0 * (Vector<float, 3> )(r_33 * (groomlab_pm_sin((angle_6))));
@@ -14452,57 +14497,57 @@ static bool curlFour_0(uint32_t first_3, KernelContext_0 * kernelContext_106)
 
     uint32_t a_49;
 
-    bool _S1326;
+    bool _S1329;
     if((first_3 + 4U) > (kernelContext_106->globalParams_0->Look_0->gStrandCount_0))
     {
 
-        _S1326 = true;
+        _S1329 = true;
 
     }
     else
     {
 
-        _S1326 = (kernelContext_106->globalParams_0->Look_0->gFlag_0.z) != 0U;
+        _S1329 = (kernelContext_106->globalParams_0->Look_0->gFlag_0.z) != 0U;
 
     }
 
-    if(_S1326)
+    if(_S1329)
     {
 
-        _S1326 = true;
+        _S1329 = true;
 
     }
     else
     {
 
-        bool _S1327 = curlSpaced_0(kernelContext_106);
+        bool _S1330 = curlSpaced_0(kernelContext_106);
 
-        _S1326 = _S1327;
+        _S1329 = _S1330;
 
     }
 
-    if(_S1326)
+    if(_S1329)
     {
 
         return false;
     }
 
-    uint32_t _S1328 = strandCountOf_0(first_3, kernelContext_106);
+    uint32_t _S1331 = strandCountOf_0(first_3, kernelContext_106);
 
-    if(_S1328 < 3U)
+    if(_S1331 < 3U)
     {
 
-        _S1326 = true;
+        _S1329 = true;
 
     }
     else
     {
 
-        _S1326 = _S1328 > 32U;
+        _S1329 = _S1331 > 32U;
 
     }
 
-    if(_S1326)
+    if(_S1329)
     {
 
         return false;
@@ -14523,18 +14568,18 @@ static bool curlFour_0(uint32_t first_3, KernelContext_0 * kernelContext_106)
             break;
         }
 
-        uint32_t _S1329 = first_3 + l_11;
+        uint32_t _S1332 = first_3 + l_11;
 
-        uint32_t _S1330 = strandCountOf_0(_S1329, kernelContext_106);
+        uint32_t _S1333 = strandCountOf_0(_S1332, kernelContext_106);
 
-        if(_S1330 != _S1328)
+        if(_S1333 != _S1331)
         {
 
             return false;
         }
 
-        uint32_t _S1331 = strandBegin_0(_S1329, kernelContext_106);
-        begin_19[l_11] = _S1331;
+        uint32_t _S1334 = strandBegin_0(_S1332, kernelContext_106);
+        begin_19[l_11] = _S1334;
 
         l_11 = l_11 + 1U;
 
@@ -14571,70 +14616,70 @@ static bool curlFour_0(uint32_t first_3, KernelContext_0 * kernelContext_106)
 
         uint32_t s_31 = first_3 + l_11;
 
-        Vector<float, 3>  _S1332 = loadPoint_0(begin_19[l_11], kernelContext_106);
-        storePoint_0(kernelContext_106->globalParams_0->gOut_0, begin_19[l_11], _S1332);
+        Vector<float, 3>  _S1335 = loadPoint_0(begin_19[l_11], kernelContext_106);
+        storePoint_0(kernelContext_106->globalParams_0->gOut_0, begin_19[l_11], _S1335);
 
-        bool _S1333 = fieldPerPoint_0(0U, kernelContext_106);
+        bool _S1336 = fieldPerPoint_0(0U, kernelContext_106);
 
-        float _S1334;
-        if(_S1333)
+        float _S1337;
+        if(_S1336)
         {
 
-            _S1334 = 0.0f;
+            _S1337 = 0.0f;
 
         }
         else
         {
 
-            float _S1335 = fieldAt_0(0U, kernelContext_106->globalParams_0->Look_0->gValue_0.x, s_31, 0U, kernelContext_106);
+            float _S1338 = fieldAt_0(0U, kernelContext_106->globalParams_0->Look_0->gValue_0.x, s_31, 0U, kernelContext_106);
 
-            _S1334 = _S1335;
+            _S1337 = _S1338;
 
         }
 
-        strandRadius_1[l_11] = _S1334;
+        strandRadius_1[l_11] = _S1337;
 
-        Vector<float, 4>  _S1336 = strandData_0(s_31, kernelContext_106);
+        Vector<float, 4>  _S1339 = strandData_0(s_31, kernelContext_106);
 
-        phase_2[l_11] = 6.28318548202514648f * (kernelContext_106->globalParams_0->Look_0->gValue_0.w + (U32_asfloat((kernelContext_106->globalParams_0->Look_0->gFlag_0.y))) * _S1336.x);
-        vary_1[l_11] = 1.0f + kernelContext_106->globalParams_0->Look_0->gValue_0.z * (-1.0f + 2.0f * _S1336.y);
-        frequency_5[l_11] = kernelContext_106->globalParams_0->Look_0->gValue_0.y * (1.0f + 0.5f * kernelContext_106->globalParams_0->Look_0->gValue_0.z * (-1.0f + 2.0f * _S1336.z));
-        plane_1[l_11] = 6.28318548202514648f * _S1336.w;
-        key_10[l_11] = curlSpacingKey_1(_S1336);
-        uint32_t _S1337 = (kernelContext_106->globalParams_0->Look_0->gTable_0.y + s_31) * 16U;
+        phase_2[l_11] = 6.28318548202514648f * (kernelContext_106->globalParams_0->Look_0->gValue_0.w + (U32_asfloat((kernelContext_106->globalParams_0->Look_0->gFlag_0.y))) * _S1339.x);
+        vary_1[l_11] = 1.0f + kernelContext_106->globalParams_0->Look_0->gValue_0.z * (-1.0f + 2.0f * _S1339.y);
+        frequency_5[l_11] = kernelContext_106->globalParams_0->Look_0->gValue_0.y * (1.0f + 0.5f * kernelContext_106->globalParams_0->Look_0->gValue_0.z * (-1.0f + 2.0f * _S1339.z));
+        plane_1[l_11] = 6.28318548202514648f * _S1339.w;
+        key_10[l_11] = curlSpacingKey_1(_S1339);
+        uint32_t _S1340 = (kernelContext_106->globalParams_0->Look_0->gTable_0.y + s_31) * 16U;
 
-        ByteAddressBuffer _S1338 = kernelContext_106->globalParams_0->gStrandData_0;
+        ByteAddressBuffer _S1341 = kernelContext_106->globalParams_0->gStrandData_0;
 
-        uint32_t _S1339 = (kernelContext_106->globalParams_0->gStrandData_0).Load<uint32_t >(_S1337);
+        uint32_t _S1342 = (kernelContext_106->globalParams_0->gStrandData_0).Load<uint32_t >(_S1340);
 
-        uint32_t _S1340 = (_S1338).Load<uint32_t >(_S1337 + 4U);
+        uint32_t _S1343 = (_S1341).Load<uint32_t >(_S1340 + 4U);
 
-        uint32_t _S1341 = (_S1338).Load<uint32_t >(_S1337 + 8U);
+        uint32_t _S1344 = (_S1341).Load<uint32_t >(_S1340 + 8U);
 
-        uint32_t _S1342 = (_S1338).Load<uint32_t >(_S1337 + 12U);
+        uint32_t _S1345 = (_S1341).Load<uint32_t >(_S1340 + 12U);
 
-        Vector<float, 4>  root_9 = asfloat_1(Vector<uint32_t, 4> (_S1339, _S1340, _S1341, _S1342));
-        uint32_t _S1343 = begin_19[l_11];
+        Vector<float, 4>  root_9 = asfloat_1(Vector<uint32_t, 4> (_S1342, _S1343, _S1344, _S1345));
+        uint32_t _S1346 = begin_19[l_11];
 
-        Vector<float, 3>  _S1344;
+        Vector<float, 3>  _S1347;
 
         if((root_9.w) != 0.0f)
         {
 
-            _S1344 = Vector<float, 3> {root_9.x, root_9.y, root_9.z};
+            _S1347 = Vector<float, 3> {root_9.x, root_9.y, root_9.z};
 
         }
         else
         {
 
-            _S1344 = Vector<float, 3> (0.0f, 0.0f, 0.0f);
+            _S1347 = Vector<float, 3> (0.0f, 0.0f, 0.0f);
 
         }
 
-        AxisWalk_0 _S1345 = ownAxisStart_0(_S1343, _S1328, _S1344, kernelContext_106);
-        t0_2[l_11] = _S1345.f_0.t_0;
-        n0_2[l_11] = _S1345.f_0.n_0;
-        b0_0[l_11] = _S1345.f_0.b_0;
+        AxisWalk_0 _S1348 = ownAxisStart_0(_S1346, _S1331, _S1347, kernelContext_106);
+        t0_2[l_11] = _S1348.f_0.t_0;
+        n0_2[l_11] = _S1348.f_0.n_0;
+        b0_0[l_11] = _S1348.f_0.b_0;
 
         l_11 = l_11 + 1U;
 
@@ -14651,7 +14696,7 @@ static bool curlFour_0(uint32_t first_3, KernelContext_0 * kernelContext_106)
     for(;;)
     {
 
-        if(k_28 < _S1328)
+        if(k_28 < _S1331)
         {
         }
         else
@@ -14660,30 +14705,30 @@ static bool curlFour_0(uint32_t first_3, KernelContext_0 * kernelContext_106)
             break;
         }
 
-        Vector<float, 3>  _S1346 = loadPoint_0(begin_19[int(0)] + k_28, kernelContext_106);
+        Vector<float, 3>  _S1349 = loadPoint_0(begin_19[int(0)] + k_28, kernelContext_106);
 
-        Vector<float, 3>  _S1347 = loadPoint_0(begin_19[int(1)] + k_28, kernelContext_106);
+        Vector<float, 3>  _S1350 = loadPoint_0(begin_19[int(1)] + k_28, kernelContext_106);
 
-        Vector<float, 3>  _S1348 = loadPoint_0(begin_19[int(2)] + k_28, kernelContext_106);
+        Vector<float, 3>  _S1351 = loadPoint_0(begin_19[int(2)] + k_28, kernelContext_106);
 
-        Vector<float, 3>  _S1349 = loadPoint_0(begin_19[int(3)] + k_28, kernelContext_106);
+        Vector<float, 3>  _S1352 = loadPoint_0(begin_19[int(3)] + k_28, kernelContext_106);
 
-        p_39[k_28] = lanes3_0(_S1346, _S1347, _S1348, _S1349);
+        p_39[k_28] = lanes3_0(_S1349, _S1350, _S1351, _S1352);
 
         k_28 = k_28 + 1U;
 
     }
-    Vector<float, 3>  _S1350 = (Vector<float, 3> )0.0f;
+    Vector<float, 3>  _S1353 = (Vector<float, 3> )0.0f;
 
-    Lanes3_0 _S1351 = lanes3_0(_S1350, _S1350, _S1350, _S1350);
+    Lanes3_0 _S1354 = lanes3_0(_S1353, _S1353, _S1353, _S1353);
 
     uint32_t j_23 = 0U;
     for(;;)
     {
 
-        uint32_t _S1352 = j_23 + 1U;
+        uint32_t _S1355 = j_23 + 1U;
 
-        if(_S1352 < _S1328)
+        if(_S1355 < _S1331)
         {
         }
         else
@@ -14692,30 +14737,30 @@ static bool curlFour_0(uint32_t first_3, KernelContext_0 * kernelContext_106)
             break;
         }
 
-        Lanes3_0 _S1353 = p_39[_S1352];
+        Lanes3_0 _S1356 = p_39[_S1355];
 
-        Lanes3_0 _S1354 = p_39[j_23];
+        Lanes3_0 _S1357 = p_39[j_23];
 
-        Lanes3_0 _S1355 = subLanes_0(&_S1353, &_S1354);
+        Lanes3_0 _S1358 = subLanes_0(&_S1356, &_S1357);
 
-        Lanes3_0 _S1356 = _S1355;
+        Lanes3_0 _S1359 = _S1358;
 
-        Lanes3_0 _S1357 = _S1355;
+        Lanes3_0 _S1360 = _S1358;
 
-        Vector<float, 4>  _S1358 = dotLanes_0(&_S1356, &_S1357);
+        Vector<float, 4>  _S1361 = dotLanes_0(&_S1359, &_S1360);
 
-        Vector<float, 4>  _S1359 = sqrt_0(_S1358);
+        Vector<float, 4>  _S1362 = sqrt_0(_S1361);
 
-        h_21[j_23] = _S1359;
+        h_21[j_23] = _S1362;
 
-        Lanes3_0 _S1360 = _S1355;
+        Lanes3_0 _S1363 = _S1358;
 
-        Lanes3_0 _S1361 = _S1351;
+        Lanes3_0 _S1364 = _S1354;
 
-        Lanes3_0 _S1362 = unitLanesOr_0(&_S1360, _S1359, &_S1361);
-        s_32[j_23] = _S1362;
+        Lanes3_0 _S1365 = unitLanesOr_0(&_S1363, _S1362, &_S1364);
+        s_32[j_23] = _S1365;
 
-        j_23 = _S1352;
+        j_23 = _S1355;
 
     }
 
@@ -14724,7 +14769,7 @@ static bool curlFour_0(uint32_t first_3, KernelContext_0 * kernelContext_106)
     for(;;)
     {
 
-        if(k_28 < _S1328)
+        if(k_28 < _S1331)
         {
         }
         else
@@ -14733,9 +14778,9 @@ static bool curlFour_0(uint32_t first_3, KernelContext_0 * kernelContext_106)
             break;
         }
 
-        bool _S1363 = k_28 == 0U;
+        bool _S1366 = k_28 == 0U;
 
-        if(_S1363)
+        if(_S1366)
         {
 
             a_49 = 0U;
@@ -14744,10 +14789,10 @@ static bool curlFour_0(uint32_t first_3, KernelContext_0 * kernelContext_106)
         else
         {
 
-            if((k_28 + 1U) == _S1328)
+            if((k_28 + 1U) == _S1331)
             {
 
-                l_11 = _S1328 - 3U;
+                l_11 = _S1331 - 3U;
 
             }
             else
@@ -14762,7 +14807,7 @@ static bool curlFour_0(uint32_t first_3, KernelContext_0 * kernelContext_106)
         }
 
         uint32_t which_6;
-        if(_S1363)
+        if(_S1366)
         {
 
             which_6 = 0U;
@@ -14771,7 +14816,7 @@ static bool curlFour_0(uint32_t first_3, KernelContext_0 * kernelContext_106)
         else
         {
 
-            if((k_28 + 1U) == _S1328)
+            if((k_28 + 1U) == _S1331)
             {
 
                 l_11 = 2U;
@@ -14787,15 +14832,15 @@ static bool curlFour_0(uint32_t first_3, KernelContext_0 * kernelContext_106)
             which_6 = l_11;
 
         }
-        uint32_t _S1364 = a_49 + 1U;
+        uint32_t _S1367 = a_49 + 1U;
 
-        Lanes3_0 _S1365 = s_32[a_49];
+        Lanes3_0 _S1368 = s_32[a_49];
 
-        Lanes3_0 _S1366 = s_32[_S1364];
+        Lanes3_0 _S1369 = s_32[_S1367];
 
-        Lanes3_0 _S1367 = slopeLanes_0(&_S1365, h_21[a_49], &_S1366, h_21[_S1364], which_6);
+        Lanes3_0 _S1370 = slopeLanes_0(&_S1368, h_21[a_49], &_S1369, h_21[_S1367], which_6);
 
-        d_30[k_28] = _S1367;
+        d_30[k_28] = _S1370;
 
         k_28 = k_28 + 1U;
 
@@ -14803,20 +14848,20 @@ static bool curlFour_0(uint32_t first_3, KernelContext_0 * kernelContext_106)
 
     FrameLanes_0 f_15;
 
-    FixedArray<Vector<float, 3> , 4>  _S1368 = t0_2;
+    FixedArray<Vector<float, 3> , 4>  _S1371 = t0_2;
 
-    Lanes3_0 _S1369 = lanes3_1(&_S1368);
-    (&f_15)->t_1 = _S1369;
+    Lanes3_0 _S1372 = lanes3_1(&_S1371);
+    (&f_15)->t_1 = _S1372;
 
-    FixedArray<Vector<float, 3> , 4>  _S1370 = n0_2;
+    FixedArray<Vector<float, 3> , 4>  _S1373 = n0_2;
 
-    Lanes3_0 _S1371 = lanes3_1(&_S1370);
-    (&f_15)->n_4 = _S1371;
+    Lanes3_0 _S1374 = lanes3_1(&_S1373);
+    (&f_15)->n_4 = _S1374;
 
-    FixedArray<Vector<float, 3> , 4>  _S1372 = b0_0;
+    FixedArray<Vector<float, 3> , 4>  _S1375 = b0_0;
 
-    Lanes3_0 _S1373 = lanes3_1(&_S1372);
-    (&f_15)->b_2 = _S1373;
+    Lanes3_0 _S1376 = lanes3_1(&_S1375);
+    (&f_15)->b_2 = _S1376;
     FixedArray<FrameLanes_0, 32>  frames_0;
     FixedArray<Vector<float, 4> , 32>  arcs_2;
 
@@ -14827,7 +14872,7 @@ static bool curlFour_0(uint32_t first_3, KernelContext_0 * kernelContext_106)
     for(;;)
     {
 
-        if(k_28 < _S1328)
+        if(k_28 < _S1331)
         {
         }
         else
@@ -14836,49 +14881,49 @@ static bool curlFour_0(uint32_t first_3, KernelContext_0 * kernelContext_106)
             break;
         }
 
-        uint32_t _S1374 = k_28 - 1U;
+        uint32_t _S1377 = k_28 - 1U;
 
-        Lanes3_0 _S1375 = p_39[_S1374];
+        Lanes3_0 _S1378 = p_39[_S1377];
 
-        Lanes3_0 _S1376 = p_39[k_28];
+        Lanes3_0 _S1379 = p_39[k_28];
 
-        Lanes3_0 _S1377 = d_30[_S1374];
+        Lanes3_0 _S1380 = d_30[_S1377];
 
-        Lanes3_0 _S1378 = d_30[k_28];
+        Lanes3_0 _S1381 = d_30[k_28];
 
-        Vector<float, 4>  _S1379 = wholeArcLanes_0(&_S1375, &_S1376, &_S1377, &_S1378, h_21[_S1374]);
+        Vector<float, 4>  _S1382 = wholeArcLanes_0(&_S1378, &_S1379, &_S1380, &_S1381, h_21[_S1377]);
 
-        Vector<float, 4>  arc_16 = arc_15 + _S1379;
+        Vector<float, 4>  arc_16 = arc_15 + _S1382;
 
-        Lanes3_0 _S1380 = p_39[k_28];
+        Lanes3_0 _S1383 = p_39[k_28];
 
-        Lanes3_0 _S1381 = p_39[_S1374];
+        Lanes3_0 _S1384 = p_39[_S1377];
 
-        Lanes3_0 _S1382 = subLanes_0(&_S1380, &_S1381);
+        Lanes3_0 _S1385 = subLanes_0(&_S1383, &_S1384);
 
-        Lanes3_0 _S1383 = d_30[k_28];
-
-        Lanes3_0 _S1384 = d_30[k_28];
-
-        Vector<float, 4>  _S1385 = dotLanes_0(&_S1383, &_S1384);
-        Vector<float, 4>  _S1386 = sqrt_0(_S1385);
+        Lanes3_0 _S1386 = d_30[k_28];
 
         Lanes3_0 _S1387 = d_30[k_28];
 
-        Lanes3_0 _S1388 = (&f_15)->t_1;
+        Vector<float, 4>  _S1388 = dotLanes_0(&_S1386, &_S1387);
+        Vector<float, 4>  _S1389 = sqrt_0(_S1388);
 
-        Lanes3_0 _S1389 = unitLanesOr_0(&_S1387, _S1386, &_S1388);
+        Lanes3_0 _S1390 = d_30[k_28];
 
-        FrameLanes_0 _S1390 = f_15;
+        Lanes3_0 _S1391 = (&f_15)->t_1;
 
-        Lanes3_0 _S1391 = _S1382;
+        Lanes3_0 _S1392 = unitLanesOr_0(&_S1390, _S1389, &_S1391);
 
-        Lanes3_0 _S1392 = _S1389;
+        FrameLanes_0 _S1393 = f_15;
 
-        FrameLanes_0 _S1393 = reflectLanes_0(&_S1390, &_S1391, &_S1392);
+        Lanes3_0 _S1394 = _S1385;
 
-        f_15 = _S1393;
-        frames_0[k_28] = _S1393;
+        Lanes3_0 _S1395 = _S1392;
+
+        FrameLanes_0 _S1396 = reflectLanes_0(&_S1393, &_S1394, &_S1395);
+
+        f_15 = _S1396;
+        frames_0[k_28] = _S1396;
         arcs_2[k_28] = arc_16;
 
         uint32_t k_29 = k_28 + 1U;
@@ -14907,7 +14952,7 @@ static bool curlFour_0(uint32_t first_3, KernelContext_0 * kernelContext_106)
         for(;;)
         {
 
-            if(a_49 < _S1328)
+            if(a_49 < _S1331)
             {
             }
             else
@@ -14918,31 +14963,31 @@ static bool curlFour_0(uint32_t first_3, KernelContext_0 * kernelContext_106)
 
             Frame_0 fr_3;
 
-            Lanes3_0 _S1394 = (&frames_0[a_49])->t_1;
+            Lanes3_0 _S1397 = (&frames_0[a_49])->t_1;
 
-            Vector<float, 3>  _S1395 = laneOf_0(&_S1394, l_11);
-            (&fr_3)->t_0 = _S1395;
+            Vector<float, 3>  _S1398 = laneOf_0(&_S1397, l_11);
+            (&fr_3)->t_0 = _S1398;
 
-            Lanes3_0 _S1396 = (&frames_0[a_49])->n_4;
+            Lanes3_0 _S1399 = (&frames_0[a_49])->n_4;
 
-            Vector<float, 3>  _S1397 = laneOf_0(&_S1396, l_11);
-            (&fr_3)->n_0 = _S1397;
+            Vector<float, 3>  _S1400 = laneOf_0(&_S1399, l_11);
+            (&fr_3)->n_0 = _S1400;
 
-            Lanes3_0 _S1398 = (&frames_0[a_49])->b_2;
+            Lanes3_0 _S1401 = (&frames_0[a_49])->b_2;
 
-            Vector<float, 3>  _S1399 = laneOf_0(&_S1398, l_11);
-            (&fr_3)->b_0 = _S1399;
-            uint32_t _S1400 = begin_19[l_11] + a_49;
+            Vector<float, 3>  _S1402 = laneOf_0(&_S1401, l_11);
+            (&fr_3)->b_0 = _S1402;
+            uint32_t _S1403 = begin_19[l_11] + a_49;
 
-            Vector<float, 3>  _S1401 = loadPoint_0(begin_19[l_11] + a_49, kernelContext_106);
+            Vector<float, 3>  _S1404 = loadPoint_0(begin_19[l_11] + a_49, kernelContext_106);
 
-            uint32_t _S1402 = first_3 + l_11;
+            uint32_t _S1405 = first_3 + l_11;
 
-            Frame_0 _S1403 = fr_3;
+            Frame_0 _S1406 = fr_3;
 
-            Vector<float, 3>  _S1404 = curlOffset_0(_S1402, begin_19[l_11], a_49, _S1328, &_S1403, arcs_2[a_49][l_11], phase_2[l_11], vary_1[l_11], frequency_5[l_11], plane_1[l_11], key_10[l_11], strandRadius_1[l_11], 0.0f, kernelContext_106);
+            Vector<float, 3>  _S1407 = curlOffset_0(_S1405, begin_19[l_11], a_49, _S1331, &_S1406, arcs_2[a_49][l_11], phase_2[l_11], vary_1[l_11], frequency_5[l_11], plane_1[l_11], key_10[l_11], strandRadius_1[l_11], 0.0f, kernelContext_106);
 
-            storePoint_0(kernelContext_106->globalParams_0->gOut_0, _S1400, _S1401 + _S1404);
+            storePoint_0(kernelContext_106->globalParams_0->gOut_0, _S1403, _S1404 + _S1407);
 
             a_49 = a_49 + 1U;
 
@@ -14959,43 +15004,43 @@ static bool curlFour_0(uint32_t first_3, KernelContext_0 * kernelContext_106)
 static Vector<float, 3>  hermiteStep_0(Vector<float, 3>  p0_4, Vector<float, 3>  p1_4, Vector<float, 3>  d0_5, Vector<float, 3>  d1_6, float h_22, float u_15)
 {
     float u2_1 = u_15 * u_15;
-    float _S1405 = 1.0f - u_15;
+    float _S1408 = 1.0f - u_15;
 
-    return (p1_4 - p0_4) * (Vector<float, 3> )(u2_1 * (3.0f - 2.0f * u_15)) + d0_5 * (Vector<float, 3> )h_22 * (Vector<float, 3> )(u_15 * _S1405 * _S1405) + d1_6 * (Vector<float, 3> )h_22 * (Vector<float, 3> )(u2_1 * (u_15 - 1.0f));
+    return (p1_4 - p0_4) * (Vector<float, 3> )(u2_1 * (3.0f - 2.0f * u_15)) + d0_5 * (Vector<float, 3> )h_22 * (Vector<float, 3> )(u_15 * _S1408 * _S1408) + d1_6 * (Vector<float, 3> )h_22 * (Vector<float, 3> )(u2_1 * (u_15 - 1.0f));
 }
 
 
 static Vector<float, 3>  hermiteDerivative_0(Vector<float, 3>  p0_5, Vector<float, 3>  p1_5, Vector<float, 3>  d0_6, Vector<float, 3>  d1_7, float h_23, float u_16)
 {
-    float _S1406 = 1.0f - u_16;
+    float _S1409 = 1.0f - u_16;
 
-    float _S1407 = 3.0f * u_16;
+    float _S1410 = 3.0f * u_16;
 
-    return (p1_5 - p0_5) * (Vector<float, 3> )(6.0f * u_16 * _S1406) + d0_6 * (Vector<float, 3> )h_23 * (Vector<float, 3> )(_S1406 * (1.0f - _S1407)) + d1_7 * (Vector<float, 3> )h_23 * (Vector<float, 3> )(u_16 * (_S1407 - 2.0f));
+    return (p1_5 - p0_5) * (Vector<float, 3> )(6.0f * u_16 * _S1409) + d0_6 * (Vector<float, 3> )h_23 * (Vector<float, 3> )(_S1409 * (1.0f - _S1410)) + d1_7 * (Vector<float, 3> )h_23 * (Vector<float, 3> )(u_16 * (_S1410 - 2.0f));
 }
 
 
 static bool curlSpacedBy_0(Vector<float, 2>  stretch_5, KernelContext_0 * kernelContext_107)
 {
 
-    bool _S1408 = curlProfiled_0(kernelContext_107);
+    bool _S1411 = curlProfiled_0(kernelContext_107);
 
-    bool _S1409;
+    bool _S1412;
 
-    if(_S1408)
+    if(_S1411)
     {
 
-        _S1409 = true;
+        _S1412 = true;
 
     }
     else
     {
 
-        _S1409 = (stretch_5.x) > 0.0f;
+        _S1412 = (stretch_5.x) > 0.0f;
 
     }
 
-    return _S1409;
+    return _S1412;
 }
 
 
@@ -15011,69 +15056,69 @@ static float clumpAxisAt_0(uint32_t c_30, float t_32, Frame_0 * frame_0, float *
 
     uint32_t stretches_1 = base_6 + 544U;
     float xs_0 = t_32 * 31.0f;
-    uint32_t _S1410 = (U32_min((uint32_t((groomlab_max((xs_0), (0.0f))))), (30U)));
-    float u_17 = xs_0 - float(_S1410);
-    uint32_t at_17 = base_6 + 192U + _S1410 * 9U;
-    uint32_t _S1411 = at_17 * 4U;
+    uint32_t _S1413 = (U32_min((uint32_t((groomlab_max((xs_0), (0.0f))))), (30U)));
+    float u_17 = xs_0 - float(_S1413);
+    uint32_t at_17 = base_6 + 192U + _S1413 * 9U;
+    uint32_t _S1414 = at_17 * 4U;
 
-    ByteAddressBuffer _S1412 = kernelContext_108->globalParams_0->gAux1_0;
+    ByteAddressBuffer _S1415 = kernelContext_108->globalParams_0->gAux1_0;
 
-    uint32_t _S1413 = (kernelContext_108->globalParams_0->gAux1_0).Load<uint32_t >(_S1411);
+    uint32_t _S1416 = (kernelContext_108->globalParams_0->gAux1_0).Load<uint32_t >(_S1414);
 
-    uint32_t _S1414 = (_S1412).Load<uint32_t >(_S1411 + 4U);
+    uint32_t _S1417 = (_S1415).Load<uint32_t >(_S1414 + 4U);
 
-    uint32_t _S1415 = (_S1412).Load<uint32_t >(_S1411 + 8U);
+    uint32_t _S1418 = (_S1415).Load<uint32_t >(_S1414 + 8U);
 
-    frame_0->t_0 = asfloat_0(Vector<uint32_t, 3> (_S1413, _S1414, _S1415));
-    uint32_t _S1416 = (at_17 + 3U) * 4U;
+    frame_0->t_0 = asfloat_0(Vector<uint32_t, 3> (_S1416, _S1417, _S1418));
+    uint32_t _S1419 = (at_17 + 3U) * 4U;
 
-    ByteAddressBuffer _S1417 = kernelContext_108->globalParams_0->gAux1_0;
+    ByteAddressBuffer _S1420 = kernelContext_108->globalParams_0->gAux1_0;
 
-    uint32_t _S1418 = (kernelContext_108->globalParams_0->gAux1_0).Load<uint32_t >(_S1416);
+    uint32_t _S1421 = (kernelContext_108->globalParams_0->gAux1_0).Load<uint32_t >(_S1419);
 
-    uint32_t _S1419 = (_S1417).Load<uint32_t >(_S1416 + 4U);
+    uint32_t _S1422 = (_S1420).Load<uint32_t >(_S1419 + 4U);
 
-    uint32_t _S1420 = (_S1417).Load<uint32_t >(_S1416 + 8U);
+    uint32_t _S1423 = (_S1420).Load<uint32_t >(_S1419 + 8U);
 
-    frame_0->n_0 = asfloat_0(Vector<uint32_t, 3> (_S1418, _S1419, _S1420));
-    uint32_t _S1421 = (at_17 + 6U) * 4U;
+    frame_0->n_0 = asfloat_0(Vector<uint32_t, 3> (_S1421, _S1422, _S1423));
+    uint32_t _S1424 = (at_17 + 6U) * 4U;
 
-    ByteAddressBuffer _S1422 = kernelContext_108->globalParams_0->gAux1_0;
+    ByteAddressBuffer _S1425 = kernelContext_108->globalParams_0->gAux1_0;
 
-    uint32_t _S1423 = (kernelContext_108->globalParams_0->gAux1_0).Load<uint32_t >(_S1421);
+    uint32_t _S1426 = (kernelContext_108->globalParams_0->gAux1_0).Load<uint32_t >(_S1424);
 
-    uint32_t _S1424 = (_S1422).Load<uint32_t >(_S1421 + 4U);
+    uint32_t _S1427 = (_S1425).Load<uint32_t >(_S1424 + 4U);
 
-    uint32_t _S1425 = (_S1422).Load<uint32_t >(_S1421 + 8U);
+    uint32_t _S1428 = (_S1425).Load<uint32_t >(_S1424 + 8U);
 
-    frame_0->b_0 = asfloat_0(Vector<uint32_t, 3> (_S1423, _S1424, _S1425));
-    uint32_t _S1426 = (kernelContext_108->globalParams_0->gAux1_0).Load<uint32_t >(uint32_t(int32_t((arcs_3 + _S1410) * 4U)));
+    frame_0->b_0 = asfloat_0(Vector<uint32_t, 3> (_S1426, _S1427, _S1428));
+    uint32_t _S1429 = (kernelContext_108->globalParams_0->gAux1_0).Load<uint32_t >(uint32_t(int32_t((arcs_3 + _S1413) * 4U)));
 
-    float a_50 = (U32_asfloat((_S1426)));
-    uint32_t _S1427 = (kernelContext_108->globalParams_0->gAux1_0).Load<uint32_t >(uint32_t(int32_t((parcs_1 + _S1410) * 4U)));
+    float a_50 = (U32_asfloat((_S1429)));
+    uint32_t _S1430 = (kernelContext_108->globalParams_0->gAux1_0).Load<uint32_t >(uint32_t(int32_t((parcs_1 + _S1413) * 4U)));
 
-    *parc_4 = (U32_asfloat((_S1427)));
+    *parc_4 = (U32_asfloat((_S1430)));
 
     *stretch_6 = 0.0f;
 
-    bool _S1428 = curlWeighed_0(kernelContext_108);
+    bool _S1431 = curlWeighed_0(kernelContext_108);
 
     Vector<float, 2>  st_11;
-    if(_S1428)
+    if(_S1431)
     {
 
-        uint32_t _S1429 = (stretches_1 + _S1410) * 4U;
+        uint32_t _S1432 = (stretches_1 + _S1413) * 4U;
 
-        ByteAddressBuffer _S1430 = kernelContext_108->globalParams_0->gAux1_0;
+        ByteAddressBuffer _S1433 = kernelContext_108->globalParams_0->gAux1_0;
 
-        uint32_t _S1431 = (kernelContext_108->globalParams_0->gAux1_0).Load<uint32_t >(_S1429);
+        uint32_t _S1434 = (kernelContext_108->globalParams_0->gAux1_0).Load<uint32_t >(_S1432);
 
-        uint32_t _S1432 = (_S1430).Load<uint32_t >(_S1429 + 4U);
+        uint32_t _S1435 = (_S1433).Load<uint32_t >(_S1432 + 4U);
 
-        Vector<float, 2>  st_12 = asfloat_2(Vector<uint32_t, 2> (_S1431, _S1432));
-        float _S1433 = st_12.x;
+        Vector<float, 2>  st_12 = asfloat_2(Vector<uint32_t, 2> (_S1434, _S1435));
+        float _S1436 = st_12.x;
 
-        *stretch_6 = _S1433 + (st_12.y - _S1433) * u_17;
+        *stretch_6 = _S1436 + (st_12.y - _S1436) * u_17;
 
         st_11 = st_12;
 
@@ -15093,92 +15138,92 @@ static float clumpAxisAt_0(uint32_t c_30, float t_32, Frame_0 * frame_0, float *
         return a_50;
     }
 
-    uint32_t _S1434 = _S1410 * 3U;
+    uint32_t _S1437 = _S1413 * 3U;
 
-    uint32_t _S1435 = base_6 + _S1434;
+    uint32_t _S1438 = base_6 + _S1437;
 
-    uint32_t _S1436 = _S1435 * 4U;
+    uint32_t _S1439 = _S1438 * 4U;
 
-    ByteAddressBuffer _S1437 = kernelContext_108->globalParams_0->gAux1_0;
+    ByteAddressBuffer _S1440 = kernelContext_108->globalParams_0->gAux1_0;
 
-    uint32_t _S1438 = (kernelContext_108->globalParams_0->gAux1_0).Load<uint32_t >(_S1436);
+    uint32_t _S1441 = (kernelContext_108->globalParams_0->gAux1_0).Load<uint32_t >(_S1439);
 
-    uint32_t _S1439 = (_S1437).Load<uint32_t >(_S1436 + 4U);
+    uint32_t _S1442 = (_S1440).Load<uint32_t >(_S1439 + 4U);
 
-    uint32_t _S1440 = (_S1437).Load<uint32_t >(_S1436 + 8U);
+    uint32_t _S1443 = (_S1440).Load<uint32_t >(_S1439 + 8U);
 
-    Vector<float, 3>  x0_2 = asfloat_0(Vector<uint32_t, 3> (_S1438, _S1439, _S1440));
+    Vector<float, 3>  x0_2 = asfloat_0(Vector<uint32_t, 3> (_S1441, _S1442, _S1443));
 
-    uint32_t _S1441 = (_S1435 + 3U) * 4U;
+    uint32_t _S1444 = (_S1438 + 3U) * 4U;
 
-    ByteAddressBuffer _S1442 = kernelContext_108->globalParams_0->gAux1_0;
+    ByteAddressBuffer _S1445 = kernelContext_108->globalParams_0->gAux1_0;
 
-    uint32_t _S1443 = (kernelContext_108->globalParams_0->gAux1_0).Load<uint32_t >(_S1441);
+    uint32_t _S1446 = (kernelContext_108->globalParams_0->gAux1_0).Load<uint32_t >(_S1444);
 
-    uint32_t _S1444 = (_S1442).Load<uint32_t >(_S1441 + 4U);
+    uint32_t _S1447 = (_S1445).Load<uint32_t >(_S1444 + 4U);
 
-    uint32_t _S1445 = (_S1442).Load<uint32_t >(_S1441 + 8U);
+    uint32_t _S1448 = (_S1445).Load<uint32_t >(_S1444 + 8U);
 
-    Vector<float, 3>  x1_2 = asfloat_0(Vector<uint32_t, 3> (_S1443, _S1444, _S1445));
-    uint32_t _S1446 = slopes_0 + _S1434;
+    Vector<float, 3>  x1_2 = asfloat_0(Vector<uint32_t, 3> (_S1446, _S1447, _S1448));
+    uint32_t _S1449 = slopes_0 + _S1437;
 
-    uint32_t _S1447 = _S1446 * 4U;
+    uint32_t _S1450 = _S1449 * 4U;
 
-    ByteAddressBuffer _S1448 = kernelContext_108->globalParams_0->gAux1_0;
+    ByteAddressBuffer _S1451 = kernelContext_108->globalParams_0->gAux1_0;
 
-    uint32_t _S1449 = (kernelContext_108->globalParams_0->gAux1_0).Load<uint32_t >(_S1447);
+    uint32_t _S1452 = (kernelContext_108->globalParams_0->gAux1_0).Load<uint32_t >(_S1450);
 
-    uint32_t _S1450 = (_S1448).Load<uint32_t >(_S1447 + 4U);
+    uint32_t _S1453 = (_S1451).Load<uint32_t >(_S1450 + 4U);
 
-    uint32_t _S1451 = (_S1448).Load<uint32_t >(_S1447 + 8U);
+    uint32_t _S1454 = (_S1451).Load<uint32_t >(_S1450 + 8U);
 
-    Vector<float, 3>  d0_7 = asfloat_0(Vector<uint32_t, 3> (_S1449, _S1450, _S1451));
+    Vector<float, 3>  d0_7 = asfloat_0(Vector<uint32_t, 3> (_S1452, _S1453, _S1454));
 
-    uint32_t _S1452 = (_S1446 + 3U) * 4U;
+    uint32_t _S1455 = (_S1449 + 3U) * 4U;
 
-    ByteAddressBuffer _S1453 = kernelContext_108->globalParams_0->gAux1_0;
+    ByteAddressBuffer _S1456 = kernelContext_108->globalParams_0->gAux1_0;
 
-    uint32_t _S1454 = (kernelContext_108->globalParams_0->gAux1_0).Load<uint32_t >(_S1452);
+    uint32_t _S1457 = (kernelContext_108->globalParams_0->gAux1_0).Load<uint32_t >(_S1455);
 
-    uint32_t _S1455 = (_S1453).Load<uint32_t >(_S1452 + 4U);
+    uint32_t _S1458 = (_S1456).Load<uint32_t >(_S1455 + 4U);
 
-    uint32_t _S1456 = (_S1453).Load<uint32_t >(_S1452 + 8U);
+    uint32_t _S1459 = (_S1456).Load<uint32_t >(_S1455 + 8U);
 
-    Vector<float, 3>  d1_8 = asfloat_0(Vector<uint32_t, 3> (_S1454, _S1455, _S1456));
+    Vector<float, 3>  d1_8 = asfloat_0(Vector<uint32_t, 3> (_S1457, _S1458, _S1459));
     float h_24;
-    Vector<float, 3>  _S1457 = secantOf_0(x0_2, x1_2, &h_24);
-    Vector<float, 3>  _S1458 = hermiteStep_0(x0_2, x1_2, d0_7, d1_8, h_24, u_17);
+    Vector<float, 3>  _S1460 = secantOf_0(x0_2, x1_2, &h_24);
+    Vector<float, 3>  _S1461 = hermiteStep_0(x0_2, x1_2, d0_7, d1_8, h_24, u_17);
 
-    Vector<float, 3>  _S1459 = tangentOf_0(hermiteDerivative_0(x0_2, x1_2, d0_7, d1_8, h_24, u_17), frame_0->t_0);
+    Vector<float, 3>  _S1462 = tangentOf_0(hermiteDerivative_0(x0_2, x1_2, d0_7, d1_8, h_24, u_17), frame_0->t_0);
 
-    Frame_0 _S1460 = *frame_0;
+    Frame_0 _S1463 = *frame_0;
 
-    Frame_0 _S1461 = reflectFrameBy_0(&_S1460, _S1458, _S1459);
+    Frame_0 _S1464 = reflectFrameBy_0(&_S1463, _S1461, _S1462);
 
-    *frame_0 = _S1461;
+    *frame_0 = _S1464;
     float arc_17 = a_50 + segmentArc_0(x0_2, x1_2, d0_7, d1_8, h_24, u_17);
 
-    bool _S1462 = curlSpacedBy_0(st_11, kernelContext_108);
+    bool _S1465 = curlSpacedBy_0(st_11, kernelContext_108);
 
-    float _S1463;
-    if(_S1462)
+    float _S1466;
+    if(_S1465)
     {
 
-        float _S1464 = *parc_4;
+        float _S1467 = *parc_4;
 
-        float _S1465 = profiledSegmentArc_0(x0_2, x1_2, d0_7, d1_8, h_24, u_17, _S1410, 32U, st_11, kernelContext_108);
+        float _S1468 = profiledSegmentArc_0(x0_2, x1_2, d0_7, d1_8, h_24, u_17, _S1413, 32U, st_11, kernelContext_108);
 
-        _S1463 = _S1464 + _S1465;
+        _S1466 = _S1467 + _S1468;
 
     }
     else
     {
 
-        _S1463 = arc_17;
+        _S1466 = arc_17;
 
     }
 
-    *parc_4 = _S1463;
+    *parc_4 = _S1466;
     return arc_17;
 }
 
@@ -15189,17 +15234,17 @@ static Vector<float, 3>  strandSlope_0(uint32_t begin_20, uint32_t n_38, uint32_
     if(n_38 == 2U)
     {
 
-        Vector<float, 3>  _S1466 = loadPoint_0(begin_20, kernelContext_109);
+        Vector<float, 3>  _S1469 = loadPoint_0(begin_20, kernelContext_109);
 
-        Vector<float, 3>  _S1467 = loadPoint_0(begin_20 + 1U, kernelContext_109);
+        Vector<float, 3>  _S1470 = loadPoint_0(begin_20 + 1U, kernelContext_109);
         float h_25;
-        return secantOf_0(_S1466, _S1467, &h_25);
+        return secantOf_0(_S1469, _S1470, &h_25);
     }
-    bool _S1468 = i_55 == 0U;
+    bool _S1471 = i_55 == 0U;
 
     uint32_t a_51;
 
-    if(_S1468)
+    if(_S1471)
     {
 
         a_51 = 0U;
@@ -15224,7 +15269,7 @@ static Vector<float, 3>  strandSlope_0(uint32_t begin_20, uint32_t n_38, uint32_
     }
 
     uint32_t which_7;
-    if(_S1468)
+    if(_S1471)
     {
 
         which_7 = 0U;
@@ -15247,24 +15292,24 @@ static Vector<float, 3>  strandSlope_0(uint32_t begin_20, uint32_t n_38, uint32_
         }
 
     }
-    uint32_t _S1469 = begin_20 + a_51;
+    uint32_t _S1472 = begin_20 + a_51;
 
-    Vector<float, 3>  _S1470 = loadPoint_0(_S1469, kernelContext_109);
+    Vector<float, 3>  _S1473 = loadPoint_0(_S1472, kernelContext_109);
 
-    Vector<float, 3>  _S1471 = loadPoint_0(_S1469 + 1U, kernelContext_109);
+    Vector<float, 3>  _S1474 = loadPoint_0(_S1472 + 1U, kernelContext_109);
 
-    Vector<float, 3>  _S1472 = loadPoint_0(_S1469 + 2U, kernelContext_109);
+    Vector<float, 3>  _S1475 = loadPoint_0(_S1472 + 2U, kernelContext_109);
 
-    return slopeOf3_0(_S1470, _S1471, _S1472, which_7);
+    return slopeOf3_0(_S1473, _S1474, _S1475, which_7);
 }
 
 
 static Vector<float, 3>  hermiteAt_0(Vector<float, 3>  p0_6, Vector<float, 3>  p1_6, Vector<float, 3>  d0_8, Vector<float, 3>  d1_9, float h_26, float u_18)
 {
     float u2_2 = u_18 * u_18;
-    float _S1473 = 1.0f - u_18;
+    float _S1476 = 1.0f - u_18;
 
-    return p0_6 + (p1_6 - p0_6) * (Vector<float, 3> )(u2_2 * (3.0f - 2.0f * u_18)) + d0_8 * (Vector<float, 3> )h_26 * (Vector<float, 3> )(u_18 * _S1473 * _S1473) + d1_9 * (Vector<float, 3> )h_26 * (Vector<float, 3> )(u2_2 * (u_18 - 1.0f));
+    return p0_6 + (p1_6 - p0_6) * (Vector<float, 3> )(u2_2 * (3.0f - 2.0f * u_18)) + d0_8 * (Vector<float, 3> )h_26 * (Vector<float, 3> )(u_18 * _S1476 * _S1476) + d1_9 * (Vector<float, 3> )h_26 * (Vector<float, 3> )(u2_2 * (u_18 - 1.0f));
 }
 
 
@@ -15274,9 +15319,9 @@ static Vector<float, 3>  curvePointAt_0(uint32_t begin_21, uint32_t n_39, float 
     if(n_39 == 1U)
     {
 
-        Vector<float, 3>  _S1474 = loadPoint_0(begin_21, kernelContext_110);
+        Vector<float, 3>  _S1477 = loadPoint_0(begin_21, kernelContext_110);
 
-        return _S1474;
+        return _S1477;
     }
 
     float x_30 = t_33 * float(n_39 - 1U);
@@ -15295,108 +15340,108 @@ static Vector<float, 3>  curvePointAt_0(uint32_t begin_21, uint32_t n_39, float 
 
     }
     float u_19 = x_30 - float(i_56);
-    uint32_t _S1475 = begin_21 + i_56;
+    uint32_t _S1478 = begin_21 + i_56;
 
-    Vector<float, 3>  _S1476 = loadPoint_0(_S1475, kernelContext_110);
+    Vector<float, 3>  _S1479 = loadPoint_0(_S1478, kernelContext_110);
     if(u_19 == 0.0f)
     {
 
-        return _S1476;
+        return _S1479;
     }
 
-    Vector<float, 3>  _S1477 = loadPoint_0(_S1475 + 1U, kernelContext_110);
+    Vector<float, 3>  _S1480 = loadPoint_0(_S1478 + 1U, kernelContext_110);
 
-    Vector<float, 3>  _S1478 = strandSlope_0(begin_21, n_39, i_56, kernelContext_110);
+    Vector<float, 3>  _S1481 = strandSlope_0(begin_21, n_39, i_56, kernelContext_110);
 
-    Vector<float, 3>  _S1479 = strandSlope_0(begin_21, n_39, i_56 + 1U, kernelContext_110);
+    Vector<float, 3>  _S1482 = strandSlope_0(begin_21, n_39, i_56 + 1U, kernelContext_110);
 
-    return hermiteAt_0(_S1476, _S1477, _S1478, _S1479, len3_0(_S1477 - _S1476), u_19);
+    return hermiteAt_0(_S1479, _S1480, _S1481, _S1482, len3_0(_S1480 - _S1479), u_19);
 }
 
 
 static Vector<float, 3>  ownAxisSample_0(uint32_t begin_22, uint32_t n_40, uint32_t samples_9, uint32_t k_30, KernelContext_0 * kernelContext_111)
 {
 
-    Vector<float, 3>  _S1480;
+    Vector<float, 3>  _S1483;
     if(samples_9 == n_40)
     {
 
-        Vector<float, 3>  _S1481 = loadPoint_0(begin_22 + k_30, kernelContext_111);
+        Vector<float, 3>  _S1484 = loadPoint_0(begin_22 + k_30, kernelContext_111);
 
-        _S1480 = _S1481;
+        _S1483 = _S1484;
 
     }
     else
     {
 
-        Vector<float, 3>  _S1482 = curvePointAt_0(begin_22, n_40, float(k_30) / float(samples_9 - 1U), kernelContext_111);
+        Vector<float, 3>  _S1485 = curvePointAt_0(begin_22, n_40, float(k_30) / float(samples_9 - 1U), kernelContext_111);
 
-        _S1480 = _S1482;
+        _S1483 = _S1485;
 
     }
 
-    return _S1480;
+    return _S1483;
 }
 
 
 static AxisWalk_0 ownAxisShift_0(AxisWalk_0 * w_34, uint32_t begin_23, uint32_t n_41, Frame_0 * f_16, float arc_18, float parc_5, KernelContext_0 * kernelContext_112)
 {
 
-    AxisWalk_0 _S1483 = *w_34;
-    (&_S1483)->arc_0 = arc_18;
-    (&_S1483)->parc_0 = parc_5;
-    (&_S1483)->f_0 = *f_16;
-    uint32_t _S1484 = (&_S1483)->k_0 + 1U;
+    AxisWalk_0 _S1486 = *w_34;
+    (&_S1486)->arc_0 = arc_18;
+    (&_S1486)->parc_0 = parc_5;
+    (&_S1486)->f_0 = *f_16;
+    uint32_t _S1487 = (&_S1486)->k_0 + 1U;
 
-    (&_S1483)->k_0 = _S1484;
-    (&_S1483)->xm_0 = (&_S1483)->x0_0;
-    (&_S1483)->x0_0 = (&_S1483)->x1_0;
-    (&_S1483)->x1_0 = (&_S1483)->x2_0;
-    if((_S1484 + 2U) < ((&_S1483)->samples_0))
+    (&_S1486)->k_0 = _S1487;
+    (&_S1486)->xm_0 = (&_S1486)->x0_0;
+    (&_S1486)->x0_0 = (&_S1486)->x1_0;
+    (&_S1486)->x1_0 = (&_S1486)->x2_0;
+    if((_S1487 + 2U) < ((&_S1486)->samples_0))
     {
 
-        Vector<float, 3>  _S1485 = ownAxisSample_0(begin_23, n_41, (&_S1483)->samples_0, (&_S1483)->k_0 + 2U, kernelContext_112);
+        Vector<float, 3>  _S1488 = ownAxisSample_0(begin_23, n_41, (&_S1486)->samples_0, (&_S1486)->k_0 + 2U, kernelContext_112);
 
-        (&_S1483)->x2_0 = _S1485;
+        (&_S1486)->x2_0 = _S1488;
 
     }
-    (&_S1483)->d0_0 = (&_S1483)->d1_0;
-    uint32_t _S1486 = (&_S1483)->k_0 + 1U;
+    (&_S1486)->d0_0 = (&_S1486)->d1_0;
+    uint32_t _S1489 = (&_S1486)->k_0 + 1U;
 
-    AxisWalk_0 _S1487 = _S1483;
+    AxisWalk_0 _S1490 = _S1486;
 
-    Vector<float, 3>  _S1488 = walkSlope_0(&_S1487, _S1486);
+    Vector<float, 3>  _S1491 = walkSlope_0(&_S1490, _S1489);
 
-    (&_S1483)->d1_0 = _S1488;
-    return _S1483;
+    (&_S1486)->d1_0 = _S1491;
+    return _S1486;
 }
 
 
 static AxisWalk_0 ownAxisStep_0(AxisWalk_0 * w_35, uint32_t begin_24, uint32_t n_42, Vector<float, 2>  stretch_7, KernelContext_0 * kernelContext_113)
 {
 
-    Vector<float, 3>  _S1489 = w_35->x0_0;
+    Vector<float, 3>  _S1492 = w_35->x0_0;
 
-    Vector<float, 3>  _S1490 = w_35->x1_0;
+    Vector<float, 3>  _S1493 = w_35->x1_0;
     float h_27;
-    Vector<float, 3>  _S1491 = secantOf_0(w_35->x0_0, w_35->x1_0, &h_27);
+    Vector<float, 3>  _S1494 = secantOf_0(w_35->x0_0, w_35->x1_0, &h_27);
 
-    Vector<float, 3>  _S1492 = w_35->d0_0;
+    Vector<float, 3>  _S1495 = w_35->d0_0;
 
-    Vector<float, 3>  _S1493 = w_35->d1_0;
+    Vector<float, 3>  _S1496 = w_35->d1_0;
     float arc_19 = w_35->arc_0 + segmentArc_0(w_35->x0_0, w_35->x1_0, w_35->d0_0, w_35->d1_0, h_27, 1.0f);
 
-    bool _S1494 = curlSpacedBy_0(stretch_7, kernelContext_113);
+    bool _S1497 = curlSpacedBy_0(stretch_7, kernelContext_113);
 
     float parc_6;
-    if(_S1494)
+    if(_S1497)
     {
 
-        float _S1495 = w_35->parc_0;
+        float _S1498 = w_35->parc_0;
 
-        float _S1496 = profiledSegmentArc_0(_S1489, _S1490, _S1492, _S1493, h_27, 1.0f, w_35->k_0, w_35->samples_0, stretch_7, kernelContext_113);
+        float _S1499 = profiledSegmentArc_0(_S1492, _S1493, _S1495, _S1496, h_27, 1.0f, w_35->k_0, w_35->samples_0, stretch_7, kernelContext_113);
 
-        parc_6 = _S1495 + _S1496;
+        parc_6 = _S1498 + _S1499;
 
     }
     else
@@ -15406,12 +15451,12 @@ static AxisWalk_0 ownAxisStep_0(AxisWalk_0 * w_35, uint32_t begin_24, uint32_t n
 
     }
 
-    Frame_0 _S1497 = reflectFrame_0(_S1489, &w_35->f_0, _S1490, tangentOf_0(_S1493, (&w_35->f_0)->t_0));
+    Frame_0 _S1500 = reflectFrame_0(_S1492, &w_35->f_0, _S1493, tangentOf_0(_S1496, (&w_35->f_0)->t_0));
 
-    Frame_0 _S1498 = _S1497;
+    Frame_0 _S1501 = _S1500;
 
-    AxisWalk_0 _S1499 = ownAxisShift_0(w_35, begin_24, n_42, &_S1498, arc_19, parc_6, kernelContext_113);
-    return _S1499;
+    AxisWalk_0 _S1502 = ownAxisShift_0(w_35, begin_24, n_42, &_S1501, arc_19, parc_6, kernelContext_113);
+    return _S1502;
 }
 
 
@@ -15420,62 +15465,62 @@ static float axisWalkAt_0(AxisWalk_0 * w_36, float u_20, Frame_0 * frame_1, floa
 
     *frame_1 = w_36->f_0;
 
-    float _S1500;
+    float _S1503;
     if(!(u_20 > 0.0f))
     {
 
-        bool _S1501 = curlSpacedBy_0(stretch_8, kernelContext_114);
-        if(_S1501)
+        bool _S1504 = curlSpacedBy_0(stretch_8, kernelContext_114);
+        if(_S1504)
         {
 
-            _S1500 = w_36->parc_0;
+            _S1503 = w_36->parc_0;
 
         }
         else
         {
 
-            _S1500 = w_36->arc_0;
+            _S1503 = w_36->arc_0;
 
         }
 
-        *parc_7 = _S1500;
+        *parc_7 = _S1503;
         return w_36->arc_0;
     }
 
-    Vector<float, 3>  _S1502 = w_36->x0_0;
+    Vector<float, 3>  _S1505 = w_36->x0_0;
 
-    Vector<float, 3>  _S1503 = w_36->x1_0;
+    Vector<float, 3>  _S1506 = w_36->x1_0;
 
     float h_28;
-    Vector<float, 3>  _S1504 = secantOf_0(w_36->x0_0, w_36->x1_0, &h_28);
+    Vector<float, 3>  _S1507 = secantOf_0(w_36->x0_0, w_36->x1_0, &h_28);
 
-    Vector<float, 3>  _S1505 = w_36->d0_0;
+    Vector<float, 3>  _S1508 = w_36->d0_0;
 
-    Vector<float, 3>  _S1506 = w_36->d1_0;
+    Vector<float, 3>  _S1509 = w_36->d1_0;
 
-    Frame_0 _S1507 = reflectFrameBy_0(&w_36->f_0, hermiteStep_0(w_36->x0_0, w_36->x1_0, w_36->d0_0, w_36->d1_0, h_28, u_20), tangentOf_0(hermiteDerivative_0(w_36->x0_0, w_36->x1_0, w_36->d0_0, w_36->d1_0, h_28, u_20), (&w_36->f_0)->t_0));
-    *frame_1 = _S1507;
-    float arc_20 = w_36->arc_0 + segmentArc_0(_S1502, _S1503, _S1505, _S1506, h_28, u_20);
+    Frame_0 _S1510 = reflectFrameBy_0(&w_36->f_0, hermiteStep_0(w_36->x0_0, w_36->x1_0, w_36->d0_0, w_36->d1_0, h_28, u_20), tangentOf_0(hermiteDerivative_0(w_36->x0_0, w_36->x1_0, w_36->d0_0, w_36->d1_0, h_28, u_20), (&w_36->f_0)->t_0));
+    *frame_1 = _S1510;
+    float arc_20 = w_36->arc_0 + segmentArc_0(_S1505, _S1506, _S1508, _S1509, h_28, u_20);
 
-    bool _S1508 = curlSpacedBy_0(stretch_8, kernelContext_114);
-    if(_S1508)
+    bool _S1511 = curlSpacedBy_0(stretch_8, kernelContext_114);
+    if(_S1511)
     {
 
-        float _S1509 = w_36->parc_0;
+        float _S1512 = w_36->parc_0;
 
-        float _S1510 = profiledSegmentArc_0(_S1502, _S1503, _S1505, _S1506, h_28, u_20, w_36->k_0, w_36->samples_0, stretch_8, kernelContext_114);
+        float _S1513 = profiledSegmentArc_0(_S1505, _S1506, _S1508, _S1509, h_28, u_20, w_36->k_0, w_36->samples_0, stretch_8, kernelContext_114);
 
-        _S1500 = _S1509 + _S1510;
+        _S1503 = _S1512 + _S1513;
 
     }
     else
     {
 
-        _S1500 = arc_20;
+        _S1503 = arc_20;
 
     }
 
-    *parc_7 = _S1500;
+    *parc_7 = _S1503;
     return arc_20;
 }
 
@@ -15483,30 +15528,30 @@ static float axisWalkAt_0(AxisWalk_0 * w_36, float u_20, Frame_0 * frame_1, floa
 static void curlStrand_0(uint32_t s_33, KernelContext_0 * kernelContext_115)
 {
 
-    uint32_t _S1511;
+    uint32_t _S1514;
 
-    uint32_t _S1512;
+    uint32_t _S1515;
 
-    uint32_t _S1513;
+    uint32_t _S1516;
     if(s_33 >= (kernelContext_115->globalParams_0->Look_0->gStrandCount_0))
     {
 
         return;
     }
 
-    uint32_t _S1514 = strandBegin_0(s_33, kernelContext_115);
+    uint32_t _S1517 = strandBegin_0(s_33, kernelContext_115);
 
-    uint32_t _S1515 = strandCountOf_0(s_33, kernelContext_115);
+    uint32_t _S1518 = strandCountOf_0(s_33, kernelContext_115);
 
-    if(_S1515 == 0U)
+    if(_S1518 == 0U)
     {
 
         return;
     }
 
-    Vector<float, 3>  _S1516 = loadPoint_0(_S1514, kernelContext_115);
-    storePoint_0(kernelContext_115->globalParams_0->gOut_0, _S1514, _S1516);
-    if(_S1515 < 2U)
+    Vector<float, 3>  _S1519 = loadPoint_0(_S1517, kernelContext_115);
+    storePoint_0(kernelContext_115->globalParams_0->gOut_0, _S1517, _S1519);
+    if(_S1518 < 2U)
     {
 
         return;
@@ -15514,21 +15559,21 @@ static void curlStrand_0(uint32_t s_33, KernelContext_0 * kernelContext_115)
 
     float randomness_0 = kernelContext_115->globalParams_0->Look_0->gValue_0.z;
 
-    bool _S1517 = fieldPerPoint_0(0U, kernelContext_115);
+    bool _S1520 = fieldPerPoint_0(0U, kernelContext_115);
 
-    float _S1518;
-    if(_S1517)
+    float _S1521;
+    if(_S1520)
     {
 
-        _S1518 = 0.0f;
+        _S1521 = 0.0f;
 
     }
     else
     {
 
-        float _S1519 = fieldAt_0(0U, kernelContext_115->globalParams_0->Look_0->gValue_0.x, s_33, 0U, kernelContext_115);
+        float _S1522 = fieldAt_0(0U, kernelContext_115->globalParams_0->Look_0->gValue_0.x, s_33, 0U, kernelContext_115);
 
-        _S1518 = _S1519;
+        _S1521 = _S1522;
 
     }
 
@@ -15536,9 +15581,9 @@ static void curlStrand_0(uint32_t s_33, KernelContext_0 * kernelContext_115)
     if((kernelContext_115->globalParams_0->Look_0->gFlag_0.z) != 0U)
     {
 
-        uint32_t _S1520 = (kernelContext_115->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t(s_33 * 4U)));
+        uint32_t _S1523 = (kernelContext_115->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t(s_33 * 4U)));
 
-        clump_0 = _S1520;
+        clump_0 = _S1523;
 
     }
     else
@@ -15551,30 +15596,30 @@ static void curlStrand_0(uint32_t s_33, KernelContext_0 * kernelContext_115)
     uint32_t i_57;
     if(clump_0 != 4294967295U)
     {
-        uint32_t _S1521 = (clump_0 * 8U + 4U) * 4U;
+        uint32_t _S1524 = (clump_0 * 8U + 4U) * 4U;
 
-        ByteAddressBuffer _S1522 = kernelContext_115->globalParams_0->gAux2_0;
+        ByteAddressBuffer _S1525 = kernelContext_115->globalParams_0->gAux2_0;
 
-        uint32_t _S1523 = (kernelContext_115->globalParams_0->gAux2_0).Load<uint32_t >(_S1521);
+        uint32_t _S1526 = (kernelContext_115->globalParams_0->gAux2_0).Load<uint32_t >(_S1524);
 
-        uint32_t _S1524 = (_S1522).Load<uint32_t >(_S1521 + 4U);
+        uint32_t _S1527 = (_S1525).Load<uint32_t >(_S1524 + 4U);
 
-        uint32_t _S1525 = (_S1522).Load<uint32_t >(_S1521 + 8U);
+        uint32_t _S1528 = (_S1525).Load<uint32_t >(_S1524 + 8U);
 
-        uint32_t _S1526 = (_S1522).Load<uint32_t >(_S1521 + 12U);
+        uint32_t _S1529 = (_S1525).Load<uint32_t >(_S1524 + 12U);
 
-        Vector<float, 4>  u_21 = asfloat_1(Vector<uint32_t, 4> (_S1523, _S1524, _S1525, _S1526));
-        float _S1527 = 6.28318548202514648f * (kernelContext_115->globalParams_0->Look_0->gValue_0.w + (U32_asfloat((kernelContext_115->globalParams_0->Look_0->gFlag_0.y))) * u_21.x);
-        float _S1528 = 1.0f + randomness_0 * (-1.0f + 2.0f * u_21.y);
-        float _S1529 = kernelContext_115->globalParams_0->Look_0->gValue_0.y * (1.0f + 0.5f * randomness_0 * (-1.0f + 2.0f * u_21.z));
-        float _S1530 = 6.28318548202514648f * u_21.w;
-        uint32_t _S1531 = curlSpacingKey_1(u_21);
+        Vector<float, 4>  u_21 = asfloat_1(Vector<uint32_t, 4> (_S1526, _S1527, _S1528, _S1529));
+        float _S1530 = 6.28318548202514648f * (kernelContext_115->globalParams_0->Look_0->gValue_0.w + (U32_asfloat((kernelContext_115->globalParams_0->Look_0->gFlag_0.y))) * u_21.x);
+        float _S1531 = 1.0f + randomness_0 * (-1.0f + 2.0f * u_21.y);
+        float _S1532 = kernelContext_115->globalParams_0->Look_0->gValue_0.y * (1.0f + 0.5f * randomness_0 * (-1.0f + 2.0f * u_21.z));
+        float _S1533 = 6.28318548202514648f * u_21.w;
+        uint32_t _S1534 = curlSpacingKey_1(u_21);
 
         i_57 = 1U;
         for(;;)
         {
 
-            if(i_57 < _S1515)
+            if(i_57 < _S1518)
             {
             }
             else
@@ -15588,17 +15633,17 @@ static void curlStrand_0(uint32_t s_33, KernelContext_0 * kernelContext_115)
 
             float stretch_9;
 
-            float _S1532 = clumpAxisAt_0(clump_0, paramAt_0(i_57, _S1515), &fr_4, &parc_8, &stretch_9, kernelContext_115);
+            float _S1535 = clumpAxisAt_0(clump_0, paramAt_0(i_57, _S1518), &fr_4, &parc_8, &stretch_9, kernelContext_115);
 
-            uint32_t _S1533 = _S1514 + i_57;
+            uint32_t _S1536 = _S1517 + i_57;
 
-            Vector<float, 3>  _S1534 = loadPoint_0(_S1533, kernelContext_115);
+            Vector<float, 3>  _S1537 = loadPoint_0(_S1536, kernelContext_115);
 
-            Frame_0 _S1535 = fr_4;
+            Frame_0 _S1538 = fr_4;
 
-            Vector<float, 3>  _S1536 = curlOffset_0(s_33, _S1514, i_57, _S1515, &_S1535, parc_8, _S1527, _S1528, _S1529, _S1530, _S1531, _S1518, stretch_9, kernelContext_115);
+            Vector<float, 3>  _S1539 = curlOffset_0(s_33, _S1517, i_57, _S1518, &_S1538, parc_8, _S1530, _S1531, _S1532, _S1533, _S1534, _S1521, stretch_9, kernelContext_115);
 
-            storePoint_0(kernelContext_115->globalParams_0->gOut_0, _S1533, _S1534 + _S1536);
+            storePoint_0(kernelContext_115->globalParams_0->gOut_0, _S1536, _S1537 + _S1539);
 
             i_57 = i_57 + 1U;
 
@@ -15607,47 +15652,47 @@ static void curlStrand_0(uint32_t s_33, KernelContext_0 * kernelContext_115)
         return;
     }
 
-    Vector<float, 4>  _S1537 = strandData_0(s_33, kernelContext_115);
+    Vector<float, 4>  _S1540 = strandData_0(s_33, kernelContext_115);
 
 
-    float _S1538 = 6.28318548202514648f * (kernelContext_115->globalParams_0->Look_0->gValue_0.w + (U32_asfloat((kernelContext_115->globalParams_0->Look_0->gFlag_0.y))) * _S1537.x);
-    float _S1539 = 1.0f + randomness_0 * (-1.0f + 2.0f * _S1537.y);
-    float _S1540 = kernelContext_115->globalParams_0->Look_0->gValue_0.y * (1.0f + 0.5f * randomness_0 * (-1.0f + 2.0f * _S1537.z));
-    float _S1541 = 6.28318548202514648f * _S1537.w;
-    uint32_t _S1542 = curlSpacingKey_1(_S1537);
+    float _S1541 = 6.28318548202514648f * (kernelContext_115->globalParams_0->Look_0->gValue_0.w + (U32_asfloat((kernelContext_115->globalParams_0->Look_0->gFlag_0.y))) * _S1540.x);
+    float _S1542 = 1.0f + randomness_0 * (-1.0f + 2.0f * _S1540.y);
+    float _S1543 = kernelContext_115->globalParams_0->Look_0->gValue_0.y * (1.0f + 0.5f * randomness_0 * (-1.0f + 2.0f * _S1540.z));
+    float _S1544 = 6.28318548202514648f * _S1540.w;
+    uint32_t _S1545 = curlSpacingKey_1(_S1540);
 
 
-    uint32_t _S1543 = (kernelContext_115->globalParams_0->Look_0->gTable_0.y + s_33) * 16U;
+    uint32_t _S1546 = (kernelContext_115->globalParams_0->Look_0->gTable_0.y + s_33) * 16U;
 
-    ByteAddressBuffer _S1544 = kernelContext_115->globalParams_0->gStrandData_0;
+    ByteAddressBuffer _S1547 = kernelContext_115->globalParams_0->gStrandData_0;
 
-    uint32_t _S1545 = (kernelContext_115->globalParams_0->gStrandData_0).Load<uint32_t >(_S1543);
+    uint32_t _S1548 = (kernelContext_115->globalParams_0->gStrandData_0).Load<uint32_t >(_S1546);
 
-    uint32_t _S1546 = (_S1544).Load<uint32_t >(_S1543 + 4U);
+    uint32_t _S1549 = (_S1547).Load<uint32_t >(_S1546 + 4U);
 
-    uint32_t _S1547 = (_S1544).Load<uint32_t >(_S1543 + 8U);
+    uint32_t _S1550 = (_S1547).Load<uint32_t >(_S1546 + 8U);
 
-    uint32_t _S1548 = (_S1544).Load<uint32_t >(_S1543 + 12U);
+    uint32_t _S1551 = (_S1547).Load<uint32_t >(_S1546 + 12U);
 
-    Vector<float, 4>  root_10 = asfloat_1(Vector<uint32_t, 4> (_S1545, _S1546, _S1547, _S1548));
+    Vector<float, 4>  root_10 = asfloat_1(Vector<uint32_t, 4> (_S1548, _S1549, _S1550, _S1551));
 
-    Vector<float, 3>  _S1549;
+    Vector<float, 3>  _S1552;
     if((root_10.w) != 0.0f)
     {
 
-        _S1549 = Vector<float, 3> {root_10.x, root_10.y, root_10.z};
+        _S1552 = Vector<float, 3> {root_10.x, root_10.y, root_10.z};
 
     }
     else
     {
 
-        _S1549 = Vector<float, 3> (0.0f, 0.0f, 0.0f);
+        _S1552 = Vector<float, 3> (0.0f, 0.0f, 0.0f);
 
     }
 
-    AxisWalk_0 _S1550 = ownAxisStart_0(_S1514, _S1515, _S1549, kernelContext_115);
+    AxisWalk_0 _S1553 = ownAxisStart_0(_S1517, _S1518, _S1552, kernelContext_115);
 
-    bool _S1551 = curlWeighed_0(kernelContext_115);
+    bool _S1554 = curlWeighed_0(kernelContext_115);
 
 
 
@@ -15720,11 +15765,11 @@ static void curlStrand_0(uint32_t s_33, KernelContext_0 * kernelContext_115)
     float pointStretch_0;
 
     AxisWalk_0 w_37;
-    if(_S1551)
+    if(_S1554)
     {
 
-        Vector<uint32_t, 4>  _S1552 = kernelContext_115->globalParams_0->Look_0->gFlag2_0;
-        Vector<float, 3>  _S1553 = asfloat_0(Vector<uint32_t, 3> {_S1552.y, _S1552.z, _S1552.w});
+        Vector<uint32_t, 4>  _S1555 = kernelContext_115->globalParams_0->Look_0->gFlag2_0;
+        Vector<float, 3>  _S1556 = asfloat_0(Vector<uint32_t, 3> {_S1555.y, _S1555.z, _S1555.w});
         FixedArray<float, 32>  turns_7;
 
         turns_7[int(0)] = 0.0f;
@@ -15791,14 +15836,14 @@ static void curlStrand_0(uint32_t s_33, KernelContext_0 * kernelContext_115)
 
         turns_7[int(31)] = 0.0f;
 
-        w_37 = _S1550;
+        w_37 = _S1553;
 
         i_57 = 0U;
 
         for(;;)
         {
 
-            _S1511 = w_37.samples_0;
+            _S1514 = w_37.samples_0;
 
             if(i_57 < (w_37.samples_0))
             {
@@ -15812,17 +15857,17 @@ static void curlStrand_0(uint32_t s_33, KernelContext_0 * kernelContext_115)
             if(i_57 > 0U)
             {
 
-                AxisWalk_0 _S1554 = w_37;
+                AxisWalk_0 _S1557 = w_37;
 
-                AxisWalk_0 _S1555 = ownAxisStep_0(&_S1554, _S1514, _S1515, Vector<float, 2> (0.0f, 0.0f), kernelContext_115);
+                AxisWalk_0 _S1558 = ownAxisStep_0(&_S1557, _S1517, _S1518, Vector<float, 2> (0.0f, 0.0f), kernelContext_115);
 
-                w_37 = _S1555;
+                w_37 = _S1558;
 
             }
-            stretch_10[i_57] = (groomlab_max((0.0f), (exactDot_0(w_37.f_0.t_0, _S1553))));
+            stretch_10[i_57] = (groomlab_max((0.0f), (exactDot_0(w_37.f_0.t_0, _S1556))));
 
-            bool _S1556 = curlProfiled_0(kernelContext_115);
-            if(_S1556)
+            bool _S1559 = curlProfiled_0(kernelContext_115);
+            if(_S1559)
             {
 
                 pointStretch_0 = w_37.parc_0;
@@ -15835,26 +15880,26 @@ static void curlStrand_0(uint32_t s_33, KernelContext_0 * kernelContext_115)
 
             }
 
-            turns_7[i_57] = curlTurns_0(_S1540, pointStretch_0, kernelContext_115->globalParams_0->Look_0->gValue2_0.x, _S1542);
+            turns_7[i_57] = curlTurns_0(_S1543, pointStretch_0, kernelContext_115->globalParams_0->Look_0->gValue2_0.x, _S1545);
 
             i_57 = i_57 + 1U;
 
         }
 
-        FixedArray<float, 32>  _S1557 = turns_7;
+        FixedArray<float, 32>  _S1560 = turns_7;
 
-        curlStretchOf_0(&stretch_10, &_S1557, _S1511, kernelContext_115);
+        curlStretchOf_0(&stretch_10, &_S1560, _S1514, kernelContext_115);
 
     }
 
-    w_37 = _S1550;
+    w_37 = _S1553;
 
     i_57 = 1U;
 
     for(;;)
     {
 
-        if(i_57 < _S1515)
+        if(i_57 < _S1518)
         {
         }
         else
@@ -15866,13 +15911,13 @@ static void curlStrand_0(uint32_t s_33, KernelContext_0 * kernelContext_115)
         Frame_0 fr_5;
         float parc_9;
 
-        AxisWalk_0 _S1558 = w_37;
+        AxisWalk_0 _S1561 = w_37;
 
         AxisWalk_0 w_38;
 
         Vector<float, 2>  st_13;
 
-        if((w_37.samples_0) == _S1515)
+        if((w_37.samples_0) == _S1518)
         {
 
             w_38 = w_37;
@@ -15881,15 +15926,15 @@ static void curlStrand_0(uint32_t s_33, KernelContext_0 * kernelContext_115)
             for(;;)
             {
 
-                AxisWalk_0 _S1559 = w_38;
+                AxisWalk_0 _S1562 = w_38;
 
-                _S1512 = w_38.k_0;
+                _S1515 = w_38.k_0;
 
-                uint32_t _S1560 = w_38.k_0 + 1U;
+                uint32_t _S1563 = w_38.k_0 + 1U;
 
-                _S1513 = _S1560;
+                _S1516 = _S1563;
 
-                if(_S1560 < i_57)
+                if(_S1563 < i_57)
                 {
                 }
                 else
@@ -15898,10 +15943,10 @@ static void curlStrand_0(uint32_t s_33, KernelContext_0 * kernelContext_115)
                     break;
                 }
 
-                if(_S1551)
+                if(_S1554)
                 {
 
-                    st_13 = Vector<float, 2> (stretch_10[_S1559.k_0], stretch_10[_S1560]);
+                    st_13 = Vector<float, 2> (stretch_10[_S1562.k_0], stretch_10[_S1563]);
 
                 }
                 else
@@ -15911,17 +15956,17 @@ static void curlStrand_0(uint32_t s_33, KernelContext_0 * kernelContext_115)
 
                 }
 
-                AxisWalk_0 _S1561 = w_38;
+                AxisWalk_0 _S1564 = w_38;
 
-                AxisWalk_0 _S1562 = ownAxisStep_0(&_S1561, _S1514, _S1515, st_13, kernelContext_115);
+                AxisWalk_0 _S1565 = ownAxisStep_0(&_S1564, _S1517, _S1518, st_13, kernelContext_115);
 
-                w_38 = _S1562;
+                w_38 = _S1565;
 
             }
-            if(_S1551)
+            if(_S1554)
             {
 
-                st_13 = Vector<float, 2> (stretch_10[_S1512], stretch_10[_S1513]);
+                st_13 = Vector<float, 2> (stretch_10[_S1515], stretch_10[_S1516]);
 
             }
             else
@@ -15931,26 +15976,26 @@ static void curlStrand_0(uint32_t s_33, KernelContext_0 * kernelContext_115)
 
             }
 
-            AxisWalk_0 _S1563 = w_38;
-
-            AxisWalk_0 _S1564 = w_38;
-
-            float h_29;
-            Vector<float, 3>  _S1565 = secantOf_0(w_38.x0_0, w_38.x1_0, &h_29);
-
             AxisWalk_0 _S1566 = w_38;
 
             AxisWalk_0 _S1567 = w_38;
 
+            float h_29;
+            Vector<float, 3>  _S1568 = secantOf_0(w_38.x0_0, w_38.x1_0, &h_29);
+
+            AxisWalk_0 _S1569 = w_38;
+
+            AxisWalk_0 _S1570 = w_38;
+
             float arc_21 = w_38.arc_0 + segmentArc_0(w_38.x0_0, w_38.x1_0, w_38.d0_0, w_38.d1_0, h_29, 1.0f);
 
-            bool _S1568 = curlSpacedBy_0(st_13, kernelContext_115);
-            if(_S1568)
+            bool _S1571 = curlSpacedBy_0(st_13, kernelContext_115);
+            if(_S1571)
             {
 
-                float _S1569 = profiledSegmentArc_0(_S1563.x0_0, _S1564.x1_0, _S1566.d0_0, _S1567.d1_0, h_29, 1.0f, _S1512, w_38.samples_0, st_13, kernelContext_115);
+                float _S1572 = profiledSegmentArc_0(_S1566.x0_0, _S1567.x1_0, _S1569.d0_0, _S1570.d1_0, h_29, 1.0f, _S1515, w_38.samples_0, st_13, kernelContext_115);
 
-                pointStretch_0 = w_38.parc_0 + _S1569;
+                pointStretch_0 = w_38.parc_0 + _S1572;
 
             }
             else
@@ -15960,40 +16005,40 @@ static void curlStrand_0(uint32_t s_33, KernelContext_0 * kernelContext_115)
 
             }
 
-            float _S1570;
-            if(_S1568)
+            float _S1573;
+            if(_S1571)
             {
 
-                _S1570 = pointStretch_0;
+                _S1573 = pointStretch_0;
 
             }
             else
             {
 
-                _S1570 = arc_21;
+                _S1573 = arc_21;
 
             }
 
-            parc_9 = _S1570;
-            Vector<float, 3>  _S1571 = tangentOf_0(_S1567.d1_0, w_38.f_0.t_0);
+            parc_9 = _S1573;
+            Vector<float, 3>  _S1574 = tangentOf_0(_S1570.d1_0, w_38.f_0.t_0);
 
-            Frame_0 _S1572 = w_38.f_0;
+            Frame_0 _S1575 = w_38.f_0;
 
-            Frame_0 _S1573 = reflectFrame_0(_S1563.x0_0, &_S1572, _S1564.x1_0, _S1571);
+            Frame_0 _S1576 = reflectFrame_0(_S1566.x0_0, &_S1575, _S1567.x1_0, _S1574);
 
-            fr_5 = _S1573;
+            fr_5 = _S1576;
 
             AxisWalk_0 w_39;
-            if((i_57 + 1U) < _S1515)
+            if((i_57 + 1U) < _S1518)
             {
 
-                AxisWalk_0 _S1574 = w_38;
+                AxisWalk_0 _S1577 = w_38;
 
-                Frame_0 _S1575 = fr_5;
+                Frame_0 _S1578 = fr_5;
 
-                AxisWalk_0 _S1576 = ownAxisShift_0(&_S1574, _S1514, _S1515, &_S1575, arc_21, pointStretch_0, kernelContext_115);
+                AxisWalk_0 _S1579 = ownAxisShift_0(&_S1577, _S1517, _S1518, &_S1578, arc_21, pointStretch_0, kernelContext_115);
 
-                w_39 = _S1576;
+                w_39 = _S1579;
 
             }
             else
@@ -16009,16 +16054,16 @@ static void curlStrand_0(uint32_t s_33, KernelContext_0 * kernelContext_115)
         else
         {
 
-            float xs_1 = paramAt_0(i_57, _S1515) * float(_S1558.samples_0 - 1U);
-            uint32_t _S1577 = (U32_min((uint32_t((groomlab_max((xs_1), (0.0f))))), (_S1558.samples_0 - 2U)));
+            float xs_1 = paramAt_0(i_57, _S1518) * float(_S1561.samples_0 - 1U);
+            uint32_t _S1580 = (U32_min((uint32_t((groomlab_max((xs_1), (0.0f))))), (_S1561.samples_0 - 2U)));
 
             w_38 = w_37;
             for(;;)
             {
 
-                AxisWalk_0 _S1578 = w_38;
+                AxisWalk_0 _S1581 = w_38;
 
-                if((w_38.k_0) < _S1577)
+                if((w_38.k_0) < _S1580)
                 {
                 }
                 else
@@ -16027,10 +16072,10 @@ static void curlStrand_0(uint32_t s_33, KernelContext_0 * kernelContext_115)
                     break;
                 }
 
-                if(_S1551)
+                if(_S1554)
                 {
 
-                    st_13 = Vector<float, 2> (stretch_10[_S1578.k_0], stretch_10[_S1578.k_0 + 1U]);
+                    st_13 = Vector<float, 2> (stretch_10[_S1581.k_0], stretch_10[_S1581.k_0 + 1U]);
 
                 }
                 else
@@ -16040,19 +16085,19 @@ static void curlStrand_0(uint32_t s_33, KernelContext_0 * kernelContext_115)
 
                 }
 
-                AxisWalk_0 _S1579 = w_38;
+                AxisWalk_0 _S1582 = w_38;
 
-                AxisWalk_0 _S1580 = ownAxisStep_0(&_S1579, _S1514, _S1515, st_13, kernelContext_115);
+                AxisWalk_0 _S1583 = ownAxisStep_0(&_S1582, _S1517, _S1518, st_13, kernelContext_115);
 
-                w_38 = _S1580;
+                w_38 = _S1583;
 
             }
-            float _S1581 = xs_1 - float(_S1577);
+            float _S1584 = xs_1 - float(_S1580);
 
-            if(_S1551)
+            if(_S1554)
             {
 
-                st_13 = Vector<float, 2> (stretch_10[_S1577], stretch_10[_S1577 + 1U]);
+                st_13 = Vector<float, 2> (stretch_10[_S1580], stretch_10[_S1580 + 1U]);
 
             }
             else
@@ -16062,19 +16107,19 @@ static void curlStrand_0(uint32_t s_33, KernelContext_0 * kernelContext_115)
 
             }
 
-            AxisWalk_0 _S1582 = w_38;
+            AxisWalk_0 _S1585 = w_38;
 
-            float _S1583 = axisWalkAt_0(&_S1582, _S1581, &fr_5, &parc_9, st_13, kernelContext_115);
+            float _S1586 = axisWalkAt_0(&_S1585, _S1584, &fr_5, &parc_9, st_13, kernelContext_115);
 
         }
 
-        if(_S1551)
+        if(_S1554)
         {
 
-            float xs_2 = paramAt_0(i_57, _S1515) * float(w_38.samples_0 - 1U);
-            uint32_t _S1584 = (U32_min((uint32_t((groomlab_max((xs_2), (0.0f))))), (w_38.samples_0 - 2U)));
+            float xs_2 = paramAt_0(i_57, _S1518) * float(w_38.samples_0 - 1U);
+            uint32_t _S1587 = (U32_min((uint32_t((groomlab_max((xs_2), (0.0f))))), (w_38.samples_0 - 2U)));
 
-            pointStretch_0 = stretch_10[_S1584] + (stretch_10[_S1584 + 1U] - stretch_10[_S1584]) * (xs_2 - float(_S1584));
+            pointStretch_0 = stretch_10[_S1587] + (stretch_10[_S1587 + 1U] - stretch_10[_S1587]) * (xs_2 - float(_S1587));
 
         }
         else
@@ -16084,15 +16129,15 @@ static void curlStrand_0(uint32_t s_33, KernelContext_0 * kernelContext_115)
 
         }
 
-        uint32_t _S1585 = _S1514 + i_57;
+        uint32_t _S1588 = _S1517 + i_57;
 
-        Vector<float, 3>  _S1586 = loadPoint_0(_S1585, kernelContext_115);
+        Vector<float, 3>  _S1589 = loadPoint_0(_S1588, kernelContext_115);
 
-        Frame_0 _S1587 = fr_5;
+        Frame_0 _S1590 = fr_5;
 
-        Vector<float, 3>  _S1588 = curlOffset_0(s_33, _S1514, i_57, _S1515, &_S1587, parc_9, _S1538, _S1539, _S1540, _S1541, _S1542, _S1518, pointStretch_0, kernelContext_115);
+        Vector<float, 3>  _S1591 = curlOffset_0(s_33, _S1517, i_57, _S1518, &_S1590, parc_9, _S1541, _S1542, _S1543, _S1544, _S1545, _S1521, pointStretch_0, kernelContext_115);
 
-        storePoint_0(kernelContext_115->globalParams_0->gOut_0, _S1585, _S1586 + _S1588);
+        storePoint_0(kernelContext_115->globalParams_0->gOut_0, _S1588, _S1589 + _S1591);
 
         uint32_t i_58 = i_57 + 1U;
 
@@ -16109,8 +16154,8 @@ static void curlStrand_0(uint32_t s_33, KernelContext_0 * kernelContext_115)
 static void curlFourOrEach_0(uint32_t first_4, KernelContext_0 * kernelContext_116)
 {
 
-    bool _S1589 = curlFour_0(first_4, kernelContext_116);
-    if(_S1589)
+    bool _S1592 = curlFour_0(first_4, kernelContext_116);
+    if(_S1592)
     {
 
         return;
@@ -16138,10 +16183,10 @@ static void curlFourOrEach_0(uint32_t first_4, KernelContext_0 * kernelContext_1
 }
 
 
-void _CurlCS(void* _S1590, void* entryPointParams_7, void* globalParams_8)
+void _CurlCS(void* _S1593, void* entryPointParams_7, void* globalParams_8)
 {
 
-    ComputeThreadVaryingInput * _S1591 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S1590));
+    ComputeThreadVaryingInput * _S1594 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S1593));
 
     KernelContext_0 kernelContext_117;
 
@@ -16151,18 +16196,18 @@ void _CurlCS(void* _S1590, void* entryPointParams_7, void* globalParams_8)
 
     (&kernelContext_117)->sTableBase_0 = 0U;
 
-    uint32_t _S1592 = threadIndex_0(_S1591->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S1591->groupThreadID, 64U, &kernelContext_117);
+    uint32_t _S1595 = threadIndex_0(_S1594->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S1594->groupThreadID, 64U, &kernelContext_117);
 
-    curlFourOrEach_0(_S1592 * 4U, &kernelContext_117);
+    curlFourOrEach_0(_S1595 * 4U, &kernelContext_117);
 
     return;
 }
 
 
-void _WidthCS(void* _S1593, void* entryPointParams_8, void* globalParams_9)
+void _WidthCS(void* _S1596, void* entryPointParams_8, void* globalParams_9)
 {
 
-    ComputeThreadVaryingInput * _S1594 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S1593));
+    ComputeThreadVaryingInput * _S1597 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S1596));
 
     KernelContext_0 kernelContext_118;
 
@@ -16172,42 +16217,42 @@ void _WidthCS(void* _S1593, void* entryPointParams_8, void* globalParams_9)
 
     (&kernelContext_118)->sTableBase_0 = 0U;
 
-    uint32_t _S1595 = threadIndex_0(_S1594->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S1594->groupThreadID, 64U, &kernelContext_118);
+    uint32_t _S1598 = threadIndex_0(_S1597->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S1597->groupThreadID, 64U, &kernelContext_118);
 
-    if(_S1595 >= ((&kernelContext_118)->globalParams_0->Look_0->gStrandCount_0))
+    if(_S1598 >= ((&kernelContext_118)->globalParams_0->Look_0->gStrandCount_0))
     {
 
         return;
     }
 
-    uint32_t _S1596 = strandBegin_0(_S1595, &kernelContext_118);
+    uint32_t _S1599 = strandBegin_0(_S1598, &kernelContext_118);
 
-    uint32_t _S1597 = strandCountOf_0(_S1595, &kernelContext_118);
+    uint32_t _S1600 = strandCountOf_0(_S1598, &kernelContext_118);
 
-    if(_S1597 == 0U)
+    if(_S1600 == 0U)
     {
 
         return;
     }
 
-    float _S1598 = strandLength_0(_S1596, _S1597, &kernelContext_118);
+    float _S1601 = strandLength_0(_S1599, _S1600, &kernelContext_118);
 
-    float _S1599;
+    float _S1602;
 
     if(((&kernelContext_118)->globalParams_0->Look_0->gValue_0.y) > 0.0f)
     {
 
-        float _S1600 = (&kernelContext_118)->globalParams_0->Look_0->gValue_0.y;
+        float _S1603 = (&kernelContext_118)->globalParams_0->Look_0->gValue_0.y;
 
-        Vector<float, 4>  _S1601 = strandData_0(_S1595, &kernelContext_118);
+        Vector<float, 4>  _S1604 = strandData_0(_S1598, &kernelContext_118);
 
-        _S1599 = 1.0f + _S1600 * _S1601.x;
+        _S1602 = 1.0f + _S1603 * _S1604.x;
 
     }
     else
     {
 
-        _S1599 = 1.0f;
+        _S1602 = 1.0f;
 
     }
 
@@ -16218,7 +16263,7 @@ void _WidthCS(void* _S1593, void* entryPointParams_8, void* globalParams_9)
     for(;;)
     {
 
-        if(k_31 < _S1597)
+        if(k_31 < _S1600)
         {
         }
         else
@@ -16230,30 +16275,30 @@ void _WidthCS(void* _S1593, void* entryPointParams_8, void* globalParams_9)
         if(k_31 > 0U)
         {
 
-            uint32_t _S1602 = _S1596 + k_31;
+            uint32_t _S1605 = _S1599 + k_31;
 
-            Vector<float, 3>  _S1603 = loadPoint_0(_S1602, &kernelContext_118);
+            Vector<float, 3>  _S1606 = loadPoint_0(_S1605, &kernelContext_118);
 
-            Vector<float, 3>  _S1604 = loadPoint_0(_S1602 - 1U, &kernelContext_118);
+            Vector<float, 3>  _S1607 = loadPoint_0(_S1605 - 1U, &kernelContext_118);
 
-            along_6 = along_6 + len3_0(_S1603 - _S1604);
+            along_6 = along_6 + len3_0(_S1606 - _S1607);
 
         }
 
         float t_34;
-        if(_S1598 > 9.999999960041972e-13f)
+        if(_S1601 > 9.999999960041972e-13f)
         {
 
-            t_34 = along_6 / _S1598;
+            t_34 = along_6 / _S1601;
 
         }
         else
         {
 
-            if(_S1597 > 1U)
+            if(_S1600 > 1U)
             {
 
-                t_34 = float(k_31) / float(_S1597 - 1U);
+                t_34 = float(k_31) / float(_S1600 - 1U);
 
             }
             else
@@ -16265,32 +16310,32 @@ void _WidthCS(void* _S1593, void* entryPointParams_8, void* globalParams_9)
 
         }
 
-        bool _S1605 = fieldPerPoint_0(0U, &kernelContext_118);
+        bool _S1608 = fieldPerPoint_0(0U, &kernelContext_118);
 
-        float _S1606;
-        if(_S1605)
+        float _S1609;
+        if(_S1608)
         {
 
-            float _S1607 = fieldAt_0(0U, (&kernelContext_118)->globalParams_0->Look_0->gValue_0.x, _S1595, _S1596 + k_31, &kernelContext_118);
+            float _S1610 = fieldAt_0(0U, (&kernelContext_118)->globalParams_0->Look_0->gValue_0.x, _S1598, _S1599 + k_31, &kernelContext_118);
 
-            _S1606 = _S1607;
+            _S1609 = _S1610;
 
         }
         else
         {
 
-            float _S1608 = fieldAt_0(0U, (&kernelContext_118)->globalParams_0->Look_0->gValue_0.x, _S1595, 0U, &kernelContext_118);
+            float _S1611 = fieldAt_0(0U, (&kernelContext_118)->globalParams_0->Look_0->gValue_0.x, _S1598, 0U, &kernelContext_118);
 
-            _S1606 = _S1608;
+            _S1609 = _S1611;
 
         }
 
-        float w_40 = _S1606 * _S1599;
-        uint32_t _S1609 = (_S1596 + k_31) * 4U;
+        float w_40 = _S1609 * _S1602;
+        uint32_t _S1612 = (_S1599 + k_31) * 4U;
 
-        float _S1610 = rampAt_0(t_34, &kernelContext_118);
+        float _S1613 = rampAt_0(t_34, &kernelContext_118);
 
-        (&kernelContext_118)->globalParams_0->gOut_0.Store(_S1609,(F32_asuint((w_40 * _S1610))));
+        (&kernelContext_118)->globalParams_0->gOut_0.Store(_S1612,(F32_asuint((w_40 * _S1613))));
 
         k_31 = k_31 + 1U;
 
@@ -16303,17 +16348,17 @@ void _WidthCS(void* _S1593, void* entryPointParams_8, void* globalParams_9)
 static Vector<float, 3>  rootNormal_1(uint32_t s_34, KernelContext_0 * kernelContext_119)
 {
 
-    uint32_t _S1611 = (kernelContext_119->globalParams_0->Look_0->gTable_0.y + s_34) * 16U;
+    uint32_t _S1614 = (kernelContext_119->globalParams_0->Look_0->gTable_0.y + s_34) * 16U;
 
-    ByteAddressBuffer _S1612 = kernelContext_119->globalParams_0->gStrandData_0;
+    ByteAddressBuffer _S1615 = kernelContext_119->globalParams_0->gStrandData_0;
 
-    uint32_t _S1613 = (kernelContext_119->globalParams_0->gStrandData_0).Load<uint32_t >(_S1611);
+    uint32_t _S1616 = (kernelContext_119->globalParams_0->gStrandData_0).Load<uint32_t >(_S1614);
 
-    uint32_t _S1614 = (_S1612).Load<uint32_t >(_S1611 + 4U);
+    uint32_t _S1617 = (_S1615).Load<uint32_t >(_S1614 + 4U);
 
-    uint32_t _S1615 = (_S1612).Load<uint32_t >(_S1611 + 8U);
+    uint32_t _S1618 = (_S1615).Load<uint32_t >(_S1614 + 8U);
 
-    return asfloat_0(Vector<uint32_t, 3> (_S1613, _S1614, _S1615));
+    return asfloat_0(Vector<uint32_t, 3> (_S1616, _S1617, _S1618));
 }
 
 static void lineFrame_0(uint32_t begin_25, uint32_t n_43, uint32_t k_32, Vector<float, 3>  up_1, Vector<float, 3>  * t_35, Vector<float, 3>  * nrm_3, Vector<float, 3>  * side_1, KernelContext_0 * kernelContext_120)
@@ -16322,66 +16367,66 @@ static void lineFrame_0(uint32_t begin_25, uint32_t n_43, uint32_t k_32, Vector<
     if(n_43 > 1U)
     {
 
-        Vector<float, 3>  _S1616 = loadPoint_0(begin_25 + (U32_min((k_32 + 1U), (n_43 - 1U))), kernelContext_120);
+        Vector<float, 3>  _S1619 = loadPoint_0(begin_25 + (U32_min((k_32 + 1U), (n_43 - 1U))), kernelContext_120);
 
-        uint32_t _S1617;
+        uint32_t _S1620;
         if(k_32 > 0U)
         {
 
-            _S1617 = k_32 - 1U;
+            _S1620 = k_32 - 1U;
 
         }
         else
         {
 
-            _S1617 = 0U;
+            _S1620 = 0U;
 
         }
 
-        Vector<float, 3>  _S1618 = loadPoint_0(begin_25 + _S1617, kernelContext_120);
+        Vector<float, 3>  _S1621 = loadPoint_0(begin_25 + _S1620, kernelContext_120);
 
-        Vector<float, 3>  _S1619 = normalized_0(_S1616 - _S1618);
+        Vector<float, 3>  _S1622 = normalized_0(_S1619 - _S1621);
 
-        *t_35 = _S1619;
-        Vector<float, 3>  _S1620 = cross_0(_S1619, up_1);
+        *t_35 = _S1622;
+        Vector<float, 3>  _S1623 = cross_0(_S1622, up_1);
 
-        *side_1 = _S1620;
-        if((len3_0(_S1620)) < 0.00009999999747379f)
+        *side_1 = _S1623;
+        if((len3_0(_S1623)) < 0.00009999999747379f)
         {
 
             *side_1 = anyPerpendicular_0(*t_35);
 
         }
         *side_1 = normalized_0(*side_1);
-        Vector<float, 3>  _S1621 = up_1 - *t_35 * (Vector<float, 3> )(0.5f * dot_0(up_1, *t_35));
+        Vector<float, 3>  _S1624 = up_1 - *t_35 * (Vector<float, 3> )(0.5f * dot_0(up_1, *t_35));
 
-        *nrm_3 = _S1621;
+        *nrm_3 = _S1624;
 
-        Vector<float, 3>  _S1622;
-        if((len3_0(_S1621)) > 0.00009999999747379f)
+        Vector<float, 3>  _S1625;
+        if((len3_0(_S1624)) > 0.00009999999747379f)
         {
 
-            _S1622 = normalized_0(*nrm_3);
+            _S1625 = normalized_0(*nrm_3);
 
         }
         else
         {
 
-            _S1622 = up_1;
+            _S1625 = up_1;
 
         }
 
-        *nrm_3 = _S1622;
+        *nrm_3 = _S1625;
 
     }
     else
     {
 
         *t_35 = up_1;
-        Vector<float, 3>  _S1623 = normalized_0(anyPerpendicular_0(up_1));
+        Vector<float, 3>  _S1626 = normalized_0(anyPerpendicular_0(up_1));
 
-        *nrm_3 = _S1623;
-        *side_1 = cross_0(*t_35, _S1623);
+        *nrm_3 = _S1626;
+        *side_1 = cross_0(*t_35, _S1626);
 
     }
 
@@ -16389,10 +16434,10 @@ static void lineFrame_0(uint32_t begin_25, uint32_t n_43, uint32_t k_32, Vector<
 }
 
 
-void _LinesCS(void* _S1624, void* entryPointParams_9, void* globalParams_10)
+void _LinesCS(void* _S1627, void* entryPointParams_9, void* globalParams_10)
 {
 
-    ComputeThreadVaryingInput * _S1625 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S1624));
+    ComputeThreadVaryingInput * _S1628 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S1627));
 
     KernelContext_0 kernelContext_121;
 
@@ -16402,19 +16447,19 @@ void _LinesCS(void* _S1624, void* entryPointParams_9, void* globalParams_10)
 
     (&kernelContext_121)->sTableBase_0 = 0U;
 
-    uint32_t _S1626 = threadIndex_0(_S1625->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S1625->groupThreadID, 64U, &kernelContext_121);
+    uint32_t _S1629 = threadIndex_0(_S1628->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S1628->groupThreadID, 64U, &kernelContext_121);
 
-    if(_S1626 >= ((&kernelContext_121)->globalParams_0->Look_0->gStrandCount_0))
+    if(_S1629 >= ((&kernelContext_121)->globalParams_0->Look_0->gStrandCount_0))
     {
 
         return;
     }
 
-    uint32_t _S1627 = strandBegin_0(_S1626, &kernelContext_121);
+    uint32_t _S1630 = strandBegin_0(_S1629, &kernelContext_121);
 
-    uint32_t _S1628 = strandCountOf_0(_S1626, &kernelContext_121);
+    uint32_t _S1631 = strandCountOf_0(_S1629, &kernelContext_121);
 
-    Vector<float, 3>  _S1629 = rootNormal_1(_S1626, &kernelContext_121);
+    Vector<float, 3>  _S1632 = rootNormal_1(_S1629, &kernelContext_121);
 
     uint32_t k_33 = 0U;
 
@@ -16422,7 +16467,7 @@ void _LinesCS(void* _S1624, void* entryPointParams_9, void* globalParams_10)
     for(;;)
     {
 
-        if(k_33 < _S1628)
+        if(k_33 < _S1631)
         {
         }
         else
@@ -16437,13 +16482,13 @@ void _LinesCS(void* _S1624, void* entryPointParams_9, void* globalParams_10)
 
         Vector<float, 3>  side_2;
 
-        lineFrame_0(_S1627, _S1628, k_33, _S1629, &t_36, &nrm_4, &side_2, &kernelContext_121);
+        lineFrame_0(_S1630, _S1631, k_33, _S1632, &t_36, &nrm_4, &side_2, &kernelContext_121);
 
-        uint32_t _S1630 = _S1627 + k_33;
+        uint32_t _S1633 = _S1630 + k_33;
 
-        storePoint_0((&kernelContext_121)->globalParams_0->gOut_0, _S1630, nrm_4);
-        storePoint_0((&kernelContext_121)->globalParams_0->gOut2_0, _S1630, t_36);
-        storePoint_0((&kernelContext_121)->globalParams_0->gOut3_0, _S1630, side_2);
+        storePoint_0((&kernelContext_121)->globalParams_0->gOut_0, _S1633, nrm_4);
+        storePoint_0((&kernelContext_121)->globalParams_0->gOut2_0, _S1633, t_36);
+        storePoint_0((&kernelContext_121)->globalParams_0->gOut3_0, _S1633, side_2);
 
         k_33 = k_33 + 1U;
 
@@ -16453,10 +16498,10 @@ void _LinesCS(void* _S1624, void* entryPointParams_9, void* globalParams_10)
 }
 
 
-void _LinesPointsCS(void* _S1631, void* entryPointParams_10, void* globalParams_11)
+void _LinesPointsCS(void* _S1634, void* entryPointParams_10, void* globalParams_11)
 {
 
-    ComputeThreadVaryingInput * _S1632 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S1631));
+    ComputeThreadVaryingInput * _S1635 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S1634));
 
     KernelContext_0 kernelContext_122;
 
@@ -16466,17 +16511,17 @@ void _LinesPointsCS(void* _S1631, void* entryPointParams_10, void* globalParams_
 
     (&kernelContext_122)->sTableBase_0 = 0U;
 
-    uint32_t _S1633 = threadIndex_0(_S1632->groupID * Vector<uint32_t, 3> (256U, 1U, 1U) + _S1632->groupThreadID, 256U, &kernelContext_122);
+    uint32_t _S1636 = threadIndex_0(_S1635->groupID * Vector<uint32_t, 3> (256U, 1U, 1U) + _S1635->groupThreadID, 256U, &kernelContext_122);
 
-    if(_S1633 >= ((&kernelContext_122)->globalParams_0->Look_0->gPointCount_0))
+    if(_S1636 >= ((&kernelContext_122)->globalParams_0->Look_0->gPointCount_0))
     {
 
         return;
     }
 
-    PointAt_0 _S1634 = pointAt_0(_S1633, &kernelContext_122);
+    PointAt_0 _S1637 = pointAt_0(_S1636, &kernelContext_122);
 
-    Vector<float, 3>  _S1635 = rootNormal_1(_S1634.s_0, &kernelContext_122);
+    Vector<float, 3>  _S1638 = rootNormal_1(_S1637.s_0, &kernelContext_122);
 
     Vector<float, 3>  t_37;
 
@@ -16484,11 +16529,11 @@ void _LinesPointsCS(void* _S1631, void* entryPointParams_10, void* globalParams_
 
     Vector<float, 3>  side_3;
 
-    lineFrame_0(_S1634.begin_3, _S1634.n_3, _S1634.i_0, _S1635, &t_37, &nrm_5, &side_3, &kernelContext_122);
+    lineFrame_0(_S1637.begin_3, _S1637.n_3, _S1637.i_0, _S1638, &t_37, &nrm_5, &side_3, &kernelContext_122);
 
-    storePoint_0((&kernelContext_122)->globalParams_0->gOut_0, _S1633, nrm_5);
-    storePoint_0((&kernelContext_122)->globalParams_0->gOut2_0, _S1633, t_37);
-    storePoint_0((&kernelContext_122)->globalParams_0->gOut3_0, _S1633, side_3);
+    storePoint_0((&kernelContext_122)->globalParams_0->gOut_0, _S1636, nrm_5);
+    storePoint_0((&kernelContext_122)->globalParams_0->gOut2_0, _S1636, t_37);
+    storePoint_0((&kernelContext_122)->globalParams_0->gOut3_0, _S1636, side_3);
     return;
 }
 
@@ -16497,11 +16542,11 @@ static void storeTexel_0(uint32_t t_38, Vector<float, 4>  v_27, KernelContext_0 
 {
 
     uint32_t width_0 = kernelContext_123->globalParams_0->Look_0->gFlag_0.x;
-    uint32_t _S1636 = t_38 % width_0;
+    uint32_t _S1639 = t_38 % width_0;
 
-    uint32_t _S1637 = t_38 / width_0;
+    uint32_t _S1640 = t_38 / width_0;
 
-    kernelContext_123->globalParams_0->gOutTexture_0[Vector<uint32_t, 2> (_S1636, _S1637)] = v_27;
+    kernelContext_123->globalParams_0->gOutTexture_0[Vector<uint32_t, 2> (_S1639, _S1640)] = v_27;
     return;
 }
 
@@ -16511,18 +16556,18 @@ static void pointTexels_0(uint32_t s_35, uint32_t begin_26, uint32_t n_44, uint3
 
     uint32_t p_40 = begin_26 + k_34;
 
-    Vector<float, 3>  _S1638 = loadPoint_0(p_40, kernelContext_124);
-    uint32_t _S1639 = (kernelContext_124->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t(p_40 * 4U)));
+    Vector<float, 3>  _S1641 = loadPoint_0(p_40, kernelContext_124);
+    uint32_t _S1642 = (kernelContext_124->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t(p_40 * 4U)));
 
-    storeTexel_0(p_40, Vector<float, 4> (_S1638.x, _S1638.y, _S1638.z, (U32_asfloat((_S1639)))), kernelContext_124);
+    storeTexel_0(p_40, Vector<float, 4> (_S1641.x, _S1641.y, _S1641.z, (U32_asfloat((_S1642)))), kernelContext_124);
     return;
 }
 
 
-void _PointsTextureCS(void* _S1640, void* entryPointParams_11, void* globalParams_12)
+void _PointsTextureCS(void* _S1643, void* entryPointParams_11, void* globalParams_12)
 {
 
-    ComputeThreadVaryingInput * _S1641 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S1640));
+    ComputeThreadVaryingInput * _S1644 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S1643));
 
     KernelContext_0 kernelContext_125;
 
@@ -16532,24 +16577,24 @@ void _PointsTextureCS(void* _S1640, void* entryPointParams_11, void* globalParam
 
     (&kernelContext_125)->sTableBase_0 = 0U;
 
-    uint32_t _S1642 = threadIndex_0(_S1641->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S1641->groupThreadID, 64U, &kernelContext_125);
+    uint32_t _S1645 = threadIndex_0(_S1644->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S1644->groupThreadID, 64U, &kernelContext_125);
 
-    if(_S1642 >= ((&kernelContext_125)->globalParams_0->Look_0->gStrandCount_0))
+    if(_S1645 >= ((&kernelContext_125)->globalParams_0->Look_0->gStrandCount_0))
     {
 
         return;
     }
 
-    uint32_t _S1643 = strandBegin_0(_S1642, &kernelContext_125);
+    uint32_t _S1646 = strandBegin_0(_S1645, &kernelContext_125);
 
-    uint32_t _S1644 = strandCountOf_0(_S1642, &kernelContext_125);
+    uint32_t _S1647 = strandCountOf_0(_S1645, &kernelContext_125);
 
     uint32_t k_35 = 0U;
 
     for(;;)
     {
 
-        if(k_35 < _S1644)
+        if(k_35 < _S1647)
         {
         }
         else
@@ -16558,7 +16603,7 @@ void _PointsTextureCS(void* _S1640, void* entryPointParams_11, void* globalParam
             break;
         }
 
-        pointTexels_0(_S1642, _S1643, _S1644, k_35, &kernelContext_125);
+        pointTexels_0(_S1645, _S1646, _S1647, k_35, &kernelContext_125);
 
         k_35 = k_35 + 1U;
 
@@ -16567,10 +16612,10 @@ void _PointsTextureCS(void* _S1640, void* entryPointParams_11, void* globalParam
 }
 
 
-void _PointsTexturePointsCS(void* _S1645, void* entryPointParams_12, void* globalParams_13)
+void _PointsTexturePointsCS(void* _S1648, void* entryPointParams_12, void* globalParams_13)
 {
 
-    ComputeThreadVaryingInput * _S1646 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S1645));
+    ComputeThreadVaryingInput * _S1649 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S1648));
 
     KernelContext_0 kernelContext_126;
 
@@ -16580,27 +16625,27 @@ void _PointsTexturePointsCS(void* _S1645, void* entryPointParams_12, void* globa
 
     (&kernelContext_126)->sTableBase_0 = 0U;
 
-    uint32_t _S1647 = threadIndex_0(_S1646->groupID * Vector<uint32_t, 3> (256U, 1U, 1U) + _S1646->groupThreadID, 256U, &kernelContext_126);
+    uint32_t _S1650 = threadIndex_0(_S1649->groupID * Vector<uint32_t, 3> (256U, 1U, 1U) + _S1649->groupThreadID, 256U, &kernelContext_126);
 
-    if(_S1647 >= ((&kernelContext_126)->globalParams_0->Look_0->gPointCount_0))
+    if(_S1650 >= ((&kernelContext_126)->globalParams_0->Look_0->gPointCount_0))
     {
 
         return;
     }
 
-    PointAt_0 _S1648 = pointAt_0(_S1647, &kernelContext_126);
+    PointAt_0 _S1651 = pointAt_0(_S1650, &kernelContext_126);
 
-    pointTexels_0(_S1648.s_0, _S1648.begin_3, _S1648.n_3, _S1648.i_0, &kernelContext_126);
+    pointTexels_0(_S1651.s_0, _S1651.begin_3, _S1651.n_3, _S1651.i_0, &kernelContext_126);
 
 
     return;
 }
 
 
-void _GatherCS(void* _S1649, void* entryPointParams_13, void* globalParams_14)
+void _GatherCS(void* _S1652, void* entryPointParams_13, void* globalParams_14)
 {
 
-    ComputeThreadVaryingInput * _S1650 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S1649));
+    ComputeThreadVaryingInput * _S1653 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S1652));
 
     KernelContext_0 kernelContext_127;
 
@@ -16610,45 +16655,45 @@ void _GatherCS(void* _S1649, void* entryPointParams_13, void* globalParams_14)
 
     (&kernelContext_127)->sTableBase_0 = 0U;
 
-    uint32_t _S1651 = threadIndex_0(_S1650->groupID * Vector<uint32_t, 3> (256U, 1U, 1U) + _S1650->groupThreadID, 256U, &kernelContext_127);
+    uint32_t _S1654 = threadIndex_0(_S1653->groupID * Vector<uint32_t, 3> (256U, 1U, 1U) + _S1653->groupThreadID, 256U, &kernelContext_127);
 
-    if(_S1651 >= ((&kernelContext_127)->globalParams_0->Look_0->gPointCount_0))
+    if(_S1654 >= ((&kernelContext_127)->globalParams_0->Look_0->gPointCount_0))
     {
 
         return;
     }
 
-    uint32_t _S1652 = ((&kernelContext_127)->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t(_S1651 * 4U)));
+    uint32_t _S1655 = ((&kernelContext_127)->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t(_S1654 * 4U)));
 
-    Vector<float, 3>  _S1653 = loadPoint_0(_S1652, &kernelContext_127);
-    storePoint_0((&kernelContext_127)->globalParams_0->gOut_0, _S1651, _S1653);
+    Vector<float, 3>  _S1656 = loadPoint_0(_S1655, &kernelContext_127);
+    storePoint_0((&kernelContext_127)->globalParams_0->gOut_0, _S1654, _S1656);
     if(((&kernelContext_127)->globalParams_0->Look_0->gFlag_0.x) != 0U)
     {
 
-        uint32_t _S1654 = _S1652 * 12U;
+        uint32_t _S1657 = _S1655 * 12U;
 
-        ByteAddressBuffer _S1655 = (&kernelContext_127)->globalParams_0->gAux1_0;
+        ByteAddressBuffer _S1658 = (&kernelContext_127)->globalParams_0->gAux1_0;
 
-        uint32_t _S1656 = ((&kernelContext_127)->globalParams_0->gAux1_0).Load<uint32_t >(_S1654);
+        uint32_t _S1659 = ((&kernelContext_127)->globalParams_0->gAux1_0).Load<uint32_t >(_S1657);
 
-        uint32_t _S1657 = _S1654 + 4U;
+        uint32_t _S1660 = _S1657 + 4U;
 
-        uint32_t _S1658 = (_S1655).Load<uint32_t >(_S1657);
+        uint32_t _S1661 = (_S1658).Load<uint32_t >(_S1660);
 
-        uint32_t _S1659 = _S1654 + 8U;
+        uint32_t _S1662 = _S1657 + 8U;
 
-        uint32_t _S1660 = (_S1655).Load<uint32_t >(_S1659);
+        uint32_t _S1663 = (_S1658).Load<uint32_t >(_S1662);
 
-        storePoint_0((&kernelContext_127)->globalParams_0->gOut2_0, _S1651, asfloat_0(Vector<uint32_t, 3> (_S1656, _S1658, _S1660)));
+        storePoint_0((&kernelContext_127)->globalParams_0->gOut2_0, _S1654, asfloat_0(Vector<uint32_t, 3> (_S1659, _S1661, _S1663)));
 
-        ByteAddressBuffer _S1661 = (&kernelContext_127)->globalParams_0->gAux2_0;
+        ByteAddressBuffer _S1664 = (&kernelContext_127)->globalParams_0->gAux2_0;
 
-        uint32_t _S1662 = ((&kernelContext_127)->globalParams_0->gAux2_0).Load<uint32_t >(_S1654);
+        uint32_t _S1665 = ((&kernelContext_127)->globalParams_0->gAux2_0).Load<uint32_t >(_S1657);
 
-        uint32_t _S1663 = (_S1661).Load<uint32_t >(_S1657);
+        uint32_t _S1666 = (_S1664).Load<uint32_t >(_S1660);
 
-        uint32_t _S1664 = (_S1661).Load<uint32_t >(_S1659);
-        storePoint_0((&kernelContext_127)->globalParams_0->gOut3_0, _S1651, asfloat_0(Vector<uint32_t, 3> (_S1662, _S1663, _S1664)));
+        uint32_t _S1667 = (_S1664).Load<uint32_t >(_S1662);
+        storePoint_0((&kernelContext_127)->globalParams_0->gOut3_0, _S1654, asfloat_0(Vector<uint32_t, 3> (_S1665, _S1666, _S1667)));
 
     }
 
@@ -16658,10 +16703,10 @@ void _GatherCS(void* _S1649, void* entryPointParams_13, void* globalParams_14)
 }
 
 
-void _UvWidthsCS(void* _S1665, void* entryPointParams_14, void* globalParams_15)
+void _UvWidthsCS(void* _S1668, void* entryPointParams_14, void* globalParams_15)
 {
 
-    ComputeThreadVaryingInput * _S1666 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S1665));
+    ComputeThreadVaryingInput * _S1669 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S1668));
 
     KernelContext_0 kernelContext_128;
 
@@ -16671,9 +16716,9 @@ void _UvWidthsCS(void* _S1665, void* entryPointParams_14, void* globalParams_15)
 
     (&kernelContext_128)->sTableBase_0 = 0U;
 
-    uint32_t _S1667 = threadIndex_0(_S1666->groupID * Vector<uint32_t, 3> (256U, 1U, 1U) + _S1666->groupThreadID, 256U, &kernelContext_128);
+    uint32_t _S1670 = threadIndex_0(_S1669->groupID * Vector<uint32_t, 3> (256U, 1U, 1U) + _S1669->groupThreadID, 256U, &kernelContext_128);
 
-    if(_S1667 >= ((&kernelContext_128)->globalParams_0->Look_0->gPointCount_0))
+    if(_S1670 >= ((&kernelContext_128)->globalParams_0->Look_0->gPointCount_0))
     {
 
         return;
@@ -16683,30 +16728,30 @@ void _UvWidthsCS(void* _S1665, void* entryPointParams_14, void* globalParams_15)
     if(((&kernelContext_128)->globalParams_0->Look_0->gFlag_0.x) != 0U)
     {
 
-        uint32_t _S1668 = ((&kernelContext_128)->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t(_S1667 * 4U)));
+        uint32_t _S1671 = ((&kernelContext_128)->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t(_S1670 * 4U)));
 
-        from_0 = _S1668;
+        from_0 = _S1671;
 
     }
     else
     {
 
-        from_0 = _S1667;
+        from_0 = _S1670;
 
     }
-    uint32_t _S1669 = _S1667 * 8U + 4U;
+    uint32_t _S1672 = _S1670 * 8U + 4U;
 
-    uint32_t _S1670 = ((&kernelContext_128)->globalParams_0->gIn_0).Load<uint32_t >(uint32_t(int32_t(from_0 * 4U)));
+    uint32_t _S1673 = ((&kernelContext_128)->globalParams_0->gIn_0).Load<uint32_t >(uint32_t(int32_t(from_0 * 4U)));
 
-    (&kernelContext_128)->globalParams_0->gOut_0.Store(_S1669,_S1670);
+    (&kernelContext_128)->globalParams_0->gOut_0.Store(_S1672,_S1673);
     return;
 }
 
 
-void _PointStrandsCS(void* _S1671, void* entryPointParams_15, void* globalParams_16)
+void _PointStrandsCS(void* _S1674, void* entryPointParams_15, void* globalParams_16)
 {
 
-    ComputeThreadVaryingInput * _S1672 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S1671));
+    ComputeThreadVaryingInput * _S1675 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S1674));
 
     KernelContext_0 kernelContext_129;
 
@@ -16716,24 +16761,24 @@ void _PointStrandsCS(void* _S1671, void* entryPointParams_15, void* globalParams
 
     (&kernelContext_129)->sTableBase_0 = 0U;
 
-    uint32_t _S1673 = threadIndex_0(_S1672->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S1672->groupThreadID, 64U, &kernelContext_129);
+    uint32_t _S1676 = threadIndex_0(_S1675->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S1675->groupThreadID, 64U, &kernelContext_129);
 
-    if(_S1673 >= ((&kernelContext_129)->globalParams_0->Look_0->gStrandCount_0))
+    if(_S1676 >= ((&kernelContext_129)->globalParams_0->Look_0->gStrandCount_0))
     {
 
         return;
     }
 
-    uint32_t _S1674 = strandBegin_0(_S1673, &kernelContext_129);
+    uint32_t _S1677 = strandBegin_0(_S1676, &kernelContext_129);
 
-    uint32_t _S1675 = strandCountOf_0(_S1673, &kernelContext_129);
+    uint32_t _S1678 = strandCountOf_0(_S1676, &kernelContext_129);
 
     uint32_t i_59 = 0U;
 
     for(;;)
     {
 
-        if(i_59 < _S1675)
+        if(i_59 < _S1678)
         {
         }
         else
@@ -16742,7 +16787,7 @@ void _PointStrandsCS(void* _S1671, void* entryPointParams_15, void* globalParams
             break;
         }
 
-        (&kernelContext_129)->globalParams_0->gOut_0.Store((_S1674 + i_59) * 4U,_S1673);
+        (&kernelContext_129)->globalParams_0->gOut_0.Store((_S1677 + i_59) * 4U,_S1676);
 
         i_59 = i_59 + 1U;
 
@@ -16751,12 +16796,12 @@ void _PointStrandsCS(void* _S1671, void* entryPointParams_15, void* globalParams
 }
 
 
-void _WidthPointsCS(void* _S1676, void* entryPointParams_16, void* globalParams_17)
+void _WidthPointsCS(void* _S1679, void* entryPointParams_16, void* globalParams_17)
 {
 
-    uint32_t _S1677;
+    uint32_t _S1680;
 
-    ComputeThreadVaryingInput * _S1678 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S1676));
+    ComputeThreadVaryingInput * _S1681 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S1679));
 
     KernelContext_0 kernelContext_130;
 
@@ -16766,15 +16811,15 @@ void _WidthPointsCS(void* _S1676, void* entryPointParams_16, void* globalParams_
 
     (&kernelContext_130)->sTableBase_0 = 0U;
 
-    uint32_t _S1679 = threadIndex_0(_S1678->groupID * Vector<uint32_t, 3> (256U, 1U, 1U) + _S1678->groupThreadID, 256U, &kernelContext_130);
+    uint32_t _S1682 = threadIndex_0(_S1681->groupID * Vector<uint32_t, 3> (256U, 1U, 1U) + _S1681->groupThreadID, 256U, &kernelContext_130);
 
-    if(_S1679 >= ((&kernelContext_130)->globalParams_0->Look_0->gPointCount_0))
+    if(_S1682 >= ((&kernelContext_130)->globalParams_0->Look_0->gPointCount_0))
     {
 
         return;
     }
 
-    PointAt_0 _S1680 = pointAt_0(_S1679, &kernelContext_130);
+    PointAt_0 _S1683 = pointAt_0(_S1682, &kernelContext_130);
 
     float along_7 = 0.0f;
 
@@ -16786,9 +16831,9 @@ void _WidthPointsCS(void* _S1676, void* entryPointParams_16, void* globalParams_
     for(;;)
     {
 
-        _S1677 = _S1680.n_3;
+        _S1680 = _S1683.n_3;
 
-        if(k_36 < (_S1680.n_3))
+        if(k_36 < (_S1683.n_3))
         {
         }
         else
@@ -16797,14 +16842,14 @@ void _WidthPointsCS(void* _S1676, void* entryPointParams_16, void* globalParams_
             break;
         }
 
-        uint32_t _S1681 = _S1680.begin_3 + k_36;
+        uint32_t _S1684 = _S1683.begin_3 + k_36;
 
-        Vector<float, 3>  _S1682 = loadPoint_0(_S1681, &kernelContext_130);
+        Vector<float, 3>  _S1685 = loadPoint_0(_S1684, &kernelContext_130);
 
-        Vector<float, 3>  _S1683 = loadPoint_0(_S1681 - 1U, &kernelContext_130);
+        Vector<float, 3>  _S1686 = loadPoint_0(_S1684 - 1U, &kernelContext_130);
 
-        float total_5 = total_4 + len3_0(_S1682 - _S1683);
-        if(k_36 == (_S1680.i_0))
+        float total_5 = total_4 + len3_0(_S1685 - _S1686);
+        if(k_36 == (_S1683.i_0))
         {
 
             along_7 = total_5;
@@ -16824,11 +16869,11 @@ void _WidthPointsCS(void* _S1676, void* entryPointParams_16, void* globalParams_
     if(((&kernelContext_130)->globalParams_0->Look_0->gValue_0.y) > 0.0f)
     {
 
-        float _S1684 = (&kernelContext_130)->globalParams_0->Look_0->gValue_0.y;
+        float _S1687 = (&kernelContext_130)->globalParams_0->Look_0->gValue_0.y;
 
-        Vector<float, 4>  _S1685 = strandData_0(_S1680.s_0, &kernelContext_130);
+        Vector<float, 4>  _S1688 = strandData_0(_S1683.s_0, &kernelContext_130);
 
-        vary_2 = 1.0f + _S1684 * _S1685.x;
+        vary_2 = 1.0f + _S1687 * _S1688.x;
 
     }
     else
@@ -16848,10 +16893,10 @@ void _WidthPointsCS(void* _S1676, void* entryPointParams_16, void* globalParams_
     else
     {
 
-        if(_S1677 > 1U)
+        if(_S1680 > 1U)
         {
 
-            along_7 = float(_S1680.i_0) / float(_S1677 - 1U);
+            along_7 = float(_S1683.i_0) / float(_S1680 - 1U);
 
         }
         else
@@ -16865,38 +16910,38 @@ void _WidthPointsCS(void* _S1676, void* entryPointParams_16, void* globalParams_
 
     }
 
-    bool _S1686 = fieldPerPoint_0(0U, &kernelContext_130);
-    if(_S1686)
+    bool _S1689 = fieldPerPoint_0(0U, &kernelContext_130);
+    if(_S1689)
     {
 
-        float _S1687 = fieldAt_0(0U, (&kernelContext_130)->globalParams_0->Look_0->gValue_0.x, _S1680.s_0, _S1679, &kernelContext_130);
+        float _S1690 = fieldAt_0(0U, (&kernelContext_130)->globalParams_0->Look_0->gValue_0.x, _S1683.s_0, _S1682, &kernelContext_130);
 
-        along_7 = _S1687;
+        along_7 = _S1690;
 
     }
     else
     {
 
-        float _S1688 = fieldAt_0(0U, (&kernelContext_130)->globalParams_0->Look_0->gValue_0.x, _S1680.s_0, 0U, &kernelContext_130);
+        float _S1691 = fieldAt_0(0U, (&kernelContext_130)->globalParams_0->Look_0->gValue_0.x, _S1683.s_0, 0U, &kernelContext_130);
 
-        along_7 = _S1688;
+        along_7 = _S1691;
 
     }
 
     float w_41 = along_7 * vary_2;
-    uint32_t _S1689 = _S1679 * 4U;
+    uint32_t _S1692 = _S1682 * 4U;
 
-    float _S1690 = rampAt_0(t_39, &kernelContext_130);
+    float _S1693 = rampAt_0(t_39, &kernelContext_130);
 
-    (&kernelContext_130)->globalParams_0->gOut_0.Store(_S1689,(F32_asuint((w_41 * _S1690))));
+    (&kernelContext_130)->globalParams_0->gOut_0.Store(_S1692,(F32_asuint((w_41 * _S1693))));
     return;
 }
 
 
-void _ShareCS(void* _S1691, void* entryPointParams_17, void* globalParams_18)
+void _ShareCS(void* _S1694, void* entryPointParams_17, void* globalParams_18)
 {
 
-    ComputeThreadVaryingInput * _S1692 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S1691));
+    ComputeThreadVaryingInput * _S1695 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S1694));
 
     KernelContext_0 kernelContext_131;
 
@@ -16906,22 +16951,22 @@ void _ShareCS(void* _S1691, void* entryPointParams_17, void* globalParams_18)
 
     (&kernelContext_131)->sTableBase_0 = 0U;
 
-    uint32_t _S1693 = threadIndex_0(_S1692->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S1692->groupThreadID, 64U, &kernelContext_131);
+    uint32_t _S1696 = threadIndex_0(_S1695->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S1695->groupThreadID, 64U, &kernelContext_131);
 
-    if(_S1693 >= ((&kernelContext_131)->globalParams_0->Look_0->gFlag_0.x))
+    if(_S1696 >= ((&kernelContext_131)->globalParams_0->Look_0->gFlag_0.x))
     {
 
         return;
     }
 
-    uint32_t base_7 = _S1693 * 32U;
-    uint32_t _S1694 = _S1693 * 36U;
+    uint32_t base_7 = _S1696 * 32U;
+    uint32_t _S1697 = _S1696 * 36U;
 
-    uint32_t _S1695 = ((&kernelContext_131)->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t(_S1694)));
+    uint32_t _S1698 = ((&kernelContext_131)->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t(_S1697)));
 
-    Vector<float, 3>  _S1696 = loadPoint_0(base_7, &kernelContext_131);
+    Vector<float, 3>  _S1699 = loadPoint_0(base_7, &kernelContext_131);
 
-    storePoint_0((&kernelContext_131)->globalParams_0->gOut_0, base_7, _S1696);
+    storePoint_0((&kernelContext_131)->globalParams_0->gOut_0, base_7, _S1699);
 
     uint32_t i_60 = 1U;
     for(;;)
@@ -16936,13 +16981,13 @@ void _ShareCS(void* _S1691, void* entryPointParams_17, void* globalParams_18)
             break;
         }
 
-        uint32_t _S1697 = base_7 + i_60;
+        uint32_t _S1700 = base_7 + i_60;
 
-        Vector<float, 3>  _S1698 = loadPoint_0(_S1697, &kernelContext_131);
-        if(_S1695 == 0U)
+        Vector<float, 3>  _S1701 = loadPoint_0(_S1700, &kernelContext_131);
+        if(_S1698 == 0U)
         {
 
-            storePoint_0((&kernelContext_131)->globalParams_0->gOut_0, _S1697, _S1698);
+            storePoint_0((&kernelContext_131)->globalParams_0->gOut_0, _S1700, _S1701);
             i_60 = i_60 + 1U;
 
             continue;
@@ -16955,7 +17000,7 @@ void _ShareCS(void* _S1691, void* entryPointParams_17, void* globalParams_18)
         for(;;)
         {
 
-            if(j_24 < _S1695)
+            if(j_24 < _S1698)
             {
             }
             else
@@ -16964,29 +17009,29 @@ void _ShareCS(void* _S1691, void* entryPointParams_17, void* globalParams_18)
                 break;
             }
 
-            uint32_t _S1699 = ((&kernelContext_131)->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t(_S1694 + (1U + j_24) * 4U)));
+            uint32_t _S1702 = ((&kernelContext_131)->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t(_S1697 + (1U + j_24) * 4U)));
 
-            uint32_t other_1 = _S1699 * 32U;
-            uint32_t _S1700 = ((&kernelContext_131)->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t(_S1694 + (5U + j_24) * 4U)));
+            uint32_t other_1 = _S1702 * 32U;
+            uint32_t _S1703 = ((&kernelContext_131)->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t(_S1697 + (5U + j_24) * 4U)));
 
-            float w_42 = (U32_asfloat((_S1700)));
+            float w_42 = (U32_asfloat((_S1703)));
 
-            Vector<float, 3>  _S1701 = loadPoint_0(other_1 + i_60, &kernelContext_131);
+            Vector<float, 3>  _S1704 = loadPoint_0(other_1 + i_60, &kernelContext_131);
 
-            Vector<float, 3>  _S1702 = loadPoint_0(other_1, &kernelContext_131);
-            Vector<float, 3>  part_5 = (_S1701 - _S1702) * (Vector<float, 3> )w_42;
-            Vector<float, 3>  _S1703 = shape_0 + part_5;
+            Vector<float, 3>  _S1705 = loadPoint_0(other_1, &kernelContext_131);
+            Vector<float, 3>  part_5 = (_S1704 - _S1705) * (Vector<float, 3> )w_42;
+            Vector<float, 3>  _S1706 = shape_0 + part_5;
 
             uint32_t j_25 = j_24 + 1U;
 
-            shape_0 = _S1703;
+            shape_0 = _S1706;
 
             j_24 = j_25;
 
         }
 
-        Vector<float, 3>  offset_11 = _S1698 - _S1696;
-        storePoint_0((&kernelContext_131)->globalParams_0->gOut_0, _S1697, _S1696 + offset_11 + (shape_0 - offset_11) * (Vector<float, 3> )(&kernelContext_131)->globalParams_0->Look_0->gValue2_0.z);
+        Vector<float, 3>  offset_11 = _S1701 - _S1699;
+        storePoint_0((&kernelContext_131)->globalParams_0->gOut_0, _S1700, _S1699 + offset_11 + (shape_0 - offset_11) * (Vector<float, 3> )(&kernelContext_131)->globalParams_0->Look_0->gValue2_0.z);
 
         i_60 = i_60 + 1U;
 
@@ -17006,21 +17051,21 @@ static Vector<float, 3>  div3Exact_0(Vector<float, 3>  v_28, float d_31)
 static Vector<float, 3>  curlAxisSample_0(uint32_t c_31, uint32_t k_37, KernelContext_0 * kernelContext_132)
 {
 
-    Vector<float, 3>  _S1704 = Vector<float, 3> (0.0f, 0.0f, 0.0f);
-    uint32_t _S1705 = c_31 * 4U;
+    Vector<float, 3>  _S1707 = Vector<float, 3> (0.0f, 0.0f, 0.0f);
+    uint32_t _S1708 = c_31 * 4U;
 
-    uint32_t _S1706 = (kernelContext_132->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t(_S1705)));
+    uint32_t _S1709 = (kernelContext_132->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t(_S1708)));
 
-    uint32_t _S1707 = (kernelContext_132->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t(_S1705 + 4U)));
-    float _S1708 = divExact_0(float(k_37), 31.0f);
+    uint32_t _S1710 = (kernelContext_132->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t(_S1708 + 4U)));
+    float _S1711 = divExact_0(float(k_37), 31.0f);
 
-    Vector<float, 3>  sum_8 = _S1704;
+    Vector<float, 3>  sum_8 = _S1707;
 
-    uint32_t m_9 = _S1706;
+    uint32_t m_9 = _S1709;
     for(;;)
     {
 
-        if(m_9 < _S1707)
+        if(m_9 < _S1710)
         {
         }
         else
@@ -17029,18 +17074,18 @@ static Vector<float, 3>  curlAxisSample_0(uint32_t c_31, uint32_t k_37, KernelCo
             break;
         }
 
-        uint32_t _S1709 = (kernelContext_132->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t((kernelContext_132->globalParams_0->Look_0->gFlag_0.x + 1U + m_9) * 4U)));
+        uint32_t _S1712 = (kernelContext_132->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t((kernelContext_132->globalParams_0->Look_0->gFlag_0.x + 1U + m_9) * 4U)));
 
-        uint32_t _S1710 = strandBegin_0(_S1709, kernelContext_132);
+        uint32_t _S1713 = strandBegin_0(_S1712, kernelContext_132);
 
-        uint32_t _S1711 = strandCountOf_0(_S1709, kernelContext_132);
+        uint32_t _S1714 = strandCountOf_0(_S1712, kernelContext_132);
 
-        if(_S1711 > 0U)
+        if(_S1714 > 0U)
         {
 
-            Vector<float, 3>  _S1712 = curvePointAtExact_0(_S1710, _S1711, _S1708, kernelContext_132);
+            Vector<float, 3>  _S1715 = curvePointAtExact_0(_S1713, _S1714, _S1711, kernelContext_132);
 
-            sum_8 = add3Exact_0(sum_8, _S1712);
+            sum_8 = add3Exact_0(sum_8, _S1715);
 
         }
 
@@ -17048,37 +17093,37 @@ static Vector<float, 3>  curlAxisSample_0(uint32_t c_31, uint32_t k_37, KernelCo
 
     }
 
-    return div3Exact_0(sum_8, float(_S1707 - _S1706));
+    return div3Exact_0(sum_8, float(_S1710 - _S1709));
 }
 
 
 static void curlAxesAlone_0(Vector<uint32_t, 3>  id_1, Vector<uint32_t, 3>  local_0, KernelContext_0 * kernelContext_133)
 {
 
-    uint32_t _S1713 = local_0.x;
+    uint32_t _S1716 = local_0.x;
 
-    uint32_t k_38 = _S1713 % 32U;
+    uint32_t k_38 = _S1716 % 32U;
 
-    uint32_t slot_0 = _S1713 / 32U;
+    uint32_t slot_0 = _S1716 / 32U;
 
-    uint32_t _S1714 = threadIndex_0(id_1, 64U, kernelContext_133);
-    uint32_t c_32 = _S1714 / 64U * 2U + slot_0;
+    uint32_t _S1717 = threadIndex_0(id_1, 64U, kernelContext_133);
+    uint32_t c_32 = _S1717 / 64U * 2U + slot_0;
 
-    bool _S1715;
+    bool _S1718;
     if(k_38 != 0U)
     {
 
-        _S1715 = true;
+        _S1718 = true;
 
     }
     else
     {
 
-        _S1715 = c_32 >= (kernelContext_133->globalParams_0->Look_0->gFlag_0.x);
+        _S1718 = c_32 >= (kernelContext_133->globalParams_0->Look_0->gFlag_0.x);
 
     }
 
-    if(_S1715)
+    if(_S1718)
     {
 
         return;
@@ -17099,9 +17144,9 @@ static void curlAxesAlone_0(Vector<uint32_t, 3>  id_1, Vector<uint32_t, 3>  loca
             break;
         }
 
-        Vector<float, 3>  _S1716 = curlAxisSample_0(c_32, j_26, kernelContext_133);
+        Vector<float, 3>  _S1719 = curlAxisSample_0(c_32, j_26, kernelContext_133);
 
-        (&axis_5)->p_0[j_26] = _S1716;
+        (&axis_5)->p_0[j_26] = _S1719;
 
         j_26 = j_26 + 1U;
 
@@ -17120,18 +17165,18 @@ static void curlAxesAlone_0(Vector<uint32_t, 3>  id_1, Vector<uint32_t, 3>  loca
             break;
         }
 
-        OwnAxis_0 _S1717 = axis_5;
+        OwnAxis_0 _S1720 = axis_5;
 
-        Vector<float, 3>  _S1718 = curlAxisSlope_0(&_S1717, j_26);
+        Vector<float, 3>  _S1721 = curlAxisSlope_0(&_S1720, j_26);
 
-        (&axis_5)->d_0[j_26] = _S1718;
+        (&axis_5)->d_0[j_26] = _S1721;
 
         j_26 = j_26 + 1U;
 
     }
     uint32_t base_8 = c_32 * 576U;
 
-    uint32_t _S1719 = base_8 + 96U;
+    uint32_t _S1722 = base_8 + 96U;
 
     j_26 = 0U;
     for(;;)
@@ -17146,22 +17191,11 @@ static void curlAxesAlone_0(Vector<uint32_t, 3>  id_1, Vector<uint32_t, 3>  loca
             break;
         }
 
-        uint32_t _S1720 = j_26 * 3U;
+        uint32_t _S1723 = j_26 * 3U;
 
-        uint32_t _S1721 = (base_8 + _S1720) * 4U;
+        uint32_t _S1724 = (base_8 + _S1723) * 4U;
 
-        Vector<uint32_t, 3>  _S1722 = asuint_0((&axis_5)->p_0[j_26]);
-
-        RWByteAddressBuffer _S1723 = kernelContext_133->globalParams_0->gOut_0;
-
-        kernelContext_133->globalParams_0->gOut_0.Store(_S1721,_S1722.x);
-
-        _S1723.Store(_S1721 + 4U,_S1722.y);
-
-        _S1723.Store(_S1721 + 8U,_S1722.z);
-        uint32_t _S1724 = (_S1719 + _S1720) * 4U;
-
-        Vector<uint32_t, 3>  _S1725 = asuint_0((&axis_5)->d_0[j_26]);
+        Vector<uint32_t, 3>  _S1725 = asuint_0((&axis_5)->p_0[j_26]);
 
         RWByteAddressBuffer _S1726 = kernelContext_133->globalParams_0->gOut_0;
 
@@ -17170,23 +17204,34 @@ static void curlAxesAlone_0(Vector<uint32_t, 3>  id_1, Vector<uint32_t, 3>  loca
         _S1726.Store(_S1724 + 4U,_S1725.y);
 
         _S1726.Store(_S1724 + 8U,_S1725.z);
+        uint32_t _S1727 = (_S1722 + _S1723) * 4U;
+
+        Vector<uint32_t, 3>  _S1728 = asuint_0((&axis_5)->d_0[j_26]);
+
+        RWByteAddressBuffer _S1729 = kernelContext_133->globalParams_0->gOut_0;
+
+        kernelContext_133->globalParams_0->gOut_0.Store(_S1727,_S1728.x);
+
+        _S1729.Store(_S1727 + 4U,_S1728.y);
+
+        _S1729.Store(_S1727 + 8U,_S1728.z);
 
         j_26 = j_26 + 1U;
 
     }
 
-    OwnAxis_0 _S1727 = axis_5;
+    OwnAxis_0 _S1730 = axis_5;
 
-    curlAxisAlong_0(c_32, &_S1727, kernelContext_133);
+    curlAxisAlong_0(c_32, &_S1730, kernelContext_133);
 
     return;
 }
 
 
-void _CurlAxesCS(void* _S1728, void* entryPointParams_18, void* globalParams_19)
+void _CurlAxesCS(void* _S1731, void* entryPointParams_18, void* globalParams_19)
 {
 
-    ComputeThreadVaryingInput * _S1729 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S1728));
+    ComputeThreadVaryingInput * _S1732 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S1731));
 
     KernelContext_0 kernelContext_134;
 
@@ -17196,7 +17241,7 @@ void _CurlAxesCS(void* _S1728, void* entryPointParams_18, void* globalParams_19)
 
     (&kernelContext_134)->sTableBase_0 = 0U;
 
-    curlAxesAlone_0(_S1729->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S1729->groupThreadID, _S1729->groupThreadID, &kernelContext_134);
+    curlAxesAlone_0(_S1732->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S1732->groupThreadID, _S1732->groupThreadID, &kernelContext_134);
 
     return;
 }
@@ -17205,19 +17250,19 @@ void _CurlAxesCS(void* _S1728, void* entryPointParams_18, void* globalParams_19)
 static Vector<float, 4>  turnAboutAxis_0(Vector<float, 3>  unitAxis_0, float angle_7)
 {
 
-    float _S1730 = 0.5f * angle_7;
+    float _S1733 = 0.5f * angle_7;
 
-    return Vector<float, 4> ((unitAxis_0 * (Vector<float, 3> )(groomlab_pm_sin((_S1730)))).x, (unitAxis_0 * (Vector<float, 3> )(groomlab_pm_sin((_S1730)))).y, (unitAxis_0 * (Vector<float, 3> )(groomlab_pm_sin((_S1730)))).z, (groomlab_pm_cos((_S1730))));
+    return Vector<float, 4> ((unitAxis_0 * (Vector<float, 3> )(groomlab_pm_sin((_S1733)))).x, (unitAxis_0 * (Vector<float, 3> )(groomlab_pm_sin((_S1733)))).y, (unitAxis_0 * (Vector<float, 3> )(groomlab_pm_sin((_S1733)))).z, (groomlab_pm_cos((_S1733))));
 }
 
 
 static Vector<float, 3>  turnApplied_0(Vector<float, 4>  q_10, Vector<float, 3>  p_41)
 {
 
-    Vector<float, 3>  _S1731 = Vector<float, 3> {q_10.x, q_10.y, q_10.z};
+    Vector<float, 3>  _S1734 = Vector<float, 3> {q_10.x, q_10.y, q_10.z};
 
-    Vector<float, 3>  c_33 = cross_0(_S1731, p_41);
-    return p_41 + c_33 * (Vector<float, 3> )(2.0f * q_10.w) + cross_0(_S1731, c_33) * (Vector<float, 3> )2.0f;
+    Vector<float, 3>  c_33 = cross_0(_S1734, p_41);
+    return p_41 + c_33 * (Vector<float, 3> )(2.0f * q_10.w) + cross_0(_S1734, c_33) * (Vector<float, 3> )2.0f;
 }
 
 
@@ -17260,10 +17305,10 @@ static Vector<float, 3>  turnedToward_0(Vector<float, 3>  dir_0, Vector<float, 3
 }
 
 
-void _PartCS(void* _S1732, void* entryPointParams_19, void* globalParams_20)
+void _PartCS(void* _S1735, void* entryPointParams_19, void* globalParams_20)
 {
 
-    ComputeThreadVaryingInput * _S1733 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S1732));
+    ComputeThreadVaryingInput * _S1736 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S1735));
 
     KernelContext_0 kernelContext_135;
 
@@ -17273,73 +17318,73 @@ void _PartCS(void* _S1732, void* entryPointParams_19, void* globalParams_20)
 
     (&kernelContext_135)->sTableBase_0 = 0U;
 
-    uint32_t _S1734 = threadIndex_0(_S1733->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S1733->groupThreadID, 64U, &kernelContext_135);
+    uint32_t _S1737 = threadIndex_0(_S1736->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S1736->groupThreadID, 64U, &kernelContext_135);
 
-    if(_S1734 >= ((&kernelContext_135)->globalParams_0->Look_0->gStrandCount_0))
+    if(_S1737 >= ((&kernelContext_135)->globalParams_0->Look_0->gStrandCount_0))
     {
 
         return;
     }
 
-    uint32_t _S1735 = strandBegin_0(_S1734, &kernelContext_135);
+    uint32_t _S1738 = strandBegin_0(_S1737, &kernelContext_135);
 
-    uint32_t _S1736 = strandCountOf_0(_S1734, &kernelContext_135);
+    uint32_t _S1739 = strandCountOf_0(_S1737, &kernelContext_135);
 
-    uint32_t _S1737 = _S1734 * 16U;
+    uint32_t _S1740 = _S1737 * 16U;
 
-    ByteAddressBuffer _S1738 = (&kernelContext_135)->globalParams_0->gAux0_0;
+    ByteAddressBuffer _S1741 = (&kernelContext_135)->globalParams_0->gAux0_0;
 
-    uint32_t _S1739 = ((&kernelContext_135)->globalParams_0->gAux0_0).Load<uint32_t >(_S1737);
+    uint32_t _S1742 = ((&kernelContext_135)->globalParams_0->gAux0_0).Load<uint32_t >(_S1740);
 
-    uint32_t _S1740 = (_S1738).Load<uint32_t >(_S1737 + 4U);
+    uint32_t _S1743 = (_S1741).Load<uint32_t >(_S1740 + 4U);
 
-    uint32_t _S1741 = (_S1738).Load<uint32_t >(_S1737 + 8U);
+    uint32_t _S1744 = (_S1741).Load<uint32_t >(_S1740 + 8U);
 
-    uint32_t _S1742 = (_S1738).Load<uint32_t >(_S1737 + 12U);
+    uint32_t _S1745 = (_S1741).Load<uint32_t >(_S1740 + 12U);
 
-    Vector<float, 4>  side_4 = asfloat_1(Vector<uint32_t, 4> (_S1739, _S1740, _S1741, _S1742));
+    Vector<float, 4>  side_4 = asfloat_1(Vector<uint32_t, 4> (_S1742, _S1743, _S1744, _S1745));
     float width_1 = (&kernelContext_135)->globalParams_0->Look_0->gValue_0.y;
 
-    bool _S1743;
+    bool _S1746;
 
-    if(_S1736 >= 2U)
+    if(_S1739 >= 2U)
     {
 
-        _S1743 = (side_4.w) >= 0.0f;
+        _S1746 = (side_4.w) >= 0.0f;
 
     }
     else
     {
 
-        _S1743 = false;
+        _S1746 = false;
 
     }
 
-    if(_S1743)
+    if(_S1746)
     {
 
-        _S1743 = (side_4.w) < width_1;
+        _S1746 = (side_4.w) < width_1;
 
     }
     else
     {
 
-        _S1743 = false;
+        _S1746 = false;
 
     }
 
     float amount_2;
 
-    if(_S1743)
+    if(_S1746)
     {
 
-        float _S1744 = side_4.w;
+        float _S1747 = side_4.w;
 
-        float falloff_0 = (1.0f - _S1744 / width_1) * (1.0f - _S1744 / width_1);
+        float falloff_0 = (1.0f - _S1747 / width_1) * (1.0f - _S1747 / width_1);
 
-        float _S1745 = fieldAt_0(0U, (&kernelContext_135)->globalParams_0->Look_0->gValue_0.x, _S1734, 0U, &kernelContext_135);
+        float _S1748 = fieldAt_0(0U, (&kernelContext_135)->globalParams_0->Look_0->gValue_0.x, _S1737, 0U, &kernelContext_135);
 
-        amount_2 = clamp_0(_S1745, 0.0f, 1.0f) * falloff_0;
+        amount_2 = clamp_0(_S1748, 0.0f, 1.0f) * falloff_0;
 
     }
     else
@@ -17355,26 +17400,26 @@ void _PartCS(void* _S1732, void* entryPointParams_19, void* globalParams_20)
     if(amount_2 <= 0.0f)
     {
 
-        _S1743 = true;
+        _S1746 = true;
 
     }
     else
     {
 
-        _S1743 = (len3_0(away_4)) == 0.0f;
+        _S1746 = (len3_0(away_4)) == 0.0f;
 
     }
 
     uint32_t i_61;
 
-    if(_S1743)
+    if(_S1746)
     {
 
         i_61 = 0U;
         for(;;)
         {
 
-            if(i_61 < _S1736)
+            if(i_61 < _S1739)
             {
             }
             else
@@ -17383,11 +17428,11 @@ void _PartCS(void* _S1732, void* entryPointParams_19, void* globalParams_20)
                 break;
             }
 
-            uint32_t _S1746 = _S1735 + i_61;
+            uint32_t _S1749 = _S1738 + i_61;
 
-            Vector<float, 3>  _S1747 = loadPoint_0(_S1746, &kernelContext_135);
+            Vector<float, 3>  _S1750 = loadPoint_0(_S1749, &kernelContext_135);
 
-            storePoint_0((&kernelContext_135)->globalParams_0->gOut_0, _S1746, _S1747);
+            storePoint_0((&kernelContext_135)->globalParams_0->gOut_0, _S1749, _S1750);
 
             i_61 = i_61 + 1U;
 
@@ -17395,20 +17440,20 @@ void _PartCS(void* _S1732, void* entryPointParams_19, void* globalParams_20)
         return;
     }
 
-    Vector<float, 3>  _S1748 = loadPoint_0(_S1735, &kernelContext_135);
+    Vector<float, 3>  _S1751 = loadPoint_0(_S1738, &kernelContext_135);
 
 
-    storePoint_0((&kernelContext_135)->globalParams_0->gOut_0, _S1735, _S1748);
+    storePoint_0((&kernelContext_135)->globalParams_0->gOut_0, _S1738, _S1751);
 
-    Vector<float, 3>  prevOriginal_0 = _S1748;
+    Vector<float, 3>  prevOriginal_0 = _S1751;
 
-    Vector<float, 3>  p_42 = _S1748;
+    Vector<float, 3>  p_42 = _S1751;
 
     i_61 = 1U;
     for(;;)
     {
 
-        if(i_61 < _S1736)
+        if(i_61 < _S1739)
         {
         }
         else
@@ -17417,29 +17462,29 @@ void _PartCS(void* _S1732, void* entryPointParams_19, void* globalParams_20)
             break;
         }
 
-        uint32_t _S1749 = _S1735 + i_61;
+        uint32_t _S1752 = _S1738 + i_61;
 
-        Vector<float, 3>  _S1750 = loadPoint_0(_S1749, &kernelContext_135);
-        Vector<float, 3>  seg_5 = _S1750 - prevOriginal_0;
+        Vector<float, 3>  _S1753 = loadPoint_0(_S1752, &kernelContext_135);
+        Vector<float, 3>  seg_5 = _S1753 - prevOriginal_0;
 
         float len_5 = len3_0(seg_5);
 
         if(len_5 > 0.0f)
         {
 
-            float _S1751 = rampAlong_0(i_61, _S1736, &kernelContext_135);
+            float _S1754 = rampAlong_0(i_61, _S1739, &kernelContext_135);
 
-            p_42 = p_42 + turnedToward_0(seg_5 / (Vector<float, 3> )len_5, normalized_0(away_4), clamp_0(amount_2 * _S1751, 0.0f, 1.0f)) * (Vector<float, 3> )len_5;
+            p_42 = p_42 + turnedToward_0(seg_5 / (Vector<float, 3> )len_5, normalized_0(away_4), clamp_0(amount_2 * _S1754, 0.0f, 1.0f)) * (Vector<float, 3> )len_5;
 
         }
 
 
 
-        storePoint_0((&kernelContext_135)->globalParams_0->gOut_0, _S1749, p_42);
+        storePoint_0((&kernelContext_135)->globalParams_0->gOut_0, _S1752, p_42);
 
         uint32_t i_62 = i_61 + 1U;
 
-        prevOriginal_0 = _S1750;
+        prevOriginal_0 = _S1753;
 
         i_61 = i_62;
 
@@ -17449,10 +17494,10 @@ void _PartCS(void* _S1732, void* entryPointParams_19, void* globalParams_20)
 }
 
 
-void _LongestCS(void* _S1752, void* entryPointParams_20, void* globalParams_21)
+void _LongestCS(void* _S1755, void* entryPointParams_20, void* globalParams_21)
 {
 
-    ComputeThreadVaryingInput * _S1753 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S1752));
+    ComputeThreadVaryingInput * _S1756 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S1755));
 
     KernelContext_0 kernelContext_136;
 
@@ -17464,7 +17509,7 @@ void _LongestCS(void* _S1752, void* entryPointParams_20, void* globalParams_21)
 
 
 
-    if((_S1753->groupThreadID.x) == 0U)
+    if((_S1756->groupThreadID.x) == 0U)
     {
 
         float most_0 = 0.0f;
@@ -17483,18 +17528,18 @@ void _LongestCS(void* _S1752, void* entryPointParams_20, void* globalParams_21)
                 break;
             }
 
-            uint32_t _S1754 = ((&kernelContext_136)->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t(((&kernelContext_136)->globalParams_0->Look_0->gAux_0.x + j_27) * 4U)));
+            uint32_t _S1757 = ((&kernelContext_136)->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t(((&kernelContext_136)->globalParams_0->Look_0->gAux_0.x + j_27) * 4U)));
 
-            uint32_t _S1755 = strandBegin_0(_S1754, &kernelContext_136);
+            uint32_t _S1758 = strandBegin_0(_S1757, &kernelContext_136);
 
-            uint32_t _S1756 = strandCountOf_0(_S1754, &kernelContext_136);
+            uint32_t _S1759 = strandCountOf_0(_S1757, &kernelContext_136);
 
-            float _S1757 = strandLength_0(_S1755, _S1756, &kernelContext_136);
-            float _S1758 = (groomlab_max((most_0), (_S1757)));
+            float _S1760 = strandLength_0(_S1758, _S1759, &kernelContext_136);
+            float _S1761 = (groomlab_max((most_0), (_S1760)));
 
             uint32_t j_28 = j_27 + 1U;
 
-            most_0 = _S1758;
+            most_0 = _S1761;
 
             j_27 = j_28;
 
@@ -17510,215 +17555,215 @@ void _LongestCS(void* _S1752, void* entryPointParams_20, void* globalParams_21)
 }
 
 
-static float powStd_0(float a_52, float b_44)
+static float powStd_0(float a_52, float b_45)
 {
 
-    if(b_44 == 0.0f)
+    if(b_45 == 0.0f)
     {
 
         return 1.0f;
     }
 
-    float _S1759;
+    float _S1762;
     if(a_52 == 0.0f)
     {
 
-        if(b_44 > 0.0f)
+        if(b_45 > 0.0f)
         {
 
-            _S1759 = 0.0f;
+            _S1762 = 0.0f;
 
         }
         else
         {
 
-            _S1759 = (U32_asfloat((2139095040U)));
+            _S1762 = (U32_asfloat((2139095040U)));
 
         }
 
-        return _S1759;
+        return _S1762;
     }
 
     if(a_52 < 0.0f)
     {
 
-        if((groomlab_floor((b_44))) != b_44)
+        if((groomlab_floor((b_45))) != b_45)
         {
 
             return (U32_asfloat((2143289344U)));
         }
 
-        float m_10 = (groomlab_pm_pow((- a_52), (b_44)));
-        if((F32_fmod(((F32_abs((b_44)))), (2.0f))) == 1.0f)
+        float m_10 = (groomlab_pm_pow((- a_52), (b_45)));
+        if((F32_fmod(((F32_abs((b_45)))), (2.0f))) == 1.0f)
         {
 
-            _S1759 = - m_10;
+            _S1762 = - m_10;
 
         }
         else
         {
 
-            _S1759 = m_10;
+            _S1762 = m_10;
 
         }
 
-        return _S1759;
+        return _S1762;
     }
-    return (groomlab_pm_pow((a_52), (b_44)));
+    return (groomlab_pm_pow((a_52), (b_45)));
 }
 
 
-static float fieldBinary_0(uint32_t code_3, float a_53, float b_45)
+static float fieldBinary_0(uint32_t code_3, float a_53, float b_46)
 {
 
-    float _S1760;
+    float _S1763;
     switch(code_3)
     {
     case 0U:
         {
 
-            return a_53 + b_45;
+            return a_53 + b_46;
         }
     case 1U:
         {
 
-            return a_53 - b_45;
+            return a_53 - b_46;
         }
     case 2U:
         {
 
-            return a_53 * b_45;
+            return a_53 * b_46;
         }
     case 3U:
         {
 
-            if(b_45 != 0.0f)
+            if(b_46 != 0.0f)
             {
 
-                _S1760 = a_53 / b_45;
+                _S1763 = a_53 / b_46;
 
             }
             else
             {
 
-                _S1760 = 0.0f;
+                _S1763 = 0.0f;
 
             }
 
-            return _S1760;
+            return _S1763;
         }
     case 4U:
         {
 
-            return powStd_0(a_53, b_45);
+            return powStd_0(a_53, b_46);
         }
     case 5U:
         {
 
-            if(a_53 < b_45)
+            if(a_53 < b_46)
             {
 
-                _S1760 = 1.0f;
+                _S1763 = 1.0f;
 
             }
             else
             {
 
-                _S1760 = 0.0f;
+                _S1763 = 0.0f;
 
             }
 
-            return _S1760;
+            return _S1763;
         }
     case 6U:
         {
 
-            if(a_53 <= b_45)
+            if(a_53 <= b_46)
             {
 
-                _S1760 = 1.0f;
+                _S1763 = 1.0f;
 
             }
             else
             {
 
-                _S1760 = 0.0f;
+                _S1763 = 0.0f;
 
             }
 
-            return _S1760;
+            return _S1763;
         }
     case 7U:
         {
 
-            if(a_53 > b_45)
+            if(a_53 > b_46)
             {
 
-                _S1760 = 1.0f;
+                _S1763 = 1.0f;
 
             }
             else
             {
 
-                _S1760 = 0.0f;
+                _S1763 = 0.0f;
 
             }
 
-            return _S1760;
+            return _S1763;
         }
     case 8U:
         {
 
-            if(a_53 >= b_45)
+            if(a_53 >= b_46)
             {
 
-                _S1760 = 1.0f;
+                _S1763 = 1.0f;
 
             }
             else
             {
 
-                _S1760 = 0.0f;
+                _S1763 = 0.0f;
 
             }
 
-            return _S1760;
+            return _S1763;
         }
     case 9U:
         {
 
-            if(a_53 == b_45)
+            if(a_53 == b_46)
             {
 
-                _S1760 = 1.0f;
+                _S1763 = 1.0f;
 
             }
             else
             {
 
-                _S1760 = 0.0f;
+                _S1763 = 0.0f;
 
             }
 
-            return _S1760;
+            return _S1763;
         }
     default:
         {
 
-            if(a_53 != b_45)
+            if(a_53 != b_46)
             {
 
-                _S1760 = 1.0f;
+                _S1763 = 1.0f;
 
             }
             else
             {
 
-                _S1760 = 0.0f;
+                _S1763 = 0.0f;
 
             }
 
-            return _S1760;
+            return _S1763;
         }
     }
 
@@ -17730,21 +17775,21 @@ static float roundStd_0(float x_31)
 
     float r_34 = (groomlab_floor(((F32_abs((x_31))) + 0.5f)));
 
-    float _S1761;
+    float _S1764;
     if(x_31 < 0.0f)
     {
 
-        _S1761 = - r_34;
+        _S1764 = - r_34;
 
     }
     else
     {
 
-        _S1761 = r_34;
+        _S1764 = r_34;
 
     }
 
-    return _S1761;
+    return _S1764;
 }
 
 
@@ -17755,14 +17800,14 @@ static float pmLog_0(float x_32)
 }
 
 
-static float pmPow_0(float a_54, float b_46)
+static float pmPow_0(float a_54, float b_47)
 {
 
-    return powStd_0(a_54, b_46);
+    return powStd_0(a_54, b_47);
 }
 
 
-static float biasOf_0(float x_33, float b_47)
+static float biasOf_0(float x_33, float b_48)
 {
 
     if(!(x_33 > 0.0f))
@@ -17771,40 +17816,40 @@ static float biasOf_0(float x_33, float b_47)
         return 0.0f;
     }
 
-    if(!(b_47 > 0.0f))
+    if(!(b_48 > 0.0f))
     {
 
         return 0.0f;
     }
 
-    if(b_47 >= 1.0f)
+    if(b_48 >= 1.0f)
     {
 
         return 1.0f;
     }
 
-    return pmPow_0(x_33, pmLog_0(b_47) / pmLog_0(0.5f));
+    return pmPow_0(x_33, pmLog_0(b_48) / pmLog_0(0.5f));
 }
 
 
 static float gainOf_0(float x_34, float g_32)
 {
 
-    float _S1762;
+    float _S1765;
     if(x_34 < 0.5f)
     {
 
-        _S1762 = 0.5f * biasOf_0(2.0f * x_34, 1.0f - g_32);
+        _S1765 = 0.5f * biasOf_0(2.0f * x_34, 1.0f - g_32);
 
     }
     else
     {
 
-        _S1762 = 1.0f - 0.5f * biasOf_0(2.0f - 2.0f * x_34, 1.0f - g_32);
+        _S1765 = 1.0f - 0.5f * biasOf_0(2.0f - 2.0f * x_34, 1.0f - g_32);
 
     }
 
-    return _S1762;
+    return _S1765;
 }
 
 
@@ -17814,54 +17859,54 @@ static float linearstep_0(float e0_1, float e1_1, float x_35)
     if(e0_1 == e1_1)
     {
 
-        float _S1763;
+        float _S1766;
 
         if(x_35 < e0_1)
         {
 
-            _S1763 = 0.0f;
+            _S1766 = 0.0f;
 
         }
         else
         {
 
-            _S1763 = 1.0f;
+            _S1766 = 1.0f;
 
         }
 
-        return _S1763;
+        return _S1766;
     }
 
     return clamp_0((x_35 - e0_1) / (e1_1 - e0_1), 0.0f, 1.0f);
 }
 
 
-static float fitOf_0(float x_36, float a_55, float b_48, float c_35, float d_32)
+static float fitOf_0(float x_36, float a_55, float b_49, float c_35, float d_32)
 {
 
-    float _S1764;
+    float _S1767;
 
-    if(b_48 != a_55)
+    if(b_49 != a_55)
     {
 
-        _S1764 = c_35 + (x_36 - a_55) / (b_48 - a_55) * (d_32 - c_35);
+        _S1767 = c_35 + (x_36 - a_55) / (b_49 - a_55) * (d_32 - c_35);
 
     }
     else
     {
 
-        _S1764 = c_35;
+        _S1767 = c_35;
 
     }
 
-    return _S1764;
+    return _S1767;
 }
 
 
 static float fieldCall_0(uint32_t fn_0, float a0_0, float a1_0, float a2_1, float a3_0, float a4_0)
 {
 
-    float _S1765;
+    float _S1768;
     switch(fn_0)
     {
     case 0U:
@@ -17930,17 +17975,17 @@ static float fieldCall_0(uint32_t fn_0, float a0_0, float a1_0, float a2_1, floa
             if(a0_0 > 0.0f)
             {
 
-                _S1765 = (groomlab_pm_log((a0_0)));
+                _S1768 = (groomlab_pm_log((a0_0)));
 
             }
             else
             {
 
-                _S1765 = 0.0f;
+                _S1768 = 0.0f;
 
             }
 
-            return _S1765;
+            return _S1768;
         }
     case 13U:
         {
@@ -17948,7 +17993,7 @@ static float fieldCall_0(uint32_t fn_0, float a0_0, float a1_0, float a2_1, floa
             if(a0_0 > 0.0f)
             {
 
-                _S1765 = 1.0f;
+                _S1768 = 1.0f;
 
             }
             else
@@ -17957,19 +18002,19 @@ static float fieldCall_0(uint32_t fn_0, float a0_0, float a1_0, float a2_1, floa
                 if(a0_0 < 0.0f)
                 {
 
-                    _S1765 = -1.0f;
+                    _S1768 = -1.0f;
 
                 }
                 else
                 {
 
-                    _S1765 = 0.0f;
+                    _S1768 = 0.0f;
 
                 }
 
             }
 
-            return _S1765;
+            return _S1768;
         }
     case 14U:
         {
@@ -17987,17 +18032,17 @@ static float fieldCall_0(uint32_t fn_0, float a0_0, float a1_0, float a2_1, floa
             if(a1_0 < a0_0)
             {
 
-                _S1765 = a1_0;
+                _S1768 = a1_0;
 
             }
             else
             {
 
-                _S1765 = a0_0;
+                _S1768 = a0_0;
 
             }
 
-            return _S1765;
+            return _S1768;
         }
     case 17U:
         {
@@ -18005,17 +18050,17 @@ static float fieldCall_0(uint32_t fn_0, float a0_0, float a1_0, float a2_1, floa
             if(a0_0 < a1_0)
             {
 
-                _S1765 = a1_0;
+                _S1768 = a1_0;
 
             }
             else
             {
 
-                _S1765 = a0_0;
+                _S1768 = a0_0;
 
             }
 
-            return _S1765;
+            return _S1768;
         }
     case 18U:
         {
@@ -18023,17 +18068,17 @@ static float fieldCall_0(uint32_t fn_0, float a0_0, float a1_0, float a2_1, floa
             if(a1_0 != 0.0f)
             {
 
-                _S1765 = a0_0 - a1_0 * (groomlab_floor((a0_0 / a1_0)));
+                _S1768 = a0_0 - a1_0 * (groomlab_floor((a0_0 / a1_0)));
 
             }
             else
             {
 
-                _S1765 = 0.0f;
+                _S1768 = 0.0f;
 
             }
 
-            return _S1765;
+            return _S1768;
         }
     case 19U:
         {
@@ -18041,17 +18086,17 @@ static float fieldCall_0(uint32_t fn_0, float a0_0, float a1_0, float a2_1, floa
             if(a1_0 < a0_0)
             {
 
-                _S1765 = 0.0f;
+                _S1768 = 0.0f;
 
             }
             else
             {
 
-                _S1765 = 1.0f;
+                _S1768 = 1.0f;
 
             }
 
-            return _S1765;
+            return _S1768;
         }
     case 20U:
         {
@@ -18091,34 +18136,34 @@ static float fieldCall_0(uint32_t fn_0, float a0_0, float a1_0, float a2_1, floa
     case 27U:
         {
 
-            bool _S1766;
+            bool _S1769;
             if(a1_0 > 0.0f)
             {
 
-                _S1766 = a0_0 > 0.0f;
+                _S1769 = a0_0 > 0.0f;
 
             }
             else
             {
 
-                _S1766 = false;
+                _S1769 = false;
 
             }
 
-            if(_S1766)
+            if(_S1769)
             {
 
-                _S1765 = powStd_0(a0_0, 1.0f / a1_0);
+                _S1768 = powStd_0(a0_0, 1.0f / a1_0);
 
             }
             else
             {
 
-                _S1765 = 0.0f;
+                _S1768 = 0.0f;
 
             }
 
-            return _S1765;
+            return _S1768;
         }
     case 28U:
         {
@@ -18165,29 +18210,29 @@ static bool finiteFloat_0(float v_29)
 static float finiteOr0_0(float v_30)
 {
 
-    float _S1767;
+    float _S1770;
 
     if(finiteFloat_0(v_30))
     {
 
-        _S1767 = v_30;
+        _S1770 = v_30;
 
     }
     else
     {
 
-        _S1767 = 0.0f;
+        _S1770 = 0.0f;
 
     }
 
-    return _S1767;
+    return _S1770;
 }
 
 
-void _FieldCS(void* _S1768, void* entryPointParams_21, void* globalParams_22)
+void _FieldCS(void* _S1771, void* entryPointParams_21, void* globalParams_22)
 {
 
-    ComputeThreadVaryingInput * _S1769 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S1768));
+    ComputeThreadVaryingInput * _S1772 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S1771));
 
     KernelContext_0 kernelContext_137;
 
@@ -18197,15 +18242,15 @@ void _FieldCS(void* _S1768, void* entryPointParams_21, void* globalParams_22)
 
     (&kernelContext_137)->sTableBase_0 = 0U;
 
-    uint32_t _S1770 = threadIndex_0(_S1769->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S1769->groupThreadID, 64U, &kernelContext_137);
+    uint32_t _S1773 = threadIndex_0(_S1772->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S1772->groupThreadID, 64U, &kernelContext_137);
 
-    if(_S1770 >= ((&kernelContext_137)->globalParams_0->Look_0->gStrandCount_0))
+    if(_S1773 >= ((&kernelContext_137)->globalParams_0->Look_0->gStrandCount_0))
     {
 
         return;
     }
 
-    uint32_t statics_0 = (&kernelContext_137)->globalParams_0->Look_0->gAux_0.z + _S1770 * (&kernelContext_137)->globalParams_0->Look_0->gAux_0.w;
+    uint32_t statics_0 = (&kernelContext_137)->globalParams_0->Look_0->gAux_0.z + _S1773 * (&kernelContext_137)->globalParams_0->Look_0->gAux_0.w;
 
     FixedArray<float, 8>  shape_1;
 
@@ -18229,28 +18274,28 @@ void _FieldCS(void* _S1768, void* entryPointParams_21, void* globalParams_22)
     if((((&kernelContext_137)->globalParams_0->Look_0->gFlag_0.x) & 1U) != 0U)
     {
 
-        uint32_t _S1771 = strandBegin_0(_S1770, &kernelContext_137);
+        uint32_t _S1774 = strandBegin_0(_S1773, &kernelContext_137);
 
-        uint32_t _S1772 = strandCountOf_0(_S1770, &kernelContext_137);
+        uint32_t _S1775 = strandCountOf_0(_S1773, &kernelContext_137);
 
-        if(_S1772 > 0U)
+        if(_S1775 > 0U)
         {
 
-            float _S1773 = strandLength_0(_S1771, _S1772, &kernelContext_137);
+            float _S1776 = strandLength_0(_S1774, _S1775, &kernelContext_137);
 
-            Vector<float, 3>  _S1774 = loadPoint_0(_S1771 + _S1772 - 1U, &kernelContext_137);
+            Vector<float, 3>  _S1777 = loadPoint_0(_S1774 + _S1775 - 1U, &kernelContext_137);
 
-            Vector<float, 3>  _S1775 = loadPoint_0(_S1771, &kernelContext_137);
+            Vector<float, 3>  _S1778 = loadPoint_0(_S1774, &kernelContext_137);
 
 
-            Vector<float, 3>  span_5 = _S1774 - _S1775;
+            Vector<float, 3>  span_5 = _S1777 - _S1778;
             float reach_2 = len3_0(span_5);
-            shape_1[int(0)] = _S1773;
+            shape_1[int(0)] = _S1776;
             shape_1[int(2)] = reach_2;
-            if(_S1773 > 9.99999993922529029e-09f)
+            if(_S1776 > 9.99999993922529029e-09f)
             {
 
-                a1_1 = reach_2 / _S1773;
+                a1_1 = reach_2 / _S1776;
 
             }
             else
@@ -18264,33 +18309,33 @@ void _FieldCS(void* _S1768, void* entryPointParams_21, void* globalParams_22)
             if((((&kernelContext_137)->globalParams_0->Look_0->gFlag_0.x) & 8U) != 0U)
             {
 
-                uint32_t _S1776 = ((&kernelContext_137)->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t(statics_0 * 4U)));
+                uint32_t _S1779 = ((&kernelContext_137)->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t(statics_0 * 4U)));
 
-                float _S1777 = (U32_asfloat((_S1776)));
+                float _S1780 = (U32_asfloat((_S1779)));
 
-                uint32_t _S1778 = ((&kernelContext_137)->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t((statics_0 + 1U) * 4U)));
+                uint32_t _S1781 = ((&kernelContext_137)->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t((statics_0 + 1U) * 4U)));
 
-                float _S1779 = (U32_asfloat((_S1778)));
-                uint32_t _S1780 = ((&kernelContext_137)->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t((statics_0 + 2U) * 4U)));
+                float _S1782 = (U32_asfloat((_S1781)));
+                uint32_t _S1783 = ((&kernelContext_137)->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t((statics_0 + 2U) * 4U)));
 
-                Vector<float, 3>  normal_4 = Vector<float, 3> (_S1777, _S1779, (U32_asfloat((_S1780))));
+                Vector<float, 3>  normal_4 = Vector<float, 3> (_S1780, _S1782, (U32_asfloat((_S1783))));
 
-                bool _S1781;
+                bool _S1784;
 
                 if(reach_2 > 9.99999993922529029e-09f)
                 {
 
-                    _S1781 = (len3_0(normal_4)) > 0.0f;
+                    _S1784 = (len3_0(normal_4)) > 0.0f;
 
                 }
                 else
                 {
 
-                    _S1781 = false;
+                    _S1784 = false;
 
                 }
 
-                if(_S1781)
+                if(_S1784)
                 {
 
                     a1_1 = dot_0(span_5, normalized_0(normal_4)) / reach_2;
@@ -18307,18 +18352,18 @@ void _FieldCS(void* _S1768, void* entryPointParams_21, void* globalParams_22)
 
             }
 
-            shape_1[int(5)] = _S1774.x;
-            shape_1[int(6)] = _S1774.y;
-            shape_1[int(7)] = _S1774.z;
+            shape_1[int(5)] = _S1777.x;
+            shape_1[int(6)] = _S1777.y;
+            shape_1[int(7)] = _S1777.z;
 
         }
 
         if((((&kernelContext_137)->globalParams_0->Look_0->gFlag_0.x) & 2U) != 0U)
         {
 
-            uint32_t _S1782 = ((&kernelContext_137)->globalParams_0->gAux2_0).Load<uint32_t >(0U);
+            uint32_t _S1785 = ((&kernelContext_137)->globalParams_0->gAux2_0).Load<uint32_t >(0U);
 
-            shape_1[int(1)] = (U32_asfloat((_S1782)));
+            shape_1[int(1)] = (U32_asfloat((_S1785)));
 
         }
 
@@ -18361,64 +18406,64 @@ void _FieldCS(void* _S1768, void* entryPointParams_21, void* globalParams_22)
             break;
         }
 
-        uint32_t _S1783 = ((&kernelContext_137)->globalParams_0->Look_0->gAux_0.x + o_9 * 4U) * 4U;
+        uint32_t _S1786 = ((&kernelContext_137)->globalParams_0->Look_0->gAux_0.x + o_9 * 4U) * 4U;
 
-        ByteAddressBuffer _S1784 = (&kernelContext_137)->globalParams_0->gAux0_0;
+        ByteAddressBuffer _S1787 = (&kernelContext_137)->globalParams_0->gAux0_0;
 
-        uint32_t _S1785 = ((&kernelContext_137)->globalParams_0->gAux0_0).Load<uint32_t >(_S1783);
+        uint32_t _S1788 = ((&kernelContext_137)->globalParams_0->gAux0_0).Load<uint32_t >(_S1786);
 
-        uint32_t _S1786 = (_S1784).Load<uint32_t >(_S1783 + 4U);
+        uint32_t _S1789 = (_S1787).Load<uint32_t >(_S1786 + 4U);
 
-        uint32_t _S1787 = (_S1784).Load<uint32_t >(_S1783 + 8U);
+        uint32_t _S1790 = (_S1787).Load<uint32_t >(_S1786 + 8U);
 
-        uint32_t _S1788 = (_S1784).Load<uint32_t >(_S1783 + 12U);
-        switch(_S1785)
+        uint32_t _S1791 = (_S1787).Load<uint32_t >(_S1786 + 12U);
+        switch(_S1788)
         {
         case 0U:
             {
 
-                uint32_t _S1789 = top_0 + 1U;
+                uint32_t _S1792 = top_0 + 1U;
 
-                stack_0[top_0] = (U32_asfloat((_S1787)));
+                stack_0[top_0] = (U32_asfloat((_S1790)));
 
-                top_0 = _S1789;
+                top_0 = _S1792;
 
                 break;
             }
         case 1U:
             {
 
-                uint32_t _S1790 = top_0 + 1U;
+                uint32_t _S1793 = top_0 + 1U;
 
-                stack_0[top_0] = shape_1[(U32_min((_S1786), (7U)))];
+                stack_0[top_0] = shape_1[(U32_min((_S1789), (7U)))];
 
-                top_0 = _S1790;
+                top_0 = _S1793;
 
                 break;
             }
         case 2U:
             {
 
-                uint32_t _S1791 = top_0 + 1U;
+                uint32_t _S1794 = top_0 + 1U;
 
-                uint32_t _S1792 = ((&kernelContext_137)->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t((statics_0 + _S1788) * 4U)));
+                uint32_t _S1795 = ((&kernelContext_137)->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t((statics_0 + _S1791) * 4U)));
 
-                stack_0[top_0] = (U32_asfloat((_S1792)));
+                stack_0[top_0] = (U32_asfloat((_S1795)));
 
-                top_0 = _S1791;
+                top_0 = _S1794;
 
                 break;
             }
         case 3U:
             {
 
-                uint32_t _S1793 = top_0 + 1U;
+                uint32_t _S1796 = top_0 + 1U;
 
-                uint32_t _S1794 = ((&kernelContext_137)->globalParams_0->gAux1_0).Load<uint32_t >(uint32_t(int32_t(_S1770 * 4U)));
+                uint32_t _S1797 = ((&kernelContext_137)->globalParams_0->gAux1_0).Load<uint32_t >(uint32_t(int32_t(_S1773 * 4U)));
 
-                stack_0[top_0] = (U32_asfloat((_S1794)));
+                stack_0[top_0] = (U32_asfloat((_S1797)));
 
-                top_0 = _S1793;
+                top_0 = _S1796;
 
                 break;
             }
@@ -18433,7 +18478,7 @@ void _FieldCS(void* _S1768, void* entryPointParams_21, void* globalParams_22)
             {
 
                 uint32_t top_1 = top_0 - 1U;
-                stack_0[top_1 - 1U] = fieldBinary_0(_S1786, stack_0[top_1 - 1U], stack_0[top_1]);
+                stack_0[top_1 - 1U] = fieldBinary_0(_S1789, stack_0[top_1 - 1U], stack_0[top_1]);
 
                 top_0 = top_1;
                 break;
@@ -18467,10 +18512,10 @@ void _FieldCS(void* _S1768, void* entryPointParams_21, void* globalParams_22)
             }
         default:
             {
-                uint32_t top_4 = top_0 - _S1788;
+                uint32_t top_4 = top_0 - _S1791;
                 float a0_1 = stack_0[top_4];
 
-                if(_S1788 > 1U)
+                if(_S1791 > 1U)
                 {
 
                     a1_1 = stack_0[top_4 + 1U];
@@ -18485,7 +18530,7 @@ void _FieldCS(void* _S1768, void* entryPointParams_21, void* globalParams_22)
 
                 float a2_2;
 
-                if(_S1788 > 2U)
+                if(_S1791 > 2U)
                 {
 
                     a2_2 = stack_0[top_4 + 2U];
@@ -18499,7 +18544,7 @@ void _FieldCS(void* _S1768, void* entryPointParams_21, void* globalParams_22)
                 }
 
                 float a3_1;
-                if(_S1788 > 3U)
+                if(_S1791 > 3U)
                 {
 
                     a3_1 = stack_0[top_4 + 3U];
@@ -18514,7 +18559,7 @@ void _FieldCS(void* _S1768, void* entryPointParams_21, void* globalParams_22)
 
                 float a4_1;
 
-                if(_S1788 > 4U)
+                if(_S1791 > 4U)
                 {
 
                     a4_1 = stack_0[top_4 + 4U];
@@ -18526,11 +18571,11 @@ void _FieldCS(void* _S1768, void* entryPointParams_21, void* globalParams_22)
                     a4_1 = 0.0f;
 
                 }
-                uint32_t _S1795 = top_4 + 1U;
+                uint32_t _S1798 = top_4 + 1U;
 
-                stack_0[top_4] = finiteOr0_0(fieldCall_0(_S1786, a0_1, a1_1, a2_2, a3_1, a4_1));
+                stack_0[top_4] = finiteOr0_0(fieldCall_0(_S1789, a0_1, a1_1, a2_2, a3_1, a4_1));
 
-                top_0 = _S1795;
+                top_0 = _S1798;
                 break;
             }
         }
@@ -18551,7 +18596,7 @@ void _FieldCS(void* _S1768, void* entryPointParams_21, void* globalParams_22)
         a1_1 = 0.0f;
 
     }
-    (&kernelContext_137)->globalParams_0->gOut_0.Store(((&kernelContext_137)->globalParams_0->Look_0->gFlag_0.y + _S1770) * 4U,(F32_asuint(((&kernelContext_137)->globalParams_0->Look_0->gValue2_0.x + ((&kernelContext_137)->globalParams_0->Look_0->gValue2_0.y - (&kernelContext_137)->globalParams_0->Look_0->gValue2_0.x) * a1_1))));
+    (&kernelContext_137)->globalParams_0->gOut_0.Store(((&kernelContext_137)->globalParams_0->Look_0->gFlag_0.y + _S1773) * 4U,(F32_asuint(((&kernelContext_137)->globalParams_0->Look_0->gValue2_0.x + ((&kernelContext_137)->globalParams_0->Look_0->gValue2_0.y - (&kernelContext_137)->globalParams_0->Look_0->gValue2_0.x) * a1_1))));
     return;
 }
 
@@ -18559,32 +18604,32 @@ void _FieldCS(void* _S1768, void* entryPointParams_21, void* globalParams_22)
 static Vector<float, 3>  stageDirection_0(uint32_t s_36, Vector<float, 3>  constant_0, KernelContext_0 * kernelContext_138)
 {
 
-    Vector<float, 3>  _S1796;
+    Vector<float, 3>  _S1799;
 
     if((kernelContext_138->globalParams_0->Look_0->gTable_0.z) != 0U)
     {
 
-        uint32_t _S1797 = (kernelContext_138->globalParams_0->Look_0->gTable_0.z + s_36) * 16U;
+        uint32_t _S1800 = (kernelContext_138->globalParams_0->Look_0->gTable_0.z + s_36) * 16U;
 
-        ByteAddressBuffer _S1798 = kernelContext_138->globalParams_0->gStrandData_0;
+        ByteAddressBuffer _S1801 = kernelContext_138->globalParams_0->gStrandData_0;
 
-        uint32_t _S1799 = (kernelContext_138->globalParams_0->gStrandData_0).Load<uint32_t >(_S1797);
+        uint32_t _S1802 = (kernelContext_138->globalParams_0->gStrandData_0).Load<uint32_t >(_S1800);
 
-        uint32_t _S1800 = (_S1798).Load<uint32_t >(_S1797 + 4U);
+        uint32_t _S1803 = (_S1801).Load<uint32_t >(_S1800 + 4U);
 
-        uint32_t _S1801 = (_S1798).Load<uint32_t >(_S1797 + 8U);
+        uint32_t _S1804 = (_S1801).Load<uint32_t >(_S1800 + 8U);
 
-        _S1796 = asfloat_0(Vector<uint32_t, 3> (_S1799, _S1800, _S1801));
+        _S1799 = asfloat_0(Vector<uint32_t, 3> (_S1802, _S1803, _S1804));
 
     }
     else
     {
 
-        _S1796 = constant_0;
+        _S1799 = constant_0;
 
     }
 
-    return _S1796;
+    return _S1799;
 }
 
 
@@ -18592,36 +18637,36 @@ static Vector<float, 4>  turnThen_0(Vector<float, 4>  a_56, Vector<float, 4>  ne
 {
 
     Vector<float, 4>  t_40;
-    float _S1802 = next_0.w;
+    float _S1805 = next_0.w;
 
-    float _S1803 = a_56.w;
+    float _S1806 = a_56.w;
 
-    Vector<float, 3>  _S1804 = Vector<float, 3> {next_0.x, next_0.y, next_0.z};
+    Vector<float, 3>  _S1807 = Vector<float, 3> {next_0.x, next_0.y, next_0.z};
 
-    Vector<float, 3>  _S1805 = Vector<float, 3> {a_56.x, a_56.y, a_56.z};
+    Vector<float, 3>  _S1808 = Vector<float, 3> {a_56.x, a_56.y, a_56.z};
 
-    t_40.w = _S1802 * _S1803 - dot_0(_S1804, _S1805);
-    Vector<float, 3>  _S1806 = _S1805 * (Vector<float, 3> )_S1802 + _S1804 * (Vector<float, 3> )_S1803 + cross_0(_S1804, _S1805);
+    t_40.w = _S1805 * _S1806 - dot_0(_S1807, _S1808);
+    Vector<float, 3>  _S1809 = _S1808 * (Vector<float, 3> )_S1805 + _S1807 * (Vector<float, 3> )_S1806 + cross_0(_S1807, _S1808);
 
-    t_40.x = _S1806.x;
-    t_40.y = _S1806.y;
-    t_40.z = _S1806.z;
+    t_40.x = _S1809.x;
+    t_40.y = _S1809.y;
+    t_40.z = _S1809.z;
 
-    Vector<float, 4>  _S1807 = t_40;
+    Vector<float, 4>  _S1810 = t_40;
 
-    Vector<float, 4>  _S1808 = t_40;
-    float len_6 = (F32_sqrt((t_40.w * t_40.w + dot_0(Vector<float, 3> {_S1807.x, _S1807.y, _S1807.z}, Vector<float, 3> {_S1808.x, _S1808.y, _S1808.z}))));
+    Vector<float, 4>  _S1811 = t_40;
+    float len_6 = (F32_sqrt((t_40.w * t_40.w + dot_0(Vector<float, 3> {_S1810.x, _S1810.y, _S1810.z}, Vector<float, 3> {_S1811.x, _S1811.y, _S1811.z}))));
 
-    Vector<float, 4>  _S1809 = t_40;
-    return Vector<float, 4> ((Vector<float, 3> {_S1809.x, _S1809.y, _S1809.z} / (Vector<float, 3> )len_6).x, (Vector<float, 3> {_S1809.x, _S1809.y, _S1809.z} / (Vector<float, 3> )len_6).y, (Vector<float, 3> {_S1809.x, _S1809.y, _S1809.z} / (Vector<float, 3> )len_6).z, t_40.w / len_6);
+    Vector<float, 4>  _S1812 = t_40;
+    return Vector<float, 4> ((Vector<float, 3> {_S1812.x, _S1812.y, _S1812.z} / (Vector<float, 3> )len_6).x, (Vector<float, 3> {_S1812.x, _S1812.y, _S1812.z} / (Vector<float, 3> )len_6).y, (Vector<float, 3> {_S1812.x, _S1812.y, _S1812.z} / (Vector<float, 3> )len_6).z, t_40.w / len_6);
 }
 
 
 
-void _GravityCS(void* _S1810, void* entryPointParams_22, void* globalParams_23)
+void _GravityCS(void* _S1813, void* entryPointParams_22, void* globalParams_23)
 {
 
-    ComputeThreadVaryingInput * _S1811 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S1810));
+    ComputeThreadVaryingInput * _S1814 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S1813));
 
     KernelContext_0 kernelContext_139;
 
@@ -18631,28 +18676,28 @@ void _GravityCS(void* _S1810, void* entryPointParams_22, void* globalParams_23)
 
     (&kernelContext_139)->sTableBase_0 = 0U;
 
-    uint32_t _S1812 = threadIndex_0(_S1811->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S1811->groupThreadID, 64U, &kernelContext_139);
+    uint32_t _S1815 = threadIndex_0(_S1814->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S1814->groupThreadID, 64U, &kernelContext_139);
 
-    if(_S1812 >= ((&kernelContext_139)->globalParams_0->Look_0->gStrandCount_0))
+    if(_S1815 >= ((&kernelContext_139)->globalParams_0->Look_0->gStrandCount_0))
     {
 
         return;
     }
 
-    uint32_t _S1813 = strandBegin_0(_S1812, &kernelContext_139);
+    uint32_t _S1816 = strandBegin_0(_S1815, &kernelContext_139);
 
-    uint32_t _S1814 = strandCountOf_0(_S1812, &kernelContext_139);
+    uint32_t _S1817 = strandCountOf_0(_S1815, &kernelContext_139);
 
-    bool _S1815 = _S1814 >= 2U;
+    bool _S1818 = _S1817 >= 2U;
 
     float amount_3;
 
-    if(_S1815)
+    if(_S1818)
     {
 
-        float _S1816 = fieldAt_0(0U, (&kernelContext_139)->globalParams_0->Look_0->gValue_0.x, _S1812, 0U, &kernelContext_139);
+        float _S1819 = fieldAt_0(0U, (&kernelContext_139)->globalParams_0->Look_0->gValue_0.x, _S1815, 0U, &kernelContext_139);
 
-        amount_3 = _S1816;
+        amount_3 = _S1819;
 
     }
     else
@@ -18662,18 +18707,18 @@ void _GravityCS(void* _S1810, void* entryPointParams_22, void* globalParams_23)
 
     }
 
-    Vector<float, 4>  _S1817 = (&kernelContext_139)->globalParams_0->Look_0->gValue2_0;
+    Vector<float, 4>  _S1820 = (&kernelContext_139)->globalParams_0->Look_0->gValue2_0;
 
-    Vector<float, 3>  _S1818 = stageDirection_0(_S1812, Vector<float, 3> {_S1817.x, _S1817.y, _S1817.z}, &kernelContext_139);
+    Vector<float, 3>  _S1821 = stageDirection_0(_S1815, Vector<float, 3> {_S1820.x, _S1820.y, _S1820.z}, &kernelContext_139);
 
     float total_6;
 
-    if(_S1815)
+    if(_S1818)
     {
 
-        float _S1819 = strandLength_0(_S1813, _S1814, &kernelContext_139);
+        float _S1822 = strandLength_0(_S1816, _S1817, &kernelContext_139);
 
-        total_6 = _S1819;
+        total_6 = _S1822;
 
     }
     else
@@ -18683,50 +18728,50 @@ void _GravityCS(void* _S1810, void* entryPointParams_22, void* globalParams_23)
 
     }
 
-    bool _S1820;
+    bool _S1823;
     if(!(amount_3 > 0.0f))
     {
 
-        _S1820 = true;
+        _S1823 = true;
 
     }
     else
     {
 
-        _S1820 = (dot_0(_S1818, _S1818)) == 0.0f;
+        _S1823 = (dot_0(_S1821, _S1821)) == 0.0f;
 
     }
 
-    if(_S1820)
+    if(_S1823)
     {
 
-        _S1820 = true;
+        _S1823 = true;
 
     }
     else
     {
 
-        _S1820 = !(total_6 > 0.0f);
+        _S1823 = !(total_6 > 0.0f);
 
     }
 
-    if(_S1820)
+    if(_S1823)
     {
 
-        copyStrand_0(_S1813, _S1814, &kernelContext_139);
+        copyStrand_0(_S1816, _S1817, &kernelContext_139);
 
         return;
     }
 
-    Vector<float, 3>  _S1821 = loadPoint_0(_S1813, &kernelContext_139);
+    Vector<float, 3>  _S1824 = loadPoint_0(_S1816, &kernelContext_139);
 
 
-    storePoint_0((&kernelContext_139)->globalParams_0->gOut_0, _S1813, _S1821);
-    Vector<float, 4>  _S1822 = Vector<float, 4> (0.0f, 0.0f, 0.0f, 1.0f);
+    storePoint_0((&kernelContext_139)->globalParams_0->gOut_0, _S1816, _S1824);
+    Vector<float, 4>  _S1825 = Vector<float, 4> (0.0f, 0.0f, 0.0f, 1.0f);
 
-    Vector<float, 3>  previous_4 = _S1821;
+    Vector<float, 3>  previous_4 = _S1824;
 
-    Vector<float, 4>  carried_0 = _S1822;
+    Vector<float, 4>  carried_0 = _S1825;
 
     uint32_t i_63 = 1U;
 
@@ -18735,7 +18780,7 @@ void _GravityCS(void* _S1810, void* entryPointParams_22, void* globalParams_23)
     for(;;)
     {
 
-        if(i_63 < _S1814)
+        if(i_63 < _S1817)
         {
         }
         else
@@ -18744,18 +18789,18 @@ void _GravityCS(void* _S1810, void* entryPointParams_22, void* globalParams_23)
             break;
         }
 
-        uint32_t _S1823 = _S1813 + i_63;
+        uint32_t _S1826 = _S1816 + i_63;
 
-        Vector<float, 3>  _S1824 = loadPoint_0(_S1823, &kernelContext_139);
+        Vector<float, 3>  _S1827 = loadPoint_0(_S1826, &kernelContext_139);
 
-        Vector<float, 3>  _S1825 = loadPoint_0(_S1823 - 1U, &kernelContext_139);
+        Vector<float, 3>  _S1828 = loadPoint_0(_S1826 - 1U, &kernelContext_139);
 
-        Vector<float, 3>  seg_6 = _S1824 - _S1825;
+        Vector<float, 3>  seg_6 = _S1827 - _S1828;
         float len_7 = len3_0(seg_6);
         if(!(len_7 > 0.0f))
         {
 
-            storePoint_0((&kernelContext_139)->globalParams_0->gOut_0, _S1823, previous_4);
+            storePoint_0((&kernelContext_139)->globalParams_0->gOut_0, _S1826, previous_4);
             i_63 = i_63 + 1U;
 
             continue;
@@ -18763,14 +18808,14 @@ void _GravityCS(void* _S1810, void* entryPointParams_22, void* globalParams_23)
 
         Vector<float, 3>  dir_1 = turnApplied_0(carried_0, seg_6 / (Vector<float, 3> )len_7);
         float load_0 = (groomlab_max((0.0f), (total_6 - (arc_22 + 0.5f * len_7)))) / total_6;
-        float _S1826 = (&kernelContext_139)->globalParams_0->Look_0->gValue_0.y;
+        float _S1829 = (&kernelContext_139)->globalParams_0->Look_0->gValue_0.y;
 
-        float _S1827 = rampAt_0(arc_22 / total_6, &kernelContext_139);
+        float _S1830 = rampAt_0(arc_22 / total_6, &kernelContext_139);
         float arc_23 = arc_22 + len_7;
-        float share_1 = 1.0f - (groomlab_pm_exp((- amount_3 * 8.0f * (1.0f - clamp_0(_S1826 * _S1827, 0.0f, 1.0f)) * load_0 * len_7 / total_6)));
+        float share_1 = 1.0f - (groomlab_pm_exp((- amount_3 * 8.0f * (1.0f - clamp_0(_S1829 * _S1830, 0.0f, 1.0f)) * load_0 * len_7 / total_6)));
 
-        float c_36 = clamp_0(dot_0(dir_1, _S1818), -1.0f, 1.0f);
-        Vector<float, 3>  axis_8 = cross_0(dir_1, _S1818);
+        float c_36 = clamp_0(dot_0(dir_1, _S1821), -1.0f, 1.0f);
+        Vector<float, 3>  axis_8 = cross_0(dir_1, _S1821);
         float sine_1 = len3_0(axis_8);
 
         Vector<float, 3>  axis_9;
@@ -18798,16 +18843,16 @@ void _GravityCS(void* _S1810, void* entryPointParams_22, void* globalParams_23)
         else
         {
 
-            turn_1 = _S1822;
+            turn_1 = _S1825;
 
         }
         Vector<float, 3>  previous_5 = previous_4 + turnApplied_0(turn_1, dir_1) * (Vector<float, 3> )len_7;
-        storePoint_0((&kernelContext_139)->globalParams_0->gOut_0, _S1823, previous_5);
-        Vector<float, 4>  _S1828 = turnThen_0(carried_0, turn_1);
+        storePoint_0((&kernelContext_139)->globalParams_0->gOut_0, _S1826, previous_5);
+        Vector<float, 4>  _S1831 = turnThen_0(carried_0, turn_1);
 
         previous_4 = previous_5;
 
-        carried_0 = _S1828;
+        carried_0 = _S1831;
 
         arc_22 = arc_23;
 
@@ -18838,23 +18883,23 @@ static Vector<float, 3>  pointAlongIn_0(uint32_t begin_27, uint32_t n_45, float 
 
     }
     float f_17 = x_37 - float(i_64);
-    uint32_t _S1829 = begin_27 + i_64;
+    uint32_t _S1832 = begin_27 + i_64;
 
-    Vector<float, 3>  _S1830 = loadPoint_0(_S1829, kernelContext_140);
+    Vector<float, 3>  _S1833 = loadPoint_0(_S1832, kernelContext_140);
 
-    Vector<float, 3>  _S1831 = _S1830 * (Vector<float, 3> )(1.0f - f_17);
+    Vector<float, 3>  _S1834 = _S1833 * (Vector<float, 3> )(1.0f - f_17);
 
-    Vector<float, 3>  _S1832 = loadPoint_0(_S1829 + 1U, kernelContext_140);
+    Vector<float, 3>  _S1835 = loadPoint_0(_S1832 + 1U, kernelContext_140);
 
-    return _S1831 + _S1832 * (Vector<float, 3> )f_17;
+    return _S1834 + _S1835 * (Vector<float, 3> )f_17;
 }
 
 
 
-void _FlyawayCS(void* _S1833, void* entryPointParams_23, void* globalParams_24)
+void _FlyawayCS(void* _S1836, void* entryPointParams_23, void* globalParams_24)
 {
 
-    ComputeThreadVaryingInput * _S1834 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S1833));
+    ComputeThreadVaryingInput * _S1837 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S1836));
 
     KernelContext_0 kernelContext_141;
 
@@ -18864,69 +18909,69 @@ void _FlyawayCS(void* _S1833, void* entryPointParams_23, void* globalParams_24)
 
     (&kernelContext_141)->sTableBase_0 = 0U;
 
-    uint32_t _S1835 = threadIndex_0(_S1834->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S1834->groupThreadID, 64U, &kernelContext_141);
+    uint32_t _S1838 = threadIndex_0(_S1837->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S1837->groupThreadID, 64U, &kernelContext_141);
 
-    if(_S1835 >= ((&kernelContext_141)->globalParams_0->Look_0->gStrandCount_0))
+    if(_S1838 >= ((&kernelContext_141)->globalParams_0->Look_0->gStrandCount_0))
     {
 
         return;
     }
 
-    uint32_t _S1836 = strandBegin_0(_S1835, &kernelContext_141);
+    uint32_t _S1839 = strandBegin_0(_S1838, &kernelContext_141);
 
-    uint32_t _S1837 = strandCountOf_0(_S1835, &kernelContext_141);
+    uint32_t _S1840 = strandCountOf_0(_S1838, &kernelContext_141);
 
-    Vector<float, 4>  _S1838 = strandData_0(_S1835, &kernelContext_141);
+    Vector<float, 4>  _S1841 = strandData_0(_S1838, &kernelContext_141);
 
 
-    float _S1839 = _S1838.w;
+    float _S1842 = _S1841.w;
 
-    float _S1840 = fieldAt_0(1U, (&kernelContext_141)->globalParams_0->Look_0->gValue_0.y, _S1835, 0U, &kernelContext_141);
+    float _S1843 = fieldAt_0(1U, (&kernelContext_141)->globalParams_0->Look_0->gValue_0.y, _S1838, 0U, &kernelContext_141);
 
-    bool _S1841;
+    bool _S1844;
 
-    if(!(_S1839 < _S1840))
+    if(!(_S1842 < _S1843))
     {
 
-        _S1841 = true;
+        _S1844 = true;
 
     }
     else
     {
 
-        _S1841 = _S1837 < 2U;
+        _S1844 = _S1840 < 2U;
 
     }
 
-    if(_S1841)
+    if(_S1844)
     {
 
-        copyStrand_0(_S1836, _S1837, &kernelContext_141);
+        copyStrand_0(_S1839, _S1840, &kernelContext_141);
 
         return;
     }
 
-    float _S1842 = fieldAt_0(0U, (&kernelContext_141)->globalParams_0->Look_0->gValue_0.x, _S1835, 0U, &kernelContext_141);
+    float _S1845 = fieldAt_0(0U, (&kernelContext_141)->globalParams_0->Look_0->gValue_0.x, _S1838, 0U, &kernelContext_141);
 
 
-    float _S1843 = (&kernelContext_141)->globalParams_0->Look_0->gValue2_0.y;
+    float _S1846 = (&kernelContext_141)->globalParams_0->Look_0->gValue2_0.y;
 
-    uint32_t _S1844 = ((&kernelContext_141)->globalParams_0->gStrandData_0).Load<uint32_t >(uint32_t(int32_t(((&kernelContext_141)->globalParams_0->Look_0->gDataBlock_0 + (&kernelContext_141)->globalParams_0->Look_0->gStrandCount_0 + _S1835) * 16U)));
+    uint32_t _S1847 = ((&kernelContext_141)->globalParams_0->gStrandData_0).Load<uint32_t >(uint32_t(int32_t(((&kernelContext_141)->globalParams_0->Look_0->gDataBlock_0 + (&kernelContext_141)->globalParams_0->Look_0->gStrandCount_0 + _S1838) * 16U)));
 
-    float _S1845 = _S1843 * (U32_asfloat((_S1844)));
-    float _S1846 = (&kernelContext_141)->globalParams_0->Look_0->gValue2_0.x;
+    float _S1848 = _S1846 * (U32_asfloat((_S1847)));
+    float _S1849 = (&kernelContext_141)->globalParams_0->Look_0->gValue2_0.x;
 
-    Vector<float, 3>  _S1847 = loadPoint_0(_S1836 + 1U, &kernelContext_141);
+    Vector<float, 3>  _S1850 = loadPoint_0(_S1839 + 1U, &kernelContext_141);
 
-    Vector<float, 3>  _S1848 = loadPoint_0(_S1836, &kernelContext_141);
-    Vector<float, 3>  _S1849 = normalized_0(_S1847 - _S1848);
-    storePoint_0((&kernelContext_141)->globalParams_0->gOut_0, _S1836, _S1848);
+    Vector<float, 3>  _S1851 = loadPoint_0(_S1839, &kernelContext_141);
+    Vector<float, 3>  _S1852 = normalized_0(_S1850 - _S1851);
+    storePoint_0((&kernelContext_141)->globalParams_0->gOut_0, _S1839, _S1851);
 
     uint32_t i_65 = 1U;
     for(;;)
     {
 
-        if(i_65 < _S1837)
+        if(i_65 < _S1840)
         {
         }
         else
@@ -18935,16 +18980,16 @@ void _FlyawayCS(void* _S1833, void* entryPointParams_23, void* globalParams_24)
             break;
         }
 
-        float t_42 = paramAt_0(i_65, _S1837);
+        float t_42 = paramAt_0(i_65, _S1840);
 
-        Vector<float, 3>  _S1850 = pointAlongIn_0(_S1836, _S1837, t_42 * (1.0f + _S1845), &kernelContext_141);
+        Vector<float, 3>  _S1853 = pointAlongIn_0(_S1839, _S1840, t_42 * (1.0f + _S1848), &kernelContext_141);
 
         float w_44 = smoothstepStd_0((&kernelContext_141)->globalParams_0->Look_0->gValue_0.w, 1.0f, t_42);
 
-        Vector<float, 3>  _S1851 = vectorNoise_0(Vector<float, 3> {_S1838.x, _S1838.y, _S1838.z} + Vector<float, 3> (0.0f, 0.0f, t_42 * (&kernelContext_141)->globalParams_0->Look_0->gValue_0.z), 0.0f, &kernelContext_141);
+        Vector<float, 3>  _S1854 = vectorNoise_0(Vector<float, 3> {_S1841.x, _S1841.y, _S1841.z} + Vector<float, 3> (0.0f, 0.0f, t_42 * (&kernelContext_141)->globalParams_0->Look_0->gValue_0.z), 0.0f, &kernelContext_141);
 
 
-        storePoint_0((&kernelContext_141)->globalParams_0->gOut_0, _S1836 + i_65, _S1850 + (_S1851 * (Vector<float, 3> )(1.0f - _S1846) + _S1849 * (Vector<float, 3> )(_S1846 * (0.5f + 0.5f * len3_0(_S1851)))) * (Vector<float, 3> )(_S1842 * w_44));
+        storePoint_0((&kernelContext_141)->globalParams_0->gOut_0, _S1839 + i_65, _S1853 + (_S1854 * (Vector<float, 3> )(1.0f - _S1849) + _S1852 * (Vector<float, 3> )(_S1849 * (0.5f + 0.5f * len3_0(_S1854)))) * (Vector<float, 3> )(_S1845 * w_44));
 
         i_65 = i_65 + 1U;
 
@@ -18980,48 +19025,48 @@ static void smoothStrand_0(uint32_t begin_28, uint32_t n_46, float softness_0, K
             break;
         }
 
-        uint32_t _S1852 = begin_28 + i_66;
+        uint32_t _S1855 = begin_28 + i_66;
 
-        Vector<float, 3>  _S1853 = loadPoint_0(_S1852, kernelContext_142);
+        Vector<float, 3>  _S1856 = loadPoint_0(_S1855, kernelContext_142);
 
-        Vector<float, 3>  _S1854 = loadPoint_0(_S1852 - 1U, kernelContext_142);
+        Vector<float, 3>  _S1857 = loadPoint_0(_S1855 - 1U, kernelContext_142);
 
-        float walked_0 = toFirst_0 + apartExact_0(_S1853, _S1854);
+        float walked_0 = toFirst_0 + apartExact_0(_S1856, _S1857);
 
-        Vector<float, 3>  _S1855 = loadOut_0(_S1852, kernelContext_142);
+        Vector<float, 3>  _S1858 = loadOut_0(_S1855, kernelContext_142);
 
-        bool _S1856;
+        bool _S1859;
 
 
-        if((_S1855.x) != (_S1853.x))
+        if((_S1858.x) != (_S1856.x))
         {
 
-            _S1856 = true;
+            _S1859 = true;
 
         }
         else
         {
 
-            _S1856 = (_S1855.y) != (_S1853.y);
+            _S1859 = (_S1858.y) != (_S1856.y);
 
         }
 
-        bool _S1857;
+        bool _S1860;
 
-        if(_S1856)
+        if(_S1859)
         {
 
-            _S1857 = true;
+            _S1860 = true;
 
         }
         else
         {
 
-            _S1857 = (_S1855.z) != (_S1853.z);
+            _S1860 = (_S1858.z) != (_S1856.z);
 
         }
 
-        if(_S1857)
+        if(_S1860)
         {
 
             fadeOver_0 = (groomlab_min((softness_0), (walked_0)));
@@ -19053,28 +19098,28 @@ static void smoothStrand_0(uint32_t begin_28, uint32_t n_46, float softness_0, K
             break;
         }
 
-        uint32_t _S1858 = begin_28 + i_66;
+        uint32_t _S1861 = begin_28 + i_66;
 
-        Vector<float, 3>  _S1859 = loadPoint_0(_S1858, kernelContext_142);
+        Vector<float, 3>  _S1862 = loadPoint_0(_S1861, kernelContext_142);
 
-        Vector<float, 3>  _S1860 = loadPoint_0(_S1858 - 1U, kernelContext_142);
+        Vector<float, 3>  _S1863 = loadPoint_0(_S1861 - 1U, kernelContext_142);
 
-        float walked_1 = fromRoot_0 + apartExact_0(_S1859, _S1860);
+        float walked_1 = fromRoot_0 + apartExact_0(_S1862, _S1863);
 
-        Vector<float, 3>  _S1861 = loadOut_0(_S1858, kernelContext_142);
+        Vector<float, 3>  _S1864 = loadOut_0(_S1861, kernelContext_142);
 
-        Vector<float, 3>  _S1862 = _S1861 - _S1859;
+        Vector<float, 3>  _S1865 = _S1864 - _S1862;
 
 
-        uint32_t _S1863 = i_66 + 1U;
+        uint32_t _S1866 = i_66 + 1U;
 
         float apart_5 = 0.0f;
 
-        sum_9 = _S1862;
+        sum_9 = _S1865;
 
         float weight_1 = 1.0f;
 
-        uint32_t j_29 = _S1863;
+        uint32_t j_29 = _S1866;
 
         for(;;)
         {
@@ -19088,13 +19133,13 @@ static void smoothStrand_0(uint32_t begin_28, uint32_t n_46, float softness_0, K
                 break;
             }
 
-            uint32_t _S1864 = begin_28 + j_29;
+            uint32_t _S1867 = begin_28 + j_29;
 
-            Vector<float, 3>  _S1865 = loadPoint_0(_S1864, kernelContext_142);
+            Vector<float, 3>  _S1868 = loadPoint_0(_S1867, kernelContext_142);
 
-            Vector<float, 3>  _S1866 = loadPoint_0(_S1864 - 1U, kernelContext_142);
+            Vector<float, 3>  _S1869 = loadPoint_0(_S1867 - 1U, kernelContext_142);
 
-            float along_8 = apart_5 + apartExact_0(_S1865, _S1866);
+            float along_8 = apart_5 + apartExact_0(_S1868, _S1869);
 
             if(!(along_8 < softness_0))
             {
@@ -19109,8 +19154,8 @@ static void smoothStrand_0(uint32_t begin_28, uint32_t n_46, float softness_0, K
             float cubic_0 = xx_1 * rest_0;
             float w_45 = 1.0f - cubic_0;
 
-            Vector<float, 3>  _S1867 = loadOut_0(_S1864, kernelContext_142);
-            Vector<float, 3>  c_37 = _S1867 - _S1865;
+            Vector<float, 3>  _S1870 = loadOut_0(_S1867, kernelContext_142);
+            Vector<float, 3>  c_37 = _S1870 - _S1868;
             Vector<float, 3>  cw_0 = c_37 * (Vector<float, 3> )w_45;
             Vector<float, 3>  added_2 = sum_9 + cw_0;
 
@@ -19150,20 +19195,20 @@ static void smoothStrand_0(uint32_t begin_28, uint32_t n_46, float softness_0, K
         }
 
         Vector<float, 3>  faded_1 = Vector<float, 3> (divExact_0(sum_9.x, weight_1), divExact_0(sum_9.y, weight_1), divExact_0(sum_9.z, weight_1)) * (Vector<float, 3> )fade_2;
-        Vector<float, 3>  spot_0 = _S1859 + faded_1;
-        storePoint_0(kernelContext_142->globalParams_0->gOut_0, _S1858, spot_0);
+        Vector<float, 3>  spot_0 = _S1862 + faded_1;
+        storePoint_0(kernelContext_142->globalParams_0->gOut_0, _S1861, spot_0);
 
         fromRoot_0 = walked_1;
 
-        i_66 = _S1863;
+        i_66 = _S1866;
 
     }
 
-    Vector<float, 3>  _S1868 = loadOut_0(begin_28, kernelContext_142);
+    Vector<float, 3>  _S1871 = loadOut_0(begin_28, kernelContext_142);
 
-    sum_9 = _S1868;
+    sum_9 = _S1871;
 
-    Vector<float, 3>  p_43 = _S1868;
+    Vector<float, 3>  p_43 = _S1871;
 
     i_66 = 1U;
 
@@ -19179,17 +19224,17 @@ static void smoothStrand_0(uint32_t begin_28, uint32_t n_46, float softness_0, K
             break;
         }
 
-        uint32_t _S1869 = begin_28 + i_66;
+        uint32_t _S1872 = begin_28 + i_66;
 
-        Vector<float, 3>  _S1870 = loadPoint_0(_S1869, kernelContext_142);
+        Vector<float, 3>  _S1873 = loadPoint_0(_S1872, kernelContext_142);
 
-        Vector<float, 3>  _S1871 = loadPoint_0(_S1869 - 1U, kernelContext_142);
+        Vector<float, 3>  _S1874 = loadPoint_0(_S1872 - 1U, kernelContext_142);
 
-        float wanted_2 = apartExact_0(_S1870, _S1871);
+        float wanted_2 = apartExact_0(_S1873, _S1874);
 
-        Vector<float, 3>  _S1872 = loadOut_0(_S1869, kernelContext_142);
+        Vector<float, 3>  _S1875 = loadOut_0(_S1872, kernelContext_142);
 
-        Vector<float, 3>  d_33 = _S1872 - sum_9;
+        Vector<float, 3>  d_33 = _S1875 - sum_9;
         float len_8 = lengthExact_0(d_33);
 
         if(len_8 > 0.0f)
@@ -19205,18 +19250,18 @@ static void smoothStrand_0(uint32_t begin_28, uint32_t n_46, float softness_0, K
 
 
 
-            Vector<float, 3>  segment_0 = _S1870 - _S1871;
+            Vector<float, 3>  segment_0 = _S1873 - _S1874;
             Vector<float, 3>  q_12 = p_43 + segment_0;
 
             p_43 = q_12;
 
         }
 
-        storePoint_0(kernelContext_142->globalParams_0->gOut_0, _S1869, p_43);
+        storePoint_0(kernelContext_142->globalParams_0->gOut_0, _S1872, p_43);
 
         uint32_t i_68 = i_66 + 1U;
 
-        sum_9 = _S1872;
+        sum_9 = _S1875;
 
         i_66 = i_68;
 
@@ -19236,98 +19281,98 @@ static bool collideRest_0(uint32_t m_11, KernelContext_0 * kernelContext_143)
 static bool collideHostSettled_0(uint32_t m_12, Vector<float, 3>  root_11, float within_0, float reach_3, KernelContext_0 * kernelContext_144)
 {
 
-    Vector<uint32_t, 4>  _S1873 = kernelContext_144->globalParams_0->Look_0->gFlag2_0;
+    Vector<uint32_t, 4>  _S1876 = kernelContext_144->globalParams_0->Look_0->gFlag2_0;
 
-    bool _S1874 = (groomlab_collide_settled((Vector<uint32_t, 2> {_S1873.z, _S1873.w}), (m_12), (root_11), (within_0), (reach_3)));
+    bool _S1877 = (groomlab_collide_settled((Vector<uint32_t, 2> {_S1876.z, _S1876.w}), (m_12), (root_11), (within_0), (reach_3)));
 
-    return _S1874;
+    return _S1877;
 }
 
 
 static bool fieldBounds_0(FieldTables_0 * t_43, Vector<float, 3>  p_44, float radius_2, float * heightLow_3, float * distanceLow_3, KernelContext_0 * kernelContext_145)
 {
 
-    float _S1875 = infinity_0();
+    float _S1878 = infinity_0();
 
-    *heightLow_3 = - _S1875;
+    *heightLow_3 = - _S1878;
     *distanceLow_3 = 0.0f;
     Vector<float, 3>  scaledP_1 = p_44 * (Vector<float, 3> )t_43->inverseCell_0;
     Vector<float, 3>  g_33 = scaledP_1 - (Vector<float, 3> )0.5f;
-    float _S1876 = g_33.x;
+    float _S1879 = g_33.x;
 
-    Vector<float, 3>  _S1877 = t_43->lo_0;
+    Vector<float, 3>  _S1880 = t_43->lo_0;
 
-    bool _S1878;
+    bool _S1881;
 
-    if(_S1876 >= (t_43->lo_0.x))
+    if(_S1879 >= (t_43->lo_0.x))
     {
 
-        _S1878 = (g_33.y) >= (_S1877.y);
+        _S1881 = (g_33.y) >= (_S1880.y);
 
     }
     else
     {
 
-        _S1878 = false;
+        _S1881 = false;
 
     }
 
-    if(_S1878)
+    if(_S1881)
     {
 
-        _S1878 = (g_33.z) >= (_S1877.z);
-
-    }
-    else
-    {
-
-        _S1878 = false;
-
-    }
-
-    if(_S1878)
-    {
-
-        _S1878 = _S1876 < (t_43->hi_0.x);
+        _S1881 = (g_33.z) >= (_S1880.z);
 
     }
     else
     {
 
-        _S1878 = false;
+        _S1881 = false;
 
     }
 
-    if(_S1878)
+    if(_S1881)
     {
 
-        _S1878 = (g_33.y) < (t_43->hi_0.y);
-
-    }
-    else
-    {
-
-        _S1878 = false;
-
-    }
-
-    if(_S1878)
-    {
-
-        _S1878 = (g_33.z) < (t_43->hi_0.z);
+        _S1881 = _S1879 < (t_43->hi_0.x);
 
     }
     else
     {
 
-        _S1878 = false;
+        _S1881 = false;
 
     }
 
-    if(!_S1878)
+    if(_S1881)
     {
 
-        Vector<float, 3>  below_0 = _S1877 - g_33;
+        _S1881 = (g_33.y) < (t_43->hi_0.y);
+
+    }
+    else
+    {
+
+        _S1881 = false;
+
+    }
+
+    if(_S1881)
+    {
+
+        _S1881 = (g_33.z) < (t_43->hi_0.z);
+
+    }
+    else
+    {
+
+        _S1881 = false;
+
+    }
+
+    if(!_S1881)
+    {
+
+        Vector<float, 3>  below_0 = _S1880 - g_33;
 
         Vector<float, 3>  above_0 = g_33 - t_43->hi_0;
 
@@ -19337,39 +19382,39 @@ static bool fieldBounds_0(FieldTables_0 * t_43, Vector<float, 3>  p_44, float ra
             return false;
         }
 
-        *distanceLow_3 = _S1875;
+        *distanceLow_3 = _S1878;
         return true;
     }
-    Vector<float, 3>  _S1879 = floor_1(g_33) - _S1877;
+    Vector<float, 3>  _S1882 = floor_1(g_33) - _S1880;
 
-    Vector<int32_t, 3>  _S1880 = Vector<int32_t, 3> {(int32_t)_slang_vector_get_element(_S1879, 0), (int32_t)_slang_vector_get_element(_S1879, 1), (int32_t)_slang_vector_get_element(_S1879, 2)};
-    Vector<int32_t, 3>  brick_2 = _S1880 / (Vector<int32_t, 3> )int(4);
+    Vector<int32_t, 3>  _S1883 = Vector<int32_t, 3> {(int32_t)_slang_vector_get_element(_S1882, 0), (int32_t)_slang_vector_get_element(_S1882, 1), (int32_t)_slang_vector_get_element(_S1882, 2)};
+    Vector<int32_t, 3>  brick_2 = _S1883 / (Vector<int32_t, 3> )int(4);
 
     Vector<int32_t, 3>  region_2 = brick_2 / (Vector<int32_t, 3> )int(4);
-    uint32_t _S1881 = (kernelContext_145->sTableBase_0 + t_43->regions_0 + (uint32_t(region_2.x) + t_43->dims_0.x * (uint32_t(region_2.y) + t_43->dims_0.y * uint32_t(region_2.z))) * 4U) * 4U;
+    uint32_t _S1884 = (kernelContext_145->sTableBase_0 + t_43->regions_0 + (uint32_t(region_2.x) + t_43->dims_0.x * (uint32_t(region_2.y) + t_43->dims_0.y * uint32_t(region_2.z))) * 4U) * 4U;
 
-    ByteAddressBuffer _S1882 = kernelContext_145->globalParams_0->gAux2_0;
+    ByteAddressBuffer _S1885 = kernelContext_145->globalParams_0->gAux2_0;
 
-    uint32_t _S1883 = (kernelContext_145->globalParams_0->gAux2_0).Load<uint32_t >(_S1881);
+    uint32_t _S1886 = (kernelContext_145->globalParams_0->gAux2_0).Load<uint32_t >(_S1884);
 
-    uint32_t _S1884 = (_S1882).Load<uint32_t >(_S1881 + 4U);
+    uint32_t _S1887 = (_S1885).Load<uint32_t >(_S1884 + 4U);
 
-    uint32_t _S1885 = (_S1882).Load<uint32_t >(_S1881 + 8U);
+    uint32_t _S1888 = (_S1885).Load<uint32_t >(_S1884 + 8U);
 
-    uint32_t _S1886 = (_S1882).Load<uint32_t >(_S1881 + 12U);
-    float _S1887 = (U32_asfloat((_S1884)));
+    uint32_t _S1889 = (_S1885).Load<uint32_t >(_S1884 + 12U);
+    float _S1890 = (U32_asfloat((_S1887)));
 
-    float _S1888 = (U32_asfloat((_S1885)));
-    if(_S1883 == 0U)
+    float _S1891 = (U32_asfloat((_S1888)));
+    if(_S1886 == 0U)
     {
 
-        _S1878 = _S1886 != 4294967295U;
+        _S1881 = _S1889 != 4294967295U;
 
     }
     else
     {
 
-        _S1878 = false;
+        _S1881 = false;
 
     }
 
@@ -19377,35 +19422,35 @@ static bool fieldBounds_0(FieldTables_0 * t_43, Vector<float, 3>  p_44, float ra
 
     float d_34;
 
-    if(_S1878)
+    if(_S1881)
     {
 
         Vector<int32_t, 3>  inRegion_2 = brick_2 - region_2 * (Vector<int32_t, 3> )int(4);
-        uint32_t _S1889 = (kernelContext_145->sTableBase_0 + t_43->bricks_0 + (_S1886 + uint32_t(inRegion_2.x + inRegion_2.y * int(4) + inRegion_2.z * int(16))) * 4U) * 4U;
+        uint32_t _S1892 = (kernelContext_145->sTableBase_0 + t_43->bricks_0 + (_S1889 + uint32_t(inRegion_2.x + inRegion_2.y * int(4) + inRegion_2.z * int(16))) * 4U) * 4U;
 
-        ByteAddressBuffer _S1890 = kernelContext_145->globalParams_0->gAux2_0;
+        ByteAddressBuffer _S1893 = kernelContext_145->globalParams_0->gAux2_0;
 
-        uint32_t _S1891 = (kernelContext_145->globalParams_0->gAux2_0).Load<uint32_t >(_S1889);
+        uint32_t _S1894 = (kernelContext_145->globalParams_0->gAux2_0).Load<uint32_t >(_S1892);
 
-        uint32_t _S1892 = (_S1890).Load<uint32_t >(_S1889 + 4U);
+        uint32_t _S1895 = (_S1893).Load<uint32_t >(_S1892 + 4U);
 
-        uint32_t _S1893 = (_S1890).Load<uint32_t >(_S1889 + 8U);
+        uint32_t _S1896 = (_S1893).Load<uint32_t >(_S1892 + 8U);
 
-        uint32_t _S1894 = (_S1890).Load<uint32_t >(_S1889 + 12U);
+        uint32_t _S1897 = (_S1893).Load<uint32_t >(_S1892 + 12U);
 
-        float _S1895 = (U32_asfloat((_S1893)));
+        float _S1898 = (U32_asfloat((_S1896)));
 
-        h_30 = (U32_asfloat((_S1892)));
+        h_30 = (U32_asfloat((_S1895)));
 
-        d_34 = _S1895;
+        d_34 = _S1898;
 
     }
     else
     {
 
-        h_30 = _S1887;
+        h_30 = _S1890;
 
-        d_34 = _S1888;
+        d_34 = _S1891;
 
     }
 
@@ -19422,16 +19467,16 @@ static CollideRestStates_0 collideRestStates_0()
 {
 
     CollideRestStates_0 st_14;
-    Vector<float, 4>  _S1896 = Vector<float, 4> ((U32_asfloat((4294967295U))), 0.0f, 0.0f, 0.0f);
+    Vector<float, 4>  _S1899 = Vector<float, 4> ((U32_asfloat((4294967295U))), 0.0f, 0.0f, 0.0f);
 
-    (&st_14)->a_1[int(1)] = _S1896;
+    (&st_14)->a_1[int(1)] = _S1899;
 
-    (&st_14)->a_1[int(0)] = _S1896;
-    Vector<float, 4>  _S1897 = Vector<float, 4> (-1.0f, 0.0f, 0.0f, 0.0f);
+    (&st_14)->a_1[int(0)] = _S1899;
+    Vector<float, 4>  _S1900 = Vector<float, 4> (-1.0f, 0.0f, 0.0f, 0.0f);
 
-    (&st_14)->b_3[int(1)] = _S1897;
+    (&st_14)->b_3[int(1)] = _S1900;
 
-    (&st_14)->b_3[int(0)] = _S1897;
+    (&st_14)->b_3[int(0)] = _S1900;
     (&st_14)->c_1[int(1)] = -1.0f;
 
     (&st_14)->c_1[int(0)] = -1.0f;
@@ -19442,9 +19487,9 @@ static CollideRestStates_0 collideRestStates_0()
 static void collideRestCursor_0(uint32_t s_37, uint32_t m_13, Vector<float, 3>  root_12, CollideRestStates_0 * rest_2, KernelContext_0 * kernelContext_146)
 {
 
-    Vector<uint32_t, 4>  _S1898 = kernelContext_146->globalParams_0->Look_0->gFlag2_0;
+    Vector<uint32_t, 4>  _S1901 = kernelContext_146->globalParams_0->Look_0->gFlag2_0;
 
-    groomlab_collide_cursor((Vector<uint32_t, 2> {_S1898.z, _S1898.w}), (m_13), (s_37), (root_12), (&rest_2->a_1[m_13]), (&rest_2->b_3[m_13]), (&rest_2->c_1[m_13]));
+    groomlab_collide_cursor((Vector<uint32_t, 2> {_S1901.z, _S1901.w}), (m_13), (s_37), (root_12), (&rest_2->a_1[m_13]), (&rest_2->b_3[m_13]), (&rest_2->c_1[m_13]));
 
     return;
 }
@@ -19454,11 +19499,11 @@ static void collideRestCursor_0(uint32_t s_37, uint32_t m_13, Vector<float, 3>  
 static bool collideRestPush_0(uint32_t m_14, Vector<float, 3>  * p_45, float to_1, CollideRestStates_0 * rest_3, KernelContext_0 * kernelContext_147)
 {
 
-    Vector<uint32_t, 4>  _S1899 = kernelContext_147->globalParams_0->Look_0->gFlag2_0;
+    Vector<uint32_t, 4>  _S1902 = kernelContext_147->globalParams_0->Look_0->gFlag2_0;
 
-    bool _S1900 = (groomlab_collide_push((Vector<uint32_t, 2> {_S1899.z, _S1899.w}), (m_14), (p_45), (to_1), (&rest_3->a_1[m_14]), (&rest_3->b_3[m_14]), (&rest_3->c_1[m_14])));
+    bool _S1903 = (groomlab_collide_push((Vector<uint32_t, 2> {_S1902.z, _S1902.w}), (m_14), (p_45), (to_1), (&rest_3->a_1[m_14]), (&rest_3->b_3[m_14]), (&rest_3->c_1[m_14])));
 
-    return _S1900;
+    return _S1903;
 }
 
 
@@ -19466,11 +19511,11 @@ static bool collideWalk_0(uint32_t s_38, uint32_t begin_29, uint32_t n_47, uint3
 {
 
     bool touched_0;
-    float _S1901 = kernelContext_148->globalParams_0->Look_0->gValue_0.x;
+    float _S1904 = kernelContext_148->globalParams_0->Look_0->gValue_0.x;
 
-    float _S1902 = kernelContext_148->globalParams_0->Look_0->gValue_0.y;
+    float _S1905 = kernelContext_148->globalParams_0->Look_0->gValue_0.y;
 
-    float _S1903 = kernelContext_148->globalParams_0->Look_0->gValue_0.z;
+    float _S1906 = kernelContext_148->globalParams_0->Look_0->gValue_0.z;
 
     bool touched_1 = false;
 
@@ -19490,7 +19535,7 @@ static bool collideWalk_0(uint32_t s_38, uint32_t begin_29, uint32_t n_47, uint3
             break;
         }
 
-        Vector<float, 3>  _S1904 = loadOut_0(begin_29, kernelContext_148);
+        Vector<float, 3>  _S1907 = loadOut_0(begin_29, kernelContext_148);
 
         bool inWalked_0;
 
@@ -19508,21 +19553,21 @@ static bool collideWalk_0(uint32_t s_38, uint32_t begin_29, uint32_t n_47, uint3
 
         }
 
-        Vector<float, 3>  _S1905;
+        Vector<float, 3>  _S1908;
         if(inWalked_0)
         {
 
-            Vector<float, 3>  _S1906 = loadPoint_0(begin_29, kernelContext_148);
+            Vector<float, 3>  _S1909 = loadPoint_0(begin_29, kernelContext_148);
 
-            _S1905 = _S1906;
+            _S1908 = _S1909;
 
         }
         else
         {
 
-            Vector<float, 3>  _S1907 = loadOut_0(begin_29, kernelContext_148);
+            Vector<float, 3>  _S1910 = loadOut_0(begin_29, kernelContext_148);
 
-            _S1905 = _S1907;
+            _S1908 = _S1910;
 
         }
 
@@ -19539,13 +19584,13 @@ static bool collideWalk_0(uint32_t s_38, uint32_t begin_29, uint32_t n_47, uint3
                 break;
             }
 
-            bool _S1908 = collideRest_0(m_15, kernelContext_148);
-            if(_S1908)
+            bool _S1911 = collideRest_0(m_15, kernelContext_148);
+            if(_S1911)
             {
 
-                Vector<float, 3>  _S1909 = loadOut_0(begin_29, kernelContext_148);
+                Vector<float, 3>  _S1912 = loadOut_0(begin_29, kernelContext_148);
 
-                collideRestCursor_0(s_38, m_15, _S1909, rest_4, kernelContext_148);
+                collideRestCursor_0(s_38, m_15, _S1912, rest_4, kernelContext_148);
 
             }
 
@@ -19555,9 +19600,9 @@ static bool collideWalk_0(uint32_t s_38, uint32_t begin_29, uint32_t n_47, uint3
 
         bool shifted_0 = false;
 
-        Vector<float, 3>  last_1 = _S1905;
+        Vector<float, 3>  last_1 = _S1908;
 
-        Vector<float, 3>  previous_6 = _S1904;
+        Vector<float, 3>  previous_6 = _S1907;
 
         bool moved_11 = false;
 
@@ -19578,63 +19623,63 @@ static bool collideWalk_0(uint32_t s_38, uint32_t begin_29, uint32_t n_47, uint3
                 break;
             }
 
-            uint32_t _S1910 = begin_29 + i_69;
+            uint32_t _S1913 = begin_29 + i_69;
 
-            Vector<float, 3>  _S1911 = loadPoint_0(_S1910, kernelContext_148);
+            Vector<float, 3>  _S1914 = loadPoint_0(_S1913, kernelContext_148);
 
-            Vector<float, 3>  _S1912 = loadPoint_0(_S1910 - 1U, kernelContext_148);
+            Vector<float, 3>  _S1915 = loadPoint_0(_S1913 - 1U, kernelContext_148);
 
-            float wanted_3 = apartExact_0(_S1911, _S1912);
+            float wanted_3 = apartExact_0(_S1914, _S1915);
 
-            bool _S1913;
+            bool _S1916;
 
             if(carried_1)
             {
 
-                _S1913 = inWalked_0;
+                _S1916 = inWalked_0;
 
             }
             else
             {
 
-                _S1913 = false;
+                _S1916 = false;
 
             }
 
             Vector<float, 3>  here_0;
 
-            if(_S1913)
+            if(_S1916)
             {
-
-                here_0 = _S1911;
-
-            }
-            else
-            {
-
-                Vector<float, 3>  _S1914 = loadOut_0(_S1910, kernelContext_148);
 
                 here_0 = _S1914;
 
             }
+            else
+            {
 
-            bool _S1915;
+                Vector<float, 3>  _S1917 = loadOut_0(_S1913, kernelContext_148);
+
+                here_0 = _S1917;
+
+            }
+
+            bool _S1918;
             if(carried_1)
             {
 
-                _S1915 = shifted_0;
+                _S1918 = shifted_0;
 
             }
             else
             {
 
-                _S1915 = false;
+                _S1918 = false;
 
             }
 
             Vector<float, 3>  p_46;
 
-            if(_S1915)
+            if(_S1918)
             {
 
                 Vector<float, 3>  segment_1 = here_0 - last_1;
@@ -19675,27 +19720,27 @@ static bool collideWalk_0(uint32_t s_38, uint32_t begin_29, uint32_t n_47, uint3
 
                 uint32_t m_16 = step_3 >> int(1);
                 bool second_1 = (step_3 & 1U) != 0U;
-                bool _S1916 = m_16 == 0U;
+                bool _S1919 = m_16 == 0U;
 
-                uint32_t _S1917;
+                uint32_t _S1920;
 
-                if(_S1916)
+                if(_S1919)
                 {
 
-                    _S1917 = 0U;
+                    _S1920 = 0U;
 
                 }
                 else
                 {
 
-                    _S1917 = kernelContext_148->globalParams_0->Look_0->gAux_0.x;
+                    _S1920 = kernelContext_148->globalParams_0->Look_0->gAux_0.x;
 
                 }
 
-                kernelContext_148->sTableBase_0 = _S1917;
+                kernelContext_148->sTableBase_0 = _S1920;
 
                 FieldTables_0 tables_1;
-                if(_S1916)
+                if(_S1919)
                 {
 
                     tables_1 = *scalpTables_0;
@@ -19709,23 +19754,23 @@ static bool collideWalk_0(uint32_t s_38, uint32_t begin_29, uint32_t n_47, uint3
                 }
                 bool collider_0 = (((kernelContext_148->globalParams_0->Look_0->gFlag_0.z) >> m_16) & 1U) != 0U;
 
-                bool _S1918 = collideRest_0(m_16, kernelContext_148);
+                bool _S1921 = collideRest_0(m_16, kernelContext_148);
 
                 bool shifted_2;
 
                 uint32_t step_4;
 
                 Vector<float, 3>  p_48;
-                if(_S1918)
+                if(_S1921)
                 {
                     Vector<float, 3>  q_13 = p_47;
 
-                    bool _S1919 = collideRestPush_0(m_16, &q_13, _S1901, rest_4, kernelContext_148);
+                    bool _S1922 = collideRestPush_0(m_16, &q_13, _S1904, rest_4, kernelContext_148);
 
                     if(second_1)
                     {
 
-                        if(_S1919)
+                        if(_S1922)
                         {
 
                             p_48 = q_13;
@@ -19757,7 +19802,7 @@ static bool collideWalk_0(uint32_t s_38, uint32_t begin_29, uint32_t n_47, uint3
                         continue;
                     }
 
-                    if(!_S1919)
+                    if(!_S1922)
                     {
 
                         uint32_t step_6 = step_3 + 1U;
@@ -19821,7 +19866,7 @@ static bool collideWalk_0(uint32_t s_38, uint32_t begin_29, uint32_t n_47, uint3
 
                 float within_1;
 
-                if(_S1916)
+                if(_S1919)
                 {
 
                     within_1 = skipWithin_0.x;
@@ -19833,39 +19878,39 @@ static bool collideWalk_0(uint32_t s_38, uint32_t begin_29, uint32_t n_47, uint3
                     within_1 = skipWithin_0.y;
 
                 }
-                bool _S1920 = !second_1;
+                bool _S1923 = !second_1;
 
-                bool _S1921;
+                bool _S1924;
 
-                if(_S1920)
+                if(_S1923)
                 {
 
-                    _S1921 = within_1 >= 0.0f;
+                    _S1924 = within_1 >= 0.0f;
 
                 }
                 else
                 {
 
-                    _S1921 = false;
+                    _S1924 = false;
 
                 }
 
-                bool _S1922;
+                bool _S1925;
 
-                if(_S1921)
+                if(_S1924)
                 {
 
-                    _S1922 = (apartExact_0(p_47, root_13)) <= within_1;
+                    _S1925 = (apartExact_0(p_47, root_13)) <= within_1;
 
                 }
                 else
                 {
 
-                    _S1922 = false;
+                    _S1925 = false;
 
                 }
 
-                if(_S1922)
+                if(_S1925)
                 {
 
                     uint32_t step_7 = step_3 + 1U;
@@ -19891,18 +19936,18 @@ static bool collideWalk_0(uint32_t s_38, uint32_t begin_29, uint32_t n_47, uint3
                     continue;
                 }
 
-                if(_S1920)
+                if(_S1923)
                 {
 
                     learnt_0(&probe_9, - infinity_0(), 0.0f);
 
                 }
 
-                FieldTables_0 _S1923 = tables_1;
+                FieldTables_0 _S1926 = tables_1;
                 Vector<float, 3>  delta_7;
 
-                uint32_t _S1924 = clearancePush_0(&_S1923, p_47, _S1901, _S1902, _S1903, &probe_9, &delta_7, kernelContext_148);
-                bool pushedOut_0 = _S1924 == 1U;
+                uint32_t _S1927 = clearancePush_0(&_S1926, p_47, _S1904, _S1905, _S1906, &probe_9, &delta_7, kernelContext_148);
+                bool pushedOut_0 = _S1927 == 1U;
                 if(second_1)
                 {
 
@@ -19987,10 +20032,10 @@ static bool collideWalk_0(uint32_t s_38, uint32_t begin_29, uint32_t n_47, uint3
 
 
 
-                Vector<float, 3>  _S1925 = keepLength_0(previous_6, pushed_2, wanted_3);
+                Vector<float, 3>  _S1928 = keepLength_0(previous_6, pushed_2, wanted_3);
                 learnt_0(&probe_9, - infinity_0(), 0.0f);
 
-                p_48 = _S1925;
+                p_48 = _S1928;
 
                 moved_12 = true;
 
@@ -20008,7 +20053,7 @@ static bool collideWalk_0(uint32_t s_38, uint32_t begin_29, uint32_t n_47, uint3
 
             }
 
-            storePoint_0(kernelContext_148->globalParams_0->gOut_0, _S1910, p_47);
+            storePoint_0(kernelContext_148->globalParams_0->gOut_0, _S1913, p_47);
 
             uint32_t i_70 = i_69 + 1U;
 
@@ -20047,10 +20092,10 @@ static bool collideWalk_0(uint32_t s_38, uint32_t begin_29, uint32_t n_47, uint3
 
 
 
-void _CollideCS(void* _S1926, void* entryPointParams_24, void* globalParams_25)
+void _CollideCS(void* _S1929, void* entryPointParams_24, void* globalParams_25)
 {
 
-    ComputeThreadVaryingInput * _S1927 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S1926));
+    ComputeThreadVaryingInput * _S1930 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S1929));
 
     KernelContext_0 kernelContext_149;
 
@@ -20060,108 +20105,108 @@ void _CollideCS(void* _S1926, void* entryPointParams_24, void* globalParams_25)
 
     (&kernelContext_149)->sTableBase_0 = 0U;
 
-    uint32_t _S1928 = threadIndex_0(_S1927->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S1927->groupThreadID, 64U, &kernelContext_149);
+    uint32_t _S1931 = threadIndex_0(_S1930->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S1930->groupThreadID, 64U, &kernelContext_149);
 
-    if(_S1928 >= ((&kernelContext_149)->globalParams_0->Look_0->gStrandCount_0))
+    if(_S1931 >= ((&kernelContext_149)->globalParams_0->Look_0->gStrandCount_0))
     {
 
         return;
     }
 
-    uint32_t _S1929 = strandBegin_0(_S1928, &kernelContext_149);
+    uint32_t _S1932 = strandBegin_0(_S1931, &kernelContext_149);
 
-    uint32_t _S1930 = strandCountOf_0(_S1928, &kernelContext_149);
+    uint32_t _S1933 = strandCountOf_0(_S1931, &kernelContext_149);
 
 
 
     bool second_2 = ((&kernelContext_149)->globalParams_0->Look_0->gFlag_0.y) != 0U;
-    bool _S1931 = !second_2;
+    bool _S1934 = !second_2;
 
-    if(_S1931)
+    if(_S1934)
     {
 
-        copyStrand_0(_S1929, _S1930, &kernelContext_149);
+        copyStrand_0(_S1932, _S1933, &kernelContext_149);
 
     }
 
-    bool _S1932;
+    bool _S1935;
     if(second_2)
     {
 
-        uint32_t _S1933 = ((&kernelContext_149)->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t(_S1928 * 4U)));
+        uint32_t _S1936 = ((&kernelContext_149)->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t(_S1931 * 4U)));
 
-        _S1932 = _S1933 == 0U;
+        _S1935 = _S1936 == 0U;
 
     }
     else
     {
 
-        _S1932 = false;
+        _S1935 = false;
 
     }
 
-    if(_S1932)
+    if(_S1935)
     {
 
         return;
     }
 
-    uint32_t _S1934 = (U32_min(((&kernelContext_149)->globalParams_0->Look_0->gAux_0.y), (2U)));
-    if(_S1930 < 2U)
+    uint32_t _S1937 = (U32_min(((&kernelContext_149)->globalParams_0->Look_0->gAux_0.y), (2U)));
+    if(_S1933 < 2U)
     {
 
-        _S1932 = true;
+        _S1935 = true;
 
     }
     else
     {
 
-        _S1932 = _S1934 == 0U;
+        _S1935 = _S1937 == 0U;
 
     }
 
-    if(_S1932)
+    if(_S1935)
     {
 
-        if(_S1931)
+        if(_S1934)
         {
 
-            _S1932 = ((&kernelContext_149)->globalParams_0->Look_0->gValue2_0.y) > 0.0f;
+            _S1935 = ((&kernelContext_149)->globalParams_0->Look_0->gValue2_0.y) > 0.0f;
 
         }
         else
         {
 
-            _S1932 = false;
+            _S1935 = false;
 
         }
 
-        if(_S1932)
+        if(_S1935)
         {
 
-            (&kernelContext_149)->globalParams_0->gOut2_0.Store(_S1928 * 4U,0U);
+            (&kernelContext_149)->globalParams_0->gOut2_0.Store(_S1931 * 4U,0U);
 
         }
         return;
     }
     (&kernelContext_149)->sTableBase_0 = 0U;
 
-    FieldTables_0 _S1935 = fieldTables_0(&kernelContext_149);
+    FieldTables_0 _S1938 = fieldTables_0(&kernelContext_149);
 
     (&kernelContext_149)->sTableBase_0 = (&kernelContext_149)->globalParams_0->Look_0->gAux_0.x;
 
-    FieldTables_0 _S1936 = fieldTables_0(&kernelContext_149);
+    FieldTables_0 _S1939 = fieldTables_0(&kernelContext_149);
 
     float softness_1 = (&kernelContext_149)->globalParams_0->Look_0->gValue2_0.y;
     bool carried_2 = softness_1 > 0.0f;
     if(second_2)
     {
 
-        smoothStrand_0(_S1929, _S1930, softness_1, &kernelContext_149);
+        smoothStrand_0(_S1932, _S1933, softness_1, &kernelContext_149);
 
     }
 
-    Vector<float, 3>  _S1937 = loadOut_0(_S1929, &kernelContext_149);
+    Vector<float, 3>  _S1940 = loadOut_0(_S1932, &kernelContext_149);
 
     float farthest_1 = 0.0f;
 
@@ -20170,7 +20215,7 @@ void _CollideCS(void* _S1926, void* entryPointParams_24, void* globalParams_25)
     for(;;)
     {
 
-        if(i_71 < _S1930)
+        if(i_71 < _S1933)
         {
         }
         else
@@ -20179,13 +20224,13 @@ void _CollideCS(void* _S1926, void* entryPointParams_24, void* globalParams_25)
             break;
         }
 
-        Vector<float, 3>  _S1938 = loadOut_0(_S1929 + i_71, &kernelContext_149);
+        Vector<float, 3>  _S1941 = loadOut_0(_S1932 + i_71, &kernelContext_149);
 
-        float _S1939 = (groomlab_max((farthest_1), (apartExact_0(_S1938, _S1937))));
+        float _S1942 = (groomlab_max((farthest_1), (apartExact_0(_S1941, _S1940))));
 
         uint32_t i_72 = i_71 + 1U;
 
-        farthest_1 = _S1939;
+        farthest_1 = _S1942;
 
         i_71 = i_72;
 
@@ -20193,14 +20238,14 @@ void _CollideCS(void* _S1926, void* entryPointParams_24, void* globalParams_25)
     float reach_4 = (&kernelContext_149)->globalParams_0->Look_0->gValue_0.x;
     float spread_0 = farthest_1 * 1.0010000467300415f;
     float widened_0 = spread_0 + reach_4;
-    float _S1940 = widened_0 + 9.99999997475242708e-07f;
+    float _S1943 = widened_0 + 9.99999997475242708e-07f;
     Vector<float, 2>  skipWithin_1 = Vector<float, 2> (-1.0f, -1.0f);
 
     uint32_t m_17 = 0U;
     for(;;)
     {
 
-        if(m_17 < _S1934)
+        if(m_17 < _S1937)
         {
         }
         else
@@ -20209,25 +20254,25 @@ void _CollideCS(void* _S1926, void* entryPointParams_24, void* globalParams_25)
             break;
         }
 
-        bool _S1941 = collideRest_0(m_17, &kernelContext_149);
-        if(_S1941)
+        bool _S1944 = collideRest_0(m_17, &kernelContext_149);
+        if(_S1944)
         {
 
-            bool _S1942 = collideHostSettled_0(m_17, _S1937, _S1940, reach_4, &kernelContext_149);
+            bool _S1945 = collideHostSettled_0(m_17, _S1940, _S1943, reach_4, &kernelContext_149);
 
-            if(_S1942)
+            if(_S1945)
             {
 
                 if(m_17 == 0U)
                 {
 
-                    skipWithin_1.x = _S1940;
+                    skipWithin_1.x = _S1943;
 
                 }
                 else
                 {
 
-                    skipWithin_1.y = _S1940;
+                    skipWithin_1.y = _S1943;
 
                 }
 
@@ -20239,9 +20284,9 @@ void _CollideCS(void* _S1926, void* entryPointParams_24, void* globalParams_25)
             continue;
         }
 
-        bool _S1943 = m_17 == 0U;
+        bool _S1946 = m_17 == 0U;
 
-        if(_S1943)
+        if(_S1946)
         {
 
             i_71 = 0U;
@@ -20257,16 +20302,16 @@ void _CollideCS(void* _S1926, void* entryPointParams_24, void* globalParams_25)
         (&kernelContext_149)->sTableBase_0 = i_71;
 
         FieldTables_0 t_44;
-        if(_S1943)
+        if(_S1946)
         {
 
-            t_44 = _S1935;
+            t_44 = _S1938;
 
         }
         else
         {
 
-            t_44 = _S1936;
+            t_44 = _S1939;
 
         }
 
@@ -20274,29 +20319,29 @@ void _CollideCS(void* _S1926, void* entryPointParams_24, void* globalParams_25)
         float above_1 = reach_4 + margin_0;
         float beyond_0 = (&kernelContext_149)->globalParams_0->Look_0->gValue_0.z + margin_0;
 
-        FieldTables_0 _S1944 = t_44;
+        FieldTables_0 _S1947 = t_44;
 
         float heightLow_4;
 
         float distanceLow_4;
 
-        bool _S1945 = fieldBounds_0(&_S1944, _S1937, _S1940, &heightLow_4, &distanceLow_4, &kernelContext_149);
+        bool _S1948 = fieldBounds_0(&_S1947, _S1940, _S1943, &heightLow_4, &distanceLow_4, &kernelContext_149);
 
 
 
-        if(_S1945)
+        if(_S1948)
         {
 
             if(heightLow_4 >= above_1)
             {
 
-                _S1932 = true;
+                _S1935 = true;
 
             }
             else
             {
 
-                _S1932 = distanceLow_4 > beyond_0;
+                _S1935 = distanceLow_4 > beyond_0;
 
             }
 
@@ -20304,23 +20349,23 @@ void _CollideCS(void* _S1926, void* entryPointParams_24, void* globalParams_25)
         else
         {
 
-            _S1932 = false;
+            _S1935 = false;
 
         }
 
-        if(_S1932)
+        if(_S1935)
         {
 
-            if(_S1943)
+            if(_S1946)
             {
 
-                skipWithin_1.x = _S1940;
+                skipWithin_1.x = _S1943;
 
             }
             else
             {
 
-                skipWithin_1.y = _S1940;
+                skipWithin_1.y = _S1943;
 
             }
 
@@ -20332,35 +20377,35 @@ void _CollideCS(void* _S1926, void* entryPointParams_24, void* globalParams_25)
 
     CollideRestStates_0 rest_5 = collideRestStates_0();
 
-    FieldTables_0 _S1946 = _S1935;
+    FieldTables_0 _S1949 = _S1938;
 
-    FieldTables_0 _S1947 = _S1936;
+    FieldTables_0 _S1950 = _S1939;
 
-    bool _S1948 = collideWalk_0(_S1928, _S1929, _S1930, _S1934, &_S1946, &_S1947, carried_2, _S1931, _S1937, skipWithin_1, &rest_5, &kernelContext_149);
+    bool _S1951 = collideWalk_0(_S1931, _S1932, _S1933, _S1937, &_S1949, &_S1950, carried_2, _S1934, _S1940, skipWithin_1, &rest_5, &kernelContext_149);
 
     if(carried_2)
     {
 
-        _S1932 = _S1948;
+        _S1935 = _S1951;
 
     }
     else
     {
 
-        _S1932 = false;
+        _S1935 = false;
 
     }
 
-    if(_S1932)
+    if(_S1935)
     {
 
-        smoothStrand_0(_S1929, _S1930, softness_1, &kernelContext_149);
+        smoothStrand_0(_S1932, _S1933, softness_1, &kernelContext_149);
 
-        FieldTables_0 _S1949 = _S1935;
+        FieldTables_0 _S1952 = _S1938;
 
-        FieldTables_0 _S1950 = _S1936;
+        FieldTables_0 _S1953 = _S1939;
 
-        bool _S1951 = collideWalk_0(_S1928, _S1929, _S1930, _S1934, &_S1949, &_S1950, carried_2, false, _S1937, skipWithin_1, &rest_5, &kernelContext_149);
+        bool _S1954 = collideWalk_0(_S1931, _S1932, _S1933, _S1937, &_S1952, &_S1953, carried_2, false, _S1940, skipWithin_1, &rest_5, &kernelContext_149);
 
     }
 
@@ -20373,8 +20418,8 @@ void _CollideCS(void* _S1926, void* entryPointParams_24, void* globalParams_25)
 static Vector<float, 4>  windLoopPoint_0(Vector<float, 3>  spot_1, Vector<float, 3>  dir_2, KernelContext_0 * kernelContext_150)
 {
 
-    Vector<uint32_t, 4>  _S1952 = kernelContext_150->globalParams_0->Look_0->gFlag2_0;
-    Vector<float, 3>  across1_0 = asfloat_0(Vector<uint32_t, 3> {_S1952.x, _S1952.y, _S1952.z});
+    Vector<uint32_t, 4>  _S1955 = kernelContext_150->globalParams_0->Look_0->gFlag2_0;
+    Vector<float, 3>  across1_0 = asfloat_0(Vector<uint32_t, 3> {_S1955.x, _S1955.y, _S1955.z});
     float a_57 = dot_0(spot_1, dir_2) * (U32_asfloat((kernelContext_150->globalParams_0->Look_0->gFlag_0.y))) - (U32_asfloat((kernelContext_150->globalParams_0->Look_0->gFlag_0.x)));
     float r_35 = (U32_asfloat((kernelContext_150->globalParams_0->Look_0->gFlag2_0.w)));
     return Vector<float, 4> (dot_0(spot_1, across1_0), dot_0(spot_1, cross_0(dir_2, across1_0)), r_35 * (groomlab_pm_cos((a_57))), r_35 * (groomlab_pm_sin((a_57))));
@@ -20384,13 +20429,13 @@ static Vector<float, 4>  windLoopPoint_0(Vector<float, 3>  spot_1, Vector<float,
 static Vector<uint32_t, 2>  cornerHash4_0(int32_t ix_1, int32_t iy_1, int32_t iz_1, int32_t iw_0, Vector<uint32_t, 2>  seed_3)
 {
 
-    Vector<uint32_t, 2>  _S1953 = cornerHashXY_0(seed_3, ix_1, iy_1);
+    Vector<uint32_t, 2>  _S1956 = cornerHashXY_0(seed_3, ix_1, iy_1);
 
-    Vector<uint32_t, 2>  _S1954 = (groomlab_mul64((fromLattice_0(iw_0)), (Vector<uint32_t, 2> (1717173651U, 3605593784U))));
+    Vector<uint32_t, 2>  _S1957 = (groomlab_mul64((fromLattice_0(iw_0)), (Vector<uint32_t, 2> (1717173651U, 3605593784U))));
 
-    Vector<uint32_t, 2>  _S1955 = cornerHashZ_0(_S1953 ^ _S1954, iz_1);
+    Vector<uint32_t, 2>  _S1958 = cornerHashZ_0(_S1956 ^ _S1957, iz_1);
 
-    return _S1955;
+    return _S1958;
 }
 
 
@@ -20399,15 +20444,15 @@ static float gradient4_0(Vector<uint32_t, 2>  h_31, uint32_t k_39, float dx_1, f
 
     uint32_t i_73 = (gradientBits_0(h_31, k_39)) & 31U;
 
-    uint32_t _S1956 = i_73 >> int(3);
+    uint32_t _S1959 = i_73 >> int(3);
     FixedArray<float, 4>  g_34;
 
-    float _S1957;
+    float _S1960;
 
     uint32_t bit_0;
 
 
-    if(0U == _S1956)
+    if(0U == _S1959)
     {
 
         g_34[0U] = 0.0f;
@@ -20420,23 +20465,23 @@ static float gradient4_0(Vector<uint32_t, 2>  h_31, uint32_t k_39, float dx_1, f
         if(((i_73 >> 0U) & 1U) != 0U)
         {
 
-            _S1957 = -1.0f;
+            _S1960 = -1.0f;
 
         }
         else
         {
 
-            _S1957 = 1.0f;
+            _S1960 = 1.0f;
 
         }
 
-        g_34[0U] = _S1957;
+        g_34[0U] = _S1960;
 
         bit_0 = 1U;
 
     }
 
-    if(1U == _S1956)
+    if(1U == _S1959)
     {
 
         g_34[1U] = 0.0f;
@@ -20447,23 +20492,23 @@ static float gradient4_0(Vector<uint32_t, 2>  h_31, uint32_t k_39, float dx_1, f
         if(((i_73 >> bit_0) & 1U) != 0U)
         {
 
-            _S1957 = -1.0f;
+            _S1960 = -1.0f;
 
         }
         else
         {
 
-            _S1957 = 1.0f;
+            _S1960 = 1.0f;
 
         }
 
-        g_34[1U] = _S1957;
+        g_34[1U] = _S1960;
 
         bit_0 = bit_0 + 1U;
 
     }
 
-    if(2U == _S1956)
+    if(2U == _S1959)
     {
 
         g_34[2U] = 0.0f;
@@ -20474,23 +20519,23 @@ static float gradient4_0(Vector<uint32_t, 2>  h_31, uint32_t k_39, float dx_1, f
         if(((i_73 >> bit_0) & 1U) != 0U)
         {
 
-            _S1957 = -1.0f;
+            _S1960 = -1.0f;
 
         }
         else
         {
 
-            _S1957 = 1.0f;
+            _S1960 = 1.0f;
 
         }
 
-        g_34[2U] = _S1957;
+        g_34[2U] = _S1960;
 
         bit_0 = bit_0 + 1U;
 
     }
 
-    if(3U == _S1956)
+    if(3U == _S1959)
     {
 
         g_34[3U] = 0.0f;
@@ -20501,17 +20546,17 @@ static float gradient4_0(Vector<uint32_t, 2>  h_31, uint32_t k_39, float dx_1, f
         if(((i_73 >> bit_0) & 1U) != 0U)
         {
 
-            _S1957 = -1.0f;
+            _S1960 = -1.0f;
 
         }
         else
         {
 
-            _S1957 = 1.0f;
+            _S1960 = 1.0f;
 
         }
 
-        g_34[3U] = _S1957;
+        g_34[3U] = _S1960;
 
     }
 
@@ -20522,422 +20567,422 @@ static float gradient4_0(Vector<uint32_t, 2>  h_31, uint32_t k_39, float dx_1, f
 static Vector<float, 3>  latticeNoise4_0(Vector<float, 3>  q_14, float qw_0, Vector<uint32_t, 2>  seed_4, uint32_t channels_1)
 {
 
-    float _S1958 = q_14.x;
+    float _S1961 = q_14.x;
 
-    float fx_1 = (groomlab_floor((_S1958)));
+    float fx_1 = (groomlab_floor((_S1961)));
 
-    float _S1959 = q_14.y;
+    float _S1962 = q_14.y;
 
-    float fy_1 = (groomlab_floor((_S1959)));
+    float fy_1 = (groomlab_floor((_S1962)));
 
-    float _S1960 = q_14.z;
+    float _S1963 = q_14.z;
 
-    float fz_1 = (groomlab_floor((_S1960)));
+    float fz_1 = (groomlab_floor((_S1963)));
 
     float fw_0 = (groomlab_floor((qw_0)));
-    int32_t _S1961 = int32_t(fx_1);
+    int32_t _S1964 = int32_t(fx_1);
 
-    int32_t _S1962 = int32_t(fy_1);
+    int32_t _S1965 = int32_t(fy_1);
 
-    int32_t _S1963 = int32_t(fz_1);
+    int32_t _S1966 = int32_t(fz_1);
 
-    int32_t _S1964 = int32_t(fw_0);
-    float dx_2 = _S1958 - fx_1;
+    int32_t _S1967 = int32_t(fw_0);
+    float dx_2 = _S1961 - fx_1;
 
-    float dy_2 = _S1959 - fy_1;
+    float dy_2 = _S1962 - fy_1;
 
-    float dz_2 = _S1960 - fz_1;
+    float dz_2 = _S1963 - fz_1;
 
     float dw_1 = qw_0 - fw_0;
-    float _S1965 = fade_0(dx_2);
+    float _S1968 = fade_0(dx_2);
 
-    float _S1966 = fade_0(dy_2);
+    float _S1969 = fade_0(dy_2);
 
-    float _S1967 = fade_0(dz_2);
+    float _S1970 = fade_0(dz_2);
 
-    float _S1968 = fade_0(dw_1);
+    float _S1971 = fade_0(dw_1);
     FixedArray<FixedArray<float, 16> , 3>  corner_1;
 
 
-    Vector<uint32_t, 2>  _S1969 = cornerHash4_0(_S1961, _S1962, _S1963, _S1964, seed_4);
+    Vector<uint32_t, 2>  _S1972 = cornerHash4_0(_S1964, _S1965, _S1966, _S1967, seed_4);
 
-    bool _S1970 = 0U < channels_1;
+    bool _S1973 = 0U < channels_1;
 
-    if(_S1970)
+    if(_S1973)
     {
 
-        corner_1[0U][0U] = gradient4_0(_S1969, 0U, dx_2, dy_2, dz_2, dw_1);
+        corner_1[0U][0U] = gradient4_0(_S1972, 0U, dx_2, dy_2, dz_2, dw_1);
 
     }
 
-    bool _S1971 = 1U < channels_1;
+    bool _S1974 = 1U < channels_1;
 
-    if(_S1971)
+    if(_S1974)
     {
 
-        corner_1[1U][0U] = gradient4_0(_S1969, 1U, dx_2, dy_2, dz_2, dw_1);
+        corner_1[1U][0U] = gradient4_0(_S1972, 1U, dx_2, dy_2, dz_2, dw_1);
 
     }
 
-    bool _S1972 = 2U < channels_1;
+    bool _S1975 = 2U < channels_1;
 
-    if(_S1972)
+    if(_S1975)
     {
 
-        corner_1[2U][0U] = gradient4_0(_S1969, 2U, dx_2, dy_2, dz_2, dw_1);
+        corner_1[2U][0U] = gradient4_0(_S1972, 2U, dx_2, dy_2, dz_2, dw_1);
 
     }
 
-    int32_t _S1973 = _S1961 + int(1);
+    int32_t _S1976 = _S1964 + int(1);
 
-    Vector<uint32_t, 2>  _S1974 = cornerHash4_0(_S1973, _S1962, _S1963, _S1964, seed_4);
+    Vector<uint32_t, 2>  _S1977 = cornerHash4_0(_S1976, _S1965, _S1966, _S1967, seed_4);
 
-    if(_S1970)
+    if(_S1973)
     {
 
-        corner_1[0U][1U] = gradient4_0(_S1974, 0U, dx_2 - 1.0f, dy_2, dz_2, dw_1);
+        corner_1[0U][1U] = gradient4_0(_S1977, 0U, dx_2 - 1.0f, dy_2, dz_2, dw_1);
 
     }
 
-    if(_S1971)
+    if(_S1974)
     {
 
-        corner_1[1U][1U] = gradient4_0(_S1974, 1U, dx_2 - 1.0f, dy_2, dz_2, dw_1);
+        corner_1[1U][1U] = gradient4_0(_S1977, 1U, dx_2 - 1.0f, dy_2, dz_2, dw_1);
 
     }
 
-    if(_S1972)
+    if(_S1975)
     {
 
-        corner_1[2U][1U] = gradient4_0(_S1974, 2U, dx_2 - 1.0f, dy_2, dz_2, dw_1);
+        corner_1[2U][1U] = gradient4_0(_S1977, 2U, dx_2 - 1.0f, dy_2, dz_2, dw_1);
 
     }
 
-    int32_t _S1975 = _S1962 + int(1);
+    int32_t _S1978 = _S1965 + int(1);
 
-    Vector<uint32_t, 2>  _S1976 = cornerHash4_0(_S1961, _S1975, _S1963, _S1964, seed_4);
+    Vector<uint32_t, 2>  _S1979 = cornerHash4_0(_S1964, _S1978, _S1966, _S1967, seed_4);
 
-    if(_S1970)
+    if(_S1973)
     {
 
-        corner_1[0U][2U] = gradient4_0(_S1976, 0U, dx_2, dy_2 - 1.0f, dz_2, dw_1);
+        corner_1[0U][2U] = gradient4_0(_S1979, 0U, dx_2, dy_2 - 1.0f, dz_2, dw_1);
 
     }
 
-    if(_S1971)
+    if(_S1974)
     {
 
-        corner_1[1U][2U] = gradient4_0(_S1976, 1U, dx_2, dy_2 - 1.0f, dz_2, dw_1);
+        corner_1[1U][2U] = gradient4_0(_S1979, 1U, dx_2, dy_2 - 1.0f, dz_2, dw_1);
 
     }
 
-    if(_S1972)
+    if(_S1975)
     {
 
-        corner_1[2U][2U] = gradient4_0(_S1976, 2U, dx_2, dy_2 - 1.0f, dz_2, dw_1);
+        corner_1[2U][2U] = gradient4_0(_S1979, 2U, dx_2, dy_2 - 1.0f, dz_2, dw_1);
 
     }
 
-    Vector<uint32_t, 2>  _S1977 = cornerHash4_0(_S1973, _S1975, _S1963, _S1964, seed_4);
+    Vector<uint32_t, 2>  _S1980 = cornerHash4_0(_S1976, _S1978, _S1966, _S1967, seed_4);
 
-    if(_S1970)
+    if(_S1973)
     {
 
-        corner_1[0U][3U] = gradient4_0(_S1977, 0U, dx_2 - 1.0f, dy_2 - 1.0f, dz_2, dw_1);
+        corner_1[0U][3U] = gradient4_0(_S1980, 0U, dx_2 - 1.0f, dy_2 - 1.0f, dz_2, dw_1);
 
     }
 
-    if(_S1971)
+    if(_S1974)
     {
 
-        corner_1[1U][3U] = gradient4_0(_S1977, 1U, dx_2 - 1.0f, dy_2 - 1.0f, dz_2, dw_1);
+        corner_1[1U][3U] = gradient4_0(_S1980, 1U, dx_2 - 1.0f, dy_2 - 1.0f, dz_2, dw_1);
 
     }
 
-    if(_S1972)
+    if(_S1975)
     {
 
-        corner_1[2U][3U] = gradient4_0(_S1977, 2U, dx_2 - 1.0f, dy_2 - 1.0f, dz_2, dw_1);
+        corner_1[2U][3U] = gradient4_0(_S1980, 2U, dx_2 - 1.0f, dy_2 - 1.0f, dz_2, dw_1);
 
     }
 
-    int32_t _S1978 = _S1963 + int(1);
+    int32_t _S1981 = _S1966 + int(1);
 
-    Vector<uint32_t, 2>  _S1979 = cornerHash4_0(_S1961, _S1962, _S1978, _S1964, seed_4);
+    Vector<uint32_t, 2>  _S1982 = cornerHash4_0(_S1964, _S1965, _S1981, _S1967, seed_4);
 
-    if(_S1970)
+    if(_S1973)
     {
 
-        corner_1[0U][4U] = gradient4_0(_S1979, 0U, dx_2, dy_2, dz_2 - 1.0f, dw_1);
+        corner_1[0U][4U] = gradient4_0(_S1982, 0U, dx_2, dy_2, dz_2 - 1.0f, dw_1);
 
     }
 
-    if(_S1971)
+    if(_S1974)
     {
 
-        corner_1[1U][4U] = gradient4_0(_S1979, 1U, dx_2, dy_2, dz_2 - 1.0f, dw_1);
+        corner_1[1U][4U] = gradient4_0(_S1982, 1U, dx_2, dy_2, dz_2 - 1.0f, dw_1);
 
     }
 
-    if(_S1972)
+    if(_S1975)
     {
 
-        corner_1[2U][4U] = gradient4_0(_S1979, 2U, dx_2, dy_2, dz_2 - 1.0f, dw_1);
+        corner_1[2U][4U] = gradient4_0(_S1982, 2U, dx_2, dy_2, dz_2 - 1.0f, dw_1);
 
     }
 
-    Vector<uint32_t, 2>  _S1980 = cornerHash4_0(_S1973, _S1962, _S1978, _S1964, seed_4);
+    Vector<uint32_t, 2>  _S1983 = cornerHash4_0(_S1976, _S1965, _S1981, _S1967, seed_4);
 
-    if(_S1970)
+    if(_S1973)
     {
 
-        corner_1[0U][5U] = gradient4_0(_S1980, 0U, dx_2 - 1.0f, dy_2, dz_2 - 1.0f, dw_1);
+        corner_1[0U][5U] = gradient4_0(_S1983, 0U, dx_2 - 1.0f, dy_2, dz_2 - 1.0f, dw_1);
 
     }
 
-    if(_S1971)
+    if(_S1974)
     {
 
-        corner_1[1U][5U] = gradient4_0(_S1980, 1U, dx_2 - 1.0f, dy_2, dz_2 - 1.0f, dw_1);
+        corner_1[1U][5U] = gradient4_0(_S1983, 1U, dx_2 - 1.0f, dy_2, dz_2 - 1.0f, dw_1);
 
     }
 
-    if(_S1972)
+    if(_S1975)
     {
 
-        corner_1[2U][5U] = gradient4_0(_S1980, 2U, dx_2 - 1.0f, dy_2, dz_2 - 1.0f, dw_1);
+        corner_1[2U][5U] = gradient4_0(_S1983, 2U, dx_2 - 1.0f, dy_2, dz_2 - 1.0f, dw_1);
 
     }
 
-    Vector<uint32_t, 2>  _S1981 = cornerHash4_0(_S1961, _S1975, _S1978, _S1964, seed_4);
+    Vector<uint32_t, 2>  _S1984 = cornerHash4_0(_S1964, _S1978, _S1981, _S1967, seed_4);
 
-    if(_S1970)
+    if(_S1973)
     {
 
-        corner_1[0U][6U] = gradient4_0(_S1981, 0U, dx_2, dy_2 - 1.0f, dz_2 - 1.0f, dw_1);
+        corner_1[0U][6U] = gradient4_0(_S1984, 0U, dx_2, dy_2 - 1.0f, dz_2 - 1.0f, dw_1);
 
     }
 
-    if(_S1971)
+    if(_S1974)
     {
 
-        corner_1[1U][6U] = gradient4_0(_S1981, 1U, dx_2, dy_2 - 1.0f, dz_2 - 1.0f, dw_1);
+        corner_1[1U][6U] = gradient4_0(_S1984, 1U, dx_2, dy_2 - 1.0f, dz_2 - 1.0f, dw_1);
 
     }
 
-    if(_S1972)
+    if(_S1975)
     {
 
-        corner_1[2U][6U] = gradient4_0(_S1981, 2U, dx_2, dy_2 - 1.0f, dz_2 - 1.0f, dw_1);
+        corner_1[2U][6U] = gradient4_0(_S1984, 2U, dx_2, dy_2 - 1.0f, dz_2 - 1.0f, dw_1);
 
     }
 
-    Vector<uint32_t, 2>  _S1982 = cornerHash4_0(_S1973, _S1975, _S1978, _S1964, seed_4);
+    Vector<uint32_t, 2>  _S1985 = cornerHash4_0(_S1976, _S1978, _S1981, _S1967, seed_4);
 
-    if(_S1970)
+    if(_S1973)
     {
 
-        corner_1[0U][7U] = gradient4_0(_S1982, 0U, dx_2 - 1.0f, dy_2 - 1.0f, dz_2 - 1.0f, dw_1);
+        corner_1[0U][7U] = gradient4_0(_S1985, 0U, dx_2 - 1.0f, dy_2 - 1.0f, dz_2 - 1.0f, dw_1);
 
     }
 
-    if(_S1971)
+    if(_S1974)
     {
 
-        corner_1[1U][7U] = gradient4_0(_S1982, 1U, dx_2 - 1.0f, dy_2 - 1.0f, dz_2 - 1.0f, dw_1);
+        corner_1[1U][7U] = gradient4_0(_S1985, 1U, dx_2 - 1.0f, dy_2 - 1.0f, dz_2 - 1.0f, dw_1);
 
     }
 
-    if(_S1972)
+    if(_S1975)
     {
 
-        corner_1[2U][7U] = gradient4_0(_S1982, 2U, dx_2 - 1.0f, dy_2 - 1.0f, dz_2 - 1.0f, dw_1);
+        corner_1[2U][7U] = gradient4_0(_S1985, 2U, dx_2 - 1.0f, dy_2 - 1.0f, dz_2 - 1.0f, dw_1);
 
     }
 
-    int32_t _S1983 = _S1964 + int(1);
+    int32_t _S1986 = _S1967 + int(1);
 
-    Vector<uint32_t, 2>  _S1984 = cornerHash4_0(_S1961, _S1962, _S1963, _S1983, seed_4);
+    Vector<uint32_t, 2>  _S1987 = cornerHash4_0(_S1964, _S1965, _S1966, _S1986, seed_4);
 
-    if(_S1970)
+    if(_S1973)
     {
 
-        corner_1[0U][8U] = gradient4_0(_S1984, 0U, dx_2, dy_2, dz_2, dw_1 - 1.0f);
+        corner_1[0U][8U] = gradient4_0(_S1987, 0U, dx_2, dy_2, dz_2, dw_1 - 1.0f);
 
     }
 
-    if(_S1971)
+    if(_S1974)
     {
 
-        corner_1[1U][8U] = gradient4_0(_S1984, 1U, dx_2, dy_2, dz_2, dw_1 - 1.0f);
+        corner_1[1U][8U] = gradient4_0(_S1987, 1U, dx_2, dy_2, dz_2, dw_1 - 1.0f);
 
     }
 
-    if(_S1972)
+    if(_S1975)
     {
 
-        corner_1[2U][8U] = gradient4_0(_S1984, 2U, dx_2, dy_2, dz_2, dw_1 - 1.0f);
+        corner_1[2U][8U] = gradient4_0(_S1987, 2U, dx_2, dy_2, dz_2, dw_1 - 1.0f);
 
     }
 
-    Vector<uint32_t, 2>  _S1985 = cornerHash4_0(_S1973, _S1962, _S1963, _S1983, seed_4);
+    Vector<uint32_t, 2>  _S1988 = cornerHash4_0(_S1976, _S1965, _S1966, _S1986, seed_4);
 
-    if(_S1970)
+    if(_S1973)
     {
 
-        corner_1[0U][9U] = gradient4_0(_S1985, 0U, dx_2 - 1.0f, dy_2, dz_2, dw_1 - 1.0f);
+        corner_1[0U][9U] = gradient4_0(_S1988, 0U, dx_2 - 1.0f, dy_2, dz_2, dw_1 - 1.0f);
 
     }
 
-    if(_S1971)
+    if(_S1974)
     {
 
-        corner_1[1U][9U] = gradient4_0(_S1985, 1U, dx_2 - 1.0f, dy_2, dz_2, dw_1 - 1.0f);
+        corner_1[1U][9U] = gradient4_0(_S1988, 1U, dx_2 - 1.0f, dy_2, dz_2, dw_1 - 1.0f);
 
     }
 
-    if(_S1972)
+    if(_S1975)
     {
 
-        corner_1[2U][9U] = gradient4_0(_S1985, 2U, dx_2 - 1.0f, dy_2, dz_2, dw_1 - 1.0f);
+        corner_1[2U][9U] = gradient4_0(_S1988, 2U, dx_2 - 1.0f, dy_2, dz_2, dw_1 - 1.0f);
 
     }
 
-    Vector<uint32_t, 2>  _S1986 = cornerHash4_0(_S1961, _S1975, _S1963, _S1983, seed_4);
+    Vector<uint32_t, 2>  _S1989 = cornerHash4_0(_S1964, _S1978, _S1966, _S1986, seed_4);
 
-    if(_S1970)
+    if(_S1973)
     {
 
-        corner_1[0U][10U] = gradient4_0(_S1986, 0U, dx_2, dy_2 - 1.0f, dz_2, dw_1 - 1.0f);
+        corner_1[0U][10U] = gradient4_0(_S1989, 0U, dx_2, dy_2 - 1.0f, dz_2, dw_1 - 1.0f);
 
     }
 
-    if(_S1971)
+    if(_S1974)
     {
 
-        corner_1[1U][10U] = gradient4_0(_S1986, 1U, dx_2, dy_2 - 1.0f, dz_2, dw_1 - 1.0f);
+        corner_1[1U][10U] = gradient4_0(_S1989, 1U, dx_2, dy_2 - 1.0f, dz_2, dw_1 - 1.0f);
 
     }
 
-    if(_S1972)
+    if(_S1975)
     {
 
-        corner_1[2U][10U] = gradient4_0(_S1986, 2U, dx_2, dy_2 - 1.0f, dz_2, dw_1 - 1.0f);
+        corner_1[2U][10U] = gradient4_0(_S1989, 2U, dx_2, dy_2 - 1.0f, dz_2, dw_1 - 1.0f);
 
     }
 
-    Vector<uint32_t, 2>  _S1987 = cornerHash4_0(_S1973, _S1975, _S1963, _S1983, seed_4);
+    Vector<uint32_t, 2>  _S1990 = cornerHash4_0(_S1976, _S1978, _S1966, _S1986, seed_4);
 
-    if(_S1970)
+    if(_S1973)
     {
 
-        corner_1[0U][11U] = gradient4_0(_S1987, 0U, dx_2 - 1.0f, dy_2 - 1.0f, dz_2, dw_1 - 1.0f);
+        corner_1[0U][11U] = gradient4_0(_S1990, 0U, dx_2 - 1.0f, dy_2 - 1.0f, dz_2, dw_1 - 1.0f);
 
     }
 
-    if(_S1971)
+    if(_S1974)
     {
 
-        corner_1[1U][11U] = gradient4_0(_S1987, 1U, dx_2 - 1.0f, dy_2 - 1.0f, dz_2, dw_1 - 1.0f);
+        corner_1[1U][11U] = gradient4_0(_S1990, 1U, dx_2 - 1.0f, dy_2 - 1.0f, dz_2, dw_1 - 1.0f);
 
     }
 
-    if(_S1972)
+    if(_S1975)
     {
 
-        corner_1[2U][11U] = gradient4_0(_S1987, 2U, dx_2 - 1.0f, dy_2 - 1.0f, dz_2, dw_1 - 1.0f);
+        corner_1[2U][11U] = gradient4_0(_S1990, 2U, dx_2 - 1.0f, dy_2 - 1.0f, dz_2, dw_1 - 1.0f);
 
     }
 
-    Vector<uint32_t, 2>  _S1988 = cornerHash4_0(_S1961, _S1962, _S1978, _S1983, seed_4);
+    Vector<uint32_t, 2>  _S1991 = cornerHash4_0(_S1964, _S1965, _S1981, _S1986, seed_4);
 
-    if(_S1970)
+    if(_S1973)
     {
 
-        corner_1[0U][12U] = gradient4_0(_S1988, 0U, dx_2, dy_2, dz_2 - 1.0f, dw_1 - 1.0f);
+        corner_1[0U][12U] = gradient4_0(_S1991, 0U, dx_2, dy_2, dz_2 - 1.0f, dw_1 - 1.0f);
 
     }
 
-    if(_S1971)
+    if(_S1974)
     {
 
-        corner_1[1U][12U] = gradient4_0(_S1988, 1U, dx_2, dy_2, dz_2 - 1.0f, dw_1 - 1.0f);
+        corner_1[1U][12U] = gradient4_0(_S1991, 1U, dx_2, dy_2, dz_2 - 1.0f, dw_1 - 1.0f);
 
     }
 
-    if(_S1972)
+    if(_S1975)
     {
 
-        corner_1[2U][12U] = gradient4_0(_S1988, 2U, dx_2, dy_2, dz_2 - 1.0f, dw_1 - 1.0f);
+        corner_1[2U][12U] = gradient4_0(_S1991, 2U, dx_2, dy_2, dz_2 - 1.0f, dw_1 - 1.0f);
 
     }
 
-    Vector<uint32_t, 2>  _S1989 = cornerHash4_0(_S1973, _S1962, _S1978, _S1983, seed_4);
+    Vector<uint32_t, 2>  _S1992 = cornerHash4_0(_S1976, _S1965, _S1981, _S1986, seed_4);
 
-    if(_S1970)
+    if(_S1973)
     {
 
-        corner_1[0U][13U] = gradient4_0(_S1989, 0U, dx_2 - 1.0f, dy_2, dz_2 - 1.0f, dw_1 - 1.0f);
+        corner_1[0U][13U] = gradient4_0(_S1992, 0U, dx_2 - 1.0f, dy_2, dz_2 - 1.0f, dw_1 - 1.0f);
 
     }
 
-    if(_S1971)
+    if(_S1974)
     {
 
-        corner_1[1U][13U] = gradient4_0(_S1989, 1U, dx_2 - 1.0f, dy_2, dz_2 - 1.0f, dw_1 - 1.0f);
+        corner_1[1U][13U] = gradient4_0(_S1992, 1U, dx_2 - 1.0f, dy_2, dz_2 - 1.0f, dw_1 - 1.0f);
 
     }
 
-    if(_S1972)
+    if(_S1975)
     {
 
-        corner_1[2U][13U] = gradient4_0(_S1989, 2U, dx_2 - 1.0f, dy_2, dz_2 - 1.0f, dw_1 - 1.0f);
+        corner_1[2U][13U] = gradient4_0(_S1992, 2U, dx_2 - 1.0f, dy_2, dz_2 - 1.0f, dw_1 - 1.0f);
 
     }
 
-    Vector<uint32_t, 2>  _S1990 = cornerHash4_0(_S1961, _S1975, _S1978, _S1983, seed_4);
+    Vector<uint32_t, 2>  _S1993 = cornerHash4_0(_S1964, _S1978, _S1981, _S1986, seed_4);
 
-    if(_S1970)
+    if(_S1973)
     {
 
-        corner_1[0U][14U] = gradient4_0(_S1990, 0U, dx_2, dy_2 - 1.0f, dz_2 - 1.0f, dw_1 - 1.0f);
+        corner_1[0U][14U] = gradient4_0(_S1993, 0U, dx_2, dy_2 - 1.0f, dz_2 - 1.0f, dw_1 - 1.0f);
 
     }
 
-    if(_S1971)
+    if(_S1974)
     {
 
-        corner_1[1U][14U] = gradient4_0(_S1990, 1U, dx_2, dy_2 - 1.0f, dz_2 - 1.0f, dw_1 - 1.0f);
+        corner_1[1U][14U] = gradient4_0(_S1993, 1U, dx_2, dy_2 - 1.0f, dz_2 - 1.0f, dw_1 - 1.0f);
 
     }
 
-    if(_S1972)
+    if(_S1975)
     {
 
-        corner_1[2U][14U] = gradient4_0(_S1990, 2U, dx_2, dy_2 - 1.0f, dz_2 - 1.0f, dw_1 - 1.0f);
+        corner_1[2U][14U] = gradient4_0(_S1993, 2U, dx_2, dy_2 - 1.0f, dz_2 - 1.0f, dw_1 - 1.0f);
 
     }
 
-    Vector<uint32_t, 2>  _S1991 = cornerHash4_0(_S1973, _S1975, _S1978, _S1983, seed_4);
+    Vector<uint32_t, 2>  _S1994 = cornerHash4_0(_S1976, _S1978, _S1981, _S1986, seed_4);
 
-    if(_S1970)
+    if(_S1973)
     {
 
-        corner_1[0U][15U] = gradient4_0(_S1991, 0U, dx_2 - 1.0f, dy_2 - 1.0f, dz_2 - 1.0f, dw_1 - 1.0f);
+        corner_1[0U][15U] = gradient4_0(_S1994, 0U, dx_2 - 1.0f, dy_2 - 1.0f, dz_2 - 1.0f, dw_1 - 1.0f);
 
     }
 
-    if(_S1971)
+    if(_S1974)
     {
 
-        corner_1[1U][15U] = gradient4_0(_S1991, 1U, dx_2 - 1.0f, dy_2 - 1.0f, dz_2 - 1.0f, dw_1 - 1.0f);
+        corner_1[1U][15U] = gradient4_0(_S1994, 1U, dx_2 - 1.0f, dy_2 - 1.0f, dz_2 - 1.0f, dw_1 - 1.0f);
 
     }
 
-    if(_S1972)
+    if(_S1975)
     {
 
-        corner_1[2U][15U] = gradient4_0(_S1991, 2U, dx_2 - 1.0f, dy_2 - 1.0f, dz_2 - 1.0f, dw_1 - 1.0f);
+        corner_1[2U][15U] = gradient4_0(_S1994, 2U, dx_2 - 1.0f, dy_2 - 1.0f, dz_2 - 1.0f, dw_1 - 1.0f);
 
     }
 
@@ -20950,42 +20995,42 @@ static Vector<float, 3>  latticeNoise4_0(Vector<float, 3>  q_14, float qw_0, Vec
 
     n_48[int(2)] = 0.0f;
 
-    if(_S1970)
+    if(_S1973)
     {
 
         FixedArray<float, 2>  atW_0;
 
-        atW_0[0U] = mix1_0(mix1_0(mix1_0(corner_1[0U][0U], corner_1[0U][1U], _S1965), mix1_0(corner_1[0U][2U], corner_1[0U][3U], _S1965), _S1966), mix1_0(mix1_0(corner_1[0U][4U], corner_1[0U][5U], _S1965), mix1_0(corner_1[0U][6U], corner_1[0U][7U], _S1965), _S1966), _S1967);
+        atW_0[0U] = mix1_0(mix1_0(mix1_0(corner_1[0U][0U], corner_1[0U][1U], _S1968), mix1_0(corner_1[0U][2U], corner_1[0U][3U], _S1968), _S1969), mix1_0(mix1_0(corner_1[0U][4U], corner_1[0U][5U], _S1968), mix1_0(corner_1[0U][6U], corner_1[0U][7U], _S1968), _S1969), _S1970);
 
-        atW_0[1U] = mix1_0(mix1_0(mix1_0(corner_1[0U][8U], corner_1[0U][9U], _S1965), mix1_0(corner_1[0U][10U], corner_1[0U][11U], _S1965), _S1966), mix1_0(mix1_0(corner_1[0U][12U], corner_1[0U][13U], _S1965), mix1_0(corner_1[0U][14U], corner_1[0U][15U], _S1965), _S1966), _S1967);
+        atW_0[1U] = mix1_0(mix1_0(mix1_0(corner_1[0U][8U], corner_1[0U][9U], _S1968), mix1_0(corner_1[0U][10U], corner_1[0U][11U], _S1968), _S1969), mix1_0(mix1_0(corner_1[0U][12U], corner_1[0U][13U], _S1968), mix1_0(corner_1[0U][14U], corner_1[0U][15U], _S1968), _S1969), _S1970);
 
-        n_48[0U] = mix1_0(atW_0[int(0)], atW_0[int(1)], _S1968);
+        n_48[0U] = mix1_0(atW_0[int(0)], atW_0[int(1)], _S1971);
 
     }
 
-    if(_S1971)
+    if(_S1974)
     {
 
         FixedArray<float, 2>  atW_1;
 
-        atW_1[0U] = mix1_0(mix1_0(mix1_0(corner_1[1U][0U], corner_1[1U][1U], _S1965), mix1_0(corner_1[1U][2U], corner_1[1U][3U], _S1965), _S1966), mix1_0(mix1_0(corner_1[1U][4U], corner_1[1U][5U], _S1965), mix1_0(corner_1[1U][6U], corner_1[1U][7U], _S1965), _S1966), _S1967);
+        atW_1[0U] = mix1_0(mix1_0(mix1_0(corner_1[1U][0U], corner_1[1U][1U], _S1968), mix1_0(corner_1[1U][2U], corner_1[1U][3U], _S1968), _S1969), mix1_0(mix1_0(corner_1[1U][4U], corner_1[1U][5U], _S1968), mix1_0(corner_1[1U][6U], corner_1[1U][7U], _S1968), _S1969), _S1970);
 
-        atW_1[1U] = mix1_0(mix1_0(mix1_0(corner_1[1U][8U], corner_1[1U][9U], _S1965), mix1_0(corner_1[1U][10U], corner_1[1U][11U], _S1965), _S1966), mix1_0(mix1_0(corner_1[1U][12U], corner_1[1U][13U], _S1965), mix1_0(corner_1[1U][14U], corner_1[1U][15U], _S1965), _S1966), _S1967);
+        atW_1[1U] = mix1_0(mix1_0(mix1_0(corner_1[1U][8U], corner_1[1U][9U], _S1968), mix1_0(corner_1[1U][10U], corner_1[1U][11U], _S1968), _S1969), mix1_0(mix1_0(corner_1[1U][12U], corner_1[1U][13U], _S1968), mix1_0(corner_1[1U][14U], corner_1[1U][15U], _S1968), _S1969), _S1970);
 
-        n_48[1U] = mix1_0(atW_1[int(0)], atW_1[int(1)], _S1968);
+        n_48[1U] = mix1_0(atW_1[int(0)], atW_1[int(1)], _S1971);
 
     }
 
-    if(_S1972)
+    if(_S1975)
     {
 
         FixedArray<float, 2>  atW_2;
 
-        atW_2[0U] = mix1_0(mix1_0(mix1_0(corner_1[2U][0U], corner_1[2U][1U], _S1965), mix1_0(corner_1[2U][2U], corner_1[2U][3U], _S1965), _S1966), mix1_0(mix1_0(corner_1[2U][4U], corner_1[2U][5U], _S1965), mix1_0(corner_1[2U][6U], corner_1[2U][7U], _S1965), _S1966), _S1967);
+        atW_2[0U] = mix1_0(mix1_0(mix1_0(corner_1[2U][0U], corner_1[2U][1U], _S1968), mix1_0(corner_1[2U][2U], corner_1[2U][3U], _S1968), _S1969), mix1_0(mix1_0(corner_1[2U][4U], corner_1[2U][5U], _S1968), mix1_0(corner_1[2U][6U], corner_1[2U][7U], _S1968), _S1969), _S1970);
 
-        atW_2[1U] = mix1_0(mix1_0(mix1_0(corner_1[2U][8U], corner_1[2U][9U], _S1965), mix1_0(corner_1[2U][10U], corner_1[2U][11U], _S1965), _S1966), mix1_0(mix1_0(corner_1[2U][12U], corner_1[2U][13U], _S1965), mix1_0(corner_1[2U][14U], corner_1[2U][15U], _S1965), _S1966), _S1967);
+        atW_2[1U] = mix1_0(mix1_0(mix1_0(corner_1[2U][8U], corner_1[2U][9U], _S1968), mix1_0(corner_1[2U][10U], corner_1[2U][11U], _S1968), _S1969), mix1_0(mix1_0(corner_1[2U][12U], corner_1[2U][13U], _S1968), mix1_0(corner_1[2U][14U], corner_1[2U][15U], _S1968), _S1969), _S1970);
 
-        n_48[2U] = mix1_0(atW_2[int(0)], atW_2[int(1)], _S1968);
+        n_48[2U] = mix1_0(atW_2[int(0)], atW_2[int(1)], _S1971);
 
     }
 
@@ -20996,48 +21041,48 @@ static Vector<float, 3>  latticeNoise4_0(Vector<float, 3>  q_14, float qw_0, Vec
 static Vector<float, 3>  latticeNoise4_1(Vector<float, 4>  q_15, Vector<uint32_t, 2>  seed_5, uint32_t channels_2)
 {
 
-    Vector<float, 3>  _S1992 = latticeNoise4_0(Vector<float, 3> {q_15.x, q_15.y, q_15.z}, q_15.w, seed_5, channels_2);
+    Vector<float, 3>  _S1995 = latticeNoise4_0(Vector<float, 3> {q_15.x, q_15.y, q_15.z}, q_15.w, seed_5, channels_2);
 
-    return _S1992;
+    return _S1995;
 }
 
 
 static float windGust4_0(Vector<float, 4>  q_16, KernelContext_0 * kernelContext_151)
 {
 
-    Vector<uint32_t, 2>  _S1993 = octaveSeed_0(0U, kernelContext_151);
-    Vector<float, 3>  _S1994 = latticeNoise4_1(q_16, _S1993, 1U);
+    Vector<uint32_t, 2>  _S1996 = octaveSeed_0(0U, kernelContext_151);
+    Vector<float, 3>  _S1997 = latticeNoise4_1(q_16, _S1996, 1U);
 
-    float first_5 = _S1994.x;
-    Vector<float, 4>  _S1995 = q_16 * (Vector<float, 4> )2.0f;
+    float first_5 = _S1997.x;
+    Vector<float, 4>  _S1998 = q_16 * (Vector<float, 4> )2.0f;
 
-    Vector<uint32_t, 2>  _S1996 = octaveSeed_0(1U, kernelContext_151);
+    Vector<uint32_t, 2>  _S1999 = octaveSeed_0(1U, kernelContext_151);
 
-    Vector<float, 3>  _S1997 = latticeNoise4_1(_S1995, _S1996, 1U);
-    return (first_5 + _S1997.x * 0.5f) / 1.5f;
+    Vector<float, 3>  _S2000 = latticeNoise4_1(_S1998, _S1999, 1U);
+    return (first_5 + _S2000.x * 0.5f) / 1.5f;
 }
 
 
 static float windGust_0(Vector<float, 3>  q_17, KernelContext_0 * kernelContext_152)
 {
 
-    Vector<uint32_t, 2>  _S1998 = octaveSeed_0(0U, kernelContext_152);
-    Vector<float, 3>  _S1999 = latticeNoise_0(q_17, _S1998, 1U);
+    Vector<uint32_t, 2>  _S2001 = octaveSeed_0(0U, kernelContext_152);
+    Vector<float, 3>  _S2002 = latticeNoise_0(q_17, _S2001, 1U);
 
-    float first_6 = _S1999.x;
-    Vector<float, 3>  _S2000 = q_17 * (Vector<float, 3> )2.0f;
+    float first_6 = _S2002.x;
+    Vector<float, 3>  _S2003 = q_17 * (Vector<float, 3> )2.0f;
 
-    Vector<uint32_t, 2>  _S2001 = octaveSeed_0(1U, kernelContext_152);
+    Vector<uint32_t, 2>  _S2004 = octaveSeed_0(1U, kernelContext_152);
 
-    Vector<float, 3>  _S2002 = latticeNoise_0(_S2000, _S2001, 1U);
-    return (first_6 + _S2002.x * 0.5f) / 1.5f;
+    Vector<float, 3>  _S2005 = latticeNoise_0(_S2003, _S2004, 1U);
+    return (first_6 + _S2005.x * 0.5f) / 1.5f;
 }
 
 
-void _WindCS(void* _S2003, void* entryPointParams_25, void* globalParams_26)
+void _WindCS(void* _S2006, void* entryPointParams_25, void* globalParams_26)
 {
 
-    ComputeThreadVaryingInput * _S2004 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2003));
+    ComputeThreadVaryingInput * _S2007 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2006));
 
     KernelContext_0 kernelContext_153;
 
@@ -21047,26 +21092,26 @@ void _WindCS(void* _S2003, void* entryPointParams_25, void* globalParams_26)
 
     (&kernelContext_153)->sTableBase_0 = 0U;
 
-    uint32_t _S2005 = threadIndex_0(_S2004->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2004->groupThreadID, 64U, &kernelContext_153);
+    uint32_t _S2008 = threadIndex_0(_S2007->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2007->groupThreadID, 64U, &kernelContext_153);
 
-    if(_S2005 >= ((&kernelContext_153)->globalParams_0->Look_0->gStrandCount_0))
+    if(_S2008 >= ((&kernelContext_153)->globalParams_0->Look_0->gStrandCount_0))
     {
 
         return;
     }
 
-    uint32_t _S2006 = strandBegin_0(_S2005, &kernelContext_153);
+    uint32_t _S2009 = strandBegin_0(_S2008, &kernelContext_153);
 
-    uint32_t _S2007 = strandCountOf_0(_S2005, &kernelContext_153);
+    uint32_t _S2010 = strandCountOf_0(_S2008, &kernelContext_153);
 
     float base_9;
 
-    if(_S2007 >= 2U)
+    if(_S2010 >= 2U)
     {
 
-        float _S2008 = fieldAt_0(0U, (&kernelContext_153)->globalParams_0->Look_0->gValue_0.x, _S2005, 0U, &kernelContext_153);
+        float _S2011 = fieldAt_0(0U, (&kernelContext_153)->globalParams_0->Look_0->gValue_0.x, _S2008, 0U, &kernelContext_153);
 
-        base_9 = _S2008;
+        base_9 = _S2011;
 
     }
     else
@@ -21076,27 +21121,27 @@ void _WindCS(void* _S2003, void* entryPointParams_25, void* globalParams_26)
 
     }
 
-    Vector<float, 4>  _S2009 = (&kernelContext_153)->globalParams_0->Look_0->gValue2_0;
-    Vector<float, 3>  dir_3 = Vector<float, 3> {_S2009.x, _S2009.y, _S2009.z};
+    Vector<float, 4>  _S2012 = (&kernelContext_153)->globalParams_0->Look_0->gValue2_0;
+    Vector<float, 3>  dir_3 = Vector<float, 3> {_S2012.x, _S2012.y, _S2012.z};
 
-    bool _S2010;
+    bool _S2013;
     if(!(base_9 > 0.0f))
     {
 
-        _S2010 = true;
+        _S2013 = true;
 
     }
     else
     {
 
-        _S2010 = (dot_0(dir_3, dir_3)) == 0.0f;
+        _S2013 = (dot_0(dir_3, dir_3)) == 0.0f;
 
     }
 
-    if(_S2010)
+    if(_S2013)
     {
 
-        copyStrand_0(_S2006, _S2007, &kernelContext_153);
+        copyStrand_0(_S2009, _S2010, &kernelContext_153);
 
         return;
     }
@@ -21106,7 +21151,7 @@ void _WindCS(void* _S2003, void* entryPointParams_25, void* globalParams_26)
 
     float turbulence_0 = (&kernelContext_153)->globalParams_0->Look_0->gValue_0.w;
 
-    Vector<float, 3>  _S2011 = loadPoint_0(_S2006, &kernelContext_153);
+    Vector<float, 3>  _S2014 = loadPoint_0(_S2009, &kernelContext_153);
 
     bool looped_0 = ((&kernelContext_153)->globalParams_0->Look_0->gFlag_0.w) != 0U;
 
@@ -21120,9 +21165,9 @@ void _WindCS(void* _S2003, void* entryPointParams_25, void* globalParams_26)
     else
     {
 
-        Vector<uint32_t, 4>  _S2012 = (&kernelContext_153)->globalParams_0->Look_0->gFlag_0;
+        Vector<uint32_t, 4>  _S2015 = (&kernelContext_153)->globalParams_0->Look_0->gFlag_0;
 
-        q_18 = _S2011 * (Vector<float, 3> )frequency_6 - asfloat_0(Vector<uint32_t, 3> {_S2012.x, _S2012.y, _S2012.z});
+        q_18 = _S2014 * (Vector<float, 3> )frequency_6 - asfloat_0(Vector<uint32_t, 3> {_S2015.x, _S2015.y, _S2015.z});
 
     }
 
@@ -21130,9 +21175,9 @@ void _WindCS(void* _S2003, void* entryPointParams_25, void* globalParams_26)
     if(looped_0)
     {
 
-        Vector<float, 4>  _S2013 = windLoopPoint_0(_S2011 * (Vector<float, 3> )frequency_6, dir_3, &kernelContext_153);
+        Vector<float, 4>  _S2016 = windLoopPoint_0(_S2014 * (Vector<float, 3> )frequency_6, dir_3, &kernelContext_153);
 
-        q4_0 = _S2013;
+        q4_0 = _S2016;
 
     }
     else
@@ -21141,27 +21186,27 @@ void _WindCS(void* _S2003, void* entryPointParams_25, void* globalParams_26)
         q4_0 = Vector<float, 4> (0.0f, 0.0f, 0.0f, 0.0f);
 
     }
-    bool _S2014 = gust_0 > 0.0f;
+    bool _S2017 = gust_0 > 0.0f;
 
     float g_35;
 
-    if(_S2014)
+    if(_S2017)
     {
 
         if(looped_0)
         {
 
-            float _S2015 = windGust4_0(q4_0, &kernelContext_153);
+            float _S2018 = windGust4_0(q4_0, &kernelContext_153);
 
-            g_35 = _S2015;
+            g_35 = _S2018;
 
         }
         else
         {
 
-            float _S2016 = windGust_0(q_18, &kernelContext_153);
+            float _S2019 = windGust_0(q_18, &kernelContext_153);
 
-            g_35 = _S2016;
+            g_35 = _S2019;
 
         }
 
@@ -21176,7 +21221,7 @@ void _WindCS(void* _S2003, void* entryPointParams_25, void* globalParams_26)
     if(!(amount_4 > 0.0f))
     {
 
-        copyStrand_0(_S2006, _S2007, &kernelContext_153);
+        copyStrand_0(_S2009, _S2010, &kernelContext_153);
 
         return;
     }
@@ -21187,31 +21232,31 @@ void _WindCS(void* _S2003, void* entryPointParams_25, void* globalParams_26)
 
 
 
-    if(_S2014)
+    if(_S2017)
     {
 
         if(looped_0)
         {
 
-            Vector<float, 4>  _S2017 = q4_0 + Vector<float, 4> (17.29999923706054688f, -4.09999990463256836f, 9.69999980926513672f, 2.90000009536743164f);
+            Vector<float, 4>  _S2020 = q4_0 + Vector<float, 4> (17.29999923706054688f, -4.09999990463256836f, 9.69999980926513672f, 2.90000009536743164f);
 
-            Vector<uint32_t, 2>  _S2018 = octaveSeed_0(2U, &kernelContext_153);
+            Vector<uint32_t, 2>  _S2021 = octaveSeed_0(2U, &kernelContext_153);
 
-            Vector<float, 3>  _S2019 = latticeNoise4_1(_S2017, _S2018, 3U);
+            Vector<float, 3>  _S2022 = latticeNoise4_1(_S2020, _S2021, 3U);
 
-            flutter_0 = _S2019;
+            flutter_0 = _S2022;
 
         }
         else
         {
 
-            Vector<float, 3>  _S2020 = q_18 + Vector<float, 3> (17.29999923706054688f, -4.09999990463256836f, 9.69999980926513672f);
+            Vector<float, 3>  _S2023 = q_18 + Vector<float, 3> (17.29999923706054688f, -4.09999990463256836f, 9.69999980926513672f);
 
-            Vector<uint32_t, 2>  _S2021 = octaveSeed_0(2U, &kernelContext_153);
+            Vector<uint32_t, 2>  _S2024 = octaveSeed_0(2U, &kernelContext_153);
 
-            Vector<float, 3>  _S2022 = latticeNoise_0(_S2020, _S2021, 3U);
+            Vector<float, 3>  _S2025 = latticeNoise_0(_S2023, _S2024, 3U);
 
-            flutter_0 = _S2022;
+            flutter_0 = _S2025;
 
         }
 
@@ -21237,46 +21282,46 @@ void _WindCS(void* _S2003, void* entryPointParams_25, void* globalParams_26)
 
     }
 
-    Vector<float, 3>  _S2023 = Vector<float, 3> (0.0f, 0.0f, 0.0f);
+    Vector<float, 3>  _S2026 = Vector<float, 3> (0.0f, 0.0f, 0.0f);
 
-    bool _S2024 = turbulence_0 > 0.0f;
+    bool _S2027 = turbulence_0 > 0.0f;
 
     float phase_3;
 
-    if(_S2024)
+    if(_S2027)
     {
 
         if(looped_0)
         {
 
-            Vector<float, 4>  _S2025 = q4_0 * (Vector<float, 4> )4.0f + Vector<float, 4> (-3.70000004768371582f, 11.89999961853027344f, 5.30000019073486328f, -7.09999990463256836f);
+            Vector<float, 4>  _S2028 = q4_0 * (Vector<float, 4> )4.0f + Vector<float, 4> (-3.70000004768371582f, 11.89999961853027344f, 5.30000019073486328f, -7.09999990463256836f);
 
-            Vector<uint32_t, 2>  _S2026 = octaveSeed_0(3U, &kernelContext_153);
+            Vector<uint32_t, 2>  _S2029 = octaveSeed_0(3U, &kernelContext_153);
 
-            Vector<float, 3>  _S2027 = latticeNoise4_1(_S2025, _S2026, 3U);
+            Vector<float, 3>  _S2030 = latticeNoise4_1(_S2028, _S2029, 3U);
 
-            q_18 = _S2027;
+            q_18 = _S2030;
 
         }
         else
         {
 
-            Vector<float, 3>  _S2028 = q_18 * (Vector<float, 3> )4.0f + Vector<float, 3> (-3.70000004768371582f, 11.89999961853027344f, 5.30000019073486328f);
+            Vector<float, 3>  _S2031 = q_18 * (Vector<float, 3> )4.0f + Vector<float, 3> (-3.70000004768371582f, 11.89999961853027344f, 5.30000019073486328f);
 
-            Vector<uint32_t, 2>  _S2029 = octaveSeed_0(3U, &kernelContext_153);
+            Vector<uint32_t, 2>  _S2032 = octaveSeed_0(3U, &kernelContext_153);
 
-            Vector<float, 3>  _S2030 = latticeNoise_0(_S2028, _S2029, 3U);
+            Vector<float, 3>  _S2033 = latticeNoise_0(_S2031, _S2032, 3U);
 
-            q_18 = _S2030;
+            q_18 = _S2033;
 
         }
-        Vector<float, 3>  _S2031 = q_18 * (Vector<float, 3> )turbulence_0;
+        Vector<float, 3>  _S2034 = q_18 * (Vector<float, 3> )turbulence_0;
 
-        Vector<float, 4>  _S2032 = strandData_0(_S2005, &kernelContext_153);
+        Vector<float, 4>  _S2035 = strandData_0(_S2008, &kernelContext_153);
 
-        phase_3 = _S2032.x;
+        phase_3 = _S2035.x;
 
-        flutter_0 = _S2031;
+        flutter_0 = _S2034;
 
     }
     else
@@ -21284,19 +21329,19 @@ void _WindCS(void* _S2003, void* entryPointParams_25, void* globalParams_26)
 
         phase_3 = 0.0f;
 
-        flutter_0 = _S2023;
+        flutter_0 = _S2026;
 
     }
 
-    storePoint_0((&kernelContext_153)->globalParams_0->gOut_0, _S2006, _S2011);
+    storePoint_0((&kernelContext_153)->globalParams_0->gOut_0, _S2009, _S2014);
 
-    Vector<float, 3>  previous_7 = _S2011;
+    Vector<float, 3>  previous_7 = _S2014;
 
     uint32_t i_74 = 1U;
     for(;;)
     {
 
-        if(i_74 < _S2007)
+        if(i_74 < _S2010)
         {
         }
         else
@@ -21305,11 +21350,11 @@ void _WindCS(void* _S2003, void* entryPointParams_25, void* globalParams_26)
             break;
         }
 
-        float t_45 = paramAt_0(i_74, _S2007);
+        float t_45 = paramAt_0(i_74, _S2010);
 
         Vector<float, 3>  target_8;
 
-        if(_S2024)
+        if(_S2027)
         {
             Vector<float, 3>  fluttered_0 = windDir_0 + flutter_0 * (Vector<float, 3> )(t_45 * (groomlab_pm_sin((9.42477798461914062f * t_45 - (&kernelContext_153)->globalParams_0->Look_0->gValue2_0.w + phase_3))));
             if((len3_0(fluttered_0)) > 9.99999997475242708e-07f)
@@ -21333,16 +21378,16 @@ void _WindCS(void* _S2003, void* entryPointParams_25, void* globalParams_26)
 
         }
 
-        float _S2033 = rampAlong_0(i_74, _S2007, &kernelContext_153);
+        float _S2036 = rampAlong_0(i_74, _S2010, &kernelContext_153);
 
-        float w_46 = clamp_0(amount_4 * _S2033, 0.0f, 1.0f);
-        uint32_t _S2034 = _S2006 + i_74;
+        float w_46 = clamp_0(amount_4 * _S2036, 0.0f, 1.0f);
+        uint32_t _S2037 = _S2009 + i_74;
 
-        Vector<float, 3>  _S2035 = loadPoint_0(_S2034, &kernelContext_153);
+        Vector<float, 3>  _S2038 = loadPoint_0(_S2037, &kernelContext_153);
 
-        Vector<float, 3>  _S2036 = loadPoint_0(_S2034 - 1U, &kernelContext_153);
+        Vector<float, 3>  _S2039 = loadPoint_0(_S2037 - 1U, &kernelContext_153);
 
-        Vector<float, 3>  seg_7 = _S2035 - _S2036;
+        Vector<float, 3>  seg_7 = _S2038 - _S2039;
         float len_9 = len3_0(seg_7);
         if(len_9 > 0.0f)
         {
@@ -21352,7 +21397,7 @@ void _WindCS(void* _S2003, void* entryPointParams_25, void* globalParams_26)
         }
 
 
-        storePoint_0((&kernelContext_153)->globalParams_0->gOut_0, _S2034, previous_7);
+        storePoint_0((&kernelContext_153)->globalParams_0->gOut_0, _S2037, previous_7);
 
         i_74 = i_74 + 1U;
 
@@ -21365,51 +21410,51 @@ void _WindCS(void* _S2003, void* entryPointParams_25, void* globalParams_26)
 static Vector<float, 3>  blendAt_1(uint32_t s_39, uint32_t i_75, uint32_t n_49, uint32_t p_49, KernelContext_0 * kernelContext_154)
 {
 
-    bool _S2037 = fieldPerPoint_0(0U, kernelContext_154);
+    bool _S2040 = fieldPerPoint_0(0U, kernelContext_154);
 
     float mix_0;
-    if(_S2037)
+    if(_S2040)
     {
 
-        float _S2038 = fieldAt_0(0U, kernelContext_154->globalParams_0->Look_0->gValue_0.x, s_39, p_49, kernelContext_154);
+        float _S2041 = fieldAt_0(0U, kernelContext_154->globalParams_0->Look_0->gValue_0.x, s_39, p_49, kernelContext_154);
 
-        mix_0 = _S2038;
+        mix_0 = _S2041;
 
     }
     else
     {
 
-        float _S2039 = fieldAt_0(0U, kernelContext_154->globalParams_0->Look_0->gValue_0.x, s_39, 0U, kernelContext_154);
+        float _S2042 = fieldAt_0(0U, kernelContext_154->globalParams_0->Look_0->gValue_0.x, s_39, 0U, kernelContext_154);
 
-        mix_0 = _S2039;
+        mix_0 = _S2042;
 
     }
-    float _S2040 = clamp_0(mix_0, 0.0f, 1.0f);
+    float _S2043 = clamp_0(mix_0, 0.0f, 1.0f);
 
-    float _S2041 = rampAlong_0(i_75, n_49, kernelContext_154);
+    float _S2044 = rampAlong_0(i_75, n_49, kernelContext_154);
 
-    float f_18 = _S2040 * _S2041;
+    float f_18 = _S2043 * _S2044;
 
-    Vector<float, 3>  _S2042 = loadPoint_0(p_49, kernelContext_154);
+    Vector<float, 3>  _S2045 = loadPoint_0(p_49, kernelContext_154);
 
-    uint32_t _S2043 = p_49 * 12U;
+    uint32_t _S2046 = p_49 * 12U;
 
-    ByteAddressBuffer _S2044 = kernelContext_154->globalParams_0->gAux0_0;
+    ByteAddressBuffer _S2047 = kernelContext_154->globalParams_0->gAux0_0;
 
-    uint32_t _S2045 = (kernelContext_154->globalParams_0->gAux0_0).Load<uint32_t >(_S2043);
+    uint32_t _S2048 = (kernelContext_154->globalParams_0->gAux0_0).Load<uint32_t >(_S2046);
 
-    uint32_t _S2046 = (_S2044).Load<uint32_t >(_S2043 + 4U);
+    uint32_t _S2049 = (_S2047).Load<uint32_t >(_S2046 + 4U);
 
-    uint32_t _S2047 = (_S2044).Load<uint32_t >(_S2043 + 8U);
-    return _S2042 + (asfloat_0(Vector<uint32_t, 3> (_S2045, _S2046, _S2047)) - _S2042) * (Vector<float, 3> )f_18;
+    uint32_t _S2050 = (_S2047).Load<uint32_t >(_S2046 + 8U);
+    return _S2045 + (asfloat_0(Vector<uint32_t, 3> (_S2048, _S2049, _S2050)) - _S2045) * (Vector<float, 3> )f_18;
 }
 
 
 
-void _BlendCS(void* _S2048, void* entryPointParams_26, void* globalParams_27)
+void _BlendCS(void* _S2051, void* entryPointParams_26, void* globalParams_27)
 {
 
-    ComputeThreadVaryingInput * _S2049 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2048));
+    ComputeThreadVaryingInput * _S2052 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2051));
 
     KernelContext_0 kernelContext_155;
 
@@ -21419,43 +21464,43 @@ void _BlendCS(void* _S2048, void* entryPointParams_26, void* globalParams_27)
 
     (&kernelContext_155)->sTableBase_0 = 0U;
 
-    uint32_t _S2050 = threadIndex_0(_S2049->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2049->groupThreadID, 64U, &kernelContext_155);
+    uint32_t _S2053 = threadIndex_0(_S2052->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2052->groupThreadID, 64U, &kernelContext_155);
 
-    if(_S2050 >= ((&kernelContext_155)->globalParams_0->Look_0->gStrandCount_0))
+    if(_S2053 >= ((&kernelContext_155)->globalParams_0->Look_0->gStrandCount_0))
     {
 
         return;
     }
 
-    uint32_t _S2051 = strandBegin_0(_S2050, &kernelContext_155);
+    uint32_t _S2054 = strandBegin_0(_S2053, &kernelContext_155);
 
-    uint32_t _S2052 = strandCountOf_0(_S2050, &kernelContext_155);
+    uint32_t _S2055 = strandCountOf_0(_S2053, &kernelContext_155);
 
-    bool _S2053;
+    bool _S2056;
 
     if(((&kernelContext_155)->globalParams_0->Look_0->gFlag_0.x) == 0U)
     {
 
-        _S2053 = true;
+        _S2056 = true;
 
     }
     else
     {
 
-        _S2053 = _S2052 < 2U;
+        _S2056 = _S2055 < 2U;
 
     }
 
     uint32_t i_76;
 
-    if(_S2053)
+    if(_S2056)
     {
 
         i_76 = 0U;
         for(;;)
         {
 
-            if(i_76 < _S2052)
+            if(i_76 < _S2055)
             {
             }
             else
@@ -21464,11 +21509,11 @@ void _BlendCS(void* _S2048, void* entryPointParams_26, void* globalParams_27)
                 break;
             }
 
-            uint32_t _S2054 = _S2051 + i_76;
+            uint32_t _S2057 = _S2054 + i_76;
 
-            Vector<float, 3>  _S2055 = blendAt_1(_S2050, i_76, _S2052, _S2054, &kernelContext_155);
+            Vector<float, 3>  _S2058 = blendAt_1(_S2053, i_76, _S2055, _S2057, &kernelContext_155);
 
-            storePoint_0((&kernelContext_155)->globalParams_0->gOut_0, _S2054, _S2055);
+            storePoint_0((&kernelContext_155)->globalParams_0->gOut_0, _S2057, _S2058);
 
             i_76 = i_76 + 1U;
 
@@ -21476,17 +21521,17 @@ void _BlendCS(void* _S2048, void* entryPointParams_26, void* globalParams_27)
         return;
     }
 
-    Vector<float, 3>  _S2056 = blendAt_1(_S2050, 0U, _S2052, _S2051, &kernelContext_155);
+    Vector<float, 3>  _S2059 = blendAt_1(_S2053, 0U, _S2055, _S2054, &kernelContext_155);
 
-    storePoint_0((&kernelContext_155)->globalParams_0->gOut_0, _S2051, _S2056);
+    storePoint_0((&kernelContext_155)->globalParams_0->gOut_0, _S2054, _S2059);
 
-    Vector<float, 3>  at_18 = _S2056;
+    Vector<float, 3>  at_18 = _S2059;
 
     i_76 = 1U;
     for(;;)
     {
 
-        if(i_76 < _S2052)
+        if(i_76 < _S2055)
         {
         }
         else
@@ -21495,66 +21540,66 @@ void _BlendCS(void* _S2048, void* entryPointParams_26, void* globalParams_27)
             break;
         }
 
-        uint32_t p_50 = _S2051 + i_76;
+        uint32_t p_50 = _S2054 + i_76;
 
-        bool _S2057 = fieldPerPoint_0(0U, &kernelContext_155);
+        bool _S2060 = fieldPerPoint_0(0U, &kernelContext_155);
 
         float mix_1;
-        if(_S2057)
+        if(_S2060)
         {
 
-            float _S2058 = fieldAt_0(0U, (&kernelContext_155)->globalParams_0->Look_0->gValue_0.x, _S2050, p_50, &kernelContext_155);
+            float _S2061 = fieldAt_0(0U, (&kernelContext_155)->globalParams_0->Look_0->gValue_0.x, _S2053, p_50, &kernelContext_155);
 
-            mix_1 = _S2058;
+            mix_1 = _S2061;
 
         }
         else
         {
 
-            float _S2059 = fieldAt_0(0U, (&kernelContext_155)->globalParams_0->Look_0->gValue_0.x, _S2050, 0U, &kernelContext_155);
+            float _S2062 = fieldAt_0(0U, (&kernelContext_155)->globalParams_0->Look_0->gValue_0.x, _S2053, 0U, &kernelContext_155);
 
-            mix_1 = _S2059;
+            mix_1 = _S2062;
 
         }
-        float _S2060 = clamp_0(mix_1, 0.0f, 1.0f);
+        float _S2063 = clamp_0(mix_1, 0.0f, 1.0f);
 
-        float _S2061 = rampAlong_0(i_76, _S2052, &kernelContext_155);
+        float _S2064 = rampAlong_0(i_76, _S2055, &kernelContext_155);
 
-        float f_19 = _S2060 * _S2061;
+        float f_19 = _S2063 * _S2064;
 
-        Vector<float, 3>  _S2062 = loadPoint_0(p_50, &kernelContext_155);
-        uint32_t _S2063 = p_50 - 1U;
+        Vector<float, 3>  _S2065 = loadPoint_0(p_50, &kernelContext_155);
+        uint32_t _S2066 = p_50 - 1U;
 
-        Vector<float, 3>  _S2064 = loadPoint_0(_S2063, &kernelContext_155);
+        Vector<float, 3>  _S2067 = loadPoint_0(_S2066, &kernelContext_155);
 
-        Vector<float, 3>  segA_0 = _S2062 - _S2064;
-        uint32_t _S2065 = p_50 * 12U;
+        Vector<float, 3>  segA_0 = _S2065 - _S2067;
+        uint32_t _S2068 = p_50 * 12U;
 
-        ByteAddressBuffer _S2066 = (&kernelContext_155)->globalParams_0->gAux0_0;
+        ByteAddressBuffer _S2069 = (&kernelContext_155)->globalParams_0->gAux0_0;
 
-        uint32_t _S2067 = ((&kernelContext_155)->globalParams_0->gAux0_0).Load<uint32_t >(_S2065);
+        uint32_t _S2070 = ((&kernelContext_155)->globalParams_0->gAux0_0).Load<uint32_t >(_S2068);
 
-        uint32_t _S2068 = _S2065 + 4U;
+        uint32_t _S2071 = _S2068 + 4U;
 
-        uint32_t _S2069 = (_S2066).Load<uint32_t >(_S2068);
+        uint32_t _S2072 = (_S2069).Load<uint32_t >(_S2071);
 
-        uint32_t _S2070 = _S2065 + 8U;
+        uint32_t _S2073 = _S2068 + 8U;
 
-        uint32_t _S2071 = (_S2066).Load<uint32_t >(_S2070);
+        uint32_t _S2074 = (_S2069).Load<uint32_t >(_S2073);
 
-        Vector<float, 3>  _S2072 = asfloat_0(Vector<uint32_t, 3> (_S2067, _S2069, _S2071));
+        Vector<float, 3>  _S2075 = asfloat_0(Vector<uint32_t, 3> (_S2070, _S2072, _S2074));
 
-        uint32_t _S2073 = _S2063 * 12U;
+        uint32_t _S2076 = _S2066 * 12U;
 
-        ByteAddressBuffer _S2074 = (&kernelContext_155)->globalParams_0->gAux0_0;
+        ByteAddressBuffer _S2077 = (&kernelContext_155)->globalParams_0->gAux0_0;
 
-        uint32_t _S2075 = ((&kernelContext_155)->globalParams_0->gAux0_0).Load<uint32_t >(_S2073);
+        uint32_t _S2078 = ((&kernelContext_155)->globalParams_0->gAux0_0).Load<uint32_t >(_S2076);
 
-        uint32_t _S2076 = (_S2074).Load<uint32_t >(_S2073 + 4U);
+        uint32_t _S2079 = (_S2077).Load<uint32_t >(_S2076 + 4U);
 
-        uint32_t _S2077 = (_S2074).Load<uint32_t >(_S2073 + 8U);
+        uint32_t _S2080 = (_S2077).Load<uint32_t >(_S2076 + 8U);
 
-        Vector<float, 3>  segB_0 = _S2072 - asfloat_0(Vector<uint32_t, 3> (_S2075, _S2076, _S2077));
+        Vector<float, 3>  segB_0 = _S2075 - asfloat_0(Vector<uint32_t, 3> (_S2078, _S2079, _S2080));
         Vector<float, 3>  way_3 = segA_0 + (segB_0 - segA_0) * (Vector<float, 3> )f_19;
         float la_0 = len3_0(segA_0);
         float length_2 = la_0 + (len3_0(segB_0) - la_0) * f_19;
@@ -21573,12 +21618,12 @@ void _BlendCS(void* _S2048, void* entryPointParams_26, void* globalParams_27)
             step_9 = way_3;
 
         }
-        Vector<float, 3>  _S2078 = at_18 + step_9;
+        Vector<float, 3>  _S2081 = at_18 + step_9;
 
         if(f_19 == 0.0f)
         {
 
-            at_18 = _S2062;
+            at_18 = _S2065;
 
         }
         else
@@ -21588,21 +21633,21 @@ void _BlendCS(void* _S2048, void* entryPointParams_26, void* globalParams_27)
             if(f_19 == 1.0f)
             {
 
-                ByteAddressBuffer _S2079 = (&kernelContext_155)->globalParams_0->gAux0_0;
+                ByteAddressBuffer _S2082 = (&kernelContext_155)->globalParams_0->gAux0_0;
 
-                uint32_t _S2080 = ((&kernelContext_155)->globalParams_0->gAux0_0).Load<uint32_t >(_S2065);
+                uint32_t _S2083 = ((&kernelContext_155)->globalParams_0->gAux0_0).Load<uint32_t >(_S2068);
 
-                uint32_t _S2081 = (_S2079).Load<uint32_t >(_S2068);
+                uint32_t _S2084 = (_S2082).Load<uint32_t >(_S2071);
 
-                uint32_t _S2082 = (_S2079).Load<uint32_t >(_S2070);
+                uint32_t _S2085 = (_S2082).Load<uint32_t >(_S2073);
 
-                at_19 = asfloat_0(Vector<uint32_t, 3> (_S2080, _S2081, _S2082));
+                at_19 = asfloat_0(Vector<uint32_t, 3> (_S2083, _S2084, _S2085));
 
             }
             else
             {
 
-                at_19 = _S2078;
+                at_19 = _S2081;
 
             }
 
@@ -21620,10 +21665,10 @@ void _BlendCS(void* _S2048, void* entryPointParams_26, void* globalParams_27)
 }
 
 
-void _BlendPointsCS(void* _S2083, void* entryPointParams_27, void* globalParams_28)
+void _BlendPointsCS(void* _S2086, void* entryPointParams_27, void* globalParams_28)
 {
 
-    ComputeThreadVaryingInput * _S2084 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2083));
+    ComputeThreadVaryingInput * _S2087 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2086));
 
     KernelContext_0 kernelContext_156;
 
@@ -21633,19 +21678,19 @@ void _BlendPointsCS(void* _S2083, void* entryPointParams_27, void* globalParams_
 
     (&kernelContext_156)->sTableBase_0 = 0U;
 
-    uint32_t _S2085 = threadIndex_0(_S2084->groupID * Vector<uint32_t, 3> (256U, 1U, 1U) + _S2084->groupThreadID, 256U, &kernelContext_156);
+    uint32_t _S2088 = threadIndex_0(_S2087->groupID * Vector<uint32_t, 3> (256U, 1U, 1U) + _S2087->groupThreadID, 256U, &kernelContext_156);
 
-    if(_S2085 >= ((&kernelContext_156)->globalParams_0->Look_0->gPointCount_0))
+    if(_S2088 >= ((&kernelContext_156)->globalParams_0->Look_0->gPointCount_0))
     {
 
         return;
     }
 
-    PointAt_0 _S2086 = pointAt_0(_S2085, &kernelContext_156);
+    PointAt_0 _S2089 = pointAt_0(_S2088, &kernelContext_156);
 
-    Vector<float, 3>  _S2087 = blendAt_1(_S2086.s_0, _S2086.i_0, _S2086.n_3, _S2085, &kernelContext_156);
+    Vector<float, 3>  _S2090 = blendAt_1(_S2089.s_0, _S2089.i_0, _S2089.n_3, _S2088, &kernelContext_156);
 
-    storePoint_0((&kernelContext_156)->globalParams_0->gOut_0, _S2085, _S2087);
+    storePoint_0((&kernelContext_156)->globalParams_0->gOut_0, _S2088, _S2090);
     return;
 }
 
@@ -21657,10 +21702,10 @@ static uint32_t gridCells_0(KernelContext_0 * kernelContext_157)
 }
 
 
-void _GridClearCS(void* _S2088, void* entryPointParams_28, void* globalParams_29)
+void _GridClearCS(void* _S2091, void* entryPointParams_28, void* globalParams_29)
 {
 
-    ComputeThreadVaryingInput * _S2089 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2088));
+    ComputeThreadVaryingInput * _S2092 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2091));
 
     KernelContext_0 kernelContext_158;
 
@@ -21670,112 +21715,112 @@ void _GridClearCS(void* _S2088, void* entryPointParams_28, void* globalParams_29
 
     (&kernelContext_158)->sTableBase_0 = 0U;
 
-    uint32_t _S2090 = threadIndex_0(_S2089->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2089->groupThreadID, 64U, &kernelContext_158);
+    uint32_t _S2093 = threadIndex_0(_S2092->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2092->groupThreadID, 64U, &kernelContext_158);
 
-    bool _S2091;
+    bool _S2094;
 
-    if(_S2090 == 0U)
+    if(_S2093 == 0U)
     {
 
-        _S2091 = ((&kernelContext_158)->globalParams_0->Look_0->gFlag_0.w) == 0U;
+        _S2094 = ((&kernelContext_158)->globalParams_0->Look_0->gFlag_0.w) == 0U;
 
     }
     else
     {
 
-        _S2091 = false;
+        _S2094 = false;
 
     }
 
-    if(_S2091)
+    if(_S2094)
     {
 
-        _S2091 = (((&kernelContext_158)->globalParams_0->Look_0->gFlag_0.x) & 1U) == 0U;
+        _S2094 = (((&kernelContext_158)->globalParams_0->Look_0->gFlag_0.x) & 1U) == 0U;
 
     }
     else
     {
 
-        _S2091 = false;
+        _S2094 = false;
 
     }
 
-    if(_S2091)
+    if(_S2094)
     {
 
         (&kernelContext_158)->globalParams_0->gOut2_0.Store(0U,0U);
 
     }
 
-    uint32_t _S2092 = gridCells_0(&kernelContext_158);
-    if(_S2090 >= (32U + _S2092))
+    uint32_t _S2095 = gridCells_0(&kernelContext_158);
+    if(_S2093 >= (32U + _S2095))
     {
 
         return;
     }
 
-    uint32_t _S2093 = _S2090 * 4U;
+    uint32_t _S2096 = _S2093 * 4U;
 
-    uint32_t _S2094;
+    uint32_t _S2097;
 
-    if(_S2090 < 3U)
+    if(_S2093 < 3U)
     {
 
-        _S2094 = 4294967295U;
+        _S2097 = 4294967295U;
 
     }
     else
     {
 
-        _S2094 = 0U;
+        _S2097 = 0U;
 
     }
 
-    (&kernelContext_158)->globalParams_0->gOut_0.Store(_S2093,_S2094);
+    (&kernelContext_158)->globalParams_0->gOut_0.Store(_S2096,_S2097);
     return;
 }
 
 
 static GridSegment_0 gridSegment_0(uint32_t seg_8, KernelContext_0 * kernelContext_159)
 {
-    uint32_t _S2095 = seg_8 * 8U;
+    uint32_t _S2098 = seg_8 * 8U;
 
-    ByteAddressBuffer _S2096 = kernelContext_159->globalParams_0->gAux0_0;
+    ByteAddressBuffer _S2099 = kernelContext_159->globalParams_0->gAux0_0;
 
-    uint32_t _S2097 = (kernelContext_159->globalParams_0->gAux0_0).Load<uint32_t >(_S2095);
+    uint32_t _S2100 = (kernelContext_159->globalParams_0->gAux0_0).Load<uint32_t >(_S2098);
 
-    uint32_t _S2098 = (_S2096).Load<uint32_t >(_S2095 + 4U);
+    uint32_t _S2101 = (_S2099).Load<uint32_t >(_S2098 + 4U);
 
     GridSegment_0 g_36;
 
-    (&g_36)->s_1 = _S2098;
+    (&g_36)->s_1 = _S2101;
 
-    uint32_t _S2099 = strandBegin_0(_S2098, kernelContext_159);
+    uint32_t _S2102 = strandBegin_0(_S2101, kernelContext_159);
 
-    uint32_t _S2100 = strandCountOf_0(_S2098, kernelContext_159);
+    uint32_t _S2103 = strandCountOf_0(_S2101, kernelContext_159);
 
-    (&g_36)->n_5 = _S2100;
-    uint32_t _S2101 = _S2097 - _S2099;
+    (&g_36)->n_5 = _S2103;
+    uint32_t _S2104 = _S2100 - _S2102;
 
-    (&g_36)->i_1 = _S2101;
+    (&g_36)->i_1 = _S2104;
 
-    Vector<float, 3>  _S2102 = loadPoint_0(_S2097, kernelContext_159);
+    Vector<float, 3>  _S2105 = loadPoint_0(_S2100, kernelContext_159);
 
-    Vector<float, 3>  _S2103 = loadPoint_0(_S2097 + 1U, kernelContext_159);
+    Vector<float, 3>  _S2106 = loadPoint_0(_S2100 + 1U, kernelContext_159);
 
-    Vector<float, 3>  before_2 = _S2102 * (Vector<float, 3> )2.0f - _S2103;
-    Vector<float, 3>  _S2104 = _S2103 * (Vector<float, 3> )2.0f;
+    Vector<float, 3>  before_2 = _S2105 * (Vector<float, 3> )2.0f - _S2106;
+    Vector<float, 3>  _S2107 = _S2106 * (Vector<float, 3> )2.0f;
 
-    Vector<float, 3>  after_0 = _S2104 - _S2102;
+    Vector<float, 3>  after_0 = _S2107 - _S2105;
 
     Vector<float, 3>  p0_7;
 
-    if(_S2101 > 0U)
+    if(_S2104 > 0U)
     {
 
-        Vector<float, 3>  _S2105 = loadPoint_0(_S2097 - 1U, kernelContext_159);
+        Vector<float, 3>  _S2108 = loadPoint_0(_S2100 - 1U, kernelContext_159);
 
-        p0_7 = _S2105;
+        p0_7 = _S2108;
 
     }
     else
@@ -21789,9 +21834,9 @@ static GridSegment_0 gridSegment_0(uint32_t seg_8, KernelContext_0 * kernelConte
     if(((&g_36)->i_1 + 2U) < ((&g_36)->n_5))
     {
 
-        Vector<float, 3>  _S2106 = loadPoint_0(_S2097 + 2U, kernelContext_159);
+        Vector<float, 3>  _S2109 = loadPoint_0(_S2100 + 2U, kernelContext_159);
 
-        p3_0 = _S2106;
+        p3_0 = _S2109;
 
     }
     else
@@ -21800,25 +21845,25 @@ static GridSegment_0 gridSegment_0(uint32_t seg_8, KernelContext_0 * kernelConte
         p3_0 = after_0;
 
     }
-    Vector<float, 3>  c1_8 = (_S2103 - p0_7) * (Vector<float, 3> )0.5f;
-    Vector<float, 3>  c2_6 = p0_7 - _S2102 * (Vector<float, 3> )2.5f;
-    Vector<float, 3>  c2_7 = c2_6 + _S2104;
+    Vector<float, 3>  c1_8 = (_S2106 - p0_7) * (Vector<float, 3> )0.5f;
+    Vector<float, 3>  c2_6 = p0_7 - _S2105 * (Vector<float, 3> )2.5f;
+    Vector<float, 3>  c2_7 = c2_6 + _S2107;
     Vector<float, 3>  c2_8 = c2_7 - p3_0 * (Vector<float, 3> )0.5f;
-    Vector<float, 3>  c3_1 = (p3_0 - p0_7) * (Vector<float, 3> )0.5f + (_S2102 - _S2103) * (Vector<float, 3> )1.5f;
-    (&g_36)->p_1 = _S2102;
+    Vector<float, 3>  c3_1 = (p3_0 - p0_7) * (Vector<float, 3> )0.5f + (_S2105 - _S2106) * (Vector<float, 3> )1.5f;
+    (&g_36)->p_1 = _S2105;
     (&g_36)->c1_0 = c1_8;
     (&g_36)->c2_0 = c2_8;
     (&g_36)->c3_0 = c3_1;
-    float _S2107 = apartExact_0(_S2103, _S2102);
+    float _S2110 = apartExact_0(_S2106, _S2105);
 
-    (&g_36)->len_0 = _S2107;
+    (&g_36)->len_0 = _S2110;
 
     float spacing_3 = kernelContext_159->globalParams_0->Look_0->gValue_0.z;
 
-    float k_40 = (F32_ceil((divExact_0(_S2107, spacing_3))));
+    float k_40 = (F32_ceil((divExact_0(_S2110, spacing_3))));
 
     float k_41;
-    if((remainderOf_0(_S2107, spacing_3, k_40)) > 0.0f)
+    if((remainderOf_0(_S2110, spacing_3, k_40)) > 0.0f)
     {
 
         k_41 = k_40 + 1.0f;
@@ -21831,48 +21876,48 @@ static GridSegment_0 gridSegment_0(uint32_t seg_8, KernelContext_0 * kernelConte
 
     }
 
-    bool _S2108;
+    bool _S2111;
     if(finiteFloat_0((&g_36)->len_0))
     {
 
-        _S2108 = k_41 < 6.5536e+04f;
+        _S2111 = k_41 < 6.5536e+04f;
 
     }
     else
     {
 
-        _S2108 = false;
+        _S2111 = false;
 
     }
 
-    uint32_t _S2109;
+    uint32_t _S2112;
 
-    if(_S2108)
+    if(_S2111)
     {
 
-        _S2109 = uint32_t((groomlab_max((k_41), (1.0f))));
+        _S2112 = uint32_t((groomlab_max((k_41), (1.0f))));
 
     }
     else
     {
 
-        _S2109 = 0U;
+        _S2112 = 0U;
 
     }
 
-    (&g_36)->m_0 = _S2109;
+    (&g_36)->m_0 = _S2112;
     return g_36;
 }
 
 static Vector<float, 3>  gridSample_0(GridSegment_0 * g_37, uint32_t j_31, float * t_46)
 {
 
-    float _S2110 = divExact_0(float(j_31) + 0.5f, float(g_37->m_0));
+    float _S2113 = divExact_0(float(j_31) + 0.5f, float(g_37->m_0));
 
-    *t_46 = _S2110;
-    Vector<float, 3>  inner_0 = g_37->c2_0 + g_37->c3_0 * (Vector<float, 3> )_S2110;
-    Vector<float, 3>  middle_0 = g_37->c1_0 + inner_0 * (Vector<float, 3> )_S2110;
-    Vector<float, 3>  q_19 = g_37->p_1 + middle_0 * (Vector<float, 3> )_S2110;
+    *t_46 = _S2113;
+    Vector<float, 3>  inner_0 = g_37->c2_0 + g_37->c3_0 * (Vector<float, 3> )_S2113;
+    Vector<float, 3>  middle_0 = g_37->c1_0 + inner_0 * (Vector<float, 3> )_S2113;
+    Vector<float, 3>  q_19 = g_37->p_1 + middle_0 * (Vector<float, 3> )_S2113;
     return q_19;
 }
 
@@ -21880,46 +21925,46 @@ static Vector<float, 3>  gridSample_0(GridSegment_0 * g_37, uint32_t j_31, float
 static uint32_t orderedOf_0(float v_31)
 {
 
-    uint32_t b_49 = (F32_asuint((v_31)));
+    uint32_t b_50 = (F32_asuint((v_31)));
 
-    uint32_t _S2111;
-    if((b_49 & 2147483648U) != 0U)
+    uint32_t _S2114;
+    if((b_50 & 2147483648U) != 0U)
     {
 
-        _S2111 = ~b_49;
+        _S2114 = ~b_50;
 
     }
     else
     {
 
-        _S2111 = b_49 | 2147483648U;
+        _S2114 = b_50 | 2147483648U;
 
     }
 
-    return _S2111;
+    return _S2114;
 }
 
 
 static uint32_t atomicMinOut_0(uint32_t at_20, uint32_t v_32, KernelContext_0 * kernelContext_160)
 {
-    uint32_t _S2112 = (glAtomicMin((kernelContext_160->globalParams_0->gOut_0), (at_20), (v_32)));
+    uint32_t _S2115 = (glAtomicMin((kernelContext_160->globalParams_0->gOut_0), (at_20), (v_32)));
 
-    return _S2112;
+    return _S2115;
 }
 
 
 static uint32_t atomicMaxOut_0(uint32_t at_21, uint32_t v_33, KernelContext_0 * kernelContext_161)
 {
-    uint32_t _S2113 = (glAtomicMax((kernelContext_161->globalParams_0->gOut_0), (at_21), (v_33)));
+    uint32_t _S2116 = (glAtomicMax((kernelContext_161->globalParams_0->gOut_0), (at_21), (v_33)));
 
-    return _S2113;
+    return _S2116;
 }
 
 
-void _GridBoundsCS(void* _S2114, void* entryPointParams_29, void* globalParams_30)
+void _GridBoundsCS(void* _S2117, void* entryPointParams_29, void* globalParams_30)
 {
 
-    ComputeThreadVaryingInput * _S2115 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2114));
+    ComputeThreadVaryingInput * _S2118 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2117));
 
     KernelContext_0 kernelContext_162;
 
@@ -21929,33 +21974,33 @@ void _GridBoundsCS(void* _S2114, void* entryPointParams_29, void* globalParams_3
 
     (&kernelContext_162)->sTableBase_0 = 0U;
 
-    uint32_t _S2116 = threadIndex_0(_S2115->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2115->groupThreadID, 64U, &kernelContext_162);
+    uint32_t _S2119 = threadIndex_0(_S2118->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2118->groupThreadID, 64U, &kernelContext_162);
 
-    if(_S2116 >= ((&kernelContext_162)->globalParams_0->Look_0->gFlag_0.y))
+    if(_S2119 >= ((&kernelContext_162)->globalParams_0->Look_0->gFlag_0.y))
     {
 
         return;
     }
 
-    GridSegment_0 _S2117 = gridSegment_0(_S2116, &kernelContext_162);
+    GridSegment_0 _S2120 = gridSegment_0(_S2119, &kernelContext_162);
 
-    if((_S2117.m_0) == 0U)
+    if((_S2120.m_0) == 0U)
     {
 
         return;
     }
 
-    Vector<uint32_t, 3>  _S2118 = Vector<uint32_t, 3> (0U, 0U, 0U);
+    Vector<uint32_t, 3>  _S2121 = Vector<uint32_t, 3> (0U, 0U, 0U);
 
     Vector<uint32_t, 3>  lo_7 = Vector<uint32_t, 3> (4294967295U, 4294967295U, 4294967295U);
 
-    Vector<uint32_t, 3>  hi_4 = _S2118;
+    Vector<uint32_t, 3>  hi_4 = _S2121;
 
     uint32_t j_32 = 0U;
     for(;;)
     {
 
-        if(j_32 < (_S2117.m_0))
+        if(j_32 < (_S2120.m_0))
         {
         }
         else
@@ -21964,44 +22009,44 @@ void _GridBoundsCS(void* _S2114, void* entryPointParams_29, void* globalParams_3
             break;
         }
 
-        GridSegment_0 _S2119 = _S2117;
+        GridSegment_0 _S2122 = _S2120;
         float t_47;
 
-        Vector<float, 3>  _S2120 = gridSample_0(&_S2119, j_32, &t_47);
+        Vector<float, 3>  _S2123 = gridSample_0(&_S2122, j_32, &t_47);
 
-        float _S2121 = _S2120.x;
+        float _S2124 = _S2123.x;
 
-        bool _S2122;
+        bool _S2125;
 
-        if(!finiteFloat_0(_S2121))
+        if(!finiteFloat_0(_S2124))
         {
 
-            _S2122 = true;
+            _S2125 = true;
 
         }
         else
         {
 
-            _S2122 = !finiteFloat_0(_S2120.y);
+            _S2125 = !finiteFloat_0(_S2123.y);
 
         }
 
-        bool _S2123;
+        bool _S2126;
 
-        if(_S2122)
+        if(_S2125)
         {
 
-            _S2123 = true;
+            _S2126 = true;
 
         }
         else
         {
 
-            _S2123 = !finiteFloat_0(_S2120.z);
+            _S2126 = !finiteFloat_0(_S2123.z);
 
         }
 
-        if(_S2123)
+        if(_S2126)
         {
 
             j_32 = j_32 + 1U;
@@ -22010,29 +22055,29 @@ void _GridBoundsCS(void* _S2114, void* entryPointParams_29, void* globalParams_3
         }
 
 
-        Vector<uint32_t, 3>  o_10 = Vector<uint32_t, 3> (orderedOf_0(_S2121), orderedOf_0(_S2120.y), orderedOf_0(_S2120.z));
+        Vector<uint32_t, 3>  o_10 = Vector<uint32_t, 3> (orderedOf_0(_S2124), orderedOf_0(_S2123.y), orderedOf_0(_S2123.z));
 
-        Vector<uint32_t, 3>  _S2124 = max_1(hi_4, o_10);
+        Vector<uint32_t, 3>  _S2127 = max_1(hi_4, o_10);
 
         lo_7 = min_2(lo_7, o_10);
 
-        hi_4 = _S2124;
+        hi_4 = _S2127;
 
         j_32 = j_32 + 1U;
 
     }
 
-    uint32_t _S2125 = atomicMinOut_0(0U, lo_7.x, &kernelContext_162);
+    uint32_t _S2128 = atomicMinOut_0(0U, lo_7.x, &kernelContext_162);
 
-    uint32_t _S2126 = atomicMinOut_0(4U, lo_7.y, &kernelContext_162);
+    uint32_t _S2129 = atomicMinOut_0(4U, lo_7.y, &kernelContext_162);
 
-    uint32_t _S2127 = atomicMinOut_0(8U, lo_7.z, &kernelContext_162);
+    uint32_t _S2130 = atomicMinOut_0(8U, lo_7.z, &kernelContext_162);
 
-    uint32_t _S2128 = atomicMaxOut_0(12U, hi_4.x, &kernelContext_162);
+    uint32_t _S2131 = atomicMaxOut_0(12U, hi_4.x, &kernelContext_162);
 
-    uint32_t _S2129 = atomicMaxOut_0(16U, hi_4.y, &kernelContext_162);
+    uint32_t _S2132 = atomicMaxOut_0(16U, hi_4.y, &kernelContext_162);
 
-    uint32_t _S2130 = atomicMaxOut_0(20U, hi_4.z, &kernelContext_162);
+    uint32_t _S2133 = atomicMaxOut_0(20U, hi_4.z, &kernelContext_162);
 
     return;
 }
@@ -22041,22 +22086,22 @@ void _GridBoundsCS(void* _S2114, void* entryPointParams_29, void* globalParams_3
 static float fromOrdered_0(uint32_t o_11)
 {
 
-    uint32_t _S2131;
+    uint32_t _S2134;
 
     if((o_11 & 2147483648U) != 0U)
     {
 
-        _S2131 = o_11 & 2147483647U;
+        _S2134 = o_11 & 2147483647U;
 
     }
     else
     {
 
-        _S2131 = ~o_11;
+        _S2134 = ~o_11;
 
     }
 
-    return (U32_asfloat((_S2131)));
+    return (U32_asfloat((_S2134)));
 }
 
 
@@ -22095,7 +22140,7 @@ static int32_t floorDiv_0(float p_51, float h_32, float * f_20)
 }
 
 
-void _GridLayCS(void* _S2132, void* entryPointParams_30, void* globalParams_31)
+void _GridLayCS(void* _S2135, void* entryPointParams_30, void* globalParams_31)
 {
 
     KernelContext_0 kernelContext_163;
@@ -22105,55 +22150,55 @@ void _GridLayCS(void* _S2132, void* entryPointParams_30, void* globalParams_31)
     (&kernelContext_163)->sRelaxedCrease_0 = false;
 
     (&kernelContext_163)->sTableBase_0 = 0U;
-    uint32_t _S2133 = ((slang_bit_cast<GlobalParams_0*>(globalParams_31))->gOut_0).Load<uint32_t >(0U);
+    uint32_t _S2136 = ((slang_bit_cast<GlobalParams_0*>(globalParams_31))->gOut_0).Load<uint32_t >(0U);
 
-    float _S2134 = fromOrdered_0(_S2133);
+    float _S2137 = fromOrdered_0(_S2136);
 
-    uint32_t _S2135 = ((slang_bit_cast<GlobalParams_0*>(globalParams_31))->gOut_0).Load<uint32_t >(4U);
+    uint32_t _S2138 = ((slang_bit_cast<GlobalParams_0*>(globalParams_31))->gOut_0).Load<uint32_t >(4U);
 
-    float _S2136 = fromOrdered_0(_S2135);
+    float _S2139 = fromOrdered_0(_S2138);
 
-    uint32_t _S2137 = ((slang_bit_cast<GlobalParams_0*>(globalParams_31))->gOut_0).Load<uint32_t >(8U);
+    uint32_t _S2140 = ((slang_bit_cast<GlobalParams_0*>(globalParams_31))->gOut_0).Load<uint32_t >(8U);
 
-    float _S2138 = fromOrdered_0(_S2137);
-    uint32_t _S2139 = ((slang_bit_cast<GlobalParams_0*>(globalParams_31))->gOut_0).Load<uint32_t >(12U);
+    float _S2141 = fromOrdered_0(_S2140);
+    uint32_t _S2142 = ((slang_bit_cast<GlobalParams_0*>(globalParams_31))->gOut_0).Load<uint32_t >(12U);
 
-    float _S2140 = fromOrdered_0(_S2139);
+    float _S2143 = fromOrdered_0(_S2142);
 
-    uint32_t _S2141 = ((slang_bit_cast<GlobalParams_0*>(globalParams_31))->gOut_0).Load<uint32_t >(16U);
+    uint32_t _S2144 = ((slang_bit_cast<GlobalParams_0*>(globalParams_31))->gOut_0).Load<uint32_t >(16U);
 
-    float _S2142 = fromOrdered_0(_S2141);
+    float _S2145 = fromOrdered_0(_S2144);
 
-    uint32_t _S2143 = ((slang_bit_cast<GlobalParams_0*>(globalParams_31))->gOut_0).Load<uint32_t >(20U);
+    uint32_t _S2146 = ((slang_bit_cast<GlobalParams_0*>(globalParams_31))->gOut_0).Load<uint32_t >(20U);
 
-    float _S2144 = fromOrdered_0(_S2143);
+    float _S2147 = fromOrdered_0(_S2146);
 
-    Vector<int32_t, 3>  _S2145 = Vector<int32_t, 3> (int(0), int(0), int(0));
+    Vector<int32_t, 3>  _S2148 = Vector<int32_t, 3> (int(0), int(0), int(0));
 
-    bool _S2146;
-    if(_S2134 <= _S2140)
+    bool _S2149;
+    if(_S2137 <= _S2143)
     {
 
-        _S2146 = _S2136 <= _S2142;
+        _S2149 = _S2139 <= _S2145;
 
     }
     else
     {
 
-        _S2146 = false;
+        _S2149 = false;
 
     }
 
-    if(_S2146)
+    if(_S2149)
     {
 
-        _S2146 = _S2138 <= _S2144;
+        _S2149 = _S2141 <= _S2147;
 
     }
     else
     {
 
-        _S2146 = false;
+        _S2149 = false;
 
     }
 
@@ -22165,26 +22210,26 @@ void _GridLayCS(void* _S2132, void* entryPointParams_30, void* globalParams_31)
 
     Vector<int32_t, 3>  blocks_0;
 
-    if(_S2146)
+    if(_S2149)
     {
 
         int32_t margin_1 = int32_t((&kernelContext_163)->globalParams_0->Look_0->gFlag_0.z);
         float h_33 = (&kernelContext_163)->globalParams_0->Look_0->gValue_0.y;
         float f_21;
-        int32_t _S2147 = floorDiv_0(_S2134, h_33, &f_21);
+        int32_t _S2150 = floorDiv_0(_S2137, h_33, &f_21);
 
-        int32_t _S2148 = floorDiv_0(_S2136, h_33, &f_21);
+        int32_t _S2151 = floorDiv_0(_S2139, h_33, &f_21);
 
-        int32_t _S2149 = floorDiv_0(_S2138, h_33, &f_21);
+        int32_t _S2152 = floorDiv_0(_S2141, h_33, &f_21);
 
-        Vector<int32_t, 3>  origin_2 = Vector<int32_t, 3> (_S2147, _S2148, _S2149) - (Vector<int32_t, 3> )margin_1;
-        int32_t _S2150 = floorDiv_0(_S2140, h_33, &f_21);
+        Vector<int32_t, 3>  origin_2 = Vector<int32_t, 3> (_S2150, _S2151, _S2152) - (Vector<int32_t, 3> )margin_1;
+        int32_t _S2153 = floorDiv_0(_S2143, h_33, &f_21);
 
-        int32_t _S2151 = floorDiv_0(_S2142, h_33, &f_21);
+        int32_t _S2154 = floorDiv_0(_S2145, h_33, &f_21);
 
-        int32_t _S2152 = floorDiv_0(_S2144, h_33, &f_21);
+        int32_t _S2155 = floorDiv_0(_S2147, h_33, &f_21);
 
-        Vector<int32_t, 3>  nodes_3 = Vector<int32_t, 3> (_S2150, _S2151, _S2152) + (Vector<int32_t, 3> )(int(2) + margin_1) - origin_2;
+        Vector<int32_t, 3>  nodes_3 = Vector<int32_t, 3> (_S2153, _S2154, _S2155) + (Vector<int32_t, 3> )(int(2) + margin_1) - origin_2;
         Vector<int32_t, 3>  blocks_1 = (nodes_3 + (Vector<int32_t, 3> )int(3)) >> ((Vector<int32_t, 3> )int(2));
 
         if((float(blocks_1.x) * float(blocks_1.y) * float(blocks_1.z)) > 8.388608e+06f)
@@ -22200,34 +22245,34 @@ void _GridLayCS(void* _S2132, void* entryPointParams_30, void* globalParams_31)
 
         }
 
-        Vector<uint32_t, 4>  _S2153 = (&kernelContext_163)->globalParams_0->Look_0->gFlag2_0;
-        Vector<uint32_t, 3>  _S2154 = Vector<uint32_t, 3> {_S2153.x, _S2153.y, _S2153.z};
+        Vector<uint32_t, 4>  _S2156 = (&kernelContext_163)->globalParams_0->Look_0->gFlag2_0;
+        Vector<uint32_t, 3>  _S2157 = Vector<uint32_t, 3> {_S2156.x, _S2156.y, _S2156.z};
 
-        Vector<int32_t, 3>  _S2155 = Vector<int32_t, 3> {(int32_t)_slang_vector_get_element(_S2154, 0), (int32_t)_slang_vector_get_element(_S2154, 1), (int32_t)_slang_vector_get_element(_S2154, 2)};
-        if(any_0(blocks_1 > _S2155))
+        Vector<int32_t, 3>  _S2158 = Vector<int32_t, 3> {(int32_t)_slang_vector_get_element(_S2157, 0), (int32_t)_slang_vector_get_element(_S2157, 1), (int32_t)_slang_vector_get_element(_S2157, 2)};
+        if(any_0(blocks_1 > _S2158))
         {
 
             overflow_0 = overflow_0 | 1U;
 
         }
-        Vector<int32_t, 3>  _S2156 = min_1(blocks_1, _S2155);
-        Vector<int32_t, 3>  _S2157 = min_1(nodes_3, _S2155 * (Vector<int32_t, 3> )int(4));
+        Vector<int32_t, 3>  _S2159 = min_1(blocks_1, _S2158);
+        Vector<int32_t, 3>  _S2160 = min_1(nodes_3, _S2158 * (Vector<int32_t, 3> )int(4));
 
         origin_1 = origin_2;
 
-        nodes_2 = _S2157;
+        nodes_2 = _S2160;
 
-        blocks_0 = _S2156;
+        blocks_0 = _S2159;
 
     }
     else
     {
 
-        origin_1 = _S2145;
+        origin_1 = _S2148;
 
-        nodes_2 = _S2145;
+        nodes_2 = _S2148;
 
-        blocks_0 = _S2145;
+        blocks_0 = _S2148;
 
         overflow_0 = 0U;
 
@@ -22271,26 +22316,26 @@ void _GridLayCS(void* _S2132, void* entryPointParams_30, void* globalParams_31)
 static uint32_t gridWord_0(bool rw_1, uint32_t w_47, KernelContext_0 * kernelContext_164)
 {
 
-    uint32_t _S2158;
+    uint32_t _S2161;
 
     if(rw_1)
     {
 
-        uint32_t _S2159 = (kernelContext_164->globalParams_0->gOut_0).Load<uint32_t >(uint32_t(int32_t(w_47 * 4U)));
+        uint32_t _S2162 = (kernelContext_164->globalParams_0->gOut_0).Load<uint32_t >(uint32_t(int32_t(w_47 * 4U)));
 
-        _S2158 = _S2159;
+        _S2161 = _S2162;
 
     }
     else
     {
 
-        uint32_t _S2160 = (kernelContext_164->globalParams_0->gAux1_0).Load<uint32_t >(uint32_t(int32_t(w_47 * 4U)));
+        uint32_t _S2163 = (kernelContext_164->globalParams_0->gAux1_0).Load<uint32_t >(uint32_t(int32_t(w_47 * 4U)));
 
-        _S2158 = _S2160;
+        _S2161 = _S2163;
 
     }
 
-    return _S2158;
+    return _S2161;
 }
 
 
@@ -22301,30 +22346,30 @@ static GridHead_0 gridHead_0(bool rw_2, KernelContext_0 * kernelContext_165)
 
     GridHead_0 g_38;
 
-    uint32_t _S2161 = gridWord_0(rw_2, 6U, kernelContext_165);
-    int32_t _S2162 = (U32_asint((_S2161)));
+    uint32_t _S2164 = gridWord_0(rw_2, 6U, kernelContext_165);
+    int32_t _S2165 = (U32_asint((_S2164)));
 
-    uint32_t _S2163 = gridWord_0(rw_2, 7U, kernelContext_165);
+    uint32_t _S2166 = gridWord_0(rw_2, 7U, kernelContext_165);
 
-    int32_t _S2164 = (U32_asint((_S2163)));
-
-    uint32_t _S2165 = gridWord_0(rw_2, 8U, kernelContext_165);
-
-    (&g_38)->origin_0 = Vector<int32_t, 3> (_S2162, _S2164, (U32_asint((_S2165))));
-
-    uint32_t _S2166 = gridWord_0(rw_2, 9U, kernelContext_165);
     int32_t _S2167 = (U32_asint((_S2166)));
 
-    uint32_t _S2168 = gridWord_0(rw_2, 10U, kernelContext_165);
+    uint32_t _S2168 = gridWord_0(rw_2, 8U, kernelContext_165);
 
-    int32_t _S2169 = (U32_asint((_S2168)));
+    (&g_38)->origin_0 = Vector<int32_t, 3> (_S2165, _S2167, (U32_asint((_S2168))));
 
-    uint32_t _S2170 = gridWord_0(rw_2, 11U, kernelContext_165);
+    uint32_t _S2169 = gridWord_0(rw_2, 9U, kernelContext_165);
+    int32_t _S2170 = (U32_asint((_S2169)));
 
-    (&g_38)->nodes_1 = Vector<int32_t, 3> (_S2167, _S2169, (U32_asint((_S2170))));
+    uint32_t _S2171 = gridWord_0(rw_2, 10U, kernelContext_165);
 
-    uint32_t _S2171 = gridWord_0(rw_2, 15U, kernelContext_165);
-    (&g_38)->count_0 = _S2171;
+    int32_t _S2172 = (U32_asint((_S2171)));
+
+    uint32_t _S2173 = gridWord_0(rw_2, 11U, kernelContext_165);
+
+    (&g_38)->nodes_1 = Vector<int32_t, 3> (_S2170, _S2172, (U32_asint((_S2173))));
+
+    uint32_t _S2174 = gridWord_0(rw_2, 15U, kernelContext_165);
+    (&g_38)->count_0 = _S2174;
     return g_38;
 }
 
@@ -22334,15 +22379,15 @@ static Vector<int32_t, 3>  cellOfGrid_0(Vector<float, 3>  p_52, Vector<int32_t, 
 
     float h_34 = kernelContext_166->globalParams_0->Look_0->gValue_0.y;
     float fx_2;
-    int32_t _S2172 = floorDiv_0(p_52.x, h_34, &fx_2);
+    int32_t _S2175 = floorDiv_0(p_52.x, h_34, &fx_2);
 
     float fy_2;
-    int32_t _S2173 = floorDiv_0(p_52.y, h_34, &fy_2);
+    int32_t _S2176 = floorDiv_0(p_52.y, h_34, &fy_2);
 
     float fz_2;
-    int32_t _S2174 = floorDiv_0(p_52.z, h_34, &fz_2);
+    int32_t _S2177 = floorDiv_0(p_52.z, h_34, &fz_2);
 
-    Vector<int32_t, 3>  c_38 = Vector<int32_t, 3> (_S2172, _S2173, _S2174) - origin_3;
+    Vector<int32_t, 3>  c_38 = Vector<int32_t, 3> (_S2175, _S2176, _S2177) - origin_3;
     *f_22 = Vector<float, 3> (fx_2, fy_2, fz_2);
     return c_38;
 }
@@ -22362,10 +22407,10 @@ static uint32_t gridCellOf_0(Vector<uint32_t, 3>  block_0, KernelContext_0 * ker
 }
 
 
-void _GridMarkCS(void* _S2175, void* entryPointParams_31, void* globalParams_32)
+void _GridMarkCS(void* _S2178, void* entryPointParams_31, void* globalParams_32)
 {
 
-    ComputeThreadVaryingInput * _S2176 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2175));
+    ComputeThreadVaryingInput * _S2179 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2178));
 
     KernelContext_0 kernelContext_168;
 
@@ -22375,30 +22420,30 @@ void _GridMarkCS(void* _S2175, void* entryPointParams_31, void* globalParams_32)
 
     (&kernelContext_168)->sTableBase_0 = 0U;
 
-    uint32_t _S2177 = threadIndex_0(_S2176->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2176->groupThreadID, 64U, &kernelContext_168);
+    uint32_t _S2180 = threadIndex_0(_S2179->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2179->groupThreadID, 64U, &kernelContext_168);
 
-    if(_S2177 >= ((&kernelContext_168)->globalParams_0->Look_0->gFlag_0.y))
+    if(_S2180 >= ((&kernelContext_168)->globalParams_0->Look_0->gFlag_0.y))
     {
 
         return;
     }
 
-    GridHead_0 _S2178 = gridHead_0(true, &kernelContext_168);
+    GridHead_0 _S2181 = gridHead_0(true, &kernelContext_168);
 
-    if((_S2178.nodes_1.x) <= int(0))
+    if((_S2181.nodes_1.x) <= int(0))
     {
 
         return;
     }
 
-    GridSegment_0 _S2179 = gridSegment_0(_S2177, &kernelContext_168);
+    GridSegment_0 _S2182 = gridSegment_0(_S2180, &kernelContext_168);
 
     uint32_t j_33 = 0U;
 
     for(;;)
     {
 
-        if(j_33 < (_S2179.m_0))
+        if(j_33 < (_S2182.m_0))
         {
         }
         else
@@ -22407,13 +22452,13 @@ void _GridMarkCS(void* _S2175, void* entryPointParams_31, void* globalParams_32)
             break;
         }
 
-        GridSegment_0 _S2180 = _S2179;
+        GridSegment_0 _S2183 = _S2182;
         float t_48;
 
-        Vector<float, 3>  _S2181 = gridSample_0(&_S2180, j_33, &t_48);
+        Vector<float, 3>  _S2184 = gridSample_0(&_S2183, j_33, &t_48);
         Vector<float, 3>  f_23;
 
-        Vector<int32_t, 3>  _S2182 = cellOfGrid_0(_S2181, _S2178.origin_0, &f_23, &kernelContext_168);
+        Vector<int32_t, 3>  _S2185 = cellOfGrid_0(_S2184, _S2181.origin_0, &f_23, &kernelContext_168);
 
         uint32_t d_36 = 0U;
 
@@ -22429,23 +22474,23 @@ void _GridMarkCS(void* _S2175, void* entryPointParams_31, void* globalParams_32)
                 break;
             }
 
-            Vector<int32_t, 3>  at_22 = _S2182 + cornerOf_0(d_36);
+            Vector<int32_t, 3>  at_22 = _S2185 + cornerOf_0(d_36);
 
-            bool _S2183;
+            bool _S2186;
             if(any_0(at_22 < Vector<int32_t, 3> (int(0), int(0), int(0))))
             {
 
-                _S2183 = true;
+                _S2186 = true;
 
             }
             else
             {
 
-                _S2183 = any_0(at_22 >= (_S2178.nodes_1));
+                _S2186 = any_0(at_22 >= (_S2181.nodes_1));
 
             }
 
-            if(_S2183)
+            if(_S2186)
             {
 
                 d_36 = d_36 + 1U;
@@ -22453,11 +22498,11 @@ void _GridMarkCS(void* _S2175, void* entryPointParams_31, void* globalParams_32)
                 continue;
             }
 
-            Vector<uint32_t, 3>  _S2184 = Vector<uint32_t, 3> {(uint32_t)_slang_vector_get_element(at_22, 0), (uint32_t)_slang_vector_get_element(at_22, 1), (uint32_t)_slang_vector_get_element(at_22, 2)};
+            Vector<uint32_t, 3>  _S2187 = Vector<uint32_t, 3> {(uint32_t)_slang_vector_get_element(at_22, 0), (uint32_t)_slang_vector_get_element(at_22, 1), (uint32_t)_slang_vector_get_element(at_22, 2)};
 
-            uint32_t _S2185 = gridCellOf_0(_S2184 >> ((Vector<uint32_t, 3> )int(2)), &kernelContext_168);
+            uint32_t _S2188 = gridCellOf_0(_S2187 >> ((Vector<uint32_t, 3> )int(2)), &kernelContext_168);
 
-            (&kernelContext_168)->globalParams_0->gOut_0.Store((32U + _S2185) * 4U,1U);
+            (&kernelContext_168)->globalParams_0->gOut_0.Store((32U + _S2188) * 4U,1U);
 
             d_36 = d_36 + 1U;
 
@@ -22473,16 +22518,16 @@ void _GridMarkCS(void* _S2175, void* entryPointParams_31, void* globalParams_32)
 
 static uint32_t atomicCompareExchangeOut_0(uint32_t at_23, uint32_t compare_0, uint32_t v_34, KernelContext_0 * kernelContext_169)
 {
-    uint32_t _S2186 = (glAtomicCompareExchange((kernelContext_169->globalParams_0->gOut_0), (at_23), (compare_0), (v_34)));
+    uint32_t _S2189 = (glAtomicCompareExchange((kernelContext_169->globalParams_0->gOut_0), (at_23), (compare_0), (v_34)));
 
-    return _S2186;
+    return _S2189;
 }
 
 
-void _GridDilateCS(void* _S2187, void* entryPointParams_32, void* globalParams_33)
+void _GridDilateCS(void* _S2190, void* entryPointParams_32, void* globalParams_33)
 {
 
-    ComputeThreadVaryingInput * _S2188 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2187));
+    ComputeThreadVaryingInput * _S2191 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2190));
 
     KernelContext_0 kernelContext_170;
 
@@ -22492,48 +22537,48 @@ void _GridDilateCS(void* _S2187, void* entryPointParams_32, void* globalParams_3
 
     (&kernelContext_170)->sTableBase_0 = 0U;
 
-    uint32_t _S2189 = threadIndex_0(_S2188->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2188->groupThreadID, 64U, &kernelContext_170);
+    uint32_t _S2192 = threadIndex_0(_S2191->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2191->groupThreadID, 64U, &kernelContext_170);
 
-    uint32_t _S2190 = gridCells_0(&kernelContext_170);
+    uint32_t _S2193 = gridCells_0(&kernelContext_170);
 
-    if(_S2189 >= _S2190)
+    if(_S2192 >= _S2193)
     {
 
         return;
     }
 
-    uint32_t _S2191 = ((&kernelContext_170)->globalParams_0->gOut_0).Load<uint32_t >(uint32_t(int32_t((32U + _S2189) * 4U)));
+    uint32_t _S2194 = ((&kernelContext_170)->globalParams_0->gOut_0).Load<uint32_t >(uint32_t(int32_t((32U + _S2192) * 4U)));
 
-    if(_S2191 != 1U)
+    if(_S2194 != 1U)
     {
 
         return;
     }
 
-    uint32_t _S2192 = ((&kernelContext_170)->globalParams_0->gOut_0).Load<uint32_t >(48U);
+    uint32_t _S2195 = ((&kernelContext_170)->globalParams_0->gOut_0).Load<uint32_t >(48U);
 
-    int32_t _S2193 = (U32_asint((_S2192)));
+    int32_t _S2196 = (U32_asint((_S2195)));
 
-    uint32_t _S2194 = ((&kernelContext_170)->globalParams_0->gOut_0).Load<uint32_t >(52U);
+    uint32_t _S2197 = ((&kernelContext_170)->globalParams_0->gOut_0).Load<uint32_t >(52U);
 
-    int32_t _S2195 = (U32_asint((_S2194)));
+    int32_t _S2198 = (U32_asint((_S2197)));
 
-    uint32_t _S2196 = ((&kernelContext_170)->globalParams_0->gOut_0).Load<uint32_t >(56U);
+    uint32_t _S2199 = ((&kernelContext_170)->globalParams_0->gOut_0).Load<uint32_t >(56U);
 
-    Vector<int32_t, 3>  _S2197 = Vector<int32_t, 3> (_S2193, _S2195, (U32_asint((_S2196))));
-    uint32_t _S2198 = _S2189 % (&kernelContext_170)->globalParams_0->Look_0->gFlag2_0.x;
-
-    int32_t _S2199 = int32_t(_S2198);
-
-    uint32_t _S2200 = _S2189 / (&kernelContext_170)->globalParams_0->Look_0->gFlag2_0.x;
-
-    uint32_t _S2201 = _S2200 % (&kernelContext_170)->globalParams_0->Look_0->gFlag2_0.y;
+    Vector<int32_t, 3>  _S2200 = Vector<int32_t, 3> (_S2196, _S2198, (U32_asint((_S2199))));
+    uint32_t _S2201 = _S2192 % (&kernelContext_170)->globalParams_0->Look_0->gFlag2_0.x;
 
     int32_t _S2202 = int32_t(_S2201);
 
-    uint32_t _S2203 = _S2189 / ((&kernelContext_170)->globalParams_0->Look_0->gFlag2_0.x * (&kernelContext_170)->globalParams_0->Look_0->gFlag2_0.y);
+    uint32_t _S2203 = _S2192 / (&kernelContext_170)->globalParams_0->Look_0->gFlag2_0.x;
 
-    Vector<int32_t, 3>  _S2204 = Vector<int32_t, 3> (_S2199, _S2202, int32_t(_S2203));
+    uint32_t _S2204 = _S2203 % (&kernelContext_170)->globalParams_0->Look_0->gFlag2_0.y;
+
+    int32_t _S2205 = int32_t(_S2204);
+
+    uint32_t _S2206 = _S2192 / ((&kernelContext_170)->globalParams_0->Look_0->gFlag2_0.x * (&kernelContext_170)->globalParams_0->Look_0->gFlag2_0.y);
+
+    Vector<int32_t, 3>  _S2207 = Vector<int32_t, 3> (_S2202, _S2205, int32_t(_S2206));
 
     uint32_t k_45 = 0U;
     for(;;)
@@ -22548,23 +22593,23 @@ void _GridDilateCS(void* _S2187, void* entryPointParams_32, void* globalParams_3
             break;
         }
 
-        Vector<int32_t, 3>  n_50 = _S2204 + Vector<int32_t, 3> (int32_t(k_45 % 3U) - int(1), int32_t(k_45 / 3U % 3U) - int(1), int32_t(k_45 / 9U) - int(1));
+        Vector<int32_t, 3>  n_50 = _S2207 + Vector<int32_t, 3> (int32_t(k_45 % 3U) - int(1), int32_t(k_45 / 3U % 3U) - int(1), int32_t(k_45 / 9U) - int(1));
 
-        bool _S2205;
+        bool _S2208;
         if(any_0(n_50 < Vector<int32_t, 3> (int(0), int(0), int(0))))
         {
 
-            _S2205 = true;
+            _S2208 = true;
 
         }
         else
         {
 
-            _S2205 = any_0(n_50 >= _S2197);
+            _S2208 = any_0(n_50 >= _S2200);
 
         }
 
-        if(_S2205)
+        if(_S2208)
         {
 
             k_45 = k_45 + 1U;
@@ -22572,11 +22617,11 @@ void _GridDilateCS(void* _S2187, void* entryPointParams_32, void* globalParams_3
             continue;
         }
 
-        Vector<uint32_t, 3>  _S2206 = Vector<uint32_t, 3> {(uint32_t)_slang_vector_get_element(n_50, 0), (uint32_t)_slang_vector_get_element(n_50, 1), (uint32_t)_slang_vector_get_element(n_50, 2)};
+        Vector<uint32_t, 3>  _S2209 = Vector<uint32_t, 3> {(uint32_t)_slang_vector_get_element(n_50, 0), (uint32_t)_slang_vector_get_element(n_50, 1), (uint32_t)_slang_vector_get_element(n_50, 2)};
 
-        uint32_t _S2207 = gridCellOf_0(_S2206, &kernelContext_170);
+        uint32_t _S2210 = gridCellOf_0(_S2209, &kernelContext_170);
 
-        uint32_t _S2208 = atomicCompareExchangeOut_0((32U + _S2207) * 4U, 0U, 2U, &kernelContext_170);
+        uint32_t _S2211 = atomicCompareExchangeOut_0((32U + _S2210) * 4U, 0U, 2U, &kernelContext_170);
 
         k_45 = k_45 + 1U;
 
@@ -22588,24 +22633,24 @@ void _GridDilateCS(void* _S2187, void* entryPointParams_32, void* globalParams_3
 
 static uint32_t atomicAddOut_0(uint32_t at_24, uint32_t v_35, KernelContext_0 * kernelContext_171)
 {
-    uint32_t _S2209 = (glAtomicAdd((kernelContext_171->globalParams_0->gOut_0), (at_24), (v_35)));
+    uint32_t _S2212 = (glAtomicAdd((kernelContext_171->globalParams_0->gOut_0), (at_24), (v_35)));
 
-    return _S2209;
+    return _S2212;
 }
 
 
 static uint32_t atomicOrOut_0(uint32_t at_25, uint32_t v_36, KernelContext_0 * kernelContext_172)
 {
-    uint32_t _S2210 = (glAtomicOr((kernelContext_172->globalParams_0->gOut_0), (at_25), (v_36)));
+    uint32_t _S2213 = (glAtomicOr((kernelContext_172->globalParams_0->gOut_0), (at_25), (v_36)));
 
-    return _S2210;
+    return _S2213;
 }
 
 
-void _GridCompactCS(void* _S2211, void* entryPointParams_33, void* globalParams_34)
+void _GridCompactCS(void* _S2214, void* entryPointParams_33, void* globalParams_34)
 {
 
-    ComputeThreadVaryingInput * _S2212 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2211));
+    ComputeThreadVaryingInput * _S2215 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2214));
 
     KernelContext_0 kernelContext_173;
 
@@ -22615,48 +22660,48 @@ void _GridCompactCS(void* _S2211, void* entryPointParams_33, void* globalParams_
 
     (&kernelContext_173)->sTableBase_0 = 0U;
 
-    uint32_t _S2213 = threadIndex_0(_S2212->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2212->groupThreadID, 64U, &kernelContext_173);
+    uint32_t _S2216 = threadIndex_0(_S2215->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2215->groupThreadID, 64U, &kernelContext_173);
 
-    uint32_t _S2214 = gridCells_0(&kernelContext_173);
+    uint32_t _S2217 = gridCells_0(&kernelContext_173);
 
-    if(_S2213 >= _S2214)
+    if(_S2216 >= _S2217)
     {
 
         return;
     }
 
-    uint32_t at_26 = (32U + _S2213) * 4U;
-    uint32_t _S2215 = ((&kernelContext_173)->globalParams_0->gOut_0).Load<uint32_t >(uint32_t(int32_t(at_26)));
+    uint32_t at_26 = (32U + _S2216) * 4U;
+    uint32_t _S2218 = ((&kernelContext_173)->globalParams_0->gOut_0).Load<uint32_t >(uint32_t(int32_t(at_26)));
 
-    if(_S2215 == 0U)
+    if(_S2218 == 0U)
     {
 
         return;
     }
 
-    uint32_t _S2216 = atomicAddOut_0(60U, 1U, &kernelContext_173);
+    uint32_t _S2219 = atomicAddOut_0(60U, 1U, &kernelContext_173);
 
-    if(_S2216 >= ((&kernelContext_173)->globalParams_0->Look_0->gFlag2_0.w))
+    if(_S2219 >= ((&kernelContext_173)->globalParams_0->Look_0->gFlag2_0.w))
     {
 
         (&kernelContext_173)->globalParams_0->gOut_0.Store(at_26,0U);
 
-        uint32_t _S2217 = atomicOrOut_0(64U, 1U, &kernelContext_173);
+        uint32_t _S2220 = atomicOrOut_0(64U, 1U, &kernelContext_173);
 
         return;
     }
-    (&kernelContext_173)->globalParams_0->gOut_0.Store(at_26,_S2216 + 1U);
-    (&kernelContext_173)->globalParams_0->gOut_0.Store((32U + _S2214 + _S2216) * 4U,_S2213);
+    (&kernelContext_173)->globalParams_0->gOut_0.Store(at_26,_S2219 + 1U);
+    (&kernelContext_173)->globalParams_0->gOut_0.Store((32U + _S2217 + _S2219) * 4U,_S2216);
     return;
 }
 
 
 
 
-void _GridZeroCS(void* _S2218, void* entryPointParams_34, void* globalParams_35)
+void _GridZeroCS(void* _S2221, void* entryPointParams_34, void* globalParams_35)
 {
 
-    ComputeThreadVaryingInput * _S2219 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2218));
+    ComputeThreadVaryingInput * _S2222 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2221));
 
     KernelContext_0 kernelContext_174;
 
@@ -22666,13 +22711,13 @@ void _GridZeroCS(void* _S2218, void* entryPointParams_34, void* globalParams_35)
 
     (&kernelContext_174)->sTableBase_0 = 0U;
 
-    uint32_t _S2220 = threadIndex_0(_S2219->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2219->groupThreadID, 64U, &kernelContext_174);
+    uint32_t _S2223 = threadIndex_0(_S2222->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2222->groupThreadID, 64U, &kernelContext_174);
 
-    uint32_t _S2221 = _S2220 >> int(6);
+    uint32_t _S2224 = _S2223 >> int(6);
 
-    uint32_t _S2222 = gridWord_0(false, 15U, &kernelContext_174);
+    uint32_t _S2225 = gridWord_0(false, 15U, &kernelContext_174);
 
-    if(_S2221 >= (U32_min((_S2222), ((&kernelContext_174)->globalParams_0->Look_0->gFlag2_0.w))))
+    if(_S2224 >= (U32_min((_S2225), ((&kernelContext_174)->globalParams_0->Look_0->gFlag2_0.w))))
     {
 
         return;
@@ -22691,7 +22736,7 @@ void _GridZeroCS(void* _S2218, void* entryPointParams_34, void* globalParams_35)
             break;
         }
 
-        (&kernelContext_174)->globalParams_0->gOut_0.Store((_S2220 * (&kernelContext_174)->globalParams_0->Look_0->gOctaveSeeds_0[int(3)].x + e_4) * 4U,0U);
+        (&kernelContext_174)->globalParams_0->gOut_0.Store((_S2223 * (&kernelContext_174)->globalParams_0->Look_0->gOctaveSeeds_0[int(3)].x + e_4) * 4U,0U);
 
         e_4 = e_4 + 1U;
 
@@ -22710,7 +22755,7 @@ void _GridZeroCS(void* _S2218, void* entryPointParams_34, void* globalParams_35)
             break;
         }
 
-        (&kernelContext_174)->globalParams_0->gOut2_0.Store((_S2220 * 12U + w_48) * 4U,0U);
+        (&kernelContext_174)->globalParams_0->gOut2_0.Store((_S2223 * 12U + w_48) * 4U,0U);
 
         w_48 = w_48 + 1U;
 
@@ -22747,51 +22792,51 @@ static Vector<int32_t, 3>  cellOfGridD_0(Vector<float, 3>  p_53, Vector<int32_t,
 static double cornerWeightD_0(Vector<double, 3>  f_25, uint32_t d_37)
 {
 
-    double _S2223;
+    double _S2226;
     if((d_37 & 1U) != 0U)
     {
 
-        _S2223 = f_25.x;
+        _S2226 = f_25.x;
 
     }
     else
     {
 
-        _S2223 = 1.0 - f_25.x;
+        _S2226 = 1.0 - f_25.x;
 
     }
 
-    double _S2224;
+    double _S2227;
 
     if((d_37 & 2U) != 0U)
     {
 
-        _S2224 = f_25.y;
+        _S2227 = f_25.y;
 
     }
     else
     {
 
-        _S2224 = 1.0 - f_25.y;
+        _S2227 = 1.0 - f_25.y;
 
     }
 
-    double _S2225 = _S2223 * _S2224;
+    double _S2228 = _S2226 * _S2227;
 
     if((d_37 & 4U) != 0U)
     {
 
-        _S2223 = f_25.z;
+        _S2226 = f_25.z;
 
     }
     else
     {
 
-        _S2223 = 1.0 - f_25.z;
+        _S2226 = 1.0 - f_25.z;
 
     }
 
-    return _S2225 * _S2223;
+    return _S2228 * _S2226;
 }
 
 static Vector<uint32_t, 2>  fixedOfD_0(double m_18)
@@ -22811,92 +22856,92 @@ static Vector<uint32_t, 2>  fixedOfD_0(double m_18)
 static bool zero64_0(Vector<uint32_t, 2>  a_58)
 {
 
-    bool _S2226;
+    bool _S2229;
 
     if((a_58.x) == 0U)
     {
 
-        _S2226 = (a_58.y) == 0U;
+        _S2229 = (a_58.y) == 0U;
 
     }
     else
     {
 
-        _S2226 = false;
+        _S2229 = false;
 
     }
 
-    return _S2226;
+    return _S2229;
 }
 
 
 static uint32_t gridNode_0(bool rw_3, GridHead_0 * g_39, Vector<int32_t, 3>  c_39, KernelContext_0 * kernelContext_178)
 {
 
-    bool _S2227;
+    bool _S2230;
     if(any_0(c_39 < Vector<int32_t, 3> (int(0), int(0), int(0))))
     {
 
-        _S2227 = true;
+        _S2230 = true;
 
     }
     else
     {
 
-        _S2227 = any_0(c_39 >= (g_39->nodes_1));
+        _S2230 = any_0(c_39 >= (g_39->nodes_1));
 
     }
 
-    if(_S2227)
+    if(_S2230)
     {
 
         return 4294967295U;
     }
 
-    Vector<uint32_t, 3>  _S2228 = Vector<uint32_t, 3> {(uint32_t)_slang_vector_get_element(c_39, 0), (uint32_t)_slang_vector_get_element(c_39, 1), (uint32_t)_slang_vector_get_element(c_39, 2)};
+    Vector<uint32_t, 3>  _S2231 = Vector<uint32_t, 3> {(uint32_t)_slang_vector_get_element(c_39, 0), (uint32_t)_slang_vector_get_element(c_39, 1), (uint32_t)_slang_vector_get_element(c_39, 2)};
 
-    uint32_t _S2229 = gridCellOf_0(_S2228 >> ((Vector<uint32_t, 3> )int(2)), kernelContext_178);
+    uint32_t _S2232 = gridCellOf_0(_S2231 >> ((Vector<uint32_t, 3> )int(2)), kernelContext_178);
 
-    uint32_t _S2230 = gridWord_0(rw_3, 32U + _S2229, kernelContext_178);
+    uint32_t _S2233 = gridWord_0(rw_3, 32U + _S2232, kernelContext_178);
 
-    if(_S2230 == 0U)
+    if(_S2233 == 0U)
     {
 
         return 4294967295U;
     }
 
-    return (_S2230 - 1U) * 64U + (((((_S2228.z) & 3U) << int(4)) | (((_S2228.y) & 3U) << int(2))) | ((_S2228.x) & 3U));
+    return (_S2233 - 1U) * 64U + (((((_S2231.z) & 3U) << int(4)) | (((_S2231.y) & 3U) << int(2))) | ((_S2231.x) & 3U));
 }
 
 
 static void atomicAdd64_0(uint32_t at_27, Vector<uint32_t, 2>  v_37, KernelContext_0 * kernelContext_179)
 {
 
-    uint32_t _S2231 = v_37.x;
+    uint32_t _S2234 = v_37.x;
 
-    uint32_t _S2232 = atomicAddOut_0(at_27, _S2231, kernelContext_179);
-    uint32_t _S2233 = v_37.y;
+    uint32_t _S2235 = atomicAddOut_0(at_27, _S2234, kernelContext_179);
+    uint32_t _S2236 = v_37.y;
 
-    uint32_t _S2234;
+    uint32_t _S2237;
 
-    if((_S2232 + _S2231) < _S2232)
+    if((_S2235 + _S2234) < _S2235)
     {
 
-        _S2234 = 1U;
+        _S2237 = 1U;
 
     }
     else
     {
 
-        _S2234 = 0U;
+        _S2237 = 0U;
 
     }
 
-    uint32_t hi_5 = _S2233 + _S2234;
+    uint32_t hi_5 = _S2236 + _S2237;
     if(hi_5 != 0U)
     {
 
-        uint32_t _S2235 = atomicAddOut_0(at_27 + 4U, hi_5, kernelContext_179);
+        uint32_t _S2238 = atomicAddOut_0(at_27 + 4U, hi_5, kernelContext_179);
 
     }
     return;
@@ -22916,11 +22961,11 @@ static void splatSampleD_0(GridHead_0 * head_0, GridSegment_0 * g_40, Vector<flo
     if(isStatic_0)
     {
 
-        double _S2236 = gridNominalD_0(kernelContext_180);
+        double _S2239 = gridNominalD_0(kernelContext_180);
 
-        double _S2237 = gridWeightD_0(kernelContext_180);
+        double _S2240 = gridWeightD_0(kernelContext_180);
 
-        volume_0 = float(_S2236 * _S2237 * double(g_40->len_0) / double(g_40->m_0) * double(charge_0 * (q0_0 * (1.0f - t_49) + q1_0 * t_49)));
+        volume_0 = float(_S2239 * _S2240 * double(g_40->len_0) / double(g_40->m_0) * double(charge_0 * (q0_0 * (1.0f - t_49) + q1_0 * t_49)));
 
         width_2 = 0.0f;
 
@@ -22928,10 +22973,10 @@ static void splatSampleD_0(GridHead_0 * head_0, GridSegment_0 * g_40, Vector<flo
     else
     {
 
-        double _S2238 = gridNominalD_0(kernelContext_180);
+        double _S2241 = gridNominalD_0(kernelContext_180);
 
 
-        double _S2239 = (F64_sqrt((4.0 * _S2238 / 3.14159265358979312)));
+        double _S2242 = (F64_sqrt((4.0 * _S2241 / 3.14159265358979312)));
 
         double across_6;
         if(widths_0)
@@ -22947,28 +22992,28 @@ static void splatSampleD_0(GridHead_0 * head_0, GridSegment_0 * g_40, Vector<flo
         else
         {
 
-            a_59 = _S2238;
+            a_59 = _S2241;
 
-            across_6 = _S2239;
+            across_6 = _S2242;
 
         }
 
-        double _S2240 = gridWeightD_0(kernelContext_180);
+        double _S2243 = gridWeightD_0(kernelContext_180);
 
-        float _S2241 = float(across_6);
+        float _S2244 = float(across_6);
 
-        volume_0 = float(a_59 * _S2240 * double(g_40->len_0) / double(g_40->m_0));
+        volume_0 = float(a_59 * _S2243 * double(g_40->len_0) / double(g_40->m_0));
 
-        width_2 = _S2241;
+        width_2 = _S2244;
 
     }
 
-    double _S2242 = double(volume_0) * (4.294967296e+09 / (h_36 * h_36 * h_36));
+    double _S2245 = double(volume_0) * (4.294967296e+09 / (h_36 * h_36 * h_36));
 
-    double _S2243 = double(width_2) / h_36;
+    double _S2246 = double(width_2) / h_36;
     Vector<double, 3>  f_26;
 
-    Vector<int32_t, 3>  _S2244 = cellOfGridD_0(q_21, head_0->origin_0, &f_26, kernelContext_180);
+    Vector<int32_t, 3>  _S2247 = cellOfGridD_0(q_21, head_0->origin_0, &f_26, kernelContext_180);
 
     uint32_t d_38 = 0U;
 
@@ -22984,7 +23029,7 @@ static void splatSampleD_0(GridHead_0 * head_0, GridSegment_0 * g_40, Vector<flo
             break;
         }
 
-        Vector<uint32_t, 2>  add_0 = fixedOfD_0(cornerWeightD_0(f_26, d_38) * _S2242);
+        Vector<uint32_t, 2>  add_0 = fixedOfD_0(cornerWeightD_0(f_26, d_38) * _S2245);
         if(zero64_0(add_0))
         {
 
@@ -22993,11 +23038,11 @@ static void splatSampleD_0(GridHead_0 * head_0, GridSegment_0 * g_40, Vector<flo
             continue;
         }
 
-        uint32_t _S2245 = gridNode_0(false, head_0, _S2244 + cornerOf_0(d_38), kernelContext_180);
+        uint32_t _S2248 = gridNode_0(false, head_0, _S2247 + cornerOf_0(d_38), kernelContext_180);
 
 
 
-        if(_S2245 == 4294967295U)
+        if(_S2248 == 4294967295U)
         {
 
             d_38 = d_38 + 1U;
@@ -23005,15 +23050,15 @@ static void splatSampleD_0(GridHead_0 * head_0, GridSegment_0 * g_40, Vector<flo
             continue;
         }
 
-        atomicAdd64_0(_S2245 * kernelContext_180->globalParams_0->Look_0->gOctaveSeeds_0[int(3)].x * 4U, add_0, kernelContext_180);
+        atomicAdd64_0(_S2248 * kernelContext_180->globalParams_0->Look_0->gOctaveSeeds_0[int(3)].x * 4U, add_0, kernelContext_180);
 
         d_38 = d_38 + 1U;
 
     }
 
-    uint32_t _S2246 = gridNode_0(false, head_0, _S2244, kernelContext_180);
+    uint32_t _S2249 = gridNode_0(false, head_0, _S2247, kernelContext_180);
 
-    if(_S2246 == 4294967295U)
+    if(_S2249 == 4294967295U)
     {
 
         return;
@@ -23036,67 +23081,67 @@ static void splatSampleD_0(GridHead_0 * head_0, GridSegment_0 * g_40, Vector<flo
         case 0U:
             {
 
-                a_59 = _S2242;
+                a_59 = _S2245;
                 break;
             }
         case 1U:
             {
 
-                a_59 = _S2242 * f_26.x;
+                a_59 = _S2245 * f_26.x;
                 break;
             }
         case 2U:
             {
 
-                a_59 = _S2242 * f_26.y;
+                a_59 = _S2245 * f_26.y;
                 break;
             }
         case 3U:
             {
 
-                a_59 = _S2242 * f_26.z;
+                a_59 = _S2245 * f_26.z;
                 break;
             }
         case 4U:
             {
 
-                a_59 = _S2242 * f_26.x * f_26.x;
+                a_59 = _S2245 * f_26.x * f_26.x;
                 break;
             }
         case 5U:
             {
 
-                a_59 = _S2242 * f_26.y * f_26.y;
+                a_59 = _S2245 * f_26.y * f_26.y;
                 break;
             }
         case 6U:
             {
 
-                a_59 = _S2242 * f_26.z * f_26.z;
+                a_59 = _S2245 * f_26.z * f_26.z;
                 break;
             }
         case 7U:
             {
 
-                a_59 = _S2242 * f_26.x * f_26.y;
+                a_59 = _S2245 * f_26.x * f_26.y;
                 break;
             }
         case 8U:
             {
 
-                a_59 = _S2242 * f_26.x * f_26.z;
+                a_59 = _S2245 * f_26.x * f_26.z;
                 break;
             }
         case 9U:
             {
 
-                a_59 = _S2242 * f_26.y * f_26.z;
+                a_59 = _S2245 * f_26.y * f_26.z;
                 break;
             }
         default:
             {
 
-                a_59 = _S2242 * _S2243;
+                a_59 = _S2245 * _S2246;
                 break;
             }
         }
@@ -23105,7 +23150,7 @@ static void splatSampleD_0(GridHead_0 * head_0, GridSegment_0 * g_40, Vector<flo
         if(!zero64_0(add_1))
         {
 
-            atomicAdd64_0((_S2246 * kernelContext_180->globalParams_0->Look_0->gOctaveSeeds_0[int(3)].x + 2U + e_5 * 2U) * 4U, add_1, kernelContext_180);
+            atomicAdd64_0((_S2249 * kernelContext_180->globalParams_0->Look_0->gOctaveSeeds_0[int(3)].x + 2U + e_5 * 2U) * 4U, add_1, kernelContext_180);
 
         }
 
@@ -23119,10 +23164,10 @@ static void splatSampleD_0(GridHead_0 * head_0, GridSegment_0 * g_40, Vector<flo
 
 
 
-void _GridSplatCS(void* _S2247, void* entryPointParams_35, void* globalParams_36)
+void _GridSplatCS(void* _S2250, void* entryPointParams_35, void* globalParams_36)
 {
 
-    ComputeThreadVaryingInput * _S2248 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2247));
+    ComputeThreadVaryingInput * _S2251 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2250));
 
     KernelContext_0 kernelContext_181;
 
@@ -23132,25 +23177,25 @@ void _GridSplatCS(void* _S2247, void* entryPointParams_35, void* globalParams_36
 
     (&kernelContext_181)->sTableBase_0 = 0U;
 
-    uint32_t _S2249 = threadIndex_0(_S2248->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2248->groupThreadID, 64U, &kernelContext_181);
+    uint32_t _S2252 = threadIndex_0(_S2251->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2251->groupThreadID, 64U, &kernelContext_181);
 
-    if(_S2249 >= ((&kernelContext_181)->globalParams_0->Look_0->gFlag_0.y))
+    if(_S2252 >= ((&kernelContext_181)->globalParams_0->Look_0->gFlag_0.y))
     {
 
         return;
     }
 
-    GridHead_0 _S2250 = gridHead_0(false, &kernelContext_181);
+    GridHead_0 _S2253 = gridHead_0(false, &kernelContext_181);
 
-    if((_S2250.count_0) == 0U)
+    if((_S2253.count_0) == 0U)
     {
 
         return;
     }
 
-    GridSegment_0 _S2251 = gridSegment_0(_S2249, &kernelContext_181);
+    GridSegment_0 _S2254 = gridSegment_0(_S2252, &kernelContext_181);
 
-    if((_S2251.m_0) == 0U)
+    if((_S2254.m_0) == 0U)
     {
 
         return;
@@ -23158,17 +23203,17 @@ void _GridSplatCS(void* _S2247, void* entryPointParams_35, void* globalParams_36
 
     bool isStatic_1 = (((&kernelContext_181)->globalParams_0->Look_0->gFlag_0.x) & 1U) != 0U;
 
-    uint32_t _S2252;
+    uint32_t _S2255;
     if(isStatic_1)
     {
 
-        _S2252 = 4U;
+        _S2255 = 4U;
 
     }
     else
     {
 
-        _S2252 = 11U;
+        _S2255 = 11U;
 
     }
 
@@ -23181,21 +23226,21 @@ void _GridSplatCS(void* _S2247, void* entryPointParams_35, void* globalParams_36
     if(isStatic_1)
     {
 
-        Vector<float, 4>  _S2253 = strandData_0(_S2251.s_1, &kernelContext_181);
-        float u_22 = _S2253.w;
-        float _S2254 = (groomlab_max((0.0f), (1.0f + (&kernelContext_181)->globalParams_0->Look_0->gValue2_0.w * (3.0f * u_22 * u_22 - 1.0f))));
+        Vector<float, 4>  _S2256 = strandData_0(_S2254.s_1, &kernelContext_181);
+        float u_22 = _S2256.w;
+        float _S2257 = (groomlab_max((0.0f), (1.0f + (&kernelContext_181)->globalParams_0->Look_0->gValue2_0.w * (3.0f * u_22 * u_22 - 1.0f))));
 
-        float _S2255 = rampAlong_0(_S2251.i_1, _S2251.n_5, &kernelContext_181);
-        float _S2256 = (groomlab_max((_S2255), (0.0f)));
+        float _S2258 = rampAlong_0(_S2254.i_1, _S2254.n_5, &kernelContext_181);
+        float _S2259 = (groomlab_max((_S2258), (0.0f)));
 
-        float _S2257 = rampAlong_0(_S2251.i_1 + 1U, _S2251.n_5, &kernelContext_181);
-        float _S2258 = (groomlab_max((_S2257), (0.0f)));
+        float _S2260 = rampAlong_0(_S2254.i_1 + 1U, _S2254.n_5, &kernelContext_181);
+        float _S2261 = (groomlab_max((_S2260), (0.0f)));
 
-        charge_1 = _S2254;
+        charge_1 = _S2257;
 
-        q0_1 = _S2256;
+        q0_1 = _S2259;
 
-        q1_1 = _S2258;
+        q1_1 = _S2261;
 
     }
     else
@@ -23230,20 +23275,20 @@ void _GridSplatCS(void* _S2247, void* entryPointParams_35, void* globalParams_36
     if(widths_1)
     {
 
-        uint32_t _S2259 = strandBegin_0(_S2251.s_1, &kernelContext_181);
+        uint32_t _S2262 = strandBegin_0(_S2254.s_1, &kernelContext_181);
 
-        uint32_t _S2260 = (_S2259 + _S2251.i_1) * 4U;
+        uint32_t _S2263 = (_S2262 + _S2254.i_1) * 4U;
 
-        uint32_t _S2261 = ((&kernelContext_181)->globalParams_0->gAux2_0).Load<uint32_t >(uint32_t(int32_t(_S2260)));
+        uint32_t _S2264 = ((&kernelContext_181)->globalParams_0->gAux2_0).Load<uint32_t >(uint32_t(int32_t(_S2263)));
 
-        float _S2262 = (U32_asfloat((_S2261)));
-        uint32_t _S2263 = ((&kernelContext_181)->globalParams_0->gAux2_0).Load<uint32_t >(uint32_t(int32_t(_S2260 + 4U)));
+        float _S2265 = (U32_asfloat((_S2264)));
+        uint32_t _S2266 = ((&kernelContext_181)->globalParams_0->gAux2_0).Load<uint32_t >(uint32_t(int32_t(_S2263 + 4U)));
 
-        float _S2264 = (U32_asfloat((_S2263)));
+        float _S2267 = (U32_asfloat((_S2266)));
 
-        w0_1 = _S2262;
+        w0_1 = _S2265;
 
-        w1_1 = _S2264;
+        w1_1 = _S2267;
 
     }
     else
@@ -23255,13 +23300,13 @@ void _GridSplatCS(void* _S2247, void* entryPointParams_35, void* globalParams_36
 
     }
 
-    float _S2265 = _S2251.len_0 / float(_S2251.m_0);
+    float _S2268 = _S2254.len_0 / float(_S2254.m_0);
 
     uint32_t j_34 = 0U;
     for(;;)
     {
 
-        if(j_34 < (_S2251.m_0))
+        if(j_34 < (_S2254.m_0))
         {
         }
         else
@@ -23270,16 +23315,16 @@ void _GridSplatCS(void* _S2247, void* entryPointParams_35, void* globalParams_36
             break;
         }
 
-        GridSegment_0 _S2266 = _S2251;
+        GridSegment_0 _S2269 = _S2254;
         float t_50;
 
-        Vector<float, 3>  _S2267 = gridSample_0(&_S2266, j_34, &t_50);
+        Vector<float, 3>  _S2270 = gridSample_0(&_S2269, j_34, &t_50);
 
-        GridHead_0 _S2268 = _S2250;
+        GridHead_0 _S2271 = _S2253;
 
-        GridSegment_0 _S2269 = _S2251;
+        GridSegment_0 _S2272 = _S2254;
 
-        splatSampleD_0(&_S2268, &_S2269, _S2267, t_50, isStatic_1, widths_1, w0_1, w1_1, charge_1, q0_1, q1_1, _S2265, _S2252, &kernelContext_181);
+        splatSampleD_0(&_S2271, &_S2272, _S2270, t_50, isStatic_1, widths_1, w0_1, w1_1, charge_1, q0_1, q1_1, _S2268, _S2255, &kernelContext_181);
 
         j_34 = j_34 + 1U;
 
@@ -23292,68 +23337,68 @@ void _GridSplatCS(void* _S2247, void* entryPointParams_35, void* globalParams_36
 static Vector<int32_t, 3>  gridCoordinates_0(bool rw_4, uint32_t at_28, KernelContext_0 * kernelContext_182)
 {
 
-    uint32_t _S2270 = gridCells_0(kernelContext_182);
+    uint32_t _S2273 = gridCells_0(kernelContext_182);
 
-    uint32_t _S2271 = gridWord_0(rw_4, 32U + _S2270 + (at_28 >> int(6)), kernelContext_182);
+    uint32_t _S2274 = gridWord_0(rw_4, 32U + _S2273 + (at_28 >> int(6)), kernelContext_182);
 
-    uint32_t _S2272 = _S2271 % kernelContext_182->globalParams_0->Look_0->gFlag2_0.x;
+    uint32_t _S2275 = _S2274 % kernelContext_182->globalParams_0->Look_0->gFlag2_0.x;
 
-    uint32_t _S2273 = _S2271 / kernelContext_182->globalParams_0->Look_0->gFlag2_0.x;
+    uint32_t _S2276 = _S2274 / kernelContext_182->globalParams_0->Look_0->gFlag2_0.x;
 
-    uint32_t _S2274 = _S2273 % kernelContext_182->globalParams_0->Look_0->gFlag2_0.y;
+    uint32_t _S2277 = _S2276 % kernelContext_182->globalParams_0->Look_0->gFlag2_0.y;
 
-    uint32_t _S2275 = _S2271 / (kernelContext_182->globalParams_0->Look_0->gFlag2_0.x * kernelContext_182->globalParams_0->Look_0->gFlag2_0.y);
+    uint32_t _S2278 = _S2274 / (kernelContext_182->globalParams_0->Look_0->gFlag2_0.x * kernelContext_182->globalParams_0->Look_0->gFlag2_0.y);
     uint32_t l_14 = at_28 & 63U;
-    Vector<uint32_t, 3>  _S2276 = Vector<uint32_t, 3> (_S2272, _S2274, _S2275) * (Vector<uint32_t, 3> )4U + Vector<uint32_t, 3> (l_14 & 3U, (l_14 >> int(2)) & 3U, l_14 >> int(4));
+    Vector<uint32_t, 3>  _S2279 = Vector<uint32_t, 3> (_S2275, _S2277, _S2278) * (Vector<uint32_t, 3> )4U + Vector<uint32_t, 3> (l_14 & 3U, (l_14 >> int(2)) & 3U, l_14 >> int(4));
 
-    Vector<int32_t, 3>  _S2277 = Vector<int32_t, 3> {(int32_t)_slang_vector_get_element(_S2276, 0), (int32_t)_slang_vector_get_element(_S2276, 1), (int32_t)_slang_vector_get_element(_S2276, 2)};
+    Vector<int32_t, 3>  _S2280 = Vector<int32_t, 3> {(int32_t)_slang_vector_get_element(_S2279, 0), (int32_t)_slang_vector_get_element(_S2279, 1), (int32_t)_slang_vector_get_element(_S2279, 2)};
 
-    return _S2277;
+    return _S2280;
 }
 
 
 static Vector<uint32_t, 2>  sumIn_0(uint32_t at_29, uint32_t e_6, KernelContext_0 * kernelContext_183)
 {
 
-    uint32_t _S2278 = (at_29 * kernelContext_183->globalParams_0->Look_0->gOctaveSeeds_0[int(3)].x + e_6 * 2U) * 4U;
+    uint32_t _S2281 = (at_29 * kernelContext_183->globalParams_0->Look_0->gOctaveSeeds_0[int(3)].x + e_6 * 2U) * 4U;
 
-    ByteAddressBuffer _S2279 = kernelContext_183->globalParams_0->gAux0_0;
+    ByteAddressBuffer _S2282 = kernelContext_183->globalParams_0->gAux0_0;
 
-    uint32_t _S2280 = (kernelContext_183->globalParams_0->gAux0_0).Load<uint32_t >(_S2278);
+    uint32_t _S2283 = (kernelContext_183->globalParams_0->gAux0_0).Load<uint32_t >(_S2281);
 
-    uint32_t _S2281 = (_S2279).Load<uint32_t >(_S2278 + 4U);
+    uint32_t _S2284 = (_S2282).Load<uint32_t >(_S2281 + 4U);
 
-    return Vector<uint32_t, 2> (_S2280, _S2281);
+    return Vector<uint32_t, 2> (_S2283, _S2284);
 }
 
 
-static Vector<uint32_t, 2>  sub64_0(Vector<uint32_t, 2>  a_60, Vector<uint32_t, 2>  b_50)
+static Vector<uint32_t, 2>  sub64_0(Vector<uint32_t, 2>  a_60, Vector<uint32_t, 2>  b_51)
 {
 
-    uint32_t _S2282 = a_60.x;
+    uint32_t _S2285 = a_60.x;
 
-    uint32_t _S2283 = b_50.x;
+    uint32_t _S2286 = b_51.x;
 
-    uint32_t _S2284 = _S2282 - _S2283;
+    uint32_t _S2287 = _S2285 - _S2286;
 
-    uint32_t _S2285 = a_60.y - b_50.y;
+    uint32_t _S2288 = a_60.y - b_51.y;
 
-    uint32_t _S2286;
+    uint32_t _S2289;
 
-    if(_S2282 < _S2283)
+    if(_S2285 < _S2286)
     {
 
-        _S2286 = 1U;
+        _S2289 = 1U;
 
     }
     else
     {
 
-        _S2286 = 0U;
+        _S2289 = 0U;
 
     }
 
-    return Vector<uint32_t, 2> (_S2284, _S2285 - _S2286);
+    return Vector<uint32_t, 2> (_S2287, _S2288 - _S2289);
 }
 
 
@@ -23377,21 +23422,21 @@ static float float64_0(Vector<uint32_t, 2>  a_61)
     }
     float v_38 = float(m_19.y) * 4.294967296e+09f + float(m_19.x);
 
-    float _S2287;
+    float _S2290;
     if(negative_0)
     {
 
-        _S2287 = - v_38;
+        _S2290 = - v_38;
 
     }
     else
     {
 
-        _S2287 = v_38;
+        _S2290 = v_38;
 
     }
 
-    return _S2287;
+    return _S2290;
 }
 
 
@@ -23412,11 +23457,11 @@ static double gridPackingD_0(KernelContext_0 * kernelContext_184)
 static FarChargeD_0 farChargeD_0(bool rw_5, GridHead_0 * head_1, KernelContext_0 * kernelContext_185)
 {
 
-    uint32_t _S2288 = gridWord_0(rw_5, 18U, kernelContext_185);
+    uint32_t _S2291 = gridWord_0(rw_5, 18U, kernelContext_185);
 
-    uint32_t _S2289 = gridWord_0(rw_5, 19U, kernelContext_185);
+    uint32_t _S2292 = gridWord_0(rw_5, 19U, kernelContext_185);
 
-    double q_22 = double64_0(Vector<uint32_t, 2> (_S2288, _S2289));
+    double q_22 = double64_0(Vector<uint32_t, 2> (_S2291, _S2292));
 
     double h_37 = double(kernelContext_185->globalParams_0->Look_0->gValue_0.y);
 
@@ -23425,24 +23470,24 @@ static FarChargeD_0 farChargeD_0(bool rw_5, GridHead_0 * head_1, KernelContext_0
     (&c_40)->total_0 = q_22 / 4.294967296e+09 * h_37 * h_37 * h_37;
     (&c_40)->centre_0 = Vector<float, 3> (0.0f, 0.0f, 0.0f);
 
-    uint32_t _S2290 = gridWord_0(rw_5, 20U, kernelContext_185);
+    uint32_t _S2293 = gridWord_0(rw_5, 20U, kernelContext_185);
 
-    uint32_t _S2291 = gridWord_0(rw_5, 21U, kernelContext_185);
+    uint32_t _S2294 = gridWord_0(rw_5, 21U, kernelContext_185);
 
 
-    (&c_40)->centre_0.x = float((double64_0(Vector<uint32_t, 2> (_S2290, _S2291)) / q_22 + double(head_1->origin_0.x)) * h_37);
+    (&c_40)->centre_0.x = float((double64_0(Vector<uint32_t, 2> (_S2293, _S2294)) / q_22 + double(head_1->origin_0.x)) * h_37);
 
-    uint32_t _S2292 = gridWord_0(rw_5, 22U, kernelContext_185);
+    uint32_t _S2295 = gridWord_0(rw_5, 22U, kernelContext_185);
 
-    uint32_t _S2293 = gridWord_0(rw_5, 23U, kernelContext_185);
+    uint32_t _S2296 = gridWord_0(rw_5, 23U, kernelContext_185);
 
-    (&c_40)->centre_0.y = float((double64_0(Vector<uint32_t, 2> (_S2292, _S2293)) / q_22 + double(head_1->origin_0.y)) * h_37);
+    (&c_40)->centre_0.y = float((double64_0(Vector<uint32_t, 2> (_S2295, _S2296)) / q_22 + double(head_1->origin_0.y)) * h_37);
 
-    uint32_t _S2294 = gridWord_0(rw_5, 24U, kernelContext_185);
+    uint32_t _S2297 = gridWord_0(rw_5, 24U, kernelContext_185);
 
-    uint32_t _S2295 = gridWord_0(rw_5, 25U, kernelContext_185);
+    uint32_t _S2298 = gridWord_0(rw_5, 25U, kernelContext_185);
 
-    (&c_40)->centre_0.z = float((double64_0(Vector<uint32_t, 2> (_S2294, _S2295)) / q_22 + double(head_1->origin_0.z)) * h_37);
+    (&c_40)->centre_0.z = float((double64_0(Vector<uint32_t, 2> (_S2297, _S2298)) / q_22 + double(head_1->origin_0.z)) * h_37);
 
     return c_40;
 }
@@ -23451,9 +23496,9 @@ static FarChargeD_0 farChargeD_0(bool rw_5, GridHead_0 * head_1, KernelContext_0
 static Vector<float, 3>  gridPosition_0(Vector<int32_t, 3>  world_0, KernelContext_0 * kernelContext_186)
 {
 
-    Vector<float, 3>  _S2296 = Vector<float, 3> {(float)_slang_vector_get_element(world_0, 0), (float)_slang_vector_get_element(world_0, 1), (float)_slang_vector_get_element(world_0, 2)};
+    Vector<float, 3>  _S2299 = Vector<float, 3> {(float)_slang_vector_get_element(world_0, 0), (float)_slang_vector_get_element(world_0, 1), (float)_slang_vector_get_element(world_0, 2)};
 
-    Vector<float, 3>  p_54 = _S2296 * (Vector<float, 3> )kernelContext_186->globalParams_0->Look_0->gValue_0.y;
+    Vector<float, 3>  p_54 = _S2299 * (Vector<float, 3> )kernelContext_186->globalParams_0->Look_0->gValue_0.y;
     return p_54;
 }
 
@@ -23467,18 +23512,18 @@ static float farAtD_0(FarChargeD_0 * c_41, Vector<float, 3>  x_40, KernelContext
 }
 
 
-void _GridUnknownsCS(void* _S2297, void* entryPointParams_36, void* globalParams_37)
+void _GridUnknownsCS(void* _S2300, void* entryPointParams_36, void* globalParams_37)
 {
 
     uint32_t entry_0;
 
-    int32_t _S2298;
+    int32_t _S2301;
 
-    int32_t _S2299;
+    int32_t _S2302;
 
-    int32_t _S2300;
+    int32_t _S2303;
 
-    ComputeThreadVaryingInput * _S2301 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2297));
+    ComputeThreadVaryingInput * _S2304 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2300));
 
     KernelContext_0 kernelContext_188;
 
@@ -23488,31 +23533,31 @@ void _GridUnknownsCS(void* _S2297, void* entryPointParams_36, void* globalParams
 
     (&kernelContext_188)->sTableBase_0 = 0U;
 
-    uint32_t _S2302 = threadIndex_0(_S2301->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2301->groupThreadID, 64U, &kernelContext_188);
+    uint32_t _S2305 = threadIndex_0(_S2304->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2304->groupThreadID, 64U, &kernelContext_188);
 
-    GridHead_0 _S2303 = gridHead_0(true, &kernelContext_188);
+    GridHead_0 _S2306 = gridHead_0(true, &kernelContext_188);
 
 
     uint32_t room_1 = (&kernelContext_188)->globalParams_0->Look_0->gFlag2_0.w * 64U;
-    if((_S2302 >> int(6)) >= (U32_min((_S2303.count_0), ((&kernelContext_188)->globalParams_0->Look_0->gFlag2_0.w))))
+    if((_S2305 >> int(6)) >= (U32_min((_S2306.count_0), ((&kernelContext_188)->globalParams_0->Look_0->gFlag2_0.w))))
     {
 
         return;
     }
 
-    uint32_t _S2304 = _S2302 * 12U;
+    uint32_t _S2307 = _S2305 * 12U;
 
-    uint32_t _S2305 = ((&kernelContext_188)->globalParams_0->gAux1_0).Load<uint32_t >(uint32_t(int32_t((_S2304 + 1U) * 4U)));
+    uint32_t _S2308 = ((&kernelContext_188)->globalParams_0->gAux1_0).Load<uint32_t >(uint32_t(int32_t((_S2307 + 1U) * 4U)));
 
-    if((_S2305 & 2U) == 0U)
+    if((_S2308 & 2U) == 0U)
     {
 
         return;
     }
 
-    Vector<int32_t, 3>  _S2306 = gridCoordinates_0(true, _S2302, &kernelContext_188);
+    Vector<int32_t, 3>  _S2309 = gridCoordinates_0(true, _S2305, &kernelContext_188);
 
-    Vector<int32_t, 3>  world_1 = _S2306 + _S2303.origin_0;
+    Vector<int32_t, 3>  world_1 = _S2309 + _S2306.origin_0;
     uint32_t colour_0 = uint32_t((world_1.x + world_1.y + world_1.z) & int(1));
     FixedArray<uint32_t, 6>  around_2;
 
@@ -23532,7 +23577,7 @@ void _GridUnknownsCS(void* _S2297, void* entryPointParams_36, void* globalParams
         if(e_7 == 0U)
         {
 
-            _S2298 = int(-1);
+            _S2301 = int(-1);
 
         }
         else
@@ -23541,13 +23586,13 @@ void _GridUnknownsCS(void* _S2297, void* entryPointParams_36, void* globalParams
             if(e_7 == 1U)
             {
 
-                _S2298 = int(1);
+                _S2301 = int(1);
 
             }
             else
             {
 
-                _S2298 = int(0);
+                _S2301 = int(0);
 
             }
 
@@ -23556,7 +23601,7 @@ void _GridUnknownsCS(void* _S2297, void* entryPointParams_36, void* globalParams
         if(e_7 == 2U)
         {
 
-            _S2299 = int(-1);
+            _S2302 = int(-1);
 
         }
         else
@@ -23565,13 +23610,13 @@ void _GridUnknownsCS(void* _S2297, void* entryPointParams_36, void* globalParams
             if(e_7 == 3U)
             {
 
-                _S2299 = int(1);
+                _S2302 = int(1);
 
             }
             else
             {
 
-                _S2299 = int(0);
+                _S2302 = int(0);
 
             }
 
@@ -23580,7 +23625,7 @@ void _GridUnknownsCS(void* _S2297, void* entryPointParams_36, void* globalParams
         if(e_7 == 4U)
         {
 
-            _S2300 = int(-1);
+            _S2303 = int(-1);
 
         }
         else
@@ -23589,40 +23634,40 @@ void _GridUnknownsCS(void* _S2297, void* entryPointParams_36, void* globalParams
             if(e_7 == 5U)
             {
 
-                _S2300 = int(1);
+                _S2303 = int(1);
 
             }
             else
             {
 
-                _S2300 = int(0);
+                _S2303 = int(0);
 
             }
 
         }
-        Vector<int32_t, 3>  _S2307 = _S2306 + Vector<int32_t, 3> (_S2298, _S2299, _S2300);
+        Vector<int32_t, 3>  _S2310 = _S2309 + Vector<int32_t, 3> (_S2301, _S2302, _S2303);
 
-        GridHead_0 _S2308 = _S2303;
+        GridHead_0 _S2311 = _S2306;
 
-        uint32_t _S2309 = gridNode_0(true, &_S2308, _S2307, &kernelContext_188);
+        uint32_t _S2312 = gridNode_0(true, &_S2311, _S2310, &kernelContext_188);
 
-        bool _S2310;
-        if(_S2309 != 4294967295U)
+        bool _S2313;
+        if(_S2312 != 4294967295U)
         {
 
-            uint32_t _S2311 = ((&kernelContext_188)->globalParams_0->gAux1_0).Load<uint32_t >(uint32_t(int32_t((_S2309 * 12U + 1U) * 4U)));
+            uint32_t _S2314 = ((&kernelContext_188)->globalParams_0->gAux1_0).Load<uint32_t >(uint32_t(int32_t((_S2312 * 12U + 1U) * 4U)));
 
-            _S2310 = (_S2311 & 1U) != 0U;
+            _S2313 = (_S2314 & 1U) != 0U;
 
         }
         else
         {
 
-            _S2310 = false;
+            _S2313 = false;
 
         }
 
-        if(_S2310)
+        if(_S2313)
         {
 
             entry_0 = 4294967294U;
@@ -23631,7 +23676,7 @@ void _GridUnknownsCS(void* _S2297, void* entryPointParams_36, void* globalParams
         else
         {
 
-            entry_0 = _S2309;
+            entry_0 = _S2312;
 
         }
 
@@ -23646,82 +23691,82 @@ void _GridUnknownsCS(void* _S2297, void* entryPointParams_36, void* globalParams
     if((((&kernelContext_188)->globalParams_0->Look_0->gFlag_0.x) & 1U) != 0U)
     {
 
-        uint32_t _S2312 = ((&kernelContext_188)->globalParams_0->gAux1_0).Load<uint32_t >(uint32_t(int32_t((_S2304 + 2U) * 4U)));
+        uint32_t _S2315 = ((&kernelContext_188)->globalParams_0->gAux1_0).Load<uint32_t >(uint32_t(int32_t((_S2307 + 2U) * 4U)));
 
-        source_0 = (U32_asfloat((_S2312)));
+        source_0 = (U32_asfloat((_S2315)));
 
     }
     else
     {
 
-        Vector<uint32_t, 2>  _S2313 = sumIn_0(_S2302, 0U, &kernelContext_188);
+        Vector<uint32_t, 2>  _S2316 = sumIn_0(_S2305, 0U, &kernelContext_188);
 
 
-        float rho_0 = float64_0(_S2313) / 4.294967296e+09f;
+        float rho_0 = float64_0(_S2316) / 4.294967296e+09f;
 
         source_0 = (U32_asfloat(((&kernelContext_188)->globalParams_0->Look_0->gOctaveSeeds_0[int(2)].y))) * (rho_0 - (&kernelContext_188)->globalParams_0->Look_0->gValue2_0.w) / rho_0;
 
     }
 
-    uint32_t _S2314 = atomicAddOut_0((26U + colour_0) * 4U, 1U, &kernelContext_188);
+    uint32_t _S2317 = atomicAddOut_0((26U + colour_0) * 4U, 1U, &kernelContext_188);
 
     if(colour_0 == 0U)
     {
 
-        entry_0 = _S2314;
+        entry_0 = _S2317;
 
     }
     else
     {
 
-        entry_0 = room_1 - 1U - _S2314;
+        entry_0 = room_1 - 1U - _S2317;
 
     }
     uint32_t w_49 = entry_0 * 10U;
-    uint32_t _S2315 = w_49 * 4U;
+    uint32_t _S2318 = w_49 * 4U;
 
-    uint32_t _S2316 = around_2[int(0)];
+    uint32_t _S2319 = around_2[int(0)];
 
-    uint32_t _S2317 = around_2[int(1)];
+    uint32_t _S2320 = around_2[int(1)];
 
-    uint32_t _S2318 = around_2[int(2)];
+    uint32_t _S2321 = around_2[int(2)];
 
-    RWByteAddressBuffer _S2319 = (&kernelContext_188)->globalParams_0->gOut2_0;
+    RWByteAddressBuffer _S2322 = (&kernelContext_188)->globalParams_0->gOut2_0;
 
-    (&kernelContext_188)->globalParams_0->gOut2_0.Store(_S2315,_S2302);
+    (&kernelContext_188)->globalParams_0->gOut2_0.Store(_S2318,_S2305);
 
-    uint32_t _S2320 = _S2315 + 4U;
+    uint32_t _S2323 = _S2318 + 4U;
 
-    _S2319.Store(_S2320,_S2316);
+    _S2322.Store(_S2323,_S2319);
 
-    uint32_t _S2321 = _S2315 + 8U;
+    uint32_t _S2324 = _S2318 + 8U;
 
-    _S2319.Store(_S2321,_S2317);
+    _S2322.Store(_S2324,_S2320);
 
-    uint32_t _S2322 = _S2315 + 12U;
+    uint32_t _S2325 = _S2318 + 12U;
 
-    _S2319.Store(_S2322,_S2318);
-    uint32_t _S2323 = (w_49 + 4U) * 4U;
+    _S2322.Store(_S2325,_S2321);
+    uint32_t _S2326 = (w_49 + 4U) * 4U;
 
-    uint32_t _S2324 = around_2[int(4)];
+    uint32_t _S2327 = around_2[int(4)];
 
-    uint32_t _S2325 = around_2[int(5)];
+    uint32_t _S2328 = around_2[int(5)];
 
-    uint32_t _S2326 = (F32_asuint((source_0)));
+    uint32_t _S2329 = (F32_asuint((source_0)));
 
-    RWByteAddressBuffer _S2327 = (&kernelContext_188)->globalParams_0->gOut2_0;
+    RWByteAddressBuffer _S2330 = (&kernelContext_188)->globalParams_0->gOut2_0;
 
-    (&kernelContext_188)->globalParams_0->gOut2_0.Store(_S2323,around_2[int(3)]);
+    (&kernelContext_188)->globalParams_0->gOut2_0.Store(_S2326,around_2[int(3)]);
 
-    uint32_t _S2328 = _S2323 + 4U;
+    uint32_t _S2331 = _S2326 + 4U;
 
-    _S2327.Store(_S2328,_S2324);
+    _S2330.Store(_S2331,_S2327);
 
-    uint32_t _S2329 = _S2323 + 8U;
+    uint32_t _S2332 = _S2326 + 8U;
 
-    _S2327.Store(_S2329,_S2325);
+    _S2330.Store(_S2332,_S2328);
 
-    _S2327.Store(_S2323 + 12U,_S2326);
+    _S2330.Store(_S2326 + 12U,_S2329);
 
     double h_39 = double((&kernelContext_188)->globalParams_0->Look_0->gValue_0.y);
 
@@ -23729,32 +23774,32 @@ void _GridUnknownsCS(void* _S2297, void* entryPointParams_36, void* globalParams
     if((((&kernelContext_188)->globalParams_0->Look_0->gFlag_0.x) & 1U) == 0U)
     {
 
-        Vector<uint32_t, 2>  _S2330 = sumIn_0(_S2302, 0U, &kernelContext_188);
-        double rho_1 = double64_0(_S2330) / 4.294967296e+09;
-        double _S2331 = h_39 * h_39;
+        Vector<uint32_t, 2>  _S2333 = sumIn_0(_S2305, 0U, &kernelContext_188);
+        double rho_1 = double64_0(_S2333) / 4.294967296e+09;
+        double _S2334 = h_39 * h_39;
 
-        double _S2332 = gridPackingD_0(&kernelContext_188);
+        double _S2335 = gridPackingD_0(&kernelContext_188);
 
-        exact_0 = _S2331 * (rho_1 - _S2332) / rho_1;
+        exact_0 = _S2334 * (rho_1 - _S2335) / rho_1;
 
     }
     else
     {
 
-        GridHead_0 _S2333 = _S2303;
+        GridHead_0 _S2336 = _S2306;
 
-        FarChargeD_0 _S2334 = farChargeD_0(true, &_S2333, &kernelContext_188);
+        FarChargeD_0 _S2337 = farChargeD_0(true, &_S2336, &kernelContext_188);
 
-        double _S2335 = h_39 * h_39;
+        double _S2338 = h_39 * h_39;
 
-        Vector<uint32_t, 2>  _S2336 = sumIn_0(_S2302, 0U, &kernelContext_188);
+        Vector<uint32_t, 2>  _S2339 = sumIn_0(_S2305, 0U, &kernelContext_188);
 
-        double _S2337 = _S2335 * double64_0(_S2336) / 4.294967296e+09;
-        FixedArray<uint32_t, 6>  own_4;
+        double _S2340 = _S2338 * double64_0(_S2339) / 4.294967296e+09;
+        FixedArray<uint32_t, 6>  own_5;
 
         e_7 = 0U;
 
-        exact_0 = _S2337;
+        exact_0 = _S2340;
         for(;;)
         {
 
@@ -23770,7 +23815,7 @@ void _GridUnknownsCS(void* _S2297, void* entryPointParams_36, void* globalParams
             if(e_7 == 0U)
             {
 
-                _S2298 = int(-1);
+                _S2301 = int(-1);
 
             }
             else
@@ -23779,13 +23824,13 @@ void _GridUnknownsCS(void* _S2297, void* entryPointParams_36, void* globalParams
                 if(e_7 == 1U)
                 {
 
-                    _S2298 = int(1);
+                    _S2301 = int(1);
 
                 }
                 else
                 {
 
-                    _S2298 = int(0);
+                    _S2301 = int(0);
 
                 }
 
@@ -23794,7 +23839,7 @@ void _GridUnknownsCS(void* _S2297, void* entryPointParams_36, void* globalParams
             if(e_7 == 2U)
             {
 
-                _S2299 = int(-1);
+                _S2302 = int(-1);
 
             }
             else
@@ -23803,13 +23848,13 @@ void _GridUnknownsCS(void* _S2297, void* entryPointParams_36, void* globalParams
                 if(e_7 == 3U)
                 {
 
-                    _S2299 = int(1);
+                    _S2302 = int(1);
 
                 }
                 else
                 {
 
-                    _S2299 = int(0);
+                    _S2302 = int(0);
 
                 }
 
@@ -23818,7 +23863,7 @@ void _GridUnknownsCS(void* _S2297, void* entryPointParams_36, void* globalParams
             if(e_7 == 4U)
             {
 
-                _S2300 = int(-1);
+                _S2303 = int(-1);
 
             }
             else
@@ -23827,32 +23872,32 @@ void _GridUnknownsCS(void* _S2297, void* entryPointParams_36, void* globalParams
                 if(e_7 == 5U)
                 {
 
-                    _S2300 = int(1);
+                    _S2303 = int(1);
 
                 }
                 else
                 {
 
-                    _S2300 = int(0);
+                    _S2303 = int(0);
 
                 }
 
             }
 
-            Vector<int32_t, 3>  step_10 = Vector<int32_t, 3> (_S2298, _S2299, _S2300);
-            Vector<int32_t, 3>  _S2338 = _S2306 + step_10;
+            Vector<int32_t, 3>  step_10 = Vector<int32_t, 3> (_S2301, _S2302, _S2303);
+            Vector<int32_t, 3>  _S2341 = _S2309 + step_10;
 
-            GridHead_0 _S2339 = _S2303;
+            GridHead_0 _S2342 = _S2306;
 
-            uint32_t _S2340 = gridNode_0(true, &_S2339, _S2338, &kernelContext_188);
+            uint32_t _S2343 = gridNode_0(true, &_S2342, _S2341, &kernelContext_188);
 
             uint32_t flags_0;
-            if(_S2340 != 4294967295U)
+            if(_S2343 != 4294967295U)
             {
 
-                uint32_t _S2341 = ((&kernelContext_188)->globalParams_0->gAux1_0).Load<uint32_t >(uint32_t(int32_t((_S2340 * 12U + 1U) * 4U)));
+                uint32_t _S2344 = ((&kernelContext_188)->globalParams_0->gAux1_0).Load<uint32_t >(uint32_t(int32_t((_S2343 * 12U + 1U) * 4U)));
 
-                flags_0 = _S2341;
+                flags_0 = _S2344;
 
             }
             else
@@ -23864,7 +23909,7 @@ void _GridUnknownsCS(void* _S2297, void* entryPointParams_36, void* globalParams
             if((flags_0 & 2U) != 0U)
             {
 
-                own_4[e_7] = _S2340;
+                own_5[e_7] = _S2343;
 
             }
             else
@@ -23875,22 +23920,22 @@ void _GridUnknownsCS(void* _S2297, void* entryPointParams_36, void* globalParams
                 if((flags_0 & 1U) != 0U)
                 {
 
-                    own_4[e_7] = 4294967294U;
+                    own_5[e_7] = 4294967294U;
 
                     exact_1 = exact_0;
 
                 }
                 else
                 {
-                    own_4[e_7] = 4294967295U;
+                    own_5[e_7] = 4294967295U;
 
-                    Vector<float, 3>  _S2342 = gridPosition_0(world_1 + step_10, &kernelContext_188);
+                    Vector<float, 3>  _S2345 = gridPosition_0(world_1 + step_10, &kernelContext_188);
 
-                    FarChargeD_0 _S2343 = _S2334;
+                    FarChargeD_0 _S2346 = _S2337;
 
-                    float _S2344 = farAtD_0(&_S2343, _S2342, &kernelContext_188);
+                    float _S2347 = farAtD_0(&_S2346, _S2345, &kernelContext_188);
 
-                    exact_1 = exact_0 + double(_S2344);
+                    exact_1 = exact_0 + double(_S2347);
 
                 }
 
@@ -23902,32 +23947,32 @@ void _GridUnknownsCS(void* _S2297, void* entryPointParams_36, void* globalParams
 
         }
 
-        uint32_t _S2345 = own_4[int(0)];
+        uint32_t _S2348 = own_5[int(0)];
 
-        uint32_t _S2346 = own_4[int(1)];
+        uint32_t _S2349 = own_5[int(1)];
 
-        uint32_t _S2347 = own_4[int(2)];
-
-        RWByteAddressBuffer _S2348 = (&kernelContext_188)->globalParams_0->gOut2_0;
-
-        (&kernelContext_188)->globalParams_0->gOut2_0.Store(_S2315,_S2302);
-
-        _S2348.Store(_S2320,_S2345);
-
-        _S2348.Store(_S2321,_S2346);
-
-        _S2348.Store(_S2322,_S2347);
-        uint32_t _S2349 = own_4[int(4)];
-
-        uint32_t _S2350 = own_4[int(5)];
+        uint32_t _S2350 = own_5[int(2)];
 
         RWByteAddressBuffer _S2351 = (&kernelContext_188)->globalParams_0->gOut2_0;
 
-        (&kernelContext_188)->globalParams_0->gOut2_0.Store(_S2323,own_4[int(3)]);
+        (&kernelContext_188)->globalParams_0->gOut2_0.Store(_S2318,_S2305);
 
-        _S2351.Store(_S2328,_S2349);
+        _S2351.Store(_S2323,_S2348);
 
-        _S2351.Store(_S2329,_S2350);
+        _S2351.Store(_S2324,_S2349);
+
+        _S2351.Store(_S2325,_S2350);
+        uint32_t _S2352 = own_5[int(4)];
+
+        uint32_t _S2353 = own_5[int(5)];
+
+        RWByteAddressBuffer _S2354 = (&kernelContext_188)->globalParams_0->gOut2_0;
+
+        (&kernelContext_188)->globalParams_0->gOut2_0.Store(_S2326,own_5[int(3)]);
+
+        _S2354.Store(_S2331,_S2352);
+
+        _S2354.Store(_S2332,_S2353);
 
     }
 
@@ -23935,15 +23980,15 @@ void _GridUnknownsCS(void* _S2297, void* entryPointParams_36, void* globalParams
 
     uint32_t hi_6;
     F64_asuint((exact_0), (&lo_8), (&hi_6));
-    uint32_t _S2352 = (w_49 + 8U) * 4U;
+    uint32_t _S2355 = (w_49 + 8U) * 4U;
 
-    uint32_t _S2353 = hi_6;
+    uint32_t _S2356 = hi_6;
 
-    RWByteAddressBuffer _S2354 = (&kernelContext_188)->globalParams_0->gOut2_0;
+    RWByteAddressBuffer _S2357 = (&kernelContext_188)->globalParams_0->gOut2_0;
 
-    (&kernelContext_188)->globalParams_0->gOut2_0.Store(_S2352,lo_8);
+    (&kernelContext_188)->globalParams_0->gOut2_0.Store(_S2355,lo_8);
 
-    _S2354.Store(_S2352 + 4U,_S2353);
+    _S2357.Store(_S2355 + 4U,_S2356);
 
 
 
@@ -23954,9 +23999,9 @@ void _GridUnknownsCS(void* _S2297, void* entryPointParams_36, void* globalParams
 static float nodeFloat_0(uint32_t at_30, uint32_t w_50, KernelContext_0 * kernelContext_189)
 {
 
-    uint32_t _S2355 = (kernelContext_189->globalParams_0->gOut_0).Load<uint32_t >(uint32_t(int32_t((at_30 * 12U + w_50) * 4U)));
+    uint32_t _S2358 = (kernelContext_189->globalParams_0->gOut_0).Load<uint32_t >(uint32_t(int32_t((at_30 * 12U + w_50) * 4U)));
 
-    return (U32_asfloat((_S2355)));
+    return (U32_asfloat((_S2358)));
 }
 
 
@@ -23969,12 +24014,12 @@ static void storeNode_0(uint32_t at_31, uint32_t w_51, float v_39, KernelContext
 }
 
 
-void _GridSorCS(void* _S2356, void* entryPointParams_37, void* globalParams_38)
+void _GridSorCS(void* _S2359, void* entryPointParams_37, void* globalParams_38)
 {
 
     double omega_0;
 
-    ComputeThreadVaryingInput * _S2357 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2356));
+    ComputeThreadVaryingInput * _S2360 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2359));
 
     KernelContext_0 kernelContext_191;
 
@@ -23984,11 +24029,11 @@ void _GridSorCS(void* _S2356, void* entryPointParams_37, void* globalParams_38)
 
     (&kernelContext_191)->sTableBase_0 = 0U;
 
-    uint32_t _S2358 = threadIndex_0(_S2357->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2357->groupThreadID, 64U, &kernelContext_191);
+    uint32_t _S2361 = threadIndex_0(_S2360->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2360->groupThreadID, 64U, &kernelContext_191);
 
-    uint32_t _S2359 = ((&kernelContext_191)->globalParams_0->gAux1_0).Load<uint32_t >(uint32_t(int32_t((26U + (&kernelContext_191)->globalParams_0->Look_0->gFlag_0.w) * 4U)));
+    uint32_t _S2362 = ((&kernelContext_191)->globalParams_0->gAux1_0).Load<uint32_t >(uint32_t(int32_t((26U + (&kernelContext_191)->globalParams_0->Look_0->gFlag_0.w) * 4U)));
 
-    if(_S2358 >= _S2359)
+    if(_S2361 >= _S2362)
     {
 
         return;
@@ -23998,45 +24043,45 @@ void _GridSorCS(void* _S2356, void* entryPointParams_37, void* globalParams_38)
     if(((&kernelContext_191)->globalParams_0->Look_0->gFlag_0.w) == 0U)
     {
 
-        e_8 = _S2358;
+        e_8 = _S2361;
 
     }
     else
     {
 
-        e_8 = (&kernelContext_191)->globalParams_0->Look_0->gFlag2_0.w * 64U - 1U - _S2358;
+        e_8 = (&kernelContext_191)->globalParams_0->Look_0->gFlag2_0.w * 64U - 1U - _S2361;
 
     }
 
     uint32_t w_52 = e_8 * 10U;
-    uint32_t _S2360 = w_52 * 4U;
+    uint32_t _S2363 = w_52 * 4U;
 
-    ByteAddressBuffer _S2361 = (&kernelContext_191)->globalParams_0->gAux0_0;
+    ByteAddressBuffer _S2364 = (&kernelContext_191)->globalParams_0->gAux0_0;
 
-    uint32_t _S2362 = ((&kernelContext_191)->globalParams_0->gAux0_0).Load<uint32_t >(_S2360);
+    uint32_t _S2365 = ((&kernelContext_191)->globalParams_0->gAux0_0).Load<uint32_t >(_S2363);
 
-    uint32_t _S2363 = (_S2361).Load<uint32_t >(_S2360 + 4U);
+    uint32_t _S2366 = (_S2364).Load<uint32_t >(_S2363 + 4U);
 
-    uint32_t _S2364 = (_S2361).Load<uint32_t >(_S2360 + 8U);
+    uint32_t _S2367 = (_S2364).Load<uint32_t >(_S2363 + 8U);
 
-    uint32_t _S2365 = (_S2361).Load<uint32_t >(_S2360 + 12U);
+    uint32_t _S2368 = (_S2364).Load<uint32_t >(_S2363 + 12U);
 
-    uint32_t _S2366 = (w_52 + 4U) * 4U;
+    uint32_t _S2369 = (w_52 + 4U) * 4U;
 
-    ByteAddressBuffer _S2367 = (&kernelContext_191)->globalParams_0->gAux0_0;
+    ByteAddressBuffer _S2370 = (&kernelContext_191)->globalParams_0->gAux0_0;
 
-    uint32_t _S2368 = ((&kernelContext_191)->globalParams_0->gAux0_0).Load<uint32_t >(_S2366);
+    uint32_t _S2371 = ((&kernelContext_191)->globalParams_0->gAux0_0).Load<uint32_t >(_S2369);
 
-    uint32_t _S2369 = (_S2367).Load<uint32_t >(_S2366 + 4U);
+    uint32_t _S2372 = (_S2370).Load<uint32_t >(_S2369 + 4U);
 
-    uint32_t _S2370 = (_S2367).Load<uint32_t >(_S2366 + 8U);
+    uint32_t _S2373 = (_S2370).Load<uint32_t >(_S2369 + 8U);
 
-    uint32_t _S2371 = (_S2367).Load<uint32_t >(_S2366 + 12U);
+    uint32_t _S2374 = (_S2370).Load<uint32_t >(_S2369 + 12U);
 
-    float _S2372 = nodeFloat_0(_S2362, 0U, &kernelContext_191);
+    float _S2375 = nodeFloat_0(_S2365, 0U, &kernelContext_191);
 
 
-    FixedArray<uint32_t, 6>  _S2373 = { { _S2363, _S2364, _S2365, _S2368, _S2369, _S2370 } };
+    FixedArray<uint32_t, 6>  _S2376 = { { _S2366, _S2367, _S2368, _S2371, _S2372, _S2373 } };
 
     e_8 = 0U;
 
@@ -24054,9 +24099,9 @@ void _GridSorCS(void* _S2356, void* entryPointParams_37, void* globalParams_38)
             break;
         }
 
-        uint32_t _S2374 = e_8;
+        uint32_t _S2377 = e_8;
 
-        if((_S2373[e_8]) == 4294967295U)
+        if((_S2376[e_8]) == 4294967295U)
         {
 
             omega_0 = 0.0;
@@ -24065,18 +24110,18 @@ void _GridSorCS(void* _S2356, void* entryPointParams_37, void* globalParams_38)
         else
         {
 
-            if((_S2373[_S2374]) == 4294967294U)
+            if((_S2376[_S2377]) == 4294967294U)
             {
 
-                omega_0 = double(_S2372);
+                omega_0 = double(_S2375);
 
             }
             else
             {
 
-                float _S2375 = nodeFloat_0(_S2373[_S2374], 0U, &kernelContext_191);
+                float _S2378 = nodeFloat_0(_S2376[_S2377], 0U, &kernelContext_191);
 
-                omega_0 = double(_S2375);
+                omega_0 = double(_S2378);
 
             }
 
@@ -24092,13 +24137,13 @@ void _GridSorCS(void* _S2356, void* entryPointParams_37, void* globalParams_38)
 
 
 
-    uint32_t _S2376 = (w_52 + 8U) * 4U;
+    uint32_t _S2379 = (w_52 + 8U) * 4U;
 
-    ByteAddressBuffer _S2377 = (&kernelContext_191)->globalParams_0->gAux0_0;
+    ByteAddressBuffer _S2380 = (&kernelContext_191)->globalParams_0->gAux0_0;
 
-    uint32_t _S2378 = ((&kernelContext_191)->globalParams_0->gAux0_0).Load<uint32_t >(_S2376);
+    uint32_t _S2381 = ((&kernelContext_191)->globalParams_0->gAux0_0).Load<uint32_t >(_S2379);
 
-    uint32_t _S2379 = (_S2377).Load<uint32_t >(_S2376 + 4U);
+    uint32_t _S2382 = (_S2380).Load<uint32_t >(_S2379 + 4U);
     if((((&kernelContext_191)->globalParams_0->Look_0->gFlag_0.x) & 1U) != 0U)
     {
 
@@ -24111,9 +24156,9 @@ void _GridSorCS(void* _S2356, void* entryPointParams_37, void* globalParams_38)
         omega_0 = 1.69999999999999996;
 
     }
-    double _S2380 = double(_S2372);
+    double _S2383 = double(_S2375);
 
-    storeNode_0(_S2362, 0U, float(_S2380 + omega_0 * ((sum_10 + (U32_asdouble((_S2378), (_S2379)))) / 6.0 - _S2380)), &kernelContext_191);
+    storeNode_0(_S2365, 0U, float(_S2383 + omega_0 * ((sum_10 + (U32_asdouble((_S2381), (_S2382)))) / 6.0 - _S2383)), &kernelContext_191);
 
     return;
 }
@@ -24136,7 +24181,7 @@ static Vector<int32_t, 3>  cellWeights_0(Vector<float, 3>  p_55, Vector<int32_t,
 
     Vector<double, 3>  f_27;
 
-    Vector<int32_t, 3>  _S2381 = cellOfGridD_0(p_55, origin_5, &f_27, kernelContext_192);
+    Vector<int32_t, 3>  _S2384 = cellOfGridD_0(p_55, origin_5, &f_27, kernelContext_192);
 
     (*w_53)[0U] = float(cornerWeightD_0(f_27, 0U));
 
@@ -24153,7 +24198,7 @@ static Vector<int32_t, 3>  cellWeights_0(Vector<float, 3>  p_55, Vector<int32_t,
     (*w_53)[6U] = float(cornerWeightD_0(f_27, 6U));
 
     (*w_53)[7U] = float(cornerWeightD_0(f_27, 7U));
-    return _S2381;
+    return _S2384;
 }
 
 
@@ -24169,76 +24214,76 @@ static bool gridWall_0(Vector<int32_t, 3>  world_2, float * height_12, Vector<fl
         return false;
     }
 
-    uint32_t _S2382 = base_10 * 4U;
+    uint32_t _S2385 = base_10 * 4U;
 
-    uint32_t _S2383 = (kernelContext_193->globalParams_0->gAux2_0).Load<uint32_t >(uint32_t(int32_t(_S2382)));
+    uint32_t _S2386 = (kernelContext_193->globalParams_0->gAux2_0).Load<uint32_t >(uint32_t(int32_t(_S2385)));
 
-    int32_t _S2384 = (U32_asint((_S2383)));
+    int32_t _S2387 = (U32_asint((_S2386)));
 
-    uint32_t _S2385 = (kernelContext_193->globalParams_0->gAux2_0).Load<uint32_t >(uint32_t(int32_t(_S2382 + 4U)));
+    uint32_t _S2388 = (kernelContext_193->globalParams_0->gAux2_0).Load<uint32_t >(uint32_t(int32_t(_S2385 + 4U)));
 
-    int32_t _S2386 = (U32_asint((_S2385)));
+    int32_t _S2389 = (U32_asint((_S2388)));
 
-    uint32_t _S2387 = (kernelContext_193->globalParams_0->gAux2_0).Load<uint32_t >(uint32_t(int32_t(_S2382 + 8U)));
+    uint32_t _S2390 = (kernelContext_193->globalParams_0->gAux2_0).Load<uint32_t >(uint32_t(int32_t(_S2385 + 8U)));
 
-    Vector<int32_t, 3>  origin_6 = Vector<int32_t, 3> (_S2384, _S2386, (U32_asint((_S2387))));
-    uint32_t _S2388 = _S2382 + 12U;
+    Vector<int32_t, 3>  origin_6 = Vector<int32_t, 3> (_S2387, _S2389, (U32_asint((_S2390))));
+    uint32_t _S2391 = _S2385 + 12U;
 
-    ByteAddressBuffer _S2389 = kernelContext_193->globalParams_0->gAux2_0;
+    ByteAddressBuffer _S2392 = kernelContext_193->globalParams_0->gAux2_0;
 
-    uint32_t _S2390 = (kernelContext_193->globalParams_0->gAux2_0).Load<uint32_t >(_S2388);
+    uint32_t _S2393 = (kernelContext_193->globalParams_0->gAux2_0).Load<uint32_t >(_S2391);
 
-    uint32_t _S2391 = (_S2389).Load<uint32_t >(_S2388 + 4U);
+    uint32_t _S2394 = (_S2392).Load<uint32_t >(_S2391 + 4U);
 
-    uint32_t _S2392 = (_S2389).Load<uint32_t >(_S2388 + 8U);
+    uint32_t _S2395 = (_S2392).Load<uint32_t >(_S2391 + 8U);
 
-    Vector<uint32_t, 3>  _S2393 = Vector<uint32_t, 3> (_S2390, _S2391, _S2392);
+    Vector<uint32_t, 3>  _S2396 = Vector<uint32_t, 3> (_S2393, _S2394, _S2395);
     Vector<int32_t, 3>  r_39 = world_2 - origin_6;
 
-    bool _S2394;
+    bool _S2397;
     if(any_0(r_39 < Vector<int32_t, 3> (int(0), int(0), int(0))))
     {
 
-        _S2394 = true;
+        _S2397 = true;
 
     }
     else
     {
 
-        Vector<uint32_t, 3>  _S2395 = Vector<uint32_t, 3> {(uint32_t)_slang_vector_get_element(r_39, 0), (uint32_t)_slang_vector_get_element(r_39, 1), (uint32_t)_slang_vector_get_element(r_39, 2)};
+        Vector<uint32_t, 3>  _S2398 = Vector<uint32_t, 3> {(uint32_t)_slang_vector_get_element(r_39, 0), (uint32_t)_slang_vector_get_element(r_39, 1), (uint32_t)_slang_vector_get_element(r_39, 2)};
 
-        _S2394 = any_0(_S2395 >= _S2393);
+        _S2397 = any_0(_S2398 >= _S2396);
 
     }
 
-    if(_S2394)
+    if(_S2397)
     {
 
         return false;
     }
 
-    uint32_t _S2396 = base_10 + 8U;
+    uint32_t _S2399 = base_10 + 8U;
 
-    uint32_t _S2397 = (kernelContext_193->globalParams_0->gAux2_0).Load<uint32_t >(uint32_t(int32_t((_S2396 + uint32_t(r_39.x) + _S2390 * (uint32_t(r_39.y) + _S2391 * uint32_t(r_39.z))) * 4U)));
-    if(_S2397 == 4294967295U)
+    uint32_t _S2400 = (kernelContext_193->globalParams_0->gAux2_0).Load<uint32_t >(uint32_t(int32_t((_S2399 + uint32_t(r_39.x) + _S2393 * (uint32_t(r_39.y) + _S2394 * uint32_t(r_39.z))) * 4U)));
+    if(_S2400 == 4294967295U)
     {
 
         return false;
     }
 
-    uint32_t _S2398 = (_S2396 + _S2390 * _S2391 * _S2392 + _S2397 * 4U) * 4U;
+    uint32_t _S2401 = (_S2399 + _S2393 * _S2394 * _S2395 + _S2400 * 4U) * 4U;
 
-    ByteAddressBuffer _S2399 = kernelContext_193->globalParams_0->gAux2_0;
+    ByteAddressBuffer _S2402 = kernelContext_193->globalParams_0->gAux2_0;
 
-    uint32_t _S2400 = (kernelContext_193->globalParams_0->gAux2_0).Load<uint32_t >(_S2398);
+    uint32_t _S2403 = (kernelContext_193->globalParams_0->gAux2_0).Load<uint32_t >(_S2401);
 
-    uint32_t _S2401 = (_S2399).Load<uint32_t >(_S2398 + 4U);
+    uint32_t _S2404 = (_S2402).Load<uint32_t >(_S2401 + 4U);
 
-    uint32_t _S2402 = (_S2399).Load<uint32_t >(_S2398 + 8U);
+    uint32_t _S2405 = (_S2402).Load<uint32_t >(_S2401 + 8U);
 
-    uint32_t _S2403 = (_S2399).Load<uint32_t >(_S2398 + 12U);
+    uint32_t _S2406 = (_S2402).Load<uint32_t >(_S2401 + 12U);
 
-    Vector<float, 4>  w_54 = asfloat_1(Vector<uint32_t, 4> (_S2400, _S2401, _S2402, _S2403));
+    Vector<float, 4>  w_54 = asfloat_1(Vector<uint32_t, 4> (_S2403, _S2404, _S2405, _S2406));
     *height_12 = w_54.x;
     *normal_5 = Vector<float, 3> {w_54.y, w_54.z, w_54.w};
     return true;
@@ -24248,10 +24293,10 @@ static bool gridWall_0(Vector<int32_t, 3>  world_2, float * height_12, Vector<fl
 static bool gridMayTouchScalp_0(GridHead_0 * head_2, Vector<float, 3>  p_56, float margin_2, KernelContext_0 * kernelContext_194)
 {
 
-    Vector<int32_t, 3>  _S2404 = head_2->origin_0;
+    Vector<int32_t, 3>  _S2407 = head_2->origin_0;
     FixedArray<float, 8>  weights_1;
 
-    Vector<int32_t, 3>  _S2405 = cellWeights_0(p_56, head_2->origin_0, &weights_1, kernelContext_194);
+    Vector<int32_t, 3>  _S2408 = cellWeights_0(p_56, head_2->origin_0, &weights_1, kernelContext_194);
 
     uint32_t d_40 = 0U;
 
@@ -24270,10 +24315,10 @@ static bool gridMayTouchScalp_0(GridHead_0 * head_2, Vector<float, 3>  p_56, flo
             break;
         }
 
-        Vector<int32_t, 3>  at_32 = _S2405 + cornerOf_0(d_40);
+        Vector<int32_t, 3>  at_32 = _S2408 + cornerOf_0(d_40);
 
-        uint32_t _S2406 = gridNode_0(false, head_2, at_32, kernelContext_194);
-        if(_S2406 == 4294967295U)
+        uint32_t _S2409 = gridNode_0(false, head_2, at_32, kernelContext_194);
+        if(_S2409 == 4294967295U)
         {
 
             return true;
@@ -24282,13 +24327,13 @@ static bool gridMayTouchScalp_0(GridHead_0 * head_2, Vector<float, 3>  p_56, flo
         float w_55 = weights_1[d_40];
 
 
-        Vector<int32_t, 3>  _S2407 = at_32 + _S2404;
+        Vector<int32_t, 3>  _S2410 = at_32 + _S2407;
 
         float wallHeight_0;
         Vector<float, 3>  wallNormal_0;
 
-        bool _S2408 = gridWall_0(_S2407, &wallHeight_0, &wallNormal_0, kernelContext_194);
-        if(!_S2408)
+        bool _S2411 = gridWall_0(_S2410, &wallHeight_0, &wallNormal_0, kernelContext_194);
+        if(!_S2411)
         {
 
             height_13 = height_13 + w_55 * (U32_asfloat((kernelContext_194->globalParams_0->Look_0->gOctaveSeeds_0[int(2)].w)));
@@ -24298,9 +24343,9 @@ static bool gridMayTouchScalp_0(GridHead_0 * head_2, Vector<float, 3>  p_56, flo
             continue;
         }
 
-        Vector<float, 3>  _S2409 = gridPosition_0(_S2407, kernelContext_194);
+        Vector<float, 3>  _S2412 = gridPosition_0(_S2410, kernelContext_194);
 
-        height_13 = height_13 + w_55 * (wallHeight_0 + dot_0(wallNormal_0, p_56 - _S2409));
+        height_13 = height_13 + w_55 * (wallHeight_0 + dot_0(wallNormal_0, p_56 - _S2412));
 
         d_40 = d_40 + 1U;
 
@@ -24316,25 +24361,25 @@ static void gridFloorHostPush_0(uint32_t s_40, Vector<float, 3>  root_14, Vector
     if(!fl_0->started_0)
     {
 
-        Vector<uint32_t, 4>  _S2410 = kernelContext_195->globalParams_0->Look_0->gOctaveSeeds_0[int(3)];
-        groomlab_grid_floor_cursor((Vector<uint32_t, 2> {_S2410.y, _S2410.z}), (s_40), (root_14), (&fl_0->a_2), (&fl_0->b_4), (&fl_0->c_2));
+        Vector<uint32_t, 4>  _S2413 = kernelContext_195->globalParams_0->Look_0->gOctaveSeeds_0[int(3)];
+        groomlab_grid_floor_cursor((Vector<uint32_t, 2> {_S2413.y, _S2413.z}), (s_40), (root_14), (&fl_0->a_2), (&fl_0->b_4), (&fl_0->c_2));
         fl_0->started_0 = true;
 
     }
 
-    Vector<uint32_t, 4>  _S2411 = kernelContext_195->globalParams_0->Look_0->gOctaveSeeds_0[int(3)];
+    Vector<uint32_t, 4>  _S2414 = kernelContext_195->globalParams_0->Look_0->gOctaveSeeds_0[int(3)];
 
 
 
-    bool _S2412 = (groomlab_grid_floor_push((Vector<uint32_t, 2> {_S2411.y, _S2411.z}), (p_57), (&fl_0->a_2), (&fl_0->b_4), (&fl_0->c_2)));
+    bool _S2415 = (groomlab_grid_floor_push((Vector<uint32_t, 2> {_S2414.y, _S2414.z}), (p_57), (&fl_0->a_2), (&fl_0->b_4), (&fl_0->c_2)));
 
-    if(_S2412)
+    if(_S2415)
     {
 
         *p_57 = keepLength_0(previous_8, *p_57, wanted_4);
 
-        Vector<uint32_t, 4>  _S2413 = kernelContext_195->globalParams_0->Look_0->gOctaveSeeds_0[int(3)];
-        bool _S2414 = (groomlab_grid_floor_push((Vector<uint32_t, 2> {_S2413.y, _S2413.z}), (p_57), (&fl_0->a_2), (&fl_0->b_4), (&fl_0->c_2)));
+        Vector<uint32_t, 4>  _S2416 = kernelContext_195->globalParams_0->Look_0->gOctaveSeeds_0[int(3)];
+        bool _S2417 = (groomlab_grid_floor_push((Vector<uint32_t, 2> {_S2416.y, _S2416.z}), (p_57), (&fl_0->a_2), (&fl_0->b_4), (&fl_0->c_2)));
 
     }
 
@@ -24347,34 +24392,34 @@ static void gridFloorHostPush_0(uint32_t s_40, Vector<float, 3>  root_14, Vector
 static Vector<float, 3>  gridWalkStep_0(GridHead_0 * head_3, FieldTables_0 * tables_2, Vector<float, 3>  previous_9, Vector<float, 3>  p_58, float wanted_5, uint32_t s_41, Vector<float, 3>  root_15, GridFloorState_0 * fl_1, KernelContext_0 * kernelContext_196)
 {
 
-    Vector<float, 3>  _S2415 = keepLength_0(previous_9, p_58, wanted_5);
+    Vector<float, 3>  _S2418 = keepLength_0(previous_9, p_58, wanted_5);
 
     if(((kernelContext_196->globalParams_0->Look_0->gFlag_0.x) & 12U) == 0U)
     {
 
-        return _S2415;
+        return _S2418;
     }
 
     float floorAt_0 = (U32_asfloat((kernelContext_196->globalParams_0->Look_0->gOctaveSeeds_0[int(1)].x)));
 
-    float _S2416 = (U32_asfloat((kernelContext_196->globalParams_0->Look_0->gOctaveSeeds_0[int(1)].y)));
+    float _S2419 = (U32_asfloat((kernelContext_196->globalParams_0->Look_0->gOctaveSeeds_0[int(1)].y)));
 
-    float _S2417 = (U32_asfloat((kernelContext_196->globalParams_0->Look_0->gOctaveSeeds_0[int(1)].z)));
+    float _S2420 = (U32_asfloat((kernelContext_196->globalParams_0->Look_0->gOctaveSeeds_0[int(1)].z)));
 
-    bool _S2418 = gridMayTouchScalp_0(head_3, _S2415, float(0.25 * double(kernelContext_196->globalParams_0->Look_0->gValue_0.y) + double(floorAt_0)), kernelContext_196);
+    bool _S2421 = gridMayTouchScalp_0(head_3, _S2418, float(0.25 * double(kernelContext_196->globalParams_0->Look_0->gValue_0.y) + double(floorAt_0)), kernelContext_196);
 
-    if(!_S2418)
+    if(!_S2421)
     {
 
-        return _S2415;
+        return _S2418;
     }
 
     if(((kernelContext_196->globalParams_0->Look_0->gFlag_0.x) & 8U) != 0U)
     {
 
-        gridFloorHostPush_0(s_41, root_15, previous_9, &_S2415, wanted_5, fl_1, kernelContext_196);
+        gridFloorHostPush_0(s_41, root_15, previous_9, &_S2418, wanted_5, fl_1, kernelContext_196);
 
-        return _S2415;
+        return _S2418;
     }
 
     uint32_t push_0 = 0U;
@@ -24395,19 +24440,19 @@ static Vector<float, 3>  gridWalkStep_0(GridHead_0 * head_3, FieldTables_0 * tab
         learnt_0(&probe_10, - infinity_0(), 0.0f);
         Vector<float, 3>  delta_8;
 
-        uint32_t _S2419 = clearancePush_0(tables_2, _S2415, floorAt_0, _S2416, _S2417, &probe_10, &delta_8, kernelContext_196);
-        if(_S2419 != 1U)
+        uint32_t _S2422 = clearancePush_0(tables_2, _S2418, floorAt_0, _S2419, _S2420, &probe_10, &delta_8, kernelContext_196);
+        if(_S2422 != 1U)
         {
 
             break;
         }
 
-        Vector<float, 3>  pushed_3 = _S2415 + delta_8;
-        _S2415 = pushed_3;
+        Vector<float, 3>  pushed_3 = _S2418 + delta_8;
+        _S2418 = pushed_3;
         if(push_0 == 0U)
         {
 
-            _S2415 = keepLength_0(previous_9, _S2415, wanted_5);
+            _S2418 = keepLength_0(previous_9, _S2418, wanted_5);
 
         }
 
@@ -24415,14 +24460,14 @@ static Vector<float, 3>  gridWalkStep_0(GridHead_0 * head_3, FieldTables_0 * tab
 
     }
 
-    return _S2415;
+    return _S2418;
 }
 
 
-void _GridWalkCS(void* _S2420, void* entryPointParams_38, void* globalParams_39)
+void _GridWalkCS(void* _S2423, void* entryPointParams_38, void* globalParams_39)
 {
 
-    ComputeThreadVaryingInput * _S2421 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2420));
+    ComputeThreadVaryingInput * _S2424 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2423));
 
     KernelContext_0 kernelContext_197;
 
@@ -24432,74 +24477,74 @@ void _GridWalkCS(void* _S2420, void* entryPointParams_38, void* globalParams_39)
 
     (&kernelContext_197)->sTableBase_0 = 0U;
 
-    uint32_t _S2422 = threadIndex_0(_S2421->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2421->groupThreadID, 64U, &kernelContext_197);
+    uint32_t _S2425 = threadIndex_0(_S2424->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2424->groupThreadID, 64U, &kernelContext_197);
 
-    if(_S2422 >= ((&kernelContext_197)->globalParams_0->Look_0->gStrandCount_0))
+    if(_S2425 >= ((&kernelContext_197)->globalParams_0->Look_0->gStrandCount_0))
     {
 
         return;
     }
 
-    uint32_t _S2423 = strandBegin_0(_S2422, &kernelContext_197);
+    uint32_t _S2426 = strandBegin_0(_S2425, &kernelContext_197);
 
-    uint32_t _S2424 = strandCountOf_0(_S2422, &kernelContext_197);
+    uint32_t _S2427 = strandCountOf_0(_S2425, &kernelContext_197);
 
-    uint32_t _S2425 = ((&kernelContext_197)->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t(_S2423 * 12U)));
+    uint32_t _S2428 = ((&kernelContext_197)->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t(_S2426 * 12U)));
 
-    bool _S2426;
-    if(_S2424 < 2U)
+    bool _S2429;
+    if(_S2427 < 2U)
     {
 
-        _S2426 = true;
+        _S2429 = true;
 
     }
     else
     {
 
-        _S2426 = _S2425 == 0U;
+        _S2429 = _S2428 == 0U;
 
     }
 
-    if(_S2426)
+    if(_S2429)
     {
 
-        _S2426 = true;
+        _S2429 = true;
 
     }
     else
     {
 
-        _S2426 = _S2425 >= _S2424;
+        _S2429 = _S2428 >= _S2427;
 
     }
 
-    if(_S2426)
+    if(_S2429)
     {
 
         return;
     }
 
-    GridHead_0 _S2427 = gridHead_0(false, &kernelContext_197);
+    GridHead_0 _S2430 = gridHead_0(false, &kernelContext_197);
 
     (&kernelContext_197)->sTableBase_0 = 0U;
 
-    FieldTables_0 _S2428 = fieldTables_0(&kernelContext_197);
+    FieldTables_0 _S2431 = fieldTables_0(&kernelContext_197);
 
-    Vector<float, 3>  _S2429 = loadOut_0(_S2423 + _S2425 - 1U, &kernelContext_197);
+    Vector<float, 3>  _S2432 = loadOut_0(_S2426 + _S2428 - 1U, &kernelContext_197);
 
-    Vector<float, 3>  _S2430 = loadOut_0(_S2423, &kernelContext_197);
+    Vector<float, 3>  _S2433 = loadOut_0(_S2426, &kernelContext_197);
 
 
 
     GridFloorState_0 fl_2 = gridFloorState_0();
 
-    Vector<float, 3>  previous_10 = _S2429;
+    Vector<float, 3>  previous_10 = _S2432;
 
-    uint32_t i_77 = _S2425;
+    uint32_t i_77 = _S2428;
     for(;;)
     {
 
-        if(i_77 < _S2424)
+        if(i_77 < _S2427)
         {
         }
         else
@@ -24508,37 +24553,37 @@ void _GridWalkCS(void* _S2420, void* entryPointParams_38, void* globalParams_39)
             break;
         }
 
-        uint32_t _S2431 = _S2423 + i_77;
+        uint32_t _S2434 = _S2426 + i_77;
 
-        Vector<float, 3>  _S2432 = loadOut_0(_S2431, &kernelContext_197);
+        Vector<float, 3>  _S2435 = loadOut_0(_S2434, &kernelContext_197);
 
-        uint32_t _S2433 = _S2431 * 12U;
+        uint32_t _S2436 = _S2434 * 12U;
 
-        ByteAddressBuffer _S2434 = (&kernelContext_197)->globalParams_0->gAux0_0;
+        ByteAddressBuffer _S2437 = (&kernelContext_197)->globalParams_0->gAux0_0;
 
-        uint32_t _S2435 = ((&kernelContext_197)->globalParams_0->gAux0_0).Load<uint32_t >(_S2433);
+        uint32_t _S2438 = ((&kernelContext_197)->globalParams_0->gAux0_0).Load<uint32_t >(_S2436);
 
-        uint32_t _S2436 = (_S2434).Load<uint32_t >(_S2433 + 4U);
+        uint32_t _S2439 = (_S2437).Load<uint32_t >(_S2436 + 4U);
 
-        uint32_t _S2437 = (_S2434).Load<uint32_t >(_S2433 + 8U);
+        uint32_t _S2440 = (_S2437).Load<uint32_t >(_S2436 + 8U);
 
-        Vector<float, 3>  p_59 = _S2432 + asfloat_0(Vector<uint32_t, 3> (_S2435, _S2436, _S2437));
+        Vector<float, 3>  p_59 = _S2435 + asfloat_0(Vector<uint32_t, 3> (_S2438, _S2439, _S2440));
 
-        Vector<float, 3>  _S2438 = loadPoint_0(_S2431, &kernelContext_197);
+        Vector<float, 3>  _S2441 = loadPoint_0(_S2434, &kernelContext_197);
 
-        Vector<float, 3>  _S2439 = loadPoint_0(_S2431 - 1U, &kernelContext_197);
-        float _S2440 = apartExact_0(_S2438, _S2439);
+        Vector<float, 3>  _S2442 = loadPoint_0(_S2434 - 1U, &kernelContext_197);
+        float _S2443 = apartExact_0(_S2441, _S2442);
 
-        GridHead_0 _S2441 = _S2427;
+        GridHead_0 _S2444 = _S2430;
 
-        FieldTables_0 _S2442 = _S2428;
+        FieldTables_0 _S2445 = _S2431;
 
-        Vector<float, 3>  _S2443 = gridWalkStep_0(&_S2441, &_S2442, previous_10, p_59, _S2440, _S2422, _S2430, &fl_2, &kernelContext_197);
-        storePoint_0((&kernelContext_197)->globalParams_0->gOut_0, _S2431, _S2443);
+        Vector<float, 3>  _S2446 = gridWalkStep_0(&_S2444, &_S2445, previous_10, p_59, _S2443, _S2425, _S2433, &fl_2, &kernelContext_197);
+        storePoint_0((&kernelContext_197)->globalParams_0->gOut_0, _S2434, _S2446);
 
         uint32_t i_78 = i_77 + 1U;
 
-        previous_10 = _S2443;
+        previous_10 = _S2446;
 
         i_77 = i_78;
 
@@ -24548,98 +24593,98 @@ void _GridWalkCS(void* _S2420, void* entryPointParams_38, void* globalParams_39)
 }
 
 
-static bool greater64_0(Vector<uint32_t, 2>  a_63, Vector<uint32_t, 2>  b_51)
+static bool greater64_0(Vector<uint32_t, 2>  a_63, Vector<uint32_t, 2>  b_52)
 {
 
-    uint32_t _S2444 = a_63.y;
+    uint32_t _S2447 = a_63.y;
 
-    uint32_t _S2445 = b_51.y;
+    uint32_t _S2448 = b_52.y;
 
-    bool _S2446;
+    bool _S2449;
 
-    if(_S2444 > _S2445)
+    if(_S2447 > _S2448)
     {
 
-        _S2446 = true;
+        _S2449 = true;
 
     }
     else
     {
 
-        if(_S2444 == _S2445)
+        if(_S2447 == _S2448)
         {
 
-            _S2446 = (a_63.x) > (b_51.x);
+            _S2449 = (a_63.x) > (b_52.x);
 
         }
         else
         {
 
-            _S2446 = false;
+            _S2449 = false;
 
         }
 
     }
 
-    return _S2446;
+    return _S2449;
 }
 
 
-static Vector<uint32_t, 2>  add64_0(Vector<uint32_t, 2>  a_64, Vector<uint32_t, 2>  b_52)
+static Vector<uint32_t, 2>  add64_0(Vector<uint32_t, 2>  a_64, Vector<uint32_t, 2>  b_53)
 {
 
-    uint32_t _S2447 = a_64.x;
+    uint32_t _S2450 = a_64.x;
 
-    uint32_t lo_9 = _S2447 + b_52.x;
-    uint32_t _S2448 = a_64.y + b_52.y;
+    uint32_t lo_9 = _S2450 + b_53.x;
+    uint32_t _S2451 = a_64.y + b_53.y;
 
-    uint32_t _S2449;
+    uint32_t _S2452;
 
-    if(lo_9 < _S2447)
+    if(lo_9 < _S2450)
     {
 
-        _S2449 = 1U;
+        _S2452 = 1U;
 
     }
     else
     {
 
-        _S2449 = 0U;
+        _S2452 = 0U;
 
     }
 
-    return Vector<uint32_t, 2> (lo_9, _S2448 + _S2449);
+    return Vector<uint32_t, 2> (lo_9, _S2451 + _S2452);
 }
 
 
 static void leastAxisD_0(FixedArray<double, 6>  * c_42, double * least_0, double * middle_1, Vector<float, 3>  * axis_10)
 {
 
-    double _S2450 = (*c_42)[int(0)];
+    double _S2453 = (*c_42)[int(0)];
 
-    double _S2451 = (*c_42)[int(1)];
+    double _S2454 = (*c_42)[int(1)];
 
-    double _S2452 = (*c_42)[int(2)];
+    double _S2455 = (*c_42)[int(2)];
 
-    double _S2453 = (*c_42)[int(3)];
+    double _S2456 = (*c_42)[int(3)];
 
-    double _S2454 = (*c_42)[int(4)];
+    double _S2457 = (*c_42)[int(4)];
 
-    double _S2455 = (*c_42)[int(5)];
+    double _S2458 = (*c_42)[int(5)];
 
-    double _S2456 = (*c_42)[int(3)] * (*c_42)[int(3)];
+    double _S2459 = (*c_42)[int(3)] * (*c_42)[int(3)];
 
-    double _S2457 = (*c_42)[int(4)] * (*c_42)[int(4)];
+    double _S2460 = (*c_42)[int(4)] * (*c_42)[int(4)];
 
-    double _S2458 = (*c_42)[int(5)] * (*c_42)[int(5)];
+    double _S2461 = (*c_42)[int(5)] * (*c_42)[int(5)];
     double q_23 = ((*c_42)[int(0)] + (*c_42)[int(1)] + (*c_42)[int(2)]) / 3.0;
-    double _S2459 = (*c_42)[int(0)] - q_23;
+    double _S2462 = (*c_42)[int(0)] - q_23;
 
-    double _S2460 = (*c_42)[int(1)] - q_23;
+    double _S2463 = (*c_42)[int(1)] - q_23;
 
-    double _S2461 = (*c_42)[int(2)] - q_23;
+    double _S2464 = (*c_42)[int(2)] - q_23;
 
-    double p2_0 = _S2459 * _S2459 + _S2460 * _S2460 + _S2461 * _S2461 + 2.0 * (_S2456 + _S2457 + _S2458);
+    double p2_0 = _S2462 * _S2462 + _S2463 * _S2463 + _S2464 * _S2464 + 2.0 * (_S2459 + _S2460 + _S2461);
     *axis_10 = Vector<float, 3> (0.0f, 0.0f, 0.0f);
     if(!(p2_0 > 1.00000000000000008e-30))
     {
@@ -24649,44 +24694,44 @@ static void leastAxisD_0(FixedArray<double, 6>  * c_42, double * least_0, double
         return;
     }
     double p_60 = (F64_sqrt((p2_0 / 6.0)));
-    double bb_0 = _S2460 / p_60;
+    double bb_0 = _S2463 / p_60;
 
-    double bd_0 = _S2461 / p_60;
+    double bd_0 = _S2464 / p_60;
 
-    double bxy_0 = _S2453 / p_60;
+    double bxy_0 = _S2456 / p_60;
 
-    double bxz_0 = _S2454 / p_60;
+    double bxz_0 = _S2457 / p_60;
 
-    double byz_0 = _S2455 / p_60;
+    double byz_0 = _S2458 / p_60;
 
-    double phi_0 = (F64_acos((clamp_1((_S2459 / p_60 * (bb_0 * bd_0 - byz_0 * byz_0) - bxy_0 * (bxy_0 * bd_0 - byz_0 * bxz_0) + bxz_0 * (bxy_0 * byz_0 - bb_0 * bxz_0)) / 2.0, -1.0, 1.0)))) / 3.0;
-    double _S2462 = 2.0 * p_60;
+    double phi_0 = (F64_acos((clamp_1((_S2462 / p_60 * (bb_0 * bd_0 - byz_0 * byz_0) - bxy_0 * (bxy_0 * bd_0 - byz_0 * bxz_0) + bxz_0 * (bxy_0 * byz_0 - bb_0 * bxz_0)) / 2.0, -1.0, 1.0)))) / 3.0;
+    double _S2465 = 2.0 * p_60;
 
-    double high_0 = q_23 + _S2462 * (F64_cos((phi_0)));
-    double low_1 = q_23 + _S2462 * (F64_cos((phi_0 + 2.09439510239319526)));
+    double high_0 = q_23 + _S2465 * (F64_cos((phi_0)));
+    double low_1 = q_23 + _S2465 * (F64_cos((phi_0 + 2.09439510239319526)));
     *least_0 = low_1;
     *middle_1 = 3.0 * q_23 - high_0 - low_1;
-    double _S2463 = _S2450 - low_1;
+    double _S2466 = _S2453 - low_1;
 
-    double _S2464 = _S2451 - low_1;
+    double _S2467 = _S2454 - low_1;
 
-    double _S2465 = _S2452 - low_1;
-    Vector<double, 3>  _S2466 = Vector<double, 3> (0.0, 0.0, 0.0);
+    double _S2468 = _S2455 - low_1;
+    Vector<double, 3>  _S2469 = Vector<double, 3> (0.0, 0.0, 0.0);
 
 
 
-    double _S2467 = _S2453 * _S2455;
+    double _S2470 = _S2456 * _S2458;
 
-    double _S2468 = _S2467 - _S2454 * _S2464;
+    double _S2471 = _S2470 - _S2457 * _S2467;
 
-    double _S2469 = _S2463 * _S2455;
+    double _S2472 = _S2466 * _S2458;
 
-    double _S2470 = _S2454 * _S2453 - _S2469;
+    double _S2473 = _S2457 * _S2456 - _S2472;
 
-    double _S2471 = _S2463 * _S2464 - _S2456;
+    double _S2474 = _S2466 * _S2467 - _S2459;
 
-    Vector<double, 3>  w_56 = Vector<double, 3> (_S2468, _S2470, _S2471);
-    double l_15 = _S2468 * _S2468 + _S2470 * _S2470 + _S2471 * _S2471;
+    Vector<double, 3>  w_56 = Vector<double, 3> (_S2471, _S2473, _S2474);
+    double l_15 = _S2471 * _S2471 + _S2473 * _S2473 + _S2474 * _S2474;
 
     double bestLength_0;
 
@@ -24704,20 +24749,20 @@ static void leastAxisD_0(FixedArray<double, 6>  * c_42, double * least_0, double
 
         bestLength_0 = 0.0;
 
-        best_4 = _S2466;
+        best_4 = _S2469;
 
     }
 
-    double _S2472 = _S2453 * _S2465;
+    double _S2475 = _S2456 * _S2468;
 
-    double _S2473 = _S2472 - _S2454 * _S2455;
+    double _S2476 = _S2475 - _S2457 * _S2458;
 
-    double _S2474 = _S2457 - _S2463 * _S2465;
+    double _S2477 = _S2460 - _S2466 * _S2468;
 
-    double _S2475 = _S2469 - _S2453 * _S2454;
+    double _S2478 = _S2472 - _S2456 * _S2457;
 
-    Vector<double, 3>  w_57 = Vector<double, 3> (_S2473, _S2474, _S2475);
-    double l_16 = _S2473 * _S2473 + _S2474 * _S2474 + _S2475 * _S2475;
+    Vector<double, 3>  w_57 = Vector<double, 3> (_S2476, _S2477, _S2478);
+    double l_16 = _S2476 * _S2476 + _S2477 * _S2477 + _S2478 * _S2478;
     if(l_16 > bestLength_0)
     {
 
@@ -24727,14 +24772,14 @@ static void leastAxisD_0(FixedArray<double, 6>  * c_42, double * least_0, double
 
     }
 
-    double _S2476 = _S2464 * _S2465 - _S2458;
+    double _S2479 = _S2467 * _S2468 - _S2461;
 
-    double _S2477 = _S2455 * _S2454 - _S2472;
+    double _S2480 = _S2458 * _S2457 - _S2475;
 
-    double _S2478 = _S2467 - _S2464 * _S2454;
+    double _S2481 = _S2470 - _S2467 * _S2457;
 
-    Vector<double, 3>  w_58 = Vector<double, 3> (_S2476, _S2477, _S2478);
-    double l_17 = _S2476 * _S2476 + _S2477 * _S2477 + _S2478 * _S2478;
+    Vector<double, 3>  w_58 = Vector<double, 3> (_S2479, _S2480, _S2481);
+    double l_17 = _S2479 * _S2479 + _S2480 * _S2480 + _S2481 * _S2481;
     if(l_17 > bestLength_0)
     {
 
@@ -24756,7 +24801,7 @@ static void leastAxisD_0(FixedArray<double, 6>  * c_42, double * least_0, double
 }
 
 
-static void collideSpreadD_0(uint32_t at_33, Vector<int32_t, 3>  world_3, bool near_1, float wallHeight_1, Vector<float, 3>  wallNormal_1, Vector<uint32_t, 2>  here_1, FixedArray<Vector<uint32_t, 2> , 11>  * sum_12, KernelContext_0 * kernelContext_198)
+static void collideSpreadD_0(uint32_t at_33, Vector<int32_t, 3>  world_3, bool near_2, float wallHeight_1, Vector<float, 3>  wallNormal_1, Vector<uint32_t, 2>  here_1, FixedArray<Vector<uint32_t, 2> , 11>  * sum_12, KernelContext_0 * kernelContext_198)
 {
 
     double rho_2 = double64_0(here_1) / 4.294967296e+09;
@@ -24789,11 +24834,11 @@ static void collideSpreadD_0(uint32_t at_33, Vector<int32_t, 3>  world_3, bool n
         return;
     }
 
-    double _S2479 = gridPackingD_0(kernelContext_198);
+    double _S2482 = gridPackingD_0(kernelContext_198);
 
 
     double wide_0 = s_42[int(10)] / m_20;
-    if(!((rho_2 / (0.5 * _S2479)) > (wide_0 + 0.14999999999999999)))
+    if(!((rho_2 / (0.5 * _S2482)) > (wide_0 + 0.14999999999999999)))
     {
 
         return;
@@ -24802,82 +24847,82 @@ static void collideSpreadD_0(uint32_t at_33, Vector<int32_t, 3>  world_3, bool n
     FixedArray<double, 3>  mean_2;
 
     FixedArray<double, 6>  cov_0;
-    double _S2480 = s_42[1U] / m_20;
+    double _S2483 = s_42[1U] / m_20;
 
-    mean_2[0U] = _S2480;
+    mean_2[0U] = _S2483;
 
-    double _S2481 = s_42[2U] / m_20;
+    double _S2484 = s_42[2U] / m_20;
 
-    mean_2[1U] = _S2481;
+    mean_2[1U] = _S2484;
 
-    double _S2482 = s_42[3U] / m_20;
+    double _S2485 = s_42[3U] / m_20;
 
-    mean_2[2U] = _S2482;
+    mean_2[2U] = _S2485;
 
 
-    cov_0[0U] = s_42[4U] / m_20 - _S2480 * _S2480;
+    cov_0[0U] = s_42[4U] / m_20 - _S2483 * _S2483;
 
-    cov_0[1U] = s_42[5U] / m_20 - _S2481 * _S2481;
+    cov_0[1U] = s_42[5U] / m_20 - _S2484 * _S2484;
 
-    cov_0[2U] = s_42[6U] / m_20 - _S2482 * _S2482;
+    cov_0[2U] = s_42[6U] / m_20 - _S2485 * _S2485;
 
-    cov_0[3U] = s_42[7U] / m_20 - _S2480 * _S2481;
+    cov_0[3U] = s_42[7U] / m_20 - _S2483 * _S2484;
 
-    cov_0[4U] = s_42[8U] / m_20 - _S2480 * _S2482;
+    cov_0[4U] = s_42[8U] / m_20 - _S2483 * _S2485;
 
-    cov_0[5U] = s_42[9U] / m_20 - _S2481 * _S2482;
+    cov_0[5U] = s_42[9U] / m_20 - _S2484 * _S2485;
 
-    FixedArray<double, 6>  _S2483 = cov_0;
+    FixedArray<double, 6>  _S2486 = cov_0;
 
     double least_1;
 
     double middle_2;
     Vector<float, 3>  axis_11;
 
-    leastAxisD_0(&_S2483, &least_1, &middle_2, &axis_11);
+    leastAxisD_0(&_S2486, &least_1, &middle_2, &axis_11);
 
-    bool _S2484;
+    bool _S2487;
 
     if(!((len3_0(axis_11)) > 0.5f))
     {
 
-        _S2484 = true;
+        _S2487 = true;
 
     }
     else
     {
 
-        _S2484 = !(least_1 < (0.59999999999999998 * middle_2));
+        _S2487 = !(least_1 < (0.59999999999999998 * middle_2));
 
     }
 
-    if(_S2484)
+    if(_S2487)
     {
 
         return;
     }
 
-    double _S2485 = (F64_max((least_1), (0.0))) + 0.001875;
+    double _S2488 = (F64_max((least_1), (0.0))) + 0.001875;
 
-    least_1 = _S2485;
+    least_1 = _S2488;
 
 
-    double between_0 = (F64_sqrt((12.0 * _S2485)));
-    double needed_0 = rho_2 / (F64_max((1.0 - (F64_abs((mean_2[int(0)] * double(axis_11.x) + mean_2[int(1)] * double(axis_11.y) + mean_2[int(2)] * double(axis_11.z))))), (0.5))) / _S2479;
+    double between_0 = (F64_sqrt((12.0 * _S2488)));
+    double needed_0 = rho_2 / (F64_max((1.0 - (F64_abs((mean_2[int(0)] * double(axis_11.x) + mean_2[int(1)] * double(axis_11.y) + mean_2[int(2)] * double(axis_11.z))))), (0.5))) / _S2482;
     if(!(needed_0 > (between_0 + wide_0)))
     {
 
-        _S2484 = true;
+        _S2487 = true;
 
     }
     else
     {
 
-        _S2484 = !(between_0 > 0.0);
+        _S2487 = !(between_0 > 0.0);
 
     }
 
-    if(_S2484)
+    if(_S2487)
     {
 
         return;
@@ -24886,24 +24931,24 @@ static void collideSpreadD_0(uint32_t at_33, Vector<int32_t, 3>  world_3, bool n
     double k_46 = (F64_min((needed_0 - wide_0), (between_0 + 1.0))) / between_0;
     float h_40 = kernelContext_198->globalParams_0->Look_0->gValue_0.y;
 
-    Vector<float, 3>  _S2486 = gridPosition_0(world_3, kernelContext_198);
-    Vector<float, 3>  from_1 = _S2486 + Vector<float, 3> (float(mean_2[int(0)]), float(mean_2[int(1)]), float(mean_2[int(2)])) * (Vector<float, 3> )h_40;
-    if(near_1)
+    Vector<float, 3>  _S2489 = gridPosition_0(world_3, kernelContext_198);
+    Vector<float, 3>  from_1 = _S2489 + Vector<float, 3> (float(mean_2[int(0)]), float(mean_2[int(1)]), float(mean_2[int(2)])) * (Vector<float, 3> )h_40;
+    if(near_2)
     {
 
-        _S2484 = wallHeight_1 > (- h_40);
+        _S2487 = wallHeight_1 > (- h_40);
 
     }
     else
     {
 
-        _S2484 = false;
+        _S2487 = false;
 
     }
 
     Vector<float, 3>  from_2;
 
-    if(_S2484)
+    if(_S2487)
     {
 
         if((dot_0(axis_11, wallNormal_1)) < 0.0f)
@@ -24925,22 +24970,11 @@ static void collideSpreadD_0(uint32_t at_33, Vector<int32_t, 3>  world_3, bool n
 
 
 
-    uint32_t _S2487 = at_33 * 12U;
+    uint32_t _S2490 = at_33 * 12U;
 
-    uint32_t _S2488 = (_S2487 + 2U) * 4U;
+    uint32_t _S2491 = (_S2490 + 2U) * 4U;
 
-    Vector<uint32_t, 3>  _S2489 = asuint_0(axis_11);
-
-    RWByteAddressBuffer _S2490 = kernelContext_198->globalParams_0->gOut_0;
-
-    kernelContext_198->globalParams_0->gOut_0.Store(_S2488,_S2489.x);
-
-    _S2490.Store(_S2488 + 4U,_S2489.y);
-
-    _S2490.Store(_S2488 + 8U,_S2489.z);
-    uint32_t _S2491 = (_S2487 + 5U) * 4U;
-
-    Vector<uint32_t, 3>  _S2492 = asuint_0(from_2);
+    Vector<uint32_t, 3>  _S2492 = asuint_0(axis_11);
 
     RWByteAddressBuffer _S2493 = kernelContext_198->globalParams_0->gOut_0;
 
@@ -24949,6 +24983,17 @@ static void collideSpreadD_0(uint32_t at_33, Vector<int32_t, 3>  world_3, bool n
     _S2493.Store(_S2491 + 4U,_S2492.y);
 
     _S2493.Store(_S2491 + 8U,_S2492.z);
+    uint32_t _S2494 = (_S2490 + 5U) * 4U;
+
+    Vector<uint32_t, 3>  _S2495 = asuint_0(from_2);
+
+    RWByteAddressBuffer _S2496 = kernelContext_198->globalParams_0->gOut_0;
+
+    kernelContext_198->globalParams_0->gOut_0.Store(_S2494,_S2495.x);
+
+    _S2496.Store(_S2494 + 4U,_S2495.y);
+
+    _S2496.Store(_S2494 + 8U,_S2495.z);
 
     storeNode_0(at_33, 8U, float(k_46 - 1.0), kernelContext_198);
 
@@ -24958,10 +25003,10 @@ static void collideSpreadD_0(uint32_t at_33, Vector<int32_t, 3>  world_3, bool n
 
 
 
-void _SelfCollideNodeCS(void* _S2494, void* entryPointParams_39, void* globalParams_40)
+void _SelfCollideNodeCS(void* _S2497, void* entryPointParams_39, void* globalParams_40)
 {
 
-    ComputeThreadVaryingInput * _S2495 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2494));
+    ComputeThreadVaryingInput * _S2498 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2497));
 
     KernelContext_0 kernelContext_199;
 
@@ -24971,28 +25016,28 @@ void _SelfCollideNodeCS(void* _S2494, void* entryPointParams_39, void* globalPar
 
     (&kernelContext_199)->sTableBase_0 = 0U;
 
-    uint32_t _S2496 = threadIndex_0(_S2495->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2495->groupThreadID, 64U, &kernelContext_199);
+    uint32_t _S2499 = threadIndex_0(_S2498->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2498->groupThreadID, 64U, &kernelContext_199);
 
-    GridHead_0 _S2497 = gridHead_0(false, &kernelContext_199);
+    GridHead_0 _S2500 = gridHead_0(false, &kernelContext_199);
 
 
-    if((_S2496 >> int(6)) >= (U32_min((_S2497.count_0), ((&kernelContext_199)->globalParams_0->Look_0->gFlag2_0.w))))
+    if((_S2499 >> int(6)) >= (U32_min((_S2500.count_0), ((&kernelContext_199)->globalParams_0->Look_0->gFlag2_0.w))))
     {
 
         return;
     }
 
-    Vector<int32_t, 3>  _S2498 = gridCoordinates_0(false, _S2496, &kernelContext_199);
+    Vector<int32_t, 3>  _S2501 = gridCoordinates_0(false, _S2499, &kernelContext_199);
 
-    Vector<int32_t, 3>  world_4 = _S2498 + _S2497.origin_0;
+    Vector<int32_t, 3>  world_4 = _S2501 + _S2500.origin_0;
     float wallHeight_2;
     Vector<float, 3>  wallNormal_2;
 
-    bool _S2499 = gridWall_0(world_4, &wallHeight_2, &wallNormal_2, &kernelContext_199);
+    bool _S2502 = gridWall_0(world_4, &wallHeight_2, &wallNormal_2, &kernelContext_199);
 
     bool solid_0;
 
-    if(_S2499)
+    if(_S2502)
     {
 
         solid_0 = wallHeight_2 < 0.0f;
@@ -25005,11 +25050,11 @@ void _SelfCollideNodeCS(void* _S2494, void* entryPointParams_39, void* globalPar
 
     }
 
-    Vector<uint32_t, 2>  _S2500 = sumIn_0(_S2496, 0U, &kernelContext_199);
+    Vector<uint32_t, 2>  _S2503 = sumIn_0(_S2499, 0U, &kernelContext_199);
 
     bool unknown_0;
 
-    if(greater64_0(_S2500, Vector<uint32_t, 2> ((&kernelContext_199)->globalParams_0->Look_0->gOctaveSeeds_0[int(0)].x, (&kernelContext_199)->globalParams_0->Look_0->gOctaveSeeds_0[int(0)].y)))
+    if(greater64_0(_S2503, Vector<uint32_t, 2> ((&kernelContext_199)->globalParams_0->Look_0->gOctaveSeeds_0[int(0)].x, (&kernelContext_199)->globalParams_0->Look_0->gOctaveSeeds_0[int(0)].y)))
     {
 
         unknown_0 = !solid_0;
@@ -25021,7 +25066,7 @@ void _SelfCollideNodeCS(void* _S2494, void* entryPointParams_39, void* globalPar
         unknown_0 = false;
 
     }
-    uint32_t _S2501 = (_S2496 * 12U + 1U) * 4U;
+    uint32_t _S2504 = (_S2499 * 12U + 1U) * 4U;
 
     uint32_t d_41;
 
@@ -25038,52 +25083,52 @@ void _SelfCollideNodeCS(void* _S2494, void* entryPointParams_39, void* globalPar
 
     }
 
-    uint32_t _S2502;
+    uint32_t _S2505;
 
     if(unknown_0)
     {
 
-        _S2502 = 2U;
+        _S2505 = 2U;
 
     }
     else
     {
 
-        _S2502 = 0U;
+        _S2505 = 0U;
 
     }
 
-    (&kernelContext_199)->globalParams_0->gOut_0.Store(_S2501,d_41 | _S2502);
-    if(zero64_0(_S2500))
+    (&kernelContext_199)->globalParams_0->gOut_0.Store(_S2504,d_41 | _S2505);
+    if(zero64_0(_S2503))
     {
 
         return;
     }
 
     FixedArray<Vector<uint32_t, 2> , 11>  sum_13;
-    Vector<uint32_t, 2>  _S2503 = Vector<uint32_t, 2> (0U, 0U);
+    Vector<uint32_t, 2>  _S2506 = Vector<uint32_t, 2> (0U, 0U);
 
-    sum_13[0U] = _S2503;
+    sum_13[0U] = _S2506;
 
-    sum_13[1U] = _S2503;
+    sum_13[1U] = _S2506;
 
-    sum_13[2U] = _S2503;
+    sum_13[2U] = _S2506;
 
-    sum_13[3U] = _S2503;
+    sum_13[3U] = _S2506;
 
-    sum_13[4U] = _S2503;
+    sum_13[4U] = _S2506;
 
-    sum_13[5U] = _S2503;
+    sum_13[5U] = _S2506;
 
-    sum_13[6U] = _S2503;
+    sum_13[6U] = _S2506;
 
-    sum_13[7U] = _S2503;
+    sum_13[7U] = _S2506;
 
-    sum_13[8U] = _S2503;
+    sum_13[8U] = _S2506;
 
-    sum_13[9U] = _S2503;
+    sum_13[9U] = _S2506;
 
-    sum_13[10U] = _S2503;
+    sum_13[10U] = _S2506;
 
     d_41 = 0U;
     for(;;)
@@ -25099,12 +25144,12 @@ void _SelfCollideNodeCS(void* _S2494, void* entryPointParams_39, void* globalPar
         }
 
         Vector<int32_t, 3>  off_1 = cornerOf_0(d_41);
-        Vector<int32_t, 3>  _S2504 = _S2498 - off_1;
+        Vector<int32_t, 3>  _S2507 = _S2501 - off_1;
 
-        GridHead_0 _S2505 = _S2497;
+        GridHead_0 _S2508 = _S2500;
 
-        uint32_t _S2506 = gridNode_0(false, &_S2505, _S2504, &kernelContext_199);
-        if(_S2506 == 4294967295U)
+        uint32_t _S2509 = gridNode_0(false, &_S2508, _S2507, &kernelContext_199);
+        if(_S2509 == 4294967295U)
         {
 
             d_41 = d_41 + 1U;
@@ -25115,48 +25160,48 @@ void _SelfCollideNodeCS(void* _S2494, void* entryPointParams_39, void* globalPar
 
         FixedArray<Vector<uint32_t, 2> , 11>  v_40;
 
-        Vector<uint32_t, 2>  _S2507 = sumIn_0(_S2506, 1U, &kernelContext_199);
-        v_40[0U] = _S2507;
+        Vector<uint32_t, 2>  _S2510 = sumIn_0(_S2509, 1U, &kernelContext_199);
+        v_40[0U] = _S2510;
 
-        Vector<uint32_t, 2>  _S2508 = sumIn_0(_S2506, 2U, &kernelContext_199);
+        Vector<uint32_t, 2>  _S2511 = sumIn_0(_S2509, 2U, &kernelContext_199);
 
-        v_40[1U] = _S2508;
+        v_40[1U] = _S2511;
 
-        Vector<uint32_t, 2>  _S2509 = sumIn_0(_S2506, 3U, &kernelContext_199);
+        Vector<uint32_t, 2>  _S2512 = sumIn_0(_S2509, 3U, &kernelContext_199);
 
-        v_40[2U] = _S2509;
+        v_40[2U] = _S2512;
 
-        Vector<uint32_t, 2>  _S2510 = sumIn_0(_S2506, 4U, &kernelContext_199);
+        Vector<uint32_t, 2>  _S2513 = sumIn_0(_S2509, 4U, &kernelContext_199);
 
-        v_40[3U] = _S2510;
+        v_40[3U] = _S2513;
 
-        Vector<uint32_t, 2>  _S2511 = sumIn_0(_S2506, 5U, &kernelContext_199);
+        Vector<uint32_t, 2>  _S2514 = sumIn_0(_S2509, 5U, &kernelContext_199);
 
-        v_40[4U] = _S2511;
+        v_40[4U] = _S2514;
 
-        Vector<uint32_t, 2>  _S2512 = sumIn_0(_S2506, 6U, &kernelContext_199);
+        Vector<uint32_t, 2>  _S2515 = sumIn_0(_S2509, 6U, &kernelContext_199);
 
-        v_40[5U] = _S2512;
+        v_40[5U] = _S2515;
 
-        Vector<uint32_t, 2>  _S2513 = sumIn_0(_S2506, 7U, &kernelContext_199);
+        Vector<uint32_t, 2>  _S2516 = sumIn_0(_S2509, 7U, &kernelContext_199);
 
-        v_40[6U] = _S2513;
+        v_40[6U] = _S2516;
 
-        Vector<uint32_t, 2>  _S2514 = sumIn_0(_S2506, 8U, &kernelContext_199);
+        Vector<uint32_t, 2>  _S2517 = sumIn_0(_S2509, 8U, &kernelContext_199);
 
-        v_40[7U] = _S2514;
+        v_40[7U] = _S2517;
 
-        Vector<uint32_t, 2>  _S2515 = sumIn_0(_S2506, 9U, &kernelContext_199);
+        Vector<uint32_t, 2>  _S2518 = sumIn_0(_S2509, 9U, &kernelContext_199);
 
-        v_40[8U] = _S2515;
+        v_40[8U] = _S2518;
 
-        Vector<uint32_t, 2>  _S2516 = sumIn_0(_S2506, 10U, &kernelContext_199);
+        Vector<uint32_t, 2>  _S2519 = sumIn_0(_S2509, 10U, &kernelContext_199);
 
-        v_40[9U] = _S2516;
+        v_40[9U] = _S2519;
 
-        Vector<uint32_t, 2>  _S2517 = sumIn_0(_S2506, 11U, &kernelContext_199);
+        Vector<uint32_t, 2>  _S2520 = sumIn_0(_S2509, 11U, &kernelContext_199);
 
-        v_40[10U] = _S2517;
+        v_40[10U] = _S2520;
         if(zero64_0(v_40[int(0)]))
         {
 
@@ -25167,74 +25212,74 @@ void _SelfCollideNodeCS(void* _S2494, void* entryPointParams_39, void* globalPar
 
         sum_13[int(0)] = add64_0(sum_13[int(0)], v_40[int(0)]);
         sum_13[int(10)] = add64_0(sum_13[int(10)], v_40[int(10)]);
-        Vector<uint32_t, 2>  _S2518 = sum_13[1U];
+        Vector<uint32_t, 2>  _S2521 = sum_13[1U];
 
-        bool _S2519 = off_1.x != int(0);
-
-        Vector<uint32_t, 2>  _S2520;
-
-        if(_S2519)
-        {
-
-            _S2520 = sub64_0(v_40[1U], v_40[int(0)]);
-
-        }
-        else
-        {
-
-            _S2520 = v_40[1U];
-
-        }
-
-        sum_13[1U] = add64_0(_S2518, _S2520);
-
-        Vector<uint32_t, 2>  _S2521 = sum_13[2U];
-
-        bool _S2522 = off_1.y != int(0);
+        bool _S2522 = off_1.x != int(0);
 
         Vector<uint32_t, 2>  _S2523;
 
         if(_S2522)
         {
 
-            _S2523 = sub64_0(v_40[2U], v_40[int(0)]);
+            _S2523 = sub64_0(v_40[1U], v_40[int(0)]);
 
         }
         else
         {
 
-            _S2523 = v_40[2U];
+            _S2523 = v_40[1U];
 
         }
 
-        sum_13[2U] = add64_0(_S2521, _S2523);
+        sum_13[1U] = add64_0(_S2521, _S2523);
 
-        Vector<uint32_t, 2>  _S2524 = sum_13[3U];
+        Vector<uint32_t, 2>  _S2524 = sum_13[2U];
 
-        bool _S2525 = off_1.z != int(0);
+        bool _S2525 = off_1.y != int(0);
 
         Vector<uint32_t, 2>  _S2526;
 
         if(_S2525)
         {
 
-            _S2526 = sub64_0(v_40[3U], v_40[int(0)]);
+            _S2526 = sub64_0(v_40[2U], v_40[int(0)]);
 
         }
         else
         {
 
-            _S2526 = v_40[3U];
+            _S2526 = v_40[2U];
 
         }
 
-        sum_13[3U] = add64_0(_S2524, _S2526);
+        sum_13[2U] = add64_0(_S2524, _S2526);
+
+        Vector<uint32_t, 2>  _S2527 = sum_13[3U];
+
+        bool _S2528 = off_1.z != int(0);
+
+        Vector<uint32_t, 2>  _S2529;
+
+        if(_S2528)
+        {
+
+            _S2529 = sub64_0(v_40[3U], v_40[int(0)]);
+
+        }
+        else
+        {
+
+            _S2529 = v_40[3U];
+
+        }
+
+        sum_13[3U] = add64_0(_S2527, _S2529);
 
 
         Vector<uint32_t, 2>  s_43 = v_40[4U];
 
         Vector<uint32_t, 2>  s_44;
-        if(_S2519)
+        if(_S2522)
         {
 
             s_44 = sub64_0(s_43, v_40[1U]);
@@ -25248,7 +25293,7 @@ void _SelfCollideNodeCS(void* _S2494, void* entryPointParams_39, void* globalPar
         }
 
         Vector<uint32_t, 2>  s_45;
-        if(_S2519)
+        if(_S2522)
         {
 
             s_45 = sub64_0(s_44, v_40[1U]);
@@ -25260,10 +25305,10 @@ void _SelfCollideNodeCS(void* _S2494, void* entryPointParams_39, void* globalPar
             s_45 = s_44;
 
         }
-        if(_S2519)
+        if(_S2522)
         {
 
-            solid_0 = _S2519;
+            solid_0 = _S2522;
 
         }
         else
@@ -25292,7 +25337,7 @@ void _SelfCollideNodeCS(void* _S2494, void* entryPointParams_39, void* globalPar
         Vector<uint32_t, 2>  s_47 = v_40[5U];
 
         Vector<uint32_t, 2>  s_48;
-        if(_S2522)
+        if(_S2525)
         {
 
             s_48 = sub64_0(s_47, v_40[2U]);
@@ -25306,7 +25351,7 @@ void _SelfCollideNodeCS(void* _S2494, void* entryPointParams_39, void* globalPar
         }
 
         Vector<uint32_t, 2>  s_49;
-        if(_S2522)
+        if(_S2525)
         {
 
             s_49 = sub64_0(s_48, v_40[2U]);
@@ -25318,10 +25363,10 @@ void _SelfCollideNodeCS(void* _S2494, void* entryPointParams_39, void* globalPar
             s_49 = s_48;
 
         }
-        if(_S2522)
+        if(_S2525)
         {
 
-            unknown_0 = _S2522;
+            unknown_0 = _S2525;
 
         }
         else
@@ -25350,7 +25395,7 @@ void _SelfCollideNodeCS(void* _S2494, void* entryPointParams_39, void* globalPar
         Vector<uint32_t, 2>  s_51 = v_40[6U];
 
         Vector<uint32_t, 2>  s_52;
-        if(_S2525)
+        if(_S2528)
         {
 
             s_52 = sub64_0(s_51, v_40[3U]);
@@ -25364,7 +25409,7 @@ void _SelfCollideNodeCS(void* _S2494, void* entryPointParams_39, void* globalPar
         }
 
         Vector<uint32_t, 2>  s_53;
-        if(_S2525)
+        if(_S2528)
         {
 
             s_53 = sub64_0(s_52, v_40[3U]);
@@ -25377,23 +25422,23 @@ void _SelfCollideNodeCS(void* _S2494, void* entryPointParams_39, void* globalPar
 
         }
 
-        bool _S2527;
-        if(_S2525)
+        bool _S2530;
+        if(_S2528)
         {
 
-            _S2527 = _S2525;
+            _S2530 = _S2528;
 
         }
         else
         {
 
-            _S2527 = false;
+            _S2530 = false;
 
         }
 
         Vector<uint32_t, 2>  s_54;
 
-        if(_S2527)
+        if(_S2530)
         {
 
             s_54 = add64_0(s_53, v_40[int(0)]);
@@ -25410,7 +25455,7 @@ void _SelfCollideNodeCS(void* _S2494, void* entryPointParams_39, void* globalPar
         Vector<uint32_t, 2>  s_55 = v_40[7U];
 
         Vector<uint32_t, 2>  s_56;
-        if(_S2522)
+        if(_S2525)
         {
 
             s_56 = sub64_0(s_55, v_40[1U]);
@@ -25424,7 +25469,7 @@ void _SelfCollideNodeCS(void* _S2494, void* entryPointParams_39, void* globalPar
         }
 
         Vector<uint32_t, 2>  s_57;
-        if(_S2519)
+        if(_S2522)
         {
 
             s_57 = sub64_0(s_56, v_40[2U]);
@@ -25437,23 +25482,23 @@ void _SelfCollideNodeCS(void* _S2494, void* entryPointParams_39, void* globalPar
 
         }
 
-        bool _S2528;
-        if(_S2519)
+        bool _S2531;
+        if(_S2522)
         {
 
-            _S2528 = _S2522;
+            _S2531 = _S2525;
 
         }
         else
         {
 
-            _S2528 = false;
+            _S2531 = false;
 
         }
 
         Vector<uint32_t, 2>  s_58;
 
-        if(_S2528)
+        if(_S2531)
         {
 
             s_58 = add64_0(s_57, v_40[int(0)]);
@@ -25470,7 +25515,7 @@ void _SelfCollideNodeCS(void* _S2494, void* entryPointParams_39, void* globalPar
         Vector<uint32_t, 2>  s_59 = v_40[8U];
 
         Vector<uint32_t, 2>  s_60;
-        if(_S2525)
+        if(_S2528)
         {
 
             s_60 = sub64_0(s_59, v_40[1U]);
@@ -25484,7 +25529,7 @@ void _SelfCollideNodeCS(void* _S2494, void* entryPointParams_39, void* globalPar
         }
 
         Vector<uint32_t, 2>  s_61;
-        if(_S2519)
+        if(_S2522)
         {
 
             s_61 = sub64_0(s_60, v_40[3U]);
@@ -25497,23 +25542,23 @@ void _SelfCollideNodeCS(void* _S2494, void* entryPointParams_39, void* globalPar
 
         }
 
-        bool _S2529;
-        if(_S2519)
+        bool _S2532;
+        if(_S2522)
         {
 
-            _S2529 = _S2525;
+            _S2532 = _S2528;
 
         }
         else
         {
 
-            _S2529 = false;
+            _S2532 = false;
 
         }
 
         Vector<uint32_t, 2>  s_62;
 
-        if(_S2529)
+        if(_S2532)
         {
 
             s_62 = add64_0(s_61, v_40[int(0)]);
@@ -25530,7 +25575,7 @@ void _SelfCollideNodeCS(void* _S2494, void* entryPointParams_39, void* globalPar
         Vector<uint32_t, 2>  s_63 = v_40[9U];
 
         Vector<uint32_t, 2>  s_64;
-        if(_S2525)
+        if(_S2528)
         {
 
             s_64 = sub64_0(s_63, v_40[2U]);
@@ -25544,7 +25589,7 @@ void _SelfCollideNodeCS(void* _S2494, void* entryPointParams_39, void* globalPar
         }
 
         Vector<uint32_t, 2>  s_65;
-        if(_S2522)
+        if(_S2525)
         {
 
             s_65 = sub64_0(s_64, v_40[3U]);
@@ -25557,23 +25602,23 @@ void _SelfCollideNodeCS(void* _S2494, void* entryPointParams_39, void* globalPar
 
         }
 
-        bool _S2530;
-        if(_S2522)
+        bool _S2533;
+        if(_S2525)
         {
 
-            _S2530 = _S2525;
+            _S2533 = _S2528;
 
         }
         else
         {
 
-            _S2530 = false;
+            _S2533 = false;
 
         }
 
         Vector<uint32_t, 2>  s_66;
 
-        if(_S2530)
+        if(_S2533)
         {
 
             s_66 = add64_0(s_65, v_40[int(0)]);
@@ -25591,9 +25636,9 @@ void _SelfCollideNodeCS(void* _S2494, void* entryPointParams_39, void* globalPar
 
     }
 
-    FixedArray<Vector<uint32_t, 2> , 11>  _S2531 = sum_13;
+    FixedArray<Vector<uint32_t, 2> , 11>  _S2534 = sum_13;
 
-    collideSpreadD_0(_S2496, world_4, _S2499, wallHeight_2, wallNormal_2, _S2500, &_S2531, &kernelContext_199);
+    collideSpreadD_0(_S2499, world_4, _S2502, wallHeight_2, wallNormal_2, _S2503, &_S2534, &kernelContext_199);
 
     return;
 }
@@ -25602,16 +25647,16 @@ void _SelfCollideNodeCS(void* _S2494, void* entryPointParams_39, void* globalPar
 static uint32_t nodeFlags_0(uint32_t at_34, KernelContext_0 * kernelContext_200)
 {
 
-    uint32_t _S2532 = (kernelContext_200->globalParams_0->gOut_0).Load<uint32_t >(uint32_t(int32_t((at_34 * 12U + 1U) * 4U)));
+    uint32_t _S2535 = (kernelContext_200->globalParams_0->gOut_0).Load<uint32_t >(uint32_t(int32_t((at_34 * 12U + 1U) * 4U)));
 
-    return _S2532;
+    return _S2535;
 }
 
 
-void _SelfCollideGradientCS(void* _S2533, void* entryPointParams_40, void* globalParams_41)
+void _SelfCollideGradientCS(void* _S2536, void* entryPointParams_40, void* globalParams_41)
 {
 
-    ComputeThreadVaryingInput * _S2534 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2533));
+    ComputeThreadVaryingInput * _S2537 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2536));
 
     KernelContext_0 kernelContext_201;
 
@@ -25621,27 +25666,27 @@ void _SelfCollideGradientCS(void* _S2533, void* entryPointParams_40, void* globa
 
     (&kernelContext_201)->sTableBase_0 = 0U;
 
-    uint32_t _S2535 = threadIndex_0(_S2534->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2534->groupThreadID, 64U, &kernelContext_201);
+    uint32_t _S2538 = threadIndex_0(_S2537->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2537->groupThreadID, 64U, &kernelContext_201);
 
-    GridHead_0 _S2536 = gridHead_0(false, &kernelContext_201);
+    GridHead_0 _S2539 = gridHead_0(false, &kernelContext_201);
 
 
-    if((_S2535 >> int(6)) >= (U32_min((_S2536.count_0), ((&kernelContext_201)->globalParams_0->Look_0->gFlag2_0.w))))
+    if((_S2538 >> int(6)) >= (U32_min((_S2539.count_0), ((&kernelContext_201)->globalParams_0->Look_0->gFlag2_0.w))))
     {
 
         return;
     }
 
-    uint32_t _S2537 = nodeFlags_0(_S2535, &kernelContext_201);
-    if((_S2537 & 1U) != 0U)
+    uint32_t _S2540 = nodeFlags_0(_S2538, &kernelContext_201);
+    if((_S2540 & 1U) != 0U)
     {
 
         return;
     }
 
-    Vector<int32_t, 3>  _S2538 = gridCoordinates_0(false, _S2535, &kernelContext_201);
+    Vector<int32_t, 3>  _S2541 = gridCoordinates_0(false, _S2538, &kernelContext_201);
 
-    float _S2539 = nodeFloat_0(_S2535, 0U, &kernelContext_201);
+    float _S2542 = nodeFloat_0(_S2538, 0U, &kernelContext_201);
 
 
     FixedArray<float, 6>  g_41;
@@ -25659,11 +25704,11 @@ void _SelfCollideGradientCS(void* _S2533, void* entryPointParams_40, void* globa
             break;
         }
 
-        int32_t _S2540;
+        int32_t _S2543;
         if(e_9 == 0U)
         {
 
-            _S2540 = int(-1);
+            _S2543 = int(-1);
 
         }
         else
@@ -25672,24 +25717,24 @@ void _SelfCollideGradientCS(void* _S2533, void* entryPointParams_40, void* globa
             if(e_9 == 1U)
             {
 
-                _S2540 = int(1);
+                _S2543 = int(1);
 
             }
             else
             {
 
-                _S2540 = int(0);
+                _S2543 = int(0);
 
             }
 
         }
 
-        int32_t _S2541;
+        int32_t _S2544;
 
         if(e_9 == 2U)
         {
 
-            _S2541 = int(-1);
+            _S2544 = int(-1);
 
         }
         else
@@ -25698,24 +25743,24 @@ void _SelfCollideGradientCS(void* _S2533, void* entryPointParams_40, void* globa
             if(e_9 == 3U)
             {
 
-                _S2541 = int(1);
+                _S2544 = int(1);
 
             }
             else
             {
 
-                _S2541 = int(0);
+                _S2544 = int(0);
 
             }
 
         }
 
-        int32_t _S2542;
+        int32_t _S2545;
 
         if(e_9 == 4U)
         {
 
-            _S2542 = int(-1);
+            _S2545 = int(-1);
 
         }
         else
@@ -25724,69 +25769,69 @@ void _SelfCollideGradientCS(void* _S2533, void* entryPointParams_40, void* globa
             if(e_9 == 5U)
             {
 
-                _S2542 = int(1);
+                _S2545 = int(1);
 
             }
             else
             {
 
-                _S2542 = int(0);
+                _S2545 = int(0);
 
             }
 
         }
-        Vector<int32_t, 3>  _S2543 = _S2538 + Vector<int32_t, 3> (_S2540, _S2541, _S2542);
+        Vector<int32_t, 3>  _S2546 = _S2541 + Vector<int32_t, 3> (_S2543, _S2544, _S2545);
 
-        GridHead_0 _S2544 = _S2536;
+        GridHead_0 _S2547 = _S2539;
 
-        uint32_t _S2545 = gridNode_0(false, &_S2544, _S2543, &kernelContext_201);
+        uint32_t _S2548 = gridNode_0(false, &_S2547, _S2546, &kernelContext_201);
 
-        float _S2546;
-        if(_S2545 == 4294967295U)
+        float _S2549;
+        if(_S2548 == 4294967295U)
         {
 
-            _S2546 = 0.0f;
+            _S2549 = 0.0f;
 
         }
         else
         {
 
-            uint32_t _S2547 = nodeFlags_0(_S2545, &kernelContext_201);
+            uint32_t _S2550 = nodeFlags_0(_S2548, &kernelContext_201);
 
-            if((_S2547 & 1U) != 0U)
+            if((_S2550 & 1U) != 0U)
             {
 
-                _S2546 = _S2539;
+                _S2549 = _S2542;
 
             }
             else
             {
 
-                float _S2548 = nodeFloat_0(_S2545, 0U, &kernelContext_201);
+                float _S2551 = nodeFloat_0(_S2548, 0U, &kernelContext_201);
 
-                _S2546 = _S2548;
+                _S2549 = _S2551;
 
             }
 
         }
 
-        g_41[e_9] = _S2546;
+        g_41[e_9] = _S2549;
 
         e_9 = e_9 + 1U;
 
     }
 
-    uint32_t _S2549 = (_S2535 * 12U + 9U) * 4U;
+    uint32_t _S2552 = (_S2538 * 12U + 9U) * 4U;
 
-    Vector<uint32_t, 3>  _S2550 = asuint_0(Vector<float, 3> (g_41[int(1)] - g_41[int(0)], g_41[int(3)] - g_41[int(2)], g_41[int(5)] - g_41[int(4)]) * (Vector<float, 3> )(U32_asfloat(((&kernelContext_201)->globalParams_0->Look_0->gOctaveSeeds_0[int(2)].x))));
+    Vector<uint32_t, 3>  _S2553 = asuint_0(Vector<float, 3> (g_41[int(1)] - g_41[int(0)], g_41[int(3)] - g_41[int(2)], g_41[int(5)] - g_41[int(4)]) * (Vector<float, 3> )(U32_asfloat(((&kernelContext_201)->globalParams_0->Look_0->gOctaveSeeds_0[int(2)].x))));
 
-    RWByteAddressBuffer _S2551 = (&kernelContext_201)->globalParams_0->gOut_0;
+    RWByteAddressBuffer _S2554 = (&kernelContext_201)->globalParams_0->gOut_0;
 
-    (&kernelContext_201)->globalParams_0->gOut_0.Store(_S2549,_S2550.x);
+    (&kernelContext_201)->globalParams_0->gOut_0.Store(_S2552,_S2553.x);
 
-    _S2551.Store(_S2549 + 4U,_S2550.y);
+    _S2554.Store(_S2552 + 4U,_S2553.y);
 
-    _S2551.Store(_S2549 + 8U,_S2550.z);
+    _S2554.Store(_S2552 + 8U,_S2553.z);
     return;
 }
 
@@ -25794,34 +25839,34 @@ void _SelfCollideGradientCS(void* _S2533, void* entryPointParams_40, void* globa
 static Vector<float, 3>  nodeIn3_0(uint32_t at_35, uint32_t w_59, KernelContext_0 * kernelContext_202)
 {
 
-    uint32_t _S2552 = (at_35 * 12U + w_59) * 4U;
+    uint32_t _S2555 = (at_35 * 12U + w_59) * 4U;
 
-    ByteAddressBuffer _S2553 = kernelContext_202->globalParams_0->gAux0_0;
+    ByteAddressBuffer _S2556 = kernelContext_202->globalParams_0->gAux0_0;
 
-    uint32_t _S2554 = (kernelContext_202->globalParams_0->gAux0_0).Load<uint32_t >(_S2552);
+    uint32_t _S2557 = (kernelContext_202->globalParams_0->gAux0_0).Load<uint32_t >(_S2555);
 
-    uint32_t _S2555 = (_S2553).Load<uint32_t >(_S2552 + 4U);
+    uint32_t _S2558 = (_S2556).Load<uint32_t >(_S2555 + 4U);
 
-    uint32_t _S2556 = (_S2553).Load<uint32_t >(_S2552 + 8U);
+    uint32_t _S2559 = (_S2556).Load<uint32_t >(_S2555 + 8U);
 
-    return asfloat_0(Vector<uint32_t, 3> (_S2554, _S2555, _S2556));
+    return asfloat_0(Vector<uint32_t, 3> (_S2557, _S2558, _S2559));
 }
 
 
 static float nodeIn_0(uint32_t at_36, uint32_t w_60, KernelContext_0 * kernelContext_203)
 {
 
-    uint32_t _S2557 = (kernelContext_203->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t((at_36 * 12U + w_60) * 4U)));
+    uint32_t _S2560 = (kernelContext_203->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t((at_36 * 12U + w_60) * 4U)));
 
-    return (U32_asfloat((_S2557)));
+    return (U32_asfloat((_S2560)));
 }
 
 
-static Vector<float, 3>  collideMove_0(GridHead_0 * head_4, uint32_t i_79, uint32_t n_51, Vector<float, 3>  p_61, float amount_5, float own_5, KernelContext_0 * kernelContext_204)
+static Vector<float, 3>  collideMove_0(GridHead_0 * head_4, uint32_t i_79, uint32_t n_51, Vector<float, 3>  p_61, float amount_5, float own_6, KernelContext_0 * kernelContext_204)
 {
 
-    float _S2558 = rampAlong_0(i_79, n_51, kernelContext_204);
-    float along_9 = amount_5 * clamp_0(_S2558, 0.0f, 1.0f);
+    float _S2561 = rampAlong_0(i_79, n_51, kernelContext_204);
+    float along_9 = amount_5 * clamp_0(_S2561, 0.0f, 1.0f);
     if(!(along_9 > 0.0f))
     {
 
@@ -25830,11 +25875,11 @@ static Vector<float, 3>  collideMove_0(GridHead_0 * head_4, uint32_t i_79, uint3
 
     FixedArray<float, 8>  weights_2;
 
-    Vector<int32_t, 3>  _S2559 = cellWeights_0(p_61, head_4->origin_0, &weights_2, kernelContext_204);
+    Vector<int32_t, 3>  _S2562 = cellWeights_0(p_61, head_4->origin_0, &weights_2, kernelContext_204);
 
-    Vector<float, 3>  _S2560 = Vector<float, 3> (0.0f, 0.0f, 0.0f);
+    Vector<float, 3>  _S2563 = Vector<float, 3> (0.0f, 0.0f, 0.0f);
 
-    Vector<float, 3>  move_0 = _S2560;
+    Vector<float, 3>  move_0 = _S2563;
 
     bool any_1 = false;
 
@@ -25852,9 +25897,9 @@ static Vector<float, 3>  collideMove_0(GridHead_0 * head_4, uint32_t i_79, uint3
             break;
         }
 
-        uint32_t _S2561 = gridNode_0(false, head_4, _S2559 + cornerOf_0(d_42), kernelContext_204);
+        uint32_t _S2564 = gridNode_0(false, head_4, _S2562 + cornerOf_0(d_42), kernelContext_204);
 
-        if(_S2561 == 4294967295U)
+        if(_S2564 == 4294967295U)
         {
 
             d_42 = d_42 + 1U;
@@ -25862,28 +25907,28 @@ static Vector<float, 3>  collideMove_0(GridHead_0 * head_4, uint32_t i_79, uint3
             continue;
         }
 
-        Vector<float, 3>  _S2562 = nodeIn3_0(_S2561, 9U, kernelContext_204);
+        Vector<float, 3>  _S2565 = nodeIn3_0(_S2564, 9U, kernelContext_204);
 
-        float _S2563 = nodeIn_0(_S2561, 8U, kernelContext_204);
+        float _S2566 = nodeIn_0(_S2564, 8U, kernelContext_204);
 
-        bool _S2564;
+        bool _S2567;
 
-        if((_S2562.x) != 0.0f)
+        if((_S2565.x) != 0.0f)
         {
 
-            _S2564 = true;
+            _S2567 = true;
 
         }
         else
         {
 
-            _S2564 = (_S2562.y) != 0.0f;
+            _S2567 = (_S2565.y) != 0.0f;
 
         }
 
         bool pushed_4;
 
-        if(_S2564)
+        if(_S2567)
         {
 
             pushed_4 = true;
@@ -25892,25 +25937,25 @@ static Vector<float, 3>  collideMove_0(GridHead_0 * head_4, uint32_t i_79, uint3
         else
         {
 
-            pushed_4 = (_S2562.z) != 0.0f;
+            pushed_4 = (_S2565.z) != 0.0f;
 
         }
 
-        bool _S2565;
+        bool _S2568;
         if(!pushed_4)
         {
 
-            _S2565 = !(_S2563 > 0.0f);
+            _S2568 = !(_S2566 > 0.0f);
 
         }
         else
         {
 
-            _S2565 = false;
+            _S2568 = false;
 
         }
 
-        if(_S2565)
+        if(_S2568)
         {
 
             d_42 = d_42 + 1U;
@@ -25924,7 +25969,7 @@ static Vector<float, 3>  collideMove_0(GridHead_0 * head_4, uint32_t i_79, uint3
         if(pushed_4)
         {
 
-            move_1 = move_0 - _S2562 * (Vector<float, 3> )w_61;
+            move_1 = move_0 - _S2565 * (Vector<float, 3> )w_61;
 
         }
         else
@@ -25935,14 +25980,14 @@ static Vector<float, 3>  collideMove_0(GridHead_0 * head_4, uint32_t i_79, uint3
         }
 
         Vector<float, 3>  move_2;
-        if(_S2563 > 0.0f)
+        if(_S2566 > 0.0f)
         {
 
-            Vector<float, 3>  _S2566 = nodeIn3_0(_S2561, 2U, kernelContext_204);
+            Vector<float, 3>  _S2569 = nodeIn3_0(_S2564, 2U, kernelContext_204);
 
-            Vector<float, 3>  _S2567 = nodeIn3_0(_S2561, 5U, kernelContext_204);
+            Vector<float, 3>  _S2570 = nodeIn3_0(_S2564, 5U, kernelContext_204);
 
-            move_2 = move_1 + _S2566 * (Vector<float, 3> )(_S2563 * (dot_0(_S2566, p_61 - _S2567) + own_5) * w_61);
+            move_2 = move_1 + _S2569 * (Vector<float, 3> )(_S2566 * (dot_0(_S2569, p_61 - _S2570) + own_6) * w_61);
 
         }
         else
@@ -25963,7 +26008,7 @@ static Vector<float, 3>  collideMove_0(GridHead_0 * head_4, uint32_t i_79, uint3
     if(!any_1)
     {
 
-        return _S2560;
+        return _S2563;
     }
 
     Vector<float, 3>  move_3 = move_0 * (Vector<float, 3> )along_9;
@@ -25971,14 +26016,14 @@ static Vector<float, 3>  collideMove_0(GridHead_0 * head_4, uint32_t i_79, uint3
     if(!(len_10 > 0.0f))
     {
 
-        return _S2560;
+        return _S2563;
     }
 
-    float _S2568 = kernelContext_204->globalParams_0->Look_0->gValue_0.y;
-    if(len_10 > _S2568)
+    float _S2571 = kernelContext_204->globalParams_0->Look_0->gValue_0.y;
+    if(len_10 > _S2571)
     {
 
-        move_0 = move_3 * (Vector<float, 3> )(_S2568 / len_10);
+        move_0 = move_3 * (Vector<float, 3> )(_S2571 / len_10);
 
     }
     else
@@ -25992,14 +26037,14 @@ static Vector<float, 3>  collideMove_0(GridHead_0 * head_4, uint32_t i_79, uint3
 }
 
 
-void _SelfCollidePushCS(void* _S2569, void* entryPointParams_41, void* globalParams_42)
+void _SelfCollidePushCS(void* _S2572, void* entryPointParams_41, void* globalParams_42)
 {
 
-    bool _S2570;
+    bool _S2573;
 
-    bool _S2571;
+    bool _S2574;
 
-    ComputeThreadVaryingInput * _S2572 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2569));
+    ComputeThreadVaryingInput * _S2575 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2572));
 
     KernelContext_0 kernelContext_205;
 
@@ -26009,50 +26054,50 @@ void _SelfCollidePushCS(void* _S2569, void* entryPointParams_41, void* globalPar
 
     (&kernelContext_205)->sTableBase_0 = 0U;
 
-    uint32_t _S2573 = threadIndex_0(_S2572->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2572->groupThreadID, 64U, &kernelContext_205);
+    uint32_t _S2576 = threadIndex_0(_S2575->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2575->groupThreadID, 64U, &kernelContext_205);
 
-    if(_S2573 >= ((&kernelContext_205)->globalParams_0->Look_0->gStrandCount_0))
+    if(_S2576 >= ((&kernelContext_205)->globalParams_0->Look_0->gStrandCount_0))
     {
 
         return;
     }
 
-    uint32_t _S2574 = strandBegin_0(_S2573, &kernelContext_205);
+    uint32_t _S2577 = strandBegin_0(_S2576, &kernelContext_205);
 
-    uint32_t _S2575 = strandCountOf_0(_S2573, &kernelContext_205);
+    uint32_t _S2578 = strandCountOf_0(_S2576, &kernelContext_205);
 
     if(((&kernelContext_205)->globalParams_0->Look_0->gFlag_0.w) == 0U)
     {
 
-        copyStrand_0(_S2574, _S2575, &kernelContext_205);
+        copyStrand_0(_S2577, _S2578, &kernelContext_205);
 
     }
-    if(_S2575 == 0U)
+    if(_S2578 == 0U)
     {
 
         return;
     }
 
-    uint32_t _S2576 = _S2574 * 12U;
+    uint32_t _S2579 = _S2577 * 12U;
 
-    (&kernelContext_205)->globalParams_0->gOut2_0.Store(_S2576,_S2575);
-    if(_S2575 < 2U)
+    (&kernelContext_205)->globalParams_0->gOut2_0.Store(_S2579,_S2578);
+    if(_S2578 < 2U)
     {
 
         return;
     }
 
-    float _S2577 = fieldAt_0(0U, (&kernelContext_205)->globalParams_0->Look_0->gValue_0.x, _S2573, 0U, &kernelContext_205);
-    float amount_6 = clamp_0(_S2577, 0.0f, 1.0f);
+    float _S2580 = fieldAt_0(0U, (&kernelContext_205)->globalParams_0->Look_0->gValue_0.x, _S2576, 0U, &kernelContext_205);
+    float amount_6 = clamp_0(_S2580, 0.0f, 1.0f);
     if(!(amount_6 > 0.0f))
     {
 
         return;
     }
 
-    GridHead_0 _S2578 = gridHead_0(false, &kernelContext_205);
+    GridHead_0 _S2581 = gridHead_0(false, &kernelContext_205);
 
-    if((_S2578.count_0) == 0U)
+    if((_S2581.count_0) == 0U)
     {
 
         return;
@@ -26062,7 +26107,7 @@ void _SelfCollidePushCS(void* _S2569, void* entryPointParams_41, void* globalPar
     for(;;)
     {
 
-        if(i_80 < _S2575)
+        if(i_80 < _S2578)
         {
         }
         else
@@ -26071,35 +26116,35 @@ void _SelfCollidePushCS(void* _S2569, void* entryPointParams_41, void* globalPar
             break;
         }
 
-        Vector<float, 3>  _S2579 = loadOut_0(_S2574 + i_80, &kernelContext_205);
+        Vector<float, 3>  _S2582 = loadOut_0(_S2577 + i_80, &kernelContext_205);
 
-        if(!finiteFloat_0(_S2579.x))
+        if(!finiteFloat_0(_S2582.x))
         {
 
-            _S2570 = true;
+            _S2573 = true;
 
         }
         else
         {
 
-            _S2570 = !finiteFloat_0(_S2579.y);
+            _S2573 = !finiteFloat_0(_S2582.y);
 
         }
 
-        if(_S2570)
+        if(_S2573)
         {
 
-            _S2571 = true;
+            _S2574 = true;
 
         }
         else
         {
 
-            _S2571 = !finiteFloat_0(_S2579.z);
+            _S2574 = !finiteFloat_0(_S2582.z);
 
         }
 
-        if(_S2571)
+        if(_S2574)
         {
 
             return;
@@ -26109,20 +26154,20 @@ void _SelfCollidePushCS(void* _S2569, void* entryPointParams_41, void* globalPar
 
     }
 
-    Vector<float, 4>  _S2580 = strandData_0(_S2573, &kernelContext_205);
+    Vector<float, 4>  _S2583 = strandData_0(_S2576, &kernelContext_205);
 
 
 
-    float _S2581 = _S2580.x * (&kernelContext_205)->globalParams_0->Look_0->gValue_0.y;
+    float _S2584 = _S2583.x * (&kernelContext_205)->globalParams_0->Look_0->gValue_0.y;
 
-    uint32_t from_3 = _S2575;
+    uint32_t from_3 = _S2578;
 
     i_80 = 1U;
 
     for(;;)
     {
 
-        if(i_80 < _S2575)
+        if(i_80 < _S2578)
         {
         }
         else
@@ -26131,62 +26176,62 @@ void _SelfCollidePushCS(void* _S2569, void* entryPointParams_41, void* globalPar
             break;
         }
 
-        uint32_t _S2582 = _S2574 + i_80;
+        uint32_t _S2585 = _S2577 + i_80;
 
-        Vector<float, 3>  _S2583 = loadOut_0(_S2582, &kernelContext_205);
+        Vector<float, 3>  _S2586 = loadOut_0(_S2585, &kernelContext_205);
 
-        GridHead_0 _S2584 = _S2578;
+        GridHead_0 _S2587 = _S2581;
 
-        Vector<float, 3>  _S2585 = collideMove_0(&_S2584, i_80, _S2575, _S2583, amount_6, _S2581, &kernelContext_205);
-        if(from_3 == _S2575)
+        Vector<float, 3>  _S2588 = collideMove_0(&_S2587, i_80, _S2578, _S2586, amount_6, _S2584, &kernelContext_205);
+        if(from_3 == _S2578)
         {
 
-            if((_S2585.x) != 0.0f)
+            if((_S2588.x) != 0.0f)
             {
 
-                _S2570 = true;
+                _S2573 = true;
 
             }
             else
             {
 
-                _S2570 = (_S2585.y) != 0.0f;
+                _S2573 = (_S2588.y) != 0.0f;
 
             }
 
-            if(_S2570)
+            if(_S2573)
             {
 
-                _S2571 = true;
+                _S2574 = true;
 
             }
             else
             {
 
-                _S2571 = (_S2585.z) != 0.0f;
+                _S2574 = (_S2588.z) != 0.0f;
 
             }
 
-            _S2570 = _S2571;
+            _S2573 = _S2574;
 
         }
         else
         {
 
-            _S2570 = false;
+            _S2573 = false;
 
         }
 
-        if(_S2570)
+        if(_S2573)
         {
 
             from_3 = i_80;
 
         }
-        if(from_3 != _S2575)
+        if(from_3 != _S2578)
         {
 
-            storePoint_0((&kernelContext_205)->globalParams_0->gOut2_0, _S2582, _S2585);
+            storePoint_0((&kernelContext_205)->globalParams_0->gOut2_0, _S2585, _S2588);
 
         }
 
@@ -26194,8 +26239,8 @@ void _SelfCollidePushCS(void* _S2569, void* entryPointParams_41, void* globalPar
 
     }
 
-    (&kernelContext_205)->globalParams_0->gOut2_0.Store(_S2576,from_3);
-    if(from_3 != _S2575)
+    (&kernelContext_205)->globalParams_0->gOut2_0.Store(_S2579,from_3);
+    if(from_3 != _S2578)
     {
 
         (&kernelContext_205)->globalParams_0->gOut3_0.Store(0U,(&kernelContext_205)->globalParams_0->Look_0->gFlag_0.w + 1U);
@@ -26208,53 +26253,53 @@ void _SelfCollidePushCS(void* _S2569, void* entryPointParams_41, void* globalPar
 static uint32_t staticReachOf_0(uint32_t at_37, KernelContext_0 * kernelContext_206)
 {
 
-    uint32_t _S2586;
+    uint32_t _S2589;
     if((kernelContext_206->globalParams_0->Look_0->gFlag_0.w) == 0U)
     {
 
-        Vector<uint32_t, 2>  _S2587 = sumIn_0(at_37, 0U, kernelContext_206);
+        Vector<uint32_t, 2>  _S2590 = sumIn_0(at_37, 0U, kernelContext_206);
 
-        if(zero64_0(_S2587))
+        if(zero64_0(_S2590))
         {
 
-            _S2586 = 5U;
+            _S2589 = 5U;
 
         }
         else
         {
 
-            _S2586 = 0U;
+            _S2589 = 0U;
 
         }
 
-        return _S2586;
+        return _S2589;
     }
 
-    uint32_t _S2588 = at_37 * 12U;
+    uint32_t _S2591 = at_37 * 12U;
 
     if((kernelContext_206->globalParams_0->Look_0->gFlag_0.w) == 1U)
     {
 
-        _S2586 = 4U;
+        _S2589 = 4U;
 
     }
     else
     {
 
-        _S2586 = 3U;
+        _S2589 = 3U;
 
     }
 
-    uint32_t _S2589 = (kernelContext_206->globalParams_0->gOut_0).Load<uint32_t >(uint32_t(int32_t((_S2588 + _S2586) * 4U)));
+    uint32_t _S2592 = (kernelContext_206->globalParams_0->gOut_0).Load<uint32_t >(uint32_t(int32_t((_S2591 + _S2589) * 4U)));
 
-    return _S2589;
+    return _S2592;
 }
 
 
-void _StaticReachCS(void* _S2590, void* entryPointParams_42, void* globalParams_43)
+void _StaticReachCS(void* _S2593, void* entryPointParams_42, void* globalParams_43)
 {
 
-    ComputeThreadVaryingInput * _S2591 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2590));
+    ComputeThreadVaryingInput * _S2594 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2593));
 
     KernelContext_0 kernelContext_207;
 
@@ -26264,20 +26309,20 @@ void _StaticReachCS(void* _S2590, void* entryPointParams_42, void* globalParams_
 
     (&kernelContext_207)->sTableBase_0 = 0U;
 
-    uint32_t _S2592 = threadIndex_0(_S2591->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2591->groupThreadID, 64U, &kernelContext_207);
+    uint32_t _S2595 = threadIndex_0(_S2594->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2594->groupThreadID, 64U, &kernelContext_207);
 
-    GridHead_0 _S2593 = gridHead_0(false, &kernelContext_207);
+    GridHead_0 _S2596 = gridHead_0(false, &kernelContext_207);
 
 
-    if((_S2592 >> int(6)) >= (U32_min((_S2593.count_0), ((&kernelContext_207)->globalParams_0->Look_0->gFlag2_0.w))))
+    if((_S2595 >> int(6)) >= (U32_min((_S2596.count_0), ((&kernelContext_207)->globalParams_0->Look_0->gFlag2_0.w))))
     {
 
         return;
     }
 
-    Vector<int32_t, 3>  _S2594 = gridCoordinates_0(false, _S2592, &kernelContext_207);
+    Vector<int32_t, 3>  _S2597 = gridCoordinates_0(false, _S2595, &kernelContext_207);
 
-    uint32_t _S2595 = staticReachOf_0(_S2592, &kernelContext_207);
+    uint32_t _S2598 = staticReachOf_0(_S2595, &kernelContext_207);
 
     int32_t sign_0;
 
@@ -26295,60 +26340,60 @@ void _StaticReachCS(void* _S2590, void* entryPointParams_42, void* globalParams_
 
     }
 
-    int32_t _S2596;
+    int32_t _S2599;
 
     if(((&kernelContext_207)->globalParams_0->Look_0->gFlag_0.w) == 1U)
     {
 
-        _S2596 = int(1);
+        _S2599 = int(1);
 
     }
     else
     {
 
-        _S2596 = int(0);
+        _S2599 = int(0);
 
     }
 
-    int32_t _S2597;
+    int32_t _S2600;
 
     if(((&kernelContext_207)->globalParams_0->Look_0->gFlag_0.w) == 2U)
     {
 
-        _S2597 = int(1);
+        _S2600 = int(1);
 
     }
     else
     {
 
-        _S2597 = int(0);
+        _S2600 = int(0);
 
     }
 
-    Vector<int32_t, 3>  _S2598 = Vector<int32_t, 3> (sign_0, _S2596, _S2597);
+    Vector<int32_t, 3>  _S2601 = Vector<int32_t, 3> (sign_0, _S2599, _S2600);
 
-    uint32_t best_5 = _S2595;
+    uint32_t best_5 = _S2598;
 
     uint32_t d_43 = 1U;
     for(;;)
     {
 
-        bool _S2599;
+        bool _S2602;
 
         if(d_43 <= 4U)
         {
 
-            _S2599 = best_5 > d_43;
+            _S2602 = best_5 > d_43;
 
         }
         else
         {
 
-            _S2599 = false;
+            _S2602 = false;
 
         }
 
-        if(_S2599)
+        if(_S2602)
         {
         }
         else
@@ -26372,17 +26417,17 @@ void _StaticReachCS(void* _S2590, void* entryPointParams_42, void* globalParams_
                 break;
             }
 
-            Vector<int32_t, 3>  _S2600 = _S2594 + _S2598 * (Vector<int32_t, 3> )(sign_0 * int32_t(d_43));
+            Vector<int32_t, 3>  _S2603 = _S2597 + _S2601 * (Vector<int32_t, 3> )(sign_0 * int32_t(d_43));
 
-            GridHead_0 _S2601 = _S2593;
+            GridHead_0 _S2604 = _S2596;
 
-            uint32_t _S2602 = gridNode_0(false, &_S2601, _S2600, &kernelContext_207);
-            if(_S2602 != 4294967295U)
+            uint32_t _S2605 = gridNode_0(false, &_S2604, _S2603, &kernelContext_207);
+            if(_S2605 != 4294967295U)
             {
 
-                uint32_t _S2603 = staticReachOf_0(_S2602, &kernelContext_207);
+                uint32_t _S2606 = staticReachOf_0(_S2605, &kernelContext_207);
 
-                best_6 = (U32_min((best_6), ((U32_max((d_43), (_S2603))))));
+                best_6 = (U32_min((best_6), ((U32_max((d_43), (_S2606))))));
 
             }
 
@@ -26398,7 +26443,7 @@ void _StaticReachCS(void* _S2590, void* entryPointParams_42, void* globalParams_
 
     }
 
-    uint32_t _S2604 = _S2592 * 12U;
+    uint32_t _S2607 = _S2595 * 12U;
 
     if(((&kernelContext_207)->globalParams_0->Look_0->gFlag_0.w) == 1U)
     {
@@ -26413,7 +26458,7 @@ void _StaticReachCS(void* _S2590, void* entryPointParams_42, void* globalParams_
 
     }
 
-    (&kernelContext_207)->globalParams_0->gOut_0.Store((_S2604 + d_43) * 4U,best_5);
+    (&kernelContext_207)->globalParams_0->gOut_0.Store((_S2607 + d_43) * 4U,best_5);
     return;
 }
 
@@ -26421,59 +26466,59 @@ void _StaticReachCS(void* _S2590, void* entryPointParams_42, void* globalParams_
 static void staticMomentsAlone_0(Vector<uint32_t, 3>  id_2, KernelContext_0 * kernelContext_208)
 {
 
-    uint32_t _S2605 = threadIndex_0(id_2, 64U, kernelContext_208);
+    uint32_t _S2608 = threadIndex_0(id_2, 64U, kernelContext_208);
 
-    uint32_t _S2606 = gridWord_0(true, 15U, kernelContext_208);
+    uint32_t _S2609 = gridWord_0(true, 15U, kernelContext_208);
 
 
-    if((_S2605 >> int(6)) >= (U32_min((_S2606), (kernelContext_208->globalParams_0->Look_0->gFlag2_0.w))))
+    if((_S2608 >> int(6)) >= (U32_min((_S2609), (kernelContext_208->globalParams_0->Look_0->gFlag2_0.w))))
     {
 
         return;
     }
 
-    Vector<uint32_t, 2>  _S2607 = sumIn_0(_S2605, 0U, kernelContext_208);
+    Vector<uint32_t, 2>  _S2610 = sumIn_0(_S2608, 0U, kernelContext_208);
 
-    bool _S2608 = zero64_0(_S2607);
+    bool _S2611 = zero64_0(_S2610);
 
-    if(_S2608)
+    if(_S2611)
     {
 
         return;
     }
 
-    Vector<int32_t, 3>  _S2609 = gridCoordinates_0(true, _S2605, kernelContext_208);
+    Vector<int32_t, 3>  _S2612 = gridCoordinates_0(true, _S2608, kernelContext_208);
 
 
 
-    if(!_S2608)
+    if(!_S2611)
     {
 
-        atomicAdd64_0(72U, _S2607, kernelContext_208);
+        atomicAdd64_0(72U, _S2610, kernelContext_208);
 
     }
 
-    Vector<uint32_t, 2>  _S2610 = (groomlab_mul64((_S2607), (Vector<uint32_t, 2> (uint32_t(_S2609.x), 0U))));
-    if(!zero64_0(_S2610))
+    Vector<uint32_t, 2>  _S2613 = (groomlab_mul64((_S2610), (Vector<uint32_t, 2> (uint32_t(_S2612.x), 0U))));
+    if(!zero64_0(_S2613))
     {
 
-        atomicAdd64_0(80U, _S2610, kernelContext_208);
+        atomicAdd64_0(80U, _S2613, kernelContext_208);
 
     }
 
-    Vector<uint32_t, 2>  _S2611 = (groomlab_mul64((_S2607), (Vector<uint32_t, 2> (uint32_t(_S2609.y), 0U))));
-    if(!zero64_0(_S2611))
+    Vector<uint32_t, 2>  _S2614 = (groomlab_mul64((_S2610), (Vector<uint32_t, 2> (uint32_t(_S2612.y), 0U))));
+    if(!zero64_0(_S2614))
     {
 
-        atomicAdd64_0(88U, _S2611, kernelContext_208);
+        atomicAdd64_0(88U, _S2614, kernelContext_208);
 
     }
 
-    Vector<uint32_t, 2>  _S2612 = (groomlab_mul64((_S2607), (Vector<uint32_t, 2> (uint32_t(_S2609.z), 0U))));
-    if(!zero64_0(_S2612))
+    Vector<uint32_t, 2>  _S2615 = (groomlab_mul64((_S2610), (Vector<uint32_t, 2> (uint32_t(_S2612.z), 0U))));
+    if(!zero64_0(_S2615))
     {
 
-        atomicAdd64_0(96U, _S2612, kernelContext_208);
+        atomicAdd64_0(96U, _S2615, kernelContext_208);
 
     }
 
@@ -26481,10 +26526,10 @@ static void staticMomentsAlone_0(Vector<uint32_t, 3>  id_2, KernelContext_0 * ke
 }
 
 
-void _StaticMomentsCS(void* _S2613, void* entryPointParams_43, void* globalParams_44)
+void _StaticMomentsCS(void* _S2616, void* entryPointParams_43, void* globalParams_44)
 {
 
-    ComputeThreadVaryingInput * _S2614 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2613));
+    ComputeThreadVaryingInput * _S2617 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2616));
 
     KernelContext_0 kernelContext_209;
 
@@ -26494,7 +26539,7 @@ void _StaticMomentsCS(void* _S2613, void* entryPointParams_43, void* globalParam
 
     (&kernelContext_209)->sTableBase_0 = 0U;
 
-    staticMomentsAlone_0(_S2614->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2614->groupThreadID, &kernelContext_209);
+    staticMomentsAlone_0(_S2617->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2617->groupThreadID, &kernelContext_209);
 
     return;
 }
@@ -26506,77 +26551,77 @@ static bool gridSolid_0(Vector<int32_t, 3>  world_5, KernelContext_0 * kernelCon
     float height_14;
     Vector<float, 3>  normal_6;
 
-    bool _S2615 = gridWall_0(world_5, &height_14, &normal_6, kernelContext_210);
+    bool _S2618 = gridWall_0(world_5, &height_14, &normal_6, kernelContext_210);
 
-    bool _S2616;
-    if(_S2615)
+    bool _S2619;
+    if(_S2618)
     {
 
-        _S2616 = height_14 < 0.0f;
+        _S2619 = height_14 < 0.0f;
 
     }
     else
     {
 
-        _S2616 = false;
+        _S2619 = false;
 
     }
 
-    return _S2616;
+    return _S2619;
 }
 
 
 static FarCharge_0 farCharge_0(GridHead_0 * head_5, KernelContext_0 * kernelContext_211)
 {
-    uint32_t _S2617 = (kernelContext_211->globalParams_0->gAux1_0).Load<uint32_t >(72U);
+    uint32_t _S2620 = (kernelContext_211->globalParams_0->gAux1_0).Load<uint32_t >(72U);
 
-    uint32_t _S2618 = (kernelContext_211->globalParams_0->gAux1_0).Load<uint32_t >(76U);
+    uint32_t _S2621 = (kernelContext_211->globalParams_0->gAux1_0).Load<uint32_t >(76U);
 
-    float q_24 = float64_0(Vector<uint32_t, 2> (_S2617, _S2618));
+    float q_24 = float64_0(Vector<uint32_t, 2> (_S2620, _S2621));
     float h_41 = kernelContext_211->globalParams_0->Look_0->gValue_0.y;
 
     FarCharge_0 c_43;
 
 
-    bool _S2619 = q_24 > 0.0f;
+    bool _S2622 = q_24 > 0.0f;
 
-    float _S2620;
+    float _S2623;
 
-    if(_S2619)
+    if(_S2622)
     {
 
-        _S2620 = q_24 / 4.294967296e+09f * h_41 * h_41 * h_41;
+        _S2623 = q_24 / 4.294967296e+09f * h_41 * h_41 * h_41;
 
     }
     else
     {
 
-        _S2620 = 0.0f;
+        _S2623 = 0.0f;
 
     }
 
-    (&c_43)->total_1 = _S2620;
+    (&c_43)->total_1 = _S2623;
     (&c_43)->centre_1 = Vector<float, 3> (0.0f, 0.0f, 0.0f);
-    if(_S2619)
+    if(_S2622)
     {
 
-        uint32_t _S2621 = (kernelContext_211->globalParams_0->gAux1_0).Load<uint32_t >(80U);
+        uint32_t _S2624 = (kernelContext_211->globalParams_0->gAux1_0).Load<uint32_t >(80U);
 
-        uint32_t _S2622 = (kernelContext_211->globalParams_0->gAux1_0).Load<uint32_t >(84U);
+        uint32_t _S2625 = (kernelContext_211->globalParams_0->gAux1_0).Load<uint32_t >(84U);
 
-        (&c_43)->centre_1.x = (float64_0(Vector<uint32_t, 2> (_S2621, _S2622)) / q_24 + float(head_5->origin_0.x)) * h_41;
+        (&c_43)->centre_1.x = (float64_0(Vector<uint32_t, 2> (_S2624, _S2625)) / q_24 + float(head_5->origin_0.x)) * h_41;
 
-        uint32_t _S2623 = (kernelContext_211->globalParams_0->gAux1_0).Load<uint32_t >(88U);
+        uint32_t _S2626 = (kernelContext_211->globalParams_0->gAux1_0).Load<uint32_t >(88U);
 
-        uint32_t _S2624 = (kernelContext_211->globalParams_0->gAux1_0).Load<uint32_t >(92U);
+        uint32_t _S2627 = (kernelContext_211->globalParams_0->gAux1_0).Load<uint32_t >(92U);
 
-        (&c_43)->centre_1.y = (float64_0(Vector<uint32_t, 2> (_S2623, _S2624)) / q_24 + float(head_5->origin_0.y)) * h_41;
+        (&c_43)->centre_1.y = (float64_0(Vector<uint32_t, 2> (_S2626, _S2627)) / q_24 + float(head_5->origin_0.y)) * h_41;
 
-        uint32_t _S2625 = (kernelContext_211->globalParams_0->gAux1_0).Load<uint32_t >(96U);
+        uint32_t _S2628 = (kernelContext_211->globalParams_0->gAux1_0).Load<uint32_t >(96U);
 
-        uint32_t _S2626 = (kernelContext_211->globalParams_0->gAux1_0).Load<uint32_t >(100U);
+        uint32_t _S2629 = (kernelContext_211->globalParams_0->gAux1_0).Load<uint32_t >(100U);
 
-        (&c_43)->centre_1.z = (float64_0(Vector<uint32_t, 2> (_S2625, _S2626)) / q_24 + float(head_5->origin_0.z)) * h_41;
+        (&c_43)->centre_1.z = (float64_0(Vector<uint32_t, 2> (_S2628, _S2629)) / q_24 + float(head_5->origin_0.z)) * h_41;
 
     }
 
@@ -26592,10 +26637,10 @@ static float farAt_0(FarCharge_0 * c_44, Vector<float, 3>  x_41, KernelContext_0
 }
 
 
-void _StaticNodeCS(void* _S2627, void* entryPointParams_44, void* globalParams_45)
+void _StaticNodeCS(void* _S2630, void* entryPointParams_44, void* globalParams_45)
 {
 
-    ComputeThreadVaryingInput * _S2628 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2627));
+    ComputeThreadVaryingInput * _S2631 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2630));
 
     KernelContext_0 kernelContext_213;
 
@@ -26605,33 +26650,33 @@ void _StaticNodeCS(void* _S2627, void* entryPointParams_44, void* globalParams_4
 
     (&kernelContext_213)->sTableBase_0 = 0U;
 
-    uint32_t _S2629 = threadIndex_0(_S2628->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2628->groupThreadID, 64U, &kernelContext_213);
+    uint32_t _S2632 = threadIndex_0(_S2631->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2631->groupThreadID, 64U, &kernelContext_213);
 
-    GridHead_0 _S2630 = gridHead_0(false, &kernelContext_213);
+    GridHead_0 _S2633 = gridHead_0(false, &kernelContext_213);
 
 
-    if((_S2629 >> int(6)) >= (U32_min((_S2630.count_0), ((&kernelContext_213)->globalParams_0->Look_0->gFlag2_0.w))))
+    if((_S2632 >> int(6)) >= (U32_min((_S2633.count_0), ((&kernelContext_213)->globalParams_0->Look_0->gFlag2_0.w))))
     {
 
         return;
     }
 
-    Vector<int32_t, 3>  _S2631 = gridCoordinates_0(false, _S2629, &kernelContext_213);
+    Vector<int32_t, 3>  _S2634 = gridCoordinates_0(false, _S2632, &kernelContext_213);
 
-    Vector<int32_t, 3>  world_6 = _S2631 + _S2630.origin_0;
+    Vector<int32_t, 3>  world_6 = _S2634 + _S2633.origin_0;
 
-    bool _S2632 = gridSolid_0(world_6, &kernelContext_213);
+    bool _S2635 = gridSolid_0(world_6, &kernelContext_213);
 
-    uint32_t _S2633 = _S2629 * 12U;
+    uint32_t _S2636 = _S2632 * 12U;
 
-    uint32_t _S2634 = ((&kernelContext_213)->globalParams_0->gOut_0).Load<uint32_t >(uint32_t(int32_t((_S2633 + 4U) * 4U)));
+    uint32_t _S2637 = ((&kernelContext_213)->globalParams_0->gOut_0).Load<uint32_t >(uint32_t(int32_t((_S2636 + 4U) * 4U)));
 
     bool unknown_1;
 
-    if(_S2634 <= 4U)
+    if(_S2637 <= 4U)
     {
 
-        unknown_1 = !_S2632;
+        unknown_1 = !_S2635;
 
     }
     else
@@ -26640,11 +26685,11 @@ void _StaticNodeCS(void* _S2627, void* entryPointParams_44, void* globalParams_4
         unknown_1 = false;
 
     }
-    uint32_t _S2635 = (_S2633 + 1U) * 4U;
+    uint32_t _S2638 = (_S2636 + 1U) * 4U;
 
     uint32_t e_10;
 
-    if(_S2632)
+    if(_S2635)
     {
 
         e_10 = 1U;
@@ -26657,31 +26702,31 @@ void _StaticNodeCS(void* _S2627, void* entryPointParams_44, void* globalParams_4
 
     }
 
-    uint32_t _S2636;
+    uint32_t _S2639;
 
     if(unknown_1)
     {
 
-        _S2636 = 2U;
+        _S2639 = 2U;
 
     }
     else
     {
 
-        _S2636 = 0U;
+        _S2639 = 0U;
 
     }
 
-    (&kernelContext_213)->globalParams_0->gOut_0.Store(_S2635,e_10 | _S2636);
+    (&kernelContext_213)->globalParams_0->gOut_0.Store(_S2638,e_10 | _S2639);
 
-    GridHead_0 _S2637 = _S2630;
+    GridHead_0 _S2640 = _S2633;
 
-    FarCharge_0 _S2638 = farCharge_0(&_S2637, &kernelContext_213);
+    FarCharge_0 _S2641 = farCharge_0(&_S2640, &kernelContext_213);
 
     float source_1;
 
 
-    if(_S2632)
+    if(_S2635)
     {
 
         source_1 = 0.0f;
@@ -26690,21 +26735,21 @@ void _StaticNodeCS(void* _S2627, void* entryPointParams_44, void* globalParams_4
     else
     {
 
-        GridHead_0 _S2639 = _S2630;
+        GridHead_0 _S2642 = _S2633;
 
-        FarChargeD_0 _S2640 = farChargeD_0(false, &_S2639, &kernelContext_213);
+        FarChargeD_0 _S2643 = farChargeD_0(false, &_S2642, &kernelContext_213);
 
-        Vector<float, 3>  _S2641 = gridPosition_0(world_6, &kernelContext_213);
+        Vector<float, 3>  _S2644 = gridPosition_0(world_6, &kernelContext_213);
 
-        FarChargeD_0 _S2642 = _S2640;
+        FarChargeD_0 _S2645 = _S2643;
 
-        float _S2643 = farAtD_0(&_S2642, _S2641, &kernelContext_213);
+        float _S2646 = farAtD_0(&_S2645, _S2644, &kernelContext_213);
 
-        source_1 = _S2643;
+        source_1 = _S2646;
 
     }
 
-    storeNode_0(_S2629, 0U, source_1, &kernelContext_213);
+    storeNode_0(_S2632, 0U, source_1, &kernelContext_213);
 
 
     if(!unknown_1)
@@ -26713,15 +26758,15 @@ void _StaticNodeCS(void* _S2627, void* entryPointParams_44, void* globalParams_4
         return;
     }
 
-    float _S2644 = (U32_asfloat(((&kernelContext_213)->globalParams_0->Look_0->gOctaveSeeds_0[int(2)].y)));
+    float _S2647 = (U32_asfloat(((&kernelContext_213)->globalParams_0->Look_0->gOctaveSeeds_0[int(2)].y)));
 
-    Vector<uint32_t, 2>  _S2645 = sumIn_0(_S2629, 0U, &kernelContext_213);
+    Vector<uint32_t, 2>  _S2648 = sumIn_0(_S2632, 0U, &kernelContext_213);
 
-    float _S2646 = _S2644 * (float64_0(_S2645) / 4.294967296e+09f);
+    float _S2649 = _S2647 * (float64_0(_S2648) / 4.294967296e+09f);
 
     e_10 = 0U;
 
-    source_1 = _S2646;
+    source_1 = _S2649;
     for(;;)
     {
 
@@ -26734,11 +26779,11 @@ void _StaticNodeCS(void* _S2627, void* entryPointParams_44, void* globalParams_4
             break;
         }
 
-        int32_t _S2647;
+        int32_t _S2650;
         if(e_10 == 0U)
         {
 
-            _S2647 = int(-1);
+            _S2650 = int(-1);
 
         }
         else
@@ -26747,24 +26792,24 @@ void _StaticNodeCS(void* _S2627, void* entryPointParams_44, void* globalParams_4
             if(e_10 == 1U)
             {
 
-                _S2647 = int(1);
+                _S2650 = int(1);
 
             }
             else
             {
 
-                _S2647 = int(0);
+                _S2650 = int(0);
 
             }
 
         }
 
-        int32_t _S2648;
+        int32_t _S2651;
 
         if(e_10 == 2U)
         {
 
-            _S2648 = int(-1);
+            _S2651 = int(-1);
 
         }
         else
@@ -26773,24 +26818,24 @@ void _StaticNodeCS(void* _S2627, void* entryPointParams_44, void* globalParams_4
             if(e_10 == 3U)
             {
 
-                _S2648 = int(1);
+                _S2651 = int(1);
 
             }
             else
             {
 
-                _S2648 = int(0);
+                _S2651 = int(0);
 
             }
 
         }
 
-        int32_t _S2649;
+        int32_t _S2652;
 
         if(e_10 == 4U)
         {
 
-            _S2649 = int(-1);
+            _S2652 = int(-1);
 
         }
         else
@@ -26799,35 +26844,35 @@ void _StaticNodeCS(void* _S2627, void* entryPointParams_44, void* globalParams_4
             if(e_10 == 5U)
             {
 
-                _S2649 = int(1);
+                _S2652 = int(1);
 
             }
             else
             {
 
-                _S2649 = int(0);
+                _S2652 = int(0);
 
             }
 
         }
 
-        Vector<int32_t, 3>  step_11 = Vector<int32_t, 3> (_S2647, _S2648, _S2649);
-        Vector<int32_t, 3>  _S2650 = _S2631 + step_11;
+        Vector<int32_t, 3>  step_11 = Vector<int32_t, 3> (_S2650, _S2651, _S2652);
+        Vector<int32_t, 3>  _S2653 = _S2634 + step_11;
 
-        GridHead_0 _S2651 = _S2630;
+        GridHead_0 _S2654 = _S2633;
 
-        uint32_t _S2652 = gridNode_0(false, &_S2651, _S2650, &kernelContext_213);
+        uint32_t _S2655 = gridNode_0(false, &_S2654, _S2653, &kernelContext_213);
 
-        if(_S2652 == 4294967295U)
+        if(_S2655 == 4294967295U)
         {
 
-            Vector<float, 3>  _S2653 = gridPosition_0(world_6 + step_11, &kernelContext_213);
+            Vector<float, 3>  _S2656 = gridPosition_0(world_6 + step_11, &kernelContext_213);
 
-            FarCharge_0 _S2654 = _S2638;
+            FarCharge_0 _S2657 = _S2641;
 
-            float _S2655 = farAt_0(&_S2654, _S2653, &kernelContext_213);
+            float _S2658 = farAt_0(&_S2657, _S2656, &kernelContext_213);
 
-            source_1 = source_1 + _S2655;
+            source_1 = source_1 + _S2658;
 
         }
 
@@ -26835,7 +26880,7 @@ void _StaticNodeCS(void* _S2627, void* entryPointParams_44, void* globalParams_4
 
     }
 
-    storeNode_0(_S2629, 2U, source_1, &kernelContext_213);
+    storeNode_0(_S2632, 2U, source_1, &kernelContext_213);
 
     return;
 }
@@ -26844,9 +26889,9 @@ void _StaticNodeCS(void* _S2627, void* entryPointParams_44, void* globalParams_4
 static void staticFieldD_0(uint32_t at_38, GridHead_0 * head_6, Vector<int32_t, 3>  c_45, Vector<int32_t, 3>  world_7, KernelContext_0 * kernelContext_214)
 {
 
-    FarChargeD_0 _S2656 = farChargeD_0(false, head_6, kernelContext_214);
+    FarChargeD_0 _S2659 = farChargeD_0(false, head_6, kernelContext_214);
 
-    float _S2657 = nodeFloat_0(at_38, 0U, kernelContext_214);
+    float _S2660 = nodeFloat_0(at_38, 0U, kernelContext_214);
 
 
     FixedArray<float, 6>  phi_1;
@@ -26864,11 +26909,11 @@ static void staticFieldD_0(uint32_t at_38, GridHead_0 * head_6, Vector<int32_t, 
             break;
         }
 
-        int32_t _S2658;
+        int32_t _S2661;
         if(e_11 == 0U)
         {
 
-            _S2658 = int(-1);
+            _S2661 = int(-1);
 
         }
         else
@@ -26877,24 +26922,24 @@ static void staticFieldD_0(uint32_t at_38, GridHead_0 * head_6, Vector<int32_t, 
             if(e_11 == 1U)
             {
 
-                _S2658 = int(1);
+                _S2661 = int(1);
 
             }
             else
             {
 
-                _S2658 = int(0);
+                _S2661 = int(0);
 
             }
 
         }
 
-        int32_t _S2659;
+        int32_t _S2662;
 
         if(e_11 == 2U)
         {
 
-            _S2659 = int(-1);
+            _S2662 = int(-1);
 
         }
         else
@@ -26903,24 +26948,24 @@ static void staticFieldD_0(uint32_t at_38, GridHead_0 * head_6, Vector<int32_t, 
             if(e_11 == 3U)
             {
 
-                _S2659 = int(1);
+                _S2662 = int(1);
 
             }
             else
             {
 
-                _S2659 = int(0);
+                _S2662 = int(0);
 
             }
 
         }
 
-        int32_t _S2660;
+        int32_t _S2663;
 
         if(e_11 == 4U)
         {
 
-            _S2660 = int(-1);
+            _S2663 = int(-1);
 
         }
         else
@@ -26929,81 +26974,81 @@ static void staticFieldD_0(uint32_t at_38, GridHead_0 * head_6, Vector<int32_t, 
             if(e_11 == 5U)
             {
 
-                _S2660 = int(1);
+                _S2663 = int(1);
 
             }
             else
             {
 
-                _S2660 = int(0);
+                _S2663 = int(0);
 
             }
 
         }
 
-        Vector<int32_t, 3>  step_12 = Vector<int32_t, 3> (_S2658, _S2659, _S2660);
+        Vector<int32_t, 3>  step_12 = Vector<int32_t, 3> (_S2661, _S2662, _S2663);
 
-        uint32_t _S2661 = gridNode_0(false, head_6, c_45 + step_12, kernelContext_214);
+        uint32_t _S2664 = gridNode_0(false, head_6, c_45 + step_12, kernelContext_214);
 
-        float _S2662;
+        float _S2665;
 
-        if(_S2661 == 4294967295U)
+        if(_S2664 == 4294967295U)
         {
 
-            Vector<float, 3>  _S2663 = gridPosition_0(world_7 + step_12, kernelContext_214);
+            Vector<float, 3>  _S2666 = gridPosition_0(world_7 + step_12, kernelContext_214);
 
-            FarChargeD_0 _S2664 = _S2656;
+            FarChargeD_0 _S2667 = _S2659;
 
-            float _S2665 = farAtD_0(&_S2664, _S2663, kernelContext_214);
+            float _S2668 = farAtD_0(&_S2667, _S2666, kernelContext_214);
 
-            _S2662 = _S2665;
+            _S2665 = _S2668;
 
         }
         else
         {
 
-            uint32_t _S2666 = nodeFlags_0(_S2661, kernelContext_214);
+            uint32_t _S2669 = nodeFlags_0(_S2664, kernelContext_214);
 
-            if((_S2666 & 1U) != 0U)
+            if((_S2669 & 1U) != 0U)
             {
 
-                _S2662 = _S2657;
+                _S2665 = _S2660;
 
             }
             else
             {
 
-                float _S2667 = nodeFloat_0(_S2661, 0U, kernelContext_214);
+                float _S2670 = nodeFloat_0(_S2664, 0U, kernelContext_214);
 
-                _S2662 = _S2667;
+                _S2665 = _S2670;
 
             }
 
         }
 
-        phi_1[e_11] = _S2662;
+        phi_1[e_11] = _S2665;
 
         e_11 = e_11 + 1U;
 
     }
 
-    uint32_t _S2668 = at_38 * 12U;
+    uint32_t _S2671 = at_38 * 12U;
 
-    uint32_t _S2669 = (_S2668 + 5U) * 4U;
+    uint32_t _S2672 = (_S2671 + 5U) * 4U;
 
-    Vector<uint32_t, 3>  _S2670 = asuint_0(Vector<float, 3> (phi_1[int(0)] - phi_1[int(1)], phi_1[int(2)] - phi_1[int(3)], phi_1[int(4)] - phi_1[int(5)]) * (Vector<float, 3> )(U32_asfloat((kernelContext_214->globalParams_0->Look_0->gOctaveSeeds_0[int(2)].x))));
+    Vector<uint32_t, 3>  _S2673 = asuint_0(Vector<float, 3> (phi_1[int(0)] - phi_1[int(1)], phi_1[int(2)] - phi_1[int(3)], phi_1[int(4)] - phi_1[int(5)]) * (Vector<float, 3> )(U32_asfloat((kernelContext_214->globalParams_0->Look_0->gOctaveSeeds_0[int(2)].x))));
 
-    RWByteAddressBuffer _S2671 = kernelContext_214->globalParams_0->gOut_0;
+    RWByteAddressBuffer _S2674 = kernelContext_214->globalParams_0->gOut_0;
 
-    kernelContext_214->globalParams_0->gOut_0.Store(_S2669,_S2670.x);
+    kernelContext_214->globalParams_0->gOut_0.Store(_S2672,_S2673.x);
 
-    _S2671.Store(_S2669 + 4U,_S2670.y);
+    _S2674.Store(_S2672 + 4U,_S2673.y);
 
-    _S2671.Store(_S2669 + 8U,_S2670.z);
+    _S2674.Store(_S2672 + 8U,_S2673.z);
 
-    Vector<uint32_t, 2>  _S2672 = sumIn_0(at_38, 0U, kernelContext_214);
+    Vector<uint32_t, 2>  _S2675 = sumIn_0(at_38, 0U, kernelContext_214);
 
-    if(zero64_0(_S2672))
+    if(zero64_0(_S2675))
     {
 
         return;
@@ -27034,9 +27079,9 @@ static void staticFieldD_0(uint32_t at_38, GridHead_0 * head_6, Vector<int32_t, 
 
         Vector<int32_t, 3>  off_2 = cornerOf_0(d_46);
 
-        uint32_t _S2673 = gridNode_0(false, head_6, c_45 - off_2, kernelContext_214);
+        uint32_t _S2676 = gridNode_0(false, head_6, c_45 - off_2, kernelContext_214);
 
-        if(_S2673 == 4294967295U)
+        if(_S2676 == 4294967295U)
         {
 
             d_46 = d_46 + 1U;
@@ -27044,11 +27089,11 @@ static void staticFieldD_0(uint32_t at_38, GridHead_0 * head_6, Vector<int32_t, 
             continue;
         }
 
-        Vector<uint32_t, 2>  _S2674 = sumIn_0(_S2673, 1U, kernelContext_214);
+        Vector<uint32_t, 2>  _S2677 = sumIn_0(_S2676, 1U, kernelContext_214);
 
 
 
-        double m_21 = double64_0(_S2674);
+        double m_21 = double64_0(_S2677);
         if(!(m_21 > 0.0))
         {
 
@@ -27059,16 +27104,16 @@ static void staticFieldD_0(uint32_t at_38, GridHead_0 * head_6, Vector<int32_t, 
 
         sum_14[int(0)] = sum_14[int(0)] + m_21;
 
-        Vector<uint32_t, 2>  _S2675 = sumIn_0(_S2673, 2U, kernelContext_214);
-        sum_14[1U] = sum_14[1U] + (double64_0(_S2675) - m_21 * double(off_2.x));
+        Vector<uint32_t, 2>  _S2678 = sumIn_0(_S2676, 2U, kernelContext_214);
+        sum_14[1U] = sum_14[1U] + (double64_0(_S2678) - m_21 * double(off_2.x));
 
-        Vector<uint32_t, 2>  _S2676 = sumIn_0(_S2673, 3U, kernelContext_214);
+        Vector<uint32_t, 2>  _S2679 = sumIn_0(_S2676, 3U, kernelContext_214);
 
-        sum_14[2U] = sum_14[2U] + (double64_0(_S2676) - m_21 * double(off_2.y));
+        sum_14[2U] = sum_14[2U] + (double64_0(_S2679) - m_21 * double(off_2.y));
 
-        Vector<uint32_t, 2>  _S2677 = sumIn_0(_S2673, 4U, kernelContext_214);
+        Vector<uint32_t, 2>  _S2680 = sumIn_0(_S2676, 4U, kernelContext_214);
 
-        sum_14[3U] = sum_14[3U] + (double64_0(_S2677) - m_21 * double(off_2.z));
+        sum_14[3U] = sum_14[3U] + (double64_0(_S2680) - m_21 * double(off_2.z));
 
         d_46 = d_46 + 1U;
 
@@ -27080,30 +27125,30 @@ static void staticFieldD_0(uint32_t at_38, GridHead_0 * head_6, Vector<int32_t, 
         return;
     }
 
-    Vector<float, 3>  _S2678 = gridPosition_0(world_7, kernelContext_214);
+    Vector<float, 3>  _S2681 = gridPosition_0(world_7, kernelContext_214);
 
-    uint32_t _S2679 = (_S2668 + 8U) * 4U;
+    uint32_t _S2682 = (_S2671 + 8U) * 4U;
 
-    Vector<uint32_t, 3>  _S2680 = asuint_0(_S2678 + Vector<float, 3> (float(sum_14[int(1)] / sum_14[int(0)]), float(sum_14[int(2)] / sum_14[int(0)]), float(sum_14[int(3)] / sum_14[int(0)])) * (Vector<float, 3> )kernelContext_214->globalParams_0->Look_0->gValue_0.y);
+    Vector<uint32_t, 3>  _S2683 = asuint_0(_S2681 + Vector<float, 3> (float(sum_14[int(1)] / sum_14[int(0)]), float(sum_14[int(2)] / sum_14[int(0)]), float(sum_14[int(3)] / sum_14[int(0)])) * (Vector<float, 3> )kernelContext_214->globalParams_0->Look_0->gValue_0.y);
 
-    RWByteAddressBuffer _S2681 = kernelContext_214->globalParams_0->gOut_0;
+    RWByteAddressBuffer _S2684 = kernelContext_214->globalParams_0->gOut_0;
 
-    kernelContext_214->globalParams_0->gOut_0.Store(_S2679,_S2680.x);
+    kernelContext_214->globalParams_0->gOut_0.Store(_S2682,_S2683.x);
 
-    _S2681.Store(_S2679 + 4U,_S2680.y);
+    _S2684.Store(_S2682 + 4U,_S2683.y);
 
-    _S2681.Store(_S2679 + 8U,_S2680.z);
+    _S2684.Store(_S2682 + 8U,_S2683.z);
 
-    storeNode_0(at_38, 11U, float(double64_0(_S2672) / 4.294967296e+09), kernelContext_214);
+    storeNode_0(at_38, 11U, float(double64_0(_S2675) / 4.294967296e+09), kernelContext_214);
 
     return;
 }
 
 
-void _StaticFieldCS(void* _S2682, void* entryPointParams_45, void* globalParams_46)
+void _StaticFieldCS(void* _S2685, void* entryPointParams_45, void* globalParams_46)
 {
 
-    ComputeThreadVaryingInput * _S2683 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2682));
+    ComputeThreadVaryingInput * _S2686 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2685));
 
     KernelContext_0 kernelContext_215;
 
@@ -27113,31 +27158,31 @@ void _StaticFieldCS(void* _S2682, void* entryPointParams_45, void* globalParams_
 
     (&kernelContext_215)->sTableBase_0 = 0U;
 
-    uint32_t _S2684 = threadIndex_0(_S2683->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2683->groupThreadID, 64U, &kernelContext_215);
+    uint32_t _S2687 = threadIndex_0(_S2686->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2686->groupThreadID, 64U, &kernelContext_215);
 
-    GridHead_0 _S2685 = gridHead_0(false, &kernelContext_215);
+    GridHead_0 _S2688 = gridHead_0(false, &kernelContext_215);
 
 
-    if((_S2684 >> int(6)) >= (U32_min((_S2685.count_0), ((&kernelContext_215)->globalParams_0->Look_0->gFlag2_0.w))))
+    if((_S2687 >> int(6)) >= (U32_min((_S2688.count_0), ((&kernelContext_215)->globalParams_0->Look_0->gFlag2_0.w))))
     {
 
         return;
     }
 
-    uint32_t _S2686 = nodeFlags_0(_S2684, &kernelContext_215);
-    if((_S2686 & 1U) != 0U)
+    uint32_t _S2689 = nodeFlags_0(_S2687, &kernelContext_215);
+    if((_S2689 & 1U) != 0U)
     {
 
         return;
     }
 
-    Vector<int32_t, 3>  _S2687 = gridCoordinates_0(false, _S2684, &kernelContext_215);
+    Vector<int32_t, 3>  _S2690 = gridCoordinates_0(false, _S2687, &kernelContext_215);
 
-    Vector<int32_t, 3>  world_8 = _S2687 + _S2685.origin_0;
+    Vector<int32_t, 3>  world_8 = _S2690 + _S2688.origin_0;
 
-    GridHead_0 _S2688 = _S2685;
+    GridHead_0 _S2691 = _S2688;
 
-    staticFieldD_0(_S2684, &_S2688, _S2687, world_8, &kernelContext_215);
+    staticFieldD_0(_S2687, &_S2691, _S2690, world_8, &kernelContext_215);
 
 
 
@@ -27145,7 +27190,7 @@ void _StaticFieldCS(void* _S2682, void* entryPointParams_45, void* globalParams_
 }
 
 
-static Vector<float, 3>  staticMove_0(GridHead_0 * head_7, Vector<float, 3>  p_62, Vector<float, 3>  before_3, float q_25, Vector<float, 3>  own_6, float most_1, KernelContext_0 * kernelContext_216)
+static Vector<float, 3>  staticMove_0(GridHead_0 * head_7, Vector<float, 3>  p_62, Vector<float, 3>  before_3, float q_25, Vector<float, 3>  own_7, float most_1, KernelContext_0 * kernelContext_216)
 {
 
     Vector<float, 3>  heading_0 = p_62 - before_3;
@@ -27164,12 +27209,12 @@ static Vector<float, 3>  staticMove_0(GridHead_0 * head_7, Vector<float, 3>  p_6
         heading_1 = Vector<float, 3> (0.0f, 0.0f, 0.0f);
 
     }
-    Vector<float, 3>  _S2689 = (own_6 - heading_1 * (Vector<float, 3> )dot_0(own_6, heading_1)) * (Vector<float, 3> )(0.25f * kernelContext_216->globalParams_0->Look_0->gValue_0.y);
+    Vector<float, 3>  _S2692 = (own_7 - heading_1 * (Vector<float, 3> )dot_0(own_7, heading_1)) * (Vector<float, 3> )(0.25f * kernelContext_216->globalParams_0->Look_0->gValue_0.y);
 
-    Vector<int32_t, 3>  _S2690 = head_7->origin_0;
+    Vector<int32_t, 3>  _S2693 = head_7->origin_0;
     FixedArray<float, 8>  weights_3;
 
-    Vector<int32_t, 3>  _S2691 = cellWeights_0(p_62, head_7->origin_0, &weights_3, kernelContext_216);
+    Vector<int32_t, 3>  _S2694 = cellWeights_0(p_62, head_7->origin_0, &weights_3, kernelContext_216);
 
     Vector<float, 3>  push_1 = Vector<float, 3> (0.0f, 0.0f, 0.0f);
 
@@ -27192,11 +27237,11 @@ static Vector<float, 3>  staticMove_0(GridHead_0 * head_7, Vector<float, 3>  p_6
             break;
         }
 
-        Vector<int32_t, 3>  corner_2 = _S2691 + cornerOf_0(d_47);
+        Vector<int32_t, 3>  corner_2 = _S2694 + cornerOf_0(d_47);
 
-        uint32_t _S2692 = gridNode_0(false, head_7, corner_2, kernelContext_216);
+        uint32_t _S2695 = gridNode_0(false, head_7, corner_2, kernelContext_216);
 
-        if(_S2692 == 4294967295U)
+        if(_S2695 == 4294967295U)
         {
 
             d_47 = d_47 + 1U;
@@ -27207,19 +27252,19 @@ static Vector<float, 3>  staticMove_0(GridHead_0 * head_7, Vector<float, 3>  p_6
 
         float w_62 = weights_3[d_47];
 
-        Vector<float, 3>  _S2693 = nodeIn3_0(_S2692, 5U, kernelContext_216);
-        Vector<float, 3>  _S2694 = push_2 + _S2693 * (Vector<float, 3> )weights_3[d_47];
+        Vector<float, 3>  _S2696 = nodeIn3_0(_S2695, 5U, kernelContext_216);
+        Vector<float, 3>  _S2697 = push_2 + _S2696 * (Vector<float, 3> )weights_3[d_47];
 
-        float _S2695 = nodeIn_0(_S2692, 11U, kernelContext_216);
+        float _S2698 = nodeIn_0(_S2695, 11U, kernelContext_216);
 
         Vector<float, 3>  local_2;
 
-        if(_S2695 > 0.0f)
+        if(_S2698 > 0.0f)
         {
 
-            Vector<float, 3>  _S2696 = nodeIn3_0(_S2692, 8U, kernelContext_216);
+            Vector<float, 3>  _S2699 = nodeIn3_0(_S2695, 8U, kernelContext_216);
 
-            local_2 = local_1 + (p_62 - _S2696 + _S2689) * (Vector<float, 3> )(w_62 * _S2695);
+            local_2 = local_1 + (p_62 - _S2699 + _S2692) * (Vector<float, 3> )(w_62 * _S2698);
 
         }
         else
@@ -27231,10 +27276,10 @@ static Vector<float, 3>  staticMove_0(GridHead_0 * head_7, Vector<float, 3>  p_6
         float wallHeight_3;
         Vector<float, 3>  wallNormal_3;
 
-        bool _S2697 = gridWall_0(corner_2 + _S2690, &wallHeight_3, &wallNormal_3, kernelContext_216);
+        bool _S2700 = gridWall_0(corner_2 + _S2693, &wallHeight_3, &wallNormal_3, kernelContext_216);
 
         Vector<float, 3>  normal_8;
-        if(_S2697)
+        if(_S2700)
         {
 
             normal_8 = normal_7 + wallNormal_3 * (Vector<float, 3> )w_62;
@@ -27247,7 +27292,7 @@ static Vector<float, 3>  staticMove_0(GridHead_0 * head_7, Vector<float, 3>  p_6
 
         }
 
-        push_2 = _S2694;
+        push_2 = _S2697;
 
         local_1 = local_2;
 
@@ -27307,21 +27352,21 @@ static Vector<float, 3>  staticMove_0(GridHead_0 * head_7, Vector<float, 3>  p_6
     Vector<float, 3>  move_4 = push_2 * (Vector<float, 3> )q_25;
     float len_11 = len3_0(move_4);
 
-    bool _S2698;
+    bool _S2701;
     if(!(len_11 > 0.0f))
     {
 
-        _S2698 = true;
+        _S2701 = true;
 
     }
     else
     {
 
-        _S2698 = !finiteFloat_0(len_11);
+        _S2701 = !finiteFloat_0(len_11);
 
     }
 
-    if(_S2698)
+    if(_S2701)
     {
 
         return push_1;
@@ -27334,18 +27379,18 @@ static Vector<float, 3>  staticMove_0(GridHead_0 * head_7, Vector<float, 3>  p_6
 static void staticBeyondAdd_0(uint32_t begin_30, uint32_t n_52, uint32_t j_35, float length_3, FixedArray<double, 6>  * sum_15, KernelContext_0 * kernelContext_217)
 {
 
-    uint32_t _S2699 = begin_30 + j_35;
+    uint32_t _S2702 = begin_30 + j_35;
 
-    Vector<float, 3>  _S2700 = loadPoint_0(_S2699, kernelContext_217);
+    Vector<float, 3>  _S2703 = loadPoint_0(_S2702, kernelContext_217);
 
     float next_2;
 
     if((j_35 + 1U) < n_52)
     {
 
-        Vector<float, 3>  _S2701 = loadPoint_0(_S2699 + 1U, kernelContext_217);
+        Vector<float, 3>  _S2704 = loadPoint_0(_S2702 + 1U, kernelContext_217);
 
-        next_2 = lengthExact_0(_S2701 - _S2700);
+        next_2 = lengthExact_0(_S2704 - _S2703);
 
     }
     else
@@ -27355,23 +27400,23 @@ static void staticBeyondAdd_0(uint32_t begin_30, uint32_t n_52, uint32_t j_35, f
 
     }
 
-    Vector<float, 3>  _S2702 = loadPoint_0(_S2699 - 1U, kernelContext_217);
-    float share_3 = 0.5f * (lengthExact_0(_S2700 - _S2702) + next_2) / length_3;
-    uint32_t _S2703 = _S2699 * 12U;
+    Vector<float, 3>  _S2705 = loadPoint_0(_S2702 - 1U, kernelContext_217);
+    float share_3 = 0.5f * (lengthExact_0(_S2703 - _S2705) + next_2) / length_3;
+    uint32_t _S2706 = _S2702 * 12U;
 
-    RWByteAddressBuffer _S2704 = kernelContext_217->globalParams_0->gOut2_0;
+    RWByteAddressBuffer _S2707 = kernelContext_217->globalParams_0->gOut2_0;
 
-    uint32_t _S2705 = (kernelContext_217->globalParams_0->gOut2_0).Load<uint32_t >(_S2703);
+    uint32_t _S2708 = (kernelContext_217->globalParams_0->gOut2_0).Load<uint32_t >(_S2706);
 
-    uint32_t _S2706 = (_S2704).Load<uint32_t >(_S2703 + 4U);
+    uint32_t _S2709 = (_S2707).Load<uint32_t >(_S2706 + 4U);
 
-    uint32_t _S2707 = (_S2704).Load<uint32_t >(_S2703 + 8U);
+    uint32_t _S2710 = (_S2707).Load<uint32_t >(_S2706 + 8U);
 
-    Vector<float, 3>  fw_1 = asfloat_0(Vector<uint32_t, 3> (_S2705, _S2706, _S2707)) * (Vector<float, 3> )share_3;
+    Vector<float, 3>  fw_1 = asfloat_0(Vector<uint32_t, 3> (_S2708, _S2709, _S2710)) * (Vector<float, 3> )share_3;
 
-    Vector<float, 3>  _S2708 = loadPoint_0(begin_30, kernelContext_217);
+    Vector<float, 3>  _S2711 = loadPoint_0(begin_30, kernelContext_217);
 
-    Vector<float, 3>  t_51 = cross_0(_S2700 - _S2708, fw_1);
+    Vector<float, 3>  t_51 = cross_0(_S2703 - _S2711, fw_1);
     (*sum_15)[int(0)] = (*sum_15)[int(0)] + double(fw_1.x);
     (*sum_15)[int(1)] = (*sum_15)[int(1)] + double(fw_1.y);
     (*sum_15)[int(2)] = (*sum_15)[int(2)] + double(fw_1.z);
@@ -27387,7 +27432,7 @@ static void staticBeyondAdd_0(uint32_t begin_30, uint32_t n_52, uint32_t j_35, f
 static void staticBendD_0(uint32_t begin_31, uint32_t n_53, float length_4, KernelContext_0 * kernelContext_218)
 {
 
-    bool _S2709;
+    bool _S2712;
     FixedArray<FixedArray<double, 6> , 128>  kept_4;
     FixedArray<double, 6>  sum_16;
 
@@ -27402,7 +27447,7 @@ static void staticBendD_0(uint32_t begin_31, uint32_t n_53, float length_4, Kern
     sum_16[int(4)] = 0.0;
 
     sum_16[int(5)] = 0.0;
-    uint32_t _S2710 = (n_53 + 32U - 1U) / 32U;
+    uint32_t _S2713 = (n_53 + 32U - 1U) / 32U;
 
     uint32_t j_36 = n_53;
     for(;;)
@@ -27419,35 +27464,35 @@ static void staticBendD_0(uint32_t begin_31, uint32_t n_53, float length_4, Kern
             break;
         }
 
-        uint32_t _S2711 = j_37 + 1U;
+        uint32_t _S2714 = j_37 + 1U;
 
-        if((_S2711 % 32U) == 0U)
+        if((_S2714 % 32U) == 0U)
         {
 
-            _S2709 = (_S2711 / 32U) < 128U;
+            _S2712 = (_S2714 / 32U) < 128U;
 
         }
         else
         {
 
-            _S2709 = false;
+            _S2712 = false;
 
         }
 
-        if(_S2709)
+        if(_S2712)
         {
 
-            kept_4[_S2711 / 32U][0U] = sum_16[0U];
+            kept_4[_S2714 / 32U][0U] = sum_16[0U];
 
-            kept_4[_S2711 / 32U][1U] = sum_16[1U];
+            kept_4[_S2714 / 32U][1U] = sum_16[1U];
 
-            kept_4[_S2711 / 32U][2U] = sum_16[2U];
+            kept_4[_S2714 / 32U][2U] = sum_16[2U];
 
-            kept_4[_S2711 / 32U][3U] = sum_16[3U];
+            kept_4[_S2714 / 32U][3U] = sum_16[3U];
 
-            kept_4[_S2711 / 32U][4U] = sum_16[4U];
+            kept_4[_S2714 / 32U][4U] = sum_16[4U];
 
-            kept_4[_S2711 / 32U][5U] = sum_16[5U];
+            kept_4[_S2714 / 32U][5U] = sum_16[5U];
 
         }
 
@@ -27457,12 +27502,12 @@ static void staticBendD_0(uint32_t begin_31, uint32_t n_53, float length_4, Kern
 
     }
 
-    Vector<float, 3>  _S2712 = loadPoint_0(begin_31, kernelContext_218);
+    Vector<float, 3>  _S2715 = loadPoint_0(begin_31, kernelContext_218);
 
-    double _S2713 = double(length_4);
+    double _S2716 = double(length_4);
 
-    double _S2714 = _S2713 * _S2713 * _S2713;
-    Vector<float, 4>  _S2715 = Vector<float, 4> (0.0f, 0.0f, 0.0f, 1.0f);
+    double _S2717 = _S2716 * _S2716 * _S2716;
+    Vector<float, 4>  _S2718 = Vector<float, 4> (0.0f, 0.0f, 0.0f, 1.0f);
 
 
     FixedArray<FixedArray<double, 6> , 32>  beyond_1;
@@ -27471,13 +27516,13 @@ static void staticBendD_0(uint32_t begin_31, uint32_t n_53, float length_4, Kern
 
     uint32_t first_7 = n_53;
 
-    Vector<float, 4>  carried_3 = _S2715;
+    Vector<float, 4>  carried_3 = _S2718;
 
-    Vector<float, 3>  bent_0 = _S2712;
+    Vector<float, 3>  bent_0 = _S2715;
     for(;;)
     {
 
-        if(k_47 < _S2710)
+        if(k_47 < _S2713)
         {
         }
         else
@@ -27485,86 +27530,35 @@ static void staticBendD_0(uint32_t begin_31, uint32_t n_53, float length_4, Kern
 
             break;
         }
-        uint32_t _S2716 = k_47 * 32U;
+        uint32_t _S2719 = k_47 * 32U;
 
-        uint32_t _S2717 = (U32_max((_S2716), (1U)));
+        uint32_t _S2720 = (U32_max((_S2719), (1U)));
 
-        uint32_t _S2718 = k_47 + 1U;
+        uint32_t _S2721 = k_47 + 1U;
 
-        uint32_t _S2719 = (U32_min((_S2718 * 32U), (n_53)));
+        uint32_t _S2722 = (U32_min((_S2721 * 32U), (n_53)));
         FixedArray<double, 6>  run_0;
-        if(_S2718 < 128U)
+        if(_S2721 < 128U)
         {
 
-            _S2709 = true;
+            _S2712 = true;
 
         }
         else
         {
 
-            _S2709 = _S2719 == n_53;
+            _S2712 = _S2722 == n_53;
 
         }
 
-        if(_S2709)
+        if(_S2712)
         {
 
-            bool _S2720 = _S2719 == n_53;
-
-            double _S2721;
-
-            if(_S2720)
-            {
-
-                _S2721 = 0.0;
-
-            }
-            else
-            {
-
-                _S2721 = kept_4[_S2718][0U];
-
-            }
-
-            run_0[0U] = _S2721;
-
-            double _S2722;
-
-            if(_S2720)
-            {
-
-                _S2722 = 0.0;
-
-            }
-            else
-            {
-
-                _S2722 = kept_4[_S2718][1U];
-
-            }
-
-            run_0[1U] = _S2722;
-
-            double _S2723;
-
-            if(_S2720)
-            {
-
-                _S2723 = 0.0;
-
-            }
-            else
-            {
-
-                _S2723 = kept_4[_S2718][2U];
-
-            }
-
-            run_0[2U] = _S2723;
+            bool _S2723 = _S2722 == n_53;
 
             double _S2724;
 
-            if(_S2720)
+            if(_S2723)
             {
 
                 _S2724 = 0.0;
@@ -27573,15 +27567,15 @@ static void staticBendD_0(uint32_t begin_31, uint32_t n_53, float length_4, Kern
             else
             {
 
-                _S2724 = kept_4[_S2718][3U];
+                _S2724 = kept_4[_S2721][0U];
 
             }
 
-            run_0[3U] = _S2724;
+            run_0[0U] = _S2724;
 
             double _S2725;
 
-            if(_S2720)
+            if(_S2723)
             {
 
                 _S2725 = 0.0;
@@ -27590,15 +27584,15 @@ static void staticBendD_0(uint32_t begin_31, uint32_t n_53, float length_4, Kern
             else
             {
 
-                _S2725 = kept_4[_S2718][4U];
+                _S2725 = kept_4[_S2721][1U];
 
             }
 
-            run_0[4U] = _S2725;
+            run_0[1U] = _S2725;
 
             double _S2726;
 
-            if(_S2720)
+            if(_S2723)
             {
 
                 _S2726 = 0.0;
@@ -27607,11 +27601,62 @@ static void staticBendD_0(uint32_t begin_31, uint32_t n_53, float length_4, Kern
             else
             {
 
-                _S2726 = kept_4[_S2718][5U];
+                _S2726 = kept_4[_S2721][2U];
 
             }
 
-            run_0[5U] = _S2726;
+            run_0[2U] = _S2726;
+
+            double _S2727;
+
+            if(_S2723)
+            {
+
+                _S2727 = 0.0;
+
+            }
+            else
+            {
+
+                _S2727 = kept_4[_S2721][3U];
+
+            }
+
+            run_0[3U] = _S2727;
+
+            double _S2728;
+
+            if(_S2723)
+            {
+
+                _S2728 = 0.0;
+
+            }
+            else
+            {
+
+                _S2728 = kept_4[_S2721][4U];
+
+            }
+
+            run_0[4U] = _S2728;
+
+            double _S2729;
+
+            if(_S2723)
+            {
+
+                _S2729 = 0.0;
+
+            }
+            else
+            {
+
+                _S2729 = kept_4[_S2721][5U];
+
+            }
+
+            run_0[5U] = _S2729;
 
         }
         else
@@ -27634,7 +27679,7 @@ static void staticBendD_0(uint32_t begin_31, uint32_t n_53, float length_4, Kern
 
                 uint32_t j_38 = j_36 - 1U;
 
-                if(j_36 > _S2719)
+                if(j_36 > _S2722)
                 {
                 }
                 else
@@ -27651,14 +27696,14 @@ static void staticBendD_0(uint32_t begin_31, uint32_t n_53, float length_4, Kern
 
         }
 
-        j_36 = _S2719;
+        j_36 = _S2722;
 
         for(;;)
         {
 
             uint32_t j_39 = j_36 - 1U;
 
-            if(j_36 > _S2717)
+            if(j_36 > _S2720)
             {
             }
             else
@@ -27669,23 +27714,23 @@ static void staticBendD_0(uint32_t begin_31, uint32_t n_53, float length_4, Kern
 
             staticBeyondAdd_0(begin_31, n_53, j_39, length_4, &run_0, kernelContext_218);
 
-            beyond_1[j_39 - _S2716][0U] = run_0[0U];
+            beyond_1[j_39 - _S2719][0U] = run_0[0U];
 
-            beyond_1[j_39 - _S2716][1U] = run_0[1U];
+            beyond_1[j_39 - _S2719][1U] = run_0[1U];
 
-            beyond_1[j_39 - _S2716][2U] = run_0[2U];
+            beyond_1[j_39 - _S2719][2U] = run_0[2U];
 
-            beyond_1[j_39 - _S2716][3U] = run_0[3U];
+            beyond_1[j_39 - _S2719][3U] = run_0[3U];
 
-            beyond_1[j_39 - _S2716][4U] = run_0[4U];
+            beyond_1[j_39 - _S2719][4U] = run_0[4U];
 
-            beyond_1[j_39 - _S2716][5U] = run_0[5U];
+            beyond_1[j_39 - _S2719][5U] = run_0[5U];
 
             j_36 = j_39;
 
         }
 
-        uint32_t i_81 = _S2717;
+        uint32_t i_81 = _S2720;
 
         Vector<float, 4>  carried_4 = carried_3;
 
@@ -27698,7 +27743,7 @@ static void staticBendD_0(uint32_t begin_31, uint32_t n_53, float length_4, Kern
         for(;;)
         {
 
-            if(i_81 < _S2719)
+            if(i_81 < _S2722)
             {
             }
             else
@@ -27707,35 +27752,35 @@ static void staticBendD_0(uint32_t begin_31, uint32_t n_53, float length_4, Kern
                 break;
             }
 
-            uint32_t _S2727 = begin_31 + i_81;
+            uint32_t _S2730 = begin_31 + i_81;
 
-            Vector<float, 3>  _S2728 = loadPoint_0(_S2727, kernelContext_218);
+            Vector<float, 3>  _S2731 = loadPoint_0(_S2730, kernelContext_218);
 
-            Vector<float, 3>  _S2729 = loadPoint_0(_S2727 - 1U, kernelContext_218);
-            Vector<float, 3>  segment_2 = _S2728 - _S2729;
+            Vector<float, 3>  _S2732 = loadPoint_0(_S2730 - 1U, kernelContext_218);
+            Vector<float, 3>  segment_2 = _S2731 - _S2732;
             float len_12 = lengthExact_0(segment_2);
             if(len_12 > 0.0f)
             {
 
-                Vector<float, 3>  moment_0 = Vector<float, 3> (float(beyond_1[i_81 - _S2716][int(3)]), float(beyond_1[i_81 - _S2716][int(4)]), float(beyond_1[i_81 - _S2716][int(5)])) - cross_0(_S2729 - _S2712, Vector<float, 3> (float(beyond_1[i_81 - _S2716][int(0)]), float(beyond_1[i_81 - _S2716][int(1)]), float(beyond_1[i_81 - _S2716][int(2)])));
+                Vector<float, 3>  moment_0 = Vector<float, 3> (float(beyond_1[i_81 - _S2719][int(3)]), float(beyond_1[i_81 - _S2719][int(4)]), float(beyond_1[i_81 - _S2719][int(5)])) - cross_0(_S2732 - _S2715, Vector<float, 3> (float(beyond_1[i_81 - _S2719][int(0)]), float(beyond_1[i_81 - _S2719][int(1)]), float(beyond_1[i_81 - _S2719][int(2)])));
 
                 float m_22 = len3_0(moment_0);
-                double _S2730 = double(len_12);
+                double _S2733 = double(len_12);
 
-                float cap_0 = float(3.14159265000000021 * _S2730 / _S2713);
-                float raw_3 = float(8.0 * double(m_22) * _S2730 / _S2714);
+                float cap_0 = float(3.14159265000000021 * _S2733 / _S2716);
+                float raw_3 = float(8.0 * double(m_22) * _S2733 / _S2717);
 
-                bool _S2731;
+                bool _S2734;
                 if(raw_3 > 0.0f)
                 {
 
-                    _S2731 = finiteFloat_0(raw_3);
+                    _S2734 = finiteFloat_0(raw_3);
 
                 }
                 else
                 {
 
-                    _S2731 = false;
+                    _S2734 = false;
 
                 }
 
@@ -27743,13 +27788,13 @@ static void staticBendD_0(uint32_t begin_31, uint32_t n_53, float length_4, Kern
 
                 Vector<float, 4>  carried_5;
 
-                if(_S2731)
+                if(_S2734)
                 {
-                    uint32_t _S2732 = (U32_min((first_8), (i_81)));
+                    uint32_t _S2735 = (U32_min((first_8), (i_81)));
 
                     carried_5 = turnThen_0(carried_4, turnAboutAxis_0(moment_0 / (Vector<float, 3> )m_22, cap_0 * (groomlab_pm_tanh((raw_3 / cap_0)))));
 
-                    first_9 = _S2732;
+                    first_9 = _S2735;
 
                 }
                 else
@@ -27763,38 +27808,38 @@ static void staticBendD_0(uint32_t begin_31, uint32_t n_53, float length_4, Kern
 
 
 
-                Vector<float, 3>  _S2733 = bent_1 + turnApplied_0(carried_5, segment_2 / (Vector<float, 3> )len_12) * (Vector<float, 3> )len_12;
+                Vector<float, 3>  _S2736 = bent_1 + turnApplied_0(carried_5, segment_2 / (Vector<float, 3> )len_12) * (Vector<float, 3> )len_12;
 
                 first_8 = first_9;
 
-                bent_1 = _S2733;
+                bent_1 = _S2736;
 
                 carried_4 = carried_5;
 
             }
 
-            Vector<float, 3>  _S2734;
+            Vector<float, 3>  _S2737;
 
             if(i_81 >= first_8)
             {
 
-                _S2734 = bent_1 - _S2728;
+                _S2737 = bent_1 - _S2731;
 
             }
             else
             {
 
-                _S2734 = Vector<float, 3> (0.0f, 0.0f, 0.0f);
+                _S2737 = Vector<float, 3> (0.0f, 0.0f, 0.0f);
 
             }
 
-            storePoint_0(kernelContext_218->globalParams_0->gOut2_0, _S2727, _S2734);
+            storePoint_0(kernelContext_218->globalParams_0->gOut2_0, _S2730, _S2737);
 
             i_81 = i_81 + 1U;
 
         }
 
-        k_47 = _S2718;
+        k_47 = _S2721;
 
         first_7 = first_8;
 
@@ -27809,12 +27854,12 @@ static void staticBendD_0(uint32_t begin_31, uint32_t n_53, float length_4, Kern
 }
 
 
-void _StaticPushCS(void* _S2735, void* entryPointParams_46, void* globalParams_47)
+void _StaticPushCS(void* _S2738, void* entryPointParams_46, void* globalParams_47)
 {
 
-    bool _S2736;
+    bool _S2739;
 
-    ComputeThreadVaryingInput * _S2737 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2735));
+    ComputeThreadVaryingInput * _S2740 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2738));
 
     KernelContext_0 kernelContext_219;
 
@@ -27824,42 +27869,42 @@ void _StaticPushCS(void* _S2735, void* entryPointParams_46, void* globalParams_4
 
     (&kernelContext_219)->sTableBase_0 = 0U;
 
-    uint32_t _S2738 = threadIndex_0(_S2737->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2737->groupThreadID, 64U, &kernelContext_219);
+    uint32_t _S2741 = threadIndex_0(_S2740->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2740->groupThreadID, 64U, &kernelContext_219);
 
-    if(_S2738 >= ((&kernelContext_219)->globalParams_0->Look_0->gStrandCount_0))
+    if(_S2741 >= ((&kernelContext_219)->globalParams_0->Look_0->gStrandCount_0))
     {
 
         return;
     }
 
-    uint32_t _S2739 = strandBegin_0(_S2738, &kernelContext_219);
+    uint32_t _S2742 = strandBegin_0(_S2741, &kernelContext_219);
 
-    uint32_t _S2740 = strandCountOf_0(_S2738, &kernelContext_219);
+    uint32_t _S2743 = strandCountOf_0(_S2741, &kernelContext_219);
 
-    copyStrand_0(_S2739, _S2740, &kernelContext_219);
+    copyStrand_0(_S2742, _S2743, &kernelContext_219);
 
 
-    if(_S2740 == 0U)
+    if(_S2743 == 0U)
     {
 
         return;
     }
 
-    (&kernelContext_219)->globalParams_0->gOut2_0.Store(_S2739 * 12U,_S2740);
+    (&kernelContext_219)->globalParams_0->gOut2_0.Store(_S2742 * 12U,_S2743);
 
-    Vector<float, 4>  _S2741 = strandData_0(_S2738, &kernelContext_219);
+    Vector<float, 4>  _S2744 = strandData_0(_S2741, &kernelContext_219);
 
-    float _S2742 = _S2741.w;
+    float _S2745 = _S2744.w;
 
-    float _S2743 = (groomlab_max((0.0f), (1.0f + (&kernelContext_219)->globalParams_0->Look_0->gValue2_0.w * (3.0f * _S2742 * _S2742 - 1.0f))));
+    float _S2746 = (groomlab_max((0.0f), (1.0f + (&kernelContext_219)->globalParams_0->Look_0->gValue2_0.w * (3.0f * _S2745 * _S2745 - 1.0f))));
 
     float amount_7;
-    if(_S2740 >= 2U)
+    if(_S2743 >= 2U)
     {
 
-        float _S2744 = fieldAt_0(0U, (&kernelContext_219)->globalParams_0->Look_0->gValue_0.x, _S2738, 0U, &kernelContext_219);
+        float _S2747 = fieldAt_0(0U, (&kernelContext_219)->globalParams_0->Look_0->gValue_0.x, _S2741, 0U, &kernelContext_219);
 
-        amount_7 = 48.0f * (groomlab_max((_S2744), (0.0f))) * _S2743;
+        amount_7 = 48.0f * (groomlab_max((_S2747), (0.0f))) * _S2746;
 
     }
     else
@@ -27869,7 +27914,7 @@ void _StaticPushCS(void* _S2735, void* entryPointParams_46, void* globalParams_4
 
     }
 
-    GridHead_0 _S2745 = gridHead_0(false, &kernelContext_219);
+    GridHead_0 _S2748 = gridHead_0(false, &kernelContext_219);
 
     bool finite_0 = true;
 
@@ -27879,7 +27924,7 @@ void _StaticPushCS(void* _S2735, void* entryPointParams_46, void* globalParams_4
     for(;;)
     {
 
-        if(i_82 < _S2740)
+        if(i_82 < _S2743)
         {
         }
         else
@@ -27888,40 +27933,40 @@ void _StaticPushCS(void* _S2735, void* entryPointParams_46, void* globalParams_4
             break;
         }
 
-        Vector<float, 3>  _S2746 = loadPoint_0(_S2739 + i_82, &kernelContext_219);
+        Vector<float, 3>  _S2749 = loadPoint_0(_S2742 + i_82, &kernelContext_219);
 
         if(finite_0)
         {
 
-            _S2736 = finiteFloat_0(_S2746.x);
+            _S2739 = finiteFloat_0(_S2749.x);
 
         }
         else
         {
 
-            _S2736 = false;
+            _S2739 = false;
 
         }
 
-        bool _S2747;
+        bool _S2750;
 
-        if(_S2736)
+        if(_S2739)
         {
 
-            _S2747 = finiteFloat_0(_S2746.y);
+            _S2750 = finiteFloat_0(_S2749.y);
 
         }
         else
         {
 
-            _S2747 = false;
+            _S2750 = false;
 
         }
 
-        if(_S2747)
+        if(_S2750)
         {
 
-            finite_0 = finiteFloat_0(_S2746.z);
+            finite_0 = finiteFloat_0(_S2749.z);
 
         }
         else
@@ -27942,7 +27987,7 @@ void _StaticPushCS(void* _S2735, void* entryPointParams_46, void* globalParams_4
     for(;;)
     {
 
-        if(i_82 < _S2740)
+        if(i_82 < _S2743)
         {
         }
         else
@@ -27951,13 +27996,13 @@ void _StaticPushCS(void* _S2735, void* entryPointParams_46, void* globalParams_4
             break;
         }
 
-        uint32_t _S2748 = _S2739 + i_82;
+        uint32_t _S2751 = _S2742 + i_82;
 
-        Vector<float, 3>  _S2749 = loadPoint_0(_S2748, &kernelContext_219);
+        Vector<float, 3>  _S2752 = loadPoint_0(_S2751, &kernelContext_219);
 
-        Vector<float, 3>  _S2750 = loadPoint_0(_S2748 - 1U, &kernelContext_219);
+        Vector<float, 3>  _S2753 = loadPoint_0(_S2751 - 1U, &kernelContext_219);
 
-        float length_6 = length_5 + lengthExact_0(_S2749 - _S2750);
+        float length_6 = length_5 + lengthExact_0(_S2752 - _S2753);
 
         i_82 = i_82 + 1U;
 
@@ -28000,7 +28045,7 @@ void _StaticPushCS(void* _S2735, void* entryPointParams_46, void* globalParams_4
     else
     {
 
-        finite_0 = (_S2745.count_0) == 0U;
+        finite_0 = (_S2748.count_0) == 0U;
 
     }
 
@@ -28010,14 +28055,14 @@ void _StaticPushCS(void* _S2735, void* entryPointParams_46, void* globalParams_4
         return;
     }
 
-    uint32_t moved_13 = _S2740;
+    uint32_t moved_13 = _S2743;
 
     i_82 = 1U;
 
     for(;;)
     {
 
-        if(i_82 < _S2740)
+        if(i_82 < _S2743)
         {
         }
         else
@@ -28026,33 +28071,33 @@ void _StaticPushCS(void* _S2735, void* entryPointParams_46, void* globalParams_4
             break;
         }
 
-        float _S2751 = rampAlong_0(i_82, _S2740, &kernelContext_219);
-        float q_26 = amount_7 * (groomlab_max((_S2751), (0.0f)));
-        Vector<float, 3>  _S2752 = Vector<float, 3> (0.0f, 0.0f, 0.0f);
+        float _S2754 = rampAlong_0(i_82, _S2743, &kernelContext_219);
+        float q_26 = amount_7 * (groomlab_max((_S2754), (0.0f)));
+        Vector<float, 3>  _S2755 = Vector<float, 3> (0.0f, 0.0f, 0.0f);
 
         Vector<float, 3>  move_5;
         if(q_26 > 0.0f)
         {
 
-            uint32_t _S2753 = _S2739 + i_82;
+            uint32_t _S2756 = _S2742 + i_82;
 
-            Vector<float, 3>  _S2754 = loadPoint_0(_S2753, &kernelContext_219);
+            Vector<float, 3>  _S2757 = loadPoint_0(_S2756, &kernelContext_219);
 
-            Vector<float, 3>  _S2755 = loadPoint_0(_S2753 - 1U, &kernelContext_219);
+            Vector<float, 3>  _S2758 = loadPoint_0(_S2756 - 1U, &kernelContext_219);
 
-            Vector<float, 3>  _S2756 = Vector<float, 3> {_S2741.x, _S2741.y, _S2741.z};
+            Vector<float, 3>  _S2759 = Vector<float, 3> {_S2744.x, _S2744.y, _S2744.z};
 
-            GridHead_0 _S2757 = _S2745;
+            GridHead_0 _S2760 = _S2748;
 
-            Vector<float, 3>  _S2758 = staticMove_0(&_S2757, _S2754, _S2755, q_26, _S2756, most_2, &kernelContext_219);
+            Vector<float, 3>  _S2761 = staticMove_0(&_S2760, _S2757, _S2758, q_26, _S2759, most_2, &kernelContext_219);
 
-            move_5 = _S2758;
+            move_5 = _S2761;
 
         }
         else
         {
 
-            move_5 = _S2752;
+            move_5 = _S2755;
 
         }
         if((move_5.x) != 0.0f)
@@ -28071,32 +28116,32 @@ void _StaticPushCS(void* _S2735, void* entryPointParams_46, void* globalParams_4
         if(finite_0)
         {
 
-            _S2736 = true;
+            _S2739 = true;
 
         }
         else
         {
 
-            _S2736 = (move_5.z) != 0.0f;
+            _S2739 = (move_5.z) != 0.0f;
 
         }
 
-        if(_S2736)
+        if(_S2739)
         {
 
             moved_13 = (U32_min((moved_13), (i_82)));
 
         }
-        storePoint_0((&kernelContext_219)->globalParams_0->gOut2_0, _S2739 + i_82, move_5);
+        storePoint_0((&kernelContext_219)->globalParams_0->gOut2_0, _S2742 + i_82, move_5);
 
         i_82 = i_82 + 1U;
 
     }
 
-    if(moved_13 != _S2740)
+    if(moved_13 != _S2743)
     {
 
-        staticBendD_0(_S2739, _S2740, length_5, &kernelContext_219);
+        staticBendD_0(_S2742, _S2743, length_5, &kernelContext_219);
 
     }
     return;
@@ -28106,26 +28151,26 @@ void _StaticPushCS(void* _S2735, void* entryPointParams_46, void* globalParams_4
 static Vector<float, 4>  rootFrameOf_0(uint32_t s_67, uint32_t part_6, KernelContext_0 * kernelContext_220)
 {
 
-    uint32_t _S2759 = s_67 * 32U + part_6 * 16U;
+    uint32_t _S2762 = s_67 * 32U + part_6 * 16U;
 
-    ByteAddressBuffer _S2760 = kernelContext_220->globalParams_0->gAux0_0;
+    ByteAddressBuffer _S2763 = kernelContext_220->globalParams_0->gAux0_0;
 
-    uint32_t _S2761 = (kernelContext_220->globalParams_0->gAux0_0).Load<uint32_t >(_S2759);
+    uint32_t _S2764 = (kernelContext_220->globalParams_0->gAux0_0).Load<uint32_t >(_S2762);
 
-    uint32_t _S2762 = (_S2760).Load<uint32_t >(_S2759 + 4U);
+    uint32_t _S2765 = (_S2763).Load<uint32_t >(_S2762 + 4U);
 
-    uint32_t _S2763 = (_S2760).Load<uint32_t >(_S2759 + 8U);
+    uint32_t _S2766 = (_S2763).Load<uint32_t >(_S2762 + 8U);
 
-    uint32_t _S2764 = (_S2760).Load<uint32_t >(_S2759 + 12U);
+    uint32_t _S2767 = (_S2763).Load<uint32_t >(_S2762 + 12U);
 
-    return asfloat_1(Vector<uint32_t, 4> (_S2761, _S2762, _S2763, _S2764));
+    return asfloat_1(Vector<uint32_t, 4> (_S2764, _S2765, _S2766, _S2767));
 }
 
 
 static Vector<float, 3>  firstDirectionIn_0(uint32_t begin_32, uint32_t n_54, KernelContext_0 * kernelContext_221)
 {
 
-    Vector<float, 3>  _S2765 = loadPoint_0(begin_32, kernelContext_221);
+    Vector<float, 3>  _S2768 = loadPoint_0(begin_32, kernelContext_221);
 
     uint32_t i_83 = 1U;
 
@@ -28141,8 +28186,8 @@ static Vector<float, 3>  firstDirectionIn_0(uint32_t begin_32, uint32_t n_54, Ke
             break;
         }
 
-        Vector<float, 3>  _S2766 = loadPoint_0(begin_32 + i_83, kernelContext_221);
-        Vector<float, 3>  d_48 = _S2766 - _S2765;
+        Vector<float, 3>  _S2769 = loadPoint_0(begin_32 + i_83, kernelContext_221);
+        Vector<float, 3>  d_48 = _S2769 - _S2768;
         if((len3_0(d_48)) > 9.999999960041972e-13f)
         {
 
@@ -28162,28 +28207,28 @@ static Vector<float, 3>  firstDirectionIn_0(uint32_t begin_32, uint32_t n_54, Ke
 static RootAxes_0 rootAxesOf_0(uint32_t s_68, uint32_t begin_33, uint32_t n_55, Vector<float, 3>  reference_0, bool byUV_0, KernelContext_0 * kernelContext_222)
 {
 
-    Vector<float, 4>  _S2767 = rootFrameOf_0(s_68, 0U, kernelContext_222);
+    Vector<float, 4>  _S2770 = rootFrameOf_0(s_68, 0U, kernelContext_222);
 
-    Vector<float, 4>  _S2768 = rootFrameOf_0(s_68, 1U, kernelContext_222);
+    Vector<float, 4>  _S2771 = rootFrameOf_0(s_68, 1U, kernelContext_222);
 
     RootAxes_0 a_65;
-    bool _S2769 = (_S2767.w) != 0.0f;
+    bool _S2772 = (_S2770.w) != 0.0f;
 
-    (&a_65)->onScalp_0 = _S2769;
+    (&a_65)->onScalp_0 = _S2772;
 
     Vector<float, 3>  t_52;
-    if(_S2769)
+    if(_S2772)
     {
 
-        t_52 = normalized_0(Vector<float, 3> {_S2767.x, _S2767.y, _S2767.z});
+        t_52 = normalized_0(Vector<float, 3> {_S2770.x, _S2770.y, _S2770.z});
 
     }
     else
     {
 
-        Vector<float, 3>  _S2770 = firstDirectionIn_0(begin_33, n_55, kernelContext_222);
+        Vector<float, 3>  _S2773 = firstDirectionIn_0(begin_33, n_55, kernelContext_222);
 
-        t_52 = _S2770;
+        t_52 = _S2773;
 
     }
 
@@ -28194,34 +28239,34 @@ static RootAxes_0 rootAxesOf_0(uint32_t s_68, uint32_t begin_33, uint32_t n_55, 
         (&a_65)->n_6 = Vector<float, 3> (0.0f, 1.0f, 0.0f);
 
     }
-    Vector<float, 3>  _S2771 = Vector<float, 3> (0.0f, 0.0f, 0.0f);
+    Vector<float, 3>  _S2774 = Vector<float, 3> (0.0f, 0.0f, 0.0f);
 
-    bool _S2772;
+    bool _S2775;
     if(byUV_0)
     {
 
-        _S2772 = (&a_65)->onScalp_0;
+        _S2775 = (&a_65)->onScalp_0;
 
     }
     else
     {
 
-        _S2772 = false;
+        _S2775 = false;
 
     }
 
-    if(_S2772)
+    if(_S2775)
     {
 
-        Vector<float, 3>  _S2773 = Vector<float, 3> {_S2768.x, _S2768.y, _S2768.z};
+        Vector<float, 3>  _S2776 = Vector<float, 3> {_S2771.x, _S2771.y, _S2771.z};
 
-        t_52 = _S2773 - (&a_65)->n_6 * (Vector<float, 3> )dot_0(_S2773, (&a_65)->n_6);
+        t_52 = _S2776 - (&a_65)->n_6 * (Vector<float, 3> )dot_0(_S2776, (&a_65)->n_6);
 
     }
     else
     {
 
-        t_52 = _S2771;
+        t_52 = _S2774;
 
     }
     if(!((len3_0(t_52)) > 9.99999997475242708e-07f))
@@ -28236,10 +28281,10 @@ static RootAxes_0 rootAxesOf_0(uint32_t s_68, uint32_t begin_33, uint32_t n_55, 
         t_52 = anyPerpendicular_0((&a_65)->n_6);
 
     }
-    Vector<float, 3>  _S2774 = normalized_0(t_52);
+    Vector<float, 3>  _S2777 = normalized_0(t_52);
 
-    (&a_65)->t_2 = _S2774;
-    (&a_65)->b_5 = cross_0(_S2774, (&a_65)->n_6);
+    (&a_65)->t_2 = _S2777;
+    (&a_65)->b_5 = cross_0(_S2777, (&a_65)->n_6);
     return a_65;
 }
 
@@ -28263,29 +28308,29 @@ static float bendShare_0(float t_53, KernelContext_0 * kernelContext_223)
         return clamp_0((t_53 - start_3) / (end_0 - start_3), 0.0f, 1.0f);
     }
 
-    float _S2775;
+    float _S2778;
     if(t_53 >= start_3)
     {
 
-        _S2775 = 1.0f;
+        _S2778 = 1.0f;
 
     }
     else
     {
 
-        _S2775 = 0.0f;
+        _S2778 = 0.0f;
 
     }
 
-    return _S2775;
+    return _S2778;
 }
 
 
 
-void _BendCS(void* _S2776, void* entryPointParams_47, void* globalParams_48)
+void _BendCS(void* _S2779, void* entryPointParams_47, void* globalParams_48)
 {
 
-    ComputeThreadVaryingInput * _S2777 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2776));
+    ComputeThreadVaryingInput * _S2780 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2779));
 
     KernelContext_0 kernelContext_224;
 
@@ -28295,28 +28340,28 @@ void _BendCS(void* _S2776, void* entryPointParams_47, void* globalParams_48)
 
     (&kernelContext_224)->sTableBase_0 = 0U;
 
-    uint32_t _S2778 = threadIndex_0(_S2777->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2777->groupThreadID, 64U, &kernelContext_224);
+    uint32_t _S2781 = threadIndex_0(_S2780->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2780->groupThreadID, 64U, &kernelContext_224);
 
-    if(_S2778 >= ((&kernelContext_224)->globalParams_0->Look_0->gStrandCount_0))
+    if(_S2781 >= ((&kernelContext_224)->globalParams_0->Look_0->gStrandCount_0))
     {
 
         return;
     }
 
-    uint32_t _S2779 = strandBegin_0(_S2778, &kernelContext_224);
+    uint32_t _S2782 = strandBegin_0(_S2781, &kernelContext_224);
 
-    uint32_t _S2780 = strandCountOf_0(_S2778, &kernelContext_224);
+    uint32_t _S2783 = strandCountOf_0(_S2781, &kernelContext_224);
 
-    bool _S2781 = _S2780 >= 2U;
+    bool _S2784 = _S2783 >= 2U;
 
     float degrees_0;
 
-    if(_S2781)
+    if(_S2784)
     {
 
-        float _S2782 = fieldAt_0(0U, (&kernelContext_224)->globalParams_0->Look_0->gValue_0.x, _S2778, 0U, &kernelContext_224);
+        float _S2785 = fieldAt_0(0U, (&kernelContext_224)->globalParams_0->Look_0->gValue_0.x, _S2781, 0U, &kernelContext_224);
 
-        degrees_0 = _S2782;
+        degrees_0 = _S2785;
 
     }
     else
@@ -28328,21 +28373,21 @@ void _BendCS(void* _S2776, void* entryPointParams_47, void* globalParams_48)
     if(((&kernelContext_224)->globalParams_0->Look_0->gValue_0.w) > 0.0f)
     {
 
-        float _S2783 = (&kernelContext_224)->globalParams_0->Look_0->gValue_0.w;
+        float _S2786 = (&kernelContext_224)->globalParams_0->Look_0->gValue_0.w;
 
-        Vector<float, 4>  _S2784 = strandData_0(_S2778, &kernelContext_224);
+        Vector<float, 4>  _S2787 = strandData_0(_S2781, &kernelContext_224);
 
-        degrees_0 = degrees_0 * (1.0f - _S2783 * _S2784.x);
+        degrees_0 = degrees_0 * (1.0f - _S2786 * _S2787.x);
 
     }
 
     Vector<float, 3>  p0_8;
-    if(_S2781)
+    if(_S2784)
     {
 
-        Vector<float, 3>  _S2785 = loadPoint_0(_S2779, &kernelContext_224);
+        Vector<float, 3>  _S2788 = loadPoint_0(_S2782, &kernelContext_224);
 
-        p0_8 = _S2785;
+        p0_8 = _S2788;
 
     }
     else
@@ -28353,12 +28398,12 @@ void _BendCS(void* _S2776, void* entryPointParams_47, void* globalParams_48)
     }
 
     Vector<float, 3>  chord_0;
-    if(_S2781)
+    if(_S2784)
     {
 
-        Vector<float, 3>  _S2786 = loadPoint_0(_S2779 + _S2780 - 1U, &kernelContext_224);
+        Vector<float, 3>  _S2789 = loadPoint_0(_S2782 + _S2783 - 1U, &kernelContext_224);
 
-        chord_0 = normalized_0(_S2786 - p0_8);
+        chord_0 = normalized_0(_S2789 - p0_8);
 
     }
     else
@@ -28385,19 +28430,19 @@ void _BendCS(void* _S2776, void* entryPointParams_47, void* globalParams_48)
     if(none_0)
     {
 
-        copyStrand_0(_S2779, _S2780, &kernelContext_224);
+        copyStrand_0(_S2782, _S2783, &kernelContext_224);
 
         return;
     }
 
-    Vector<float, 4>  _S2787 = (&kernelContext_224)->globalParams_0->Look_0->gValue2_0;
+    Vector<float, 4>  _S2790 = (&kernelContext_224)->globalParams_0->Look_0->gValue2_0;
 
-    Vector<float, 3>  _S2788 = stageDirection_0(_S2778, Vector<float, 3> {_S2787.x, _S2787.y, _S2787.z}, &kernelContext_224);
+    Vector<float, 3>  _S2791 = stageDirection_0(_S2781, Vector<float, 3> {_S2790.x, _S2790.y, _S2790.z}, &kernelContext_224);
 
 
     bool alongNormal_0 = ((&kernelContext_224)->globalParams_0->Look_0->gFlag_0.x) == 0U;
 
-    RootAxes_0 _S2789 = rootAxesOf_0(_S2778, _S2779, _S2780, _S2788, true, &kernelContext_224);
+    RootAxes_0 _S2792 = rootAxesOf_0(_S2781, _S2782, _S2783, _S2791, true, &kernelContext_224);
 
     Vector<float, 3>  target_9;
 
@@ -28405,24 +28450,24 @@ void _BendCS(void* _S2776, void* entryPointParams_47, void* globalParams_48)
 
     if(((&kernelContext_224)->globalParams_0->Look_0->gFlag_0.x) == 2U)
     {
-        if(_S2789.onScalp_0)
+        if(_S2792.onScalp_0)
         {
 
-            target_9 = _S2788 - _S2789.n_6 * (Vector<float, 3> )dot_0(_S2788, _S2789.n_6);
+            target_9 = _S2791 - _S2792.n_6 * (Vector<float, 3> )dot_0(_S2791, _S2792.n_6);
 
         }
         else
         {
 
-            target_9 = _S2788;
+            target_9 = _S2791;
 
         }
 
-        Vector<float, 3>  _S2790 = normalized_0(target_9);
+        Vector<float, 3>  _S2793 = normalized_0(target_9);
 
-        none_0 = !((len3_0(target_9)) > (9.99999997475242708e-07f * len3_0(_S2788)));
+        none_0 = !((len3_0(target_9)) > (9.99999997475242708e-07f * len3_0(_S2791)));
 
-        target_9 = _S2790;
+        target_9 = _S2793;
 
     }
     else
@@ -28432,13 +28477,13 @@ void _BendCS(void* _S2776, void* entryPointParams_47, void* globalParams_48)
         if(((&kernelContext_224)->globalParams_0->Look_0->gFlag_0.x) == 1U)
         {
 
-            target_9 = _S2789.t_2;
+            target_9 = _S2792.t_2;
 
         }
         else
         {
 
-            target_9 = _S2789.n_6;
+            target_9 = _S2792.n_6;
 
         }
 
@@ -28460,23 +28505,23 @@ void _BendCS(void* _S2776, void* entryPointParams_47, void* globalParams_48)
     }
     Vector<float, 3>  axis_12 = cross_0(chord_0, target_9);
 
-    bool _S2791;
+    bool _S2794;
     if(!none_0)
     {
 
-        _S2791 = (len3_0(axis_12)) < 0.00000999999974738f;
+        _S2794 = (len3_0(axis_12)) < 0.00000999999974738f;
 
     }
     else
     {
 
-        _S2791 = false;
+        _S2794 = false;
 
     }
 
     Vector<float, 3>  axis_13;
 
-    if(_S2791)
+    if(_S2794)
     {
 
 
@@ -28506,7 +28551,7 @@ void _BendCS(void* _S2776, void* entryPointParams_47, void* globalParams_48)
 
         }
 
-        axis_13 = _S2789.b_5;
+        axis_13 = _S2792.b_5;
 
     }
     else
@@ -28519,28 +28564,28 @@ void _BendCS(void* _S2776, void* entryPointParams_47, void* globalParams_48)
     if(!none_0)
     {
 
-        Vector<float, 3>  _S2792 = normalized_0(axis_13);
+        Vector<float, 3>  _S2795 = normalized_0(axis_13);
         float current_0 = acosAccurate_0(dot_0(chord_0, target_9)) / 0.01745329238474369f;
 
-        float _S2793;
+        float _S2796;
         if(alongNormal_0)
         {
 
-            _S2793 = (groomlab_min((0.0f), (current_0 - 90.0f)));
+            _S2796 = (groomlab_min((0.0f), (current_0 - 90.0f)));
 
         }
         else
         {
 
-            _S2793 = current_0 - 180.0f;
+            _S2796 = current_0 - 180.0f;
 
         }
 
-        float _S2794 = clamp_0(degrees_0, _S2793, current_0);
+        float _S2797 = clamp_0(degrees_0, _S2796, current_0);
 
-        axis_13 = _S2792;
+        axis_13 = _S2795;
 
-        degrees_0 = _S2794;
+        degrees_0 = _S2797;
 
     }
 
@@ -28560,12 +28605,12 @@ void _BendCS(void* _S2776, void* entryPointParams_47, void* globalParams_48)
     if(none_0)
     {
 
-        copyStrand_0(_S2779, _S2780, &kernelContext_224);
+        copyStrand_0(_S2782, _S2783, &kernelContext_224);
 
         return;
     }
 
-    storePoint_0((&kernelContext_224)->globalParams_0->gOut_0, _S2779, p0_8);
+    storePoint_0((&kernelContext_224)->globalParams_0->gOut_0, _S2782, p0_8);
 
     Vector<float, 3>  previous_11 = p0_8;
 
@@ -28575,7 +28620,7 @@ void _BendCS(void* _S2776, void* entryPointParams_47, void* globalParams_48)
     for(;;)
     {
 
-        if(i_84 < _S2780)
+        if(i_84 < _S2783)
         {
         }
         else
@@ -28584,16 +28629,16 @@ void _BendCS(void* _S2776, void* entryPointParams_47, void* globalParams_48)
             break;
         }
 
-        uint32_t _S2795 = _S2779 + i_84;
+        uint32_t _S2798 = _S2782 + i_84;
 
-        Vector<float, 3>  _S2796 = loadPoint_0(_S2795, &kernelContext_224);
-        Vector<float, 3>  segment_3 = _S2796 - previous_11;
+        Vector<float, 3>  _S2799 = loadPoint_0(_S2798, &kernelContext_224);
+        Vector<float, 3>  segment_3 = _S2799 - previous_11;
 
-        float _S2797 = degrees_0 * 0.01745329238474369f;
+        float _S2800 = degrees_0 * 0.01745329238474369f;
 
-        float _S2798 = bendShare_0(paramAt_0(i_84, _S2780), &kernelContext_224);
+        float _S2801 = bendShare_0(paramAt_0(i_84, _S2783), &kernelContext_224);
 
-        float turn_2 = _S2797 * _S2798;
+        float turn_2 = _S2800 * _S2801;
         if(turn_2 == 0.0f)
         {
 
@@ -28608,11 +28653,11 @@ void _BendCS(void* _S2776, void* entryPointParams_47, void* globalParams_48)
         }
 
         Vector<float, 3>  bent_3 = bent_2 + p0_8;
-        storePoint_0((&kernelContext_224)->globalParams_0->gOut_0, _S2795, bent_3);
+        storePoint_0((&kernelContext_224)->globalParams_0->gOut_0, _S2798, bent_3);
 
         uint32_t i_85 = i_84 + 1U;
 
-        previous_11 = _S2796;
+        previous_11 = _S2799;
 
         bent_2 = bent_3;
 
@@ -28630,36 +28675,36 @@ static float directionParam_0(uint32_t slot_1, float number_1, uint32_t s_69, ui
     if(slot_1 == 3U)
     {
 
-        uint32_t _S2799 = (kernelContext_225->globalParams_0->gStrandData_0).Load<uint32_t >(uint32_t(int32_t((kernelContext_225->globalParams_0->Look_0->gTable_0.z + s_69) * 16U + c_47 * 4U)));
+        uint32_t _S2802 = (kernelContext_225->globalParams_0->gStrandData_0).Load<uint32_t >(uint32_t(int32_t((kernelContext_225->globalParams_0->Look_0->gTable_0.z + s_69) * 16U + c_47 * 4U)));
 
-        return (U32_asfloat((_S2799)));
+        return (U32_asfloat((_S2802)));
     }
 
-    float _S2800;
+    float _S2803;
     if(slot_1 < 2U)
     {
 
-        float _S2801 = fieldAt_0(slot_1, number_1, s_69, 0U, kernelContext_225);
+        float _S2804 = fieldAt_0(slot_1, number_1, s_69, 0U, kernelContext_225);
 
-        _S2800 = _S2801;
+        _S2803 = _S2804;
 
     }
     else
     {
 
-        _S2800 = number_1;
+        _S2803 = number_1;
 
     }
 
-    return _S2800;
+    return _S2803;
 }
 
 
 
-void _DirectionCS(void* _S2802, void* entryPointParams_48, void* globalParams_49)
+void _DirectionCS(void* _S2805, void* entryPointParams_48, void* globalParams_49)
 {
 
-    ComputeThreadVaryingInput * _S2803 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2802));
+    ComputeThreadVaryingInput * _S2806 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2805));
 
     KernelContext_0 kernelContext_226;
 
@@ -28669,26 +28714,26 @@ void _DirectionCS(void* _S2802, void* entryPointParams_48, void* globalParams_49
 
     (&kernelContext_226)->sTableBase_0 = 0U;
 
-    uint32_t _S2804 = threadIndex_0(_S2803->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2803->groupThreadID, 64U, &kernelContext_226);
+    uint32_t _S2807 = threadIndex_0(_S2806->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2806->groupThreadID, 64U, &kernelContext_226);
 
-    if(_S2804 >= ((&kernelContext_226)->globalParams_0->Look_0->gStrandCount_0))
+    if(_S2807 >= ((&kernelContext_226)->globalParams_0->Look_0->gStrandCount_0))
     {
 
         return;
     }
 
-    uint32_t _S2805 = strandBegin_0(_S2804, &kernelContext_226);
+    uint32_t _S2808 = strandBegin_0(_S2807, &kernelContext_226);
 
-    uint32_t _S2806 = strandCountOf_0(_S2804, &kernelContext_226);
+    uint32_t _S2809 = strandCountOf_0(_S2807, &kernelContext_226);
 
     bool rooted_0;
 
-    if(_S2806 >= 2U)
+    if(_S2809 >= 2U)
     {
 
-        Vector<float, 4>  _S2807 = rootFrameOf_0(_S2804, 0U, &kernelContext_226);
+        Vector<float, 4>  _S2810 = rootFrameOf_0(_S2807, 0U, &kernelContext_226);
 
-        rooted_0 = (_S2807.w) != 0.0f;
+        rooted_0 = (_S2810.w) != 0.0f;
 
     }
     else
@@ -28702,9 +28747,9 @@ void _DirectionCS(void* _S2802, void* entryPointParams_48, void* globalParams_49
     if(rooted_0)
     {
 
-        float _S2808 = directionParam_0((&kernelContext_226)->globalParams_0->Look_0->gFlag_0.w, (&kernelContext_226)->globalParams_0->Look_0->gValue_0.z, _S2804, 2U, &kernelContext_226);
+        float _S2811 = directionParam_0((&kernelContext_226)->globalParams_0->Look_0->gFlag_0.w, (&kernelContext_226)->globalParams_0->Look_0->gValue_0.z, _S2807, 2U, &kernelContext_226);
 
-        w_63 = (groomlab_min((_S2808), (1.0f)));
+        w_63 = (groomlab_min((_S2811), (1.0f)));
 
     }
     else
@@ -28713,16 +28758,16 @@ void _DirectionCS(void* _S2802, void* entryPointParams_48, void* globalParams_49
         w_63 = 0.0f;
 
     }
-    bool _S2809 = w_63 > 0.0f;
+    bool _S2812 = w_63 > 0.0f;
 
     Vector<float, 3>  current_1;
 
-    if(_S2809)
+    if(_S2812)
     {
 
-        Vector<float, 3>  _S2810 = firstDirectionIn_0(_S2805, _S2806, &kernelContext_226);
+        Vector<float, 3>  _S2813 = firstDirectionIn_0(_S2808, _S2809, &kernelContext_226);
 
-        current_1 = _S2810;
+        current_1 = _S2813;
 
     }
     else
@@ -28731,7 +28776,7 @@ void _DirectionCS(void* _S2802, void* entryPointParams_48, void* globalParams_49
         current_1 = Vector<float, 3> (0.0f, 0.0f, 0.0f);
 
     }
-    if(!_S2809)
+    if(!_S2812)
     {
 
         rooted_0 = true;
@@ -28747,16 +28792,16 @@ void _DirectionCS(void* _S2802, void* entryPointParams_48, void* globalParams_49
     if(rooted_0)
     {
 
-        copyStrand_0(_S2805, _S2806, &kernelContext_226);
+        copyStrand_0(_S2808, _S2809, &kernelContext_226);
 
         return;
     }
 
-    Vector<float, 4>  _S2811 = strandData_0(_S2804, &kernelContext_226);
+    Vector<float, 4>  _S2814 = strandData_0(_S2807, &kernelContext_226);
 
-    float _S2812 = directionParam_0((&kernelContext_226)->globalParams_0->Look_0->gFlag_0.y, (&kernelContext_226)->globalParams_0->Look_0->gValue_0.x, _S2804, 0U, &kernelContext_226);
+    float _S2815 = directionParam_0((&kernelContext_226)->globalParams_0->Look_0->gFlag_0.y, (&kernelContext_226)->globalParams_0->Look_0->gValue_0.x, _S2807, 0U, &kernelContext_226);
 
-    float _S2813 = directionParam_0((&kernelContext_226)->globalParams_0->Look_0->gFlag_0.z, (&kernelContext_226)->globalParams_0->Look_0->gValue_0.y, _S2804, 1U, &kernelContext_226);
+    float _S2816 = directionParam_0((&kernelContext_226)->globalParams_0->Look_0->gFlag_0.z, (&kernelContext_226)->globalParams_0->Look_0->gValue_0.y, _S2807, 1U, &kernelContext_226);
 
     float incline_0;
 
@@ -28765,13 +28810,13 @@ void _DirectionCS(void* _S2802, void* entryPointParams_48, void* globalParams_49
     if(((&kernelContext_226)->globalParams_0->Look_0->gValue_0.w) > 0.0f)
     {
 
-        incline_0 = _S2812 + (&kernelContext_226)->globalParams_0->Look_0->gValue_0.w * _S2811.x;
+        incline_0 = _S2815 + (&kernelContext_226)->globalParams_0->Look_0->gValue_0.w * _S2814.x;
 
     }
     else
     {
 
-        incline_0 = _S2812;
+        incline_0 = _S2815;
 
     }
 
@@ -28779,24 +28824,24 @@ void _DirectionCS(void* _S2802, void* entryPointParams_48, void* globalParams_49
     if(((&kernelContext_226)->globalParams_0->Look_0->gValue2_0.w) > 0.0f)
     {
 
-        roll_0 = _S2813 + (&kernelContext_226)->globalParams_0->Look_0->gValue2_0.w * _S2811.y;
+        roll_0 = _S2816 + (&kernelContext_226)->globalParams_0->Look_0->gValue2_0.w * _S2814.y;
 
     }
     else
     {
 
-        roll_0 = _S2813;
+        roll_0 = _S2816;
 
     }
 
-    Vector<float, 4>  _S2814 = (&kernelContext_226)->globalParams_0->Look_0->gValue2_0;
+    Vector<float, 4>  _S2817 = (&kernelContext_226)->globalParams_0->Look_0->gValue2_0;
 
-    RootAxes_0 _S2815 = rootAxesOf_0(_S2804, _S2805, _S2806, Vector<float, 3> {_S2814.x, _S2814.y, _S2814.z}, ((&kernelContext_226)->globalParams_0->Look_0->gFlag_0.x) != 0U, &kernelContext_226);
+    RootAxes_0 _S2818 = rootAxesOf_0(_S2807, _S2808, _S2809, Vector<float, 3> {_S2817.x, _S2817.y, _S2817.z}, ((&kernelContext_226)->globalParams_0->Look_0->gFlag_0.x) != 0U, &kernelContext_226);
 
     float i_86 = incline_0 * 0.01745329238474369f;
 
     float r_40 = roll_0 * 0.01745329238474369f;
-    Vector<float, 3>  target_10 = _S2815.n_6 * (Vector<float, 3> )(groomlab_pm_cos((i_86))) + (_S2815.t_2 * (Vector<float, 3> )(groomlab_pm_cos((r_40))) + _S2815.b_5 * (Vector<float, 3> )(groomlab_pm_sin((r_40)))) * (Vector<float, 3> )(groomlab_pm_sin((i_86)));
+    Vector<float, 3>  target_10 = _S2818.n_6 * (Vector<float, 3> )(groomlab_pm_cos((i_86))) + (_S2818.t_2 * (Vector<float, 3> )(groomlab_pm_cos((r_40))) + _S2818.b_5 * (Vector<float, 3> )(groomlab_pm_sin((r_40)))) * (Vector<float, 3> )(groomlab_pm_sin((i_86)));
     float c_48 = clamp_0(dot_0(current_1, target_10), -1.0f, 1.0f);
     Vector<float, 3>  axis_14 = cross_0(current_1, target_10);
 
@@ -28807,7 +28852,7 @@ void _DirectionCS(void* _S2802, void* entryPointParams_48, void* globalParams_49
         if(c_48 > 0.0f)
         {
 
-            copyStrand_0(_S2805, _S2806, &kernelContext_226);
+            copyStrand_0(_S2808, _S2809, &kernelContext_226);
 
             return;
         }
@@ -28822,18 +28867,18 @@ void _DirectionCS(void* _S2802, void* entryPointParams_48, void* globalParams_49
 
     }
 
-    Vector<float, 3>  _S2816 = normalized_0(axis_15);
-    float _S2817 = acosAccurate_0(c_48) * w_63;
+    Vector<float, 3>  _S2819 = normalized_0(axis_15);
+    float _S2820 = acosAccurate_0(c_48) * w_63;
 
-    Vector<float, 3>  _S2818 = loadPoint_0(_S2805, &kernelContext_226);
+    Vector<float, 3>  _S2821 = loadPoint_0(_S2808, &kernelContext_226);
 
-    storePoint_0((&kernelContext_226)->globalParams_0->gOut_0, _S2805, _S2818);
+    storePoint_0((&kernelContext_226)->globalParams_0->gOut_0, _S2808, _S2821);
 
     uint32_t k_48 = 1U;
     for(;;)
     {
 
-        if(k_48 < _S2806)
+        if(k_48 < _S2809)
         {
         }
         else
@@ -28842,11 +28887,11 @@ void _DirectionCS(void* _S2802, void* entryPointParams_48, void* globalParams_49
             break;
         }
 
-        uint32_t _S2819 = _S2805 + k_48;
+        uint32_t _S2822 = _S2808 + k_48;
 
-        Vector<float, 3>  _S2820 = loadPoint_0(_S2819, &kernelContext_226);
+        Vector<float, 3>  _S2823 = loadPoint_0(_S2822, &kernelContext_226);
 
-        storePoint_0((&kernelContext_226)->globalParams_0->gOut_0, _S2819, _S2818 + twistAbout_0(_S2816, _S2820 - _S2818, _S2817));
+        storePoint_0((&kernelContext_226)->globalParams_0->gOut_0, _S2822, _S2821 + twistAbout_0(_S2819, _S2823 - _S2821, _S2820));
 
         k_48 = k_48 + 1U;
 
@@ -28860,55 +28905,55 @@ void _DirectionCS(void* _S2802, void* entryPointParams_48, void* globalParams_49
 static Vector<float, 3>  moreRow_0(uint32_t r_41, KernelContext_0 * kernelContext_227)
 {
 
-    Vector<uint32_t, 4>  _S2821 = kernelContext_227->globalParams_0->Look_0->gOctaveSeeds_0[r_41];
+    Vector<uint32_t, 4>  _S2824 = kernelContext_227->globalParams_0->Look_0->gOctaveSeeds_0[r_41];
 
-    return asfloat_0(Vector<uint32_t, 3> {_S2821.x, _S2821.y, _S2821.z});
+    return asfloat_0(Vector<uint32_t, 3> {_S2824.x, _S2824.y, _S2824.z});
 }
 
-static Vector<float, 3>  turnedBy_0(Vector<float, 3>  v_41, Vector<float, 3>  degrees_1, Vector<float, 3>  a_66, Vector<float, 3>  b_53, Vector<float, 3>  c_49)
+static Vector<float, 3>  turnedBy_0(Vector<float, 3>  v_41, Vector<float, 3>  degrees_1, Vector<float, 3>  a_66, Vector<float, 3>  b_54, Vector<float, 3>  c_49)
 {
 
-    float _S2822 = degrees_1.x;
+    float _S2825 = degrees_1.x;
 
-    Vector<float, 3>  _S2823;
+    Vector<float, 3>  _S2826;
 
-    if(_S2822 != 0.0f)
+    if(_S2825 != 0.0f)
     {
 
-        _S2823 = twistAbout_0(a_66, v_41, _S2822 * 0.01745329238474369f);
+        _S2826 = twistAbout_0(a_66, v_41, _S2825 * 0.01745329238474369f);
 
     }
     else
     {
 
-        _S2823 = v_41;
+        _S2826 = v_41;
 
     }
-    float _S2824 = degrees_1.y;
+    float _S2827 = degrees_1.y;
 
-    if(_S2824 != 0.0f)
+    if(_S2827 != 0.0f)
     {
 
-        _S2823 = twistAbout_0(b_53, _S2823, _S2824 * 0.01745329238474369f);
+        _S2826 = twistAbout_0(b_54, _S2826, _S2827 * 0.01745329238474369f);
 
     }
-    float _S2825 = degrees_1.z;
+    float _S2828 = degrees_1.z;
 
-    if(_S2825 != 0.0f)
+    if(_S2828 != 0.0f)
     {
 
-        _S2823 = twistAbout_0(c_49, _S2823, _S2825 * 0.01745329238474369f);
+        _S2826 = twistAbout_0(c_49, _S2826, _S2828 * 0.01745329238474369f);
 
     }
-    return _S2823;
+    return _S2826;
 }
 
 
 
-void _TransformCS(void* _S2826, void* entryPointParams_49, void* globalParams_50)
+void _TransformCS(void* _S2829, void* entryPointParams_49, void* globalParams_50)
 {
 
-    ComputeThreadVaryingInput * _S2827 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2826));
+    ComputeThreadVaryingInput * _S2830 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2829));
 
     KernelContext_0 kernelContext_228;
 
@@ -28918,19 +28963,19 @@ void _TransformCS(void* _S2826, void* entryPointParams_49, void* globalParams_50
 
     (&kernelContext_228)->sTableBase_0 = 0U;
 
-    uint32_t _S2828 = threadIndex_0(_S2827->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2827->groupThreadID, 64U, &kernelContext_228);
+    uint32_t _S2831 = threadIndex_0(_S2830->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2830->groupThreadID, 64U, &kernelContext_228);
 
-    if(_S2828 >= ((&kernelContext_228)->globalParams_0->Look_0->gStrandCount_0))
+    if(_S2831 >= ((&kernelContext_228)->globalParams_0->Look_0->gStrandCount_0))
     {
 
         return;
     }
 
-    uint32_t _S2829 = strandBegin_0(_S2828, &kernelContext_228);
+    uint32_t _S2832 = strandBegin_0(_S2831, &kernelContext_228);
 
-    uint32_t _S2830 = strandCountOf_0(_S2828, &kernelContext_228);
+    uint32_t _S2833 = strandCountOf_0(_S2831, &kernelContext_228);
 
-    if(_S2830 == 0U)
+    if(_S2833 == 0U)
     {
 
         return;
@@ -28939,42 +28984,42 @@ void _TransformCS(void* _S2826, void* entryPointParams_49, void* globalParams_50
     if(((&kernelContext_228)->globalParams_0->Look_0->gFlag_0.y) != 0U)
     {
 
-        copyStrand_0(_S2829, _S2830, &kernelContext_228);
+        copyStrand_0(_S2832, _S2833, &kernelContext_228);
 
         return;
     }
 
-    float _S2831 = fieldAt_0(0U, (&kernelContext_228)->globalParams_0->Look_0->gValue_0.x, _S2828, 0U, &kernelContext_228);
+    float _S2834 = fieldAt_0(0U, (&kernelContext_228)->globalParams_0->Look_0->gValue_0.x, _S2831, 0U, &kernelContext_228);
 
-    Vector<float, 4>  _S2832 = strandData_0(_S2828, &kernelContext_228);
+    Vector<float, 4>  _S2835 = strandData_0(_S2831, &kernelContext_228);
 
 
-    uint32_t _S2833 = ((&kernelContext_228)->globalParams_0->Look_0->gDataBlock_0 + (&kernelContext_228)->globalParams_0->Look_0->gStrandCount_0 + _S2828) * 16U;
+    uint32_t _S2836 = ((&kernelContext_228)->globalParams_0->Look_0->gDataBlock_0 + (&kernelContext_228)->globalParams_0->Look_0->gStrandCount_0 + _S2831) * 16U;
 
-    ByteAddressBuffer _S2834 = (&kernelContext_228)->globalParams_0->gStrandData_0;
+    ByteAddressBuffer _S2837 = (&kernelContext_228)->globalParams_0->gStrandData_0;
 
-    uint32_t _S2835 = ((&kernelContext_228)->globalParams_0->gStrandData_0).Load<uint32_t >(_S2833);
+    uint32_t _S2838 = ((&kernelContext_228)->globalParams_0->gStrandData_0).Load<uint32_t >(_S2836);
 
-    uint32_t _S2836 = (_S2834).Load<uint32_t >(_S2833 + 4U);
+    uint32_t _S2839 = (_S2837).Load<uint32_t >(_S2836 + 4U);
 
-    uint32_t _S2837 = (_S2834).Load<uint32_t >(_S2833 + 8U);
+    uint32_t _S2840 = (_S2837).Load<uint32_t >(_S2836 + 8U);
 
-    uint32_t _S2838 = (_S2834).Load<uint32_t >(_S2833 + 12U);
+    uint32_t _S2841 = (_S2837).Load<uint32_t >(_S2836 + 12U);
 
-    Vector<float, 4>  d1_10 = asfloat_1(Vector<uint32_t, 4> (_S2835, _S2836, _S2837, _S2838));
+    Vector<float, 4>  d1_10 = asfloat_1(Vector<uint32_t, 4> (_S2838, _S2839, _S2840, _S2841));
 
-    Vector<float, 4>  _S2839 = (&kernelContext_228)->globalParams_0->Look_0->gValue2_0;
-    Vector<float, 3>  move_6 = Vector<float, 3> {_S2839.x, _S2839.y, _S2839.z};
+    Vector<float, 4>  _S2842 = (&kernelContext_228)->globalParams_0->Look_0->gValue2_0;
+    Vector<float, 3>  move_6 = Vector<float, 3> {_S2842.x, _S2842.y, _S2842.z};
 
-    Vector<float, 3>  _S2840 = moreRow_0(0U, &kernelContext_228);
+    Vector<float, 3>  _S2843 = moreRow_0(0U, &kernelContext_228);
 
     Vector<float, 3>  move_7;
     if(((&kernelContext_228)->globalParams_0->Look_0->gFlag_0.z) != 0U)
     {
 
-        Vector<float, 3>  _S2841 = moreRow_0(2U, &kernelContext_228);
+        Vector<float, 3>  _S2844 = moreRow_0(2U, &kernelContext_228);
 
-        move_7 = move_6 + _S2841 * Vector<float, 3> (_S2832.x, _S2832.y, _S2832.z);
+        move_7 = move_6 + _S2844 * Vector<float, 3> (_S2835.x, _S2835.y, _S2835.z);
 
     }
     else
@@ -28988,15 +29033,15 @@ void _TransformCS(void* _S2826, void* entryPointParams_49, void* globalParams_50
     if(((&kernelContext_228)->globalParams_0->Look_0->gFlag_0.w) != 0U)
     {
 
-        Vector<float, 3>  _S2842 = moreRow_0(3U, &kernelContext_228);
+        Vector<float, 3>  _S2845 = moreRow_0(3U, &kernelContext_228);
 
-        turn_3 = _S2840 + _S2842 * Vector<float, 3> (_S2832.w, d1_10.x, d1_10.y);
+        turn_3 = _S2843 + _S2845 * Vector<float, 3> (_S2835.w, d1_10.x, d1_10.y);
 
     }
     else
     {
 
-        turn_3 = _S2840;
+        turn_3 = _S2843;
 
     }
 
@@ -29004,23 +29049,23 @@ void _TransformCS(void* _S2826, void* entryPointParams_49, void* globalParams_50
     if(((&kernelContext_228)->globalParams_0->Look_0->gValue_0.y) > 0.0f)
     {
 
-        k_49 = _S2831 * (groomlab_max((0.0f), (1.0f + (&kernelContext_228)->globalParams_0->Look_0->gValue_0.y * d1_10.z)));
+        k_49 = _S2834 * (groomlab_max((0.0f), (1.0f + (&kernelContext_228)->globalParams_0->Look_0->gValue_0.y * d1_10.z)));
 
     }
     else
     {
 
-        k_49 = _S2831;
+        k_49 = _S2834;
 
     }
 
-    Vector<float, 3>  _S2843 = moreRow_0(1U, &kernelContext_228);
+    Vector<float, 3>  _S2846 = moreRow_0(1U, &kernelContext_228);
 
-    Vector<float, 3>  _S2844 = Vector<float, 3> (1.0f, 0.0f, 0.0f);
+    Vector<float, 3>  _S2847 = Vector<float, 3> (1.0f, 0.0f, 0.0f);
 
-    Vector<float, 3>  _S2845 = Vector<float, 3> (0.0f, 1.0f, 0.0f);
+    Vector<float, 3>  _S2848 = Vector<float, 3> (0.0f, 1.0f, 0.0f);
 
-    Vector<float, 3>  _S2846 = Vector<float, 3> (0.0f, 0.0f, 1.0f);
+    Vector<float, 3>  _S2849 = Vector<float, 3> (0.0f, 0.0f, 1.0f);
 
     Vector<float, 3>  ax_1;
 
@@ -29034,48 +29079,48 @@ void _TransformCS(void* _S2826, void* entryPointParams_49, void* globalParams_50
     if(((&kernelContext_228)->globalParams_0->Look_0->gFlag_0.x) == 0U)
     {
 
-        RootAxes_0 _S2847 = rootAxesOf_0(_S2828, _S2829, _S2830, Vector<float, 3> (0.0f, -1.0f, 0.0f), true, &kernelContext_228);
+        RootAxes_0 _S2850 = rootAxesOf_0(_S2831, _S2832, _S2833, Vector<float, 3> (0.0f, -1.0f, 0.0f), true, &kernelContext_228);
 
-        Vector<float, 3>  _S2848 = loadPoint_0(_S2829, &kernelContext_228);
+        Vector<float, 3>  _S2851 = loadPoint_0(_S2832, &kernelContext_228);
 
 
-        Vector<float, 3>  _S2849 = _S2847.t_2 * (Vector<float, 3> )move_7.x + _S2847.n_6 * (Vector<float, 3> )move_7.y + _S2847.b_5 * (Vector<float, 3> )move_7.z;
+        Vector<float, 3>  _S2852 = _S2850.t_2 * (Vector<float, 3> )move_7.x + _S2850.n_6 * (Vector<float, 3> )move_7.y + _S2850.b_5 * (Vector<float, 3> )move_7.z;
 
-        ax_1 = _S2847.t_2;
+        ax_1 = _S2850.t_2;
 
-        ay_1 = _S2847.n_6;
+        ay_1 = _S2850.n_6;
 
-        az_1 = _S2847.b_5;
+        az_1 = _S2850.b_5;
 
-        origin_7 = _S2848;
+        origin_7 = _S2851;
 
-        offset_12 = _S2849;
+        offset_12 = _S2852;
 
     }
     else
     {
 
-        ax_1 = _S2844;
+        ax_1 = _S2847;
 
-        ay_1 = _S2845;
+        ay_1 = _S2848;
 
-        az_1 = _S2846;
+        az_1 = _S2849;
 
-        origin_7 = _S2843;
+        origin_7 = _S2846;
 
         offset_12 = move_7;
 
     }
 
-    Vector<float, 3>  _S2850 = turnedBy_0(_S2844, turn_3, ax_1, ay_1, az_1);
-    Vector<float, 3>  _S2851 = turnedBy_0(_S2845, turn_3, ax_1, ay_1, az_1);
-    Vector<float, 3>  _S2852 = turnedBy_0(_S2846, turn_3, ax_1, ay_1, az_1);
+    Vector<float, 3>  _S2853 = turnedBy_0(_S2847, turn_3, ax_1, ay_1, az_1);
+    Vector<float, 3>  _S2854 = turnedBy_0(_S2848, turn_3, ax_1, ay_1, az_1);
+    Vector<float, 3>  _S2855 = turnedBy_0(_S2849, turn_3, ax_1, ay_1, az_1);
 
     uint32_t i_87 = 0U;
     for(;;)
     {
 
-        if(i_87 < _S2830)
+        if(i_87 < _S2833)
         {
         }
         else
@@ -29084,12 +29129,12 @@ void _TransformCS(void* _S2826, void* entryPointParams_49, void* globalParams_50
             break;
         }
 
-        uint32_t _S2853 = _S2829 + i_87;
+        uint32_t _S2856 = _S2832 + i_87;
 
-        Vector<float, 3>  _S2854 = loadPoint_0(_S2853, &kernelContext_228);
+        Vector<float, 3>  _S2857 = loadPoint_0(_S2856, &kernelContext_228);
 
-        Vector<float, 3>  v_42 = (_S2854 - origin_7) * (Vector<float, 3> )k_49;
-        storePoint_0((&kernelContext_228)->globalParams_0->gOut_0, _S2853, origin_7 + (_S2850 * (Vector<float, 3> )v_42.x + _S2851 * (Vector<float, 3> )v_42.y + _S2852 * (Vector<float, 3> )v_42.z) + offset_12);
+        Vector<float, 3>  v_42 = (_S2857 - origin_7) * (Vector<float, 3> )k_49;
+        storePoint_0((&kernelContext_228)->globalParams_0->gOut_0, _S2856, origin_7 + (_S2853 * (Vector<float, 3> )v_42.x + _S2854 * (Vector<float, 3> )v_42.y + _S2855 * (Vector<float, 3> )v_42.z) + offset_12);
 
         i_87 = i_87 + 1U;
 
@@ -29101,10 +29146,10 @@ void _TransformCS(void* _S2826, void* entryPointParams_49, void* globalParams_50
 }
 
 
-void _DisplaceCS(void* _S2855, void* entryPointParams_50, void* globalParams_51)
+void _DisplaceCS(void* _S2858, void* entryPointParams_50, void* globalParams_51)
 {
 
-    ComputeThreadVaryingInput * _S2856 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2855));
+    ComputeThreadVaryingInput * _S2859 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2858));
 
     KernelContext_0 kernelContext_229;
 
@@ -29114,83 +29159,83 @@ void _DisplaceCS(void* _S2855, void* entryPointParams_50, void* globalParams_51)
 
     (&kernelContext_229)->sTableBase_0 = 0U;
 
-    uint32_t _S2857 = threadIndex_0(_S2856->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2856->groupThreadID, 64U, &kernelContext_229);
+    uint32_t _S2860 = threadIndex_0(_S2859->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2859->groupThreadID, 64U, &kernelContext_229);
 
-    if(_S2857 >= ((&kernelContext_229)->globalParams_0->Look_0->gStrandCount_0))
+    if(_S2860 >= ((&kernelContext_229)->globalParams_0->Look_0->gStrandCount_0))
     {
 
         return;
     }
 
-    uint32_t _S2858 = strandBegin_0(_S2857, &kernelContext_229);
+    uint32_t _S2861 = strandBegin_0(_S2860, &kernelContext_229);
 
-    uint32_t _S2859 = strandCountOf_0(_S2857, &kernelContext_229);
+    uint32_t _S2862 = strandCountOf_0(_S2860, &kernelContext_229);
 
-    if(_S2859 == 0U)
+    if(_S2862 == 0U)
     {
 
         return;
     }
 
-    Vector<float, 4>  _S2860 = rootFrameOf_0(_S2857, 0U, &kernelContext_229);
+    Vector<float, 4>  _S2863 = rootFrameOf_0(_S2860, 0U, &kernelContext_229);
 
-    bool _S2861;
+    bool _S2864;
 
     if(((&kernelContext_229)->globalParams_0->Look_0->gFlag_0.x) != 0U)
     {
 
-        _S2861 = (_S2860.w) != 0.0f;
+        _S2864 = (_S2863.w) != 0.0f;
 
     }
     else
     {
 
-        _S2861 = false;
+        _S2864 = false;
 
     }
 
-    Vector<float, 3>  _S2862;
+    Vector<float, 3>  _S2865;
 
-    if(_S2861)
+    if(_S2864)
     {
 
-        _S2862 = Vector<float, 3> {_S2860.x, _S2860.y, _S2860.z};
+        _S2865 = Vector<float, 3> {_S2863.x, _S2863.y, _S2863.z};
 
     }
     else
     {
 
-        Vector<float, 4>  _S2863 = (&kernelContext_229)->globalParams_0->Look_0->gValue2_0;
+        Vector<float, 4>  _S2866 = (&kernelContext_229)->globalParams_0->Look_0->gValue2_0;
 
-        Vector<float, 3>  _S2864 = stageDirection_0(_S2857, Vector<float, 3> {_S2863.x, _S2863.y, _S2863.z}, &kernelContext_229);
+        Vector<float, 3>  _S2867 = stageDirection_0(_S2860, Vector<float, 3> {_S2866.x, _S2866.y, _S2866.z}, &kernelContext_229);
 
-        _S2862 = _S2864;
+        _S2865 = _S2867;
 
     }
 
-    bool _S2865 = fieldPerPoint_0(0U, &kernelContext_229);
+    bool _S2868 = fieldPerPoint_0(0U, &kernelContext_229);
 
-    float _S2866;
+    float _S2869;
 
-    if(_S2865)
+    if(_S2868)
     {
 
-        _S2866 = 0.0f;
+        _S2869 = 0.0f;
 
     }
     else
     {
 
-        float _S2867 = fieldAt_0(0U, (&kernelContext_229)->globalParams_0->Look_0->gValue_0.x, _S2857, 0U, &kernelContext_229);
+        float _S2870 = fieldAt_0(0U, (&kernelContext_229)->globalParams_0->Look_0->gValue_0.x, _S2860, 0U, &kernelContext_229);
 
-        _S2866 = _S2867;
+        _S2869 = _S2870;
 
     }
 
-    Vector<float, 3>  _S2868 = loadPoint_0(_S2858, &kernelContext_229);
-    storePoint_0((&kernelContext_229)->globalParams_0->gOut_0, _S2858, _S2868);
+    Vector<float, 3>  _S2871 = loadPoint_0(_S2861, &kernelContext_229);
+    storePoint_0((&kernelContext_229)->globalParams_0->gOut_0, _S2861, _S2871);
 
-    float _S2869 = strandLength_0(_S2858, _S2859, &kernelContext_229);
+    float _S2872 = strandLength_0(_S2861, _S2862, &kernelContext_229);
 
     uint32_t i_88 = 1U;
 
@@ -29201,7 +29246,7 @@ void _DisplaceCS(void* _S2855, void* entryPointParams_50, void* globalParams_51)
     for(;;)
     {
 
-        if(i_88 < _S2859)
+        if(i_88 < _S2862)
         {
         }
         else
@@ -29211,44 +29256,44 @@ void _DisplaceCS(void* _S2855, void* entryPointParams_50, void* globalParams_51)
         }
 
         float amount_8;
-        if(_S2865)
+        if(_S2868)
         {
 
-            float _S2870 = fieldAt_0(0U, (&kernelContext_229)->globalParams_0->Look_0->gValue_0.x, _S2857, _S2858 + i_88, &kernelContext_229);
+            float _S2873 = fieldAt_0(0U, (&kernelContext_229)->globalParams_0->Look_0->gValue_0.x, _S2860, _S2861 + i_88, &kernelContext_229);
 
-            amount_8 = _S2870;
+            amount_8 = _S2873;
 
         }
         else
         {
 
-            amount_8 = _S2866;
+            amount_8 = _S2869;
 
         }
-        uint32_t _S2871 = _S2858 + i_88;
+        uint32_t _S2874 = _S2861 + i_88;
 
-        Vector<float, 3>  _S2872 = loadPoint_0(_S2871, &kernelContext_229);
+        Vector<float, 3>  _S2875 = loadPoint_0(_S2874, &kernelContext_229);
 
-        Vector<float, 3>  _S2873 = loadPoint_0(_S2871 - 1U, &kernelContext_229);
+        Vector<float, 3>  _S2876 = loadPoint_0(_S2874 - 1U, &kernelContext_229);
 
-        float along_12 = along_11 + len3_0(_S2872 - _S2873);
+        float along_12 = along_11 + len3_0(_S2875 - _S2876);
 
         float t_54;
-        if(_S2869 > 9.999999960041972e-13f)
+        if(_S2872 > 9.999999960041972e-13f)
         {
 
-            t_54 = along_12 / _S2869;
+            t_54 = along_12 / _S2872;
 
         }
         else
         {
 
-            t_54 = paramAt_0(i_88, _S2859);
+            t_54 = paramAt_0(i_88, _S2862);
 
         }
 
-        float _S2874 = rampAt_0(t_54, &kernelContext_229);
-        storePoint_0((&kernelContext_229)->globalParams_0->gOut_0, _S2871, _S2872 + _S2862 * (Vector<float, 3> )(amount_8 * _S2874));
+        float _S2877 = rampAt_0(t_54, &kernelContext_229);
+        storePoint_0((&kernelContext_229)->globalParams_0->gOut_0, _S2874, _S2875 + _S2865 * (Vector<float, 3> )(amount_8 * _S2877));
 
         i_88 = i_88 + 1U;
 
@@ -29263,17 +29308,17 @@ void _DisplaceCS(void* _S2855, void* entryPointParams_50, void* globalParams_51)
 static Vector<float, 3>  twistSample_0(uint32_t a_67, uint32_t k_50, KernelContext_0 * kernelContext_230)
 {
 
-    uint32_t _S2875 = (a_67 * 96U + k_50 * 3U) * 4U;
+    uint32_t _S2878 = (a_67 * 96U + k_50 * 3U) * 4U;
 
-    ByteAddressBuffer _S2876 = kernelContext_230->globalParams_0->gAux1_0;
+    ByteAddressBuffer _S2879 = kernelContext_230->globalParams_0->gAux1_0;
 
-    uint32_t _S2877 = (kernelContext_230->globalParams_0->gAux1_0).Load<uint32_t >(_S2875);
+    uint32_t _S2880 = (kernelContext_230->globalParams_0->gAux1_0).Load<uint32_t >(_S2878);
 
-    uint32_t _S2878 = (_S2876).Load<uint32_t >(_S2875 + 4U);
+    uint32_t _S2881 = (_S2879).Load<uint32_t >(_S2878 + 4U);
 
-    uint32_t _S2879 = (_S2876).Load<uint32_t >(_S2875 + 8U);
+    uint32_t _S2882 = (_S2879).Load<uint32_t >(_S2878 + 8U);
 
-    return asfloat_0(Vector<uint32_t, 3> (_S2877, _S2878, _S2879));
+    return asfloat_0(Vector<uint32_t, 3> (_S2880, _S2881, _S2882));
 }
 
 
@@ -29299,8 +29344,8 @@ static uint32_t nearestTwistAxis_0(Vector<float, 3>  p_63, KernelContext_0 * ker
             break;
         }
 
-        Vector<float, 3>  _S2880 = twistSample_0(a_68, 0U, kernelContext_231);
-        Vector<float, 3>  d_49 = _S2880 - p_63;
+        Vector<float, 3>  _S2883 = twistSample_0(a_68, 0U, kernelContext_231);
+        Vector<float, 3>  d_49 = _S2883 - p_63;
         float d2_1 = exactDot_0(d_49, d_49);
         if(d2_1 < bestD2_0)
         {
@@ -29338,19 +29383,19 @@ static Vector<float, 3>  twistAxisAt_0(uint32_t a_69, float t_55, KernelContext_
     }
     float f_28 = x_42 - float(i_89);
 
-    Vector<float, 3>  _S2881 = twistSample_0(a_69, i_89, kernelContext_232);
-    Vector<float, 3>  _S2882 = _S2881 * (Vector<float, 3> )(1.0f - f_28);
+    Vector<float, 3>  _S2884 = twistSample_0(a_69, i_89, kernelContext_232);
+    Vector<float, 3>  _S2885 = _S2884 * (Vector<float, 3> )(1.0f - f_28);
 
-    Vector<float, 3>  _S2883 = twistSample_0(a_69, i_89 + 1U, kernelContext_232);
+    Vector<float, 3>  _S2886 = twistSample_0(a_69, i_89 + 1U, kernelContext_232);
 
-    return _S2882 + _S2883 * (Vector<float, 3> )f_28;
+    return _S2885 + _S2886 * (Vector<float, 3> )f_28;
 }
 
 
-void _TwistCS(void* _S2884, void* entryPointParams_51, void* globalParams_52)
+void _TwistCS(void* _S2887, void* entryPointParams_51, void* globalParams_52)
 {
 
-    ComputeThreadVaryingInput * _S2885 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2884));
+    ComputeThreadVaryingInput * _S2888 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2887));
 
     KernelContext_0 kernelContext_233;
 
@@ -29360,105 +29405,105 @@ void _TwistCS(void* _S2884, void* entryPointParams_51, void* globalParams_52)
 
     (&kernelContext_233)->sTableBase_0 = 0U;
 
-    uint32_t _S2886 = threadIndex_0(_S2885->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2885->groupThreadID, 64U, &kernelContext_233);
+    uint32_t _S2889 = threadIndex_0(_S2888->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2888->groupThreadID, 64U, &kernelContext_233);
 
-    if(_S2886 >= ((&kernelContext_233)->globalParams_0->Look_0->gStrandCount_0))
+    if(_S2889 >= ((&kernelContext_233)->globalParams_0->Look_0->gStrandCount_0))
     {
 
         return;
     }
 
-    uint32_t _S2887 = strandBegin_0(_S2886, &kernelContext_233);
+    uint32_t _S2890 = strandBegin_0(_S2889, &kernelContext_233);
 
-    uint32_t _S2888 = strandCountOf_0(_S2886, &kernelContext_233);
+    uint32_t _S2891 = strandCountOf_0(_S2889, &kernelContext_233);
 
-    uint32_t _S2889 = _S2886 * 16U;
+    uint32_t _S2892 = _S2889 * 16U;
 
-    ByteAddressBuffer _S2890 = (&kernelContext_233)->globalParams_0->gAux0_0;
+    ByteAddressBuffer _S2893 = (&kernelContext_233)->globalParams_0->gAux0_0;
 
-    uint32_t _S2891 = ((&kernelContext_233)->globalParams_0->gAux0_0).Load<uint32_t >(_S2889);
+    uint32_t _S2894 = ((&kernelContext_233)->globalParams_0->gAux0_0).Load<uint32_t >(_S2892);
 
-    uint32_t _S2892 = (_S2890).Load<uint32_t >(_S2889 + 4U);
+    uint32_t _S2895 = (_S2893).Load<uint32_t >(_S2892 + 4U);
 
-    uint32_t _S2893 = (_S2890).Load<uint32_t >(_S2889 + 8U);
+    uint32_t _S2896 = (_S2893).Load<uint32_t >(_S2892 + 8U);
 
-    uint32_t _S2894 = (_S2890).Load<uint32_t >(_S2889 + 12U);
+    uint32_t _S2897 = (_S2893).Load<uint32_t >(_S2892 + 12U);
 
-    bool _S2895 = _S2888 >= 2U;
+    bool _S2898 = _S2891 >= 2U;
 
-    bool _S2896;
+    bool _S2899;
 
-    if(_S2895)
+    if(_S2898)
     {
 
-        _S2896 = ((&kernelContext_233)->globalParams_0->Look_0->gFlag_0.x) != 0U;
+        _S2899 = ((&kernelContext_233)->globalParams_0->Look_0->gFlag_0.x) != 0U;
 
     }
     else
     {
 
-        _S2896 = false;
+        _S2899 = false;
 
     }
 
-    if(_S2896)
+    if(_S2899)
     {
 
-        _S2896 = ((&kernelContext_233)->globalParams_0->Look_0->gFlag_0.y) > 0U;
+        _S2899 = ((&kernelContext_233)->globalParams_0->Look_0->gFlag_0.y) > 0U;
 
     }
     else
     {
 
-        _S2896 = false;
+        _S2899 = false;
 
     }
 
     uint32_t a_70;
 
-    if(_S2896)
+    if(_S2899)
     {
 
-        Vector<float, 3>  _S2897 = loadPoint_0(_S2887, &kernelContext_233);
-        Vector<uint32_t, 3>  root_16 = asuint_0(_S2897);
-        if((root_16.x) != _S2892)
+        Vector<float, 3>  _S2900 = loadPoint_0(_S2890, &kernelContext_233);
+        Vector<uint32_t, 3>  root_16 = asuint_0(_S2900);
+        if((root_16.x) != _S2895)
         {
 
-            _S2896 = true;
+            _S2899 = true;
 
         }
         else
         {
 
-            _S2896 = (root_16.y) != _S2893;
+            _S2899 = (root_16.y) != _S2896;
 
         }
 
-        if(_S2896)
+        if(_S2899)
         {
 
-            _S2896 = true;
-
-        }
-        else
-        {
-
-            _S2896 = (root_16.z) != _S2894;
-
-        }
-
-        if(_S2896)
-        {
-
-            uint32_t _S2898 = nearestTwistAxis_0(_S2897, &kernelContext_233);
-
-            a_70 = _S2898;
+            _S2899 = true;
 
         }
         else
         {
 
-            a_70 = _S2891;
+            _S2899 = (root_16.z) != _S2897;
+
+        }
+
+        if(_S2899)
+        {
+
+            uint32_t _S2901 = nearestTwistAxis_0(_S2900, &kernelContext_233);
+
+            a_70 = _S2901;
+
+        }
+        else
+        {
+
+            a_70 = _S2894;
 
         }
 
@@ -29466,36 +29511,36 @@ void _TwistCS(void* _S2884, void* entryPointParams_51, void* globalParams_52)
     else
     {
 
-        a_70 = _S2891;
+        a_70 = _S2894;
 
     }
 
 
 
-    if(_S2895)
+    if(_S2898)
     {
 
-        _S2896 = a_70 < ((&kernelContext_233)->globalParams_0->Look_0->gFlag_0.y);
+        _S2899 = a_70 < ((&kernelContext_233)->globalParams_0->Look_0->gFlag_0.y);
 
     }
     else
     {
 
-        _S2896 = false;
+        _S2899 = false;
 
     }
 
     float rate_0;
-    if(_S2896)
+    if(_S2899)
     {
 
-        float _S2899 = fieldAt_0(0U, (&kernelContext_233)->globalParams_0->Look_0->gValue_0.x, _S2886, 0U, &kernelContext_233);
+        float _S2902 = fieldAt_0(0U, (&kernelContext_233)->globalParams_0->Look_0->gValue_0.x, _S2889, 0U, &kernelContext_233);
 
-        float _S2900 = 6.28318548202514648f * _S2899;
+        float _S2903 = 6.28318548202514648f * _S2902;
 
-        uint32_t _S2901 = ((&kernelContext_233)->globalParams_0->gAux1_0).Load<uint32_t >(uint32_t(int32_t(((&kernelContext_233)->globalParams_0->Look_0->gFlag_0.y * 96U + a_70) * 4U)));
+        uint32_t _S2904 = ((&kernelContext_233)->globalParams_0->gAux1_0).Load<uint32_t >(uint32_t(int32_t(((&kernelContext_233)->globalParams_0->Look_0->gFlag_0.y * 96U + a_70) * 4U)));
 
-        rate_0 = _S2900 * (U32_asfloat((_S2901)));
+        rate_0 = _S2903 * (U32_asfloat((_S2904)));
 
     }
     else
@@ -29508,20 +29553,20 @@ void _TwistCS(void* _S2884, void* entryPointParams_51, void* globalParams_52)
     if(rate_0 == 0.0f)
     {
 
-        copyStrand_0(_S2887, _S2888, &kernelContext_233);
+        copyStrand_0(_S2890, _S2891, &kernelContext_233);
 
         return;
     }
-    float _S2902 = (&kernelContext_233)->globalParams_0->Look_0->gValue2_0.x;
+    float _S2905 = (&kernelContext_233)->globalParams_0->Look_0->gValue2_0.x;
 
-    Vector<float, 3>  _S2903 = loadPoint_0(_S2887, &kernelContext_233);
-    storePoint_0((&kernelContext_233)->globalParams_0->gOut_0, _S2887, _S2903);
+    Vector<float, 3>  _S2906 = loadPoint_0(_S2890, &kernelContext_233);
+    storePoint_0((&kernelContext_233)->globalParams_0->gOut_0, _S2890, _S2906);
 
     uint32_t i_90 = 1U;
     for(;;)
     {
 
-        if(i_90 < _S2888)
+        if(i_90 < _S2891)
         {
         }
         else
@@ -29530,36 +29575,36 @@ void _TwistCS(void* _S2884, void* entryPointParams_51, void* globalParams_52)
             break;
         }
 
-        uint32_t _S2904 = _S2887 + i_90;
+        uint32_t _S2907 = _S2890 + i_90;
 
-        Vector<float, 3>  _S2905 = loadPoint_0(_S2904, &kernelContext_233);
-        float t_56 = paramAt_0(i_90, _S2888);
+        Vector<float, 3>  _S2908 = loadPoint_0(_S2907, &kernelContext_233);
+        float t_56 = paramAt_0(i_90, _S2891);
 
-        Vector<float, 3>  _S2906 = twistAxisAt_0(a_70, t_56, &kernelContext_233);
+        Vector<float, 3>  _S2909 = twistAxisAt_0(a_70, t_56, &kernelContext_233);
 
-        Vector<float, 3>  _S2907 = twistAxisAt_0(a_70, (groomlab_min((t_56 + _S2902), (1.0f))), &kernelContext_233);
+        Vector<float, 3>  _S2910 = twistAxisAt_0(a_70, (groomlab_min((t_56 + _S2905), (1.0f))), &kernelContext_233);
 
-        Vector<float, 3>  _S2908 = twistAxisAt_0(a_70, (groomlab_max((t_56 - _S2902), (0.0f))), &kernelContext_233);
+        Vector<float, 3>  _S2911 = twistAxisAt_0(a_70, (groomlab_max((t_56 - _S2905), (0.0f))), &kernelContext_233);
 
-        Vector<float, 3>  tangent_3 = _S2907 - _S2908;
+        Vector<float, 3>  tangent_3 = _S2910 - _S2911;
         float l_19 = len3_0(tangent_3);
         if(l_19 < 9.99999993922529029e-09f)
         {
 
-            storePoint_0((&kernelContext_233)->globalParams_0->gOut_0, _S2904, _S2905);
+            storePoint_0((&kernelContext_233)->globalParams_0->gOut_0, _S2907, _S2908);
             i_90 = i_90 + 1U;
 
             continue;
         }
 
         Vector<float, 3>  tangent_4 = tangent_3 / (Vector<float, 3> )l_19;
-        Vector<float, 3>  _S2909 = _S2905 - _S2906;
+        Vector<float, 3>  _S2912 = _S2908 - _S2909;
 
-        float _S2910 = rate_0 * t_56;
+        float _S2913 = rate_0 * t_56;
 
-        float _S2911 = rampAlong_0(i_90, _S2888, &kernelContext_233);
+        float _S2914 = rampAlong_0(i_90, _S2891, &kernelContext_233);
 
-        storePoint_0((&kernelContext_233)->globalParams_0->gOut_0, _S2904, _S2906 + twistAbout_0(tangent_4, _S2909, _S2910 * _S2911));
+        storePoint_0((&kernelContext_233)->globalParams_0->gOut_0, _S2907, _S2909 + twistAbout_0(tangent_4, _S2912, _S2913 * _S2914));
 
         i_90 = i_90 + 1U;
 
@@ -29572,21 +29617,21 @@ void _TwistCS(void* _S2884, void* entryPointParams_51, void* globalParams_52)
 static Vector<float, 3>  twistAxisSample_0(uint32_t c_50, uint32_t k_51, KernelContext_0 * kernelContext_234)
 {
 
-    Vector<float, 3>  _S2912 = Vector<float, 3> (0.0f, 0.0f, 0.0f);
-    uint32_t _S2913 = c_50 * 4U;
+    Vector<float, 3>  _S2915 = Vector<float, 3> (0.0f, 0.0f, 0.0f);
+    uint32_t _S2916 = c_50 * 4U;
 
-    uint32_t _S2914 = (kernelContext_234->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t(_S2913)));
+    uint32_t _S2917 = (kernelContext_234->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t(_S2916)));
 
-    uint32_t _S2915 = (kernelContext_234->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t(_S2913 + 4U)));
-    float _S2916 = divExact_0(float(k_51), 31.0f);
+    uint32_t _S2918 = (kernelContext_234->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t(_S2916 + 4U)));
+    float _S2919 = divExact_0(float(k_51), 31.0f);
 
-    Vector<float, 3>  sum_17 = _S2912;
+    Vector<float, 3>  sum_17 = _S2915;
 
-    uint32_t m_23 = _S2914;
+    uint32_t m_23 = _S2917;
     for(;;)
     {
 
-        if(m_23 < _S2915)
+        if(m_23 < _S2918)
         {
         }
         else
@@ -29595,20 +29640,20 @@ static Vector<float, 3>  twistAxisSample_0(uint32_t c_50, uint32_t k_51, KernelC
             break;
         }
 
-        uint32_t _S2917 = (kernelContext_234->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t((kernelContext_234->globalParams_0->Look_0->gFlag_0.y + 1U + m_23) * 4U)));
+        uint32_t _S2920 = (kernelContext_234->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t((kernelContext_234->globalParams_0->Look_0->gFlag_0.y + 1U + m_23) * 4U)));
 
-        uint32_t _S2918 = strandBegin_0(_S2917, kernelContext_234);
+        uint32_t _S2921 = strandBegin_0(_S2920, kernelContext_234);
 
-        uint32_t _S2919 = strandCountOf_0(_S2917, kernelContext_234);
+        uint32_t _S2922 = strandCountOf_0(_S2920, kernelContext_234);
 
         Vector<float, 3>  sum_18;
 
-        if(_S2919 == 1U)
+        if(_S2922 == 1U)
         {
 
-            Vector<float, 3>  _S2920 = loadPoint_0(_S2918, kernelContext_234);
+            Vector<float, 3>  _S2923 = loadPoint_0(_S2921, kernelContext_234);
 
-            sum_18 = sum_17 + _S2920;
+            sum_18 = sum_17 + _S2923;
 
         }
         else
@@ -29617,12 +29662,12 @@ static Vector<float, 3>  twistAxisSample_0(uint32_t c_50, uint32_t k_51, KernelC
             sum_18 = sum_17;
 
         }
-        if(_S2919 >= 2U)
+        if(_S2922 >= 2U)
         {
 
-            Vector<float, 3>  _S2921 = pointAlongIn_0(_S2918, _S2919, _S2916, kernelContext_234);
+            Vector<float, 3>  _S2924 = pointAlongIn_0(_S2921, _S2922, _S2919, kernelContext_234);
 
-            sum_17 = sum_18 + _S2921;
+            sum_17 = sum_18 + _S2924;
 
         }
         else
@@ -29636,10 +29681,10 @@ static Vector<float, 3>  twistAxisSample_0(uint32_t c_50, uint32_t k_51, KernelC
 
     }
 
-    if(_S2915 > _S2914)
+    if(_S2918 > _S2917)
     {
 
-        sum_17 = div3Exact_0(sum_17, float(_S2915 - _S2914));
+        sum_17 = div3Exact_0(sum_17, float(_S2918 - _S2917));
 
     }
     return sum_17;
@@ -29649,30 +29694,30 @@ static Vector<float, 3>  twistAxisSample_0(uint32_t c_50, uint32_t k_51, KernelC
 static void twistAxesAlone_0(Vector<uint32_t, 3>  id_3, Vector<uint32_t, 3>  local_4, KernelContext_0 * kernelContext_235)
 {
 
-    uint32_t _S2922 = local_4.x;
+    uint32_t _S2925 = local_4.x;
 
-    uint32_t k_52 = _S2922 % 32U;
+    uint32_t k_52 = _S2925 % 32U;
 
-    uint32_t slot_2 = _S2922 / 32U;
+    uint32_t slot_2 = _S2925 / 32U;
 
-    uint32_t _S2923 = threadIndex_0(id_3, 64U, kernelContext_235);
-    uint32_t c_51 = _S2923 / 64U * 2U + slot_2;
+    uint32_t _S2926 = threadIndex_0(id_3, 64U, kernelContext_235);
+    uint32_t c_51 = _S2926 / 64U * 2U + slot_2;
 
-    bool _S2924;
+    bool _S2927;
     if(k_52 != 0U)
     {
 
-        _S2924 = true;
+        _S2927 = true;
 
     }
     else
     {
 
-        _S2924 = c_51 >= (kernelContext_235->globalParams_0->Look_0->gFlag_0.y);
+        _S2927 = c_51 >= (kernelContext_235->globalParams_0->Look_0->gFlag_0.y);
 
     }
 
-    if(_S2924)
+    if(_S2927)
     {
 
         return;
@@ -29693,19 +29738,19 @@ static void twistAxesAlone_0(Vector<uint32_t, 3>  id_3, Vector<uint32_t, 3>  loc
             break;
         }
 
-        Vector<float, 3>  _S2925 = twistAxisSample_0(c_51, j_40, kernelContext_235);
-        axis_16[j_40] = _S2925;
-        uint32_t _S2926 = (c_51 * 96U + j_40 * 3U) * 4U;
+        Vector<float, 3>  _S2928 = twistAxisSample_0(c_51, j_40, kernelContext_235);
+        axis_16[j_40] = _S2928;
+        uint32_t _S2929 = (c_51 * 96U + j_40 * 3U) * 4U;
 
-        Vector<uint32_t, 3>  _S2927 = asuint_0(_S2925);
+        Vector<uint32_t, 3>  _S2930 = asuint_0(_S2928);
 
-        RWByteAddressBuffer _S2928 = kernelContext_235->globalParams_0->gOut_0;
+        RWByteAddressBuffer _S2931 = kernelContext_235->globalParams_0->gOut_0;
 
-        kernelContext_235->globalParams_0->gOut_0.Store(_S2926,_S2927.x);
+        kernelContext_235->globalParams_0->gOut_0.Store(_S2929,_S2930.x);
 
-        _S2928.Store(_S2926 + 4U,_S2927.y);
+        _S2931.Store(_S2929 + 4U,_S2930.y);
 
-        _S2928.Store(_S2926 + 8U,_S2927.z);
+        _S2931.Store(_S2929 + 8U,_S2930.z);
 
         j_40 = j_40 + 1U;
 
@@ -29739,10 +29784,10 @@ static void twistAxesAlone_0(Vector<uint32_t, 3>  id_3, Vector<uint32_t, 3>  loc
 }
 
 
-void _TwistAxesCS(void* _S2929, void* entryPointParams_52, void* globalParams_53)
+void _TwistAxesCS(void* _S2932, void* entryPointParams_52, void* globalParams_53)
 {
 
-    ComputeThreadVaryingInput * _S2930 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2929));
+    ComputeThreadVaryingInput * _S2933 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2932));
 
     KernelContext_0 kernelContext_236;
 
@@ -29752,7 +29797,7 @@ void _TwistAxesCS(void* _S2929, void* entryPointParams_52, void* globalParams_53
 
     (&kernelContext_236)->sTableBase_0 = 0U;
 
-    twistAxesAlone_0(_S2930->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2930->groupThreadID, _S2930->groupThreadID, &kernelContext_236);
+    twistAxesAlone_0(_S2933->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2933->groupThreadID, _S2933->groupThreadID, &kernelContext_236);
 
     return;
 }
@@ -29764,22 +29809,22 @@ static Vector<double, 3>  smoothPointAt_0(SmoothWalk_0 * w_64, uint32_t begin_34
     for(;;)
     {
 
-        bool _S2931;
+        bool _S2934;
 
         if((w_64->seg_1 + 1U) < n_56)
         {
 
-            _S2931 = (w_64->arcHi_0) < a_71;
+            _S2934 = (w_64->arcHi_0) < a_71;
 
         }
         else
         {
 
-            _S2931 = false;
+            _S2934 = false;
 
         }
 
-        if(_S2931)
+        if(_S2934)
         {
         }
         else
@@ -29788,19 +29833,19 @@ static Vector<double, 3>  smoothPointAt_0(SmoothWalk_0 * w_64, uint32_t begin_34
             break;
         }
 
-        uint32_t _S2932 = w_64->seg_1 + 1U;
+        uint32_t _S2935 = w_64->seg_1 + 1U;
 
-        w_64->seg_1 = _S2932;
-        double _S2933 = w_64->arcHi_0;
+        w_64->seg_1 = _S2935;
+        double _S2936 = w_64->arcHi_0;
 
         w_64->arcLo_0 = w_64->arcHi_0;
-        uint32_t _S2934 = begin_34 + _S2932;
+        uint32_t _S2937 = begin_34 + _S2935;
 
-        Vector<float, 3>  _S2935 = loadPoint_0(_S2934, kernelContext_237);
+        Vector<float, 3>  _S2938 = loadPoint_0(_S2937, kernelContext_237);
 
-        Vector<float, 3>  _S2936 = loadPoint_0(_S2934 - 1U, kernelContext_237);
+        Vector<float, 3>  _S2939 = loadPoint_0(_S2937 - 1U, kernelContext_237);
 
-        w_64->arcHi_0 = _S2933 + double(len3_0(_S2935 - _S2936));
+        w_64->arcHi_0 = _S2936 + double(len3_0(_S2938 - _S2939));
 
     }
 
@@ -29820,12 +29865,12 @@ static Vector<double, 3>  smoothPointAt_0(SmoothWalk_0 * w_64, uint32_t begin_34
 
     }
 
-    Vector<float, 3>  _S2937 = loadPoint_0(begin_34 + w_64->seg_1 - 1U, kernelContext_237);
+    Vector<float, 3>  _S2940 = loadPoint_0(begin_34 + w_64->seg_1 - 1U, kernelContext_237);
 
-    Vector<float, 3>  _S2938 = loadPoint_0(begin_34 + w_64->seg_1, kernelContext_237);
+    Vector<float, 3>  _S2941 = loadPoint_0(begin_34 + w_64->seg_1, kernelContext_237);
 
-    Vector<float, 3>  pq_0 = _S2938 - _S2937;
-    return Vector<double, 3> (double(_S2937.x) + double(pq_0.x) * t_57, double(_S2937.y) + double(pq_0.y) * t_57, double(_S2937.z) + double(pq_0.z) * t_57);
+    Vector<float, 3>  pq_0 = _S2941 - _S2940;
+    return Vector<double, 3> (double(_S2940.x) + double(pq_0.x) * t_57, double(_S2940.y) + double(pq_0.y) * t_57, double(_S2940.z) + double(pq_0.z) * t_57);
 }
 
 
@@ -29835,19 +29880,19 @@ static SmoothEnd_0 smoothEndOf_0(uint32_t i_91, KernelContext_0 * kernelContext_
 
     SmoothEnd_0 e_12;
 
-    uint32_t _S2939 = (kernelContext_238->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t(at_39)));
+    uint32_t _S2942 = (kernelContext_238->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t(at_39)));
 
-    uint32_t _S2940 = (kernelContext_238->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t(at_39 + 4U)));
+    uint32_t _S2943 = (kernelContext_238->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t(at_39 + 4U)));
 
-    (&e_12)->turns_0 = (U32_asdouble((_S2939), (_S2940)));
-    uint32_t _S2941 = (kernelContext_238->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t(at_39 + 8U)));
+    (&e_12)->turns_0 = (U32_asdouble((_S2942), (_S2943)));
+    uint32_t _S2944 = (kernelContext_238->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t(at_39 + 8U)));
 
-    uint32_t _S2942 = (kernelContext_238->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t(at_39 + 12U)));
+    uint32_t _S2945 = (kernelContext_238->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t(at_39 + 12U)));
 
-    (&e_12)->into_0 = (U32_asdouble((_S2941), (_S2942)));
-    uint32_t _S2943 = (kernelContext_238->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t(at_39 + 16U)));
+    (&e_12)->into_0 = (U32_asdouble((_S2944), (_S2945)));
+    uint32_t _S2946 = (kernelContext_238->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t(at_39 + 16U)));
 
-    (&e_12)->cell_1 = _S2943;
+    (&e_12)->cell_1 = _S2946;
     return e_12;
 }
 
@@ -29857,37 +29902,37 @@ static void smoothAlone_0(uint32_t s_70, KernelContext_0 * kernelContext_239)
 
     Vector<double, 3>  next_3;
 
-    uint32_t _S2944 = strandBegin_0(s_70, kernelContext_239);
+    uint32_t _S2947 = strandBegin_0(s_70, kernelContext_239);
 
-    uint32_t _S2945 = strandCountOf_0(s_70, kernelContext_239);
+    uint32_t _S2948 = strandCountOf_0(s_70, kernelContext_239);
 
-    copyStrand_0(_S2944, _S2945, kernelContext_239);
+    copyStrand_0(_S2947, _S2948, kernelContext_239);
 
 
     float scale_3 = kernelContext_239->globalParams_0->Look_0->gValue_0.y;
 
-    bool _S2946;
+    bool _S2949;
     if(!(scale_3 > 0.0f))
     {
 
-        _S2946 = true;
+        _S2949 = true;
 
     }
     else
     {
 
-        _S2946 = _S2945 < 3U;
+        _S2949 = _S2948 < 3U;
 
     }
 
-    if(_S2946)
+    if(_S2949)
     {
 
         return;
     }
 
-    float _S2947 = fieldAt_0(0U, kernelContext_239->globalParams_0->Look_0->gValue_0.x, s_70, 0U, kernelContext_239);
-    float k_53 = clamp_0(_S2947, 0.0f, 1.0f);
+    float _S2950 = fieldAt_0(0U, kernelContext_239->globalParams_0->Look_0->gValue_0.x, s_70, 0U, kernelContext_239);
+    float k_53 = clamp_0(_S2950, 0.0f, 1.0f);
     if(k_53 <= 0.0f)
     {
 
@@ -29900,17 +29945,17 @@ static void smoothAlone_0(uint32_t s_70, KernelContext_0 * kernelContext_239)
     if(m_24 == 0U)
     {
 
-        _S2946 = true;
+        _S2949 = true;
 
     }
     else
     {
 
-        _S2946 = m_24 > 128U;
+        _S2949 = m_24 > 128U;
 
     }
 
-    if(_S2946)
+    if(_S2949)
     {
 
         return;
@@ -29924,7 +29969,7 @@ static void smoothAlone_0(uint32_t s_70, KernelContext_0 * kernelContext_239)
     for(;;)
     {
 
-        if(i_92 < _S2945)
+        if(i_92 < _S2948)
         {
         }
         else
@@ -29933,17 +29978,17 @@ static void smoothAlone_0(uint32_t s_70, KernelContext_0 * kernelContext_239)
             break;
         }
 
-        uint32_t _S2948 = _S2944 + i_92;
+        uint32_t _S2951 = _S2947 + i_92;
 
-        Vector<float, 3>  _S2949 = loadPoint_0(_S2948, kernelContext_239);
+        Vector<float, 3>  _S2952 = loadPoint_0(_S2951, kernelContext_239);
 
-        Vector<float, 3>  _S2950 = loadPoint_0(_S2948 - 1U, kernelContext_239);
+        Vector<float, 3>  _S2953 = loadPoint_0(_S2951 - 1U, kernelContext_239);
 
-        double _S2951 = length_9 + double(len3_0(_S2949 - _S2950));
+        double _S2954 = length_9 + double(len3_0(_S2952 - _S2953));
 
         uint32_t i_93 = i_92 + 1U;
 
-        length_9 = _S2951;
+        length_9 = _S2954;
 
         i_92 = i_93;
 
@@ -29966,19 +30011,19 @@ static void smoothAlone_0(uint32_t s_70, KernelContext_0 * kernelContext_239)
             break;
         }
 
-        Vector<double, 3>  _S2952 = Vector<double, 3> (0.0, 0.0, 0.0);
+        Vector<double, 3>  _S2955 = Vector<double, 3> (0.0, 0.0, 0.0);
 
-        period_0[c_52] = _S2952;
-        boxed_0[c_52] = _S2952;
-        sums_1[c_52] = _S2952;
+        period_0[c_52] = _S2955;
+        boxed_0[c_52] = _S2955;
+        sums_1[c_52] = _S2955;
 
         c_52 = c_52 + 1U;
 
     }
 
-    Vector<double, 3>  _S2953 = Vector<double, 3> (0.0, 0.0, 0.0);
+    Vector<double, 3>  _S2956 = Vector<double, 3> (0.0, 0.0, 0.0);
 
-    sums_1[wrap_0] = _S2953;
+    sums_1[wrap_0] = _S2956;
     bool shaped_1 = length_9 > 0.0;
     if(shaped_1)
     {
@@ -30001,14 +30046,14 @@ static void smoothAlone_0(uint32_t s_70, KernelContext_0 * kernelContext_239)
         (&w_65)->seg_1 = 1U;
         (&w_65)->arcLo_0 = 0.0;
 
-        Vector<float, 3>  _S2954 = loadPoint_0(_S2944 + 1U, kernelContext_239);
+        Vector<float, 3>  _S2957 = loadPoint_0(_S2947 + 1U, kernelContext_239);
 
-        Vector<float, 3>  _S2955 = loadPoint_0(_S2944, kernelContext_239);
-        (&w_65)->arcHi_0 = double(len3_0(_S2954 - _S2955));
+        Vector<float, 3>  _S2958 = loadPoint_0(_S2947, kernelContext_239);
+        (&w_65)->arcHi_0 = double(len3_0(_S2957 - _S2958));
 
-        Vector<double, 3>  _S2956 = smoothPointAt_0(&w_65, _S2944, _S2945, 0.0, kernelContext_239);
+        Vector<double, 3>  _S2959 = smoothPointAt_0(&w_65, _S2947, _S2948, 0.0, kernelContext_239);
 
-        behind_0 = _S2956;
+        behind_0 = _S2959;
 
         c_52 = 0U;
 
@@ -30024,22 +30069,22 @@ static void smoothAlone_0(uint32_t s_70, KernelContext_0 * kernelContext_239)
                 break;
             }
 
-            Vector<float, 3>  _S2957 = loadPoint_0(_S2944 + _S2945 - 1U, kernelContext_239);
+            Vector<float, 3>  _S2960 = loadPoint_0(_S2947 + _S2948 - 1U, kernelContext_239);
 
-            uint32_t _S2958 = c_52 + 1U;
+            uint32_t _S2961 = c_52 + 1U;
 
-            if(_S2958 == m_24)
+            if(_S2961 == m_24)
             {
 
-                next_3 = Vector<double, 3> (double(_S2957.x), double(_S2957.y), double(_S2957.z));
+                next_3 = Vector<double, 3> (double(_S2960.x), double(_S2960.y), double(_S2960.z));
 
             }
             else
             {
 
-                Vector<double, 3>  _S2959 = smoothPointAt_0(&w_65, _S2944, _S2945, length_9 * double(_S2958), kernelContext_239);
+                Vector<double, 3>  _S2962 = smoothPointAt_0(&w_65, _S2947, _S2948, length_9 * double(_S2961), kernelContext_239);
 
-                next_3 = _S2959;
+                next_3 = _S2962;
 
             }
             Vector<double, 3>  step_13 = next_3 - behind_0;
@@ -30048,12 +30093,12 @@ static void smoothAlone_0(uint32_t s_70, KernelContext_0 * kernelContext_239)
 
             behind_0 = next_3;
 
-            c_52 = _S2958;
+            c_52 = _S2961;
 
         }
 
-        double _S2960 = (F64_min((2.0 * double(scale_3) * double(m_24)), (double(wrap_0))));
-        if(_S2960 > 0.0)
+        double _S2963 = (F64_min((2.0 * double(scale_3) * double(m_24)), (double(wrap_0))));
+        if(_S2963 > 0.0)
         {
 
             uint32_t pass_3 = 0U;
@@ -30069,9 +30114,9 @@ static void smoothAlone_0(uint32_t s_70, KernelContext_0 * kernelContext_239)
                     break;
                 }
 
-                sums_1[int(0)] = _S2953;
+                sums_1[int(0)] = _S2956;
 
-                next_3 = _S2953;
+                next_3 = _S2956;
 
                 c_52 = 0U;
 
@@ -30088,13 +30133,13 @@ static void smoothAlone_0(uint32_t s_70, KernelContext_0 * kernelContext_239)
                     }
 
                     Vector<double, 3>  running_0 = next_3 + period_0[c_52];
-                    uint32_t _S2961 = c_52 + 1U;
+                    uint32_t _S2964 = c_52 + 1U;
 
-                    sums_1[_S2961] = running_0;
+                    sums_1[_S2964] = running_0;
 
                     next_3 = running_0;
 
-                    c_52 = _S2961;
+                    c_52 = _S2964;
 
                 }
 
@@ -30112,13 +30157,13 @@ static void smoothAlone_0(uint32_t s_70, KernelContext_0 * kernelContext_239)
                         break;
                     }
 
-                    SmoothEnd_0 _S2962 = smoothEndOf_0(c_53, kernelContext_239);
+                    SmoothEnd_0 _S2965 = smoothEndOf_0(c_53, kernelContext_239);
 
-                    SmoothEnd_0 _S2963 = smoothEndOf_0(wrap_0 + c_53, kernelContext_239);
+                    SmoothEnd_0 _S2966 = smoothEndOf_0(wrap_0 + c_53, kernelContext_239);
 
 
 
-                    boxed_0[c_53] = (next_3 * (Vector<double, 3> )_S2962.turns_0 + sums_1[_S2962.cell_1] + period_0[_S2962.cell_1] * (Vector<double, 3> )_S2962.into_0 - (next_3 * (Vector<double, 3> )_S2963.turns_0 + sums_1[_S2963.cell_1] + period_0[_S2963.cell_1] * (Vector<double, 3> )_S2963.into_0)) * (Vector<double, 3> )(1.0 / _S2960);
+                    boxed_0[c_53] = (next_3 * (Vector<double, 3> )_S2965.turns_0 + sums_1[_S2965.cell_1] + period_0[_S2965.cell_1] * (Vector<double, 3> )_S2965.into_0 - (next_3 * (Vector<double, 3> )_S2966.turns_0 + sums_1[_S2966.cell_1] + period_0[_S2966.cell_1] * (Vector<double, 3> )_S2966.into_0)) * (Vector<double, 3> )(1.0 / _S2963);
 
                     c_53 = c_53 + 1U;
 
@@ -30150,9 +30195,9 @@ static void smoothAlone_0(uint32_t s_70, KernelContext_0 * kernelContext_239)
 
         }
 
-        sums_1[int(0)] = _S2953;
+        sums_1[int(0)] = _S2956;
 
-        next_3 = _S2953;
+        next_3 = _S2956;
 
         c_52 = 0U;
 
@@ -30169,19 +30214,19 @@ static void smoothAlone_0(uint32_t s_70, KernelContext_0 * kernelContext_239)
             }
 
             Vector<double, 3>  running_1 = next_3 + period_0[c_52];
-            uint32_t _S2964 = c_52 + 1U;
+            uint32_t _S2967 = c_52 + 1U;
 
-            sums_1[_S2964] = running_1;
+            sums_1[_S2967] = running_1;
 
             next_3 = running_1;
 
-            c_52 = _S2964;
+            c_52 = _S2967;
 
         }
 
     }
 
-    Vector<float, 3>  _S2965 = loadPoint_0(_S2944, kernelContext_239);
+    Vector<float, 3>  _S2968 = loadPoint_0(_S2947, kernelContext_239);
 
     if(shaped_1)
     {
@@ -30192,21 +30237,21 @@ static void smoothAlone_0(uint32_t s_70, KernelContext_0 * kernelContext_239)
     else
     {
 
-        behind_0 = _S2953;
+        behind_0 = _S2956;
 
     }
 
     double behindArc_0 = 0.0;
 
-    Vector<float, 3>  target_11 = _S2965;
+    Vector<float, 3>  target_11 = _S2968;
 
-    Vector<float, 3>  moved_14 = _S2965;
+    Vector<float, 3>  moved_14 = _S2968;
 
     i_92 = 1U;
     for(;;)
     {
 
-        if(i_92 < _S2945)
+        if(i_92 < _S2948)
         {
         }
         else
@@ -30215,15 +30260,15 @@ static void smoothAlone_0(uint32_t s_70, KernelContext_0 * kernelContext_239)
             break;
         }
 
-        uint32_t _S2966 = _S2944 + i_92;
+        uint32_t _S2969 = _S2947 + i_92;
 
-        Vector<float, 3>  _S2967 = loadPoint_0(_S2966, kernelContext_239);
+        Vector<float, 3>  _S2970 = loadPoint_0(_S2969, kernelContext_239);
 
-        Vector<float, 3>  _S2968 = loadPoint_0(_S2966 - 1U, kernelContext_239);
+        Vector<float, 3>  _S2971 = loadPoint_0(_S2969 - 1U, kernelContext_239);
 
-        Vector<float, 3>  old_0 = _S2967 - _S2968;
-        float own_7 = len3_0(old_0);
-        double arc_24 = behindArc_0 + double(own_7);
+        Vector<float, 3>  old_0 = _S2970 - _S2971;
+        float own_8 = len3_0(old_0);
+        double arc_24 = behindArc_0 + double(own_8);
 
         Vector<float, 3>  next_4;
 
@@ -30231,8 +30276,8 @@ static void smoothAlone_0(uint32_t s_70, KernelContext_0 * kernelContext_239)
         {
 
             double x_43 = clamp_1(arc_24 / length_9, 0.0, double(m_24));
-            uint32_t _S2969 = (U32_min((uint32_t(x_43)), (m_24 - 1U)));
-            Vector<double, 3>  ahead_0 = sums_1[_S2969] + period_0[_S2969] * (Vector<double, 3> )(x_43 - double(_S2969));
+            uint32_t _S2972 = (U32_min((uint32_t(x_43)), (m_24 - 1U)));
+            Vector<double, 3>  ahead_0 = sums_1[_S2972] + period_0[_S2972] * (Vector<double, 3> )(x_43 - double(_S2972));
             Vector<double, 3>  d_50 = ahead_0 - behind_0;
 
             float segment_4 = float(arc_24 - behindArc_0);
@@ -30269,18 +30314,18 @@ static void smoothAlone_0(uint32_t s_70, KernelContext_0 * kernelContext_239)
         else
         {
 
-            next_4 = _S2967;
+            next_4 = _S2970;
 
         }
 
-        float _S2970 = rampAlong_0(i_92, _S2945, kernelContext_239);
+        float _S2973 = rampAlong_0(i_92, _S2948, kernelContext_239);
 
-        Vector<float, 3>  d_51 = _S2967 + (next_4 - _S2967) * (Vector<float, 3> )(k_53 * clamp_0(_S2970, 0.0f, 1.0f)) - moved_14;
+        Vector<float, 3>  d_51 = _S2970 + (next_4 - _S2970) * (Vector<float, 3> )(k_53 * clamp_0(_S2973, 0.0f, 1.0f)) - moved_14;
         float l_20 = len3_0(d_51);
-        if(l_20 > (9.99999997475242708e-07f * own_7))
+        if(l_20 > (9.99999997475242708e-07f * own_8))
         {
 
-            moved_14 = moved_14 + d_51 * (Vector<float, 3> )(own_7 / l_20);
+            moved_14 = moved_14 + d_51 * (Vector<float, 3> )(own_8 / l_20);
 
         }
         else
@@ -30289,7 +30334,7 @@ static void smoothAlone_0(uint32_t s_70, KernelContext_0 * kernelContext_239)
             moved_14 = moved_14 + (next_4 - target_11);
 
         }
-        storePoint_0(kernelContext_239->globalParams_0->gOut_0, _S2966, moved_14);
+        storePoint_0(kernelContext_239->globalParams_0->gOut_0, _S2969, moved_14);
 
         uint32_t i_94 = i_92 + 1U;
 
@@ -30305,10 +30350,10 @@ static void smoothAlone_0(uint32_t s_70, KernelContext_0 * kernelContext_239)
 }
 
 
-void _SmoothCS(void* _S2971, void* entryPointParams_53, void* globalParams_54)
+void _SmoothCS(void* _S2974, void* entryPointParams_53, void* globalParams_54)
 {
 
-    ComputeThreadVaryingInput * _S2972 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2971));
+    ComputeThreadVaryingInput * _S2975 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2974));
 
     KernelContext_0 kernelContext_240;
 
@@ -30318,12 +30363,12 @@ void _SmoothCS(void* _S2971, void* entryPointParams_53, void* globalParams_54)
 
     (&kernelContext_240)->sTableBase_0 = 0U;
 
-    uint32_t _S2973 = (_S2972->groupID.y * (slang_bit_cast<GlobalParams_0*>(globalParams_54))->Look_0->gDispatch_0.x + _S2972->groupID.x) * 64U + _S2972->groupThreadID.x;
+    uint32_t _S2976 = (_S2975->groupID.y * (slang_bit_cast<GlobalParams_0*>(globalParams_54))->Look_0->gDispatch_0.x + _S2975->groupID.x) * 64U + _S2975->groupThreadID.x;
 
-    if(_S2973 < ((slang_bit_cast<GlobalParams_0*>(globalParams_54))->Look_0->gStrandCount_0))
+    if(_S2976 < ((slang_bit_cast<GlobalParams_0*>(globalParams_54))->Look_0->gStrandCount_0))
     {
 
-        smoothAlone_0(_S2973, &kernelContext_240);
+        smoothAlone_0(_S2976, &kernelContext_240);
 
     }
 
@@ -30336,24 +30381,24 @@ void _SmoothCS(void* _S2971, void* entryPointParams_53, void* globalParams_54)
 static Vector<float, 3>  restoreReference_0(uint32_t p_64, KernelContext_0 * kernelContext_241)
 {
 
-    uint32_t _S2974 = p_64 * 12U;
+    uint32_t _S2977 = p_64 * 12U;
 
-    ByteAddressBuffer _S2975 = kernelContext_241->globalParams_0->gAux0_0;
+    ByteAddressBuffer _S2978 = kernelContext_241->globalParams_0->gAux0_0;
 
-    uint32_t _S2976 = (kernelContext_241->globalParams_0->gAux0_0).Load<uint32_t >(_S2974);
+    uint32_t _S2979 = (kernelContext_241->globalParams_0->gAux0_0).Load<uint32_t >(_S2977);
 
-    uint32_t _S2977 = (_S2975).Load<uint32_t >(_S2974 + 4U);
+    uint32_t _S2980 = (_S2978).Load<uint32_t >(_S2977 + 4U);
 
-    uint32_t _S2978 = (_S2975).Load<uint32_t >(_S2974 + 8U);
+    uint32_t _S2981 = (_S2978).Load<uint32_t >(_S2977 + 8U);
 
-    return asfloat_0(Vector<uint32_t, 3> (_S2976, _S2977, _S2978));
+    return asfloat_0(Vector<uint32_t, 3> (_S2979, _S2980, _S2981));
 }
 
 
-void _RestoreLengthCS(void* _S2979, void* entryPointParams_54, void* globalParams_55)
+void _RestoreLengthCS(void* _S2982, void* entryPointParams_54, void* globalParams_55)
 {
 
-    ComputeThreadVaryingInput * _S2980 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2979));
+    ComputeThreadVaryingInput * _S2983 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S2982));
 
     KernelContext_0 kernelContext_242;
 
@@ -30363,22 +30408,22 @@ void _RestoreLengthCS(void* _S2979, void* entryPointParams_54, void* globalParam
 
     (&kernelContext_242)->sTableBase_0 = 0U;
 
-    uint32_t _S2981 = threadIndex_0(_S2980->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2980->groupThreadID, 64U, &kernelContext_242);
+    uint32_t _S2984 = threadIndex_0(_S2983->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S2983->groupThreadID, 64U, &kernelContext_242);
 
-    if(_S2981 >= ((&kernelContext_242)->globalParams_0->Look_0->gStrandCount_0))
+    if(_S2984 >= ((&kernelContext_242)->globalParams_0->Look_0->gStrandCount_0))
     {
 
         return;
     }
 
-    uint32_t _S2982 = strandBegin_0(_S2981, &kernelContext_242);
+    uint32_t _S2985 = strandBegin_0(_S2984, &kernelContext_242);
 
-    uint32_t _S2983 = strandCountOf_0(_S2981, &kernelContext_242);
+    uint32_t _S2986 = strandCountOf_0(_S2984, &kernelContext_242);
 
-    copyStrand_0(_S2982, _S2983, &kernelContext_242);
+    copyStrand_0(_S2985, _S2986, &kernelContext_242);
 
 
-    if(_S2983 < 2U)
+    if(_S2986 < 2U)
     {
 
         return;
@@ -30387,25 +30432,25 @@ void _RestoreLengthCS(void* _S2979, void* entryPointParams_54, void* globalParam
     uint32_t mode_1 = (&kernelContext_242)->globalParams_0->Look_0->gFlag_0.x;
     bool fromStage_0 = ((&kernelContext_242)->globalParams_0->Look_0->gFlag_0.y) != 0U;
 
-    Vector<float, 3>  _S2984 = loadPoint_0(_S2982, &kernelContext_242);
+    Vector<float, 3>  _S2987 = loadPoint_0(_S2985, &kernelContext_242);
 
     uint32_t i_95;
 
     if(mode_1 == 2U)
     {
 
-        float _S2985 = strandLength_0(_S2982, _S2983, &kernelContext_242);
+        float _S2988 = strandLength_0(_S2985, _S2986, &kernelContext_242);
 
-        float _S2986 = _S2985 / float(_S2983 - 1U);
+        float _S2989 = _S2988 / float(_S2986 - 1U);
 
-        ArcWalk_0 _S2987 = arcWalkStart_0(_S2982, &kernelContext_242);
-        ArcWalk_0 w_66 = _S2987;
+        ArcWalk_0 _S2990 = arcWalkStart_0(_S2985, &kernelContext_242);
+        ArcWalk_0 w_66 = _S2990;
 
         i_95 = 1U;
         for(;;)
         {
 
-            if(i_95 < _S2983)
+            if(i_95 < _S2986)
             {
             }
             else
@@ -30414,11 +30459,11 @@ void _RestoreLengthCS(void* _S2979, void* entryPointParams_54, void* globalParam
                 break;
             }
 
-            uint32_t _S2988 = _S2982 + i_95;
+            uint32_t _S2991 = _S2985 + i_95;
 
-            Vector<float, 3>  _S2989 = arcWalkAt_0(&w_66, _S2982, _S2983, _S2986 * float(i_95), &kernelContext_242);
+            Vector<float, 3>  _S2992 = arcWalkAt_0(&w_66, _S2985, _S2986, _S2989 * float(i_95), &kernelContext_242);
 
-            storePoint_0((&kernelContext_242)->globalParams_0->gOut_0, _S2988, _S2989);
+            storePoint_0((&kernelContext_242)->globalParams_0->gOut_0, _S2991, _S2992);
 
             i_95 = i_95 + 1U;
 
@@ -30441,7 +30486,7 @@ void _RestoreLengthCS(void* _S2979, void* entryPointParams_54, void* globalParam
             for(;;)
             {
 
-                if(i_95 < _S2983)
+                if(i_95 < _S2986)
                 {
                 }
                 else
@@ -30450,13 +30495,13 @@ void _RestoreLengthCS(void* _S2979, void* entryPointParams_54, void* globalParam
                     break;
                 }
 
-                uint32_t _S2990 = _S2982 + i_95;
+                uint32_t _S2993 = _S2985 + i_95;
 
-                Vector<float, 3>  _S2991 = restoreReference_0(_S2990, &kernelContext_242);
+                Vector<float, 3>  _S2994 = restoreReference_0(_S2993, &kernelContext_242);
 
-                Vector<float, 3>  _S2992 = restoreReference_0(_S2990 - 1U, &kernelContext_242);
+                Vector<float, 3>  _S2995 = restoreReference_0(_S2993 - 1U, &kernelContext_242);
 
-                float whole_2 = whole_1 + len3_0(_S2991 - _S2992);
+                float whole_2 = whole_1 + len3_0(_S2994 - _S2995);
 
                 i_95 = i_95 + 1U;
 
@@ -30464,70 +30509,70 @@ void _RestoreLengthCS(void* _S2979, void* entryPointParams_54, void* globalParam
 
             }
 
-            Vector<float, 3>  _S2993 = restoreReference_0(_S2982 + 1U, &kernelContext_242);
+            Vector<float, 3>  _S2996 = restoreReference_0(_S2985 + 1U, &kernelContext_242);
 
-            Vector<float, 3>  _S2994 = restoreReference_0(_S2982, &kernelContext_242);
+            Vector<float, 3>  _S2997 = restoreReference_0(_S2985, &kernelContext_242);
 
-            first_10 = _S2993 - _S2994;
-
-        }
-        else
-        {
-
-            uint32_t _S2995 = ((&kernelContext_242)->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t(_S2982 * 4U)));
-
-            float _S2996 = (U32_asfloat((_S2995)));
-            uint32_t _S2997 = _S2981 * 16U;
-
-            ByteAddressBuffer _S2998 = (&kernelContext_242)->globalParams_0->gAux1_0;
-
-            uint32_t _S2999 = ((&kernelContext_242)->globalParams_0->gAux1_0).Load<uint32_t >(_S2997);
-
-            uint32_t _S3000 = (_S2998).Load<uint32_t >(_S2997 + 4U);
-
-            uint32_t _S3001 = (_S2998).Load<uint32_t >(_S2997 + 8U);
-
-            uint32_t _S3002 = (_S2998).Load<uint32_t >(_S2997 + 12U);
-
-            first_10 = asfloat_0(Vector<uint32_t, 3> (_S2999, _S3000, _S3001));
-
-            whole_1 = _S2996;
-
-        }
-
-        bool _S3003 = whole_1 >= 0.0f;
-
-        bool _S3004;
-
-        if(_S3003)
-        {
-
-            _S3004 = mode_1 == 1U;
+            first_10 = _S2996 - _S2997;
 
         }
         else
         {
 
-            _S3004 = false;
+            uint32_t _S2998 = ((&kernelContext_242)->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t(_S2985 * 4U)));
+
+            float _S2999 = (U32_asfloat((_S2998)));
+            uint32_t _S3000 = _S2984 * 16U;
+
+            ByteAddressBuffer _S3001 = (&kernelContext_242)->globalParams_0->gAux1_0;
+
+            uint32_t _S3002 = ((&kernelContext_242)->globalParams_0->gAux1_0).Load<uint32_t >(_S3000);
+
+            uint32_t _S3003 = (_S3001).Load<uint32_t >(_S3000 + 4U);
+
+            uint32_t _S3004 = (_S3001).Load<uint32_t >(_S3000 + 8U);
+
+            uint32_t _S3005 = (_S3001).Load<uint32_t >(_S3000 + 12U);
+
+            first_10 = asfloat_0(Vector<uint32_t, 3> (_S3002, _S3003, _S3004));
+
+            whole_1 = _S2999;
 
         }
 
-        if(_S3004)
+        bool _S3006 = whole_1 >= 0.0f;
+
+        bool _S3007;
+
+        if(_S3006)
         {
 
-            float _S3005 = strandLength_0(_S2982, _S2983, &kernelContext_242);
+            _S3007 = mode_1 == 1U;
+
+        }
+        else
+        {
+
+            _S3007 = false;
+
+        }
+
+        if(_S3007)
+        {
+
+            float _S3008 = strandLength_0(_S2985, _S2986, &kernelContext_242);
 
 
-            if(_S3005 > 9.99999993922529029e-09f)
+            if(_S3008 > 9.99999993922529029e-09f)
             {
 
-                float _S3006 = whole_1 / _S3005;
+                float _S3009 = whole_1 / _S3008;
 
                 i_95 = 1U;
                 for(;;)
                 {
 
-                    if(i_95 < _S2983)
+                    if(i_95 < _S2986)
                     {
                     }
                     else
@@ -30536,11 +30581,11 @@ void _RestoreLengthCS(void* _S2979, void* entryPointParams_54, void* globalParam
                         break;
                     }
 
-                    uint32_t _S3007 = _S2982 + i_95;
+                    uint32_t _S3010 = _S2985 + i_95;
 
-                    Vector<float, 3>  _S3008 = loadPoint_0(_S3007, &kernelContext_242);
+                    Vector<float, 3>  _S3011 = loadPoint_0(_S3010, &kernelContext_242);
 
-                    storePoint_0((&kernelContext_242)->globalParams_0->gOut_0, _S3007, _S2984 + (_S3008 - _S2984) * (Vector<float, 3> )_S3006);
+                    storePoint_0((&kernelContext_242)->globalParams_0->gOut_0, _S3010, _S2987 + (_S3011 - _S2987) * (Vector<float, 3> )_S3009);
 
                     i_95 = i_95 + 1U;
 
@@ -30552,12 +30597,12 @@ void _RestoreLengthCS(void* _S2979, void* entryPointParams_54, void* globalParam
         else
         {
 
-            if(_S3003)
+            if(_S3006)
             {
 
-                Vector<float, 3>  previous_12 = _S2984;
+                Vector<float, 3>  previous_12 = _S2987;
 
-                Vector<float, 3>  before_4 = _S2984;
+                Vector<float, 3>  before_4 = _S2987;
 
                 i_95 = 1U;
 
@@ -30566,7 +30611,7 @@ void _RestoreLengthCS(void* _S2979, void* entryPointParams_54, void* globalParam
                 for(;;)
                 {
 
-                    if(i_95 < _S2983)
+                    if(i_95 < _S2986)
                     {
                     }
                     else
@@ -30579,29 +30624,29 @@ void _RestoreLengthCS(void* _S2979, void* entryPointParams_54, void* globalParam
                     if(fromStage_0)
                     {
 
-                        uint32_t _S3009 = _S2982 + i_95;
+                        uint32_t _S3012 = _S2985 + i_95;
 
-                        Vector<float, 3>  _S3010 = restoreReference_0(_S3009, &kernelContext_242);
+                        Vector<float, 3>  _S3013 = restoreReference_0(_S3012, &kernelContext_242);
 
-                        Vector<float, 3>  _S3011 = restoreReference_0(_S3009 - 1U, &kernelContext_242);
+                        Vector<float, 3>  _S3014 = restoreReference_0(_S3012 - 1U, &kernelContext_242);
 
-                        length_10 = len3_0(_S3010 - _S3011);
+                        length_10 = len3_0(_S3013 - _S3014);
 
                     }
                     else
                     {
 
-                        uint32_t _S3012 = ((&kernelContext_242)->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t((_S2982 + i_95) * 4U)));
+                        uint32_t _S3015 = ((&kernelContext_242)->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t((_S2985 + i_95) * 4U)));
 
-                        length_10 = (U32_asfloat((_S3012)));
+                        length_10 = (U32_asfloat((_S3015)));
 
                     }
 
-                    uint32_t _S3013 = _S2982 + i_95;
+                    uint32_t _S3016 = _S2985 + i_95;
 
-                    Vector<float, 3>  _S3014 = loadPoint_0(_S3013, &kernelContext_242);
+                    Vector<float, 3>  _S3017 = loadPoint_0(_S3016, &kernelContext_242);
 
-                    Vector<float, 3>  d_52 = _S3014 - previous_12;
+                    Vector<float, 3>  d_52 = _S3017 - previous_12;
                     float l_21 = len3_0(d_52);
 
                     float l_22;
@@ -30651,7 +30696,7 @@ void _RestoreLengthCS(void* _S2979, void* entryPointParams_54, void* globalParam
                         moved_15 = previous_12;
 
                     }
-                    storePoint_0((&kernelContext_242)->globalParams_0->gOut_0, _S3013, moved_15);
+                    storePoint_0((&kernelContext_242)->globalParams_0->gOut_0, _S3016, moved_15);
 
                     uint32_t i_96 = i_95 + 1U;
 
@@ -30673,10 +30718,10 @@ void _RestoreLengthCS(void* _S2979, void* entryPointParams_54, void* globalParam
 }
 
 
-void _BlendNeighborsCS(void* _S3015, void* entryPointParams_55, void* globalParams_56)
+void _BlendNeighborsCS(void* _S3018, void* entryPointParams_55, void* globalParams_56)
 {
 
-    ComputeThreadVaryingInput * _S3016 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S3015));
+    ComputeThreadVaryingInput * _S3019 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S3018));
 
     KernelContext_0 kernelContext_243;
 
@@ -30686,32 +30731,32 @@ void _BlendNeighborsCS(void* _S3015, void* entryPointParams_55, void* globalPara
 
     (&kernelContext_243)->sTableBase_0 = 0U;
 
-    uint32_t _S3017 = threadIndex_0(_S3016->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S3016->groupThreadID, 64U, &kernelContext_243);
+    uint32_t _S3020 = threadIndex_0(_S3019->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S3019->groupThreadID, 64U, &kernelContext_243);
 
-    if(_S3017 >= ((&kernelContext_243)->globalParams_0->Look_0->gStrandCount_0))
+    if(_S3020 >= ((&kernelContext_243)->globalParams_0->Look_0->gStrandCount_0))
     {
 
         return;
     }
 
-    uint32_t _S3018 = strandBegin_0(_S3017, &kernelContext_243);
+    uint32_t _S3021 = strandBegin_0(_S3020, &kernelContext_243);
 
-    uint32_t _S3019 = strandCountOf_0(_S3017, &kernelContext_243);
+    uint32_t _S3022 = strandCountOf_0(_S3020, &kernelContext_243);
 
-    uint32_t _S3020 = ((&kernelContext_243)->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t(_S3017 * 4U)));
-    uint32_t _S3021 = ((&kernelContext_243)->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t((_S3017 + 1U) * 4U)));
+    uint32_t _S3023 = ((&kernelContext_243)->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t(_S3020 * 4U)));
+    uint32_t _S3024 = ((&kernelContext_243)->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t((_S3020 + 1U) * 4U)));
 
-    uint32_t _S3022 = _S3021 - _S3020;
+    uint32_t _S3025 = _S3024 - _S3023;
 
-    Vector<uint32_t, 2>  header_4 = Vector<uint32_t, 2> (_S3020, _S3022);
+    Vector<uint32_t, 2>  header_4 = Vector<uint32_t, 2> (_S3023, _S3025);
 
     float a_72;
-    if(_S3019 >= 2U)
+    if(_S3022 >= 2U)
     {
 
-        float _S3023 = fieldAt_0(0U, (&kernelContext_243)->globalParams_0->Look_0->gValue_0.x, _S3017, 0U, &kernelContext_243);
+        float _S3026 = fieldAt_0(0U, (&kernelContext_243)->globalParams_0->Look_0->gValue_0.x, _S3020, 0U, &kernelContext_243);
 
-        a_72 = clamp_0(_S3023, 0.0f, 1.0f);
+        a_72 = clamp_0(_S3026, 0.0f, 1.0f);
 
     }
     else
@@ -30721,56 +30766,56 @@ void _BlendNeighborsCS(void* _S3015, void* entryPointParams_55, void* globalPara
 
     }
 
-    bool _S3024;
-    if(_S3019 < 2U)
+    bool _S3027;
+    if(_S3022 < 2U)
     {
 
-        _S3024 = true;
+        _S3027 = true;
 
     }
     else
     {
 
-        _S3024 = !(a_72 > 0.0f);
+        _S3027 = !(a_72 > 0.0f);
 
     }
 
-    if(_S3024)
+    if(_S3027)
     {
 
-        _S3024 = true;
+        _S3027 = true;
 
     }
     else
     {
 
-        _S3024 = _S3022 == 0U;
+        _S3027 = _S3025 == 0U;
 
     }
 
-    if(_S3024)
+    if(_S3027)
     {
 
-        copyStrand_0(_S3018, _S3019, &kernelContext_243);
+        copyStrand_0(_S3021, _S3022, &kernelContext_243);
 
         return;
     }
     OutMean_0 out_3;
-    (&out_3)->begin_0 = _S3018;
+    (&out_3)->begin_0 = _S3021;
 
 
-    if(_S3019 <= 128U)
+    if(_S3022 <= 128U)
     {
 
-        OwnMean_0 own_8;
+        OwnMean_0 own_9;
 
-        blendTowardNeighbours_1(&own_8, _S3017, _S3018, _S3019, a_72, header_4, &kernelContext_243);
+        blendTowardNeighbours_1(&own_9, _S3020, _S3021, _S3022, a_72, header_4, &kernelContext_243);
 
     }
     else
     {
 
-        blendTowardNeighbours_0(&out_3, _S3017, _S3018, _S3019, a_72, header_4, &kernelContext_243);
+        blendTowardNeighbours_0(&out_3, _S3020, _S3021, _S3022, a_72, header_4, &kernelContext_243);
 
     }
 
@@ -30778,10 +30823,10 @@ void _BlendNeighborsCS(void* _S3015, void* entryPointParams_55, void* globalPara
 }
 
 
-void _TangleCS(void* _S3025, void* entryPointParams_56, void* globalParams_57)
+void _TangleCS(void* _S3028, void* entryPointParams_56, void* globalParams_57)
 {
 
-    ComputeThreadVaryingInput * _S3026 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S3025));
+    ComputeThreadVaryingInput * _S3029 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S3028));
 
     KernelContext_0 kernelContext_244;
 
@@ -30791,35 +30836,35 @@ void _TangleCS(void* _S3025, void* entryPointParams_56, void* globalParams_57)
 
     (&kernelContext_244)->sTableBase_0 = 0U;
 
-    uint32_t _S3027 = threadIndex_0(_S3026->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S3026->groupThreadID, 64U, &kernelContext_244);
+    uint32_t _S3030 = threadIndex_0(_S3029->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S3029->groupThreadID, 64U, &kernelContext_244);
 
-    if(_S3027 >= ((&kernelContext_244)->globalParams_0->Look_0->gStrandCount_0))
+    if(_S3030 >= ((&kernelContext_244)->globalParams_0->Look_0->gStrandCount_0))
     {
 
         return;
     }
 
-    uint32_t _S3028 = strandBegin_0(_S3027, &kernelContext_244);
+    uint32_t _S3031 = strandBegin_0(_S3030, &kernelContext_244);
 
-    uint32_t _S3029 = strandCountOf_0(_S3027, &kernelContext_244);
+    uint32_t _S3032 = strandCountOf_0(_S3030, &kernelContext_244);
 
-    copyStrand_0(_S3028, _S3029, &kernelContext_244);
+    copyStrand_0(_S3031, _S3032, &kernelContext_244);
 
 
-    uint32_t _S3030 = _S3027 * 16U;
+    uint32_t _S3033 = _S3030 * 16U;
 
-    ByteAddressBuffer _S3031 = (&kernelContext_244)->globalParams_0->gAux0_0;
+    ByteAddressBuffer _S3034 = (&kernelContext_244)->globalParams_0->gAux0_0;
 
-    uint32_t _S3032 = ((&kernelContext_244)->globalParams_0->gAux0_0).Load<uint32_t >(_S3030);
+    uint32_t _S3035 = ((&kernelContext_244)->globalParams_0->gAux0_0).Load<uint32_t >(_S3033);
 
-    uint32_t _S3033 = (_S3031).Load<uint32_t >(_S3030 + 4U);
+    uint32_t _S3036 = (_S3034).Load<uint32_t >(_S3033 + 4U);
 
-    uint32_t _S3034 = (_S3031).Load<uint32_t >(_S3030 + 8U);
+    uint32_t _S3037 = (_S3034).Load<uint32_t >(_S3033 + 8U);
 
-    uint32_t _S3035 = (_S3031).Load<uint32_t >(_S3030 + 12U);
+    uint32_t _S3038 = (_S3034).Load<uint32_t >(_S3033 + 12U);
 
     bool moved_16;
-    if(_S3032 == 4294967295U)
+    if(_S3035 == 4294967295U)
     {
 
         moved_16 = true;
@@ -30828,7 +30873,7 @@ void _TangleCS(void* _S3025, void* entryPointParams_56, void* globalParams_57)
     else
     {
 
-        moved_16 = _S3029 < 2U;
+        moved_16 = _S3032 < 2U;
 
     }
 
@@ -30838,19 +30883,19 @@ void _TangleCS(void* _S3025, void* entryPointParams_56, void* globalParams_57)
         return;
     }
 
-    uint32_t _S3036 = strandBegin_0(_S3032, &kernelContext_244);
+    uint32_t _S3039 = strandBegin_0(_S3035, &kernelContext_244);
 
-    uint32_t _S3037 = strandCountOf_0(_S3032, &kernelContext_244);
+    uint32_t _S3040 = strandCountOf_0(_S3035, &kernelContext_244);
 
 
     float half_0 = 0.5f * (&kernelContext_244)->globalParams_0->Look_0->gValue_0.z;
-    float _S3038 = (groomlab_min(((&kernelContext_244)->globalParams_0->Look_0->gValue_0.y + half_0), (1.0f)));
-    float _S3039 = _S3038 + ((groomlab_max((1.0f - half_0 * 0.5f), (_S3038))) - _S3038) * (U32_asfloat((_S3033)));
-    float _S3040 = (U32_asfloat((_S3034)));
+    float _S3041 = (groomlab_min(((&kernelContext_244)->globalParams_0->Look_0->gValue_0.y + half_0), (1.0f)));
+    float _S3042 = _S3041 + ((groomlab_max((1.0f - half_0 * 0.5f), (_S3041))) - _S3041) * (U32_asfloat((_S3036)));
+    float _S3043 = (U32_asfloat((_S3037)));
 
-    float _S3041 = fieldAt_0(0U, (&kernelContext_244)->globalParams_0->Look_0->gValue_0.x, _S3027, 0U, &kernelContext_244);
-    float _S3042 = clamp_0(_S3041, 0.0f, 1.0f);
-    float _S3043 = (&kernelContext_244)->globalParams_0->Look_0->gValue_0.w;
+    float _S3044 = fieldAt_0(0U, (&kernelContext_244)->globalParams_0->Look_0->gValue_0.x, _S3030, 0U, &kernelContext_244);
+    float _S3045 = clamp_0(_S3044, 0.0f, 1.0f);
+    float _S3046 = (&kernelContext_244)->globalParams_0->Look_0->gValue_0.w;
 
     moved_16 = false;
 
@@ -30859,7 +30904,7 @@ void _TangleCS(void* _S3025, void* entryPointParams_56, void* globalParams_57)
     for(;;)
     {
 
-        if(i_97 < _S3029)
+        if(i_97 < _S3032)
         {
         }
         else
@@ -30868,8 +30913,8 @@ void _TangleCS(void* _S3025, void* entryPointParams_56, void* globalParams_57)
             break;
         }
 
-        float t_58 = paramAt_0(i_97, _S3029);
-        float x_44 = (t_58 - _S3039) / half_0;
+        float t_58 = paramAt_0(i_97, _S3032);
+        float x_44 = (t_58 - _S3042) / half_0;
         if((F32_abs((x_44))) >= 1.0f)
         {
 
@@ -30879,25 +30924,25 @@ void _TangleCS(void* _S3025, void* entryPointParams_56, void* globalParams_57)
         }
 
 
-        float _S3044 = 1.0f - x_44 * x_44;
+        float _S3047 = 1.0f - x_44 * x_44;
 
-        float bump_0 = _S3044 * _S3044;
+        float bump_0 = _S3047 * _S3047;
 
-        Vector<float, 3>  _S3045 = pointAlongIn_0(_S3036, _S3037, t_58, &kernelContext_244);
+        Vector<float, 3>  _S3048 = pointAlongIn_0(_S3039, _S3040, t_58, &kernelContext_244);
 
-        uint32_t _S3046 = _S3028 + i_97;
+        uint32_t _S3049 = _S3031 + i_97;
 
-        Vector<float, 3>  _S3047 = loadPoint_0(_S3046, &kernelContext_244);
+        Vector<float, 3>  _S3050 = loadPoint_0(_S3049, &kernelContext_244);
 
-        Vector<float, 3>  _S3048 = _S3045 - _S3047;
+        Vector<float, 3>  _S3051 = _S3048 - _S3050;
 
-        float gap_0 = len3_0(_S3048);
+        float gap_0 = len3_0(_S3051);
 
         float held_0;
-        if(_S3043 > 0.0f)
+        if(_S3046 > 0.0f)
         {
 
-            held_0 = 1.0f - smoothstepStd_0(0.5f * _S3043, _S3043, gap_0);
+            held_0 = 1.0f - smoothstepStd_0(0.5f * _S3046, _S3046, gap_0);
 
         }
         else
@@ -30906,7 +30951,7 @@ void _TangleCS(void* _S3025, void* entryPointParams_56, void* globalParams_57)
             held_0 = 1.0f;
 
         }
-        float w_67 = _S3040 * _S3042 * bump_0 * held_0;
+        float w_67 = _S3043 * _S3045 * bump_0 * held_0;
         if(!(w_67 > 0.0f))
         {
 
@@ -30915,7 +30960,7 @@ void _TangleCS(void* _S3025, void* entryPointParams_56, void* globalParams_57)
             continue;
         }
 
-        storePoint_0((&kernelContext_244)->globalParams_0->gOut_0, _S3046, _S3047 + _S3048 * (Vector<float, 3> )w_67);
+        storePoint_0((&kernelContext_244)->globalParams_0->gOut_0, _S3049, _S3050 + _S3051 * (Vector<float, 3> )w_67);
 
         moved_16 = true;
 
@@ -30926,9 +30971,9 @@ void _TangleCS(void* _S3025, void* entryPointParams_56, void* globalParams_57)
     if(moved_16)
     {
 
-        Vector<float, 3>  _S3049 = loadPoint_0(_S3028, &kernelContext_244);
+        Vector<float, 3>  _S3052 = loadPoint_0(_S3031, &kernelContext_244);
 
-        Vector<float, 3>  previous_13 = _S3049;
+        Vector<float, 3>  previous_13 = _S3052;
 
         i_97 = 1U;
 
@@ -30937,7 +30982,7 @@ void _TangleCS(void* _S3025, void* entryPointParams_56, void* globalParams_57)
         for(;;)
         {
 
-            if(i_97 < _S3029)
+            if(i_97 < _S3032)
             {
             }
             else
@@ -30946,16 +30991,16 @@ void _TangleCS(void* _S3025, void* entryPointParams_56, void* globalParams_57)
                 break;
             }
 
-            uint32_t _S3050 = _S3028 + i_97;
+            uint32_t _S3053 = _S3031 + i_97;
 
-            Vector<float, 3>  _S3051 = loadPoint_0(_S3050, &kernelContext_244);
+            Vector<float, 3>  _S3054 = loadPoint_0(_S3053, &kernelContext_244);
 
-            Vector<float, 3>  _S3052 = loadPoint_0(_S3050 - 1U, &kernelContext_244);
+            Vector<float, 3>  _S3055 = loadPoint_0(_S3053 - 1U, &kernelContext_244);
 
-            Vector<float, 3>  seg_9 = _S3051 - _S3052;
+            Vector<float, 3>  seg_9 = _S3054 - _S3055;
 
-            Vector<float, 3>  _S3053 = loadOut_0(_S3050, &kernelContext_244);
-            Vector<float, 3>  d_54 = _S3053 - previous_13;
+            Vector<float, 3>  _S3056 = loadOut_0(_S3053, &kernelContext_244);
+            Vector<float, 3>  d_54 = _S3056 - previous_13;
             float len_13 = len3_0(d_54);
             float l_23 = len3_0(seg_9);
             if(len_13 > 9.999999960041972e-13f)
@@ -30970,7 +31015,7 @@ void _TangleCS(void* _S3025, void* entryPointParams_56, void* globalParams_57)
                 previous_13 = previous_13 + seg_9;
 
             }
-            storePoint_0((&kernelContext_244)->globalParams_0->gOut_0, _S3050, previous_13);
+            storePoint_0((&kernelContext_244)->globalParams_0->gOut_0, _S3053, previous_13);
 
             i_97 = i_97 + 1U;
 
@@ -30985,31 +31030,31 @@ void _TangleCS(void* _S3025, void* entryPointParams_56, void* globalParams_57)
 static Vector<float, 3>  flowFieldAt_0(Vector<float, 3>  p_65, Vector<float, 3>  normal_10, KernelContext_0 * kernelContext_245)
 {
 
-    Vector<uint32_t, 4>  _S3054 = kernelContext_245->globalParams_0->Look_0->gFlag2_0;
+    Vector<uint32_t, 4>  _S3057 = kernelContext_245->globalParams_0->Look_0->gFlag2_0;
 
-    Vector<float, 3>  _S3055 = (groomlab_flow_at((Vector<uint32_t, 2> {_S3054.z, _S3054.w}), (p_65), (normal_10)));
+    Vector<float, 3>  _S3058 = (groomlab_flow_at((Vector<uint32_t, 2> {_S3057.z, _S3057.w}), (p_65), (normal_10)));
 
-    return _S3055;
+    return _S3058;
 }
 
 
-static Vector<float, 3>  flowHeading_0(Vector<float, 3>  field_0, Vector<float, 3>  rootNormal_2, Vector<float, 3>  nrm_6, Vector<float, 3>  own_9, float spin_0)
+static Vector<float, 3>  flowHeading_0(Vector<float, 3>  field_0, Vector<float, 3>  rootNormal_2, Vector<float, 3>  nrm_6, Vector<float, 3>  own_10, float spin_0)
 {
 
     Vector<float, 3>  d_55;
 
     if((len3_0(field_0)) < 9.99999997475242708e-07f)
     {
-        float _S3056 = 0.00100000004749745f * len3_0(own_9);
+        float _S3059 = 0.00100000004749745f * len3_0(own_10);
 
-        if(!((len3_0(own_9 - rootNormal_2 * (Vector<float, 3> )dot_0(own_9, rootNormal_2))) > _S3056))
+        if(!((len3_0(own_10 - rootNormal_2 * (Vector<float, 3> )dot_0(own_10, rootNormal_2))) > _S3059))
         {
 
             return Vector<float, 3> (0.0f, 0.0f, 0.0f);
         }
 
-        Vector<float, 3>  d_56 = own_9 - nrm_6 * (Vector<float, 3> )dot_0(own_9, nrm_6);
-        if(!((len3_0(d_56)) > _S3056))
+        Vector<float, 3>  d_56 = own_10 - nrm_6 * (Vector<float, 3> )dot_0(own_10, nrm_6);
+        if(!((len3_0(d_56)) > _S3059))
         {
 
             return Vector<float, 3> (0.0f, 0.0f, 0.0f);
@@ -31045,11 +31090,11 @@ static Vector<float, 3>  flowHeading_0(Vector<float, 3>  field_0, Vector<float, 
 static Vector<float, 3>  flowFieldAtRoot_0(uint32_t face_1, Vector<float, 2>  uv_2, Vector<float, 3>  normal_11, KernelContext_0 * kernelContext_246)
 {
 
-    Vector<uint32_t, 4>  _S3057 = kernelContext_246->globalParams_0->Look_0->gFlag2_0;
+    Vector<uint32_t, 4>  _S3060 = kernelContext_246->globalParams_0->Look_0->gFlag2_0;
 
-    Vector<float, 3>  _S3058 = (groomlab_flow_at_root((Vector<uint32_t, 2> {_S3057.z, _S3057.w}), (face_1), (uv_2), (normal_11)));
+    Vector<float, 3>  _S3061 = (groomlab_flow_at_root((Vector<uint32_t, 2> {_S3060.z, _S3060.w}), (face_1), (uv_2), (normal_11)));
 
-    return _S3058;
+    return _S3061;
 }
 
 
@@ -31058,18 +31103,18 @@ static Vector<float, 3>  flowFieldAtRoot_0(uint32_t face_1, Vector<float, 2>  uv
 static bool flowSnap_0(Vector<float, 3>  p_66, float reach_5, uint32_t * face_2, Vector<float, 2>  * uv_3, Vector<float, 3>  * at_40, Vector<float, 3>  * normal_12, KernelContext_0 * kernelContext_247)
 {
 
-    Vector<uint32_t, 4>  _S3059 = kernelContext_247->globalParams_0->Look_0->gFlag2_0;
+    Vector<uint32_t, 4>  _S3062 = kernelContext_247->globalParams_0->Look_0->gFlag2_0;
 
-    bool _S3060 = (groomlab_flow_closest((Vector<uint32_t, 2> {_S3059.z, _S3059.w}), (p_66), (reach_5), (face_2), (uv_3), (at_40), (normal_12)));
+    bool _S3063 = (groomlab_flow_closest((Vector<uint32_t, 2> {_S3062.z, _S3062.w}), (p_66), (reach_5), (face_2), (uv_3), (at_40), (normal_12)));
 
-    return _S3060;
+    return _S3063;
 }
 
 
-void _FlowCS(void* _S3061, void* entryPointParams_57, void* globalParams_58)
+void _FlowCS(void* _S3064, void* entryPointParams_57, void* globalParams_58)
 {
 
-    ComputeThreadVaryingInput * _S3062 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S3061));
+    ComputeThreadVaryingInput * _S3065 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S3064));
 
     KernelContext_0 kernelContext_248;
 
@@ -31079,69 +31124,69 @@ void _FlowCS(void* _S3061, void* entryPointParams_57, void* globalParams_58)
 
     (&kernelContext_248)->sTableBase_0 = 0U;
 
-    uint32_t _S3063 = threadIndex_0(_S3062->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S3062->groupThreadID, 64U, &kernelContext_248);
+    uint32_t _S3066 = threadIndex_0(_S3065->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S3065->groupThreadID, 64U, &kernelContext_248);
 
-    if(_S3063 >= ((&kernelContext_248)->globalParams_0->Look_0->gStrandCount_0))
+    if(_S3066 >= ((&kernelContext_248)->globalParams_0->Look_0->gStrandCount_0))
     {
 
         return;
     }
 
-    uint32_t _S3064 = strandBegin_0(_S3063, &kernelContext_248);
+    uint32_t _S3067 = strandBegin_0(_S3066, &kernelContext_248);
 
-    uint32_t _S3065 = strandCountOf_0(_S3063, &kernelContext_248);
+    uint32_t _S3068 = strandCountOf_0(_S3066, &kernelContext_248);
 
-    copyStrand_0(_S3064, _S3065, &kernelContext_248);
+    copyStrand_0(_S3067, _S3068, &kernelContext_248);
 
 
-    if(_S3065 < 2U)
+    if(_S3068 < 2U)
     {
 
         return;
     }
-    uint32_t _S3066 = _S3063 * 48U;
+    uint32_t _S3069 = _S3066 * 48U;
 
-    ByteAddressBuffer _S3067 = (&kernelContext_248)->globalParams_0->gAux0_0;
+    ByteAddressBuffer _S3070 = (&kernelContext_248)->globalParams_0->gAux0_0;
 
-    uint32_t _S3068 = ((&kernelContext_248)->globalParams_0->gAux0_0).Load<uint32_t >(_S3066);
+    uint32_t _S3071 = ((&kernelContext_248)->globalParams_0->gAux0_0).Load<uint32_t >(_S3069);
 
-    uint32_t _S3069 = (_S3067).Load<uint32_t >(_S3066 + 4U);
+    uint32_t _S3072 = (_S3070).Load<uint32_t >(_S3069 + 4U);
 
-    uint32_t _S3070 = (_S3067).Load<uint32_t >(_S3066 + 8U);
+    uint32_t _S3073 = (_S3070).Load<uint32_t >(_S3069 + 8U);
 
-    uint32_t _S3071 = (_S3067).Load<uint32_t >(_S3066 + 12U);
+    uint32_t _S3074 = (_S3070).Load<uint32_t >(_S3069 + 12U);
 
-    Vector<float, 4>  w0_2 = asfloat_1(Vector<uint32_t, 4> (_S3068, _S3069, _S3070, _S3071));
+    Vector<float, 4>  w0_2 = asfloat_1(Vector<uint32_t, 4> (_S3071, _S3072, _S3073, _S3074));
 
-    uint32_t _S3072 = _S3066 + 16U;
+    uint32_t _S3075 = _S3069 + 16U;
 
-    ByteAddressBuffer _S3073 = (&kernelContext_248)->globalParams_0->gAux0_0;
+    ByteAddressBuffer _S3076 = (&kernelContext_248)->globalParams_0->gAux0_0;
 
-    uint32_t _S3074 = ((&kernelContext_248)->globalParams_0->gAux0_0).Load<uint32_t >(_S3072);
+    uint32_t _S3077 = ((&kernelContext_248)->globalParams_0->gAux0_0).Load<uint32_t >(_S3075);
 
-    uint32_t _S3075 = (_S3073).Load<uint32_t >(_S3072 + 4U);
+    uint32_t _S3078 = (_S3076).Load<uint32_t >(_S3075 + 4U);
 
-    uint32_t _S3076 = (_S3073).Load<uint32_t >(_S3072 + 8U);
+    uint32_t _S3079 = (_S3076).Load<uint32_t >(_S3075 + 8U);
 
-    uint32_t _S3077 = (_S3073).Load<uint32_t >(_S3072 + 12U);
+    uint32_t _S3080 = (_S3076).Load<uint32_t >(_S3075 + 12U);
 
-    Vector<float, 4>  w1_2 = asfloat_1(Vector<uint32_t, 4> (_S3074, _S3075, _S3076, _S3077));
+    Vector<float, 4>  w1_2 = asfloat_1(Vector<uint32_t, 4> (_S3077, _S3078, _S3079, _S3080));
 
-    uint32_t _S3078 = _S3066 + 32U;
+    uint32_t _S3081 = _S3069 + 32U;
 
-    ByteAddressBuffer _S3079 = (&kernelContext_248)->globalParams_0->gAux0_0;
+    ByteAddressBuffer _S3082 = (&kernelContext_248)->globalParams_0->gAux0_0;
 
-    uint32_t _S3080 = ((&kernelContext_248)->globalParams_0->gAux0_0).Load<uint32_t >(_S3078);
+    uint32_t _S3083 = ((&kernelContext_248)->globalParams_0->gAux0_0).Load<uint32_t >(_S3081);
 
-    uint32_t _S3081 = (_S3079).Load<uint32_t >(_S3078 + 4U);
+    uint32_t _S3084 = (_S3082).Load<uint32_t >(_S3081 + 4U);
 
-    uint32_t _S3082 = (_S3079).Load<uint32_t >(_S3078 + 8U);
+    uint32_t _S3085 = (_S3082).Load<uint32_t >(_S3081 + 8U);
 
-    uint32_t _S3083 = (_S3079).Load<uint32_t >(_S3078 + 12U);
+    uint32_t _S3086 = (_S3082).Load<uint32_t >(_S3081 + 12U);
 
-    Vector<float, 4>  w2_0 = asfloat_1(Vector<uint32_t, 4> (_S3080, _S3081, _S3082, _S3083));
+    Vector<float, 4>  w2_0 = asfloat_1(Vector<uint32_t, 4> (_S3083, _S3084, _S3085, _S3086));
     uint32_t over_1 = (F32_asuint((w0_2.x)));
-    Vector<float, 2>  _S3084 = Vector<float, 2> {w0_2.y, w0_2.z};
+    Vector<float, 2>  _S3087 = Vector<float, 2> {w0_2.y, w0_2.z};
 
     bool onScalp_1;
     if(over_1 != 4294967295U)
@@ -31158,7 +31203,7 @@ void _FlowCS(void* _S3061, void* entryPointParams_57, void* globalParams_58)
     }
     bool arrows_0 = ((&kernelContext_248)->globalParams_0->Look_0->gFlag_0.x) != 0U;
 
-    Vector<float, 3>  _S3085 = loadPoint_0(_S3064, &kernelContext_248);
+    Vector<float, 3>  _S3088 = loadPoint_0(_S3067, &kernelContext_248);
 
     Vector<float, 3>  normal_13;
 
@@ -31171,9 +31216,9 @@ void _FlowCS(void* _S3061, void* entryPointParams_57, void* globalParams_58)
     else
     {
 
-        Vector<float, 3>  _S3086 = loadPoint_0(_S3064 + 1U, &kernelContext_248);
+        Vector<float, 3>  _S3089 = loadPoint_0(_S3067 + 1U, &kernelContext_248);
 
-        normal_13 = normalized_0(_S3086 - _S3085);
+        normal_13 = normalized_0(_S3089 - _S3088);
 
     }
 
@@ -31181,11 +31226,11 @@ void _FlowCS(void* _S3061, void* entryPointParams_57, void* globalParams_58)
     if(((&kernelContext_248)->globalParams_0->Look_0->gValue_0.z) > 0.0f)
     {
 
-        float _S3087 = (&kernelContext_248)->globalParams_0->Look_0->gValue_0.z;
+        float _S3090 = (&kernelContext_248)->globalParams_0->Look_0->gValue_0.z;
 
-        Vector<float, 4>  _S3088 = strandData_0(_S3063, &kernelContext_248);
+        Vector<float, 4>  _S3091 = strandData_0(_S3066, &kernelContext_248);
 
-        spin_1 = _S3087 * _S3088.x;
+        spin_1 = _S3090 * _S3091.x;
 
     }
     else
@@ -31195,11 +31240,11 @@ void _FlowCS(void* _S3061, void* entryPointParams_57, void* globalParams_58)
 
     }
 
-    float _S3089 = fieldAt_0(0U, (&kernelContext_248)->globalParams_0->Look_0->gValue_0.x, _S3063, 0U, &kernelContext_248);
-    float _S3090 = _S3089 * 0.01745329238474369f;
-    float _S3091 = (&kernelContext_248)->globalParams_0->Look_0->gValue_0.y;
+    float _S3092 = fieldAt_0(0U, (&kernelContext_248)->globalParams_0->Look_0->gValue_0.x, _S3066, 0U, &kernelContext_248);
+    float _S3093 = _S3092 * 0.01745329238474369f;
+    float _S3094 = (&kernelContext_248)->globalParams_0->Look_0->gValue_0.y;
 
-    float _S3092 = strandLength_0(_S3064, _S3065, &kernelContext_248);
+    float _S3095 = strandLength_0(_S3067, _S3068, &kernelContext_248);
 
     Vector<float, 3>  first_11;
 
@@ -31215,9 +31260,9 @@ void _FlowCS(void* _S3061, void* entryPointParams_57, void* globalParams_58)
         if(arrows_0)
         {
 
-            Vector<float, 3>  _S3093 = flowFieldAt_0(_S3085, normal_13, &kernelContext_248);
+            Vector<float, 3>  _S3096 = flowFieldAt_0(_S3088, normal_13, &kernelContext_248);
 
-            first_11 = _S3093;
+            first_11 = _S3096;
 
         }
         else
@@ -31229,8 +31274,8 @@ void _FlowCS(void* _S3061, void* entryPointParams_57, void* globalParams_58)
 
     }
 
-    Vector<float, 3>  _S3094 = loadPoint_0(_S3064 + _S3065 - 1U, &kernelContext_248);
-    Vector<float, 3>  dir_4 = flowHeading_0(first_11, normal_13, normal_13, _S3094 - _S3085, spin_1);
+    Vector<float, 3>  _S3097 = loadPoint_0(_S3067 + _S3068 - 1U, &kernelContext_248);
+    Vector<float, 3>  dir_4 = flowHeading_0(first_11, normal_13, normal_13, _S3097 - _S3088, spin_1);
 
     Vector<float, 3>  dir_5;
     if((len3_0(dir_4)) < 0.5f)
@@ -31247,32 +31292,32 @@ void _FlowCS(void* _S3061, void* entryPointParams_57, void* globalParams_58)
     }
 
 
-    uint32_t _S3095 = _S3065 - 1U;
+    uint32_t _S3098 = _S3068 - 1U;
 
-    uint32_t _S3096;
+    uint32_t _S3099;
 
-    if(_S3095 > 1U)
+    if(_S3098 > 1U)
     {
 
-        _S3096 = _S3095;
+        _S3099 = _S3098;
 
     }
     else
     {
 
-        _S3096 = 2U;
+        _S3099 = 2U;
 
     }
 
-    Vector<float, 3>  previous_14 = _S3085;
+    Vector<float, 3>  previous_14 = _S3088;
 
     uint32_t over_2 = over_1;
 
-    Vector<float, 2>  overUv_0 = _S3084;
+    Vector<float, 2>  overUv_0 = _S3087;
 
     Vector<float, 3>  normal_14 = normal_13;
 
-    Vector<float, 3>  skin_2 = _S3085;
+    Vector<float, 3>  skin_2 = _S3088;
 
     uint32_t i_98 = 1U;
 
@@ -31280,7 +31325,7 @@ void _FlowCS(void* _S3061, void* entryPointParams_57, void* globalParams_58)
     for(;;)
     {
 
-        if(i_98 < _S3065)
+        if(i_98 < _S3068)
         {
         }
         else
@@ -31288,12 +31333,12 @@ void _FlowCS(void* _S3061, void* entryPointParams_57, void* globalParams_58)
 
             break;
         }
-        float a_73 = _S3090 * (1.0f - _S3091 * paramAt_0(i_98 - 1U, _S3096));
-        uint32_t _S3097 = _S3064 + i_98;
+        float a_73 = _S3093 * (1.0f - _S3094 * paramAt_0(i_98 - 1U, _S3099));
+        uint32_t _S3100 = _S3067 + i_98;
 
-        Vector<float, 3>  _S3098 = loadPoint_0(_S3097, &kernelContext_248);
-        Vector<float, 3>  own_10 = _S3098 - previous_14;
-        float len_14 = len3_0(own_10);
+        Vector<float, 3>  _S3101 = loadPoint_0(_S3100, &kernelContext_248);
+        Vector<float, 3>  own_11 = _S3101 - previous_14;
+        float len_14 = len3_0(own_11);
 
         Vector<float, 3>  field_1;
 
@@ -31303,17 +31348,17 @@ void _FlowCS(void* _S3061, void* entryPointParams_57, void* globalParams_58)
             if(onScalp_1)
             {
 
-                Vector<float, 3>  _S3099 = flowFieldAtRoot_0(over_2, overUv_0, normal_14, &kernelContext_248);
+                Vector<float, 3>  _S3102 = flowFieldAtRoot_0(over_2, overUv_0, normal_14, &kernelContext_248);
 
-                first_11 = _S3099;
+                first_11 = _S3102;
 
             }
             else
             {
 
-                Vector<float, 3>  _S3100 = flowFieldAt_0(skin_2, normal_14, &kernelContext_248);
+                Vector<float, 3>  _S3103 = flowFieldAt_0(skin_2, normal_14, &kernelContext_248);
 
-                first_11 = _S3100;
+                first_11 = _S3103;
 
             }
 
@@ -31326,7 +31371,7 @@ void _FlowCS(void* _S3061, void* entryPointParams_57, void* globalParams_58)
             field_1 = Vector<float, 3> (0.0f, 0.0f, 0.0f);
 
         }
-        Vector<float, 3>  want_0 = flowHeading_0(field_1, normal_13, normal_14, own_10, spin_1);
+        Vector<float, 3>  want_0 = flowHeading_0(field_1, normal_13, normal_14, own_11, spin_1);
 
         Vector<float, 3>  want_1;
         if((len3_0(want_0)) < 0.5f)
@@ -31342,7 +31387,7 @@ void _FlowCS(void* _S3061, void* entryPointParams_57, void* globalParams_58)
 
         }
 
-        Vector<float, 3>  turned_2 = dir_5 + (want_1 - dir_5) * (Vector<float, 3> )(1.0f - (groomlab_pm_exp((- len_14 / (groomlab_max((0.10000000149011612f * _S3092), (9.99999997475242708e-07f)))))));
+        Vector<float, 3>  turned_2 = dir_5 + (want_1 - dir_5) * (Vector<float, 3> )(1.0f - (groomlab_pm_exp((- len_14 / (groomlab_max((0.10000000149011612f * _S3095), (9.99999997475242708e-07f)))))));
         Vector<float, 3>  turned_3 = turned_2 - normal_14 * (Vector<float, 3> )dot_0(turned_2, normal_14);
 
         Vector<float, 3>  dir_6;
@@ -31377,10 +31422,10 @@ void _FlowCS(void* _S3061, void* entryPointParams_57, void* globalParams_58)
 
             Vector<float, 3>  hitNormal_0;
 
-            bool _S3101 = flowSnap_0(next_5, 2.0f * len_14 + 9.99999997475242708e-07f, &face_3, &hitUv_0, &hitAt_0, &hitNormal_0, &kernelContext_248);
+            bool _S3104 = flowSnap_0(next_5, 2.0f * len_14 + 9.99999997475242708e-07f, &face_3, &hitUv_0, &hitAt_0, &hitNormal_0, &kernelContext_248);
 
             Vector<float, 3>  dir_7;
-            if(_S3101)
+            if(_S3104)
             {
 
                 Vector<float, 3>  back_0 = next_5 - hitAt_0;
@@ -31402,10 +31447,10 @@ void _FlowCS(void* _S3061, void* entryPointParams_57, void* globalParams_58)
                 if(!pastEdge_0)
                 {
 
-                    Vector<float, 3>  _S3102 = hitAt_0;
+                    Vector<float, 3>  _S3105 = hitAt_0;
                     Vector<float, 3>  normal_16 = hitNormal_0;
-                    uint32_t _S3103 = face_3;
-                    Vector<float, 2>  _S3104 = hitUv_0;
+                    uint32_t _S3106 = face_3;
+                    Vector<float, 2>  _S3107 = hitUv_0;
                     Vector<float, 3>  dir_8 = dir_6 - hitNormal_0 * (Vector<float, 3> )dot_0(dir_6, hitNormal_0);
                     if((len3_0(dir_8)) > 9.99999997475242708e-07f)
                     {
@@ -31420,13 +31465,13 @@ void _FlowCS(void* _S3061, void* entryPointParams_57, void* globalParams_58)
 
                     }
 
-                    next_6 = _S3102;
+                    next_6 = _S3105;
 
                     normal_15 = normal_16;
 
-                    over_3 = _S3103;
+                    over_3 = _S3106;
 
-                    overUv_1 = _S3104;
+                    overUv_1 = _S3107;
 
                     dir_7 = first_11;
 
@@ -31480,11 +31525,11 @@ void _FlowCS(void* _S3061, void* entryPointParams_57, void* globalParams_58)
 
         }
 
-        storePoint_0((&kernelContext_248)->globalParams_0->gOut_0, _S3097, next_6 + normal_15 * (Vector<float, 3> )height_16);
+        storePoint_0((&kernelContext_248)->globalParams_0->gOut_0, _S3100, next_6 + normal_15 * (Vector<float, 3> )height_16);
 
         uint32_t i_99 = i_98 + 1U;
 
-        previous_14 = _S3098;
+        previous_14 = _S3101;
 
         over_2 = over_3;
 
@@ -31507,16 +31552,16 @@ void _FlowCS(void* _S3061, void* entryPointParams_57, void* globalParams_58)
 static float affectAt_0(uint32_t s_71, uint32_t p_67, KernelContext_0 * kernelContext_249)
 {
 
-    float _S3105 = fieldAt_0(0U, kernelContext_249->globalParams_0->Look_0->gValue_0.x, s_71, p_67, kernelContext_249);
+    float _S3108 = fieldAt_0(0U, kernelContext_249->globalParams_0->Look_0->gValue_0.x, s_71, p_67, kernelContext_249);
 
-    return _S3105;
+    return _S3108;
 }
 
 
 static float clamp01_0(float v_43)
 {
 
-    float _S3106;
+    float _S3109;
 
     if(v_43 >= 0.0f)
     {
@@ -31524,13 +31569,13 @@ static float clamp01_0(float v_43)
         if(v_43 <= 1.0f)
         {
 
-            _S3106 = v_43;
+            _S3109 = v_43;
 
         }
         else
         {
 
-            _S3106 = 1.0f;
+            _S3109 = 1.0f;
 
         }
 
@@ -31538,18 +31583,18 @@ static float clamp01_0(float v_43)
     else
     {
 
-        _S3106 = 0.0f;
+        _S3109 = 0.0f;
 
     }
 
-    return _S3106;
+    return _S3109;
 }
 
 
-void _AffectCS(void* _S3107, void* entryPointParams_58, void* globalParams_59)
+void _AffectCS(void* _S3110, void* entryPointParams_58, void* globalParams_59)
 {
 
-    ComputeThreadVaryingInput * _S3108 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S3107));
+    ComputeThreadVaryingInput * _S3111 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S3110));
 
     KernelContext_0 kernelContext_250;
 
@@ -31559,40 +31604,40 @@ void _AffectCS(void* _S3107, void* entryPointParams_58, void* globalParams_59)
 
     (&kernelContext_250)->sTableBase_0 = 0U;
 
-    uint32_t _S3109 = threadIndex_0(_S3108->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S3108->groupThreadID, 64U, &kernelContext_250);
+    uint32_t _S3112 = threadIndex_0(_S3111->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S3111->groupThreadID, 64U, &kernelContext_250);
 
-    if(_S3109 >= ((&kernelContext_250)->globalParams_0->Look_0->gStrandCount_0))
+    if(_S3112 >= ((&kernelContext_250)->globalParams_0->Look_0->gStrandCount_0))
     {
 
         return;
     }
 
-    uint32_t _S3110 = strandBegin_0(_S3109, &kernelContext_250);
+    uint32_t _S3113 = strandBegin_0(_S3112, &kernelContext_250);
 
-    uint32_t _S3111 = strandCountOf_0(_S3109, &kernelContext_250);
+    uint32_t _S3114 = strandCountOf_0(_S3112, &kernelContext_250);
 
-    bool _S3112 = fieldPerPoint_0(0U, &kernelContext_250);
+    bool _S3115 = fieldPerPoint_0(0U, &kernelContext_250);
 
-    float _S3113 = affectAt_0(_S3109, _S3110, &kernelContext_250);
+    float _S3116 = affectAt_0(_S3112, _S3113, &kernelContext_250);
 
 
-    float strandWeight_0 = clamp01_0(_S3113);
+    float strandWeight_0 = clamp01_0(_S3116);
 
-    bool _S3114;
-    if(!_S3112)
+    bool _S3117;
+    if(!_S3115)
     {
 
-        _S3114 = strandWeight_0 >= 1.0f;
+        _S3117 = strandWeight_0 >= 1.0f;
 
     }
     else
     {
 
-        _S3114 = false;
+        _S3117 = false;
 
     }
 
-    if(_S3114)
+    if(_S3117)
     {
 
         return;
@@ -31602,7 +31647,7 @@ void _AffectCS(void* _S3107, void* entryPointParams_58, void* globalParams_59)
     for(;;)
     {
 
-        if(i_100 < _S3111)
+        if(i_100 < _S3114)
         {
         }
         else
@@ -31611,15 +31656,15 @@ void _AffectCS(void* _S3107, void* entryPointParams_58, void* globalParams_59)
             break;
         }
 
-        uint32_t p_68 = _S3110 + i_100;
+        uint32_t p_68 = _S3113 + i_100;
 
         float m_25;
-        if(_S3112)
+        if(_S3115)
         {
 
-            float _S3115 = affectAt_0(_S3109, p_68, &kernelContext_250);
+            float _S3118 = affectAt_0(_S3112, p_68, &kernelContext_250);
 
-            m_25 = clamp01_0(_S3115);
+            m_25 = clamp01_0(_S3118);
 
         }
         else
@@ -31640,67 +31685,67 @@ void _AffectCS(void* _S3107, void* entryPointParams_58, void* globalParams_59)
         if(((&kernelContext_250)->globalParams_0->Look_0->gFlag_0.z) != 0U)
         {
 
-            Vector<float, 3>  _S3116 = loadPoint_0(p_68, &kernelContext_250);
+            Vector<float, 3>  _S3119 = loadPoint_0(p_68, &kernelContext_250);
 
-            uint32_t _S3117 = p_68 * 12U;
+            uint32_t _S3120 = p_68 * 12U;
 
-            RWByteAddressBuffer _S3118 = (&kernelContext_250)->globalParams_0->gOut_0;
+            RWByteAddressBuffer _S3121 = (&kernelContext_250)->globalParams_0->gOut_0;
 
-            uint32_t _S3119 = ((&kernelContext_250)->globalParams_0->gOut_0).Load<uint32_t >(_S3117);
+            uint32_t _S3122 = ((&kernelContext_250)->globalParams_0->gOut_0).Load<uint32_t >(_S3120);
 
-            uint32_t _S3120 = (_S3118).Load<uint32_t >(_S3117 + 4U);
+            uint32_t _S3123 = (_S3121).Load<uint32_t >(_S3120 + 4U);
 
-            uint32_t _S3121 = (_S3118).Load<uint32_t >(_S3117 + 8U);
+            uint32_t _S3124 = (_S3121).Load<uint32_t >(_S3120 + 8U);
 
-            Vector<float, 3>  made_0 = asfloat_0(Vector<uint32_t, 3> (_S3119, _S3120, _S3121));
+            Vector<float, 3>  made_0 = asfloat_0(Vector<uint32_t, 3> (_S3122, _S3123, _S3124));
 
-            Vector<float, 3>  _S3122;
+            Vector<float, 3>  _S3125;
             if(m_25 <= 0.0f)
             {
 
-                _S3122 = _S3116;
+                _S3125 = _S3119;
 
             }
             else
             {
 
-                _S3122 = _S3116 + (made_0 - _S3116) * (Vector<float, 3> )m_25;
+                _S3125 = _S3119 + (made_0 - _S3119) * (Vector<float, 3> )m_25;
 
             }
 
-            storePoint_0((&kernelContext_250)->globalParams_0->gOut_0, p_68, _S3122);
+            storePoint_0((&kernelContext_250)->globalParams_0->gOut_0, p_68, _S3125);
 
         }
 
         if(((&kernelContext_250)->globalParams_0->Look_0->gFlag_0.y) != 0U)
         {
 
-            uint32_t _S3123 = p_68 * 4U;
+            uint32_t _S3126 = p_68 * 4U;
 
-            uint32_t _S3124 = uint32_t(int32_t(_S3123));
+            uint32_t _S3127 = uint32_t(int32_t(_S3126));
 
-            uint32_t _S3125 = ((&kernelContext_250)->globalParams_0->gAux1_0).Load<uint32_t >(_S3124);
+            uint32_t _S3128 = ((&kernelContext_250)->globalParams_0->gAux1_0).Load<uint32_t >(_S3127);
 
-            float was_0 = (U32_asfloat((_S3125)));
-            uint32_t _S3126 = ((&kernelContext_250)->globalParams_0->gOut2_0).Load<uint32_t >(_S3124);
+            float was_0 = (U32_asfloat((_S3128)));
+            uint32_t _S3129 = ((&kernelContext_250)->globalParams_0->gOut2_0).Load<uint32_t >(_S3127);
 
-            float made_1 = (U32_asfloat((_S3126)));
+            float made_1 = (U32_asfloat((_S3129)));
 
-            float _S3127;
+            float _S3130;
             if(m_25 <= 0.0f)
             {
 
-                _S3127 = was_0;
+                _S3130 = was_0;
 
             }
             else
             {
 
-                _S3127 = was_0 + (made_1 - was_0) * m_25;
+                _S3130 = was_0 + (made_1 - was_0) * m_25;
 
             }
 
-            (&kernelContext_250)->globalParams_0->gOut2_0.Store(_S3123,(F32_asuint((_S3127))));
+            (&kernelContext_250)->globalParams_0->gOut2_0.Store(_S3126,(F32_asuint((_S3130))));
 
         }
 
@@ -31716,30 +31761,30 @@ static double jiggleTurnAt_0(uint32_t face_4, uint32_t i_101, KernelContext_0 * 
 {
 
     uint32_t w_68 = (face_4 * 9U + i_101) * 8U;
-    uint32_t _S3128 = (kernelContext_251->globalParams_0->gAux2_0).Load<uint32_t >(uint32_t(int32_t(w_68)));
+    uint32_t _S3131 = (kernelContext_251->globalParams_0->gAux2_0).Load<uint32_t >(uint32_t(int32_t(w_68)));
 
-    uint32_t _S3129 = (kernelContext_251->globalParams_0->gAux2_0).Load<uint32_t >(uint32_t(int32_t(w_68 + 4U)));
+    uint32_t _S3132 = (kernelContext_251->globalParams_0->gAux2_0).Load<uint32_t >(uint32_t(int32_t(w_68 + 4U)));
 
-    return (U32_asdouble((_S3128), (_S3129)));
+    return (U32_asdouble((_S3131), (_S3132)));
 }
 
 
 static float jiggleTurnRow_0(uint32_t face_5, uint32_t row_0, Vector<float, 3>  chord_1, KernelContext_0 * kernelContext_252)
 {
 
-    uint32_t _S3130 = row_0 * 3U;
+    uint32_t _S3133 = row_0 * 3U;
 
-    double _S3131 = jiggleTurnAt_0(face_5, _S3130, kernelContext_252);
+    double _S3134 = jiggleTurnAt_0(face_5, _S3133, kernelContext_252);
 
-    double _S3132 = _S3131 * double(chord_1.x);
+    double _S3135 = _S3134 * double(chord_1.x);
 
-    double _S3133 = jiggleTurnAt_0(face_5, _S3130 + 1U, kernelContext_252);
+    double _S3136 = jiggleTurnAt_0(face_5, _S3133 + 1U, kernelContext_252);
 
-    double _S3134 = _S3132 + _S3133 * double(chord_1.y);
+    double _S3137 = _S3135 + _S3136 * double(chord_1.y);
 
-    double _S3135 = jiggleTurnAt_0(face_5, _S3130 + 2U, kernelContext_252);
+    double _S3138 = jiggleTurnAt_0(face_5, _S3133 + 2U, kernelContext_252);
 
-    return float(_S3134 + _S3135 * double(chord_1.z));
+    return float(_S3137 + _S3138 * double(chord_1.z));
 }
 
 
@@ -31750,10 +31795,10 @@ static float atan2Precise_0(float y_7, float x_45)
 }
 
 
-void _JiggleCS(void* _S3136, void* entryPointParams_59, void* globalParams_60)
+void _JiggleCS(void* _S3139, void* entryPointParams_59, void* globalParams_60)
 {
 
-    ComputeThreadVaryingInput * _S3137 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S3136));
+    ComputeThreadVaryingInput * _S3140 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S3139));
 
     KernelContext_0 kernelContext_253;
 
@@ -31763,38 +31808,38 @@ void _JiggleCS(void* _S3136, void* entryPointParams_59, void* globalParams_60)
 
     (&kernelContext_253)->sTableBase_0 = 0U;
 
-    uint32_t _S3138 = threadIndex_0(_S3137->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S3137->groupThreadID, 64U, &kernelContext_253);
+    uint32_t _S3141 = threadIndex_0(_S3140->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S3140->groupThreadID, 64U, &kernelContext_253);
 
-    if(_S3138 >= ((&kernelContext_253)->globalParams_0->Look_0->gStrandCount_0))
+    if(_S3141 >= ((&kernelContext_253)->globalParams_0->Look_0->gStrandCount_0))
     {
 
         return;
     }
 
-    uint32_t _S3139 = strandBegin_0(_S3138, &kernelContext_253);
+    uint32_t _S3142 = strandBegin_0(_S3141, &kernelContext_253);
 
-    uint32_t _S3140 = strandCountOf_0(_S3138, &kernelContext_253);
+    uint32_t _S3143 = strandCountOf_0(_S3141, &kernelContext_253);
 
-    uint32_t _S3141 = _S3138 * 16U;
+    uint32_t _S3144 = _S3141 * 16U;
 
-    ByteAddressBuffer _S3142 = (&kernelContext_253)->globalParams_0->gAux0_0;
+    ByteAddressBuffer _S3145 = (&kernelContext_253)->globalParams_0->gAux0_0;
 
-    uint32_t _S3143 = ((&kernelContext_253)->globalParams_0->gAux0_0).Load<uint32_t >(_S3141);
+    uint32_t _S3146 = ((&kernelContext_253)->globalParams_0->gAux0_0).Load<uint32_t >(_S3144);
 
-    uint32_t _S3144 = (_S3142).Load<uint32_t >(_S3141 + 4U);
+    uint32_t _S3147 = (_S3145).Load<uint32_t >(_S3144 + 4U);
 
-    uint32_t _S3145 = (_S3142).Load<uint32_t >(_S3141 + 8U);
+    uint32_t _S3148 = (_S3145).Load<uint32_t >(_S3144 + 8U);
 
-    uint32_t _S3146 = (_S3142).Load<uint32_t >(_S3141 + 12U);
+    uint32_t _S3149 = (_S3145).Load<uint32_t >(_S3144 + 12U);
 
-    Vector<float, 4>  root_17 = asfloat_1(Vector<uint32_t, 4> (_S3143, _S3144, _S3145, _S3146));
+    Vector<float, 4>  root_17 = asfloat_1(Vector<uint32_t, 4> (_S3146, _S3147, _S3148, _S3149));
     uint32_t face_6 = (F32_asuint((root_17.w)));
 
     bool turns_8;
     if(face_6 != 4294967295U)
     {
 
-        turns_8 = _S3140 >= 2U;
+        turns_8 = _S3143 >= 2U;
 
     }
     else
@@ -31804,12 +31849,12 @@ void _JiggleCS(void* _S3136, void* entryPointParams_59, void* globalParams_60)
 
     }
 
-    Vector<float, 3>  _S3147 = loadPoint_0(_S3139, &kernelContext_253);
+    Vector<float, 3>  _S3150 = loadPoint_0(_S3142, &kernelContext_253);
 
-    Vector<float, 3>  _S3148 = loadPoint_0(_S3139 + (U32_max((_S3140), (1U))) - 1U, &kernelContext_253);
+    Vector<float, 3>  _S3151 = loadPoint_0(_S3142 + (U32_max((_S3143), (1U))) - 1U, &kernelContext_253);
 
-    Vector<float, 3>  chord_2 = _S3148 - _S3147;
-    Vector<float, 3>  _S3149 = Vector<float, 3> (0.0f, 0.0f, 0.0f);
+    Vector<float, 3>  chord_2 = _S3151 - _S3150;
+    Vector<float, 3>  _S3152 = Vector<float, 3> (0.0f, 0.0f, 0.0f);
 
     Vector<float, 3>  axis_17;
 
@@ -31819,27 +31864,27 @@ void _JiggleCS(void* _S3136, void* entryPointParams_59, void* globalParams_60)
     {
 
         Vector<float, 3>  lag_0 = Vector<float, 3> {root_17.x, root_17.y, root_17.z};
-        uint32_t _S3150 = face_6 * 48U;
+        uint32_t _S3153 = face_6 * 48U;
 
-        ByteAddressBuffer _S3151 = (&kernelContext_253)->globalParams_0->gAux1_0;
+        ByteAddressBuffer _S3154 = (&kernelContext_253)->globalParams_0->gAux1_0;
 
-        uint32_t _S3152 = ((&kernelContext_253)->globalParams_0->gAux1_0).Load<uint32_t >(_S3150);
+        uint32_t _S3155 = ((&kernelContext_253)->globalParams_0->gAux1_0).Load<uint32_t >(_S3153);
 
-        uint32_t _S3153 = (_S3151).Load<uint32_t >(_S3150 + 4U);
+        uint32_t _S3156 = (_S3154).Load<uint32_t >(_S3153 + 4U);
 
-        uint32_t _S3154 = (_S3151).Load<uint32_t >(_S3150 + 8U);
+        uint32_t _S3157 = (_S3154).Load<uint32_t >(_S3153 + 8U);
 
-        uint32_t _S3155 = (_S3151).Load<uint32_t >(_S3150 + 12U);
-        if((asfloat_1(Vector<uint32_t, 4> (_S3152, _S3153, _S3154, _S3155)).w) != 0.0f)
+        uint32_t _S3158 = (_S3154).Load<uint32_t >(_S3153 + 12U);
+        if((asfloat_1(Vector<uint32_t, 4> (_S3155, _S3156, _S3157, _S3158)).w) != 0.0f)
         {
 
-            float _S3156 = jiggleTurnRow_0(face_6, 0U, chord_2, &kernelContext_253);
+            float _S3159 = jiggleTurnRow_0(face_6, 0U, chord_2, &kernelContext_253);
 
-            float _S3157 = jiggleTurnRow_0(face_6, 1U, chord_2, &kernelContext_253);
+            float _S3160 = jiggleTurnRow_0(face_6, 1U, chord_2, &kernelContext_253);
 
-            float _S3158 = jiggleTurnRow_0(face_6, 2U, chord_2, &kernelContext_253);
+            float _S3161 = jiggleTurnRow_0(face_6, 2U, chord_2, &kernelContext_253);
 
-            axis_17 = lag_0 + Vector<float, 3> (_S3156, _S3157, _S3158);
+            axis_17 = lag_0 + Vector<float, 3> (_S3159, _S3160, _S3161);
 
         }
         else
@@ -31877,8 +31922,8 @@ void _JiggleCS(void* _S3136, void* entryPointParams_59, void* globalParams_60)
 
         bool turns_9 = !turns_8;
 
-        float _S3159 = fieldAt_0(0U, (&kernelContext_253)->globalParams_0->Look_0->gValue_0.x, _S3138, _S3139, &kernelContext_253);
-        Vector<float, 3>  lag_1 = axis_17 * (Vector<float, 3> )_S3159;
+        float _S3162 = fieldAt_0(0U, (&kernelContext_253)->globalParams_0->Look_0->gValue_0.x, _S3141, _S3142, &kernelContext_253);
+        Vector<float, 3>  lag_1 = axis_17 * (Vector<float, 3> )_S3162;
         float reach_6 = len3_0(chord_2);
         if(turns_9)
         {
@@ -31919,17 +31964,17 @@ void _JiggleCS(void* _S3136, void* entryPointParams_59, void* globalParams_60)
             turns_8 = false;
 
         }
-        float _S3160 = atan2Precise_0(side_5, reach_6);
+        float _S3163 = atan2Precise_0(side_5, reach_6);
 
         axis_17 = axis_18;
 
-        angle_10 = _S3160;
+        angle_10 = _S3163;
 
     }
     else
     {
 
-        axis_17 = _S3149;
+        axis_17 = _S3152;
 
         angle_10 = 0.0f;
 
@@ -31938,22 +31983,22 @@ void _JiggleCS(void* _S3136, void* entryPointParams_59, void* globalParams_60)
     if(!turns_8)
     {
 
-        copyStrand_0(_S3139, _S3140, &kernelContext_253);
+        copyStrand_0(_S3142, _S3143, &kernelContext_253);
 
         return;
     }
-    storePoint_0((&kernelContext_253)->globalParams_0->gOut_0, _S3139, _S3147);
+    storePoint_0((&kernelContext_253)->globalParams_0->gOut_0, _S3142, _S3150);
 
-    Vector<float, 3>  prevOriginal_1 = _S3147;
+    Vector<float, 3>  prevOriginal_1 = _S3150;
 
-    Vector<float, 3>  prev_1 = _S3147;
+    Vector<float, 3>  prev_1 = _S3150;
 
     uint32_t i_102 = 1U;
 
     for(;;)
     {
 
-        if(i_102 < _S3140)
+        if(i_102 < _S3143)
         {
         }
         else
@@ -31962,19 +32007,19 @@ void _JiggleCS(void* _S3136, void* entryPointParams_59, void* globalParams_60)
             break;
         }
 
-        uint32_t _S3161 = _S3139 + i_102;
+        uint32_t _S3164 = _S3142 + i_102;
 
-        Vector<float, 3>  _S3162 = loadPoint_0(_S3161, &kernelContext_253);
-        Vector<float, 3>  seg_10 = _S3162 - prevOriginal_1;
+        Vector<float, 3>  _S3165 = loadPoint_0(_S3164, &kernelContext_253);
+        Vector<float, 3>  seg_10 = _S3165 - prevOriginal_1;
 
-        float _S3163 = rampAlong_0(i_102, _S3140, &kernelContext_253);
+        float _S3166 = rampAlong_0(i_102, _S3143, &kernelContext_253);
 
-        Vector<float, 3>  prev_2 = prev_1 + twistAbout_0(axis_17, seg_10, angle_10 * _S3163);
-        storePoint_0((&kernelContext_253)->globalParams_0->gOut_0, _S3161, prev_2);
+        Vector<float, 3>  prev_2 = prev_1 + twistAbout_0(axis_17, seg_10, angle_10 * _S3166);
+        storePoint_0((&kernelContext_253)->globalParams_0->gOut_0, _S3164, prev_2);
 
         uint32_t i_103 = i_102 + 1U;
 
-        prevOriginal_1 = _S3162;
+        prevOriginal_1 = _S3165;
 
         prev_1 = prev_2;
 
@@ -31989,26 +32034,26 @@ void _JiggleCS(void* _S3136, void* entryPointParams_59, void* globalParams_60)
 static uint32_t cutWord_0(uint32_t w_69, KernelContext_0 * kernelContext_254)
 {
 
-    uint32_t _S3164 = (kernelContext_254->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t(w_69 * 4U)));
+    uint32_t _S3167 = (kernelContext_254->globalParams_0->gAux0_0).Load<uint32_t >(uint32_t(int32_t(w_69 * 4U)));
 
-    return _S3164;
+    return _S3167;
 }
 
 
 static Vector<float, 3>  cutVec_0(uint32_t w_70, KernelContext_0 * kernelContext_255)
 {
 
-    uint32_t _S3165 = w_70 * 4U;
+    uint32_t _S3168 = w_70 * 4U;
 
-    ByteAddressBuffer _S3166 = kernelContext_255->globalParams_0->gAux0_0;
+    ByteAddressBuffer _S3169 = kernelContext_255->globalParams_0->gAux0_0;
 
-    uint32_t _S3167 = (kernelContext_255->globalParams_0->gAux0_0).Load<uint32_t >(_S3165);
+    uint32_t _S3170 = (kernelContext_255->globalParams_0->gAux0_0).Load<uint32_t >(_S3168);
 
-    uint32_t _S3168 = (_S3166).Load<uint32_t >(_S3165 + 4U);
+    uint32_t _S3171 = (_S3169).Load<uint32_t >(_S3168 + 4U);
 
-    uint32_t _S3169 = (_S3166).Load<uint32_t >(_S3165 + 8U);
+    uint32_t _S3172 = (_S3169).Load<uint32_t >(_S3168 + 8U);
 
-    return asfloat_0(Vector<uint32_t, 3> (_S3167, _S3168, _S3169));
+    return asfloat_0(Vector<uint32_t, 3> (_S3170, _S3171, _S3172));
 }
 
 
@@ -32016,14 +32061,14 @@ static Vector<float, 3>  cutVec_0(uint32_t w_70, KernelContext_0 * kernelContext
 static void cutBox_0(uint32_t node_0, Vector<float, 3>  * lo_10, Vector<float, 3>  * hi_7, KernelContext_0 * kernelContext_256)
 {
 
-    uint32_t _S3170 = cutWord_0(2U, kernelContext_256);
-    uint32_t at_41 = _S3170 + node_0 * 6U;
+    uint32_t _S3173 = cutWord_0(2U, kernelContext_256);
+    uint32_t at_41 = _S3173 + node_0 * 6U;
 
-    Vector<float, 3>  _S3171 = cutVec_0(at_41, kernelContext_256);
-    *lo_10 = _S3171;
+    Vector<float, 3>  _S3174 = cutVec_0(at_41, kernelContext_256);
+    *lo_10 = _S3174;
 
-    Vector<float, 3>  _S3172 = cutVec_0(at_41 + 3U, kernelContext_256);
-    *hi_7 = _S3172;
+    Vector<float, 3>  _S3175 = cutVec_0(at_41 + 3U, kernelContext_256);
+    *hi_7 = _S3175;
     return;
 }
 
@@ -32046,64 +32091,64 @@ static float cutBoxDistance2_0(uint32_t node_1, Vector<float, 3>  p_69, KernelCo
 static Vector<uint32_t, 2>  cutNode_0(uint32_t node_2, KernelContext_0 * kernelContext_258)
 {
 
-    uint32_t _S3173 = cutWord_0(1U, kernelContext_258);
+    uint32_t _S3176 = cutWord_0(1U, kernelContext_258);
 
-    uint32_t _S3174 = (_S3173 + node_2 * 2U) * 4U;
+    uint32_t _S3177 = (_S3176 + node_2 * 2U) * 4U;
 
-    ByteAddressBuffer _S3175 = kernelContext_258->globalParams_0->gAux0_0;
+    ByteAddressBuffer _S3178 = kernelContext_258->globalParams_0->gAux0_0;
 
-    uint32_t _S3176 = (kernelContext_258->globalParams_0->gAux0_0).Load<uint32_t >(_S3174);
+    uint32_t _S3179 = (kernelContext_258->globalParams_0->gAux0_0).Load<uint32_t >(_S3177);
 
-    uint32_t _S3177 = (_S3175).Load<uint32_t >(_S3174 + 4U);
+    uint32_t _S3180 = (_S3178).Load<uint32_t >(_S3177 + 4U);
 
-    return Vector<uint32_t, 2> (_S3176, _S3177);
+    return Vector<uint32_t, 2> (_S3179, _S3180);
 }
 
 static uint32_t cutOrder_0(uint32_t i_104, KernelContext_0 * kernelContext_259)
 {
 
-    uint32_t _S3178 = cutWord_0(3U, kernelContext_259);
+    uint32_t _S3181 = cutWord_0(3U, kernelContext_259);
 
-    uint32_t _S3179 = cutWord_0(_S3178 + i_104, kernelContext_259);
+    uint32_t _S3182 = cutWord_0(_S3181 + i_104, kernelContext_259);
 
-    return _S3179;
+    return _S3182;
 }
 
 
 static Vector<uint32_t, 3>  cutTriangle_0(uint32_t t_59, KernelContext_0 * kernelContext_260)
 {
 
-    uint32_t _S3180 = cutWord_0(6U, kernelContext_260);
+    uint32_t _S3183 = cutWord_0(6U, kernelContext_260);
 
-    uint32_t _S3181 = (_S3180 + t_59 * 3U) * 4U;
+    uint32_t _S3184 = (_S3183 + t_59 * 3U) * 4U;
 
-    ByteAddressBuffer _S3182 = kernelContext_260->globalParams_0->gAux0_0;
+    ByteAddressBuffer _S3185 = kernelContext_260->globalParams_0->gAux0_0;
 
-    uint32_t _S3183 = (kernelContext_260->globalParams_0->gAux0_0).Load<uint32_t >(_S3181);
+    uint32_t _S3186 = (kernelContext_260->globalParams_0->gAux0_0).Load<uint32_t >(_S3184);
 
-    uint32_t _S3184 = (_S3182).Load<uint32_t >(_S3181 + 4U);
+    uint32_t _S3187 = (_S3185).Load<uint32_t >(_S3184 + 4U);
 
-    uint32_t _S3185 = (_S3182).Load<uint32_t >(_S3181 + 8U);
+    uint32_t _S3188 = (_S3185).Load<uint32_t >(_S3184 + 8U);
 
-    return Vector<uint32_t, 3> (_S3183, _S3184, _S3185);
+    return Vector<uint32_t, 3> (_S3186, _S3187, _S3188);
 }
 
 
 static Vector<float, 3>  cutPoint_0(uint32_t v_44, KernelContext_0 * kernelContext_261)
 {
 
-    uint32_t _S3186 = cutWord_0(4U, kernelContext_261);
+    uint32_t _S3189 = cutWord_0(4U, kernelContext_261);
 
-    Vector<float, 3>  _S3187 = cutVec_0(_S3186 + v_44 * 3U, kernelContext_261);
+    Vector<float, 3>  _S3190 = cutVec_0(_S3189 + v_44 * 3U, kernelContext_261);
 
-    return _S3187;
+    return _S3190;
 }
 
 
 static bool cutInside_0(Vector<float, 3>  p_70, float hair_0, KernelContext_0 * kernelContext_262)
 {
 
-    Vector<float, 2>  _S3188 = Vector<float, 2> (0.0f, 0.0f);
+    Vector<float, 2>  _S3191 = Vector<float, 2> (0.0f, 0.0f);
 
     FixedArray<uint32_t, 48>  stack_1;
 
@@ -32112,16 +32157,16 @@ static bool cutInside_0(Vector<float, 3>  p_70, float hair_0, KernelContext_0 * 
 
     FixedArray<float, 48>  boxes_0;
 
-    float _S3189 = cutBoxDistance2_0(0U, p_70, kernelContext_262);
+    float _S3192 = cutBoxDistance2_0(0U, p_70, kernelContext_262);
 
 
-    boxes_0[int(0)] = _S3189;
+    boxes_0[int(0)] = _S3192;
 
     float best_8 = 3.4028234663852886e+38f;
 
     uint32_t face_7 = 4294967295U;
 
-    Vector<float, 2>  uv_4 = _S3188;
+    Vector<float, 2>  uv_4 = _S3191;
 
     Vector<float, 3>  at_42 = p_70;
 
@@ -32148,9 +32193,9 @@ static bool cutInside_0(Vector<float, 3>  p_70, float hair_0, KernelContext_0 * 
             continue;
         }
 
-        Vector<uint32_t, 2>  _S3190 = cutNode_0(node_3, kernelContext_262);
+        Vector<uint32_t, 2>  _S3193 = cutNode_0(node_3, kernelContext_262);
 
-        uint32_t _S3191 = _S3190.y;
+        uint32_t _S3194 = _S3193.y;
 
         float best_9;
 
@@ -32158,10 +32203,10 @@ static bool cutInside_0(Vector<float, 3>  p_70, float hair_0, KernelContext_0 * 
 
         uint32_t i_105;
 
-        if(_S3191 > 0U)
+        if(_S3194 > 0U)
         {
 
-            uint32_t _S3192 = _S3190.x;
+            uint32_t _S3195 = _S3193.x;
 
             best_9 = best_8;
 
@@ -32171,12 +32216,12 @@ static bool cutInside_0(Vector<float, 3>  p_70, float hair_0, KernelContext_0 * 
 
             Vector<float, 3>  at_43 = at_42;
 
-            i_105 = _S3192;
+            i_105 = _S3195;
 
             for(;;)
             {
 
-                if(i_105 < (_S3192 + _S3191))
+                if(i_105 < (_S3195 + _S3194))
                 {
                 }
                 else
@@ -32185,25 +32230,25 @@ static bool cutInside_0(Vector<float, 3>  p_70, float hair_0, KernelContext_0 * 
                     break;
                 }
 
-                uint32_t _S3193 = cutOrder_0(i_105, kernelContext_262);
+                uint32_t _S3196 = cutOrder_0(i_105, kernelContext_262);
 
-                Vector<uint32_t, 3>  _S3194 = cutTriangle_0(_S3193, kernelContext_262);
+                Vector<uint32_t, 3>  _S3197 = cutTriangle_0(_S3196, kernelContext_262);
 
-                Vector<float, 3>  _S3195 = cutPoint_0(_S3194.x, kernelContext_262);
+                Vector<float, 3>  _S3198 = cutPoint_0(_S3197.x, kernelContext_262);
 
-                Vector<float, 3>  _S3196 = cutPoint_0(_S3194.y, kernelContext_262);
+                Vector<float, 3>  _S3199 = cutPoint_0(_S3197.y, kernelContext_262);
 
-                Vector<float, 3>  _S3197 = cutPoint_0(_S3194.z, kernelContext_262);
+                Vector<float, 3>  _S3200 = cutPoint_0(_S3197.z, kernelContext_262);
 
 
 
-                Vector<float, 2>  w_71 = closestBarycentric_0(p_70, _S3195, _S3196, _S3197);
-                float _S3198 = w_71.x;
+                Vector<float, 2>  w_71 = closestBarycentric_0(p_70, _S3198, _S3199, _S3200);
+                float _S3201 = w_71.x;
 
-                float _S3199 = w_71.y;
+                float _S3202 = w_71.y;
 
-                float wa_0 = 1.0f - _S3198 - _S3199;
-                Vector<float, 3>  q_27 = _S3195 * (Vector<float, 3> )wa_0 + _S3196 * (Vector<float, 3> )_S3198 + _S3197 * (Vector<float, 3> )_S3199;
+                float wa_0 = 1.0f - _S3201 - _S3202;
+                Vector<float, 3>  q_27 = _S3198 * (Vector<float, 3> )wa_0 + _S3199 * (Vector<float, 3> )_S3201 + _S3200 * (Vector<float, 3> )_S3202;
                 Vector<float, 3>  qp_1 = q_27 - p_70;
                 float d_58 = exactDot_0(qp_1, qp_1);
                 if(d_58 < best_9)
@@ -32211,7 +32256,7 @@ static bool cutInside_0(Vector<float, 3>  p_70, float hair_0, KernelContext_0 * 
 
                     best_9 = d_58;
 
-                    face_8 = _S3193;
+                    face_8 = _S3196;
 
                     uv_5 = w_71;
 
@@ -32241,15 +32286,15 @@ static bool cutInside_0(Vector<float, 3>  p_70, float hair_0, KernelContext_0 * 
             break;
         }
 
-        uint32_t l_24 = _S3190.x;
+        uint32_t l_24 = _S3193.x;
 
         uint32_t r_42 = l_24 + 1U;
 
-        float _S3200 = cutBoxDistance2_0(l_24, p_70, kernelContext_262);
+        float _S3203 = cutBoxDistance2_0(l_24, p_70, kernelContext_262);
 
-        float _S3201 = cutBoxDistance2_0(r_42, p_70, kernelContext_262);
+        float _S3204 = cutBoxDistance2_0(r_42, p_70, kernelContext_262);
 
-        bool leftNearer_0 = _S3200 <= _S3201;
+        bool leftNearer_0 = _S3203 <= _S3204;
         if(leftNearer_0)
         {
 
@@ -32269,13 +32314,13 @@ static bool cutInside_0(Vector<float, 3>  p_70, float hair_0, KernelContext_0 * 
         if(leftNearer_0)
         {
 
-            best_9 = _S3201;
+            best_9 = _S3204;
 
         }
         else
         {
 
-            best_9 = _S3200;
+            best_9 = _S3203;
 
         }
 
@@ -32294,26 +32339,26 @@ static bool cutInside_0(Vector<float, 3>  p_70, float hair_0, KernelContext_0 * 
         }
 
         stack_1[top_7] = i_105;
-        int32_t _S3202 = top_7 + int(1);
+        int32_t _S3205 = top_7 + int(1);
 
-        float _S3203;
+        float _S3206;
 
         if(leftNearer_0)
         {
 
-            _S3203 = _S3200;
+            _S3206 = _S3203;
 
         }
         else
         {
 
-            _S3203 = _S3201;
+            _S3206 = _S3204;
 
         }
 
-        boxes_0[top_7] = _S3203;
+        boxes_0[top_7] = _S3206;
 
-        top_5 = _S3202;
+        top_5 = _S3205;
 
     }
 
@@ -32323,26 +32368,26 @@ static bool cutInside_0(Vector<float, 3>  p_70, float hair_0, KernelContext_0 * 
         return false;
     }
 
-    Vector<uint32_t, 3>  _S3204 = cutTriangle_0(face_7, kernelContext_262);
+    Vector<uint32_t, 3>  _S3207 = cutTriangle_0(face_7, kernelContext_262);
 
-    uint32_t _S3205 = cutWord_0(5U, kernelContext_262);
+    uint32_t _S3208 = cutWord_0(5U, kernelContext_262);
 
 
-    float _S3206 = uv_4.x;
+    float _S3209 = uv_4.x;
 
-    float _S3207 = uv_4.y;
+    float _S3210 = uv_4.y;
 
-    float wa_1 = 1.0f - _S3206 - _S3207;
+    float wa_1 = 1.0f - _S3209 - _S3210;
 
-    Vector<float, 3>  _S3208 = cutVec_0(_S3205 + _S3204.x * 3U, kernelContext_262);
-    Vector<float, 3>  _S3209 = _S3208 * (Vector<float, 3> )wa_1;
+    Vector<float, 3>  _S3211 = cutVec_0(_S3208 + _S3207.x * 3U, kernelContext_262);
+    Vector<float, 3>  _S3212 = _S3211 * (Vector<float, 3> )wa_1;
 
-    Vector<float, 3>  _S3210 = cutVec_0(_S3205 + _S3204.y * 3U, kernelContext_262);
+    Vector<float, 3>  _S3213 = cutVec_0(_S3208 + _S3207.y * 3U, kernelContext_262);
 
-    Vector<float, 3>  _S3211 = _S3209 + _S3210 * (Vector<float, 3> )_S3206;
+    Vector<float, 3>  _S3214 = _S3212 + _S3213 * (Vector<float, 3> )_S3209;
 
-    Vector<float, 3>  _S3212 = cutVec_0(_S3205 + _S3204.z * 3U, kernelContext_262);
-    return (dot_0(p_70 - at_42, normalized_0(_S3211 + _S3212 * (Vector<float, 3> )_S3207))) < (- hair_0);
+    Vector<float, 3>  _S3215 = cutVec_0(_S3208 + _S3207.z * 3U, kernelContext_262);
+    return (dot_0(p_70 - at_42, normalized_0(_S3214 + _S3215 * (Vector<float, 3> )_S3210))) < (- hair_0);
 }
 
 
@@ -32482,10 +32527,10 @@ static float cutBoxEntry_0(Vector<float, 3>  lo_12, Vector<float, 3>  hi_9, Vect
     return t0_3;
 }
 
-static float cutRayTriangle_0(Vector<float, 3>  o_13, Vector<float, 3>  d_59, Vector<float, 3>  a_74, Vector<float, 3>  b_54, Vector<float, 3>  c_55)
+static float cutRayTriangle_0(Vector<float, 3>  o_13, Vector<float, 3>  d_59, Vector<float, 3>  a_74, Vector<float, 3>  b_55, Vector<float, 3>  c_55)
 {
 
-    Vector<float, 3>  e1_2 = b_54 - a_74;
+    Vector<float, 3>  e1_2 = b_55 - a_74;
 
     Vector<float, 3>  e2_0 = c_55 - a_74;
     Vector<float, 3>  p_71 = exactCross3_0(d_59, e2_0);
@@ -32500,21 +32545,21 @@ static float cutRayTriangle_0(Vector<float, 3>  o_13, Vector<float, 3>  d_59, Ve
     Vector<float, 3>  s_72 = o_13 - a_74;
     float u_23 = exactDot_0(s_72, p_71) * inv_1;
 
-    bool _S3213;
+    bool _S3216;
     if(u_23 < 0.0f)
     {
 
-        _S3213 = true;
+        _S3216 = true;
 
     }
     else
     {
 
-        _S3213 = u_23 > 1.0f;
+        _S3216 = u_23 > 1.0f;
 
     }
 
-    if(_S3213)
+    if(_S3216)
     {
 
         return -1.0f;
@@ -32525,17 +32570,17 @@ static float cutRayTriangle_0(Vector<float, 3>  o_13, Vector<float, 3>  d_59, Ve
     if(v_45 < 0.0f)
     {
 
-        _S3213 = true;
+        _S3216 = true;
 
     }
     else
     {
 
-        _S3213 = (u_23 + v_45) > 1.0f;
+        _S3216 = (u_23 + v_45) > 1.0f;
 
     }
 
-    if(_S3213)
+    if(_S3216)
     {
 
         return -1.0f;
@@ -32543,40 +32588,40 @@ static float cutRayTriangle_0(Vector<float, 3>  o_13, Vector<float, 3>  d_59, Ve
 
     float t_60 = exactDot_0(e2_0, q_28) * inv_1;
 
-    float _S3214;
+    float _S3217;
     if(t_60 >= 0.0f)
     {
 
-        _S3214 = t_60;
+        _S3217 = t_60;
 
     }
     else
     {
 
-        _S3214 = -1.0f;
+        _S3217 = -1.0f;
 
     }
 
-    return _S3214;
+    return _S3217;
 }
 
 static bool cutRay_0(Vector<float, 3>  o_14, Vector<float, 3>  d_60, float * hitT_0, KernelContext_0 * kernelContext_263)
 {
 
-    float _S3215 = d_60.x;
+    float _S3218 = d_60.x;
 
     float best_10;
 
-    if((F32_abs((_S3215))) > 1.00000000317107685e-30f)
+    if((F32_abs((_S3218))) > 1.00000000317107685e-30f)
     {
 
-        best_10 = 1.0f / _S3215;
+        best_10 = 1.0f / _S3218;
 
     }
     else
     {
 
-        if(_S3215 < 0.0f)
+        if(_S3218 < 0.0f)
         {
 
             best_10 = -1.00000001504746622e+30f;
@@ -32590,20 +32635,20 @@ static bool cutRay_0(Vector<float, 3>  o_14, Vector<float, 3>  d_60, float * hit
         }
 
     }
-    float _S3216 = d_60.y;
+    float _S3219 = d_60.y;
 
     float best_11;
 
-    if((F32_abs((_S3216))) > 1.00000000317107685e-30f)
+    if((F32_abs((_S3219))) > 1.00000000317107685e-30f)
     {
 
-        best_11 = 1.0f / _S3216;
+        best_11 = 1.0f / _S3219;
 
     }
     else
     {
 
-        if(_S3216 < 0.0f)
+        if(_S3219 < 0.0f)
         {
 
             best_11 = -1.00000001504746622e+30f;
@@ -32617,35 +32662,35 @@ static bool cutRay_0(Vector<float, 3>  o_14, Vector<float, 3>  d_60, float * hit
         }
 
     }
-    float _S3217 = d_60.z;
+    float _S3220 = d_60.z;
 
-    float _S3218;
+    float _S3221;
 
-    if((F32_abs((_S3217))) > 1.00000000317107685e-30f)
+    if((F32_abs((_S3220))) > 1.00000000317107685e-30f)
     {
 
-        _S3218 = 1.0f / _S3217;
+        _S3221 = 1.0f / _S3220;
 
     }
     else
     {
 
-        if(_S3217 < 0.0f)
+        if(_S3220 < 0.0f)
         {
 
-            _S3218 = -1.00000001504746622e+30f;
+            _S3221 = -1.00000001504746622e+30f;
 
         }
         else
         {
 
-            _S3218 = 1.00000001504746622e+30f;
+            _S3221 = 1.00000001504746622e+30f;
 
         }
 
     }
 
-    Vector<float, 3>  _S3219 = Vector<float, 3> (best_10, best_11, _S3218);
+    Vector<float, 3>  _S3222 = Vector<float, 3> (best_10, best_11, _S3221);
 
     FixedArray<uint32_t, 48>  stack_2;
 
@@ -32677,7 +32722,7 @@ static bool cutRay_0(Vector<float, 3>  o_14, Vector<float, 3>  d_60, float * hit
 
         cutBox_0(stack_2[top_9], &lo_13, &hi_10, kernelContext_263);
 
-        if((cutBoxEntry_0(lo_13, hi_10, o_14, _S3219, best_10)) == (infinity_0()))
+        if((cutBoxEntry_0(lo_13, hi_10, o_14, _S3222, best_10)) == (infinity_0()))
         {
 
             top_8 = top_9;
@@ -32685,25 +32730,25 @@ static bool cutRay_0(Vector<float, 3>  o_14, Vector<float, 3>  d_60, float * hit
             continue;
         }
 
-        Vector<uint32_t, 2>  _S3220 = cutNode_0(at_44, kernelContext_263);
+        Vector<uint32_t, 2>  _S3223 = cutNode_0(at_44, kernelContext_263);
 
-        uint32_t _S3221 = _S3220.y;
+        uint32_t _S3224 = _S3223.y;
 
-        if(_S3221 > 0U)
+        if(_S3224 > 0U)
         {
 
-            uint32_t _S3222 = _S3220.x;
+            uint32_t _S3225 = _S3223.x;
 
             best_11 = best_10;
 
             bool hit_1 = hit_0;
 
-            uint32_t i_106 = _S3222;
+            uint32_t i_106 = _S3225;
 
             for(;;)
             {
 
-                if(i_106 < (_S3222 + _S3221))
+                if(i_106 < (_S3225 + _S3224))
                 {
                 }
                 else
@@ -32712,33 +32757,33 @@ static bool cutRay_0(Vector<float, 3>  o_14, Vector<float, 3>  d_60, float * hit
                     break;
                 }
 
-                uint32_t _S3223 = cutOrder_0(i_106, kernelContext_263);
+                uint32_t _S3226 = cutOrder_0(i_106, kernelContext_263);
 
-                Vector<uint32_t, 3>  _S3224 = cutTriangle_0(_S3223, kernelContext_263);
+                Vector<uint32_t, 3>  _S3227 = cutTriangle_0(_S3226, kernelContext_263);
 
-                Vector<float, 3>  _S3225 = cutPoint_0(_S3224.x, kernelContext_263);
+                Vector<float, 3>  _S3228 = cutPoint_0(_S3227.x, kernelContext_263);
 
-                Vector<float, 3>  _S3226 = cutPoint_0(_S3224.y, kernelContext_263);
+                Vector<float, 3>  _S3229 = cutPoint_0(_S3227.y, kernelContext_263);
 
-                Vector<float, 3>  _S3227 = cutPoint_0(_S3224.z, kernelContext_263);
+                Vector<float, 3>  _S3230 = cutPoint_0(_S3227.z, kernelContext_263);
 
-                float t_61 = cutRayTriangle_0(o_14, d_60, _S3225, _S3226, _S3227);
+                float t_61 = cutRayTriangle_0(o_14, d_60, _S3228, _S3229, _S3230);
 
-                bool _S3228;
+                bool _S3231;
                 if(t_61 >= 0.0f)
                 {
 
-                    _S3228 = t_61 < best_11;
+                    _S3231 = t_61 < best_11;
 
                 }
                 else
                 {
 
-                    _S3228 = false;
+                    _S3231 = false;
 
                 }
 
-                if(_S3228)
+                if(_S3231)
                 {
 
                     best_11 = t_61;
@@ -32767,14 +32812,14 @@ static bool cutRay_0(Vector<float, 3>  o_14, Vector<float, 3>  d_60, float * hit
 
         int32_t top_10 = top_9 + int(1);
 
-        uint32_t _S3229 = _S3220.x;
+        uint32_t _S3232 = _S3223.x;
 
-        stack_2[top_9] = _S3229;
-        int32_t _S3230 = top_10 + int(1);
+        stack_2[top_9] = _S3232;
+        int32_t _S3233 = top_10 + int(1);
 
-        stack_2[top_10] = _S3229 + 1U;
+        stack_2[top_10] = _S3232 + 1U;
 
-        top_8 = _S3230;
+        top_8 = _S3233;
 
     }
 
@@ -32783,10 +32828,10 @@ static bool cutRay_0(Vector<float, 3>  o_14, Vector<float, 3>  d_60, float * hit
 }
 
 
-void _MeshCutCS(void* _S3231, void* entryPointParams_60, void* globalParams_61)
+void _MeshCutCS(void* _S3234, void* entryPointParams_60, void* globalParams_61)
 {
 
-    ComputeThreadVaryingInput * _S3232 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S3231));
+    ComputeThreadVaryingInput * _S3235 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S3234));
 
     KernelContext_0 kernelContext_264;
 
@@ -32796,57 +32841,57 @@ void _MeshCutCS(void* _S3231, void* entryPointParams_60, void* globalParams_61)
 
     (&kernelContext_264)->sTableBase_0 = 0U;
 
-    uint32_t _S3233 = threadIndex_0(_S3232->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S3232->groupThreadID, 64U, &kernelContext_264);
+    uint32_t _S3236 = threadIndex_0(_S3235->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S3235->groupThreadID, 64U, &kernelContext_264);
 
-    if(_S3233 >= ((&kernelContext_264)->globalParams_0->Look_0->gStrandCount_0))
+    if(_S3236 >= ((&kernelContext_264)->globalParams_0->Look_0->gStrandCount_0))
     {
 
         return;
     }
 
-    uint32_t _S3234 = strandBegin_0(_S3233, &kernelContext_264);
+    uint32_t _S3237 = strandBegin_0(_S3236, &kernelContext_264);
 
-    uint32_t _S3235 = strandCountOf_0(_S3233, &kernelContext_264);
+    uint32_t _S3238 = strandCountOf_0(_S3236, &kernelContext_264);
 
-    bool _S3236;
+    bool _S3239;
 
     if(((&kernelContext_264)->globalParams_0->Look_0->gFlag_0.y) == 0U)
     {
 
-        _S3236 = true;
+        _S3239 = true;
 
     }
     else
     {
 
-        _S3236 = _S3235 < 2U;
+        _S3239 = _S3238 < 2U;
 
     }
 
-    if(_S3236)
+    if(_S3239)
     {
 
-        copyStrand_0(_S3234, _S3235, &kernelContext_264);
+        copyStrand_0(_S3237, _S3238, &kernelContext_264);
 
         return;
     }
 
-    Vector<float, 3>  _S3237 = loadPoint_0(_S3234, &kernelContext_264);
+    Vector<float, 3>  _S3240 = loadPoint_0(_S3237, &kernelContext_264);
 
-    Vector<float, 3>  _S3238 = loadPoint_0(_S3234 + 1U, &kernelContext_264);
+    Vector<float, 3>  _S3241 = loadPoint_0(_S3237 + 1U, &kernelContext_264);
 
-    bool _S3239 = cutInside_0(_S3237, (groomlab_max((0.00009999999747379f * len3_0(_S3238 - _S3237)), (3.99999998990097083e-06f * (groomlab_max(((groomlab_max(((F32_abs((_S3237.x)))), ((F32_abs((_S3237.y))))))), ((F32_abs((_S3237.z))))))))), &kernelContext_264);
+    bool _S3242 = cutInside_0(_S3240, (groomlab_max((0.00009999999747379f * len3_0(_S3241 - _S3240)), (3.99999998990097083e-06f * (groomlab_max(((groomlab_max(((F32_abs((_S3240.x)))), ((F32_abs((_S3240.y))))))), ((F32_abs((_S3240.z))))))))), &kernelContext_264);
 
     uint32_t i_107;
 
-    if(_S3239 != (((&kernelContext_264)->globalParams_0->Look_0->gFlag_0.x) != 0U))
+    if(_S3242 != (((&kernelContext_264)->globalParams_0->Look_0->gFlag_0.x) != 0U))
     {
 
         i_107 = 0U;
         for(;;)
         {
 
-            if(i_107 < _S3235)
+            if(i_107 < _S3238)
             {
             }
             else
@@ -32855,7 +32900,7 @@ void _MeshCutCS(void* _S3231, void* entryPointParams_60, void* globalParams_61)
                 break;
             }
 
-            storePoint_0((&kernelContext_264)->globalParams_0->gOut_0, _S3234 + i_107, _S3237);
+            storePoint_0((&kernelContext_264)->globalParams_0->gOut_0, _S3237 + i_107, _S3240);
 
             i_107 = i_107 + 1U;
 
@@ -32872,20 +32917,20 @@ void _MeshCutCS(void* _S3231, void* entryPointParams_60, void* globalParams_61)
     for(;;)
     {
 
-        if(i_107 < _S3235)
+        if(i_107 < _S3238)
         {
 
-            _S3236 = crossing_0 < 0.0f;
+            _S3239 = crossing_0 < 0.0f;
 
         }
         else
         {
 
-            _S3236 = false;
+            _S3239 = false;
 
         }
 
-        if(_S3236)
+        if(_S3239)
         {
         }
         else
@@ -32894,12 +32939,12 @@ void _MeshCutCS(void* _S3231, void* entryPointParams_60, void* globalParams_61)
             break;
         }
 
-        uint32_t _S3240 = _S3234 + i_107;
+        uint32_t _S3243 = _S3237 + i_107;
 
-        Vector<float, 3>  _S3241 = loadPoint_0(_S3240 - 1U, &kernelContext_264);
+        Vector<float, 3>  _S3244 = loadPoint_0(_S3243 - 1U, &kernelContext_264);
 
-        Vector<float, 3>  _S3242 = loadPoint_0(_S3240, &kernelContext_264);
-        Vector<float, 3>  segment_5 = _S3242 - _S3241;
+        Vector<float, 3>  _S3245 = loadPoint_0(_S3243, &kernelContext_264);
+        Vector<float, 3>  segment_5 = _S3245 - _S3244;
         float length_11 = len3_0(segment_5);
         if(!(length_11 > 0.0f))
         {
@@ -32924,31 +32969,31 @@ void _MeshCutCS(void* _S3231, void* entryPointParams_60, void* globalParams_61)
 
         }
         float t_62 = 0.0f;
-        float _S3243 = 1.0f - skip_0;
+        float _S3246 = 1.0f - skip_0;
 
-        bool _S3244 = cutRay_0(_S3241 + segment_5 * (Vector<float, 3> )skip_0, segment_5 * (Vector<float, 3> )_S3243, &t_62, &kernelContext_264);
+        bool _S3247 = cutRay_0(_S3244 + segment_5 * (Vector<float, 3> )skip_0, segment_5 * (Vector<float, 3> )_S3246, &t_62, &kernelContext_264);
 
-        bool _S3245;
+        bool _S3248;
 
-        if(_S3244)
+        if(_S3247)
         {
 
-            _S3245 = t_62 <= 1.0f;
+            _S3248 = t_62 <= 1.0f;
 
         }
         else
         {
 
-            _S3245 = false;
+            _S3248 = false;
 
         }
 
         float crossing_1;
 
-        if(_S3245)
+        if(_S3248)
         {
 
-            crossing_1 = along_13 + length_11 * (skip_0 + t_62 * _S3243);
+            crossing_1 = along_13 + length_11 * (skip_0 + t_62 * _S3246);
 
         }
         else
@@ -32967,40 +33012,40 @@ void _MeshCutCS(void* _S3231, void* entryPointParams_60, void* globalParams_61)
 
     }
 
-    float _S3246 = strandLength_0(_S3234, _S3235, &kernelContext_264);
+    float _S3249 = strandLength_0(_S3237, _S3238, &kernelContext_264);
 
     if(crossing_0 < 0.0f)
     {
 
-        _S3236 = true;
+        _S3239 = true;
 
     }
     else
     {
 
-        _S3236 = !(_S3246 > 0.0f);
+        _S3239 = !(_S3249 > 0.0f);
 
     }
 
-    if(_S3236)
+    if(_S3239)
     {
 
-        copyStrand_0(_S3234, _S3235, &kernelContext_264);
+        copyStrand_0(_S3237, _S3238, &kernelContext_264);
 
         return;
     }
 
 
-    float _S3247 = _S3246 * clamp_0((groomlab_min(((groomlab_max((crossing_0 - (&kernelContext_264)->globalParams_0->Look_0->gValue_0.x), (0.0f))) / _S3246), (1.0f))), 0.0f, 1.0f) / float(_S3235 - 1U);
+    float _S3250 = _S3249 * clamp_0((groomlab_min(((groomlab_max((crossing_0 - (&kernelContext_264)->globalParams_0->Look_0->gValue_0.x), (0.0f))) / _S3249), (1.0f))), 0.0f, 1.0f) / float(_S3238 - 1U);
 
-    ArcWalk_0 _S3248 = arcWalkStart_0(_S3234, &kernelContext_264);
-    ArcWalk_0 w_72 = _S3248;
+    ArcWalk_0 _S3251 = arcWalkStart_0(_S3237, &kernelContext_264);
+    ArcWalk_0 w_72 = _S3251;
 
     i_107 = 0U;
     for(;;)
     {
 
-        if(i_107 < _S3235)
+        if(i_107 < _S3238)
         {
         }
         else
@@ -33009,11 +33054,11 @@ void _MeshCutCS(void* _S3231, void* entryPointParams_60, void* globalParams_61)
             break;
         }
 
-        uint32_t _S3249 = _S3234 + i_107;
+        uint32_t _S3252 = _S3237 + i_107;
 
-        Vector<float, 3>  _S3250 = arcWalkAt_0(&w_72, _S3234, _S3235, _S3247 * float(i_107), &kernelContext_264);
+        Vector<float, 3>  _S3253 = arcWalkAt_0(&w_72, _S3237, _S3238, _S3250 * float(i_107), &kernelContext_264);
 
-        storePoint_0((&kernelContext_264)->globalParams_0->gOut_0, _S3249, _S3250);
+        storePoint_0((&kernelContext_264)->globalParams_0->gOut_0, _S3252, _S3253);
 
         i_107 = i_107 + 1U;
 
@@ -33049,10 +33094,10 @@ static Vector<float, 3>  mirrorPoint_0(Vector<float, 3>  p_72, uint32_t axis_19,
 
 
 
-void _LayoutCS(void* _S3251, void* entryPointParams_61, void* globalParams_62)
+void _LayoutCS(void* _S3254, void* entryPointParams_61, void* globalParams_62)
 {
 
-    ComputeThreadVaryingInput * _S3252 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S3251));
+    ComputeThreadVaryingInput * _S3255 = (slang_bit_cast<ComputeThreadVaryingInput *>(_S3254));
 
     KernelContext_0 kernelContext_265;
 
@@ -33062,46 +33107,46 @@ void _LayoutCS(void* _S3251, void* entryPointParams_61, void* globalParams_62)
 
     (&kernelContext_265)->sTableBase_0 = 0U;
 
-    uint32_t _S3253 = threadIndex_0(_S3252->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S3252->groupThreadID, 64U, &kernelContext_265);
+    uint32_t _S3256 = threadIndex_0(_S3255->groupID * Vector<uint32_t, 3> (64U, 1U, 1U) + _S3255->groupThreadID, 64U, &kernelContext_265);
 
-    if(_S3253 >= ((&kernelContext_265)->globalParams_0->Look_0->gStrandCount_0))
+    if(_S3256 >= ((&kernelContext_265)->globalParams_0->Look_0->gStrandCount_0))
     {
 
         return;
     }
 
-    uint32_t _S3254 = strandBegin_0(_S3253, &kernelContext_265);
+    uint32_t _S3257 = strandBegin_0(_S3256, &kernelContext_265);
 
-    uint32_t _S3255 = strandCountOf_0(_S3253, &kernelContext_265);
+    uint32_t _S3258 = strandCountOf_0(_S3256, &kernelContext_265);
 
-    uint32_t _S3256 = _S3253 * 32U;
+    uint32_t _S3259 = _S3256 * 32U;
 
-    ByteAddressBuffer _S3257 = (&kernelContext_265)->globalParams_0->gAux0_0;
+    ByteAddressBuffer _S3260 = (&kernelContext_265)->globalParams_0->gAux0_0;
 
-    uint32_t _S3258 = ((&kernelContext_265)->globalParams_0->gAux0_0).Load<uint32_t >(_S3256);
+    uint32_t _S3261 = ((&kernelContext_265)->globalParams_0->gAux0_0).Load<uint32_t >(_S3259);
 
-    uint32_t _S3259 = (_S3257).Load<uint32_t >(_S3256 + 4U);
+    uint32_t _S3262 = (_S3260).Load<uint32_t >(_S3259 + 4U);
 
-    uint32_t _S3260 = (_S3257).Load<uint32_t >(_S3256 + 8U);
+    uint32_t _S3263 = (_S3260).Load<uint32_t >(_S3259 + 8U);
 
-    uint32_t _S3261 = (_S3257).Load<uint32_t >(_S3256 + 12U);
-    uint32_t _S3262 = _S3256 + 16U;
+    uint32_t _S3264 = (_S3260).Load<uint32_t >(_S3259 + 12U);
+    uint32_t _S3265 = _S3259 + 16U;
 
-    ByteAddressBuffer _S3263 = (&kernelContext_265)->globalParams_0->gAux0_0;
+    ByteAddressBuffer _S3266 = (&kernelContext_265)->globalParams_0->gAux0_0;
 
-    uint32_t _S3264 = ((&kernelContext_265)->globalParams_0->gAux0_0).Load<uint32_t >(_S3262);
+    uint32_t _S3267 = ((&kernelContext_265)->globalParams_0->gAux0_0).Load<uint32_t >(_S3265);
 
-    uint32_t _S3265 = (_S3263).Load<uint32_t >(_S3262 + 4U);
+    uint32_t _S3268 = (_S3266).Load<uint32_t >(_S3265 + 4U);
 
-    uint32_t _S3266 = (_S3263).Load<uint32_t >(_S3262 + 8U);
+    uint32_t _S3269 = (_S3266).Load<uint32_t >(_S3265 + 8U);
 
-    Vector<float, 3>  _S3267 = asfloat_0(Vector<uint32_t, 3> (_S3264, _S3265, _S3266));
+    Vector<float, 3>  _S3270 = asfloat_0(Vector<uint32_t, 3> (_S3267, _S3268, _S3269));
 
     uint32_t i_108 = 0U;
     for(;;)
     {
 
-        if(i_108 < _S3255)
+        if(i_108 < _S3258)
         {
         }
         else
@@ -33110,29 +33155,29 @@ void _LayoutCS(void* _S3251, void* entryPointParams_61, void* globalParams_62)
             break;
         }
 
-        uint32_t _S3268 = _S3258 + i_108;
+        uint32_t _S3271 = _S3261 + i_108;
 
-        Vector<float, 3>  _S3269 = loadPoint_0(_S3268, &kernelContext_265);
+        Vector<float, 3>  _S3272 = loadPoint_0(_S3271, &kernelContext_265);
 
         Vector<float, 3>  v_46;
-        if((_S3259 & 1U) != 0U)
+        if((_S3262 & 1U) != 0U)
         {
 
-            v_46 = mirrorPoint_0(_S3269, (&kernelContext_265)->globalParams_0->Look_0->gFlag_0.x, (&kernelContext_265)->globalParams_0->Look_0->gValue_0.x);
+            v_46 = mirrorPoint_0(_S3272, (&kernelContext_265)->globalParams_0->Look_0->gFlag_0.x, (&kernelContext_265)->globalParams_0->Look_0->gValue_0.x);
 
         }
         else
         {
 
-            v_46 = _S3269;
+            v_46 = _S3272;
 
         }
 
         Vector<float, 3>  v_47;
-        if((_S3259 & 2U) != 0U)
+        if((_S3262 & 2U) != 0U)
         {
 
-            v_47 = v_46 + _S3267;
+            v_47 = v_46 + _S3270;
 
         }
         else
@@ -33141,17 +33186,17 @@ void _LayoutCS(void* _S3251, void* entryPointParams_61, void* globalParams_62)
             v_47 = v_46;
 
         }
-        uint32_t _S3270 = _S3254 + i_108;
+        uint32_t _S3273 = _S3257 + i_108;
 
-        storePoint_0((&kernelContext_265)->globalParams_0->gOut_0, _S3270, v_47);
+        storePoint_0((&kernelContext_265)->globalParams_0->gOut_0, _S3273, v_47);
         if(((&kernelContext_265)->globalParams_0->Look_0->gFlag_0.y) != 0U)
         {
 
-            uint32_t _S3271 = _S3270 * 4U;
+            uint32_t _S3274 = _S3273 * 4U;
 
-            uint32_t _S3272 = ((&kernelContext_265)->globalParams_0->gAux1_0).Load<uint32_t >(uint32_t(int32_t(_S3268 * 4U)));
+            uint32_t _S3275 = ((&kernelContext_265)->globalParams_0->gAux1_0).Load<uint32_t >(uint32_t(int32_t(_S3271 * 4U)));
 
-            (&kernelContext_265)->globalParams_0->gOut2_0.Store(_S3271,_S3272);
+            (&kernelContext_265)->globalParams_0->gOut2_0.Store(_S3274,_S3275);
 
         }
 

@@ -2470,12 +2470,25 @@ void ClumpCS(uint3 id : SV_DispatchThreadID) {
     // Its spot in a lock: its own way round the axis (its root's from the center's, in the root
     // frame: strands keep their places around the lock and never cross in it), at its drawn share of
     // the radius (so the disk fills evenly); a strand rooted on the center, a way of its own.
+    // Centers on the scalp (gFlag2.w: a Clump's version 2, its centers between the strands): a root
+    // a hair from its center takes its own way as its root nears the center (near^2 / (l^2 +
+    // near^2)), so its spot never turns on a rounding of the root's way (which the GPU and the CPU
+    // round apart); farther out the root's way alone, to a few ten-thousandths of a turn. Version 1:
+    // the root's way (a strand rooted on its center its own).
     float2 lockWay = float2(cos(angle), sin(angle));
     if (radius > 0.0f) {
         const Frame first = centerFrame(c, 0);
         const float2 inFrame = float2(dot(rootOffset, first.n), dot(rootOffset, first.b));
         const float l = sqrt(inFrame.x * inFrame.x + inFrame.y * inFrame.y);
-        if (l > 1e-6f * (1.0f + len3(rootOffset))) lockWay = inFrame / l;
+        if (l > 1e-6f * (1.0f + len3(rootOffset)) && gFlag2.w == 0u) {
+            lockWay = inFrame / l;
+        } else if (l > 1e-6f * (1.0f + len3(rootOffset))) {
+            const float near = 0.01f * radius;
+            const float own = near * near / (l * l + near * near);
+            const float2 blended = (inFrame / l) * (1.0f - own) + lockWay * own;
+            const float b = sqrt(blended.x * blended.x + blended.y * blended.y);
+            if (b > 1e-6f) lockWay = blended / b;
+        }
     }
     // pastTip extend: past the center's tip, on along its last segment's way.
     const float3 tipWay = normalized(centerPoint(c, CENTER_SAMPLES - 1) - centerPoint(c, CENTER_SAMPLES - 2));

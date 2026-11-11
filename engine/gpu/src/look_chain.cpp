@@ -2052,6 +2052,7 @@ bool LookInputs::read(const GraphDocument& doc, const LookChain& chain, const Lo
                 fixed->centers = state.centerGuides.size();
                 fixed->curves = std::make_shared<const std::vector<Vec3f>>(state.curves);
                 fixed->normals = std::make_shared<const std::vector<Vec3f>>(state.centerNormals);
+                fixed->spots = !state.offsets.empty();  // centers on the scalp (Clump's version 2)
                 // copyAmount, for centers made on the GPU: each center's nearest centers by the
                 // roots it was assigned by (ClumpOp::shareCenters; a center of centersFrom inputPoints
                 // gathering no strand neither gives nor takes), in the order it sums them.
