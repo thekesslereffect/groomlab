@@ -608,6 +608,10 @@ void bindGraph(py::module_& m) {
              },
              py::arg("path"), py::arg("object") = std::string(), py::arg("groom_size") = py::none(),
              "Load Guide Cache (graph_inserts.h): a GuideCache node right after the Guides node, or the one there reading the file.")
+        .def("insert_drive_guides",
+             [](GraphEdit& e, std::optional<double> groomSize) { return insertDriveGuides(e, groomSize); },
+             py::arg("groom_size") = py::none(),
+             "Add Drivers (graph_inserts.h): a DriveGuides node right after the Guides node, or the one there.")
         .def("insert_collider",
              [](GraphEdit& e, const std::string& mesh, bool wire, std::optional<double> offset, std::optional<double> friction,
                 std::optional<double> groomSize) { return insertCollider(e, mesh, wire, offset, friction, groomSize); },

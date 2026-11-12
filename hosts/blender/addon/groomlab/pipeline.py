@@ -454,6 +454,282 @@ def sync_extra_scalps(scalp, rt, depsgraph=None, force=False, read_pose=True):
 groom.input_hooks.append(sync_extra_scalps)
 
 
+# ---- Driver curves (DriveGuides) ------------------------------------------------------------------
+
+DRIVER_SAMPLES = 24  # points along a driver, by arc length (as Maya samples its curves)
+TWIST = "twist"      # a driver curve object's twist about its own length, degrees at its tip
+
+
+def kept_drivers(scalp):
+    """[(ID, object)] of the groom's driver curves still in the file."""
+    return [(d.index, d.object) for d in scalp.groomlab.drivers
+            if d.object is not None and d.object.type == "CURVE" and d.index >= 0]
+
+
+def _resampled(points, count):
+    points = np.asarray(points, np.float64)
+    if len(points) < 2:
+        return np.repeat(points[:1], count, axis=0)
+    lengths = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(points, axis=0), axis=1))])
+    if lengths[-1] <= 0.0:
+        return np.repeat(points[:1], count, axis=0)
+    at = np.linspace(0.0, lengths[-1], count)
+    return np.stack([np.interp(at, lengths, points[:, k]) for k in range(3)], axis=1)
+
+
+def driver_points(obj, scalp, depsgraph=None, count=DRIVER_SAMPLES):
+    """A driver curve as posed now: `count` points along its first spline, evenly by length, in
+    the scalp object's space (its evaluated shape: hooks, armatures, modifiers)."""
+    depsgraph = depsgraph or bpy.context.evaluated_depsgraph_get()
+    evaluated = obj.evaluated_get(depsgraph)
+    scalp_eval = scalp.evaluated_get(depsgraph)
+    matrix = np.array(scalp_eval.matrix_world.inverted() @ evaluated.matrix_world, np.float64)
+    mesh = evaluated.to_mesh()
+    try:
+        n = len(mesh.vertices)
+        pts = np.empty(n * 3, np.float32)
+        mesh.vertices.foreach_get("co", pts)
+        pts = pts.reshape(-1, 3).astype(np.float64)
+        # The first spline's points in order (a curve's mesh: each spline's points, then the next).
+        if len(mesh.edges):
+            edges = np.empty(len(mesh.edges) * 2, np.int32)
+            mesh.edges.foreach_get("vertices", edges)
+            edges = edges.reshape(-1, 2)
+            run = [0]
+            for a, b in edges:
+                if a == run[-1] and b == run[-1] + 1:
+                    run.append(int(b))
+                elif a > run[-1]:
+                    break
+            pts = pts[run]
+    finally:
+        evaluated.to_mesh_clear()
+    pts = pts @ matrix[:3, :3].T + matrix[:3, 3]
+    return _resampled(pts, count).astype(np.float32)
+
+
+def driver_twist(obj, depsgraph=None):
+    """A driver curve object's twist (degrees at its tip), as animated at this frame."""
+    evaluated = obj.evaluated_get(depsgraph) if depsgraph is not None else obj
+    try:
+        return float(evaluated.get(TWIST, obj.get(TWIST, 0.0)) or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def sync_drivers(scalp, rt, depsgraph=None, force=False, read_pose=True):
+    """groom.sync's input hook: the driver curves sent when they moved (a frame, a rig, an edit),
+    each in the scalp's space as posed now with its twist, and the bind when it changed (Maya's
+    driverCurves, driverTwist and driverBind). True when sent."""
+    kept = kept_drivers(scalp)
+    bind = scalp.groomlab.driver_bind
+    sent = False
+    if "driverBind" not in rt.keys and not bind:
+        # A new session: a groom opened from a file has its bind in it; it is kept here from then on.
+        bind = process.call("driver_bind", session=rt.session).get("bind") or ""
+        if bind:
+            try:
+                scalp.groomlab.driver_bind = bind
+            except (AttributeError, RuntimeError):  # (a context that cannot write: kept next time)
+                pass
+        rt.keys["driverBind"] = bind
+    if rt.keys.get("driverBind") != bind or force:
+        process.call("set_driver_bind", session=rt.session, bind=bind)
+        rt.keys["driverBind"] = bind
+        sent = True
+    if not kept and "drivers" not in rt.keys:
+        return sent
+    if not read_pose and "drivers" in rt.keys:
+        return sent
+    drivers = [{"id": int(i), "points": [float(v) for v in driver_points(obj, scalp, depsgraph).ravel()],
+                "twist": driver_twist(obj, depsgraph)} for i, obj in kept]
+    key = groom._key(json.dumps(drivers, sort_keys=True))
+    if not force and rt.keys.get("drivers") == key:
+        return sent
+    process.call("set_drivers", session=rt.session, drivers=drivers)
+    rt.keys["drivers"] = key
+    return True
+
+
+groom.input_hooks.append(sync_drivers)
+
+
+def _keep_bind(scalp, r):
+    scalp.groomlab.driver_bind = r.get("bind") or ""
+    rt = groom.runtime(scalp)
+    rt.keys["driverBind"] = scalp.groomlab.driver_bind
+    groom.mark(scalp, "eval")
+    return r
+
+
+def driver_bind(scalp):
+    """The bind as the helper has it: {"bind" (JSON text), "frame", "drivers", "attached"}."""
+    return call(scalp, "driver_bind")
+
+
+def add_drivers(scalp, objects, wire=True):
+    """The curve objects as the groom's driver curves (each with a "twist" to key), each by the next
+    free ID; ones there already are skipped. With `wire`, a DriveGuides node right after the Guides
+    node (every host's insertDriveGuides). Returns {object name: ID}."""
+    kept = scalp.groomlab.drivers
+    used = set(d.index for d in kept)
+    out = {}
+    for obj in objects:
+        if obj is None or obj.type != "CURVE":
+            raise HelperError("bad_request", "a driver is a curve object")
+        entry = next((d for d in kept if d.object == obj), None)
+        if entry is None:
+            index = 0
+            while index in used:
+                index += 1
+            entry = kept.add()
+            entry.object = obj
+            entry.index = index
+            used.add(index)
+        if TWIST not in obj.keys():
+            obj[TWIST] = 0.0
+            try:
+                obj.id_properties_ui(TWIST).update(description="The driver's twist about its own length, degrees at "
+                                                               "its tip (none at its root): the guides round it turn "
+                                                               "with it", subtype="NONE")
+            except (AttributeError, TypeError):
+                pass
+        out[obj.name] = entry.index
+    rt = _session(scalp)
+    sync_drivers(scalp, rt, force=True)
+    if wire:
+        g = GraphEdits(scalp)
+        g.edit(op="insert_drive_guides")
+        g.finish()
+    return out
+
+
+def bind_drivers(scalp, frame=0):
+    """Bind the driver curves as they are at `frame` (the scalp then too): the attached guides keep
+    their place round their drivers as they were there; the attachments stay. The scene goes to
+    that frame and back."""
+    scene = groom.scene_of(scalp)
+    now = scene.frame_current
+    if now != frame:
+        scene.frame_set(int(frame))
+    try:
+        rt = groom.ensure(scalp, scene)
+        groom.sync(scalp, scene=scene, evaluate_now=False, force_inputs=True)
+        r = process.call("bind_drivers", session=rt.session, frame=int(frame))
+    finally:
+        if now != frame:
+            scene.frame_set(now)
+    _keep_bind(scalp, r)
+    return r
+
+
+def attach_guides(scalp, obj, guides=None, frame=None):
+    """Attach guides (IDs; default: the selected ones) to the driver curve `obj`: they (and their
+    children) follow it. The curve is added as a driver and the drivers bound at the bind's frame
+    (`frame`, else 0). Returns the guide IDs."""
+    from . import tools
+    ids = sorted(set(int(g) for g in (guides if guides is not None else tools.selected_guides(scalp))))
+    if not ids:
+        raise HelperError("bad_request", "no guides to attach: select some with the GroomLab select tool")
+    index = add_drivers(scalp, [obj])[obj.name]
+    _keep_bind(scalp, call(scalp, "attach_guides", driver=index, guides=ids))
+    bound = driver_bind(scalp)
+    bind_drivers(scalp, frame=bound.get("frame", 0) if frame is None else frame)
+    return ids
+
+
+def detach_guides(scalp, guides=None, obj=None):
+    """Detach guides (default: the selected ones) from `obj`, or from every driver: they stay as
+    groomed again. Returns how many were detached."""
+    from . import tools
+    ids = sorted(set(int(g) for g in (guides if guides is not None else tools.selected_guides(scalp))))
+    args = {"guides": ids}
+    if obj is not None:
+        entry = next((d for d in scalp.groomlab.drivers if d.object == obj), None)
+        if entry is None:
+            return 0
+        args["driver"] = entry.index
+    r = _keep_bind(scalp, call(scalp, "detach_guides", **args))
+    return int(r.get("detached", 0))
+
+
+def remove_drivers(scalp, objects=None):
+    """Forget the driver curves (`objects`, or every one): the guides attached to them stay as bound
+    (as groomed). Returns how many were removed."""
+    kept = scalp.groomlab.drivers
+    count = 0
+    for i in reversed(range(len(kept))):
+        if objects is None or kept[i].object in objects:
+            kept.remove(i)
+            count += 1
+    rt = _session(scalp)
+    sync_drivers(scalp, rt, force=True)
+    groom.mark(scalp, "eval")
+    return count
+
+
+def _guide_shapes(scalp, ids):
+    """{guide ID: its points in the scalp's space} of the guides as groomed (the Guides object)."""
+    g = scalp.groomlab
+    guides = g.guides if g.guides is not None and g.guides.type == "CURVES" else None
+    if guides is None:
+        return {}
+    points, counts, gids = groom.read_guides(scalp, guides)
+    out, start = {}, 0
+    wanted = set(ids)
+    for n, gid in zip(counts, gids):
+        if int(gid) in wanted and n >= 2:
+            out[int(gid)] = np.asarray(points[start:start + n], np.float64)
+        start += n
+    return out
+
+
+def create_drivers(scalp, guides=None, per_guide=False, frame=None):
+    """Driver curves made from guides (IDs; default: the selected ones), attached and bound: one
+    down the middle of them all (the mean of their shapes, root to tip), or with `per_guide` one on
+    each guide exactly (the guide then follows it as if bound to it directly). Each is a poly curve
+    object beside the scalp, its origin at its root. Returns the curve objects."""
+    from . import tools
+    ids = sorted(set(int(g) for g in (guides if guides is not None else tools.selected_guides(scalp))))
+    if not ids:
+        raise HelperError("bad_request", "no guides to make drivers from: select some with the GroomLab select tool")
+    shapes = _guide_shapes(scalp, ids)
+    if not shapes:
+        raise HelperError("state", "the guides %s have no points" % ids)
+    count = max(len(p) for p in shapes.values())
+    world = np.array(scalp.matrix_world, np.float64)
+    lines = {}
+    if per_guide:
+        for gid, p in sorted(shapes.items()):
+            lines[gid] = [gid], p
+    else:
+        mean = np.mean([_resampled(p, count) for p in shapes.values()], axis=0) if len(shapes) > 1 else list(shapes.values())[0]
+        lines[min(shapes)] = sorted(shapes), mean
+    scene = groom.scene_of(scalp)
+    made = []
+    for key, (attached, local) in lines.items():
+        pts = np.asarray(local, np.float64) @ world[:3, :3].T + world[:3, 3]
+        name = "%s_driver_%d" % (scalp.name, key) if per_guide else "%s_driver" % scalp.name
+        data = bpy.data.curves.new(name, "CURVE")
+        data.dimensions = "3D"
+        spline = data.splines.new("POLY")
+        spline.points.add(len(pts) - 1)
+        root = pts[0]
+        for k, p in enumerate(pts):
+            spline.points[k].co = (float(p[0] - root[0]), float(p[1] - root[1]), float(p[2] - root[2]), 1.0)
+        obj = bpy.data.objects.new(name, data)
+        obj.location = tuple(float(v) for v in root)  # the origin at the root: rotating it swings it from there
+        (scalp.users_collection[0] if scalp.users_collection else scene.collection).objects.link(obj)
+        made.append((obj, attached))
+    bpy.context.view_layer.update()
+    add_drivers(scalp, [obj for obj, _ in made])
+    for obj, attached in made:
+        entry = next(d for d in scalp.groomlab.drivers if d.object == obj)
+        _keep_bind(scalp, call(scalp, "attach_guides", driver=entry.index, guides=attached))
+    bind_drivers(scalp, frame=driver_bind(scalp).get("frame", 0) if frame is None else frame)
+    return [obj for obj, _ in made]
+
+
 def add_scalp(scalp, obj, name=None, wire=True):
     """Add > Scalp (Maya's add_scalp): `obj`'s mesh another scalp of the groom, joined after its own:
     hair grows on it too. Kept posed frame by frame; with `wire`, a Scalp node reading it, a Scatter

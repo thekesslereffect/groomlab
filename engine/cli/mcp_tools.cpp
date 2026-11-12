@@ -776,7 +776,7 @@ struct McpTools::Impl {
         }
         if (!file.data.scalp) throw ToolError("the groom file has no scalp");
         // The caches it names are read too: they must lie inside the root as well.
-        std::vector<std::string> refs{file.scalpCache.file, file.guideCache.file};
+        std::vector<std::string> refs{file.scalpCache.file, file.guideCache.file, file.driverCache.file};
         for (const auto& [node, ref] : file.simCaches) refs.push_back(ref.file);
         for (const std::string& ref : refs) {
             if (!ref.empty() && !w.insideRoot(ref)) throw ToolError("the groom reads '" + ref + "', outside the folder this server may use");

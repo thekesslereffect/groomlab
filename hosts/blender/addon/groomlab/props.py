@@ -88,6 +88,14 @@ class GroomLabCollider(bpy.types.PropertyGroup):
     object: PointerProperty(type=bpy.types.Object)
 
 
+class GroomLabDriver(bpy.types.PropertyGroup):
+    """A driver curve (DriveGuides): a curve object an animator rigs, the guides attached to it
+    following it (pipeline.sync_drivers sends it as posed on every frame). Its twist about its own
+    length is the curve object's "twist" (degrees at its tip): a curve cannot show it."""
+    object: PointerProperty(type=bpy.types.Object)
+    index: IntProperty(default=-1)  # its ID in the groom (the bind's attachments name it)
+
+
 def _node_selected(self, context):
     if is_quiet():
         return
@@ -155,6 +163,8 @@ class GroomLabObject(bpy.types.PropertyGroup):
     view_node: StringProperty(description="The node the viewport shows instead of the output (the Graph Editor's View)")
     colliders: CollectionProperty(type=GroomLabCollider)  # Add > Collider's meshes
     extra_scalps: CollectionProperty(type=GroomLabCollider)  # Add > Scalp's meshes (Maya's extraScalps), in order
+    drivers: CollectionProperty(type=GroomLabDriver)  # Simulate > Drivers' curves (DriveGuides)
+    driver_bind: StringProperty()  # the drivers as bound and the guides attached (DriverBind's JSON)
 
 
 def _is_scalp(self, obj):
@@ -212,7 +222,7 @@ class GroomLabScene(bpy.types.PropertyGroup):
     add_type: EnumProperty(name="Node", items=_types, description="The kind of node to add")
 
 
-classes = (GroomLabParam, GroomLabNode, GroomLabCollider, GroomLabObject, GroomLabScene)
+classes = (GroomLabParam, GroomLabNode, GroomLabCollider, GroomLabDriver, GroomLabObject, GroomLabScene)
 
 
 def register():

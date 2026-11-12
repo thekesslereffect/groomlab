@@ -86,7 +86,7 @@ class GraphEditorTest(unittest.TestCase):
 
     def test_motion_nodes_come_from_the_add_menu_and_notes_badge_them(self):
         cats = dict(self.ge.categories(self.editor.catalog))
-        self.assertEqual(cats["Motion"], ["Wind", "Jiggle", "Simulate", "GuideCache"])
+        self.assertEqual(cats["Motion"], ["Wind", "Jiggle", "Simulate", "GuideCache", "DriveGuides"])
         self.editor.items["resample"].setSelected(True)
         name = self.editor.add_node("Jiggle")
         self.assertEqual(self.editor.model.source_of(name, "strands"), "resample")
@@ -3890,7 +3890,9 @@ class DockableWindowsTest(unittest.TestCase):
             self.assertEqual(entries_of("Add"), ["Feathers...", "Braid on Curves...", "Cards", "Collider", "Wind",
                                                  "Jiggle"])
             self.assertEqual(entries_of("Simulate"), ["Add Simulate Node", "Simulate Range", "Bake Simulation",
-                                                      "Clear Simulation", "Export Guides for Simulation...",
+                                                      "Clear Simulation", "Sculpt on Simulation",
+                                                      "Back to Live Simulation", "Drivers",
+                                                      "Export Guides for Simulation...",
                                                       "Load Guide Cache...", "Legacy"])
             simulate = next(menu.MENU + "|" + i for i in cmds.menu(menu.MENU, query=True, itemArray=True)
                             if cmds.menuItem(i, query=True, label=True) == "Simulate")

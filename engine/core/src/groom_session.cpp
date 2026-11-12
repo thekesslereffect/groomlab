@@ -43,18 +43,21 @@ namespace groomlab {
 
 namespace {
 
-// The guides an Interpolate feeding `shown` takes, when a GuideCache or Simulate node on its guides
-// input moved them this frame (its output not its input passed through): what the viewport draws
-// as the moving guides. Every value read is the evaluation's own (cached): no extra work.
+// The guides an Interpolate feeding `shown` takes, when a GuideCache, Simulate or DriveGuides node on
+// its guides input moved them this frame (its output not its input passed through): what the
+// viewport draws as the moving guides. Every value read is the evaluation's own (cached): no extra
+// work.
 GuidesPtr movingGuidesOf(Graph& graph, NodeId shown, const EvalContext& ctx) {
     auto isMotion = [&](NodeId id) {
         const std::string type = graph.node(id).typeName();
-        return (type == "GuideCache" || type == "Simulate") && !graph.bypassed(id);
+        return (type == "GuideCache" || type == "Simulate" || type == "DriveGuides") && !graph.bypassed(id);
     };
+    // The input the guides come in by: "guides", or a DriveGuides node's (it takes any curves).
     auto guidesSlot = [&](NodeId id) -> std::ptrdiff_t {
         const std::vector<PortSpec> specs = graph.inputSpecs(id);
+        const bool drive = graph.node(id).typeName() == "DriveGuides";
         for (std::size_t slot = 0; slot < specs.size(); ++slot) {
-            if (specs[slot].name == "guides") return static_cast<std::ptrdiff_t>(slot);
+            if (specs[slot].name == "guides" || (drive && specs[slot].name == "strands")) return static_cast<std::ptrdiff_t>(slot);
         }
         return -1;
     };
@@ -311,6 +314,11 @@ GroomSession::GroomSession(GroomData data) : data_(std::move(data)) {
     }
     for (const auto& [name, edits] : sculpts_.nodes) {
         sculptExternals_[name] = {std::make_shared<const SculptEdits>(edits), edits.contentHash()};
+    }
+    try {
+        driverBind_ = DriverBind::fromJson(data_.driverBindJson);
+    } catch (const std::invalid_argument& e) {
+        throw std::runtime_error(e.what());
     }
     posesHash_ = data_.guidePoses ? data_.guidePoses->contentHash() : 0;
     time_ = data_.time;
@@ -644,6 +652,27 @@ void GroomSession::setSculptsJson(const std::string& json) {
     sculptExternals_ = std::move(externals);
 }
 
+void GroomSession::setDrivers(GuidesPtr drivers) { data_.drivers = std::move(drivers); }
+
+void GroomSession::setDriverBindJson(const std::string& json) {
+    if (json == data_.driverBindJson) return;
+    data_.driverBindJson = json;
+    driverBindError_.clear();
+    try {
+        driverBind_ = DriverBind::fromJson(json);
+    } catch (const std::exception& e) {
+        driverBind_ = DriverBind{};
+        driverBindError_ = e.what();  // "driverBind: <why>"
+    }
+}
+
+std::string GroomSession::bindDrivers(int frame) const {
+    if (!data_.drivers) return {};
+    DriverBind bind = groomlab::bindDrivers(*data_.drivers, cageScalp_.get(), frame);
+    bind.attached = driverBind_.attached;  // the guides attached stay attached
+    return bind.empty() && bind.attached.empty() ? std::string() : bind.toJson();
+}
+
 void GroomSession::setCorrectiveWeights(std::map<int, float> weights) {
     if (liveWeights_ && weights == weights_) return;
     liveWeights_ = true;
@@ -658,7 +687,7 @@ void GroomSession::clearCorrectiveWeights() {
 std::vector<std::string> GroomSession::inputErrors() const {
     std::vector<std::string> out;
     for (const std::string* e : {&hierarchyError_, &graphError_, &partError_, &flowError_, &correctiveError_, &scalpMapsError_,
-                                 &sculptError_}) {
+                                 &sculptError_, &driverBindError_}) {
         if (!e->empty()) out.push_back(*e);
     }
     return out;
@@ -1357,6 +1386,36 @@ void GroomSession::fillExternals(ExternalInputs& externals) const {
         setGroomExternals(externals, scalp_, guides_, activeHierarchy_, parts_, flow_);
     }
     setMeshExternals(externals, data_.meshes);          // "mesh:<name>" for ColliderMesh nodes
+    // The driver curves as bound and as they are now, in the space the graph evaluates in (on the
+    // rest pose while following), for DriveGuides nodes. Their anchors are on the scalp before any
+    // subdivision (cageScalp_: its faces whatever the level), and so is their carry.
+    if (!driverBind_.empty()) {
+        const ScalpMesh* cage = cageScalp_.get();
+        const ScalpMesh* rest = cage;
+        if (cage && cage->hasRest()) {
+            const std::uint64_t h = cage->restPoseHash();
+            if (!driverRest_ || h != driverRestHash_) {
+                driverRest_ = std::make_shared<const ScalpMesh>(cage->restPose());
+                driverRestHash_ = h;
+            }
+            rest = driverRest_.get();
+        }
+        const DriversInGraph drivers = driversInGraphSpace(driverBind_, data_.drivers, rest, cage, following_ ? rest : cage);
+        externals.set(kDriverBindExternal, drivers.bound, drivers.bound->contentHash());
+        if (drivers.now) externals.set(kDriversExternal, drivers.now, drivers.now->contentHash());
+        // Which guides follow them (a child its parent's): made again when the attachments or the
+        // guides' family tree changed.
+        const GuideHierarchy* family = following_ ? followActive_.get() : activeHierarchy_.get();
+        std::uint64_t key = std::hash<std::string>{}(data_.driverBindJson);
+        if (family && !driverBind_.attached.empty()) {
+            for (const HierarchyGuide& g : family->guides()) key = hashCombine(hashCombine(key, g.id), g.parent);
+        }
+        if (!driverAttach_ || key != driverAttachKey_) {
+            driverAttach_ = std::make_shared<const DriverAttachments>(attachmentsOf(driverBind_, family));
+            driverAttachKey_ = key;
+        }
+        externals.set(kDriverAttachExternal, driverAttach_, driverAttach_->hash);
+    }
     setControlExternals(externals, scaledControls());  // keyed lengths at the groom's scale
     setMapExternals(externals, data_.maps);             // where each painted map lives, for Map nodes
     // The scalp's earlier frames, for Jiggle nodes (in rest space while following).
@@ -3083,8 +3142,10 @@ void GroomSession::advanceSimulations(std::vector<SimRef>& nodes, int target, do
         std::map<std::string, MeshPtr> meshes;
         std::map<std::string, float> controls;
         ScalpHistoryPtr history;
+        GuidesPtr drivers;
     };
-    const Moving saved{data_.scalp, data_.scalps, data_.guides, data_.guidePoses, posesHash_, data_.meshes, data_.controls, data_.scalpHistory};
+    const Moving saved{data_.scalp,    data_.scalps,   data_.guides,       data_.guidePoses, posesHash_,
+                       data_.meshes,   data_.controls, data_.scalpHistory, data_.drivers};
     bool fed = false;
     std::vector<std::string> scratchErrors;
     std::vector<SessionMessage> scratchMessages;
@@ -3098,6 +3159,7 @@ void GroomSession::advanceSimulations(std::vector<SimRef>& nodes, int target, do
         data_.meshes = saved.meshes;
         data_.controls = saved.controls;
         data_.scalpHistory = saved.history;
+        data_.drivers = saved.drivers;
         fed = false;
         scratchErrors.clear();
         scratchMessages.clear();
@@ -3154,7 +3216,11 @@ void GroomSession::advanceSimulations(std::vector<SimRef>& nodes, int target, do
                 const std::uint64_t stamp = known ? hash : 0;
                 if (!node.cache.started()) {
                     if (next != f) continue;
-                    node.cache.start(in, stamp);
+                    if (node.cache.settings().preroll > 0) {
+                        node.cache.start(restInputs(ref, seconds), in, stamp);
+                    } else {
+                        node.cache.start(in, stamp);
+                    }
                 } else if (!node.cache.step(in, stamp, f - next + 1)) {
                     stepError(ref);
                     continue;
@@ -3175,6 +3241,34 @@ void GroomSession::advanceSimulations(std::vector<SimRef>& nodes, int target, do
     }
     restore();
     run.milliseconds += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
+}
+
+SimInputs GroomSession::restInputs(const SimRef& ref, double seconds) {
+    // The inputs on the scalp's rest pose, the driver curves as bound (in that pose: the bind's
+    // drivers are carried to it), then the inputs of `seconds` put back. The colliders stay.
+    const MeshPtr scalp = data_.scalp;
+    const GuidesPtr drivers = data_.drivers;
+    std::vector<std::string> errors;
+    std::vector<SessionMessage> messages;
+    SimInputs rest;
+    try {
+        if (scalp && scalp->hasRest()) data_.scalp = std::make_shared<const ScalpMesh>(scalp->restPose());
+        if (!driverBind_.empty()) data_.drivers = std::make_shared<const GuideSet>(driverBind_.drivers);
+        prepareTime(seconds, errors, messages);
+        ExternalInputs externals;
+        fillExternals(externals);
+        std::uint64_t hash = 0;
+        rest = simInputs(ref, simContext(seconds, externals), &hash);
+    } catch (...) {
+        data_.scalp = scalp;
+        data_.drivers = drivers;
+        prepareTime(seconds, errors, messages);
+        throw;
+    }
+    data_.scalp = scalp;
+    data_.drivers = drivers;
+    prepareTime(seconds, errors, messages);
+    return rest;
 }
 
 SimRun GroomSession::simulateTo(int frame, const SimProgress& progress) {

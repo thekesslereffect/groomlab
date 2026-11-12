@@ -14,6 +14,7 @@ The functions live in modules by what they work on, each imported into the packa
     painting   maps: painted, used by params, their files; the freeze mask
     flow       parting lines, flow arrows and sinks, the Flow and Part nodes
     motion     Wind and Jiggle
+    drivers    driver curves an animator rigs, posing the guides attached to them (DriveGuides)
     shading    the hair shader and the look it reads from the graph
     groom      the groom node: creating one, scalp and rest mesh, the active groom
     transfer   moving a groom onto another scalp mesh
@@ -79,6 +80,8 @@ from groomlab.flow import (  # noqa: F401
     FLOW_SINKS, add_flow_node, add_part, add_part_node, clear_flow, clear_parts, draw_part_tool, flow_arrows, flow_counts,
     flow_sink, flow_sinks, flow_stroke, flow_tool, list_parts, remove_part)
 from groomlab.motion import add_jiggle, add_wind, motion_anchor  # noqa: F401
+from groomlab.drivers import (add_drivers, attach_guides, attached_guides, bind_drivers, bind_frame, clear_bind,  # noqa: F401
+                              create_drivers, detach_guides, driver_curves, remove_drivers)
 from groomlab.shading import (  # noqa: F401
     assign_shading_group, color_nodes, create_hair_shader, hair_color_node, hair_color_params, hair_look,
     iridescent_tint, render_data_node, render_data_params, sync_hair_shader)

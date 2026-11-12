@@ -21,7 +21,14 @@ User guide: [Node graph](https://www.getgroomlab.com/docs/node-graph).
 - **Color:** `HairColor`, `Bands`, `FeatherColor`, `RenderData`.
 - **Motion:** `Wind`, `Jiggle` (no simulation cache: see [Motion without a cache](motion-and-simulation.md#motion-without-a-cache)), `Simulate`
   (the guides simulated, every host: see [Simulating the guides](motion-and-simulation.md#simulating-the-guides)),
-  `GuideCache` (the guides posed from an Alembic cache simulated in another package, by guide ID).
+  `GuideCache` (the guides posed from an Alembic cache simulated in another package, by guide ID),
+  `DriveGuides` (guides attached by hand to driver curves an animator rigs follow them: each binds
+  to its drivers as bound at the bind frame, the groom's `driverBind` with its attachments, a child
+  guide following its parent's, and keeps its place round them in their rotation-minimizing frames as
+  they swing, bend and stretch; the root stays on the scalp; guides attached to nothing stay;
+  `strength` (mappable), `profile` along the length; the viewport draws the driven guides; a
+  Simulate after it plays on top, its bend and twist holding the driven shape frame by frame: see
+  [Rigged hair](motion-and-simulation.md#rigged-hair-driver-curves)).
 - **Feathers:** `Propagate` (barbs grown off shafts), `Plume` (feathers laid over one another and off the body).
 - **Utility:** `Attribute`, `Value`, `Group`, `Merge`, `Switch`, `Split` (strands routed to four outputs), `Blend`, `Output`; `Compound` and `Input` for compound nodes.
 - **Fields:** `Map`, `Control` (a keyable slider on the groom), `Expression`, `FieldNoise`, `FieldRemap`, `FieldCombine`, `Layers`, `ColorLayers`, `Curve`.

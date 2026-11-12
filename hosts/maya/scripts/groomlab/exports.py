@@ -19,7 +19,8 @@ def viewport_points(groom):
     return [tuple(xyz[i:i + 3]) for i in range(0, len(xyz), 3)]
 
 
-def export_alembic(groom, path, start=None, end=None, step=1.0, density=1.0, scales="mesh", render_overrides=False):
+def export_alembic(groom, path, start=None, end=None, step=1.0, density=1.0, scales="mesh", render_overrides=False,
+                   velocities=False):
     """Write the groom's strands to an Alembic file as animated curves.
 
     Frames default to the current frame. Density 1.0 exports every strand
@@ -29,12 +30,16 @@ def export_alembic(groom, path, start=None, end=None, step=1.0, density=1.0, sca
     scales: "mesh" (default) writes the groom's scales beside the curves as an animated mesh,
     bent onto the skin as rendered (<name>/scales), with their data as arbitrary params (scaleColor
     per vertex; scaleRootColor, scaleId, scaleUV, scaleVariant per face); "none" leaves them out.
+    velocities: each point's velocity too (the curves' .velocities, scene units per second, from
+    the frames a step before and after), so renderers blur the motion from one sample.
     """
     kwargs = {"file": path, "step": step, "density": density, "scales": scales, "renderOverrides": bool(render_overrides)}
     if start is not None:
         kwargs["startFrame"] = start
     if end is not None:
         kwargs["endFrame"] = end
+    if velocities:
+        kwargs["velocities"] = True
     return cmds.groomLabExportAlembic(groom, **kwargs)
 
 

@@ -620,7 +620,10 @@ Simulate has no loop.
 3. **Bake Simulation** for renders: it simulates the playback range and writes the frames to the
    scene's caches folder, which exports, groom files and Arnold read.
 
-- **Settle first:** set `startFrame` a few frames before the shot so the hair comes to rest.
+- **Settle first:** set `startFrame` a few frames before the shot so the hair comes to rest, or
+  `preroll`: the hair starts at rest on the scalp's rest pose (and the drivers' bind) and the head
+  and rig move into the start frame's pose over those frames, so a shot starting with the head
+  turned or the rig posed starts with the hair hanging, not holding the groomed shape stiffly.
 - **Less floppy:** raise `bend` (keeps the groomed curves), `rootStiffness` (how firmly it's held;
   `rootStiffnessProfile` along the length) or `damping`, or lower `inertia` (how much of the head's
   motion the hair feels).
@@ -636,6 +639,43 @@ Simulate has no loop.
 - **The standalone app** shows **Simulate**, **Bake** and **Clear** on its timeline when the graph
   has a Simulate node. Save the groom after baking: the file names the bake.
 - More: https://getgroomlab.com/docs/motion-and-simulation.
+
+### Rigged hair (driver curves)
+
+Animators pose hero hair with curves rigged like anything else in Maya (joints and a skinCluster,
+spline IK, wire, blend shapes), and attach guides to them; a simulation can play on top.
+
+1. Select guides with the GroomLab select tool, then select a driver curve, and **GroomLab >
+   Simulate > Drivers > Attach Selected Guides to Curve** (`groomlab.attach_guides(groom, curve)`,
+   or `group="bangs"` for a whole group). The curve is connected, a **DriveGuides** node goes right
+   after the Guides node, and the drivers are bound at frame 0: their pose and the scalp's there is
+   the bind pose, saved with the scene and in .groom files.
+2. Animate the rig: each attached guide (and its children) keeps its place round its driver as it
+   swings, bends and stretches; the root stays on the scalp. Guides attached to nothing stay as
+   groomed. A guide attached to several drivers follows each, the nearest most. The viewport draws
+   the driven guides over the groomed ones.
+3. `strength` (paintable) and `profile` (root to tip) on the DriveGuides node set how much follows.
+
+No curve yet? Select the guides and **Create Driver from Selected Guides** (a curve down the middle of
+them, the mean of their shapes) or **Create a Driver per Selected Guide** (a curve on each guide,
+exactly its shape: the guide follows its curve as if bound to it directly); Attach Selected Guides to
+Curve with no curve selected does the first. The curves are made from the guides as groomed at the
+bind frame, with their pivot at the root, attached and bound already
+(`groomlab.create_drivers(groom, per_guide=False)`); rig them.
+
+- **Detach Selected Guides** (`groomlab.detach_guides`) makes them stay as groomed again. **Rebind
+  Drivers at Frame 0** after changing the rig's rest pose; the attachments stay.
+- **Blender:** the same Simulate > Drivers menu works on curve objects (each gets a `twist` custom
+  property to key).
+- **Which hair follows the animation exactly:** paint the Simulate node's `strength` (0: held to the
+  driven shape, 1: simulated).
+- **Simulation on top:** Add Simulate Node after it (Guides > DriveGuides > Simulate): the
+  simulation holds the driven shape frame by frame and adds the swing and follow-through;
+  `rootStiffness` and its profile set how closely it sticks to the animation.
+- **Follow Scalp** works with drivers: a driver moving with the head drives nothing; only its motion
+  against the head does.
+- **Twist:** each driver's transform has a keyable `twist` (degrees at its tip, none at its root):
+  key it or connect a joint's `rotateX`; the guides round the driver turn with it.
 
 ### Other simulators
 

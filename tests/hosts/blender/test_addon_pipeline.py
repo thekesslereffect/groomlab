@@ -96,6 +96,50 @@ class PipelineTest(unittest.TestCase):
         with open(self.tmp("scales.usda")) as f:
             self.assertIn("PointInstancer", f.read())
 
+    def test_driver_curves_pose_the_guides(self):
+        """Simulate > Drivers in Blender (Maya's): a driver curve made from guides, attached and
+        bound at frame 0; as made the groom is as groomed, the curve turned (and twisted) moves the
+        hair, the guides detached it is as groomed again."""
+        import math
+        scene = bpy.context.scene
+        groom.create_groom(bpy.context, self.head, preset="hair_basics", guide_count=20, guides="flat")
+        scene.groomlab.groom = self.head
+        self.head.groomlab.preview_density = 0.1
+        scene.frame_set(1)
+        groom.flush()
+        rest = bu.hair_arrays(self.head.groomlab.hair)[0]
+        ids = [int(i) for i in bu.guide_arrays(self.head.groomlab.guides)[2][:6]]
+        made = pipeline.create_drivers(self.head, guides=ids)
+        self.assertEqual([o.type for o in made], ["CURVE"])
+        self.assertIn("twist", made[0].keys())
+        bind = pipeline.driver_bind(self.head)
+        self.assertEqual(bind["frame"], 0)
+        self.assertEqual(bind["drivers"], 1)
+        self.assertEqual(sorted(int(g) for g in bind["attached"]), sorted(ids))
+        self.assertTrue(self.head.groomlab.driver_bind)  # kept with the .blend
+        groom.sync(self.head)
+        np.testing.assert_allclose(bu.hair_arrays(self.head.groomlab.hair)[0], rest, atol=2e-4)  # made on them
+
+        curve = made[0]
+        curve.rotation_mode = "XYZ"
+        curve.rotation_euler = (0.0, 0.0, 0.0)
+        curve.keyframe_insert("rotation_euler", frame=1)
+        curve.rotation_euler = (math.radians(40.0), 0.0, 0.0)
+        curve.keyframe_insert("rotation_euler", frame=10)
+        scene.frame_set(10)
+        groom.sync(self.head)
+        swung = bu.hair_arrays(self.head.groomlab.hair)[0]
+        self.assertGreater(float(np.abs(swung - rest).max()), 0.005)  # the attached hair followed it
+        curve["twist"] = 90.0
+        groom.sync(self.head)
+        self.assertGreater(float(np.abs(bu.hair_arrays(self.head.groomlab.hair)[0] - swung).max()), 1e-4)  # twisted
+
+        self.assertEqual(pipeline.detach_guides(self.head, guides=ids), len(ids))
+        groom.flush()  # (the edit marked the groom to evaluate)
+        np.testing.assert_allclose(bu.hair_arrays(self.head.groomlab.hair)[0], rest, atol=2e-4)  # as groomed again
+        self.assertEqual(pipeline.remove_drivers(self.head), 1)
+        scene.frame_set(1)
+
     def test_colliders_scalps_transfer_and_samples(self):
         groom.create_groom(bpy.context, self.head, preset="hair_basics")
         groom.flush()

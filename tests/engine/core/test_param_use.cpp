@@ -36,6 +36,7 @@
 #include "groomlab/presets.h"
 #include "groomlab/simulation.h"
 #include "groomlab/strand_geometry.h"
+#include "test_helpers.h"
 
 namespace groomlab {
 namespace {
@@ -270,6 +271,21 @@ TEST(ParamUse, EveryDeclaredParamIsReadWhereItShows) {
         frames.push_back(std::move(moved));
     }
     setScalpHistoryExternal(externals, ScalpHistory::make(1.0 / 24.0, std::move(frames)));
+    // Driver curves (DriveGuides): two up out of the top, as bound and swung over.
+    auto bound = std::make_shared<GuideSet>(), posed = std::make_shared<GuideSet>();
+    for (int d = 0; d < 2; ++d) {
+        const Vec3f root{d == 0 ? -0.3f : 0.3f, 0.95f, 0.0f};
+        std::vector<Vec3f> points = test::straightCurve(root, {0.0f, 1.0f, 0.0f}, 6);
+        bound->add(static_cast<std::uint64_t>(d + 1), points);
+        for (Vec3f& p : points) p = root + rotateAxisAngle(p - root, {0.0f, 0.0f, 1.0f}, 0.5f);
+        posed->add(static_cast<std::uint64_t>(d + 1), std::move(points));
+    }
+    externals.set(kDriverBindExternal, GuidesPtr(bound), bound->contentHash());
+    externals.set(kDriversExternal, GuidesPtr(posed), posed->contentHash());
+    auto attached = std::make_shared<DriverAttachments>();
+    attached->byGuide[0] = {1, 2};
+    attached->hash = 3;
+    externals.set(kDriverAttachExternal, DriverAttachPtr(attached), attached->hash);
     EvalContext ctx;
     ctx.previewDensity = kDensity;
     ctx.externals = &externals;

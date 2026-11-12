@@ -857,6 +857,7 @@ SimSettings SimSettings::fromParams(const ParamSet& p) {
     s.substeps = static_cast<int>(p.getInt("substeps", s.substeps));
     s.iterations = static_cast<int>(p.getInt("iterations", s.iterations));
     s.startFrame = static_cast<int>(p.getInt("startFrame", s.startFrame));
+    s.preroll = std::max(0, static_cast<int>(p.getInt("preroll", 0)));
     s.seed = static_cast<std::uint64_t>(p.getInt("seed", 0));
     s.live = p.getString("cacheMode", "live") != "cached";
     s.water = p.getBool("water", s.water);
@@ -910,6 +911,7 @@ std::uint64_t SimSettings::hash() const {
         }
         h = hashCombine(h, mapsKey);
     }
+    if (preroll > 0) h = hashCombine(hashCombine(h, 0x9E40), static_cast<std::uint64_t>(preroll));  // only when on
     // Only when on (else the hash made before it).
     if (groomedUnderGravity) h = hashCombine(h, 0x6A7E);
     if (groomedUnderGravity && preload) h = hashCombine(h, 0x9E10);
@@ -2027,6 +2029,20 @@ void SimCache::start(const SimInputs& inputs, std::uint64_t inputHash) {
     solver_.start(settings_, fps_, settings_.startFrame, inputs);
     keep(inputHash);
     lastStepMs_ = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
+}
+
+void SimCache::start(const SimInputs& rest, const SimInputs& inputs, std::uint64_t inputHash) {
+    const int preroll = settings_.preroll;
+    if (preroll <= 0 || !rest.guides || !inputs.guides) return start(inputs, inputHash);
+    const auto started = std::chrono::steady_clock::now();
+    frames_.clear();
+    solver_.start(settings_, fps_, settings_.startFrame - preroll, rest);
+    if (!solver_.sameLayout(*inputs.guides)) return start(inputs, inputHash);
+    const int move = (preroll + 1) / 2;
+    solver_.step(inputs, move);
+    if (preroll > move) solver_.step(inputs, preroll - move);
+    keep(inputHash);
+    lastStepMs_ = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count() / (preroll + 1);
 }
 
 bool SimCache::step(const SimInputs& inputs, std::uint64_t inputHash, int frames) {

@@ -153,6 +153,9 @@ MObject GroomShape::aSimGuideId;
 MObject GroomShape::aGuideCache;
 MObject GroomShape::aGuideCacheObject;
 MObject GroomShape::aGuideCurves;
+MObject GroomShape::aDriverCurves;
+MObject GroomShape::aDriverTwist;
+MObject GroomShape::aDriverBind;
 MObject GroomShape::aTime;
 MObject GroomShape::aSimCaches;
 MObject GroomShape::aTransferMarkers;
@@ -487,6 +490,7 @@ const MObject* GroomShape::textAttribute(int input) {
         case kPartText: return &aPartData;
         case kFlowText: return &aFlowData;
         case kSculptText: return &aSculptData;
+        case kDriverBindText: return &aDriverBind;
         default: return nullptr;
     }
 }
@@ -502,6 +506,7 @@ void GroomShape::markDirty(const MPlug& plug) {
     if (plug == aColliderMeshes || plug == aColliderMesh || plug == aColliderName || plug == aColliderRestMesh) live_.collidersDirty = true;
     if (plug == aExtraScalps || plug == aExtraScalpMesh || plug == aExtraScalpName || plug == aExtraScalpRestMesh) live_.scalpsDirty = true;
     if (plug == aGuideCurves) live_.curvesDirty = true;
+    if (plug == aDriverCurves || plug == aDriverTwist) live_.driversDirty = true;
     for (int i = 0; i < kTextInputs; ++i) {
         if (plug == *textAttribute(i)) textDirty_[i] = true;
     }
@@ -510,7 +515,8 @@ void GroomShape::markDirty(const MPlug& plug) {
 MStatus GroomShape::preEvaluation(const MDGContext& context, const MEvaluationNode& evaluationNode) {
     if (context.isNormal()) {
         for (const MObject* attr : {&aInMesh, &aRestMesh, &aColliderMeshes, &aColliderMesh, &aColliderName, &aColliderRestMesh,
-                                    &aExtraScalps, &aExtraScalpMesh, &aExtraScalpName, &aExtraScalpRestMesh, &aGuideCurves}) {
+                                    &aExtraScalps, &aExtraScalpMesh, &aExtraScalpName, &aExtraScalpRestMesh, &aGuideCurves, &aDriverCurves,
+                                    &aDriverTwist}) {
             MStatus status;
             if (evaluationNode.dirtyPlugExists(*attr, &status) && status) markDirty(MPlug(thisMObject(), *attr));
         }
@@ -704,6 +710,35 @@ MStatus GroomShape::initialize() {
     tAttr.setStorable(false);
     tAttr.setHidden(true);
     tAttr.setDisconnectBehavior(MFnAttribute::kDelete);
+    // Driver curves (DriveGuides nodes, drive_guides.h): the curves an animator rigs, by logical
+    // index (their IDs); and the drivers as bound (groomLabDrivers -bind), kept with the scene.
+    aDriverCurves = tAttr.create("driverCurves", "gldc", MFnData::kNurbsCurve, MObject::kNullObj, &status);
+    CHECK_MSTATUS_AND_RETURN_IT(status);
+    tAttr.setArray(true);
+    tAttr.setReadable(false);
+    tAttr.setIndexMatters(false);
+    tAttr.setStorable(false);
+    tAttr.setHidden(true);
+    tAttr.setDisconnectBehavior(MFnAttribute::kDelete);
+    // Each driver's twist about its own length, degrees at its tip (none at its root), by the
+    // driver's logical index: connected from the curve's "twist" (a curve cannot show it).
+    {
+        MFnNumericAttribute twistAttr;
+        aDriverTwist = twistAttr.create("driverTwist", "gldtw", MFnNumericData::kDouble, 0.0, &status);
+        CHECK_MSTATUS_AND_RETURN_IT(status);
+        twistAttr.setArray(true);
+        twistAttr.setIndexMatters(false);
+        twistAttr.setStorable(false);
+        twistAttr.setHidden(true);
+        twistAttr.setDisconnectBehavior(MFnAttribute::kDelete);
+    }
+    {
+        MFnStringData bindData;
+        aDriverBind = tAttr.create("driverBind", "gldb", MFnData::kString, bindData.create(""), &status);
+        CHECK_MSTATUS_AND_RETURN_IT(status);
+        tAttr.setStorable(true);
+        tAttr.setHidden(true);
+    }
 
     aTime = uAttr.create("time", "gltm", MFnUnitAttribute::kTime, 0.0, &status);
     CHECK_MSTATUS_AND_RETURN_IT(status);
@@ -1087,7 +1122,7 @@ MStatus GroomShape::initialize() {
     tAttr.setStorable(false);
     tAttr.setHidden(true);
 
-    for (MObject* attr : {&aInMesh, &aRestMesh, &aFollowScalp, &aScalpTopology, &aScaleSource, &aScaleReference, &aScaleTransformReference, &aGroomScale, &aScaleArea, &aScaleTransform, &aColliderMeshes, &aExtraScalps, &aRenderDensity, &aRenderWidthScale, &aRenderLengthScale, &aRenderView, &aSimGuides, &aGuideCache, &aGuideCacheObject, &aSimCaches, &aTransferMarkers, &aGuideCurves, &aTime, &aGraph, &aGuideData, &aPartData, &aGraphUi, &aViewNode, &aLocked, &aDisplayInstances, &aGuideSelection, &aSoftSelectRadius, &aStrandColorMode, &aStrandColorSource, &aStrandColorMin, &aStrandColorMax, &aDisplayRibbons, &aRibbonWidthScale, &aDisplayWidthCoverage, &aDisplayCoverageDensity, &aDisplayClumpLod, &aClumpLodError, &aDisplayLighting, &aDisplayShadows, &aDisplayHairShading, &aDisplaySelfShadowing, &aDisplayStrandVariation, &aGuideWidth, &aCorrectiveData, &aCorrectiveWeight, &aSculptData, &aSculptNode, &aFlowData, &aDisplayFlow, &aShotSculpt, &aShotLayer, &aLodDistance, &aLodNear, &aLodFar, &aLodMinDensity,
+    for (MObject* attr : {&aInMesh, &aRestMesh, &aFollowScalp, &aScalpTopology, &aScaleSource, &aScaleReference, &aScaleTransformReference, &aGroomScale, &aScaleArea, &aScaleTransform, &aColliderMeshes, &aExtraScalps, &aRenderDensity, &aRenderWidthScale, &aRenderLengthScale, &aRenderView, &aSimGuides, &aGuideCache, &aGuideCacheObject, &aSimCaches, &aTransferMarkers, &aGuideCurves, &aDriverCurves, &aDriverTwist, &aDriverBind, &aTime, &aGraph, &aGuideData, &aPartData, &aGraphUi, &aViewNode, &aLocked, &aDisplayInstances, &aGuideSelection, &aSoftSelectRadius, &aStrandColorMode, &aStrandColorSource, &aStrandColorMin, &aStrandColorMax, &aDisplayRibbons, &aRibbonWidthScale, &aDisplayWidthCoverage, &aDisplayCoverageDensity, &aDisplayClumpLod, &aClumpLodError, &aDisplayLighting, &aDisplayShadows, &aDisplayHairShading, &aDisplaySelfShadowing, &aDisplayStrandVariation, &aGuideWidth, &aCorrectiveData, &aCorrectiveWeight, &aSculptData, &aSculptNode, &aFlowData, &aDisplayFlow, &aShotSculpt, &aShotLayer, &aLodDistance, &aLodNear, &aLodFar, &aLodMinDensity,
                           &aLodWidthCompensation, &aCameraCull, &aCullMargin, &aBackfaceCull, &aBackfaceAngle, &aDisplayColor, &aUseMaterialColor, &aSculptDisplay, &aSculptDensity, &aIsolateGroup, &aGuideColorMode, &aGuideColorLayer, &aGuidePoints, &aGuideSmoothing, &aHiddenGuideGroups, &aGuideGroupColors, &aRenderMode, &aGroomFile, &aPreviewDensity, &aPreviewPointBudget, &aDisplayGuides, &aDisplayHair,
                           &aDisplayTubes, &aBrushTick, &aCardDensity, &aOutCards, &aOutRachis, &aOutMesh, &aDisplayCards, &aDisplayMesh, &aDisplayCardTextures, &aDisplayOverlaysOnTop, &aCardMaps, &aScalpMaps, &aScalpMapDisplay, &aScalpMapChannel, &aOutStrandCount, &aLastError, &aOutVrayPluginData, &aOutFrame}) {
         CHECK_MSTATUS_AND_RETURN_IT(addAttribute(*attr));
@@ -1098,14 +1133,14 @@ MStatus GroomShape::initialize() {
     for (MObject* input : {&aInMesh, &aRestMesh, &aFollowScalp, &aScalpTopology, &aScaleSource, &aScaleReference,
                            &aScaleTransformReference, &aColliderMeshes, &aColliderMesh, &aColliderName, &aColliderRestMesh,
                            &aExtraScalps, &aExtraScalpMesh, &aExtraScalpName, &aExtraScalpRestMesh, &aSimGuides, &aSimCurve,
-                           &aSimGuideId, &aGuideCache, &aGuideCacheObject, &aSimCaches, &aGuideCurves, &aTime, &aGraph,
+                           &aSimGuideId, &aGuideCache, &aGuideCacheObject, &aSimCaches, &aGuideCurves, &aDriverCurves, &aDriverTwist, &aDriverBind, &aTime, &aGraph,
                            &aGuideData, &aCorrectiveData, &aCorrectiveWeight, &aSculptData, &aSculptNode, &aFlowData,
                            &aPartData, &aScalpMaps, &aRenderDensity, &aRenderWidthScale, &aRenderLengthScale, &aRenderMode,
                            &aGroomFile}) {
         CHECK_MSTATUS_AND_RETURN_IT(attributeAffects(*input, aOutVrayPluginData));
     }
     for (MObject* input : {&aInMesh, &aRestMesh, &aFollowScalp, &aScalpTopology, &aScaleSource, &aScaleReference, &aScaleTransformReference, &aColliderMeshes, &aColliderMesh, &aColliderName, &aColliderRestMesh,
-                           &aExtraScalps, &aExtraScalpMesh, &aExtraScalpName, &aExtraScalpRestMesh, &aSimGuides, &aSimCurve, &aSimGuideId, &aGuideCache, &aGuideCacheObject, &aSimCaches, &aGuideCurves, &aTime, &aGraph, &aGuideData, &aCorrectiveData, &aCorrectiveWeight, &aSculptData, &aSculptNode, &aFlowData, &aPartData, &aPreviewDensity, &aPreviewPointBudget, &aRenderView, &aSculptDensity, &aViewNode, &aBrushTick, &aCardDensity, &aDisplayCards, &aDisplayMesh, &aCardMaps, &aScalpMaps}) {
+                           &aExtraScalps, &aExtraScalpMesh, &aExtraScalpName, &aExtraScalpRestMesh, &aSimGuides, &aSimCurve, &aSimGuideId, &aGuideCache, &aGuideCacheObject, &aSimCaches, &aGuideCurves, &aDriverCurves, &aDriverTwist, &aDriverBind, &aTime, &aGraph, &aGuideData, &aCorrectiveData, &aCorrectiveWeight, &aSculptData, &aSculptNode, &aFlowData, &aPartData, &aPreviewDensity, &aPreviewPointBudget, &aRenderView, &aSculptDensity, &aViewNode, &aBrushTick, &aCardDensity, &aDisplayCards, &aDisplayMesh, &aCardMaps, &aScalpMaps}) {
         CHECK_MSTATUS_AND_RETURN_IT(attributeAffects(*input, aOutStrandCount));
         CHECK_MSTATUS_AND_RETURN_IT(attributeAffects(*input, aLastError));
         CHECK_MSTATUS_AND_RETURN_IT(attributeAffects(*input, aOutCards));
@@ -1295,7 +1330,7 @@ MStatus GroomShape::evaluate(MDataBlock& data, Lane& lane) {
     // param's control too: not tracked here), nothing converted again.
     const CommitKind expected = live ? std::exchange(expectedCommit_, CommitKind::None) : CommitKind::None;
     bool offThread = expected != CommitKind::None && lane.frame && requested_ && asyncCommitsEnabled() &&
-                     !lane.meshDirty && !lane.curvesDirty && !lane.collidersDirty && !lane.scalpsDirty && !lane.meshReconnected;
+                     !lane.meshDirty && !lane.curvesDirty && !lane.driversDirty && !lane.collidersDirty && !lane.scalpsDirty && !lane.meshReconnected;
     for (int i = 0; offThread && i < kTextInputs; ++i) {
         const bool committed = (expected == CommitKind::Graph && i == kGraphText) || (expected == CommitKind::Guides && i == kGuideText);
         if (textDirty_[i] && !committed) offThread = false;
@@ -1309,7 +1344,7 @@ MStatus GroomShape::evaluate(MDataBlock& data, Lane& lane) {
                                pendingKind_ == CommitKind::Guides && chain_ == Chain::None;
     if (live && !chainedDab && !chainedCommit) finishCommit(true, nullptr, "compute");
     // The background lane takes every input as dirtied: its data block holds another time's values.
-    if (!live) lane.meshDirty = lane.curvesDirty = lane.collidersDirty = lane.scalpsDirty = true;
+    if (!live) lane.meshDirty = lane.curvesDirty = lane.driversDirty = lane.collidersDirty = lane.scalpsDirty = true;
     auto readText = [&](int input) { return live ? takeTextDirty(input) : true; };
     // Off the main thread the node is read through its data block alone: what plugs say (the
     // connections, the names, the control attributes, the paths) comes from the live lane's last
@@ -1524,6 +1559,31 @@ MStatus GroomShape::evaluate(MDataBlock& data, Lane& lane) {
     }
     lane.curvesDirty = false;
     session.setGuides(lane.guides);
+    // Driver curves (DriveGuides): sampled again only when their plugs were dirtied and their
+    // data reads differently (a frame of a rig).
+    std::vector<GuideCurveData> driverCurves;
+    MArrayDataHandle driverHandles = data.inputArrayValue(aDriverCurves);
+    for (unsigned i = 0; i < driverHandles.elementCount(); ++i, driverHandles.next()) {
+        driverCurves.push_back({driverHandles.elementIndex(), driverHandles.inputValue().asNurbsCurve()});
+    }
+    std::map<unsigned, double> driverTwist;  // degrees at the tip, by driver ID
+    MArrayDataHandle twistHandles = data.inputArrayValue(aDriverTwist);
+    for (unsigned i = 0; i < twistHandles.elementCount(); ++i, twistHandles.next()) {
+        driverTwist[twistHandles.elementIndex()] = twistHandles.inputValue().asDouble();
+    }
+    if (lane.driversDirty || !lane.drivers) {
+        std::uint64_t key = hash64(0xD71E);
+        for (const GuideCurveData& c : driverCurves) key = curveFingerprint(hashCombine(key, c.id), c.curve);
+        for (const auto& [id, degrees] : driverTwist) key = hashFloat(hashCombine(key, id), static_cast<float>(degrees));
+        lane.driversDataKey = key;
+    }
+    if (!lane.drivers || lane.driversDataKey != lane.driversKey) {
+        lane.drivers = toDrivers(driverCurves, driverTwist);
+        lane.driversKey = lane.driversDataKey;
+    }
+    lane.driversDirty = false;
+    session.setDrivers(lane.drivers);
+    if (readText(kDriverBindText)) session.setDriverBindJson(data.inputValue(aDriverBind).asString().asChar());
     // Colliders: converted (like the scalp) only when their plugs were dirtied or
     // their mesh data reads differently (a moving collider at another frame). With a rest mesh
     // connected (the same mesh undeformed), the mesh carries it as its rest pose: Collide and the
@@ -2067,7 +2127,7 @@ MStatus GroomShape::setDependentsDirty(const MPlug& plug, MPlugArray& affected) 
         plug == aColliderMesh ||
         plug == aColliderName || plug == aColliderRestMesh || plug == aExtraScalps || plug == aExtraScalpMesh ||
         plug == aExtraScalpName || plug == aExtraScalpRestMesh || plug == aSimGuides || plug == aSimCurve || plug == aGuideCache ||
-        plug == aGuideCacheObject || plug == aSimCaches || plug == aGuideCurves || plug == aTime || plug == aGraph || plug == aGuideData ||
+        plug == aGuideCacheObject || plug == aSimCaches || plug == aGuideCurves || plug == aDriverCurves || plug == aDriverTwist || plug == aDriverBind || plug == aTime || plug == aGraph || plug == aGuideData ||
         plug == aPartData || plug == aFlowData || plug == aCorrectiveData || plug == aCorrectiveWeight || plug == aViewNode ||
         plug == aSculptData || plug == aSculptNode ||
         plug == aSculptDensity || plug == aPreviewDensity || plug == aPreviewPointBudget || plug == aRenderView || plug == aCardDensity ||

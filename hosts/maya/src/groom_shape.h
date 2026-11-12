@@ -131,6 +131,9 @@ public:
     static MObject aExtraScalpName;
     static MObject aExtraScalpRestMesh;
     static MObject aGuideCurves;     // array of nurbsCurve (world space)
+    static MObject aDriverTwist;     // array of double: each driver's twist, degrees at its tip (by its index)
+    static MObject aDriverCurves;    // array of nurbsCurve (world space): DriveGuides nodes' drivers (drive_guides.h)
+    static MObject aDriverBind;      // the drivers as bound (DriverBind's JSON; groomLabDrivers -bind)
     static MObject aTime;            // scene time
     static MObject aGraph;           // graph JSON (stored string)
     static MObject aGuideData;       // guide hierarchy JSON (stored string, edited by groomLabGuides)
@@ -624,6 +627,7 @@ private:
         // another time's): it fingerprints them all.
         bool meshDirty = true;       // inMesh or restMesh (or their connections) changed
         bool curvesDirty = true;     // guideCurves changed (their CVs are fingerprinted only then)
+        bool driversDirty = true;    // driverCurves changed (the same)
         bool collidersDirty = true;  // colliderMeshes (or their connections) changed
         bool scalpsDirty = true;     // extraScalps (or their connections) changed
         bool meshReconnected = false;
@@ -641,6 +645,9 @@ private:
         NamedScalps scalps;                        // the groom's other scalps (extraScalps), in order
         std::string restError;                     // the rest mesh was dropped (vertex counts differ)
         GuidesPtr guides;                          // flat guides from guideCurves, rooted on the scalp
+        std::uint64_t driversDataKey = 0;          // fingerprint of the driver curves' data, taken when they were dirtied
+        std::uint64_t driversKey = 0;              // what drivers was made from
+        GuidesPtr drivers;                         // the driver curves (driverCurves), world space, by logical index
         MeshPtr rawScalp;     // the scalp as converted from the mesh (the session lays the maps on it)
         std::string poseKey;  // guide cache file, object and time of posesFromCache
         GuidesPtr posesFromCache;
@@ -786,8 +793,8 @@ private:
     // Evaluation Manager's dirty plugs in preEvaluation). A connected one is read on every
     // compute, as a connection may bring a new value without the plug being dirtied here. The
     // background lane reads them all on every frame.
-    enum TextInput { kGraphText, kGuideText, kScalpMapsText, kCorrectiveText, kPartText, kFlowText, kSculptText, kTextInputs };
-    bool textDirty_[kTextInputs] = {true, true, true, true, true, true, true};
+    enum TextInput { kGraphText, kGuideText, kScalpMapsText, kCorrectiveText, kPartText, kFlowText, kSculptText, kDriverBindText, kTextInputs };
+    bool textDirty_[kTextInputs] = {true, true, true, true, true, true, true, true};
     static const MObject* textAttribute(int input);
     // True (and clears the flag) when the live lane must read that text again.
     bool takeTextDirty(int input);

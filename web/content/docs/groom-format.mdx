@@ -69,6 +69,9 @@ GroomLab always writes the fields marked *always*; the others only when they hol
 | `guides` | array | `[]` | Flat guides ([below](#guides)). *Always.* |
 | `scalpCache` | object or null | null | An animated scalp: `{"file", "object"}` in an Alembic cache. *Always.* |
 | `guideCache` | object or null | null | Animated guide poses in an Alembic cache, matched to hierarchy guides by ID. *Always.* |
+| `drivers` | array | none | Driver curves a rig poses (DriveGuides): `[{"id", "points"}]`, as they were when the file was written. |
+| `driverBind` | object | none | The drivers' bind: `{"frame", "drivers": [{"id", "face", "u", "v", "points"}], "attached": {"<guide ID>": [driver IDs]}}`, each driver anchored to the scalp. |
+| `driverCache` | object | none | The driver curves' animation in an Alembic cache, matched to `drivers` by ID: the rig drives the hair on the farm as in the host. |
 | `searchPaths` | array of strings | none | Where relative paths in the graph resolve, after the file's own folder. May use environment variables. |
 | `followScalp` | boolean | false | The groom is evaluated on the scalp's rest pose and carried by each root. Written only when true. |
 | `scaleSource` | string | `"area"` | What the groom's scale follows ([Scaling a groom](/docs/guides-and-brushes#scaling-a-groom)): `"area"` (the scalp's surface area), `"transform"` (the scalp's transform scale) or `"off"`. Written only when not `"area"`. |

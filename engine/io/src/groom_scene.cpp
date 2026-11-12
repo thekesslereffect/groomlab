@@ -5,6 +5,7 @@
 #include <cmath>
 
 #include "groomlab/alembic_io.h"
+#include "groomlab/drive_guides.h"
 #include "groomlab/frame_time.h"
 #include "groomlab/groom_package.h"
 #include "groomlab/sim_cache.h"
@@ -14,9 +15,26 @@ namespace groomlab {
 namespace {
 
 // The time's inputs into the session: the cached scalp, its history for Jiggle, the guide
-// cache's poses (evaluate and view share it, so a view sees what a render sees; a simulation
+// cache's poses, the driver cache's curves (evaluate and view share it, so a view sees what a render sees; a simulation
 // steps over other frames with the same).
-void feedTime(GroomSession& session, GroomScene& scene, const AlembicCurvesReader* guideCache, double seconds,
+GuidesPtr curvesAt(const AlembicCurvesReader& cache, double seconds, const char* layer = nullptr) {
+    const StrandSet curves = cache.at(seconds);
+    auto out = std::make_shared<GuideSet>();
+    const std::vector<float>* channel = layer ? curves.pointChannel(layer) : nullptr;
+    for (std::size_t s = 0; s < curves.strandCount(); ++s) {
+        const Vec3f* p = curves.strandPoints(s);
+        Guide& g = out->add(curves.ids()[s], std::vector<Vec3f>(p, p + curves.strandPointCount(s)));
+        if (channel) {
+            const auto begin = channel->begin() + static_cast<std::ptrdiff_t>(curves.strandBegin(s));
+            std::vector<float> values(begin, begin + static_cast<std::ptrdiff_t>(curves.strandPointCount(s)));
+            if (std::any_of(values.begin(), values.end(), [](float v) { return v != 0.0f; })) g.pointAttributes[layer] = std::move(values);
+        }
+    }
+    return out;
+}
+
+void feedTime(GroomSession& session, GroomScene& scene, const AlembicCurvesReader* guideCache,
+              const AlembicCurvesReader* driverCache, double seconds,
               const std::string& viewNode, bool viewport = false) {
     // (A Jiggle off where this evaluates, by its evaluation mode, reads no history.)
     const int where = viewport ? 1 : 0;
@@ -24,15 +42,8 @@ void feedTime(GroomSession& session, GroomScene& scene, const AlembicCurvesReade
     session.setScalpHistory(scene.scalpHistoryAt(seconds, session.scalpHistoryFrames(viewNode, where),
                                                  session.scalpHistoryLoopFrames(secondsToFrame(seconds, session.framesPerSecond()),
                                                                                 viewNode, where)));
-    if (guideCache) {
-        const StrandSet curves = guideCache->at(seconds);
-        auto poses = std::make_shared<GuideSet>();
-        for (std::size_t s = 0; s < curves.strandCount(); ++s) {
-            const Vec3f* p = curves.strandPoints(s);
-            poses->add(curves.ids()[s], std::vector<Vec3f>(p, p + curves.strandPointCount(s)));
-        }
-        session.setGuidePoses(poses);
-    }
+    if (guideCache) session.setGuidePoses(curvesAt(*guideCache, seconds));
+    if (driverCache) session.setDrivers(curvesAt(*driverCache, seconds, kDriverTwistLayer));  // the rig's pose then
 }
 
 }  // namespace
@@ -62,6 +73,9 @@ GroomScene::GroomScene(GroomFile file) : file_(std::move(file)) {
     if (!file_.guideCache.empty()) {
         guideCache_ = std::make_unique<AlembicCurvesReader>(file_.guideCache.file, file_.guideCache.object);
     }
+    if (!file_.driverCache.empty()) {
+        driverCache_ = std::make_unique<AlembicCurvesReader>(file_.driverCache.file, file_.driverCache.object);
+    }
     session_ = std::make_unique<GroomSession>(file_.data);
     // Relative paths in the graph: the groom file's folder, then its search paths.
     std::vector<std::string> dirs;
@@ -72,7 +86,7 @@ GroomScene::GroomScene(GroomFile file) : file_(std::move(file)) {
     // feeds its own, the bakes the file names.
     session_->setFramesPerSecond(file_.framesPerSecond);
     session_->setSimulationFeed([this](double seconds) {
-        feedTime(*session_, *this, guideCache_.get(), seconds, {});
+        feedTime(*session_, *this, guideCache_.get(), driverCache_.get(), seconds, {});
         return true;
     });
     for (const auto& [node, ref] : file_.simCaches) {
@@ -155,21 +169,22 @@ bool GroomScene::timeRange(double* startSeconds, double* endSeconds) const {
     double a = 0.0, b = 0.0;
     if (scalpCache_ && scalpAnimated_ && scalpCache_->timeRange(&a, &b)) widen(a, b);
     if (guideCache_ && guideCache_->timeRange(&a, &b)) widen(a, b);
+    if (driverCache_ && driverCache_->timeRange(&a, &b)) widen(a, b);
     if (!any) return false;
     if (startSeconds) *startSeconds = lo;
     if (endSeconds) *endSeconds = hi;
     return true;
 }
 
-void GroomScene::setTime(double seconds) { feedTime(*session_, *this, guideCache_.get(), seconds, {}); }
+void GroomScene::setTime(double seconds) { feedTime(*session_, *this, guideCache_.get(), driverCache_.get(), seconds, {}); }
 
 StrandsPtr GroomScene::evaluate(double seconds, float density) {
-    feedTime(*session_, *this, guideCache_.get(), seconds, {});
+    feedTime(*session_, *this, guideCache_.get(), driverCache_.get(), seconds, {});
     return session_->evaluate(density, seconds);
 }
 
 const ViewResult& GroomScene::view(const ViewRequest& request) {
-    feedTime(*session_, *this, guideCache_.get(), request.time, request.viewNode, request.viewport);
+    feedTime(*session_, *this, guideCache_.get(), driverCache_.get(), request.time, request.viewNode, request.viewport);
     return session_->evaluate(request);
 }
 

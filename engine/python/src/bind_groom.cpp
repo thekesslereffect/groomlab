@@ -228,6 +228,9 @@ void bindGroom(py::module_& m) {
         .def_readwrite("correctives_json", &GroomData::correctivesJson)
         .def_readwrite("flow_json", &GroomData::flowJson)
         .def_readwrite("sculpts_json", &GroomData::sculptsJson, "The Sculpt nodes' edits (sculpt.h), by node name.")
+        .def_property("drivers", [](const GroomData& d) { return mutableShared(d.drivers); }, [](GroomData& d, std::shared_ptr<GuideSet> g) { d.drivers = std::move(g); },
+                      "Driver curves for DriveGuides nodes as they are now (world space), or None.")
+        .def_readwrite("driver_bind_json", &GroomData::driverBindJson, "The driver curves as bound (drive_guides.h); empty: not bound.")
         .def_readwrite("controls", &GroomData::controls, "Control node values by name.")
         .def_readwrite("follow_scalp", &GroomData::followScalp,
                        "Evaluate on the scalp's rest pose and carry each strand by its root's frame (groom files store it).")
@@ -289,6 +292,7 @@ void bindGroom(py::module_& m) {
         .def_readwrite("data", &GroomFile::data)
         .def_readwrite("scalp_cache", &GroomFile::scalpCache)
         .def_readwrite("guide_cache", &GroomFile::guideCache)
+        .def_readwrite("driver_cache", &GroomFile::driverCache)
         .def_readwrite("card_bake", &GroomFile::cardBake)
         .def_readwrite("transfer_markers", &GroomFile::transferMarkers)
         .def_readwrite("units", &GroomFile::units)

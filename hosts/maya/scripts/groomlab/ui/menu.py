@@ -672,6 +672,39 @@ def clear_core_simulation(groom=None):
         sim.invalidate_simulation(groom)
 
 
+def sculpt_on_simulation_action(groom=None):
+    """Simulate > Sculpt on Simulation (groomlab.shots.sculpt_on_simulation): the simulation baked
+    and posing the guides, shot sculpts (correctives) on top of it."""
+    from groomlab import shots, sim
+    groom = groom or _selected_groom()
+    if not groom:
+        return None
+    if not sim.simulate_nodes(groom):
+        cmds.warning("GroomLab: %s has no Simulate node to sculpt on" % groom)
+        return None
+    if not any(s.get("baked") and not s.get("bakeStale") for s in sim.simulation_status(groom)):
+        if not bake_core_simulation(groom):
+            return None
+    path = shots.sculpt_on_simulation(groom)
+    shots.shot_sculpt(groom, on=True, all_frames=False)
+    _say("%s: the guides follow the baked simulation (%s); brushes make shot fixes on it. "
+         "Back to Live Simulation to simulate again" % (groom, path))
+    return path
+
+
+def live_simulation_action(groom=None):
+    """Simulate > Back to Live Simulation (groomlab.shots.live_simulation)."""
+    from groomlab import shots
+    groom = groom or _selected_groom()
+    if not groom:
+        return None
+    names = shots.live_simulation(groom)
+    shots.set_target(groom, None)
+    _say("%s simulates live again (%s)" % (groom, ", ".join(names)) if names else
+         "%s is not sculpting on a simulation" % groom)
+    return names
+
+
 def simulate_guides_dialog():
     """nHair on one guide group; children follow the simulated guides."""
     import groomlab
@@ -1860,6 +1893,79 @@ def add_wind_action(groom=None):
     return None
 
 
+def create_drivers_action(groom=None, per_guide=False):
+    """Simulate > Drivers > Create Driver from Selected Guides / Create a Driver per Selected Guide
+    (groomlab.create_drivers): curves made from the guides selected with the select tool, the
+    guides attached to them and bound."""
+    import groomlab
+    groom = groom or _selected_groom()
+    if not groom:
+        return None
+    if not groomlab.selected_guides(groom):
+        cmds.warning("GroomLab: select the guides to make drivers from with the GroomLab select tool")
+        return None
+    curves = groomlab.create_drivers(groom, per_guide=per_guide)
+    _say("%d driver curve(s) made from the selected guides of %s, attached and bound: rig and animate them"
+         % (len(curves), groom))
+    return curves
+
+
+def attach_guides_action(groom=None):
+    """Simulate > Drivers > Attach Selected Guides to Curve (groomlab.attach_guides): the guides
+    selected with the select tool follow the selected curve; with no curve selected, one is made
+    from them (create_drivers_action)."""
+    import groomlab
+    curves = cmds.ls(selection=True, dagObjects=True, type="nurbsCurve", noIntermediate=True, long=True) or []
+    if not curves:
+        return create_drivers_action(groom)
+    if len(curves) != 1:
+        cmds.warning("GroomLab: select one driver curve (and the guides, with the GroomLab select tool)")
+        return None
+    groom = groom or _selected_groom()
+    if not groom:
+        return None
+    if not groomlab.selected_guides(groom):
+        cmds.warning("GroomLab: select the guides to attach with the GroomLab select tool")
+        return None
+    ids = groomlab.attach_guides(groom, curves[0])
+    _say("%d guide(s) of %s follow %s" % (len(ids), groom, curves[0].split("|")[-1]))
+    return ids
+
+
+def detach_guides_action(groom=None):
+    """Simulate > Drivers > Detach Selected Guides (groomlab.detach_guides)."""
+    import groomlab
+    groom = groom or _selected_groom()
+    if groom:
+        count = groomlab.detach_guides(groom)
+        _say("detached %d guide(s) of %s" % (count, groom))
+        return count
+    return None
+
+
+def bind_drivers_action(groom=None, frame=0):
+    """Simulate > Drivers > Bind Drivers at Frame 0 (groomlab.bind_drivers)."""
+    import groomlab
+    groom = groom or _selected_groom()
+    if groom:
+        count = groomlab.bind_drivers(groom, frame=frame)
+        _say("bound %d driver curve(s) of %s at frame %s" % (count, groom, frame) if count else
+             "%s has no driver curves to bind" % groom)
+        return count
+    return None
+
+
+def remove_drivers_action(groom=None):
+    """Simulate > Drivers > Remove Drivers (groomlab.remove_drivers)."""
+    import groomlab
+    groom = groom or _selected_groom()
+    if groom:
+        count = groomlab.remove_drivers(groom)
+        _say("disconnected %d driver curve(s) from %s" % (count, groom))
+        return count
+    return None
+
+
 def add_jiggle_action(groom=None):
     """Add > Jiggle: a Jiggle node before the output (groomlab.add_jiggle): strands lag behind
     the scalp's motion and settle."""
@@ -2098,6 +2204,14 @@ ACTIONS = {
     "sim.range": simulate_range,
     "sim.bake": bake_core_simulation,
     "sim.clear": clear_core_simulation,
+    "sim.sculptOn": sculpt_on_simulation_action,
+    "sim.live": live_simulation_action,
+    "drivers.create": create_drivers_action,
+    "drivers.createEach": lambda: create_drivers_action(per_guide=True),
+    "drivers.attach": attach_guides_action,
+    "drivers.detach": detach_guides_action,
+    "drivers.bind": bind_drivers_action,
+    "drivers.remove": remove_drivers_action,
     "nhair.simulate": simulate_guides_dialog,
     "nhair.bake": bake_simulation_dialog,
     "nhair.remove": remove_simulation,

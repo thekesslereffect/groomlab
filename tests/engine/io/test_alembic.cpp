@@ -84,6 +84,44 @@ TEST(Alembic, RoundTripsAnimatedCurves) {
     std::remove(path.c_str());
 }
 
+TEST(Alembic, VelocitiesAreACentralDifferenceByStrandId) {
+    const StrandSet before = makeStrands(3, 0.0f), now = makeStrands(3, 0.5f), after = makeStrands(3, 1.0f);
+    const double dt = 1.0 / 24.0;
+    std::vector<Vec3f> v = strandVelocities(now, &before, &after, dt);
+    ASSERT_EQ(v.size(), now.pointCount());
+    for (const Vec3f& p : v) EXPECT_NEAR(p.x, 0.5f / dt, 1e-3f);  // half a unit a frame along x
+    v = strandVelocities(now, &before, nullptr, dt);  // the end of a range: one-sided
+    EXPECT_NEAR(v[0].x, 0.5f / dt, 1e-3f);
+    const StrandSet fewer = makeStrands(2, 0.0f);  // strand 1002 is new: still
+    v = strandVelocities(now, &fewer, nullptr, dt);
+    EXPECT_NEAR(v[0].x, 0.5f / dt, 1e-3f);
+    EXPECT_EQ(v[now.strandBegin(2)], Vec3f(0.0f, 0.0f, 0.0f));
+    EXPECT_EQ(strandVelocities(now, nullptr, nullptr, dt), std::vector<Vec3f>(now.pointCount(), Vec3f(0, 0, 0)));
+}
+
+TEST(Alembic, CurvesCarryTheirVelocitiesForMotionBlur) {
+    const std::string path = tempPath("groomlab_velocities.abc");
+    const StrandSet before = makeStrands(3, 0.0f), now = makeStrands(3, 0.5f);
+    {
+        AlembicCurvesWriter::Options options;
+        options.scale = 2.0f;
+        AlembicCurvesWriter writer(path, "groom", 1.0 / 24.0, 1.0 / 24.0, options);
+        const std::vector<Vec3f> v = strandVelocities(now, &before, nullptr, 1.0 / 24.0);
+        writer.writeFrame(now, nullptr, nullptr, &v);
+    }
+    namespace Abc = Alembic::Abc;
+    namespace AbcG = Alembic::AbcGeom;
+    Abc::IArchive archive(Alembic::AbcCoreOgawa::ReadArchive(), path);
+    Abc::IObject top(archive.getTop(), "groom");
+    AbcG::ICurves curves(top, "groomShape");
+    ASSERT_TRUE(curves.valid());
+    const AbcG::ICurvesSchema::Sample sample = curves.getSchema().getValue();
+    ASSERT_TRUE(sample.getVelocities());
+    ASSERT_EQ(sample.getVelocities()->size(), now.pointCount());
+    EXPECT_NEAR((*sample.getVelocities())[0].x, 2.0f * 12.0f, 1e-3f);  // scaled with the points
+    std::remove(path.c_str());
+}
+
 TEST(Alembic, CurvesBlendBetweenSamples) {
     const std::string path = tempPath("groomlab_blend.abc");
     {

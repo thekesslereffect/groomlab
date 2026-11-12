@@ -204,7 +204,7 @@ class GraphApiTest(unittest.TestCase):
 
     def test_motion_nodes_are_listed_and_added_in_one_undo(self):
         from groomlab.ui import graph_editor as ge
-        self.assertEqual(dict(ge.categories(self.catalog))["Motion"], ["Wind", "Jiggle", "Simulate", "GuideCache"])
+        self.assertEqual(dict(ge.categories(self.catalog))["Motion"], ["Wind", "Jiggle", "Simulate", "GuideCache", "DriveGuides"])
         self.assertEqual(ge.category_of("Simulate", self.catalog), "Motion")
         self.assertEqual(ge.category_of("Jiggle", self.catalog), "Motion")
         self.assertTrue(self.catalog.param_spec("Wind", "strength")["mappable"])

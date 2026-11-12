@@ -102,6 +102,7 @@ the standalone app, groom files and on the farm, with the same results.
 | `volume`, `volumeCellSize` | Volume preservation (off by default): hair packed denser than one cell is pushed apart, so long hair keeps its body. |
 | `substeps`, `iterations` | Accuracy: steps per frame, constraint iterations per step. |
 | `startFrame` | The frame at which the simulation starts at rest; start a few frames before the shot so the hair can settle. |
+| `preroll` | Frames the hair settles before the start frame, from the rest pose (0: off). It starts at rest in the groomed shape on the scalp's rest pose, with the driver curves as bound; the head and the rig move to the start frame's pose over the first half and hold over the second. A shot that starts far from the rest pose (the head turned, the rig posed) starts with the hair hanging as it would, not stiffly holding the groomed shape. Without a rest pose on the scalp the head holds where it is and the hair settles there. |
 | `cacheMode` | `live` simulates during playback; `cached` only in Simulate Range (other frames as groomed). |
 | `water`, `waterLevel` | Water (off by default): below the surface, either the plane at `waterLevel` (world Y) or the mesh on the `water` input. |
 | `buoyancy`, `waterDrag` | Under water: upward force as a fraction of gravity (above 1 the hair floats up); drag much stronger than in air. |
@@ -229,6 +230,68 @@ sim.bake_simulation(groom)             # the bake that renders and exports read
 sim.invalidate_simulation(groom)       # simulate again from the start frame
 ```
 
+## Rigged hair: driver curves
+
+Studios pose hero and stylized hair with a hair rig before any simulation: a few controls an
+animator keys for the big shapes and the silhouette, then a simulation adds the follow-through on
+top. In GroomLab the rig is a set of **driver curves**, rigged with whatever the host has (in Maya:
+joints and a skinCluster, spline IK, wire or blend shapes; in Blender: curve objects with hooks,
+armatures or plain keys), with guides **attached** to them, and a **DriveGuides** node that makes the
+attached guides follow. Maya and Blender have the same Simulate > Drivers menu; the app and the farm
+play a groom file's drivers from its driver cache.
+
+1. **Attach:** select guides with the GroomLab select tool and a driver curve, then **GroomLab >
+   Simulate > Drivers > Attach Selected Guides to Curve**. The curve is connected, a DriveGuides node
+   goes right after the Guides node, and the drivers are bound at frame 0 (the pose the groom was made
+   in). The bind and the attachments are saved with the scene and in `.groom` files.
+2. **Animate:** each attached guide, and its children, keeps its place round its driver, in the
+   driver's rotation-minimizing frame, as it swings, bends and stretches. Roots stay on the scalp.
+   Guides attached to nothing stay as groomed; a guide attached to several drivers follows each, the
+   nearest most. The viewport draws the driven guides.
+   No curve yet? **Create Driver from Selected Guides** makes one down the middle of the selected
+   guides, and **Create a Driver per Selected Guide** one on each guide, exactly its shape (the guide
+   follows it as if bound to it directly): made from the guides as groomed at the bind frame, the
+   pivot at the root, attached and bound, ready to rig.
+3. **Detach Selected Guides** returns guides to their groom; **Rebind Drivers at Frame 0** takes the
+   bind pose again after the rig's rest pose changed (the attachments stay).
+
+| Parameter | Effect |
+| --- | --- |
+| `strength` | How much the attached guides follow (mappable: paint where hair stays as groomed). |
+| `profile` | How much each part follows, root to tip. |
+
+**Which hair follows the animation exactly:** paint the Simulate node's `strength` (mappable): 0
+holds the hair to its input, the driven shape, and 1 simulates it, so a fringe can stick to the rig
+while the rest swings.
+
+**Simulation on top:** put a Simulate node after the DriveGuides node (Guides, DriveGuides,
+Simulate). The solver takes the driven guides as its targets on every frame, so its bend and twist
+hold the animated shape and `rootStiffness` (with its profile) pulls toward it: the animation sets the
+pose, the simulation adds the swing.
+
+**With Follow Scalp,** drivers are taken to the rest pose through the scalp point each was anchored
+to at the bind, so a driver that only moves with the head drives nothing.
+
+**On the farm:** `export_groom` writes the driver curves' animation beside the groom file
+(`<name>.drivers.abc`, the file's `driverCache`) whenever driver curves are connected, so the CLI,
+the procedurals and the app drive the hair (and simulate on top) as Maya does, exactly.
+
+**Twist:** a curve turned about its own length looks the same, so each driver's transform has a
+keyable **twist** (degrees at its tip, none at its root): key it, or connect a joint's `rotateX`
+to it. The guides round the driver turn with its twist since the bind; the driver cache carries it
+to the farm.
+
+```python
+import groomlab
+
+groomlab.attach_guides(groom, "hair_ctrl_crv1")                 # the selected guides
+groomlab.attach_guides(groom, "hair_ctrl_crv2", group="bangs")  # a whole guide group
+groomlab.create_drivers(groom)                                  # a curve down the selected guides
+groomlab.create_drivers(groom, group="bangs", per_guide=True)   # a curve on each guide
+groomlab.detach_guides(groom, guides=[12, 13])
+groomlab.bind_drivers(groom, frame=0)                            # after changing the rig's rest pose
+```
+
 ## Follow the scalp
 
 On an animated head, the groom is normally re-evaluated on every frame on the deformed scalp.
@@ -330,3 +393,18 @@ Older Maya scenes whose groom has a guide cache set (`sim.set_guide_cache`, the 
 **Correctives** (Groom Tools > Correctives) are sculpt layers applied on top of the groom. **Fix
 Frame** creates one that blends in and out around the current frame, with keyable weights;
 renders include them.
+
+**Fixing a simulation:** correctives apply to the groomed guides, before the graph's DriveGuides and
+Simulate nodes. To sculpt on the simulated hair itself, as studios fix a sim, use **Simulate > Sculpt
+on Simulation** (Maya): the Simulate node's frames are baked (unless its bake is current), the guides
+are posed from the bake and the Simulate node, with the DriveGuides and Simulate nodes feeding it, is
+bypassed. The guides on screen are then the simulated ones and brushes make shot fixes on top of
+them; renders, exports and groom files carry both (the farm gives the same hair). **Back to Live
+Simulation** turns those nodes on again and clears the guide cache; the correctives stay.
+
+```python
+from groomlab import shots
+shots.sculpt_on_simulation(groom)   # bake, pose the guides from it, bypass the sim
+shots.add_layer(groom, frame=1012, fade=6)  # a fix keyed around frame 1012; brush it
+shots.live_simulation(groom)        # simulate again
+```

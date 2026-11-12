@@ -140,10 +140,18 @@ std::string insertSimulate(GraphEdit& edit, const std::string& paramsJson, std::
         }
         return out;
     };
+    // The Guides node, or the DriveGuides or GuideCache nodes after it (posing the guides): the last
+    // of them, feeding an Interpolate, so the simulation plays on top of the posed guides.
     std::string source;
     for (const std::string& n : ofType(g, "Guides")) {
-        if (!interpolates(n).empty()) {
-            source = n;
+        std::string at = n;
+        for (int steps = 0; interpolates(at).empty() && steps < 8; ++steps) {
+            const std::vector<Link> next = linksFrom(g, at);
+            if (next.size() != 1 || (typeOf(g, next[0].to) != "DriveGuides" && typeOf(g, next[0].to) != "GuideCache")) break;
+            at = next[0].to;
+        }
+        if (!interpolates(at).empty()) {
+            source = at;
             break;
         }
     }
@@ -190,6 +198,27 @@ std::string insertGuideCache(GraphEdit& edit, const std::string& path, const std
                                           at ? std::optional<double>(at->second) : std::nullopt, groomSize);
     for (const Link& l : consumers) edit.connect(node, l.to, l.input, l.output);
     edit.connect(source, node, "guides");
+    return node;
+}
+
+std::string insertDriveGuides(GraphEdit& edit, std::optional<double> groomSize) {
+    const json g = graphOf(edit);
+    const std::vector<std::string> existing = ofType(g, "DriveGuides");
+    if (!existing.empty()) return existing.front();
+    std::string source;
+    for (const std::string& n : ofType(g, "Guides")) {
+        if (!linksFrom(g, n).empty()) {
+            source = n;
+            break;
+        }
+    }
+    if (source.empty()) throw GraphError("the groom's graph has no Guides node feeding the groom");
+    const std::vector<Link> consumers = linksFrom(g, source);
+    const auto at = placeBy(edit, source, kInsertColumn / 2.0, kInsertRow);
+    const std::string node = edit.addNode("DriveGuides", {}, "{}", at ? std::optional<double>(at->first) : std::nullopt,
+                                          at ? std::optional<double>(at->second) : std::nullopt, groomSize);
+    for (const Link& l : consumers) edit.connect(node, l.to, l.input, l.output);
+    edit.connect(source, node, "strands");
     return node;
 }
 

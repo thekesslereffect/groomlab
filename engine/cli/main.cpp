@@ -76,6 +76,11 @@ int abcInfo(const char* path, const char* name) {
                 std::cout << " bbox=(" << lo.x << "," << lo.y << "," << lo.z << ")-(" << hi.x << "," << hi.y << ","
                           << hi.z << ")";
             }
+            if (!f.velocities.empty()) {  // motion blur: the fastest point, units per second
+                float fastest = 0.0f;
+                for (const auto& v : f.velocities) fastest = std::max(fastest, v.length());
+                std::cout << " velocities=" << f.velocities.size() << " fastest=" << fastest;
+            }
             std::cout << "\n";
         }
         return 0;
@@ -147,6 +152,10 @@ int groomInfo(const char* path) {
             std::cout << "guide cache: " << file.guideCache.file
                       << (file.guideCache.object.empty() ? "" : " (" + file.guideCache.object + ")") << "\n";
         }
+        if (!file.driverCache.empty()) {
+            std::cout << "driver cache: " << file.driverCache.file
+                      << (file.driverCache.object.empty() ? "" : " (" + file.driverCache.object + ")") << "\n";
+        }
         if (!file.cardBake.empty()) std::cout << "card bake:   " << file.cardBake.prefix << "*\n";
         return 0;
     } catch (const std::exception& e) {
@@ -195,6 +204,8 @@ int evalGroom(int argc, char** argv) {
             a.step = std::stod(value());
         } else if (arg == "--density") {
             a.density = std::stof(value());
+        } else if (arg == "--velocities") {
+            a.velocities = true;
         } else if (arg == "--timings") {
             a.timings = true;
         } else if (arg == "--stats") {

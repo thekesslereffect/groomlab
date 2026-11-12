@@ -14,6 +14,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "groomlab/drive_guides.h"
 #include "groomlab/export_view.h"
 #include "groomlab/graph_edit.h"
 #include "groomlab/graph_io.h"
@@ -473,8 +474,19 @@ json groomObject(FloatArrays& arrays, const GroomFile& file) {
         }
     }
     root["guides"] = std::move(guides);
+    // Driver curves (drive_guides.h): as they were when written, and as bound.
+    if (file.data.drivers && !file.data.drivers->empty()) {
+        json drivers = json::array();
+        for (const Guide& g : file.data.drivers->guides()) {
+            drivers.push_back({{"id", g.id}, {"points", points(arrays, g.points, "drivers.points")}});
+        }
+        root["drivers"] = std::move(drivers);
+    }
+    const json driverBind = parseEmbedded(file.data.driverBindJson, "driverBind");
+    if (driverBind.is_object()) root["driverBind"] = driverBind;
     root["scalpCache"] = file.scalpCache.empty() ? json(nullptr) : cacheJson(file.scalpCache);
     root["guideCache"] = file.guideCache.empty() ? json(nullptr) : cacheJson(file.guideCache);
+    if (!file.driverCache.empty()) root["driverCache"] = cacheJson(file.driverCache);
     if (!file.searchPaths.empty()) root["searchPaths"] = file.searchPaths;
     if (file.data.followScalp) root["followScalp"] = true;  // written only when on (the default is off)
     if (file.data.scaleSource != ScaleSource::Area) root["scaleSource"] = scaleSourceName(file.data.scaleSource);  // (default "area")
@@ -608,9 +620,16 @@ GroomFile groomFromObject(const json& root, const std::string& baseDir) {
             guide.root = {r.at(0).get<std::int32_t>(), r.at(1).get<float>(), r.at(2).get<float>()};
         }
         if (!guides->empty()) file.data.guides = guides;
+        auto drivers = std::make_shared<GuideSet>();
+        for (const json& g : root.value("drivers", json::array())) {
+            drivers->add(g.at("id").get<std::uint64_t>(), readPoints(g.at("points"), "drivers.points"));
+        }
+        if (!drivers->empty()) file.data.drivers = drivers;
+        if (root.contains("driverBind") && root.at("driverBind").is_object()) file.data.driverBindJson = root.at("driverBind").dump();
 
         file.scalpCache = readCache(root, "scalpCache", baseDir);
         file.guideCache = readCache(root, "guideCache", baseDir);
+        file.driverCache = readCache(root, "driverCache", baseDir);
         file.searchPaths = root.value("searchPaths", std::vector<std::string>{});
         file.data.followScalp = root.value("followScalp", false);
         file.data.scaleSource = scaleSourceFromName(root.value("scaleSource", std::string("area")));
@@ -786,6 +805,16 @@ void convertUpAxis(GroomFile& file, const std::string& upAxis) {
         auto guides = std::make_shared<GuideSet>(*file.data.guides);
         for (Guide& g : guides->guides()) g.points = turnAll(std::move(g.points));
         file.data.guides = guides;
+    }
+    if (file.data.drivers) {
+        auto drivers = std::make_shared<GuideSet>(*file.data.drivers);
+        for (Guide& g : drivers->guides()) g.points = turnAll(std::move(g.points));
+        file.data.drivers = drivers;
+    }
+    if (!file.data.driverBindJson.empty()) {  // anchors stay: faces and barycentrics turn with the scalp
+        DriverBind bind = DriverBind::fromJson(file.data.driverBindJson);
+        for (Guide& g : bind.drivers.guides()) g.points = turnAll(std::move(g.points));
+        file.data.driverBindJson = bind.toJson();
     }
     if (!file.data.hierarchyJson.empty()) {
         // The world shapes (points) and frame references (frameUp) of the guides that have them;

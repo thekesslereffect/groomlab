@@ -36,6 +36,7 @@ add_library(groomlab_core_objects OBJECT
     src/curve.cpp
     src/distance_field.cpp
     src/display.cpp
+    src/drive_guides.cpp
     src/display_overlays.cpp
     src/strand_lod.cpp
     src/expression.cpp
@@ -156,6 +157,7 @@ add_library(groomlab_core_objects OBJECT
     src/operators/hair_grid.cpp
     src/operators/subdivide_op.cpp
     src/operators/spectrum_op.cpp
+    src/operators/drive_guides_op.cpp
 )
 # What every user of the core's objects needs: its headers.
 add_library(groomlab_core_headers INTERFACE)

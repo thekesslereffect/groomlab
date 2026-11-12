@@ -801,6 +801,57 @@ TEST(SimulateNode, TheHeadsMotionSwingsTheHairWhichSettles) {
     EXPECT_NEAR(settled, atRest, 0.05f) << "the hair did not settle back";
 }
 
+// A head turned on its side from its rest pose, still: the groom at the start frame as each
+// session gives it, and the guides' mean tip height over their roots there.
+float startTipDrop(const std::string& params, bool turned = true) {
+    GroomData data = simData(simGraph(params));
+    auto scalp = std::make_shared<ScalpMesh>(*data.scalp);
+    if (turned) {
+        scalp->setRestPoints(scalp->points());
+        std::vector<Vec3f> points = scalp->points();
+        for (Vec3f& p : points) p = Vec3f{-p.y, p.x, p.z};  // 90 degrees about z: the top to -x
+        *scalp = scalp->withPoints(points);
+        scalp->setRestPoints(data.scalp->points());
+    }
+    data.scalp = scalp;
+    GroomSession session(data);
+    viewAt(session, 1);
+    const GuidesPtr sim = session.simulatedFrame("sim", 1);
+    EXPECT_TRUE(sim);
+    if (!sim) return 0.0f;
+    EXPECT_EQ(session.simulationStatus()[0].ranges[0], std::make_pair(1, 1)) << "a preroll frame was kept";
+    float drop = 0.0f;
+    for (const Guide& g : sim->guides()) drop += g.points.back().y - g.points.front().y;
+    return drop / static_cast<float>(sim->size());
+}
+
+TEST(SimulateNode, APrerollStartsFromTheRestPoseSoTheHairHangsAtTheStart) {
+    // Without a preroll the hair starts at rest in the start frame's pose: groomed on a head turned
+    // on its side it sticks out sideways, holding its weight. With one it starts at rest on the
+    // scalp's rest pose (its weight preloaded upright) and the head turns over the preroll: at the
+    // start frame it hangs down.
+    const std::string base = R"("gravity": 980.0, "collisionOffset": 0.02, "startFrame": 1, "damping": 0.3)";
+    const float stiff = startTipDrop("{" + base + "}");
+    const float hanging = startTipDrop("{" + base + R"(, "preroll": 24})");
+    EXPECT_LT(hanging, stiff - 0.1f) << "the hair did not fall as the head turned over the preroll";
+}
+
+TEST(SimulateNode, APrerollOnAStillHeadInItsRestPoseKeepsTheGroom) {
+    const std::string base = R"("gravity": 980.0, "collisionOffset": 0.02, "startFrame": 1)";
+    const float none = startTipDrop("{" + base + "}", false);
+    const float settled = startTipDrop("{" + base + R"(, "preroll": 12})", false);
+    EXPECT_NEAR(settled, none, 0.01f) << "the groom moved settling where it rests";
+}
+
+TEST(SimulateNode, APrerollChangesTheStampOnlyWhenOn) {
+    SimSettings off, on;
+    on.preroll = 10;
+    EXPECT_NE(off.hash(), on.hash());
+    SimSettings zero;
+    zero.preroll = 0;
+    EXPECT_EQ(off.hash(), zero.hash());
+}
+
 TEST(SimulateNode, FramesPlaybackSkippedAreSteppedInOneGoAndKept) {
     // Real-time playback skips frames when a frame takes longer than its time, and while it plays
     // the host's feed gives nothing (Maya reads no other time then). The frames skipped were each

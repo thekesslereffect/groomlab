@@ -339,6 +339,105 @@ class GROOMLAB_OT_simulate_add(_Tipped, GroomOperator):
         return {"FINISHED"}
 
 
+def _selected_curves(context):
+    return [o for o in context.selected_objects if o.type == "CURVE"]
+
+
+class GROOMLAB_OT_drivers_create(_Tipped, GroomOperator):
+    """A driver curve made from the selected guides, the guides attached to it and bound: rig and
+    animate it"""
+    bl_idname = "groomlab.drivers_create"
+    bl_label = "Create Driver from Selected Guides"
+    bl_options = {"REGISTER", "UNDO"}
+    per_guide: BoolProperty(name="One per Guide", default=False,
+                            description="A curve on each guide, exactly its shape (the guide follows it as if bound "
+                                        "to it directly), instead of one down the middle of them")
+
+    def execute(self, context):
+        scalp = active_groom(context)
+        try:
+            made = pipeline.create_drivers(scalp, per_guide=self.per_guide)
+        except HelperError as e:
+            return _fail(self, e)
+        _say(self, "%d driver curve(s) made from the selected guides of %s, attached and bound: rig and animate "
+                   "them (each has a twist to key)" % (len(made), scalp.name))
+        return {"FINISHED"}
+
+
+class GROOMLAB_OT_drivers_attach(_Tipped, GroomOperator):
+    """The guides selected with the GroomLab select tool (and their children) follow the selected
+    curve (none selected: one is made from them)"""
+    bl_idname = "groomlab.drivers_attach"
+    bl_label = "Attach Selected Guides to Curve"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        scalp = active_groom(context)
+        curves = _selected_curves(context)
+        try:
+            if not curves:
+                made = pipeline.create_drivers(scalp)
+                _say(self, "no curve selected: made %s from the selected guides, attached and bound" % made[0].name)
+                return {"FINISHED"}
+            if len(curves) > 1:
+                return _fail(self, HelperError("bad_request", "select one driver curve"))
+            ids = pipeline.attach_guides(scalp, curves[0])
+        except HelperError as e:
+            return _fail(self, e)
+        _say(self, "%d guide(s) of %s follow %s" % (len(ids), scalp.name, curves[0].name))
+        return {"FINISHED"}
+
+
+class GROOMLAB_OT_drivers_detach(_Tipped, GroomOperator):
+    """The selected guides stay as groomed again (from every driver)"""
+    bl_idname = "groomlab.drivers_detach"
+    bl_label = "Detach Selected Guides"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        scalp = active_groom(context)
+        try:
+            count = pipeline.detach_guides(scalp)
+        except HelperError as e:
+            return _fail(self, e)
+        _say(self, "detached %d guide(s) of %s" % (count, scalp.name))
+        return {"FINISHED"}
+
+
+class GROOMLAB_OT_drivers_bind(_Tipped, GroomOperator):
+    """Take the drivers' and the scalp's pose at frame 0 as the bind pose again; the attachments
+    stay"""
+    bl_idname = "groomlab.drivers_bind"
+    bl_label = "Rebind Drivers at Frame 0"
+    bl_options = {"REGISTER", "UNDO"}
+    frame: IntProperty(name="Frame", default=0)
+
+    def execute(self, context):
+        scalp = active_groom(context)
+        try:
+            r = pipeline.bind_drivers(scalp, frame=self.frame)
+        except HelperError as e:
+            return _fail(self, e)
+        _say(self, "bound %d driver curve(s) of %s at frame %d" % (r.get("drivers", 0), scalp.name, self.frame))
+        return {"FINISHED"}
+
+
+class GROOMLAB_OT_drivers_remove(_Tipped, GroomOperator):
+    """Forget the groom's driver curves (their guides stay as groomed)"""
+    bl_idname = "groomlab.drivers_remove"
+    bl_label = "Remove Drivers"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        scalp = active_groom(context)
+        try:
+            count = pipeline.remove_drivers(scalp)
+        except HelperError as e:
+            return _fail(self, e)
+        _say(self, "removed %d driver curve(s) from %s" % (count, scalp.name))
+        return {"FINISHED"}
+
+
 class GROOMLAB_OT_export_guides_sim(_Tipped, GroomOperator, ExportHelper):
     """The guides as Alembic curves over the scene's frame range (each curve's strandId its guide's
     ID), to simulate in another package; Load Guide Cache brings the result back"""
@@ -1197,7 +1296,8 @@ classes = (GROOMLAB_OT_export_unreal_groom, GROOMLAB_OT_export_unity_strands, GR
            GROOMLAB_OT_find_missing_files, GROOMLAB_OT_collect_files, GROOMLAB_OT_add_scalp,
            GROOMLAB_OT_prototype_from_selection, GROOMLAB_OT_cards_lod, GROOMLAB_OT_card_stats,
            GROOMLAB_OT_copy_graph_to_grooms, GROOMLAB_OT_import_alembic_curves,
-           GROOMLAB_OT_bake_to_guides)
+           GROOMLAB_OT_bake_to_guides, GROOMLAB_OT_drivers_create, GROOMLAB_OT_drivers_attach,
+           GROOMLAB_OT_drivers_detach, GROOMLAB_OT_drivers_bind, GROOMLAB_OT_drivers_remove)
 
 
 def register():
