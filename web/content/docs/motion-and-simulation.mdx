@@ -245,6 +245,10 @@ joints and a skinCluster, spline IK, wire or blend shapes), with guides **attach
    driver's rotation-minimizing frame, as it swings, bends and stretches. Roots stay on the scalp.
    Guides attached to nothing stay as groomed; a guide attached to several drivers follows each, the
    nearest most. The viewport draws the driven guides.
+   No curve yet? **Create Driver from Selected Guides** makes one down the middle of the selected
+   guides, and **Create a Driver per Selected Guide** one on each guide, exactly its shape (the guide
+   follows it as if bound to it directly): made from the guides as groomed at the bind frame,
+   attached and bound, ready to rig.
 3. **Detach Selected Guides** returns guides to their groom; **Rebind Drivers at Frame 0** takes the
    bind pose again after the rig's rest pose changed (the attachments stay).
 
@@ -268,6 +272,8 @@ import groomlab
 
 groomlab.attach_guides(groom, "hair_ctrl_crv1")                 # the selected guides
 groomlab.attach_guides(groom, "hair_ctrl_crv2", group="bangs")  # a whole guide group
+groomlab.create_drivers(groom)                                  # a curve down the selected guides
+groomlab.create_drivers(groom, group="bangs", per_guide=True)   # a curve on each guide
 groomlab.detach_guides(groom, guides=[12, 13])
 groomlab.bind_drivers(groom, frame=0)                            # after changing the rig's rest pose
 ```

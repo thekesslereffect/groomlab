@@ -3,11 +3,14 @@
 
 Rig the curves with anything Maya has (joints and a skinCluster, spline IK, wire, blend shapes),
 then attach guides to them: select the guides (the GroomLab select tool) and a driver curve, and
-attach. The attached guides (and their children) keep their place round their drivers as they
+attach; or make the curves from the selected guides (create_drivers: one down the middle of them,
+or one per guide on it exactly), attached and bound already. The attached guides (and their children) keep their place round their drivers as they
 swing, bend and stretch from the bind pose (frame 0 by default: the pose the groom was made in);
 every other guide stays as groomed. A Simulate after the DriveGuides node plays on top:
     attach_guides(groom, "hair_ctrl_crv1")                  # the selected guides follow it
     attach_guides(groom, "hair_ctrl_crv2", group="bangs")   # a whole guide group
+    create_drivers(groom)                                   # a curve down the selected guides, attached
+    create_drivers(groom, group="bangs", per_guide=True)    # a curve on each guide
     detach_guides(groom, guides=[12, 13])                   # those stay as groomed again
     bind_drivers(groom, frame=0)                            # bind again after changing the rig's rest pose
 
@@ -103,18 +106,109 @@ def attach_guides(groom, driver, guides=None, group=None, frame=None):
     ids = _guide_targets(groom, guides, group)
     if not ids:
         raise ValueError("no guides to attach: select some with the GroomLab select tool, or name them")
-    add_drivers(groom, [driver])
-    shape = _long(_shape_of(driver, "nurbsCurve"))
-    index = next(d["index"] for d in driver_curves(groom) if d["curve"] == shape)
+    _attach(groom, {driver: ids}, frame)
+    return ids
+
+
+def _attach(groom, guides_by_driver, frame):
+    """Connect the drivers ({driver curve: guide IDs}), record the attachments and bind once."""
+    add_drivers(groom, list(guides_by_driver))
+    index_of = dict((d["curve"], d["index"]) for d in driver_curves(groom))
     bind = _bind(groom)
     attached = bind.setdefault("attached", {})
-    for g in ids:
-        drivers = attached.setdefault(str(g), [])
-        if index not in drivers:
-            drivers.append(index)
+    for driver, ids in guides_by_driver.items():
+        index = index_of[_long(_shape_of(driver, "nurbsCurve"))]
+        for g in ids:
+            drivers = attached.setdefault(str(g), [])
+            if index not in drivers:
+                drivers.append(index)
     _store(groom, bind)
     bind_drivers(groom, frame=bind.get("frame", 0) if frame is None else frame)
-    return ids
+
+
+def _resampled(points, count):
+    """`points` (a polyline) as `count` points evenly spaced along its length."""
+    if len(points) < 2 or count < 2:
+        return [tuple(points[0])] * max(count, 1)
+    lengths = [0.0]
+    for a, b in zip(points, points[1:]):
+        lengths.append(lengths[-1] + sum((b[i] - a[i]) ** 2 for i in range(3)) ** 0.5)
+    total = lengths[-1] or 1.0
+    out, seg = [], 0
+    for k in range(count):
+        s = total * k / (count - 1)
+        while seg < len(points) - 2 and lengths[seg + 1] < s:
+            seg += 1
+        span = lengths[seg + 1] - lengths[seg]
+        t = (s - lengths[seg]) / span if span > 0 else 0.0
+        t = min(max(t, 0.0), 1.0)
+        a, b = points[seg], points[seg + 1]
+        out.append(tuple(a[i] + (b[i] - a[i]) * t for i in range(3)))
+    return out
+
+
+def _guide_points(groom, guide_id):
+    """A guide's points as groomed (not posed), on the scalp as it is now, in world space."""
+    xyz = cmds.groomLabGuides(groom, guidePoints=str(guide_id)) or []
+    return [tuple(xyz[i:i + 3]) for i in range(0, len(xyz), 3)]
+
+
+def _curve_through(name, points, parent):
+    """A curve through `points` (a cubic with them as its edit points; fewer than 4: a line)."""
+    pts = [tuple(p) for p in points]
+    curve = cmds.curve(name=name, editPoint=pts, degree=3) if len(pts) >= 4 else \
+        cmds.curve(name=name, point=pts, degree=1)
+    return cmds.ls(cmds.parent(curve, parent)[0], long=True)[0]
+
+
+@undoable("create driver curves")
+def create_drivers(groom, guides=None, group=None, per_guide=False, points=None, frame=None, name=None):
+    """Driver curves made from guides, the guides attached to them and bound: `guides` (IDs), else
+    every guide of `group`, else the selected guides. One curve down the middle of them all (the
+    mean of their shapes, root to tip), or with `per_guide` a curve per guide on it exactly (the
+    guide then follows its curve as if bound to it directly). Rig and animate the curves.
+
+    The curves are made from the guides as groomed at the bind frame (`frame`: the bind's, else 0;
+    the timeline goes there and back while they are made), with `points` edit points (default: as
+    many as the guides have), under one group transform per groom ("<groom>_drivers"). Returns the
+    curve transforms."""
+    ids = _guide_targets(groom, guides, group)
+    if not ids:
+        raise ValueError("no guides to make drivers from: select some with the GroomLab select tool, or name them")
+    if frame is None:
+        frame = _bind(groom).get("frame", 0)
+    now = cmds.currentTime(query=True)
+    if now != frame:
+        cmds.currentTime(frame, update=True)
+    try:
+        shapes = {g: _guide_points(groom, g) for g in ids}
+    finally:
+        if now != frame:
+            cmds.currentTime(now, update=True)
+    shapes = {g: p for g, p in shapes.items() if len(p) >= 2}
+    if not shapes:
+        raise ValueError("the guides %s have no points" % ids)
+
+    transform = cmds.listRelatives(groom, parent=True)[0].split("|")[-1].split(":")[-1]
+    holder = "%s_drivers" % transform
+    if not cmds.objExists(holder):
+        holder = cmds.group(empty=True, name=holder)
+    base = name or "%s_driver" % transform
+    count = points or max(len(p) for p in shapes.values())
+    made = {}
+    if per_guide:
+        for g, p in sorted(shapes.items()):
+            curve = _curve_through("%s_%d" % (base, g), p if points is None else _resampled(p, count), holder)
+            made[curve] = [g]
+    else:
+        if len(shapes) == 1 and points is None:
+            mean = list(shapes.values())[0]
+        else:
+            lines = [_resampled(p, count) for p in shapes.values()]
+            mean = [tuple(sum(line[k][i] for line in lines) / len(lines) for i in range(3)) for k in range(count)]
+        made[_curve_through(base + "1", mean, holder)] = sorted(shapes)
+    _attach(groom, made, frame)
+    return list(made)
 
 
 @undoable("detach guides")

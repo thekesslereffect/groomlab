@@ -28,7 +28,7 @@
         "sim.clear",
         "-",
         {"submenu": "Drivers", "id": "drivers", "tip": "Curves an animator rigs that pose the guides (a DriveGuides node); a Simulate after it plays on top", "hosts": ["maya"], "items": [
-          "drivers.attach", "drivers.detach", "-", "drivers.bind", "drivers.remove"
+          "drivers.create", "drivers.createEach", "drivers.attach", "drivers.detach", "-", "drivers.bind", "drivers.remove"
         ]},
         "-",
         "nhair.exportGuides",

@@ -653,6 +653,12 @@ spline IK, wire, blend shapes), and attach guides to them; a simulation can play
    the driven guides over the groomed ones.
 3. `strength` (paintable) and `profile` (root to tip) on the DriveGuides node set how much follows.
 
+No curve yet? Select the guides and **Create Driver from Selected Guides** (a curve down the middle of
+them, the mean of their shapes) or **Create a Driver per Selected Guide** (a curve on each guide,
+exactly its shape: the guide follows its curve as if bound to it directly); Attach Selected Guides to
+Curve with no curve selected does the first. The curves are made from the guides as groomed at the
+bind frame, attached and bound already (`groomlab.create_drivers(groom, per_guide=False)`); rig them.
+
 - **Detach Selected Guides** (`groomlab.detach_guides`) makes them stay as groomed again. **Rebind
   Drivers at Frame 0** after changing the rig's rest pose; the attachments stay.
 - **Simulation on top:** Add Simulate Node after it (Guides > DriveGuides > Simulate): the

@@ -1860,11 +1860,31 @@ def add_wind_action(groom=None):
     return None
 
 
+def create_drivers_action(groom=None, per_guide=False):
+    """Simulate > Drivers > Create Driver from Selected Guides / Create a Driver per Selected Guide
+    (groomlab.create_drivers): curves made from the guides selected with the select tool, the
+    guides attached to them and bound."""
+    import groomlab
+    groom = groom or _selected_groom()
+    if not groom:
+        return None
+    if not groomlab.selected_guides(groom):
+        cmds.warning("GroomLab: select the guides to make drivers from with the GroomLab select tool")
+        return None
+    curves = groomlab.create_drivers(groom, per_guide=per_guide)
+    _say("%d driver curve(s) made from the selected guides of %s, attached and bound: rig and animate them"
+         % (len(curves), groom))
+    return curves
+
+
 def attach_guides_action(groom=None):
     """Simulate > Drivers > Attach Selected Guides to Curve (groomlab.attach_guides): the guides
-    selected with the select tool follow the selected curve."""
+    selected with the select tool follow the selected curve; with no curve selected, one is made
+    from them (create_drivers_action)."""
     import groomlab
     curves = cmds.ls(selection=True, dagObjects=True, type="nurbsCurve", noIntermediate=True, long=True) or []
+    if not curves:
+        return create_drivers_action(groom)
     if len(curves) != 1:
         cmds.warning("GroomLab: select one driver curve (and the guides, with the GroomLab select tool)")
         return None
@@ -2151,6 +2171,8 @@ ACTIONS = {
     "sim.range": simulate_range,
     "sim.bake": bake_core_simulation,
     "sim.clear": clear_core_simulation,
+    "drivers.create": create_drivers_action,
+    "drivers.createEach": lambda: create_drivers_action(per_guide=True),
     "drivers.attach": attach_guides_action,
     "drivers.detach": detach_guides_action,
     "drivers.bind": bind_drivers_action,
