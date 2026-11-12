@@ -15,13 +15,13 @@
     "strand.roughness": "d397aa11a38e12da",
     "strand.specular": "9fc1c56b1b4bf4c6"
    },
-   "everything": "0ff65ba17b7975f9",
+   "everything": "8aa3da2e6370c721",
    "ids": "e1d6b354f4cac720",
    "points": 349875,
-   "positions": "e78730948991998b",
+   "positions": "7f830bf13c246d7b",
    "roots": "8d07691717968c79",
    "strands": 38875,
-   "widths": "0a54bba599c6aa89"
+   "widths": "a0b30c7fcdb777c5"
   },
   "blend_two_looks": {
    "channels": {
@@ -33,13 +33,13 @@
     "strand.melanin": "9c433b002ba246d0",
     "strand.melaninRedness": "88dc3bf9277a8513"
    },
-   "everything": "3b83bdaae334d306",
+   "everything": "939bd2c6597bb6e9",
    "ids": "20ed751c376a9e91",
    "points": 207993,
-   "positions": "34d2d7ce783c5270",
+   "positions": "6bb345148083ba36",
    "roots": "3489599712871aca",
    "strands": 5073,
-   "widths": "1782e7b495c89766"
+   "widths": "2083383fdf20074c"
   },
   "braids": {
    "channels": {
@@ -230,13 +230,13 @@
     "strand.melanin": "585bff22f9e7a57f",
     "strand.melaninRedness": "5ec86156f9531dc7"
    },
-   "everything": "1a22ffb5331e11e7",
+   "everything": "0066d2cf116b1b43",
    "ids": "6c9dd80f03761f4f",
    "points": 40902,
-   "positions": "5ed0c4124c022a5b",
+   "positions": "130dd95dc6e8449c",
    "roots": "e6131fd1a27d1940",
    "strands": 2406,
-   "widths": "aad2b94e4372511c"
+   "widths": "34f6b88dc8de7864"
   },
   "creature_fur": {
    "channels": {
@@ -250,13 +250,13 @@
     "strand.melanin": "ec2db78c30e4c4d0",
     "strand.melaninRedness": "d397aa11a38e12da"
    },
-   "everything": "f08c557228b8bc8a",
+   "everything": "3a6d2106134b683e",
    "ids": "e1d6b354f4cac720",
    "points": 349875,
-   "positions": "071aa1c0859ea951",
+   "positions": "0cfc6c1de685695a",
    "roots": "8d07691717968c79",
    "strands": 38875,
-   "widths": "c81eecc84c9e563a"
+   "widths": "70c374387496067f"
   },
   "curly": {
    "channels": {
@@ -267,13 +267,13 @@
     "strand.melanin": "dad6a7052491619b",
     "strand.melaninRedness": "e10b4fe3f7ad70b5"
    },
-   "everything": "37412b4c159bb864",
+   "everything": "fcd886f1e80a098e",
    "ids": "20ed751c376a9e91",
    "points": 207993,
-   "positions": "5e30eac6688f5566",
+   "positions": "44b9eb2b8a54758f",
    "roots": "3489599712871aca",
    "strands": 5073,
-   "widths": "d758b487a2441622"
+   "widths": "fa5cf58efa53eafc"
   },
   "dragon_scales": {
    "channels": {
@@ -303,13 +303,13 @@
     "strand.melanin": "e4fe0f692e16a780",
     "strand.melaninRedness": "88dc3bf9277a8513"
    },
-   "everything": "ed33a37cd474190c",
+   "everything": "ab7d6f47191825fc",
    "ids": "20ed751c376a9e91",
    "points": 86241,
-   "positions": "f34c4b9221cbeb4d",
+   "positions": "01fc76dc9992cb8b",
    "roots": "3489599712871aca",
    "strands": 5073,
-   "widths": "fa1ed0478a3f951c"
+   "widths": "54465d604c111bab"
   },
   "expression_driven": {
    "channels": {
@@ -320,13 +320,13 @@
     "strand.melanin": "36c1fc2c3567efc9",
     "strand.melaninRedness": "e10b4fe3f7ad70b5"
    },
-   "everything": "13275c9738ec4ca3",
+   "everything": "7aaca95dd4ce8357",
    "ids": "20ed751c376a9e91",
    "points": 86241,
-   "positions": "86b6704661e39e9e",
+   "positions": "fcc9a6bc59a8a04c",
    "roots": "3489599712871aca",
    "strands": 5073,
-   "widths": "078f7cb925029b80"
+   "widths": "a2df67d1c9d9c54b"
   },
   "feathers_afterfeather": {
    "channels": {
@@ -586,13 +586,13 @@
     "strand.melanin": "13d0d463a431142b",
     "strand.melaninRedness": "7ca6c66b74842a4a"
    },
-   "everything": "3ba691c1a8003a6e",
+   "everything": "91180087da9b46b7",
    "ids": "e1d6b354f4cac720",
    "points": 427625,
-   "positions": "7276fc31c88f4f6b",
+   "positions": "255be7a410d726b4",
    "roots": "8d07691717968c79",
    "strands": 38875,
-   "widths": "1b229bb7cca9f39d"
+   "widths": "22054311e922389d"
   },
   "flyaways": {
    "channels": {
@@ -625,13 +625,13 @@
     "strand.melanin": "eda3865f3a47d0e6",
     "strand.melaninRedness": "88dc3bf9277a8513"
    },
-   "everything": "db85a31ca3e79f25",
+   "everything": "3f19cf4016b4c97a",
    "ids": "20ed751c376a9e91",
    "points": 65949,
-   "positions": "3b45f3c2aa6f842c",
+   "positions": "1273cd2cf855e473",
    "roots": "3489599712871aca",
    "strands": 5073,
-   "widths": "573d6787ba942439"
+   "widths": "ca9575e1bb71d230"
   },
   "gravity": {
    "channels": {},
@@ -652,13 +652,13 @@
     "strand.melanin": "c69a1723ec1fb8fe",
     "strand.melaninRedness": "e10b4fe3f7ad70b5"
    },
-   "everything": "cc8cc13458f173e6",
+   "everything": "48b6e0439d2a92ec",
    "ids": "20ed751c376a9e91",
    "points": 86241,
-   "positions": "16972f67c3b24497",
+   "positions": "5af8b958aa33643e",
    "roots": "3489599712871aca",
    "strands": 5073,
-   "widths": "b35412238394688b"
+   "widths": "e53e966cf62c34ac"
   },
   "hand_placed_feathers": {
    "channels": {
@@ -718,13 +718,13 @@
     "strand.melanin": "7a3730f1bc56abcf",
     "strand.melaninRedness": "23466d20c870ab34"
    },
-   "everything": "4dcd69309f4f342b",
+   "everything": "68790d258d2b112f",
    "ids": "883d112633c26dfe",
    "points": 89386,
-   "positions": "4f4bb93c8fec924d",
+   "positions": "1d215c25d24343cc",
    "roots": "b0518e0aa1a57890",
    "strands": 5258,
-   "widths": "1944befba27b2258"
+   "widths": "69aaca4b193d9a6e"
   },
   "painted_maps": {
    "channels": {
@@ -735,13 +735,13 @@
     "strand.melanin": "fb60260099ee8637",
     "strand.melaninRedness": "88dc3bf9277a8513"
    },
-   "everything": "8f8a787923d100e1",
+   "everything": "9c0d7a29bd7fa63b",
    "ids": "20ed751c376a9e91",
    "points": 86241,
-   "positions": "f1d2a4a17f0783a7",
+   "positions": "7a2944cd082d3d0a",
    "roots": "3489599712871aca",
    "strands": 5073,
-   "widths": "c4641e2bfc4cadba"
+   "widths": "de373a9b9c66b2a0"
   },
   "parity_nodes": {
    "channels": {
@@ -756,13 +756,13 @@
     "strand.specular": "762500d77b084d87",
     "strand.tilt": "6f924aeef4a64b7d"
    },
-   "everything": "ae4b9da2113fe6d1",
+   "everything": "55ee051c526bf33c",
    "ids": "370bed6e7e7d7796",
    "points": 82089,
-   "positions": "5fd59e1dd116c9f4",
+   "positions": "c3c10e5883d371a4",
    "roots": "f7c9f86c0018a986",
    "strands": 9121,
-   "widths": "a8046c9d9c0ac5fa"
+   "widths": "9780a8e82c692bad"
   },
   "parted_style": {
    "channels": {
@@ -773,13 +773,13 @@
     "strand.melanin": "796271b0a5ae7123",
     "strand.melaninRedness": "20d13dd49794de15"
    },
-   "everything": "2186ebcbd1942515",
+   "everything": "94a473a83cca4d6e",
    "ids": "20ed751c376a9e91",
    "points": 86241,
-   "positions": "b0cc365e212ff4fe",
+   "positions": "347b14de3c926c41",
    "roots": "3489599712871aca",
    "strands": 5073,
-   "widths": "d2610211c7b688cc"
+   "widths": "506d6408ca7e9106"
   },
   "scales_from_flow": {
    "channels": {
@@ -850,13 +850,13 @@
     "strand.tubeU": "bd4bc1d443ccc031",
     "strand.tubeV": "bf996f494bd81a52"
    },
-   "everything": "e00f1a26ce246d9f",
+   "everything": "916283b440ce993b",
    "ids": "d960092680c33616",
    "points": 1428,
-   "positions": "bb4ad56eeda22012",
+   "positions": "b210cebdb571f506",
    "roots": "d4991a8f008280c4",
    "strands": 84,
-   "widths": "638b2deed07ff358"
+   "widths": "173b2a38cad66b9d"
   },
   "two_tone_tips": {
    "channels": {
@@ -890,13 +890,13 @@
     "strand.melanin": "38b8b434287d8ff9",
     "strand.melaninRedness": "8e7501db85c21a65"
    },
-   "everything": "65dd58d6a7e07e89",
+   "everything": "0dda779d836c54a2",
    "ids": "c04cfe6e72c2e911",
    "points": 140928,
-   "positions": "14eb1321ffffb71a",
+   "positions": "c783d6a0dcff93d6",
    "roots": "5f06ef95f2e7231c",
    "strands": 8808,
-   "widths": "8b18527bf2c1ecfe"
+   "widths": "e07479f58f7a3362"
   },
   "vine_leaves": {
    "channels": {},
@@ -938,13 +938,13 @@
     "strand.melanin": "1e420dffea704214",
     "strand.melaninRedness": "205364499e1d6368"
    },
-   "everything": "7a6c6c32d1d9020b",
+   "everything": "23844a9ffe3dbcc1",
    "ids": "d01a0c3fbaec036d",
    "points": 191148,
-   "positions": "f0724330d698c10f",
+   "positions": "d3326ace20d6ead1",
    "roots": "516384f8da469902",
    "strands": 11244,
-   "widths": "57035c1360184f00"
+   "widths": "440e66934583af83"
   },
   "white_wool": {
    "channels": {
@@ -960,13 +960,13 @@
     "strand.roughness": "cc52282938d3e077",
     "strand.specular": "c8760251671e2efd"
    },
-   "everything": "9cfe155b069d193c",
+   "everything": "caef334f8ddc6b93",
    "ids": "e1d6b354f4cac720",
    "points": 971875,
-   "positions": "5195c7b74e7c1d07",
+   "positions": "4c3627176179f55d",
    "roots": "8d07691717968c79",
    "strands": 38875,
-   "widths": "b0d56d298e3a84a3"
+   "widths": "9892ffbac89f84c4"
   },
   "wind_and_jiggle": {
    "channels": {
@@ -977,13 +977,13 @@
     "strand.melanin": "ebf3746b02ed4fdd",
     "strand.melaninRedness": "df8c93f508ecb802"
    },
-   "everything": "e12117bb7cb35ff7",
+   "everything": "6867791d9028321d",
    "ids": "20ed751c376a9e91",
    "points": 65949,
-   "positions": "0bf7eef3f4925c44",
+   "positions": "020151e3ba91db50",
    "roots": "3489599712871aca",
    "strands": 5073,
-   "widths": "46fbf99c6fee324a"
+   "widths": "0b77eb0d205a736e"
   }
  }
 }

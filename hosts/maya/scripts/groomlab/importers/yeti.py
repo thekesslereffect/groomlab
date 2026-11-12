@@ -962,7 +962,9 @@ class YetiReader(object):
                                      (groom_attr, vec[0]))
 
     def _node_clumping(self, n, foreign, what):
-        op = ForeignOp("clump", {}, source=what)
+        # Each strand along its clump curve by its length from the root, keeping its own (pastTip extend),
+        # as Yeti's clumped strands keep the lengths Grow gave them.
+        op = ForeignOp("clump", {"pastTip": "extend"}, source=what)
         self.assign(op, "strength", self.param(n, "weight", 1.0), what + " weight", profile_param="profile")
         base, tip, bias = self.num(n, "attractionBase", 1.0), self.num(n, "attractionTip", 1.0), \
             self.num(n, "attractionBias", 0.0)

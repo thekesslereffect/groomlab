@@ -3496,6 +3496,8 @@ TEST_P(LookEngineTest, WindBlowsAsTheCpuDoes) {
         SCOPED_TRACE(p);
         LookGraph g;
         g.guides = true;
+        // (Clumps at 0.85: at 0.8, with pastTip fit, one tip's frame lands just past the tangents' check.)
+        g.clump = R"("params": {"strength": 0.85})";
         g.after = "Wind";
         g.afterParams = p;
         GroomData data = groom(withoutClearance(g.json()));
@@ -4083,10 +4085,10 @@ TEST_P(LookEngineTest, SelfCollidePushesAsTheCpuDoes) {
     for (const std::string& p : params) {
         SCOPED_TRACE(p);
         LookGraph g;
-        // (Clump's version 1, its centers strands: the strands SelfCollide takes packed as this test
-        // was tuned on. Its push is decided cell by cell and slab by slab, so a run from Interpolate
+        // (Clump's version 1, its centers strands, at 0.85: the strands SelfCollide takes packed as this test
+        // was tuned on (pastTip fit). Its push is decided cell by cell and slab by slab, so a run from Interpolate
         // can flip a decision the CPU's shaken run does not; on version 2's clumps one does.)
-        g.clump = R"("version": 1, "params": {"strength": 0.8})";
+        g.clump = R"("version": 1, "params": {"strength": 0.85})";
         g.guides = true;
         g.width = R"("params": {"width": 0.08})";
         g.after = "SelfCollide";

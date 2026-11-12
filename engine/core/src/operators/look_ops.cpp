@@ -912,8 +912,10 @@ std::vector<float> clumpNumbers(const std::vector<const ClumpCenter*>& centers) 
 // there); inputCurves, each axis is the center curve itself (groomed
 // clump curves, Yeti's clump input). Whether the input is linked never decides it: pick ignores
 // a linked one, and the input modes with nothing linked leave the strands as they came (a note
-// says which to change). pastTip says what a strand longer than its
-// axis does past the axis's tip: gathers at the tip, or extends on along it. With a radius the
+// says which to change). pastTip says how a strand lies along its axis: fit, by its share of
+// its length (tip to tip, Yeti's and XGen's way: the strand takes the axis's length as much as it
+// clumps), or extend, by its length from the root and on past a shorter axis's tip along it (the
+// strand keeps its own length). With a radius the
 // strands gather into a round lock of that radius instead of onto the center
 // (dreads, wet strings). With `flatness` each clump is squashed across into a ribbon
 // (wet hair). What primitive nodes do is theirs: a Twist after it spirals the
@@ -986,10 +988,12 @@ public:
                 .soft(0, 1)
                 .when("centersFrom", {"pick"})
                 .adv(),
-            ParamSpec{"pastTip", std::string("gather"),
-                      "A strand longer than its clump's axis: gather: its points past the axis's tip gather at the tip; "
-                      "extend: they go on past it, along the axis's last direction, so long hair keeps its length",
-                      "", {"gather", "extend"}},
+            ParamSpec{"pastTip", std::string("fit"),
+                      "How a strand lies along its clump's axis. fit: tip to tip, each point at the same share of the "
+                      "axis's length as of its own, so the strand takes the axis's length as much as it clumps; "
+                      "extend: each point as far along the axis as along the strand, and past a shorter axis's tip on "
+                      "along its last direction, so the strand keeps its own length",
+                      "", {"fit", "extend"}},
             ParamSpec{"clumpChannel", std::string("clumpId"),
                       "Per-strand channel receiving the clump's number, from its center's ID (the same while that center "
                       "is; empty: none). Chained Clumps each want their own (lockId, then clumpId), for a Twist, Cards or "

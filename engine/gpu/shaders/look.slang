@@ -2320,8 +2320,9 @@ void ShareCS(uint3 id : SV_DispatchThreadID) {
 // or a flatness), their root normals after them (a float4 a center), and their variation at word
 // gAux.z (a float4 a center: its strength's draw, its lock radius's, its random flatten's turn).
 // gValue: strength (mapped: field 0), volumize (mapped: field 1, per strand), flatness, radius;
-// gFlag.x: the repel radius' float bits, gFlag.y: pastTip extend (past the center's tip, on along
-// its last way), gFlag.z: flatten (0 surface, 1 random, 2 direction); gValue2: strengthRandom,
+// gFlag.x: the repel radius' float bits, gFlag.y: pastTip extend (each point by its length from
+// the root; past the center's tip, on along its last way; 0: fit, each point by its share of the
+// strand's length, laid along the center's whole length), gFlag.z: flatten (0 surface, 1 random, 2 direction); gValue2: strengthRandom,
 // lockRadiusRandom; gFlag2.xyz: flatDirection's bits; the profile, and volumizeProfile the
 // second. The strand's numbers: unused, its spot in the lock (angle and radius as fractions). A
 // negative strength repels (look_ops.cpp repelled), off the skin where the root normals' block
@@ -2459,13 +2460,21 @@ void ClumpCS(uint3 id : SV_DispatchThreadID) {
         const float4 root = asfloat(gStrandData.Load4((gTable.y + s) * 16));
         if (root.w != 0.0f) skin = root.xyz;
     }
-    // The center's cumulative arc length at its samples (cumulativeArcLength): each point of the
-    // strand is pulled toward the center's point as far from the root as the point is along its
-    // strand (past the center's tip, the tip, or with extend on past it).
+    // The center's cumulative arc length at its samples (cumulativeArcLength): fit, each point of
+    // the strand is pulled toward the center's point at the same share of the center's length as
+    // the point is of its strand's (root to root, tip to tip: the strand takes the center's length
+    // as much as it clumps); extend, toward the center's point as far from the root as the point is
+    // along its strand, and past the center's tip on along its last way (the strand keeps its own).
     // (CentersCS made them, at word gAux.w.)
     float arcs[CENTER_SAMPLES];
     for (uint a = 0; a < CENTER_SAMPLES; ++a) arcs[a] = asfloat(gAux1.Load((gAux.w + c * CENTER_SAMPLES + a) * 4));
     const float centerLength = arcs[CENTER_SAMPLES - 1];
+    const bool extend = gFlag.y != 0;
+    float strandLength = 0.0f;  // (fit: the strand's length as it came)
+    if (!extend) {
+        for (uint i = 1; i < n; ++i) strandLength += len3(loadPoint(begin + i) - loadPoint(begin + i - 1));
+    }
+    const float fitScale = strandLength > 0.0f ? centerLength / strandLength : 0.0f;
     const float3 rootOffset = loadPoint(begin) - centerPoint(c, 0);
     // Its spot in a lock: its own way round the axis (its root's from the center's, in the root
     // frame: strands keep their places around the lock and never cross in it), at its drawn share of
@@ -2507,9 +2516,10 @@ void ClumpCS(uint3 id : SV_DispatchThreadID) {
         } else {
             const float w = clamp(raw, 0.0f, 1.0f);
             float f = 0.0f;
-            centerSampleAt(arcs, arc, k, f);
+            const float along = extend ? arc : min(arc * fitScale, centerLength);  // (fit: by share)
+            centerSampleAt(arcs, along, k, f);
             float3 at = centerPoint(c, k) * (1.0f - f) + centerPoint(c, k + 1) * f;
-            if (gFlag.y != 0 && arc > centerLength) at = at + tipWay * (arc - centerLength);  // pastTip extend
+            if (extend && arc > centerLength) at = at + tipWay * (arc - centerLength);  // pastTip extend
             if (radius > 0.0f) {
                 // A fixed spot in the lock's disk, in the center's frame there (between samples).
                 const Frame fr = frameBetween(centerFrame(c, k), centerFrame(c, k + 1), f);

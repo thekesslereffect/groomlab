@@ -495,12 +495,10 @@ TEST(Clump, PullsTipsOntoTheirCenter) {
         EXPECT_EQ(c, p[0].x < 0.5f ? 0 : 1);
         EXPECT_EQ(numbers.emplace(c, (*ids)[s]).first->second, (*ids)[s]);
         EXPECT_EQ(p[0], before->strandPoints(s)[0]);  // roots stay
-        // Full strength at the tip: on the center's point as far along it as the strand is long
-        // (the centers are straight; the second is longer than the strands).
+        // Full strength at the tip: on the center's tip (pastTip fit: tip to tip; the second center
+        // is longer than the strands, which take its length).
         const std::vector<Vec3f>& center = centers->guides()[c].points;
-        const float along = std::min(arcLength(before->strandPoints(s), n), arcLength(center));
-        const Vec3f centerAt = center.front() + (center.back() - center.front()).normalized() * along;
-        EXPECT_NEAR((p[n - 1] - centerAt).length(), 0.0f, 1e-4f);
+        EXPECT_NEAR((p[n - 1] - center.back()).length(), 0.0f, 1e-4f);
     }
     ASSERT_EQ(numbers.size(), 2u);
     EXPECT_NE(numbers[0], numbers[1]);
@@ -551,12 +549,13 @@ TEST(Clump, StrandStrengthRandomLetsEachStrandHangLooseItsOwnWay) {
     EXPECT_NEAR(maxDisplacement(*lg.eval(clump), *loose), 0.0f, 1e-6f);  // the same every time (by each strand's ID)
 }
 
-TEST(Clump, PullsEachPointToTheCentersPointAtItsOwnArcLength) {
-    // A long, a short and a longer strand beside a straight center up y, at strength 1 all along:
-    // each point lands on the center's point as far from the root as the point is along its
-    // strand, so the short strand's tip stops at the center's point at its own length (short
-    // hairs stay by the clump's root, as Ornatrix's and Yeti's), not at the center's tip, and the
-    // longer strand's points past the center's length gather at its tip.
+TEST(Clump, FitLaysEachStrandAlongItsCenterTipToTipAndExtendByItsOwnLength) {
+    // A long, a short and a longer strand beside a straight center 1 long up y, at strength 1 all
+    // along. pastTip fit (the default, Yeti's and XGen's clumping): each point lands on the
+    // center's point at the same share of the center's length as it is of its strand's, so every
+    // strand takes the center's length, tip on its tip (nothing bunches past a shorter center's
+    // tip). extend: each point on the center's point as far from the root as the point is along
+    // its strand, and past the center's tip on up along it: each strand keeps its own length.
     auto centers = std::make_shared<GuideSet>();
     centers->add(1, test::straightCurve({0, 0, 0}, {0, 1, 0}, 8));
     auto strands = std::make_shared<StrandSet>();
@@ -568,21 +567,26 @@ TEST(Clump, PullsEachPointToTheCentersPointAtItsOwnArcLength) {
     clump->params().set("profile", Ramp::constant(1.0f));
     clump->params().set("centersFrom", std::string("inputCurves"));
     EvalContext ctx;
-    const StrandsPtr out = valueAs<StrandsPtr>(clump->evaluate(ctx, {Value(StrandsPtr(strands)), Value(GuidesPtr(centers))}));
-    ASSERT_TRUE(out);
-    for (std::size_t s = 0; s < 3; ++s) {
-        const Vec3f* src = strands->strandPoints(s);
-        const Vec3f* p = out->strandPoints(s);
-        EXPECT_EQ(p[0], src[0]) << "roots stay";
-        float arc = 0.0f;
-        for (std::size_t i = 1; i < 9; ++i) {
-            arc += (src[i] - src[i - 1]).length();
-            const Vec3f expected(0.0f, std::min(arc, 1.0f), 0.0f);
-            EXPECT_NEAR((p[i] - expected).length(), 0.0f, 1e-5f) << "strand " << s << " point " << i;
+    for (const std::string mode : {"fit", "extend"}) {
+        clump->params().set("pastTip", mode);
+        const StrandsPtr out = valueAs<StrandsPtr>(clump->evaluate(ctx, {Value(StrandsPtr(strands)), Value(GuidesPtr(centers))}));
+        ASSERT_TRUE(out);
+        for (std::size_t s = 0; s < 3; ++s) {
+            const Vec3f* src = strands->strandPoints(s);
+            const Vec3f* p = out->strandPoints(s);
+            EXPECT_EQ(p[0], src[0]) << "roots stay";
+            const float length = arcLength(src, 9);
+            float arc = 0.0f;
+            for (std::size_t i = 1; i < 9; ++i) {
+                arc += (src[i] - src[i - 1]).length();
+                const Vec3f expected(0.0f, mode == "fit" ? arc / length : arc, 0.0f);
+                EXPECT_NEAR((p[i] - expected).length(), 0.0f, 1e-5f) << mode << " strand " << s << " point " << i;
+            }
         }
+        const float tip = mode == "fit" ? 1.0f : arcLength(strands->strandPoints(2), 9);
+        EXPECT_NEAR(out->strandPoints(1)[8].y, mode == "fit" ? 1.0f : 0.4f, 1e-5f) << mode << ": the short strand's tip";
+        EXPECT_NEAR(out->strandPoints(2)[8].y, tip, 1e-5f) << mode << ": the longer strand's tip";
     }
-    EXPECT_NEAR((out->strandPoints(1)[8] - Vec3f(0.0f, 0.4f, 0.0f)).length(), 0.0f, 1e-5f) << "the short strand's tip";
-    EXPECT_NEAR((out->strandPoints(2)[8] - Vec3f(0.0f, 1.0f, 0.0f)).length(), 0.0f, 1e-5f) << "past the center's tip: the tip";
 }
 
 TEST(Clump, OwnCentersAreKeptAcrossAStrengthTweakAndTheSameOnOneThread) {
@@ -794,7 +798,7 @@ TEST(Clump, ScatteredPointsAsCentersPlaceClumpsTheStrandsShape) {
     lg.g.node(clump).params().set("pastTip", std::string("extend"));
     const Look extended = look(lg.eval(clump));
     EXPECT_LT(extended.worstLength, 0.5f * spikes.worstLength);
-    lg.g.node(clump).params().set("pastTip", std::string("gather"));
+    lg.g.node(clump).params().set("pastTip", std::string("fit"));
 
     // Centers that are strands of its own (ToGuides of them): either way, the same to the bit.
     const NodeId own = lg.add(op::kToGuides, interp);

@@ -266,10 +266,8 @@ TEST(Maps, AttributeDrivesClumpStrength) {
     for (std::size_t s = 0; s < out->strandCount(); ++s) {
         const std::size_t n = out->strandPointCount(s);
         const Vec3f tip0 = before->strandPoints(s)[n - 1];
-        // The tip is pulled toward the center's point as far along it as the strand is long.
-        const float along = std::min(arcLength(before->strandPoints(s), n), arcLength(center));
-        const Vec3f centerAt = center.front() + (center.back() - center.front()).normalized() * along;
-        const Vec3f expected = tip0 + (centerAt - tip0) * pull[s];  // tip pull = strength * profile(1)
+        // The tip is pulled toward the center's tip (pastTip fit: tip to tip).
+        const Vec3f expected = tip0 + (center.back() - tip0) * pull[s];  // tip pull = strength * profile(1)
         EXPECT_NEAR((out->strandPoints(s)[n - 1] - expected).length(), 0.0f, 1e-4f);
     }
 }
