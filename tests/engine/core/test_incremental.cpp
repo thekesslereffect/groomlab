@@ -2097,7 +2097,7 @@ std::unique_ptr<Chain> makeParityChain() {
     chain->node(op::kHairColor).params().set("roughness", byLength);
     chain->node(op::kHairColor).params().set("specularRandom", 0.3);
     chain->node(op::kHairColor).params().set("tilt", 4.0);
-    chain->node(op::kClump).params().set("volumize", 0.5);
+    chain->node(op::kClump).params().set("volumize", 0.05);
     chain->node(op::kClump).params().set("strengthRandom", 0.5);
     chain->node(op::kClump).params().set("copyAmount", 0.5);
     chain->node(op::kClump).params().set("centersFrom", std::string("inputPoints"));  // the guides below

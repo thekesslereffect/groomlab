@@ -391,11 +391,11 @@ private:
 // not lose it), grown stage by stage: Interpolate's strands lie within twice its guides' longest
 // offset of their roots (blended offsets are no longer than the longest, preserveLength at most
 // doubles them; keeping clearance, twice the longest guide: lifted points keep their segments'
-// lengths); Clump's between where they were and their centers' (grown by the lock radius,
-// and with pastTip extend by the longest strand it took);
+// lengths); Clump's between where they were and their centers' (grown by its volume, the lock's
+// radius, and with pastTip extend by the longest strand it took);
 // Length's scale stretches them about their roots; Noise's sum stays under kNoiseReach per axis
 // (times the largest amplitude and profile) and Curl's within its largest radius, varied, times its
-// profile; volumize pushes a point out by its share of the box's diagonal at most; Part turns
+// profile; Part turns
 // segments about their roots (within the longest strand of them), as do Gravity and Wind; Flyaway's strays
 // wander by their stray under the noise's reach and carry on past their tips by lengthen; Collide
 // keeps segment lengths from points it pushed to its offset above its surfaces (within their boxes

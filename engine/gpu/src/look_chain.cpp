@@ -905,7 +905,6 @@ bool readLookParams(const GraphDocument& doc, const LookChain& chain, const Over
                     s.seed = static_cast<std::uint64_t>(level.getInt("seed"));
                     s.ramp = wetLevelProfile(stage.level, levels, static_cast<float>(number("wetness")));
                     s.ramp2 = level.getRamp("volumizeProfile");
-                    s.ramp3 = level.getRamp("lockProfile");
                     break;
                 }
                 if (!readStageParams(stage.kind, reader, &s, why)) return false;
@@ -1443,7 +1442,7 @@ bool readLookFields(const GraphDocument& doc, const LookChain& chain, const Scal
         }
         if (stage.level >= 0) continue;  // a Wet's level: its pull a number of its own
         switch (stage.kind) {
-            case StageKind::Interpolate: break;
+            case StageKind::Interpolate: ok = read("followBends", false, &v[0]); break;  // (BendsCS)
             case StageKind::Length: ok = read("keep", false, &v[0]) && read("fraction", false, &v[1]); break;
             case StageKind::Clump: ok = read("strength", true, &v[0]) && read("volumize", false, &v[1]); break;
             case StageKind::Noise: ok = read("amplitude", true, &v[0]) && read("fraction", false, &v[1]); break;
@@ -3072,20 +3071,14 @@ LookBounds lookBounds(const LookParams& p, const LookFields& fields, const std::
                         chi = made.hi;
                     }
                 }
-                // pastTip extend: on past an axis's tip by up to the longest strand. (A lock radius
-                // varied per clump up to 1 + lockRadiusRandom of it.)
-                const float lock = s.value[3] * (1.0f + std::abs(s.value2[1])) * (s.hasRamp3 ? peak(s.ramp3) : 1.0f);
+                // pastTip extend: on past an axis's tip by up to the longest strand. (The volume, the
+                // lock's radius, varied per clump up to 1 + volumizeRandom of it, along it by
+                // volumizeProfile.)
+                const FieldValues& f1 = f ? f[1] : kNone;
+                const float lock = largest(s.value[1], f1) * (1.0f + std::abs(s.value2[1])) * (s.hasRamp2 ? peak(s.ramp2) : 1.0f);
                 const float r = (lock + (s.flag[1] != 0 && in ? in->reach : 0.0f)) * slack;
                 lo = {std::min(lo.x, clo.x - r), std::min(lo.y, clo.y - r), std::min(lo.z, clo.z - r)};
                 hi = {std::max(hi.x, chi.x + r), std::max(hi.y, chi.y + r), std::max(hi.z, chi.z + r)};
-                // Volumize pushes a point out from its axis by a share of how far it is across it
-                // (both within the box so far).
-                const FieldValues& f1 = f ? f[1] : kNone;
-                const float volume = largest(s.value[1], f1) * (s.hasRamp2 ? peak(s.ramp2) : 1.0f);
-                if (volume > 0.0f) {
-                    const Vec3f d = hi - lo;
-                    grow(volume * d.length() * slack);
-                }
                 // A negative strength pushes points out by the repel radius at most.
                 float lowest = s.value[0];
                 if (f0.mode) {

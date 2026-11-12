@@ -51,9 +51,6 @@ public:
     // Interpolate keeping curls (keepCurls): the caller keeps them after it (the CPU engine); else
     // the CPU's.
     bool curls = false;
-    // Interpolate following its guides' bends (followBends): the caller carries the strands'
-    // offsets after it (the CPU engine); else the CPU's.
-    bool bends = false;
     // Gravity, Bend and Displace given their direction per strand (StageInputs::directions; Direction:
     // its inclination, roll and strength per strand): the caller's; else one varying (Direction's
     // three mapped) is the CPU's.
@@ -81,7 +78,7 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
 template <class Get>
 void clumpShape(const ParamSet& clump, const Get& get, StageParams* s) {
     s->value[2] = static_cast<float>(get("flatness"));
-    s->value[3] = static_cast<float>(get("lockRadius"));
+    s->value[3] = 0.0f;  // (the volume: value 1, mapped)
     const float repelRadius = static_cast<float>(get("repelRadius"));
     std::memcpy(&s->flag[0], &repelRadius, sizeof(float));  // the kernel reads its bits as a float
     s->flag[1] = clump.getString("pastTip") == "extend" ? 1 : 0;
@@ -89,7 +86,7 @@ void clumpShape(const ParamSet& clump, const Get& get, StageParams* s) {
     s->flag[2] = flatten == "random" ? 1 : flatten == "direction" ? 2 : 0;
     // The per-clump variation (by each center's ID: ClumpInputs::variation) and copy.
     s->value2[0] = static_cast<float>(get("strengthRandom"));
-    s->value2[1] = static_cast<float>(get("lockRadiusRandom"));
+    s->value2[1] = static_cast<float>(get("volumizeRandom"));
     s->value2[2] = static_cast<float>(get("copyAmount"));
     const Vec3f direction = clump.getVec3("flatDirection");
     std::memcpy(&s->flag2[0], &direction.x, sizeof(float));
@@ -97,11 +94,10 @@ void clumpShape(const ParamSet& clump, const Get& get, StageParams* s) {
     std::memcpy(&s->flag2[2], &direction.z, sizeof(float));
     s->tabled = true;
     s->hasRamp2 = true;
-    s->hasRamp3 = true;  // (lockProfile: the caller's, as the profiles)
 }
 // Clump's centers as the kernel takes them (ClumpInputs) from its operator's: each strand's center,
 // the centers' curves as made (their copy shared), their roots' normals, their variation by `ids`
-// and `seed` (clumpVariation: the strength's, the lock radius's and a random flatten's draws).
+// and `seed` (clumpVariation: the strength's, the volume's and a random flatten's draws).
 std::shared_ptr<ClumpInputs> clumpInputs(std::shared_ptr<const std::vector<std::uint32_t>> assigned, std::vector<Vec3f> curves,
                                          std::vector<Vec3f> normals, const std::vector<StrandId>& ids, std::uint64_t seed);
 // The same of curves and normals already shared (a Clump's kept ones: no copies).

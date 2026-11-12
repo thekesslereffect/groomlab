@@ -71,14 +71,15 @@ struct LookChain {
 // One stage's params as its operator reads them. A mapped param's number is the multiplier of its
 // values (StageFields): a plugged field's own number (the CPU multiplies the field by it), 1 for a
 // map that is the param's own value.
-//   Interpolate: value[0] limitDistance; flag[0] samples, [1] preserveLength; ramp: the falloff.
+//   Interpolate: value[0] limitDistance, [1] followBends (mapped, per strand: BendsCS); flag[0]
+//                samples, [1] preserveLength; ramp: the falloff.
 //   Length: value[0] keep (mapped, per strand), [1] fraction (mapped, per strand), [2] the least
 //           a trimmed strand loses (0), [3] the most (randomness); seed.
-//   Clump: value[0] strength (mapped; negative repels), [1] volumize (mapped, per strand), [2]
-//          flatness, [3] lockRadius; flag[0] repelRadius's float bits, [1] pastTip extend, [2]
+//   Clump: value[0] strength (mapped; negative repels), [1] volumize (mapped, per strand: the lock's
+//          radius), [2] flatness; flag[0] repelRadius's float bits, [1] pastTip extend, [2]
 //          flatten (0 surface, 1 random, 2 direction); value2[0] strengthRandom, [1]
-//          lockRadiusRandom, [2] copyAmount, [3] strandStrengthRandom; flag2[0-2] flatDirection's float bits; seed;
-//          ramp: the profile; ramp2: volumizeProfile. A Wet's level the same, from its level's
+//          volumizeRandom, [2] copyAmount, [3] strandStrengthRandom; flag2[0-2] flatDirection's float bits; seed;
+//          ramp: the profile; ramp2: volumizeProfile (the lock's radius along it). A Wet's level the same, from its level's
 //          Clump params (WetState), its profile wetLevelProfile at the (dragged) wetness.
 //   Noise: value[0] amplitude (mapped), [1] frequency, [2] fraction (mapped, at the root); flag[0]
 //          octaves, [1] world space, [2] kinky; seed; ramp: the profile.
@@ -154,8 +155,6 @@ struct StageParams {
     bool tabled = false;  // the ramp by point index (RampAlong; Width's and Interpolate's are not)
     Ramp ramp2;           // a second profile (Clump's volumizeProfile), by point index
     bool hasRamp2 = false;
-    Ramp ramp3;           // a third (Clump's lockProfile), by point index (no table: its keys alone)
-    bool hasRamp3 = false;
     // Affect masks. Masked (its affect a map, a field plugged
     // in, a number between 0 and 1, or dragged): the node's result mixed back toward what its first
     // stage took by its affect (StageFields::affect at that stage, times `affect`: the mapped
@@ -282,7 +281,7 @@ struct ClumpInputs {
     // (ClumpState::centerNormals, look.slang frameSeed).
     std::shared_ptr<const std::vector<Vec3f>> normals;
     // Per center 4 floats (its per-clump variation, drawn from its ID and the seed as ClumpOp draws
-    // it): the strength's draw, the lock radius's, a random flatten's turn (a share of one), 0.
+    // it): the strength's draw, the volume's, a random flatten's turn (a share of one), 0.
     std::shared_ptr<const std::vector<float>> variation;
     // copyAmount, centers made on the GPU: per center the nearest centers it takes the shape of,
     // kClumpCopyWords words (clumpCopyNeighbors: the count, the centers, their weights; a center

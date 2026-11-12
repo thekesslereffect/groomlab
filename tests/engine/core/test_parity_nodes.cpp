@@ -458,15 +458,15 @@ struct Clumped {
 TEST(ClumpVariation, NothingChangesAtTheDefaults) {
     Clumped c;
     const NodeId plain = c.clump({});
-    const NodeId zeros = c.clump({{"volumize", 0.0}, {"strengthRandom", 0.0}, {"lockRadiusRandom", 0.0}, {"copyAmount", 0.0},
+    const NodeId zeros = c.clump({{"volumize", 0.0}, {"strengthRandom", 0.0}, {"volumizeRandom", 0.0}, {"copyAmount", 0.0},
                                   {"copyNeighbors", std::int64_t{3}}});
     expectSame(*c.rig.eval(zeros), *c.rig.eval(plain), "the variation at 0");
     for (const char* name : {"volumize", "strengthRandom", "copyAmount"}) {
         const NodeId one = c.clump({{name, 0.5}});
         EXPECT_NE(c.rig.eval(one)->contentHash(), c.rig.eval(plain)->contentHash()) << name;
     }
-    const NodeId locks = c.clump({{"lockRadius", 0.05}});
-    const NodeId varied = c.clump({{"lockRadius", 0.05}, {"lockRadiusRandom", 0.8}});
+    const NodeId locks = c.clump({{"volumize", 0.05}});
+    const NodeId varied = c.clump({{"volumize", 0.05}, {"volumizeRandom", 0.8}});
     EXPECT_NE(c.rig.eval(varied)->contentHash(), c.rig.eval(locks)->contentHash());
 }
 
@@ -502,13 +502,14 @@ TEST(ClumpVariation, ClumpNoiseAndCopyMoveEachClumpAsOne) {
     expectThreadIndependent(c.rig, waved, "Clump noise and copy");
 }
 
-TEST(ClumpVariation, VolumizeFillsTheClumpNearTheRoot) {
+TEST(ClumpVariation, VolumizeGivesEachClumpItsVolume) {
     Clumped c;
     const NodeId plain = c.clump({{"strength", 0.6}});
     const NodeId full = c.clump({{"strength", 0.6}, {"volumize", 1.0}});
     const NodeId weaker = c.clump({{"strength", 0.6}, {"strengthRandom", 1.0}});
     const StrandsPtr a = c.rig.eval(plain), b = c.rig.eval(full), w = c.rig.eval(weaker);
-    // The spread of each clump about its strands' mean at a quarter of the length: wider volumized.
+    // The spread of each clump about its strands' mean at a quarter of the length: wider volumized,
+    // the strands a lock round the center rather than onto it.
     auto spread = [](const StrandSet& s) {
         const std::vector<float>& ids = *s.strandChannel("clumpId");
         std::map<int, std::pair<Vec3f, int>> mean;

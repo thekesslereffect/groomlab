@@ -82,6 +82,8 @@ GROOMLAB_KERNEL(Jiggle)
 GROOMLAB_KERNEL(MeshCut)
 // Cull, Split and Mirror: the strands of the run up their input copied into their layout.
 GROOMLAB_KERNEL(Layout)
+// Interpolate's followBends, after it (and its clearance walk).
+GROOMLAB_KERNEL(Bends)
 
 #ifdef GROOMLAB_KERNEL_DEFAULTED
 #undef GROOMLAB_KERNEL

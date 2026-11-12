@@ -423,8 +423,7 @@ def _core_clump(module, get, resolver, file_names, report, what, desc_path, guid
     if copy:
         params["copyAmount"] = max(0.0, min(1.0, copy))
     if str(get(module, "clumpVolumize")).lower() == "true":
-        params["volumize"] = 0.3
-        report.approximated(what, "clumpVolumize: Clump volumize 0.3")
+        report.skipped(what + " clumpVolumize", "Clump's volumize is the clumps' radius: set it on the Clump node")
     variance = _float(get(module, "clumpVariance"), 0.0)
     if variance:
         params["strengthRandom"] = max(0.0, min(1.0, variance))
@@ -786,8 +785,7 @@ def _igs_clump(node, what, resolver, report, work, scalp, area):
     if copy:
         params["copyAmount"] = max(0.0, min(1.0, copy))
     if cmds.getAttr(node + ".clumpVolumize"):
-        params["volumize"] = 0.3
-        report.approximated(what, "clumpVolumize: Clump volumize 0.3")
+        report.skipped(what + " clumpVolumize", "Clump's volumize is the clumps' radius: set it on the Clump node")
     variance = cmds.getAttr(node + ".clumpVariance")
     if variance:
         params["strengthRandom"] = max(0.0, min(1.0, variance))

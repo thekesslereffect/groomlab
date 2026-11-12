@@ -191,6 +191,7 @@ struct InterpolateGuideRows {
     std::vector<Vec3f> offsets;  // guide g's at [g * samples, (g + 1) * samples)
     std::vector<Vec3f> roots, normals;
     std::vector<float> lengths;
+    std::vector<Vec3f> firsts;  // each guide's first point as it is (followBends: a strand's offset from it)
 };
 std::size_t interpolateSamples(const StrandSet& strands);
 // `params`: the Interpolate node's (smoothGuides); `kept`: the guides with 2 points or more.

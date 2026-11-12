@@ -549,10 +549,10 @@ TEST(Clump, StrandStrengthRandomLetsEachStrandHangLooseItsOwnWay) {
     EXPECT_NEAR(maxDisplacement(*lg.eval(clump), *loose), 0.0f, 1e-6f);  // the same every time (by each strand's ID)
 }
 
-TEST(Clump, LockProfileShapesTheLockAlongItsLength) {
+TEST(Clump, VolumizeProfileShapesTheLockAlongItsLength) {
     // A lock of radius 0.1 round a straight center, every strand all the way in (strength 1 along
-    // it): its strands fill a disk that wide at every point (lockProfile 1, the default); with a
-    // lockProfile tapering from 1 to 0.25 the disk narrows with it, root to tip.
+    // it): its strands fill a disk that wide at every point (volumizeProfile 1, the default); with a
+    // volumizeProfile tapering from 1 to 0.25 the disk narrows with it, root to tip.
     auto centers = std::make_shared<GuideSet>();
     centers->add(1, test::straightCurve({0, 0, 0}, {0, 1, 0}, 8));
     auto strands = std::make_shared<StrandSet>();
@@ -564,7 +564,7 @@ TEST(Clump, LockProfileShapesTheLockAlongItsLength) {
     clump->params().set("strength", 1.0);
     clump->params().set("profile", Ramp::constant(1.0f));
     clump->params().set("centersFrom", std::string("inputCurves"));
-    clump->params().set("lockRadius", 0.1);
+    clump->params().set("volumize", 0.1);
     EvalContext ctx;
     // The farthest a strand's point i lies from the center (straight up y).
     auto widest = [&](std::size_t i) {
@@ -574,7 +574,7 @@ TEST(Clump, LockProfileShapesTheLockAlongItsLength) {
         return most;
     };
     for (const std::size_t i : {1u, 4u, 8u}) EXPECT_NEAR(widest(i), 0.1f, 0.01f) << "point " << i << ": the lock's radius";
-    clump->params().set("lockProfile", Ramp::linear(1.0f, 0.25f));
+    clump->params().set("volumizeProfile", Ramp::linear(1.0f, 0.25f));
     EXPECT_NEAR(widest(4), 0.1f * 0.625f, 0.008f) << "halfway";
     EXPECT_NEAR(widest(8), 0.1f * 0.25f, 0.004f) << "the tip";
     EXPECT_GT(widest(1), widest(4));

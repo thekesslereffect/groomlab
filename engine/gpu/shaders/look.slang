@@ -80,7 +80,7 @@
     uint4 gField;        // mapped params 0 and 1: mode (0 the number, 1 per strand, 2 per point), offset (floats in gFields)
     uint4 gAux;          // offsets into gAux0 and gAux1 (words), by node
     uint4 gDispatch;     // x: the groups in a row of the dispatch (threadIndex)
-    float4 gValue2;      // more numbers (Clump: strengthRandom, lockRadiusRandom, copyAmount; FieldCS: min, max)
+    float4 gValue2;      // more numbers (Clump: strengthRandom, volumizeRandom, copyAmount; FieldCS: min, max)
     uint4 gFlag2;        // more switches (Clump: flatDirection's bits; Interpolate: x, write the influence)
     uint4 gRamp2;        // a second profile (Clump's volumizeProfile), as gRamp
     uint4 gTable2;       // x: its table's offset
@@ -222,11 +222,6 @@ float rampAlong(uint i, uint n) {
 float rampAlong2(uint i, uint n) {  // the second profile
     if (n == gRamp2.w) return asfloat(gRamps.Load((gTable2.x + i) * 4));
     return rampAtOf(gRamp2, paramAt(i, n));
-}
-// The third (Clump's lockProfile): its keys alone, gTable2.y its key count (straight: bit 31), .z
-// their offset; no keys: 1.
-float rampAlong3(uint i, uint n) {
-    return rampAtOf(uint4(gTable2.y & 0x7fffffffu, gTable2.z, gTable2.y >> 31, 0u), paramAt(i, n));
 }
 
 // ---- Mapped params (field.h ScalarField) -----------------------------------------------------
@@ -1665,6 +1660,82 @@ void InterpolateCS(uint3 id : SV_DispatchThreadID, uint3 local : SV_GroupThreadI
     }
 }
 
+// ---- followBends (interpolate.cpp): BendsCS, after InterpolateCS (and ClearanceCS), in place ------
+//
+// Each bound strand's offset from each of its guides (its root's from the guide's first point as it
+// is, 3 words a guide at word gFlag.y of gAux1), in the guide's frame at its root, carried along the
+// guide's rotation-minimizing frames (9 words a sample: tangent, normal, binormal, at word gFlag.z;
+// gFlag.x samples a guide): the strand moved by its guides' weighed (carried - kept) offsets, times
+// followBends (field 0, its number gValue.y) and its influence (Interpolate's: gValue.x the
+// radius), point j at sample share j / (n - 1). So a lock bent over keeps the section it has at the
+// roots rather than flattening into a ribbon. Strands riding a tube (fillTubes) as they are.
+
+float3 bendFirst(uint g) { return asfloat(gAux1.Load3((gFlag.y + g * 3) * 4)); }
+Frame bendFrame(uint g, uint k) {
+    const uint at = gFlag.z + (g * gFlag.x + k) * 9;
+    Frame f;
+    f.t = asfloat(gAux1.Load3(at * 4));
+    f.n = asfloat(gAux1.Load3((at + 3) * 4));
+    f.b = asfloat(gAux1.Load3((at + 6) * 4));
+    return f;
+}
+// frames.h Frame::toWorld and toLocal (x along the normal, y the binormal, z the tangent).
+float3 bendToWorld(Frame f, float3 l) {
+    PRECISE float3 a = f.n * l.x;
+    PRECISE float3 b = f.b * l.y;
+    PRECISE float3 c = f.t * l.z;
+    PRECISE float3 ab = a + b;
+    PRECISE float3 r = ab + c;
+    return r;
+}
+float3 bendToLocal(Frame f, float3 w) { return float3(exactDot(w, f.n), exactDot(w, f.b), exactDot(w, f.t)); }
+
+[shader("compute")]
+[numthreads(GROUP_SIZE, 1, 1)]
+void BendsCS(uint3 id : SV_DispatchThreadID) {
+    const uint s = threadIndex(id, GROUP_SIZE);
+    if (s >= gStrandCount) return;
+    const InterpStrand st = interpStrand(s);
+    if (!st.bound || st.n < 2) return;
+    if (gAux.z != 0u && tubeOf(s).tube >= 0) return;
+    const float amount = clamp(fieldAt(0, gValue.y, s, st.begin), 0.0f, 1.0f) * st.influence;
+    if (!(amount > 0.0f)) return;
+    const uint samples = gFlag.x, found = min(st.found, BIND_SLOTS);
+    if (samples < 2) return;
+    // Each guide's offset of the root, kept and in its root frame.
+    float3 offset[BIND_SLOTS], local[BIND_SLOTS];
+    float weight[BIND_SLOTS];
+    uint guide[BIND_SLOTS];
+    const float3 root = loadOut(st.begin);
+    for (uint i = 0; i < found; ++i) {
+        const uint g = interpGuideIndex(s, st, i);
+        guide[i] = g;
+        weight[i] = interpGuideWeight(s, st, i);
+        PRECISE float3 o = root - bendFirst(g);
+        offset[i] = o;
+        local[i] = bendToLocal(bendFrame(g, 0), o);
+    }
+    const float last = float(samples - 1), steps = float(st.n - 1);
+    for (uint j = 1; j < st.n; ++j) {
+        PRECISE float x = divExact(float(j), steps) * last;
+        const uint k = min(uint(x), samples - 2);
+        PRECISE float f = x - float(k);
+        float3 move = float3(0.0f, 0.0f, 0.0f);
+        for (uint i = 0; i < found; ++i) {
+            PRECISE float3 a = bendToWorld(bendFrame(guide[i], k), local[i]) * (1.0f - f);
+            PRECISE float3 b = bendToWorld(bendFrame(guide[i], k + 1), local[i]) * f;
+            PRECISE float3 carried = a + b;
+            PRECISE float3 d = carried - offset[i];
+            PRECISE float3 weighed = d * weight[i];
+            PRECISE float3 sum = move + weighed;
+            move = sum;
+        }
+        PRECISE float3 moved = move * amount;
+        PRECISE float3 p = loadOut(st.begin + j) + moved;
+        storePoint(gOut, st.begin + j, p);
+    }
+}
+
 // ---- Keeping clearance over a deformed scalp (distance_field.cpp RestPoseCollision::push) ---------
 //
 // The scalp deformed away from its rest pose: a point is taken to rest space by the rigid motion of
@@ -2321,15 +2392,16 @@ void ShareCS(uint3 id : SV_DispatchThreadID) {
 // ---- Clump: each strand toward its center --------------------------------------------------------
 //
 // gAux0: each strand's center (0xffffffff: not clumped); gAux1: the centers' curves
-// (CENTER_SAMPLES points each), their frames at word gAux.y (9 a sample; made with a lock radius
-// or a flatness), their root normals after them (a float4 a center), and their variation at word
-// gAux.z (a float4 a center: its strength's draw, its lock radius's, its random flatten's turn).
-// gValue: strength (mapped: field 0), volumize (mapped: field 1, per strand), flatness, radius;
+// (CENTER_SAMPLES points each), their frames at word gAux.y (9 a sample; made with a volume or a
+// flatness), their root normals after them (a float4 a center), and their variation at word
+// gAux.z (a float4 a center: its strength's draw, its volume's, its random flatten's turn).
+// gValue: strength (mapped: field 0), volumize (mapped: field 1, per strand: the lock's radius),
+// flatness;
 // gFlag.x: the repel radius' float bits, gFlag.y: pastTip extend (each point by its length from
 // the root; past the center's tip, on along its last way; 0: fit, each point by its share of the
 // strand's length, laid along the center's whole length), gFlag.z: flatten (0 surface, 1 random, 2 direction); gValue2: strengthRandom,
-// lockRadiusRandom; gFlag2.xyz: flatDirection's bits; the profile, and volumizeProfile the
-// second. The strand's numbers: unused, its spot in the lock (angle and radius as fractions). A
+// volumizeRandom; gFlag2.xyz: flatDirection's bits; the profile, and volumizeProfile (the lock's
+// radius along it) the second. The strand's numbers: unused, its spot in the lock (angle and radius as fractions). A
 // negative strength repels (look_ops.cpp repelled), off the skin where the root normals' block
 // says the root is on it (w 1).
 
@@ -2421,16 +2493,16 @@ void ClumpCS(uint3 id : SV_DispatchThreadID) {
         return;
     }
     const float4 d = strandData(s);
-    // The clump's variation (by its center's ID): its strength scaled down, its lock radius varied.
+    // The clump's variation (by its center's ID): its strength scaled down, its volume varied.
     const float4 variation = asfloat(gAux1.Load4((gAux.z + c * 4) * 4));
     float escape = gValue2.x > 0.0f ? 1.0f - gValue2.x * variation.x : 1.0f;
     if (gValue2.w > 0.0f) escape *= 1.0f - gValue2.w * d.w;  // strandStrengthRandom (its draw: strand data w)
     const float strandAmount = fieldAt(0, gValue.x, s, 0) * escape;
-    const float radius = gValue.w;
+    // Its volume (volumize, read on the strand as it came): the radius of the lock it gathers into.
+    const float radius = max(fieldAt(1, gValue.y, s, 0), 0.0f);
     const float angle = kTwoPi * d.y;
     const float r = (gValue2.y > 0.0f ? radius * (1.0f + gValue2.y * (2.0f * variation.y - 1.0f)) : radius) * d.z;
-    // Volumize: read on the strand as it came; flatness: the way each clump's ribbon is thin in.
-    const float volume = fieldAt(1, gValue.y, s, 0);
+    // Flatness: the way each clump's ribbon is thin in.
     const bool shaped = gValue.z > 0.0f;
     float2 thin = float2(1.0f, 0.0f);  // (the root frame's normal)
     if (shaped) {
@@ -2527,24 +2599,15 @@ void ClumpCS(uint3 id : SV_DispatchThreadID) {
             if (extend && arc > centerLength) at = at + tipWay * (arc - centerLength);  // pastTip extend
             if (radius > 0.0f) {
                 // A fixed spot in the lock's disk, in the center's frame there (between samples), the
-                // disk as wide there as lockProfile says.
+                // disk as wide there as volumizeProfile says.
                 const Frame fr = frameBetween(centerFrame(c, k), centerFrame(c, k + 1), f);
-                const float ri = r * rampAlong3(i, n);
+                const float ri = r * rampAlong2(i, n);
                 const float3 target = at + ((fr.n * (ri * lockWay.x) + fr.b * (ri * lockWay.y)) + fr.t * 0.0f);
                 moved = p + (target - p) * w;
                 if (shaped) moved = flattened(moved, at, fr, thin, w);
             } else {
                 moved = p + (at - p) * w;
                 if (shaped) moved = flattened(moved, at, frameBetween(centerFrame(c, k), centerFrame(c, k + 1), f), thin, w);
-            }
-            if (volume != 0.0f) {
-                // Volumize: pushed out from the axis there by the volume's share across it.
-                const float v = volume * rampAlong2(i, n);
-                if (v != 0.0f) {
-                    const float3 tangent = normalized(centerPoint(c, k + 1) - centerPoint(c, k));
-                    const float3 across = moved - at;
-                    moved += (across - tangent * dot(across, tangent)) * v;
-                }
             }
         }
         if (repelling) {

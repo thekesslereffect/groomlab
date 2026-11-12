@@ -27,7 +27,7 @@ struct alignas(16) StageConstants {
     float value2[4];                // more numbers (StageParams::value2; a field's program: min, max)
     std::uint32_t flag2[4];         // more switches (StageParams::flag2; Interpolate: write the influence)
     std::uint32_t ramp2[4];         // a second profile (Clump's volumizeProfile), as `ramp`
-    std::uint32_t table2[4];        // its table's offset; Clump: lockProfile's key count (straight: bit 31) and offset; [3] a view
+    std::uint32_t table2[4];        // its table's offset
 };
 static_assert(sizeof(StageConstants) % 16 == 0, "cbuffer rows");
 // Each dispatch's slot in one buffer: OpenGL binds ranges of it, at its uniform offset alignment

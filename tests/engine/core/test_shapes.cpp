@@ -944,7 +944,7 @@ struct Locks {
         p.set("count", std::int64_t{8});
         p.set("strength", 1.0);
         p.set("profile", Ramp::constant(1.0f));
-        p.set("lockRadius", 0.1);
+        p.set("volumize", 0.1);
         for (const auto& [k, v] : extra) p.set(k, v);
     }
     // Each strand's offset at point i from its clump's center there: the mean of its clump's strands.

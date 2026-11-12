@@ -1600,7 +1600,7 @@ TEST(GpuPreview, AnOpenGLEngineKeepsItsKernelsCompiled) {
 // ---- Clump, Length, Interpolate (Phase 2) -------------------------------------------------------
 
 TEST_P(LookEngineTest, ClumpDragsGiveWhatTheCpuClumps) {
-    // Clump's numbers dragged (strength, a lock radius): its centers as the CPU chose and
+    // Clump's numbers dragged (strength, a volumize): its centers as the CPU chose and
     // resampled them, its strength per point by point index.
     LookGraph g;
     g.clump = R"("params": {"strength": 0.8})";
@@ -1608,10 +1608,10 @@ TEST_P(LookEngineTest, ClumpDragsGiveWhatTheCpuClumps) {
     c.clump = R"("params": {"strength": 0.55})";
     EXPECT_GPU_MATCHES(g.json(), (gpu::Overrides{{"clump", {{"strength", 0.55}}}}), c.json());
     LookGraph lock = g;
-    lock.clump = R"("params": {"strength": 0.9, "lockRadius": 0.15})";
+    lock.clump = R"("params": {"strength": 0.9, "volumize": 0.15})";
     LookGraph locked = g;
-    locked.clump = R"("params": {"strength": 0.9, "lockRadius": 0.25})";
-    EXPECT_GPU_MATCHES(lock.json(), (gpu::Overrides{{"clump", {{"lockRadius", 0.25}}}}), locked.json());
+    locked.clump = R"("params": {"strength": 0.9, "volumize": 0.25})";
+    EXPECT_GPU_MATCHES(lock.json(), (gpu::Overrides{{"clump", {{"volumize", 0.25}}}}), locked.json());
     LookGraph mapped = g;
     mapped.clump = R"("params": {"strength": {"expression": "0.3 + 0.05 * pt", "min": 0.0, "max": 1.0}})";
     EXPECT_GPU_MATCHES(mapped.json(), gpu::Overrides{}, mapped.json());
@@ -1636,7 +1636,7 @@ TEST_P(LookEngineTest, ANegativeClumpRepelsAsTheCpuDoes) {
     wider.clump = R"("version": 1, "params": {"strength": -0.7, "repelRadius": 0.9})";
     EXPECT_GPU_MATCHES(g.json(), (gpu::Overrides{{"clump", {{"repelRadius", 0.9}}}}), wider.json());
     LookGraph mapped = g;
-    mapped.clump = R"("version": 1, "params": {"strength": {"expression": "0.5 - 0.1 * pt", "min": -1.0, "max": 1.0}, "lockRadius": 0.2,
+    mapped.clump = R"("version": 1, "params": {"strength": {"expression": "0.5 - 0.1 * pt", "min": -1.0, "max": 1.0}, "volumize": 0.2,
                                  "repelRadius": 0.5})";
     EXPECT_GPU_MATCHES(mapped.json(), gpu::Overrides{}, mapped.json());
 }
@@ -1673,7 +1673,7 @@ TEST_P(LookEngineTest, ClumpOnCentersABranchShapesFromTheGuidesGivesWhatTheCpuCl
             SCOPED_TRACE(std::string(shared ? "shared" : "alone") + (clearance ? ", keeping clearance" : ""));
             LookGraph g;
             g.guides = true;
-            g.clump = std::string(R"("params": {"centersFrom": "inputCurves", "strength": 0.8, "lockRadius": 0.1)") +
+            g.clump = std::string(R"("params": {"centersFrom": "inputCurves", "strength": 0.8, "volumize": 0.1)") +
                       (shared ? R"(, "copyAmount": 0.4})" : "}");
             g.nodes = std::string(R"(, {"name": "spots", "type": "Scatter", "params": {"density": 0.4, "seed": 4, "length": 3.0}},
                 {"name": "spotsShaped", "type": "Interpolate", "params": {"keepClearance": )") +
@@ -1834,7 +1834,7 @@ TEST_P(LookEngineTest, ASeedDragGivesWhatTheCpuDrawsForIt) {
     // Each stage's seed dragged: the strands' draws made again from it, as the CPU hashes them.
     LookGraph g;
     g.length = true;
-    g.clump = R"("params": {"strength": 0.8, "lockRadius": 0.1, "seed": 1})";
+    g.clump = R"("params": {"strength": 0.8, "volumize": 0.1, "seed": 1})";
     g.lengthNode = R"("params": {"keep": 0.9, "randomness": 0.3, "seed": 1})";
     g.noise = R"("params": {"amplitude": 0.3, "frequency": 1.0, "seed": 1, "octaves": 2})";
     g.curl = R"("params": {"radius": 0.1, "frequency": 0.8, "randomness": 0.5, "seed": 1})";
@@ -2161,14 +2161,58 @@ TEST_P(LookEngineTest, InterpolateCarriesGuidesRoundAFoldAsTheCpuDoes) {
     }
 }
 
+TEST_P(LookEngineTest, InterpolateFollowsBendsAsTheCpuDoes) {
+    // Guides arcing over (a half turn) on a plane: Interpolate's followBends carries each strand's
+    // offset along its guides' frames (look.slang BendsCS) on the GPU as the CPU does, all of it and
+    // by a map per strand; and it does move them (against followBends 0).
+    for (const std::string follow : {std::string("1.0"), std::string(R"({"expression": "0.3 + 0.7 * rand", "min": 0.0, "max": 1.0})")}) {
+        SCOPED_TRACE(follow);
+        LookGraph g;
+        g.guides = true;
+        g.scatter = R"("params": {"density": 400.0, "length": 1.0})";
+        g.interpolate = R"("params": {"keepClearance": false, "followBends": )" + follow + "}";
+        GroomData data;
+        data.graphJson = g.json();
+        data.scalp = test::makePlane(8, 2.0f);
+        auto guides = std::make_shared<GuideSet>();
+        std::uint64_t id = 1;
+        for (int i = 0; i < 3; ++i) {
+            for (int j = 0; j < 3; ++j) {
+                const float x = 0.35f + 0.65f * static_cast<float>(i), z = 0.35f + 0.65f * static_cast<float>(j);
+                std::vector<Vec3f> arc;
+                for (int k = 0; k <= 16; ++k) {
+                    const float a = 3.14159265f * static_cast<float>(k) / 16.0f;
+                    arc.push_back({x + 0.3f - 0.3f * std::cos(a), 0.1f + 0.3f * std::sin(a) + 0.02f * static_cast<float>(k), z});
+                }
+                arc.insert(arc.begin(), Vec3f{x, 0.0f, z});
+                guides->add(id++, arc);
+            }
+        }
+        guides->rootOnMesh(*data.scalp);
+        data.guides = guides;
+        GroomSession session(data);
+        ASSERT_TRUE(session.evaluate(ViewRequest{}).strands);
+        expectClose(runAndCompare(session, {}, session, "interpolate"));
+        // (It moves them: the same groom without it differs.)
+        GroomData flat = data;
+        LookGraph none = g;
+        none.interpolate = R"("params": {"keepClearance": false})";
+        flat.graphJson = none.json();
+        GroomSession plain(flat);
+        const StrandsPtr bent = session.evaluate(ViewRequest{}).strands, copies = plain.evaluate(ViewRequest{}).strands;
+        ASSERT_TRUE(bent && copies && bent->pointCount() == copies->pointCount());
+        EXPECT_GT(gpu::compareVectors(bent->positions(), copies->positions()).max, 0.01);
+    }
+}
+
 TEST_P(LookEngineTest, AGuideEditRunsFromInterpolateAsABrushDabWould) {
     // A brush dab's guides (their shapes changed, not their roots): evaluated up to Interpolate
     // alone (ViewRequest::stopAt), the GPU blends, clumps (centers made again from its strands,
-    // with a lock radius: their frames too) and shapes them; against a fresh CPU session of the
+    // with a volumize: their frames too) and shapes them; against a fresh CPU session of the
     // same guides. Then roots moved: the binding is the CPU's, the GPU says no.
     LookGraph g;
     g.guides = true;
-    g.clump = R"("params": {"strength": 0.8, "lockRadius": 0.1})";
+    g.clump = R"("params": {"strength": 0.8, "volumize": 0.1})";
     GroomData data = groom(g.json(), 0.6f);
     GroomSession session(data);
     ASSERT_TRUE(session.evaluate(ViewRequest{}).strands);
@@ -2498,7 +2542,7 @@ TEST_P(LookEngineTest, EveryPointStaysInTheBounds) {
         }
         GroomSession session(groom(g.json()));
         ASSERT_TRUE(session.evaluate(ViewRequest{}).strands);
-        const gpu::Overrides drag{{"noise", {{"amplitude", 2.5}}}, {"curl", {{"radius", 0.8}}}, {"clump", {{"lockRadius", 0.6}}}};
+        const gpu::Overrides drag{{"noise", {{"amplitude", 2.5}}}, {"curl", {{"radius", 0.8}}}, {"clump", {{"volumize", 0.6}}}};
         const Prepared p = prepare(session, drag, "interpolate");
         auto engine = backend_->engine();
         engine->setBase(p.base, session.last().scalp.get());
@@ -2633,17 +2677,17 @@ std::string meridianParts(const ScalpMesh& scalp, float radius = 4.0f) {
 }
 
 TEST_P(LookEngineTest, ClumpVariesItsClumpsAsTheCpuDoes) {
-    // Each clump's strength and lock radius varied by its center's ID, volumize (a number, then a
+    // Each clump's strength and volume varied by its center's ID, volumize (a number, then a
     // map, along its profile), flatness lying along the scalp, turned at random or along a
     // direction: from Clump as the CPU chose its centers, and from Interpolate with its centers
     // made again (and given frames) from the strands it moves; then drags of each.
-    const std::string varied = R"("strength": 0.8, "strengthRandom": 0.6, "lockRadius": 0.12, "lockRadiusRandom": 0.5, "seed": 3)";
+    const std::string varied = R"("strength": 0.8, "strengthRandom": 0.6, "volumize": 0.12, "volumizeRandom": 0.5, "seed": 3)";
     const std::string clumps[] = {
         "{" + varied + "}",
-        "{" + varied + R"(, "volumize": 0.4, "volumizeProfile": [[0, 1], [0.6, 0.4], [1, 0]]})",
+        "{" + varied + R"(, "volumizeProfile": [[0, 1], [0.6, 0.4], [1, 0.2]]})",
         R"({"strength": 0.9, "volumize": {"expression": "0.2 + 0.3 * rand", "min": 0.0, "max": 1.0}})",
         R"({"strength": 0.9, "flatness": 0.7})",
-        R"({"strength": 0.9, "flatness": 0.6, "flatAlong": "random", "lockRadius": 0.1})",
+        R"({"strength": 0.9, "flatness": 0.6, "flatAlong": "random", "volumize": 0.1})",
         R"({"strength": 0.9, "flatness": 0.8, "flatAlong": "direction", "flatDirection": [0, 1, 1]})"};
     for (const std::string& params : clumps) {
         for (const bool guides : {false, true}) {
@@ -2660,13 +2704,13 @@ TEST_P(LookEngineTest, ClumpVariesItsClumpsAsTheCpuDoes) {
             expectClose(runAndCompare(session, {}, session, guides ? "interpolate" : "clump"));
         }
     }
-    const std::pair<const char*, double> drags[] = {{"strengthRandom", 0.3}, {"lockRadiusRandom", 0.9}, {"volumize", 0.25},
+    const std::pair<const char*, double> drags[] = {{"strengthRandom", 0.3}, {"volumizeRandom", 0.9}, {"volumize", 0.25},
                                                     {"flatness", 0.4}, {"seed", 7.0}};
     for (const auto& [param, value] : drags) {
         SCOPED_TRACE(param);
         LookGraph g;
-        g.clump = R"("params": {"centersFrom": "inputPoints", "strength": 0.8, "strengthRandom": 0.6, "lockRadius": 0.12, "lockRadiusRandom": 0.5,
-                                "volumize": 0.2, "flatness": 0.3, "seed": 3})";
+        g.clump = R"("params": {"centersFrom": "inputPoints", "strength": 0.8, "strengthRandom": 0.6, "volumize": 0.12, "volumizeRandom": 0.5,
+                                "flatness": 0.3, "seed": 3})";
         g.nodes = R"(, {"name": "spots", "type": "Scatter", "params": {"density": 0.3, "seed": 4, "previewAll": true}})";
         g.connections = R"(, {"from": "scalp", "to": "spots", "input": "scalp"}, {"from": "spots", "to": "clump", "input": "centers"})";
         nlohmann::json want = nlohmann::json::parse(g.json());
@@ -2683,7 +2727,7 @@ TEST_P(LookEngineTest, ClumpSharesItsNeighboursShapesAsTheCpuDoes) {
     // centersFrom inputPoints (axes gathering no strand neither give nor take), and as the CPU made them.
     LookGraph own;
     own.guides = true;
-    own.clump = R"("params": {"strength": 0.85, "copyAmount": 0.6, "copyNeighbors": 3, "lockRadius": 0.08})";
+    own.clump = R"("params": {"strength": 0.85, "copyAmount": 0.6, "copyNeighbors": 3, "volumize": 0.08})";
     LookGraph fed = own;
     fed.clump = R"("params": {"centersFrom": "inputPoints", "strength": 0.85, "copyAmount": 0.5, "copyNeighbors": 4, "flatness": 0.4})";
     fed.nodes = R"(, {"name": "spots", "type": "Scatter", "params": {"density": 0.3, "seed": 4, "previewAll": true}})";
@@ -6358,10 +6402,10 @@ TEST(CpuEngine, TheOperatorsGiveTheirStagesBits) {
         {"Collide", R"("params": {"offset": 0.08, "softness": 0.2, "iterations": 3})"},
         {"Collide", R"("params": {"offset": 0.12, "softness": 0.05, "method": "exact"})", false, true},
         {"Clump", R"("params": {"count": 80, "strength": 0.7})"},
-        {"Clump", R"("params": {"count": 50, "strength": {"expression": "0.3 + 0.7 * t", "min": 0.0, "max": 1.0}, "volumize": 0.2, "flatness": 0.5,
-                                "lockRadius": 0.05, "lockRadiusRandom": 0.3, "strengthRandom": 0.4, "copyAmount": 0.3, "pastTip": "extend", "seed": 6})"},
-        {"Clump", R"("params": {"count": 50, "strength": {"expression": "0.3 + 0.7 * rand", "min": 0.0, "max": 1.0}, "volumize": 0.2, "flatness": 0.5,
-                                "lockRadius": 0.05, "lockRadiusRandom": 0.3, "strengthRandom": 0.4, "copyAmount": 0.3, "pastTip": "extend", "seed": 6})"},
+        {"Clump", R"("params": {"count": 50, "strength": {"expression": "0.3 + 0.7 * t", "min": 0.0, "max": 1.0}, "volumize": 0.05, "flatness": 0.5,
+                                "volumizeRandom": 0.3, "strengthRandom": 0.4, "copyAmount": 0.3, "pastTip": "extend", "seed": 6})"},
+        {"Clump", R"("params": {"count": 50, "strength": {"expression": "0.3 + 0.7 * rand", "min": 0.0, "max": 1.0}, "volumize": 0.05, "flatness": 0.5,
+                                "volumizeRandom": 0.3, "strengthRandom": 0.4, "copyAmount": 0.3, "pastTip": "extend", "seed": 6})"},
         {"Clump", R"("params": {"count": 40, "strength": -0.3, "repelRadius": 0.2, "flatAlong": "random", "flatness": 0.7})"},
         {"Interpolate", R"("params": {"keepClearance": true})", false, true},
         {"Interpolate", R"("params": {"keepClearance": false, "limitDistance": 0.6, "preserveLength": true})", false, true},

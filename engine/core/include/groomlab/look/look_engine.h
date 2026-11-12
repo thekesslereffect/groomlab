@@ -376,6 +376,9 @@ private:
         std::size_t walkPoints = 0;
         bool walked = false;       // the buffer holds the walk of walkRows and walkKey
         bool walkPartial = false;  // this run walks only the strands of the guides it changed
+        // Interpolate's followBends (BendsCS): where its guides' frames and first points are in its
+        // guides' buffer (words; 0: not uploaded).
+        std::uint32_t bendsAt = 0, firstsAt = 0;
         // SelfCollide and Static: the room the hair grid's buffers hold (block cells along x, y, z;
         // blocks), and where the scalp's walls start in its floor's tables' buffer (aux 4; ~0: none).
         std::uint32_t room[4] = {};

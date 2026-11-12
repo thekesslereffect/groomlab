@@ -96,11 +96,10 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
                 *why = r.name() + " keeps the guides' curls (keepCurls): the CPU's";
                 return false;
             }
-            if (params.has("followBends") && !r.bends && params.getString("take") == "shape" &&
-                (mappedParam(params, "followBends") || number("followBends") > 0.0)) {
-                *why = r.name() + " follows the guides' bends (followBends): the CPU's";
-                return false;
-            }
+            // followBends (field 0; value 1 its number, the clearance's constants after it): BendsCS
+            // after the blend (and its clearance walk).
+            s->value[1] = 0.0f;
+            if (params.has("followBends") && params.getString("take") == "shape" && !mappable("followBends", &s->value[1])) return false;
             s->value[0] = static_cast<float>(number("limitDistance"));
             s->flag[0] = static_cast<int>(r.samples);
             s->flag[1] = params.getBool("preserveLength") ? 1 : 0;
@@ -117,7 +116,6 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
             s->value2[3] = params.has("strandStrengthRandom") ? static_cast<float>(params.getDouble("strandStrengthRandom")) : 0.0f;
             s->ramp = r.ramp("profile");
             s->ramp2 = r.ramp("volumizeProfile");
-            s->ramp3 = r.ramp("lockProfile");
             return true;
         }
         case StageKind::Noise: {

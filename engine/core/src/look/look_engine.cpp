@@ -7,6 +7,7 @@
 #include <memory>
 #include <stdexcept>
 
+#include "groomlab/frames.h"
 #include "groomlab/parallel.h"
 #include "groomlab/portable_math.h"
 #include "groomlab/preview_core.h"
@@ -56,6 +57,7 @@ KernelSet kernelsOf(const LookRun& run) {
             case StageKind::Interpolate:
                 set |= bit(K::Interpolate);
                 if (in && in->interpolate && in->interpolate->clearance) set |= bit(K::Clearance);
+                if (stages[k].value[1] > 0.0f) set |= bit(K::Bends);  // followBends
                 break;
             case StageKind::Length: set |= bit(K::Length); break;
             case StageKind::Clump:
@@ -926,7 +928,8 @@ void LookEngine::putStageInputs(const LookRun& run) {
             held.a = data->binding.get();
             held.keep = data->binding;
             if (data->tubes && !sharesBase()) throw std::runtime_error("GPU preview: Interpolate's tubes are the CPU engine's");
-            if (held.b != data->rows.get() || held.alive[2].get() != data->tubes.get()) {
+            const bool bends = stages[k].value[1] > 0.0f;  // followBends (BendsCS): the guides' frames
+            if (held.b != data->rows.get() || held.alive[2].get() != data->tubes.get() || (bends && held.bendsAt == 0)) {
                 // The guides: 8 words each (normal xyz, turns, length), then their offsets.
                 const InterpolateGuideRows& rows = *data->rows;
                 const std::size_t count = rows.roots.size();
@@ -958,6 +961,34 @@ void LookEngine::putStageInputs(const LookRun& run) {
                     }
                 } else if (!rows.offsets.empty()) {
                     std::memcpy(words.data() + count * 8, rows.offsets.data(), rows.offsets.size() * 12);
+                }
+                // followBends: each guide's rotation-minimizing frames along its offsets (9 words a
+                // sample: tangent, normal, binormal) at word bendsAt, then each guide's first point as
+                // it is (3 words) at firstsAt (look.slang BendsCS).
+                held.bendsAt = held.firstsAt = 0;
+                if (bends && rows.samples >= 2 && rows.offsets.size() == count * rows.samples && rows.firsts.size() == count) {
+                    const std::size_t n = rows.samples;
+                    held.bendsAt = static_cast<std::uint32_t>(words.size());
+                    held.firstsAt = static_cast<std::uint32_t>(words.size() + count * n * 9);
+                    words.resize(held.firstsAt + count * 3, 0.0f);
+                    parallelFor(0, count, [&](std::size_t gi) {
+                        thread_local std::vector<Frame> frames;
+                        rotationMinimizingFramesInto(rows.offsets.data() + gi * n, n, Vec3f{}, frames);
+                        float* to = words.data() + held.bendsAt + gi * n * 9;
+                        for (std::size_t j = 0; j < n; ++j, to += 9) {
+                            const Frame& f = frames[j];
+                            const Vec3f axes[3] = {f.tangent, f.normal, f.binormal};
+                            for (int a = 0; a < 3; ++a) {
+                                to[a * 3] = axes[a].x;
+                                to[a * 3 + 1] = axes[a].y;
+                                to[a * 3 + 2] = axes[a].z;
+                            }
+                        }
+                        float* first = words.data() + held.firstsAt + gi * 3;
+                        first[0] = rows.firsts[gi].x;
+                        first[1] = rows.firsts[gi].y;
+                        first[2] = rows.firsts[gi].z;
+                    }, 16);
                 }
                 // fillTubes: the tubes and each strand's (look.slang tubeOf) after them, at word aux[2].
                 held.aux[2] = 0;
@@ -1560,11 +1591,10 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
         }
         return at;
     };
-    std::vector<RampAt> rampAt(stages.size()), rampAt2(stages.size()), rampAt3(stages.size());
+    std::vector<RampAt> rampAt(stages.size()), rampAt2(stages.size());
     for (std::size_t k = 0; k < stages.size(); ++k) {
         rampAt[k] = putRamp(stages[k].ramp, stages[k].tabled);
         if (stages[k].hasRamp2) rampAt2[k] = putRamp(stages[k].ramp2, true);  // (RampAlong: by point index)
-        if (stages[k].hasRamp3) rampAt3[k] = putRamp(stages[k].ramp3, false);  // (its keys alone: table2's spare words)
     }
     if (ramps_.empty()) ramps_.push_back(0.0f);
     write(kRamps, ramps_.data(), ramps_.size() * 4, false);
@@ -1675,10 +1705,6 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
         c.ramp2[2] = rampAt2[k].straight;
         c.ramp2[3] = rampAt2[k].tableCount;
         c.table2[0] = rampAt2[k].tableOffset;
-        if (stages[k].hasRamp3) {  // a third profile (Clump's lockProfile): its key count (straight: the top bit), offset
-            c.table2[1] = rampAt3[k].count | (rampAt3[k].straight << 31);
-            c.table2[2] = rampAt3[k].offset;
-        }
         if (p.stage.kind == StageKind::Interpolate) {
             c.flag2[0] = needInfluence ? 1u : 0u;  // the influence for FieldCS
             c.flag2[2] = held_[k].aux[1];          // keeping clearance over a deformed scalp: its walk words (0: none)
@@ -2174,14 +2200,14 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
                 const ClumpInputs& in = *r.inputs[k].clump;
                 c.flag2[3] = in.spots ? 1u : 0u;  // centers on the scalp (ClumpInputs::spots)
                 const bool made = !in.curves;
-                // Frames for a lock radius or a flatness.
-                const bool framed = p.value[3] > 0.0f || p.value[2] > 0.0f;
+                // Frames for a volume (the lock round each center) or a flatness.
+                const bool framed = p.value[1] > 0.0f || p.value[2] > 0.0f;  // (volumize: a number, or 1 mapped)
                 // copyAmount on centers made here: resampled into a buffer of their own, then shared.
                 const bool share = made && in.neighbors && p.value2[2] > 0.0f && in.centers > 1;
                 const std::size_t centerGroups = (in.centers + 63) / 64;
                 if (in.centers > 0 && (made || !held_[k].framesMade)) {
                     // The centers' curves made from the points so far (the Clump's own strands), and
-                    // with a lock radius or a flatness their frames; their arc lengths where the
+                    // with a volumize or a flatness their frames; their arc lengths where the
                     // curves are final (not shared after).
                     StageConstants centers = c;
                     centers.flag[0] = static_cast<std::uint32_t>(in.centers);
@@ -2372,6 +2398,22 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
             if (keeps) walkedStages.push_back(k);
             slots.push_back(c);
             steps.push_back({Kernel::Clearance, walk, strandGroups, false, kClearanceStamp});
+        }
+        if (kernel == Kernel::Interpolate && p.value[1] > 0.0f && held_[k].bendsAt != 0) {
+            // followBends: the strands' offsets from their guides carried along the guides' frames,
+            // on the points Interpolate (and its clearance walk) wrote, in place (look.slang BendsCS):
+            // its number (value 1; the clearance's constants in the stage's), the frames' and first
+            // points' words (flag 2, flag 1).
+            StageConstants bends = c;
+            bends.value[1] = p.value[1];
+            bends.flag[1] = held_[k].firstsAt;
+            bends.flag[2] = held_[k].bendsAt;
+            Binding bb;
+            bb.out[0] = to;
+            bb.aux[0] = b.aux[0];
+            bb.aux[1] = b.aux[1];
+            slots.push_back(bends);
+            steps.push_back({Kernel::Bends, bb, strandGroups, false, -3});
         }
         mixAffect(k, to, -1);
         resultOf[k] = current = to;

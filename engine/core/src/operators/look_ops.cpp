@@ -915,9 +915,8 @@ std::vector<float> clumpNumbers(const std::vector<const ClumpCenter*>& centers) 
 // says which to change). pastTip says how a strand lies along its axis: fit, by its share of
 // its length (tip to tip, Yeti's and XGen's way: the strand takes the axis's length as much as it
 // clumps), or extend, by its length from the root and on past a shorter axis's tip along it (the
-// strand keeps its own length). With a radius the
-// strands gather into a round lock of that radius instead of onto the center
-// (dreads, wet strings). With `flatness` each clump is squashed across into a ribbon
+// strand keeps its own length). With `volumize` the strands gather into a round lock that thick
+// (volumizeProfile along it) instead of onto the center (dreads, wet strings). With `flatness` each clump is squashed across into a ribbon
 // (wet hair). What primitive nodes do is theirs: a Twist after it spirals the
 // clumps (ropes, locs), a Noise on guides as its centers waves each clump as one, a
 // RestoreLength after it keeps the strands' lengths, a strength that varies per
@@ -1015,14 +1014,6 @@ public:
                       "twist and taper with the tube; strands in no tube clump as ever. Off: by root across tubes. "
                       "Strands without those channels clump as ever either way"}
                 .when("centersFrom", {"pick"}),
-            ParamSpec{"lockRadius", 0.0, "Lock radius: strands gather into a round lock this thick around the center "
-                                         "(dreads, wet strings; a Twist node after it turns them into ropes); 0: onto the "
-                                         "center", "length"}
-                .atLeast(0)
-                .soft(0, 1),
-            ParamSpec{"lockProfile", Ramp::constant(1.0f),
-                      "With a lock radius: the lock's radius along the length, root to tip, times lockRadius (a lock "
-                      "fuller at the root and tapering to its tip, or swelling midway)"},
             ParamSpec{"repelRadius", 0.5, "With a negative strength: how far from its center a strand is pushed out to at "
                                           "least (the part's half width): those within twice it move out, the nearest "
                                           "to it, keeping their order; those farther away stay as they are", "length"}
@@ -1039,11 +1030,17 @@ public:
                 .world()
                 .when("flatAlong", {"direction"}),
             // XGen's and Yeti's clump controls, each per clump (by its center's ID), 0: none.
-            ParamSpec{"volumize", 0.0, "Pushes each clump's strands out from its axis by this share of how far they are from "
-                                       "it, most near the root, filling the clump's volume (mappable)"}
+            ParamSpec{"volumize", 0.0, "Each clump's volume: its strands gather into a round lock this thick round its "
+                                       "center, each keeping its place round it so none cross (dreads, wet strings, "
+                                       "stylized locks; a Twist after it turns them into ropes); 0: onto the center "
+                                       "(mappable: per strand)", "length"}
+                .atLeast(0)
                 .soft(0, 1)
                 .in("Shape"),
-            ParamSpec{"volumizeProfile", Ramp::linear(1.0f, 0.0f), "Volumize along the length, root to tip"}.in("Shape"),
+            ParamSpec{"volumizeProfile", Ramp::constant(1.0f),
+                      "The volume along the length, root to tip, times volumize: a lock fuller at the root tapering to "
+                      "its tip, or swelling midway"}
+                .in("Shape"),
             ParamSpec{"strengthRandom", 0.0, "Each clump's strength scaled down by up to this share, at random per clump",
                       "fraction"}
                 .range(0, 1)
@@ -1052,8 +1049,8 @@ public:
                                                    "strand: some hug the clump, some hang loose", "fraction"}
                 .range(0, 1)
                 .in("Random"),
-            ParamSpec{"lockRadiusRandom", 0.0, "Each clump's lock radius up to this share bigger or smaller, at random per "
-                                               "clump", "fraction"}
+            ParamSpec{"volumizeRandom", 0.0, "Each clump's volume up to this share bigger or smaller, at random per clump",
+                      "fraction"}
                 .range(0, 1)
                 .in("Random")
                 .adv(),

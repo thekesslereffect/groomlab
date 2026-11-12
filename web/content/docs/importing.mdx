@@ -82,7 +82,7 @@ Transform and Width nodes. The FX modules become nodes, in the order XGen applie
 | Clumping's clump map points | Clump centers | At the guides when XGen's clump points are the guides; else that many clumps picked among the strands |
 | Clump modifier pointDensity | Clump count | pointDensity x pointDensityMask x the scalp's area |
 | flatness, copy | Clump flatness, copyAmount | |
-| clumpVolumize, clumpVariance | Clump volumize 0.3, strengthRandom | Approximated |
+| clumpVariance | Clump strengthRandom | Approximated; clumpVolumize is skipped: set Clump's volumize (the locks' radius) by eye |
 | Noise magnitude, frequency, magnitudeScale | Noise amplitude, frequency, profile | Amplitude = magnitude x 0.05 x the guides' median length; frequency x 4 per strand length (calibrated) |
 | Noise correlation | Noise space | 0.5 or more: world (coherent); below: strand |
 | Coil count, radius, countScale, radiusScale | Curl (helix) frequency, radius, frequencyProfile, profile | count turns per strand, set per unit length at the strands' median length |

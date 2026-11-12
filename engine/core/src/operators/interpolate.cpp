@@ -1249,7 +1249,7 @@ public:
                       "0 each strand a copy of its guides moved over to its root (a lock bent over flattens into a "
                       "ribbon); 1 its offset from each guide carried along the guide's frames, so a lock keeps the "
                       "section it has at the roots through curls and arcs (a strand on the outside of a bend grows "
-                      "longer, as in a tube). The CPU's: the GPU preview hands the node to it",
+                      "longer, as in a tube)",
                       "fraction"}
                 .range(0, 1)
                 .when("take", {"shape"}),
@@ -2052,6 +2052,8 @@ private:
             rows->roots = roots;
             rows->normals = normals;
             rows->lengths = guideLengths;
+            rows->firsts.resize(kept.size());
+            for (std::size_t g = 0; g < kept.size(); ++g) rows->firsts[g] = kept[g]->points.front();
             rows->offsets.resize(kept.size() * samples);
             for (std::size_t g = 0; g < kept.size(); ++g) {
                 const float* o = offsets.data() + g * 3 * stride;
@@ -2123,57 +2125,6 @@ private:
         reader.lengthAlone = lengthOnly;
         reader.tubes = true;  // (its tubes handed in, StageInputs::interpolate; none filled: none)
         reader.curls = true;  // (keepCurls: run after it, below)
-        reader.bends = true;  // (followBends: likewise)
-        // followBends: each guide's rotation-minimizing frames at its samples, then each bound
-        // strand's offset from each of its guides (its root's, in the guide's root frame) carried
-        // along them: the strand moved by the blend of (carried - kept) offsets, by its amount (the
-        // strands in tubes ride them as they are).
-        const ScalarField bendsField(params(), "followBends", align ? scalp.get() : nullptr, guides.get());
-        const bool bends = !lengthOnly && samples >= 2 && !(bendsField.isConstant() && !(bendsField.maximum() > 0.0f));
-        std::vector<Frame> guideFrames;
-        if (bends) {
-            guideFrames.resize(kept.size() * samples);
-            parallelFor(0, kept.size(), [&](std::size_t g) {
-                const float* row = offsets.data() + g * 3 * stride;
-                std::vector<Vec3f> points(samples);
-                for (std::size_t k = 0; k < samples; ++k) points[k] = {row[k], row[stride + k], row[2 * stride + k]};
-                std::vector<Frame> frames;
-                rotationMinimizingFramesInto(points.data(), samples, Vec3f{}, frames);
-                std::copy(frames.begin(), frames.end(), guideFrames.begin() + static_cast<std::ptrdiff_t>(g * samples));
-            }, 8);
-        }
-        Vec3f* bendPoints = nullptr;  // the output's points, once the stage wrote them
-        auto followBends = [&](std::size_t s) {
-            if (guideFrames.empty()) return;
-            const Binding::Record record = bindings.record(s);
-            if (!record.bound || (fill && fill->tubeOf[s] >= 0)) return;
-            const float amount = std::clamp(bendsField.at(*strands, s), 0.0f, 1.0f) * influenceAt(record.nearest2);
-            const std::size_t n = out->strandPointCount(s);
-            if (!(amount > 0.0f) || n < 2) return;
-            Vec3f* p = bendPoints + out->strandBegin(s);
-            // The root's offset from each guide's root, in the guide's root frame.
-            constexpr std::size_t kMost = 32;  // (more guides than any record binds: neighbors' most is 16)
-            std::array<Vec3f, kMost> local{}, offset{};
-            const std::uint32_t count = std::min<std::uint32_t>(record.count, static_cast<std::uint32_t>(kMost));
-            for (std::uint32_t i = 0; i < count; ++i) {
-                const std::size_t g = record.guide(i);
-                offset[i] = p[0] - kept[g]->points[0];
-                local[i] = guideFrames[g * samples].toLocal(offset[i]);
-            }
-            const float last = static_cast<float>(samples - 1);
-            for (std::size_t j = 1; j < n; ++j) {
-                const float x = static_cast<float>(j) / static_cast<float>(n - 1) * last;
-                const std::size_t k = std::min(static_cast<std::size_t>(x), samples - 2);
-                const float f = x - static_cast<float>(k);
-                Vec3f move{};
-                for (std::uint32_t i = 0; i < count; ++i) {
-                    const Frame* frames = guideFrames.data() + record.guide(i) * samples;
-                    const Vec3f carried = frames[k].toWorld(local[i]) * (1.0f - f) + frames[k + 1].toWorld(local[i]) * f;
-                    move += (carried - offset[i]) * record.weight(i);
-                }
-                p[j] += move * amount;
-            }
-        };
         // keepCurls: each guide's curl envelope, then each bound strand's curl brought back to its
         // guides' blended envelope (the strands in tubes ride them as they are).
         const ScalarField keepCurlsField(params(), "keepCurls", align ? scalp.get() : nullptr, guides.get());
@@ -2210,10 +2161,6 @@ private:
         };
         if (!last) {
             gpu::runStageInto(gpu::StageKind::Interpolate, reader, strands, scalp.get(), *out, std::move(blend));
-            if (!guideFrames.empty()) {
-                bendPoints = out->strandPoints(0);
-                parallelFor(0, strandCount, followBends, 256);
-            }
             if (!guideCurls.empty()) {
                 curlPoints = out->strandPoints(0);
                 parallelFor(0, strandCount, keepCurls, 256);
@@ -2234,11 +2181,9 @@ private:
         } else {
             gpu::runStageOnStrands(gpu::StageKind::Interpolate, reader, strands, dirty, scalp.get(), *out, std::move(blend));
             if (!guideCurls.empty()) curlPoints = out->strandPoints(0);
-            if (!guideFrames.empty()) bendPoints = out->strandPoints(0);
             forEachListed(dirty, [&](std::size_t s) {
                 thread_local Scratch scratch;
-                followBends(s);  // (bendPoints: set before)
-                keepCurls(s);    // (curlPoints: set before)
+                keepCurls(s);  // (curlPoints: set before)
                 for (std::vector<float>* channel : attrChannels) (*channel)[s] = 0.0f;
                 const std::size_t begin = out->strandBegin(s), n = out->strandPointCount(s);
                 for (std::vector<float>* channel : layerChannels) std::fill(channel->begin() + begin, channel->begin() + begin + n, 0.0f);
@@ -3106,8 +3051,10 @@ void interpolateGuideRows(const ParamSet& params, const std::vector<const Guide*
     rows->roots.assign(kept.size(), Vec3f{});
     rows->normals.assign(kept.size(), Vec3f{});
     rows->lengths.assign(kept.size(), 0.0f);
+    rows->firsts.assign(kept.size(), Vec3f{});
     parallelFor(0, kept.size(), [&](std::size_t k) {
         const Guide& g = *kept[k];
+        rows->firsts[k] = g.points.front();
         thread_local std::vector<Vec3f> resampled;
         rows->lengths[k] = guideShape(g, samples, smoothGuides, resampled);
         rows->roots[k] = restRootOr(align ? scalp : nullptr, g.root, resampled.front());

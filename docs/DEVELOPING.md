@@ -2230,8 +2230,8 @@ side-by-sides with `tests/data/app/arnold_compare.py --lights key --ocio-linear`
 `--lighting key --tonemap none`). The cards and scales keep Maya's hair tube graph.
 
 **GPU look preview (on by default).** With Viewport 2.0 on DirectX 11 or OpenGL, a drag of a
-number of a node the GPU runs (Interpolate's radius, Length, Clump's strength, flyaways, lock
-radius, repel radius, volumize, flatness and per-clump randomness, Noise, Curl (a coil's
+number of a node the GPU runs (Interpolate's radius, Length, Clump's strength, flyaways,
+repel radius, volumize, flatness and per-clump randomness, Noise, Curl (a coil's
 coilWidths too), Width, Part's strength and width, Gravity's strength, stiffness and stiffness
 profile, Flyaway's numbers and seed, Curl's weightDirection: the Graph Editor's `preview_param`, or
 `groomLabGpuPreview -node n -param p -value v <groom>`, `-ramp` a profile's keys, `-vector x y z` a
@@ -2364,10 +2364,10 @@ with. Weighted curls (`weight`) take the stretch at each of the axis's samples, 
 makes it: `CurlCS` walks a strand's own axis to its tip once before curling (its hang and its
 unweighted turns at each sample, a local array of 32), `CurlAxesCS` a clump's after its frames
 (the stretches a row of the clump's table); the profiled arc is then weighted by it on the same
-walk, and the radius narrowed (`curlStretchedShare`). A Clump varies its clumps on the GPU too: each center's draws (strength, lock radius, a random
+walk, and the radius narrowed (`curlStretchedShare`). A Clump varies its clumps on the GPU too: each center's draws (strength, volume, a random
 flatten's turn) from its ID and the seed (`ClumpState::centerIds`, drawn in `LookInputs::read`, a
-seed dragged draws again), volumize along its own profile (a second ramp, `gRamp2`), flatness in
-the centers' frames (made for a lock radius or a flatness; the thin way the scalp's normal at the
+seed dragged draws again), the lock's radius along volumizeProfile (a second ramp, `gRamp2`), flatness in
+the centers' frames (made for a volumize or a flatness; the thin way the scalp's normal at the
 center's root, a random turn or across a direction), and copyAmount: centers the CPU made come
 shared, centers made on the GPU are resampled into a buffer of their own and shared by `ShareCS`
 (each center's nearest centers by the roots it was assigned by, found once on the CPU in its order,
