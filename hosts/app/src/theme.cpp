@@ -775,6 +775,66 @@ ViewportOverlayLayout layoutViewportOverlay(const ViewportOverlayRequest& r, int
 
 // ---- The style sheet ------------------------------------------------------------------------------
 
+namespace {
+
+// A picture the style sheet names (an indicator's, an arrow's), in the theme's colors: written once
+// per colors to the temp folder (a style sheet names files, not colors), its path returned.
+QString uiImage(const QString& name, const QString& svg) {
+    const QString dir = QDir::tempPath() + QStringLiteral("/groomlab-ui");
+    const QString path = dir + QLatin1Char('/') + name;
+    if (!QFileInfo::exists(path)) {
+        QDir().mkpath(dir);
+        QFile file(path);
+        if (file.open(QIODevice::WriteOnly)) file.write(svg.toUtf8());
+    }
+    return QDir::fromNativeSeparators(path);
+}
+
+QString svgFill(const QColor& c) {
+    return QStringLiteral("fill=\"%1\" fill-opacity=\"%2\"").arg(c.name()).arg(c.alphaF(), 0, 'f', 3);
+}
+
+// A switch (components.switch): a rounded track, its knob at the left (off) or the right (on).
+QString switchImage(bool on, bool disabled) {
+    const int w = component("switch", "width", 28), h = component("switch", "height", 16);
+    QColor track = on ? componentColor("switch", "trackOn", accentFill()) : componentColor("switch", "track", textDisabled());
+    QColor knob = on ? componentColor("switch", "knobOn", uiColor("accentText")) : componentColor("switch", "knob", uiColor("accentText"));
+    if (disabled) {
+        track.setAlphaF(track.alphaF() * 0.4);
+        knob.setAlphaF(knob.alphaF() * 0.5);
+    }
+    const double r = h * 0.5, k = r - 2.5;
+    const double cx = on ? w - r : r;
+    const QString svg = QStringLiteral("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"%1\" height=\"%2\" viewBox=\"0 0 %1 %2\">"
+                                       "<rect x=\"0\" y=\"0\" width=\"%1\" height=\"%2\" rx=\"%3\" %4/>"
+                                       "<circle cx=\"%5\" cy=\"%3\" r=\"%6\" %7/></svg>")
+                            .arg(w)
+                            .arg(h)
+                            .arg(r)
+                            .arg(svgFill(track))
+                            .arg(cx)
+                            .arg(k)
+                            .arg(svgFill(knob));
+    const QString name = QStringLiteral("switch_%1x%2_%3_%4.svg")
+                             .arg(w)
+                             .arg(h)
+                             .arg(track.name(QColor::HexArgb).mid(1), knob.name(QColor::HexArgb).mid(1))
+                             .replace(QStringLiteral(".svg"), on ? QStringLiteral("_on.svg") : QStringLiteral("_off.svg"));
+    return uiImage(name, svg);
+}
+
+// A dropdown's chevron (components.field chevron), plain to read beside the value.
+QString chevronImage(const QColor& color) {
+    const QString svg = QStringLiteral("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"12\" height=\"12\" viewBox=\"0 0 12 12\" fill=\"none\" "
+                                       "stroke=\"%1\" stroke-opacity=\"%2\" stroke-width=\"1.8\" stroke-linecap=\"round\" "
+                                       "stroke-linejoin=\"round\"><path d=\"M2.75 4.5 6 7.75 9.25 4.5\"/></svg>")
+                            .arg(color.name())
+                            .arg(color.alphaF(), 0, 'f', 3);
+    return uiImage(QStringLiteral("chevron_%1.svg").arg(color.name(QColor::HexArgb).mid(1)), svg);
+}
+
+}  // namespace
+
 QString styleSheet() {
     // The window's chrome first (solid in every theme: the menu bar, the tool bar, the docks with
     // their titles and tabs, the separators), then the ordinary widgets inside the docks and the
@@ -838,15 +898,17 @@ QAbstractSpinBox::up-button, QAbstractSpinBox::down-button { width: 14px; border
 QAbstractSpinBox::up-arrow { image: url(:/groomlab/icons/ui_chevron_up.svg); width: 9px; height: 9px; }
 QAbstractSpinBox::down-arrow { image: url(:/groomlab/icons/ui_chevron_down.svg); width: 9px; height: 9px; }
 QAbstractSpinBox::up-arrow:disabled, QAbstractSpinBox::down-arrow:disabled { image: none; }
-QComboBox::drop-down { border: none; width: 18px; }
-QComboBox::down-arrow { image: url(:/groomlab/icons/ui_chevron_down.svg); width: 11px; height: 11px; margin-right: 4px; }
+QComboBox::drop-down { border: none; width: 22px; }
+QComboBox::down-arrow { image: url(@chevron@); width: 12px; height: 12px; margin-right: 0px; }
+QComboBox::down-arrow:disabled { image: url(@chevronOff@); }
 QComboBox QAbstractItemView { background: @field@; border: 1px solid @popupEdge@; border-radius: @radius@px; padding: 4px; selection-background-color: @selection@;
     selection-color: @selectionText@; outline: none; }
 QCheckBox { spacing: 8px; }
-QCheckBox::indicator { width: 14px; height: 14px; border-radius: @checkRadius@px; background: @check@; border: 1px solid @checkEdge@; }
-QCheckBox::indicator:checked { background: @checkOn@; border-color: @checkOnEdge@; image: url(:/groomlab/icons/ui_check_light.svg); }
-QCheckBox::indicator:disabled { background: @checkOff@; }
-QCheckBox::indicator:checked:disabled { background: @hover@; border-color: @hover@; image: url(:/groomlab/icons/ui_check_light.svg); }
+QCheckBox[role="switch"] { spacing: 0px; }  /* a row's switch, no label of its own: it ends where the numbers end */
+QCheckBox::indicator { width: @switchWidth@px; height: @switchHeight@px; border: none; background: transparent; image: url(@switchOff@); }
+QCheckBox::indicator:checked { image: url(@switchOn@); }
+QCheckBox::indicator:disabled { image: url(@switchOffDisabled@); }
+QCheckBox::indicator:checked:disabled { image: url(@switchOnDisabled@); }
 QCheckBox:disabled { color: @disabled@; }
 QPushButton { background: @field@; border: 1px solid @fieldEdge@; border-radius: @radius@px; padding: 4px 12px; min-height: @buttonHeight@px; font-weight: 500; }
 QPushButton:hover { background: @fieldHover@; }
@@ -1118,6 +1180,15 @@ QFrame[role="propRule"] { background: @cardRule@; border: none; }
         {QStringLiteral("@dim@"), textDim().name()},
         {QStringLiteral("@muted@"), textMuted().name()},
         {QStringLiteral("@emerald@"), emerald().name()},
+        // Booleans are switches, dropdowns carry a chevron (components.switch, components.field).
+        {QStringLiteral("@switchWidth@"), QString::number(component("switch", "width", 28))},
+        {QStringLiteral("@switchHeight@"), QString::number(component("switch", "height", 16))},
+        {QStringLiteral("@switchOffDisabled@"), switchImage(false, true)},
+        {QStringLiteral("@switchOnDisabled@"), switchImage(true, true)},
+        {QStringLiteral("@switchOff@"), switchImage(false, false)},
+        {QStringLiteral("@switchOn@"), switchImage(true, false)},
+        {QStringLiteral("@chevronOff@"), chevronImage(textDisabled())},
+        {QStringLiteral("@chevron@"), chevronImage(componentColor("field", "chevron", textDim()))},
     };
     for (const auto& [token, color] : tokens) sheet.replace(token, color);
     return sheet;

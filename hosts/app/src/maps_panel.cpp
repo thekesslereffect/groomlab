@@ -248,19 +248,15 @@ MapsPanel::MapsPanel(QWidget* parent) : QWidget(parent) {
         }
     }
     {
-        // Whole Faces: each dab fills the scalp's faces under it, no falloff (BrushToolSettings::paintWholeFaces).
-        auto* line = new QHBoxLayout();
-        line->setContentsMargins(0, 0, 0, 0);
-        wholeFaces_ = makeChip(tr("Whole Faces"),
-                               tr("The brush fills the scalp's faces under it all the way, no falloff: masks by face (a vertex or "
-                                  "texture map; Shift+drag still smooths)"),
-                               paintBox);
+        // Whole Faces: each dab fills the scalp's faces under it, no falloff (BrushToolSettings::paintWholeFaces),
+        // a switch row as every toggle.
+        wholeFaces_ = new QCheckBox(tr("Whole Faces"), paintBox);
+        wholeFaces_->setToolTip(tr("The brush fills the scalp's faces under it all the way, no falloff: masks by face (a vertex or "
+                                   "texture map; Shift+drag still smooths)"));
         wholeFaces_->setObjectName(QStringLiteral("paintWholeFaces"));
         wholeFaces_->setChecked(false);
-        connect(wholeFaces_, &QToolButton::toggled, this, [this] { applyPaintSettings(); });
-        line->addWidget(wholeFaces_);
-        line->addStretch(1);
-        paintLayout->addLayout(line);
+        connect(wholeFaces_, &QCheckBox::toggled, this, [this] { applyPaintSettings(); });
+        paintLayout->addWidget(switchRow(paintBox, wholeFaces_));
     }
     valueRow_ = new QWidget(paintBox);
     auto* valueLine = new QHBoxLayout(valueRow_);
@@ -362,6 +358,7 @@ MapsPanel::MapsPanel(QWidget* parent) : QWidget(parent) {
     channel_->setToolTip(qs(defs().get("choices/scalpChannel").value("tip", std::string())));
     showRow->addWidget(channel_, 1);
     showRow->addItem(new QSpacerItem(0, 0, QSizePolicy::Expanding, QSizePolicy::Minimum));  // (no channel: the switch still at the end)
+    show_->setProperty("role", "switch");
     showRow->addWidget(show_);
     showRow->addSpacing(6);
     connect(show_, &QCheckBox::toggled, this, [this](bool on) {

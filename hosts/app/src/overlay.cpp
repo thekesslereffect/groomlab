@@ -649,8 +649,9 @@ LookCard::LookCard(QWidget* parent) : GlassPanel(parent, 24.0) {
         row.color->setToolTip(tr("The light's color"));
         head->addWidget(row.color);
         head->addSpacing(4);
-        head->addWidget(row.enabled);  // the switch at the header's end
-        head->addSpacing(6);
+        row.enabled->setProperty("role", "switch");
+        head->addWidget(row.enabled);  // the switch at the header's end, where the sliders' numbers end
+        head->addSpacing(9);
         v->addLayout(head);
         auto lightSlider = [&](const QString& name, const QColor& fill, double min, double max, int decimals) {
             auto* s = new ValueSlider(row.host);

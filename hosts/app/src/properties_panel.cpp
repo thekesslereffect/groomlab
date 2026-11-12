@@ -261,6 +261,7 @@ bool PropertiesPanel::setControl(const std::string& key, QWidget* control) {
         line->addWidget(r.label, 0, Qt::AlignVCenter);
         if (qobject_cast<QCheckBox*>(control)) {
             line->addStretch(1);
+            control->setProperty("role", "switch");  // (no label gap: it ends where the rows' numbers end)
             line->addWidget(control, 0, Qt::AlignVCenter);
             line->addSpacing(6);
         } else {

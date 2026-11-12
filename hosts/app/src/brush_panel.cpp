@@ -152,32 +152,30 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
                      [this](double v) { session_->settings().setSmoothStrength(static_cast<float>(v)); }, settingHint("smoothStrength"));
     smooth_->setObjectName(QStringLiteral("smoothStrength"));
     {
-        // The chips, in a fixed order (a chip never moves between tools): the toggles (Pressure,
+        // The toggles as switch rows, in a fixed order (a row never moves between tools): Pressure,
         // Keep off scalp, Stretch for Comb, Straighten for Smooth, the app's own Propagate and
-        // Pointwise), then the curves, which open an editor (a chevron says so).
+        // Pointwise; then the curves as chips, which open an editor (a chevron says so).
+        pressure_ = settingSwitch(rows, "pressure", tr("Pressure"), [this] { return session_->settings().pressure; },
+                                  [this](bool on) { session_->settings().pressure = on; });
+        collide_ = settingSwitch(rows, "collide", tr("Keep off scalp"), [this] { return session_->settings().brush.collide; },
+                                 [this](bool on) { session_->settings().brush.collide = on; });
+        stretch_ = settingSwitch(rows, "stretch", tr("Stretch"), [this] { return session_->settings().brush.stretch; },
+                                 [this](bool on) { session_->settings().brush.stretch = on; });
+        straighten_ = settingSwitch(rows, "straighten", tr("Straighten"), [this] { return session_->settings().brush.straighten; },
+                                    [this](bool on) { session_->settings().brush.straighten = on; });
+        propagate_ = switchSetting(rows, tr("Propagate"), [this] { return session_->settings().brush.propagate; },
+                                   [this](bool on) { session_->settings().brush.propagate = on; },
+                                   tr("Also edit the locked descendants (children that keep their own shape)"));
+        propagate_->setObjectName(QStringLiteral("propagate"));
+        pointwise_ = switchSetting(rows, tr("Pointwise"), [this] { return session_->settings().brush.pointwise; },
+                                   [this](bool on) { session_->settings().brush.pointwise = on; },
+                                   tr("Paint a per-point layer along the guide instead of one value per guide"));
+        pointwise_->setObjectName(QStringLiteral("pointwise"));
         FlowLayout* chips = nullptr;
         rows->addWidget(chipRow(brush_, &chips));
-        pressure_ = settingChip(chips, "pressure", tr("Pressure"), [this] { return session_->settings().pressure; },
-                                [this](bool on) { session_->settings().pressure = on; });
-        collide_ = settingChip(chips, "collide", tr("Keep off scalp"), [this] { return session_->settings().brush.collide; },
-                               [this](bool on) { session_->settings().brush.collide = on; });
-        stretch_ = settingChip(chips, "stretch", tr("Stretch"), [this] { return session_->settings().brush.stretch; },
-                               [this](bool on) { session_->settings().brush.stretch = on; });
-        stretch_->setObjectName(QStringLiteral("stretch"));
-        straighten_ = settingChip(chips, "straighten", tr("Straighten"), [this] { return session_->settings().brush.straighten; },
-                                  [this](bool on) { session_->settings().brush.straighten = on; });
-        straighten_->setObjectName(QStringLiteral("straighten"));
         auto* ramps = new QVBoxLayout();
         ramps->setContentsMargins(0, 0, 0, 0);
         ramps->setSpacing(4);
-        propagate_ = chip(chips, tr("Propagate"), [this] { return session_->settings().brush.propagate; },
-                          [this](bool on) { session_->settings().brush.propagate = on; },
-                          tr("Also edit the locked descendants (children that keep their own shape)"));
-        propagate_->setObjectName(QStringLiteral("propagate"));
-        pointwise_ = chip(chips, tr("Pointwise"), [this] { return session_->settings().brush.pointwise; },
-                          [this](bool on) { session_->settings().brush.pointwise = on; },
-                          tr("Paint a per-point layer along the guide instead of one value per guide"));
-        pointwise_->setObjectName(QStringLiteral("pointwise"));
         curve(chips, ramps, "falloffProfile", tr("Falloff curve"), "[[0, 1], [0.5, 0.56], [1, 0]]",
               [this] { return session_->settings().falloffProfileJson(); }, [this](const std::string& v) { session_->settings().setFalloffProfile(v); });
         falloffCurve_ = findChild<QToolButton*>(QStringLiteral("falloffProfile"));
@@ -259,10 +257,9 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
                                   "trail, 100 and up for separate stamps"));
         alphaSpacing_->setObjectName(QStringLiteral("alphaSpacing"));
         alphaSpacing_->setFormat([](double v) { return QString::number(std::lround(v)) + QStringLiteral("%"); });
-        FlowLayout* invertChips = nullptr;
-        options->addWidget(chipRow(alphaOptions_, &invertChips));
-        QToolButton* invert = chip(invertChips, tr("Invert"), [this] { return session_->settings().alphaInvert; },
-                                   [this](bool on) { session_->settings().alphaInvert = on; }, tr("Paint where the alpha is black instead"));
+        QCheckBox* invert = switchSetting(options, tr("Invert"), [this] { return session_->settings().alphaInvert; },
+                                          [this](bool on) { session_->settings().alphaInvert = on; },
+                                          tr("Paint where the alpha is black instead"));
         invert->setObjectName(QStringLiteral("alphaInvert"));
         column->addWidget(alphaOptions_);
     }
@@ -293,18 +290,15 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
                       tr("Place many: no new root closer than this to another of the group"));
     spacing_->setObjectName(QStringLiteral("spacing"));
     {
-        FlowLayout* chips = nullptr;
-        rows->addWidget(chipRow(newGuides_, &chips));
-        QToolButton* match = chip(chips, tr("Match nearby"), [this] { return session_->settings().place.matchNeighbors; },
-                                  [this](bool on) { session_->settings().place.matchNeighbors = on; },
-                                  tr("New guides take the shape, length and painted maps of the nearest guides: the group's own, or the "
-                                     "groups around it while it has none. Off: they stand straight up, with no maps"));
+        QCheckBox* match = switchSetting(rows, tr("Match nearby"), [this] { return session_->settings().place.matchNeighbors; },
+                                         [this](bool on) { session_->settings().place.matchNeighbors = on; },
+                                         tr("New guides take the shape, length and painted maps of the nearest guides: the group's own, "
+                                            "or the groups around it while it has none. Off: they stand straight up, with no maps"));
         match->setObjectName(QStringLiteral("matchNearby"));
-        QToolButton* solo = settingChip(chips, "soloNewGuides", tr("Solo new"), [this] { return session_->settings().place.soloNewGuides; },
-                                        [this](bool on) { session_->settings().place.soloNewGuides = on; });
-        solo->setObjectName(QStringLiteral("soloNewGuides"));
-        placeCollide_ = chip(chips, tr("Keep off scalp"), [this] { return session_->settings().brush.collide; },
-                             [this](bool on) { session_->settings().brush.collide = on; }, settingHint("collide"));
+        settingSwitch(rows, "soloNewGuides", tr("Solo new"), [this] { return session_->settings().place.soloNewGuides; },
+                      [this](bool on) { session_->settings().place.soloNewGuides = on; });
+        placeCollide_ = switchSetting(rows, tr("Keep off scalp"), [this] { return session_->settings().brush.collide; },
+                                      [this](bool on) { session_->settings().brush.collide = on; }, settingHint("collide"));
         placeCollide_->setObjectName(QStringLiteral("placeCollide"));
     }
     card_->addWidget(newGuides_);
@@ -597,6 +591,7 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
         connect(symmetry_, &QCheckBox::toggled, this, [this](bool) { symmetryEdited(); });
         connect(symmetryMode_, &QComboBox::currentIndexChanged, this, [this](int) { symmetryEdited(); });
         row->addWidget(symmetryMode_, 1);
+        symmetry_->setProperty("role", "switch");
         row->addWidget(symmetry_);  // (the switch at the row's end, as every switch row)
         row->addSpacing(6);
         symmetryCenter_ = new ValueSlider(mirrorRow_);
@@ -652,11 +647,35 @@ QToolButton* BrushPanel::chip(FlowLayout* into, const QString& label, std::funct
     return c;
 }
 
-QToolButton* BrushPanel::settingChip(FlowLayout* into, const char* id, const QString& label, std::function<bool()> get,
+QCheckBox* BrushPanel::switchSetting(QVBoxLayout* into, const QString& label, std::function<bool()> get, std::function<void(bool)> set,
+                                     const QString& tip) {
+    // A field row with the switch at its end (every host's switch row); setRowVisible shows or
+    // hides the whole row.
+    auto* box = new QCheckBox(label, this);
+    box->setToolTip(tip);
+    into->addWidget(switchRow(this, box));
+    connect(box, &QCheckBox::toggled, this, [this, set](bool on) {
+        if (updating_ || !session_) return;
+        set(on);
+        edited();
+    });
+    refreshers_.push_back([box, get] { box->setChecked(get()); });
+    return box;
+}
+
+QCheckBox* BrushPanel::settingSwitch(QVBoxLayout* into, const char* id, const QString& label, std::function<bool()> get,
                                      std::function<void(bool)> set) {
-    QToolButton* c = chip(into, label, std::move(get), std::move(set), settingHint(id));
-    c->setObjectName(QString::fromLatin1(id));
-    return c;
+    QCheckBox* box = switchSetting(into, label, std::move(get), std::move(set), settingHint(id));
+    box->setObjectName(QString::fromLatin1(id));
+    return box;
+}
+
+void BrushPanel::setRowVisible(QWidget* control, bool visible) {
+    // A switch row's frame (switchRow: the control's parent).
+    QWidget* row = control->parentWidget() && control->parentWidget()->property("role").toString() == QStringLiteral("propField")
+                       ? control->parentWidget()
+                       : control;
+    row->setVisible(visible);
 }
 
 void BrushPanel::curve(FlowLayout* chips, QVBoxLayout* editors, const std::string& setting, const QString& label, const std::string& start,
@@ -742,14 +761,14 @@ void BrushPanel::setTool(const std::string& id) {
     const bool brush = uses("radius");
     for (ValueSlider* s : {radius_, strength_, falloff_}) s->setVisible(brush);
     smooth_->setVisible(uses("smoothStrength"));
-    pressure_->setVisible(uses("pressure"));
-    collide_->setVisible(brush && uses("collide"));
+    setRowVisible(pressure_, uses("pressure"));
+    setRowVisible(collide_, brush && uses("collide"));
     falloffCurve_->setVisible(uses("falloffProfile"));
     strengthCurve_->setVisible(uses("strengthProfile"));
     if (!uses("falloffProfile")) falloffRamp_->hide();
     if (!uses("strengthProfile")) strengthRamp_->hide();
-    propagate_->setVisible(uses("strengthProfile"));  // the shaping brushes (the app's own)
-    pointwise_->setVisible(uses("map") && id == "paint");
+    setRowVisible(propagate_, uses("strengthProfile"));  // the shaping brushes (the app's own)
+    setRowVisible(pointwise_, uses("map") && id == "paint");
     brush_->setVisible(brush || uses("smoothStrength"));
     brush_->titleLabel()->setVisible(uses("map"));  // under Paint's own block: titled
     // The strength's span: -1..1 for the tools that work both ways, else 0..1 (Maya's).
@@ -762,9 +781,9 @@ void BrushPanel::setTool(const std::string& id) {
     paint_->titleLabel()->setVisible(id != "paint");  // (the Paint card's header says it)
     newGuides_->setVisible(uses("newGuides"));
     spacing_->setVisible(uses("spacing"));
-    placeCollide_->setVisible(uses("newGuides") && uses("collide"));
-    stretch_->setVisible(uses("stretch"));
-    straighten_->setVisible(uses("straighten"));
+    setRowVisible(placeCollide_, uses("newGuides") && uses("collide"));
+    setRowVisible(stretch_, uses("stretch"));
+    setRowVisible(straighten_, uses("straighten"));
     paints_->setVisible(uses("tubeChannel"));
     erases_->setVisible(uses("erases"));
     keys_->setVisible(uses("lengthKeys"));

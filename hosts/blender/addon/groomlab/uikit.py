@@ -1127,7 +1127,7 @@ class Dropdown(Widget):
             p.text(name, (r[0] + col, r[1], r[2] - col - pad - 14 * s, r[3]), value)
         else:
             p.text(name, (r[0] + pad, r[1], r[2] - 2 * pad - 14 * s, r[3]), value)
-        p.chevron(r[0] + r[2] - pad - 4 * s, r[1] + r[3] * 0.5, 3.5 * s, t.text if hover else t.textDim)
+        p.chevron(r[0] + r[2] - pad - 5 * s, r[1] + r[3] * 0.5, 4.0 * s, t.text if hover else t.textDim, width=1.8)
 
     def press(self, win, context, event):
         return MenuInteraction(self, win)
@@ -1194,8 +1194,9 @@ class MenuInteraction(Interaction):
 
 
 class Check(Widget):
-    """A boolean as a field row with a box at its right (the app's switch rows, components.switchRow):
-    its name in the dim tone; on, the box in the soft accent with the accent's edge and a tick."""
+    """A boolean as a field row with a switch at its right (the app's switch rows, components.switchRow
+    and components.switch): its name in the dim tone; the switch a rounded track, its knob at the
+    left (off) or, on the accent's fill, at the right (on)."""
 
     own_disabled = True
 
@@ -1211,16 +1212,15 @@ class Check(Widget):
         p.rect(self.rect, t.hover if hover else t.role("switchRow", "fill", "raised"),
                t.size("field", "radius", t.radius) * s)
         pad = 9 * s
-        b = 16 * s
-        box = (x + w - pad - b, y + (h - b) * 0.5, b, b)
-        if on:
-            p.rect(box, t.role("switchRow", "on", "accentSoft"), t.check_radius * s, t.role("switchRow", "edge", "accent"),
-                   1.0 * s)
-            cx, cy, k = box[0] + b * 0.5, box[1] + b * 0.5, 4.0 * s
-            p.lines([(cx - k, cy), (cx - k * 0.3, cy - k * 0.75), (cx + k, cy + k * 0.75)], t.accentInk, 1.6)
-        else:
-            p.rect(box, (0, 0, 0, 0), t.check_radius * s, t.checkEdge, 1.2 * s)
-        p.text(self.prop.label, (x + pad, y, w - b - 3 * pad, h), t.textDisabled if self.disabled else t.textDim)
+        sw, sh = t.size("switch", "width", 28) * s, t.size("switch", "height", 16) * s
+        track = (x + w - pad - sw, y + (h - sh) * 0.5, sw, sh)
+        fill = t.role("switch", "trackOn", "accentFill") if on else t.role("switch", "track", "textDisabled")
+        knob_color = t.role("switch", "knobOn" if on else "knob", "accentText")
+        p.rect(track, fill, sh * 0.5)
+        k = sh - 5 * s  # the knob's diameter: 2.5 px of track round it
+        kx = track[0] + (sw - sh if on else 0.0) + 2.5 * s
+        p.rect((kx, track[1] + 2.5 * s, k, k), knob_color, k * 0.5)
+        p.text(self.prop.label, (x + pad, y, w - sw - 3 * pad, h), t.textDisabled if self.disabled else t.textDim)
 
     def press(self, win, context, event):
         self.prop.set(not bool(self.prop.get()))

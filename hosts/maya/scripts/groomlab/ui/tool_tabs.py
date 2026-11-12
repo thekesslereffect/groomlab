@@ -1051,11 +1051,11 @@ class PaintTab(_GroomTab):
         modes.setToolTip(definitions.get("choices/paintMode")["tip"])
         controls.addWidget(widgets.small_label("Mode"))
         controls.addWidget(modes)
-        self.whole_faces = widgets.chip("Whole Faces", "The brush fills the scalp's faces under it all the way, "
-                                        "no falloff: masks by face (a vertex or texture map; Shift+drag still "
-                                        "smooths)", False, "paintWholeFaces")
+        self.whole_faces = widgets.switch("Whole Faces", "The brush fills the scalp's faces under it all the way, "
+                                          "no falloff: masks by face (a vertex or texture map; Shift+drag still "
+                                          "smooths)", False, "paintWholeFaces")
         self.whole_faces.toggled.connect(self.whole_faces_changed)
-        controls.addWidget(widgets.chip_row((self.whole_faces,)))
+        controls.addWidget(self.whole_faces.row)
         self.value = widgets.SoftSlider(1.0, 0.0, 1.0, minimum=0.0, maximum=1.0, key=None, label="Value")
         self.value.setToolTip("What the Paint brush paints toward, and what Fill sets")
         self.value.committed.connect(lambda v: self.owner.push(value=v))

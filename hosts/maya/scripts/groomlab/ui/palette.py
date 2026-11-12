@@ -1176,25 +1176,26 @@ class ToolPalette(QtWidgets.QWidget):
         for slider in (self.radius, self.strength, self.falloff):  # the brush's numbers: the card's tallest fields
             slider.setFixedHeight(widgets.SoftSlider.row_height() + theme.px(4))
         self.brush_block.add(self.brush_form)
-        # The stroke's options as chips, in a fixed order (a chip never moves between tools):
+        # The stroke's toggles as switch rows, in a fixed order (a row never moves between tools):
         # Pressure, Keep off scalp, Stretch (Comb: lengths change with the pull), Straighten (Smooth: toward the
-        # straight line), then the brush's curves (each off until its chip is on, then drawn
-        # in a curve editor under the chips; right-click: presets). Selected only and Front only
-        # are not in the panel: the brushes keep their defaults (off and on).
-        self.pressure = self.setting_chip("pressure", True)
+        # straight line); then the brush's curves as chips (each off until its chip is on, then
+        # drawn in a curve editor under the chips; right-click: presets). Selected only and Front
+        # only are not in the panel: the brushes keep their defaults (off and on).
+        self.pressure = self.setting_switch("pressure", True)
         self.pressure.toggled.connect(lambda on: self.push(pressure=on))
-        self.collide = self.setting_chip("collide", True)
+        self.collide = self.setting_switch("collide", True)
         self.collide.toggled.connect(lambda on: self.push(collide=on))
-        self.stretch = widgets.chip("Stretch", _setting("stretch", "hint"), False, "stretch")
+        self.stretch = widgets.switch("Stretch", _setting("stretch", "hint"), False, "stretch")
         self.stretch.toggled.connect(lambda on: self.push(stretch=on))
-        self.straighten = widgets.chip("Straighten", _setting("straighten", "hint"), False, "straighten")
+        self.straighten = widgets.switch("Straighten", _setting("straighten", "hint"), False, "straighten")
         self.straighten.toggled.connect(lambda on: self.push(straighten=on))
+        for toggle in (self.pressure, self.collide, self.stretch, self.straighten):
+            self.brush_block.add(toggle.row)
         self.falloff_curve_box, self.falloff_curve = self.curve_setting(
             "falloffProfile", [[0, 1], [0.5, 0.56], [1, 0]], ("center", "edge"))
         self.strength_curve_box, self.strength_curve = self.curve_setting(
             "strengthProfile", [[0, 0.25], [1, 1]], ("root", "tip"))
-        self.brush_chips = widgets.chip_row((self.pressure, self.collide, self.stretch, self.straighten,
-                                             self.falloff_curve_box, self.strength_curve_box))
+        self.brush_chips = widgets.chip_row((self.falloff_curve_box, self.strength_curve_box))
         self.brush_chips.setObjectName("brushChips")
         self.brush_block.add(self.brush_chips)
         self.brush_block.add(self.falloff_curve)
@@ -1233,13 +1234,14 @@ class ToolPalette(QtWidgets.QWidget):
         self.spacing.committed.connect(lambda v: self.push(spacing=v / self.length_factor))
         for field in (self.length, self.segments, self.spacing):
             self.create_box.add(field)  # the name inside the field
-        self.match = widgets.chip("Match nearby", "New guides take the shape, length and painted maps of the nearest "
-                                  "guides: the group's own, or the groups around it while it has none. Draw takes the "
-                                  "maps. Off: they stand straight up, with no maps", True, "matchNearby")
+        self.match = widgets.switch("Match nearby", "New guides take the shape, length and painted maps of the nearest "
+                                    "guides: the group's own, or the groups around it while it has none. Draw takes the "
+                                    "maps. Off: they stand straight up, with no maps", True, "matchNearby")
         self.match.toggled.connect(lambda on: self.push(matchNeighbors=on))
-        self.solo_new = widgets.chip("Solo new", _setting("soloNewGuides", "hint"), False, "soloNewGuides")
+        self.solo_new = widgets.switch("Solo new", _setting("soloNewGuides", "hint"), False, "soloNewGuides")
         self.solo_new.toggled.connect(lambda on: self.push(soloNewGuides=on))  # (off: placing freezes nothing)
-        self.create_box.add(widgets.chip_row((self.match, self.solo_new)))
+        self.create_box.add(self.match.row)
+        self.create_box.add(self.solo_new.row)
         card.addWidget(self.create_box)
         self.tube_panel = TubePanel(self)  # its blocks: Tube (Place, Draw), Profile and Selected guides
         card.addWidget(self.tube_panel.tube_block)
@@ -1480,6 +1482,12 @@ class ToolPalette(QtWidgets.QWidget):
         return box
 
     @staticmethod
+    def setting_switch(setting, on=False):
+        """A switch row for one of the catalog's settings: its short name (CHIP_LABELS) and hint."""
+        return widgets.switch(CHIP_LABELS.get(setting, SETTINGS[setting]["label"]), SETTINGS[setting]["hint"], on,
+                              "chip_" + setting)
+
+    @staticmethod
     def setting_chip(setting, on=False):
         """A toggle chip for one of the catalog's settings: its short name (CHIP_LABELS) and hint."""
         b = widgets.chip(CHIP_LABELS.get(setting, SETTINGS[setting]["label"]), SETTINGS[setting]["hint"], on,
@@ -1541,9 +1549,9 @@ class ToolPalette(QtWidgets.QWidget):
                                       "diameter: low for a smooth trail, 100 and up for separate stamps")
         self.alpha_spacing.committed.connect(lambda v: self.push(alphaSpacing=v / 100.0))
         options.addWidget(self.alpha_spacing)
-        self.alpha_invert = widgets.chip("Invert", "Paint where the stamp is black instead", False, "alphaInvert")
+        self.alpha_invert = widgets.switch("Invert", "Paint where the stamp is black instead", False, "alphaInvert")
         self.alpha_invert.toggled.connect(lambda on: self.push(alphaInvert=on))
-        options.addWidget(widgets.chip_row((self.alpha_invert,)))
+        options.addWidget(self.alpha_invert.row)
         self.alpha_options.setVisible(False)
         column.addWidget(self.alpha_options)
         return box
@@ -2281,9 +2289,9 @@ class ToolPalette(QtWidgets.QWidget):
         for slider in (self.radius, self.strength, self.falloff):
             slider.setEnabled(brush)
         self.smooth_strength.setVisible("smoothStrength" in uses)
-        self.pressure.setVisible("pressure" in uses)
+        self.pressure.row.setVisible("pressure" in uses)
         self.pressure.setEnabled("pressure" in uses)
-        self.collide.setVisible("collide" in uses)
+        self.collide.row.setVisible("collide" in uses)
         for chip_, editor, setting in ((self.falloff_curve_box, self.falloff_curve, "falloffProfile"),
                                        (self.strength_curve_box, self.strength_curve, "strengthProfile")):
             chip_.setVisible(setting in uses)
@@ -2307,8 +2315,8 @@ class ToolPalette(QtWidgets.QWidget):
         if new_tube or edit_tube:
             panel.set_mode("new" if new_tube else "edit")
             panel.refresh(self.groom())
-        self.stretch.setVisible("stretch" in uses)
-        self.straighten.setVisible("straighten" in uses)
+        self.stretch.row.setVisible("stretch" in uses)
+        self.straighten.row.setVisible("straighten" in uses)
         self.tube_channel_box.setVisible("tubeChannel" in uses)
         self.select_box.setVisible("selection" in uses)
         self.erase_box.setVisible("erases" in uses)

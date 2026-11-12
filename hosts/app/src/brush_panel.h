@@ -114,7 +114,11 @@ private:
     // A chip bound to a bool.
     QToolButton* chip(FlowLayout* into, const QString& label, std::function<bool()> get, std::function<void(bool)> set,
                       const QString& tip = {});
-    QToolButton* settingChip(FlowLayout* into, const char* id, const QString& label, std::function<bool()> get, std::function<void(bool)> set);
+    // A toggle as a switch row (a field row, its switch at the end), the catalog's setting `id`'s hint.
+    QCheckBox* switchSetting(QVBoxLayout* into, const QString& label, std::function<bool()> get, std::function<void(bool)> set,
+                             const QString& tip = QString());
+    QCheckBox* settingSwitch(QVBoxLayout* into, const char* id, const QString& label, std::function<bool()> get, std::function<void(bool)> set);
+    static void setRowVisible(QWidget* control, bool visible);
     // A brush curve of the catalog's (falloffProfile, strengthProfile): a chip, and a ramp editor
     // shown under the chips while it is on (starting at the keys of `start`, a ramp's JSON); `get`
     // and `set` are the settings' JSON ("" for none).
@@ -136,14 +140,14 @@ private:
     ValueSlider* strength_ = nullptr;
     ValueSlider* falloff_ = nullptr;
     ValueSlider* smooth_ = nullptr;
-    QToolButton* pressure_ = nullptr;
-    QToolButton* collide_ = nullptr;
-    QToolButton* stretch_ = nullptr;
-    QToolButton* straighten_ = nullptr;
+    QCheckBox* pressure_ = nullptr;
+    QCheckBox* collide_ = nullptr;
+    QCheckBox* stretch_ = nullptr;
+    QCheckBox* straighten_ = nullptr;
     QToolButton* falloffCurve_ = nullptr;
     QToolButton* strengthCurve_ = nullptr;
-    QToolButton* propagate_ = nullptr;
-    QToolButton* pointwise_ = nullptr;
+    QCheckBox* propagate_ = nullptr;
+    QCheckBox* pointwise_ = nullptr;
     QWidget* falloffRamp_ = nullptr;
     QWidget* strengthRamp_ = nullptr;
     // Paint.
@@ -158,7 +162,7 @@ private:
     // New guides.
     CardBlock* newGuides_ = nullptr;
     ValueSlider* spacing_ = nullptr;
-    QToolButton* placeCollide_ = nullptr;
+    QCheckBox* placeCollide_ = nullptr;
     // The others.
     CardBlock* paints_ = nullptr;
     std::vector<QToolButton*> tubeChannels_;

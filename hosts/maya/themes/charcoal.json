@@ -97,6 +97,7 @@
     "card": {"fill": "card", "radius": 10, "padding": 12, "gap": 8},
     "tray": {"fill": "card", "radius": 10, "padding": 8},
     "segTrack": {"track": "sunken", "on": "segmentOn", "radius": 8, "segmentRadius": 6, "padding": 2},
+    "switch": {"width": 28, "height": 16, "track": "textDisabled", "knob": "accentText", "trackOn": "accentFill", "knobOn": "accentText"},
     "switchRow": {"fill": "raised", "on": "accentSoft", "edge": "accent"},
     "chip": {"fill": "raised", "on": "accentSoft", "onText": "accentInk"},
     "disclosure": {"edge": "hover", "text": "textDim"},

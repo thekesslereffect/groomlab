@@ -156,9 +156,11 @@ QFrame* fieldRow(QWidget* parent, QWidget* label, QWidget* control) {
     if (control) {
         control->setParent(box);
         if (qobject_cast<QCheckBox*>(control)) {
-            // A switch at the row's end.
+            // A switch at the row's end, where the rows' numbers end (no label gap after it).
+            control->setProperty("role", "switch");
             line->addStretch(1);
             line->addWidget(control, 0, Qt::AlignVCenter);
+            line->addSpacing(6);
         } else {
             // A value at the value column (the label's 104 px), as Properties' rows.
             line->addWidget(control, 1, Qt::AlignVCenter);
@@ -193,7 +195,6 @@ QFrame* switchRow(QWidget* parent, QCheckBox* box) {
     box->setText(QString());
     QFrame* row = fieldRow(parent, label, box);
     row->setObjectName(box->objectName().isEmpty() ? QString() : box->objectName() + QStringLiteral("Row"));
-    if (static_cast<QHBoxLayout*>(row->layout())->count() > 0) static_cast<QHBoxLayout*>(row->layout())->addSpacing(6);
     label->setToolTip(box->toolTip());
     return row;
 }

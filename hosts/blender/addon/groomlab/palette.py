@@ -540,7 +540,7 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
             angle.enabled = t.alpha_rotation != "RANDOM"
             angle.prop(t, "alpha_angle", slider=True)
             col.prop(t, "alpha_spacing", slider=True)
-            col.prop(t, "alpha_invert", toggle=True)
+            col.prop(t, "alpha_invert")
 
     def draw_tube_fields(self, layout, t):
         col = layout.column(align=True)
@@ -577,17 +577,15 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
             sliders.prop(t, "falloff", text=label("falloff", "Falloff"), slider=True)
             if "smoothStrength" in uses:
                 sliders.prop(t, "smooth_strength", text=label("smoothStrength", "Smooth"), slider=True)
-            # Its options as toggles, in one order whatever the tool (Selected only and Front only
-            # are not in the panel: the brushes keep their defaults, off and on).
+            # Its options as switch rows, in one order whatever the tool (Selected only and Front
+            # only are not in the panel: the brushes keep their defaults, off and on).
             toggles = [(k, p, text) for k, p, text in (("pressure", "pressure", "Pressure"),
                                                        ("collide", "collide", "Keep off scalp"),
                                                        ("stretch", "stretch", "Stretch"),  # Comb's
                                                        ("straighten", "straighten", "Straighten"))  # Smooth's
                        if k in uses]
-            if toggles:  # (the window: chips two to a row, the app's)
-                row = col.grid_flow(columns=2, even_columns=True) if in_window(col) else col.row(align=True)
-                for _k, p, text in toggles:
-                    row.prop(t, p, text=text, toggle=True)
+            for _k, p, text in toggles:  # (the window: a switch row each, the app's)
+                col.prop(t, p, text=text)
             if "falloffProfile" in uses:
                 col.prop(t, "falloff_curve", text=label("falloffProfile", "Falloff curve"))
             if "strengthProfile" in uses:
@@ -619,7 +617,7 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
         col.label(text="Mode")
         col.row(align=True).prop(t, "paint_mode", expand=True)
         if m is None or m.kind in ("vertices", "texture"):  # (a guide layer paints guides, not faces)
-            col.prop(t, "paint_whole_faces", toggle=True)
+            col.prop(t, "paint_whole_faces")
         if m is None or m.channels == 1:
             row = col.row(align=True)
             row.prop(t, "value", slider=True)
@@ -642,10 +640,9 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
             sliders.prop(t, "segments", slider=True)
             if "spacing" in uses:
                 sliders.prop(t, "spacing", slider=True)
-            row = col.row(align=True)
-            row.prop(t, "match_neighbors", text="Match nearby", toggle=True)
+            col.prop(t, "match_neighbors", text="Match nearby")
             if "soloNewGuides" in uses:
-                row.prop(t, "solo_new_guides", text="Solo new", toggle=True)
+                col.prop(t, "solo_new_guides", text="Solo new")
             if "tube" in uses:
                 col, _ = block(card, label("tube", "Tube"))
                 col.prop(t, "tube_shape", text="")

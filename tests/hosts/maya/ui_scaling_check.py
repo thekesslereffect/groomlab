@@ -507,16 +507,25 @@ def main():
                              "output", "tubes", "isolate", "group"):
                     _expect(not any(w.startswith(gone) or w.endswith(gone) for w in words if w),
                             "%s: %r left the panel: %r" % (tool, gone, [w for w in words if gone in w]))
-                _expect(not [b for b in tools.settings.findChildren(QtWidgets.QCheckBox) if b.isVisibleTo(tools)
-                             and b is not tools.symmetry], "%s: options are chips, not checkboxes" % tool)
-            # The brush's chips in one order whatever the tool: Pressure, Keep off scalp, the two curves.
+                _expect(not [b for b in tools.settings.findChildren(QtWidgets.QToolButton)
+                             if b.isVisibleTo(tools) and b.isCheckable() and b.property("role") == "chip"
+                             and not b.property("disclosure") and b.parent() is not None
+                             and b.objectName() in ("chip_pressure", "chip_collide", "stretch", "straighten",
+                                                    "matchNearby", "soloNewGuides", "alphaInvert")],
+                        "%s: toggles are switch rows, not chips" % tool)
+            # The brush's toggles as switch rows in one order whatever the tool (Pressure, Keep off
+            # scalp, Stretch, Straighten), then the two curves' chips.
             tools.tool = "comb"
             tools.show_tool_settings()
             settle()
+            rows = [b.row for b in (tools.pressure, tools.collide, tools.stretch, tools.straighten)]
+            body = tools.brush_block.body
+            at = [body.indexOf(r) for r in rows]
+            _expect(at == sorted(at) and min(at) >= 0, "brush switch rows in order: %r" % at)
+            _expect(all(r.property("role") == "propField" for r in rows), "brush toggles: switch rows")
             flow = tools.brush_chips.flow
             order = [flow.itemAt(i).widget().text() for i in range(flow.count())]
-            _expect(order == ["Pressure", "Keep off scalp", "Stretch", "Straighten", "Falloff curve", "Root to tip"],
-                    "brush chips: %r" % order)
+            _expect(order == ["Falloff curve", "Root to tip"], "brush chips: %r" % order)
             tools.strength_curve_box.setChecked(True)
             settle()
             _expect(tools.strength_curve.isVisibleTo(tools), "a curve chip on: its ramp under the chips")

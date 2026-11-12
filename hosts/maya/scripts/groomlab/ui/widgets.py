@@ -623,6 +623,22 @@ def chip(text, tip="", checked=None, name=None):
     return b
 
 
+def switch(text, tip="", checked=False, name=None, label_width=None):
+    """A toggle as a switch row (the app's switchRow): a field row with the name inside at its
+    left and the switch at its end. Returns the check box; its row is `.row` (show and hide that)."""
+    box = QtWidgets.QCheckBox()
+    box.setToolTip(tip)
+    box.setChecked(bool(checked))
+    if name:
+        box.setObjectName(name)
+    row, label = field_row(text, box, label_width=label_width)
+    label.setToolTip(tip)
+    if name:
+        row.setObjectName(name + "Row")
+    box.row = row
+    return box
+
+
 class FlowLayout(QtWidgets.QLayout):
     """The chips' rows (the app's FlowLayout): an even grid, as many equal columns (at most
     `max_columns`, 3 unless said) as the widest item allows, each item a column wide, so rows line
@@ -778,6 +794,7 @@ def field_row(text, *controls, **kwargs):
         if not any(isinstance(c, (QtWidgets.QComboBox, QtWidgets.QLineEdit, QtWidgets.QLayout)) for c in controls):
             line.addStretch(1)
         for s in switches:
+            s.setProperty("role", "switch")  # (no label gap: it ends where the rows' numbers end)
             line.addWidget(s, 0, QtCore.Qt.AlignVCenter)
         line.addSpacing(theme.px(6))
     return box, label

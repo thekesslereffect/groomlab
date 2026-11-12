@@ -178,7 +178,7 @@ private:
     ValueSlider* paintAlpha_ = nullptr;
     std::vector<QToolButton*> paintChannels_;
     std::vector<QToolButton*> paintModes_;
-    QToolButton* wholeFaces_ = nullptr;  // Whole Faces: the brush fills the faces under it
+    QCheckBox* wholeFaces_ = nullptr;  // Whole Faces: the brush fills the faces under it
     QWidget* colorRow_ = nullptr;
     RoundButton* paint_ = nullptr;
     bool updating_ = false;

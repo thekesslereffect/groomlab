@@ -604,7 +604,7 @@ TEST(AppGroomTools, PaintsValueAndFillAreInThePaintCard) {
     for (ValueSlider* s : block->findChildren<ValueSlider*>()) value = value || s->caption() == QStringLiteral("Value");
     EXPECT_TRUE(value);
     // Whole Faces: the brush fills the faces under it (BrushToolSettings::paintWholeFaces).
-    auto* wholeFaces = card->findChild<QToolButton*>(QStringLiteral("paintWholeFaces"));
+    auto* wholeFaces = card->findChild<QCheckBox*>(QStringLiteral("paintWholeFaces"));
     ASSERT_NE(wholeFaces, nullptr);
     EXPECT_TRUE(block->isAncestorOf(wholeFaces));
     EXPECT_FALSE(session.settings().paintWholeFaces);

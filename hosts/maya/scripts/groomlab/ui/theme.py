@@ -519,22 +519,60 @@ def style(widget, surface=None):
 
 
 def _arrow_icon(color):
-    """A small chevron in `color` for combo boxes (a styled drop-down hides Qt's own):
-    an SVG written once per color next to the user's prefs, as a style-sheet url."""
+    """A chevron in `color` for combo boxes (a styled drop-down hides Qt's own), plain to read beside
+    the value: an SVG written once per color next to the user's prefs, as a style-sheet url."""
     import tempfile
     folder = os.path.join(tempfile.gettempdir(), "groomlab_ui")
-    path = os.path.join(folder, "arrow_%s.svg" % color.lstrip("#"))
+    path = os.path.join(folder, "chevron_%s.svg" % color.lstrip("#"))
     if not os.path.exists(path):
         try:
             if not os.path.isdir(folder):
                 os.makedirs(folder)
             with open(path, "w", encoding="utf-8") as f:
-                f.write('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">'
-                        '<path d="M2 3.5 L5 6.5 L8 3.5" fill="none" stroke="%s" stroke-width="1.6" '
+                f.write('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12">'
+                        '<path d="M2.75 4.5 L6 7.75 L9.25 4.5" fill="none" stroke="%s" stroke-width="1.8" '
                         'stroke-linecap="round" stroke-linejoin="round"/></svg>' % color)
         except (IOError, OSError):
             return ""
     return path.replace("\\", "/")
+
+
+def _switch_icon(track, knob, on, faded=False, size=(28, 16)):
+    """A switch (components.switch) for check boxes: a rounded `track` with its `knob` at the left
+    (off) or the right (on), faded when disabled. An SVG written once per look, as a style-sheet url."""
+    import tempfile
+    w, h = size
+    folder = os.path.join(tempfile.gettempdir(), "groomlab_ui")
+    path = os.path.join(folder, "switch_%dx%d_%s_%s_%s%s.svg" % (w, h, track.lstrip("#"), knob.lstrip("#"),
+                                                                 "on" if on else "off", "_faded" if faded else ""))
+    if not os.path.exists(path):
+        r = h * 0.5
+        try:
+            if not os.path.isdir(folder):
+                os.makedirs(folder)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write('<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" viewBox="0 0 %d %d">'
+                        '<rect x="0" y="0" width="%d" height="%d" rx="%g" fill="%s" fill-opacity="%g"/>'
+                        '<circle cx="%g" cy="%g" r="%g" fill="%s" fill-opacity="%g"/></svg>'
+                        % (w, h, w, h, w, h, r, track, 0.4 if faded else 1.0, w - r if on else r, r, r - 2.5, knob,
+                           0.5 if faded else 1.0))
+        except (IOError, OSError):
+            return ""
+    return path.replace("\\", "/")
+
+
+def _switch_rules(t):
+    """Check boxes as switches (components.switch): the track and knob in the theme's roles."""
+    w, h = int(component("switch", "width", 28)), int(component("switch", "height", 16))
+    track, knob = component_color("switch", "track", "textDisabled", t), component_color("switch", "knob", "accentText", t)
+    on, knob_on = component_color("switch", "trackOn", "accentFill", t), component_color("switch", "knobOn", "accentText", t)
+    icon = lambda tr, kn, is_on, faded=False: _switch_icon(tr, kn, is_on, faded, (w, h))  # noqa: E731
+    return ("QCheckBox::indicator { width: {{%d}}px; height: {{%d}}px; border: none; background: transparent; image: url(%s); }\n"
+            "QCheckBox::indicator:checked { image: url(%s); }\n"
+            "QCheckBox::indicator:disabled { image: url(%s); }\n"
+            "QCheckBox::indicator:checked:disabled { image: url(%s); }\n"
+            % (w, h, icon(track, knob, False), icon(on, knob_on, True), icon(track, knob, False, True),
+               icon(on, knob_on, True, True)))
 
 
 def _lighter(color, f):
@@ -830,8 +868,8 @@ QLineEdit:read-only { color: %(muted)s; }
 QComboBox { padding-right: {{22}}px; }
 QComboBox:editable { min-height: {{24}}px; }  /* room for its field's text, descenders included */
 QComboBox QLineEdit { padding: 0; border: none; background: transparent; }  /* an editable box's field: the box pads it */
-QComboBox::drop-down { border: none; width: {{18}}px; }
-QComboBox::down-arrow { image: url(%(arrow)s); width: {{10}}px; height: {{10}}px; }
+QComboBox::drop-down { border: none; width: {{22}}px; }
+QComboBox::down-arrow { image: url(%(arrow)s); width: {{12}}px; height: {{12}}px; }
 QComboBox QAbstractItemView { background: %(raised)s; border: {{1}}px solid %(popupEdge)s; selection-background-color: %(selection)s;
     selection-color: %(selectionText)s; outline: none; }
 QListWidget, QTreeWidget, QTableWidget, QListView, QTreeView {
@@ -849,12 +887,8 @@ QGroupBox { background: transparent; border: {{1}}px solid %(edge)s; border-radi
     padding: {{8}}px {{4}}px {{4}}px {{4}}px; font-weight: 600; }
 QGroupBox::title { subcontrol-origin: margin; left: {{10}}px; padding: 0 {{4}}px; color: %(dim)s; }
 QCheckBox { background: transparent; spacing: {{8}}px; }
-QCheckBox::indicator { width: {{14}}px; height: {{14}}px; border-radius: %(check)dpx; background: %(raised)s;
-    border: {{1}}px solid %(checkEdge)s; }
-QCheckBox::indicator:checked { background: %(checkOn)s; border-color: %(checkOnEdge)s; image: url(%(tick)s); }
-QCheckBox::indicator:disabled { background: %(panel)s; }
-QCheckBox::indicator:checked:disabled { background: %(hover)s; border-color: %(hover)s; }
-QRadioButton { background: transparent; spacing: {{8}}px; }
+QCheckBox[role="switch"] { spacing: 0px; }
+%(switch_rules)sQRadioButton { background: transparent; spacing: {{8}}px; }
 QRadioButton::indicator { width: {{14}}px; height: {{14}}px; border-radius: {{8}}px; background: %(raised)s;
     border: {{1}}px solid %(checkEdge)s; }
 QRadioButton::indicator:checked { background: %(checkOn)s; border-color: %(checkOnEdge)s; image: url(%(dot)s); }
@@ -887,7 +921,8 @@ QSplitter::handle { background: %(bg)s; }
 QScrollArea { border: none; }
 %(outline_rules)s%(row_rules)s""" % dict(
         k, family='font-family: "%s"; ' % family if family else "", slider_rules=slider_rules,
-        arrow=_arrow_icon(k["muted"]), tick=_check_icon(k["accentText"] if t.is_light() else k["accentInk"]),
+        arrow=_arrow_icon(component_color("field", "chevron", "textDim", t)), switch_rules=_switch_rules(t),
+        tick=_check_icon(k["accentText"] if t.is_light() else k["accentInk"]),
         dot=_dot_icon(k["accentText"] if t.is_light() else k["accentInk"]),
         outline_rules=_outline_rules(t), row_rules=_row_rules(t))
     # Fixed sizes ({{N}}px in the template) at Maya's interface scale.
