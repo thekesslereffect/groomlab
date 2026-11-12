@@ -13,6 +13,44 @@ version. While GroomLab is in early access, a node's params can still change bet
 param renamed, or two merged into one); the entries below say when one does and what to set. Once
 it leaves early access, saved grooms will keep their look across updates.
 
+## 0.47.0 (November 12, 2026)
+
+- **Rigged hair: driver curves.** Animators pose hero hair with curves rigged like anything else
+  (joints, spline IK, a wire, blend shapes in Maya; hooks, armatures or keys in Blender). Select
+  guides and **Simulate > Drivers > Create Driver from Selected Guides** (one curve down the middle
+  of them) or **Create a Driver per Selected Guide** (one on each guide, exactly its shape): the
+  curve is made, its pivot at the root, and the guides are attached and bound at frame 0. Or attach
+  guides to a curve of your own. The guides (and their children) follow it as it swings, bends and
+  stretches, and each driver has a keyable **twist** that turns the hair round it. A Simulate node
+  after the DriveGuides node plays on top. In Maya and Blender.
+- **Rigged and simulated hair renders the same on the farm.** Groom files carry the drivers'
+  animation (`<name>.drivers.abc`), so the command line, the procedurals and the app drive and
+  simulate the hair exactly as Maya does.
+- **Simulate preroll.** A Simulate node's **preroll** lets the hair settle before the start frame
+  from the rest pose: a shot that starts with the head turned or the rig posed starts with the hair
+  hanging, not holding the groomed shape stiffly.
+- **Sculpt on Simulation (Maya).** Simulate > Sculpt on Simulation bakes the simulation and lets
+  the brushes make shot fixes on top of the simulated hair; renders and groom files carry both.
+  **Back to Live Simulation** goes back.
+- **Motion blur from Alembic.** Alembic exports can carry each point's velocity
+  (`export_alembic(..., velocities=True)`, `groomlab-cli eval --velocities`).
+- **Hair kept to modeled tubes.** Interpolate's **regionMap** takes a guide map: each value on the
+  guides is a region, so hair stays with its own tube's guides. Tubes to Curves paints one a tube
+  (the `tubes` map) and sets it, and **New Map > For > Interpolation regions** makes one to paint.
+- **Locks stay round through curls.** Interpolate's **followBends** (paintable) carries each
+  strand's place round its guides through their bends, so a curled lock keeps its section instead of
+  flattening into a ribbon.
+- **Clumps fit their strands tip to tip.** Clump's **pastTip** now defaults to **fit**: each
+  strand runs along its clump's center tip to tip, as in Yeti and XGen. **gather** is gone; saved
+  grooms with a Clump change look slightly (set pastTip to **extend** to keep each strand's own
+  length). Clump's **volumize** is now the clump's lock radius (with volumizeProfile root to tip and
+  volumizeRandom): grooms that used volumize need it set again by eye.
+- **Switches and dropdowns read apart.** Every on/off setting is a switch, the brush's options
+  included, and dropdowns carry a clear chevron, in Maya, Blender and the app.
+- **Fixes:**
+  - Guide roots stay on the scalp when the camera is inside the head (#55, thanks to Omar Hesham).
+  - Paste Graph leaves out params a node no longer has instead of refusing the paste.
+
 ## 0.46.0 (November 11, 2026)
 
 - **As many clumps as you ask for.** A new Clump node picks its centers on the scalp, the way a
