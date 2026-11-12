@@ -844,6 +844,8 @@ class SimulationTest(unittest.TestCase):
             self.assertAlmostEqual(a, b, delta=1e-3)  # down the middle of the two
         for a, b in zip(tip, (0, 1.4, 0)):
             self.assertAlmostEqual(a, b, delta=1e-3)
+        for a, b in zip(cmds.xform(made[0], query=True, worldSpace=True, rotatePivot=True), root):
+            self.assertAlmostEqual(a, b, delta=1e-3)  # it swings from the root
         for a, b in zip(strands_bbox(10, "unmoved"), before):
             self.assertAlmostEqual(a, b, delta=1e-3)  # made on them: as groomed
         cmds.setKeyframe(made[0], attribute="rotateZ", time=1, value=0.0)
@@ -864,6 +866,10 @@ class SimulationTest(unittest.TestCase):
         for a, b in zip(strands_bbox(10, "each"), before):
             self.assertAlmostEqual(a, b, delta=1e-3)
         first = each[0]
+        first_root = cmds.pointPosition(first + ".cv[0]", world=True)
+        for a, b in zip(cmds.xform(first, query=True, worldSpace=True, rotatePivot=True), first_root):
+            self.assertAlmostEqual(a, b, delta=1e-3)
+        self.assertAlmostEqual(abs(first_root[0]), 0.2, delta=1e-3)  # its own guide's root, not the origin
         cmds.setKeyframe(first, attribute="rotateZ", time=1, value=0.0)
         cmds.setKeyframe(first, attribute="rotateZ", time=10, value=40.0)
         cmds.currentTime(1)

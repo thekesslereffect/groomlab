@@ -657,7 +657,8 @@ No curve yet? Select the guides and **Create Driver from Selected Guides** (a cu
 them, the mean of their shapes) or **Create a Driver per Selected Guide** (a curve on each guide,
 exactly its shape: the guide follows its curve as if bound to it directly); Attach Selected Guides to
 Curve with no curve selected does the first. The curves are made from the guides as groomed at the
-bind frame, attached and bound already (`groomlab.create_drivers(groom, per_guide=False)`); rig them.
+bind frame, with their pivot at the root, attached and bound already
+(`groomlab.create_drivers(groom, per_guide=False)`); rig them.
 
 - **Detach Selected Guides** (`groomlab.detach_guides`) makes them stay as groomed again. **Rebind
   Drivers at Frame 0** after changing the rig's rest pose; the attachments stay.

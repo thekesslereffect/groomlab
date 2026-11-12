@@ -154,11 +154,14 @@ def _guide_points(groom, guide_id):
 
 
 def _curve_through(name, points, parent):
-    """A curve through `points` (a cubic with them as its edit points; fewer than 4: a line)."""
+    """A curve through `points` (a cubic with them as its edit points; fewer than 4: a line), its
+    pivot at the first (the root), so rotating it swings it from there."""
     pts = [tuple(p) for p in points]
     curve = cmds.curve(name=name, editPoint=pts, degree=3) if len(pts) >= 4 else \
         cmds.curve(name=name, point=pts, degree=1)
-    return cmds.ls(cmds.parent(curve, parent)[0], long=True)[0]
+    curve = cmds.ls(cmds.parent(curve, parent)[0], long=True)[0]
+    cmds.xform(curve, worldSpace=True, pivots=pts[0])
+    return curve
 
 
 @undoable("create driver curves")
@@ -170,7 +173,7 @@ def create_drivers(groom, guides=None, group=None, per_guide=False, points=None,
 
     The curves are made from the guides as groomed at the bind frame (`frame`: the bind's, else 0;
     the timeline goes there and back while they are made), with `points` edit points (default: as
-    many as the guides have), under one group transform per groom ("<groom>_drivers"). Returns the
+    many as the guides have) and the pivot at the root, under one group transform per groom ("<groom>_drivers"). Returns the
     curve transforms."""
     ids = _guide_targets(groom, guides, group)
     if not ids:
