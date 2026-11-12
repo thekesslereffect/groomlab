@@ -637,6 +637,31 @@ Simulate has no loop.
   has a Simulate node. Save the groom after baking: the file names the bake.
 - More: https://getgroomlab.com/docs/motion-and-simulation.
 
+### Rigged hair (driver curves)
+
+Animators pose hero hair with a few curves rigged like anything else in Maya (joints and a
+skinCluster, spline IK, wire, blend shapes); the guides follow them, and a simulation can play on
+top.
+
+1. Select the driver curves (and the groom, or pin it), then **GroomLab > Simulate > Drivers > Add
+   Selected Curves as Drivers** (`groomlab.add_drivers(groom, curves)`): they are connected and a
+   **DriveGuides** node goes right after the Guides node.
+2. **Bind Drivers at Frame 0** (`groomlab.bind_drivers(groom, frame=0)`): the drivers' and the
+   scalp's pose there is the bind pose, saved with the scene and in .groom files. Rebind after
+   changing the rig's rest pose or adding drivers.
+3. Animate the rig: each guide keeps its place round its nearest drivers as they swing, bend and
+   stretch (the root stays on the scalp). `reach` sets how far from the drivers hair follows (all
+   of it within half, none past it), `drivers` how many nearest drivers each guide blends, `profile`
+   how much of each part follows, `strength` (paintable) how much in all.
+
+- **Simulation on top:** Add Simulate Node after it (Guides > DriveGuides > Simulate): the
+  simulation holds the driven shape frame by frame and adds the swing and follow-through;
+  `rootStiffness` and its profile set how closely it sticks to the animation.
+- **Follow Scalp** works with drivers: a driver moving with the head drives nothing; only its motion
+  against the head does.
+- Drivers do not carry twist yet: a driver spun about its own length does not turn the hair round
+  it.
+
 ### Other simulators
 
 - **nHair (legacy):** **GroomLab > Simulate > Legacy > Simulate Guides (nHair)...** on the primary

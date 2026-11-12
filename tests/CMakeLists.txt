@@ -59,6 +59,7 @@ add_executable(groomlab_tests
     engine/core/test_layers.cpp
     engine/core/test_locality.cpp
     engine/core/test_sculpt.cpp
+    engine/core/test_drive_guides.cpp
     engine/core/test_sculpt_node.cpp
     engine/core/test_session.cpp
     engine/core/test_shapes.cpp

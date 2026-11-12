@@ -74,6 +74,7 @@ GROOMLAB_OPERATOR(Wind)                  // Curves -> Curves (bent by a wind mov
 GROOMLAB_OPERATOR(Jiggle)                // Curves -> Curves (lag and overshoot from the scalp's recent motion)
 GROOMLAB_OPERATOR(Simulate)              // Guides (+ Mesh collider) -> Guides (the hair solver's frame: simulation.h)
 GROOMLAB_OPERATOR_ELSEWHERE(GuideCache)  // Guides -> Guides, posed from an Alembic cache by guide ID (alembic_operators.h)
+GROOMLAB_OPERATOR(DriveGuides)           // Curves -> Curves (posed by rigged driver curves: externals "drivers", "driverBind": drive_guides.h)
 // [feathers]
 GROOMLAB_OPERATOR(Propagate)             // Curves (shafts) -> Strands (barbs grown off each shaft: feathers)
 GROOMLAB_OPERATOR(Plume)                 // Strands (feathers) (+ Mesh collider) -> Strands (laid over one another and off the body)

@@ -1860,6 +1860,45 @@ def add_wind_action(groom=None):
     return None
 
 
+def add_drivers_action(groom=None):
+    """Simulate > Drivers > Add Selected Curves as Drivers (groomlab.add_drivers): the selected
+    curves drive the active groom's guides through a DriveGuides node."""
+    import groomlab
+    curves = cmds.ls(selection=True, dagObjects=True, type="nurbsCurve", noIntermediate=True, long=True) or []
+    if not curves:
+        cmds.warning("GroomLab: select the driver curves (and the groom, or pin it)")
+        return None
+    groom = groom or _selected_groom()
+    if groom:
+        node = groomlab.add_drivers(groom, curves)
+        _say("%d driver curve(s) on %s through %s: Bind Drivers at the bind frame" % (len(curves), groom, node))
+        return node
+    return None
+
+
+def bind_drivers_action(groom=None, frame=0):
+    """Simulate > Drivers > Bind Drivers at Frame 0 (groomlab.bind_drivers)."""
+    import groomlab
+    groom = groom or _selected_groom()
+    if groom:
+        count = groomlab.bind_drivers(groom, frame=frame)
+        _say("bound %d driver curve(s) of %s at frame %s" % (count, groom, frame) if count else
+             "%s has no driver curves to bind" % groom)
+        return count
+    return None
+
+
+def remove_drivers_action(groom=None):
+    """Simulate > Drivers > Remove Drivers (groomlab.remove_drivers)."""
+    import groomlab
+    groom = groom or _selected_groom()
+    if groom:
+        count = groomlab.remove_drivers(groom)
+        _say("disconnected %d driver curve(s) from %s" % (count, groom))
+        return count
+    return None
+
+
 def add_jiggle_action(groom=None):
     """Add > Jiggle: a Jiggle node before the output (groomlab.add_jiggle): strands lag behind
     the scalp's motion and settle."""
@@ -2098,6 +2137,9 @@ ACTIONS = {
     "sim.range": simulate_range,
     "sim.bake": bake_core_simulation,
     "sim.clear": clear_core_simulation,
+    "drivers.add": add_drivers_action,
+    "drivers.bind": bind_drivers_action,
+    "drivers.remove": remove_drivers_action,
     "nhair.simulate": simulate_guides_dialog,
     "nhair.bake": bake_simulation_dialog,
     "nhair.remove": remove_simulation,

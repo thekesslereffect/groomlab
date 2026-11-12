@@ -312,6 +312,11 @@ GroomSession::GroomSession(GroomData data) : data_(std::move(data)) {
     for (const auto& [name, edits] : sculpts_.nodes) {
         sculptExternals_[name] = {std::make_shared<const SculptEdits>(edits), edits.contentHash()};
     }
+    try {
+        driverBind_ = DriverBind::fromJson(data_.driverBindJson);
+    } catch (const std::invalid_argument& e) {
+        throw std::runtime_error(e.what());
+    }
     posesHash_ = data_.guidePoses ? data_.guidePoses->contentHash() : 0;
     time_ = data_.time;
 }
@@ -644,6 +649,26 @@ void GroomSession::setSculptsJson(const std::string& json) {
     sculptExternals_ = std::move(externals);
 }
 
+void GroomSession::setDrivers(GuidesPtr drivers) { data_.drivers = std::move(drivers); }
+
+void GroomSession::setDriverBindJson(const std::string& json) {
+    if (json == data_.driverBindJson) return;
+    data_.driverBindJson = json;
+    driverBindError_.clear();
+    try {
+        driverBind_ = DriverBind::fromJson(json);
+    } catch (const std::exception& e) {
+        driverBind_ = DriverBind{};
+        driverBindError_ = e.what();  // "driverBind: <why>"
+    }
+}
+
+std::string GroomSession::bindDrivers(int frame) const {
+    if (!data_.drivers) return {};
+    const DriverBind bind = groomlab::bindDrivers(*data_.drivers, cageScalp_.get(), frame);
+    return bind.empty() ? std::string() : bind.toJson();
+}
+
 void GroomSession::setCorrectiveWeights(std::map<int, float> weights) {
     if (liveWeights_ && weights == weights_) return;
     liveWeights_ = true;
@@ -658,7 +683,7 @@ void GroomSession::clearCorrectiveWeights() {
 std::vector<std::string> GroomSession::inputErrors() const {
     std::vector<std::string> out;
     for (const std::string* e : {&hierarchyError_, &graphError_, &partError_, &flowError_, &correctiveError_, &scalpMapsError_,
-                                 &sculptError_}) {
+                                 &sculptError_, &driverBindError_}) {
         if (!e->empty()) out.push_back(*e);
     }
     return out;
@@ -1357,6 +1382,24 @@ void GroomSession::fillExternals(ExternalInputs& externals) const {
         setGroomExternals(externals, scalp_, guides_, activeHierarchy_, parts_, flow_);
     }
     setMeshExternals(externals, data_.meshes);          // "mesh:<name>" for ColliderMesh nodes
+    // The driver curves as bound and as they are now, in the space the graph evaluates in (on the
+    // rest pose while following), for DriveGuides nodes. Their anchors are on the scalp before any
+    // subdivision (cageScalp_: its faces whatever the level), and so is their carry.
+    if (!driverBind_.empty()) {
+        const ScalpMesh* cage = cageScalp_.get();
+        const ScalpMesh* rest = cage;
+        if (cage && cage->hasRest()) {
+            const std::uint64_t h = cage->restPoseHash();
+            if (!driverRest_ || h != driverRestHash_) {
+                driverRest_ = std::make_shared<const ScalpMesh>(cage->restPose());
+                driverRestHash_ = h;
+            }
+            rest = driverRest_.get();
+        }
+        const DriversInGraph drivers = driversInGraphSpace(driverBind_, data_.drivers, rest, cage, following_ ? rest : cage);
+        externals.set(kDriverBindExternal, drivers.bound, drivers.bound->contentHash());
+        if (drivers.now) externals.set(kDriversExternal, drivers.now, drivers.now->contentHash());
+    }
     setControlExternals(externals, scaledControls());  // keyed lengths at the groom's scale
     setMapExternals(externals, data_.maps);             // where each painted map lives, for Map nodes
     // The scalp's earlier frames, for Jiggle nodes (in rest space while following).

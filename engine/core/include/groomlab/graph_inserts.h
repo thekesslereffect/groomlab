@@ -40,6 +40,7 @@ void insertBefore(GraphEdit& edit, const std::string& anchor, const std::string&
 // the simulated guides; bypassed or deleted, the groom is as it was. Placed half a column right of
 // and a row below the Guides node. GraphError when no Guides node feeds an Interpolate. Returns the
 // node's name.
+// (After a DriveGuides or GuideCache node posing the guides, when the Guides node feeds one.)
 std::string insertSimulate(GraphEdit& edit, const std::string& paramsJson = {}, std::optional<double> groomSize = std::nullopt);
 
 // Load Guide Cache: a GuideCache node reading `path` (`object`: the Alembic object, "" every one)
@@ -48,6 +49,12 @@ std::string insertSimulate(GraphEdit& edit, const std::string& paramsJson = {}, 
 // instead. GraphError when no Guides node feeds anything. Returns the node's name.
 std::string insertGuideCache(GraphEdit& edit, const std::string& path, const std::string& object = {},
                              std::optional<double> groomSize = std::nullopt);
+
+// Add Drivers, its graph: a DriveGuides node right after the first Guides node feeding the groom,
+// feeding all it fed (before a Simulate there, so the simulation plays on top of the drivers). A
+// DriveGuides node already there is kept (its name returned). GraphError when no Guides node feeds
+// anything. Returns the node's name.
+std::string insertDriveGuides(GraphEdit& edit, std::optional<double> groomSize = std::nullopt);
 
 // Add > Collider, its graph: a ColliderMesh node reading the graph's mesh input `meshName` (the
 // one reading it already, else a new one named after it, letters, digits and _). With `wire`, a

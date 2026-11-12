@@ -30,6 +30,7 @@
 
 #include "groomlab/cards.h"
 #include "groomlab/correctives.h"
+#include "groomlab/drive_guides.h"
 #include "groomlab/follow_scalp.h"
 #include "groomlab/graph.h"
 #include "groomlab/graph_edit.h"
@@ -355,6 +356,18 @@ public:
     // keeps the error ("sculptData: <why>") and no edits.
     void setSculptsJson(const std::string& json);
     const SculptSet& sculpts() const { return sculpts_; }
+    // Driver curves for DriveGuides nodes (drive_guides.h): as they are now (world space; null:
+    // none), and as bound (DriverBind's JSON; empty: not bound; a bad text keeps the error
+    // "driverBind: <why>" and no bind).
+    void setDrivers(GuidesPtr drivers);
+    GuidesPtr drivers() const { return data_.drivers; }
+    void setDriverBindJson(const std::string& json);
+    const std::string& driverBindJson() const { return data_.driverBindJson; }
+    // Bind: the drivers as they are now on the scalp as it is now (call it at the bind frame;
+    // anchored on the scalp before subdivision),
+    // as DriverBind's JSON, for the host to keep and hand back by setDriverBindJson (empty: no
+    // drivers of 2 points or more).
+    std::string bindDrivers(int frame) const;
     // The stored inputs that did not parse, "<label>: <why>" (guideData, graph, partData,
     // flowData, correctiveData, scalpMaps, sculptData), in that order.
     std::vector<std::string> inputErrors() const;
@@ -943,6 +956,12 @@ private:
     // live stroke's, the target and its shown guides (made from the node's output of that serial).
     SculptSet sculpts_;
     std::string sculptError_;
+    // Driver curves: the bind parsed, its error, and the scalp's rest pose they are carried by
+    // (made from the scalp's rest points when the scalp has them and the session does not follow).
+    DriverBind driverBind_;
+    std::string driverBindError_;
+    mutable MeshPtr driverRest_;
+    mutable std::uint64_t driverRestHash_ = 0;
     std::map<std::string, std::pair<SculptPtr, std::uint64_t>> sculptExternals_;
     std::string previewSculptNode_;
     SculptPtr previewSculpt_;

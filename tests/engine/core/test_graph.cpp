@@ -607,6 +607,35 @@ TEST(GraphInserts, EveryHostAddsAFeatureAlike) {
     EXPECT_THROW(insertBefore(edit, "scalp", sim), GraphError) << "nothing feeds the scalp's strands";
 }
 
+TEST(GraphInserts, DriversGoRightAfterTheGuidesAndASimulationAfterThem) {
+    using nlohmann::json;
+    auto feeds = [](const GraphEdit& e, const std::string& from, const std::string& to, const std::string& input) {
+        const json g = json::parse(e.toJson());
+        for (const json& c : g["connections"]) {
+            if (c["from"] == from && c["to"] == to && c["input"] == input) return true;
+        }
+        return false;
+    };
+    // Drivers first, then a simulation: Guides > DriveGuides > Simulate > Interpolate.
+    GraphEdit edit(defaultGraphJson());
+    const std::string drive = insertDriveGuides(edit);
+    EXPECT_EQ(edit.nodeType(drive), "DriveGuides");
+    EXPECT_TRUE(feeds(edit, "guides", drive, "strands"));
+    EXPECT_TRUE(feeds(edit, drive, "interpolate", "guides"));
+    EXPECT_EQ(insertDriveGuides(edit), drive) << "one there: kept";
+    const std::string sim = insertSimulate(edit);
+    EXPECT_TRUE(feeds(edit, drive, sim, "guides"));
+    EXPECT_TRUE(feeds(edit, sim, "interpolate", "guides"));
+    EXPECT_FALSE(feeds(edit, drive, "interpolate", "guides"));
+    // A simulation first, then drivers: they go before it.
+    GraphEdit other(defaultGraphJson());
+    const std::string sim2 = insertSimulate(other);
+    const std::string drive2 = insertDriveGuides(other);
+    EXPECT_TRUE(feeds(other, "guides", drive2, "strands"));
+    EXPECT_TRUE(feeds(other, drive2, sim2, "guides"));
+    EXPECT_NO_THROW(loadGraphJson(other.toJson())) << "a graph that loads";
+}
+
 TEST(GraphInserts, BraidsAndFeathersLandAlikeInEveryHost) {
     // graph_inserts.h insertBraid / insertFeathers: Maya's braids.py and feathers.py, the Blender
     // helper and the app add them through these.

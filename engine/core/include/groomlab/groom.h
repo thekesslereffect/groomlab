@@ -43,6 +43,11 @@ struct GroomData {
     // SculptSet::toJson (sculpt.h): the Sculpt nodes' brushed edits by node name; empty: none.
     // Stored in groom files ("sculpts").
     std::string sculptsJson;
+    // Driver curves (drive_guides.h): as they are now (world space, the host's curves at the
+    // evaluation time; IDs stable) and as bound (DriverBind::toJson; empty: not bound), what
+    // DriveGuides nodes read. Stored in groom files ("drivers", "driverBind").
+    GuidesPtr drivers;
+    std::string driverBindJson;
     std::map<std::string, float> controls;  // Control node values by name (Maya: the groom's control attributes)
     MapCatalog maps;            // the maps painted on the scalp, by name (Map nodes read them; graph.h)
     // Other meshes by name, read by ColliderMesh nodes (e.g. "collider" for Collide), world space,

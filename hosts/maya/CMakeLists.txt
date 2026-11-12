@@ -99,6 +99,7 @@ maya_add_plugin(GroomLab
     src/reference_tool.cpp
     src/select_tool.cpp
     src/sim_cmd.cpp
+    src/drivers_cmd.cpp
     src/tool_view.cpp
     src/version_cmd.cpp
 )

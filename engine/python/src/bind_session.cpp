@@ -223,6 +223,17 @@ void bindSession(py::module_& m) {
         .def_property_readonly("scalp_maps_error", &GroomSession::scalpMapsError)
         // ---- Moving inputs
         .def("set_guides", [](GroomSession& s, std::shared_ptr<GuideSet> g) { s.setGuides(std::move(g)); }, py::arg("guides"))
+        .def("set_drivers", [](GroomSession& s, std::shared_ptr<GuideSet> g) { s.setDrivers(std::move(g)); }, py::arg("drivers"),
+             "Driver curves for DriveGuides nodes as they are now (world space, stable IDs; None: none).")
+        .def_property_readonly("drivers", [](const GroomSession& s) {
+            return s.drivers() ? py::cast(std::make_shared<GuideSet>(*s.drivers())) : py::none();
+        })
+        .def("set_driver_bind_json", &GroomSession::setDriverBindJson, py::arg("json"),
+             "The driver curves as bound (bind_drivers()'s text; '' not bound).")
+        .def_property_readonly("driver_bind_json", &GroomSession::driverBindJson)
+        .def("bind_drivers", &GroomSession::bindDrivers, py::arg("frame") = 0,
+             "The drivers as they are now on the scalp now, as a bind's text (call it at the bind frame, then "
+             "set_driver_bind_json it and keep it with the groom; '' when there are no drivers).")
         .def("set_guide_poses", [](GroomSession& s, std::shared_ptr<GuideSet> p) { s.setGuidePoses(std::move(p)); }, py::arg("poses"))
         .def("set_controls", &GroomSession::setControls, py::arg("controls"))
         .def("set_mesh", [](GroomSession& s, const std::string& name, std::shared_ptr<ScalpMesh> mesh) { s.setMesh(name, std::move(mesh)); },

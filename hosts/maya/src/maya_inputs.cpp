@@ -486,7 +486,7 @@ void prepareSimulation(const MObject& node, GroomSession& session, SimCacheInput
     // The frames on the way: the scalp's points at that time on the scalp the session has, and the
     // groom's other scalps and its colliders then (each read as a frame shows it), so Simulate
     // Range, and the bake it makes, meets a body moving through the hair where playing met it (it
-    // was met where it stood at the frame shown). Guide curves, guide caches and controls at other
+    // was met where it stood at the frame shown), and its driver curves then. Guide curves, guide caches and controls at other
     // times are not read. Not while Maya plays or scrubs (playing): frames stepped over then
     // (playback started past a node's last frame, frames real-time playback dropped) are stepped in
     // one go toward the inputs as shown (GroomSession::setSimulationFeed).
@@ -502,6 +502,7 @@ void prepareSimulation(const MObject& node, GroomSession& session, SimCacheInput
         MDGContextGuard guard(context);
         session.setScalps(extraScalpsFromNode(handle.object()));
         session.setMeshes(colliderMeshesFromNode(handle.object()));
+        session.setDrivers(driverCurvesFromNode(handle.object()));  // a rig's drivers then (DriveGuides)
         return true;
     });
     const MPlug plug = MFnDependencyNode(node).findPlug("simCaches", true);
@@ -825,6 +826,26 @@ GuidesPtr toGuides(const std::vector<GuideCurveData>& curves, const ScalpMesh* s
     }
     if (scalp) guides->orientAndRoot(*scalp);
     return guides;
+}
+
+GuidesPtr toDrivers(const std::vector<GuideCurveData>& curves) {
+    auto drivers = std::make_shared<GuideSet>();
+    for (const GuideCurveData& c : curves) {
+        std::vector<Vec3f> pts = sampleCurveData(c.curve, kGuideCurveSamples);
+        if (pts.size() >= 2) drivers->add(c.id, std::move(pts));
+    }
+    return drivers->empty() ? nullptr : GuidesPtr(drivers);
+}
+
+GuidesPtr driverCurvesFromNode(const MObject& node) {
+    MPlug plug = MFnDependencyNode(node).findPlug("driverCurves", true);
+    std::vector<GuideCurveData> curves;
+    const unsigned count = plug.evaluateNumElements();
+    for (unsigned i = 0; i < count; ++i) {
+        MPlug element = plug.elementByPhysicalIndex(i);
+        curves.push_back({element.logicalIndex(), element.asMObject()});
+    }
+    return toDrivers(curves);
 }
 
 struct GuideCacheReader {
@@ -1312,6 +1333,8 @@ GroomData groomDataFromNode(const MObject& node, NodeInputCache* cache, std::str
     data.partsJson = fn.findPlug("partData", true).asString().asChar();
     data.correctivesJson = withWeightCurves(node, fn.findPlug("correctiveData", true).asString().asChar());
     data.sculptsJson = fn.findPlug("sculptData", true).asString().asChar();
+    data.drivers = driverCurvesFromNode(node);
+    data.driverBindJson = fn.findPlug("driverBind", true).asString().asChar();
     data.flowJson = fn.findPlug("flowData", true).asString().asChar();
     if (cache) cache->controlsListed = false;  // a full read lists the control attributes again
     data.controls = controlsFromNode(node, cache);
@@ -1332,6 +1355,7 @@ GroomData groomMotionFromNode(const MObject& node, NodeInputCache& cache) {
     data.scalps = extraScalpsFromNode(node, &cache);
     data.guides = guideCurvesFromNode(node, combineScalps(data.scalp, data.scalps), &cache);
     data.guidePoses = guidePosesFromNode(node, &cache);
+    data.drivers = driverCurvesFromNode(node);
     data.controls = controlsFromNode(node, &cache);
     data.meshes = colliderMeshesFromNode(node, &cache);
     data.time = mayaSeconds(MFnDependencyNode(node).findPlug("time", true).asMTime());

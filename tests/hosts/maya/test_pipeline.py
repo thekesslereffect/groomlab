@@ -773,6 +773,30 @@ class SimulationTest(unittest.TestCase):
         self.assertFalse(cmds.objExists(made["group"]))
         self.assertEqual([round(v, 4) for v in bbox(self.groom)], [round(v, 4) for v in before])
 
+    def test_driver_curves_pose_the_guides_from_their_bind(self):
+        """A rigged driver curve (keyed here) along the top guide, bound at frame 1 while the
+        timeline sits elsewhere: at frame 1 the groom is as groomed, swung at frame 10."""
+        before = bbox(self.groom)
+        driver = cmds.curve(degree=1, point=[(0.03, 1, 0), (0.13, 1.7, 0.0), (0.23, 2.4, 0.0)])
+        node = groomlab.add_drivers(self.groom, [driver])
+        self.assertEqual(groomlab.add_drivers(self.groom, [driver]), node)  # connected already: kept
+        self.assertEqual(len(groomlab.driver_curves(self.groom)), 1)
+        groomlab.set_param(self.groom, node, "reach", 0.0)  # every guide follows it
+        cmds.xform(driver, worldSpace=True, pivots=(0.03, 1, 0))
+        cmds.setKeyframe(driver, attribute="rotateZ", time=1, value=0.0)
+        cmds.setKeyframe(driver, attribute="rotateZ", time=10, value=40.0)
+        cmds.currentTime(10)
+        self.assertEqual(groomlab.bind_drivers(self.groom, frame=1), 1)
+        self.assertEqual(groomlab.bind_frame(self.groom), 1)
+        moved = sum(abs(a - b) for a, b in zip(bbox(self.groom), before))
+        self.assertGreater(moved, 0.3)  # every guide following the one driver (reach 0), swung with it
+        cmds.currentTime(1)
+        for a, b in zip(bbox(self.groom), before):
+            self.assertAlmostEqual(a, b, delta=1e-3)  # the bind pose: as groomed
+        self.assertEqual(groomlab.remove_drivers(self.groom), 1)
+        groomlab.clear_bind(self.groom)
+        self.assertIsNone(groomlab.bind_frame(self.groom))
+
     def test_nhair_simulation_drives_the_groom(self):
         made = sim.create_sim_curves(self.groom, "primary")
         self.assertTrue(made["hairSystem"] and made["nucleus"])

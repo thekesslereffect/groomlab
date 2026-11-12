@@ -32,6 +32,7 @@
 #include "groomlab/groom.h"
 #include "groomlab/guide_hierarchy.h"
 #include "groomlab/random.h"
+#include "groomlab/drive_guides.h"
 #include "groomlab/sculpt.h"
 #include "groomlab/simulation.h"
 #include "test_helpers.h"
@@ -134,6 +135,7 @@ struct Case {
     int simulate = 0;     // frames the Simulate node "op" is stepped (from rest on the guides) before the evaluation
     bool flap = false;    // on the flap scalp (a thin flap standing on a floor) and its guides
     bool sculpt = false;  // the Sculpt node "op" given edits of the guides it is fed (sculptEdits)
+    bool drive = false;   // with driver curves bound and posed (goldenDrivers)
 };
 
 // Every case shares scalp -> scatter -> interpolate (guides, scalp); the strands grow with
@@ -488,6 +490,14 @@ std::vector<Case> cases() {
          false, 0.0, false, 12},
         // Edits on the guides (the session's as the external "sculpt:op": every other guide hooked
         // near its tip, the rest shortened), the strands grown from them.
+        // Guides posed by two driver curves on top of the head (goldenDrivers: one swung over, one
+        // bent at its middle), the strands grown from them.
+        {"DriveGuides", "grown",
+         R"({"name": "op", "type": "DriveGuides", "params": {"strength": 0.9, "drivers": 2, "reach": 1.5}},
+            {"name": "grown", "type": "Interpolate"})",
+         link("guides", "op", "strands") + "," + link("scatter", "grown", "strands") + "," + link("op", "grown", "guides") + "," +
+             link("scalp", "grown", "scalp"),
+         false, 0.0, false, 0, false, false, true},
         {"Sculpt", "grown",
          R"({"name": "op", "type": "Sculpt", "params": {"strength": 0.8}},
             {"name": "grown", "type": "Interpolate"})",
@@ -604,6 +614,25 @@ StrandSet asStrands(const Value& v) {
     return out;
 }
 
+// Two driver curves out of the top of the golden scalp, as bound and as posed: the one at -x swung
+// 35 degrees toward -x about its root, the one at +x bent 60 degrees at its middle.
+std::pair<GuidesPtr, GuidesPtr> goldenDrivers() {
+    auto bound = std::make_shared<GuideSet>(), now = std::make_shared<GuideSet>();
+    const Vec3f roots[2] = {{-0.35f, 0.937f, 0.0f}, {0.35f, 0.937f, 0.0f}};
+    for (int d = 0; d < 2; ++d) {
+        const Vec3f out = roots[d].normalized();
+        std::vector<Vec3f> points = test::straightCurve(roots[d], out * 1.2f, 8);
+        bound->add(static_cast<std::uint64_t>(d + 1), points);
+        if (d == 0) {
+            for (Vec3f& p : points) p = roots[d] + rotateAxisAngle(p - roots[d], {0.0f, 0.0f, 1.0f}, 0.61f);
+        } else {
+            for (std::size_t i = 5; i < points.size(); ++i) points[i] = points[4] + rotateAxisAngle(points[i] - points[4], {0.0f, 0.0f, 1.0f}, -1.05f);
+        }
+        now->add(static_cast<std::uint64_t>(d + 1), std::move(points));
+    }
+    return {bound, now};
+}
+
 struct Scene {
     MeshPtr scalp = goldenScalp();
     HierarchyPtr hierarchy;
@@ -702,6 +731,14 @@ struct Scene {
             withSculpts.setParent(ctx.externals);
             withSculpts.set(sculptExternal("op"), SculptPtr(edits), edits->contentHash());
             ctx.externals = &withSculpts;
+        }
+        ExternalInputs withDrivers;
+        if (c.drive) {
+            const auto [bound, now] = goldenDrivers();
+            withDrivers.setParent(ctx.externals);
+            withDrivers.set(kDriverBindExternal, bound, bound->contentHash());
+            withDrivers.set(kDriversExternal, now, now->contentHash());
+            ctx.externals = &withDrivers;
         }
         return asStrands(doc.graph.evaluate(doc.node(c.output), ctx));
     }
