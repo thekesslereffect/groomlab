@@ -1425,6 +1425,8 @@ def tubes_report(result):
         where = ("in %s" % result["group"].split("|")[-1] if result["group"] else
                  "as guides (%s)" % ", ".join(sorted(set(g for g in result["groups"].values() if g))))
         text = "%s from %s, %s" % (made, utils._count(result["tubes"], "tube"), where)
+        if result.get("regionMap"):
+            text += "; guide map %s keeps each tube's hair to its own guides (Interpolate's Region Map)" % result["regionMap"]
     if result["skipped"]:
         text += "; skipped %s" % "; ".join("%s: %s" % kv for kv in sorted(result["skipped"].items()))
     return text

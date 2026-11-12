@@ -4079,14 +4079,15 @@ class ParamPanel(QtWidgets.QScrollArea):
             if op_type in ("HairColor", "Interpolate"):
                 try:
                     # Color maps first: they paint hair color and regions (a gray map reads as gray).
-                    # Guide layers lie on the guides: regions are painted on the scalp.
                     entries = groomlab.maps(groom) if groom else []
                 except RuntimeError:
                     entries = []
-                if op_type == "Interpolate":
+                if op_type == "HairColor":  # (guide layers lie on the guides, not at the scalp's UVs)
                     entries = [m for m in entries if m.get("kind") != "guides"]
-                names = [m["name"] for m in entries if m.get("channels") == 4] + \
-                        [m["name"] for m in entries if m.get("channels") != 4]
+                # Regions: guide maps first (each value a region, each strand its nearest guide's).
+                guide_maps = [m["name"] for m in entries if m.get("kind") == "guides"] if op_type == "Interpolate" else []
+                names = guide_maps + [m["name"] for m in entries if m.get("channels") == 4 and m["name"] not in guide_maps] + \
+                    [m["name"] for m in entries if m.get("channels") != 4 and m["name"] not in guide_maps]
                 # Then the scalp's own color sets (an image file's path can be typed in).
                 names += [s for s in self.editor.color_sets() if s not in names]
                 return names, "none (a color map from Groom Tools > Paint, a color set, or an image file)"

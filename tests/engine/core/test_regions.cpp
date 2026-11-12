@@ -316,5 +316,70 @@ TEST(Regions, BlendNeighborsAndTangleKeepWithinRegions) {
     }
 }
 
+TEST(Regions, AGuideMapsValuesAreRegionsEachStrandItsNearestGuides) {
+    // Regions from the guides (Tubes to Curves' way): each guide's value on a guide layer is its
+    // region, every distinct value its own (the green band's 0.5 lies between red's 0.2 and blue's
+    // 0.8, and is still a region of its own), and each strand is in the region of the guide rooted
+    // nearest it: no strand without one, and each region's strands are its guides' blend alone. By
+    // name or with a Map node of the layer plugged into regionMap: the same.
+    const MeshPtr scalp = test::makePlane(8, 1.0f);  // (nothing painted on the scalp)
+    auto valued = bandGuides(*scalp, {kRedBand, kGreenBand, kBlueBand});
+    for (Guide& g : valued->guides()) g.attributes["bands"] = g.id > 200 ? 0.8f : g.id > 100 ? 0.5f : 0.2f;
+    RegionGraph byName;
+    byName.node("interp").params().set("regionMap", std::string("bands"));
+    const StrandsPtr out = byName.eval("interp", scalp, valued);
+    ASSERT_TRUE(out);
+    const std::vector<float> regions = regionsOf(*out);
+    ASSERT_EQ(regions.size(), out->strandCount());
+    EXPECT_EQ(std::count(regions.begin(), regions.end(), -1.0f), 0) << "every strand in a region";
+    EXPECT_EQ(std::set<float>(regions.begin(), regions.end()).size(), 3u);
+    // Each strand's region is its nearest guide's band.
+    std::map<StrandId, float> regionOfBand;
+    for (std::size_t s = 0; s < out->strandCount(); ++s) {
+        const Vec3f root = out->strandPoints(s)[0];
+        const Guide* nearest = nullptr;
+        float best = 1e30f;
+        for (const Guide& g : valued->guides()) {
+            const float d = (g.points[0] - root).length();
+            if (d < best) best = d, nearest = &g;
+        }
+        const StrandId band = nearest->id / 100;
+        const auto [it, added] = regionOfBand.emplace(band, regions[s]);
+        EXPECT_EQ(it->second, regions[s]) << root.x << " " << root.z;
+    }
+    EXPECT_EQ(regionOfBand.size(), 3u);
+    // A region's strands: its guides' blend alone.
+    float worst = 0.0f;
+    for (const Band band : {kRedBand, kGreenBand, kBlueBand}) {
+        RegionGraph alone;
+        alone.node("interp").params().set("regionMap", std::string());
+        const StrandsPtr only = alone.eval("interp", scalp, bandGuides(*scalp, {band}));
+        ASSERT_TRUE(only);
+        for (std::size_t s = 0; s < out->strandCount(); ++s) {
+            if (regions[s] == regionOfBand[band]) worst = std::max(worst, strandGap(*out, *only, s));
+        }
+    }
+    EXPECT_LE(worst, 1e-6f);
+
+    // A Map node of the layer plugged into regionMap: the same strands and regions.
+    GraphDocument plugged = loadGraphJson(R"({"version": 1, "output": "interp", "nodes": [
+        {"name": "scalp", "type": "Scalp"}, {"name": "guides", "type": "Guides"},
+        {"name": "scatter", "type": "Scatter", "params": {"density": 2500.0}},
+        {"name": "bands", "type": "Map", "params": {"name": "bands"}},
+        {"name": "interp", "type": "Interpolate", "paramInputs": ["regionMap"]}],
+      "connections": [{"from": "scalp", "to": "scatter", "input": "scalp"},
+                      {"from": "scatter", "to": "interp", "input": "strands"},
+                      {"from": "guides", "to": "interp", "input": "guides"},
+                      {"from": "scalp", "to": "interp", "input": "scalp"},
+                      {"from": "bands", "to": "interp", "input": "regionMap", "output": "rgb"}]})");
+    ExternalInputs ext;
+    setGroomExternals(ext, scalp, valued, nullptr, nullptr);
+    EvalContext ctx;
+    ctx.externals = &ext;
+    const StrandsPtr viaMap = plugged.graph.evaluateStrands(plugged.node("interp"), ctx);
+    ASSERT_TRUE(viaMap);
+    expectSame(*viaMap, *out, "a Map node plugged in");
+}
+
 }  // namespace
 }  // namespace groomlab

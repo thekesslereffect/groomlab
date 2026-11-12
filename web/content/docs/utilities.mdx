@@ -36,6 +36,10 @@ on every tube of the selected meshes (or groups).
   Maya curves** leaves them in the scene, grouped in the Outliner.
 - **Count bevels as one curve:** edge loops or runs held close together to keep a crease make one
   curve.
+- **Keep each tube's hair to its own guides** (adding to a groom): a guide map, *tubes*, gives each
+  tube's guides a value of their own, and an Interpolate without a `regionMap` takes it, so each
+  strand blends only the guides of the tube rooted nearest it, never a neighbouring tube's
+  ([Regions](/docs/node-graph#regions)).
 
 **Convert Tubes to GroomLab Tubes** makes one tube guide per modeled tube, to keep shaping with
 GroomLab's tools:

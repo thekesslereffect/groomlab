@@ -188,9 +188,11 @@ Frozen guides draw blue and brushes leave them alone.
   partings, lower it for soft ones; `minLength` drops short splits like the center of a whorl.
   These parts only open the gap: Interpolate and Clump still blend across them (draw the part if
   they must not).
-- **Regions:** to keep whole areas apart (bangs from the sides), paint a color map in the Paint tab,
-  one color per region, and name it in Interpolate's `regionMap`. Each strand then takes only its own
-  region's guides, and Clump, BlendNeighbors and Tangle stay within regions too.
+- **Regions:** to keep whole areas apart (bangs from the sides, modeled tubes), give each group of
+  guides a value of its own in a guide map (Tubes to Curves does it a tube at a time), or paint a
+  color map on the scalp, one color per region, and name it in Interpolate's `regionMap` (or plug a
+  Map node into it). Each strand then takes only its own region's guides (with a guide map: the
+  region of the guide rooted nearest it), and Clump, BlendNeighbors and Tangle stay within regions too.
 
 ### Groups and restructuring
 
@@ -271,8 +273,9 @@ Add a **Clump**. By default it picks its own clump centers among the strands (`c
 - **Clumps of clumps:** chain Clumps from small to large. The small ones form first and the large
   ones carry them whole. Give each its own `clumpChannel` (`clumpId` for the small, `lockId` for
   the large) so a Twist, Cards or HairColor's `clumpShare` can follow the one it names.
-- **Long hair:** a strand longer than its clump's axis gathers at the tip (`pastTip` `gather`), or
-  carries on past it (`extend`) so long hair keeps its length.
+- **Strand length in a clump:** by default each strand lies along its clump's axis tip to tip
+  (`pastTip` `fit`), so it takes the axis's length as much as it clumps; `extend` keeps each
+  strand's own length instead, carrying a longer one on past the axis's tip.
 - **Paint clumping:** right-click `strength` > **Paint > On Guides**. Children and strands inherit
   what you paint.
 - **Parting around whiskers, horns, eyes:** a negative `strength` (down to -1) pushes strands

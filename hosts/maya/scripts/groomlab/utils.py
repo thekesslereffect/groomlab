@@ -485,7 +485,7 @@ def _new_group_name(groom, base):
 
 
 def tubes_to_curves(meshes, groom=None, centers=True, centers_group=True, existing_groups=False, ignore_bevels=True,
-                    name=None, shapes=True, center_count=1, smooth=True):
+                    name=None, shapes=True, center_count=1, smooth=True, region_map=True):
     """Modeled hair tubes (open quad tubes: `meshes`, or groups of them) as NURBS curves: with `shapes`
     one per edge run along each tube (its shape curves, a point per edge loop), and with `centers` one through
     each tube's middle (each section's area centroid); `center_count` above 1 fills the tube with
@@ -502,11 +502,15 @@ def tubes_to_curves(meshes, groom=None, centers=True, centers_group=True, existi
     (tubesShape, tubesShape2...). Without a groom they stay in the scene as Maya curves under one group
     (`name`, default "tubeCurves"): a group per tube of its curves (<tube>_curve1...), and with
     `centers_group` one group of every center curve ("tubeCenterCurves"), else each center curve in
-    its tube's group. One undo step.
+    its tube's group. With a groom and `region_map`, a guide map ("tubes", a free name) gives each
+    tube's guides (shape and center) a value of their own, neighbouring tubes far apart in gray, and
+    every Interpolate whose regionMap is empty takes it: each strand then blends only the guides of
+    the tube rooted nearest it (regions from a guide map, Interpolate's regionMap). One undo step.
 
     Returns {"tubes": n, "shape": [curves or guide IDs], "centers": [...], "group": the scene group
     (None with a groom), "groups": {"shape": guide group, "centers": guide group} (with a groom),
-    "skipped": {mesh: why}}. Neither `shapes` nor `centers`: ValueError.
+    "regionMap": the guide map (with a groom and `region_map`, else None), "skipped": {mesh: why}}.
+    Neither `shapes` nor `centers`: ValueError.
     """
     if not shapes and not centers:
         raise ValueError("Choose shape curves, center curves or both")
@@ -517,18 +521,21 @@ def tubes_to_curves(meshes, groom=None, centers=True, centers_group=True, existi
         center_holder = (cmds.group(empty=True, name="tubeCenterCurves", parent=root)
                          if centers and centers_group else None)
         shape_curves, centers_made = [], []
+        shape_tube, center_tube = [], []  # each curve's tube (its index)
         closest = _scalp_closest(groom) if groom else None  # (guides: rooted here, see _rooted)
-        for tube in tubes:
+        for t, tube in enumerate(tubes):
             holder = (cmds.group(empty=True, name=tube.name + "_curves", parent=root)
                       if shapes or (centers and not centers_group) else None)
             if shapes:
                 for i, column in enumerate(tube.columns()):
                     shape_curves.append(_curve("%s_curve%d" % (tube.name, i + 1), _rooted(column, closest), holder))
+                    shape_tube.append(t)
             if centers:
                 for i, points in enumerate(tube.volume_curves(center_count)):
                     centers_made.append(_curve("%s_center%s" % (tube.name, i + 1 if i else ""),
                                                _rooted(points, closest), center_holder or holder))
-        result = {"tubes": len(tubes), "skipped": skipped, "group": root, "groups": {}}
+                    center_tube.append(t)
+        result = {"tubes": len(tubes), "skipped": skipped, "group": root, "groups": {}, "regionMap": None}
         if not groom:
             result.update(shape=shape_curves, centers=centers_made)
             return result
@@ -542,7 +549,53 @@ def tubes_to_curves(meshes, groom=None, centers=True, centers_group=True, existi
         result["centers"] = _guides_point_per_loop(groom, centers_made, groups["centers"])
         cmds.delete(root)
         result.update(group=None, groups=groups)
+        if region_map and tubes:
+            by_tube = [[] for _ in tubes]
+            for ids, owners in ((result["shape"], shape_tube), (result["centers"], center_tube)):
+                for guide, t in zip(ids or [], owners):
+                    by_tube[t].append(guide)
+            result["regionMap"] = _tube_region_map(groom, by_tube)
     return result
+
+
+TUBE_REGION_MAP = "tubes"
+
+
+def tube_region_values(count):
+    """`count` distinct grays for tubes, one each: evenly spaced in (0, 1), handed out a golden step
+    apart so neighbouring tubes (made one after another) differ by about a third or more."""
+    if count <= 0:
+        return []
+    values = [round((k + 1.0) / (count + 1.0), 4) for k in range(count)]
+    step = max(1, int(round(count * 0.381966)))
+    while math.gcd(step, count) != 1:
+        step += 1
+    return [values[(t * step) % count] for t in range(count)]
+
+
+def _tube_region_map(groom, by_tube):
+    """A guide map ("tubes", a free name) with each tube's guides at a value of their own
+    (tube_region_values), every other guide at 0, and every Interpolate whose regionMap is empty
+    reading it. Returns its name."""
+    from groomlab import graph as gm
+    taken = set(groomlab.list_maps(groom))
+    name, n = TUBE_REGION_MAP, 1
+    while name in taken:
+        n += 1
+        name = "%s%d" % (TUBE_REGION_MAP, n)
+    groomlab.add_map(groom, name, value=0.0, kind="guides")
+    for guides, value in zip(by_tube, tube_region_values(len(by_tube))):
+        if guides:
+            groomlab.set_guide_attribute(groom, name, value, guides=list(guides))
+    model = gm.GraphModel.from_groom(groom, gm.OperatorCatalog.from_maya())
+    changed = False
+    for node in list(model.order):
+        if model.node_type(node) == "Interpolate" and not model.param(node, "regionMap"):
+            model.set_param(node, "regionMap", name)
+            changed = True
+    if changed:
+        model.save(groom)
+    return name
 
 
 def _shape_name(groom, base, taken):

@@ -267,6 +267,38 @@ class TubesInMayaTest(unittest.TestCase):
         self.assertEqual(set(counts()) - before, set())
         self.assertEqual(counts()["tubesCenter"], 5)
 
+    def test_each_tubes_hair_from_its_own_guides(self):
+        # Into a groom, the tubes' guides get a guide map of a value a tube, which the Interpolate
+        # takes as its regions: every strand in the region of the tube rooted nearest it.
+        groom = groomlab.create_groom(self.scalp)
+        result = utils.tubes_to_curves([self.lock, self.side], groom=groom)
+        self.assertEqual(result["regionMap"], "tubes")
+        self.assertEqual(groomlab.map_kind(groom, "tubes"), "guides")
+        interpolates = [n["name"] for n in groomlab.get_graph(groom)["nodes"] if n["type"] == "Interpolate"]
+        self.assertTrue(interpolates)
+        for n in groomlab.get_graph(groom)["nodes"]:
+            if n["type"] == "Interpolate":
+                self.assertEqual(n["params"].get("regionMap"), "tubes")
+        made = utils.strands_to_curves(groom, node=interpolates[0], max_curves=100000, attributes=True)
+        regions = set()
+        for t in made["curves"]:
+            shape = cmds.listRelatives(t, shapes=True)[0]
+            regions.add(cmds.getAttr(shape + ".glRegion"))
+        cmds.delete(made["group"])
+        self.assertEqual(len(regions), 2)  # one a tube, no strand without one
+        self.assertNotIn(-1.0, regions)
+        # Another conversion: a map of its own; the Interpolate keeps the first.
+        again = utils.tubes_to_curves([self.lock], groom=groom)
+        self.assertEqual(again["regionMap"], "tubes2")
+        self.assertEqual(next(n for n in groomlab.get_graph(groom)["nodes"] if n["type"] == "Interpolate")["params"]["regionMap"],
+                         "tubes")
+        # Off: no map.
+        self.assertIsNone(utils.tubes_to_curves([self.lock], groom=groom, region_map=False)["regionMap"])
+        # The values: distinct, neighbouring tubes far apart.
+        values = utils.tube_region_values(7)
+        self.assertEqual(len(set(values)), 7)
+        self.assertTrue(all(abs(a - b) > 0.2 for a, b in zip(values, values[1:])))
+
     def test_center_curves_only_in_the_scene(self):
         result = utils.tubes_to_curves([self.lock, self.side], shapes=False)
         self.assertEqual((result["shape"], len(result["centers"])), ([], 2))

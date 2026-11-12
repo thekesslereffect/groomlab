@@ -75,6 +75,11 @@ class TubesWindow(QtWidgets.QWidget):
             "Add to existing guide groups", False,
             "Add to the tubesShape and tubesCenter guide groups if the groom has them. Off: new groups each "
             "time (tubesShape2, tubesShape3...)", "tubesExistingGroups")
+        self.region_map = check(
+            "Keep each tube's hair to its own guides", True,
+            "Paint a guide map (tubes) with a value per tube and set Interpolate's Region Map to it: each strand "
+            "then blends only the guides of the tube rooted nearest it, never a neighbouring tube's",
+            "tubesRegionMap")
         self.ignore_bevels = check(
             "Count bevels as one curve", True,
             "Bevels count as one curve however many edges they have: edges that sit much closer "
@@ -99,6 +104,7 @@ class TubesWindow(QtWidgets.QWidget):
         destination_row.addStretch(1)
         outer.addLayout(destination_row)
         outer.addWidget(self.existing_groups)
+        outer.addWidget(self.region_map)
 
         def column(heading, name):
             card = QtWidgets.QFrame()
@@ -188,6 +194,7 @@ class TubesWindow(QtWidgets.QWidget):
         """Existing groups only mean something going into a groom; each column's group only with its curves."""
         groom = self.to_groom.isChecked()
         self.existing_groups.setEnabled(groom)
+        self.region_map.setEnabled(groom)
         self.shape_group_hint.setEnabled(self.shapes.isChecked())
         self.centers_group.setEnabled(self.centers.isChecked())
         self.volume.setEnabled(self.centers.isChecked())
@@ -207,6 +214,7 @@ class TubesWindow(QtWidgets.QWidget):
         return {"groom": groom, "shapes": self.shapes.isChecked(), "centers": self.centers.isChecked(),
                 "centers_group": self.centers_group.isChecked(),
                 "existing_groups": self.existing_groups.isChecked(),
+                "region_map": self.region_map.isChecked(),
                 "ignore_bevels": self.ignore_bevels.isChecked(),
                 "smooth": self.smooth.isChecked(),
                 "center_count": self.volume_count.value() if self.volume.isChecked() else 1}

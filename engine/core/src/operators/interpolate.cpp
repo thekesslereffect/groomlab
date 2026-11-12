@@ -92,7 +92,12 @@
 // is nearest its root's, when that is close, or its color lies close to the line between two
 // regions' colors (soft paint between them); a strand of a color no guide is rooted on (a region
 // without a guide), or not
-// rooted on the scalp, blends the nearest guides of any region. Each strand's region number goes
+// rooted on the scalp, blends the nearest guides of any region. A guide map instead (regionMap
+// naming a guide layer, or a Map node of one plugged into it): each guide's value is its region,
+// every distinct value its own (kLayerRegionTolerance), and each strand is in the region of the
+// guide rooted nearest it, so every strand has one and two regions meet halfway between their
+// guides (Tubes to Curves paints a value a tube: each tube's hair from its own guides). Any other
+// field plugged in: its colors at the roots, as a map's. Each strand's region number goes
 // to `regionChannel` (-1: none) for Clump, BlendNeighbors and Tangle to keep within. A brush dab
 // binds again as without regions while every guide and strand keeps its region; a guide rooted
 // into another region binds every strand again, and a strand changing region (a guide rooted
@@ -988,8 +993,16 @@ public:
             throw GraphError(about + "no map, color set or image of that name (Groom Tools > Paint > New... makes a color map)");
         }
     }
+    // A field node plugged into regionMap (not a map of the scalp's): its color at each root.
+    explicit RegionMap(FieldPtr field, MeshPtr scalp) : scalp_(std::move(scalp)), field_(std::move(field)) {}
     // The map's color at `root`; false when the root is not on the scalp.
     bool at(const StrandRoot& root, Vec3f* rgb) const {
+        if (field_) {
+            if (scalp_ && !scalp_->contains(root)) return false;
+            const std::array<float, 3> c = field_->colorAtRoot(root);
+            *rgb = {c[0], c[1], c[2]};
+            return true;
+        }
         if (!scalp_->contains(root)) return false;
         if (texture_) {
             const ScalpMesh::UV uv = scalp_->uvAt(root);
@@ -1006,17 +1019,36 @@ private:
     MeshPtr scalp_;
     TexturePtr texture_;
     std::string colorSet_;
+    FieldPtr field_;
+
+public:
+    const FieldValue* field() const { return field_.get(); }
 };
 
 // What regions are read from: the map, and each strand's color at its root (NaN: not on the scalp),
 // which depend on the strands' roots alone (kept while the strands are; `name` and `salt`: the
-// param and what the map was read from, contextSalt).
+// param and what the map was read from, contextSalt). A guide layer's regions (`layer`): each
+// guide's value its color, each strand the color of the guide rooted nearest it (strandColors,
+// made again with the guides), every distinct value a region of its own.
 struct RegionSource {
     std::shared_ptr<const RegionMap> map;
     std::shared_ptr<const std::vector<Vec3f>> strandColors;
     std::string name;
     std::uint64_t salt = 0;
+    std::string layer;
 };
+
+// How close two guide layer values are and still one region's: every value painted apart is a
+// region of its own (a guide layer's values are each guide's own, never blended).
+constexpr float kLayerRegionTolerance = 1e-3f;
+
+// A guide's color on guide layer `layer`: its value as gray (NaN: the guide does not have it).
+Vec3f guideLayerColor(const Guide& g, const std::string& layer) {
+    const auto it = g.attributes.find(layer);
+    const float none = std::numeric_limits<float>::quiet_NaN();
+    if (it == g.attributes.end() || !std::isfinite(it->second)) return {none, none, none};
+    return {it->second, it->second, it->second};
+}
 
 // The regions: each one's color, each kept guide's region (-1: not rooted on the scalp) and each
 // strand's (-1: no region's color: any guide).
@@ -1035,7 +1067,8 @@ bool sameStrandRegions(const RegionSplit& a, const RegionSplit& b) {
 // within kRegionTolerance, or c lies that close to the line from it to another region's color
 // (a soft edge between the two, where the paint blends them); else -1 (an area no guide's root is
 // in: the strand blends the nearest guides of any region).
-std::int32_t regionOfColor(const std::vector<Vec3f>& palette, const Vec3f& c) {
+std::int32_t regionOfColor(const std::vector<Vec3f>& palette, const Vec3f& c, float tolerance = kRegionTolerance,
+                           bool between = true) {
     if (palette.empty() || !(c.x == c.x)) return -1;
     std::size_t best = 0;
     float best2 = std::numeric_limits<float>::infinity();
@@ -1046,8 +1079,9 @@ std::int32_t regionOfColor(const std::vector<Vec3f>& palette, const Vec3f& c) {
             best = r;
         }
     }
-    const float tolerance2 = kRegionTolerance * kRegionTolerance;
+    const float tolerance2 = tolerance * tolerance;
     if (best2 <= tolerance2) return static_cast<std::int32_t>(best);
+    if (!between) return -1;
     const Vec3f& p = palette[best];
     for (std::size_t r = 0; r < palette.size(); ++r) {
         if (r == best) continue;
@@ -1064,14 +1098,16 @@ std::int32_t regionOfColor(const std::vector<Vec3f>& palette, const Vec3f& c) {
 // each region the mean of its colors; one lying between two others, a blend of them, is not a
 // region of its own), each guide in the nearest; each strand's from its color.
 // The strands' regions of `previous` are kept when the regions' colors are the same to the bit
-// (`previous` made from the same source).
-RegionSplit splitRegions(const RegionSource& source, const std::vector<StrandRoot>& guideRoots, const RegionSplit* previous) {
+// (`previous` made from the same source). `colors`: each kept guide's (NaN: none). A guide layer's
+// (source.layer): every distinct value a region, none lying between two others joining them.
+RegionSplit splitRegions(const RegionSource& source, const std::vector<Vec3f>& colors, const RegionSplit* previous) {
     RegionSplit out;
-    const std::size_t count = guideRoots.size();
-    std::vector<Vec3f> colors(count);
+    const std::size_t count = colors.size();
+    const bool layer = !source.layer.empty();
+    const float tolerance = layer ? kLayerRegionTolerance : kRegionTolerance;
     std::vector<std::uint32_t> order;
     for (std::size_t g = 0; g < count; ++g) {
-        if (source.map->at(guideRoots[g], &colors[g])) order.push_back(static_cast<std::uint32_t>(g));
+        if (colors[g].x == colors[g].x) order.push_back(static_cast<std::uint32_t>(g));
     }
     std::sort(order.begin(), order.end(), [&](std::uint32_t a, std::uint32_t b) {
         const Vec3f &x = colors[a], &y = colors[b];
@@ -1088,7 +1124,7 @@ RegionSplit splitRegions(const RegionSource& source, const std::vector<StrandRoo
     for (const std::uint32_t g : order) {
         const Vec3f& c = colors[g];
         std::size_t into = clusters.size();
-        float nearest2 = kRegionTolerance * kRegionTolerance;
+        float nearest2 = tolerance * tolerance;
         for (std::size_t k = 0; k < clusters.size(); ++k) {
             const Vec3f d = c - clusters[k].first;
             if (d.dot(d) <= nearest2) {
@@ -1108,11 +1144,11 @@ RegionSplit splitRegions(const RegionSource& source, const std::vector<StrandRoo
     std::stable_sort(byCount.begin(), byCount.end(), [&](std::size_t a, std::size_t b) { return clusters[a].n > clusters[b].n; });
     std::vector<char> region(clusters.size(), 0);
     std::vector<Vec3f> regionColors;
-    const float tolerance2 = kRegionTolerance * kRegionTolerance;
+    const float tolerance2 = tolerance * tolerance;
     for (const std::size_t k : byCount) {
         const Vec3f c = clusters[k].sum * (1.0f / clusters[k].n);
-        bool between = false;
-        for (std::size_t a = 0; a < regionColors.size() && !between; ++a) {
+        bool between = false;  // (a guide layer: no value lies between, each is its own)
+        for (std::size_t a = 0; a < regionColors.size() && !between && !layer; ++a) {
             for (std::size_t b = a + 1; b < regionColors.size() && !between; ++b) {
                 const Vec3f e = regionColors[b] - regionColors[a];
                 const float t = std::clamp((c - regionColors[a]).dot(e) / std::max(e.dot(e), 1e-12f), 0.0f, 1.0f);
@@ -1140,7 +1176,7 @@ RegionSplit splitRegions(const RegionSource& source, const std::vector<StrandRoo
     }
     const std::vector<Vec3f>& strandColors = *source.strandColors;
     auto samePalette = [&] {
-        return previous && previous->strands && previous->strands->size() == strandColors.size() &&
+        return !layer && previous && previous->strands && previous->strands->size() == strandColors.size() &&
                previous->palette.size() == out.palette.size() &&
                (out.palette.empty() || std::memcmp(previous->palette.data(), out.palette.data(), out.palette.size() * sizeof(Vec3f)) == 0);
     };
@@ -1148,7 +1184,9 @@ RegionSplit splitRegions(const RegionSource& source, const std::vector<StrandRoo
         out.strands = previous->strands;
     } else {
         auto strands = std::make_shared<std::vector<std::int32_t>>(strandColors.size());
-        parallelFor(0, strandColors.size(), [&](std::size_t s) { (*strands)[s] = regionOfColor(out.palette, strandColors[s]); }, 4096);
+        parallelFor(0, strandColors.size(), [&](std::size_t s) {
+            (*strands)[s] = regionOfColor(out.palette, strandColors[s], tolerance, !layer);
+        }, 4096);
         out.strands = std::move(strands);
     }
     return out;
@@ -1256,11 +1294,14 @@ public:
                 .adv()
                 .writesChannel(),
             ParamSpec{"regionMap", std::string(),
-                      "Regions painted on the scalp in colors (empty: none): a strand blends only the guides rooted in "
-                      "its own region, with a hard edge between regions, like a part. Each color guides are rooted on "
-                      "is a region (soft paint between two joins the nearer); a strand in a color no guide is rooted "
-                      "on blends the nearest guides of any region. A map painted in Groom Tools > Paint by name, a "
-                      "color set of that name on the scalp, or an image file at the scalp's UVs"}
+                      "Regions (empty: none): a strand blends only the guides of its own region, with a hard edge "
+                      "between regions, like a part. Plug a Map node into it, or name a map. A guide map: each value "
+                      "painted on the guides is a region, and each strand is in the region of the guide rooted "
+                      "nearest it (no painting on the scalp: Tubes to Curves paints one value a tube). A map on the "
+                      "scalp (a color map, a color set, an image at the scalp's UVs): each color guides are rooted on "
+                      "is a region (soft paint between two joins the nearer), and a strand in a color no guide is "
+                      "rooted on blends the nearest guides of any region"}
+                .colorMap()
                 .in("Regions"),
             ParamSpec{"regionChannel", std::string("region"),
                       "With a regionMap: per-strand channel receiving each strand's region number (-1: none), which "
@@ -1383,7 +1424,15 @@ public:
             // rooted in a color none was) is the CPU's to evaluate (its region channel changes).
             std::shared_ptr<const RegionSplit> regions;
             if (held->regionSource) {
-                regions = std::make_shared<const RegionSplit>(splitRegions(*held->regionSource, guideRoots, held->regions.get()));
+                // (A guide layer's regions follow the guides rooted nearest each strand: the CPU's.)
+                if (!held->regionSource->layer.empty() || !held->regionSource->map) return false;
+                std::vector<Vec3f> guideColors(guideRoots.size());
+                for (std::size_t g = 0; g < guideRoots.size(); ++g) {
+                    const float none = std::numeric_limits<float>::quiet_NaN();
+                    guideColors[g] = Vec3f(none, none, none);
+                    held->regionSource->map->at(guideRoots[g], &guideColors[g]);
+                }
+                regions = std::make_shared<const RegionSplit>(splitRegions(*held->regionSource, guideColors, held->regions.get()));
                 if (!held->regions || !sameStrandRegions(*regions, *held->regions)) return false;
             }
             binding = bind(held->queries, held->hasPoints, held->strandRoots, roots, guideRoots,
@@ -1515,9 +1564,31 @@ private:
         // Roots index the whole mesh: a scalp's piece (scalp_pieces.h) reads as the groom's scalps together.
         const MeshPtr scalp = wholeScalp(valueAs<MeshPtr>(inputs.at(2)));
         const bool align = scalp && scalp->triangleCount() > 0;
-        // The region map, read on the scalp (checked before anything is made).
-        const std::shared_ptr<const RegionMap> regionMap =
-            regionMapName.empty() ? nullptr : std::make_shared<const RegionMap>(ctx, regionMapName, scalp);
+        // The regions (checked before anything is made): a field plugged into regionMap (a Map node:
+        // its guide layer, or its colors at the roots), else the map regionMap names (a guide
+        // layer, or a map read on the scalp).
+        const FieldPtr regionField = params().field("regionMap");
+        std::string regionLayer;
+        std::shared_ptr<const RegionMap> regionMap;
+        if (regionField) {
+            const ScalarField* plugged = regionField->scalarField();
+            const MapRef* ref = plugged ? plugged->map() : nullptr;
+            if (ref && ref->source == MapRef::Source::Guide) {
+                regionLayer = ref->name;
+            } else {
+                regionMap = std::make_shared<const RegionMap>(regionField, scalp);
+            }
+        } else if (!regionMapName.empty()) {
+            const MapInfo* info = catalogMap(ctx, regionMapName);
+            const bool onGuides = info ? info->kind == "guides"
+                                       : std::any_of(guides->guides().begin(), guides->guides().end(),
+                                                     [&](const Guide& g) { return g.attributes.count(regionMapName) != 0; });
+            if (onGuides) {
+                regionLayer = regionMapName;
+            } else {
+                regionMap = std::make_shared<const RegionMap>(ctx, regionMapName, scalp);
+            }
+        }
 
         // Guides at a common resolution: at least the strands' own (the core strands', preview_core.h:
         // the same at every preview density), so detail survives.
@@ -1708,14 +1779,52 @@ private:
         // every strand keeps its region (else it is evaluated in full: its region channel changes).
         std::shared_ptr<const RegionSource> regionSource;
         std::shared_ptr<const RegionSplit> regions;
-        if (regionMap) {
-            const std::uint64_t salt = regionSalt(ctx, regionMapName);
+        if (!regionLayer.empty()) {
+            // A guide layer: each guide's value its color, each strand the color of the guide rooted
+            // nearest it (its rest root's), so every strand is in a region and two regions meet
+            // halfway between their guides. Made again with the guides (a dab may move a root or
+            // paint a value; the regions then say whether a strand changed region).
+            std::vector<Vec3f> guideColors(kept.size());
+            std::vector<Vec3f> placed;
+            std::vector<std::uint32_t> placedGuide;
+            for (std::size_t g = 0; g < kept.size(); ++g) {
+                guideColors[g] = guideLayerColor(*kept[g], regionLayer);
+                if (guideColors[g].x != guideColors[g].x) continue;
+                placed.push_back(restRootOr(align ? scalp.get() : nullptr, kept[g]->root, kept[g]->points[0]));
+                placedGuide.push_back(static_cast<std::uint32_t>(g));
+            }
+            auto colors = std::make_shared<std::vector<Vec3f>>(strandCount);
+            const float none = std::numeric_limits<float>::quiet_NaN();
+            if (placed.empty()) {
+                std::fill(colors->begin(), colors->end(), Vec3f(none, none, none));
+            } else {
+                const PointIndex index(placed);
+                parallelFor(0, strandCount, [&](std::size_t s) {
+                    if (strands->strandPointCount(s) == 0) {
+                        (*colors)[s] = Vec3f(none, none, none);
+                        return;
+                    }
+                    const Vec3f at = restRootOr(align ? scalp.get() : nullptr, strands->roots()[s], strands->strandPoints(s)[0]);
+                    (*colors)[s] = guideColors[placedGuide[index.nearest(at)]];
+                }, 4096);
+            }
+            auto source = std::make_shared<RegionSource>();
+            source->strandColors = std::move(colors);
+            source->name = regionLayer;
+            source->layer = regionLayer;
+            source->salt = hashString(0x1A7E5u, regionLayer);
+            regionSource = std::move(source);
+            regions = std::make_shared<const RegionSplit>(splitRegions(*regionSource, guideColors, nullptr));
+            if (last && (!made.regions || !sameStrandRegions(*regions, *made.regions))) return false;
+        } else if (regionMap) {
+            const std::uint64_t salt = regionField ? 0x5EEDF1E1Du : regionSalt(ctx, regionMapName);
             std::shared_ptr<const RegionSource> heldSource;
             std::shared_ptr<const RegionSplit> heldRegions;
             {
                 const std::lock_guard<std::mutex> lock(madeMutex_);
+                // (A plugged field: the same field object, the same colors.)
                 if (made_.regionSource && made_.strands.lock() == strands && made_.regionSource->name == regionMapName &&
-                    made_.regionSource->salt == salt) {
+                    made_.regionSource->salt == salt && made_.regionSource->map && made_.regionSource->map->field() == regionField.get()) {
                     heldSource = made_.regionSource;
                     heldRegions = made_.regions;
                 }
@@ -1738,7 +1847,13 @@ private:
                 source->salt = salt;
                 regionSource = std::move(source);
             }
-            regions = std::make_shared<const RegionSplit>(splitRegions(*regionSource, guideRoots, heldRegions.get()));
+            std::vector<Vec3f> guideColors(kept.size());
+            for (std::size_t g = 0; g < kept.size(); ++g) {
+                const float none = std::numeric_limits<float>::quiet_NaN();
+                guideColors[g] = Vec3f(none, none, none);
+                regionSource->map->at(guideRoots[g], &guideColors[g]);
+            }
+            regions = std::make_shared<const RegionSplit>(splitRegions(*regionSource, guideColors, heldRegions.get()));
             if (last && (!made.regions || !sameStrandRegions(*regions, *made.regions))) return false;
         }
         // The binding is kept while everything it is made from stays (a brush dab changes the
