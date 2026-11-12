@@ -665,6 +665,10 @@ bind frame, with their pivot at the root, attached and bound already
 
 - **Detach Selected Guides** (`groomlab.detach_guides`) makes them stay as groomed again. **Rebind
   Drivers at Frame 0** after changing the rig's rest pose; the attachments stay.
+- **Blender:** the same Simulate > Drivers menu works on curve objects (each gets a `twist` custom
+  property to key).
+- **Which hair follows the animation exactly:** paint the Simulate node's `strength` (0: held to the
+  driven shape, 1: simulated).
 - **Simulation on top:** Add Simulate Node after it (Guides > DriveGuides > Simulate): the
   simulation holds the driven shape frame by frame and adds the swing and follow-through;
   `rootStiffness` and its profile set how closely it sticks to the animation.

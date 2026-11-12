@@ -235,8 +235,10 @@ sim.invalidate_simulation(groom)       # simulate again from the start frame
 Studios pose hero and stylized hair with a hair rig before any simulation: a few controls an
 animator keys for the big shapes and the silhouette, then a simulation adds the follow-through on
 top. In GroomLab the rig is a set of **driver curves**, rigged with whatever the host has (in Maya:
-joints and a skinCluster, spline IK, wire or blend shapes), with guides **attached** to them, and a
-**DriveGuides** node that makes the attached guides follow.
+joints and a skinCluster, spline IK, wire or blend shapes; in Blender: curve objects with hooks,
+armatures or plain keys), with guides **attached** to them, and a **DriveGuides** node that makes the
+attached guides follow. Maya and Blender have the same Simulate > Drivers menu; the app and the farm
+play a groom file's drivers from its driver cache.
 
 1. **Attach:** select guides with the GroomLab select tool and a driver curve, then **GroomLab >
    Simulate > Drivers > Attach Selected Guides to Curve**. The curve is connected, a DriveGuides node
@@ -257,6 +259,10 @@ joints and a skinCluster, spline IK, wire or blend shapes), with guides **attach
 | --- | --- |
 | `strength` | How much the attached guides follow (mappable: paint where hair stays as groomed). |
 | `profile` | How much each part follows, root to tip. |
+
+**Which hair follows the animation exactly:** paint the Simulate node's `strength` (mappable): 0
+holds the hair to its input, the driven shape, and 1 simulates it, so a fringe can stick to the rig
+while the rest swings.
 
 **Simulation on top:** put a Simulate node after the DriveGuides node (Guides, DriveGuides,
 Simulate). The solver takes the driven guides as its targets on every frame, so its bend and twist

@@ -24,6 +24,7 @@
 #include "groomlab/card_presets.h"
 #include "groomlab/cards.h"
 #include "groomlab/display.h"
+#include "groomlab/drive_guides.h"
 #include "groomlab/export_view.h"
 #include "groomlab/feathers.h"
 #include "groomlab/flow.h"
@@ -1853,11 +1854,123 @@ void applyCardBake(Session& s) {
     if (!at.prefix.empty() && at.exists()) s.groom->setCardMaps(formatCardMaps(at.prefix, s.file.cardBake.strands, 0));
 }
 
+// ---- Driver curves (DriveGuides, drive_guides.h) ---------------------------------------------------
+
+// The driver curves as the host has them now: [{id, points: [x, y, z, ...] (the scalp's space, the
+// host's units), twist: degrees at the tip}] into the groom's space.
+json setDrivers(Session& s, const json& args) {
+    const json& list = need(args, "drivers");
+    if (!list.is_array()) fail("bad_request", "drivers is [{id, points, twist}]");
+    auto drivers = std::make_shared<GuideSet>();
+    for (const json& d : list) {
+        if (!d.is_object() || !d.contains("id") || !d["id"].is_number_integer()) fail("bad_request", "a driver needs an integer id");
+        const json& flat = need(d, "points");
+        if (!flat.is_array() || flat.size() % 3 != 0) fail("bad_request", "a driver's points are x, y, z, ...");
+        std::vector<Vec3f> points;
+        for (std::size_t i = 0; i + 2 < flat.size(); i += 3) {
+            points.push_back(s.space.toGroom(flat[i].get<float>(), flat[i + 1].get<float>(), flat[i + 2].get<float>()));
+        }
+        if (points.size() < 2) continue;
+        Guide& g = drivers->add(d["id"].get<std::uint64_t>(), std::move(points));
+        const double twist = optNumber(d, "twist", 0.0);
+        if (twist != 0.0) g.pointAttributes[kDriverTwistLayer] = driverTwistLayer(g.points, twist);
+    }
+    s.groom->setDrivers(drivers->empty() ? nullptr : GuidesPtr(drivers));
+    return {{"drivers", drivers->size()}};
+}
+
+json driverBindJson(const Session& s) {
+    const std::string& text = s.groom->driverBindJson();
+    DriverBind bind;
+    try {
+        bind = DriverBind::fromJson(text);
+    } catch (const std::exception&) {
+    }
+    json attached = json::object();
+    for (const auto& [guide, ids] : bind.attached) attached[std::to_string(guide)] = ids;
+    return {{"bind", text}, {"frame", bind.frame}, {"drivers", bind.drivers.size()}, {"attached", attached}};
+}
+
+// The bind's attachments changed by `change` (the drivers as bound kept).
+json changeAttachments(Session& s, const std::function<void(DriverBind&)>& change) {
+    DriverBind bind;
+    try {
+        bind = DriverBind::fromJson(s.groom->driverBindJson());
+    } catch (const std::exception& e) {
+        fail("state", e.what());
+    }
+    change(bind);
+    s.groom->setDriverBindJson(bind.drivers.empty() && bind.attached.empty() ? std::string() : bind.toJson());
+    return driverBindJson(s);
+}
+
+std::vector<std::uint64_t> idList(const json& args, const char* key) {
+    const json& v = need(args, key);
+    if (!v.is_array()) fail("bad_request", std::string(key) + " is a list of IDs");
+    std::vector<std::uint64_t> out;
+    for (const json& id : v) {
+        if (!id.is_number_integer()) fail("bad_request", std::string(key) + " is a list of IDs");
+        out.push_back(id.get<std::uint64_t>());
+    }
+    return out;
+}
+
+json driverCommand(Session& s, const std::string& cmd, const json& args) {
+    if (cmd == "set_drivers") return setDrivers(s, args);
+    if (cmd == "driver_bind") return driverBindJson(s);
+    if (cmd == "set_driver_bind") {
+        s.groom->setDriverBindJson(optString(args, "bind", ""));
+        return driverBindJson(s);
+    }
+    if (cmd == "bind_drivers") {  // the drivers and the scalp as the session has them now, as the bind (attachments kept)
+        const int frame = static_cast<int>(std::lround(optNumber(args, "frame", 0.0)));
+        s.groom->hierarchy();  // the scalp as sent bound (the drivers' anchors are on it)
+        s.groom->setDriverBindJson(s.groom->bindDrivers(frame));
+        return driverBindJson(s);
+    }
+    if (cmd == "attach_guides") {
+        const std::uint64_t driver = static_cast<std::uint64_t>(optNumber(args, "driver", -1.0));
+        const std::vector<std::uint64_t> guides = idList(args, "guides");
+        return changeAttachments(s, [&](DriverBind& bind) {
+            for (const std::uint64_t g : guides) {
+                std::vector<std::uint64_t>& ids = bind.attached[g];
+                if (std::find(ids.begin(), ids.end(), driver) == ids.end()) ids.push_back(driver);
+            }
+        });
+    }
+    if (cmd == "detach_guides") {
+        const std::vector<std::uint64_t> guides = idList(args, "guides");
+        const bool one = args.contains("driver") && args["driver"].is_number_integer();
+        const std::uint64_t driver = one ? args["driver"].get<std::uint64_t>() : 0;
+        int count = 0;
+        json r = changeAttachments(s, [&](DriverBind& bind) {
+            for (const std::uint64_t g : guides) {
+                const auto it = bind.attached.find(g);
+                if (it == bind.attached.end()) continue;
+                if (one) {
+                    auto& ids = it->second;
+                    const auto at = std::find(ids.begin(), ids.end(), driver);
+                    if (at == ids.end()) continue;
+                    ids.erase(at);
+                    if (ids.empty()) bind.attached.erase(it);
+                } else {
+                    bind.attached.erase(it);
+                }
+                ++count;
+            }
+        });
+        r["detached"] = count;
+        return r;
+    }
+    fail("bad_request", "unknown driver command " + cmd);
+}
+
 bool isPipelineCommand(const std::string& cmd) {
     static const std::set<std::string> kCommands = {
         "bake_scale_maps", "bake_follicle_map", "scale_mesh", "strand_mesh", "set_scalp_frames", "simulate_status", "simulate_range", "simulate_poll",
         "simulate_cancel", "simulate_bake", "simulate_clear", "set_meshes", "set_scalps", "meshes_info", "transfer",
-        "transfer_markers", "sample_meshes", "cards_preset", "card_stats", "bake_to_guides", "import_alembic_curves", "bake_cards", "bake_scalp", "card_view"};
+        "transfer_markers", "sample_meshes", "cards_preset", "card_stats", "bake_to_guides", "import_alembic_curves", "bake_cards", "bake_scalp", "card_view",
+        "set_drivers", "driver_bind", "set_driver_bind", "bind_drivers", "attach_guides", "detach_guides"};
     return kCommands.count(cmd) > 0;
 }
 
@@ -1910,6 +2023,10 @@ json runPipelineCommand(const std::string& cmd, const json& args, BlockReader& b
     }
     if (cmd == "simulate_bake") return simulateBake(s, args);
     if (cmd == "simulate_clear") return simulateClear(s, args);
+    if (cmd == "set_drivers" || cmd == "driver_bind" || cmd == "set_driver_bind" || cmd == "bind_drivers" ||
+        cmd == "attach_guides" || cmd == "detach_guides") {
+        return driverCommand(s, cmd, args);
+    }
     if (cmd == "set_meshes") return setMeshes(s, args, blocks);
     if (cmd == "set_scalps") return setScalps(s, args, blocks);
     if (cmd == "meshes_info") return meshesJson(s);

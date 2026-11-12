@@ -1950,6 +1950,8 @@ json Helper::run(const std::string& cmd, const json& args) {
         } else if (op == "insert_simulate") {  // Add > Simulate, every host's (graph_inserts.h)
             const json& params = args.contains("params") && args["params"].is_object() ? args["params"] : json::object();
             r["name"] = insertSimulate(edit, params.dump(), scalpSize(s));
+        } else if (op == "insert_drive_guides") {  // Simulate > Drivers, every host's (graph_inserts.h)
+            r["name"] = insertDriveGuides(edit, scalpSize(s));
         } else if (op == "insert_guide_cache") {  // Load Guide Cache, every host's
             r["name"] = insertGuideCache(edit, needString(args, "path"), optString(args, "object", ""), scalpSize(s));
         } else if (op == "insert_collider") {  // Add > Collider's graph, every host's
