@@ -46,10 +46,20 @@ StrandSet besides(const std::vector<float>& offsets, Vec3f base = {0, 0, 0}) {
     return out;
 }
 
+// Every curve attached to every bound driver.
+DriverAttachments allAttached(const StrandSet& curves, const GuideSet& bound) {
+    DriverAttachments a;
+    std::vector<std::uint64_t> ids;
+    for (const Guide& d : bound.guides()) ids.push_back(d.id);
+    for (const StrandId id : curves.ids()) a.byGuide[id] = ids;
+    a.hash = 1;
+    return a;
+}
+
 StrandSet drive(const StrandSet& curves, const GuideSet& bound, const GuideSet& now, float amount = 1.0f,
-                const Ramp& profile = Ramp::constant(1.0f), DriveSettings settings = {}) {
+                const Ramp& profile = Ramp::constant(1.0f), const DriverAttachments* attached = nullptr) {
     StrandSet out = curves;
-    const DriveBinding binding = bindToDrivers(curves, bound, settings);
+    const DriveBinding binding = bindToDrivers(curves, bound, attached ? *attached : allAttached(curves, bound));
     driveCurves(out, binding, bound, now, std::vector<float>(curves.strandCount(), amount), profile);
     return out;
 }
@@ -125,7 +135,7 @@ TEST(DriveGuides, StrengthAndProfileScaleTheMove) {
     EXPECT_LT((rooted.strandPoints(0)[10] - full.strandPoints(0)[10]).length(), 1e-5f) << "the tip all of it";
 }
 
-TEST(DriveGuides, BetweenTwoDriversAGuideFollowsBothAndReachLetsFarOnesBe) {
+TEST(DriveGuides, AGuideFollowsTheDriversItIsAttachedToAndNoOthers) {
     GuideSet bound;
     bound.add(1, test::straightCurve({-1, 0, 0}, {0, 1, 0}, 8));
     bound.add(2, test::straightCurve({1, 0, 0}, {0, 1, 0}, 8));
@@ -138,12 +148,18 @@ TEST(DriveGuides, BetweenTwoDriversAGuideFollowsBothAndReachLetsFarOnesBe) {
     EXPECT_GT(moved(0), 0.4f) << "on the swung driver";
     EXPECT_LT(moved(2), 1e-3f) << "on the still one";
     EXPECT_GT(moved(1), moved(0) * 0.35f);
-    EXPECT_LT(moved(1), moved(0) * 0.8f) << "midway: about half of each";
-    DriveSettings near;
-    near.reach = 2.0f;
-    const StrandSet reached = drive(curves, bound, now, 1.0f, Ramp::constant(1.0f), near);
-    EXPECT_EQ(reached.strandPoints(3)[10], curves.strandPoints(3)[10]) << "past the reach: as groomed";
-    EXPECT_GT((reached.strandPoints(0)[10] - curves.strandPoints(0)[10]).length(), 0.4f) << "on a driver: all of it";
+    EXPECT_LT(moved(1), moved(0) * 0.8f) << "midway, attached to both: about half of each";
+    // Attached by hand: the guide on the swung driver to the still one (it stays), the far one to the
+    // swung one (it swings, far as it is), the midway one to nothing (it stays).
+    DriverAttachments some;
+    some.byGuide[1] = {2};
+    some.byGuide[4] = {1};
+    some.hash = 2;
+    const StrandSet picked = drive(curves, bound, now, 1.0f, Ramp::constant(1.0f), &some);
+    auto pickedMoved = [&](std::size_t s) { return (picked.strandPoints(s)[10] - curves.strandPoints(s)[10]).length(); };
+    EXPECT_LT(pickedMoved(0), 1e-3f) << "on the swung driver, attached to the still one";
+    EXPECT_EQ(picked.strandPoints(1)[10], curves.strandPoints(1)[10]) << "attached to nothing: as groomed";
+    EXPECT_GT(pickedMoved(3), 1.0f) << "far off, attached to the swung driver: swung round it";
 }
 
 TEST(DriveGuides, BindTextRoundTrips) {
@@ -151,7 +167,9 @@ TEST(DriveGuides, BindTextRoundTrips) {
     bind.frame = 12;
     Guide& g = bind.drivers.add(42, test::straightCurve({0.5f, 0, 0.25f}, {0, 1, 0}, 3));
     g.root = {3, 0.25f, 0.5f};
+    bind.attached[9] = {42};
     const DriverBind back = DriverBind::fromJson(bind.toJson());
+    EXPECT_EQ(back.attached, bind.attached);
     EXPECT_EQ(back.frame, 12);
     ASSERT_EQ(back.drivers.size(), 1u);
     EXPECT_EQ(back.drivers.guides()[0].id, 42u);
@@ -204,6 +222,9 @@ TEST(DriveGuides, TheNodePassesGuidesThroughUnboundAndDrivesThemBound) {
     now->add(7, turned(bound->guides()[0].points, {0, 0, 0}, 40.0f));
     externals.set(kDriverBindExternal, GuidesPtr(bound), bound->contentHash());
     externals.set(kDriversExternal, GuidesPtr(now), now->contentHash());
+    EXPECT_EQ(valueAs<StrandsPtr>(node->evaluate(ctx, {Value(StrandsPtr(curves))})), curves) << "nothing attached: the input";
+    auto attached = std::make_shared<DriverAttachments>(allAttached(*curves, *bound));
+    externals.set(kDriverAttachExternal, DriverAttachPtr(attached), attached->hash);
     const StrandsPtr out = valueAs<StrandsPtr>(node->evaluate(ctx, {Value(StrandsPtr(curves))}));
     const StrandSet want = drive(*curves, *bound, *now);
     for (std::size_t i = 0; i < want.strandPointCount(0); ++i) EXPECT_EQ(out->strandPoints(0)[i], want.strandPoints(0)[i]) << i;
@@ -270,17 +291,30 @@ float farthest(const StrandSet& a, const StrandSet& b) {
     return most;
 }
 
+// The session's drivers bound now, with guides `ids` attached to driver 3 (every guide: 1-10).
+void bindAttached(GroomSession& session, const std::vector<std::uint64_t>& ids = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10}) {
+    DriverBind bind = DriverBind::fromJson(session.bindDrivers(0));
+    for (const std::uint64_t id : ids) bind.attached[id] = {3};
+    session.setDriverBindJson(bind.toJson());
+}
+
 TEST(DriveGuides, ASessionBindsItsDriversAndTheStrandsFollowThem) {
     GroomSession session(driveData());
     const StrandsPtr unbound = viewOf(session);
-    const std::string bind = session.bindDrivers(0);
-    ASSERT_FALSE(bind.empty());
-    session.setDriverBindJson(bind);
+    ASSERT_FALSE(session.bindDrivers(0).empty());
+    bindAttached(session);
+    EXPECT_FALSE(DriverBind::fromJson(session.bindDrivers(0)).attached.empty()) << "binding again keeps the attachments";
     EXPECT_LT(farthest(*viewOf(session), *unbound), 1e-4f) << "the drivers as bound: the groom as it was";
     auto swung = std::make_shared<GuideSet>();
     swung->add(3, turned(session.drivers()->guides()[0].points, {0.0f, 1.0f, 0.0f}, 40.0f));
     session.setDrivers(swung);
     EXPECT_GT(farthest(*viewOf(session), *unbound), 0.2f) << "swung over: the strands with it";
+    {
+        ViewRequest request;
+        const ViewResult& view = session.evaluate(request);
+        ASSERT_TRUE(view.movingGuides) << "the driven guides drawn over the groomed ones";
+        EXPECT_EQ(view.movingGuides->size(), 10u);
+    }
     session.setDriverBindJson("");
     EXPECT_EQ(farthest(*viewOf(session), *unbound), 0.0f) << "no bind: the groom as it was";
 }
@@ -294,7 +328,7 @@ TEST(DriveGuides, DriversMovingWithTheScalpDriveNothingWhileFollowing) {
     plain.drivers = nullptr;
     GroomSession session(data), still(plain);
     viewOf(session);
-    session.setDriverBindJson(session.bindDrivers(0));
+    bindAttached(session);
     std::vector<Vec3f> moved = data.scalp->points();
     for (Vec3f& p : moved) p = turnZ(p, {0.0f, 0.0f, 0.0f}, 25.0f);
     session.updateScalpPoints(moved);

@@ -962,6 +962,8 @@ private:
     std::string driverBindError_;
     mutable MeshPtr driverRest_;
     mutable std::uint64_t driverRestHash_ = 0;
+    mutable DriverAttachPtr driverAttach_;  // the attachments with children inheriting (attachmentsOf)
+    mutable std::uint64_t driverAttachKey_ = 0;
     std::map<std::string, std::pair<SculptPtr, std::uint64_t>> sculptExternals_;
     std::string previewSculptNode_;
     SculptPtr previewSculpt_;

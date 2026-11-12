@@ -167,13 +167,19 @@ using ScalpHistoryPtr = std::shared_ptr<const ScalpHistory>;
 struct SculptEdits;
 using SculptPtr = std::shared_ptr<const SculptEdits>;
 
+// Which guides follow which driver curves (drive_guides.h), handed in by the session as the external
+// "driverAttach".
+struct DriverAttachments;
+using DriverAttachPtr = std::shared_ptr<const DriverAttachments>;
+
 struct UniformValue;  // below, after ParamValue
 using UniformPtr = std::shared_ptr<const UniformValue>;
 
 using Value = std::variant<std::monostate, StrandsPtr, GuidesPtr, MeshPtr, HierarchyPtr, PartsPtr,
                            FieldPtr, CurvePtr, FlowPtr, MapCatalogPtr,
                            ScalpHistoryPtr, SculptPtr,  // hierarchy, parts, flow, maps, scalp history, sculpts: external only
-                           UniformPtr>;
+                           UniformPtr,
+                           DriverAttachPtr>;  // driver attachments: external only
 
 // Typed accessor: the pointer held in v, or null if v holds something else.
 template <class Ptr>

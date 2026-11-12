@@ -493,7 +493,7 @@ std::vector<Case> cases() {
         // Guides posed by two driver curves on top of the head (goldenDrivers: one swung over, one
         // bent at its middle), the strands grown from them.
         {"DriveGuides", "grown",
-         R"({"name": "op", "type": "DriveGuides", "params": {"strength": 0.9, "drivers": 2, "reach": 1.5}},
+         R"({"name": "op", "type": "DriveGuides", "params": {"strength": 0.9}},
             {"name": "grown", "type": "Interpolate"})",
          link("guides", "op", "strands") + "," + link("scatter", "grown", "strands") + "," + link("op", "grown", "guides") + "," +
              link("scalp", "grown", "scalp"),
@@ -738,6 +738,15 @@ struct Scene {
             withDrivers.setParent(ctx.externals);
             withDrivers.set(kDriverBindExternal, bound, bound->contentHash());
             withDrivers.set(kDriversExternal, now, now->contentHash());
+            // Every guide attached: the ones on the -x side to the swung driver, the rest to the bent one.
+            const NodeId op = doc.node("op");
+            NodeId source = 0;
+            doc.graph.inputSource(op, 0, &source);
+            const GuidesPtr fed = valueAs<GuidesPtr>(doc.graph.evaluate(source, ctx));
+            auto attached = std::make_shared<DriverAttachments>();
+            for (const Guide& g : fed->guides()) attached->byGuide[g.id] = {g.points.front().x < 0.0f ? 1u : 2u};
+            attached->hash = 7;
+            withDrivers.set(kDriverAttachExternal, DriverAttachPtr(attached), attached->hash);
             ctx.externals = &withDrivers;
         }
         return asStrands(doc.graph.evaluate(doc.node(c.output), ctx));

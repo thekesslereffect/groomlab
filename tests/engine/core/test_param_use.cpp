@@ -282,6 +282,10 @@ TEST(ParamUse, EveryDeclaredParamIsReadWhereItShows) {
     }
     externals.set(kDriverBindExternal, GuidesPtr(bound), bound->contentHash());
     externals.set(kDriversExternal, GuidesPtr(posed), posed->contentHash());
+    auto attached = std::make_shared<DriverAttachments>();
+    attached->byGuide[0] = {1, 2};
+    attached->hash = 3;
+    externals.set(kDriverAttachExternal, DriverAttachPtr(attached), attached->hash);
     EvalContext ctx;
     ctx.previewDensity = kDensity;
     ctx.externals = &externals;

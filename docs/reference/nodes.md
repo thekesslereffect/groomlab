@@ -22,12 +22,12 @@ User guide: [Node graph](https://www.getgroomlab.com/docs/node-graph).
 - **Motion:** `Wind`, `Jiggle` (no simulation cache: see [Motion without a cache](motion-and-simulation.md#motion-without-a-cache)), `Simulate`
   (the guides simulated, every host: see [Simulating the guides](motion-and-simulation.md#simulating-the-guides)),
   `GuideCache` (the guides posed from an Alembic cache simulated in another package, by guide ID),
-  `DriveGuides` (the guides posed by driver curves an animator rigs: each guide binds to its nearest
-  drivers as bound at the bind frame, the groom's `driverBind`, and keeps its place round them in
-  their rotation-minimizing frames as they swing, bend and stretch; the root stays on the scalp;
-  `strength` (mappable), `profile` along the length, `drivers` (how many nearest, blended by
-  distance), `reach` (all of it within half, none past it; 0: every guide); a Simulate after it
-  plays on top, its bend and twist holding the driven shape frame by frame: see
+  `DriveGuides` (guides attached by hand to driver curves an animator rigs follow them: each binds
+  to its drivers as bound at the bind frame, the groom's `driverBind` with its attachments, a child
+  guide following its parent's, and keeps its place round them in their rotation-minimizing frames as
+  they swing, bend and stretch; the root stays on the scalp; guides attached to nothing stay;
+  `strength` (mappable), `profile` along the length; the viewport draws the driven guides; a
+  Simulate after it plays on top, its bend and twist holding the driven shape frame by frame: see
   [Rigged hair](motion-and-simulation.md#rigged-hair-driver-curves)).
 - **Feathers:** `Propagate` (barbs grown off shafts), `Plume` (feathers laid over one another and off the body).
 - **Utility:** `Attribute`, `Value`, `Group`, `Merge`, `Switch`, `Split` (strands routed to four outputs), `Blend`, `Output`; `Compound` and `Input` for compound nodes.

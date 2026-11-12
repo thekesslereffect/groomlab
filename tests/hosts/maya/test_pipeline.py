@@ -773,29 +773,46 @@ class SimulationTest(unittest.TestCase):
         self.assertFalse(cmds.objExists(made["group"]))
         self.assertEqual([round(v, 4) for v in bbox(self.groom)], [round(v, 4) for v in before])
 
-    def test_driver_curves_pose_the_guides_from_their_bind(self):
-        """A rigged driver curve (keyed here) along the top guide, bound at frame 1 while the
-        timeline sits elsewhere: at frame 1 the groom is as groomed, swung at frame 10."""
-        before = bbox(self.groom)
-        driver = cmds.curve(degree=1, point=[(0.03, 1, 0), (0.13, 1.7, 0.0), (0.23, 2.4, 0.0)])
-        node = groomlab.add_drivers(self.groom, [driver])
-        self.assertEqual(groomlab.add_drivers(self.groom, [driver]), node)  # connected already: kept
-        self.assertEqual(len(groomlab.driver_curves(self.groom)), 1)
-        groomlab.set_param(self.groom, node, "reach", 0.0)  # every guide follows it
-        cmds.xform(driver, worldSpace=True, pivots=(0.03, 1, 0))
+    def test_guides_attached_to_a_driver_curve_follow_it_from_their_bind(self):
+        """On a flat scalp, one guide (its children with it) attached to a rigged driver curve
+        beside it (keyed here) and bound at frame 1 while the timeline sits elsewhere: as groomed at
+        frame 1, swung over at frame 10; detached, as groomed again."""
+        plane = cmds.polyPlane(width=2, height=2, subdivisionsX=10, subdivisionsY=10)[0]
+        groom = groomlab.create_groom(plane)
+        cmds.setAttr(groom + ".previewDensity", 0.3)
+        groomlab.guides_from_curves(groom, [cmds.curve(degree=1, point=[(0, 0, 0), (0, 0.7, 0), (0, 1.4, 0)])])
+        groomlab.generate_children(groom, "primary", name="children", count=6)
+        guide = int(groomlab.guide_ids(groom, "primary")[0])
+
+        def strands_bbox(frame):  # the strands alone (the groom's bounds hold the groomed guides too)
+            path = os.path.join(WORK_DIR, "driven_%d.abc" % frame)
+            groomlab.export_alembic(groom, path, start=frame, end=frame, density=0.3)
+            text = cli("abc-info", path).splitlines()[1].split("bbox=")[1]
+            return [float(v) for v in re.findall(r"-?[\d.]+(?:e-?\d+)?", text)]
+
+        before = strands_bbox(10)
+        driver = cmds.curve(degree=1, point=[(0.03, 0, 0), (0.03, 0.7, 0), (0.03, 1.4, 0)])
+        cmds.xform(driver, worldSpace=True, pivots=(0.03, 0, 0))
         cmds.setKeyframe(driver, attribute="rotateZ", time=1, value=0.0)
         cmds.setKeyframe(driver, attribute="rotateZ", time=10, value=40.0)
         cmds.currentTime(10)
-        self.assertEqual(groomlab.bind_drivers(self.groom, frame=1), 1)
-        self.assertEqual(groomlab.bind_frame(self.groom), 1)
-        moved = sum(abs(a - b) for a, b in zip(bbox(self.groom), before))
-        self.assertGreater(moved, 0.3)  # every guide following the one driver (reach 0), swung with it
-        cmds.currentTime(1)
-        for a, b in zip(bbox(self.groom), before):
+        self.assertEqual(groomlab.attach_guides(groom, driver, guides=[guide], frame=1), [guide])
+        self.assertEqual(groomlab.attached_guides(groom), {guide: [0]})
+        self.assertEqual(groomlab.bind_frame(groom), 1)
+        self.assertEqual(len(groomlab.driver_curves(groom)), 1)
+        swung = strands_bbox(10)
+        self.assertLess(swung[0], before[0] - 0.5)  # swung over toward -x with the driver, children too
+        self.assertLess(swung[4], before[4] - 0.15)  # and down
+        self.assertEqual(groomlab.bind_drivers(groom, frame=1), 1)
+        self.assertEqual(groomlab.attached_guides(groom), {guide: [0]})  # binding again keeps them
+        for a, b in zip(strands_bbox(1), before):
             self.assertAlmostEqual(a, b, delta=1e-3)  # the bind pose: as groomed
-        self.assertEqual(groomlab.remove_drivers(self.groom), 1)
-        groomlab.clear_bind(self.groom)
-        self.assertIsNone(groomlab.bind_frame(self.groom))
+        self.assertEqual(groomlab.detach_guides(groom, guides=[guide]), 1)
+        for a, b in zip(strands_bbox(10), before):
+            self.assertAlmostEqual(a, b, delta=1e-3)  # detached: as groomed
+        self.assertEqual(groomlab.remove_drivers(groom), 1)
+        groomlab.clear_bind(groom)
+        self.assertIsNone(groomlab.bind_frame(groom))
 
     def test_nhair_simulation_drives_the_groom(self):
         made = sim.create_sim_curves(self.groom, "primary")

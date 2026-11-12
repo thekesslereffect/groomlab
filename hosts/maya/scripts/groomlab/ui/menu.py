@@ -1860,19 +1860,33 @@ def add_wind_action(groom=None):
     return None
 
 
-def add_drivers_action(groom=None):
-    """Simulate > Drivers > Add Selected Curves as Drivers (groomlab.add_drivers): the selected
-    curves drive the active groom's guides through a DriveGuides node."""
+def attach_guides_action(groom=None):
+    """Simulate > Drivers > Attach Selected Guides to Curve (groomlab.attach_guides): the guides
+    selected with the select tool follow the selected curve."""
     import groomlab
     curves = cmds.ls(selection=True, dagObjects=True, type="nurbsCurve", noIntermediate=True, long=True) or []
-    if not curves:
-        cmds.warning("GroomLab: select the driver curves (and the groom, or pin it)")
+    if len(curves) != 1:
+        cmds.warning("GroomLab: select one driver curve (and the guides, with the GroomLab select tool)")
         return None
     groom = groom or _selected_groom()
+    if not groom:
+        return None
+    if not groomlab.selected_guides(groom):
+        cmds.warning("GroomLab: select the guides to attach with the GroomLab select tool")
+        return None
+    ids = groomlab.attach_guides(groom, curves[0])
+    _say("%d guide(s) of %s follow %s" % (len(ids), groom, curves[0].split("|")[-1]))
+    return ids
+
+
+def detach_guides_action(groom=None):
+    """Simulate > Drivers > Detach Selected Guides (groomlab.detach_guides)."""
+    import groomlab
+    groom = groom or _selected_groom()
     if groom:
-        node = groomlab.add_drivers(groom, curves)
-        _say("%d driver curve(s) on %s through %s: Bind Drivers at the bind frame" % (len(curves), groom, node))
-        return node
+        count = groomlab.detach_guides(groom)
+        _say("detached %d guide(s) of %s" % (count, groom))
+        return count
     return None
 
 
@@ -2137,7 +2151,8 @@ ACTIONS = {
     "sim.range": simulate_range,
     "sim.bake": bake_core_simulation,
     "sim.clear": clear_core_simulation,
-    "drivers.add": add_drivers_action,
+    "drivers.attach": attach_guides_action,
+    "drivers.detach": detach_guides_action,
     "drivers.bind": bind_drivers_action,
     "drivers.remove": remove_drivers_action,
     "nhair.simulate": simulate_guides_dialog,

@@ -234,24 +234,24 @@ sim.invalidate_simulation(groom)       # simulate again from the start frame
 Studios pose hero and stylized hair with a hair rig before any simulation: a few controls an
 animator keys for the big shapes and the silhouette, then a simulation adds the follow-through on
 top. In GroomLab the rig is a set of **driver curves**, rigged with whatever the host has (in Maya:
-joints and a skinCluster, spline IK, wire or blend shapes), and a **DriveGuides** node that makes the
-guides follow them.
+joints and a skinCluster, spline IK, wire or blend shapes), with guides **attached** to them, and a
+**DriveGuides** node that makes the attached guides follow.
 
-1. **Add drivers:** select the curves and the groom, then **GroomLab > Simulate > Drivers > Add
-   Selected Curves as Drivers**. The curves are connected and a DriveGuides node goes right after
-   the Guides node.
-2. **Bind:** **Bind Drivers at Frame 0** records the drivers and the scalp at the bind frame (the
-   pose the groom was made in). The bind is saved with the scene and in `.groom` files. Bind again
-   after changing the rig's rest pose or adding drivers.
-3. **Animate:** each guide keeps its place round its nearest drivers, in each driver's
-   rotation-minimizing frame, as they swing, bend and stretch. Roots stay on the scalp.
+1. **Attach:** select guides with the GroomLab select tool and a driver curve, then **GroomLab >
+   Simulate > Drivers > Attach Selected Guides to Curve**. The curve is connected, a DriveGuides node
+   goes right after the Guides node, and the drivers are bound at frame 0 (the pose the groom was made
+   in). The bind and the attachments are saved with the scene and in `.groom` files.
+2. **Animate:** each attached guide, and its children, keeps its place round its driver, in the
+   driver's rotation-minimizing frame, as it swings, bends and stretches. Roots stay on the scalp.
+   Guides attached to nothing stay as groomed; a guide attached to several drivers follows each, the
+   nearest most. The viewport draws the driven guides.
+3. **Detach Selected Guides** returns guides to their groom; **Rebind Drivers at Frame 0** takes the
+   bind pose again after the rig's rest pose changed (the attachments stay).
 
 | Parameter | Effect |
 | --- | --- |
-| `strength` | How much the guides follow (mappable: paint where hair stays as groomed). |
+| `strength` | How much the attached guides follow (mappable: paint where hair stays as groomed). |
 | `profile` | How much each part follows, root to tip. |
-| `drivers` | How many of the nearest drivers each guide follows, blended by distance (more: smoother between drivers). |
-| `reach` | How far from its drivers a guide follows: all of it within half this, easing off to none at it; 0: every guide follows. |
 
 **Simulation on top:** put a Simulate node after the DriveGuides node (Guides, DriveGuides,
 Simulate). The solver takes the driven guides as its targets on every frame, so its bend and twist
@@ -266,8 +266,10 @@ Drivers do not carry twist yet: a driver spun about its own length does not turn
 ```python
 import groomlab
 
-groomlab.add_drivers(groom, ["hair_ctrl_crv1", "hair_ctrl_crv2"])
-groomlab.bind_drivers(groom, frame=0)
+groomlab.attach_guides(groom, "hair_ctrl_crv1")                 # the selected guides
+groomlab.attach_guides(groom, "hair_ctrl_crv2", group="bangs")  # a whole guide group
+groomlab.detach_guides(groom, guides=[12, 13])
+groomlab.bind_drivers(groom, frame=0)                            # after changing the rig's rest pose
 ```
 
 ## Follow the scalp

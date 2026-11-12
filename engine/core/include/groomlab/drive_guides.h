@@ -10,14 +10,17 @@
 //     (frame 0 by default), each carried to the scalp's rest pose by its anchor (the scalp point
 //     nearest its first point then), so the bind holds whatever the character did at that frame.
 //
-// A DriveGuides node binds each guide (or strand) to its nearest drivers as bound, point by point
-// (the closest point of each driver and the offset from it in the driver's rotation-minimizing
-// frame there), and carries the offsets along the drivers as they are now. Drivers as bound and as
-// they are now go into the space the graph evaluates in (driversInGraphSpace): the scalp's rest
-// pose while following the scalp, else the scalp as it is; each driver is matched by ID.
+// Guides are attached to drivers by hand (DriverBind::attached: guide ID -> driver IDs; a child guide
+// follows its parent's drivers unless attached itself: attachmentsOf). A DriveGuides node binds each
+// attached guide to its drivers as bound, point by point (the closest point of each driver and the
+// offset from it in the driver's rotation-minimizing frame there), and carries the offsets along the
+// drivers as they are now; a guide attached to nothing stays as it is. Drivers as bound and as they
+// are now go into the space the graph evaluates in (driversInGraphSpace): the scalp's rest pose while
+// following the scalp, else the scalp as it is; each driver is matched by ID.
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -32,9 +35,13 @@ namespace groomlab {
 
 class Ramp;
 
-// The externals a DriveGuides node reads (GuidesPtr each, in the graph's space).
-inline constexpr const char* kDriversExternal = "drivers";        // the drivers now
-inline constexpr const char* kDriverBindExternal = "driverBind";  // the drivers as bound
+class GuideHierarchy;
+
+// The externals a DriveGuides node reads: the drivers (GuidesPtr each, in the graph's space) and
+// which guides follow them (DriverAttachPtr).
+inline constexpr const char* kDriversExternal = "drivers";            // the drivers now
+inline constexpr const char* kDriverBindExternal = "driverBind";      // the drivers as bound
+inline constexpr const char* kDriverAttachExternal = "driverAttach";  // the guides attached
 
 // The drivers as bound: each with its ID, its points on the scalp's rest pose and its anchor
 // there (Guide::root: the face the driver rides when the scalp moves; face -1: none, the driver
@@ -42,12 +49,23 @@ inline constexpr const char* kDriverBindExternal = "driverBind";  // the drivers
 struct DriverBind {
     int frame = 0;  // the frame bound at (shown to the user; nothing reads it back)
     GuideSet drivers;
+    // The guides attached by hand: guide ID -> the IDs of the drivers it follows (kept when the
+    // drivers are bound again: GroomSession::bindDrivers).
+    std::map<std::uint64_t, std::vector<std::uint64_t>> attached;
 
     bool empty() const { return drivers.empty(); }
     std::string toJson() const;
     // Throws std::invalid_argument ("driverBind: <why>") on malformed text; empty text: no bind.
     static DriverBind fromJson(const std::string& text);
 };
+
+// Each guide's drivers (IDs), by guide ID: the attached guides', and every child guide of
+// `hierarchy` (when given) not attached itself takes its nearest attached ancestor's.
+struct DriverAttachments {
+    std::map<std::uint64_t, std::vector<std::uint64_t>> byGuide;
+    std::uint64_t hash = 0;
+};
+DriverAttachments attachmentsOf(const DriverBind& bind, const GuideHierarchy* hierarchy);
 
 // The bind of `drivers` (world space, as they are on `scalp` at `frame`): each anchored at the
 // scalp point nearest its first point and carried by that anchor's motion to the scalp's rest
@@ -66,12 +84,6 @@ struct DriversInGraph {
 DriversInGraph driversInGraphSpace(const DriverBind& bind, const GuidesPtr& drivers, const ScalpMesh* rest,
                                    const ScalpMesh* now, const ScalpMesh* graph);
 
-// How a curve follows its drivers.
-struct DriveSettings {
-    int drivers = 2;     // the nearest drivers each curve follows, blended by distance (1..8)
-    float reach = 0.0f;  // > 0: curves past half this from every driver follow less, none past it; 0: all follow
-};
-
 // Each curve's drivers (as bound) and each point's place on them: what driveCurves carries.
 struct DriveBinding {
     struct Hold {
@@ -80,16 +92,18 @@ struct DriveBinding {
         float t = 0.0f;             // and where along it (0..1)
         Vec3f local0, local1;       // the offset from that point in the frames at the segment's ends
     };
-    std::size_t perPoint = 0;              // holds per point (the drivers each curve follows)
+    std::size_t perPoint = 0;              // holds per point (the most drivers a curve follows)
     std::vector<std::size_t> pointOffset;  // per curve, its first point's index into holds / perPoint
     std::vector<Hold> holds;               // per point, perPoint of them (weight 0: unused)
-    std::vector<float> weights;            // per curve, perPoint driver weights (summing to its influence)
+    std::vector<float> weights;            // per curve, perPoint driver weights (summing to 1; all 0: not attached)
     std::uint64_t key = 0;                 // what it was made from (bindingKey)
 };
 
-// What a binding depends on: the curves' points, the bound drivers and the settings.
-std::uint64_t driveBindingKey(const StrandSet& curves, const GuideSet& bound, const DriveSettings& settings);
-DriveBinding bindToDrivers(const StrandSet& curves, const GuideSet& bound, const DriveSettings& settings);
+// Each curve (by its ID) bound to the drivers it is attached to (several: weighed by their mean
+// distance from it, the nearest most; at most 8). A curve attached to none is left out.
+// What a binding depends on: the curves' points and IDs, the bound drivers and the attachments.
+std::uint64_t driveBindingKey(const StrandSet& curves, const GuideSet& bound, const DriverAttachments& attached);
+DriveBinding bindToDrivers(const StrandSet& curves, const GuideSet& bound, const DriverAttachments& attached);
 
 // The curves carried along their drivers from `bound` to `now` (matched by ID; a driver missing now,
 // or of another point count, stays as bound): each point but the root moves by the carry times

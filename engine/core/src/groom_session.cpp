@@ -43,18 +43,21 @@ namespace groomlab {
 
 namespace {
 
-// The guides an Interpolate feeding `shown` takes, when a GuideCache or Simulate node on its guides
-// input moved them this frame (its output not its input passed through): what the viewport draws
-// as the moving guides. Every value read is the evaluation's own (cached): no extra work.
+// The guides an Interpolate feeding `shown` takes, when a GuideCache, Simulate or DriveGuides node on
+// its guides input moved them this frame (its output not its input passed through): what the
+// viewport draws as the moving guides. Every value read is the evaluation's own (cached): no extra
+// work.
 GuidesPtr movingGuidesOf(Graph& graph, NodeId shown, const EvalContext& ctx) {
     auto isMotion = [&](NodeId id) {
         const std::string type = graph.node(id).typeName();
-        return (type == "GuideCache" || type == "Simulate") && !graph.bypassed(id);
+        return (type == "GuideCache" || type == "Simulate" || type == "DriveGuides") && !graph.bypassed(id);
     };
+    // The input the guides come in by: "guides", or a DriveGuides node's (it takes any curves).
     auto guidesSlot = [&](NodeId id) -> std::ptrdiff_t {
         const std::vector<PortSpec> specs = graph.inputSpecs(id);
+        const bool drive = graph.node(id).typeName() == "DriveGuides";
         for (std::size_t slot = 0; slot < specs.size(); ++slot) {
-            if (specs[slot].name == "guides") return static_cast<std::ptrdiff_t>(slot);
+            if (specs[slot].name == "guides" || (drive && specs[slot].name == "strands")) return static_cast<std::ptrdiff_t>(slot);
         }
         return -1;
     };
@@ -665,8 +668,9 @@ void GroomSession::setDriverBindJson(const std::string& json) {
 
 std::string GroomSession::bindDrivers(int frame) const {
     if (!data_.drivers) return {};
-    const DriverBind bind = groomlab::bindDrivers(*data_.drivers, cageScalp_.get(), frame);
-    return bind.empty() ? std::string() : bind.toJson();
+    DriverBind bind = groomlab::bindDrivers(*data_.drivers, cageScalp_.get(), frame);
+    bind.attached = driverBind_.attached;  // the guides attached stay attached
+    return bind.empty() && bind.attached.empty() ? std::string() : bind.toJson();
 }
 
 void GroomSession::setCorrectiveWeights(std::map<int, float> weights) {
@@ -1399,6 +1403,18 @@ void GroomSession::fillExternals(ExternalInputs& externals) const {
         const DriversInGraph drivers = driversInGraphSpace(driverBind_, data_.drivers, rest, cage, following_ ? rest : cage);
         externals.set(kDriverBindExternal, drivers.bound, drivers.bound->contentHash());
         if (drivers.now) externals.set(kDriversExternal, drivers.now, drivers.now->contentHash());
+        // Which guides follow them (a child its parent's): made again when the attachments or the
+        // guides' family tree changed.
+        const GuideHierarchy* family = following_ ? followActive_.get() : activeHierarchy_.get();
+        std::uint64_t key = std::hash<std::string>{}(data_.driverBindJson);
+        if (family && !driverBind_.attached.empty()) {
+            for (const HierarchyGuide& g : family->guides()) key = hashCombine(hashCombine(key, g.id), g.parent);
+        }
+        if (!driverAttach_ || key != driverAttachKey_) {
+            driverAttach_ = std::make_shared<const DriverAttachments>(attachmentsOf(driverBind_, family));
+            driverAttachKey_ = key;
+        }
+        externals.set(kDriverAttachExternal, driverAttach_, driverAttach_->hash);
     }
     setControlExternals(externals, scaledControls());  // keyed lengths at the groom's scale
     setMapExternals(externals, data_.maps);             // where each painted map lives, for Map nodes

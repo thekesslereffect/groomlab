@@ -14,6 +14,7 @@
 
 #include "groomlab/follow_scalp.h"
 #include "groomlab/frames.h"
+#include "groomlab/guide_hierarchy.h"
 #include "groomlab/parallel.h"
 #include "groomlab/ramp.h"
 #include "groomlab/random.h"
@@ -114,7 +115,13 @@ std::string DriverBind::toJson() const {
         }
         list.push_back({{"id", d.id}, {"face", d.root.face}, {"u", d.root.u}, {"v", d.root.v}, {"points", std::move(points)}});
     }
-    return json{{"frame", frame}, {"drivers", std::move(list)}}.dump();
+    json out{{"frame", frame}, {"drivers", std::move(list)}};
+    if (!attached.empty()) {
+        json guides = json::object();
+        for (const auto& [guide, ids] : attached) guides[std::to_string(guide)] = ids;
+        out["attached"] = std::move(guides);
+    }
+    return out.dump();
 }
 
 DriverBind DriverBind::fromJson(const std::string& text) {
@@ -135,10 +142,43 @@ DriverBind DriverBind::fromJson(const std::string& text) {
             g.root.u = d.value("u", 0.0f);
             g.root.v = d.value("v", 0.0f);
         }
+        const json attached = root.value("attached", json::object());
+        for (auto it = attached.begin(); it != attached.end(); ++it) {
+            std::vector<std::uint64_t> ids = it.value().get<std::vector<std::uint64_t>>();
+            if (!ids.empty()) bind.attached[std::stoull(it.key())] = std::move(ids);
+        }
     } catch (const std::exception& e) {
         throw std::invalid_argument(std::string("driverBind: ") + e.what());
     }
     return bind;
+}
+
+DriverAttachments attachmentsOf(const DriverBind& bind, const GuideHierarchy* hierarchy) {
+    DriverAttachments out;
+    out.byGuide = bind.attached;
+    if (hierarchy && !bind.attached.empty()) {
+        // A child not attached itself follows its nearest attached ancestor's drivers.
+        for (const HierarchyGuide& g : hierarchy->guides()) {
+            if (out.byGuide.count(g.id)) continue;
+            GuideId up = g.parent;
+            for (int depth = 0; up != kNoGuide && depth < 64; ++depth) {
+                const auto it = bind.attached.find(up);
+                if (it != bind.attached.end()) {
+                    out.byGuide[g.id] = it->second;
+                    break;
+                }
+                const HierarchyGuide* parent = hierarchy->guide(up);
+                up = parent ? parent->parent : kNoGuide;
+            }
+        }
+    }
+    std::uint64_t h = hash64(0xA77AC4);
+    for (const auto& [guide, ids] : out.byGuide) {
+        h = hashCombine(h, guide);
+        for (const std::uint64_t d : ids) h = hashCombine(h, d);
+    }
+    out.hash = h;
+    return out;
 }
 
 DriverBind bindDrivers(const GuideSet& drivers, const ScalpMesh* scalp, int frame) {
@@ -172,63 +212,69 @@ DriversInGraph driversInGraphSpace(const DriverBind& bind, const GuidesPtr& driv
     return out;
 }
 
-std::uint64_t driveBindingKey(const StrandSet& curves, const GuideSet& bound, const DriveSettings& settings) {
-    std::uint64_t h = hashCombine(curves.contentHash(), bound.contentHash());
-    h = hashCombine(h, static_cast<std::uint64_t>(settings.drivers));
-    return hashFloat(h, settings.reach);
+std::uint64_t driveBindingKey(const StrandSet& curves, const GuideSet& bound, const DriverAttachments& attached) {
+    return hashCombine(hashCombine(curves.contentHash(), bound.contentHash()), attached.hash);
 }
 
-DriveBinding bindToDrivers(const StrandSet& curves, const GuideSet& bound, const DriveSettings& settings) {
+DriveBinding bindToDrivers(const StrandSet& curves, const GuideSet& bound, const DriverAttachments& attached) {
     DriveBinding b;
-    b.key = driveBindingKey(curves, bound, settings);
-    const std::vector<std::uint32_t> usable = usableDrivers(bound);
+    b.key = driveBindingKey(curves, bound, attached);
+    std::unordered_map<std::uint64_t, std::uint32_t> byId;  // a usable bound driver's index by its ID
+    for (const std::uint32_t d : usableDrivers(bound)) byId[bound.guides()[d].id] = d;
     const std::size_t count = curves.strandCount();
     b.pointOffset.resize(count + 1, 0);
     for (std::size_t c = 0; c < count; ++c) b.pointOffset[c + 1] = b.pointOffset[c] + curves.strandPointCount(c);
-    const std::size_t want = std::clamp<std::size_t>(static_cast<std::size_t>(std::max(settings.drivers, 1)), 1, kMaxDrivers);
-    b.perPoint = std::min(want, usable.size());
+    // Each curve's drivers: the bound ones of the IDs it is attached to.
+    std::vector<std::vector<std::uint32_t>> driversOf(count);
+    for (std::size_t c = 0; c < count; ++c) {
+        const auto it = attached.byGuide.find(curves.ids()[c]);
+        if (it == attached.byGuide.end()) continue;
+        for (const std::uint64_t id : it->second) {
+            const auto d = byId.find(id);
+            if (d != byId.end() && std::find(driversOf[c].begin(), driversOf[c].end(), d->second) == driversOf[c].end()) {
+                driversOf[c].push_back(d->second);
+            }
+        }
+        b.perPoint = std::max(b.perPoint, std::min(driversOf[c].size(), kMaxDrivers));
+    }
     if (b.perPoint == 0) return b;
     b.holds.resize(b.pointOffset[count] * b.perPoint);
     b.weights.assign(count * b.perPoint, 0.0f);
 
     std::vector<std::vector<Frame>> frames(bound.guides().size());
-    for (const std::uint32_t d : usable) boundFrames(bound.guides()[d].points, frames[d]);
+    for (const auto& [id, d] : byId) boundFrames(bound.guides()[d].points, frames[d]);
 
     parallelFor(0, count, [&](std::size_t c) {
         const std::size_t n = curves.strandPointCount(c);
         if (n == 0) return;
+        if (driversOf[c].empty()) return;  // attached to nothing: it stays
         const Vec3f* points = curves.strandPoints(c);
-        // Each driver's mean distance from the curve: the nearest ones it follows.
+        // Each of its drivers' mean distance from the curve: the nearest weigh most.
         std::vector<std::pair<float, std::uint32_t>> nearest;
-        nearest.reserve(usable.size());
+        nearest.reserve(driversOf[c].size());
         float length = 0.0f;
         for (std::size_t i = 1; i < n; ++i) length += (points[i] - points[i - 1]).length();
-        for (const std::uint32_t d : usable) {
+        for (const std::uint32_t d : driversOf[c]) {
             const std::vector<Vec3f>& line = bound.guides()[d].points;
             float sum = 0.0f;
             for (std::size_t i = 0; i < n; ++i) sum += closestOn(line, points[i]).distance;
             nearest.emplace_back(sum / static_cast<float>(n), d);
         }
-        std::partial_sort(nearest.begin(), nearest.begin() + static_cast<std::ptrdiff_t>(b.perPoint), nearest.end());
-        // Shepard weights over the chosen, scaled by how far the nearest is within reach.
+        const std::size_t used = std::min(nearest.size(), b.perPoint);
+        std::partial_sort(nearest.begin(), nearest.begin() + static_cast<std::ptrdiff_t>(used), nearest.end());
+        // Shepard weights over its drivers.
         const float eps = std::max(length, 1e-6f) * 1e-4f;
         float total = 0.0f;
         float* w = &b.weights[c * b.perPoint];
-        for (std::size_t j = 0; j < b.perPoint; ++j) {
+        for (std::size_t j = 0; j < used; ++j) {
             const float d = nearest[j].first;
             w[j] = 1.0f / (d * d + eps * eps);
             total += w[j];
         }
-        // All of it within half the reach of the nearest driver, easing off to none at the reach.
-        float influence = 1.0f;
-        if (settings.reach > 0.0f) {
-            const float x = std::clamp(2.0f * nearest[0].first / settings.reach - 1.0f, 0.0f, 1.0f);
-            influence = 1.0f - x * x * (3.0f - 2.0f * x);
-        }
-        for (std::size_t j = 0; j < b.perPoint; ++j) w[j] = w[j] / total * influence;
-        // Each point's place on each chosen driver, never back along it from the point before (a
+        for (std::size_t j = 0; j < used; ++j) w[j] /= total;
+        // Each point's place on each of its drivers, never back along it from the point before (a
         // curve running along a driver keeps running along it where it bends close to itself).
-        for (std::size_t j = 0; j < b.perPoint; ++j) {
+        for (std::size_t j = 0; j < used; ++j) {
             const std::uint32_t d = nearest[j].second;
             const std::vector<Vec3f>& line = bound.guides()[d].points;
             const std::vector<Frame>& f = frames[d];
