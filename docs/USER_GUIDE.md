@@ -620,7 +620,10 @@ Simulate has no loop.
 3. **Bake Simulation** for renders: it simulates the playback range and writes the frames to the
    scene's caches folder, which exports, groom files and Arnold read.
 
-- **Settle first:** set `startFrame` a few frames before the shot so the hair comes to rest.
+- **Settle first:** set `startFrame` a few frames before the shot so the hair comes to rest, or
+  `preroll`: the hair starts at rest on the scalp's rest pose (and the drivers' bind) and the head
+  and rig move into the start frame's pose over those frames, so a shot starting with the head
+  turned or the rig posed starts with the hair hanging, not holding the groomed shape stiffly.
 - **Less floppy:** raise `bend` (keeps the groomed curves), `rootStiffness` (how firmly it's held;
   `rootStiffnessProfile` along the length) or `damping`, or lower `inertia` (how much of the head's
   motion the hair feels).

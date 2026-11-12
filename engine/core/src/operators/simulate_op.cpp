@@ -128,6 +128,14 @@ public:
             notAnimatable({"startFrame", std::int64_t{1}, "The frame the simulation starts at, at rest in the groomed shape"})
                 .range(-1000000, 1000000)
                 .soft(-100, 500),
+            notAnimatable({"preroll", std::int64_t{0}, "Frames the hair settles before the start frame, from the rest "
+                                                       "pose (0: off): it starts at rest in the groomed shape on the "
+                                                       "scalp's rest pose with the driver curves as bound, the head and "
+                                                       "the rig move to the start frame's pose over the first half and "
+                                                       "hold over the second, so a shot starting mid-motion or far from "
+                                                       "the rest pose starts with the hair hanging as it would"})
+                .range(0, 10000)
+                .soft(0, 100),
             notAnimatable({"seed", std::int64_t{0}, "Another wind with the same settings"}).in("Wind").adv(),
             notAnimatable({"cacheMode", std::string("live"),
                            "live: playing or scrubbing past the cached frames simulates them; cached: only Simulate Range "

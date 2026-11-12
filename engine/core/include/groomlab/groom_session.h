@@ -817,6 +817,9 @@ private:
     // What a Simulate node is fed at ctx's time (its guides and collider, the scalp now; guides
     // given on the rest pose while following are carried to the scalp), and its hash.
     SimInputs simInputs(const SimRef& ref, const EvalContext& ctx, std::uint64_t* hash);
+    // A Simulate node's inputs on the rest pose (the scalp's, the drivers as bound) at `seconds`,
+    // where its preroll starts (SimSettings::preroll); the session's inputs of `seconds` after.
+    SimInputs restInputs(const SimRef& ref, double seconds);
     // The nodes' frames at the request's time (stepping live nodes), into each node's `shown`.
     void stepSimulations(const ViewRequest& request, std::vector<std::string>& errors);
     // Steps `nodes` on to `target` (frames other than `nowSeconds` fed by the host's feed).

@@ -146,6 +146,10 @@ struct SimSettings {
     int substeps = 4;
     int iterations = 6;
     int startFrame = 1;
+    // Frames the hair settles before the start frame, from the rest pose (0: off): the solver
+    // starts at rest there (the groomed shape, gravity preloaded on it), the inputs move to the
+    // start frame's over the first half and hold over the second (SimCache::start).
+    int preroll = 0;
     std::uint64_t seed = 0;  // the wind's gusts (and the current's)
     bool live = true;        // cacheMode "live": evaluation steps frames not cached; "cached": only Simulate Range does
     // Water (see the top of this file).
@@ -290,6 +294,11 @@ public:
 
     // At the start frame: the solver at rest on these inputs, the frame kept.
     void start(const SimInputs& inputs, std::uint64_t inputHash);
+    // With a preroll (SimSettings::preroll): the solver at rest on `rest` (the rest pose's inputs)
+    // preroll frames before the start frame, stepped toward `inputs` over the first half of them
+    // (the roots and shapes moving evenly) and held on them over the second; the start frame kept.
+    // Guides other than the rest pose's (another layout): as start(inputs) without one.
+    void start(const SimInputs& rest, const SimInputs& inputs, std::uint64_t inputHash);
     // `frames` frames on from lastFrame() toward these inputs (GuideSolver::step), each kept.
     // False when the guides are not the ones simulated (another count, IDs, point counts): the
     // cache is cleared then, to start again.

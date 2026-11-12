@@ -3142,8 +3142,10 @@ void GroomSession::advanceSimulations(std::vector<SimRef>& nodes, int target, do
         std::map<std::string, MeshPtr> meshes;
         std::map<std::string, float> controls;
         ScalpHistoryPtr history;
+        GuidesPtr drivers;
     };
-    const Moving saved{data_.scalp, data_.scalps, data_.guides, data_.guidePoses, posesHash_, data_.meshes, data_.controls, data_.scalpHistory};
+    const Moving saved{data_.scalp,    data_.scalps,   data_.guides,       data_.guidePoses, posesHash_,
+                       data_.meshes,   data_.controls, data_.scalpHistory, data_.drivers};
     bool fed = false;
     std::vector<std::string> scratchErrors;
     std::vector<SessionMessage> scratchMessages;
@@ -3157,6 +3159,7 @@ void GroomSession::advanceSimulations(std::vector<SimRef>& nodes, int target, do
         data_.meshes = saved.meshes;
         data_.controls = saved.controls;
         data_.scalpHistory = saved.history;
+        data_.drivers = saved.drivers;
         fed = false;
         scratchErrors.clear();
         scratchMessages.clear();
@@ -3213,7 +3216,11 @@ void GroomSession::advanceSimulations(std::vector<SimRef>& nodes, int target, do
                 const std::uint64_t stamp = known ? hash : 0;
                 if (!node.cache.started()) {
                     if (next != f) continue;
-                    node.cache.start(in, stamp);
+                    if (node.cache.settings().preroll > 0) {
+                        node.cache.start(restInputs(ref, seconds), in, stamp);
+                    } else {
+                        node.cache.start(in, stamp);
+                    }
                 } else if (!node.cache.step(in, stamp, f - next + 1)) {
                     stepError(ref);
                     continue;
@@ -3234,6 +3241,34 @@ void GroomSession::advanceSimulations(std::vector<SimRef>& nodes, int target, do
     }
     restore();
     run.milliseconds += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
+}
+
+SimInputs GroomSession::restInputs(const SimRef& ref, double seconds) {
+    // The inputs on the scalp's rest pose, the driver curves as bound (in that pose: the bind's
+    // drivers are carried to it), then the inputs of `seconds` put back. The colliders stay.
+    const MeshPtr scalp = data_.scalp;
+    const GuidesPtr drivers = data_.drivers;
+    std::vector<std::string> errors;
+    std::vector<SessionMessage> messages;
+    SimInputs rest;
+    try {
+        if (scalp && scalp->hasRest()) data_.scalp = std::make_shared<const ScalpMesh>(scalp->restPose());
+        if (!driverBind_.empty()) data_.drivers = std::make_shared<const GuideSet>(driverBind_.drivers);
+        prepareTime(seconds, errors, messages);
+        ExternalInputs externals;
+        fillExternals(externals);
+        std::uint64_t hash = 0;
+        rest = simInputs(ref, simContext(seconds, externals), &hash);
+    } catch (...) {
+        data_.scalp = scalp;
+        data_.drivers = drivers;
+        prepareTime(seconds, errors, messages);
+        throw;
+    }
+    data_.scalp = scalp;
+    data_.drivers = drivers;
+    prepareTime(seconds, errors, messages);
+    return rest;
 }
 
 SimRun GroomSession::simulateTo(int frame, const SimProgress& progress) {

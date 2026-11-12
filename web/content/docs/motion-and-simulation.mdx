@@ -102,6 +102,7 @@ the standalone app, groom files and on the farm, with the same results.
 | `volume`, `volumeCellSize` | Volume preservation (off by default): hair packed denser than one cell is pushed apart, so long hair keeps its body. |
 | `substeps`, `iterations` | Accuracy: steps per frame, constraint iterations per step. |
 | `startFrame` | The frame at which the simulation starts at rest; start a few frames before the shot so the hair can settle. |
+| `preroll` | Frames the hair settles before the start frame, from the rest pose (0: off). It starts at rest in the groomed shape on the scalp's rest pose, with the driver curves as bound; the head and the rig move to the start frame's pose over the first half and hold over the second. A shot that starts far from the rest pose (the head turned, the rig posed) starts with the hair hanging as it would, not stiffly holding the groomed shape. Without a rest pose on the scalp the head holds where it is and the hair settles there. |
 | `cacheMode` | `live` simulates during playback; `cached` only in Simulate Range (other frames as groomed). |
 | `water`, `waterLevel` | Water (off by default): below the surface, either the plane at `waterLevel` (world Y) or the mesh on the `water` input. |
 | `buoyancy`, `waterDrag` | Under water: upward force as a fraction of gravity (above 1 the hair floats up); drag much stronger than in air. |
