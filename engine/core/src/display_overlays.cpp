@@ -149,10 +149,18 @@ std::vector<float> overlayPullLimits(const std::vector<Vec3f>& points, const Vec
             dir = dir * (1.0f / away);
             float nearest = pull;
             const Vec3f origin = p + dir * eps;
+            const Vec3f behind = p - dir * eps;
             for (const auto& mesh : occluders) {
+                if (!mesh) continue;
                 SurfacePoint hit;
                 float t = 0.0f;
-                if (mesh && mesh->intersectRay(origin, dir, &hit, &t) && t < nearest) nearest = std::max(t, 0.0f);
+                if (mesh->intersectRay(origin, dir, &hit, &t) && t < nearest) nearest = std::max(t, 0.0f);
+                // A point on a surface seen from the surface's back (a guide root on the scalp, the
+                // camera inside the head): the ray from just past the point misses the surface it
+                // sits on, which still hides it. Not pulled through it (issue 55).
+                if (nearest > 0.0f && mesh->intersectRay(behind, dir, &hit, &t) && t <= 2.0f * eps && hit.normal.dot(dir) < 0.0f) {
+                    nearest = 0.0f;
+                }
             }
             // Something in the way: short of it, so a dot drawn about the point stays behind it.
             if (nearest < pull) nearest *= 0.9f;

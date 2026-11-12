@@ -1183,6 +1183,12 @@ TEST(Display, OverlayPullLimitsStopAtTheScalp) {
     EXPECT_LT(limits[1], 0.2f);
     EXPECT_FLOAT_EQ(limits[2], 1.0f);     // more than the pull away from it
     EXPECT_EQ(overlayPullLimits(points, {0.0f, 0.0f, 5.0f}, 0.0f, occluders), std::vector<float>(3, 1.0f));
+    // A root on the surface (issue 55): pulled from outside, where its side faces the camera; from
+    // inside the sphere, its back toward the camera, it stays on it (pulled, it showed through).
+    const std::vector<Vec3f> roots{f.view.scalp->closestPoint({0.0f, 0.0f, 2.0f}).position};
+    EXPECT_FLOAT_EQ(overlayPullLimits(roots, {0.0f, 0.0f, 5.0f}, 1.0f, occluders)[0], 1.0f);
+    EXPECT_FLOAT_EQ(overlayPullLimits(roots, {0.0f, 0.0f, 0.0f}, 1.0f, occluders)[0], 0.0f);
+    EXPECT_FLOAT_EQ(overlayPullLimits(roots, {0.0f, 0.3f, -0.2f}, 1.0f, occluders)[0], 0.0f);
     DisplayGeometry g;
     appendPolyline(g, points.data(), points.size());
     std::vector<float> rgba(12);
