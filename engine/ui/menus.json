@@ -26,6 +26,8 @@
         "sim.range",
         "sim.bake",
         "sim.clear",
+        "sim.sculptOn",
+        "sim.live",
         "-",
         {"submenu": "Drivers", "id": "drivers", "tip": "Curves an animator rigs that pose the guides (a DriveGuides node); a Simulate after it plays on top", "hosts": ["maya"], "items": [
           "drivers.create", "drivers.createEach", "drivers.attach", "drivers.detach", "-", "drivers.bind", "drivers.remove"

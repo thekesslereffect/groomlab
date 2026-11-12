@@ -3890,7 +3890,9 @@ class DockableWindowsTest(unittest.TestCase):
             self.assertEqual(entries_of("Add"), ["Feathers...", "Braid on Curves...", "Cards", "Collider", "Wind",
                                                  "Jiggle"])
             self.assertEqual(entries_of("Simulate"), ["Add Simulate Node", "Simulate Range", "Bake Simulation",
-                                                      "Clear Simulation", "Drivers", "Export Guides for Simulation...",
+                                                      "Clear Simulation", "Sculpt on Simulation",
+                                                      "Back to Live Simulation", "Drivers",
+                                                      "Export Guides for Simulation...",
                                                       "Load Guide Cache...", "Legacy"])
             simulate = next(menu.MENU + "|" + i for i in cmds.menu(menu.MENU, query=True, itemArray=True)
                             if cmds.menuItem(i, query=True, label=True) == "Simulate")

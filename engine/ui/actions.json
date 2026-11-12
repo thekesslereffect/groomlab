@@ -87,6 +87,8 @@
     "drivers.detach": {"label": "Detach Selected Guides", "tip": "The selected guides stay as groomed again (from every driver)", "hosts": ["maya"]},
     "drivers.bind": {"label": "Rebind Drivers at Frame 0", "tip": "Take the drivers' and the scalp's pose at frame 0 as the bind pose again (after changing the rig's rest pose); the attachments stay", "hosts": ["maya"]},
     "drivers.remove": {"label": "Remove Drivers", "tip": "Disconnect the active groom's driver curves (their guides stay as groomed)", "hosts": ["maya"]},
+    "sim.sculptOn": {"label": "Sculpt on Simulation", "tip": "Bake the simulation and pose the guides from the bake (the Simulate and DriveGuides nodes bypassed): brushes then make shot fixes (correctives) on top of the simulated hair, for renders and groom files too", "hosts": ["maya"]},
+    "sim.live": {"label": "Back to Live Simulation", "tip": "The Simulate and DriveGuides nodes Sculpt on Simulation bypassed run again and its guide cache is cleared (the correctives stay)", "hosts": ["maya"]},
     "sim.clear": {"label": "Clear Simulation", "tip": "Drop the Simulate nodes' frames and bakes: the next frame shown simulates again"},
     "nhair.simulate": {"label": "Simulate Guides (nHair)...", "tip": "Maya's nHair on one guide group; children follow the simulated guides", "hosts": ["maya"]},
     "nhair.bake": {"label": "Bake Simulation to Cache...", "tip": "Run the nHair sim over the playback range, cache the guides and drop the live sim", "hosts": ["maya"]},

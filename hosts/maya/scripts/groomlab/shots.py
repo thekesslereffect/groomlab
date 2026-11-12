@@ -343,3 +343,84 @@ def shot_sculpt(groom, on=True, all_frames=None, fade=6.0):
     if current not in names:
         return add_layer(groom, all_frames=True if all_frames is None else all_frames, fade=None if all_frames in (None, True) else fade)
     return add_layer(groom, all_frames=bool(all_frames), fade=None if all_frames else fade)
+
+
+# ---- Sculpting on the simulation -----------------------------------------------------------------
+
+
+def _motion_nodes(model, node):
+    """`node` (a Simulate) and the DriveGuides and Simulate nodes feeding it guides, in a chain."""
+    out, name = [], node
+    while name and name not in out and model.node_type(name) in ("Simulate", "DriveGuides"):
+        out.append(name)
+        source = model._source(name, "guides")
+        name = source[0] if source else None
+    return out
+
+
+@undoable("sculpt on simulation")
+def sculpt_on_simulation(groom, node=None, end=None):
+    """Shot sculpting on top of a simulation, as studios fix a sim: the Simulate node's frames are
+    baked (bake_simulation, unless its bake is current), the guides are posed from the bake (the
+    groom's guide cache) and the Simulate node, with the DriveGuides and Simulate nodes feeding it,
+    is bypassed. The guides shown are then the simulated ones, and corrective layers (add_layer,
+    shot_sculpt) apply on top of them: in the viewport, exports, groom files and renders.
+    live_simulation goes back. `node`: the Simulate node (default: the last). Returns the bake's
+    path as the groom names it."""
+    from groomlab import graph as gm
+    from groomlab import sim
+    nodes = sim.simulate_nodes(groom)
+    if not nodes:
+        raise ValueError("%s has no Simulate node to sculpt on" % groom)
+    node = node or nodes[-1]
+    if node not in nodes:
+        raise ValueError("%s has no Simulate node %r making its output" % (groom, node))
+    status = next((s for s in sim.simulation_status(groom) if s.get("node") == node), {})
+    bakes = sim.baked_simulations(groom)
+    if not status.get("baked") or status.get("bakeStale") or node not in bakes:
+        sim.bake_simulation(groom, node=node, end=end)
+        bakes = sim.baked_simulations(groom)
+    bake = bakes[node]
+    cmds.setAttr(groom + ".guideCache", bake["file"], type="string")
+    cmds.setAttr(groom + ".guideCacheObject", bake.get("object", ""), type="string")
+    model = gm.GraphModel.from_groom(groom)
+    for name in _motion_nodes(model, node):
+        model.set_bypass(name, True)
+    model.save(groom)
+    return cmds.getAttr(groom + ".guideCache")
+
+
+def sculpting_on_simulation(groom):
+    """The Simulate node whose bake poses the guides with it bypassed (sculpt_on_simulation), or
+    None: the simulation is live."""
+    from groomlab import graph as gm
+    from groomlab import sim
+    cache = cmds.getAttr(groom + ".guideCache") or ""
+    if not cache:
+        return None
+    model = gm.GraphModel.from_groom(groom)
+    from groomlab.paths import resolve_path, _same_file
+    for node, bake in sim.baked_simulations(groom).items():
+        if node in model.nodes and model.bypassed(node) and bake.get("file") and                 _same_file(resolve_path(bake["file"], groom), resolve_path(cache, groom)):
+            return node
+    return None
+
+
+@undoable("live simulation")
+def live_simulation(groom):
+    """Back from sculpt_on_simulation: its Simulate node and the DriveGuides and Simulate nodes
+    feeding it run again, and the guide cache is cleared. The corrective layers stay (on the live
+    simulation they apply before it: switch the shot fixes off, or remove them). Returns the nodes
+    turned back on."""
+    from groomlab import graph as gm
+    from groomlab import sim
+    node = sculpting_on_simulation(groom)
+    if node is None:
+        return []
+    model = gm.GraphModel.from_groom(groom)
+    names = _motion_nodes(model, node)
+    for name in names:
+        model.set_bypass(name, False)
+    model.save(groom)
+    sim.clear_guide_cache(groom)
+    return names

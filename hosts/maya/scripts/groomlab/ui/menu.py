@@ -672,6 +672,39 @@ def clear_core_simulation(groom=None):
         sim.invalidate_simulation(groom)
 
 
+def sculpt_on_simulation_action(groom=None):
+    """Simulate > Sculpt on Simulation (groomlab.shots.sculpt_on_simulation): the simulation baked
+    and posing the guides, shot sculpts (correctives) on top of it."""
+    from groomlab import shots, sim
+    groom = groom or _selected_groom()
+    if not groom:
+        return None
+    if not sim.simulate_nodes(groom):
+        cmds.warning("GroomLab: %s has no Simulate node to sculpt on" % groom)
+        return None
+    if not any(s.get("baked") and not s.get("bakeStale") for s in sim.simulation_status(groom)):
+        if not bake_core_simulation(groom):
+            return None
+    path = shots.sculpt_on_simulation(groom)
+    shots.shot_sculpt(groom, on=True, all_frames=False)
+    _say("%s: the guides follow the baked simulation (%s); brushes make shot fixes on it. "
+         "Back to Live Simulation to simulate again" % (groom, path))
+    return path
+
+
+def live_simulation_action(groom=None):
+    """Simulate > Back to Live Simulation (groomlab.shots.live_simulation)."""
+    from groomlab import shots
+    groom = groom or _selected_groom()
+    if not groom:
+        return None
+    names = shots.live_simulation(groom)
+    shots.set_target(groom, None)
+    _say("%s simulates live again (%s)" % (groom, ", ".join(names)) if names else
+         "%s is not sculpting on a simulation" % groom)
+    return names
+
+
 def simulate_guides_dialog():
     """nHair on one guide group; children follow the simulated guides."""
     import groomlab
@@ -2171,6 +2204,8 @@ ACTIONS = {
     "sim.range": simulate_range,
     "sim.bake": bake_core_simulation,
     "sim.clear": clear_core_simulation,
+    "sim.sculptOn": sculpt_on_simulation_action,
+    "sim.live": live_simulation_action,
     "drivers.create": create_drivers_action,
     "drivers.createEach": lambda: create_drivers_action(per_guide=True),
     "drivers.attach": attach_guides_action,

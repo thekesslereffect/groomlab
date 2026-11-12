@@ -905,6 +905,54 @@ class SimulationTest(unittest.TestCase):
         cli("eval", path, "-o", still, "-f", "1", "--density", "0.3")
         self.assertNotEqual(cli("hash", still), cli("hash", from_cli))  # the rig moved it
 
+    def test_shot_fixes_sculpted_on_a_baked_simulation(self):
+        """sculpt_on_simulation: the Simulate node baked, the guides posed from the bake, the node
+        bypassed: the groom looks as simulated; a corrective then applies on top of the simulated
+        hair, in Maya and from the groom file alike; live_simulation turns the node back on."""
+        import json
+        from groomlab import shots
+        plane = cmds.polyPlane(width=2, height=2, subdivisionsX=10, subdivisionsY=10)[0]
+        groom = groomlab.create_groom(plane)
+        cmds.setAttr(groom + ".previewDensity", 0.3)
+        groomlab.guides_from_curves(groom, [cmds.curve(degree=1, point=[(0, 0, 0), (0.7, 0.7, 0), (1.4, 1.0, 0)])])
+        guide = int(groomlab.guide_ids(groom, "primary")[0])
+        node = sim.add_simulate(groom, groomedUnderGravity="off")
+        cmds.playbackOptions(minTime=1, maxTime=8)
+        for frame in range(1, 9):
+            cmds.currentTime(frame)
+
+        def strands(name):
+            path = os.path.join(WORK_DIR, "onsim_%s.abc" % name)
+            groomlab.export_alembic(groom, path, start=8, end=8, density=0.3)
+            return cli("abc-info", path)
+
+        simulated = strands("live")
+        self.assertIsNone(shots.sculpting_on_simulation(groom))
+        shots.sculpt_on_simulation(groom)
+        self.assertEqual(shots.sculpting_on_simulation(groom), node)
+        from groomlab import graph as gm
+        self.assertTrue(gm.GraphModel.from_groom(groom).bypassed(node))
+        self.assertEqual(strands("posed"), simulated)  # posed from its bake: as simulated
+
+        points = len(cmds.groomLabGuides(groom, guidePoints=str(guide))) // 3
+        fix = {"layers": [{"name": "fix", "time": 0.0, "holdBefore": True, "holdAfter": True, "weight": 1.0,
+                           "enabled": True, "offsets": {str(guide): [0.0, 0.0, 0.0] + [0.3, 0.0, 0.0] * (points - 1)}}]}
+        cmds.setAttr(groom + ".correctiveData", json.dumps(fix), type="string")
+        fixed = strands("fixed")
+        self.assertNotEqual(fixed, simulated)  # the fix on top of the simulated hair
+
+        path = os.path.join(WORK_DIR, "onsim.groom")
+        written = groomlab.export_groom(groom, path, start=8, end=8)
+        self.assertIn("onsim.guides.abc", [os.path.basename(p) for p in written])
+        from_cli = os.path.join(WORK_DIR, "onsim_cli.abc")
+        cli("eval", path, "-o", from_cli, "-f", "8", "--density", "0.3")
+        self.assertEqual(cli("abc-info", from_cli), fixed)  # the farm: the same fix on the same sim
+
+        self.assertEqual(shots.live_simulation(groom), [node])
+        self.assertFalse(gm.GraphModel.from_groom(groom).bypassed(node))
+        self.assertEqual(cmds.getAttr(groom + ".guideCache") or "", "")
+        self.assertIsNone(shots.sculpting_on_simulation(groom))
+
     def test_nhair_simulation_drives_the_groom(self):
         made = sim.create_sim_curves(self.groom, "primary")
         self.assertTrue(made["hairSystem"] and made["nucleus"])

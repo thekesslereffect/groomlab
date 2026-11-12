@@ -384,3 +384,18 @@ Older Maya scenes whose groom has a guide cache set (`sim.set_guide_cache`, the 
 **Correctives** (Groom Tools > Correctives) are sculpt layers applied on top of the groom. **Fix
 Frame** creates one that blends in and out around the current frame, with keyable weights;
 renders include them.
+
+**Fixing a simulation:** correctives apply to the groomed guides, before the graph's DriveGuides and
+Simulate nodes. To sculpt on the simulated hair itself, as studios fix a sim, use **Simulate > Sculpt
+on Simulation** (Maya): the Simulate node's frames are baked (unless its bake is current), the guides
+are posed from the bake and the Simulate node, with the DriveGuides and Simulate nodes feeding it, is
+bypassed. The guides on screen are then the simulated ones and brushes make shot fixes on top of
+them; renders, exports and groom files carry both (the farm gives the same hair). **Back to Live
+Simulation** turns those nodes on again and clears the guide cache; the correctives stay.
+
+```python
+from groomlab import shots
+shots.sculpt_on_simulation(groom)   # bake, pose the guides from it, bypass the sim
+shots.add_layer(groom, frame=1012, fade=6)  # a fix keyed around frame 1012; brush it
+shots.live_simulation(groom)        # simulate again
+```
