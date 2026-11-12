@@ -265,6 +265,10 @@ pose, the simulation adds the swing.
 **With Follow Scalp,** drivers are taken to the rest pose through the scalp point each was anchored
 to at the bind, so a driver that only moves with the head drives nothing.
 
+**On the farm:** `export_groom` writes the driver curves' animation beside the groom file
+(`<name>.drivers.abc`, the file's `driverCache`) whenever driver curves are connected, so the CLI,
+the procedurals and the app drive the hair (and simulate on top) as Maya does, exactly.
+
 Drivers do not carry twist yet: a driver spun about its own length does not turn the hair round it.
 
 ```python

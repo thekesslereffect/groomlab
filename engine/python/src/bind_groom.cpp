@@ -292,6 +292,7 @@ void bindGroom(py::module_& m) {
         .def_readwrite("data", &GroomFile::data)
         .def_readwrite("scalp_cache", &GroomFile::scalpCache)
         .def_readwrite("guide_cache", &GroomFile::guideCache)
+        .def_readwrite("driver_cache", &GroomFile::driverCache)
         .def_readwrite("card_bake", &GroomFile::cardBake)
         .def_readwrite("transfer_markers", &GroomFile::transferMarkers)
         .def_readwrite("units", &GroomFile::units)

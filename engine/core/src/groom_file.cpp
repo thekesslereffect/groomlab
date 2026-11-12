@@ -486,6 +486,7 @@ json groomObject(FloatArrays& arrays, const GroomFile& file) {
     if (driverBind.is_object()) root["driverBind"] = driverBind;
     root["scalpCache"] = file.scalpCache.empty() ? json(nullptr) : cacheJson(file.scalpCache);
     root["guideCache"] = file.guideCache.empty() ? json(nullptr) : cacheJson(file.guideCache);
+    if (!file.driverCache.empty()) root["driverCache"] = cacheJson(file.driverCache);
     if (!file.searchPaths.empty()) root["searchPaths"] = file.searchPaths;
     if (file.data.followScalp) root["followScalp"] = true;  // written only when on (the default is off)
     if (file.data.scaleSource != ScaleSource::Area) root["scaleSource"] = scaleSourceName(file.data.scaleSource);  // (default "area")
@@ -628,6 +629,7 @@ GroomFile groomFromObject(const json& root, const std::string& baseDir) {
 
         file.scalpCache = readCache(root, "scalpCache", baseDir);
         file.guideCache = readCache(root, "guideCache", baseDir);
+        file.driverCache = readCache(root, "driverCache", baseDir);
         file.searchPaths = root.value("searchPaths", std::vector<std::string>{});
         file.data.followScalp = root.value("followScalp", false);
         file.data.scaleSource = scaleSourceFromName(root.value("scaleSource", std::string("area")));

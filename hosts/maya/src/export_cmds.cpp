@@ -89,6 +89,12 @@ const char* kGuideGroupFlag = "-gg";
 const char* kGuideGroupFlagLong = "-guideGroup";
 const char* kGuidePosesFlag = "-gps";
 const char* kGuidePosesFlagLong = "-guidePoses";
+const char* kDriverCurvesFlag = "-drv";
+const char* kDriverCurvesFlagLong = "-driverCurves";
+const char* kDriverCacheFlag = "-dc";
+const char* kDriverCacheFlagLong = "-driverCache";
+const char* kDriverObjectFlag = "-do";
+const char* kDriverObjectFlagLong = "-driverObject";
 const char* kRenderOverridesFlag = "-ro";
 const char* kRenderOverridesFlagLong = "-renderOverrides";
 
@@ -294,6 +300,7 @@ MSyntax ExportAlembicCmd::newSyntax() {
     MSyntax syntax = curveSyntax();
     syntax.addFlag(kGuideGroupFlag, kGuideGroupFlagLong, MSyntax::kString);
     syntax.addFlag(kGuidePosesFlag, kGuidePosesFlagLong);
+    syntax.addFlag(kDriverCurvesFlag, kDriverCurvesFlagLong);  // the driver curves (DriveGuides), as the groom reads them
     syntax.addFlag("-ue", "-unreal");
     // Unreal only: groom groups ("": one object, groom_group_id from the groupId channel;
     // "auto": by groupId, an object each; else by that channel), the feathers' shafts as
@@ -343,9 +350,14 @@ struct GuideFrames {
 
 // The groom's guides at the context's time: a group of the posed hierarchy,
 // or the poses alone (only they are read).
-MStatus guidesAtFrame(const char* command, const MObject& node, const MString& group, bool poses, GuideFrames& frames,
-                      StrandSet* out) {
+MStatus guidesAtFrame(const char* command, const MObject& node, const MString& group, bool poses, bool drivers,
+                      GuideFrames& frames, StrandSet* out) {
     try {
+        if (drivers) {  // the curves exactly as the groom samples them (driverCurvesFromNode): the farm drives the same
+            const GuidesPtr curves = driverCurvesFromNode(node);
+            *out = curves ? toCurves(*curves) : StrandSet{};
+            return MS::kSuccess;
+        }
         if (poses) {
             const GuidesPtr posed = guidePosesFromNode(node, &frames.inputs);
             *out = posed ? toCurves(*posed) : StrandSet{};
@@ -383,10 +395,13 @@ MStatus ExportAlembicCmd::doIt(const MArgList& args) {
     
         const MTime::Unit unit = MTime::uiUnit();
         const bool poses = db.isFlagSet(kGuidePosesFlag);
+        const bool drivers = db.isFlagSet(kDriverCurvesFlag);
         MString group;
         if (db.isFlagSet(kGuideGroupFlag)) db.getFlagArgument(kGuideGroupFlag, 0, group);
-        if (poses && group.length() > 0) return fail(kName, "use -guideGroup or -guidePoses, not both");
-        const bool guides = poses || group.length() > 0;
+        if (int(poses) + int(drivers) + int(group.length() > 0) > 1) {
+            return fail(kName, "use one of -guideGroup, -guidePoses and -driverCurves");
+        }
+        const bool guides = poses || drivers || group.length() > 0;
     
         AlembicCurvesWriter::Options options;
         if (db.isFlagSet("-sca")) {
@@ -501,7 +516,7 @@ MStatus ExportAlembicCmd::doIt(const MArgList& args) {
             return fail(kName, "-scales must be mesh or none (an instancer goes to USD)");
         }
         try {
-            AlembicCurvesWriter writer(file.asChar(), exportName(path) + (guides ? "Guides" : ""),
+            AlembicCurvesWriter writer(file.asChar(), exportName(path) + (drivers ? "Drivers" : guides ? "Guides" : ""),
                                        mayaSeconds(MTime(range.start, unit)), frameToSeconds(range.step, mayaFramesPerSecond()),
                                        options);
             if (guides) {
@@ -512,7 +527,7 @@ MStatus ExportAlembicCmd::doIt(const MArgList& args) {
                     MDGContext context = exportContext(range.start + i * range.step, unit);
                     MDGContextGuard guard(context);
                     StrandSet curves;
-                    status = guidesAtFrame(kName, path.node(), group, poses, frames, &curves);
+                    status = guidesAtFrame(kName, path.node(), group, poses, drivers, frames, &curves);
                     if (!status) return status;
                     writer.writeFrame(curves);
                     strandTotal += curves.strandCount();
@@ -679,6 +694,8 @@ MSyntax ExportGroomCmd::newSyntax() {
     syntax.addFlag(kScalpObjectFlag, kScalpObjectFlagLong, MSyntax::kString);
     syntax.addFlag(kGuideCacheFlag, kGuideCacheFlagLong, MSyntax::kString);
     syntax.addFlag(kGuideObjectFlag, kGuideObjectFlagLong, MSyntax::kString);
+    syntax.addFlag(kDriverCacheFlag, kDriverCacheFlagLong, MSyntax::kString);
+    syntax.addFlag(kDriverObjectFlag, kDriverObjectFlagLong, MSyntax::kString);
     syntax.addFlag("-n", "-name", MSyntax::kString);     // the groom's name in the file (its asset name)
     syntax.addFlag("-mg", "-merge", MSyntax::kBoolean);  // keep the file's other grooms
     syntax.setObjectType(MSyntax::kSelectionList, 1, 1);
@@ -709,6 +726,7 @@ MStatus ExportGroomCmd::doIt(const MArgList& args) {
         if (!groom.data.scalp) return fail(kName, path.partialPathName() + " has no scalp mesh connected");
         groom.scalpCache = {stringFlag(kScalpCacheFlag), stringFlag(kScalpObjectFlag)};
         groom.guideCache = {stringFlag(kGuideCacheFlag), stringFlag(kGuideObjectFlag)};
+        groom.driverCache = {stringFlag(kDriverCacheFlag), stringFlag(kDriverObjectFlag)};
         groom.framesPerSecond = framesPerSecond();
         groom.upAxis = MGlobal::isZAxisUp() ? "Z" : "Y";
         refreshMayaPaths();
@@ -736,7 +754,7 @@ MStatus ExportGroomCmd::doIt(const MArgList& args) {
             }
         }
         // The caches named for the file (relative to it: the scalp's and the guides' it was written with).
-        for (CacheRef* cache : {&groom.scalpCache, &groom.guideCache}) {
+        for (CacheRef* cache : {&groom.scalpCache, &groom.guideCache, &groom.driverCache}) {
             if (!cache->file.empty() && !isAbsolutePath(cache->file)) cache->file = (target.parent_path() / fs::u8path(cache->file)).generic_u8string();
         }
         // The scene meshes the Instance nodes name (scales of the artist's own plates): stored,

@@ -222,6 +222,7 @@ GroomWriteReport writeGroomsToFile(const std::string& path, std::vector<GroomFil
         // The caches the host wrote for the file (the scalp's, the guides'): where they are.
         if (!g.scalpCache.empty()) g.scalpCache.file = relative(resolved(g.scalpCache.file));
         if (!g.guideCache.empty()) g.guideCache.file = relative(resolved(g.guideCache.file));
+        if (!g.driverCache.empty()) g.driverCache.file = relative(resolved(g.driverCache.file));
         g.directory = folder;
     }
 

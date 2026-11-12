@@ -33,7 +33,7 @@
 
 namespace groomlab {
 
-class Ramp;
+struct Ramp;
 
 class GuideHierarchy;
 

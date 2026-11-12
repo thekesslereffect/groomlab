@@ -79,7 +79,8 @@ groomlab.reload_groom(groom)                               # the app's edits, on
   reason; import without one (the file's scalp is made, with its UVs and color sets, and a
   hidden rest mesh when it has a rest pose) and move the groom with Utilities > **Transfer
   Groom to Scalp**. Reload checks the groom's own scalp the same way and never touches it.
-- **Animation:** the file's guide cache poses the groom (`guideCache`); its scalp cache is read
+- **Animation:** the file's guide cache poses the groom (`guideCache`) and its driver cache moves the
+  driver curves (`driverCache`; Maya's rig needs its own curves, the cache is not imported); its scalp cache is read
   with AbcImport (under `<name>ScalpCache`) and its mesh is the scalp when it is the file's,
   else it drives the scalp through a world-space blendShape. AbcImport does not undo: undoing
   an import leaves what it read, as File > Import does. Reload leaves caches alone.

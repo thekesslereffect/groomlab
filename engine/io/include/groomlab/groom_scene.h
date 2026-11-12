@@ -69,10 +69,10 @@ public:
     const ViewResult& view(const ViewRequest& request);
 
     // Whether another time can give other strands: the session's readsTime (Wind, ImportCurves,
-    // Jiggle, fading correctives), an animated scalp cache or a guide cache. When it is false a
+    // Jiggle, fading correctives), an animated scalp cache, a guide cache or a driver cache. When it is false a
     // host evaluates once and keeps the strands for every frame and motion key (the CLI, the
     // procedural).
-    bool readsTime() const { return (scalpCache_ && scalpAnimated_) || guideCache_ || session_->readsTime(); }
+    bool readsTime() const { return (scalpCache_ && scalpAnimated_) || guideCache_ || driverCache_ || session_->readsTime(); }
 
     // The span of the caches' samples (the scalp cache's and the guide cache's together): what
     // a timeline should cover. False when no cache animates (`start` and `end` left alone).
@@ -97,6 +97,7 @@ private:
     GroomFile file_;
     std::unique_ptr<AlembicMeshReader> scalpCache_;
     std::unique_ptr<AlembicCurvesReader> guideCache_;
+    std::unique_ptr<AlembicCurvesReader> driverCache_;  // the drivers' animation (DriveGuides)
     std::unique_ptr<GroomSession> session_;
     bool scalpAnimated_ = false;
     MeshPtr lastScalp_;  // the scalp last read from the cache, at lastScalpSeconds_

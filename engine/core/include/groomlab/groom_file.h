@@ -20,7 +20,8 @@
 //    "guides": [{"id": 3, "root": [face, u, v], "points": [x, y, z, ...]}],
 //    "scalpCache": {"file": "scalp.abc", "object": "headShape"}?,
 //    "searchPaths": ["$PROJECT", "C:/shows/abc/sourceimages"]?,
-//    "guideCache": {"file": "sim.abc", "object": ""}?, "followScalp": true?, "scaleSource": "transform"|"off"?,
+//    "guideCache": {"file": "sim.abc", "object": ""}?, "driverCache": {"file": "drivers.abc", "object": ""}?,
+//    "followScalp": true?, "scaleSource": "transform"|"off"?,
 //    "scaleReference": 412.5?, "scaleTransformReference": 1.0?,
 //    "cardBake": {"prefix": "hair_cards/hair_", "strands": "<node>:<hash>,..."}?,
 //    "simCaches": {"<Simulate node>": {"file": "hair_sim/sim.abc", "object": "", "stamp": "9f3a..."}}?,
@@ -125,6 +126,7 @@ struct GroomFile {
     GroomData data;             // data.scalp: the scalp when the file was written
     CacheRef scalpCache;        // animated scalp: the same vertices over time
     CacheRef guideCache;        // animated guide poses, matched to hierarchy guides by ID
+    CacheRef driverCache;       // animated driver curves (DriveGuides), matched to data.drivers by ID
     CardBakeRef cardBake;       // the last card bake (the atlas the cards keep their cells from)
     std::map<std::string, SimCacheRef> simCaches;  // baked Simulate nodes, by node name
     std::map<std::string, InstancePrototype> prototypes;  // the Instance nodes' scene meshes, by name

@@ -147,6 +147,10 @@ int groomInfo(const char* path) {
             std::cout << "guide cache: " << file.guideCache.file
                       << (file.guideCache.object.empty() ? "" : " (" + file.guideCache.object + ")") << "\n";
         }
+        if (!file.driverCache.empty()) {
+            std::cout << "driver cache: " << file.driverCache.file
+                      << (file.driverCache.object.empty() ? "" : " (" + file.driverCache.object + ")") << "\n";
+        }
         if (!file.cardBake.empty()) std::cout << "card bake:   " << file.cardBake.prefix << "*\n";
         return 0;
     } catch (const std::exception& e) {

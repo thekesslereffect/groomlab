@@ -18,7 +18,7 @@ from groomlab.transfer import _deformed
 
 
 def export_groom(groom, path, scalp_cache=False, start=None, end=None, step=1.0, guide_cache="auto", merge=False,
-                 name=None):
+                 name=None, driver_cache="auto"):
     """Write a groom file (.groom) that groomlab-cli, the Arnold procedural and the standalone app
     read without Maya, and import_groom brings back into Maya.
 
@@ -35,6 +35,8 @@ def export_groom(groom, path, scalp_cache=False, start=None, end=None, step=1.0,
       or a (path, object) pair, names that cache instead of writing one (save_groom keeps its own).
     - `guide_cache`: the guide poses (simulation), <name>.guides.abc ("_<groom>" with `merge`).
       "auto" writes it when sim curves or a guide cache pose the groom.
+    - `driver_cache`: the driver curves' animation (DriveGuides), <name>.drivers.abc, so the rig
+      drives the hair on the farm as in Maya. "auto" writes it when driver curves are connected.
     Returns the paths written."""
     from groomlab import sim
 
@@ -45,13 +47,16 @@ def export_groom(groom, path, scalp_cache=False, start=None, end=None, step=1.0,
     written = []
     if guide_cache == "auto":
         guide_cache = sim.has_poses(groom)
+    if driver_cache == "auto":
+        from groomlab import drivers
+        driver_cache = bool(drivers.driver_curves(groom))
     if isinstance(scalp_cache, (str, tuple, list)):  # an existing cache, named as it is
         cache, obj = (scalp_cache, "") if isinstance(scalp_cache, str) else tuple(scalp_cache)
         kwargs["scalpCache"] = cache.replace("\\", "/")
         if obj:
             kwargs["scalpObject"] = obj
         scalp_cache = False
-    if scalp_cache or guide_cache:
+    if scalp_cache or guide_cache or driver_cache:
         if start is None:
             start = cmds.playbackOptions(query=True, minTime=True)
         if end is None:
@@ -74,6 +79,11 @@ def export_groom(groom, path, scalp_cache=False, start=None, end=None, step=1.0,
         cache = stem + ".guides.abc"
         cmds.groomLabExportAlembic(groom, file=cache, startFrame=start, endFrame=end, step=step, guidePoses=True)
         kwargs["guideCache"] = os.path.basename(cache)
+        written.append(cache)
+    if driver_cache:
+        cache = stem + ".drivers.abc"
+        cmds.groomLabExportAlembic(groom, file=cache, startFrame=start, endFrame=end, step=step, driverCurves=True)
+        kwargs["driverCache"] = os.path.basename(cache)
         written.append(cache)
     cmds.groomLabExportGroom(groom, **kwargs)
     return [path] + written

@@ -351,7 +351,10 @@ TEST(DriveGuides, GroomFilesKeepTheDriversAndTheirBind) {
     bind.frame = 4;
     bind.drivers.add(3, test::straightCurve({0.0f, 1.0f, 0.0f}, {0.0f, 0.8f, 0.0f}, 8)).root = {5, 0.2f, 0.3f};
     file.data.driverBindJson = bind.toJson();
+    file.driverCache = {"shot.drivers.abc", "hairDrivers"};
     const GroomFile back = groomFileFromJson(groomFileToJson(file));
+    EXPECT_EQ(back.driverCache.file, "shot.drivers.abc");  // the rig's animation, for the farm
+    EXPECT_EQ(back.driverCache.object, "hairDrivers");
     ASSERT_TRUE(back.data.drivers);
     EXPECT_EQ(back.data.drivers->guides()[0].id, 3u);
     EXPECT_EQ(back.data.drivers->guides()[0].points, file.data.drivers->guides()[0].points);

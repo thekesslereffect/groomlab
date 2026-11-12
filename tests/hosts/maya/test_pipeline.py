@@ -877,6 +877,34 @@ class SimulationTest(unittest.TestCase):
         one = strands_bbox(10, "each_swung")  # the hair round that guide swung toward -x
         self.assertTrue(one[0] < before[0] - 0.3 or one[3] < before[3] - 0.3, (one, before))
 
+    def test_rigged_and_simulated_groom_renders_the_same_from_its_groom_file(self):
+        """A groom driven by an animated driver curve, a Simulate on top: the groom file carries the
+        drivers' animation (<name>.drivers.abc), so the CLI (the farm) gives Maya's strands exactly."""
+        plane = cmds.polyPlane(width=2, height=2, subdivisionsX=10, subdivisionsY=10)[0]
+        groom = groomlab.create_groom(plane)
+        cmds.setAttr(groom + ".previewDensity", 0.3)
+        groomlab.guides_from_curves(groom, [cmds.curve(degree=1, point=[(0, 0, 0), (0, 0.7, 0), (0, 1.4, 0)])])
+        made = groomlab.create_drivers(groom, guides=[int(g) for g in groomlab.guide_ids(groom, "primary")])
+        cmds.setKeyframe(made[0], attribute="rotateZ", time=1, value=0.0)
+        cmds.setKeyframe(made[0], attribute="rotateZ", time=8, value=50.0)
+        sim.add_simulate(groom)
+        cmds.playbackOptions(minTime=1, maxTime=8)
+        for frame in range(1, 9):  # the simulation steps every frame in order
+            cmds.currentTime(frame)
+        path = os.path.join(WORK_DIR, "rigged.groom")
+        written = groomlab.export_groom(groom, path, start=1, end=8)
+        self.assertEqual([os.path.basename(p) for p in written], ["rigged.groom", "rigged.drivers.abc"])
+        self.assertIn("rigged.drivers.abc", cli("info", path).split("driver cache: ")[1])
+        from_cli = os.path.join(WORK_DIR, "rigged_cli.abc")
+        from_maya = os.path.join(WORK_DIR, "rigged_maya.abc")
+        cli("eval", path, "-o", from_cli, "-f", "8", "--density", "0.3")
+        groomlab.export_alembic(groom, from_maya, start=8, end=8, density=0.3)
+        self.assertEqual(cli("abc-info", from_cli), cli("abc-info", from_maya))
+        self.assertEqual(cli("hash", from_cli), cli("hash", from_maya))  # bit-exact
+        still = os.path.join(WORK_DIR, "rigged_cli_1.abc")
+        cli("eval", path, "-o", still, "-f", "1", "--density", "0.3")
+        self.assertNotEqual(cli("hash", still), cli("hash", from_cli))  # the rig moved it
+
     def test_nhair_simulation_drives_the_groom(self):
         made = sim.create_sim_curves(self.groom, "primary")
         self.assertTrue(made["hairSystem"] and made["nucleus"])
