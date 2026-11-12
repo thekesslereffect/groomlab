@@ -539,8 +539,8 @@ def setting_targets(scalp):
 
 
 def map_for_param(scalp, node, param, kind="vertices", resolution=1024, faces=None):
-    """New Map > For a setting: the map node.param reads, or a white one (`kind`: vertices or
-    texture) made and linked to it, one undo step (helper map_for_param); picked in the Paint tab,
+    """New Map > For a setting: the map node.param reads, or a white one (`kind`: vertices, texture
+    or guides) made and linked to it, one undo step (helper map_for_param); picked in the Paint tab,
     painted toward 1 (Ctrl: toward 0; on Density, no hair). A map made with `faces` (the scalp's
     polygon indices) is white on those faces only. The caller picks the Paint tool."""
     args = {"node": node, "param": param, "kind": kind, "resolution": int(resolution)}

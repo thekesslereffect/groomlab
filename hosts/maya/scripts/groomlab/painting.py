@@ -846,6 +846,8 @@ def param_map(groom, node, param):
             return None
     target = next((n for n in graph["nodes"] if n["name"] == node), None)
     value = (target.get("params") or {}).get(param) if target else None
+    if isinstance(value, str):  # a param naming a map (Interpolate's regionMap)
+        return (value, "luminance") if value in names else None
     if isinstance(value, dict):
         name = value.get("guide") or value.get("colorSet")
         if name in names:
@@ -858,6 +860,13 @@ def param_map(groom, node, param):
                     gray = map_channels(groom, m["name"]) != 4
                     return m["name"], "luminance" if gray or component not in ("r", "g", "b", "a") else component
     return None
+
+
+def _names_map(groom, node, param):
+    """Whether node.param names a map rather than taking one (Interpolate's regionMap: a text param)."""
+    from groomlab import graph as gm
+    model = gm.GraphModel.from_groom(groom)
+    return node in model.order and isinstance(model.param(node, param), str)
 
 
 def paint_param(groom, node, param, kind="guides", name=None, resolution=1024, paint=True, channel="luminance",
@@ -886,7 +895,17 @@ def paint_param(groom, node, param, kind="guides", name=None, resolution=1024, p
                 if kind == "guides":
                     raise ValueError("a guide layer is gray: paint a channel of a map on the scalp's vertices or a texture")
                 add_map(groom, name, 1.0, kind=kind, resolution=resolution, color=True, faces=faces)
-            use_map(groom, node, param, name, kind=kind, resolution=resolution, channel=channel, faces=faces)
+            if _names_map(groom, node, param):
+                # A param naming its map (Interpolate's regionMap): the map, white (one region: the
+                # look stays), named in it.
+                from groomlab import graph as gm
+                if name not in list_maps(groom):
+                    add_map(groom, name, 1.0, kind=kind, resolution=resolution, faces=faces)
+                model = gm.GraphModel.from_groom(groom)
+                model.set_param(node, param, name)
+                model.save(groom)
+            else:
+                use_map(groom, node, param, name, kind=kind, resolution=resolution, channel=channel, faces=faces)
         if paint:
             if channel in ("r", "g", "b", "a"):
                 paint_map(groom, name, value=1.0, color=(1.0, 1.0, 1.0, 1.0), channels=channel)
@@ -898,9 +917,10 @@ def paint_param(groom, node, param, kind="guides", name=None, resolution=1024, p
 def setting_targets(groom):
     """What + New Map > for a setting offers on this groom: the common settings (groomlab_core's
     paintable_settings: Density, Width, Length, Clump strength, Curl, Noise amplitude, Flyaways,
-    Guide weight),
-    each [{"id", "label", "node", "param", "hint"}] with node "" when the graph has no node of its
-    type; then every mappable param of the graph (Other) as {"id": "node.param", ...}. Returns
+    Guide weight, Interpolation regions),
+    each [{"id", "label", "node", "param", "hint", "kind"}] with node "" when the graph has no node of
+    its type (kind: where its new map lives unless picked otherwise, "guides" for the regions); then
+    every mappable param of the graph (Other) as {"id": "node.param", ...}. Returns
     (settings, others)."""
     graph = get_graph(groom, expand_default=True)
     specs = dict((s["type"], s) for s in groomlab_core.operator_specs())
@@ -908,7 +928,8 @@ def setting_targets(groom):
     for s in groomlab_core.paintable_settings():
         node = next((n["name"] for n in graph["nodes"] if n.get("type") == s["type"]), "")
         settings.append({"id": s["id"], "label": s["label"], "node": node, "param": s["param"], "type": s["type"],
-                         "hint": s["hint"] if node else "Add a %s node first (Graph Editor)" % s["type"]})
+                         "hint": s["hint"] if node else "Add a %s node first (Graph Editor)" % s["type"],
+                         "kind": s.get("kind", "vertices")})
     others = []
     for n in graph["nodes"]:
         spec = specs.get(n.get("type"))

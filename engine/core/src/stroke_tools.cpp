@@ -403,6 +403,10 @@ const std::vector<PaintableSetting>& paintableSettings() {
         {"flyaways", "Flyaways", "Flyaway", "fraction", "Where strays leave the flow: white the node's share of strays, black none"},
         {"guideWeight", "Guide weight", "Interpolate", "guideWeight",
          "How strongly the guides rooted there pull the hair around them: white fully, black they give way to their neighbours"},
+        {"regions", "Interpolation regions", "Interpolate", "regionMap",
+         "Each value is a region: a strand blends only its own region's guides (on the guides: fill each group with a value "
+         "of its own)",
+         "guides"},
     };
     return settings;
 }
@@ -479,6 +483,14 @@ ParamSource sourceOf(nlohmann::json& g, const nlohmann::json& node, const ScalpM
     }
     const nlohmann::json params = node.value("params", nlohmann::json::object());
     const auto value = params.is_object() ? params.find(param) : params.end();
+    // A param naming a map (Interpolate's regionMap): the map of that name ("": none yet).
+    if (params.is_object() && value != params.end() && value->is_string()) {
+        out.map = value->get<std::string>();
+        if (out.map.empty()) return out;
+        out.kind = kindOf(out.map);
+        if (out.kind.empty()) out.foreign = "names " + out.map + ", which is no map of the groom";
+        return out;
+    }
     if (!params.is_object() || value == params.end() || !value->is_object()) return out;  // a number: no map yet
     for (const char* key : {"colorSet", "guide"}) {
         if (value->contains(key) && (*value)[key].is_string()) {
@@ -529,6 +541,7 @@ std::string wireParamMap(const std::string& graphJson, const ScalpMaps& maps, co
     nlohmann::json& n = nodeNamed(g, node);
     // White: 1 x the param's value, as it was (its default when the node leaves it out).
     double top = 1.0;
+    bool names = false;  // a param naming a map (Interpolate's regionMap): it takes the map's name
     try {
         const nlohmann::json complete = nlohmann::json::parse(completeGraphJson(g.dump()), nullptr, false);
         if (complete.is_object() && complete.contains("nodes")) {
@@ -536,13 +549,16 @@ std::string wireParamMap(const std::string& graphJson, const ScalpMaps& maps, co
                 if (!c.is_object() || c.value("name", std::string()) != node) continue;
                 const nlohmann::json params = c.value("params", nlohmann::json::object());
                 if (params.is_object() && params.contains(param) && params[param].is_number()) top = params[param].get<double>();
+                if (params.is_object() && params.contains(param) && params[param].is_string()) names = true;
             }
         }
     } catch (const std::exception&) {
         // An incomplete graph: the map's white is 1.
     }
     nlohmann::json value;
-    if (kind == "guides") {
+    if (names) {
+        value = map;
+    } else if (kind == "guides") {
         value = {{"guide", map}, {"min", 0.0}, {"max", top}};
     } else if (kind == "texture") {
         const auto it = maps.maps.find(map);

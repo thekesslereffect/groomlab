@@ -270,7 +270,10 @@ TEST(BrushPack, PaintableSettingsAreMappableParams) {
         bool mappable = false;
         for (const nlohmann::json& op : specs) {
             if (op["type"] != s.type) continue;
-            for (const nlohmann::json& p : op["params"]) mappable = mappable || (p["name"] == s.param && p.value("mappable", false));
+            // (A mappable number, or a param naming its map: Interpolate's regionMap.)
+            for (const nlohmann::json& p : op["params"]) {
+                mappable = mappable || (p["name"] == s.param && (p.value("mappable", false) || p["default"].is_string()));
+            }
         }
         EXPECT_TRUE(mappable) << s.type << "." << s.param;
     }
@@ -352,6 +355,25 @@ TEST(BrushPack, BindParamMapFindsOrWiresTheMap) {
     for (const nlohmann::json& n : layer["nodes"]) {
         if (n["name"] == "noise") EXPECT_EQ(n["params"]["amplitude"]["guide"], "wild");
     }
+
+    // A param naming its map (Interpolate's regionMap, New Map > For > Interpolation regions): the
+    // map's name in it, whatever its kind; a name of no map refused.
+    EXPECT_STREQ(paintableSetting("regions")->param, "regionMap");
+    b = bindParamMap("", none, nullptr, 7, "interpolate", "regionMap");
+    EXPECT_EQ(b.map, "interpolate_regionMap");
+    EXPECT_EQ(b.kind, "vertices");
+    for (const nlohmann::json& n : nlohmann::json::parse(b.graphJson)["nodes"]) {
+        if (n["name"] == "interpolate") EXPECT_EQ(n["params"]["regionMap"], "interpolate_regionMap");
+    }
+    EXPECT_EQ(paramMapOf(b.graphJson, b.maps, nullptr, "interpolate", "regionMap").map, "interpolate_regionMap");
+    const nlohmann::json tubes = nlohmann::json::parse(wireParamMap("", none, "interpolate", "regionMap", "tubes", "guides"));
+    for (const nlohmann::json& n : tubes["nodes"]) {
+        if (n["name"] == "interpolate") EXPECT_EQ(n["params"]["regionMap"], "tubes");
+    }
+    EXPECT_EQ(paramMapOf("", none, nullptr, "interpolate", "regionMap").map, "") << "none yet";
+    EXPECT_THROW(paramMapOf(R"({"nodes": [{"name": "i", "type": "Interpolate", "params": {"regionMap": "gone"}}]})", none, nullptr, "i",
+                            "regionMap"),
+                 std::runtime_error);
 }
 
 // The new flow end to end on a session: the map made, linked and picked in one undo step; strokes

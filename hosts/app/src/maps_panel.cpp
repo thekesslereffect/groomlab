@@ -45,6 +45,7 @@ QString qs(const std::string& s) { return QString::fromStdString(s); }
 constexpr int kKindRole = Qt::UserRole + 1;
 constexpr int kChannelsRole = Qt::UserRole + 2;
 constexpr int kMissingRole = Qt::UserRole + 3;  // a texture map's expected image when it is missing
+constexpr int kSettingKindRole = Qt::UserRole + 4;  // New Map > For: where a setting's map lives by default
 
 RoundButton* actionButton(const QString& text, const QColor& fill, const QColor& textColor, QWidget* parent) {
     auto* b = new RoundButton(parent);
@@ -607,6 +608,7 @@ void MapsPanel::refreshTargets() {
             const int row = newFor_->count() - 1;
             newFor_->setItemData(row, node.empty() ? tr("Add a %1 node first").arg(QString::fromUtf8(s.type)) : QString::fromUtf8(s.hint),
                                  Qt::ToolTipRole);
+            newFor_->setItemData(row, QString::fromUtf8(s.kind), kSettingKindRole);
             if (node.empty()) newFor_->setItemData(row, 0, Qt::UserRole - 1);  // disabled: the graph has none
         }
         if (document_) {
@@ -638,12 +640,17 @@ void MapsPanel::targetChanged() {
         if (QWidget* label = form->labelForField(newOther_)) label->setVisible(other);
     }
     const bool forSetting = !newMapTarget().first.empty();
-    // A setting's map is named for it (<node>_<param>), gray, and lives on the scalp.
+    // A setting's map is named for it (<node>_<param>), gray, and lives on the scalp unless picked
+    // otherwise (the regions: on the guides, a value a group of guides: PaintableSetting::kind).
     newName_->setEnabled(!forSetting);
     newColor_->setEnabled(!forSetting && newKind_->currentData().toString() != QStringLiteral("guides"));
     if (forSetting) {
         newColor_->setChecked(false);
-        if (newKind_->currentData().toString() == QStringLiteral("guides")) newKind_->setCurrentIndex(newKind_->findData(QStringLiteral("vertices")));
+        const QString settingKind = newFor_->currentData(kSettingKindRole).toString();
+        const QString wanted = settingKind.isEmpty() ? QStringLiteral("vertices") : settingKind;
+        if (wanted == QStringLiteral("guides") || newKind_->currentData().toString() == QStringLiteral("guides")) {
+            newKind_->setCurrentIndex(std::max(0, newKind_->findData(wanted)));
+        }
     }
     newValue_->setEnabled(!forSetting);
 }

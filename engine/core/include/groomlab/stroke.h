@@ -284,6 +284,9 @@ struct PaintableSetting {
     const char* type;   // the node type
     const char* param;
     const char* hint;   // what painting it does
+    // Where its new map lives unless picked otherwise: "vertices" (the scalp's), or "guides" (the
+    // regions: a value a group of guides). Every host's New Map > For starts on it.
+    const char* kind = "vertices";
 };
 const std::vector<PaintableSetting>& paintableSettings();
 const PaintableSetting* paintableSetting(const std::string& id);  // null for no such id

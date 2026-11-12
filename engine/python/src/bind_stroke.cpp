@@ -438,6 +438,7 @@ void bindStroke(py::module_& m) {
                 d["type"] = s.type;
                 d["param"] = s.param;
                 d["hint"] = s.hint;
+                d["kind"] = s.kind;
                 out.append(d);
             }
             return out;

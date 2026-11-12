@@ -831,8 +831,11 @@ class NewMapDialog(QtWidgets.QDialog):
         self.target.setObjectName("newMapFor")
         self.target.addItem("Nothing yet (a blank map)", None)
         model = self.target.model()
+        self.setting_kinds = {}  # node.param -> where a setting's new map lives by default
         for s in settings:
             self.target.addItem("Setting: %s" % s["label"], "%s.%s" % (s["node"], s["param"]) if s["node"] else None)
+            if s["node"]:
+                self.setting_kinds["%s.%s" % (s["node"], s["param"])] = s.get("kind", "vertices")
             row = self.target.count() - 1
             self.target.setItemData(row, s["hint"], QtCore.Qt.ToolTipRole)
             if not s["node"]:
@@ -908,12 +911,14 @@ class NewMapDialog(QtWidgets.QDialog):
         self.other.setVisible(target == "other")
         self.other_label.setVisible(target == "other")
         for_setting = target is not None
-        # A setting's map is named for it (<node>_<param>), gray, on the scalp's vertices unless picked otherwise.
+        # A setting's map is named for it (<node>_<param>), gray, on the scalp's vertices unless picked
+        # otherwise (the regions: on the guides, a value a group of guides).
         self.name.setEnabled(not for_setting)
         if for_setting:
             self.values_box.setCurrentIndex(0)
-            if self.kind.currentData() == "guides":
-                self.kind.setCurrentIndex(1)
+            wanted = self.setting_kinds.get(target, "vertices")
+            if wanted == "guides" or self.kind.currentData() == "guides":
+                self.kind.setCurrentIndex(max(0, self.kind.findData(wanted)))
         self._kind_changed()
 
     def _kind_changed(self, *_):

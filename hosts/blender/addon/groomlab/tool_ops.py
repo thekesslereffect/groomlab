@@ -850,6 +850,17 @@ _OTHER_ITEMS = []
 FOR_TIP = defs.get("lists/maps/forTip")
 
 
+_TARGET_KINDS = {}  # New Map's For: where each setting's map lives by default (the regions: on the guides)
+
+
+def _target_changed(self, context):
+    """A setting picked: its map's kind (core PaintableSetting::kind), unless it is any setting's
+    vertices and another kind was picked by hand."""
+    wanted = _TARGET_KINDS.get(self.target, "vertices")
+    if wanted == "guides" or self.kind == "guides":
+        self.kind = wanted
+
+
 def _target_items(self, context):
     """New Map's For: nothing (a blank map), the common settings the graph has a node for, Other."""
     _TARGET_ITEMS[:] = [("NONE", "Nothing yet (a blank map)", "A blank map, named as you like")]
@@ -861,7 +872,9 @@ def _target_items(self, context):
             settings, others = [], []
         for s in settings:
             if s["node"]:
-                _TARGET_ITEMS.append(("%s.%s" % (s["node"], s["param"]), "Setting: %s" % s["label"], s["hint"]))
+                key = "%s.%s" % (s["node"], s["param"])
+                _TARGET_ITEMS.append((key, "Setting: %s" % s["label"], s["hint"]))
+                _TARGET_KINDS[key] = s.get("kind") or "vertices"
         if others:
             _TARGET_ITEMS.append(("OTHER", "Other setting...", "Any mappable param of the graph"))
     return _TARGET_ITEMS
@@ -885,7 +898,7 @@ class GROOMLAB_OT_map_new(GroomToolOperator):
     bl_label = "New Map"
     bl_options = {"REGISTER", "UNDO"}
 
-    target: EnumProperty(name="For", items=_target_items, description=FOR_TIP)
+    target: EnumProperty(name="For", items=_target_items, description=FOR_TIP, update=_target_changed)
     other: EnumProperty(name="Setting", items=_other_items, description="Every mappable param of the graph")
     name: StringProperty(name="Name", default="mask", description="Letters, digits and _ (not starting with a digit)")
     kind: EnumProperty(name=defs.get("choices/mapKind")["label"], items=defs.enum_items("mapKind"), default="vertices")
@@ -931,8 +944,9 @@ class GROOMLAB_OT_map_new(GroomToolOperator):
         faces = groom.selected_faces(scalp)
         try:
             if target:
-                # A setting's map lives on the scalp (vertices or a texture).
-                kind = self.kind if self.kind in ("vertices", "texture") else "vertices"
+                # A setting's map: on the scalp (vertices or a texture), or on the guides (the regions'
+                # default: a value a group of guides).
+                kind = self.kind if self.kind in ("vertices", "texture", "guides") else "vertices"
                 r = tools.map_for_param(scalp, target[0], target[1], kind=kind, resolution=int(self.resolution), faces=faces)
                 tools.pick(context, "paint")
                 on = " (white on the %d selected faces)" % len(faces) if faces and r.get("made") else ""

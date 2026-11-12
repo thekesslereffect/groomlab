@@ -3435,7 +3435,7 @@ json toolCatalogJson() {
     // What New Map > For offers first (stroke.h paintableSettings): the node type and its param.
     json paintable = json::array();
     for (const PaintableSetting& p : paintableSettings()) {
-        paintable.push_back({{"id", p.id}, {"label", p.label}, {"type", p.type}, {"param", p.param}, {"hint", p.hint}});
+        paintable.push_back({{"id", p.id}, {"label", p.label}, {"type", p.type}, {"param", p.param}, {"hint", p.hint}, {"kind", p.kind}});
     }
     return {{"tools", tools}, {"categories", categories}, {"settings", settings}, {"paintable", paintable}};
 }
