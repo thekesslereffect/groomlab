@@ -45,6 +45,7 @@
 #include <maya/MTime.h>
 
 #include "groomlab/display.h"
+#include "groomlab/drive_guides.h"
 #include "groomlab/groom_file.h"
 #include "groomlab/graph_io.h"
 #include "groomlab/paths.h"
@@ -828,24 +829,36 @@ GuidesPtr toGuides(const std::vector<GuideCurveData>& curves, const ScalpMesh* s
     return guides;
 }
 
-GuidesPtr toDrivers(const std::vector<GuideCurveData>& curves) {
+GuidesPtr toDrivers(const std::vector<GuideCurveData>& curves, const std::map<unsigned, double>& twist) {
     auto drivers = std::make_shared<GuideSet>();
     for (const GuideCurveData& c : curves) {
         std::vector<Vec3f> pts = sampleCurveData(c.curve, kGuideCurveSamples);
-        if (pts.size() >= 2) drivers->add(c.id, std::move(pts));
+        if (pts.size() < 2) continue;
+        const auto t = twist.find(c.id);
+        const double degrees = t == twist.end() ? 0.0 : t->second;
+        Guide& d = drivers->add(c.id, std::move(pts));
+        if (degrees != 0.0) d.pointAttributes[kDriverTwistLayer] = driverTwistLayer(d.points, degrees);
     }
     return drivers->empty() ? nullptr : GuidesPtr(drivers);
 }
 
 GuidesPtr driverCurvesFromNode(const MObject& node) {
-    MPlug plug = MFnDependencyNode(node).findPlug("driverCurves", true);
+    const MFnDependencyNode fn(node);
+    MPlug plug = fn.findPlug("driverCurves", true);
     std::vector<GuideCurveData> curves;
     const unsigned count = plug.evaluateNumElements();
     for (unsigned i = 0; i < count; ++i) {
         MPlug element = plug.elementByPhysicalIndex(i);
         curves.push_back({element.logicalIndex(), element.asMObject()});
     }
-    return toDrivers(curves);
+    std::map<unsigned, double> twist;
+    MPlug twistPlug = fn.findPlug("driverTwist", true);
+    const unsigned twists = twistPlug.isNull() ? 0 : twistPlug.evaluateNumElements();
+    for (unsigned i = 0; i < twists; ++i) {
+        MPlug element = twistPlug.elementByPhysicalIndex(i);
+        twist[element.logicalIndex()] = element.asDouble();
+    }
+    return toDrivers(curves, twist);
 }
 
 struct GuideCacheReader {

@@ -40,6 +40,7 @@
 #include "groom_shape.h"
 #include "groomlab/card_files.h"
 #include "groomlab/display.h"
+#include "groomlab/drive_guides.h"
 #include "groomlab/export_view.h"
 #include "groomlab/feathers.h"
 #include "groomlab/gltf_writer.h"
@@ -357,6 +358,20 @@ MStatus guidesAtFrame(const char* command, const MObject& node, const MString& g
         if (drivers) {  // the curves exactly as the groom samples them (driverCurvesFromNode): the farm drives the same
             const GuidesPtr curves = driverCurvesFromNode(node);
             *out = curves ? toCurves(*curves) : StrandSet{};
+            // Their twist as a point channel on every frame (0 where none: the first frame decides
+            // what the file carries, and a rig's twist may start at 0), read back as the layer.
+            if (curves) {
+                std::vector<float>& channel = out->addPointChannel(kDriverTwistLayer, 0.0f);
+                std::size_t s = 0;
+                for (const Guide& g : curves->guides()) {
+                    if (g.points.size() < 2) continue;
+                    const auto it = g.pointAttributes.find(kDriverTwistLayer);
+                    if (it != g.pointAttributes.end() && it->second.size() == g.points.size()) {
+                        std::copy(it->second.begin(), it->second.end(), channel.begin() + static_cast<std::ptrdiff_t>(out->strandBegin(s)));
+                    }
+                    ++s;
+                }
+            }
             return MS::kSuccess;
         }
         if (poses) {
@@ -418,6 +433,7 @@ MStatus ExportAlembicCmd::doIt(const MArgList& args) {
             options.pointsPerStrand = static_cast<std::size_t>(points);
         }
         options.vertexUVs = db.isFlagSet("-vuv");
+        options.pointChannels = options.pointChannels || db.isFlagSet(kDriverCurvesFlag);  // the drivers' twist
         const bool adjusted = options.scale != 1.0f || options.pointsPerStrand != 0 || options.vertexUVs;
 
         std::size_t strandTotal = 0;

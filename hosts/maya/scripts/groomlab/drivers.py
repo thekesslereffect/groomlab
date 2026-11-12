@@ -14,6 +14,10 @@ every other guide stays as groomed. A Simulate after the DriveGuides node plays 
     detach_guides(groom, guides=[12, 13])                   # those stay as groomed again
     bind_drivers(groom, frame=0)                            # bind again after changing the rig's rest pose
 
+Each driver's transform gets a keyable "twist" (degrees at its tip, none at its root): turning a
+curve about its own length cannot be seen in its points, so key it or drive it from the rig
+(connect a joint's rotateX). The guides round the driver turn with its twist since the bind.
+
 Attaching connects the curve, adds the DriveGuides node right after the Guides node when there is
 none, and binds the drivers at the bind frame (the attachments are kept when binding again).
 """
@@ -54,6 +58,21 @@ def driver_curves(groom):
     return out
 
 
+TWIST = "twist"
+
+
+def _connect_twist(groom, shape, index):
+    """The curve's transform gets a keyable "twist" (degrees at its tip, none at its root: a curve
+    cannot show a turn about itself), connected to the groom's driverTwist[index]: key it, or
+    drive it from the rig (a joint's rotateX)."""
+    transform = cmds.listRelatives(shape, parent=True, fullPath=True)[0]
+    if not cmds.attributeQuery(TWIST, node=transform, exists=True):
+        cmds.addAttr(transform, longName=TWIST, attributeType="double", defaultValue=0.0, keyable=True)
+    if not cmds.attributeQuery("driverTwist", node=groom, exists=True):
+        return  # a plugin from before twist
+    cmds.connectAttr(transform + "." + TWIST, "%s.driverTwist[%d]" % (groom, index), force=True)
+
+
 @undoable("add drivers")
 def add_drivers(groom, curves, wire=True):
     """Connect `curves` (transforms or nurbsCurve shapes) as the groom's driver curves (each one's
@@ -72,6 +91,7 @@ def add_drivers(groom, curves, wire=True):
         while index in used:
             index += 1
         cmds.connectAttr(shape + ".worldSpace[0]", "%s.driverCurves[%d]" % (groom, index), force=True)
+        _connect_twist(groom, shape, index)
         used.add(index)
         have.add(shape)
     if not wire:
@@ -260,9 +280,11 @@ def remove_drivers(groom, curves=None):
     for d in driver_curves(groom):
         if wanted is not None and d["curve"] not in wanted:
             continue
-        plug = "%s.driverCurves[%d]" % (groom, d["index"])
-        for source in cmds.listConnections(plug, source=True, destination=False, plugs=True) or []:
-            cmds.disconnectAttr(source, plug)
+        for plug in ("%s.driverCurves[%d]" % (groom, d["index"]), "%s.driverTwist[%d]" % (groom, d["index"])):
+            if not cmds.objExists(plug):
+                continue
+            for source in cmds.listConnections(plug, source=True, destination=False, plugs=True) or []:
+                cmds.disconnectAttr(source, plug)
         count += 1
     return count
 

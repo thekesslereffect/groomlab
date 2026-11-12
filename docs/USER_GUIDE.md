@@ -670,8 +670,8 @@ bind frame, with their pivot at the root, attached and bound already
   `rootStiffness` and its profile set how closely it sticks to the animation.
 - **Follow Scalp** works with drivers: a driver moving with the head drives nothing; only its motion
   against the head does.
-- Drivers do not carry twist yet: a driver spun about its own length does not turn the hair round
-  it.
+- **Twist:** each driver's transform has a keyable `twist` (degrees at its tip, none at its root):
+  key it or connect a joint's `rotateX`; the guides round the driver turn with it.
 
 ### Other simulators
 

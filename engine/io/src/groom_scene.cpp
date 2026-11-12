@@ -5,6 +5,7 @@
 #include <cmath>
 
 #include "groomlab/alembic_io.h"
+#include "groomlab/drive_guides.h"
 #include "groomlab/frame_time.h"
 #include "groomlab/groom_package.h"
 #include "groomlab/sim_cache.h"
@@ -16,12 +17,18 @@ namespace {
 // The time's inputs into the session: the cached scalp, its history for Jiggle, the guide
 // cache's poses, the driver cache's curves (evaluate and view share it, so a view sees what a render sees; a simulation
 // steps over other frames with the same).
-GuidesPtr curvesAt(const AlembicCurvesReader& cache, double seconds) {
+GuidesPtr curvesAt(const AlembicCurvesReader& cache, double seconds, const char* layer = nullptr) {
     const StrandSet curves = cache.at(seconds);
     auto out = std::make_shared<GuideSet>();
+    const std::vector<float>* channel = layer ? curves.pointChannel(layer) : nullptr;
     for (std::size_t s = 0; s < curves.strandCount(); ++s) {
         const Vec3f* p = curves.strandPoints(s);
-        out->add(curves.ids()[s], std::vector<Vec3f>(p, p + curves.strandPointCount(s)));
+        Guide& g = out->add(curves.ids()[s], std::vector<Vec3f>(p, p + curves.strandPointCount(s)));
+        if (channel) {
+            const auto begin = channel->begin() + static_cast<std::ptrdiff_t>(curves.strandBegin(s));
+            std::vector<float> values(begin, begin + static_cast<std::ptrdiff_t>(curves.strandPointCount(s)));
+            if (std::any_of(values.begin(), values.end(), [](float v) { return v != 0.0f; })) g.pointAttributes[layer] = std::move(values);
+        }
     }
     return out;
 }
@@ -36,7 +43,7 @@ void feedTime(GroomSession& session, GroomScene& scene, const AlembicCurvesReade
                                                  session.scalpHistoryLoopFrames(secondsToFrame(seconds, session.framesPerSecond()),
                                                                                 viewNode, where)));
     if (guideCache) session.setGuidePoses(curvesAt(*guideCache, seconds));
-    if (driverCache) session.setDrivers(curvesAt(*driverCache, seconds));  // the rig's pose then
+    if (driverCache) session.setDrivers(curvesAt(*driverCache, seconds, kDriverTwistLayer));  // the rig's pose then
 }
 
 }  // namespace

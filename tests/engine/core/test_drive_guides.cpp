@@ -75,6 +75,35 @@ TEST(DriveGuides, DriversAsBoundLeaveTheGuidesAsTheyAre) {
     }
 }
 
+TEST(DriveGuides, AGuideTurnsRoundItsDriverAsTheDriverTwists) {
+    // The driver as bound but twisted 90 degrees at its tip (none at its root): a guide beside it
+    // at +x is carried a quarter turn round it at the tip, half that halfway, its length kept off
+    // the driver; the bind's own twist is the zero.
+    GuideSet bound = upright();
+    GuideSet now = bound;
+    now.guides()[0].pointAttributes[kDriverTwistLayer] = driverTwistLayer(now.guides()[0].points, 90.0);
+    const StrandSet curves = besides({0.1f});
+    const StrandSet out = drive(curves, bound, now);
+    const Vec3f tip = out.strandPoints(0)[10];
+    EXPECT_NEAR(tip.y, 1.0f, 1e-4f);
+    EXPECT_NEAR(std::abs(tip.z), 0.1f, 2e-3f) << "a quarter turn round the driver at the tip";
+    EXPECT_NEAR(tip.x, 0.0f, 2e-3f);
+    const Vec3f mid = out.strandPoints(0)[5];
+    EXPECT_NEAR(std::atan2(std::abs(mid.z), mid.x), 3.14159265f / 4.0f, 0.02f) << "half of it halfway";
+    EXPECT_NEAR(Vec3f(mid.x, 0, mid.z).length(), 0.1f, 1e-3f);
+    // Bound with that twist already: no turn.
+    bound = now;
+    const StrandSet same = drive(curves, bound, now);
+    EXPECT_LT((same.strandPoints(0)[10] - curves.strandPoints(0)[10]).length(), 1e-5f);
+    // The twist goes through the bind's JSON.
+    DriverBind bind;
+    bind.drivers = now;
+    const DriverBind back = DriverBind::fromJson(bind.toJson());
+    ASSERT_TRUE(back.drivers.guides()[0].pointAttributes.count(kDriverTwistLayer));
+    EXPECT_EQ(back.drivers.guides()[0].pointAttributes.at(kDriverTwistLayer),
+              now.guides()[0].pointAttributes.at(kDriverTwistLayer));
+}
+
 TEST(DriveGuides, AGuideTurnsWithItsDriverItsRootStaying) {
     // The driver swung 40 degrees about its root: every point of a guide beside it but its root
     // where the same swing takes it.

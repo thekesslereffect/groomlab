@@ -154,6 +154,7 @@ MObject GroomShape::aGuideCache;
 MObject GroomShape::aGuideCacheObject;
 MObject GroomShape::aGuideCurves;
 MObject GroomShape::aDriverCurves;
+MObject GroomShape::aDriverTwist;
 MObject GroomShape::aDriverBind;
 MObject GroomShape::aTime;
 MObject GroomShape::aSimCaches;
@@ -505,7 +506,7 @@ void GroomShape::markDirty(const MPlug& plug) {
     if (plug == aColliderMeshes || plug == aColliderMesh || plug == aColliderName || plug == aColliderRestMesh) live_.collidersDirty = true;
     if (plug == aExtraScalps || plug == aExtraScalpMesh || plug == aExtraScalpName || plug == aExtraScalpRestMesh) live_.scalpsDirty = true;
     if (plug == aGuideCurves) live_.curvesDirty = true;
-    if (plug == aDriverCurves) live_.driversDirty = true;
+    if (plug == aDriverCurves || plug == aDriverTwist) live_.driversDirty = true;
     for (int i = 0; i < kTextInputs; ++i) {
         if (plug == *textAttribute(i)) textDirty_[i] = true;
     }
@@ -514,7 +515,8 @@ void GroomShape::markDirty(const MPlug& plug) {
 MStatus GroomShape::preEvaluation(const MDGContext& context, const MEvaluationNode& evaluationNode) {
     if (context.isNormal()) {
         for (const MObject* attr : {&aInMesh, &aRestMesh, &aColliderMeshes, &aColliderMesh, &aColliderName, &aColliderRestMesh,
-                                    &aExtraScalps, &aExtraScalpMesh, &aExtraScalpName, &aExtraScalpRestMesh, &aGuideCurves, &aDriverCurves}) {
+                                    &aExtraScalps, &aExtraScalpMesh, &aExtraScalpName, &aExtraScalpRestMesh, &aGuideCurves, &aDriverCurves,
+                                    &aDriverTwist}) {
             MStatus status;
             if (evaluationNode.dirtyPlugExists(*attr, &status) && status) markDirty(MPlug(thisMObject(), *attr));
         }
@@ -718,6 +720,18 @@ MStatus GroomShape::initialize() {
     tAttr.setStorable(false);
     tAttr.setHidden(true);
     tAttr.setDisconnectBehavior(MFnAttribute::kDelete);
+    // Each driver's twist about its own length, degrees at its tip (none at its root), by the
+    // driver's logical index: connected from the curve's "twist" (a curve cannot show it).
+    {
+        MFnNumericAttribute twistAttr;
+        aDriverTwist = twistAttr.create("driverTwist", "gldtw", MFnNumericData::kDouble, 0.0, &status);
+        CHECK_MSTATUS_AND_RETURN_IT(status);
+        twistAttr.setArray(true);
+        twistAttr.setIndexMatters(false);
+        twistAttr.setStorable(false);
+        twistAttr.setHidden(true);
+        twistAttr.setDisconnectBehavior(MFnAttribute::kDelete);
+    }
     {
         MFnStringData bindData;
         aDriverBind = tAttr.create("driverBind", "gldb", MFnData::kString, bindData.create(""), &status);
@@ -1108,7 +1122,7 @@ MStatus GroomShape::initialize() {
     tAttr.setStorable(false);
     tAttr.setHidden(true);
 
-    for (MObject* attr : {&aInMesh, &aRestMesh, &aFollowScalp, &aScalpTopology, &aScaleSource, &aScaleReference, &aScaleTransformReference, &aGroomScale, &aScaleArea, &aScaleTransform, &aColliderMeshes, &aExtraScalps, &aRenderDensity, &aRenderWidthScale, &aRenderLengthScale, &aRenderView, &aSimGuides, &aGuideCache, &aGuideCacheObject, &aSimCaches, &aTransferMarkers, &aGuideCurves, &aDriverCurves, &aDriverBind, &aTime, &aGraph, &aGuideData, &aPartData, &aGraphUi, &aViewNode, &aLocked, &aDisplayInstances, &aGuideSelection, &aSoftSelectRadius, &aStrandColorMode, &aStrandColorSource, &aStrandColorMin, &aStrandColorMax, &aDisplayRibbons, &aRibbonWidthScale, &aDisplayWidthCoverage, &aDisplayCoverageDensity, &aDisplayClumpLod, &aClumpLodError, &aDisplayLighting, &aDisplayShadows, &aDisplayHairShading, &aDisplaySelfShadowing, &aDisplayStrandVariation, &aGuideWidth, &aCorrectiveData, &aCorrectiveWeight, &aSculptData, &aSculptNode, &aFlowData, &aDisplayFlow, &aShotSculpt, &aShotLayer, &aLodDistance, &aLodNear, &aLodFar, &aLodMinDensity,
+    for (MObject* attr : {&aInMesh, &aRestMesh, &aFollowScalp, &aScalpTopology, &aScaleSource, &aScaleReference, &aScaleTransformReference, &aGroomScale, &aScaleArea, &aScaleTransform, &aColliderMeshes, &aExtraScalps, &aRenderDensity, &aRenderWidthScale, &aRenderLengthScale, &aRenderView, &aSimGuides, &aGuideCache, &aGuideCacheObject, &aSimCaches, &aTransferMarkers, &aGuideCurves, &aDriverCurves, &aDriverTwist, &aDriverBind, &aTime, &aGraph, &aGuideData, &aPartData, &aGraphUi, &aViewNode, &aLocked, &aDisplayInstances, &aGuideSelection, &aSoftSelectRadius, &aStrandColorMode, &aStrandColorSource, &aStrandColorMin, &aStrandColorMax, &aDisplayRibbons, &aRibbonWidthScale, &aDisplayWidthCoverage, &aDisplayCoverageDensity, &aDisplayClumpLod, &aClumpLodError, &aDisplayLighting, &aDisplayShadows, &aDisplayHairShading, &aDisplaySelfShadowing, &aDisplayStrandVariation, &aGuideWidth, &aCorrectiveData, &aCorrectiveWeight, &aSculptData, &aSculptNode, &aFlowData, &aDisplayFlow, &aShotSculpt, &aShotLayer, &aLodDistance, &aLodNear, &aLodFar, &aLodMinDensity,
                           &aLodWidthCompensation, &aCameraCull, &aCullMargin, &aBackfaceCull, &aBackfaceAngle, &aDisplayColor, &aUseMaterialColor, &aSculptDisplay, &aSculptDensity, &aIsolateGroup, &aGuideColorMode, &aGuideColorLayer, &aGuidePoints, &aGuideSmoothing, &aHiddenGuideGroups, &aGuideGroupColors, &aRenderMode, &aGroomFile, &aPreviewDensity, &aPreviewPointBudget, &aDisplayGuides, &aDisplayHair,
                           &aDisplayTubes, &aBrushTick, &aCardDensity, &aOutCards, &aOutRachis, &aOutMesh, &aDisplayCards, &aDisplayMesh, &aDisplayCardTextures, &aDisplayOverlaysOnTop, &aCardMaps, &aScalpMaps, &aScalpMapDisplay, &aScalpMapChannel, &aOutStrandCount, &aLastError, &aOutVrayPluginData, &aOutFrame}) {
         CHECK_MSTATUS_AND_RETURN_IT(addAttribute(*attr));
@@ -1119,14 +1133,14 @@ MStatus GroomShape::initialize() {
     for (MObject* input : {&aInMesh, &aRestMesh, &aFollowScalp, &aScalpTopology, &aScaleSource, &aScaleReference,
                            &aScaleTransformReference, &aColliderMeshes, &aColliderMesh, &aColliderName, &aColliderRestMesh,
                            &aExtraScalps, &aExtraScalpMesh, &aExtraScalpName, &aExtraScalpRestMesh, &aSimGuides, &aSimCurve,
-                           &aSimGuideId, &aGuideCache, &aGuideCacheObject, &aSimCaches, &aGuideCurves, &aDriverCurves, &aDriverBind, &aTime, &aGraph,
+                           &aSimGuideId, &aGuideCache, &aGuideCacheObject, &aSimCaches, &aGuideCurves, &aDriverCurves, &aDriverTwist, &aDriverBind, &aTime, &aGraph,
                            &aGuideData, &aCorrectiveData, &aCorrectiveWeight, &aSculptData, &aSculptNode, &aFlowData,
                            &aPartData, &aScalpMaps, &aRenderDensity, &aRenderWidthScale, &aRenderLengthScale, &aRenderMode,
                            &aGroomFile}) {
         CHECK_MSTATUS_AND_RETURN_IT(attributeAffects(*input, aOutVrayPluginData));
     }
     for (MObject* input : {&aInMesh, &aRestMesh, &aFollowScalp, &aScalpTopology, &aScaleSource, &aScaleReference, &aScaleTransformReference, &aColliderMeshes, &aColliderMesh, &aColliderName, &aColliderRestMesh,
-                           &aExtraScalps, &aExtraScalpMesh, &aExtraScalpName, &aExtraScalpRestMesh, &aSimGuides, &aSimCurve, &aSimGuideId, &aGuideCache, &aGuideCacheObject, &aSimCaches, &aGuideCurves, &aDriverCurves, &aDriverBind, &aTime, &aGraph, &aGuideData, &aCorrectiveData, &aCorrectiveWeight, &aSculptData, &aSculptNode, &aFlowData, &aPartData, &aPreviewDensity, &aPreviewPointBudget, &aRenderView, &aSculptDensity, &aViewNode, &aBrushTick, &aCardDensity, &aDisplayCards, &aDisplayMesh, &aCardMaps, &aScalpMaps}) {
+                           &aExtraScalps, &aExtraScalpMesh, &aExtraScalpName, &aExtraScalpRestMesh, &aSimGuides, &aSimCurve, &aSimGuideId, &aGuideCache, &aGuideCacheObject, &aSimCaches, &aGuideCurves, &aDriverCurves, &aDriverTwist, &aDriverBind, &aTime, &aGraph, &aGuideData, &aCorrectiveData, &aCorrectiveWeight, &aSculptData, &aSculptNode, &aFlowData, &aPartData, &aPreviewDensity, &aPreviewPointBudget, &aRenderView, &aSculptDensity, &aViewNode, &aBrushTick, &aCardDensity, &aDisplayCards, &aDisplayMesh, &aCardMaps, &aScalpMaps}) {
         CHECK_MSTATUS_AND_RETURN_IT(attributeAffects(*input, aOutStrandCount));
         CHECK_MSTATUS_AND_RETURN_IT(attributeAffects(*input, aLastError));
         CHECK_MSTATUS_AND_RETURN_IT(attributeAffects(*input, aOutCards));
@@ -1552,13 +1566,19 @@ MStatus GroomShape::evaluate(MDataBlock& data, Lane& lane) {
     for (unsigned i = 0; i < driverHandles.elementCount(); ++i, driverHandles.next()) {
         driverCurves.push_back({driverHandles.elementIndex(), driverHandles.inputValue().asNurbsCurve()});
     }
+    std::map<unsigned, double> driverTwist;  // degrees at the tip, by driver ID
+    MArrayDataHandle twistHandles = data.inputArrayValue(aDriverTwist);
+    for (unsigned i = 0; i < twistHandles.elementCount(); ++i, twistHandles.next()) {
+        driverTwist[twistHandles.elementIndex()] = twistHandles.inputValue().asDouble();
+    }
     if (lane.driversDirty || !lane.drivers) {
         std::uint64_t key = hash64(0xD71E);
         for (const GuideCurveData& c : driverCurves) key = curveFingerprint(hashCombine(key, c.id), c.curve);
+        for (const auto& [id, degrees] : driverTwist) key = hashFloat(hashCombine(key, id), static_cast<float>(degrees));
         lane.driversDataKey = key;
     }
     if (!lane.drivers || lane.driversDataKey != lane.driversKey) {
-        lane.drivers = toDrivers(driverCurves);
+        lane.drivers = toDrivers(driverCurves, driverTwist);
         lane.driversKey = lane.driversDataKey;
     }
     lane.driversDirty = false;
@@ -2107,7 +2127,7 @@ MStatus GroomShape::setDependentsDirty(const MPlug& plug, MPlugArray& affected) 
         plug == aColliderMesh ||
         plug == aColliderName || plug == aColliderRestMesh || plug == aExtraScalps || plug == aExtraScalpMesh ||
         plug == aExtraScalpName || plug == aExtraScalpRestMesh || plug == aSimGuides || plug == aSimCurve || plug == aGuideCache ||
-        plug == aGuideCacheObject || plug == aSimCaches || plug == aGuideCurves || plug == aDriverCurves || plug == aDriverBind || plug == aTime || plug == aGraph || plug == aGuideData ||
+        plug == aGuideCacheObject || plug == aSimCaches || plug == aGuideCurves || plug == aDriverCurves || plug == aDriverTwist || plug == aDriverBind || plug == aTime || plug == aGraph || plug == aGuideData ||
         plug == aPartData || plug == aFlowData || plug == aCorrectiveData || plug == aCorrectiveWeight || plug == aViewNode ||
         plug == aSculptData || plug == aSculptNode ||
         plug == aSculptDensity || plug == aPreviewDensity || plug == aPreviewPointBudget || plug == aRenderView || plug == aCardDensity ||

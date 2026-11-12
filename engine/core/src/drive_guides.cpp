@@ -68,6 +68,24 @@ Closest closestOn(const std::vector<Vec3f>& line, const Vec3f& p) {
     return best;
 }
 
+// Frames turned about their tangents by `angle[k]` (radians) each.
+void twistFrames(std::vector<Frame>& frames, const std::vector<float>& angle) {
+    for (std::size_t k = 0; k < frames.size() && k < angle.size(); ++k) {
+        if (angle[k] == 0.0f) continue;
+        const float c = std::cos(angle[k]), s = std::sin(angle[k]);
+        Frame& f = frames[k];
+        const Vec3f n = f.normal, b = f.binormal;
+        f.normal = n * c + b * s;
+        f.binormal = b * c - n * s;
+    }
+}
+
+// A driver's twist layer (empty: none) when it has one per point.
+const std::vector<float>* twistOf(const Guide& driver) {
+    const auto it = driver.pointAttributes.find(kDriverTwistLayer);
+    return it != driver.pointAttributes.end() && it->second.size() == driver.points.size() ? &it->second : nullptr;
+}
+
 Vec3f along(const std::vector<Vec3f>& line, std::uint32_t segment, float t) {
     return line[segment] + (line[segment + 1] - line[segment]) * t;
 }
@@ -104,6 +122,17 @@ GuidesPtr carried(const GuidesPtr& drivers, const ScalpMesh* from, const ScalpMe
 
 }  // namespace
 
+std::vector<float> driverTwistLayer(const std::vector<Vec3f>& points, double degrees) {
+    std::vector<float> out(points.size(), 0.0f);
+    if (points.size() < 2 || degrees == 0.0) return out;
+    std::vector<double> lengths(points.size(), 0.0);
+    for (std::size_t k = 1; k < points.size(); ++k) lengths[k] = lengths[k - 1] + (points[k] - points[k - 1]).length();
+    const double total = lengths.back() > 0.0 ? lengths.back() : 1.0;
+    const double radians = degrees * 3.14159265358979323846 / 180.0;
+    for (std::size_t k = 0; k < points.size(); ++k) out[k] = static_cast<float>(radians * lengths[k] / total);
+    return out;
+}
+
 std::string DriverBind::toJson() const {
     json list = json::array();
     for (const Guide& d : drivers.guides()) {
@@ -113,7 +142,11 @@ std::string DriverBind::toJson() const {
             points.push_back(p.y);
             points.push_back(p.z);
         }
-        list.push_back({{"id", d.id}, {"face", d.root.face}, {"u", d.root.u}, {"v", d.root.v}, {"points", std::move(points)}});
+        json entry{{"id", d.id}, {"face", d.root.face}, {"u", d.root.u}, {"v", d.root.v}, {"points", std::move(points)}};
+        if (const std::vector<float>* twist = twistOf(d)) {
+            if (std::any_of(twist->begin(), twist->end(), [](float t) { return t != 0.0f; })) entry["twist"] = *twist;
+        }
+        list.push_back(std::move(entry));
     }
     json out{{"frame", frame}, {"drivers", std::move(list)}};
     if (!attached.empty()) {
@@ -141,6 +174,10 @@ DriverBind DriverBind::fromJson(const std::string& text) {
             g.root.face = d.value("face", -1);
             g.root.u = d.value("u", 0.0f);
             g.root.v = d.value("v", 0.0f);
+            if (d.contains("twist")) {
+                std::vector<float> twist = d.at("twist").get<std::vector<float>>();
+                if (twist.size() == g.points.size()) g.pointAttributes[kDriverTwistLayer] = std::move(twist);
+            }
         }
         const json attached = root.value("attached", json::object());
         for (auto it = attached.begin(); it != attached.end(); ++it) {
@@ -189,6 +226,7 @@ DriverBind bindDrivers(const GuideSet& drivers, const ScalpMesh* scalp, int fram
     for (const Guide& d : drivers.guides()) {
         if (d.points.size() < 2) continue;
         Guide& g = bind.drivers.add(d.id, d.points);
+        if (const std::vector<float>* twist = twistOf(d)) g.pointAttributes[kDriverTwistLayer] = *twist;
         if (!onScalp) continue;
         std::vector<Vec3f> moved = d.points;
         g.root = rootRigidly(moved, *scalp);  // the anchor alone: the driver itself stays put
@@ -322,6 +360,16 @@ void driveCurves(StrandSet& curves, const DriveBinding& binding, const GuideSet&
         boundFrames(was.points, bf);
         if (moved) {
             currentFrames(*lines[d], bf, frames[d]);
+            // Its twist since the bind turns the frames about it (the guides round it with them).
+            const std::vector<float>* twistNow = twistOf(now.guides()[it->second]);
+            const std::vector<float>* twistWas = twistOf(was);
+            if (twistNow || twistWas) {
+                std::vector<float> turn(was.points.size(), 0.0f);
+                for (std::size_t k = 0; k < turn.size(); ++k) {
+                    turn[k] = (twistNow ? (*twistNow)[k] : 0.0f) - (twistWas ? (*twistWas)[k] : 0.0f);
+                }
+                twistFrames(frames[d], turn);
+            }
         } else {
             frames[d] = std::move(bf);
         }

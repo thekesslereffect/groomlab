@@ -109,7 +109,8 @@ std::vector<Vec3f> sampleCurveData(const MObject& curveData, unsigned samples = 
 GuidesPtr toGuides(const std::vector<GuideCurveData>& curves, const ScalpMesh* scalp);
 // Driver curves (driverCurves elements) as DriveGuides nodes read them: each sampled evenly by arc
 // length, its ID its logical index, nothing rooted or turned (null when there are none).
-GuidesPtr toDrivers(const std::vector<GuideCurveData>& curves);
+// `twist`: degrees at the tip by driver ID (drive_guides.h kDriverTwistLayer); none: none.
+GuidesPtr toDrivers(const std::vector<GuideCurveData>& curves, const std::map<unsigned, double>& twist = {});
 // The node's driver curves as the current DG context shows them (an MDGContextGuard picks a time).
 GuidesPtr driverCurvesFromNode(const MObject& node);
 

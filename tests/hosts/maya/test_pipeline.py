@@ -877,6 +877,36 @@ class SimulationTest(unittest.TestCase):
         one = strands_bbox(10, "each_swung")  # the hair round that guide swung toward -x
         self.assertTrue(one[0] < before[0] - 0.3 or one[3] < before[3] - 0.3, (one, before))
 
+    def test_a_driver_twist_turns_the_guides_round_it_on_the_farm_too(self):
+        """A driver's "twist" (keyable on its transform, degrees at its tip) turns the guides round
+        it; the driver cache carries it, so the CLI gives Maya's strands exactly."""
+        plane = cmds.polyPlane(width=2, height=2, subdivisionsX=10, subdivisionsY=10)[0]
+        groom = groomlab.create_groom(plane)
+        cmds.setAttr(groom + ".previewDensity", 0.3)
+        groomlab.guides_from_curves(groom, [cmds.curve(degree=1, point=[(x, 0, 0), (x, 0.7, 0), (x, 1.4, 0)])
+                                            for x in (-0.2, 0.2)])
+        made = groomlab.create_drivers(groom, guides=[int(g) for g in groomlab.guide_ids(groom, "primary")])[0]
+        self.assertTrue(cmds.listConnections(made + ".twist", destination=True, source=False))
+        cmds.setKeyframe(made, attribute="twist", time=1, value=0.0)
+        cmds.setKeyframe(made, attribute="twist", time=8, value=90.0)
+
+        def maya_hash(frame, name):
+            out = os.path.join(WORK_DIR, "twist_%s.abc" % name)
+            groomlab.export_alembic(groom, out, start=frame, end=frame, density=0.3)
+            return cli("hash", out).split("hash=")[1].split()[0]  # the frame's strands (not its time)
+
+        cmds.currentTime(8)
+        twisted = maya_hash(8, "maya8")
+        self.assertNotEqual(twisted, maya_hash(1, "maya1"))  # the guides turned round the driver
+        path = os.path.join(WORK_DIR, "twist.groom")
+        groomlab.export_groom(groom, path, start=1, end=8)
+        from_cli = os.path.join(WORK_DIR, "twist_cli.abc")
+        cli("eval", path, "-o", from_cli, "-f", "8", "--density", "0.3")
+        self.assertEqual(cli("hash", from_cli).split("hash=")[1].split()[0], twisted)  # the cache carries the twist
+        cmds.cutKey(made, attribute="twist")
+        cmds.setAttr(made + ".twist", 0.0)
+        self.assertEqual(maya_hash(8, "untwisted"), maya_hash(1, "maya1b"))  # nothing else moves it
+
     def test_rigged_and_simulated_groom_renders_the_same_from_its_groom_file(self):
         """A groom driven by an animated driver curve, a Simulate on top: the groom file carries the
         drivers' animation (<name>.drivers.abc), so the CLI (the farm) gives Maya's strands exactly."""

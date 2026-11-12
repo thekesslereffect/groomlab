@@ -42,6 +42,12 @@ class GuideHierarchy;
 inline constexpr const char* kDriversExternal = "drivers";            // the drivers now
 inline constexpr const char* kDriverBindExternal = "driverBind";      // the drivers as bound
 inline constexpr const char* kDriverAttachExternal = "driverAttach";  // the guides attached
+// A driver's twist about its own length, radians per point (a point layer of the driver: none is
+// none). The guides round it turn with the change of its twist since the bind; a curve alone
+// cannot show a turn about itself, so a host reads it from the rig (Maya: the curve's "twist").
+inline constexpr const char* kDriverTwistLayer = "twist";
+// A driver's twist layer for `degrees` at its tip, none at its root, along its length.
+std::vector<float> driverTwistLayer(const std::vector<Vec3f>& points, double degrees);
 
 // The drivers as bound: each with its ID, its points on the scalp's rest pose and its anchor
 // there (Guide::root: the face the driver rides when the scalp moves; face -1: none, the driver

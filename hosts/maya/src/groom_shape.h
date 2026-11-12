@@ -131,6 +131,7 @@ public:
     static MObject aExtraScalpName;
     static MObject aExtraScalpRestMesh;
     static MObject aGuideCurves;     // array of nurbsCurve (world space)
+    static MObject aDriverTwist;     // array of double: each driver's twist, degrees at its tip (by its index)
     static MObject aDriverCurves;    // array of nurbsCurve (world space): DriveGuides nodes' drivers (drive_guides.h)
     static MObject aDriverBind;      // the drivers as bound (DriverBind's JSON; groomLabDrivers -bind)
     static MObject aTime;            // scene time

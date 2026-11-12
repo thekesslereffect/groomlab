@@ -270,7 +270,10 @@ to at the bind, so a driver that only moves with the head drives nothing.
 (`<name>.drivers.abc`, the file's `driverCache`) whenever driver curves are connected, so the CLI,
 the procedurals and the app drive the hair (and simulate on top) as Maya does, exactly.
 
-Drivers do not carry twist yet: a driver spun about its own length does not turn the hair round it.
+**Twist:** a curve turned about its own length looks the same, so each driver's transform has a
+keyable **twist** (degrees at its tip, none at its root): key it, or connect a joint's `rotateX`
+to it. The guides round the driver turn with its twist since the bind; the driver cache carries it
+to the farm.
 
 ```python
 import groomlab
