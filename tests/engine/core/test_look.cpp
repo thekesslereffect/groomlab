@@ -549,6 +549,37 @@ TEST(Clump, StrandStrengthRandomLetsEachStrandHangLooseItsOwnWay) {
     EXPECT_NEAR(maxDisplacement(*lg.eval(clump), *loose), 0.0f, 1e-6f);  // the same every time (by each strand's ID)
 }
 
+TEST(Clump, LockProfileShapesTheLockAlongItsLength) {
+    // A lock of radius 0.1 round a straight center, every strand all the way in (strength 1 along
+    // it): its strands fill a disk that wide at every point (lockProfile 1, the default); with a
+    // lockProfile tapering from 1 to 0.25 the disk narrows with it, root to tip.
+    auto centers = std::make_shared<GuideSet>();
+    centers->add(1, test::straightCurve({0, 0, 0}, {0, 1, 0}, 8));
+    auto strands = std::make_shared<StrandSet>();
+    for (int k = 0; k < 300; ++k) {
+        const float a = 6.2831853f * static_cast<float>(k) * 0.618034f, r = 0.2f * std::sqrt(static_cast<float>(k % 50) / 50.0f);
+        strands->addStrand(static_cast<StrandId>(k + 1), test::straightCurve({r * std::cos(a), 0, r * std::sin(a)}, {0, 1, 0}, 8));
+    }
+    auto clump = OperatorRegistry::instance().create(op::kClump);
+    clump->params().set("strength", 1.0);
+    clump->params().set("profile", Ramp::constant(1.0f));
+    clump->params().set("centersFrom", std::string("inputCurves"));
+    clump->params().set("lockRadius", 0.1);
+    EvalContext ctx;
+    // The farthest a strand's point i lies from the center (straight up y).
+    auto widest = [&](std::size_t i) {
+        const StrandsPtr out = valueAs<StrandsPtr>(clump->evaluate(ctx, {Value(StrandsPtr(strands)), Value(GuidesPtr(centers))}));
+        float most = 0.0f;
+        for (std::size_t s = 0; s < out->strandCount(); ++s) most = std::max(most, std::hypot(out->strandPoints(s)[i].x, out->strandPoints(s)[i].z));
+        return most;
+    };
+    for (const std::size_t i : {1u, 4u, 8u}) EXPECT_NEAR(widest(i), 0.1f, 0.01f) << "point " << i << ": the lock's radius";
+    clump->params().set("lockProfile", Ramp::linear(1.0f, 0.25f));
+    EXPECT_NEAR(widest(4), 0.1f * 0.625f, 0.008f) << "halfway";
+    EXPECT_NEAR(widest(8), 0.1f * 0.25f, 0.004f) << "the tip";
+    EXPECT_GT(widest(1), widest(4));
+}
+
 TEST(Clump, FitLaysEachStrandAlongItsCenterTipToTipAndExtendByItsOwnLength) {
     // A long, a short and a longer strand beside a straight center 1 long up y, at strength 1 all
     // along. pastTip fit (the default, Yeti's and XGen's clumping): each point lands on the
@@ -2986,6 +3017,70 @@ TEST(Interpolate, StrandsFollowTheSmoothCurveThroughAGuidesPoints) {
         return worst;
     };
     EXPECT_LT(sharpest(), 15.0f);  // a round bend, a few degrees a segment (straight spans: about 19 at the points)
+}
+
+TEST(Interpolate, FollowBendsKeepsALocksSectionThroughAnArc) {
+    // A guide up from the plane, arcing over (a half turn) and down: the strands rooted round it are
+    // copies of it moved over to their roots (followBends 0), so at the top of the arc, where the guide
+    // runs along x, those rooted beside it along x lie on it, seen across it (the lock flattens into a
+    // ribbon). followBends 1: each one's offset carried along the guide's frames, so across the guide
+    // it lies as far from it at the top as at the root; between, part of the way.
+    LookGraph lg{6000.0, 48};
+    std::vector<Vec3f> guide;
+    for (int i = 0; i <= 12; ++i) guide.push_back({0.5f, 0.05f * static_cast<float>(i), 0.5f});
+    for (int i = 1; i <= 24; ++i) {
+        const float a = 3.14159265f * static_cast<float>(i) / 24.0f;
+        guide.push_back({0.8f - 0.3f * std::cos(a), 0.6f + 0.3f * std::sin(a), 0.5f});
+    }
+    for (int i = 1; i <= 6; ++i) guide.push_back({1.1f, 0.6f - 0.05f * static_cast<float>(i), 0.5f});
+    auto set = std::make_shared<GuideSet>();
+    set->add(1, guide);
+    lg.ext.set("guides", GuidesPtr(set), 11);
+    const NodeId guides = lg.g.addNode(op::kGuides);
+    const NodeId interp = lg.add(op::kInterpolate, lg.scatter);
+    lg.g.connect(guides, interp, 1);
+    // The guide's point and way at share u of its length.
+    const float total = arcLength(guide.data(), guide.size());
+    auto onGuide = [&](float u, Vec3f* way) {
+        float at = 0.0f;
+        for (std::size_t k = 1; k < guide.size(); ++k) {
+            const float l = (guide[k] - guide[k - 1]).length();
+            if (at + l >= u * total || k + 1 == guide.size()) {
+                *way = (guide[k] - guide[k - 1]).normalized();
+                return guide[k - 1] + *way * std::clamp(u * total - at, 0.0f, l);
+            }
+            at += l;
+        }
+        return guide.back();
+    };
+    // Across the guide at the top of the arc, the nearest of the strands rooted 0.03 to 0.06 from it.
+    const float top = (0.6f + 3.14159265f * 0.3f * 0.5f) / total;
+    auto nearestAcross = [&](double follow) {
+        lg.g.node(interp).params().set("followBends", follow);
+        const StrandsPtr out = lg.eval(interp);
+        float nearest = 1e9f;
+        std::size_t counted = 0;
+        for (std::size_t s = 0; s < out->strandCount(); ++s) {
+            const Vec3f* p = out->strandPoints(s);
+            const std::size_t n = out->strandPointCount(s);
+            const Vec3f off = p[0] - guide[0];
+            const float r = std::hypot(off.x, off.z);
+            if (r < 0.03f || r > 0.06f || n < 3) continue;
+            Vec3f way;
+            const Vec3f g = onGuide(top, &way);
+            const Vec3f d = p[static_cast<std::size_t>(std::lround(top * static_cast<float>(n - 1)))] - g;
+            nearest = std::min(nearest, (d - way * d.dot(way)).length());
+            ++counted;
+        }
+        EXPECT_GT(counted, 10u);
+        return nearest;
+    };
+    const float copies = nearestAcross(0.0), carried = nearestAcross(1.0), half = nearestAcross(0.5);
+    std::printf("[ bends  ] nearest across the guide at the top: copies %.4f, carried %.4f, half %.4f\n", copies, carried, half);
+    EXPECT_LT(copies, 0.01f) << "a copy rooted beside it along x lies on it";
+    EXPECT_GT(carried, 0.024f) << "carried: as far across as at the root (0.03 at least), give or take the samples";
+    EXPECT_GT(half, copies);
+    EXPECT_LT(half, carried);
 }
 
 }  // namespace

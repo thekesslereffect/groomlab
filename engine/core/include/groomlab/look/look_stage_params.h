@@ -51,6 +51,9 @@ public:
     // Interpolate keeping curls (keepCurls): the caller keeps them after it (the CPU engine); else
     // the CPU's.
     bool curls = false;
+    // Interpolate following its guides' bends (followBends): the caller carries the strands'
+    // offsets after it (the CPU engine); else the CPU's.
+    bool bends = false;
     // Gravity, Bend and Displace given their direction per strand (StageInputs::directions; Direction:
     // its inclination, roll and strength per strand): the caller's; else one varying (Direction's
     // three mapped) is the CPU's.
@@ -94,6 +97,7 @@ void clumpShape(const ParamSet& clump, const Get& get, StageParams* s) {
     std::memcpy(&s->flag2[2], &direction.z, sizeof(float));
     s->tabled = true;
     s->hasRamp2 = true;
+    s->hasRamp3 = true;  // (lockProfile: the caller's, as the profiles)
 }
 // Clump's centers as the kernel takes them (ClumpInputs) from its operator's: each strand's center,
 // the centers' curves as made (their copy shared), their roots' normals, their variation by `ids`

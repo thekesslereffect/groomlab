@@ -154,6 +154,8 @@ struct StageParams {
     bool tabled = false;  // the ramp by point index (RampAlong; Width's and Interpolate's are not)
     Ramp ramp2;           // a second profile (Clump's volumizeProfile), by point index
     bool hasRamp2 = false;
+    Ramp ramp3;           // a third (Clump's lockProfile), by point index (no table: its keys alone)
+    bool hasRamp3 = false;
     // Affect masks. Masked (its affect a map, a field plugged
     // in, a number between 0 and 1, or dragged): the node's result mixed back toward what its first
     // stage took by its affect (StageFields::affect at that stage, times `affect`: the mapped

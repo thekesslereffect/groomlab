@@ -1020,6 +1020,9 @@ public:
                                          "center", "length"}
                 .atLeast(0)
                 .soft(0, 1),
+            ParamSpec{"lockProfile", Ramp::constant(1.0f),
+                      "With a lock radius: the lock's radius along the length, root to tip, times lockRadius (a lock "
+                      "fuller at the root and tapering to its tip, or swelling midway)"},
             ParamSpec{"repelRadius", 0.5, "With a negative strength: how far from its center a strand is pushed out to at "
                                           "least (the part's half width): those within twice it move out, the nearest "
                                           "to it, keeping their order; those farther away stay as they are", "length"}

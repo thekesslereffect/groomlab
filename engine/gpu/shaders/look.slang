@@ -223,6 +223,11 @@ float rampAlong2(uint i, uint n) {  // the second profile
     if (n == gRamp2.w) return asfloat(gRamps.Load((gTable2.x + i) * 4));
     return rampAtOf(gRamp2, paramAt(i, n));
 }
+// The third (Clump's lockProfile): its keys alone, gTable2.y its key count (straight: bit 31), .z
+// their offset; no keys: 1.
+float rampAlong3(uint i, uint n) {
+    return rampAtOf(uint4(gTable2.y & 0x7fffffffu, gTable2.z, gTable2.y >> 31, 0u), paramAt(i, n));
+}
 
 // ---- Mapped params (field.h ScalarField) -----------------------------------------------------
 
@@ -2521,9 +2526,11 @@ void ClumpCS(uint3 id : SV_DispatchThreadID) {
             float3 at = centerPoint(c, k) * (1.0f - f) + centerPoint(c, k + 1) * f;
             if (extend && arc > centerLength) at = at + tipWay * (arc - centerLength);  // pastTip extend
             if (radius > 0.0f) {
-                // A fixed spot in the lock's disk, in the center's frame there (between samples).
+                // A fixed spot in the lock's disk, in the center's frame there (between samples), the
+                // disk as wide there as lockProfile says.
                 const Frame fr = frameBetween(centerFrame(c, k), centerFrame(c, k + 1), f);
-                const float3 target = at + ((fr.n * (r * lockWay.x) + fr.b * (r * lockWay.y)) + fr.t * 0.0f);
+                const float ri = r * rampAlong3(i, n);
+                const float3 target = at + ((fr.n * (ri * lockWay.x) + fr.b * (ri * lockWay.y)) + fr.t * 0.0f);
                 moved = p + (target - p) * w;
                 if (shaped) moved = flattened(moved, at, fr, thin, w);
             } else {

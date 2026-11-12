@@ -1560,10 +1560,11 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
         }
         return at;
     };
-    std::vector<RampAt> rampAt(stages.size()), rampAt2(stages.size());
+    std::vector<RampAt> rampAt(stages.size()), rampAt2(stages.size()), rampAt3(stages.size());
     for (std::size_t k = 0; k < stages.size(); ++k) {
         rampAt[k] = putRamp(stages[k].ramp, stages[k].tabled);
         if (stages[k].hasRamp2) rampAt2[k] = putRamp(stages[k].ramp2, true);  // (RampAlong: by point index)
+        if (stages[k].hasRamp3) rampAt3[k] = putRamp(stages[k].ramp3, false);  // (its keys alone: table2's spare words)
     }
     if (ramps_.empty()) ramps_.push_back(0.0f);
     write(kRamps, ramps_.data(), ramps_.size() * 4, false);
@@ -1674,6 +1675,10 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
         c.ramp2[2] = rampAt2[k].straight;
         c.ramp2[3] = rampAt2[k].tableCount;
         c.table2[0] = rampAt2[k].tableOffset;
+        if (stages[k].hasRamp3) {  // a third profile (Clump's lockProfile): its key count (straight: the top bit), offset
+            c.table2[1] = rampAt3[k].count | (rampAt3[k].straight << 31);
+            c.table2[2] = rampAt3[k].offset;
+        }
         if (p.stage.kind == StageKind::Interpolate) {
             c.flag2[0] = needInfluence ? 1u : 0u;  // the influence for FieldCS
             c.flag2[2] = held_[k].aux[1];          // keeping clearance over a deformed scalp: its walk words (0: none)
