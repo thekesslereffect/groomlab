@@ -117,6 +117,47 @@ TEST(Presets, APastedTextIsCheckedAsEveryHostChecksIt) {
     EXPECT_NO_THROW(presetFromText(quoted.dump()));
 }
 
+TEST(Presets, APastedGraphLeavesOutParamsItsNodesNoLongerHave) {
+    // A groom saved by an older GroomLab keeps params its nodes have since lost (unread), and Copy
+    // Graph copies them: the paste leaves them out (Maya's check refused the graph), with the param
+    // inputs and keys naming them; known params, a Compound's exposed ones and its inner graph's
+    // known ones stay.
+    nlohmann::json graph = nlohmann::json::parse(makePresetJson(defaultGraphJson(), 20.0, "look", "", "Shared"));
+    nlohmann::json* interpolate = nullptr;
+    for (nlohmann::json& n : graph["nodes"]) {
+        if (n["type"] == "Interpolate") interpolate = &n;
+    }
+    ASSERT_NE(interpolate, nullptr);
+    if (!(*interpolate)["params"].is_object()) (*interpolate)["params"] = nlohmann::json::object();
+    const std::string known = allParamSpecs(*OperatorRegistry::instance().create("Interpolate")).front().name;
+    if (!(*interpolate)["params"].contains(known)) (*interpolate)["params"][known] = 1;
+    (*interpolate)["params"]["power"] = 2.0;
+    (*interpolate)["params"]["reach"] = 0.5;
+    (*interpolate)["params"]["clearanceEveryPoint"] = true;
+    (*interpolate)["paramControls"] = {{"power", "ctl_power"}};
+    (*interpolate)["paramInputs"] = nlohmann::json::array({"reach"});
+    nlohmann::json inner = {{"nodes", nlohmann::json::array({{{"name", "noise"}, {"type", "Noise"}, {"params", {{"amplitude", 0.1}, {"oldParam", 3}}}}})},
+                            {"connections", nlohmann::json::array()}};
+    graph["nodes"].push_back({{"name", "look"},
+                              {"type", "Compound"},
+                              {"params", {{"definition", {{"graph", inner}, {"expose", {{"amp", "noise.amplitude"}}}}}, {"amp", 0.2}}}});
+    const nlohmann::json pasted = nlohmann::json::parse(presetFromText(graph.dump()));
+    for (const nlohmann::json& n : pasted["nodes"]) {
+        if (n["type"] == "Interpolate") {
+            EXPECT_TRUE(n["params"].contains(known));
+            for (const char* gone : {"power", "reach", "clearanceEveryPoint"}) EXPECT_FALSE(n["params"].contains(gone)) << gone;
+            EXPECT_TRUE(n["paramControls"].empty());
+            EXPECT_TRUE(n["paramInputs"].empty());
+        }
+        if (n["type"] == "Compound") {
+            EXPECT_EQ(n["params"]["amp"], 0.2);
+            const nlohmann::json& noise = n["params"]["definition"]["graph"]["nodes"][0];
+            EXPECT_EQ(noise["params"]["amplitude"], 0.1);
+            EXPECT_FALSE(noise["params"].contains("oldParam"));
+        }
+    }
+}
+
 TEST(Presets, ShippedPresetsAreFoundDescribedAndLoad) {
     const std::vector<std::string> dirs = presetSearchDirs({}, kShipped);
     ASSERT_FALSE(dirs.empty());

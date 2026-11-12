@@ -170,8 +170,10 @@ constexpr int kMaxPresetDepth = 16;
 // and kMaxPresetDepth compounds deep; the shape of a graph (nodes named and typed, params objects,
 // links between names, positions numbers, numbers finite), not from a newer GroomLab, its node
 // types known (a library node's "node:<id>" too); nodes copied with Ctrl+C refused (they paste into
-// a graph). Returns the preset's JSON (compact); throws std::invalid_argument saying why ("the
-// clipboard holds no GroomLab graph...", three problems at most).
+// a graph). Params a node's kind no longer has (an older GroomLab's, which a groom keeps unread
+// and Copy Graph copies) are left out, with the param inputs and keys naming them. Returns the
+// preset's JSON (compact); throws std::invalid_argument saying why ("the clipboard holds no
+// GroomLab graph...", three problems at most).
 std::string presetFromText(const std::string& text);
 
 // The scalp size a preset is made on and fitted to: the largest extent of the mesh's bounding

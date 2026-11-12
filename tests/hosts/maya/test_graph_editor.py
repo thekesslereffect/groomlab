@@ -1235,6 +1235,20 @@ class GraphTextTest(unittest.TestCase):
         groomlab.add_map(self.b, "mask", value=1.0, kind="vertices")
         self.assertEqual(presets.missing_inputs(self.b, groomlab.get_graph(self.b))["maps"], {})
 
+    def test_copy_of_an_older_grooms_graph_pastes(self):
+        # A groom saved by an older GroomLab keeps params its nodes have since lost (unread): Copy
+        # Graph copies them, and the paste leaves them out instead of refusing the graph.
+        graph = groomlab.get_graph(self.a)
+        node = next(n for n in graph["nodes"] if n["type"] == "Interpolate")
+        node.setdefault("params", {}).update({"power": 2.0, "reach": 0.5, "clearanceEveryPoint": True})
+        cmds.setAttr(self.a + ".graph", json.dumps(graph), type="string")
+        text = groomlab.copy_graph_text(self.a)
+        self.assertIn("clearanceEveryPoint", text)
+        groomlab.paste_graph_text(self.b, text)
+        pasted = self.node(self.b, node["name"])["params"]
+        for gone in ("power", "reach", "clearanceEveryPoint"):
+            self.assertNotIn(gone, pasted)
+
     def test_text_that_is_no_graph_changes_nothing(self):
         presets.apply_preset(self.b, "curly")
         good = json.loads(self.make_look())

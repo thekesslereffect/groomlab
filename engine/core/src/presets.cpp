@@ -15,6 +15,7 @@
 
 #include "groomlab/graph_edit.h"
 #include "groomlab/graph_io.h"
+#include "groomlab/operators.h"
 #include "groomlab/param_conditions.h"
 #include "groomlab/paths.h"
 #include "groomlab/scalp_mesh.h"
@@ -1092,6 +1093,57 @@ void graphShape(const json& graph, const std::string& where, int depth, std::siz
     }
 }
 
+// A pasted graph's params its nodes' kinds no longer have, left out: an older GroomLab's (a groom
+// keeps them, unread, and Copy Graph copies them), in compounds' inner graphs too, with the param
+// inputs and keys naming them. A Compound's own params are its exposed ones (kept); a library
+// node's are its definition's (kept); a Script's are its definition's header's.
+void dropUnknownParams(json& graph, int depth) {
+    if (depth > kMaxPresetDepth || !graph.is_object() || !graph.contains("nodes") || !graph["nodes"].is_array()) return;
+    const OperatorRegistry& registry = OperatorRegistry::instance();
+    for (json& node : graph["nodes"]) {
+        if (!node.is_object() || !node.contains("type") || !node["type"].is_string()) continue;
+        if (!node.contains("params") || !node["params"].is_object()) continue;
+        const std::string type = node["type"].get<std::string>();
+        json& params = node["params"];
+        if (type == op::kCompound) {
+            if (params.contains("definition") && params["definition"].is_object() && params["definition"].contains("graph")) {
+                dropUnknownParams(params["definition"]["graph"], depth + 1);
+            }
+            continue;
+        }
+        if (type.rfind("node:", 0) == 0 || !registry.contains(type)) continue;
+        std::set<std::string> known;
+        try {
+            const std::unique_ptr<Operator> op = registry.create(type);
+            const bool script = type == op::kScript;
+            if (script && params.contains("definition")) {
+                const json& d = params["definition"];
+                op->params().set("definition", d.is_string() ? d.get<std::string>() : d.dump());
+            }
+            for (const ParamSpec& spec : script ? nodeParamSpecs(*op) : allParamSpecs(*op)) known.insert(spec.name);
+            if (script) known.insert("definition");
+        } catch (const std::exception&) {
+            continue;  // (a Script whose definition does not read: its params as they are)
+        }
+        for (auto it = params.begin(); it != params.end();) {
+            it = known.count(it.key()) ? std::next(it) : params.erase(it);
+        }
+        if (node.contains("paramInputs") && node["paramInputs"].is_array()) {
+            json kept = json::array();
+            for (const json& p : node["paramInputs"]) {
+                if (!p.is_string() || known.count(p.get<std::string>())) kept.push_back(p);
+            }
+            node["paramInputs"] = kept;
+        }
+        if (node.contains("paramControls") && node["paramControls"].is_object()) {
+            json& links = node["paramControls"];
+            for (auto it = links.begin(); it != links.end();) {
+                it = known.count(it.key()) ? std::next(it) : links.erase(it);
+            }
+        }
+    }
+}
+
 }  // namespace
 
 std::string presetFromText(const std::string& text) {
@@ -1174,6 +1226,7 @@ std::string presetFromText(const std::string& text) {
         if (problems.size() > 3) message += " (and " + std::to_string(problems.size() - 3) + " more)";
         throw std::invalid_argument(message);
     }
+    dropUnknownParams(data, 0);
     return data.dump();
 }
 
