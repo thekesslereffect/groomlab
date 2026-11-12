@@ -91,6 +91,21 @@ ExportReport exportStrands(GroomScene& scene, const ExportOptions& a, std::ostre
         const double frame = a.start + static_cast<double>(i) * a.step;
         const double seconds = frameToSeconds(frame, fps);  // every host's rule (frame_time.h)
         const StrandsPtr strands = moves || i == 0 ? scene.evaluate(seconds, a.density) : still;
+        // Velocities (Alembic): the frames a step before and after, a central difference by strand
+        // ID (a groom nothing moves is still). The neighbours are evaluated after, so this frame's
+        // own evaluation is the one written.
+        std::vector<Vec3f> velocities;
+        if (abc && a.velocities && strands) {
+            const double dt = frameToSeconds(a.step, fps);
+            if (moves) {
+                const StrandsPtr before = scene.evaluate(seconds - dt, a.density);
+                const StrandsPtr after = scene.evaluate(seconds + dt, a.density);
+                velocities = strandVelocities(*strands, before.get(), after.get(), dt);
+                scene.setTime(seconds);  // the scalp and inputs of this frame again, for its scales
+            } else {
+                velocities.assign(strands->pointCount(), Vec3f{0.0f, 0.0f, 0.0f});
+            }
+        }
         if (i == 0) still = strands;
         const StrandSet empty;
         const StrandSet& s = strands ? *strands : empty;
@@ -103,7 +118,7 @@ ExportReport exportStrands(GroomScene& scene, const ExportOptions& a, std::ostre
         } else if (usdWriter) {
             usdWriter->writeFrame(frame, s, scalp.get(), scaleMesh.get());
         } else {
-            abc->writeFrame(s, scalp.get(), scaleMesh.get());  // root UVs, as Maya's export writes them
+            abc->writeFrame(s, scalp.get(), scaleMesh.get(), velocities.empty() ? nullptr : &velocities);  // root UVs, as Maya's
         }
         report.strandTotal += s.strandCount();
         if (log) *log << "frame " << frame << ": " << s.strandCount() << " strands\n";

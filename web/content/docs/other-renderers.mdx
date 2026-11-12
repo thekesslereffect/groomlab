@@ -54,6 +54,9 @@ groomlab.export_usd(groom, "C:/shots/010/hair.usda", start=1, end=48,
   a lower `density` for a lighter file, or `render_overrides=True` to export the groom with its
   [render overrides](/docs/rendering#render-overrides) applied. The menu exports without the
   overrides.
+- **Motion blur:** `velocities=True` (Alembic; `groomlab-cli eval ... --velocities` on the farm)
+  writes each point's velocity as the curves' `.velocities` (scene units per second, from the
+  frames a step before and after), so a renderer blurs fast hair from one sample per frame.
 - **No render-time LOD:** distance thinning and camera culling only apply in Arnold at render
   time. Exports do not apply them.
 - **Alembic or USD:** prefer USD. Only USD carries per-point attributes (opacity, a tip color or

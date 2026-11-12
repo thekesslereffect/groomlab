@@ -1481,6 +1481,7 @@ StrandsPtr NodeEvaluator::evaluate(float density, std::string* error, MeshPtr* s
             session_->setGuidePoses(data.guidePoses);
             session_->setControls(data.controls);  // animated sliders
             session_->setMeshes(data.meshes);      // moving colliders
+            session_->setDrivers(data.drivers);    // the rig's driver curves then (DriveGuides)
             // A stored text edited into something that does not parse: an error, as a fresh read gives
             // (bad painted maps are left out, as a fresh read leaves them).
             std::vector<std::string> bad = session_->inputErrors();

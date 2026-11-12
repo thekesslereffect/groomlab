@@ -23,6 +23,7 @@ struct ExportOptions {
     bool timings = false;         // the milliseconds each graph node took, per frame
     bool stats = false;           // the session's stats (GroomStats JSON) after the first frame
     std::string scales = "mesh";  // how scales are written (USD: mesh, instancer, both, none)
+    bool velocities = false;      // Alembic: each point's velocity (.velocities), for motion blur
 };
 
 struct ExportReport {

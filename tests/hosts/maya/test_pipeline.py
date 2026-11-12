@@ -905,6 +905,24 @@ class SimulationTest(unittest.TestCase):
         cli("eval", path, "-o", still, "-f", "1", "--density", "0.3")
         self.assertNotEqual(cli("hash", still), cli("hash", from_cli))  # the rig moved it
 
+        # Motion blur: each point's velocity, in Maya's export and the farm's alike.
+        # Several frames in one export (an evaluator of its own, the drivers read at each frame).
+        frames_maya = os.path.join(WORK_DIR, "rigged_maya_frames.abc")
+        frames_cli = os.path.join(WORK_DIR, "rigged_cli_frames.abc")
+        groomlab.export_alembic(groom, frames_maya, start=3, end=6, density=0.3)
+        cli("eval", path, "-o", frames_cli, "-f", "3-6", "--density", "0.3")
+        self.assertEqual(cli("hash", frames_cli), cli("hash", frames_maya))
+        blurred = os.path.join(WORK_DIR, "rigged_maya_vel.abc")
+        groomlab.export_alembic(groom, blurred, start=4, end=5, density=0.3, velocities=True)
+        maya_info = cli("abc-info", blurred).splitlines()[1:]
+        self.assertEqual(len(maya_info), 2)
+        fastest = [float(line.split("fastest=")[1]) for line in maya_info]
+        self.assertGreater(min(fastest), 0.3)  # swinging: units per second
+        blurred_cli = os.path.join(WORK_DIR, "rigged_cli_vel.abc")
+        cli("eval", path, "-o", blurred_cli, "-f", "4-5", "--density", "0.3", "--velocities")
+        for a, b in zip(maya_info, cli("abc-info", blurred_cli).splitlines()[1:]):
+            self.assertAlmostEqual(float(a.split("fastest=")[1]), float(b.split("fastest=")[1]), places=3)
+
     def test_shot_fixes_sculpted_on_a_baked_simulation(self):
         """sculpt_on_simulation: the Simulate node baked, the guides posed from the bake, the node
         bypassed: the groom looks as simulated; a corrective then applies on top of the simulated

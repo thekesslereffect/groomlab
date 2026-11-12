@@ -301,6 +301,7 @@ MSyntax ExportAlembicCmd::newSyntax() {
     syntax.addFlag(kGuideGroupFlag, kGuideGroupFlagLong, MSyntax::kString);
     syntax.addFlag(kGuidePosesFlag, kGuidePosesFlagLong);
     syntax.addFlag(kDriverCurvesFlag, kDriverCurvesFlagLong);  // the driver curves (DriveGuides), as the groom reads them
+    syntax.addFlag("-vel", "-velocities");  // each point's velocity (.velocities), for motion blur
     syntax.addFlag("-ue", "-unreal");
     // Unreal only: groom groups ("": one object, groom_group_id from the groupId channel;
     // "auto": by groupId, an object each; else by that channel), the feathers' shafts as
@@ -532,6 +533,35 @@ MStatus ExportAlembicCmd::doIt(const MArgList& args) {
                     writer.writeFrame(curves);
                     strandTotal += curves.strandCount();
                 }
+            } else if (db.isFlagSet("-vel")) {
+                // Velocities: the frames a step before and after the range too, each frame written
+                // once the next is known (a central difference, by strand ID).
+                SceneScales scales;
+                const bool withScales = scaleMode == UsdCurvesWriter::Options::Scales::Mesh;
+                FrameRange wide = range;
+                wide.start -= range.step;
+                wide.end += range.step;
+                const double seconds = frameToSeconds(range.step, mayaFramesPerSecond());
+                struct Held {
+                    StrandSet strands;
+                    MeshPtr scalp;
+                };
+                std::vector<Held> held;  // the last three frames
+                std::size_t evaluated = 0;
+                status = forEachFrame(
+                    kName, path, wide,
+                    [&](double, const StrandSet& strands, const MeshPtr& scalp, NodeEvaluator&) {
+                        held.push_back({strands, scalp});
+                        if (held.size() < 3) return;
+                        const Held& now = held[1];
+                        const std::vector<Vec3f> v = strandVelocities(now.strands, &held[0].strands, &held[2].strands, seconds);
+                        const auto mesh = withScales ? scales.build(now.strands, now.scalp) : nullptr;
+                        writer.writeFrame(now.strands, now.scalp.get(), mesh.get(), &v);
+                        strandTotal += now.strands.strandCount();
+                        held.erase(held.begin());
+                    },
+                    &evaluated, false);
+                if (!status) return status;
             } else {
                 SceneScales scales;
                 const bool withScales = scaleMode == UsdCurvesWriter::Options::Scales::Mesh;

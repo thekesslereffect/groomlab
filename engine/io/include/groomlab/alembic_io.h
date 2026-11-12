@@ -52,6 +52,12 @@ public:
 // each curves object): one group the layout writeFrame gives; several each
 // /<name>/<group>/<group>Shape (the group's name made an object name), in the
 // order given, each resampled to its own `pointsPerStrand` (0: the option's).
+// Each point's velocity, scene units per second, for motion blur: a central difference of the
+// strands a frame before and after (`before` or `after` null at an end of the range: one-sided),
+// `seconds` apart from `now` each. A strand is matched by ID with the same point count; a strand
+// not in a neighbour (or with other points) is still there (zero).
+std::vector<Vec3f> strandVelocities(const StrandSet& now, const StrandSet* before, const StrandSet* after, double seconds);
+
 class AlembicCurvesWriter {
 public:
     struct Options {
@@ -80,7 +86,12 @@ public:
     // scaleVariant (int32). The first frame decides: with scales, a later frame without writes
     // an empty mesh; without, later scales are left out. Strands that only lay scales out
     // (InstanceSet::hidesStrands) are written hidden.
-    void writeFrame(const StrandSet& strands, const ScalpMesh* scalp = nullptr, const ScaleMesh* scales = nullptr);
+    //
+    // `velocities`: each point's velocity (scene units per second, strandVelocities), written as
+    // the curves' .velocities for a renderer's motion blur (scaled with Options::scale); left out
+    // when resampled (Options::pointsPerStrand) or when its count is not the points'.
+    void writeFrame(const StrandSet& strands, const ScalpMesh* scalp = nullptr, const ScaleMesh* scales = nullptr,
+                    const std::vector<Vec3f>* velocities = nullptr);
 
     // A group of strands written as a curves object of its own. The first frame
     // decides the objects: a later frame's group of another name is left out, and
@@ -185,6 +196,7 @@ struct AlembicCurvesFrame {
     StrandSet strands;  // positions, widths and IDs (IDs are 0.. when absent)
     // The curves' UVs as stored (one per strand, or per point with vertexUVs); empty without.
     std::vector<std::array<float, 2>> uvs;
+    std::vector<Vec3f> velocities;  // the curves' .velocities as stored (one per point); empty without
 };
 
 // Reads every sample of the first curves object named `name` + "Shape", or

@@ -5,6 +5,7 @@
 #include <cmath>
 #include <filesystem>
 #include <map>
+#include <unordered_map>
 
 #include <Alembic/AbcCoreOgawa/All.h>
 #include <Alembic/AbcGeom/All.h>
@@ -118,7 +119,9 @@ struct AlembicCurvesWriter::Impl {
                                         1, ts);
         return o;
     }
-    void write(Objects& o, const StrandSet& input, const ScalpMesh* scalp, bool first);
+    void write(Objects& o, const StrandSet& input, const ScalpMesh* scalp, bool first,
+               const std::vector<Vec3f>* velocities = nullptr);
+    std::vector<Imath::V3f> velocities;  // scaled, for the frame's sample
     void writeScales(const ScaleMesh& mesh);
 };
 
@@ -208,7 +211,39 @@ std::vector<std::string> AlembicCurvesWriter::objectPaths() const {
     return paths;
 }
 
-void AlembicCurvesWriter::writeFrame(const StrandSet& input, const ScalpMesh* scalp, const ScaleMesh* scales) {
+std::vector<Vec3f> strandVelocities(const StrandSet& now, const StrandSet* before, const StrandSet* after, double seconds) {
+    std::vector<Vec3f> out(now.positions().size(), Vec3f{0.0f, 0.0f, 0.0f});
+    if (!(seconds > 0.0) || (!before && !after)) return out;
+    auto indexOf = [](const StrandSet* set) {
+        std::unordered_map<StrandId, std::size_t> index;
+        if (!set) return index;
+        index.reserve(set->strandCount());
+        for (std::size_t s = 0; s < set->strandCount(); ++s) index.emplace(set->ids()[s], s);
+        return index;
+    };
+    const auto beforeIndex = indexOf(before), afterIndex = indexOf(after);
+    auto match = [&](const StrandSet* set, const std::unordered_map<StrandId, std::size_t>& index, std::size_t s) -> const Vec3f* {
+        if (!set) return nullptr;
+        const auto it = index.find(now.ids()[s]);
+        if (it == index.end() || set->strandPointCount(it->second) != now.strandPointCount(s)) return nullptr;
+        return set->strandPoints(it->second);
+    };
+    for (std::size_t s = 0; s < now.strandCount(); ++s) {
+        const Vec3f* a = match(before, beforeIndex, s);
+        const Vec3f* b = match(after, afterIndex, s);
+        if (!a && !b) continue;
+        const Vec3f* p = now.strandPoints(s);
+        const float span = static_cast<float>((a && b ? 2.0 : 1.0) * seconds);
+        const std::size_t begin = now.strandBegin(s);
+        for (std::size_t k = 0; k < now.strandPointCount(s); ++k) {
+            out[begin + k] = ((b ? b[k] : p[k]) - (a ? a[k] : p[k])) / span;
+        }
+    }
+    return out;
+}
+
+void AlembicCurvesWriter::writeFrame(const StrandSet& input, const ScalpMesh* scalp, const ScaleMesh* scales,
+                                     const std::vector<Vec3f>* velocities) {
     if (!impl_ || !impl_->open) throw AlembicError("writer is closed");
     Impl& d = *impl_;
     if (d.grouped) throw AlembicError("the strands were written in groups");
@@ -236,7 +271,7 @@ void AlembicCurvesWriter::writeFrame(const StrandSet& input, const ScalpMesh* sc
     } catch (const std::exception& e) {
         throw AlembicError(std::string("cannot write frame: ") + e.what());
     }
-    d.write(*d.objects.front(), input, scalp, first);
+    d.write(*d.objects.front(), input, scalp, first, velocities);
     if (d.scales) {
         static const ScaleMesh kNone;  // (the scales left the groom: an empty mesh this frame)
         d.writeScales(scales ? *scales : kNone);
@@ -293,7 +328,8 @@ void AlembicCurvesWriter::writeGroups(const std::vector<Group>& groups, const Sc
     ++d.frames;
 }
 
-void AlembicCurvesWriter::Impl::write(Objects& o, const StrandSet& input, const ScalpMesh* scalp, bool first) {
+void AlembicCurvesWriter::Impl::write(Objects& o, const StrandSet& input, const ScalpMesh* scalp, bool first,
+                                      const std::vector<Vec3f>* velocityValues) {
     Impl& d = *this;
     // Scaled or resampled for an importer: a copy; as they are: the strands themselves.
     const std::size_t points = o.pointsPerStrand >= 2 ? o.pointsPerStrand : d.options.pointsPerStrand;
@@ -341,6 +377,16 @@ void AlembicCurvesWriter::Impl::write(Objects& o, const StrandSet& input, const 
     AbcG::OCurvesSchema::Sample sample(Abc::P3fArraySample(positions, view.pointCount()),
                                        Abc::Int32ArraySample(view.counts), AbcG::kLinear, AbcG::kNonPeriodic, widths);
     sample.setBasis(AbcG::kNoBasis);
+    // Motion blur: each point's velocity (not resampled: the strands' own points).
+    if (velocityValues && points < 2 && velocityValues->size() == view.pointCount()) {
+        d.velocities.resize(velocityValues->size());
+        const float scale = d.options.scale;
+        for (std::size_t i = 0; i < velocityValues->size(); ++i) {
+            const Vec3f& v = (*velocityValues)[i];
+            d.velocities[i] = Imath::V3f(v.x * scale, v.y * scale, v.z * scale);
+        }
+        sample.setVelocities(Abc::V3fArraySample(d.velocities));
+    }
     if (o.hasUVs) {
         if (d.options.vertexUVs) {  // the root UV at every point of its strand
             d.uvs.assign(view.pointCount(), Imath::V2f(0.0f, 0.0f));
@@ -997,6 +1043,10 @@ std::vector<AlembicCurvesFrame> readAlembicCurves(const std::string& path, const
 
             AlembicCurvesFrame& frame = frames[i];
             frame.seconds = schema.getTimeSampling()->getSampleTime(static_cast<Abc::index_t>(i));
+            if (const Abc::V3fArraySamplePtr v = sample.getVelocities()) {
+                frame.velocities.reserve(v->size());
+                for (std::size_t k = 0; k < v->size(); ++k) frame.velocities.push_back({(*v)[k].x, (*v)[k].y, (*v)[k].z});
+            }
             if (uvsParam) {
                 const Abc::V2fArraySamplePtr uvs = uvsParam.getExpandedValue(sel).getVals();
                 if (uvs) {

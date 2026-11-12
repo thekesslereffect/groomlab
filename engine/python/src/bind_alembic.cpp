@@ -18,6 +18,14 @@ namespace groomlab::py_bind {
 
 void bindAlembic(py::module_& m) {
 #if GROOMLAB_PY_HAS_ALEMBIC
+    m.def(
+        "strand_velocities",
+        [](const StrandSet& now, const StrandSet* before, const StrandSet* after, double seconds) {
+            return strandVelocities(now, before, after, seconds);
+        },
+        py::arg("now"), py::arg("before") = nullptr, py::arg("after") = nullptr, py::arg("seconds") = 1.0 / 24.0,
+        "Each point's velocity (units per second): a central difference of the strands a frame before and after "
+        "(one-sided at an end), matched by strand ID.");
     m.attr("has_alembic") = true;
     registerAlembicOperators(OperatorRegistry::instance());
     py::register_exception<AlembicError>(m, "AlembicError", PyExc_RuntimeError);
@@ -29,8 +37,18 @@ void bindAlembic(py::module_& m) {
                  return std::make_unique<AlembicCurvesWriter>(path, name, start, step);
              }),
              py::arg("path"), py::arg("name"), py::arg("start_seconds") = 0.0, py::arg("seconds_per_frame") = 1.0 / 24.0)
-        .def("write_frame", &AlembicCurvesWriter::writeFrame, py::arg("strands"), py::arg("scalp") = nullptr, py::arg("scales") = nullptr,
-             py::call_guard<py::gil_scoped_release>(), "Appends a frame; the scalp supplies root UVs when it has them.")
+        .def(
+            "write_frame",
+            [](AlembicCurvesWriter& w, const StrandSet& strands, const ScalpMesh* scalp, const ScaleMesh* scales,
+               py::object velocities) {
+                std::vector<Vec3f> v;
+                if (!velocities.is_none()) v = toPoints(velocities);
+                py::gil_scoped_release release;
+                w.writeFrame(strands, scalp, scales, velocities.is_none() ? nullptr : &v);
+            },
+            py::arg("strands"), py::arg("scalp") = nullptr, py::arg("scales") = nullptr, py::arg("velocities") = py::none(),
+            "Appends a frame; the scalp supplies root UVs when it has them; velocities (strand_velocities: a Vec3 per "
+            "point) are written as the curves' .velocities.")
         .def("frame_count", &AlembicCurvesWriter::frameCount)
         .def("close", &AlembicCurvesWriter::close, py::call_guard<py::gil_scoped_release>())
         .def("__enter__", [](AlembicCurvesWriter& w) -> AlembicCurvesWriter& { return w; }, py::return_value_policy::reference)
