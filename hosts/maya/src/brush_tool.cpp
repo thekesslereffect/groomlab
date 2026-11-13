@@ -91,6 +91,8 @@ const char* kPartNameFlag[] = {"-pn", "-partName"};
 const char* kFlowSinkFlag[] = {"-fsk", "-flowSink"};
 const char* kDragSliderFlag[] = {"-ds", "-dragSlider"};
 const char* kDebugPickFlag[] = {"-dbp", "-debugPick"};
+const char* kTubeShadedFlag[] = {"-tsh", "-tubeShaded"};        // the Tube brush's tubes drawn shaded
+const char* kTubeWireframeFlag[] = {"-twf", "-tubeWireframe"};  // ... and as wires
 const char* kTargetsFlag[] = {"-tg", "-targets"};
 const char* kPaintKindFlag[] = {"-pk", "-paintKind"};
 const char* kPaintTextureFlag[] = {"-ptx", "-paintTexture"};
@@ -1282,7 +1284,7 @@ void BrushContext::showTubeWires() {
     }
     if (!on) return;
     tubeWiresOn_ = MObjectHandle(shape_->thisMObject());
-    shape_->setTubeWires(true);
+    shape_->setTubeWires(true, tubeShaded, tubeWireframe);
 }
 
 void BrushContext::showSymmetry() {
@@ -1423,6 +1425,8 @@ MStatus BrushContextCmd::appendSyntax() {
     s.addFlag(kErasePartsFlag[0], kErasePartsFlag[1], MSyntax::kBoolean);
     s.addFlag(kEraseFlowFlag[0], kEraseFlowFlag[1], MSyntax::kBoolean);
     s.addFlag(kDragSliderFlag[0], kDragSliderFlag[1], MSyntax::kString);
+    s.addFlag(kTubeShadedFlag[0], kTubeShadedFlag[1], MSyntax::kBoolean);
+    s.addFlag(kTubeWireframeFlag[0], kTubeWireframeFlag[1], MSyntax::kBoolean);
     s.addFlag(kDebugPickFlag[0], kDebugPickFlag[1], MSyntax::kString);
     s.addFlag(kDebugHoverFlag[0], kDebugHoverFlag[1], MSyntax::kString);
     s.addFlag(kLengthEditFlag[0], kLengthEditFlag[1], MSyntax::kString);
@@ -1458,6 +1462,8 @@ MStatus BrushContextCmd::doEditFlags() {
         if (args.isFlagSet(kEraseGuidesFlag[0]) && args.getFlagArgument(kEraseGuidesFlag[0], 0, b)) s.eraseGuides = b;
         if (args.isFlagSet(kErasePartsFlag[0]) && args.getFlagArgument(kErasePartsFlag[0], 0, b)) s.eraseParts = b;
         if (args.isFlagSet(kEraseFlowFlag[0]) && args.getFlagArgument(kEraseFlowFlag[0], 0, b)) s.eraseFlow = b;
+        if (args.isFlagSet(kTubeShadedFlag[0]) && args.getFlagArgument(kTubeShadedFlag[0], 0, b)) context_->tubeShaded = b;
+        if (args.isFlagSet(kTubeWireframeFlag[0]) && args.getFlagArgument(kTubeWireframeFlag[0], 0, b)) context_->tubeWireframe = b;
         MToolsInfo::setDirtyFlag(*context_);
         context_->showSymmetry();  // the line follows the symmetry set (or goes with it)
 
@@ -1571,6 +1577,8 @@ MStatus BrushContextCmd::doQueryFlags() {
         else if (args.isFlagSet(kAlphaSpacingFlag[0])) setResult(double(s.alphaSpacing));
         else if (args.isFlagSet(kAlphaInvertFlag[0])) setResult(s.alphaInvert);
         else if (args.isFlagSet(kDragSliderFlag[0])) setResult(MString(context_->dragSlider.empty() ? "none" : context_->dragSlider.c_str()));
+        else if (args.isFlagSet(kTubeShadedFlag[0])) setResult(context_->tubeShaded);
+        else if (args.isFlagSet(kTubeWireframeFlag[0])) setResult(context_->tubeWireframe);
         else if (args.isFlagSet(kLengthStateFlag[0])) setResult(MString(context_->lengthState().c_str()));
         // Testing aids: what the texture strokes in the undo queue keep (bytes), and how the
         // viewport sends a stroke's texels to the map's texture.

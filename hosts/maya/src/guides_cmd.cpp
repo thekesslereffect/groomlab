@@ -556,13 +556,41 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                 }
             }
             nlohmann::json out = {{"source", source}, {"guides", nlohmann::json::array()}, {"shapes", nlohmann::json::array()}};
-            std::vector<std::string> shapes;
+            // The targets' profiles: each different root shape, mid shape and tip shape among them
+            // ("" an unset mid or tip).
+            std::vector<std::string> shapes, mids, tips;
+            auto note = [](std::vector<std::string>& into, const std::string& name) {
+                if (std::find(into.begin(), into.end(), name) == into.end()) into.push_back(name);
+            };
             for (const GuideId id : ids) {
                 out["guides"].push_back(std::to_string(id));
-                const std::string name = h->guide(id)->tube.shapeName();
-                if (std::find(shapes.begin(), shapes.end(), name) == shapes.end()) shapes.push_back(name);
+                const TubeProfile& tube = h->guide(id)->tube;
+                note(shapes, tube.shapeName());
+                note(mids, tube.midShape ? tube.midShape->name() : std::string());
+                note(tips, tube.tipShape ? tube.tipShape->name() : std::string());
             }
             out["shapes"] = shapes;
+            out["midShapes"] = mids;
+            out["tipShapes"] = tips;
+            // The profiles in the groom: each shape any guide takes (root, mid or tip), and how
+            // many guides take it, in the order first met.
+            std::vector<std::pair<std::string, int>> inUse;
+            for (const HierarchyGuide& g : h->guides()) {
+                std::vector<std::string> own;
+                note(own, g.tube.shapeName());
+                if (g.tube.midShape) note(own, g.tube.midShape->name());
+                if (g.tube.tipShape) note(own, g.tube.tipShape->name());
+                for (const std::string& name : own) {
+                    auto it = std::find_if(inUse.begin(), inUse.end(), [&](const auto& e) { return e.first == name; });
+                    if (it == inUse.end()) {
+                        inUse.emplace_back(name, 1);
+                    } else {
+                        ++it->second;
+                    }
+                }
+            }
+            out["inUse"] = nlohmann::json::array();
+            for (const auto& [name, count] : inUse) out["inUse"].push_back({{"name", name}, {"guides", count}});
             out["tube"] = ids.empty() ? nlohmann::json() : nlohmann::json::parse(tubeToJson(h->guide(ids.front())->tube, h->scale()));
             setResult(MString(out.dump().c_str()));
             return MS::kSuccess;

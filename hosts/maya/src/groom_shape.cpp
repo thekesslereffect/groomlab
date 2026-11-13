@@ -349,9 +349,11 @@ void GroomShape::setSymmetrySeam(std::vector<Vec3f> segments) {
     M3dView::scheduleRefreshAllViews();
 }
 
-void GroomShape::setTubeWires(bool on) {
-    if (on == tubeWires_) return;
+void GroomShape::setTubeWires(bool on, bool shaded, bool wireframe) {
+    if (on == tubeWires_ && shaded == tubeShaded_ && wireframe == tubeWireframe_) return;
     tubeWires_ = on;
+    tubeShaded_ = shaded;
+    tubeWireframe_ = wireframe;
     M3dView::scheduleRefreshAllViews();
 }
 
@@ -1280,16 +1282,24 @@ MStatus GroomShape::compute(const MPlug& plug, MDataBlock& data) {
     // The live lane's compute: a pending commit settled from within it lands into it (it goes on and
     // makes the frame), not into the data block from outside.
     // (The background lane, on other threads, leaves the flag alone.)
+    // Leaving the outermost one: a commit that landed in it (redrawOwed_) redrawn.
     struct Computing {
+        GroomShape* shape;
         bool* flag;
         bool was = false;
-        explicit Computing(bool* f) : flag(f) {
+        Computing(GroomShape* s, bool* f) : shape(s), flag(f) {
             if (flag) was = std::exchange(*flag, true);
         }
         ~Computing() {
-            if (flag) *flag = was;
+            if (!flag) return;
+            *flag = was;
+            if (!was && shape->redrawOwed_) {
+                shape->redrawOwed_ = false;
+                MHWRender::MRenderer::setGeometryDrawDirty(shape->thisMObject());
+                M3dView::scheduleRefreshAllViews();
+            }
         }
-    } computing(normal ? &computing_ : nullptr);
+    } computing(this, normal ? &computing_ : nullptr);
     // Nothing may throw into Maya's evaluation (out of memory, say): the groom
     // drops its strands and says why instead.
     std::string message;
@@ -2002,6 +2012,7 @@ void GroomShape::finishCommit(bool evaluatesAfter, MDataBlock* into, const char*
     // only what changed then) and makes the frame.
     if (evaluatesAfter) {
         pendingErrors_.clear();
+        if (computing_) redrawOwed_ = true;  // (compute makes the frame: redrawn once it returns)
         return;
     }
     // Its frame: the session's evaluation, which finds every result made.
@@ -2038,7 +2049,11 @@ void GroomShape::finishCommit(bool evaluatesAfter, MDataBlock* into, const char*
         scheduleStrokeWarmup();
     }
     MHWRender::MRenderer::setGeometryDrawDirty(thisMObject());
-    if (!computing_) M3dView::scheduleRefreshAllViews();
+    if (!computing_) {
+        M3dView::scheduleRefreshAllViews();
+    } else {
+        redrawOwed_ = true;  // (redrawn once compute returns)
+    }
 }
 
 void GroomShape::makeFrame(MDataBlock& data, Lane& lane, const ViewResult* result, double seconds, const std::string& errors) {

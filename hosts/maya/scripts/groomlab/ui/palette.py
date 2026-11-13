@@ -266,9 +266,11 @@ class StarterCard(QtWidgets.QFrame):
 class TubePanel(QtWidgets.QWidget):
     """The tubes in the tool card, as three blocks (the panel itself is never shown: it owns them):
 
-    Profile          (Shape, Select) the shape picker with Apply, the cross-section editor, Edit as
-                     custom, Mirror and Smooth; the library's New / Rename / Duplicate / Delete as
-                     glyphs in the block's header
+    Profile          (Shape, Select) the Root, Mid and Tip shape pickers, each with its Apply (the
+                     tube's outline changes smoothly root to mid to tip), the cross-section editor
+                     on the profile picked last, Mirror and Smooth; the library's New / Rename /
+                     Duplicate / Delete as glyphs in the block's header; with no targets, the
+                     profiles the groom's guides take (edit one: every guide taking it follows)
     Selected guides  (Shape, Select) the targets' Width, Flatness and Twist, Smooth in the header
     Tube             (Place, Draw) the tube new guides get: a small preview, the shape picker and
                      Width / Flatness / Twist (the library is edited with the Tube brush)
@@ -295,7 +297,19 @@ class TubePanel(QtWidgets.QWidget):
         self.shape = QtWidgets.QComboBox()
         self.shape.setObjectName("tubeShape")
         self.shape.setToolTip("The tube shape: the built-ins, then the groom's library of custom shapes")
-        self.shape.activated.connect(lambda _i: self.pick(self.shape.currentData()))
+        self.shape.activated.connect(lambda _i: self.pick(self.shape.currentData(), "root"))
+        # The mid's and the tip's profiles (GH-59): their pickers start with "unset".
+        self.mid_shape = QtWidgets.QComboBox()
+        self.mid_shape.setObjectName("tubeMidShape")
+        self.mid_shape.setToolTip("The profile at the middle of the tube: the outline changes smoothly from the root's "
+                                  "to this one and on to the tip's. Between: halfway between the root's and the tip's")
+        self.mid_shape.activated.connect(lambda _i: self.pick(self.mid_shape.currentData(), "mid"))
+        self.tip_shape = QtWidgets.QComboBox()
+        self.tip_shape.setObjectName("tubeTipShape")
+        self.tip_shape.setToolTip("The profile at the tip of the tube: the outline changes smoothly to it from the "
+                                  "mid's. As root: the root's shape")
+        self.tip_shape.activated.connect(lambda _i: self.pick(self.tip_shape.currentData(), "tip"))
+        self.profile_combos = {"root": self.shape, "mid": self.mid_shape, "tip": self.tip_shape}
         self.length_factor = units.factor("length")  # shown in real units, stored in scene units
         self.width = widgets.SoftSlider(0.1 * self.length_factor, 0.0, 1.0 * self.length_factor, minimum=0.0,
                                         key="palette.tubeWidth@" + units.unit("length")[0], label="Width",
@@ -332,15 +346,52 @@ class TubePanel(QtWidgets.QWidget):
         self.profile_block = widgets.Block("Profile", (self.new_shape, self.rename_shape, self.duplicate_shape,
                                                        self.delete_shape), name="tubeProfile")
         self.profile_block.setToolTip(_setting("tube", "hint"))
-        self.profile_row = QtWidgets.QHBoxLayout()
-        self.profile_row.setContentsMargins(0, 0, 0, 0)
-        self.profile_row.setSpacing(theme.px(4))
-        self.apply_shape = QtWidgets.QPushButton("Apply")
-        self.apply_shape.setObjectName("tubeShapeApply")
-        self.apply_shape.setToolTip("Give the selected guides this profile")
-        self.apply_shape.clicked.connect(lambda: self.apply(shape=self._choice))
-        self.profile_row.addWidget(self.apply_shape)
-        self.profile_block.add(self.profile_row)
+        # A row per profile: its button (picks the profile the shape editor shows), its picker (the
+        # root's: self.shape, moved by set_mode) and Apply; under each, Length: the share of the tube
+        # (in percent; the tube's rootHold, midHold, tipHold) where that profile keeps its exact shape (the root's from the root, the mid's around the
+        # middle, the tip's up to the tip); between the held stretches the shape changes smoothly.
+        self.profile_labels = {}
+        self.apply_buttons = {}
+        self.profile_rows = {}
+        self.hold_sliders = {}
+        self.profile_group = QtWidgets.QButtonGroup(self)  # exclusive: one profile in the editor
+        for key, label in (("root", "Root"), ("mid", "Mid"), ("tip", "Tip")):
+            row = QtWidgets.QHBoxLayout()
+            row.setContentsMargins(0, 0, 0, 0)
+            row.setSpacing(theme.px(4))
+            name = widgets.chip(label, "Show the %s profile's shape in the editor" % label.lower(), key == "root",
+                                "tubeProfile_" + key)
+            name.setFixedWidth(theme.px(44))
+            name.clicked.connect(lambda _=False, k=key: self.show_profile(k))
+            self.profile_group.addButton(name)
+            row.addWidget(name)
+            if key != "root":
+                row.addWidget(self.profile_combos[key], 1)
+            button = QtWidgets.QPushButton("Apply")
+            button.setObjectName({"root": "tubeShapeApply", "mid": "tubeMidShapeApply", "tip": "tubeTipShapeApply"}[key])
+            button.setToolTip("Give the selected guides this %s profile (every one selected)" % label.lower())
+            button.clicked.connect(lambda _=False, k=key: self.apply_profile(k))
+            row.addWidget(button)
+            self.profile_block.add(row)
+            self.profile_labels[key] = name
+            self.apply_buttons[key] = button
+            self.profile_rows[key] = row
+            slider = widgets.SoftSlider(0, 0, 100, integer=True, minimum=0, maximum=100, key=None, label="Length",
+                                        suffix="%")
+            slider.setObjectName("tube%sLength" % label)
+            slider.setToolTip("How much of the tube's length is exactly the %s profile's shape (%s); 0%%: only "
+                              "at its own point. Between these stretches the shape changes smoothly"
+                              % (label.lower(), {"root": "from the root", "mid": "centered on the middle",
+                                                 "tip": "up to the tip"}[key]))
+            slider.committed.connect(lambda v, k=key: self.set_hold(k, v))
+            self.profile_block.add(slider)
+            self.hold_sliders[key] = slider
+        self.profile_row = self.profile_rows["root"]
+        self.apply_shape = self.apply_buttons["root"]
+        # No targets: the profiles the groom's guides take (picked, one is edited for all of them).
+        self.in_use = widgets.small_label("", wrap=True)
+        self.in_use.setObjectName("tubeInUse")
+        self.profile_block.add(self.in_use)
         self.editor = TubeShapeEditor()
         self.editor.setFixedSize(theme.px(190), theme.px(190))  # at most ~200 px square
         self.editor.dragged.connect(self.shape_dragged)
@@ -442,11 +493,15 @@ class TubePanel(QtWidgets.QWidget):
         self._preview.timeout.connect(self.send_preview)
         self._previewing = False
         # What needs targets (Selected guides' edits and Apply).
-        self.edits = (self.smooth, self.apply_shape) + self.fields
+        self.edits = (self.smooth,) + tuple(self.apply_buttons.values()) + tuple(self.hold_sliders.values()) + self.fields
         self._selection = []
         self._source = "none"
         self._reference = 0.0  # the first target's widest section (scene units)
-        self._choice = "round"  # the profile picked: the targets', else the last picked
+        # The profiles picked (root, mid, tip; "" an unset mid or tip): the targets', else the last
+        # picked; the editor shows the active one's (_choice).
+        self._choices = {"root": "round", "mid": "", "tip": ""}
+        self._active = "root"
+        self._in_use = []
         # The tube Place and Draw give new guides (the Tube block's: a shape, its width in scene
         # units, the sections' aspect and twist in radians).
         self._placement = {"shape": "round", "width": 0.1, "aspect": 1.0, "twist": 0.0}
@@ -471,7 +526,7 @@ class TubePanel(QtWidgets.QWidget):
             for field in self.fields:
                 self.tube_fields.addWidget(field)
         else:
-            self.profile_row.insertWidget(0, self.shape, 1)
+            self.profile_row.insertWidget(1, self.shape, 1)
             for field in self.fields:
                 self.selected_block.add(field)
         self._targets_key = None
@@ -482,7 +537,7 @@ class TubePanel(QtWidgets.QWidget):
 
     def busy(self):
         """A slider held, a field being typed in or a point dragged: refresh() leaves the panel as it is."""
-        for slider in self.fields:
+        for slider in self.fields + tuple(self.hold_sliders.values()):
             if slider.busy():
                 return True
         return self.editor.busy() or self.rename_field.isVisible()
@@ -494,7 +549,7 @@ class TubePanel(QtWidgets.QWidget):
         (busy()); `force` (after the panel's own edit): only not mid-drag."""
         if self.editor.busy() if force else self.busy():
             return
-        info = {"source": "none", "guides": [], "tube": None, "shapes": []}
+        info = {"source": "none", "guides": [], "tube": None, "shapes": [], "midShapes": [], "tipShapes": [], "inUse": []}
         if groom:
             try:
                 if self.mode == "edit":
@@ -510,6 +565,8 @@ class TubePanel(QtWidgets.QWidget):
         self._source = info["source"]
         tube = info["tube"]
         shapes = info["shapes"]
+        mids, tips = info.get("midShapes", []), info.get("tipShapes", [])
+        self._in_use = info.get("inUse", [])
         self.fill_shapes()
         if self.mode == "new":
             self.show_values()
@@ -520,28 +577,36 @@ class TubePanel(QtWidgets.QWidget):
             w.setEnabled(tube is not None)
         if tube is None:
             self.targets.setText("No guides selected or soloed: select some (Select, or Shift with a brush).")
-            self.show_mixed(False)
+            for combo in self.profile_combos.values():
+                self.show_mixed(combo, False)
         else:
             count = len(self._selection)
             how = "selected" if self._source == "selection" else "soloed"
             self.targets.setText("%d guide%s %s." % (count, "" if count == 1 else "s", how))
             widths, aspects, twists = tube.get("width") or [0.1], tube.get("aspect") or [1.0], tube.get("twist") or [0.0]
             self._reference = max(widths)
-            for w in (self.shape,) + self.fields:
+            for w in tuple(self.profile_combos.values()) + self.fields:
                 w.blockSignals(True)
-            self.show_mixed(len(shapes) > 1)
-            # The choice follows the targets when they (or their shapes) change, and is left alone
-            # otherwise (a shape made or picked in the editor while they stay selected).
-            key = (tuple(self._selection), tuple(shapes))
-            if len(shapes) == 1 and key != self._targets_key:
-                self._choice = shapes[0]
+            # The choices follow the targets when they (or their profiles) change, and are left
+            # alone otherwise (a shape made or picked in the editor while they stay selected).
+            key = (tuple(self._selection), tuple(shapes), tuple(mids), tuple(tips))
+            if key != self._targets_key:
+                for profile, among in (("root", shapes), ("mid", mids), ("tip", tips)):
+                    if len(among) == 1:
+                        self._choices[profile] = among[0]
             self._targets_key = key
+            for profile, slider in self.hold_sliders.items():
+                if not slider.busy():
+                    slider.blockSignals(True)
+                    slider.setValue(round(float(tube.get(profile + "Hold", 0.0)) * 100.0))  # (shown in percent)
+                    slider.blockSignals(False)
             self.width.setValue(self._reference * self.length_factor)
             self.flatness.setValue(min(max(1.0 - sum(aspects) / len(aspects), 0.0), 0.99))
             self.twist.setValue(sum(twists) / len(twists) * 180.0 / 3.14159265358979)
-            for w in (self.shape,) + self.fields:
+            for w in tuple(self.profile_combos.values()) + self.fields:
                 w.blockSignals(False)
-        self.show_choice(mixed=tube is not None and len(shapes) > 1)
+        mixed = {"root": len(shapes) > 1, "mid": len(mids) > 1, "tip": len(tips) > 1} if tube is not None else None
+        self.show_choice(mixed=mixed)
         self.push_placement()
 
     def show_values(self):
@@ -557,29 +622,50 @@ class TubePanel(QtWidgets.QWidget):
         for w in self.fields:
             w.blockSignals(False)
             w.setEnabled(True)
-        self.show_mixed(False)
+        self.show_mixed(self.shape, False)
+
+    MIXED = "*"  # a picker's "Mixed" entry (no shape is named so)
+    UNSET = {"mid": ("Between", "Halfway between the root's profile and the tip's"),
+             "tip": ("As root", "The root's profile again at the tip")}
 
     def fill_shapes(self):
-        """The shape picker: the built-ins, then the library (rebuilt only when that changes)."""
+        """The shape pickers: the mid's and the tip's "unset" entry first, the built-ins, then the
+        library (each rebuilt only when that changes)."""
         names = [name for name, _, _ in TUBE_SHAPES] + [s["name"] for s in self._library]
-        have = [self.shape.itemData(i) for i in range(self.shape.count()) if self.shape.itemData(i)]
-        if have == names:
-            return
-        mixed = self.shape.count() > 0 and self.shape.itemData(0) == ""
-        self.shape.blockSignals(True)
-        self.shape.clear()
-        if mixed:
-            self.shape.addItem("Mixed", "")
-        for name, label, tip in TUBE_SHAPES:
-            self.shape.addItem(label, name)
-            self.shape.setItemData(self.shape.count() - 1, tip, QtCore.Qt.ToolTipRole)
-        if self._library:
-            self.shape.insertSeparator(self.shape.count())
-        for s in self._library:
-            self.shape.addItem(s["name"], s["name"])
-            self.shape.setItemData(self.shape.count() - 1, "A custom shape of this groom's library (%d guide%s)" %
-                                   (s["users"], "" if s["users"] == 1 else "s"), QtCore.Qt.ToolTipRole)
-        self.shape.blockSignals(False)
+        for profile, combo in self.profile_combos.items():
+            unset = profile in self.UNSET
+            have = [combo.itemData(i) for i in range(combo.count())
+                    if combo.itemData(i) is not None and combo.itemData(i) != self.MIXED]
+            if have == ([""] if unset else []) + names:
+                continue
+            mixed = combo.count() > 0 and combo.itemData(0) == self.MIXED
+            combo.blockSignals(True)
+            combo.clear()
+            if mixed:
+                combo.addItem("Mixed", self.MIXED)
+            if unset:
+                label, tip = self.UNSET[profile]
+                combo.addItem(label, "")
+                combo.setItemData(combo.count() - 1, tip, QtCore.Qt.ToolTipRole)
+            for name, label, tip in TUBE_SHAPES:
+                combo.addItem(label, name)
+                combo.setItemData(combo.count() - 1, tip, QtCore.Qt.ToolTipRole)
+            if self._library:
+                combo.insertSeparator(combo.count())
+            for s in self._library:
+                combo.addItem(s["name"], s["name"])
+                combo.setItemData(combo.count() - 1, "A custom shape of this groom's library (%d guide%s)" %
+                                  (s["users"], "" if s["users"] == 1 else "s"), QtCore.Qt.ToolTipRole)
+            combo.blockSignals(False)
+
+    @property
+    def _choice(self):
+        """The profile the editor shows: the active picker's (root, mid or tip)."""
+        return self._choices[self._active]
+
+    @_choice.setter
+    def _choice(self, name):
+        self._choices[self._active] = name
 
     def library_shape(self, name):
         for s in self._library:
@@ -598,21 +684,43 @@ class TubePanel(QtWidgets.QWidget):
         import groomlab_core
         return groomlab_core.builtin_tube_shape_points(name)
 
-    def show_choice(self, mixed=False):
-        """The picker, the editor (or the Tube block's preview) and the library glyphs on the
-        chosen shape."""
-        if not self._known(self._choice):
-            self._choice = "round"  # (a library shape gone: renamed, deleted, another groom)
+    def show_choice(self, mixed=None):
+        """The pickers, the editor (or the Tube block's preview) and the library glyphs on the
+        chosen shapes; `mixed`: {profile: whether the targets' differ} ("Mixed" shown)."""
+        mixed = mixed or {}
+        for profile in self.profile_combos:
+            name = self._choices[profile]
+            if not self._known(name) and not (profile != "root" and name == ""):
+                # (A library shape gone: renamed, deleted, another groom.)
+                self._choices[profile] = "round" if profile == "root" else ""
         if not self._known(self._placement["shape"]):
             self._placement["shape"] = "round"
-        shown = self._placement["shape"] if self.mode == "new" else self._choice
-        self.shape.blockSignals(True)
-        self.shape.setCurrentIndex(0 if mixed else max(0, self.shape.findData(shown)))
-        self.shape.blockSignals(False)
+        for profile, combo in self.profile_combos.items():
+            self.show_mixed(combo, bool(mixed.get(profile)))
+            shown = self._placement["shape"] if self.mode == "new" and profile == "root" else self._choices[profile]
+            combo.blockSignals(True)
+            combo.setCurrentIndex(0 if mixed.get(profile) else max(0, combo.findData(shown)))
+            combo.blockSignals(False)
+        for profile, button in self.profile_labels.items():
+            button.blockSignals(True)
+            button.setChecked(profile == self._active)
+            button.blockSignals(False)
+        if self._selection:
+            self.in_use.setVisible(False)
+        else:
+            listed = ", ".join("%s (%d)" % (u["name"], u["guides"]) for u in self._in_use)
+            self.in_use.setText("Profiles in this groom: %s. Pick one to edit it: every guide taking it follows."
+                                % listed if listed else "No guides take a profile yet.")
+            self.in_use.setVisible(bool(self._groom))
         points, smooth = self._outline(self._placement["shape"])
         self.preview.set_shape(points, smooth, editable=False)
         custom = self.library_shape(self._choice)
-        if custom is not None:
+        if self._choice == "":
+            # An unset mid or tip: the root's outline, read-only.
+            points, smooth = self._outline(self._choices["root"])
+            note = "Between the root's and the tip's" if self._active == "mid" else "The root's again"
+            self.editor.set_shape(points, smooth, editable=False, note=note)
+        elif custom is not None:
             self.editor.set_shape(custom["points"], custom["smooth"], editable=True)
             # Mirror only for the edits to come: showing a shape never changes it. (Made symmetric
             # and saved here, at every tick of the panel's poll, it rewrote the shape, an
@@ -631,18 +739,23 @@ class TubePanel(QtWidgets.QWidget):
         self.duplicate_shape.setEnabled(has_groom)
         for b in (self.rename_shape, self.delete_shape):
             b.setEnabled(custom is not None)
-        self.apply_shape.setEnabled(bool(self._selection))
+        for b in self.apply_buttons.values():
+            b.setEnabled(bool(self._selection))
 
-    def show_mixed(self, on):
-        """The shape picker's "Mixed" entry (first, no shape of its own): there while the targets'
+    def show_mixed(self, combo, on):
+        """A shape picker's "Mixed" entry (first, no shape of its own): there while the targets'
         shapes differ."""
-        has = self.shape.count() > 0 and self.shape.itemData(0) == ""
+        has = combo.count() > 0 and combo.itemData(0) == self.MIXED
         if on and not has:
-            self.shape.insertItem(0, "Mixed", "")
-            self.shape.setItemData(0, "The selected guides have different shapes: pick one to give them all",
-                                   QtCore.Qt.ToolTipRole)
+            combo.blockSignals(True)
+            combo.insertItem(0, "Mixed", self.MIXED)
+            combo.setItemData(0, "The selected guides have different shapes here: pick one to give them all",
+                              QtCore.Qt.ToolTipRole)
+            combo.blockSignals(False)
         elif not on and has:
-            self.shape.removeItem(0)
+            combo.blockSignals(True)
+            combo.removeItem(0)
+            combo.blockSignals(False)
 
     # -- The placement tube ------------------------------------------------------------
 
@@ -679,24 +792,52 @@ class TubePanel(QtWidgets.QWidget):
         self.refresh(self.owner.groom(), force=True)
         return ok
 
-    def pick(self, name):
-        """A shape picked: new guides' ("new"), else given to the targets (one undo step)."""
-        if name == "":  # "Mixed": nothing to give
+    # The set_tube argument each profile's picker sets.
+    PROFILE_ARGS = {"root": "shape", "mid": "mid_shape", "tip": "tip_shape"}
+
+    def pick(self, name, profile="root"):
+        """A shape picked for a profile (root, mid or tip; "" an unset mid or tip): new guides'
+        ("new", the root's), else given to the targets (one undo step); the editor shows it."""
+        if name is None or name == self.MIXED:  # "Mixed": nothing to give
             return
         if self.mode == "new":
-            self._placement["shape"] = name
+            if profile == "root":
+                self._placement["shape"] = name
             self.show_choice()
             self.push_placement()
             return
+        self._active = profile
         self._choice = name
         if self._selection:
-            self.apply(shape=name)
+            self.apply(**{self.PROFILE_ARGS[profile]: name})
         self.show_choice()
+
+    def show_profile(self, profile):
+        """A profile's button: the editor shows that profile's shape (nothing given to the targets)."""
+        self._active = profile
+        self.show_choice()
+
+    def set_hold(self, profile, value):
+        """A Length slider let go (percent): the share of the targets' tubes keeping that profile's
+        exact shape (set_tube's holds: one undo step)."""
+        groom = self.owner.groom()
+        if groom and self._selection:
+            self.run(groomlab.set_tube, groom, guides=self._selection, **{profile + "_hold": float(value) / 100.0})
+
+    def apply_profile(self, profile):
+        """A profile's Apply: its picked shape and its Length given to every target (one undo step;
+        while the targets' shapes there are Mixed, the Length alone)."""
+        name = self._choices[profile]
+        self._active = profile
+        edit = {profile + "_hold": self.hold_sliders[profile].value() / 100.0}
+        if name != self.MIXED and not (profile == "root" and name == ""):
+            edit[self.PROFILE_ARGS[profile]] = name
+        self.apply(**edit)
 
     def apply(self, **edit):
         """An edit of the targets' tubes (set_tube: one undo step); for new guides ("new"), the
         placement tube's."""
-        if edit.get("shape") == "":
+        if edit.get("shape") == "" or self.MIXED in edit.values():
             return
         if self.mode == "new":
             self._placement.update(edit)
@@ -744,14 +885,16 @@ class TubePanel(QtWidgets.QWidget):
         if not groom:
             return
         import groomlab_core
-        points, smooth = groomlab_core.builtin_tube_shape_points(self._choice)
-        name = self.unique_name(self._choice)
+        base = self._choice or self._choices["root"]  # (an unset mid or tip: the root's)
+        custom = self.library_shape(base)
+        points, smooth = (custom["points"], custom["smooth"]) if custom else groomlab_core.builtin_tube_shape_points(base)
+        name = self.unique_name(base)
         from groomlab.base import undo_chunk
         try:
             with undo_chunk("tube shape"):
                 groomlab.add_tube_shape(groom, name, points, smooth=smooth)
                 if self._selection:
-                    groomlab.set_tube(groom, guides=self._selection, shape=name)
+                    groomlab.set_tube(groom, guides=self._selection, **{self.PROFILE_ARGS[self._active]: name})
         except (RuntimeError, ValueError) as e:
             self.owner.status.setText(str(e).strip())
             return
@@ -801,7 +944,9 @@ class TubePanel(QtWidgets.QWidget):
         if not groom or not new or new == old:
             return
         if self.run(groomlab.rename_tube_shape, groom, old, new):
-            self._choice = new
+            for profile in self._choices:
+                if self._choices[profile] == old:
+                    self._choices[profile] = new
             if self._placement["shape"] == old:
                 self._placement["shape"] = new
             self.refresh(groom, force=True)
@@ -840,7 +985,9 @@ class TubePanel(QtWidgets.QWidget):
             return
         self.disarm_delete()
         if self.run(groomlab.remove_tube_shape, groom, custom["name"]):
-            self._choice = "round"
+            for profile in self._choices:
+                if self._choices[profile] == custom["name"]:
+                    self._choices[profile] = "round" if profile == "root" else ""
             self.refresh(groom, force=True)
 
     def disarm_delete(self):
@@ -1258,6 +1405,17 @@ class ToolPalette(QtWidgets.QWidget):
             self.tube_channel_buttons[name] = b
         self.tube_channel.buttonClicked.connect(lambda _b: self.push(tubeChannel=self.tube_channel_name()))
         self.tube_channel_box.add(widgets.seg_row(self.tube_channel_buttons.values()))  # one of them: a track
+        # Shaded and Wireframe (GH-63): how the tubes the brush shows are drawn, each on its own:
+        # shaded surfaces (off by default), to judge the profiles' shapes, and see-through wires (on).
+        # (Switch rows: a chip's text grows bold when checked and outgrew its width.)
+        self.tube_shaded = widgets.switch("Shaded", "Draw the tubes as shaded surfaces, to judge the profiles' "
+                                          "shapes", False, "tubeShaded")
+        self.tube_shaded.toggled.connect(lambda on: self.push(tubeShaded=bool(on)))
+        self.tube_channel_box.add(self.tube_shaded.row)
+        self.tube_wireframe = widgets.switch("Wireframe", "Draw the tubes as see-through wires (over the shaded "
+                                             "surfaces when Shaded is on)", True, "tubeWireframe")
+        self.tube_wireframe.toggled.connect(lambda on: self.push(tubeWireframe=bool(on)))
+        self.tube_channel_box.add(self.tube_wireframe.row)
         card.addWidget(self.tube_channel_box)
 
         # Select: the soft radius (its selection's), then the profile and the selected guides' tubes.
@@ -2241,6 +2399,8 @@ class ToolPalette(QtWidgets.QWidget):
                 self.paint_tab.show_while_painting(name)
         try:
             groomlab.brush_tool(tool, **kwargs)
+            # (The context's own: not stroke settings.)
+            self.push(tubeShaded=self.tube_shaded.isChecked(), tubeWireframe=self.tube_wireframe.isChecked())
         except (RuntimeError, ValueError) as e:
             self.tool_failed(e)
         self.show_tool_settings()

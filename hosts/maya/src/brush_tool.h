@@ -160,6 +160,10 @@ public:
     // B / M held (the GroomLab hotkeys): a left drag sets the radius or the strength, as
     // middle-drag does. "radius", "strength" or empty.
     std::string dragSlider;
+    // The Tube card's Shaded and Wireframe (GH-63): the Tube brush's tubes drawn as shaded surfaces
+    // (off by default) and as wires (on by default), each on its own (GroomShape::setTubeWires).
+    bool tubeShaded = false;
+    bool tubeWireframe = true;
 
     BrushToolSettings& settings() { return tool_.settings; }
     // The view's pixels per point of the brush's radius (display_scale.h: 2 on a Retina display,

@@ -618,13 +618,16 @@ void GuideHierarchy::resolveFollower(HierarchyGuide& child, const HierarchyGuide
     if (!parentFrames || parentFrames->size() != n) computed = parent.frames();
     const std::vector<Frame>& frames = computed.empty() ? *parentFrames : computed;
     child.points.resize(n);
+    const bool blended = parent.tube.blended();
     // The offsets are the parent tube's section coordinates (tube.h): across in its sections,
     // along in scene units. A plain round tube's sections (no twist, aspect 1) give the offsets
     // times the width, to the bit as before sections.
     for (std::size_t i = 0; i < n; ++i) {
         const float t = paramAt(i, n);
         const Vec3f off = sampleEven(child.offsets, t, Vec3f{});
-        const Vec3f o = sectionOffset(parent.tube.sectionAt(t), off.x, off.y, scale_);
+        // (A tube of several profiles: the offset carried along them, tube.h.)
+        const SectionPoint q = blended ? tubeBlendAt(parent.tube.blendPoint(off.x, off.y), off.x, off.y, t) : SectionPoint{off.x, off.y};
+        const Vec3f o = sectionOffset(parent.tube.sectionAt(t), q.u, q.v, scale_);
         child.points[i] = parent.points[i] + frames[i].toWorld({o.x, o.y, off.z * scale_});
     }
     // A shaped tube's children keep their frames started from its root's, so their own tubes lie
@@ -674,6 +677,7 @@ std::vector<Vec3f> GuideHierarchy::offsetsFromWorld(const HierarchyGuide& child,
                                        ? child.points
                                        : resampleByArcLength(child.points.data(), child.points.size(), n);
     const std::vector<Frame> frames = parent.frames();
+    const bool blended = parent.tube.blended();
     // A child on its parent's root footprint (resolveFollower): the footprint's shift taken back
     // out, so the offsets give the same shape again.
     Vec3f shift;
@@ -686,7 +690,8 @@ std::vector<Vec3f> GuideHierarchy::offsetsFromWorld(const HierarchyGuide& child,
     for (std::size_t i = 0; i < n; ++i) {
         const float t = paramAt(i, n);
         const Vec3f local = frames[i].toLocal(pts[i] - shift * foot.fade(t) - parent.points[i]);
-        const SectionPoint at = sectionCoords(parent.tube.sectionAt(t), local.x, local.y, scale_);
+        SectionPoint at = sectionCoords(parent.tube.sectionAt(t), local.x, local.y, scale_);
+        if (blended) at = parent.tube.unblend(at.u, at.v, t);  // (back into the root's outline)
         offsets[i] = {at.u, at.v, local.z / scale_};
     }
     return offsets;
@@ -1213,14 +1218,16 @@ void GuideHierarchy::setTube(GuideId id, TubeProfile tube) {
 }
 
 void GuideHierarchy::adoptTubeShape(TubeProfile& tube) {
-    if (!tube.custom) return;
-    invalidateHash();
-    const auto it = tubeShapes_.find(tube.custom->name);
-    if (it == tubeShapes_.end()) {
-        tubeShapes_.emplace(tube.custom->name, tube.custom);
-    } else {
-        tube.custom = it->second;
-    }
+    // Each library shape among its profiles (root, mid, tip).
+    tube.forEachCustom([&](CustomTubeShapePtr& custom) {
+        invalidateHash();
+        const auto it = tubeShapes_.find(custom->name);
+        if (it == tubeShapes_.end()) {
+            tubeShapes_.emplace(custom->name, custom);
+        } else {
+            custom = it->second;
+        }
+    });
 }
 
 CustomTubeShapePtr GuideHierarchy::tubeShape(const std::string& name) const {
@@ -1233,7 +1240,9 @@ CustomTubeShapePtr GuideHierarchy::setTubeShape(const std::string& name, const s
     invalidateHash();
     tubeShapes_[name] = shape;
     for (HierarchyGuide& g : guides_) {
-        if (g.tube.custom && g.tube.custom->name == name) g.tube.custom = shape;
+        g.tube.forEachCustom([&](CustomTubeShapePtr& custom) {
+            if (custom->name == name) custom = shape;
+        });
     }
     return shape;
 }
@@ -1250,7 +1259,9 @@ void GuideHierarchy::renameTubeShape(const std::string& from, const std::string&
     tubeShapes_.erase(it);
     tubeShapes_[to] = renamed;
     for (HierarchyGuide& g : guides_) {
-        if (g.tube.custom && g.tube.custom->name == from) g.tube.custom = renamed;
+        g.tube.forEachCustom([&](CustomTubeShapePtr& custom) {
+            if (custom->name == from) custom = renamed;
+        });
     }
 }
 
@@ -1264,19 +1275,23 @@ std::size_t GuideHierarchy::removeTubeShape(const std::string& name) {
     invalidateHash();
     tubeShapes_.erase(name);
     std::size_t reverted = 0;
+    // A root profile goes round; a mid or tip profile is unset.
     for (HierarchyGuide& g : guides_) {
+        if (!g.tube.usesShape(name)) continue;
         if (g.tube.custom && g.tube.custom->name == name) {
             g.tube.custom = nullptr;
             g.tube.shape = TubeShape::Round;
-            ++reverted;
         }
+        if (g.tube.midShape && g.tube.midShape->custom && g.tube.midShape->custom->name == name) g.tube.midShape.reset();
+        if (g.tube.tipShape && g.tube.tipShape->custom && g.tube.tipShape->custom->name == name) g.tube.tipShape.reset();
+        ++reverted;
     }
     return reverted;
 }
 
 std::size_t GuideHierarchy::tubeShapeUsers(const std::string& name) const {
     std::size_t users = 0;
-    for (const HierarchyGuide& g : guides_) users += g.tube.custom && g.tube.custom->name == name ? 1 : 0;
+    for (const HierarchyGuide& g : guides_) users += g.tube.usesShape(name) ? 1 : 0;
     return users;
 }
 
@@ -1536,6 +1551,13 @@ json guideToJson(const HierarchyGuide& g) {
         {"frameUp", {g.frameUp.x, g.frameUp.y, g.frameUp.z}},
         {"tube", {{"shape", g.tube.shapeName()}, {"width", g.tube.width}, {"aspect", g.tube.aspect}, {"twist", g.tube.twist}}},
     };
+    // The mid's and the tip's profiles where set (GH-59).
+    if (g.tube.midShape) j["tube"]["midShape"] = g.tube.midShape->name();
+    if (g.tube.tipShape) j["tube"]["tipShape"] = g.tube.tipShape->name();
+    if (g.tube.rootHold != 0.0f) j["tube"]["rootHold"] = g.tube.rootHold;
+    if (g.tube.midHold != 0.0f) j["tube"]["midHold"] = g.tube.midHold;
+    if (g.tube.tipHold != 0.0f) j["tube"]["tipHold"] = g.tube.tipHold;
+    if (g.tube.midAt != 0.5f) j["tube"]["midAt"] = g.tube.midAt;
     if (g.parent != kNoGuide) j["parent"] = g.parent;
     if (g.locked) j["locked"] = true;
     if (g.ownSegments) j["ownSegments"] = true;
@@ -1591,6 +1613,24 @@ HierarchyGuide guideFromJson(const json& j, const TubeShapeLibrary& library, std
         list("width", g.tube.width);
         list("aspect", g.tube.aspect);
         list("twist", g.tube.twist);
+        // The mid's and the tip's profiles (a library shape that is missing: unset, its name in `missing`).
+        for (const auto& [key, into] : {std::pair<const char*, std::optional<TubeShapeRef>*>{"midShape", &g.tube.midShape},
+                                        std::pair<const char*, std::optional<TubeShapeRef>*>{"tipShape", &g.tube.tipShape}}) {
+            if (!tube.contains(key) || !tube.at(key).is_string()) continue;
+            const std::string shape = tube.at(key).get<std::string>();
+            TubeShapeRef ref;
+            if (tubeShapeByName(shape, &library, &ref)) {
+                *into = ref;
+            } else if (missing && missing->empty()) {
+                *missing = shape;
+            }
+        }
+        for (const auto& [key, into] : {std::pair<const char*, float*>{"rootHold", &g.tube.rootHold},
+                                        std::pair<const char*, float*>{"midHold", &g.tube.midHold},
+                                        std::pair<const char*, float*>{"tipHold", &g.tube.tipHold},
+                                        std::pair<const char*, float*>{"midAt", &g.tube.midAt}}) {
+            if (tube.contains(key) && tube.at(key).is_number()) *into = std::clamp(tube.at(key).get<float>(), 0.0f, 1.0f);
+        }
     }
     if (j.contains("attributes")) g.attributes = j.at("attributes").get<std::map<std::string, float>>();
     if (j.contains("pointAttributes")) {

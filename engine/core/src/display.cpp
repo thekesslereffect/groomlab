@@ -1082,6 +1082,13 @@ void appendTubeWire(std::vector<Vec3f>& out, const HierarchyGuide& g, float scal
     }
     std::array<SectionPoint, kAround> ring;
     for (std::size_t s = 0; s < kAround; ++s) ring[s] = outline[index[s]];
+    if (g.tube.blended()) {
+        // Several profiles (tube.h): the rings evenly round the perimeter the profiles are matched
+        // along, so each profile's own corners show at its key (the root's corner lines left out).
+        const TubeOutline& own = tubeShapeOutline(g.tube);
+        for (std::size_t s = 0; s < kAround; ++s) ring[s] = own.perimeterPoint(static_cast<float>(s) / static_cast<float>(kAround));
+        cornerSlots.clear();
+    }
     const TubeSpine spine(g.points.data(), n, g.frameUp, g.tube, scale);
     const std::size_t step = std::max<std::size_t>(ringStep, 1);
     std::array<Vec3f, kAround> at;
@@ -1126,7 +1133,8 @@ void appendTubeSurface(DisplayGeometry& batch, const HierarchyGuide& g, float sc
     if (n < 2) return;
     constexpr int kAlong = 24;
     const auto base = static_cast<std::uint32_t>(batch.positions.size() / 3);
-    const std::vector<SectionPoint>& outline = tubeOutline(g.tube);
+    // (Several profiles: the root's perimeter, evenly round, the profiles matched along it: tube.h.)
+    const std::vector<SectionPoint>& outline = g.tube.blended() ? tubeShapeOutline(g.tube).perimeter : tubeOutline(g.tube);
     // A plain round tube: 16 sides round each ring, in the nearest sample's frame.
     const bool round = !g.tube.shaped();
     const int kAround = round ? 16 : static_cast<int>(outline.size() / 2);
@@ -1152,15 +1160,26 @@ void appendTubeSurface(DisplayGeometry& batch, const HierarchyGuide& g, float sc
     // Any other: the tube's sections (tube.h) along the guide, its shape's outline (every other
     // point) at each ring, turned, flattened and sized as the sections say.
     const TubeSpine spine = round ? TubeSpine() : TubeSpine(g.points.data(), n, g.frameUp, g.tube, scale);
+    // Several profiles (tube.h): each outline point carried along them.
+    std::vector<TubeBlendPoint> blends;
+    if (!round && spine.blended()) {
+        blends.reserve(outline.size());
+        for (const SectionPoint& p : outline) blends.push_back(g.tube.blendPoint(p.u, p.v));
+    }
+    auto placed = [&](std::size_t k, float t) {
+        const SectionPoint& p = outline[k];
+        return blends.empty() ? p : tubeBlendAt(blends[k], p.u, p.v, t);
+    };
     for (int j = 0; j <= kAlong && !round; ++j) {
         const float t = static_cast<float>(j) / kAlong;
-        const Vec3f center = spine.at(t, 0.0f, 0.0f);
-        const Vec3f axisU = spine.at(t, 1.0f, 0.0f) - center, axisV = spine.at(t, 0.0f, 1.0f) - center;
+        const TubeBlendPoint plain;
+        const Vec3f center = spine.at(t, 0.0f, 0.0f, plain);
+        const Vec3f axisU = spine.at(t, 1.0f, 0.0f, plain) - center, axisV = spine.at(t, 0.0f, 1.0f, plain) - center;
         const float uu = std::max(axisU.dot(axisU), 1e-20f), vv = std::max(axisV.dot(axisV), 1e-20f);
         for (int s = 0; s < kAround; ++s) {
-            const SectionPoint& p = outline[static_cast<std::size_t>(2 * s)];
-            const SectionPoint& next = outline[static_cast<std::size_t>((2 * s + 1) % outline.size())];
-            const SectionPoint& prev = outline[(static_cast<std::size_t>(2 * s) + outline.size() - 1) % outline.size()];
+            const SectionPoint p = placed(static_cast<std::size_t>(2 * s), t);
+            const SectionPoint next = placed(static_cast<std::size_t>((2 * s + 1) % outline.size()), t);
+            const SectionPoint prev = placed((static_cast<std::size_t>(2 * s) + outline.size() - 1) % outline.size(), t);
             // Out of the outline (counter-clockwise: its edge's right), through the section's axes.
             const float nu = next.v - prev.v, nv = prev.u - next.u;
             Vec3f out = axisU * (nu / uu) + axisV * (nv / vv);
