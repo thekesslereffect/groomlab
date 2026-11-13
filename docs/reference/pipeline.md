@@ -135,6 +135,13 @@ scalp.
   else a hidden copy of the scalp at the current frame. The mesh must have the scalp's vertices.
 - **Removing:** `groomlab.clear_rest_mesh(groom)`, or **Clear** on the Rest row.
 
+**Freezing or sculpting the scalp:** Maya splits each quad across its shorter diagonal, so
+rewriting the scalp's points (Freeze Transformations, a sculpt) can split a quad the other way.
+The groom keeps the split its guides, parts and flow were rooted on (the hidden `scalpSplit`
+attribute, stored on each save) for as long as the mesh has the same polygons, so a scalp moved
+and frozen keeps its groom where it is. A changed topology (faces added, cut or merged) takes
+Maya's split again.
+
 ## Follow the scalp
 
 `followScalp` (Attribute Editor > Inputs > Follow Scalp, `groomlab.set_follow_scalp(groom, True)`,

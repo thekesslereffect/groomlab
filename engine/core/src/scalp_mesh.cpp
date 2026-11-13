@@ -9,6 +9,7 @@
 #include <cstring>
 #include <limits>
 #include <stdexcept>
+#include <utility>
 
 #if defined(_M_X64) || defined(__SSE2__)
 #include <xmmintrin.h>
@@ -997,6 +998,57 @@ std::shared_ptr<const ScalpMesh> withRestArea(const std::shared_ptr<const ScalpM
     auto out = std::make_shared<ScalpMesh>(*scalp);
     out->setRestPoints(std::move(rest));
     return out;
+}
+
+bool isTriangulationOf(const std::vector<ScalpMesh::Triangle>& triangles, const std::vector<std::int32_t>& trianglesPerPolygon,
+                       const std::vector<std::int32_t>& loopCounts, const std::vector<std::int32_t>& loops) {
+    if (trianglesPerPolygon.size() != loopCounts.size()) return false;
+    std::size_t t = 0, l = 0;
+    std::vector<std::pair<int, int>> edges;  // a polygon's directed edges, as places along its loop
+    for (std::size_t f = 0; f < loopCounts.size(); ++f) {
+        const std::int32_t n = loopCounts[f], k = trianglesPerPolygon[f];
+        if (n < 3 || k < 1 || l + static_cast<std::size_t>(n) > loops.size() || t + static_cast<std::size_t>(k) > triangles.size()) {
+            return false;
+        }
+        const std::int32_t* loop = loops.data() + l;
+        for (std::int32_t i = 0; i < n; ++i) {
+            for (std::int32_t j = i + 1; j < n; ++j) {
+                if (loop[i] == loop[j]) return false;
+            }
+        }
+        auto place = [&](std::int32_t vertex) {
+            for (std::int32_t i = 0; i < n; ++i) {
+                if (loop[i] == vertex) return i;
+            }
+            return -1;
+        };
+        edges.clear();
+        for (std::int32_t j = 0; j < k; ++j) {
+            const ScalpMesh::Triangle& tri = triangles[t + static_cast<std::size_t>(j)];
+            int corners[3];
+            for (int c = 0; c < 3; ++c) {
+                corners[c] = place(tri[c]);
+                if (corners[c] < 0) return false;
+            }
+            for (int c = 0; c < 3; ++c) {
+                if (corners[c] == corners[(c + 1) % 3]) return false;
+                edges.emplace_back(corners[c], corners[(c + 1) % 3]);
+            }
+        }
+        std::sort(edges.begin(), edges.end());
+        if (std::adjacent_find(edges.begin(), edges.end()) != edges.end()) return false;  // an edge used twice the same way
+        auto has = [&](int a, int b) { return std::binary_search(edges.begin(), edges.end(), std::make_pair(a, b)); };
+        auto onLoop = [&](int a, int b) { return b == (a + 1) % n; };
+        for (int i = 0; i < n; ++i) {
+            if (!has(i, (i + 1) % n) || has((i + 1) % n, i)) return false;  // the loop's edges, each its way
+        }
+        for (const auto& [a, b] : edges) {
+            if (!onLoop(a, b) && !has(b, a)) return false;  // a diagonal, both ways
+        }
+        t += static_cast<std::size_t>(k);
+        l += static_cast<std::size_t>(n);
+    }
+    return t == triangles.size() && l == loops.size();
 }
 
 }  // namespace groomlab

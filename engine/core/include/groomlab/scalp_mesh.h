@@ -368,4 +368,15 @@ double surfaceArea(const std::vector<Vec3f>& points, const std::vector<ScalpMesh
 double poseFreeArea(const ScalpMesh& scalp, const std::vector<Vec3f>& points);
 bool scaleToArea(std::vector<Vec3f>& points, const std::vector<ScalpMesh::Triangle>& triangles, double area);
 
+// Whether `triangles` split the polygons `loops` (each polygon's vertices in order, `loopCounts` of
+// them per polygon) into `trianglesPerPolygon` triangles each, polygon after polygon
+// (ScalpMesh::polygons): every triangle over its own polygon's vertices, every edge of the loop
+// used once in its direction and every diagonal once each way (so the triangles turn as the
+// polygon does and cover it once). A host keeps the split a groom's guides, parts and maps were
+// rooted on with it: Maya splits a quad across its shorter diagonal, so a mesh whose points are
+// rewritten (a transform frozen into them, a sculpt) splits otherwise, and a root's triangle
+// index and its frame would mean another triangle. A polygon repeating a vertex is no polygon here.
+bool isTriangulationOf(const std::vector<ScalpMesh::Triangle>& triangles, const std::vector<std::int32_t>& trianglesPerPolygon,
+                       const std::vector<std::int32_t>& loopCounts, const std::vector<std::int32_t>& loops);
+
 }  // namespace groomlab

@@ -26,6 +26,8 @@
 #include <maya/MGlobal.h>
 #include <maya/MFnGeometryData.h>
 #include <maya/MFnMesh.h>
+#include <maya/MFnIntArrayData.h>
+#include <maya/MObjectHandle.h>
 #include <maya/MFnStringArrayData.h>
 #include <maya/MFnNurbsCurve.h>
 #include <maya/MFnReference.h>
@@ -582,7 +584,71 @@ ScalpHistoryPtr sampleScalpHistory(const MObject& node, const MTime& now, int fr
                          reread, loopSeconds);
 }
 
-MeshPtr toScalpMesh(const MObject& meshData, const MObject& restData, std::string* restError) {
+namespace {
+
+// The split each groom's live evaluation last converted, by node (rememberScalpSplit).
+std::mutex gSplitsMutex;
+std::map<unsigned, std::pair<MObjectHandle, std::vector<ScalpMesh::Triangle>>> gSplits;
+
+}  // namespace
+
+std::vector<ScalpMesh::Triangle> splitFromIntArray(const MObject& intArrayData) {
+    std::vector<ScalpMesh::Triangle> split;
+    if (intArrayData.isNull() || !intArrayData.hasFn(MFn::kIntArrayData)) return split;
+    const MIntArray ints = MFnIntArrayData(intArrayData).array();
+    split.resize(ints.length() / 3);
+    for (std::size_t t = 0; t < split.size(); ++t) {
+        const unsigned i = static_cast<unsigned>(3 * t);
+        split[t] = {ints[i], ints[i + 1], ints[i + 2]};
+    }
+    return split;
+}
+
+void rememberScalpSplit(const MObject& node, const std::vector<ScalpMesh::Triangle>& split) {
+    const MObjectHandle handle(node);
+    std::lock_guard<std::mutex> lock(gSplitsMutex);
+    for (auto it = gSplits.begin(); it != gSplits.end();) {  // nodes deleted since
+        it = it->second.first.isAlive() ? std::next(it) : gSplits.erase(it);
+    }
+    auto& entry = gSplits[handle.hashCode()];
+    entry.first = handle;
+    entry.second = split;
+}
+
+std::vector<ScalpMesh::Triangle> rememberedScalpSplit(const MObject& node) {
+    const MObjectHandle handle(node);
+    std::lock_guard<std::mutex> lock(gSplitsMutex);
+    const auto it = gSplits.find(handle.hashCode());
+    if (it == gSplits.end() || !it->second.first.isAlive() || !(it->second.first == handle)) return {};
+    return it->second.second;
+}
+
+std::vector<ScalpMesh::Triangle> scalpSplitOf(const MObject& node) {
+    const MPlug plug = MFnDependencyNode(node).findPlug("scalpSplit", true);
+    std::vector<ScalpMesh::Triangle> split = plug.isNull() ? std::vector<ScalpMesh::Triangle>() : splitFromIntArray(plug.asMObject());
+    return split.empty() ? rememberedScalpSplit(node) : split;
+}
+
+void storeScalpSplits() {
+    for (MItDependencyNodes it(MFn::kPluginShape); !it.isDone(); it.next()) {
+        MObject node = it.thisNode();
+        MFnDependencyNode fn(node);
+        if (fn.typeName() != "groomLabShape" || fn.isFromReferencedFile()) continue;
+        const std::vector<ScalpMesh::Triangle> live = rememberedScalpSplit(node);
+        if (live.empty()) continue;  // not evaluated since it was opened: what it stores stays
+        MPlug plug = fn.findPlug("scalpSplit", true);
+        if (plug.isNull() || splitFromIntArray(plug.asMObject()) == live) continue;
+        MIntArray ints(static_cast<unsigned>(live.size() * 3));
+        for (std::size_t t = 0; t < live.size(); ++t) {
+            for (int c = 0; c < 3; ++c) ints[static_cast<unsigned>(3 * t + c)] = live[t][c];
+        }
+        MFnIntArrayData data;
+        plug.setMObject(data.create(ints));
+    }
+}
+
+MeshPtr toScalpMesh(const MObject& meshData, const MObject& restData, std::string* restError,
+                    const std::vector<ScalpMesh::Triangle>* keepSplit) {
     if (restError) restError->clear();
     if (meshData.isNull()) return nullptr;
     MStatus status;
@@ -614,6 +680,16 @@ MeshPtr toScalpMesh(const MObject& meshData, const MObject& restData, std::strin
     std::vector<ScalpMesh::Triangle> tris(triVerts.length() / 3);
     for (unsigned t = 0; t < tris.size(); ++t) {
         tris[t] = {triVerts[3 * t], triVerts[3 * t + 1], triVerts[3 * t + 2]};
+    }
+    // The split the groom's roots were laid on, while it still splits these polygons.
+    if (keepSplit && !keepSplit->empty() && *keepSplit != tris) {
+        MIntArray counts, vertices;
+        fn.getVertices(counts, vertices);
+        std::vector<std::int32_t> loopCounts(counts.length()), loops(vertices.length()), perPolygon(triCounts.length());
+        for (unsigned i = 0; i < counts.length(); ++i) loopCounts[i] = counts[i];
+        for (unsigned i = 0; i < vertices.length(); ++i) loops[i] = vertices[i];
+        for (unsigned i = 0; i < triCounts.length(); ++i) perPolygon[i] = triCounts[i];
+        if (isTriangulationOf(*keepSplit, perPolygon, loopCounts, loops)) tris = *keepSplit;
     }
     auto scalp = std::make_shared<ScalpMesh>(std::move(points), std::move(tris));
     // The polygons the triangles came from (each polygon's triangle count, in order): what
@@ -1069,8 +1145,9 @@ MeshPtr rawScalpFromNode(const MObject& node, NodeInputCache* cache) {
     const MObject meshData = fn.findPlug("inMesh", true).asMObject();
     const MObject restData = rest.isConnected() ? rest.asMObject() : MObject::kNullObj;
     MeshPtr raw;
+    const std::vector<ScalpMesh::Triangle> keepSplit = scalpSplitOf(node);  // the split its roots were laid on
     if (!cache) {
-        raw = toScalpMesh(meshData, restData);
+        raw = toScalpMesh(meshData, restData, nullptr, &keepSplit);
     } else {
         // Converting the mesh (triangles, UVs, color sets) costs more than reading its points.
         // The same points (and matrix) as last time: the same scalp, unless something else of it
@@ -1107,7 +1184,7 @@ MeshPtr rawScalpFromNode(const MObject& node, NodeInputCache* cache) {
             }
         }
         if (!converted) {
-            raw = toScalpMesh(meshData, restData);
+            raw = toScalpMesh(meshData, restData, nullptr, &keepSplit);
             // The same scalp as last time: keep the old one, with what it has built.
             if (raw && cache->rawScalp && raw->contentHash() == cache->rawScalp->contentHash()) raw = cache->rawScalp;
             cache->scalpRead = true;

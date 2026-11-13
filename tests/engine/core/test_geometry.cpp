@@ -107,6 +107,38 @@ TEST(ScalpMesh, AreaAndNormals) {
     EXPECT_NEAR(mesh->position(root).y, 0.0f, 1e-6f);
 }
 
+// A host keeps the split a groom was rooted on while it still splits the mesh's polygons: a quad
+// split across either diagonal, a pentagon fanned anywhere, polygon after polygon; not triangles
+// turned the other way (normals reversed since), over another polygon's vertices, overlapping, or
+// a polygon re-cut (another loop).
+TEST(ScalpMesh, IsTriangulationOfTheSamePolygons) {
+    using T = ScalpMesh::Triangle;
+    // A quad (0 1 2 3) and a pentagon (1 4 5 6 2) sharing the edge 1-2.
+    const std::vector<std::int32_t> loopCounts{4, 5};
+    const std::vector<std::int32_t> loops{0, 1, 2, 3, 1, 4, 5, 6, 2};
+    const std::vector<std::int32_t> perPolygon{2, 3};
+    const std::vector<T> pentagon{{1, 4, 5}, {1, 5, 6}, {1, 6, 2}};
+    auto with = [&](std::vector<T> quad) {
+        quad.insert(quad.end(), pentagon.begin(), pentagon.end());
+        return quad;
+    };
+    EXPECT_TRUE(isTriangulationOf(with({{0, 1, 2}, {0, 2, 3}}), perPolygon, loopCounts, loops));
+    EXPECT_TRUE(isTriangulationOf(with({{0, 1, 3}, {1, 2, 3}}), perPolygon, loopCounts, loops));  // the other diagonal
+    EXPECT_TRUE(isTriangulationOf(with({{1, 2, 3}, {3, 0, 1}}), perPolygon, loopCounts, loops));  // its corners rotated
+    EXPECT_TRUE(isTriangulationOf({{0, 1, 2}, {0, 2, 3}, {4, 5, 6}, {4, 6, 2}, {4, 2, 1}}, perPolygon, loopCounts, loops));
+    EXPECT_FALSE(isTriangulationOf(with({{0, 2, 1}, {0, 3, 2}}), perPolygon, loopCounts, loops));  // turned the other way
+    EXPECT_FALSE(isTriangulationOf(with({{0, 1, 2}, {1, 2, 3}}), perPolygon, loopCounts, loops));  // overlapping
+    EXPECT_FALSE(isTriangulationOf(with({{0, 1, 2}, {0, 1, 2}}), perPolygon, loopCounts, loops));  // one twice
+    EXPECT_FALSE(isTriangulationOf(with({{0, 1, 4}, {0, 2, 3}}), perPolygon, loopCounts, loops));  // another polygon's vertex
+    EXPECT_FALSE(isTriangulationOf({{0, 1, 2}, {0, 2, 3}}, perPolygon, loopCounts, loops));      // too few
+    EXPECT_FALSE(isTriangulationOf(with({{0, 1, 2}, {0, 2, 3}}), {3, 2}, loopCounts, loops));  // other counts
+    // The quad re-cut (another loop over the same vertices: 0 2 1 3) is another polygon.
+    EXPECT_FALSE(isTriangulationOf(with({{0, 1, 2}, {0, 2, 3}}), perPolygon, loopCounts, {0, 2, 1, 3, 1, 4, 5, 6, 2}));
+    EXPECT_FALSE(isTriangulationOf({}, perPolygon, loopCounts, loops));
+    EXPECT_TRUE(isTriangulationOf({}, {}, {}, {}));
+    EXPECT_FALSE(isTriangulationOf({{0, 1, 1}}, {1}, {3}, {0, 1, 1}));  // a polygon repeating a vertex
+}
+
 TEST(ScalpMesh, PositionAndNormalOnEveryFace) {
     // position() is the barycentric blend of the face's corners (no bounds check on the hot
     // path: callers validate the face); normal() is unit, and at a corner the same from every

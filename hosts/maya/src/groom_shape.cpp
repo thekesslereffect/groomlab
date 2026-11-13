@@ -24,6 +24,7 @@
 #include <maya/MFnDagNode.h>
 #include <maya/MFnEnumAttribute.h>
 #include <maya/MFnGeometryData.h>
+#include <maya/MFnIntArrayData.h>
 #include <maya/MFnMesh.h>
 #include <maya/MFnMeshData.h>
 #include <maya/MFnNumericAttribute.h>
@@ -160,6 +161,7 @@ MObject GroomShape::aTime;
 MObject GroomShape::aSimCaches;
 MObject GroomShape::aTransferMarkers;
 MObject GroomShape::aScalpTopology;
+MObject GroomShape::aScalpSplit;
 MObject GroomShape::aScaleSource;
 MObject GroomShape::aScaleReference;
 MObject GroomShape::aGroomScale;
@@ -579,6 +581,15 @@ MStatus GroomShape::initialize() {
     // The scalp's fingerprint (ScalpMesh::topologyFingerprint, groom_file.h text) an imported groom
     // was made on: a scalp of another topology is said in lastError (GroomSession). "": not known.
     aScalpTopology = tAttr.create("scalpTopology", "glstp", MFnData::kString, MObject::kNullObj, &status);
+    CHECK_MSTATUS_AND_RETURN_IT(status);
+    tAttr.setStorable(true);
+    tAttr.setHidden(true);
+    // The split (triangles) the groom's roots were laid on, stored before each save
+    // (storeScalpSplits): the scalp keeps it while it has the same polygons, so a transform frozen
+    // into the mesh or a sculpt, which Maya splits otherwise, leaves the guides where they are.
+    // Read when the scalp is converted; it affects nothing (it is that split already).
+    MFnIntArrayData noSplit;
+    aScalpSplit = tAttr.create("scalpSplit", "glspl", MFnData::kIntArray, noSplit.create(), &status);
     CHECK_MSTATUS_AND_RETURN_IT(status);
     tAttr.setStorable(true);
     tAttr.setHidden(true);
@@ -1124,7 +1135,7 @@ MStatus GroomShape::initialize() {
     tAttr.setStorable(false);
     tAttr.setHidden(true);
 
-    for (MObject* attr : {&aInMesh, &aRestMesh, &aFollowScalp, &aScalpTopology, &aScaleSource, &aScaleReference, &aScaleTransformReference, &aGroomScale, &aScaleArea, &aScaleTransform, &aColliderMeshes, &aExtraScalps, &aRenderDensity, &aRenderWidthScale, &aRenderLengthScale, &aRenderView, &aSimGuides, &aGuideCache, &aGuideCacheObject, &aSimCaches, &aTransferMarkers, &aGuideCurves, &aDriverCurves, &aDriverTwist, &aDriverBind, &aTime, &aGraph, &aGuideData, &aPartData, &aGraphUi, &aViewNode, &aLocked, &aDisplayInstances, &aGuideSelection, &aSoftSelectRadius, &aStrandColorMode, &aStrandColorSource, &aStrandColorMin, &aStrandColorMax, &aDisplayRibbons, &aRibbonWidthScale, &aDisplayWidthCoverage, &aDisplayCoverageDensity, &aDisplayClumpLod, &aClumpLodError, &aDisplayLighting, &aDisplayShadows, &aDisplayHairShading, &aDisplaySelfShadowing, &aDisplayStrandVariation, &aGuideWidth, &aCorrectiveData, &aCorrectiveWeight, &aSculptData, &aSculptNode, &aFlowData, &aDisplayFlow, &aShotSculpt, &aShotLayer, &aLodDistance, &aLodNear, &aLodFar, &aLodMinDensity,
+    for (MObject* attr : {&aInMesh, &aRestMesh, &aFollowScalp, &aScalpTopology, &aScalpSplit, &aScaleSource, &aScaleReference, &aScaleTransformReference, &aGroomScale, &aScaleArea, &aScaleTransform, &aColliderMeshes, &aExtraScalps, &aRenderDensity, &aRenderWidthScale, &aRenderLengthScale, &aRenderView, &aSimGuides, &aGuideCache, &aGuideCacheObject, &aSimCaches, &aTransferMarkers, &aGuideCurves, &aDriverCurves, &aDriverTwist, &aDriverBind, &aTime, &aGraph, &aGuideData, &aPartData, &aGraphUi, &aViewNode, &aLocked, &aDisplayInstances, &aGuideSelection, &aSoftSelectRadius, &aStrandColorMode, &aStrandColorSource, &aStrandColorMin, &aStrandColorMax, &aDisplayRibbons, &aRibbonWidthScale, &aDisplayWidthCoverage, &aDisplayCoverageDensity, &aDisplayClumpLod, &aClumpLodError, &aDisplayLighting, &aDisplayShadows, &aDisplayHairShading, &aDisplaySelfShadowing, &aDisplayStrandVariation, &aGuideWidth, &aCorrectiveData, &aCorrectiveWeight, &aSculptData, &aSculptNode, &aFlowData, &aDisplayFlow, &aShotSculpt, &aShotLayer, &aLodDistance, &aLodNear, &aLodFar, &aLodMinDensity,
                           &aLodWidthCompensation, &aCameraCull, &aCullMargin, &aBackfaceCull, &aBackfaceAngle, &aDisplayColor, &aUseMaterialColor, &aSculptDisplay, &aSculptDensity, &aIsolateGroup, &aGuideColorMode, &aGuideColorLayer, &aGuidePoints, &aGuideSmoothing, &aHiddenGuideGroups, &aGuideGroupColors, &aRenderMode, &aGroomFile, &aPreviewDensity, &aPreviewPointBudget, &aDisplayGuides, &aDisplayHair,
                           &aDisplayTubes, &aBrushTick, &aCardDensity, &aOutCards, &aOutRachis, &aOutMesh, &aDisplayCards, &aDisplayMesh, &aDisplayCardTextures, &aDisplayOverlaysOnTop, &aCardMaps, &aScalpMaps, &aScalpMapDisplay, &aScalpMapChannel, &aOutStrandCount, &aLastError, &aOutVrayPluginData, &aOutFrame}) {
         CHECK_MSTATUS_AND_RETURN_IT(addAttribute(*attr));
@@ -1432,7 +1443,12 @@ MStatus GroomShape::evaluate(MDataBlock& data, Lane& lane) {
         }
         if (!pointsOnly) {
             std::string restError;
-            scalp = toScalpMesh(meshData, restData, &restError);
+            // The split its roots were laid on (scalpSplitOf): the stored one, else the last one
+            // converted live, while the mesh has the same polygons (a frozen transform, a sculpt).
+            std::vector<ScalpMesh::Triangle> keepSplit = splitFromIntArray(data.inputValue(aScalpSplit).data());
+            if (keepSplit.empty()) keepSplit = rememberedScalpSplit(thisMObject());
+            scalp = toScalpMesh(meshData, restData, &restError, &keepSplit);
+            if (scalp && live) rememberScalpSplit(thisMObject(), scalp->triangles());
             // The same scalp as last time: keep the old one, with its closest-point tree built.
             if (scalp && lane.rawScalp && scalp->contentHash() == lane.rawScalp->contentHash()) scalp = lane.rawScalp;
             if (restError != lane.restError) {

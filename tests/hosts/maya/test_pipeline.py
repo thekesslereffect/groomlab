@@ -303,6 +303,82 @@ class PipelineTest(unittest.TestCase):
         cmds.setAttr(groom + ".previewPointBudget", 0)
         return groom
 
+    def test_a_scalp_split_otherwise_leaves_the_groom_where_it_is(self):
+        # Maya splits each quad across its shorter diagonal, so rewriting the scalp's points (a
+        # sculpt; a transform frozen into them, whose rounding tips a quad whose diagonals are all
+        # but equal) can split a quad the other way, and one quad split otherwise made every guide
+        # let go of the scalp (another topology): they went back to their stored shape, where the
+        # scalp was when they were rooted. The groom keeps the split its guides were rooted on
+        # (scalpSplit, stored at save) while the mesh has the same polygons.
+        import maya.api.OpenMaya as om
+        cmds.loadPlugin("AbcImport", quiet=True)
+        scalp = cmds.polyPlane(width=4, height=4, subdivisionsX=8, subdivisionsY=8, constructionHistory=False)[0]
+        groom = groomlab.create_groom(scalp)
+        roots = ((1.2, 1.3), (0.4, 1.5), (1.5, 0.3), (0.9, 0.8))
+        groomlab.guides_from_curves(groom, [cmds.curve(degree=1, point=[(x, 0, z), (x + 0.2, 0.6, z), (x + 0.5, 0.9, z + 0.2)])
+                                            for x, z in roots])
+        cmds.setAttr(groom + ".previewDensity", 1.0)
+        cmds.setAttr(groom + ".scaleSource", 2)  # Off: the sculpt's bit of area does not scale the groom
+        cmds.getAttr(groom + ".outStrandCount")  # evaluated, as the viewport does
+
+        def mesh():
+            sel = om.MSelectionList()
+            sel.add(scalp)
+            return om.MFnMesh(sel.getDagPath(0))
+
+        def guides(name):
+            # The guides as an export evaluates them (a session of its own, as a reopened file's):
+            # the Unreal groom's guides object, imported back, its points in order.
+            path = os.path.join(WORK_DIR, name + ".abc")
+            groomlab.export_unreal_groom(groom, path)
+            before = set(cmds.ls(assemblies=True))
+            cmds.AbcImport(path, mode="import")
+            made = [a for a in cmds.ls(assemblies=True) if a not in before]
+            curves = [cmds.getAttr(curve + ".cv[*]")
+                      for curve in cmds.listRelatives(made, allDescendents=True, fullPath=True, type="nurbsCurve") or []
+                      if "|guides|" in curve]
+            cmds.delete(made)
+            return sorted(curves, key=lambda cvs: [round(v, 1) for v in cvs[0]])  # guide by guide, by root
+
+        def assert_same(a, b, what):
+            self.assertEqual([len(g) for g in a], [len(g) for g in b], what)
+            worst = max(abs(p[c] - q[c]) for ga, gb in zip(a, b) for p, q in zip(ga, gb) for c in range(3))
+            self.assertLess(worst, 1e-3, what)
+
+        # The scalp moved by its transform (the groom follows), then a vertex pushed along the
+        # diagonal Maya split its quad by, so that quad splits across the other one.
+        cmds.xform(scalp, translation=(0.5, -9.0, 0.25))
+        moved = guides("split_moved")
+        self.assertEqual(len(moved), 4)
+        fn = mesh()
+        counts, before = fn.getTriangles()
+        sculpted = 0  # a corner vertex, away from the guides' roots
+        loop = list(fn.getPolygonVertices(0))
+        self.assertIn(sculpted, loop)
+        across = loop[(loop.index(sculpted) + 2) % 4]  # the quad's other end of the sculpted vertex's diagonal
+        diagonal_split = all({sculpted, across} <= set(before[t:t + 3]) for t in (0, 3))  # split along it
+        p, q = fn.getPoint(sculpted), fn.getPoint(across)
+        push = (p - q) * (0.25 if diagonal_split else -0.25)  # that diagonal longer, or shorter
+        cmds.move(push.x, push.y, push.z, "%s.vtx[%d]" % (scalp, sculpted), relative=True, objectSpace=True)
+        self.assertNotEqual(list(mesh().getTriangles()[1]), list(before), "the sculpt re-split a quad (the case under test)")
+        assert_same(moved, guides("split_sculpted"), "sculpted")
+        cmds.makeIdentity(scalp, apply=True, translate=True, rotate=True, scale=True)
+        assert_same(moved, guides("split_frozen"), "frozen")
+        self.assertEqual(groomlab.errors(groom), [])
+
+        # Saved and reopened: the stored split.
+        path = os.path.join(WORK_DIR, "split_frozen.ma")
+        cmds.file(rename=path)
+        cmds.file(save=True, type="mayaAscii")
+        self.assertEqual(len(cmds.getAttr(groom + ".scalpSplit")), 3 * cmds.polyEvaluate(scalp, triangle=True))
+        cmds.file(path, open=True, force=True)
+        groom = cmds.ls(type="groomLabShape")[0]
+        assert_same(moved, guides("split_reopened"), "reopened")
+
+        # Another topology (a face cut) is no longer that split: Maya's own, as before.
+        cmds.polySubdivideFacet("%s.f[40]" % scalp, divisions=1)
+        self.assertEqual(len(guides("split_cut")), 4)
+
     def test_rest_mesh_stays_put_while_the_transform_moves(self):
         # The scalp under a group whose transform is keyed (a character moved by its rig; no
         # deformer), its rest mesh set at frame 5 (away from the identity): the rest pose is the

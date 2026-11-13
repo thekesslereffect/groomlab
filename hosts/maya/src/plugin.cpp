@@ -318,6 +318,7 @@ PLUGIN_EXPORT MStatus initializePlugin(MObject obj) {
     gCallbacks.append(MSceneMessage::addCallback(MSceneMessage::kBeforeSave, [](void*) {
         try {
             groomlab::maya::refreshMayaPaths();
+            groomlab::maya::storeScalpSplits();  // the file reopens on the split its roots were laid on
             callGroomlab("follow_scene_files");
             callGroomlab("store_scale_references");  // a groom reopens at the scale it had
             callGroomlab("sync_file_nodes");  // the File Path Editor's nodes as the files are now (file_node.h)

@@ -68,8 +68,26 @@ struct NodeInputCache;  // below: conversions kept across the frames of an expor
 // Triangulated scalp from mesh data. Null if meshData is not a mesh.
 // restData, when it is a mesh with the same vertex count, becomes the rest pose;
 // with another vertex count it is dropped and *restError (when given) says so.
+// `keepSplit` (scalpSplitOf): triangles the mesh is split into instead of Maya's own split while
+// they still split its polygons (isTriangulationOf), so a mesh whose points were rewritten keeps
+// the triangles a groom's roots were laid on.
 MeshPtr toScalpMesh(const MObject& meshData, const MObject& restData = MObject::kNullObj,
-                    std::string* restError = nullptr);
+                    std::string* restError = nullptr, const std::vector<ScalpMesh::Triangle>* keepSplit = nullptr);
+
+// The split a groom's scalp keeps (its triangles, ScalpMesh::Triangle). Maya splits a quad across
+// its shorter diagonal, so a scalp whose points are rewritten (a transform frozen into them, a
+// sculpt) can split otherwise; the guides, parts, flow and maps rooted on its triangles would then
+// read other triangles (guides bound to another split let go of the scalp and keep their stored
+// shape). So a groom keeps the split it was rooted on while the mesh has the same polygons: the
+// node's scalpSplit (stored before each save: storeScalpSplits), else the split its live
+// evaluation last converted (rememberScalpSplit). Empty: none known (Maya's own split).
+std::vector<ScalpMesh::Triangle> scalpSplitOf(const MObject& node);
+std::vector<ScalpMesh::Triangle> splitFromIntArray(const MObject& intArrayData);
+void rememberScalpSplit(const MObject& node, const std::vector<ScalpMesh::Triangle>& split);
+std::vector<ScalpMesh::Triangle> rememberedScalpSplit(const MObject& node);
+// Before a save: every groom not from a referenced file stores in scalpSplit the split it
+// evaluated on (when it changed), so the file reopens on it.
+void storeScalpSplits();
 
 // Colliders (the node's colliderMeshes elements): the name a connected collider
 // registers its mesh under, so the graph's ColliderMesh node of that name reads it
