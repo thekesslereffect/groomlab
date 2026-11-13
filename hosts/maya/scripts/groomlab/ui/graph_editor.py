@@ -3081,6 +3081,12 @@ class ParamPanel(QtWidgets.QScrollArea):
         takes the old one away (deleted once the click that got here is over)."""
         old = self.pinned
         if old is not None and widgets.alive(old) and old is not widget:
+            # The focus off the old bar first (issue #47): a hidden focus widget hands it to the
+            # next one in the chain, a param in the scrolled body, and the scroll area scrolls to
+            # show it, so the params jumped after a click on Bake Maps or an export.
+            focus = QtWidgets.QApplication.focusWidget()
+            if focus is not None and (focus is old or old.isAncestorOf(focus)):
+                self.setFocus(QtCore.Qt.OtherFocusReason)
             old.hide()
             old.setParent(None)  # (out of the panel now, as takeWidget does with the params)
             old.deleteLater()
@@ -3089,6 +3095,10 @@ class ParamPanel(QtWidgets.QScrollArea):
         if widget is not None:
             widget.setParent(self)
             shrinkable(widget)
+            # Its buttons take no focus from a click: the keyboard stays where it was, and nothing
+            # hands focus on into the params when the bar is rebuilt.
+            for button in widget.findChildren(QtWidgets.QAbstractButton):
+                button.setFocusPolicy(QtCore.Qt.NoFocus)
             widget.show()
         self.place_pinned()
 
@@ -3113,12 +3123,27 @@ class ParamPanel(QtWidgets.QScrollArea):
         super(ParamPanel, self).resizeEvent(event)
         self.place_pinned()
 
+    _scroll_hold = None  # (node, scroll) taken as an action began (action_runner)
+
+    def restore_scroll_hold(self):
+        """The params scrolled back to where they were as the action began, when the same node shows."""
+        hold, self._scroll_hold = self._scroll_hold, None
+        if hold and hold[0] is not None and hold[0] == self.node and widgets.alive(self.widget()):
+            self.keep_scroll(self.widget(), hold[1])
+
     def action_runner(self, fn, done=None, busy=None):
         """A button's click: `fn` run once the click is over, its changes into the editor's graph,
         then onto the groom (reloading rebuilds this panel, and the button that was clicked with it).
         `done`: what to report (a text, or a function of the result); `busy`: what a long one says
         while it runs (the panel disabled, the wait cursor)."""
         def act():
+            # Where the params are scrolled to, taken before anything moves them (issue #47): the
+            # panel disabled while a long one runs passes the focus on, and the scroll area scrolls
+            # to where it lands, before the reload that would keep the scroll.
+            self._scroll_hold = (self.node, self.verticalScrollBar().value())
+            focus = QtWidgets.QApplication.focusWidget()
+            if busy and focus is not None and (focus is self or self.isAncestorOf(focus)):
+                focus.clearFocus()  # (no focus in the panel: disabling it hands none on into the params)
             try:
                 if busy:
                     with widgets.busy([self], self.editor.status, busy):
@@ -3127,6 +3152,7 @@ class ParamPanel(QtWidgets.QScrollArea):
                     result = fn()
             except (RuntimeError, ValueError) as e:
                 self.editor.report(plain_message(e), trouble=True)
+                self.restore_scroll_hold()
                 return
             except Exception as e:  # noqa: BLE001 (a button never ends in a bare traceback)
                 import traceback
@@ -3134,8 +3160,10 @@ class ParamPanel(QtWidgets.QScrollArea):
                 self.editor.report("%s (details in the Script Editor)" % plain_message(e), trouble=True)
                 return
             if not self.editor.apply():
+                self.restore_scroll_hold()
                 return
             self.editor.reload()
+            self.restore_scroll_hold()
             if done:
                 self.editor.report(done(result) if callable(done) else done)
 
@@ -3213,23 +3241,34 @@ class ParamPanel(QtWidgets.QScrollArea):
                 stats = groomlab.card_stats(groom, node=name) if groom else None
             except RuntimeError:
                 stats = None
-            if stats and stats["cards"]:
-                text = "%d cards \u00b7 %d triangles \u00b7 %d textures" % (stats["cards"], stats["triangles"],
+            # Two lines that are always there (issue #47): what the cards cost, and the maps' status.
+            # The pinned bar keeps its height as cards come and go and the maps go stale and fresh,
+            # so the params under it never move.
+            stats = stats or {"cards": 0, "triangles": 0, "textures": 0}
+            if stats["cards"]:
+                text = "%d cards · %d triangles · %d textures" % (stats["cards"], stats["triangles"],
                                                                          stats["textures"])
                 if stats.get("feathers"):
-                    text += " \u00b7 %d feathers" % stats["feathers"]
-                info = QtWidgets.QLabel(text)
-                info.setObjectName("nodeAction_CardStats")
-                info.setToolTip("This node's cards as they are now (at cardDensity). Change them with the params, "
-                                "or pick a level of detail. All Cards nodes share one atlas and one bake")
-                buttons.append(info)
-                if stats.get("stale"):
-                    stale = QtWidgets.QLabel("\u26a0 Maps out of date: rebake")
-                    stale.setObjectName("nodeAction_CardsStale")
-                    stale.setStyleSheet("color: %s; font-weight: bold;" % WARNING.name())
-                    stale.setToolTip(self.editor.CARDS_STALE)
-                    buttons.append(stale)
-                buttons.append(None)
+                    text += " · %d feathers" % stats["feathers"]
+            else:
+                text = "No cards yet (nothing feeds this node, or cardDensity is 0)"
+            info = QtWidgets.QLabel(text)
+            info.setObjectName("nodeAction_CardStats")
+            info.setToolTip("This node's cards as they are now (at cardDensity). Change them with the params, "
+                            "or pick a level of detail. All Cards nodes share one atlas and one bake")
+            buttons.append(info)
+            if stats.get("stale"):
+                text, color, tip = "⚠ Maps out of date: rebake", WARNING, self.editor.CARDS_STALE
+            elif stats.get("baked"):
+                text, color, tip = "✓ Maps up to date", MUTED, "The baked maps match these cards"
+            else:
+                text, color, tip = "Maps not baked yet", MUTED, "Bake Maps makes the atlas's maps for these cards"
+            status = QtWidgets.QLabel(text)
+            status.setObjectName("nodeAction_CardsStatus")
+            status.setStyleSheet("color: %s;%s" % (color.name(), " font-weight: bold;" if stats.get("stale") else ""))
+            status.setToolTip(tip)
+            buttons.append(status)
+            buttons.append(None)
             show = QtWidgets.QCheckBox("Show cards")
             show.setObjectName("nodeAction_ShowCards")
             show.setToolTip("Cards view (A/B): the cards instead of the strands, with the baked maps once "

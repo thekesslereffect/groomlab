@@ -1041,12 +1041,12 @@ class GraphEditorTest(unittest.TestCase):
         mine = groomlab.card_stats(self.groom, node=inner)
         labels = panel(inner)
         self.assertTrue(labels["nodeAction_CardStats"].startswith("%d cards" % mine["cards"]), labels)
-        self.assertIn("nodeAction_CardsStale", labels)
+        self.assertIn("out of date", labels["nodeAction_CardsStatus"])
         theirs = groomlab.card_stats(self.groom, node=outer)
         self.assertNotEqual(theirs["cards"], mine["cards"])
         labels = panel(outer)
         self.assertTrue(labels["nodeAction_CardStats"].startswith("%d cards" % theirs["cards"]), labels)
-        self.assertNotIn("nodeAction_CardsStale", labels)
+        self.assertNotIn("out of date", labels["nodeAction_CardsStatus"])  # (the line stays: its status)
 
     def test_paint_a_param_from_its_menu(self):
         menu = self.editor.params.build_param_menu("scatter", "density")
@@ -1107,6 +1107,46 @@ class GraphEditorTest(unittest.TestCase):
         wait(50)
         self.assertEqual(params.node, "scatter")
         self.assertEqual(bar.value(), 0)
+
+    def test_a_cards_nodes_params_keep_their_scroll_through_a_bake_click(self):
+        # Issue #47 (Omar): a real click on Bake Maps (the bake stubbed: its reload is what matters)
+        # gave the clicked button's focus to the params when the pinned bar was rebuilt, and the
+        # scroll area scrolled to it: the params jumped back to their top. The pinned bar's height
+        # stays the same as the maps go stale and fresh (its status line is always there).
+        from groomlab.ui.qt import QtCore, QtWidgets
+        from groomlab.ui.qt import QtTest as qt_test_module
+        QtTest = qt_test_module()
+        self.editor.resize(1200, 360)
+        self.editor.show()
+        cards = self.editor.add_node("Cards")
+        self._select_node(cards)
+        wait(50)
+        params = self.editor.params
+        bar = params.verticalScrollBar()
+        self.assertGreater(bar.maximum(), 40, "the Cards params scroll in a short panel")
+        bar.setValue(bar.maximum() // 2)
+        kept = bar.value()
+        height = params.pinned.height()
+        status = [w for w in params.pinned.findChildren(QtWidgets.QLabel) if w.objectName() == "nodeAction_CardsStatus"]
+        self.assertEqual(len(status), 1, "the maps' status: one line, always there")
+        moves = []  # every scroll the click caused: none but the rebuild's own reset (restored at once)
+        bar.valueChanged.connect(lambda v: moves.append(v))
+        real = groomlab.bake_cards
+        try:
+            groomlab.bake_cards = lambda groom, *args, **kwargs: []
+            button = self._action("Bake Maps")
+            QtTest.QTest.mouseClick(button, QtCore.Qt.LeftButton)
+            wait(200)
+        finally:
+            groomlab.bake_cards = real
+        self.assertEqual(params.node, cards)
+        self.assertEqual(bar.value(), kept, "the params where they were scrolled to")
+        self.assertEqual([v for v in moves if v not in (0, kept)], [], "the panel disabled for the bake scrolled it")
+        self.assertEqual(params.pinned.height(), height)
+        # A param edited (the maps' status may change): the params stay too.
+        self.editor.set_param(cards, "maxCards", 123)
+        wait(100)
+        self.assertEqual(bar.value(), kept)
 
     def test_any_param_exposed_and_set_by_a_value(self):
         from groomlab.ui.qt import QtWidgets
