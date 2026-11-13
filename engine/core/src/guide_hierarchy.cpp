@@ -531,6 +531,35 @@ GroupId GuideHierarchy::generateChildren(GroupId parentGroup, const std::string&
             GuideId id = hashCombine(hashCombine(hash64(parentId), params.seed), k);
             while (id == kNoGuide || index_.count(id)) id = hash64(id);  // keep IDs stable, unique and nonzero
 
+            if (params.split) {
+                // A slice of the parent's section: across its longer side at the root, centered.
+                const TubeSection root = parent.tube.sectionAt(0.0f);
+                const bool across = root.aspect <= 1.0f;  // the width is the longer side: cut it
+                const float slices = static_cast<float>(params.count);
+                const float center = -1.0f + (2.0f * static_cast<float>(k) + 1.0f) / slices;
+                const Vec3f at = across ? Vec3f(center, 0.0f, 0.0f) : Vec3f(0.0f, center, 0.0f);
+                HierarchyGuide child;
+                child.id = id;
+                child.group = childGroup;
+                child.parent = parentId;
+                child.tube = parent.tube;
+                child.tube.roll.clear();
+                if (across) {
+                    child.tube.scaleWidth(1.0f / slices);
+                    for (float& a : child.tube.aspect) a = std::clamp(a * slices, kMinTubeAspect, kMaxTubeAspect);
+                } else {
+                    for (float& a : child.tube.aspect) a = std::clamp(a / slices, kMinTubeAspect, kMaxTubeAspect);
+                }
+                child.offsets.assign(n, at);
+                child.frameUp = parentFrames.empty() ? parent.frameUp : parentFrames.front().normal;
+                resolveFollower(child, parent, nullptr, &parentFrames);
+                child.frameUp = parentFrames.empty() ? parent.frameUp : parentFrames.front().normal;
+                index_[id] = guides_.size();
+                guides_.push_back(std::move(child));
+                made.push_back(id);
+                continue;
+            }
+
             Rng rng(id);
             const float u = rng.nextFloat();
             const float angle = kTwoPi * rng.nextFloat();

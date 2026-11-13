@@ -57,6 +57,7 @@ const char* kTwist[] = {"-tw", "-twist"};
 const char* kJitter[] = {"-j", "-jitter"};
 const char* kTubeScale[] = {"-tsc", "-tubeScale"};
 const char* kSeed[] = {"-sd", "-seed"};
+const char* kSplit[] = {"-spl", "-split"};
 const char* kRemoveGroup[] = {"-rg", "-removeGroup"};
 const char* kRenameGroup[] = {"-rng", "-renameGroup"};
 const char* kAddGroup[] = {"-adg", "-addGroup"};
@@ -260,6 +261,7 @@ MSyntax GuidesCmd::newSyntax() {
     s.addFlag(kTwist[0], kTwist[1], MSyntax::kDouble);
     s.addFlag(kJitter[0], kJitter[1], MSyntax::kDouble);
     s.addFlag(kTubeScale[0], kTubeScale[1], MSyntax::kDouble);
+    s.addFlag(kSplit[0], kSplit[1], MSyntax::kBoolean);
     s.addFlag(kSeed[0], kSeed[1], MSyntax::kLong);
     s.addFlag(kRemoveGroup[0], kRemoveGroup[1], MSyntax::kString);
     s.addFlag(kRenameGroup[0], kRenameGroup[1], MSyntax::kString, MSyntax::kString);
@@ -702,6 +704,7 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                 int seed = 0;
                 if (db.isFlagSet(kSeed[0])) db.getFlagArgument(kSeed[0], 0, seed);
                 p.seed = static_cast<std::uint64_t>(seed);
+                if (db.isFlagSet(kSplit[0])) db.getFlagArgument(kSplit[0], 0, p.split);
     
                 const MString childName = flagString(db, kNameFlag[0], parentName + "_children");
                 const GroupId child = h->generateChildren(parent, childName.asChar(), p, restricted ? &only : nullptr);

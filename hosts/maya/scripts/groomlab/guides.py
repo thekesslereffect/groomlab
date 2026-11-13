@@ -46,7 +46,7 @@ def guides_from_curves(groom, curves, group="primary", tube_radius=0.1, tube_tip
 
 
 def generate_children(groom, parent_group=None, name=None, count=5, root_spread=0.8, tip_spread=1.0, twist=0.0,
-                      jitter=0.1, tube_scale=0.35, seed=0, guides=None, selected=False):
+                      jitter=0.1, tube_scale=0.35, seed=0, guides=None, selected=False, split=False):
     """Give guides `count` children each, in the child group `name` (default "<parent group>_children").
 
     Parents: `guides` (IDs), or the selected guides with `selected=True`, else
@@ -54,12 +54,17 @@ def generate_children(groom, parent_group=None, name=None, count=5, root_spread=
     added to otherwise; a parent that already has children there gets new
     ones. So you choose, parent by parent, which guides have children, at any
     level (children of children too). Spreads and jitter are in units of the
-    parent tube radius; twist is in radians. Returns the size of the child group.
+    parent tube radius; twist is in radians. With `split` the children cut each parent's tube into
+    `count` equal slices across its longer side instead, each child's tube its slice (the Tube
+    hierarchy's Add: spreads, twist, jitter, tube_scale and seed are not read). Returns the size
+    of the child group.
     """
     kwargs = {"generateChildren": parent_group or "", "count": count, "rootSpread": root_spread,
               "tipSpread": tip_spread, "twist": twist, "jitter": jitter, "tubeScale": tube_scale, "seed": seed}
     if name:
         kwargs["name"] = name
+    if split:
+        kwargs["split"] = True
     if guides:
         kwargs["guide"] = [str(g) for g in guides]
     elif selected:

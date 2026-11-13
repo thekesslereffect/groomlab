@@ -259,6 +259,54 @@ the library is `-tubeShapes` (a query, JSON), `-editTubeShape <json>` (`{"op": "
 run on the CPU; the GPU preview hands those nodes to it. The shape editor is in Maya and the app;
 Blender has the same blocks and lists the library, without the outline editor yet.
 
+### Tubes drawn root first (Maya)
+
+The Tube tool's **Root tubes** block draws a tube the way Tonic does: its root first.
+
+- **Draw root**: click the root's outline on the scalp, one CV at a time (drag to move the CV
+  just placed; **Undo CV** takes one back). Near another root tube a CV snaps onto its CVs or edges
+  (**Snap to neighbours**), so the tubes meet with no gap. Clicking the first CV again closes the
+  outline.
+- With **Draw before extrude** (on by default) the root's middle then shows as a CV: drag from it
+  out to draw the tube's path, as the Draw tool draws a guide. On release the tube is made and the
+  next root can be drawn. Off, the tube goes straight off the scalp, **Length** long.
+- The tube's root section is exactly the drawn outline (a library shape of its own,
+  `rootTube_<n>`; **Smooth outline** draws a smooth curve through the CVs instead of straight
+  edges), narrowing to **Tip width** of it at the tip.
+- Each root tube is its own **region**: every root's area is painted in a color of its own on the
+  `tubeRoots` color vertex map (black elsewhere), which the Interpolate nodes with no region map
+  read, so the hair rooted in a tube's area follows only that tube. **Update regions** paints it
+  again.
+- **Edit roots** shows the root tubes' outlines and CVs (the selected guides' tubes, or every root
+  tube with none selected), the guides hidden. Drag CVs on the scalp (a CV shared with a
+  neighbour moves with it), then **Finish edit**: each changed tube is moved to its new root and
+  its section refitted (its taper and what brushes painted kept), and the regions are updated, in
+  one undo step.
+
+```python
+from groomlab import root_tubes
+guide = root_tubes.make_root_tube(groom, outline_points, path=None, length=2.0, taper=0.5)
+root_tubes.edit_root_tube(groom, guide, moved_points)
+root_tubes.update_regions(groom)
+```
+
+### Tube hierarchy
+
+The Tube tool's **Tube hierarchy** block subdivides tubes, level by level. **Add** splits each
+selected tube (or, with none selected, every tube of the base group) into two tubes side by side
+across its longer side, sharing its root shape, in the next level's group (`<base>_L2`,
+`<base>_L3`, ... up to level 9); pressing it again splits those in two (2 to 4, and on).
+The numbered buttons show one level at a time (the other levels' groups hidden) and pick its group,
+so the Tube tool and the brushes edit that level's tubes. Every level's tubes follow their parent:
+shaping a level 1 tube carries all the smaller tubes inside it, while each smaller tube keeps its
+own edits. **Remove** drops the deepest level.
+
+```python
+root_tubes.add_tube_level(groom)                   # every leaf tube split in two
+root_tubes.show_tube_level(groom, "rootTubes", 2)  # level 2 shown and returned
+groomlab.generate_children(groom, "tubes", count=2, split=True)  # the split itself (-split true)
+```
+
 ## Guide groups
 
 Guides belong to named **guide groups**. A group is either a top-level group of primary guides

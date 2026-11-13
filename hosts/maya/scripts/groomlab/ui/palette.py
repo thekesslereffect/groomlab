@@ -1442,6 +1442,11 @@ class ToolPalette(QtWidgets.QWidget):
         card.addWidget(self.select_box)
         card.addWidget(self.tube_panel.profile_block)
         card.addWidget(self.tube_panel.selected_block)
+        # The Tube tool's Tonic-style blocks: tubes drawn root first, and the tube hierarchy.
+        from groomlab.ui import tonic_tubes
+        self.tonic = tonic_tubes.TonicTubes(self)
+        for block in self.tonic.blocks:
+            card.addWidget(block)
 
         # Erase: what it removes.
         self.erase_box = widgets.Block(_setting("erases", "label"), name="erasesBlock")
@@ -2243,6 +2248,8 @@ class ToolPalette(QtWidgets.QWidget):
             self.length_keys.refresh()
         if any(b.isVisible() for b in self.tube_panel.blocks):  # (Shape, Select, Place, Draw) a selection or solo
             self.tube_panel.refresh(groom, full=self._ticks % 3 == 0)
+        if self.tonic.visible():  # the root tool's state and the hierarchy's levels
+            self.tonic.refresh(groom)
         # Weights change with the frame: read them every tick, the stack itself now and then
         # (keys edited in the timeline) and whenever the groom's correctives change (its callback);
         # only while the Correctives box shows.
@@ -2292,6 +2299,8 @@ class ToolPalette(QtWidgets.QWidget):
             self.tool = "select"
             self.buttons["select"].setChecked(True)
             self.show_tool_settings()
+        elif current == "groomLabRootTubeCtx" and self.tool == "shape":
+            pass  # the Tube tool's root-first mode (Draw root, Edit roots): its card stays
         elif current not in (ctx, groomlab.SELECT_CONTEXT) and self.tool is not None:
             self.clear_tool()  # another Maya tool took over: nothing is active here
 
@@ -2493,6 +2502,7 @@ class ToolPalette(QtWidgets.QWidget):
         self.stretch.row.setVisible("stretch" in uses)
         self.straighten.row.setVisible("straighten" in uses)
         self.tube_channel_box.setVisible("tubeChannel" in uses)
+        self.tonic.show(tool == "shape")
         self.select_box.setVisible("selection" in uses)
         self.erase_box.setVisible("erases" in uses)
         self.keys_block.setVisible("lengthKeys" in uses)

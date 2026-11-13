@@ -120,6 +120,13 @@ struct ChildGenerationParams {
     float jitter = 0.1f;           // random tip offset, in section units of the parent's tube
     float childTubeScale = 0.35f;  // child tube width as a fraction of the parent's (its shape, aspect and twist the parent's)
     std::uint64_t seed = 0;
+    // Split the parent's tube instead (the Tube hierarchy's Add, Tonic's subdivided tubes): the
+    // `count` children cut its section into equal slices across its longer side at the root (its
+    // width, or its height where the root's aspect is above 1), each child's tube that slice (the
+    // parent's shape drawn in it: its width or its aspect divided by count), centered in it from
+    // root to tip. Spreads, twist, jitter, childTubeScale and seed are not read. The children's
+    // frames start from the parent's root frame, so each slice lies across the parent as cut.
+    bool split = false;
 };
 
 // A guide group's name as it is kept: one word. The hosts' lists of group names (hidden groups,

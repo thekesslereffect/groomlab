@@ -1747,6 +1747,52 @@ TEST(TubeTargets, TheSelectionElseTheSoloAndTheirProfiles) {
     t = tubeTargetsOf(h, {});
     EXPECT_EQ(t.source, "solo");
     EXPECT_EQ(t.guides, (std::vector<GuideId>{ids[2]}));
+
+// The Tube hierarchy's Add (ChildGenerationParams::split): the children cut the parent's section
+// into equal slices across its longer side, side by side, each a slice's tube, following it.
+TEST(Tubes, SplitChildrenSliceTheParentAcrossItsLongerSide) {
+    for (const float aspect : {0.5f, 2.0f}) {
+        GuideHierarchy h;
+        const GroupId g = h.addGroup("tubes");
+        TubeProfile tube;
+        tube.shape = TubeShape::Ribbon;
+        tube.width = {0.2f};
+        tube.aspect = {aspect};
+        const GuideId parent = h.addGuide(g, straightGuide({0, 0, 0}), tube);
+        h.evaluate(nullptr);
+        ChildGenerationParams p;
+        p.count = 2;
+        p.split = true;
+        const GroupId kids = h.generateChildren(g, "tubes_L2", p);
+        h.evaluate(nullptr);
+        const std::vector<GuideId> ids = h.guidesInGroup(kids);
+        ASSERT_EQ(ids.size(), 2u);
+        const HierarchyGuide& a = *h.guide(ids[0]);
+        const HierarchyGuide& b = *h.guide(ids[1]);
+        const Vec3f root = h.guide(parent)->points.front();
+        // Side by side across the longer side, half of it apart, about the parent's guide.
+        const float longer = aspect <= 1.0f ? 0.2f : 0.2f * aspect;
+        EXPECT_NEAR((a.points.front() - b.points.front()).length(), longer, 1e-4f) << "aspect " << aspect;
+        EXPECT_NEAR(((a.points.front() + b.points.front()) * 0.5f - root).length(), 0.0f, 1e-4f);
+        EXPECT_NEAR((a.points.back() - b.points.back()).length(), longer, 1e-4f);
+        // Each child's tube is its slice: the same shape, half the longer side.
+        for (const HierarchyGuide* c : {&a, &b}) {
+            EXPECT_EQ(c->tube.shape, TubeShape::Ribbon);
+            EXPECT_NEAR(c->tube.widthAt(0.0f), aspect <= 1.0f ? 0.1f : 0.2f, 1e-5f);
+            EXPECT_NEAR(c->tube.widthAt(0.0f) * c->tube.aspectAt(0.0f), aspect <= 1.0f ? 0.1f : 0.2f, 1e-5f);
+        }
+        // Splitting again cuts each slice in two: four tubes under the two.
+        const GroupId grand = h.generateChildren(kids, "tubes_L3", p);
+        h.evaluate(nullptr);
+        EXPECT_EQ(h.guidesInGroup(grand).size(), 4u);
+        // The parent moved: its slices go with it.
+        std::vector<Vec3f> moved = h.guide(parent)->points;
+        for (Vec3f& q : moved) q += Vec3f(0.0f, 0.0f, 0.5f);
+        h.setPoints(parent, moved);
+        h.evaluate(nullptr);
+        EXPECT_NEAR(((h.guide(ids[0])->points.front() + h.guide(ids[1])->points.front()) * 0.5f - moved.front()).length(),
+                    0.0f, 1e-4f);
+    }
 }
 
 }  // namespace
