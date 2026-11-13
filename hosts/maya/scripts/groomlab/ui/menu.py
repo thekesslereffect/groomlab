@@ -1460,6 +1460,8 @@ def tubes_report(result):
         text = "%s from %s, %s" % (made, utils._count(result["tubes"], "tube"), where)
         if result.get("regionMap"):
             text += "; guide map %s keeps each tube's hair to its own guides (Interpolate's Region Map)" % result["regionMap"]
+        if result.get("liveLink"):
+            text += "; live linked: the guides follow their tubes as you edit them"
     if result["skipped"]:
         text += "; skipped %s" % "; ".join("%s: %s" % kv for kv in sorted(result["skipped"].items()))
     return text
@@ -2347,6 +2349,11 @@ def install():
         theme.on_change(_theme_changed)
     except (ImportError, RuntimeError, ValueError, IOError, OSError) as e:
         cmds.warning("GroomLab: theme not applied: %s" % e)
+    try:  # Tubes to Curves' live links: the linked meshes watched, in this scene and the next ones
+        from groomlab import tube_links
+        tube_links.start()
+    except Exception as e:
+        cmds.warning("GroomLab: tube live links not watched: %s" % e)
 
 
 def _theme_submenu():
@@ -2377,9 +2384,15 @@ def _theme_changed(_theme):
 
 
 def uninstall():
-    """The plugin unloads: the menu goes, and the scene callbacks behind Remove Simulation."""
+    """The plugin unloads: the menu goes, and the scene callbacks behind Remove Simulation and
+    the tube live links."""
     if cmds.menu(MENU, exists=True):
         cmds.deleteUI(MENU)
+    try:
+        from groomlab import tube_links
+        tube_links.stop()
+    except Exception:
+        pass
     if _SIMS_SCENE_JOBS:
         from maya.api import OpenMaya as om
         for job in _SIMS_SCENE_JOBS:

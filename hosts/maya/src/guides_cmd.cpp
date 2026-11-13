@@ -106,6 +106,11 @@ const char* kResetGroupSegments[] = {"-rgs", "-resetGroupSegments"};
 const char* kOnlySelected[] = {"-osl", "-onlySelected"};
 const char* kFreezeOthers[] = {"-fzo", "-freezeOthers"};
 const char* kReshape[] = {"-rsh", "-reshape"};  // <guide id> <curve>, multi-use
+// Guides given new points straight from JSON, as -reshape does from curves: {"<guide id>": [[x, y, z], ...]}
+// (world space). Tubes to Curves' live link reshapes its guides with it as the modeled tubes change.
+const char* kSetPoints[] = {"-spt", "-setPoints"};
+// The -guide guides deleted (their children with them).
+const char* kRemoveGuides[] = {"-rmg", "-removeGuides"};
 // Tube guides (tube.h): a tube edit as JSON on the targets, and one guide's tube as JSON.
 const char* kSetTube[] = {"-stb", "-setTube"};
 const char* kTube[] = {"-tb", "-tube"};
@@ -307,6 +312,8 @@ MSyntax GuidesCmd::newSyntax() {
     s.addFlag(kTubeFrames[0], kTubeFrames[1], MSyntax::kString);
     s.addFlag(kReshape[0], kReshape[1], MSyntax::kString, MSyntax::kString);
     s.makeFlagMultiUse(kReshape[0]);
+    s.addFlag(kSetPoints[0], kSetPoints[1], MSyntax::kString);
+    s.addFlag(kRemoveGuides[0], kRemoveGuides[1]);
     s.setObjectType(MSyntax::kSelectionList, 1, 1);
     s.useSelectionAsDefault(true);
     s.enableQuery(false);
@@ -342,7 +349,8 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                             int(db.isFlagSet(kPointCounts[0])) + int(db.isFlagSet(kSetTube[0])) + int(db.isFlagSet(kTube[0])) +
                             int(db.isFlagSet(kTubeShapes[0])) + int(db.isFlagSet(kEditTubeShape[0])) +
                             int(db.isFlagSet(kPreviewTubeShape[0])) + int(db.isFlagSet(kTubeTargets[0])) +
-                            int(db.isFlagSet(kTubeFrames[0]));
+                            int(db.isFlagSet(kTubeFrames[0])) + int(db.isFlagSet(kSetPoints[0])) +
+                            int(db.isFlagSet(kRemoveGuides[0]));
         if (actions != 1) return fail(kName, "give exactly one action flag");
 
         // The groups need no rooting: the shape's parse of guideData (kept while it is unchanged).
@@ -765,6 +773,16 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                 }
             } else if (db.isFlagSet(kClear[0])) {
                 *h = GuideHierarchy{};
+            } else if (db.isFlagSet(kRemoveGuides[0])) {
+                if (!db.isFlagSet(kGuide[0])) return fail(kName, "-removeGuides needs -guide, the guides to delete");
+                std::vector<GuideId> doomed;
+                for (const MString& idText : multiStrings(db, kGuide[0])) {
+                    const GuideId id = guideIdOf(idText);
+                    if (h->guide(id)) doomed.push_back(id);  // (one already gone: nothing to do)
+                }
+                setResult(static_cast<int>(doomed.size()));
+                if (doomed.empty()) return MS::kSuccess;
+                h->removeGuides(doomed);
             } else if (db.isFlagSet(kReparent[0])) {
                 const GuideId parent = guideIdOf(flagString(db, kReparent[0], "0"));
                 const std::vector<GuideId> ids = targets();
@@ -844,8 +862,9 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                 const int segments = h->resetGroupSegments(gid);
                 if (segments < 1) return fail(kName, "the group has no guides");
                 setResult(segments);
-            } else if (db.isFlagSet(kReshape[0])) {
-                // Guides take the shapes of curves (Curves to Guides: edited copies coming back).
+            } else if (db.isFlagSet(kReshape[0]) || db.isFlagSet(kSetPoints[0])) {
+                // Guides take the shapes of curves (Curves to Guides: edited copies coming back),
+                // or points given as JSON (-setPoints: Tubes to Curves' live link).
                 // Only guides whose curve differs from their shape change; parents first, so an
                 // edited child keeps its new shape under its edited parent and an untouched child
                 // follows its parent.
@@ -868,6 +887,24 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                     if (pts.size() < 2) return fail(kName, curve + " is too short");
                     if (samePoints(pts, g->points)) continue;
                     reshapes.push_back({id, std::move(pts), h->groupDepth(g->group)});
+                }
+                if (db.isFlagSet(kSetPoints[0])) {
+                    const nlohmann::json given = nlohmann::json::parse(flagString(db, kSetPoints[0], "{}").asChar());
+                    if (!given.is_object()) return fail(kName, "-setPoints takes {\"<guide id>\": [[x, y, z], ...]}");
+                    for (auto it = given.begin(); it != given.end(); ++it) {
+                        const MString idText(it.key().c_str());
+                        const GuideId id = guideIdOf(idText);
+                        const HierarchyGuide* g = h->guide(id);
+                        if (!g) return fail(kName, "no guide " + idText);
+                        std::vector<Vec3f> pts;
+                        for (const nlohmann::json& p : it.value()) {
+                            if (!p.is_array() || p.size() != 3) return fail(kName, "-setPoints: a point is [x, y, z]");
+                            pts.emplace_back(p[0].get<float>(), p[1].get<float>(), p[2].get<float>());
+                        }
+                        if (pts.size() < 2) return fail(kName, "guide " + idText + ": a guide needs two points or more");
+                        if (samePoints(pts, g->points)) continue;
+                        reshapes.push_back({id, std::move(pts), h->groupDepth(g->group)});
+                    }
                 }
                 std::stable_sort(reshapes.begin(), reshapes.end(),
                                  [](const Reshape& a, const Reshape& b) { return a.depth < b.depth; });

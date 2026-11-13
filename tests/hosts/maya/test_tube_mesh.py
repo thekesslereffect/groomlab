@@ -287,11 +287,17 @@ class TubesInMayaTest(unittest.TestCase):
         cmds.delete(made["group"])
         self.assertEqual(len(regions), 2)  # one a tube, no strand without one
         self.assertNotIn(-1.0, regions)
-        # Another conversion: a map of its own; the Interpolate keeps the first.
+        # Another conversion adds its tube to the map the Interpolate reads, at a value of its own
+        # (issue #60: conversions add, never take the earlier tubes' regions).
+        before = utils._region_values_in_use(groom, "tubes")
         again = utils.tubes_to_curves([self.lock], groom=groom)
-        self.assertEqual(again["regionMap"], "tubes2")
+        self.assertEqual(again["regionMap"], "tubes")
+        self.assertNotIn("tubes2", groomlab.list_maps(groom))
         self.assertEqual(next(n for n in groomlab.get_graph(groom)["nodes"] if n["type"] == "Interpolate")["params"]["regionMap"],
                          "tubes")
+        after = utils._region_values_in_use(groom, "tubes")
+        self.assertEqual(len(after), 3)
+        self.assertTrue(set(before) <= set(after))
         # Off: no map.
         self.assertIsNone(utils.tubes_to_curves([self.lock], groom=groom, region_map=False)["regionMap"])
         # The values: distinct, neighbouring tubes far apart.
@@ -502,6 +508,153 @@ class TubesInMayaTest(unittest.TestCase):
         result = menu.tubes_to_groomlab_tubes_action()
         self.assertEqual(len(result["guides"]), 2)
         self.assertIn("2 tube guides in guide group tubes", menu.tubes_report(result))
+
+
+def _guide_points(groom, guide):
+    xyz = cmds.groomLabGuides(groom, guidePoints=str(guide)) or []
+    return [tuple(xyz[i:i + 3]) for i in range(0, len(xyz), 3)]
+
+
+class TubeLiveLinkTest(unittest.TestCase):
+    """Issue #60: guides made with the live link keep following their modeled tubes."""
+
+    @classmethod
+    def setUpClass(cls):
+        cmds.loadPlugin(PLUGIN_PATH, quiet=True)
+
+    def setUp(self):
+        from groomlab import tube_links
+        self.links = tube_links
+        cmds.file(new=True, force=True)
+        cmds.undoInfo(state=True, infinity=True)
+        self.scalp = cmds.polySphere(radius=1, subdivisionsX=40, subdivisionsY=20, name="head")[0]
+        self.lock = make_mesh("lock", *grid(tube_rings(root=(0.0, 0.98, 0.0)), pointed=True))
+        side = tube_rings(root=(0.6, 0.78, 0.0), loops=7, sides=6, aspect=1.0, twist=0.0)
+        self.side = make_mesh("sideLock", *grid(list(reversed(side))))
+        self.groom = groomlab.create_groom(self.scalp)
+
+    def tearDown(self):
+        self.links.stop()
+
+    def link_of(self, mesh):
+        uuid = cmds.ls(cmds.listRelatives(mesh, shapes=True, fullPath=True), uuid=True)[0]
+        return next(l for l in self.links.links(self.groom) if l["mesh"] == uuid)
+
+    def test_off_by_default(self):
+        result = utils.tubes_to_curves([self.lock], groom=self.groom)
+        self.assertFalse(result["liveLink"])
+        self.assertEqual(self.links.links(self.groom), [])
+
+    def test_guides_follow_moves_and_edits(self):
+        result = utils.tubes_to_curves([self.lock, self.side], groom=self.groom, live_link=True)
+        self.assertTrue(result["liveLink"])
+        self.assertEqual(len(self.links.links(self.groom)), 2)
+        link = self.link_of(self.lock)
+        self.assertEqual(len(link["shape"]), 8)
+        self.assertEqual(len(link["centers"]), 1)
+        shape_guide, center_guide = link["shape"][0], link["centers"][0]
+        tip = _guide_points(self.groom, shape_guide)[-1]
+        center_tip = _guide_points(self.groom, center_guide)[-1]
+        # Nothing changed: nothing to do.
+        self.assertEqual(self.links.sync()["reshaped"], [])
+
+        # The object moved (its transform): the tip goes with it, the root stays on the scalp.
+        cmds.move(0.1, 0.0, 0.0, self.lock, relative=True)
+        report = self.links.sync()
+        self.assertIn(shape_guide, report["reshaped"])
+        self.assertIn(center_guide, report["reshaped"])
+        moved = _guide_points(self.groom, shape_guide)
+        self.assertAlmostEqual(moved[-1][0] - tip[0], 0.1, places=3)
+        self.assertLess(abs(math.sqrt(sum(c * c for c in moved[0])) - 1.0), 0.02)  # (rooted on the head)
+        side = self.link_of(self.side)
+        self.assertFalse(set(report["reshaped"]) & set(side["shape"] + side["centers"]))
+
+        # A component edit: the tip's vertex moved up.
+        shape = cmds.listRelatives(self.lock, shapes=True, fullPath=True)[0]
+        tip_vertex = cmds.polyEvaluate(shape, vertex=True) - 1
+        cmds.move(0.0, 0.2, 0.0, "%s.vtx[%d]" % (shape, tip_vertex), relative=True)
+        self.links.sync()
+        self.assertGreater(_guide_points(self.groom, center_guide)[-1][1] - center_tip[1], 0.1)
+
+        # Undo the edit and the move: the guides follow the tube back (outside the undo queue).
+        cmds.undo()
+        cmds.undo()
+        self.links.sync()
+        back = _guide_points(self.groom, shape_guide)[-1]
+        self.assertLess(max(abs(a - b) for a, b in zip(back, tip)), 1e-4)
+
+    def test_watched_meshes_queue_a_sync(self):
+        utils.tubes_to_curves([self.lock], groom=self.groom, live_link=True)
+        self.links.start()
+        uuid = self.link_of(self.lock)["mesh"]
+        self.assertIn(uuid, self.links._mesh_jobs)
+        self.links._pending.clear()
+        cmds.move(0.1, 0.0, 0.0, self.lock, relative=True)
+        self.assertIn(uuid, self.links._pending)
+        self.links._flush()
+        self.assertEqual(self.links._pending, set())
+
+    def test_topology_change_remakes_shape_guides(self):
+        utils.tubes_to_curves([self.lock], groom=self.groom, live_link=True)
+        link = self.link_of(self.lock)
+        old = list(link["shape"])
+        value = link["regionValue"]
+        self.assertIsNotNone(value)
+        # The lock remodeled with 6 sides instead of 8: its shape guides made anew, 6 of them.
+        other = make_mesh("remodel", *grid(tube_rings(root=(0.0, 0.98, 0.0), sides=6), pointed=True))
+        sel = om.MSelectionList()
+        sel.add(cmds.listRelatives(self.lock, shapes=True, fullPath=True)[0])
+        sel.add(cmds.listRelatives(other, shapes=True, fullPath=True)[0])
+        om.MFnMesh(sel.getDagPath(0)).copyInPlace(sel.getDependNode(1))
+        cmds.delete(other)
+        report = self.links.sync()
+        self.assertEqual(sorted(report["removed"]), sorted(old))
+        self.assertEqual(len(report["remade"]), 6)
+        link = self.link_of(self.lock)
+        self.assertEqual(link["shape"], report["remade"])
+        self.assertEqual(link["columnCount"], 6)
+        self.assertFalse(set(utils.all_guide_ids(self.groom)) & set(old))
+        for guide in groomlab.get_hierarchy(self.groom)["guides"]:
+            if str(guide["id"]) in link["shape"]:
+                self.assertAlmostEqual(guide["attributes"]["tubes"], value, places=4)
+
+    def test_conversions_add_links(self):
+        utils.tubes_to_curves([self.lock], groom=self.groom, live_link=True)
+        utils.tubes_to_curves([self.side], groom=self.groom, live_link=True, existing_groups=True)
+        found = self.links.links(self.groom)
+        self.assertEqual(len(found), 2)
+        self.assertEqual(set(l["groups"]["shape"] for l in found), {"tubesShape"})
+        self.assertEqual(set(l["regionMap"] for l in found), {"tubes"})
+        self.assertEqual(len(set(l["regionValue"] for l in found)), 2)  # one map, a value a tube
+        # Undoing the second conversion takes only its link.
+        cmds.undo()
+        self.assertEqual(len(self.links.links(self.groom)), 1)
+
+    def test_saved_with_the_scene(self):
+        utils.tubes_to_curves([self.lock], groom=self.groom, live_link=True)
+        guide = self.link_of(self.lock)["shape"][0]
+        path = os.path.join(os.environ.get("TEMP", "."), "groomlab_tube_live_link.ma")
+        cmds.file(rename=path)
+        cmds.file(save=True, type="mayaAscii", force=True)
+        cmds.file(new=True, force=True)
+        cmds.file(path, open=True, force=True)
+        try:
+            from groomlab.base import GROOM_TYPE
+            self.groom = cmds.ls(type=GROOM_TYPE, long=True)[0]
+            self.assertEqual(len(self.links.links(self.groom)), 1)
+            tip = _guide_points(self.groom, guide)[-1]
+            cmds.move(0.0, 0.0, 0.1, "lock", relative=True)
+            self.links.sync()
+            moved = _guide_points(self.groom, guide)[-1]
+            self.assertAlmostEqual(moved[2] - tip[2], 0.1, places=3)
+            # Unlinked: the guides stay as they are.
+            self.assertEqual(self.links.unlink(self.groom, "lock"), 1)
+            cmds.move(0.0, 0.0, 0.1, "lock", relative=True)
+            self.links.sync()
+            self.assertLess(max(abs(a - b) for a, b in zip(_guide_points(self.groom, guide)[-1], moved)), 1e-5)
+        finally:
+            cmds.file(new=True, force=True)
+            os.remove(path)
 
 
 if __name__ == "__main__":
