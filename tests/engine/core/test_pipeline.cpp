@@ -402,6 +402,50 @@ TEST(Paths, OneRuleForStoredPaths) {
     fs::remove_all(root);
 }
 
+// A scene shared with its files (the sender's absolute paths, a zip extracted into a folder of
+// its own name): the files are found where they came along to; a file missing from a folder that
+// is here (about to be written) is left where it says.
+TEST(Paths, ASharedScenesFilesAreFoundWhereTheyCameAlong) {
+    namespace fs = std::filesystem;
+    const fs::path root = fs::temp_directory_path() / "groomlab_shared_paths";
+    fs::remove_all(root);
+    const fs::path scene = root / "received";
+    fs::create_directories(scene / "groomlab" / "groomlab" / "hero" / "masks");
+    fs::create_directories(scene / "textures");
+    fs::create_directories(root / "project");
+    const fs::path nested = scene / "groomlab" / "groomlab" / "hero" / "masks" / "density.png";
+    std::ofstream(nested) << "x";
+    std::ofstream(scene / "textures" / "clumps.png") << "x";
+    std::ofstream(scene / "beside.png") << "x";
+    const PathResolver resolver = searchPathResolver({scene.u8string(), (root / "project").u8string()});
+    const ScopedPathResolver scope(&resolver);
+    auto same = [](const std::string& a, const fs::path& b) {
+        std::error_code ec;
+        return fs::equivalent(fs::u8path(a), b, ec);
+    };
+#ifdef _WIN32
+    const std::string elsewhere = "Q:/2026 projects/show/scenes/";
+#else
+    const std::string elsewhere = "/nonexistent_groomlab_machine/show/scenes/";
+#endif
+    // Relative, as the scene stored it, extracted one folder deeper.
+    EXPECT_TRUE(same(resolvePath("groomlab/hero/masks/density.png"), nested));
+    // The sender's absolute path: by its tail, nested the same way, or plain.
+    EXPECT_TRUE(same(resolvePath(elsewhere + "groomlab/hero/masks/density.png"), nested));
+    EXPECT_TRUE(same(resolvePath(elsewhere + "textures/clumps.png"), scene / "textures" / "clumps.png"));
+    // A bare file name could be any file: an absolute path keeps a folder in its tail.
+    EXPECT_EQ(resolvePath(elsewhere + "beside.png"), elsewhere + "beside.png");
+    // Missing everywhere: as it was (the absolute path; the relative one's join with the scene).
+    EXPECT_EQ(resolvePath(elsewhere + "groomlab/hero/masks/none.png"), elsewhere + "groomlab/hero/masks/none.png");
+    EXPECT_EQ(fs::u8path(resolvePath("groomlab/hero/masks/none.png")),
+              (scene / "groomlab" / "hero" / "masks" / "none.png").lexically_normal());
+    // A file missing from a folder that is here (about to be written): where it says.
+    const std::string here = (scene / "textures" / "density.png").generic_u8string();
+    EXPECT_EQ(resolvePath(here), here);
+    EXPECT_EQ(fs::u8path(resolvePath("textures/beside.png")), (scene / "textures" / "beside.png").lexically_normal());
+    fs::remove_all(root);
+}
+
 // A path a groom file stores, as every host resolves it (groom_file.h resolveGroomPath: the app's
 // and Blender's maps): variables expanded; relative, the file's folder (or the one it was saved to
 // since) and then its search paths, the first that holds it.

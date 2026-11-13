@@ -4337,9 +4337,14 @@ class MappableEditor(QtWidgets.QWidget):
         return names
 
     def browse(self, line_edit):
+        import groomlab
+        start = groomlab.resolve_path(line_edit.text()) if line_edit.text() else ""
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self.window(), "Map image", line_edit.text(), "Images (*.png *.jpg *.jpeg *.tga *.bmp *.psd *.hdr *.pgm *.ppm)")
+            self.window(), "Map image", start, "Images (*.png *.jpg *.jpeg *.tga *.bmp *.psd *.hdr *.pgm *.ppm)")
         if path:
+            # Stored as the scene stores paths (relative to its folder or project): the scene moves
+            # to another machine with its files.
+            path = groomlab.portable_path(path)
             line_edit.setText(path)
             self.set_field("texture", path)
 

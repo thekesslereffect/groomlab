@@ -31,7 +31,12 @@ std::string expandEnvironment(const std::string& path);
 bool isAbsolutePath(const std::string& path);
 
 // Variables expanded; a relative path goes through the current resolver
-// (unchanged when there is none or it finds nothing).
+// (unchanged when there is none or it finds nothing). A file whose folder is not
+// on this machine (a scene or groom shared with its files) is looked for where
+// it came along to, through the current resolver: an absolute path by its
+// tails (a folder and the file at least), longest first; a relative one, and
+// each tail, also inside a folder of its own first name (groomlab/groomlab/...:
+// a zip extracted into a folder of its name). Unchanged when none is there.
 std::string resolvePath(const std::string& path);
 
 // A resolver joining the path to each directory in turn: the first that

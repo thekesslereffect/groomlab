@@ -86,11 +86,64 @@ bool isAbsolutePath(const std::string& path) {
     return fs::u8path(path).is_absolute();
 }
 
+namespace {
+
+bool existsOnDisk(const std::string& path) {
+    std::error_code ec;
+    return !path.empty() && fs::exists(fs::u8path(path), ec);
+}
+
+// Whether `path`'s folder is on this machine: a file missing from a folder that is here is
+// missing (or about to be written); a folder that is not here is another machine's.
+bool folderHere(const std::string& path) {
+    std::error_code ec;
+    const fs::path parent = fs::u8path(path).lexically_normal().parent_path();
+    return parent.empty() || fs::is_directory(parent, ec);
+}
+
+// A file a scene or groom stores, missing where it says, found where it came along to (a scene
+// shared with its files): through `resolver` (the scene's or groom's folders), the stored path
+// in a folder of its own first name (a zip of groomlab/ extracted into a groomlab/ folder:
+// groomlab/groomlab/...); an absolute path from another machine by its tails, longest first, and
+// those doubled the same way (D:/show/scenes/groomlab/masks/a.png: groomlab/masks/a.png beside the
+// scene). A tail keeps a folder and the file (a bare name could be any file of that name). ""
+// when none is there.
+std::string relocated(const std::string& path, bool absolute, const PathResolver& resolver) {
+    std::vector<fs::path> parts;
+    for (const fs::path& part : fs::u8path(path).lexically_normal().relative_path()) {
+        if (!part.empty() && part != ".") parts.push_back(part);
+    }
+    const std::size_t last = absolute ? (parts.size() >= 2 ? parts.size() - 2 : 0) : 0;
+    for (std::size_t i = 0; i < parts.size() && i <= last; ++i) {
+        if (parts[i] == "..") continue;
+        fs::path tail;
+        for (std::size_t j = i; j < parts.size(); ++j) tail /= parts[j];
+        if (absolute) {
+            const std::string found = resolver(tail.generic_u8string());
+            if (existsOnDisk(found)) return found;
+        }
+        const std::string doubled = resolver((parts[i] / tail).generic_u8string());
+        if (existsOnDisk(doubled)) return doubled;
+        if (!absolute) break;
+    }
+    return {};
+}
+
+}  // namespace
+
 std::string resolvePath(const std::string& path) {
     const std::string expanded = expandEnvironment(path);
-    if (expanded.empty() || isAbsolutePath(expanded) || !tCurrent || !*tCurrent) return expanded;
+    if (expanded.empty() || !tCurrent || !*tCurrent) return expanded;
+    if (isAbsolutePath(expanded)) {
+        if (existsOnDisk(expanded) || folderHere(expanded)) return expanded;
+        const std::string found = relocated(expanded, true, *tCurrent);
+        return found.empty() ? expanded : found;
+    }
     const std::string resolved = (*tCurrent)(expanded);
-    return resolved.empty() ? expanded : resolved;
+    if (resolved.empty()) return expanded;
+    if (existsOnDisk(resolved) || folderHere(resolved)) return resolved;
+    const std::string found = relocated(expanded, false, *tCurrent);
+    return found.empty() ? resolved : found;
 }
 
 PathResolver searchPathResolver(std::vector<std::string> directories) {
