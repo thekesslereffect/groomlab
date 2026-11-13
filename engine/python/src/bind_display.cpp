@@ -14,14 +14,15 @@ namespace groomlab::py_bind {
 
 namespace {
 
-const char* const kParts[] = {"strands", "instances", "guides", "selection", "parts", "flow", "cards", "scalpMap", "strandMesh"};
+const char* const kParts[] = {"strands", "instances", "guides", "selection", "parts", "flow", "cards", "scalpMap", "strandMesh", "brushTubes"};
+static_assert(sizeof(kParts) / sizeof(kParts[0]) == kDisplayPartCount, "a name for every display part");
 const char* const kLayers[] = {"dormantWire", "dormantFilled", "activeWire", "selection"};
 
 DisplayPart partNamed(const std::string& name) {
     for (std::size_t i = 0; i < kDisplayPartCount; ++i) {
         if (name == kParts[i]) return static_cast<DisplayPart>(i);
     }
-    throw py::value_error("no display part '" + name + "' (strands, instances, guides, selection, parts, flow, cards, scalpMap, strandMesh)");
+    throw py::value_error("no display part '" + name + "' (strands, instances, guides, selection, parts, flow, cards, scalpMap, strandMesh, brushTubes)");
 }
 
 // A geometry's stream as a read-only view with `width` floats (or indices) per row.
@@ -61,6 +62,9 @@ void bindDisplay(py::module_& m) {
         .def_readwrite("flow", &DisplayTheme::flow)
         .def_readwrite("flow_field", &DisplayTheme::flowField)
         .def_readwrite("tubes", &DisplayTheme::tubes)
+        .def_readwrite("tube_wires", &DisplayTheme::tubeWires)
+        .def_readwrite("selected_tube_wires", &DisplayTheme::selectedTubeWires)
+        .def_readwrite("tube_surfaces", &DisplayTheme::tubeSurfaces)
         .def_readwrite("instances", &DisplayTheme::instances)
         .def_readwrite("cards", &DisplayTheme::cards)
         .def_readwrite("clump_centers", &DisplayTheme::clumpCenters)
@@ -92,6 +96,8 @@ void bindDisplay(py::module_& m) {
         .def_readwrite("instances", &DisplaySettings::instances)
         .def_readwrite("guides", &DisplaySettings::guides)
         .def_readwrite("tubes", &DisplaySettings::tubes)
+        .def_readwrite("tube_wires", &DisplaySettings::tubeWires)
+        .def_readwrite("tube_shaded", &DisplaySettings::tubeShaded)
         .def_readwrite("guide_width", &DisplaySettings::guideWidth)
         .def_readwrite("guide_color_mode", &DisplaySettings::guideColorMode, "1 by the painted layer guide_color_layer; else (0) by group.")
         .def_readwrite("guide_color_layer", &DisplaySettings::guideColorLayer)

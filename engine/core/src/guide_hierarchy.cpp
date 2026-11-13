@@ -1850,4 +1850,55 @@ GuideHierarchy GuideHierarchy::fromJson(const std::string& text) {
     return h;
 }
 
+TubeTargets tubeTargetsOf(const GuideHierarchy& h, const std::vector<GuideId>& selection, const std::string& freeze) {
+    TubeTargets out;
+    for (const GuideId id : selection) {
+        if (h.guide(id) && std::find(out.guides.begin(), out.guides.end(), id) == out.guides.end()) out.guides.push_back(id);
+    }
+    if (!out.guides.empty()) {
+        out.source = "selection";
+    } else {
+        auto frozen = [&](const HierarchyGuide& g) {
+            float value = 0.0f;
+            return h.effectiveAttribute(g, freeze, &value) && value >= 0.5f;
+        };
+        bool any = false;
+        for (const HierarchyGuide& g : h.guides()) any = any || frozen(g);
+        if (any) {
+            for (const HierarchyGuide& g : h.guides()) {
+                if (frozen(g)) continue;
+                const HierarchyGuide* parent = g.isChild() ? h.guide(g.parent) : nullptr;
+                if (!parent || frozen(*parent)) out.guides.push_back(g.id);
+            }
+        }
+        // A groom of one guide: that one (soloing it freezes nothing, so it shows as no solo).
+        if (out.guides.empty() && h.guides().size() == 1) out.guides.push_back(h.guides().front().id);
+        if (!out.guides.empty()) out.source = "solo";
+    }
+    auto note = [](std::vector<std::string>& into, const std::string& name) {
+        if (std::find(into.begin(), into.end(), name) == into.end()) into.push_back(name);
+    };
+    for (const GuideId id : out.guides) {
+        const TubeProfile& tube = h.guide(id)->tube;
+        note(out.shapes, tube.shapeName());
+        note(out.midShapes, tube.midShape ? tube.midShape->name() : std::string());
+        note(out.tipShapes, tube.tipShape ? tube.tipShape->name() : std::string());
+    }
+    for (const HierarchyGuide& g : h.guides()) {
+        std::vector<std::string> own;
+        note(own, g.tube.shapeName());
+        if (g.tube.midShape) note(own, g.tube.midShape->name());
+        if (g.tube.tipShape) note(own, g.tube.tipShape->name());
+        for (const std::string& name : own) {
+            auto it = std::find_if(out.inUse.begin(), out.inUse.end(), [&](const auto& e) { return e.first == name; });
+            if (it == out.inUse.end()) {
+                out.inUse.emplace_back(name, 1);
+            } else {
+                ++it->second;
+            }
+        }
+    }
+    return out;
+}
+
 }  // namespace groomlab

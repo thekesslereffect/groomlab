@@ -168,10 +168,10 @@ The selected guides' tubes draw brighter.
   stroke on a tube gives it one section per guide point, so you shape it point by point.
   Symmetry, frozen and soloed guides work as with every brush; each stroke is one
   undo step.
-- **Shaded** (under **Paints**, off by default) draws the tubes as shaded surfaces, easier to
-  judge a tube's root, mid and tip profiles; **Wireframe** (on by default) draws them as
-  see-through wires, over the surfaces when both are on. (Maya; `groomLabBrushCtx -tubeShaded true
-  -tubeWireframe false`.)
+- **Shaded** (off by default) draws the tubes as shaded surfaces, easier to judge a tube's root,
+  mid and tip profiles; **Wireframe** (on by default) draws them as see-through wires, over the
+  surfaces when both are on. In Maya they sit under **Paints** (`groomLabBrushCtx -tubeShaded true
+  -tubeWireframe false`); in Blender and the app at the top of the **Profile** block.
 - **Ctrl** does the opposite: it shrinks, rounds or untwists the tubes.
 - **Shift+drag smooths** what the brush paints: the channel picked (width, flatness or twist) of
   the sections under the brush, each evened out toward its neighbours along the guide. The
@@ -194,7 +194,8 @@ The selected guides' tubes draw brighter.
     changing outline. Under the pickers, the shape editor shows the profile picked last. With no
     guides selected or soloed, the block lists the profiles the groom's guides use (and how many
     guides use each): pick one to edit it in the shape editor, and every guide using it follows,
-    as the root, mid or tip profile.
+    as the root, mid or tip profile. The app and Blender have the same rows (Blender's shape editor shows the root's
+    profile; the library list picks another shape to edit).
   - **Selected guides**: the targets' **Width** (the tubes scaled so the first one's widest section
     is that wide; their taper and painted detail kept), **Flatness** and **Twist** (the same from
     root to tip). **Smooth** in the block's header evens out the targets' tubes along their guides:

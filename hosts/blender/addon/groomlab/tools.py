@@ -818,11 +818,16 @@ def _tube_edit(scalp, cmd, **args):
     return r
 
 
-def set_tube(scalp, guides=None, group=None, level=None, shape=None, width=None, aspect=None, twist=None, samples=None):
+def set_tube(scalp, guides=None, group=None, level=None, shape=None, width=None, aspect=None, twist=None, samples=None,
+             mid_shape=None, tip_shape=None, root_hold=None, mid_hold=None, tip_hold=None, mid_at=None):
     """Edit guides' tubes (default: the selected ones): a number or a list root to tip for each of
-    width (scene units), aspect and twist (radians); a shape's name. One undo step."""
+    width (scene units), aspect and twist (radians); a shape's name (the root's profile); the mid's
+    and the tip's profiles ("" unsets one); each profile's hold (0-1: how much of the tube keeps its
+    exact shape) and where the mid sits (mid_at). Maya's set_tube. One undo step."""
     args = _targets(guides, group, level)
-    for key, value in (("shape", shape), ("width", width), ("aspect", aspect), ("twist", twist), ("samples", samples)):
+    for key, value in (("shape", shape), ("width", width), ("aspect", aspect), ("twist", twist), ("samples", samples),
+                       ("midShape", mid_shape), ("tipShape", tip_shape), ("rootHold", root_hold), ("midHold", mid_hold),
+                       ("tipHold", tip_hold), ("midAt", mid_at)):
         if value is not None:
             args[key] = list(value) if isinstance(value, (list, tuple)) else value
     return _tube_edit(scalp, "tube_set", **args)
@@ -1270,6 +1275,7 @@ def refresh_tubes(scalp, scene=None):
     library = [x for x in tube_shapes(scalp) if not x.get("builtin")]
     gt.tube_guides = [int(g) for g in info.get("guides") or []]
     tube, shapes = info.get("tube"), list(info.get("shapes") or [])
+    mids, tips = list(info.get("midShapes") or []), list(info.get("tipShapes") or [])
     with props.quiet():
         picked = t.tube_shapes[t.tube_shape_index].name if 0 <= t.tube_shape_index < len(t.tube_shapes) else ""
         t.tube_shapes.clear()
@@ -1285,12 +1291,26 @@ def refresh_tubes(scalp, scene=None):
         builtin = [c["value"] for c in defs.choices("tubeShape")]
         if t.tube_choice not in builtin and t.tube_choice not in names:
             t.tube_choice = "round"  # a library shape gone (renamed, deleted, another groom)
+        for attr in ("tube_mid_choice", "tube_tip_choice"):
+            if getattr(t, attr) and getattr(t, attr) not in builtin and getattr(t, attr) not in names:
+                setattr(t, attr, "")
         t.tube_mixed = tube is not None and len(shapes) > 1
+        t.tube_mid_mixed = tube is not None and len(mids) > 1
+        t.tube_tip_mixed = tube is not None and len(tips) > 1
         if tube is not None and not any(k in _deferred for k in ("tube.width", "tube.flatness", "tube.twist")):
-            key = (tuple(gt.tube_guides), tuple(shapes))
-            if len(shapes) == 1 and key != gt.tube_key:
-                t.tube_choice = shapes[0]
+            key = (tuple(gt.tube_guides), tuple(shapes), tuple(mids), tuple(tips))
+            if key != gt.tube_key:
+                if len(shapes) == 1:
+                    t.tube_choice = shapes[0]
+                if len(mids) == 1:
+                    t.tube_mid_choice = mids[0]
+                if len(tips) == 1:
+                    t.tube_tip_choice = tips[0]
             gt.tube_key = key
+            if not any(k in _deferred for k in ("tube.rootHold", "tube.midHold", "tube.tipHold")):
+                t.tube_root_hold = float(tube.get("rootHold", 0.0)) * 100.0
+                t.tube_mid_hold = float(tube.get("midHold", 0.0)) * 100.0
+                t.tube_tip_hold = float(tube.get("tipHold", 0.0)) * 100.0
             widths = tube.get("width") or [0.1]
             aspects = tube.get("aspect") or [1.0]
             twists = tube.get("twist") or [0.0]
@@ -1302,6 +1322,8 @@ def refresh_tubes(scalp, scene=None):
             t.tube_shape_index = names.index(t.tube_choice)
         try:
             t.tube_shape = tool_props.MIXED if t.tube_mixed else t.tube_choice
+            t.tube_mid_shape = tool_props.MIXED if t.tube_mid_mixed else (t.tube_mid_choice or tool_props.UNSET)
+            t.tube_tip_shape = tool_props.MIXED if t.tube_tip_mixed else (t.tube_tip_choice or tool_props.UNSET)
         except TypeError:
             pass
     fill = fill_tubes(scalp)
@@ -1367,6 +1389,24 @@ def tube_changed(context, key):
                 t.tube_choice = name
             if gt.tube_guides:
                 set_tube(scalp, guides=gt.tube_guides, shape=name)
+        elif key in ("midShape", "tipShape"):
+            profile = key[:3]
+            name = getattr(t, "tube_%s_shape" % profile)
+            if name == tool_props.MIXED:
+                return
+            name = "" if name == tool_props.UNSET else name
+            with props.quiet():
+                setattr(t, "tube_%s_choice" % profile, name)
+            if gt.tube_guides:
+                set_tube(scalp, guides=gt.tube_guides, **{profile + "_shape": name})
+        elif key in ("rootHold", "midHold", "tipHold"):
+            profile = key[:-4]
+
+            def commit_hold():
+                if gt.tube_guides:
+                    set_tube(scalp, guides=gt.tube_guides,
+                             **{profile + "_hold": float(getattr(t, "tube_%s_hold" % profile)) / 100.0})
+            defer("tube." + key, commit_hold)
         else:
             def commit():
                 if not gt.tube_guides:

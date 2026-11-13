@@ -13,7 +13,8 @@ FIXTURE = os.path.join(HERE, "..", "..", "data", "compat", "v1", "groom.groom")
 # The fixture draws strands and guides only: (vertices, lines or triangles) of the other items.
 EXPECTED_SIZES = {name: (0, 0) for name in (
     "dimStrands", "coloredStrands", "ribbons", "instanceMarkers", "instanceMeshes", "scales", "tubes", "selectedGuides",
-    "softSelectedGuides", "parts", "flowArrows", "flowField", "cards", "scalpMap", "strandMesh")}
+    "softSelectedGuides", "parts", "flowArrows", "flowField", "cards", "scalpMap", "strandMesh", "tubeSurfaces", "tubeWires",
+    "selectedTubeWires")}
 
 
 def digest_of(geometry):
@@ -36,7 +37,8 @@ class DisplayBuffersTest(unittest.TestCase):
         builder = gl.DisplayBuilder()
         items = builder.update(self.view, settings)
         self.assertEqual(sorted(builder.rebuilt_parts),
-                         sorted(["strands", "instances", "guides", "selection", "parts", "flow", "cards", "scalpMap", "strandMesh"]))
+                         sorted(["strands", "instances", "guides", "selection", "parts", "flow", "cards", "scalpMap", "strandMesh",
+                                 "brushTubes"]))
         # Lit strand lines: every strand point, a segment between each two along a strand, a
         # shading frame per point.
         lines = items["strands"].geometry

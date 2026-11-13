@@ -877,6 +877,8 @@ public:
         std::string source = "none";
         std::vector<GuideId> guides;
         std::vector<std::string> shapes;  // the shapes among them, in the guides' order, once each
+        std::vector<std::string> midShapes, tipShapes;  // their mid and tip profiles ("" unset), once each
+        std::vector<std::pair<std::string, int>> inUse;  // each shape the groom's guides take, and how many
         std::optional<TubeProfile> tube;  // the first one's (widths as stored)
         float scale = 1.0f;               // the hierarchy's: shown width = stored width * scale
     };
@@ -900,8 +902,9 @@ public:
     // The library: a new shape (with `give`, those guides take it in the same step: Edit as
     // Custom), new points and/or smoothness (every guide taking it follows), a rename (its guides
     // keep it), a removal (its guides become round; how many to *users).
+    // `give`: guides taking it as `profile` ("shape" the root's, "midShape", "tipShape").
     std::string addTubeShape(const std::string& name, const std::vector<SectionPoint>& points, bool smooth,
-                             const std::vector<GuideId>& give = {});
+                             const std::vector<GuideId>& give = {}, const std::string& profile = "shape");
     std::string setTubeShape(const std::string& name, const std::vector<SectionPoint>* points, std::optional<bool> smooth);
     std::string renameTubeShape(const std::string& from, const std::string& to);
     std::string removeTubeShape(const std::string& name, std::size_t* users = nullptr);

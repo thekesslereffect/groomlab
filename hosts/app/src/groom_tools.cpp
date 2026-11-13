@@ -471,6 +471,7 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
         if (!updating_) emit settingsChanged();
     });
     connect(tubes_, &TubePanel::message, this, [this](const QString& text) { setStatus(text); });
+    connect(tubes_, &TubePanel::displayChanged, this, &GroomTools::settingsChanged);  // (the brush's tubes drawn again)
     card_->setTubes(tubes_);
     noTool_ = label(tr("Pick a tool, then drag over the groom in the viewport."), "hint", work_);
     noTool_->setObjectName(QStringLiteral("noTool"));

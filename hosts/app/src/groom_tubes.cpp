@@ -25,33 +25,13 @@ GroomDocument::TubeTargets GroomDocument::tubeTargets() const {
     const std::shared_ptr<const GuideHierarchy> h = session().storedHierarchy();
     if (!h) return out;
     out.scale = h->scale();
-    for (const GuideId id : selection_) {
-        if (h->guide(id)) out.guides.push_back(id);
-    }
-    if (!out.guides.empty()) {
-        out.source = "selection";
-    } else {
-        // Soloed: the guides left unfrozen while others are frozen (not their children).
-        auto frozen = [&](const HierarchyGuide& g) {
-            float value = 0.0f;
-            return h->effectiveAttribute(g, kFreeze, &value) && value >= 0.5f;
-        };
-        bool any = false;
-        for (const HierarchyGuide& g : h->guides()) any = any || frozen(g);
-        if (any) {
-            for (const HierarchyGuide& g : h->guides()) {
-                if (frozen(g)) continue;
-                const HierarchyGuide* parent = g.isChild() ? h->guide(g.parent) : nullptr;
-                if (!parent || frozen(*parent)) out.guides.push_back(g.id);
-            }
-        }
-        if (out.guides.empty() && h->guides().size() == 1) out.guides.push_back(h->guides().front().id);
-        if (!out.guides.empty()) out.source = "solo";
-    }
-    for (const GuideId id : out.guides) {
-        const std::string name = h->guide(id)->tube.shapeName();
-        if (std::find(out.shapes.begin(), out.shapes.end(), name) == out.shapes.end()) out.shapes.push_back(name);
-    }
+    const groomlab::TubeTargets targets = tubeTargetsOf(*h, std::vector<GuideId>(selection_.begin(), selection_.end()), kFreeze);
+    out.source = targets.source;
+    out.guides = targets.guides;
+    out.shapes = targets.shapes;
+    out.midShapes = targets.midShapes;
+    out.tipShapes = targets.tipShapes;
+    out.inUse = targets.inUse;
     if (!out.guides.empty()) out.tube = h->guide(out.guides.front())->tube;
     return out;
 }
@@ -112,12 +92,12 @@ std::string GroomDocument::smoothTubes(const std::vector<GuideId>& guides, const
 }
 
 std::string GroomDocument::addTubeShape(const std::string& name, const std::vector<SectionPoint>& points, bool smooth,
-                                        const std::vector<GuideId>& give) {
+                                        const std::vector<GuideId>& give, const std::string& profile) {
     endTubePreview();
     return editGuides(give.empty() ? "add tube shape" : "tube shape", [&](GuideHierarchy& h) {
         if (h.tubeShape(name)) throw std::invalid_argument("a tube shape named '" + name + "' exists");
         h.setTubeShape(name, points, smooth);
-        const std::string edit = json{{"shape", name}}.dump();
+        const std::string edit = json{{profile, name}}.dump();
         for (const GuideId id : give) {
             if (const HierarchyGuide* g = h.guide(id)) h.setTube(id, editedTube(g->tube, edit, h.scale(), g->points.size(), &h.tubeShapes()));
         }

@@ -1713,5 +1713,41 @@ TEST(TubeProfiles, HoldsKeepEachProfileExactly) {
     EXPECT_EQ(loaded.guide(th.parent)->tube, edited);
 }
 
+// tubeTargetsOf (every host's Tubes section): the selected guides, else the soloed ones, else a
+// groom's only guide; the profiles among them and in the groom.
+TEST(TubeTargets, TheSelectionElseTheSoloAndTheirProfiles) {
+    const std::shared_ptr<const ScalpMesh> scalp = test::makePlane(8);
+    GuideHierarchy h;
+    const GroupId primary = h.addGroup("primary");
+    std::vector<GuideId> ids;
+    for (int k = 0; k < 3; ++k) {
+        const float x = 0.2f + 0.3f * k;
+        ids.push_back(h.addGuide(primary, {Vec3f(x, 0.0f, 0.5f), Vec3f(x, 0.5f, 0.5f), Vec3f(x, 1.0f, 0.5f)}));
+    }
+    h.evaluate(scalp.get());
+    h.setTube(ids[0], editedTube(h.guide(ids[0])->tube, R"({"shape": "ribbon", "tipShape": "blade"})", h.scale(), 3,
+                                 &h.tubeShapes()));
+    h.setTube(ids[1], editedTube(h.guide(ids[1])->tube, R"({"shape": "ribbon", "midShape": "teardrop"})", h.scale(), 3,
+                                 &h.tubeShapes()));
+    TubeTargets t = tubeTargetsOf(h, {ids[1], ids[0], 999});
+    EXPECT_EQ(t.source, "selection");
+    EXPECT_EQ(t.guides, (std::vector<GuideId>{ids[1], ids[0]}));
+    EXPECT_EQ(t.shapes, (std::vector<std::string>{"ribbon"}));
+    EXPECT_EQ(t.midShapes, (std::vector<std::string>{"teardrop", ""}));
+    EXPECT_EQ(t.tipShapes, (std::vector<std::string>{"", "blade"}));
+    // The groom's profiles: ribbon on two guides, round on one, blade and teardrop on one each.
+    std::map<std::string, int> uses(t.inUse.begin(), t.inUse.end());
+    EXPECT_EQ(uses["ribbon"], 2);
+    EXPECT_EQ(uses["round"], 1);
+    EXPECT_EQ(uses["blade"], 1);
+    EXPECT_EQ(uses["teardrop"], 1);
+    // Nothing selected, one guide soloed (the others frozen).
+    h.setAttribute(ids[0], "freeze", 1.0f);
+    h.setAttribute(ids[1], "freeze", 1.0f);
+    t = tubeTargetsOf(h, {});
+    EXPECT_EQ(t.source, "solo");
+    EXPECT_EQ(t.guides, (std::vector<GuideId>{ids[2]}));
+}
+
 }  // namespace
 }  // namespace groomlab

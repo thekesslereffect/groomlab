@@ -703,11 +703,19 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
         sub.operator("groomlab.tube_shape_new", text="", icon="DUPLICATE", emboss=False).duplicate = True
         sub.operator("groomlab.tube_shape_rename", text="", icon="GREASEPENCIL", emboss=False)
         sub.operator("groomlab.tube_shape_remove", text="", icon="TRASH", emboss=False)
-        row = col.row(align=True)
-        row.prop(t, "tube_shape", text="")
-        apply = row.row(align=True)
-        apply.enabled = t.tube_targets > 0
-        apply.operator("groomlab.tube_apply", text="Apply")
+        if t.tool == "shape":  # the brush's tubes in the viewport (Maya's Tube card switches)
+            col.prop(t, "tube_shaded")
+            col.prop(t, "tube_wireframe")
+        # Root, Mid and Tip (Maya's rows): each profile's picker and Apply (the shape and its
+        # Length to every targeted guide), its Length under it.
+        for profile, label in (("root", "Root"), ("mid", "Mid"), ("tip", "Tip")):
+            row = col.row(align=True)
+            row.label(text=label)
+            row.prop(t, "tube_shape" if profile == "root" else "tube_%s_shape" % profile, text="")
+            apply = row.row(align=True)
+            apply.enabled = t.tube_targets > 0
+            apply.operator("groomlab.tube_apply", text="Apply").profile = profile.upper()
+            col.prop(t, "tube_%s_hold" % profile, slider=True)
         col.template_list("GROOMLAB_UL_tube_shapes", "", t, "tube_shapes", t, "tube_shape_index", rows=2)
         editor = getattr(col, "groomlab_profile_editor", None)
         if editor is not None:  # the GroomLab window draws the picked shape's cross-section (Maya's editor)

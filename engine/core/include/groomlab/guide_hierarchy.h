@@ -416,4 +416,19 @@ private:
     std::vector<std::string> loadWarnings_;
 };
 
+// The guides a host's Tubes section edits (every host's: Maya's groomLabGuides -tubeTargets,
+// Blender's helper's tube_targets, the app's): the selected ones (`selection`, those in the groom),
+// else the soloed ones (some guides frozen by `freeze`, these not, nor their parents: the brushes'
+// solo), else a groom's only guide. With the profiles among them (each different root, mid and tip
+// shape, "" an unset mid or tip) and the groom's (each shape any guide takes, root, mid or tip, and
+// how many guides take it), in the order first met.
+struct TubeTargets {
+    std::string source = "none";  // "selection", "solo" or "none"
+    std::vector<GuideId> guides;
+    std::vector<std::string> shapes, midShapes, tipShapes;
+    std::vector<std::pair<std::string, int>> inUse;
+};
+TubeTargets tubeTargetsOf(const GuideHierarchy& hierarchy, const std::vector<GuideId>& selection,
+                          const std::string& freeze = "freeze");
+
 }  // namespace groomlab

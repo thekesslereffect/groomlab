@@ -1583,9 +1583,11 @@ def _library_pick(context):
 
 
 class GROOMLAB_OT_tube_apply(TubeOperator):
-    """Give the targeted guides this shape"""
+    """Give the targeted guides this profile and its Length"""
     bl_idname = "groomlab.tube_apply"
     bl_label = "Apply to Selected"
+    profile: bpy.props.EnumProperty(items=[("ROOT", "Root", ""), ("MID", "Mid", ""), ("TIP", "Tip", "")], default="ROOT",
+                                    options={"HIDDEN"})
 
     def execute(self, context):
         scalp = active(context)
@@ -1593,8 +1595,16 @@ class GROOMLAB_OT_tube_apply(TubeOperator):
         if not guides:
             self.report({"ERROR"}, "No guides selected or soloed: select guides (Select tool), or Ctrl+click one with a brush")
             return {"CANCELLED"}
+        t = context.scene.groomlab_tools
+        profile = self.profile.lower()
+        edit = {profile + "_hold": float(getattr(t, "tube_%s_hold" % profile)) / 100.0}
+        if profile == "root":
+            if not t.tube_mixed:
+                edit["shape"] = t.tube_choice
+        elif not getattr(t, "tube_%s_mixed" % profile):
+            edit[profile + "_shape"] = getattr(t, "tube_%s_choice" % profile)
         try:
-            tools.set_tube(scalp, guides=guides, shape=context.scene.groomlab_tools.tube_choice)
+            tools.set_tube(scalp, guides=guides, **edit)
         except HelperError as e:
             return _fail(self, e)
         return {"FINISHED"}

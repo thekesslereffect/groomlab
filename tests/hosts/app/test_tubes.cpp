@@ -365,6 +365,66 @@ TEST(AppTubes, TubesSectionPicksShapesEditsTheLibraryAndFillsTubes) {
     EXPECT_NE(std::find(params.begin(), params.end(), "tubeBlend"), params.end());
 }
 
+TEST(AppTubes, TheMidAndTipProfilesAndTheirLengths) {
+    // Maya's Root, Mid and Tip rows (tube.h's profiles): each picker gives its profile to the
+    // targets (one step), each Length its share of the tube; the editor shows the profile picked
+    // (an unset one: the root's, read-only); Mixed where the targets differ; a library shape renamed
+    // stays on every profile that took it. Shaded and Wireframe: the brush's tubes in the viewport.
+    auto doc = GroomDocument::open(kSampleGroom);
+    ASSERT_TRUE(doc);
+    BrushSession session;
+    session.setDocument(doc.get());
+    TubePanel panel;
+    panel.resize(300, 900);
+    panel.setSession(&session);
+    const std::vector<GuideId> ids = primaryGuides(*doc, 2);
+    doc->setSelection(ids);
+    panel.refresh();
+    EXPECT_EQ(panel.midChoice(), "") << "unset: Between";
+    EXPECT_EQ(panel.tipChoice(), "") << "unset: As root";
+    panel.pickProfile(2, "ribbon");
+    for (const GuideId id : ids) EXPECT_EQ(guideOf(*doc, id).tube.tipShape ? guideOf(*doc, id).tube.tipShape->name() : "", "ribbon");
+    EXPECT_EQ(panel.activeProfile(), 2);
+    panel.pickProfile(1, "blade");
+    EXPECT_EQ(guideOf(*doc, ids[0]).tube.midShape->name(), "blade");
+    panel.setHold(2, 30.0);
+    EXPECT_NEAR(guideOf(*doc, ids[1]).tube.tipHold, 0.3f, 1e-5f);
+    panel.refresh(true);
+    EXPECT_NEAR(panel.holdSlider(2)->value(), 30.0, 1e-3);
+    // The mid's Apply: its shape and Length.
+    panel.holdSlider(1)->setValue(10.0);
+    panel.applyProfile(1);
+    EXPECT_NEAR(guideOf(*doc, ids[0]).tube.midHold, 0.1f, 1e-5f);
+    // One guide's tip changed: Mixed while both are targets.
+    ASSERT_TRUE(doc->editTubes({ids[1]}, json{{"tipShape", "teardrop"}}).empty());
+    panel.refresh(true);
+    EXPECT_EQ(panel.profileBox(2)->currentData().toString(), QStringLiteral("*")) << "Mixed";
+    // Unset (As root): the editor shows the root's, read-only.
+    panel.pickProfile(2, "");
+    EXPECT_FALSE(guideOf(*doc, ids[0]).tube.tipShape.has_value());
+    EXPECT_FALSE(panel.editor()->editable());
+    // A library shape on the mid, renamed: the mid keeps it.
+    panel.setActiveProfile(1);
+    panel.duplicateShape();  // (a built-in: Edit as Custom, the copy given to the mid)
+    const std::string copy = panel.midChoice();
+    ASSERT_TRUE(panel.libraryShape(copy));
+    EXPECT_EQ(guideOf(*doc, ids[0]).tube.midShape->name(), copy);
+    EXPECT_EQ(guideOf(*doc, ids[0]).tube.shapeName(), panel.choice()) << "the root's left alone";
+    panel.startRename();
+    panel.renameField()->setText(QStringLiteral("leaf"));
+    panel.finishRename();
+    EXPECT_EQ(panel.midChoice(), "leaf");
+    EXPECT_EQ(guideOf(*doc, ids[0]).tube.midShape->name(), "leaf");
+    // The brush's tubes: Wireframe on, Shaded off to start with; toggling one says so.
+    EXPECT_TRUE(panel.wireframe());
+    EXPECT_FALSE(panel.shaded());
+    int display = 0;
+    QObject::connect(&panel, &TubePanel::displayChanged, [&] { ++display; });
+    panel.shadedBox()->click();
+    EXPECT_TRUE(panel.shaded());
+    EXPECT_EQ(display, 1);
+}
+
 TEST(AppTubes, ShapeBrushCardPaintsAChannelAndHoldsTheProfile) {
     auto doc = GroomDocument::open(kSampleGroom);
     ASSERT_TRUE(doc);

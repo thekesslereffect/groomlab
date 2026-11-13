@@ -168,19 +168,102 @@ TubePanel::TubePanel(QWidget* parent) : QWidget(parent) {
                     &TubePanel::deleteShape);
     delete_->setText(tr("Delete"));
     {
-        // The shape and Apply in one field row (the combo flat in it, Apply its trailing action).
-        auto* pickBox = new QFrame(profileBlock_);
-        pickBox->setProperty("role", "propField");
-        pickBox->setMinimumHeight(theme::rowHeight());
-        editPicker_ = new QHBoxLayout(pickBox);
-        editPicker_->setContentsMargins(4, 0, 2, 0);
-        editPicker_->setSpacing(4);
-        apply_ = new QPushButton(tr("Apply"), profileBlock_);
-        apply_->setObjectName(QStringLiteral("tubeShapeApply"));
-        apply_->setToolTip(tr("Give the selected guides this profile"));
-        connect(apply_, &QPushButton::clicked, this, [this] { applyShape(); });
-        editPicker_->addWidget(apply_);
-        profileBlock_->rows()->addWidget(pickBox);
+        // The brush's tubes in the viewport (Maya's Tube card): shaded surfaces, wires.
+        shaded_ = new QCheckBox(tr("Shaded"), profileBlock_);
+        shaded_->setObjectName(QStringLiteral("tubeShaded"));
+        shaded_->setToolTip(tr("Draw the Tube brush's tubes as shaded surfaces"));
+        wireframe_ = new QCheckBox(tr("Wireframe"), profileBlock_);
+        wireframe_->setObjectName(QStringLiteral("tubeWireframe"));
+        wireframe_->setToolTip(tr("Draw the Tube brush's tubes as wires (the selected guides' warm)"));
+        wireframe_->setChecked(true);
+        for (QCheckBox* box : {shaded_, wireframe_}) {
+            connect(box, &QCheckBox::toggled, this, [this] { emit displayChanged(); });
+            profileBlock_->rows()->addWidget(switchRow(profileBlock_, box));
+        }
+        // Root, Mid and Tip (Maya's rows): a button choosing what the editor shows, the picker
+        // and Apply (the shape and its Length to every target) in one field row, its Length under it.
+        mid_ = new QComboBox(this);
+        mid_->setObjectName(QStringLiteral("tubeMidShape"));
+        mid_->setToolTip(tr("The tube's profile at its middle: picked, it goes to the targeted guides (Between: halfway from the "
+                            "root's to the tip's)"));
+        tip_ = new QComboBox(this);
+        tip_->setObjectName(QStringLiteral("tubeTipShape"));
+        tip_->setToolTip(tr("The tube's profile at its tip: picked, it goes to the targeted guides (As root: the root's again)"));
+        for (QComboBox* box : {mid_, tip_}) {
+            box->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+            box->setMinimumContentsLength(6);
+        }
+        connect(mid_, &QComboBox::activated, this, [this](int) {
+            const QVariant v = mid_->currentData();
+            if (v.toString() != QStringLiteral("*")) pickProfile(1, v.toString().toStdString());
+        });
+        connect(tip_, &QComboBox::activated, this, [this](int) {
+            const QVariant v = tip_->currentData();
+            if (v.toString() != QStringLiteral("*")) pickProfile(2, v.toString().toStdString());
+        });
+        static const char* const kLabels[3] = {"Root", "Mid", "Tip"};
+        static const char* const kApplyNames[3] = {"tubeShapeApply", "tubeMidShapeApply", "tubeTipShapeApply"};
+        static const char* const kHoldNames[3] = {"tubeRootLength", "tubeMidLength", "tubeTipLength"};
+        for (int k = 0; k < 3; ++k) {
+            auto* pickBox = new QFrame(profileBlock_);
+            pickBox->setProperty("role", "propField");
+            pickBox->setMinimumHeight(theme::rowHeight());
+            auto* line = new QHBoxLayout(pickBox);
+            line->setContentsMargins(4, 0, 2, 0);
+            line->setSpacing(4);
+            QToolButton* which = makeChip(tr(kLabels[k]), tr("Show this profile in the editor (a library shape there is edited for "
+                                                             "every guide taking it)"),
+                                          profileBlock_);
+            which->setObjectName(QStringLiteral("tubeProfile") + QLatin1String(kLabels[k]));
+            which->setAutoExclusive(true);
+            which->setFixedWidth(44);  // (the three pickers start at one edge)
+            which->setChecked(k == 0);
+            connect(which, &QToolButton::clicked, this, [this, k] { setActiveProfile(k); });
+            profileButtons_[static_cast<std::size_t>(k)] = which;
+            line->addWidget(which);
+            if (k == 0) {
+                editPicker_ = line;  // (setMode puts the root's picker here, before Apply)
+            } else {
+                line->addWidget(k == 1 ? mid_ : tip_, 1);
+            }
+            QPushButton* apply = new QPushButton(tr("Apply"), profileBlock_);
+            apply->setObjectName(QLatin1String(kApplyNames[k]));
+            apply->setToolTip(tr("Give the selected guides this %1 profile and its Length").arg(tr(kLabels[k]).toLower()));
+            connect(apply, &QPushButton::clicked, this, [this, k] { applyProfile(k); });
+            line->addWidget(apply);
+            profileApply_[static_cast<std::size_t>(k)] = apply;
+            if (k == 0) apply_ = apply;
+            profileBlock_->rows()->addWidget(pickBox);
+            ValueSlider* hold = new ValueSlider(this);
+            hold->setObjectName(QLatin1String(kHoldNames[k]));
+            hold->setRange(0.0, 100.0);
+            hold->setLimits(0.0, 100.0);
+            hold->setDecimals(0);
+            hold->setFill(theme::sliderFill(theme::blue()));
+            hold->setCaption(tr("Length"));
+            hold->setFormat([](double v) { return QString::number(std::lround(v)) + QStringLiteral("%"); });
+            hold->setToolTip(tr("How much of the tube is exactly the %1 profile's shape (%2); 0%: only at its own point. Between "
+                                "these stretches the shape changes smoothly")
+                                 .arg(tr(kLabels[k]).toLower(),
+                                      k == 0 ? tr("from the root") : k == 1 ? tr("centered on the middle") : tr("up to the tip")));
+            // A drag commits at its release (one undo step); a typed value or a wheel step at once.
+            sliders_.push_back(hold);
+            connect(hold, &ValueSlider::pressed, this, [this, hold] {
+                if (std::find(held_.begin(), held_.end(), hold) == held_.end()) held_.push_back(hold);
+            });
+            connect(hold, &ValueSlider::released, this, [this, k, hold] {
+                const auto at = std::find(held_.begin(), held_.end(), hold);
+                if (at == held_.end()) return;
+                held_.erase(at);
+                if (!updating_) setHold(k, hold->value());
+            });
+            connect(hold, &ValueSlider::valueChanged, this, [this, k, hold](double v) {
+                if (updating_ || std::find(held_.begin(), held_.end(), hold) != held_.end()) return;
+                setHold(k, v);
+            });
+            holds_[static_cast<std::size_t>(k)] = hold;
+            profileBlock_->rows()->addWidget(hold);
+        }
         // The editor: the chosen shape's outline (at most 200 px square), and the library's edits.
         editor_ = new TubeShapeEditor(profileBlock_);
         editor_->setMaximumWidth(200);
@@ -289,7 +372,7 @@ void TubePanel::setMode(Mode mode) {
         placed_ = false;
         // The picker and the fields move to the mode's block.
         if (edit) {
-            editPicker_->insertWidget(0, shape_, 1);
+            editPicker_->insertWidget(1, shape_, 1);  // (after its Root button)
             editFields_->addWidget(fields_);
         } else {
             newPicker_->insertWidget(0, shape_);
@@ -318,6 +401,24 @@ void TubePanel::refreshTips() {
 }
 
 QAbstractButton* TubePanel::mirrorBox() const { return mirror_; }
+QAbstractButton* TubePanel::shadedBox() const { return shaded_; }
+QAbstractButton* TubePanel::wireframeBox() const { return wireframe_; }
+bool TubePanel::shaded() const { return shaded_ && shaded_->isChecked(); }
+bool TubePanel::wireframe() const { return wireframe_ && wireframe_->isChecked(); }
+
+std::string& TubePanel::activeChoice() { return active_ == 1 ? midChoice_ : active_ == 2 ? tipChoice_ : choice_; }
+const std::string& TubePanel::activeChoice() const { return active_ == 1 ? midChoice_ : active_ == 2 ? tipChoice_ : choice_; }
+
+void TubePanel::setActiveProfile(int profile) {
+    active_ = std::clamp(profile, 0, 2);
+    for (int k = 0; k < 3; ++k) {
+        if (QToolButton* b = profileButtons_[static_cast<std::size_t>(k)]) {
+            const QSignalBlocker quiet(b);
+            b->setChecked(k == active_);
+        }
+    }
+    showChoice(active_ == 0 && shapes_.size() > 1 && !targets_.empty());
+}
 QAbstractButton* TubePanel::shapeSmoothBox() const { return shapeSmooth_; }
 
 QString TubePanel::widthCaption() const { return width_->caption(); }
@@ -383,10 +484,15 @@ void TubePanel::refresh(bool force) {
     targets_ = info.guides;
     source_ = info.source;
     shapes_ = info.shapes;
+    mids_ = info.midShapes;
+    tips_ = info.tipShapes;
     updating_ = true;
     fillShapes();
     for (QWidget* w : {static_cast<QWidget*>(smooth_), static_cast<QWidget*>(apply_)}) {
         w->setEnabled(info.tube.has_value());
+    }
+    for (QPushButton* b : profileApply_) {
+        if (b) b->setEnabled(info.tube.has_value());
     }
     if (!info.tube) {
         targetsLabel_->setText(tr("No guides selected or soloed: the shape and values here go to the guides Place and Draw make. "
@@ -412,8 +518,19 @@ void TubePanel::refresh(bool force) {
         for (const GuideId id : targets_) key += std::to_string(id) + ",";
         key += "|";
         for (const std::string& s : shapes_) key += s + ",";
-        if (shapes_.size() == 1 && key != targetsKey_) choice_ = shapes_.front();
+        for (const std::string& s : mids_) key += "m" + s + ",";
+        for (const std::string& s : tips_) key += "t" + s + ",";
+        if (key != targetsKey_) {
+            if (shapes_.size() == 1) choice_ = shapes_.front();
+            if (mids_.size() == 1) midChoice_ = mids_.front();
+            if (tips_.size() == 1) tipChoice_ = tips_.front();
+        }
         targetsKey_ = key;
+        const float held[3] = {tube.rootHold, tube.midHold, tube.tipHold};
+        for (int k = 0; k < 3; ++k) {
+            ValueSlider* hold = holds_[static_cast<std::size_t>(k)];
+            if (hold && std::find(held_.begin(), held_.end(), hold) == held_.end() && !hold->editing()) hold->setValue(held[k] * 100.0);
+        }
         width_->setValue(reference_ * lengthFactor_);
         flatness_->setValue(std::clamp(1.0 - aspect, 0.0, 0.99));
         twist_->setValue(twist * 180.0 / kPi);
@@ -430,8 +547,29 @@ void TubePanel::fillShapes() {
     // Rebuilt only when what it lists changed (the users counts in the tips too).
     std::string key = mixed ? "mixed|" : "|";
     for (const LibraryShape& s : library_) key += s.name + ":" + std::to_string(s.users) + "|";
+    key += mids_.size() > 1 && !targets_.empty() ? "midMixed|" : "|";
+    key += tips_.size() > 1 && !targets_.empty() ? "tipMixed|" : "|";
     if (key == shapesKey_ && shape_->count() > 0) return;
     shapesKey_ = key;
+    // The mid's and the tip's: unset first (Between, As root), Mixed while the targets differ.
+    for (int k = 1; k < 3; ++k) {
+        QComboBox* box = k == 1 ? mid_ : tip_;
+        const QSignalBlocker quiet(box);
+        box->clear();
+        if ((k == 1 ? mids_ : tips_).size() > 1 && !targets_.empty()) {
+            box->addItem(tr("Mixed"), QStringLiteral("*"));
+            box->setItemData(0, tr("The targeted guides have different profiles here: pick one to give them all"), Qt::ToolTipRole);
+        }
+        box->addItem(k == 1 ? tr("Between") : tr("As root"), QString());
+        box->setItemData(box->count() - 1, k == 1 ? tr("Halfway between the root's profile and the tip's") : tr("The root's profile again at the tip"),
+                         Qt::ToolTipRole);
+        for (const ui::json& item : defs().choices("tubeShape")) {
+            box->addItem(qs(item.value("label", std::string())), qs(item.value("value", std::string())));
+            box->setItemData(box->count() - 1, qs(item.value("tip", std::string())), Qt::ToolTipRole);
+        }
+        if (!library_.empty()) box->insertSeparator(box->count());
+        for (const LibraryShape& s : library_) box->addItem(qs(s.name), qs(s.name));
+    }
     const QSignalBlocker blocker(shape_);
     shape_->clear();
     if (mixed) {
@@ -453,13 +591,25 @@ void TubePanel::fillShapes() {
 
 void TubePanel::showChoice(bool mixed) {
     const std::vector<std::string> builtins = builtinNames();
-    const bool builtin = std::find(builtins.begin(), builtins.end(), choice_) != builtins.end();
-    if (!library(choice_) && !builtin) choice_ = "round";  // (a library shape gone: renamed, deleted, another groom)
+    auto known = [&](const std::string& name) {
+        return library(name) || std::find(builtins.begin(), builtins.end(), name) != builtins.end();
+    };
+    if (!known(choice_)) choice_ = "round";  // (a library shape gone: renamed, deleted, another groom)
+    if (!midChoice_.empty() && !known(midChoice_)) midChoice_.clear();
+    if (!tipChoice_.empty() && !known(tipChoice_)) tipChoice_.clear();
     {
         const QSignalBlocker blocker(shape_);
-        shape_->setCurrentIndex(mixed ? 0 : std::max(0, shape_->findData(qs(choice_))));
+        shape_->setCurrentIndex(mixed && active_ == 0 ? 0 : std::max(0, shape_->findData(qs(choice_))));
+        if (mixed && active_ != 0) shape_->setCurrentIndex(shapes_.size() > 1 ? 0 : std::max(0, shape_->findData(qs(choice_))));
     }
-    if (const LibraryShape* custom = library(choice_)) {
+    for (int k = 1; k < 3; ++k) {
+        QComboBox* box = k == 1 ? mid_ : tip_;
+        const QSignalBlocker quiet(box);
+        const bool differ = (k == 1 ? mids_ : tips_).size() > 1 && !targets_.empty();
+        box->setCurrentIndex(differ ? 0 : std::max(0, box->findData(qs(k == 1 ? midChoice_ : tipChoice_))));
+    }
+    const std::string shown = activeChoice().empty() ? choice_ : activeChoice();  // (an unset mid or tip: the root's)
+    if (const LibraryShape* custom = activeChoice().empty() ? nullptr : library(shown)) {
         editor_->setShape(custom->points, custom->smooth, true);
         builtinNote_->hide();
         preview_->setShape(custom->points, custom->smooth, false);
@@ -468,25 +618,31 @@ void TubePanel::showChoice(bool mixed) {
             shapeCommitted(made);  // made symmetric: saved so
             return;
         }
+    } else if (const LibraryShape* root = library(shown)) {  // an unset mid or tip: the root's library shape, read-only
+        editor_->setShape(root->points, root->smooth, false, QString());
+        builtinNote_->hide();
+        preview_->setShape(root->points, root->smooth, false);
     } else {
         TubeShape shape = TubeShape::Round;
-        parseTubeShape(choice_, &shape);
+        parseTubeShape(shown, &shape);
         bool smooth = true;
         const std::vector<SectionPoint> points = builtinTubeShapePoints(shape, &smooth);
         editor_->setShape(points, smooth, false, QString());
-        builtinNote_->show();
+        builtinNote_->setVisible(!activeChoice().empty());
         preview_->setShape(points, smooth, false);
     }
     updating_ = true;
     shapeSmooth_->setChecked(editor_->smooth());
     updating_ = false;
-    const bool custom = library(choice_) != nullptr;
+    const bool custom = !activeChoice().empty() && library(activeChoice()) != nullptr;
     const bool hasGroom = document() != nullptr;
     shapeOptions_->setVisible(custom);
     new_->setEnabled(hasGroom);
     duplicate_->setEnabled(hasGroom);
     for (QToolButton* b : {rename_, delete_}) b->setEnabled(custom);
-    apply_->setEnabled(!targets_.empty());
+    for (QPushButton* b : profileApply_) {
+        if (b) b->setEnabled(!targets_.empty());
+    }
 }
 
 std::string TubePanel::placement() const {
@@ -519,6 +675,7 @@ void TubePanel::edited(const std::string& error) {
 void TubePanel::pick(const std::string& name) {
     if (name.empty()) return;  // "Mixed": nothing to give
     choice_ = name;
+    if (active_ != 0) setActiveProfile(0);
     GroomDocument* doc = document();
     if (doc && !targets_.empty()) {
         edited(doc->editTubes(targets_, json{{"shape", name}}));
@@ -528,10 +685,31 @@ void TubePanel::pick(const std::string& name) {
     pushPlacement();
 }
 
-void TubePanel::applyShape() {
+void TubePanel::applyShape() { applyProfile(0); }
+
+void TubePanel::pickProfile(int profile, const std::string& name) {
+    (profile == 1 ? midChoice_ : tipChoice_) = name;
+    setActiveProfile(profile);
     GroomDocument* doc = document();
-    if (doc && !targets_.empty()) edited(doc->editTubes(targets_, json{{"shape", choice_}}));
-    pushPlacement();
+    if (doc && !targets_.empty()) edited(doc->editTubes(targets_, json{{profile == 1 ? "midShape" : "tipShape", name}}));
+}
+
+void TubePanel::applyProfile(int profile) {
+    // Its shape (unless Mixed: the targets differ there) and its Length, to every target.
+    static const char* const kShape[3] = {"shape", "midShape", "tipShape"};
+    static const char* const kHold[3] = {"rootHold", "midHold", "tipHold"};
+    json edit{{kHold[profile], holds_[static_cast<std::size_t>(profile)]->value() / 100.0}};
+    const std::vector<std::string>& among = profile == 0 ? shapes_ : profile == 1 ? mids_ : tips_;
+    if (among.size() <= 1) edit[kShape[profile]] = profile == 0 ? choice_ : profile == 1 ? midChoice_ : tipChoice_;
+    GroomDocument* doc = document();
+    if (doc && !targets_.empty()) edited(doc->editTubes(targets_, edit));
+    if (profile == 0) pushPlacement();
+}
+
+void TubePanel::setHold(int profile, double percent) {
+    static const char* const kHold[3] = {"rootHold", "midHold", "tipHold"};
+    GroomDocument* doc = document();
+    if (doc && !targets_.empty()) edited(doc->editTubes(targets_, json{{kHold[profile], std::clamp(percent, 0.0, 100.0) / 100.0}}));
 }
 
 void TubePanel::setWidth(double shown) {
@@ -599,17 +777,19 @@ std::string TubePanel::uniqueName(const std::string& base) const {
 void TubePanel::editAsCustom() {
     GroomDocument* doc = document();
     if (!doc) return;
+    const std::string base = activeChoice().empty() ? choice_ : activeChoice();  // (an unset mid or tip: the root's)
     TubeShape shape = TubeShape::Round;
-    parseTubeShape(choice_, &shape);
+    parseTubeShape(base, &shape);
     bool smooth = true;
     const std::vector<SectionPoint> points = builtinTubeShapePoints(shape, &smooth);
-    const std::string name = uniqueName(choice_);
-    const std::string error = doc->addTubeShape(name, points, smooth, targets_);
+    const std::string name = uniqueName(base);
+    static const char* const kShape[3] = {"shape", "midShape", "tipShape"};
+    const std::string error = doc->addTubeShape(name, points, smooth, targets_, kShape[active_]);
     if (!error.empty()) {
         emit message(qs(error));
         return;
     }
-    choice_ = name;
+    activeChoice() = name;
     refresh(true);
     pushPlacement();
     emit guidesEdited();
@@ -623,7 +803,7 @@ void TubePanel::newShape() {
     const std::vector<SectionPoint> points = builtinTubeShapePoints(TubeShape::Round, &smooth);
     const std::string name = uniqueName("shape");
     const std::string error = doc->addTubeShape(name, points, true);
-    if (error.empty()) choice_ = name;
+    if (error.empty()) activeChoice() = name;
     edited(error);
     pushPlacement();
 }
@@ -631,7 +811,7 @@ void TubePanel::newShape() {
 void TubePanel::duplicateShape() {
     // A copy of the shape in the library, chosen: a built-in's is how it is edited.
     GroomDocument* doc = document();
-    const LibraryShape* custom = library(choice_);
+    const LibraryShape* custom = library(activeChoice());
     if (doc && !custom) {
         editAsCustom();
         return;
@@ -640,14 +820,14 @@ void TubePanel::duplicateShape() {
     const LibraryShape copy = *custom;
     const std::string name = uniqueName(copy.name);
     const std::string error = doc->addTubeShape(name, copy.points, copy.smooth);
-    if (error.empty()) choice_ = name;
+    if (error.empty()) activeChoice() = name;
     edited(error);
     pushPlacement();
 }
 
 void TubePanel::startRename() {
-    if (!library(choice_)) return;
-    renameField_->setText(qs(choice_));
+    if (!library(activeChoice())) return;
+    renameField_->setText(qs(activeChoice()));
     renameField_->show();
     renameField_->setFocus();
     renameField_->selectAll();
@@ -656,11 +836,15 @@ void TubePanel::startRename() {
 void TubePanel::finishRename() {
     GroomDocument* doc = document();
     const std::string to = renameField_->text().trimmed().toStdString();
-    const std::string from = choice_;
+    const std::string from = activeChoice();
     cancelRename();
     if (!doc || to.empty() || to == from || !library(from)) return;
     const std::string error = doc->renameTubeShape(from, to);
-    if (error.empty()) choice_ = to;
+    if (error.empty()) {
+        for (std::string* c : {&choice_, &midChoice_, &tipChoice_}) {  // every profile on it keeps it
+            if (*c == from) *c = to;
+        }
+    }
     edited(error);
     pushPlacement();
 }
@@ -684,7 +868,7 @@ bool TubePanel::eventFilter(QObject* watched, QEvent* event) {
 
 void TubePanel::deleteShape() {
     GroomDocument* doc = document();
-    const LibraryShape* custom = library(choice_);
+    const LibraryShape* custom = library(activeChoice());
     if (!doc || !custom) return;
     if (!armed_) {
         armed_ = true;
@@ -701,7 +885,11 @@ void TubePanel::deleteShape() {
     const std::string name = custom->name;
     disarmDelete();
     const std::string error = doc->removeTubeShape(name);
-    if (error.empty()) choice_ = "round";
+    if (error.empty()) {
+        if (choice_ == name) choice_ = "round";
+        if (midChoice_ == name) midChoice_.clear();
+        if (tipChoice_ == name) tipChoice_.clear();
+    }
     edited(error);
     pushPlacement();
 }
@@ -718,8 +906,8 @@ void TubePanel::disarmDelete() {
 
 void TubePanel::sendPreview() {
     GroomDocument* doc = document();
-    if (!doc || !editor_->problem().isEmpty() || !library(choice_)) return;
-    if (doc->previewTubeShape(choice_, editor_->points(), editor_->smooth()).empty()) {
+    if (!doc || !editor_->problem().isEmpty() || !library(activeChoice())) return;
+    if (doc->previewTubeShape(activeChoice(), editor_->points(), editor_->smooth()).empty()) {
         previewing_ = true;
         emit previewed();
     }
@@ -728,8 +916,8 @@ void TubePanel::sendPreview() {
 void TubePanel::shapeCommitted(const std::vector<SectionPoint>& points) {
     previewTimer_->stop();
     GroomDocument* doc = document();
-    if (!doc || !library(choice_)) return;
-    const std::string error = doc->setTubeShape(choice_, &points, editor_->smooth());
+    if (!doc || !library(activeChoice())) return;
+    const std::string error = doc->setTubeShape(activeChoice(), &points, editor_->smooth());
     const bool wasPreviewing = previewing_;
     previewing_ = false;
     if (!error.empty()) {
@@ -743,7 +931,7 @@ void TubePanel::shapeCommitted(const std::vector<SectionPoint>& points) {
 }
 
 void TubePanel::setMirror(bool on) {
-    if (editor_->setMirror(on) && library(choice_)) {
+    if (editor_->setMirror(on) && library(activeChoice())) {
         const std::vector<SectionPoint> made = editor_->points();
         shapeCommitted(made);
     }
@@ -751,8 +939,8 @@ void TubePanel::setMirror(bool on) {
 
 void TubePanel::setShapeSmooth(bool on) {
     GroomDocument* doc = document();
-    if (!doc || !library(choice_)) return;
-    edited(doc->setTubeShape(choice_, nullptr, on));
+    if (!doc || !library(activeChoice())) return;
+    edited(doc->setTubeShape(activeChoice(), nullptr, on));
 }
 
 }  // namespace groomlab::app

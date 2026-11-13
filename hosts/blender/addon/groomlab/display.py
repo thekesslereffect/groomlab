@@ -21,7 +21,7 @@ import numpy as np
 from . import groom, process
 from .helper_client import HelperError
 
-ORDER = ("scalpMap", "tubes", "guides", "tubeWires", "flowField", "selectedGuides", "softSelectedGuides",
+ORDER = ("scalpMap", "tubes", "tubeSurfaces", "guides", "tubeWires", "flowField", "selectedGuides", "softSelectedGuides",
          "selectedTubeWires", "parts", "flowArrows")
 # Pulled toward the camera by the hair's depth, so they show through the strands round them (the
 # tubes too: a guide's tube sits inside its clump).
@@ -141,7 +141,9 @@ def settings_for(scalp, scene):
         s["guideColorMode"] = "layer"
         s["guideColorLayer"] = m.name
     if t.tool == "shape":
-        s["tubeWires"] = True  # while the Shape brush is on: every tube it can shape as a wire (Maya's)
+        # While the Tube brush is on: every tube it can shape as a wire and/or shaded (Maya's Tube card).
+        s["tubeWires"] = bool(t.tube_wireframe)
+        s["tubeShaded"] = bool(t.tube_shaded)
     if t.isolate:
         _level, group = tools.group_target(scene)
         s["isolateGroup"] = group or ""

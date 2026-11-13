@@ -179,10 +179,6 @@ struct ToolState {
     std::string generation;
     Arena overlayOut, displayOut, colorsOut;
     std::uint64_t colorsKey = 0, colorsVersion = 0;
-    // The Shape brush's tube wires (the display's tubeWires setting; Maya's GroomShape::tubeWires):
-    // [0] every guide the brush can shape, [1] the selected ones, drawn apart to stand out.
-    std::array<DisplayGeometry, 2> tubeWires;
-    std::uint64_t tubeWiresKey = 0, tubeWiresVersion = 0;
 };
 
 Session::Session(int id)
@@ -1655,10 +1651,11 @@ json tubeEdit(ToolState& t, const json& args, const std::string& label, const js
 
 json tubeSet(ToolState& t, const json& args) {
     json edit = json::object();
-    for (const char* key : {"shape", "width", "aspect", "twist", "samples"}) {
+    for (const char* key : {"shape", "width", "aspect", "twist", "samples", "midShape", "tipShape", "rootHold", "midHold", "tipHold",
+                            "midAt"}) {
         if (given(args, key)) edit[key] = args[key];
     }
-    if (edit.empty()) fail("bad_request", "give a shape, width, aspect, twist or samples");
+    if (edit.empty()) fail("bad_request", "give a shape, width, aspect, twist, samples, a mid or tip shape or a hold");
     return tubeEdit(t, args, "set tube", edit);
 }
 
@@ -1687,50 +1684,24 @@ json tubeGet(ToolState& t, const json& args) {
     return {{"tube", tubeToHost(t.session.space, tubeToJson(g->tube, h->scale()))}};
 }
 
-// The guides the Tubes section edits: the selected ones, else the soloed ones (those left
-// unfrozen while others are frozen, not their children), else a groom's
-// only guide; the first one's tube and the shapes among them.
+// The guides the Tubes section edits and their profiles (every host's: tubeTargetsOf).
 json tubeTargets(ToolState& t) {
     const HierarchyPtr h = t.session.groom->authoredHierarchy();
-    std::vector<GuideId> ids;
-    std::string source = "none";
-    if (h) {
-        pruneSelection(t);
-        for (const GuideId id : t.selection) {
-            if (h->guide(id)) ids.push_back(id);
-        }
-        if (!ids.empty()) {
-            source = "selection";
-        } else {
-            auto frozen = [&](const HierarchyGuide& g) {
-                float value = 0.0f;
-                return h->effectiveAttribute(g, kFreezeTool, &value) && value >= 0.5f;
-            };
-            bool any = false;
-            for (const HierarchyGuide& g : h->guides()) any = any || frozen(g);
-            if (any) {
-                for (const HierarchyGuide& g : h->guides()) {
-                    if (frozen(g)) continue;
-                    const HierarchyGuide* parent = g.isChild() ? h->guide(g.parent) : nullptr;
-                    if (!parent || frozen(*parent)) ids.push_back(g.id);
-                }
-                if (!ids.empty()) source = "solo";
-            }
-            if (ids.empty() && h->guides().size() == 1) {
-                ids.push_back(h->guides().front().id);
-                source = "solo";
-            }
-        }
-    }
-    std::vector<std::string> shapes;
-    for (const GuideId id : ids) {
-        const std::string name = h->guide(id)->tube.shapeName();
-        if (std::find(shapes.begin(), shapes.end(), name) == shapes.end()) shapes.push_back(name);
-    }
-    return {{"source", source},
-            {"guides", ids},
-            {"shapes", shapes},
-            {"tube", ids.empty() ? json(nullptr) : tubeToHost(t.session.space, tubeToJson(h->guide(ids.front())->tube, h->scale()))}};
+    if (!h) return {{"source", "none"}, {"guides", json::array()}, {"shapes", json::array()}, {"midShapes", json::array()},
+                    {"tipShapes", json::array()}, {"inUse", json::array()}, {"tube", nullptr}};
+    pruneSelection(t);
+    const std::vector<GuideId> selection(t.selection.begin(), t.selection.end());
+    const TubeTargets targets = tubeTargetsOf(*h, selection, kFreezeTool);
+    json inUse = json::array();
+    for (const auto& [name, count] : targets.inUse) inUse.push_back({{"name", name}, {"guides", count}});
+    return {{"source", targets.source},
+            {"guides", targets.guides},
+            {"shapes", targets.shapes},
+            {"midShapes", targets.midShapes},
+            {"tipShapes", targets.tipShapes},
+            {"inUse", inUse},
+            {"tube", targets.guides.empty() ? json(nullptr)
+                                            : tubeToHost(t.session.space, tubeToJson(h->guide(targets.guides.front())->tube, h->scale()))}};
 }
 
 json sectionPointsJson(const std::vector<SectionPoint>& points) {
@@ -2987,7 +2958,8 @@ DisplaySettings displaySettingsOf(ToolState& t, const json& v) {
         if (key == "guides") s.guides = settingBool(x, k);
         else if (key == "tubes") s.tubes = settingBool(x, k);
         else if (key == "flow") s.flow = settingBool(x, k);
-        else if (key == "tubeWires") settingBool(x, k);  // display() reads it (not the core's display)
+        else if (key == "tubeWires") s.tubeWires = settingBool(x, k);    // the Tube brush's tubes (the core's display)
+        else if (key == "tubeShaded") s.tubeShaded = settingBool(x, k);
         else if (key == "guideWidth") s.guideWidth = settingNumber(x, k);
         else if (key == "guideColorMode") {
             if (x.is_string()) {
@@ -3049,48 +3021,15 @@ const char* layerName(DisplayLayer layer) {
     }
 }
 
-constexpr std::array<DisplayItemId, 8> kShownItems{DisplayItemId::Guides, DisplayItemId::Tubes,     DisplayItemId::Selected,
-                                                   DisplayItemId::SoftSelected, DisplayItemId::Parts, DisplayItemId::Flow,
-                                                   DisplayItemId::FlowField, DisplayItemId::ScalpMap};
+constexpr std::array<DisplayItemId, 11> kShownItems{DisplayItemId::Guides,       DisplayItemId::Tubes,     DisplayItemId::Selected,
+                                                    DisplayItemId::SoftSelected, DisplayItemId::Parts,     DisplayItemId::Flow,
+                                                    DisplayItemId::FlowField,    DisplayItemId::ScalpMap,  DisplayItemId::TubeSurfaces,
+                                                    DisplayItemId::TubeWires,    DisplayItemId::SelectedTubeWires};
 
 std::uint64_t haveVersion(const json& have, const std::string& name) {
     if (!have.is_object()) return 0;
     const auto it = have.find(name);
     return it != have.end() && it->is_number_unsigned() ? it->get<std::uint64_t>() : 0;
-}
-
-// The Shape brush's tube wires as Maya's draw override builds them (addTubeWires): every guide the
-// brush can shape (shown, not frozen: activeTubeGuides) as a wire (appendTubeWire), the selected
-// ones apart; fewer rings along each tube on a groom of many guides. Built again when the guides,
-// the selection or the hidden groups change; empty when off.
-void updateTubeWires(ToolState& t, const HierarchyPtr& hierarchy, std::uint64_t hierarchyVersion, const std::string& hidden, bool on) {
-    std::uint64_t key = 0;
-    if (on && hierarchy) {
-        key = hashCombine(hashCombine(hash64(hierarchyVersion), t.selectionVersion), hashString(hash64(0x7B3u), hidden)) | 1u;
-    }
-    if (key == t.tubeWiresKey) return;
-    t.tubeWiresKey = key;
-    ++t.tubeWiresVersion;
-    for (DisplayGeometry& g : t.tubeWires) g = DisplayGeometry();
-    if (!key) return;
-    const std::set<GuideId> selected(t.selection.begin(), t.selection.end());
-    const std::vector<const HierarchyGuide*> guides = activeTubeGuides(*hierarchy, hidden);
-    std::size_t points = 0;
-    for (const HierarchyGuide* g : guides) points += g->points.size();
-    constexpr std::size_t kBudget = 400000;  // segment ends (Maya's)
-    const std::size_t perPoint = 2 * 32 + 2 * 8;
-    const std::size_t ringStep = std::max<std::size_t>(1, (points * perPoint + kBudget - 1) / kBudget);
-    std::array<std::vector<Vec3f>, 2> wires;
-    for (const HierarchyGuide* g : guides) appendTubeWire(wires[selected.count(g->id) ? 1 : 0], *g, hierarchy->scale(), 8, ringStep);
-    for (std::size_t i = 0; i < 2; ++i) {
-        DisplayGeometry& g = t.tubeWires[i];
-        g.positions.reserve(wires[i].size() * 3);
-        g.indices.reserve(wires[i].size());
-        for (const Vec3f& p : wires[i]) {
-            g.indices.push_back(static_cast<std::uint32_t>(g.positions.size() / 3));
-            g.positions.insert(g.positions.end(), {p.x, p.y, p.z});
-        }
-    }
 }
 
 json display(ToolState& t, const json& args) {
@@ -3153,10 +3092,6 @@ json display(ToolState& t, const json& args) {
         in.scalpMapTextureGeneration = image.texture;
     }
     const DisplayFrame& frame = t.builder.update(in, settings);
-    const json& asked = args.contains("settings") ? args["settings"] : json(nullptr);
-    const bool tubeWires = asked.is_object() && asked.contains("tubeWires") && settingBool(asked["tubeWires"], "tubeWires");
-    updateTubeWires(t, in.hierarchy, in.hierarchyVersion, settings.hiddenGuideGroups, tubeWires);
-    static const std::array<const char*, 2> kWireNames{"tubeWires", "selectedTubeWires"};
 
     // What changed against what the host holds: those items' arrays, in one block.
     std::vector<const DisplayItem*> send;
@@ -3167,11 +3102,6 @@ json display(ToolState& t, const json& args) {
             send.push_back(&item);
             bytes += geometryBytes(*item.geometry);
         }
-    }
-    std::array<bool, 2> sendWires{};
-    for (std::size_t i = 0; i < 2; ++i) {
-        sendWires[i] = t.tubeWiresVersion != 0 && t.tubeWiresVersion != haveVersion(have, kWireNames[i]);
-        if (sendWires[i]) bytes += geometryBytes(t.tubeWires[i]);
     }
     const std::uint64_t dotsVersion = frame.item(DisplayItemId::Guides).geometryVersion;
     const bool sendDots = dotsVersion != haveVersion(have, "dots");
@@ -3203,23 +3133,6 @@ json display(ToolState& t, const json& args) {
         j["changed"] = changed;
         if (changed) j["arrays"] = geometryArrays(t.displayOut, *g, space);
         items[item.name] = j;
-    }
-    // The tube wires: Maya's colors (a cool wire, the selected warm, opaque and thicker).
-    for (std::size_t i = 0; i < 2; ++i) {
-        const DisplayGeometry& g = t.tubeWires[i];
-        json j;
-        j["version"] = t.tubeWiresVersion;
-        j["shown"] = !g.positions.empty();
-        j["vertexCount"] = g.positions.size() / 3;
-        j["color"] = i ? std::array<float, 4>{1.0f, 0.7f, 0.15f, 1.0f} : std::array<float, 4>{0.45f, 0.85f, 1.0f, 0.6f};
-        j["lineWidth"] = i ? 2.0f : 1.0f;
-        j["layer"] = i ? "selection" : "activeWire";
-        j["primitive"] = "lines";
-        j["perVertexColors"] = false;
-        j["surface"] = false;
-        j["changed"] = sendWires[i];
-        if (sendWires[i]) j["arrays"] = geometryArrays(t.displayOut, g, space);
-        items[kWireNames[i]] = j;
     }
     json dots;
     dots["version"] = dotsVersion;

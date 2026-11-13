@@ -111,6 +111,10 @@ struct DisplayTheme {
     RGBA flow{1.0f, 0.55f, 0.1f, 1.0f};
     RGBA flowField{0.62f, 0.7f, 0.8f, 1.0f};
     RGBA tubes{0.55f, 0.55f, 0.6f, 1.0f};
+    // The Tube brush's tubes (Maya's draw override's colors): wires, the selected ones', surfaces.
+    RGBA tubeWires{0.45f, 0.85f, 1.0f, 0.6f};
+    RGBA selectedTubeWires{1.0f, 0.7f, 0.15f, 1.0f};
+    RGBA tubeSurfaces{0.5f, 0.56f, 0.62f, 1.0f};
     RGBA instances{0.75f, 0.9f, 1.0f, 1.0f};
     RGBA cards{0.58f, 0.5f, 0.42f, 1.0f};  // game cards without their maps (before a bake, or textures off)
     RGB clumpCenters{1.0f, 0.3f, 0.85f};    // the dots of a viewed Clump's centers
@@ -381,6 +385,10 @@ struct DisplaySettings {
     bool hair = true;
     // Guides.
     bool guides = true, tubes = false;
+    // The Tube brush's tubes (every host's, as Maya's draw override shows them): every guide the
+    // brush can shape (activeTubeGuides) as a wire (tubeWires; the selected ones apart, warm) and/or
+    // a shaded surface a little inside it (tubeShaded).
+    bool tubeWires = false, tubeShaded = false;
     bool movingGuides = true;  // the moving guides (DisplayInputs::movingGuides) over the groomed ones
     float guideWidth = 2.0f;
     // 1: the painted layer guideColorLayer, black 0 to white 1; anything else (0): each group's
@@ -449,11 +457,14 @@ struct DisplayInputs {
     static DisplayInputs fromView(const ViewResult& view, bool stroke = false);
 };
 
-enum class DisplayPart { Strands, Instances, Guides, Selection, Parts, Flow, Cards, ScalpMap, StrandMesh, Count };
+enum class DisplayPart { Strands, Instances, Guides, Selection, Parts, Flow, Cards, ScalpMap, StrandMesh, BrushTubes, Count };
 // In drawing (upload) order.
 enum class DisplayItemId {
     DimStrands, Strands, ColoredStrands, Ribbons, InstanceMarkers, InstanceMeshes, Scales, Guides, Tubes, Selected,
-    SoftSelected, Parts, Flow, FlowField, Cards, ScalpMap, StrandMesh, Count
+    SoftSelected, Parts, Flow, FlowField, Cards, ScalpMap, StrandMesh,
+    // The Tube brush's tubes (DisplaySettings::tubeWires, tubeShaded): shaded surfaces, wires, the
+    // selected guides' wires.
+    TubeSurfaces, TubeWires, SelectedTubeWires, Count
 };
 constexpr std::size_t kDisplayItemCount = static_cast<std::size_t>(DisplayItemId::Count);
 // The hair's items: what the groom grows (the strands in every form, the instances, the scales,
@@ -742,6 +753,7 @@ private:
     void buildInstances(const DisplayInputs& in, const DisplaySettings& s);
     void buildGuides(const DisplayInputs& in, const DisplaySettings& s);
     void buildSelection(const DisplayInputs& in, const DisplaySettings& s);
+    void buildBrushTubes(const DisplayInputs& in, const DisplaySettings& s);
     void buildOverlays(const DisplayInputs& in, const DisplaySettings& s);
     void buildCards(const DisplayInputs& in, const DisplaySettings& s);
     void buildStrandMesh(const DisplayInputs& in, const DisplaySettings& s);

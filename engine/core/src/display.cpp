@@ -1597,6 +1597,9 @@ constexpr ItemSpec kItems[kDisplayItemCount] = {
     {DisplayItemId::Cards, DisplayPart::Cards, "cards", DisplayLayer::DormantFilled},
     {DisplayItemId::ScalpMap, DisplayPart::ScalpMap, "scalpMap", DisplayLayer::DormantFilled},
     {DisplayItemId::StrandMesh, DisplayPart::StrandMesh, "strandMesh", DisplayLayer::DormantFilled},
+    {DisplayItemId::TubeSurfaces, DisplayPart::BrushTubes, "tubeSurfaces", DisplayLayer::DormantFilled},
+    {DisplayItemId::TubeWires, DisplayPart::BrushTubes, "tubeWires", DisplayLayer::ActiveWire},
+    {DisplayItemId::SelectedTubeWires, DisplayPart::BrushTubes, "selectedTubeWires", DisplayLayer::Selection},
 };
 
 std::array<float, 4> rgba(const std::array<float, 3>& c, float scale = 1.0f) {
@@ -1718,6 +1721,7 @@ const DisplayFrame& DisplayBuilder::update(const DisplayInputs& in, const Displa
     buildInstances(in, s);
     buildGuides(in, s);
     buildSelection(in, s);
+    buildBrushTubes(in, s);
     buildOverlays(in, s);
     buildCards(in, s);
     buildStrandMesh(in, s);
@@ -2166,6 +2170,63 @@ void DisplayBuilder::buildSelection(const DisplayInputs& in, const DisplaySettin
     selected.overlay = soft.overlay = true;
     put(DisplayItemId::Selected, std::move(selected));
     put(DisplayItemId::SoftSelected, std::move(soft));
+}
+
+void DisplayBuilder::buildBrushTubes(const DisplayInputs& in, const DisplaySettings& s) {
+    // The Tube brush's tubes, as Maya's draw override builds them: every guide the brush can shape
+    // as a wire (fewer rings along each tube on a groom of many guides), the selected ones apart,
+    // and/or as a shaded surface a little inside the wires (so they are not lost in its facets).
+    item(DisplayItemId::TubeWires).color = s.theme.tubeWires;
+    item(DisplayItemId::SelectedTubeWires).color = s.theme.selectedTubeWires;
+    item(DisplayItemId::SelectedTubeWires).lineWidth = 2.0f;
+    item(DisplayItemId::TubeSurfaces).color = s.theme.tubeSurfaces;
+    const HierarchyPtr& hierarchy = in.hierarchy;
+    const bool on = hierarchy && (s.tubeWires || s.tubeShaded);
+    std::uint64_t key = on ? hashCombine(hashCombine(hash64(in.hierarchyVersion), in.selectionHash),
+                                         (s.tubeWires ? 1u : 0u) + (s.tubeShaded ? 2u : 0u))
+                           : 0;
+    if (on) key = hashCombine(hashChars(key, s.hiddenGuideGroups), reinterpret_cast<std::uintptr_t>(hierarchy.get()));
+    if (!rebuild(DisplayPart::BrushTubes, key)) return;
+    DisplayGeometry surfaces, wires, selectedWires;
+    surfaces.triangles = true;
+    surfaces.surface = true;
+    if (on) {
+        const std::vector<const HierarchyGuide*> guides = activeTubeGuides(*hierarchy, s.hiddenGuideGroups);
+        if (s.tubeWires) {
+            std::set<GuideId> selected;
+            if (in.selection) {
+                for (const auto& [id, weight] : in.selection()) {
+                    if (weight >= 0.999f) selected.insert(id);
+                }
+            }
+            std::size_t points = 0;
+            for (const HierarchyGuide* g : guides) points += g->points.size();
+            constexpr std::size_t kBudget = 400000;  // segment ends
+            const std::size_t perPoint = 2 * 32 + 2 * 8;
+            const std::size_t ringStep = std::max<std::size_t>(1, (points * perPoint + kBudget - 1) / kBudget);
+            std::array<std::vector<Vec3f>, 2> segments;
+            for (const HierarchyGuide* g : guides) {
+                appendTubeWire(segments[selected.count(g->id) ? 1 : 0], *g, hierarchy->scale(), 8, ringStep);
+            }
+            for (std::size_t i = 0; i < 2; ++i) {
+                DisplayGeometry& out = i == 0 ? wires : selectedWires;
+                out.positions.reserve(segments[i].size() * 3);
+                out.indices.reserve(segments[i].size());
+                for (const Vec3f& p : segments[i]) {
+                    out.indices.push_back(static_cast<std::uint32_t>(out.positions.size() / 3));
+                    out.positions.insert(out.positions.end(), {p.x, p.y, p.z});
+                }
+            }
+        }
+        if (s.tubeShaded) {
+            constexpr float kInset = 0.985f;  // (Maya's: the wires on the outline itself stay seen)
+            for (const HierarchyGuide* g : guides) appendTubeSurface(surfaces, *g, hierarchy->scale() * kInset);
+        }
+    }
+    wires.overlay = selectedWires.overlay = true;
+    put(DisplayItemId::TubeSurfaces, std::move(surfaces));
+    put(DisplayItemId::TubeWires, std::move(wires));
+    put(DisplayItemId::SelectedTubeWires, std::move(selectedWires));
 }
 
 void DisplayBuilder::buildOverlays(const DisplayInputs& in, const DisplaySettings& s) {

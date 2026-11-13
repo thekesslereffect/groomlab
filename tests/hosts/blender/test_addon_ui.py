@@ -39,6 +39,7 @@ actions = importlib.import_module(bu.MODULE + ".actions")
 menu = importlib.import_module(bu.MODULE + ".menu")
 palette = importlib.import_module(bu.MODULE + ".palette")
 tools = importlib.import_module(bu.MODULE + ".tools")
+tool_props = importlib.import_module(bu.MODULE + ".tool_props")
 tool_ops = importlib.import_module(bu.MODULE + ".tool_ops")
 
 # Ids the definitions show for Blender that it does not run yet: hidden in Blender. This is the
@@ -566,6 +567,29 @@ class ToolsTest(unittest.TestCase):
         twist = tools.get_tube(head, ids[1])["twist"]
         self.assertAlmostEqual(sum(twist) / len(twist), 0.5, places=4)
         self.assertEqual(bpy.ops.groomlab.tube_smooth(), {"FINISHED"})
+        # Mid and tip profiles (tube.h; Maya's rows): picked, they go to the targets; each Length
+        # its share of the tube; unset again; read back with the targets.
+        t.tube_tip_shape = "ribbon"
+        self.assertEqual(tools.get_tube(head, ids[0]).get("tipShape"), "ribbon")
+        t.tube_mid_shape = "blade"
+        self.assertEqual(tools.get_tube(head, ids[1]).get("midShape"), "blade")
+        tools.set_tube(head, guides=ids, tip_hold=0.25)
+        tools.refresh_tubes(head)
+        self.assertAlmostEqual(t.tube_tip_hold, 25.0, places=3)
+        self.assertEqual(t.tube_tip_choice, "ribbon")
+        self.assertEqual(bpy.ops.groomlab.tube_apply(profile="MID"), {"FINISHED"})
+        tools.set_tube(head, guides=[ids[2]], tip_shape="teardrop")
+        tools.refresh_tubes(head)
+        self.assertTrue(t.tube_tip_mixed)
+        tools.set_tube(head, guides=ids, mid_shape="", tip_shape="")
+        self.assertNotIn("tipShape", tools.get_tube(head, ids[0]))
+        tools.refresh_tubes(head)
+        self.assertEqual(t.tube_tip_shape, tool_props.UNSET)
+        log = drawn(palette.VIEW3D_PT_groomlab_tools)
+        self.assertIn(("prop", "tube_mid_shape"), log)
+        self.assertIn(("prop", "tube_tip_hold"), log)
+        self.assertIn(("prop", "tube_shaded"), log)  # the brush's tubes shaded, and as wires
+        self.assertIn(("prop", "tube_wireframe"), log)
         # The library: Edit as Custom, New, Duplicate, Rename, Apply, Delete.
         self.assertEqual(bpy.ops.groomlab.tube_shape_custom(), {"FINISHED"})
         self.assertEqual([s.name for s in t.tube_shapes], ["teardrop 1"])

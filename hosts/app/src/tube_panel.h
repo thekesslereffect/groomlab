@@ -24,6 +24,7 @@
 // step, every guide taking it following). Rename is a name field in place, Delete arms on the
 // first click and deletes on a second: no dialog.
 
+#include <array>
 #include <optional>
 #include <string>
 #include <vector>
@@ -34,6 +35,7 @@
 #include "groomlab/guide_hierarchy.h"
 
 class QAbstractButton;
+class QCheckBox;
 class QComboBox;
 class QHBoxLayout;
 class QLabel;
@@ -67,7 +69,16 @@ public:
     bool busy() const;
 
     // ---- State (tests) -----------------------------------------------------------------------
-    const std::string& choice() const { return choice_; }  // the shape picked: the targets', else the last picked
+    const std::string& choice() const { return choice_; }  // the root shape picked: the targets', else the last picked
+    // The mid's and the tip's profiles picked ("" unset: Between, As root), and the profile the
+    // editor and the library's glyphs work on (0 root, 1 mid, 2 tip).
+    const std::string& midChoice() const { return midChoice_; }
+    const std::string& tipChoice() const { return tipChoice_; }
+    int activeProfile() const { return active_; }
+    void setActiveProfile(int profile);
+    // The Tube brush's tubes in the viewport (Maya's Tube card): shaded surfaces, wires.
+    bool shaded() const;
+    bool wireframe() const;
     const std::vector<GuideId>& targets() const { return targets_; }
     const std::string& source() const { return source_; }  // "selection", "solo" or "none"
     bool libraryShape(const std::string& name) const;
@@ -76,7 +87,10 @@ public:
 
     // ---- The edits, as the controls do them --------------------------------------------------
     void pick(const std::string& name);     // the picker: the targets take it, and new guides
-    void applyShape();                      // Apply to Selected
+    void applyShape();                      // Apply to Selected (the root's row)
+    void pickProfile(int profile, const std::string& name);  // the mid's or the tip's picker ("" unset)
+    void applyProfile(int profile);         // a row's Apply: its shape and its Length to every target
+    void setHold(int profile, double percent);  // a row's Length (percent of the tube)
     void setWidth(double shown);            // the targets scaled so the first one's widest section is this
     // Width's unit again (Edit > Units: the lengths' unit; its label "Width (mm)", the slider in it).
     void refreshUnits();
@@ -96,6 +110,11 @@ public:
 
     // ---- The pieces (tests, screenshots) ------------------------------------------------------
     QComboBox* shapeBox() const { return shape_; }
+    QComboBox* profileBox(int profile) const { return profile == 0 ? shape_ : profile == 1 ? mid_ : tip_; }
+    QPushButton* profileApply(int profile) const { return profileApply_[static_cast<std::size_t>(profile)]; }
+    ValueSlider* holdSlider(int profile) const { return holds_[static_cast<std::size_t>(profile)]; }
+    QAbstractButton* shadedBox() const;
+    QAbstractButton* wireframeBox() const;
     TubeShapeEditor* editor() const { return editor_; }
     QLabel* targetsLabel() const { return targetsLabel_; }
     TubeShapeEditor* preview() const { return preview_; }  // New's small read-only profile
@@ -121,6 +140,7 @@ signals:
     void previewed();        // a drag's live preview (no step): the host evaluates and redraws
     void settingsChanged();  // the placement tube changed (the brush session's settings)
     void message(const QString& text);  // what went wrong, or what was made ("" clears)
+    void displayChanged();   // Shaded or Wireframe toggled: the host draws the brush's tubes again
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -130,7 +150,9 @@ private:
     // A slider whose value is committed when it settles (a release, a typed value, a wheel step).
     ValueSlider* committingSlider(double min, double max, double limitMin, double limitMax, int decimals,
                                   void (TubePanel::*commit)(double));
-    void fillShapes();           // the picker: Mixed (while the targets differ), the built-ins, the library
+    void fillShapes();           // the pickers: Mixed (while the targets differ), the built-ins, the library
+    std::string& activeChoice();  // the active profile's choice
+    const std::string& activeChoice() const;
     void showChoice(bool mixed = false);
     void refreshTips();          // the fields' tips: what they change
     void pushPlacement();        // the placement tube to the brush session when it changed
@@ -147,6 +169,9 @@ private:
     std::vector<GuideId> targets_;
     std::string source_ = "none";
     std::vector<std::string> shapes_;   // the targets' shapes
+    std::vector<std::string> mids_, tips_;  // ... their mid and tip profiles ("" unset)
+    std::string midChoice_, tipChoice_;     // the mid's and the tip's picked ("" unset)
+    int active_ = 0;                        // the profile the editor shows: 0 root, 1 mid, 2 tip
     float reference_ = 0.0f;            // the first target's widest section (scene units)
     std::string choice_ = "round";
     struct LibraryShape {
@@ -173,6 +198,13 @@ private:
     QVBoxLayout* editFields_ = nullptr;    // ... and in Edit
     QWidget* fields_ = nullptr;
     QComboBox* shape_ = nullptr;
+    QComboBox* mid_ = nullptr;
+    QComboBox* tip_ = nullptr;
+    std::array<QToolButton*, 3> profileButtons_{};  // Root, Mid, Tip: which one the editor shows
+    std::array<QPushButton*, 3> profileApply_{};
+    std::array<ValueSlider*, 3> holds_{};
+    QCheckBox* shaded_ = nullptr;
+    QCheckBox* wireframe_ = nullptr;
     TubeShapeEditor* preview_ = nullptr;
     TubeShapeEditor* editor_ = nullptr;
     QLabel* builtinNote_ = nullptr;  // under the editor: a built-in shape is duplicated to edit

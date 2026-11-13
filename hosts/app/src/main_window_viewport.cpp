@@ -32,6 +32,7 @@
 #include "mesh_io.h"
 #include "overlay.h"
 #include "theme.h"
+#include "tube_panel.h"
 #include "viewport.h"
 
 namespace groomlab::app {
@@ -515,6 +516,15 @@ void MainWindow::refreshTool() {
     // The Groom Tools' tile and card follow the tool the viewport has (and the settings it uses).
     const Viewport::ToolMode mode = viewport_->toolMode();
     shell_->setTool(mode == Viewport::ToolMode::Brush ? brush_.toolId() : std::string(), mode == Viewport::ToolMode::Select);
+    // The Tube brush's tubes (the core's display, every host's): wires and/or shaded, as its card says.
+    const bool tubeBrush = mode == Viewport::ToolMode::Brush && brush_.toolId() == "shape";
+    const TubePanel* tubes = groomTools_ ? groomTools_->tubePanel() : nullptr;
+    const bool wires = tubeBrush && tubes && tubes->wireframe(), shaded = tubeBrush && tubes && tubes->shaded();
+    if (settings_.tubeWires != wires || settings_.tubeShaded != shaded) {
+        settings_.tubeWires = wires;
+        settings_.tubeShaded = shaded;
+        redisplay();
+    }
 }
 
 void MainWindow::setHairVisible(bool on) {

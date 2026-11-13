@@ -25,6 +25,16 @@ def _push(*keys):
     return update
 
 
+def _tube_display(self, context):
+    """The Tube brush's tubes shown otherwise: the display asks the helper again."""
+    if props.is_quiet():
+        return
+    from . import display, tools
+    scalp = tools.active(context)
+    if scalp is not None:
+        display.mark(scalp)
+
+
 def _redraw_views(self, context):
     from . import groom
     groom._redraw(viewport_only=True)
@@ -246,6 +256,47 @@ def _tube_shape_items(self, context):
 
 _tube_cache = []
 MIXED = "__mixed__"
+UNSET = "__unset__"  # a mid or tip profile not set (Between, As root)
+
+
+def _profile_items(profile):
+    """The mid's or the tip's picker (Maya's): unset first (Between, As root), Mixed while the
+    targets differ, the built-ins, the groom's library."""
+    cache = []
+
+    def items(self, context):
+        out = []
+        if getattr(self, "tube_%s_mixed" % profile):
+            out.append((MIXED, "Mixed", "The targeted guides have different %s profiles: pick one to give them all" % profile,
+                        "NONE", _number(MIXED)))
+        label, tip = ("Between", "Halfway between the root's profile and the tip's") if profile == "mid" else \
+            ("As root", "The root's profile again at the tip")
+        out.append((UNSET, label, tip, "NONE", _number(UNSET)))
+        for c in defs.choices("tubeShape"):
+            out.append((c["value"], c["label"], c.get("tip", ""), "NONE", _number(c["value"])))
+        for s in self.tube_shapes:
+            out.append((s.name, s.name, "A custom shape of this groom's library", "NONE", _number("library:" + s.name)))
+        cache[:] = out
+        return cache
+    return items
+
+
+def _tube_profile(profile):
+    def update(self, context):
+        if props.is_quiet():
+            return
+        from . import tools
+        tools.tube_changed(context, profile + "Shape")
+    return update
+
+
+def _tube_hold(profile):
+    def update(self, context):
+        if props.is_quiet():
+            return
+        from . import tools
+        tools.tube_changed(context, profile + "Hold")
+    return update
 
 
 class GroomLabGroupItem(bpy.types.PropertyGroup):
@@ -491,6 +542,32 @@ class GroomLabTools(bpy.types.PropertyGroup):
                                          "and Draw make. The built-ins, then the groom's library of custom shapes")
     tube_choice: StringProperty(default="round")  # the shape picked (the targets', else the last picked)
     tube_mixed: BoolProperty()
+    # The mid and tip profiles (tube.h: the outline changes smoothly root to mid to tip) and how
+    # much of the tube each keeps its exact shape (Maya's Tubes panel rows and Length sliders).
+    tube_mid_shape: EnumProperty(name="Mid", items=_profile_items("mid"), update=_tube_profile("mid"),
+                                 description="The tube's profile at its middle: picked, it goes to the targeted guides")
+    tube_tip_shape: EnumProperty(name="Tip", items=_profile_items("tip"), update=_tube_profile("tip"),
+                                 description="The tube's profile at its tip: picked, it goes to the targeted guides")
+    tube_mid_choice: StringProperty(default="")  # "" unset
+    tube_tip_choice: StringProperty(default="")
+    tube_mid_mixed: BoolProperty()
+    tube_tip_mixed: BoolProperty()
+    tube_root_hold: FloatProperty(name="Length", default=0.0, min=0.0, max=100.0, subtype="PERCENTAGE", precision=0,
+                                  update=_tube_hold("root"),
+                                  description="How much of the tube is exactly the root profile's shape, from the root (0%: "
+                                              "only at the root); between the held stretches the shape changes smoothly")
+    tube_mid_hold: FloatProperty(name="Length", default=0.0, min=0.0, max=100.0, subtype="PERCENTAGE", precision=0,
+                                 update=_tube_hold("mid"),
+                                 description="How much of the tube is exactly the mid profile's shape, centered on the "
+                                             "middle")
+    tube_tip_hold: FloatProperty(name="Length", default=0.0, min=0.0, max=100.0, subtype="PERCENTAGE", precision=0,
+                                 update=_tube_hold("tip"),
+                                 description="How much of the tube is exactly the tip profile's shape, up to the tip")
+    # The Tube brush's tubes in the viewport (Maya's Tube card switches): shaded surfaces, wires.
+    tube_shaded: BoolProperty(name="Shaded", default=False, update=_tube_display,
+                              description="Draw the brush's tubes as shaded surfaces")
+    tube_wireframe: BoolProperty(name="Wireframe", default=True, update=_tube_display,
+                                 description="Draw the brush's tubes as wires (the selected guides' warm)")
     tube_shapes: CollectionProperty(type=GroomLabTubeShapeItem)
     tube_shape_index: IntProperty()
     tube_width: FloatProperty(name="Width", default=0.001, min=0.0, soft_max=0.01, subtype="DISTANCE", unit="LENGTH",
