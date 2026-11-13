@@ -133,6 +133,20 @@ class UpdatesTest(unittest.TestCase):
             f.write(self.site.release_zip(extra={"GroomLab-0.2.0/GroomLab/maya%s/plug-ins/%s" % (OTHER, updates.PLUGIN_FILE): OTHER}))
         self.assertTrue(os.path.isdir(updates._unpack(zip_path, os.path.join(self.site.root, "unpacked"), "0.2.0",
                                                       int(OTHER))))
+        # A macOS zip: every build in maya<year>/, none at the module's root (no Maya 2022): it
+        # installs in the Mayas it has a build for (0.47.0's was refused: "no GroomLab module").
+        import zipfile
+        with zipfile.ZipFile(zip_path, "w") as z:
+            top = "GroomLab-0.2.0/"
+            z.writestr(top + "GroomLab/maya%s/plug-ins/%s" % (OTHER, updates.PLUGIN_FILE), "the new plugin")
+            z.writestr(top + "GroomLab/VERSION.txt", "GroomLab 0.2.0 (def5678, RelWithDebInfo)\n")
+            z.writestr(top + "GroomLab.mod", "+ MAYAVERSION:%s GroomLab 0.2.0 GroomLab/maya%s\n" % (OTHER, OTHER))
+        for n, maya in enumerate((int(OTHER), 0)):
+            self.assertTrue(os.path.isdir(updates._unpack(zip_path, os.path.join(self.site.root, "unpacked-mac%d" % n),
+                                                          "0.2.0", maya)))
+        with self.assertRaises(updates.UpdateError) as caught:
+            updates._unpack(zip_path, os.path.join(self.site.root, "unpacked-mac-2022"), "0.2.0", 2022)
+        self.assertIn("no GroomLab for Maya 2022", str(caught.exception))
 
     def test_install_unpacks_beside_and_rewrites_the_mod(self):
         result = updates.check()

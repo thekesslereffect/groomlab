@@ -490,7 +490,9 @@ def _download(url, path, sha256, size, progress=None, module=None):
 
 def _unpack(zip_path, dest, version, maya=0):
     """The release zip's GroomLab-<version>/ folder unpacked into dest; returns its path. It must hold
-    the plugin for Maya `maya` (the running one; 0: unknown) as well as Maya 2022's."""
+    the GroomLab.mod and a plugin build: the running Maya's (`maya`; 0: unknown, any build). Maya
+    2022's is the one at the module's root (Windows' zips); the others' are in maya<year>/ (every
+    build on macOS, whose zips have no Maya 2022 nor a root plugin)."""
     top = "GroomLab-%s" % version
     try:
         with zipfile.ZipFile(zip_path) as z:
@@ -503,11 +505,14 @@ def _unpack(zip_path, dest, version, maya=0):
         raise UpdateError("the download is not a zip: refused")
     folder = os.path.join(dest, top)
     module = os.path.join(folder, "GroomLab")
-    if not (os.path.isfile(os.path.join(module, "plug-ins", PLUGIN_FILE))
-            and os.path.isfile(os.path.join(folder, "GroomLab.mod"))):
+
+    def build(year):  # (a plugin may be a file or, as a .bundle can be, a folder)
+        return os.path.exists(os.path.join(module, *(("maya%s" % year,) if str(year) != "2022" else ()) + ("plug-ins", PLUGIN_FILE)))
+
+    years = [d[4:] for d in (os.listdir(module) if os.path.isdir(module) else []) if re.match(r"maya\d{4}$", d)]
+    if not (os.path.isfile(os.path.join(folder, "GroomLab.mod")) and (build(2022) or any(build(y) for y in years))):
         raise UpdateError("the release zip has no GroomLab module: refused")
-    if maya and str(maya) != "2022" and not os.path.isfile(os.path.join(module, "maya%s" % maya, "plug-ins",
-                                                                          PLUGIN_FILE)):
+    if maya and not build(maya):
         raise UpdateError("the release zip has no GroomLab for Maya %s: refused" % maya)
     if installed_version(module) != version:
         raise UpdateError("the release zip's VERSION.txt is not %s: refused" % version)
