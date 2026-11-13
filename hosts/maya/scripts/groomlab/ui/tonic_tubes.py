@@ -199,9 +199,9 @@ class TonicTubes(QtCore.QObject):
                     return picked
         return None
 
-    def _run(self, fn, *args):
+    def _run(self, fn, *args, **kwargs):
         try:
-            return fn(*args)
+            return fn(*args, **kwargs)
         except Exception as e:  # noqa: BLE001 (a button never ends in a bare traceback)
             from groomlab.ui import messages
             self.owner.status.setText(messages.error("Root tubes", e))
