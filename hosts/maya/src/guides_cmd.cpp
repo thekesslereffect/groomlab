@@ -111,6 +111,10 @@ const char* kReshape[] = {"-rsh", "-reshape"};  // <guide id> <curve>, multi-use
 const char* kSetPoints[] = {"-spt", "-setPoints"};
 // The -guide guides deleted (their children with them).
 const char* kRemoveGuides[] = {"-rmg", "-removeGuides"};
+// The closest points on the scalp the guides root on (refined as the groom refines it) to points
+// given as JSON [[x, y, z], ...] (world space): x, y, z of each, in order. A query, no undo step.
+// Tubes to Curves roots its curves there, so the groom does not move them whole to root them.
+const char* kClosestOnScalp[] = {"-cos", "-closestOnScalp"};
 // Tube guides (tube.h): a tube edit as JSON on the targets, and one guide's tube as JSON.
 const char* kSetTube[] = {"-stb", "-setTube"};
 const char* kTube[] = {"-tb", "-tube"};
@@ -237,6 +241,17 @@ MObject selectionData(const std::vector<GuideId>& ids) {
     return fn.create(values);
 }
 
+// The scalp the groom roots its guides on: inMesh joined with its other scalps, refined as its
+// session refines them (a Scalp node's subdivision; matchRender: the render's level), as the
+// brush reads it. Rooted on the cage instead, an edit here would find another topology than the
+// guides were bound on, root every guide again on the cage, and the groom root them back on the
+// refined scalp: guides moving a little each select and deselect (#68).
+MeshPtr groomScalp(const MFnDagNode& groomFn) {
+    const MeshPtr joined = joinedScalpFromNode(groomFn.object());
+    auto* shape = dynamic_cast<GroomShape*>(groomFn.userNode());
+    return shape && joined ? shape->session().refineAsScalp(joined) : joined;
+}
+
 }  // namespace
 
 const char* GuidesCmd::kName = "groomLabGuides";
@@ -314,6 +329,7 @@ MSyntax GuidesCmd::newSyntax() {
     s.makeFlagMultiUse(kReshape[0]);
     s.addFlag(kSetPoints[0], kSetPoints[1], MSyntax::kString);
     s.addFlag(kRemoveGuides[0], kRemoveGuides[1]);
+    s.addFlag(kClosestOnScalp[0], kClosestOnScalp[1], MSyntax::kString);
     s.setObjectType(MSyntax::kSelectionList, 1, 1);
     s.useSelectionAsDefault(true);
     s.enableQuery(false);
@@ -350,8 +366,27 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                             int(db.isFlagSet(kTubeShapes[0])) + int(db.isFlagSet(kEditTubeShape[0])) +
                             int(db.isFlagSet(kPreviewTubeShape[0])) + int(db.isFlagSet(kTubeTargets[0])) +
                             int(db.isFlagSet(kTubeFrames[0])) + int(db.isFlagSet(kSetPoints[0])) +
-                            int(db.isFlagSet(kRemoveGuides[0]));
+                            int(db.isFlagSet(kRemoveGuides[0])) + int(db.isFlagSet(kClosestOnScalp[0]));
         if (actions != 1) return fail(kName, "give exactly one action flag");
+
+        if (db.isFlagSet(kClosestOnScalp[0])) {
+            const MeshPtr scalp = groomScalp(groomFn);
+            if (!scalp || scalp->triangleCount() == 0) return fail(kName, "the groom has no scalp mesh");
+            const nlohmann::json given = nlohmann::json::parse(flagString(db, kClosestOnScalp[0], "[]").asChar(), nullptr, false);
+            if (!given.is_array()) return fail(kName, "-closestOnScalp takes [[x, y, z], ...]");
+            MDoubleArray out;
+            for (const nlohmann::json& p : given) {
+                if (!p.is_array() || p.size() != 3 || !p[0].is_number() || !p[1].is_number() || !p[2].is_number()) {
+                    return fail(kName, "-closestOnScalp: a point is [x, y, z]");
+                }
+                const Vec3f at = scalp->closestPoint(Vec3f(p[0].get<float>(), p[1].get<float>(), p[2].get<float>())).position;
+                out.append(at.x);
+                out.append(at.y);
+                out.append(at.z);
+            }
+            setResult(out);
+            return MS::kSuccess;
+        }
 
         // The groups need no rooting: the shape's parse of guideData (kept while it is unchanged).
         if (db.isFlagSet(kListGroups[0])) {
@@ -404,7 +439,7 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                 auto preview = std::make_shared<GuideHierarchy>(*authored);
                 preview->setTubeShape(op.value("name", std::string()), shapePoints(op.value("points", nlohmann::json::array())),
                                       op.value("smooth", true));
-                preview->evaluate(joinedScalpFromNode(groomPath.node()).get());
+                preview->evaluate(groomScalp(groomFn).get());
                 shape->setPreviewHierarchy(preview);
             } catch (const std::exception& e) {
                 return fail(kName, e.what());
@@ -445,7 +480,7 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
 
         // Current hierarchy, rooted on the groom's scalp.
         MPlug dataPlug = groomFn.findPlug("guideData", true);
-        const MeshPtr scalp = joinedScalpFromNode(groomPath.node());  // with the groom's other scalps
+        const MeshPtr scalp = groomScalp(groomFn);  // with the groom's other scalps, refined as it roots on them
         std::string error;
         std::shared_ptr<GuideHierarchy> h = toHierarchy(dataPlug.asString().asChar(), scalp.get(), &error, groomScaleOf(groomPath.node()));
         if (!h) return fail(kName, error.c_str());

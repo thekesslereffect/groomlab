@@ -384,18 +384,42 @@ def _scalp_distance(groom):
     return distance
 
 
-def _scalp_closest(groom):
-    """A function of a point: the nearest point on the groom's scalps (None without a scalp)."""
-    from maya.api import OpenMaya as om
-    fns = [_om_mesh(s) for s in sorted(_groom_meshes(groom))]
-    if not fns:
-        return None
+class _ScalpClosest(object):
+    """A function of a point: the nearest point on the scalp the groom roots its guides on, its
+    scalps refined as the groom refines them (a Scalp node's subdivision; matchRender: the render's
+    level), not the meshes as modeled: a root on the cage lies off that surface, and the groom
+    would move the whole guide to root it, its tip leaving its tube (#67). `prime(points)` asks
+    for many in one go (groomLabGuides -closestOnScalp); the answers are kept."""
 
-    def closest(p):
-        q = om.MPoint(*p)
-        hit = min((fn.getClosestPoint(q, om.MSpace.kWorld)[0] for fn in fns), key=q.distanceTo)
-        return (hit.x, hit.y, hit.z)
-    return closest
+    def __init__(self, groom):
+        self.groom = groom
+        self.known = {}
+
+    def prime(self, points):
+        wanted = []
+        for p in points:
+            key = tuple(float(x) for x in p)
+            if key not in self.known and key not in wanted:
+                wanted.append(key)
+        if not wanted:
+            return
+        flat = cmds.groomLabGuides(self.groom, closestOnScalp=json.dumps([list(p) for p in wanted])) or []
+        for k, p in enumerate(wanted):
+            self.known[p] = tuple(flat[3 * k:3 * k + 3])
+
+    def __call__(self, p):
+        key = tuple(float(x) for x in p)
+        if key not in self.known:
+            self.prime([key])
+        return self.known[key]
+
+
+def _scalp_closest(groom):
+    """A function of a point: the nearest point on the scalp the groom roots its guides on
+    (_ScalpClosest), None without a scalp."""
+    if not _groom_meshes(groom):
+        return None
+    return _ScalpClosest(groom)
 
 
 ROOT_FADE = 0.25  # the share of a curve's length over which _rooted's move fades away
@@ -531,15 +555,19 @@ def tubes_to_curves(meshes, groom=None, centers=True, centers_group=True, existi
         shape_curves, centers_made = [], []
         shape_tube, center_tube = [], []  # each curve's tube (its index)
         closest = _scalp_closest(groom) if groom else None  # (guides: rooted here, see _rooted)
+        columns = [tube.columns() if shapes else [] for tube in tubes]
+        volumes = [tube.volume_curves(center_count) if centers else [] for tube in tubes]
+        if closest:  # every root asked for in one go
+            closest.prime([c[0] for t in range(len(tubes)) for c in columns[t] + volumes[t] if c])
         for t, tube in enumerate(tubes):
             holder = (cmds.group(empty=True, name=tube.name + "_curves", parent=root)
                       if shapes or (centers and not centers_group) else None)
             if shapes:
-                for i, column in enumerate(tube.columns()):
+                for i, column in enumerate(columns[t]):
                     shape_curves.append(_curve("%s_curve%d" % (tube.name, i + 1), _rooted(column, closest), holder))
                     shape_tube.append(t)
             if centers:
-                for i, points in enumerate(tube.volume_curves(center_count)):
+                for i, points in enumerate(volumes[t]):
                     centers_made.append(_curve("%s_center%s" % (tube.name, i + 1 if i else ""),
                                                _rooted(points, closest), center_holder or holder))
                     center_tube.append(t)

@@ -365,7 +365,11 @@ def _sync_groom(groom, items, meshes, report):
             item["centers"] = [i for i in item["centers"] if i in existing]
             if item.pop("_changed", False):
                 changed = True
-            columns = [utils._rooted(c, closest) for c in tube.columns()] if item.get("columnCount") else []
+            raw = tube.columns() if item.get("columnCount") else []
+            volumes = tube.volume_curves(item.get("centerCount", 1)) if item["centers"] else []
+            if closest:  # this tube's roots asked for in one go
+                closest.prime([c[0] for c in raw + volumes if c])
+            columns = [utils._rooted(c, closest) for c in raw]
             if item.get("columnCount") and len(columns) != item["columnCount"]:
                 _remake_shape_guides(groom, item, columns, report)
                 changed = True
@@ -373,7 +377,7 @@ def _sync_groom(groom, items, meshes, report):
                 for guide, pts in zip(item["shape"], columns):
                     points[guide] = _points(pts)
             if item["centers"]:
-                for guide, pts in zip(item["centers"], tube.volume_curves(item.get("centerCount", 1))):
+                for guide, pts in zip(item["centers"], volumes):
                     points[guide] = _points(utils._rooted(pts, closest))
     if points:
         report["reshaped"] += list(cmds.groomLabGuides(groom, setPoints=json.dumps(points)) or [])
