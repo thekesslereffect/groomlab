@@ -149,6 +149,37 @@ def compare_versions(a, b):
 
 # ---- The release ---------------------------------------------------------------------------------
 
+# The system's trusted certificates, for a Python that found none of its own (as Maya's does on
+# macOS: every https site then fails with CERTIFICATE_VERIFY_FAILED); Maya's updates.py the same.
+CA_BUNDLES = ("/etc/ssl/cert.pem", "/etc/ssl/certs/ca-certificates.crt", "/etc/pki/tls/certs/ca-bundle.crt",
+              "/etc/ssl/ca-bundle.pem", "/opt/homebrew/etc/openssl@3/cert.pem", "/usr/local/etc/openssl@3/cert.pem",
+              "/usr/local/etc/openssl/cert.pem")
+
+
+def ssl_context():
+    """A context that verifies the server (never one that does not): Python's default, with the
+    system's trusted certificates added when it holds none (certifi's when it is there, else the
+    first bundle of CA_BUNDLES that loads)."""
+    import ssl
+    context = ssl.create_default_context()
+    if context.cert_store_stats().get("x509_ca", 0):
+        return context
+    bundles = []
+    try:
+        import certifi
+        bundles.append(certifi.where())
+    except Exception:
+        pass
+    for path in bundles + list(CA_BUNDLES):
+        if path and os.path.isfile(path):
+            try:
+                context.load_verify_locations(cafile=path)
+                return context
+            except Exception:
+                continue
+    return context
+
+
 def user_agent():
     return "GroomLab-Blender/%s" % (current_version() or "unknown")
 
@@ -174,7 +205,7 @@ def fetch_latest(url=None, timeout=None):
     url = url or LATEST_URL
     request = Request(url, headers={"User-Agent": user_agent(), "Accept": "application/json"})
     try:
-        with urlopen(request, timeout=TIMEOUT if timeout is None else timeout) as response:
+        with urlopen(request, timeout=TIMEOUT if timeout is None else timeout, context=ssl_context()) as response:
             body = response.read(1 << 20)
     except (URLError, OSError, ValueError) as e:
         if getattr(e, "code", None):  # an HTTP error: the server answered
@@ -248,7 +279,8 @@ def download(info, latest_url=None):
     digest = hashlib.sha256()
     size = 0
     try:
-        with urlopen(Request(url, headers={"User-Agent": user_agent()}), timeout=DOWNLOAD_TIMEOUT) as response, \
+        with urlopen(Request(url, headers={"User-Agent": user_agent()}), timeout=DOWNLOAD_TIMEOUT,
+                     context=ssl_context()) as response, \
                 open(path, "wb") as out:
             while True:
                 chunk = response.read(1 << 20)

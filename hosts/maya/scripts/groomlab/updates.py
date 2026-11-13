@@ -326,6 +326,52 @@ def _urllib():
     return Request, urlopen, URLError, urlparse
 
 
+# The system's trusted certificates, for a Python that found none of its own: Maya's on macOS (its
+# OpenSSL looks where no bundle is, so every https site fails with CERTIFICATE_VERIFY_FAILED), and
+# Linux distributions' usual places.
+CA_BUNDLES = ("/etc/ssl/cert.pem", "/etc/ssl/certs/ca-certificates.crt", "/etc/pki/tls/certs/ca-bundle.crt",
+              "/etc/ssl/ca-bundle.pem", "/opt/homebrew/etc/openssl@3/cert.pem", "/usr/local/etc/openssl@3/cert.pem",
+              "/usr/local/etc/openssl/cert.pem")
+
+
+def ssl_context():
+    """A context that verifies the server (never one that does not): Python's default, with the
+    system's trusted certificates added when it holds none (certifi's when it is there, else the
+    first bundle of CA_BUNDLES that loads). None on a Python without ssl."""
+    try:
+        import ssl
+        context = ssl.create_default_context()
+    except (ImportError, AttributeError):
+        return None
+    if context.cert_store_stats().get("x509_ca", 0):
+        return context
+    # (None loaded yet: a Python whose OpenSSL looks in a folder loads them as it needs them, so
+    # adding a bundle costs nothing there; Maya's on macOS has neither.)
+    bundles = []
+    try:
+        import certifi
+        bundles.append(certifi.where())
+    except Exception:
+        pass
+    for path in bundles + list(CA_BUNDLES):
+        if path and os.path.isfile(path):
+            try:
+                context.load_verify_locations(cafile=path)
+                return context
+            except Exception:
+                continue
+    return context
+
+
+def _open(request, timeout):
+    """urlopen with ssl_context() (the server's certificate verified as ever)."""
+    urlopen = _urllib()[1]
+    context = ssl_context()
+    if context is None:
+        return urlopen(request, timeout=timeout)
+    return urlopen(request, timeout=timeout, context=context)
+
+
 def user_agent(module=None):
     return "GroomLab/%s" % (current_version(module) or "unknown")
 
@@ -345,11 +391,11 @@ def _check_download_url(url, latest_url):
 
 def fetch_latest(url=None, module=None, timeout=None):
     """latest.json as a dict (UpdateError when it cannot be read or is not a release)."""
-    Request, urlopen, URLError, _ = _urllib()
+    Request, _, URLError, _ = _urllib()
     url = url or LATEST_URL
     request = Request(url, headers={"User-Agent": user_agent(module), "Accept": "application/json"})
     try:
-        response = urlopen(request, timeout=TIMEOUT if timeout is None else timeout)
+        response = _open(request, TIMEOUT if timeout is None else timeout)
         try:
             body = response.read(1 << 20)
         finally:
@@ -415,11 +461,11 @@ def check(url=None, module=None, timeout=None):
 
 
 def _download(url, path, sha256, size, progress=None, module=None):
-    Request, urlopen, URLError, _ = _urllib()
+    Request, _, URLError, _ = _urllib()
     digest = hashlib.sha256()
     done = 0
     try:
-        response = urlopen(Request(url, headers={"User-Agent": user_agent(module)}), timeout=DOWNLOAD_TIMEOUT)
+        response = _open(Request(url, headers={"User-Agent": user_agent(module)}), DOWNLOAD_TIMEOUT)
         try:
             total = int(response.headers.get("Content-Length") or size or 0)
             with open(path, "wb") as f:

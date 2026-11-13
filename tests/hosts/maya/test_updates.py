@@ -264,6 +264,37 @@ class UpdatesTest(unittest.TestCase):
         self.assertIsNone(updates.on_startup(now=now + 5 * day))
         self.assertEqual(len(self.site.requests), 2)
 
+    def test_https_verified_with_the_systems_certificates(self):
+        # A Python that found no trusted certificates of its own (Maya's on macOS): the system's
+        # bundle loaded, the server still verified.
+        import ssl
+        import tempfile
+        own = ssl.create_default_context()
+        pems = [ssl.DER_cert_to_PEM_cert(der) for der in own.get_ca_certs(binary_form=True)]
+        if not pems:
+            own.load_default_certs()
+            pems = [ssl.DER_cert_to_PEM_cert(der) for der in own.get_ca_certs(binary_form=True)]
+        if not pems:
+            self.skipTest("no trusted certificates on this machine to stand in for a system bundle")
+        folder = tempfile.mkdtemp(prefix="groomlab_ca_")
+        bundle = os.path.join(folder, "cert.pem")
+        with open(bundle, "w") as f:
+            f.write("".join(pems))
+        create, bundles = ssl.create_default_context, updates.CA_BUNDLES
+        ssl.create_default_context = lambda *a, **k: ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)  # none of its own
+        updates.CA_BUNDLES = (os.path.join(folder, "missing.pem"), bundle)
+        try:
+            context = updates.ssl_context()
+        finally:
+            ssl.create_default_context, updates.CA_BUNDLES = create, bundles
+        self.assertGreater(context.cert_store_stats()["x509_ca"], 0)
+        self.assertEqual(context.verify_mode, ssl.CERT_REQUIRED)
+        self.assertTrue(context.check_hostname)
+        # The default: verified too, and the check still reaches the (plain http, local) site.
+        context = updates.ssl_context()
+        self.assertEqual(context.verify_mode, ssl.CERT_REQUIRED)
+        self.assertTrue(updates.check()["reached"])
+
     def test_offline_is_silent(self):
         updates.LATEST_URL = "http://127.0.0.1:%d/maya/latest.json" % _closed_port()
         result = updates.check(timeout=2)
