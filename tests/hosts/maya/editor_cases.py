@@ -4557,6 +4557,60 @@ class DockableWindowsTest(unittest.TestCase):
         finally:
             window.close()
 
+    def test_tube_profiles_root_mid_tip(self):
+        # GH-59: the Profile block's Root, Mid and Tip pickers, each with its Apply, given to every
+        # selected guide; the targets' profiles shown (Mixed where they differ); with none selected,
+        # the groom's profiles listed and a library shape edited for every guide taking it.
+        from groomlab.ui import palette
+        guides = groomlab.guides_from_curves(self.groom, [cmds.curve(degree=1, point=[(0, 1, 0), (0, 2, 0)]),
+                                                          cmds.curve(degree=1, point=[(0.3, 0.95, 0), (0.6, 1.9, 0)])])
+        cmds.select(self.groom)
+        window = palette.show()
+        try:
+            window.groom_picked(window.grooms.findData(self.groom))
+            window.buttons["shape"].click()
+            panel = window.tube_panel
+            groomlab.select_guides(self.groom, guides=guides)
+            panel.refresh(self.groom)
+            self.assertEqual(panel.mid_shape.currentData(), "")  # unset: Between
+            self.assertEqual(panel.tip_shape.currentData(), "")  # unset: As root
+            # Picking the tip's profile gives it to both selected guides; the editor shows it.
+            panel.tip_shape.setCurrentIndex(panel.tip_shape.findData("ribbon"))
+            panel.tip_shape.activated.emit(panel.tip_shape.currentIndex())
+            for g in guides:
+                self.assertEqual(groomlab.get_tube(self.groom, g).get("tipShape"), "ribbon")
+            self.assertEqual(panel._active, "tip")
+            # The mid's Apply, on both.
+            panel.mid_shape.setCurrentIndex(panel.mid_shape.findData("blade"))
+            panel._choices["mid"] = "blade"
+            panel.apply_buttons["mid"].click()
+            for g in guides:
+                self.assertEqual(groomlab.get_tube(self.groom, g).get("midShape"), "blade")
+            # One guide's tip changed: Mixed while both are selected.
+            groomlab.set_tube(self.groom, guides=[guides[1]], tip_shape="teardrop")
+            panel.refresh(self.groom)
+            self.assertEqual(panel.tip_shape.currentData(), panel.MIXED)
+            # Unset again ("" : As root).
+            groomlab.set_tube(self.groom, guides=guides, tip_shape="")
+            self.assertNotIn("tipShape", groomlab.get_tube(self.groom, guides[0]))
+            # No targets: the groom's profiles listed; a library shape as the mid's, edited for all.
+            groomlab.add_tube_shape(self.groom, "leaf", [(0, 1), (-0.6, 0.2), (0, -1), (0.6, 0.2)])
+            groomlab.set_tube(self.groom, guides=guides, mid_shape="leaf")
+            groomlab.clear_guide_selection(self.groom)
+            panel.refresh(self.groom)
+            self.assertTrue(panel.in_use.isVisibleTo(window))
+            self.assertIn("leaf (2)", panel.in_use.text())
+            leaf = [s for s in groomlab.tube_shapes(self.groom) if s["name"] == "leaf"][0]
+            self.assertEqual(leaf["users"], 2)
+            panel.mid_shape.setCurrentIndex(panel.mid_shape.findData("leaf"))
+            panel.mid_shape.activated.emit(panel.mid_shape.currentIndex())
+            self.assertTrue(panel.editor.editable)
+            groomlab.set_tube_shape_points(self.groom, "leaf", [(0, 1), (-0.8, 0.0), (0, -1), (0.8, 0.0)])
+            for g in guides:
+                self.assertEqual(groomlab.get_tube(self.groom, g).get("midShape"), "leaf")
+        finally:
+            window.close()
+
     def test_paint_tool_follows_the_active_groom(self):
         # Two grooms, each with a texture map "mask" (its own file): while painting, making the
         # other groom active sends the tool that groom's file; the first one's never lingers.

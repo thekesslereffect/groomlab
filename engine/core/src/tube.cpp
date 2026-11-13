@@ -124,6 +124,77 @@ void measureDepth(TubeOutline& t) {
     t.depth = std::max(best, 1e-3f);
 }
 
+// The farthest crossing of the ray from the center at angle `a` with a closed polygon: how far
+// out (0: none), and on which edge (from points[edge] to the next) how far along it.
+float farthestCrossing(const std::vector<SectionPoint>& poly, float a, std::size_t* edge, float* along) {
+    const float du = pm::cos(a), dv = pm::sin(a);
+    const std::size_t n = poly.size();
+    float far = 0.0f;
+    *edge = 0;
+    *along = 0.0f;
+    for (std::size_t i = 0; i < n; ++i) {
+        const SectionPoint& p = poly[i];
+        const SectionPoint& q = poly[(i + 1) % n];
+        const float eu = q.u - p.u, ev = q.v - p.v;
+        const float den = du * ev - dv * eu;  // the ray across the edge
+        if (std::abs(den) < 1e-12f) continue;
+        const float s = (p.u * ev - p.v * eu) / den;  // along the ray
+        const float f = (p.u * dv - p.v * du) / den;  // along the edge
+        if (f >= -1e-6f && f <= 1.0f + 1e-6f && s > far) {
+            far = s;
+            *edge = i;
+            *along = std::clamp(f, 0.0f, 1.0f);
+        }
+    }
+    return far;
+}
+
+// The outline's radius each way out from the center (TubeOutline::radius: along each bin's ray
+// the farthest crossing of its edges), its perimeter walked evenly from where the +u ray crosses
+// it, and where along that each bin's ray crosses (TubeOutline::perimeter, perimeterAt).
+void measureRadius(TubeOutline& t) {
+    t.radius.assign(kTubeRadialBins, 1.0f);
+    t.perimeterAt.assign(kTubeRadialBins, 0.0f);
+    t.perimeter.clear();
+    const std::vector<SectionPoint>& poly = t.points;
+    const std::size_t n = poly.size();
+    if (n < 3) return;
+    std::vector<float> at(n + 1, 0.0f);  // arc length to each point
+    for (std::size_t i = 0; i < n; ++i) {
+        const SectionPoint& a = poly[i];
+        const SectionPoint& b = poly[(i + 1) % n];
+        at[i + 1] = at[i] + std::hypot(b.u - a.u, b.v - a.v);
+    }
+    const float total = std::max(at[n], 1e-6f);
+    auto arcOf = [&](std::size_t edge, float along) { return at[edge] + (at[edge + 1] - at[edge]) * along; };
+    std::size_t edge = 0;
+    float along = 0.0f;
+    farthestCrossing(poly, 0.0f, &edge, &along);
+    const float start = arcOf(edge, along);
+    for (std::size_t b = 0; b < kTubeRadialBins; ++b) {
+        const float a = 2.0f * kPi * static_cast<float>(b) / static_cast<float>(kTubeRadialBins);
+        const float far = farthestCrossing(poly, a, &edge, &along);
+        t.radius[b] = far > 1e-4f ? far : 1.0f;
+        float s = (arcOf(edge, along) - start) / total;
+        s -= std::floor(s);
+        t.perimeterAt[b] = s >= 1.0f ? 0.0f : s;
+    }
+    t.perimeterAt[0] = 0.0f;  // (the start itself)
+    t.perimeter.resize(kTubePerimeterPoints);
+    std::size_t seg = 0;
+    for (std::size_t k = 0; k < kTubePerimeterPoints; ++k) {
+        float d = start + total * static_cast<float>(k) / static_cast<float>(kTubePerimeterPoints);
+        if (d >= total) d -= total;
+        seg = std::upper_bound(at.begin(), at.end(), d) - at.begin();
+        seg = std::clamp<std::size_t>(seg, 1, n) - 1;
+        const float len = at[seg + 1] - at[seg];
+        const float f = len > 0.0f ? std::clamp((d - at[seg]) / len, 0.0f, 1.0f) : 0.0f;
+        const SectionPoint& a = poly[seg];
+        const SectionPoint& b = poly[(seg + 1) % n];
+        t.perimeter[k] = {a.u + (b.u - a.u) * f, a.v + (b.v - a.v) * f};
+    }
+}
+
 ShapeTable makeTable(TubeShape shape) {
     ShapeTable t;
     t.points = makeOutline(shape);
@@ -144,6 +215,7 @@ ShapeTable makeTable(TubeShape shape) {
         }
         t.corners.push_back(best);
     }
+    measureRadius(t);
     if (shape == TubeShape::Round) return t;  // deepest at the center, 1 deep
     measureDepth(t);
     return t;
@@ -200,8 +272,174 @@ TubeSection TubeProfile::sectionAt(float t) const { return {widthAt(t), aspectAt
 
 std::string TubeProfile::shapeName() const { return custom ? custom->name : tubeShapeName(shape); }
 
+std::string TubeShapeRef::name() const { return custom ? custom->name : tubeShapeName(shape); }
+
+float TubeOutline::radiusAt(float u, float v) const {
+    if (radius.empty()) return 1.0f;
+    if (u == 0.0f && v == 0.0f) return radius.front();
+    float a = pm::atan2(v, u);
+    if (a < 0.0f) a += 2.0f * kPi;
+    const float x = a / (2.0f * kPi) * static_cast<float>(radius.size());
+    const std::size_t i = std::min(static_cast<std::size_t>(x), radius.size() - 1);
+    const float f = std::clamp(x - static_cast<float>(i), 0.0f, 1.0f);
+    return radius[i] + (radius[(i + 1) % radius.size()] - radius[i]) * f;
+}
+
+SectionPoint TubeOutline::perimeterPoint(float s) const {
+    if (perimeter.empty()) return {};
+    const std::size_t n = perimeter.size();
+    float x = (s - std::floor(s)) * static_cast<float>(n);
+    const std::size_t i = std::min(static_cast<std::size_t>(x), n - 1);
+    const float f = std::clamp(x - static_cast<float>(i), 0.0f, 1.0f);
+    const SectionPoint& a = perimeter[i];
+    const SectionPoint& b = perimeter[(i + 1) % n];
+    return {a.u + (b.u - a.u) * f, a.v + (b.v - a.v) * f};
+}
+
+float TubeOutline::perimeterParam(float u, float v) const {
+    if (perimeterAt.empty() || (u == 0.0f && v == 0.0f)) return 0.0f;
+    float a = pm::atan2(v, u);
+    if (a < 0.0f) a += 2.0f * kPi;
+    const std::size_t n = perimeterAt.size();
+    const float x = a / (2.0f * kPi) * static_cast<float>(n);
+    const std::size_t i = std::min(static_cast<std::size_t>(x), n - 1);
+    const float f = std::clamp(x - static_cast<float>(i), 0.0f, 1.0f);
+    const float s0 = perimeterAt[i];
+    float s1 = perimeterAt[(i + 1) % n];
+    if (s1 - s0 > 0.5f) s1 -= 1.0f;  // (round the start: the shorter way)
+    if (s0 - s1 > 0.5f) s1 += 1.0f;
+    const float s = s0 + (s1 - s0) * f;
+    return s - std::floor(s);
+}
+
+bool tubeShapeByName(const std::string& name, const std::map<std::string, CustomTubeShapePtr>* library, TubeShapeRef* into) {
+    TubeShape builtin = TubeShape::Round;
+    if (parseTubeShape(name, &builtin)) {
+        *into = {builtin, nullptr};
+        return true;
+    }
+    if (library) {
+        const auto it = library->find(name);
+        if (it != library->end()) {
+            *into = {TubeShape::Round, it->second};
+            return true;
+        }
+    }
+    return false;
+}
+
+namespace {
+
+// From 0 at t a to 1 at t b, smoothstep; a step at b where they meet.
+float holdStep(float a, float b, float t) {
+    if (b - a <= 1e-6f) return t >= b ? 1.0f : 0.0f;
+    const float x = std::clamp((t - a) / (b - a), 0.0f, 1.0f);
+    return x * x * (3.0f - 2.0f * x);
+}
+
+}  // namespace
+
+TubeBlendWeights tubeBlendWeights(const TubeBlendTiming& m, float t) {
+    if (m.none()) return {};
+    const float x = std::clamp(t, 0.0f, 1.0f);
+    if (!m.hasMid()) {
+        const float s = holdStep(m.rootEnd, m.tipStart, x);
+        return {1.0f - s, 0.0f, s};
+    }
+    if (x <= m.midStart) {
+        const float s = holdStep(m.rootEnd, m.midStart, x);
+        return {1.0f - s, s, 0.0f};
+    }
+    if (x <= m.midEnd) return {0.0f, 1.0f, 0.0f};
+    const float s = holdStep(m.midEnd, m.tipStart, x);
+    return {0.0f, 1.0f - s, s};
+}
+
+SectionPoint tubeBlendAt(const TubeBlendPoint& b, float u, float v, float t) {
+    if (b.none()) return {u, v};
+    const TubeBlendWeights w = tubeBlendWeights(b.timing, t);
+    return {w.root * u + w.mid * b.mid.u + w.tip * b.tip.u, w.root * v + w.mid * b.mid.v + w.tip * b.tip.v};
+}
+
+bool TubeProfile::blended() const {
+    const TubeShapeRef root = rootShape();
+    return (midShape && *midShape != root) || (tipShape && *tipShape != root);
+}
+
+TubeBlendTiming TubeProfile::blendTiming() const {
+    TubeBlendTiming m;
+    if (!blended()) return m;
+    float rootEnd = std::clamp(rootHold, 0.0f, 1.0f);
+    float tipStart = 1.0f - std::clamp(tipHold, 0.0f, 1.0f);
+    if (midShape) {
+        // The mid's hold centered on its place, the root's and the tip's stopping at it.
+        const float at = std::clamp(midAt, 0.0f, 1.0f);
+        rootEnd = std::min(rootEnd, at);
+        tipStart = std::max(tipStart, at);
+        const float half = 0.5f * std::clamp(midHold, 0.0f, 1.0f);
+        m.midStart = std::max(at - half, rootEnd);
+        m.midEnd = std::min(at + half, tipStart);
+    } else if (rootEnd > tipStart) {
+        rootEnd = tipStart = 0.5f * (rootEnd + tipStart);  // (overlapping holds: they meet halfway)
+    }
+    m.rootEnd = rootEnd;
+    m.tipStart = tipStart;
+    return m;
+}
+
+TubeBlendPoint TubeProfile::blendPoint(float u, float v) const {
+    TubeBlendPoint b;
+    b.timing = blendTiming();
+    b.mid = b.tip = {u, v};
+    if (b.none()) return b;
+    // Where its ray crosses the root's perimeter, and how far out it lies (1 on the outline).
+    const TubeOutline& root = tubeShapeOutline(rootShape());
+    const float s = root.perimeterParam(u, v);
+    const float r = std::hypot(u, v) / std::max(root.radiusAt(u, v), 1e-4f);
+    auto place = [&](const std::optional<TubeShapeRef>& profile) -> SectionPoint {
+        if (!profile) return {u, v};  // (no tip: the root's)
+        const SectionPoint p = tubeShapeOutline(*profile).perimeterPoint(s);
+        return {p.u * r, p.v * r};
+    };
+    b.mid = place(midShape);
+    b.tip = place(tipShape);
+    return b;
+}
+
+SectionPoint TubeProfile::unblend(float u, float v, float t) const {
+    const TubeBlendTiming m = blendTiming();
+    if (m.none() || (u == 0.0f && v == 0.0f)) return {u, v};
+    const TubeBlendWeights w = tubeBlendWeights(m, t);
+    if (w.root >= 1.0f) return {u, v};
+    // The outline at t (each perimeter point the weights' mix of the profiles'), the ray through
+    // (u, v) crossing it: the place along the perimeters and how far out.
+    const TubeOutline& root = tubeShapeOutline(rootShape());
+    const TubeOutline& mid = tubeShapeOutline(midShape ? *midShape : rootShape());
+    const TubeOutline& tip = tubeShapeOutline(tipShape ? *tipShape : rootShape());
+    std::vector<SectionPoint> curve(kTubePerimeterPoints);
+    for (std::size_t k = 0; k < kTubePerimeterPoints; ++k) {
+        const float s = static_cast<float>(k) / static_cast<float>(kTubePerimeterPoints);
+        const SectionPoint a = root.perimeterPoint(s), b = mid.perimeterPoint(s), c = tip.perimeterPoint(s);
+        curve[k] = {w.root * a.u + w.mid * b.u + w.tip * c.u, w.root * a.v + w.mid * b.v + w.tip * c.v};
+    }
+    std::size_t edge = 0;
+    float along = 0.0f;
+    float a = pm::atan2(v, u);
+    if (a < 0.0f) a += 2.0f * kPi;
+    const float far = farthestCrossing(curve, a, &edge, &along);
+    if (!(far > 1e-6f)) return {u, v};
+    const float r = std::hypot(u, v) / far;
+    const SectionPoint p = root.perimeterPoint((static_cast<float>(edge) + along) / static_cast<float>(kTubePerimeterPoints));
+    return {p.u * r, p.v * r};
+}
+
+bool TubeProfile::usesShape(const std::string& name) const {
+    return (custom && custom->name == name) || (midShape && midShape->custom && midShape->custom->name == name) ||
+           (tipShape && tipShape->custom && tipShape->custom->name == name);
+}
+
 bool TubeProfile::shaped() const {
-    if (custom || shape != TubeShape::Round) return true;
+    if (custom || shape != TubeShape::Round || blended()) return true;
     for (const float a : aspect) {
         if (a != 1.0f) return true;
     }
@@ -233,6 +471,18 @@ std::uint64_t hashTube(std::uint64_t h, const TubeProfile& tube) {
     for (const std::vector<float>* list : {&tube.width, &tube.aspect, &tube.twist}) {
         h = hashCombine(h, list->size());
         for (const float v : *list) h = hashFloat(h, v);
+    }
+    // The mid's and the tip's profiles where set (a tube of one profile hashes as it always has).
+    const std::pair<std::uint64_t, const std::optional<TubeShapeRef>*> keys[] = {{0x3D1Du, &tube.midShape},
+                                                                                 {0x7195u, &tube.tipShape}};
+    for (const auto& [salt, ref] : keys) {
+        if (!*ref) continue;
+        h = hashCombine(h, salt);
+        const TubeShapeRef& s = **ref;
+        h = s.custom ? hashCombine(hashString(h, s.custom->name), s.custom->hash) : hashCombine(h, static_cast<std::uint64_t>(s.shape) + 1);
+    }
+    if (tube.rootHold != 0.0f || tube.midHold != 0.0f || tube.tipHold != 0.0f || tube.midAt != 0.5f) {
+        h = hashFloat(hashFloat(hashFloat(hashFloat(hashCombine(h, 0xB01Du), tube.rootHold), tube.midHold), tube.tipHold), tube.midAt);
     }
     return h;
 }
@@ -308,6 +558,8 @@ SectionPoint randomPointInTubeShape(TubeShape shape, std::uint64_t seed) {
 }
 
 const TubeOutline& tubeShapeOutline(const TubeProfile& tube) { return tube.custom ? tube.custom->outline : table(tube.shape); }
+
+const TubeOutline& tubeShapeOutline(const TubeShapeRef& shape) { return shape.custom ? shape.custom->outline : table(shape.shape); }
 
 const std::vector<SectionPoint>& tubeOutline(const TubeProfile& tube) { return tubeShapeOutline(tube).points; }
 
@@ -568,6 +820,7 @@ CustomTubeShapePtr buildCustomTubeShape(const std::string& name, const std::vect
     }
     std::sort(t.corners.begin(), t.corners.end());
     measureDepth(t);
+    measureRadius(t);
     return shape;
 }
 
@@ -638,7 +891,7 @@ SectionPoint sectionCoords(const TubeSection& section, float x, float y, float s
 // TubeSpine
 
 TubeSpine::TubeSpine(const Vec3f* points, std::size_t count, const Vec3f& frameUp, const TubeProfile& tube, float scale)
-    : tube_(tube) {
+    : tube_(tube), blended_(tube.blended()) {
     if (count < 2) return;
     const std::vector<Frame> frames = rotationMinimizingFrames(points, count, frameUp);
     centers_.assign(points, points + count);
@@ -681,12 +934,29 @@ void TubeSpine::setRootSurface(const Vec3f& normal) {
 }
 
 Vec3f TubeSpine::at(float t, float u, float v) const {
+    if (blended_) return at(t, u, v, tube_.blendPoint(u, v));
     const std::size_t n = centers_.size();
     const float x = std::clamp(t, 0.0f, 1.0f) * static_cast<float>(n - 1);
     const std::size_t i = std::min(static_cast<std::size_t>(x), n - 2);
     const float f = x - static_cast<float>(i);
     if (f == 0.0f) return atSample(i, u, v);
     return atSample(i, u, v) * (1.0f - f) + atSample(i + 1, u, v) * f;
+}
+
+Vec3f TubeSpine::atSample(std::size_t i, float u, float v, const TubeBlendPoint& blend) const {
+    if (blend.none()) return centers_[i] + axisU_[i] * u + axisV_[i] * v;
+    const std::size_t n = centers_.size();
+    const SectionPoint q = tubeBlendAt(blend, u, v, n > 1 ? static_cast<float>(i) / static_cast<float>(n - 1) : 0.0f);
+    return centers_[i] + axisU_[i] * q.u + axisV_[i] * q.v;
+}
+
+Vec3f TubeSpine::at(float t, float u, float v, const TubeBlendPoint& blend) const {
+    const std::size_t n = centers_.size();
+    const float x = std::clamp(t, 0.0f, 1.0f) * static_cast<float>(n - 1);
+    const std::size_t i = std::min(static_cast<std::size_t>(x), n - 2);
+    const float f = x - static_cast<float>(i);
+    if (f == 0.0f) return atSample(i, u, v, blend);
+    return atSample(i, u, v, blend) * (1.0f - f) + atSample(i + 1, u, v, blend) * f;
 }
 
 SectionPoint TubeSpine::rootCoords(const Vec3f& p, float* along) const {
@@ -736,7 +1006,13 @@ std::vector<float> listOf(const json& j, const char* key) {
 std::string tubeToJson(const TubeProfile& tube, float scale) {
     std::vector<float> width = tube.width;
     for (float& w : width) w *= scale;
-    const json j = {{"shape", tube.shapeName()}, {"width", width}, {"aspect", tube.aspect}, {"twist", tube.twist}};
+    json j = {{"shape", tube.shapeName()}, {"width", width}, {"aspect", tube.aspect}, {"twist", tube.twist}};
+    if (tube.midShape) j["midShape"] = tube.midShape->name();
+    if (tube.tipShape) j["tipShape"] = tube.tipShape->name();
+    if (tube.rootHold != 0.0f) j["rootHold"] = tube.rootHold;
+    if (tube.midHold != 0.0f) j["midHold"] = tube.midHold;
+    if (tube.tipHold != 0.0f) j["tipHold"] = tube.tipHold;
+    if (tube.midAt != 0.5f) j["midAt"] = tube.midAt;
     return j.dump();
 }
 
@@ -766,6 +1042,36 @@ TubeProfile editedTube(const TubeProfile& base, const std::string& editJson, flo
             }
             throw std::invalid_argument("tube shape '" + name + "': one of " + known);
         }
+    }
+    // The mid's and the tip's profiles: a shape's name, or null / "" to unset.
+    for (const auto& [key, into] : {std::pair<const char*, std::optional<TubeShapeRef>*>{"midShape", &tube.midShape},
+                                    std::pair<const char*, std::optional<TubeShapeRef>*>{"tipShape", &tube.tipShape}}) {
+        if (!j.contains(key)) continue;
+        const json& value = j[key];
+        if (value.is_null() || (value.is_string() && value.get<std::string>().empty())) {
+            into->reset();
+            continue;
+        }
+        const std::string name = value.is_string() ? value.get<std::string>() : "";
+        TubeShapeRef ref;
+        if (!tubeShapeByName(name, library, &ref)) {
+            std::string known = "round, ribbon, teardrop, blade";
+            if (library) {
+                for (const auto& entry : *library) known += ", " + entry.first;
+            }
+            throw std::invalid_argument(std::string("tube ") + key + " '" + name + "': one of " + known + ", or none");
+        }
+        *into = ref;
+    }
+    for (const auto& [key, into] : {std::pair<const char*, float*>{"rootHold", &tube.rootHold},
+                                    std::pair<const char*, float*>{"midHold", &tube.midHold},
+                                    std::pair<const char*, float*>{"tipHold", &tube.tipHold},
+                                    std::pair<const char*, float*>{"midAt", &tube.midAt}}) {
+        if (!j.contains(key)) continue;
+        if (!j[key].is_number() || !(j[key].get<double>() >= 0.0 && j[key].get<double>() <= 1.0)) {
+            throw std::invalid_argument(std::string("tube ") + key + ": a number, 0 to 1");
+        }
+        *into = j[key].get<float>();
     }
     if (j.contains("width")) {
         tube.width = listOf(j["width"], "width");
@@ -846,6 +1152,12 @@ TubeProfile blendedTube(const std::vector<const TubeProfile*>& tubes, const std:
     if (tubes.empty()) return out;
     out.shape = tubes.front()->shape;
     out.custom = tubes.front()->custom;
+    out.midShape = tubes.front()->midShape;
+    out.tipShape = tubes.front()->tipShape;
+    out.rootHold = tubes.front()->rootHold;
+    out.midHold = tubes.front()->midHold;
+    out.tipHold = tubes.front()->tipHold;
+    out.midAt = tubes.front()->midAt;
     const std::size_t n = std::max<std::size_t>(samples, 2);
     float total = 0.0f;
     for (std::size_t k = 0; k < tubes.size(); ++k) total += k < weights.size() ? std::max(weights[k], 0.0f) : 0.0f;

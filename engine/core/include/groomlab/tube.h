@@ -24,12 +24,28 @@
 // frame's normal, y along its binormal. So a point inside the outline at the root stays inside the
 // outline all the way to the tip, however the tube flattens, twists or tapers. t runs over the
 // guide's samples by index (evenly spaced samples: evenly along its length).
+//
+// Profiles along the tube (GH-59): the shape above is the ROOT's profile; a tube may also give a
+// MID profile (at t midAt, 0.5 by default) and a TIP profile (at t 1), and its outline then
+// changes smoothly from one to the next. The outlines are matched along their edges, as a shape
+// morph is: each is walked evenly round its perimeter from where the +u ray crosses it
+// (TubeOutline::perimeter), and a section between two profiles is the point-by-point mix of their
+// perimeters, so each profile is exactly its own shape at its key, corners and all. A point given
+// in the root's section coordinates (what strands, children and clumps carry) is taken as where
+// its ray out from the guide crosses the root's perimeter (s) and how far out it lies (r, 0 at the
+// guide to 1 on the outline); a profile places it at r times its own perimeter's point s
+// (TubeBlendPoint, tubeBlendAt). When: each profile HOLDS its shape over a share of the tube
+// (rootHold from the root, tipHold up to the tip, midHold centered on midAt) and between the held
+// stretches the shape changes smoothly (smoothstep); holds that meet change it at once. No mid:
+// one change from the root's to the tip's; no tip: the root's again. Neither: one shape all
+// along, as before profiles.
 
 #include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -63,7 +79,23 @@ struct TubeOutline {
     std::vector<std::size_t> corners;
     SectionPoint deepest;
     float depth = 1.0f;
+    // The outline's radius from the center each way out: kTubeRadialBins evenly round from angle
+    // 0 (+u) counter-clockwise, each the farthest the outline lies along that ray (what profiles
+    // blend: tube.h's top).
+    std::vector<float> radius;
+    float radiusAt(float u, float v) const;  // the ray through (u, v), between bins linearly
+    // The outline walked evenly round its perimeter (kTubePerimeterPoints, counter-clockwise) from
+    // where the +u ray crosses it: what profiles are matched along (tube.h's top); and for each bin
+    // of `radius`, where along it (0 to 1) that bin's ray crosses it.
+    std::vector<SectionPoint> perimeter;
+    std::vector<float> perimeterAt;
+    SectionPoint perimeterPoint(float s) const;   // s 0 to 1 round it (wrapped), between points linearly
+    float perimeterParam(float u, float v) const;  // where the ray through (u, v) crosses it
 };
+
+// Bins round an outline's radius table, and points round its perimeter.
+constexpr std::size_t kTubeRadialBins = 256;
+constexpr std::size_t kTubePerimeterPoints = 256;
 
 // A custom tube shape: one entry of a groom's shape library (GuideHierarchy::setTubeShape), which
 // guides take by name as they take a built-in shape. Drawn by its control points, in order round
@@ -109,6 +141,54 @@ struct TubeSection {
     float twist = 0.0f;  // radians
 };
 
+// One profile: a built-in shape, or a library shape (`custom`, `shape` then not read).
+struct TubeShapeRef {
+    TubeShape shape = TubeShape::Round;
+    CustomTubeShapePtr custom;
+
+    std::string name() const;
+    bool roundShape() const { return !custom && shape == TubeShape::Round; }
+    // The same shape: the same built-in, or library shapes of the same name.
+    bool sameShape(const TubeShapeRef& o) const {
+        return custom ? o.custom && o.custom->name == custom->name : !o.custom && shape == o.shape;
+    }
+    // The same shape drawn the same (a library shape's points too).
+    bool operator==(const TubeShapeRef& o) const {
+        return custom ? o.custom && custom->name == o.custom->name && custom->hash == o.custom->hash
+                      : !o.custom && shape == o.shape;
+    }
+    bool operator!=(const TubeShapeRef& o) const { return !(*this == o); }
+};
+const TubeOutline& tubeShapeOutline(const TubeShapeRef& shape);
+// A built-in's name or a library shape's: false (`into` untouched) for one neither knows.
+bool tubeShapeByName(const std::string& name, const std::map<std::string, CustomTubeShapePtr>* library, TubeShapeRef* into);
+
+// When a tube's profiles change along it (TubeProfile::blendTiming): the root's shape up to t
+// rootEnd, changing to the mid's by midStart, the mid's up to midEnd, changing to the tip's by
+// tipStart, the tip's after. No mid (midStart < 0): the root's changing to the tip's between
+// rootEnd and tipStart. rootEnd above 1: one profile all along (none).
+struct TubeBlendTiming {
+    float rootEnd = 2.0f, midStart = -1.0f, midEnd = -1.0f, tipStart = 1.0f;
+    bool none() const { return rootEnd > 1.0f; }
+    bool hasMid() const { return midStart >= 0.0f; }
+};
+// How much of each profile the section at t is (summing to 1): smoothstep across each change, a
+// step where the held stretches meet. (look.slang's tubeBlendWeights is the same.)
+struct TubeBlendWeights {
+    float root = 1.0f, mid = 0.0f, tip = 0.0f;
+};
+TubeBlendWeights tubeBlendWeights(const TubeBlendTiming& timing, float t);
+// A point of the root's section carried along the profiles (TubeProfile::blendPoint): where it
+// lies in the mid's and the tip's outlines (section coordinates), and the tube's timing.
+struct TubeBlendPoint {
+    SectionPoint mid, tip;
+    TubeBlendTiming timing;
+    bool none() const { return timing.none(); }
+};
+// Its section coordinates at t, given its root coordinates (u, v): the weights' mix of (u, v), mid
+// and tip. Exactly (u, v) for none(). (look.slang's tubeBlendAt is the same.)
+SectionPoint tubeBlendAt(const TubeBlendPoint& point, float u, float v, float t);
+
 // A guide's tube: its shape and the sections along it (see above).
 struct TubeProfile {
     TubeShape shape = TubeShape::Round;  // a built-in shape, unless `custom`
@@ -118,6 +198,34 @@ struct TubeProfile {
     // A library shape (shared with the library and every guide that takes it); `shape` is then
     // not read. A guide hierarchy keeps it pointing at its library's entry of that name.
     CustomTubeShapePtr custom;
+    // The mid's and the tip's profiles (tube.h's top); unset: blended (mid) or the root's (tip).
+    // A guide hierarchy keeps their library shapes pointing at its entries, as `custom`.
+    std::optional<TubeShapeRef> midShape, tipShape;
+    // How much of the tube each profile holds its shape over (shares of its length, 0 to 1:
+    // tube.h's top), and where the mid's is (0 to 1).
+    float rootHold = 0.0f, midHold = 0.0f, tipHold = 0.0f, midAt = 0.5f;
+
+    // The root's profile (`shape` and `custom`), and setting it.
+    TubeShapeRef rootShape() const { return {shape, custom}; }
+    void setRootShape(const TubeShapeRef& s) { shape = s.custom ? TubeShape::Round : s.shape, custom = s.custom; }
+    // More than one profile along it: a mid or tip set to another shape than the root's (or than
+    // the mid's, for a tip).
+    bool blended() const;
+    // When its profiles change (none: one profile).
+    TubeBlendTiming blendTiming() const;
+    // A point at section coordinates (u, v) of the root's outline carried along the profiles.
+    TubeBlendPoint blendPoint(float u, float v) const;
+    // The inverse at t: the root's section coordinates of the point that lies at (u, v) there.
+    SectionPoint unblend(float u, float v, float t) const;
+    // Every library shape among its profiles (root, mid, tip) given to f(CustomTubeShapePtr&).
+    template <typename F>
+    void forEachCustom(F&& f) {
+        if (custom) f(custom);
+        if (midShape && midShape->custom) f(midShape->custom);
+        if (tipShape && tipShape->custom) f(tipShape->custom);
+    }
+    // Whether any of its profiles is the library shape `name`.
+    bool usesShape(const std::string& name) const;
     // Radians per guide point (evenly spaced root to tip, as the lists): how far the sections turn
     // from the guide's rotation-minimizing frame to lie as the scalp does (a guide hierarchy works
     // it out on the scalp at each evaluate: GuideHierarchy::evaluate), added to the twist by
@@ -149,7 +257,9 @@ struct TubeProfile {
     bool operator==(const TubeProfile& o) const {
         const bool sameCustom = custom ? o.custom && custom->name == o.custom->name && custom->hash == o.custom->hash
                                        : !o.custom && shape == o.shape;
-        return sameCustom && width == o.width && aspect == o.aspect && twist == o.twist;
+        return sameCustom && width == o.width && aspect == o.aspect && twist == o.twist && midShape == o.midShape &&
+               tipShape == o.tipShape && rootHold == o.rootHold && midHold == o.midHold && tipHold == o.tipHold &&
+               midAt == o.midAt;
     }
     bool operator!=(const TubeProfile& o) const { return !(*this == o); }
 };
@@ -206,10 +316,17 @@ public:
     std::size_t samples() const { return centers_.size(); }
     bool empty() const { return centers_.empty(); }
     const TubeProfile& tube() const { return tube_; }
-    // The world point of section coordinates (u, v) at t (0 root, 1 tip; linear between samples).
+    // The world point of section coordinates (u, v) at t (0 root, 1 tip; linear between samples):
+    // (u, v) in the root's outline, carried along the profiles (tube.h's top).
     Vec3f at(float t, float u, float v) const;
+    Vec3f at(float t, float u, float v, const TubeBlendPoint& blend) const;
     // The same at sample i.
-    Vec3f atSample(std::size_t i, float u, float v) const { return centers_[i] + axisU_[i] * u + axisV_[i] * v; }
+    Vec3f atSample(std::size_t i, float u, float v) const {
+        return blended_ ? atSample(i, u, v, tube_.blendPoint(u, v)) : centers_[i] + axisU_[i] * u + axisV_[i] * v;
+    }
+    Vec3f atSample(std::size_t i, float u, float v, const TubeBlendPoint& blend) const;
+    // Whether the tube's profiles change along it (TubeProfile::blended).
+    bool blended() const { return blended_; }
     // Sample i's center and section axes (atSample's: center + axisU u + axisV v).
     const Vec3f& center(std::size_t i) const { return centers_[i]; }
     const Vec3f& axisU(std::size_t i) const { return axisU_[i]; }
@@ -238,14 +355,17 @@ public:
 
 private:
     TubeProfile tube_;
+    bool blended_ = false;
     std::vector<Vec3f> centers_, axisU_, axisV_;
     Vec3f footU_, footV_, footNormal_;
     float rootWidth_ = 0.0f, rootHeight_ = 0.0f, rootJoin_ = 1.0f;
 };
 
-// The tube as JSON ({"shape", "width", "aspect", "twist"}; widths times scale; a library shape:
-// its name), and a tube from such JSON over `base`: what a key gives replaces it (a "shape": a
-// built-in's name or one of `library`'s) (a number: that value all along; a list:
+// The tube as JSON ({"shape", "width", "aspect", "twist"}, and "midShape" and "tipShape" where
+// set; widths times scale; a library shape: its name), and a tube from such JSON over `base`: what
+// a key gives replaces it (a "shape", "midShape" or "tipShape": a built-in's name or one of
+// `library`'s; "midShape" or "tipShape" null or "": unset; "rootHold", "midHold", "tipHold", "midAt":
+// 0 to 1, written where not 0, 0, 0, 0.5) (a number: that value all along; a list:
 // evenly spaced root to tip), what it leaves out stays; "scaleWidth" multiplies every width (after
 // "width": a tube scaled as a whole, its taper kept); "samples" (2 or more) resamples all three
 // lists to that many; "smooth" ("width", "aspect", "twist" or "all") smooths those lists

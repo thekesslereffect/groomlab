@@ -1070,6 +1070,12 @@ TubeProfile neighborTube(const GuideHierarchy& h, const std::vector<GroupId>& gr
     TubeProfile out = blendedTube(tubes, weights, std::max<std::size_t>(points, 2));
     out.shape = own.shape;
     out.custom = own.custom;
+    out.midShape = own.midShape;
+    out.tipShape = own.tipShape;
+    out.rootHold = own.rootHold;
+    out.midHold = own.midHold;
+    out.tipHold = own.tipHold;
+    out.midAt = own.midAt;
     return out;
 }
 

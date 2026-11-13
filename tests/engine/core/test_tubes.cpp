@@ -1456,5 +1456,262 @@ TEST(TubeChildren, PlacedGuidesTakeThePlacementShape) {
     EXPECT_THROW(setPlacementTube(s, R"({"shape": "no/such"})"), std::invalid_argument);
 }
 
+
+// ---------------------------------------------------------------------------
+// Profiles along the tube (GH-59): root, mid and tip shapes, the outline blended between them
+
+TubeShapeRef builtinRef(TubeShape shape) { return {shape, nullptr}; }
+
+TEST(TubeProfiles, WeightsChangeSmoothlyBetweenKeys) {
+    TubeProfile tube;
+    tube.midShape = builtinRef(TubeShape::Blade);
+    tube.tipShape = builtinRef(TubeShape::Ribbon);
+    const TubeBlendTiming m = tube.blendTiming();
+    ASSERT_FALSE(m.none());
+    EXPECT_TRUE(m.hasMid());
+    // Each profile wholly itself at its key, a smooth change between.
+    EXPECT_FLOAT_EQ(tubeBlendWeights(m, 0.0f).root, 1.0f);
+    EXPECT_FLOAT_EQ(tubeBlendWeights(m, 0.5f).mid, 1.0f);
+    EXPECT_FLOAT_EQ(tubeBlendWeights(m, 1.0f).tip, 1.0f);
+    float last = 0.0f;
+    for (int i = 0; i <= 200; ++i) {
+        const float t = static_cast<float>(i) / 200.0f;
+        const TubeBlendWeights w = tubeBlendWeights(m, t);
+        EXPECT_NEAR(w.root + w.mid + w.tip, 1.0f, 1e-6f);
+        const float along = w.mid + 2.0f * w.tip;  // 0 root .. 1 mid .. 2 tip
+        EXPECT_GE(along, last - 1e-6f);
+        EXPECT_LT(along - last, 0.05f);
+        last = along;
+    }
+    // One profile: no timing, every point where it is.
+    TubeProfile plain;
+    EXPECT_TRUE(plain.blendTiming().none());
+    const SectionPoint same = tubeBlendAt(plain.blendPoint(0.3f, -0.2f), 0.3f, -0.2f, 0.7f);
+    EXPECT_EQ(same.u, 0.3f);
+    EXPECT_EQ(same.v, -0.2f);
+}
+
+TEST(TubeProfiles, ProfilesAreMatchedAlongTheirPerimeters) {
+    // Every outline walked evenly round from the +u ray's crossing.
+    for (std::size_t k = 0; k < 4; ++k) {
+        const TubeOutline& outline = tubeShapeOutline(builtinRef(shapeAt(k)));
+        ASSERT_EQ(outline.perimeter.size(), kTubePerimeterPoints);
+        EXPECT_NEAR(outline.perimeter.front().v, 0.0f, 1e-3f) << tubeShapeName(shapeAt(k));
+        EXPECT_GT(outline.perimeter.front().u, 0.0f);
+        // Each perimeter point's ray finds it again (round and convex shapes: one crossing).
+        if (shapeAt(k) == TubeShape::Teardrop) continue;
+        for (std::size_t i = 0; i < kTubePerimeterPoints; i += 7) {
+            const SectionPoint& q = outline.perimeter[i];
+            const float s = outline.perimeterParam(q.u, q.v);
+            const float d = std::abs(s - static_cast<float>(i) / kTubePerimeterPoints);
+            EXPECT_LT(std::min(d, 1.0f - d), 0.01f) << tubeShapeName(shapeAt(k)) << " " << i;
+        }
+    }
+    // A round root, a ribbon tip: the circle's points land on the ribbon's outline at the tip,
+    // corners included (some reach past the circle), and stay where they are at the root.
+    TubeProfile tube;
+    tube.tipShape = builtinRef(TubeShape::Ribbon);
+    float reach = 0.0f;
+    for (const SectionPoint& p : tubeOutline(TubeShape::Round)) {
+        const TubeBlendPoint b = tube.blendPoint(p.u, p.v);
+        const SectionPoint root = tubeBlendAt(b, p.u, p.v, 0.0f), tip = tubeBlendAt(b, p.u, p.v, 1.0f);
+        EXPECT_FLOAT_EQ(root.u, p.u);
+        EXPECT_NEAR(tubeShapeDepth(TubeShape::Ribbon, tip.u, tip.v), 0.0f, 0.02f);
+        reach = std::max(reach, std::hypot(tip.u, tip.v));
+        // Back from the tip into the root's outline.
+        const SectionPoint back = tube.unblend(tip.u, tip.v, 1.0f);
+        EXPECT_NEAR(back.u, p.u, 0.02f);
+        EXPECT_NEAR(back.v, p.v, 0.02f);
+    }
+    EXPECT_GT(reach, 1.25f) << "the ribbon's corners";
+    // A point halfway in stays halfway in.
+    const SectionPoint half = tubeBlendAt(tube.blendPoint(0.0f, 0.5f), 0.0f, 0.5f, 1.0f);
+    EXPECT_NEAR(half.v, 0.5f, 0.02f);
+}
+
+TEST(TubeProfiles, SpineCarriesThePointsToEachProfile) {
+    const std::vector<Vec3f> pts = straightGuide({0, 0, 0}, 1.0f, 20);
+    TubeProfile tube;
+    tube.width = {0.2f};
+    tube.midShape = builtinRef(TubeShape::Blade);
+    tube.tipShape = builtinRef(TubeShape::Ribbon);
+    TubeProfile plain = tube;
+    plain.midShape.reset();
+    plain.tipShape.reset();
+    const TubeSpine spine(pts.data(), pts.size(), {1, 0, 0}, tube);
+    const TubeSpine one(pts.data(), pts.size(), {1, 0, 0}, plain);
+    EXPECT_TRUE(spine.blended());
+    EXPECT_FALSE(one.blended());
+    // The root's outline at the root, the blade's at the middle, the ribbon's at the tip.
+    const std::vector<SectionPoint>& circle = tubeOutline(TubeShape::Round);
+    for (std::size_t k = 0; k < circle.size(); k += 3) {
+        const SectionPoint& p = circle[k];
+        EXPECT_NEAR((spine.at(0.0f, p.u, p.v) - one.at(0.0f, p.u, p.v)).length(), 0.0f, 1e-6f);
+        for (const auto& [t, shape] : {std::pair<float, TubeShape>{0.5f, TubeShape::Blade}, {1.0f, TubeShape::Ribbon}}) {
+            const Vec3f o = spine.at(t, p.u, p.v) - one.at(t, 0.0f, 0.0f);
+            // (The guide stands up along y: u along x, v along -z.)
+            const SectionPoint at{o.x / 0.2f, -o.z / 0.2f};
+            EXPECT_NEAR(tubeShapeDepth(shape, at.u, at.v), 0.0f, 0.03f) << tubeShapeName(shape) << " " << k;
+        }
+    }
+    // The center stays on the guide.
+    EXPECT_NEAR((spine.at(0.7f, 0.0f, 0.0f) - one.at(0.7f, 0.0f, 0.0f)).length(), 0.0f, 1e-6f);
+}
+
+TEST(TubeProfiles, JsonEditsSavesAndTheLibraryKeepThem) {
+    TubeProfile t = editedTube(TubeProfile{}, R"({"midShape": "blade", "tipShape": "ribbon"})");
+    ASSERT_TRUE(t.midShape && t.tipShape);
+    EXPECT_EQ(t.midShape->name(), "blade");
+    EXPECT_EQ(t.tipShape->name(), "ribbon");
+    EXPECT_EQ(editedTube(TubeProfile{}, tubeToJson(t)), t);
+    EXPECT_NE(hashTube(0, t), hashTube(0, TubeProfile{}));
+    EXPECT_EQ(tubeToJson(TubeProfile{}).find("midShape"), std::string::npos) << "one profile: as before";
+    const TubeProfile unset = editedTube(t, R"({"midShape": null, "tipShape": ""})");
+    EXPECT_FALSE(unset.midShape || unset.tipShape);
+    EXPECT_THROW(editedTube(t, R"({"tipShape": "nope"})"), std::invalid_argument);
+
+    // In a hierarchy: a library shape as the tip's, saved and loaded, renamed and removed.
+    TubeHierarchy th(TubeProfile{});
+    GuideHierarchy& h = th.h;
+    h.setTubeShape("star", starPoints(), false);
+    const TubeProfile given = editedTube(h.guide(th.parent)->tube, R"({"midShape": "teardrop", "tipShape": "star"})", 1.0f,
+                                         0, &h.tubeShapes());
+    h.setTube(th.parent, given);
+    h.evaluate(th.scalp.get());
+    EXPECT_EQ(h.guide(th.parent)->tube.tipShape->custom, h.tubeShape("star"));
+    EXPECT_EQ(h.tubeShapeUsers("star"), 1u);
+    const std::string saved = h.toJson();
+    const GuideHierarchy loaded = GuideHierarchy::fromJson(saved);
+    EXPECT_TRUE(loaded.loadWarnings().empty());
+    EXPECT_EQ(loaded.guide(th.parent)->tube, h.guide(th.parent)->tube);
+    EXPECT_EQ(loaded.guide(th.parent)->tube.tipShape->custom, loaded.tubeShape("star")) << "the library's own entry";
+    EXPECT_EQ(loaded.toJson(), saved);
+    // Editing the library shape: the tip's profile follows (the guide's hash with it).
+    const std::uint64_t before = h.contentHash();
+    h.setTubeShape("star", starPoints(0.7f), true);
+    EXPECT_EQ(h.guide(th.parent)->tube.tipShape->custom, h.tubeShape("star"));
+    EXPECT_NE(h.contentHash(), before);
+    h.renameTubeShape("star", "spiky");
+    EXPECT_EQ(h.guide(th.parent)->tube.tipShape->name(), "spiky");
+    EXPECT_EQ(h.removeTubeShape("spiky"), 1u);
+    EXPECT_FALSE(h.guide(th.parent)->tube.tipShape) << "a removed tip profile is unset";
+    EXPECT_EQ(h.guide(th.parent)->tube.midShape->name(), "teardrop");
+}
+
+TEST(TubeProfiles, ChildrenFollowTheBlendedOutline) {
+    TubeProfile tube;
+    tube.width = {0.2f};
+    tube.tipShape = builtinRef(TubeShape::Ribbon);
+    ChildGenerationParams params;
+    params.rootSpread = 1.0f;
+    params.tipSpread = 1.0f;
+    params.jitter = 0.0f;
+    TubeHierarchy t(tube, params);
+    float beyond = 0.0f;
+    const std::size_t n = t.h.guide(t.parent)->points.size();
+    for (const GuideId id : t.h.guidesInGroup(t.children)) {
+        const HierarchyGuide& c = *t.h.guide(id);
+        EXPECT_TRUE(c.tube.blended()) << "a child takes its parent's profiles";
+        // At the tip, inside the ribbon (the circle's points carried out to its corners).
+        const Vec3f tip = t.local(c, n - 1);
+        EXPECT_GE(tubeShapeDepth(TubeShape::Ribbon, tip.x / 0.2f, tip.y / 0.2f), -0.02f);
+        beyond = std::max(beyond, std::hypot(tip.x, tip.y) / 0.2f);
+    }
+    // A child added where one lies binds the same offsets (read back into the root's coordinates)
+    // and so stays there.
+    const HierarchyGuide first = *t.h.guide(t.h.guidesInGroup(t.children).front());
+    const GuideId copy = t.h.addChildGuide(t.children, t.parent, first.points, first.tube);
+    for (std::size_t i = 0; i < n; ++i) {
+        EXPECT_NEAR(t.h.guide(copy)->offsets[i].x, first.offsets[i].x, 1e-3f) << i;
+        EXPECT_NEAR(t.h.guide(copy)->offsets[i].y, first.offsets[i].y, 1e-3f) << i;
+    }
+    EXPECT_GT(beyond, 1.05f) << "some children lie out toward the ribbon's corners, past the circle";
+}
+
+TEST(FillTubes, StrandsFollowTheProfilesToTheTip) {
+    TubeGraph f;
+    f.tube = TubeProfile{};
+    f.tube.width = {0.15f};
+    f.tube.tipShape = builtinRef(TubeShape::Ribbon);
+    f.setGuides(f.tube, true, 8);
+    const StrandsPtr out = f.eval(f.interp);
+    const std::vector<float>* ids = out->strandChannel("tubeId");
+    const std::vector<float>* us = out->strandChannel("tubeU");
+    const std::vector<float>* vs = out->strandChannel("tubeV");
+    ASSERT_TRUE(ids && us && vs);
+    std::size_t inTube = 0;
+    float tipReach = 0.0f;
+    for (std::size_t s = 0; s < out->strandCount(); ++s) {
+        if ((*ids)[s] < 0.0f) continue;
+        ++inTube;
+        const float u = (*us)[s], v = (*vs)[s];
+        const TubeBlendPoint blend = f.tube.blendPoint(u, v);
+        const Vec3f* p = out->strandPoints(s);
+        const std::size_t n = out->strandPointCount(s);
+        for (std::size_t j = 0; j < n; ++j) {
+            const float t = static_cast<float>(j) / static_cast<float>(n - 1);
+            const SectionPoint want = tubeBlendAt(blend, u, v, t);  // carried along the profiles
+            const SectionPoint at = f.sectionOf(p[j], t);
+            EXPECT_NEAR(at.u, want.u, 5e-3f) << s << " " << j;
+            EXPECT_NEAR(at.v, want.v, 5e-3f) << s << " " << j;
+        }
+        const SectionPoint tip = f.sectionOf(p[n - 1], 1.0f);
+        EXPECT_GE(tubeShapeDepth(TubeShape::Ribbon, tip.u, tip.v), -0.02f) << "inside the tip's ribbon";
+        tipReach = std::max(tipReach, std::hypot(tip.u, tip.v));
+    }
+    EXPECT_GT(inTube, 100u);
+    EXPECT_GT(tipReach, 1.1f) << "strands reach out toward the ribbon's corners at the tip";
+}
+
+
+TEST(TubeProfiles, HoldsKeepEachProfileExactly) {
+    TubeProfile tube;
+    tube.midShape = builtinRef(TubeShape::Blade);
+    tube.tipShape = builtinRef(TubeShape::Ribbon);
+    tube.rootHold = 0.2f;
+    tube.midHold = 0.2f;
+    tube.tipHold = 0.1f;
+    const TubeBlendTiming m = tube.blendTiming();
+    EXPECT_FLOAT_EQ(m.rootEnd, 0.2f);
+    EXPECT_FLOAT_EQ(m.midStart, 0.4f);
+    EXPECT_FLOAT_EQ(m.midEnd, 0.6f);
+    EXPECT_FLOAT_EQ(m.tipStart, 0.9f);
+    EXPECT_FLOAT_EQ(tubeBlendWeights(m, 0.15f).root, 1.0f);
+    EXPECT_GT(tubeBlendWeights(m, 0.3f).mid, 0.0f);
+    EXPECT_LT(tubeBlendWeights(m, 0.3f).mid, 1.0f);
+    EXPECT_FLOAT_EQ(tubeBlendWeights(m, 0.45f).mid, 1.0f);
+    EXPECT_FLOAT_EQ(tubeBlendWeights(m, 0.55f).mid, 1.0f);
+    EXPECT_FLOAT_EQ(tubeBlendWeights(m, 0.95f).tip, 1.0f);
+    // Holds that meet: a change at once.
+    tube.rootHold = 0.5f;
+    const TubeBlendTiming met = tube.blendTiming();
+    EXPECT_FLOAT_EQ(met.rootEnd, 0.5f);
+    EXPECT_FLOAT_EQ(tubeBlendWeights(met, 0.49f).root, 1.0f);
+    EXPECT_FLOAT_EQ(tubeBlendWeights(met, 0.5f).mid, 1.0f);
+    // The mid elsewhere; no mid: one change root to tip between the holds.
+    tube.rootHold = 0.0f;
+    tube.midAt = 0.7f;
+    EXPECT_FLOAT_EQ(tubeBlendWeights(tube.blendTiming(), 0.7f).mid, 1.0f);
+    tube.midShape.reset();
+    tube.rootHold = 0.3f;
+    const TubeBlendTiming direct = tube.blendTiming();
+    EXPECT_FALSE(direct.hasMid());
+    EXPECT_FLOAT_EQ(tubeBlendWeights(direct, 0.3f).root, 1.0f);
+    EXPECT_GT(tubeBlendWeights(direct, 0.6f).tip, 0.0f);
+    EXPECT_FLOAT_EQ(tubeBlendWeights(direct, 0.9f).tip, 1.0f);
+    // Edited, saved and compared.
+    TubeProfile edited = editedTube(TubeProfile{}, R"({"tipShape": "ribbon", "rootHold": 0.25, "midHold": 0.1, "tipHold": 0.3, "midAt": 0.6})");
+    EXPECT_FLOAT_EQ(edited.rootHold, 0.25f);
+    EXPECT_FLOAT_EQ(edited.midAt, 0.6f);
+    EXPECT_EQ(editedTube(TubeProfile{}, tubeToJson(edited)), edited);
+    EXPECT_NE(hashTube(0, edited), hashTube(0, editedTube(edited, R"({"rootHold": 0})")));
+    EXPECT_THROW(editedTube(edited, R"({"tipHold": 2})"), std::invalid_argument);
+    TubeHierarchy th(TubeProfile{});
+    th.h.setTube(th.parent, edited);
+    th.h.evaluate(th.scalp.get());
+    const GuideHierarchy loaded = GuideHierarchy::fromJson(th.h.toJson());
+    EXPECT_EQ(loaded.guide(th.parent)->tube, edited);
+}
+
 }  // namespace
 }  // namespace groomlab

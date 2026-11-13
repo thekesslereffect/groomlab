@@ -247,7 +247,10 @@ bool GroomSubSceneOverride::requiresUpdate(const MHWRender::MSubSceneContainer&,
     try {
         // The CPU's dots are built for one camera and viewport size: another one rebuilds them.
         // The tube wires turned on or off (their guides and selection: needsUpdate's versions).
-        if (shape_->tubeWires() != tubeWiresDrawn_) return true;
+        if (shape_->tubeWires() != tubeWiresDrawn_ || shape_->tubeShaded() != tubeShadedDrawn_ ||
+            shape_->tubeWireframe() != tubeWireframeDrawn_) {
+            return true;
+        }
         if (!points_.empty() && !gpuDots_) {
             int ox = 0, oy = 0, width = 0, height = 0;
             frameContext.getViewportDimensions(ox, oy, width, height);
@@ -535,12 +538,14 @@ void GroomSubSceneOverride::updateMapWires(MHWRender::MSubSceneContainer& contai
 void GroomSubSceneOverride::updateTubeWires(MHWRender::MSubSceneContainer& container) {
     const float none[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     auto giveBack = [&]() {  // their buffers given back
-        for (const MString* name : {&kTubeWiresItem, &kTubeWiresSelectedItem}) {
+        for (const MString* name : {&kTubeWiresItem, &kTubeWiresSelectedItem, &kTubeSurfacesItem}) {
             if (container.find(*name)) updateItem(container, *name, none, 0, nullptr, 1.0f);
         }
         tubeWiresKey_ = ~std::uint64_t{0};
     };
     tubeWiresDrawn_ = shape_ && shape_->tubeWires();
+    tubeShadedDrawn_ = shape_ && shape_->tubeShaded();
+    tubeWireframeDrawn_ = shape_ && shape_->tubeWireframe();
     uiSelection_ = shape_ ? shape_->selectionHash() : 0;  // the selected tubes stand out
     if (!tubeWiresDrawn_) {
         giveBack();
@@ -554,6 +559,7 @@ void GroomSubSceneOverride::updateTubeWires(MHWRender::MSubSceneContainer& conta
     const std::string hidden = MPlug(object_, GroomShape::aHiddenGuideGroups).asString().asChar();
     std::uint64_t key = hashCombine(hashCombine(shape_->hierarchyVersion(), uiSelection_), hashChars(0x7B3u, hidden));
     key = hashCombine(key, reinterpret_cast<std::uintptr_t>(hierarchy.get()));
+    key = hashCombine(key, (tubeShadedDrawn_ ? 2u : 1u) + (tubeWireframeDrawn_ ? 4u : 0u));
     if (key == tubeWiresKey_ && container.find(kTubeWiresItem)) return;
     tubeWiresKey_ = key;
     // Every guide the brush can shape (shown, not frozen: activeTubeGuides), the selected ones
@@ -568,6 +574,7 @@ void GroomSubSceneOverride::updateTubeWires(MHWRender::MSubSceneContainer& conta
     const std::size_t perPoint = 2 * 32 + 2 * 8;
     const std::size_t ringStep = std::max<std::size_t>(1, (points * perPoint + kBudget - 1) / kBudget);
     for (const HierarchyGuide* g : guides) {
+        if (!tubeWireframeDrawn_) break;  // (Wireframe off: the shaded surfaces alone, if on)
         const auto it = selection.find(g->id);
         const bool selected = it != selection.end() && it->second >= 1.0f;
         appendTubeWire(selected ? selectedWires : wires, *g, hierarchy->scale(), 8, ringStep);
@@ -587,6 +594,18 @@ void GroomSubSceneOverride::updateTubeWires(MHWRender::MSubSceneContainer& conta
     const float normal[4] = {0.45f, 0.85f, 1.0f, 0.6f}, warm[4] = {1.0f, 0.7f, 0.15f, 1.0f};  // the selected: warm, opaque, thicker
     updateItem(container, kTubeWiresItem, normal, 5, geometry(wires), 1.0f);
     updateItem(container, kTubeWiresSelectedItem, warm, 5, geometry(selectedWires), 2.0f);
+    // Shaded (the Tube card's switch): the same tubes as shaded surfaces, a little narrower so the
+    // wires (on the outline itself, with Wireframe on) are not lost in its facets.
+    std::shared_ptr<DisplayGeometry> surfaces;
+    if (tubeShadedDrawn_) {
+        surfaces = std::make_shared<DisplayGeometry>();
+        surfaces->triangles = true;
+        surfaces->surface = true;
+        constexpr float kInset = 0.985f;
+        for (const HierarchyGuide* g : guides) appendTubeSurface(*surfaces, *g, hierarchy->scale() * kInset);
+    }
+    const float shade[4] = {0.5f, 0.56f, 0.62f, 1.0f};
+    updateItem(container, kTubeSurfacesItem, shade, MHWRender::MRenderItem::sDormantFilledDepthPriority, surfaces, 1.0f);
 }
 
 void GroomSubSceneOverride::addDots(MHWRender::MUIDrawManager& draw, const MHWRender::MFrameContext& context) {

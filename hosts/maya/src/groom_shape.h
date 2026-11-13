@@ -604,9 +604,13 @@ public:
     std::uint64_t symmetrySeamVersion() const { return symmetrySeamVersion_; }
     // The Shape brush is on this groom: its guides' tubes drawn as wires (appendTubeWire) with the
     // groom on every redraw: every guide the brush can shape (activeTubeGuides: shown, not
-    // frozen), the selected ones brighter. Off: nothing drawn and nothing worked out.
-    void setTubeWires(bool on);
+    // frozen), the selected ones brighter. Off: nothing drawn and nothing worked out. `shaded`
+    // and `wireframe` (the Tube card's Shaded and Wireframe, GH-63): their surfaces drawn shaded,
+    // their wires drawn (over them), each on its own.
+    void setTubeWires(bool on, bool shaded = false, bool wireframe = true);
     bool tubeWires() const { return tubeWires_; }
+    bool tubeShaded() const { return tubeWires_ && tubeShaded_; }
+    bool tubeWireframe() const { return tubeWires_ && tubeWireframe_; }
 
     // Selection weights on the evaluated hierarchy (1: selected, below 1: soft),
     // and a hash of what they depend on, for the draw override.
@@ -755,6 +759,10 @@ private:
     CommitKind expectedCommit_ = CommitKind::None;
     bool commitPending_ = false;
     bool computing_ = false;  // the live lane's compute is running (a commit lands into it)
+    // A commit landed inside compute (settled by whatever pulled the groom: a panel's query, not
+    // only a draw): the viewport is redrawn once compute returns, else the new frame waits for
+    // the next redraw (a camera move) to show.
+    bool redrawOwed_ = false;
     double pendingSeconds_ = 0.0;
     std::vector<std::string> pendingErrors_;
     ViewRequest pendingRequest_;
@@ -770,6 +778,8 @@ private:
     std::vector<Vec3f> symmetrySeam_;
     std::uint64_t symmetrySeamVersion_ = 0;
     bool tubeWires_ = false;
+    bool tubeShaded_ = false;
+    bool tubeWireframe_ = true;
     std::string reported_;  // the last message sent to the Script Editor
     std::string reportedHeavy_;  // the last "heavy" Scatter note warned about (finishView)
 

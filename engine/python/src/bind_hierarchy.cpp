@@ -114,6 +114,67 @@ void bindHierarchy(py::module_& m) {
             },
             "The shape's name: a built-in's (set one here), or a library shape's (set those with "
             "GuideHierarchy.set_tube_shape_of)")
+        .def_property(
+            "mid_shape",
+            [](const TubeProfile& t) -> py::object { return t.midShape ? py::cast(t.midShape->name()) : py::none(); },
+            [](TubeProfile& t, const py::object& name) {
+                if (name.is_none() || name.cast<std::string>().empty()) {
+                    t.midShape.reset();
+                    return;
+                }
+                TubeShapeRef ref;
+                if (!tubeShapeByName(name.cast<std::string>(), nullptr, &ref)) {
+                    throw py::value_error("unknown tube shape '" + name.cast<std::string>() + "'");
+                }
+                t.midShape = ref;
+            },
+            "The mid's profile (t 0.5): a shape's name, or None (halfway between the root's and the tip's). "
+            "Set a built-in here; library shapes with GuideHierarchy.set_tube_shape_of(profile='mid')")
+        .def_property(
+            "tip_shape",
+            [](const TubeProfile& t) -> py::object { return t.tipShape ? py::cast(t.tipShape->name()) : py::none(); },
+            [](TubeProfile& t, const py::object& name) {
+                if (name.is_none() || name.cast<std::string>().empty()) {
+                    t.tipShape.reset();
+                    return;
+                }
+                TubeShapeRef ref;
+                if (!tubeShapeByName(name.cast<std::string>(), nullptr, &ref)) {
+                    throw py::value_error("unknown tube shape '" + name.cast<std::string>() + "'");
+                }
+                t.tipShape = ref;
+            },
+            "The tip's profile: a shape's name, or None (the root's). Set a built-in here; library shapes with "
+            "GuideHierarchy.set_tube_shape_of(profile='tip')")
+        .def_property(
+            "root_hold", [](const TubeProfile& t) { return t.rootHold; },
+            [](TubeProfile& t, float v) {
+                if (!(v >= 0.0f && v <= 1.0f)) throw py::value_error("root_hold: 0 to 1");
+                t.rootHold = v;
+            },
+            "The share of the tube from the root that keeps the root's profile exactly (0 to 1)")
+        .def_property(
+            "mid_hold", [](const TubeProfile& t) { return t.midHold; },
+            [](TubeProfile& t, float v) {
+                if (!(v >= 0.0f && v <= 1.0f)) throw py::value_error("mid_hold: 0 to 1");
+                t.midHold = v;
+            },
+            "The share of the tube, centered on mid_at, that keeps the mid's profile exactly (0 to 1)")
+        .def_property(
+            "tip_hold", [](const TubeProfile& t) { return t.tipHold; },
+            [](TubeProfile& t, float v) {
+                if (!(v >= 0.0f && v <= 1.0f)) throw py::value_error("tip_hold: 0 to 1");
+                t.tipHold = v;
+            },
+            "The share of the tube up to the tip that keeps the tip's profile exactly (0 to 1)")
+        .def_property(
+            "mid_at", [](const TubeProfile& t) { return t.midAt; },
+            [](TubeProfile& t, float v) {
+                if (!(v >= 0.0f && v <= 1.0f)) throw py::value_error("mid_at: 0 to 1");
+                t.midAt = v;
+            },
+            "Where along the tube the mid's profile is (0 root, 1 tip; 0.5 by default)")
+        .def_property_readonly("blended", &TubeProfile::blended, "Whether its profiles change along it (a mid or tip unlike the root)")
         .def_readonly("roll", &TubeProfile::roll, "Radians per guide point: the sections turned to lie as the scalp does")
         .def("width_at", &TubeProfile::widthAt, py::arg("t"), "Width at t in [0, 1] along the guide.")
         .def("aspect_at", &TubeProfile::aspectAt, py::arg("t"), "Aspect at t in [0, 1] along the guide.")
@@ -127,6 +188,8 @@ void bindHierarchy(py::module_& m) {
                 s << "]";
             };
             s << "TubeProfile(shape='" << t.shapeName() << "', ";
+            if (t.midShape) s << "mid_shape='" << t.midShape->name() << "', ";
+            if (t.tipShape) s << "tip_shape='" << t.tipShape->name() << "', ";
             list("width", t.width);
             s << ", ";
             list("aspect", t.aspect);
@@ -571,22 +634,31 @@ void bindHierarchy(py::module_& m) {
             py::arg("name"), "Removes a library shape; its guides become round. Returns how many did.")
         .def(
             "set_tube_shape_of",
-            [](GuideHierarchy& h, GuideId id, const std::string& name) {
+            [](GuideHierarchy& h, GuideId id, const std::string& name, const std::string& profile) {
                 const HierarchyGuide* g = h.guide(id);
                 if (!g) throw py::value_error("no guide " + std::to_string(id));
+                if (profile != "root" && profile != "mid" && profile != "tip") {
+                    throw py::value_error("profile: root, mid or tip");
+                }
                 TubeProfile tube = g->tube;
-                TubeShape builtin = TubeShape::Round;
-                if (parseTubeShape(name, &builtin)) {
-                    tube.shape = builtin;
-                    tube.custom = nullptr;
-                } else if (CustomTubeShapePtr custom = h.tubeShape(name)) {
-                    tube.custom = std::move(custom);
+                std::optional<TubeShapeRef>& other = profile == "mid" ? tube.midShape : tube.tipShape;
+                if (profile != "root" && name.empty()) {
+                    other.reset();
+                    h.setTube(id, std::move(tube));
+                    return;
+                }
+                TubeShapeRef ref;
+                if (!tubeShapeByName(name, &h.tubeShapes(), &ref)) throw py::value_error("no tube shape named '" + name + "'");
+                if (profile == "root") {
+                    tube.setRootShape(ref);
                 } else {
-                    throw py::value_error("no tube shape named '" + name + "'");
+                    other = ref;
                 }
                 h.setTube(id, std::move(tube));
             },
-            py::arg("id"), py::arg("shape"), "Gives a guide a built-in or library shape by name.")
+            py::arg("id"), py::arg("shape"), py::arg("profile") = std::string("root"),
+            "Gives a guide a built-in or library shape by name, as its root's, mid's or tip's profile (`profile`; "
+            "an empty name unsets the mid's or the tip's).")
         .def_property_readonly("load_warnings", &GuideHierarchy::loadWarnings,
                                "What from_json could not read as saved (guides whose library shape was missing load round).")
         .def("set_attribute", &GuideHierarchy::setAttribute, py::arg("id"), py::arg("name"), py::arg("value"))

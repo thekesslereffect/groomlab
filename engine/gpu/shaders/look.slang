@@ -1183,10 +1183,13 @@ float3 directionStep(inout DirectionWalk w, float3 raw) {
 
 // fillTubes (the CPU engine's; look_run.h InterpolateInputs::tubes): gAux.z the word of gAux1 where
 // the tubes start (0: none). A strand's tube (-1: none, it blends) and section coordinates, the
-// deeper tube whose soft edge it lies in (-1: none), its coordinates there and how far it leans.
+// deeper tube whose soft edge it lies in (-1: none), its coordinates there and how far it leans;
+// carried along its tube's profiles and the edge's (tube.h TubeBlendPoint: its mid u, v and tip u,
+// v; the timing: rootEnd, midStart, midEnd, tipStart, rootEnd above 1 one profile).
 struct TubeOf {
     int tube, edge;
     float u, v, eu, ev, lean;
+    float4 places, timing, edgePlaces, edgeTiming;
 };
 uint tubeSamples() { return gAux1.Load(gAux.z * 4); }
 uint tubeWordsAt(uint tube) { return gAux.z + 2 + tube * (1 + 9 * tubeSamples()); }
@@ -1195,8 +1198,10 @@ TubeOf tubeOf(uint s) {
     t.tube = -1;
     t.edge = -1;
     t.u = t.v = t.eu = t.ev = t.lean = 0.0f;
+    t.places = t.edgePlaces = float4(0.0f, 0.0f, 0.0f, 0.0f);
+    t.timing = t.edgeTiming = float4(2.0f, -1.0f, -1.0f, 1.0f);
     if (gAux.z == 0u) return t;
-    const uint at = tubeWordsAt(gAux1.Load(gAux.z * 4 + 4)) + s * 8;
+    const uint at = tubeWordsAt(gAux1.Load(gAux.z * 4 + 4)) + s * 24;
     const uint4 a = gAux1.Load4(at * 4), b = gAux1.Load4(at * 4 + 16);
     t.tube = asint(a.x);
     t.u = asfloat(a.y);
@@ -1205,37 +1210,79 @@ TubeOf tubeOf(uint s) {
     t.eu = asfloat(b.x);
     t.ev = asfloat(b.y);
     t.lean = asfloat(b.z);
+    t.places = asfloat(gAux1.Load4(at * 4 + 32));
+    t.timing = asfloat(gAux1.Load4(at * 4 + 48));
+    t.edgePlaces = asfloat(gAux1.Load4(at * 4 + 64));
+    t.edgeTiming = asfloat(gAux1.Load4(at * 4 + 80));
     return t;
 }
-// TubeSpine::atSample and at: the tube's point at sample i, and at share t (between samples).
-float3 tubeSample(uint tube, uint i, float u, float v) {
+// tube.cpp holdStep: 0 at t a to 1 at t b, smoothstep; a step at b where they meet.
+float tubeHoldStep(float a, float b, float t) {
+    if (b - a <= 1e-6f) return t >= b ? 1.0f : 0.0f;
+    const float x = clamp((t - a) / (b - a), 0.0f, 1.0f);
+    return x * x * (3.0f - 2.0f * x);
+}
+// tube.h tubeBlendWeights: the root's, the mid's and the tip's share of the section at t, from the
+// timing m (rootEnd, midStart, midEnd, tipStart).
+float3 tubeBlendWeights(float4 m, float t) {
+    const float x = clamp(t, 0.0f, 1.0f);
+    if (m.y < 0.0f) {
+        const float s = tubeHoldStep(m.x, m.w, x);
+        return float3(1.0f - s, 0.0f, s);
+    }
+    if (x <= m.y) {
+        const float s = tubeHoldStep(m.x, m.y, x);
+        return float3(1.0f - s, s, 0.0f);
+    }
+    if (x <= m.z) return float3(0.0f, 1.0f, 0.0f);
+    const float s = tubeHoldStep(m.z, m.w, x);
+    return float3(0.0f, 1.0f - s, s);
+}
+// tube.h tubeBlendAt: the section coordinates at t of a point at (u, v) of the root's, its places
+// p (mid u, v, tip u, v) and the timing m; exactly (u, v) for one profile (m.x above 1).
+float2 tubeBlendAt(float u, float v, float4 p, float4 m, float t) {
+    if (m.x > 1.0f) return float2(u, v);
+    const float3 w = tubeBlendWeights(m, t);
+    PRECISE float bu = w.x * u + w.y * p.x + w.z * p.z;
+    PRECISE float bv = w.x * v + w.y * p.y + w.z * p.w;
+    return float2(bu, bv);
+}
+// TubeSpine::atSample and at: the tube's point at sample i, and at share t (between samples), of
+// a point with ratios (mid, tip) carried along the tube's profiles.
+float3 tubeSample(uint tube, uint i, float u0, float v0, float4 places, float4 timing) {
+    float u = u0, v = v0;
+    if (timing.x <= 1.0f) {
+        const float2 q = tubeBlendAt(u0, v0, places, timing, float(i) / float(tubeSamples() - 1));
+        u = q.x;
+        v = q.y;
+    }
     const uint at = tubeWordsAt(tube) + 1 + i * 9;
     const float3 c = asfloat(gAux1.Load3(at * 4)), axisU = asfloat(gAux1.Load3((at + 3) * 4)), axisV = asfloat(gAux1.Load3((at + 6) * 4));
     PRECISE float3 cu = c + axisU * u;
     PRECISE float3 r = cu + axisV * v;
     return r;
 }
-float3 tubeAt(uint tube, float t, float u, float v) {
+float3 tubeAt(uint tube, float t, float u, float v, float4 places, float4 timing) {
     const uint n = tubeSamples();
     const float x = clamp(t, 0.0f, 1.0f) * float(n - 1);
     const uint i = min(uint(x), n - 2);
     const float f = x - float(i);
-    if (f == 0.0f) return tubeSample(tube, i, u, v);
-    PRECISE float3 a = tubeSample(tube, i, u, v) * (1.0f - f);
-    PRECISE float3 b = tubeSample(tube, i + 1, u, v) * f;
+    if (f == 0.0f) return tubeSample(tube, i, u, v, places, timing);
+    PRECISE float3 a = tubeSample(tube, i, u, v, places, timing) * (1.0f - f);
+    PRECISE float3 b = tubeSample(tube, i + 1, u, v, places, timing) * f;
     PRECISE float3 r = a + b;
     return r;
 }
 // Point j of n riding the tube at (u, v), its root kept where it grows and
 // the difference faded out by (1 - t / join)^2.
-float3 rideTubeAt(uint tube, float u, float v, float3 root, uint j, uint n) {
+float3 rideTubeAt(uint tube, float u, float v, float4 places, float4 timing, float3 root, uint j, uint n) {
     if (j == 0) return root;
     const float last = float(n - 1);
     const float t = float(j) / last;
-    const float3 p = tubeAt(tube, t, u, v);
+    const float3 p = tubeAt(tube, t, u, v, places, timing);
     const float join = asfloat(gAux1.Load(tubeWordsAt(tube) * 4));
     if (t >= join) return p;
-    PRECISE float3 delta = root - tubeAt(tube, 0.0f, u, v);
+    PRECISE float3 delta = root - tubeAt(tube, 0.0f, u, v, places, timing);
     const float fade = 1.0f - t / join;
     PRECISE float faded = fade * fade;
     PRECISE float3 moved = delta * faded;
@@ -1245,7 +1292,7 @@ float3 rideTubeAt(uint tube, float u, float v, float3 root, uint j, uint n) {
 // A point leaning part of the way to riding the deeper tube whose soft edge it lies in.
 float3 leanToEdge(TubeOf tb, float3 p, float3 root, uint j, uint n) {
     if (tb.edge < 0 || j == 0) return p;
-    const float3 ride = rideTubeAt(uint(tb.edge), tb.eu, tb.ev, root, j, n);
+    const float3 ride = rideTubeAt(uint(tb.edge), tb.eu, tb.ev, tb.edgePlaces, tb.edgeTiming, root, j, n);
     PRECISE float3 toward = ride - p;
     PRECISE float3 part = toward * tb.lean;
     PRECISE float3 r = p + part;
@@ -1298,7 +1345,7 @@ void interpolateStrandAlone(uint s) {
     if (tb.tube >= 0) {
         const float3 root = loadPoint(begin);
         for (uint i = 0; i < n; ++i) {
-            const float3 p = rideTubeAt(uint(tb.tube), tb.u, tb.v, root, i, n);
+            const float3 p = rideTubeAt(uint(tb.tube), tb.u, tb.v, tb.places, tb.timing, root, i, n);
             storePoint(gOut, begin + i, leanToEdge(tb, p, root, i, n));
         }
         return;

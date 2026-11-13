@@ -374,14 +374,22 @@ def set_guide_attribute(groom, name, value, guides=None, group=None, level=None)
 TUBE_SHAPES = ("round", "ribbon", "teardrop", "blade")
 
 
-def set_tube(groom, guides=None, group=None, level=None, width=None, aspect=None, twist=None, shape=None, samples=None):
+def set_tube(groom, guides=None, group=None, level=None, width=None, aspect=None, twist=None, shape=None, samples=None,
+             mid_shape=None, tip_shape=None, root_hold=None, mid_hold=None, tip_hold=None, mid_at=None):
     """Edit guides' tubes (tube guides): their cross-section along the guide and its shape.
 
     Targets: `guides` (IDs), else `group`, else `level`, else the selected guides. Each of `width`
     (half the section's width in scene units, as shown: a round tube's radius), `aspect` (height
     over width: 1 as drawn, toward 0 flat) and `twist` (radians, the section turned at that point)
     is a number (the same all along) or a list evenly spaced root to tip; None leaves it as it is.
-    `shape`: one of TUBE_SHAPES, or a shape of the groom's library (tube_shapes). `samples` resamples all three lists to that many. Children follow
+    `shape`: one of TUBE_SHAPES, or a shape of the groom's library (tube_shapes): the root's profile.
+    `mid_shape` and `tip_shape`: the profiles at the middle and the tip, the same kinds of names, or
+    "" to unset them (no mid: halfway between the root's and the tip's; no tip: the root's); the
+    outline changes smoothly root to mid to tip, each profile its own shape at its key.
+    `root_hold`, `mid_hold` and `tip_hold` (0 to 1, default 0): the share of the tube where that
+    profile keeps its exact shape (the root's from the root, the tip's up to the tip, the mid's
+    centered on `mid_at`); between the held stretches the shape changes smoothly, at once where
+    they meet. `mid_at` (0 to 1, default 0.5): where along the tube the mid's profile is. `samples` resamples all three lists to that many. Children follow
     their parent's tube; Interpolate's fillTubes fills tubes with strands. One undo step. Returns
     how many guides changed."""
     edit = {}
@@ -394,10 +402,24 @@ def set_tube(groom, guides=None, group=None, level=None, width=None, aspect=None
             raise ValueError("shape must be one of %s or a library shape (%s)" %
                              (", ".join(TUBE_SHAPES), ", ".join(_library_names(groom)) or "the library is empty"))
         edit["shape"] = shape
+    for key, value in (("midShape", mid_shape), ("tipShape", tip_shape)):
+        if value is None:
+            continue
+        if value and value not in TUBE_SHAPES and value not in _library_names(groom):
+            raise ValueError("%s must be one of %s, a library shape (%s) or \"\" (none)" %
+                             (key, ", ".join(TUBE_SHAPES), ", ".join(_library_names(groom)) or "the library is empty"))
+        edit[key] = value
+    for key, value in (("rootHold", root_hold), ("midHold", mid_hold), ("tipHold", tip_hold), ("midAt", mid_at)):
+        if value is None:
+            continue
+        if not 0.0 <= float(value) <= 1.0:
+            raise ValueError("%s: 0 to 1" % key)
+        edit[key] = float(value)
     if samples is not None:
         edit["samples"] = int(samples)
     if not edit:
-        raise ValueError("give a width, aspect, twist, shape or samples")
+        raise ValueError("give a width, aspect, twist, shape, mid_shape, tip_shape, root_hold, mid_hold, tip_hold, "
+                         "mid_at or samples")
     return cmds.groomLabGuides(groom, setTube=json.dumps(edit), **_targets(guides, group, level))
 
 
@@ -473,15 +495,17 @@ def preview_tube_shape(groom, name, points, smooth=True):
 
 def tube_targets(groom):
     """The guides the Groom Tools' Tubes panel edits: {"source": "selection" | "solo" | "none",
-    "guides": [IDs], "tube": the first one's tube (get_tube's dict) or None, "shapes": the shapes
-    among them}. The selected guides; with none selected, the soloed ones (those left unfrozen
-    while the rest are frozen)."""
+    "guides": [IDs], "tube": the first one's tube (get_tube's dict) or None, "shapes",
+    "midShapes", "tipShapes": the root, mid and tip profiles among them ("" an unset mid or tip),
+    "inUse": [{"name", "guides"}] every profile the groom's guides take, and how many take it}.
+    The selected guides; with none selected, the soloed ones (those left unfrozen while the rest
+    are frozen)."""
     return json.loads(cmds.groomLabGuides(groom, tubeTargets=True))
 
 
 def get_tube(groom, guide):
     """A guide's tube as a dict: shape, width (scene units, as shown), aspect and twist (radians),
-    each list evenly spaced root to tip."""
+    each list evenly spaced root to tip; midShape and tipShape where set."""
     return json.loads(cmds.groomLabGuides(groom, tube=str(guide)))
 
 

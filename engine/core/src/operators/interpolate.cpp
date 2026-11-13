@@ -839,6 +839,9 @@ private:
 // be in the tube, in the root section's larger half-extents.
 constexpr float kTubeAlongReach = 4.0f;
 
+// Words per strand in the tubes the kernel reads (look_run.h InterpolateInputs::tubes, look.slang tubeOf).
+constexpr std::size_t kTubeStrandWords = 24;
+
 // fillTubes' work for one evaluation: every tube filled (the kept guides' first, in their order,
 // then the other levels': GuideSet::levelTubes) laid along its guide (empty: none), its level and
 // its number for tubeId; each strand's tube (an index into them; -1: none) and section
@@ -854,6 +857,8 @@ struct TubeFill {
     std::vector<std::int32_t> edgeOf;
     std::vector<SectionPoint> edgeAt;
     std::vector<float> edgeWeight;
+    // Each strand carried along its tube's profiles, and the edge's (tubes of several profiles: tube.h).
+    std::vector<TubeBlendPoint> blends, edgeBlends;
 };
 
 // The scalp's normal under a guide's root: at its root on the scalp, else at the scalp point
@@ -2071,7 +2076,7 @@ private:
             if (fill) {
                 // The tubes and each strand's as the kernel reads them (look_run.h InterpolateInputs::tubes).
                 const std::size_t tubes = fill->spines.size(), perTube = 1 + 9 * samples;
-                auto words = std::make_shared<std::vector<std::uint32_t>>(2 + tubes * perTube + count * 8, 0u);
+                auto words = std::make_shared<std::vector<std::uint32_t>>(2 + tubes * perTube + count * kTubeStrandWords, 0u);
                 auto put = [&](std::size_t at, float v) { std::memcpy(words->data() + at, &v, 4); };
                 (*words)[0] = static_cast<std::uint32_t>(samples);
                 (*words)[1] = static_cast<std::uint32_t>(tubes);
@@ -2089,7 +2094,7 @@ private:
                     }
                 }
                 parallelFor(0, count, [&](std::size_t k) {
-                    const std::size_t s = strandAt(k), at = 2 + tubes * perTube + k * 8;
+                    const std::size_t s = strandAt(k), at = 2 + tubes * perTube + k * kTubeStrandWords;
                     std::memcpy(words->data() + at, &fill->tubeOf[s], 4);
                     put(at + 1, fill->at[s].u);
                     put(at + 2, fill->at[s].v);
@@ -2097,6 +2102,20 @@ private:
                     put(at + 4, fill->edgeAt[s].u);
                     put(at + 5, fill->edgeAt[s].v);
                     put(at + 6, fill->edgeWeight[s]);
+                    // Its places in the mid's and the tip's outlines and the tube's timing (tube.h
+                    // TubeBlendPoint), in its tube, then in the edge's.
+                    for (int e = 0; e < 2; ++e) {
+                        const TubeBlendPoint& b = e == 0 ? fill->blends[s] : fill->edgeBlends[s];
+                        const std::size_t w = at + 8 + 8 * static_cast<std::size_t>(e);
+                        put(w, b.mid.u);
+                        put(w + 1, b.mid.v);
+                        put(w + 2, b.tip.u);
+                        put(w + 3, b.tip.v);
+                        put(w + 4, b.timing.rootEnd);
+                        put(w + 5, b.timing.midStart);
+                        put(w + 6, b.timing.midEnd);
+                        put(w + 7, b.timing.tipStart);
+                    }
                 }, 4096);
                 data->tubes = std::move(words);
             }
@@ -2227,6 +2246,8 @@ private:
         fill.edgeOf.assign(count, -1);
         fill.edgeAt.assign(count, SectionPoint{});
         fill.edgeWeight.assign(count, 0.0f);
+        fill.blends.assign(count, TubeBlendPoint{});
+        fill.edgeBlends.assign(count, TubeBlendPoint{});
         std::vector<std::uint32_t> tubes;
         std::vector<Vec3f> centers;
         std::vector<std::uint64_t> ids;
@@ -2274,6 +2295,7 @@ private:
             });
             fill.tubeOf[s] = best;
             fill.at[s] = bestAt;
+            if (best >= 0) fill.blends[s] = fill.spines[static_cast<std::size_t>(best)].tube().blendPoint(bestAt.u, bestAt.v);
             if (!(blend > 0.0f)) return;
             // The soft edges of the deeper tubes not holding it.
             const int ownLevel = best < 0 ? std::numeric_limits<int>::min() : fill.depths[static_cast<std::size_t>(best)];
@@ -2304,6 +2326,7 @@ private:
             const float x = edgeDistance / blend;
             fill.edgeOf[s] = edge;
             fill.edgeAt[s] = edgeAt;
+            fill.edgeBlends[s] = fill.spines[static_cast<std::size_t>(edge)].tube().blendPoint(edgeAt.u, edgeAt.v);
             fill.edgeWeight[s] = 1.0f - x * x * (3.0f - 2.0f * x);
         }, 1024);
     }
