@@ -33,6 +33,7 @@ using detail::StrandColors;
 using detail::ColorCache;
 using detail::distance2;
 using detail::kMeans;
+using detail::packRects;
 
 namespace {
 
@@ -99,6 +100,11 @@ std::vector<float> describeCard(const CardMesh::Card& card, const StrandSet& s, 
     for (const float c : color) f.push_back(4.0f * (colored > 0 ? c / colored : 0.0f));
     return f;
 }
+
+
+}  // namespace
+
+namespace detail {
 
 // Rectangles (w, h) packed into the unit square as large as they fit, with
 // `pad` around each: shelves of the tallest first. Returns x0, y0, x1, y1 per rect.
@@ -175,7 +181,7 @@ std::vector<std::array<float, 4>> packRects(const std::vector<std::array<float, 
     return cells;
 }
 
-}  // namespace
+}  // namespace detail
 
 void shareCardTextures(std::vector<CardMesh::Card>& cards, const StrandSet* strands, int variations, bool mirror) {
     const std::size_t n = cards.size();
@@ -496,7 +502,8 @@ void buildCardVertices(CardMesh& mesh, bool holdInCell) {
                     float acrossTexture = 0.5f + textureOffset / featherGridWidth;
                     if (holdInCell) acrossTexture = std::clamp(acrossTexture, 0.0f, 1.0f);
                     mesh.u.push_back(u0 + (u1 - u0) * acrossTexture);
-                    mesh.v.push_back(card.cell[1] + (card.cell[3] - card.cell[1]) * edgeAlong[e]);
+                    mesh.v.push_back(card.flipAlong ? card.cell[3] - (card.cell[3] - card.cell[1]) * edgeAlong[e]
+                                                    : card.cell[1] + (card.cell[3] - card.cell[1]) * edgeAlong[e]);
                     mesh.tints.push_back(tint);
                     if (iridescent) mesh.iridescence.push_back(iridescenceAcross(card, static_cast<float>(e - 1)));
                 }
@@ -516,7 +523,8 @@ void buildCardVertices(CardMesh& mesh, bool holdInCell) {
                 const float inset = card.tubeArc >= 6.2831f ? std::min(1.5f * texel, 0.1f * std::abs(u1 - u0)) : 0.0f;
                 const float a0 = u0 + (u1 > u0 ? inset : -inset), a1 = u1 - (u1 > u0 ? inset : -inset);
                 mesh.u.push_back(a0 + (a1 - a0) * around);
-                mesh.v.push_back(card.cell[1] + (card.cell[3] - card.cell[1]) * along);
+                mesh.v.push_back(card.flipAlong ? card.cell[3] - (card.cell[3] - card.cell[1]) * along
+                                             : card.cell[1] + (card.cell[3] - card.cell[1]) * along);
                 mesh.tints.push_back(tint);
                 if (iridescent) mesh.iridescence.push_back(iridescenceAcross(card, 2.0f * around - 1.0f));
             }
@@ -535,7 +543,8 @@ void buildCardVertices(CardMesh& mesh, bool holdInCell) {
                 float acrossTexture = 0.5f + x * (0.5f * card.width[i]) / uvFrameWidth;
                 if (holdInCell) acrossTexture = std::clamp(acrossTexture, 0.0f, 1.0f);
                 mesh.u.push_back(u0 + (u1 - u0) * acrossTexture);
-                mesh.v.push_back(card.cell[1] + (card.cell[3] - card.cell[1]) * along);
+                mesh.v.push_back(card.flipAlong ? card.cell[3] - (card.cell[3] - card.cell[1]) * along
+                                             : card.cell[1] + (card.cell[3] - card.cell[1]) * along);
                 mesh.tints.push_back(tint);
                 if (iridescent) mesh.iridescence.push_back(iridescenceAcross(card, x));
             }

@@ -97,6 +97,7 @@ public:
     // Follow the scalp (follow_scalp.h): evaluate on the rest mesh, carry each strand to the scalp
     // by its root's rigid frame. Off by default.
     static MObject aFollowScalp;
+    static MObject aCardBlock;       // a Card Atlas block (card_blocks.h; "" none)
     static MObject aScalpSplit;      // the split its roots were laid on (maya_inputs.h scalpSplitOf)
     static MObject aScalpTopology;   // the topology the groom was made on (an imported file's scalp fingerprint; "": not known)
     // Scale with the scalp (GroomSession::setScaleSource): the groom grows with its scalp. Scale

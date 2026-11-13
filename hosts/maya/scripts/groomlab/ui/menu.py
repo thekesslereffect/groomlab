@@ -2143,6 +2143,12 @@ def install_hotkeys():
     return hotkeys.last_changes
 
 
+def open_card_atlas():
+    """GroomLab > Card Atlas...: hair card textures block by block (never modal)."""
+    from groomlab.ui import card_atlas_window
+    return card_atlas_window.show()
+
+
 def open_palette():
     from groomlab.ui import palette
     palette.show()
@@ -2180,6 +2186,7 @@ VALUES = {"donateUrl": DONATE_URL}
 # _guarded): a failure is said in plain words with a next step, its traceback in the Script Editor.
 ACTIONS = {
     "tools.open": open_palette,
+    "cardAtlas.open": open_card_atlas,
     "graph.open": open_graph_editor,
     "groom.create": create_groom_from_selection,
     "sample.nika": lambda: add_sample_action("nika"),

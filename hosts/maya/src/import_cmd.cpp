@@ -460,6 +460,7 @@ MStatus ImportGroomCmd::doIt(const MArgList& args) {
             modifier_.newPlugValueShort(fn.findPlug("scaleSource", true), static_cast<short>(file.data.scaleSource));
             modifier_.newPlugValueDouble(fn.findPlug("scaleTransformReference", true), file.data.scaleTransformReference);
             modifier_.newPlugValueDouble(fn.findPlug("scaleReference", true), file.data.scaleReference);
+            modifier_.newPlugValueString(fn.findPlug("cardBlock", true), file.cardBlock.c_str());
             // The last transfer's markers, for the next transfer.
             modifier_.newPlugValueString(fn.findPlug("transferMarkers", true),
                                          file.transferMarkers.empty() ? "" : transferMarkersToJson(file.transferMarkers).c_str());

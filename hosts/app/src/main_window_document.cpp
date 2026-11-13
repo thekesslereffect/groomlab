@@ -2,6 +2,8 @@
 // MainWindow: the document (time, cards, exports, files), its evaluations and its edits.
 
 #include "reference_window.h"
+#include "card_atlas_window.h"
+#include "groomlab/asset_files.h"
 #include "transfer_window.h"
 #include "main_window_internal.h"
 
@@ -1191,6 +1193,45 @@ ReferenceWindow* MainWindow::openPhotoAlign(int index) {
         w->setStage(ReferenceWindow::Stage::Align);
     }
     return w;
+}
+
+CardAtlasWindow* MainWindow::openCardAtlas() {
+    if (!cardAtlasWindow_) {
+        cardAtlasWindow_ = new CardAtlasWindow(this, this);  // a window of its own (Qt::Window), owned here
+        fitWindowToScreen(cardAtlasWindow_, cardAtlasWindow_->size());
+    } else {
+        cardAtlasWindow_->refresh();
+    }
+    cardAtlasWindow_->show();
+    cardAtlasWindow_->raise();
+    return cardAtlasWindow_;
+}
+
+bool MainWindow::newCardAtlas(const groomlab::CardBlock& block, const CardAtlasSettings& settings) {
+    if (refuseWhileBusy(tr("starting a card atlas"))) return false;
+    try {
+        setDocument(GroomDocument::newCardBlock(block, settings));
+    } catch (const std::exception& e) {
+        report(tr("Cannot make the card atlas: %1").arg(QString::fromUtf8(e.what())));
+        return false;
+    }
+    document_->setName(block.name.empty() ? std::string("block1") : fileSafeName(block.name));
+    refreshOutliner();
+    notify(tr("New card atlas"));
+    return true;
+}
+
+bool MainWindow::addCardBlock(const groomlab::CardBlock& block, const CardAtlasSettings& settings, const std::string& graphJson) {
+    if (!document_) return newCardAtlas(block, settings);
+    if (refuseWhileBusy(tr("adding a block"))) return false;
+    std::unique_ptr<GroomDocument> groom;
+    try {
+        groom = GroomDocument::newCardBlock(block, settings, graphJson);
+    } catch (const std::exception& e) {
+        report(tr("Cannot make the block: %1").arg(QString::fromUtf8(e.what())));
+        return false;
+    }
+    return adoptNewGroom(std::move(groom), fileSafeName(block.name.empty() ? std::string("block") : block.name));
 }
 
 TransferWindow* MainWindow::openTransferWindow() {

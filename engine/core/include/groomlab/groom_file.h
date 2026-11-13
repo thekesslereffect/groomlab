@@ -149,6 +149,9 @@ struct GroomFile {
     // Maya's attributes' text; "" none).
     std::string guideGroupColors;
     std::string hiddenGuideGroups;
+    // A Card Atlas block's card and the atlas' settings ("cardBlock", card_blocks.h
+    // cardBlockToJson; "" not a block): a file whose grooms are blocks is a Card Atlas.
+    std::string cardBlock;
     std::string directory;      // the folder the file was read from (not stored)
     // The groom's name ("name"; "" none). A file holds one groom, or several (the app's document of
     // several grooms): the first at the top, the others in "grooms", each named.

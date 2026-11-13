@@ -19,6 +19,7 @@ add_library(groomlab_core_objects OBJECT
     src/card_separation.cpp
     src/color_patterns.cpp
     src/card_atlas.cpp
+    src/card_blocks.cpp
     src/card_bake.cpp
     src/card_feathers.cpp
     src/asset_files.cpp

@@ -94,6 +94,17 @@ std::unique_ptr<GroomDocument> GroomDocument::newOnMesh(MeshPtr scalp, const std
     return std::unique_ptr<GroomDocument>(new GroomDocument(std::move(file), {}));
 }
 
+std::unique_ptr<GroomDocument> GroomDocument::newCardBlock(const groomlab::CardBlock& block, const CardAtlasSettings& settings,
+                                                           const std::string& graphJson) {
+    GroomFile file;
+    file.data.scalp = cardBlockScalp(block);
+    file.data.graphJson = graphJson.empty() ? cardBlockGraphJson() : graphJson;
+    file.data.hierarchyJson = cardBlockGuidesJson(block);
+    file.cardBlock = cardBlockToJson(block, settings);
+    file.source = "card atlas";
+    return std::unique_ptr<GroomDocument>(new GroomDocument(std::move(file), {}));
+}
+
 std::unique_ptr<GroomDocument> GroomDocument::newOnAlembic(const std::string& abcPath, const std::string& object) {
     try {
         AlembicMeshReader reader(abcPath, object);
@@ -1836,6 +1847,7 @@ std::string GroomDocument::transferToScalp(MeshPtr scalp, const TransferOptions&
     }
     transferMarkers_.reset();  // in the new scene's file
     referencePhotos_.reset();
+    cardBlock_.reset();
     loadGraph(scene_->file().data.graphJson);
     loadMaps();
     controlKeys_ = scene_->file().controlKeys;
@@ -1867,6 +1879,16 @@ void GroomDocument::setReferencePhotos(std::string json) {
     referencePhotos_ = std::move(json);
     dirty_ = true;
 }
+
+const std::string& GroomDocument::cardBlock() const { return cardBlock_ ? *cardBlock_ : scene_->file().cardBlock; }
+
+void GroomDocument::setCardBlock(std::string json) {
+    if (json == cardBlock()) return;
+    cardBlock_ = std::move(json);
+    dirty_ = true;
+}
+
+StrandsPtr GroomDocument::fullDensityStrands() { return exportFrame(time(), 1.0f, nullptr, false, true); }
 
 std::vector<GroomDocument::NodeInfo> GroomDocument::nodes() const {
     std::vector<NodeInfo> out;
@@ -2436,6 +2458,7 @@ GroomFile GroomDocument::currentFile() const {
     GroomFile file = scene_->file();
     if (transferMarkers_) file.transferMarkers = *transferMarkers_;
     if (referencePhotos_) file.referencePhotos = *referencePhotos_;
+    if (cardBlock_) file.cardBlock = *cardBlock_;
     // The groups' own colors and the hidden groups, in Maya's attributes' form (space separated).
     file.guideGroupColors = groupColorsText();
     file.hiddenGuideGroups.clear();

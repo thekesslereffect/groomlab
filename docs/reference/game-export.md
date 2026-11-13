@@ -1,6 +1,6 @@
 # Game export
 
-Game cards, feather cards, Resample by length or curvature, and exports for Unreal, Unity and glTF.
+Game cards, the Card Atlas, feather cards, Resample by length or curvature, and exports for Unreal, Unity and glTF.
 
 User guide: [Game export](https://www.getgroomlab.com/docs/game-export).
 
@@ -274,6 +274,73 @@ tint): in the material, Base Color = Color x 2 x Vertex Color (RGB, read as line
 Mask of the Coverage map (dithered, or with alpha-to-coverage, keeps thin strands as the card
 shrinks on screen). Unreal can also import the strands themselves
 (Exporting for Unreal Engine).
+
+## Card Atlas (hair card textures block by block)
+
+GroomLab > Card Atlas... (Maya and the app) makes hair card textures the way FiberShop does: an
+atlas of **blocks**, each a small groom of its own, all baked into one texture set. The cards
+are then placed by hand (or with the exported card shapes). Use it for a library of card
+textures; the Cards node above makes cards from a whole groom instead.
+
+- **A block is a groom.** It grows on a narrow **root band** at the top of the card (the card's
+  width across, Root Height down it, facing you: draw guides on it straight on from the front)
+  and hangs down the card (length) from it, with the card graph
+  (scatter, interpolate, clump, length variation, noise, tapered width, hair color) and a few
+  guides to start. Everything works on it: the Graph Editor (Edit in Graph Editor; in the app,
+  picking a block makes it the active groom), the guide tools and brushes, presets, maps.
+- **Root Tilt, Turn, Roll** turn the root band about its top edge: tilted back, the roots spread
+  in depth, as a scalp seen at an angle, and the texture reads with depth (90: lying flat). The
+  card itself stays flat. The guides move with the band but don't turn with it: each keeps its
+  place on the band and its shape, so a tilt (or a wider band) spreads the roots without swinging
+  the hair you shaped.
+- **The card fits the hair.** Each card is as wide and as long as its hair actually reaches:
+  comb or noise the hair past the block's Width, or make it longer or shorter than its Length,
+  and the card (its rectangle of the atlas, the baked texture and the exported card shape)
+  follows, with a little margin, so nothing is cut at its edges. It fits before every Bake
+  Preview, export, Auto Layout and block edit; **Fit** refits after grooming so you can see the
+  rectangles the hair will take, and the block's box shows the card's size. A block placed by
+  hand grows or shrinks about its root corner at the same texel density. It fits before every
+  Bake Preview, export, Auto Layout and block edit; **Fit** refits after grooming so you can see
+  the rectangles the hair will take, and the Block section shows the card's size. A block
+  placed by hand grows or shrinks about its root corner at the same texel density. Off: the
+  card is exactly Width by Length and hair past it is cut at its edges.
+- **Depth in the guides:** guides drawn from the front lie in the card's plane; comb or draw them
+  from a side view to bring some forward and push others back (freeze the rest: Freeze in the
+  Groom Tools), so strands pass in front of each other and the Depth map shows it.
+- **The atlas** packs the blocks at one texel density (Auto Layout). Drag a block's rectangle to
+  move it, its bottom-right corner to resize it: it is placed by hand from then on, and new or
+  resized blocks find room around it. Size (square, 512 to 8192), Padding (texels between
+  blocks), Preset, Name and **Roots at Top** are the atlas': with Roots at Top (the default)
+  each block's root is at the top of its rectangle and its tip at the bottom, as hand-made card
+  atlases lay hair out (the maps, their tangent and normal directions, and the card shapes' UVs
+  alike); off, the root is at the bottom, as the Cards node bakes.
+- **Bake Preview** bakes every block small and shows a map (Albedo, Alpha, Depth, Normal, AO,
+  Direction, Root, ID, Seed) under the rectangles.
+- **Export Maps** bakes every block into its cell and writes the maps as the preset packs them
+  (the Card Maps presets: Unreal Hair Cards, Unreal packed, Unity HDRP Hair, Separate maps, your
+  own). **Export Card Shapes** writes an FBX with one UV-ready card per block (Segments along,
+  Bend over its length), its root at the origin hanging down, facing +z. The cards are named
+  `<block>_card` and share the material `<atlas>_mat`, apart from the blocks' grooms and the
+  atlas, so the FBX can be dragged into the scene that made them. **Cards to Scene** (Maya) makes
+  the same cards in the scene, in a group `<atlas>_cards` beside the blocks, textured with the
+  preview maps; making them again replaces them.
+- **One file:** each block's groom keeps its block (`cardBlock`: its card, rectangle and the
+  atlas' settings), so a groom file of the blocks is the atlas. The app saves its document as
+  one; Maya's `card_atlas.save_atlas` writes one and `card_atlas.open_atlas` opens one.
+
+By script (Maya):
+
+```python
+from groomlab import card_atlas
+atlas = card_atlas.create_atlas("bangs", size=2048)
+hair = card_atlas.add_block(atlas, "straight", width=2.0, length=15.0)
+card_atlas.set_block(hair, root_rotation=(35, 0, 0))     # roots tilted: depth in the texture
+card_atlas.export_maps(atlas, "C:/textures")              # the atlas' preset, one texture set
+card_atlas.export_shapes(atlas, "C:/textures/bangs_cards.fbx", bend=20)
+```
+
+`groomLabCardAtlas <grooms> -maps <folder> | -preview <folder> | -shapes <file.fbx>` is the
+command underneath; the core is `card_blocks.h` (layout, root bands, the bake, the shapes).
 
 ## Feather cards
 

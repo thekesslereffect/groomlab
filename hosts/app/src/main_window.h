@@ -30,6 +30,7 @@
 #include <QStringList>
 #include <QVector3D>
 
+#include "groomlab/card_blocks.h"
 #include "groomlab/async_evaluation.h"
 #include "groomlab/lod.h"
 #include "groomlab/render_overrides.h"
@@ -108,6 +109,7 @@ class Segmented;
 class ValueSlider;
 class Viewport;
 class TransferWindow;
+class CardAtlasWindow;
 class ReferenceWindow;
 class RenderJob;
 class RenderWindow;
@@ -258,6 +260,15 @@ public:
     // points clicked on the groom's scalp and the new mesh, the method and Transfer), made once and
     // raised; never modal.
     TransferWindow* openTransferWindow();
+    // GroomLab > Card Atlas...: hair card textures block by block (card_atlas_window.h), a window
+    // of its own over the document whose grooms are the blocks.
+    CardAtlasWindow* openCardAtlas();
+    CardAtlasWindow* cardAtlasWindow() const { return cardAtlasWindow_; }
+    // A new document of one Card Atlas block (card_blocks.h), and another block in the open one:
+    // a groom on the block's root band (the card graph, or `graphJson`; new guides), named after
+    // the block (free), made active.
+    bool newCardAtlas(const groomlab::CardBlock& block, const CardAtlasSettings& settings);
+    bool addCardBlock(const groomlab::CardBlock& block, const CardAtlasSettings& settings, const std::string& graphJson = {});
     TransferWindow* transferWindow() const { return transferWindow_; }
     // Tools > Guides from Reference (experimental): the Reference window (reference_window.h: the photo
     // and the scalp side by side, landmarks, guide lines, mask touch-ups, Generate), made once and
@@ -832,6 +843,7 @@ private:
     GuidesPanel* guidesPanel_ = nullptr;
     CorrectivesPanel* correctives_ = nullptr;
     TransferWindow* transferWindow_ = nullptr;  // Tools > Transfer Groom to Mesh (a child window)
+    CardAtlasWindow* cardAtlasWindow_ = nullptr;  // GroomLab > Card Atlas... (a child window)
     ReferenceWindow* referenceWindow_ = nullptr;  // Tools > Guides from Reference (a child window)
     // A render's shared steps (main_window_render.cpp): the checks and the viewport's stage; the
     // renderer started, its window shown (or waited for).

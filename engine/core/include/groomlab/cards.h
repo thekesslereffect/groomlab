@@ -287,6 +287,16 @@ struct CardMesh {
         // -1: its own), and whether it shows it mirrored across.
         int variationOf = -1;
         bool mirrored = false;
+        // Its root at the cell's top (v1) and its tip at the bottom (v0), as hand-made card
+        // atlases lay hair out (the Card Atlas' blocks: card_blocks.h rootAtTop); the bake writes
+        // it so (the along direction in its tangent and normal maps turned with it) and its UVs
+        // run so. False: the root at v0 (the Cards node's cards).
+        bool flipAlong = false;
+        // Hair past the card's edges (across it or beyond its tip) left out of the bake, cut where
+        // it leaves (the Card Atlas' blocks: their cards are the frame chosen for the hair). False:
+        // held inside the cell, squeezed against its edge (the Cards node's cards, sized from
+        // their own strands).
+        bool clip = false;
         // Its strands' mean color (linear RGB) at kCardColorStations along them, root to tip
         // (a tip blend, bands, feather patterns included), and the same of the strands its texture was baked
         // from (its own, the card's it shares, or the baked atlas entry's: CardAtlas::Entry::colors).

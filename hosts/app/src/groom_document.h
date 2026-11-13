@@ -21,6 +21,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "groomlab/card_blocks.h"
 #include "groomlab/card_files.h"
 #include "groomlab/card_maps.h"
 #include "groomlab/cards.h"
@@ -137,6 +138,10 @@ public:
     // animates, the file as the scalp cache, so the groom follows it frame by frame (and the
     // timeline spans its samples). `object` names the mesh in the file ("" the first). Throws
     // std::runtime_error (an AlembicError's message).
+    // A Card Atlas block (card_blocks.h): a groom on the block's root band with `graphJson` (the
+    // card graph by default) and the block's new guides, the block stored with it (cardBlock).
+    static std::unique_ptr<GroomDocument> newCardBlock(const groomlab::CardBlock& block, const CardAtlasSettings& settings,
+                                                       const std::string& graphJson = {});
     static std::unique_ptr<GroomDocument> newOnAlembic(const std::string& abcPath, const std::string& object = {});
     ~GroomDocument();
     GroomDocument(const GroomDocument&) = delete;
@@ -511,6 +516,14 @@ public:
     // history step (the window keeps its own per photo), dirty.
     const std::string& referencePhotos() const;
     void setReferencePhotos(std::string json);
+    // A Card Atlas block's card and the atlas' settings (GroomFile::cardBlock, card_blocks.h
+    // cardBlockToJson; "" not a block): saved with the groom. setCardBlock replaces it: no history
+    // step (the Card Atlas window's layout and fields), dirty.
+    const std::string& cardBlock() const;
+    void setCardBlock(std::string json);
+    // The hair at full density at the document's time (what a Card Atlas bake reads); null when
+    // the groom has none (its error in the status).
+    StrandsPtr fullDensityStrands();
     // A photo for the Reference window and the Photos tab, copied into assetFolder("references")
     // (the same image there used as it is, else a free name), as Maya keeps them: the path to
     // store, relative to the groom's folder (an untitled groom: absolute, taken along when saved).
@@ -1015,6 +1028,7 @@ private:
     std::size_t undoIndex_ = 0;
     bool dirty_ = false;
     std::optional<std::vector<TransferMarker>> transferMarkers_;
+    std::optional<std::string> cardBlock_;  // set since the scene was made
     std::optional<std::string> referencePhotos_;  // set since the scene was made  // set since the scene was made
     DisplayBuilder display_;
     std::vector<GuideId> selection_;

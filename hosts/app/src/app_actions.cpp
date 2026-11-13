@@ -203,6 +203,7 @@ ui::Bindings AppActions::bindings(MainWindow& w) {
                           }),
                           {}, groomOpen, {}, {}, QStringLiteral("guidesFromReference")};
     b["groom.transfer"] = {run([m] { m->openTransferWindow(); }), {}, groomOpen, {}, {}, QStringLiteral("transfer")};
+    b["cardAtlas.open"] = {run([m] { m->openCardAtlas(); })};
     b["sim.range"] = {run([m] { m->simulateTo(); }), {}, groomOpen};
     b["sim.bake"] = {run([m] { m->bakeSimulation(); }), {}, groomOpen};
     b["sim.clear"] = {run([m] { m->invalidateSimulation(); }), {}, groomOpen};

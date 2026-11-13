@@ -249,7 +249,7 @@ TEST(AppUi, MenuBarFromTheDefinitionsHidesWhatTheAppDoesNotRun) {
                                                      "Add Eye...", "-", "Quit"}));
     // The GroomLab menu as Maya's, without Maya's alone (or the FBX exports the app cannot write).
     const QMenu* groomlab = bar.actions()[3]->menu();
-    EXPECT_EQ(shown(groomlab), (std::vector<std::string>{"Groom Tools", "Graph Editor", "-", "New Groom on Mesh...", "Add Sample Mesh",
+    EXPECT_EQ(shown(groomlab), (std::vector<std::string>{"Groom Tools", "Graph Editor", "-", "New Groom on Mesh...", "Card Atlas...", "Add Sample Mesh",
                                                          "Guides from Photos (experimental)...", "Groom Files", "Import", "-", "Add", "Simulate",
                                                          "Display", "Review", "Studio", "Render", "Export", "Utilities", "-", "Theme", "Help"}));
     EXPECT_EQ(shown(submenu(groomlab, QStringLiteral("Display"))),

@@ -6,7 +6,7 @@
       "tools.open",
       "graph.open",
       "-",
-      "groom.create",
+      "groom.create", "cardAtlas.open",
       {"submenu": "Add Sample Mesh", "id": "samples", "tip": "A mesh to start from, at the origin and selected", "ref": "menus/samples"},
       "photos.guides",
       {"submenu": "Groom Files", "id": "groomFiles", "items": ["file.import", "file.reload", "-", "file.save", "file.saveAs"]},

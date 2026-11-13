@@ -18,6 +18,7 @@
 #include "convert_cmd.h"
 #include "crash_log.h"
 #include "display_theme.h"
+#include "card_atlas_cmd.h"
 #include "drivers_cmd.h"
 #include "export_cmds.h"
 #include "gpu_preview.h"
@@ -172,6 +173,9 @@ PLUGIN_EXPORT MStatus initializePlugin(MObject obj) {
     CHECK_MSTATUS_AND_RETURN_IT(status);
     status = plugin.registerCommand(groomlab::maya::DriversCmd::kName, groomlab::maya::DriversCmd::creator,
                                     groomlab::maya::DriversCmd::newSyntax);
+    CHECK_MSTATUS_AND_RETURN_IT(status);
+    status = plugin.registerCommand(groomlab::maya::CardAtlasCmd::kName, groomlab::maya::CardAtlasCmd::creator,
+                                    groomlab::maya::CardAtlasCmd::newSyntax);
     CHECK_MSTATUS_AND_RETURN_IT(status);
     status = plugin.registerCommand(groomlab::maya::GraphStatsCmd::kName, groomlab::maya::GraphStatsCmd::creator,
                                     groomlab::maya::GraphStatsCmd::newSyntax);
@@ -384,6 +388,7 @@ PLUGIN_EXPORT MStatus uninitializePlugin(MObject obj) {
     CHECK_MSTATUS_AND_RETURN_IT(plugin.deregisterCommand(groomlab::maya::GraphStatsCmd::kName));
     CHECK_MSTATUS_AND_RETURN_IT(plugin.deregisterCommand(groomlab::maya::SimulateCmd::kName));
     CHECK_MSTATUS_AND_RETURN_IT(plugin.deregisterCommand(groomlab::maya::DriversCmd::kName));
+    CHECK_MSTATUS_AND_RETURN_IT(plugin.deregisterCommand(groomlab::maya::CardAtlasCmd::kName));
     CHECK_MSTATUS_AND_RETURN_IT(plugin.deregisterCommand(groomlab::maya::BakeCardsCmd::kName));
     CHECK_MSTATUS_AND_RETURN_IT(plugin.deregisterCommand(groomlab::maya::ConvertCmd::kName));
     CHECK_MSTATUS_AND_RETURN_IT(plugin.deregisterCommand(groomlab::maya::CopyColorSetsCmd::kName));

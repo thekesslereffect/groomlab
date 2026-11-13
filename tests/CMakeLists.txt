@@ -50,6 +50,7 @@ add_executable(groomlab_tests
     engine/core/test_cards.cpp
     engine/core/test_card_separation.cpp
     engine/core/test_card_maps.cpp
+    engine/core/test_card_blocks.cpp
     engine/core/test_fields.cpp
     engine/core/test_game_exports.cpp
     engine/core/test_cinematic.cpp
@@ -601,6 +602,17 @@ if(GROOMLAB_BUILD_MAYA AND TARGET GroomLab)
                 "${PROJECT_SOURCE_DIR}/hosts/maya/scripts")
 endif()
 
+# The Card Atlas (card_blocks.h; groomlab.card_atlas, groomLabCardAtlas): blocks as grooms on root
+# bands, laid out, edited, baked into one texture set, their cards exported, saved and opened.
+if(GROOMLAB_BUILD_MAYA AND TARGET GroomLab)
+    add_test(NAME maya.card_atlas
+        COMMAND "${GROOMLAB_MAYA_BIN}/mayapy${CMAKE_EXECUTABLE_SUFFIX}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/hosts/maya/test_card_atlas.py"
+                "$<TARGET_FILE:GroomLab>"
+                "${PROJECT_SOURCE_DIR}/hosts/maya/scripts"
+                "${CMAKE_CURRENT_BINARY_DIR}/maya_card_atlas")
+endif()
+
 # Importing XGen grooms (both flavors) on synthetic scenes made with XGen's API, compared with
 # XGen's own strands (pictures in the work dir). Needs Maya's XGen plugin (skipped without it).
 if(GROOMLAB_BUILD_MAYA AND TARGET GroomLab AND TARGET groomlab_alembic)
@@ -808,7 +820,7 @@ endif()
 # The plugin's Python imports the build's groomlab_core module (as the
 # installed module's PYTHONPATH has it). COST starts the long suites first.
 set(GROOMLAB_MAYA_PYTHONPATH "$<$<TARGET_EXISTS:groomlab_core_py>:$<TARGET_FILE_DIR:groomlab_core_py>>")
-foreach(_maya_test maya.plugin maya.graph_editor maya.pipeline maya.groom_io maya.grooming maya.to_mesh maya.subdivision maya.hardening maya.updates maya.arnold maya.studio maya.studio_render maya.vray maya.prman maya.xgen_import maya.yeti_import maya.tube_mesh)
+foreach(_maya_test maya.plugin maya.graph_editor maya.pipeline maya.groom_io maya.grooming maya.to_mesh maya.subdivision maya.hardening maya.updates maya.arnold maya.studio maya.studio_render maya.vray maya.prman maya.xgen_import maya.yeti_import maya.tube_mesh maya.card_atlas)
     if(TEST ${_maya_test})
         set(_app_dir "${CMAKE_CURRENT_BINARY_DIR}/maya_app_dirs/${_maya_test}")
         file(MAKE_DIRECTORY "${_app_dir}")

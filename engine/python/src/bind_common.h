@@ -122,6 +122,7 @@ void bindDisplay(py::module_& m);  // after bindSession (ViewResult)
 void bindStroke(py::module_& m);   // after bindSession (GroomSession)
 void bindAlembic(py::module_& m);  // a no-op stub without groomlab_alembic
 void bindReference(py::module_& m);
+void bindCardBlocks(py::module_& m);
 
 }  // namespace groomlab::py_bind
 

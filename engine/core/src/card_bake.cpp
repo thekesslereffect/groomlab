@@ -421,7 +421,8 @@ CardMaps bakeCardMaps(const StrandSet& strands, const CardMesh& cards, const Car
                 // the final silhouette below, but does not stretch every row independently;
                 // row-wise stretching turns triangle interpolation into visible zigzags.
                 sm.x = card.cell[0] * size + cp.across * cellW;
-                sm.y = (1.0f - (card.cell[1] + (card.cell[3] - card.cell[1]) * cp.along)) * size;
+                const float alongInCell = card.flipAlong ? 1.0f - cp.along : cp.along;  // the root at the top
+                sm.y = (1.0f - (card.cell[1] + (card.cell[3] - card.cell[1]) * alongInCell)) * size;
                 sm.radius = 0.5f * width / cp.textureWidth * cellW;
                 sm.depth = std::clamp(cp.depth / cp.width, -0.5f, 0.5f);
                 sm.coordU = coordU;
@@ -429,13 +430,15 @@ CardMaps bakeCardMaps(const StrandSet& strands, const CardMesh& cards, const Car
                 sm.color = {rgb[0], rgb[1], rgb[2]};
                 sm.iridescence = colors.iridescenceAt(s, si, coordU);
                 sm.along = cp.along;
-                sm.tangent = {dir.dot(cp.side), dir.dot(cp.forward), dir.dot(cp.normal)};
+                // (Root at the top: root to tip runs down the texture, -v.)
+                sm.tangent = {dir.dot(cp.side), (card.flipAlong ? -1.0f : 1.0f) * dir.dot(cp.forward), dir.dot(cp.normal)};
                 sm.ao = settings.occlusion > 0.0f
                             ? pm::exp(-settings.occlusion * grid.ambientOcclusion(
                                   pts[k], cp.normal, aoPhase + 2.39996322973f * static_cast<float>(k)))
                             : 1.0f;
                 sm.in = cp.along >= -0.1f && cp.along <= 1.1f;
                 if (tubeOpen && (cp.across < 0.0f || cp.across > 1.0f)) sm.in = false;
+                if (card.clip && (cp.across < 0.0f || cp.across > 1.0f || cp.along > 1.0f)) sm.in = false;
                 if (card.braidFeed && feedWoven) {
                     // A braid's feed card holds its strands' way in (the braid's tubes the rest).
                     const float f = coordU * static_cast<float>(n - 1);
@@ -490,6 +493,7 @@ CardMaps bakeCardMaps(const StrandSet& strands, const CardMesh& cards, const Car
                 Sample a = line[k];
                 Sample c = line[k + 1];
                 if (!a.in && !c.in) continue;
+                if (card.clip && (!a.in || !c.in)) continue;  // cut where it leaves the card
                 float wrap = 0.0f;  // the cell widths c moves to land beside a
                 if (tubeClosed && std::abs(c.x - a.x) > 0.5f * cellW) wrap = c.x > a.x ? -cellW : cellW;
                 if (second && wrap == 0.0f) continue;

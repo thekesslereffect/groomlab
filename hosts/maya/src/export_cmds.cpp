@@ -815,6 +815,8 @@ MStatus ExportGroomCmd::doIt(const MArgList& args) {
                                         " for the Instance node; the groom file does not hold it");
             }
         }
+        // A Card Atlas block's card (the file of blocks is the atlas).
+        groom.cardBlock = MFnDependencyNode(path.node()).findPlug("cardBlock", true).asString().asChar();
         // The last transfer's marker pairs (the next transfer reuses them).
         try {
             const MPlug markers = MFnDependencyNode(path.node()).findPlug("transferMarkers", true);

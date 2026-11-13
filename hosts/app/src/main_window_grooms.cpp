@@ -2,6 +2,7 @@
 // The document's grooms (main_window.h "The document's grooms"): several grooms in one document,
 // each on its own scalp, one active; the others drawn as plain strands and their scalps; the
 // Groom Tools' Outliner tab; Save writing them all into one file.
+#include "card_atlas_window.h"
 #include "main_window_internal.h"
 
 #include <filesystem>
@@ -318,6 +319,7 @@ void MainWindow::refreshOutliner() {
         entries.push_back(e);
     }
     outliner_->setEntries(entries);
+    if (cardAtlasWindow_ && cardAtlasWindow_->isVisible()) cardAtlasWindow_->refresh();  // its blocks are the grooms
 }
 
 void MainWindow::writeDocument(const std::string& path) {

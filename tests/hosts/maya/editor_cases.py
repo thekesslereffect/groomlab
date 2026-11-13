@@ -980,6 +980,77 @@ class GraphEditorTest(unittest.TestCase):
         finally:
             os.environ.pop("GROOMLAB_USER_CARD_PRESETS", None)
 
+    def test_card_atlas_window(self):
+        # GroomLab > Card Atlas... opens the window (never modal): New Atlas, Add makes blocks laid out
+        # on the atlas, a block's fields edit its card and root band, a rectangle dragged on the
+        # canvas is placed by hand, Bake Preview shows the map picked, the exports write.
+        import tempfile
+        from groomlab import card_atlas
+        from groomlab.ui import menu
+        panel = menu.open_card_atlas()
+        try:
+            atlas = panel.new_atlas()
+            self.assertEqual(panel.atlas, atlas)
+            first = panel.add_block()
+            second = panel.add_block()
+            self.assertEqual(panel.list.count(), 2)
+            self.assertEqual(len(panel.canvas.items), 2)
+            self.assertEqual(panel.groom, second)
+            # Its fields: the length typed, the root tilted.
+            panel.fields["length"].setValue(9.0)
+            panel.fields["tilt"].setValue(35.0)
+            panel._block_changed()
+            self.assertAlmostEqual(card_atlas.block(second)["length"], 9.0)
+            self.assertEqual(card_atlas.block(second)["rootRotation"][0], 35.0)
+            # Dragged on the canvas: placed by hand where it was dropped.
+            item = panel.canvas.items[first]
+            moved = item.rect().translated(30.0, 20.0)
+            item.setRect(moved)
+            panel.canvas.moved.emit(first, panel.canvas.cell_of(moved))
+            self.assertTrue(card_atlas.block(first)["placed"])
+            self.assertAlmostEqual(card_atlas.block(first)["cell"][0], moved.left() / panel.canvas.side, places=4)
+            # Duplicate, then Auto Layout packs all three again.
+            panel.groom = first
+            panel.duplicate_block()
+            self.assertEqual(panel.list.count(), 3)
+            panel.auto_layout()
+            self.assertFalse(any(card_atlas.block(g)["placed"] for g in card_atlas.blocks(atlas)))
+            # Bake Preview: the map picked shows.
+            self.assertTrue(panel.bake_preview())
+            panel.map.setCurrentText("Alpha")
+            self.assertIsNotNone(panel.canvas.image)
+            self.assertFalse(panel.canvas.image.isNull())
+            if os.environ.get("GROOMLAB_GUI_GRAB"):  # a picture of the window to look at
+                panel.resize(1100, 700)
+                wait(100)
+                panel.grab().save(os.path.join(os.environ["GROOMLAB_GUI_GRAB"], "card_atlas_window.png"))
+                from groomlab.ui.qt import QtWidgets
+                side = panel.findChild(QtWidgets.QScrollArea, "cardAtlasSide")
+                if side is not None:  # the column's lower half (the picked block, the exports)
+                    side.verticalScrollBar().setValue(side.verticalScrollBar().maximum())
+                    wait(100)
+                    panel.grab().save(os.path.join(os.environ["GROOMLAB_GUI_GRAB"], "card_atlas_window_lower.png"))
+            # The exports, into a folder of our own.
+            folder = tempfile.mkdtemp(prefix="groomlab_card_atlas_ui_")
+            panel.folder.setText(folder)
+            panel.size.setCurrentIndex(panel.size.findData(512))
+            self.assertTrue(panel.export_maps())
+            self.assertIn("Wrote", panel.status.text())
+            self.assertTrue(os.path.isfile(panel.export_shapes()))
+            # Cards to Scene: the cards beside the blocks, textured with the preview.
+            group = panel.cards_to_scene()
+            self.assertTrue(group)
+            self.assertEqual(len(cmds.listRelatives(group, children=True)), 3)
+            self.assertIn("Made the cards", panel.status.text())
+        finally:
+            panel.close()
+            for a in card_atlas.atlases():
+                cards = card_atlas.scene_cards(a)
+                if cards:
+                    cmds.delete(cards)
+                cmds.delete(a)
+            cmds.select(self.groom)
+
     def test_bake_follicle_map_window(self):
         # Utilities > Bake Follicle Map opens a window (never modal) on the groom: its radius measured
         # from the roots' spacing, the folder the scene's exports folder; a wider radius bakes.
@@ -3909,7 +3980,7 @@ class DockableWindowsTest(unittest.TestCase):
         try:
             labels = [cmds.menuItem(i, query=True, label=True) for i in cmds.menu(menu.MENU, query=True, itemArray=True)
                       if not cmds.menuItem(i, query=True, divider=True)]
-            self.assertEqual(labels, ["Groom Tools", "Graph Editor", "Create Groom from Selection", "Add Sample Mesh",
+            self.assertEqual(labels, ["Groom Tools", "Graph Editor", "Create Groom from Selection", "Card Atlas...", "Add Sample Mesh",
                                       "Guides from Photos (experimental)...", "Groom Files", "Import", "Add", "Simulate",
                                       "Display", "Review", "Studio", "Render", "Export", "Utilities", "Theme",
                                       "Install GroomLab Hotkeys",

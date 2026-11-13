@@ -91,6 +91,10 @@ struct CardShape {
 // gets its widest station.
 float textureWidthOf(const CardMesh::Card& card);
 
+// Rectangles (w, h) packed into the unit square as large as they fit, `pad` around each, at one
+// scale (shelves of the tallest first: a skyline). Returns x0, y0, x1, y1 per rect.
+std::vector<std::array<float, 4>> packRects(const std::vector<std::array<float, 2>>& sizes, float pad);
+
 // A point in a card's space: across (0..1 edge to edge of the texture, one scale along the
 // whole card: 0.5 + offset / textureWidth), along (0 root .. 1 tip; outside past the
 // ends), depth off the card plane, its offset along the side in scene units, and the

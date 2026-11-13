@@ -180,7 +180,7 @@ def main():
             menu.cmds = real
         tree = stack[0]
         top = [label for label, _, _ in tree]
-        _expect(top == ["Groom Tools", "Graph Editor", "Create Groom from Selection", "Add Sample Mesh",
+        _expect(top == ["Groom Tools", "Graph Editor", "Create Groom from Selection", "Card Atlas...", "Add Sample Mesh",
                         "Guides from Photos (experimental)...", "Groom Files", "Import", "Add", "Simulate", "Display",
                         "Review", "Studio", "Render", "Export", "Utilities", "Theme", "Install GroomLab Hotkeys", "Help"],
                 "top: %r" % top)

@@ -292,6 +292,7 @@ qt_add_library(groomlab_app_ui STATIC
     src/timeline.cpp
     src/timeline.h
     src/transfer_window.cpp
+    src/card_atlas_window.cpp
     src/transfer_window.h
     src/viewport.cpp
     src/viewport.h

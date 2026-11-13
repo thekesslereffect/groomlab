@@ -88,6 +88,7 @@ pybind11_add_module(groomlab_core_py MODULE
     src/bind_stroke.cpp
     src/bind_alembic.cpp
     src/bind_reference.cpp
+    src/bind_card_blocks.cpp
 )
 set_target_properties(groomlab_core_py PROPERTIES OUTPUT_NAME groomlab_core)
 target_link_libraries(groomlab_core_py PRIVATE groomlab::core groomlab::warnings)

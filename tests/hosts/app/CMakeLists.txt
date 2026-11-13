@@ -4,7 +4,7 @@
 # into a texture, read back and checked for pixels, the panels (the param editors, the look
 # card, the maps panel) driven without a window, and the live benchmark. No window:
 # QT_QPA_PLATFORM=offscreen.
-add_executable(groomlab_app_tests test_app.cpp test_panels.cpp test_definitions.cpp test_graph_editor.cpp test_tubes.cpp test_lists.cpp test_properties.cpp test_output.cpp test_marking_menu.cpp test_subdivision.cpp bench_app.cpp)
+add_executable(groomlab_app_tests test_app.cpp test_panels.cpp test_definitions.cpp test_graph_editor.cpp test_tubes.cpp test_lists.cpp test_properties.cpp test_output.cpp test_marking_menu.cpp test_subdivision.cpp test_card_atlas.cpp bench_app.cpp)
 target_link_libraries(groomlab_app_tests PRIVATE groomlab_app_ui groomlab::warnings GTest::gtest nlohmann_json::nlohmann_json)
 groomlab_path_literal(_test_data "${PROJECT_SOURCE_DIR}/tests/data")
 target_compile_definitions(groomlab_app_tests PRIVATE "GROOMLAB_TEST_DATA=${_test_data}")
