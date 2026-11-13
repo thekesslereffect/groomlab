@@ -11,7 +11,8 @@ Pick a tool and drag in the viewport over the groom (the pinned one, else the
 selected one). The brush settings under the tabs follow the tool: radius,
 strength (signed for tools that work both ways), which guides, symmetry, pen
 pressure, keeping off the scalp; Place and Draw add the new guide's shape.
-Radius and strength changed in the viewport (middle-drag) show up here.
+Radius and strength changed in the viewport (middle-drag) show up here. Each brush
+keeps its own radius, strength, falloff and curves: picked again, it has them back.
 
     import groomlab.ui.palette as palette
     palette.show()               # or show(tab="paint"), show(tab="photos")
@@ -56,6 +57,9 @@ SYMMETRY_TIP = definitions.text("symmetryTip")
 NO_TOOL = "Pick a tool, then drag over the groom in the viewport."
 # The brush block's chips: a short name each (their tooltips: the catalog's hints).
 CHIP_LABELS = {"pressure": "Pressure", "collide": "Keep off scalp"}
+# A brush's radius (screen pixels) and falloff until it has its own (ToolPalette.recall_brush).
+DEFAULT_RADIUS = 60
+DEFAULT_FALLOFF = 1.0
 
 
 SMOOTHING = ("Shape", "Trim")  # the groups whose tools smooth on Shift+drag (Create's, Paint's and Guides' don't say)
@@ -919,6 +923,10 @@ class ToolPalette(QtWidgets.QWidget):
         self.setWindowIcon(widgets.icon("logo"))
         self.tool = None
         self.strengths = dict(DEFAULT_STRENGTH)
+        # Each brush's radius, falloff and curves as last left (strength: self.strengths), and the
+        # tool whose settings the Brush block shows now (remember_brush, recall_brush).
+        self.brushes = {}
+        self._brush_shown = None
         self.buttons = {}  # tool -> its tile (the first made; a tool with tiles on two tabs: tiles)
         self.tiles = {}    # tool -> every tile of it
 
@@ -1150,7 +1158,7 @@ class ToolPalette(QtWidgets.QWidget):
         fields = QtWidgets.QVBoxLayout(self.brush_form)
         fields.setContentsMargins(0, 0, 0, 0)
         fields.setSpacing(theme.px(4))
-        self.radius = widgets.SoftSlider(60, 5, 400, integer=True, minimum=1, key="palette.radius",
+        self.radius = widgets.SoftSlider(DEFAULT_RADIUS, 5, 400, integer=True, minimum=1, key="palette.radius",
                                          label=_setting("radius", "label"), suffix="px")
         self.radius.unit_tip = "Screen pixels: the circle's radius on screen, whatever the zoom"
         self.radius.setToolTip(_setting("radius", "hint"))
@@ -1162,7 +1170,7 @@ class ToolPalette(QtWidgets.QWidget):
         self.strength.dragged.connect(self.set_strength)
         # Falloff as the catalog names it in both hosts: 0 hard (full strength to the edge), 1 soft
         # (fading from the center out); the brush's hardness is 1 - falloff.
-        self.falloff = widgets.SoftSlider(1.0, 0.0, 1.0, key="palette.falloff", label=_setting("falloff", "label"))
+        self.falloff = widgets.SoftSlider(DEFAULT_FALLOFF, 0.0, 1.0, key="palette.falloff", label=_setting("falloff", "label"))
         self.falloff.setToolTip(_setting("falloff", "hint"))
         self.falloff.committed.connect(lambda v: self.push(hardness=1.0 - v))
         self.falloff.dragged.connect(lambda v: self.push(hardness=1.0 - v))
@@ -1501,6 +1509,7 @@ class ToolPalette(QtWidgets.QWidget):
         check = self.setting_chip(setting, False)
         check.setProperty("disclosure", True)  # (it opens an editor below: outlined, never a toggle's fill)
         editor = widgets.RampEditor(keys, ends=ends)
+        editor.default_keys = [list(k) for k in keys]  # (a brush with no curve of its own yet)
         editor.setToolTip(SETTINGS[setting]["hint"] + " (right-click: presets)")
         editor.setVisible(False)
         flag = setting  # the tool's flag has the setting's name
@@ -2084,10 +2093,8 @@ class ToolPalette(QtWidgets.QWidget):
         wanted = self.POLL_TOOL_MS if current in (ctx, groomlab.SELECT_CONTEXT) else self.POLL_IDLE_MS
         if self.timer.interval() != wanted:
             self.timer.setInterval(wanted)
-        if current == ctx and cmds.contextInfo(ctx, exists=True):
-            mode = cmds.groomLabBrushCtx(ctx, query=True, mode=True)
-            if mode == "paint" and cmds.groomLabBrushCtx(ctx, query=True, attribute=True) == "freeze":
-                mode = "freeze"
+        mode = self.context_tool()
+        if mode is not None:
             if mode != self.tool and mode in self.buttons:
                 if self.tool == "paint":
                     self.paint_tab.end_painting()  # the brush left Paint (a hotkey, the tool settings)
@@ -2095,7 +2102,8 @@ class ToolPalette(QtWidgets.QWidget):
                 self.buttons[mode].setChecked(True)
                 self.leave_paint_tab()
                 self.show_tool_settings()
-            if not self.radius.busy():
+            # (the Paint card while another brush is on shows Paint's own: left alone)
+            if not self.radius.busy() and self._brush_shown == self.tool:
                 self.radius.setValue(cmds.groomLabBrushCtx(ctx, query=True, radius=True))
             # The group or level picked from the viewport (the level keys) shows here too.
             if self.tool != PART:
@@ -2113,7 +2121,8 @@ class ToolPalette(QtWidgets.QWidget):
                     self.apply_isolation()
             if not self.strength.busy():
                 strength = cmds.groomLabBrushCtx(ctx, query=True, strength=True)
-                self.strength.setValue(strength)
+                if self._brush_shown == self.tool:
+                    self.strength.setValue(strength)
                 if self.tool in self.strengths:
                     self.strengths[self.tool] = strength
         elif current == groomlab.SELECT_CONTEXT and self.tool != "select":
@@ -2178,6 +2187,7 @@ class ToolPalette(QtWidgets.QWidget):
         self.tool = tool
         self.check_tiles(tool)
         self.leave_paint_tab()
+        self.sync_brush()  # the tool's own radius, falloff and curves, before they go to it
         self.status.setText("")
         if not self.groom():
             self.status.setText("Select a groom first; tools work on the selected groom.")
@@ -2208,7 +2218,7 @@ class ToolPalette(QtWidgets.QWidget):
             self.fill_parts(groom)
             self.show_tool_settings()
             return
-        kwargs = dict(radius=self.radius.value(), strength=self.strengths.get(tool, 1.0),
+        kwargs = dict(strength=self.strengths.get(tool, 1.0),
                       level=self.level.currentData() if self.level.currentData() is not None else 0,
                       # Selected only and Front only are not in the panel: the brushes' defaults.
                       group=self.current_group(), selected_only=False,
@@ -2224,12 +2234,13 @@ class ToolPalette(QtWidgets.QWidget):
                       spacing=self.spacing.value() / self.length_factor,
                       value=self.paint_tab.value.value(),
                       targets=self.targets_name(),
-                      hardness=1.0 - self.falloff.value(), smooth_strength=self.smooth_strength.value(),
-                      falloff_profile=self.curve_of(self.falloff_curve.check, self.falloff_curve),
-                      strength_profile=self.curve_of(self.strength_curve.check, self.strength_curve),
+                      smooth_strength=self.smooth_strength.value(),
                       tube=self.tube_panel.placement())
+        kwargs.update(self.brush_flags())
         if tool == "paint":
             self.show_tab("paint")
+            self.sync_brush()  # (the Paint card's, now its tab shows)
+            kwargs.update(self.brush_flags())
             name = self.paint_tab.current() or self.paint_tab.new_map()
             if not name:
                 self.status.setText("Make a map to paint (New...).")
@@ -2278,6 +2289,7 @@ class ToolPalette(QtWidgets.QWidget):
         """The card shows what its tool uses (the catalog's settings for it: card_tool()), and
         nothing else; with no tool, one line on how to start. Its blocks, in order: Brush, the
         tool's own, Applies to (Paint: its own block, then Brush, titled)."""
+        self.sync_brush()
         tool = self.card_tool()
         uses = TOOL_SETTINGS.get(tool, set())
         photos = self.current_tab() == "photos"
@@ -2337,6 +2349,70 @@ class ToolPalette(QtWidgets.QWidget):
             self.strength.setRange(-1.0 if signed else 0.0, 1.0)
             self.strength.setValue(self.strengths[tool])
             self.strength.setLabel("Strength (±)" if signed else "Strength")
+
+    # -- Each brush's own settings ----------------------------------------------------
+    # Radius, falloff and the two curves are kept per brush (strength too: self.strengths), so a
+    # brush picked again has them as it was left; one never used starts from the defaults.
+
+    def context_tool(self):
+        """The brush the viewport's GroomLab brush is on now (Freeze: Paint on the freeze map), or None."""
+        from maya import cmds
+        ctx = groomlab.BRUSH_CONTEXT
+        if cmds.currentCtx() != ctx or not cmds.contextInfo(ctx, exists=True):
+            return None
+        mode = cmds.groomLabBrushCtx(ctx, query=True, mode=True)
+        if mode == "paint" and cmds.groomLabBrushCtx(ctx, query=True, attribute=True) == "freeze":
+            mode = "freeze"
+        return mode
+
+    def sync_brush(self):
+        """The Brush block follows the card's tool: the one it showed keeps what it shows, and the
+        card's own come back."""
+        tool = self.card_tool()
+        if tool == self._brush_shown:
+            return
+        self.remember_brush()
+        self.recall_brush(tool)
+
+    def remember_brush(self):
+        """Keep the Brush block's settings for the tool it shows (a radius or strength just
+        changed in the viewport too: the brush's own, not yet polled)."""
+        tool = self._brush_shown
+        if tool is None or "radius" not in TOOL_SETTINGS.get(tool, set()):
+            return
+        radius = self.radius.value()
+        if self.context_tool() == tool:
+            from maya import cmds
+            ctx = groomlab.BRUSH_CONTEXT
+            radius = cmds.groomLabBrushCtx(ctx, query=True, radius=True)
+            if tool in self.strengths:
+                self.strengths[tool] = cmds.groomLabBrushCtx(ctx, query=True, strength=True)
+        self.brushes[tool] = {
+            "radius": radius, "falloff": self.falloff.value(),
+            "falloffProfile": (self.falloff_curve.check.isChecked(), self.falloff_curve.value()),
+            "strengthProfile": (self.strength_curve.check.isChecked(), self.strength_curve.value())}
+
+    def recall_brush(self, tool):
+        """Show the tool's own brush settings (the defaults for one not used yet); nothing is
+        sent: the tool takes them as it starts (activate)."""
+        self._brush_shown = tool
+        if tool is None or "radius" not in TOOL_SETTINGS.get(tool, set()):
+            return
+        kept = self.brushes.get(tool, {})
+        self.radius.setValue(kept.get("radius", DEFAULT_RADIUS))
+        self.falloff.setValue(kept.get("falloff", DEFAULT_FALLOFF))
+        for setting, editor in (("falloffProfile", self.falloff_curve), ("strengthProfile", self.strength_curve)):
+            on, keys = kept.get(setting, (False, editor.default_keys))
+            editor.check.blockSignals(True)
+            editor.check.setChecked(on)
+            editor.check.blockSignals(False)
+            editor.setValue(keys)
+
+    def brush_flags(self):
+        """The Brush block's radius, falloff and curves as brush_tool takes them."""
+        return dict(radius=self.radius.value(), hardness=1.0 - self.falloff.value(),
+                    falloff_profile=self.curve_of(self.falloff_curve.check, self.falloff_curve),
+                    strength_profile=self.curve_of(self.strength_curve.check, self.strength_curve))
 
     def show_card_header(self, tool):
         """The card's header: the tool's icon (in the accent's ink) and name, then what it does."""

@@ -359,6 +359,7 @@ class GroomLabTools(bpy.types.PropertyGroup):
                       default="TOOLS", update=_tab_changed)
     status: StringProperty()
     strengths: StringProperty()  # {tool: strength}: each tool keeps its own, as in Maya
+    brushes: StringProperty()  # {tool: {radius, falloff, falloff_curve, strength_profile}}: each brush's own
     radius: IntProperty(name="Radius", default=60, min=1, max=2000, soft_min=5, soft_max=400, subtype="PIXEL",
                         description="The brush circle (B held + drag sets it)", update=_push("radius"))
     strength: FloatProperty(name="Strength", default=1.0, min=-1.0, max=1.0, update=_strength,
