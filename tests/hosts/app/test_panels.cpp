@@ -4560,11 +4560,29 @@ TEST(AppPanels, GroomToolsTilesPickToolsAndTheEyeHidesTheGroom) {
     EXPECT_EQ(window.overlay()->viewport()->toolMode(), Viewport::ToolMode::Brush);
     EXPECT_TRUE(tools->tile("comb")->isChecked());
     EXPECT_TRUE(tools->card()->isVisibleTo(tools));
+    // ... and its radius, falloff and curves (issue 54): Lift starts from the defaults, Comb has its own back.
     window.brush().settings().brush.strength = 0.3f;
+    window.brush().settings().screenRadius = 140.0f;
+    window.brush().settings().brush.hardness = 0.75f;
+    window.brush().settings().setFalloffProfile("[[0, 1], [1, 0]]");
+    window.brush().settings().setStrengthProfile("[[0, 0], [1, 1]]");
     tools->tile("lift")->click();
     EXPECT_FLOAT_EQ(window.brush().settings().brush.strength, brushEntry("lift")->defaultStrength);
+    EXPECT_FLOAT_EQ(window.brush().settings().screenRadius, 60.0f);
+    EXPECT_FLOAT_EQ(window.brush().settings().brush.hardness, 0.0f);
+    EXPECT_EQ(window.brush().settings().falloffProfileJson(), "");
+    EXPECT_EQ(window.brush().settings().strengthProfileJson(), "");
+    window.brush().settings().screenRadius = 30.0f;
     tools->tile("comb")->click();
     EXPECT_FLOAT_EQ(window.brush().settings().brush.strength, 0.3f) << "Comb's own strength back";
+    EXPECT_FLOAT_EQ(window.brush().settings().screenRadius, 140.0f) << "Comb's own radius back";
+    EXPECT_FLOAT_EQ(window.brush().settings().brush.hardness, 0.75f) << "Comb's own falloff back";
+    EXPECT_NE(window.brush().settings().falloffProfileJson(), "") << "Comb's own falloff curve back";
+    EXPECT_NE(window.brush().settings().strengthProfileJson(), "") << "Comb's own root-to-tip curve back";
+    tools->tile("lift")->click();
+    EXPECT_FLOAT_EQ(window.brush().settings().screenRadius, 30.0f) << "Lift's own radius back";
+    EXPECT_EQ(window.brush().settings().falloffProfileJson(), "");
+    tools->tile("comb")->click();
     // Select, and again: the camera.
     tools->tile("select")->click();
     EXPECT_EQ(window.overlay()->viewport()->toolMode(), Viewport::ToolMode::Select);

@@ -188,6 +188,48 @@ def strength_for(t, tool):
     return float(info["defaultStrength"]) if info else 1.0
 
 
+# Each brush keeps its own radius, falloff and curves (strength: strengths), as Maya's palette
+# does: picked again, it has them back; one never used starts from the properties' defaults.
+BRUSH_PROPS = ("radius", "falloff", "falloff_curve", "strength_profile")
+
+
+def brushes(t):
+    try:
+        return json.loads(t.brushes or "{}")
+    except ValueError:
+        return {}
+
+
+def _is_brush(tool):
+    info = tool_info(tool)
+    return bool(info) and "radius" in info.get("settings", [])
+
+
+def remember_brush(t, tool):
+    """Keep the palette's radius, falloff and curves as `tool`'s own (a brush)."""
+    if not tool or not _is_brush(tool):
+        return
+    b = brushes(t)
+    b[tool] = dict((name, getattr(t, name)) for name in BRUSH_PROPS)
+    with props.quiet():
+        t.brushes = json.dumps(b, sort_keys=True)
+
+
+def recall_brush(t, tool):
+    """The palette's radius, falloff and curves set to `tool`'s own (the defaults the first time)."""
+    if not _is_brush(tool):
+        return
+    kept = brushes(t).get(tool, {})
+    rna = t.bl_rna.properties
+    with props.quiet():
+        for name in BRUSH_PROPS:
+            value = kept.get(name, rna[name].default)
+            try:
+                setattr(t, name, value)
+            except (TypeError, ValueError):  # (a preset no longer offered)
+                setattr(t, name, rna[name].default)
+
+
 def group_target(scene):
     """(level, group) the brushes edit and new guides go into: the Group choice."""
     t = scene.groomlab_tools
@@ -291,12 +333,15 @@ def active(context):
 
 
 def pick(context, tool):
-    """Picks a tool as Maya's palette does: the tool's own strength back (the catalog's default the
-    first time), its settings sent. Returns the helper's tool_get answer."""
+    """Picks a tool as Maya's palette does: the tool's own strength, radius, falloff and curves back
+    (the defaults the first time), its settings sent. Returns the helper's tool_get answer."""
     scene = context.scene
     t = scene.groomlab_tools
     if tool not in [x["id"] for x in catalog()["tools"]]:
         raise HelperError("bad_request", "no GroomLab tool %r" % tool)
+    if tool != t.tool:
+        remember_brush(t, t.tool)
+        recall_brush(t, tool)
     with props.quiet():
         t.tool = tool
         t.strength = strength_for(t, tool)

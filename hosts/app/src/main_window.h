@@ -687,10 +687,20 @@ private:
     static constexpr int kStatsMaxAgeMs = 500;
     void refreshTool();  // the Groom Tools' tile and card from the brush settings and the tool mode
     // A Groom Tools tile (a catalog id): the Select tool (again: the camera), a brush (each keeps
-    // its own strength, as Maya's palette does), Paint on the Paint tab's map (again: done painting).
+    // its own strength, radius, falloff and curves, as Maya's palette does), Paint on the Paint
+    // tab's map (again: done painting).
     void chooseTool(const QString& id);
     void refreshStarter();  // the first-groom steps: guides placed, a look given
-    std::map<std::string, float> toolStrengths_;  // each brush's strength as last left
+    // Each brush's own settings as last left (a brush never picked: the defaults, and the
+    // catalog's strength).
+    struct ToolBrush {
+        float strength = 1.0f;
+        float screenRadius = 60.0f;
+        float hardness = 0.0f;
+        std::shared_ptr<const Ramp> falloffProfile;
+        std::shared_ptr<const Ramp> strengthProfile;
+    };
+    std::map<std::string, ToolBrush> toolBrushes_;
     bool starterDismissed_ = false;
     void refreshSurfaces();  // the look panel's surface list: the scalp and the props
     void refreshDisplayChoices();  // the color sources and the maps the display panel offers

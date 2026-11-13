@@ -483,8 +483,12 @@ void MainWindow::chooseTool(const QString& id) {
             return;
         }
     }
-    // Each brush keeps its own strength (the catalog's default the first time).
-    if (brushing && !before.empty()) toolStrengths_[before] = brush_.settings().brush.strength;
+    // Each brush keeps its own strength, radius, falloff and curves (the defaults and the
+    // catalog's strength the first time): the settings still are the last brush's, picked or not.
+    if (!before.empty() && tool != before) {
+        const BrushToolSettings& s = brush_.settings();
+        toolBrushes_[before] = {s.brush.strength, s.screenRadius, s.brush.hardness, s.brush.falloffProfile, s.brush.strengthProfile};
+    }
     try {
         brush_.setTool(tool);
     } catch (const std::invalid_argument& e) {
@@ -493,9 +497,15 @@ void MainWindow::chooseTool(const QString& id) {
         return;
     }
     if (tool != before) {
-        const auto kept = toolStrengths_.find(tool);
-        if (kept != toolStrengths_.end()) brush_.settings().brush.strength = kept->second;
-        else if (const groomlab::BrushEntry* e = brushEntry(tool)) brush_.settings().brush.strength = e->defaultStrength;
+        BrushToolSettings& s = brush_.settings();
+        ToolBrush kept;
+        if (const auto found = toolBrushes_.find(tool); found != toolBrushes_.end()) kept = found->second;
+        else if (const groomlab::BrushEntry* e = brushEntry(tool)) kept.strength = e->defaultStrength;
+        s.brush.strength = kept.strength;
+        s.screenRadius = kept.screenRadius;
+        s.brush.hardness = kept.hardness;
+        s.brush.falloffProfile = kept.falloffProfile;
+        s.brush.strengthProfile = kept.strengthProfile;
     }
     if (tool == "paint") {
         maps_->paintSelected();  // the map's kind, value and channels on the brush; brush mode (paintRequested)

@@ -353,8 +353,20 @@ class ToolsTest(unittest.TestCase):
         t.strength = -0.5  # Comb does not work both ways: 0
         self.assertEqual(hcall(head, "tool_get")["settings"]["strength"], 0.0)
         t.strength = 1.0
+        # Each brush's radius, falloff and curves too (issue 54): Comb's, then Smooth's own back.
+        t.radius, t.falloff, t.falloff_curve, t.strength_profile = 150, 0.25, "LINEAR", "TIPS"
         bpy.ops.groomlab.tool(tool="smooth")
         self.assertAlmostEqual(t.strength, 0.3)  # Smooth kept its own
+        self.assertEqual((t.radius, t.falloff_curve, t.strength_profile), (60, "SLIDER", "FLAT"))
+        self.assertAlmostEqual(t.falloff, 1.0)
+        t.radius = 90
+        bpy.ops.groomlab.tool(tool="comb")
+        self.assertEqual((t.radius, t.falloff_curve, t.strength_profile), (150, "LINEAR", "TIPS"))
+        self.assertAlmostEqual(t.falloff, 0.25)
+        self.assertEqual(hcall(head, "tool_get")["settings"]["radius"], 150)
+        t.radius, t.falloff, t.falloff_curve, t.strength_profile = 60, 1.0, "SLIDER", "FLAT"
+        bpy.ops.groomlab.tool(tool="smooth")
+        self.assertEqual(t.radius, 90)
         bpy.ops.groomlab.tool(tool="lift")
         t.strength = -0.4  # Lift works both ways
         self.assertAlmostEqual(hcall(head, "tool_get")["settings"]["strength"], -0.4, places=6)
