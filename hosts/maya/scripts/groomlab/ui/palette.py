@@ -947,11 +947,14 @@ class TubePanel(QtWidgets.QWidget):
         self.hide_rename()
         if not groom or not new or new == old:
             return
+        # The profiles (and the placement) on the shape, taken before the rename: run's refresh
+        # finds the old name gone and sets them back to round.
+        using = [profile for profile, name in self._choices.items() if name == old]
+        placed = self._placement["shape"] == old
         if self.run(groomlab.rename_tube_shape, groom, old, new):
-            for profile in self._choices:
-                if self._choices[profile] == old:
-                    self._choices[profile] = new
-            if self._placement["shape"] == old:
+            for profile in using:
+                self._choices[profile] = new
+            if placed:
                 self._placement["shape"] = new
             self.refresh(groom, force=True)
 
