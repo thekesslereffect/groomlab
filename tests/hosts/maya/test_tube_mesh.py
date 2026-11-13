@@ -593,6 +593,12 @@ class TubeLiveLinkTest(unittest.TestCase):
         self.assertIn(uuid, self.links._pending)
         self.links._flush()
         self.assertEqual(self.links._pending, set())
+        # Moving a group above it counts too (its world matrix changes, its points do not).
+        holder = cmds.group(self.lock, name="tubesHolder")
+        self.links._flush()
+        cmds.move(0.0, 0.1, 0.0, holder, relative=True)
+        self.assertIn(uuid, self.links._pending)
+        self.links._flush()
 
     def test_topology_change_remakes_shape_guides(self):
         utils.tubes_to_curves([self.lock], groom=self.groom, live_link=True)

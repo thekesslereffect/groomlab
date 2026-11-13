@@ -26,8 +26,11 @@ from maya import cmds
 ATTR = "glTubeLinks"
 VERSION = 1
 
-# What dirties a mesh's shape when its points change: component tweaks, its history, its smoothing.
-_MESH_PLUGS = frozenset(("outMesh", "inMesh", "cachedInMesh", "pnts", "pntx", "pnty", "pntz",
+# What dirties a mesh's shape when its points change: component tweaks, its history, its smoothing,
+# and a move of it or anything above it (its world mesh: still caught after a reparent, when the
+# world-matrix callback's DAG path may no longer be the mesh's).
+_MESH_PLUGS = frozenset(("outMesh", "inMesh", "cachedInMesh", "worldMesh", "worldMatrix",
+                         "pnts", "pntx", "pnty", "pntz",
                          "displaySmoothMesh", "smoothLevel"))
 
 _mesh_jobs = {}      # mesh UUID -> [callback ids]
@@ -204,6 +207,8 @@ def _undone(*_):
     """After an undo or redo: links may have come or gone (a conversion undone), and guides may
     have gone back to points from before a mesh edit: every link checked."""
     try:
+        for uuid in list(_mesh_jobs):  # watched afresh: an undone reparent leaves stale DAG paths
+            _unwatch_mesh(uuid)
         for uuid in _rewatch():
             _queue(uuid)
     except Exception as e:
