@@ -6,7 +6,7 @@ work is groomlab.utils.tubes_to_curves'.
 
     from groomlab.ui import tubes_window
     w = tubes_window.show()
-    w.centers.setChecked(False); w.convert()
+    w.centers.setChecked(False); w.live_link.setChecked(True); w.convert()
 """
 
 from groomlab.ui.qt import QtCore, QtWidgets
@@ -80,6 +80,11 @@ class TubesWindow(QtWidgets.QWidget):
             "Paint a guide map (tubes) with a value per tube and set Interpolate's Region Map to it: each strand "
             "then blends only the guides of the tube rooted nearest it, never a neighbouring tube's",
             "tubesRegionMap")
+        self.live_link = check(
+            "Live link tubes to guides", False,
+            "The guides keep following the modeled tubes they come from: edit a tube's components or "
+            "move it and its guides take the new shape, their roots sliding over the scalp. Saved with "
+            "the scene; later conversions add their tubes", "tubesLiveLink")
         self.ignore_bevels = check(
             "Count bevels as one curve", True,
             "Bevels count as one curve however many edges they have: edges that sit much closer "
@@ -105,6 +110,7 @@ class TubesWindow(QtWidgets.QWidget):
         outer.addLayout(destination_row)
         outer.addWidget(self.existing_groups)
         outer.addWidget(self.region_map)
+        outer.addWidget(self.live_link)
 
         def column(heading, name):
             card = QtWidgets.QFrame()
@@ -195,6 +201,7 @@ class TubesWindow(QtWidgets.QWidget):
         groom = self.to_groom.isChecked()
         self.existing_groups.setEnabled(groom)
         self.region_map.setEnabled(groom)
+        self.live_link.setEnabled(groom)
         self.shape_group_hint.setEnabled(self.shapes.isChecked())
         self.centers_group.setEnabled(self.centers.isChecked())
         self.volume.setEnabled(self.centers.isChecked())
@@ -215,6 +222,7 @@ class TubesWindow(QtWidgets.QWidget):
                 "centers_group": self.centers_group.isChecked(),
                 "existing_groups": self.existing_groups.isChecked(),
                 "region_map": self.region_map.isChecked(),
+                "live_link": self.live_link.isChecked() and groom is not None,
                 "ignore_bevels": self.ignore_bevels.isChecked(),
                 "smooth": self.smooth.isChecked(),
                 "center_count": self.volume_count.value() if self.volume.isChecked() else 1}

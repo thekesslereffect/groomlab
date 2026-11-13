@@ -440,8 +440,12 @@ def _read_tubes(meshes, groom, ignore_bevels, smooth=None):
         except tube_mesh.TubeError as e:
             skipped[shape.split("|")[-2] if shape.count("|") > 1 else shape] = str(e)
             continue
-        for tube in found:
+        for index, tube in enumerate(found):
+            # Where it came from and how it was read (a live link reads it again the same way).
+            tube.mesh, tube.shell, tube.signature = shape, index, (len(tube.rings), tube.sides)
+            before = tube_mesh.section_center(tube.rings[0])
             tube_mesh.orient(tube, distance)
+            tube.flipped = tube_mesh.section_center(tube.rings[0]) != before
             if ignore_bevels:
                 tube.merge_bevels()  # (bevels told apart as modeled: the smooth surface rounds them away)
             tubes.append(tube.use_smooth())
@@ -485,7 +489,7 @@ def _new_group_name(groom, base):
 
 
 def tubes_to_curves(meshes, groom=None, centers=True, centers_group=True, existing_groups=False, ignore_bevels=True,
-                    name=None, shapes=True, center_count=1, smooth=True, region_map=True):
+                    name=None, shapes=True, center_count=1, smooth=True, region_map=True, live_link=False):
     """Modeled hair tubes (open quad tubes: `meshes`, or groups of them) as NURBS curves: with `shapes`
     one per edge run along each tube (its shape curves, a point per edge loop), and with `centers` one through
     each tube's middle (each section's area centroid); `center_count` above 1 fills the tube with
@@ -505,11 +509,15 @@ def tubes_to_curves(meshes, groom=None, centers=True, centers_group=True, existi
     its tube's group. With a groom and `region_map`, a guide map ("tubes", a free name) gives each
     tube's guides (shape and center) a value of their own, neighbouring tubes far apart in gray, and
     every Interpolate whose regionMap is empty takes it: each strand then blends only the guides of
-    the tube rooted nearest it (regions from a guide map, Interpolate's regionMap). One undo step.
+    the tube rooted nearest it (regions from a guide map, Interpolate's regionMap). When an
+    Interpolate already reads a tube map, the new tubes join it at values of their own. With a groom
+    and `live_link`, the guides keep following their tubes (tube_links: the mesh's edits and moves
+    reshape them, their roots sliding over the scalp). One undo step.
 
     Returns {"tubes": n, "shape": [curves or guide IDs], "centers": [...], "group": the scene group
     (None with a groom), "groups": {"shape": guide group, "centers": guide group} (with a groom),
-    "regionMap": the guide map (with a groom and `region_map`, else None), "skipped": {mesh: why}}.
+    "regionMap": the guide map (with a groom and `region_map`, else None), "liveLink": whether the
+    guides follow their tubes (with a groom), "skipped": {mesh: why}}.
     Neither `shapes` nor `centers`: ValueError.
     """
     if not shapes and not centers:
@@ -549,12 +557,24 @@ def tubes_to_curves(meshes, groom=None, centers=True, centers_group=True, existi
         result["centers"] = _guides_point_per_loop(groom, centers_made, groups["centers"])
         cmds.delete(root)
         result.update(group=None, groups=groups)
+        by_tube = [[] for _ in tubes]
+        shape_ids, center_ids = [[] for _ in tubes], [[] for _ in tubes]
+        for ids, owners, mine in ((result["shape"], shape_tube, shape_ids), (result["centers"], center_tube, center_ids)):
+            for guide, t in zip(ids or [], owners):
+                by_tube[t].append(guide)
+                mine[t].append(guide)
+        values = [None] * len(tubes)
         if region_map and tubes:
-            by_tube = [[] for _ in tubes]
-            for ids, owners in ((result["shape"], shape_tube), (result["centers"], center_tube)):
-                for guide, t in zip(ids or [], owners):
-                    by_tube[t].append(guide)
-            result["regionMap"] = _tube_region_map(groom, by_tube)
+            result["regionMap"], values = _tube_region_map(groom, by_tube)
+        if live_link:
+            from groomlab import tube_links
+            uuids = dict((mesh, cmds.ls(mesh, uuid=True)[0]) for mesh in set(t.mesh for t in tubes))
+            tube_links.add_links(groom, [
+                tube_links.link_record(tube, uuids[tube.mesh], shape_ids[t], center_ids[t],
+                                       center_count if centers else 0, groups, ignore_bevels, smooth,
+                                       result["regionMap"], values[t])
+                for t, tube in enumerate(tubes)])
+        result["liveLink"] = bool(live_link)
     return result
 
 
@@ -573,29 +593,67 @@ def tube_region_values(count):
     return [values[(t * step) % count] for t in range(count)]
 
 
-def _tube_region_map(groom, by_tube):
-    """A guide map ("tubes", a free name) with each tube's guides at a value of their own
-    (tube_region_values), every other guide at 0, and every Interpolate whose regionMap is empty
-    reading it. Returns its name."""
-    from groomlab import graph as gm
-    taken = set(groomlab.list_maps(groom))
-    name, n = TUBE_REGION_MAP, 1
-    while name in taken:
+def _is_tube_map_name(name):
+    rest = (name or "")[len(TUBE_REGION_MAP):]
+    return (name or "").startswith(TUBE_REGION_MAP) and (rest == "" or rest.isdigit())
+
+
+def _region_values_in_use(groom, name):
+    """The distinct values the groom's guides have in guide map `name`, 0 (no tube) left out."""
+    used = set()
+    for guide in groomlab.get_hierarchy(groom).get("guides", []):
+        value = (guide.get("attributes") or {}).get(name)
+        if value:
+            used.add(round(float(value), 4))
+    return sorted(used)
+
+
+def _extra_region_values(used, count):
+    """`count` tube values for tubes added to a map whose tubes have `used`: tube_region_values of
+    the whole count, the ones well clear of every value already used."""
+    n = len(used) + count
+    while True:
+        gap = 0.5 / (n + 1.0)
+        free = [v for v in tube_region_values(n) if all(abs(v - u) > gap for u in used)]
+        if len(free) >= count:
+            return free[:count]
         n += 1
-        name = "%s%d" % (TUBE_REGION_MAP, n)
-    groomlab.add_map(groom, name, value=0.0, kind="guides")
-    for guides, value in zip(by_tube, tube_region_values(len(by_tube))):
+
+
+def _tube_region_map(groom, by_tube):
+    """Each tube's guides at a value of their own in a guide map, every other guide at 0, read by
+    every Interpolate whose regionMap is empty. When an Interpolate already reads a tube map
+    ("tubes", "tubes2"...: an earlier conversion's), the new tubes join it at values none of its
+    tubes has (conversions add tubes, never take the earlier ones' regions); else a new map
+    ("tubes", a free name) with values tube_region_values. Returns (its name, each tube's value)."""
+    from groomlab import graph as gm
+    model = gm.GraphModel.from_groom(groom, gm.OperatorCatalog.from_maya())
+    taken = set(groomlab.list_maps(groom))
+    interpolates = [node for node in model.order if model.node_type(node) == "Interpolate"]
+    reading = [model.param(node, "regionMap") for node in interpolates]
+    joined = next((m for m in reading if m and _is_tube_map_name(m) and m in taken and
+                   groomlab.map_kind(groom, m) == "guides"), None)
+    if joined:
+        name = joined
+        values = _extra_region_values(_region_values_in_use(groom, name), len(by_tube))
+    else:
+        name, n = TUBE_REGION_MAP, 1
+        while name in taken:
+            n += 1
+            name = "%s%d" % (TUBE_REGION_MAP, n)
+        groomlab.add_map(groom, name, value=0.0, kind="guides")
+        values = tube_region_values(len(by_tube))
+    for guides, value in zip(by_tube, values):
         if guides:
             groomlab.set_guide_attribute(groom, name, value, guides=list(guides))
-    model = gm.GraphModel.from_groom(groom, gm.OperatorCatalog.from_maya())
     changed = False
-    for node in list(model.order):
-        if model.node_type(node) == "Interpolate" and not model.param(node, "regionMap"):
+    for node in interpolates:
+        if not model.param(node, "regionMap"):
             model.set_param(node, "regionMap", name)
             changed = True
     if changed:
         model.save(groom)
-    return name
+    return name, values
 
 
 def _shape_name(groom, base, taken):
