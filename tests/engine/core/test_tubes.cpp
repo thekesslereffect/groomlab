@@ -1795,5 +1795,103 @@ TEST(Tubes, SplitChildrenSliceTheParentAcrossItsLongerSide) {
     }
 }
 
+// A guide tipped over by a brush (setPoints) carries its tube round with it, not twisted about the
+// guide: its root frame turns as its root direction does (as pose turns it). With rollOnScalp off
+// the sections follow those frames alone (a root-first tube, swept from its root), and the flag is
+// saved, read back and set by a tube edit.
+TEST(TubeSections, TippedGuidesCarryTheirTubeUntwisted) {
+    const std::shared_ptr<const ScalpMesh> scalp = test::makeSphere(48, 96, 1.0f);
+    GuideHierarchy h;
+    const GroupId primary = h.addGroup("primary");
+    TubeProfile ribbon;
+    ribbon.shape = TubeShape::Ribbon;
+    ribbon.width = {0.15f};
+    ribbon.aspect = {0.3f};
+    ribbon.rollOnScalp = false;
+    const GuideId id = h.addGuide(primary, straightGuide({0.0f, 1.0f, 0.0f}), ribbon);
+    h.evaluate(scalp.get());
+    const Frame before = h.guide(id)->frames().front();
+    // Tipped 60 degrees about its root, sideways.
+    const float a = 1.0471976f, c = std::cos(a), s = std::sin(a);
+    std::vector<Vec3f> tipped;
+    for (const Vec3f& q : h.guide(id)->points) {
+        const Vec3f d = q - Vec3f(0.0f, 1.0f, 0.0f);
+        tipped.push_back(Vec3f(0.0f, 1.0f, 0.0f) + Vec3f(d.x * c - d.y * s, d.x * s + d.y * c, d.z));
+    }
+    h.setPoints(id, tipped);
+    h.evaluate(scalp.get());
+    const HierarchyGuide& g = *h.guide(id);
+    const Frame after = g.frames().front();
+    const Vec3f carried = rotateBetween(before.normal, before.tangent, after.tangent);
+    EXPECT_GT(after.normal.dot(carried), 0.9999f) << "the root frame turned with the root";
+    EXPECT_TRUE(g.tube.roll.empty()) << "no roll on the scalp with rollOnScalp off";
+    // Saved only when off, read back, and set by an edit.
+    const std::string text = h.toJson();
+    EXPECT_NE(text.find("\"rollOnScalp\":false"), std::string::npos);
+    EXPECT_FALSE(GuideHierarchy::fromJson(text).guide(id)->tube.rollOnScalp);
+    EXPECT_TRUE(editedTube(g.tube, "{\"rollOnScalp\": true}").rollOnScalp);
+    EXPECT_THROW(editedTube(g.tube, "{\"rollOnScalp\": 1}"), std::invalid_argument);
+    TubeProfile on = g.tube;
+    on.rollOnScalp = true;
+    EXPECT_NE(on, g.tube);
+    EXPECT_NE(hashTube(0, on), hashTube(0, g.tube));
+    EXPECT_EQ(tubeToJson(on).find("rollOnScalp"), std::string::npos);
+}
+
+// The roll on the scalp holds where the guide lies on the head, not where it stands off it: a
+// ribbon combed over in its upper half, far from the scalp there, keeps its sections as its frames
+// carry them.
+TEST(TubeSections, NoRollWhereTheGuideStandsOffTheScalp) {
+    const std::shared_ptr<const ScalpMesh> scalp = test::makeSphere(48, 96, 1.0f);
+    GuideHierarchy h;
+    const GroupId primary = h.addGroup("primary");
+    TubeProfile ribbon;
+    ribbon.shape = TubeShape::Ribbon;
+    ribbon.width = {0.15f};
+    ribbon.aspect = {0.3f};
+    // Standing off the equator (+x; not a pole, where a mesh sphere's normals lean), bent over
+    // sideways from its middle.
+    std::vector<Vec3f> pts;
+    for (int i = 0; i <= 16; ++i) {
+        const float x = 1.0f + std::min(i, 8) / 16.0f;
+        const float k = std::max(i - 8, 0) / 8.0f;
+        pts.push_back(Vec3f(x + 0.4f * k - 0.3f * k * k, 0.0f, 0.5f * k));
+    }
+    const GuideId id = h.addGuide(primary, pts, ribbon);
+    h.evaluate(scalp.get());
+    // Off the scalp the sections carry on as they left the root (whatever the root's few degrees
+    // on a faceted sphere): no turn where the guide bends over, far from the head.
+    const std::vector<float>& roll = h.guide(id)->tube.roll;
+    for (std::size_t i = 6; i < roll.size(); ++i) EXPECT_NEAR(roll[i], roll[5], 1e-3f) << "point " << i;
+    EXPECT_LT(std::abs(roll.empty() ? 0.0f : roll[5]), 0.05f);
+}
+
+// A library shape named kOwnedTubeShapePrefix... belongs to its guides: removed with the last of
+// them (removeGuides, removeGroup); other shapes stay.
+TEST(TubeShapes, OwnedShapesGoWithTheirLastGuide) {
+    GuideHierarchy h;
+    const GroupId g = h.addGroup("tubes");
+    const std::vector<SectionPoint> square{{-1, -1}, {1, -1}, {1, 1}, {-1, 1}};
+    h.setTubeShape(std::string(kOwnedTubeShapePrefix) + "1", square, false);
+    h.setTubeShape(std::string(kOwnedTubeShapePrefix) + "2", square, false);
+    h.setTubeShape("keep", square, false);
+    TubeProfile owned;
+    owned.custom = h.tubeShape(std::string(kOwnedTubeShapePrefix) + "1");
+    const GuideId a = h.addGuide(g, straightGuide({0, 0, 0}), owned);
+    const GuideId b = h.addGuide(g, straightGuide({1, 0, 0}), owned);
+    TubeProfile other = owned;
+    other.custom = h.tubeShape(std::string(kOwnedTubeShapePrefix) + "2");
+    const GroupId g2 = h.addGroup("more");
+    h.addGuide(g2, straightGuide({2, 0, 0}), other);
+    h.removeGuides({a});
+    EXPECT_TRUE(h.tubeShape(std::string(kOwnedTubeShapePrefix) + "1")) << "b still takes it";
+    h.removeGuides({b});
+    EXPECT_FALSE(h.tubeShape(std::string(kOwnedTubeShapePrefix) + "1"));
+    EXPECT_TRUE(h.tubeShape(std::string(kOwnedTubeShapePrefix) + "2"));
+    h.removeGroup(g2);
+    EXPECT_FALSE(h.tubeShape(std::string(kOwnedTubeShapePrefix) + "2"));
+    EXPECT_TRUE(h.tubeShape("keep")) << "a shape not owned stays";
+}
+
 }  // namespace
 }  // namespace groomlab

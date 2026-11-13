@@ -106,6 +106,8 @@ void bindHierarchy(py::module_& m) {
         .def_readwrite("width", &TubeProfile::width)
         .def_readwrite("aspect", &TubeProfile::aspect)
         .def_readwrite("twist", &TubeProfile::twist)
+        .def_readwrite("roll_on_scalp", &TubeProfile::rollOnScalp,
+                       "Whether the sections roll to lie as the scalp does (off: swept from the root, no twist)")
         .def_property(
             "shape", [](const TubeProfile& t) { return t.shapeName(); },
             [](TubeProfile& t, const std::string& name) {

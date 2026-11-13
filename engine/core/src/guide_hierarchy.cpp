@@ -91,13 +91,13 @@ FootprintTurn footprintTurn(const HierarchyGuide& parent, const Frame& rootFrame
 // turn from the guide's rotation-minimizing frames (`frames`) so that, at twist 0, the section's
 // height (v) points off the scalp and its width (u) lies along it, all along the guide: the
 // scalp's normal at the point nearest each guide point, taken across the guide. It holds
-// where the guide lies within kNear section extents of the scalp and leans at least 30 degrees
+// where the guide lies within kNear section extents of the scalp (on it, not standing off it) and leans at least 30 degrees
 // off the normal there; farther off (none past kFar extents) or more upright, the sections keep
 // the roll they had before (the frames carried on), so a lock hanging off the head keeps the
 // way it left it. Evened out along the guide; empty when it is 0 all along.
 std::vector<float> sectionRoll(const std::vector<Vec3f>& points, const std::vector<Frame>& frames, const TubeProfile& tube,
                                const ScalpMesh& scalp, float scale) {
-    constexpr float kNear = 2.0f, kFar = 6.0f;
+    constexpr float kNear = 0.75f, kFar = 1.5f;
     constexpr float kPi = 3.14159265358979f;
     const std::size_t n = points.size();
     std::vector<float> roll(n, 0.0f);
@@ -407,10 +407,29 @@ void GuideHierarchy::removeGroup(GroupId id) {
                                  [&](const HierarchyGuide& g) { return doomed.count(g.group) > 0; }),
                   guides_.end());
     rebuildIndex();
+    pruneOwnedTubeShapes();
 }
 
 // ---------------------------------------------------------------------------
 // Guides
+
+void GuideHierarchy::pruneOwnedTubeShapes() {
+    const std::string prefix = kOwnedTubeShapePrefix;
+    std::set<std::string> used;
+    for (const HierarchyGuide& g : guides_) {
+        if (g.tube.custom) used.insert(g.tube.custom->name);
+        for (const std::optional<TubeShapeRef>* ref : {&g.tube.midShape, &g.tube.tipShape}) {  // (a mid or tip profile)
+            if (*ref && (*ref)->custom) used.insert((*ref)->custom->name);
+        }
+    }
+    for (auto it = tubeShapes_.begin(); it != tubeShapes_.end();) {
+        if (it->first.compare(0, prefix.size(), prefix) == 0 && !used.count(it->first)) {
+            it = tubeShapes_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
 
 void GuideHierarchy::rebuildIndex() {
     invalidateHash();
@@ -739,7 +758,7 @@ void GuideHierarchy::evaluateGuide(HierarchyGuide& g, const ScalpMesh* scalp, co
     // and, for a shaped tube, its sections' roll (TubeProfile::roll).
     if (!scalp || scalp->triangleCount() == 0) return;
     if (scalp->contains(g.root)) g.rootNormal = scalp->normal(g.root);
-    if (g.tube.shaped() && g.points.size() >= 2) {
+    if (g.tube.shaped() && g.tube.rollOnScalp && g.points.size() >= 2) {
         g.tube.roll = sectionRoll(g.points, rotationMinimizingFrames(g.points.data(), g.points.size(), g.frameUp), g.tube,
                                   *scalp, scale_);
     } else {
@@ -1057,6 +1076,7 @@ void GuideHierarchy::removeGuides(const std::vector<GuideId>& ids) {
                                  [&](const HierarchyGuide& g) { return doomed.count(g.id) > 0; }),
                   guides_.end());
     rebuildIndex();
+    pruneOwnedTubeShapes();
 }
 
 std::vector<GuideId> GuideHierarchy::mirrorGroup(GroupId groupId, int axis, float center, bool fromPositive) {
@@ -1222,6 +1242,16 @@ void GuideHierarchy::setPoints(GuideId id, std::vector<Vec3f> points) {
     invalidateHash();
     HierarchyGuide* g = mutableGuide(id);
     if (!g) throw std::invalid_argument("setPoints: unknown guide");
+    // A primary's frame carried with its root's turn (as pose carries it): a brush tipping the guide
+    // over moves its tube with it, not twisted round it (frameUp kept as it is would be squared
+    // onto the new root direction, which turns it the more the root tips).
+    if (!g->followsParent() && g->points.size() >= 2 && points.size() >= 2) {
+        const Vec3f from = rootTangent(g->points), to = rootTangent(points);
+        const Vec3f up = g->frameUp - from * g->frameUp.dot(from);
+        if (up.length() > 1e-6f && from.length() > 0.0f && to.length() > 0.0f) {
+            g->frameUp = rotateBetween(up.normalized(), from, to);
+        }
+    }
     g->points = std::move(points);
     g->rootLocal.clear();  // re-bind to the scalp on the next evaluate
     if (g->followsParent()) {
@@ -1587,6 +1617,7 @@ json guideToJson(const HierarchyGuide& g) {
     if (g.tube.midHold != 0.0f) j["tube"]["midHold"] = g.tube.midHold;
     if (g.tube.tipHold != 0.0f) j["tube"]["tipHold"] = g.tube.tipHold;
     if (g.tube.midAt != 0.5f) j["tube"]["midAt"] = g.tube.midAt;
+    if (!g.tube.rollOnScalp) j["tube"]["rollOnScalp"] = false;
     if (g.parent != kNoGuide) j["parent"] = g.parent;
     if (g.locked) j["locked"] = true;
     if (g.ownSegments) j["ownSegments"] = true;
@@ -1659,6 +1690,9 @@ HierarchyGuide guideFromJson(const json& j, const TubeShapeLibrary& library, std
                                         std::pair<const char*, float*>{"tipHold", &g.tube.tipHold},
                                         std::pair<const char*, float*>{"midAt", &g.tube.midAt}}) {
             if (tube.contains(key) && tube.at(key).is_number()) *into = std::clamp(tube.at(key).get<float>(), 0.0f, 1.0f);
+        }
+        if (tube.contains("rollOnScalp") && tube.at("rollOnScalp").is_boolean()) {
+            g.tube.rollOnScalp = tube.at("rollOnScalp").get<bool>();
         }
     }
     if (j.contains("attributes")) g.attributes = j.at("attributes").get<std::map<std::string, float>>();

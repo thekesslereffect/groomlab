@@ -380,7 +380,7 @@ TUBE_SHAPES = ("round", "ribbon", "teardrop", "blade")
 
 
 def set_tube(groom, guides=None, group=None, level=None, width=None, aspect=None, twist=None, shape=None, samples=None,
-             mid_shape=None, tip_shape=None, root_hold=None, mid_hold=None, tip_hold=None, mid_at=None):
+             mid_shape=None, tip_shape=None, root_hold=None, mid_hold=None, tip_hold=None, mid_at=None, roll_on_scalp=None):
     """Edit guides' tubes (tube guides): their cross-section along the guide and its shape.
 
     Targets: `guides` (IDs), else `group`, else `level`, else the selected guides. Each of `width`
@@ -394,7 +394,10 @@ def set_tube(groom, guides=None, group=None, level=None, width=None, aspect=None
     `root_hold`, `mid_hold` and `tip_hold` (0 to 1, default 0): the share of the tube where that
     profile keeps its exact shape (the root's from the root, the tip's up to the tip, the mid's
     centered on `mid_at`); between the held stretches the shape changes smoothly, at once where
-    they meet. `mid_at` (0 to 1, default 0.5): where along the tube the mid's profile is. `samples` resamples all three lists to that many. Children follow
+    they meet. `mid_at` (0 to 1, default 0.5): where along the tube the mid's profile is. `samples` resamples all three lists to that many.
+    `roll_on_scalp`: False sweeps the sections from the root along the guide with no twist (a
+    root-first tube); True (as tubes start) turns a shaped tube's sections to lie as the scalp
+    does where the guide lies on it (get_tube shows "rollOnScalp": False when off). Children follow
     their parent's tube; Interpolate's fillTubes fills tubes with strands. One undo step. Returns
     how many guides changed."""
     edit = {}
@@ -422,6 +425,8 @@ def set_tube(groom, guides=None, group=None, level=None, width=None, aspect=None
         edit[key] = float(value)
     if samples is not None:
         edit["samples"] = int(samples)
+    if roll_on_scalp is not None:
+        edit["rollOnScalp"] = bool(roll_on_scalp)
     if not edit:
         raise ValueError("give a width, aspect, twist, shape, mid_shape, tip_shape, root_hold, mid_hold, tip_hold, "
                          "mid_at or samples")

@@ -484,6 +484,7 @@ std::uint64_t hashTube(std::uint64_t h, const TubeProfile& tube) {
     if (tube.rootHold != 0.0f || tube.midHold != 0.0f || tube.tipHold != 0.0f || tube.midAt != 0.5f) {
         h = hashFloat(hashFloat(hashFloat(hashFloat(hashCombine(h, 0xB01Du), tube.rootHold), tube.midHold), tube.tipHold), tube.midAt);
     }
+    if (!tube.rollOnScalp) h = hashCombine(h, 0x5011u);
     return h;
 }
 
@@ -1013,6 +1014,7 @@ std::string tubeToJson(const TubeProfile& tube, float scale) {
     if (tube.midHold != 0.0f) j["midHold"] = tube.midHold;
     if (tube.tipHold != 0.0f) j["tipHold"] = tube.tipHold;
     if (tube.midAt != 0.5f) j["midAt"] = tube.midAt;
+    if (!tube.rollOnScalp) j["rollOnScalp"] = false;
     return j.dump();
 }
 
@@ -1087,6 +1089,10 @@ TubeProfile editedTube(const TubeProfile& base, const std::string& editJson, flo
         }
     }
     if (j.contains("twist")) tube.twist = listOf(j["twist"], "twist");
+    if (j.contains("rollOnScalp")) {
+        if (!j["rollOnScalp"].is_boolean()) throw std::invalid_argument("tube rollOnScalp: true or false");
+        tube.rollOnScalp = j["rollOnScalp"].get<bool>();
+    }
     if (j.contains("scaleWidth")) {
         if (!j["scaleWidth"].is_number() || !(j["scaleWidth"].get<double>() >= 0.0)) {
             throw std::invalid_argument("tube scaleWidth: a number, 0 or more");

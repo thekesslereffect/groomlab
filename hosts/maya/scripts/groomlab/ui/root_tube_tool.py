@@ -6,11 +6,13 @@ moves it; near a neighbouring root tube a CV snaps onto its CVs or edges, so tub
 gap). Clicking the first CV again closes the outline. With "Draw before extrude" the root's middle
 then shows as a CV and a stroke drawn from it out sets the tube's path (as the Draw tool draws a
 guide); on release the tube is made and the next root can be drawn. Without it the tube goes
-straight off the scalp at once (Length, Segments).
+straight off the scalp at once (Length, Segments). Undoing the tube just made (Ctrl+Z) brings its
+outline back: drawing its path again, or (without Draw before extrude) the outline open.
 
 Edit roots: the root tubes (the selected guides' or, with none selected, every root tube) show as
 their root outlines with their CVs, the guides hidden; dragging a CV moves it on the scalp (CVs
-shared with a neighbour, sealed, move together). Finish gives each changed tube its new root and
+shared with a neighbour, sealed, move together; Ctrl+click an edge adds a CV there, on every
+outline sharing the edge). Finish gives each changed tube its new root and
 updates the regions (groomlab.root_tubes.edit_root_tube).
 
 The outlines and strokes are drawn with temporary curves under PREVIEW (not in the undo queue,
@@ -59,14 +61,15 @@ class RootTubeTool(object):
         self.stroke = []        # the path being drawn
         self.center = None      # the closed outline's middle (draw mode), and the scalp's normal there
         self.normal = None
-        self.settings = {"draw": True, "length": 1.0, "segments": 12, "taper": 0.5, "smooth": False, "snap": True,
-                         "group": None}
+        self.settings = {"draw": True, "length": 1.0, "segments": 12, "taper": 0.5, "snap": True, "group": None}
         self.neighbours = []    # snap targets: [(guide, cvs)]
         self.edits = {}         # edit mode: {guide: [cvs]}
         self.original = {}      # ... as they were
         self.drag = []          # edit mode: the CVs being dragged [(guide, index)]
         self.guides_shown = None
         self.listeners = []     # called with a message after each change (the Groom Tools card)
+        self.last_made = None   # the tube just made: {guide, cvs, center, normal, drawn} (undoing it brings it back)
+        self.callbacks = []     # Maya's Undo event, while the tool is up
 
     # -- Plumbing ---------------------------------------------------------------------
 
@@ -148,6 +151,8 @@ class RootTubeTool(object):
         self.reset()
         self.groom = groom
         self.mode = mode
+        self.last_made = None
+        self.listen(True)
         if cmds.currentCtx() != CONTEXT:
             cmds.setToolTo(CONTEXT)
         if mode == "edit":
@@ -169,6 +174,37 @@ class RootTubeTool(object):
         dropped)."""
         self.reset()
         self.mode = "place"
+        self.last_made = None
+        self.listen(False)
+
+    def listen(self, on):
+        om, _omui = _om()
+        for cb in self.callbacks:
+            try:
+                om.MMessage.removeCallback(cb)
+            except RuntimeError:
+                pass
+        self.callbacks = [om.MEventMessage.addEventCallback("Undo", _undone)] if on else []
+
+    def undone(self):
+        """After an undo: when it took back the tube just made, its outline back (drawing its path
+        again with Draw before extrude, else the outline open, to close it again)."""
+        last = self.last_made
+        if not last or self.mode != "place" or self.cvs or not self.groom or not cmds.objExists(self.groom):
+            return
+        if last["guide"] in root_tubes.root_tubes(self.groom):
+            return
+        self.last_made = None
+        self.cvs = list(last["cvs"])
+        self.neighbours = root_tubes.snap_targets(self.groom) if self.settings["snap"] else []
+        if last["drawn"]:
+            self.mode = "draw"
+            self.center, self.normal = last["center"], last["normal"]
+            self.stroke = [self.center]
+            self.say("Tube undone: drag from the root out to draw its path again.")
+        else:
+            self.say("Tube undone: its outline is back; click its first CV to close it again.")
+        self.redraw()
 
     def active(self):
         return cmds.currentCtx() == CONTEXT
@@ -199,6 +235,7 @@ class RootTubeTool(object):
             self.say("Click on the scalp.")
             return
         point, how = self.snapped(hit[0])
+        self.last_made = None  # (a new outline begun: an undo no longer brings the last one back)
         self.cvs.append(point)
         self.redraw()
         if how:
@@ -250,14 +287,15 @@ class RootTubeTool(object):
         s = self.settings
         try:
             guide = root_tubes.make_root_tube(self.groom, self.cvs, path=path, length=s["length"],
-                                              segments=s["segments"], taper=s["taper"], smooth=s["smooth"],
-                                              group=s["group"])
+                                              segments=s["segments"], taper=s["taper"], group=s["group"])
         except (RuntimeError, ValueError) as e:
             self.say("The tube wasn't made: %s" % str(e).strip())
             self.mode = "place"
             self.cvs, self.stroke, self.center = [], [], None
             self.redraw()
             return None
+        self.last_made = {"guide": int(guide), "cvs": list(self.cvs), "center": self.center, "normal": self.normal,
+                          "drawn": path is not None}
         self.mode = "place"
         self.cvs, self.stroke, self.center = [], [], None
         self.neighbours = root_tubes.snap_targets(self.groom) if s["snap"] else []
@@ -305,10 +343,69 @@ class RootTubeTool(object):
                 continue
         self.original = dict((g, list(c)) for g, c in self.edits.items())
         self.show_guides(False)
-        self.say("Editing %d root%s: drag their CVs on the scalp, then Finish edit." %
+        self.say("Editing %d root%s: drag their CVs on the scalp (Ctrl+click an edge to add one), then Finish edit." %
                  (len(self.edits), "" if len(self.edits) == 1 else "s"))
 
+    def modifier(self):
+        try:
+            return cmds.draggerContext(CONTEXT, query=True, modifier=True) or ""
+        except RuntimeError:
+            return ""
+
+    def _tolerance(self):
+        scale = max(root_tubes.tm._dist(a, b) for cvs in self.edits.values() for a, b in zip(cvs, cvs[1:] + cvs[:1]))
+        return 1e-4 * max(scale, 1e-6)
+
+    def insert_cv(self, x, y):
+        """A new CV on the outline edge nearest view point (x, y) (within PICK_PIXELS), on the
+        scalp; put into every outline being edited that shares the edge, so sealed neighbours stay
+        sealed. Then dragged as a picked CV is."""
+        tm = root_tubes.tm
+        best = None
+        for g, cvs in self.edits.items():
+            n = len(cvs)
+            for i in range(n):
+                a, b = cvs[i], cvs[(i + 1) % n]
+                ax, ay = self.to_screen(a)
+                bx, by = self.to_screen(b)
+                dx, dy = bx - ax, by - ay
+                span = dx * dx + dy * dy
+                f = min(max(((x - ax) * dx + (y - ay) * dy) / span, 0.0), 1.0) if span > 1e-9 else 0.0
+                d = math.hypot(ax + f * dx - x, ay + f * dy - y)
+                if d <= PICK_PIXELS and (best is None or d < best[0]):
+                    best = (d, g, i, f)
+        self.drag = []
+        if best is None:
+            self.say("Ctrl+click on a root's edge to add a CV there.")
+            return
+        _d, g, i, f = best
+        cvs = self.edits[g]
+        a, b = cvs[i], cvs[(i + 1) % len(cvs)]
+        point = tuple(root_tubes._project(self.groom, [tm.lerp(a, b, f)])[0])
+        tol = self._tolerance()
+        full = 0
+        for h, other in self.edits.items():
+            n = len(other)
+            for j in range(n):
+                p, q = other[j], other[(j + 1) % n]
+                if ((tm._dist(p, a) <= tol and tm._dist(q, b) <= tol) or
+                        (tm._dist(p, b) <= tol and tm._dist(q, a) <= tol)):
+                    if n >= tm.MAX_SHAPE_POINTS:
+                        full += 1
+                        break
+                    other.insert(j + 1, point)
+                    self.drag.append((h, j + 1))
+                    break
+        self.redraw()
+        if full and not self.drag:
+            self.say("A root takes at most %d CVs." % tm.MAX_SHAPE_POINTS)
+        else:
+            self.say("Added a CV%s: drag it, then Finish edit." %
+                     (" on %d sealed outlines" % len(self.drag) if len(self.drag) > 1 else ""))
+
     def press_edit(self, x, y):
+        if "ctrl" in self.modifier():
+            return self.insert_cv(x, y)
         best = None
         for g, cvs in self.edits.items():
             for i, p in enumerate(cvs):
@@ -320,8 +417,7 @@ class RootTubeTool(object):
             self.drag = []
             return
         picked = self.edits[best[1]][best[2]]
-        scale = max(root_tubes.tm._dist(a, b) for cvs in self.edits.values() for a, b in zip(cvs, cvs[1:] + cvs[:1]))
-        tol = 1e-4 * max(scale, 1e-6)
+        tol = self._tolerance()
         # A CV shared with a neighbour (sealed) moves with it.
         self.drag = [(g, i) for g, cvs in self.edits.items() for i, p in enumerate(cvs)
                      if root_tubes.tm._dist(p, picked) <= tol]
@@ -465,6 +561,10 @@ def _finalize():
     _guarded(TOOL.leave)
 
 
+def _undone(*_):
+    _guarded(TOOL.undone)
+
+
 def _guarded(fn):
     try:
         fn()
@@ -476,7 +576,7 @@ def _guarded(fn):
 
 def start(groom, mode="place", **settings):
     """The root-first tube tool on `groom` ("place": draw roots; "edit": edit the root tubes' CVs);
-    `settings`: draw, length, segments, taper, smooth, snap, group."""
+    `settings`: draw, length, segments, taper, snap, group."""
     TOOL.settings.update(settings)
     TOOL.start(groom, mode)
     return TOOL

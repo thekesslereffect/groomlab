@@ -113,6 +113,11 @@ using CustomTubeShapePtr = std::shared_ptr<const CustomTubeShape>;
 // A groom's custom shapes by name.
 using TubeShapeLibrary = std::map<std::string, CustomTubeShapePtr>;
 
+// A library shape whose name starts so belongs to the guides that take it (a root-first tube's
+// root outline, "rootTube_<n>"): removed from the library with the last of them
+// (GuideHierarchy::removeGuides, removeGroup).
+constexpr const char* kOwnedTubeShapePrefix = "rootTube_";
+
 // Points round every outline, built-in or custom.
 constexpr std::size_t kTubeOutlinePoints = 96;
 // The most control points a custom shape takes.
@@ -232,6 +237,10 @@ struct TubeProfile {
     // sectionAt, so twist 0 lays the section's width along the scalp all along the guide. Worked
     // out, not authored: not saved, not compared, not in hashTube. Empty: 0.
     std::vector<float> roll;
+    // Whether the sections roll on the scalp (above). Off: they follow the guide's rotation-
+    // minimizing frames alone, as a section swept from its root out (a root-first tube: its root
+    // outline drawn on the scalp, the tube extruded from it with no twist). Saved when off.
+    bool rollOnScalp = true;
 
     float widthAt(float t) const;
     float aspectAt(float t) const;  // clamped
@@ -259,7 +268,7 @@ struct TubeProfile {
                                        : !o.custom && shape == o.shape;
         return sameCustom && width == o.width && aspect == o.aspect && twist == o.twist && midShape == o.midShape &&
                tipShape == o.tipShape && rootHold == o.rootHold && midHold == o.midHold && tipHold == o.tipHold &&
-               midAt == o.midAt;
+               midAt == o.midAt && rollOnScalp == o.rollOnScalp;
     }
     bool operator!=(const TubeProfile& o) const { return !(*this == o); }
 };

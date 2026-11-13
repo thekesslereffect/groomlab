@@ -42,6 +42,7 @@ MAX_LEVELS = 9              # the tube hierarchy's deepest level (1: the base)
 LEVEL_SUFFIX = "_L"         # level n's group: <base>_L<n>
 SNAP_PIXELS = 12            # how near (in view pixels) a CV snaps to a neighbouring root's CV or edge
 ROOT_LIFT = 0.05            # the guide's second point off the scalp: a share of its length
+_RECENTER_PASSES = 4        # the guide moved onto its root shape's box middle at most so often
 
 
 # ---------------------------------------------------------------------------
@@ -223,36 +224,57 @@ def _affine_error(src, dst):
     return err
 
 
-def _correspond(given, stored):
+def _candidates(given, stored):
     """The library's points (`stored`: as GroomLab keeps them, fitted into its box and maybe turned
     and reordered) matched to the `given` points they came from, point for point: the cyclic
-    order an affine map takes best onto them (both run counter-clockwise: no mirror image)."""
+    orders an affine map takes onto them as well as the best one does (both run counter-
+    clockwise: no mirror image). A symmetric outline (a regular polygon) matches at several."""
     n = len(given)
     if len(stored) != n:
-        return None
+        return []
+    scored = []
+    for shift in range(n):
+        cand = list(stored[shift:]) + list(stored[:shift])
+        scored.append((_affine_error(cand, given), cand))
+    least = min(e for e, _c in scored)
+    size = sum(x * x + y * y for x, y in given) or 1.0
+    return [c for e, c in scored if e <= least + 1e-9 * size]
+
+
+def _correspond(given, stored):
+    """The best of _candidates (the first, when several match as well)."""
+    found = _candidates(given, stored)
+    return found[0] if found else None
+
+
+def _best_section(pts, stored):
+    """The section (fit_section: twist, width, height, center offset) that puts the library's
+    points on `pts`: of the orders matching as well (a symmetric outline), the one whose box's
+    middle lies nearest the guide, so fitting again after the guide moved there picks it again.
+    None when they do not match."""
     best = None
-    for order in (list(stored),):
-        for shift in range(n):
-            cand = order[shift:] + order[:shift]
-            err = _affine_error(cand, given)
-            if best is None or err < best[0]:
-                best = (err, cand)
+    for fitted in _candidates(pts, stored):
+        section = tm.fit_section(pts, fitted)
+        off = math.hypot(*section[3])
+        if best is None or off < best[0] - 1e-12:
+            best = (off, section)
     return best[1] if best else None
 
 
-def _fit(groom, guide, shape, outline, smooth):
+def _fit(groom, guide, shape, outline):
     """The tube's root section on `outline`: `shape` (a library name; made or given these points)
     fitted to the outline in the guide's root frame. Returns (twist, width, height, center offset
     (u, v)) and the outline's points as the shape keeps them."""
     _center, _u, _v, flat = _root_fit(groom, guide, outline)
     pts, _indices = tm.shape_points(flat)
     if _library_shape(groom, shape) is None:
-        groomlab.add_tube_shape(groom, shape, pts, smooth=smooth)
+        groomlab.add_tube_shape(groom, shape, pts, smooth=False)
     else:
-        groomlab.set_tube_shape_points(groom, shape, pts, smooth=smooth)
-    fitted = _correspond(pts, _library_shape(groom, shape)["points"])
-    twist, w, h, off = tm.fit_section(pts, fitted)
-    return twist, w, h, off
+        groomlab.set_tube_shape_points(groom, shape, pts, smooth=False)
+    section = _best_section(pts, _library_shape(groom, shape)["points"])
+    if section is None:
+        raise RuntimeError("the root outline's shape %s does not match its CVs" % shape)
+    return section
 
 
 def _settle(groom, guide, shape, outline, passes=2):
@@ -262,11 +284,10 @@ def _settle(groom, guide, shape, outline, passes=2):
     for _ in range(passes):
         _center, _u, _v, flat = _root_fit(groom, guide, outline)
         pts, _indices = tm.shape_points(flat)
-        lib = _library_shape(groom, shape)["points"]
-        fitted = _correspond(pts, lib)
-        if fitted is None:
+        section = _best_section(pts, _library_shape(groom, shape)["points"])
+        if section is None:
             return
-        twist, w, h, _off = tm.fit_section(pts, fitted)
+        twist, w, h, _off = section
         tube = groomlab.get_tube(groom, guide)
         w0, t0 = tube["width"][0] or 1e-9, tube["twist"][0]
         a0 = tube["aspect"][0] or 1.0
@@ -285,19 +306,51 @@ def _project(groom, points):
     return [surface(p)[0] for p in points]
 
 
+def _project_along(groom, points, direction):
+    """Points taken onto the scalp along `direction` (the nearest hit on the line through each,
+    either way), else to the nearest point on it. The inverse of flattening a scalp point onto a
+    root's plane (to_plane drops it along the plane's normal): an outline read off the scalp into
+    the root plane and put back lands on the same CVs, however the scalp curves there."""
+    from maya.api import OpenMaya as om
+    from groomlab import utils
+    fns = [utils._om_mesh(s) for s in sorted(utils._groom_meshes(groom))]
+    surface = _scalp_surface(groom)
+    d = om.MFloatVector(*tm._unit(direction))
+    out = []
+    for p in points:
+        source = om.MFloatPoint(*p)
+        best = None
+        for fn in fns:
+            try:
+                found = fn.closestIntersection(source, d, om.MSpace.kWorld, 1e6, True)
+            except RuntimeError:
+                continue
+            if not found or found[2] < 0:
+                continue
+            if best is None or abs(found[1]) < best[0]:
+                best = (abs(found[1]), (found[0].x, found[0].y, found[0].z))
+        near = surface(p)[0]
+        # (A hit far past the nearest point: the line grazes the scalp; the nearest point instead.)
+        if best is None or best[0] > 4.0 * tm._dist(p, near) + 1e-6:
+            out.append(tuple(near))
+        else:
+            out.append(best[1])
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Root-first tubes
 
 
-def make_root_tube(groom, outline, path=None, length=1.0, segments=12, taper=0.5, smooth=False, group=None,
-                   regions=True):
+def make_root_tube(groom, outline, path=None, length=1.0, segments=12, taper=0.5, group=None, regions=True):
     """A tube guide grown from its root's outline: `outline` the root's CVs on the scalp (world
     points, 3 or more, in order round it). The guide roots at the outline's middle and goes along
     the drawn `path` (world points from the root out; its first point is taken to the root), or
     with none straight off the scalp `length` long, in `segments` segments. Its tube: a library
-    shape of its own (rootTube_<n>) whose outline at the root is the drawn one (straight edges
-    between the CVs, or with `smooth` a smooth curve through them), its width going to `taper`
-    times the root's at the tip. Into `group` (default ROOT_GROUP, made when missing). With
+    shape of its own (rootTube_<n>, removed with the last guide that takes it) whose outline at
+    the root is the drawn one (straight edges between the CVs), its width going to `taper` times
+    the root's at the tip. The tube is swept from its root along the guide with no twist (its
+    sections do not roll on the scalp: roll_on_scalp off). Into `group` (default ROOT_GROUP, made when missing). With
     `regions`, the tube's area becomes a region of its own (update_regions). One undo step.
     Returns the guide's ID."""
     outline = [tuple(p) for p in outline]
@@ -314,12 +367,16 @@ def make_root_tube(groom, outline, path=None, length=1.0, segments=12, taper=0.5
         radius = max(tm._dist(root, p) for p in outline)
         # A placeholder shaped tube first, so the guide's frame is laid across the scalp (as it
         # will lie), then the outline read in it.
-        groomlab.set_tube(groom, guides=[guide], shape="ribbon", width=radius, aspect=1.0, twist=0.0)
+        groomlab.set_tube(groom, guides=[guide], shape="ribbon", width=radius, aspect=1.0, twist=0.0,
+                          roll_on_scalp=False)
         shape = _new_shape_name(groom)
-        twist, w, h, off = _fit(groom, guide, shape, outline, smooth)
+        twist, w, h, off = _fit(groom, guide, shape, outline)
         # The shape fills its box: the guide runs through the box's middle, which may lie off the
-        # area centroid (an uneven outline). Moved there and fitted again.
-        if math.hypot(*off) > 1e-4 * max(w, 1e-9):
+        # area centroid (an uneven outline). Moved there and fitted again (till it holds: the
+        # root plane turns a hair with the scalp as the root moves).
+        for _ in range(_RECENTER_PASSES):
+            if math.hypot(*off) <= 1e-5 * max(w, 1e-9):
+                break
             center, u, v, _flat = _root_fit(groom, guide, outline)
             moved_root, normal = surface(tm.from_plane(off, center, u, v))
             if path and len(path) >= 2:  # the drawn curve moved with its root
@@ -327,7 +384,7 @@ def make_root_tube(groom, outline, path=None, length=1.0, segments=12, taper=0.5
                 path = [tm._add(p, delta) for p in path]
             points = _guide_path(moved_root, normal, path, length, segments)
             _reshape(groom, guide, points)
-            twist, w, h, off = _fit(groom, guide, shape, outline, smooth)
+            twist, w, h, off = _fit(groom, guide, shape, outline)
         groomlab.set_tube(groom, guides=[guide], shape=shape, width=[w, w * float(taper)],
                           aspect=min(max(h / w, 0.01), 100.0) if w > 1e-12 else 1.0, twist=twist)
         _settle(groom, guide, shape, outline)
@@ -362,7 +419,8 @@ def root_tubes(groom, guides=None):
 
 def root_outline(groom, guide, on_scalp=True):
     """A root tube's CVs as world points: its shape's control points placed in its root section,
-    taken onto the scalp (`on_scalp`)."""
+    taken onto the scalp (`on_scalp`: along the root section's normal, the way they were read off
+    it, so the CVs come back where they were drawn)."""
     tube = groomlab.get_tube(groom, guide)
     shape = _library_shape(groom, tube["shape"])
     if shape is None or shape["builtin"]:
@@ -372,12 +430,7 @@ def root_outline(groom, guide, on_scalp=True):
     h = w * tube["aspect"][0]
     flat = tm.place_outline(shape["points"], tube["twist"][0], w, h, (0.0, 0.0))
     world = [tm.from_plane(p, center, u, v) for p in flat]
-    return _project(groom, world) if on_scalp else world
-
-
-def root_smooth(groom, guide):
-    shape = _library_shape(groom, groomlab.get_tube(groom, guide)["shape"])
-    return bool(shape and shape["smooth"])
+    return _project_along(groom, world, tm._cross(u, v)) if on_scalp else world
 
 
 def edit_root_tube(groom, guide, outline, regions=True):
@@ -392,8 +445,9 @@ def edit_root_tube(groom, guide, outline, regions=True):
     surface = _scalp_surface(groom)
     tube = groomlab.get_tube(groom, guide)
     shape = tube["shape"]
-    smooth = root_smooth(groom, guide)
     with groomlab.undo_chunk("edit root tube"):
+        if tube.get("rollOnScalp", True):  # (a root tube made before it was swept with no roll)
+            groomlab.set_tube(groom, guides=[guide], roll_on_scalp=False)
         outline = [surface(p)[0] for p in outline]
         frames = _frames(groom, guide)
         old = [tuple(p) for p in frames["points"]]
@@ -401,14 +455,16 @@ def edit_root_tube(groom, guide, outline, regions=True):
         move = tm._sub(root, old[0])
         moved = [root] + [tm._add(p, move) for p in old[1:]]
         _reshape(groom, guide, moved)
-        twist, w, h, off = _fit(groom, guide, shape, outline, smooth)
-        if math.hypot(*off) > 1e-4 * max(w, 1e-9):
+        twist, w, h, off = _fit(groom, guide, shape, outline)
+        for _ in range(_RECENTER_PASSES):  # (on the box's middle, as make_root_tube puts it)
+            if math.hypot(*off) <= 1e-5 * max(w, 1e-9):
+                break
             center, u, v, _flat = _root_fit(groom, guide, outline)
             root2, _n = surface(tm.from_plane(off, center, u, v))
             move = tm._sub(root2, moved[0])
             moved = [root2] + [tm._add(p, move) for p in moved[1:]]
             _reshape(groom, guide, moved)
-            twist, w, h, off = _fit(groom, guide, shape, outline, smooth)
+            twist, w, h, off = _fit(groom, guide, shape, outline)
         w0 = tube["width"][0] or 1e-9
         a0 = tube["aspect"][0] or 1.0
         t0 = tube["twist"][0]
@@ -513,12 +569,7 @@ def update_regions(groom):
             continue
         center, u, v = tm.frame_at(frames, 0.0)
         n = tm._unit(tm._cross(u, v))
-        if root_smooth(groom, guide):
-            import groomlab_core
-            flat = [tm.to_plane(p, center, u, v) for p in outline]
-            flat = [tuple(p) for p in groomlab_core.tube_shape_curve(flat, True)]
-        else:
-            flat = [tm.to_plane(p, center, u, v) for p in outline]
+        flat = [tm.to_plane(p, center, u, v) for p in outline]
         reach = max(math.hypot(x, y) for x, y in flat)
         hits = set()
         for i, p in enumerate(points):

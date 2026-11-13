@@ -41,7 +41,8 @@ class TonicTubes(QtCore.QObject):
                                       "CV snaps onto it, sealing the tubes", False, "rootTubeDraw")
         self.draw_root.clicked.connect(self.toggle_draw)
         self.edit_root = widgets.chip("Edit roots", "Show the root tubes' outlines (the selected guides', else all) "
-                                      "with their CVs, the guides hidden; drag CVs on the scalp, then Finish edit",
+                                      "with their CVs, the guides hidden; drag CVs on the scalp (Ctrl+click an edge: "
+                                      "a new CV there), then Finish edit",
                                       False, "rootTubeEdit")
         self.edit_root.clicked.connect(self.toggle_edit)
         self.root_block.add(widgets.chip_row((self.draw_root, self.edit_root)))
@@ -75,14 +76,9 @@ class TonicTubes(QtCore.QObject):
         self.taper.committed.connect(lambda v: self._set(taper=v))
         for field in (self.length, self.segments, self.taper):
             self.root_block.add(field)
-        self.smooth = widgets.switch("Smooth outline", "The root's outline a smooth curve through its CVs. Off: "
-                                     "straight edges between them, so neighbours sharing CVs meet exactly",
-                                     False, "rootTubeSmooth")
-        self.smooth.toggled.connect(lambda on: self._set(smooth=on))
         self.snap = widgets.switch("Snap to neighbours", "A CV near a neighbouring root's CV or edge snaps onto it, "
                                    "so the tubes meet with no gap", True, "rootTubeSnap")
         self.snap.toggled.connect(lambda on: self._set(snap=on))
-        self.root_block.add(self.smooth.row)
         self.root_block.add(self.snap.row)
 
         # -- Tube hierarchy ----------------------------------------------------------------
@@ -188,7 +184,7 @@ class TonicTubes(QtCore.QObject):
     def _settings(self):
         return {"draw": self.extrude_draw.isChecked(), "length": self.length.value() / self.length_factor,
                 "segments": int(self.segments.value()), "taper": self.taper.value(),
-                "smooth": self.smooth.isChecked(), "snap": self.snap.isChecked(), "group": self._new_group()}
+                "snap": self.snap.isChecked(), "group": self._new_group()}
 
     def _new_group(self):
         """New root tubes go into the picked group when it is a top group, else rootTubes."""

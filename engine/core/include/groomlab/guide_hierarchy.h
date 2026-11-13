@@ -418,6 +418,8 @@ private:
     GuideId nextGuideId_ = 1;
     std::uint64_t boundTopology_ = 0;
     float scale_ = 1.0f;  // setScale
+    // The library's owned shapes (kOwnedTubeShapePrefix) no guide takes any more, removed.
+    void pruneOwnedTubeShapes();
     TubeShapeLibrary tubeShapes_;
     LengthKeySet lengthKeys_;
     std::vector<std::string> loadWarnings_;

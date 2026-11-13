@@ -67,6 +67,7 @@ class RootTubes(unittest.TestCase):
         guide = root_tubes.make_root_tube(self.groom, outline, length=0.8, segments=8)
         tube = groomlab.get_tube(self.groom, guide)
         self.assertTrue(tube["shape"].startswith(root_tubes.SHAPE_PREFIX))
+        self.assertIs(tube.get("rollOnScalp"), False)  # swept from the root: no roll on the scalp
         self.assertAlmostEqual(tube["width"][-1] / tube["width"][0], 0.5, places=3)  # the tip's taper
         back = root_tubes.root_outline(self.groom, guide)
         self.assertEqual(len(back), len(outline))
@@ -135,6 +136,85 @@ class RootTubes(unittest.TestCase):
         cmds.undo()  # one undo step
         for p in first:
             self.assertLess(nearest(p, root_tubes.root_outline(self.groom, a)), 0.01)
+
+    def test_edits_land_where_the_cvs_were_put(self):
+        """Finish edit gives the tube the outline as edited (a CV pulled out, one added on an edge),
+        edit after edit with no drift, on a tube drawn along the scalp."""
+        root = on_sphere((0.0, 1.0, 0.0))
+        path = [root, (0.0, 1.1, 0.1), (0.0, 1.1, 0.4), (0.0, 0.95, 0.7), (0.0, 0.7, 0.95)]
+        guide = root_tubes.make_root_tube(self.groom, ring((0.0, 1.0, 0.0), 0.15), path=path, regions=False)
+        for step in range(3):
+            cvs = root_tubes.root_outline(self.groom, guide)
+            c = root_tubes._centroid(cvs)
+            cvs[1] = tm._add(c, tm._mul(tm._sub(cvs[1], c), 1.3))
+            if step == 1:
+                cvs.insert(3, tm._add(c, tm._mul(tm._sub(tm.lerp(cvs[2], cvs[3], 0.5), c), 1.4)))
+            cvs = root_tubes._project(self.groom, cvs)
+            root_tubes.edit_root_tube(self.groom, guide, cvs, regions=False)
+            back = root_tubes.root_outline(self.groom, guide)
+            self.assertEqual(len(back), len(cvs))
+            for p in cvs:
+                self.assertLess(nearest(p, back), 0.002, "edit %d: a CV off where it was put" % step)
+
+    def test_a_ctrl_click_adds_a_cv_on_every_outline_sharing_the_edge(self):
+        from groomlab.ui import root_tube_tool
+        a = root_tubes.make_root_tube(self.groom, ring((0.0, 1.0, 0.0), 0.12, count=4), regions=False)
+        ca = root_tubes.root_outline(self.groom, a)
+        c = root_tubes._centroid(ca)
+        mid = tm.lerp(ca[0], ca[1], 0.5)
+        out = tm._sub(mid, c)
+        b = root_tubes.make_root_tube(self.groom, [ca[1], ca[0], on_sphere(tm._add(ca[0], out)),
+                                                   on_sphere(tm._add(ca[1], out))], regions=False)
+        tool = root_tube_tool.TOOL
+        tool.to_screen = lambda p: (p[0] * 1000.0, p[2] * 1000.0)  # (a top view, 1000 px a unit)
+        try:
+            tool.start(self.groom, "edit")
+            self.assertEqual(sorted(tool.edits), sorted([int(a), int(b)]))
+            x, y = tool.to_screen(tm.lerp(tool.edits[int(a)][0], tool.edits[int(a)][1], 0.5))
+            tool.insert_cv(x, y + 3.0)
+            self.assertEqual(len(tool.edits[int(a)]), 5)
+            self.assertEqual(len(tool.edits[int(b)]), 5, "the sealed neighbour gets it too")
+            self.assertEqual(len(tool.drag), 2)
+            self.assertEqual(tool.finish_edit(), 2)
+            self.assertEqual(len(root_tubes.root_outline(self.groom, a)), 5)
+            self.assertEqual(len(root_tubes.root_outline(self.groom, b)), 5)
+        finally:
+            tool.leave()
+            del tool.to_screen
+
+    def test_undo_brings_the_outline_back_to_draw_its_path_again(self):
+        from groomlab.ui import root_tube_tool
+        tool = root_tube_tool.TOOL
+        try:
+            tool.start(self.groom, "place")
+            tool.cvs = ring((0.0, 1.0, 0.0), 0.15)
+            tool.settings["draw"] = True
+            tool.close()
+            self.assertEqual(tool.mode, "draw")
+            root = tool.center
+            guide = tool.make([root, tm._add(root, (0.0, 0.3, 0.1)), tm._add(root, (0.0, 0.5, 0.5))])
+            self.assertEqual(tool.mode, "place")
+            cmds.undo()
+            tool.undone()  # (Maya's Undo event calls it in a session; again: nothing more)
+            tool.undone()
+            self.assertNotIn(int(guide), root_tubes.root_tubes(self.groom))
+            self.assertEqual(tool.mode, "draw")
+            self.assertEqual(len(tool.cvs), 5)
+            self.assertLess(tm._dist(tool.center, root), 1e-6)
+        finally:
+            tool.leave()
+
+    def test_a_deleted_root_tubes_shape_goes_with_it(self):
+        guide = root_tubes.make_root_tube(self.groom, ring((0.0, 1.0, 0.0), 0.15), length=0.5, regions=False)
+        shape = groomlab.get_tube(self.groom, guide)["shape"]
+        names = lambda: [s["name"] for s in groomlab.tube_shapes(self.groom)]  # noqa: E731
+        self.assertIn(shape, names())
+        groomlab.brush_stroke(self.groom, "erase", [self.points(guide)[0]], radius=0.1)
+        self.assertEqual(root_tubes.root_tubes(self.groom), [])
+        self.assertNotIn(shape, names())
+        cmds.undo()
+        self.assertIn(shape, names())
+        self.assertEqual(root_tubes.root_tubes(self.groom), [int(guide)])
 
     def test_hierarchy_levels_split_tubes_in_two(self):
         root_tubes.make_root_tube(self.groom, ring((0.0, 1.0, 0.0), 0.2, count=6), length=0.8, regions=False)
