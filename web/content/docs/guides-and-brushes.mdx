@@ -268,8 +268,10 @@ The Tube tool's **Root tubes** block draws a tube the way Tonic does: its root f
   (**Snap to neighbours**), so the tubes meet with no gap. Clicking the first CV again closes the
   outline.
 - With **Draw before extrude** (on by default) the root's middle then shows as a CV: drag from it
-  out to draw the tube's path, as the Draw tool draws a guide. On release the tube is made and the
-  next root can be drawn. Off, the tube goes straight off the scalp, **Length** long. Undoing the
+  out to draw the tube's path, as the Draw tool draws a guide. The stroke is smoothed (the hand's
+  shakes averaged out, its bends kept) and the guide's points spaced evenly along it; a stroke
+  leaving the root nearly flat along the scalp starts at most 50° off the scalp's normal and bends
+  into it. On release the tube is made and the next root can be drawn. Off, the tube goes straight off the scalp, **Length** long. Undoing the
   tube just made (Ctrl+Z) brings its outline back, ready to draw its path again.
 - The tube's root section is exactly the drawn outline (straight edges between the CVs; a library
   shape of its own, `rootTube_<n>`, removed when the last guide taking it is deleted), narrowing
@@ -279,6 +281,9 @@ The Tube tool's **Root tubes** block draws a tube the way Tonic does: its root f
   `tubeRoots` color vertex map (black elsewhere), which the Interpolate nodes with no region map
   read, so the hair rooted in a tube's area follows only that tube. **Update regions** paints it
   again.
+- A root's CVs are kept on the scalp itself, apart from its guide: combing, brushing, retwisting
+  or resizing the tube never moves them, and its region stays where it was drawn. Only **Edit
+  roots** changes them.
 - **Edit roots** shows the root tubes' outlines and CVs (the selected guides' tubes, or every root
   tube with none selected), the guides hidden. Drag CVs on the scalp (a CV shared with a
   neighbour moves with it; Ctrl+click an edge to add a CV there, on every outline sharing that

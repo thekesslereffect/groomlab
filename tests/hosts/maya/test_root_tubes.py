@@ -69,10 +69,13 @@ class RootTubes(unittest.TestCase):
         self.assertTrue(tube["shape"].startswith(root_tubes.SHAPE_PREFIX))
         self.assertIs(tube.get("rollOnScalp"), False)  # swept from the root: no roll on the scalp
         self.assertAlmostEqual(tube["width"][-1] / tube["width"][0], 0.5, places=3)  # the tip's taper
-        back = root_tubes.root_outline(self.groom, guide)
+        back = root_tubes.section_outline(self.groom, guide)
         self.assertEqual(len(back), len(outline))
         for p in outline:
             self.assertLess(nearest(p, back), 0.01, "a CV off the tube's root section")
+        kept = root_tubes.root_outline(self.groom, guide)  # (the CVs as drawn, kept on the scalp)
+        for p in outline:
+            self.assertLess(nearest(p, kept), 0.003)
         pts = self.points(guide)
         self.assertLess(tm._dist(pts[0], on_sphere((0.0, 1.0, 0.0))), 0.02)  # rooted at the middle
         self.assertAlmostEqual(sum(tm._dist(a, b) for a, b in zip(pts, pts[1:])), 0.8, delta=0.05)
@@ -86,8 +89,76 @@ class RootTubes(unittest.TestCase):
         guide = root_tubes.make_root_tube(self.groom, outline, path=path, segments=10)
         pts = self.points(guide)
         self.assertLess(tm._dist(pts[-1], path[-1]), 0.05, "the tip where the stroke ended")
-        for p in root_tubes.root_outline(self.groom, guide):
+        for p in root_tubes.section_outline(self.groom, guide):
             self.assertLess(nearest(p, outline), 0.015)
+
+    def test_a_hand_drawn_path_is_smoothed_and_evenly_spaced(self):
+        """A shaky stroke (a smooth arc plus the hand's jitter, many points unevenly spaced): the
+        guide follows the arc, its jitter gone, its points evenly spaced, turning one way only."""
+        root = on_sphere((0.0, 1.0, 0.0))
+        clean, shaky = [], []
+        for i in range(90):
+            t = (i / 89.0) ** 1.4  # (bunched up at the start, as a slow start of a stroke)
+            a = 1.2 * t
+            c = (0.0, 1.0 + 0.6 * math.sin(a), 0.6 * (1.0 - math.cos(a)) + 0.4 * t)
+            clean.append(c)
+            jitter = 0.012 * math.sin(i * 2.7) + 0.008 * math.cos(i * 4.1)
+            shaky.append(tm._add(c, (jitter, 0.6 * jitter, -0.5 * jitter)))
+        shaky[0] = clean[0] = root
+        guide = root_tubes.make_root_tube(self.groom, ring((0.0, 1.0, 0.0), 0.12), path=shaky, segments=16,
+                                          regions=False)
+        pts = self.points(guide)
+        self.assertEqual(len(pts), 17)
+        spans = [tm._dist(a, b) for a, b in zip(pts, pts[1:])]
+        mean = sum(spans) / len(spans)
+        self.assertLess(max(abs(x - mean) for x in spans) / mean, 0.05, "evenly spaced")
+        # Smooth: the jitter gone, each span turning a little and the same way (no wiggle).
+        turns = []
+        for a, b, c in zip(pts, pts[1:], pts[2:]):
+            t1, t2 = tm._unit(tm._sub(b, a)), tm._unit(tm._sub(c, b))
+            turns.append((math.degrees(math.acos(max(-1.0, min(1.0, tm._dot(t1, t2))))), tm._cross(t1, t2)[0]))
+        join = 1
+        for angle, _side in turns[join:]:
+            self.assertLess(angle, 6.0, "jitter left in the guide")
+        # (in the stroke's plane, y-z: its way turning on and on, never back)
+        ways = [math.degrees(math.atan2(b[2] - a[2], b[1] - a[1])) for a, b in zip(pts, pts[1:])]
+        for a, b in zip(ways, ways[1:]):
+            self.assertGreater(b, a - 0.5, "the guide wiggles")
+        # On the arc drawn (the jitter averaged out), leaving the root its way.
+        dense = root_tubes._resample(clean, 400)
+        for p in pts[1:]:
+            self.assertLess(nearest(p, dense), 0.02, "off the drawn curve")
+        # A stroke laid flat along the scalp: the guide leaves the root at most MAX_LEAN off its
+        # normal, bending into the stroke in one turn.
+        flat = [root] + [(0.6 * k / 20.0, 1.0 + 0.02 * k / 20.0, 0.0) for k in range(1, 21)]
+        pts = root_tubes._guide_path(root, (0.0, 1.0, 0.0), flat, 1.0, 12)
+        lean = math.degrees(root_tubes._lean(tm._sub(pts[1], pts[0]), (0.0, 1.0, 0.0)))
+        self.assertLessEqual(lean, math.degrees(root_tubes.MAX_LEAN) + 0.01)
+
+    def test_the_root_is_kept_whatever_happens_to_its_guide(self):
+        """Combing, retwisting and resizing the guide's tube leave its root CVs (and its region)
+        as drawn: only editing the root moves them."""
+        outline = ring((0.0, 1.0, 0.0), 0.15)
+        guide = root_tubes.make_root_tube(self.groom, outline, length=0.8)
+        before = root_tubes.root_outline(self.groom, guide)
+        regions = json.loads(cmds.getAttr(self.groom + ".scalpMaps"))[root_tubes.REGION_MAP]["values"]
+        groomlab.brush_stroke(self.groom, "comb", [(-0.3, 1.3, 0.0), (0.0, 1.3, 0.1), (0.4, 1.3, 0.3)], radius=0.6)
+        groomlab.set_tube(self.groom, guides=[guide], twist=1.0, width=0.3)
+        self.assertGreater(max(nearest(p, root_tubes.section_outline(self.groom, guide)) for p in before), 0.02,
+                           "the tube's own section moved (else this tests nothing)")
+        after = root_tubes.root_outline(self.groom, guide)
+        self.assertEqual(len(after), len(before))
+        for a, b in zip(before, after):
+            self.assertLess(tm._dist(a, b), 1e-6)
+        root_tubes.update_regions(self.groom)
+        again = json.loads(cmds.getAttr(self.groom + ".scalpMaps"))[root_tubes.REGION_MAP]["values"]
+        self.assertEqual(again, regions)
+        # Editing the root moves them, and puts the tube back on them.
+        moved = [on_sphere(tm._add(p, (0.05, 0.0, 0.0))) for p in after]
+        root_tubes.edit_root_tube(self.groom, guide, moved)
+        for p in moved:
+            self.assertLess(nearest(p, root_tubes.root_outline(self.groom, guide)), 0.003)
+            self.assertLess(nearest(p, root_tubes.section_outline(self.groom, guide)), 0.01)
 
     def test_each_tube_is_a_region_of_its_own(self):
         a = root_tubes.make_root_tube(self.groom, ring((0.0, 1.0, 0.25), 0.18, count=6), length=0.5)
@@ -151,7 +222,7 @@ class RootTubes(unittest.TestCase):
                 cvs.insert(3, tm._add(c, tm._mul(tm._sub(tm.lerp(cvs[2], cvs[3], 0.5), c), 1.4)))
             cvs = root_tubes._project(self.groom, cvs)
             root_tubes.edit_root_tube(self.groom, guide, cvs, regions=False)
-            back = root_tubes.root_outline(self.groom, guide)
+            back = root_tubes.section_outline(self.groom, guide)
             self.assertEqual(len(back), len(cvs))
             for p in cvs:
                 self.assertLess(nearest(p, back), 0.002, "edit %d: a CV off where it was put" % step)

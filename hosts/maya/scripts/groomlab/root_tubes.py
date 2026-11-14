@@ -11,6 +11,11 @@ Interpolate nodes with no region map read it, so the hair rooted in a tube's are
 tube's guides. Editing a root's CVs later moves the guide to the new outline's middle and gives
 its shape the new outline; the regions follow.
 
+A root's CVs are kept on the scalp itself (OUTLINES_ATTR on the groom: each CV a scalp face and
+its barycentric weights), apart from the guide: combing, brushing or retwisting the guide never
+moves them. Only drawing the root and editing it (make_root_tube, edit_root_tube) set them; the
+regions, Edit roots and snapping read them.
+
     from groomlab import root_tubes
     guide = root_tubes.make_root_tube(groom, outline, path=None, length=2.0)
     cvs = root_tubes.root_outline(groom, guide)            # the root's CVs, on the scalp
@@ -29,6 +34,7 @@ following their parents', so shaping a tube carries the smaller tubes inside it.
 import colorsys
 import json
 import math
+from functools import reduce
 
 from maya import cmds
 
@@ -41,8 +47,13 @@ REGION_MAP = "tubeRoots"   # the color vertex map holding each root tube's area
 MAX_LEVELS = 9              # the tube hierarchy's deepest level (1: the base)
 LEVEL_SUFFIX = "_L"         # level n's group: <base>_L<n>
 SNAP_PIXELS = 12            # how near (in view pixels) a CV snaps to a neighbouring root's CV or edge
-ROOT_LIFT = 0.05            # the guide's second point off the scalp: a share of its length
+OUTLINES_ATTR = "groomLabRootOutlines"  # the groom's string attribute: each root tube's CVs on the scalp (JSON)
 _RECENTER_PASSES = 4        # the guide moved onto its root shape's box middle at most so often
+_PATH_SAMPLES = 200         # a drawn path smoothed at this many points evenly along it
+_PATH_SMOOTHING = 0.035     # ... averaged over this share of its length (a Gaussian's sigma), twice
+_PATH_STEP = 0.02           # a drawn path thinned to points this share of its size apart
+MAX_LEAN = math.radians(50.0)  # a root tube's guide leaves the scalp leaning at most this far off its normal
+_PATH_LEAVE = 0.2           # the least share of the path over which it bends from the scalp's normal into the stroke
 
 
 # ---------------------------------------------------------------------------
@@ -135,23 +146,160 @@ def _resample(points, count):
     return out
 
 
+def _length(points):
+    return sum(tm._dist(a, b) for a, b in zip(points, points[1:]))
+
+
+def _end_line(pts, m):
+    """The straight line the last `m` of `pts` lie along (least squares by index): its point at
+    the last index and its step per index."""
+    m = max(2, min(m, len(pts)))
+    tail = pts[-m:]
+    mean_i = (m - 1) / 2.0
+    mean_p = tm._mul(reduce(tm._add, tail), 1.0 / m)
+    den = sum((i - mean_i) ** 2 for i in range(m))
+    step = tm._mul(reduce(tm._add, [tm._mul(tm._sub(q, mean_p), i - mean_i) for i, q in enumerate(tail)]), 1.0 / den)
+    return tm._add(mean_p, tm._mul(step, m - 1 - mean_i)), step
+
+
+def _gaussian(pts, sigma):
+    """`pts` (evenly spaced) averaged with their neighbours, a Gaussian of `sigma` samples; past
+    each end the curve carried on along the straight line its last stretch lies along (so the ends
+    are smoothed too, neither pinned to a shaky last point nor pulled in)."""
+    n = len(pts)
+    reach = int(3.0 * sigma) + 1
+    weights = [math.exp(-0.5 * (k / sigma) ** 2) for k in range(-reach, reach + 1)]
+    m = int(2.0 * sigma) + 2
+    end, end_step = _end_line(pts, m)
+    start, start_step = _end_line(pts[::-1], m)
+
+    def at(i):
+        if i < 0:
+            return tm._add(start, tm._mul(start_step, -i))
+        if i >= n:
+            return tm._add(end, tm._mul(end_step, i - (n - 1)))
+        return pts[i]
+    out = []
+    for i in range(n):
+        acc, total = (0.0, 0.0, 0.0), 0.0
+        for k, w in zip(range(-reach, reach + 1), weights):
+            acc = tm._add(acc, tm._mul(at(i + k), w))
+            total += w
+        out.append(tm._mul(acc, 1.0 / total))
+    out[0] = pts[0]  # (the root: held)
+    return out
+
+
+def _lean(direction, normal):
+    """How far (radians) `direction` leans off the scalp's `normal`."""
+    return math.acos(max(-1.0, min(1.0, tm._dot(tm._unit(direction), tm._unit(normal)))))
+
+
+def _leaned(direction, normal, most=None):
+    """`direction` (a unit vector) leaning at most `most` (MAX_LEAN) off `normal`: turned toward
+    it where it leans more, as it is otherwise."""
+    most = MAX_LEAN if most is None else most
+    n = tm._unit(normal)
+    d = tm._unit(direction)
+    if _lean(d, n) <= most:
+        return d
+    side = tm._sub(d, tm._mul(n, tm._dot(d, n)))
+    side = tm._unit(side) if tm._length(side) > 1e-9 else tm._unit(tm._cross(n, (1.0, 0.0, 0.0) if abs(n[0]) < 0.9 else (0.0, 1.0, 0.0)))
+    return tm._add(tm._mul(n, math.cos(most)), tm._mul(side, math.sin(most)))
+
+
+def _seat(points, normal):
+    """A guide's points with its first span leaning at most MAX_LEAN off the scalp's normal at its
+    root (the span's length kept), so its tube's section at the root stays a fair outline."""
+    out = [tuple(p) for p in points]
+    first = tm._sub(out[1], out[0])
+    out[1] = tm._add(out[0], tm._mul(_leaned(first, normal), tm._length(first)))
+    return out
+
+
+def _smooth_path(path, root, normal, segments):
+    """A drawn stroke as the guide follows it: its first point taken to `root`, the hand's jitter
+    averaged out along it (a Gaussian over _PATH_SMOOTHING of its length, at _PATH_SAMPLES points
+    evenly along it, twice: the shakes, and the back-and-forth of a hand slowing, smoothed away
+    while its bends stay; its root held, its tip smoothed too), leaving the root the stroke's way
+    (at most MAX_LEAN off the scalp's `normal`: below)."""
+    drawn = [tuple(p) for p in path]
+    drawn[0] = tuple(root)
+    if _length(drawn) <= 1e-9:
+        raise ValueError("the tube needs a length")
+    # Thinned first: a point nearer the last one kept than _PATH_STEP of the stroke's size dropped,
+    # so where the hand went slowly (its start, mostly) its shakes don't count as length.
+    lo = [min(q[k] for q in drawn) for k in range(3)]
+    hi = [max(q[k] for q in drawn) for k in range(3)]
+    step = _PATH_STEP * math.sqrt(sum((b - a) ** 2 for a, b in zip(lo, hi)))
+    pts = [drawn[0]]
+    for q in drawn[1:]:
+        if tm._dist(q, pts[-1]) >= step:
+            pts.append(q)
+    if tm._dist(drawn[-1], pts[-1]) > 1e-12:
+        pts[-1 if len(pts) > 1 else len(pts):] = [drawn[-1]]
+    for _ in range(2):
+        pts = _gaussian(_resample(pts, _PATH_SAMPLES), _PATH_SMOOTHING * (_PATH_SAMPLES - 1))
+    # From the root the guide goes the stroke's way, as drawn. Only a stroke leaving the root
+    # leaning more than MAX_LEAN off the scalp's normal (so flat along the scalp that the tube's
+    # section there would thin to nothing) starts at MAX_LEAN instead and bends into the stroke:
+    # a quadratic Bezier from the root that way, its middle point where that line and the
+    # stroke's line meet (one bend, never past the stroke's way), meeting the stroke no sooner
+    # than _PATH_LEAVE along it (where those lines meet ahead on both; else at its tip).
+    total = _length(pts)
+    probe = pts[min(len(pts) - 1, max(2, int(0.05 * len(pts))))]
+    first = tm._sub(probe, pts[0])
+    if _lean(first, normal) <= MAX_LEAN + 1e-6:
+        return pts
+    start_way = _leaned(first, normal)
+
+    def corner(i):
+        q = pts[i]
+        way = tm._unit(tm._sub(pts[min(i + 2, len(pts) - 1)], pts[max(i - 2, 0)]))
+        w0 = tm._sub(pts[0], q)
+        b = tm._dot(start_way, way)
+        den = 1.0 - b * b
+        if den < 1e-6:
+            return tm.lerp(pts[0], q, 0.5)
+        d, e = tm._dot(start_way, w0), tm._dot(way, w0)
+        t = (b * e - d) / den        # along the start's way from the root
+        u = (e - b * d) / den        # along the stroke's way from q (negative: behind q)
+        if t <= 0.0 or u >= 0.0:
+            return None
+        return tm.lerp(tm._add(pts[0], tm._mul(start_way, t)), tm._add(q, tm._mul(way, u)), 0.5)
+    least = max(_PATH_LEAVE * total, 3.0 * total / float(segments))
+    along, k, mid = 0.0, None, None
+    for i in range(1, len(pts)):
+        along += tm._dist(pts[i - 1], pts[i])
+        if along < least and i < len(pts) - 1:
+            continue
+        mid = corner(i)
+        if mid is not None:
+            k = i
+            break
+    if k is None:  # (no single bend reaches it anywhere: a gentle curve to its tip)
+        k = len(pts) - 1
+        mid = tm._add(pts[0], tm._mul(start_way, 0.5 * tm._dist(pts[0], pts[k])))
+    q = pts[k]
+    curve = []
+    for i in range(96):
+        t = i / 96.0
+        curve.append(tm._add(tm._add(tm._mul(pts[0], (1 - t) ** 2), tm._mul(mid, 2 * t * (1 - t))), tm._mul(q, t * t)))
+    return curve + pts[k:]
+
+
 def _guide_path(root, normal, path, length, segments):
     """The guide's points: from `root` straight off the scalp (`length`), or along the drawn `path`
-    (its first point taken to the root), `segments` + 1 of them, the second straight off the scalp
-    so the root section lies on it."""
+    smoothed (_smooth_path), `segments` + 1 of them evenly spaced along it; its first span leaning
+    at most MAX_LEAN off the scalp's `normal`."""
     segments = max(int(segments), 2)
     if path and len(path) >= 2:
-        drawn = [tuple(p) for p in path]
-        drawn[0] = tuple(root)
-        pts = _resample(drawn, segments + 1)
-        total = sum(tm._dist(a, b) for a, b in zip(pts, pts[1:]))
+        pts = _resample(_smooth_path(path, root, normal, segments), segments + 1)
     else:
-        total = float(length)
-        pts = [tm._add(root, tm._mul(normal, total * i / float(segments))) for i in range(segments + 1)]
-    if total <= 1e-9:
-        raise ValueError("the tube needs a length")
-    pts[1] = tm._add(root, tm._mul(normal, max(ROOT_LIFT * total, tm._dist(pts[0], pts[1]) * 0.5)))
-    return pts
+        if float(length) <= 1e-9:
+            raise ValueError("the tube needs a length")
+        pts = [tm._add(root, tm._mul(normal, float(length) * i / float(segments))) for i in range(segments + 1)]
+    return _seat(pts, normal)
 
 
 def _reshape(groom, guide, points):
@@ -338,6 +486,106 @@ def _project_along(groom, points, direction):
     return out
 
 
+def _plane(points):
+    """A closed outline's plane: (its area centroid, u, v, normal), normal by Newell's method."""
+    center = _centroid(points)
+    n = len(points)
+    normal = (0.0, 0.0, 0.0)
+    for i in range(n):
+        a, b = points[i], points[(i + 1) % n]
+        normal = tm._add(normal, ((a[1] - b[1]) * (a[2] + b[2]), (a[2] - b[2]) * (a[0] + b[0]),
+                                  (a[0] - b[0]) * (a[1] + b[1])))
+    nz = tm._unit(normal) if tm._length(normal) > 1e-12 else (0.0, 1.0, 0.0)
+    u = tm._unit(tm._cross(nz, (1.0, 0.0, 0.0) if abs(nz[0]) < 0.9 else (0.0, 1.0, 0.0)))
+    return center, u, tm._cross(nz, u), nz
+
+
+def _scalp_meshes(groom):
+    """The groom's scalps, its own first, then the others by index (as the region map joins them)."""
+    return [m for m in [groomlab.scalp_mesh(groom)] + [s["mesh"] for s in groomlab.scalps(groom)] if m]
+
+
+def _barycentric(q, a, b, c):
+    v0, v1, v2 = tm._sub(b, a), tm._sub(c, a), tm._sub(q, a)
+    d00, d01, d11 = tm._dot(v0, v0), tm._dot(v0, v1), tm._dot(v1, v1)
+    d20, d21 = tm._dot(v2, v0), tm._dot(v2, v1)
+    den = d00 * d11 - d01 * d01
+    if abs(den) < 1e-30:
+        return 1.0, 0.0, 0.0
+    wb = (d11 * d20 - d01 * d21) / den
+    wc = (d00 * d21 - d01 * d20) / den
+    return 1.0 - wb - wc, wb, wc
+
+
+def _bind(groom, points):
+    """Points on the scalp as the scalp holds them: [mesh, face, fan triangle, w0, w1, w2] each (the
+    nearest point of the nearest scalp, in the face's fan triangle (vertex 0, k, k + 1) it lies in)."""
+    from maya.api import OpenMaya as om
+    from groomlab import utils
+    fns = [utils._om_mesh(m) for m in _scalp_meshes(groom)]
+    out = []
+    for p in points:
+        q = om.MPoint(*p)
+        best = None
+        for mi, fn in enumerate(fns):
+            hit, face = fn.getClosestPoint(q, om.MSpace.kWorld)
+            d = hit.distanceTo(q)
+            if best is None or d < best[0]:
+                best = (d, mi, face, (hit.x, hit.y, hit.z))
+        if best is None:
+            raise ValueError("the groom has no scalp to keep a root outline on")
+        _d, mi, face, at = best
+        fn = fns[mi]
+        corners = [tuple(fn.getPoint(v, om.MSpace.kWorld))[:3] for v in fn.getPolygonVertices(face)]
+        pick = None
+        for k in range(1, len(corners) - 1):
+            w = _barycentric(at, corners[0], corners[k], corners[k + 1])
+            if pick is None or min(w) > min(pick[1]):
+                pick = (k, w)
+        out.append([mi, int(face), pick[0]] + [round(x, 7) for x in pick[1]])
+    return out
+
+
+def _unbind(groom, bound):
+    """World points from _bind's records (the scalp as it is now)."""
+    from maya.api import OpenMaya as om
+    from groomlab import utils
+    fns = [utils._om_mesh(m) for m in _scalp_meshes(groom)]
+    out = []
+    for mi, face, k, w0, w1, w2 in bound:
+        if mi >= len(fns) or face >= fns[mi].numPolygons:
+            raise ValueError("the scalp changed under a root outline")
+        fn = fns[mi]
+        verts = fn.getPolygonVertices(face)
+        if k + 1 >= len(verts):
+            raise ValueError("the scalp changed under a root outline")
+        a, b, c = (tuple(fn.getPoint(verts[i], om.MSpace.kWorld))[:3] for i in (0, k, k + 1))
+        out.append(tm._add(tm._add(tm._mul(a, w0), tm._mul(b, w1)), tm._mul(c, w2)))
+    return out
+
+
+def _stored_outlines(groom):
+    if not cmds.attributeQuery(OUTLINES_ATTR, node=groom, exists=True):
+        return {}
+    try:
+        data = json.loads(cmds.getAttr(groom + "." + OUTLINES_ATTR) or "{}")
+    except ValueError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _store_outline(groom, guide, outline):
+    """Keep `guide`'s root CVs (world points on the scalp) on the scalp (OUTLINES_ATTR), dropping
+    those of guides no longer root tubes. Undoable."""
+    data = _stored_outlines(groom)
+    data[str(int(guide))] = _bind(groom, outline)
+    live = set(str(g) for g in root_tubes(groom))
+    data = dict((k, v) for k, v in data.items() if k in live)
+    if not cmds.attributeQuery(OUTLINES_ATTR, node=groom, exists=True):
+        cmds.addAttr(groom, longName=OUTLINES_ATTR, dataType="string")
+    cmds.setAttr(groom + "." + OUTLINES_ATTR, json.dumps(data, separators=(",", ":")), type="string")
+
+
 # ---------------------------------------------------------------------------
 # Root-first tubes
 
@@ -388,6 +636,7 @@ def make_root_tube(groom, outline, path=None, length=1.0, segments=12, taper=0.5
         groomlab.set_tube(groom, guides=[guide], shape=shape, width=[w, w * float(taper)],
                           aspect=min(max(h / w, 0.01), 100.0) if w > 1e-12 else 1.0, twist=twist)
         _settle(groom, guide, shape, outline)
+        _store_outline(groom, guide, outline)
         if regions:
             update_regions(groom)
     return guide
@@ -417,10 +666,23 @@ def root_tubes(groom, guides=None):
     return sorted(roots)
 
 
-def root_outline(groom, guide, on_scalp=True):
-    """A root tube's CVs as world points: its shape's control points placed in its root section,
-    taken onto the scalp (`on_scalp`: along the root section's normal, the way they were read off
-    it, so the CVs come back where they were drawn)."""
+def root_outline(groom, guide):
+    """A root tube's CVs as world points on the scalp: as drawn or last edited, kept on the scalp
+    (OUTLINES_ATTR), whatever has been done to the guide since. A root tube made before they were
+    kept: its tube's root section (section_outline)."""
+    bound = _stored_outlines(groom).get(str(int(guide)))
+    if bound:
+        try:
+            return _unbind(groom, bound)
+        except ValueError:
+            pass
+    return section_outline(groom, guide)
+
+
+def section_outline(groom, guide, on_scalp=True):
+    """A root tube's tube's root section as world points: its shape's control points placed in its
+    root section, taken onto the scalp (`on_scalp`: along the root section's normal, the way they
+    were read off it, so they come back where they were drawn)."""
     tube = groomlab.get_tube(groom, guide)
     shape = _library_shape(groom, tube["shape"])
     if shape is None or shape["builtin"]:
@@ -435,7 +697,7 @@ def root_outline(groom, guide, on_scalp=True):
 
 def edit_root_tube(groom, guide, outline, regions=True):
     """A root tube given a new root outline (`outline`: its CVs, world points, as root_outline
-    gives them, moved): the guide moved whole so it roots at the new outline's middle, its shape
+    gives them, moved; kept on the scalp as its outline): the guide moved whole so it roots at the new outline's middle, its shape
     the new outline, its root section fitted to it and the rest of the tube scaled, flattened and
     turned as much (its taper and what brushes painted along it kept). Its child tubes follow.
     `regions`: the regions updated. One undo step."""
@@ -454,15 +716,19 @@ def edit_root_tube(groom, guide, outline, regions=True):
         root, normal = surface(_centroid(outline))
         move = tm._sub(root, old[0])
         moved = [root] + [tm._add(p, move) for p in old[1:]]
+        # Seated on its root again: its first span leaning at most MAX_LEAN (a brush may have
+        # laid it over), so its section there stays a fair outline.
+        moved = _seat(moved, normal)
         _reshape(groom, guide, moved)
         twist, w, h, off = _fit(groom, guide, shape, outline)
         for _ in range(_RECENTER_PASSES):  # (on the box's middle, as make_root_tube puts it)
             if math.hypot(*off) <= 1e-5 * max(w, 1e-9):
                 break
             center, u, v, _flat = _root_fit(groom, guide, outline)
-            root2, _n = surface(tm.from_plane(off, center, u, v))
+            root2, normal2 = surface(tm.from_plane(off, center, u, v))
             move = tm._sub(root2, moved[0])
             moved = [root2] + [tm._add(p, move) for p in moved[1:]]
+            moved = _seat(moved, normal2)
             _reshape(groom, guide, moved)
             twist, w, h, off = _fit(groom, guide, shape, outline)
         w0 = tube["width"][0] or 1e-9
@@ -473,6 +739,7 @@ def edit_root_tube(groom, guide, outline, regions=True):
                           aspect=[min(max(a * a_new / a0, 0.01), 100.0) for a in tube["aspect"]],
                           twist=[t + twist - t0 for t in tube["twist"]])
         _settle(groom, guide, shape, outline)
+        _store_outline(groom, guide, outline)
         if regions:
             update_regions(groom)
     return guide
@@ -563,12 +830,10 @@ def update_regions(groom):
     from maya.api import OpenMaya as om
     for guide, color in zip(tubes, colors):
         try:
-            outline = root_outline(groom, guide, on_scalp=False)
-            frames = _frames(groom, guide)
+            outline = root_outline(groom, guide)
         except (RuntimeError, ValueError):
             continue
-        center, u, v = tm.frame_at(frames, 0.0)
-        n = tm._unit(tm._cross(u, v))
+        center, u, v, n = _plane(outline)
         flat = [tm.to_plane(p, center, u, v) for p in outline]
         reach = max(math.hypot(x, y) for x, y in flat)
         hits = set()
@@ -581,8 +846,8 @@ def update_regions(groom):
             x, y = tm._dot(d, u), tm._dot(d, v)
             if _inside(flat, x, y):
                 hits.add(i)
-        # The vertices of the face under the root: its guide's own color, however small the tube.
-        root = om.MPoint(*frames["points"][0])
+        # The vertices of the face under the root's middle: its own color, however small the tube.
+        root = om.MPoint(*center)
         for fn, first in fns:
             hit, face = fn.getClosestPoint(root, om.MSpace.kWorld)
             if hit.distanceTo(root) < max(reach, 1e-6):
