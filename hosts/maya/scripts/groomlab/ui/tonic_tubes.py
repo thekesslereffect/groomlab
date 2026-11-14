@@ -33,7 +33,7 @@ class TonicTubes(QtCore.QObject):
         self.length_factor = units.factor("length")
 
         # -- Root tubes --------------------------------------------------------------------
-        self.root_block = widgets.Block("Root tubes", name="rootTubes")
+        self.root_block = widgets.Block("Tube roots", name="rootTubes")
         self.root_block.setToolTip("Tonic-style tubes drawn root first: click the root's outline on the scalp, one "
                                    "CV at a time, and close it on its first CV. Each tube is its own region.")
         self.draw_root = widgets.chip("Draw root", "Click the root's outline on the scalp, one CV at a time (drag "
@@ -200,7 +200,7 @@ class TonicTubes(QtCore.QObject):
             return fn(*args, **kwargs)
         except Exception as e:  # noqa: BLE001 (a button never ends in a bare traceback)
             from groomlab.ui import messages
-            self.owner.status.setText(messages.error("Root tubes", e))
+            self.owner.status.setText(messages.error("Tube roots", e))
             return None
         finally:
             self.refresh(self.owner.groom())

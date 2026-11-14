@@ -22,6 +22,31 @@ from groomlab.ui.qt import QtCore, QtGui, QtWidgets
 ICON_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir, os.pardir, "icons"))
 RANGES_VAR = "groomLabSoftRanges"
 _ranges = None  # key -> [lo, hi], loaded from the optionVar on first use
+FOLDED_VAR = "groomLabFoldedBlocks"
+_folded = None  # the folded blocks' keys (Block.set_foldable), loaded from the optionVar on first use
+
+
+def folded_blocks():
+    """The keys of the tool-card blocks folded away (Block.set_foldable), this session or an
+    earlier one (an optionVar in Maya's prefs)."""
+    global _folded
+    if _folded is None:
+        _folded = set()
+        try:
+            from maya import cmds
+            if cmds.optionVar(exists=FOLDED_VAR):
+                _folded = set(json.loads(cmds.optionVar(query=FOLDED_VAR)) or [])
+        except Exception:
+            _folded = set()
+    return _folded
+
+
+def _save_folded():
+    try:
+        from maya import cmds
+        cmds.optionVar(stringValue=(FOLDED_VAR, json.dumps(sorted(folded_blocks()))))
+    except Exception:
+        pass
 
 
 # Icons are drawn with placeholder colors (tools/make_icons.py) that the theme
@@ -862,7 +887,8 @@ class EmptyState(QtWidgets.QFrame):
 
 class Block(QtWidgets.QWidget):
     """One of a tool card's labeled blocks: a small semibold dim title over a faint hairline, any
-    action glyphs on the title's right, then its rows (add())."""
+    action glyphs on the title's right, then its rows (add()). set_foldable: a chevron before the
+    title, and a click on either folds its rows away or shows them, remembered (folded_blocks)."""
 
     def __init__(self, title, actions=(), name=None, parent=None):
         super(Block, self).__init__(parent)
@@ -886,10 +912,89 @@ class Block(QtWidgets.QWidget):
         for a in actions:
             head.addWidget(a)
         column.addLayout(head)
-        self.body = QtWidgets.QVBoxLayout()
+        self.content = QtWidgets.QWidget()  # (the rows: what folding hides)
+        self.body = QtWidgets.QVBoxLayout(self.content)
         self.body.setContentsMargins(0, 0, 0, 0)
         self.body.setSpacing(theme.px(4))
-        column.addLayout(self.body)
+        column.addWidget(self.content)
+        self.chevron = None
+        self.fold_key = None  # set_foldable: folding on, remembered under this key
+        self.titled = True
+        self._folded = False
+
+    # -- Folding ---------------------------------------------------------------------------
+
+    def set_foldable(self, key):
+        """Folding on under `key` (a tool's block: "<tool>/<block>"; its state remembered across
+        tools and sessions), or off with None (the rows always shown, no chevron)."""
+        from groomlab.ui import theme
+        if key and self.chevron is None:
+            self.chevron = QtWidgets.QToolButton()
+            self.chevron.setAutoRaise(True)
+            self.chevron.setProperty("role", "blockFold")
+            self.chevron.setObjectName("blockFold")
+            self.chevron.setCursor(QtCore.Qt.PointingHandCursor)
+            self.chevron.setIconSize(QtCore.QSize(theme.px(12), theme.px(12)))
+            self.chevron.setToolTip("Fold this section away, or show it (remembered)")
+            self.chevron.clicked.connect(self.toggle_fold)
+            self.head.insertWidget(0, self.chevron)
+            self.title.installEventFilter(self)
+            theme.listen(self, "apply_theme")
+        self.fold_key = key or None
+        self._folded = bool(key) and key in folded_blocks()
+        self.title.setCursor(QtCore.Qt.PointingHandCursor if key else QtCore.Qt.ArrowCursor)
+        self._show_fold()
+
+    def set_titled(self, on):
+        """The title (and its hairline) shown or not; a block with no title doesn't fold."""
+        self.titled = bool(on)
+        self.rule.setVisible(self.titled)
+        self.title.setVisible(self.titled)
+        self._show_fold()
+
+    def folded(self):
+        return self._folded
+
+    def set_folded(self, on):
+        """Fold the rows away (or show them), remembered under the block's key."""
+        if not self.fold_key:
+            return
+        self._folded = bool(on)
+        keys = folded_blocks()
+        if self._folded:
+            keys.add(self.fold_key)
+        else:
+            keys.discard(self.fold_key)
+        _save_folded()
+        self._show_fold()
+
+    def toggle_fold(self):
+        self.set_folded(not self._folded)
+
+    def _show_fold(self):
+        folding = bool(self.fold_key) and self.titled
+        if self.chevron is not None:
+            self.chevron.setVisible(folding)
+            self._chevron_icon()
+        self.content.setVisible(not (folding and self._folded))
+
+    def _chevron_icon(self, t=None):
+        if self.chevron is None:
+            return
+        from groomlab.ui import theme
+        t = t or theme.current()
+        self.chevron.setIcon(QtGui.QIcon(tinted_pixmap("chevronRight" if self._folded else "chevronDown",
+                                                       t.token("textMuted"), theme.px(24))))
+
+    def apply_theme(self, t):
+        self._chevron_icon(t)
+
+    def eventFilter(self, obj, event):
+        if (obj is self.title and self.fold_key and event.type() == QtCore.QEvent.MouseButtonRelease
+                and event.button() == QtCore.Qt.LeftButton):
+            self.toggle_fold()
+            return True
+        return super(Block, self).eventFilter(obj, event)
 
     def add(self, item, stretch=0):
         """A widget or a layout as the next row."""

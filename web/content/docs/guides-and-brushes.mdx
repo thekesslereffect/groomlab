@@ -261,7 +261,7 @@ Blender has the same blocks and lists the library, without the outline editor ye
 
 ### Tubes drawn root first (Maya)
 
-The Tube tool's **Root tubes** block draws a tube the way Tonic does: its root first.
+The Tube tool's **Tube roots** section draws a tube the way Tonic does: its root first.
 
 - **Draw root**: click the root's outline on the scalp, one CV at a time (drag to move the CV
   just placed; **Undo CV** takes one back). Near another root tube a CV snaps onto its CVs or edges
@@ -314,6 +314,10 @@ root_tubes.add_tube_level(groom)                   # every leaf tube split in tw
 root_tubes.show_tube_level(groom, "rootTubes", 2)  # level 2 shown and returned
 groomlab.generate_children(groom, "tubes", count=2, split=True)  # the split itself (-split true)
 ```
+
+The Tube tool's card is long, so each of its sections (Brush, Paints, Profile, Selected guides,
+Tube roots, Tube hierarchy, Applies to) folds away: click its chevron or its title. Which sections
+are folded is remembered when you switch tools and the next time Maya starts.
 
 ## Guide groups
 

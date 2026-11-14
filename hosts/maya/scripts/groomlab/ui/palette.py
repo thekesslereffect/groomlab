@@ -2457,6 +2457,11 @@ class ToolPalette(QtWidgets.QWidget):
         self.status.setText("%s: %s" % ((self.tool or "tool").capitalize(), str(error).strip()))
         self.stop_tool()
 
+    def tube_tool_blocks(self):
+        """The Tube tool card's blocks, which fold away (their state remembered: issue 70)."""
+        return (self.brush_block, self.tube_channel_box, self.tube_panel.profile_block, self.tube_panel.selected_block,
+                self.tonic.root_block, self.tonic.hierarchy_block, self.applies_block)
+
     def show_tool_settings(self):
         """The card shows what its tool uses (the catalog's settings for it: card_tool()), and
         nothing else; with no tool, one line on how to start. Its blocks, in order: Brush, the
@@ -2483,8 +2488,11 @@ class ToolPalette(QtWidgets.QWidget):
         paints = "map" in uses
         self.paint_block.setVisible(paints)
         # Under Paint's own block the Brush block is titled (otherwise first, untitled).
-        self.brush_block.rule.setVisible(paints)
-        self.brush_block.title.setVisible(paints)
+        # (The Tube tool's card titles it too: every block of that card folds away, issue 70.)
+        tube_tool = tool == "shape"
+        self.brush_block.set_titled(paints or tube_tool)
+        for block in self.tube_tool_blocks():
+            block.set_foldable("shape/" + block.objectName() if tube_tool else None)
         self.sync_alpha()
         self.create_box.setVisible("newGuides" in uses)
         self.spacing.setVisible("spacing" in uses)

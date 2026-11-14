@@ -478,7 +478,8 @@ def main():
                 ("comb", ["Brush", "Applies to"]),  # Stretch: a Brush chip
                 ("place", ["New guides", "Tube", "Applies to"]),
                 ("draw", ["New guides", "Tube", "Applies to"]),
-                ("shape", ["Brush", "Paints", "Profile", "Selected guides", "Applies to"]),
+                ("shape", ["Brush", "Paints", "Profile", "Selected guides", "Tube roots", "Tube hierarchy",
+                           "Applies to"]),
                 ("select", ["Selection", "Applies to"]),
                 ("lengths", ["Keys", "Applies to"]),
                 ("erase", ["Brush", "Erases", "Applies to"]),
@@ -513,6 +514,34 @@ def main():
                              and b.objectName() in ("chip_pressure", "chip_collide", "stretch", "straighten",
                                                     "matchNearby", "soloNewGuides", "alphaInvert")],
                         "%s: toggles are switch rows, not chips" % tool)
+            # The Tube card's blocks fold away (a chevron before the title, or a click on the title),
+            # folded or not remembered across tools (issue 70); no other card's blocks fold.
+            widgets._folded = set()
+            tools.tool = "shape"
+            tools.show_tool_settings()
+            settle()
+            shown = [b for b in tools.tube_tool_blocks() if b.isVisibleTo(tools)]
+            _expect(len(shown) == 7 and all(b.chevron is not None and b.chevron.isVisibleTo(tools) for b in shown),
+                    "Tube: every block folds")
+            _expect(tools.brush_block.title.isVisibleTo(tools), "Tube: Brush titled (to fold it)")
+            profile = tools.tube_panel.profile_block
+            profile.chevron.click()
+            settle()
+            _expect(profile.folded() and not profile.content.isVisibleTo(tools), "Tube: Profile folds")
+            tools.tool = "comb"
+            tools.show_tool_settings()
+            settle()
+            _expect(not [b for b in tools.settings.findChildren(widgets.Block) if b.isVisibleTo(tools)
+                         and b.chevron is not None and b.chevron.isVisibleTo(tools)], "Comb: no block folds")
+            _expect(tools.brush_block.content.isVisibleTo(tools) and not tools.brush_block.title.isVisibleTo(tools),
+                    "Comb: Brush as it was (untitled, open)")
+            tools.tool = "shape"
+            tools.show_tool_settings()
+            settle()
+            _expect(profile.folded() and not profile.content.isVisibleTo(tools), "Tube: Profile still folded")
+            profile.chevron.click()
+            settle()
+            _expect(profile.content.isVisibleTo(tools) and not widgets.folded_blocks(), "Tube: Profile open again")
             # The brush's toggles as switch rows in one order whatever the tool (Pressure, Keep off
             # scalp, Stretch, Straighten), then the two curves' chips.
             tools.tool = "comb"
