@@ -1,10 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 """The Tube tool card's Tonic-style blocks (Groom Tools, the Tube tool):
 
-Root tubes (issue 61)   Draw root: the root's outline clicked on the scalp CV by CV, then (Draw
+Tube roots (issue 61)   Draw root: the root's outline clicked on the scalp CV by CV, then (Draw
                         before extrude) its path drawn from the root's middle; Edit roots, which
-                        turns into Finish edit while editing; the new tubes' Length, Segments and
-                        Taper; Smooth outline, Snap to neighbours; Update regions.
+                        turns into Finish edit while editing; Select root (pick a root by its
+                        middle and drag it over the scalp), with Duplicate and Delete for the
+                        selected root. A mode's button again leaves it (Draw and Select: as they
+                        are; Edit: finished). Undo CV, Update regions; the new tubes' Length,
+                        Segments and Taper; Snap to neighbours.
 Tube hierarchy (#62)    Add splits the selected tubes (or every tube of the base group) in two, a
                         level deeper; a row of level buttons, 1 (the base) always there, shows and
                         picks a level to work on (the Tube tool and the brushes then edit that
@@ -45,17 +48,25 @@ class TonicTubes(QtCore.QObject):
                                       "a new CV there), then Finish edit",
                                       False, "rootTubeEdit")
         self.edit_root.clicked.connect(self.toggle_edit)
-        self.root_block.add(widgets.chip_row((self.draw_root, self.edit_root)))
+        self.select_root = widgets.chip("Select root", "Show every root's middle: click one to select its root, drag "
+                                        "it to move the root over the scalp (with Snap, its CVs sealed onto a "
+                                        "neighbour stay put). Again: leave", False, "rootTubeSelect")
+        self.select_root.clicked.connect(self.toggle_select)
+        self.root_block.add(widgets.chip_row((self.draw_root, self.edit_root, self.select_root)))
         self.undo_cv = widgets.chip("Undo CV", "Take back the last CV (or the drawn path)", None, "rootTubeUndoCv")
         self.undo_cv.clicked.connect(lambda: self._run(self.tool.undo_cv))
-        self.cancel = widgets.chip("Cancel", "Drop the outline being drawn, or leave editing without changes", None,
-                                   "rootTubeCancel")
-        self.cancel.clicked.connect(self.cancel_clicked)
+        self.delete_root = widgets.chip("Delete", "Delete the selected root (Select root): its tube and the tube "
+                                        "hierarchy under it", None, "rootTubeDelete")
+        self.delete_root.clicked.connect(self.delete_clicked)
+        self.duplicate_root = widgets.chip("Duplicate", "Copy the selected root (Select root): the copy follows the "
+                                           "cursor over the scalp, a click sets it down there with its tube and "
+                                           "hierarchy. Again: stop", False, "rootTubeDuplicate")
+        self.duplicate_root.clicked.connect(self.duplicate_clicked)
         self.regions = widgets.chip("Update regions", "Paint every root tube's area in its own color on the %s "
                                     "map, which Interpolate reads as its regions" % root_tubes.REGION_MAP, None,
                                     "rootTubeRegions")
         self.regions.clicked.connect(self.update_regions)
-        self.root_block.add(widgets.chip_row((self.undo_cv, self.cancel, self.regions)))
+        self.root_block.add(widgets.chip_row((self.undo_cv, self.delete_root, self.duplicate_root, self.regions)))
         self.extrude_draw = widgets.switch("Draw before extrude", "Once the outline closes, drag from its middle out "
                                            "to draw the tube's path (as the Draw tool draws a guide). Off: the tube "
                                            "goes straight off the scalp, Length long", True, "rootTubeDrawFirst")
@@ -124,12 +135,18 @@ class TonicTubes(QtCore.QObject):
         """The buttons as the tool stands, and the hierarchy's levels."""
         from maya import cmds
         ours = cmds.currentCtx() == "groomLabRootTubeCtx"
-        editing = ours and self.tool.mode == "edit"
-        self.draw_root.setChecked(ours and not editing)
+        mode = self.tool.mode if ours else None
+        editing = mode == "edit"
+        selecting = mode in ("select", "duplicate")
+        picked = selecting and self.tool.selected is not None
+        self.draw_root.setChecked(mode in ("place", "draw"))
         self.edit_root.setChecked(editing)
         self.edit_root.setText("Finish edit" if editing else "Edit roots")
-        self.undo_cv.setEnabled(ours and not editing)
-        self.cancel.setEnabled(ours)
+        self.select_root.setChecked(selecting)
+        self.undo_cv.setEnabled(mode in ("place", "draw"))
+        self.delete_root.setEnabled(picked)
+        self.duplicate_root.setEnabled(picked)
+        self.duplicate_root.setChecked(mode == "duplicate")
         self.fill_levels(groom)
 
     def fill_levels(self, groom):
@@ -205,33 +222,47 @@ class TonicTubes(QtCore.QObject):
         finally:
             self.refresh(self.owner.groom())
 
-    def toggle_draw(self, on):
-        groom = self.owner.groom()
-        if not groom:
-            self.owner.status.setText("Select a groom first.")
-            self.draw_root.setChecked(False)
-            return
-        if on:
-            from groomlab.ui import root_tube_tool
-            self._run(root_tube_tool.start, groom, "place", **self._settings())
-        else:
-            self.back_to_brush()
-
-    def toggle_edit(self, _on=None):
-        groom = self.owner.groom()
-        if not groom:
-            self.owner.status.setText("Select a groom first.")
-            self.edit_root.setChecked(False)
-            return
+    def _mode(self):
+        """The root tool's mode, or None when it isn't the current tool."""
         from maya import cmds
-        if cmds.currentCtx() == "groomLabRootTubeCtx" and self.tool.mode == "edit":
-            self._run(self.tool.finish_edit)  # Finish edit
+        return self.tool.mode if cmds.currentCtx() == "groomLabRootTubeCtx" else None
+
+    def _enter(self, mode, button):
+        """The root tool in `mode` (its button again: left)."""
+        groom = self.owner.groom()
+        if not groom:
+            self.owner.status.setText("Select a groom first.")
+            button.setChecked(False)
             return
         from groomlab.ui import root_tube_tool
-        self._run(root_tube_tool.start, groom, "edit", **self._settings())
+        self._run(root_tube_tool.start, groom, mode, **self._settings())
 
-    def cancel_clicked(self):
-        self._run(self.tool.cancel)
+    def toggle_draw(self, _on=None):
+        if self._mode() in ("place", "draw"):  # again: the outline being drawn dropped, the mode left
+            return self.back_to_brush()
+        self._enter("place", self.draw_root)
+
+    def toggle_edit(self, _on=None):
+        if self._mode() == "edit":  # Finish edit: the edits given to the roots, the mode left
+            self._run(self.tool.finish_edit)
+            if self.tool.mode != "edit":  # (finished; on an error the edits stay, still editing)
+                self.back_to_brush()
+            return
+        self._enter("edit", self.edit_root)
+
+    def toggle_select(self, _on=None):
+        if self._mode() in ("select", "duplicate"):  # again: left
+            return self.back_to_brush()
+        self._enter("select", self.select_root)
+
+    def duplicate_clicked(self, _on=None):
+        if self._mode() == "duplicate":  # again: no copy
+            self._run(self.tool.end_duplicate)
+            return
+        self._run(self.tool.begin_duplicate)
+
+    def delete_clicked(self):
+        self._run(self.tool.delete_selected)
 
     def back_to_brush(self):
         """The Tube brush again (the root tool put away)."""

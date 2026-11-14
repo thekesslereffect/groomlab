@@ -287,6 +287,201 @@ class RootTubes(unittest.TestCase):
         self.assertIn(shape, names())
         self.assertEqual(root_tubes.root_tubes(self.groom), [int(guide)])
 
+    def test_the_footprint_is_the_outline_however_the_guide_leans(self):
+        """Scatter and fillTubes go by the root footprint (the root section turned flat onto the
+        scalp: TubeSpine::setRootSurface): it is the outline drawn, upright or leaning far over, so
+        the hair rooted inside the outline is the tube's (none left between, blending any guides)."""
+        for way in (None, (0.0, 0.0, 1.0)):
+            outline = ring((0.0, 1.0, 0.0), 0.14, count=6)
+            root = on_sphere(root_tubes._centroid(outline))
+            path = None
+            if way:
+                path = [root] + [tm._mul(on_sphere(tm._add(root, tm._mul(way, 0.06 * k))), 1.04 + 0.01 * k)
+                                 for k in range(1, 16)]
+            guide = root_tubes.make_root_tube(self.groom, outline, path=path, segments=12, regions=False)
+            frames = json.loads(cmds.groomLabGuides(self.groom, tubeFrames=str(guide), evaluated=True))
+            c, u, v = tm.frame_at(frames, 0.0)
+            way_out = tm._unit(tm._cross(u, v))
+            normal = root_tubes._smooth_normal(self.groom, c)
+            if way:
+                self.assertGreater(math.degrees(math.acos(tm._dot(way_out, normal))), 30.0, "it leans")
+            tube = groomlab.get_tube(self.groom, guide)
+            shape = root_tubes._library_shape(self.groom, tube["shape"])
+            w = tube["width"][0]
+            placed = tm.place_outline(shape["points"], tube["twist"][0], w, w * tube["aspect"][0], (0.0, 0.0))
+            # (GroomLab's footprint: the section turned flat, by the least rotation from the
+            # guide's root way onto the scalp's normal)
+            foot = [tm._add(c, root_tubes._turn(tm.from_plane(q, (0.0, 0.0, 0.0), u, v), way_out, normal))
+                    for q in placed]
+
+            def flat(q):
+                d = tm._sub(q, c)
+                return tm._sub(d, tm._mul(normal, tm._dot(d, normal)))
+            for q in root_tubes.root_outline(self.groom, guide):
+                self.assertLess(min(tm._dist(flat(q), flat(f)) for f in foot), 0.002, "a CV off the footprint")
+
+    def test_the_region_reaches_just_past_the_outline(self):
+        """A face the outline crosses blends the tube's color with its own, not with black: a band
+        about a face wide outside the outline is the tube's too; far off, black."""
+        guide = root_tubes.make_root_tube(self.groom, ring((0.0, 1.0, 0.0), 0.15, count=6), length=0.5)
+        entry = json.loads(cmds.getAttr(self.groom + ".scalpMaps"))[root_tubes.REGION_MAP]
+        points, _fns = root_tubes._scalp_points(self.groom)
+        outline = root_tubes.root_outline(self.groom, guide)
+        c, u, v, n = root_tubes._plane(outline)
+        flat = [tm.to_plane(q, c, u, v) for q in outline]
+        color = lambda i: tuple(entry["values"][4 * i:4 * i + 3])  # noqa: E731
+        ours = color(min(range(len(points)), key=lambda i: tm._dist(points[i], c)))
+        edge = 2.0 * math.pi / 60.0  # (the sphere's faces: about this wide)
+        just, far = 0, 0
+        for i, q in enumerate(points):
+            d = tm._sub(q, c)
+            if tm._dot(d, n) < -0.5:
+                continue
+            x, y = tm._dot(d, u), tm._dot(d, v)
+            if root_tubes._inside(flat, x, y):
+                continue
+            off = root_tubes._edge_distance(flat, x, y)
+            if off < 0.5 * edge:
+                just += 1
+                self.assertEqual(color(i), ours, "a vertex just outside the outline")
+            elif off > 3.0 * edge:
+                far += 1
+                self.assertEqual(color(i), (0.0, 0.0, 0.0))
+        self.assertGreater(just, 0)
+        self.assertGreater(far, 0)
+
+    def test_a_root_duplicated_with_its_hierarchy_and_deleted(self):
+        root = on_sphere((0.0, 1.0, 0.0))
+        path = [root] + [tm._mul(on_sphere(tm._add(root, (0.0, 0.0, 0.06 * k))), 1.05 + 0.01 * k) for k in range(1, 14)]
+        a = root_tubes.make_root_tube(self.groom, ring((0.0, 1.0, 0.0), 0.15), path=path)
+        root_tubes.add_tube_level(self.groom)
+        root_tubes.add_tube_level(self.groom)
+        count = lambda: len(groomlab.get_hierarchy(self.groom)["guides"])  # noqa: E731
+        self.assertEqual(count(), 7)
+        b = root_tubes.duplicate_root_tube(self.groom, a, on_sphere((0.5, 0.85, 0.1)))
+        self.assertEqual(count(), 14)
+        self.assertEqual(root_tubes.root_tubes(self.groom), sorted([int(a), int(b)]))
+        o1, o2 = root_tubes.root_outline(self.groom, a), root_tubes.root_outline(self.groom, b)
+        sides = lambda o: [tm._dist(x, y) for x, y in zip(o, o[1:] + o[:1])]  # noqa: E731
+        for x, y in zip(sides(o1), sides(o2)):
+            self.assertAlmostEqual(x, y, delta=0.002)  # the same shape
+        self.assertLess(tm._dist(on_sphere(root_tubes._centroid(o2)), on_sphere((0.5, 0.85, 0.1))), 0.005)  # set down there
+        for q in root_tubes.section_outline(self.groom, b):
+            self.assertLess(nearest(q, o2), 0.003)  # its tube on its root
+        data = groomlab.get_hierarchy(self.groom)
+        kids = lambda gid: sorted(int(x["id"]) for x in data["guides"]  # noqa: E731
+                                  if x.get("parent") and int(x["parent"]) == int(gid))
+        self.assertEqual(len(kids(b)), 2)
+        self.assertEqual([len(kids(k)) for k in kids(b)], [2, 2])
+        length = lambda gid: sum(tm._dist(x, y) for x, y in zip(self.points(gid), self.points(gid)[1:]))  # noqa: E731
+        for k1, k2 in zip(kids(a), kids(b)):
+            self.assertAlmostEqual(length(k1), length(k2), delta=0.01)  # each child its counterpart's shape
+        cmds.undo()  # one undo step
+        self.assertEqual(count(), 7)
+        cmds.redo()
+        self.assertEqual(count(), 14)
+        shape = groomlab.get_tube(self.groom, b)["shape"]
+        root_tubes.delete_root_tubes(self.groom, [b])
+        self.assertEqual(count(), 7)
+        self.assertEqual(sorted(root_tubes._stored_outlines(self.groom)), [str(a)])
+        self.assertNotIn(shape, [x["name"] for x in groomlab.tube_shapes(self.groom)])
+        cmds.undo()
+        self.assertEqual(count(), 14)
+
+    def _tool(self):
+        """The root tool, its view a top view (1000 px a unit) onto the sphere's top."""
+        from groomlab.ui import root_tube_tool
+        tool = root_tube_tool.TOOL
+        tool.to_screen = lambda q: (q[0] * 1000.0, q[2] * 1000.0)
+
+        def hit(x, y):
+            q = on_sphere((x / 1000.0, 1.0, y / 1000.0))
+            return q, q
+        tool.hit = hit
+        self.addCleanup(self._untool, tool)
+        return tool
+
+    def _untool(self, tool):
+        tool.leave()
+        for name in ("to_screen", "hit", "press_point", "view_point"):
+            tool.__dict__.pop(name, None)
+
+    def test_select_mode_carries_a_root_its_sealed_cvs_held(self):
+        a = root_tubes.make_root_tube(self.groom, ring((0.0, 1.0, 0.0), 0.12, count=4))
+        ca = root_tubes.root_outline(self.groom, a)
+        c = root_tubes._centroid(ca)
+        out = tm._sub(tm.lerp(ca[0], ca[1], 0.5), c)
+        b = root_tubes.make_root_tube(self.groom, [ca[1], ca[0], on_sphere(tm._add(ca[0], out)),
+                                                   on_sphere(tm._add(ca[1], out))])
+        tool = self._tool()
+        tool.start(self.groom, "select")
+        self.assertEqual(sorted(tool.roots), sorted([int(a), int(b)]))
+        middle = tool.middles[int(b)][0]
+        x, y = tool.to_screen(middle)
+        tool.press_point = lambda: (x + 2.0, y)
+        tool.press()
+        self.assertEqual(tool.selected, int(b))
+        self.assertEqual(len(tool.move["held"]), 2, "its two CVs on a's edge held")
+        step = tm._mul(tm._unit(out), 0.05)
+        tool.view_point = lambda: (x + 2.0 + step[0] * 1000.0, y + step[2] * 1000.0)
+        tool.drag_event()
+        tool.release()
+        after = root_tubes.root_outline(self.groom, b)
+        before = [ca[1], ca[0]]
+        for q in before:
+            self.assertLess(nearest(q, after), 1e-3, "a sealed CV moved")
+        self.assertGreater(tm._dist(root_tubes._centroid(after), c), tm._dist(root_tubes._centroid(
+            [ca[1], ca[0], on_sphere(tm._add(ca[0], out)), on_sphere(tm._add(ca[1], out))]), c) + 0.01)
+        for q in root_tubes.root_outline(self.groom, a):
+            self.assertLess(nearest(q, ca), 1e-6, "the neighbour stays")
+        cmds.undo()  # one step
+        self.assertLess(max(nearest(q, root_tubes.root_outline(self.groom, b)) for q in before), 1e-3)
+        # Duplicate: the copy follows the cursor; the click (release) sets it down.
+        tool.start(self.groom, "select")
+        tool.press_point = lambda: (x, y)
+        tool.press()
+        tool.release()
+        self.assertTrue(tool.begin_duplicate())
+        target = on_sphere((-0.45, 0.85, 0.1))
+        tool.follow(target[0] * 1000.0, target[2] * 1000.0)
+        self.assertIsNotNone(tool.ghost)
+        new = tool.place_copy()
+        self.assertEqual(tool.mode, "select")
+        self.assertEqual(tool.selected, int(new))
+        self.assertEqual(len(root_tubes.root_tubes(self.groom)), 3)
+        self.assertEqual(tool.delete_selected(), 1)
+        self.assertEqual(len(root_tubes.root_tubes(self.groom)), 2)
+        self.assertIsNone(tool.selected)
+
+    def test_redo_puts_the_drawn_outline_away(self):
+        tool = self._tool()
+        tool.start(self.groom, "place")
+        tool.cvs = ring((0.0, 1.0, 0.0), 0.15)
+        tool.settings["draw"] = True
+        tool.close()
+        root = tool.center
+        guide = tool.make([root, tm._add(root, (0.0, 0.3, 0.1)), tm._add(root, (0.0, 0.5, 0.5))])
+        cmds.undo()
+        tool.undone()
+        self.assertEqual(tool.mode, "draw")
+        cmds.redo()
+        tool.redone()
+        self.assertEqual(tool.mode, "place")
+        self.assertEqual(tool.cvs, [])
+        self.assertIn(int(guide), root_tubes.root_tubes(self.groom))
+
+    def test_edit_mode_greens_the_root_touched(self):
+        a = root_tubes.make_root_tube(self.groom, ring((0.0, 1.0, 0.0), 0.12, count=4), regions=False)
+        root_tubes.make_root_tube(self.groom, ring((0.5, 0.85, 0.0), 0.12, count=4), regions=False)
+        tool = self._tool()
+        tool.start(self.groom, "edit")
+        self.assertEqual(tool.touched, set())
+        x, y = tool.to_screen(tool.edits[int(a)][0])
+        tool.modifier = lambda: ""
+        self.addCleanup(lambda: tool.__dict__.pop("modifier", None))
+        tool.press_edit(x, y)
+        self.assertEqual(tool.touched, {int(a)})
+
     def test_hierarchy_levels_split_tubes_in_two(self):
         root_tubes.make_root_tube(self.groom, ring((0.0, 1.0, 0.0), 0.2, count=6), length=0.8, regions=False)
         root_tubes.make_root_tube(self.groom, ring((0.5, 0.8, 0.0), 0.15, count=5), length=0.8, regions=False)

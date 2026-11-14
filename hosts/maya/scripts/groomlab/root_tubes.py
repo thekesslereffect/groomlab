@@ -44,6 +44,7 @@ from groomlab import tube_mesh as tm
 ROOT_GROUP = "rootTubes"   # the root group new root tubes go into (when no group is picked)
 SHAPE_PREFIX = "rootTube_"  # each root tube's library shape: its root outline
 REGION_MAP = "tubeRoots"   # the color vertex map holding each root tube's area
+REGION_BAND = 1.25          # ... and a band this many scalp edges wide outside its outline
 MAX_LEVELS = 9              # the tube hierarchy's deepest level (1: the base)
 LEVEL_SUFFIX = "_L"         # level n's group: <base>_L<n>
 SNAP_PIXELS = 12            # how near (in view pixels) a CV snaps to a neighbouring root's CV or edge
@@ -329,10 +330,64 @@ def _new_shape_name(groom):
     return "%s%d" % (SHAPE_PREFIX, n)
 
 
-def _root_fit(groom, guide, outline):
-    """The guide's root frame and the outline in it: (center, u, v, flat points (u, v))."""
+def _turn(vec, a, b):
+    """`vec` turned by the least rotation taking unit `a` onto unit `b` (frames.h's Rotation)."""
+    a, b = tm._unit(a), tm._unit(b)
+    c = tm._dot(a, b)
+    if c < -1.0 + 1e-6:
+        return tm._mul(vec, -1.0)
+    k = tm._cross(a, b)
+    return tm._add(tm._add(tm._mul(vec, c), tm._cross(k, vec)), tm._mul(k, tm._dot(k, vec) / (1.0 + c)))
+
+
+def _smooth_normal(groom, point):
+    """The scalp's normal at `point` as GroomLab reads it (ScalpMesh::normal: the vertex normals
+    blended across the triangle the point lies in)."""
+    from maya.api import OpenMaya as om
+    from groomlab import utils
+    q = om.MPoint(*point)
+    best = None
+    for shape in _scalp_meshes(groom):
+        fn = utils._om_mesh(shape)
+        hit, face = fn.getClosestPoint(q, om.MSpace.kWorld)
+        d = hit.distanceTo(q)
+        if best is None or d < best[0]:
+            best = (d, fn, face, (hit.x, hit.y, hit.z))
+    if best is None:
+        raise ValueError("the groom has no scalp")
+    _d, fn, face, at = best
+    verts = fn.getPolygonVertices(face)
+    corners = [tuple(fn.getPoint(v, om.MSpace.kWorld))[:3] for v in verts]
+    pick = None
+    for k in range(1, len(corners) - 1):
+        w = _barycentric(at, corners[0], corners[k], corners[k + 1])
+        if pick is None or min(w) > min(pick[1]):
+            pick = (k, w)
+    k, w = pick
+    normals = [tuple(fn.getFaceVertexNormal(face, verts[i], om.MSpace.kWorld))[:3] for i in (0, k, k + 1)]
+    n = tm._add(tm._add(tm._mul(normals[0], w[0]), tm._mul(normals[1], w[1])), tm._mul(normals[2], w[2]))
+    return tm._unit(n)
+
+
+def _footprint(groom, guide):
+    """The guide's root footprint as GroomLab lays it (TubeSpine::setRootSurface): its root
+    section turned flat onto the scalp, by the least rotation taking the guide's root way onto the
+    scalp's normal there. (center, u, v, normal): u and v the section's axes so turned. Scatter's
+    roots on a shaped tube and Interpolate's fillTubes go by it, so a root outline is fitted in it:
+    the hair rooted inside the outline as drawn is the tube's, however far the guide leans."""
     frames = _frames(groom, guide)
     center, u, v = tm.frame_at(frames, 0.0)
+    way = tm._unit(tm._cross(u, v))
+    n = _smooth_normal(groom, center)
+    if tm._dot(way, n) < -1.0 + 1e-4:  # (against the scalp: GroomLab leaves it as it is)
+        return center, u, v, way
+    return center, _turn(u, way, n), _turn(v, way, n), n
+
+
+def _root_fit(groom, guide, outline):
+    """The guide's root footprint and the outline in it (taken into its plane along its normal):
+    (center, u, v, flat points (u, v))."""
+    center, u, v, _n = _footprint(groom, guide)
     return center, u, v, [tm.to_plane(p, center, u, v) for p in outline]
 
 
@@ -680,19 +735,20 @@ def root_outline(groom, guide):
 
 
 def section_outline(groom, guide, on_scalp=True):
-    """A root tube's tube's root section as world points: its shape's control points placed in its
-    root section, taken onto the scalp (`on_scalp`: along the root section's normal, the way they
-    were read off it, so they come back where they were drawn)."""
+    """A root tube's tube's root footprint as world points: its shape's control points placed in
+    its root section laid flat on the scalp (_footprint), taken onto the scalp (`on_scalp`: along
+    the footprint's normal, the way they were read off it, so they come back where they were
+    drawn)."""
     tube = groomlab.get_tube(groom, guide)
     shape = _library_shape(groom, tube["shape"])
     if shape is None or shape["builtin"]:
         raise ValueError("guide %s is not a root tube (its shape is %s)" % (guide, tube["shape"]))
-    center, u, v = tm.frame_at(_frames(groom, guide), 0.0)
+    center, u, v, n = _footprint(groom, guide)
     w = tube["width"][0]
     h = w * tube["aspect"][0]
     flat = tm.place_outline(shape["points"], tube["twist"][0], w, h, (0.0, 0.0))
     world = [tm.from_plane(p, center, u, v) for p in flat]
-    return _project_along(groom, world, tm._cross(u, v)) if on_scalp else world
+    return _project_along(groom, world, n) if on_scalp else world
 
 
 def edit_root_tube(groom, guide, outline, regions=True):
@@ -743,6 +799,164 @@ def edit_root_tube(groom, guide, outline, regions=True):
         if regions:
             update_regions(groom)
     return guide
+
+
+def root_center(groom, guide):
+    """A root tube's root middle on the scalp (its outline's area centroid, taken onto it) and the
+    scalp's normal there."""
+    return _scalp_surface(groom)(_centroid(root_outline(groom, guide)))
+
+
+def carried(groom, outline, start, to, held=()):
+    """`outline` (a root's CVs on the scalp) carried over the scalp from its middle at `start` to
+    `to` (world points: the middle and where it goes): each CV turned with the scalp's normal from
+    there to here, set down at `to` and taken onto the scalp, so the shape keeps its size on a
+    curved head. CVs whose index is in `held` stay where they are (sealed onto a neighbour)."""
+    surface = _scalp_surface(groom)
+    c0, n0 = surface(start)
+    c1, n1 = surface(to)
+    held = set(held)
+    out = []
+    for i, p in enumerate(outline):
+        if i in held:
+            out.append(tuple(p))
+        else:
+            out.append(tuple(surface(tm._add(c1, _turn(tm._sub(p, c0), n0, n1)))[0]))
+    return out
+
+
+def sealed(groom, guide, outline=None, others=None, tolerance=None):
+    """The indices of `guide`'s root CVs (`outline`: as root_outline gives them) lying on another
+    root tube's outline (one of its CVs, or on one of its edges): sealed onto a neighbour."""
+    outline = outline if outline is not None else root_outline(groom, guide)
+    others = others if others is not None else snap_targets(groom, skip=[guide])
+    scale = max(tm._dist(a, b) for a, b in zip(outline, outline[1:] + outline[:1]))
+    tol = tolerance if tolerance is not None else 1e-3 * max(scale, 1e-6)
+    held = []
+    for i, p in enumerate(outline):
+        for _g, cvs in others:
+            n = len(cvs)
+            hit = False
+            for k in range(n):
+                a, b = cvs[k], cvs[(k + 1) % n]
+                ab = tm._sub(b, a)
+                span = tm._dot(ab, ab)
+                f = min(max(tm._dot(tm._sub(p, a), ab) / span, 0.0), 1.0) if span > 1e-18 else 0.0
+                if tm._dist(p, tm._add(a, tm._mul(ab, f))) <= tol:
+                    hit = True
+                    break
+            if hit:
+                held.append(i)
+                break
+    return held
+
+
+def _children(data, guide):
+    """`guide`'s child guides (the stored hierarchy's dicts), in ID order."""
+    return sorted((g for g in data.get("guides", []) if g.get("parent") and int(g["parent"]) == int(guide)),
+                  key=lambda g: int(g["id"]))
+
+
+def _tube_copy(tube, twist_by=0.0):
+    """set_tube's arguments giving a guide `tube` (get_tube's dict): its lists (the twist turned
+    by `twist_by`), its mid and tip profiles and holds."""
+    kwargs = {"width": list(tube["width"]), "aspect": list(tube["aspect"]),
+              "twist": [t + twist_by for t in tube["twist"]]}
+    for key, arg in (("midShape", "mid_shape"), ("tipShape", "tip_shape"), ("rootHold", "root_hold"),
+                     ("midHold", "mid_hold"), ("tipHold", "tip_hold"), ("midAt", "mid_at")):
+        if key in tube:
+            kwargs[arg] = tube[key]
+    return kwargs
+
+
+def duplicate_root_tube(groom, guide, to, regions=True):
+    """A copy of root tube `guide` with its root set down at `to` (a world point, taken onto the
+    scalp): its outline and its guide carried there over the scalp as one (carried), its tube a
+    copy (a root shape of its own, the same widths, flatness, twist and profiles), and the tube
+    hierarchy under it copied level by level (each level's split made again, each child given its
+    counterpart's shape and tube). Into the same groups. With `regions`, the regions updated. One
+    undo step. Returns the new guide's ID."""
+    data = _hierarchy(groom)
+    by_id = _guides_by_id(data)
+    groups = _groups_by_id(data)
+    if int(guide) not in by_id or not is_root_tube(by_id[int(guide)]):
+        raise ValueError("guide %s is not a root tube" % guide)
+    surface = _scalp_surface(groom)
+    outline = root_outline(groom, guide)
+    start, n0 = surface(_centroid(outline))
+    c1, n1 = surface(to)
+
+    def move(p):
+        return tm._add(c1, _turn(tm._sub(p, start), n0, n1))
+    new_outline = carried(groom, outline, start, to)
+    points = [move(p) for p in _frames(groom, guide)["points"]]
+    points[0] = surface(points[0])[0]
+    tube = groomlab.get_tube(groom, guide)
+    group = groups[int(by_id[int(guide)]["group"])]["name"]
+    with groomlab.undo_chunk("duplicate root tube"):
+        new = _new_guide(groom, points, group)
+        groomlab.set_tube(groom, guides=[new], shape="ribbon", width=tube["width"][0], aspect=1.0, twist=0.0,
+                          roll_on_scalp=False)
+        shape = _new_shape_name(groom)
+        twist, w, h, _off = _fit(groom, new, shape, new_outline)
+        w0 = tube["width"][0] or 1e-9
+        a0 = tube["aspect"][0] or 1.0
+        turn = twist - tube["twist"][0]
+        kwargs = _tube_copy(tube, turn)
+        a_new = min(max(h / w, 0.01), 100.0) if w > 1e-12 else 1.0
+        kwargs["width"] = [x * w / w0 for x in tube["width"]]
+        kwargs["aspect"] = [min(max(a * a_new / a0, 0.01), 100.0) for a in tube["aspect"]]
+        groomlab.set_tube(groom, guides=[new], shape=shape, **kwargs)
+        _settle(groom, new, shape, new_outline)
+        _store_outline(groom, new, new_outline)
+        # The hierarchy under it: each parent's children made again (its split), each the copy of
+        # its counterpart, parents first.
+        made = {int(guide): int(new)}
+        level = [int(guide)]
+        while level:
+            below = []
+            for old_parent in level:
+                kids = _children(data, old_parent)
+                if not kids:
+                    continue
+                kid_group = groups[int(kids[0]["group"])]["name"]
+                parent_group = groups[int(by_id[old_parent]["group"])]["name"]
+                before = set(int(i) for i in groomlab.guide_ids(groom, kid_group)) \
+                    if any(g["name"] == kid_group for g in groomlab.list_guide_groups(groom)) else set()
+                groomlab.generate_children(groom, parent_group=parent_group, name=kid_group, count=len(kids),
+                                           guides=[made[old_parent]], split=True)
+                fresh = sorted(set(int(i) for i in groomlab.guide_ids(groom, kid_group)) - before)
+                shapes = {}
+                for old, copy in zip(kids, fresh):
+                    made[int(old["id"])] = copy
+                    below.append(int(old["id"]))
+                    shapes[str(copy)] = [list(move(q)) for q in _frames(groom, old["id"])["points"]]
+                    groomlab.set_tube(groom, guides=[copy], **_tube_copy(groomlab.get_tube(groom, old["id"]), turn))
+                if shapes:
+                    cmds.groomLabGuides(groom, setPoints=json.dumps(shapes))
+            level = below
+        if regions:
+            update_regions(groom)
+    return new
+
+
+def delete_root_tubes(groom, guides, regions=True):
+    """Remove root tubes `guides` and the tube hierarchy under each (their guides; their root
+    shapes go with them), their kept outlines dropped. With `regions`, the regions updated. One
+    undo step. Returns how many guides went."""
+    guides = [int(g) for g in guides]
+    if not guides:
+        return 0
+    with groomlab.undo_chunk("delete root tubes"):
+        gone = cmds.groomLabGuides(groom, removeGuides=True, guide=[str(g) for g in guides]) or 0
+        data = _stored_outlines(groom)
+        live = set(str(g) for g in root_tubes(groom))
+        kept = dict((k, v) for k, v in data.items() if k in live)
+        if kept != data:
+            cmds.setAttr(groom + "." + OUTLINES_ATTR, json.dumps(kept, separators=(",", ":")), type="string")
+        if regions:
+            update_regions(groom)
+    return gone
 
 
 # ---------------------------------------------------------------------------
@@ -810,13 +1024,29 @@ def _region_map(groom):
     return other
 
 
+def _edge_distance(poly, x, y):
+    """How far (x, y) lies from the closed polygon's edges."""
+    best = float("inf")
+    n = len(poly)
+    for i in range(n):
+        (ax, ay), (bx, by) = poly[i], poly[(i + 1) % n]
+        dx, dy = bx - ax, by - ay
+        span = dx * dx + dy * dy
+        f = min(max(((x - ax) * dx + (y - ay) * dy) / span, 0.0), 1.0) if span > 1e-18 else 0.0
+        best = min(best, math.hypot(ax + f * dx - x, ay + f * dy - y))
+    return best
+
+
 def update_regions(groom):
     """Every root tube's area painted in its own color on the region map (REGION_MAP; black outside
     them), which the Interpolate nodes with no region map read: the hair rooted in a tube's area
-    follows that tube's guides only. A tube's area: the scalp's vertices inside its root outline
-    (and the vertices round its root, so a tube smaller than the scalp's faces still has its
-    region). Returns {"tubes": count, "vertices": painted, "other": an Interpolate reads another
-    region map}."""
+    follows that tube's guides only. A tube's area: the scalp's vertices inside its root outline,
+    the vertices round its root (so a tube smaller than the scalp's faces still has its region),
+    and a band about a face wide outside its outline (REGION_BAND faces' edges), so a face the
+    outline crosses blends the tube's color with a neighbour's or its own, never with black:
+    the hair rooted at the outline's edge is the tube's, not the nearest guides' of any region.
+    Where two tubes' bands meet, the nearer outline's. Returns {"tubes": count, "vertices":
+    painted, "other": an Interpolate reads another region map}."""
     tubes = root_tubes(groom)
     other = _region_map(groom)
     maps = json.loads(cmds.getAttr(groom + ".scalpMaps") or "{}")
@@ -826,9 +1056,9 @@ def update_regions(groom):
         raise RuntimeError("the region map %s does not match the scalp's %d vertices" % (REGION_MAP, len(points)))
     values = [0.0, 0.0, 0.0, 1.0] * len(points)
     colors = region_colors(len(tubes))
-    painted = 0
+    owner = {}  # vertex -> (how far outside its tube's outline (0: inside), the tube's index)
     from maya.api import OpenMaya as om
-    for guide, color in zip(tubes, colors):
+    for k, guide in enumerate(tubes):
         try:
             outline = root_outline(groom, guide)
         except (RuntimeError, ValueError):
@@ -836,29 +1066,38 @@ def update_regions(groom):
         center, u, v, n = _plane(outline)
         flat = [tm.to_plane(p, center, u, v) for p in outline]
         reach = max(math.hypot(x, y) for x, y in flat)
-        hits = set()
-        for i, p in enumerate(points):
-            d = tm._sub(p, center)
-            if tm._dot(d, d) > reach * reach * 1.5:
-                continue
-            if abs(tm._dot(d, n)) > reach:  # (the scalp's far side)
-                continue
-            x, y = tm._dot(d, u), tm._dot(d, v)
-            if _inside(flat, x, y):
-                hits.add(i)
-        # The vertices of the face under the root's middle: its own color, however small the tube.
+        # The scalp's faces there: the band's width.
+        under = []
         root = om.MPoint(*center)
         for fn, first in fns:
             hit, face = fn.getClosestPoint(root, om.MSpace.kWorld)
             if hit.distanceTo(root) < max(reach, 1e-6):
-                hits.update(first + k for k in fn.getPolygonVertices(face))
-        for i in hits:
-            values[4 * i:4 * i + 3] = list(color)
-        painted += len(hits)
+                corners = [fn.getPoint(i, om.MSpace.kWorld) for i in fn.getPolygonVertices(face)]
+                edge = sum(a.distanceTo(b) for a, b in zip(corners, corners[1:] + corners[:1])) / len(corners)
+                under.append((fn, first, face, edge))
+        band = REGION_BAND * max([e for _fn, _first, _face, e in under] or [0.0])
+        far = reach + band
+        for i, p in enumerate(points):
+            d = tm._sub(p, center)
+            if tm._dot(d, d) > far * far * 1.5:
+                continue
+            if abs(tm._dot(d, n)) > far:  # (the scalp's far side)
+                continue
+            x, y = tm._dot(d, u), tm._dot(d, v)
+            off = 0.0 if _inside(flat, x, y) else _edge_distance(flat, x, y)
+            if off > band:
+                continue
+            if i not in owner or off < owner[i][0]:
+                owner[i] = (off, k)
+        for fn, first, face, _edge in under:  # (however small the tube: the face under its middle)
+            for j in fn.getPolygonVertices(face):
+                owner[first + j] = (0.0, k)
+    for i, (_off, k) in owner.items():
+        values[4 * i:4 * i + 3] = list(colors[k])
     entry["values"] = [round(float(x), 3) for x in values]
     entry["channels"] = 4
     cmds.setAttr(groom + ".scalpMaps", json.dumps(maps, separators=(",", ":")), type="string")
-    return {"tubes": len(tubes), "vertices": painted, "other": other}
+    return {"tubes": len(tubes), "vertices": len(owner), "other": other}
 
 
 # ---------------------------------------------------------------------------
