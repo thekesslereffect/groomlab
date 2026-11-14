@@ -851,6 +851,7 @@ struct TubeFill {
     std::vector<TubeSpine> spines;
     std::vector<int> depths;
     std::vector<std::uint64_t> ids;
+    std::vector<std::uint64_t> bases;  // each tube's level-0 ancestor's ID (Guide::baseId; its own when 0)
     std::vector<float> numbers;
     std::vector<std::int32_t> tubeOf;
     std::vector<SectionPoint> at;
@@ -1697,10 +1698,12 @@ private:
             fill->numbers.assign(tubes, -1.0f);
             fill->depths.resize(tubes);
             fill->ids.resize(tubes);
+            fill->bases.resize(tubes);
             for (std::size_t k = 0; k < tubes; ++k) {
                 const Guide& g = k < kept.size() ? *kept[k] : (*levelTubes)[k - kept.size()];
                 fill->depths[k] = g.depth;
                 fill->ids[k] = g.id;
+                fill->bases[k] = g.baseId ? g.baseId : g.id;
             }
             if (levelTubes) {  // the other levels' tubes, along their guides as the kept ones' below
                 parallelFor(0, levelTubes->size(), [&](std::size_t i) {
@@ -2332,12 +2335,35 @@ private:
             if (strands.strandPointCount(s) < 2) return;
             const Vec3f root = strands.strandPoints(s)[0];
             if (!std::isfinite(root.x) || !std::isfinite(root.y) || !std::isfinite(root.z)) return;
+            // The level-0 tube holding the root (the most central): its own deeper tubes alone may
+            // take the strand or blend it at their edges, never a neighbour's (whose slices may reach
+            // past their level-0 tube's outline into this one's).
+            std::int32_t base = -1;
+            float baseDepth = 0.0f;
+            grid.around(root, [&](std::uint32_t i) {
+                const std::uint32_t k = tubes[i];
+                if (fill.depths[k] != 0) return true;
+                const TubeSpine& spine = fill.spines[k];
+                float along = 0.0f;
+                const SectionPoint at = spine.rootCoords(root, &along);
+                if (std::abs(along) > kTubeAlongReach * std::max(spine.rootWidth(), spine.rootHeight())) return true;
+                const float depth = tubeShapeDepth(spine.tube(), at.u, at.v);
+                if (!(depth >= 0.0f)) return true;
+                if (base < 0 || depth > baseDepth || (depth == baseDepth && static_cast<std::int32_t>(k) < base)) {
+                    base = static_cast<std::int32_t>(k);
+                    baseDepth = depth;
+                }
+                return true;
+            });
+            const std::uint64_t lineage = base >= 0 ? fill.bases[static_cast<std::size_t>(base)] : 0;
+            auto ours = [&](std::uint32_t k) { return base < 0 || fill.bases[k] == lineage; };
             std::int32_t best = -1;
             float bestDepth = 0.0f;
             SectionPoint bestAt;
             // The tubes holding the root.
             grid.around(root, [&](std::uint32_t i) {
                 const std::uint32_t k = tubes[i];
+                if (!ours(k)) return true;
                 const TubeSpine& spine = fill.spines[k];
                 float along = 0.0f;
                 const SectionPoint at = spine.rootCoords(root, &along);
@@ -2366,7 +2392,7 @@ private:
             grid.around(root, [&](std::uint32_t i) {
                 const std::uint32_t k = tubes[i];
                 const int level = fill.depths[k];
-                if (level <= ownLevel) return true;
+                if (level <= ownLevel || !ours(k)) return true;
                 const TubeSpine& spine = fill.spines[k];
                 float along = 0.0f;
                 const SectionPoint at = spine.rootCoords(root, &along);

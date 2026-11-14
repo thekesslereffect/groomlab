@@ -352,7 +352,19 @@ void GroomShape::setSymmetrySeam(std::vector<Vec3f> segments) {
     M3dView::scheduleRefreshAllViews();
 }
 
+void GroomShape::setTubesAlwaysVisible(bool always) {
+    if (always == tubesAlways_) return;
+    tubesAlways_ = always;
+    M3dView::scheduleRefreshAllViews();
+}
+
 void GroomShape::setTubeWires(bool on, bool shaded, bool wireframe, bool colors) {
+    if (!on) {  // (the look kept, for Always visible)
+        if (!tubeWires_) return;
+        tubeWires_ = false;
+        M3dView::scheduleRefreshAllViews();
+        return;
+    }
     if (on == tubeWires_ && shaded == tubeShaded_ && wireframe == tubeWireframe_ && colors == tubeColors_) return;
     tubeWires_ = on;
     tubeShaded_ = shaded;

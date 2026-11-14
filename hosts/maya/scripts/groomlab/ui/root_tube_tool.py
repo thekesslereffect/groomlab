@@ -997,8 +997,8 @@ class RootTubeTool(object):
                 for g, cvs in zip(self.picked, self.ghost[1]):
                     out.append((cvs, self.color_of(g), CLOSED | FILLED | HIGHLIGHT | DOTS))
         else:
-            for g, cvs in self.neighbours:
-                out.append((cvs, self.color_of(g), CLOSED))
+            for g, cvs in self.neighbours:  # (their CVs shown: what a new CV snaps onto)
+                out.append((cvs, self.color_of(g), CLOSED | FILLED | DOTS))
             if self.cvs:
                 closed = self.mode == "draw"
                 out.append((self.cvs, COLORS["closing" if closed else "outline"],

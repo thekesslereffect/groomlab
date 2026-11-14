@@ -1972,6 +1972,9 @@ void DisplayBuilder::buildGuides(const DisplayInputs& in, const DisplaySettings&
     key = hashChars(key, s.isolateGroup);
     key = hashChars(key, s.guideColorLayer);
     key = hashChars(key, s.guideColorSeed);
+    const ScalpMesh* regionScalp =
+        !s.guideRegionMap.empty() && in.scalp && in.scalp->hasColorSet(s.guideRegionMap) ? in.scalp.get() : nullptr;
+    if (regionScalp) key = hashCombine(hashChars(key, s.guideRegionMap), regionScalp->colorSetHash(s.guideRegionMap));
     if (in.clumpCenters) {
         // Hashed once per set of centers (the same pointer: the same centers, held here so no
         // other set takes its address), not on every update.
@@ -2062,6 +2065,13 @@ void DisplayBuilder::buildGuides(const DisplayInputs& in, const DisplaySettings&
                 if (hierarchy->effectiveAttribute(g, "freeze", &frozen) && frozen >= 0.5f) c = theme.frozen;
             } else if (byLayer) {
                 c = {0.08f, 0.08f, 0.08f};
+            }
+            if (regionScalp) {  // its region's color, at its base guide's root (frozen ones too)
+                const StrandRoot base = hierarchy->baseRootOf(g);
+                if (regionScalp->contains(base)) {
+                    const ScalpMesh::Color r = regionScalp->colorAt(s.guideRegionMap, base);
+                    if (r[0] + r[1] + r[2] >= 0.03f) c = {r[0], r[1], r[2]};
+                }
             }
             const bool dimmed = isolated != kNoGroup && !inIsolated(g.group);
             if (dimmed) c = {c[0] * 0.25f, c[1] * 0.25f, c[2] * 0.25f};

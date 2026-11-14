@@ -39,6 +39,9 @@ struct Guide {
     // face -1 when it has none): where an Interpolate reads a guide's region on a region map, so a
     // tube split into tubes of tubes keeps the region of the tube it was split from.
     StrandRoot baseRoot{-1, 0.0f, 0.0f};
+    // That guide's ID (its own at level 0; 0 when it has none): fillTubes fills a strand rooted in a
+    // level-0 tube only with that tube's own deeper tubes, never a neighbour's.
+    std::uint64_t baseId = 0;
 };
 
 // Whether a curve was drawn tip-first: its last point nearer the mesh than its

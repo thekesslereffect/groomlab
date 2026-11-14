@@ -612,11 +612,14 @@ public:
     // in its region's color on the tube root region map (kTubeRegionMap), or with no such map a
     // color of its own (from its guide's ID): its surface's color when shaded (its wires then
     // gray), else its wires'.
+    // Off keeps the last Shaded, Wireframe and Colors. `always` (the Tube card's Always visible):
+    // the tubes drawn as last set whichever tool is up (Comb, Select, ...), not only the Tube brush.
     void setTubeWires(bool on, bool shaded = false, bool wireframe = true, bool colors = true);
-    bool tubeWires() const { return tubeWires_; }
-    bool tubeShaded() const { return tubeWires_ && tubeShaded_; }
-    bool tubeWireframe() const { return tubeWires_ && tubeWireframe_; }
-    bool tubeColors() const { return tubeWires_ && tubeColors_; }
+    void setTubesAlwaysVisible(bool always);
+    bool tubeWires() const { return tubeWires_ || tubesAlways_; }
+    bool tubeShaded() const { return tubeWires() && tubeShaded_; }
+    bool tubeWireframe() const { return tubeWires() && tubeWireframe_; }
+    bool tubeColors() const { return tubeWires() && tubeColors_; }
 
     // Selection weights on the evaluated hierarchy (1: selected, below 1: soft),
     // and a hash of what they depend on, for the draw override.
@@ -787,6 +790,7 @@ private:
     bool tubeShaded_ = false;
     bool tubeWireframe_ = true;
     bool tubeColors_ = true;
+    bool tubesAlways_ = false;
     std::string reported_;  // the last message sent to the Script Editor
     std::string reportedHeavy_;  // the last "heavy" Scatter note warned about (finishView)
 

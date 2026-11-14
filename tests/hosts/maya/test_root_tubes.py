@@ -763,9 +763,42 @@ class RootTubes(unittest.TestCase):
         for i in range(1, len(pts) - 1):
             u, v = tm._sub(pts[i], pts[i - 1]), tm._sub(pts[i + 1], pts[i])
             turn = math.degrees(math.acos(max(-1.0, min(1.0, tm._dot(tm._unit(u), tm._unit(v))))))
-            # (at the root: its seat, at most MAX_LEAN off the normal, eases into the path over a
-            # few points, never a kink; beyond, the path's own gentle bends)
-            self.assertLess(turn, 40.0 if i <= 2 else 20.0, "no corner at point %d" % i)
+            # (at the root: its seat, at most MAX_LEAN off the normal, turning into a path drawn flat
+            # along the scalp; beyond, the path's own gentle bends, no corner where it was lifted)
+            self.assertLess(turn, 65.0 if i <= 2 else 20.0, "no corner at point %d" % i)
+
+    def test_a_drawn_guide_clear_of_the_scalp_keeps_its_course(self):
+        """A path drawn just over the head (no dip into it) is left as drawn by the clearance; one
+        dipping in only where it crosses the head is lifted there, its course elsewhere kept."""
+        outline = ring((0.0, 1.0, 0.0), 0.08, count=6)
+        size = max(tm._dist(on_sphere((0.0, 1.0, 0.0)), p) for p in outline)
+
+        def path(height, dip=0.0):
+            out = [on_sphere((0.0, 1.0, 0.0))]
+            for k in range(1, 60):
+                a = math.radians(1.2 * k)
+                r = 1.0 + height - dip * math.exp(-((k - 35) / 6.0) ** 2)  # (a dip about k = 35)
+                out.append((0.0, r * math.cos(a), r * math.sin(a)))
+            return out
+
+        def off(pts, drawn):
+            def seg(q, a, b):
+                ab = tm._sub(b, a)
+                t = max(0.0, min(1.0, tm._dot(tm._sub(q, a), ab) / max(tm._dot(ab, ab), 1e-12)))
+                return tm._dist(q, tm.lerp(a, b, t))
+            return [min(seg(q, a, b) for a, b in zip(drawn, drawn[1:])) for q in pts]
+
+        high = path(0.6 * size)
+        guide = root_tubes.make_root_tube(self.groom, outline, path=high, regions=False)
+        pts = self.points(guide)
+        self.assertLess(max(off(pts[3:], high)), 0.25 * size, "kept where it never dipped")
+        dipped = path(0.6 * size, dip=0.9 * size)
+        cmds.undo()
+        guide = root_tubes.make_root_tube(self.groom, outline, path=dipped, regions=False)
+        pts = self.points(guide)
+        self.assertGreater(min(tm._length(q) for q in pts[len(pts) // 3:]) - 1.0, 0.0, "out of the scalp")
+        far = [q for q in pts if q[2] < math.sin(math.radians(1.2 * 20))]  # (its first part, far from the dip)
+        self.assertLess(max(off(far[3:], dipped)), 0.25 * size, "its course kept away from the dip")
 
     def test_hierarchy_levels_split_tubes_in_two(self):
         root_tubes.make_root_tube(self.groom, ring((0.0, 1.0, 0.0), 0.2, count=6), length=0.8, regions=False)

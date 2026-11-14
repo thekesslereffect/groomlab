@@ -212,9 +212,12 @@ void RootOutlinesDrawOverride::addUIDrawables(const MDagPath&, MHWRender::MUIDra
             return p + toEye * (kStep * steps * size);
         };
         const MColor dark(0.08f, 0.08f, 0.08f, 1.0f);
-        constexpr double kFill = 1.0, kEdge = 2.0, kDot = 4.0;
+        // (The fills well clear of the scalp's own depth: never fighting it, wherever the scalp
+        // curves between the fill's rings; the edges over the fills, the dots over the edges.)
+        constexpr double kFill = 2.5, kEdge = 4.0, kDot = 6.5;
 
         draw.beginDrawable(MUIDrawManager::kNonSelectable);
+        draw.setDepthPriority(MHWRender::MRenderItem::sActiveWireDepthPriority);
         // The fills (see-through).
         if (!data->fills.empty() && data->fillOpacity > 0.0f) {
             MPointArray positions;
@@ -235,7 +238,7 @@ void RootOutlinesDrawOverride::addUIDrawables(const MDagPath&, MHWRender::MUIDra
             const Outline& o = data->outlines[k];
             if ((o.style & RootOutlines::kMarker) || o.points.size() < 2) continue;
             const bool high = (o.style & RootOutlines::kHighlight) != 0;
-            const double steps = kEdge + 0.05 * static_cast<double>(k % 16) + (high ? 0.9 : 0.0);
+            const double steps = kEdge + 0.08 * static_cast<double>(k % 16) + (high ? 1.3 : 0.0);
             MPointArray strip;
             for (const MPoint& p : o.points) strip.append(lifted(p, steps));
             if ((o.style & RootOutlines::kClosed) && o.points.size() >= 3) strip.append(strip[0]);

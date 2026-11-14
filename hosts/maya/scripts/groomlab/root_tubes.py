@@ -56,8 +56,9 @@ _PATH_SMOOTHING = 0.25     # a drawn path averaged along it over this share of i
 _SPAN_ROOTS = 1.0           # a drawn guide's spans about this many root sizes long (Point density 1) ...
 _SPAN_TURN = math.radians(15.0)  # ... and turning at most this much each, so a curl keeps its points
 _SPANS = (3, 200)           # ... between these many
-CLEARANCE = 1.0      # a drawn guide kept this many root sizes off the scalp (_clear_of_scalp) ...
-_CLEAR_RAMP = 2.0    # ... reached this many root sizes along it from the root
+CLEARANCE = 0.35     # a drawn guide popped this many root sizes out where it dips into the scalp ...
+_CLEAR_RAMP = 2.0    # ... reached this many root sizes along it from the root ...
+_CLEAR_SPREAD = 1.5  # ... the lift spread smoothly over this many root sizes along it
 MAX_LEAN = math.radians(50.0)  # a root tube's guide leaves the scalp leaning at most this far off its normal
 _PATH_LEAVE = 0.2           # the least share of the path over which it bends from the scalp's normal into the stroke
 
@@ -369,11 +370,12 @@ def path_spans(points, size, density=1.0):
 
 
 def _clear_of_scalp(points, surface, size):
-    """A guide kept off the scalp softly: each point pushed out along the scalp's normal to a
-    clearance that grows from nothing at the root to CLEARANCE of the root's `size` over
-    _CLEAR_RAMP sizes along it, the pushes evened out along the guide (a Gaussian over the root's
-    size), so where a drawn path dips into the scalp the guide eases over it instead of snapping
-    onto the surface. The root stays. A few passes (the evening out lowers the pushes' peaks)."""
+    """A guide popped out of the scalp, its drawn shape kept: only where it dips under a small
+    clearance (CLEARANCE of the root's `size`, growing from nothing at the root over _CLEAR_RAMP
+    sizes along it) is it lifted, along the scalp's normal, and the lifts are spread wide and
+    smooth along the guide (a Gaussian over _CLEAR_SPREAD sizes), a few passes adding up until no
+    point is left under, so the guide's bends, curls and course stay as drawn and it rises gently
+    over the scalp where it dipped in. The root stays."""
     pts = [tuple(p) for p in points]
     if surface is None or len(pts) < 3 or size <= 0.0:
         return pts
@@ -386,30 +388,32 @@ def _clear_of_scalp(points, surface, size):
     for d in along:
         x = min(d / (_CLEAR_RAMP * size), 1.0)
         want.append(clearance * x * x * (3.0 - 2.0 * x))
-    sigma = max(size / step, 1.0)  # (in points)
+    sigma = max(_CLEAR_SPREAD * size / step, 1.0)  # (in points)
     reach = int(math.ceil(3.0 * sigma))
     kernel = [math.exp(-0.5 * (k / sigma) ** 2) for k in range(-reach, reach + 1)]
-    for _ in range(4):
-        pushes = []
+    peak = max(kernel)
+    for _ in range(12):
+        lifts = []
         for i, p in enumerate(pts):
             q, n = surface(p)
-            depth = want[i] - tm._dot(tm._sub(p, q), n)  # (how far short of its clearance)
-            pushes.append(tm._mul(n, depth) if depth > 0.0 and i > 0 else (0.0, 0.0, 0.0))
-        if not any(tm._length(v) > 1e-9 for v in pushes):
+            short = want[i] - tm._dot(tm._sub(p, q), n)  # (how far under its clearance)
+            lifts.append(tm._mul(n, short) if short > 0.02 * clearance and i > 0 else (0.0, 0.0, 0.0))
+        if not any(tm._length(v) > 0.0 for v in lifts):
             break
-        smoothed = []
+        spread = []
         for i in range(len(pts)):
-            total, weight = (0.0, 0.0, 0.0), 0.0
+            total = (0.0, 0.0, 0.0)
             for k, w in enumerate(kernel):
                 j = i + k - reach
                 if 0 <= j < len(pts):
-                    total = tm._add(total, tm._mul(pushes[j], w))
-                    weight += w
-            # (each push kept at least as it was: the evening out spreads it, never undoes it)
-            avg = tm._mul(total, 1.0 / weight) if weight > 0.0 else (0.0, 0.0, 0.0)
-            smoothed.append(avg if tm._length(avg) >= tm._length(pushes[i]) else pushes[i])
-        smoothed[0] = (0.0, 0.0, 0.0)
-        pts = [tm._add(p, v) for p, v in zip(pts, smoothed)]
+                    total = tm._add(total, tm._mul(lifts[j], w / peak))
+            spread.append(total)
+        # (each pass lifts a point at most what it was short: the spread adds up, never overshoots far)
+        top = max(tm._length(v) for v in spread)
+        need = max(tm._length(v) for v in lifts)
+        scale = min(1.0, need / top) if top > 0.0 else 0.0
+        spread[0] = (0.0, 0.0, 0.0)
+        pts = [tm._add(p, tm._mul(v, scale)) for p, v in zip(pts, spread)]
     return pts
 
 

@@ -113,7 +113,7 @@ def help_tip(tool):
 
 
 # The block titles a core older than these definitions may not name yet.
-SETTING_LABELS = {"lengthKeys": "Keys", "newGuides": "New guides", "tube": "Tube", "tubeChannel": "Paints",
+SETTING_LABELS = {"lengthKeys": "Keys", "newGuides": "New guides", "tube": "Tube", "tubeChannel": "Visibility",
                   "selection": "Selection", "erases": "Erases", "flow": "Flow", "parts": "Parts"}
 
 
@@ -1404,10 +1404,8 @@ class ToolPalette(QtWidgets.QWidget):
         self.tube_panel = TubePanel(self)  # its blocks: Tube (Place, Draw), Profile and Selected guides
         card.addWidget(self.tube_panel.tube_block)
 
-        # Shape: what it paints on the tubes (Width, Flatness, Twist), then the profile and the
-        # selected guides' tubes.
-        self.tube_channel_box = widgets.Block(_setting("tubeChannel", "label"), name="paintsBlock")
-        self.tube_channel_box.setToolTip(_setting("tubeChannel", "hint"))
+        # Shape: what it paints on the tubes (Width, Flatness, Twist) at the top of Brush; then
+        # Visibility (how the tubes are drawn), the profile and the selected guides' tubes.
         self.tube_channel = QtWidgets.QButtonGroup(self)  # exclusive: one channel at a time
         self.tube_channel_buttons = {}
         for name, label, tip in TUBE_CHANNELS:
@@ -1415,7 +1413,11 @@ class ToolPalette(QtWidgets.QWidget):
             self.tube_channel.addButton(b)
             self.tube_channel_buttons[name] = b
         self.tube_channel.buttonClicked.connect(lambda _b: self.push(tubeChannel=self.tube_channel_name()))
-        self.tube_channel_box.add(widgets.seg_row(self.tube_channel_buttons.values()))  # one of them: a track
+        self.tube_channel_row = widgets.seg_row(self.tube_channel_buttons.values())  # one of them: a track
+        self.tube_channel_row.setToolTip(_setting("tubeChannel", "hint"))
+        self.brush_block.body.insertWidget(0, self.tube_channel_row)
+        self.tube_channel_box = widgets.Block("Visibility", name="paintsBlock")
+        self.tube_channel_box.setToolTip("How the tubes are drawn")
         # Shaded and Wireframe (GH-63): how the tubes the brush shows are drawn, each on its own:
         # shaded surfaces (off by default), to judge the profiles' shapes, and see-through wires (on).
         # (Switch rows: a chip's text grows bold when checked and outgrew its width.)
@@ -1435,6 +1437,11 @@ class ToolPalette(QtWidgets.QWidget):
                                           "tubeColors")
         self.tube_colors.toggled.connect(lambda on: self.push(tubeColors=bool(on)))
         self.tube_channel_box.add(self.tube_colors.row)
+        # Always visible: the tubes drawn whichever tool is up (Comb, Select, ...), as set above.
+        self.tube_always = widgets.switch("Always visible", "Keep the tubes drawn with every tool (Comb, "
+                                          "Select, ...), not only the Tube tool", False, "tubesAlwaysVisible")
+        self.tube_always.toggled.connect(lambda on: self.push(tubesAlwaysVisible=bool(on)))
+        self.tube_channel_box.add(self.tube_always.row)
         card.addWidget(self.tube_channel_box)
 
         # Select: the soft radius (its selection's), then the profile and the selected guides' tubes.
@@ -2433,7 +2440,7 @@ class ToolPalette(QtWidgets.QWidget):
             groomlab.brush_tool(tool, **kwargs)
             # (The context's own: not stroke settings.)
             self.push(tubeShaded=self.tube_shaded.isChecked(), tubeWireframe=self.tube_wireframe.isChecked(),
-                      tubeColors=self.tube_colors.isChecked())
+                      tubeColors=self.tube_colors.isChecked(), tubesAlwaysVisible=self.tube_always.isChecked())
         except (RuntimeError, ValueError) as e:
             self.tool_failed(e)
         self.show_tool_settings()
@@ -2520,6 +2527,7 @@ class ToolPalette(QtWidgets.QWidget):
         self.stretch.row.setVisible("stretch" in uses)
         self.straighten.row.setVisible("straighten" in uses)
         self.tube_channel_box.setVisible("tubeChannel" in uses)
+        self.tube_channel_row.setVisible("tubeChannel" in uses)
         self.tonic.show(tool == "shape")
         self.select_box.setVisible("selection" in uses)
         self.erase_box.setVisible("erases" in uses)

@@ -610,12 +610,17 @@ void GroomSubSceneOverride::updateTubeWires(MHWRender::MSubSceneContainer& conta
     }
     if (key == tubeWiresKey_ && (container.find(kTubeWiresItem) || container.find(kTubeSurfacesItem))) return;
     tubeWiresKey_ = key;
-    // Every guide the brush can shape (shown, not frozen: activeTubeGuides), the selected ones
-    // (soft-selected left out) apart, to stand out.
+    // Every guide shown (its group not hidden), the selected ones (soft-selected left out) apart, to
+    // stand out; the frozen ones (a solo: the guides the brush can't shape, activeTubeGuides) dimmed,
+    // not hidden, so the soloed tubes read against the rest.
     std::vector<Vec3f> wires, selectedWires;
-    std::vector<float> wireColors;  // (Colors on, Shaded off: r g b a per end of `wires`)
+    std::vector<float> wireColors;  // (r g b a per end of `wires`, when they vary)
     const std::map<GuideId, float> selection = shape_->guideSelectionWeights();
-    const std::vector<const HierarchyGuide*> guides = activeTubeGuides(*hierarchy, hidden);
+    const std::vector<const HierarchyGuide*> guides = activeTubeGuides(*hierarchy, hidden, "");
+    std::set<const HierarchyGuide*> live;
+    for (const HierarchyGuide* g : activeTubeGuides(*hierarchy, hidden)) live.insert(g);
+    const bool anyDim = live.size() != guides.size();
+    constexpr float kDim = 0.3f;
     std::size_t points = 0;
     for (const HierarchyGuide* g : guides) points += g->points.size();
     // Within a budget of lines: fewer rings along each tube on a groom of many guides.
@@ -628,7 +633,8 @@ void GroomSubSceneOverride::updateTubeWires(MHWRender::MSubSceneContainer& conta
     auto colorOf = [&](const HierarchyGuide& g, std::array<float, 4>& out) {
         if (!tubeColorsDrawn_) return false;
         if (regions) {
-            const ScalpMesh::Color c = scalp->colorAt(kTubeRegionMap, g.root);
+            // (its base guide's region: a tube's split tubes and children in its color)
+            const ScalpMesh::Color c = scalp->colorAt(kTubeRegionMap, hierarchy->baseRootOf(g));
             if (c[0] + c[1] + c[2] < 0.03f) return false;  // (outside every tube's region)
             out = {c[0], c[1], c[2], 1.0f};
             return true;
@@ -653,10 +659,11 @@ void GroomSubSceneOverride::updateTubeWires(MHWRender::MSubSceneContainer& conta
         const bool selected = it != selection.end() && it->second >= 1.0f;
         const std::size_t before = wires.size();
         appendTubeWire(selected ? selectedWires : wires, *g, hierarchy->scale(), 8, ringStep);
-        if (colorWires && !selected) {
-            std::array<float, 4> c{};
-            if (!colorOf(*g, c)) c = {plainWire[0], plainWire[1], plainWire[2], 1.0f};
+        if ((colorWires || anyDim) && !selected) {
+            std::array<float, 4> c = {wireColor[0], wireColor[1], wireColor[2], 1.0f};
+            if (colorWires && !colorOf(*g, c)) c = {plainWire[0], plainWire[1], plainWire[2], 1.0f};
             c[3] = kWireAlpha;
+            if (!live.count(g)) c = {c[0] * kDim, c[1] * kDim, c[2] * kDim, 0.35f};
             for (std::size_t i = before; i < wires.size(); ++i) wireColors.insert(wireColors.end(), c.begin(), c.end());
         }
     }
@@ -674,7 +681,7 @@ void GroomSubSceneOverride::updateTubeWires(MHWRender::MSubSceneContainer& conta
     };
     const float warm[4] = {1.0f, 0.7f, 0.15f, 1.0f};  // the selected: warm, opaque, thicker
     std::shared_ptr<const DisplayGeometry> plain = geometry(wires);
-    if (plain && colorWires && wireColors.size() == wires.size() * 4) {
+    if (plain && (colorWires || anyDim) && wireColors.size() == wires.size() * 4) {
         auto colored = std::make_shared<DisplayGeometry>(*plain);
         colored->colors = std::move(wireColors);
         plain = colored;
@@ -692,9 +699,10 @@ void GroomSubSceneOverride::updateTubeWires(MHWRender::MSubSceneContainer& conta
         for (const HierarchyGuide* g : guides) {
             const std::size_t before = surfaces->positions.size() / 3;
             appendTubeSurface(*surfaces, *g, hierarchy->scale() * kInset);
-            if (!tubeColorsDrawn_) continue;
-            std::array<float, 4> c{};
-            if (!colorOf(*g, c)) c = {0.5f, 0.56f, 0.62f, 1.0f};
+            if (!tubeColorsDrawn_ && !anyDim) continue;
+            std::array<float, 4> c = {0.5f, 0.56f, 0.62f, 1.0f};
+            if (tubeColorsDrawn_ && !colorOf(*g, c)) c = {0.5f, 0.56f, 0.62f, 1.0f};
+            if (!live.count(g)) c = {c[0] * kDim, c[1] * kDim, c[2] * kDim, 1.0f};
             colorTubeSurface(*surfaces, before, c);
         }
     }
@@ -844,6 +852,8 @@ DisplaySettings GroomSubSceneOverride::readSettings() {
     s.guideWidth = floatPlug(GroomShape::aGuideWidth);
     s.guideColorMode = MPlug(object_, GroomShape::aGuideColorMode).asShort();
     s.guideColorLayer = MPlug(object_, GroomShape::aGuideColorLayer).asString().asChar();
+    // The Tube tool up (its tubes drawn): the guides in their root tubes' region colors.
+    if (shape_ && shape_->tubeWires()) s.guideRegionMap = kTubeRegionMap;
     s.isolateGroup = MPlug(object_, GroomShape::aIsolateGroup).asString().asChar();
     s.guidePoints = MPlug(object_, GroomShape::aGuidePoints).asShort();
     s.guideSmoothing = MPlug(object_, GroomShape::aGuideSmoothing).asInt();
