@@ -93,9 +93,11 @@ class DrawnLayout(object):
         self.activate_init = False
         self.groomlab_role = None  # the window's look for what it holds (the module's docstring)
         self.groomlab_tip = ""     # its labels' tooltip (the window: a hover shows it)
+        self.context_strings = {}  # context_string_set's: what the menus drawn after it read
 
     def _child(self, kind, **kw):
         child = DrawnLayout(kind, **kw)
+        child.context_strings = dict(self.context_strings)
         self.children.append(child)
         return child
 
@@ -170,7 +172,7 @@ class DrawnLayout(object):
         cls = getattr(bpy.types, menu, None)
         label = getattr(cls, "bl_label", menu) if text is None else text  # (no text given: the menu's name)
         self._item("menu", menu=menu, text=label, icon=icon_name(icon, icon_value),
-                   has_icon=icon not in ("NONE", None) or bool(icon_value))
+                   has_icon=icon not in ("NONE", None) or bool(icon_value), ctx=dict(self.context_strings))
 
     def popover(self, panel, text=None, text_ctxt="", translate=True, icon="NONE", icon_value=0):
         cls = getattr(bpy.types, panel, None)
@@ -183,6 +185,11 @@ class DrawnLayout(object):
         self._item("list", cls=listtype_name, list_id=list_id, data=dataptr, prop=propname,
                    active_data=active_dataptr, active_prop=active_propname, rows=rows)
 
+    def template_curve_mapping(self, data, property, type="NONE", levels=False, brush=False, use_negative_slope=False,
+                               show_tone=False):
+        """A curve (a ramp param's): drawn as a preview, a press opens Blender's curve editor."""
+        self._item("curve", data=data, prop=property)
+
     def template_icon_view(self, data, property, show_labels=False, scale=6.0, scale_popup=5.0):
         self._item("icon_view", data=data, prop=property)
 
@@ -194,7 +201,7 @@ class DrawnLayout(object):
         pass
 
     def context_string_set(self, name, value):
-        pass
+        self.context_strings[name] = value
 
     def __getattr__(self, name):
         # A UILayout call not drawn here (a template the panels do not use yet): a column that
@@ -255,12 +262,29 @@ def run_operator(idname, props, call_context="INVOKE_DEFAULT"):
     return result
 
 
-def menu_entries(name, context):
+class _ContextWith(object):
+    """bpy.context with a layout's context strings over it (what a menu's draw reads: a param's
+    menu reads context.groomlab_menu)."""
+
+    def __init__(self, context, extra):
+        object.__setattr__(self, "_context", context)
+        object.__setattr__(self, "_extra", extra)
+
+    def __getattr__(self, name):
+        if name in self._extra:
+            return self._extra[name]
+        return getattr(self._context, name)
+
+
+def menu_entries(name, context, extra=None):
     """A Menu class's entries (its draw run against a DrawnLayout) for editors.PopupMenu, or None
-    when it draws something a drawn menu cannot show (Blender's own popup opens instead)."""
+    when it draws something a drawn menu cannot show (Blender's own popup opens instead). `extra`:
+    the context strings the layout that drew the menu's button set (context_string_set)."""
     cls = getattr(bpy.types, name, None)
     if cls is None or not hasattr(cls, "draw"):
         return None
+    if extra:
+        context = _ContextWith(context, extra)
     rec = DrawnLayout("column")
     try:
         draw_panel(cls, rec, context)
@@ -305,8 +329,9 @@ def menu_entries(name, context):
                 else:
                     return False
             elif kind == "menu":
-                entries.append({"kind": "sub", "text": a.get("text") or "", "icon": a.get("icon"), "enabled": enabled,
-                                "sub": lambda n=a["menu"]: menu_entries(n, bpy.context)})
+                label = a.get("text") or getattr(getattr(bpy.types, a["menu"], None), "bl_label", "") or ""
+                entries.append({"kind": "sub", "text": label, "icon": a.get("icon"), "enabled": enabled,
+                                "sub": lambda n=a["menu"], c=a.get("ctx"): menu_entries(n, bpy.context, c)})
             elif kind == "enum_choice":
                 prop = uikit.Prop(a["data"], a["prop"])
                 entries.append({"kind": "check", "text": a.get("text") or a["value"], "enabled": enabled,
@@ -325,16 +350,73 @@ def menu_entries(name, context):
     return entries or None
 
 
+_curve_target = [None]  # (data, property) the curve popup edits
+
+
+class GROOMLAB_PT_curve_popup(bpy.types.Panel):
+    """A ramp's curve in Blender's curve editor, opened from a drawn curve preview"""
+    bl_space_type = "NODE_EDITOR"
+    bl_region_type = "HEADER"
+    bl_label = "Curve"
+    bl_ui_units_x = 14
+
+    def draw(self, context):
+        target = _curve_target[0]
+        if target is None:
+            return
+        try:
+            self.layout.template_curve_mapping(target[0], target[1])
+        except (ReferenceError, TypeError, KeyError):
+            _curve_target[0] = None
+
+
+class CurvePreview(uikit.Widget):
+    """A curve param drawn: its curve over a sunken box; a press opens Blender's curve editor."""
+
+    def __init__(self, wid, rect, data, prop):
+        super().__init__(wid, rect)
+        self.data, self.prop = data, prop
+        self.tooltip = "Click to edit the curve"
+
+    def samples(self, n=40):
+        mapping = getattr(self.data, self.prop, None)
+        if mapping is None or not len(mapping.curves):
+            return []
+        try:
+            mapping.initialize()
+            curve = mapping.curves[0]
+            return [(i / float(n), mapping.evaluate(curve, i / float(n))) for i in range(n + 1)]
+        except (RuntimeError, ReferenceError, TypeError):
+            return []
+
+    def draw(self, p, win):
+        t, s = win.theme, win.scale
+        x, y, w, h = self.rect
+        hover = win.hover == self.id
+        p.rect(self.rect, t.hover if hover else t.sunken, t.radius * s, t.outline, 1.0 * s)
+        inner = uikit.inset(self.rect, 8 * s, 6 * s)
+        p.rect((inner[0], inner[1] + inner[3] * 0.5, inner[2], max(1.0, s)), uikit.with_alpha(t.textMuted, 0.25))
+        points = [(inner[0] + u * inner[2], inner[1] + min(max(v, 0.0), 1.0) * inner[3]) for u, v in self.samples()]
+        if len(points) > 1:
+            p.lines(points, t.accent, 2.0)
+
+    def press(self, win, context, event):
+        _curve_target[0] = (self.data, self.prop)
+        bpy.ops.wm.call_panel(name=GROOMLAB_PT_curve_popup.__name__, keep_open=True)
+        return None
+
+
 class MenuButton(uikit.Button):
     """A menu's button: a press opens it drawn (editors.PopupMenu), else as Blender's own popup."""
 
-    def __init__(self, wid, rect, text, icon, menu_name):
+    def __init__(self, wid, rect, text, icon, menu_name, ctx=None):
         # (a named menu: the app's disclosure, outlined with a small chevron and no icon)
         super().__init__(wid, rect, text, None, None if text else icon, flat=not text, menu=bool(text))
         self.menu_name = menu_name
+        self.ctx = ctx or {}
 
     def press(self, win, context, event):
-        entries = menu_entries(self.menu_name, context)
+        entries = menu_entries(self.menu_name, context, self.ctx)
         if not entries:
             bpy.ops.wm.call_menu(name=self.menu_name)
             return None
@@ -423,6 +505,8 @@ class Placer(object):
                 return self.row_h - 2 * self.s
         if kind == "icon_view":
             return 44 * self.s
+        if kind == "curve":
+            return 64 * self.s
         if kind == "profile":
             return min(200 * self.s, self.ui.w) + self.row_h + 5 * self.s
         if kind == "list":
@@ -547,6 +631,14 @@ class Placer(object):
             if dy > 0.5:
                 for wd in self.widgets[first:last]:
                     wd.rect = (wd.rect[0], wd.rect[1] - dy, wd.rect[2], wd.rect[3])
+        # A row ending in a menu button of its own (a param's ⋯): a right-click anywhere on the row
+        # opens it, as Maya's and the app's params do.
+        row = self.widgets[placed[0][0]:placed[-1][1]] if placed else []
+        menus = [wd for wd in row if isinstance(wd, MenuButton) and not wd.text]
+        if menus:
+            for wd in row:
+                if getattr(wd, "context_menu", None) is None and not isinstance(wd, MenuButton):
+                    wd.context_menu = lambda context, win, event, b=menus[-1]: b.press(win, context, event)
         return h
 
     def share(self, children, naturals, w, gap):
@@ -657,7 +749,8 @@ class Placer(object):
             text = a.get("text") or ""
             icon = a.get("icon") or ("ui_chevron_down" if not text else "")
             if kind == "menu" and name:
-                widget = MenuButton(self.wid(kind, name), rect, text, icon or None, name)
+                widget = MenuButton(self.wid(kind, name + ":" + str((a.get("ctx") or {}).get("groomlab_menu", ""))),
+                                    rect, text, icon or None, name, a.get("ctx"))
             else:
                 call = (lambda ctx, n=name: bpy.ops.wm.call_panel(name=n)) if name else (lambda ctx: None)
                 widget = uikit.Button(self.wid(kind, name), rect, text, call, icon or None, flat=not text,
@@ -677,6 +770,8 @@ class Placer(object):
                                         self.actions["preview"])
         elif kind == "profile":
             self.profile(item, rect, st)
+        elif kind == "curve":
+            widget = CurvePreview(self.wid("curve", getattr(a["data"], "name", "")), rect, a["data"], a["prop"])
         if widget is not None:
             widget.disabled = not st.enabled
             widget.dim = not st.active

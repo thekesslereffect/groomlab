@@ -901,6 +901,183 @@ class GraphEditorTest(unittest.TestCase):
         accent = rounded(gt._rgb(gt.CATEGORY_COLORS[gt.category_of(node.gl_type)]))
         self.assertNotIn(accent, colors)  # no category dot: the node's color says it
 
+    def test_8d_canvas_lays_the_graph_out_as_the_app(self):
+        """The drawn canvas (graph_canvas.py) lays the tree's nodes out as the app's node_graph.cpp
+        does (176 wide, a 28 header, 18 a port row), where Blender's view puts them; its hit tests
+        find the cards and the header toggles. A rebuilt tree's nodes come in unpicked (Blender
+        makes a new node picked), and a ramp's curve is a drawn item of its own."""
+        import types
+        canvas = importlib.import_module(bu.MODULE + ".graph_canvas")
+        drawn = importlib.import_module(bu.MODULE + ".drawn")
+        gt.remove_tree(self.head)
+        tree = gt.rebuild(self.head)  # (every node new)
+        self.assertFalse([n.name for n in tree.nodes if n.select])
+        ox, oy, zoom = 100.0, 900.0, 1.5
+        view2d = types.SimpleNamespace(view_to_region=lambda x, y, clip=False: (ox + x * zoom, oy + y * zoom))
+        region = types.SimpleNamespace(width=2000, height=1200, view2d=view2d)
+        g = canvas.Graph(bpy.context, region, tree)
+        self.assertGreater(g.ui, 0.0)
+        self.assertAlmostEqual(g.k, zoom * g.ui, 5)
+        ours = [n for n in tree.nodes if gt.ours(n)]
+        self.assertEqual(len(g.boxes), len(ours))
+        for box in g.boxes:
+            node = box.node
+            x, y, w, h = box.rect
+            gx, gy = gt.get_location(node)
+            self.assertAlmostEqual(x, ox + gx * g.k, 3)
+            self.assertAlmostEqual(y + h, oy + gy * g.k, 3)  # (the location is the card's top left)
+            self.assertAlmostEqual(w, (canvas.NODE_W + (canvas.CLUMP_W if node.gl_type == "Clump" else 0.0)) * g.k, 3)
+            rows = max(len(box.inputs), len(box.outputs), 1) + (1 if box.type_row else 0)
+            self.assertAlmostEqual(h, (canvas.HEADER + 2 * canvas.PAD + rows * canvas.ROW) * g.k, 3)
+            for i, (_s, (px, py)) in enumerate(box.inputs):
+                self.assertAlmostEqual(px, x, 3)
+                self.assertAlmostEqual(py, y + h - (canvas.HEADER + canvas.PAD + canvas.ROW * (i + 0.5)) * g.k, 3)
+            names = [t[0] for t in box.toggles]
+            self.assertEqual(names[-1], "bypass")  # (the header's corner, as the app's)
+            if node.gl_type == "Clump":
+                self.assertEqual(names, ["clump", "inputs", "view", "bypass"])
+            self.assertIs(g.box_at(x + w / 2, y + h / 2), box)
+            r = dict(box.toggles)["bypass"]
+            self.assertEqual(g.toggle_at(r[0] + r[2] / 2, r[1] + r[3] / 2), (box, "bypass"))
+        self.assertIsNone(g.box_at(ox - 5000, oy + 5000))
+        # Every wire's ends: an output on a card's right edge, an input on another's left.
+        for link in tree.links:
+            a = g.socket_point(link.from_node, link.from_socket, True)
+            b = g.socket_point(link.to_node, link.to_socket, False)
+            points = canvas._wire_points(a, b, g.k)
+            self.assertAlmostEqual(points[0][0], a[0], 3)
+            self.assertAlmostEqual(points[-1][1], b[1], 3)
+        # The theme's graph colors (Charcoal's): every category a color.
+        t = canvas.theme()
+        for node in ours:
+            self.assertEqual(len(canvas._category_color(t, node)), 4)
+        rec = drawn.DrawnLayout("column")
+        rec.template_curve_mapping(tree, "name")
+        self.assertEqual(rec.children[-1].kind, "curve")
+
+    def test_8e_canvas_wires_cuts_and_searches(self):
+        """The canvas' editing (graph_canvas.py): a wire dragged from an output onto an input wires
+        them (the graph takes it), one picked up from an input and dropped on the canvas goes, a
+        cut's path across a wire finds it, and the node search finds a type by part of its name."""
+        import types
+        canvas = importlib.import_module(bu.MODULE + ".graph_canvas")
+        tree = gt.rebuild(self.head)
+        view2d = types.SimpleNamespace(view_to_region=lambda x, y, clip=False: (100.0 + x, 900.0 + y))
+        region = types.SimpleNamespace(width=4000, height=2000, view2d=view2d)
+
+        def graph():
+            return canvas.Graph(bpy.context, region, tree)
+
+        self.assertTrue(canvas.compatible("Strands", "Strands"))
+        self.assertTrue(canvas.compatible("Curves", "Guides"))
+        self.assertFalse(canvas.compatible("Strands", "Guides"))
+        self.assertFalse(canvas.compatible("Mesh", "Strands"))
+        link = next(l for l in tree.links if canvas._port_type(l.from_socket) == "Strands"
+                    and l.to_node.bl_idname != "NodeReroute")
+        source, target, into = link.from_node.name, link.to_node.name, link.to_socket.identifier
+        g = graph()
+        # Picked up from its input and dropped on the empty canvas: the wire goes.
+        at = g.socket_point(link.to_node, link.to_socket, False)
+        canvas._start_wire(tree, g, g.port_at(*at), *at)
+        self.assertEqual(canvas._wire["picked"], link)
+        self.assertIsNone(canvas._drop_wire(bpy.context, tree, g, at[0] - 3000, at[1] + 1500, True))
+        canvas._wire.clear()
+        self.assertFalse([l for l in tree.links if l.to_node.name == target and l.to_socket.identifier == into])
+        gt.sync_from_tree(tree)
+        self.assertFalse([c for c in helper_graph(self.head)["connections"] if c["to"] == target and c["input"] == into])
+        # Dragged from the output onto the input: wired again, in the graph too.
+        g = graph()
+        out = g.by_name[source].outputs[0][1]
+        dest = next(p for s, p in g.by_name[target].inputs if s.identifier == into)
+        canvas._start_wire(tree, g, g.port_at(*out, inputs=False), *out)
+        self.assertIsNone(canvas._drop_wire(bpy.context, tree, g, dest[0] + 2, dest[1] - 2, True))
+        canvas._wire.clear()
+        gt.sync_from_tree(tree)
+        self.assertIn((source, target, into), {(c["from"], c["to"], c["input"]) for c in helper_graph(self.head)["connections"]})
+        # A cut across it finds it; one beside it finds nothing.
+        g = graph()
+        a = g.socket_point(tree.nodes[source], tree.nodes[source].outputs[0], True)
+        b = g.socket_point(tree.nodes[target], tree.nodes[target].inputs[into], False)
+        wire = canvas._wire_points(a, b, g.k)
+        p, q = wire[len(wire) // 2 - 1], wire[len(wire) // 2 + 1]
+        mid = ((p[0] + q[0]) / 2, (p[1] + q[1]) / 2)
+        nx, ny = -(q[1] - p[1]), q[0] - p[0]  # across the wire there
+        n = max((nx * nx + ny * ny) ** 0.5, 1e-6)
+        hits = canvas._links_crossing(g, [(mid[0] + 20 * nx / n, mid[1] + 20 * ny / n), (mid[0] - 20 * nx / n, mid[1] - 20 * ny / n)])
+        self.assertIn((source, target), {(l.from_node.name, l.to_node.name) for l in hits})
+        self.assertFalse(canvas._links_crossing(g, [(-9000, -9000), (-8000, -9100)]))
+        # The search: part of a name finds it, its own name first.
+        items = [("Width", "Shape", "x", {}), ("Noise", "Shape", "y", {}), ("Frizz Noise", "Shape", "z", {})]
+        self.assertEqual([i[0] for i in canvas._matches(items, "noi")], ["Noise", "Frizz Noise"])
+        self.assertEqual([i[0] for i in canvas._matches(items, "shape wid")], ["Width"])
+
+    def test_8f_canvas_pins_backdrops_and_compounds(self):
+        """The canvas' double-click (graph_canvas.double_click): on a wire a pin, the wire through it
+        and the graph keeping it; on a Compound its nodes back in the graph. A drag carries a
+        selected backdrop's nodes (Blender keeps node locations in the editor's space), and its
+        corner grip is hit."""
+        import types
+        canvas = importlib.import_module(bu.MODULE + ".graph_canvas")
+        tree = gt.rebuild(self.head)
+        view2d = types.SimpleNamespace(view_to_region=lambda x, y, clip=False: (100.0 + x, 900.0 + y))
+        region = types.SimpleNamespace(width=4000, height=2000, view2d=view2d)
+
+        def graph():
+            return canvas.Graph(bpy.context, region, tree)
+
+        g = graph()
+        link = next(l for l in tree.links if canvas._port_type(l.from_socket) == "Strands"
+                    and l.from_node.bl_idname != "NodeReroute" and l.to_node.bl_idname != "NodeReroute")
+        source, target, into = link.from_node.name, link.to_node.name, link.to_socket.identifier
+        a = g.socket_point(link.from_node, link.from_socket, True)
+        b = g.socket_point(link.to_node, link.to_socket, False)
+        wire = canvas._wire_points(a, b, g.k)
+        mid = wire[len(wire) // 2]
+        self.assertEqual(g.wire_at(*mid), link)
+        before = len(gt.reroutes(tree))
+        self.assertEqual(canvas.double_click(bpy.context, g, *mid), "pin")
+        pins = gt.reroutes(tree)
+        self.assertEqual(len(pins), before + 1)
+        pin = [p for p in pins if p.select][0]
+        self.assertEqual([(l.from_node.name, l.to_node.name) for l in tree.links if l.to_node == pin], [(source, pin.name)])
+        self.assertEqual([(l.from_node.name, l.to_node.name) for l in tree.links if l.from_node == pin], [(pin.name, target)])
+        gt.sync_from_tree(tree)
+        data = gt.push_positions(self.head, tree)
+        self.assertIn((source, target, into), {(c["from"], c["to"], c["input"]) for c in data["connections"]})
+        self.assertTrue((data.get("pins") or {}).get("routes"), "the wire's pin is in the graph")
+        # A backdrop: its grip resizes, a drag of it carries its nodes.
+        for n in tree.nodes:
+            n.select = n.name in ("scalp", "guides")
+        frame = tree.nodes.new("NodeFrame")
+        frame.shrink = False
+        frame.width, frame.height = 400.0, 300.0
+        x0, y0 = gt.get_location(tree.nodes["scalp"])
+        gt.set_location(frame, (x0 - 20.0, y0 + 40.0))
+        tree.nodes["scalp"].parent = frame
+        for n in tree.nodes:
+            n.select = n == frame
+        g = graph()
+        r = dict((f, rr) for f, rr in g.frames)[frame]
+        self.assertEqual(g.grip_at(r[0] + r[2] - 3, r[1] + 3), frame)
+        self.assertIsNone(g.grip_at(r[0] + 3, r[1] + 3))
+        carried = canvas._carried(tree)
+        self.assertIn(frame, carried)
+        self.assertIn(tree.nodes["scalp"], carried)
+        self.assertNotIn(tree.nodes["guides"], carried)
+        tree.nodes.remove(frame)
+        # A Compound double-clicked: its nodes back in the graph.
+        self.assertEqual(bpy.ops.groomlab.graph_group(names="frizzNoise,width"), {"FINISHED"})
+        self.assertIn("Compound", {n["type"] for n in helper_graph(self.head)["nodes"]})
+        tree = gt.tree_of(self.head)
+        compound = next(n for n in tree.nodes if getattr(n, "gl_type", "") == "Compound")
+        g = graph()
+        box = g.by_name[compound.name]
+        x, y, w, h = box.rect
+        self.assertEqual(canvas.double_click(bpy.context, g, x + w / 2, y + 4), "open")
+        nodes = helper_graph(self.head)["nodes"]
+        self.assertNotIn("Compound", {n["type"] for n in nodes})
+        self.assertTrue({"frizzNoise", "width"} <= {n["name"] for n in nodes})
+
     def test_8b_preset_makes_the_maps_it_reads(self):
         # A preset reading a painted map the groom lacks (flow_with_guides' guideAreas): the map is
         # made (black, a vertex map), so the groom evaluates at once; applied again, it is kept.

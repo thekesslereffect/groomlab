@@ -211,6 +211,24 @@ void main() {
     FragColor = vec4(c.rgb, c.a * coverage);
 }
 """
+# A rounded rect filled with a vertical gradient (bottom color at band.x, top color at band.y) and
+# kept to that band (a node's header: the card's shape, its top part only).
+_BAND_FRAG = """
+float roundedBox(vec2 p, vec2 half_size, float r) {
+    vec2 q = abs(p) - half_size + r;
+    return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+}
+void main() {
+    float r = shape.x, soft = max(shape.z, 1.0);
+    vec2 half_size = rect.zw * 0.5;
+    float d = roundedBox(pos - rect.xy - half_size, half_size, min(r, min(half_size.x, half_size.y)));
+    float coverage = clamp(0.5 - d / soft, 0.0, 1.0);
+    coverage *= clamp(pos.y - band.x + 0.5, 0.0, 1.0) * clamp(band.y - pos.y + 0.5, 0.0, 1.0);
+    float t = clamp((pos.y - band.x) / max(band.y - band.x, 1.0), 0.0, 1.0);
+    vec4 c = mix(fill, stroke, t);
+    FragColor = vec4(c.rgb, c.a * coverage);
+}
+"""
 _ICON_VERT = """
 void main() {
     uv = position;
@@ -248,6 +266,28 @@ def _rect_shader():
         quad = batch_for_shader(shader, "TRI_FAN", {"position": ((0, 0), (1, 0), (1, 1), (0, 1))})
         _shaders["rect"] = (shader, quad)
     return _shaders["rect"]
+
+
+def _band_shader():
+    if "band" not in _shaders:
+        iface = gpu.types.GPUStageInterfaceInfo("groomlab_ui_band")
+        iface.smooth("VEC2", "pos")
+        info = gpu.types.GPUShaderCreateInfo()
+        info.push_constant("MAT4", "ModelViewProjectionMatrix")
+        info.push_constant("VEC4", "rect")
+        info.push_constant("VEC4", "fill")    # the band's bottom color
+        info.push_constant("VEC4", "stroke")  # its top color
+        info.push_constant("VEC4", "shape")   # radius, -, edge softness, -
+        info.push_constant("VEC4", "band")    # x: the band's bottom y, y: its top y
+        info.vertex_in(0, "VEC2", "position")
+        info.vertex_out(iface)
+        info.fragment_out(0, "VEC4", "FragColor")
+        info.vertex_source(_RECT_VERT)
+        info.fragment_source(_BAND_FRAG)
+        shader = gpu.shader.create_from_info(info)
+        quad = batch_for_shader(shader, "TRI_FAN", {"position": ((0, 0), (1, 0), (1, 1), (0, 1))})
+        _shaders["band"] = (shader, quad)
+    return _shaders["band"]
 
 
 def _icon_shader():
@@ -395,6 +435,36 @@ class Painter:
         shader.uniform_float("stroke", self._faded(stroke or fill))
         shader.uniform_float("shape", (radius, border if stroke else 0.0, soft, 1e9 if clip_x is None else clip_x))
         quad.draw(shader)
+
+    def band(self, r, bottom, top, radius, y0, y1):
+        """The part of rounded rect r between y0 and y1, filled from `bottom` (at y0) to `top` (at y1):
+        a card's header, its top corners rounded and its bottom edge straight."""
+        shader, quad = _band_shader()
+        gpu.state.blend_set("ALPHA")
+        shader.bind()
+        shader.uniform_float("ModelViewProjectionMatrix", self.mvp)
+        shader.uniform_float("rect", r)
+        shader.uniform_float("fill", self._faded(bottom))
+        shader.uniform_float("stroke", self._faded(top))
+        shader.uniform_float("shape", (radius, 0.0, 0.0, 0.0))
+        shader.uniform_float("band", (y0, y1, 0.0, 0.0))
+        quad.draw(shader)
+
+    def dots(self, points, radius, color):
+        """Small squares (a canvas' dot grid) centered on `points`, in one batch."""
+        if not points:
+            return
+        verts, tris = [], []
+        for x, y in points:
+            i = len(verts)
+            verts += [(x - radius, y - radius), (x + radius, y - radius), (x + radius, y + radius), (x - radius, y + radius)]
+            tris += [(i, i + 1, i + 2), (i, i + 2, i + 3)]
+        shader = gpu.shader.from_builtin("UNIFORM_COLOR")
+        batch = batch_for_shader(shader, "TRIS", {"pos": verts}, indices=tris)
+        gpu.state.blend_set("ALPHA")
+        shader.bind()
+        shader.uniform_float("color", self._faded(color))
+        batch.draw(shader)
 
     def icon(self, name, r, tint=None, alpha=1.0):
         tex = _texture(name)

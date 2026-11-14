@@ -1391,7 +1391,11 @@ def build_tree(scalp, tree, data, rt=None):
             node.parent = None
         backdrops =[b for b in data.get("backdrops") or [] if isinstance(b, dict)]
         for i, backdrop in enumerate(backdrops):
-            frame = kept_frames[i] if i < len(kept_frames) else tree.nodes.new("NodeFrame")
+            if i < len(kept_frames):
+                frame = kept_frames[i]
+            else:
+                frame = tree.nodes.new("NodeFrame")
+                frame.select = False
             frame.parent = None
             set_frame(frame, backdrop)
         for frame in kept_frames[len(backdrops):]:
@@ -1408,6 +1412,7 @@ def build_tree(scalp, tree, data, rt=None):
             fresh = node is None
             if fresh:
                 node = tree.nodes.new(cls.bl_idname)
+                node.select = False  # (Blender makes a node picked: the graph's come in unpicked)
             node.name = name
             node.gl_name = name
             node.gl_copy_of = ""
@@ -1468,6 +1473,7 @@ def build_tree(scalp, tree, data, rt=None):
             node = pin_nodes.get(pin)
             if node is None:
                 node = pin_nodes[pin] = tree.nodes.new("NodeReroute")
+                node.select = False
                 node["gl_pin"] = pin
             placed.append((node, (points[pin][0], -points[pin][1])))
         for node, at in placed:

@@ -963,6 +963,34 @@ in a new window); choosing a groom (the scene's `groomlab.groom`, in either plac
 in the open GroomLab node editors, and picking another groom's tree in an editor makes it the
 scene's groom.
 
+**The canvas** (`graph_canvas.py`). Blender's nodes take no styling, so a GroomLab Graph editor is
+drawn over in full in the app's look (uikit.py, the theme file's `graph` section): the canvas and
+its dot grid, backdrops, the app's wires, and each node as `node_graph.cpp`'s `drawNode` draws it (176
+wide, a 28 header washed with the category's color, the name, the cook time, warning and View
+badges, the header toggles Clump Colors, Expand Inputs, View and Bypass, ports down the sides, the
+type under one-port nodes), with the selected node's params docked on the right (the sidebar's
+GroomLab Node panel run through `drawn.py`; a ramp's curve drawn, a press opens Blender's curve
+editor). The tree stays the data: the canvas draws its nodes at their locations through Blender's
+view (the wheel, the middle button and Home pan and zoom it), the selection is the tree's, and a
+gizmo over the whole region takes the presses: a node picked (Shift toggles) and dragged, a box
+drawn around nodes, a header toggle, the params' widgets; a wire dragged from a port (the ports it
+can go to ringed; dropped on a card, its first free port it can take; an input's wire picked up,
+moved, or dropped on the canvas to go; a new one dropped on the canvas opens the search and wires
+the node added); the right press opens the drawn menus (a node's: `draw_node_actions`; the
+canvas': Add Node, Search Nodes, Edit, Presets, through `drawn.menu_entries` and
+`editors.PopupMenu`), Ctrl+right-drag cuts the wires it crosses. A double-click (`double_click`)
+opens a Compound (ungrouped: its nodes back in the graph) or a Script node's editor, renames a node
+by its header or a backdrop by its title, and on a wire adds a pin (a reroute the wire runs
+through, a pin of the graph); a backdrop's title bar drags it with the nodes on it (Blender keeps
+every node's location in the editor's space, so the canvas moves them too: `_carried`) and its
+corner grip resizes it. F (`frame_view`) fits the selected cards, or all, as the canvas draws them,
+beside the params. Ctrl+C and Ctrl+V are Blender's (each pasted node a node of its own). Tab is the canvas' own search (a
+field and the node types of the Add menu, `nodeitems_utils`'s, typed down; Enter or a click adds
+one at the pointer). The other keys stay Blender's and act on the selection (F, V, B, Delete,
+Ctrl+D, Ctrl+G), and **Blender Nodes** (the top bar's button; **GroomLab Look** in the header
+comes back) shows Blender's own nodes. The
+Graph Editor's own window shows the canvas alone (Blender's header and sidebar hidden).
+
 **Nodes.** One node class per operator (`GroomLabNode_<Type>`), made from `operator_specs` when
 the helper first answers and made again when its operators change: ports typed by port type,
 one socket class per type in Maya's wire colors (Strands, Guides, Mesh, Field, Curve; Curves,

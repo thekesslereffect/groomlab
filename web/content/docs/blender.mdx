@@ -320,8 +320,19 @@ Graph Editor.
 
 ## The Graph Editor
 
-**Graph Editor** (in the GroomLab tab's Graph panel) opens the groom's graph in a node editor of
-its own, as Maya's GroomLab Graph Editor shows it. Any node editor shows it too: set its type to
+**Graph Editor** (in the GroomLab tab's Graph panel) opens the groom's graph in a window of its
+own, drawn as the app's and Maya's Graph Editor: the same node cards, wires and colors, with the
+selected node's settings docked on the right. Drag nodes to move them, drag on the canvas to
+select several, and click a node header's icons to bypass it, view up to it or color its clumps;
+the wheel and the middle mouse button zoom and pan. Drag from a port to wire it (the ports it can
+go to light up); drag a wire off an input to move it, or drop it on the canvas to remove it; drop
+a new wire on the canvas to search for a node to add, already wired. **Tab** searches the nodes
+at the pointer, a right-click opens a node's menu (or, on the canvas, Add Node, Edit and Presets),
+and **Ctrl+right-drag** cuts the wires it crosses. Double-click a wire to add a pin that routes it,
+a node's header to rename it, a Compound to open it, a Script node to edit it, or a backdrop's
+title to rename it; drag a backdrop by its title to move it with its nodes, by its corner to
+resize it. **F** frames the selection (or the whole graph), **Ctrl+C** and **Ctrl+V** copy and paste. **Blender Nodes** (top right) shows the graph as
+Blender's own nodes; **GroomLab Look** in the header comes back. Any node editor shows it too: set its type to
 **GroomLab Graph** and pick the groom's graph (`<mesh> Graph`). Choosing another groom in the
 editor's header (or the GroomLab tab) shows that groom's graph.
 

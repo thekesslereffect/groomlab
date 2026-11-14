@@ -259,6 +259,7 @@ class GROOMLAB_OT_graph_open(_GraphOperator):
         if screen is None or bpy.app.background:
             return {"FINISHED"}  # no interface: the tree is made
         area = next((a for a in screen.areas if a.type == "NODE_EDITOR" and a.spaces.active.tree_type == TREE), None)
+        own = False  # the graph's own window, made here
         if area is None and self.new_window:
             before = set(context.window_manager.windows[:])
             try:
@@ -268,6 +269,7 @@ class GROOMLAB_OT_graph_open(_GraphOperator):
             window = next((w for w in context.window_manager.windows if w not in before), None)
             if window is not None:
                 area = window.screen.areas[0]
+                own = True
         if area is None:
             area = context.area
         if area is None:
@@ -277,6 +279,9 @@ class GROOMLAB_OT_graph_open(_GraphOperator):
         space = area.spaces.active
         space.node_tree = tree
         space.show_region_ui = True
+        if own:  # the graph's own window: GroomLab's canvas alone (graph_canvas.py)
+            from . import graph_canvas
+            graph_canvas.set_up_own_window(area)
         return {"FINISHED"}
 
 
@@ -286,6 +291,9 @@ class GROOMLAB_OT_graph_add_search(_EditorOperator):
     bl_label = "Add Node (Search)"
 
     def invoke(self, context, event):
+        from . import graph_canvas
+        if graph_canvas.shows_here(context):  # the canvas' own search, drawn at the pointer
+            return bpy.ops.groomlab.graph_canvas_search("INVOKE_DEFAULT")
         bpy.ops.wm.search_single_menu("INVOKE_DEFAULT", menu_idname="NODE_MT_add")
         return {"FINISHED"}
 
@@ -296,6 +304,10 @@ class GROOMLAB_OT_graph_frame(_EditorOperator):
     bl_label = "Frame"
 
     def execute(self, context):
+        from . import graph_canvas
+        if graph_canvas.shows_here(context):  # fitted to the cards as the canvas draws them
+            graph_canvas.frame_view(context)
+            return {"FINISHED"}
         if any(n.select for n in editor_tree(context).nodes):
             return bpy.ops.node.view_selected()
         return bpy.ops.node.view_all()
@@ -765,6 +777,8 @@ def draw_header(self, context):
     if tree is None:
         return
     layout = self.layout
+    from . import graph_canvas
+    graph_canvas.draw_header_toggle(layout, context)
     scene = context.scene
     space = context.space_data
     pinned = bool(getattr(space, "pin", False))
@@ -1030,9 +1044,7 @@ def draw_node_panel(layout, context, node):
     if node.gl_type == "Control" and scalp is not None:
         draw_control_slider(layout, node, scalp)
     draw_params(layout, context, node, scene)
-    col = layout.column(align=True)
-    col.separator()
-    draw_node_actions(col, context)
+    # (the node's actions are its right-click menu's, as in Maya and the app: not repeated here)
 
 
 def draw_script_editor(layout, node):
@@ -1470,6 +1482,9 @@ def _node_times(scalp):
 
 
 def _draw_overlay():
+    from . import graph_canvas
+    if graph_canvas.shows_here(bpy.context):
+        return  # (the canvas draws the badges itself, over Blender's nodes)
     try:
         _draw_overlay_now()
     except Exception as e:  # noqa: BLE001 - never break the editor's drawing
