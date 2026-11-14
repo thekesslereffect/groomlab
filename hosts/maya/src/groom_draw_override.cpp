@@ -248,7 +248,7 @@ bool GroomSubSceneOverride::requiresUpdate(const MHWRender::MSubSceneContainer&,
         // The CPU's dots are built for one camera and viewport size: another one rebuilds them.
         // The tube wires turned on or off (their guides and selection: needsUpdate's versions).
         if (shape_->tubeWires() != tubeWiresDrawn_ || shape_->tubeShaded() != tubeShadedDrawn_ ||
-            shape_->tubeWireframe() != tubeWireframeDrawn_) {
+            shape_->tubeWireframe() != tubeWireframeDrawn_ || shape_->tubeColors() != tubeColorsDrawn_) {
             return true;
         }
         if (!points_.empty() && !gpuDots_) {
@@ -409,6 +409,46 @@ void GroomSubSceneOverride::updateCardWires(MHWRender::MSubSceneContainer& conta
 
 namespace {
 
+// The tube root region map (groomlab.root_tubes.REGION_MAP): each root tube's area in its own
+// color, which the Tube card's Colors draws the tubes in.
+const char* const kTubeRegionMap = "tubeRoots";
+
+// appendTubeSurface's vertices from `first` on (one guide's tube: rings of the same count, root
+// to tip) in `color`, with what the lit, colored surface needs (DisplayGeometry::scaleSurface):
+// the shading normal again as the bitangent, the tangent along the tube, uvs x root (0) to tip (1).
+void colorTubeSurface(DisplayGeometry& batch, std::size_t first, const std::array<float, 4>& color) {
+    const std::size_t end = batch.positions.size() / 3;
+    batch.scaleSurface = true;
+    batch.uvFloats = 2;
+    batch.colors.resize(first * 4, 1.0f);
+    batch.tangents.resize(first * 3, 0.0f);
+    batch.bitangents.resize(first * 3, 0.0f);
+    batch.uvs.resize(first * 2, 0.0f);
+    constexpr std::size_t kRings = 25;  // (appendTubeSurface: kAlong + 1 rings)
+    const std::size_t count = end - first;
+    const std::size_t around = count % kRings == 0 ? count / kRings : 0;
+    auto at = [&](std::size_t v) {
+        return Vec3f(batch.positions[v * 3], batch.positions[v * 3 + 1], batch.positions[v * 3 + 2]);
+    };
+    for (std::size_t v = first; v < end; ++v) {
+        batch.colors.insert(batch.colors.end(), color.begin(), color.end());
+        Vec3f t(0.0f, 1.0f, 0.0f);
+        float u = 0.0f, w = 0.0f;
+        if (around > 0) {
+            const std::size_t k = v - first, ring = k / around, s = k % around;
+            const std::size_t a = first + (ring > 0 ? ring - 1 : ring) * around + s;
+            const std::size_t b = first + (ring + 1 < kRings ? ring + 1 : ring) * around + s;
+            const Vec3f d = at(b) - at(a);
+            if (d.length() > 0.0f) t = d.normalized();
+            u = static_cast<float>(ring) / static_cast<float>(kRings - 1);
+            w = static_cast<float>(s) / static_cast<float>(around);
+        }
+        batch.tangents.insert(batch.tangents.end(), {t.x, t.y, t.z});
+        batch.bitangents.insert(batch.bitangents.end(), {batch.normals[v * 3], batch.normals[v * 3 + 1], batch.normals[v * 3 + 2]});
+        batch.uvs.insert(batch.uvs.end(), {u, w});
+    }
+}
+
 // The mesh feeding the groom's inMesh (its worldMesh): the scalp as Maya draws it.
 bool scalpMeshPath(const MObject& groom, MDagPath& path) {
     const MPlug source = MPlug(groom, GroomShape::aInMesh).source();
@@ -546,6 +586,7 @@ void GroomSubSceneOverride::updateTubeWires(MHWRender::MSubSceneContainer& conta
     tubeWiresDrawn_ = shape_ && shape_->tubeWires();
     tubeShadedDrawn_ = shape_ && shape_->tubeShaded();
     tubeWireframeDrawn_ = shape_ && shape_->tubeWireframe();
+    tubeColorsDrawn_ = shape_ && shape_->tubeColors();
     uiSelection_ = shape_ ? shape_->selectionHash() : 0;  // the selected tubes stand out
     if (!tubeWiresDrawn_) {
         giveBack();
@@ -559,12 +600,20 @@ void GroomSubSceneOverride::updateTubeWires(MHWRender::MSubSceneContainer& conta
     const std::string hidden = MPlug(object_, GroomShape::aHiddenGuideGroups).asString().asChar();
     std::uint64_t key = hashCombine(hashCombine(shape_->hierarchyVersion(), uiSelection_), hashChars(0x7B3u, hidden));
     key = hashCombine(key, reinterpret_cast<std::uintptr_t>(hierarchy.get()));
-    key = hashCombine(key, (tubeShadedDrawn_ ? 2u : 1u) + (tubeWireframeDrawn_ ? 4u : 0u));
-    if (key == tubeWiresKey_ && container.find(kTubeWiresItem)) return;
+    key = hashCombine(key, (tubeShadedDrawn_ ? 2u : 1u) + (tubeWireframeDrawn_ ? 4u : 0u) + (tubeColorsDrawn_ ? 8u : 0u));
+    // Colors: the region map's (a color set of its name on the drawn scalp), or none.
+    const MeshPtr scalp = tubeColorsDrawn_ ? shape_->evaluatedScalp() : nullptr;
+    const bool regions = scalp && scalp->hasColorSet(kTubeRegionMap);
+    if (tubeColorsDrawn_) {
+        key = hashCombine(key, regions ? scalp->colorSetHash(kTubeRegionMap) : 0x51u);
+        key = hashCombine(key, reinterpret_cast<std::uintptr_t>(scalp.get()));
+    }
+    if (key == tubeWiresKey_ && (container.find(kTubeWiresItem) || container.find(kTubeSurfacesItem))) return;
     tubeWiresKey_ = key;
     // Every guide the brush can shape (shown, not frozen: activeTubeGuides), the selected ones
     // (soft-selected left out) apart, to stand out.
     std::vector<Vec3f> wires, selectedWires;
+    std::vector<float> wireColors;  // (Colors on, Shaded off: r g b a per end of `wires`)
     const std::map<GuideId, float> selection = shape_->guideSelectionWeights();
     const std::vector<const HierarchyGuide*> guides = activeTubeGuides(*hierarchy, hidden);
     std::size_t points = 0;
@@ -573,11 +622,43 @@ void GroomSubSceneOverride::updateTubeWires(MHWRender::MSubSceneContainer& conta
     constexpr std::size_t kBudget = 400000;  // segment ends
     const std::size_t perPoint = 2 * 32 + 2 * 8;
     const std::size_t ringStep = std::max<std::size_t>(1, (points * perPoint + kBudget - 1) / kBudget);
+    // Each tube's color (Colors): its region's where its root lies in one, else (no region map)
+    // its own from its ID; null: the plain color.
+    const float kWireAlpha = 0.6f;
+    auto colorOf = [&](const HierarchyGuide& g, std::array<float, 4>& out) {
+        if (!tubeColorsDrawn_) return false;
+        if (regions) {
+            const ScalpMesh::Color c = scalp->colorAt(kTubeRegionMap, g.root);
+            if (c[0] + c[1] + c[2] < 0.03f) return false;  // (outside every tube's region)
+            out = {c[0], c[1], c[2], 1.0f};
+            return true;
+        }
+        const std::uint64_t h = hashCombine(0x9E3779B97F4A7C15ull, static_cast<std::uint64_t>(g.id));
+        const float hue = static_cast<float>(h % 1000u) / 1000.0f;
+        const float k[3] = {5.0f, 3.0f, 1.0f};  // hsv(hue, 0.65, 0.95) to rgb
+        for (int c = 0; c < 3; ++c) {
+            const float x = std::fmod(k[c] + hue * 6.0f, 6.0f);
+            out[static_cast<std::size_t>(c)] = 0.95f * (1.0f - 0.65f * std::max(0.0f, std::min({x, 4.0f - x, 1.0f})));
+        }
+        out[3] = 1.0f;
+        return true;
+    };
+    const bool colorWires = tubeColorsDrawn_ && !tubeShadedDrawn_;
+    const float plainWire[4] = {0.45f, 0.85f, 1.0f, kWireAlpha};
+    const float grayWire[4] = {0.62f, 0.62f, 0.62f, kWireAlpha};  // (Colors on, Shaded on: the color on the surfaces)
+    const float* wireColor = tubeColorsDrawn_ ? grayWire : plainWire;
     for (const HierarchyGuide* g : guides) {
         if (!tubeWireframeDrawn_) break;  // (Wireframe off: the shaded surfaces alone, if on)
         const auto it = selection.find(g->id);
         const bool selected = it != selection.end() && it->second >= 1.0f;
+        const std::size_t before = wires.size();
         appendTubeWire(selected ? selectedWires : wires, *g, hierarchy->scale(), 8, ringStep);
+        if (colorWires && !selected) {
+            std::array<float, 4> c{};
+            if (!colorOf(*g, c)) c = {plainWire[0], plainWire[1], plainWire[2], 1.0f};
+            c[3] = kWireAlpha;
+            for (std::size_t i = before; i < wires.size(); ++i) wireColors.insert(wireColors.end(), c.begin(), c.end());
+        }
     }
     // Each as a line list (a segment's two ends a pair).
     auto geometry = [](const std::vector<Vec3f>& ends) -> std::shared_ptr<const DisplayGeometry> {
@@ -591,8 +672,14 @@ void GroomSubSceneOverride::updateTubeWires(MHWRender::MSubSceneContainer& conta
         }
         return g;
     };
-    const float normal[4] = {0.45f, 0.85f, 1.0f, 0.6f}, warm[4] = {1.0f, 0.7f, 0.15f, 1.0f};  // the selected: warm, opaque, thicker
-    updateItem(container, kTubeWiresItem, normal, 5, geometry(wires), 1.0f);
+    const float warm[4] = {1.0f, 0.7f, 0.15f, 1.0f};  // the selected: warm, opaque, thicker
+    std::shared_ptr<const DisplayGeometry> plain = geometry(wires);
+    if (plain && colorWires && wireColors.size() == wires.size() * 4) {
+        auto colored = std::make_shared<DisplayGeometry>(*plain);
+        colored->colors = std::move(wireColors);
+        plain = colored;
+    }
+    updateItem(container, kTubeWiresItem, wireColor, 5, plain, 1.0f);
     updateItem(container, kTubeWiresSelectedItem, warm, 5, geometry(selectedWires), 2.0f);
     // Shaded (the Tube card's switch): the same tubes as shaded surfaces, a little narrower so the
     // wires (on the outline itself, with Wireframe on) are not lost in its facets.
@@ -602,7 +689,14 @@ void GroomSubSceneOverride::updateTubeWires(MHWRender::MSubSceneContainer& conta
         surfaces->triangles = true;
         surfaces->surface = true;
         constexpr float kInset = 0.985f;
-        for (const HierarchyGuide* g : guides) appendTubeSurface(*surfaces, *g, hierarchy->scale() * kInset);
+        for (const HierarchyGuide* g : guides) {
+            const std::size_t before = surfaces->positions.size() / 3;
+            appendTubeSurface(*surfaces, *g, hierarchy->scale() * kInset);
+            if (!tubeColorsDrawn_) continue;
+            std::array<float, 4> c{};
+            if (!colorOf(*g, c)) c = {0.5f, 0.56f, 0.62f, 1.0f};
+            colorTubeSurface(*surfaces, before, c);
+        }
     }
     const float shade[4] = {0.5f, 0.56f, 0.62f, 1.0f};
     updateItem(container, kTubeSurfacesItem, shade, MHWRender::MRenderItem::sDormantFilledDepthPriority, surfaces, 1.0f);

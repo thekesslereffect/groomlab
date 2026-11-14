@@ -1197,18 +1197,7 @@ void appendTubeSurface(DisplayGeometry& batch, const HierarchyGuide& g, float sc
             batch.indices.insert(batch.indices.end(), {a, b, d, a, d, c});
         }
     }
-    // A flat cap at the tip (a fan round the guide's tip).
-    const Vec3f tip = g.points[n - 1];
-    const Vec3f tipWay = round ? rotationMinimizingFrames(g.points.data(), n, g.frameUp)[n - 1].tangent
-                               : (tip - g.points[n - 2]).normalized();
-    const auto cap = static_cast<std::uint32_t>(batch.positions.size() / 3);
-    batch.positions.insert(batch.positions.end(), {tip.x, tip.y, tip.z});
-    batch.normals.insert(batch.normals.end(), {tipWay.x, tipWay.y, tipWay.z});
-    for (int s = 0; s < kAround; ++s) {
-        const std::uint32_t ring = base + static_cast<std::uint32_t>(kAlong * kAround);
-        batch.indices.insert(batch.indices.end(),
-                             {cap, ring + static_cast<std::uint32_t>(s), ring + static_cast<std::uint32_t>((s + 1) % kAround)});
-    }
+    // (Open at the tip: no cap.)
 }
 
 // ---- Instances --------------------------------------------------------------------------------

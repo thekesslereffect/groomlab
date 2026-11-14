@@ -608,11 +608,15 @@ public:
     // groom on every redraw: every guide the brush can shape (activeTubeGuides: shown, not
     // frozen), the selected ones brighter. Off: nothing drawn and nothing worked out. `shaded`
     // and `wireframe` (the Tube card's Shaded and Wireframe, GH-63): their surfaces drawn shaded,
-    // their wires drawn (over them), each on its own.
-    void setTubeWires(bool on, bool shaded = false, bool wireframe = true);
+    // their wires drawn (over them), each on its own. `colors` (the Tube card's Colors): each tube
+    // in its region's color on the tube root region map (kTubeRegionMap), or with no such map a
+    // color of its own (from its guide's ID): its surface's color when shaded (its wires then
+    // gray), else its wires'.
+    void setTubeWires(bool on, bool shaded = false, bool wireframe = true, bool colors = true);
     bool tubeWires() const { return tubeWires_; }
     bool tubeShaded() const { return tubeWires_ && tubeShaded_; }
     bool tubeWireframe() const { return tubeWires_ && tubeWireframe_; }
+    bool tubeColors() const { return tubeWires_ && tubeColors_; }
 
     // Selection weights on the evaluated hierarchy (1: selected, below 1: soft),
     // and a hash of what they depend on, for the draw override.
@@ -782,6 +786,7 @@ private:
     bool tubeWires_ = false;
     bool tubeShaded_ = false;
     bool tubeWireframe_ = true;
+    bool tubeColors_ = true;
     std::string reported_;  // the last message sent to the Script Editor
     std::string reportedHeavy_;  // the last "heavy" Scatter note warned about (finishView)
 

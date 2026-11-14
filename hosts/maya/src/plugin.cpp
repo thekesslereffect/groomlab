@@ -30,6 +30,7 @@
 #include "import_cmd.h"
 #include "file_node.h"
 #include "marker_set.h"
+#include "root_outlines.h"
 #include "parts_cmd.h"
 #include "scalp_maps_cmd.h"
 #include "pen_pressure.h"
@@ -146,6 +147,16 @@ PLUGIN_EXPORT MStatus initializePlugin(MObject obj) {
     status = MHWRender::MDrawRegistry::registerDrawOverrideCreator(groomlab::maya::MarkerSet::kDrawDbClassification,
                                                                    groomlab::maya::MarkerSet::kRegistrantId,
                                                                    groomlab::maya::MarkerSetDrawOverride::creator);
+    CHECK_MSTATUS_AND_RETURN_IT(status);
+
+    // The Tube tool's root outlines (root_outlines.h).
+    status = plugin.registerNode(groomlab::maya::RootOutlines::kTypeName, groomlab::maya::RootOutlines::kTypeId,
+                                 groomlab::maya::RootOutlines::creator, groomlab::maya::RootOutlines::initialize,
+                                 MPxNode::kLocatorNode, &groomlab::maya::RootOutlines::kDrawDbClassification);
+    CHECK_MSTATUS_AND_RETURN_IT(status);
+    status = MHWRender::MDrawRegistry::registerDrawOverrideCreator(groomlab::maya::RootOutlines::kDrawDbClassification,
+                                                                   groomlab::maya::RootOutlines::kRegistrantId,
+                                                                   groomlab::maya::RootOutlinesDrawOverride::creator);
     CHECK_MSTATUS_AND_RETURN_IT(status);
 
     status = plugin.registerCommand(VersionCmd::kName, VersionCmd::creator);
@@ -410,6 +421,9 @@ PLUGIN_EXPORT MStatus uninitializePlugin(MObject obj) {
     CHECK_MSTATUS_AND_RETURN_IT(MHWRender::MDrawRegistry::deregisterDrawOverrideCreator(
         groomlab::maya::MarkerSet::kDrawDbClassification, groomlab::maya::MarkerSet::kRegistrantId));
     CHECK_MSTATUS_AND_RETURN_IT(plugin.deregisterNode(groomlab::maya::MarkerSet::kTypeId));
+    CHECK_MSTATUS_AND_RETURN_IT(MHWRender::MDrawRegistry::deregisterDrawOverrideCreator(
+        groomlab::maya::RootOutlines::kDrawDbClassification, groomlab::maya::RootOutlines::kRegistrantId));
+    CHECK_MSTATUS_AND_RETURN_IT(plugin.deregisterNode(groomlab::maya::RootOutlines::kTypeId));
     MGlobal::executeCommand("if (stringArrayContains(\"groomLabFile.fileName\", `filePathEditor -query -listRegisteredTypes`)) "
                             "filePathEditor -deregisterType \"groomLabFile.fileName\" -temporary;");
     CHECK_MSTATUS_AND_RETURN_IT(plugin.deregisterNode(groomlab::maya::GroomFileNode::kTypeId));

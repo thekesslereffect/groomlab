@@ -168,10 +168,15 @@ The selected guides' tubes draw brighter.
   stroke on a tube gives it one section per guide point, so you shape it point by point.
   Symmetry, frozen and soloed guides work as with every brush; each stroke is one
   undo step.
-- **Shaded** (off by default) draws the tubes as shaded surfaces, easier to judge a tube's root,
-  mid and tip profiles; **Wireframe** (on by default) draws them as see-through wires, over the
-  surfaces when both are on. In Maya they sit under **Paints** (`groomLabBrushCtx -tubeShaded true
-  -tubeWireframe false`); in Blender and the app at the top of the **Profile** block.
+- **Shaded** (off by default) draws the tubes as shaded surfaces, open at the tip, easier to judge
+  a tube's root, mid and tip profiles; **Wireframe** (on by default) draws them as see-through
+  wires, over the surfaces when both are on. In Maya they sit under **Paints**
+  (`groomLabBrushCtx -tubeShaded true -tubeWireframe false`); in Blender and the app at the top of
+  the **Profile** block.
+- **Colors** (Maya, on by default) colors each tube as its region on the `tubeRoots` region map
+  (see Root tubes below), or, in a groom with no such map, in a color of its own. With **Shaded**
+  on the color goes on the shaded surfaces and the wires stay gray; with it off, on the wires.
+  The selected tubes' wires stay orange. (`groomLabBrushCtx -tubeColors false` turns it off.)
 - **Ctrl** does the opposite: it shrinks, rounds or untwists the tubes.
 - **Shift+drag smooths** what the brush paints: the channel picked (width, flatness or twist) of
   the sections under the brush, each evened out toward its neighbours along the guide. The
@@ -292,13 +297,25 @@ The Tube tool's **Tube roots** section draws a tube the way Tonic does: its root
 - A root's CVs are kept on the scalp itself, apart from its guide: combing, brushing, retwisting
   or resizing the tube never moves them, and its region stays where it was drawn. Only **Edit
   roots** changes them.
-- **Edit roots** shows the root tubes' outlines and CVs (the selected guides' tubes, or every root
-  tube with none selected), the guides hidden. Drag CVs on the scalp (a CV shared with a
-  neighbour moves with it; Ctrl+click an edge to add a CV there, on every outline sharing that
-  edge), then **Finish edit**: each changed tube is moved to its new root and
-  its section refitted (its taper and what brushes painted kept), and the regions are updated, in
-  one undo step. The root whose CV you last touched shows green.
-- **Select root** shows every root's middle. Click one to select its root (green), Shift+click to
+- Every root shows in its region's color, the same as the `tubeRoots` map paints it, with its CVs
+  as large dots drawn over its edges.
+- **Edit roots** shows the root tubes' outlines, filled, and their CVs (the selected guides'
+  tubes, or every root tube with none selected), the guides hidden. Drag CVs on the scalp:
+  - A CV shared with a neighbour moves with it.
+  - With **Snap to neighbours** a CV snaps onto another root's CVs and edges, never onto its own
+    root's.
+  - **Ctrl+click an edge** to add a CV there, on every outline sharing that edge.
+  - **Ctrl+click a CV** to take it out of the root edged white only; a neighbour sealed to it keeps
+    its own. A root keeps at least 3 CVs.
+  - **Undo CV** takes back the last CV move. Maya's Ctrl+Z undoes the scene, not a CV move; a root
+    it changes shows as the scene now has it.
+
+  The roots whose CVs you last touched are edged white. **Finish edit** moves each changed tube to
+  its new root, refits its section (its taper and what brushes painted kept) and updates the
+  regions, in one undo step. A root that can't take its new outline keeps its old one and the
+  status line says why; the edit finishes either way. Leaving the tool any other way (another
+  tool, **Draw root**, **Select root**) finishes the edit too, so no edit is lost.
+- **Select root** shows every root's middle. Click one to select its root (edged white), Shift+click to
   add roots or take one out, and drag a selected one to move them all over the scalp as one; with
   **Snap to neighbours** their CVs sealed onto a root not selected stay put while the others
   slide. Their tubes and hierarchies move with them on release, in one undo step. **Duplicate**

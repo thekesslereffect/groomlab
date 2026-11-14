@@ -1062,6 +1062,14 @@ def region_colors(count):
     return out
 
 
+def root_colors(groom, tubes=None):
+    """{guide: (r, g, b)}: each root tube's color on the region map (update_regions paints tube k
+    of root_tubes in region_colors' k-th), for the Tube tool's outlines. `tubes`: root_tubes(groom)
+    when not given."""
+    tubes = root_tubes(groom) if tubes is None else tubes
+    return dict(zip(tubes, region_colors(len(tubes))))
+
+
 def _scalp_points(groom):
     """The scalps' vertices in world space, in the order the groom joins them (its own scalp, then
     the others by index), and each scalp's MFnMesh with its first vertex's index."""

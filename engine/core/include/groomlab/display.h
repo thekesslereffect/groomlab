@@ -256,7 +256,8 @@ std::size_t appendGuideCurve(DisplayGeometry& geometry, const std::vector<Vec3f>
 std::vector<const HierarchyGuide*> activeTubeGuides(const GuideHierarchy& hierarchy, const std::string& hiddenGuideGroups,
                                                     const std::string& freeze = "freeze");
 // A guide's tube as a shaded surface: its shape's outline at rings along it, each section turned,
-// flattened and sized as the tube says (tube.h; widths times scale, the size shown), capped at the tip.
+// flattened and sized as the tube says (tube.h; widths times scale, the size shown), open at the tip
+// (no cap): kAlong + 1 = 25 rings of the same count, root to tip.
 void appendTubeSurface(DisplayGeometry& geometry, const HierarchyGuide& guide, float scale = 1.0f);
 // The same tube as a wire (what the hosts draw while the Shape brush is on): its shape's outline at
 // every guide point, where the sections the brush paints sit (every `ringStep`-th point's, the

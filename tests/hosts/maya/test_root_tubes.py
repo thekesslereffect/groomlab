@@ -601,6 +601,140 @@ class RootTubes(unittest.TestCase):
         tool.press_edit(x, y)
         self.assertEqual(tool.touched, {int(a)})
 
+    def _pair(self):
+        """Two roots sealed along an edge (a's CVs 0 and 1 are b's 1 and 0)."""
+        a = root_tubes.make_root_tube(self.groom, ring((0.0, 1.0, 0.0), 0.12, count=4), regions=False)
+        ca = root_tubes.root_outline(self.groom, a)
+        out = tm._sub(tm.lerp(ca[0], ca[1], 0.5), root_tubes._centroid(ca))
+        b = root_tubes.make_root_tube(self.groom, [ca[1], ca[0], on_sphere(tm._add(ca[0], out)),
+                                                   on_sphere(tm._add(ca[1], out))])
+        return int(a), int(b)
+
+    def test_the_preview_draws_each_root_in_its_regions_color(self):
+        from groomlab.ui import root_tube_tool as rt
+        a, b = self._pair()
+        tool = self._tool()
+        tool.start(self.groom, "edit")
+        shape = rt.PREVIEW + "Shape"
+        self.assertEqual(cmds.nodeType(shape), rt.OUTLINES_NODE)
+        counts = list(cmds.getAttr(shape + ".counts"))
+        styles = list(cmds.getAttr(shape + ".styles"))
+        colors = [tuple(c) for c in cmds.getAttr(shape + ".colors")]
+        self.assertEqual(counts, [4, 4])
+        want = root_tubes.root_colors(self.groom)
+        self.assertEqual(len(set(want.values())), 2, "each root a color of its own")
+        for got, g in zip(colors, [a, b]):
+            for x, y in zip(got, want[g]):
+                self.assertAlmostEqual(x, y, places=5)
+        for st in styles:
+            self.assertEqual(st & (rt.CLOSED | rt.FILLED | rt.DOTS), rt.CLOSED | rt.FILLED | rt.DOTS)
+            self.assertFalse(st & rt.HIGHLIGHT)
+        # The region map paints them the same colors.
+        maps = __import__("json").loads(cmds.getAttr(self.groom + ".scalpMaps"))
+        values = maps[root_tubes.REGION_MAP]["values"]
+        seen = set(tuple(round(v, 2) for v in values[4 * i:4 * i + 3]) for i in range(len(values) // 4))
+        for g in (a, b):
+            self.assertIn(tuple(round(v, 2) for v in want[g]), seen)
+        tool.modifier = lambda: ""
+        self.addCleanup(lambda: tool.__dict__.pop("modifier", None))
+        x, y = tool.to_screen(tool.edits[a][2])
+        tool.press_edit(x, y)
+        styles = list(cmds.getAttr(shape + ".styles"))
+        self.assertTrue(styles[0] & rt.HIGHLIGHT and not styles[1] & rt.HIGHLIGHT, "the root touched edged white")
+        tool.leave()
+        self.assertFalse(cmds.objExists(rt.PREVIEW))
+
+    def test_a_ctrl_click_on_a_sealed_cv_takes_it_out_of_the_root_meant_only(self):
+        a, b = self._pair()
+        tool = self._tool()
+        tool.start(self.groom, "edit")
+        keys = {"mod": ""}
+        tool.modifier = lambda: keys["mod"]
+        self.addCleanup(lambda: tool.__dict__.pop("modifier", None))
+        # b first touched (its far CV), then Ctrl+click on the CV it shares with a.
+        x, y = tool.to_screen(tool.edits[b][2])
+        tool.press_edit(x, y)
+        tool.release()
+        tool.edits[a].insert(2, on_sphere(tm.lerp(tool.edits[a][1], tool.edits[a][2], 0.5)))  # (a has 5: room to lose one)
+        tool.edits[b].insert(3, on_sphere(tm.lerp(tool.edits[b][2], tool.edits[b][3], 0.5)))
+        shared = tool.edits[b][0]
+        keys["mod"] = "ctrl"
+        x, y = tool.to_screen(shared)
+        tool.press_edit(x, y)
+        self.assertEqual(len(tool.edits[b]), 4, "taken out of b, the root touched")
+        self.assertEqual(len(tool.edits[a]), 5, "a keeps its own")
+        self.assertLess(nearest(shared, tool.edits[a]), 1e-5)
+        tool.undo_cv()
+        self.assertEqual(len(tool.edits[b]), 5, "Undo CV puts it back")
+        # A root down to 3 CVs keeps them.
+        for _ in range(2):
+            tool.touched = {b}
+            x, y = tool.to_screen(tool.edits[b][-1])
+            tool.press_edit(x, y)
+        self.assertEqual(len(tool.edits[b]), 3)
+        x, y = tool.to_screen(tool.edits[b][-1])
+        tool.press_edit(x, y)
+        self.assertEqual(len(tool.edits[b]), 3)
+        self.assertEqual(tool.finish_edit(), 2)
+        self.assertEqual(len(root_tubes.root_outline(self.groom, b)), 3)
+        self.assertEqual(len(root_tubes.root_outline(self.groom, a)), 5)
+
+    def test_a_cv_never_snaps_onto_its_own_root(self):
+        a, b = self._pair()
+        tool = self._tool()
+        tool.settings["snap"] = True
+        tool.start(self.groom, "edit")
+        tool.modifier = lambda: ""
+        self.addCleanup(lambda: tool.__dict__.pop("modifier", None))
+        # b's far CV dragged to 5 px from its own neighbouring CV (b's 3): it stays where it is put.
+        own = tool.edits[b][3]
+        x, y = tool.to_screen(tool.edits[b][2])
+        tool.press_edit(x, y)
+        tx, ty = tool.to_screen(own)
+        tool.view_point = lambda: (tx + 5.0, ty)
+        self.addCleanup(lambda: tool.__dict__.pop("view_point", None))
+        tool.drag_event()
+        tool.release()
+        self.assertGreater(tm._dist(tool.edits[b][2], own), 1e-3, "not snapped onto its own CV")
+        self.assertEqual(len(tool.drag), 0)
+        # ... and a CV of b dragged near a's free CV snaps onto it (another root).
+        x, y = tool.to_screen(tool.edits[b][2])
+        tool.press_edit(x, y)
+        ax, ay = tool.to_screen(tool.edits[a][2])
+        tool.view_point = lambda: (ax + 4.0, ay)
+        tool.drag_event()
+        self.assertLess(tm._dist(tool.edits[b][2], tool.edits[a][2]), 1e-6)
+
+    def test_leaving_the_tool_while_editing_keeps_the_edits(self):
+        a, _b = self._pair()
+        tool = self._tool()
+        tool.start(self.groom, "edit")
+        c = root_tubes._centroid(tool.edits[a])
+        moved = on_sphere(tm._add(c, tm._mul(tm._sub(tool.edits[a][2], c), 1.3)))
+        tool.edits[a][2] = moved
+        tool.start(self.groom, "select")  # (another mode: the edit finished first)
+        self.assertLess(nearest(moved, root_tubes.root_outline(self.groom, a)), 1e-3)
+        tool.start(self.groom, "edit")
+        moved2 = on_sphere(tm._add(c, tm._mul(tm._sub(tool.edits[a][3], c), 1.3)))
+        tool.edits[a][3] = moved2
+        tool.leave()  # (another tool)
+        self.assertEqual(tool.mode, "place")
+        self.assertLess(nearest(moved2, root_tubes.root_outline(self.groom, a)), 1e-3)
+
+    def test_finish_never_strands_the_edit(self):
+        """A root whose CV was dragged onto its neighbour, and Maya's Undo taking away a root being
+        edited: Finish still finishes, edit mode left."""
+        a, b = self._pair()
+        tool = self._tool()
+        tool.start(self.groom, "edit")
+        tool.edits[a][2] = tool.edits[a][3]  # (two CVs one)
+        cmds.undo()  # Maya's Undo: b (made last) taken away while editing
+        tool.undone()
+        self.assertNotIn(b, tool.edits)
+        self.assertEqual(tool.finish_edit(), 1)
+        self.assertEqual(tool.mode, "place")
+        self.assertEqual(len(root_tubes.root_outline(self.groom, a)), 3)
+
     def test_hierarchy_levels_split_tubes_in_two(self):
         root_tubes.make_root_tube(self.groom, ring((0.0, 1.0, 0.0), 0.2, count=6), length=0.8, regions=False)
         root_tubes.make_root_tube(self.groom, ring((0.5, 0.8, 0.0), 0.15, count=5), length=0.8, regions=False)

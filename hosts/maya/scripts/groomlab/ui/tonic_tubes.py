@@ -53,7 +53,8 @@ class TonicTubes(QtCore.QObject):
                                         "neighbour stay put). Again: leave", False, "rootTubeSelect")
         self.select_root.clicked.connect(self.toggle_select)
         self.root_block.add(widgets.chip_row((self.draw_root, self.edit_root, self.select_root)))
-        self.undo_cv = widgets.chip("Undo CV", "Take back the last CV (or the drawn path)", None, "rootTubeUndoCv")
+        self.undo_cv = widgets.chip("Undo CV", "Take back the last CV (or the drawn path); in Edit roots, the last "
+                                    "CV move", None, "rootTubeUndoCv")
         self.undo_cv.clicked.connect(lambda: self._run(self.tool.undo_cv))
         self.delete_root = widgets.chip("Delete", "Delete the selected root (Select root): its tube and the tube "
                                         "hierarchy under it", None, "rootTubeDelete")
@@ -153,7 +154,7 @@ class TonicTubes(QtCore.QObject):
         self.edit_root.setChecked(editing)
         self.edit_root.setText("Finish edit" if editing else "Edit roots")
         self.select_root.setChecked(selecting)
-        self.undo_cv.setEnabled(mode in ("place", "draw"))
+        self.undo_cv.setEnabled(mode in ("place", "draw", "edit"))
         self.delete_root.setEnabled(picked)
         self.duplicate_root.setEnabled(picked)
         self.duplicate_root.setChecked(mode == "duplicate")
@@ -262,7 +263,9 @@ class TonicTubes(QtCore.QObject):
         self._enter("place", self.draw_root)
 
     def toggle_edit(self, _on=None):
-        if self._mode() == "edit":  # Finish edit: the edits given to the roots, the mode left
+        # Finish edit (the button said so, even should Maya have changed tools meanwhile): the
+        # edits given to the roots, the mode left; never edit mode begun again.
+        if self._mode() == "edit" or self.edit_root.text() == "Finish edit":
             self._run(self.tool.finish_edit)
             if self.tool.mode != "edit":  # (finished; on an error the edits stay, still editing)
                 self.back_to_brush()

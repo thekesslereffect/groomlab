@@ -1427,6 +1427,14 @@ class ToolPalette(QtWidgets.QWidget):
                                              "surfaces when Shaded is on)", True, "tubeWireframe")
         self.tube_wireframe.toggled.connect(lambda on: self.push(tubeWireframe=bool(on)))
         self.tube_channel_box.add(self.tube_wireframe.row)
+        # Colors: each tube in its region's color on the tube root region map (tubeRoots), a color of
+        # its own without one; on the shaded surfaces with Shaded on (the wires gray), else the wires.
+        self.tube_colors = widgets.switch("Colors", "Color each tube as its region on the tube root region map "
+                                          "(tubeRoots), or a color of its own when there is none: the shaded "
+                                          "surfaces with Shaded on (the wires stay gray), else the wires", True,
+                                          "tubeColors")
+        self.tube_colors.toggled.connect(lambda on: self.push(tubeColors=bool(on)))
+        self.tube_channel_box.add(self.tube_colors.row)
         card.addWidget(self.tube_channel_box)
 
         # Select: the soft radius (its selection's), then the profile and the selected guides' tubes.
@@ -2423,7 +2431,8 @@ class ToolPalette(QtWidgets.QWidget):
         try:
             groomlab.brush_tool(tool, **kwargs)
             # (The context's own: not stroke settings.)
-            self.push(tubeShaded=self.tube_shaded.isChecked(), tubeWireframe=self.tube_wireframe.isChecked())
+            self.push(tubeShaded=self.tube_shaded.isChecked(), tubeWireframe=self.tube_wireframe.isChecked(),
+                      tubeColors=self.tube_colors.isChecked())
         except (RuntimeError, ValueError) as e:
             self.tool_failed(e)
         self.show_tool_settings()

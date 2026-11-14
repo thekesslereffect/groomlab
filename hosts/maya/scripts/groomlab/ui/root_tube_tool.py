@@ -12,9 +12,14 @@ it puts the tube back and the outline away.
 
 Edit roots: the root tubes (the selected guides' or, with none selected, every root tube) show as
 their root outlines with their CVs, the guides hidden; dragging a CV moves it on the scalp (CVs
-shared with a neighbour, sealed, move together; Ctrl+click an edge adds a CV there, on every
-outline sharing the edge). The root last touched shows green. Finish gives each changed tube its
-new root and updates the regions (groomlab.root_tubes.edit_root_tube).
+shared with a neighbour, sealed, move together; with Snap a CV snaps onto another root's CVs and
+edges, never its own root's; Ctrl+click an edge adds a CV there, on every outline sharing the
+edge; Ctrl+click a CV takes it out of the root edged white only, not out of a neighbour sealed to
+it). The roots last touched are edged white. Undo CV takes back the last CV move. Finish gives
+each changed tube its new root and updates the regions (groomlab.root_tubes.edit_root_tube);
+leaving the tool any other way (another tool, Draw root, Select root) finishes the edit too, so
+no edit is lost. Maya's Undo while editing undoes the scene, not a CV move: the roots it changed
+come back as the scene has them.
 
 Select root: every root shows its outline and its middle; clicking a middle selects that root
 (green; Shift+click adds a root to the selection or takes it out), dragging a selected one carries
@@ -25,8 +30,9 @@ the scalp (no button held) and a click sets a copy of them, their tubes and hier
 (groomlab.root_tubes.duplicate_root_tube); Delete removes the selected roots, their tubes and
 hierarchies.
 
-The outlines and strokes are drawn with temporary curves under PREVIEW (not in the undo queue,
-removed when the tool is left).
+Every root shows in its region's color (as the region map paints it), filled, with its CVs as dots
+over its edges. The outlines and strokes are drawn by the plugin's groomLabRootOutlines under
+PREVIEW (its attributes set outside the undo queue; removed when the tool is left).
 """
 
 import math
@@ -40,12 +46,18 @@ CONTEXT = "groomLabRootTubeCtx"
 PREVIEW = "glRootTubePreview"
 PICK_PIXELS = 12
 
-# Placing: the outline amber, closed (drawing its path) green. A finished root neutral; the one
-# being edited, selected or carried green.
+# Placing: the outline amber, closed (drawing its path) green. A finished root in its region's
+# color (root_tubes.root_colors), filled; the one being edited, selected or carried edged white,
+# its CVs shown. "root": a root the region map has no color for yet.
 COLORS = {"outline": (1.0, 0.75, 0.15), "closing": (0.3, 1.0, 0.4), "active": (0.3, 1.0, 0.4),
           "stroke": (0.3, 0.85, 1.0), "root": (0.85, 0.85, 0.9), "neighbour": (0.55, 0.55, 0.6)}
 
 MODES = ("place", "draw", "edit", "select", "duplicate")
+
+# The preview's node (the plugin's, root_outlines.h) and its styles' bits.
+OUTLINES_NODE = "groomLabRootOutlines"
+CLOSED, FILLED, DOTS, HIGHLIGHT, MARKER = 1, 2, 4, 8, 16
+DOT_PIXELS = 9.0  # the CV dots' size across
 
 
 class _NoUndo(object):
@@ -81,7 +93,10 @@ class RootTubeTool(object):
         self.edits = {}         # edit mode: {guide: [cvs]}
         self.original = {}      # ... as they were
         self.drag = []          # edit mode: the CVs being dragged [(guide, index)]
-        self.touched = set()    # edit mode: the roots last touched (green)
+        self.touched = set()    # edit mode: the roots last touched (edged white)
+        self.current = None     # ... the root last clicked (Ctrl+click on a sealed CV takes it out of this one)
+        self.history = []       # ... the edits before each CV move (Undo CV)
+        self.scope = False      # ... only the selected guides' roots
         self.roots = {}         # select mode: {guide: [cvs]}
         self.middles = {}       # ... {guide: (middle, normal)}
         self.picked = []        # ... the selected roots' guides (the last picked last)
@@ -93,6 +108,8 @@ class RootTubeTool(object):
         self.restored = None    # ... the one an undo brought back (a redo puts it away again)
         self.callbacks = []     # Maya's Undo and Redo events, while the tool is up
         self.hover_filter = None
+        self.colors = {}        # {guide: its region's color} (recolor)
+        self.facing = {}        # {guide: the scalp's normal under its middle}
 
     # -- Plumbing ---------------------------------------------------------------------
 
@@ -178,10 +195,12 @@ class RootTubeTool(object):
                                 undoMode="step", name=CONTEXT)
         cmds.draggerContext(CONTEXT, edit=True, pressCommand=_press, dragCommand=_drag, releaseCommand=_release,
                             finalize=_finalize)
+        self.finish_pending()
         self.reset()
         self.groom = groom
         self.mode = mode
         self.last_made = self.restored = None
+        self.recolor()
         self.listen(True)
         if cmds.currentCtx() != CONTEXT:
             cmds.setToolTo(CONTEXT)
@@ -199,19 +218,31 @@ class RootTubeTool(object):
         self.cvs, self.stroke, self.drag = [], [], []
         self.center = self.normal = None
         self.edits, self.original, self.touched = {}, {}, set()
+        self.current, self.history = None, []
         self.roots, self.middles, self.move, self.ghost = {}, {}, None, None
         self.hover(False)
         self.show_guides(True)
         self.clear_preview()
 
     def leave(self):
-        """The tool put away: its preview removed, the guides shown again (edits not finished are
-        dropped)."""
+        """The tool put away: edits not finished given to their roots (finish_edit), its preview
+        removed, the guides shown again."""
+        self.finish_pending()
         self.reset()
         self.mode = "place"
         self.picked = []
         self.last_made = self.restored = None
         self.listen(False)
+        try:  # (the Groom Tools card's buttons, once Maya has its new tool)
+            cmds.evalDeferred(lambda: _guarded(lambda: self.say("")), lowestPriority=True)
+        except (RuntimeError, TypeError):
+            pass
+
+    def finish_pending(self):
+        """Edits not finished (the tool left or its mode changed while editing): finished."""
+        if self.mode == "edit" and self.edits and self.groom and cmds.objExists(self.groom):
+            if any(cvs != self.original.get(g) for g, cvs in self.edits.items()):
+                self.finish_edit()
 
     def listen(self, on):
         om, _omui = _om()
@@ -231,6 +262,8 @@ class RootTubeTool(object):
             return
         if self.mode in ("select", "duplicate"):
             return self.reload_roots()
+        if self.mode == "edit":
+            return self.reconcile_edits()
         last = self.last_made
         if not last or self.mode != "place" or self.cvs:
             return
@@ -238,6 +271,7 @@ class RootTubeTool(object):
             return
         self.last_made = None
         self.restored = last
+        self.recolor()
         self.cvs = list(last["cvs"])
         self.neighbours = root_tubes.snap_targets(self.groom) if self.settings["snap"] else []
         if last["drawn"]:
@@ -256,6 +290,8 @@ class RootTubeTool(object):
             return
         if self.mode in ("select", "duplicate"):
             return self.reload_roots()
+        if self.mode == "edit":
+            return self.reconcile_edits()
         back = self.restored
         if not back or self.mode not in ("place", "draw"):
             return
@@ -263,6 +299,7 @@ class RootTubeTool(object):
             return
         self.restored = None
         self.last_made = back
+        self.recolor()
         self.mode = "place"
         self.cvs, self.stroke, self.center = [], [], None
         self.neighbours = root_tubes.snap_targets(self.groom) if self.settings["snap"] else []
@@ -341,6 +378,8 @@ class RootTubeTool(object):
             self.make(self.stroke)
         elif self.mode == "edit":
             self.drag = []
+            if self.history and self.history[-1] == self.edits:  # (a click that moved nothing)
+                self.history.pop()
         elif self.mode == "select":
             self.release_select()
         elif self.mode == "duplicate":
@@ -382,13 +421,26 @@ class RootTubeTool(object):
         self.restored = None
         self.mode = "place"
         self.cvs, self.stroke, self.center = [], [], None
+        self.recolor()
         self.neighbours = root_tubes.snap_targets(self.groom) if s["snap"] else []
         self.redraw()
         self.say("Made root tube %s (its own region on %s). Draw the next root." % (guide, root_tubes.REGION_MAP))
         return guide
 
     def undo_cv(self):
-        """The last CV taken back (the path dropped first in draw mode)."""
+        """The last CV taken back (the path dropped first in draw mode; in edit mode the last CV
+        moved, added or taken out put back)."""
+        if self.mode == "edit":
+            if not self.history:
+                self.say("No CV move to take back.")
+                return
+            before = self.history.pop()
+            self.touched = set(g for g in before if before[g] != self.edits.get(g))
+            self.edits.update(dict((g, list(c)) for g, c in before.items() if g in self.edits))
+            self.drag = []
+            self.redraw()
+            self.say("CV move taken back.")
+            return
         if self.mode == "draw":
             self.mode, self.stroke, self.center = "place", [], None
         elif self.mode == "place" and self.cvs:
@@ -400,6 +452,7 @@ class RootTubeTool(object):
     def begin_edit(self):
         selected = groomlab.selected_guides(self.groom)
         tubes = root_tubes.root_tubes(self.groom, selected) if selected else []
+        self.scope = bool(tubes)  # (only the selected guides' roots: Undo brings no others in)
         if not tubes:
             tubes = root_tubes.root_tubes(self.groom)
         if not tubes:
@@ -415,7 +468,9 @@ class RootTubeTool(object):
         self.original = dict((g, list(c)) for g, c in self.edits.items())
         self.touched = set()
         self.show_guides(False)
-        self.say("Editing %d root%s: drag their CVs on the scalp (Ctrl+click an edge to add one), then Finish edit." %
+        self.neighbours = root_tubes.snap_targets(self.groom) if self.settings["snap"] else []
+        self.say("Editing %d root%s: drag their CVs on the scalp (Ctrl+click an edge to add one, a CV to take it out), "
+                 "then Finish edit." %
                  (len(self.edits), "" if len(self.edits) == 1 else "s"))
 
     def _tolerance(self):
@@ -445,6 +500,8 @@ class RootTubeTool(object):
             self.say("Ctrl+click on a root's edge to add a CV there.")
             return
         _d, g, i, f = best
+        self.remember()
+        self.current = g
         cvs = self.edits[g]
         a, b = cvs[i], cvs[(i + 1) % len(cvs)]
         point = tuple(root_tubes._project(self.groom, [tm.lerp(a, b, f)])[0])
@@ -470,9 +527,14 @@ class RootTubeTool(object):
             self.say("Added a CV%s: drag it, then Finish edit." %
                      (" on %d sealed outlines" % len(self.drag) if len(self.drag) > 1 else ""))
 
-    def press_edit(self, x, y):
-        if "ctrl" in self.modifier():
-            return self.insert_cv(x, y)
+    def remember(self):
+        """The edits as they are, for Undo CV."""
+        self.history.append(dict((g, list(c)) for g, c in self.edits.items()))
+        del self.history[:-100]
+
+    def _cv_under(self, x, y):
+        """The CV nearest view point (x, y) within PICK_PIXELS: (point, [(guide, index)] of every
+        root's CV there, sealed ones too), or None."""
         best = None
         for g, cvs in self.edits.items():
             for i, p in enumerate(cvs):
@@ -481,13 +543,66 @@ class RootTubeTool(object):
                 if d <= PICK_PIXELS and (best is None or d < best[0]):
                     best = (d, g, i)
         if best is None:
-            self.drag = []
-            return
+            return None
         picked = self.edits[best[1]][best[2]]
         tol = self._tolerance()
+        owners = []
+        for g, cvs in self.edits.items():
+            near = [i for i, p in enumerate(cvs) if root_tubes.tm._dist(p, picked) <= tol]
+            if near:
+                owners.append((g, near[0]))
+        return picked, owners
+
+    def _meant(self, owners, x, y):
+        """Of the roots sharing a CV, the one meant: the one edged white (last touched), else the
+        one last clicked, else the one whose middle is nearest the click on the screen."""
+        roots = [g for g, _i in owners]
+        touched = [g for g in roots if g in self.touched]
+        if len(touched) == 1:
+            return touched[0]
+        if self.current in roots:
+            return self.current
+
+        def away(g):
+            mx, my = self.to_screen(root_tubes._centroid(self.edits[g]))
+            return math.hypot(mx - x, my - y)
+        return min(roots, key=away)
+
+    def remove_cv(self, x, y):
+        """Ctrl+click on a CV: taken out of the root meant (_meant) only; a neighbour sealed to it
+        keeps its CV. False when no CV is there."""
+        under = self._cv_under(x, y)
+        if under is None:
+            return False
+        _point, owners = under
+        g = self._meant(owners, x, y)
+        i = dict(owners)[g]
+        self.drag = []
+        if len(self.edits[g]) <= 3:
+            self.say("A root needs at least 3 CVs.")
+            return True
+        self.remember()
+        del self.edits[g][i]
+        self.current = g
+        self.touched = {g}
+        self.redraw()
+        self.say("Took a CV out of root %s%s." % (g, " (its neighbour keeps its own)" if len(owners) > 1 else ""))
+        return True
+
+    def press_edit(self, x, y):
+        if "ctrl" in self.modifier():
+            if self.remove_cv(x, y):
+                return
+            return self.insert_cv(x, y)
+        under = self._cv_under(x, y)
+        if under is None:
+            self.drag = []
+            return
+        _point, owners = under
+        self.remember()
         # A CV shared with a neighbour (sealed) moves with it.
-        self.drag = [(g, i) for g, cvs in self.edits.items() for i, p in enumerate(cvs)
-                     if root_tubes.tm._dist(p, picked) <= tol]
+        self.drag = owners
+        self.current = self._meant(owners, x, y)
         self.touched = set(g for g, _i in self.drag)
         self.redraw()
 
@@ -499,35 +614,109 @@ class RootTubeTool(object):
             return
         point = hit[0]
         if self.settings["snap"]:
-            moving = set(self.drag)
-            others = [(g, [p for i, p in enumerate(cvs) if (g, i) not in moving]) for g, cvs in self.edits.items()]
-            others = [(g, cvs) for g, cvs in others if len(cvs) >= 2]
+            # Onto another root's CVs and edges only: never its own (two of its CVs would become one).
+            mine = set(g for g, _i in self.drag)
+            others = [(g, cvs) for g, cvs in self.edits.items() if g not in mine and len(cvs) >= 2]
+            others += [(g, cvs) for g, cvs in self.neighbours if g not in self.edits and g not in mine]
             point = root_tubes.snap_point(point, others, self.to_screen)[0]
         for g, i in self.drag:
             self.edits[g][i] = tuple(point)
         self.redraw()
 
+    def reconcile_edits(self):
+        """After Maya's Undo or Redo while editing: the roots as the scene has them where it changed
+        them (a root it took away dropped, one it brought back added), the others' edits kept."""
+        if not self.groom or not cmds.objExists(self.groom):
+            return
+        now = set(root_tubes.root_tubes(self.groom))
+        changed = []
+        for g in list(self.edits):
+            if g not in now:
+                del self.edits[g]
+                self.original.pop(g, None)
+                changed.append(g)
+                continue
+            try:
+                stored = [tuple(p) for p in root_tubes.root_outline(self.groom, g)]
+            except (RuntimeError, ValueError):
+                continue
+            old = self.original.get(g, [])
+            if len(stored) != len(old) or any(root_tubes.tm._dist(a, b) > 1e-6 for a, b in zip(stored, old)):
+                self.edits[g] = list(stored)
+                self.original[g] = list(stored)
+                changed.append(g)
+        if not self.scope:
+            for g in sorted(now - set(self.edits)):
+                try:
+                    self.edits[g] = [tuple(p) for p in root_tubes.root_outline(self.groom, g)]
+                    self.original[g] = list(self.edits[g])
+                    changed.append(g)
+                except (RuntimeError, ValueError):
+                    continue
+        self.drag, self.history = [], []
+        self.touched &= set(self.edits)
+        self.recolor()
+        self.neighbours = root_tubes.snap_targets(self.groom) if self.settings["snap"] else []
+        self.redraw()
+        if changed:
+            self.say("Undo changed %d root%s in the scene: %s as the scene has %s now (Undo CV takes back a "
+                     "CV move)." % (len(changed), "" if len(changed) == 1 else "s",
+                                    "it is" if len(changed) == 1 else "they are", "it" if len(changed) == 1 else "them"))
+
+    def _cleaned(self, cvs):
+        """An outline with no CV twice in a row (a CV dragged onto its neighbour)."""
+        tol = self._tolerance()
+        out = []
+        for p in cvs:
+            if not out or root_tubes.tm._dist(p, out[-1]) > tol:
+                out.append(tuple(p))
+        while len(out) > 1 and root_tubes.tm._dist(out[0], out[-1]) <= tol:
+            out.pop()
+        return out
+
     def finish_edit(self):
-        """Every changed root given its new outline (one undo step), the regions updated."""
+        """Every changed root given its new outline (one undo step), the regions updated; edit
+        mode left whatever happens (a root that can't take its outline keeps its old one, and
+        says why)."""
         if self.mode != "edit":
             return 0
-        changed = [g for g, cvs in self.edits.items() if cvs != self.original.get(g)]
+        now = set(root_tubes.root_tubes(self.groom)) if self.groom and cmds.objExists(self.groom) else set()
+        changed = [g for g, cvs in self.edits.items() if g in now and cvs != self.original.get(g)]
+        done, failed = [], []
         try:
             with groomlab.undo_chunk("edit root tubes"):
                 for g in changed:
-                    root_tubes.edit_root_tube(self.groom, g, self.edits[g], regions=False)
-                if changed:
+                    cvs = self._cleaned(self.edits[g])
+                    if len(cvs) < 3:
+                        failed.append((g, "fewer than 3 CVs"))
+                        continue
+                    try:
+                        root_tubes.edit_root_tube(self.groom, g, cvs, regions=False)
+                        done.append(g)
+                    except Exception as e:  # noqa: BLE001 (one root's trouble never strands the edit)
+                        failed.append((g, str(e).strip() or type(e).__name__))
+                        try:  # (back as it was, should it have half changed)
+                            root_tubes.edit_root_tube(self.groom, g, self.original[g], regions=False)
+                        except Exception:  # noqa: BLE001
+                            pass
+                if done:
                     root_tubes.update_regions(self.groom)
-        except (RuntimeError, ValueError) as e:
-            self.say("The roots weren't changed: %s" % str(e).strip())
-            return 0
+        except Exception as e:  # noqa: BLE001
+            failed.append((None, str(e).strip() or type(e).__name__))
         self.edits, self.original, self.drag, self.touched = {}, {}, [], set()
+        self.current, self.history = None, []
         self.show_guides(True)
         self.mode = "place"
+        self.recolor()
         self.neighbours = root_tubes.snap_targets(self.groom) if self.settings["snap"] else []
         self.redraw()
-        self.say("Finished: %d root%s changed, the regions updated." % (len(changed), "" if len(changed) == 1 else "s"))
-        return len(changed)
+        text = "Finished: %d root%s changed, the regions updated." % (len(done), "" if len(done) == 1 else "s")
+        if failed:
+            text += " Kept as %s: %s." % ("it was" if len(failed) == 1 else "they were",
+                                         "; ".join("root %s (%s)" % (g, why) if g is not None else why
+                                                   for g, why in failed))
+        self.say(text)
+        return len(done)
 
     # -- Selecting, carrying, duplicating and deleting roots ------------------------------
 
@@ -542,6 +731,7 @@ class RootTubeTool(object):
         """The roots as they are (their outlines and middles), the selection kept as far as its
         roots are."""
         self.roots, self.middles = {}, {}
+        self.recolor()
         for g in root_tubes.root_tubes(self.groom):
             try:
                 cvs = [tuple(p) for p in root_tubes.root_outline(self.groom, g)]
@@ -765,77 +955,107 @@ class RootTubeTool(object):
             with _NoUndo():
                 cmds.delete(PREVIEW)
 
-    def _root(self):
-        if not cmds.objExists(PREVIEW):
-            cmds.createNode("transform", name=PREVIEW, skipSelect=True)
-            cmds.setAttr(PREVIEW + ".hiddenInOutliner", True)
-        return PREVIEW
+    def _node(self):
+        """The groomLabRootOutlines shape the preview is drawn by (made when missing)."""
+        shape = PREVIEW + "Shape"
+        if not cmds.objExists(shape):
+            if not cmds.objExists(PREVIEW):
+                cmds.createNode("transform", name=PREVIEW, skipSelect=True)
+                cmds.setAttr(PREVIEW + ".hiddenInOutliner", True)
+            cmds.createNode(OUTLINES_NODE, name=shape, parent=PREVIEW, skipSelect=True)
+        return shape
 
-    def _curve(self, name, points, color, closed=False, cvs=True, width=2.0):
-        pts = [tuple(p) for p in points]
-        if closed and len(pts) >= 3:
-            pts = pts + [pts[0]]
-        if len(pts) < 2:
-            pts = pts * 2 if pts else []
-        if not pts:
-            return None
-        curve = cmds.curve(name=name, point=pts, degree=1)
-        curve = cmds.ls(cmds.parent(curve, self._root(), relative=True)[0], long=True)[0]
-        shape = cmds.listRelatives(curve, shapes=True, fullPath=True)[0]
-        cmds.setAttr(shape + ".overrideEnabled", True)
-        cmds.setAttr(shape + ".overrideRGBColors", True)
-        cmds.setAttr(shape + ".overrideColorRGB", *color)
-        cmds.setAttr(shape + ".dispCV", bool(cvs))
-        for attr, value in (("lineWidth", width), ("alwaysDrawOnTop", True)):
-            if cmds.attributeQuery(attr, node=shape, exists=True):
-                cmds.setAttr(shape + "." + attr, value)
-        return curve
+    def color_of(self, guide):
+        """A root's color: its region's on the region map (root_tubes.root_colors)."""
+        return self.colors.get(guide, COLORS["root"])
 
-    def _marker(self, center, normal, radius, color, name="glRootCenter"):
+    def recolor(self):
+        """The roots' colors as the region map has them now, and where each faces."""
+        try:
+            self.colors = root_tubes.root_colors(self.groom) if self.groom and cmds.objExists(self.groom) else {}
+        except (RuntimeError, ValueError):
+            self.colors = {}
+        self.facing = {}
+
+    def facing_of(self, guide, cvs):
+        """The scalp's normal under a root's middle (the outline drawn faint when it faces away)."""
+        if guide not in self.facing:
+            try:
+                self.facing[guide] = tuple(root_tubes._scalp_surface(self.groom)(root_tubes._centroid(cvs))[1])
+            except (RuntimeError, ValueError, ZeroDivisionError):
+                self.facing[guide] = (0.0, 0.0, 0.0)
+        return self.facing[guide]
+
+    def outlines(self):
+        """What the preview draws now: [(points, color, normal, style)] (style: root_outlines.h's
+        bits), and the fills' opacity."""
         tm = root_tubes.tm
-        a = tm._unit(tm._cross(normal, (1.0, 0.0, 0.0) if abs(normal[0]) < 0.9 else (0.0, 1.0, 0.0)))
-        b = tm._cross(normal, a)
-        ring = [tm._add(center, tm._add(tm._mul(a, radius * math.cos(k * math.pi / 6.0)),
-                                        tm._mul(b, radius * math.sin(k * math.pi / 6.0)))) for k in range(12)]
-        self._curve(name + "Ring", ring, color, closed=True, cvs=False)
-        self._curve(name, [center, tm._add(center, tm._mul(normal, radius * 0.01))], color, cvs=True, width=4.0)
+        out = []
+        fill = 1.0
+        if self.mode == "edit":
+            for g, cvs in self.neighbours:  # (editing the selected guides' roots: the others, unfilled)
+                if g not in self.edits:
+                    out.append((cvs, self.color_of(g), self.facing_of(g, cvs), CLOSED))
+            for g, cvs in self.edits.items():
+                style = CLOSED | FILLED | DOTS | (HIGHLIGHT if g in self.touched else 0)
+                out.append((cvs, self.color_of(g), self.facing_of(g, self.original.get(g, cvs)), style))
+        elif self.mode in ("select", "duplicate"):
+            fill = 0.6
+            for g, cvs in self.roots.items():
+                picked = g in self.picked
+                middle, normal = self.middles[g]
+                out.append((cvs, self.color_of(g), normal, CLOSED | FILLED | (HIGHLIGHT | DOTS if picked else 0)))
+                out.append(([middle], self.color_of(g), normal, MARKER | (HIGHLIGHT if picked else 0)))
+            if self.mode == "duplicate" and self.ghost:
+                for g, cvs in zip(self.picked, self.ghost[1]):
+                    out.append((cvs, self.color_of(g), (0.0, 0.0, 0.0), CLOSED | FILLED | HIGHLIGHT | DOTS))
+        else:
+            for g, cvs in self.neighbours:
+                out.append((cvs, self.color_of(g), self.facing_of(g, cvs), CLOSED))
+            if self.cvs:
+                closed = self.mode == "draw"
+                out.append((self.cvs, COLORS["closing" if closed else "outline"], (0.0, 0.0, 0.0),
+                            DOTS | (CLOSED | HIGHLIGHT if closed else 0)))
+            if self.mode == "draw" and self.center is not None:
+                out.append(([self.center], COLORS["closing"], self.normal or (0.0, 0.0, 0.0), MARKER | HIGHLIGHT))
+                if len(self.stroke) >= 2:
+                    out.append((self.stroke, COLORS["stroke"], (0.0, 0.0, 0.0), 0))
+        return out, fill
 
     def redraw(self):
-        tm = root_tubes.tm
+        from maya.api import OpenMaya as om
         with _NoUndo():
-            self.clear_preview()
             if not self.groom:
+                self.clear_preview()
                 return
-            if self.mode == "edit":
-                for g, cvs in self.edits.items():
-                    self._curve("glRootEdit_%s" % g, cvs, COLORS["active" if g in self.touched else "root"], closed=True)
-            elif self.mode in ("select", "duplicate"):
-                for g, cvs in self.roots.items():
-                    picked = g in self.picked
-                    self._curve("glRootSelect_%s" % g, cvs, COLORS["active" if picked else "root"], closed=True,
-                                cvs=picked, width=3.0 if picked else 1.5)
-                    middle, normal = self.middles[g]
-                    reach = max(tm._dist(middle, p) for p in cvs) if cvs else 0.1
-                    self._marker(middle, normal, 0.12 * reach, COLORS["active" if picked else "root"],
-                                 "glRootMiddle_%s" % g)
-                if self.mode == "duplicate" and self.ghost:
-                    for k, cvs in enumerate(self.ghost[1]):
-                        self._curve("glRootCopy%d" % k, cvs, COLORS["active"], closed=True, width=3.0)
-            else:
-                for _g, cvs in self.neighbours:
-                    self._curve("glRootNeighbour", cvs, COLORS["neighbour"], closed=True, cvs=False, width=1.0)
-                if self.cvs:
-                    closed = self.mode == "draw"
-                    self._curve("glRootOutline", self.cvs, COLORS["closing" if closed else "outline"], closed=closed)
-                if self.mode == "draw" and self.center is not None:
-                    reach = max(tm._dist(self.center, p) for p in self.cvs) if self.cvs else 0.1
-                    self._marker(self.center, self.normal, 0.15 * reach, COLORS["closing"])
-                    if len(self.stroke) >= 2:
-                        self._curve("glRootStroke", self.stroke, COLORS["stroke"], cvs=False, width=3.0)
+            items, fill = self.outlines()
+            node = om.MFnDependencyNode(om.MSelectionList().add(self._node()).getDependNode(0))
+            points = [om.MVector(*p) for cvs, _c, _n, _s in items for p in cvs]
+            node.findPlug("points", False).setMObject(om.MFnVectorArrayData().create(om.MVectorArray(points)))
+            node.findPlug("counts", False).setMObject(
+                om.MFnIntArrayData().create(om.MIntArray([len(cvs) for cvs, _c, _n, _s in items])))
+            node.findPlug("colors", False).setMObject(
+                om.MFnVectorArrayData().create(om.MVectorArray([om.MVector(*c) for _p, c, _n, _s in items])))
+            node.findPlug("normals", False).setMObject(
+                om.MFnVectorArrayData().create(om.MVectorArray([om.MVector(*n) for _p, _c, n, _s in items])))
+            node.findPlug("styles", False).setMObject(
+                om.MFnIntArrayData().create(om.MIntArray([int(st) for _p, _c, _n, st in items])))
+            node.findPlug("fillOpacity", False).setFloat(fill)
+            node.findPlug("dotSize", False).setFloat(DOT_PIXELS * _pixel_scale())
         try:
             cmds.refresh(currentView=True, force=True)
         except RuntimeError:  # (no viewport: batch)
             pass
+
+
+def _pixel_scale():
+    """The screen's pixels per point (a high-DPI screen's dots as big to the eye)."""
+    try:
+        from groomlab.ui import qt
+        app = qt.QtWidgets.QApplication.instance()
+        return max(1.0, float(app.devicePixelRatio())) if app else 1.0
+    except Exception:  # noqa: BLE001 (no Qt: batch)
+        return 1.0
 
 
 TOOL = RootTubeTool()
