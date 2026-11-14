@@ -1796,6 +1796,38 @@ TEST(Tubes, SplitChildrenSliceTheParentAcrossItsLongerSide) {
     }
 }
 
+// Every guide of a tube hierarchy carries its base tube's root (Guide::baseRoot): where an
+// Interpolate reads its region on a region map, so tubes split from a tube keep its region.
+TEST(Tubes, SplitTubesCarryTheirBaseTubesRoot) {
+    const std::shared_ptr<const ScalpMesh> scalp = test::makeSphere(48, 96, 1.0f);
+    GuideHierarchy h;
+    const GroupId g = h.addGroup("tubes");
+    TubeProfile tube;
+    tube.shape = TubeShape::Ribbon;
+    tube.width = {0.2f};
+    tube.aspect = {0.5f};
+    const GuideId parent = h.addGuide(g, straightGuide({0.0f, 1.0f, 0.0f}), tube);
+    h.evaluate(scalp.get());
+    ChildGenerationParams p;
+    p.count = 2;
+    p.split = true;
+    const GroupId kids = h.generateChildren(g, "tubes_L2", p);
+    const GroupId grand = h.generateChildren(kids, "tubes_L3", p);
+    h.evaluate(scalp.get());
+    const StrandRoot base = h.guide(parent)->root;
+    ASSERT_GE(base.face, 0);
+    for (const int level : {0, 1, 2}) {
+        const GuideSet set = h.flatten(level);
+        ASSERT_FALSE(set.guides().empty()) << "level " << level;
+        for (const Guide& c : set.guides()) {
+            EXPECT_EQ(c.baseRoot.face, base.face) << "level " << level;
+            EXPECT_FLOAT_EQ(c.baseRoot.u, base.u);
+            EXPECT_FLOAT_EQ(c.baseRoot.v, base.v);
+        }
+    }
+    EXPECT_EQ(h.flattenGroup(grand).guides().front().baseRoot.face, base.face);
+}
+
 // A guide tipped over by a brush (setPoints) carries its tube round with it, not twisted about the
 // guide: its root frame turns as its root direction does (as pose turns it). With rollOnScalp off
 // the sections follow those frames alone (a root-first tube, swept from its root), and the flag is

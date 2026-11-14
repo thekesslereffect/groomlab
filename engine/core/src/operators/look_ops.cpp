@@ -1284,7 +1284,9 @@ private:
                             std::none_of(tubeIds->begin(), tubeIds->end(), [](float t) { return t >= 0.0f; }))) {
                 tubeIds = nullptr;
             }
-            if (tubeIds && incremental) return false;  // (each tube's centers picked anew)
+            // Each tube's centers picked anew; during a live brush stroke the strands keep their tubes
+            // (an Interpolate's fillTubes, EvalContext::liveStroke), so a dab's are the same.
+            if (tubeIds && incremental && !(ctx.viewport && ctx.liveStroke)) return false;
         }
         if (own && !in->empty() && !sizing.none()) {
             const auto seed = static_cast<std::uint64_t>(params().getInt("seed"));

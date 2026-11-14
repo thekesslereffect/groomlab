@@ -1449,7 +1449,6 @@ class ToolPalette(QtWidgets.QWidget):
         self.select_box.add(self.soft)
         card.addWidget(self.select_box)
         card.addWidget(self.tube_panel.profile_block)
-        card.addWidget(self.tube_panel.selected_block)
         # The Tube tool's Tonic-style blocks: tubes drawn root first, and the tube hierarchy.
         from groomlab.ui import tonic_tubes
         self.tonic = tonic_tubes.TonicTubes(self)
@@ -1564,6 +1563,8 @@ class ToolPalette(QtWidgets.QWidget):
         mirror.setToolTip(self.symmetry.toolTip())
         self.applies_block.add(self.symmetry_row)
         card.addWidget(self.applies_block)
+        # Selected guides (Shape, Select): after Applies to.
+        card.addWidget(self.tube_panel.selected_block)
 
         # Right under the grid: the list the tab works on (Guide groups, Maps, Layers, Photos);
         # the tool's card under it.
@@ -2468,8 +2469,8 @@ class ToolPalette(QtWidgets.QWidget):
 
     def tube_tool_blocks(self):
         """The Tube tool card's blocks, which fold away (their state remembered: issue 70)."""
-        return (self.brush_block, self.tube_channel_box, self.tube_panel.profile_block, self.tube_panel.selected_block,
-                self.tonic.root_block, self.tonic.hierarchy_block, self.applies_block)
+        return (self.brush_block, self.tube_channel_box, self.tube_panel.profile_block, self.tonic.root_block,
+                self.tonic.hierarchy_block, self.applies_block, self.tube_panel.selected_block)
 
     def show_tool_settings(self):
         """The card shows what its tool uses (the catalog's settings for it: card_tool()), and

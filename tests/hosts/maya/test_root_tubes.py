@@ -620,7 +620,15 @@ class RootTubes(unittest.TestCase):
         counts = list(cmds.getAttr(shape + ".counts"))
         styles = list(cmds.getAttr(shape + ".styles"))
         colors = [tuple(c) for c in cmds.getAttr(shape + ".colors")]
-        self.assertEqual(counts, [4, 4])
+        self.assertEqual(len(counts), 2)
+        self.assertTrue(all(c >= 4 for c in counts), "the edges laid along the scalp between the CVs")
+        for p in cmds.getAttr(shape + ".points") + cmds.getAttr(shape + ".fillPoints"):
+            self.assertAlmostEqual(tm._length(p), 1.0, delta=1e-3, msg="on the scalp (the unit sphere)")
+        self.assertEqual(len(cmds.getAttr(shape + ".dots")), 8, "every CV a dot")
+        owners = list(cmds.getAttr(shape + ".fillOwners"))
+        self.assertEqual(sorted(set(owners)), [0, 1], "both filled")
+        self.assertEqual(len(cmds.getAttr(shape + ".fillPoints")), 3 * len(owners))
+        self.assertAlmostEqual(cmds.getAttr(shape + ".fillOpacity"), 0.5)
         want = root_tubes.root_colors(self.groom)
         self.assertEqual(len(set(want.values())), 2, "each root a color of its own")
         for got, g in zip(colors, [a, b]):
@@ -640,7 +648,7 @@ class RootTubes(unittest.TestCase):
         x, y = tool.to_screen(tool.edits[a][2])
         tool.press_edit(x, y)
         styles = list(cmds.getAttr(shape + ".styles"))
-        self.assertTrue(styles[0] & rt.HIGHLIGHT and not styles[1] & rt.HIGHLIGHT, "the root touched edged white")
+        self.assertTrue(styles[0] & rt.HIGHLIGHT and not styles[1] & rt.HIGHLIGHT, "the root touched edged green")
         tool.leave()
         self.assertFalse(cmds.objExists(rt.PREVIEW))
 
@@ -734,6 +742,30 @@ class RootTubes(unittest.TestCase):
         self.assertEqual(tool.finish_edit(), 1)
         self.assertEqual(tool.mode, "place")
         self.assertEqual(len(root_tubes.root_outline(self.groom, a)), 3)
+
+    def test_a_drawn_guide_eases_over_the_scalp_never_through_it(self):
+        """A path drawn down over the head, dipping into it (as a stroke on the view's plane does):
+        the guide keeps off the scalp, more so away from its root, and bends smoothly where it
+        rides over it (no corner where it was pushed out)."""
+        outline = ring((0.0, 1.0, 0.0), 0.08, count=6)
+        size = max(tm._dist(on_sphere((0.0, 1.0, 0.0)), p) for p in outline)
+        path = [on_sphere((0.0, 1.0, 0.0))]
+        for k in range(1, 60):
+            a = math.radians(1.2 * k)  # down the sphere's side, 3% inside it
+            path.append((0.0, 0.97 * math.cos(a), 0.97 * math.sin(a)))
+        guide = root_tubes.make_root_tube(self.groom, outline, path=path, regions=False)
+        pts = self.points(guide)
+        along = 0.0
+        for a, b in zip(pts, pts[1:]):
+            along += tm._dist(a, b)
+            if along > 2.0 * root_tubes._CLEAR_RAMP * size:
+                self.assertGreater(tm._length(b) - 1.0, 0.6 * root_tubes.CLEARANCE * size, "off the scalp")
+        for i in range(1, len(pts) - 1):
+            u, v = tm._sub(pts[i], pts[i - 1]), tm._sub(pts[i + 1], pts[i])
+            turn = math.degrees(math.acos(max(-1.0, min(1.0, tm._dot(tm._unit(u), tm._unit(v))))))
+            # (at the root: its seat, at most MAX_LEAN off the normal, eases into the path over a
+            # few points, never a kink; beyond, the path's own gentle bends)
+            self.assertLess(turn, 40.0 if i <= 2 else 20.0, "no corner at point %d" % i)
 
     def test_hierarchy_levels_split_tubes_in_two(self):
         root_tubes.make_root_tube(self.groom, ring((0.0, 1.0, 0.0), 0.2, count=6), length=0.8, regions=False)

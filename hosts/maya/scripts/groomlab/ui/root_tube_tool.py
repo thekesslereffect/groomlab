@@ -14,8 +14,8 @@ Edit roots: the root tubes (the selected guides' or, with none selected, every r
 their root outlines with their CVs, the guides hidden; dragging a CV moves it on the scalp (CVs
 shared with a neighbour, sealed, move together; with Snap a CV snaps onto another root's CVs and
 edges, never its own root's; Ctrl+click an edge adds a CV there, on every outline sharing the
-edge; Ctrl+click a CV takes it out of the root edged white only, not out of a neighbour sealed to
-it). The roots last touched are edged white. Undo CV takes back the last CV move. Finish gives
+edge; Ctrl+click a CV takes it out of the root edged green only, not out of a neighbour sealed to
+it). The roots last touched are edged green. Undo CV takes back the last CV move. Finish gives
 each changed tube its new root and updates the regions (groomlab.root_tubes.edit_root_tube);
 leaving the tool any other way (another tool, Draw root, Select root) finishes the edit too, so
 no edit is lost. Maya's Undo while editing undoes the scene, not a CV move: the roots it changed
@@ -47,8 +47,8 @@ PREVIEW = "glRootTubePreview"
 PICK_PIXELS = 12
 
 # Placing: the outline amber, closed (drawing its path) green. A finished root in its region's
-# color (root_tubes.root_colors), filled; the one being edited, selected or carried edged white,
-# its CVs shown. "root": a root the region map has no color for yet.
+# color (root_tubes.root_colors), filled half see-through; the one being edited, selected or
+# carried edged green (thicker), its CVs shown. "root": a root the region map has no color for yet.
 COLORS = {"outline": (1.0, 0.75, 0.15), "closing": (0.3, 1.0, 0.4), "active": (0.3, 1.0, 0.4),
           "stroke": (0.3, 0.85, 1.0), "root": (0.85, 0.85, 0.9), "neighbour": (0.55, 0.55, 0.6)}
 
@@ -57,7 +57,10 @@ MODES = ("place", "draw", "edit", "select", "duplicate")
 # The preview's node (the plugin's, root_outlines.h) and its styles' bits.
 OUTLINES_NODE = "groomLabRootOutlines"
 CLOSED, FILLED, DOTS, HIGHLIGHT, MARKER = 1, 2, 4, 8, 16
+STROKE = 1 << 10  # (the tool's own: a drawn path, in the air, not laid on the scalp)
 DOT_PIXELS = 9.0  # the CV dots' size across
+EDGE_PIXELS = 3.0  # the edges' width (edited or selected: 1.5 times, green)
+FILL_OPACITY = 0.5  # the fills, the scalp showing through
 
 
 class _NoUndo(object):
@@ -93,7 +96,7 @@ class RootTubeTool(object):
         self.edits = {}         # edit mode: {guide: [cvs]}
         self.original = {}      # ... as they were
         self.drag = []          # edit mode: the CVs being dragged [(guide, index)]
-        self.touched = set()    # edit mode: the roots last touched (edged white)
+        self.touched = set()    # edit mode: the roots last touched (edged green)
         self.current = None     # ... the root last clicked (Ctrl+click on a sealed CV takes it out of this one)
         self.history = []       # ... the edits before each CV move (Undo CV)
         self.scope = False      # ... only the selected guides' roots
@@ -109,7 +112,7 @@ class RootTubeTool(object):
         self.callbacks = []     # Maya's Undo and Redo events, while the tool is up
         self.hover_filter = None
         self.colors = {}        # {guide: its region's color} (recolor)
-        self.facing = {}        # {guide: the scalp's normal under its middle}
+        self.laid_cache = {}    # {an outline: its edges and fill laid on the scalp} (laid)
 
     # -- Plumbing ---------------------------------------------------------------------
 
@@ -554,7 +557,7 @@ class RootTubeTool(object):
         return picked, owners
 
     def _meant(self, owners, x, y):
-        """Of the roots sharing a CV, the one meant: the one edged white (last touched), else the
+        """Of the roots sharing a CV, the one meant: the one edged green (last touched), else the
         one last clicked, else the one whose middle is nearest the click on the screen."""
         roots = [g for g, _i in owners]
         touched = [g for g in roots if g in self.touched]
@@ -970,57 +973,82 @@ class RootTubeTool(object):
         return self.colors.get(guide, COLORS["root"])
 
     def recolor(self):
-        """The roots' colors as the region map has them now, and where each faces."""
+        """The roots' colors as the region map has them now."""
         try:
             self.colors = root_tubes.root_colors(self.groom) if self.groom and cmds.objExists(self.groom) else {}
         except (RuntimeError, ValueError):
             self.colors = {}
-        self.facing = {}
-
-    def facing_of(self, guide, cvs):
-        """The scalp's normal under a root's middle (the outline drawn faint when it faces away)."""
-        if guide not in self.facing:
-            try:
-                self.facing[guide] = tuple(root_tubes._scalp_surface(self.groom)(root_tubes._centroid(cvs))[1])
-            except (RuntimeError, ValueError, ZeroDivisionError):
-                self.facing[guide] = (0.0, 0.0, 0.0)
-        return self.facing[guide]
 
     def outlines(self):
-        """What the preview draws now: [(points, color, normal, style)] (style: root_outlines.h's
-        bits), and the fills' opacity."""
-        tm = root_tubes.tm
+        """What the preview draws now: [(points, color, style)] (style: root_outlines.h's bits)."""
         out = []
-        fill = 1.0
         if self.mode == "edit":
             for g, cvs in self.neighbours:  # (editing the selected guides' roots: the others, unfilled)
                 if g not in self.edits:
-                    out.append((cvs, self.color_of(g), self.facing_of(g, cvs), CLOSED))
+                    out.append((cvs, self.color_of(g), CLOSED))
             for g, cvs in self.edits.items():
-                style = CLOSED | FILLED | DOTS | (HIGHLIGHT if g in self.touched else 0)
-                out.append((cvs, self.color_of(g), self.facing_of(g, self.original.get(g, cvs)), style))
+                out.append((cvs, self.color_of(g), CLOSED | FILLED | DOTS | (HIGHLIGHT if g in self.touched else 0)))
         elif self.mode in ("select", "duplicate"):
-            fill = 0.6
             for g, cvs in self.roots.items():
                 picked = g in self.picked
-                middle, normal = self.middles[g]
-                out.append((cvs, self.color_of(g), normal, CLOSED | FILLED | (HIGHLIGHT | DOTS if picked else 0)))
-                out.append(([middle], self.color_of(g), normal, MARKER | (HIGHLIGHT if picked else 0)))
+                out.append((cvs, self.color_of(g), CLOSED | FILLED | (HIGHLIGHT | DOTS if picked else 0)))
+                out.append(([self.middles[g][0]], self.color_of(g), MARKER | (HIGHLIGHT if picked else 0)))
             if self.mode == "duplicate" and self.ghost:
                 for g, cvs in zip(self.picked, self.ghost[1]):
-                    out.append((cvs, self.color_of(g), (0.0, 0.0, 0.0), CLOSED | FILLED | HIGHLIGHT | DOTS))
+                    out.append((cvs, self.color_of(g), CLOSED | FILLED | HIGHLIGHT | DOTS))
         else:
             for g, cvs in self.neighbours:
-                out.append((cvs, self.color_of(g), self.facing_of(g, cvs), CLOSED))
+                out.append((cvs, self.color_of(g), CLOSED))
             if self.cvs:
                 closed = self.mode == "draw"
-                out.append((self.cvs, COLORS["closing" if closed else "outline"], (0.0, 0.0, 0.0),
+                out.append((self.cvs, COLORS["closing" if closed else "outline"],
                             DOTS | (CLOSED | HIGHLIGHT if closed else 0)))
             if self.mode == "draw" and self.center is not None:
-                out.append(([self.center], COLORS["closing"], self.normal or (0.0, 0.0, 0.0), MARKER | HIGHLIGHT))
+                out.append(([self.center], COLORS["closing"], MARKER | HIGHLIGHT))
                 if len(self.stroke) >= 2:
-                    out.append((self.stroke, COLORS["stroke"], (0.0, 0.0, 0.0), 0))
-        return out, fill
+                    out.append((self.stroke, COLORS["stroke"], STROKE))
+        return out
+
+    def laid(self, cvs, closed, filled):
+        """An outline laid on the scalp: its edges' points along the scalp between its CVs, and
+        (`filled`) its fill's triangles on the scalp (rings from its middle out). Kept per outline:
+        a drag lays again only the roots it moves."""
+        key = (tuple(tuple(p) for p in cvs), bool(closed), bool(filled))
+        if key in self.laid_cache:
+            return self.laid_cache[key]
+        tm = root_tubes.tm
+        surface = root_tubes._scalp_surface(self.groom)
+        pts = [tuple(p) for p in cvs]
+        n = len(pts)
+        middle = root_tubes._centroid(pts) if n >= 3 else tm._mean(pts)
+        reach = max([tm._dist(middle, p) for p in pts] + [1e-6])
+        loop = closed and n >= 3
+        edge = []
+        for i in range(n if loop else n - 1):
+            a, b = pts[i], pts[(i + 1) % n]
+            m = min(max(int(math.ceil(tm._dist(a, b) / (0.06 * reach))), 1), 8)
+            edge.extend(tuple(surface(tm.lerp(a, b, j / float(m)))[0]) for j in range(m))
+        if not loop:
+            edge.append(tuple(surface(pts[-1])[0]))
+        tris = []
+        if filled and loop:
+            c = tuple(surface(middle)[0])
+            rings = [[c] * len(edge)]
+            for t in (1.0 / 3.0, 2.0 / 3.0):
+                rings.append([tuple(surface(tm.lerp(c, q, t))[0]) for q in edge])
+            rings.append(edge)
+            m = len(edge)
+            for r in range(len(rings) - 1):
+                inner, outer = rings[r], rings[r + 1]
+                for i in range(m):
+                    j = (i + 1) % m
+                    if r > 0:
+                        tris.append((inner[i], outer[i], inner[j]))
+                    tris.append((inner[j], outer[i], outer[j]))
+        if len(self.laid_cache) > 400:
+            self.laid_cache.clear()
+        self.laid_cache[key] = (edge, tris)
+        return edge, tris
 
     def redraw(self):
         from maya.api import OpenMaya as om
@@ -1028,20 +1056,44 @@ class RootTubeTool(object):
             if not self.groom:
                 self.clear_preview()
                 return
-            items, fill = self.outlines()
+            items = self.outlines()
+            edges, colors, styles, fills, owners, dots, dot_owners = [], [], [], [], [], [], []
+            for k, (cvs, color, style) in enumerate(items):
+                if style & MARKER or style == STROKE or not cvs:
+                    edges.append([tuple(p) for p in cvs])
+                else:
+                    try:
+                        edge, tris = self.laid(cvs, style & CLOSED, style & FILLED)
+                    except (RuntimeError, ValueError, ZeroDivisionError):
+                        edge, tris = [tuple(p) for p in cvs], []
+                    edges.append(edge)
+                    for t in tris:
+                        fills.extend(t)
+                        owners.append(k)
+                if style & DOTS:
+                    dots.extend(tuple(p) for p in cvs)
+                    dot_owners.extend([k] * len(cvs))
+                colors.append(color)
+                styles.append(style & ~STROKE)
             node = om.MFnDependencyNode(om.MSelectionList().add(self._node()).getDependNode(0))
-            points = [om.MVector(*p) for cvs, _c, _n, _s in items for p in cvs]
-            node.findPlug("points", False).setMObject(om.MFnVectorArrayData().create(om.MVectorArray(points)))
-            node.findPlug("counts", False).setMObject(
-                om.MFnIntArrayData().create(om.MIntArray([len(cvs) for cvs, _c, _n, _s in items])))
-            node.findPlug("colors", False).setMObject(
-                om.MFnVectorArrayData().create(om.MVectorArray([om.MVector(*c) for _p, c, _n, _s in items])))
-            node.findPlug("normals", False).setMObject(
-                om.MFnVectorArrayData().create(om.MVectorArray([om.MVector(*n) for _p, _c, n, _s in items])))
-            node.findPlug("styles", False).setMObject(
-                om.MFnIntArrayData().create(om.MIntArray([int(st) for _p, _c, _n, st in items])))
-            node.findPlug("fillOpacity", False).setFloat(fill)
+
+            def vectors(name, values):
+                node.findPlug(name, False).setMObject(
+                    om.MFnVectorArrayData().create(om.MVectorArray([om.MVector(*v) for v in values])))
+
+            def ints(name, values):
+                node.findPlug(name, False).setMObject(om.MFnIntArrayData().create(om.MIntArray([int(v) for v in values])))
+            vectors("points", [p for e in edges for p in e])
+            ints("counts", [len(e) for e in edges])
+            vectors("colors", colors)
+            ints("styles", styles)
+            vectors("fillPoints", fills)
+            ints("fillOwners", owners)
+            vectors("dots", dots)
+            ints("dotOwners", dot_owners)
+            node.findPlug("fillOpacity", False).setFloat(FILL_OPACITY)
             node.findPlug("dotSize", False).setFloat(DOT_PIXELS * _pixel_scale())
+            node.findPlug("edgeWidth", False).setFloat(EDGE_PIXELS * _pixel_scale())
         try:
             cmds.refresh(currentView=True, force=True)
         except RuntimeError:  # (no viewport: batch)

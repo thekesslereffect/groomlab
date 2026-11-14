@@ -1656,6 +1656,7 @@ const ViewResult& GroomSession::evaluate(const ViewRequest& request) {
     ctx.scale = groomScale_;  // the lattices sizes round to, at the groom's scale
     ctx.viewport = request.viewport;
     ctx.liveDrag = liveDrag_;
+    ctx.liveStroke = hasPreview();
     ctx.externals = &externals;
     ctx.paths = paths();
     ctx.buildCards = request.buildCards;
@@ -2189,6 +2190,7 @@ bool GroomSession::warmStroke(const ViewRequest& request) {
     ctx.scale = groomScale_;  // the lattices sizes round to, at the groom's scale
     ctx.viewport = request.viewport;
     ctx.liveDrag = liveDrag_;
+    ctx.liveStroke = hasPreview();
     ctx.externals = &externals;
     ctx.paths = paths();
     // The node a stroke would show (the view's node, as evaluate picks it).
@@ -2231,6 +2233,7 @@ std::shared_ptr<DetachedEvaluation> GroomSession::detachWarm(const ViewRequest& 
     ctx.scale = groomScale_;  // the lattices sizes round to, at the groom's scale
     ctx.viewport = request.viewport;
     ctx.liveDrag = liveDrag_;
+    ctx.liveStroke = hasPreview();
     ctx.externals = &job->externals_;
     ctx.paths = job->paths_.get();
     const auto it = sculptDoc_->nodesByName.find(flat_.result(request.viewNode));
@@ -2300,6 +2303,7 @@ std::shared_ptr<DetachedEvaluation> GroomSession::detachStroke(const ViewRequest
     ctx.scale = groomScale_;  // the lattices sizes round to, at the groom's scale
     ctx.viewport = request.viewport;
     ctx.liveDrag = liveDrag_;
+    ctx.liveStroke = hasPreview();
     ctx.externals = &job->externals_;
     ctx.paths = job->paths_.get();
     ctx.buildCards = request.buildCards;
@@ -2350,6 +2354,7 @@ std::shared_ptr<DetachedEvaluation> GroomSession::detach(const ViewRequest& requ
     ctx.scale = groomScale_;  // the lattices sizes round to, at the groom's scale
     ctx.viewport = request.viewport;
     ctx.liveDrag = liveDrag_;
+    ctx.liveStroke = hasPreview();
     ctx.externals = &job->externals_;
     ctx.paths = job->paths_.get();
     ctx.buildCards = request.buildCards;

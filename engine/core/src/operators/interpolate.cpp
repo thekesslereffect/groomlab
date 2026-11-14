@@ -1355,7 +1355,14 @@ public:
     }
     // A region map's source joins the key, as HairColor's map's does: a texture map's or an image's
     // file stamp, a color set's hash (the scalp's key leaves color sets out).
-    std::uint64_t contextSalt(const EvalContext& ctx) const override { return regionSalt(ctx, params().getString("regionMap")); }
+    std::uint64_t contextSalt(const EvalContext& ctx) const override {
+        // (A live stroke's dabs keep the strands' tubes: the release's key is another, so it fills anew.)
+        const std::uint64_t salt = regionSalt(ctx, params().getString("regionMap"));
+        return keepsTubes(ctx) ? hashCombine(salt, 0x5D0Bu) : salt;
+    }
+    // fillTubes during a live brush stroke in the viewport (EvalContext::liveStroke): each strand
+    // keeps the tube the stroke's first evaluation found it in.
+    bool keepsTubes(const EvalContext& ctx) const { return fillsTubes() && ctx.viewport && ctx.liveStroke; }
     static std::uint64_t regionSalt(const EvalContext& ctx, const std::string& name) {
         if (name.empty()) return 0;
         const MapInfo* info = catalogMap(ctx, name);
@@ -1536,6 +1543,7 @@ private:
         // and the map are) and the regions.
         std::shared_ptr<const RegionSource> regionSource;
         std::shared_ptr<const RegionSplit> regions;
+        std::shared_ptr<const TubeFill> fill;  // fillTubes: the tubes and each strand's in them
     };
 
     // In full, or (with `incremental`) only the strands a change of the guides reaches, into the
@@ -1562,9 +1570,10 @@ private:
             return true;
         }
 
-        // fillTubes: each strand's tube is worked out anew from the guides (a dab evaluates in full).
+        // fillTubes: each strand's tube is worked out anew from the guides (a dab evaluates in full),
+        // except during a live brush stroke: a dab keeps each strand's tube (keepsTubes).
         const bool fillTubes = fillsTubes();
-        if (incremental && fillTubes) return false;
+        if (incremental && fillTubes && !keepsTubes(ctx)) return false;
         const float radius = static_cast<float>(params().getDouble("limitDistance"));
         const Ramp falloff = params().getRamp("falloff");
         const std::string take = params().getString("take");
@@ -1648,6 +1657,15 @@ private:
         if (last) {
             guideChanged.resize(kept.size());
             parallelFor(0, kept.size(), [&](std::size_t g) { guideChanged[g] = sameGuide(*kept[g], *made.kept[g]) ? 0 : 1; });
+            if (fillTubes) {  // (a tube's profile or frame changed: its tube and the strands in it too)
+                for (std::size_t g = 0; g < kept.size(); ++g) {
+                    const Guide& a = *kept[g];
+                    const Guide& b = *made.kept[g];
+                    if (a.tube != b.tube || a.hasTube != b.hasTube || std::memcmp(&a.frameUp, &b.frameUp, sizeof(Vec3f)) != 0) {
+                        guideChanged[g] = 1;
+                    }
+                }
+            }
         }
         auto rowsMade = std::make_shared<GuideRows>();
         rowsMade->samples = samples;
@@ -1663,11 +1681,18 @@ private:
         // keepClearance: the scalp's field.
         const Clearance clearance = align && !lengthOnly && params().getBool("keepClearance") ? clearanceOf(scalp) : Clearance{};
         // fillTubes: each kept guide's tube laid along its shape as the blend reads it.
-        std::unique_ptr<TubeFill> fill;
+        std::shared_ptr<TubeFill> fill;
         const std::vector<Guide>* levelTubes = fillTubes && guides->levelTubes() ? guides->levelTubes().get() : nullptr;
+        const TubeFill* fillBefore = nullptr;  // incrementally (a live stroke's dab): the last result's tubes
         if (fillTubes) {
             const std::size_t tubes = kept.size() + (levelTubes ? levelTubes->size() : 0);
-            fill = std::make_unique<TubeFill>();
+            if (last) {
+                fillBefore = made.fill.get();
+                if (!fillBefore || fillBefore->spines.size() != tubes || fillBefore->tubeOf.size() != strands->strandCount()) {
+                    return false;
+                }
+            }
+            fill = std::make_shared<TubeFill>();
             fill->spines.resize(tubes);
             fill->numbers.assign(tubes, -1.0f);
             fill->depths.resize(tubes);
@@ -1691,7 +1716,8 @@ private:
         }
         parallelFor(0, kept.size(), [&](std::size_t k) {
             const Guide& g = *kept[k];
-            if (before && !guideChanged[k]) {  // (no tubes: a fill evaluates in full)
+            if (before && !guideChanged[k]) {
+                if (fill) fill->spines[k] = fillBefore->spines[k];  // (a live stroke's dab: its tube as it was)
                 roots[k] = before->roots[k];
                 normals[k] = before->normals[k];
                 guideLengths[k] = before->lengths[k];
@@ -1865,7 +1891,9 @@ private:
             for (std::size_t g = 0; g < kept.size(); ++g) {
                 const float none = std::numeric_limits<float>::quiet_NaN();
                 guideColors[g] = Vec3f(none, none, none);
-                regionSource->map->at(guideRoots[g], &guideColors[g]);
+                // (A tube's split tubes and every follower: its hierarchy's base guide's region.)
+                const StrandRoot& at = kept[g]->baseRoot.face >= 0 ? kept[g]->baseRoot : guideRoots[g];
+                regionSource->map->at(at, &guideColors[g]);
             }
             regions = std::make_shared<const RegionSplit>(splitRegions(*regionSource, guideColors, heldRegions.get()));
             if (last && (!made.regions || !sameStrandRegions(*regions, *made.regions))) return false;
@@ -1909,7 +1937,39 @@ private:
             keepBinding(key, binding);
         }
         const Binding& bindings = *binding;
-        if (fill) findTubes(*strands, *fill, std::clamp(static_cast<float>(params().getDouble("tubeBlend")), 0.0f, 1.0f));
+        // The strands' tubes: found anew, or (a live stroke's dab) each strand's kept, the tubes whose
+        // guides changed noted (their strands blend again).
+        std::vector<char> tubeChanged;
+        if (fill && fillBefore) {
+            fill->numbers = fillBefore->numbers;
+            fill->tubeOf = fillBefore->tubeOf;
+            fill->at = fillBefore->at;
+            fill->edgeOf = fillBefore->edgeOf;
+            fill->edgeAt = fillBefore->edgeAt;
+            fill->edgeWeight = fillBefore->edgeWeight;
+            fill->blends = fillBefore->blends;
+            fill->edgeBlends = fillBefore->edgeBlends;
+            tubeChanged.assign(fill->spines.size(), 1);
+            for (std::size_t k = 0; k < kept.size(); ++k) tubeChanged[k] = guideChanged[k];
+            const std::vector<Guide>* levelBefore = made.guides ? made.guides->levelTubes().get() : nullptr;
+            if (levelTubes && levelBefore && levelBefore->size() == levelTubes->size()) {
+                for (std::size_t i = 0; i < levelTubes->size(); ++i) {
+                    const Guide& a = (*levelTubes)[i];
+                    const Guide& b = (*levelBefore)[i];
+                    tubeChanged[kept.size() + i] = sameGuide(a, b) && a.tube == b.tube && a.hasTube == b.hasTube &&
+                                                           std::memcmp(&a.frameUp, &b.frameUp, sizeof(Vec3f)) == 0
+                                                       ? 0
+                                                       : 1;
+                }
+            }
+        } else if (fill) {
+            findTubes(*strands, *fill, std::clamp(static_cast<float>(params().getDouble("tubeBlend")), 0.0f, 1.0f));
+        }
+        auto inChangedTube = [&](std::size_t s) {
+            if (tubeChanged.empty()) return false;
+            const std::int32_t t = fill->tubeOf[s], e = fill->edgeOf[s];
+            return (t >= 0 && tubeChanged[static_cast<std::size_t>(t)]) || (e >= 0 && tubeChanged[static_cast<std::size_t>(e)]);
+        };
 
         // Incrementally, the strands to blend again: those bound to a guide that changed, and
         // (another binding: guide roots moved) those whose guides or weights did.
@@ -1923,7 +1983,7 @@ private:
                 const bool rebound = c >= boundBefore.chunks.size() || boundBefore.chunks[c] != bindings.chunks[c];
                 const std::size_t end = std::min(strandCount, (c + 1) * kBindChunk);
                 for (std::size_t s = c * kBindChunk; s < end; ++s) {
-                    bool again = rebound && !sameRecord(boundBefore, bindings, s);
+                    bool again = (rebound && !sameRecord(boundBefore, bindings, s)) || inChangedTube(s);
                     const Binding::Record r = bindings.record(s);
                     if (!again && r.bound) {
                         for (std::uint32_t i = 0; i < r.count && !again; ++i) again = guideChanged[r.guide(i)] != 0;
@@ -1934,7 +1994,7 @@ private:
             for (const auto& list : found) dirty.insert(dirty.end(), list.begin(), list.end());
             if (dirty.empty()) {  // nothing reaches a strand: the last result as it is
                 remember(last, strands, guides, kept, binding, attrNames, layerNames, scalpKey, baseKey,
-                         regionSource, regions, rowsMade);
+                         regionSource, regions, rowsMade, fill);
                 *result = last;
                 *changed = StrandChanges::listed({});
                 return true;
@@ -2210,11 +2270,12 @@ private:
                 blendChannels(s);
                 if (bindings.record(s).bound) blendLayers(s, scratch);
             });
+            if (fill) writeTubeChannels(*out, *fill);  // (every strand's tube as it was)
             *changed = StrandChanges::listed(std::move(dirty));
         }
         const StrandsPtr blended = out;
         remember(blended, strands, guides, kept, binding, attrNames, layerNames, scalpKey, baseKey,
-                 regionSource, regions, rowsMade);
+                 regionSource, regions, rowsMade, fill);
         *result = blended;
         return true;
     }
@@ -2335,9 +2396,11 @@ private:
                   const std::vector<const Guide*>& kept, const std::shared_ptr<const Binding>& binding,
                   const std::vector<std::string>& attrNames, const std::vector<std::string>& layerNames,
                   std::uint64_t scalp, std::uint64_t baseKey, std::shared_ptr<const RegionSource> regionSource,
-                  std::shared_ptr<const RegionSplit> regions, std::shared_ptr<const GuideRows> rows) const {
+                  std::shared_ptr<const RegionSplit> regions, std::shared_ptr<const GuideRows> rows,
+                  std::shared_ptr<const TubeFill> fill = nullptr) const {
         const std::lock_guard<std::mutex> lock(madeMutex_);
         made_.rows = std::move(rows);
+        made_.fill = std::move(fill);
         made_.regionSource = std::move(regionSource);
         made_.regions = std::move(regions);
         made_.output = output;

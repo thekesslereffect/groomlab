@@ -1487,6 +1487,16 @@ bool GuideHierarchy::hasAttributes() const {
     return false;
 }
 
+StrandRoot GuideHierarchy::baseRootOf(const HierarchyGuide& g) const {
+    const HierarchyGuide* at = &g;
+    for (std::size_t steps = 0; at->parent != kNoGuide && steps < guides_.size(); ++steps) {
+        const auto it = index_.find(at->parent);
+        if (it == index_.end()) break;
+        at = &guides_[it->second];
+    }
+    return at->root;
+}
+
 GuideSet GuideHierarchy::flattenGroup(GroupId groupId) const {
     GuideSet set;
     const bool attributes = hasAttributes();
@@ -1501,6 +1511,7 @@ GuideSet GuideHierarchy::flattenGroup(GroupId groupId) const {
         out.tube.scaleWidth(scale_);
         out.frameUp = g.frameUp;
         out.depth = depth;
+        out.baseRoot = baseRootOf(g);
         if (attributes) out.attributes = effectiveAttributes(g);
         if (layers) out.pointAttributes = effectivePointAttributes(g);
     }
@@ -1523,6 +1534,7 @@ GuideSet GuideHierarchy::flatten(int level) const {
         out.tube.scaleWidth(scale_);
         out.frameUp = g.frameUp;
         out.depth = depths[g.group];
+        out.baseRoot = baseRootOf(g);
         if (attributes) out.attributes = effectiveAttributes(g);
         if (layers) out.pointAttributes = effectivePointAttributes(g);
     }

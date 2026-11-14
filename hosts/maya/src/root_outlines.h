@@ -2,17 +2,20 @@
 #pragma once
 
 // groomLabRootOutlines: the Tube tool's root outlines (groomlab.ui.root_tube_tool, issue 61), drawn
-// in screen space over everything (a constant size whatever the zoom):
+// in the scene, on the scalp, so the hair and guides in front of them hide them:
 //
-//   - each outline a polyline of `counts[k]` of `points`, in `colors[k]` (its region's color,
-//     groomlab.root_tubes.root_colors), styled by `styles[k]` (Style bits): closed, filled (a fan
-//     round its middle, `fillOpacity`), its CVs as dots (`dotColor`, `dotSize` pixels across, a
-//     dark ring), its edge white and thicker (the root being edited or selected), or a marker
-//     (a large dot at its first point: a root's middle);
-//   - the edges drawn over the fills, the dots over the edges;
-//   - an outline whose `normals[k]` faces away from the camera (behind the head): faint, unfilled.
+//   - each outline a polyline of `counts[k]` of `points` (its edges laid along the scalp), in
+//     `colors[k]` (its region's color, groomlab.root_tubes.root_colors), styled by `styles[k]`
+//     (Style bits): closed, its edges green and thicker (the root being edited or selected:
+//     `highlight`), or a marker (a large dot at its first point: a root's middle);
+//   - the fills: triangles of `fillPoints` (three points each, on the scalp), each in its outline's
+//     color (`fillOwners`) at `fillOpacity`;
+//   - the CVs: dots at `dots` (`dotOwners`: their outline), `dotColor`, `dotSize` pixels across.
 //
-// Unselectable and unbounded (no bounding box).
+// Each layer lifted toward the camera a little more than the one under it (the scalp, the fills,
+// the edges, the dots), so the dots draw over the edges and the edges over the fills; each outline's
+// edges a hair more than the outline before it's (the edited or selected ones most), so two
+// neighbours' shared edge never flickers between them. Unselectable and unbounded.
 
 #include <maya/MPxDrawOverride.h>
 #include <maya/MPxLocatorNode.h>
@@ -37,13 +40,19 @@ public:
     static const MString kDrawDbClassification;
     static const MString kRegistrantId;
 
-    static MObject aPoints;       // vectorArray: every outline's points, one outline after another (world space)
+    static MObject aPoints;       // vectorArray: every outline's edge points, one outline after another (world)
     static MObject aCounts;       // Int32Array: each outline's point count
     static MObject aColors;       // vectorArray: each outline's color
-    static MObject aNormals;      // vectorArray: each outline's facing (the scalp's normal at its middle; zero: always faces)
+    static MObject aNormals;      // vectorArray: each outline's facing (unused: the scene's depth hides the far side)
     static MObject aStyles;       // Int32Array: each outline's Style bits
+    static MObject aFillPoints;   // vectorArray: the fills' triangles, three points each (world)
+    static MObject aFillOwners;   // Int32Array: each triangle's outline
+    static MObject aDots;         // vectorArray: the CVs (world)
+    static MObject aDotOwners;    // Int32Array: each CV's outline
     static MObject aDotColor;     // float3: the CV dots' color
+    static MObject aEdgeColor;    // float3: a highlighted outline's edges
     static MObject aDotSize;      // float: the CV dots' diameter in pixels
+    static MObject aEdgeWidth;    // float: the edges' width in pixels (highlighted: 1.5 times)
     static MObject aFillOpacity;  // float: the fills' opacity
 };
 

@@ -478,8 +478,8 @@ def main():
                 ("comb", ["Brush", "Applies to"]),  # Stretch: a Brush chip
                 ("place", ["New guides", "Tube", "Applies to"]),
                 ("draw", ["New guides", "Tube", "Applies to"]),
-                ("shape", ["Brush", "Paints", "Profile", "Selected guides", "Tube roots", "Tube hierarchy",
-                           "Applies to"]),
+                ("shape", ["Brush", "Paints", "Profile", "Tube roots", "Tube hierarchy", "Applies to",
+                           "Selected guides"]),
                 ("select", ["Selection", "Applies to"]),
                 ("lengths", ["Keys", "Applies to"]),
                 ("erase", ["Brush", "Erases", "Applies to"]),

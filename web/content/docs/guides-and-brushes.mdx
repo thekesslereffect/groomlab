@@ -278,8 +278,12 @@ The Tube tool's **Tube roots** section draws a tube the way Tonic does: its root
   as the tube stay. The guide's points are spaced evenly, as many as its length and turns need
   (about one per root width, and no span turning more than 15°), times **Point density**: a short
   stroke gets few. A stroke leaving the root nearly flat along the scalp starts at most 50° off the
-  scalp's normal and bends into it. On release the tube is made and the next root can be drawn. Off, the tube goes straight off the scalp, **Length** long. Undoing the
-  tube just made (Ctrl+Z) brings its outline back, ready to draw its path again.
+  scalp's normal and bends into it. Where the stroke dips into the head (it is drawn on the view's
+  plane), the guide eases over the scalp instead: it keeps about the root's radius off it, from
+  nothing at the root to all of it two root sizes out, and bends smoothly where it rides over.
+  On release the tube is made and the next root can be drawn. Off, the tube goes straight off the
+  scalp, **Length** long. Undoing the tube just made (Ctrl+Z) brings its outline back, ready to
+  draw its path again.
 - The tube's root section is exactly the drawn outline (straight edges between the CVs; a library
   shape of its own, `rootTube_<n>`, removed when the last guide taking it is deleted), narrowing
   to **Tip width** of it at the tip. The tube is swept from its root along the path with no
@@ -297,25 +301,27 @@ The Tube tool's **Tube roots** section draws a tube the way Tonic does: its root
 - A root's CVs are kept on the scalp itself, apart from its guide: combing, brushing, retwisting
   or resizing the tube never moves them, and its region stays where it was drawn. Only **Edit
   roots** changes them.
-- Every root shows in its region's color, the same as the `tubeRoots` map paints it, with its CVs
-  as large dots drawn over its edges.
+- Every root shows on the scalp in its region's color, the same as the `tubeRoots` map paints it,
+  half see-through, with its CVs as large dots drawn over its edges. The roots sit in the scene
+  like the scalp: the hair and the guides in front of them hide them. A root being edited or
+  selected has thicker green edges; its CVs stay the same.
 - **Edit roots** shows the root tubes' outlines, filled, and their CVs (the selected guides'
   tubes, or every root tube with none selected), the guides hidden. Drag CVs on the scalp:
   - A CV shared with a neighbour moves with it.
   - With **Snap to neighbours** a CV snaps onto another root's CVs and edges, never onto its own
     root's.
   - **Ctrl+click an edge** to add a CV there, on every outline sharing that edge.
-  - **Ctrl+click a CV** to take it out of the root edged white only; a neighbour sealed to it keeps
+  - **Ctrl+click a CV** to take it out of the root edged green only; a neighbour sealed to it keeps
     its own. A root keeps at least 3 CVs.
   - **Undo CV** takes back the last CV move. Maya's Ctrl+Z undoes the scene, not a CV move; a root
     it changes shows as the scene now has it.
 
-  The roots whose CVs you last touched are edged white. **Finish edit** moves each changed tube to
+  The roots whose CVs you last touched are edged green. **Finish edit** moves each changed tube to
   its new root, refits its section (its taper and what brushes painted kept) and updates the
   regions, in one undo step. A root that can't take its new outline keeps its old one and the
   status line says why; the edit finishes either way. Leaving the tool any other way (another
   tool, **Draw root**, **Select root**) finishes the edit too, so no edit is lost.
-- **Select root** shows every root's middle. Click one to select its root (edged white), Shift+click to
+- **Select root** shows every root's middle. Click one to select its root (edged green), Shift+click to
   add roots or take one out, and drag a selected one to move them all over the scalp as one; with
   **Snap to neighbours** their CVs sealed onto a root not selected stay put while the others
   slide. Their tubes and hierarchies move with them on release, in one undo step. **Duplicate**
@@ -341,7 +347,10 @@ across its longer side, sharing its root shape, in the next level's group (`<bas
 The numbered buttons show one level at a time (the other levels' groups hidden) and pick its group,
 so the Tube tool and the brushes edit that level's tubes. Every level's tubes follow their parent:
 shaping a level 1 tube carries all the smaller tubes inside it, while each smaller tube keeps its
-own edits. **Remove** drops the deepest level.
+own edits. **Remove** drops the deepest level. The `tubeRoots` region map stays the level 1
+tubes': every tube split from a tube, and every guide under it, takes that tube's region (an
+Interpolate reads a guide's region at the root of the guide its hierarchy starts from), so the
+smaller tubes' hair stays inside the tube they came from.
 
 ```python
 root_tubes.add_tube_level(groom)                   # every leaf tube split in two
