@@ -148,6 +148,19 @@ class Themes(unittest.TestCase):
         self.assertIn(("groomlab.theme_set", {"name": "paper"}), [(e[2], e[3]) for e in ops if e[0] == "op"
                                                                    and e[3].get("name") == "paper"])
         self.assertTrue(ge)
+        # Tool tiles in their group's color (the theme's "icons", as the app's toolIconColor): Playful's
+        # four groups apart, the guide tools paint's; Charcoal's one gray; Playful's picked tile washed.
+        playful = uikit.Theme(data=themes.load("playful"))
+        groups = {name: playful.tool_color(name) for name in ("place", "comb", "cut", "paint", "select", "freeze")}
+        self.assertEqual(len({groups[n] for n in ("place", "comb", "cut", "paint")}), 4)
+        self.assertEqual(groups["select"], groups["paint"])
+        self.assertEqual(groups["freeze"], groups["paint"])
+        emerald = uikit._srgb(themes.load("playful")["palette"]["emerald"], {})
+        self.assertEqual(groups["place"], uikit._linear_rgba(emerald))
+        self.assertTrue(playful.tool_on_category)
+        charcoal = uikit.Theme(data=themes.load("charcoal"))
+        self.assertEqual(len({charcoal.tool_color(n) for n in ("place", "comb", "cut", "paint")}), 1)
+        self.assertFalse(charcoal.tool_on_category)
         # A theme of the user's own: only its accent, the rest from the theme it extends.
         path = themes.create_theme("probe_accent", base="charcoal")
         with open(path, encoding="utf-8") as f:
