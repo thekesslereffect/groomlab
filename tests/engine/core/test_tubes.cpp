@@ -1747,6 +1747,7 @@ TEST(TubeTargets, TheSelectionElseTheSoloAndTheirProfiles) {
     t = tubeTargetsOf(h, {});
     EXPECT_EQ(t.source, "solo");
     EXPECT_EQ(t.guides, (std::vector<GuideId>{ids[2]}));
+}
 
 // The Tube hierarchy's Add (ChildGenerationParams::split): the children cut the parent's section
 // into equal slices across its longer side, side by side, each a slice's tube, following it.
