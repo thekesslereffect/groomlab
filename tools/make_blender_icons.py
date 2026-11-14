@@ -3,7 +3,7 @@
 (hosts/blender/addon/groomlab/icons/<name>.png, 64 px), in the Maya palette's default theme colors
 (hosts/maya/themes/playful.json, as groomlab.ui.widgets.icon colors them):
 
-    python tools/make_blender_icons.py        (Python 3 with Pillow)
+    python tools/make_blender_icons.py        (Python 3 with Pillow and resvg-py)
 
 It also renders the app's mono UI glyphs (hosts/app/icons/ui_*.svg, 24 x 24, white) as
 icons/ui_<name>.png for the GroomLab window (window.py), which tints them.
@@ -11,9 +11,11 @@ icons/ui_<name>.png for the GroomLab window (window.py), which tints them.
 Run it after tools/make_icons.py changes the SVGs; the PNGs are committed (Blender's previews read
 PNGs, and the extension build needs no SVG renderer). The SVGs use a small subset (path with M L H V
 C Q A Z, rect, circle, ellipse, a rotated g; strokes with round caps and joins, dashes, opacity),
-which this draws supersampled and scales down."""
+which this draws supersampled and scales down. The authored 100 x 100 tool designs use resvg
+to preserve compound-path holes and fill rules. Install with: pip install Pillow resvg-py."""
 
 import json
+import io
 import math
 import os
 import re
@@ -33,13 +35,14 @@ K = SIZE * SS / 32.0         # SVG units (32 x 32) to canvas pixels; render() se
 
 # groomlab/ui/widgets.py: which theme color each icon's main color is, and the placeholders.
 ICON_GROUPS = {
-    "create": ("place", "draw", "part", "flow", "select"),
+    "create": ("place", "draw", "part", "flow"),
     "shape": ("comb", "slide", "smooth", "lift", "twist", "attract", "shape"),  # "shape": the Tube brush
     "trim": ("cut", "length", "lengths", "erase"),
-    "paint": ("paint", "freeze", "invert", "unfreeze"),
+    "paint": ("paint", "freeze", "invert", "unfreeze", "select"),
 }
 PLACEHOLDERS = {"main": "#3D7EFF", "shade": "#1F4FB3", "tint": "#A8C7FF", "ink": "#F2F2F5", "shine": "#FFFFFF",
-                "red": "#FF4D50", "yellow": "#FFC53E", "blue": "#2F7BF7", "emerald": "#2ECC90"}
+                "red": "#FF4D50", "yellow": "#FFC53E", "blue": "#2F7BF7", "emerald": "#2ECC90",
+                "frame": "#464646", "background": "#1E1E1E"}
 
 
 def _hex(c):
@@ -63,7 +66,9 @@ def colors_for(name, theme):
     group = next((g for g, names in ICON_GROUPS.items() if name in names), "app")
     main = resolve(theme["icons"].get(group, "accent"))
     out = {"main": main, "shade": _mix(main, "#000000", 0.38), "tint": _mix(main, "#FFFFFF", 0.5),
-           "ink": resolve(theme["icons"].get("ink", "white")), "shine": "#FFFFFF"}
+           "ink": resolve(theme["icons"].get("ink", "white")), "shine": "#FFFFFF",
+           "frame": theme["ui"].get("cardRule", _mix(theme["ui"]["card"], theme["ui"]["hover"], 0.6)),
+           "background": theme["ui"]["card"]}
     for n in ("red", "yellow", "blue", "emerald"):
         out[n] = resolve(n)
     return out
@@ -342,6 +347,16 @@ def render(path, colors_by_placeholder):
     global K
     root = ET.parse(path).getroot()
     box = (root.get("viewBox") or "0 0 32 32").split()
+    if box == ["0", "0", "100", "100"]:
+        import resvg_py
+        # Replace attributes directly so a target color cannot become another placeholder.
+        for element in root.iter():
+            for attribute in ("fill", "stroke"):
+                value = element.get(attribute, "")
+                if value.upper() in colors_by_placeholder:
+                    element.set(attribute, colors_by_placeholder[value.upper()])
+        png = resvg_py.svg_to_bytes(svg_string=ET.tostring(root, encoding="unicode"), width=SIZE, height=SIZE)
+        return Image.open(io.BytesIO(png)).convert("RGBA")
     K = SIZE * SS / float(box[2])
     img = Image.new("RGBA", (SIZE * SS, SIZE * SS), (0, 0, 0, 0))
     walk(img, root, _style(root, {}), colors_by_placeholder)

@@ -34,7 +34,8 @@ ICON_GROUPS = {
     "paint": ("paint", "freeze", "invert", "unfreeze", "select"),  # the guide tools share one color
 }
 PLACEHOLDERS = {"main": "#3D7EFF", "shade": "#1F4FB3", "tint": "#A8C7FF", "ink": "#F2F2F5", "shine": "#FFFFFF",
-                "red": "#FF4D50", "yellow": "#FFC53E", "blue": "#2F7BF7", "emerald": "#2ECC90"}
+                "red": "#FF4D50", "yellow": "#FFC53E", "blue": "#2F7BF7", "emerald": "#2ECC90",
+                "frame": "#464646", "background": "#1E1E1E"}
 _svg_cache = {}
 
 
@@ -395,13 +396,14 @@ def icon_colors(name, t=None):
     group = next((g for g, names in ICON_GROUPS.items() if name in names), "app")
     main = t.hex(t.get("icons." + group, "accent"))
     colors = {"main": main, "shade": _mix(main, "#000000", 0.38), "tint": _mix(main, "#FFFFFF", 0.5),
-              "ink": t.hex(t.get("icons.ink", "white")), "shine": "#FFFFFF"}
+              "ink": t.hex(t.get("icons.ink", "white")), "shine": "#FFFFFF",
+              "frame": t.token("cardRule"), "background": t.token("card")}
     for name_ in ("red", "yellow", "blue", "emerald"):
         colors[name_] = t.hex(name_)
     return colors
 
 
-def icon_svg(name, t=None):
+def icon_svg(name, t=None, overrides=None):
     """The icon's SVG text in the theme's colors; None if there is no such icon."""
     path = os.path.join(ICON_DIR, "groomLab_%s.svg" % name)
     if path not in _svg_cache:
@@ -411,6 +413,7 @@ def icon_svg(name, t=None):
             _svg_cache[path] = f.read()
     svg = _svg_cache[path]
     colors = icon_colors(name, t)
+    colors.update(overrides or {})
     for role, placeholder in PLACEHOLDERS.items():
         svg = svg.replace(placeholder, "\0%s\0" % role)  # two passes: a color may equal another placeholder
     for role, color in colors.items():
@@ -576,15 +579,29 @@ def tinted_icon(name, rest, on=None, hover=None, disabled=None, size=48):
 
 
 def tool_icon(name, t=None, size=48):
-    """A tool tile's icon as the app draws it on a solid theme: one quiet tone (its group's icon
-    color) at rest, the accent's ink when chosen (a theme with ui.toolOn "category": its group's
-    color toward the text), the muted text disabled."""
+    """Two-tone tool artwork, retaining its compound paths in every state."""
     from groomlab.ui import theme
     t = t or theme.current()
-    group = next((g for g, names in ICON_GROUPS.items() if name in names), "app")
-    rest = t.hex(t.get("icons." + group, "accent"))
-    on = _mix(rest, t.color("ui.text"), 0.25) if t.get("ui.toolOn") == "category" else t.token("accentInk")
-    return tinted_icon(name, rest, on=on, disabled=t.token("textMuted"), size=size)
+    svg = icon_svg(name, t)
+    if svg is None:
+        return QtGui.QIcon()
+    on_svg = svg if t.get("ui.toolOn") == "category" else icon_svg(
+        name, t, {"main": t.token("accentInk"), "ink": t.token("accentInk")})
+    disabled_svg = icon_svg(name, t, {"main": t.token("textMuted"), "ink": t.token("textMuted")})
+    key = (svg, on_svg, disabled_svg, size)
+    if key in _icon_cache:
+        return _icon_cache[key]
+    normal = _pixmap(svg, size)
+    on = _pixmap(on_svg, size)
+    disabled = _pixmap(disabled_svg, size)
+    result = QtGui.QIcon()
+    result.addPixmap(normal, QtGui.QIcon.Normal, QtGui.QIcon.Off)
+    result.addPixmap(on, QtGui.QIcon.Normal, QtGui.QIcon.On)
+    result.addPixmap(on, QtGui.QIcon.Active, QtGui.QIcon.On)
+    result.addPixmap(disabled, QtGui.QIcon.Disabled, QtGui.QIcon.Off)
+    result.addPixmap(disabled, QtGui.QIcon.Disabled, QtGui.QIcon.On)
+    _icon_cache[key] = result
+    return result
 
 
 def glyph_button(name, tip="", slot=None, checkable=False, menu=None):

@@ -157,7 +157,7 @@ def main():
         check.run("import " + name, lambda n=name: importlib.import_module(n))
 
     from groomlab import graph as gm
-    from groomlab.ui import graph_editor, palette, updates_window, expression_editor, widgets
+    from groomlab.ui import graph_editor, palette, updates_window, expression_editor, widgets, theme
     from groomlab.ui import tool_tabs
     import groomlab_core
 
@@ -229,10 +229,40 @@ def main():
     def palette_builds():
         shown(palette.ToolPalette(), (420, 900))
 
+    def tool_icons():
+        from groomlab.ui import theme
+        names = ("place", "draw", "part", "flow", "comb", "slide", "smooth", "lift", "twist",
+                 "attract", "shape", "cut", "length", "lengths", "erase", "select", "freeze", "invert", "unfreeze")
+        _expect(palette.ToolPalette.TILE_ICON == 32, "tool icons default to 32 px")
+        for key in ("playful", "charcoal", "studio", "paper"):
+            t = theme.Theme(key, theme.load(key))
+            for name in names:
+                svg = widgets.icon_svg(name, t)
+                _expect("\0" not in svg, "%s/%s has no unresolved theme roles" % (key, name))
+                renderer = qt.QtSvg().QSvgRenderer(QtCore.QByteArray(svg.encode("utf-8")))
+                _expect(renderer.isValid(), "%s/%s is a valid Qt SVG" % (key, name))
+                icon = widgets.tool_icon(name, t, size=32)
+                normal = icon.pixmap(32, 32, QtGui.QIcon.Normal, QtGui.QIcon.Off).toImage()
+                expected = widgets._pixmap(svg, 32).toImage()
+                _expect(normal == expected, "%s/%s preserves both tones" % (key, name))
+                on_svg = svg if t.get("ui.toolOn") == "category" else widgets.icon_svg(
+                    name, t, {"main": t.token("accentInk"), "ink": t.token("accentInk")})
+                on = icon.pixmap(32, 32, QtGui.QIcon.Normal, QtGui.QIcon.On).toImage()
+                _expect(on == widgets._pixmap(on_svg, 32).toImage(), "%s/%s checked artwork" % (key, name))
+                off_svg = widgets.icon_svg(name, t, {"main": t.token("textMuted"), "ink": t.token("textMuted")})
+                off = icon.pixmap(32, 32, QtGui.QIcon.Disabled, QtGui.QIcon.Off).toImage()
+                _expect(off == widgets._pixmap(off_svg, 32).toImage(), "%s/%s disabled artwork" % (key, name))
+                _expect(any(normal.pixelColor(x, y).alpha() for x in range(6, 26) for y in range(6, 26)),
+                        "%s/%s has visible artwork inside the frame" % (key, name))
+
     def palette_cards():
         """Every tool's card and every tab painted; chips wrap (FlowLayout), tiles keep their size
         (ToolGrid's height for a width), the binding's virtuals reached from Python."""
         tools = shown(palette.ToolPalette(), (380, 900))
+        for name in ("length", "twist"):
+            button = tools.buttons[name]
+            _expect(button.height() >= button.iconSize().height() + button.fontMetrics().height() + theme.px(8),
+                    "%s leaves room for the label's descenders" % name)
         tools.empty.setVisible(False)
         tools.work.setVisible(True)
         for tool in [None] + list(palette.TOOL_SETTINGS):
@@ -322,6 +352,7 @@ def main():
                       ("Graph Editor's parameter panel for every node", graph_editor_params),
                       ("Graph Editor's keys, pan and zoom", graph_editor_events),
                       ("Groom Tools builds and paints", palette_builds),
+                      ("Tool icons render in light/dark themes, checked and disabled, at 32 px", tool_icons),
                       ("Groom Tools' tool cards and tabs; chips wrap, tiles keep their size", palette_cards),
                       ("Updates window builds", updates_builds),
                       ("Expression editor builds", expression_builds),

@@ -357,17 +357,18 @@ def main():
                     "Unfreeze All: a labeled tile, a button")
             _expect(unfreeze.text() == "Unfreeze All" and unfreeze.toolButtonStyle() == QtCore.Qt.ToolButtonTextUnderIcon,
                     "Unfreeze All's name under its icon")
-            # The app's tiles: one quiet tone at rest, the accent's ink when chosen.
+            # Two-tone artwork at rest, the accent's ink when chosen in this theme.
             comb = tools.buttons["comb"].icon()
 
             def ink(icon, state):
                 image = icon.pixmap(32, 32, QtGui.QIcon.Normal, state).toImage()
                 return next(QtGui.QColor(image.pixel(x, y)).name().upper() for y in range(32) for x in range(32)
                             if QtGui.QColor.fromRgba(image.pixel(x, y)).alpha() == 255)
-            _expect(ink(comb, QtGui.QIcon.On) == t.token("accentInk").upper()
-                    and ink(comb, QtGui.QIcon.Off) == t.hex(t.get("icons.shape")).upper(),
-                    "a tile's icon: the group's tone, chosen the accent's ink (%s, %s)"
-                    % (ink(comb, QtGui.QIcon.Off), ink(comb, QtGui.QIcon.On)))
+            normal = comb.pixmap(32, 32, QtGui.QIcon.Normal, QtGui.QIcon.Off).toImage()
+            expected = QtGui.QIcon(widgets._pixmap(widgets.icon_svg("comb", t), 48))
+            _expect(normal == expected.pixmap(32, 32).toImage()
+                    and ink(comb, QtGui.QIcon.On) == t.token("accentInk").upper(),
+                    "a tile preserves its themed artwork, chosen the accent's ink")
             # The pages: an icon rail along the window's top (components.iconRail; a side column
             # would widen the docked panel), no tab row.
             rail = tools.tabs.rail

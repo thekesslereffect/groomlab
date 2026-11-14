@@ -1844,7 +1844,7 @@ class ToolPalette(QtWidgets.QWidget):
 
     @staticmethod
     def paint_tile(button, tool, t=None):
-        """A tile's icon as the app's: one quiet tone, the accent's ink when chosen; a theme whose
+        """A tile's two-tone icon as the app's; a theme whose
         ui.toolOn is "category" (Playful): the chosen tile a soft wash of its group's color."""
         t = t or theme.current()
         button.setIcon(widgets.tool_icon(tool, t))
@@ -1858,8 +1858,8 @@ class ToolPalette(QtWidgets.QWidget):
         else:
             button.setStyleSheet("")
 
-    TILE_ICON = 24       # px at 100%: the tool tiles' icons
-    TILE = (56, 54)      # the tiles' minimum width and fixed height, the border included (the grid stretches them)
+    TILE_ICON = 32       # px at 100%: the tool tiles' icons
+    TILE = (56, 62)      # room for a 32 px icon and its label (the grid stretches the width)
     MAX_COLUMNS = 4      # at most this many tiles to a row, however wide the panel
 
     def _tile_size(self, b):

@@ -653,20 +653,16 @@ void GroomTools::groupPicked(const std::string& name) {
 
 void GroomTools::refreshTiles() {
     const qreal dpr = devicePixelRatioF();
-    const int iconSize = 24;
-    // The icons in their two tones (the group's color and the ink, as Maya's); checked, a glass
-    // theme's in the accent's text (on the accent), a solid theme's as at rest (on the selection).
+    const int iconSize = 32;
+    // Two-tone artwork at rest. Playful keeps it when checked; the other themes use the accent's ink.
     const bool glass = theme::glassy();
     auto toolIcon = [&](const std::string& stem, BrushCategory category) {
         const QString resource = iconPath(stem);
-        // A solid theme's tiles are one quiet tone (every part of the icon, Unfreeze's slash too);
-        // a glass theme's keep their two tones.
-        const QPixmap rest = glass ? duotoneIcon(resource, theme::toolIconColor(category, stem), theme::iconInk(), iconSize, dpr)
-                                   : tintedIcon(resource, theme::toolIconColor(category, stem), iconSize, dpr);
+        const QPixmap rest = duotoneIcon(resource, theme::toolIconColor(category, stem), theme::iconInk(), iconSize, dpr);
         // Chosen: the accent's ink; a theme with toolOn "category" (Playful) keeps the category's own color.
         const QColor onInk = glass ? theme::uiColor("accentText") : theme::toolOnCategory() ? theme::towardText(theme::toolIconColor(category, stem), 0.25) : theme::accentInk();
-        const QPixmap on = tintedIcon(resource, onInk, iconSize, dpr);
-        const QPixmap off = tintedIcon(resource, theme::textMuted(), iconSize, dpr);
+        const QPixmap on = !glass && theme::toolOnCategory() ? rest : duotoneIcon(resource, onInk, onInk, iconSize, dpr);
+        const QPixmap off = duotoneIcon(resource, theme::textMuted(), theme::textMuted(), iconSize, dpr);
         QIcon icon;
         icon.addPixmap(rest, QIcon::Normal, QIcon::Off);
         icon.addPixmap(on, QIcon::Normal, QIcon::On);
@@ -704,7 +700,7 @@ void GroomTools::refreshTiles() {
         b->setIconSize(QSize(iconSize, iconSize));
         const bool wide = b->property("wide").toBool();  // Paint's: the panel's width, the name beside the icon
         b->setToolButtonStyle(wide ? Qt::ToolButtonTextBesideIcon : tileLabels_ ? Qt::ToolButtonTextUnderIcon : Qt::ToolButtonIconOnly);
-        const QSize size = tileLabels_ ? QSize(56, 54) : QSize(38, 38);
+        const QSize size = tileLabels_ ? QSize(56, 62) : QSize(46, 46);
         b->setMinimumSize(wide ? QSize(0, 38) : size);
         b->setMaximumSize(QWIDGETSIZE_MAX, wide ? 38 : size.height());
         if (b->objectName() == QLatin1String("unfreezeAllTile") && b->property("iconLook").toString() != look) {
