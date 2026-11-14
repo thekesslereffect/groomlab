@@ -84,8 +84,19 @@ def state(context):
 def resolve(entries, context, conditions=True):
     """`entries` for Blender: bound actions only, conditions met (`conditions`, else every entry
     as an action bar shows them), the host's generators left out."""
+    from . import themes
     return definitions.resolve(entries, state(context) if conditions else None, keep=actions.bound,
+                               generators={"themes": themes.menu_entries, "themeMenu": theme_menu},
                                drop_generators=True)
+
+
+# The "themeMenu" generator (the Groom Tools' More menu, the Graph Editor's Edit menu): the GroomLab
+# menu's Theme submenu, as Maya's and the app's put it there.
+THEME_MENU = {"ref": "menus/theme"}
+
+
+def theme_menu(entry):
+    return [dict(THEME_MENU)]
 
 
 def _key(text):
@@ -118,6 +129,8 @@ def draw_action(layout, item, context, text=None, icon=None, emboss=True):
         where.prop(data, path[-1], text=label)
         return None
     kwargs = {"text": label, "emboss": emboss}
+    if (item.get("entry") or {}).get("checked"):  # (the active theme: picked in the menu)
+        kwargs["depress"] = True
     stem = item.get("icon")
     if icon is not None:
         kwargs["icon"] = icon
@@ -205,7 +218,9 @@ def _submenus(entries, key, conditions, out):
     for entry in entries:
         if not isinstance(entry, dict) or not definitions._for_host(entry, definitions.HOST):
             continue
-        if "include" in entry:
+        if entry.get("generator") == "themeMenu":  # (its Theme submenu, a class of this menu's)
+            _submenus([THEME_MENU], key, conditions, out)
+        elif "include" in entry:
             _submenus(definitions.get(entry["include"]), key, conditions, out)
         elif "submenu" in entry or "ref" in entry:
             item_id = entry.get("id", entry.get("ref"))

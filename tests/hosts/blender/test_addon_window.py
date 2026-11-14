@@ -91,6 +91,77 @@ class Assets(unittest.TestCase):
         self.assertEqual(b.size("card", "radius", 0), 10.0)
 
 
+class Themes(unittest.TestCase):
+    """GroomLab > Theme in Blender (themes.py), as Maya's and the app's: the shipped themes listed,
+    one picked restyles the window and the Graph Editor's canvas and is remembered, a theme sets
+    only some keys over the one it extends, and the menu lists them with the active one checked."""
+
+    def tearDown(self):
+        themes = importlib.import_module(bu.MODULE + ".themes")
+        themes.set_theme(themes.DEFAULT)
+
+    def test_pick_a_theme(self):
+        import json
+        themes = importlib.import_module(bu.MODULE + ".themes")
+        canvas = importlib.import_module(bu.MODULE + ".graph_canvas")
+        menu = importlib.import_module(bu.MODULE + ".menu")
+        self.assertTrue({"charcoal", "paper", "playful", "studio"} <= set(themes.list_themes()))
+        self.assertEqual(themes.active(), "charcoal")
+        dark = uikit._theme().panel
+        canvas_dark = canvas.theme()["canvas"]
+        themes.set_theme("paper")
+        self.assertEqual(themes.active(), "paper")
+        self.assertNotEqual(uikit._theme().panel, dark)
+        self.assertGreater(sum(uikit._theme().panel[:3]), sum(dark[:3]))  # Paper is light
+        self.assertNotEqual(canvas.theme()["canvas"], canvas_dark)
+        with open(themes._settings_path(), encoding="utf-8") as f:
+            self.assertEqual(json.load(f), {"theme": "paper"})  # remembered across sessions
+        themes._active["name"] = None
+        self.assertEqual(themes.active(), "paper")
+        with self.assertRaises(ValueError):
+            themes.set_theme("no_such_theme")
+        self.assertEqual(themes.active(), "paper")  # (a theme that won't load changes nothing)
+        # The Theme menu: every theme, the active one checked; the menu's other actions bound.
+        items = menu.resolve([{"ref": "menus/theme"}], bpy.context)
+        sub = next(i for i in items if i["kind"] == "submenu")
+        listed = [(i["value"], bool(i["entry"].get("checked"))) for i in sub["items"] if i["kind"] == "action"
+                  and i["id"] == "theme.set"]
+        self.assertIn(("paper", True), listed)
+        self.assertIn(("charcoal", False), listed)
+        self.assertTrue({"theme.new", "theme.reload", "theme.openFolder"} <= {i["id"] for i in sub["items"]
+                                                                               if i["kind"] == "action"})
+        # The Groom Tools' More menu (palette.json's header "more": its themeMenu generator) and the
+        # Graph Editor's Edit menu hold the same Theme submenu, as Maya's and the app's do.
+        defs = importlib.import_module(bu.MODULE + ".definitions")
+        more = menu.resolve(defs.get("palette/header/more")["items"], bpy.context)
+        theme_sub = [i for i in more if i["kind"] == "submenu"]
+        self.assertEqual([i["label"] for i in theme_sub], ["Theme"])
+        self.assertIn("paper", [i.get("value") for i in theme_sub[0]["items"]])
+        self.assertTrue(hasattr(bpy.types, menu.submenu_idname("more", "menus/theme")))  # (its class, to draw it)
+        gu = importlib.import_module(bu.MODULE + ".graph_ui")
+        ge = importlib.import_module(bu.MODULE + ".graph_editor")
+        edit = gu.prepare(gu.resolve(gu.get("graph/editMenu"), {"groom"}, generators={
+            "units": lambda e: [], "themeMenu": menu.theme_menu, "themes": themes.menu_entries}), gu.MenuContext(), "edit")
+        sub = [e for e in edit if e[0] == "menu" and e[1] == "Theme"]
+        self.assertTrue(sub)
+        ops = gu._submenus[sub[0][2]][1]
+        self.assertIn(("groomlab.theme_set", {"name": "paper"}), [(e[2], e[3]) for e in ops if e[0] == "op"
+                                                                   and e[3].get("name") == "paper"])
+        self.assertTrue(ge)
+        # A theme of the user's own: only its accent, the rest from the theme it extends.
+        path = themes.create_theme("probe_accent", base="charcoal")
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"name": "Probe", "extends": "charcoal", "ui": {"accent": "#FF0000"}}, f)
+        themes.set_theme("probe_accent")
+        t = uikit._theme()
+        self.assertAlmostEqual(t.accent[0], 1.0, places=5)
+        self.assertAlmostEqual(t.panel[0], uikit.linear(0x17 / 255.0), places=5)  # Charcoal's panel kept
+        self.assertTrue(data.get("ui"))
+        os.remove(path)
+
+
 class Props(unittest.TestCase):
     def test_prop_over_a_real_property(self):
         t = bpy.context.scene.groomlab_tools

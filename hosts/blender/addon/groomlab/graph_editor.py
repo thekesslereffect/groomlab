@@ -754,9 +754,12 @@ class GROOMLAB_MT_graph_edit(bpy.types.Menu):
     bl_label = "Edit"
 
     def draw(self, context):
-        # (Units and themes are Blender's own: their generators give nothing here.)
+        # (Units are the scene's in Blender: their generator gives nothing here. The theme is
+        # GroomLab's, as in Maya and the app: themes.py.)
+        from . import menu, themes
         graph_ui.draw(self.layout, "graph/editMenu", menu_context(context, active_node(context)), "edit",
-                      {"groom"}, generators={"units": lambda e: [], "themeMenu": lambda e: []})
+                      {"groom"}, generators={"units": lambda e: [], "themeMenu": menu.theme_menu,
+                                             "themes": themes.menu_entries})
 
 
 def draw_context_menu(self, context):

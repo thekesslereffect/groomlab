@@ -12,7 +12,8 @@
 
 from . import (actions, alphas, blender_theme, cards_view, definitions, display, graph_authoring, graph_canvas, graph_editor,
                graph_tree, graph_ui,
-               handlers, icons, menu, ops, palette, photos, pipeline_ops, process, props, tool_ops, tool_props, tools, ui,
+               handlers, icons, menu, ops, palette, photos, pipeline_ops, process, props, themes, tool_ops, tool_props, tools,
+               ui,
                updates, window)
 
 
@@ -39,12 +40,14 @@ def register():
     handlers.register()
     blender_theme.register()
     window.register()
+    themes.register()
     updates.register()
 
 
 def unregister():
     from . import groom
     updates.unregister()
+    themes.unregister()
     window.unregister()
     blender_theme.unregister()
     handlers.unregister()

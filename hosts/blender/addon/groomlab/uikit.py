@@ -92,8 +92,8 @@ class Theme:
     sunken, accentSoft, accentInk, cardRule, accentEdge, segmentOn...) and the components' sizes and
     roles (Charcoal's "components" block: every theme draws the components as it says)."""
 
-    def __init__(self, path=THEME_FILE):
-        data = self._read(path)
+    def __init__(self, path=None, data=None):
+        data = data if data is not None else (self._read(path) if path else theme_data())
         components = data.get("components")
         if not isinstance(components, dict):  # (Charcoal's block, whatever the theme)
             components = self._read(THEME_FILE).get("components") or {}
@@ -1756,6 +1756,24 @@ def _gizmo_width(context, s):
 
 
 _theme_cache = [None]
+_theme_data = [None]  # the active theme's data (themes.py: the one picked, merged with what it extends)
+
+
+def theme_data():
+    """The active theme's data (themes.apply sets it), else Charcoal's file as it ships."""
+    if _theme_data[0] is None:
+        _theme_data[0] = Theme._read(THEME_FILE)
+    return _theme_data[0]
+
+
+def set_theme_data(data):
+    _theme_data[0] = data
+    forget_theme()
+
+
+def forget_theme():
+    """The theme read again on the next draw (another one picked, its file edited)."""
+    _theme_cache[0] = None
 
 
 def _theme():

@@ -100,6 +100,11 @@ BINDINGS = {
     "import.alembicCurves": ("groomlab.import_alembic_curves", {}),
     "photos.guides": ("groomlab.photos_guides", {}),
     "help.docs": ("wm.url_open", {"url": DOCS_URL}),
+    # GroomLab > Theme (themes.py): the themes listed by menus.json's "themes" generator.
+    "theme.set": ("groomlab.theme_set", {"$value": "name"}),
+    "theme.new": ("groomlab.theme_new", {}),
+    "theme.reload": ("groomlab.theme_reload", {}),
+    "theme.openFolder": ("groomlab.theme_open_folder", {}),
     "help.shortcuts": ("groomlab.shortcuts", {}),
     "help.updates": ("groomlab.check_updates", {}),
     "help.discord": ("wm.url_open", {"url": DISCORD_URL}),

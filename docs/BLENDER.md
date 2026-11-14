@@ -963,6 +963,13 @@ in a new window); choosing a groom (the scene's `groomlab.groom`, in either plac
 in the open GroomLab node editors, and picking another groom's tree in an editor makes it the
 scene's groom.
 
+**Themes** (`themes.py`). GroomLab > Theme lists the themes as Maya's `ui/theme.py` finds them
+(GROOMLAB_THEME_PATH, the extension's user folder's `themes/`, the shipped Charcoal, Paper, Playful
+and Studio; a theme merged over the one it extends, Playful by default) and makes one active,
+remembered in the extension's `theme.json`: `uikit.theme_data()` is its data, which the window, the
+canvas and the node editor's colors (`blender_theme.graph_colors`) read; `themes.restyle()` drops
+their caches and redraws. New Theme from Current, Reload Theme and Open Themes Folder as in Maya.
+
 **The canvas** (`graph_canvas.py`). Blender's nodes take no styling, so a GroomLab Graph editor is
 drawn over in full in the app's look (uikit.py, the theme file's `graph` section): the canvas and
 its dot grid, backdrops, the app's wires, and each node as `node_graph.cpp`'s `drawNode` draws it (176

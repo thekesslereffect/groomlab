@@ -24,19 +24,9 @@ _cache = {"stamp": None, "data": {}}
 
 
 def _theme_json():
-    """The theme file's data (read again only when the file changes: nodes ask for it as they tint)."""
-    try:
-        stamp = os.path.getmtime(uikit.THEME_FILE)
-    except OSError:
-        return {}
-    if _cache["stamp"] != stamp:
-        try:
-            with open(uikit.THEME_FILE, encoding="utf-8") as f:
-                _cache["data"] = json.load(f)
-        except (OSError, ValueError):
-            _cache["data"] = {}
-        _cache["stamp"] = stamp
-    return _cache["data"]
+    """The active GroomLab theme's data (themes.py: GroomLab > Theme; Charcoal unless another was
+    picked)."""
+    return uikit.theme_data()
 
 
 def graph_colors():

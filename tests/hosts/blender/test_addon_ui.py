@@ -49,14 +49,13 @@ ALLOWED_MISSING = set()
 ALLOWED_MISSING_GRAPH = {
     "graph.gpuPreview",   # the GPU preview is Maya's viewport (Blender draws what the helper builds)
 }
-# Ids Blender does its own way (n/a in the parity audit): Blender's theme, keymap and updates.
-NOT_IN_BLENDER = {
-    "theme.set", "theme.new", "theme.reload", "theme.openFolder",  # Blender's own UI theme
-}
+# Ids Blender does its own way (n/a in the parity audit). (GroomLab's themes run here too since
+# themes.py: GroomLab > Theme restyles the window and the Graph Editor's canvas, as in Maya and the app.)
+NOT_IN_BLENDER = set()
 
 
 MAIN = ["Groom Tools", "Graph Editor", "Create Groom from Selection", "Add Sample Mesh", "Guides from Photos (experimental)...",
-        "Groom Files", "Import", "Add", "Simulate", "Display", "Review", "Export", "Utilities", "Help"]
+        "Groom Files", "Import", "Add", "Simulate", "Display", "Review", "Export", "Utilities", "Theme", "Help"]
 
 
 def blender_ids():
@@ -163,7 +162,7 @@ class DefinitionsTest(unittest.TestCase):
         # Unbound actions hidden: a submenu left empty goes.
         main = menu.resolve(defs.get("menus/main"), bpy.context)
         labels = [i["label"] for i in main if i["kind"] != "divider"]
-        for gone in ("Studio", "Render", "Theme"):
+        for gone in ("Studio", "Render"):
             self.assertNotIn(gone, labels)
         self.assertEqual(labels, MAIN)
         self.assertEqual(defs.plain("the <b>Group</b> picked"), "the Group picked")
