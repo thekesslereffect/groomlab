@@ -385,6 +385,27 @@ class SubdivisionTest(unittest.TestCase):
         self.assertEqual(again["directions"], off["directions"])
         self.assertEqual(again["strands"], off["strands"])
 
+    def test_guides_stay_put_through_select_and_deselect(self):
+        # Issue #68: guides placed on the refined scalp (the brush roots there) moved when the
+        # Select tool selected or deselected them: groomLabGuides (its solo, -freezeOthers) rooted
+        # every guide again on the cage and wrote them back. It roots them as the brush does now.
+        groomlab.set_param(self.groom, "scalp", "subdivision", "2")
+        cmds.groomLabGraphStats(self.groom, points=True)  # evaluated at level 2, as the viewport has
+        for k in range(12):
+            groomlab.brush_stroke(self.groom, "place", [on_head(15 + 5 * (k % 4), 30 * k)], radius=0.5, length=3.0)
+        ids = groomlab.guide_ids(self.groom, "primary")
+        self.assertEqual(len(ids), 12)
+
+        def stored():
+            return {g["id"]: g["points"] for g in json.loads(cmds.getAttr(self.groom + ".guideData"))["guides"]}
+        before = stored()
+        for _ in range(3):
+            cmds.groomLabGuides(self.groom, select=True, guide=[str(ids[0])], freezeOthers=True)
+            cmds.groomLabGuides(self.groom, clearSelection=True, freezeOthers=True)
+        after = stored()
+        worst = max(max(abs(a - b) for a, b in zip(before[i], after[i])) for i in before)
+        self.assertLess(worst, 1e-4 * RADIUS)  # (was 0.2 on a radius-10 head, each guide re-rooted)
+
 
 if __name__ == "__main__":
     result = unittest.main(exit=False).result

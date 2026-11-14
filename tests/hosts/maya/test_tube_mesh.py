@@ -237,6 +237,26 @@ class TubesInMayaTest(unittest.TestCase):
         ep = cmds.ls(result["shape"][0] + ".ep[*]", flatten=True)
         self.assertEqual(len(ep), len(self.rings) + 1)
 
+    def test_tips_stay_in_the_tube_on_a_refined_scalp(self):
+        # Issue #67: with the Scalp node refining a coarse scalp, the curves were rooted on the
+        # modeled mesh, off the surface the groom roots on, and the groom moved each guide whole to
+        # root it: the tips left their tube. Rooted on the refined scalp, only the root moves.
+        cmds.delete(self.scalp)
+        scalp = cmds.polySphere(radius=1, subdivisionsX=8, subdivisionsY=4, name="coarseHead")[0]
+        lock = make_mesh("coarseLock", *grid(tube_rings(root=(0.15, 0.93, 0.1)), pointed=True))
+        free = utils.tubes_to_curves([lock], centers=False)
+        tips = [cmds.pointPosition(cmds.ls(c + ".ep[*]", flatten=True)[-1]) for c in free["shape"]]
+        cmds.delete(free["group"])
+        groom = groomlab.create_groom(scalp)
+        groomlab.set_param(groom, "scalp", "subdivision", "2")
+        cmds.groomLabGraphStats(groom, points=True)  # evaluated at level 2, as the viewport has
+        result = utils.tubes_to_curves([lock], groom=groom, centers=False)
+        worst = 0.0
+        for guide in result["shape"]:
+            tip = _guide_points(groom, guide)[-1]
+            worst = max(worst, min(math.sqrt(sum((a - b) ** 2 for a, b in zip(tip, t))) for t in tips))
+        self.assertLess(worst, 0.03)  # (was 0.07, the root's whole move, in a tube 0.15 wide)
+
     def test_curves_into_the_groom(self):
         groom = groomlab.create_groom(self.scalp)
         result = utils.tubes_to_curves([self.lock, self.side], groom=groom)
