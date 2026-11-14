@@ -7,6 +7,7 @@
 
 #include <QAction>
 #include <QActionGroup>
+#include <QCheckBox>
 #include <QComboBox>
 #include <QEvent>
 #include <QFormLayout>
