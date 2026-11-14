@@ -49,10 +49,13 @@ MAX_LEVELS = 9              # the tube hierarchy's deepest level (1: the base)
 LEVEL_SUFFIX = "_L"         # level n's group: <base>_L<n>
 SNAP_PIXELS = 12            # how near (in view pixels) a CV snaps to a neighbouring root's CV or edge
 OUTLINES_ATTR = "groomLabRootOutlines"  # the groom's string attribute: each root tube's CVs on the scalp (JSON)
+ROOT_OVERLAP = 0.015       # a root tube's footprint this share larger than its outline: sealed neighbours overlap
 _RECENTER_PASSES = 4        # the guide moved onto its root shape's box middle at most so often
-_PATH_SAMPLES = 200         # a drawn path smoothed at this many points evenly along it
-_PATH_SMOOTHING = 0.035     # ... averaged over this share of its length (a Gaussian's sigma), twice
-_PATH_STEP = 0.02           # a drawn path thinned to points this share of its size apart
+_PATH_SMOOTHING = 0.25     # a drawn path averaged along it over this share of its root's size (a Gaussian's
+                            # sigma): the hand's shakes go, a curl as wide as its tube stays
+_SPAN_ROOTS = 1.0           # a drawn guide's spans about this many root sizes long (Point density 1) ...
+_SPAN_TURN = math.radians(15.0)  # ... and turning at most this much each, so a curl keeps its points
+_SPANS = (3, 200)           # ... between these many
 MAX_LEAN = math.radians(50.0)  # a root tube's guide leaves the scalp leaning at most this far off its normal
 _PATH_LEAVE = 0.2           # the least share of the path over which it bends from the scalp's normal into the stroke
 
@@ -187,7 +190,12 @@ def _gaussian(pts, sigma):
             acc = tm._add(acc, tm._mul(at(i + k), w))
             total += w
         out.append(tm._mul(acc, 1.0 / total))
-    out[0] = pts[0]  # (the root: held)
+    # The root held, the shift it takes faded out along the first stretch (pinning the root point
+    # alone would leave a hook there).
+    shift = tm._sub(pts[0], out[0])
+    for i in range(min(reach, n)):
+        w = 0.5 * (1.0 + math.cos(math.pi * i / float(reach)))
+        out[i] = tm._add(out[i], tm._mul(shift, w))
     return out
 
 
@@ -218,29 +226,32 @@ def _seat(points, normal):
     return out
 
 
-def _smooth_path(path, root, normal, segments):
+def _smooth_path(path, root, normal, size):
     """A drawn stroke as the guide follows it: its first point taken to `root`, the hand's jitter
-    averaged out along it (a Gaussian over _PATH_SMOOTHING of its length, at _PATH_SAMPLES points
-    evenly along it, twice: the shakes, and the back-and-forth of a hand slowing, smoothed away
-    while its bends stay; its root held, its tip smoothed too), leaving the root the stroke's way
-    (at most MAX_LEAN off the scalp's `normal`: below)."""
+    averaged out along it (a Gaussian over _PATH_SMOOTHING of the root's `size`, at points evenly
+    along it: the shakes, and the back-and-forth of a hand slowing, smoothed away while its bends,
+    curls and spirals as wide as the tube stay; its root held, its tip smoothed too), leaving the
+    root the stroke's way (at most MAX_LEAN off the scalp's `normal`: below)."""
     drawn = [tuple(p) for p in path]
     drawn[0] = tuple(root)
     if _length(drawn) <= 1e-9:
         raise ValueError("the tube needs a length")
-    # Thinned first: a point nearer the last one kept than _PATH_STEP of the stroke's size dropped,
-    # so where the hand went slowly (its start, mostly) its shakes don't count as length.
-    lo = [min(q[k] for q in drawn) for k in range(3)]
-    hi = [max(q[k] for q in drawn) for k in range(3)]
-    step = _PATH_STEP * math.sqrt(sum((b - a) ** 2 for a, b in zip(lo, hi)))
+    sigma = max(_PATH_SMOOTHING * float(size), 1e-6)
+    # Thinned first: a point nearer the last one kept than half the smoothing dropped, so where
+    # the hand went slowly (its start, mostly) its shakes don't count as length.
     pts = [drawn[0]]
     for q in drawn[1:]:
-        if tm._dist(q, pts[-1]) >= step:
+        if tm._dist(q, pts[-1]) >= 0.5 * sigma:
             pts.append(q)
     if tm._dist(drawn[-1], pts[-1]) > 1e-12:
         pts[-1 if len(pts) > 1 else len(pts):] = [drawn[-1]]
-    for _ in range(2):
-        pts = _gaussian(_resample(pts, _PATH_SAMPLES), _PATH_SMOOTHING * (_PATH_SAMPLES - 1))
+    if len(pts) < 2:
+        pts = [drawn[0], drawn[-1]]
+    total = _length(pts)
+    sigma = min(sigma, 0.1 * total)  # (a stroke shorter than its root's size: still its own shape)
+    samples = int(min(max(4.0 * total / sigma, 50), 4000))
+    pts = _resample(pts, samples)
+    pts = _gaussian(pts, sigma / (total / float(samples - 1)))
     # From the root the guide goes the stroke's way, as drawn. Only a stroke leaving the root
     # leaning more than MAX_LEAN off the scalp's normal (so flat along the scalp that the tube's
     # section there would thin to nothing) starts at MAX_LEAN instead and bends into the stroke:
@@ -268,7 +279,7 @@ def _smooth_path(path, root, normal, segments):
         if t <= 0.0 or u >= 0.0:
             return None
         return tm.lerp(tm._add(pts[0], tm._mul(start_way, t)), tm._add(q, tm._mul(way, u)), 0.5)
-    least = max(_PATH_LEAVE * total, 3.0 * total / float(segments))
+    least = max(_PATH_LEAVE * total, 3.0 * float(size))
     along, k, mid = 0.0, None, None
     for i in range(1, len(pts)):
         along += tm._dist(pts[i - 1], pts[i])
@@ -289,14 +300,83 @@ def _smooth_path(path, root, normal, segments):
     return curve + pts[k:]
 
 
-def _guide_path(root, normal, path, length, segments):
-    """The guide's points: from `root` straight off the scalp (`length`), or along the drawn `path`
-    smoothed (_smooth_path), `segments` + 1 of them evenly spaced along it; its first span leaning
-    at most MAX_LEAN off the scalp's `normal`."""
-    segments = max(int(segments), 2)
+def _turning(pts):
+    """How far (radians) a polyline turns, all told."""
+    out = 0.0
+    for a, b, c in zip(pts, pts[1:], pts[2:]):
+        u, v = tm._sub(b, a), tm._sub(c, b)
+        lu, lv = tm._length(u), tm._length(v)
+        if lu > 1e-12 and lv > 1e-12:
+            out += math.acos(max(-1.0, min(1.0, tm._dot(u, v) / (lu * lv))))
+    return out
+
+
+def _even_chords(points, count):
+    """`count` points along a polyline (dense: a smoothed stroke), its ends kept, each the same
+    straight distance from the last (the guide's spans all one length, however it bends)."""
+    pts = [tuple(p) for p in points]
+    if count < 2 or len(pts) < 2:
+        return pts[:1] * max(count, 1)
+
+    def walk(step):
+        out, j = [pts[0]], 1
+        for _ in range(count - 1):
+            here = out[-1]
+            while j < len(pts) and tm._dist(pts[j], here) < step:
+                j += 1
+            if j >= len(pts):
+                return out, False
+            # On the segment (pts[j - 1], pts[j]): the point `step` from `here`.
+            a, b = pts[j - 1], pts[j]
+            lo, hi = 0.0, 1.0
+            for _ in range(40):
+                m = 0.5 * (lo + hi)
+                if tm._dist(tm.lerp(a, b, m), here) < step:
+                    lo = m
+                else:
+                    hi = m
+            out.append(tm.lerp(a, b, hi))
+        return out, True
+    lo, hi = 0.0, _length(pts) / float(count - 1)
+    best = None
+    for _ in range(50):
+        step = 0.5 * (lo + hi)
+        out, whole = walk(step)
+        if whole:
+            best = out
+            lo = step  # (all placed: longer spans may still fit)
+        else:
+            hi = step
+    if best is None:
+        return _resample(pts, count)
+    best[-1] = pts[-1]
+    return best
+
+
+def path_spans(points, size, density=1.0):
+    """How many spans a drawn guide gets: about one every _SPAN_ROOTS root sizes (`size`) along it
+    and enough that none turns more than _SPAN_TURN, both times `density`, within _SPANS: a short
+    stroke few, a long or a curling one more."""
+    density = max(float(density), 1e-3)
+    total = _length(points)
+    along = total / max(_SPAN_ROOTS * float(size) / density, 1e-9)
+    # (its turns at the shape's scale: on points half a root size apart, not the fine samples)
+    coarse = _resample(points, int(min(max(total / (0.5 * max(float(size), 1e-9)), 2), 2000)) + 1)
+    turns = _turning(coarse) / (_SPAN_TURN / density)
+    return int(min(max(math.ceil(max(along, turns)), _SPANS[0]), _SPANS[1]))
+
+
+def _guide_path(root, normal, path, length, segments, size=None, density=1.0):
+    """The guide's points: from `root` straight off the scalp (`length`, `segments` spans), or along
+    the drawn `path` smoothed (_smooth_path, over the root's `size`), as many evenly spaced along it
+    as its length and its turns call for (path_spans, times `density`); its first span leaning at
+    most MAX_LEAN off the scalp's `normal`."""
     if path and len(path) >= 2:
-        pts = _resample(_smooth_path(path, root, normal, segments), segments + 1)
+        size = float(size) if size else 0.05 * _length([tuple(p) for p in path])
+        smooth = _smooth_path(path, root, normal, size)
+        pts = _even_chords(smooth, path_spans(smooth, size, density) + 1)
     else:
+        segments = max(int(segments), 2)
         if float(length) <= 1e-9:
             raise ValueError("the tube needs a length")
         pts = [tm._add(root, tm._mul(normal, float(length) * i / float(segments))) for i in range(segments + 1)]
@@ -385,10 +465,14 @@ def _footprint(groom, guide):
 
 
 def _root_fit(groom, guide, outline):
-    """The guide's root footprint and the outline in it (taken into its plane along its normal):
-    (center, u, v, flat points (u, v))."""
+    """The guide's root footprint and the outline in it (taken into its plane along its normal),
+    ROOT_OVERLAP larger about the guide: (center, u, v, flat points (u, v)). Sealed neighbours'
+    footprints each lie flat on a plane of their own, so where they share an edge a hair-thin
+    crack can open between them, and a strand rooted in it would be in no tube; a little larger,
+    they overlap there instead (the tube a strand lies most centrally in takes it)."""
     center, u, v, _n = _footprint(groom, guide)
-    return center, u, v, [tm.to_plane(p, center, u, v) for p in outline]
+    k = 1.0 + ROOT_OVERLAP
+    return center, u, v, [tuple(x * k for x in tm.to_plane(p, center, u, v)) for p in outline]
 
 
 def _solve3(m, r):
@@ -645,11 +729,14 @@ def _store_outline(groom, guide, outline):
 # Root-first tubes
 
 
-def make_root_tube(groom, outline, path=None, length=1.0, segments=12, taper=0.5, group=None, regions=True):
+def make_root_tube(groom, outline, path=None, length=1.0, segments=12, taper=0.5, group=None, regions=True,
+                   density=1.0):
     """A tube guide grown from its root's outline: `outline` the root's CVs on the scalp (world
     points, 3 or more, in order round it). The guide roots at the outline's middle and goes along
-    the drawn `path` (world points from the root out; its first point is taken to the root), or
-    with none straight off the scalp `length` long, in `segments` segments. Its tube: a library
+    the drawn `path` (world points from the root out; its first point is taken to the root:
+    smoothed over the root's size, its points as many as its length and turns call for, times
+    `density`: _guide_path), or with none straight off the scalp `length` long, in `segments`
+    segments. Its tube: a library
     shape of its own (rootTube_<n>, removed with the last guide that takes it) whose outline at
     the root is the drawn one (straight edges between the CVs), its width going to `taper` times
     the root's at the tip. The tube is swept from its root along the guide with no twist (its
@@ -665,9 +752,9 @@ def make_root_tube(groom, outline, path=None, length=1.0, segments=12, taper=0.5
     with groomlab.undo_chunk("root tube"):
         outline = [surface(p)[0] for p in outline]
         root, normal = surface(_centroid(outline))
-        points = _guide_path(root, normal, path, length, segments)
-        guide = _new_guide(groom, points, group or ROOT_GROUP)
         radius = max(tm._dist(root, p) for p in outline)
+        points = _guide_path(root, normal, path, length, segments, radius, density)
+        guide = _new_guide(groom, points, group or ROOT_GROUP)
         # A placeholder shaped tube first, so the guide's frame is laid across the scalp (as it
         # will lie), then the outline read in it.
         groomlab.set_tube(groom, guides=[guide], shape="ribbon", width=radius, aspect=1.0, twist=0.0,
@@ -685,7 +772,7 @@ def make_root_tube(groom, outline, path=None, length=1.0, segments=12, taper=0.5
             if path and len(path) >= 2:  # the drawn curve moved with its root
                 delta = tm._sub(moved_root, points[0])
                 path = [tm._add(p, delta) for p in path]
-            points = _guide_path(moved_root, normal, path, length, segments)
+            points = _guide_path(moved_root, normal, path, length, segments, radius, density)
             _reshape(groom, guide, points)
             twist, w, h, off = _fit(groom, guide, shape, outline)
         groomlab.set_tube(groom, guides=[guide], shape=shape, width=[w, w * float(taper)],
@@ -869,9 +956,11 @@ def _tube_copy(tube, twist_by=0.0):
     return kwargs
 
 
-def duplicate_root_tube(groom, guide, to, regions=True):
+def duplicate_root_tube(groom, guide, to, regions=True, start=None):
     """A copy of root tube `guide` with its root set down at `to` (a world point, taken onto the
-    scalp): its outline and its guide carried there over the scalp as one (carried), its tube a
+    scalp; with `start`, the point carried to `to` instead of its root's middle: several roots
+    copied as one group, each carried alike): its outline and its guide carried there over the
+    scalp as one (carried), its tube a
     copy (a root shape of its own, the same widths, flatness, twist and profiles), and the tube
     hierarchy under it copied level by level (each level's split made again, each child given its
     counterpart's shape and tube). Into the same groups. With `regions`, the regions updated. One
@@ -883,7 +972,7 @@ def duplicate_root_tube(groom, guide, to, regions=True):
         raise ValueError("guide %s is not a root tube" % guide)
     surface = _scalp_surface(groom)
     outline = root_outline(groom, guide)
-    start, n0 = surface(_centroid(outline))
+    start, n0 = surface(start if start is not None else _centroid(outline))
     c1, n1 = surface(to)
 
     def move(p):
@@ -1098,6 +1187,36 @@ def update_regions(groom):
     entry["channels"] = 4
     cmds.setAttr(groom + ".scalpMaps", json.dumps(maps, separators=(",", ":")), type="string")
     return {"tubes": len(tubes), "vertices": len(owner), "other": other}
+
+
+def footprint_error(groom, guide):
+    """How far (a share of the root's size) root tube `guide`'s footprint lies off its kept
+    outline made ROOT_OVERLAP larger: 0 when its tube was fitted to it as it is now."""
+    outline = root_outline(groom, guide)
+    c, u, v, n = _footprint(groom, guide)
+    k = 1.0 + ROOT_OVERLAP
+    want = [tuple(x * k for x in tm.to_plane(p, c, u, v)) for p in outline]
+    have = [tm.to_plane(p, c, u, v) for p in section_outline(groom, guide, on_scalp=False)]
+    size = max(math.hypot(x, y) for x, y in want) or 1.0
+    return max(min(math.hypot(a[0] - b[0], a[1] - b[1]) for b in have) for a in want) / size
+
+
+def refresh_root_tubes(groom, tolerance=0.004):
+    """Every root tube whose footprint has drifted off its kept outline (a tube fitted by an
+    earlier GroomLab, or one a brush resized) fitted to it again (edit_root_tube), then the
+    regions painted again. One undo step. Returns {"refitted": [guides], plus update_regions'}."""
+    refitted = []
+    with groomlab.undo_chunk("refresh root tubes"):
+        for guide in root_tubes(groom):
+            try:
+                if footprint_error(groom, guide) > tolerance:
+                    edit_root_tube(groom, guide, root_outline(groom, guide), regions=False)
+                    refitted.append(guide)
+            except (RuntimeError, ValueError):
+                continue
+        out = update_regions(groom)
+    out["refitted"] = refitted
+    return out
 
 
 # ---------------------------------------------------------------------------

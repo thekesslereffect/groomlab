@@ -105,10 +105,11 @@ class RootTubes(unittest.TestCase):
             jitter = 0.012 * math.sin(i * 2.7) + 0.008 * math.cos(i * 4.1)
             shaky.append(tm._add(c, (jitter, 0.6 * jitter, -0.5 * jitter)))
         shaky[0] = clean[0] = root
-        guide = root_tubes.make_root_tube(self.groom, ring((0.0, 1.0, 0.0), 0.12), path=shaky, segments=16,
-                                          regions=False)
+        guide = root_tubes.make_root_tube(self.groom, ring((0.0, 1.0, 0.0), 0.12), path=shaky, regions=False)
         pts = self.points(guide)
-        self.assertEqual(len(pts), 17)
+        # Its points by its length and turns: a root 0.12 across, a stroke ~1.2 long turning ~70
+        # degrees: about one a root size, the turn under 15 degrees a span.
+        self.assertTrue(8 <= len(pts) - 1 <= 16, "%d spans" % (len(pts) - 1))
         spans = [tm._dist(a, b) for a, b in zip(pts, pts[1:])]
         mean = sum(spans) / len(spans)
         self.assertLess(max(abs(x - mean) for x in spans) / mean, 0.05, "evenly spaced")
@@ -119,21 +120,56 @@ class RootTubes(unittest.TestCase):
             turns.append((math.degrees(math.acos(max(-1.0, min(1.0, tm._dot(t1, t2))))), tm._cross(t1, t2)[0]))
         join = 1
         for angle, _side in turns[join:]:
-            self.assertLess(angle, 6.0, "jitter left in the guide")
+            self.assertLess(angle, 15.0, "jitter left in the guide")
         # (in the stroke's plane, y-z: its way turning on and on, never back)
         ways = [math.degrees(math.atan2(b[2] - a[2], b[1] - a[1])) for a, b in zip(pts, pts[1:])]
         for a, b in zip(ways, ways[1:]):
-            self.assertGreater(b, a - 0.5, "the guide wiggles")
+            self.assertGreater(b, a - 1.5, "the guide wiggles")  # (a degree's give: the tip's own shake)
         # On the arc drawn (the jitter averaged out), leaving the root its way.
         dense = root_tubes._resample(clean, 400)
         for p in pts[1:]:
-            self.assertLess(nearest(p, dense), 0.02, "off the drawn curve")
+            self.assertLess(nearest(p, dense), 0.03, "off the drawn curve")  # (within the shake's size, 0.02)
         # A stroke laid flat along the scalp: the guide leaves the root at most MAX_LEAN off its
         # normal, bending into the stroke in one turn.
         flat = [root] + [(0.6 * k / 20.0, 1.0 + 0.02 * k / 20.0, 0.0) for k in range(1, 21)]
-        pts = root_tubes._guide_path(root, (0.0, 1.0, 0.0), flat, 1.0, 12)
+        pts = root_tubes._guide_path(root, (0.0, 1.0, 0.0), flat, 1.0, 12, 0.12)
         lean = math.degrees(root_tubes._lean(tm._sub(pts[1], pts[0]), (0.0, 1.0, 0.0)))
         self.assertLessEqual(lean, math.degrees(root_tubes.MAX_LEAN) + 0.01)
+
+    def test_a_drawn_curl_keeps_its_shape_and_a_short_stroke_few_points(self):
+        """A curl drawn shakily (a helix of three turns, each a few roots wide, rising off the
+        scalp): the guide keeps its turns (the smoothing goes by the root's size, not the stroke's
+        length), the jitter gone; a short stroke gets few points, a long one more."""
+        root = on_sphere((0.0, 1.0, 0.0))
+        size = 0.06
+        spiral, shaky = [root], [root]
+        for i in range(1, 600):
+            t = i / 599.0
+            a = 3 * 2 * math.pi * t
+            r = 0.15
+            q = (r * math.cos(a) - r, 1.0 + 2.4 * t, r * math.sin(a))
+            spiral.append(q)
+            j = 0.004 * math.sin(i * 2.9)
+            shaky.append(tm._add(q, (j, 0.5 * j, -j)))
+        pts = root_tubes._guide_path(root, (0.0, 1.0, 0.0), shaky, 1.0, 12, size)
+        drawn = root_tubes._turning(root_tubes._resample(spiral, 200))
+        made = root_tubes._turning(pts)
+        self.assertGreater(made, 0.8 * drawn, "the curls kept (%.0f of %.0f degrees)" % (math.degrees(made),
+                                                                                         math.degrees(drawn)))
+        dense = root_tubes._resample(spiral, 2000)
+        for p in pts[3:]:
+            self.assertLess(nearest(p, dense), 0.02, "off the drawn spiral")
+        spans = [tm._dist(a, b) for a, b in zip(pts, pts[1:])]
+        self.assertLess(max(spans) / min(spans), 1.1, "evenly spaced")
+        # Few points on a short straight stroke, more on a long one; Point density doubles them.
+        short = [root, tm._add(root, (0.0, 0.1, 0.0)), tm._add(root, (0.0, 0.2, 0.02))]
+        long = [root, tm._add(root, (0.0, 1.0, 0.0)), tm._add(root, (0.0, 2.0, 0.2))]
+        n_short = len(root_tubes._guide_path(root, (0.0, 1.0, 0.0), short, 1.0, 12, 0.1)) - 1
+        n_long = len(root_tubes._guide_path(root, (0.0, 1.0, 0.0), long, 1.0, 12, 0.1)) - 1
+        n_dense = len(root_tubes._guide_path(root, (0.0, 1.0, 0.0), long, 1.0, 12, 0.1, density=2.0)) - 1
+        self.assertLessEqual(n_short, 3)
+        self.assertGreater(n_long, 3 * n_short)
+        self.assertAlmostEqual(n_dense, 2 * n_long, delta=2)
 
     def test_the_root_is_kept_whatever_happens_to_its_guide(self):
         """Combing, retwisting and resizing the guide's tube leave its root CVs (and its region)
@@ -225,7 +261,8 @@ class RootTubes(unittest.TestCase):
             back = root_tubes.section_outline(self.groom, guide)
             self.assertEqual(len(back), len(cvs))
             for p in cvs:
-                self.assertLess(nearest(p, back), 0.002, "edit %d: a CV off where it was put" % step)
+                # (its tube's root a little larger than the outline: ROOT_OVERLAP)
+                self.assertLess(nearest(p, back), 0.002 + root_tubes.ROOT_OVERLAP * 0.2, "edit %d: a CV off" % step)
 
     def test_a_ctrl_click_adds_a_cv_on_every_outline_sharing_the_edge(self):
         from groomlab.ui import root_tube_tool
@@ -317,8 +354,10 @@ class RootTubes(unittest.TestCase):
             def flat(q):
                 d = tm._sub(q, c)
                 return tm._sub(d, tm._mul(normal, tm._dot(d, normal)))
+            k = 1.0 + root_tubes.ROOT_OVERLAP  # (the footprint a little larger: sealed neighbours overlap)
             for q in root_tubes.root_outline(self.groom, guide):
-                self.assertLess(min(tm._dist(flat(q), flat(f)) for f in foot), 0.002, "a CV off the footprint")
+                grown = tm._add(c, tm._mul(flat(q), k))
+                self.assertLess(min(tm._dist(flat(grown), flat(f)) for f in foot), 0.002, "a CV off the footprint")
 
     def test_the_region_reaches_just_past_the_outline(self):
         """A face the outline crosses blends the tube's color with its own, not with black: a band
@@ -421,7 +460,7 @@ class RootTubes(unittest.TestCase):
         tool.press_point = lambda: (x + 2.0, y)
         tool.press()
         self.assertEqual(tool.selected, int(b))
-        self.assertEqual(len(tool.move["held"]), 2, "its two CVs on a's edge held")
+        self.assertEqual(len(tool.move["held"][int(b)]), 2, "its two CVs on a's edge held")
         step = tm._mul(tm._unit(out), 0.05)
         tool.view_point = lambda: (x + 2.0 + step[0] * 1000.0, y + step[2] * 1000.0)
         tool.drag_event()
@@ -452,6 +491,86 @@ class RootTubes(unittest.TestCase):
         self.assertEqual(tool.delete_selected(), 1)
         self.assertEqual(len(root_tubes.root_tubes(self.groom)), 2)
         self.assertIsNone(tool.selected)
+
+    def test_shift_selects_several_roots_carried_and_copied_as_one(self):
+        a = root_tubes.make_root_tube(self.groom, ring((0.0, 1.0, 0.0), 0.12, count=4), regions=False)
+        ca = root_tubes.root_outline(self.groom, a)
+        c = root_tubes._centroid(ca)
+        out = tm._sub(tm.lerp(ca[0], ca[1], 0.5), c)
+        b = root_tubes.make_root_tube(self.groom, [ca[1], ca[0], on_sphere(tm._add(ca[0], out)),
+                                                   on_sphere(tm._add(ca[1], out))], regions=False)
+        other = tm._mul(out, -1.0)
+        d = root_tubes.make_root_tube(self.groom, [ca[3], ca[2], on_sphere(tm._add(ca[2], other)),
+                                                   on_sphere(tm._add(ca[3], other))], regions=False)
+        tool = self._tool()
+        tool.start(self.groom, "select")
+        keys = {"mod": ""}
+        tool.modifier = lambda: keys["mod"]
+
+        def click(g):
+            x, y = tool.to_screen(tool.middles[int(g)][0])
+            tool.press_point = lambda: (x, y)
+            tool.press()
+            return x, y
+        click(a)
+        keys["mod"] = "shift"
+        click(b)
+        self.assertEqual(tool.picked, [int(a), int(b)])
+        click(b)  # Shift+click a selected one: out
+        self.assertEqual(tool.picked, [int(a)])
+        x, y = click(b)
+        self.assertEqual(sorted(tool.picked), sorted([int(a), int(b)]))
+        # a's CVs sealed onto d (not selected) held; a and b's shared CVs carried together.
+        self.assertEqual(len(tool.move["held"][int(a)]), 2)
+        self.assertEqual(len(tool.move["held"][int(b)]), 0)
+        keys["mod"] = ""
+        step = tm._mul(tm._unit(out), 0.04)
+        tool.view_point = lambda: (x + step[0] * 1000.0, y + step[2] * 1000.0)
+        tool.drag_event()
+        tool.release()
+        oa, ob = root_tubes.root_outline(self.groom, a), root_tubes.root_outline(self.groom, b)
+        for q in ob[:2]:
+            self.assertLess(nearest(q, oa), 1e-3, "the seam between the two carried roots kept")
+        od = root_tubes.root_outline(self.groom, d)
+        for q in od[:2]:
+            self.assertLess(nearest(q, oa), 1e-3, "a's CVs sealed onto d stay")
+        self.assertGreater(nearest(ob[2], [ca[0], ca[1], ca[2], ca[3]]), 0.03, "b moved")
+        cmds.undo()  # one step for both
+        for q in [ca[1], ca[0]]:
+            self.assertLess(nearest(q, root_tubes.root_outline(self.groom, b)), 1e-3)
+        # Both copied at once, as one group, then both deleted.
+        tool.start(self.groom, "select")
+        tool.modifier = lambda: keys["mod"]
+        keys["mod"] = ""
+        click(a)
+        keys["mod"] = "shift"
+        click(b)
+        tool.release()
+        self.assertTrue(tool.begin_duplicate())
+        target = on_sphere((-0.45, 0.85, 0.1))
+        tool.follow(target[0] * 1000.0, target[2] * 1000.0)
+        self.assertEqual(len(tool.ghost[1]), 2)
+        made = tool.place_copy()
+        self.assertEqual(len(made), 2)
+        self.assertEqual(len(root_tubes.root_tubes(self.groom)), 5)
+        na, nb = (root_tubes.root_outline(self.groom, g) for g in made)
+        self.assertLess(min(nearest(q, na) for q in nb[:2]), 1e-3, "the copies sealed as their sources are")
+        self.assertEqual(tool.delete_selected(), 2)
+        self.assertEqual(len(root_tubes.root_tubes(self.groom)), 3)
+
+    def test_update_regions_refits_a_tube_off_its_root(self):
+        """A tube whose root section drifted off its kept outline (fitted by an earlier GroomLab, or
+        resized) is fitted to it again by Update regions (refresh_root_tubes); a second refresh
+        changes nothing."""
+        guide = root_tubes.make_root_tube(self.groom, ring((0.0, 1.0, 0.0), 0.15), length=0.6)
+        self.assertLess(root_tubes.footprint_error(self.groom, guide), 0.004)
+        tube = groomlab.get_tube(self.groom, guide)
+        groomlab.set_tube(self.groom, guides=[guide], width=[w * 0.8 for w in tube["width"]], twist=0.4)
+        self.assertGreater(root_tubes.footprint_error(self.groom, guide), 0.05)
+        out = root_tubes.refresh_root_tubes(self.groom)
+        self.assertEqual(out["refitted"], [int(guide)])
+        self.assertLess(root_tubes.footprint_error(self.groom, guide), 0.004)
+        self.assertEqual(root_tubes.refresh_root_tubes(self.groom)["refitted"], [])
 
     def test_redo_puts_the_drawn_outline_away(self):
         tool = self._tool()

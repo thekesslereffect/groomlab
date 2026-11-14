@@ -267,23 +267,28 @@ The Tube tool's **Tube roots** section draws a tube the way Tonic does: its root
   just placed; **Undo CV** takes one back). Near another root tube a CV snaps onto its CVs or edges
   (**Snap to neighbours**), so the tubes meet with no gap. Clicking the first CV again closes the
   outline.
-- With **Draw before extrude** (on by default) the root's middle then shows as a CV: drag from it
-  out to draw the tube's path, as the Draw tool draws a guide. The stroke is smoothed (the hand's
-  shakes averaged out, its bends kept) and the guide's points spaced evenly along it; a stroke
-  leaving the root nearly flat along the scalp starts at most 50° off the scalp's normal and bends
-  into it. On release the tube is made and the next root can be drawn. Off, the tube goes straight off the scalp, **Length** long. Undoing the
+- With **Draw guide before extrude** (on by default) the root's middle then shows as a CV: drag
+  from it out to draw the tube's guide, as the Draw tool draws one. The stroke is smoothed over a
+  quarter of the root's size, so the hand's shakes go while bends, curls and spirals about as wide
+  as the tube stay. The guide's points are spaced evenly, as many as its length and turns need
+  (about one per root width, and no span turning more than 15°), times **Point density**: a short
+  stroke gets few. A stroke leaving the root nearly flat along the scalp starts at most 50° off the
+  scalp's normal and bends into it. On release the tube is made and the next root can be drawn. Off, the tube goes straight off the scalp, **Length** long. Undoing the
   tube just made (Ctrl+Z) brings its outline back, ready to draw its path again.
 - The tube's root section is exactly the drawn outline (straight edges between the CVs; a library
   shape of its own, `rootTube_<n>`, removed when the last guide taking it is deleted), narrowing
   to **Tip width** of it at the tip. The tube is swept from its root along the path with no
   twist: its sections don't roll to lie along the scalp as other shaped tubes' do. Its root
   footprint (where Scatter and Fill Tubes put the tube's hair) is the outline drawn, however far
-  the guide leans.
+  the guide leans, made 1.5% larger so sealed neighbours overlap a little rather than leave a
+  crack whose hair belongs to no tube.
 - Each root tube is its own **region**: every root's area is painted in a color of its own on the
   `tubeRoots` color vertex map (black elsewhere), which the Interpolate nodes with no region map
   read, so the hair rooted in a tube's area follows only that tube. The color reaches about a
   face past the outline, so a face the outline crosses never blends it with black (hair there would
-  otherwise follow the nearest guides of any tube). **Update regions** paints it again.
+  otherwise follow the nearest guides of any tube). **Update regions** first fits every tube that
+  drifted off its root (one made by an earlier GroomLab, or resized) back onto it, then paints the
+  map again.
 - A root's CVs are kept on the scalp itself, apart from its guide: combing, brushing, retwisting
   or resizing the tube never moves them, and its region stays where it was drawn. Only **Edit
   roots** changes them.
@@ -293,12 +298,13 @@ The Tube tool's **Tube roots** section draws a tube the way Tonic does: its root
   edge), then **Finish edit**: each changed tube is moved to its new root and
   its section refitted (its taper and what brushes painted kept), and the regions are updated, in
   one undo step. The root whose CV you last touched shows green.
-- **Select root** shows every root's middle. Click one to select its root (green) and drag it to
-  move the whole root over the scalp; with **Snap to neighbours** its CVs sealed onto a neighbour
-  stay put while the others slide. The tube and its hierarchy move with it on release, in one
-  undo step. **Duplicate** makes the selected root follow the cursor over the scalp; a click sets
-  a copy down there, with a copy of its tube and the tube hierarchy under it. **Delete** removes the
-  selected root, its tube and its hierarchy.
+- **Select root** shows every root's middle. Click one to select its root (green), Shift+click to
+  add roots or take one out, and drag a selected one to move them all over the scalp as one; with
+  **Snap to neighbours** their CVs sealed onto a root not selected stay put while the others
+  slide. Their tubes and hierarchies move with them on release, in one undo step. **Duplicate**
+  makes the selected roots follow the cursor over the scalp; a click sets copies down there, with
+  copies of their tubes and the tube hierarchies under them. **Delete** removes the selected roots,
+  their tubes and hierarchies.
 - Clicking **Draw root** or **Select root** again leaves that mode; **Finish edit** applies the
   edits and leaves (Ctrl+Z takes them back in one step).
 

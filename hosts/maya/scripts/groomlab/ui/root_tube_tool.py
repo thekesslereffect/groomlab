@@ -17,12 +17,13 @@ outline sharing the edge). The root last touched shows green. Finish gives each 
 new root and updates the regions (groomlab.root_tubes.edit_root_tube).
 
 Select root: every root shows its outline and its middle; clicking a middle selects that root
-(green), dragging it carries the whole root over the scalp (with Snap, its CVs sealed onto a
-neighbour stay put, the others slide along), the tube and the hierarchy under it moving with it on
-release (one undo step, the regions updated). Duplicate: the selected root follows the cursor over
-the scalp (no button held) and a click sets a copy of it, its tube and its hierarchy down there
-(groomlab.root_tubes.duplicate_root_tube); Delete removes the selected root, its tube and its
-hierarchy.
+(green; Shift+click adds a root to the selection or takes it out), dragging a selected one carries
+every selected root over the scalp as one (with Snap, their CVs sealed onto a root not selected
+stay put, the others slide along), their tubes and the hierarchies under them moving with them on
+release (one undo step, the regions updated). Duplicate: the selected roots follow the cursor over
+the scalp (no button held) and a click sets a copy of them, their tubes and hierarchies down there
+(groomlab.root_tubes.duplicate_root_tube); Delete removes the selected roots, their tubes and
+hierarchies.
 
 The outlines and strokes are drawn with temporary curves under PREVIEW (not in the undo queue,
 removed when the tool is left).
@@ -74,7 +75,8 @@ class RootTubeTool(object):
         self.stroke = []        # the path being drawn
         self.center = None      # the closed outline's middle (draw mode), and the scalp's normal there
         self.normal = None
-        self.settings = {"draw": True, "length": 1.0, "segments": 12, "taper": 0.5, "snap": True, "group": None}
+        self.settings = {"draw": True, "length": 1.0, "segments": 12, "taper": 0.5, "snap": True, "group": None,
+                         "density": 1.0}
         self.neighbours = []    # snap targets: [(guide, cvs)]
         self.edits = {}         # edit mode: {guide: [cvs]}
         self.original = {}      # ... as they were
@@ -82,9 +84,9 @@ class RootTubeTool(object):
         self.touched = set()    # edit mode: the roots last touched (green)
         self.roots = {}         # select mode: {guide: [cvs]}
         self.middles = {}       # ... {guide: (middle, normal)}
-        self.selected = None    # ... the selected root's guide
-        self.move = None        # ... a root being carried: {guide, start, base, held, outline}
-        self.ghost = None       # duplicate mode: the copy's outline where it would go
+        self.picked = []        # ... the selected roots' guides (the last picked last)
+        self.move = None        # ... roots being carried: {press, middle, base: {guide: cvs}, held: {guide: [i]}}
+        self.ghost = None       # duplicate mode: (where, [the copies' outlines]) where they would go
         self.guides_shown = None
         self.listeners = []     # called with a message after each change (the Groom Tools card)
         self.last_made = None   # the tube just made: {guide, cvs, center, normal, drawn} (undoing it brings it back)
@@ -186,6 +188,7 @@ class RootTubeTool(object):
         if mode == "edit":
             self.begin_edit()
         elif mode == "select":
+            self.picked = []  # (a new selection)
             self.begin_select()
         else:
             self.neighbours = root_tubes.snap_targets(groom) if self.settings["snap"] else []
@@ -206,7 +209,7 @@ class RootTubeTool(object):
         dropped)."""
         self.reset()
         self.mode = "place"
-        self.selected = None
+        self.picked = []
         self.last_made = self.restored = None
         self.listen(False)
 
@@ -268,6 +271,11 @@ class RootTubeTool(object):
 
     def active(self):
         return cmds.currentCtx() == CONTEXT
+
+    @property
+    def selected(self):
+        """The last root selected (None: none)."""
+        return self.picked[-1] if self.picked else None
 
     # -- Events ------------------------------------------------------------------------
 
@@ -361,7 +369,8 @@ class RootTubeTool(object):
         s = self.settings
         try:
             guide = root_tubes.make_root_tube(self.groom, self.cvs, path=path, length=s["length"],
-                                              segments=s["segments"], taper=s["taper"], group=s["group"])
+                                              segments=s["segments"], taper=s["taper"], group=s["group"],
+                                              density=s.get("density", 1.0))
         except (RuntimeError, ValueError) as e:
             self.say("The tube wasn't made: %s" % str(e).strip())
             self.mode = "place"
@@ -530,7 +539,8 @@ class RootTubeTool(object):
         self.say("Click a root's middle to select it; drag it to move the root over the scalp.")
 
     def reload_roots(self):
-        """The roots as they are (their outlines and middles), the selection kept while its root is."""
+        """The roots as they are (their outlines and middles), the selection kept as far as its
+        roots are."""
         self.roots, self.middles = {}, {}
         for g in root_tubes.root_tubes(self.groom):
             try:
@@ -539,12 +549,18 @@ class RootTubeTool(object):
                 self.middles[g] = root_tubes._scalp_surface(self.groom)(root_tubes._centroid(cvs))
             except (RuntimeError, ValueError):
                 continue
-        if self.selected not in self.roots:
-            self.selected = None
-            if self.mode == "duplicate":
-                self.mode = "select"
-                self.hover(False)
+        self.picked = [g for g in self.picked if g in self.roots]
+        if not self.picked and self.mode == "duplicate":
+            self.mode = "select"
+            self.hover(False)
         self.redraw()
+
+    def group_middle(self):
+        """The selected roots' middle as one: the mean of theirs, on the scalp."""
+        tm = root_tubes.tm
+        mids = [self.middles[g][0] for g in self.picked]
+        mean = tm._mul(tuple(sum(c) for c in zip(*mids)), 1.0 / len(mids))
+        return tuple(root_tubes._scalp_surface(self.groom)(mean)[0])
 
     def press_select(self, x, y):
         best = None
@@ -553,26 +569,43 @@ class RootTubeTool(object):
             d = math.hypot(sx - x, sy - y)
             if d <= PICK_PIXELS and (best is None or d < best[0]):
                 best = (d, g)
+        shift = "shift" in self.modifier()
         self.move = None
         if best is None:
-            self.selected = None
+            if not shift:
+                self.picked = []
             self.redraw()
-            self.say("Nothing selected: click a root's middle.")
+            self.say("Nothing selected: click a root's middle (Shift+click: add one)." if not self.picked else
+                     "%d root%s selected." % (len(self.picked), "" if len(self.picked) == 1 else "s"))
             return
         g = best[1]
-        self.selected = g
+        if shift and g in self.picked:  # (Shift+click a selected one: out of the selection)
+            self.picked.remove(g)
+            self.redraw()
+            self.say("%d root%s selected." % (len(self.picked), "" if len(self.picked) == 1 else "s"))
+            return
+        if shift:
+            self.picked.append(g)
+        elif g not in self.picked:
+            self.picked = [g]
+        else:  # (a selected one: carried with the others, last picked)
+            self.picked.remove(g)
+            self.picked.append(g)
         hit = self.hit(x, y)
-        base = self.roots[g]
-        held = []
+        held = {}
         if self.settings["snap"]:
-            others = [(h, cvs) for h, cvs in self.roots.items() if h != g]
-            held = root_tubes.sealed(self.groom, g, base, others)
-        self.move = {"guide": g, "press": hit[0] if hit else self.middles[g][0], "base": list(base), "held": held,
-                     "outline": list(base)}
+            others = [(h, cvs) for h, cvs in self.roots.items() if h not in self.picked]
+            for h in self.picked:
+                held[h] = root_tubes.sealed(self.groom, h, self.roots[h], others)
+        middle = self.group_middle()
+        self.move = {"press": hit[0] if hit else self.middles[g][0], "middle": middle,
+                     "base": dict((h, list(self.roots[h])) for h in self.picked), "held": held, "moved": False}
         self.redraw()
-        self.say("Root %s selected%s: drag to move it; Duplicate or Delete it." %
-                 (g, " (%d CV%s sealed to a neighbour stay put)" % (len(held), "" if len(held) == 1 else "s")
-                  if held else ""))
+        sealed = sum(len(v) for v in held.values())
+        self.say("%d root%s selected%s: drag to move %s; Duplicate or Delete %s." %
+                 (len(self.picked), "" if len(self.picked) == 1 else "s",
+                  " (%d CV%s sealed to a neighbour stay put)" % (sealed, "" if sealed == 1 else "s") if sealed else "",
+                  "it" if len(self.picked) == 1 else "them", "it" if len(self.picked) == 1 else "them"))
 
     def drag_select(self, x, y):
         if not self.move:
@@ -582,33 +615,39 @@ class RootTubeTool(object):
             return
         tm = root_tubes.tm
         m = self.move
-        middle = self.middles[m["guide"]][0]
-        to = tm._add(middle, tm._sub(hit[0], m["press"]))
-        m["outline"] = root_tubes.carried(self.groom, m["base"], middle, to, m["held"])
-        self.roots[m["guide"]] = m["outline"]
+        to = tm._add(m["middle"], tm._sub(hit[0], m["press"]))
+        for h, base in m["base"].items():
+            self.roots[h] = root_tubes.carried(self.groom, base, m["middle"], to, m["held"].get(h, ()))
+        m["moved"] = True
         self.redraw()
 
     def release_select(self):
         m, self.move = self.move, None
-        if not m or m["outline"] == m["base"]:
+        if not m or not m["moved"]:
             return
+        changed = [h for h in m["base"] if self.roots[h] != m["base"][h]]
         try:
-            root_tubes.edit_root_tube(self.groom, m["guide"], m["outline"])
+            with groomlab.undo_chunk("move root tubes"):
+                for h in changed:
+                    root_tubes.edit_root_tube(self.groom, h, self.roots[h], regions=False)
+                if changed:
+                    root_tubes.update_regions(self.groom)
         except (RuntimeError, ValueError) as e:
-            self.say("The root wasn't moved: %s" % str(e).strip())
+            self.say("The roots weren't moved: %s" % str(e).strip())
         self.reload_roots()
-        self.say("Root %s moved, the regions updated." % m["guide"])
+        self.say("%d root%s moved, the regions updated." % (len(changed), "" if len(changed) == 1 else "s"))
 
     def begin_duplicate(self):
-        """The selected root follows the cursor over the scalp; a click sets a copy down there."""
-        if self.mode not in ("select", "duplicate") or self.selected not in self.roots:
+        """The selected roots follow the cursor over the scalp; a click sets a copy down there."""
+        if self.mode not in ("select", "duplicate") or not self.picked:
             self.say("Select a root first (Select root, then click its middle).")
             return False
         self.mode = "duplicate"
         self.ghost = None
         self.hover(True)
         self.redraw()
-        self.say("Move the cursor over the scalp and click to set the copy of root %s down." % self.selected)
+        self.say("Move the cursor over the scalp and click to set the cop%s down." %
+                 ("y" if len(self.picked) == 1 else "ies"))
         return True
 
     def end_duplicate(self):
@@ -619,44 +658,52 @@ class RootTubeTool(object):
             self.redraw()
 
     def follow(self, x, y):
-        """Duplicate mode: the copy's outline under view point (x, y)."""
-        if self.selected not in self.roots:
+        """Duplicate mode: the copies' outlines under view point (x, y)."""
+        if not self.picked:
             return
         hit = self.hit(x, y)
         if hit is None:
             return
-        self.ghost = (hit[0], root_tubes.carried(self.groom, self.roots[self.selected],
-                                                 self.middles[self.selected][0], hit[0]))
+        middle = self.group_middle()
+        self.ghost = (hit[0], [root_tubes.carried(self.groom, self.roots[g], middle, hit[0]) for g in self.picked])
         self.redraw()
 
     def place_copy(self):
         if not self.ghost:
             self.say("Click on the scalp to set the copy down.")
             return None
-        to, _outline = self.ghost
+        to, _outlines = self.ghost
+        middle = self.group_middle()
+        made = []
         try:
-            new = root_tubes.duplicate_root_tube(self.groom, self.selected, to)
+            with groomlab.undo_chunk("duplicate root tubes"):
+                for g in self.picked:
+                    made.append(int(root_tubes.duplicate_root_tube(self.groom, g, to, regions=False, start=middle)))
+                root_tubes.update_regions(self.groom)
         except (RuntimeError, ValueError) as e:
-            self.say("The root wasn't duplicated: %s" % str(e).strip())
+            self.say("The roots weren't duplicated: %s" % str(e).strip())
             return None
-        source = self.selected
-        self.selected = int(new)
+        sources = list(self.picked)
+        self.picked = made
         self.end_duplicate()
         self.reload_roots()
-        self.say("Duplicated root %s as %s (its tube and hierarchy with it); the copy is selected." % (source, new))
-        return new
+        self.say("Duplicated root%s %s as %s (tubes and hierarchies with them); the copies are selected." %
+                 ("" if len(sources) == 1 else "s", ", ".join(map(str, sources)), ", ".join(map(str, made))))
+        return made[0] if len(made) == 1 else made
 
     def delete_selected(self):
-        if self.mode not in ("select", "duplicate") or self.selected not in self.roots:
+        if self.mode not in ("select", "duplicate") or not self.picked:
             self.say("Select a root first (Select root, then click its middle).")
             return 0
-        g = self.selected
+        gone = list(self.picked)
         self.end_duplicate()
-        root_tubes.delete_root_tubes(self.groom, [g])
-        self.selected = None
+        root_tubes.delete_root_tubes(self.groom, gone)
+        self.picked = []
         self.reload_roots()
-        self.say("Deleted root %s, its tube and the hierarchy under it." % g)
-        return 1
+        self.say("Deleted root%s %s, with %s tube%s and hierarch%s." %
+                 ("" if len(gone) == 1 else "s", ", ".join(map(str, gone)), "its" if len(gone) == 1 else "their",
+                  "" if len(gone) == 1 else "s", "y" if len(gone) == 1 else "ies"))
+        return len(gone)
 
     def hover(self, on):
         """Duplicate mode: the viewport's mouse moves (no button held) followed (follow)."""
@@ -764,7 +811,7 @@ class RootTubeTool(object):
                     self._curve("glRootEdit_%s" % g, cvs, COLORS["active" if g in self.touched else "root"], closed=True)
             elif self.mode in ("select", "duplicate"):
                 for g, cvs in self.roots.items():
-                    picked = g == self.selected
+                    picked = g in self.picked
                     self._curve("glRootSelect_%s" % g, cvs, COLORS["active" if picked else "root"], closed=True,
                                 cvs=picked, width=3.0 if picked else 1.5)
                     middle, normal = self.middles[g]
@@ -772,7 +819,8 @@ class RootTubeTool(object):
                     self._marker(middle, normal, 0.12 * reach, COLORS["active" if picked else "root"],
                                  "glRootMiddle_%s" % g)
                 if self.mode == "duplicate" and self.ghost:
-                    self._curve("glRootCopy", self.ghost[1], COLORS["active"], closed=True, width=3.0)
+                    for k, cvs in enumerate(self.ghost[1]):
+                        self._curve("glRootCopy%d" % k, cvs, COLORS["active"], closed=True, width=3.0)
             else:
                 for _g, cvs in self.neighbours:
                     self._curve("glRootNeighbour", cvs, COLORS["neighbour"], closed=True, cvs=False, width=1.0)
@@ -829,7 +877,7 @@ def _guarded(fn):
 def start(groom, mode="place", **settings):
     """The root-first tube tool on `groom` ("place": draw roots; "edit": edit the root tubes' CVs;
     "select": select, move, duplicate and delete roots); `settings`: draw, length, segments,
-    taper, snap, group."""
+    taper, snap, group, density."""
     TOOL.settings.update(settings)
     TOOL.start(groom, mode)
     return TOOL

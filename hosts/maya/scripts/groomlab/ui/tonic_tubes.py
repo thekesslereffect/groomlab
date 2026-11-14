@@ -62,35 +62,45 @@ class TonicTubes(QtCore.QObject):
                                            "cursor over the scalp, a click sets it down there with its tube and "
                                            "hierarchy. Again: stop", False, "rootTubeDuplicate")
         self.duplicate_root.clicked.connect(self.duplicate_clicked)
-        self.regions = widgets.chip("Update regions", "Paint every root tube's area in its own color on the %s "
-                                    "map, which Interpolate reads as its regions" % root_tubes.REGION_MAP, None,
+        self.regions = widgets.chip("Update regions", "Fit every root tube whose tube drifted off its root back onto it "
+                                    "(tubes from an earlier GroomLab too), then paint every root tube's area in its own "
+                                    "color on the %s map, which Interpolate reads as its regions" % root_tubes.REGION_MAP,
+                                    None,
                                     "rootTubeRegions")
         self.regions.clicked.connect(self.update_regions)
         self.root_block.add(widgets.chip_row((self.undo_cv, self.delete_root, self.duplicate_root, self.regions)))
-        self.extrude_draw = widgets.switch("Draw before extrude", "Once the outline closes, drag from its middle out "
-                                           "to draw the tube's path (as the Draw tool draws a guide). Off: the tube "
-                                           "goes straight off the scalp, Length long", True, "rootTubeDrawFirst")
-        self.extrude_draw.toggled.connect(lambda on: self._set(draw=on))
+        self.snap = widgets.switch("Snap to neighbours", "A CV near a neighbouring root's CV or edge snaps onto it, "
+                                   "so the tubes meet with no gap", True, "rootTubeSnap")
+        self.snap.toggled.connect(lambda on: self._set(snap=on))
+        self.root_block.add(self.snap.row)
+        self.extrude_draw = widgets.switch("Draw guide before extrude", "Once the outline closes, drag from its middle "
+                                           "out to draw the tube's guide (as the Draw tool draws one): smoothed, its "
+                                           "curls kept, its points as many as its length and turns need. Off: the "
+                                           "tube goes straight off the scalp, Length long, in Segments",
+                                           True, "rootTubeDrawFirst")
+        self.extrude_draw.toggled.connect(self.draw_toggled)
         self.root_block.add(self.extrude_draw.row)
+        self.density = widgets.SoftSlider(1.0, 0.25, 4.0, minimum=0.05, maximum=20.0, key="palette.rootTubeDensity",
+                                          label="Point density")
+        self.density.setToolTip("How many points a drawn guide gets: 1, about one per root width along it and "
+                                "enough that no span turns more than 15 degrees; 2, twice as many")
+        self.density.committed.connect(lambda v: self._set(density=v))
         key = "palette.rootTubeLength@" + units.unit("length")[0]
         self.length = widgets.SoftSlider(1.0 * self.length_factor, minimum=0.001 * self.length_factor, key=key,
                                          label="Length", suffix=units.label("length"))
-        self.length.setToolTip("A tube's length when it goes straight off the scalp (Draw before extrude off)")
+        self.length.setToolTip("A tube's length when it goes straight off the scalp (Draw guide before extrude off)")
         self.length.committed.connect(lambda v: self._set(length=v / self.length_factor))
         self.segments = widgets.SoftSlider(12, 2, 32, integer=True, minimum=2, maximum=256,
                                            key="palette.rootTubeSegments", label="Segments")
-        self.segments.setToolTip("The new tube guide's segments")
+        self.segments.setToolTip("A straight tube guide's segments (Draw guide before extrude off)")
         self.segments.committed.connect(lambda v: self._set(segments=int(v)))
         self.taper = widgets.SoftSlider(0.5, 0.0, 1.0, minimum=0.0, maximum=4.0, key="palette.rootTubeTaper",
                                         label="Tip width")
         self.taper.setToolTip("The tube's width at its tip, as a share of its root's")
         self.taper.committed.connect(lambda v: self._set(taper=v))
-        for field in (self.length, self.segments, self.taper):
+        for field in (self.density, self.length, self.segments, self.taper):
             self.root_block.add(field)
-        self.snap = widgets.switch("Snap to neighbours", "A CV near a neighbouring root's CV or edge snaps onto it, "
-                                   "so the tubes meet with no gap", True, "rootTubeSnap")
-        self.snap.toggled.connect(lambda on: self._set(snap=on))
-        self.root_block.add(self.snap.row)
+        self.draw_toggled(self.extrude_draw.isChecked(), remember=False)
 
         # -- Tube hierarchy ----------------------------------------------------------------
         self.add_level = widgets.chip("Add", "Split each selected tube in two (with none selected: every tube of "
@@ -201,7 +211,16 @@ class TonicTubes(QtCore.QObject):
     def _settings(self):
         return {"draw": self.extrude_draw.isChecked(), "length": self.length.value() / self.length_factor,
                 "segments": int(self.segments.value()), "taper": self.taper.value(),
-                "snap": self.snap.isChecked(), "group": self._new_group()}
+                "snap": self.snap.isChecked(), "group": self._new_group(), "density": self.density.value()}
+
+    def draw_toggled(self, on, remember=True):
+        """Draw guide before extrude: the drawn guide's Point density; off, the straight tube's
+        Length and Segments."""
+        self.density.setVisible(bool(on))
+        self.length.setVisible(not on)
+        self.segments.setVisible(not on)
+        if remember:
+            self._set(draw=bool(on))
 
     def _new_group(self):
         """New root tubes go into the picked group when it is a top group, else rootTubes."""
@@ -274,14 +293,14 @@ class TonicTubes(QtCore.QObject):
         groom = self.owner.groom()
         if not groom:
             return
-        from groomlab.base import undo_chunk
-        with undo_chunk("update tube regions"):
-            out = self._run(root_tubes.update_regions, groom)
+        out = self._run(root_tubes.refresh_root_tubes, groom)
         if out:
-            note = " (an Interpolate reads another region map: set its regionMap to %s)" % root_tubes.REGION_MAP \
-                if out["other"] else ""
-            self.owner.status.setText("%d root tube%s painted on %s%s." % (out["tubes"], "" if out["tubes"] == 1 else "s",
-                                                                            root_tubes.REGION_MAP, note))
+            note = (" (an Interpolate reads another region map: set its regionMap to %s)" % root_tubes.REGION_MAP
+                    if out["other"] else "")
+            n = len(out["refitted"])
+            fixed = " %d tube%s fitted to %s root again." % (n, "" if n == 1 else "s", "its" if n == 1 else "their") if n else ""
+            self.owner.status.setText("%d root tube%s painted on %s%s.%s" %
+                                      (out["tubes"], "" if out["tubes"] == 1 else "s", root_tubes.REGION_MAP, note, fixed))
 
     # -- Tube hierarchy ----------------------------------------------------------------------
 
