@@ -480,14 +480,16 @@ def _file_texture(name, path, color_space):
 def card_material(mesh, maps):
     """A preview material on the card mesh from baked maps ({"Color": path, "Coverage": ..., "AO": ...}):
     a lambert (it lights like the viewport's strands, so the two compare fairly) with color x AO,
-    and coverage as transparency. Reuses the mesh's material when it is a lambert made here.
-    Returns the material."""
+    and coverage as transparency. Reuses the mesh's material when it is a lambert in a shading
+    group of the mesh's own; a mesh on the scene's default shader (initialShadingGroup) or on a
+    group shared with other meshes gets a group of its own, so the others keep their shading
+    (issue #71: the default shader replaced, the scalp drawn green). Returns the material."""
     shapes = cmds.listRelatives(mesh, shapes=True, fullPath=True) or [mesh]
     groups = cmds.listConnections(shapes[0], type="shadingEngine") or []
-    group = groups[0] if groups else None
+    group = groups[0] if groups and _own_group(groups[0], shapes[0]) else None
     material = (cmds.listConnections(group + ".surfaceShader") or [None])[0] if group else None
     if not material or cmds.nodeType(material) != "lambert":
-        material = cmds.shadingNode("lambert", asShader=True, name=mesh + "Material")
+        material = cmds.shadingNode("lambert", asShader=True, name=mesh.split("|")[-1] + "Material")
         if not group:
             group = cmds.sets(renderable=True, noSurfaceShader=True, empty=True, name=material + "SG")
             cmds.sets(shapes[0], edit=True, forceElement=group)
@@ -516,6 +518,14 @@ def card_material(mesh, maps):
         if cmds.attributeQuery("aiOpaque", node=shapes[0], exists=True):
             cmds.setAttr(shapes[0] + ".aiOpaque", False)  # Arnold: let the transparency through
     return material
+
+
+def _own_group(group, shape):
+    """Whether the shading group shades `shape` alone: not the default one, no other member."""
+    if group == "initialShadingGroup":
+        return False
+    mine = set(cmds.ls(shape, long=True) + (cmds.listRelatives(shape, parent=True, fullPath=True) or []))
+    return all(m in mine for m in cmds.ls(cmds.sets(group, query=True) or [], objectsOnly=True, long=True))
 
 
 def bake_scalp(groom, directory=None, resolution=2048, name=None, reach=None, density=1.0, cap=True):

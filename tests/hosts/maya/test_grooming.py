@@ -2338,8 +2338,18 @@ class GroomingTest(unittest.TestCase):
         self.assertFalse(cmds.getAttr(mesh + ".visibility"))  # it follows the view
         self.assertTrue(cmds.getAttr(self.groom + ".visibility"))
         # Unreal: FBX, maps and a manifest.
+        def default_shader():  # what the scalp and the rest of the scene shade with
+            material = (cmds.listConnections("initialShadingGroup.surfaceShader") or [None])[0]
+            return (material, cmds.listConnections(material, source=True, destination=False, plugs=True) or [],
+                    cmds.getAttr("lambert1.color")[0], cmds.getAttr("lambert1.transparency")[0])
+
+        shader = default_shader()
         folder = tempfile.mkdtemp(prefix="groomlab_unreal_cards_")
         result = groomlab.export_cards_unreal(self.groom, folder, name="hero", resolution=128)
+        # The export's card mesh starts on the default shader: that shader stays the scene's, its
+        # maps never reach it (issue #71: Maya 2024+'s default shader replaced, the scalp drawn green).
+        self.assertIsNotNone(shader[0])
+        self.assertEqual(default_shader(), shader)
         self.assertTrue(os.path.getsize(result["fbx"]) > 1000)
         self.assertEqual(len(result["maps"]), 10)  # the cards' seven, their world-space AO and the scalp's two
         self.assertTrue(os.path.getsize(result["scalpCap"]) > 1000)
