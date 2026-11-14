@@ -333,7 +333,7 @@ private:
     bool prepareMapTexture(QRhi* rhi, QRhiResourceUpdateBatch* batch);
     // The photo's texture and uniforms for this frame (its own batch, before any pass); false
     // when none draws.
-    bool preparePhoto(QRhi* rhi, QRhiCommandBuffer* cb, QRhiRenderTarget* target);
+    bool preparePhoto(QRhi* rhi, QRhiCommandBuffer* cb, QRhiRenderTarget* target, const OrbitCamera& camera);
     void drawPhoto(QRhiCommandBuffer* cb);
 };
 

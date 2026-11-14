@@ -76,6 +76,12 @@ Basis. In the app the groom moves onto the morphed scalp by its UVs.
 move it, nor does tumbling through it. Set the photo's **Opacity**, place it **In front** of the
 mesh or **Behind** it, and brush the guides to match the photo while looking through the camera.
 
+**Zoom in without moving the camera.** Through a locked photo the viewport's navigation zooms and
+pans the picture in 2D, the photo and the groom together: the wheel and Alt+right drag zoom, Alt+middle
+drag pans, **F** shows the whole view again. The camera stays where you lined it up, and the brushes
+work in the zoomed view. Unlocked, the same gestures move the camera, to line it up by eye. In Blender,
+a camera view always does this: the wheel zooms, Shift+middle drag pans, **Home** fits the view.
+
 </Step>
 </Steps>
 
@@ -89,6 +95,8 @@ ref.morph_to_photos(groom, stiffness=0.0, symmetric=True)   # optional; ref.rese
 ref.look_through(cam)
 ref.lock_reference(cam)
 ref.set_reference_opacity(cam, 0.4)
+ref.zoom_view_2d(cam, 3.0, at=(120, 40))   # the view zoomed 3x about a point (pixels from its middle)
+ref.reset_view_2d(cam)
 ```
 
 ## Guides from photos (experimental)

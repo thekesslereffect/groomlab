@@ -582,7 +582,7 @@ QRectF GroomRenderer::photoRect(const QSize& size, double photoAspect) {
     return QRectF(0.0, (h - ph) * 0.5, w, ph);
 }
 
-bool GroomRenderer::preparePhoto(QRhi* rhi, QRhiCommandBuffer* cb, QRhiRenderTarget* target) {
+bool GroomRenderer::preparePhoto(QRhi* rhi, QRhiCommandBuffer* cb, QRhiRenderTarget* target, const OrbitCamera& camera) {
     if (photo_.image.isNull()) return false;
     PhotoGpu& g = photoGpu_;
     QRhiResourceUpdateBatch* batch = rhi->nextResourceUpdateBatch();
@@ -648,16 +648,18 @@ bool GroomRenderer::preparePhoto(QRhi* rhi, QRhiCommandBuffer* cb, QRhiRenderTar
         g.sampleCount = target->sampleCount();
     }
     // The photo's rectangle in normalized device coordinates (y up, or down where the backend's
-    // NDC has it so).
+    // NDC has it so), zoomed and panned with the scene by the camera's 2D view.
     const QSize size = target->pixelSize();
     const QRectF r = photoRect(size, static_cast<double>(photo_.image.width()) / std::max(photo_.image.height(), 1));
-    const float w = static_cast<float>(std::max(size.width(), 1)), h = static_cast<float>(std::max(size.height(), 1));
-    float top = 1.0f - 2.0f * static_cast<float>(r.top()) / h, bottom = 1.0f - 2.0f * static_cast<float>(r.bottom()) / h;
+    const double w = std::max(size.width(), 1), h = std::max(size.height(), 1);
+    const QPointF topLeft = camera.shown2D(QPointF(2.0 * r.left() / w - 1.0, 1.0 - 2.0 * r.top() / h));
+    const QPointF bottomRight = camera.shown2D(QPointF(2.0 * r.right() / w - 1.0, 1.0 - 2.0 * r.bottom() / h));
+    float top = static_cast<float>(topLeft.y()), bottom = static_cast<float>(bottomRight.y());
     if (!rhi->isYUpInNDC()) {
         top = -top;
         bottom = -bottom;
     }
-    const float u[8] = {2.0f * static_cast<float>(r.left()) / w - 1.0f, top, 2.0f * static_cast<float>(r.right()) / w - 1.0f, bottom,
+    const float u[8] = {static_cast<float>(topLeft.x()), top, static_cast<float>(bottomRight.x()), bottom,
                         std::clamp(photo_.opacity, 0.0f, 1.0f), 0.0f, 0.0f, 0.0f};
     batch->updateDynamicBuffer(g.uniforms.get(), 0, sizeof(u), u);
     cb->resourceUpdate(batch);
@@ -1353,7 +1355,7 @@ void GroomRenderer::render(QRhi* rhi, QRhiCommandBuffer* cb, QRhiRenderTarget* t
     }
     ensurePipelines(rhi, target->renderPassDescriptor(), target->sampleCount(), main_);
     // The reference photo (looking through it): its texture and quad first, in a batch of its own.
-    const bool photo = preparePhoto(rhi, cb, target);
+    const bool photo = preparePhoto(rhi, cb, target, camera);
     lod_->item = nullptr;  // (the line path sets it: prepareLod)
     lodStats_.on = false;
     rhi_ = rhi;

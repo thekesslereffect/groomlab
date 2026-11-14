@@ -85,6 +85,7 @@ float OrbitCamera::lookFov(float aspect) const {
 void OrbitCamera::setLookThrough(const QVector3D& eye, const QQuaternion& rotation, double focalPx, double width, double height, float pivot,
                                  bool locked) {
     if (!look_.on) {
+        reset2D();  // (a new look: the whole view)
         look_.target = target_;
         look_.distance = distance_;
         look_.yaw = yaw_;
@@ -103,11 +104,55 @@ void OrbitCamera::setLookThrough(const QVector3D& eye, const QQuaternion& rotati
 }
 
 void OrbitCamera::setLookThroughLocked(bool locked) {
-    if (look_.on) look_.locked = locked;
+    if (!look_.on) return;
+    if (!locked) reset2D();  // unlocked, the navigation moves the camera again: from the whole view
+    look_.locked = locked;
+}
+
+float OrbitCamera::fovDegrees() const {
+    if (!look_.on) return fov_;
+    const float base = lookFov(lastAspect_);
+    if (look_.zoom == 1.0f) return base;
+    return degrees(2.0f * std::atan(std::tan(radians(base) * 0.5f) / look_.zoom));
+}
+
+// ---- The 2D view ------------------------------------------------------------------------------------
+
+namespace {
+constexpr float kMinZoom2D = 0.25f, kMaxZoom2D = 64.0f;
+}
+
+void OrbitCamera::zoom2D(float factor, float ndcX, float ndcY) {
+    if (!look_.on || !look_.locked || !(factor > 0.0f)) return;
+    const float zoom = std::clamp(look_.zoom * factor, kMinZoom2D, kMaxZoom2D);
+    // The frame point under the cursor (unzoomed), kept under it at the new zoom.
+    const float bx = ndcX / look_.zoom + look_.center[0], by = ndcY / look_.zoom + look_.center[1];
+    look_.zoom = zoom;
+    look_.center[0] = bx - ndcX / zoom;
+    look_.center[1] = by - ndcY / zoom;
+    if (std::abs(look_.zoom - 1.0f) < 1e-3f && std::abs(look_.center[0]) < 1e-3f && std::abs(look_.center[1]) < 1e-3f) reset2D();
+}
+
+void OrbitCamera::pan2D(float dxPixels, float dyPixels, int widthPixels, int heightPixels) {
+    if (!look_.on || !look_.locked || widthPixels <= 0 || heightPixels <= 0) return;
+    // The picture follows the cursor: a pixel right is 2 / width of the shown frame, y up.
+    look_.center[0] -= 2.0f * dxPixels / static_cast<float>(widthPixels) / look_.zoom;
+    look_.center[1] += 2.0f * dyPixels / static_cast<float>(heightPixels) / look_.zoom;
+}
+
+void OrbitCamera::reset2D() {
+    look_.zoom = 1.0f;
+    look_.center[0] = look_.center[1] = 0.0f;
+}
+
+QPointF OrbitCamera::shown2D(const QPointF& ndc) const {
+    if (!look_.on) return ndc;
+    return QPointF((ndc.x() - look_.center[0]) * look_.zoom, (ndc.y() - look_.center[1]) * look_.zoom);
 }
 
 void OrbitCamera::leaveLookThrough() {
     if (!look_.on) return;
+    reset2D();
     look_.on = false;
     target_ = look_.target;
     distance_ = look_.distance;
@@ -131,6 +176,15 @@ QMatrix4x4 OrbitCamera::projection(float aspect, const QMatrix4x4& clipCorrectio
     const float nearPlane = std::max(distance_ * 0.01f, 1e-4f);
     const float farPlane = distance_ * 100.0f;
     lastAspect_ = aspect > 0.0f ? aspect : 1.0f;
+    if (look_.on && (look_.zoom != 1.0f || look_.center[0] != 0.0f || look_.center[1] != 0.0f)) {
+        // The 2D view: the part of the camera's frame it shows, as an off-center frustum (the
+        // camera's frame [-1, 1] in its normalized coordinates spans tanHalf * near either side).
+        const float tanY = std::tan(radians(lookFov(lastAspect_)) * 0.5f), tanX = tanY * lastAspect_;
+        const float h = 1.0f / look_.zoom;
+        m.frustum(nearPlane * tanX * (look_.center[0] - h), nearPlane * tanX * (look_.center[0] + h),
+                  nearPlane * tanY * (look_.center[1] - h), nearPlane * tanY * (look_.center[1] + h), nearPlane, farPlane);
+        return m;
+    }
     m.perspective(fovDegrees(), lastAspect_, nearPlane, farPlane);
     return m;
 }

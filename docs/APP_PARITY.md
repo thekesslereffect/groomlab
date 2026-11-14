@@ -212,6 +212,7 @@ labels, search words and number decimals come from the core (`node_catalog.h`, t
 | Capability | Maya entry point | App |
 | --- | --- | --- |
 | Import a photo as a camera with an image plane; look through it; opacity, depth, focal length, lock | `reference.py`, `tool_tabs.py` ReferenceTab | The Photos tab (`photos_panel.h`): the photo drawn over the viewport through its camera |
+| Through a locked photo: 2D zoom and pan of the view (wheel, Alt+right, Alt+middle; F: all of it), the camera kept | `reference.py` zoom_view_2d, `ui/photo_view.py` (the camera's 2D Pan/Zoom) | `camera.h` the 2D view (an off-center frustum), `viewport.cpp` |
 | Align Photo: photo and mesh points side by side, the camera solved live | `ui/reference_window.py` (Align stage; core: `reference_edit.h`, `camera_solve.h`) | The Photos window (`reference_window.h`), the same stages |
 
 ## Look, lighting and review

@@ -505,8 +505,11 @@ void MainWindow::refreshStats() {
         }
     }
     // The artist's numbers always; the time per dab (and the draw path) once a brush has worked.
+    // Zoomed into a locked photo's view (the camera kept): how far, and the key back to all of it.
+    const OrbitCamera& camera = viewport_->camera();
+    const QString view2D = camera.zoomed2D() ? tr("2D %1% · F whole view").arg(qRound(camera.zoom2D() * 100.0f)) : QString();
     host_->setStats(strands, lastDabMs_ > 0.0 ? lastDabMs_ : 0.0, gpu ? tr("GPU") : tr("LINES"),
-                    gpu ? theme::purple() : theme::textMuted(), guides, guidesFrom);
+                    gpu ? theme::purple() : theme::textMuted(), guides, guidesFrom, view2D);
     const bool refining = r.lookdev() && r.lighting().quality == Quality::Refine;
     host_->setRefine(refining, r.accumulatedFrames(), std::clamp(r.lighting().refineFrames, 1, LookdevRenderer::kMaxAccumulatedFrames),
                      viewport_->lastFrameMs());

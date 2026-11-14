@@ -5585,6 +5585,46 @@ class ReferenceTest(unittest.TestCase):
         cmds.tumble(cam, rotationAngles=(15, 25))
         self.assertNotEqual(cmds.xform(cam, query=True, worldSpace=True, matrix=True), before)
 
+    def test_the_2d_view_zooms_about_a_point_without_moving_the_camera(self):
+        # Through a locked reference the view zooms and pans in 2D (the camera's own 2D Pan/Zoom,
+        # which renders leave alone): the camera, its film and the solve stay; no undo steps.
+        cam = self.ref.import_reference(self.photo, groom=self.groom)
+        self.ref.lock_reference(cam)
+        shape = cmds.listRelatives(cam, shapes=True, type="camera", fullPath=True)[0]
+        matrix = cmds.xform(cam, query=True, worldSpace=True, matrix=True)
+        port = (960, 540)
+        cmds.flushUndo()
+        view = self.ref.zoom_view_2d(cam, 2.0, at=(100.0, 50.0), port=port)
+        self.assertAlmostEqual(view["zoom"], 2.0)
+        self.assertTrue(cmds.getAttr(shape + ".panZoomEnabled"))
+        self.assertAlmostEqual(cmds.getAttr(shape + ".zoom"), 0.5)
+        self.assertFalse(cmds.getAttr(shape + ".renderPanZoom"))  # a render shows the whole photo
+        # About the point: the view's middle moved toward it, by half its distance at 2x.
+        ppi = self.ref._pixels_per_inch(shape, port)
+        self.assertAlmostEqual(view["pan"][0], 0.5 * 100.0 / ppi, places=6)
+        self.assertAlmostEqual(view["pan"][1], 0.5 * 50.0 / ppi, places=6)
+        # Back out about the same point: where it was.
+        view = self.ref.zoom_view_2d(cam, 0.5, at=(100.0, 50.0), port=port)
+        self.assertAlmostEqual(view["zoom"], 1.0)
+        self.assertAlmostEqual(view["pan"][0], 0.0, places=6)
+        # Panning: the picture follows (right and up), less film a pixel when zoomed in.
+        self.ref.zoom_view_2d(cam, 4.0, port=port)
+        view = self.ref.pan_view_2d(cam, 40.0, -20.0, port=port)
+        self.assertAlmostEqual(view["pan"][0], -40.0 * 0.25 / ppi, places=6)
+        self.assertAlmostEqual(view["pan"][1], 20.0 * 0.25 / ppi, places=6)
+        # Not past 64x nor out past a quarter.
+        self.assertAlmostEqual(self.ref.zoom_view_2d(cam, 1000.0, port=port)["zoom"], self.ref.ZOOM_2D_RANGE[1])
+        self.assertAlmostEqual(self.ref.zoom_view_2d(cam, 1e-6, port=port)["zoom"], self.ref.ZOOM_2D_RANGE[0])
+        self.assertEqual(cmds.xform(cam, query=True, worldSpace=True, matrix=True), matrix)
+        self.assertFalse(cmds.undoInfo(query=True, undoName=True))  # a view, not an edit
+        self.ref.reset_view_2d(cam)
+        self.assertEqual(self.ref.view_2d(cam), {"zoom": 1.0, "pan": (0.0, 0.0)})
+        self.assertFalse(cmds.getAttr(shape + ".panZoomEnabled"))
+        # Unlocking (the navigation moves the camera again) and looking through it start whole.
+        self.ref.zoom_view_2d(cam, 3.0, port=port)
+        self.ref.lock_reference(cam, False)
+        self.assertEqual(self.ref.view_2d(cam)["zoom"], 1.0)
+
     def test_save_reopen_keeps_the_settings_and_save_as_takes_the_photo(self):
         path = self.save_as("a", "hero.ma")
         cam = self.ref.import_reference(self.photo, groom=self.groom)

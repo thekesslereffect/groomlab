@@ -224,9 +224,10 @@ public:
     void setTool(const std::string& brushMode, bool select);
     QString toolText() const;  // "" when hidden
     // The stats line (Groom): strands, the guides (npos: not said; guidesFrom: where guides the
-    // groom cannot brush come from, "the graph" or "the file"), the time per dab (0: none yet).
+    // groom cannot brush come from, "the graph" or "the file"), the time per dab (0: none yet), and
+    // `view` last ("" none: the 2D view through a locked photo, "2D 250% · F whole view").
     void setStats(std::size_t strands, double msPerDab, const QString& badge, const QColor& badgeColor,
-                  std::size_t guides = static_cast<std::size_t>(-1), const QString& guidesFrom = QString());
+                  std::size_t guides = static_cast<std::size_t>(-1), const QString& guidesFrom = QString(), const QString& view = QString());
     QString statsText() const;  // the stats line's words ("" hidden)
     // GroomLab > Review > Strand Count HUD: the stats line shown (on by default) or not.
     void setStatsWanted(bool on);

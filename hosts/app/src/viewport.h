@@ -45,6 +45,7 @@ public:
     // What to draw (the builder's frame; the scalp), then a redraw.
     void setFrame(const DisplayFrame& frame);
     void setScalp(MeshPtr scalp);
+    // Frames the bounds; looking through a locked photo, shows its whole view again (the 2D view reset).
     void frameAll(const Bounds& bounds);
     // The API in use, for the status bar ("Direct3D 11"), once the widget initialized.
     QString apiName() const;
@@ -122,6 +123,7 @@ private:
     QString hoverState_;  // the held key's state shown beside the ring ("" none)
     enum class Drag { None, Orbit, Pan, Dolly, Stroke, Radius, Strength, Box, Menu };
     void cameraMoved();
+    QPointF ndcAt(const QPointF& pos) const;  // a widget point in normalized device coordinates (y up)
     bool cameraPress(QMouseEvent* event, bool alt);  // the camera's buttons; false: not a camera drag
     float pressure() const;
     GroomRenderer renderer_;

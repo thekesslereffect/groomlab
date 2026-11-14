@@ -19,9 +19,11 @@
 #include <QElapsedTimer>
 #include <QImage>
 #include <QLabel>
+#include <QMouseEvent>
 #include <QPushButton>
 #include <QToolButton>
 #include <QTreeWidget>
+#include <QWheelEvent>
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
@@ -394,6 +396,176 @@ TEST(AppPhotos, MorphToPhotosShapesTheScalpAndResets) {
     photos->findChild<QPushButton*>(QStringLiteral("referenceUnmorph"))->click();
     const MeshPtr back = doc->file().data.scalp;
     for (std::size_t i = 0; i < original->pointCount(); ++i) EXPECT_EQ(back->points()[i], original->points()[i]) << i;
+}
+
+TEST(AppPhotos, LockedPhotoZoomsAndPansIn2DWithoutMovingTheCamera) {
+    // Through a locked photo the viewport's navigation zooms and pans the picture (the photo and
+    // the scene together) in 2D: the camera stays where the solve put it, and brushes pick through
+    // the same projection. F shows the whole view again; unlocking moves the camera again.
+    const std::string path = sampleCopy("groomlab_app_photo_2d");
+    const std::filesystem::path dir = std::filesystem::u8path(path).parent_path();
+    MainWindow window;
+    window.resize(1280, 800);
+    window.show();
+    ASSERT_TRUE(window.openGroom(QString::fromStdString(path)));
+    auto* photos = window.findChild<PhotosPanel*>();
+    auto* viewport = window.findChild<Viewport*>();
+    ASSERT_TRUE(photos && viewport);
+    // A photo red on its left half, blue on its right.
+    const int W = 400, H = 300;
+    QImage image(W, H, QImage::Format_RGB32);
+    image.fill(QColor(30, 30, 230));
+    for (int y = 0; y < H; ++y) {
+        for (int x = 0; x < W / 2; ++x) image.setPixelColor(x, y, QColor(230, 30, 30));
+    }
+    const std::string file = (dir / "halves.png").u8string();
+    ASSERT_TRUE(image.save(QString::fromStdString(file)));
+    ASSERT_EQ(photos->importPhoto(QString::fromStdString(file)), 0);
+    PhotosPanel::Display d = photos->display(0);
+    d.locked = true;
+    d.opacity = 1.0;
+    d.front = true;
+    photos->setDisplay(0, d);
+    AppActions::bindings(window).at("photo.lookThrough").trigger(nullptr, false);
+    OrbitCamera& camera = viewport->camera();
+    ASSERT_TRUE(camera.lookThroughLocked());
+    const QVector3D eye = camera.eye();
+    const QQuaternion turn = camera.lookThroughRotation();
+    const float aspect = static_cast<float>(viewport->width()) / static_cast<float>(std::max(viewport->height(), 1));
+    const float fov = (camera.projection(aspect), camera.fovDegrees());
+
+    // Where a world point shows (normalized device coordinates, y up).
+    auto shown = [&](const QVector3D& p) {
+        const QVector4D c = camera.viewProjection(aspect) * QVector4D(p, 1.0f);
+        return QPointF(c.x() / c.w(), c.y() / c.w());
+    };
+    const QVector3D ahead = camera.target();  // (on the view axis: the frame's middle)
+    const QVector3D aside = ahead + turn.rotatedVector(QVector3D(1.0f, 0.5f, 0.0f)) * (camera.distance() * 0.05f);
+    const QPointF asideBefore = shown(aside);
+
+    // The wheel over `aside`: 2D zoom about it; it stays under the cursor, the frame's middle
+    // moves away from it, the camera stays.
+    const QPointF cursor((asideBefore.x() + 1.0) * 0.5 * viewport->width(), (1.0 - asideBefore.y()) * 0.5 * viewport->height());
+    for (int k = 0; k < 3; ++k) {
+        QWheelEvent wheel(cursor, viewport->mapToGlobal(cursor), QPoint(), QPoint(0, 120), Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase,
+                          false);
+        QCoreApplication::sendEvent(viewport, &wheel);
+    }
+    EXPECT_NEAR(camera.zoom2D(), std::pow(1.0f / 0.9f, 3.0f), 1e-4);
+    EXPECT_TRUE(camera.zoomed2D());
+    EXPECT_LT((camera.eye() - eye).length(), 1e-6f) << "the camera does not move";
+    EXPECT_LT((camera.lookThroughRotation() - turn).length(), 1e-6f);
+    camera.projection(aspect);
+    const QPointF asideAfter = shown(aside);
+    EXPECT_NEAR(asideAfter.x(), asideBefore.x(), 1e-4) << "the point under the cursor stays under it";
+    EXPECT_NEAR(asideAfter.y(), asideBefore.y(), 1e-4);
+    EXPECT_GT(std::hypot(shown(ahead).x() - asideAfter.x(), shown(ahead).y() - asideAfter.y()),
+              1.3 * std::hypot(asideBefore.x(), asideBefore.y()))
+        << "the rest spreads out from it";
+    // Lines keep their width in pixels: the field of view shown is the zoomed one, the camera's not.
+    EXPECT_LT(camera.fovDegrees(), fov * 0.8f);
+    EXPECT_NEAR(camera.cameraFovDegrees(), fov, 1e-4);
+    // The photo zooms with the scene: its rectangle shows where the projection puts it.
+    EXPECT_NEAR(camera.shown2D(asideBefore).x(), asideAfter.x(), 1e-4);
+    window.setHud(true);  // (the line said now, not after the frames stop)
+    EXPECT_TRUE(window.overlay()->statsText().contains(QStringLiteral("2D 137% · F whole view")))
+        << window.overlay()->statsText().toStdString();
+
+    // Alt+middle drag: the picture follows the cursor (the camera stays).
+    auto drag = [&](Qt::MouseButton button, const QPointF& from, const QPointF& to) {
+        QMouseEvent press(QEvent::MouseButtonPress, from, viewport->mapToGlobal(from), button, button, Qt::AltModifier);
+        QCoreApplication::sendEvent(viewport, &press);
+        QMouseEvent move(QEvent::MouseMove, to, viewport->mapToGlobal(to), Qt::NoButton, button, Qt::AltModifier);
+        QCoreApplication::sendEvent(viewport, &move);
+        QMouseEvent release(QEvent::MouseButtonRelease, to, viewport->mapToGlobal(to), button, Qt::NoButton, Qt::AltModifier);
+        QCoreApplication::sendEvent(viewport, &release);
+    };
+    const QPointF from = shown(aside);
+    drag(Qt::MiddleButton, cursor, cursor + QPointF(40.0, -20.0));
+    camera.projection(aspect);
+    EXPECT_NEAR(shown(aside).x(), from.x() + 2.0 * 40.0 / viewport->width(), 1e-3);
+    EXPECT_NEAR(shown(aside).y(), from.y() + 2.0 * 20.0 / viewport->height(), 1e-3);
+    // Alt+right drag right: zooms in further about where it began.
+    const float zoom = camera.zoom2D();
+    drag(Qt::RightButton, cursor, cursor + QPointF(60.0, 0.0));
+    EXPECT_GT(camera.zoom2D(), zoom * 1.2f);
+    EXPECT_LT((camera.eye() - eye).length(), 1e-6f);
+
+    // A brush through the 2D view: Place clicked where the groom's middle shows roots the new guide
+    // under the click (the picks go through the same zoomed projection).
+    camera.projection(aspect);
+    const QPointF middle = shown(ahead);
+    const QPointF click((middle.x() + 1.0) * 0.5 * viewport->width(), (1.0 - middle.y()) * 0.5 * viewport->height());
+    std::set<GuideId> had;
+    if (const HierarchyPtr h = window.document()->session().authoredHierarchy()) {
+        for (const HierarchyGuide& g : h->guides()) had.insert(g.id);
+    }
+    window.brush().settings().setMode("place");
+    viewport->setToolMode(Viewport::ToolMode::Brush);
+    {
+        QMouseEvent press(QEvent::MouseButtonPress, click, viewport->mapToGlobal(click), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        QCoreApplication::sendEvent(viewport, &press);
+        QMouseEvent release(QEvent::MouseButtonRelease, click, viewport->mapToGlobal(click), Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+        QCoreApplication::sendEvent(viewport, &release);
+    }
+    const HierarchyPtr placed = window.document()->session().authoredHierarchy();
+    ASSERT_TRUE(placed);
+    const HierarchyGuide* added = nullptr;
+    for (const HierarchyGuide& g : placed->guides()) {
+        if (!had.count(g.id)) added = &g;
+    }
+    ASSERT_NE(added, nullptr) << "Place added a guide through the zoomed view";
+    ASSERT_FALSE(added->points.empty());
+    camera.projection(aspect);
+    const QPointF root = shown(QVector3D(added->points[0].x, added->points[0].y, added->points[0].z));
+    const double pixel = 2.0 / viewport->width();
+    EXPECT_NEAR(root.x(), middle.x(), 2.0 * pixel) << "the root under the click";
+    EXPECT_NEAR(root.y(), middle.y(), 2.0 * pixel * viewport->width() / viewport->height());
+    viewport->setToolMode(Viewport::ToolMode::Camera);
+    if (const char* grab = std::getenv("GROOMLAB_APP_GRAB")) {  // pictures to look at: the whole view, then zoomed
+        PhotosPanel::Display half = d;
+        half.opacity = 0.45;
+        photos->setDisplay(0, half);
+        const float z = camera.zoom2D();
+        const QPointF c = camera.center2D();
+        camera.reset2D();
+        window.renderOffscreen(QSize(960, 600), 4).save(QString::fromUtf8(grab) + QStringLiteral("/photo_2d_whole.png"));
+        camera.zoom2D(z, 0.0f, 0.0f);
+        camera.pan2D(static_cast<float>(-c.x() * z * 480.0), static_cast<float>(c.y() * z * 300.0), 960, 600);
+        window.renderOffscreen(QSize(960, 600), 4).save(QString::fromUtf8(grab) + QStringLiteral("/photo_2d_zoomed.png"));
+        photos->setDisplay(0, d);
+    }
+
+    // Offscreen, zoomed hard into the photo's left quarter: red fills the frame.
+    camera.reset2D();
+    camera.projection(4.0f / 3.0f);
+    camera.zoom2D(4.0f, -0.6f, 0.0f);
+    const QImage frame = window.renderOffscreen(QSize(320, 240), 1);
+    if (!frame.isNull()) {
+        for (const QPoint p : {QPoint(6, 120), QPoint(314, 120), QPoint(160, 6)}) {
+            const QColor c = frame.pixelColor(p);
+            EXPECT_GT(c.red(), c.blue() + 60) << "the photo's red half over the frame at " << p.x() << "," << p.y();
+        }
+    }
+
+    // F: the whole view again.
+    AppActions::bindings(window).at("view.frameAll").trigger(nullptr, false);
+    EXPECT_FALSE(camera.zoomed2D());
+    EXPECT_LT((camera.eye() - eye).length(), 1e-6f) << "F does not frame a locked camera";
+    // Unlocked: the 2D view goes, the wheel dollies the photo's camera (lining it up by eye).
+    camera.zoom2D(2.0f, 0.0f, 0.0f);
+    d.locked = false;
+    photos->setDisplay(0, d);
+    EXPECT_FALSE(camera.zoomed2D());
+    QWheelEvent wheel(cursor, viewport->mapToGlobal(cursor), QPoint(), QPoint(0, 120), Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase,
+                      false);
+    QCoreApplication::sendEvent(viewport, &wheel);
+    EXPECT_FALSE(camera.zoomed2D());
+    EXPECT_GT((camera.eye() - eye).length(), 1e-4f) << "unlocked, the camera moves";
+    // Back to Perspective: no 2D view left behind.
+    photos->lookButton()->click();
+    EXPECT_FALSE(camera.lookingThrough());
+    EXPECT_FALSE(camera.zoomed2D());
 }
 
 TEST(AppPhotos, LookThroughLockOpacityDepthAndAlignPhoto) {

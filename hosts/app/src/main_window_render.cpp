@@ -42,7 +42,7 @@ bool MainWindow::prepareRender(const QString& renderer, const QString& imagePath
     const OrbitCamera& camera = viewport_->camera();
     stage->eye = camera.eye();
     stage->target = camera.target();
-    stage->fovDegrees = camera.fovDegrees();
+    stage->fovDegrees = camera.cameraFovDegrees();  // (the camera's own: a 2D view zooms the viewport only)
     GroomRenderer& renderer3d = viewport_->renderer();
     stage->lighting = renderer3d.lighting();
     stage->showScalp = renderer3d.showScalp();

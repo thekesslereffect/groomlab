@@ -1360,7 +1360,7 @@ QString OverlayHost::statsText() const {
 }
 
 void OverlayHost::setStats(std::size_t strands, double msPerDab, const QString& badge, const QColor& /*badgeColor*/, std::size_t guides,
-                           const QString& guidesFrom) {
+                           const QString& guidesFrom, const QString& view) {
     // One quiet line in the number font: "25,843 strands · 104 guides · 63 ms per dab · GPU".
     const QLocale english(QLocale::English);
     QStringList parts;
@@ -1373,6 +1373,7 @@ void OverlayHost::setStats(std::size_t strands, double msPerDab, const QString& 
         parts << QString::number(msPerDab, 'f', msPerDab < 10.0 ? 1 : 0) + tr(" ms per dab");
         if (!badge.isEmpty()) parts << badge;
     }
+    if (!view.isEmpty()) parts << view;
     ShadowText::Run line;
     line.text = parts.join(QStringLiteral(" · "));
     line.font = theme::numberFont(12);

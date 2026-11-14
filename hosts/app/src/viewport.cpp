@@ -2,6 +2,7 @@
 #include "viewport.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 
 #include <QByteArray>
@@ -94,7 +95,8 @@ void Viewport::setScalp(MeshPtr scalp) {
 }
 
 void Viewport::frameAll(const Bounds& bounds) {
-    camera_.frame(bounds);
+    if (camera_.lookThroughLocked()) camera_.reset2D();  // through a locked photo: the whole view again
+    else camera_.frame(bounds);
     cameraMoved();
 }
 
@@ -302,13 +304,22 @@ void Viewport::mouseMoveEvent(QMouseEvent* event) {
             cameraMoved();
             break;
         case Drag::Pan:
-            camera_.pan(static_cast<float>(delta.x()), static_cast<float>(delta.y()), height());
+            // Through a locked photo the camera stays: the picture pans in 2D instead.
+            if (camera_.lookThroughLocked()) camera_.pan2D(static_cast<float>(delta.x()), static_cast<float>(delta.y()), width(), height());
+            else camera_.pan(static_cast<float>(delta.x()), static_cast<float>(delta.y()), height());
             cameraMoved();
             break;
-        case Drag::Dolly:
-            camera_.dolly(1.0f - (delta.x() + delta.y()) * 0.005f);  // as Maya: right or down zooms in
+        case Drag::Dolly: {
+            const float factor = 1.0f - (delta.x() + delta.y()) * 0.005f;  // as Maya: right or down zooms in
+            if (camera_.lookThroughLocked()) {
+                const QPointF at = ndcAt(pressAt_);  // (zoomed about where the drag began)
+                camera_.zoom2D(1.0f / std::max(factor, 0.05f), static_cast<float>(at.x()), static_cast<float>(at.y()));
+            } else {
+                camera_.dolly(factor);
+            }
             cameraMoved();
             break;
+        }
         case Drag::Stroke:
             if (!session_) break;
             session_->move(event->position(), pressure());
@@ -415,10 +426,21 @@ void Viewport::previewBrush(const QPointF& at, const QString& readout, int state
 void Viewport::wheelEvent(QWheelEvent* event) {
     const int steps = event->angleDelta().y() / 120;
     if (steps == 0) return;
-    camera_.dolly(steps > 0 ? 0.9f : 1.1f);
-    for (int i = 1; i < std::abs(steps); ++i) camera_.dolly(steps > 0 ? 0.9f : 1.1f);
+    if (camera_.lookThroughLocked()) {
+        // Through a locked photo: the picture zooms in 2D about the cursor, the camera stays.
+        const QPointF at = ndcAt(event->position());
+        camera_.zoom2D(std::pow(1.0f / 0.9f, static_cast<float>(steps)), static_cast<float>(at.x()), static_cast<float>(at.y()));
+    } else {
+        camera_.dolly(steps > 0 ? 0.9f : 1.1f);
+        for (int i = 1; i < std::abs(steps); ++i) camera_.dolly(steps > 0 ? 0.9f : 1.1f);
+    }
     cameraMoved();
     event->accept();
+}
+
+QPointF Viewport::ndcAt(const QPointF& pos) const {
+    const double w = std::max(width(), 1), h = std::max(height(), 1);
+    return QPointF(2.0 * pos.x() / w - 1.0, 1.0 - 2.0 * pos.y() / h);
 }
 
 void Viewport::keyPressEvent(QKeyEvent* event) {

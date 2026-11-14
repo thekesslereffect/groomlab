@@ -15,7 +15,14 @@ and in front of the mesh or behind it.
     ref.solve(cam)               # {"rms": 0.8, "focal": 52.3, ...}
     ref.lock_reference(cam)
     ref.set_reference_opacity(cam, 0.4)
+    ref.zoom_view_2d(cam, 3.0, at=(120, 40))   # locked: zoom into the view, the camera stays
     ref.look_back()
+
+Looking through a locked reference, the viewport's navigation zooms and pans the picture in
+2D (the wheel and Alt+right zoom, Alt+middle pans, F shows all of it again: ui/photo_view.py),
+the photo and the scene together: the camera's own 2D Pan/Zoom (zoom, horizontalPan,
+verticalPan), which renders leave alone. The camera never moves, so the solve stays and brushes
+pick through the zoomed view.
 
 The photo fills the camera's film gate: the film back takes the image's aspect (36 mm
 wide) and the image plane is sized to it, so a pixel of the photo is a direction from
@@ -466,7 +473,14 @@ def look_through(camera, panel=None):
     current = _panel_camera(panel)
     if current and not is_reference(current):
         _previous[panel] = _transform(current)
+    reset_view_2d(camera)  # (the whole view to start with)
     cmds.lookThru(panel, camera)
+    if not cmds.about(batch=True):
+        try:
+            from groomlab.ui import photo_view
+            photo_view.watch(panel)
+        except Exception:  # (the 2D view's gestures are a convenience: never in the way of the look)
+            pass
     return panel
 
 
@@ -476,6 +490,9 @@ def look_back(panel=None):
     panel = panel or active_panel()
     if not panel:
         raise RuntimeError("no viewport")
+    shown = current_reference(panel)
+    if shown:
+        reset_view_2d(shown)
     camera = _previous.pop(panel, None)
     if not camera or not cmds.objExists(camera) or is_reference(camera):
         camera = "persp"
@@ -581,10 +598,101 @@ def lock_reference(camera, locked=True):
         for attr in attrs:
             if cmds.attributeQuery(attr, node=node, exists=True):
                 cmds.setAttr(node + "." + attr, lock=bool(locked))
+    if not locked:
+        reset_view_2d(camera)  # unlocked, the navigation moves the camera again: from the whole view
 
 
 def is_locked(camera):
     return bool(cmds.camera(_camera(camera), query=True, lockTransform=True))
+
+
+# ---------------------------------------------------------------------------
+# The 2D view: zooming into a locked reference's view without moving its camera
+
+ZOOM_2D_RANGE = (0.25, 64.0)  # how far out and in the 2D view goes (times the whole view)
+
+
+def view_2d(camera):
+    """The reference's 2D view: {"zoom": times the whole view (1: all of it), "pan": (x, y)}, the
+    pan the camera's horizontalPan and verticalPan (inches of film from the middle)."""
+    shape = _shape(_camera(camera))
+    if not cmds.getAttr(shape + ".panZoomEnabled"):
+        return {"zoom": 1.0, "pan": (0.0, 0.0)}
+    return {"zoom": 1.0 / max(cmds.getAttr(shape + ".zoom"), 1e-6),
+            "pan": (cmds.getAttr(shape + ".horizontalPan"), cmds.getAttr(shape + ".verticalPan"))}
+
+
+def _active_port():
+    import maya.OpenMayaUI as omui
+    view = omui.M3dView.active3dView()
+    return view.portWidth(), view.portHeight()
+
+
+def _pixels_per_inch(shape, port):
+    """The view's pixels per inch of film at 1x (the film the port shows, as Maya fits it)."""
+    import math
+    import maya.OpenMaya as om
+    sel = om.MSelectionList()
+    sel.add(shape)
+    dag = om.MDagPath()
+    sel.getDagPath(0, dag)
+    fn = om.MFnCamera(dag)
+    h, v = om.MScriptUtil(), om.MScriptUtil()
+    h.createFromDouble(0.0)
+    v.createFromDouble(0.0)
+    hp, vp = h.asDoublePtr(), v.asDoublePtr()
+    fn.getPortFieldOfView(int(port[0]), int(port[1]), hp, vp)
+    half = (fn.focalLength() / 25.4) * math.tan(0.5 * om.MScriptUtil.getDouble(hp))
+    return float(port[0]) / max(2.0 * half, 1e-9)
+
+
+def _set_view_2d(shape, scale, pan):
+    from groomlab.base import no_undo
+    with no_undo():  # (a view, not an edit: no undo step per wheel notch)
+        cmds.setAttr(shape + ".panZoomEnabled", True)
+        cmds.setAttr(shape + ".zoom", scale)
+        cmds.setAttr(shape + ".horizontalPan", pan[0])
+        cmds.setAttr(shape + ".verticalPan", pan[1])
+
+
+def zoom_view_2d(camera, factor, at=(0.0, 0.0), port=None):
+    """Zoom the reference's view `factor` times in 2D (above 1: in), keeping the point under `at`
+    (pixels from the view's middle, x right, y up) where it is; `port`: the view's (width, height)
+    in pixels (the active view's by default). The camera does not move. Returns view_2d."""
+    shape = _shape(_camera(camera))
+    port = port or _active_port()
+    ppi = _pixels_per_inch(shape, port)
+    current = view_2d(camera)
+    old = 1.0 / current["zoom"]
+    new = 1.0 / min(max(current["zoom"] * float(factor), ZOOM_2D_RANGE[0]), ZOOM_2D_RANGE[1])
+    # The film under `at` (Maya's zoom shows 1/zoom times as big about the pan), kept under it.
+    film = (current["pan"][0] + at[0] * old / ppi, current["pan"][1] + at[1] * old / ppi)
+    _set_view_2d(shape, new, (film[0] - at[0] * new / ppi, film[1] - at[1] * new / ppi))
+    return view_2d(camera)
+
+
+def pan_view_2d(camera, dx, dy, port=None):
+    """Move the reference's view in 2D by (dx, dy) pixels (right, up): the picture follows. The
+    camera does not move. Returns view_2d."""
+    shape = _shape(_camera(camera))
+    port = port or _active_port()
+    ppi = _pixels_per_inch(shape, port)
+    current = view_2d(camera)
+    scale = 1.0 / current["zoom"]
+    _set_view_2d(shape, scale, (current["pan"][0] - dx * scale / ppi, current["pan"][1] - dy * scale / ppi))
+    return view_2d(camera)
+
+
+def reset_view_2d(camera):
+    """The reference's whole view again (its 2D view off)."""
+    shape = _shape(_camera(camera))
+    if cmds.getAttr(shape + ".panZoomEnabled") or cmds.getAttr(shape + ".zoom") != 1.0:
+        from groomlab.base import no_undo
+        with no_undo():
+            cmds.setAttr(shape + ".panZoomEnabled", False)
+            cmds.setAttr(shape + ".zoom", 1.0)
+            cmds.setAttr(shape + ".horizontalPan", 0.0)
+            cmds.setAttr(shape + ".verticalPan", 0.0)
 
 
 # ---------------------------------------------------------------------------

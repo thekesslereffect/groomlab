@@ -230,7 +230,9 @@ from these names.
   focal length**); each pair shows how many pixels off it lands. Or line it up by eye, looking
   through it. **Lock** it, set its **Opacity** and
   **In front** or **Behind**, and brush the guides to the photo while looking through it
-  (`groomlab.reference`).
+  (`groomlab.reference`). Through a locked photo the wheel and Alt+right zoom and Alt+middle pans
+  the picture in 2D (photo and groom together, the camera stays, the brushes work zoomed); **F**
+  shows the whole view again.
 
 ## 3. Look development (Yeti-style)
 
