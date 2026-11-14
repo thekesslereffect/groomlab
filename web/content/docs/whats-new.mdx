@@ -13,6 +13,41 @@ version. While GroomLab is in early access, a node's params can still change bet
 param renamed, or two merged into one); the entries below say when one does and what to set. Once
 it leaves early access, saved grooms will keep their look across updates.
 
+## 0.48.0 (November 13, 2026)
+
+- **Card Atlas.** A texture atlas for hair cards made from little grooms: **GroomLab > Card
+  Atlas** lays out blocks (each a small groom on a strip, its rectangle of the atlas), which you
+  groom like any other (comb, noise, clumps). Each block's card fits its hair by itself, wider
+  where the hair is combed or noised out; **Tilt**, **Turn** and **Roll** stand the block's root
+  band up without bending its guides. **Bake Preview** shows the maps, **Export Maps** writes them
+  in Unreal's card layout, **Export Card Shapes** writes one UV-ready card per block as FBX
+  (`<block>_card`, material `<atlas>_mat`, so the file drops into the scene beside the blocks), and
+  in Maya **Cards to Scene** makes those cards in the scene, textured. In Maya and the app.
+- **Zoom into a photo without moving its camera.** Looking through a locked reference photo, the
+  wheel and Alt+right drag zoom and Alt+middle drag pans the picture in 2D, the photo and the groom
+  together; **F** shows all of it again. The camera stays lined up and the brushes work zoomed in.
+  An unlocked photo still moves its camera, to line it up by eye. In Maya and the app (Blender's
+  camera view always zoomed this way).
+- **Tube profiles: root, mid and tip.** A tube takes a mid and a tip profile besides its root shape
+  (built-in or library shapes), each holding its shape over a share of the tube and blending
+  between, and the Tube brush shows the tubes shaded. In every host (thanks to Omar Hesham, #59, #63).
+- **Tubes to Curves can stay linked.** **Live link tubes to guides** keeps each tube's guides
+  following its modeled mesh as you edit, move or add edge runs to it (Maya; thanks to Omar Hesham,
+  #60). Later conversions add their tubes to the same region map.
+- **Each brush keeps its own settings.** Radius, falloff and its curves stay with each brush, as
+  strength did, so Erase and Slide each come back as you left them (thanks to Omar Hesham, #54).
+- **Shared scenes find their files.** A scene or groom sent from another machine, or unzipped into
+  a folder of its own, finds its maps and caches where they came along to.
+- **Reference photos turn with the groom's up axis**, so a photo lined up in a Y-up file stays lined
+  up in a Z-up one (Blender) and back.
+- **Fixes:**
+  - Guides no longer creep on select and deselect on a smoothed scalp, and Tubes to Curves keeps
+    tips inside their tube there (#67, #68, thanks to Omar Hesham).
+  - Exporting Unreal cards leaves the scalp's shader alone on Maya 2024 and later (#71).
+  - Freezing transforms on or sculpting a scalp keeps the hair rooted where it was groomed.
+  - A Cards node's params stay in place through a bake (#47).
+  - Check for Updates works on macOS (certificates, and Mac release zips install).
+
 ## 0.47.0 (November 12, 2026)
 
 - **Rigged hair: driver curves.** Animators pose hero hair with curves rigged like anything else
