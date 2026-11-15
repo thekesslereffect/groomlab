@@ -94,6 +94,7 @@ TOOL_GROUPS = {
     "trim": ("cut", "length", "lengths", "erase"),
     "paint": ("paint", "freeze", "invert", "unfreeze", "select"),
 }
+FREEZE_ICONS = ("freeze", "invert", "unfreeze")  # their own color when the theme has icons.freeze
 
 
 class Theme:
@@ -153,6 +154,8 @@ class Theme:
         named = dict(palette, accent=ui.get("accent", "#5B8DEF"))
         self._tool_srgb = {g: _srgb(icons.get(g, "accent"), named) or c["toolIcon"]
                            for g in ("create", "shape", "trim", "paint")}
+        # Freeze, Invert and Unfreeze: the theme's icons.freeze when it has one.
+        self._freeze_srgb = _srgb(icons.get("freeze", ""), named)
         # ui.toolOn "category" (Playful's): the picked tool's tile washed with its group's color.
         self.tool_on_category = ui.get("toolOn") == "category"
         # The two-tone tool designs' second tone: the theme's icon ink (hair and neutral parts).
@@ -174,6 +177,8 @@ class Theme:
         picked tile's icon), or `over` a theme color by `amount` (its wash and edge)."""
         group = next((g for g, names in TOOL_GROUPS.items() if icon in names), None)
         c = self._tool_srgb.get(group) if group else self._srgb["toolIcon"]
+        if icon in FREEZE_ICONS and self._freeze_srgb:
+            c = self._freeze_srgb
         if toward_text:
             c = _mix(c, self._srgb["text"], toward_text)
         if over is not None:

@@ -33,6 +33,7 @@ ICON_GROUPS = {
     "trim": ("cut", "length", "lengths", "erase"),
     "paint": ("paint", "freeze", "invert", "unfreeze", "select"),  # the guide tools share one color
 }
+FREEZE_ICONS = ("freeze", "invert", "unfreeze")  # their own color when the theme has icons.freeze
 PLACEHOLDERS = {"main": "#3D7EFF", "shade": "#1F4FB3", "tint": "#A8C7FF", "ink": "#F2F2F5", "shine": "#FFFFFF",
                 "red": "#FF4D50", "yellow": "#FFC53E", "blue": "#2F7BF7", "emerald": "#2ECC90"}
 _svg_cache = {}
@@ -394,6 +395,8 @@ def icon_colors(name, t=None):
     t = t or theme.current()
     group = next((g for g, names in ICON_GROUPS.items() if name in names), "app")
     main = t.hex(t.get("icons." + group, "accent"))
+    if name in FREEZE_ICONS and t.get("icons.freeze"):
+        main = t.hex(t.get("icons.freeze"))
     colors = {"main": main, "shade": _mix(main, "#000000", 0.38), "tint": _mix(main, "#FFFFFF", 0.5),
               "ink": t.hex(t.get("icons.ink", "white")), "shine": "#FFFFFF"}
     for name_ in ("red", "yellow", "blue", "emerald"):

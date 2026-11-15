@@ -565,8 +565,12 @@ QColor categoryIconColor(BrushCategory category) {
 }
 
 QColor toolIconColor(BrushCategory category, const std::string& icon) {
-    // The Guides tray's tools (Select, Freeze, Unfreeze) share one color: the paint group's (yellow in Playful).
-    (void)icon;
+    // Freeze, Invert and Unfreeze: the theme's icons.freeze when it has one.
+    if (icon == "freeze" || icon == "invert" || icon == "unfreeze") {
+        const QColor frozen = themed({"icons"}, "freeze");
+        if (frozen.isValid()) return frozen;
+    }
+    // The other Guides tray tools (Select) share the paint group's color (yellow in Playful).
     if (category == BrushCategory::Guides) category = BrushCategory::Paint;
     return categoryIconColor(category);
 }

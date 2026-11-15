@@ -102,6 +102,7 @@
     "shape": "#8A8275",
     "trim": "#8A8275",
     "paint": "#8A8275",
+    "freeze": "#83AFCE",
     "app": "accent",
     "ink": "#1C1B19"
   },

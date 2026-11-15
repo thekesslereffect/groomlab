@@ -94,6 +94,7 @@
     "shape": "blue",
     "trim": "red",
     "paint": "yellow",
+    "freeze": "#83AFCE",
     "app": "accent",
     "ink": "white"
   },

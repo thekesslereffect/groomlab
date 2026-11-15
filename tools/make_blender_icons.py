@@ -47,6 +47,7 @@ ICON_GROUPS = {
     "trim": ("cut", "length", "lengths", "erase"),
     "paint": ("paint", "freeze", "invert", "unfreeze", "select"),
 }
+FREEZE_ICONS = ("freeze", "invert", "unfreeze")  # their own color when the theme has icons.freeze
 PLACEHOLDERS = {"main": "#3D7EFF", "shade": "#1F4FB3", "tint": "#A8C7FF", "ink": "#F2F2F5", "shine": "#FFFFFF",
                 "red": "#FF4D50", "yellow": "#FFC53E", "blue": "#2F7BF7", "emerald": "#2ECC90"}
 
@@ -71,6 +72,8 @@ def colors_for(name, theme):
 
     group = next((g for g, names in ICON_GROUPS.items() if name in names), "app")
     main = resolve(theme["icons"].get(group, "accent"))
+    if name in FREEZE_ICONS and theme["icons"].get("freeze"):
+        main = resolve(theme["icons"]["freeze"])
     out = {"main": main, "shade": _mix(main, "#000000", 0.38), "tint": _mix(main, "#FFFFFF", 0.5),
            "ink": resolve(theme["icons"].get("ink", "white")), "shine": "#FFFFFF"}
     for n in ("red", "yellow", "blue", "emerald"):
