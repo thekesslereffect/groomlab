@@ -172,11 +172,23 @@ std::string BrushToolSettings::targetsName() const {
 }
 
 void BrushToolSettings::prepareMask(const GuideHierarchy& h, std::set<std::string> hiddenGroups,
-                                    const std::vector<GuideId>& selection, float softRadius) {
+                                    const std::vector<GuideId>& selection, float softRadius, const ScalpMesh* scalp) {
     brush.hiddenGroups = std::move(hiddenGroups);
     brush.mask = nullptr;
     if (!selectedOnly) return;
-    selectionMask = std::make_shared<const std::map<GuideId, float>>(softSelection(h, selection, softRadius));
+    std::map<GuideId, float> mask = softSelection(h, selection, softRadius);
+    const StrokeSymmetry sym = StrokeSymmetry::of(brush, scalp);
+    if (sym.on() && !mask.empty()) {
+        std::vector<GuideId> ids;
+        for (const auto& [id, w] : mask) ids.push_back(id);
+        const std::vector<GuideId> mirrors = mirrorGuides(h, ids, sym);
+        for (std::size_t i = 0; i < ids.size(); ++i) {
+            if (mirrors[i] == kNoGuide) continue;
+            float& m = mask[mirrors[i]];
+            m = std::max(m, mask.at(ids[i]));
+        }
+    }
+    selectionMask = std::make_shared<const std::map<GuideId, float>>(std::move(mask));
     brush.mask = selectionMask.get();  // empty selection: nothing to brush
 }
 

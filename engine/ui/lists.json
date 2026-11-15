@@ -20,6 +20,7 @@
           "guides.syncPos",
           "guides.syncNeg",
           "guides.mirrorSelection",
+          "guides.mirrorToOther",
           "guides.mirrorGroup",
           "-",
           "guides.reparent",

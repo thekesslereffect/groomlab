@@ -1255,6 +1255,20 @@ TEST(AppPanels, GuidesPanelMirrorsResamplesAndClearsOverlays) {
     EXPECT_GE(doc->session().authoredHierarchy()->guides().size(), guides);
     EXPECT_EQ(doc->undo(), "");
     EXPECT_EQ(doc->session().authoredHierarchy()->guides().size(), guides);
+    // Copy Shape to Other Side (issue 74): nothing selected is refused; a guide off the seam
+    // gives its mirror guide its mirror image in place, one undo step, the guides' IDs kept.
+    BrushSettings brush;  // symmetry off: World X
+    EXPECT_FALSE(panel.mirrorToOtherSide(brush));
+    GuideId offSeam = kNoGuide;
+    for (const HierarchyGuide& g : h0->guides()) {
+        if (!g.isChild() && std::abs(g.points.front().x) > 0.01f) offSeam = g.id;
+    }
+    ASSERT_NE(offSeam, kNoGuide);
+    doc->setSelection({offSeam});
+    EXPECT_TRUE(panel.mirrorToOtherSide(brush));
+    EXPECT_EQ(doc->undoText(), "Undo mirror to other side");
+    EXPECT_EQ(doc->undo(), "");
+    doc->setSelection({});
     // A root group mirrored; a child group cannot be; promoting a root group is refused.
     const std::string root = h0->groups()[0].name;
     EXPECT_TRUE(panel.mirrorGroup(root));

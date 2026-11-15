@@ -711,7 +711,7 @@ def map_users(scalp, name):
     return [tuple(u) for u in call(scalp, "map_users", name=name).get("users") or []]
 
 
-# ---- Guide edits: Segments, Mirror Selection, group colors -------------------------------------------
+# ---- Guide edits: Segments, Select Mirror Guides, group colors -------------------------------------------
 
 def _targets(guides=None, group=None, level=None):
     if guides:
@@ -764,6 +764,21 @@ def end_preview(scalp):
     r = call(scalp, "guides_preview_end")
     if r.get("ended"):
         _preview_shown(scalp)
+    return r
+
+
+def mirror_to_other_side(scalp, symmetry="x", side="selected", group=None):
+    """Maya's mirror_to_other_side (issue 74): the selected guides' mirror guides given their exact
+    mirror images in place ("selected"), or a whole side ("positive", "negative") over the other;
+    across `symmetry` ("x" or "topology", as the brushes). One undo step."""
+    from . import display
+    args = {"op": "mirror_shapes", "from": side, "symmetry": symmetry or "x", "center": 0.0}
+    if group and side != "selected":
+        args["group"] = group
+    r = call(scalp, "guides_edit", **args)
+    display.mark(scalp)
+    refresh_info(scalp)
+    mark_state(scalp)
     return r
 
 

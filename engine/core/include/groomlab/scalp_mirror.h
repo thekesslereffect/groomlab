@@ -33,6 +33,11 @@ public:
     Vec3f point(const ScalpMesh& scalp, const Vec3f& p) const;
     // A direction at point `at` mirrored the same way (a stroke's drag, a flow arrow).
     Vec3f vector(const ScalpMesh& scalp, const Vec3f& at, const Vec3f& v) const;
+    // The side of the mirror a point is on (the side of its nearest surface point on the rest
+    // pose, whatever the pose now): 1 past the middle in x, -1 before it, 0 on the seam (within
+    // a ten-thousandth of the scalp's size); 0 when the scalp does not fit. `root`, when on the
+    // scalp, is the point's own surface point (no search).
+    int side(const ScalpMesh& scalp, const Vec3f& p, const StrandRoot* root = nullptr) const;
 
     // Each vertex's partner on the surface (face and barycentrics, ScalpMesh::position).
     const std::vector<StrandRoot>& partners() const { return partners_; }
@@ -50,6 +55,7 @@ private:
     std::vector<int> pairs_;
     std::size_t points_ = 0, triangles_ = 0;
     std::uint64_t key_ = 0;
+    float middle_ = 0.0f, seam_ = 0.0f;  // the rest pose's middle in x; how near it is on the seam
 };
 
 }  // namespace groomlab

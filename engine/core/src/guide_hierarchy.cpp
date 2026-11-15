@@ -1107,6 +1107,119 @@ std::vector<GuideId> GuideHierarchy::mirrorAll(int axis, float center, bool from
     return created;
 }
 
+GuideHierarchy::MirrorShapesResult GuideHierarchy::mirrorShapes(const Mirror& mirror, const std::vector<GuideId>& sources,
+                                                                int fromSide, GroupId group) {
+    invalidateHash();
+    MirrorShapesResult out;
+    if (!mirror.point || !mirror.side) return out;
+    // A root group's guides and their descendants' groups (a whole side of one group).
+    std::unordered_set<GroupId> groups;
+    if (group != kNoGroup) {
+        groups.insert(group);
+        for (bool grew = true; grew;) {
+            grew = false;
+            for (const GuideGroup& g : groups_) {
+                if (g.parent != kNoGroup && groups.count(g.parent) && groups.insert(g.id).second) grew = true;
+            }
+        }
+    }
+    auto authored = [&](const HierarchyGuide& g) {
+        return (!g.isChild() || g.locked) && g.points.size() >= 2 && (groups.empty() || groups.count(g.group));
+    };
+    // The guides with shapes of their own, each one's side.
+    std::unordered_map<GuideId, int> sideOf;
+    for (const HierarchyGuide& g : guides_) {
+        if (authored(g)) sideOf[g.id] = mirror.side(g);
+    }
+    std::vector<GuideId> from;
+    if (!sources.empty()) {
+        std::unordered_set<GuideId> seen;
+        for (const GuideId id : sources) {
+            const auto it = sideOf.find(id);
+            if (it != sideOf.end() && it->second != 0 && seen.insert(id).second) from.push_back(id);
+        }
+    } else {
+        if (fromSide != 1 && fromSide != -1) throw std::invalid_argument("mirrorShapes: the side is 1 or -1");
+        for (const HierarchyGuide& g : guides_) {
+            const auto it = sideOf.find(g.id);
+            if (it != sideOf.end() && it->second == fromSide) from.push_back(g.id);
+        }
+    }
+    if (from.empty()) return out;
+    const std::unordered_set<GuideId> isSource(from.begin(), from.end());
+
+    // Each source's partner: the nearest root to its mirrored root among its group's guides on
+    // the other side, within half its spacing; nearer pairs first, each guide taken once.
+    struct Pair {
+        float d;
+        GuideId source, target;
+    };
+    std::vector<Pair> pairs;
+    std::unordered_map<GuideId, std::vector<Vec3f>> mirrored;  // each source's mirror image
+    for (const GuideId id : from) {
+        const HierarchyGuide& s = *guide(id);
+        std::vector<Vec3f> pts;
+        pts.reserve(s.points.size());
+        for (const Vec3f& p : s.points) pts.push_back(mirror.point(p));
+        const Vec3f root = pts.front();
+        mirrored[id] = std::move(pts);
+        float spacing = std::numeric_limits<float>::infinity(), best = std::numeric_limits<float>::infinity();
+        GuideId target = kNoGuide;
+        for (const HierarchyGuide& g : guides_) {
+            if (g.id == id || g.group != s.group || g.points.empty()) continue;
+            spacing = std::min(spacing, (g.points.front() - s.points.front()).length());
+            const auto it = sideOf.find(g.id);
+            if (it == sideOf.end() || it->second != -sideOf.at(id) || isSource.count(g.id)) continue;
+            const float d = (g.points.front() - root).length();
+            if (d < best) best = d, target = g.id;
+        }
+        if (target != kNoGuide && best <= 0.5f * spacing) pairs.push_back({best, id, target});
+    }
+    std::stable_sort(pairs.begin(), pairs.end(), [](const Pair& a, const Pair& b) { return a.d < b.d; });
+    std::unordered_map<GuideId, GuideId> partner;
+    std::unordered_set<GuideId> taken;
+    for (const Pair& p : pairs) {
+        if (partner.count(p.source) || taken.count(p.target)) continue;
+        partner[p.source] = p.target;
+        taken.insert(p.target);
+    }
+
+    // The source's own shape, frame, tube, segments and layers on its partner (or a new primary).
+    for (const GuideId id : from) {
+        const HierarchyGuide src = *guide(id);  // copy: adding guides grows guides_
+        std::vector<Vec3f> pts = mirrored[id];
+        const Vec3f up = mirror.vector ? mirror.vector(src.points.front(), src.frameUp) : src.frameUp;
+        GuideId target = kNoGuide;
+        const auto it = partner.find(id);
+        if (it != partner.end()) {
+            target = it->second;
+            setPoints(target, std::move(pts));
+            out.reshaped.push_back(target);
+        } else if (!src.isChild()) {
+            target = addGuide(src.group, std::move(pts), src.tube);
+            out.created.push_back(target);
+        } else {
+            continue;  // a locked child with no partner: the other side's parent has no child to take it
+        }
+        HierarchyGuide* t = mutableGuide(target);
+        t->attributes = src.attributes;
+        t->pointAttributes = src.pointAttributes;
+        t->frameUp = up;
+        t->tube = src.tube;
+        t->ownSegments = src.ownSegments;
+        if (!t->isChild() || t->locked) t->rootLocal.clear();  // bound to the scalp again at the next evaluate
+    }
+    // A whole side: the other side's guides no source matched go.
+    if (sources.empty()) {
+        for (const HierarchyGuide& g : guides_) {
+            const auto it = sideOf.find(g.id);
+            if (it != sideOf.end() && it->second == -fromSide && !taken.count(g.id)) out.removed.push_back(g.id);
+        }
+        removeGuides(out.removed);
+    }
+    return out;
+}
+
 void GuideHierarchy::lock(GuideId id) {
     invalidateHash();
     HierarchyGuide* g = mutableGuide(id);

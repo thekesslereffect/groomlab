@@ -830,6 +830,17 @@ def clear_selection():
         groomlab.clear_guide_selection(groom)
 
 
+def mirror_to_other_side(symmetry="x"):
+    """The selected guides' mirror guides given their exact mirror images (issue 74), across the
+    brushes' Mirror (X when it is off)."""
+    import groomlab
+    groom = _selected_groom()
+    if groom:
+        symmetry = "x" if symmetry in (None, "", "none") else symmetry
+        done = groomlab.mirror_to_other_side(groom, "selected", symmetry)
+        messages.say("mirrored to the other side: %s" % done, warning=False)
+
+
 def symmetry_sync(from_negative=False):
     import groomlab
     groom = _selected_groom()

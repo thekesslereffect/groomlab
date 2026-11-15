@@ -566,7 +566,7 @@ bool BrushTool::startStroke(StrokeHost& host, const ToolView& view, float x, flo
     }
     settings.prepareMask(*working_, sculpt_ ? std::set<std::string>{} : host.hiddenGroups(),
                          settings.selectedOnly ? host.selectedGuides() : std::vector<GuideId>{},
-                         settings.selectedOnly ? host.softSelectRadius() : 0.0f);
+                         settings.selectedOnly ? host.softSelectRadius() : 0.0f, scalp_.get());
     // Parts and flow arrows the stroke shapes (a brush set to them) or erases (the Erase brush;
     // the Part tool with Ctrl): working copies of the stored data, previewed live and committed
     // with the guides. Not while shot sculpting, nor on a Sculpt node.
@@ -1309,7 +1309,7 @@ std::size_t scriptedStroke(StrokeHost& host, BrushToolSettings s, const std::vec
         s.brush.level = 0;
         s.brush.group.clear();
         s.prepareMask(*h, {}, s.selectedOnly ? host.selectedGuides() : std::vector<GuideId>{},
-                      s.selectedOnly ? host.softSelectRadius() : 0.0f);
+                      s.selectedOnly ? host.softSelectRadius() : 0.0f, scalp.get());
         applyBrushStroke(*h, scalp.get(), s.brush, path);
         SculptEdits edits = in.edits;
         recordSculptStroke(edits, *in.guides, *h, in.strength, in.scalp.get());
@@ -1406,9 +1406,9 @@ std::size_t scriptedStroke(StrokeHost& host, BrushToolSettings s, const std::vec
     }
     if (!brush || s.brushGuides) {
         const std::shared_ptr<GuideHierarchy> h = host.editableHierarchy();
-        s.prepareMask(*h, host.hiddenGroups(), s.selectedOnly ? host.selectedGuides() : std::vector<GuideId>{},
-                      s.selectedOnly ? host.softSelectRadius() : 0.0f);
         requireScalp();
+        s.prepareMask(*h, host.hiddenGroups(), s.selectedOnly ? host.selectedGuides() : std::vector<GuideId>{},
+                      s.selectedOnly ? host.softSelectRadius() : 0.0f, scalp.get());
         std::set<GuideId> before;
         for (const HierarchyGuide& g : h->guides()) before.insert(g.id);
         if (s.tool == Tool::Place) {

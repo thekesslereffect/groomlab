@@ -7,7 +7,7 @@
 // (the color dot and name, children under their parents, the guides it holds, the eye that shows or
 // hides it; a click picks the group brushes edit, a double-click renames it in place, a right-click
 // opens lists.groups.context: its color...), then the picked group's box: Rename, Select, Delete,
-// Segments (resample), Edit Guides ▾ (Children, Sync +X → -X and -X → +X, Mirror Selection, Mirror
+// Segments (resample), Edit Guides ▾ (Children, Sync +X → -X and -X → +X, Select Mirror Guides, Mirror
 // Group, Reparent, Promote / Demote, Clear Selection) with the children count beside it.
 //
 // The edits go through the document, each one undo step; what the bar and menus run is the
@@ -25,6 +25,7 @@
 #include <QWidget>
 
 #include "definitions.h"
+#include "groomlab/brush.h"
 #include "groomlab/guide_hierarchy.h"
 
 class QCheckBox;
@@ -84,6 +85,10 @@ public:
     void clearSelection();
     // The mirror image of each selected guide selected (core mirrorSelection, across x = 0).
     bool mirrorSelection();
+    // Copy Shape to Other Side (issue 74): each selected guide's mirror guide given its exact
+    // mirror image in place (one made where there is none), across `brush`'s symmetry (its
+    // Mirror; World X when off). One undo step.
+    bool mirrorToOtherSide(const BrushSettings& brush);
     // A root group mirrored across the plane x = 0 from one side (its guides there copied over the
     // other side's); the whole groom made symmetric the same way (every root group, children with
     // their parents); a group moved one level up, or down under a sibling group; the selected

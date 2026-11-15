@@ -93,7 +93,7 @@ works on in the list right under the tool grid, set the tool in its card under t
     Segments and Delete. The picked group's box: rename, select its guides, delete; **Segments**
     (the selected guides' point count, else the picked group's, else every guide's; resampled live
     while dragged and applied on release, one undo step); **Edit Guides** (Children..., Sync +X →
-    -X, Sync -X → +X, Mirror Selection, Mirror Group..., Reparent..., Promote / Demote..., From
+    -X, Sync -X → +X, Select Mirror Guides, Mirror Group..., Reparent..., Promote / Demote..., From
     Curves and Clear Selection) with the children count beside it.
   - **Paint:** Paint's card and the maps of every kind; the picked map's Show on, channel and Read
     by under the list (see Painted maps in [Maps](looks-and-maps.md#maps)).

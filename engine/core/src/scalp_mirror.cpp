@@ -38,6 +38,8 @@ ScalpMirror::ScalpMirror(const ScalpMesh& scalp)
     const float middle = 0.5f * (lo.x + hi.x);
     // A vertex this close to the mirrored spot is its partner (a symmetric mesh's twin).
     const float snap = 1e-4f * std::max((hi - lo).length(), 1e-6f);
+    middle_ = middle;
+    seam_ = snap;
     // Each vertex at one corner of a triangle using it: a partner vertex as a surface point.
     std::vector<StrandRoot> corner(points_);
     const std::vector<ScalpMesh::Triangle>& tris = rest.triangles();
@@ -86,6 +88,20 @@ std::shared_ptr<const ScalpMirror> ScalpMirror::of(const ScalpMesh& scalp) {
     kept.insert(kept.begin(), made);
     if (kept.size() > 4) kept.resize(4);
     return made;
+}
+
+int ScalpMirror::side(const ScalpMesh& scalp, const Vec3f& p, const StrandRoot* root) const {
+    if (!fits(scalp)) return 0;
+    StrandRoot at = root && scalp.contains(*root) ? *root : scalp.closestPoint(p).root;
+    if (!scalp.contains(at)) return 0;
+    // Where it is on the rest pose: the side does not change as the head turns.
+    const std::vector<Vec3f>& rest = scalp.hasRest() ? scalp.restPoints() : scalp.points();
+    const ScalpMesh::Triangle& tri = scalp.triangles()[static_cast<std::size_t>(at.face)];
+    const float w = 1.0f - at.u - at.v;
+    const float x = rest[static_cast<std::size_t>(tri[0])].x * w + rest[static_cast<std::size_t>(tri[1])].x * at.u +
+                    rest[static_cast<std::size_t>(tri[2])].x * at.v;
+    const float d = x - middle_;
+    return std::abs(d) <= seam_ ? 0 : (d > 0.0f ? 1 : -1);
 }
 
 bool ScalpMirror::fits(const ScalpMesh& scalp) const {

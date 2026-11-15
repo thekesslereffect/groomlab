@@ -158,8 +158,11 @@ struct BrushToolSettings {
     std::string symmetryName() const;
     // brush.hiddenGroups set, and brush.mask pointed at the soft selection of `selection` (soft
     // radius `softRadius`) when selectedOnly (an empty selection: nothing to brush), else null.
+    // With symmetry on, each masked guide's mirror guide is masked as much too (on `scalp`, for
+    // topology), so the mirrored stamp edits the selection's mirror images (issue 74: brush one
+    // picked guide, its mirror follows).
     void prepareMask(const GuideHierarchy& h, std::set<std::string> hiddenGroups, const std::vector<GuideId>& selection,
-                     float softRadius);
+                     float softRadius, const ScalpMesh* scalp = nullptr);
 };
 
 // The colors every host draws the tool in (RGB 0..1): the ring under the cursor (red for Part and

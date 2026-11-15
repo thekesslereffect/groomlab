@@ -9,7 +9,7 @@ headless Blender (run_blender_test.py installs the extension in a throwaway prof
 - the GroomLab menu, the Groom Tools (every tab and section), the lists' right-click menus and the
   pie are built from the files, in their order, unbound actions hidden;
 - the Groom Tools' operators the helper's B1/B2 commands back: guide group colors, Segments,
-  Mirror Selection, Reparent, Promote / Demote, Mirror Group, parts, flow, the maps' menu (rename,
+  Select Mirror Guides, Reparent, Promote / Demote, Mirror Group, parts, flow, the maps' menu (rename,
   convert, gray / color, fill, import, relink, reload, read by, delete with its file), Tubes (shape,
   library, width, flatness, twist, smooth, Fill Tubes, the Shape brush's channel), correctives
   (new, fix frame, weight keyed with Blender's keyframes, solo, move, rename, clear keys, delete),
@@ -255,9 +255,10 @@ class DefinitionsTest(unittest.TestCase):
         # The Photos tab's menus: the photo's (its actions need a photo picked) and the pairs'.
         self.assertEqual(texts(drawn(bpy.types.GROOMLAB_MT_photo_context)), ["Import Photo..."])
         edits = drawn(bpy.types.GROOMLAB_MT_guide_edits)
-        self.assertEqual(texts(edits)[:10], ["Children", "Sync +X → -X", "Sync -X → +X", "Mirror Selection",
-                                             "Mirror Group...", "Reparent...", "Promote / Demote...", "From Curves",
-                                             "Clear Selection", "Lock"])  # From Curves: Blender's curve objects
+        self.assertEqual(texts(edits)[:11], ["Children", "Sync +X → -X", "Sync -X → +X", "Select Mirror Guides",
+                                             "Copy Shape to Other Side", "Mirror Group...", "Reparent...",
+                                             "Promote / Demote...", "From Curves", "Clear Selection",
+                                             "Lock"])  # From Curves: Blender's curve objects
         # Groups' right-click menu without a group: New Group only.
         self.assertEqual(texts(drawn(bpy.types.GROOMLAB_MT_group_context)), ["New Group..."])
         # Every operator's tooltip from actions.json.
@@ -330,7 +331,7 @@ class ToolsTest(unittest.TestCase):
         self.assertEqual(next(x for x in info if x["name"] == "primary")["segments"], 5)
         self.assertEqual(bpy.ops.groomlab.tool_undo(), {"FINISHED"})
         self.assertEqual(set(tools.guide_segments(head)["segments"]), before)
-        # Mirror Selection: the mirror images of the selected guides.
+        # Select Mirror Guides: the mirror images of the selected guides.
         ids = self.guide_ids()
         tools.selection_set(head, ids=ids[:5], mode="replace")
         self.assertEqual(bpy.ops.groomlab.guides_edit(action="MIRROR_SELECTION"), {"FINISHED"})
@@ -363,6 +364,14 @@ class ToolsTest(unittest.TestCase):
         self.assertEqual(bpy.ops.groomlab.group_promote_demote(action="PROMOTE", group="extra"), {"FINISHED"})
         self.assertEqual(next(g for g in t.groups if g.name == "extra").parent, "")
         self.assertEqual(bpy.ops.groomlab.guides_mirror_group(group="primary", direction="POS"), {"FINISHED"})
+        # Copy Shape to Other Side (issue 74): the picked guide's mirror guide reshaped in place
+        # (the IDs kept), one undo step.
+        primaries = sorted(int(i) for i in tools.guide_segments(head, group="primary")["ids"])
+        tools.selection_set(head, ids=primaries[:1], mode="replace")
+        depth = tools.groom_tools(head).undo.get("undoDepth")
+        self.assertEqual(bpy.ops.groomlab.guides_edit(action="MIRROR_TO_OTHER"), {"FINISHED"})
+        self.assertEqual(tools.groom_tools(head).undo.get("undoDepth"), depth + 1)
+        self.assertEqual(sorted(int(i) for i in tools.guide_segments(head, group="primary")["ids"]), primaries)
         tools.selection_set(head, ids=[], mode="replace")
         t.group = "primary"
 

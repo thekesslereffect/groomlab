@@ -4,6 +4,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <optional>
 #include <set>
@@ -257,6 +258,30 @@ public:
     // Guides on the plane are left alone. Needs an evaluated hierarchy (the
     // children's world shapes). Returns the new guide IDs.
     std::vector<GuideId> mirrorAll(int axis, float center, bool fromPositive);
+    // A symmetry, for mirrorShapes: a point's mirror image, a direction at a point mirrored, and
+    // the side a guide's root is on (1 or -1; 0 on the seam).
+    struct Mirror {
+        std::function<Vec3f(const Vec3f&)> point;
+        std::function<Vec3f(const Vec3f& at, const Vec3f& v)> vector;
+        std::function<int(const HierarchyGuide&)> side;
+    };
+    struct MirrorShapesResult {
+        std::vector<GuideId> reshaped;  // the other side's guides given their partners' mirror images
+        std::vector<GuideId> created;   // made where a source had no partner
+        std::vector<GuideId> removed;   // (a whole side) the other side's guides no source matched
+    };
+    // One side copied onto the other in place (issue 74): each source guide's mirror guide (of its
+    // group, on the other side, its root the nearest to the source's mirrored root and within half
+    // the source's spacing to its nearest neighbor) takes the mirror image of the source's shape,
+    // its frame, tube, segments and painted layers, and keeps its own ID, group, parent and lock
+    // (what refers to it stays), its children following. A source with no such guide gets a new
+    // primary (a child source with none is left). Sources: `sources` (primaries and locked guides
+    // among them, off the seam; `fromSide` unread), or with none every primary and locked guide on
+    // `fromSide`, and then the other side's primaries and locked guides no source matched go
+    // (a mirror image of the side); `group`, when given, only that root group's (its children
+    // follow). Needs evaluated guides (world shapes).
+    MirrorShapesResult mirrorShapes(const Mirror& mirror, const std::vector<GuideId>& sources, int fromSide,
+                                    GroupId group = kNoGroup);
     // Moves every guide onto another scalp (GH-8). Evaluates on `from`, then
     // each primary and locked guide keeps its shape, turned with the surface
     // normal, and is re-rooted at the closest point of `to` to fit.apply(its

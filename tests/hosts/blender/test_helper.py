@@ -1838,7 +1838,7 @@ class ToolsTest(HelperTestCase):
         self.assertEqual(self.call("guide_segments")["segments"], placed)
         with self.assertRaises(HelperError):
             self.call("guides_edit", op="resample", segments=0)
-        # Mirror Selection: the guide across the plane selected (a selection: no undo step).
+        # Select Mirror Guides: the guide across the plane selected (a selection: no undo step).
         g = self.guides()
         left = min(g, key=lambda k: g[k][0][0])
         self.call("selection_set", ids=[left])

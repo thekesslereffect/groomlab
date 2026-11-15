@@ -195,6 +195,20 @@ class GroomingTest(unittest.TestCase):
         self.assertEqual(cmds.getAttr(self.groom + ".guideData"), before)
         self.assertEqual(len(groomlab.symmetry_sync(self.groom, "x", from_negative=True)), 3 + 9)
 
+    def test_mirror_to_other_side_reshapes_in_place(self):
+        # Issue 74: a +X primary's mirror guide takes its mirror image under its own ID (nothing
+        # added or removed), one undo step; nothing selected is refused.
+        plus = [p for p in self.primaries if cmds.groomLabGuides(self.groom, guidePoints=p)[0] > 0.05]
+        before = cmds.getAttr(self.groom + ".guideData")
+        groomlab.select_guides(self.groom, plus[:1])
+        self.assertTrue(groomlab.mirror_to_other_side(self.groom, symmetry="x").startswith("1 matched, 0 added"))
+        self.assertEqual(sorted(groomlab.guide_ids(self.groom, "primary")), sorted(self.primaries))
+        cmds.undo()
+        self.assertEqual(cmds.getAttr(self.groom + ".guideData"), before)
+        groomlab.clear_guide_selection(self.groom)
+        with self.assertRaises(RuntimeError):
+            groomlab.mirror_to_other_side(self.groom)
+
     def test_one_current_groom(self):
         # The Groom Tools, the Graph Editor and the brushes share one current groom: a pick holds
         # while other things are selected, a groom selected since takes over (and stays current with

@@ -10,6 +10,7 @@
 #include "groomlab/brush.h"
 #include "groomlab/curve.h"
 #include "groomlab/random.h"
+#include "groomlab/stroke.h"
 #include "groomlab/view_projection.h"
 #include "test_helpers.h"
 
@@ -930,6 +931,97 @@ TEST(ScreenPointGrid, FindsEveryPolylineWithAPointInTheCircle) {
         for (const std::uint32_t k : want) EXPECT_TRUE(std::binary_search(got.begin(), got.end(), k)) << k;
         EXPECT_LT(got.size(), lines.size());
     }
+}
+
+
+// ---------------------------------------------------------------------------
+// Issue 74: symmetry that keeps the two sides mirror images
+
+// Whether `b` is `a`'s mirror image across x = 0.5, point for point.
+void expectMirrorImages(const std::vector<Vec3f>& a, const std::vector<Vec3f>& b, float tolerance = 1e-4f) {
+    ASSERT_EQ(a.size(), b.size());
+    for (std::size_t i = 0; i < a.size(); ++i) {
+        EXPECT_NEAR(b[i].x, 1.0f - a[i].x, tolerance) << i;
+        EXPECT_NEAR(b[i].y, a[i].y, tolerance) << i;
+        EXPECT_NEAR(b[i].z, a[i].z, tolerance) << i;
+    }
+}
+
+TEST(BrushSymmetry, ABrushReachingOverTheSeamKeepsTheSidesMirrorImages) {
+    // Two mirror guides near the seam, the brush wide enough to reach both from either side: each
+    // side's guide is brushed by its own side's stamp only, so the right one is the left one's
+    // mirror image (it used to take the left stamp's weaker, unmirrored pull and skip its own).
+    Scene s;
+    const GuideId left = s.add(0.42f, 0.5f), right = s.add(0.58f, 0.5f);
+    BrushSettings b;
+    b.mode = BrushMode::Comb;
+    b.radius = 0.25f;
+    b.strength = 1.0f;
+    b.mirrorAxis = 0;
+    b.mirrorCenter = 0.5f;
+    applyBrushStroke(s.h, s.scalp.get(), b, {{0.45f, 0.6f, 0.5f}, {0.45f, 0.6f, 0.2f}});
+    EXPECT_GT((s.pts(left).back() - Vec3f(0.42f, 1.0f, 0.5f)).length(), 0.05f) << "combed";
+    expectMirrorImages(s.pts(left), s.pts(right));
+    // On the seam the stamp is its own mirror image: both sides alike too.
+    applyBrushStroke(s.h, s.scalp.get(), b, {{0.5f, 0.6f, 0.2f}, {0.5f, 0.6f, 0.7f}});
+    expectMirrorImages(s.pts(left), s.pts(right));
+}
+
+TEST(BrushSymmetry, SelectedOnlyBrushesTheSelectionsMirrorGuidesToo) {
+    // One guide picked, Selected Only and symmetry on: it and its mirror guide change as mirror
+    // images, a guide beside it that is not picked does not.
+    Scene s;
+    const GuideId left = s.add(0.3f, 0.5f), right = s.add(0.7f, 0.5f), beside = s.add(0.3f, 0.62f);
+    const std::vector<Vec3f> besideBefore = s.pts(beside);
+    BrushToolSettings t;
+    t.setMode("comb");
+    t.selectedOnly = true;
+    t.setSymmetry("x");
+    t.brush.mirrorCenter = 0.5f;
+    t.brush.radius = 0.3f;
+    t.brush.strength = 1.0f;
+    t.prepareMask(s.h, {}, {left}, 0.0f, s.scalp.get());
+    ASSERT_TRUE(t.brush.mask);
+    EXPECT_EQ(t.brush.mask->count(right), 1u) << "the mirror guide is masked in";
+    EXPECT_EQ(t.brush.mask->count(beside), 0u);
+    applyBrushStroke(s.h, s.scalp.get(), t.brush, {{0.3f, 0.6f, 0.55f}, {0.3f, 0.6f, 0.25f}});
+    EXPECT_GT((s.pts(left).back() - Vec3f(0.3f, 1.0f, 0.5f)).length(), 0.05f) << "combed";
+    expectMirrorImages(s.pts(left), s.pts(right));
+    EXPECT_EQ(s.pts(beside), besideBefore) << "not picked";
+}
+
+TEST(BrushSymmetry, MirrorToOtherSideReshapesThePartnersInPlace) {
+    Scene s;
+    const GuideId left = s.add(0.3f, 0.5f), right = s.add(0.7f, 0.5f), lone = s.add(0.2f, 0.2f), extra = s.add(0.85f, 0.85f);
+    // The left guide combed on its own (no symmetry) and painted.
+    BrushSettings comb;
+    comb.mode = BrushMode::Comb;
+    comb.radius = 0.08f;
+    comb.strength = 1.0f;
+    applyBrushStroke(s.h, s.scalp.get(), comb, {{0.3f, 0.6f, 0.55f}, {0.3f, 0.6f, 0.25f}});
+    s.h.setAttribute(left, "clumpiness", 0.75f);
+    StrokeSymmetry sym;
+    sym.axis = 0;
+    sym.center = 0.5f;
+    // The picked guide: its partner takes its mirror image, under its own ID.
+    const auto picked = mirrorGuideShapes(s.h, sym, {left}, 0);
+    EXPECT_EQ(picked.reshaped, std::vector<GuideId>{right});
+    EXPECT_TRUE(picked.created.empty() && picked.removed.empty());
+    s.h.evaluate(s.scalp.get());
+    expectMirrorImages(s.pts(left), s.pts(right), 1e-3f);
+    float c = 0.0f;
+    EXPECT_TRUE(s.h.guide(right)->attributes.count("clumpiness") && (c = s.h.guide(right)->attributes.at("clumpiness")) == 0.75f) << c;
+    EXPECT_TRUE(s.h.guide(extra)) << "a picked source leaves the other side's other guides";
+    // The whole left side: the lone guide gets a new partner, the right side's unmatched one goes.
+    const auto whole = mirrorGuideShapes(s.h, sym, {}, -1);
+    EXPECT_EQ(whole.reshaped, std::vector<GuideId>{right});
+    ASSERT_EQ(whole.created.size(), 1u);
+    EXPECT_EQ(whole.removed, std::vector<GuideId>{extra});
+    EXPECT_FALSE(s.h.guide(extra));
+    s.h.evaluate(s.scalp.get());
+    expectMirrorImages(s.pts(lone), s.pts(whole.created[0]), 1e-3f);
+    // Symmetry off: refused.
+    EXPECT_THROW(mirrorGuideShapes(s.h, StrokeSymmetry{}, {left}, 0), std::invalid_argument);
 }
 
 }  // namespace

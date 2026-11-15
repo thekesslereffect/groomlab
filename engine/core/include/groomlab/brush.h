@@ -154,6 +154,11 @@ struct StrokeSymmetry {
     bool topology() const { return mirror != nullptr; }
     Vec3f point(const Vec3f& p) const;                    // a point's mirror image
     Vec3f vector(const Vec3f& at, const Vec3f& v) const;  // a direction at `at`, mirrored
+    // The side a point is on: 1 or -1, 0 on the seam (or symmetry off). A world plane: past its
+    // center along its axis; topology: of the scalp's rest pose (ScalpMirror::side; `root`, a
+    // surface point of the scalp, spares the search). Each side's guides are brushed by the stamp
+    // on that side only, so a brush reaching over the seam keeps the two sides mirror images.
+    int side(const Vec3f& p, const StrandRoot* root = nullptr) const;
 };
 
 // The scalp's line of symmetry, for hosts to draw while symmetry is on (as Substance Painter draws
@@ -167,6 +172,14 @@ std::vector<Vec3f> symmetrySeam(const ScalpMesh& scalp, const StrokeSymmetry& sy
 // mirror image of its root (itself, for a guide on the seam). kNoGuide when symmetry is off or
 // there is no such guide.
 GuideId mirrorGuide(const GuideHierarchy& hierarchy, GuideId id, const StrokeSymmetry& sym);
+// Each of `ids`' mirror guide (as mirrorGuide), in the same order: kNoGuide where none.
+std::vector<GuideId> mirrorGuides(const GuideHierarchy& hierarchy, const std::vector<GuideId>& ids, const StrokeSymmetry& sym);
+// Mirror to Other Side (issue 74): GuideHierarchy::mirrorShapes under `sym` (a world plane at its
+// center, or across the scalp's topology), each guide's side as the brushes take it
+// (StrokeSymmetry::side). Throws std::invalid_argument when symmetry is off.
+GuideHierarchy::MirrorShapesResult mirrorGuideShapes(GuideHierarchy& hierarchy, const StrokeSymmetry& sym,
+                                                     const std::vector<GuideId>& sources, int fromSide,
+                                                     GroupId group = kNoGroup);
 // `ids` and each one's mirror guide, each once, in order (symmetry off: `ids`).
 std::vector<GuideId> withMirrorGuides(const GuideHierarchy& hierarchy, const std::vector<GuideId>& ids, const StrokeSymmetry& sym);
 // The guides a brush of these settings edits: its level or group, its mask, not hidden or frozen.

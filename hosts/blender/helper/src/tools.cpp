@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "groomlab/asset_files.h"
+#include "groomlab/brush.h"
 #include "groomlab/brush_catalog.h"
 #include "groomlab/card_files.h"
 #include "groomlab/curve.h"
@@ -1489,6 +1490,37 @@ json guidesEdit(ToolState& t, const json& args) {
             }
         });
         r["added"] = made;
+    } else if (op == "mirror_shapes") {
+        // Maya's groomLabGuides -mirrorShapes (issue 74): "selected" (the selected or `ids` guides'
+        // mirror guides take their mirror images), "positive" or "negative" (that whole side over
+        // the other; `group`: one root group's), across `symmetry` (x, y, z at `center`, or
+        // topology), as the brushes take it. One undo step.
+        const std::string from = optString(args, "from", "selected");
+        if (from != "selected" && from != "positive" && from != "negative") fail("bad_request", "from is selected, positive or negative");
+        const std::string symmetry = optString(args, "symmetry", "x");
+        BrushSettings b;
+        if (symmetry == "topology") {
+            b.mirrorTopology = true;
+        } else {
+            symmetryToGroom(space, symmetry, optNumber(args, "center", 0.0), b.mirrorAxis, b.mirrorCenter);
+            if (b.mirrorAxis < 0) fail("bad_request", "symmetry is x, y, z or topology");
+        }
+        const MeshPtr scalp = t.session.groom->scalp();
+        if (b.mirrorTopology && !scalp) fail("state", "Topology symmetry needs the groom's scalp");
+        GuideHierarchy::MirrorShapesResult done;
+        editGuides(t, "mirror to other side", [&](GuideHierarchy& h) {
+            const std::vector<GuideId> sources = from == "selected" ? targets(h) : std::vector<GuideId>{};
+            const GroupId only = from != "selected" && given(args, "group") ? groupNamed(h, args, "group") : kNoGroup;
+            done = mirrorGuideShapes(h, StrokeSymmetry::of(b, scalp.get()), sources,
+                                     from == "positive" ? 1 : from == "negative" ? -1 : 0, only);
+            if (done.reshaped.empty() && done.created.empty() && done.removed.empty()) {
+                fail("state", from == "selected" ? "the selected guides are on the symmetry's seam: nothing to mirror"
+                                                 : "no guides on that side");
+            }
+        });
+        r["reshaped"] = done.reshaped.size();
+        r["added"] = done.created.size();
+        r["removed"] = done.removed.size();
     } else if (op == "promote_group") {
         editGuides(t, "promote group", [&](GuideHierarchy& h) { h.promoteGroup(groupNamed(h, args, "group")); });
     } else if (op == "demote_group") {

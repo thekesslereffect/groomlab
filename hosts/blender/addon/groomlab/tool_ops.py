@@ -774,7 +774,8 @@ class GROOMLAB_OT_group_edit(GroomToolOperator):
 
 # Edit Guides' entries this operator runs (lists.json's groups/edits, by action id), then Blender's own.
 GUIDE_EDIT_IDS = (("CHILDREN", "guides.children"), ("SYNC_POS", "guides.syncPos"), ("SYNC_NEG", "guides.syncNeg"),
-                  ("MIRROR_SELECTION", "guides.mirrorSelection"), ("CLEAR", "guides.clearSelection"))
+                  ("MIRROR_SELECTION", "guides.mirrorSelection"), ("MIRROR_TO_OTHER", "guides.mirrorToOther"),
+                  ("CLEAR", "guides.clearSelection"))
 GUIDE_EXTRAS = [
     ("LOCK", "Lock", "Lock the selected guides: their children stop following them"),
     ("UNLOCK", "Unlock", "Unlock the selected guides"),
@@ -820,6 +821,13 @@ class GROOMLAB_OT_guides_edit(GroomToolOperator):
                     self.report({"ERROR"}, "No guides selected: select some first (the Select tool, or a group's Select)")
                     return {"CANCELLED"}
                 tools.mirror_selection(scalp)
+            elif a == "MIRROR_TO_OTHER":
+                if not t.selected_count:
+                    self.report({"ERROR"}, "No guides selected: select the guides to mirror to the other side")
+                    return {"CANCELLED"}
+                r = tools.mirror_to_other_side(scalp, t.symmetry_mode if t.symmetry else "x")
+                self.report({"INFO"}, "Mirrored to the other side: %d matched, %d added" % (r.get("reshaped", 0),
+                                                                                          r.get("added", 0)))
             elif a in ("LOCK", "UNLOCK", "FREEZE", "UNFREEZE", "DELETE"):
                 if not t.selected_count:
                     self.report({"ERROR"}, "No guides selected: select some first (the Select tool, or a group's Select)")

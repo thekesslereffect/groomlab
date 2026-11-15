@@ -332,6 +332,8 @@ class GuidesTab(_GroomTab):
         "guides.syncPos": lambda self: self.menu_action(lambda: menu.symmetry_sync(False)),
         "guides.syncNeg": lambda self: self.menu_action(lambda: menu.symmetry_sync(True)),
         "guides.mirrorSelection": lambda self: self.menu_action(menu.mirror_selection),
+        "guides.mirrorToOther": lambda self: self.menu_action(lambda: menu.mirror_to_other_side(
+            self.owner.symmetry_name() if hasattr(self.owner, "symmetry_name") else "x")),
         "guides.mirrorGroup": lambda self: self.menu_action(menu.mirror_group_dialog),
         "guides.reparent": lambda self: self.menu_action(menu.reparent_dialog),
         "group.promoteDemote": "promote_demote",

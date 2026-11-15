@@ -28,6 +28,7 @@
 #include "groomlab/curve.h"
 #include "groomlab/display.h"
 #include "groomlab/flow.h"
+#include "groomlab/brush.h"
 #include "groomlab/guide_selection.h"
 #include "groomlab/parts.h"
 #include "card_parts.h"
@@ -603,6 +604,27 @@ bool GuidesPanel::mirrorSelection() {
     document_->setSelection(picked);
     emit displayChanged();
     return !picked.empty();
+}
+
+bool GuidesPanel::mirrorToOtherSide(const BrushSettings& brush) {
+    if (!document_) return false;
+    const std::vector<GuideId> selected = document_->selection();
+    if (selected.empty()) {
+        emit message(tr("No guides selected: select the guides to mirror to the other side"));
+        return false;
+    }
+    BrushSettings b = brush;
+    if (!b.mirrorTopology && (b.mirrorAxis < 0 || b.mirrorAxis > 2)) b.mirrorAxis = 0, b.mirrorCenter = 0.0f;  // off: World X
+    const MeshPtr scalp = document_->session().scalp();
+    GuideHierarchy::MirrorShapesResult done;
+    const bool ok = edit("mirror to the other side", "mirror to other side", [&](GuideHierarchy& h) {
+        done = mirrorGuideShapes(h, StrokeSymmetry::of(b, scalp.get()), selected, 0);
+        if (done.reshaped.empty() && done.created.empty()) {
+            throw std::invalid_argument("the selected guides are on the symmetry's seam: nothing to mirror");
+        }
+    });
+    if (ok) emit message(tr("Mirrored to the other side: %1 matched, %2 added").arg(done.reshaped.size()).arg(done.created.size()));
+    return ok;
 }
 
 // ---- Shape edits ------------------------------------------------------------------------------------

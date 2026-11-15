@@ -65,6 +65,15 @@ Vec3f StrokeSymmetry::vector(const Vec3f& at, const Vec3f& v) const {
     return axis >= 0 && axis <= 2 ? mirrorVector(v, axis) : v;
 }
 
+int StrokeSymmetry::side(const Vec3f& p, const StrandRoot* root) const {
+    if (mirror) return mirror->side(*scalp, p, root);
+    if (axis < 0 || axis > 2) return 0;
+    const float d = (axis == 0 ? p.x : axis == 1 ? p.y : p.z) - center;
+    // On the plane within a hundred-thousandth of where it is (its rounding): any scene scale.
+    const float seam = 1e-5f * std::max({std::abs(p.x), std::abs(p.y), std::abs(p.z), std::abs(center), 1e-3f});
+    return std::abs(d) <= seam ? 0 : (d > 0.0f ? 1 : -1);
+}
+
 std::vector<Vec3f> symmetrySeam(const ScalpMesh& scalp, const StrokeSymmetry& sym, float lift) {
     std::vector<Vec3f> out;
     if (!sym.on()) return out;
@@ -717,10 +726,13 @@ bool sphereReaches(const Vec3f& center, float radius, const Vec3f& lo, const Vec
     return dx * dx + dy * dy + dz * dz <= limit * limit;
 }
 
+// The side of the symmetry a guide's root is on (StrokeSymmetry::side): 1, -1, 0 on the seam.
+using GuideSideFn = std::function<int(const HierarchyGuide&)>;
+
 std::size_t stamp(GuideHierarchy& h, const ScalpMesh* scalp, const BrushSettings& s, const Vec3f& center,
                   const Vec3f& drag, const BrushWeightFn& weight, const BrushReachFn& reach, BrushStrokeCache::State* cache,
                   bool threadSafeWeight, std::set<GuideId>* changedIds, const std::set<GuideId>* skip = nullptr,
-                  std::set<GuideId>* touched = nullptr) {
+                  std::set<GuideId>* touched = nullptr, const GuideSideFn* sideOf = nullptr, int keepSide = 0) {
     const Weigher weigh{center, s.radius, weight, falloffOf(s)};
     // Collect targets first: edits below must not disturb the iteration.
     std::vector<std::pair<GuideId, float>> collected;
@@ -766,6 +778,10 @@ std::size_t stamp(GuideHierarchy& h, const ScalpMesh* scalp, const BrushSettings
                 }
                 if (!reaches(lo, hi)) continue;
             }
+        }
+        if (sideOf && keepSide != 0 && !g->points.empty()) {  // symmetry: this stamp's side, and the seam
+            const int sd = (*sideOf)(*g);
+            if (sd != 0 && sd != keepSide) continue;
         }
         reached.push_back(k);
     }
@@ -888,20 +904,27 @@ BrushSettings mirroredSettings(const BrushSettings& s) {
 std::size_t symmetricStamp(GuideHierarchy& h, const ScalpMesh* scalp, const BrushSettings& s, const Vec3f& center,
                            const Vec3f& drag, const BrushWeightFn& weight, const BrushReachFn& reach,
                            BrushStrokeCache::State* cache, bool threadSafeWeight, std::set<GuideId>* changedIds) {
+    const StrokeSymmetry sym = StrokeSymmetry::of(s, scalp);
+    if (!sym.on()) return stamp(h, scalp, s, center, drag, weight, reach, cache, threadSafeWeight, changedIds);
+    // Each stamp brushes the guides rooted on its own side (and the seam's, once): a stamp
+    // reaching over the seam leaves the other side's guides to the mirrored stamp, which edits
+    // them as the mirror image of this one's edits (issue 74: the two sides stay mirror images).
+    const GuideSideFn sideOf = [&sym](const HierarchyGuide& g) {
+        return sym.side(g.points.front(), g.parent == kNoGuide ? &g.root : nullptr);
+    };
+    const int here = sym.side(center);  // 0, the cursor on the seam: the stamp is its own mirror image
     std::set<GuideId> touched;
-    std::size_t changed = stamp(h, scalp, s, center, drag, weight, reach, cache, threadSafeWeight, changedIds, nullptr, &touched);
-    if (s.mirrorTopology) {
+    std::size_t changed = stamp(h, scalp, s, center, drag, weight, reach, cache, threadSafeWeight, changedIds, nullptr,
+                                &touched, &sideOf, here);
+    if (sym.topology()) {
         // At the partner spot across the scalp's topology: a world sphere of the stamp's radius
         // (the cursor's screen circle does not carry over a head in another pose).
-        const StrokeSymmetry sym = StrokeSymmetry::of(s, scalp);
-        if (!sym.on()) return changed;
         return changed + stamp(h, scalp, mirroredSettings(s), sym.point(center), sym.vector(center, drag), {}, {}, cache,
-                               threadSafeWeight, changedIds, &touched, nullptr);
+                               threadSafeWeight, changedIds, &touched, nullptr, &sideOf, -here);
     }
-    if (s.mirrorAxis < 0 || s.mirrorAxis > 2) return changed;
     changed += stamp(h, scalp, mirroredSettings(s), mirrorPoint(center, s.mirrorAxis, s.mirrorCenter), mirrorVector(drag, s.mirrorAxis),
                      mirroredWeight(weight, s.mirrorAxis, s.mirrorCenter), mirroredReach(reach, s.mirrorAxis, s.mirrorCenter),
-                     cache, threadSafeWeight, changedIds, &touched, nullptr);
+                     cache, threadSafeWeight, changedIds, &touched, nullptr, &sideOf, -here);
     return changed;
 }
 
@@ -1221,6 +1244,33 @@ std::size_t applyBrushStroke(GuideHierarchy& hierarchy, const ScalpMesh* scalp, 
     return changed.size();
 }
 
+std::vector<GuideId> mirrorGuides(const GuideHierarchy& h, const std::vector<GuideId>& ids, const StrokeSymmetry& sym) {
+    std::vector<GuideId> out(ids.size(), kNoGuide);
+    if (!sym.on() || ids.empty()) return out;
+    // Each group's roots, indexed once.
+    struct Group {
+        std::vector<GuideId> ids;
+        std::unique_ptr<PointIndex> index;
+    };
+    std::map<GroupId, Group> groups;
+    for (const HierarchyGuide& g : h.guides()) {
+        if (!g.points.empty()) groups[g.group].ids.push_back(g.id);
+    }
+    for (auto& [gid, group] : groups) {
+        std::vector<Vec3f> roots;
+        for (const GuideId id : group.ids) roots.push_back(h.guide(id)->points.front());
+        group.index = std::make_unique<PointIndex>(std::move(roots));
+    }
+    for (std::size_t i = 0; i < ids.size(); ++i) {
+        const HierarchyGuide* g = h.guide(ids[i]);
+        if (!g || g->points.empty()) continue;
+        const Group& group = groups[g->group];
+        const std::size_t k = group.index ? group.index->nearest(sym.point(g->points.front())) : SIZE_MAX;
+        if (k < group.ids.size()) out[i] = group.ids[k];
+    }
+    return out;
+}
+
 std::vector<GuideId> withMirrorGuides(const GuideHierarchy& h, const std::vector<GuideId>& ids, const StrokeSymmetry& sym) {
     if (!sym.on() || ids.empty()) return ids;
     // Each group's roots, indexed once.
@@ -1251,6 +1301,16 @@ std::vector<GuideId> withMirrorGuides(const GuideHierarchy& h, const std::vector
         if (k < group.ids.size()) add(group.ids[k]);
     }
     return out;
+}
+
+GuideHierarchy::MirrorShapesResult mirrorGuideShapes(GuideHierarchy& h, const StrokeSymmetry& sym,
+                                                     const std::vector<GuideId>& sources, int fromSide, GroupId group) {
+    if (!sym.on()) throw std::invalid_argument("Mirror to Other Side needs symmetry: pick an axis or Topology");
+    GuideHierarchy::Mirror m;
+    m.point = [&sym](const Vec3f& p) { return sym.point(p); };
+    m.vector = [&sym](const Vec3f& at, const Vec3f& v) { return sym.vector(at, v); };
+    m.side = [&sym](const HierarchyGuide& g) { return sym.side(g.points.front(), g.parent == kNoGuide ? &g.root : nullptr); };
+    return h.mirrorShapes(m, sources, fromSide, group);
 }
 
 GuideId mirrorGuide(const GuideHierarchy& h, GuideId id, const StrokeSymmetry& sym) {
@@ -1604,25 +1664,45 @@ std::size_t flowStamp(FlowSet& flow, const ScalpMesh& scalp, const BrushSettings
     return 0;
 }
 
+// The flow's pins and sinks on `side` of the symmetry (none for 0): what the other side's stamp leaves.
+FlowTouched flowOnSide(const FlowSet& flow, const ScalpMesh& scalp, const StrokeSymmetry& sym, int side) {
+    FlowTouched out;
+    if (side == 0) return out;
+    for (std::size_t i = 0; i < flow.pins.size(); ++i) {
+        const StrandRoot& r = flow.pins[i].root;
+        if (scalp.contains(r) && sym.side(scalp.position(r), &r) == side) out.pins.insert(i);
+    }
+    for (std::size_t i = 0; i < flow.sinks.size(); ++i) {
+        const StrandRoot& r = flow.sinks[i].root;
+        if (scalp.contains(r) && sym.side(scalp.position(r), &r) == side) out.sinks.insert(i);
+    }
+    return out;
+}
+
 std::size_t symmetricFlowStamp(FlowSet& flow, const ScalpMesh& scalp, const BrushSettings& s, const Vec3f& center,
                                const Vec3f& drag, const BrushWeightFn& weight, FlowTouched* touched) {
+    const StrokeSymmetry sym = StrokeSymmetry::of(s, &scalp);
     FlowTouched first;
-    std::size_t changed = flowStamp(flow, scalp, s, center, drag, weight, nullptr, &first);
-    if (s.mirrorTopology) {
-        const StrokeSymmetry sym = StrokeSymmetry::of(s, &scalp);
-        FlowTouched second;
-        if (sym.on()) {
-            changed += flowStamp(flow, scalp, mirroredSettings(s), sym.point(center), sym.vector(center, drag), {}, &first,
-                                 &second);
-        }
-        first.add(second);
-    } else if (s.mirrorAxis >= 0 && s.mirrorAxis <= 2) {
-        FlowTouched second;
+    if (!sym.on()) {
+        const std::size_t changed = flowStamp(flow, scalp, s, center, drag, weight, nullptr, &first);
+        if (touched) touched->add(first);
+        return changed;
+    }
+    // Each stamp on its own side's pins and sinks (and the seam's, once), as the guides' stamps.
+    const int here = sym.side(center);
+    const FlowTouched far = flowOnSide(flow, scalp, sym, -here);
+    std::size_t changed = flowStamp(flow, scalp, s, center, drag, weight, &far, &first);
+    FlowTouched near = flowOnSide(flow, scalp, sym, here);
+    near.add(first);
+    FlowTouched second;
+    if (sym.topology()) {
+        changed += flowStamp(flow, scalp, mirroredSettings(s), sym.point(center), sym.vector(center, drag), {}, &near, &second);
+    } else {
         changed += flowStamp(flow, scalp, mirroredSettings(s), mirrorPoint(center, s.mirrorAxis, s.mirrorCenter),
                              mirrorVector(drag, s.mirrorAxis), mirroredWeight(weight, s.mirrorAxis, s.mirrorCenter),
-                             &first, &second);
-        first.add(second);
+                             &near, &second);
     }
+    first.add(second);
     if (touched) touched->add(first);
     return changed;
 }
@@ -1779,22 +1859,43 @@ std::size_t partStamp(PartSet& set, const ScalpMesh& scalp, const BrushSettings&
     return changed;
 }
 
+// The part points on `side` of the symmetry (none for 0): what the other side's stamp leaves.
+PartTouched partsOnSide(const PartSet& set, const ScalpMesh& scalp, const StrokeSymmetry& sym, int side) {
+    PartTouched out;
+    if (side == 0) return out;
+    for (std::size_t pi = 0; pi < set.parts.size(); ++pi) {
+        const std::vector<StrandRoot>& points = set.parts[pi].points;
+        for (std::size_t i = 0; i < points.size(); ++i) {
+            if (scalp.contains(points[i]) && sym.side(scalp.position(points[i]), &points[i]) == side) out.points.insert({pi, i});
+        }
+    }
+    return out;
+}
+
 std::size_t symmetricPartStamp(PartSet& set, const ScalpMesh& scalp, const BrushSettings& s, const Vec3f& center,
                                const Vec3f& drag, const BrushWeightFn& weight, PartTouched* touched) {
+    const StrokeSymmetry sym = StrokeSymmetry::of(s, &scalp);
     PartTouched first;
-    std::size_t changed = partStamp(set, scalp, s, center, drag, weight, nullptr, &first);
-    if (s.mirrorTopology) {
-        const StrokeSymmetry sym = StrokeSymmetry::of(s, &scalp);
-        PartTouched second;
-        if (sym.on()) changed += partStamp(set, scalp, s, sym.point(center), sym.vector(center, drag), {}, &first, &second);
-        first.add(second);
-    } else if (s.mirrorAxis >= 0 && s.mirrorAxis <= 2) {
-        PartTouched second;
+    if (!sym.on()) {
+        const std::size_t changed = partStamp(set, scalp, s, center, drag, weight, nullptr, &first);
+        if (touched) touched->add(first);
+        return changed;
+    }
+    // Each stamp on its own side's part points (and the seam's, once), as the guides' stamps.
+    const int here = sym.side(center);
+    const PartTouched far = partsOnSide(set, scalp, sym, -here);
+    std::size_t changed = partStamp(set, scalp, s, center, drag, weight, &far, &first);
+    PartTouched near = partsOnSide(set, scalp, sym, here);
+    near.add(first);
+    PartTouched second;
+    if (sym.topology()) {
+        changed += partStamp(set, scalp, s, sym.point(center), sym.vector(center, drag), {}, &near, &second);
+    } else {
         changed += partStamp(set, scalp, s, mirrorPoint(center, s.mirrorAxis, s.mirrorCenter),
                              mirrorVector(drag, s.mirrorAxis), mirroredWeight(weight, s.mirrorAxis, s.mirrorCenter),
-                             &first, &second);
-        first.add(second);
+                             &near, &second);
     }
+    first.add(second);
     if (touched) touched->add(first);
     return changed;
 }

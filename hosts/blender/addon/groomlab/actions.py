@@ -124,6 +124,7 @@ BINDINGS = {
     "guides.syncPos": ("groomlab.guides_edit", {"action": "SYNC_POS"}),
     "guides.syncNeg": ("groomlab.guides_edit", {"action": "SYNC_NEG"}),
     "guides.mirrorSelection": ("groomlab.guides_edit", {"action": "MIRROR_SELECTION"}),
+    "guides.mirrorToOther": ("groomlab.guides_edit", {"action": "MIRROR_TO_OTHER"}),
     "guides.mirrorGroup": ("groomlab.guides_mirror_group", {}),
     "guides.reparent": ("groomlab.guides_reparent", {}),
     "guides.clearSelection": ("groomlab.guides_edit", {"action": "CLEAR"}),

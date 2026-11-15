@@ -30,6 +30,7 @@
 #include "command_args.h"
 #include "guarded.h"
 #include "groom_shape.h"
+#include "groomlab/brush.h"
 #include "groomlab/curve.h"
 #include "groomlab/display.h"
 #include "groomlab/guide_hierarchy.h"
@@ -84,6 +85,11 @@ const char* kMirror[] = {"-mir", "-mirror"};
 const char* kAxis[] = {"-ax", "-axis"};
 const char* kCenter[] = {"-ctr", "-center"};
 const char* kFromNegative[] = {"-fn", "-fromNegative"};
+// Mirror to Other Side (issue 74): "selected" (the selected or -guide guides' partners take their
+// mirror images), "positive" or "negative" (that whole side copied over the other), under
+// -symmetry (x, y, z or topology; default x) and -center; a side, -group: only that root group's.
+const char* kMirrorShapes[] = {"-msh", "-mirrorShapes"};
+const char* kSymmetry[] = {"-sym", "-symmetry"};
 const char* kSetAttribute[] = {"-sat", "-setAttribute"};
 const char* kValue[] = {"-v", "-value"};
 const char* kListAttributes[] = {"-lat", "-listAttributes"};
@@ -304,6 +310,8 @@ MSyntax GuidesCmd::newSyntax() {
     s.addFlag(kAxis[0], kAxis[1], MSyntax::kString);
     s.addFlag(kCenter[0], kCenter[1], MSyntax::kDouble);
     s.addFlag(kFromNegative[0], kFromNegative[1]);
+    s.addFlag(kMirrorShapes[0], kMirrorShapes[1], MSyntax::kString);
+    s.addFlag(kSymmetry[0], kSymmetry[1], MSyntax::kString);
     s.addFlag(kSetAttribute[0], kSetAttribute[1], MSyntax::kString);
     s.addFlag(kValue[0], kValue[1], MSyntax::kDouble);
     s.addFlag(kListAttributes[0], kListAttributes[1]);
@@ -356,6 +364,7 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                             int(db.isFlagSet(kMirrorSelection[0])) + int(db.isFlagSet(kListSelected[0])) +
                             int(db.isFlagSet(kClearSelection[0])) + int(db.isFlagSet(kReparent[0])) +
                             int(db.isFlagSet(kPromote[0])) + int(db.isFlagSet(kDemote[0])) + int(db.isFlagSet(kMirror[0])) +
+                            int(db.isFlagSet(kMirrorShapes[0])) +
                             int(db.isFlagSet(kSetAttribute[0])) + int(db.isFlagSet(kListAttributes[0])) +
                             int(db.isFlagSet(kRemoveAttribute[0])) + int(db.isFlagSet(kRenameAttribute[0])) +
                             int(db.isFlagSet(kInvertAttribute[0])) +
@@ -823,6 +832,38 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                 MStringArray ids;
                 for (const GuideId id : created) ids.append(std::to_string(id).c_str());
                 setResult(ids);
+            } else if (db.isFlagSet(kMirrorShapes[0])) {
+                const std::string from = flagString(db, kMirrorShapes[0], "selected").asChar();
+                if (from != "selected" && from != "positive" && from != "negative") {
+                    return fail(kName, "-mirrorShapes takes selected, positive or negative");
+                }
+                BrushSettings b;
+                b.mirrorCenter = static_cast<float>(flagDouble(db, kCenter[0], 0.0));
+                const std::string symmetry = flagString(db, kSymmetry[0], "x").asChar();
+                if (symmetry == "topology") {
+                    b.mirrorTopology = true;
+                } else {
+                    b.mirrorAxis = axisIndex(MString(symmetry.c_str()));
+                    if (b.mirrorAxis < 0) return fail(kName, "-symmetry takes x, y, z or topology");
+                }
+                if (b.mirrorTopology && !scalp) return fail(kName, "Topology symmetry needs the groom's scalp");
+                const std::vector<GuideId> sources = from == "selected" ? targets() : std::vector<GuideId>{};
+                if (from == "selected" && sources.empty()) return fail(kName, "select the guides to mirror to the other side");
+                GroupId only = kNoGroup;
+                if (from != "selected" && db.isFlagSet(kGroup[0])) {
+                    const MString name = flagString(db, kGroup[0], "");
+                    only = h->findGroup(name.asChar());
+                    if (only == kNoGroup) return fail(kName, "no guide group named " + name);
+                }
+                const auto done = mirrorGuideShapes(*h, StrokeSymmetry::of(b, scalp.get()), sources,
+                                                    from == "positive" ? 1 : from == "negative" ? -1 : 0, only);
+                if (done.reshaped.empty() && done.created.empty() && done.removed.empty()) {
+                    return fail(kName, from == "selected" ? "the selected guides are on the symmetry's seam: nothing to mirror"
+                                                          : "no guides on that side");
+                }
+                setResult(MString((std::to_string(done.reshaped.size()) + " matched, " + std::to_string(done.created.size()) +
+                                   " added, " + std::to_string(done.removed.size()) + " removed")
+                                      .c_str()));
             } else if (db.isFlagSet(kRemoveAttribute[0])) {
                 const MString name = flagString(db, kRemoveAttribute[0], "");
                 const auto names = h->attributeNames();

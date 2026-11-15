@@ -93,6 +93,7 @@ follows. Each is one undo step:
 ```python
 groomlab.mirror_group(groom, "primary", "x")               # copy +X guides to -X, replacing what is there
 groomlab.symmetry_sync(groom, "x")                         # the whole groom +X to -X, children and edits too
+groomlab.mirror_to_other_side(groom, "selected", "x")      # the selection's mirror guides reshaped in place
 groomlab.reparent_guides(groom, parent_id, guides=[...])   # follow another parent (default: the selection)
 groomlab.promote_group(groom, "children")                  # one level up; at the top they become primaries
 groomlab.demote_group(groom, "extra", under="primary")     # one level down; each follows the nearest guide
@@ -103,6 +104,13 @@ groomlab.set_guide_attribute(groom, "clump", 0.5, group="primary")
   `symmetry_sync` (**Sync +X → -X** / **Sync -X → +X** in Edit Guides, under the Groom Tools' Guide groups)
   mirrors every root group and copies each guide's children, grandchildren and so on with it,
   hand edits, locks and painted attributes included. Guides on the plane are left alone.
+  `mirror_to_other_side` (**Copy Shape to Other Side** in Edit Guides) keeps the other side's
+  guides instead of replacing them: each selected guide's mirror guide (the nearest across the
+  symmetry, within half the guides' spacing) takes its mirror image (shape, frame, tube, segments,
+  painted layers) under its own ID, so what refers to it stays; a guide with none gets a new one.
+  `side="positive"` or `"negative"` does a whole side (`group=` one root group), the other side's
+  unmatched guides removed. `symmetry` is `"x"`, `"y"`, `"z"` (a plane at `center`) or
+  `"topology"`, as the brushes take it.
 - **Per-guide attributes:** children inherit them from their ancestors unless they set their
   own. `Interpolate` blends them into strand channels of the same name, which attribute maps
   read, for example `attribute_map("clump")` on a Clump's strength.
@@ -178,7 +186,7 @@ groomlab.selected_guides(groom)
   weighted.
 - **Hierarchy tools:** they act on the selection when no guides are given.
 - **In the Groom Tools:** **Select** (Tools tab) lassoes, its card's Selection block sets the
-  **Soft radius**, and **Edit Guides** (under Guide groups) has **Mirror Selection**, **Clear
+  **Soft radius**, and **Edit Guides** (under Guide groups) has **Select Mirror Guides**, **Clear
   Selection** and the hierarchy tools. The brushes themselves keep `selected_only` off: Shift+drag
   paints guides into the selection and freezes the rest instead.
 
@@ -326,10 +334,12 @@ groomlab.brush_tool("place", length=0.6)                        # click the scal
   edited parents, and `propagate=True` also brushes locked descendants, which otherwise ignore
   their parents.
 - **Selected guides only:** with `selected_only=True`, strokes only touch the selected guides,
-  scaled by the soft selection.
+  scaled by the soft selection; with symmetry on, their mirror guides too, so one picked guide and
+  its mirror change as mirror images.
 - **Symmetry:** `symmetry="x"` (or `"y"` or `"z"`, with `symmetry_center`) repeats every stamp
-  mirrored across the plane, so a groom mirrored with `mirror_group` stays symmetric. A guide on
-  the seam changes once. Place puts a guide on each side. The Groom Tools' brush settings have
+  mirrored across the plane, so a groom mirrored with `mirror_group` stays symmetric. Each side's
+  guides (by their roots) are brushed only by the stamp on their side, so a brush reaching over
+  the seam keeps the sides mirror images; a guide on the seam changes once. Place puts a guide on each side. The Groom Tools' brush settings have
   the Symmetry choice (off, world X, topology) and every other option; Maya's Tool Settings
   window only points there.
 - **Scripted strokes:** strokes can be scripted in world space, which is how the tests drive

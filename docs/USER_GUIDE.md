@@ -165,17 +165,24 @@ Frozen guides draw blue and brushes leave them alone.
   select stays live and the rest freeze, so brushes work on the selection. A click on nothing
   unfreezes every guide.
 - **Soft radius** (in the Select card's Selection block) gives the selection a falloff.
-- **Edit Guides** has **Mirror Selection** and **Clear Selection**.
+- **Edit Guides** has **Select Mirror Guides** and **Clear Selection**.
 
 ### Symmetry
 
 - **Mirror a finished side:** **Edit Guides > Sync +X → -X** (or **-X → +X**), or **Mirror
   Group...**.
+- **Mirror a few guides exactly:** select them (with the Select tool's symmetry off), then **Edit
+  Guides > Copy Shape to Other Side**: each one's mirror guide takes its exact mirror image
+  (shape, tube, painted layers) and keeps its own identity; one is made where there is none. Good
+  for eyebrows: groom one side, mirror it, then tweak a side to break the symmetry a little.
 - **Keep it symmetric as you work:** turn on **Mirror** in the tool card's **Applies to** block
   (or **Alt+Shift+X** with the GroomLab hotkey set). Every stroke is
   mirrored across world X, or, with **Topology** picked, across the scalp's own left and right. Use
   Topology for a head that is turned, tilted, animated or not quite symmetric. Brushes, Place, Draw,
-  Part, Flow, Select and map painting all follow it.
+  Part, Flow, Select and map painting all follow it. Each side's guides are brushed only by the
+  stroke on their side, so a brush reaching over the middle keeps the two sides mirror images.
+- **Brush one guide and its mirror:** select the guide, turn on **Selected Only** and **Mirror**:
+  only it and its mirror guide change, as mirror images.
 
 ### Parts and regions
 

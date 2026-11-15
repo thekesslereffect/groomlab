@@ -207,6 +207,10 @@ void AppActions::addListBindings(ui::Bindings& b, MainWindow& w) {
                            }),
                            {}, groomOpen};
     b["guides.mirrorSelection"] = {run([m] { m->guidesPanel_->mirrorSelection(); }), {}, groomOpen};
+    b["guides.mirrorToOther"] = {run([m] {
+                                     if (m->guidesPanel_->mirrorToOtherSide(m->brush().settings().brush)) m->guidesEdited();
+                                 }),
+                                 {}, groomOpen};
     // Mirror Group...: the picked group's root group, from the side asked.
     b["guides.mirrorGroup"] = {run([m, group] {
                                    if (!m->document_) return;

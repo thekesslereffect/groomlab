@@ -290,6 +290,23 @@ def mirror_group(groom, group="primary", axis="x", center=0.0, from_negative=Fal
     return cmds.groomLabGuides(groom, mirror=group, axis=axis, center=center, **kwargs) or []
 
 
+def mirror_to_other_side(groom, side="selected", symmetry="x", center=0.0, group=None, guides=None):
+    """Copy guide shapes onto their mirror guides in place (issue 74): each mirror guide keeps its
+    ID (what refers to it stays) and takes the mirror image of its partner's shape, frame, tube
+    and painted layers; a guide with no partner gets a new one.
+
+    side      "selected": the selected guides (or `guides`) onto their partners; "positive" or
+              "negative": that whole side onto the other (the other side's unmatched guides go),
+              `group` limiting it to one root group
+    symmetry  "x", "y", "z" (a plane at `center`) or "topology" (across the scalp), as the brushes
+    Returns "<n> matched, <n> added, <n> removed". One undo step.
+    """
+    kwargs = dict(_targets(guides)) if side == "selected" else {}
+    if group and side != "selected":
+        kwargs["group"] = group
+    return cmds.groomLabGuides(groom, mirrorShapes=side, symmetry=symmetry or "x", center=center, **kwargs)
+
+
 def symmetry_sync(groom, axis="x", center=0.0, from_negative=False):
     """Make the whole groom symmetric: every guide on one side, children included, copied to the other.
 
