@@ -1108,7 +1108,8 @@ class ToolPalette(QtWidgets.QWidget):
         outer.addWidget(self.top_part)
 
         # What the tools work on: the current groom (groomlab.active_groom: the Graph Editor's too
-        # unless pinned).
+        # unless pinned). Its eyes, the Graph Editor and More go on the page rail, right of the
+        # pages (issue 73: in view however far the panel scrolls); the groom's list stays here.
         top = QtWidgets.QHBoxLayout()
         top.setSpacing(theme.px(4))
         self.grooms = QtWidgets.QComboBox()
@@ -1124,12 +1125,10 @@ class ToolPalette(QtWidgets.QWidget):
         self.visible.setObjectName("hairVisible")
         self.visible.toggled.connect(self.hair_visibility)
         self.eye_menu(self.visible, header["visible"].get("items", []))
-        top.addWidget(self.visible)
         self.guides_eye = self.header_button("guides", header["guides"]["tip"], checkable=True)
         self.guides_eye.setObjectName("guidesVisible")
         self.guides_eye.toggled.connect(self.guides_visibility)
         self.eye_menu(self.guides_eye, header["guides"].get("items", []))
-        top.addWidget(self.guides_eye)
         self.header_icons = {}
         graph = self.header_button(None, header["graph"]["tip"])
         t = theme.current()
@@ -1137,14 +1136,13 @@ class ToolPalette(QtWidgets.QWidget):
                                           disabled=t.token("textDisabled")))
         graph.clicked.connect(self.open_graph)
         self.header_icons["graph"] = graph
-        top.addWidget(graph)
         more = self.header_button("more", header["more"]["tip"])
         more.setPopupMode(QtWidgets.QToolButton.InstantPopup)
         self.more_menu = QtWidgets.QMenu(more)
         widgets.fill_menu(self.more_menu, header["more"]["items"], definitions.binder(self.ACTIONS, self),
                           generators=self.generators())
         more.setMenu(self.more_menu)
-        top.addWidget(more)
+        self.header_buttons = [self.visible, self.guides_eye, graph, more]  # (on the rail: below)
         top_column.addLayout(top)
         # A newer GroomLab (the startup check's): a quiet note linking to GroomLab > Help > Check for Updates.
         from groomlab.ui import updates_window
@@ -1224,6 +1222,8 @@ class ToolPalette(QtWidgets.QWidget):
         self.group.setExclusive(False)  # the active tool's tiles are checked by hand (one tool, maybe two tiles)
         self.tabs = widgets.Pages()
         frame.insertWidget(0, self.tabs.rail)  # the pages' icons along the window's top
+        for b in self.header_buttons:  # the groom's eyes, the Graph Editor, More: the rail's right end
+            self.tabs.rail.add_trailing(b)
         # The tool grid (Tools and Correctives): each category a tray, its name inside over its
         # tiles; the Paint tile alone in a tray on the Paint tab.
         self.tool_palette = QtWidgets.QWidget()

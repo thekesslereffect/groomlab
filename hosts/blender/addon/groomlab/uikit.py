@@ -1673,10 +1673,12 @@ class WindowState:
 
 class Rail:
     """A window's pages as icons in a row under its title bar (components.iconRail; a side column
-    would widen the window): pages of (id, label, tip, icon), the open one get(), a press set(id)."""
+    would widen the window): pages of (id, label, tip, icon), the open one get(), a press set(id);
+    extras(layout, context), when given, lays out more widgets at the rail's right end (they don't
+    scroll either)."""
 
-    def __init__(self, pages, get, set_):
-        self.pages, self.get, self.set = pages, get, set_
+    def __init__(self, pages, get, set_, extras=None):
+        self.pages, self.get, self.set, self.extras = pages, get, set_, extras
 
 
 class Window:
@@ -1729,6 +1731,14 @@ class Window:
                                                rail.get, rail.set))
                 self.chrome.add(wid)
                 bx += button + gap
+            if rail.extras is not None:  # right of the pages, centered on the rail's row
+                row = t.row * s
+                extras = Layout(self, bx, top - self.title_h - (self.rail_h - row) * 0.5, x + w - pad - bx)
+                rail.extras(extras, context)
+                for wd in extras.widgets:
+                    wd.id = "rail:" + wd.id  # (its own ids: the content's are counted from 0 too)
+                    self.widgets.append(wd)
+                    self.chrome.add(wd.id)
         c = self.content
         self.widgets += [wd for wd in layout.widgets if wd.rect[1] + wd.rect[3] > c[1] and wd.rect[1] < c[1] + c[3]]
 

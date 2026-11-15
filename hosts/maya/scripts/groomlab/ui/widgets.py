@@ -1161,12 +1161,18 @@ class IconRail(QtWidgets.QWidget):
         b.setIconSize(QtCore.QSize(glyph_size, glyph_size))
         b.setCursor(QtCore.Qt.PointingHandCursor)
         b.clicked.connect(lambda _=False, i=index: self._clicked(i))
-        self.column.insertWidget(self.column.count() - 1, b)  # (before the stretch)
+        self.column.insertWidget(index, b)  # (after the pages, before the stretch and what trails it)
         self.buttons.append(b)
         self.icons.append(icon)
         self._paint_icon(index)
         self.set_current(self.current)
         return b
+
+    def add_trailing(self, widget):
+        """A widget at the rail's right end, after the stretch (the Groom Tools' eyes, Graph Editor
+        and More: on the rail, they stay in view however far the panel scrolls)."""
+        self.column.addWidget(widget)
+        return widget
 
     def _clicked(self, index):
         self.set_current(index)

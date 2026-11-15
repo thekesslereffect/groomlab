@@ -281,6 +281,20 @@ def help_text(tool):
     return text
 
 
+def header_buttons(row, context):
+    """The current groom's eyes (the strands, the guides; Shift+click or right-click: every
+    groom's), the Graph Editor, More (palette.json's header)."""
+    scalp = active_groom(context)
+    if scalp is not None:
+        d = scalp.groomlab_tools
+        op = row.operator("groomlab.eye", text="", icon="HIDE_OFF" if d.show_strands else "HIDE_ON")
+        op.what, op.mode = "STRANDS", "TOGGLE"
+        op = row.operator("groomlab.eye", text="", icon="OUTLINER_DATA_CURVES", depress=bool(d.show_guides))
+        op.what, op.mode = "GUIDES", "TOGGLE"
+    row.operator("groomlab.graph_open", text="", icon_value=icons.icon("graph"))
+    row.menu("GROOMLAB_MT_tools_more", text="", icon="DOWNARROW_HLT")
+
+
 class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
@@ -297,18 +311,12 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
         t = scene.groomlab_tools
         scalp = active_groom(context)
         # What the tools work on: the current groom (the Graph Editor's too unless pinned; selecting
-        # a groom makes it current), its eyes (the strands, the guides; Shift+click or right-click:
-        # every groom's), the Graph Editor, More (palette.json's header).
+        # a groom makes it current), then header_buttons; in the GroomLab window those sit on its
+        # rail, right of the pages (issue 73: in view however far the window scrolls).
         row = layout.row(align=True)
         row.prop(scene.groomlab, "groom", text="")
-        if scalp is not None:
-            d = scalp.groomlab_tools
-            op = row.operator("groomlab.eye", text="", icon="HIDE_OFF" if d.show_strands else "HIDE_ON")
-            op.what, op.mode = "STRANDS", "TOGGLE"
-            op = row.operator("groomlab.eye", text="", icon="OUTLINER_DATA_CURVES", depress=bool(d.show_guides))
-            op.what, op.mode = "GUIDES", "TOGGLE"
-        row.operator("groomlab.graph_open", text="", icon_value=icons.icon("graph"))
-        row.menu("GROOMLAB_MT_tools_more", text="", icon="DOWNARROW_HLT")
+        if not in_window(layout):
+            header_buttons(row, context)
         if updates.available:  # the startup check found a newer GroomLab
             row = layout.box().row(align=True)
             row.label(text="GroomLab %s is available" % updates.available[0], icon="INFO")

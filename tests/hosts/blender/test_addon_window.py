@@ -250,6 +250,17 @@ class Drawn(unittest.TestCase):
         walk(rec)
         self.assertNotIn("tab", props)  # (the rail switches the pages)
         self.assertIn("primary", roles)  # the empty state's Create Groom in the accent
+        # The header's buttons on the rail's right end (issue 73: they don't scroll), not in the column.
+        self.assertIs(rail.extras, window._rail_extras)
+
+        def named(node, kind, key):
+            return [c for c in node.children if isinstance(c, drawn.DrawnLayout) and named(c, kind, key)] + [
+                c for c in node.children if not isinstance(c, drawn.DrawnLayout) and c.kind == kind and
+                c.args.get(key) in ("GROOMLAB_MT_tools_more", "groomlab.graph_open")]
+        self.assertFalse(named(rec, "menu", "menu"))
+        row = drawn.DrawnLayout("row")
+        palette.header_buttons(row, bpy.context)
+        self.assertTrue(named(row, "menu", "menu") and named(row, "operator", "idname"))
 
 
 class Editors(unittest.TestCase):

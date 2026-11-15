@@ -499,7 +499,13 @@ TEST(AppGroomTools, TilesFillTheRowsAndTheColumnsFollowTheWidth) {
     tools.setGroomName(QStringLiteral("sample"));
     EXPECT_TRUE(tools.topPart()->isAncestorOf(tools.tabBar()));
     EXPECT_TRUE(tools.topPart()->isAncestorOf(tools.tile("comb")));
-    EXPECT_TRUE(tools.scrollArea()->isAncestorOf(tools.topPart())) << "the whole panel scrolls: the header, the tabs and the grid too";
+    EXPECT_TRUE(tools.scrollArea()->isAncestorOf(tools.topPart())) << "the panel scrolls: the tabs and the grid too";
+    // The header pinned over the scroll area (issue 73): the eyes, the Graph Editor and More stay in view.
+    for (QWidget* w : {static_cast<QWidget*>(tools.eyeButton()), static_cast<QWidget*>(tools.guidesEyeButton()),
+                       static_cast<QWidget*>(tools.graphButton())}) {
+        EXPECT_TRUE(tools.header()->isAncestorOf(w));
+        EXPECT_FALSE(tools.scrollArea()->isAncestorOf(w)) << "the header does not scroll";
+    }
     EXPECT_TRUE(tools.scrollArea()->isAncestorOf(tools.card()));
     auto* grid = qobject_cast<ToolGrid*>(tools.tile("comb")->parentWidget());
     ASSERT_NE(grid, nullptr);

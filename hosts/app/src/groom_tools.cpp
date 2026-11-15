@@ -262,8 +262,8 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
     frame->setContentsMargins(0, 0, 0, 0);
     frame->setSpacing(0);
 
-    // One scroll area for the whole panel: the header, the status, the tabs and the tool grid on
-    // top, then the empty state, the tab's list and the card.
+    // One scroll area for the rest of the panel (the header pinned over it, below): the status,
+    // the tabs and the tool grid on top, then the empty state, the tab's list and the card.
     scroll_ = new QScrollArea(this);
     scroll_->setObjectName(QStringLiteral("groomToolsScroll"));
     scroll_->setWidgetResizable(true);
@@ -276,7 +276,7 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
     content->setObjectName(QStringLiteral("groomToolsContent"));
     scroll_->setWidget(content);
     auto* outer = new QVBoxLayout(content);
-    outer->setContentsMargins(12, 10, 12, 12);  // the cards 12 px in, as the Properties dock's
+    outer->setContentsMargins(12, 6, 12, 12);  // the cards 12 px in, as the Properties dock's (6 under the pinned header)
     outer->setSpacing(8);
 
     // ---- The top: the header, the status, the tabs and the tool grid.
@@ -286,17 +286,24 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
     top->setContentsMargins(0, 0, 0, 0);
     top->setSpacing(6);
     outer->addWidget(top_);
+    // The header: the groom's name, its eyes, the Graph Editor, More. Pinned over the scroll area
+    // (issue 73: in view however far the panel scrolls), as Maya's and Blender's put them on the
+    // page rail.
     const ui::json& header = palette.at("header");
-    auto* head = new QHBoxLayout();
+    header_ = new QWidget(this);
+    header_->setObjectName(QStringLiteral("groomToolsHeader"));
+    auto* head = new QHBoxLayout(header_);
+    head->setContentsMargins(12, 10, 12, 0);  // (the column's gutter, as the content's)
     head->setSpacing(2);
-    groomName_ = new QLabel(top_);
+    frame->insertWidget(0, header_);
+    groomName_ = new QLabel(header_);
     groomName_->setObjectName(QStringLiteral("groomName"));
     groomName_->setProperty("role", "title");
     groomName_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     groomName_->setToolTip(tr("The groom every tool works on: the open one"));
     head->addWidget(groomName_, 1);
     // The hair's eye: the strands alone (instances, cards too); the guides are the next eye's.
-    eye_ = glyphButton("eye", tr("Show or hide the hair"), top_);
+    eye_ = glyphButton("eye", tr("Show or hide the hair"), header_);
     eye_->setObjectName(QStringLiteral("hairVisible"));
     eye_->setCheckable(true);
     eye_->setChecked(true);
@@ -306,7 +313,7 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
     });
     head->addWidget(eye_);
     // The guides' eye: every guide group at once (Properties > Guides; Maya's displayGuides).
-    guidesEye_ = glyphButton("groups", tr("Show or hide the guides, every guide group"), top_);
+    guidesEye_ = glyphButton("groups", tr("Show or hide the guides, every guide group"), header_);
     guidesEye_->setObjectName(QStringLiteral("guidesVisible"));
     guidesEye_->setCheckable(true);
     guidesEye_->setChecked(true);
@@ -315,18 +322,17 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
         if (!updating_) emit guidesVisibilityToggled(on);
     });
     head->addWidget(guidesEye_);
-    graph_ = glyphButton("graph", withShortcut(qs(header.at("graph").value("tip", std::string())), "view.graph"), top_);
+    graph_ = glyphButton("graph", withShortcut(qs(header.at("graph").value("tip", std::string())), "view.graph"), header_);
     graph_->setObjectName(QStringLiteral("openGraph"));
     connect(graph_, &QToolButton::clicked, this, &GroomTools::graphRequested);
     head->addWidget(graph_);
-    more_ = glyphButton("more", qs(header.at("more").value("tip", std::string())), top_);
+    more_ = glyphButton("more", qs(header.at("more").value("tip", std::string())), header_);
     more_->setObjectName(QStringLiteral("groomToolsMore"));
     more_->setPopupMode(QToolButton::InstantPopup);
     moreMenu_ = new QMenu(more_);
     moreMenu_->setObjectName(QStringLiteral("groomToolsMoreMenu"));
     more_->setMenu(moreMenu_);
     head->addWidget(more_);
-    top->addLayout(head);
 
     status_ = label(QString(), "status", top_);
     status_->setObjectName(QStringLiteral("groomToolsStatus"));

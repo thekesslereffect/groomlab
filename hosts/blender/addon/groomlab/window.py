@@ -219,7 +219,17 @@ def _rail(context):
     pages = [(p["id"].upper(), p["label"], p.get("tip", ""), _rail_icon(p.get("icon", "ui_tools")))
              for p in definitions.tabs() if p["id"].upper() in ids]
     return uikit.Rail(pages, lambda: bpy.context.scene.groomlab_tools.tab,
-                      lambda ident: uikit.Prop(bpy.context.scene.groomlab_tools, "tab").set(ident))
+                      lambda ident: uikit.Prop(bpy.context.scene.groomlab_tools, "tab").set(ident), extras=_rail_extras)
+
+
+def _rail_extras(layout, context):
+    """The current groom's eyes, the Graph Editor and More (palette.header_buttons), at the rail's
+    right end: in view however far the window scrolls (issue 73)."""
+    rec = drawn.DrawnLayout("column")
+    row = rec.row(align=True)
+    row.alignment = "RIGHT"
+    palette.header_buttons(row, context)
+    drawn.place(rec, layout, context, ACTIONS)
 
 
 def _window(context, region=None, reuse=False):

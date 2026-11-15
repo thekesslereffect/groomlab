@@ -7,9 +7,9 @@
 // the grid, the list of things the tab works on with the picked one's own settings under it;
 // then the tool's card.
 //
-//   one scroll area, the whole panel:
-//     header      the groom's name, the eyes (its hair, its guides), the Graph Editor, ⋯ More
-//                 (palette.header.more: New Groom on Mesh, Theme)
+//   header        pinned over the scroll area (issue 73): the groom's name, the eyes (its hair,
+//                 its guides), the Graph Editor, ⋯ More (palette.header.more: New Groom on Mesh, Theme)
+//   one scroll area, the rest:
 //     status      a line that takes no room while it has nothing to say
 //     tabs        palette.tabs: Tools, Paint, Correctives, Photos
 //     the grid    the tool tiles at a fixed size, as many to a row as the width takes (Tools and
@@ -178,6 +178,7 @@ public:
     QToolButton* graphButton() const { return graph_; }
     QMenu* moreMenu() const { return moreMenu_; }
     QWidget* emptyState() const { return empty_; }
+    QWidget* header() const { return header_; }  // pinned: not in the scroll area
     QWidget* topPart() const { return top_; }
     QWidget* work() const { return work_; }
     QTabBar* tabBar() const { return tabs_; }
@@ -216,7 +217,8 @@ private:
     std::string tool_;
     bool tileLabels_ = true;  // the names under the icons (View > Tool Labels off: icons alone)
     std::vector<GroupRow> groups_;
-    // The top: the header, the status, the tabs, the grid.
+    // The header (pinned over the scroll area), then the top: the status, the tabs, the grid.
+    QWidget* header_ = nullptr;
     QWidget* top_ = nullptr;
     QLabel* groomName_ = nullptr;
     QToolButton* eye_ = nullptr;

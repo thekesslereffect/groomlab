@@ -378,6 +378,13 @@ def main():
             _expect([b.accessibleName() for b in rail.buttons] == [t_["label"] for t_ in definitions.tabs()]
                     and all(b.toolTip().startswith(b.accessibleName()) for b in rail.buttons), "one icon per page, named")
             _expect(not tools.findChildren(QtWidgets.QTabBar), "no tab row")
+            # The groom's eyes, the Graph Editor and More on the rail's right end (issue 73: they
+            # stay in view however far the panel scrolls), the groom's list in the column.
+            rights = [b.geometry().right() for b in tools.header_buttons]
+            _expect(all(rail.isAncestorOf(b) for b in tools.header_buttons)
+                    and min(b.x() for b in tools.header_buttons) > max(b.geometry().right() for b in rail.buttons)
+                    and max(rights) < rail.width() and tools.scroll.isAncestorOf(tools.grooms),
+                    "the header's buttons on the rail, right of the pages")
             sheet = tools.styleSheet()
             _expect("QToolButton[role=\"tool\"]:checked { background: %s; border-color: %s;"
                     % (t.token("accentSoft"), t.token("accentEdge")) in sheet, "checked tile: the soft accent")
