@@ -758,7 +758,27 @@ void GuideHierarchy::evaluateGuide(HierarchyGuide& g, const ScalpMesh* scalp, co
     // and, for a shaped tube, its sections' roll (TubeProfile::roll).
     if (!scalp || scalp->triangleCount() == 0) return;
     if (scalp->contains(g.root)) g.rootNormal = scalp->normal(g.root);
-    if (g.tube.shaped() && g.tube.rollOnScalp && g.points.size() >= 2) {
+    if (!g.isChild() && isRootTube(g.tube, 0) && g.points.size() >= 2 && scalp->contains(g.root)) {
+        // A root-first tube: its footprint is fixed on the scalp (TubeSpine::setRootOnScalp), so its
+        // whole tube rolls by one angle to meet it: the root section, turned flat onto the scalp by
+        // the least rotation from the guide's root way (as a footprint is laid), lands on the fixed
+        // one, and the hair leaving the root area keeps its place round the tube, never twisting
+        // (whichever way the guide is combed).
+        const std::vector<Frame> frames = rotationMinimizingFrames(g.points.data(), g.points.size(), g.frameUp);
+        const Vec3f n = scalp->normal(g.root);
+        const Vec3f across = scalp->acrossAt(g.root);
+        const Vec3f way = frames.front().tangent;
+        float roll = 0.0f;
+        if (across.length() > 0.5f && way.length() > 0.5f && way.normalized().dot(n) > -1.0f + 1e-4f) {
+            Vec3f laid = Rotation(way.normalized(), n)(frames.front().normal);
+            laid = laid - n * laid.dot(n);
+            if (laid.length() > 1e-6f) {
+                laid = laid.normalized();
+                roll = std::atan2(n.dot(laid.cross(across)), laid.dot(across));
+            }
+        }
+        g.tube.roll = {roll};
+    } else if (g.tube.shaped() && g.tube.rollOnScalp && g.points.size() >= 2) {
         g.tube.roll = sectionRoll(g.points, rotationMinimizingFrames(g.points.data(), g.points.size(), g.frameUp), g.tube,
                                   *scalp, scale_);
     } else {
