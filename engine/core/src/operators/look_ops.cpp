@@ -1418,7 +1418,16 @@ private:
             } else {
                 thread_local std::vector<Vec3f> resampled;
                 resampled.resize(kCenterSamples);
-                resampleByArcLengthInto(g.points, g.count, resampled.data(), kCenterSamples);
+                if (!centerStrands && g.count >= 3 && g.count < kCenterSamples) {
+                    // A guide's few points: the smooth curve through them (as Interpolate blends
+                    // it), so the clumps follow the guide's bends, not chords between its points.
+                    thread_local std::vector<Vec3f> smooth;
+                    const int perSpan = std::max(4, static_cast<int>((2 * kCenterSamples + g.count - 2) / (g.count - 1)));
+                    smooth = smoothPolyline(g.points, g.count, perSpan);
+                    resampleByArcLengthInto(smooth.data(), smooth.size(), resampled.data(), kCenterSamples);
+                } else {
+                    resampleByArcLengthInto(g.points, g.count, resampled.data(), kCenterSamples);
+                }
                 if (guide < axisOffsets.size()) {
                     for (Vec3f& q : resampled) q = q + axisOffsets[guide];
                 }
@@ -1717,15 +1726,20 @@ private:
             if (strandRegions) {
                 const float mine = (*strandRegions)[s];
                 auto it = mine == mine ? regionCenters.find(mine) : regionCenters.end();
+                bool anywhere = false;  // (no center of its own anywhere: the nearest of all)
                 if (it == regionCenters.end() && !fallbackCenters.empty()) {  // (its tube has no center)
                     const float own = fallbackOf(s);
                     it = own == own ? fallbackCenters.find(own) : fallbackCenters.end();
-                    if (it == fallbackCenters.end()) return kNoCenter;
+                    // followTubes, centers given: none of its own tube's (a strand rooted in no tube,
+                    // at a seam): the nearest center of all, so no strand is left unclumped.
+                    if (it == fallbackCenters.end()) anywhere = true;
                 } else if (it == regionCenters.end()) {
                     return kNoCenter;
                 }
-                search = &*it->second.index;
-                region = &it->second.centers;
+                if (!anywhere) {
+                    search = &*it->second.index;
+                    region = &it->second.centers;
+                }
             }
             auto centerAt = [&](std::size_t i) { return region ? static_cast<std::size_t>((*region)[i]) : i; };
             if (!parts) return static_cast<std::uint32_t>(centerAt(search->nearest(query)));
