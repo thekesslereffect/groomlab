@@ -2121,7 +2121,7 @@ bool LookInputs::read(const GraphDocument& doc, const LookChain& chain, const Lo
                     const Guide& guide = guidesNow->guides()[g];
                     ok = guide.id == kept.centerIds[c] && !guide.points.empty();
                     if (!ok) break;
-                    resampleByArcLengthInto(guide.points.data(), guide.points.size(), curves->data() + c * K, K);
+                    clumpGuideCurve(guide.points.data(), guide.points.size(), curves->data() + c * K);
                     const Vec3f& was = kept.curves[c * K];
                     ok = ((*curves)[c * K] - was).length() <= 1e-5f * std::max(1.0f, was.length());  // (its root stays)
                 }

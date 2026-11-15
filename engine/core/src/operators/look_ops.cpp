@@ -1418,13 +1418,8 @@ private:
             } else {
                 thread_local std::vector<Vec3f> resampled;
                 resampled.resize(kCenterSamples);
-                if (!centerStrands && g.count >= 3 && g.count < kCenterSamples) {
-                    // A guide's few points: the smooth curve through them (as Interpolate blends
-                    // it), so the clumps follow the guide's bends, not chords between its points.
-                    thread_local std::vector<Vec3f> smooth;
-                    const int perSpan = std::max(4, static_cast<int>((2 * kCenterSamples + g.count - 2) / (g.count - 1)));
-                    smooth = smoothPolyline(g.points, g.count, perSpan);
-                    resampleByArcLengthInto(smooth.data(), smooth.size(), resampled.data(), kCenterSamples);
+                if (!centerStrands) {
+                    clumpGuideCurve(g.points, g.count, resampled.data());  // (a guide: its smooth curve)
                 } else {
                     resampleByArcLengthInto(g.points, g.count, resampled.data(), kCenterSamples);
                 }
@@ -1617,14 +1612,15 @@ private:
             }
         }
         // followTubes with centers given: a strand whose tube holds no center (a part of a tube that
-        // none of the centers' smaller tubes covers) clumps toward the centers of its level-0 tube
-        // (Interpolate's tubeBase; without it, its region of the regionChannel), each center in the
-        // one of the strand rooted nearest it; with neither, it stays unclumped.
+        // none of the centers' smaller tubes covers, or no tube: a seam) clumps toward the centers of
+        // its level-0 tube (Interpolate's tubeBase: the one holding its root, else the nearest), each
+        // center in the one of the strand rooted nearest it. The regionChannel (a painted map,
+        // blurred between a coarse scalp's vertices) only without tubeBase.
         std::map<float, RegionCenters> fallbackCenters;
         const std::vector<float>* tubeBases = tubeIds ? in->strandChannel("tubeBase") : nullptr;
         if (tubeBases && tubeBases->size() != in->strandCount()) tubeBases = nullptr;
         auto fallbackOf = [&](std::size_t s) {
-            if (tubeBases && (*tubeBases)[s] >= 0.0f) return kTubeRegionBase + (*tubeBases)[s];
+            if (tubeBases) return (*tubeBases)[s] >= 0.0f ? kTubeRegionBase + (*tubeBases)[s] : std::numeric_limits<float>::quiet_NaN();
             return channelRegions ? (*channelRegions)[s] : std::numeric_limits<float>::quiet_NaN();
         };
         if (tubeIds && picked.empty() && (tubeBases || channelRegions) && strandRegions == &tubeRegions && !roots.empty()) {
@@ -3096,6 +3092,17 @@ void clumpCopyNeighbors(const PointIndex& index, const std::vector<Vec3f>& roots
         const float w = weights[j] / sum;
         std::memcpy(&out[5 + j], &w, sizeof w);
     }
+}
+
+void clumpGuideCurve(const Vec3f* points, std::size_t count, Vec3f* out) {
+    if (count >= 3 && count < kClumpCenterSamples) {
+        thread_local std::vector<Vec3f> smooth;
+        const int perSpan = std::max(4, static_cast<int>((2 * kClumpCenterSamples + count - 2) / (count - 1)));
+        smooth = smoothPolyline(points, count, perSpan);
+        resampleByArcLengthInto(smooth.data(), smooth.size(), out, kClumpCenterSamples);
+        return;
+    }
+    resampleByArcLengthInto(points, count, out, kClumpCenterSamples);
 }
 
 }  // namespace groomlab

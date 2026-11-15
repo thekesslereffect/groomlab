@@ -825,6 +825,39 @@ TEST(FillTubes, OverlappingTubesTakeTheMostCentral) {
     EXPECT_NE(first, second);
 }
 
+TEST(FillTubes, OverlappingTubesOfDifferentSizesSplitByDistanceOnTheScalp) {
+    // A big tube and a small one overlapping: a root in both goes to the one whose edge lies
+    // farther from it (as lengths on the scalp), not to the one it lies in by a larger share of the
+    // tube's own size (which hands the small tube roots that lie deeper in the big one).
+    TubeGraph f;
+    auto set = std::make_shared<GuideSet>();
+    const float bigX = 0.3f, bigR = 0.2f, smallX = 0.54f, smallR = 0.08f;
+    for (std::uint64_t id : {1u, 2u}) {
+        Guide& g = set->add(id, straightGuide({id == 1 ? bigX : smallX, 0, 0.5f}));
+        g.hasTube = true;
+        g.tube.width = {id == 1 ? bigR : smallR};
+    }
+    f.ext.set("guides", GuidesPtr(set), 9);
+    const StrandsPtr out = f.eval(f.interp);
+    const std::vector<float>& ids = *out->strandChannel("tubeId");
+    float big = -1, small = -1;
+    std::size_t overlap = 0;
+    for (std::size_t s = 0; s < out->strandCount(); ++s) {
+        const Vec3f r = out->strandPoints(s)[0];
+        const float inBig = bigR - std::hypot(r.x - bigX, r.z - 0.5f), inSmall = smallR - std::hypot(r.x - smallX, r.z - 0.5f);
+        if (inBig < 1e-3f || inSmall < 1e-3f || std::abs(inBig - inSmall) < 1e-3f) continue;
+        ++overlap;
+        ASSERT_GE(ids[s], 0.0f);
+        float& mine = inBig > inSmall ? big : small;
+        if (mine < 0.0f) mine = ids[s];
+        EXPECT_EQ(ids[s], mine) << "the tube whose edge lies farther";
+    }
+    EXPECT_GT(overlap, 4u);
+    EXPECT_GE(big, 0.0f);
+    EXPECT_GE(small, 0.0f);
+    EXPECT_NE(big, small);
+}
+
 TEST(FillTubes, ClumpsStayInsideTheTubeAndFlattenWithIt) {
     TubeGraph f;
     f.tube.twist = {0.0f};  // flat across x all along

@@ -855,6 +855,9 @@ struct TubeFill {
     std::vector<std::uint64_t> bases;  // each tube's level-0 ancestor's ID (Guide::baseId; its own when 0)
     std::vector<float> numbers;
     std::vector<std::int32_t> tubeOf;
+    // Each strand's level-0 tube: the one holding its root, else the nearest within reach (-1: none;
+    // tubeBase takes it for a strand no tube holds).
+    std::vector<std::int32_t> baseOf;
     std::vector<SectionPoint> at;
     std::vector<std::int32_t> edgeOf;
     std::vector<SectionPoint> edgeAt;
@@ -1947,6 +1950,7 @@ private:
         if (fill && fillBefore) {
             fill->numbers = fillBefore->numbers;
             fill->tubeOf = fillBefore->tubeOf;
+            fill->baseOf = fillBefore->baseOf;
             fill->at = fillBefore->at;
             fill->edgeOf = fillBefore->edgeOf;
             fill->edgeAt = fillBefore->edgeAt;
@@ -2285,9 +2289,10 @@ private:
     }
 
     // fillTubes' channels, written last: each strand's tube wins over a guide attribute of its name.
-    // tubeBase: the number of the level-0 tube the strand's tube comes from (its own at level 0),
-    // so a node can keep a strand within its level-0 tube whichever smaller tube holds it (Clump's
-    // followTubes, its centers given).
+    // tubeBase: the number of the strand's level-0 tube (its tube's ancestor; a strand no tube
+    // holds, in a crack between roots: TubeFill::baseOf, the nearest), so a node can keep a strand
+    // within its level-0 tube whichever smaller tube holds it, or none (Clump's followTubes, its
+    // centers given).
     static void writeTubeChannels(StrandSet& out, const TubeFill& fill) {
         std::vector<float>& ids = out.addStrandChannel("tubeId", -1.0f);
         std::vector<float>& us = out.addStrandChannel("tubeU", 0.0f);
@@ -2297,7 +2302,11 @@ private:
         for (std::size_t k = 0; k < fill.ids.size() && k < fill.numbers.size(); ++k) numberOf[fill.ids[k]] = fill.numbers[k];
         parallelFor(0, ids.size(), [&](std::size_t s) {
             const std::int32_t t = fill.tubeOf[s];
-            if (t < 0) return;
+            if (t < 0) {
+                const std::int32_t b = s < fill.baseOf.size() ? fill.baseOf[s] : -1;
+                if (b >= 0) bases[s] = fill.numbers[static_cast<std::size_t>(b)];
+                return;
+            }
             const auto k = static_cast<std::size_t>(t);
             ids[s] = fill.numbers[k];
             us[s] = fill.at[s].u;
@@ -2307,15 +2316,45 @@ private:
         }, 4096);
     }
 
+    // How far inside its tube's root footprint section coordinates `at` lie, in the footprint's
+    // own lengths (its width 2 across, whatever its shape and aspect): below 0 outside. Tubes of
+    // any size and aspect compare by it as lengths on the scalp, where tubeShapeDepth's share of
+    // each tube's own depth favours the larger or narrower one: so where sealed neighbours'
+    // footprints overlap (ROOT_OVERLAP), the root goes to the one whose outline it lies within.
+    static float footprintDepth(const TubeSpine& spine, const SectionPoint& at) {
+        const std::vector<SectionPoint>& poly = tubeShapeOutline(spine.tube()).points;
+        const float width = spine.rootWidth();
+        const float a = width > 0.0f ? std::max(spine.rootHeight() / width, 1e-6f) : 1.0f;
+        const float u = at.u, y = at.v * a;
+        float best = std::numeric_limits<float>::max();
+        bool inside = false;
+        const std::size_t n = poly.size();
+        if (n < 3) return -std::numeric_limits<float>::max();
+        for (std::size_t i = 0, j = n - 1; i < n; j = i++) {
+            const float au = poly[j].u, av = poly[j].v * a, bu = poly[i].u, bv = poly[i].v * a;
+            if ((bv > y) != (av > y) && u < (au - bu) * (y - bv) / (av - bv) + bu) inside = !inside;
+            const float eu = bu - au, ev = bv - av;
+            const float l2 = eu * eu + ev * ev;
+            const float f = l2 > 0.0f ? std::clamp(((u - au) * eu + (y - av) * ev) / l2, 0.0f, 1.0f) : 0.0f;
+            const float du = u - (au + eu * f), dv = y - (av + ev * f);
+            best = std::min(best, du * du + dv * dv);
+        }
+        const float d = std::sqrt(best) * width;
+        return inside ? d : -d;
+    }
+
     // fillTubes: each strand's tube (TubeFill::tubeOf, at) from its root (its first point), among
     // the tubes laid out (`fill.spines`), the soft edge it lies in (edgeOf, edgeAt, edgeWeight;
-    // `blend`: tubeBlend), and each tube's number. The strands each on their own, side by side; of
-    // the tubes holding a root the deepest wins, then the most central, then the first; of the
+    // `blend`: tubeBlend), its level-0 tube (baseOf) and each tube's number. The strands each on
+    // their own, side by side; of the tubes holding a root the deepest wins, then the one it lies
+    // furthest inside (footprintDepth), then the first; a root no level-0 tube holds takes the
+    // nearest as its base (none beyond reach); of the
     // deeper tubes whose edge holds it the nearest, then the deepest, then the first: the same
     // whichever threads ran.
     static void findTubes(const StrandSet& strands, TubeFill& fill, float blend) {
         const std::size_t count = strands.strandCount();
         fill.tubeOf.assign(count, -1);
+        fill.baseOf.assign(count, -1);
         fill.at.assign(count, SectionPoint{});
         fill.edgeOf.assign(count, -1);
         fill.edgeAt.assign(count, SectionPoint{});
@@ -2345,11 +2384,12 @@ private:
             if (strands.strandPointCount(s) < 2) return;
             const Vec3f root = strands.strandPoints(s)[0];
             if (!std::isfinite(root.x) || !std::isfinite(root.y) || !std::isfinite(root.z)) return;
-            // The level-0 tube holding the root (the most central): its own deeper tubes alone may
-            // take the strand or blend it at their edges, never a neighbour's (whose slices may reach
-            // past their level-0 tube's outline into this one's).
-            std::int32_t base = -1;
-            float baseDepth = 0.0f;
+            // The level-0 tube holding the root (the one it lies furthest inside): its own deeper
+            // tubes alone may take the strand or blend it at their edges, never a neighbour's (whose
+            // slices may reach past their level-0 tube's outline into this one's). Held by none:
+            // the nearest (baseOf only; the strand's tube stays none).
+            std::int32_t base = -1, near = -1;
+            float baseDepth = 0.0f, nearDepth = 0.0f;
             grid.around(root, [&](std::uint32_t i) {
                 const std::uint32_t k = tubes[i];
                 if (fill.depths[k] != 0) return true;
@@ -2357,14 +2397,17 @@ private:
                 float along = 0.0f;
                 const SectionPoint at = spine.rootCoords(root, &along);
                 if (std::abs(along) > kTubeAlongReach * std::max(spine.rootWidth(), spine.rootHeight())) return true;
-                const float depth = tubeShapeDepth(spine.tube(), at.u, at.v);
-                if (!(depth >= 0.0f)) return true;
-                if (base < 0 || depth > baseDepth || (depth == baseDepth && static_cast<std::int32_t>(k) < base)) {
-                    base = static_cast<std::int32_t>(k);
-                    baseDepth = depth;
+                const float depth = footprintDepth(spine, at);
+                const bool held = tubeShapeDepth(spine.tube(), at.u, at.v) >= 0.0f;
+                std::int32_t& pick = held ? base : near;
+                float& pickDepth = held ? baseDepth : nearDepth;
+                if (pick < 0 || depth > pickDepth || (depth == pickDepth && static_cast<std::int32_t>(k) < pick)) {
+                    pick = static_cast<std::int32_t>(k);
+                    pickDepth = depth;
                 }
                 return true;
             });
+            fill.baseOf[s] = base >= 0 ? base : near;
             const std::uint64_t lineage = base >= 0 ? fill.bases[static_cast<std::size_t>(base)] : 0;
             auto ours = [&](std::uint32_t k) { return base < 0 || fill.bases[k] == lineage; };
             std::int32_t best = -1;
@@ -2378,8 +2421,8 @@ private:
                 float along = 0.0f;
                 const SectionPoint at = spine.rootCoords(root, &along);
                 if (std::abs(along) > kTubeAlongReach * std::max(spine.rootWidth(), spine.rootHeight())) return true;
-                const float depth = tubeShapeDepth(spine.tube(), at.u, at.v);
-                if (!(depth >= 0.0f)) return true;
+                if (!(tubeShapeDepth(spine.tube(), at.u, at.v) >= 0.0f)) return true;
+                const float depth = footprintDepth(spine, at);
                 const int level = fill.depths[k];
                 const int bestLevel = best < 0 ? -1 : fill.depths[static_cast<std::size_t>(best)];
                 if (best < 0 || level > bestLevel ||

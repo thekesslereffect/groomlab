@@ -820,24 +820,40 @@ TEST(Clump, ScatteredPointsAsCentersPlaceClumpsTheStrandsShape) {
     std::printf("[ clump  ] scattered centers: from strands, lengths within %.3f, tips moved %.3f; from the spikes, %.3f and "
                 "%.3f\n",
                 strands.worstLength, strands.meanTipMove, spikes.worstLength, spikes.meanTipMove);
-    // The spikes as guides (ToGuides, the only way in before strands were taken): the same to the
-    // bit.
+    // How far apart two results' points lie at most (the same strands).
+    auto apart = [](const StrandSet& a, const StrandSet& b) {
+        float worst = 0.0f;
+        for (std::size_t s = 0; s < a.strandCount(); ++s) {
+            for (std::size_t k = 0; k < a.strandPointCount(s); ++k) {
+                worst = std::max(worst, (a.strandPoints(s)[k] - b.strandPoints(s)[k]).length());
+            }
+        }
+        return worst;
+    };
+    // The spikes as guides (ToGuides, the only way in before strands were taken): as from the
+    // curves (a guide's few points followed along the smooth curve through them, straight here).
     const NodeId asGuides = lg.add(op::kToGuides, spots);
     lg.g.connect(asGuides, clump, 1);
-    EXPECT_EQ(lg.eval(clump)->contentHash(), fromCenters->contentHash());
+    const StrandsPtr fromGuides = lg.eval(clump);
+    ASSERT_EQ(fromGuides->strandCount(), fromCenters->strandCount());
+    EXPECT_LT(apart(*fromGuides, *fromCenters), 1e-3f);
     // pastTip extend: past a spike's tip the strands go on along it, keeping their length.
     lg.g.node(clump).params().set("pastTip", std::string("extend"));
     const Look extended = look(lg.eval(clump));
     EXPECT_LT(extended.worstLength, 0.5f * spikes.worstLength);
     lg.g.node(clump).params().set("pastTip", std::string("fit"));
 
-    // Centers that are strands of its own (ToGuides of them): either way, the same to the bit.
+    // Centers that are strands of its own (ToGuides of them): either way alike (as guides, the
+    // smooth curve through each one's points; as points, its axis strand itself).
     const NodeId own = lg.add(op::kToGuides, interp);
     lg.g.node(own).params().set("fraction", 0.03);
     lg.g.connect(own, clump, 1);
     const StrandsPtr ownCurves = lg.eval(clump);
     lg.g.node(clump).params().set("centersFrom", std::string("inputPoints"));
-    EXPECT_EQ(lg.eval(clump)->contentHash(), ownCurves->contentHash());
+    const StrandsPtr ownPoints = lg.eval(clump);
+    ASSERT_EQ(ownPoints->strandCount(), ownCurves->strandCount());
+    std::printf("[ clump  ] own strands as guides vs as points: %.5f apart at most\n", apart(*ownPoints, *ownCurves));
+    EXPECT_LT(apart(*ownPoints, *ownCurves), 0.02f);
 
     // Centers of a single point (a root, no curve): placed clumps from the strands; nothing from
     // the centers' own shape (none).
