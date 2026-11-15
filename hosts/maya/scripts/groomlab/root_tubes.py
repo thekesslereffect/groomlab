@@ -1338,14 +1338,65 @@ def add_tube_level(groom, guides=None, picked=None):
     return info
 
 
-def remove_tube_level(groom, base):
-    """Remove the deepest level of base group `base`'s hierarchy (its group and guides). One undo
-    step. Returns the levels left."""
+def remove_tube_level(groom, base, guides=None):
+    """Undo a split (the Tube hierarchy's Remove). With `guides` (the selection), only theirs: a
+    selected tube that is split loses its deepest split tubes (the deepest level under it), a
+    selected tube that is a split tube itself goes back into its parent with its siblings; the
+    other tubes keep their levels. Without, the hierarchy's deepest level goes everywhere (its group
+    and guides). A level left with no guides goes with its group. One undo step. Returns the
+    levels left ({"base", "levels", "removed": how many tubes went})."""
     info = tube_levels(groom, picked=base)
     if len(info["levels"]) <= 1:
         raise ValueError("%s has no level under it to remove" % base)
-    groomlab.remove_guide_group(groom, info["levels"][-1])
-    return tube_levels(groom, picked=base)
+    if not guides:
+        groomlab.remove_guide_group(groom, info["levels"][-1])
+        out = tube_levels(groom, picked=base)
+        out["removed"] = None
+        return out
+    data = _hierarchy(groom)
+    level_of = {}
+    for depth, name in enumerate(info["levels"]):
+        g = _group_named(data, name)
+        if g is not None:
+            level_of[int(g["id"])] = depth + 1
+    by_id = _guides_by_id(data)
+    children = {}
+    for gd in data.get("guides", []):
+        if gd.get("parent") and int(gd["group"]) in level_of:
+            children.setdefault(int(gd["parent"]), []).append(int(gd["id"]))
+
+    def level(g):
+        return level_of.get(int(by_id[g]["group"]), 0)
+
+    gone = set()
+    for g in (int(x) for x in guides):
+        if g not in by_id or not level(g):
+            continue
+        if children.get(g):
+            below, todo = [], list(children[g])
+            while todo:
+                k = todo.pop()
+                if children.get(k):
+                    todo.extend(children[k])
+                else:
+                    below.append(k)
+            deepest = max(level(k) for k in below)
+            gone.update(k for k in below if level(k) == deepest)
+        elif level(g) > 1 and by_id[g].get("parent"):
+            gone.update(children.get(int(by_id[g]["parent"]), [g]))
+    if not gone:
+        raise ValueError("no split tubes to remove under the selection: select a split tube, or one that is split")
+    with groomlab.undo_chunk("tube hierarchy: remove a level"):
+        cmds.groomLabGuides(groom, removeGuides=True, guide=[str(g) for g in sorted(gone)])
+        counts = dict((g["name"], g["count"]) for g in groomlab.list_guide_groups(groom))
+        for name in reversed(info["levels"][1:]):  # (a level emptied: its group too, deepest first)
+            if counts.get(name, 0) == 0:
+                groomlab.remove_guide_group(groom, name)
+            else:
+                break
+    out = tube_levels(groom, picked=base)
+    out["removed"] = len(gone)
+    return out
 
 
 def show_tube_level(groom, base, level):

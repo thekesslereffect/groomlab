@@ -11,7 +11,7 @@ Tube roots (issue 61)   Draw root: the root's outline clicked on the scalp CV by
 Tube hierarchy (#62)    Add splits the selected tubes (or every tube of the base group) in two, a
                         level deeper; a row of level buttons, 1 (the base) always there, shows and
                         picks a level to work on (the Tube tool and the brushes then edit that
-                        level's tubes; the others hidden). Remove drops the deepest level.
+                        level's tubes; the others hidden). Remove undoes a split: the selected tubes', else the deepest level.
 
 The viewport side is groomlab.ui.root_tube_tool; the work, groomlab.root_tubes.
 """
@@ -102,7 +102,9 @@ class TonicTubes(QtCore.QObject):
                                       "the base group), sharing its root shape: a level deeper. Again: 2 to 4...",
                                       None, "tubeLevelAdd")
         self.add_level.clicked.connect(self.add_clicked)
-        self.remove_level = widgets.chip("Remove", "Remove the deepest level (its tubes)", None, "tubeLevelRemove")
+        self.remove_level = widgets.chip("Remove", "Undo a split: with tubes selected, theirs only (a split tube's "
+                                         "deepest split tubes, or a split tube back into its parent); with none, the "
+                                         "deepest level everywhere", None, "tubeLevelRemove")
         self.remove_level.clicked.connect(self.remove_clicked)
         self.hierarchy_block = widgets.Block("Tube hierarchy", name="tubeHierarchy")
         self.hierarchy_block.setToolTip("Tonic-style tube levels: each level splits the tubes above it in two. Shaping "
@@ -337,9 +339,14 @@ class TonicTubes(QtCore.QObject):
         groom = self.owner.groom()
         if not groom or not self._base:
             return
-        info = self._run(root_tubes.remove_tube_level, groom, self._base)
+        selected = groomlab.selected_guides(groom)
+        info = self._run(root_tubes.remove_tube_level, groom, self._base, selected or None)
         if info:
             self._after_levels(groom, info["base"], len(info["levels"]))
+            if info.get("removed") is not None:
+                self.owner.status.setText("Removed %d split tube%s under the selection: %s has %d levels." %
+                                          (info["removed"], "" if info["removed"] == 1 else "s", info["base"],
+                                           len(info["levels"])))
 
     def level_clicked(self, button):
         groom = self.owner.groom()

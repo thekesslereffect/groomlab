@@ -1567,10 +1567,30 @@ private:
             const float none = std::numeric_limits<float>::quiet_NaN();
             centerRegions.assign(roots.size(), none);
             std::vector<std::size_t> unknown;
+            // followTubes, guides as centers: a guide that is a tube's own (its ID numbers the tube,
+            // as Interpolate's tubeId: stableGroupNumbers) is that tube's center wherever its root
+            // lies (slid off the middle, into a smaller tube of its own), not the tube of the strand
+            // rooted nearest it. One whose tube holds no strand (all of it in smaller tubes) then
+            // joins no tube a guide of its own already leads.
+            std::unordered_set<float> heldTubes;
+            if (tubeIds && strandRegions == &tubeRegions && picked.empty() && !centerStrands) {
+                for (const float t : *tubeIds) {
+                    if (t >= 0.0f) heldTubes.insert(t);
+                }
+            }
+            std::vector<char> ownTube(roots.size(), 0);
             for (std::size_t c = 0; c < roots.size(); ++c) {
                 if (!picked.empty()) {
                     centerRegions[c] = (*strandRegions)[picked[centerGuides[c]]];
                     continue;
+                }
+                if (!heldTubes.empty()) {
+                    const float number = stableGroupNumbers({static_cast<std::uint64_t>(used[c]->id)}).front();
+                    if (heldTubes.count(number)) {
+                        centerRegions[c] = kTubeRegionBase + number;
+                        ownTube[c] = 1;
+                        continue;
+                    }
                 }
                 if (used[c]->region == used[c]->region) {
                     centerRegions[c] = used[c]->region;
@@ -1593,6 +1613,15 @@ private:
                         const std::size_t c = unknown[k];
                         centerRegions[c] = (*strandRegions)[rooted[nearestStrand.nearest(roots[c])]];
                     });
+                }
+            }
+            if (std::find(ownTube.begin(), ownTube.end(), 1) != ownTube.end()) {
+                std::unordered_set<float> led;
+                for (std::size_t c = 0; c < roots.size(); ++c) {
+                    if (ownTube[c]) led.insert(centerRegions[c]);
+                }
+                for (std::size_t c = 0; c < roots.size(); ++c) {
+                    if (!ownTube[c] && led.count(centerRegions[c])) centerRegions[c] = none;
                 }
             }
         }

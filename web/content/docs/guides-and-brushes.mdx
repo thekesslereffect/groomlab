@@ -359,7 +359,7 @@ across its longer side, sharing its root shape, in the next level's group (`<bas
 The numbered buttons show one level at a time (the other levels' groups hidden) and pick its group,
 so the Tube tool and the brushes edit that level's tubes. Every level's tubes follow their parent:
 shaping a level 1 tube carries all the smaller tubes inside it, while each smaller tube keeps its
-own edits. **Remove** drops the deepest level. Every tube split from a root tube, and every
+own edits. **Remove** undoes a split: with tubes selected, only theirs (a split tube loses its deepest split tubes; a split tube goes back into its parent with its siblings), with none the deepest level everywhere. **Add** likewise splits only the selected tubes when some are. A slid guide stays its own tube's clump center wherever its root moves within its root. Every tube split from a root tube, and every
 guide under it, belongs to that root, so the smaller tubes' hair stays inside the root they came
 from. Fill Tubes fills a strand rooted in a
 level 1 tube only with that tube's own smaller tubes, never a neighbour's (a split tube's corners
