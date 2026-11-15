@@ -89,8 +89,12 @@ struct HierarchyGuide {
     // coordinates (tube.h: in its rotation-minimizing frame, turned by the
     // section's twist, in units of its width across and width times aspect up),
     // so children follow the tube as it flattens, twists and tapers; z is along
-    // the parent's tangent, in scene units.
+    // the parent's tangent, in scene units (offsetsAlongCurve: along its curve).
     std::vector<Vec3f> offsets;
+    // The offsets' z slides along the parent's curve (bound so in a root tube's hierarchy:
+    // followsAlongCurve), not out along each parent point's tangent: the child follows the parent
+    // round a bend keeping its shape. Offsets bound before (false) keep their meaning.
+    bool offsetsAlongCurve = false;
     // A following child's own point count (it was resampled, drawn or its group has segments of
     // its own): its shape, rebuilt from its parent's, respaced to that many points. 0: its
     // parent's count.
@@ -367,6 +371,9 @@ public:
     StrandRoot baseRootOf(const HierarchyGuide& g) const;
     // That guide's ID (its own for a guide with none).
     GuideId baseIdOf(const HierarchyGuide& g) const;
+    // Whether a child follows its parent along the parent's curve (a root tube's hierarchy: its
+    // along offset slides along the parent, resolveFollower), not along each parent point's tangent.
+    bool followsAlongCurve(const HierarchyGuide& child) const;
     // The root-first tubes (primaries whose tube takes a kOwnedTubeShapePrefix shape: a root
     // outline drawn on the scalp), in ID order: root tube k's color is rootTubeColor(k).
     std::vector<GuideId> rootTubeIds() const;

@@ -141,6 +141,41 @@ std::vector<float> sectionRoll(const std::vector<Vec3f>& points, const std::vect
     return roll;
 }
 
+// Each point's arc length along a polyline from its first.
+std::vector<float> arcLengthsOf(const std::vector<Vec3f>& pts) {
+    std::vector<float> arc(pts.size(), 0.0f);
+    for (std::size_t i = 1; i < pts.size(); ++i) arc[i] = arc[i - 1] + (pts[i] - pts[i - 1]).length();
+    return arc;
+}
+
+// The point and frame arc length `s` along a polyline (its points' frames between them, made
+// orthonormal again); past either end, on along the end's tangent with the end's frame.
+struct AlongCurve {
+    Vec3f point;
+    Frame frame;
+};
+AlongCurve alongCurve(const std::vector<Vec3f>& pts, const std::vector<Frame>& frames, const std::vector<float>& arc, float s) {
+    const std::size_t n = pts.size();
+    if (n == 0) return {};
+    if (n == 1 || s <= 0.0f) return {pts.front() + frames.front().tangent * std::min(s, 0.0f), frames.front()};
+    if (s >= arc.back()) return {pts.back() + frames.back().tangent * (s - arc.back()), frames.back()};
+    const std::size_t k = std::min<std::size_t>(
+        static_cast<std::size_t>(std::upper_bound(arc.begin(), arc.end(), s) - arc.begin()) - 1, n - 2);
+    const float span = arc[k + 1] - arc[k];
+    const float f = span > 0.0f ? std::clamp((s - arc[k]) / span, 0.0f, 1.0f) : 0.0f;
+    AlongCurve out;
+    out.point = pts[k] + (pts[k + 1] - pts[k]) * f;
+    Vec3f tangent = frames[k].tangent * (1.0f - f) + frames[k + 1].tangent * f;
+    tangent = tangent.length() > 1e-12f ? tangent.normalized() : frames[k].tangent;
+    Vec3f normal = frames[k].normal * (1.0f - f) + frames[k + 1].normal * f;
+    normal = normal - tangent * normal.dot(tangent);
+    normal = normal.length() > 1e-12f ? normal.normalized() : frames[k].normal;
+    out.frame.tangent = tangent;
+    out.frame.normal = normal;
+    out.frame.binormal = tangent.cross(normal);
+    return out;
+}
+
 Vec3f rotateXY(const Vec3f& v, float angle) {
     const float c = pm::cos(angle), s = pm::sin(angle);
     return {v.x * c - v.y * s, v.x * s + v.y * c, v.z};
@@ -570,6 +605,7 @@ GroupId GuideHierarchy::generateChildren(GroupId parentGroup, const std::string&
                     for (float& a : child.tube.aspect) a = std::clamp(a / slices, kMinTubeAspect, kMaxTubeAspect);
                 }
                 child.offsets.assign(n, at);
+                child.offsetsAlongCurve = followsAlongCurve(child);
                 child.frameUp = parentFrames.empty() ? parent.frameUp : parentFrames.front().normal;
                 resolveFollower(child, parent, nullptr, &parentFrames);
                 child.frameUp = parentFrames.empty() ? parent.frameUp : parentFrames.front().normal;
@@ -608,6 +644,7 @@ GroupId GuideHierarchy::generateChildren(GroupId parentGroup, const std::string&
                 const float t = paramAt(i, n);
                 child.offsets[i] = rotateXY(rootXY * (1.0f - t) + tipXY * t, params.twist * t);
             }
+            child.offsetsAlongCurve = followsAlongCurve(child);
             resolveFollower(child, parent, nullptr, &parentFrames);
             if (!parent.tube.shaped()) child.frameUp = anyPerpendicular(rootTangent(child.points));
 
@@ -667,6 +704,12 @@ void GuideHierarchy::resolveFollower(HierarchyGuide& child, const HierarchyGuide
     const std::vector<Frame>& frames = computed.empty() ? *parentFrames : computed;
     child.points.resize(n);
     const bool blended = parent.tube.blended();
+    // A root tube's hierarchy: the along offset slides the point along the parent's curve (and the
+    // across one sits in the frame there), not out along the parent point's tangent, so a child
+    // groomed away from its parent follows the parent round a bend keeping its own shape, never
+    // zig-zagging back across it (alongCurve; offsetsFromWorld's inverse).
+    const bool slides = child.offsetsAlongCurve;
+    const std::vector<float> arc = slides ? arcLengthsOf(parent.points) : std::vector<float>{};
     // The offsets are the parent tube's section coordinates (tube.h): across in its sections,
     // along in scene units. A plain round tube's sections (no twist, aspect 1) give the offsets
     // times the width, to the bit as before sections.
@@ -676,7 +719,12 @@ void GuideHierarchy::resolveFollower(HierarchyGuide& child, const HierarchyGuide
         // (A tube of several profiles: the offset carried along them, tube.h.)
         const SectionPoint q = blended ? tubeBlendAt(parent.tube.blendPoint(off.x, off.y), off.x, off.y, t) : SectionPoint{off.x, off.y};
         const Vec3f o = sectionOffset(parent.tube.sectionAt(t), q.u, q.v, scale_);
-        child.points[i] = parent.points[i] + frames[i].toWorld({o.x, o.y, off.z * scale_});
+        if (slides) {
+            const AlongCurve at = alongCurve(parent.points, frames, arc, arc[i] + off.z * scale_);
+            child.points[i] = at.point + at.frame.toWorld({o.x, o.y, 0.0f});
+        } else {
+            child.points[i] = parent.points[i] + frames[i].toWorld({o.x, o.y, off.z * scale_});
+        }
     }
     // A shaped tube's children keep their frames started from its root's, so their own tubes lie
     // as the parent's does however it turns.
@@ -735,18 +783,39 @@ std::vector<Vec3f> GuideHierarchy::offsetsFromWorld(const HierarchyGuide& child,
         shift = onFoot - foot.back(onFoot);
     }
     std::vector<Vec3f> offsets(n);
+    const bool slides = followsAlongCurve(child);
+    const std::vector<float> arc = slides ? arcLengthsOf(parent.points) : std::vector<float>{};
     for (std::size_t i = 0; i < n; ++i) {
         const float t = paramAt(i, n);
-        const Vec3f local = frames[i].toLocal(pts[i] - shift * foot.fade(t) - parent.points[i]);
+        const Vec3f p = pts[i] - shift * foot.fade(t);
+        Vec3f local = frames[i].toLocal(p - parent.points[i]);
+        float along = local.z;
+        if (slides) {
+            // (resolveFollower's inverse: the spot along the parent's curve whose section holds it)
+            along = 0.0f;
+            for (int pass = 0; pass < 6; ++pass) {
+                const AlongCurve at = alongCurve(parent.points, frames, arc, arc[i] + along);
+                local = at.frame.toLocal(p - at.point);
+                along += local.z;
+                if (std::abs(local.z) < 1e-6f * std::max(1.0f, std::abs(along))) break;
+            }
+        }
         SectionPoint at = sectionCoords(parent.tube.sectionAt(t), local.x, local.y, scale_);
         if (blended) at = parent.tube.unblend(at.u, at.v, t);  // (back into the root's outline)
-        offsets[i] = {at.u, at.v, local.z / scale_};
+        offsets[i] = {at.u, at.v, along / scale_};
     }
     return offsets;
 }
 
+bool GuideHierarchy::followsAlongCurve(const HierarchyGuide& child) const {
+    if (!child.isChild()) return false;
+    const HierarchyGuide* base = guide(baseIdOf(child));
+    return base && !base->isChild() && isRootTube(base->tube, 0);
+}
+
 void GuideHierarchy::bindOffsets(HierarchyGuide& child, const HierarchyGuide& parent) const {
     child.offsets = offsetsFromWorld(child, parent);
+    child.offsetsAlongCurve = followsAlongCurve(child);  // (as offsetsFromWorld bound them)
     const std::size_t own = child.points.size();
     child.pointCount = own >= 2 && own != parent.points.size() ? static_cast<std::uint32_t>(own) : 0;
 }
@@ -1638,6 +1707,7 @@ std::uint64_t GuideHierarchy::computeContentHash() const {
         for (const Vec3f& p : g.points) h = hashVec(h, p);
         h = hashCombine(h, g.offsets.size());
         for (const Vec3f& o : g.offsets) h = hashVec(h, o);
+        if (g.offsetsAlongCurve) h = hashCombine(h, 0xA1C0u);
         if (g.pointCount > 0) h = hashCombine(h, static_cast<std::uint64_t>(g.pointCount) + 0x9C0u);  // (none: as it always has)
         h = hashCombine(h, g.rootLocal.size());
         for (const Vec3f& l : g.rootLocal) h = hashVec(h, l);
@@ -1695,6 +1765,7 @@ json guideToJson(const HierarchyGuide& g) {
     if (!g.pointAttributes.empty()) j["pointAttributes"] = g.pointAttributes;
     if (g.followsParent()) {
         j["offsets"] = vecsToJson(g.offsets);
+        if (g.offsetsAlongCurve) j["offsetsAlongCurve"] = true;
         if (g.pointCount > 0) j["pointCount"] = g.pointCount;
     } else {
         j["points"] = vecsToJson(g.points);
@@ -1771,6 +1842,7 @@ HierarchyGuide guideFromJson(const json& j, const TubeShapeLibrary& library, std
     }
     if (j.contains("points")) g.points = vecsFromJson(j.at("points"));
     if (j.contains("offsets")) g.offsets = vecsFromJson(j.at("offsets"));
+    g.offsetsAlongCurve = j.value("offsetsAlongCurve", false);
     g.pointCount = std::min(j.value("pointCount", std::uint32_t{0}), std::uint32_t{257});
     if (j.contains("rootLocal")) g.rootLocal = vecsFromJson(j.at("rootLocal"));
     if (j.contains("frameUpLocal")) {
