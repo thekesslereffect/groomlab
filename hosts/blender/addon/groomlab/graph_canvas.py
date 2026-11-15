@@ -105,12 +105,14 @@ def theme():
         "text": color(g.get("text"), "#EDEDF0"), "textDim": color(g.get("textDim"), "#B4B5BC"),
         "selected": color(g.get("selected"), "#8B7DFF"), "error": color(g.get("error"), "#E5534B"),
         "warning": color(g.get("warning"), "#D4B26A"), "accent": color(g.get("accent"), "#8B7DFF"),
-        "muted": color(g.get("uiTextDim"), "#737373"),
+        "muted": color(g.get("uiTextDim"), "#737373"), "focus": color(g.get("blue"), "#5AD2F0"),
         "radius": float(g.get("cornerRadius", 10)), "header": g.get("headerStyle", "tinted"),
         "dots": g.get("canvasStyle", "dots") == "dots", "shadow": bool(g.get("shadow", True)),
         "categories": {k: color(v, "#9095A0") for k, v in (g.get("categories") or {}).items()},
         "ports": {k: color(v, "#C8C8C8") for k, v in (g.get("ports") or {}).items()},
     }
+    # An exposed param's input is named in the Field port's color, lighter (Maya's lighter(120)).
+    t["param"] = _lighter(_port_color(t, "Field"), 1.2)
     _theme_cache["t"] = t
     return t
 
@@ -136,6 +138,29 @@ def _port_color(t, port_type):
     return uikit._linear_rgba(tuple(c / 255.0 for c in rgb))
 
 
+def _srgb_of(c):
+    """A linear color's sRGB components (0-1), as Qt holds colors."""
+    return tuple(12.92 * v if v <= 0.0031308 else 1.055 * v ** (1 / 2.4) - 0.055 for v in c[:3])
+
+
+def _readable_on(c):
+    """Dark or light text, whichever reads on `c` (Maya's graph_editor.readable_on)."""
+    r, g, b = _srgb_of(c)
+    luma = 0.2126 * r + 0.7152 * g + 0.0722 * b
+    return uikit._linear_rgba((28 / 255.0, 29 / 255.0, 33 / 255.0) if luma > 0.55 else (1.0, 1.0, 1.0))
+
+
+def _lighter(c, factor):
+    """QColor.lighter in sRGB: the value scaled, past full taking the excess off the saturation."""
+    import colorsys
+    h, s, v = colorsys.rgb_to_hsv(*_srgb_of(c))
+    v *= factor
+    if v > 1.0:
+        s = max(0.0, s - (v - 1.0))
+        v = 1.0
+    return uikit._linear_rgba(colorsys.hsv_to_rgb(h, s, v), c[3] if len(c) > 3 else 1.0)
+
+
 def with_alpha(c, a):
     return (c[0], c[1], c[2], a)
 
@@ -149,6 +174,7 @@ class Box(object):
         self.node, self.rect, self.k = node, rect, k
         self.inputs, self.outputs = [], []  # (socket, (x, y)) in region pixels
         self.toggles = []                   # (id, rect): the header's toggles, left to right
+        self.header_ink = None              # on a filled header: the ink that reads on its color
 
 
 class Graph(object):
@@ -536,7 +562,10 @@ def _draw_node(p, t, box, errors, notes, times, viewed, active):
                radius, top - HEADER * k, top)
         p.band(box.rect, color, color, radius, top - 2.0 * k, top)
     readable = 14 * k >= 6
-    ink = t["text"]
+    filled = t["header"] == "filled"
+    # The header's text as Maya's: on a filled header the ink that reads on its color, else the text.
+    ink = _readable_on(color) if filled else t["text"]
+    box.header_ink = ink if filled else None
     # The toggles, then the badges right to left before them, then the name in what is left.
     left_of_toggles = box.toggles[0][1][0] - 4.0 * k if box.toggles else x + w - 8.0 * k
     for ident, r in box.toggles:
@@ -548,7 +577,12 @@ def _draw_node(p, t, box, errors, notes, times, viewed, active):
     if stamp and readable:
         size = 11
         tw = p.text_size(stamp, size)
-        p.text(stamp, (bx - tw, top - HEADER * k, tw, HEADER * k), with_alpha(ink, 0.75), size=size, clip=False)
+        ms = times.get(name)
+        # As Maya's: on a filled header its ink; else the warning color when slow, otherwise the text
+        # faded (Maya's muted gray is too dark on this header's brighter wash).
+        stamp_color = with_alpha(ink, 190 / 255.0) if filled else (
+            t["warning"] if ms is not None and ms >= graph_editor.SLOW_MS else with_alpha(ink, 0.75))
+        p.text(stamp, (bx - tw, top - HEADER * k, tw, HEADER * k), stamp_color, size=size, clip=False)
         bx -= tw + 6.0 * k
     if node.gl_viewed and not viewable(box):
         _eye(p, (bx - 7.0 * k, mid), 6.5 * k, t["accent"], 1.4, 2.0 * k)
@@ -557,8 +591,8 @@ def _draw_node(p, t, box, errors, notes, times, viewed, active):
         c, s = (bx - 6.0 * k, mid), 12.0 * k
         hh = s * 0.9
         p.lines([(c[0], c[1] + hh / 2), (c[0] + s / 2, c[1] - hh / 2), (c[0] - s / 2, c[1] - hh / 2), (c[0], c[1] + hh / 2)],
-                t["warning"], 1.4)
-        p.lines([(c[0], c[1] + hh * 0.12), (c[0], c[1] - hh * 0.18)], t["warning"], 1.4)
+                ink if filled else t["warning"], 1.4)
+        p.lines([(c[0], c[1] + hh * 0.12), (c[0], c[1] - hh * 0.18)], ink if filled else t["warning"], 1.4)
         bx -= 17.0 * k
     if readable:
         tx = x + 12.0 * k
@@ -576,20 +610,24 @@ def _draw_node(p, t, box, errors, notes, times, viewed, active):
         else:
             p.rect((px - r, py - r, 2 * r, 2 * r), pc, r)
         if readable:
-            p.text(s.name, (px + 10 * k, py - ROW * k / 2, w / 2, ROW * k), t["textDim"], size=13)
+            param = s.display_shape.startswith("DIAMOND")  # an exposed param: the Field color, lighter
+            p.text(s.name, (px + 10 * k, py - ROW * k / 2, w / 2, ROW * k), t["param"] if param else t["text"], size=13)
     for s, (px, py) in box.outputs:
         pc = _port_color(t, _port_type(s))
         r = PORT_R * k
         p.rect((px - r, py - r, 2 * r, 2 * r), pc, r)
         if readable:
-            p.text(s.name, (px - 10 * k - w / 2, py - ROW * k / 2, w / 2, ROW * k), t["textDim"], size=13, align="right")
+            p.text(s.name, (px - 10 * k - w / 2, py - ROW * k / 2, w / 2, ROW * k), t["text"], size=13, align="right")
     if box.type_row and readable:
         info = graph_editor.graph_authoring.library_info(node) if node.gl_library_info else {}
-        p.text(info.get("label") or graph_tree.label_of(node.gl_type), (x, y + 2 * k, w, 14 * k), t["muted"], size=11,
+        # The type: under a tinted header the category's color, lighter, as Maya's; under a filled one
+        # (Maya writes it on the header, here it sits on the card) or a minimal one, muted.
+        kind = _lighter(color, 1.15) if t["header"] == "tinted" else t["textDim"]
+        p.text(info.get("label") or graph_tree.label_of(node.gl_type), (x, y + 2 * k, w, 14 * k), kind, size=11,
                align="center")
     p.fade = 1.0
     if node.gl_evaluation in graph_tree.EVALUATION_LABELS and readable:
-        p.text(graph_tree.EVALUATION_LABELS[node.gl_evaluation].lower(), (x + 4 * k, y - 18 * k, w - 8 * k, 16 * k), t["muted"],
+        p.text(graph_tree.EVALUATION_LABELS[node.gl_evaluation].lower(), (x + 4 * k, y - 18 * k, w - 8 * k, 16 * k), t["textDim"],
                size=11)
     if name in errors:
         p.rect((x - 3 * k, y - 3 * k, w + 6 * k, h + 6 * k), (0, 0, 0, 0), radius + 3 * k, t["error"], 2.0 * k)
@@ -603,39 +641,42 @@ def _draw_node(p, t, box, errors, notes, times, viewed, active):
 
 
 def _draw_toggle(p, t, box, ident, r, viewed):
+    """A header toggle in Maya's colors (graph_editor.paint_toggles): idle, the muted text (on a filled
+    header its ink, fainter); lit, View, Expand Inputs and Clump Colors in the blue, Bypass in the
+    warning color (on a filled header its ink), on a tile of that color."""
     node, k = box.node, box.k
-    ink = t["text"]
     c = (r[0] + r[2] / 2, r[1] + r[3] / 2)
     if ident == "bypass":
         on = node.mute
-        if on:
-            p.rect(r, with_alpha(ink, 46 / 255.0), 4 * k)
-        rad = r[2] / 2 - 4 * k
-        col = ink if on else with_alpha(ink, 120 / 255.0)
-        ring = [(c[0] + rad * math.cos(a * math.pi / 12), c[1] + rad * math.sin(a * math.pi / 12)) for a in range(25)]
-        p.lines(ring, col, 1.8 if on else 1.5)
-        d = rad * 0.7071
-        p.lines([(c[0] - d, c[1] - d), (c[0] + d, c[1] + d)], col, 1.8 if on else 1.5)
     elif ident == "view":
         on = node.gl_viewed
-        col = t["accent"] if on else with_alpha(t["textDim"], 170 / 255.0)
-        if on:
-            p.rect(r, with_alpha(col, 60 / 255.0), 4 * k)
-        _eye(p, c, 6.5 * k, col, 1.8 if on else 1.5, 2.2 * k)
     elif ident == "inputs":
         exposed = set(json.loads(node.gl_inputs or "[]"))
         names = [s["name"] for s in graph_tree.node_param_specs(node) if s.get("port")]
         on = bool(names) and all(n in exposed for n in names)
-        col = ink if on else with_alpha(ink, 170 / 255.0)
-        for dy in (5.0, 9.0, 13.0):
-            yy = r[1] + r[3] - dy * k
-            p.lines([(r[0] + 4 * k, yy), (r[0] + r[2] - 4 * k, yy)], col, 1.6)
-    elif ident == "clump":
+    else:  # clump
         scalp = getattr(node.id_data, "gl_scalp", None)
         on = bool(scalp) and graph_tree.clump_colored(scalp, node)
-        col = t["accent"] if on else with_alpha(t["textDim"], 170 / 255.0)
-        if on:
-            p.rect(r, with_alpha(col, 60 / 255.0), 4 * k)
+    ink = getattr(box, "header_ink", None)
+    idle = with_alpha(ink, 150 / 255.0) if ink is not None else t["textDim"]
+    active = t["warning"] if ident == "bypass" else t["focus"]
+    col = (ink if ink is not None else active) if on else idle
+    if on:
+        p.rect(r, with_alpha(col, 70 / 255.0), 4 * k)
+    width = 1.8 if on else 1.6
+    if ident == "bypass":
+        rad = r[2] / 2 - 4 * k
+        ring = [(c[0] + rad * math.cos(a * math.pi / 12), c[1] + rad * math.sin(a * math.pi / 12)) for a in range(25)]
+        p.lines(ring, col, width)
+        d = rad * 0.7071
+        p.lines([(c[0] - d, c[1] - d), (c[0] + d, c[1] + d)], col, width)
+    elif ident == "view":
+        _eye(p, c, 6.5 * k, col, width, 2.2 * k)
+    elif ident == "inputs":
+        for dy in (5.0, 9.0, 13.0):
+            yy = r[1] + r[3] - dy * k
+            p.lines([(r[0] + 4 * k, yy), (r[0] + r[2] - 4 * k, yy)], col, width)
+    else:
         hues = ((0.87, 0.16, 0.1, 1.0), (0.1, 0.58, 0.19, 1.0), (0.13, 0.3, 0.91, 1.0))
         for (dx, dy), hue in zip(((0.0, 3.4), (-3.6, -2.6), (3.6, -2.6)), hues):
             rr = 2.6 * k

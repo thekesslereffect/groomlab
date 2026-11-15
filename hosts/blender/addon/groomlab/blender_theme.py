@@ -45,6 +45,7 @@ def graph_colors():
     ui = data.get("ui", {})
     graph["accent"] = resolve(ui.get("accent", "#5B8DEF"))
     graph["uiTextDim"] = resolve(ui.get("textMuted", "#737373"))
+    graph["blue"] = resolve("blue")  # the View and Expand Inputs toggles lit (Maya's FOCUS)
     return graph
 
 
