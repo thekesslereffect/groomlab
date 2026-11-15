@@ -3,9 +3,12 @@
 // the map shown on the scalp.
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <map>
 #include <stdexcept>
+#include <utility>
+#include <vector>
 
 #include "groomlab/curve.h"
 #include "groomlab/display.h"
@@ -326,6 +329,47 @@ void writeCardBakePreview(const std::string& prefix) {
     writeCompressedPng(prefix + "Preview.png", width, height, 4, preview);
 }
 
+namespace {
+
+// Each quad's split across its other diagonal (the host's polygons(): a polygon of two triangles
+// sharing an edge): two triangles a quad, as (points, the corners of the mesh's triangles they take
+// their uvs from: triangle * 3 + k), wound as the quad's own.
+std::vector<std::pair<std::array<std::size_t, 3>, std::array<std::size_t, 3>>> otherQuadSplits(const ScalpMesh& scalp) {
+    std::vector<std::pair<std::array<std::size_t, 3>, std::array<std::size_t, 3>>> out;
+    const auto& tris = scalp.triangles();
+    std::size_t t = 0;
+    for (const std::int32_t count : scalp.polygons()) {
+        const std::size_t first = t;
+        t += static_cast<std::size_t>(std::max(count, 0));
+        if (count != 2 || t > tris.size()) continue;
+        const auto& a = tris[first];
+        const auto& b = tris[first + 1];
+        auto in = [](const ScalpMesh::Triangle& tri, std::int32_t v) { return tri[0] == v || tri[1] == v || tri[2] == v; };
+        // a = (r, u, w) from its corner off the shared edge u-w; b holds u, w and s: the quad r u s w.
+        int ra = -1, sb = -1;
+        for (int k = 0; k < 3; ++k) {
+            if (!in(b, a[static_cast<std::size_t>(k)])) ra = k;
+            if (!in(a, b[static_cast<std::size_t>(k)])) sb = k;
+        }
+        if (ra < 0 || sb < 0) continue;  // (not two triangles of one quad)
+        const std::size_t r = static_cast<std::size_t>(ra), u = (r + 1) % 3, w = (r + 2) % 3;
+        std::size_t ub = 3, wb = 3;
+        for (std::size_t k = 0; k < 3; ++k) {
+            if (b[k] == a[u]) ub = k;
+            if (b[k] == a[w]) wb = k;
+        }
+        if (ub == 3 || wb == 3) continue;
+        const std::size_t s = static_cast<std::size_t>(sb);
+        auto point = [](std::int32_t v) { return static_cast<std::size_t>(v); };
+        // Across r-s: (r, u, s) and (r, s, w).
+        out.push_back({{point(a[r]), point(a[u]), point(b[s])}, {first * 3 + r, first * 3 + u, (first + 1) * 3 + s}});
+        out.push_back({{point(a[r]), point(b[s]), point(a[w])}, {first * 3 + r, (first + 1) * 3 + s, first * 3 + w}});
+    }
+    return out;
+}
+
+}  // namespace
+
 DisplayGeometry scalpMapGeometry(const ScalpMesh* scalp, const ScalpMapView& view, bool textured) {
     DisplayGeometry batch;
     textured = textured && scalp && scalp->hasUVs();
@@ -348,6 +392,11 @@ DisplayGeometry scalpMapGeometry(const ScalpMesh* scalp, const ScalpMapView& vie
     }
     const float lift = 0.0015f * std::max((hi - lo).length(), 1e-6f);
     for (Vec3f& n : normals) n = n.normalized();
+    // A quad drawn across its other diagonal too: a host's viewport may split it the other way
+    // (Blender's across 0-2, ours across the shorter one, as Maya's), and on a bent quad that fold
+    // stands out past the lift, the mesh showing through the map in patches. Over both splits the
+    // map is above the mesh however the host splits it.
+    const auto others = otherQuadSplits(*scalp);
     auto put = [](std::vector<float>& into, const Vec3f& value) {
         into.push_back(value.x);
         into.push_back(value.y);
@@ -366,6 +415,16 @@ DisplayGeometry scalpMapGeometry(const ScalpMesh* scalp, const ScalpMapView& vie
                 batch.indices.push_back(next++);
             }
         }
+        for (const auto& [tri, corners] : others) {
+            (void)tri;
+            for (const std::size_t corner : corners) {
+                const auto v = static_cast<std::size_t>(scalp->triangles()[corner / 3][corner % 3]);
+                put(batch.positions, points[v] + normals[v] * lift);
+                batch.uvs.push_back(uvs[corner][0]);
+                batch.uvs.push_back(uvs[corner][1]);
+                batch.indices.push_back(next++);
+            }
+        }
         return batch;
     }
     for (std::size_t v = 0; v < points.size(); ++v) {
@@ -379,6 +438,10 @@ DisplayGeometry scalpMapGeometry(const ScalpMesh* scalp, const ScalpMapView& vie
     }
     for (const auto& tri : scalp->triangles()) {
         for (const std::int32_t v : tri) batch.indices.push_back(static_cast<std::uint32_t>(v));
+    }
+    for (const auto& [tri, corners] : others) {
+        (void)corners;
+        for (const std::size_t v : tri) batch.indices.push_back(static_cast<std::uint32_t>(v));
     }
     return batch;
 }

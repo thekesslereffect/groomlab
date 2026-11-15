@@ -28,6 +28,7 @@
 #include "groomlab/hair_color.h"
 #include "groomlab/parts.h"
 #include "groomlab/random.h"
+#include "groomlab/retriangulate.h"
 #include "test_helpers.h"
 
 namespace groomlab {
@@ -1488,6 +1489,69 @@ TEST(Display, GuideColorsStartFromTheGroomsOwnHue) {
     EXPECT_EQ(guideColors("groom1", ""), guideColors("groom1", ""));
     const std::string own = "primary:#ff8800 children:#00ff80";
     EXPECT_EQ(guideColors("groom1", own), guideColors("groom2", own));
+}
+
+// The map on the scalp over a bent quad: split across both diagonals, so a host splitting it the
+// other way (Blender across 0-2) never stands out through the map (the mesh in patches).
+TEST(DisplayScalpMap, BentQuadsAreCoveredAcrossBothDiagonals) {
+    // A quad bent up across 1-3: its shorter diagonal 0-2 (ours, as Maya's), Blender's 0-2 too here
+    // or 1-3 for another quad; either way the map covers the fold.
+    const std::vector<Vec3f> points{{0, 0, 0}, {1, 0, 0.6f}, {1.1f, 1.1f, 0}, {0, 1, 0.6f}};
+    std::vector<ScalpMesh::Triangle> triangles;
+    std::vector<ScalpMesh::UV> uvs;
+    const std::array<ScalpMesh::UV, 4> quadUVs{{{0, 0}, {1, 0}, {1, 1}, {0, 1}}};
+    for (const auto& tri : polygonTriangles(points)) {
+        triangles.push_back({tri[0], tri[1], tri[2]});
+        for (const int k : tri) uvs.push_back(quadUVs[static_cast<std::size_t>(k)]);
+    }
+    auto mesh = std::make_shared<ScalpMesh>(points, triangles);
+    mesh->setCornerUVs(uvs);
+    mesh->setPolygons({2});
+    ScalpMapView view;
+    view.kind = "vertices";
+    view.values = std::make_shared<const std::vector<float>>(std::vector<float>{0.0f, 0.25f, 0.5f, 1.0f});
+
+    auto diagonals = [](const std::vector<std::uint32_t>& indices) {
+        std::set<std::pair<std::uint32_t, std::uint32_t>> edges;
+        for (std::size_t t = 0; t + 2 < indices.size(); t += 3) {
+            for (std::size_t k = 0; k < 3; ++k) {
+                const std::uint32_t a = indices[t + k], b = indices[t + (k + 1) % 3];
+                edges.insert({std::min(a, b), std::max(a, b)});
+            }
+        }
+        return edges;
+    };
+    const DisplayGeometry perVertex = scalpMapGeometry(mesh.get(), view, false);
+    ASSERT_EQ(perVertex.indices.size(), 12u) << "the quad's two triangles, and the two across its other diagonal";
+    const auto edges = diagonals(perVertex.indices);
+    EXPECT_TRUE(edges.count({0u, 2u})) << "across 0-2";
+    EXPECT_TRUE(edges.count({1u, 3u})) << "across 1-3";
+    // Lifted off the mesh: each diagonal's middle above the mesh's split across it.
+    for (const auto& [a, b] : {std::pair<int, int>{0, 2}, std::pair<int, int>{1, 3}}) {
+        auto at = [&](int v) { return Vec3f{perVertex.positions[3 * v], perVertex.positions[3 * v + 1], perVertex.positions[3 * v + 2]}; };
+        const float under = 0.5f * (points[static_cast<std::size_t>(a)].z + points[static_cast<std::size_t>(b)].z);
+        EXPECT_GT(0.5f * (at(a).z + at(b).z), under) << a << "-" << b;
+    }
+
+    // A texture map: the corners as triangles of their own, each at its vertex's uv.
+    const DisplayGeometry textured = scalpMapGeometry(mesh.get(), view, true);
+    ASSERT_EQ(textured.positions.size(), 12u * 3u);
+    ASSERT_EQ(textured.uvs.size(), 12u * 2u);
+    for (std::size_t c = 0; c < 12; ++c) {
+        // The vertex a corner is: the nearest point to its (lifted) position.
+        std::size_t v = 0;
+        float best = std::numeric_limits<float>::max();
+        for (std::size_t p = 0; p < points.size(); ++p) {
+            const Vec3f d = Vec3f{textured.positions[3 * c], textured.positions[3 * c + 1], textured.positions[3 * c + 2]} - points[p];
+            if (d.length() < best) best = d.length(), v = p;
+        }
+        EXPECT_FLOAT_EQ(textured.uvs[2 * c], quadUVs[v][0]) << c;
+        EXPECT_FLOAT_EQ(textured.uvs[2 * c + 1], quadUVs[v][1]) << c;
+    }
+
+    // No polygons (a host that sends triangles only): nothing added.
+    auto plain = std::make_shared<ScalpMesh>(points, triangles);
+    EXPECT_EQ(scalpMapGeometry(plain.get(), view, false).indices.size(), 6u);
 }
 
 }  // namespace
