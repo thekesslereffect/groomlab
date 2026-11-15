@@ -1570,7 +1570,7 @@ class ToolPalette(QtWidgets.QWidget):
         mirror.setToolTip(self.symmetry.toolTip())
         self.applies_block.add(self.symmetry_row)
         card.addWidget(self.applies_block)
-        # Selected guides (Shape, Select): after Applies to.
+        # Selected guides (Shape, Select): last (the Tube tool has no Applies to: its Mirror is in Brush).
         card.addWidget(self.tube_panel.selected_block)
 
         # Right under the grid: the list the tab works on (Guide groups, Maps, Layers, Photos);
@@ -2477,7 +2477,7 @@ class ToolPalette(QtWidgets.QWidget):
     def tube_tool_blocks(self):
         """The Tube tool card's blocks, which fold away (their state remembered: issue 70)."""
         return (self.brush_block, self.tube_channel_box, self.tube_panel.profile_block, self.tonic.root_block,
-                self.tonic.hierarchy_block, self.applies_block, self.tube_panel.selected_block)
+                self.tonic.hierarchy_block, self.tube_panel.selected_block)
 
     def show_tool_settings(self):
         """The card shows what its tool uses (the catalog's settings for it: card_tool()), and
@@ -2539,9 +2539,14 @@ class ToolPalette(QtWidgets.QWidget):
             self.fill_flow_count(self.groom())
         self.part_box.setVisible("parts" in uses)
         # Applies to: Acts on where the tool has targets, Mirror for the tools that mirror.
-        self.target_box.setVisible("targets" in uses)
+        # The Tube tool: no Applies to; its Mirror at the bottom of Brush. Every other tool: in Applies to.
+        tube_card = tool == "shape"
+        home = self.brush_block if tube_card else self.applies_block
+        if self.symmetry_row.parentWidget() is not home.content:
+            home.body.addWidget(self.symmetry_row)
+        self.target_box.setVisible("targets" in uses and not tube_card)
         self.symmetry_row.setVisible("symmetry" in uses)
-        self.applies_block.setVisible("targets" in uses or "symmetry" in uses)
+        self.applies_block.setVisible(not tube_card and ("targets" in uses or "symmetry" in uses))
         self.show_sections()
         if tool in self.strengths:
             signed = tool in SIGNED

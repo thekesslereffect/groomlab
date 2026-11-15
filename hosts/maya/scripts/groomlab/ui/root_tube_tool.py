@@ -56,7 +56,7 @@ MODES = ("place", "draw", "edit", "select", "duplicate")
 
 # The preview's node (the plugin's, root_outlines.h) and its styles' bits.
 OUTLINES_NODE = "groomLabRootOutlines"
-CLOSED, FILLED, DOTS, HIGHLIGHT, MARKER = 1, 2, 4, 8, 16
+CLOSED, FILLED, DOTS, HIGHLIGHT, MARKER, DIM = 1, 2, 4, 8, 16, 32
 STROKE = 1 << 10  # (the tool's own: a drawn path, in the air, not laid on the scalp)
 DOT_PIXELS = 9.0  # the CV dots' size across
 EDGE_PIXELS = 3.0  # the edges' width (edited or selected: 1.5 times, green)
@@ -997,12 +997,12 @@ class RootTubeTool(object):
                 for g, cvs in zip(self.picked, self.ghost[1]):
                     out.append((cvs, self.color_of(g), CLOSED | FILLED | HIGHLIGHT | DOTS))
         else:
-            for g, cvs in self.neighbours:  # (their CVs shown: what a new CV snaps onto)
-                out.append((cvs, self.color_of(g), CLOSED | FILLED | DOTS))
-            if self.cvs:
+            for g, cvs in self.neighbours:  # (their CVs shown dimmed: what a new CV snaps onto)
+                out.append((cvs, self.color_of(g), CLOSED | DOTS | DIM))
+            if self.cvs:  # (the root being drawn: edged green, as a selected root)
                 closed = self.mode == "draw"
                 out.append((self.cvs, COLORS["closing" if closed else "outline"],
-                            DOTS | (CLOSED | HIGHLIGHT if closed else 0)))
+                            DOTS | HIGHLIGHT | (CLOSED if closed else 0)))
             if self.mode == "draw" and self.center is not None:
                 out.append(([self.center], COLORS["closing"], MARKER | HIGHLIGHT))
                 if len(self.stroke) >= 2:

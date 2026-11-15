@@ -260,7 +260,26 @@ class TonicTubes(QtCore.QObject):
     def toggle_draw(self, _on=None):
         if self._mode() in ("place", "draw"):  # again: the outline being drawn dropped, the mode left
             return self.back_to_brush()
+        self.to_base_level()
         self._enter("place", self.draw_root)
+
+    def to_base_level(self):
+        """A deeper level of the tube hierarchy picked: level 1 shown and picked instead (a new
+        root tube's guide is a level 1 guide, drawn there)."""
+        groom = self.owner.groom()
+        if not groom:
+            return
+        try:
+            info = root_tubes.tube_levels(groom, picked=self.owner.current_group() or self._base)
+        except (RuntimeError, ValueError):
+            return
+        levels = info.get("levels") or []
+        if info.get("base") and len(levels) > 1 and self.owner.current_group() in levels[1:]:
+            try:
+                self._after_levels(groom, info["base"], 1)
+                self.owner.status.setText("Level 1 shown: a new root tube is drawn at the base level.")
+            except (RuntimeError, ValueError) as e:
+                self.owner.status.setText(str(e).strip())
 
     def toggle_edit(self, _on=None):
         # Finish edit (the button said so, even should Maya have changed tools meanwhile): the

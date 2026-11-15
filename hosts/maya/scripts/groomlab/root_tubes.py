@@ -392,7 +392,7 @@ def _clear_of_scalp(points, surface, size):
     reach = int(math.ceil(3.0 * sigma))
     kernel = [math.exp(-0.5 * (k / sigma) ** 2) for k in range(-reach, reach + 1)]
     peak = max(kernel)
-    for _ in range(12):
+    for _ in range(6):
         lifts = []
         for i, p in enumerate(pts):
             q, n = surface(p)

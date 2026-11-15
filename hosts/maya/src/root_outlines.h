@@ -33,7 +33,8 @@ public:
     bool excludeAsLocator() const override { return false; }
 
     // styles[k]'s bits.
-    enum Style : int { kClosed = 1, kFilled = 2, kDots = 4, kHighlight = 8, kMarker = 16 };
+    // kDim: its CVs' dots darker (another root's, shown while a new one is drawn).
+    enum Style : int { kClosed = 1, kFilled = 2, kDots = 4, kHighlight = 8, kMarker = 16, kDim = 32 };
 
     static const MTypeId kTypeId;
     static const MString kTypeName;

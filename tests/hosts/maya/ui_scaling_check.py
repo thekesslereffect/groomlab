@@ -478,8 +478,7 @@ def main():
                 ("comb", ["Brush", "Applies to"]),  # Stretch: a Brush chip
                 ("place", ["New guides", "Tube", "Applies to"]),
                 ("draw", ["New guides", "Tube", "Applies to"]),
-                ("shape", ["Brush", "Visibility", "Profile", "Tube roots", "Tube hierarchy", "Applies to",
-                           "Selected guides"]),
+                ("shape", ["Brush", "Visibility", "Profile", "Tube roots", "Tube hierarchy", "Selected guides"]),
                 ("select", ["Selection", "Applies to"]),
                 ("lengths", ["Keys", "Applies to"]),
                 ("erase", ["Brush", "Erases", "Applies to"]),
@@ -521,7 +520,7 @@ def main():
             tools.show_tool_settings()
             settle()
             shown = [b for b in tools.tube_tool_blocks() if b.isVisibleTo(tools)]
-            _expect(len(shown) == 7 and all(b.chevron is not None and b.chevron.isVisibleTo(tools) for b in shown),
+            _expect(len(shown) == 6 and all(b.chevron is not None and b.chevron.isVisibleTo(tools) for b in shown),
                     "Tube: every block folds")
             _expect(tools.brush_block.title.isVisibleTo(tools), "Tube: Brush titled (to fold it)")
             profile = tools.tube_panel.profile_block

@@ -273,7 +273,14 @@ void RootOutlinesDrawOverride::addUIDrawables(const MDagPath&, MHWRender::MUIDra
             const bool high = (o.style & RootOutlines::kHighlight) != 0;
             disc(o.points[0], std::max(1.6 * data->dotSize, 12.0), o.color, high ? data->edgeColor : dark, high ? 2.5f : 1.5f);
         }
-        for (const MPoint& p : data->dots) disc(p, data->dotSize, data->dotColor, dark, 1.5f);
+        for (std::size_t i = 0; i < data->dots.size(); ++i) {
+            const int owner = data->dotOwners[i];
+            const bool dim = owner >= 0 && static_cast<std::size_t>(owner) < data->outlines.size() &&
+                             (data->outlines[static_cast<std::size_t>(owner)].style & RootOutlines::kDim);
+            MColor c = data->dotColor;
+            if (dim) c = MColor(c.r * 0.45f, c.g * 0.45f, c.b * 0.45f, 1.0f);
+            disc(data->dots[i], dim ? 0.8 * data->dotSize : data->dotSize, c, dark, 1.5f);
+        }
         draw.endDrawable();
     } catch (...) {
     }

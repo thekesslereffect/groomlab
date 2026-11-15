@@ -2054,6 +2054,7 @@ void DisplayBuilder::buildGuides(const DisplayInputs& in, const DisplaySettings&
                 auto own = grp ? groupColors.find(grp->name) : groupColors.end();
                 if (own != groupColors.end()) c = own->second;
             }
+            bool isFrozen = false;
             if (attributes) {
                 if (byLayer) {
                     float v = 0.0f;
@@ -2062,16 +2063,20 @@ void DisplayBuilder::buildGuides(const DisplayInputs& in, const DisplaySettings&
                     c = {0.08f + 0.92f * v, 0.08f + 0.92f * v, 0.08f + 0.92f * v};
                 }
                 float frozen = 0.0f;
-                if (hierarchy->effectiveAttribute(g, "freeze", &frozen) && frozen >= 0.5f) c = theme.frozen;
+                if (hierarchy->effectiveAttribute(g, "freeze", &frozen) && frozen >= 0.5f) {
+                    c = theme.frozen;
+                    isFrozen = true;
+                }
             } else if (byLayer) {
                 c = {0.08f, 0.08f, 0.08f};
             }
-            if (regionScalp) {  // its region's color, at its base guide's root (frozen ones too)
+            if (regionScalp) {  // its region's color, at its base guide's root; a frozen one (soloed out) dimmed
                 const StrandRoot base = hierarchy->baseRootOf(g);
                 if (regionScalp->contains(base)) {
                     const ScalpMesh::Color r = regionScalp->colorAt(s.guideRegionMap, base);
                     if (r[0] + r[1] + r[2] >= 0.03f) c = {r[0], r[1], r[2]};
                 }
+                if (isFrozen) c = {c[0] * 0.3f, c[1] * 0.3f, c[2] * 0.3f};
             }
             const bool dimmed = isolated != kNoGroup && !inIsolated(g.group);
             if (dimmed) c = {c[0] * 0.25f, c[1] * 0.25f, c[2] * 0.25f};
