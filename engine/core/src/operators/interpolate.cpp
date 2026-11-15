@@ -839,6 +839,9 @@ private:
 // fillTubes: how far off the plane of a tube's root footprint a strand's root may lie and still
 // be in the tube, in the root section's larger half-extents.
 constexpr float kTubeAlongReach = 4.0f;
+// How far outside a deeper tube of its root a strand no deeper tube holds may lie and still be
+// taken by it (the gaps between a split's slices), in the tube's larger half-extents.
+constexpr float kTubeAdoptReach = 0.5f;
 
 // Words per strand in the tubes the kernel reads (look_run.h InterpolateInputs::tubes, look.slang tubeOf).
 constexpr std::size_t kTubeStrandWords = 24;
@@ -2459,6 +2462,41 @@ private:
                 }
                 return true;
             });
+            // Its root's deeper tubes holding none of it (a split's slices leave gaps between them
+            // and short of the root's edge, or it lies in no tube at all): the nearest of the
+            // deepest level within reach takes it, so every strand of a split root rides (and
+            // clumps with) one of its slices, never the root's own tube between them.
+            if (mine >= 0) {
+                const int heldLevel = best < 0 ? -1 : fill.depths[static_cast<std::size_t>(best)];
+                std::int32_t adopt = -1;
+                int adoptLevel = -1;
+                float adoptDepth = 0.0f;
+                SectionPoint adoptAt;
+                grid.around(root, [&](std::uint32_t i) {
+                    const std::uint32_t k = tubes[i];
+                    const int level = fill.depths[k];
+                    if (!ours(k) || level <= heldLevel) return true;
+                    const TubeSpine& spine = fill.spines[k];
+                    const float extent = std::max(spine.rootWidth(), spine.rootHeight());
+                    float along = 0.0f;
+                    const SectionPoint at = spine.rootCoords(root, &along);
+                    if (std::abs(along) > kTubeAlongReach * extent) return true;
+                    const float depth = footprintDepth(spine, at);
+                    if (depth < -kTubeAdoptReach * extent) return true;
+                    if (adopt < 0 || level > adoptLevel ||
+                        (level == adoptLevel && (depth > adoptDepth || (depth == adoptDepth && static_cast<std::int32_t>(k) < adopt)))) {
+                        adopt = static_cast<std::int32_t>(k);
+                        adoptLevel = level;
+                        adoptDepth = depth;
+                        adoptAt = at;
+                    }
+                    return true;
+                });
+                if (adopt >= 0) {
+                    best = adopt;
+                    bestAt = adoptAt;
+                }
+            }
             fill.tubeOf[s] = best;
             fill.at[s] = bestAt;
             if (best >= 0) fill.blends[s] = fill.spines[static_cast<std::size_t>(best)].tube().blendPoint(bestAt.u, bestAt.v);
