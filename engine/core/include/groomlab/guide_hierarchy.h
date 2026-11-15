@@ -367,6 +367,9 @@ public:
     StrandRoot baseRootOf(const HierarchyGuide& g) const;
     // That guide's ID (its own for a guide with none).
     GuideId baseIdOf(const HierarchyGuide& g) const;
+    // The root-first tubes (primaries whose tube takes a kOwnedTubeShapePrefix shape: a root
+    // outline drawn on the scalp), in ID order: root tube k's color is rootTubeColor(k).
+    std::vector<GuideId> rootTubeIds() const;
 
     // Everything the hierarchy holds, hashed. Worked out once and kept until the next change:
     // every non-const member clears it (a new one must too), so hosts may call it on every
@@ -443,5 +446,9 @@ struct TubeTargets {
 };
 TubeTargets tubeTargetsOf(const GuideHierarchy& hierarchy, const std::vector<GuideId>& selection,
                           const std::string& freeze = "freeze");
+
+// Root tube k's color (in GuideHierarchy::rootTubeIds' order): hues a golden step apart, three
+// brightnesses, none black; root_tubes.region_colors in the Maya scripts makes the same.
+std::array<float, 3> rootTubeColor(std::size_t k);
 
 }  // namespace groomlab

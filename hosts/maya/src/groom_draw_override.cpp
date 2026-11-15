@@ -409,9 +409,6 @@ void GroomSubSceneOverride::updateCardWires(MHWRender::MSubSceneContainer& conta
 
 namespace {
 
-// The tube root region map (groomlab.root_tubes.REGION_MAP): each root tube's area in its own
-// color, which the Tube card's Colors draws the tubes in.
-const char* const kTubeRegionMap = "tubeRoots";
 
 // appendTubeSurface's vertices from `first` on (one guide's tube: rings of the same count, root
 // to tip) in `color`, with what the lit, colored surface needs (DisplayGeometry::scaleSurface):
@@ -601,13 +598,8 @@ void GroomSubSceneOverride::updateTubeWires(MHWRender::MSubSceneContainer& conta
     std::uint64_t key = hashCombine(hashCombine(shape_->hierarchyVersion(), uiSelection_), hashChars(0x7B3u, hidden));
     key = hashCombine(key, reinterpret_cast<std::uintptr_t>(hierarchy.get()));
     key = hashCombine(key, (tubeShadedDrawn_ ? 2u : 1u) + (tubeWireframeDrawn_ ? 4u : 0u) + (tubeColorsDrawn_ ? 8u : 0u));
-    // Colors: the region map's (a color set of its name on the drawn scalp), or none.
-    const MeshPtr scalp = tubeColorsDrawn_ ? shape_->evaluatedScalp() : nullptr;
-    const bool regions = scalp && scalp->hasColorSet(kTubeRegionMap);
-    if (tubeColorsDrawn_) {
-        key = hashCombine(key, regions ? scalp->colorSetHash(kTubeRegionMap) : 0x51u);
-        key = hashCombine(key, reinterpret_cast<std::uintptr_t>(scalp.get()));
-    }
+    // Colors: each root tube's own (rootTubeColor, by its place among the root tubes).
+    const std::vector<GuideId> rootTubes = tubeColorsDrawn_ ? hierarchy->rootTubeIds() : std::vector<GuideId>{};
     if (key == tubeWiresKey_ && (container.find(kTubeWiresItem) || container.find(kTubeSurfacesItem))) return;
     tubeWiresKey_ = key;
     // Every guide shown (its group not hidden), the selected ones (soft-selected left out) apart, to
@@ -627,15 +619,15 @@ void GroomSubSceneOverride::updateTubeWires(MHWRender::MSubSceneContainer& conta
     constexpr std::size_t kBudget = 400000;  // segment ends
     const std::size_t perPoint = 2 * 32 + 2 * 8;
     const std::size_t ringStep = std::max<std::size_t>(1, (points * perPoint + kBudget - 1) / kBudget);
-    // Each tube's color (Colors): its region's where its root lies in one, else (no region map)
-    // its own from its ID; null: the plain color.
+    // Each tube's color (Colors): its root tube's (a tube's split tubes and children in its color),
+    // else its own from its ID; false: the plain color.
     const float kWireAlpha = 0.6f;
     auto colorOf = [&](const HierarchyGuide& g, std::array<float, 4>& out) {
         if (!tubeColorsDrawn_) return false;
-        if (regions) {
-            // (its base guide's region: a tube's split tubes and children in its color)
-            const ScalpMesh::Color c = scalp->colorAt(kTubeRegionMap, hierarchy->baseRootOf(g));
-            if (c[0] + c[1] + c[2] < 0.03f) return false;  // (outside every tube's region)
+        const GuideId base = hierarchy->baseIdOf(g);
+        const auto at = std::lower_bound(rootTubes.begin(), rootTubes.end(), base);
+        if (at != rootTubes.end() && *at == base) {
+            const std::array<float, 3> c = rootTubeColor(static_cast<std::size_t>(at - rootTubes.begin()));
             out = {c[0], c[1], c[2], 1.0f};
             return true;
         }
@@ -853,7 +845,7 @@ DisplaySettings GroomSubSceneOverride::readSettings() {
     s.guideColorMode = MPlug(object_, GroomShape::aGuideColorMode).asShort();
     s.guideColorLayer = MPlug(object_, GroomShape::aGuideColorLayer).asString().asChar();
     // The Tube tool up (its tubes drawn): the guides in their root tubes' region colors.
-    if (shape_ && shape_->tubeWires()) s.guideRegionMap = kTubeRegionMap;
+    if (shape_ && shape_->tubeWires()) s.guideRootColors = true;
     s.isolateGroup = MPlug(object_, GroomShape::aIsolateGroup).asString().asChar();
     s.guidePoints = MPlug(object_, GroomShape::aGuidePoints).asShort();
     s.guideSmoothing = MPlug(object_, GroomShape::aGuideSmoothing).asInt();

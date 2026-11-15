@@ -960,6 +960,30 @@ Vec3f TubeSpine::at(float t, float u, float v, const TubeBlendPoint& blend) cons
     return atSample(i, u, v, blend) * (1.0f - f) + atSample(i + 1, u, v, blend) * f;
 }
 
+void TubeSpine::setRootOnScalp(const Vec3f& normal, const Vec3f& across) {
+    if (centers_.empty()) return;
+    const float len = normal.length();
+    if (!(len > 1e-12f) || !std::isfinite(len)) return;
+    const Vec3f n = normal * (1.0f / len);
+    Vec3f u = across - n * across.dot(n);
+    const float ul = u.length();
+    if (!(ul > 1e-6f) || !std::isfinite(ul)) {
+        setRootSurface(normal);
+        return;
+    }
+    u = u * (1.0f / ul);
+    const Vec3f v = n.cross(u);  // (as a laid footprint: v = n x u)
+    const float twist = tube_.twistAt(0.0f);
+    const float c = std::cos(twist), s = std::sin(twist);
+    footU_ = (u * c + v * s) * rootWidth_;
+    footV_ = (u * -s + v * c) * rootHeight_;
+    footNormal_ = n;
+}
+
+bool isRootTube(const TubeProfile& tube, int depth) {
+    return depth == 0 && tube.custom && tube.custom->name.rfind(kOwnedTubeShapePrefix, 0) == 0;
+}
+
 SectionPoint TubeSpine::rootCoords(const Vec3f& p, float* along) const {
     const Vec3f d = p - centers_.front();
     const float off = d.dot(footNormal_);

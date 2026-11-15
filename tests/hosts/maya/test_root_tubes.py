@@ -172,12 +172,11 @@ class RootTubes(unittest.TestCase):
         self.assertAlmostEqual(n_dense, 2 * n_long, delta=2)
 
     def test_the_root_is_kept_whatever_happens_to_its_guide(self):
-        """Combing, retwisting and resizing the guide's tube leave its root CVs (and its region)
-        as drawn: only editing the root moves them."""
+        """Combing, retwisting and resizing the guide's tube leave its root CVs as drawn: only
+        editing the root moves them."""
         outline = ring((0.0, 1.0, 0.0), 0.15)
         guide = root_tubes.make_root_tube(self.groom, outline, length=0.8)
         before = root_tubes.root_outline(self.groom, guide)
-        regions = json.loads(cmds.getAttr(self.groom + ".scalpMaps"))[root_tubes.REGION_MAP]["values"]
         groomlab.brush_stroke(self.groom, "comb", [(-0.3, 1.3, 0.0), (0.0, 1.3, 0.1), (0.4, 1.3, 0.3)], radius=0.6)
         groomlab.set_tube(self.groom, guides=[guide], twist=1.0, width=0.3)
         self.assertGreater(max(nearest(p, root_tubes.section_outline(self.groom, guide)) for p in before), 0.02,
@@ -186,39 +185,12 @@ class RootTubes(unittest.TestCase):
         self.assertEqual(len(after), len(before))
         for a, b in zip(before, after):
             self.assertLess(tm._dist(a, b), 1e-6)
-        root_tubes.update_regions(self.groom)
-        again = json.loads(cmds.getAttr(self.groom + ".scalpMaps"))[root_tubes.REGION_MAP]["values"]
-        self.assertEqual(again, regions)
         # Editing the root moves them, and puts the tube back on them.
         moved = [on_sphere(tm._add(p, (0.05, 0.0, 0.0))) for p in after]
         root_tubes.edit_root_tube(self.groom, guide, moved)
         for p in moved:
             self.assertLess(nearest(p, root_tubes.root_outline(self.groom, guide)), 0.003)
             self.assertLess(nearest(p, root_tubes.section_outline(self.groom, guide)), 0.01)
-
-    def test_each_tube_is_a_region_of_its_own(self):
-        a = root_tubes.make_root_tube(self.groom, ring((0.0, 1.0, 0.25), 0.18, count=6), length=0.5)
-        b = root_tubes.make_root_tube(self.groom, ring((0.0, 1.0, -0.25), 0.18, count=6), length=0.5)
-        maps = json.loads(cmds.getAttr(self.groom + ".scalpMaps"))
-        entry = maps[root_tubes.REGION_MAP]
-        self.assertEqual(entry.get("channels"), 4)
-        points, _fns = root_tubes._scalp_points(self.groom)
-        color = lambda i: tuple(entry["values"][4 * i:4 * i + 3])  # noqa: E731
-
-        def vertex_near(p):
-            return min(range(len(points)), key=lambda i: tm._dist(points[i], p))
-        ca = color(vertex_near(self.points(a)[0]))
-        cb = color(vertex_near(self.points(b)[0]))
-        far = color(vertex_near((0.0, -1.0, 0.0)))
-        self.assertNotEqual(ca, (0.0, 0.0, 0.0))
-        self.assertNotEqual(cb, (0.0, 0.0, 0.0))
-        self.assertGreater(math.sqrt(sum((x - y) ** 2 for x, y in zip(ca, cb))), 0.1, "the two regions differ")
-        self.assertEqual(far, (0.0, 0.0, 0.0))
-        # Interpolate reads it.
-        graph = groomlab.get_graph(self.groom, expand_default=True)
-        interpolates = [n for n in graph.get("nodes", []) if n.get("type") == "Interpolate"]
-        for node in interpolates:
-            self.assertEqual(node.get("params", {}).get("regionMap"), root_tubes.REGION_MAP)
 
     def test_cvs_snap_onto_a_neighbour_and_edits_follow(self):
         first = ring((0.0, 1.0, 0.0), 0.15, count=4)
@@ -325,8 +297,8 @@ class RootTubes(unittest.TestCase):
         self.assertEqual(root_tubes.root_tubes(self.groom), [int(guide)])
 
     def test_the_footprint_is_the_outline_however_the_guide_leans(self):
-        """Scatter and fillTubes go by the root footprint (the root section turned flat onto the
-        scalp: TubeSpine::setRootSurface): it is the outline drawn, upright or leaning far over, so
+        """Scatter and fillTubes go by the root footprint (fixed on the scalp:
+        TubeSpine::setRootOnScalp): it is the outline drawn, upright or leaning far over, so
         the hair rooted inside the outline is the tube's (none left between, blending any guides)."""
         for way in (None, (0.0, 0.0, 1.0)):
             outline = ring((0.0, 1.0, 0.0), 0.14, count=6)
@@ -346,10 +318,10 @@ class RootTubes(unittest.TestCase):
             shape = root_tubes._library_shape(self.groom, tube["shape"])
             w = tube["width"][0]
             placed = tm.place_outline(shape["points"], tube["twist"][0], w, w * tube["aspect"][0], (0.0, 0.0))
-            # (GroomLab's footprint: the section turned flat, by the least rotation from the
-            # guide's root way onto the scalp's normal)
-            foot = [tm._add(c, root_tubes._turn(tm.from_plane(q, (0.0, 0.0, 0.0), u, v), way_out, normal))
-                    for q in placed]
+            # (GroomLab's footprint: fixed on the scalp, along its frame there, whatever the guide's
+            # lean: TubeSpine::setRootOnScalp)
+            fixed = frames["footprint"]
+            foot = [tm._add(c, tm.from_plane(q, (0.0, 0.0, 0.0), tuple(fixed["u"]), tuple(fixed["v"]))) for q in placed]
 
             def flat(q):
                 d = tm._sub(q, c)
@@ -358,36 +330,6 @@ class RootTubes(unittest.TestCase):
             for q in root_tubes.root_outline(self.groom, guide):
                 grown = tm._add(c, tm._mul(flat(q), k))
                 self.assertLess(min(tm._dist(flat(grown), flat(f)) for f in foot), 0.002, "a CV off the footprint")
-
-    def test_the_region_reaches_just_past_the_outline(self):
-        """A face the outline crosses blends the tube's color with its own, not with black: a band
-        about a face wide outside the outline is the tube's too; far off, black."""
-        guide = root_tubes.make_root_tube(self.groom, ring((0.0, 1.0, 0.0), 0.15, count=6), length=0.5)
-        entry = json.loads(cmds.getAttr(self.groom + ".scalpMaps"))[root_tubes.REGION_MAP]
-        points, _fns = root_tubes._scalp_points(self.groom)
-        outline = root_tubes.root_outline(self.groom, guide)
-        c, u, v, n = root_tubes._plane(outline)
-        flat = [tm.to_plane(q, c, u, v) for q in outline]
-        color = lambda i: tuple(entry["values"][4 * i:4 * i + 3])  # noqa: E731
-        ours = color(min(range(len(points)), key=lambda i: tm._dist(points[i], c)))
-        edge = 2.0 * math.pi / 60.0  # (the sphere's faces: about this wide)
-        just, far = 0, 0
-        for i, q in enumerate(points):
-            d = tm._sub(q, c)
-            if tm._dot(d, n) < -0.5:
-                continue
-            x, y = tm._dot(d, u), tm._dot(d, v)
-            if root_tubes._inside(flat, x, y):
-                continue
-            off = root_tubes._edge_distance(flat, x, y)
-            if off < 0.5 * edge:
-                just += 1
-                self.assertEqual(color(i), ours, "a vertex just outside the outline")
-            elif off > 3.0 * edge:
-                far += 1
-                self.assertEqual(color(i), (0.0, 0.0, 0.0))
-        self.assertGreater(just, 0)
-        self.assertGreater(far, 0)
 
     def test_a_root_duplicated_with_its_hierarchy_and_deleted(self):
         root = on_sphere((0.0, 1.0, 0.0))
@@ -406,7 +348,7 @@ class RootTubes(unittest.TestCase):
             self.assertAlmostEqual(x, y, delta=0.002)  # the same shape
         self.assertLess(tm._dist(on_sphere(root_tubes._centroid(o2)), on_sphere((0.5, 0.85, 0.1))), 0.005)  # set down there
         for q in root_tubes.section_outline(self.groom, b):
-            self.assertLess(nearest(q, o2), 0.003)  # its tube on its root
+            self.assertLess(nearest(q, o2), 0.004)  # its tube on its root (the footprint 1.5% larger, the sphere curving away)
         data = groomlab.get_hierarchy(self.groom)
         kids = lambda gid: sorted(int(x["id"]) for x in data["guides"]  # noqa: E731
                                   if x.get("parent") and int(x["parent"]) == int(gid))
@@ -558,19 +500,16 @@ class RootTubes(unittest.TestCase):
         self.assertEqual(tool.delete_selected(), 2)
         self.assertEqual(len(root_tubes.root_tubes(self.groom)), 3)
 
-    def test_update_regions_refits_a_tube_off_its_root(self):
-        """A tube whose root section drifted off its kept outline (fitted by an earlier GroomLab, or
-        resized) is fitted to it again by Update regions (refresh_root_tubes); a second refresh
-        changes nothing."""
-        guide = root_tubes.make_root_tube(self.groom, ring((0.0, 1.0, 0.0), 0.15), length=0.6)
+    def test_combing_the_guide_leaves_the_root_area_where_it_was_drawn(self):
+        """A root tube's footprint is fixed on the scalp: combed hard over, its guide leans away,
+        but the area its strands root in (and fill) stays the outline as drawn, with no region map."""
+        outline = ring((0.0, 1.0, 0.0), 0.15)
+        guide = root_tubes.make_root_tube(self.groom, outline, length=0.8)
         self.assertLess(root_tubes.footprint_error(self.groom, guide), 0.004)
-        tube = groomlab.get_tube(self.groom, guide)
-        groomlab.set_tube(self.groom, guides=[guide], width=[w * 0.8 for w in tube["width"]], twist=0.4)
-        self.assertGreater(root_tubes.footprint_error(self.groom, guide), 0.05)
-        out = root_tubes.refresh_root_tubes(self.groom)
-        self.assertEqual(out["refitted"], [int(guide)])
-        self.assertLess(root_tubes.footprint_error(self.groom, guide), 0.004)
-        self.assertEqual(root_tubes.refresh_root_tubes(self.groom)["refitted"], [])
+        groomlab.brush_stroke(self.groom, "comb", [(-0.3, 1.3, 0.0), (0.0, 1.3, 0.1), (0.4, 1.3, 0.3)], radius=0.6)
+        groomlab.brush_stroke(self.groom, "comb", [(0.4, 1.3, -0.3), (0.0, 1.3, 0.0), (-0.4, 1.3, 0.3)], radius=0.6)
+        self.assertLess(root_tubes.footprint_error(self.groom, guide), 0.004, "the root area stayed as drawn")
+        self.assertNotIn("tubeRoots", groomlab.list_maps(self.groom))
 
     def test_redo_puts_the_drawn_outline_away(self):
         tool = self._tool()
@@ -610,7 +549,7 @@ class RootTubes(unittest.TestCase):
                                                    on_sphere(tm._add(ca[1], out))])
         return int(a), int(b)
 
-    def test_the_preview_draws_each_root_in_its_regions_color(self):
+    def test_the_preview_draws_each_root_in_its_own_color(self):
         from groomlab.ui import root_tube_tool as rt
         a, b = self._pair()
         tool = self._tool()
@@ -637,12 +576,6 @@ class RootTubes(unittest.TestCase):
         for st in styles:
             self.assertEqual(st & (rt.CLOSED | rt.FILLED | rt.DOTS), rt.CLOSED | rt.FILLED | rt.DOTS)
             self.assertFalse(st & rt.HIGHLIGHT)
-        # The region map paints them the same colors.
-        maps = __import__("json").loads(cmds.getAttr(self.groom + ".scalpMaps"))
-        values = maps[root_tubes.REGION_MAP]["values"]
-        seen = set(tuple(round(v, 2) for v in values[4 * i:4 * i + 3]) for i in range(len(values) // 4))
-        for g in (a, b):
-            self.assertIn(tuple(round(v, 2) for v in want[g]), seen)
         tool.modifier = lambda: ""
         self.addCleanup(lambda: tool.__dict__.pop("modifier", None))
         x, y = tool.to_screen(tool.edits[a][2])

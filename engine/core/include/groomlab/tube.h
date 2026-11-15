@@ -121,6 +121,10 @@ constexpr const char* kOwnedTubeShapePrefix = "rootTube_";
 // (root_tubes.py ROOT_OVERLAP: sealed neighbours' footprints overlap rather than leave a crack).
 // fillTubes takes it off again to tell which outline a root in the overlap was drawn in.
 constexpr float kRootTubeOverlap = 0.015f;
+// A root-first tube (a level-0 guide whose shape is its drawn root outline: kOwnedTubeShapePrefix),
+// whose footprint stays fixed on the scalp (TubeSpine::setRootOnScalp).
+struct TubeProfile;
+bool isRootTube(const TubeProfile& tube, int depth);
 
 // Points round every outline, built-in or custom.
 constexpr std::size_t kTubeOutlinePoints = 96;
@@ -353,6 +357,12 @@ public:
     // ahead. Without it (or with a zero normal, or one against the guide's direction) the
     // footprint is the root section itself, in the plane across the guide's root.
     void setRootSurface(const Vec3f& normal);
+    // A root-first tube's footprint (isRootTube): its root outline as drawn, fixed on the scalp of
+    // normal `normal` along `across` (ScalpMesh::acrossAt), turned by the tube's authored twist
+    // (no roll): however the guide is combed, its root area stays where it was drawn. The tube
+    // still leaves the root along the guide, joined from this footprint over rootJoin. Without a
+    // direction across (zero, or along the normal), laid as setRootSurface lays it.
+    void setRootOnScalp(const Vec3f& normal, const Vec3f& across);
     // The root footprint `other` lays (its axes and normal: a spine of the same root), so a tube
     // along a guide's resampled, smoothed shape lies on the scalp as the guide's own points lay it
     // (Scatter's footprints, and the root outline a root tube was fitted to: the first span's

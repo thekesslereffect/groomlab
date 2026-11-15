@@ -305,12 +305,16 @@ public:
     explicit GuideFootprints(float margin) : margin_(margin) {}
     // A guide's tube, its root moved to `root` (where the scatter reads it: the rest pose), laid
     // on the surface of normal `normal` there.
-    void add(const Guide& g, const Vec3f& root, const Vec3f& normal) {
+    void add(const Guide& g, const Vec3f& root, const Vec3f& normal, const Vec3f& across = Vec3f{}) {
         std::vector<Vec3f> pts = g.points;
         const Vec3f move = root - pts.front();
         for (Vec3f& p : pts) p += move;
         TubeSpine spine(pts.data(), pts.size(), g.frameUp, g.tube);
-        spine.setRootSurface(normal);
+        if (isRootTube(g.tube, g.depth)) {
+            spine.setRootOnScalp(normal, across);  // (fixed on the scalp, as Interpolate fills it)
+        } else {
+            spine.setRootSurface(normal);
+        }
         if (spine.empty() || !(spine.rootWidth() > 0.0f) || !(spine.rootHeight() > 0.0f)) return;
         hash_ = hashTube(hashCombine(hash_, g.tube.roll.size()), g.tube);
         for (const float r : g.tube.roll) hash_ = hashFloat(hash_, r);
@@ -518,7 +522,8 @@ public:
                 if (g.points.empty()) return;
                 const Vec3f root = binding.stablePosition(g.root, g.points[0]);
                 if (g.hasTube && g.tube.edited() && g.points.size() >= 2) {
-                    shaped->add(g, root, surface.contains(g.root) ? surface.normal(g.root) : Vec3f{});
+                    shaped->add(g, root, surface.contains(g.root) ? surface.normal(g.root) : Vec3f{},
+                                surface.contains(g.root) ? surface.acrossAt(g.root) : Vec3f{});
                 } else {
                     positions.push_back(root);
                 }

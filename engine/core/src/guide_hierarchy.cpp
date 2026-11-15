@@ -1504,6 +1504,35 @@ StrandRoot GuideHierarchy::baseRootOf(const HierarchyGuide& g) const { return ba
 
 GuideId GuideHierarchy::baseIdOf(const HierarchyGuide& g) const { return baseOf(g, guides_, index_)->id; }
 
+std::vector<GuideId> GuideHierarchy::rootTubeIds() const {
+    std::vector<GuideId> out;
+    for (const HierarchyGuide& g : guides_) {
+        if (!g.isChild() && isRootTube(g.tube, 0)) out.push_back(g.id);
+    }
+    std::sort(out.begin(), out.end());
+    return out;
+}
+
+std::array<float, 3> rootTubeColor(std::size_t k) {
+    // colorsys.hsv_to_rgb(hue, 0.8, value), as root_tubes.region_colors.
+    const double hue = std::fmod(static_cast<double>(k) * 0.618033988749895, 1.0);
+    const double v = std::array<double, 3>{0.95, 0.7, 0.5}[(k / 7) % 3];
+    const double sat = 0.8;
+    const int i = static_cast<int>(hue * 6.0);
+    const double f = hue * 6.0 - i;
+    const double p = v * (1.0 - sat), q = v * (1.0 - sat * f), t = v * (1.0 - sat * (1.0 - f));
+    double r = v, g = t, b = p;
+    switch (i % 6) {
+        case 0: r = v; g = t; b = p; break;
+        case 1: r = q; g = v; b = p; break;
+        case 2: r = p; g = v; b = t; break;
+        case 3: r = p; g = q; b = v; break;
+        case 4: r = t; g = p; b = v; break;
+        default: r = v; g = p; b = q; break;
+    }
+    return {static_cast<float>(r), static_cast<float>(g), static_cast<float>(b)};
+}
+
 GuideSet GuideHierarchy::flattenGroup(GroupId groupId) const {
     GuideSet set;
     const bool attributes = hasAttributes();

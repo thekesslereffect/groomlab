@@ -395,11 +395,10 @@ struct DisplaySettings {
     // 1: the painted layer guideColorLayer, black 0 to white 1; anything else (0): each group's
     // color (its own, else autoGuideColors').
     int guideColorMode = 0;
-    // A color map on the scalp (a color set of the scalp's of this name, e.g. "tubeRoots": the root
-    // tubes' regions): each guide drawn in its region's color there, read at the root of the guide
-    // its hierarchy starts from (a tube's split tubes and children in its color); a guide whose
-    // region is black (in none), and every guide with no such map, as the mode says. "": off.
-    std::string guideRegionMap;
+    // Each guide drawn in its root tube's color (rootTubeColor: the root-first tube its hierarchy
+    // starts from, so a tube's split tubes and children take its color); a guide of no root tube as
+    // the mode says.
+    bool guideRootColors = false;
     // The groom's name: the automatic guide colors start from its hue (guideHueSeed).
     std::string guideColorSeed;
     std::string guideColorLayer;

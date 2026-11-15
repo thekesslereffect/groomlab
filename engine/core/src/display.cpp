@@ -1972,9 +1972,7 @@ void DisplayBuilder::buildGuides(const DisplayInputs& in, const DisplaySettings&
     key = hashChars(key, s.isolateGroup);
     key = hashChars(key, s.guideColorLayer);
     key = hashChars(key, s.guideColorSeed);
-    const ScalpMesh* regionScalp =
-        !s.guideRegionMap.empty() && in.scalp && in.scalp->hasColorSet(s.guideRegionMap) ? in.scalp.get() : nullptr;
-    if (regionScalp) key = hashCombine(hashChars(key, s.guideRegionMap), regionScalp->colorSetHash(s.guideRegionMap));
+    key = hashCombine(key, s.guideRootColors ? 0x2007u : 0x2006u);
     if (in.clumpCenters) {
         // Hashed once per set of centers (the same pointer: the same centers, held here so no
         // other set takes its address), not on every update.
@@ -2041,6 +2039,7 @@ void DisplayBuilder::buildGuides(const DisplayInputs& in, const DisplaySettings&
             }
             return false;
         };
+        const std::vector<GuideId> rootTubes = s.guideRootColors ? hierarchy->rootTubeIds() : std::vector<GuideId>{};
         for (const HierarchyGuide& g : hierarchy->guides()) {
             const int level = hierarchy->groupDepth(g.group);
             if (level < 0 || level >= kMaxDrawnGuideLevels || hiddenGuide(g)) continue;
@@ -2070,11 +2069,12 @@ void DisplayBuilder::buildGuides(const DisplayInputs& in, const DisplaySettings&
             } else if (byLayer) {
                 c = {0.08f, 0.08f, 0.08f};
             }
-            if (regionScalp) {  // its region's color, at its base guide's root; a frozen one (soloed out) dimmed
-                const StrandRoot base = hierarchy->baseRootOf(g);
-                if (regionScalp->contains(base)) {
-                    const ScalpMesh::Color r = regionScalp->colorAt(s.guideRegionMap, base);
-                    if (r[0] + r[1] + r[2] >= 0.03f) c = {r[0], r[1], r[2]};
+            if (s.guideRootColors) {  // its root tube's color; a frozen one (soloed out) dimmed
+                const GuideId base = hierarchy->baseIdOf(g);
+                const auto at = std::lower_bound(rootTubes.begin(), rootTubes.end(), base);
+                if (at != rootTubes.end() && *at == base) {
+                    const std::array<float, 3> r = rootTubeColor(static_cast<std::size_t>(at - rootTubes.begin()));
+                    c = {r[0], r[1], r[2]};
                 }
                 if (isFrozen) c = {c[0] * 0.3f, c[1] * 0.3f, c[2] * 0.3f};
             }

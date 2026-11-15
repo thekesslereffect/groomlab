@@ -5,11 +5,11 @@
 Root-first tubes: the artist clicks the root's outline on the scalp one CV at a time; closing it on
 its first CV makes a tube guide rooted at the outline's middle, its tube's root section that
 outline exactly (a library shape of its own, "rootTube_<n>"), going out along a drawn curve or
-straight off the scalp. Each root tube is its own region: a color vertex map on the scalp
-(REGION_MAP) holds every root tube's area in a color of its own, black elsewhere, and the groom's
-Interpolate nodes with no region map read it, so the hair rooted in a tube's area follows only that
-tube's guides. Editing a root's CVs later moves the guide to the new outline's middle and gives
-its shape the new outline; the regions follow.
+straight off the scalp. The tube's root footprint is that outline fixed on the scalp (the engine
+lays it along the scalp itself, not the guide: combing never moves it), and Interpolate's
+fillTubes gives every strand rooted in it to that tube, so the hair rooted in a root's area follows
+only that root's guides; no region map. Editing a root's CVs later moves the guide to the new
+outline's middle and gives its shape the new outline.
 
 A root's CVs are kept on the scalp itself (OUTLINES_ATTR on the groom: each CV a scalp face and
 its barycentric weights), apart from the guide: combing, brushing or retwisting the guide never
@@ -43,8 +43,6 @@ from groomlab import tube_mesh as tm
 
 ROOT_GROUP = "rootTubes"   # the root group new root tubes go into (when no group is picked)
 SHAPE_PREFIX = "rootTube_"  # each root tube's library shape: its root outline
-REGION_MAP = "tubeRoots"   # the color vertex map holding each root tube's area
-REGION_BAND = 1.25          # ... and a band this many scalp edges wide outside its outline
 MAX_LEVELS = 9              # the tube hierarchy's deepest level (1: the base)
 LEVEL_SUFFIX = "_L"         # level n's group: <base>_L<n>
 SNAP_PIXELS = 12            # how near (in view pixels) a CV snaps to a neighbouring root's CV or edge
@@ -527,6 +525,9 @@ def _footprint(groom, guide):
     roots on a shaped tube and Interpolate's fillTubes go by it, so a root outline is fitted in it:
     the hair rooted inside the outline as drawn is the tube's, however far the guide leans."""
     frames = _frames(groom, guide)
+    fixed = frames.get("footprint")
+    if fixed:  # a root tube: fixed on the scalp (TubeSpine::setRootOnScalp), whatever the guide does
+        return (tuple(frames["points"][0]), tuple(fixed["u"]), tuple(fixed["v"]), tuple(fixed["n"]))
     center, u, v = tm.frame_at(frames, 0.0)
     way = tm._unit(tm._cross(u, v))
     n = _smooth_normal(groom, center)
@@ -811,8 +812,8 @@ def make_root_tube(groom, outline, path=None, length=1.0, segments=12, taper=0.5
     shape of its own (rootTube_<n>, removed with the last guide that takes it) whose outline at
     the root is the drawn one (straight edges between the CVs), its width going to `taper` times
     the root's at the tip. The tube is swept from its root along the guide with no twist (its
-    sections do not roll on the scalp: roll_on_scalp off). Into `group` (default ROOT_GROUP, made when missing). With
-    `regions`, the tube's area becomes a region of its own (update_regions). One undo step.
+    sections do not roll on the scalp: roll_on_scalp off). Into `group` (default ROOT_GROUP, made when missing).
+    (`regions`: no effect, kept for older callers.) One undo step.
     Returns the guide's ID."""
     outline = [tuple(p) for p in outline]
     if len(outline) < 3:
@@ -850,8 +851,6 @@ def make_root_tube(groom, outline, path=None, length=1.0, segments=12, taper=0.5
                           aspect=min(max(h / w, 0.01), 100.0) if w > 1e-12 else 1.0, twist=twist)
         _settle(groom, guide, shape, outline)
         _store_outline(groom, guide, outline)
-        if regions:
-            update_regions(groom)
     return guide
 
 
@@ -954,8 +953,6 @@ def edit_root_tube(groom, guide, outline, regions=True):
                           twist=[t + twist - t0 for t in tube["twist"]])
         _settle(groom, guide, shape, outline)
         _store_outline(groom, guide, outline)
-        if regions:
-            update_regions(groom)
     return guide
 
 
@@ -1095,8 +1092,6 @@ def duplicate_root_tube(groom, guide, to, regions=True, start=None):
                 if shapes:
                     cmds.groomLabGuides(groom, setPoints=json.dumps(shapes))
             level = below
-        if regions:
-            update_regions(groom)
     return new
 
 
@@ -1114,8 +1109,6 @@ def delete_root_tubes(groom, guides, regions=True):
         kept = dict((k, v) for k, v in data.items() if k in live)
         if kept != data:
             cmds.setAttr(groom + "." + OUTLINES_ATTR, json.dumps(kept, separators=(",", ":")), type="string")
-        if regions:
-            update_regions(groom)
     return gone
 
 
@@ -1134,27 +1127,11 @@ def region_colors(count):
 
 
 def root_colors(groom, tubes=None):
-    """{guide: (r, g, b)}: each root tube's color on the region map (update_regions paints tube k
-    of root_tubes in region_colors' k-th), for the Tube tool's outlines. `tubes`: root_tubes(groom)
-    when not given."""
+    """{guide: (r, g, b)}: each root tube's color (tube k of root_tubes region_colors' k-th, as the
+    engine's rootTubeColor draws its tubes and guides), for the Tube tool's outlines. `tubes`:
+    root_tubes(groom) when not given."""
     tubes = root_tubes(groom) if tubes is None else tubes
     return dict(zip(tubes, region_colors(len(tubes))))
-
-
-def _scalp_points(groom):
-    """The scalps' vertices in world space, in the order the groom joins them (its own scalp, then
-    the others by index), and each scalp's MFnMesh with its first vertex's index."""
-    from groomlab import utils
-    meshes = [groomlab.scalp_mesh(groom)] + [s["mesh"] for s in groomlab.scalps(groom)]
-    points, fns = [], []
-    for shape in meshes:
-        if not shape:
-            continue
-        from maya.api import OpenMaya as om
-        fn = utils._om_mesh(shape)
-        fns.append((fn, len(points)))
-        points.extend((p.x, p.y, p.z) for p in fn.getPoints(om.MSpace.kWorld))
-    return points, fns
 
 
 def _inside(poly, x, y):
@@ -1170,104 +1147,6 @@ def _inside(poly, x, y):
     return inside
 
 
-def _region_map(groom):
-    """The region map (made when missing: a color vertex map, black) and the Interpolate nodes
-    with no region map set to read it. Returns whether some Interpolate reads another map."""
-    from groomlab import graph as gm
-    if REGION_MAP not in groomlab.list_maps(groom):
-        groomlab.add_map(groom, REGION_MAP, kind="vertices", color=(0.0, 0.0, 0.0, 1.0))
-    model = gm.GraphModel.from_groom(groom, gm.OperatorCatalog.from_maya())
-    changed, other = False, False
-    for node in list(model.order):
-        if model.node_type(node) != "Interpolate":
-            continue
-        current = model.param(node, "regionMap")
-        if not current:
-            model.set_param(node, "regionMap", REGION_MAP)
-            changed = True
-        elif current != REGION_MAP:
-            other = True
-    if changed:
-        model.save(groom)
-    return other
-
-
-def _edge_distance(poly, x, y):
-    """How far (x, y) lies from the closed polygon's edges."""
-    best = float("inf")
-    n = len(poly)
-    for i in range(n):
-        (ax, ay), (bx, by) = poly[i], poly[(i + 1) % n]
-        dx, dy = bx - ax, by - ay
-        span = dx * dx + dy * dy
-        f = min(max(((x - ax) * dx + (y - ay) * dy) / span, 0.0), 1.0) if span > 1e-18 else 0.0
-        best = min(best, math.hypot(ax + f * dx - x, ay + f * dy - y))
-    return best
-
-
-def update_regions(groom):
-    """Every root tube's area painted in its own color on the region map (REGION_MAP; black outside
-    them), which the Interpolate nodes with no region map read: the hair rooted in a tube's area
-    follows that tube's guides only. A tube's area: the scalp's vertices inside its root outline,
-    the vertices round its root (so a tube smaller than the scalp's faces still has its region),
-    and a band about a face wide outside its outline (REGION_BAND faces' edges), so a face the
-    outline crosses blends the tube's color with a neighbour's or its own, never with black:
-    the hair rooted at the outline's edge is the tube's, not the nearest guides' of any region.
-    Where two tubes' bands meet, the nearer outline's. Returns {"tubes": count, "vertices":
-    painted, "other": an Interpolate reads another region map}."""
-    tubes = root_tubes(groom)
-    other = _region_map(groom)
-    maps = json.loads(cmds.getAttr(groom + ".scalpMaps") or "{}")
-    entry = maps.get(REGION_MAP)
-    points, fns = _scalp_points(groom)
-    if not isinstance(entry, dict) or len(entry.get("values", [])) != 4 * len(points):
-        raise RuntimeError("the region map %s does not match the scalp's %d vertices" % (REGION_MAP, len(points)))
-    values = [0.0, 0.0, 0.0, 1.0] * len(points)
-    colors = region_colors(len(tubes))
-    owner = {}  # vertex -> (how far outside its tube's outline (0: inside), the tube's index)
-    from maya.api import OpenMaya as om
-    for k, guide in enumerate(tubes):
-        try:
-            outline = root_outline(groom, guide)
-        except (RuntimeError, ValueError):
-            continue
-        center, u, v, n = _plane(outline)
-        flat = [tm.to_plane(p, center, u, v) for p in outline]
-        reach = max(math.hypot(x, y) for x, y in flat)
-        # The scalp's faces there: the band's width.
-        under = []
-        root = om.MPoint(*center)
-        for fn, first in fns:
-            hit, face = fn.getClosestPoint(root, om.MSpace.kWorld)
-            if hit.distanceTo(root) < max(reach, 1e-6):
-                corners = [fn.getPoint(i, om.MSpace.kWorld) for i in fn.getPolygonVertices(face)]
-                edge = sum(a.distanceTo(b) for a, b in zip(corners, corners[1:] + corners[:1])) / len(corners)
-                under.append((fn, first, face, edge))
-        band = REGION_BAND * max([e for _fn, _first, _face, e in under] or [0.0])
-        far = reach + band
-        for i, p in enumerate(points):
-            d = tm._sub(p, center)
-            if tm._dot(d, d) > far * far * 1.5:
-                continue
-            if abs(tm._dot(d, n)) > far:  # (the scalp's far side)
-                continue
-            x, y = tm._dot(d, u), tm._dot(d, v)
-            off = 0.0 if _inside(flat, x, y) else _edge_distance(flat, x, y)
-            if off > band:
-                continue
-            if i not in owner or off < owner[i][0]:
-                owner[i] = (off, k)
-        for fn, first, face, _edge in under:  # (however small the tube: the face under its middle)
-            for j in fn.getPolygonVertices(face):
-                owner[first + j] = (0.0, k)
-    for i, (_off, k) in owner.items():
-        values[4 * i:4 * i + 3] = list(colors[k])
-    entry["values"] = [round(float(x), 3) for x in values]
-    entry["channels"] = 4
-    cmds.setAttr(groom + ".scalpMaps", json.dumps(maps, separators=(",", ":")), type="string")
-    return {"tubes": len(tubes), "vertices": len(owner), "other": other}
-
-
 def footprint_error(groom, guide):
     """How far (a share of the root's size) root tube `guide`'s footprint lies off its kept
     outline made ROOT_OVERLAP larger: 0 when its tube was fitted to it as it is now."""
@@ -1278,24 +1157,6 @@ def footprint_error(groom, guide):
     have = [tm.to_plane(p, c, u, v) for p in section_outline(groom, guide, on_scalp=False)]
     size = max(math.hypot(x, y) for x, y in want) or 1.0
     return max(min(math.hypot(a[0] - b[0], a[1] - b[1]) for b in have) for a in want) / size
-
-
-def refresh_root_tubes(groom, tolerance=0.004):
-    """Every root tube whose footprint has drifted off its kept outline (a tube fitted by an
-    earlier GroomLab, or one a brush resized) fitted to it again (edit_root_tube), then the
-    regions painted again. One undo step. Returns {"refitted": [guides], plus update_regions'}."""
-    refitted = []
-    with groomlab.undo_chunk("refresh root tubes"):
-        for guide in root_tubes(groom):
-            try:
-                if footprint_error(groom, guide) > tolerance:
-                    edit_root_tube(groom, guide, root_outline(groom, guide), regions=False)
-                    refitted.append(guide)
-            except (RuntimeError, ValueError):
-                continue
-        out = update_regions(groom)
-    out["refitted"] = refitted
-    return out
 
 
 # ---------------------------------------------------------------------------

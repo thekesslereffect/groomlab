@@ -179,13 +179,13 @@ The selected guides' tubes draw brighter.
 - Selecting tubes with Ctrl+Shift solos them: the other tubes stay drawn, dimmed (their wires and
   shaded surfaces dark), and so do their guides, so the selected ones, orange, stand out.
 - The Tube tool's card has no **Applies to** block: its **Mirror** is at the bottom of **Brush**.
-- **Colors** (Maya, on by default) colors each tube as its region on the `tubeRoots` region map
-  (see Root tubes below), or, in a groom with no such map, in a color of its own. With **Shaded**
+- **Colors** (Maya, on by default) colors each tube in its root tube's color (see Root tubes
+  below), or, a tube of no root tube, in a color of its own. With **Shaded**
   on the color goes on the shaded surfaces and the wires stay gray; with it off, on the wires.
   The selected tubes' wires stay orange. (`groomLabBrushCtx -tubeColors false` turns it off.)
-  While the Tube tool's tubes are drawn and the groom has a `tubeRoots` map, the guides themselves
-  are drawn in their tube's region color too, not their group's (a split tube's and every child
-  guide's: the color of the level 1 tube it comes from).
+  While the Tube tool's tubes are drawn, the guides of root tubes are drawn in their root's color
+  too, not their group's (a split tube's and every child guide's: the color of the level 1 tube it
+  comes from).
 - **Ctrl** does the opposite: it shrinks, rounds or untwists the tubes.
 - **Shift+drag smooths** what the brush paints: the channel picked (width, flatness or twist) of
   the sections under the brush, each evened out toward its neighbours along the guide. The
@@ -298,20 +298,19 @@ The Tube tool's **Tube roots** section draws a tube the way Tonic does: its root
   shape of its own, `rootTube_<n>`, removed when the last guide taking it is deleted), narrowing
   to **Tip width** of it at the tip. The tube is swept from its root along the path with no
   twist: its sections don't roll to lie along the scalp as other shaped tubes' do. Its root
-  footprint (where Scatter and Fill Tubes put the tube's hair) is the outline drawn, however far
-  the guide leans, made 1.5% larger so sealed neighbours overlap a little rather than leave a
-  crack whose hair belongs to no tube.
-- Each root tube is its own **region**: every root's area is painted in a color of its own on the
-  `tubeRoots` color vertex map (black elsewhere), which the Interpolate nodes with no region map
-  read, so the hair rooted in a tube's area follows only that tube. The color reaches about a
-  face past the outline, so a face the outline crosses never blends it with black (hair there would
-  otherwise follow the nearest guides of any tube). **Update regions** first fits every tube that
-  drifted off its root (one made by an earlier GroomLab, or resized) back onto it, then paints the
-  map again.
+  footprint (where Scatter and Fill Tubes put the tube's hair) is the outline drawn, fixed on the
+  scalp: laid along the scalp itself, not the guide, so combing or leaning the guide never turns
+  or moves it. It is made 1.5% larger so sealed neighbours overlap a little rather than leave a
+  crack; a strand in the overlap goes to the root it was drawn inside, one in a crack or just
+  past an edge to the nearest root, and one its root's split tubes leave out to the nearest of
+  them.
+- Each root tube keeps its own hair with no region map: Fill Tubes gives every strand rooted in a
+  root's area to that root's tubes, and Clump's **followTubes** keeps it in that root's clumps.
+  (A region map you paint yourself still works as usual, for the strands outside every tube.)
 - A root's CVs are kept on the scalp itself, apart from its guide: combing, brushing, retwisting
-  or resizing the tube never moves them, and its region stays where it was drawn. Only **Edit
-  roots** changes them.
-- Every root shows on the scalp in its region's color, the same as the `tubeRoots` map paints it
+  or resizing the tube never moves them, nor the area its hair roots in. Only **Edit roots**
+  changes them.
+- Every root shows on the scalp in its own color, the same as its tubes and guides are drawn
   (**Draw root** shows the other roots' CVs too, dimmed, the points a new CV snaps onto, and edges
   the root being drawn green; entering it with a deeper level of the tube hierarchy picked shows and
   picks level 1, where a new root tube's guide belongs),
@@ -360,10 +359,9 @@ across its longer side, sharing its root shape, in the next level's group (`<bas
 The numbered buttons show one level at a time (the other levels' groups hidden) and pick its group,
 so the Tube tool and the brushes edit that level's tubes. Every level's tubes follow their parent:
 shaping a level 1 tube carries all the smaller tubes inside it, while each smaller tube keeps its
-own edits. **Remove** drops the deepest level. The `tubeRoots` region map stays the level 1
-tubes': every tube split from a tube, and every guide under it, takes that tube's region (an
-Interpolate reads a guide's region at the root of the guide its hierarchy starts from), so the
-smaller tubes' hair stays inside the tube they came from. Fill Tubes fills a strand rooted in a
+own edits. **Remove** drops the deepest level. Every tube split from a root tube, and every
+guide under it, belongs to that root, so the smaller tubes' hair stays inside the root they came
+from. Fill Tubes fills a strand rooted in a
 level 1 tube only with that tube's own smaller tubes, never a neighbour's (a split tube's corners
 may reach past its level 1 tube's outline).
 

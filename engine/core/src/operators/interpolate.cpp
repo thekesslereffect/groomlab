@@ -1720,7 +1720,7 @@ private:
                     guideShape(g, samples, smoothGuides, resampled);
                     TubeSpine& spine = fill->spines[kept.size() + i];
                     spine = TubeSpine(resampled.data(), samples, g.frameUp, g.tube);
-                    if (align) layFootprint(spine, g, scalpNormalAt(*scalp, g.root, resampled.front()));
+                    if (align) layFootprint(spine, g, *scalp, scalpNormalAt(*scalp, g.root, resampled.front()));
                 }, 8);
             }
         }
@@ -1743,7 +1743,7 @@ private:
                 // The tube along the guide, its root footprint laid on the scalp.
                 fill->spines[k] = TubeSpine(resampled.data(), samples, g.frameUp, g.tube);
                 if (align) {
-                    layFootprint(fill->spines[k], g, scalpNormalAt(*scalp, g.root, resampled.front()));
+                    layFootprint(fill->spines[k], g, *scalp, scalpNormalAt(*scalp, g.root, resampled.front()));
                 } else {
                     fill->spines[k].setRootSurface(Vec3f{});
                 }
@@ -2323,10 +2323,15 @@ private:
         }, 4096);
     }
 
-    // A tube's root footprint laid on the scalp of normal `normal` as the guide's own points lay it
-    // (TubeSpine::setFootprint), not its resampled, smoothed shape: where Scatter rooted the
-    // strands and the root outline was fitted.
-    static void layFootprint(TubeSpine& spine, const Guide& g, const Vec3f& normal) {
+    // A tube's root footprint laid on the scalp of normal `normal`: a root-first tube's fixed on the
+    // scalp (TubeSpine::setRootOnScalp, as Scatter roots its strands and the root outline is fitted),
+    // another's as the guide's own points lay it (TubeSpine::setFootprint), not its resampled,
+    // smoothed shape.
+    static void layFootprint(TubeSpine& spine, const Guide& g, const ScalpMesh& scalp, const Vec3f& normal) {
+        if (isRootTube(g.tube, g.depth) && scalp.contains(g.root)) {
+            spine.setRootOnScalp(normal, scalp.acrossAt(g.root));
+            return;
+        }
         if (g.points.size() >= 2) {
             TubeSpine own(g.points.data(), g.points.size(), g.frameUp, g.tube);
             own.setRootSurface(normal);

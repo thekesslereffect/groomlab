@@ -6,7 +6,7 @@ Tube roots (issue 61)   Draw root: the root's outline clicked on the scalp CV by
                         turns into Finish edit while editing; Select root (pick a root by its
                         middle and drag it over the scalp), with Duplicate and Delete for the
                         selected root. A mode's button again leaves it (Draw and Select: as they
-                        are; Edit: finished). Undo CV, Update regions; the new tubes' Length,
+                        are; Edit: finished). Undo CV, Delete, Duplicate; the new tubes' Length,
                         Segments and Taper; Snap to neighbours.
 Tube hierarchy (#62)    Add splits the selected tubes (or every tube of the base group) in two, a
                         level deeper; a row of level buttons, 1 (the base) always there, shows and
@@ -63,13 +63,7 @@ class TonicTubes(QtCore.QObject):
                                            "cursor over the scalp, a click sets it down there with its tube and "
                                            "hierarchy. Again: stop", False, "rootTubeDuplicate")
         self.duplicate_root.clicked.connect(self.duplicate_clicked)
-        self.regions = widgets.chip("Update regions", "Fit every root tube whose tube drifted off its root back onto it "
-                                    "(tubes from an earlier GroomLab too), then paint every root tube's area in its own "
-                                    "color on the %s map, which Interpolate reads as its regions" % root_tubes.REGION_MAP,
-                                    None,
-                                    "rootTubeRegions")
-        self.regions.clicked.connect(self.update_regions)
-        self.root_block.add(widgets.chip_row((self.undo_cv, self.delete_root, self.duplicate_root, self.regions)))
+        self.root_block.add(widgets.chip_row((self.undo_cv, self.delete_root, self.duplicate_root)))
         self.snap = widgets.switch("Snap to neighbours", "A CV near a neighbouring root's CV or edge snaps onto it, "
                                    "so the tubes meet with no gap", True, "rootTubeSnap")
         self.snap.toggled.connect(lambda on: self._set(snap=on))
@@ -310,19 +304,6 @@ class TonicTubes(QtCore.QObject):
         self.tool.leave()
         self.owner.activate("shape")
         self.refresh(self.owner.groom())
-
-    def update_regions(self):
-        groom = self.owner.groom()
-        if not groom:
-            return
-        out = self._run(root_tubes.refresh_root_tubes, groom)
-        if out:
-            note = (" (an Interpolate reads another region map: set its regionMap to %s)" % root_tubes.REGION_MAP
-                    if out["other"] else "")
-            n = len(out["refitted"])
-            fixed = " %d tube%s fitted to %s root again." % (n, "" if n == 1 else "s", "its" if n == 1 else "their") if n else ""
-            self.owner.status.setText("%d root tube%s painted on %s%s.%s" %
-                                      (out["tubes"], "" if out["tubes"] == 1 else "s", root_tubes.REGION_MAP, note, fixed))
 
     # -- Tube hierarchy ----------------------------------------------------------------------
 

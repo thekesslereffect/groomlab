@@ -16,7 +16,7 @@ shared with a neighbour, sealed, move together; with Snap a CV snaps onto anothe
 edges, never its own root's; Ctrl+click an edge adds a CV there, on every outline sharing the
 edge; Ctrl+click a CV takes it out of the root edged green only, not out of a neighbour sealed to
 it). The roots last touched are edged green. Undo CV takes back the last CV move. Finish gives
-each changed tube its new root and updates the regions (groomlab.root_tubes.edit_root_tube);
+each changed tube its new root (groomlab.root_tubes.edit_root_tube);
 leaving the tool any other way (another tool, Draw root, Select root) finishes the edit too, so
 no edit is lost. Maya's Undo while editing undoes the scene, not a CV move: the roots it changed
 come back as the scene has them.
@@ -25,12 +25,12 @@ Select root: every root shows its outline and its middle; clicking a middle sele
 (green; Shift+click adds a root to the selection or takes it out), dragging a selected one carries
 every selected root over the scalp as one (with Snap, their CVs sealed onto a root not selected
 stay put, the others slide along), their tubes and the hierarchies under them moving with them on
-release (one undo step, the regions updated). Duplicate: the selected roots follow the cursor over
+release (one undo step). Duplicate: the selected roots follow the cursor over
 the scalp (no button held) and a click sets a copy of them, their tubes and hierarchies down there
 (groomlab.root_tubes.duplicate_root_tube); Delete removes the selected roots, their tubes and
 hierarchies.
 
-Every root shows in its region's color (as the region map paints it), filled, with its CVs as dots
+Every root shows in its own color (as its tubes and guides are drawn), filled, with its CVs as dots
 over its edges. The outlines and strokes are drawn by the plugin's groomLabRootOutlines under
 PREVIEW (its attributes set outside the undo queue; removed when the tool is left).
 """
@@ -46,9 +46,9 @@ CONTEXT = "groomLabRootTubeCtx"
 PREVIEW = "glRootTubePreview"
 PICK_PIXELS = 12
 
-# Placing: the outline amber, closed (drawing its path) green. A finished root in its region's
+# Placing: the outline amber, closed (drawing its path) green. A finished root in its own
 # color (root_tubes.root_colors), filled half see-through; the one being edited, selected or
-# carried edged green (thicker), its CVs shown. "root": a root the region map has no color for yet.
+# carried edged green (thicker), its CVs shown. "root": a root with no color yet.
 COLORS = {"outline": (1.0, 0.75, 0.15), "closing": (0.3, 1.0, 0.4), "active": (0.3, 1.0, 0.4),
           "stroke": (0.3, 0.85, 1.0), "root": (0.85, 0.85, 0.9), "neighbour": (0.55, 0.55, 0.6)}
 
@@ -111,7 +111,7 @@ class RootTubeTool(object):
         self.restored = None    # ... the one an undo brought back (a redo puts it away again)
         self.callbacks = []     # Maya's Undo and Redo events, while the tool is up
         self.hover_filter = None
-        self.colors = {}        # {guide: its region's color} (recolor)
+        self.colors = {}        # {guide: its color} (recolor)
         self.laid_cache = {}    # {an outline: its edges and fill laid on the scalp} (laid)
 
     # -- Plumbing ---------------------------------------------------------------------
@@ -427,7 +427,7 @@ class RootTubeTool(object):
         self.recolor()
         self.neighbours = root_tubes.snap_targets(self.groom) if s["snap"] else []
         self.redraw()
-        self.say("Made root tube %s (its own region on %s). Draw the next root." % (guide, root_tubes.REGION_MAP))
+        self.say("Made root tube %s. Draw the next root." % guide)
         return guide
 
     def undo_cv(self):
@@ -678,7 +678,7 @@ class RootTubeTool(object):
         return out
 
     def finish_edit(self):
-        """Every changed root given its new outline (one undo step), the regions updated; edit
+        """Every changed root given its new outline (one undo step); edit
         mode left whatever happens (a root that can't take its outline keeps its old one, and
         says why)."""
         if self.mode != "edit":
@@ -702,8 +702,6 @@ class RootTubeTool(object):
                             root_tubes.edit_root_tube(self.groom, g, self.original[g], regions=False)
                         except Exception:  # noqa: BLE001
                             pass
-                if done:
-                    root_tubes.update_regions(self.groom)
         except Exception as e:  # noqa: BLE001
             failed.append((None, str(e).strip() or type(e).__name__))
         self.edits, self.original, self.drag, self.touched = {}, {}, [], set()
@@ -713,7 +711,7 @@ class RootTubeTool(object):
         self.recolor()
         self.neighbours = root_tubes.snap_targets(self.groom) if self.settings["snap"] else []
         self.redraw()
-        text = "Finished: %d root%s changed, the regions updated." % (len(done), "" if len(done) == 1 else "s")
+        text = "Finished: %d root%s changed." % (len(done), "" if len(done) == 1 else "s")
         if failed:
             text += " Kept as %s: %s." % ("it was" if len(failed) == 1 else "they were",
                                          "; ".join("root %s (%s)" % (g, why) if g is not None else why
@@ -823,12 +821,10 @@ class RootTubeTool(object):
             with groomlab.undo_chunk("move root tubes"):
                 for h in changed:
                     root_tubes.edit_root_tube(self.groom, h, self.roots[h], regions=False)
-                if changed:
-                    root_tubes.update_regions(self.groom)
         except (RuntimeError, ValueError) as e:
             self.say("The roots weren't moved: %s" % str(e).strip())
         self.reload_roots()
-        self.say("%d root%s moved, the regions updated." % (len(changed), "" if len(changed) == 1 else "s"))
+        self.say("%d root%s moved." % (len(changed), "" if len(changed) == 1 else "s"))
 
     def begin_duplicate(self):
         """The selected roots follow the cursor over the scalp; a click sets a copy down there."""
@@ -872,7 +868,6 @@ class RootTubeTool(object):
             with groomlab.undo_chunk("duplicate root tubes"):
                 for g in self.picked:
                     made.append(int(root_tubes.duplicate_root_tube(self.groom, g, to, regions=False, start=middle)))
-                root_tubes.update_regions(self.groom)
         except (RuntimeError, ValueError) as e:
             self.say("The roots weren't duplicated: %s" % str(e).strip())
             return None
@@ -969,11 +964,11 @@ class RootTubeTool(object):
         return shape
 
     def color_of(self, guide):
-        """A root's color: its region's on the region map (root_tubes.root_colors)."""
+        """A root's color: its own (root_tubes.root_colors)."""
         return self.colors.get(guide, COLORS["root"])
 
     def recolor(self):
-        """The roots' colors as the region map has them now."""
+        """The roots' colors as they are now (root_tubes.root_colors)."""
         try:
             self.colors = root_tubes.root_colors(self.groom) if self.groom and cmds.objExists(self.groom) else {}
         except (RuntimeError, ValueError):

@@ -114,6 +114,11 @@ public:
         return points_[tri[0]] * w + points_[tri[1]] * root.u + points_[tri[2]] * root.v;
     }
     Vec3f normal(const StrandRoot& root) const;  // smooth (area-weighted vertex normals)
+    // A direction across the scalp at `root` fixed to the scalp, whatever grows there: a fixed axis
+    // of the rest pose laid flat on it, turned with the scalp as it deforms (unit; the same on
+    // whichever triangle holds a root on an edge or a corner). What a root-first tube's footprint
+    // is laid along (TubeSpine::setRootOnScalp).
+    Vec3f acrossAt(const StrandRoot& root) const;
 
     // Closest point on the surface, through an AABB tree built on the first
     // query (thread-safe). Returns face -1 on an empty mesh, or when nothing
