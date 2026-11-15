@@ -1077,43 +1077,6 @@ TEST(Incremental, InterpolateBlendsAgainOnlyTheStrandsADabReaches) {
     }
 }
 
-TEST(Incremental, FillingTubesALiveStrokesDabsKeepEachStrandsTube) {
-    // fillTubes in the viewport: a live stroke's dabs keep each strand's tube and blend again only
-    // the strands of the tubes a dab changed (incrementally); the release fills anew, as a fresh
-    // evaluation does.
-    std::string graph = kInterpolateGraph;
-    const std::string params = R"("limitDistance": 0.45})";
-    graph.replace(graph.find(params), params.size(), R"("limitDistance": 0.45, "fillTubes": true})");
-    GroomSession session(sphereGroom(graph, 30, 0));
-    SessionStrokeHost host(session);
-    ViewRequest request;
-    request.viewport = true;
-    const ToolView view = ToolView::fromMatrix(test::lookAtProjection({0.0f, 1.8f, 4.5f}, {0.0f, 0.8f, 0.0f}, 40.0, 1.5), 1200, 800);
-    float x0 = 0.0f, y0 = 0.0f;
-    ASSERT_TRUE(view.project(Vec3f(0.0f, 1.0f, 0.35f).normalized(), x0, y0));
-    ASSERT_TRUE(session.evaluate(request).strands);
-    const std::vector<float>* tubes = session.evaluate(request).strands->strandChannel("tubeId");
-    ASSERT_TRUE(tubes && std::any_of(tubes->begin(), tubes->end(), [](float t) { return t >= 0.0f; })) << "strands in tubes";
-    BrushTool tool;
-    tool.settings.setMode("comb");
-    tool.settings.screenRadius = 90.0f;
-    tool.settings.brush.strength = 0.8f;
-    ASSERT_TRUE(tool.begin(host, view, x0 - 40.0f, y0, 1.0f));
-    session.evaluate(request);  // (the press: in full, the strands' tubes found)
-    const std::size_t before = session.incrementalCount();
-    for (int k = 1; k < 5; ++k) {
-        tool.moveTo(host, view, x0 - 40.0f + 12.0f * static_cast<float>(k), y0 + 2.0f * static_cast<float>(k), 1.0f);
-        const ViewResult& seen = session.evaluate(request);
-        EXPECT_TRUE(seen.errors.empty()) << (seen.errors.empty() ? "" : seen.errors[0]);
-    }
-    EXPECT_GE(session.incrementalCount() - before, 4u) << "the dabs evaluated incrementally";
-    tool.end(host, view);
-    const ViewResult& released = session.evaluate(request);
-    ASSERT_TRUE(released.strands);
-    GroomSession fresh(session.data());
-    EXPECT_EQ(released.strands->contentHash(), fresh.evaluate(request).strands->contentHash()) << "the release fills anew";
-}
-
 TEST(Incremental, GuideWeightFromAGuideLayerFollowsStrokes) {
     // guideWeight read from the guides' painted clump value: painting it weighs those guides again
     // (the strands they reach bound again), combing keeps the weights, sliding moves their roots.

@@ -585,11 +585,6 @@ struct EvalContext {
     // refine the look for it (Subdivide) hand their input on, so the GPU's preview runs the nodes
     // before them; the release evaluates them again. The nodes reading it salt their keys with it.
     bool liveDrag = false;
-    // A brush stroke is live in the viewport (GroomSession::hasPreview: the tool's guides stand in
-    // for the stored ones): an Interpolate filling tubes keeps each strand's tube from dab to dab,
-    // blending again only the strands of the tubes whose guides a dab changed; the release
-    // evaluates it in full. The nodes reading it salt their keys with it.
-    bool liveStroke = false;
     const ExternalInputs* externals = nullptr;
     const PathResolver* paths = nullptr;  // relative file paths (maps, caches); see paths.h
     bool buildCards = false;  // Cards nodes build their cards (else they pass strands through)

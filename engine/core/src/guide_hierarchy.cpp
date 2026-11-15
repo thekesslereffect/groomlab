@@ -1487,23 +1487,6 @@ bool GuideHierarchy::hasAttributes() const {
     return false;
 }
 
-namespace {
-const HierarchyGuide* baseOf(const HierarchyGuide& g, const std::vector<HierarchyGuide>& guides,
-                             const std::unordered_map<GuideId, std::size_t>& index) {
-    const HierarchyGuide* at = &g;
-    for (std::size_t steps = 0; at->parent != kNoGuide && steps < guides.size(); ++steps) {
-        const auto it = index.find(at->parent);
-        if (it == index.end()) break;
-        at = &guides[it->second];
-    }
-    return at;
-}
-}  // namespace
-
-StrandRoot GuideHierarchy::baseRootOf(const HierarchyGuide& g) const { return baseOf(g, guides_, index_)->root; }
-
-GuideId GuideHierarchy::baseIdOf(const HierarchyGuide& g) const { return baseOf(g, guides_, index_)->id; }
-
 GuideSet GuideHierarchy::flattenGroup(GroupId groupId) const {
     GuideSet set;
     const bool attributes = hasAttributes();
@@ -1518,8 +1501,6 @@ GuideSet GuideHierarchy::flattenGroup(GroupId groupId) const {
         out.tube.scaleWidth(scale_);
         out.frameUp = g.frameUp;
         out.depth = depth;
-        out.baseRoot = baseRootOf(g);
-        out.baseId = baseIdOf(g);
         if (attributes) out.attributes = effectiveAttributes(g);
         if (layers) out.pointAttributes = effectivePointAttributes(g);
     }
@@ -1542,8 +1523,6 @@ GuideSet GuideHierarchy::flatten(int level) const {
         out.tube.scaleWidth(scale_);
         out.frameUp = g.frameUp;
         out.depth = depths[g.group];
-        out.baseRoot = baseRootOf(g);
-        out.baseId = baseIdOf(g);
         if (attributes) out.attributes = effectiveAttributes(g);
         if (layers) out.pointAttributes = effectivePointAttributes(g);
     }
