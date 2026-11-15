@@ -34,8 +34,7 @@ ICON_GROUPS = {
     "paint": ("paint", "freeze", "invert", "unfreeze", "select"),  # the guide tools share one color
 }
 PLACEHOLDERS = {"main": "#3D7EFF", "shade": "#1F4FB3", "tint": "#A8C7FF", "ink": "#F2F2F5", "shine": "#FFFFFF",
-                "red": "#FF4D50", "yellow": "#FFC53E", "blue": "#2F7BF7", "emerald": "#2ECC90",
-                "frame": "#464646", "background": "#1E1E1E"}
+                "red": "#FF4D50", "yellow": "#FFC53E", "blue": "#2F7BF7", "emerald": "#2ECC90"}
 _svg_cache = {}
 
 
@@ -396,8 +395,7 @@ def icon_colors(name, t=None):
     group = next((g for g, names in ICON_GROUPS.items() if name in names), "app")
     main = t.hex(t.get("icons." + group, "accent"))
     colors = {"main": main, "shade": _mix(main, "#000000", 0.38), "tint": _mix(main, "#FFFFFF", 0.5),
-              "ink": t.hex(t.get("icons.ink", "white")), "shine": "#FFFFFF",
-              "frame": t.token("cardRule"), "background": t.token("card")}
+              "ink": t.hex(t.get("icons.ink", "white")), "shine": "#FFFFFF"}
     for name_ in ("red", "yellow", "blue", "emerald"):
         colors[name_] = t.hex(name_)
     return colors

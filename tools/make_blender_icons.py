@@ -3,24 +3,28 @@
 (hosts/blender/addon/groomlab/icons/<name>.png, 64 px), in the Maya palette's default theme colors
 (hosts/maya/themes/playful.json, as groomlab.ui.widgets.icon colors them):
 
-    python tools/make_blender_icons.py        (Python 3 with Pillow and resvg-py)
+    python tools/make_blender_icons.py        (Python 3 with Pillow and numpy)
 
 It also renders the app's mono UI glyphs (hosts/app/icons/ui_*.svg, 24 x 24, white) as
 icons/ui_<name>.png for the GroomLab window (window.py), which tints them.
 
 Run it after tools/make_icons.py changes the SVGs; the PNGs are committed (Blender's previews read
 PNGs, and the extension build needs no SVG renderer). The SVGs use a small subset (path with M L H V
-C Q A Z, rect, circle, ellipse, a rotated g; strokes with round caps and joins, dashes, opacity),
-which this draws supersampled and scales down. The authored 100 x 100 tool designs use resvg
-to preserve compound-path holes and fill rules. Install with: pip install Pillow resvg-py."""
+C Q A Z, rect, circle, ellipse, a rotated g; strokes with round caps and joins, dashes, opacity;
+fills by their fill-rule, nonzero or evenodd, so a compound path's holes stay holes), which this
+draws supersampled and scales down.
+
+The tool designs (make_icons.DESIGNED_ICONS: two tones, the group's color and the ink) get two masks
+besides: icons/<name>_main.png and icons/<name>_ink.png, white with the part's coverage as alpha,
+which the GroomLab window tints with the theme's two colors (uikit.Tile)."""
 
 import json
-import io
 import math
 import os
 import re
 import xml.etree.ElementTree as ET
 
+import numpy as np
 from PIL import Image, ImageDraw
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -32,8 +36,11 @@ SIZE = 64
 SS = 8                       # supersampling
 UI_DIR = os.path.join(ROOT, "hosts", "app", "icons")  # the mono glyphs (ui_*.svg)
 K = SIZE * SS / 32.0         # SVG units (32 x 32) to canvas pixels; render() sets it from the viewBox
+ORIGIN = (0.0, 0.0)          # the viewBox's top left (render() sets it)
 
 # groomlab/ui/widgets.py: which theme color each icon's main color is, and the placeholders.
+from make_icons import DESIGNED_ICONS  # noqa: E402 (the two-tone tool designs)
+
 ICON_GROUPS = {
     "create": ("place", "draw", "part", "flow"),
     "shape": ("comb", "slide", "smooth", "lift", "twist", "attract", "shape"),  # "shape": the Tube brush
@@ -41,8 +48,7 @@ ICON_GROUPS = {
     "paint": ("paint", "freeze", "invert", "unfreeze", "select"),
 }
 PLACEHOLDERS = {"main": "#3D7EFF", "shade": "#1F4FB3", "tint": "#A8C7FF", "ink": "#F2F2F5", "shine": "#FFFFFF",
-                "red": "#FF4D50", "yellow": "#FFC53E", "blue": "#2F7BF7", "emerald": "#2ECC90",
-                "frame": "#464646", "background": "#1E1E1E"}
+                "red": "#FF4D50", "yellow": "#FFC53E", "blue": "#2F7BF7", "emerald": "#2ECC90"}
 
 
 def _hex(c):
@@ -66,9 +72,7 @@ def colors_for(name, theme):
     group = next((g for g, names in ICON_GROUPS.items() if name in names), "app")
     main = resolve(theme["icons"].get(group, "accent"))
     out = {"main": main, "shade": _mix(main, "#000000", 0.38), "tint": _mix(main, "#FFFFFF", 0.5),
-           "ink": resolve(theme["icons"].get("ink", "white")), "shine": "#FFFFFF",
-           "frame": theme["ui"].get("cardRule", _mix(theme["ui"]["card"], theme["ui"]["hover"], 0.6)),
-           "background": theme["ui"]["card"]}
+           "ink": resolve(theme["icons"].get("ink", "white")), "shine": "#FFFFFF"}
     for n in ("red", "yellow", "blue", "emerald"):
         out[n] = resolve(n)
     return out
@@ -256,7 +260,8 @@ def dashes(points, closed, pattern):
 
 def _style(el, inherited):
     s = dict(inherited)
-    for k in ("fill", "stroke", "stroke-width", "opacity", "stroke-dasharray", "stroke-linecap", "transform"):
+    for k in ("fill", "fill-rule", "stroke", "stroke-width", "opacity", "stroke-dasharray", "stroke-linecap",
+              "transform"):
         if el.get(k) is not None:
             s[k] = el.get(k)
     return s
@@ -293,15 +298,11 @@ def draw_element(img, el, s, colors):
     shapes = _shapes(el, s)
     tf = _transform(s)
     opacity = float(s.get("opacity", 1.0))
-    canvas = lambda pts: [(x * K, y * K) for x, y in (tf(p) for p in pts)]
+    canvas = lambda pts: [((x - ORIGIN[0]) * K, (y - ORIGIN[1]) * K) for x, y in (tf(p) for p in pts)]
     fill, stroke = s.get("fill", "none"), s.get("stroke", "none")
     if fill and fill != "none":
-        mask = Image.new("L", img.size, 0)
-        d = ImageDraw.Draw(mask)
-        for pts, _closed in shapes:
-            if len(pts) >= 3:
-                d.polygon(canvas(pts), fill=255)
-        _paint(img, mask, colors.get(fill.upper(), fill), opacity)
+        _paint(img, _fill_mask(img.size, [canvas(pts) for pts, _closed in shapes if len(pts) >= 3],
+                               s.get("fill-rule", "nonzero")), colors.get(fill.upper(), fill), opacity)
     if stroke and stroke != "none":
         width = float(s.get("stroke-width", 1.0)) * K
         cap = s.get("stroke-linecap", "round")
@@ -325,6 +326,23 @@ def draw_element(img, el, s, colors):
         _paint(img, mask, colors.get(stroke.upper(), stroke), opacity)
 
 
+def _fill_mask(size, polygons, rule):
+    """A fill's coverage (an "L" mask) by its fill-rule: each subpath's winding (+1 or -1 by its
+    direction) summed, inside where nonzero, or where an odd count of subpaths hold it (evenodd)."""
+    winding = np.zeros((size[1], size[0]), np.int16)
+    for poly in polygons:
+        one = Image.new("1", size, 0)
+        ImageDraw.Draw(one).polygon(poly, fill=1)
+        inside = np.asarray(one, dtype=np.int16)
+        if rule == "evenodd":
+            winding += inside
+        else:
+            area = sum(a[0] * b[1] - b[0] * a[1] for a, b in zip(poly, poly[1:] + poly[:1]))
+            winding += inside if area >= 0 else -inside
+    filled = (winding % 2 == 1) if rule == "evenodd" else (winding != 0)
+    return Image.fromarray((filled * 255).astype(np.uint8), "L")
+
+
 def _paint(img, mask, color, opacity):
     rgb = _hex(color)
     if opacity < 1.0:
@@ -344,23 +362,30 @@ def walk(img, el, s, colors):
 
 
 def render(path, colors_by_placeholder):
-    global K
+    global K, ORIGIN
     root = ET.parse(path).getroot()
-    box = (root.get("viewBox") or "0 0 32 32").split()
-    if box == ["0", "0", "100", "100"]:
-        import resvg_py
-        # Replace attributes directly so a target color cannot become another placeholder.
-        for element in root.iter():
-            for attribute in ("fill", "stroke"):
-                value = element.get(attribute, "")
-                if value.upper() in colors_by_placeholder:
-                    element.set(attribute, colors_by_placeholder[value.upper()])
-        png = resvg_py.svg_to_bytes(svg_string=ET.tostring(root, encoding="unicode"), width=SIZE, height=SIZE)
-        return Image.open(io.BytesIO(png)).convert("RGBA")
-    K = SIZE * SS / float(box[2])
+    box = [float(v) for v in (root.get("viewBox") or "0 0 32 32").split()]
+    K = SIZE * SS / box[2]
+    ORIGIN = (box[0], box[1])
     img = Image.new("RGBA", (SIZE * SS, SIZE * SS), (0, 0, 0, 0))
     walk(img, root, _style(root, {}), colors_by_placeholder)
     return img.resize((SIZE, SIZE), Image.LANCZOS)
+
+
+def two_tone_masks(path):
+    """A two-tone design's parts as masks: {"main": the group color's (main, shade, tint), "ink": the
+    ink's}, white with each part's coverage as alpha (its share where the two meet)."""
+    roles = {PLACEHOLDERS[r].upper(): "#FF0000" for r in ("main", "shade", "tint")}
+    roles[PLACEHOLDERS["ink"].upper()] = "#00FF00"
+    rgba = np.asarray(render(path, roles), dtype=np.float32)
+    out = {}
+    for part, channel in (("main", 0), ("ink", 1)):
+        alpha = rgba[..., 3] * rgba[..., channel] / 255.0
+        mask = np.zeros(rgba.shape, np.uint8)
+        mask[..., :3] = 255
+        mask[..., 3] = np.clip(np.round(alpha), 0, 255).astype(np.uint8)
+        out[part] = Image.fromarray(mask, "RGBA")
+    return out
 
 
 def main():
@@ -377,6 +402,15 @@ def main():
         by_placeholder = {PLACEHOLDERS[role].upper(): colors[role] for role in PLACEHOLDERS}
         render(os.path.join(SVG_DIR, file), by_placeholder).save(os.path.join(OUT, name + ".png"), optimize=True)
         count += 1
+        if name in DESIGNED_ICONS:
+            for part, image in two_tone_masks(os.path.join(SVG_DIR, file)).items():
+                path = os.path.join(OUT, "%s_%s.png" % (name, part))
+                if image.getchannel("A").getbbox() is None:  # (a design of one tone: no ink)
+                    if os.path.exists(path):
+                        os.remove(path)
+                    continue
+                image.save(path, optimize=True)
+                count += 1
     for file in sorted(os.listdir(UI_DIR)):  # the window's glyphs: white, tinted when drawn
         if re.match(r"ui_\w+\.svg$", file):
             render(os.path.join(UI_DIR, file), {}).save(os.path.join(OUT, file[:-4] + ".png"), optimize=True)

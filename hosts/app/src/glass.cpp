@@ -246,8 +246,6 @@ QPixmap duotoneIcon(const QString& resource, const QColor& main, const QColor& i
         {QStringLiteral("#FFC53E"), theme::yellow()},
         {QStringLiteral("#2F7BF7"), theme::blue()},
         {QStringLiteral("#2ECC90"), theme::emerald()},
-        {QStringLiteral("#464646"), theme::cardRule()},
-        {QStringLiteral("#1E1E1E"), theme::card()},
     };
     for (std::size_t i = 0; i < roles.size(); ++i) svg.replace(roles[i].first, QStringLiteral("@role%1@").arg(i), Qt::CaseInsensitive);
     for (std::size_t i = 0; i < roles.size(); ++i) {

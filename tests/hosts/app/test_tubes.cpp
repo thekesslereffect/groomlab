@@ -492,7 +492,7 @@ TEST(AppTubes, ShapeBrushCardPaintsAChannelAndHoldsTheProfile) {
 }
 
 TEST(AppGroomTools, TilesFillTheRowsAndTheColumnsFollowTheWidth) {
-    // The grid: every tile one height and minimum width (labeled 56 x 54, icons alone 38 x 38; 24 px
+    // The grid: every tile one height and minimum width (labeled 56 x 62, icons alone 46 x 46; 32 px
     // icons); as many to a row as (width + spacing) / (tile + spacing), at most four, the row's
     // width split evenly between them.
     GroomTools tools;
@@ -505,7 +505,7 @@ TEST(AppGroomTools, TilesFillTheRowsAndTheColumnsFollowTheWidth) {
     ASSERT_NE(grid, nullptr);
     for (const bool labels : {true, false}) {
         tools.setTileLabels(labels);
-        const QSize tile = labels ? QSize(56, 54) : QSize(38, 38);
+        const QSize tile = labels ? QSize(56, 62) : QSize(46, 46);
         EXPECT_EQ(grid->tile(), tile) << "labels " << labels;
         for (const int width : {120, 200, 252, 320, 480}) {
             const int columns = grid->columnsFor(width);
@@ -529,7 +529,7 @@ TEST(AppGroomTools, TilesFillTheRowsAndTheColumnsFollowTheWidth) {
         EXPECT_GT(grid->heightForWidth(120), grid->heightForWidth(480)) << "narrower: more rows";
     }
     QAbstractButton* comb = tools.tile("comb");
-    EXPECT_EQ(qobject_cast<QToolButton*>(comb)->iconSize(), QSize(24, 24));
+    EXPECT_EQ(qobject_cast<QToolButton*>(comb)->iconSize(), QSize(32, 32));
     // The Paint tab: Paint is one full-width button over the maps, not a tile in a grid.
     auto* paint = qobject_cast<QToolButton*>(tools.tile("paint"));
     ASSERT_NE(paint, nullptr);

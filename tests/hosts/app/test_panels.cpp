@@ -1168,8 +1168,8 @@ TEST(AppPanels, GroomToolsTilesReflowAndTheModePillClosesTheGraph) {
     EXPECT_EQ(tabs, (std::vector<std::string>{"Tools", "Paint", "Correctives", "Photos", "Outliner"})) << "palette.json's tabs (the Outliner the app's own)";
     auto* grid = qobject_cast<ToolGrid*>(tools.tile("comb")->parentWidget());
     ASSERT_NE(grid, nullptr);
-    EXPECT_EQ(grid->columnsFor(260), 4) << "at most four to a row (six 38 px icons would fit in 260 px)";
-    EXPECT_EQ(grid->columnsFor(130), 3) << "fewer when only fewer fit";
+    EXPECT_EQ(grid->columnsFor(260), 4) << "at most four to a row (five 46 px icons would fit in 260 px)";
+    EXPECT_EQ(grid->columnsFor(150), 3) << "fewer when only fewer fit";
     EXPECT_EQ(qobject_cast<QToolButton*>(tools.tile("comb"))->toolButtonStyle(), Qt::ToolButtonIconOnly);
     EXPECT_TRUE(tools.tile("comb")->toolTip().contains(QStringLiteral("Comb"))) << "the name in the tool tip";
     const int icons = grid->heightForWidth(260);

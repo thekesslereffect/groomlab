@@ -155,6 +155,8 @@ class Theme:
                            for g in ("create", "shape", "trim", "paint")}
         # ui.toolOn "category" (Playful's): the picked tool's tile washed with its group's color.
         self.tool_on_category = ui.get("toolOn") == "category"
+        # The two-tone tool designs' second tone: the theme's icon ink (hair and neutral parts).
+        self.icon_ink = _linear_rgba(_srgb(icons.get("ink", "white"), named) or c["text"])
         self._srgb = c
         for key, value in c.items():
             setattr(self, key, _linear_rgba(value))
@@ -416,6 +418,11 @@ def _texture(name):
                     continue
         _textures[name] = tex
     return _textures[name]
+
+
+def has_icon(name):
+    """Whether icons/<name>.png is there (a two-tone design's masks)."""
+    return _texture(name) is not None
 
 
 def font():
@@ -958,10 +965,13 @@ class Glyph(Button):
 
 
 class Tile(Button):
-    """A tool's tile, flat (a tray's): its icon over its name, in its group's color (the theme's
-    icons: Playful's green, blue, red and yellow; Charcoal's one gray), as the app's; hovered, the
+    """A tool's tile, flat (a tray's): its icon over its name, as the app's (groom_tools.cpp): a tool
+    design in its two tones, its group's color (the theme's icons: Playful's green, blue, red and
+    yellow) and the theme's icon ink (icons/<name>_main.png and _ink.png, tinted); hovered, the
     hover; the picked one on the soft accent with its edge, the icon in the accent's ink, or with
-    toolOn "category" (Playful's) washed with its group's color, the icon toward the text."""
+    toolOn "category" (Playful's) washed with its group's color, the icon as at rest."""
+
+    ICON = 32  # px (the app's and Maya's tool tiles)
 
     def __init__(self, wid, rect, text, action, icon, active, tooltip=""):
         super().__init__(wid, rect, text, action, icon, tooltip=tooltip)
@@ -979,14 +989,20 @@ class Tile(Button):
         elif hover:
             p.rect(self.rect, t.hover, t.radius * s)
         x, y, w, h = self.rect
-        g = 24 * s
+        g = self.ICON * s
+        r = (x + (w - g) * 0.5, y + h - g - 6 * s, g, g)
         if self.disabled:
-            ink = t.textMuted
-        elif self.active:
-            ink = t.tool_color(self.icon, toward_text=0.25) if by_group else t.accentInk
+            main = ink = t.textMuted
+        elif self.active and not by_group:
+            main = ink = t.accentInk
+        else:  # (at rest, and picked in a toolOn "category" theme: its own two tones)
+            main, ink = t.tool_color(self.icon), t.icon_ink
+        if has_icon(self.icon + "_main"):
+            p.icon(self.icon + "_main", r, tint=main)
+            if has_icon(self.icon + "_ink"):  # (a design of one tone has none)
+                p.icon(self.icon + "_ink", r, tint=ink)
         else:
-            ink = t.tool_color(self.icon)
-        p.glyph(self.icon, (x + (w - g) * 0.5, y + h - g - 7 * s, g, g), ink, mono=True)
+            p.glyph(self.icon, r, main, mono=True)
         color = t.textDisabled if self.disabled else t.text if self.active or hover else t.textDim
         p.text(self.text, (x + 2 * s, y + 4 * s, w - 4 * s, 15 * s), color, t.tiny_size, "center")
 

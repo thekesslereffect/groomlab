@@ -98,10 +98,10 @@
     }
   },
   "icons": {
-    "create": "#45413A",
-    "shape": "#45413A",
-    "trim": "#45413A",
-    "paint": "#45413A",
+    "create": "#8A8275",
+    "shape": "#8A8275",
+    "trim": "#8A8275",
+    "paint": "#8A8275",
     "app": "accent",
     "ink": "#1C1B19"
   },

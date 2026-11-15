@@ -495,7 +495,7 @@ class Placer(object):
                 return h
             return self.label_h * max(1.0, st.scale_y)
         if kind == "operator" and st.tiles:
-            return 54 * self.s  # a tool tile: its icon over its name (the app's 56 x 54)
+            return 62 * self.s  # a tool tile: its 32 px icon over its name (the app's 56 x 62)
         if kind in ("operator", "menu", "popover") and st.scale_y <= 1.0:
             return self.row_h - 2 * self.s  # buttons and chips a little under the fields (the app's)
         if kind == "prop" and st.scale_y <= 1.0:
