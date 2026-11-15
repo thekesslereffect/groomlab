@@ -117,6 +117,10 @@ using TubeShapeLibrary = std::map<std::string, CustomTubeShapePtr>;
 // root outline, "rootTube_<n>"): removed from the library with the last of them
 // (GuideHierarchy::removeGuides, removeGroup).
 constexpr const char* kOwnedTubeShapePrefix = "rootTube_";
+// How much larger than its outline as drawn a root-first tube's shape is laid, about its guide
+// (root_tubes.py ROOT_OVERLAP: sealed neighbours' footprints overlap rather than leave a crack).
+// fillTubes takes it off again to tell which outline a root in the overlap was drawn in.
+constexpr float kRootTubeOverlap = 0.015f;
 
 // Points round every outline, built-in or custom.
 constexpr std::size_t kTubeOutlinePoints = 96;
@@ -349,6 +353,16 @@ public:
     // ahead. Without it (or with a zero normal, or one against the guide's direction) the
     // footprint is the root section itself, in the plane across the guide's root.
     void setRootSurface(const Vec3f& normal);
+    // The root footprint `other` lays (its axes and normal: a spine of the same root), so a tube
+    // along a guide's resampled, smoothed shape lies on the scalp as the guide's own points lay it
+    // (Scatter's footprints, and the root outline a root tube was fitted to: the first span's
+    // way decides how the footprint turns, and a smoothed one turns it a little otherwise).
+    void setFootprint(const TubeSpine& other) {
+        if (empty() || other.empty()) return;
+        footU_ = other.footU_;
+        footV_ = other.footV_;
+        footNormal_ = other.footNormal_;
+    }
     // Where world point p lies on the root footprint: its section coordinates there (p taken into
     // the footprint's plane along its normal), and (with `along`) how far off that plane it lies
     // (signed, scene units).

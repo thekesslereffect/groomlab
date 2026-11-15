@@ -1717,7 +1717,7 @@ private:
                     guideShape(g, samples, smoothGuides, resampled);
                     TubeSpine& spine = fill->spines[kept.size() + i];
                     spine = TubeSpine(resampled.data(), samples, g.frameUp, g.tube);
-                    if (align) spine.setRootSurface(scalpNormalAt(*scalp, g.root, resampled.front()));
+                    if (align) layFootprint(spine, g, scalpNormalAt(*scalp, g.root, resampled.front()));
                 }, 8);
             }
         }
@@ -1739,7 +1739,11 @@ private:
             if (fill && g.hasTube && samples >= 2) {
                 // The tube along the guide, its root footprint laid on the scalp.
                 fill->spines[k] = TubeSpine(resampled.data(), samples, g.frameUp, g.tube);
-                fill->spines[k].setRootSurface(align ? scalpNormalAt(*scalp, g.root, resampled.front()) : Vec3f{});
+                if (align) {
+                    layFootprint(fill->spines[k], g, scalpNormalAt(*scalp, g.root, resampled.front()));
+                } else {
+                    fill->spines[k].setRootSurface(Vec3f{});
+                }
             }
             float* rows = offsets.data() + k * 3 * stride;
             for (std::size_t j = 0; j < samples; ++j) {
@@ -2316,16 +2320,35 @@ private:
         }, 4096);
     }
 
-    // How far inside its tube's root footprint section coordinates `at` lie, in the footprint's
-    // own lengths (its width 2 across, whatever its shape and aspect): below 0 outside. Tubes of
-    // any size and aspect compare by it as lengths on the scalp, where tubeShapeDepth's share of
-    // each tube's own depth favours the larger or narrower one: so where sealed neighbours'
-    // footprints overlap (ROOT_OVERLAP), the root goes to the one whose outline it lies within.
+    // A tube's root footprint laid on the scalp of normal `normal` as the guide's own points lay it
+    // (TubeSpine::setFootprint), not its resampled, smoothed shape: where Scatter rooted the
+    // strands and the root outline was fitted.
+    static void layFootprint(TubeSpine& spine, const Guide& g, const Vec3f& normal) {
+        if (g.points.size() >= 2) {
+            TubeSpine own(g.points.data(), g.points.size(), g.frameUp, g.tube);
+            own.setRootSurface(normal);
+            if (!own.empty()) {
+                spine.setFootprint(own);
+                return;
+            }
+        }
+        spine.setRootSurface(normal);
+    }
+
+    // How far inside its tube's root footprint section coordinates `at` lie, as a length on the
+    // scalp (whatever the tube's size, shape and aspect): below 0 outside. A root-first tube's
+    // footprint is laid kRootTubeOverlap larger than its outline as drawn, about its guide, so
+    // sealed neighbours overlap; measured against the outline as drawn, so a root in the overlap
+    // goes to the root it was drawn inside (each footprint reaches across the shared edge by its
+    // own share of its guide's distance, the farther guide's further).
     static float footprintDepth(const TubeSpine& spine, const SectionPoint& at) {
-        const std::vector<SectionPoint>& poly = tubeShapeOutline(spine.tube()).points;
+        const TubeProfile& tube = spine.tube();
+        const std::vector<SectionPoint>& poly = tubeShapeOutline(tube).points;
         const float width = spine.rootWidth();
         const float a = width > 0.0f ? std::max(spine.rootHeight() / width, 1e-6f) : 1.0f;
-        const float u = at.u, y = at.v * a;
+        const bool drawn = tube.custom && tube.custom->name.rfind(kOwnedTubeShapePrefix, 0) == 0;
+        const float k = drawn ? 1.0f + kRootTubeOverlap : 1.0f;  // (the outline as drawn: the footprint over k)
+        const float u = at.u * k, y = at.v * a * k;
         float best = std::numeric_limits<float>::max();
         bool inside = false;
         const std::size_t n = poly.size();
@@ -2339,7 +2362,7 @@ private:
             const float du = u - (au + eu * f), dv = y - (av + ev * f);
             best = std::min(best, du * du + dv * dv);
         }
-        const float d = std::sqrt(best) * width;
+        const float d = std::sqrt(best) * width / k;
         return inside ? d : -d;
     }
 
@@ -2408,8 +2431,11 @@ private:
                 return true;
             });
             fill.baseOf[s] = base >= 0 ? base : near;
-            const std::uint64_t lineage = base >= 0 ? fill.bases[static_cast<std::size_t>(base)] : 0;
-            auto ours = [&](std::uint32_t k) { return base < 0 || fill.bases[k] == lineage; };
+            // Held by none (a crack between roots, or just past an edge): the nearest's deeper tubes
+            // alone, never a farther root's slice reaching over it.
+            const std::int32_t mine = base >= 0 ? base : near;
+            const std::uint64_t lineage = mine >= 0 ? fill.bases[static_cast<std::size_t>(mine)] : 0;
+            auto ours = [&](std::uint32_t k) { return mine < 0 || fill.bases[k] == lineage; };
             std::int32_t best = -1;
             float bestDepth = 0.0f;
             SectionPoint bestAt;

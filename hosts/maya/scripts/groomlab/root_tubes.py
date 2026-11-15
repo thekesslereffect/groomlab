@@ -49,7 +49,7 @@ MAX_LEVELS = 9              # the tube hierarchy's deepest level (1: the base)
 LEVEL_SUFFIX = "_L"         # level n's group: <base>_L<n>
 SNAP_PIXELS = 12            # how near (in view pixels) a CV snaps to a neighbouring root's CV or edge
 OUTLINES_ATTR = "groomLabRootOutlines"  # the groom's string attribute: each root tube's CVs on the scalp (JSON)
-ROOT_OVERLAP = 0.015       # a root tube's footprint this share larger than its outline: sealed neighbours overlap
+ROOT_OVERLAP = 0.015       # a root tube's footprint this share larger than its outline: sealed neighbours overlap (tube.h kRootTubeOverlap)
 _RECENTER_PASSES = 4        # the guide moved onto its root shape's box middle at most so often
 _PATH_SMOOTHING = 0.25     # a drawn path averaged along it over this share of its root's size (a Gaussian's
                             # sigma): the hand's shakes go, a curl as wide as its tube stays
@@ -475,8 +475,11 @@ def _turn(vec, a, b):
 
 
 def _smooth_normal(groom, point):
-    """The scalp's normal at `point` as GroomLab reads it (ScalpMesh::normal: the vertex normals
-    blended across the triangle the point lies in)."""
+    """The scalp's normal at `point` as GroomLab reads it (ScalpMesh::normal): on the triangle of
+    Maya's split the point lies in, its corners' normals blended, each corner's the sum of the
+    normals of the triangles round it weighted by their areas (not Maya's own vertex normals,
+    which weigh by angle: on a coarse scalp the two tilt a root's footprint apart, and strands at
+    a shared edge go to the neighbour)."""
     from maya.api import OpenMaya as om
     from groomlab import utils
     q = om.MPoint(*point)
@@ -486,20 +489,34 @@ def _smooth_normal(groom, point):
         hit, face = fn.getClosestPoint(q, om.MSpace.kWorld)
         d = hit.distanceTo(q)
         if best is None or d < best[0]:
-            best = (d, fn, face, (hit.x, hit.y, hit.z))
+            best = (d, shape, fn, face, (hit.x, hit.y, hit.z))
     if best is None:
         raise ValueError("the groom has no scalp")
-    _d, fn, face, at = best
-    verts = fn.getPolygonVertices(face)
-    corners = [tuple(fn.getPoint(v, om.MSpace.kWorld))[:3] for v in verts]
+    _d, shape, fn, face, at = best
+    dag = om.MSelectionList().add(shape).getDagPath(0)
+    polys = om.MItMeshPolygon(dag)
+
+    def triangles(f):
+        polys.setIndex(f)
+        pts, ids = polys.getTriangles(om.MSpace.kWorld)
+        return [(tuple(ids[3 * t:3 * t + 3]), [tuple(pts[3 * t + j])[:3] for j in range(3)]) for t in range(len(ids) // 3)]
+
     pick = None
-    for k in range(1, len(corners) - 1):
-        w = _barycentric(at, corners[0], corners[k], corners[k + 1])
+    for ids, corners in triangles(face):
+        w = _barycentric(at, *corners)
         if pick is None or min(w) > min(pick[1]):
-            pick = (k, w)
-    k, w = pick
-    normals = [tuple(fn.getFaceVertexNormal(face, verts[i], om.MSpace.kWorld))[:3] for i in (0, k, k + 1)]
-    n = tm._add(tm._add(tm._mul(normals[0], w[0]), tm._mul(normals[1], w[1])), tm._mul(normals[2], w[2]))
+            pick = (ids, w)
+    ids, w = pick
+    verts = om.MItMeshVertex(dag)
+    n = (0.0, 0.0, 0.0)
+    for vid, weight in zip(ids, w):
+        verts.setIndex(vid)
+        total = (0.0, 0.0, 0.0)
+        for f in verts.getConnectedFaces():
+            for tids, (p0, p1, p2) in triangles(f):
+                if vid in tids:
+                    total = tm._add(total, tm._cross(tm._sub(p1, p0), tm._sub(p2, p0)))
+        n = tm._add(n, tm._mul(tm._unit(total), weight))
     return tm._unit(n)
 
 
