@@ -335,6 +335,8 @@ private:
             out.tube.scaleWidth(scale);
             out.frameUp = g.frameUp;
             out.depth = depth;
+            out.baseRoot = hierarchy.baseRootOf(g);
+            out.baseId = hierarchy.baseIdOf(g);
             tubes->push_back(std::move(out));
         });
         if (!tubes->empty()) set.setLevelTubes(std::move(tubes));

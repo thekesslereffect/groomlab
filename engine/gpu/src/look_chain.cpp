@@ -873,7 +873,7 @@ bool readLookParams(const GraphDocument& doc, const LookChain& chain, const Over
             case StageKind::Clump: {
                 // Strands filling tube guides (an Interpolate's fillTubes) clumped inside their tubes
                 // (a Clump's followTubes picking its own centers, a Wet's levels): the CPU's.
-                if (stage.level >= 0 || (params.getBool("followTubes") && params.getString("centersFrom") == "pick")) {
+                if (stage.level >= 0 || params.getBool("followTubes")) {  // (any centers: each tube its own region)
                     const StrandsPtr in = inputStrands(graph, id);
                     const std::vector<float>* tubes = in ? in->strandChannel("tubeId") : nullptr;
                     if (tubes && in->strandChannel("tubeU") && in->strandChannel("tubeV") &&

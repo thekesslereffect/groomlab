@@ -363,6 +363,10 @@ public:
     void removeAttribute(const std::string& name);
     void renameAttribute(const std::string& from, const std::string& to);
     GuideSet flattenGroup(GroupId group) const;
+    // The root of the guide `g`'s line of parents starts from (its own for a guide with none).
+    StrandRoot baseRootOf(const HierarchyGuide& g) const;
+    // That guide's ID (its own for a guide with none).
+    GuideId baseIdOf(const HierarchyGuide& g) const;
 
     // Everything the hierarchy holds, hashed. Worked out once and kept until the next change:
     // every non-const member clears it (a new one must too), so hosts may call it on every
