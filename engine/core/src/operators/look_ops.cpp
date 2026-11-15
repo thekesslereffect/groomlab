@@ -1011,7 +1011,9 @@ public:
                       "Strands filling tube guides (an Interpolate's fillTubes: tubeId, tubeU and tubeV) clump inside "
                       "their own tube: each tube's centers are picked among its strands (as far apart as clumpBy says "
                       "for the whole scalp) and a strand gathers toward its tube's nearest, so the clumps flatten, "
-                      "twist and taper with the tube; strands in no tube clump as ever. Off: by root across tubes. "
+                      "twist and taper with the tube; with centers given (curves, points) each belongs to the tube it is "
+                      "rooted in and a strand gathers toward its own tube's; strands in no tube clump as ever. Off: by "
+                      "root across tubes. "
                       "Strands without those channels clump as ever either way"}
                 .when("centersFrom", {"pick"}),
             ParamSpec{"repelRadius", 0.5, "With a negative strength: how far from its center a strand is pushed out to at "
@@ -1278,7 +1280,9 @@ private:
         // followTubes: strands filling tube guides clump inside their own tube (addTubeCenters,
         // their tubes as regions below); not on barbs.
         const std::vector<float>* tubeIds = nullptr;
-        if (own && params().getBool("followTubes") && in->strandChannel("tubeU") && in->strandChannel("tubeV") && !hasVanes(*in)) {
+        // (Centers given as curves or points too: each tube a region of its own, below, so a strand gathers
+        // toward the center lying in its own tube, never a neighbour tube's.)
+        if (params().getBool("followTubes") && in->strandChannel("tubeU") && in->strandChannel("tubeV") && !hasVanes(*in)) {
             tubeIds = in->strandChannel("tubeId");
             if (tubeIds && (tubeIds->size() != in->strandCount() ||
                             std::none_of(tubeIds->begin(), tubeIds->end(), [](float t) { return t >= 0.0f; }))) {
@@ -1286,7 +1290,7 @@ private:
             }
             // Each tube's centers picked anew; during a live brush stroke the strands keep their tubes
             // (an Interpolate's fillTubes, EvalContext::liveStroke), so a dab's are the same.
-            if (tubeIds && incremental && !(ctx.viewport && ctx.liveStroke)) return false;
+            if (tubeIds && own && incremental && !(ctx.viewport && ctx.liveStroke)) return false;
         }
         if (own && !in->empty() && !sizing.none()) {
             const auto seed = static_cast<std::uint64_t>(params().getInt("seed"));
@@ -1455,11 +1459,13 @@ private:
         const std::vector<float>* strandRegions = vanes.active() ? nullptr : regionsOf(*in, regionName);
         // followTubes: each tube a region of its own (kTubeRegionBase + its number), the strands in
         // no tube in theirs (the channel's, else one region), so a strand clumps toward its tube's
-        // centers and the others toward the centers off the tubes.
+        // centers and the others toward the centers off the tubes. Centers given (curves, points):
+        // each in the tube of the strand rooted nearest it (the region rule above), so a strand
+        // gathers toward the center curve of its own tube.
         std::vector<float> tubeRegions;
-        if (tubeIds && !picked.empty()) {
+        const std::vector<float>* channelRegions = strandRegions;  // (the regionChannel's own, before the tubes')
+        if (tubeIds) {
             tubeRegions.resize(in->strandCount());
-            const std::vector<float>* channelRegions = strandRegions;
             parallelFor(0, tubeRegions.size(), [&](std::size_t s) {
                 const float t = (*tubeIds)[s];
                 tubeRegions[s] = t >= 0.0f ? kTubeRegionBase + t : channelRegions ? (*channelRegions)[s] : 0.0f;
@@ -1601,11 +1607,38 @@ private:
                 group.index.emplace(std::move(at));
             }
         }
+        // followTubes with centers given: a strand whose tube holds no center (a part of a tube that
+        // none of the centers' smaller tubes covers) clumps toward the centers of its own region of
+        // the regionChannel (a tube hierarchy's level 1 tube's), each center in the region of the
+        // strand rooted nearest it; with no such channel, it stays unclumped.
+        std::map<float, RegionCenters> fallbackCenters;
+        if (tubeIds && picked.empty() && channelRegions && strandRegions == &tubeRegions && !roots.empty()) {
+            std::vector<std::uint32_t> rooted;
+            std::vector<Vec3f> at;
+            for (std::size_t s = 0; s < in->strandCount(); ++s) {
+                if (in->strandPointCount(s) == 0 || !core.core(s)) continue;
+                rooted.push_back(static_cast<std::uint32_t>(s));
+                at.push_back(queryOf(s));
+            }
+            if (!rooted.empty()) {
+                const PointIndex nearestStrand(std::move(at));
+                for (std::size_t c = 0; c < roots.size(); ++c) {
+                    const float r = (*channelRegions)[rooted[nearestStrand.nearest(roots[c])]];
+                    if (r == r) fallbackCenters[r].centers.push_back(static_cast<std::uint32_t>(c));
+                }
+                for (auto& [region, group] : fallbackCenters) {
+                    std::vector<Vec3f> where;
+                    for (const std::uint32_t c : group.centers) where.push_back(roots[c]);
+                    group.index.emplace(std::move(where));
+                }
+            }
+        }
         // What the assignment is searched from besides the queries and the centers' roots.
         std::uint64_t partsKey = parts ? hashCombine(parts->sideHash(), 1) : 0;
         if (strandRegions) {
             partsKey = hashCombine(hashCombine(partsKey, regionHash), centerRegions.size());
             for (const float r : centerRegions) partsKey = hashFloat(partsKey, r);
+            if (!fallbackCenters.empty()) partsKey = hashCombine(partsKey, hashChannel(*channelRegions));
         }
         // In full: the last full run's assignment when it was searched from these queries, centers'
         // roots and parts (a tweak of the strength, profile, flatness...), else searched again.
@@ -1675,8 +1708,14 @@ private:
             const std::vector<std::uint32_t>* region = nullptr;
             if (strandRegions) {
                 const float mine = (*strandRegions)[s];
-                const auto it = mine == mine ? regionCenters.find(mine) : regionCenters.end();
-                if (it == regionCenters.end()) return kNoCenter;
+                auto it = mine == mine ? regionCenters.find(mine) : regionCenters.end();
+                if (it == regionCenters.end() && !fallbackCenters.empty()) {  // (its tube has no center)
+                    const float own = (*channelRegions)[s];
+                    it = own == own ? fallbackCenters.find(own) : fallbackCenters.end();
+                    if (it == fallbackCenters.end()) return kNoCenter;
+                } else if (it == regionCenters.end()) {
+                    return kNoCenter;
+                }
                 search = &*it->second.index;
                 region = &it->second.centers;
             }
