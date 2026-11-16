@@ -33,6 +33,7 @@
 #include <maya/MToolsInfo.h>
 #include <maya/MVector.h>
 #include <maya/MUIDrawManager.h>
+#include <nlohmann/json.hpp>
 
 #include "command_args.h"
 #include "gpu_preview.h"
