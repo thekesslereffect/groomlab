@@ -99,6 +99,10 @@ std::vector<Vec3f> rootTubeOutline(const GuideHierarchy& h, const ScalpMesh& sca
 // A root tube's root footprint as world points: its shape's control points placed in its root
 // section laid flat on the scalp, taken onto the scalp along the footprint's normal (`onScalp`).
 std::vector<Vec3f> rootTubeSectionOutline(const GuideHierarchy& h, const ScalpMesh& scalp, GuideId guide, bool onScalp = true);
+// Root tube `guide`'s CVs kept as `outline` (world points, taken onto the scalp), its tube as it
+// is: an outline read from elsewhere (Maya's first root tubes kept theirs on the scene). Throws
+// std::invalid_argument for a guide that is not a root tube or fewer than 3 CVs.
+void keepRootTubeOutline(GuideHierarchy& h, const ScalpMesh& scalp, GuideId guide, const std::vector<Vec3f>& outline);
 // A root tube's root middle on the scalp (its outline's centroid taken onto it) and the normal there.
 ScalpPointNormal rootTubeCenter(const GuideHierarchy& h, const ScalpMesh& scalp, GuideId guide);
 // `outline` carried over the scalp from its middle at `start` to `to`: each CV turned with the

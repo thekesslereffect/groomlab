@@ -53,8 +53,51 @@ MAX_LEAN = 0.8726646259971648  # (50 degrees) a root tube's guide leaves the sca
 
 def _request(groom, op, **args):
     """groomLabGuides -rootTubes: the core's root tube work (an edit one undo step), its JSON answer."""
+    _adopt_scene_outlines(groom)
     args["op"] = op
     return json.loads(cmds.groomLabGuides(groom, rootTubes=json.dumps(args)) or "null")
+
+
+# GroomLab 0.49.0 kept a root tube's CVs on the scene (this attribute), not with its guide. A groom
+# from it has them read once into its guides and the attribute dropped. Remove this after a few
+# releases (DEVELOPING.md's rule is no migrations: this one only spares outlines drawn with 0.49.0).
+_SCENE_OUTLINES = "groomLabRootOutlines"
+
+
+def _adopt_scene_outlines(groom):
+    if not cmds.objExists(groom) or not cmds.attributeQuery(_SCENE_OUTLINES, node=groom, exists=True):
+        return
+    try:
+        stored = json.loads(cmds.getAttr(groom + "." + _SCENE_OUTLINES) or "{}")
+    except ValueError:
+        stored = {}
+    with groomlab.undo_chunk("keep root outlines with their guides"):
+        for guide, bound in sorted(stored.items()):
+            try:
+                outline = _scene_outline(groom, bound)
+                cmds.groomLabGuides(groom, rootTubes=json.dumps({"op": "keepOutline", "guide": int(guide),
+                                                                 "outline": [list(p) for p in outline]}))
+            except (ValueError, RuntimeError):
+                pass  # (a root tube gone, or the scalp changed under it: its tube's section stands in)
+        cmds.deleteAttr(groom, attribute=_SCENE_OUTLINES)
+
+
+def _scene_outline(groom, bound):
+    """0.49.0's records ([scalp, Maya face, fan triangle, w0, w1, w2] each) as world points."""
+    from maya.api import OpenMaya as om
+    from groomlab import utils
+    meshes = [m for m in [groomlab.scalp_mesh(groom)] + [s["mesh"] for s in groomlab.scalps(groom)] if m]
+    fns = [utils._om_mesh(m) for m in meshes]
+    out = []
+    for mi, face, k, w0, w1, w2 in bound:
+        if mi >= len(fns) or face >= fns[mi].numPolygons:
+            raise ValueError("the scalp changed under a root outline")
+        verts = fns[mi].getPolygonVertices(face)
+        if k + 1 >= len(verts):
+            raise ValueError("the scalp changed under a root outline")
+        a, b, c = (tuple(fns[mi].getPoint(verts[i], om.MSpace.kWorld))[:3] for i in (0, k, k + 1))
+        out.append(tm._add(tm._add(tm._mul(a, w0), tm._mul(b, w1)), tm._mul(c, w2)))
+    return out
 
 
 def _tuple(v):

@@ -970,6 +970,12 @@ std::vector<Vec3f> rootTubeOutline(const GuideHierarchy& h, const ScalpMesh& sca
     return rootTubeSectionOutline(h, scalp, id, true);
 }
 
+void keepRootTubeOutline(GuideHierarchy& h, const ScalpMesh& scalp, GuideId id, const std::vector<Vec3f>& outline) {
+    const HierarchyGuide* g = h.guide(id);
+    if (!g || !isRootTubeGuide(*g)) throw std::invalid_argument("guide " + std::to_string(id) + " is not a root tube");
+    h.setRootOutline(id, bindOutline(scalp, projectAll(scalp, checkedOutline(outline))));
+}
+
 ScalpPointNormal rootTubeCenter(const GuideHierarchy& h, const ScalpMesh& scalp, GuideId id) {
     return scalpPointNormal(scalp, outlineCentroid(rootTubeOutline(h, scalp, id)));
 }

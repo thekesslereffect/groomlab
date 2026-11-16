@@ -886,6 +886,20 @@ class MatchesTheFirstMayaVersion(unittest.TestCase):
         a, b = self.both(work)
         self.assert_same_tube(a, b, a[1], b[1])
 
+    def test_outlines_drawn_with_0_49_are_kept(self):
+        """A root tube drawn by the first version (0.49.0: its CVs kept on the scene, not with its
+        guide) keeps its CVs: read into its guide once, the scene's attribute dropped."""
+        groom = self.scene()
+        outline = uneven((0.0, 1.0, 0.0), 0.12)
+        guide = self.ref.make_root_tube(groom, outline, length=0.6)
+        drawn = self.ref.root_outline(groom, guide)
+        self.assertTrue(cmds.attributeQuery("groomLabRootOutlines", node=groom, exists=True))
+        kept = root_tubes.root_outline(groom, guide)
+        self.assertLess(max(tm._dist(a, b) for a, b in zip(drawn, kept)), 5e-3, "the CVs as drawn")
+        self.assertFalse(cmds.attributeQuery("groomLabRootOutlines", node=groom, exists=True))
+        data = groomlab.get_hierarchy(groom)
+        self.assertTrue(next(g for g in data["guides"] if int(g["id"]) == int(guide)).get("rootOutline"))
+
     def test_a_hierarchy_split_duplicated_and_trimmed(self):
         outline = uneven((0.0, 1.0, 0.0), 0.15)
 

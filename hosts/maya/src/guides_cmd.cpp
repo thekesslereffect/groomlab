@@ -93,7 +93,7 @@ const char* kFromNegative[] = {"-fn", "-fromNegative"};
 const char* kMirrorShapes[] = {"-msh", "-mirrorShapes"};
 const char* kSymmetry[] = {"-sym", "-symmetry"};
 // Root-first tubes and the tube hierarchy (root_tubes.h): one JSON request {"op", ...}. Edits
-// ("make", "edit", "duplicate", "delete", "addLevel", "removeLevel") are one undo step; queries
+// ("make", "edit", "keepOutline", "duplicate", "delete", "addLevel", "removeLevel") are one undo step; queries
 // ("outline", "sectionOutline", "center", "rootTubes", "levels", "levelVisibility",
 // "footprintError", "carry", "sealed", "surface") change nothing. Returns JSON.
 const char* kRootTubes[] = {"-rtb", "-rootTubes"};
@@ -945,6 +945,9 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                         result = makeRootTube(*h, *scalp, vecs("outline"), vecs("path"), o);
                     } else if (op == "edit") {
                         editRootTube(*h, *scalp, guide, vecs("outline"));
+                        result = guide;
+                    } else if (op == "keepOutline") {
+                        keepRootTubeOutline(*h, *scalp, guide, vecs("outline"));
                         result = guide;
                     } else if (op == "duplicate") {
                         Vec3f start;
