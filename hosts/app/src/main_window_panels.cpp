@@ -163,6 +163,19 @@ void MainWindow::buildPanels() {
         refreshTool();
     });
     connect(groomTools_, &GroomTools::toolChosen, this, [this](const QString& id) { chooseTool(id); });
+    connect(groomTools_, &GroomTools::rootModeChanged, this, [this] {
+        // The Tube card's root mode: clicks in the viewport go to it (the brush's mode), its
+        // outlines drawn, the guides hidden while it edits roots.
+        if (brush_.rootMode() && viewport_->toolMode() != Viewport::ToolMode::Brush) {
+            maps_->endPainting();
+            endPaintView();
+            viewport_->setToolMode(Viewport::ToolMode::Brush);
+        }
+        viewport_->refreshOverlay();
+        groomTools_->refresh();
+        refreshTool();
+        redisplay();
+    });
     connect(groomTools_, &GroomTools::guidesEdited, this, [this] { guidesEdited(); });
     connect(groomTools_, &GroomTools::tubesPreviewed, this, [this] { reevaluate(); });
     connect(groomTools_, &GroomTools::lengthsPreviewed, this, [this] {

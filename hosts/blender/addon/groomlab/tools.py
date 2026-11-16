@@ -123,6 +123,7 @@ class GroomTools(object):
         self.tube_guides = []     # the guides the Tubes section edits (the selection, else the soloed ones)
         self.tube_key = None      # (targets, their shapes) as last read
         self.pushed_keys = {}     # corrective -> the keys last sent from its Blender fcurve
+        self.root_heard = -1      # the root tool's last message said (its messageCount)
 
 
 _groom_tools = {}
@@ -302,6 +303,8 @@ def push(scalp, scene=None, **only):
     rt = groom.ensure(scalp, scene)
     tool = t.tool or "comb"
     settings = settings_of(scene, tool)
+    if t.root_mode and tool == "shape":
+        tool = "roots"  # the Tube tool's root mode: the helper's root tool keeps the events
     if only:
         settings = {k: v for k, v in settings.items() if k in only}
     r = process.call("tool_set", session=rt.session, tool=tool, settings=settings)
@@ -339,6 +342,16 @@ def pick(context, tool):
     t = scene.groomlab_tools
     if tool not in [x["id"] for x in catalog()["tools"]]:
         raise HelperError("bad_request", "no GroomLab tool %r" % tool)
+    if t.root_mode:
+        # The Tube tool's root mode put away first (an edit not finished given to its roots).
+        scalp = active(context)
+        if scalp is not None:
+            try:
+                root_edit(scalp, "leave")
+            except HelperError:
+                pass
+        with props.quiet():
+            t.root_mode = ""
     if tool != t.tool:
         remember_brush(t, t.tool)
         recall_brush(t, tool)
@@ -426,6 +439,7 @@ def stroke_begin(scalp, view, x, y, pressure=1.0, ctrl=False, shift=False, adjus
              shift=bool(shift), adjust=bool(adjust))
     follow_graph(scalp, r)
     display.take_overlay(scalp, r.get("overlay"), r.get("ring"))
+    take_roots(scalp, r)
     display.mark(scalp)
     groom_tools(scalp).last_live = time.monotonic()
     return r
@@ -466,6 +480,7 @@ def stroke_end(scalp):
     scene = groom.scene_of(scalp)
     r = call(scalp, "stroke_end")
     groom_tools(scalp).last_end = r
+    take_roots(scalp, r)
     after_edit(scalp, scene, r.get("undo"), refresh=r.get("committed", False))
     warn = r.get("warnings") or []
     status(scene, "; ".join(warn) if warn else "")
@@ -530,6 +545,11 @@ def undo(scalp, redo=False):
         scalp = pipeline.follow_helper_undo(scalp, redo)
     follow_graph(scalp, r)
     after_edit(scalp, groom.scene_of(scalp), r, refresh=bool(r.get("done")))
+    if r.get("done") and groom.scene_of(scalp).groomlab_tools.root_mode:
+        try:
+            root_state(scalp)  # the root tool reads the groom again: an undone tube's outline back
+        except HelperError:
+            pass
     return r
 
 
@@ -1057,6 +1077,137 @@ def sculpt_clear(scalp, node):
     return _corrective_edit(scalp, "sculpt_clear", node=node)
 
 
+# ---- The Tube card's root tubes and tube hierarchy (the core's root tool, root_tube_tool.h) ------
+
+def root_settings(scene):
+    t = scene.groomlab_tools
+    _level, group = group_target(scene)
+    top = next((g for g in t.groups if g.name == group), None)
+    return {"drawPath": bool(t.root_draw_path), "snap": bool(t.root_snap), "length": float(t.root_length),
+            "segments": int(t.root_segments), "taper": float(t.root_taper), "density": float(t.root_density),
+            # New roots go into the picked group when it is a top group, else rootTubes.
+            "group": group if top is not None and not top.parent else ""}
+
+
+def take_roots(scalp, r):
+    """A root tool answer: its overlay, its state into the card's properties, its message said."""
+    from . import display
+    if not isinstance(r, dict):
+        return r
+    if "overlay" in r:
+        display.take_overlay(scalp, r.get("overlay"), r.get("ring"))
+    state = r.get("roots")
+    if state is None:
+        return r
+    scene = groom.scene_of(scalp)
+    t = scene.groomlab_tools
+    gt = groom_tools(scalp)
+    with props.quiet():
+        t.root_mode = state.get("mode", "") if state.get("active") else ""
+        t.root_selected = len(state.get("selected") or [])
+        t.root_cvs = int(state.get("cvs", 0))
+    count = state.get("messageCount", 0)
+    if count != getattr(gt, "root_heard", -1):
+        gt.root_heard = count
+        if state.get("message"):
+            status(scene, state["message"])
+    display.mark(scalp)
+    return r
+
+
+def root_edit(scalp, edit, mode=None):
+    """One of the Tube roots block's buttons ("start" with `mode` place, edit or select; "leave",
+    "finish", "undoCv", "duplicate", "endDuplicate", "delete"; None: the settings alone)."""
+    scene = groom.scene_of(scalp)
+    args = {"settings": root_settings(scene)}
+    if edit:
+        args["edit"] = edit
+    if mode:
+        args["mode"] = mode
+    r = call(scalp, "root_edit", **args)
+    take_roots(scalp, r)
+    if edit in ("start", "leave"):
+        push(scalp, scene)  # the helper's tool: roots while a mode is on, the Tube brush after
+    if r.get("committed"):
+        after_edit(scalp, scene, r.get("undo"), refresh=True)
+        push_undo_step((r.get("undo") or {}).get("undoLabel") or "root tubes")
+    return r
+
+
+def root_state(scalp):
+    """The root tool read again (after an undo or redo its outlines follow the groom)."""
+    return take_roots(scalp, call(scalp, "root_state"))
+
+
+def tube_levels(scalp, picked=None):
+    """{"base", "levels": [each level's group, the base first], "maxLevels"} into the card."""
+    scene = groom.scene_of(scalp)
+    t = scene.groomlab_tools
+    _level, group = group_target(scene)
+    picked = picked if picked is not None else (group or t.tube_base)
+    r = call(scalp, "tube_levels", picked=picked or "")
+    _take_levels(scene, r)
+    return r
+
+
+def _take_levels(scene, r):
+    t = scene.groomlab_tools
+    levels = list(r.get("levels") or [])
+    _level, group = group_target(scene)
+    with props.quiet():
+        t.tube_base = r.get("base") or ""
+        t.tube_levels = ",".join(levels)
+        t.tube_level = levels.index(group) + 1 if group in levels else 1
+
+
+def tube_level_show(scalp, level):
+    """Level `level` (1: the base) shown, the hierarchy's other levels hidden, its group picked."""
+    scene = groom.scene_of(scalp)
+    t = scene.groomlab_tools
+    if not t.tube_base:
+        tube_levels(scalp)
+    r = call(scalp, "tube_level_show", base=t.tube_base, level=int(level))
+    shown = r.get("shown") or {}
+    hidden = set(g.name for g in t.groups if g.hidden)
+    picked = None
+    for name, visible in shown.items():
+        if visible:
+            hidden.discard(name)
+            picked = name
+        else:
+            hidden.add(name)
+    set_hidden_groups(scalp, sorted(hidden))
+    if picked:
+        with props.quiet():
+            t.group = picked
+            t.group_index = next((i for i, g in enumerate(t.groups) if g.name == picked), -1)
+        push(scalp, scene)
+    tube_levels(scalp, picked=picked)
+    return picked
+
+
+def tube_level_edit(scalp, add):
+    """Add (split the selected tubes, else the base group's, in two) or Remove (undo a split: the
+    selection's, else the deepest level); one undo step; the new deepest level shown."""
+    scene = groom.scene_of(scalp)
+    t = scene.groomlab_tools
+    _level, group = group_target(scene)
+    if add:
+        r = call(scalp, "tube_level_add", picked=group or t.tube_base or "")
+    else:
+        if not t.tube_base:
+            tube_levels(scalp)
+        r = call(scalp, "tube_level_remove", base=t.tube_base)
+    if r.get("committed"):
+        after_edit(scalp, scene, r.get("undo"), refresh=True)
+        push_undo_step((r.get("undo") or {}).get("undoLabel") or "tube level")
+    _take_levels(scene, r)
+    levels = list(r.get("levels") or [])
+    if levels:
+        tube_level_show(scalp, len(levels))
+    return r
+
+
 def set_hidden_groups(scalp, names):
     from . import display
     r = call(scalp, "set_hidden_groups", groups=list(names))
@@ -1162,6 +1313,7 @@ def refresh_info(scalp, scene=None):
         refresh_segments(scalp, scene)
         refresh_tubes(scalp, scene)
         refresh_correctives(scalp, scene)
+        _take_levels(scene, call(scalp, "tube_levels", picked=group_target(scene)[1] or scene.groomlab_tools.tube_base))
     except HelperError as e:
         status(scene, e.message)
 

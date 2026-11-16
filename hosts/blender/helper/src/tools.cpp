@@ -38,6 +38,7 @@
 #include "groomlab/parts.h"
 #include "groomlab/paths.h"
 #include "groomlab/random.h"
+#include "groomlab/root_tubes.h"
 #include "groomlab/scalp_maps.h"
 #include "groomlab/scalp_paint.h"
 #include "groomlab/stroke.h"
@@ -147,6 +148,9 @@ struct ToolState {
 
     // The stroke in flight.
     float pressX = 0.0f, pressY = 0.0f;
+    // The undo steps before the stroke's press: a press can commit one (a root closed by a click
+    // on its first CV makes its tube), stroke_end reports it with the release's.
+    std::size_t pressEdits = 0;
 
     // What redo would bring back (labels and texture maps), beside the host's stack.
     std::vector<std::string> redoLabels, redoMaps;
@@ -174,6 +178,8 @@ struct ToolState {
     // overlay as Maya draws it, made again for another scalp or symmetry.
     std::vector<Vec3f> seam;
     std::uint64_t seamKey = 0;
+    // The Tube tool's root-first mode (BrushTool::roots): its outlines, CVs and middles.
+    RootOverlayGeometry roots;
 
     // The display (Maya's buffers) and the strand colors.
     DisplayBuilder builder;
@@ -973,6 +979,7 @@ void appendColoredLine(DisplayGeometry& g, const std::vector<Vec3f>& points, con
 void clearOverlay(ToolState& t) {
     t.overlay = DisplayGeometry();
     t.overlay.overlay = true;
+    t.roots = RootOverlayGeometry();
     t.ringValid = t.ringOnScalp = false;
     ++t.overlayVersion;
 }
@@ -985,6 +992,18 @@ void rebuildOverlay(ToolState& t, float x, float y, bool withLines) {
     clearOverlay(t);
     const BrushToolSettings& s = t.tool.settings;
     using Tool = BrushToolSettings::Tool;
+    if (s.tool == Tool::Roots && !t.selectTool) {
+        // The root tool: no ring, its outlines (the core's: the app draws the same).
+        prepareHost(t);
+        try {
+            if (withLines && t.hasView && !t.tool.rootsPressed()) t.tool.roots().hover(t.host, t.view, x, y);  // (Duplicate: the copies follow)
+            const MeshPtr scalp = t.session.groom->scalp();
+            t.roots = rootOverlayGeometry(t.tool.roots().overlay(t.host), scalp.get());
+        } catch (const std::exception&) {
+            t.roots = RootOverlayGeometry();
+        }
+        return;
+    }
     if (withLines && !t.selectTool) {
         prepareHost(t);
         std::vector<std::vector<Vec3f>> lines;
@@ -1096,7 +1115,7 @@ std::size_t geometryBytes(const DisplayGeometry& g) {
 json geometryArrays(Arena& arena, const DisplayGeometry& g, const HostSpace& space) {
     json a;
     a["positions"] = positionsToHost(arena, g.positions, space);
-    const std::size_t per = g.triangles ? 3 : 2;
+    const std::size_t per = g.triangles ? 3 : g.points ? 1 : 2;
     a["indices"] = put(arena, g.indices.data(), g.indices.size() / per, per);
     if (!g.colors.empty()) a["colors"] = put(arena, g.colors.data(), g.colors.size() / 4, 4);
     if (!g.normals.empty()) a["normals"] = directionsToHost(arena, g.normals, space);
@@ -1167,9 +1186,29 @@ json overlayJson(ToolState& t, bool arrays) {
     json overlay;
     overlay["version"] = t.overlayVersion;
     overlay["vertexCount"] = t.overlay.positions.size() / 3;
+    const RootOverlayGeometry& ro = t.roots;
+    const std::pair<const char*, const DisplayGeometry*> rootParts[] = {
+        {"fills", &ro.fills}, {"edges", &ro.edges}, {"highlighted", &ro.highlighted},
+        {"dots", &ro.dots},   {"dimDots", &ro.dimDots}, {"markers", &ro.markers}};
     if (arrays) {
-        t.overlayOut.begin(geometryBytes(t.overlay));
+        std::size_t bytes = geometryBytes(t.overlay);
+        for (const auto& [name, g] : rootParts) bytes += geometryBytes(*g);
+        t.overlayOut.begin(bytes + 64);
         overlay["arrays"] = geometryArrays(t.overlayOut, t.overlay, space);
+        // The root tool's: see-through fills, edges (the highlighted apart, wider), dots a size in
+        // pixels across (RootOverlayGeometry); empty ones left out.
+        json roots = json::object();
+        for (const auto& [name, g] : rootParts) {
+            if (!g->positions.empty() && !g->indices.empty()) roots[name] = geometryArrays(t.overlayOut, *g, space);
+        }
+        if (!roots.empty()) {
+            roots["edgePixels"] = ro.edgePixels;
+            roots["highlightPixels"] = ro.highlightPixels;
+            roots["dotPixels"] = ro.dotPixels;
+            roots["dimDotPixels"] = ro.dimDotPixels;
+            roots["markerPixels"] = ro.markerPixels;
+        }
+        overlay["roots"] = roots;
     }
     r["overlay"] = overlay;
     return r;
@@ -2992,6 +3031,7 @@ DisplaySettings displaySettingsOf(ToolState& t, const json& v) {
         else if (key == "flow") s.flow = settingBool(x, k);
         else if (key == "tubeWires") s.tubeWires = settingBool(x, k);    // the Tube brush's tubes (the core's display)
         else if (key == "tubeShaded") s.tubeShaded = settingBool(x, k);
+        else if (key == "tubeColors") s.tubeColors = settingBool(x, k);
         else if (key == "guideWidth") s.guideWidth = settingNumber(x, k);
         else if (key == "guideColorMode") {
             if (x.is_string()) {
@@ -3068,7 +3108,11 @@ json display(ToolState& t, const json& args) {
     Session& s = t.session;
     GroomSession& session = *s.groom;
     const HostSpace& space = s.space;
-    const DisplaySettings settings = displaySettingsOf(t, args.contains("settings") ? args["settings"] : json(nullptr));
+    DisplaySettings settings = displaySettingsOf(t, args.contains("settings") ? args["settings"] : json(nullptr));
+    if (t.tool.settings.tool == BrushToolSettings::Tool::Roots && !t.selectTool && t.tool.roots().hidesGuides()) {
+        // Edit roots: the guides and their tubes hidden, only the roots' outlines (Maya's too).
+        settings.guides = settings.tubes = settings.tubeWires = settings.tubeShaded = false;
+    }
     json have = args.contains("have") ? args["have"] : json::object();
     if (args.contains("generation") && args["generation"] != t.generation) have = json::object();  // another builder's versions
 
@@ -3455,7 +3499,10 @@ bool isToolCommand(const std::string& cmd) {
         "parts_list", "part_add", "part_remove", "parts_clear", "flow_clear", "map_rename", "map_convert", "map_set_channels",
         "map_fill", "map_import", "map_relink", "map_reload", "map_users", "maps_move_to", "files_collect",
         // The Length Keys tool's keys (the Keys box).
-        "length_state", "length_edit"};
+        "length_state", "length_edit",
+        // The Tube tool's root-first mode and the tube hierarchy (the Tube card's Tube roots and
+        // Tube hierarchy blocks).
+        "root_state", "root_edit", "tube_levels", "tube_level_add", "tube_level_remove", "tube_level_show"};
     return kCommands.count(cmd) > 0;
 }
 
@@ -3475,6 +3522,36 @@ json lengthStateJson(ToolState& t, const HostSpace& space) {
             {"activeKey", lk.activeKey()},
             {"edited", lk.edited()},
             {"change", lengthChangeName(lk.change)}};
+}
+
+// The Tube tool's root-first mode as the Tube card shows it (Maya's -rootState): whether it is the
+// tool, its mode, what it last said (and a count bumped with each), the roots selected, the CVs
+// placed, whether the guides hide (editing).
+json rootStateJson(ToolState& t) {
+    RootTubeTool& roots = t.tool.roots();
+    const bool on = roots.active() && t.tool.settings.tool == BrushToolSettings::Tool::Roots && !t.selectTool;
+    if (on) {
+        prepareHost(t);
+        try {
+            roots.sync(t.host);  // (an undo or redo since: the tool reads the groom again)
+        } catch (const std::exception&) {
+        }
+    }
+    static const char* kModes[] = {"place", "draw", "edit", "select", "duplicate"};
+    json selected = json::array();
+    for (const GuideId g : roots.selected()) selected.push_back(g);
+    return {{"active", on},
+            {"mode", kModes[static_cast<int>(roots.mode())]},
+            {"message", roots.message()},
+            {"messageCount", roots.messageCount()},
+            {"selected", selected},
+            {"cvs", roots.outlineCvs()},
+            {"hidesGuides", on && roots.hidesGuides()}};
+}
+
+json tubeLevelsJson(const GuideHierarchy& h, const std::vector<GuideId>& guides, const std::string& picked) {
+    const TubeLevels levels = tubeLevels(h, guides, picked);
+    return {{"base", levels.base}, {"levels", levels.levels}, {"maxLevels", kMaxTubeLevels}};
 }
 
 json toolStateJson(Session& s) {
@@ -3603,6 +3680,7 @@ bool runToolCommandIn(Session& s, ToolState& t, const std::string& cmd, const js
                                    (optBool(args, "adjust", false) ? kStrokeAdjust : 0u);
         prepareHost(t);
         t.host.clearWarnings();
+        t.pressEdits = t.host.edits().size();
         t.pressX = x;
         t.pressY = y;
         // A press that changed the graph (none does now that map_for_param links a setting's map;
@@ -3611,17 +3689,19 @@ bool runToolCommandIn(Session& s, ToolState& t, const std::string& cmd, const js
         guarded(t, "press", [&] { t.tool.press(t.host, t.view, x, y, pressure, modifiers); });
         rebuildOverlay(t, x, y, false);
         result = overlayJson(t, optBool(args, "overlay", true));
-        result["stroking"] = t.tool.stroking() || t.tool.lengthsPressed();
+        result["stroking"] = t.tool.stroking() || t.tool.lengthsPressed() || t.tool.rootsPressed();
         result["selecting"] = t.tool.selectingPaint();  // a Ctrl+Shift drag painting the selection
         result["mode"] = t.tool.toolModeName();
         result["graphChanged"] = s.groom->data().graphJson != graphBefore;
         result["view"] = viewJson(t);
         result["warnings"] = warningsJson(t);
+        if (t.tool.settings.tool == BrushToolSettings::Tool::Roots) result["roots"] = rootStateJson(t);
         return true;
     }
     if (cmd == "stroke_drag") {
         // (A Shift press has no stroke yet: its drag starts the smoothing.)
-        if (!t.tool.stroking() && !t.tool.shiftPending() && !t.tool.lengthsPressed() && !t.tool.selectingPaint()) {
+        if (!t.tool.stroking() && !t.tool.shiftPending() && !t.tool.lengthsPressed() && !t.tool.rootsPressed() &&
+            !t.tool.selectingPaint()) {
             fail("state", "no stroke: stroke_begin first");
         }
         if (args.contains("view") && !args["view"].is_null()) setView(t, args["view"]);
@@ -3641,7 +3721,7 @@ bool runToolCommandIn(Session& s, ToolState& t, const std::string& cmd, const js
         return true;
     }
     if (cmd == "stroke_end") {
-        const std::size_t before = t.host.edits().size();
+        const std::size_t before = std::min(t.pressEdits, t.host.edits().size());
         StrokeRelease released = StrokeRelease::None;
         if (t.hasView) guarded(t, "release", [&] { released = t.tool.release(t.host, t.view); });
         result["released"] = released == StrokeRelease::Stroke ? "stroke" : "none";
@@ -3653,6 +3733,11 @@ bool runToolCommandIn(Session& s, ToolState& t, const std::string& cmd, const js
         pruneSelection(t);
         result["undo"] = undoJson(t);
         result["warnings"] = warningsJson(t);
+        if (t.tool.settings.tool == BrushToolSettings::Tool::Roots) {
+            rebuildOverlay(t, t.pressX, t.pressY, false);
+            result.update(overlayJson(t, optBool(args, "overlay", true)));
+            result["roots"] = rootStateJson(t);
+        }
         return true;
     }
     if (cmd == "stroke_cancel") {
@@ -3870,6 +3955,125 @@ bool runToolCommandIn(Session& s, ToolState& t, const std::string& cmd, const js
             else lk.cancel(t.host);
         });
         result = lengthStateJson(t, s.space);
+        result["committed"] = t.host.edits().size() != before;
+        if (result["committed"].get<bool>()) {
+            t.redoLabels.clear();
+            t.redoMaps.clear();
+        }
+        result["undo"] = undoJson(t);
+        return true;
+    }
+    if (cmd == "root_state") {
+        // The root tool's state, its overlay with it (after an undo the outlines follow).
+        result = {{"roots", rootStateJson(t)}};
+        if (t.tool.settings.tool == BrushToolSettings::Tool::Roots) {
+            rebuildOverlay(t, t.pressX, t.pressY, false);
+            result.update(overlayJson(t, optBool(args, "overlay", true)));
+        }
+        return true;
+    }
+    if (cmd == "root_edit") {
+        // The Tube card's root tube buttons: "start" (mode: place, edit or select; the tool made
+        // "roots"), "leave", "finish", "undoCv", "duplicate", "endDuplicate", "delete", "sync";
+        // "settings" (drawPath, snap, length in host units, segments, taper, density, group) first.
+        requireScalp(s);
+        prepareHost(t);
+        RootTubeTool& roots = t.tool.roots();
+        if (args.contains("settings") && args["settings"].is_object()) {
+            const json& j = args["settings"];
+            RootTubeTool::Settings& rs = roots.settings;
+            rs.drawPath = optBool(j, "drawPath", rs.drawPath);
+            rs.snap = optBool(j, "snap", rs.snap);
+            if (given(j, "length")) rs.length = std::max(1e-6f, toGroomLength(s.space, optNumber(j, "length", 1.0)));
+            rs.segments = std::max(2, static_cast<int>(optNumber(j, "segments", rs.segments)));
+            rs.taper = static_cast<float>(optNumber(j, "taper", rs.taper));
+            rs.density = std::max(0.01f, static_cast<float>(optNumber(j, "density", rs.density)));
+            rs.group = optString(j, "group", rs.group);
+        }
+        const std::string edit = optString(args, "edit", "");
+        const std::size_t before = t.host.edits().size();
+        if (!edit.empty()) {
+            if (t.tool.stroking()) t.tool.cancel(&t.host);
+            guarded(t, "roots", [&] {
+                if (edit == "start") {
+                    const std::string mode = optString(args, "mode", "place");
+                    RootTubeTool::Mode m = RootTubeTool::Mode::Place;
+                    if (mode == "edit") m = RootTubeTool::Mode::Edit;
+                    else if (mode == "select") m = RootTubeTool::Mode::Select;
+                    else if (mode != "place") throw std::invalid_argument("start takes mode place, edit or select");
+                    t.selectTool = false;
+                    t.tool.settings.setMode("roots");
+                    roots.start(t.host, m);
+                } else if (edit == "leave") {
+                    roots.leave(t.host);
+                } else if (edit == "finish") {
+                    roots.finishEdit(t.host);
+                } else if (edit == "undoCv") {
+                    roots.undoCv(t.host);
+                } else if (edit == "duplicate") {
+                    roots.beginDuplicate(t.host);
+                } else if (edit == "endDuplicate") {
+                    roots.endDuplicate();
+                } else if (edit == "delete") {
+                    roots.deleteSelected(t.host);
+                } else if (edit == "sync") {
+                    roots.sync(t.host);
+                } else {
+                    throw std::invalid_argument("root_edit takes start, leave, finish, undoCv, duplicate, endDuplicate, delete or sync");
+                }
+            });
+        }
+        rebuildOverlay(t, t.pressX, t.pressY, false);
+        result = overlayJson(t, optBool(args, "overlay", true));
+        result["roots"] = rootStateJson(t);
+        result["committed"] = t.host.edits().size() != before;
+        if (result["committed"].get<bool>()) {
+            t.redoLabels.clear();
+            t.redoMaps.clear();
+        }
+        pruneSelection(t);
+        result["undo"] = undoJson(t);
+        return true;
+    }
+    if (cmd == "tube_levels" || cmd == "tube_level_add" || cmd == "tube_level_remove" || cmd == "tube_level_show") {
+        // The Tube hierarchy block: the levels of the base group (the top group of the first of
+        // "guides", else of "picked", else the first top group holding guides); Add splits the
+        // tubes under "guides" (none: the base group's), Remove undoes a split (the selection's,
+        // else the deepest level), each one undo step; Show gives each level's group and whether
+        // it shows (that level alone: the host hides the others).
+        const std::shared_ptr<const GuideHierarchy> h = s.groom->authoredHierarchy();
+        if (!h && cmd == "tube_levels") {
+            result = {{"base", ""}, {"levels", json::array()}, {"maxLevels", kMaxTubeLevels}};
+            return true;
+        }
+        if (!h) fail("state", "the groom has no guides");
+        pruneSelection(t);
+        // (No "guides": the guides selected, as Maya's card gives its selection.)
+        const std::vector<GuideId> guides = args.contains("guides") && !args["guides"].is_null() ? idsOf(args["guides"]) : t.selection;
+        const std::string picked = optString(args, "picked", "");
+        if (cmd == "tube_levels") {
+            result = tubeLevelsJson(*h, guides, picked);
+            return true;
+        }
+        if (cmd == "tube_level_show") {
+            json shown = json::object();
+            for (const auto& [group, visible] : tubeLevelVisibility(*h, needString(args, "base"), static_cast<int>(optNumber(args, "level", 1)))) {
+                shown[group] = visible;
+            }
+            result = {{"shown", shown}};
+            return true;
+        }
+        const bool adding = cmd == "tube_level_add";
+        const std::size_t before = t.host.edits().size();
+        std::size_t count = 0;
+        const std::string base = adding ? tubeLevels(*h, guides, picked).base : needString(args, "base");
+        const MeshPtr scalp = s.groom->scalp();
+        editGuides(t, adding ? "tube level add" : "tube level remove", [&](GuideHierarchy& g) {
+            count = adding ? addTubeLevel(g, scalp.get(), guides, picked) : removeTubeLevel(g, scalp.get(), base, guides);
+        });
+        const std::shared_ptr<const GuideHierarchy> after = s.groom->authoredHierarchy();
+        result = after ? tubeLevelsJson(*after, {}, base) : json::object();
+        result[adding ? "split" : "removed"] = count;
         result["committed"] = t.host.edits().size() != before;
         if (result["committed"].get<bool>()) {
             t.redoLabels.clear();

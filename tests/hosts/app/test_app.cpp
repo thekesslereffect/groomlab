@@ -32,6 +32,7 @@
 #include "groomlab/display.h"
 #include "brush_session.h"
 #include "camera.h"
+#include "groomlab/root_tubes.h"
 #include "card_preview.h"
 #include "gpu_preview.h"
 #include "graph_presets.h"
@@ -1400,6 +1401,62 @@ TEST(AppBrush, StrokesMoveGuidesWithOneUndoStepEach) {
     auto again = GroomDocument::open(saved);
     EXPECT_EQ(again->session().data().hierarchyJson, stroked);
     std::remove(saved.c_str());
+}
+
+TEST(AppBrush, RootTubesDrawnByClicksWithTheirOverlayAndUndo) {
+    // The Tube tool's root mode (the core's root tool, as Maya's and Blender's): a root's CVs
+    // clicked on the scalp, closed on the first (the tube made on that press: one undo step), the
+    // outline drawn as fills, edges and dots lifted off the scalp; an undo gives the outline back.
+    BrushFixture f;
+    // The guide root nearest the view's middle (facing the camera: the ring round it on the scalp).
+    QPointF c;
+    double best = 1e30;
+    for (const HierarchyGuide& g : f.doc->session().hierarchy()->guides()) {
+        if (g.points.empty()) continue;
+        const QPointF at = f.widgetPoint(g.points[0]);
+        const double d = std::hypot(at.x() - f.w / 2.0, at.y() - f.h / 2.0);
+        if (d < best) {
+            best = d;
+            c = at;
+        }
+    }
+    f.session.roots().settings.drawPath = false;
+    ASSERT_TRUE(f.session.startRoots(RootTubeTool::Mode::Place)) << f.session.lastError();
+    const std::size_t roots = rootTubesOf(*f.doc->session().authoredHierarchy()).size();
+    std::vector<QPointF> ring;
+    for (int k = 0; k < 5; ++k) {
+        const double a = 2.0 * 3.14159265358979 * k / 5;
+        ring.push_back(c + QPointF(20.0 * std::cos(a), 20.0 * std::sin(a)));
+    }
+    auto click = [&](const QPointF& at) {
+        f.session.hover(at);
+        ASSERT_TRUE(f.session.press(at, 1.0f, 0)) << f.session.lastError();
+        EXPECT_EQ(f.session.release(), StrokeRelease::Stroke);
+    };
+    for (const QPointF& p : ring) click(p);
+    EXPECT_EQ(f.session.roots().outlineCvs(), 5u) << f.session.roots().message();
+    EXPECT_FALSE(f.session.committedSincePress()) << "a CV placed: nothing committed";
+    const RootOverlayGeometry& g = f.session.rootOverlay();
+    EXPECT_EQ(g.dots.indices.size(), 5u);
+    EXPECT_FALSE(g.edges.indices.empty() && g.highlighted.indices.empty());
+    EXPECT_FALSE(f.session.ringValid()) << "no ring in the root mode";
+    // Lifted off the scalp (a hair), so the viewport's depth test shows it over the skin.
+    const MeshPtr scalp = f.doc->session().scalp();
+    const Vec3f dot{g.dots.positions[0], g.dots.positions[1], g.dots.positions[2]};
+    const float off = (scalp->closestPoint(dot).position - dot).length();
+    EXPECT_GT(off, 0.0f);
+    EXPECT_LT(off, 0.05f * f.camera.distance());
+    click(ring[0]);
+    EXPECT_TRUE(f.session.committedSincePress()) << "closed: the tube made on the press";
+    EXPECT_EQ(rootTubesOf(*f.doc->session().authoredHierarchy()).size(), roots + 1);
+    EXPECT_EQ(f.session.roots().outlineCvs(), 0u);
+    ASSERT_TRUE(f.doc->undo().empty());
+    f.session.refreshRoots();
+    EXPECT_EQ(rootTubesOf(*f.doc->session().authoredHierarchy()).size(), roots);
+    EXPECT_EQ(f.session.roots().outlineCvs(), 5u) << "the outline back to close again";
+    f.session.leaveRoots();
+    EXPECT_TRUE(f.session.rootOverlay().empty());
+    EXPECT_EQ(f.session.toolId(), "shape");
 }
 
 TEST(AppBrush, HoverRingAndPressure) {

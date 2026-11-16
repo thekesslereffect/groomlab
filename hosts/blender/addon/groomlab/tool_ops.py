@@ -207,6 +207,10 @@ class ToolSession(object):
             if busy:
                 self.cancel(context)
                 return {"RUNNING_MODAL"}
+            if kind == "ESC" and context.scene.groomlab_tools.root_mode:
+                leave_roots(context, scalp)  # the Tube tool's root mode left: the Tube brush again
+                display.redraw()
+                return {"RUNNING_MODAL"}
             if kind == "ESC":
                 self.leave(context, clear_tool=True)
                 return {"FINISHED"}
@@ -572,8 +576,15 @@ class GROOMLAB_OT_tool_modal(bpy.types.Operator):
 def stop_tool(context):
     """Leaves the GroomLab tool (Maya's palette stop_tool): no tool, the viewport's tool ended, and
     the views as they are without it (the paint view and the Shape brush's tube wires gone)."""
+    scalp = active(context)
+    if context.scene.groomlab_tools.root_mode and scalp is not None:
+        try:
+            leave_roots(context, scalp)  # (an edit not finished given to its roots)
+        except HelperError:
+            pass
     with props.quiet():
         context.scene.groomlab_tools.tool = ""
+        context.scene.groomlab_tools.root_mode = ""
     if _session[0] is not None:
         _session[0].leave(context)
     display.mark(active(context))
@@ -1579,6 +1590,149 @@ class GROOMLAB_OT_length_edit(GroomToolOperator):
         return {"FINISHED"}
 
 
+# ---- Tube roots and the tube hierarchy (the Tube card's blocks; the core's root tool) --------------
+
+ROOT_TIPS = {
+    "DRAW": "Click the root's outline on the scalp, one CV at a time (drag to move the CV); click the first CV to "
+            "close it. Near a neighbouring root a CV snaps onto it, sealing the tubes. Again: leave",
+    "EDIT": "Show the root tubes' outlines with their CVs, the guides hidden; drag CVs on the scalp (Ctrl+click an "
+            "edge: a new CV there; a CV: taken out), then Finish edit",
+    "SELECT": "Show every root's middle: click one to select its root (Shift: several), drag it to move the root "
+              "over the scalp. Again: leave",
+    "UNDO_CV": "Take back the last CV (or the drawn path); in Edit roots, the last CV move",
+    "DELETE": "Delete the selected roots: their tubes and the tube hierarchy under them",
+    "DUPLICATE": "Copy the selected roots: the copies follow the cursor over the scalp, a click sets them down. "
+                 "Again: stop",
+}
+
+
+class GROOMLAB_OT_root_tube(GroomToolOperator):
+    """The Tube card's Tube roots buttons: Draw root, Edit roots, Select root, Undo CV, Delete, Duplicate"""
+    bl_idname = "groomlab.root_tube"
+    bl_label = "Tube Roots"
+    bl_options = {"REGISTER"}
+
+    action: bpy.props.EnumProperty(items=[(k, k.replace("_", " ").title(), v) for k, v in ROOT_TIPS.items()],
+                                   options={"SKIP_SAVE"})
+
+    @classmethod
+    def description(cls, context, properties):
+        if properties.action == "EDIT" and context.scene.groomlab_tools.root_mode == "edit":
+            return "Give the roots their edited CVs (one undo step) and leave Edit roots"
+        return ROOT_TIPS.get(properties.action, cls.__doc__)
+
+    def execute(self, context):
+        scalp = active(context)
+        t = context.scene.groomlab_tools
+        mode = t.root_mode
+        try:
+            if self.action == "DRAW":
+                if mode in ("place", "draw"):
+                    leave_roots(context, scalp)
+                else:
+                    self.begin(context, scalp, "place")
+            elif self.action == "EDIT":
+                if mode == "edit":
+                    tools.root_edit(scalp, "finish")
+                    if t.root_mode != "edit":  # (finished; on an error still editing)
+                        leave_roots(context, scalp)
+                else:
+                    self.begin(context, scalp, "edit")
+            elif self.action == "SELECT":
+                if mode in ("select", "duplicate"):
+                    leave_roots(context, scalp)
+                else:
+                    self.begin(context, scalp, "select")
+            elif self.action == "UNDO_CV":
+                tools.root_edit(scalp, "undoCv")
+            elif self.action == "DELETE":
+                tools.root_edit(scalp, "delete")
+            elif self.action == "DUPLICATE":
+                tools.root_edit(scalp, "endDuplicate" if mode == "duplicate" else "duplicate")
+        except HelperError as e:
+            return _fail(self, e)
+        display.redraw()
+        return {"FINISHED"}
+
+    def begin(self, context, scalp, mode):
+        t = context.scene.groomlab_tools
+        if t.tool != "shape":
+            tools.pick(context, "shape")
+        if mode == "place":
+            # A deeper level picked: level 1 shown and picked instead (a new root tube is a level 1 guide).
+            tools.tube_levels(scalp)
+            levels = [x for x in t.tube_levels.split(",") if x]
+            if len(levels) > 1 and t.tube_level > 1:
+                tools.tube_level_show(scalp, 1)
+        tools.root_edit(scalp, "start", mode=mode)
+        start_modal(context)
+
+
+def leave_roots(context, scalp):
+    """The root mode put away (an edit not finished given to its roots): the Tube brush again."""
+    t = context.scene.groomlab_tools
+    if not t.root_mode:
+        return
+    try:
+        tools.root_edit(scalp, "leave")
+    finally:
+        with props.quiet():
+            t.root_mode = ""
+        try:
+            tools.push(scalp, context.scene)
+        except HelperError:
+            pass
+        display.mark(scalp)
+
+
+LEVEL_TIPS = {
+    "ADD": "Split each selected tube in two (with none selected: every tube of the base group), sharing its root "
+           "shape: a level deeper",
+    "REMOVE": "Undo a split: with tubes selected, theirs only (a split tube's deepest split tubes, or a split tube "
+              "back into its parent); with none, the deepest level everywhere",
+    "SHOW": "Show this level's tubes and edit them",
+}
+
+
+class GROOMLAB_OT_tube_level(GroomToolOperator):
+    """The Tube hierarchy: Add, Remove, or show a level's tubes"""
+    bl_idname = "groomlab.tube_level"
+    bl_label = "Tube Hierarchy"
+    bl_options = {"REGISTER"}
+
+    action: bpy.props.EnumProperty(items=[(k, k.title(), v) for k, v in LEVEL_TIPS.items()], options={"SKIP_SAVE"})
+    level: bpy.props.IntProperty(default=1, min=1, options={"SKIP_SAVE"})
+
+    @classmethod
+    def description(cls, context, properties):
+        if properties.action == "SHOW":
+            return "Level %d%s: show its tubes and edit them" % (properties.level,
+                                                                 " (the base)" if properties.level == 1 else "")
+        return LEVEL_TIPS[properties.action]
+
+    def execute(self, context):
+        scalp = active(context)
+        try:
+            if self.action == "SHOW":
+                tools.tube_level_show(scalp, self.level)
+                tools.status(context.scene, "Level %d: its tubes shown; the Tube tool and brushes edit them."
+                             % self.level)
+            else:
+                r = tools.tube_level_edit(scalp, self.action == "ADD")
+                levels = r.get("levels") or []
+                if self.action == "ADD":
+                    n = int(r.get("split", 0))
+                    tools.status(context.scene, "Split %d tube%s: %s has %d levels; level %d shown." %
+                                 (n, "" if n == 1 else "s", r.get("base"), len(levels), len(levels)))
+                else:
+                    tools.status(context.scene, "%s has %d level%s." % (r.get("base"), len(levels),
+                                                                        "" if len(levels) == 1 else "s"))
+        except HelperError as e:
+            return _fail(self, e)
+        display.redraw()
+        return {"FINISHED"}
+
+
 # ---- Tubes (the Tubes section) --------------------------------------------------------------------
 
 class TubeOperator(GroomToolOperator):
@@ -2139,7 +2293,7 @@ classes = (GROOMLAB_OT_tool_modal, GROOMLAB_OT_tool, GROOMLAB_OT_tool_exit, GROO
            GROOMLAB_OT_group_color, GROOMLAB_OT_group_promote_demote, GROOMLAB_OT_guides_mirror_group,
            GROOMLAB_OT_guides_reparent, GROOMLAB_OT_part_remove, GROOMLAB_OT_parts_clear, GROOMLAB_OT_guides_from_curves, GROOMLAB_OT_parts_from_curves, GROOMLAB_OT_guides_to_curves,
            GROOMLAB_OT_curves_to_guides, GROOMLAB_OT_strands_to_curves, GROOMLAB_OT_flow_clear,
-           GROOMLAB_OT_length_edit,
+           GROOMLAB_OT_length_edit, GROOMLAB_OT_root_tube, GROOMLAB_OT_tube_level,
            GROOMLAB_OT_tube_apply, GROOMLAB_OT_tube_smooth, GROOMLAB_OT_tube_shape_custom, GROOMLAB_OT_tube_shape_new,
            GROOMLAB_OT_tube_shape_rename, GROOMLAB_OT_tube_shape_remove, GROOMLAB_OT_corrective_new,
            GROOMLAB_OT_corrective_move, GROOMLAB_OT_corrective_solo, GROOMLAB_OT_corrective_delete,

@@ -638,6 +638,16 @@ void MainWindow::undo() {
     if (!error.empty()) report(QString::fromStdString(error));
     graphEdited();
     refreshGroups();
+    rootsFollowHistory();
+}
+
+void MainWindow::rootsFollowHistory() {
+    // The root mode takes the groom as it is now (an undone tube's outline back to close again).
+    if (!brush_.rootMode()) return;
+    brush_.refreshRoots();
+    groomTools_->refresh();
+    viewport_->refreshOverlay();
+    refreshTool();
 }
 
 void MainWindow::redo() {
@@ -646,6 +656,7 @@ void MainWindow::redo() {
     if (!error.empty()) report(QString::fromStdString(error));
     graphEdited();
     refreshGroups();
+    rootsFollowHistory();
 }
 
 void MainWindow::setPreviewDensity(double density) { density_->setValue(density); }

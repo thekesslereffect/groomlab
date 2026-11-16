@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The Tube tool card's Tonic-style blocks (Groom Tools, the Tube tool):
+"""The Tube tool card's root tube blocks (Groom Tools, the Tube tool):
 
 Tube roots (issue 61)   Draw root: the root's outline clicked on the scalp CV by CV, then (Draw
                         before extrude) its path drawn from the root's middle; Edit roots, which
@@ -23,11 +23,11 @@ from groomlab import root_tubes
 from groomlab.ui import theme, widgets
 
 
-class TonicTubes(QtCore.QObject):
+class RootTubeCard(QtCore.QObject):
     """Owns the two blocks (root_block, hierarchy_block); `owner` is the Groom Tools palette."""
 
     def __init__(self, owner):
-        super(TonicTubes, self).__init__(owner)
+        super(RootTubeCard, self).__init__(owner)
         self.owner = owner
         from groomlab import units
         from groomlab.ui import root_tube_tool
@@ -37,7 +37,7 @@ class TonicTubes(QtCore.QObject):
 
         # -- Root tubes --------------------------------------------------------------------
         self.root_block = widgets.Block("Tube roots", name="rootTubes")
-        self.root_block.setToolTip("Tonic-style tubes drawn root first: click the root's outline on the scalp, one "
+        self.root_block.setToolTip("Tubes drawn root first: click the root's outline on the scalp, one "
                                    "CV at a time, and close it on its first CV. Each tube is its own region.")
         self.draw_root = widgets.chip("Draw root", "Click the root's outline on the scalp, one CV at a time (drag "
                                       "to move the CV); click the first CV to close it. Near a neighbouring root a "
@@ -107,7 +107,7 @@ class TonicTubes(QtCore.QObject):
                                          "deepest level everywhere", None, "tubeLevelRemove")
         self.remove_level.clicked.connect(self.remove_clicked)
         self.hierarchy_block = widgets.Block("Tube hierarchy", name="tubeHierarchy")
-        self.hierarchy_block.setToolTip("Tonic-style tube levels: each level splits the tubes above it in two. Shaping "
+        self.hierarchy_block.setToolTip("Tube levels: each level splits the tubes above it in two. Shaping "
                                         "a tube carries the smaller tubes inside it; pick a level to edit its tubes")
         self.hierarchy_block.add(widgets.chip_row((self.add_level, self.remove_level)))
         self.base_label = QtWidgets.QLabel()
@@ -140,9 +140,8 @@ class TonicTubes(QtCore.QObject):
 
     def refresh(self, groom):
         """The buttons as the tool stands, and the hierarchy's levels."""
-        from maya import cmds
-        ours = cmds.currentCtx() == "groomLabRootTubeCtx"
-        mode = self.tool.mode if ours else None
+        self.tool.poll()  # (after an undo the tool reads the groom again: its outlines follow)
+        mode = self._mode()
         editing = mode == "edit"
         selecting = mode in ("select", "duplicate")
         picked = selecting and self.tool.selected is not None
@@ -200,10 +199,7 @@ class TonicTubes(QtCore.QObject):
             pass
 
     def _set(self, **settings):
-        self.tool.settings.update(settings)
-        if "snap" in settings and self.tool.groom:
-            self.tool.neighbours = root_tubes.snap_targets(self.tool.groom) if settings["snap"] else []
-            self.tool.redraw()
+        self.tool.update_settings(**settings)
 
     def _settings(self):
         return {"draw": self.extrude_draw.isChecked(), "length": self.length.value() / self.length_factor,
@@ -240,8 +236,7 @@ class TonicTubes(QtCore.QObject):
 
     def _mode(self):
         """The root tool's mode, or None when it isn't the current tool."""
-        from maya import cmds
-        return self.tool.mode if cmds.currentCtx() == "groomLabRootTubeCtx" else None
+        return self.tool.mode if self.tool.active() else None
 
     def _enter(self, mode, button):
         """The root tool in `mode` (its button again: left)."""

@@ -352,6 +352,14 @@ void GroomShape::setSymmetrySeam(std::vector<Vec3f> segments) {
     M3dView::scheduleRefreshAllViews();
 }
 
+void GroomShape::setRootOverlay(std::vector<RootTubeTool::Item> items, float pixelScale) {
+    if (items.empty() && rootOverlay_.empty()) return;
+    rootOverlay_ = std::move(items);
+    rootOverlayScale_ = pixelScale;
+    ++rootOverlayVersion_;
+    M3dView::scheduleRefreshAllViews();
+}
+
 void GroomShape::setTubesAlwaysVisible(bool always) {
     if (always == tubesAlways_) return;
     tubesAlways_ = always;

@@ -88,6 +88,7 @@ void BrushSession::setTool(const std::string& id) {
         return;
     }
     BrushToolSettings().setMode(id);  // throws for an unknown id, before anything changes
+    if (s.tool == BrushToolSettings::Tool::Roots && id != "roots") leaveRoots();  // (another tool: the root mode put away)
     if (freezing) {
         s.brush.attribute = beforeFreeze_.attribute;
         s.brush.value = beforeFreeze_.value;
@@ -103,11 +104,65 @@ std::string BrushSession::toolId() const {
         s.paintKind == "guides") {
         return kFreezeTool;
     }
+    if (s.tool == BrushToolSettings::Tool::Roots) return "shape";  // the Tube tool's root mode
     return s.modeName();
+}
+
+bool BrushSession::startRoots(RootTubeTool::Mode mode) {
+    if (!host_) {
+        error_ = "no groom open";
+        return false;
+    }
+    if (tool_.stroking()) tool_.cancel(host_.get());
+    guard("roots", [&] {
+        tool_.settings.setMode("roots");
+        tool_.roots().start(*host_, mode);
+    });
+    refreshRoots();
+    return error_.empty();
+}
+
+void BrushSession::leaveRoots() {
+    if (host_ && tool_.roots().active()) guard("roots", [&] { tool_.roots().leave(*host_); });
+    if (tool_.settings.tool == BrushToolSettings::Tool::Roots) tool_.settings.setMode("shape");
+    refreshRoots();
+}
+
+bool BrushSession::editRoots(const char* what, const std::function<void(RootTubeTool&, StrokeHost&)>& fn) {
+    if (!host_) {
+        error_ = "no groom open";
+        return false;
+    }
+    guard(what, [&] { fn(tool_.roots(), *host_); });
+    refreshRoots();
+    return error_.empty();
+}
+
+void BrushSession::refreshRoots() {
+    RootOverlayGeometry g;
+    if (host_ && tool_.settings.tool == BrushToolSettings::Tool::Roots && tool_.roots().active()) {
+        try {
+            const MeshPtr scalp = host_->scalp();
+            g = rootOverlayGeometry(tool_.roots().overlay(*host_), scalp.get());
+        } catch (const std::exception& e) {
+            error_ = std::string("roots: ") + e.what();
+        }
+    }
+    if (g.empty() && rootOverlay_.empty()) return;
+    rootOverlay_ = std::move(g);
+    ++overlayVersion_;
 }
 
 void BrushSession::setDocument(GroomDocument* document) {
     if (tool_.stroking()) tool_.cancel(host_.get());
+    if (host_ && tool_.roots().active()) {
+        try {
+            tool_.roots().leave(*host_);  // (an edit not finished given to its roots)
+        } catch (const std::exception&) {
+        }
+    }
+    if (tool_.settings.tool == BrushToolSettings::Tool::Roots) tool_.settings.setMode("shape");
+    rootOverlay_ = RootOverlayGeometry();
     document_ = document;
     host_ = document ? std::make_unique<DocumentStrokeHost>(*document) : nullptr;
     if (host_) host_->setShotSculpt(shot_, shotSeconds_, shotFrame_, shotLayer_);
@@ -148,6 +203,8 @@ bool BrushSession::press(const QPointF& at, float pressure, unsigned modifiers) 
         return false;
     }
     const std::array<float, 2> p = port(at);
+    pressIndex_ = document_ ? document_->undoIndex() : 0;
+    pressText_ = document_ ? document_->undoText() : std::string();
     guard("press", [&] { tool_.press(*host_, view_, p[0], p[1], pressure, modifiers); });
     rebuildOverlay(at, false);
     return error_.empty();
@@ -175,6 +232,10 @@ bool BrushSession::editLengths(const char* what,
     }
     guard(what, [&] { fn(tool_.lengths(), *host_, tool_.settings); });
     return error_.empty();
+}
+
+bool BrushSession::committedSincePress() const {
+    return document_ && (document_->undoIndex() != pressIndex_ || document_->undoText() != pressText_);
 }
 
 void BrushSession::cancel() {
@@ -251,6 +312,16 @@ void BrushSession::rebuildOverlay(const QPointF& at, bool withLines) {
     const std::array<float, 2> p = port(at);
     const BrushToolSettings& s = tool_.settings;
     using Tool = BrushToolSettings::Tool;
+    if (s.tool == Tool::Roots) {
+        // The root mode: no ring, its outlines (Duplicate: the copies follow the cursor).
+        if (withLines && host_ && tool_.roots().active() && !tool_.rootsPressed()) {
+            guard("roots", [&] { tool_.roots().hover(*host_, view_, p[0], p[1]); });
+        }
+        const std::uint64_t before = overlayVersion_;
+        refreshRoots();
+        if (overlayVersion_ == before) ++overlayVersion_;
+        return;
+    }
     if (withLines && host_) {
         // The guides the brush would touch, as the core draws them for the hover (smoothed).
         std::vector<std::vector<Vec3f>> lines;

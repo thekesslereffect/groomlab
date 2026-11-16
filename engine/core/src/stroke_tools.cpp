@@ -37,11 +37,12 @@ std::array<float, 3> brushHoverColor(const BrushToolSettings& s) {
 }
 
 void BrushToolSettings::setMode(const std::string& name) {
-    if (name == "place" || name == "draw" || name == "part" || name == "flow" || name == "lengths") {
+    if (name == "place" || name == "draw" || name == "part" || name == "flow" || name == "lengths" || name == "roots") {
         tool = name == "place" ? Tool::Place
                : name == "draw" ? Tool::Draw
                : name == "part" ? Tool::Part
                : name == "flow" ? Tool::Flow
+               : name == "roots" ? Tool::Roots
                                 : Tool::Lengths;
         return;
     }
@@ -57,6 +58,7 @@ std::string BrushToolSettings::modeName() const {
     if (tool == Tool::Part) return "part";
     if (tool == Tool::Flow) return "flow";
     if (tool == Tool::Lengths) return "lengths";
+    if (tool == Tool::Roots) return "roots";
     if (brush.mode == BrushMode::Attribute && brush.attribute == "clump") return "clump";
     return brushModeName(brush.mode);
 }

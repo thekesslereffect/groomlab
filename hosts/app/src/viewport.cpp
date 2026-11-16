@@ -178,10 +178,13 @@ void Viewport::syncView() {
 
 void Viewport::refreshOverlay() {
     static const DisplayGeometry none;
+    static const RootOverlayGeometry noRoots;
     if (session_ && mode_ != ToolMode::Camera) {
         renderer_.setToolOverlay(session_->overlay(), session_->overlayVersion());
+        renderer_.setRootOverlay(session_->rootOverlay(), session_->overlayVersion());
     } else {
         renderer_.setToolOverlay(none, 0);
+        renderer_.setRootOverlay(noRoots, 0);
     }
     update();
 }
@@ -382,6 +385,13 @@ void Viewport::mouseReleaseEvent(QMouseEvent* event) {
                 emit brushSettingsChanged();  // the Paths box follows the key placed or dragged
                 break;
             }
+            if (session_->settings().tool == BrushToolSettings::Tool::Roots) {
+                // The root mode: the card's buttons follow (a root picked, Finish edit); the groom
+                // evaluated again only when a click made, moved or copied a root.
+                emit brushSettingsChanged();
+                if (session_->committedSincePress()) emit strokeEnded();
+                break;
+            }
             if (released == StrokeRelease::Stroke) emit strokeEnded();
             break;
         }
@@ -498,6 +508,14 @@ void Viewport::keyPressEvent(QKeyEvent* event) {
                 return;
             }
             if (session_ && session_->stroking()) session_->cancel();
+            if (session_ && mode_ == ToolMode::Brush && session_->rootMode()) {
+                // The root mode: Esc leaves it for the Tube brush (again: leaves the brush).
+                session_->leaveRoots();
+                refreshOverlay();
+                emit brushSettingsChanged();
+                event->accept();
+                return;
+            }
             setToolMode(ToolMode::Camera);
             event->accept();
             return;

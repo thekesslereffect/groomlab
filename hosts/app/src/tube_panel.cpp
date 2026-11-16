@@ -27,6 +27,7 @@
 #include <nlohmann/json.hpp>
 
 #include "groomlab/brush.h"
+#include "groomlab/root_tubes.h"
 #include "groomlab/tube.h"
 
 #include "brush_session.h"
@@ -177,7 +178,15 @@ TubePanel::TubePanel(QWidget* parent) : QWidget(parent) {
         wireframe_->setObjectName(QStringLiteral("tubeWireframe"));
         wireframe_->setToolTip(tr("Draw the Tube brush's tubes as wires (the selected guides' warm)"));
         wireframe_->setChecked(true);
-        for (QCheckBox* box : {shaded_, wireframe_}) {
+        colors_ = new QCheckBox(tr("Colors"), profileBlock_);
+        colors_->setObjectName(QStringLiteral("tubeColors"));
+        colors_->setToolTip(tr("Color each tube as the root tube it comes from (its split tubes and children in its color), a "
+                               "color of its own without one"));
+        colors_->setChecked(true);
+        always_ = new QCheckBox(tr("Always visible"), profileBlock_);
+        always_->setObjectName(QStringLiteral("tubesAlwaysVisible"));
+        always_->setToolTip(tr("Keep the tubes drawn whichever tool is up (Comb, Select, ...), not only the Tube tool"));
+        for (QCheckBox* box : {shaded_, wireframe_, colors_, always_}) {
             connect(box, &QCheckBox::toggled, this, [this] { emit displayChanged(); });
             profileBlock_->rows()->addWidget(switchRow(profileBlock_, box));
         }
@@ -312,6 +321,121 @@ TubePanel::TubePanel(QWidget* parent) : QWidget(parent) {
         renameField_->hide();
         profileBlock_->rows()->addWidget(renameField_);
     }
+    // ---- Tube roots and Tube hierarchy (Edit: the Tube tool), over the profile.
+    rootsBlock_ = new CardBlock(tr("Tube roots"), this);
+    rootsBlock_->setObjectName(QStringLiteral("rootTubes"));
+    rootsBlock_->titleLabel()->setToolTip(tr("Tubes drawn root first: click the root's outline on the scalp, one CV at a time, "
+                                             "and close it on its first CV. Each tube is its own region."));
+    {
+        auto button = [this](const QString& text, const char* name, const QString& tip, bool checkable, void (TubePanel::*run)()) {
+            QAbstractButton* b = nullptr;
+            if (checkable) {
+                QToolButton* chip = makeChip(text, tip, rootsBlock_);  // (checked: the accent, as the card's chips)
+                chip->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+                b = chip;
+            } else {
+                b = new QPushButton(text, rootsBlock_);
+                b->setToolTip(tip);
+            }
+            b->setObjectName(QLatin1String(name));
+            connect(b, &QAbstractButton::clicked, this, [this, run] { (this->*run)(); });
+            return b;
+        };
+        drawRoot_ = button(tr("Draw root"), "rootTubeDraw",
+                           tr("Click the root's outline on the scalp, one CV at a time (drag to move the CV); click the first CV to "
+                              "close it. Near a neighbouring root a CV snaps onto it, sealing the tubes. Again: leave"),
+                           true, &TubePanel::drawRoot);
+        editRoots_ = button(tr("Edit roots"), "rootTubeEdit",
+                            tr("Show the root tubes' outlines with their CVs, the guides hidden; drag CVs on the scalp (Ctrl+click an "
+                               "edge: a new CV there; a CV: taken out), then Finish edit"),
+                            true, &TubePanel::editRoots);
+        selectRoot_ = button(tr("Select root"), "rootTubeSelect",
+                             tr("Show every root's middle: click one to select its root (Shift: several), drag it to move the root "
+                                "over the scalp. Again: leave"),
+                             true, &TubePanel::selectRoot);
+        undoCv_ = button(tr("Undo CV"), "rootTubeUndoCv", tr("Take back the last CV (or the drawn path); in Edit roots, the last CV move"),
+                         false, &TubePanel::undoCv);
+        deleteRoots_ = button(tr("Delete"), "rootTubeDelete", tr("Delete the selected roots: their tubes and the tube hierarchy under them"),
+                              false, &TubePanel::deleteRoots);
+        duplicateRoots_ = button(tr("Duplicate"), "rootTubeDuplicate",
+                                 tr("Copy the selected roots: the copies follow the cursor over the scalp, a click sets them down. "
+                                    "Again: stop"),
+                                 true, &TubePanel::duplicateRoots);
+        // Two rows of chips that wrap on a narrow card (the modes; then Undo CV, Delete, Duplicate).
+        for (const std::array<QAbstractButton*, 3>& row : {std::array<QAbstractButton*, 3>{drawRoot_, editRoots_, selectRoot_},
+                                                           std::array<QAbstractButton*, 3>{undoCv_, deleteRoots_, duplicateRoots_}}) {
+            FlowLayout* flow = nullptr;
+            QWidget* line = chipRow(rootsBlock_, &flow);
+            for (QAbstractButton* b : row) flow->addWidget(b);
+            rootsBlock_->rows()->addWidget(line);
+        }
+        rootSnap_ = new QCheckBox(tr("Snap to neighbours"), rootsBlock_);
+        rootSnap_->setObjectName(QStringLiteral("rootTubeSnap"));
+        rootSnap_->setToolTip(tr("A CV near a neighbouring root's CV or edge snaps onto it, so the tubes meet with no gap"));
+        rootSnap_->setChecked(true);
+        connect(rootSnap_, &QCheckBox::toggled, this, &TubePanel::setRootSnap);
+        rootDrawPath_ = new QCheckBox(tr("Draw guide before extrude"), rootsBlock_);
+        rootDrawPath_->setObjectName(QStringLiteral("rootTubeDrawFirst"));
+        rootDrawPath_->setToolTip(tr("Once the outline closes, drag from its middle out to draw the tube's guide. Off: the tube goes "
+                                     "straight off the scalp, Length long, in Segments"));
+        rootDrawPath_->setChecked(true);
+        connect(rootDrawPath_, &QCheckBox::toggled, this, &TubePanel::setRootDrawPath);
+        for (QCheckBox* box : {rootSnap_, rootDrawPath_}) rootsBlock_->rows()->addWidget(switchRow(rootsBlock_, box));
+        rootDensity_ = committingSlider(0.25, 4.0, 0.05, 20.0, 2, &TubePanel::setRootDensity);
+        rootDensity_->setObjectName(QStringLiteral("rootTubeDensity"));
+        rootDensity_->setCaption(tr("Point density"));
+        rootDensity_->setValue(1.0);
+        rootDensity_->setToolTip(tr("How many points a drawn guide gets: 1, about one per root width along it; 2, twice as many"));
+        rootLength_ = committingSlider(0.0, 10.0, 0.0001, 1e4, 3, &TubePanel::setRootLength);
+        rootLength_->setObjectName(QStringLiteral("rootTubeLength"));
+        rootLength_->setCaption(tr("Length"));
+        rootLength_->setValue(1.0);
+        rootLength_->setToolTip(tr("A tube's length when it goes straight off the scalp (Draw guide before extrude off)"));
+        rootSegments_ = committingSlider(2.0, 32.0, 2.0, 256.0, 0, &TubePanel::setRootSegments);
+        rootSegments_->setObjectName(QStringLiteral("rootTubeSegments"));
+        rootSegments_->setCaption(tr("Segments"));
+        rootSegments_->setValue(12.0);
+        rootSegments_->setToolTip(tr("A straight tube guide's segments (Draw guide before extrude off)"));
+        rootTaper_ = committingSlider(0.0, 1.0, 0.0, 4.0, 2, &TubePanel::setRootTaper);
+        rootTaper_->setObjectName(QStringLiteral("rootTubeTaper"));
+        rootTaper_->setCaption(tr("Tip width"));
+        rootTaper_->setValue(0.5);
+        rootTaper_->setToolTip(tr("The tube's width at its tip, as a share of its root's"));
+        for (ValueSlider* s : {rootDensity_, rootLength_, rootSegments_, rootTaper_}) rootsBlock_->rows()->addWidget(s);
+        setRootDrawPath(rootDrawPath_->isChecked());  // (Point density, or Length and Segments)
+    }
+    column->addWidget(rootsBlock_);
+    levelsBlock_ = new CardBlock(tr("Tube hierarchy"), this);
+    levelsBlock_->setObjectName(QStringLiteral("tubeHierarchy"));
+    levelsBlock_->titleLabel()->setToolTip(tr("Tube levels: each level splits the tubes above it in two. Shaping a tube carries the "
+                                              "smaller tubes inside it; pick a level to edit its tubes"));
+    {
+        addLevel_ = new QPushButton(tr("Add"), levelsBlock_);
+        addLevel_->setObjectName(QStringLiteral("tubeLevelAdd"));
+        addLevel_->setToolTip(tr("Split each selected tube in two (with none selected: every tube of the base group), sharing its "
+                                 "root shape: a level deeper"));
+        connect(addLevel_, &QPushButton::clicked, this, [this] { addLevel(); });
+        removeLevel_ = new QPushButton(tr("Remove"), levelsBlock_);
+        removeLevel_->setObjectName(QStringLiteral("tubeLevelRemove"));
+        removeLevel_->setToolTip(tr("Undo a split: with tubes selected, theirs only (a split tube's deepest split tubes, or a split "
+                                    "tube back into its parent); with none, the deepest level everywhere"));
+        connect(removeLevel_, &QPushButton::clicked, this, [this] { removeLevel(); });
+        auto* line = new QHBoxLayout();
+        line->setContentsMargins(0, 0, 0, 0);
+        line->setSpacing(4);
+        line->addWidget(addLevel_, 1);
+        line->addWidget(removeLevel_, 1);
+        levelsBlock_->rows()->addLayout(line);
+        levelBaseLabel_ = new QLabel(levelsBlock_);
+        levelBaseLabel_->setObjectName(QStringLiteral("tubeLevelBase"));
+        levelBaseLabel_->setProperty("role", "hint");
+        levelsBlock_->rows()->addWidget(levelBaseLabel_);
+        levelRow_ = new QHBoxLayout();
+        levelRow_->setContentsMargins(0, 0, 0, 0);
+        levelRow_->setSpacing(4);
+        levelsBlock_->rows()->addLayout(levelRow_);
+    }
+    column->addWidget(levelsBlock_);
     column->addWidget(profileBlock_);
 
     // ---- Edit: the selected guides' sections; Smooth evens out what the brush painted.
@@ -386,6 +510,8 @@ void TubePanel::setMode(Mode mode) {
     tubeBlock_->setVisible(!edit);
     profileBlock_->setVisible(edit);
     selectedBlock_->setVisible(edit);
+    rootsBlock_->setVisible(edit);
+    levelsBlock_->setVisible(edit);
     refreshTips();
 }
 
@@ -406,6 +532,263 @@ QAbstractButton* TubePanel::shadedBox() const { return shaded_; }
 QAbstractButton* TubePanel::wireframeBox() const { return wireframe_; }
 bool TubePanel::shaded() const { return shaded_ && shaded_->isChecked(); }
 bool TubePanel::wireframe() const { return wireframe_ && wireframe_->isChecked(); }
+bool TubePanel::colors() const { return colors_ && colors_->isChecked(); }
+bool TubePanel::alwaysVisible() const { return always_ && always_->isChecked(); }
+QAbstractButton* TubePanel::colorsBox() const { return colors_; }
+QAbstractButton* TubePanel::alwaysVisibleBox() const { return always_; }
+
+// ---- Tube roots ------------------------------------------------------------------------------------
+
+void TubePanel::startRoots(RootTubeTool::Mode mode) {
+    if (!session_ || !session_->document()) {
+        emit message(tr("Open a groom first."));
+        refreshRoots();
+        return;
+    }
+    RootTubeTool::Settings& s = session_->roots().settings;
+    s.snap = rootSnap_->isChecked();
+    s.drawPath = rootDrawPath_->isChecked();
+    s.density = static_cast<float>(rootDensity_->value());
+    s.length = static_cast<float>(rootLength_->value());
+    s.segments = static_cast<int>(std::lround(rootSegments_->value()));
+    s.taper = static_cast<float>(rootTaper_->value());
+    // New roots go into the picked group when it is a top group, else rootTubes.
+    s.group.clear();
+    if (const HierarchyPtr h = session_->document()->session().authoredHierarchy()) {
+        const std::string& picked = session_->settings().brush.group;
+        const GroupId id = picked.empty() ? kNoGroup : h->findGroup(picked);
+        if (id != kNoGroup && h->groupDepth(id) == 0) s.group = picked;
+    }
+    rootsDone(session_->startRoots(mode));
+}
+
+bool TubePanel::rootsDone(bool ok) {
+    if (!ok && session_) emit message(QString::fromStdString(session_->lastError()));
+    refreshRoots();
+    emit rootModeChanged();
+    return ok;
+}
+
+void TubePanel::drawRoot() {
+    if (session_ && session_->rootMode() && (session_->roots().mode() == RootTubeTool::Mode::Place ||
+                                             session_->roots().mode() == RootTubeTool::Mode::Draw)) {
+        session_->leaveRoots();  // again: the outline being drawn dropped, the mode left
+        rootsDone(true);
+        return;
+    }
+    // A deeper level picked: level 1 shown and picked instead (a new root tube is a level 1 guide).
+    fillLevels();
+    if (levels_.size() > 1 && shownLevel_ > 1) showLevel(1);
+    startRoots(RootTubeTool::Mode::Place);
+}
+
+void TubePanel::editRoots() {
+    if (session_ && session_->rootMode() && session_->roots().mode() == RootTubeTool::Mode::Edit) {
+        // Finish edit: the edits given to the roots (one undo step), the mode left.
+        const bool ok = session_->editRoots("roots", [](RootTubeTool& t, StrokeHost& h) { t.finishEdit(h); });
+        if (ok) session_->leaveRoots();
+        rootsDone(ok);
+        emit guidesEdited();
+        return;
+    }
+    startRoots(RootTubeTool::Mode::Edit);
+}
+
+void TubePanel::selectRoot() {
+    if (session_ && session_->rootMode() && (session_->roots().mode() == RootTubeTool::Mode::Select ||
+                                             session_->roots().mode() == RootTubeTool::Mode::Duplicate)) {
+        session_->leaveRoots();
+        rootsDone(true);
+        return;
+    }
+    startRoots(RootTubeTool::Mode::Select);
+}
+
+void TubePanel::undoCv() {
+    if (!session_ || !session_->rootMode()) return;
+    rootsDone(session_->editRoots("roots", [](RootTubeTool& t, StrokeHost& h) { t.undoCv(h); }));
+}
+
+void TubePanel::deleteRoots() {
+    if (!session_ || !session_->rootMode()) return;
+    rootsDone(session_->editRoots("roots", [](RootTubeTool& t, StrokeHost& h) { t.deleteSelected(h); }));
+    emit guidesEdited();
+}
+
+void TubePanel::duplicateRoots() {
+    if (!session_ || !session_->rootMode()) return;
+    const bool duplicating = session_->roots().mode() == RootTubeTool::Mode::Duplicate;
+    rootsDone(session_->editRoots("roots", [duplicating](RootTubeTool& t, StrokeHost& h) {
+        if (duplicating) t.endDuplicate();
+        else t.beginDuplicate(h);
+    }));
+}
+
+void TubePanel::setRootSnap(bool on) {
+    if (!session_) return;
+    session_->roots().settings.snap = on;
+    if (session_->rootMode()) rootsDone(session_->editRoots("roots", [](RootTubeTool& t, StrokeHost& h) { t.sync(h); }));
+}
+
+void TubePanel::setRootDrawPath(bool on) {
+    rootDensity_->setVisible(on);
+    rootLength_->setVisible(!on);
+    rootSegments_->setVisible(!on);
+    if (session_) session_->roots().settings.drawPath = on;
+}
+
+void TubePanel::setRootDensity(double density) {
+    if (session_) session_->roots().settings.density = static_cast<float>(density);
+}
+
+void TubePanel::setRootLength(double length) {
+    if (session_) session_->roots().settings.length = static_cast<float>(std::max(length, 1e-6));
+}
+
+void TubePanel::setRootSegments(double segments) {
+    if (session_) session_->roots().settings.segments = std::max(2, static_cast<int>(std::lround(segments)));
+}
+
+void TubePanel::setRootTaper(double taper) {
+    if (session_) session_->roots().settings.taper = static_cast<float>(taper);
+}
+
+void TubePanel::refreshRoots() {
+    const bool on = session_ && session_->rootMode();
+    const RootTubeTool::Mode mode = on ? session_->roots().mode() : RootTubeTool::Mode::Place;
+    if (session_) session_->refreshRoots();
+    const bool placing = on && (mode == RootTubeTool::Mode::Place || mode == RootTubeTool::Mode::Draw);
+    const bool editing = on && mode == RootTubeTool::Mode::Edit;
+    const bool selecting = on && (mode == RootTubeTool::Mode::Select || mode == RootTubeTool::Mode::Duplicate);
+    const bool picked = selecting && !session_->roots().selected().empty();
+    QSignalBlocker b1(drawRoot_), b2(editRoots_), b3(selectRoot_), b4(duplicateRoots_);
+    drawRoot_->setChecked(placing);
+    editRoots_->setChecked(editing);
+    editRoots_->setText(editing ? tr("Finish edit") : tr("Edit roots"));
+    selectRoot_->setChecked(selecting);
+    undoCv_->setEnabled(placing || editing);
+    deleteRoots_->setEnabled(picked);
+    duplicateRoots_->setEnabled(picked);
+    duplicateRoots_->setChecked(on && mode == RootTubeTool::Mode::Duplicate);
+    if (on && session_->roots().messageCount() != rootsHeard_) {
+        rootsHeard_ = session_->roots().messageCount();
+        if (!session_->roots().message().empty()) emit message(QString::fromStdString(session_->roots().message()));
+    }
+    fillLevels();
+}
+
+// ---- The tube hierarchy ------------------------------------------------------------------------------
+
+std::string TubePanel::levelPicked() const {
+    const std::string group = session_ ? session_->settings().brush.group : std::string();
+    return group.empty() ? levelBase_ : group;
+}
+
+void TubePanel::fillLevels() {
+    const HierarchyPtr h = document() ? document()->session().authoredHierarchy() : nullptr;
+    TubeLevels info;
+    if (h) {
+        try {
+            info = tubeLevels(*h, {}, levelPicked());
+        } catch (const std::exception&) {
+        }
+    }
+    levelBase_ = info.base;
+    const std::string picked = session_ ? session_->settings().brush.group : std::string();
+    const auto at = std::find(info.levels.begin(), info.levels.end(), picked);
+    shownLevel_ = at != info.levels.end() ? static_cast<int>(at - info.levels.begin()) + 1 : 1;
+    levelBaseLabel_->setText(levelBase_.empty() ? tr("No guides yet.") : tr("Base: %1").arg(QString::fromStdString(levelBase_)));
+    addLevel_->setEnabled(!levelBase_.empty() && info.levels.size() < static_cast<std::size_t>(kMaxTubeLevels));
+    removeLevel_->setEnabled(info.levels.size() > 1);
+    const std::size_t count = std::max<std::size_t>(info.levels.size(), 1);
+    if (info.levels != levels_ || levelButtons_.size() != count) {
+        levels_ = info.levels;
+        for (QAbstractButton* b : levelButtons_) b->deleteLater();
+        levelButtons_.clear();
+        while (QLayoutItem* item = levelRow_->takeAt(0)) delete item;
+        for (std::size_t k = 0; k < count; ++k) {
+            QToolButton* b = makeChip(QString::number(k + 1),
+                                      tr("Level %1%2: show its tubes and edit them").arg(k + 1).arg(k == 0 ? tr(" (the base)") : QString()),
+                                      levelsBlock_);
+            b->setObjectName(QStringLiteral("tubeLevel%1").arg(k + 1));
+            b->setFixedWidth(30);
+            const int level = static_cast<int>(k + 1);
+            connect(b, &QToolButton::clicked, this, [this, level] { showLevel(level); });
+            levelRow_->addWidget(b);
+            levelButtons_.push_back(b);
+        }
+        levelRow_->addStretch(1);
+    }
+    for (std::size_t k = 0; k < levelButtons_.size(); ++k) {
+        QSignalBlocker block(levelButtons_[k]);
+        levelButtons_[k]->setChecked(static_cast<int>(k + 1) == shownLevel_);
+    }
+}
+
+void TubePanel::showLevel(int level) {
+    GroomDocument* doc = document();
+    const HierarchyPtr h = doc ? doc->session().authoredHierarchy() : nullptr;
+    if (!h || levelBase_.empty()) return;
+    std::string picked;
+    try {
+        for (const auto& [group, visible] : tubeLevelVisibility(*h, levelBase_, level)) {
+            doc->setGroupHidden(group, !visible);
+            if (visible) picked = group;
+        }
+    } catch (const std::exception& e) {
+        emit message(QString::fromUtf8(e.what()));
+        return;
+    }
+    if (!picked.empty() && session_) {
+        BrushSettings& b = session_->settings().brush;
+        b.group = picked;
+        const GroupId id = h->findGroup(picked);
+        if (id != kNoGroup) b.level = h->groupDepth(id);
+    }
+    fillLevels();
+    emit message(tr("Level %1: its tubes shown; the Tube tool and brushes edit them.").arg(level));
+    emit guidesEdited();  // (the groups' eyes and the brush's group: the host shows them)
+    emit settingsChanged();
+}
+
+void TubePanel::addLevel() {
+    GroomDocument* doc = document();
+    if (!doc) return;
+    const std::vector<GuideId> selected = doc->selection();
+    const std::string picked = levelPicked();
+    std::size_t split = 0;
+    const MeshPtr scalp = doc->session().scalp();
+    const std::string error = doc->editGuides("tube level add", [&](GuideHierarchy& g) {
+        split = addTubeLevel(g, scalp.get(), selected, picked);
+    });
+    if (!error.empty()) {
+        emit message(QString::fromStdString(error));
+        return;
+    }
+    emit guidesEdited();
+    fillLevels();
+    showLevel(static_cast<int>(levels_.size()));
+    emit message(tr("Split %1 tube(s): %2 has %3 levels; level %3 shown.")
+                     .arg(split).arg(QString::fromStdString(levelBase_)).arg(levels_.size()));
+}
+
+void TubePanel::removeLevel() {
+    GroomDocument* doc = document();
+    if (!doc || levelBase_.empty()) return;
+    const std::vector<GuideId> selected = doc->selection();
+    const std::string base = levelBase_;
+    const MeshPtr scalp = doc->session().scalp();
+    const std::string error = doc->editGuides("tube level remove", [&](GuideHierarchy& g) {
+        removeTubeLevel(g, scalp.get(), base, selected);
+    });
+    if (!error.empty()) {
+        emit message(QString::fromStdString(error));
+        return;
+    }
+    emit guidesEdited();
+    fillLevels();
+    showLevel(static_cast<int>(levels_.size()));
+}
 
 std::string& TubePanel::activeChoice() { return active_ == 1 ? midChoice_ : active_ == 2 ? tipChoice_ : choice_; }
 const std::string& TubePanel::activeChoice() const { return active_ == 1 ? midChoice_ : active_ == 2 ? tipChoice_ : choice_; }
@@ -473,6 +856,7 @@ bool TubePanel::libraryShape(const std::string& name) const { return library(nam
 
 void TubePanel::refresh(bool force) {
     if (force ? editor_->busy() : busy()) return;
+    refreshRoots();  // (the root buttons as the tool stands; the levels)
     GroomDocument* doc = document();
     GroomDocument::TubeTargets info;
     library_.clear();

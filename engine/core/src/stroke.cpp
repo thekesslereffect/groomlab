@@ -1041,6 +1041,13 @@ void BrushTool::press(StrokeHost& host, const ToolView& view, float x, float y, 
         lengthsPressed_ = host.attach() && lengths_.press(host, view, settings, x, y, modifiers);
         return;
     }
+    if (settings.tool == BrushToolSettings::Tool::Roots) {
+        if (!host.attach()) return;
+        if (!roots_.active()) roots_.start(host, RootTubeTool::Mode::Place);
+        roots_.press(host, view, x, y, modifiers);
+        rootsPressed_ = true;
+        return;
+    }
     inverted_ = (modifiers & kStrokeCtrl) != 0;
     pressure_ = pressure;
     // Ctrl and Shift together (however they were pressed) with a Shape or Trim brush: paint the
@@ -1073,6 +1080,10 @@ void BrushTool::drag(StrokeHost& host, const ToolView& view, float x, float y, f
         lengths_.drag(host, view, settings, x, y);
         return;
     }
+    if (rootsPressed_) {
+        roots_.drag(host, view, x, y);
+        return;
+    }
     pressure_ = pressure;
     if (selecting_) {
         if (pm::hypot(x - pressX_, y - pressY_) > 4.0f) selectMoved_ = true;
@@ -1100,6 +1111,11 @@ StrokeRelease BrushTool::release(StrokeHost& host, const ToolView& view) {
     if (lengthsPressed_) {
         lengthsPressed_ = false;
         lengths_.release(host, settings);
+        return StrokeRelease::Stroke;
+    }
+    if (rootsPressed_) {
+        rootsPressed_ = false;
+        roots_.release(host, view);
         return StrokeRelease::Stroke;
     }
     if (shiftPending_) {

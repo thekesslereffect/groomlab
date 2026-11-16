@@ -27,6 +27,7 @@
 #include "groomlab/graph.h"
 #include "groomlab/guide_hierarchy.h"
 #include "groomlab/length_key_tool.h"
+#include "groomlab/root_tube_tool.h"
 #include "groomlab/parts.h"
 #include "groomlab/scalp_maps.h"
 #include "groomlab/scalp_paint.h"
@@ -42,10 +43,11 @@ class GroomSession;
 // Everything a stroke needs besides the path: the core brush settings, the guide-creating tools,
 // the interactive (screen-space) radius and what the brush acts on.
 struct BrushToolSettings {
-    enum class Tool { Brush, Place, Draw, Part, Flow, Lengths };
+    enum class Tool { Brush, Place, Draw, Part, Flow, Lengths, Roots };
     // Place: click one guide, drag to place many; Draw: draw a guide's shape; Part: draw a part
     // freehand on the scalp; Flow: lay flow arrows along the stroke and comb the ones it passes
-    // (Ctrl: erase them); Lengths: the Length Keys tool (length_key_tool.h, BrushTool::lengths).
+    // (Ctrl: erase them); Lengths: the Length Keys tool (length_key_tool.h, BrushTool::lengths);
+    // Roots: the Tube tool's root-first mode (root_tube_tool.h, BrushTool::roots).
     Tool tool = Tool::Brush;
     std::string partName = "part";  // Part: the new part's name (made unique)
     // Flow: "" lays arrows along strokes; whorl, whorlcw, converge or part places a sink of that
@@ -629,7 +631,12 @@ public:
     // The Length Keys tool (Tool::Lengths): press, drag and release go to it; hosts draw its
     // overlay and give it the panel's edits, Apply and Cancel.
     LengthKeyTool& lengths() { return lengths_; }
+    // The Tube tool's root-first mode (Tool::Roots): press, drag and release go to it; hosts draw
+    // its overlay, hand it the hover (Duplicate) and the card's buttons, and start and leave it.
+    RootTubeTool& roots() { return roots_; }
+    const RootTubeTool& roots() const { return roots_; }
     bool lengthsPressed() const { return lengthsPressed_; }  // a press it took, until its release
+    bool rootsPressed() const { return rootsPressed_; }      // a press the root tool took, until its release
     // The mode the tool is set to: during a Shift+drag's smoothing still the tool's own mode.
     std::string toolModeName() const;
 
@@ -670,6 +677,8 @@ private:
 
     float pressure_ = 1.0f;
     LengthKeyTool lengths_;
+    RootTubeTool roots_;
+    bool rootsPressed_ = false;
     bool lengthsPressed_ = false;  // a press the Length Keys tool took
     std::shared_ptr<GuideHierarchy> working_;
     // The parts and flow arrows a brush stroke shapes (or erases): working copies of the stored

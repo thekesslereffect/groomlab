@@ -44,6 +44,8 @@ add_executable(groomlab_tests
     engine/core/test_grooming.cpp
     engine/core/test_hierarchy.cpp
     engine/core/test_tubes.cpp
+    engine/core/test_root_tubes.cpp
+    engine/core/test_root_tube_tool.cpp
     engine/core/test_incremental.cpp
     engine/core/test_keyed_params.cpp
     engine/core/test_value_inputs.cpp
@@ -613,7 +615,7 @@ if(GROOMLAB_BUILD_MAYA AND TARGET GroomLab)
                 "${CMAKE_CURRENT_BINARY_DIR}/maya_card_atlas")
 endif()
 
-# Tonic-style tubes in the Tube tool (issues 61, 62): tubes drawn root first (their regions, snapping,
+# Root-first tubes in the Tube tool (issues 61, 62): tubes drawn root first (their regions, snapping,
 # editing the root) and the tube hierarchy's levels.
 if(GROOMLAB_BUILD_MAYA AND TARGET GroomLab)
     add_test(NAME maya.root_tubes

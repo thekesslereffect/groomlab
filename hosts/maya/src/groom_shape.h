@@ -22,6 +22,7 @@
 #include <maya/MPxSurfaceShape.h>
 #include <maya/MPxSurfaceShapeUI.h>
 
+#include "groomlab/root_tube_tool.h"
 #include "groomlab/async_evaluation.h"
 #include "groomlab/correctives.h"
 #include "groomlab/card_files.h"
@@ -604,6 +605,13 @@ public:
     void setSymmetrySeam(std::vector<Vec3f> segments);
     const std::vector<Vec3f>& symmetrySeam() const { return symmetrySeam_; }
     std::uint64_t symmetrySeamVersion() const { return symmetrySeamVersion_; }
+    // The Tube tool's root overlay (RootTubeTool::overlay: roots' outlines, CVs, a drawn path),
+    // drawn with the groom on every redraw while the root tool is on it; `pixelScale` the screen's
+    // pixels per point. Empty: none. The version moves when it changes.
+    void setRootOverlay(std::vector<RootTubeTool::Item> items, float pixelScale);
+    const std::vector<RootTubeTool::Item>& rootOverlay() const { return rootOverlay_; }
+    float rootOverlayScale() const { return rootOverlayScale_; }
+    std::uint64_t rootOverlayVersion() const { return rootOverlayVersion_; }
     // The Shape brush is on this groom: its guides' tubes drawn as wires (appendTubeWire) with the
     // groom on every redraw: every guide the brush can shape (activeTubeGuides: shown, not
     // frozen), the selected ones brighter. Off: nothing drawn and nothing worked out. `shaded`
@@ -786,6 +794,9 @@ private:
     std::uint64_t displayVersion_ = 0;
     std::vector<Vec3f> symmetrySeam_;
     std::uint64_t symmetrySeamVersion_ = 0;
+    std::vector<RootTubeTool::Item> rootOverlay_;
+    float rootOverlayScale_ = 1.0f;
+    std::uint64_t rootOverlayVersion_ = 0;
     bool tubeWires_ = false;
     bool tubeShaded_ = false;
     bool tubeWireframe_ = true;

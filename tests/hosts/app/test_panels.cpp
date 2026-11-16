@@ -345,7 +345,14 @@ TEST(AppPanels, ParamEditorsRoundTripEveryKindWithoutLosingMaps) {
             const std::string editor = panel.editorKind(name);
             EXPECT_FALSE(editor.empty()) << type << "." << name;
             editors.insert(editor);
-            if (editor != "label") EXPECT_EQ(panel.shownValue(name), doc->paramOrDefault(made, name)) << type << "." << name;
+            if (editor == "label") continue;
+            const json shown = panel.shownValue(name), stored = doc->paramOrDefault(made, name);
+            if (shown.is_number_float() && stored.is_number_float()) {
+                // (A length shown in the unit an earlier test picked comes back within a rounding.)
+                EXPECT_NEAR(shown.get<double>(), stored.get<double>(), 1e-9 * std::max(1.0, std::abs(stored.get<double>()))) << type << "." << name;
+            } else {
+                EXPECT_EQ(shown, stored) << type << "." << name;
+            }
         }
     }
     // No operator declares a map param: a map is what a mappable number holds (the "map" editor).

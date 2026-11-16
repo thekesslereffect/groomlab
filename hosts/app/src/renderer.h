@@ -56,6 +56,10 @@ public:
     // The tools' overlay (the brush ring, the hovered guides, a part being drawn: colored lines,
     // no depth test), drawn last; the same version keeps the upload. Empty: nothing.
     void setToolOverlay(const DisplayGeometry& lines, std::uint64_t version);
+    // The Tube tool's root mode (RootOverlayGeometry, lifted off the scalp): its see-through fills
+    // and edges depth tested, its CVs and middles as dots a size in pixels across with a dark ring,
+    // over everything; the same version keeps the upload.
+    void setRootOverlay(const RootOverlayGeometry& roots, std::uint64_t version);
     // The scalp to shade (null: none); the same pointer keeps its buffers.
     void setScalp(MeshPtr scalp);
     // What the scalp is shaded as in the lookdev path (the "scalp" preset by default).
@@ -259,6 +263,8 @@ private:
     std::unique_ptr<GpuItem> dots_;  // the guide points, camera-facing diamonds (dots.vert)
     std::unique_ptr<GpuItem> tool_;  // the tools' overlay
     std::uint64_t toolVersion_ = 0;
+    std::unique_ptr<GpuItem> rootFills_, rootLines_, rootDots_;  // the root mode's (setRootOverlay)
+    std::uint64_t rootVersion_ = 0;
     MeshPtr scalpMesh_;
     SurfacePtr scalpSurface_;
     std::vector<SurfacePtr> props_;

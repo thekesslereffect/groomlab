@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tonic-style tubes in the Tube tool (issues 61 and 62): tubes drawn root first (the root's outline
+"""Root-first tubes in the Tube tool (issues 61 and 62): tubes drawn root first (the root's outline
 its tube's root section, the guide rooted at its middle, straight off the scalp or along a drawn
 path; each tube a region of its own on the tubeRoots map; a root's CVs edited later, snapped onto a
 neighbour's) and the tube hierarchy (each level splits the tubes above it in two, side by side,
@@ -236,54 +236,6 @@ class RootTubes(unittest.TestCase):
                 # (its tube's root a little larger than the outline: ROOT_OVERLAP)
                 self.assertLess(nearest(p, back), 0.002 + root_tubes.ROOT_OVERLAP * 0.2, "edit %d: a CV off" % step)
 
-    def test_a_ctrl_click_adds_a_cv_on_every_outline_sharing_the_edge(self):
-        from groomlab.ui import root_tube_tool
-        a = root_tubes.make_root_tube(self.groom, ring((0.0, 1.0, 0.0), 0.12, count=4), regions=False)
-        ca = root_tubes.root_outline(self.groom, a)
-        c = root_tubes._centroid(ca)
-        mid = tm.lerp(ca[0], ca[1], 0.5)
-        out = tm._sub(mid, c)
-        b = root_tubes.make_root_tube(self.groom, [ca[1], ca[0], on_sphere(tm._add(ca[0], out)),
-                                                   on_sphere(tm._add(ca[1], out))], regions=False)
-        tool = root_tube_tool.TOOL
-        tool.to_screen = lambda p: (p[0] * 1000.0, p[2] * 1000.0)  # (a top view, 1000 px a unit)
-        try:
-            tool.start(self.groom, "edit")
-            self.assertEqual(sorted(tool.edits), sorted([int(a), int(b)]))
-            x, y = tool.to_screen(tm.lerp(tool.edits[int(a)][0], tool.edits[int(a)][1], 0.5))
-            tool.insert_cv(x, y + 3.0)
-            self.assertEqual(len(tool.edits[int(a)]), 5)
-            self.assertEqual(len(tool.edits[int(b)]), 5, "the sealed neighbour gets it too")
-            self.assertEqual(len(tool.drag), 2)
-            self.assertEqual(tool.finish_edit(), 2)
-            self.assertEqual(len(root_tubes.root_outline(self.groom, a)), 5)
-            self.assertEqual(len(root_tubes.root_outline(self.groom, b)), 5)
-        finally:
-            tool.leave()
-            del tool.to_screen
-
-    def test_undo_brings_the_outline_back_to_draw_its_path_again(self):
-        from groomlab.ui import root_tube_tool
-        tool = root_tube_tool.TOOL
-        try:
-            tool.start(self.groom, "place")
-            tool.cvs = ring((0.0, 1.0, 0.0), 0.15)
-            tool.settings["draw"] = True
-            tool.close()
-            self.assertEqual(tool.mode, "draw")
-            root = tool.center
-            guide = tool.make([root, tm._add(root, (0.0, 0.3, 0.1)), tm._add(root, (0.0, 0.5, 0.5))])
-            self.assertEqual(tool.mode, "place")
-            cmds.undo()
-            tool.undone()  # (Maya's Undo event calls it in a session; again: nothing more)
-            tool.undone()
-            self.assertNotIn(int(guide), root_tubes.root_tubes(self.groom))
-            self.assertEqual(tool.mode, "draw")
-            self.assertEqual(len(tool.cvs), 5)
-            self.assertLess(tm._dist(tool.center, root), 1e-6)
-        finally:
-            tool.leave()
-
     def test_a_deleted_root_tubes_shape_goes_with_it(self):
         guide = root_tubes.make_root_tube(self.groom, ring((0.0, 1.0, 0.0), 0.15), length=0.5, regions=False)
         shape = groomlab.get_tube(self.groom, guide)["shape"]
@@ -364,7 +316,9 @@ class RootTubes(unittest.TestCase):
         shape = groomlab.get_tube(self.groom, b)["shape"]
         root_tubes.delete_root_tubes(self.groom, [b])
         self.assertEqual(count(), 7)
-        self.assertEqual(sorted(root_tubes._stored_outlines(self.groom)), [str(a)])
+        # (each root's CVs are kept with its guide, saved with the groom: the deleted root's went with it)
+        kept = [int(g["id"]) for g in groomlab.get_hierarchy(self.groom)["guides"] if g.get("rootOutline")]
+        self.assertEqual(kept, [int(a)])
         self.assertNotIn(shape, [x["name"] for x in groomlab.tube_shapes(self.groom)])
         cmds.undo()
         self.assertEqual(count(), 14)
@@ -383,137 +337,6 @@ class RootTubes(unittest.TestCase):
         self.assertEqual(groups(), sorted(levels))
         self.assertEqual(count(), 7)
 
-    def _tool(self):
-        """The root tool, its view a top view (1000 px a unit) onto the sphere's top."""
-        from groomlab.ui import root_tube_tool
-        tool = root_tube_tool.TOOL
-        tool.to_screen = lambda q: (q[0] * 1000.0, q[2] * 1000.0)
-
-        def hit(x, y):
-            q = on_sphere((x / 1000.0, 1.0, y / 1000.0))
-            return q, q
-        tool.hit = hit
-        self.addCleanup(self._untool, tool)
-        return tool
-
-    def _untool(self, tool):
-        tool.leave()
-        for name in ("to_screen", "hit", "press_point", "view_point"):
-            tool.__dict__.pop(name, None)
-
-    def test_select_mode_carries_a_root_its_sealed_cvs_held(self):
-        a = root_tubes.make_root_tube(self.groom, ring((0.0, 1.0, 0.0), 0.12, count=4))
-        ca = root_tubes.root_outline(self.groom, a)
-        c = root_tubes._centroid(ca)
-        out = tm._sub(tm.lerp(ca[0], ca[1], 0.5), c)
-        b = root_tubes.make_root_tube(self.groom, [ca[1], ca[0], on_sphere(tm._add(ca[0], out)),
-                                                   on_sphere(tm._add(ca[1], out))])
-        tool = self._tool()
-        tool.start(self.groom, "select")
-        self.assertEqual(sorted(tool.roots), sorted([int(a), int(b)]))
-        middle = tool.middles[int(b)][0]
-        x, y = tool.to_screen(middle)
-        tool.press_point = lambda: (x + 2.0, y)
-        tool.press()
-        self.assertEqual(tool.selected, int(b))
-        self.assertEqual(len(tool.move["held"][int(b)]), 2, "its two CVs on a's edge held")
-        step = tm._mul(tm._unit(out), 0.05)
-        tool.view_point = lambda: (x + 2.0 + step[0] * 1000.0, y + step[2] * 1000.0)
-        tool.drag_event()
-        tool.release()
-        after = root_tubes.root_outline(self.groom, b)
-        before = [ca[1], ca[0]]
-        for q in before:
-            self.assertLess(nearest(q, after), 1e-3, "a sealed CV moved")
-        self.assertGreater(tm._dist(root_tubes._centroid(after), c), tm._dist(root_tubes._centroid(
-            [ca[1], ca[0], on_sphere(tm._add(ca[0], out)), on_sphere(tm._add(ca[1], out))]), c) + 0.01)
-        for q in root_tubes.root_outline(self.groom, a):
-            self.assertLess(nearest(q, ca), 1e-6, "the neighbour stays")
-        cmds.undo()  # one step
-        self.assertLess(max(nearest(q, root_tubes.root_outline(self.groom, b)) for q in before), 1e-3)
-        # Duplicate: the copy follows the cursor; the click (release) sets it down.
-        tool.start(self.groom, "select")
-        tool.press_point = lambda: (x, y)
-        tool.press()
-        tool.release()
-        self.assertTrue(tool.begin_duplicate())
-        target = on_sphere((-0.45, 0.85, 0.1))
-        tool.follow(target[0] * 1000.0, target[2] * 1000.0)
-        self.assertIsNotNone(tool.ghost)
-        new = tool.place_copy()
-        self.assertEqual(tool.mode, "select")
-        self.assertEqual(tool.selected, int(new))
-        self.assertEqual(len(root_tubes.root_tubes(self.groom)), 3)
-        self.assertEqual(tool.delete_selected(), 1)
-        self.assertEqual(len(root_tubes.root_tubes(self.groom)), 2)
-        self.assertIsNone(tool.selected)
-
-    def test_shift_selects_several_roots_carried_and_copied_as_one(self):
-        a = root_tubes.make_root_tube(self.groom, ring((0.0, 1.0, 0.0), 0.12, count=4), regions=False)
-        ca = root_tubes.root_outline(self.groom, a)
-        c = root_tubes._centroid(ca)
-        out = tm._sub(tm.lerp(ca[0], ca[1], 0.5), c)
-        b = root_tubes.make_root_tube(self.groom, [ca[1], ca[0], on_sphere(tm._add(ca[0], out)),
-                                                   on_sphere(tm._add(ca[1], out))], regions=False)
-        other = tm._mul(out, -1.0)
-        d = root_tubes.make_root_tube(self.groom, [ca[3], ca[2], on_sphere(tm._add(ca[2], other)),
-                                                   on_sphere(tm._add(ca[3], other))], regions=False)
-        tool = self._tool()
-        tool.start(self.groom, "select")
-        keys = {"mod": ""}
-        tool.modifier = lambda: keys["mod"]
-
-        def click(g):
-            x, y = tool.to_screen(tool.middles[int(g)][0])
-            tool.press_point = lambda: (x, y)
-            tool.press()
-            return x, y
-        click(a)
-        keys["mod"] = "shift"
-        click(b)
-        self.assertEqual(tool.picked, [int(a), int(b)])
-        click(b)  # Shift+click a selected one: out
-        self.assertEqual(tool.picked, [int(a)])
-        x, y = click(b)
-        self.assertEqual(sorted(tool.picked), sorted([int(a), int(b)]))
-        # a's CVs sealed onto d (not selected) held; a and b's shared CVs carried together.
-        self.assertEqual(len(tool.move["held"][int(a)]), 2)
-        self.assertEqual(len(tool.move["held"][int(b)]), 0)
-        keys["mod"] = ""
-        step = tm._mul(tm._unit(out), 0.04)
-        tool.view_point = lambda: (x + step[0] * 1000.0, y + step[2] * 1000.0)
-        tool.drag_event()
-        tool.release()
-        oa, ob = root_tubes.root_outline(self.groom, a), root_tubes.root_outline(self.groom, b)
-        for q in ob[:2]:
-            self.assertLess(nearest(q, oa), 1e-3, "the seam between the two carried roots kept")
-        od = root_tubes.root_outline(self.groom, d)
-        for q in od[:2]:
-            self.assertLess(nearest(q, oa), 1e-3, "a's CVs sealed onto d stay")
-        self.assertGreater(nearest(ob[2], [ca[0], ca[1], ca[2], ca[3]]), 0.03, "b moved")
-        cmds.undo()  # one step for both
-        for q in [ca[1], ca[0]]:
-            self.assertLess(nearest(q, root_tubes.root_outline(self.groom, b)), 1e-3)
-        # Both copied at once, as one group, then both deleted.
-        tool.start(self.groom, "select")
-        tool.modifier = lambda: keys["mod"]
-        keys["mod"] = ""
-        click(a)
-        keys["mod"] = "shift"
-        click(b)
-        tool.release()
-        self.assertTrue(tool.begin_duplicate())
-        target = on_sphere((-0.45, 0.85, 0.1))
-        tool.follow(target[0] * 1000.0, target[2] * 1000.0)
-        self.assertEqual(len(tool.ghost[1]), 2)
-        made = tool.place_copy()
-        self.assertEqual(len(made), 2)
-        self.assertEqual(len(root_tubes.root_tubes(self.groom)), 5)
-        na, nb = (root_tubes.root_outline(self.groom, g) for g in made)
-        self.assertLess(min(nearest(q, na) for q in nb[:2]), 1e-3, "the copies sealed as their sources are")
-        self.assertEqual(tool.delete_selected(), 2)
-        self.assertEqual(len(root_tubes.root_tubes(self.groom)), 3)
-
     def test_combing_the_guide_leaves_the_root_area_where_it_was_drawn(self):
         """A root tube's footprint is fixed on the scalp: combed hard over, its guide leans away,
         but the area its strands root in (and fill) stays the outline as drawn, with no region map."""
@@ -525,35 +348,6 @@ class RootTubes(unittest.TestCase):
         self.assertLess(root_tubes.footprint_error(self.groom, guide), 0.004, "the root area stayed as drawn")
         self.assertNotIn("tubeRoots", groomlab.list_maps(self.groom))
 
-    def test_redo_puts_the_drawn_outline_away(self):
-        tool = self._tool()
-        tool.start(self.groom, "place")
-        tool.cvs = ring((0.0, 1.0, 0.0), 0.15)
-        tool.settings["draw"] = True
-        tool.close()
-        root = tool.center
-        guide = tool.make([root, tm._add(root, (0.0, 0.3, 0.1)), tm._add(root, (0.0, 0.5, 0.5))])
-        cmds.undo()
-        tool.undone()
-        self.assertEqual(tool.mode, "draw")
-        cmds.redo()
-        tool.redone()
-        self.assertEqual(tool.mode, "place")
-        self.assertEqual(tool.cvs, [])
-        self.assertIn(int(guide), root_tubes.root_tubes(self.groom))
-
-    def test_edit_mode_greens_the_root_touched(self):
-        a = root_tubes.make_root_tube(self.groom, ring((0.0, 1.0, 0.0), 0.12, count=4), regions=False)
-        root_tubes.make_root_tube(self.groom, ring((0.5, 0.85, 0.0), 0.12, count=4), regions=False)
-        tool = self._tool()
-        tool.start(self.groom, "edit")
-        self.assertEqual(tool.touched, set())
-        x, y = tool.to_screen(tool.edits[int(a)][0])
-        tool.modifier = lambda: ""
-        self.addCleanup(lambda: tool.__dict__.pop("modifier", None))
-        tool.press_edit(x, y)
-        self.assertEqual(tool.touched, {int(a)})
-
     def _pair(self):
         """Two roots sealed along an edge (a's CVs 0 and 1 are b's 1 and 0)."""
         a = root_tubes.make_root_tube(self.groom, ring((0.0, 1.0, 0.0), 0.12, count=4), regions=False)
@@ -562,133 +356,6 @@ class RootTubes(unittest.TestCase):
         b = root_tubes.make_root_tube(self.groom, [ca[1], ca[0], on_sphere(tm._add(ca[0], out)),
                                                    on_sphere(tm._add(ca[1], out))])
         return int(a), int(b)
-
-    def test_the_preview_draws_each_root_in_its_own_color(self):
-        from groomlab.ui import root_tube_tool as rt
-        a, b = self._pair()
-        tool = self._tool()
-        tool.start(self.groom, "edit")
-        shape = rt.PREVIEW + "Shape"
-        self.assertEqual(cmds.nodeType(shape), rt.OUTLINES_NODE)
-        counts = list(cmds.getAttr(shape + ".counts"))
-        styles = list(cmds.getAttr(shape + ".styles"))
-        colors = [tuple(c) for c in cmds.getAttr(shape + ".colors")]
-        self.assertEqual(len(counts), 2)
-        self.assertTrue(all(c >= 4 for c in counts), "the edges laid along the scalp between the CVs")
-        for p in cmds.getAttr(shape + ".points") + cmds.getAttr(shape + ".fillPoints"):
-            self.assertAlmostEqual(tm._length(p), 1.0, delta=1e-3, msg="on the scalp (the unit sphere)")
-        self.assertEqual(len(cmds.getAttr(shape + ".dots")), 8, "every CV a dot")
-        owners = list(cmds.getAttr(shape + ".fillOwners"))
-        self.assertEqual(sorted(set(owners)), [0, 1], "both filled")
-        self.assertEqual(len(cmds.getAttr(shape + ".fillPoints")), 3 * len(owners))
-        self.assertAlmostEqual(cmds.getAttr(shape + ".fillOpacity"), 0.5)
-        want = root_tubes.root_colors(self.groom)
-        self.assertEqual(len(set(want.values())), 2, "each root a color of its own")
-        for got, g in zip(colors, [a, b]):
-            for x, y in zip(got, want[g]):
-                self.assertAlmostEqual(x, y, places=5)
-        for st in styles:
-            self.assertEqual(st & (rt.CLOSED | rt.FILLED | rt.DOTS), rt.CLOSED | rt.FILLED | rt.DOTS)
-            self.assertFalse(st & rt.HIGHLIGHT)
-        tool.modifier = lambda: ""
-        self.addCleanup(lambda: tool.__dict__.pop("modifier", None))
-        x, y = tool.to_screen(tool.edits[a][2])
-        tool.press_edit(x, y)
-        styles = list(cmds.getAttr(shape + ".styles"))
-        self.assertTrue(styles[0] & rt.HIGHLIGHT and not styles[1] & rt.HIGHLIGHT, "the root touched edged green")
-        tool.leave()
-        self.assertFalse(cmds.objExists(rt.PREVIEW))
-
-    def test_a_ctrl_click_on_a_sealed_cv_takes_it_out_of_the_root_meant_only(self):
-        a, b = self._pair()
-        tool = self._tool()
-        tool.start(self.groom, "edit")
-        keys = {"mod": ""}
-        tool.modifier = lambda: keys["mod"]
-        self.addCleanup(lambda: tool.__dict__.pop("modifier", None))
-        # b first touched (its far CV), then Ctrl+click on the CV it shares with a.
-        x, y = tool.to_screen(tool.edits[b][2])
-        tool.press_edit(x, y)
-        tool.release()
-        tool.edits[a].insert(2, on_sphere(tm.lerp(tool.edits[a][1], tool.edits[a][2], 0.5)))  # (a has 5: room to lose one)
-        tool.edits[b].insert(3, on_sphere(tm.lerp(tool.edits[b][2], tool.edits[b][3], 0.5)))
-        shared = tool.edits[b][0]
-        keys["mod"] = "ctrl"
-        x, y = tool.to_screen(shared)
-        tool.press_edit(x, y)
-        self.assertEqual(len(tool.edits[b]), 4, "taken out of b, the root touched")
-        self.assertEqual(len(tool.edits[a]), 5, "a keeps its own")
-        self.assertLess(nearest(shared, tool.edits[a]), 1e-5)
-        tool.undo_cv()
-        self.assertEqual(len(tool.edits[b]), 5, "Undo CV puts it back")
-        # A root down to 3 CVs keeps them.
-        for _ in range(2):
-            tool.touched = {b}
-            x, y = tool.to_screen(tool.edits[b][-1])
-            tool.press_edit(x, y)
-        self.assertEqual(len(tool.edits[b]), 3)
-        x, y = tool.to_screen(tool.edits[b][-1])
-        tool.press_edit(x, y)
-        self.assertEqual(len(tool.edits[b]), 3)
-        self.assertEqual(tool.finish_edit(), 2)
-        self.assertEqual(len(root_tubes.root_outline(self.groom, b)), 3)
-        self.assertEqual(len(root_tubes.root_outline(self.groom, a)), 5)
-
-    def test_a_cv_never_snaps_onto_its_own_root(self):
-        a, b = self._pair()
-        tool = self._tool()
-        tool.settings["snap"] = True
-        tool.start(self.groom, "edit")
-        tool.modifier = lambda: ""
-        self.addCleanup(lambda: tool.__dict__.pop("modifier", None))
-        # b's far CV dragged to 5 px from its own neighbouring CV (b's 3): it stays where it is put.
-        own = tool.edits[b][3]
-        x, y = tool.to_screen(tool.edits[b][2])
-        tool.press_edit(x, y)
-        tx, ty = tool.to_screen(own)
-        tool.view_point = lambda: (tx + 5.0, ty)
-        self.addCleanup(lambda: tool.__dict__.pop("view_point", None))
-        tool.drag_event()
-        tool.release()
-        self.assertGreater(tm._dist(tool.edits[b][2], own), 1e-3, "not snapped onto its own CV")
-        self.assertEqual(len(tool.drag), 0)
-        # ... and a CV of b dragged near a's free CV snaps onto it (another root).
-        x, y = tool.to_screen(tool.edits[b][2])
-        tool.press_edit(x, y)
-        ax, ay = tool.to_screen(tool.edits[a][2])
-        tool.view_point = lambda: (ax + 4.0, ay)
-        tool.drag_event()
-        self.assertLess(tm._dist(tool.edits[b][2], tool.edits[a][2]), 1e-6)
-
-    def test_leaving_the_tool_while_editing_keeps_the_edits(self):
-        a, _b = self._pair()
-        tool = self._tool()
-        tool.start(self.groom, "edit")
-        c = root_tubes._centroid(tool.edits[a])
-        moved = on_sphere(tm._add(c, tm._mul(tm._sub(tool.edits[a][2], c), 1.3)))
-        tool.edits[a][2] = moved
-        tool.start(self.groom, "select")  # (another mode: the edit finished first)
-        self.assertLess(nearest(moved, root_tubes.root_outline(self.groom, a)), 1e-3)
-        tool.start(self.groom, "edit")
-        moved2 = on_sphere(tm._add(c, tm._mul(tm._sub(tool.edits[a][3], c), 1.3)))
-        tool.edits[a][3] = moved2
-        tool.leave()  # (another tool)
-        self.assertEqual(tool.mode, "place")
-        self.assertLess(nearest(moved2, root_tubes.root_outline(self.groom, a)), 1e-3)
-
-    def test_finish_never_strands_the_edit(self):
-        """A root whose CV was dragged onto its neighbour, and Maya's Undo taking away a root being
-        edited: Finish still finishes, edit mode left."""
-        a, b = self._pair()
-        tool = self._tool()
-        tool.start(self.groom, "edit")
-        tool.edits[a][2] = tool.edits[a][3]  # (two CVs one)
-        cmds.undo()  # Maya's Undo: b (made last) taken away while editing
-        tool.undone()
-        self.assertNotIn(b, tool.edits)
-        self.assertEqual(tool.finish_edit(), 1)
-        self.assertEqual(tool.mode, "place")
-        self.assertEqual(len(root_tubes.root_outline(self.groom, a)), 3)
 
     def test_a_drawn_guide_eases_over_the_scalp_never_through_it(self):
         """A path drawn down over the head, dipping into it (as a stroke on the view's plane does):
@@ -792,6 +459,135 @@ class RootTubes(unittest.TestCase):
         a, b = (self.points(k)[0] for k in kids)
         self.assertAlmostEqual(tm._dist(a, b), 0.1, delta=0.02)  # half the width apart each side
         self.assertTrue(ids)
+
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def uneven(center, radius):
+    """An irregular root outline (no symmetry: it fits its tube shape one way only)."""
+    up = on_sphere(center)
+    a = tm._unit(tm._cross(up, (0.0, 0.0, 1.0)))
+    b = tm._cross(up, a)
+    scale = (1.0, 0.7, 1.25, 0.85, 1.1, 0.6)
+    return [on_sphere(tm._add(up, tm._add(tm._mul(a, radius * s * math.cos(2 * math.pi * k / 6.0 + 0.3)),
+                                          tm._mul(b, radius * s * math.sin(2 * math.pi * k / 6.0 + 0.3)))))
+            for k, s in enumerate(scale)]
+
+
+class MatchesTheFirstMayaVersion(unittest.TestCase):
+    """The core's root tubes (root_tubes.h, what groomlab.root_tubes now calls) against the first
+    version, written in Maya's Python (kept as tests/hosts/maya/root_tubes_reference.py): the same
+    outlines, paths and edits give the same guides, tubes and hierarchies."""
+
+    @classmethod
+    def setUpClass(cls):
+        cmds.loadPlugin(PLUGIN_PATH, quiet=True)
+        sys.path.insert(0, HERE)
+        import root_tubes_reference
+        cls.ref = root_tubes_reference
+
+    def scene(self):
+        cmds.file(new=True, force=True)
+        scalp = cmds.polySphere(radius=1, subdivisionsX=60, subdivisionsY=40, name="head")[0]
+        return groomlab.create_groom(scalp)
+
+    def points(self, groom, guide):
+        return json.loads(cmds.groomLabGuides(groom, tubeFrames=str(guide), evaluated=True))["points"]
+
+    def both(self, work):
+        """`work(module, groom)` run on a groom of its own by each version: (theirs, ours)."""
+        out = []
+        for module in (self.ref, root_tubes):
+            groom = self.scene()
+            out.append((groom, work(module, groom)))
+        return out
+
+    def assert_same_tube(self, a, b, guide_a, guide_b, points=0.01):
+        (ga, ma), (gb, mb) = a, b
+        pa, pb = self.points(ga, guide_a), self.points(gb, guide_b)
+        n = 40
+        da = root_tubes._resample([tuple(p) for p in pa], n)
+        db = root_tubes._resample([tuple(p) for p in pb], n)
+        self.assertLess(max(tm._dist(x, y) for x, y in zip(da, db)), points, "the guide's course")
+        ta, tb = groomlab.get_tube(ga, guide_a), groomlab.get_tube(gb, guide_b)
+        self.assertAlmostEqual(ta["width"][0], tb["width"][0], delta=0.02 * ta["width"][0])
+        self.assertAlmostEqual(ta["width"][-1], tb["width"][-1], delta=0.02 * ta["width"][0])
+        self.assertAlmostEqual(ta["aspect"][0], tb["aspect"][0], delta=0.03)
+        # The tube's root section on its outline, in both.
+        for groom, guide, mod in ((ga, guide_a, self.ref), (gb, guide_b, root_tubes)):
+            outline = mod.root_outline(groom, guide)
+            self.assertLess(max(nearest(q, outline) for q in mod.section_outline(groom, guide)), 0.005)
+        oa, ob = self.ref.root_outline(ga, guide_a), root_tubes.root_outline(gb, guide_b)
+        # (the first version took CVs onto Maya's polygons, the core onto the triangles the hair roots
+        # on: a sphere's quads are not flat, so the two lie up to a facet's sag apart)
+        self.assertLess(max(tm._dist(x, y) for x, y in zip(oa, ob)), 5e-3, "the CVs kept")
+
+    def test_a_straight_root_tube(self):
+        outline = uneven((0.1, 1.0, 0.05), 0.12)
+        a, b = self.both(lambda m, g: m.make_root_tube(g, outline, length=0.8, segments=10, taper=0.4))
+        self.assert_same_tube(a, b, a[1], b[1])
+
+    def test_a_drawn_root_tube(self):
+        outline = uneven((0.0, 1.0, 0.0), 0.1)
+        root = on_sphere((0.0, 1.0, 0.0))
+        path = [root]
+        for k in range(1, 50):  # a curl rising off the head, drawn a little shakily
+            t = k / 49.0
+            path.append((0.25 * math.sin(6.0 * t), 1.05 + 0.6 * t, 0.25 * (1.0 - math.cos(6.0 * t)) + 0.002 * (k % 3)))
+        a, b = self.both(lambda m, g: m.make_root_tube(g, outline, path=path, density=1.5))
+        self.assert_same_tube(a, b, a[1], b[1], points=0.02)
+
+    def test_an_edited_root(self):
+        outline = uneven((0.0, 1.0, 0.1), 0.1)
+
+        def work(m, g):
+            guide = m.make_root_tube(g, outline, length=0.6)
+            cvs = m.root_outline(g, guide)
+            c = m._centroid(cvs)
+            cvs[2] = on_sphere(tm._add(c, tm._mul(tm._sub(cvs[2], c), 1.4)))
+            m.edit_root_tube(g, guide, cvs)
+            return guide
+        a, b = self.both(work)
+        self.assert_same_tube(a, b, a[1], b[1])
+
+    def test_outlines_drawn_with_0_49_are_kept(self):
+        """A root tube drawn by the first version (0.49.0: its CVs kept on the scene, not with its
+        guide) keeps its CVs: read into its guide once, the scene's attribute dropped."""
+        groom = self.scene()
+        outline = uneven((0.0, 1.0, 0.0), 0.12)
+        guide = self.ref.make_root_tube(groom, outline, length=0.6)
+        drawn = self.ref.root_outline(groom, guide)
+        self.assertTrue(cmds.attributeQuery("groomLabRootOutlines", node=groom, exists=True))
+        kept = root_tubes.root_outline(groom, guide)
+        self.assertLess(max(tm._dist(a, b) for a, b in zip(drawn, kept)), 5e-3, "the CVs as drawn")
+        self.assertFalse(cmds.attributeQuery("groomLabRootOutlines", node=groom, exists=True))
+        data = groomlab.get_hierarchy(groom)
+        self.assertTrue(next(g for g in data["guides"] if int(g["id"]) == int(guide)).get("rootOutline"))
+
+    def test_a_hierarchy_split_duplicated_and_trimmed(self):
+        outline = uneven((0.0, 1.0, 0.0), 0.15)
+
+        def work(m, g):
+            guide = m.make_root_tube(g, outline, length=0.7)
+            m.add_tube_level(g)
+            m.add_tube_level(g)
+            copy = m.duplicate_root_tube(g, guide, on_sphere((0.45, 0.85, 0.15)))
+            data = groomlab.get_hierarchy(g)
+            leaf = max(int(x["id"]) for x in data["guides"])
+            m.remove_tube_level(g, m.ROOT_GROUP, [leaf])
+            return guide, copy, m.tube_levels(g, picked=m.ROOT_GROUP)["levels"], len(groomlab.get_hierarchy(g)["guides"])
+        a, b = self.both(work)
+        (ga, (sa, ca, la, na)), (gb, (sb, cb, lb, nb)) = a, b
+        self.assertEqual(la, lb, "the levels")
+        self.assertEqual(na, nb, "the guides left")
+        self.assert_same_tube((ga, None), (gb, None), sa, sb)
+        # The copy: its outline the source's shape set down there, its tube on it, in both.
+        oa, ob = self.ref.root_outline(ga, ca), root_tubes.root_outline(gb, cb)
+        self.assertLess(max(tm._dist(x, y) for x, y in zip(oa, ob)), 5e-3, "the copy's CVs")
+        for groom, guide, mod in ((ga, ca, self.ref), (gb, cb, root_tubes)):
+            outline = mod.root_outline(groom, guide)
+            self.assertLess(max(nearest(q, outline) for q in mod.section_outline(groom, guide)), 0.005)
 
 
 if __name__ == "__main__":

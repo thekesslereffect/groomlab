@@ -757,6 +757,7 @@ private:
     void frameAll();
     void undo();
     void redo();
+    void rootsFollowHistory();  // the Tube card's root mode after an undo or redo
     void guidesEdited();  // a stroke committed or the guides panel edited: shown, undoable
     void graphEdited();   // the graph view or a param panel edited the graph: shown, undoable
     // The offscreen view the headless benchmarks draw into (made on first use at `size`, fed
@@ -935,6 +936,7 @@ private:
     QTimer* lookStore_ = nullptr;  // an unlocked look-through's moves stored once they stop
     bool lookdevWanted_ = true;  // the Lookdev box: the colored modes draw lines while they are on
     bool hairVisible_ = true;   // the Groom Tools' eye: the hair
+    bool rootsHide_ = false;    // Edit roots hides the guides (redisplay)
     QMenu* presetsMenu_ = nullptr;
     QAction* undo_ = nullptr;
     QAction* redo_ = nullptr;

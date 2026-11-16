@@ -35,6 +35,7 @@
 #include "groomlab/display.h"
 #include "groomlab/guide_hierarchy.h"
 #include "groomlab/guide_set.h"
+#include "groomlab/root_tubes.h"
 #include "groomlab/guide_selection.h"
 #include "maya_inputs.h"
 
@@ -91,6 +92,11 @@ const char* kFromNegative[] = {"-fn", "-fromNegative"};
 // -symmetry (x, y, z or topology; default x) and -center; a side, -group: only that root group's.
 const char* kMirrorShapes[] = {"-msh", "-mirrorShapes"};
 const char* kSymmetry[] = {"-sym", "-symmetry"};
+// Root-first tubes and the tube hierarchy (root_tubes.h): one JSON request {"op", ...}. Edits
+// ("make", "edit", "keepOutline", "duplicate", "delete", "addLevel", "removeLevel") are one undo step; queries
+// ("outline", "sectionOutline", "center", "rootTubes", "levels", "levelVisibility",
+// "footprintError", "carry", "sealed", "surface") change nothing. Returns JSON.
+const char* kRootTubes[] = {"-rtb", "-rootTubes"};
 const char* kSetAttribute[] = {"-sat", "-setAttribute"};
 const char* kValue[] = {"-v", "-value"};
 const char* kListAttributes[] = {"-lat", "-listAttributes"};
@@ -314,6 +320,7 @@ MSyntax GuidesCmd::newSyntax() {
     s.addFlag(kFromNegative[0], kFromNegative[1]);
     s.addFlag(kMirrorShapes[0], kMirrorShapes[1], MSyntax::kString);
     s.addFlag(kSymmetry[0], kSymmetry[1], MSyntax::kString);
+    s.addFlag(kRootTubes[0], kRootTubes[1], MSyntax::kString);
     s.addFlag(kSetAttribute[0], kSetAttribute[1], MSyntax::kString);
     s.addFlag(kValue[0], kValue[1], MSyntax::kDouble);
     s.addFlag(kListAttributes[0], kListAttributes[1]);
@@ -366,7 +373,7 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                             int(db.isFlagSet(kMirrorSelection[0])) + int(db.isFlagSet(kListSelected[0])) +
                             int(db.isFlagSet(kClearSelection[0])) + int(db.isFlagSet(kReparent[0])) +
                             int(db.isFlagSet(kPromote[0])) + int(db.isFlagSet(kDemote[0])) + int(db.isFlagSet(kMirror[0])) +
-                            int(db.isFlagSet(kMirrorShapes[0])) +
+                            int(db.isFlagSet(kMirrorShapes[0])) + int(db.isFlagSet(kRootTubes[0])) +
                             int(db.isFlagSet(kSetAttribute[0])) + int(db.isFlagSet(kListAttributes[0])) +
                             int(db.isFlagSet(kRemoveAttribute[0])) + int(db.isFlagSet(kRenameAttribute[0])) +
                             int(db.isFlagSet(kInvertAttribute[0])) +
@@ -853,6 +860,113 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                 MStringArray ids;
                 for (const GuideId id : created) ids.append(std::to_string(id).c_str());
                 setResult(ids);
+            } else if (db.isFlagSet(kRootTubes[0])) {
+                nlohmann::json request;
+                try {
+                    request = nlohmann::json::parse(flagString(db, kRootTubes[0], "{}").asChar());
+                } catch (const std::exception& e) {
+                    return fail(kName, MString("-rootTubes takes a JSON request: ") + e.what());
+                }
+                if (!scalp) return fail(kName, "the groom has no scalp to root a tube on");
+                const std::string op = request.value("op", std::string());
+                auto vec = [](const nlohmann::json& j) { return Vec3f{j.at(0).get<float>(), j.at(1).get<float>(), j.at(2).get<float>()}; };
+                auto vecs = [&](const char* key) {
+                    std::vector<Vec3f> out;
+                    if (request.contains(key) && request[key].is_array()) {
+                        for (const nlohmann::json& p : request[key]) out.push_back(vec(p));
+                    }
+                    return out;
+                };
+                auto ids = [&](const char* key) {
+                    std::vector<GuideId> out;
+                    if (request.contains(key) && request[key].is_array()) {
+                        for (const nlohmann::json& g : request[key]) out.push_back(g.get<GuideId>());
+                    }
+                    return out;
+                };
+                auto points = [](const std::vector<Vec3f>& pts) {
+                    nlohmann::json out = nlohmann::json::array();
+                    for (const Vec3f& p : pts) out.push_back({p.x, p.y, p.z});
+                    return out;
+                };
+                auto answer = [&](const nlohmann::json& j) {
+                    setResult(MString(j.dump().c_str()));
+                    return MS::kSuccess;
+                };
+                const GuideId guide = request.value("guide", GuideId{kNoGuide});
+                try {
+                    // Queries.
+                    if (op == "outline") return answer(points(rootTubeOutline(*h, *scalp, guide)));
+                    if (op == "sectionOutline") return answer(points(rootTubeSectionOutline(*h, *scalp, guide, request.value("onScalp", true))));
+                    if (op == "center") {
+                        const ScalpPointNormal c = rootTubeCenter(*h, *scalp, guide);
+                        return answer({points({c.point})[0], points({c.normal})[0]});
+                    }
+                    if (op == "rootTubes") return answer(rootTubesOf(*h, ids("guides")));
+                    if (op == "levels") {
+                        const TubeLevels t = tubeLevels(*h, ids("guides"), request.value("picked", std::string()));
+                        return answer({{"base", t.base.empty() ? nlohmann::json() : nlohmann::json(t.base)}, {"levels", t.levels}});
+                    }
+                    if (op == "levelVisibility") {
+                        return answer(tubeLevelVisibility(*h, request.value("base", std::string()), request.value("level", 1)));
+                    }
+                    if (op == "footprintError") return answer(rootFootprintError(*h, *scalp, guide));
+                    if (op == "carry") {
+                        std::set<int> held;
+                        if (request.contains("held")) held = request["held"].get<std::set<int>>();
+                        return answer(points(carryOutline(*scalp, vecs("outline"), vec(request.at("start")), vec(request.at("to")), held)));
+                    }
+                    if (op == "sealed") {
+                        std::vector<std::vector<Vec3f>> others;
+                        for (const nlohmann::json& o : request.value("others", nlohmann::json::array())) {
+                            std::vector<Vec3f> cvs;
+                            for (const nlohmann::json& p : o) cvs.push_back(vec(p));
+                            others.push_back(std::move(cvs));
+                        }
+                        return answer(sealedCvs(vecs("outline"), others, request.value("tolerance", -1.0f)));
+                    }
+                    if (op == "surface") {  // each point's nearest point on the scalp and the normal there
+                        nlohmann::json out = nlohmann::json::array();
+                        for (const Vec3f& p : vecs("points")) {
+                            const ScalpPointNormal q = scalpPointNormal(*scalp, p);
+                            out.push_back({{q.point.x, q.point.y, q.point.z}, {q.normal.x, q.normal.y, q.normal.z}});
+                        }
+                        return answer(out);
+                    }
+                    // Edits: stored below as one undo step.
+                    nlohmann::json result;
+                    if (op == "make") {
+                        RootTubeOptions o;
+                        o.length = request.value("length", o.length);
+                        o.segments = request.value("segments", o.segments);
+                        o.taper = request.value("taper", o.taper);
+                        o.density = request.value("density", o.density);
+                        o.group = request.value("group", std::string());
+                        result = makeRootTube(*h, *scalp, vecs("outline"), vecs("path"), o);
+                    } else if (op == "edit") {
+                        editRootTube(*h, *scalp, guide, vecs("outline"));
+                        result = guide;
+                    } else if (op == "keepOutline") {
+                        keepRootTubeOutline(*h, *scalp, guide, vecs("outline"));
+                        result = guide;
+                    } else if (op == "duplicate") {
+                        Vec3f start;
+                        const bool given = request.contains("start") && !request["start"].is_null();
+                        if (given) start = vec(request["start"]);
+                        result = duplicateRootTube(*h, *scalp, guide, vec(request.at("to")), given ? &start : nullptr);
+                    } else if (op == "delete") {
+                        result = deleteRootTubes(*h, *scalp, ids("guides"));
+                    } else if (op == "addLevel") {
+                        result = addTubeLevel(*h, scalp.get(), ids("guides"), request.value("picked", std::string()));
+                    } else if (op == "removeLevel") {
+                        result = removeTubeLevel(*h, scalp.get(), request.value("base", std::string()), ids("guides"));
+                    } else {
+                        return fail(kName, ("-rootTubes: no op named '" + op + "'").c_str());
+                    }
+                    setResult(MString(result.dump().c_str()));
+                } catch (const std::exception& e) {
+                    return fail(kName, e.what());
+                }
             } else if (db.isFlagSet(kMirrorShapes[0])) {
                 const std::string from = flagString(db, kMirrorShapes[0], "selected").asChar();
                 if (from != "selected" && from != "positive" && from != "negative") {

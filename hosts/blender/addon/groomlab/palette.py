@@ -220,6 +220,18 @@ def block(layout, title, actions=None, titled=True):
     return col, head
 
 
+def fold_block(layout, title, owner, prop):
+    """A block that folds (Maya's widgets.Block, its title clicked): (column or None when folded,
+    header row). `owner.prop`: True folded."""
+    layout.separator(type="LINE")
+    col = layout.column()
+    head = col.row(align=True)
+    folded = bool(getattr(owner, prop))
+    look(head, "tray").prop(owner, prop, text=title, icon="RIGHTARROW" if folded else "DOWNARROW_HLT", emboss=False,
+                            invert_checkbox=False)
+    return (None if folded else col), head
+
+
 def section_header(layout, title, count=None):
     """A list's header (Guide groups, Maps, Layers): its name and how many; the row for its icons.
     In the window (the section on its card) the name as the card's title, the count beside it."""
@@ -692,13 +704,66 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
             row.label(text="%d selected" % t.selected_count)
             row.operator("groomlab.guides_edit", text="All").action = "SELECT_ALL"
             row.operator("groomlab.guides_edit", text="None").action = "CLEAR"
-        if "tubeChannel" in uses:  # Tube: the profile and the selected guides
+        if "tubeChannel" in uses:  # Tube: its root tubes, its hierarchy, the profile and the selected guides
+            self.draw_roots(card, context, t)
+            self.draw_levels(card, context, t)
             self.draw_profile(card, context, t)
         if "erases" in uses:
             col, _ = block(card, label("erases", "Erases"))
             row = col.row(align=True)
             for p in ("erase_guides", "erase_parts", "erase_flow"):
                 row.prop(t, p, toggle=True)
+
+    def draw_roots(self, card, context, t):
+        """Tube roots (Maya's card): Draw root, Edit roots (Finish edit while editing), Select root;
+        Undo CV, Delete, Duplicate; Snap, Draw guide before extrude and the new tubes' settings."""
+        col, _head = fold_block(card, "Tube roots", t, "fold_roots")
+        if col is None:
+            return
+        mode = t.root_mode
+        row = col.row(align=True)
+        row.operator("groomlab.root_tube", text="Draw root", depress=mode in ("place", "draw")).action = "DRAW"
+        row.operator("groomlab.root_tube", text="Finish edit" if mode == "edit" else "Edit roots",
+                     depress=mode == "edit").action = "EDIT"
+        row.operator("groomlab.root_tube", text="Select root", depress=mode in ("select", "duplicate")).action = "SELECT"
+        row = col.row(align=True)
+        sub = row.row(align=True)
+        sub.enabled = mode in ("place", "draw", "edit")
+        sub.operator("groomlab.root_tube", text="Undo CV").action = "UNDO_CV"
+        sub = row.row(align=True)
+        sub.enabled = mode in ("select", "duplicate") and t.root_selected > 0
+        sub.operator("groomlab.root_tube", text="Delete").action = "DELETE"
+        sub.operator("groomlab.root_tube", text="Duplicate", depress=mode == "duplicate").action = "DUPLICATE"
+        col.prop(t, "root_snap")
+        col.prop(t, "root_draw_path")
+        sliders = col.column(align=True)
+        if t.root_draw_path:
+            sliders.prop(t, "root_density", slider=True)
+        else:
+            sliders.prop(t, "root_length", slider=True)
+            sliders.prop(t, "root_segments", slider=True)
+        sliders.prop(t, "root_taper", slider=True)
+
+    def draw_levels(self, card, context, t):
+        """Tube hierarchy: Add and Remove, the base group, a button a level (1, the base, always)."""
+        col, head = fold_block(card, "Tube hierarchy", t, "fold_levels")
+        if col is None:
+            return
+        levels = [x for x in t.tube_levels.split(",") if x]
+        row = col.row(align=True)
+        sub = row.row(align=True)
+        sub.enabled = bool(t.tube_base) and len(levels) < 9
+        sub.operator("groomlab.tube_level", text="Add").action = "ADD"
+        sub = row.row(align=True)
+        sub.enabled = len(levels) > 1
+        sub.operator("groomlab.tube_level", text="Remove").action = "REMOVE"
+        col.label(text="Base: %s" % t.tube_base if t.tube_base else "No guides yet.")
+        row = col.row(align=True)
+        row.alignment = "LEFT"
+        for k in range(max(len(levels), 1)):
+            op = row.operator("groomlab.tube_level", text=str(k + 1), depress=k + 1 == t.tube_level)
+            op.action = "SHOW"
+            op.level = k + 1
 
     def draw_profile(self, card, context, t):
         """Profile (the shape picked, Apply, the library with its New / Duplicate / Rename / Delete:
@@ -714,6 +779,8 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
         if t.tool == "shape":  # the brush's tubes in the viewport (Maya's Tube card switches)
             col.prop(t, "tube_shaded")
             col.prop(t, "tube_wireframe")
+            col.prop(t, "tube_colors")
+            col.prop(t, "tubes_always")
         # Root, Mid and Tip (Maya's rows): each profile's picker and Apply (the shape and its
         # Length to every targeted guide), its Length under it.
         for profile, label in (("root", "Root"), ("mid", "Mid"), ("tip", "Tip")):

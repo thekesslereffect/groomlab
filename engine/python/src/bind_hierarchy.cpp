@@ -11,6 +11,7 @@
 #include "groomlab/correctives.h"
 #include "groomlab/guide_hierarchy.h"
 #include "groomlab/guide_selection.h"
+#include "groomlab/root_tubes.h"
 #include "groomlab/transfer.h"
 #include "groomlab/transfer_markers_edit.h"
 
@@ -944,6 +945,99 @@ void bindHierarchy(py::module_& m) {
         .def("record", &Correctives::record, py::arg("name"), py::arg("posed"), py::arg("sculpted"), py::arg("seconds"),
              py::arg("scalp") = nullptr,
              "Adds a sculpt (sculpted vs posed) to layer `name`, created at `seconds` if missing; returns the guides that got offsets.");
+
+    // ---- Root-first tubes and the tube hierarchy (root_tubes.h) ----------------------------------
+    m.def("outline_centroid", &outlineCentroid, py::arg("outline"), "A closed outline's area centroid (in its Newell plane).");
+    m.def("resample_polyline", &resamplePolyline, py::arg("points"), py::arg("count"), "`count` points evenly along a polyline.");
+    m.def("polyline_turning", &polylineTurning, py::arg("points"), "How far (radians) a polyline turns, all told.");
+    m.def("lean_off", &leanOff, py::arg("direction"), py::arg("normal"), "How far (radians) a direction leans off a normal.");
+    m.def("root_path_spans", &rootPathSpans, py::arg("points"), py::arg("size"), py::arg("density") = 1.0f,
+          "How many spans a drawn root tube guide gets.");
+    m.def("root_tube_guide_path", &rootTubeGuidePath, py::arg("root"), py::arg("normal"), py::arg("path"), py::arg("length"),
+          py::arg("segments"), py::arg("size"), py::arg("density") = 1.0f, py::arg("scalp") = nullptr,
+          "A root tube's guide points: along a drawn path (smoothed, evenly spaced, clear of the scalp when given) or "
+          "straight off the scalp.");
+    m.def(
+        "scalp_point_normal",
+        [](const ScalpMesh& scalp, const Vec3f& p) {
+            const ScalpPointNormal q = scalpPointNormal(scalp, p);
+            return py::make_tuple(q.point, q.normal);
+        },
+        py::arg("scalp"), py::arg("point"), "The scalp's nearest point and its smooth normal there: (point, normal).");
+    m.def(
+        "make_root_tube",
+        [](GuideHierarchy& h, const ScalpMesh& scalp, const std::vector<Vec3f>& outline, const std::vector<Vec3f>& path, float length,
+           int segments, float taper, float density, const std::string& group) {
+            RootTubeOptions o;
+            o.length = length;
+            o.segments = segments;
+            o.taper = taper;
+            o.density = density;
+            o.group = group;
+            return makeRootTube(h, scalp, outline, path, o);
+        },
+        py::arg("hierarchy"), py::arg("scalp"), py::arg("outline"), py::arg("path") = std::vector<Vec3f>{}, py::arg("length") = 1.0f,
+        py::arg("segments") = 12, py::arg("taper") = 0.5f, py::arg("density") = 1.0f, py::arg("group") = std::string(),
+        "A root tube grown from its root's outline (and a drawn path); returns its guide's ID.");
+    m.def("edit_root_tube", &editRootTube, py::arg("hierarchy"), py::arg("scalp"), py::arg("guide"), py::arg("outline"),
+          "A root tube given a new root outline.");
+    m.def("root_tubes_of", &rootTubesOf, py::arg("hierarchy"), py::arg("guides") = std::vector<GuideId>{},
+          "The root tubes' guide IDs (of `guides`: those among them or their root tubes).");
+    m.def("root_tube_outline", &rootTubeOutline, py::arg("hierarchy"), py::arg("scalp"), py::arg("guide"),
+          "A root tube's CVs on the scalp, as drawn or last edited.");
+    m.def("root_tube_section_outline", &rootTubeSectionOutline, py::arg("hierarchy"), py::arg("scalp"), py::arg("guide"),
+          py::arg("on_scalp") = true, "A root tube's root footprint: its shape placed in its root section.");
+    m.def("carry_outline", &carryOutline, py::arg("scalp"), py::arg("outline"), py::arg("start"), py::arg("to"),
+          py::arg("held") = std::set<int>{}, "An outline carried over the scalp from `start` to `to`, `held` CVs kept.");
+    m.def("sealed_cvs", &sealedCvs, py::arg("outline"), py::arg("others"), py::arg("tolerance") = -1.0f,
+          "The indices of an outline's CVs lying on one of `others`.");
+    m.def(
+        "snap_root_cv",
+        [](const Vec3f& p, const std::vector<std::vector<Vec3f>>& outlines, const py::function& toScreen, float pixels) {
+            Vec3f at = p;
+            const RootSnap kind = snapRootCv(
+                at, outlines,
+                [&](const Vec3f& q) {
+                    const py::tuple xy = toScreen(py::make_tuple(q.x, q.y, q.z));
+                    return std::array<float, 2>{xy[0].cast<float>(), xy[1].cast<float>()};
+                },
+                pixels);
+            py::object how = py::none();
+            if (kind == RootSnap::Cv) how = py::str("cv");
+            if (kind == RootSnap::Edge) how = py::str("edge");
+            return py::make_tuple(at, how);
+        },
+        py::arg("point"), py::arg("outlines"), py::arg("to_screen"), py::arg("pixels") = kRootSnapPixels,
+        "A point snapped onto the nearest outline's CV, else edge, within `pixels` on screen: (point, 'cv' / 'edge' / None).");
+    m.def(
+        "duplicate_root_tube",
+        [](GuideHierarchy& h, const ScalpMesh& scalp, GuideId guide, const Vec3f& to, std::optional<Vec3f> start) {
+            return duplicateRootTube(h, scalp, guide, to, start ? &*start : nullptr);
+        },
+        py::arg("hierarchy"), py::arg("scalp"), py::arg("guide"), py::arg("to"), py::arg("start") = py::none(),
+        "A copy of a root tube and its tube hierarchy set down at `to`; returns its guide's ID.");
+    m.def("delete_root_tubes", &deleteRootTubes, py::arg("hierarchy"), py::arg("scalp"), py::arg("guides"),
+          "Root tubes removed with their tube hierarchy; returns how many guides went.");
+    m.def("root_footprint_error", &rootFootprintError, py::arg("hierarchy"), py::arg("scalp"), py::arg("guide"),
+          "How far a root tube's footprint lies off its kept outline (a share of its size).");
+    m.def("tube_level_group", &tubeLevelGroup, py::arg("base"), py::arg("level"), "Level `level`'s group in `base`'s hierarchy.");
+    m.def(
+        "tube_levels",
+        [](const GuideHierarchy& h, const std::vector<GuideId>& guides, const std::string& picked) {
+            const TubeLevels t = tubeLevels(h, guides, picked);
+            py::dict d;
+            d["base"] = t.base.empty() ? py::object(py::none()) : py::object(py::str(t.base));
+            d["levels"] = t.levels;
+            return d;
+        },
+        py::arg("hierarchy"), py::arg("guides") = std::vector<GuideId>{}, py::arg("picked") = std::string(),
+        "The tube hierarchy's base group and each level's group: {'base', 'levels'}.");
+    m.def("add_tube_level", &addTubeLevel, py::arg("hierarchy"), py::arg("scalp"), py::arg("guides") = std::vector<GuideId>{},
+          py::arg("picked") = std::string(), "Splits the leaf tubes in two (Add); returns how many were split.");
+    m.def("remove_tube_level", &removeTubeLevel, py::arg("hierarchy"), py::arg("scalp"), py::arg("base"),
+          py::arg("guides") = std::vector<GuideId>{}, "Undoes a split (Remove); returns how many guides went (0: a whole level).");
+    m.def("tube_level_visibility", &tubeLevelVisibility, py::arg("hierarchy"), py::arg("base"), py::arg("level"),
+          "Each level's group and whether it shows with level `level` shown.");
 }
 
 }  // namespace groomlab::py_bind
