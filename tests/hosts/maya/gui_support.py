@@ -52,7 +52,7 @@ SUITES = ("viewport", "brush", "select", "roots", "reference", "graph_editor", "
 # presets' contact sheets (gui_presets.py, ctest maya.preset_sheet), and the viewport benchmark
 # (gui_bench.py, ctest maya.viewport_bench), and the viewport's pictures before and after a display change
 # (gui_pictures.py).
-OPT_IN_SUITES = ("presets", "bench", "pictures", "hair")
+OPT_IN_SUITES = ("presets", "bench", "pictures", "hair", "deformers")
 
 
 class _Session(object):
