@@ -1159,6 +1159,77 @@ class ToolsTest(unittest.TestCase):
         self.assertTrue(hcall(head, "tool_get")["settings"]["paintWholeFaces"])
         t.paint_whole_faces = False
 
+    def test_9_root_tubes_and_the_tube_hierarchy(self):
+        """The Tube card's Tube roots (the core's root tool, run by the modal tool as Maya's context
+        runs it) and Tube hierarchy blocks."""
+        import math
+        head = self.head
+        bpy.context.view_layer.objects.active = head
+        for o in bpy.context.view_layer.objects:
+            o.select_set(o == head)
+        bpy.context.scene.groomlab.groom = head  # (test_8 made another groom the scene's)
+        cam = self.cam
+        t = bpy.context.scene.groomlab_tools
+        ts = self.session()
+        self.assertEqual(bpy.ops.groomlab.tool(tool="shape"), {"FINISHED"})
+        t.root_draw_path = False  # the tube straight off the scalp on the close
+        tools.refresh_info(head)
+        guides = t.guide_count
+        self.assertEqual(bpy.ops.groomlab.root_tube(action="DRAW"), {"FINISHED"})
+        self.assertEqual(t.root_mode, "place")
+        self.assertEqual(hcall(head, "tool_get")["tool"], "roots")
+        # Five clicks round a crown point, then the first again: the tube made, one undo step.
+        cx, cy = cam.pixel(th.crown_points(5)[2])
+        ring = [(cx + 18.0 * math.cos(2.0 * math.pi * k / 5), cy + 18.0 * math.sin(2.0 * math.pi * k / 5)) for k in range(5)]
+        for k, (x, y) in enumerate(ring):
+            self.click(ts, x, y)
+            if k == 1:
+                names = [e[0] for e in display.draw_list(head)]
+                self.assertIn("roots.dots", names)  # the CVs placed, drawn as dots
+                self.assertIn("roots.highlighted", names)  # the outline being drawn
+        self.assertEqual(t.root_cvs, 5)
+        depth = hcall(head, "undo_state")["undoDepth"]
+        self.click(ts, ring[0][0], ring[0][1])
+        self.assertEqual(t.guide_count, guides + 1)  # (made on the press: stroke_end counts it, an undo step)
+        self.assertEqual(t.root_cvs, 0)
+        self.assertEqual(t.root_mode, "place")
+        self.assertEqual(hcall(head, "undo_state")["undoDepth"], depth + 1)
+        # Ctrl+Z: the tube taken back, its outline back to close again; redo puts it back.
+        self.send(ts, Event("Z", "PRESS", cx, cy, ctrl=True))
+        self.assertEqual(t.guide_count, guides)
+        self.assertEqual(t.root_cvs, 5)
+        self.send(ts, Event("Z", "PRESS", cx, cy, ctrl=True, shift=True))
+        self.assertEqual(t.guide_count, guides + 1)
+        self.assertEqual(t.root_cvs, 0)
+        # Select root: a click on its middle picks it; Delete takes it away.
+        self.assertEqual(bpy.ops.groomlab.root_tube(action="SELECT"), {"FINISHED"})
+        self.assertEqual(t.root_mode, "select")
+        self.click(ts, cx, cy)
+        self.assertEqual(t.root_selected, 1)
+        self.assertEqual(bpy.ops.groomlab.root_tube(action="DELETE"), {"FINISHED"})
+        self.assertEqual(t.guide_count, guides)
+        # Esc leaves the root mode for the Tube brush.
+        self.assertEqual(self.send(ts, Event("ESC", "PRESS", cx, cy)), {"RUNNING_MODAL"})
+        self.assertEqual(t.root_mode, "")
+        self.assertEqual(t.tool, "shape")
+        self.assertEqual(hcall(head, "tool_get")["tool"], "shape")
+        # The tubes in their colors while the Tube tool is up (Colors on by default).
+        self.assertTrue(display.settings_for(head, bpy.context.scene)["tubeColors"])
+        # Tube hierarchy: Add splits the base group's tubes a level deeper, shown; Remove takes it back.
+        tools.refresh_info(head)
+        self.assertTrue(t.tube_base)
+        self.assertEqual(len(t.tube_levels.split(",")), 1)
+        self.assertEqual(bpy.ops.groomlab.tube_level(action="ADD"), {"FINISHED"})
+        self.assertEqual(len(t.tube_levels.split(",")), 2)
+        self.assertEqual(t.tube_level, 2)
+        self.assertGreater(t.guide_count, guides)
+        self.assertEqual(bpy.ops.groomlab.tube_level(action="SHOW", level=1), {"FINISHED"})
+        self.assertEqual(t.tube_level, 1)
+        self.assertEqual(bpy.ops.groomlab.tube_level(action="REMOVE"), {"FINISHED"})
+        self.assertEqual(len(t.tube_levels.split(",")), 1)
+        self.assertEqual(t.guide_count, guides)
+        bpy.ops.groomlab.tool(tool="comb")
+
 
 if __name__ == "__main__":
     bu.run(ToolsTest)

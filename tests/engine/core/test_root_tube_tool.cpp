@@ -368,6 +368,36 @@ TEST(RootTubeTool, TheBrushToolHandsItsEventsOn) {
     EXPECT_EQ(head.roots().size(), 1u) << brush.roots().message();
 }
 
+// The overlay as display geometry (Blender's and the app's): the CVs placed as dots, the outline
+// so far as edges; a closed root's fill with its middle as a marker in Select.
+TEST(RootTubeTool, TheOverlayAsGeometryForBlenderAndTheApp) {
+    Head head;
+    const ToolView view = topView();
+    RootTubeTool tool;
+    tool.start(*head.host, RootTubeTool::Mode::Place);
+    const std::vector<Vec3f> cvs = ring({0, 1, 0}, 0.1f, 4);
+    for (std::size_t k = 0; k < 3; ++k) click(tool, head, view, cvs[k]);
+    RootOverlayGeometry g = rootOverlayGeometry(tool.overlay(*head.host));
+    EXPECT_EQ(g.dots.positions.size(), 9u) << "three CVs";
+    EXPECT_TRUE(g.dots.points);
+    EXPECT_EQ(g.dots.indices.size(), 3u);
+    EXPECT_EQ(g.dots.colors.size(), 12u);
+    const DisplayGeometry& outline = g.edges.indices.empty() ? g.highlighted : g.edges;  // (the one drawn: highlighted)
+    EXPECT_FALSE(outline.indices.empty());
+    EXPECT_EQ(outline.indices.size() % 2, 0u) << "line pairs";
+    tool.leave(*head.host);
+    draw(tool, head, view, cvs);
+    tool.start(*head.host, RootTubeTool::Mode::Select);
+    g = rootOverlayGeometry(tool.overlay(*head.host));
+    EXPECT_EQ(g.markers.indices.size(), 1u) << "the root's middle";
+    EXPECT_FALSE(g.fills.indices.empty());
+    EXPECT_TRUE(g.fills.triangles);
+    EXPECT_EQ(g.fills.indices.size() % 3, 0u);
+    EXPECT_FLOAT_EQ(g.fills.colors[3], RootTubeTool::kFillOpacity);
+    tool.leave(*head.host);
+    EXPECT_TRUE(rootOverlayGeometry(tool.overlay(*head.host)).empty());
+}
+
 // The Tube card's Colors, as every host draws them (buildTubeDisplay): each tube in its root tube's
 // color on the wires, or on the surfaces (the wires gray) with Shaded; the selected ones apart.
 TEST(RootTubeTool, TheTubesTakeTheirRootTubesColorsInEveryHost) {

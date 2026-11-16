@@ -1327,6 +1327,46 @@ TubeDisplay buildTubeDisplay(const GuideHierarchy& hierarchy, const TubeDisplayO
     return out;
 }
 
+RootOverlayGeometry rootOverlayGeometry(const std::vector<RootTubeTool::Item>& items) {
+    using Item = RootTubeTool::Item;
+    RootOverlayGeometry out;
+    out.fills.triangles = true;
+    for (DisplayGeometry* g : {&out.dots, &out.dimDots, &out.markers}) g->points = true;
+    for (DisplayGeometry* g : {&out.fills, &out.edges, &out.highlighted, &out.dots, &out.dimDots, &out.markers}) g->overlay = true;
+    auto vertex = [](DisplayGeometry& g, const Vec3f& p, const std::array<float, 3>& c, float a) {
+        g.positions.insert(g.positions.end(), {p.x, p.y, p.z});
+        g.colors.insert(g.colors.end(), {c[0], c[1], c[2], a});
+        return static_cast<std::uint32_t>(g.positions.size() / 3 - 1);
+    };
+    for (const Item& item : items) {
+        if (item.style & RootTubeTool::Filled) {
+            for (const Vec3f& p : item.triangles) out.fills.indices.push_back(vertex(out.fills, p, item.color, RootTubeTool::kFillOpacity));
+        }
+        if (item.style & RootTubeTool::Marker) {
+            if (!item.edge.empty()) out.markers.indices.push_back(vertex(out.markers, item.edge.front(), item.color, 1.0f));
+        } else if (item.edge.size() >= 2) {
+            const bool high = (item.style & RootTubeTool::Highlight) != 0;
+            const std::array<float, 3> c = (item.style & RootTubeTool::Stroke) ? item.color : RootTubeTool::edgeColor(item);
+            DisplayGeometry& g = high ? out.highlighted : out.edges;
+            const bool closed = (item.style & RootTubeTool::Closed) && item.edge.size() >= 3;
+            const std::uint32_t first = vertex(g, item.edge.front(), c, 1.0f);
+            for (std::size_t k = 1; k < item.edge.size(); ++k) {
+                const std::uint32_t v = vertex(g, item.edge[k], c, 1.0f);
+                g.indices.insert(g.indices.end(), {v - 1, v});
+            }
+            if (closed) g.indices.insert(g.indices.end(), {static_cast<std::uint32_t>(g.positions.size() / 3 - 1), first});
+        }
+        if (item.style & RootTubeTool::Dots) {
+            const bool dim = (item.style & RootTubeTool::Dim) != 0;
+            std::array<float, 3> c = RootTubeTool::kDotColor;
+            if (dim) c = {c[0] * 0.45f, c[1] * 0.45f, c[2] * 0.45f};
+            DisplayGeometry& g = dim ? out.dimDots : out.dots;
+            for (const Vec3f& p : item.dots) g.indices.push_back(vertex(g, p, c, 1.0f));
+        }
+    }
+    return out;
+}
+
 // ---- Instances --------------------------------------------------------------------------------
 
 void appendInstances(DisplayGeometry& markers, DisplayGeometry& meshes, const std::vector<InstanceSet::Placed>& placed,

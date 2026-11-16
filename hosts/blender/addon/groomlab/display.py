@@ -67,6 +67,8 @@ class GroomDisplay(object):
         self.point_size = 6.0
         self.brush = Item("brush")
         self.brush_version = 0
+        # The Tube tool's root mode (RootOverlayGeometry): fills, edges, CVs and middles, in order.
+        self.roots = {}
         self.ring = None
         self.overlay_pull = 0.0
         self.strand_version = 0
@@ -140,10 +142,12 @@ def settings_for(scalp, scene):
     if painting and t.show_on_guides and m is not None and m.kind == "guides":
         s["guideColorMode"] = "layer"
         s["guideColorLayer"] = m.name
-    if t.tool == "shape":
-        # While the Tube brush is on: every tube it can shape as a wire and/or shaded (Maya's Tube card).
+    if t.tool == "shape" or (t.tubes_always and t.tool):
+        # While the Tube tool is on (its root mode too; Always visible: any tool): every tube it can
+        # shape as a wire and/or shaded, in its root tube's color (Maya's Tube card switches).
         s["tubeWires"] = bool(t.tube_wireframe)
         s["tubeShaded"] = bool(t.tube_shaded)
+        s["tubeColors"] = bool(t.tube_colors)
     if t.isolate:
         _level, group = tools.group_target(scene)
         s["isolateGroup"] = group or ""
@@ -282,6 +286,29 @@ def take_display(scalp, r):
             gd.strand_range = tuple(sc["range"]) if sc.get("range") else None
 
 
+ROOT_PARTS = (("fills", "triangles"), ("edges", "lines"), ("highlighted", "lines"), ("dimDots", "points"),
+              ("dots", "points"), ("markers", "points"))
+ROOT_SIZES = {"edges": "edgePixels", "highlighted": "highlightPixels", "dots": "dotPixels", "dimDots": "dimDotPixels",
+              "markers": "markerPixels"}
+
+
+def _take_roots(gd, client, roots):
+    """The root tool's overlay (fills, edges, dots: each vertex colored), what it sent; the rest gone."""
+    gd.roots = {}
+    for name, primitive in ROOT_PARTS:
+        a = roots.get(name)
+        if not a:
+            continue
+        it = Item("roots." + name)
+        it.primitive = primitive
+        it.positions = _copy(client, a["positions"], np.float32)
+        it.indices = _copy(client, a["indices"], np.uint32)
+        it.colors = _copy(client, a["colors"], np.float32) if "colors" in a else None
+        it.width = float(roots.get(ROOT_SIZES.get(name, ""), 1.0) or 1.0)
+        it.shown = True
+        gd.roots[name] = it
+
+
 def take_overlay(scalp, overlay, ring=None):
     """The brush overlay of a hover, a stroke or a display answer (its arrays when they came)."""
     gd = state(scalp)
@@ -298,6 +325,7 @@ def take_overlay(scalp, overlay, ring=None):
         gd.brush.shown = True
         gd.brush.width = 2.0
         gd.brush.batch = None
+        _take_roots(gd, client, overlay.get("roots") or {})
     elif overlay.get("vertexCount", 1) == 0:
         gd.brush.positions = np.zeros((0, 3), np.float32)
         gd.brush.indices = np.zeros((0, 2), np.uint32)
@@ -424,6 +452,18 @@ def draw_list(scalp):
     if gd.dots.shown and len(gd.dots.positions):
         out.append(("dots", "points", gd.dots.positions, gd.dots.indices, gd.dots.colors, (1, 1, 1, 1), gd.point_size,
                      True, True))
+    for name, primitive in ROOT_PARTS:
+        it = gd.roots.get(name)
+        if it is None or it.empty():
+            continue
+        if primitive == "points":
+            # A dark ring under each dot (Maya's discs' edge), then the dot.
+            dark = np.tile(np.array([0.08, 0.08, 0.08, 1.0], np.float32), (len(it.positions), 1))
+            out.append(("roots.ring." + name, "points", it.positions, it.indices, dark, (0, 0, 0, 1), it.width + 3.0,
+                        True, True))
+        # Pulled toward the camera (off the scalp they lie on), behind the head hidden.
+        out.append(("roots." + name, primitive, it.positions, it.indices, it.colors, (1, 1, 1, 1), it.width, True,
+                    True))
     if gd.brush.shown and len(gd.brush.positions) and len(gd.brush.indices):
         out.append(("brush", "lines", gd.brush.positions, gd.brush.indices, gd.brush.colors, (1.0, 0.8, 0.2, 1.0),
                     gd.brush.width, False, False))
@@ -472,6 +512,13 @@ def make_batch(primitive, positions, indices, colors, color):
 
 
 def _batch_of(gd, name, entry):
+    if name.startswith("roots."):
+        part = name.split(".")[-1]
+        it = gd.roots[part]
+        key = "ring_batch" if name.startswith("roots.ring.") else "batch"
+        if getattr(it, key, None) is None:
+            setattr(it, key, make_batch(entry[1], entry[2], entry[3], entry[4], entry[5]))
+        return getattr(it, key)
     it = gd.dots if name == "dots" else gd.brush if name == "brush" else gd.items.get(name)
     if it.batch is None:
         it.batch = make_batch(entry[1], entry[2], entry[3], entry[4], entry[5])

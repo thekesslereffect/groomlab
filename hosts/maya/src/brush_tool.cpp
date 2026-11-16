@@ -1157,6 +1157,7 @@ MStatus BrushContext::doPtrMoved(MEvent& event, MHWRender::MUIDrawManager& draw,
         if (tool_.settings.tool == BrushToolSettings::Tool::Roots && host_ && tool_.roots().mode() == RootTubeTool::Mode::Duplicate) {
             tool_.roots().hover(*host_, activeToolView(), x, y);
             publishRoots();
+            refreshDuringDrag();  // (the copies follow the cursor now, as the first Maya tool's did)
         }
         drawAffected(draw, x, y);
         drawCircle(draw, x, y);
@@ -1192,7 +1193,11 @@ MStatus BrushContext::press(MEvent& event, MHWRender::MUIDrawManager& draw) {
     const unsigned modifiers = (event.isModifierControl() ? kStrokeCtrl : 0u) | (event.isModifierShift() ? kStrokeShift : 0u);
     tool_.press(*host_, activeToolView(), x, y, penPressure(), modifiers);
     unchainUnlessStroking();
-    if (tool_.settings.tool == BrushToolSettings::Tool::Roots) publishRoots();
+    if (tool_.settings.tool == BrushToolSettings::Tool::Roots) {
+        publishRoots();
+        showTubeWires();  // (Edit roots hides the tubes with the guides)
+        refreshDuringDrag();  // the CV placed, the root picked: drawn now, not when Maya is idle
+    }
     showSymmetry();
     drawLengths(draw);
     drawCircle(draw, x, y);
@@ -1237,7 +1242,10 @@ MStatus BrushContext::drag(MEvent& event, MHWRender::MUIDrawManager& draw) {
         draw.endDrawable();
     }
     if (s.tool == Tool::Lengths) refreshDuringDrag();  // the guides at their new lengths
-    if (s.tool == Tool::Roots) publishRoots();
+    if (s.tool == Tool::Roots) {
+        publishRoots();
+        refreshDuringDrag();  // a CV dragged, roots carried: the outlines follow live
+    }
     showSymmetry();
     drawLengths(draw);
     drawCircle(draw, x, y);
@@ -1268,7 +1276,11 @@ MStatus BrushContext::release(MEvent&) {
     if (!tool_.selectingPaint()) expectGpuCommit();  // (painting the selection commits no stroke)
     const StrokeRelease released = tool_.release(*host_, activeToolView());
     unchainUnlessStroking();
-    if (tool_.settings.tool == BrushToolSettings::Tool::Roots) publishRoots();
+    if (tool_.settings.tool == BrushToolSettings::Tool::Roots) {
+        publishRoots();
+        showTubeWires();
+        if (shape_) M3dView::active3dView().refresh(false, true);  // a tube made or moved: drawn now
+    }
     if (released == StrokeRelease::Stroke && shape_) {
         M3dView::active3dView().refresh(false, true);  // as endStroke: the commit's drawing now
     }
@@ -1310,7 +1322,10 @@ void BrushContext::clearTubeWires() {
 void BrushContext::showTubeWires() {
     const BrushToolSettings& s = tool_.settings;
     if (shape_) shape_->setTubesAlwaysVisible(tubesAlwaysVisible);
-    const bool on = active_ && shape_ && s.tool == BrushToolSettings::Tool::Brush && s.brush.mode == BrushMode::ShapeTube;
+    // The Tube brush, and the Tube tool's root mode (the tube made shown as the card's Shaded,
+    // Wireframe and Colors say; not while Edit roots hides the guides).
+    const bool roots = s.tool == BrushToolSettings::Tool::Roots && !tool_.roots().hidesGuides();
+    const bool on = active_ && shape_ && ((s.tool == BrushToolSettings::Tool::Brush && s.brush.mode == BrushMode::ShapeTube) || roots);
     if (!on || !(tubeWiresOn_.isAlive() && tubeWiresOn_.isValid() && tubeWiresOn_.object() == shape_->thisMObject())) {
         clearTubeWires();  // off, or on another groom
     }
@@ -1478,6 +1493,7 @@ void BrushContext::rootEdit(const std::string& words) {
         throw std::invalid_argument("-rootEdit takes start, leave, finish, undoCv, duplicate, endDuplicate, delete or sync");
     }
     publishRoots();
+    showTubeWires();  // (the root mode shows the tubes, Edit roots hides them)
     M3dView::active3dView().refresh(false, true);
 }
 
@@ -1486,6 +1502,7 @@ std::string BrushContext::rootState() {
     if (host_ && (shape_ || findGroom()) && roots.active()) {
         roots.sync(*host_);  // (an undo or redo since: the tool reads the groom again)
         publishRoots();
+        showTubeWires();
     }
     const char* modes[] = {"place", "draw", "edit", "select", "duplicate"};
     nlohmann::json state = {{"active", roots.active() && tool_.settings.tool == BrushToolSettings::Tool::Roots},

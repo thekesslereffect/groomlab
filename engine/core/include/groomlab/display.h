@@ -33,6 +33,7 @@
 #include "groomlab/instances.h"
 #include "groomlab/math.h"
 #include "groomlab/parts.h"
+#include "groomlab/root_tube_tool.h"
 #include "groomlab/scales.h"
 #include "groomlab/scalp_mesh.h"
 #include "groomlab/strand_geometry.h"
@@ -290,6 +291,23 @@ struct TubeDisplay {
 // `selected`: the guides selected in full (soft-selected ones are not).
 TubeDisplay buildTubeDisplay(const GuideHierarchy& hierarchy, const TubeDisplayOptions& options,
                              const std::set<GuideId>& selected);
+
+// The root-first Tube tool's overlay (RootTubeTool::overlay) as geometry, for a host drawing
+// display geometry (Blender, the app; Maya draws the items itself, root_overlay_draw.cpp): the
+// see-through fills (triangles), the edges (line pairs; the highlighted root's apart, drawn wider)
+// and dots facing the camera a size in pixels across (points): the CVs, the dim CVs (another
+// root's, while one is drawn) and the roots' middles (markers). Every vertex colored.
+struct RootOverlayGeometry {
+    DisplayGeometry fills, edges, highlighted, dots, dimDots, markers;
+    float edgePixels = RootTubeTool::kEdgePixels;
+    float highlightPixels = 1.5f * RootTubeTool::kEdgePixels;
+    float dotPixels = RootTubeTool::kDotPixels;
+    float dimDotPixels = 0.8f * RootTubeTool::kDotPixels;
+    float markerPixels = 1.6f * RootTubeTool::kDotPixels;
+    bool empty() const { return fills.positions.empty() && edges.positions.empty() && highlighted.positions.empty() &&
+                                dots.positions.empty() && dimDots.positions.empty() && markers.positions.empty(); }
+};
+RootOverlayGeometry rootOverlayGeometry(const std::vector<RootTubeTool::Item>& items);
 
 // ---- Instances --------------------------------------------------------------------------------
 

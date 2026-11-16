@@ -635,6 +635,7 @@ public:
     // its overlay, hand it the hover (Duplicate) and the card's buttons, and start and leave it.
     RootTubeTool& roots() { return roots_; }
     bool lengthsPressed() const { return lengthsPressed_; }  // a press it took, until its release
+    bool rootsPressed() const { return rootsPressed_; }      // a press the root tool took, until its release
     // The mode the tool is set to: during a Shift+drag's smoothing still the tool's own mode.
     std::string toolModeName() const;
 

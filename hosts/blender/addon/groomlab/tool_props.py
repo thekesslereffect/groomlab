@@ -35,6 +35,21 @@ def _tube_display(self, context):
         display.mark(scalp)
 
 
+def _root_settings(self, context):
+    """The Tube roots block's settings to the helper's root tool."""
+    if props.is_quiet():
+        return
+    from . import tools
+    from .helper_client import HelperError
+    scalp = tools.active(context)
+    if scalp is None or not tools.is_hierarchy(scalp):
+        return
+    try:
+        tools.root_edit(scalp, None)
+    except HelperError as e:
+        self.status = e.message
+
+
 def _redraw_views(self, context):
     from . import groom
     groom._redraw(viewport_only=True)
@@ -568,6 +583,43 @@ class GroomLabTools(bpy.types.PropertyGroup):
                               description="Draw the brush's tubes as shaded surfaces")
     tube_wireframe: BoolProperty(name="Wireframe", default=True, update=_tube_display,
                                  description="Draw the brush's tubes as wires (the selected guides' warm)")
+    tube_colors: BoolProperty(name="Colors", default=True, update=_tube_display,
+                              description="Color each tube as the root tube it comes from (its split tubes and "
+                                          "children in its color), a color of its own without one")
+    tubes_always: BoolProperty(name="Always visible", default=False, update=_tube_display,
+                               description="Keep the tubes drawn whichever GroomLab tool is up (Comb, Select, ...), "
+                                           "not only the Tube tool")
+    # The Tube card's Tube roots block (the core's root tool, root_tube_tool.h): the mode the
+    # helper's tool is in ("": not on; place, draw, edit, select, duplicate), what it holds, and the
+    # settings new root tubes take.
+    root_mode: StringProperty()
+    root_selected: IntProperty()
+    root_cvs: IntProperty()
+    root_snap: BoolProperty(name="Snap to neighbours", default=True, update=_root_settings,
+                            description="A CV near a neighbouring root's CV or edge snaps onto it, so the tubes "
+                                        "meet with no gap")
+    root_draw_path: BoolProperty(name="Draw guide before extrude", default=True, update=_root_settings,
+                                 description="Once the outline closes, drag from its middle out to draw the tube's "
+                                             "guide. Off: the tube goes straight off the scalp, Length long, in "
+                                             "Segments")
+    root_density: FloatProperty(name="Point density", default=1.0, min=0.05, max=20.0, soft_min=0.25, soft_max=4.0,
+                                update=_root_settings,
+                                description="How many points a drawn guide gets: 1, about one per root width along "
+                                            "it; 2, twice as many")
+    root_length: FloatProperty(name="Length", default=0.01, min=1e-6, soft_max=1.0, subtype="DISTANCE", unit="LENGTH",
+                               update=_root_settings,
+                               description="A tube's length when it goes straight off the scalp")
+    root_segments: IntProperty(name="Segments", default=12, min=2, max=256, soft_max=32, update=_root_settings,
+                               description="A straight tube guide's segments")
+    root_taper: FloatProperty(name="Tip width", default=0.5, min=0.0, max=4.0, soft_max=1.0, update=_root_settings,
+                              description="The tube's width at its tip, as a share of its root's")
+    # The Tube hierarchy block: its base group, its levels' groups (comma separated), the level shown.
+    tube_base: StringProperty()
+    tube_levels: StringProperty()
+    tube_level: IntProperty(default=1)
+    # The Tube card's blocks folded (a click on a block's title).
+    fold_roots: BoolProperty(name="Tube roots", default=False)
+    fold_levels: BoolProperty(name="Tube hierarchy", default=False)
     tube_shapes: CollectionProperty(type=GroomLabTubeShapeItem)
     tube_shape_index: IntProperty()
     tube_width: FloatProperty(name="Width", default=0.001, min=0.0, soft_max=0.01, subtype="DISTANCE", unit="LENGTH",
