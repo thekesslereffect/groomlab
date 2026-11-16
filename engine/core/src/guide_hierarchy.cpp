@@ -792,13 +792,57 @@ std::vector<Vec3f> GuideHierarchy::offsetsFromWorld(const HierarchyGuide& child,
         float along = local.z;
         if (slides) {
             // (resolveFollower's inverse: the spot along the parent's curve whose section holds it)
-            along = 0.0f;
-            for (int pass = 0; pass < 6; ++pass) {
-                const AlongCurve at = alongCurve(parent.points, frames, arc, arc[i] + along);
-                local = at.frame.toLocal(p - at.point);
-                along += local.z;
-                if (std::abs(local.z) < 1e-6f * std::max(1.0f, std::abs(along))) break;
+            // The spot along the parent (arc length arc[i] + along) whose section plane holds the
+            // point, so resolveFollower gives it back exactly. Not by stepping (it runs away for a
+            // point past the parent's centre of curvature: a child curled inside a tight curl):
+            // the parent scanned for every spot whose plane the point crosses (the ends carried on
+            // along their tangents: there is always one), the one nearest the child's own spot
+            // before kept (so a stroke's dabs never jump it to another turn of a spiral), then
+            // found exactly (bisection).
+            const float length = std::max(arc.back(), 1e-6f);
+            const float lo = -arc[i] - 0.5f * length - 2.0f * std::sqrt(p.dot(p) + 1.0f),
+                        hi = arc.back() - arc[i] + 0.5f * length + 2.0f * std::sqrt(p.dot(p) + 1.0f);
+            const float before = child.offsets.empty() ? local.z : sampleEven(child.offsets, t, Vec3f{}).z * scale_;
+            auto ahead = [&](float a) {  // (how far ahead of the spot's section plane the point lies)
+                const AlongCurve c = alongCurve(parent.points, frames, arc, arc[i] + a);
+                return (p - c.point).dot(c.frame.tangent);
+            };
+            const int steps = static_cast<int>(std::clamp<std::size_t>(16 * n, 64, 4096));
+            const float h = (hi - lo) / static_cast<float>(steps);
+            float best = local.z, bestGap = std::numeric_limits<float>::max();
+            float a0 = 0.0f, a1 = 0.0f, g0 = 0.0f;
+            float prevA = lo, prevG = ahead(lo);
+            for (int k = 1; k <= steps; ++k) {
+                const float a = lo + h * static_cast<float>(k);
+                const float g = ahead(a);
+                if ((prevG > 0.0f) != (g > 0.0f) || g == 0.0f) {  // the plane crossed between prevA and a
+                    const float gap = std::abs(0.5f * (prevA + a) - before);
+                    if (gap < bestGap) {
+                        bestGap = gap;
+                        a0 = prevA;
+                        a1 = a;
+                        g0 = prevG;
+                    }
+                }
+                prevA = a;
+                prevG = g;
             }
+            if (bestGap < std::numeric_limits<float>::max()) {
+                for (int pass = 0; pass < 60; ++pass) {
+                    const float mid = 0.5f * (a0 + a1);
+                    const float gm = ahead(mid);
+                    if ((gm > 0.0f) == (g0 > 0.0f)) {
+                        a0 = mid;
+                        g0 = gm;
+                    } else {
+                        a1 = mid;
+                    }
+                }
+                best = 0.5f * (a0 + a1);
+            }
+            along = best;
+            const AlongCurve at = alongCurve(parent.points, frames, arc, arc[i] + along);
+            local = at.frame.toLocal(p - at.point);
         }
         SectionPoint at = sectionCoords(parent.tube.sectionAt(t), local.x, local.y, scale_);
         if (blended) at = parent.tube.unblend(at.u, at.v, t);  // (back into the root's outline)
