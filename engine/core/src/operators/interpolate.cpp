@@ -2438,9 +2438,11 @@ private:
                 }
                 return true;
             });
+            // Held by none (a crack between root-first tubes, or just past an edge): the nearest
+            // root tube's deeper tubes alone, never a farther root's slice reaching over it. (Other
+            // tubes: a strand outside them all is no tube's, as ever.)
+            if (near >= 0 && !isRootTube(fill.spines[static_cast<std::size_t>(near)].tube(), 0)) near = -1;
             fill.baseOf[s] = base >= 0 ? base : near;
-            // Held by none (a crack between roots, or just past an edge): the nearest's deeper tubes
-            // alone, never a farther root's slice reaching over it.
             const std::int32_t mine = base >= 0 ? base : near;
             const std::uint64_t lineage = mine >= 0 ? fill.bases[static_cast<std::size_t>(mine)] : 0;
             auto ours = [&](std::uint32_t k) { return mine < 0 || fill.bases[k] == lineage; };
@@ -2470,8 +2472,9 @@ private:
             // Its root's deeper tubes holding none of it (a split's slices leave gaps between them
             // and short of the root's edge, or it lies in no tube at all): the nearest of the
             // deepest level within reach takes it, so every strand of a split root rides (and
-            // clumps with) one of its slices, never the root's own tube between them.
-            if (mine >= 0) {
+            // clumps with) one of its slices, never the root's own tube between them. (Root-first
+            // tubes: another tube's strands between its children keep to it, as ever.)
+            if (mine >= 0 && isRootTube(fill.spines[static_cast<std::size_t>(mine)].tube(), 0)) {
                 const int heldLevel = best < 0 ? -1 : fill.depths[static_cast<std::size_t>(best)];
                 std::int32_t adopt = -1;
                 int adoptLevel = -1;
