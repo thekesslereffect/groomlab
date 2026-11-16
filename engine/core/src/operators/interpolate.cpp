@@ -157,6 +157,7 @@
 #include <mutex>
 #include <optional>
 #include <new>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -838,6 +839,9 @@ private:
 // fillTubes: how far off the plane of a tube's root footprint a strand's root may lie and still
 // be in the tube, in the root section's larger half-extents.
 constexpr float kTubeAlongReach = 4.0f;
+// How far outside a deeper tube of its root a strand no deeper tube holds may lie and still be
+// taken by it (the gaps between a split's slices), in the tube's larger half-extents.
+constexpr float kTubeAdoptReach = 0.5f;
 
 // Words per strand in the tubes the kernel reads (look_run.h InterpolateInputs::tubes, look.slang tubeOf).
 constexpr std::size_t kTubeStrandWords = 24;
@@ -851,8 +855,12 @@ struct TubeFill {
     std::vector<TubeSpine> spines;
     std::vector<int> depths;
     std::vector<std::uint64_t> ids;
+    std::vector<std::uint64_t> bases;  // each tube's level-0 ancestor's ID (Guide::baseId; its own when 0)
     std::vector<float> numbers;
     std::vector<std::int32_t> tubeOf;
+    // Each strand's level-0 tube: the one holding its root, else the nearest within reach (-1: none;
+    // tubeBase takes it for a strand no tube holds).
+    std::vector<std::int32_t> baseOf;
     std::vector<SectionPoint> at;
     std::vector<std::int32_t> edgeOf;
     std::vector<SectionPoint> edgeAt;
@@ -1355,7 +1363,14 @@ public:
     }
     // A region map's source joins the key, as HairColor's map's does: a texture map's or an image's
     // file stamp, a color set's hash (the scalp's key leaves color sets out).
-    std::uint64_t contextSalt(const EvalContext& ctx) const override { return regionSalt(ctx, params().getString("regionMap")); }
+    std::uint64_t contextSalt(const EvalContext& ctx) const override {
+        // (A live stroke's dabs keep the strands' tubes: the release's key is another, so it fills anew.)
+        const std::uint64_t salt = regionSalt(ctx, params().getString("regionMap"));
+        return keepsTubes(ctx) ? hashCombine(salt, 0x5D0Bu) : salt;
+    }
+    // fillTubes during a live brush stroke in the viewport (EvalContext::liveStroke): each strand
+    // keeps the tube the stroke's first evaluation found it in.
+    bool keepsTubes(const EvalContext& ctx) const { return fillsTubes() && ctx.viewport && ctx.liveStroke; }
     static std::uint64_t regionSalt(const EvalContext& ctx, const std::string& name) {
         if (name.empty()) return 0;
         const MapInfo* info = catalogMap(ctx, name);
@@ -1536,6 +1551,7 @@ private:
         // and the map are) and the regions.
         std::shared_ptr<const RegionSource> regionSource;
         std::shared_ptr<const RegionSplit> regions;
+        std::shared_ptr<const TubeFill> fill;  // fillTubes: the tubes and each strand's in them
     };
 
     // In full, or (with `incremental`) only the strands a change of the guides reaches, into the
@@ -1562,9 +1578,10 @@ private:
             return true;
         }
 
-        // fillTubes: each strand's tube is worked out anew from the guides (a dab evaluates in full).
+        // fillTubes: each strand's tube is worked out anew from the guides (a dab evaluates in full),
+        // except during a live brush stroke: a dab keeps each strand's tube (keepsTubes).
         const bool fillTubes = fillsTubes();
-        if (incremental && fillTubes) return false;
+        if (incremental && fillTubes && !keepsTubes(ctx)) return false;
         const float radius = static_cast<float>(params().getDouble("limitDistance"));
         const Ramp falloff = params().getRamp("falloff");
         const std::string take = params().getString("take");
@@ -1648,6 +1665,15 @@ private:
         if (last) {
             guideChanged.resize(kept.size());
             parallelFor(0, kept.size(), [&](std::size_t g) { guideChanged[g] = sameGuide(*kept[g], *made.kept[g]) ? 0 : 1; });
+            if (fillTubes) {  // (a tube's profile or frame changed: its tube and the strands in it too)
+                for (std::size_t g = 0; g < kept.size(); ++g) {
+                    const Guide& a = *kept[g];
+                    const Guide& b = *made.kept[g];
+                    if (a.tube != b.tube || a.hasTube != b.hasTube || std::memcmp(&a.frameUp, &b.frameUp, sizeof(Vec3f)) != 0) {
+                        guideChanged[g] = 1;
+                    }
+                }
+            }
         }
         auto rowsMade = std::make_shared<GuideRows>();
         rowsMade->samples = samples;
@@ -1663,19 +1689,28 @@ private:
         // keepClearance: the scalp's field.
         const Clearance clearance = align && !lengthOnly && params().getBool("keepClearance") ? clearanceOf(scalp) : Clearance{};
         // fillTubes: each kept guide's tube laid along its shape as the blend reads it.
-        std::unique_ptr<TubeFill> fill;
+        std::shared_ptr<TubeFill> fill;
         const std::vector<Guide>* levelTubes = fillTubes && guides->levelTubes() ? guides->levelTubes().get() : nullptr;
+        const TubeFill* fillBefore = nullptr;  // incrementally (a live stroke's dab): the last result's tubes
         if (fillTubes) {
             const std::size_t tubes = kept.size() + (levelTubes ? levelTubes->size() : 0);
-            fill = std::make_unique<TubeFill>();
+            if (last) {
+                fillBefore = made.fill.get();
+                if (!fillBefore || fillBefore->spines.size() != tubes || fillBefore->tubeOf.size() != strands->strandCount()) {
+                    return false;
+                }
+            }
+            fill = std::make_shared<TubeFill>();
             fill->spines.resize(tubes);
             fill->numbers.assign(tubes, -1.0f);
             fill->depths.resize(tubes);
             fill->ids.resize(tubes);
+            fill->bases.resize(tubes);
             for (std::size_t k = 0; k < tubes; ++k) {
                 const Guide& g = k < kept.size() ? *kept[k] : (*levelTubes)[k - kept.size()];
                 fill->depths[k] = g.depth;
                 fill->ids[k] = g.id;
+                fill->bases[k] = g.baseId ? g.baseId : g.id;
             }
             if (levelTubes) {  // the other levels' tubes, along their guides as the kept ones' below
                 parallelFor(0, levelTubes->size(), [&](std::size_t i) {
@@ -1685,13 +1720,14 @@ private:
                     guideShape(g, samples, smoothGuides, resampled);
                     TubeSpine& spine = fill->spines[kept.size() + i];
                     spine = TubeSpine(resampled.data(), samples, g.frameUp, g.tube);
-                    if (align) spine.setRootSurface(scalpNormalAt(*scalp, g.root, resampled.front()));
+                    if (align) layFootprint(spine, g, *scalp, scalpNormalAt(*scalp, g.root, resampled.front()));
                 }, 8);
             }
         }
         parallelFor(0, kept.size(), [&](std::size_t k) {
             const Guide& g = *kept[k];
-            if (before && !guideChanged[k]) {  // (no tubes: a fill evaluates in full)
+            if (before && !guideChanged[k]) {
+                if (fill) fill->spines[k] = fillBefore->spines[k];  // (a live stroke's dab: its tube as it was)
                 roots[k] = before->roots[k];
                 normals[k] = before->normals[k];
                 guideLengths[k] = before->lengths[k];
@@ -1706,7 +1742,11 @@ private:
             if (fill && g.hasTube && samples >= 2) {
                 // The tube along the guide, its root footprint laid on the scalp.
                 fill->spines[k] = TubeSpine(resampled.data(), samples, g.frameUp, g.tube);
-                fill->spines[k].setRootSurface(align ? scalpNormalAt(*scalp, g.root, resampled.front()) : Vec3f{});
+                if (align) {
+                    layFootprint(fill->spines[k], g, *scalp, scalpNormalAt(*scalp, g.root, resampled.front()));
+                } else {
+                    fill->spines[k].setRootSurface(Vec3f{});
+                }
             }
             float* rows = offsets.data() + k * 3 * stride;
             for (std::size_t j = 0; j < samples; ++j) {
@@ -1865,7 +1905,9 @@ private:
             for (std::size_t g = 0; g < kept.size(); ++g) {
                 const float none = std::numeric_limits<float>::quiet_NaN();
                 guideColors[g] = Vec3f(none, none, none);
-                regionSource->map->at(guideRoots[g], &guideColors[g]);
+                // (A tube's split tubes and every follower: its hierarchy's base guide's region.)
+                const StrandRoot& at = kept[g]->baseRoot.face >= 0 ? kept[g]->baseRoot : guideRoots[g];
+                regionSource->map->at(at, &guideColors[g]);
             }
             regions = std::make_shared<const RegionSplit>(splitRegions(*regionSource, guideColors, heldRegions.get()));
             if (last && (!made.regions || !sameStrandRegions(*regions, *made.regions))) return false;
@@ -1909,7 +1951,40 @@ private:
             keepBinding(key, binding);
         }
         const Binding& bindings = *binding;
-        if (fill) findTubes(*strands, *fill, std::clamp(static_cast<float>(params().getDouble("tubeBlend")), 0.0f, 1.0f));
+        // The strands' tubes: found anew, or (a live stroke's dab) each strand's kept, the tubes whose
+        // guides changed noted (their strands blend again).
+        std::vector<char> tubeChanged;
+        if (fill && fillBefore) {
+            fill->numbers = fillBefore->numbers;
+            fill->tubeOf = fillBefore->tubeOf;
+            fill->baseOf = fillBefore->baseOf;
+            fill->at = fillBefore->at;
+            fill->edgeOf = fillBefore->edgeOf;
+            fill->edgeAt = fillBefore->edgeAt;
+            fill->edgeWeight = fillBefore->edgeWeight;
+            fill->blends = fillBefore->blends;
+            fill->edgeBlends = fillBefore->edgeBlends;
+            tubeChanged.assign(fill->spines.size(), 1);
+            for (std::size_t k = 0; k < kept.size(); ++k) tubeChanged[k] = guideChanged[k];
+            const std::vector<Guide>* levelBefore = made.guides ? made.guides->levelTubes().get() : nullptr;
+            if (levelTubes && levelBefore && levelBefore->size() == levelTubes->size()) {
+                for (std::size_t i = 0; i < levelTubes->size(); ++i) {
+                    const Guide& a = (*levelTubes)[i];
+                    const Guide& b = (*levelBefore)[i];
+                    tubeChanged[kept.size() + i] = sameGuide(a, b) && a.tube == b.tube && a.hasTube == b.hasTube &&
+                                                           std::memcmp(&a.frameUp, &b.frameUp, sizeof(Vec3f)) == 0
+                                                       ? 0
+                                                       : 1;
+                }
+            }
+        } else if (fill) {
+            findTubes(*strands, *fill, std::clamp(static_cast<float>(params().getDouble("tubeBlend")), 0.0f, 1.0f));
+        }
+        auto inChangedTube = [&](std::size_t s) {
+            if (tubeChanged.empty()) return false;
+            const std::int32_t t = fill->tubeOf[s], e = fill->edgeOf[s];
+            return (t >= 0 && tubeChanged[static_cast<std::size_t>(t)]) || (e >= 0 && tubeChanged[static_cast<std::size_t>(e)]);
+        };
 
         // Incrementally, the strands to blend again: those bound to a guide that changed, and
         // (another binding: guide roots moved) those whose guides or weights did.
@@ -1923,7 +1998,7 @@ private:
                 const bool rebound = c >= boundBefore.chunks.size() || boundBefore.chunks[c] != bindings.chunks[c];
                 const std::size_t end = std::min(strandCount, (c + 1) * kBindChunk);
                 for (std::size_t s = c * kBindChunk; s < end; ++s) {
-                    bool again = rebound && !sameRecord(boundBefore, bindings, s);
+                    bool again = (rebound && !sameRecord(boundBefore, bindings, s)) || inChangedTube(s);
                     const Binding::Record r = bindings.record(s);
                     if (!again && r.bound) {
                         for (std::uint32_t i = 0; i < r.count && !again; ++i) again = guideChanged[r.guide(i)] != 0;
@@ -1934,7 +2009,7 @@ private:
             for (const auto& list : found) dirty.insert(dirty.end(), list.begin(), list.end());
             if (dirty.empty()) {  // nothing reaches a strand: the last result as it is
                 remember(last, strands, guides, kept, binding, attrNames, layerNames, scalpKey, baseKey,
-                         regionSource, regions, rowsMade);
+                         regionSource, regions, rowsMade, fill);
                 *result = last;
                 *changed = StrandChanges::listed({});
                 return true;
@@ -2210,38 +2285,107 @@ private:
                 blendChannels(s);
                 if (bindings.record(s).bound) blendLayers(s, scratch);
             });
+            if (fill) writeTubeChannels(*out, *fill);  // (every strand's tube as it was)
             *changed = StrandChanges::listed(std::move(dirty));
         }
         const StrandsPtr blended = out;
         remember(blended, strands, guides, kept, binding, attrNames, layerNames, scalpKey, baseKey,
-                 regionSource, regions, rowsMade);
+                 regionSource, regions, rowsMade, fill);
         *result = blended;
         return true;
     }
 
     // fillTubes' channels, written last: each strand's tube wins over a guide attribute of its name.
+    // tubeBase: the number of the strand's level-0 tube (its tube's ancestor; a strand no tube
+    // holds, in a crack between roots: TubeFill::baseOf, the nearest), so a node can keep a strand
+    // within its level-0 tube whichever smaller tube holds it, or none (Clump's followTubes, its
+    // centers given).
     static void writeTubeChannels(StrandSet& out, const TubeFill& fill) {
         std::vector<float>& ids = out.addStrandChannel("tubeId", -1.0f);
         std::vector<float>& us = out.addStrandChannel("tubeU", 0.0f);
         std::vector<float>& vs = out.addStrandChannel("tubeV", 0.0f);
+        std::vector<float>& bases = out.addStrandChannel("tubeBase", -1.0f);
+        std::unordered_map<std::uint64_t, float> numberOf;  // a tube's ID: its number
+        for (std::size_t k = 0; k < fill.ids.size() && k < fill.numbers.size(); ++k) numberOf[fill.ids[k]] = fill.numbers[k];
         parallelFor(0, ids.size(), [&](std::size_t s) {
             const std::int32_t t = fill.tubeOf[s];
-            if (t < 0) return;
-            ids[s] = fill.numbers[static_cast<std::size_t>(t)];
+            if (t < 0) {
+                const std::int32_t b = s < fill.baseOf.size() ? fill.baseOf[s] : -1;
+                if (b >= 0) bases[s] = fill.numbers[static_cast<std::size_t>(b)];
+                return;
+            }
+            const auto k = static_cast<std::size_t>(t);
+            ids[s] = fill.numbers[k];
             us[s] = fill.at[s].u;
             vs[s] = fill.at[s].v;
+            const auto base = k < fill.bases.size() ? numberOf.find(fill.bases[k]) : numberOf.end();
+            bases[s] = base != numberOf.end() ? base->second : fill.numbers[k];
         }, 4096);
+    }
+
+    // A tube's root footprint laid on the scalp of normal `normal`: a root-first tube's fixed on the
+    // scalp (TubeSpine::setRootOnScalp, as Scatter roots its strands and the root outline is fitted),
+    // another's as the guide's own points lay it (TubeSpine::setFootprint), not its resampled,
+    // smoothed shape.
+    static void layFootprint(TubeSpine& spine, const Guide& g, const ScalpMesh& scalp, const Vec3f& normal) {
+        if (isRootTube(g.tube, g.depth) && scalp.contains(g.root)) {
+            spine.setRootOnScalp(normal, scalp.acrossAt(g.root));
+            return;
+        }
+        if (g.points.size() >= 2) {
+            TubeSpine own(g.points.data(), g.points.size(), g.frameUp, g.tube);
+            own.setRootSurface(normal);
+            if (!own.empty()) {
+                spine.setFootprint(own);
+                return;
+            }
+        }
+        spine.setRootSurface(normal);
+    }
+
+    // How far inside its tube's root footprint section coordinates `at` lie, as a length on the
+    // scalp (whatever the tube's size, shape and aspect): below 0 outside. A root-first tube's
+    // footprint is laid kRootTubeOverlap larger than its outline as drawn, about its guide, so
+    // sealed neighbours overlap; measured against the outline as drawn, so a root in the overlap
+    // goes to the root it was drawn inside (each footprint reaches across the shared edge by its
+    // own share of its guide's distance, the farther guide's further).
+    static float footprintDepth(const TubeSpine& spine, const SectionPoint& at) {
+        const TubeProfile& tube = spine.tube();
+        const std::vector<SectionPoint>& poly = tubeShapeOutline(tube).points;
+        const float width = spine.rootWidth();
+        const float a = width > 0.0f ? std::max(spine.rootHeight() / width, 1e-6f) : 1.0f;
+        const bool drawn = tube.custom && tube.custom->name.rfind(kOwnedTubeShapePrefix, 0) == 0;
+        const float k = drawn ? 1.0f + kRootTubeOverlap : 1.0f;  // (the outline as drawn: the footprint over k)
+        const float u = at.u * k, y = at.v * a * k;
+        float best = std::numeric_limits<float>::max();
+        bool inside = false;
+        const std::size_t n = poly.size();
+        if (n < 3) return -std::numeric_limits<float>::max();
+        for (std::size_t i = 0, j = n - 1; i < n; j = i++) {
+            const float au = poly[j].u, av = poly[j].v * a, bu = poly[i].u, bv = poly[i].v * a;
+            if ((bv > y) != (av > y) && u < (au - bu) * (y - bv) / (av - bv) + bu) inside = !inside;
+            const float eu = bu - au, ev = bv - av;
+            const float l2 = eu * eu + ev * ev;
+            const float f = l2 > 0.0f ? std::clamp(((u - au) * eu + (y - av) * ev) / l2, 0.0f, 1.0f) : 0.0f;
+            const float du = u - (au + eu * f), dv = y - (av + ev * f);
+            best = std::min(best, du * du + dv * dv);
+        }
+        const float d = std::sqrt(best) * width / k;
+        return inside ? d : -d;
     }
 
     // fillTubes: each strand's tube (TubeFill::tubeOf, at) from its root (its first point), among
     // the tubes laid out (`fill.spines`), the soft edge it lies in (edgeOf, edgeAt, edgeWeight;
-    // `blend`: tubeBlend), and each tube's number. The strands each on their own, side by side; of
-    // the tubes holding a root the deepest wins, then the most central, then the first; of the
+    // `blend`: tubeBlend), its level-0 tube (baseOf) and each tube's number. The strands each on
+    // their own, side by side; of the tubes holding a root the deepest wins, then the one it lies
+    // furthest inside (footprintDepth), then the first; a root no level-0 tube holds takes the
+    // nearest as its base (none beyond reach); of the
     // deeper tubes whose edge holds it the nearest, then the deepest, then the first: the same
     // whichever threads ran.
     static void findTubes(const StrandSet& strands, TubeFill& fill, float blend) {
         const std::size_t count = strands.strandCount();
         fill.tubeOf.assign(count, -1);
+        fill.baseOf.assign(count, -1);
         fill.at.assign(count, SectionPoint{});
         fill.edgeOf.assign(count, -1);
         fill.edgeAt.assign(count, SectionPoint{});
@@ -2271,18 +2415,50 @@ private:
             if (strands.strandPointCount(s) < 2) return;
             const Vec3f root = strands.strandPoints(s)[0];
             if (!std::isfinite(root.x) || !std::isfinite(root.y) || !std::isfinite(root.z)) return;
+            // The level-0 tube holding the root (the one it lies furthest inside): its own deeper
+            // tubes alone may take the strand or blend it at their edges, never a neighbour's (whose
+            // slices may reach past their level-0 tube's outline into this one's). Held by none:
+            // the nearest (baseOf only; the strand's tube stays none).
+            std::int32_t base = -1, near = -1;
+            float baseDepth = 0.0f, nearDepth = 0.0f;
+            grid.around(root, [&](std::uint32_t i) {
+                const std::uint32_t k = tubes[i];
+                if (fill.depths[k] != 0) return true;
+                const TubeSpine& spine = fill.spines[k];
+                float along = 0.0f;
+                const SectionPoint at = spine.rootCoords(root, &along);
+                if (std::abs(along) > kTubeAlongReach * std::max(spine.rootWidth(), spine.rootHeight())) return true;
+                const float depth = footprintDepth(spine, at);
+                const bool held = tubeShapeDepth(spine.tube(), at.u, at.v) >= 0.0f;
+                std::int32_t& pick = held ? base : near;
+                float& pickDepth = held ? baseDepth : nearDepth;
+                if (pick < 0 || depth > pickDepth || (depth == pickDepth && static_cast<std::int32_t>(k) < pick)) {
+                    pick = static_cast<std::int32_t>(k);
+                    pickDepth = depth;
+                }
+                return true;
+            });
+            // Held by none (a crack between root-first tubes, or just past an edge): the nearest
+            // root tube's deeper tubes alone, never a farther root's slice reaching over it. (Other
+            // tubes: a strand outside them all is no tube's, as ever.)
+            if (near >= 0 && !isRootTube(fill.spines[static_cast<std::size_t>(near)].tube(), 0)) near = -1;
+            fill.baseOf[s] = base >= 0 ? base : near;
+            const std::int32_t mine = base >= 0 ? base : near;
+            const std::uint64_t lineage = mine >= 0 ? fill.bases[static_cast<std::size_t>(mine)] : 0;
+            auto ours = [&](std::uint32_t k) { return mine < 0 || fill.bases[k] == lineage; };
             std::int32_t best = -1;
             float bestDepth = 0.0f;
             SectionPoint bestAt;
             // The tubes holding the root.
             grid.around(root, [&](std::uint32_t i) {
                 const std::uint32_t k = tubes[i];
+                if (!ours(k)) return true;
                 const TubeSpine& spine = fill.spines[k];
                 float along = 0.0f;
                 const SectionPoint at = spine.rootCoords(root, &along);
                 if (std::abs(along) > kTubeAlongReach * std::max(spine.rootWidth(), spine.rootHeight())) return true;
-                const float depth = tubeShapeDepth(spine.tube(), at.u, at.v);
-                if (!(depth >= 0.0f)) return true;
+                if (!(tubeShapeDepth(spine.tube(), at.u, at.v) >= 0.0f)) return true;
+                const float depth = footprintDepth(spine, at);
                 const int level = fill.depths[k];
                 const int bestLevel = best < 0 ? -1 : fill.depths[static_cast<std::size_t>(best)];
                 if (best < 0 || level > bestLevel ||
@@ -2293,6 +2469,42 @@ private:
                 }
                 return true;
             });
+            // Its root's deeper tubes holding none of it (a split's slices leave gaps between them
+            // and short of the root's edge, or it lies in no tube at all): the nearest of the
+            // deepest level within reach takes it, so every strand of a split root rides (and
+            // clumps with) one of its slices, never the root's own tube between them. (Root-first
+            // tubes: another tube's strands between its children keep to it, as ever.)
+            if (mine >= 0 && isRootTube(fill.spines[static_cast<std::size_t>(mine)].tube(), 0)) {
+                const int heldLevel = best < 0 ? -1 : fill.depths[static_cast<std::size_t>(best)];
+                std::int32_t adopt = -1;
+                int adoptLevel = -1;
+                float adoptDepth = 0.0f;
+                SectionPoint adoptAt;
+                grid.around(root, [&](std::uint32_t i) {
+                    const std::uint32_t k = tubes[i];
+                    const int level = fill.depths[k];
+                    if (!ours(k) || level <= heldLevel) return true;
+                    const TubeSpine& spine = fill.spines[k];
+                    const float extent = std::max(spine.rootWidth(), spine.rootHeight());
+                    float along = 0.0f;
+                    const SectionPoint at = spine.rootCoords(root, &along);
+                    if (std::abs(along) > kTubeAlongReach * extent) return true;
+                    const float depth = footprintDepth(spine, at);
+                    if (depth < -kTubeAdoptReach * extent) return true;
+                    if (adopt < 0 || level > adoptLevel ||
+                        (level == adoptLevel && (depth > adoptDepth || (depth == adoptDepth && static_cast<std::int32_t>(k) < adopt)))) {
+                        adopt = static_cast<std::int32_t>(k);
+                        adoptLevel = level;
+                        adoptDepth = depth;
+                        adoptAt = at;
+                    }
+                    return true;
+                });
+                if (adopt >= 0) {
+                    best = adopt;
+                    bestAt = adoptAt;
+                }
+            }
             fill.tubeOf[s] = best;
             fill.at[s] = bestAt;
             if (best >= 0) fill.blends[s] = fill.spines[static_cast<std::size_t>(best)].tube().blendPoint(bestAt.u, bestAt.v);
@@ -2305,7 +2517,7 @@ private:
             grid.around(root, [&](std::uint32_t i) {
                 const std::uint32_t k = tubes[i];
                 const int level = fill.depths[k];
-                if (level <= ownLevel) return true;
+                if (level <= ownLevel || !ours(k)) return true;
                 const TubeSpine& spine = fill.spines[k];
                 float along = 0.0f;
                 const SectionPoint at = spine.rootCoords(root, &along);
@@ -2335,9 +2547,11 @@ private:
                   const std::vector<const Guide*>& kept, const std::shared_ptr<const Binding>& binding,
                   const std::vector<std::string>& attrNames, const std::vector<std::string>& layerNames,
                   std::uint64_t scalp, std::uint64_t baseKey, std::shared_ptr<const RegionSource> regionSource,
-                  std::shared_ptr<const RegionSplit> regions, std::shared_ptr<const GuideRows> rows) const {
+                  std::shared_ptr<const RegionSplit> regions, std::shared_ptr<const GuideRows> rows,
+                  std::shared_ptr<const TubeFill> fill = nullptr) const {
         const std::lock_guard<std::mutex> lock(madeMutex_);
         made_.rows = std::move(rows);
+        made_.fill = std::move(fill);
         made_.regionSource = std::move(regionSource);
         made_.regions = std::move(regions);
         made_.output = output;

@@ -46,7 +46,7 @@ def guides_from_curves(groom, curves, group="primary", tube_radius=0.1, tube_tip
 
 
 def generate_children(groom, parent_group=None, name=None, count=5, root_spread=0.8, tip_spread=1.0, twist=0.0,
-                      jitter=0.1, tube_scale=0.35, seed=0, guides=None, selected=False):
+                      jitter=0.1, tube_scale=0.35, seed=0, guides=None, selected=False, split=False):
     """Give guides `count` children each, in the child group `name` (default "<parent group>_children").
 
     Parents: `guides` (IDs), or the selected guides with `selected=True`, else
@@ -54,12 +54,17 @@ def generate_children(groom, parent_group=None, name=None, count=5, root_spread=
     added to otherwise; a parent that already has children there gets new
     ones. So you choose, parent by parent, which guides have children, at any
     level (children of children too). Spreads and jitter are in units of the
-    parent tube radius; twist is in radians. Returns the size of the child group.
+    parent tube radius; twist is in radians. With `split` the children cut each parent's tube into
+    `count` equal slices across its longer side instead, each child's tube its slice (the Tube
+    hierarchy's Add: spreads, twist, jitter, tube_scale and seed are not read). Returns the size
+    of the child group.
     """
     kwargs = {"generateChildren": parent_group or "", "count": count, "rootSpread": root_spread,
               "tipSpread": tip_spread, "twist": twist, "jitter": jitter, "tubeScale": tube_scale, "seed": seed}
     if name:
         kwargs["name"] = name
+    if split:
+        kwargs["split"] = True
     if guides:
         kwargs["guide"] = [str(g) for g in guides]
     elif selected:
@@ -392,7 +397,7 @@ TUBE_SHAPES = ("round", "ribbon", "teardrop", "blade")
 
 
 def set_tube(groom, guides=None, group=None, level=None, width=None, aspect=None, twist=None, shape=None, samples=None,
-             mid_shape=None, tip_shape=None, root_hold=None, mid_hold=None, tip_hold=None, mid_at=None):
+             mid_shape=None, tip_shape=None, root_hold=None, mid_hold=None, tip_hold=None, mid_at=None, roll_on_scalp=None):
     """Edit guides' tubes (tube guides): their cross-section along the guide and its shape.
 
     Targets: `guides` (IDs), else `group`, else `level`, else the selected guides. Each of `width`
@@ -406,7 +411,10 @@ def set_tube(groom, guides=None, group=None, level=None, width=None, aspect=None
     `root_hold`, `mid_hold` and `tip_hold` (0 to 1, default 0): the share of the tube where that
     profile keeps its exact shape (the root's from the root, the tip's up to the tip, the mid's
     centered on `mid_at`); between the held stretches the shape changes smoothly, at once where
-    they meet. `mid_at` (0 to 1, default 0.5): where along the tube the mid's profile is. `samples` resamples all three lists to that many. Children follow
+    they meet. `mid_at` (0 to 1, default 0.5): where along the tube the mid's profile is. `samples` resamples all three lists to that many.
+    `roll_on_scalp`: False sweeps the sections from the root along the guide with no twist (a
+    root-first tube); True (as tubes start) turns a shaped tube's sections to lie as the scalp
+    does where the guide lies on it (get_tube shows "rollOnScalp": False when off). Children follow
     their parent's tube; Interpolate's fillTubes fills tubes with strands. One undo step. Returns
     how many guides changed."""
     edit = {}
@@ -434,6 +442,8 @@ def set_tube(groom, guides=None, group=None, level=None, width=None, aspect=None
         edit[key] = float(value)
     if samples is not None:
         edit["samples"] = int(samples)
+    if roll_on_scalp is not None:
+        edit["rollOnScalp"] = bool(roll_on_scalp)
     if not edit:
         raise ValueError("give a width, aspect, twist, shape, mid_shape, tip_shape, root_hold, mid_hold, tip_hold, "
                          "mid_at or samples")

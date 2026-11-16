@@ -1011,7 +1011,9 @@ public:
                       "Strands filling tube guides (an Interpolate's fillTubes: tubeId, tubeU and tubeV) clump inside "
                       "their own tube: each tube's centers are picked among its strands (as far apart as clumpBy says "
                       "for the whole scalp) and a strand gathers toward its tube's nearest, so the clumps flatten, "
-                      "twist and taper with the tube; strands in no tube clump as ever. Off: by root across tubes. "
+                      "twist and taper with the tube; with centers given (curves, points) each belongs to the tube it is "
+                      "rooted in and a strand gathers toward its own tube's; strands in no tube clump as ever. Off: by "
+                      "root across tubes. "
                       "Strands without those channels clump as ever either way"}
                 .when("centersFrom", {"pick"}),
             ParamSpec{"repelRadius", 0.5, "With a negative strength: how far from its center a strand is pushed out to at "
@@ -1278,13 +1280,17 @@ private:
         // followTubes: strands filling tube guides clump inside their own tube (addTubeCenters,
         // their tubes as regions below); not on barbs.
         const std::vector<float>* tubeIds = nullptr;
-        if (own && params().getBool("followTubes") && in->strandChannel("tubeU") && in->strandChannel("tubeV") && !hasVanes(*in)) {
+        // (Centers given as curves or points too: each tube a region of its own, below, so a strand gathers
+        // toward the center lying in its own tube, never a neighbour tube's.)
+        if (params().getBool("followTubes") && in->strandChannel("tubeU") && in->strandChannel("tubeV") && !hasVanes(*in)) {
             tubeIds = in->strandChannel("tubeId");
             if (tubeIds && (tubeIds->size() != in->strandCount() ||
                             std::none_of(tubeIds->begin(), tubeIds->end(), [](float t) { return t >= 0.0f; }))) {
                 tubeIds = nullptr;
             }
-            if (tubeIds && incremental) return false;  // (each tube's centers picked anew)
+            // Each tube's centers picked anew; during a live brush stroke the strands keep their tubes
+            // (an Interpolate's fillTubes, EvalContext::liveStroke), so a dab's are the same.
+            if (tubeIds && own && incremental && !(ctx.viewport && ctx.liveStroke)) return false;
         }
         if (own && !in->empty() && !sizing.none()) {
             const auto seed = static_cast<std::uint64_t>(params().getInt("seed"));
@@ -1412,7 +1418,11 @@ private:
             } else {
                 thread_local std::vector<Vec3f> resampled;
                 resampled.resize(kCenterSamples);
-                resampleByArcLengthInto(g.points, g.count, resampled.data(), kCenterSamples);
+                if (!centerStrands) {
+                    clumpGuideCurve(g.points, g.count, resampled.data());  // (a guide: its smooth curve)
+                } else {
+                    resampleByArcLengthInto(g.points, g.count, resampled.data(), kCenterSamples);
+                }
                 if (guide < axisOffsets.size()) {
                     for (Vec3f& q : resampled) q = q + axisOffsets[guide];
                 }
@@ -1453,11 +1463,13 @@ private:
         const std::vector<float>* strandRegions = vanes.active() ? nullptr : regionsOf(*in, regionName);
         // followTubes: each tube a region of its own (kTubeRegionBase + its number), the strands in
         // no tube in theirs (the channel's, else one region), so a strand clumps toward its tube's
-        // centers and the others toward the centers off the tubes.
+        // centers and the others toward the centers off the tubes. Centers given (curves, points):
+        // each in the tube of the strand rooted nearest it (the region rule above), so a strand
+        // gathers toward the center curve of its own tube.
         std::vector<float> tubeRegions;
-        if (tubeIds && !picked.empty()) {
+        const std::vector<float>* channelRegions = strandRegions;  // (the regionChannel's own, before the tubes')
+        if (tubeIds) {
             tubeRegions.resize(in->strandCount());
-            const std::vector<float>* channelRegions = strandRegions;
             parallelFor(0, tubeRegions.size(), [&](std::size_t s) {
                 const float t = (*tubeIds)[s];
                 tubeRegions[s] = t >= 0.0f ? kTubeRegionBase + t : channelRegions ? (*channelRegions)[s] : 0.0f;
@@ -1555,10 +1567,30 @@ private:
             const float none = std::numeric_limits<float>::quiet_NaN();
             centerRegions.assign(roots.size(), none);
             std::vector<std::size_t> unknown;
+            // followTubes, guides as centers: a guide that is a tube's own (its ID numbers the tube,
+            // as Interpolate's tubeId: stableGroupNumbers) is that tube's center wherever its root
+            // lies (slid off the middle, into a smaller tube of its own), not the tube of the strand
+            // rooted nearest it. One whose tube holds no strand (all of it in smaller tubes) then
+            // joins no tube a guide of its own already leads.
+            std::unordered_set<float> heldTubes;
+            if (tubeIds && strandRegions == &tubeRegions && picked.empty() && !centerStrands) {
+                for (const float t : *tubeIds) {
+                    if (t >= 0.0f) heldTubes.insert(t);
+                }
+            }
+            std::vector<char> ownTube(roots.size(), 0);
             for (std::size_t c = 0; c < roots.size(); ++c) {
                 if (!picked.empty()) {
                     centerRegions[c] = (*strandRegions)[picked[centerGuides[c]]];
                     continue;
+                }
+                if (!heldTubes.empty()) {
+                    const float number = stableGroupNumbers({static_cast<std::uint64_t>(used[c]->id)}).front();
+                    if (heldTubes.count(number)) {
+                        centerRegions[c] = kTubeRegionBase + number;
+                        ownTube[c] = 1;
+                        continue;
+                    }
                 }
                 if (used[c]->region == used[c]->region) {
                     centerRegions[c] = used[c]->region;
@@ -1583,6 +1615,15 @@ private:
                     });
                 }
             }
+            if (std::find(ownTube.begin(), ownTube.end(), 1) != ownTube.end()) {
+                std::unordered_set<float> led;
+                for (std::size_t c = 0; c < roots.size(); ++c) {
+                    if (ownTube[c]) led.insert(centerRegions[c]);
+                }
+                for (std::size_t c = 0; c < roots.size(); ++c) {
+                    if (!ownTube[c] && led.count(centerRegions[c])) centerRegions[c] = none;
+                }
+            }
         }
         struct RegionCenters {
             std::vector<std::uint32_t> centers;
@@ -1599,11 +1640,47 @@ private:
                 group.index.emplace(std::move(at));
             }
         }
+        // followTubes with centers given: a strand whose tube holds no center (a part of a tube that
+        // none of the centers' smaller tubes covers, or no tube: a seam) clumps toward the centers of
+        // its level-0 tube (Interpolate's tubeBase: the one holding its root, else the nearest), each
+        // center in the one of the strand rooted nearest it. The regionChannel (a painted map,
+        // blurred between a coarse scalp's vertices) only without tubeBase.
+        std::map<float, RegionCenters> fallbackCenters;
+        const std::vector<float>* tubeBases = tubeIds ? in->strandChannel("tubeBase") : nullptr;
+        if (tubeBases && tubeBases->size() != in->strandCount()) tubeBases = nullptr;
+        auto fallbackOf = [&](std::size_t s) {
+            if (tubeBases) return (*tubeBases)[s] >= 0.0f ? kTubeRegionBase + (*tubeBases)[s] : std::numeric_limits<float>::quiet_NaN();
+            return channelRegions ? (*channelRegions)[s] : std::numeric_limits<float>::quiet_NaN();
+        };
+        if (tubeIds && picked.empty() && (tubeBases || channelRegions) && strandRegions == &tubeRegions && !roots.empty()) {
+            std::vector<std::uint32_t> rooted;
+            std::vector<Vec3f> at;
+            for (std::size_t s = 0; s < in->strandCount(); ++s) {
+                if (in->strandPointCount(s) == 0 || !core.core(s)) continue;
+                rooted.push_back(static_cast<std::uint32_t>(s));
+                at.push_back(queryOf(s));
+            }
+            if (!rooted.empty()) {
+                const PointIndex nearestStrand(std::move(at));
+                for (std::size_t c = 0; c < roots.size(); ++c) {
+                    const float r = fallbackOf(rooted[nearestStrand.nearest(roots[c])]);
+                    if (r == r) fallbackCenters[r].centers.push_back(static_cast<std::uint32_t>(c));
+                }
+                for (auto& [region, group] : fallbackCenters) {
+                    std::vector<Vec3f> where;
+                    for (const std::uint32_t c : group.centers) where.push_back(roots[c]);
+                    group.index.emplace(std::move(where));
+                }
+            }
+        }
         // What the assignment is searched from besides the queries and the centers' roots.
         std::uint64_t partsKey = parts ? hashCombine(parts->sideHash(), 1) : 0;
         if (strandRegions) {
             partsKey = hashCombine(hashCombine(partsKey, regionHash), centerRegions.size());
             for (const float r : centerRegions) partsKey = hashFloat(partsKey, r);
+            if (!fallbackCenters.empty()) {
+                partsKey = hashCombine(partsKey, tubeBases ? hashChannel(*tubeBases) : hashChannel(*channelRegions));
+            }
         }
         // In full: the last full run's assignment when it was searched from these queries, centers'
         // roots and parts (a tweak of the strength, profile, flatness...), else searched again.
@@ -1673,10 +1750,21 @@ private:
             const std::vector<std::uint32_t>* region = nullptr;
             if (strandRegions) {
                 const float mine = (*strandRegions)[s];
-                const auto it = mine == mine ? regionCenters.find(mine) : regionCenters.end();
-                if (it == regionCenters.end()) return kNoCenter;
-                search = &*it->second.index;
-                region = &it->second.centers;
+                auto it = mine == mine ? regionCenters.find(mine) : regionCenters.end();
+                bool anywhere = false;  // (no center of its own anywhere: the nearest of all)
+                if (it == regionCenters.end() && !fallbackCenters.empty()) {  // (its tube has no center)
+                    const float own = fallbackOf(s);
+                    it = own == own ? fallbackCenters.find(own) : fallbackCenters.end();
+                    // followTubes, centers given: none of its own tube's (a strand rooted in no tube,
+                    // at a seam): the nearest center of all, so no strand is left unclumped.
+                    if (it == fallbackCenters.end()) anywhere = true;
+                } else if (it == regionCenters.end()) {
+                    return kNoCenter;
+                }
+                if (!anywhere) {
+                    search = &*it->second.index;
+                    region = &it->second.centers;
+                }
             }
             auto centerAt = [&](std::size_t i) { return region ? static_cast<std::size_t>((*region)[i]) : i; };
             if (!parts) return static_cast<std::uint32_t>(centerAt(search->nearest(query)));
@@ -3033,6 +3121,17 @@ void clumpCopyNeighbors(const PointIndex& index, const std::vector<Vec3f>& roots
         const float w = weights[j] / sum;
         std::memcpy(&out[5 + j], &w, sizeof w);
     }
+}
+
+void clumpGuideCurve(const Vec3f* points, std::size_t count, Vec3f* out) {
+    if (count >= 3 && count < kClumpCenterSamples) {
+        thread_local std::vector<Vec3f> smooth;
+        const int perSpan = std::max(4, static_cast<int>((2 * kClumpCenterSamples + count - 2) / (count - 1)));
+        smooth = smoothPolyline(points, count, perSpan);
+        resampleByArcLengthInto(smooth.data(), smooth.size(), out, kClumpCenterSamples);
+        return;
+    }
+    resampleByArcLengthInto(points, count, out, kClumpCenterSamples);
 }
 
 }  // namespace groomlab

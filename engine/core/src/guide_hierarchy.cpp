@@ -91,13 +91,13 @@ FootprintTurn footprintTurn(const HierarchyGuide& parent, const Frame& rootFrame
 // turn from the guide's rotation-minimizing frames (`frames`) so that, at twist 0, the section's
 // height (v) points off the scalp and its width (u) lies along it, all along the guide: the
 // scalp's normal at the point nearest each guide point, taken across the guide. It holds
-// where the guide lies within kNear section extents of the scalp and leans at least 30 degrees
+// where the guide lies within kNear section extents of the scalp (on it, not standing off it) and leans at least 30 degrees
 // off the normal there; farther off (none past kFar extents) or more upright, the sections keep
 // the roll they had before (the frames carried on), so a lock hanging off the head keeps the
 // way it left it. Evened out along the guide; empty when it is 0 all along.
 std::vector<float> sectionRoll(const std::vector<Vec3f>& points, const std::vector<Frame>& frames, const TubeProfile& tube,
                                const ScalpMesh& scalp, float scale) {
-    constexpr float kNear = 2.0f, kFar = 6.0f;
+    constexpr float kNear = 0.75f, kFar = 1.5f;
     constexpr float kPi = 3.14159265358979f;
     const std::size_t n = points.size();
     std::vector<float> roll(n, 0.0f);
@@ -139,6 +139,41 @@ std::vector<float> sectionRoll(const std::vector<Vec3f>& points, const std::vect
         roll.swap(next);
     }
     return roll;
+}
+
+// Each point's arc length along a polyline from its first.
+std::vector<float> arcLengthsOf(const std::vector<Vec3f>& pts) {
+    std::vector<float> arc(pts.size(), 0.0f);
+    for (std::size_t i = 1; i < pts.size(); ++i) arc[i] = arc[i - 1] + (pts[i] - pts[i - 1]).length();
+    return arc;
+}
+
+// The point and frame arc length `s` along a polyline (its points' frames between them, made
+// orthonormal again); past either end, on along the end's tangent with the end's frame.
+struct AlongCurve {
+    Vec3f point;
+    Frame frame;
+};
+AlongCurve alongCurve(const std::vector<Vec3f>& pts, const std::vector<Frame>& frames, const std::vector<float>& arc, float s) {
+    const std::size_t n = pts.size();
+    if (n == 0) return {};
+    if (n == 1 || s <= 0.0f) return {pts.front() + frames.front().tangent * std::min(s, 0.0f), frames.front()};
+    if (s >= arc.back()) return {pts.back() + frames.back().tangent * (s - arc.back()), frames.back()};
+    const std::size_t k = std::min<std::size_t>(
+        static_cast<std::size_t>(std::upper_bound(arc.begin(), arc.end(), s) - arc.begin()) - 1, n - 2);
+    const float span = arc[k + 1] - arc[k];
+    const float f = span > 0.0f ? std::clamp((s - arc[k]) / span, 0.0f, 1.0f) : 0.0f;
+    AlongCurve out;
+    out.point = pts[k] + (pts[k + 1] - pts[k]) * f;
+    Vec3f tangent = frames[k].tangent * (1.0f - f) + frames[k + 1].tangent * f;
+    tangent = tangent.length() > 1e-12f ? tangent.normalized() : frames[k].tangent;
+    Vec3f normal = frames[k].normal * (1.0f - f) + frames[k + 1].normal * f;
+    normal = normal - tangent * normal.dot(tangent);
+    normal = normal.length() > 1e-12f ? normal.normalized() : frames[k].normal;
+    out.frame.tangent = tangent;
+    out.frame.normal = normal;
+    out.frame.binormal = tangent.cross(normal);
+    return out;
 }
 
 Vec3f rotateXY(const Vec3f& v, float angle) {
@@ -407,10 +442,29 @@ void GuideHierarchy::removeGroup(GroupId id) {
                                  [&](const HierarchyGuide& g) { return doomed.count(g.group) > 0; }),
                   guides_.end());
     rebuildIndex();
+    pruneOwnedTubeShapes();
 }
 
 // ---------------------------------------------------------------------------
 // Guides
+
+void GuideHierarchy::pruneOwnedTubeShapes() {
+    const std::string prefix = kOwnedTubeShapePrefix;
+    std::set<std::string> used;
+    for (const HierarchyGuide& g : guides_) {
+        if (g.tube.custom) used.insert(g.tube.custom->name);
+        for (const std::optional<TubeShapeRef>* ref : {&g.tube.midShape, &g.tube.tipShape}) {  // (a mid or tip profile)
+            if (*ref && (*ref)->custom) used.insert((*ref)->custom->name);
+        }
+    }
+    for (auto it = tubeShapes_.begin(); it != tubeShapes_.end();) {
+        if (it->first.compare(0, prefix.size(), prefix) == 0 && !used.count(it->first)) {
+            it = tubeShapes_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
 
 void GuideHierarchy::rebuildIndex() {
     invalidateHash();
@@ -531,6 +585,36 @@ GroupId GuideHierarchy::generateChildren(GroupId parentGroup, const std::string&
             GuideId id = hashCombine(hashCombine(hash64(parentId), params.seed), k);
             while (id == kNoGuide || index_.count(id)) id = hash64(id);  // keep IDs stable, unique and nonzero
 
+            if (params.split) {
+                // A slice of the parent's section: across its longer side at the root, centered.
+                const TubeSection root = parent.tube.sectionAt(0.0f);
+                const bool across = root.aspect <= 1.0f;  // the width is the longer side: cut it
+                const float slices = static_cast<float>(params.count);
+                const float center = -1.0f + (2.0f * static_cast<float>(k) + 1.0f) / slices;
+                const Vec3f at = across ? Vec3f(center, 0.0f, 0.0f) : Vec3f(0.0f, center, 0.0f);
+                HierarchyGuide child;
+                child.id = id;
+                child.group = childGroup;
+                child.parent = parentId;
+                child.tube = parent.tube;
+                child.tube.roll.clear();
+                if (across) {
+                    child.tube.scaleWidth(1.0f / slices);
+                    for (float& a : child.tube.aspect) a = std::clamp(a * slices, kMinTubeAspect, kMaxTubeAspect);
+                } else {
+                    for (float& a : child.tube.aspect) a = std::clamp(a / slices, kMinTubeAspect, kMaxTubeAspect);
+                }
+                child.offsets.assign(n, at);
+                child.offsetsAlongCurve = followsAlongCurve(child);
+                child.frameUp = parentFrames.empty() ? parent.frameUp : parentFrames.front().normal;
+                resolveFollower(child, parent, nullptr, &parentFrames);
+                child.frameUp = parentFrames.empty() ? parent.frameUp : parentFrames.front().normal;
+                index_[id] = guides_.size();
+                guides_.push_back(std::move(child));
+                made.push_back(id);
+                continue;
+            }
+
             Rng rng(id);
             const float u = rng.nextFloat();
             const float angle = kTwoPi * rng.nextFloat();
@@ -560,6 +644,7 @@ GroupId GuideHierarchy::generateChildren(GroupId parentGroup, const std::string&
                 const float t = paramAt(i, n);
                 child.offsets[i] = rotateXY(rootXY * (1.0f - t) + tipXY * t, params.twist * t);
             }
+            child.offsetsAlongCurve = followsAlongCurve(child);
             resolveFollower(child, parent, nullptr, &parentFrames);
             if (!parent.tube.shaped()) child.frameUp = anyPerpendicular(rootTangent(child.points));
 
@@ -619,6 +704,12 @@ void GuideHierarchy::resolveFollower(HierarchyGuide& child, const HierarchyGuide
     const std::vector<Frame>& frames = computed.empty() ? *parentFrames : computed;
     child.points.resize(n);
     const bool blended = parent.tube.blended();
+    // A root tube's hierarchy: the along offset slides the point along the parent's curve (and the
+    // across one sits in the frame there), not out along the parent point's tangent, so a child
+    // groomed away from its parent follows the parent round a bend keeping its own shape, never
+    // zig-zagging back across it (alongCurve; offsetsFromWorld's inverse).
+    const bool slides = child.offsetsAlongCurve;
+    const std::vector<float> arc = slides ? arcLengthsOf(parent.points) : std::vector<float>{};
     // The offsets are the parent tube's section coordinates (tube.h): across in its sections,
     // along in scene units. A plain round tube's sections (no twist, aspect 1) give the offsets
     // times the width, to the bit as before sections.
@@ -628,7 +719,12 @@ void GuideHierarchy::resolveFollower(HierarchyGuide& child, const HierarchyGuide
         // (A tube of several profiles: the offset carried along them, tube.h.)
         const SectionPoint q = blended ? tubeBlendAt(parent.tube.blendPoint(off.x, off.y), off.x, off.y, t) : SectionPoint{off.x, off.y};
         const Vec3f o = sectionOffset(parent.tube.sectionAt(t), q.u, q.v, scale_);
-        child.points[i] = parent.points[i] + frames[i].toWorld({o.x, o.y, off.z * scale_});
+        if (slides) {
+            const AlongCurve at = alongCurve(parent.points, frames, arc, arc[i] + off.z * scale_);
+            child.points[i] = at.point + at.frame.toWorld({o.x, o.y, 0.0f});
+        } else {
+            child.points[i] = parent.points[i] + frames[i].toWorld({o.x, o.y, off.z * scale_});
+        }
     }
     // A shaped tube's children keep their frames started from its root's, so their own tubes lie
     // as the parent's does however it turns.
@@ -687,18 +783,83 @@ std::vector<Vec3f> GuideHierarchy::offsetsFromWorld(const HierarchyGuide& child,
         shift = onFoot - foot.back(onFoot);
     }
     std::vector<Vec3f> offsets(n);
+    const bool slides = followsAlongCurve(child);
+    const std::vector<float> arc = slides ? arcLengthsOf(parent.points) : std::vector<float>{};
     for (std::size_t i = 0; i < n; ++i) {
         const float t = paramAt(i, n);
-        const Vec3f local = frames[i].toLocal(pts[i] - shift * foot.fade(t) - parent.points[i]);
+        const Vec3f p = pts[i] - shift * foot.fade(t);
+        Vec3f local = frames[i].toLocal(p - parent.points[i]);
+        float along = local.z;
+        if (slides) {
+            // (resolveFollower's inverse: the spot along the parent's curve whose section holds it)
+            // The spot along the parent (arc length arc[i] + along) whose section plane holds the
+            // point, so resolveFollower gives it back exactly. Not by stepping (it runs away for a
+            // point past the parent's centre of curvature: a child curled inside a tight curl):
+            // the parent scanned for every spot whose plane the point crosses (the ends carried on
+            // along their tangents: there is always one), the one nearest the child's own spot
+            // before kept (so a stroke's dabs never jump it to another turn of a spiral), then
+            // found exactly (bisection).
+            const float length = std::max(arc.back(), 1e-6f);
+            const float lo = -arc[i] - 0.5f * length - 2.0f * std::sqrt(p.dot(p) + 1.0f),
+                        hi = arc.back() - arc[i] + 0.5f * length + 2.0f * std::sqrt(p.dot(p) + 1.0f);
+            const float before = child.offsets.empty() ? local.z : sampleEven(child.offsets, t, Vec3f{}).z * scale_;
+            auto ahead = [&](float a) {  // (how far ahead of the spot's section plane the point lies)
+                const AlongCurve c = alongCurve(parent.points, frames, arc, arc[i] + a);
+                return (p - c.point).dot(c.frame.tangent);
+            };
+            const int steps = static_cast<int>(std::clamp<std::size_t>(16 * n, 64, 4096));
+            const float h = (hi - lo) / static_cast<float>(steps);
+            float best = local.z, bestGap = std::numeric_limits<float>::max();
+            float a0 = 0.0f, a1 = 0.0f, g0 = 0.0f;
+            float prevA = lo, prevG = ahead(lo);
+            for (int k = 1; k <= steps; ++k) {
+                const float a = lo + h * static_cast<float>(k);
+                const float g = ahead(a);
+                if ((prevG > 0.0f) != (g > 0.0f) || g == 0.0f) {  // the plane crossed between prevA and a
+                    const float gap = std::abs(0.5f * (prevA + a) - before);
+                    if (gap < bestGap) {
+                        bestGap = gap;
+                        a0 = prevA;
+                        a1 = a;
+                        g0 = prevG;
+                    }
+                }
+                prevA = a;
+                prevG = g;
+            }
+            if (bestGap < std::numeric_limits<float>::max()) {
+                for (int pass = 0; pass < 60; ++pass) {
+                    const float mid = 0.5f * (a0 + a1);
+                    const float gm = ahead(mid);
+                    if ((gm > 0.0f) == (g0 > 0.0f)) {
+                        a0 = mid;
+                        g0 = gm;
+                    } else {
+                        a1 = mid;
+                    }
+                }
+                best = 0.5f * (a0 + a1);
+            }
+            along = best;
+            const AlongCurve at = alongCurve(parent.points, frames, arc, arc[i] + along);
+            local = at.frame.toLocal(p - at.point);
+        }
         SectionPoint at = sectionCoords(parent.tube.sectionAt(t), local.x, local.y, scale_);
         if (blended) at = parent.tube.unblend(at.u, at.v, t);  // (back into the root's outline)
-        offsets[i] = {at.u, at.v, local.z / scale_};
+        offsets[i] = {at.u, at.v, along / scale_};
     }
     return offsets;
 }
 
+bool GuideHierarchy::followsAlongCurve(const HierarchyGuide& child) const {
+    if (!child.isChild()) return false;
+    const HierarchyGuide* base = guide(baseIdOf(child));
+    return base && !base->isChild() && isRootTube(base->tube, 0);
+}
+
 void GuideHierarchy::bindOffsets(HierarchyGuide& child, const HierarchyGuide& parent) const {
     child.offsets = offsetsFromWorld(child, parent);
+    child.offsetsAlongCurve = followsAlongCurve(child);  // (as offsetsFromWorld bound them)
     const std::size_t own = child.points.size();
     child.pointCount = own >= 2 && own != parent.points.size() ? static_cast<std::uint32_t>(own) : 0;
 }
@@ -710,7 +871,27 @@ void GuideHierarchy::evaluateGuide(HierarchyGuide& g, const ScalpMesh* scalp, co
     // and, for a shaped tube, its sections' roll (TubeProfile::roll).
     if (!scalp || scalp->triangleCount() == 0) return;
     if (scalp->contains(g.root)) g.rootNormal = scalp->normal(g.root);
-    if (g.tube.shaped() && g.points.size() >= 2) {
+    if (!g.isChild() && isRootTube(g.tube, 0) && g.points.size() >= 2 && scalp->contains(g.root)) {
+        // A root-first tube: its footprint is fixed on the scalp (TubeSpine::setRootOnScalp), so its
+        // whole tube rolls by one angle to meet it: the root section, turned flat onto the scalp by
+        // the least rotation from the guide's root way (as a footprint is laid), lands on the fixed
+        // one, and the hair leaving the root area keeps its place round the tube, never twisting
+        // (whichever way the guide is combed).
+        const std::vector<Frame> frames = rotationMinimizingFrames(g.points.data(), g.points.size(), g.frameUp);
+        const Vec3f n = scalp->normal(g.root);
+        const Vec3f across = scalp->acrossAt(g.root);
+        const Vec3f way = frames.front().tangent;
+        float roll = 0.0f;
+        if (across.length() > 0.5f && way.length() > 0.5f && way.normalized().dot(n) > -1.0f + 1e-4f) {
+            Vec3f laid = Rotation(way.normalized(), n)(frames.front().normal);
+            laid = laid - n * laid.dot(n);
+            if (laid.length() > 1e-6f) {
+                laid = laid.normalized();
+                roll = std::atan2(n.dot(laid.cross(across)), laid.dot(across));
+            }
+        }
+        g.tube.roll = {roll};
+    } else if (g.tube.shaped() && g.tube.rollOnScalp && g.points.size() >= 2) {
         g.tube.roll = sectionRoll(g.points, rotationMinimizingFrames(g.points.data(), g.points.size(), g.frameUp), g.tube,
                                   *scalp, scale_);
     } else {
@@ -1020,14 +1201,41 @@ void GuideHierarchy::demoteGroup(GroupId groupId, GroupId newParent) {
     grp->parent = newParent;
 }
 
-void GuideHierarchy::removeGuides(const std::vector<GuideId>& ids) {
+void GuideHierarchy::removeGuides(const std::vector<GuideId>& ids, bool dropEmptiedGroups) {
     invalidateHash();
     std::set<GuideId> doomed;
-    for (const std::size_t i : subtrees(ids, true)) doomed.insert(guides_[i].id);
+    std::set<GroupId> emptied;  // (the groups the removed guides were in, and the groups above them)
+    for (const std::size_t i : subtrees(ids, true)) {
+        doomed.insert(guides_[i].id);
+        if (dropEmptiedGroups) emptied.insert(guides_[i].group);
+    }
     guides_.erase(std::remove_if(guides_.begin(), guides_.end(),
                                  [&](const HierarchyGuide& g) { return doomed.count(g.id) > 0; }),
                   guides_.end());
     rebuildIndex();
+    if (!emptied.empty()) {
+        for (const GroupId id : std::vector<GroupId>(emptied.begin(), emptied.end())) {
+            for (const GuideGroup* g = group(id); g && g->parent != kNoGroup; g = group(g->parent)) emptied.insert(g->parent);
+        }
+        std::set<GroupId> holding;  // groups with a guide in them or in a group under them
+        for (const HierarchyGuide& g : guides_) {
+            for (const GuideGroup* grp = group(g.group); grp && holding.insert(grp->id).second; grp = group(grp->parent)) {
+            }
+        }
+        // The highest emptied child group of each emptied branch (removeGroup takes those under it).
+        std::vector<GroupId> drop;
+        for (const GroupId id : emptied) {
+            const GuideGroup* g = group(id);
+            if (!g || g->parent == kNoGroup || holding.count(id)) continue;
+            const GuideGroup* up = group(g->parent);
+            if (up && up->parent != kNoGroup && emptied.count(up->id) && !holding.count(up->id)) continue;
+            drop.push_back(id);
+        }
+        for (const GroupId id : drop) {
+            if (group(id)) removeGroup(id);
+        }
+    }
+    pruneOwnedTubeShapes();
 }
 
 std::vector<GuideId> GuideHierarchy::mirrorGroup(GroupId groupId, int axis, float center, bool fromPositive) {
@@ -1306,6 +1514,16 @@ void GuideHierarchy::setPoints(GuideId id, std::vector<Vec3f> points) {
     invalidateHash();
     HierarchyGuide* g = mutableGuide(id);
     if (!g) throw std::invalid_argument("setPoints: unknown guide");
+    // A primary's frame carried with its root's turn (as pose carries it): a brush tipping the guide
+    // over moves its tube with it, not twisted round it (frameUp kept as it is would be squared
+    // onto the new root direction, which turns it the more the root tips).
+    if (!g->followsParent() && g->points.size() >= 2 && points.size() >= 2) {
+        const Vec3f from = rootTangent(g->points), to = rootTangent(points);
+        const Vec3f up = g->frameUp - from * g->frameUp.dot(from);
+        if (up.length() > 1e-6f && from.length() > 0.0f && to.length() > 0.0f) {
+            g->frameUp = rotateBetween(up.normalized(), from, to);
+        }
+    }
     g->points = std::move(points);
     g->rootLocal.clear();  // re-bind to the scalp on the next evaluate
     if (g->followsParent()) {
@@ -1541,6 +1759,52 @@ bool GuideHierarchy::hasAttributes() const {
     return false;
 }
 
+namespace {
+const HierarchyGuide* baseOf(const HierarchyGuide& g, const std::vector<HierarchyGuide>& guides,
+                             const std::unordered_map<GuideId, std::size_t>& index) {
+    const HierarchyGuide* at = &g;
+    for (std::size_t steps = 0; at->parent != kNoGuide && steps < guides.size(); ++steps) {
+        const auto it = index.find(at->parent);
+        if (it == index.end()) break;
+        at = &guides[it->second];
+    }
+    return at;
+}
+}  // namespace
+
+StrandRoot GuideHierarchy::baseRootOf(const HierarchyGuide& g) const { return baseOf(g, guides_, index_)->root; }
+
+GuideId GuideHierarchy::baseIdOf(const HierarchyGuide& g) const { return baseOf(g, guides_, index_)->id; }
+
+std::vector<GuideId> GuideHierarchy::rootTubeIds() const {
+    std::vector<GuideId> out;
+    for (const HierarchyGuide& g : guides_) {
+        if (!g.isChild() && isRootTube(g.tube, 0)) out.push_back(g.id);
+    }
+    std::sort(out.begin(), out.end());
+    return out;
+}
+
+std::array<float, 3> rootTubeColor(std::size_t k) {
+    // colorsys.hsv_to_rgb(hue, 0.8, value), as root_tubes.region_colors.
+    const double hue = std::fmod(static_cast<double>(k) * 0.618033988749895, 1.0);
+    const double v = std::array<double, 3>{0.95, 0.7, 0.5}[(k / 7) % 3];
+    const double sat = 0.8;
+    const int i = static_cast<int>(hue * 6.0);
+    const double f = hue * 6.0 - i;
+    const double p = v * (1.0 - sat), q = v * (1.0 - sat * f), t = v * (1.0 - sat * (1.0 - f));
+    double r = v, g = t, b = p;
+    switch (i % 6) {
+        case 0: r = v; g = t; b = p; break;
+        case 1: r = q; g = v; b = p; break;
+        case 2: r = p; g = v; b = t; break;
+        case 3: r = p; g = q; b = v; break;
+        case 4: r = t; g = p; b = v; break;
+        default: r = v; g = p; b = q; break;
+    }
+    return {static_cast<float>(r), static_cast<float>(g), static_cast<float>(b)};
+}
+
 GuideSet GuideHierarchy::flattenGroup(GroupId groupId) const {
     GuideSet set;
     const bool attributes = hasAttributes();
@@ -1555,6 +1819,8 @@ GuideSet GuideHierarchy::flattenGroup(GroupId groupId) const {
         out.tube.scaleWidth(scale_);
         out.frameUp = g.frameUp;
         out.depth = depth;
+        out.baseRoot = baseRootOf(g);
+        out.baseId = baseIdOf(g);
         if (attributes) out.attributes = effectiveAttributes(g);
         if (layers) out.pointAttributes = effectivePointAttributes(g);
     }
@@ -1577,6 +1843,8 @@ GuideSet GuideHierarchy::flatten(int level) const {
         out.tube.scaleWidth(scale_);
         out.frameUp = g.frameUp;
         out.depth = depths[g.group];
+        out.baseRoot = baseRootOf(g);
+        out.baseId = baseIdOf(g);
         if (attributes) out.attributes = effectiveAttributes(g);
         if (layers) out.pointAttributes = effectivePointAttributes(g);
     }
@@ -1622,6 +1890,7 @@ std::uint64_t GuideHierarchy::computeContentHash() const {
         for (const Vec3f& p : g.points) h = hashVec(h, p);
         h = hashCombine(h, g.offsets.size());
         for (const Vec3f& o : g.offsets) h = hashVec(h, o);
+        if (g.offsetsAlongCurve) h = hashCombine(h, 0xA1C0u);
         if (g.pointCount > 0) h = hashCombine(h, static_cast<std::uint64_t>(g.pointCount) + 0x9C0u);  // (none: as it always has)
         h = hashCombine(h, g.rootLocal.size());
         for (const Vec3f& l : g.rootLocal) h = hashVec(h, l);
@@ -1671,6 +1940,7 @@ json guideToJson(const HierarchyGuide& g) {
     if (g.tube.midHold != 0.0f) j["tube"]["midHold"] = g.tube.midHold;
     if (g.tube.tipHold != 0.0f) j["tube"]["tipHold"] = g.tube.tipHold;
     if (g.tube.midAt != 0.5f) j["tube"]["midAt"] = g.tube.midAt;
+    if (!g.tube.rollOnScalp) j["tube"]["rollOnScalp"] = false;
     if (g.parent != kNoGuide) j["parent"] = g.parent;
     if (g.locked) j["locked"] = true;
     if (g.ownSegments) j["ownSegments"] = true;
@@ -1678,6 +1948,7 @@ json guideToJson(const HierarchyGuide& g) {
     if (!g.pointAttributes.empty()) j["pointAttributes"] = g.pointAttributes;
     if (g.followsParent()) {
         j["offsets"] = vecsToJson(g.offsets);
+        if (g.offsetsAlongCurve) j["offsetsAlongCurve"] = true;
         if (g.pointCount > 0) j["pointCount"] = g.pointCount;
     } else {
         j["points"] = vecsToJson(g.points);
@@ -1744,6 +2015,9 @@ HierarchyGuide guideFromJson(const json& j, const TubeShapeLibrary& library, std
                                         std::pair<const char*, float*>{"midAt", &g.tube.midAt}}) {
             if (tube.contains(key) && tube.at(key).is_number()) *into = std::clamp(tube.at(key).get<float>(), 0.0f, 1.0f);
         }
+        if (tube.contains("rollOnScalp") && tube.at("rollOnScalp").is_boolean()) {
+            g.tube.rollOnScalp = tube.at("rollOnScalp").get<bool>();
+        }
     }
     if (j.contains("attributes")) g.attributes = j.at("attributes").get<std::map<std::string, float>>();
     if (j.contains("pointAttributes")) {
@@ -1751,6 +2025,7 @@ HierarchyGuide guideFromJson(const json& j, const TubeShapeLibrary& library, std
     }
     if (j.contains("points")) g.points = vecsFromJson(j.at("points"));
     if (j.contains("offsets")) g.offsets = vecsFromJson(j.at("offsets"));
+    g.offsetsAlongCurve = j.value("offsetsAlongCurve", false);
     g.pointCount = std::min(j.value("pointCount", std::uint32_t{0}), std::uint32_t{257});
     if (j.contains("rootLocal")) g.rootLocal = vecsFromJson(j.at("rootLocal"));
     if (j.contains("frameUpLocal")) {

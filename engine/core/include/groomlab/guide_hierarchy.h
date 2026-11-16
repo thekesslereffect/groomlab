@@ -90,8 +90,12 @@ struct HierarchyGuide {
     // coordinates (tube.h: in its rotation-minimizing frame, turned by the
     // section's twist, in units of its width across and width times aspect up),
     // so children follow the tube as it flattens, twists and tapers; z is along
-    // the parent's tangent, in scene units.
+    // the parent's tangent, in scene units (offsetsAlongCurve: along its curve).
     std::vector<Vec3f> offsets;
+    // The offsets' z slides along the parent's curve (bound so in a root tube's hierarchy:
+    // followsAlongCurve), not out along each parent point's tangent: the child follows the parent
+    // round a bend keeping its shape. Offsets bound before (false) keep their meaning.
+    bool offsetsAlongCurve = false;
     // A following child's own point count (it was resampled, drawn or its group has segments of
     // its own): its shape, rebuilt from its parent's, respaced to that many points. 0: its
     // parent's count.
@@ -121,6 +125,13 @@ struct ChildGenerationParams {
     float jitter = 0.1f;           // random tip offset, in section units of the parent's tube
     float childTubeScale = 0.35f;  // child tube width as a fraction of the parent's (its shape, aspect and twist the parent's)
     std::uint64_t seed = 0;
+    // Split the parent's tube instead (the Tube hierarchy's Add, Tonic's subdivided tubes): the
+    // `count` children cut its section into equal slices across its longer side at the root (its
+    // width, or its height where the root's aspect is above 1), each child's tube that slice (the
+    // parent's shape drawn in it: its width or its aspect divided by count), centered in it from
+    // root to tip. Spreads, twist, jitter, childTubeScale and seed are not read. The children's
+    // frames start from the parent's root frame, so each slice lies across the parent as cut.
+    bool split = false;
 };
 
 // A guide group's name as it is kept: one word. The hosts' lists of group names (hidden groups,
@@ -293,8 +304,11 @@ public:
     // mapping's local rotation and scale there (closest and bounds: as above); tube widths and
     // children's offsets along scale with the guide they hang from (keepLengths: they keep theirs).
     void transfer(const ScalpMapping& mapping);
-    // Removes guides and their descendants.
-    void removeGuides(const std::vector<GuideId>& guides);
+    // Removes guides and their descendants. `dropEmptiedGroups` (a user's delete: the erase brush,
+    // a delete command): a child group (a tube hierarchy's level, generated children's group) left
+    // with no guides by it goes too, so no empty levels stay behind; a top-level group stays (the
+    // graph's Guides nodes read it by name), as does a group that was empty before.
+    void removeGuides(const std::vector<GuideId>& guides, bool dropEmptiedGroups = false);
 
     // Rebuilds guides with `segments` segments (1 to 256) evenly along the smooth curve through
     // their points, as the viewport draws it, keeping their shape (the Segments slider). Frozen
@@ -381,6 +395,16 @@ public:
     void removeAttribute(const std::string& name);
     void renameAttribute(const std::string& from, const std::string& to);
     GuideSet flattenGroup(GroupId group) const;
+    // The root of the guide `g`'s line of parents starts from (its own for a guide with none).
+    StrandRoot baseRootOf(const HierarchyGuide& g) const;
+    // That guide's ID (its own for a guide with none).
+    GuideId baseIdOf(const HierarchyGuide& g) const;
+    // Whether a child follows its parent along the parent's curve (a root tube's hierarchy: its
+    // along offset slides along the parent, resolveFollower), not along each parent point's tangent.
+    bool followsAlongCurve(const HierarchyGuide& child) const;
+    // The root-first tubes (primaries whose tube takes a kOwnedTubeShapePrefix shape: a root
+    // outline drawn on the scalp), in ID order: root tube k's color is rootTubeColor(k).
+    std::vector<GuideId> rootTubeIds() const;
 
     // Everything the hierarchy holds, hashed. Worked out once and kept until the next change:
     // every non-const member clears it (a new one must too), so hosts may call it on every
@@ -436,6 +460,8 @@ private:
     GuideId nextGuideId_ = 1;
     std::uint64_t boundTopology_ = 0;
     float scale_ = 1.0f;  // setScale
+    // The library's owned shapes (kOwnedTubeShapePrefix) no guide takes any more, removed.
+    void pruneOwnedTubeShapes();
     TubeShapeLibrary tubeShapes_;
     LengthKeySet lengthKeys_;
     std::vector<std::string> loadWarnings_;
@@ -455,5 +481,9 @@ struct TubeTargets {
 };
 TubeTargets tubeTargetsOf(const GuideHierarchy& hierarchy, const std::vector<GuideId>& selection,
                           const std::string& freeze = "freeze");
+
+// Root tube k's color (in GuideHierarchy::rootTubeIds' order): hues a golden step apart, three
+// brightnesses, none black; root_tubes.region_colors in the Maya scripts makes the same.
+std::array<float, 3> rootTubeColor(std::size_t k);
 
 }  // namespace groomlab

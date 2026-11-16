@@ -472,6 +472,7 @@ private:
     bool tubeWiresDrawn_ = false;
     bool tubeShadedDrawn_ = false;    // their surfaces shaded (GroomShape::tubeShaded)
     bool tubeWireframeDrawn_ = true;  // their wires (GroomShape::tubeWireframe)
+    bool tubeColorsDrawn_ = true;     // in their regions' colors (GroomShape::tubeColors)
     std::uint64_t uiSelection_ = 0;  // the guide selection the tube wires were drawn with
     mutable MMatrix uiCamera_;  // the view-projection the dots were last built for
     mutable int uiHeight_ = 0;

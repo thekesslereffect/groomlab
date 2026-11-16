@@ -36,6 +36,11 @@ class FlowField;  // flow.h
 // Each center as Clump follows it: resampled evenly by arc length to this many points.
 constexpr std::size_t kClumpCenterSamples = 32;
 constexpr std::uint32_t kNoClumpCenter = 0xffffffffu;
+// A guide's curve as Clump follows it (centers given as guides), kClumpCenterSamples points into
+// `out`: with 3 points or more and fewer than that, the smooth curve through them (as Interpolate
+// blends it), so clumps follow its bends, not the chords between its points; else its points
+// resampled evenly by arc length. The CPU's and the GPU run's alike.
+void clumpGuideCurve(const Vec3f* points, std::size_t count, Vec3f* out);
 
 // What Clump made `output` from: its centers (the ones with 2 points or more, with centersFrom
 // inputPoints 1 or more, in the centers' order), their curves resampled to kClumpCenterSamples

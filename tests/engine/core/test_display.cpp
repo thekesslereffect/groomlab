@@ -462,6 +462,24 @@ TEST(Display, TheTubeBrushsTubesShowAsWiresAndShadedSurfaces) {
     EXPECT_EQ(sh.item(DisplayItemId::TubeWires).geometry->vertexCount(), 0u);
 }
 
+TEST(Display, TubeSurfacesAreOpenAtTheTip) {
+    // A shaded tube has no cap at its tip: 25 rings round the guide, no point on its axis.
+    HierarchyGuide g;
+    g.points = {{0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 2.0f, 0.0f}};
+    g.frameUp = {1.0f, 0.0f, 0.0f};
+    DisplayGeometry surface;
+    appendTubeSurface(surface, g);
+    const std::size_t points = surface.positions.size() / 3;
+    ASSERT_GT(points, 0u);
+    EXPECT_EQ(points % 25u, 0u);
+    const std::size_t around = points / 25u;
+    EXPECT_EQ(surface.indices.size(), 24u * around * 6u);  // the sides' quads alone
+    for (std::size_t i = 0; i < points; ++i) {
+        const float x = surface.positions[i * 3], z = surface.positions[i * 3 + 2];
+        EXPECT_GT(x * x + z * z, 1e-8f) << "a point on the tube's axis (a cap) at " << i;
+    }
+}
+
 TEST(Display, BuffersAsRecorded) {
     json actual = json::object();
     for (const Scenario& s : scenarios()) {

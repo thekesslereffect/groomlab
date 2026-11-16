@@ -1197,18 +1197,7 @@ void appendTubeSurface(DisplayGeometry& batch, const HierarchyGuide& g, float sc
             batch.indices.insert(batch.indices.end(), {a, b, d, a, d, c});
         }
     }
-    // A flat cap at the tip (a fan round the guide's tip).
-    const Vec3f tip = g.points[n - 1];
-    const Vec3f tipWay = round ? rotationMinimizingFrames(g.points.data(), n, g.frameUp)[n - 1].tangent
-                               : (tip - g.points[n - 2]).normalized();
-    const auto cap = static_cast<std::uint32_t>(batch.positions.size() / 3);
-    batch.positions.insert(batch.positions.end(), {tip.x, tip.y, tip.z});
-    batch.normals.insert(batch.normals.end(), {tipWay.x, tipWay.y, tipWay.z});
-    for (int s = 0; s < kAround; ++s) {
-        const std::uint32_t ring = base + static_cast<std::uint32_t>(kAlong * kAround);
-        batch.indices.insert(batch.indices.end(),
-                             {cap, ring + static_cast<std::uint32_t>(s), ring + static_cast<std::uint32_t>((s + 1) % kAround)});
-    }
+    // (Open at the tip: no cap.)
 }
 
 // ---- Instances --------------------------------------------------------------------------------
@@ -1983,6 +1972,7 @@ void DisplayBuilder::buildGuides(const DisplayInputs& in, const DisplaySettings&
     key = hashChars(key, s.isolateGroup);
     key = hashChars(key, s.guideColorLayer);
     key = hashChars(key, s.guideColorSeed);
+    key = hashCombine(key, s.guideRootColors ? 0x2007u : 0x2006u);
     if (in.clumpCenters) {
         // Hashed once per set of centers (the same pointer: the same centers, held here so no
         // other set takes its address), not on every update.
@@ -2049,6 +2039,7 @@ void DisplayBuilder::buildGuides(const DisplayInputs& in, const DisplaySettings&
             }
             return false;
         };
+        const std::vector<GuideId> rootTubes = s.guideRootColors ? hierarchy->rootTubeIds() : std::vector<GuideId>{};
         for (const HierarchyGuide& g : hierarchy->guides()) {
             const int level = hierarchy->groupDepth(g.group);
             if (level < 0 || level >= kMaxDrawnGuideLevels || hiddenGuide(g)) continue;
@@ -2062,6 +2053,7 @@ void DisplayBuilder::buildGuides(const DisplayInputs& in, const DisplaySettings&
                 auto own = grp ? groupColors.find(grp->name) : groupColors.end();
                 if (own != groupColors.end()) c = own->second;
             }
+            bool isFrozen = false;
             if (attributes) {
                 if (byLayer) {
                     float v = 0.0f;
@@ -2070,9 +2062,21 @@ void DisplayBuilder::buildGuides(const DisplayInputs& in, const DisplaySettings&
                     c = {0.08f + 0.92f * v, 0.08f + 0.92f * v, 0.08f + 0.92f * v};
                 }
                 float frozen = 0.0f;
-                if (hierarchy->effectiveAttribute(g, "freeze", &frozen) && frozen >= 0.5f) c = theme.frozen;
+                if (hierarchy->effectiveAttribute(g, "freeze", &frozen) && frozen >= 0.5f) {
+                    c = theme.frozen;
+                    isFrozen = true;
+                }
             } else if (byLayer) {
                 c = {0.08f, 0.08f, 0.08f};
+            }
+            if (s.guideRootColors) {  // its root tube's color; a frozen one (soloed out) dimmed
+                const GuideId base = hierarchy->baseIdOf(g);
+                const auto at = std::lower_bound(rootTubes.begin(), rootTubes.end(), base);
+                if (at != rootTubes.end() && *at == base) {
+                    const std::array<float, 3> r = rootTubeColor(static_cast<std::size_t>(at - rootTubes.begin()));
+                    c = {r[0], r[1], r[2]};
+                }
+                if (isFrozen) c = {c[0] * 0.3f, c[1] * 0.3f, c[2] * 0.3f};
             }
             const bool dimmed = isolated != kNoGroup && !inIsolated(g.group);
             if (dimmed) c = {c[0] * 0.25f, c[1] * 0.25f, c[2] * 0.25f};

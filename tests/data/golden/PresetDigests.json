@@ -230,13 +230,13 @@
     "strand.melanin": "585bff22f9e7a57f",
     "strand.melaninRedness": "5ec86156f9531dc7"
    },
-   "everything": "0066d2cf116b1b43",
+   "everything": "bdf1f551b4a866b8",
    "ids": "6c9dd80f03761f4f",
    "points": 40902,
-   "positions": "130dd95dc6e8449c",
+   "positions": "81f8e95eb83f1902",
    "roots": "e6131fd1a27d1940",
    "strands": 2406,
-   "widths": "34f6b88dc8de7864"
+   "widths": "685bd06bc9cae579"
   },
   "creature_fur": {
    "channels": {
@@ -846,17 +846,18 @@
     "strand.colorR": "beb9044bb05efd80",
     "strand.melanin": "37dcc3f2f6378f18",
     "strand.melaninRedness": "7dd653c1c96969a1",
+    "strand.tubeBase": "4c58132b2bc09a0f",
     "strand.tubeId": "c50b11fad20e3955",
-    "strand.tubeU": "bd4bc1d443ccc031",
-    "strand.tubeV": "bf996f494bd81a52"
+    "strand.tubeU": "712471ec221701f6",
+    "strand.tubeV": "8cb8306139d6b6c4"
    },
-   "everything": "916283b440ce993b",
+   "everything": "cf9e5e0e565f958f",
    "ids": "d960092680c33616",
    "points": 1428,
-   "positions": "b210cebdb571f506",
+   "positions": "07dea34dc0b31a6d",
    "roots": "d4991a8f008280c4",
    "strands": 84,
-   "widths": "173b2a38cad66b9d"
+   "widths": "cd21e33b6e0517be"
   },
   "two_tone_tips": {
    "channels": {

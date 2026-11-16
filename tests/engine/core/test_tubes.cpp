@@ -825,6 +825,39 @@ TEST(FillTubes, OverlappingTubesTakeTheMostCentral) {
     EXPECT_NE(first, second);
 }
 
+TEST(FillTubes, OverlappingTubesOfDifferentSizesSplitByDistanceOnTheScalp) {
+    // A big tube and a small one overlapping: a root in both goes to the one whose edge lies
+    // farther from it (as lengths on the scalp), not to the one it lies in by a larger share of the
+    // tube's own size (which hands the small tube roots that lie deeper in the big one).
+    TubeGraph f;
+    auto set = std::make_shared<GuideSet>();
+    const float bigX = 0.3f, bigR = 0.2f, smallX = 0.54f, smallR = 0.08f;
+    for (std::uint64_t id : {1u, 2u}) {
+        Guide& g = set->add(id, straightGuide({id == 1 ? bigX : smallX, 0, 0.5f}));
+        g.hasTube = true;
+        g.tube.width = {id == 1 ? bigR : smallR};
+    }
+    f.ext.set("guides", GuidesPtr(set), 9);
+    const StrandsPtr out = f.eval(f.interp);
+    const std::vector<float>& ids = *out->strandChannel("tubeId");
+    float big = -1, small = -1;
+    std::size_t overlap = 0;
+    for (std::size_t s = 0; s < out->strandCount(); ++s) {
+        const Vec3f r = out->strandPoints(s)[0];
+        const float inBig = bigR - std::hypot(r.x - bigX, r.z - 0.5f), inSmall = smallR - std::hypot(r.x - smallX, r.z - 0.5f);
+        if (inBig < 1e-3f || inSmall < 1e-3f || std::abs(inBig - inSmall) < 1e-3f) continue;
+        ++overlap;
+        ASSERT_GE(ids[s], 0.0f);
+        float& mine = inBig > inSmall ? big : small;
+        if (mine < 0.0f) mine = ids[s];
+        EXPECT_EQ(ids[s], mine) << "the tube whose edge lies farther";
+    }
+    EXPECT_GT(overlap, 4u);
+    EXPECT_GE(big, 0.0f);
+    EXPECT_GE(small, 0.0f);
+    EXPECT_NE(big, small);
+}
+
 TEST(FillTubes, ClumpsStayInsideTheTubeAndFlattenWithIt) {
     TubeGraph f;
     f.tube.twist = {0.0f};  // flat across x all along
@@ -1747,6 +1780,183 @@ TEST(TubeTargets, TheSelectionElseTheSoloAndTheirProfiles) {
     t = tubeTargetsOf(h, {});
     EXPECT_EQ(t.source, "solo");
     EXPECT_EQ(t.guides, (std::vector<GuideId>{ids[2]}));
+}
+
+// The Tube hierarchy's Add (ChildGenerationParams::split): the children cut the parent's section
+// into equal slices across its longer side, side by side, each a slice's tube, following it.
+TEST(Tubes, SplitChildrenSliceTheParentAcrossItsLongerSide) {
+    for (const float aspect : {0.5f, 2.0f}) {
+        GuideHierarchy h;
+        const GroupId g = h.addGroup("tubes");
+        TubeProfile tube;
+        tube.shape = TubeShape::Ribbon;
+        tube.width = {0.2f};
+        tube.aspect = {aspect};
+        const GuideId parent = h.addGuide(g, straightGuide({0, 0, 0}), tube);
+        h.evaluate(nullptr);
+        ChildGenerationParams p;
+        p.count = 2;
+        p.split = true;
+        const GroupId kids = h.generateChildren(g, "tubes_L2", p);
+        h.evaluate(nullptr);
+        const std::vector<GuideId> ids = h.guidesInGroup(kids);
+        ASSERT_EQ(ids.size(), 2u);
+        const HierarchyGuide& a = *h.guide(ids[0]);
+        const HierarchyGuide& b = *h.guide(ids[1]);
+        const Vec3f root = h.guide(parent)->points.front();
+        // Side by side across the longer side, half of it apart, about the parent's guide.
+        const float longer = aspect <= 1.0f ? 0.2f : 0.2f * aspect;
+        EXPECT_NEAR((a.points.front() - b.points.front()).length(), longer, 1e-4f) << "aspect " << aspect;
+        EXPECT_NEAR(((a.points.front() + b.points.front()) * 0.5f - root).length(), 0.0f, 1e-4f);
+        EXPECT_NEAR((a.points.back() - b.points.back()).length(), longer, 1e-4f);
+        // Each child's tube is its slice: the same shape, half the longer side.
+        for (const HierarchyGuide* c : {&a, &b}) {
+            EXPECT_EQ(c->tube.shape, TubeShape::Ribbon);
+            EXPECT_NEAR(c->tube.widthAt(0.0f), aspect <= 1.0f ? 0.1f : 0.2f, 1e-5f);
+            EXPECT_NEAR(c->tube.widthAt(0.0f) * c->tube.aspectAt(0.0f), aspect <= 1.0f ? 0.1f : 0.2f, 1e-5f);
+        }
+        // Splitting again cuts each slice in two: four tubes under the two.
+        const GroupId grand = h.generateChildren(kids, "tubes_L3", p);
+        h.evaluate(nullptr);
+        EXPECT_EQ(h.guidesInGroup(grand).size(), 4u);
+        // The parent moved: its slices go with it.
+        std::vector<Vec3f> moved = h.guide(parent)->points;
+        for (Vec3f& q : moved) q += Vec3f(0.0f, 0.0f, 0.5f);
+        h.setPoints(parent, moved);
+        h.evaluate(nullptr);
+        EXPECT_NEAR(((h.guide(ids[0])->points.front() + h.guide(ids[1])->points.front()) * 0.5f - moved.front()).length(),
+                    0.0f, 1e-4f);
+    }
+}
+
+// Every guide of a tube hierarchy carries its base tube's root (Guide::baseRoot): where an
+// Interpolate reads its region on a region map, so tubes split from a tube keep its region.
+TEST(Tubes, SplitTubesCarryTheirBaseTubesRoot) {
+    const std::shared_ptr<const ScalpMesh> scalp = test::makeSphere(48, 96, 1.0f);
+    GuideHierarchy h;
+    const GroupId g = h.addGroup("tubes");
+    TubeProfile tube;
+    tube.shape = TubeShape::Ribbon;
+    tube.width = {0.2f};
+    tube.aspect = {0.5f};
+    const GuideId parent = h.addGuide(g, straightGuide({0.0f, 1.0f, 0.0f}), tube);
+    h.evaluate(scalp.get());
+    ChildGenerationParams p;
+    p.count = 2;
+    p.split = true;
+    const GroupId kids = h.generateChildren(g, "tubes_L2", p);
+    const GroupId grand = h.generateChildren(kids, "tubes_L3", p);
+    h.evaluate(scalp.get());
+    const StrandRoot base = h.guide(parent)->root;
+    ASSERT_GE(base.face, 0);
+    for (const int level : {0, 1, 2}) {
+        const GuideSet set = h.flatten(level);
+        ASSERT_FALSE(set.guides().empty()) << "level " << level;
+        for (const Guide& c : set.guides()) {
+            EXPECT_EQ(c.baseRoot.face, base.face) << "level " << level;
+            EXPECT_FLOAT_EQ(c.baseRoot.u, base.u);
+            EXPECT_FLOAT_EQ(c.baseRoot.v, base.v);
+        }
+    }
+    EXPECT_EQ(h.flattenGroup(grand).guides().front().baseRoot.face, base.face);
+}
+
+// A guide tipped over by a brush (setPoints) carries its tube round with it, not twisted about the
+// guide: its root frame turns as its root direction does (as pose turns it). With rollOnScalp off
+// the sections follow those frames alone (a root-first tube, swept from its root), and the flag is
+// saved, read back and set by a tube edit.
+TEST(TubeSections, TippedGuidesCarryTheirTubeUntwisted) {
+    const std::shared_ptr<const ScalpMesh> scalp = test::makeSphere(48, 96, 1.0f);
+    GuideHierarchy h;
+    const GroupId primary = h.addGroup("primary");
+    TubeProfile ribbon;
+    ribbon.shape = TubeShape::Ribbon;
+    ribbon.width = {0.15f};
+    ribbon.aspect = {0.3f};
+    ribbon.rollOnScalp = false;
+    const GuideId id = h.addGuide(primary, straightGuide({0.0f, 1.0f, 0.0f}), ribbon);
+    h.evaluate(scalp.get());
+    const Frame before = h.guide(id)->frames().front();
+    // Tipped 60 degrees about its root, sideways.
+    const float a = 1.0471976f, c = std::cos(a), s = std::sin(a);
+    std::vector<Vec3f> tipped;
+    for (const Vec3f& q : h.guide(id)->points) {
+        const Vec3f d = q - Vec3f(0.0f, 1.0f, 0.0f);
+        tipped.push_back(Vec3f(0.0f, 1.0f, 0.0f) + Vec3f(d.x * c - d.y * s, d.x * s + d.y * c, d.z));
+    }
+    h.setPoints(id, tipped);
+    h.evaluate(scalp.get());
+    const HierarchyGuide& g = *h.guide(id);
+    const Frame after = g.frames().front();
+    const Vec3f carried = rotateBetween(before.normal, before.tangent, after.tangent);
+    EXPECT_GT(after.normal.dot(carried), 0.9999f) << "the root frame turned with the root";
+    EXPECT_TRUE(g.tube.roll.empty()) << "no roll on the scalp with rollOnScalp off";
+    // Saved only when off, read back, and set by an edit.
+    const std::string text = h.toJson();
+    EXPECT_NE(text.find("\"rollOnScalp\":false"), std::string::npos);
+    EXPECT_FALSE(GuideHierarchy::fromJson(text).guide(id)->tube.rollOnScalp);
+    EXPECT_TRUE(editedTube(g.tube, "{\"rollOnScalp\": true}").rollOnScalp);
+    EXPECT_THROW(editedTube(g.tube, "{\"rollOnScalp\": 1}"), std::invalid_argument);
+    TubeProfile on = g.tube;
+    on.rollOnScalp = true;
+    EXPECT_NE(on, g.tube);
+    EXPECT_NE(hashTube(0, on), hashTube(0, g.tube));
+    EXPECT_EQ(tubeToJson(on).find("rollOnScalp"), std::string::npos);
+}
+
+// The roll on the scalp holds where the guide lies on the head, not where it stands off it: a
+// ribbon combed over in its upper half, far from the scalp there, keeps its sections as its frames
+// carry them.
+TEST(TubeSections, NoRollWhereTheGuideStandsOffTheScalp) {
+    const std::shared_ptr<const ScalpMesh> scalp = test::makeSphere(48, 96, 1.0f);
+    GuideHierarchy h;
+    const GroupId primary = h.addGroup("primary");
+    TubeProfile ribbon;
+    ribbon.shape = TubeShape::Ribbon;
+    ribbon.width = {0.15f};
+    ribbon.aspect = {0.3f};
+    // Standing off the equator (+x; not a pole, where a mesh sphere's normals lean), bent over
+    // sideways from its middle.
+    std::vector<Vec3f> pts;
+    for (int i = 0; i <= 16; ++i) {
+        const float x = 1.0f + std::min(i, 8) / 16.0f;
+        const float k = std::max(i - 8, 0) / 8.0f;
+        pts.push_back(Vec3f(x + 0.4f * k - 0.3f * k * k, 0.0f, 0.5f * k));
+    }
+    const GuideId id = h.addGuide(primary, pts, ribbon);
+    h.evaluate(scalp.get());
+    // Off the scalp the sections carry on as they left the root (whatever the root's few degrees
+    // on a faceted sphere): no turn where the guide bends over, far from the head.
+    const std::vector<float>& roll = h.guide(id)->tube.roll;
+    for (std::size_t i = 6; i < roll.size(); ++i) EXPECT_NEAR(roll[i], roll[5], 1e-3f) << "point " << i;
+    EXPECT_LT(std::abs(roll.empty() ? 0.0f : roll[5]), 0.05f);
+}
+
+// A library shape named kOwnedTubeShapePrefix... belongs to its guides: removed with the last of
+// them (removeGuides, removeGroup); other shapes stay.
+TEST(TubeShapes, OwnedShapesGoWithTheirLastGuide) {
+    GuideHierarchy h;
+    const GroupId g = h.addGroup("tubes");
+    const std::vector<SectionPoint> square{{-1, -1}, {1, -1}, {1, 1}, {-1, 1}};
+    h.setTubeShape(std::string(kOwnedTubeShapePrefix) + "1", square, false);
+    h.setTubeShape(std::string(kOwnedTubeShapePrefix) + "2", square, false);
+    h.setTubeShape("keep", square, false);
+    TubeProfile owned;
+    owned.custom = h.tubeShape(std::string(kOwnedTubeShapePrefix) + "1");
+    const GuideId a = h.addGuide(g, straightGuide({0, 0, 0}), owned);
+    const GuideId b = h.addGuide(g, straightGuide({1, 0, 0}), owned);
+    TubeProfile other = owned;
+    other.custom = h.tubeShape(std::string(kOwnedTubeShapePrefix) + "2");
+    const GroupId g2 = h.addGroup("more");
+    h.addGuide(g2, straightGuide({2, 0, 0}), other);
+    h.removeGuides({a});
+    EXPECT_TRUE(h.tubeShape(std::string(kOwnedTubeShapePrefix) + "1")) << "b still takes it";
+    h.removeGuides({b});
+    EXPECT_FALSE(h.tubeShape(std::string(kOwnedTubeShapePrefix) + "1"));
+    EXPECT_TRUE(h.tubeShape(std::string(kOwnedTubeShapePrefix) + "2"));
+    h.removeGroup(g2);
+    EXPECT_FALSE(h.tubeShape(std::string(kOwnedTubeShapePrefix) + "2"));
+    EXPECT_TRUE(h.tubeShape("keep")) << "a shape not owned stays";
 }
 
 }  // namespace

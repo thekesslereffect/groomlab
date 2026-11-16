@@ -613,6 +613,16 @@ if(GROOMLAB_BUILD_MAYA AND TARGET GroomLab)
                 "${CMAKE_CURRENT_BINARY_DIR}/maya_card_atlas")
 endif()
 
+# Tonic-style tubes in the Tube tool (issues 61, 62): tubes drawn root first (their regions, snapping,
+# editing the root) and the tube hierarchy's levels.
+if(GROOMLAB_BUILD_MAYA AND TARGET GroomLab)
+    add_test(NAME maya.root_tubes
+        COMMAND "${GROOMLAB_MAYA_BIN}/mayapy${CMAKE_EXECUTABLE_SUFFIX}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/hosts/maya/test_root_tubes.py"
+                "$<TARGET_FILE:GroomLab>"
+                "${PROJECT_SOURCE_DIR}/hosts/maya/scripts")
+endif()
+
 # Importing XGen grooms (both flavors) on synthetic scenes made with XGen's API, compared with
 # XGen's own strands (pictures in the work dir). Needs Maya's XGen plugin (skipped without it).
 if(GROOMLAB_BUILD_MAYA AND TARGET GroomLab AND TARGET groomlab_alembic)
@@ -820,7 +830,7 @@ endif()
 # The plugin's Python imports the build's groomlab_core module (as the
 # installed module's PYTHONPATH has it). COST starts the long suites first.
 set(GROOMLAB_MAYA_PYTHONPATH "$<$<TARGET_EXISTS:groomlab_core_py>:$<TARGET_FILE_DIR:groomlab_core_py>>")
-foreach(_maya_test maya.plugin maya.graph_editor maya.pipeline maya.groom_io maya.grooming maya.to_mesh maya.subdivision maya.hardening maya.updates maya.arnold maya.studio maya.studio_render maya.vray maya.prman maya.xgen_import maya.yeti_import maya.tube_mesh maya.card_atlas)
+foreach(_maya_test maya.plugin maya.graph_editor maya.pipeline maya.groom_io maya.grooming maya.to_mesh maya.subdivision maya.hardening maya.updates maya.arnold maya.studio maya.studio_render maya.vray maya.prman maya.xgen_import maya.yeti_import maya.tube_mesh maya.card_atlas maya.root_tubes)
     if(TEST ${_maya_test})
         set(_app_dir "${CMAKE_CURRENT_BINARY_DIR}/maya_app_dirs/${_maya_test}")
         file(MAKE_DIRECTORY "${_app_dir}")

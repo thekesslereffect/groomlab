@@ -17,7 +17,8 @@ namespace groomlab::maya {
 //        guide per strand), evaluated at density d (default 1), as primary guides of
 //        root group g (created if missing); returns the new guide IDs
 //   -generateChildren/-gc <parentGroup> [-name n] [-count c] [-rootSpread s]
-//        [-tipSpread s] [-twist t] [-jitter j] [-tubeScale s] [-seed n]
+//        [-tipSpread s] [-twist t] [-jitter j] [-tubeScale s] [-seed n] [-split true]
+//        (-split: the children cut the parent's tube into equal slices, ChildGenerationParams::split)
 //        fills every parent guide's tube with children in a new group
 //   -removeGroup/-rg <group>     removes a group, its sub-groups and guides
 //   -lock/-lk | -unlock/-ul  -guide/-gid <id> (multi-use, decimal string)

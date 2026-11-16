@@ -158,6 +158,49 @@ std::uint64_t ScalpMesh::colorSetHash(const std::string& name) const {
 }
 
 // (Hot paths: callers check the face against triangleCount() first, so no bounds check here.)
+namespace {
+
+// A triangle's frame: its first edge, its normal and their cross product (unit; false when the
+// triangle is degenerate).
+bool triangleFrame(const Vec3f& a, const Vec3f& b, const Vec3f& c, Vec3f* x, Vec3f* y, Vec3f* z) {
+    const Vec3f e = b - a;
+    const Vec3f n = e.cross(c - a);
+    const float el = e.length(), nl = n.length();
+    if (!(el > 1e-12f) || !(nl > 1e-12f) || !std::isfinite(el) || !std::isfinite(nl)) return false;
+    *x = e * (1.0f / el);
+    *z = n * (1.0f / nl);
+    *y = z->cross(*x);
+    return true;
+}
+
+}  // namespace
+
+Vec3f ScalpMesh::acrossAt(const StrandRoot& root) const {
+    assert(root.face >= 0 && static_cast<std::size_t>(root.face) < triangles_.size());
+    const Vec3f n = normal(root);
+    // A fixed axis of the rest pose taken flat onto the scalp there (the world's x, or z where the
+    // scalp faces along x), carried to the scalp as it is now by the root triangle's turn from rest:
+    // the same on whichever triangle holds a root lying on an edge or a corner (a still scalp: no
+    // turn, the smooth normal alone), and turning with the head as it moves.
+    Vec3f nr = n;
+    Vec3f rx{1, 0, 0}, ry{0, 1, 0}, rz{0, 0, 1}, cx{1, 0, 0}, cy{0, 1, 0}, cz{0, 0, 1};
+    bool turned = false;
+    if (!restPoints_.empty()) {
+        const Triangle& tri = triangles_[static_cast<std::size_t>(root.face)];
+        if (triangleFrame(restPoints_[tri[0]], restPoints_[tri[1]], restPoints_[tri[2]], &rx, &ry, &rz) &&
+            triangleFrame(points_[tri[0]], points_[tri[1]], points_[tri[2]], &cx, &cy, &cz)) {
+            turned = true;
+            nr = rx * n.dot(cx) + ry * n.dot(cy) + rz * n.dot(cz);  // (the normal back on the rest pose)
+        }
+    }
+    const Vec3f axis = std::abs(nr.x) > 0.8f * nr.length() ? Vec3f{0, 0, 1} : Vec3f{1, 0, 0};
+    Vec3f a = axis - nr * (axis.dot(nr) / std::max(nr.dot(nr), 1e-20f));
+    if (turned) a = cx * a.dot(rx) + cy * a.dot(ry) + cz * a.dot(rz);  // (rest to now)
+    const Vec3f flat = a - n * a.dot(n);
+    const float len = flat.length();
+    return len > 1e-12f && std::isfinite(len) ? flat * (1.0f / len) : Vec3f{};
+}
+
 Vec3f ScalpMesh::normal(const StrandRoot& root) const {
     assert(root.face >= 0 && static_cast<std::size_t>(root.face) < triangles_.size());
     const Triangle& tri = triangles_[static_cast<std::size_t>(root.face)];

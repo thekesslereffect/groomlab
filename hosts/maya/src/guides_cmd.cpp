@@ -58,6 +58,7 @@ const char* kTwist[] = {"-tw", "-twist"};
 const char* kJitter[] = {"-j", "-jitter"};
 const char* kTubeScale[] = {"-tsc", "-tubeScale"};
 const char* kSeed[] = {"-sd", "-seed"};
+const char* kSplit[] = {"-spl", "-split"};
 const char* kRemoveGroup[] = {"-rg", "-removeGroup"};
 const char* kRenameGroup[] = {"-rng", "-renameGroup"};
 const char* kAddGroup[] = {"-adg", "-addGroup"};
@@ -281,6 +282,7 @@ MSyntax GuidesCmd::newSyntax() {
     s.addFlag(kTwist[0], kTwist[1], MSyntax::kDouble);
     s.addFlag(kJitter[0], kJitter[1], MSyntax::kDouble);
     s.addFlag(kTubeScale[0], kTubeScale[1], MSyntax::kDouble);
+    s.addFlag(kSplit[0], kSplit[1], MSyntax::kBoolean);
     s.addFlag(kSeed[0], kSeed[1], MSyntax::kLong);
     s.addFlag(kRemoveGroup[0], kRemoveGroup[1], MSyntax::kString);
     s.addFlag(kRenameGroup[0], kRenameGroup[1], MSyntax::kString, MSyntax::kString);
@@ -624,7 +626,25 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                     vs.push_back({v.x, v.y, v.z});
                 }
             }
-            setResult(MString(nlohmann::json({{"points", points}, {"u", us}, {"v", vs}}).dump().c_str()));
+            nlohmann::json result = {{"points", points}, {"u", us}, {"v", vs}};
+            // A primary: the frame a root-first tube's footprint is laid in, fixed on the scalp
+            // (TubeSpine::setRootOnScalp: across along ScalpMesh::acrossAt, v = n x across), which a
+            // root outline is fitted in (before the guide takes its root shape too).
+            auto* rootShape = dynamic_cast<GroomShape*>(groomFn.userNode());
+            if (rootShape && n >= 1 && !g->isChild()) {
+                for (const MeshPtr& scalp : {rootShape->evaluatedCageScalp(), rootShape->evaluatedScalp()}) {
+                    if (!scalp || !scalp->contains(g->root)) continue;
+                    const Vec3f at = g->points.front();
+                    if ((scalp->position(g->root) - at).length() > 1e-3f * std::max(1.0f, at.length())) continue;
+                    const Vec3f nrm = scalp->normal(g->root);
+                    const Vec3f across = scalp->acrossAt(g->root);
+                    if (!(across.length() > 0.5f)) break;
+                    const Vec3f v = nrm.cross(across);
+                    result["footprint"] = {{"u", {across.x, across.y, across.z}}, {"v", {v.x, v.y, v.z}}, {"n", {nrm.x, nrm.y, nrm.z}}};
+                    break;
+                }
+            }
+            setResult(MString(result.dump().c_str()));
             return MS::kSuccess;
         }
         if (db.isFlagSet(kGuidePoints[0])) {
@@ -746,6 +766,7 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                 int seed = 0;
                 if (db.isFlagSet(kSeed[0])) db.getFlagArgument(kSeed[0], 0, seed);
                 p.seed = static_cast<std::uint64_t>(seed);
+                if (db.isFlagSet(kSplit[0])) db.getFlagArgument(kSplit[0], 0, p.split);
     
                 const MString childName = flagString(db, kNameFlag[0], parentName + "_children");
                 const GroupId child = h->generateChildren(parent, childName.asChar(), p, restricted ? &only : nullptr);
@@ -798,7 +819,7 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                 }
                 setResult(static_cast<int>(doomed.size()));
                 if (doomed.empty()) return MS::kSuccess;
-                h->removeGuides(doomed);
+                h->removeGuides(doomed, true);  // (a child group left empty goes too)
             } else if (db.isFlagSet(kReparent[0])) {
                 const GuideId parent = guideIdOf(flagString(db, kReparent[0], "0"));
                 const std::vector<GuideId> ids = targets();

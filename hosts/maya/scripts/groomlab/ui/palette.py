@@ -113,7 +113,7 @@ def help_tip(tool):
 
 
 # The block titles a core older than these definitions may not name yet.
-SETTING_LABELS = {"lengthKeys": "Keys", "newGuides": "New guides", "tube": "Tube", "tubeChannel": "Paints",
+SETTING_LABELS = {"lengthKeys": "Keys", "newGuides": "New guides", "tube": "Tube", "tubeChannel": "Visibility",
                   "selection": "Selection", "erases": "Erases", "flow": "Flow", "parts": "Parts"}
 
 
@@ -1404,10 +1404,8 @@ class ToolPalette(QtWidgets.QWidget):
         self.tube_panel = TubePanel(self)  # its blocks: Tube (Place, Draw), Profile and Selected guides
         card.addWidget(self.tube_panel.tube_block)
 
-        # Shape: what it paints on the tubes (Width, Flatness, Twist), then the profile and the
-        # selected guides' tubes.
-        self.tube_channel_box = widgets.Block(_setting("tubeChannel", "label"), name="paintsBlock")
-        self.tube_channel_box.setToolTip(_setting("tubeChannel", "hint"))
+        # Shape: what it paints on the tubes (Width, Flatness, Twist) at the top of Brush; then
+        # Visibility (how the tubes are drawn), the profile and the selected guides' tubes.
         self.tube_channel = QtWidgets.QButtonGroup(self)  # exclusive: one channel at a time
         self.tube_channel_buttons = {}
         for name, label, tip in TUBE_CHANNELS:
@@ -1415,7 +1413,11 @@ class ToolPalette(QtWidgets.QWidget):
             self.tube_channel.addButton(b)
             self.tube_channel_buttons[name] = b
         self.tube_channel.buttonClicked.connect(lambda _b: self.push(tubeChannel=self.tube_channel_name()))
-        self.tube_channel_box.add(widgets.seg_row(self.tube_channel_buttons.values()))  # one of them: a track
+        self.tube_channel_row = widgets.seg_row(self.tube_channel_buttons.values())  # one of them: a track
+        self.tube_channel_row.setToolTip(_setting("tubeChannel", "hint"))
+        self.brush_block.body.insertWidget(0, self.tube_channel_row)
+        self.tube_channel_box = widgets.Block("Visibility", name="paintsBlock")
+        self.tube_channel_box.setToolTip("How the tubes are drawn")
         # Shaded and Wireframe (GH-63): how the tubes the brush shows are drawn, each on its own:
         # shaded surfaces (off by default), to judge the profiles' shapes, and see-through wires (on).
         # (Switch rows: a chip's text grows bold when checked and outgrew its width.)
@@ -1427,6 +1429,19 @@ class ToolPalette(QtWidgets.QWidget):
                                              "surfaces when Shaded is on)", True, "tubeWireframe")
         self.tube_wireframe.toggled.connect(lambda on: self.push(tubeWireframe=bool(on)))
         self.tube_channel_box.add(self.tube_wireframe.row)
+        # Colors: each tube in its root tube's color (a color of its own when it has none); on the
+        # shaded surfaces with Shaded on (the wires gray), else the wires.
+        self.tube_colors = widgets.switch("Colors", "Color each tube as the root tube it comes from (its split "
+                                          "tubes and children in its color), or a color of its own: the shaded "
+                                          "surfaces with Shaded on (the wires stay gray), else the wires", True,
+                                          "tubeColors")
+        self.tube_colors.toggled.connect(lambda on: self.push(tubeColors=bool(on)))
+        self.tube_channel_box.add(self.tube_colors.row)
+        # Always visible: the tubes drawn whichever tool is up (Comb, Select, ...), as set above.
+        self.tube_always = widgets.switch("Always visible", "Keep the tubes drawn with every tool (Comb, "
+                                          "Select, ...), not only the Tube tool", False, "tubesAlwaysVisible")
+        self.tube_always.toggled.connect(lambda on: self.push(tubesAlwaysVisible=bool(on)))
+        self.tube_channel_box.add(self.tube_always.row)
         card.addWidget(self.tube_channel_box)
 
         # Select: the soft radius (its selection's), then the profile and the selected guides' tubes.
@@ -1441,7 +1456,11 @@ class ToolPalette(QtWidgets.QWidget):
         self.select_box.add(self.soft)
         card.addWidget(self.select_box)
         card.addWidget(self.tube_panel.profile_block)
-        card.addWidget(self.tube_panel.selected_block)
+        # The Tube tool's Tonic-style blocks: tubes drawn root first, and the tube hierarchy.
+        from groomlab.ui import tonic_tubes
+        self.tonic = tonic_tubes.TonicTubes(self)
+        for block in self.tonic.blocks:
+            card.addWidget(block)
 
         # Erase: what it removes.
         self.erase_box = widgets.Block(_setting("erases", "label"), name="erasesBlock")
@@ -1551,6 +1570,8 @@ class ToolPalette(QtWidgets.QWidget):
         mirror.setToolTip(self.symmetry.toolTip())
         self.applies_block.add(self.symmetry_row)
         card.addWidget(self.applies_block)
+        # Selected guides (Shape, Select): last (the Tube tool has no Applies to: its Mirror is in Brush).
+        card.addWidget(self.tube_panel.selected_block)
 
         # Right under the grid: the list the tab works on (Guide groups, Maps, Layers, Photos);
         # the tool's card under it.
@@ -2243,6 +2264,8 @@ class ToolPalette(QtWidgets.QWidget):
             self.length_keys.refresh()
         if any(b.isVisible() for b in self.tube_panel.blocks):  # (Shape, Select, Place, Draw) a selection or solo
             self.tube_panel.refresh(groom, full=self._ticks % 3 == 0)
+        if self.tonic.visible():  # the root tool's state and the hierarchy's levels
+            self.tonic.refresh(groom)
         # Weights change with the frame: read them every tick, the stack itself now and then
         # (keys edited in the timeline) and whenever the groom's correctives change (its callback);
         # only while the Correctives box shows.
@@ -2292,6 +2315,8 @@ class ToolPalette(QtWidgets.QWidget):
             self.tool = "select"
             self.buttons["select"].setChecked(True)
             self.show_tool_settings()
+        elif current == "groomLabRootTubeCtx" and self.tool == "shape":
+            pass  # the Tube tool's root-first mode (Draw root, Edit roots): its card stays
         elif current not in (ctx, groomlab.SELECT_CONTEXT) and self.tool is not None:
             self.clear_tool()  # another Maya tool took over: nothing is active here
 
@@ -2414,7 +2439,8 @@ class ToolPalette(QtWidgets.QWidget):
         try:
             groomlab.brush_tool(tool, **kwargs)
             # (The context's own: not stroke settings.)
-            self.push(tubeShaded=self.tube_shaded.isChecked(), tubeWireframe=self.tube_wireframe.isChecked())
+            self.push(tubeShaded=self.tube_shaded.isChecked(), tubeWireframe=self.tube_wireframe.isChecked(),
+                      tubeColors=self.tube_colors.isChecked(), tubesAlwaysVisible=self.tube_always.isChecked())
         except (RuntimeError, ValueError) as e:
             self.tool_failed(e)
         self.show_tool_settings()
@@ -2448,6 +2474,11 @@ class ToolPalette(QtWidgets.QWidget):
         self.status.setText("%s: %s" % ((self.tool or "tool").capitalize(), str(error).strip()))
         self.stop_tool()
 
+    def tube_tool_blocks(self):
+        """The Tube tool card's blocks, which fold away (their state remembered: issue 70)."""
+        return (self.brush_block, self.tube_channel_box, self.tube_panel.profile_block, self.tonic.root_block,
+                self.tonic.hierarchy_block, self.tube_panel.selected_block)
+
     def show_tool_settings(self):
         """The card shows what its tool uses (the catalog's settings for it: card_tool()), and
         nothing else; with no tool, one line on how to start. Its blocks, in order: Brush, the
@@ -2474,8 +2505,11 @@ class ToolPalette(QtWidgets.QWidget):
         paints = "map" in uses
         self.paint_block.setVisible(paints)
         # Under Paint's own block the Brush block is titled (otherwise first, untitled).
-        self.brush_block.rule.setVisible(paints)
-        self.brush_block.title.setVisible(paints)
+        # (The Tube tool's card titles it too: every block of that card folds away, issue 70.)
+        tube_tool = tool == "shape"
+        self.brush_block.set_titled(paints or tube_tool)
+        for block in self.tube_tool_blocks():
+            block.set_foldable("shape/" + block.objectName() if tube_tool else None)
         self.sync_alpha()
         self.create_box.setVisible("newGuides" in uses)
         self.spacing.setVisible("spacing" in uses)
@@ -2493,6 +2527,8 @@ class ToolPalette(QtWidgets.QWidget):
         self.stretch.row.setVisible("stretch" in uses)
         self.straighten.row.setVisible("straighten" in uses)
         self.tube_channel_box.setVisible("tubeChannel" in uses)
+        self.tube_channel_row.setVisible("tubeChannel" in uses)
+        self.tonic.show(tool == "shape")
         self.select_box.setVisible("selection" in uses)
         self.erase_box.setVisible("erases" in uses)
         self.keys_block.setVisible("lengthKeys" in uses)
@@ -2503,9 +2539,14 @@ class ToolPalette(QtWidgets.QWidget):
             self.fill_flow_count(self.groom())
         self.part_box.setVisible("parts" in uses)
         # Applies to: Acts on where the tool has targets, Mirror for the tools that mirror.
-        self.target_box.setVisible("targets" in uses)
+        # The Tube tool: no Applies to; its Mirror at the bottom of Brush. Every other tool: in Applies to.
+        tube_card = tool == "shape"
+        home = self.brush_block if tube_card else self.applies_block
+        if self.symmetry_row.parentWidget() is not home.content:
+            home.body.addWidget(self.symmetry_row)
+        self.target_box.setVisible("targets" in uses and not tube_card)
         self.symmetry_row.setVisible("symmetry" in uses)
-        self.applies_block.setVisible("targets" in uses or "symmetry" in uses)
+        self.applies_block.setVisible(not tube_card and ("targets" in uses or "symmetry" in uses))
         self.show_sections()
         if tool in self.strengths:
             signed = tool in SIGNED

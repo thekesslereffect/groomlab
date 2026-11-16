@@ -850,7 +850,7 @@ std::size_t stamp(GuideHierarchy& h, const ScalpMesh* scalp, const BrushSettings
         if (touched) touched->insert(id);
     }
     if (!erased.empty()) {
-        h.removeGuides(erased);
+        h.removeGuides(erased, true);  // (a level left empty goes with them)
         if (cache) *cache = BrushStrokeCache::State{};  // other guides now: found again
     }
     if (!edited.empty()) {

@@ -113,6 +113,19 @@ using CustomTubeShapePtr = std::shared_ptr<const CustomTubeShape>;
 // A groom's custom shapes by name.
 using TubeShapeLibrary = std::map<std::string, CustomTubeShapePtr>;
 
+// A library shape whose name starts so belongs to the guides that take it (a root-first tube's
+// root outline, "rootTube_<n>"): removed from the library with the last of them
+// (GuideHierarchy::removeGuides, removeGroup).
+constexpr const char* kOwnedTubeShapePrefix = "rootTube_";
+// How much larger than its outline as drawn a root-first tube's shape is laid, about its guide
+// (root_tubes.py ROOT_OVERLAP: sealed neighbours' footprints overlap rather than leave a crack).
+// fillTubes takes it off again to tell which outline a root in the overlap was drawn in.
+constexpr float kRootTubeOverlap = 0.015f;
+// A root-first tube (a level-0 guide whose shape is its drawn root outline: kOwnedTubeShapePrefix),
+// whose footprint stays fixed on the scalp (TubeSpine::setRootOnScalp).
+struct TubeProfile;
+bool isRootTube(const TubeProfile& tube, int depth);
+
 // Points round every outline, built-in or custom.
 constexpr std::size_t kTubeOutlinePoints = 96;
 // The most control points a custom shape takes.
@@ -232,6 +245,10 @@ struct TubeProfile {
     // sectionAt, so twist 0 lays the section's width along the scalp all along the guide. Worked
     // out, not authored: not saved, not compared, not in hashTube. Empty: 0.
     std::vector<float> roll;
+    // Whether the sections roll on the scalp (above). Off: they follow the guide's rotation-
+    // minimizing frames alone, as a section swept from its root out (a root-first tube: its root
+    // outline drawn on the scalp, the tube extruded from it with no twist). Saved when off.
+    bool rollOnScalp = true;
 
     float widthAt(float t) const;
     float aspectAt(float t) const;  // clamped
@@ -259,7 +276,7 @@ struct TubeProfile {
                                        : !o.custom && shape == o.shape;
         return sameCustom && width == o.width && aspect == o.aspect && twist == o.twist && midShape == o.midShape &&
                tipShape == o.tipShape && rootHold == o.rootHold && midHold == o.midHold && tipHold == o.tipHold &&
-               midAt == o.midAt;
+               midAt == o.midAt && rollOnScalp == o.rollOnScalp;
     }
     bool operator!=(const TubeProfile& o) const { return !(*this == o); }
 };
@@ -340,6 +357,22 @@ public:
     // ahead. Without it (or with a zero normal, or one against the guide's direction) the
     // footprint is the root section itself, in the plane across the guide's root.
     void setRootSurface(const Vec3f& normal);
+    // A root-first tube's footprint (isRootTube): its root outline as drawn, fixed on the scalp of
+    // normal `normal` along `across` (ScalpMesh::acrossAt), turned by the tube's authored twist
+    // (no roll): however the guide is combed, its root area stays where it was drawn. The tube
+    // still leaves the root along the guide, joined from this footprint over rootJoin. Without a
+    // direction across (zero, or along the normal), laid as setRootSurface lays it.
+    void setRootOnScalp(const Vec3f& normal, const Vec3f& across);
+    // The root footprint `other` lays (its axes and normal: a spine of the same root), so a tube
+    // along a guide's resampled, smoothed shape lies on the scalp as the guide's own points lay it
+    // (Scatter's footprints, and the root outline a root tube was fitted to: the first span's
+    // way decides how the footprint turns, and a smoothed one turns it a little otherwise).
+    void setFootprint(const TubeSpine& other) {
+        if (empty() || other.empty()) return;
+        footU_ = other.footU_;
+        footV_ = other.footV_;
+        footNormal_ = other.footNormal_;
+    }
     // Where world point p lies on the root footprint: its section coordinates there (p taken into
     // the footprint's plane along its normal), and (with `along`) how far off that plane it lies
     // (signed, scene units).

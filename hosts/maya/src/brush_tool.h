@@ -164,6 +164,11 @@ public:
     // (off by default) and as wires (on by default), each on its own (GroomShape::setTubeWires).
     bool tubeShaded = false;
     bool tubeWireframe = true;
+    // The Tube card's Colors (on by default): each tube in its region's color on the tube root
+    // region map (tubeRoots), a color of its own without one (GroomShape::setTubeWires).
+    bool tubeColors = true;
+    // The Tube card's Always visible: the tubes drawn whichever tool is up (GroomShape::setTubesAlwaysVisible).
+    bool tubesAlwaysVisible = false;
 
     BrushToolSettings& settings() { return tool_.settings; }
     // The view's pixels per point of the brush's radius (display_scale.h: 2 on a Retina display,
