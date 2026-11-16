@@ -461,7 +461,8 @@ private:
     float gpuDotsSize_ = 0.0f;      // the size and pull it was styled with
     float gpuDotsPull_ = -1.0f;
     mutable bool uiDirty_ = true;
-    std::uint64_t seamDrawn_ = ~std::uint64_t{0};  // the brush's symmetry line drawn (GroomShape::symmetrySeamVersion)
+    std::uint64_t seamDrawn_ = ~std::uint64_t{0};
+    std::uint64_t rootsDrawn_ = ~std::uint64_t{0};  // the Tube tool's root overlay drawn (GroomShape::rootOverlayVersion)  // the brush's symmetry line drawn (GroomShape::symmetrySeamVersion)
     // The Shape brush's tube wires (GroomShape::tubeWires): every guide it can shape (shown, not
     // frozen), the selected ones' segments apart (drawn brighter), two render items made again
     // only when what they come from changes (the guides, the selection, the hidden groups), drawn

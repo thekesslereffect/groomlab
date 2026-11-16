@@ -119,6 +119,10 @@ const char* kDebugHoverFlag[] = {"-dbh", "-debugHover"};
 // The Length Keys tool: an edit by words (BrushContext::lengthEdit), and its state as JSON.
 const char* kLengthEditFlag[] = {"-led", "-lengthEdit"};
 const char* kLengthStateFlag[] = {"-lst", "-lengthState"};
+// The Tube tool's root-first mode: an edit by words, its settings and its state (BrushContext::rootEdit).
+const char* kRootEditFlag[] = {"-red", "-rootEdit"};
+const char* kRootSettingsFlag[] = {"-rse", "-rootSettings"};
+const char* kRootStateFlag[] = {"-rst", "-rootState"};
 const char* kHeldBytesFlag[] = {"-hb", "-heldUndoBytes"};
 const char* kPreviewUploadFlag[] = {"-pup", "-previewUpload"};
 const char* kFileImageFlag[] = {"-fim", "-fileImage"};
@@ -946,6 +950,11 @@ void BrushContext::toolOffCleanup() {
         return MStatus(MS::kSuccess);
     });
     active_ = false;
+    if (tool_.roots().active() && host_) guarded("root tool off", [&] {
+        tool_.roots().leave(*host_);  // (an edit pending finished: none lost)
+        return MStatus(MS::kSuccess);
+    });
+    if (shape_) shape_->setRootOverlay({}, 1.0f);
     clearSymmetry();
     clearTubeWires();
     GroomShape::setBrushTarget(nullptr);  // what strokes keep (the stroke document) goes with the tool
@@ -1001,6 +1010,19 @@ bool BrushContext::simulateStroke(const std::vector<std::pair<short, short>>& po
         tool_.release(*host_, view);
         if (draw) M3dView::active3dView().refresh(false, true);
         return tool_.lengths().edited();
+    }
+    if (tool_.settings.tool == BrushToolSettings::Tool::Roots) {
+        // The Tube tool's root mode: a press at the first point, a drag through the rest, the
+        // release (one point: a click), as the mouse does; its outlines published.
+        if (points.empty() || !host_) return false;
+        const unsigned modifiers = (ctrl ? kStrokeCtrl : 0u) | (shift ? kStrokeShift : 0u);
+        const std::uint64_t said = tool_.roots().messageCount();
+        tool_.press(*host_, view, points[0].first, points[0].second, 1.0f, modifiers);
+        for (std::size_t i = 1; i < points.size(); ++i) tool_.drag(*host_, view, points[i].first, points[i].second, 1.0f);
+        tool_.release(*host_, view);
+        publishRoots();
+        if (draw) M3dView::active3dView().refresh(false, true);
+        return tool_.roots().messageCount() != said;
     }
     if (ctrl && shift && tool_.paintsSelection()) {
         // A guide brush's Ctrl+Shift drag paints the selection, through press, drag and release as
@@ -1132,6 +1154,10 @@ MStatus BrushContext::doPtrMoved(MEvent& event, MHWRender::MUIDrawManager& draw,
             tool_.lengths().hover(*host_, activeToolView(), x, y);
             drawLengths(draw);
         }
+        if (tool_.settings.tool == BrushToolSettings::Tool::Roots && host_ && tool_.roots().mode() == RootTubeTool::Mode::Duplicate) {
+            tool_.roots().hover(*host_, activeToolView(), x, y);
+            publishRoots();
+        }
         drawAffected(draw, x, y);
         drawCircle(draw, x, y);
         return MStatus(MS::kSuccess);
@@ -1166,6 +1192,7 @@ MStatus BrushContext::press(MEvent& event, MHWRender::MUIDrawManager& draw) {
     const unsigned modifiers = (event.isModifierControl() ? kStrokeCtrl : 0u) | (event.isModifierShift() ? kStrokeShift : 0u);
     tool_.press(*host_, activeToolView(), x, y, penPressure(), modifiers);
     unchainUnlessStroking();
+    if (tool_.settings.tool == BrushToolSettings::Tool::Roots) publishRoots();
     showSymmetry();
     drawLengths(draw);
     drawCircle(draw, x, y);
@@ -1210,6 +1237,7 @@ MStatus BrushContext::drag(MEvent& event, MHWRender::MUIDrawManager& draw) {
         draw.endDrawable();
     }
     if (s.tool == Tool::Lengths) refreshDuringDrag();  // the guides at their new lengths
+    if (s.tool == Tool::Roots) publishRoots();
     showSymmetry();
     drawLengths(draw);
     drawCircle(draw, x, y);
@@ -1240,6 +1268,7 @@ MStatus BrushContext::release(MEvent&) {
     if (!tool_.selectingPaint()) expectGpuCommit();  // (painting the selection commits no stroke)
     const StrokeRelease released = tool_.release(*host_, activeToolView());
     unchainUnlessStroking();
+    if (tool_.settings.tool == BrushToolSettings::Tool::Roots) publishRoots();
     if (released == StrokeRelease::Stroke && shape_) {
         M3dView::active3dView().refresh(false, true);  // as endStroke: the commit's drawing now
     }
@@ -1393,6 +1422,82 @@ void BrushContext::lengthEdit(const std::string& words) {
     M3dView::active3dView().refresh(false, true);
 }
 
+void BrushContext::publishRoots() {
+    if (!shape_) return;
+    if (tool_.settings.tool != BrushToolSettings::Tool::Roots || !tool_.roots().active() || !host_) {
+        shape_->setRootOverlay({}, 1.0f);
+        return;
+    }
+    shape_->setRootOverlay(tool_.roots().overlay(*host_), pixelScale_);
+}
+
+void BrushContext::rootSettings(const std::string& text) {
+    const nlohmann::json j = nlohmann::json::parse(text);
+    RootTubeTool::Settings& s = tool_.roots().settings;
+    s.drawPath = j.value("drawPath", s.drawPath);
+    s.snap = j.value("snap", s.snap);
+    s.length = j.value("length", s.length);
+    s.segments = j.value("segments", s.segments);
+    s.taper = j.value("taper", s.taper);
+    s.density = j.value("density", s.density);
+    if (j.contains("group")) s.group = j["group"].is_string() ? j["group"].get<std::string>() : std::string();
+    if (j.contains("snap") && tool_.roots().active() && host_) {
+        tool_.roots().sync(*host_);
+        publishRoots();
+    }
+}
+
+void BrushContext::rootEdit(const std::string& words) {
+    if (!host_ || (!shape_ && !findGroom())) throw std::invalid_argument("select a groom first");
+    RootTubeTool& roots = tool_.roots();
+    std::istringstream in(words);
+    std::string verb, arg;
+    in >> verb >> arg;
+    if (verb == "start") {
+        const RootTubeTool::Mode mode = arg == "edit"     ? RootTubeTool::Mode::Edit
+                                        : arg == "select" ? RootTubeTool::Mode::Select
+                                        : arg == "place"  ? RootTubeTool::Mode::Place
+                                                          : throw std::invalid_argument("-rootEdit start takes place, edit or select");
+        tool_.settings.tool = BrushToolSettings::Tool::Roots;
+        roots.start(*host_, mode);
+    } else if (verb == "leave") {
+        roots.leave(*host_);
+    } else if (verb == "finish") {
+        roots.finishEdit(*host_);
+    } else if (verb == "undoCv") {
+        roots.undoCv(*host_);
+    } else if (verb == "duplicate") {
+        roots.beginDuplicate(*host_);
+    } else if (verb == "endDuplicate") {
+        roots.endDuplicate();
+    } else if (verb == "delete") {
+        roots.deleteSelected(*host_);
+    } else if (verb == "sync") {
+        roots.sync(*host_);
+    } else {
+        throw std::invalid_argument("-rootEdit takes start, leave, finish, undoCv, duplicate, endDuplicate, delete or sync");
+    }
+    publishRoots();
+    M3dView::active3dView().refresh(false, true);
+}
+
+std::string BrushContext::rootState() {
+    RootTubeTool& roots = tool_.roots();
+    if (host_ && (shape_ || findGroom()) && roots.active()) {
+        roots.sync(*host_);  // (an undo or redo since: the tool reads the groom again)
+        publishRoots();
+    }
+    const char* modes[] = {"place", "draw", "edit", "select", "duplicate"};
+    nlohmann::json state = {{"active", roots.active() && tool_.settings.tool == BrushToolSettings::Tool::Roots},
+                            {"mode", modes[static_cast<int>(roots.mode())]},
+                            {"message", roots.message()},
+                            {"messageCount", roots.messageCount()},
+                            {"selected", roots.selected()},
+                            {"cvs", roots.outlineCvs()},
+                            {"hidesGuides", roots.hidesGuides()}};
+    return state.dump();
+}
+
 std::string BrushContext::lengthState() {
     if (!host_ && !findGroom()) return "{}";
     LengthKeyTool& lk = tool_.lengths();
@@ -1437,6 +1542,9 @@ MStatus BrushContextCmd::appendSyntax() {
     s.addFlag(kDebugHoverFlag[0], kDebugHoverFlag[1], MSyntax::kString);
     s.addFlag(kLengthEditFlag[0], kLengthEditFlag[1], MSyntax::kString);
     s.addFlag(kLengthStateFlag[0], kLengthStateFlag[1]);
+    s.addFlag(kRootEditFlag[0], kRootEditFlag[1], MSyntax::kString);
+    s.addFlag(kRootSettingsFlag[0], kRootSettingsFlag[1], MSyntax::kString);
+    s.addFlag(kRootStateFlag[0], kRootStateFlag[1]);
     s.addFlag(kHeldBytesFlag[0], kHeldBytesFlag[1]);
     s.addFlag(kPreviewUploadFlag[0], kPreviewUploadFlag[1]);
     s.addFlag(kFileImageFlag[0], kFileImageFlag[1]);
@@ -1494,6 +1602,20 @@ MStatus BrushContextCmd::doEditFlags() {
         if (args.isFlagSet(kLengthEditFlag[0]) && args.getFlagArgument(kLengthEditFlag[0], 0, text)) {
             try {
                 context_->lengthEdit(text.asChar());
+            } catch (const std::invalid_argument& e) {
+                return fail(kName, e.what());
+            }
+        }
+        if (args.isFlagSet(kRootSettingsFlag[0]) && args.getFlagArgument(kRootSettingsFlag[0], 0, text)) {
+            try {
+                context_->rootSettings(text.asChar());
+            } catch (const std::exception& e) {
+                return fail(kName, e.what());
+            }
+        }
+        if (args.isFlagSet(kRootEditFlag[0]) && args.getFlagArgument(kRootEditFlag[0], 0, text)) {
+            try {
+                context_->rootEdit(text.asChar());
             } catch (const std::invalid_argument& e) {
                 return fail(kName, e.what());
             }
@@ -1590,6 +1712,7 @@ MStatus BrushContextCmd::doQueryFlags() {
         else if (args.isFlagSet(kTubeColorsFlag[0])) setResult(context_->tubeColors);
         else if (args.isFlagSet(kTubeAlwaysFlag[0])) setResult(context_->tubesAlwaysVisible);
         else if (args.isFlagSet(kLengthStateFlag[0])) setResult(MString(context_->lengthState().c_str()));
+        else if (args.isFlagSet(kRootStateFlag[0])) setResult(MString(context_->rootState().c_str()));
         // Testing aids: what the texture strokes in the undo queue keep (bytes), and how the
         // viewport sends a stroke's texels to the map's texture.
         else if (args.isFlagSet(kHeldBytesFlag[0])) setResult(static_cast<double>(BrushStrokeCmd::heldTextureBytes()));

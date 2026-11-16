@@ -2315,8 +2315,6 @@ class ToolPalette(QtWidgets.QWidget):
             self.tool = "select"
             self.buttons["select"].setChecked(True)
             self.show_tool_settings()
-        elif current == "groomLabRootTubeCtx" and self.tool == "shape":
-            pass  # the Tube tool's root-first mode (Draw root, Edit roots): its card stays
         elif current not in (ctx, groomlab.SELECT_CONTEXT) and self.tool is not None:
             self.clear_tool()  # another Maya tool took over: nothing is active here
 

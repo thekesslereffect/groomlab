@@ -267,6 +267,30 @@ void appendTubeSurface(DisplayGeometry& geometry, const HierarchyGuide& guide, f
 void appendTubeWire(std::vector<Vec3f>& out, const HierarchyGuide& guide, float scale = 1.0f, std::size_t lengthwise = 8,
                     std::size_t ringStep = 1);
 
+// The Tube brush's tubes as every host draws them (the Tube card's Wireframe, Shaded and Colors):
+// every guide shown (its group not hidden), the frozen ones (a solo: not activeTubeGuides) dimmed,
+// not hidden, so the soloed tubes read against the rest; the selected ones' wires apart.
+struct TubeDisplayOptions {
+    bool wireframe = true;  // the tubes as wires (fewer rings along each on a groom of many guides)
+    bool shaded = false;    // as shaded surfaces a little inside the wires (not lost in its facets)
+    // Each tube in its root tube's color (rootTubeColor: a tube's split tubes and children in its
+    // color), else its own from its ID; with Shaded the colors on the surfaces, the wires gray.
+    bool colors = false;
+    std::string hiddenGuideGroups;
+};
+struct TubeDisplay {
+    // Line lists (a segment's two ends a pair). `wires` carries colors (r g b a per vertex) when
+    // they vary (Colors, a solo), else draw it in wireColor; `selectedWires` warm, opaque, thicker.
+    DisplayGeometry wires, selectedWires;
+    // Triangles (surface); colored and set up as the scales draw (scaleSurface) with Colors or a
+    // solo, else drawn in the theme's tubeSurfaces.
+    DisplayGeometry surfaces;
+    std::array<float, 4> wireColor{0.45f, 0.85f, 1.0f, 0.6f};
+};
+// `selected`: the guides selected in full (soft-selected ones are not).
+TubeDisplay buildTubeDisplay(const GuideHierarchy& hierarchy, const TubeDisplayOptions& options,
+                             const std::set<GuideId>& selected);
+
 // ---- Instances --------------------------------------------------------------------------------
 
 // Instances draw their prototype meshes (InstancePrototype, instances.h: the host's scene meshes,
@@ -388,8 +412,9 @@ struct DisplaySettings {
     bool guides = true, tubes = false;
     // The Tube brush's tubes (every host's, as Maya's draw override shows them): every guide the
     // brush can shape (activeTubeGuides) as a wire (tubeWires; the selected ones apart, warm) and/or
-    // a shaded surface a little inside it (tubeShaded).
-    bool tubeWires = false, tubeShaded = false;
+    // a shaded surface a little inside it (tubeShaded), each in its root tube's color with
+    // tubeColors (buildTubeDisplay).
+    bool tubeWires = false, tubeShaded = false, tubeColors = false;
     bool movingGuides = true;  // the moving guides (DisplayInputs::movingGuides) over the groomed ones
     float guideWidth = 2.0f;
     // 1: the painted layer guideColorLayer, black 0 to white 1; anything else (0): each group's

@@ -16,7 +16,7 @@ SHIPPED_ALPHAS = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", 
 groomlab_core.set_shipped_brush_alpha_dir(SHIPPED_ALPHAS)
 
 
-BRUSH_MODES = ("comb", "slide", "smooth", "straighten", "lift", "twist", "attract", "length", "cut", "shape", "erase", "paint", "clump", "place", "draw", "part", "flow", "lengths")
+BRUSH_MODES = ("comb", "slide", "smooth", "straighten", "lift", "twist", "attract", "length", "cut", "shape", "erase", "paint", "clump", "place", "draw", "part", "flow", "lengths", "roots")
 # What the Shape brush paints on the guides' tubes (tube guides).
 TUBE_CHANNELS = ("width", "flatness", "twist")
 BRUSH_CONTEXT = "groomLabBrushCtx1"
@@ -91,6 +91,9 @@ def brush_stroke(groom, mode, points, radius=0.25, strength=1.0, level=0, group=
     whorls, attract gathers them, cut splits parts and erase removes them.
     """
     _check_mode(mode)
+    if mode == "roots":
+        raise ValueError("the Tube tool's root mode is interactive: groomlab.ui.root_tube_tool.start(groom) "
+                         "(groomlab.root_tubes makes and edits root tubes from scripts)")
     if mode == "lengths":
         raise ValueError("the Length Keys tool is interactive: brush_tool(\"lengths\") and click keys on the scalp "
                          "(length_keys_edit sets their scales and applies)")

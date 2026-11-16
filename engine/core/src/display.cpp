@@ -1200,6 +1200,133 @@ void appendTubeSurface(DisplayGeometry& batch, const HierarchyGuide& g, float sc
     // (Open at the tip: no cap.)
 }
 
+namespace {
+
+// appendTubeSurface's vertices from `first` on (one guide's tube: rings of the same count, root
+// to tip) in `color`, with what the lit, colored surface needs (DisplayGeometry::scaleSurface):
+// the shading normal again as the bitangent, the tangent along the tube, uvs x root (0) to tip (1).
+void colorTubeSurface(DisplayGeometry& batch, std::size_t first, const std::array<float, 4>& color) {
+    const std::size_t end = batch.positions.size() / 3;
+    batch.scaleSurface = true;
+    batch.uvFloats = 2;
+    batch.colors.resize(first * 4, 1.0f);
+    batch.tangents.resize(first * 3, 0.0f);
+    batch.bitangents.resize(first * 3, 0.0f);
+    batch.uvs.resize(first * 2, 0.0f);
+    constexpr std::size_t kRings = 25;  // (appendTubeSurface: kAlong + 1 rings)
+    const std::size_t count = end - first;
+    const std::size_t around = count % kRings == 0 ? count / kRings : 0;
+    auto at = [&](std::size_t v) {
+        return Vec3f(batch.positions[v * 3], batch.positions[v * 3 + 1], batch.positions[v * 3 + 2]);
+    };
+    for (std::size_t v = first; v < end; ++v) {
+        batch.colors.insert(batch.colors.end(), color.begin(), color.end());
+        Vec3f t(0.0f, 1.0f, 0.0f);
+        float u = 0.0f, w = 0.0f;
+        if (around > 0) {
+            const std::size_t k = v - first, ring = k / around, s = k % around;
+            const std::size_t a = first + (ring > 0 ? ring - 1 : ring) * around + s;
+            const std::size_t b = first + (ring + 1 < kRings ? ring + 1 : ring) * around + s;
+            const Vec3f d = at(b) - at(a);
+            if (d.length() > 0.0f) t = d.normalized();
+            u = static_cast<float>(ring) / static_cast<float>(kRings - 1);
+            w = static_cast<float>(s) / static_cast<float>(around);
+        }
+        batch.tangents.insert(batch.tangents.end(), {t.x, t.y, t.z});
+        batch.bitangents.insert(batch.bitangents.end(), {batch.normals[v * 3], batch.normals[v * 3 + 1], batch.normals[v * 3 + 2]});
+        batch.uvs.insert(batch.uvs.end(), {u, w});
+    }
+}
+
+}  // namespace
+
+TubeDisplay buildTubeDisplay(const GuideHierarchy& hierarchy, const TubeDisplayOptions& options,
+                             const std::set<GuideId>& selected) {
+    TubeDisplay out;
+    const std::vector<const HierarchyGuide*> guides = activeTubeGuides(hierarchy, options.hiddenGuideGroups, "");
+    std::set<const HierarchyGuide*> live;
+    for (const HierarchyGuide* g : activeTubeGuides(hierarchy, options.hiddenGuideGroups)) live.insert(g);
+    const bool anyDim = live.size() != guides.size();
+    constexpr float kDim = 0.3f;
+    const std::vector<GuideId> rootTubes = options.colors ? hierarchy.rootTubeIds() : std::vector<GuideId>{};
+    // Each tube's color (Colors): its root tube's, else its own from its ID; false: the plain color.
+    auto colorOf = [&](const HierarchyGuide& g, std::array<float, 4>& c) {
+        if (!options.colors) return false;
+        const GuideId base = hierarchy.baseIdOf(g);
+        const auto at = std::lower_bound(rootTubes.begin(), rootTubes.end(), base);
+        if (at != rootTubes.end() && *at == base) {
+            const std::array<float, 3> r = rootTubeColor(static_cast<std::size_t>(at - rootTubes.begin()));
+            c = {r[0], r[1], r[2], 1.0f};
+            return true;
+        }
+        const std::uint64_t h = hashCombine(0x9E3779B97F4A7C15ull, static_cast<std::uint64_t>(g.id));
+        const float hue = static_cast<float>(h % 1000u) / 1000.0f;
+        const float k[3] = {5.0f, 3.0f, 1.0f};  // hsv(hue, 0.65, 0.95) to rgb
+        for (int i = 0; i < 3; ++i) {
+            const float x = std::fmod(k[i] + hue * 6.0f, 6.0f);
+            c[static_cast<std::size_t>(i)] = 0.95f * (1.0f - 0.65f * std::max(0.0f, std::min({x, 4.0f - x, 1.0f})));
+        }
+        c[3] = 1.0f;
+        return true;
+    };
+    constexpr float kWireAlpha = 0.6f;
+    const std::array<float, 4> plainWire{0.45f, 0.85f, 1.0f, kWireAlpha};
+    const std::array<float, 4> grayWire{0.62f, 0.62f, 0.62f, kWireAlpha};  // (Colors and Shaded: the color on the surfaces)
+    out.wireColor = options.colors ? grayWire : plainWire;
+    const bool colorWires = options.colors && !options.shaded;
+    if (options.wireframe) {
+        std::size_t points = 0;
+        for (const HierarchyGuide* g : guides) points += g->points.size();
+        // Within a budget of lines: fewer rings along each tube on a groom of many guides.
+        constexpr std::size_t kBudget = 400000;  // segment ends
+        const std::size_t perPoint = 2 * 32 + 2 * 8;
+        const std::size_t ringStep = std::max<std::size_t>(1, (points * perPoint + kBudget - 1) / kBudget);
+        std::vector<Vec3f> wires, selectedWires;
+        std::vector<float> wireColors;
+        for (const HierarchyGuide* g : guides) {
+            const bool isSelected = selected.count(g->id) > 0;
+            const std::size_t before = wires.size();
+            appendTubeWire(isSelected ? selectedWires : wires, *g, hierarchy.scale(), 8, ringStep);
+            if ((colorWires || anyDim) && !isSelected) {
+                std::array<float, 4> c = out.wireColor;
+                if (colorWires && !colorOf(*g, c)) c = plainWire;
+                c[3] = kWireAlpha;
+                if (!live.count(g)) c = {c[0] * kDim, c[1] * kDim, c[2] * kDim, 0.35f};
+                for (std::size_t i = before; i < wires.size(); ++i) wireColors.insert(wireColors.end(), c.begin(), c.end());
+            }
+        }
+        auto lines = [](const std::vector<Vec3f>& ends, DisplayGeometry& g) {
+            if (ends.size() < 2) return;
+            g.positions.reserve(ends.size() * 3);
+            g.indices.reserve(ends.size());
+            for (std::size_t i = 0; i < ends.size(); ++i) {
+                g.positions.insert(g.positions.end(), {ends[i].x, ends[i].y, ends[i].z});
+                g.indices.push_back(static_cast<std::uint32_t>(i));
+            }
+        };
+        lines(wires, out.wires);
+        lines(selectedWires, out.selectedWires);
+        if ((colorWires || anyDim) && wireColors.size() == wires.size() * 4 && wires.size() >= 2) {
+            out.wires.colors = std::move(wireColors);
+        }
+    }
+    out.surfaces.triangles = true;
+    out.surfaces.surface = true;
+    if (options.shaded) {
+        constexpr float kInset = 0.985f;  // (the wires on the outline itself stay seen)
+        for (const HierarchyGuide* g : guides) {
+            const std::size_t before = out.surfaces.positions.size() / 3;
+            appendTubeSurface(out.surfaces, *g, hierarchy.scale() * kInset);
+            if (!options.colors && !anyDim) continue;
+            std::array<float, 4> c{0.5f, 0.56f, 0.62f, 1.0f};
+            if (options.colors && !colorOf(*g, c)) c = {0.5f, 0.56f, 0.62f, 1.0f};
+            if (!live.count(g)) c = {c[0] * kDim, c[1] * kDim, c[2] * kDim, 1.0f};
+            colorTubeSurface(out.surfaces, before, c);
+        }
+    }
+    return out;
+}
+
 // ---- Instances --------------------------------------------------------------------------------
 
 void appendInstances(DisplayGeometry& markers, DisplayGeometry& meshes, const std::vector<InstanceSet::Placed>& placed,
@@ -2186,51 +2313,34 @@ void DisplayBuilder::buildBrushTubes(const DisplayInputs& in, const DisplaySetti
     item(DisplayItemId::TubeSurfaces).color = s.theme.tubeSurfaces;
     const HierarchyPtr& hierarchy = in.hierarchy;
     const bool on = hierarchy && (s.tubeWires || s.tubeShaded);
+    const bool colors = on && s.tubeColors;
+    if (colors) item(DisplayItemId::TubeWires).color = {0.62f, 0.62f, 0.62f, s.theme.tubeWires[3]};  // (buildTubeDisplay's gray)
     std::uint64_t key = on ? hashCombine(hashCombine(hash64(in.hierarchyVersion), in.selectionHash),
-                                         (s.tubeWires ? 1u : 0u) + (s.tubeShaded ? 2u : 0u))
+                                         (s.tubeWires ? 1u : 0u) + (s.tubeShaded ? 2u : 0u) + (colors ? 4u : 0u))
                            : 0;
     if (on) key = hashCombine(hashChars(key, s.hiddenGuideGroups), reinterpret_cast<std::uintptr_t>(hierarchy.get()));
     if (!rebuild(DisplayPart::BrushTubes, key)) return;
-    DisplayGeometry surfaces, wires, selectedWires;
-    surfaces.triangles = true;
-    surfaces.surface = true;
+    TubeDisplay tubes;
+    tubes.surfaces.triangles = true;
+    tubes.surfaces.surface = true;
     if (on) {
-        const std::vector<const HierarchyGuide*> guides = activeTubeGuides(*hierarchy, s.hiddenGuideGroups);
-        if (s.tubeWires) {
-            std::set<GuideId> selected;
-            if (in.selection) {
-                for (const auto& [id, weight] : in.selection()) {
-                    if (weight >= 0.999f) selected.insert(id);
-                }
-            }
-            std::size_t points = 0;
-            for (const HierarchyGuide* g : guides) points += g->points.size();
-            constexpr std::size_t kBudget = 400000;  // segment ends
-            const std::size_t perPoint = 2 * 32 + 2 * 8;
-            const std::size_t ringStep = std::max<std::size_t>(1, (points * perPoint + kBudget - 1) / kBudget);
-            std::array<std::vector<Vec3f>, 2> segments;
-            for (const HierarchyGuide* g : guides) {
-                appendTubeWire(segments[selected.count(g->id) ? 1 : 0], *g, hierarchy->scale(), 8, ringStep);
-            }
-            for (std::size_t i = 0; i < 2; ++i) {
-                DisplayGeometry& out = i == 0 ? wires : selectedWires;
-                out.positions.reserve(segments[i].size() * 3);
-                out.indices.reserve(segments[i].size());
-                for (const Vec3f& p : segments[i]) {
-                    out.indices.push_back(static_cast<std::uint32_t>(out.positions.size() / 3));
-                    out.positions.insert(out.positions.end(), {p.x, p.y, p.z});
-                }
+        std::set<GuideId> selected;
+        if (in.selection) {
+            for (const auto& [id, weight] : in.selection()) {
+                if (weight >= 0.999f) selected.insert(id);
             }
         }
-        if (s.tubeShaded) {
-            constexpr float kInset = 0.985f;  // (Maya's: the wires on the outline itself stay seen)
-            for (const HierarchyGuide* g : guides) appendTubeSurface(surfaces, *g, hierarchy->scale() * kInset);
-        }
+        TubeDisplayOptions options;
+        options.wireframe = s.tubeWires;
+        options.shaded = s.tubeShaded;
+        options.colors = colors;
+        options.hiddenGuideGroups = s.hiddenGuideGroups;
+        tubes = buildTubeDisplay(*hierarchy, options, selected);
     }
-    wires.overlay = selectedWires.overlay = true;
-    put(DisplayItemId::TubeSurfaces, std::move(surfaces));
-    put(DisplayItemId::TubeWires, std::move(wires));
-    put(DisplayItemId::SelectedTubeWires, std::move(selectedWires));
+    tubes.wires.overlay = tubes.selectedWires.overlay = true;
+    put(DisplayItemId::TubeSurfaces, std::move(tubes.surfaces));
+    put(DisplayItemId::TubeWires, std::move(tubes.wires));
+    put(DisplayItemId::SelectedTubeWires, std::move(tubes.selectedWires));
 }
 
 void DisplayBuilder::buildOverlays(const DisplayInputs& in, const DisplaySettings& s) {

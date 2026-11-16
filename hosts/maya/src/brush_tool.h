@@ -181,6 +181,14 @@ public:
     // std::invalid_argument for others) and its state as JSON (-lengthState).
     void lengthEdit(const std::string& words);
     std::string lengthState();
+    // The Tube tool's root-first mode (Tool::Roots, RootTubeTool): an edit by words (-rootEdit:
+    // "start place|edit|select", "leave", "finish", "undoCv", "duplicate", "endDuplicate",
+    // "delete", "sync"; throws std::invalid_argument for others), its settings as JSON
+    // (-rootSettings: drawPath, snap, length, segments, taper, density, group) and its state as
+    // JSON (-rootState: read after the groom changed, an undo say, its overlay drawn again).
+    void rootEdit(const std::string& words);
+    void rootSettings(const std::string& json);
+    std::string rootState();
     // The mode the tool is set to (-mode's query): during a Shift+drag's smoothing still the
     // tool's own mode, so nothing watching the tool (Groom Tools) mistakes the stroke for a
     // switch to the Smooth brush.
@@ -205,6 +213,7 @@ private:
     void drawCircle(MHWRender::MUIDrawManager& draw, short x, short y) const;
     void drawAffected(MHWRender::MUIDrawManager& draw, short x, short y);
     void drawLengths(MHWRender::MUIDrawManager& draw);  // the Length Keys tool's keys
+    void publishRoots();  // the root tool's overlay onto the groom (drawn with it), or none
 public:
     // Symmetry on: the scalp's line of symmetry (symmetrySeam) handed to the groom, which draws it
     // in red on every redraw (GroomShape::setSymmetrySeam), as Substance Painter shows it: from the

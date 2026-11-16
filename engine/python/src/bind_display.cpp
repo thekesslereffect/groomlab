@@ -98,6 +98,7 @@ void bindDisplay(py::module_& m) {
         .def_readwrite("tubes", &DisplaySettings::tubes)
         .def_readwrite("tube_wires", &DisplaySettings::tubeWires)
         .def_readwrite("tube_shaded", &DisplaySettings::tubeShaded)
+        .def_readwrite("tube_colors", &DisplaySettings::tubeColors)
         .def_readwrite("guide_width", &DisplaySettings::guideWidth)
         .def_readwrite("guide_color_mode", &DisplaySettings::guideColorMode, "1 by the painted layer guide_color_layer; else (0) by group.")
         .def_readwrite("guide_color_layer", &DisplaySettings::guideColorLayer)

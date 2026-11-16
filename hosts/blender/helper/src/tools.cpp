@@ -2992,6 +2992,7 @@ DisplaySettings displaySettingsOf(ToolState& t, const json& v) {
         else if (key == "flow") s.flow = settingBool(x, k);
         else if (key == "tubeWires") s.tubeWires = settingBool(x, k);    // the Tube brush's tubes (the core's display)
         else if (key == "tubeShaded") s.tubeShaded = settingBool(x, k);
+        else if (key == "tubeColors") s.tubeColors = settingBool(x, k);
         else if (key == "guideWidth") s.guideWidth = settingNumber(x, k);
         else if (key == "guideColorMode") {
             if (x.is_string()) {

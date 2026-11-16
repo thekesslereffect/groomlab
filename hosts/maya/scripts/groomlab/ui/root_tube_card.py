@@ -140,9 +140,8 @@ class RootTubeCard(QtCore.QObject):
 
     def refresh(self, groom):
         """The buttons as the tool stands, and the hierarchy's levels."""
-        from maya import cmds
-        ours = cmds.currentCtx() == "groomLabRootTubeCtx"
-        mode = self.tool.mode if ours else None
+        self.tool.poll()  # (after an undo the tool reads the groom again: its outlines follow)
+        mode = self._mode()
         editing = mode == "edit"
         selecting = mode in ("select", "duplicate")
         picked = selecting and self.tool.selected is not None
@@ -200,10 +199,7 @@ class RootTubeCard(QtCore.QObject):
             pass
 
     def _set(self, **settings):
-        self.tool.settings.update(settings)
-        if "snap" in settings and self.tool.groom:
-            self.tool.neighbours = root_tubes.snap_targets(self.tool.groom) if settings["snap"] else []
-            self.tool.redraw()
+        self.tool.update_settings(**settings)
 
     def _settings(self):
         return {"draw": self.extrude_draw.isChecked(), "length": self.length.value() / self.length_factor,
@@ -240,8 +236,7 @@ class RootTubeCard(QtCore.QObject):
 
     def _mode(self):
         """The root tool's mode, or None when it isn't the current tool."""
-        from maya import cmds
-        return self.tool.mode if cmds.currentCtx() == "groomLabRootTubeCtx" else None
+        return self.tool.mode if self.tool.active() else None
 
     def _enter(self, mode, button):
         """The root tool in `mode` (its button again: left)."""

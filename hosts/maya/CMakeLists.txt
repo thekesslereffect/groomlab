@@ -92,6 +92,7 @@ maya_add_plugin(GroomLab
     src/import_cmd.cpp
     src/marker_set.cpp
     src/root_outlines.cpp
+    src/root_overlay_draw.cpp
     src/file_node.cpp
     src/parts_cmd.cpp
     src/scalp_maps_cmd.cpp
