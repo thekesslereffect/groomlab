@@ -587,7 +587,8 @@ class PipelineOpsTest(unittest.TestCase):
             self.assertTrue(os.path.isfile("%s/Head_%s" % (folder, f)), f)
         textures = [n for n in g.cards.data.materials[0].node_tree.nodes if n.type == "TEX_IMAGE"]
         self.assertEqual(len(textures), 1)
-        self.assertTrue(textures[0].image.filepath.replace("\\", "/").endswith("Head_Preview.png"))
+        shown = textures[0].image.filepath.replace("\\", "/")
+        self.assertTrue(shown.endswith("Head_Preview.png"), shown)
         stats = pipeline.call(head, "card_stats")
         self.assertEqual((stats["baked"], stats["stale"]), (True, False))
         self.assertTrue(rt.cards_view["baked"])

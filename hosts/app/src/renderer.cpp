@@ -226,7 +226,7 @@ GroomRenderer::GroomRenderer() : lod_(std::make_unique<LodDraw>()) {
     rootLines_ = std::make_unique<GpuItem>();
     rootLines_->kind = Kind::LinesColored;
     rootDots_ = std::make_unique<GpuItem>();
-    rootDots_->kind = Kind::Dots;
+    rootDots_->kind = Kind::DotsTested;
     rootDots_->overlay = true;
     scalpSurface_ = std::make_shared<Surface>();
     scalpSurface_->name = "scalp";
@@ -256,6 +256,7 @@ GroomRenderer::Kind GroomRenderer::kindOf(const DisplayGeometry& g, bool overlay
 }
 
 void GroomRenderer::setFrame(const DisplayFrame& frame) {
+    overlayPull_ = frame.overlayPull;
     for (std::size_t i = 0; i < kDisplayItemCount; ++i) {
         const DisplayItem& item = frame.items[i];
         GpuItem& gpu = *items_[i];
@@ -894,13 +895,16 @@ void GroomRenderer::ensurePipelines(QRhi* rhi, QRhiRenderPassDescriptor* pass, i
                 triangles = true;
                 break;
             case Kind::Dots:
+            case Kind::DotsTested:
                 ps->setShaderStages({{QRhiShaderStage::Vertex, dotsVert}, {QRhiShaderStage::Fragment, flatFrag}});
                 layout.setBindings({{kStrideXYZ}, {kStrideUV}, {kStrideRGBA}});
                 layout.setAttributes({{0, 0, QRhiVertexInputAttribute::Float3, 0},
                                       {1, 1, QRhiVertexInputAttribute::Float2, 0},
                                       {2, 2, QRhiVertexInputAttribute::Float4, 0}});
                 triangles = true;
-                depthTest = false;  // over the guides, as the guides are over the hair
+                // The guide dots over the guides, as the guides are over the hair; the root mode's
+                // depth tested (hidden behind the head).
+                depthTest = kind == Kind::DotsTested;
                 break;
             case Kind::MapTextured:
                 ps->setShaderStages({{QRhiShaderStage::Vertex, mapVert}, {QRhiShaderStage::Fragment, mapFrag}});
@@ -1244,6 +1248,7 @@ bool GroomRenderer::setInputs(QRhiCommandBuffer* cb, const GpuItem& item, QRhiBu
             inputs.append({item.normals.get(), 0});
             break;
         case Kind::Dots:
+        case Kind::DotsTested:
             if (!item.offsets || !item.colors) return false;
             inputs.append({item.offsets.get(), 0});
             inputs.append({item.colors.get(), 0});
@@ -1479,7 +1484,24 @@ void GroomRenderer::render(QRhi* rhi, QRhiCommandBuffer* cb, QRhiRenderTarget* t
     }
     prepare(*dots_, false);
     prepare(*tool_, false);
-    for (GpuItem* item : {rootFills_.get(), rootLines_.get(), rootDots_.get()}) prepare(*item, false);
+    {
+        // The root mode's items: the view's matrix pulled toward the camera by the hair's depth at
+        // the camera's target (its depth in clip space less by that much), as Blender pulls its
+        // overlays: depth tested, they show over the hair round them and hide behind the head.
+        QMatrix4x4 pulled = mvp;
+        const QVector3D target = camera.target(), along = (target - eye).normalized();
+        const float pull = overlayPull_ > 0.0f ? overlayPull_ : 0.002f * std::max((target - eye).length(), 1e-3f);
+        const QVector3D closer = target - along * pull;
+        const float eps = std::clamp(mvp.map(target).z() - mvp.map(closer).z(), 1e-6f, 0.02f);
+        pulled.setRow(2, pulled.row(2) - eps * pulled.row(3));
+        for (GpuItem* item : {rootFills_.get(), rootLines_.get(), rootDots_.get()}) {
+            item->fresh = false;
+            if (!item->shown) continue;
+            upload(rhi, batch, *item);
+            writeUniforms(batch, *item, pulled, eye, size, false, pixelScale);
+            if (lookdev) writeUniforms(batch, *item, lookdev_.jitter(size) * pulled, eye, size, true, pixelScale);
+        }
+    }
     // The GPU preview's run, once this frame's uploads are recorded (its targets exist) and
     // before anything draws them.
     runGpuPreview(rhi, lookdev);

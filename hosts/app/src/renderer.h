@@ -56,9 +56,10 @@ public:
     // The tools' overlay (the brush ring, the hovered guides, a part being drawn: colored lines,
     // no depth test), drawn last; the same version keeps the upload. Empty: nothing.
     void setToolOverlay(const DisplayGeometry& lines, std::uint64_t version);
-    // The Tube tool's root mode (RootOverlayGeometry, lifted off the scalp): its see-through fills
-    // and edges depth tested, its CVs and middles as dots a size in pixels across with a dark ring,
-    // over everything; the same version keeps the upload.
+    // The Tube tool's root mode (RootOverlayGeometry, lifted off the scalp): its see-through fills,
+    // edges, and CVs and middles as dots a size in pixels across with a dark ring; depth tested
+    // pulled toward the camera by the hair's depth (DisplayFrame::overlayPull, as Blender draws
+    // them): over the hair round them, hidden behind the head. The same version keeps the upload.
     void setRootOverlay(const RootOverlayGeometry& roots, std::uint64_t version);
     // The scalp to shade (null: none); the same pointer keeps its buffers.
     void setScalp(MeshPtr scalp);
@@ -215,7 +216,7 @@ private:
     // LinesColored: other lines.
     enum class Kind {
         LinesLit, Lines, LinesColored, StrandLines, StrandLinesColored, Overlay, OverlayColored, Triangles, TrianglesColored,
-        Surface, Dots, MapTextured, Count
+        Surface, Dots, DotsTested, MapTextured, Count
     };
     struct GpuItem;
     struct Pipeline;
@@ -265,6 +266,7 @@ private:
     std::uint64_t toolVersion_ = 0;
     std::unique_ptr<GpuItem> rootFills_, rootLines_, rootDots_;  // the root mode's (setRootOverlay)
     std::uint64_t rootVersion_ = 0;
+    float overlayPull_ = 0.0f;  // the last frame's (DisplayFrame::overlayPull, scene units)
     MeshPtr scalpMesh_;
     SurfacePtr scalpSurface_;
     std::vector<SurfacePtr> props_;
