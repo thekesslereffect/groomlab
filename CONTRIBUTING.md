@@ -23,18 +23,27 @@ Thanks for helping. Bug reports, presets, docs fixes and code are all welcome.
    (`win-core`, `linux-core`, `ninja-core`) need no proprietary SDK. Maya work needs the Maya
    devkit (a free download from Autodesk) for the version you build (`ninja-maya2022`...); the
    standalone app (`ninja-app`) needs Qt only. Run the tests for what you changed, by label:
-   `ctest --preset <preset> -L quick` always, plus `-L app`, `-L maya` or `-L blender` for those
-   hosts.
+   `ctest --preset <preset> -L quick` always (the whole label: it runs the Python bindings' tests
+   and the golden files too, not only `groomlab_tests`), plus `-L app`, `-L maya` or `-L blender`
+   for those hosts. When an intended change moves a golden file or a fixture, record it again with
+   the script that made it (a fixture's `make_fixture.py`), not by hand.
 1. GroomLab runs in Maya, Blender and the standalone app from one engine. UI that exists in
    several hosts (menus, the Groom Tools, list menus, Graph Editor menus, Properties) is defined
    once in `engine/ui/*.json` ([docs/UI_DEFINITIONS.md](docs/UI_DEFINITIONS.md)): change it
    there so every host gets it, and bind any new action id in each host (the binding tests list
    what a host has not done yet). Logic works the same way: what a menu action does to the graph
    (Add Braid, Add Simulate...), a param's units and when it shows, controls and keys, file and
-   map rules live once in `engine/core` and every host calls them. If a second host needs
-   something one host already does, move it to the core first. The table under "What every host
-   does, written once" in [docs/DEVELOPING.md](docs/DEVELOPING.md) section 6 says where each
-   piece lives.
+   map rules live once in `engine/core` and every host calls them. The table under "What every
+   host does, written once" in [docs/DEVELOPING.md](docs/DEVELOPING.md) section 6 says where each
+   piece lives. For a new feature or tool this means:
+   - **Its logic goes in the core from the start**, in C++ (`engine/core`), with core tests. A
+     host holds only its UI and its viewport plumbing (events in, drawing out), calling the core;
+     Maya's Python and Blender's add-on never hold the feature's math or rules. A feature may
+     reach one host's UI first, but only when the others can follow by adding UI alone.
+   - **What it saves goes in the groom's own data** (the graph, the guide hierarchy, scalp maps,
+     the `.groom` file), never only in a host's scene (a Maya attribute, a Blender property), so a
+     groom exported, opened in another host or sent to someone keeps it.
+   - **Plain names.** Name tools, files and UI text for what they do, not after another product.
 2. Follow the conventions in [docs/DEVELOPING.md](docs/DEVELOPING.md), section 6 ("Rules").
    Format C++ with the repository's `.clang-format`. Stored formats change in place, with no
    migrations. Add or update tests with the change. Golden files change only for intended
