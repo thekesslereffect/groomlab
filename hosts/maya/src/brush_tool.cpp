@@ -954,19 +954,25 @@ void BrushContext::toolOffCleanup() {
         tool_.roots().leave(*host_);  // (an edit pending finished: none lost)
         return MStatus(MS::kSuccess);
     });
-    if (shape_) shape_->setRootOverlay({}, 1.0f);
+    if (GroomShape* shape = liveShape()) shape->setRootOverlay({}, 1.0f);
     clearSymmetry();
     clearTubeWires();
     GroomShape::setBrushTarget(nullptr);  // what strokes keep (the stroke document) goes with the tool
     MPxContext::toolOffCleanup();
 }
 
+GroomShape* BrushContext::liveShape() const {
+    return shape_ && shapeNode_.isAlive() && shapeNode_.isValid() ? shape_ : nullptr;
+}
+
 bool BrushContext::findGroom() {
     if (!activeGroom(groom_)) {
         shape_ = nullptr;
+        shapeNode_ = MObjectHandle();
         return false;
     }
     shape_ = groomShape(groom_);
+    shapeNode_ = shape_ ? MObjectHandle(shape_->thisMObject()) : MObjectHandle();
     // The groom about to be brushed: its stroke document is evaluated ahead in idle time.
     if (shape_) GroomShape::setBrushTarget(shape_);
     return shape_ != nullptr;
@@ -1321,17 +1327,18 @@ void BrushContext::clearTubeWires() {
 
 void BrushContext::showTubeWires() {
     const BrushToolSettings& s = tool_.settings;
-    if (shape_) shape_->setTubesAlwaysVisible(tubesAlwaysVisible);
+    GroomShape* shape = liveShape();
+    if (shape) shape->setTubesAlwaysVisible(tubesAlwaysVisible);
     // The Tube brush, and the Tube tool's root mode (the tube made shown as the card's Shaded,
     // Wireframe and Colors say; not while Edit roots hides the guides).
     const bool roots = s.tool == BrushToolSettings::Tool::Roots && !tool_.roots().hidesGuides();
-    const bool on = active_ && shape_ && ((s.tool == BrushToolSettings::Tool::Brush && s.brush.mode == BrushMode::ShapeTube) || roots);
-    if (!on || !(tubeWiresOn_.isAlive() && tubeWiresOn_.isValid() && tubeWiresOn_.object() == shape_->thisMObject())) {
+    const bool on = active_ && shape && ((s.tool == BrushToolSettings::Tool::Brush && s.brush.mode == BrushMode::ShapeTube) || roots);
+    if (!on || !(tubeWiresOn_.isAlive() && tubeWiresOn_.isValid() && tubeWiresOn_.object() == shape->thisMObject())) {
         clearTubeWires();  // off, or on another groom
     }
     if (!on) return;
-    tubeWiresOn_ = MObjectHandle(shape_->thisMObject());
-    shape_->setTubeWires(true, tubeShaded, tubeWireframe, tubeColors);
+    tubeWiresOn_ = MObjectHandle(shape->thisMObject());
+    shape->setTubeWires(true, tubeShaded, tubeWireframe, tubeColors);
     // (Always visible: the look the tubes keep once the Tube brush is put down)
 }
 
@@ -1438,12 +1445,13 @@ void BrushContext::lengthEdit(const std::string& words) {
 }
 
 void BrushContext::publishRoots() {
-    if (!shape_) return;
+    GroomShape* shape = liveShape();
+    if (!shape) return;
     if (tool_.settings.tool != BrushToolSettings::Tool::Roots || !tool_.roots().active() || !host_) {
-        shape_->setRootOverlay({}, 1.0f);
+        shape->setRootOverlay({}, 1.0f);
         return;
     }
-    shape_->setRootOverlay(tool_.roots().overlay(*host_), pixelScale_);
+    shape->setRootOverlay(tool_.roots().overlay(*host_), pixelScale_);
 }
 
 void BrushContext::rootSettings(const std::string& text) {
@@ -1463,7 +1471,7 @@ void BrushContext::rootSettings(const std::string& text) {
 }
 
 void BrushContext::rootEdit(const std::string& words) {
-    if (!host_ || (!shape_ && !findGroom())) throw std::invalid_argument("select a groom first");
+    if (!host_ || (!liveShape() && !findGroom())) throw std::invalid_argument("select a groom first");
     RootTubeTool& roots = tool_.roots();
     std::istringstream in(words);
     std::string verb, arg;
@@ -1499,7 +1507,7 @@ void BrushContext::rootEdit(const std::string& words) {
 
 std::string BrushContext::rootState() {
     RootTubeTool& roots = tool_.roots();
-    if (host_ && (shape_ || findGroom()) && roots.active()) {
+    if (host_ && (liveShape() || findGroom()) && roots.active()) {
         roots.sync(*host_);  // (an undo or redo since: the tool reads the groom again)
         publishRoots();
         showTubeWires();

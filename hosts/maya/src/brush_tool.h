@@ -238,6 +238,11 @@ private:
     std::unique_ptr<ContextStrokeHost> host_;
     MDagPath groom_;
     GroomShape* shape_ = nullptr;
+    MObjectHandle shapeNode_;  // shape_'s node (findGroom)
+    // shape_ while its node lives, else null: a groom deleted with the tool still up (a new
+    // scene) leaves shape_ dangling until findGroom runs again, so the calls made outside a
+    // stroke (the tool put away, its settings edited) go through this.
+    GroomShape* liveShape() const;
     std::string warnedReference_;  // the referenced groom a stroke was refused on (warned once)
     // The texture map being painted: kept between strokes while its file is what the last stroke
     // wrote (opened again from the file otherwise).
