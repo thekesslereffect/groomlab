@@ -13,6 +13,20 @@ version. While GroomLab is in early access, a node's params can still change bet
 param renamed, or two merged into one); the entries below say when one does and what to set. Once
 it leaves early access, saved grooms will keep their look across updates.
 
+## 0.49.1 (November 16, 2026)
+
+- **Tubes drawn root first, and the tube hierarchy, in Blender and the app.** The Tube tool's
+  **Tube roots** (Draw root, Edit roots, Select root, Duplicate, Delete) and **Tube hierarchy**
+  (Add, Remove, the level buttons) now work in every host, with the same **Colors** and **Always
+  visible** switches as Maya. A root's outline shows over the hair around it and hides behind the
+  head.
+- **Maya's root mode updates live:** outlines and tubes redraw while you drag a point, and the
+  tubes show as the Tube card's **Shaded**, **Wireframe** and **Colors** say.
+- **Outlines drawn with 0.49.0 are kept:** the first time the Tube tool touches a groom from
+  0.49.0, its root outlines move into its guides, so there is nothing to redraw.
+- **Fixes:** Maya could crash some time after a groom was deleted (or a new scene opened) with the
+  brush tool still up (seen in Maya 2026).
+
 ## 0.49.0 (November 15, 2026)
 
 - **Tubes drawn root first.** In the Tube tool's **Tube roots** section, **Draw root** clicks a
