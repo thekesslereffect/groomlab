@@ -1327,9 +1327,24 @@ TubeDisplay buildTubeDisplay(const GuideHierarchy& hierarchy, const TubeDisplayO
     return out;
 }
 
-RootOverlayGeometry rootOverlayGeometry(const std::vector<RootTubeTool::Item>& items) {
+RootOverlayGeometry rootOverlayGeometry(const std::vector<RootTubeTool::Item>& items, const ScalpMesh* scalp) {
     using Item = RootTubeTool::Item;
     RootOverlayGeometry out;
+    // A hair off the skin (the scalp map's lift, a little more for each layer above the fill).
+    float lift = 0.0f;
+    if (scalp && scalp->triangleCount() > 0 && !scalp->points().empty()) {
+        Vec3f lo = scalp->points().front(), hi = lo;
+        for (const Vec3f& q : scalp->points()) {
+            lo = Vec3f(std::min(lo.x, q.x), std::min(lo.y, q.y), std::min(lo.z, q.z));
+            hi = Vec3f(std::max(hi.x, q.x), std::max(hi.y, q.y), std::max(hi.z, q.z));
+        }
+        lift = 0.0015f * (hi - lo).length();
+    }
+    auto lifted = [&](const Vec3f& p, float layers) {
+        if (lift <= 0.0f) return p;
+        const Vec3f n = scalpPointNormal(*scalp, p).normal;
+        return n.length() > 0.0f ? p + n.normalized() * (lift * layers) : p;
+    };
     out.fills.triangles = true;
     for (DisplayGeometry* g : {&out.dots, &out.dimDots, &out.markers}) g->points = true;
     for (DisplayGeometry* g : {&out.fills, &out.edges, &out.highlighted, &out.dots, &out.dimDots, &out.markers}) g->overlay = true;
@@ -1340,18 +1355,22 @@ RootOverlayGeometry rootOverlayGeometry(const std::vector<RootTubeTool::Item>& i
     };
     for (const Item& item : items) {
         if (item.style & RootTubeTool::Filled) {
-            for (const Vec3f& p : item.triangles) out.fills.indices.push_back(vertex(out.fills, p, item.color, RootTubeTool::kFillOpacity));
+            for (const Vec3f& p : item.triangles) {
+                out.fills.indices.push_back(vertex(out.fills, lifted(p, 1.0f), item.color, RootTubeTool::kFillOpacity));
+            }
         }
         if (item.style & RootTubeTool::Marker) {
-            if (!item.edge.empty()) out.markers.indices.push_back(vertex(out.markers, item.edge.front(), item.color, 1.0f));
+            if (!item.edge.empty()) out.markers.indices.push_back(vertex(out.markers, lifted(item.edge.front(), 3.0f), item.color, 1.0f));
         } else if (item.edge.size() >= 2) {
             const bool high = (item.style & RootTubeTool::Highlight) != 0;
             const std::array<float, 3> c = (item.style & RootTubeTool::Stroke) ? item.color : RootTubeTool::edgeColor(item);
             DisplayGeometry& g = high ? out.highlighted : out.edges;
             const bool closed = (item.style & RootTubeTool::Closed) && item.edge.size() >= 3;
-            const std::uint32_t first = vertex(g, item.edge.front(), c, 1.0f);
+            const bool air = (item.style & RootTubeTool::Stroke) != 0;  // (a path drawn in the air: as it is)
+            const float layers = high ? 2.5f : 2.0f;
+            const std::uint32_t first = vertex(g, air ? item.edge.front() : lifted(item.edge.front(), layers), c, 1.0f);
             for (std::size_t k = 1; k < item.edge.size(); ++k) {
-                const std::uint32_t v = vertex(g, item.edge[k], c, 1.0f);
+                const std::uint32_t v = vertex(g, air ? item.edge[k] : lifted(item.edge[k], layers), c, 1.0f);
                 g.indices.insert(g.indices.end(), {v - 1, v});
             }
             if (closed) g.indices.insert(g.indices.end(), {static_cast<std::uint32_t>(g.positions.size() / 3 - 1), first});
@@ -1361,7 +1380,7 @@ RootOverlayGeometry rootOverlayGeometry(const std::vector<RootTubeTool::Item>& i
             std::array<float, 3> c = RootTubeTool::kDotColor;
             if (dim) c = {c[0] * 0.45f, c[1] * 0.45f, c[2] * 0.45f};
             DisplayGeometry& g = dim ? out.dimDots : out.dots;
-            for (const Vec3f& p : item.dots) g.indices.push_back(vertex(g, p, c, 1.0f));
+            for (const Vec3f& p : item.dots) g.indices.push_back(vertex(g, lifted(p, 3.0f), c, 1.0f));
         }
     }
     return out;

@@ -33,6 +33,7 @@
 #include <QWidget>
 
 #include "groomlab/guide_hierarchy.h"
+#include "groomlab/root_tube_tool.h"
 
 class QAbstractButton;
 class QCheckBox;
@@ -76,9 +77,12 @@ public:
     const std::string& tipChoice() const { return tipChoice_; }
     int activeProfile() const { return active_; }
     void setActiveProfile(int profile);
-    // The Tube brush's tubes in the viewport (Maya's Tube card): shaded surfaces, wires.
+    // The Tube brush's tubes in the viewport (Maya's Tube card): shaded surfaces, wires, each in
+    // its root tube's color (Colors), drawn whatever the tool (Always visible).
     bool shaded() const;
     bool wireframe() const;
+    bool colors() const;
+    bool alwaysVisible() const;
     const std::vector<GuideId>& targets() const { return targets_; }
     const std::string& source() const { return source_; }  // "selection", "solo" or "none"
     bool libraryShape(const std::string& name) const;
@@ -108,7 +112,43 @@ public:
     void setShapeSmooth(bool on);           // the library shape's Smooth
     void setMirror(bool on);
 
+    // ---- Tube roots and the tube hierarchy (Maya's root_tube_card.py; the core's root tool) ------
+    // Draw root, Edit roots (Finish edit while editing), Select root: each starts the root mode
+    // (the brush session's), again leaves it; Undo CV, Delete, Duplicate; the new roots' settings.
+    void drawRoot();
+    void editRoots();
+    void selectRoot();
+    void undoCv();
+    void deleteRoots();
+    void duplicateRoots();
+    void setRootSnap(bool on);
+    void setRootDrawPath(bool on);
+    void setRootDensity(double density);
+    void setRootLength(double length);
+    void setRootSegments(double segments);
+    void setRootTaper(double taper);
+    // The buttons as the root mode stands, the hierarchy's levels (after an undo: the tool reads
+    // the groom again, its outlines following).
+    void refreshRoots();
+    // Add splits the selected tubes (none: the base group's) a level deeper, Remove undoes a split;
+    // showLevel shows a level alone (the others' groups hidden) and picks its group.
+    void addLevel();
+    void removeLevel();
+    void showLevel(int level);
+    const std::string& levelBase() const { return levelBase_; }
+    const std::vector<std::string>& levels() const { return levels_; }
+    int shownLevel() const { return shownLevel_; }
+
     // ---- The pieces (tests, screenshots) ------------------------------------------------------
+    CardBlock* rootsBlock() const { return rootsBlock_; }
+    CardBlock* levelsBlock() const { return levelsBlock_; }
+    QAbstractButton* drawRootButton() const { return drawRoot_; }
+    QAbstractButton* editRootsButton() const { return editRoots_; }
+    QAbstractButton* selectRootButton() const { return selectRoot_; }
+    QAbstractButton* deleteRootsButton() const { return deleteRoots_; }
+    QAbstractButton* duplicateRootsButton() const { return duplicateRoots_; }
+    QAbstractButton* colorsBox() const;
+    QAbstractButton* alwaysVisibleBox() const;
     QComboBox* shapeBox() const { return shape_; }
     QComboBox* profileBox(int profile) const { return profile == 0 ? shape_ : profile == 1 ? mid_ : tip_; }
     QPushButton* profileApply(int profile) const { return profileApply_[static_cast<std::size_t>(profile)]; }
@@ -141,6 +181,9 @@ signals:
     void settingsChanged();  // the placement tube changed (the brush session's settings)
     void message(const QString& text);  // what went wrong, or what was made ("" clears)
     void displayChanged();   // Shaded or Wireframe toggled: the host draws the brush's tubes again
+    // The root mode started, left or changed its outlines (the host: the viewport's tool and
+    // overlay, the guides hidden while editing).
+    void rootModeChanged();
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -161,6 +204,10 @@ private:
     void disarmDelete();
     void sendPreview();
     void shapeCommitted(const std::vector<SectionPoint>& points);
+    void startRoots(RootTubeTool::Mode mode);
+    bool rootsDone(bool ok);  // after a root button: said, the buttons, the host told
+    void fillLevels();
+    std::string levelPicked() const;  // the brush's group, else the base kept
 
     BrushSession* session_ = nullptr;
     bool updating_ = false;
@@ -188,6 +235,21 @@ private:
     bool previewing_ = false;
     bool armed_ = false;
 
+    CardBlock* rootsBlock_ = nullptr;
+    CardBlock* levelsBlock_ = nullptr;
+    // (The modes and Duplicate: chips, checked while on; Undo CV and Delete: buttons.)
+    QAbstractButton *drawRoot_ = nullptr, *editRoots_ = nullptr, *selectRoot_ = nullptr;
+    QAbstractButton *undoCv_ = nullptr, *deleteRoots_ = nullptr, *duplicateRoots_ = nullptr;
+    QCheckBox *rootSnap_ = nullptr, *rootDrawPath_ = nullptr, *colors_ = nullptr, *always_ = nullptr;
+    ValueSlider *rootDensity_ = nullptr, *rootLength_ = nullptr, *rootSegments_ = nullptr, *rootTaper_ = nullptr;
+    QPushButton *addLevel_ = nullptr, *removeLevel_ = nullptr;
+    QLabel* levelBaseLabel_ = nullptr;
+    QHBoxLayout* levelRow_ = nullptr;
+    std::vector<QAbstractButton*> levelButtons_;
+    std::string levelBase_;
+    std::vector<std::string> levels_;
+    int shownLevel_ = 1;
+    std::uint64_t rootsHeard_ = 0;  // the root tool's last message said (its messageCount)
     QLabel* targetsLabel_ = nullptr;  // what the fields change (their tips; not shown)
     CardBlock* tubeBlock_ = nullptr;
     CardBlock* profileBlock_ = nullptr;

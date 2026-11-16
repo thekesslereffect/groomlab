@@ -186,6 +186,7 @@ public:
     QScrollArea* scrollArea() const { return scroll_; }
 
 signals:
+    void rootModeChanged();  // the Tube card's root mode started, left or changed (tube_panel.h)
     // A tile: the catalog id ("select", "freeze", "paint", "comb"...).
     void toolChosen(const QString& id);
     void unfreezeAllRequested();  // the Unfreeze All tile

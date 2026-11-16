@@ -296,7 +296,9 @@ TubeDisplay buildTubeDisplay(const GuideHierarchy& hierarchy, const TubeDisplayO
 // display geometry (Blender, the app; Maya draws the items itself, root_overlay_draw.cpp): the
 // see-through fills (triangles), the edges (line pairs; the highlighted root's apart, drawn wider)
 // and dots facing the camera a size in pixels across (points): the CVs, the dim CVs (another
-// root's, while one is drawn) and the roots' middles (markers). Every vertex colored.
+// root's, while one is drawn) and the roots' middles (markers). Every vertex colored. With
+// `scalp`, each lifted a hair off it along its normal (fills, then edges, then dots above them), so
+// a host drawing them depth tested sees them over the skin they lie on, hidden behind the head.
 struct RootOverlayGeometry {
     DisplayGeometry fills, edges, highlighted, dots, dimDots, markers;
     float edgePixels = RootTubeTool::kEdgePixels;
@@ -307,7 +309,7 @@ struct RootOverlayGeometry {
     bool empty() const { return fills.positions.empty() && edges.positions.empty() && highlighted.positions.empty() &&
                                 dots.positions.empty() && dimDots.positions.empty() && markers.positions.empty(); }
 };
-RootOverlayGeometry rootOverlayGeometry(const std::vector<RootTubeTool::Item>& items);
+RootOverlayGeometry rootOverlayGeometry(const std::vector<RootTubeTool::Item>& items, const ScalpMesh* scalp = nullptr);
 
 // ---- Instances --------------------------------------------------------------------------------
 

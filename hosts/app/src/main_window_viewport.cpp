@@ -520,12 +520,18 @@ void MainWindow::refreshTool() {
     const Viewport::ToolMode mode = viewport_->toolMode();
     shell_->setTool(mode == Viewport::ToolMode::Brush ? brush_.toolId() : std::string(), mode == Viewport::ToolMode::Select);
     // The Tube brush's tubes (the core's display, every host's): wires and/or shaded, as its card says.
-    const bool tubeBrush = mode == Viewport::ToolMode::Brush && brush_.toolId() == "shape";
+    // (The Tube tool's root mode is the Tube tool's too: its toolId; Always visible: any tool.)
     const TubePanel* tubes = groomTools_ ? groomTools_->tubePanel() : nullptr;
+    const bool tubeBrush = (mode == Viewport::ToolMode::Brush && brush_.toolId() == "shape") ||
+                           (tubes && tubes->alwaysVisible() && mode != Viewport::ToolMode::Camera);
     const bool wires = tubeBrush && tubes && tubes->wireframe(), shaded = tubeBrush && tubes && tubes->shaded();
-    if (settings_.tubeWires != wires || settings_.tubeShaded != shaded) {
+    const bool colors = tubeBrush && tubes && tubes->colors();
+    const bool hidden = brush_.rootMode() && brush_.roots().hidesGuides();
+    if (settings_.tubeWires != wires || settings_.tubeShaded != shaded || settings_.tubeColors != colors || hidden != rootsHide_) {
         settings_.tubeWires = wires;
         settings_.tubeShaded = shaded;
+        settings_.tubeColors = colors;
+        rootsHide_ = hidden;
         redisplay();
     }
 }
@@ -730,6 +736,15 @@ bool MainWindow::applyStroke(const std::vector<QPointF>& points, const QSize& si
     if (dabs > 0) lastDabMs_ = total / dabs;
     timer.start();
     guidesEdited();
+    if (brush_.rootMode()) {
+        // The Tube tool's root mode (--brush mode=roots): its outlines shown and its card, as a
+        // click in the viewport shows them.
+        if (viewport_->toolMode() != Viewport::ToolMode::Brush) viewport_->setToolMode(Viewport::ToolMode::Brush);
+        viewport_->refreshOverlay();
+        groomTools_->refresh();
+        refreshTool();
+        redisplay();
+    }
     if (drawDabs) headlessFrame();
     const double fullViewMs = timer.nsecsElapsed() / 1e6;
     const ViewResult& view = document_->lastView();
@@ -767,7 +782,12 @@ bool MainWindow::applyStroke(const std::vector<QPointF>& points, const QSize& si
 
 void MainWindow::redisplay() {
     if (!document_) return;
-    const DisplayFrame& frame = document_->updateDisplay(settings_);
+    DisplaySettings shown = settings_;
+    if (brush_.rootMode() && brush_.roots().hidesGuides()) {
+        // Edit roots: the guides and their tubes hidden, only the roots' outlines (Maya's too).
+        shown.guides = shown.tubes = shown.tubeWires = shown.tubeShaded = false;
+    }
+    const DisplayFrame& frame = document_->updateDisplay(shown);
     viewport_->renderer().setHairLook(document_->session().hairLook());
     // The coverage at the render's density: the density the shown strands were evaluated at.
     const float density = settings_.coverageDensity ? document_->lastView().density : 1.0f;

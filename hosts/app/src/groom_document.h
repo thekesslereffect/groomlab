@@ -464,6 +464,9 @@ public:
     // each node and from which node, what it writes and overwrites, whether its reads reach it.
     nlohmann::json channels() const;
     bool canUndo() const { return undoIndex_ > 0; }
+    // Where the history stands (its undo steps done) and the step to undo: together they change
+    // with every edit, undo and redo (a tool asks whether its press or release committed one).
+    std::size_t undoIndex() const { return undoIndex_; }
     bool canRedo() const { return undoIndex_ < edits_.size(); }
     std::string undoText() const;  // "Undo length.length", "Undo comb stroke" or ""
     std::string redoText() const;

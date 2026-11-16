@@ -38,6 +38,8 @@
 #include "groomlab/brush_catalog.h"
 #include "groomlab/guide_hierarchy.h"
 #include "groomlab/tube.h"
+#include "groomlab/root_tubes.h"
+#include "camera.h"
 #include "param_panel.h"
 #include "tube_panel.h"
 #include "tube_shape_editor.h"
@@ -563,7 +565,7 @@ TEST(AppGroomTools, TheCardsBlocksInOrderPerTool) {
         {"flow", {"Brush", "Flow"}},
         {"place", {"New guides", "Tube", "Applies to"}},
         {"draw", {"New guides", "Tube", "Applies to"}},
-        {"shape", {"Brush", "Paints", "Profile", "Selected guides", "Applies to"}},
+        {"shape", {"Brush", "Paints", "Tube roots", "Tube hierarchy", "Profile", "Selected guides", "Applies to"}},
         {"select", {"Applies to"}},
         {"erase", {"Brush", "Erases", "Applies to"}},
         {"lengths", {"Keys", "Applies to"}},
@@ -603,6 +605,73 @@ TEST(AppGroomTools, TheCardsBlocksInOrderPerTool) {
     EXPECT_TRUE(card->isHidden());
     EXPECT_FALSE(tools.noToolLabel()->isHidden());
     EXPECT_EQ(tools.findChild<QLabel*>(QStringLiteral("toolHeading")), nullptr) << "no TOOL heading";
+}
+
+TEST(AppTubes, TubeRootsAndTheHierarchyFromTheCard) {
+    // The Tube card's Tube roots (the core's root tool through the brush session) and Tube
+    // hierarchy blocks, as Maya's root_tube_card.py: a mode's button starts it and again leaves
+    // it; Finish edit while editing; Add splits a level deeper (shown, picked), Remove takes it back.
+    auto doc = GroomDocument::open(kSampleGroom);
+    ASSERT_TRUE(doc);
+    BrushSession session;
+    session.setDocument(doc.get());
+    OrbitCamera camera;
+    camera.frame(doc->sceneBounds());
+    session.setView(camera, 800, 600);
+    TubePanel panel;
+    panel.setSession(&session);
+    panel.setMode(TubePanel::Mode::Edit);
+    EXPECT_FALSE(panel.rootsBlock()->isHidden());
+    EXPECT_FALSE(panel.levelsBlock()->isHidden());
+    EXPECT_TRUE(panel.colors()) << "Colors on, as Maya's";
+    EXPECT_FALSE(panel.alwaysVisible());
+    int changes = 0;
+    QObject::connect(&panel, &TubePanel::rootModeChanged, [&changes] { ++changes; });
+    // Draw root: the root mode, placing; the card's id stays the Tube tool's; again: left.
+    panel.drawRootButton()->click();
+    EXPECT_TRUE(session.rootMode());
+    EXPECT_EQ(session.roots().mode(), RootTubeTool::Mode::Place);
+    EXPECT_EQ(session.toolId(), "shape");
+    EXPECT_TRUE(panel.drawRootButton()->isChecked());
+    EXPECT_GT(changes, 0);
+    panel.drawRootButton()->click();
+    EXPECT_FALSE(session.rootMode());
+    EXPECT_EQ(session.settings().modeName(), "shape");
+    // Edit roots on a groom with no root tubes: drawing one instead, as Maya's tool says.
+    panel.editRootsButton()->click();
+    EXPECT_TRUE(session.rootMode());
+    EXPECT_EQ(session.roots().mode(), RootTubeTool::Mode::Place);
+    EXPECT_TRUE(panel.drawRootButton()->isChecked());
+    EXPECT_EQ(panel.editRootsButton()->text(), QStringLiteral("Edit roots"));
+    panel.drawRootButton()->click();
+    EXPECT_FALSE(session.rootMode());
+    // Select root: Delete and Duplicate wait for a root picked.
+    panel.selectRootButton()->click();
+    EXPECT_EQ(session.roots().mode(), RootTubeTool::Mode::Select);
+    EXPECT_FALSE(panel.deleteRootsButton()->isEnabled());
+    EXPECT_FALSE(panel.duplicateRootsButton()->isEnabled());
+    session.setTool("comb");  // another tool: the root mode put away
+    EXPECT_FALSE(session.rootMode());
+    EXPECT_EQ(session.toolId(), "comb");
+
+    // The hierarchy: one level; Add splits the base group's tubes (one undo step), level 2 shown
+    // and picked; level 1 again; Remove: one level, the guides as they were.
+    panel.refreshRoots();
+    ASSERT_FALSE(panel.levelBase().empty());
+    EXPECT_EQ(panel.levels().size(), 1u);
+    const std::size_t guides = doc->session().authoredHierarchy()->guides().size();
+    panel.addLevel();
+    EXPECT_EQ(panel.levels().size(), 2u);
+    EXPECT_EQ(panel.shownLevel(), 2);
+    EXPECT_EQ(session.settings().brush.group, panel.levels()[1]);
+    EXPECT_GT(doc->session().authoredHierarchy()->guides().size(), guides);
+    EXPECT_TRUE(doc->hiddenGroups().count(panel.levels()[0])) << "the other level hidden";
+    panel.showLevel(1);
+    EXPECT_EQ(panel.shownLevel(), 1);
+    EXPECT_FALSE(doc->hiddenGroups().count(panel.levels()[0]));
+    panel.removeLevel();
+    EXPECT_EQ(panel.levels().size(), 1u);
+    EXPECT_EQ(doc->session().authoredHierarchy()->guides().size(), guides);
 }
 
 TEST(AppGroomTools, NoSelectedOnlyOrFrontOnlyInThePanel) {

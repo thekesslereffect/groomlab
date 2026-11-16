@@ -997,7 +997,8 @@ void rebuildOverlay(ToolState& t, float x, float y, bool withLines) {
         prepareHost(t);
         try {
             if (withLines && t.hasView && !t.tool.rootsPressed()) t.tool.roots().hover(t.host, t.view, x, y);  // (Duplicate: the copies follow)
-            t.roots = rootOverlayGeometry(t.tool.roots().overlay(t.host));
+            const MeshPtr scalp = t.session.groom->scalp();
+            t.roots = rootOverlayGeometry(t.tool.roots().overlay(t.host), scalp.get());
         } catch (const std::exception&) {
             t.roots = RootOverlayGeometry();
         }

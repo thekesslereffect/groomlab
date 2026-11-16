@@ -55,7 +55,7 @@ public:
     // unknown id, leaving the settings as they were.
     void setTool(const std::string& id);
     // The catalog id of the tool the settings make: "freeze" while they paint the freeze mask on
-    // the guides, else settings().modeName().
+    // the guides, "shape" in the Tube tool's root mode (its card stays), else settings().modeName().
     std::string toolId() const;
     // The view's density while a stroke is live (ViewRequest::sculptDensity): the strands step
     // back to this fraction so each dab evaluates fast; the release evaluates them all again.
@@ -81,11 +81,27 @@ public:
     // threw (lastError says). The overlay draws its keys while it is the tool.
     LengthKeyTool& lengths() { return tool_.lengths(); }
     bool editLengths(const char* what, const std::function<void(LengthKeyTool&, StrokeHost&, const BrushToolSettings&)>& fn);
+    // The Tube tool's root mode (Tool::Roots, root_tube_tool.h): its buttons through the
+    // session's host (start, Finish edit, Undo CV, Duplicate, Delete...), false when no groom is
+    // open or it threw (lastError says); the overlay's root outlines follow. startRoots makes it
+    // the tool ("place", "edit" or "select"); leaveRoots puts it away for the Tube brush.
+    RootTubeTool& roots() { return tool_.roots(); }
+    bool rootMode() const { return tool_.settings.tool == BrushToolSettings::Tool::Roots && tool_.roots().active(); }
+    bool startRoots(RootTubeTool::Mode mode);
+    void leaveRoots();
+    bool editRoots(const char* what, const std::function<void(RootTubeTool&, StrokeHost&)>& fn);
+    // The root outlines read again (after an undo or redo: the tool takes the groom as it is).
+    void refreshRoots();
+    // What the root mode draws (RootOverlayGeometry: fills, edges, dots), with the overlay's version.
+    const RootOverlayGeometry& rootOverlay() const { return rootOverlay_; }
     // A whole stroke through press, moves and release (tests, the CLI): true when it changed something.
     bool stroke(const std::vector<QPointF>& points, float pressure = 1.0f, unsigned modifiers = 0);
     // The level (and group) of the guide under the cursor becomes the brush's; -2 when no guide
     // is there.
     int pickLevel(const QPointF& at);
+    // Whether the document's history moved since the last press (the root mode commits on a
+    // press, a release or neither: the host evaluates only when it did).
+    bool committedSincePress() const;
     // What went wrong in the last press, move or release ("" when nothing): the stroke was dropped.
     const std::string& lastError() const { return error_; }
     // The core's warnings since the last clear (a stroke that touched nothing says why).
@@ -141,6 +157,7 @@ private:
     int width_ = 0, height_ = 0;
     QVector3D target_;
     DisplayGeometry overlay_;
+    RootOverlayGeometry rootOverlay_;
     std::uint64_t overlayVersion_ = 0;
     bool ringValid_ = false;
     std::array<float, 3> ringTone_{1.0f, 1.0f, 1.0f};
@@ -158,6 +175,8 @@ private:
         std::vector<Vec3f> points;
     } seam_;
     std::string error_;
+    std::size_t pressIndex_ = 0;
+    std::string pressText_;
     bool shot_ = false;
     double shotSeconds_ = 0.0;
     long shotFrame_ = 0;

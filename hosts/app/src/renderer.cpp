@@ -221,6 +221,13 @@ GroomRenderer::GroomRenderer() : lod_(std::make_unique<LodDraw>()) {
     tool_ = std::make_unique<GpuItem>();
     tool_->kind = Kind::OverlayColored;
     tool_->overlay = true;
+    rootFills_ = std::make_unique<GpuItem>();
+    rootFills_->kind = Kind::TrianglesColored;
+    rootLines_ = std::make_unique<GpuItem>();
+    rootLines_->kind = Kind::LinesColored;
+    rootDots_ = std::make_unique<GpuItem>();
+    rootDots_->kind = Kind::Dots;
+    rootDots_->overlay = true;
     scalpSurface_ = std::make_shared<Surface>();
     scalpSurface_->name = "scalp";
     scalpSurface_->material = surfacePreset("scalp");
@@ -334,6 +341,52 @@ void GroomRenderer::setToolOverlay(const DisplayGeometry& lines, std::uint64_t v
     } else {
         tool_->pending.reset();
     }
+}
+
+void GroomRenderer::setRootOverlay(const RootOverlayGeometry& roots, std::uint64_t version) {
+    if (version == rootVersion_) return;
+    rootVersion_ = version;
+    // The fills (see-through) and the edges (the highlighted root's with them): depth tested.
+    auto put = [](GpuItem& item, std::shared_ptr<DisplayGeometry> g) {
+        item.shown = g && !g->indices.empty() && !g->colors.empty();
+        if (item.shown) item.pending = std::move(g);
+        else item.pending.reset();
+    };
+    put(*rootFills_, std::make_shared<DisplayGeometry>(roots.fills));
+    auto lines = std::make_shared<DisplayGeometry>(roots.edges);
+    const auto base = static_cast<std::uint32_t>(lines->positions.size() / 3);
+    lines->positions.insert(lines->positions.end(), roots.highlighted.positions.begin(), roots.highlighted.positions.end());
+    lines->colors.insert(lines->colors.end(), roots.highlighted.colors.begin(), roots.highlighted.colors.end());
+    for (const std::uint32_t i : roots.highlighted.indices) lines->indices.push_back(base + i);
+    lines->overlay = false;  // (depth tested: hidden behind the head)
+    put(*rootLines_, std::move(lines));
+    // The dots: a dark diamond a few pixels wider under each (Maya's ring), as setDots makes them.
+    GpuItem& d = *rootDots_;
+    d.ownPositions.clear();
+    d.ownOffsets.clear();
+    d.ownColors.clear();
+    d.ownIndices.clear();
+    auto dot = [&](const float* p, const float* c, float size) {
+        const float s = std::max(size, 1.0f) * 0.5f;
+        const float offsets[8] = {-s, 0.0f, 0.0f, s, s, 0.0f, 0.0f, -s};
+        const auto first = static_cast<std::uint32_t>(d.ownPositions.size() / 3);
+        for (int k = 0; k < 4; ++k) {
+            d.ownPositions.insert(d.ownPositions.end(), {p[0], p[1], p[2]});
+            d.ownColors.insert(d.ownColors.end(), {c[0], c[1], c[2], c[3]});
+        }
+        d.ownOffsets.insert(d.ownOffsets.end(), offsets, offsets + 8);
+        d.ownIndices.insert(d.ownIndices.end(), {first, first + 1, first + 2, first, first + 2, first + 3});
+    };
+    const float dark[4] = {0.08f, 0.08f, 0.08f, 1.0f};
+    for (const auto& [g, size] : {std::pair<const DisplayGeometry*, float>{&roots.dimDots, roots.dimDotPixels},
+                                  {&roots.dots, roots.dotPixels}, {&roots.markers, roots.markerPixels}}) {
+        const std::size_t n = g->positions.size() / 3;
+        if (g->colors.size() < n * 4) continue;
+        for (std::size_t i = 0; i < n; ++i) dot(g->positions.data() + i * 3, dark, size + 4.0f);
+        for (std::size_t i = 0; i < n; ++i) dot(g->positions.data() + i * 3, g->colors.data() + i * 4, size);
+    }
+    d.ownPending = true;
+    d.shown = !d.ownIndices.empty();
 }
 
 void GroomRenderer::setScalp(MeshPtr scalp) {
@@ -535,6 +588,13 @@ void GroomRenderer::clear() {
     tool_->release();
     tool_->pending.reset();
     tool_->shown = false;
+    for (GpuItem* item : {rootFills_.get(), rootLines_.get(), rootDots_.get()}) {
+        item->release();
+        item->pending.reset();
+        item->ownIndices.clear();
+        item->shown = false;
+    }
+    rootVersion_ = 0;
     hairStrands_.reset();
     hairVersion_ = 0;
     lookdev_.setHair(nullptr, nullptr, 0);
@@ -550,6 +610,9 @@ void GroomRenderer::releaseResources() {
     dots_->release();
     dots_->ownPending = !dots_->ownIndices.empty();
     tool_->release();
+    for (GpuItem* item : {rootFills_.get(), rootLines_.get(), rootDots_.get()}) item->release();
+    rootDots_->ownPending = !rootDots_->ownIndices.empty();
+    rootVersion_ = 0;  // (the fills and lines sent again)
     for (auto& item : propItems_) {
         item->release();
         item->ownPending = !item->ownIndices.empty();
@@ -821,6 +884,7 @@ void GroomRenderer::ensurePipelines(QRhi* rhi, QRhiRenderPassDescriptor* pass, i
                                       {1, 1, QRhiVertexInputAttribute::Float4, 0}});
                 triangles = kind == Kind::TrianglesColored;
                 depthTest = kind != Kind::OverlayColored;
+                blended = triangles;  // (the root mode's see-through fills; an opaque color draws as before)
                 break;
             case Kind::Surface:
                 ps->setShaderStages({{QRhiShaderStage::Vertex, surfaceVert}, {QRhiShaderStage::Fragment, surfaceFrag}});
@@ -882,7 +946,7 @@ void GroomRenderer::ensurePipelines(QRhi* rhi, QRhiRenderPassDescriptor* pass, i
         item->bindings.reset();
         item->bindingsHdr.reset();
     }
-    for (GpuItem* item : {scalp_.get(), dots_.get(), tool_.get()}) {
+    for (GpuItem* item : {scalp_.get(), dots_.get(), tool_.get(), rootFills_.get(), rootLines_.get(), rootDots_.get()}) {
         item->bindings.reset();
         item->bindingsHdr.reset();
     }
@@ -1339,6 +1403,9 @@ void GroomRenderer::render(QRhi* rhi, QRhiCommandBuffer* cb, QRhiRenderTarget* t
         dots_->ownPending = !dots_->ownIndices.empty();
         tool_->release();
         tool_->shown = tool_->pending != nullptr;
+        for (GpuItem* item : {rootFills_.get(), rootLines_.get(), rootDots_.get()}) item->release();
+        rootDots_->ownPending = !rootDots_->ownIndices.empty();
+        rootVersion_ = 0;
         for (auto& item : propItems_) {
             item->release();
             item->ownPending = !item->ownIndices.empty();
@@ -1412,6 +1479,7 @@ void GroomRenderer::render(QRhi* rhi, QRhiCommandBuffer* cb, QRhiRenderTarget* t
     }
     prepare(*dots_, false);
     prepare(*tool_, false);
+    for (GpuItem* item : {rootFills_.get(), rootLines_.get(), rootDots_.get()}) prepare(*item, false);
     // The GPU preview's run, once this frame's uploads are recorded (its targets exist) and
     // before anything draws them.
     runGpuPreview(rhi, lookdev);
@@ -1422,6 +1490,10 @@ void GroomRenderer::render(QRhi* rhi, QRhiCommandBuffer* cb, QRhiRenderTarget* t
             if (!hidden(i) && item.shown && isOverlay(item.kind)) draw(passCb, item, main_, false);  // (a Scatter's root dots: hair)
         }
         if (dots_->shown) draw(passCb, *dots_, main_, false);
+        // The root mode's fills, edges and dots, under the brush's overlay.
+        for (const GpuItem* item : {rootFills_.get(), rootLines_.get(), rootDots_.get()}) {
+            if (item->shown) draw(passCb, *item, main_, false);
+        }
         if (tool_->shown) draw(passCb, *tool_, main_, false);
     };
 
