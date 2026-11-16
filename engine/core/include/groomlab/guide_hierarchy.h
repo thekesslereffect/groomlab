@@ -279,8 +279,11 @@ public:
     // mapping's local rotation and scale there (closest and bounds: as above); tube widths and
     // children's offsets along scale with the guide they hang from (keepLengths: they keep theirs).
     void transfer(const ScalpMapping& mapping);
-    // Removes guides and their descendants.
-    void removeGuides(const std::vector<GuideId>& guides);
+    // Removes guides and their descendants. `dropEmptiedGroups` (a user's delete: the erase brush,
+    // a delete command): a child group (a tube hierarchy's level, generated children's group) left
+    // with no guides by it goes too, so no empty levels stay behind; a top-level group stays (the
+    // graph's Guides nodes read it by name), as does a group that was empty before.
+    void removeGuides(const std::vector<GuideId>& guides, bool dropEmptiedGroups = false);
 
     // Rebuilds guides with `segments` segments (1 to 256) evenly along the smooth curve through
     // their points, as the viewport draws it, keeping their shape (the Segments slider). Frozen

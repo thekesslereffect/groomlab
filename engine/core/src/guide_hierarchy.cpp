@@ -1201,14 +1201,40 @@ void GuideHierarchy::demoteGroup(GroupId groupId, GroupId newParent) {
     grp->parent = newParent;
 }
 
-void GuideHierarchy::removeGuides(const std::vector<GuideId>& ids) {
+void GuideHierarchy::removeGuides(const std::vector<GuideId>& ids, bool dropEmptiedGroups) {
     invalidateHash();
     std::set<GuideId> doomed;
-    for (const std::size_t i : subtrees(ids, true)) doomed.insert(guides_[i].id);
+    std::set<GroupId> emptied;  // (the groups the removed guides were in, and the groups above them)
+    for (const std::size_t i : subtrees(ids, true)) {
+        doomed.insert(guides_[i].id);
+        if (dropEmptiedGroups) emptied.insert(guides_[i].group);
+    }
     guides_.erase(std::remove_if(guides_.begin(), guides_.end(),
                                  [&](const HierarchyGuide& g) { return doomed.count(g.id) > 0; }),
                   guides_.end());
     rebuildIndex();
+    if (!emptied.empty()) {
+        for (const GroupId id : std::vector<GroupId>(emptied.begin(), emptied.end())) {
+            for (const GuideGroup* g = group(id); g && g->parent != kNoGroup; g = group(g->parent)) emptied.insert(g->parent);
+        }
+        std::set<GroupId> holding;  // groups with a guide in them or in a group under them
+        for (const HierarchyGuide& g : guides_) {
+            for (const GuideGroup* grp = group(g.group); grp && holding.insert(grp->id).second; grp = group(grp->parent)) {
+            }
+        }
+        // The highest emptied child group of each emptied branch (removeGroup takes those under it).
+        std::vector<GroupId> drop;
+        for (const GroupId id : emptied) {
+            const GuideGroup* g = group(id);
+            if (!g || g->parent == kNoGroup || holding.count(id)) continue;
+            const GuideGroup* up = group(g->parent);
+            if (up && up->parent != kNoGroup && emptied.count(up->id) && !holding.count(up->id)) continue;
+            drop.push_back(id);
+        }
+        for (const GroupId id : drop) {
+            if (group(id)) removeGroup(id);
+        }
+    }
     pruneOwnedTubeShapes();
 }
 

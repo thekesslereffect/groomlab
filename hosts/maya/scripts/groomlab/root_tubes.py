@@ -1097,8 +1097,8 @@ def duplicate_root_tube(groom, guide, to, regions=True, start=None):
 
 def delete_root_tubes(groom, guides, regions=True):
     """Remove root tubes `guides` and the tube hierarchy under each (their guides; their root
-    shapes go with them), their kept outlines dropped. With `regions`, the regions updated. One
-    undo step. Returns how many guides went."""
+    shapes go with them, and a level left with no guides its group), their kept outlines dropped.
+    (`regions`: no effect, kept for older callers.) One undo step. Returns how many guides went."""
     guides = [int(g) for g in guides]
     if not guides:
         return 0
@@ -1388,12 +1388,7 @@ def remove_tube_level(groom, base, guides=None):
         raise ValueError("no split tubes to remove under the selection: select a split tube, or one that is split")
     with groomlab.undo_chunk("tube hierarchy: remove a level"):
         cmds.groomLabGuides(groom, removeGuides=True, guide=[str(g) for g in sorted(gone)])
-        counts = dict((g["name"], g["count"]) for g in groomlab.list_guide_groups(groom))
-        for name in reversed(info["levels"][1:]):  # (a level emptied: its group too, deepest first)
-            if counts.get(name, 0) == 0:
-                groomlab.remove_guide_group(groom, name)
-            else:
-                break
+        # (a level emptied goes with its group: the removal drops it, groomLabGuides -removeGuides)
     out = tube_levels(groom, picked=base)
     out["removed"] = len(gone)
     return out

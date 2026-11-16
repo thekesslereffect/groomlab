@@ -775,7 +775,7 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                 }
                 setResult(static_cast<int>(doomed.size()));
                 if (doomed.empty()) return MS::kSuccess;
-                h->removeGuides(doomed);
+                h->removeGuides(doomed, true);  // (a child group left empty goes too)
             } else if (db.isFlagSet(kReparent[0])) {
                 const GuideId parent = guideIdOf(flagString(db, kReparent[0], "0"));
                 const std::vector<GuideId> ids = targets();

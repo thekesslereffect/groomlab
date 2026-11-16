@@ -573,7 +573,7 @@ bool GuidesPanel::generateChildren(const std::string& parent, int count) {
 bool GuidesPanel::deleteSelected() {
     if (!document_ || document_->selection().empty()) return false;
     const std::vector<GuideId> ids = document_->selection();
-    const bool ok = edit("delete the guides", "delete guides", [&](GuideHierarchy& h) { h.removeGuides(ids); });
+    const bool ok = edit("delete the guides", "delete guides", [&](GuideHierarchy& h) { h.removeGuides(ids, true); });
     if (ok) document_->setSelection({});
     return ok;
 }

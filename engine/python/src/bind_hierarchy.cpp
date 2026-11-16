@@ -578,7 +578,8 @@ void bindHierarchy(py::module_& m) {
              py::call_guard<py::gil_scoped_release>(), "Moves every guide onto another scalp.")
         .def("transfer", py::overload_cast<const ScalpMapping&>(&GuideHierarchy::transfer), py::arg("mapping"),
              py::call_guard<py::gil_scoped_release>(), "Moves every guide onto another scalp by a ScalpMapping.")
-        .def("remove_guides", &GuideHierarchy::removeGuides, py::arg("guides"), "Removes guides and their descendants.")
+        .def("remove_guides", &GuideHierarchy::removeGuides, py::arg("guides"), py::arg("drop_emptied_groups") = false,
+             "Removes guides and their descendants (drop_emptied_groups: and the child groups they leave empty).")
         .def("lock", &GuideHierarchy::lock, py::arg("id"))
         .def("unlock", &GuideHierarchy::unlock, py::arg("id"))
         .def("set_points", [](GuideHierarchy& h, GuideId id, py::handle points) { h.setPoints(id, toPoints(points)); }, py::arg("id"), py::arg("points"),

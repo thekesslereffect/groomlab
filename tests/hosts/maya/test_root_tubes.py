@@ -368,6 +368,20 @@ class RootTubes(unittest.TestCase):
         self.assertNotIn(shape, [x["name"] for x in groomlab.tube_shapes(self.groom)])
         cmds.undo()
         self.assertEqual(count(), 14)
+        levels = root_tubes.tube_levels(self.groom, picked=root_tubes.ROOT_GROUP)["levels"]
+        self.assertEqual(len(levels), 3)
+        groups = lambda: sorted(x["name"] for x in groomlab.list_guide_groups(self.groom))  # noqa: E731
+        # Erased (the brush, groomLabGuides -removeGuides): the hierarchy under them goes, and the
+        # levels left empty with it; the other root keeps its levels until it goes too.
+        cmds.groomLabGuides(self.groom, removeGuides=True, guide=[str(b)])
+        self.assertEqual(count(), 7)
+        self.assertEqual(groups(), sorted(levels))
+        cmds.groomLabGuides(self.groom, removeGuides=True, guide=[str(a)])
+        self.assertEqual(count(), 0)
+        self.assertEqual(groups(), [root_tubes.ROOT_GROUP])  # (the base stays: the graph reads it)
+        cmds.undo()
+        self.assertEqual(groups(), sorted(levels))
+        self.assertEqual(count(), 7)
 
     def _tool(self):
         """The root tool, its view a top view (1000 px a unit) onto the sphere's top."""
