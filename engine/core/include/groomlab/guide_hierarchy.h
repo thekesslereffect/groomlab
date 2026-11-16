@@ -54,6 +54,11 @@ struct HierarchyGuide {
     // when its group's are set (resample with groupWide skips it). Saved.
     bool ownSegments = false;
     StrandRoot root;
+    // A root-first tube's root outline as drawn (root_tubes.h): its CVs on the scalp the guides
+    // root on (each a triangle and barycentrics, as `root`), in order round it, so it stays where
+    // it was drawn whatever is done to the guide and moves with a deforming scalp. Saved. Empty
+    // for every other guide.
+    std::vector<StrandRoot> rootOutline;
     TubeProfile tube;  // tube.h: its shape and sections, the volume its children (and fillTubes' strands) fill
     // Reference direction for this guide's first frame normal (projected
     // perpendicular to the root tangent). Fixed at creation so the frame, and
@@ -332,6 +337,8 @@ public:
     // it to offsets; their children follow on the next evaluate. Per-point
     // layers are resampled to the new point count.
     void setPoints(GuideId id, std::vector<Vec3f> points);
+    // A root-first tube's root outline (HierarchyGuide::rootOutline: its CVs on the scalp).
+    void setRootOutline(GuideId id, std::vector<StrandRoot> outline);
     // A guide's tube. A primary without children given a shape (another shape, or round to
     // shaped) has its frame laid across the scalp at its next evaluate: the new shape lies flat on
     // the head at twist 0, across the way the guide lies over the scalp. A library shape (tube.h:

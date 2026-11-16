@@ -1,0 +1,159 @@
+// SPDX-License-Identifier: Apache-2.0
+#pragma once
+
+// Root-first tubes (issue 61) and the tube hierarchy (issue 62), the Tube tool's work in every host
+// (first written for Maya in Python: hosts/maya/scripts/groomlab/root_tubes.py, now a thin wrapper
+// over these).
+//
+// Root-first tubes: the artist clicks a root's outline on the scalp one CV at a time; closing it
+// makes a tube guide rooted at the outline's middle, its tube's root section that outline exactly
+// (a library shape of its own, kOwnedTubeShapePrefix<n>, removed with its last guide), going out
+// along a drawn path or straight off the scalp. The tube's root footprint is that outline fixed on
+// the scalp (TubeSpine::setRootOnScalp: combing never moves it), and Interpolate's fillTubes gives
+// every strand rooted in it to that tube. The CVs are kept on the scalp with the guide
+// (HierarchyGuide::rootOutline, saved), apart from its shape: only drawing the root and editing it
+// set them.
+//
+// The tube hierarchy: a base group of tubes (level 1) and below it groups that split each tube in
+// two (ChildGenerationParams::split), level by level up to kMaxTubeLevels, level n's group a child
+// group of level n - 1's named <base>_L<n>; shaping a tube carries the smaller tubes inside it.
+//
+// Every edit here works on a hierarchy evaluated on `scalp` (the scalp its guides root on) and
+// leaves it evaluated there; the host stores it as one undo step.
+
+#include <array>
+#include <functional>
+#include <map>
+#include <set>
+#include <string>
+#include <vector>
+
+#include "groomlab/guide_hierarchy.h"
+#include "groomlab/math.h"
+#include "groomlab/scalp_mesh.h"
+
+namespace groomlab {
+
+constexpr const char* kRootTubeGroup = "rootTubes";  // where new root tubes go with no group picked
+constexpr int kMaxTubeLevels = 9;                     // the hierarchy's deepest level (1: the base)
+constexpr const char* kTubeLevelSuffix = "_L";        // level n's group: <base>_L<n>
+constexpr float kRootSnapPixels = 12.0f;              // how near on screen a CV snaps to a neighbour's
+
+// ---- Path math (pure: the tools and the tests use it too) ------------------------------------------
+
+// The area centroid of a closed outline (points roughly on a plane: in its Newell plane), the mean
+// where it has no area.
+Vec3f outlineCentroid(const std::vector<Vec3f>& outline);
+// `count` points evenly along a polyline (2 or more points).
+std::vector<Vec3f> resamplePolyline(const std::vector<Vec3f>& points, std::size_t count);
+// How far (radians) a polyline turns, all told.
+float polylineTurning(const std::vector<Vec3f>& points);
+// How far (radians) `direction` leans off `normal`.
+float leanOff(const Vec3f& direction, const Vec3f& normal);
+// How many spans a drawn guide gets: about one every root size (`size`) along it and enough that
+// none turns more than 15 degrees, both times `density`, 3 to 200.
+int rootPathSpans(const std::vector<Vec3f>& points, float size, float density = 1.0f);
+// A root tube's guide points: from `root` straight off the scalp (`length`, `segments` spans), or
+// along the drawn `path` (world points from the root out; its first taken to the root) smoothed
+// over the root's `size`, as many evenly spaced points as its length and turns call for (times
+// `density`), kept softly clear of `scalp` when given; its first span leaning at most 50 degrees
+// off `normal`. Throws std::invalid_argument for a path or length of nothing.
+std::vector<Vec3f> rootTubeGuidePath(const Vec3f& root, const Vec3f& normal, const std::vector<Vec3f>& path, float length,
+                                     int segments, float size, float density = 1.0f, const ScalpMesh* scalp = nullptr);
+
+// ---- On the scalp ------------------------------------------------------------------------------------
+
+// The scalp's nearest point to `p` and its smooth normal there (ScalpMesh::normal).
+struct ScalpPointNormal {
+    Vec3f point, normal;
+};
+ScalpPointNormal scalpPointNormal(const ScalpMesh& scalp, const Vec3f& p);
+
+// ---- Root tubes --------------------------------------------------------------------------------------
+
+struct RootTubeOptions {
+    float length = 1.0f;   // a guide straight off the scalp (no path): its length ...
+    int segments = 12;     // ... and spans
+    float taper = 0.5f;    // the tip's width, a share of the root's
+    float density = 1.0f;  // a drawn guide's points, times this
+    std::string group;     // the root group it goes into ("": kRootTubeGroup), made when missing
+};
+
+// A root tube grown from its root's `outline` (world points on or near the scalp, 3 to
+// kMaxTubeShapePoints, in order round it) along `path` (empty: straight off the scalp). Returns
+// its guide's ID. Throws std::invalid_argument for too few or too many CVs, or nothing to grow.
+GuideId makeRootTube(GuideHierarchy& h, const ScalpMesh& scalp, const std::vector<Vec3f>& outline,
+                     const std::vector<Vec3f>& path, const RootTubeOptions& options = {});
+// Root tube `guide` given a new outline (as rootTubeOutline gives it, moved): the guide moved whole
+// to root at its middle, its shape the new outline, its root section fitted to it and the rest of
+// the tube scaled, flattened and turned as much (its taper and what brushes painted kept); its
+// child tubes follow.
+void editRootTube(GuideHierarchy& h, const ScalpMesh& scalp, GuideId guide, const std::vector<Vec3f>& outline);
+// The root tubes' guide IDs (of `guides` when given: those among them, or the root tubes their
+// tubes descend from), in ID order.
+std::vector<GuideId> rootTubesOf(const GuideHierarchy& h, const std::vector<GuideId>& guides = {});
+// A root tube's CVs as world points on the scalp: as drawn or last edited (HierarchyGuide::
+// rootOutline), else (one made before they were kept, or the scalp changed under them) its tube's
+// root section (rootTubeSectionOutline).
+std::vector<Vec3f> rootTubeOutline(const GuideHierarchy& h, const ScalpMesh& scalp, GuideId guide);
+// A root tube's root footprint as world points: its shape's control points placed in its root
+// section laid flat on the scalp, taken onto the scalp along the footprint's normal (`onScalp`).
+std::vector<Vec3f> rootTubeSectionOutline(const GuideHierarchy& h, const ScalpMesh& scalp, GuideId guide, bool onScalp = true);
+// A root tube's root middle on the scalp (its outline's centroid taken onto it) and the normal there.
+ScalpPointNormal rootTubeCenter(const GuideHierarchy& h, const ScalpMesh& scalp, GuideId guide);
+// `outline` carried over the scalp from its middle at `start` to `to`: each CV turned with the
+// scalp's normal from there to here, set down at `to` and taken onto the scalp (the shape keeps its
+// size on a curved head). CVs whose index is in `held` stay (sealed onto a neighbour).
+std::vector<Vec3f> carryOutline(const ScalpMesh& scalp, const std::vector<Vec3f>& outline, const Vec3f& start, const Vec3f& to,
+                                const std::set<int>& held = {});
+// The indices of `outline`'s CVs lying on one of `others` (one of its CVs or edges), within
+// `tolerance` (negative: a thousandth of the outline's longest edge): sealed onto a neighbour.
+std::vector<int> sealedCvs(const std::vector<Vec3f>& outline, const std::vector<std::vector<Vec3f>>& others,
+                           float tolerance = -1.0f);
+// `p` snapped onto the nearest of `outlines`: one of their CVs within `pixels` on screen
+// (`toScreen`: a point's view coordinates), else the nearest point of their edges within `pixels`.
+enum class RootSnap { None, Cv, Edge };
+RootSnap snapRootCv(Vec3f& p, const std::vector<std::vector<Vec3f>>& outlines,
+                    const std::function<std::array<float, 2>(const Vec3f&)>& toScreen, float pixels = kRootSnapPixels);
+// A copy of root tube `guide` set down at `to` (with `start`, that point carried to `to` instead of
+// its root's middle: several roots copied as one), its outline and guide carried there over the
+// scalp, its tube a copy (a root shape of its own), and the tube hierarchy under it copied level by
+// level. Into the same groups. Returns the new guide's ID. Throws std::invalid_argument for a
+// guide that is not a root tube.
+GuideId duplicateRootTube(GuideHierarchy& h, const ScalpMesh& scalp, GuideId guide, const Vec3f& to,
+                          const Vec3f* start = nullptr);
+// Root tubes `guides` removed with the tube hierarchy under each (their root shapes go with them,
+// and a level left with no guides its group). Returns how many guides went.
+std::size_t deleteRootTubes(GuideHierarchy& h, const ScalpMesh& scalp, const std::vector<GuideId>& guides);
+// How far (a share of the root's size) a root tube's footprint lies off its kept outline made
+// kRootTubeOverlap larger: 0 when its tube was fitted to it as it is now.
+float rootFootprintError(const GuideHierarchy& h, const ScalpMesh& scalp, GuideId guide);
+
+// ---- The tube hierarchy ------------------------------------------------------------------------------
+
+// Level `level`'s group (1: the base) in base group `base`'s hierarchy.
+std::string tubeLevelGroup(const std::string& base, int level);
+struct TubeLevels {
+    std::string base;                 // "": no hierarchy (the groom has no guides)
+    std::vector<std::string> levels;  // each level's group, the base first
+};
+// The base group the hierarchy works on (the top group of the first of `guides`, else of group
+// `picked`, else the first top group holding guides) and its levels.
+TubeLevels tubeLevels(const GuideHierarchy& h, const std::vector<GuideId>& guides = {}, const std::string& picked = {});
+// Splits tubes in two (Add): each leaf tube under `guides` (none: under every guide of the base
+// group) gets two child tubes side by side across its longer side, sharing its root shape, in the
+// next level's group. Returns how many tubes were split. Throws std::invalid_argument when there
+// is nothing to split or the tubes are kMaxTubeLevels deep.
+std::size_t addTubeLevel(GuideHierarchy& h, const ScalpMesh* scalp, const std::vector<GuideId>& guides = {},
+                         const std::string& picked = {});
+// Undoes a split (Remove). With `guides`: a selected tube that is split loses its deepest split
+// tubes, a selected split tube goes back into its parent with its siblings. Without: the deepest
+// level goes everywhere. A level left with no guides goes with its group. Returns how many guides
+// went (0: a whole level). Throws std::invalid_argument when there is nothing to remove.
+std::size_t removeTubeLevel(GuideHierarchy& h, const ScalpMesh* scalp, const std::string& base,
+                            const std::vector<GuideId>& guides = {});
+// Showing level `level` of `base`'s hierarchy: each level's group and whether it shows (that level
+// alone). The host hides the others.
+std::map<std::string, bool> tubeLevelVisibility(const GuideHierarchy& h, const std::string& base, int level);
+
+}  // namespace groomlab

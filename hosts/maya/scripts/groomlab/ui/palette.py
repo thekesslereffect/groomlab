@@ -1456,10 +1456,10 @@ class ToolPalette(QtWidgets.QWidget):
         self.select_box.add(self.soft)
         card.addWidget(self.select_box)
         card.addWidget(self.tube_panel.profile_block)
-        # The Tube tool's Tonic-style blocks: tubes drawn root first, and the tube hierarchy.
-        from groomlab.ui import tonic_tubes
-        self.tonic = tonic_tubes.TonicTubes(self)
-        for block in self.tonic.blocks:
+        # The Tube tool's root tube blocks: tubes drawn root first, and the tube hierarchy.
+        from groomlab.ui import root_tube_card
+        self.root_card = root_tube_card.RootTubeCard(self)
+        for block in self.root_card.blocks:
             card.addWidget(block)
 
         # Erase: what it removes.
@@ -2264,8 +2264,8 @@ class ToolPalette(QtWidgets.QWidget):
             self.length_keys.refresh()
         if any(b.isVisible() for b in self.tube_panel.blocks):  # (Shape, Select, Place, Draw) a selection or solo
             self.tube_panel.refresh(groom, full=self._ticks % 3 == 0)
-        if self.tonic.visible():  # the root tool's state and the hierarchy's levels
-            self.tonic.refresh(groom)
+        if self.root_card.visible():  # the root tool's state and the hierarchy's levels
+            self.root_card.refresh(groom)
         # Weights change with the frame: read them every tick, the stack itself now and then
         # (keys edited in the timeline) and whenever the groom's correctives change (its callback);
         # only while the Correctives box shows.
@@ -2476,8 +2476,8 @@ class ToolPalette(QtWidgets.QWidget):
 
     def tube_tool_blocks(self):
         """The Tube tool card's blocks, which fold away (their state remembered: issue 70)."""
-        return (self.brush_block, self.tube_channel_box, self.tube_panel.profile_block, self.tonic.root_block,
-                self.tonic.hierarchy_block, self.tube_panel.selected_block)
+        return (self.brush_block, self.tube_channel_box, self.tube_panel.profile_block, self.root_card.root_block,
+                self.root_card.hierarchy_block, self.tube_panel.selected_block)
 
     def show_tool_settings(self):
         """The card shows what its tool uses (the catalog's settings for it: card_tool()), and
@@ -2528,7 +2528,7 @@ class ToolPalette(QtWidgets.QWidget):
         self.straighten.row.setVisible("straighten" in uses)
         self.tube_channel_box.setVisible("tubeChannel" in uses)
         self.tube_channel_row.setVisible("tubeChannel" in uses)
-        self.tonic.show(tool == "shape")
+        self.root_card.show(tool == "shape")
         self.select_box.setVisible("selection" in uses)
         self.erase_box.setVisible("erases" in uses)
         self.keys_block.setVisible("lengthKeys" in uses)

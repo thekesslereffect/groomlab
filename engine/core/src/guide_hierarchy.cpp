@@ -1428,6 +1428,11 @@ GuideHierarchy::MirrorShapesResult GuideHierarchy::mirrorShapes(const Mirror& mi
     return out;
 }
 
+void GuideHierarchy::setRootOutline(GuideId id, std::vector<StrandRoot> outline) {
+    invalidateHash();
+    if (HierarchyGuide* g = mutableGuide(id)) g->rootOutline = std::move(outline);
+}
+
 void GuideHierarchy::lock(GuideId id) {
     invalidateHash();
     HierarchyGuide* g = mutableGuide(id);
@@ -1476,6 +1481,12 @@ void GuideHierarchy::transfer(const ScalpMapping& mapping) {
             for (Vec3f& p : g.points) p = target.position + rotateBetween((p - oldRoot) * scale, n0, n1);
             g.frameUp = rotateBetween(g.frameUp, n0, n1);
             g.root = target.root;
+            // A root tube's outline carried as its guide is, its CVs set on the new scalp.
+            for (StrandRoot& cv : g.rootOutline) {
+                if (!from.contains(cv)) continue;
+                const Vec3f p = target.position + rotateBetween((from.position(cv) - oldRoot) * scale, n0, n1);
+                cv = to.closestPoint(p).root;
+            }
             scales[g.id] = scale;
         } else {
             // The shape carried by the mapping's local rotation and scale at the root.
@@ -1485,6 +1496,11 @@ void GuideHierarchy::transfer(const ScalpMapping& mapping) {
             for (Vec3f& p : g.points) p = m.target.position + m.rotation * ((p - oldRoot) * scale);
             g.frameUp = m.rotation * g.frameUp;
             g.root = m.target.root;
+            for (StrandRoot& cv : g.rootOutline) {  // (each CV mapped as a root is)
+                if (!from.contains(cv)) continue;
+                const MappedPoint at = mapping.map(cv);
+                if (at.target.root.face >= 0) cv = at.target.root;
+            }
             scales[g.id] = scale;
         }
         g.rootLocal.clear();  // bind on `to` below
@@ -1879,6 +1895,12 @@ std::uint64_t GuideHierarchy::computeContentHash() const {
         if (g.ownSegments) h = hashCombine(h, 0x05E6u);  // (none: as it always has)
         h = hashCombine(h, static_cast<std::uint64_t>(static_cast<std::int64_t>(g.root.face)));
         h = hashFloat(hashFloat(h, g.root.u), g.root.v);
+        if (!g.rootOutline.empty()) {
+            h = hashCombine(h, g.rootOutline.size() + 0x0071u);
+            for (const StrandRoot& r : g.rootOutline) {
+                h = hashFloat(hashFloat(hashCombine(h, static_cast<std::uint64_t>(static_cast<std::int64_t>(r.face))), r.u), r.v);
+            }
+        }
         h = hashVec(h, g.frameUp);
         h = hashTube(h, g.tube);
         for (const auto& [k, v] : g.attributes) h = hashFloat(hashString(h, k), v);
@@ -1944,6 +1966,11 @@ json guideToJson(const HierarchyGuide& g) {
     if (g.parent != kNoGuide) j["parent"] = g.parent;
     if (g.locked) j["locked"] = true;
     if (g.ownSegments) j["ownSegments"] = true;
+    if (!g.rootOutline.empty()) {
+        json cvs = json::array();
+        for (const StrandRoot& r : g.rootOutline) cvs.push_back({r.face, r.u, r.v});
+        j["rootOutline"] = std::move(cvs);
+    }
     if (!g.attributes.empty()) j["attributes"] = g.attributes;
     if (!g.pointAttributes.empty()) j["pointAttributes"] = g.pointAttributes;
     if (g.followsParent()) {
@@ -2017,6 +2044,12 @@ HierarchyGuide guideFromJson(const json& j, const TubeShapeLibrary& library, std
         }
         if (tube.contains("rollOnScalp") && tube.at("rollOnScalp").is_boolean()) {
             g.tube.rollOnScalp = tube.at("rollOnScalp").get<bool>();
+        }
+    }
+    if (j.contains("rootOutline") && j.at("rootOutline").is_array()) {
+        for (const json& cv : j.at("rootOutline")) {
+            if (!cv.is_array() || cv.size() != 3) continue;
+            g.rootOutline.push_back({cv.at(0).get<std::int32_t>(), cv.at(1).get<float>(), cv.at(2).get<float>()});
         }
     }
     if (j.contains("attributes")) g.attributes = j.at("attributes").get<std::map<std::string, float>>();

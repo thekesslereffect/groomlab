@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tonic-style tubes in the Tube tool (issues 61 and 62): tubes drawn root first (the root's outline
+"""Root-first tubes in the Tube tool (issues 61 and 62): tubes drawn root first (the root's outline
 its tube's root section, the guide rooted at its middle, straight off the scalp or along a drawn
 path; each tube a region of its own on the tubeRoots map; a root's CVs edited later, snapped onto a
 neighbour's) and the tube hierarchy (each level splits the tubes above it in two, side by side,
@@ -364,7 +364,9 @@ class RootTubes(unittest.TestCase):
         shape = groomlab.get_tube(self.groom, b)["shape"]
         root_tubes.delete_root_tubes(self.groom, [b])
         self.assertEqual(count(), 7)
-        self.assertEqual(sorted(root_tubes._stored_outlines(self.groom)), [str(a)])
+        # (each root's CVs are kept with its guide, saved with the groom: the deleted root's went with it)
+        kept = [int(g["id"]) for g in groomlab.get_hierarchy(self.groom)["guides"] if g.get("rootOutline")]
+        self.assertEqual(kept, [int(a)])
         self.assertNotIn(shape, [x["name"] for x in groomlab.tube_shapes(self.groom)])
         cmds.undo()
         self.assertEqual(count(), 14)
@@ -792,6 +794,121 @@ class RootTubes(unittest.TestCase):
         a, b = (self.points(k)[0] for k in kids)
         self.assertAlmostEqual(tm._dist(a, b), 0.1, delta=0.02)  # half the width apart each side
         self.assertTrue(ids)
+
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def uneven(center, radius):
+    """An irregular root outline (no symmetry: it fits its tube shape one way only)."""
+    up = on_sphere(center)
+    a = tm._unit(tm._cross(up, (0.0, 0.0, 1.0)))
+    b = tm._cross(up, a)
+    scale = (1.0, 0.7, 1.25, 0.85, 1.1, 0.6)
+    return [on_sphere(tm._add(up, tm._add(tm._mul(a, radius * s * math.cos(2 * math.pi * k / 6.0 + 0.3)),
+                                          tm._mul(b, radius * s * math.sin(2 * math.pi * k / 6.0 + 0.3)))))
+            for k, s in enumerate(scale)]
+
+
+class MatchesTheFirstMayaVersion(unittest.TestCase):
+    """The core's root tubes (root_tubes.h, what groomlab.root_tubes now calls) against the first
+    version, written in Maya's Python (kept as tests/hosts/maya/root_tubes_reference.py): the same
+    outlines, paths and edits give the same guides, tubes and hierarchies."""
+
+    @classmethod
+    def setUpClass(cls):
+        cmds.loadPlugin(PLUGIN_PATH, quiet=True)
+        sys.path.insert(0, HERE)
+        import root_tubes_reference
+        cls.ref = root_tubes_reference
+
+    def scene(self):
+        cmds.file(new=True, force=True)
+        scalp = cmds.polySphere(radius=1, subdivisionsX=60, subdivisionsY=40, name="head")[0]
+        return groomlab.create_groom(scalp)
+
+    def points(self, groom, guide):
+        return json.loads(cmds.groomLabGuides(groom, tubeFrames=str(guide), evaluated=True))["points"]
+
+    def both(self, work):
+        """`work(module, groom)` run on a groom of its own by each version: (theirs, ours)."""
+        out = []
+        for module in (self.ref, root_tubes):
+            groom = self.scene()
+            out.append((groom, work(module, groom)))
+        return out
+
+    def assert_same_tube(self, a, b, guide_a, guide_b, points=0.01):
+        (ga, ma), (gb, mb) = a, b
+        pa, pb = self.points(ga, guide_a), self.points(gb, guide_b)
+        n = 40
+        da = root_tubes._resample([tuple(p) for p in pa], n)
+        db = root_tubes._resample([tuple(p) for p in pb], n)
+        self.assertLess(max(tm._dist(x, y) for x, y in zip(da, db)), points, "the guide's course")
+        ta, tb = groomlab.get_tube(ga, guide_a), groomlab.get_tube(gb, guide_b)
+        self.assertAlmostEqual(ta["width"][0], tb["width"][0], delta=0.02 * ta["width"][0])
+        self.assertAlmostEqual(ta["width"][-1], tb["width"][-1], delta=0.02 * ta["width"][0])
+        self.assertAlmostEqual(ta["aspect"][0], tb["aspect"][0], delta=0.03)
+        # The tube's root section on its outline, in both.
+        for groom, guide, mod in ((ga, guide_a, self.ref), (gb, guide_b, root_tubes)):
+            outline = mod.root_outline(groom, guide)
+            self.assertLess(max(nearest(q, outline) for q in mod.section_outline(groom, guide)), 0.005)
+        oa, ob = self.ref.root_outline(ga, guide_a), root_tubes.root_outline(gb, guide_b)
+        # (the first version took CVs onto Maya's polygons, the core onto the triangles the hair roots
+        # on: a sphere's quads are not flat, so the two lie up to a facet's sag apart)
+        self.assertLess(max(tm._dist(x, y) for x, y in zip(oa, ob)), 5e-3, "the CVs kept")
+
+    def test_a_straight_root_tube(self):
+        outline = uneven((0.1, 1.0, 0.05), 0.12)
+        a, b = self.both(lambda m, g: m.make_root_tube(g, outline, length=0.8, segments=10, taper=0.4))
+        self.assert_same_tube(a, b, a[1], b[1])
+
+    def test_a_drawn_root_tube(self):
+        outline = uneven((0.0, 1.0, 0.0), 0.1)
+        root = on_sphere((0.0, 1.0, 0.0))
+        path = [root]
+        for k in range(1, 50):  # a curl rising off the head, drawn a little shakily
+            t = k / 49.0
+            path.append((0.25 * math.sin(6.0 * t), 1.05 + 0.6 * t, 0.25 * (1.0 - math.cos(6.0 * t)) + 0.002 * (k % 3)))
+        a, b = self.both(lambda m, g: m.make_root_tube(g, outline, path=path, density=1.5))
+        self.assert_same_tube(a, b, a[1], b[1], points=0.02)
+
+    def test_an_edited_root(self):
+        outline = uneven((0.0, 1.0, 0.1), 0.1)
+
+        def work(m, g):
+            guide = m.make_root_tube(g, outline, length=0.6)
+            cvs = m.root_outline(g, guide)
+            c = m._centroid(cvs)
+            cvs[2] = on_sphere(tm._add(c, tm._mul(tm._sub(cvs[2], c), 1.4)))
+            m.edit_root_tube(g, guide, cvs)
+            return guide
+        a, b = self.both(work)
+        self.assert_same_tube(a, b, a[1], b[1])
+
+    def test_a_hierarchy_split_duplicated_and_trimmed(self):
+        outline = uneven((0.0, 1.0, 0.0), 0.15)
+
+        def work(m, g):
+            guide = m.make_root_tube(g, outline, length=0.7)
+            m.add_tube_level(g)
+            m.add_tube_level(g)
+            copy = m.duplicate_root_tube(g, guide, on_sphere((0.45, 0.85, 0.15)))
+            data = groomlab.get_hierarchy(g)
+            leaf = max(int(x["id"]) for x in data["guides"])
+            m.remove_tube_level(g, m.ROOT_GROUP, [leaf])
+            return guide, copy, m.tube_levels(g, picked=m.ROOT_GROUP)["levels"], len(groomlab.get_hierarchy(g)["guides"])
+        a, b = self.both(work)
+        (ga, (sa, ca, la, na)), (gb, (sb, cb, lb, nb)) = a, b
+        self.assertEqual(la, lb, "the levels")
+        self.assertEqual(na, nb, "the guides left")
+        self.assert_same_tube((ga, None), (gb, None), sa, sb)
+        # The copy: its outline the source's shape set down there, its tube on it, in both.
+        oa, ob = self.ref.root_outline(ga, ca), root_tubes.root_outline(gb, cb)
+        self.assertLess(max(tm._dist(x, y) for x, y in zip(oa, ob)), 5e-3, "the copy's CVs")
+        for groom, guide, mod in ((ga, ca, self.ref), (gb, cb, root_tubes)):
+            outline = mod.root_outline(groom, guide)
+            self.assertLess(max(nearest(q, outline) for q in mod.section_outline(groom, guide)), 0.005)
 
 
 if __name__ == "__main__":
