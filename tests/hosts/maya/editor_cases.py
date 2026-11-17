@@ -1459,7 +1459,8 @@ class GraphEditorTest(unittest.TestCase):
 
         click()
         self.assertEqual(cmds.getAttr(self.groom + ".strandColorMode"), review.CLUMP_MODE)
-        self.assertEqual(cmds.getAttr(self.groom + ".strandColorSource"), "bigClumpId")
+        # The node's own channel (issue #77): "<channel>@<node>", though a later Clump writes the same one.
+        self.assertEqual(cmds.getAttr(self.groom + ".strandColorSource"), "bigClumpId@" + name)
         self.assertEqual(cmds.getAttr(self.groom + ".viewNode") or "", "")
         self.assertTrue(self.editor.clump_colored(name))
         click()

@@ -46,6 +46,7 @@ SHORTCUTS = (
     ("Ctrl+D", "Duplicate nodes"),
     ("Ctrl+G / Ctrl+Shift+G", "Group / ungroup"),
     ("B", "Bypass nodes"),
+    ("Ctrl+Shift+X", "Detach nodes (the flow passes through)"),
     ("V", "View up to node"),
 )
 
