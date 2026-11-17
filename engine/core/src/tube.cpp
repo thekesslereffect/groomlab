@@ -264,10 +264,10 @@ const std::vector<std::string>& tubeShapeNames() {
     return names;
 }
 
-float TubeProfile::widthAt(float t) const { return sampleEven(width, t, 0.1f); }
-float TubeProfile::aspectAt(float t) const { return std::clamp(sampleEven(aspect, t, 1.0f), kMinTubeAspect, kMaxTubeAspect); }
-float TubeProfile::twistAt(float t) const { return sampleEven(twist, t, 0.0f); }
-float TubeProfile::rollAt(float t) const { return sampleEven(roll, t, 0.0f); }
+float TubeProfile::widthAt(float t) const { return sampleSmooth(width, t, 0.1f); }
+float TubeProfile::aspectAt(float t) const { return std::clamp(sampleSmooth(aspect, t, 1.0f), kMinTubeAspect, kMaxTubeAspect); }
+float TubeProfile::twistAt(float t) const { return sampleSmooth(twist, t, 0.0f); }
+float TubeProfile::rollAt(float t) const { return sampleSmooth(roll, t, 0.0f); }
 TubeSection TubeProfile::sectionAt(float t) const { return {widthAt(t), aspectAt(t), twistAt(t) + rollAt(t)}; }
 
 std::string TubeProfile::shapeName() const { return custom ? custom->name : tubeShapeName(shape); }

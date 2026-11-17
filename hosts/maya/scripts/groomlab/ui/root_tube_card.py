@@ -141,7 +141,9 @@ class RootTubeCard(QtCore.QObject):
                                           "it): white, more and smaller roots; black, fewer and larger. Again, Q or "
                                           "another tool stops painting; Apply cuts by it", False, "rootTubePaintDensity")
         self.paint_density.setIcon(widgets.tool_icon("paint"))
-        self.paint_density.setIconSize(QtCore.QSize(theme.px(16), theme.px(16)))
+        # (Its icon large in the button: little padding round it.)
+        self.paint_density.setStyleSheet("QToolButton { padding: %dpx; }" % theme.px(1))
+        self.paint_density.setIconSize(QtCore.QSize(theme.px(22), theme.px(22)))
         self.paint_density.clicked.connect(self.paint_density_clicked)
         self.multiplier = widgets.SoftSlider(1.0, 0.25, 4.0, minimum=0.05, maximum=20.0,
                                              key="palette.rootSubdivisionMultiplier", label="Multiplier")
@@ -162,9 +164,9 @@ class RootTubeCard(QtCore.QObject):
                 w.setSizePolicy(QtWidgets.QSizePolicy.Ignored, w.sizePolicy().verticalPolicy())
                 w.setMinimumWidth(theme.px(40))
             else:
-                # (The brush: just its icon, square.)
+                # (The brush: just its icon.)
                 w.setSizePolicy(QtWidgets.QSizePolicy.Fixed, w.sizePolicy().verticalPolicy())
-                w.setFixedWidth(theme.px(28))
+                w.setFixedWidth(theme.px(34))
             layout.addWidget(w, stretch)
         self.root_block.add(row)
         self._painting = None  # painting a density map: (the roots it is for, the map)
@@ -239,6 +241,15 @@ class RootTubeCard(QtCore.QObject):
         self.level_row = QtWidgets.QWidget()
         LeadTrailLayout(levels, edits, self.level_row)
         self.hierarchy_block.add(self.level_row)
+        self.lock_view = widgets.switch("Lock view", "Keep the level shown now in view while you pick other levels "
+                                        "to work on (step down to level 1 and comb it while a deeper level's tubes "
+                                        "stay in view and follow). Only the levels' view: the other visibility "
+                                        "controls work as they do", False, "tubeLockView")
+        self.lock_view.toggled.connect(self.lock_toggled)
+        self.hierarchy_block.add(self.lock_view.row)
+        self._locked = 0  # Lock view: the level kept in view (0: none), of hierarchy _locked_base
+        self._locked_base = None
+        self._current = 1  # the level picked
         self._levels = None  # (base, [groups]) shown
         self._base = None
 
@@ -288,6 +299,9 @@ class RootTubeCard(QtCore.QObject):
         self._base = base
         picked = self.owner.current_group()
         current = levels.index(picked) + 1 if picked in levels else 1
+        self._current = current
+        if self._locked and (base != self._locked_base or self._locked > len(levels)):
+            self._unlock()  # (another hierarchy, or its locked level gone)
         state = (base, tuple(levels), current)
         if state == self._levels:
             return
@@ -564,7 +578,7 @@ class RootTubeCard(QtCore.QObject):
     def _after_levels(self, groom, base, level):
         """The level `level` shown and picked (the brushes and new guides work there)."""
         self.owner.fill_levels(groom)
-        group = root_tubes.show_tube_level(groom, base, level)
+        group = root_tubes.show_tube_level(groom, base, level, self._locked)
         self.owner.pick_group(group)
         self._levels = None
         self.fill_levels(groom)
@@ -572,6 +586,28 @@ class RootTubeCard(QtCore.QObject):
             self.owner.guides_tab.refresh()
         except Exception:  # noqa: BLE001 (the list catches up on its own)
             pass
+
+    def lock_toggled(self, on):
+        """Lock view: the level picked now stays in view (whatever level is picked after); off, only
+        the picked level shows again."""
+        groom = self.owner.groom()
+        self._locked = self._current if on and self._base else 0
+        self._locked_base = self._base
+        if not groom or not self._base:
+            return
+        try:
+            root_tubes.show_tube_level(groom, self._base, self._current, self._locked)
+        except (RuntimeError, ValueError) as e:
+            self.owner.status.setText(str(e).strip())
+            return
+        self.owner.status.setText("Level %d kept in view while you work on other levels." % self._locked if self._locked
+                                  else "Lock view off: only the picked level shows.")
+
+    def _unlock(self):
+        self._locked = 0
+        self.lock_view.blockSignals(True)
+        self.lock_view.setChecked(False)
+        self.lock_view.blockSignals(False)
 
     def add_clicked(self):
         groom = self.owner.groom()

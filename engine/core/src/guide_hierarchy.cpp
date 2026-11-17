@@ -931,6 +931,46 @@ void GuideHierarchy::evaluateGuide(HierarchyGuide& g, const ScalpMesh* scalp, co
     if (!isRootTube(g.tube, 0)) g.rootRing.clear(), g.rootRingFlat.clear();
 }
 
+namespace {
+
+// The point (u, v) carried by the map a closed polygon `cage` (section coordinates) makes onto
+// `to` (a world point per cage point): mean value coordinates (Floater), so a point on the cage
+// lands on `to` (linearly along each edge) and one inside moves smoothly with it.
+Vec3f cageMap(const std::vector<SectionPoint>& cage, const std::vector<Vec3f>& to, const SectionPoint& q) {
+    const std::size_t m = cage.size();
+    std::vector<double> dx(m), dy(m), r(m);
+    double size = 0.0;
+    for (std::size_t k = 0; k < m; ++k) size = std::max(size, std::hypot(static_cast<double>(cage[k].u), static_cast<double>(cage[k].v)));
+    const double eps = std::max(size * 1e-6, 1e-12);
+    for (std::size_t k = 0; k < m; ++k) {
+        dx[k] = static_cast<double>(cage[k].u) - q.u;
+        dy[k] = static_cast<double>(cage[k].v) - q.v;
+        r[k] = std::hypot(dx[k], dy[k]);
+        if (r[k] < eps) return to[k];  // (on a cage point)
+    }
+    std::vector<double> tanHalf(m);
+    for (std::size_t k = 0; k < m; ++k) {
+        const std::size_t j = (k + 1) % m;
+        const double cross = dx[k] * dy[j] - dy[k] * dx[j], dot = dx[k] * dx[j] + dy[k] * dy[j];
+        if (std::abs(cross) < eps * std::max(r[k], r[j]) && dot < 0.0) {  // (on an edge: along it)
+            const double f = r[k] / (r[k] + r[j]);
+            return to[k] * static_cast<float>(1.0 - f) + to[j] * static_cast<float>(f);
+        }
+        tanHalf[k] = cross / (r[k] * r[j] + dot);  // tan of half the angle k-q-j (signed)
+    }
+    Vec3f sum;
+    double total = 0.0;
+    for (std::size_t k = 0; k < m; ++k) {
+        const double w = (tanHalf[(k + m - 1) % m] + tanHalf[k]) / r[k];
+        sum = sum + to[k] * static_cast<float>(w);
+        total += w;
+    }
+    if (std::abs(total) < 1e-300) return to.front();
+    return sum * static_cast<float>(1.0 / total);
+}
+
+}  // namespace
+
 void GuideHierarchy::layRootRing(HierarchyGuide& g, const ScalpMesh& scalp, const Vec3f& n, const Vec3f& across) const {
     // Its root loop on the scalp (HierarchyGuide::rootRing). First its footprint's outline, each
     // point taken onto the scalp along the footprint's normal (the nearer hit either way; the
@@ -998,8 +1038,11 @@ void GuideHierarchy::layRootRing(HierarchyGuide& g, const ScalpMesh& scalp, cons
         }
         return;
     }
-    // A slice: its loop pulled as its root's is near it (each point by the pull of the root's loop
-    // points nearest it), so where it meets its root's edge it runs along the root drawn too.
+    // A slice: a clean slice of its root's loop. Each point of its footprint taken to its place in
+    // the root's section (the root's footprint laid as the root's is), then carried by the map the
+    // root's section outline makes onto the root's loop (mean value coordinates: exact along the
+    // outline, so where the slice meets its root's edge it runs on the root drawn, smooth inside), so
+    // the slices of a root tile its root shape as one.
     const HierarchyGuide* base = &g;
     std::set<GuideId> seen;
     while (base->isChild() && seen.insert(base->id).second) {
@@ -1007,21 +1050,31 @@ void GuideHierarchy::layRootRing(HierarchyGuide& g, const ScalpMesh& scalp, cons
         if (!up) break;
         base = up;
     }
-    if (base == &g || base->rootRing.size() != base->rootRingFlat.size() || base->rootRing.empty()) return;
+    if (base == &g || base->rootRing.empty() || base->points.size() < 2 || !scalp.contains(base->root)) return;
+    const std::vector<SectionPoint>& cage = tubeOutline(base->tube);
+    if (cage.size() != base->rootRing.size() || cage.size() < 3) return;
+    TubeSpine root(base->points.data(), base->points.size(), base->frameUp, base->tube, scale_);
+    root.setRootOnScalp(scalp.normal(base->root), base->rootAcross);
+    // (A point within the slices' gap of the root's edge goes onto it: the slices' outer edges are
+    // the root drawn, the gap left only between them.)
     float size = 0.0f;
-    for (std::size_t k = 1; k < base->rootRingFlat.size(); ++k) size = std::max(size, (base->rootRingFlat[k] - base->rootRingFlat[0]).length());
-    const float eps = std::max(size * 1e-3f, 1e-9f);
+    for (const SectionPoint& c : cage) size = std::max(size, std::hypot(c.u, c.v));
+    const float snap = 0.03f * size;
     for (std::size_t i = 0; i < g.rootRing.size(); ++i) {
-        const Vec3f p = g.rootRingFlat[i];
-        Vec3f pull;
-        double total = 0.0;
-        for (std::size_t k = 0; k < base->rootRingFlat.size(); ++k) {
-            const float d = (base->rootRingFlat[k] - p).length() + eps;
-            const double w = 1.0 / (static_cast<double>(d) * d * d * d);
-            pull = pull + (base->rootRing[k] - base->rootRingFlat[k]) * static_cast<float>(w);
-            total += w;
+        SectionPoint q = root.rootCoords(spine.footprintAt(outline[i].u, outline[i].v));
+        float nearest = snap;
+        SectionPoint onEdge = q;
+        for (std::size_t k = 0; k < cage.size(); ++k) {
+            const SectionPoint& a = cage[k];
+            const SectionPoint& b = cage[(k + 1) % cage.size()];
+            const float du = b.u - a.u, dv = b.v - a.v, span = du * du + dv * dv;
+            const float f = span > 0.0f ? std::clamp(((q.u - a.u) * du + (q.v - a.v) * dv) / span, 0.0f, 1.0f) : 0.0f;
+            const SectionPoint e{a.u + du * f, a.v + dv * f};
+            const float d = std::hypot(q.u - e.u, q.v - e.v);
+            if (d < nearest) nearest = d, onEdge = e;
         }
-        if (total > 0.0) g.rootRing[i] = scalp.closestPoint(p + pull * static_cast<float>(1.0 / total)).position;
+        q = onEdge;
+        g.rootRing[i] = scalp.closestPoint(cageMap(cage, base->rootRing, q)).position;
     }
 }
 

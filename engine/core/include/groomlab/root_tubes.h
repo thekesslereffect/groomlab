@@ -207,7 +207,8 @@ std::size_t addTubeLevel(GuideHierarchy& h, const ScalpMesh* scalp, const std::v
 std::size_t removeTubeLevel(GuideHierarchy& h, const ScalpMesh* scalp, const std::string& base,
                             const std::vector<GuideId>& guides = {});
 // Showing level `level` of `base`'s hierarchy: each level's group and whether it shows (that level
-// alone). The host hides the others.
-std::map<std::string, bool> tubeLevelVisibility(const GuideHierarchy& h, const std::string& base, int level);
+// alone, and level `locked` too when given: the card's Lock view, the level shown when it was
+// switched on kept in view while another is picked to work on). The host hides the others.
+std::map<std::string, bool> tubeLevelVisibility(const GuideHierarchy& h, const std::string& base, int level, int locked = 0);
 
 }  // namespace groomlab

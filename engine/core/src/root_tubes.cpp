@@ -1460,12 +1460,15 @@ std::size_t removeTubeLevel(GuideHierarchy& h, const ScalpMesh* scalp, const std
     return gone.size();
 }
 
-std::map<std::string, bool> tubeLevelVisibility(const GuideHierarchy& h, const std::string& base, int level) {
+std::map<std::string, bool> tubeLevelVisibility(const GuideHierarchy& h, const std::string& base, int level, int locked) {
     const TubeLevels info = tubeLevels(h, {}, base);
     if (info.levels.empty()) throw std::invalid_argument("no tube hierarchy on " + base);
     level = std::clamp(level, 1, static_cast<int>(info.levels.size()));
     std::map<std::string, bool> out;
-    for (std::size_t k = 0; k < info.levels.size(); ++k) out[info.levels[k]] = static_cast<int>(k) + 1 == level;
+    for (std::size_t k = 0; k < info.levels.size(); ++k) {
+        const int at = static_cast<int>(k) + 1;
+        out[info.levels[k]] = at == level || (locked > 0 && at == locked);
+    }
     return out;
 }
 

@@ -929,7 +929,8 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                         return answer({{"base", t.base.empty() ? nlohmann::json() : nlohmann::json(t.base)}, {"levels", t.levels}});
                     }
                     if (op == "levelVisibility") {
-                        return answer(tubeLevelVisibility(*h, request.value("base", std::string()), request.value("level", 1)));
+                        return answer(tubeLevelVisibility(*h, request.value("base", std::string()), request.value("level", 1),
+                                                  request.value("locked", 0)));
                     }
                     if (op == "footprintError") return answer(rootFootprintError(*h, *scalp, guide));
                     if (op == "overlaps") {  // drawn roots' tubes passing into each other (root_tubes.h tubeOverlaps)
