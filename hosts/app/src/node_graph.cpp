@@ -1970,6 +1970,19 @@ void NodeGraphView::deleteSelected() {
     refresh();
 }
 
+void NodeGraphView::detachNodes(const std::vector<std::string>& names) {
+    if (!document_ || names.empty()) return;
+    int detached = 0;
+    const std::string error = document_->detachNodes(names, &detached);
+    if (!error.empty()) {
+        emit message(QString::fromStdString(error));
+        return;
+    }
+    if (detached == 0) emit message(tr("Nothing to detach: no links"));
+    emit edited();
+    refresh();
+}
+
 bool NodeGraphView::event(QEvent* event) {
     // A node's tooltip: its error, else its note (the badges' text).
     if (event->type() == QEvent::ToolTip) {
@@ -2290,6 +2303,11 @@ void NodeGraphView::contextMenuEvent(QContextMenuEvent* event) {
 
 void NodeGraphView::keyPressEvent(QKeyEvent* event) {
     if (event->modifiers().testFlag(Qt::ControlModifier)) {
+        if (event->key() == Qt::Key_X && event->modifiers().testFlag(Qt::ShiftModifier)) {
+            detachNodes(selection_);  // Detach (Maya's and Blender's key too)
+            event->accept();
+            return;
+        }
         if (event->key() == Qt::Key_G) {
             if (event->modifiers().testFlag(Qt::ShiftModifier)) ungroupSelected();
             else groupSelected();

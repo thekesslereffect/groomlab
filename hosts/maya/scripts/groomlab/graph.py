@@ -575,12 +575,19 @@ class GraphModel(object):
         self._take(edit)
         return made
 
-    def remove_node(self, name):
+    def remove_node(self, name, keep_flow=False):
+        """The node gone with its links. keep_flow (the Graph Editor's Delete, issue #80): as Detach
+        first, what fed it feeding what it fed (GraphEdit.remove_node_keeping_flow)."""
         self._node(name)
         edit = self._edit()
         with _core_errors():
-            edit.remove_node(name)
+            if keep_flow:
+                edit.remove_node_keeping_flow(name)
+            else:
+                edit.remove_node(name)
         self._take(edit)
+        if keep_flow:
+            self.prune_pins()  # the reroute points of links that went
         self.renamed = {k: v for k, v in self.renamed.items() if v != name and not v.startswith(name + "/")}
 
     def rename_node(self, old, new):
@@ -1074,6 +1081,19 @@ class GraphModel(object):
                 if inner["name"] == inner_name and name in node["params"]:
                     inner.setdefault("params", {})[param] = node["params"].pop(name)
             del expose[name]
+
+    def detach(self, name, drop=140.0):
+        """Detach (Ctrl+Shift+X; the core's GraphEdit.detach): the node taken out of the flow as if it
+        were not there, what fed it feeding what it fed, the node kept, unlinked, `drop` below the
+        new link. Returns the core's {"source", "relinked", "changed"}."""
+        self._node(name)
+        edit = self._edit()
+        with _core_errors():
+            done = edit.detach(name, float(drop))
+        if done["changed"]:
+            self._take(edit)
+            self.prune_pins()  # the reroute points of links that went
+        return done
 
     def expand(self, compound):
         """Replace a Compound node with the nodes it holds (exposed values applied, every field

@@ -232,6 +232,8 @@ public:
     void copySelected();
     void paste();
     void deleteSelected();  // Delete: the selected nodes (or the selected wire, pin or backdrop)
+    // Detach (Ctrl+Shift+X, the node menu): the nodes out of the flow, kept (GroomDocument::detachNodes).
+    void detachNodes(const std::vector<std::string>& names);
     // Snap: nodes and pins dragged land on the grid (24 scene units, the docked canvas's lines).
     void setSnapping(bool on) { snapping_ = on; }
     bool snapping() const { return snapping_; }

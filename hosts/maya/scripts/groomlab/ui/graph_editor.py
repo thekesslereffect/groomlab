@@ -997,6 +997,8 @@ class NodeItem(QtWidgets.QGraphicsItem):
         "node.setOutput": lambda self: later(lambda: self.editor.set_output(self.name)),
         "node.view": lambda self, on: later(lambda: self.editor.view_node(self.name if on else None)),
         "node.bypass": lambda self, on: later(lambda: self.editor.set_bypass([self.name], on)),
+        # Out of the flow: what fed it feeds what it fed, the node kept below the new link (#80).
+        "node.detach": lambda self: later(lambda: self.editor.detach_nodes(self.editor.menu_targets(self.name))),
         # When it runs (Yeti's per-node evaluation): renders and exports skip a viewport-only node,
         # the viewport a render-only one.
         "node.evaluate": lambda self, mode, _on: later(lambda: self.editor.set_evaluation([self.name], mode)),
@@ -1973,6 +1975,8 @@ class GraphScene(QtWidgets.QGraphicsScene):
             self.editor.duplicate(selected)
         elif ctrl and key == QtCore.Qt.Key_G and event.modifiers() & QtCore.Qt.ShiftModifier:
             self.editor.expand_selected()
+        elif ctrl and key == QtCore.Qt.Key_X and event.modifiers() & QtCore.Qt.ShiftModifier:
+            self.editor.detach_selected()
         elif ctrl and key == QtCore.Qt.Key_G:
             self.editor.collapse_selected()
         elif key == QtCore.Qt.Key_V and len(selected) == 1:
@@ -4518,6 +4522,13 @@ class GraphEditor(QtWidgets.QWidget):
                 shortcut.activated.connect(slot)
                 shortcut.activatedAmbiguously.connect(slot)
                 self._shortcuts.append(shortcut)
+        # Detach (Ctrl+Shift+X, issue #80): only while the graph view has the focus, and taken there
+        # so no Maya hotkey runs on it.
+        shortcut = qt.QShortcut(QtGui.QKeySequence("Ctrl+Shift+X"), self.view)
+        shortcut.setContext(QtCore.Qt.WidgetWithChildrenShortcut)
+        shortcut.activated.connect(self.detach_selected)
+        shortcut.activatedAmbiguously.connect(self.detach_selected)
+        self._shortcuts.append(shortcut)
         # S with the mouse over a param keys it, as over a channel in Maya's Channel Box; elsewhere in
         # the editor it is Maya's Set Key. Text fields keep S for typing (they take it first).
         shortcut = qt.QShortcut(QtGui.QKeySequence("S"), self)
@@ -5141,8 +5152,16 @@ class GraphEditor(QtWidgets.QWidget):
         except Exception:  # noqa: BLE001 - a node gone
             return None
 
+    @staticmethod
+    def clump_source(name, channel):
+        """The color source naming this Clump's own channel, "<channel>@<node>": chained Clumps
+        writing the same channel each show their own clumps (strandColors in the core, #77)."""
+        return "%s@%s" % (channel, name)
+
     def clump_colored(self, name):
-        """Whether the strands show this Clump's clumps: colored by clump from its channel."""
+        """Whether the strands show this Clump's clumps: colored by clump from its channel as this
+        node wrote it ("<channel>@<node>"); a source of the bare channel (scenes from before) lights
+        the last Clump writing it, as that is the one the strands show."""
         if not self.groom:
             return False
         channel = self.clump_channel(name)
@@ -5151,10 +5170,31 @@ class GraphEditor(QtWidgets.QWidget):
         from maya import cmds
         from groomlab import review
         try:
-            return (cmds.getAttr(self.groom + ".strandColorMode") == review.CLUMP_MODE
-                    and (cmds.getAttr(self.groom + ".strandColorSource") or "") == channel)
+            if cmds.getAttr(self.groom + ".strandColorMode") != review.CLUMP_MODE:
+                return False
+            source = cmds.getAttr(self.groom + ".strandColorSource") or ""
         except (RuntimeError, ValueError):
             return False
+        if source == self.clump_source(name, channel):
+            return True
+        if source != channel:
+            return False
+        return self._last_clump_writing(channel) == name
+
+    def _last_clump_writing(self, channel):
+        """The Clump nearest the output among those writing `channel`: the one every other such
+        Clump feeds (None: none, or no one of them is after all the others)."""
+        try:
+            names = [n for n in self.model.of_type("Clump") if self.clump_channel(n) == channel]
+            if len(names) <= 1:
+                return names[0] if names else None
+            for name in names:
+                feeding = self.model.upstream(name)
+                if all(other in feeding for other in names if other != name):
+                    return name
+        except Exception:  # noqa: BLE001 - a node gone
+            pass
+        return None
 
     def toggle_clump_colors(self, name):
         """A Clump's Clump Colors: the strands colored by its clumps (its clumpChannel), the focus left
@@ -5178,7 +5218,7 @@ class GraphEditor(QtWidgets.QWidget):
         groom = self.groom
 
         def colored():
-            cmds.setAttr(groom + ".strandColorSource", channel, type="string")
+            cmds.setAttr(groom + ".strandColorSource", self.clump_source(name, channel), type="string")
             cmds.setAttr(groom + ".strandColorMode", review.CLUMP_MODE)
         self.silently(colored)
         self._repaint_toggles()
@@ -5947,7 +5987,7 @@ class GraphEditor(QtWidgets.QWidget):
 
     def delete_nodes(self, names):
         for name in names:
-            self.model.remove_node(name)
+            self.model.remove_node(name, keep_flow=True)  # the flow passes through (issue #80)
         self.rebuild()
         self.changed()
 
@@ -5978,6 +6018,41 @@ class GraphEditor(QtWidgets.QWidget):
             return
         self.expand(names)
 
+    def menu_targets(self, name):
+        """The nodes a node menu's entry acts on: the selection when the node is in it, else the node."""
+        selected = [i.name for i in self.scene.selectedItems() if isinstance(i, NodeItem)]
+        return selected if name in selected else [name]
+
+    def detach_selected(self):
+        names = [i.name for i in self.scene.selectedItems() if isinstance(i, NodeItem)]
+        if not names:
+            self.report("select the nodes to detach (Ctrl+Shift+X)")
+            return
+        self.detach_nodes(names)
+
+    def detach_nodes(self, names):
+        """Detach (Ctrl+Shift+X, the node menu; the core's GraphEdit.detach, issue #80): each node
+        taken out of the flow as if it were not there, what fed it feeding what it fed, the node kept,
+        unlinked, below the new link. One undo step."""
+        done = []
+        for name in names:
+            try:
+                if self.model.detach(name)["changed"]:
+                    done.append(name)
+            except (gm.GraphError, ValueError) as e:
+                self.report("%s: %s" % (name, e))
+        if not done:
+            if names:
+                self.report("%s: not linked to anything" % ", ".join(names))
+            return
+        self.rebuild()
+        for name in done:
+            item = self.items.get(name)
+            if item is not None:
+                item.setSelected(True)
+        self.changed()
+        self.report("detached %s" % ", ".join(done))
+
     def expand(self, names):
         """Ungroup Compound nodes: their nodes go back into the graph (one undo step)."""
         done = []
@@ -6007,7 +6082,7 @@ class GraphEditor(QtWidgets.QWidget):
         for e in edges:
             self.model.disconnect(e.dst_item.name, e.input_name)
         for name in nodes:
-            self.model.remove_node(name)
+            self.model.remove_node(name, keep_flow=True)  # the flow passes through (issue #80)
         for data in backdrops:
             self.model.backdrops.remove(data)
             self._layout_dirty = True
@@ -6057,8 +6132,23 @@ class GraphEditor(QtWidgets.QWidget):
             except gm.GraphError as e:
                 self.report(str(e))
                 return
+            self._rename_color_source(name, new)
             self.rebuild()
             self.changed()
+
+    def _rename_color_source(self, old, new):
+        """A strand color source naming the renamed node ("<channel>@<node>", Clump Colors) follows it."""
+        if not self.groom:
+            return
+        from maya import cmds
+        try:
+            source = cmds.getAttr(self.groom + ".strandColorSource") or ""
+        except (RuntimeError, ValueError):
+            return
+        channel, at, node = source.rpartition("@")
+        if at and channel and node == old:
+            groom = self.groom
+            self.silently(lambda: cmds.setAttr(groom + ".strandColorSource", "%s@%s" % (channel, new), type="string"))
 
     def keyed(self, name, param):
         """Whether a param is keyed (linked to its attribute on the groom): edits then go there."""

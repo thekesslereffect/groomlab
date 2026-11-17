@@ -1574,11 +1574,15 @@ def sync_from_tree(tree):
                 gnodes[node.name] = gnodes.pop(node.gl_name)
                 with building():
                     node.gl_name = node.name
-    # Deleted nodes.
+    # Deleted nodes: what fed each feeds what it fed (issue #80, as Maya's and the app's Delete);
+    # those links are kept below unless the tree feeds that input from elsewhere.
     present = {n.gl_name for n in nodes if n.gl_name}
+    bridged = set()
     for name in list(gnodes):
         if name not in present:
-            edit(op="remove_node", name=name)
+            r = edit(op="remove_node", name=name, keepFlow=True)
+            for link in (r or {}).get("relinked") or []:
+                bridged.add((link["node"], link["input"]))
             gnodes.pop(name)
             if scalp.groomlab.view_node == name:
                 with props.quiet():
@@ -1616,6 +1620,9 @@ def sync_from_tree(tree):
     # (A link through reroutes is the link from where they lead back to: plugging another output
     # into a reroute feeds every input after it from that output.)
     want = {key: _source_of(a, identifier) for key, (a, identifier, _) in chains(tree).items()}
+    for key in bridged:  # a deleted node's flow, kept (the tree has no link there yet)
+        if key not in want and key in have:
+            want[key] = have[key]
     # A node dropped on a link (Blender splices it in): the graph's insert_on_link, one step (Maya's
     # insert_on_wire), which picks the node's input as Maya does; the graph's links are then the truth.
     for (dst, inp, src, output, mid) in insertions(have, want, gnodes):
@@ -1726,6 +1733,17 @@ def set_bypass(scalp, names, on):
     for name in names:
         _call("edit_graph", session=rt.session, op="set_bypass", name=name, bypass=bool(on))
     _edited(scalp, rt)
+
+
+def detach(scalp, names):
+    """The nodes out of the flow, kept (Detach, the core's GraphEdit::detach): what fed each feeds
+    what it fed, the output passes to it, the node waits unlinked below. How many had links."""
+    rt = groom.ensure(scalp)
+    push_positions(scalp)
+    r = _call("edit_graph", session=rt.session, op="detach", names=list(names))
+    mark_replaced(scalp)  # the tree takes the graph's positions: the detached nodes moved below
+    _edited(scalp, rt)
+    return int(r.get("detached", 0))
 
 
 def set_evaluation(scalp, names, mode):

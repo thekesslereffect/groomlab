@@ -313,6 +313,10 @@ public:
     // on its first input that takes from's output, `link.to` reads it. One undo step; "" or why not
     // (nothing changes then).
     std::string insertOnLink(const std::string& node, const NodeLink& link);
+    // The nodes taken out of the flow and kept (GraphEdit::detach, Detach): what fed each now feeds
+    // what it fed, the output passes to it, and the node waits unlinked below. One undo step; "" or
+    // why not (nothing changes then). *detached: how many had a link to drop.
+    std::string detachNodes(const std::vector<std::string>& nodes, int* detached = nullptr);
     // A Compound's inner param ("node.param") shown on it as a param of its own (named after the
     // param, node + Param when the compound has that name), or no longer (Maya's Show Inner Param:
     // what Save as Node keeps). One undo step; "" or the error. shownInnerParams: the targets shown.
@@ -361,7 +365,8 @@ public:
     // guides made to *count. "" or the error.
     std::string bakeNodeToGuides(const std::string& node, const std::string& group = "baked", float density = 1.0f,
                                  std::size_t* count = nullptr);
-    // Removes the node with every connection to or from it.
+    // Removes the node with every connection to or from it; what fed it feeds what it fed (as
+    // Detach: GraphEdit::removeNodeKeepingFlow, issue #80).
     std::string removeNode(const std::string& node);
     // Removes several nodes in one undo step (the output node is left; "" or the error when
     // nothing else was asked).

@@ -1418,7 +1418,8 @@ class GROOMLAB_OT_graph_delete(_NodeOp):
         try:
             graph_tree.push_positions(scalp)
             for name in names:
-                process.call("edit_graph", session=rt.session, op="remove_node", name=name)
+                # (the flow passes through: what fed it feeds what it fed, issue #80)
+                process.call("edit_graph", session=rt.session, op="remove_node", name=name, keepFlow=True)
         except HelperError as e:
             return _fail(self, e)
         if scalp.groomlab.view_node in names:

@@ -51,6 +51,7 @@ const std::vector<Shortcut>& shortcuts() {
         {"graph.group", "Graph", "Ctrl+G / Ctrl+Shift+G", "Group / ungroup", kAll},
         {"graph.tidy", "Graph", "Ctrl+L", "Tidy layout", kApp},
         {"graph.bypass", "Graph", "B", "Bypass nodes", kAll},
+        {"graph.detach", "Graph", "Ctrl+Shift+X", "Detach nodes (the flow passes through)", kAll},
         {"graph.view", "Graph", "V", "View up to node", kAll},
         {"graph.frame", "Graph", "F", "Frame selection", kMaya | kApp},
         {"graph.frameAll", "Graph", "A", "Frame all", kMaya | kApp},

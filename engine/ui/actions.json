@@ -245,6 +245,7 @@
     "node.setOutput": {"label": "Set as Output", "tip": "The groom shows this node's strands"},
     "node.view": {"label": "Focus: View Up to Here", "tip": "The viewport shows the groom up to this node", "shortcut": "graph.view", "checkable": true, "needs": ["node.viewable"]},
     "node.bypass": {"label": "Bypass", "tip": "Pass the input straight through", "shortcut": "graph.bypass", "checkable": true},
+    "node.detach": {"label": "Detach", "tip": "Take the node out of the flow: what fed it feeds what it fed, as if it were not there; the node stays, unlinked, below the new link", "shortcut": "graph.detach"},
     "node.evaluate": {"label": "Evaluate", "tip": "When the node runs", "checkable": true},
     "node.rename": {"label": "Rename...", "tip": "Rename the node"},
     "node.duplicate": {"label": "Duplicate", "tip": "Duplicate the node", "shortcut": "graph.duplicate"},

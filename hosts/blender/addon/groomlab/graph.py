@@ -352,12 +352,8 @@ def add_node(scalp, type_name, after=None):
 
 def remove_node(scalp, name):
     rt = _ensure(scalp)
-    graph = _call("get_graph", session=rt.session)["graph"]
-    chain, into = main_chain(graph)
-    if name in chain and 0 < chain.index(name) < len(chain) - 1:
-        i = chain.index(name)
-        _edit(rt, op="connect", **{"from": chain[i - 1], "to": chain[i + 1], "input": _input_from(into, chain[i + 1], name)})
-    error = _edit(rt, op="remove_node", name=name)["graphError"]
+    # What fed it feeds what it fed (the core's removeNodeKeepingFlow, as every graph editor's Delete).
+    error = _edit(rt, op="remove_node", name=name, keepFlow=True)["graphError"]
     _changed(scalp, rt)
     return error
 

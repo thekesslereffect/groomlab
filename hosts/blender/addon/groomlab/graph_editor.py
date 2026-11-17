@@ -416,6 +416,30 @@ class GROOMLAB_OT_graph_bypass(_GraphOperator):
         return {"FINISHED"}
 
 
+class GROOMLAB_OT_graph_detach(_GraphOperator):
+    """Detach: take the node out of the flow; what fed it feeds what it fed, and the node stays,
+    unlinked, below the new link"""
+    bl_idname = "groomlab.graph_detach"
+    bl_label = "Detach"
+    bl_options = {"REGISTER", "UNDO"}
+
+    node: StringProperty(options={"SKIP_SAVE"}, description="The node (empty: the selected ones)")
+
+    def execute(self, context):
+        scalp = context_groom(context)
+        chosen = [n.gl_name for n in selected_nodes(context)]
+        names = chosen if not self.node or self.node in chosen else [self.node]
+        if not names:
+            return {"CANCELLED"}
+        try:
+            detached = graph_tree.detach(scalp, names)
+        except HelperError as e:
+            return _fail(self, e)
+        if not detached:
+            self.report({"INFO"}, "Nothing to detach: no links")
+        return {"FINISHED"}
+
+
 class GROOMLAB_OT_graph_evaluation(_GraphOperator):
     """When the node runs: always, only in the viewport (renders and exports skip it) or only in
     renders (the viewport skips it)"""
@@ -828,6 +852,7 @@ def _bind_editor():
          lambda ctx, item: ctx.scalp is not None and ctx.scalp.groomlab.view_node == ctx.node)
     bind("node.bypass", "groomlab.graph_bypass", _n,
          lambda ctx, item: bool(_tree_node(ctx) and _tree_node(ctx).mute))
+    bind("node.detach", "groomlab.graph_detach", _n)
     bind("node.evaluate", "groomlab.graph_evaluation", lambda ctx, item: {"node": ctx.node or "", "mode": item["value"]},
          lambda ctx, item: bool(_tree_node(ctx)) and _tree_node(ctx).gl_evaluation == item["value"])
     bind("node.duplicate", "groomlab.graph_duplicate")
@@ -1595,17 +1620,19 @@ def _draw_overlay_now():
 _keymaps = []
 
 classes = (GROOMLAB_OT_graph_open, GROOMLAB_OT_graph_add_search, GROOMLAB_OT_graph_frame, GROOMLAB_OT_graph_duplicate,
-           GROOMLAB_OT_graph_view_node, GROOMLAB_OT_graph_clump_colors, GROOMLAB_OT_graph_bypass, GROOMLAB_OT_graph_evaluation, GROOMLAB_OT_graph_set_output,
+           GROOMLAB_OT_graph_view_node, GROOMLAB_OT_graph_clump_colors, GROOMLAB_OT_graph_bypass, GROOMLAB_OT_graph_detach, GROOMLAB_OT_graph_evaluation, GROOMLAB_OT_graph_set_output,
            GROOMLAB_OT_graph_upgrade_node, GROOMLAB_OT_graph_fold, GROOMLAB_OT_graph_pick_attribute, GROOMLAB_OT_graph_tidy, GROOMLAB_OT_graph_reload,
            GROOMLAB_OT_graph_preset, GROOMLAB_OT_graph_presets_refresh, GROOMLAB_MT_graph_presets,
            GROOMLAB_MT_graph_edit, GROOMLAB_PT_graph_node, GROOMLAB_PT_graph_groom, GROOMLAB_PT_graph_presets)
 
 # Maya's keys (shortcuts.h): Tab adds, F frames, V views, B bypasses, Ctrl+D duplicates, Ctrl+G groups
-# into a Compound, Ctrl+Shift+G ungroups (only in GroomLab graphs: each operator's poll).
+# into a Compound, Ctrl+Shift+G ungroups, Ctrl+Shift+X detaches (only in GroomLab graphs: each
+# operator's poll; elsewhere the key is Blender's).
 KEYS = (("groomlab.graph_add_search", "TAB", {}), ("groomlab.graph_frame", "F", {}),
         ("groomlab.graph_view_node", "V", {}), ("groomlab.graph_bypass", "B", {}),
         ("groomlab.graph_duplicate", "D", {"ctrl": True}), ("groomlab.graph_group", "G", {"ctrl": True}),
-        ("groomlab.graph_ungroup", "G", {"ctrl": True, "shift": True}))
+        ("groomlab.graph_ungroup", "G", {"ctrl": True, "shift": True}),
+        ("groomlab.graph_detach", "X", {"ctrl": True, "shift": True}))
 
 
 def register():

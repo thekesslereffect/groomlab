@@ -1506,9 +1506,23 @@ class GraphEditorTest(unittest.TestCase):
 
     def test_invalid_graphs_are_not_applied(self):
         applied = cmds.getAttr(self.groom + ".graph")
-        self.editor.delete_nodes(["output"])
+        self.editor.model.remove_node("output")  # (the editor's Delete passes the output on: issue #80)
+        self.editor.rebuild()
+        self.editor.changed()
         self.assertIn("no output node", self.editor.status.text())
         self.assertEqual(cmds.getAttr(self.groom + ".graph"), applied)
+
+    def test_delete_keeps_the_flow(self):
+        # Delete (issue #80): what fed the node feeds what it fed, as Detach does.
+        feeds = [c for c in self.editor.model.connections if c["from"] == "width"]
+        self.assertTrue(feeds)
+        source = self.editor.model.source_of("width", "strands")
+        self.assertTrue(source)
+        self.editor.delete_nodes(["width"])
+        self.assertNotIn("width", self.editor.model.nodes)
+        for c in feeds:
+            self.assertEqual([k["from"] for k in self.editor.model.connections
+                              if k["to"] == c["to"] and k["input"] == c["input"]], [source])
 
     def test_connect_rejects_type_mismatch(self):
         self.editor.link("scalp", "width", "strands")
