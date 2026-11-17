@@ -434,6 +434,24 @@ class RootTubeCard(QtCore.QObject):
         name = root_tubes.ensure_density_map(groom, root_tubes.density_map_for(groom, roots))
         return root_tubes.subdivide(groom, roots, name, multiplier=self.multiplier.value())
 
+    def _density_roots(self, groom):
+        """The roots Paint subdivision density is for: those picked in Select root, else the guides
+        selected (their root tubes), else a cell of the last root cut (painting its map again)."""
+        if self._mode() in ("select", "duplicate") and self.tool.picked:
+            return list(self.tool.picked)
+        try:
+            selected = groomlab.selected_guides(groom)
+        except (RuntimeError, ValueError):
+            selected = []
+        if selected:
+            return list(selected)
+        cuts = (groomlab.get_hierarchy(groom) or {}).get("rootSubdivisions") or []
+        for cut in reversed(cuts):
+            live = [int(c) for c in cut.get("cells") or [] if c]
+            if live:
+                return live[:1]
+        return []
+
     def paint_density_clicked(self, _on=None):
         groom = self.owner.groom()
         if not groom:
@@ -443,7 +461,7 @@ class RootTubeCard(QtCore.QObject):
         if self._painting is not None:  # Finish painting: cut by the map
             self.finish_painting()
             return
-        roots = self.tool.picked if self._mode() in ("select", "duplicate") else []
+        roots = self._density_roots(groom)
         if not roots:
             self.owner.status.setText("Select a root first (Select root): a root to cut, or a root cut before to "
                                       "paint its density again.")

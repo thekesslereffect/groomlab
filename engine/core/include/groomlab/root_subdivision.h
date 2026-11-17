@@ -71,8 +71,11 @@ std::string subdivisionDensityMapFor(const GuideHierarchy& h, const std::vector<
 // A flat cut: `outline` (a simple polygon, either way round) filled with Voronoi cells about
 // `sites`, each cell the outline clipped to its site's side of every other site; each counter-
 // clockwise, the points shared by neighbouring cells exactly equal (welded), so cells meet with no
-// gap. A site outside the outline gets an empty cell. Pure 2D: the tests and the scalp cut use it.
-std::vector<std::vector<CutPoint>> voronoiCells(const std::vector<CutPoint>& outline, const std::vector<CutPoint>& sites);
+// gap. A site outside the outline gets an empty cell. Corners nearer each other than `mergeBelow`
+// (scene units; 0: none) are made one (their middle; an outline CV among them stays where it is),
+// so no cell keeps a sliver of an edge. Pure 2D: the tests and the scalp cut use it.
+std::vector<std::vector<CutPoint>> voronoiCells(const std::vector<CutPoint>& outline, const std::vector<CutPoint>& sites,
+                                                double mergeBelow = 0.0);
 // Sites for the cells inside `outline`, spaced about `size(p)` apart (dart throwing over a
 // jittered grid finer than the smallest size, then `relax` half Lloyd steps), from `seed`. Sites
 // in `kept` stay where they are and count as thrown; none land nearer them than the spacing.

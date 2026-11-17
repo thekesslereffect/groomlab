@@ -1230,8 +1230,25 @@ void appendTubeSurface(DisplayGeometry& batch, const HierarchyGuide& g, float sc
         const SectionPoint& p = outline[k];
         return blends.empty() ? p : tubeBlendAt(blends[k], p.u, p.v, t);
     };
+    // The rings: one on each of the guide's points (where its sections, and the wire's rings, are)
+    // with the rest spread between them, so the surface bends where the wire does; evenly along it
+    // when the guide has more points than rings.
+    std::vector<float> ringAt(kAlong + 1);
+    const std::size_t spans = n - 1;
+    if (spans <= static_cast<std::size_t>(kAlong)) {
+        std::size_t j = 0;
+        for (std::size_t i = 0; i < spans; ++i) {
+            const std::size_t steps = kAlong / spans + (i < kAlong % spans ? 1 : 0);
+            for (std::size_t k = 0; k < steps; ++k) {
+                ringAt[j++] = (static_cast<float>(i) + static_cast<float>(k) / static_cast<float>(steps)) / static_cast<float>(spans);
+            }
+        }
+        ringAt[kAlong] = 1.0f;
+    } else {
+        for (int j = 0; j <= kAlong; ++j) ringAt[static_cast<std::size_t>(j)] = static_cast<float>(j) / kAlong;
+    }
     for (int j = 0; j <= kAlong && !round; ++j) {
-        const float t = static_cast<float>(j) / kAlong;
+        const float t = ringAt[static_cast<std::size_t>(j)];
         const TubeBlendPoint plain;
         const Vec3f center = spine.at(t, 0.0f, 0.0f, plain);
         const Vec3f axisU = spine.at(t, 1.0f, 0.0f, plain) - center, axisV = spine.at(t, 0.0f, 1.0f, plain) - center;
@@ -1377,7 +1394,7 @@ TubeDisplay buildTubeDisplay(const GuideHierarchy& hierarchy, const TubeDisplayO
     out.surfaces.triangles = true;
     out.surfaces.surface = true;
     if (options.shaded) {
-        constexpr float kInset = 0.985f;  // (the wires on the outline itself stay seen)
+        constexpr float kInset = 0.997f;  // (the wires on the outline itself stay seen, a hair outside the surface)
         for (const HierarchyGuide* g : guides) {
             const std::size_t before = out.surfaces.positions.size() / 3;
             appendTubeSurface(out.surfaces, *g, hierarchy.scale() * kInset);

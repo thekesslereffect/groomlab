@@ -24,6 +24,7 @@ constexpr double kDensityChanged = 0.02;  // a sample's density moved more than 
 constexpr std::size_t kMaxCells = 400;    // a root cut into at most this many cells (the sizes grown to fit)
 constexpr std::size_t kMaxGrid = 40000;   // the candidate grid's and the density grid's points, at most
 constexpr int kBlendNearest = 3;          // a new guide's shape blended from this many old guides near it
+constexpr double kMergeCorners = 0.2;     // cell corners nearer than this share of the smallest cell size made one
 
 using P = CutPoint;
 P operator+(const P& a, const P& b) { return {a.x + b.x, a.y + b.y}; }
@@ -139,6 +140,54 @@ std::vector<P> ccw(std::vector<P> poly) {
     return poly;
 }
 
+// Corners (points the cells share, welded: exactly equal) nearer each other than `below` along an
+// edge made one: each group of them their middle, or the outline's CV among them where there is
+// one (two CVs never merge: the outline stays as drawn). Shortest edges first; cells tidied after.
+void mergeCorners(std::vector<std::vector<P>>& cells, const std::vector<P>& outline, double below) {
+    using Key = std::pair<double, double>;
+    std::map<Key, std::size_t> index;
+    std::vector<P> at;
+    std::vector<bool> fixed;
+    auto id = [&](const P& p) {
+        const auto it = index.find({p.x, p.y});
+        if (it != index.end()) return it->second;
+        index.emplace(Key{p.x, p.y}, at.size());
+        at.push_back(p);
+        fixed.push_back(false);
+        return at.size() - 1;
+    };
+    for (const P& p : outline) fixed[id(p)] = true;
+    std::vector<std::pair<double, std::pair<std::size_t, std::size_t>>> edges;
+    for (const auto& cell : cells) {
+        for (std::size_t i = 0; i < cell.size(); ++i) {
+            const std::size_t a = id(cell[i]), b = id(cell[(i + 1) % cell.size()]);
+            if (a != b) edges.push_back({dist(at[a], at[b]), {std::min(a, b), std::max(a, b)}});
+        }
+    }
+    std::sort(edges.begin(), edges.end());
+    std::vector<std::size_t> up(at.size());
+    for (std::size_t i = 0; i < up.size(); ++i) up[i] = i;
+    std::function<std::size_t(std::size_t)> top = [&](std::size_t i) { return up[i] == i ? i : up[i] = top(up[i]); };
+    std::vector<P> place = at;
+    std::vector<int> count(at.size(), 1);
+    for (const auto& [length, ends] : edges) {
+        if (length >= below) break;
+        std::size_t a = top(ends.first), b = top(ends.second);
+        if (a == b || dist(place[a], place[b]) >= below) continue;
+        if (fixed[a] && fixed[b]) continue;
+        if (fixed[b]) std::swap(a, b);
+        // a takes b in: a CV keeps its place, else the group's middle.
+        up[b] = a;
+        if (!fixed[a]) place[a] = (place[a] * count[a] + place[b] * count[b]) * (1.0 / (count[a] + count[b]));
+        count[a] += count[b];
+        fixed[a] = fixed[a] || fixed[b];
+    }
+    for (auto& cell : cells) {
+        for (P& p : cell) p = place[top(index.at({p.x, p.y}))];
+        cell = tidy(cell, 0.0);
+    }
+}
+
 // ---- The plane a root is cut in ------------------------------------------------------------------
 
 struct Plane {
@@ -252,29 +301,6 @@ Source sourceOf(const ScalpMesh& scalp, const HierarchyGuide& g) {
     return s;
 }
 
-// The shape the sources near `root` give (kBlendNearest of them, by inverse square distance),
-// each carried onto `root` turned from its normal onto `normal`, `count` points.
-std::vector<Vec3f> blendedShape(const std::vector<Source>& sources, const Vec3f& root, const Vec3f& normal, std::size_t count) {
-    std::vector<std::pair<float, const Source*>> near;
-    for (const Source& s : sources) {
-        if (s.points.size() >= 2) near.push_back({(s.root - root).length(), &s});
-    }
-    if (near.empty()) return {};
-    std::sort(near.begin(), near.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
-    near.resize(std::min<std::size_t>(near.size(), kBlendNearest));
-    if (count < 2) count = near.front().second->points.size();
-    std::vector<Vec3f> out(count, Vec3f{});
-    double total = 0.0;
-    const float eps = std::max(near.front().first * 1e-3f, 1e-9f);
-    for (const auto& [d, s] : near) {
-        const double w = 1.0 / std::pow(static_cast<double>(d) + eps, 2.0);
-        const std::vector<Vec3f> pts = resamplePolyline(s->points, count);
-        for (std::size_t i = 0; i < count; ++i) out[i] = out[i] + turn(pts[i] - s->root, s->normal, normal) * static_cast<float>(w);
-        total += w;
-    }
-    for (Vec3f& p : out) p = root + p * static_cast<float>(1.0 / total);
-    return out;
-}
 
 // ---- The hierarchy under a root ---------------------------------------------------------------------
 
@@ -306,6 +332,47 @@ void rebuildLevels(GuideHierarchy& h, const ScalpMesh& scalp, const std::vector<
 }
 
 // ---- Cells to root tubes ------------------------------------------------------------------------------
+
+// A cell's CVs (on the scalp) as points of the tube's root section (its footprint's coordinates).
+std::vector<SectionPoint> sectionPolygon(const TubeSpine& spine, const std::vector<Vec3f>& cvs) {
+    std::vector<SectionPoint> out;
+    for (const Vec3f& p : cvs) out.push_back(spine.rootCoords(p));
+    return out;
+}
+
+// The tube cut, kept with its record (RootSubdivisionSource), and back.
+RootSubdivisionSource snapshot(const TubeSource& t, const ScalpMesh& scalp) {
+    RootSubdivisionSource out;
+    out.points = t.points;
+    out.frameUp = t.frameUp;
+    out.normal = t.normal;
+    out.across = t.across;
+    out.width = t.tube.width;
+    out.aspect = t.tube.aspect;
+    out.twist = t.tube.twist;
+    out.roll = t.tube.roll;
+    out.root = t.points.empty() ? StrandRoot{} : scalp.closestPoint(t.points.front()).root;
+    return out;
+}
+bool sourceOf(const RootSubdivisionSource& kept, const ScalpMesh& scalp, TubeSource* out) {
+    if (kept.points.size() < 2 || kept.width.empty()) return false;
+    TubeSource t;
+    // (Where the scalp moved since: carried with its root.)
+    const Vec3f move = scalp.contains(kept.root) ? scalp.position(kept.root) - kept.points.front() : Vec3f{};
+    for (const Vec3f& p : kept.points) t.points.push_back(p + move);
+    t.frameUp = kept.frameUp;
+    t.normal = scalp.contains(kept.root) ? scalp.normal(kept.root) : kept.normal;
+    t.across = kept.across - t.normal * kept.across.dot(t.normal);
+    if (t.across.length() < 1e-4f) return false;
+    t.across = t.across.normalized();
+    t.tube.width = kept.width;
+    t.tube.aspect = kept.aspect.empty() ? std::vector<float>{1.0f} : kept.aspect;
+    t.tube.twist = kept.twist.empty() ? std::vector<float>{0.0f} : kept.twist;
+    t.tube.roll = kept.roll;
+    t.tube.rollOnScalp = false;
+    *out = std::move(t);
+    return true;
+}
 
 // A cell's CVs, at most kMaxTubeShapePoints: the points that matter least to its shape taken out,
 // those it shares with a neighbour or the old outline last.
@@ -380,58 +447,10 @@ std::vector<std::vector<Vec3f>> liftCells(const ScalpMesh& scalp, const Cut& cut
     return out;
 }
 
-// A cell's guide inside the old tube: the path a strand rooted at the cell's middle takes there.
-std::vector<Vec3f> pathInTube(const GuideHierarchy& h, const ScalpMesh& scalp, const HierarchyGuide& g, const Vec3f& at) {
-    if (g.points.size() < 2) return {};
-    TubeSpine spine(g.points.data(), g.points.size(), g.frameUp, g.tube, h.scale());
-    if (scalp.contains(g.root)) spine.setRootOnScalp(scalp.normal(g.root), scalp.acrossAt(g.root));
-    const SectionPoint uv = spine.rootCoords(at);
-    std::vector<Vec3f> out;
-    const std::size_t n = g.points.size();
-    for (std::size_t i = 0; i < n; ++i) out.push_back(spine.at(static_cast<float>(i) / static_cast<float>(n - 1), uv.u, uv.v));
-    out.front() = at;
-    return out;
-}
 
-float taperOf(const TubeProfile& tube) {
-    if (tube.width.size() < 2 || tube.width.front() <= 0.0f) return 1.0f;
-    return std::clamp(tube.width.back() / tube.width.front(), 0.0f, 4.0f);
-}
 
-std::string groupName(const GuideHierarchy& h, GroupId id) {
-    const GuideGroup* g = h.group(id);
-    return g ? g->name : std::string();
-}
 
-// A cell made a root tube along `path` (its point count kept), into `group`. kNoGuide when the
-// cell is too small to fit.
-GuideId makeCell(GuideHierarchy& h, const ScalpMesh& scalp, const std::vector<Vec3f>& cvs, const std::vector<Vec3f>& path,
-                 const std::string& group, float taper, float fallbackLength) {
-    if (cvs.size() < 3) return kNoGuide;
-    RootTubeOptions o;
-    o.group = group;
-    o.taper = taper;
-    o.length = fallbackLength;
-    double radius = 0.0;
-    const Vec3f mid = outlineCentroid(cvs);
-    for (const Vec3f& p : cvs) radius = std::max(radius, static_cast<double>((p - mid).length()));
-    if (path.size() >= 2 && radius > 0.0) {
-        const int base = rootPathSpans(path, static_cast<float>(radius), 1.0f);
-        o.density = base > 0 ? std::clamp(static_cast<float>(path.size() - 1) / static_cast<float>(base), 0.02f, 20.0f) : 1.0f;
-        o.segments = static_cast<int>(path.size()) - 1;
-    }
-    try {
-        return makeRootTube(h, scalp, cvs, path.size() >= 2 ? path : std::vector<Vec3f>{}, o);
-    } catch (const std::exception&) {
-        return kNoGuide;  // (a sliver the fit cannot take: its neighbours cover it)
-    }
-}
 
-float guideLength(const std::vector<Vec3f>& pts) {
-    float total = 0.0f;
-    for (std::size_t i = 1; i < pts.size(); ++i) total += (pts[i] - pts[i - 1]).length();
-    return total;
-}
 
 std::uint32_t nextRecordId(const std::vector<RootSubdivisionRecord>& records) {
     std::uint32_t id = 0;
@@ -531,7 +550,8 @@ void fitSizes(double area, double* s0, double* s1) {
 
 // ---- The flat cut ---------------------------------------------------------------------------------------
 
-std::vector<std::vector<CutPoint>> voronoiCells(const std::vector<CutPoint>& outlineIn, const std::vector<CutPoint>& sites) {
+std::vector<std::vector<CutPoint>> voronoiCells(const std::vector<CutPoint>& outlineIn, const std::vector<CutPoint>& sites,
+                                                double mergeBelow) {
     const std::vector<P> outline = ccw(outlineIn);
     const double eps = 1e-9 * std::max(polygonSize(outline), 1e-12);
     std::vector<std::vector<P>> cells(sites.size());
@@ -582,6 +602,7 @@ std::vector<std::vector<CutPoint>> voronoiCells(const std::vector<CutPoint>& out
         for (P& p : cell) p = weldPoint(p);
         cell = tidy(cell, 0.0);
     }
+    if (mergeBelow > 0.0) mergeCorners(cells, outline, mergeBelow);
     return cells;
 }
 
@@ -617,26 +638,25 @@ void cutRoot(GuideHierarchy& h, const ScalpMesh& scalp, GuideId guide, const Roo
     record.id = nextRecordId(h.rootSubdivisions());
     record.seed = hashCombine(o.seed, record.id);
     const std::vector<P> sites = throwSites(cut.outline, size, record.seed, o.relax, {}, nullptr);
-    const std::vector<std::vector<Vec3f>> cells = liftCells(scalp, cut, voronoiCells(cut.outline, sites));
+    const std::vector<std::vector<Vec3f>> cells = liftCells(scalp, cut, voronoiCells(cut.outline, sites, kMergeCorners * std::min(s0, s1)));
 
     // The old guide, its tube and the hierarchy under it, as they were.
-    const HierarchyGuide old = *g;
-    const std::string group = groupName(h, old.group);
+    const TubeSource source = tubeSourceOf(h, scalp, guide);
+    const TubeSpine spine = sourceSpine(source, h.scale());
     std::map<int, std::vector<Source>> sources;
     for (const auto& [level, ids] : levelsUnder(h, guide)) {
         for (const GuideId k : ids) {
             if (const HierarchyGuide* kid = h.guide(k)) sources[level].push_back(sourceOf(scalp, *kid));
         }
     }
-    const float taper = taperOf(old.tube);
-    const float length = guideLength(old.points);
 
+    // Each cell a slice of the tube cut (sliceTube): its root shape its part of the tube's root, its
+    // sections the tube's scaled to it, turned as the tube's; so the cells tile the tube all along.
     std::vector<GuideId> made;
     std::vector<StrandRoot> siteRoots;
     for (std::size_t i = 0; i < cells.size(); ++i) {
         if (cells[i].size() < 3) continue;
-        const Vec3f mid = scalpPointNormal(scalp, outlineCentroid(cells[i])).point;
-        const GuideId id = makeCell(h, scalp, cells[i], pathInTube(h, scalp, old, mid), group, taper, length);
+        const GuideId id = sliceTube(h, scalp, source, sectionPolygon(spine, cells[i]), kNoGuide, cells[i]);
         if (id == kNoGuide) continue;
         made.push_back(id);
         siteRoots.push_back(lift(scalp, cut.plane, sites[i]).root);
@@ -672,6 +692,7 @@ void cutRoot(GuideHierarchy& h, const ScalpMesh& scalp, GuideId guide, const Roo
     record.sizeAtZero = static_cast<float>(s0);
     record.sizeAtOne = static_cast<float>(s1);
     record.multiplier = o.multiplier > 0.0f ? o.multiplier : 1.0f;
+    record.source = snapshot(source, scalp);
     records.push_back(std::move(record));
     h.setRootSubdivisions(std::move(records));
     result.cells.insert(result.cells.end(), made.begin(), made.end());
@@ -721,32 +742,38 @@ bool recut(GuideHierarchy& h, const ScalpMesh& scalp, std::size_t index, const R
         keptCells.push_back(live ? r.cells[i] : kNoGuide);
     }
     const std::vector<P> sites = throwSites(cut.outline, size, hashCombine(r.seed, h.contentHash()), o.relax, kept, inChange);
-    const std::vector<std::vector<Vec3f>> cells = liftCells(scalp, cut, voronoiCells(cut.outline, sites));
+    const std::vector<std::vector<Vec3f>> cells = liftCells(scalp, cut, voronoiCells(cut.outline, sites, kMergeCorners * std::min(s0, s1)));
 
-    // What the cells replaced looked like: the shapes new cells take, level by level.
-    std::vector<Source> levelOne;
+    // How deep the cells replaced were split (the new cells are split as deep, afresh), and the tube
+    // the new cells are slices of: the one the root was cut from (else, a cut made before it was
+    // kept: a cell's), in the cells' group.
     std::map<int, std::vector<Source>> sources;
-    std::string group;
-    float taper = 1.0f, length = 1.0f;
+    GroupId group = kNoGroup;
+    GuideId some = kNoGuide;
     for (const GuideId c : replaced) {
         const HierarchyGuide* g = h.guide(c);
         if (!g) continue;
-        levelOne.push_back(sourceOf(scalp, *g));
-        if (group.empty()) group = groupName(h, g->group), taper = taperOf(g->tube), length = guideLength(g->points);
+        if (some == kNoGuide) some = c, group = g->group;
         for (const auto& [level, ids] : levelsUnder(h, c)) {
             for (const GuideId k : ids) {
                 if (const HierarchyGuide* kid = h.guide(k)) sources[level].push_back(sourceOf(scalp, *kid));
             }
         }
     }
-    if (levelOne.empty()) {  // (nothing replaced: new sites in a gap take the kept cells' shapes)
-        for (const GuideId c : keptCells) {
-            if (const HierarchyGuide* g = h.guide(c)) {
-                levelOne.push_back(sourceOf(scalp, *g));
-                if (group.empty()) group = groupName(h, g->group), taper = taperOf(g->tube), length = guideLength(g->points);
-            }
-        }
+    for (const GuideId c : keptCells) {
+        if (some == kNoGuide && c != kNoGuide && h.guide(c)) some = c, group = h.guide(c)->group;
     }
+    TubeSource source;
+    if (!sourceOf(r.source, scalp, &source)) {
+        if (some == kNoGuide) return false;
+        source = tubeSourceOf(h, scalp, some);
+    }
+    if (group == kNoGroup) {
+        group = h.findGroup(kRootTubeGroup);
+        if (group == kNoGroup) group = h.addGroup(kRootTubeGroup);
+    }
+    source.group = group;
+    const TubeSpine spine = sourceSpine(source, h.scale());
 
     RootSubdivisionRecord next = r;
     next.sites.clear();
@@ -777,9 +804,7 @@ bool recut(GuideHierarchy& h, const ScalpMesh& scalp, std::size_t index, const R
             continue;
         }
         if (cells[i].size() < 3) continue;
-        const ScalpPointNormal mid = scalpPointNormal(scalp, outlineCentroid(cells[i]));
-        const std::vector<Vec3f> path = blendedShape(levelOne, mid.point, mid.normal, 0);
-        const GuideId id = makeCell(h, scalp, cells[i], path, group.empty() ? std::string(kRootTubeGroup) : group, taper, length);
+        const GuideId id = sliceTube(h, scalp, source, sectionPolygon(spine, cells[i]), kNoGuide, cells[i]);
         if (id == kNoGuide) continue;
         made.push_back(id);
         next.sites.push_back(siteAt.root);

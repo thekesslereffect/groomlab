@@ -51,6 +51,12 @@ ScalpMesh painted(const std::function<float(const Vec3f&)>& density) {
     return s;
 }
 
+float nearestOf(const Vec3f& p, const std::vector<Vec3f>& pts) {
+    float best = 1e30f;
+    for (const Vec3f& q : pts) best = std::min(best, (p - q).length());
+    return best;
+}
+
 double area(const std::vector<CutPoint>& poly) {
     double a = 0.0;
     for (std::size_t i = 0; i < poly.size(); ++i) {
@@ -436,6 +442,99 @@ TEST(RootSubdivision, TheMultiplierMakesTheCutDenser) {
     EXPECT_FLOAT_EQ(two.rootSubdivisions().at(0).multiplier, 1.0f);
     // The same multiplier and density: nothing.
     EXPECT_TRUE(applySubdivisionDensity(two, *scalp, {}, o).cells.empty());
+}
+
+TEST(RootSubdivision, CellsTileTheTubeAllAlongWithNoPenetration) {
+    // The cut tube twisted, flattened and tapered: its cells still tile it all along, a hair apart,
+    // none reaching into another.
+    GuideHierarchy h;
+    const auto scalp = head();
+    RootTubeOptions o;
+    o.length = 0.8f;
+    o.segments = 8;
+    const std::vector<Vec3f> path{{0, 1, 0}, {0.05f, 1.3f, 0}, {0.25f, 1.55f, 0.05f}, {0.55f, 1.7f, 0.1f}};
+    const GuideId root = makeRootTube(h, *scalp, ring({0, 1, 0}, 0.3f, 12), path, o);
+    TubeProfile shaped = h.guide(root)->tube;
+    const std::size_t n = h.guide(root)->points.size();
+    shaped.width.resize(n), shaped.aspect.resize(n), shaped.twist.resize(n);
+    const float w0 = h.guide(root)->tube.widthAt(0.0f), a0 = h.guide(root)->tube.aspectAt(0.0f), t0 = h.guide(root)->tube.twistAt(0.0f);
+    for (std::size_t i = 0; i < n; ++i) {
+        const float t = static_cast<float>(i) / static_cast<float>(n - 1);
+        shaped.width[i] = w0 * (1.0f - 0.5f * t);
+        shaped.aspect[i] = a0 * (1.0f - 0.4f * t);
+        shaped.twist[i] = t0 + 0.8f * t;
+    }
+    h.setTube(root, shaped);
+    h.evaluate(scalp.get());
+    const TubeSource source = tubeSourceOf(h, *scalp, root);
+    const TubeSpine pspine = sourceSpine(source, h.scale());
+    const std::vector<GuideId> cells = subdivideRootTubes(h, *scalp, {root}).cells;
+    ASSERT_GE(cells.size(), 4u);
+    std::vector<TubeSpine> spines;
+    for (const GuideId c : cells) {
+        const HierarchyGuide* g = h.guide(c);
+        ASSERT_EQ(g->points.size(), n);
+        spines.emplace_back(g->points.data(), n, g->frameUp, g->tube, h.scale());
+    }
+    for (std::size_t i = 1; i < n; ++i) {
+        std::vector<std::vector<SectionPoint>> at(cells.size());
+        for (std::size_t k = 0; k < cells.size(); ++k) {
+            for (const SectionPoint& q : tubeOutline(h.guide(cells[k])->tube)) at[k].push_back(inSection(pspine, i, spines[k].atSample(i, q.u, q.v)));
+        }
+        for (std::size_t a = 0; a < cells.size(); ++a) {
+            for (std::size_t b = 0; b < cells.size(); ++b) {
+                if (a == b) continue;
+                for (const SectionPoint& q : at[a]) {
+                    EXPECT_FALSE(deepInside(at[b], q, 0.02f)) << "cell " << a << " reaches into cell " << b << " at sample " << i;
+                }
+            }
+        }
+    }
+}
+
+TEST(RootSubdivision, CornersTooCloseAreMadeOne) {
+    // Four sites nearly on one circle: two Voronoi corners a sliver apart, made one.
+    const std::vector<CutPoint> square{{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+    const std::vector<CutPoint> sites{{0.3, 0.3}, {0.7, 0.3}, {0.3, 0.7}, {0.7, 0.71}};
+    auto shortest = [&](const std::vector<std::vector<CutPoint>>& cells) {
+        double best = 1e9;
+        for (const auto& cell : cells) {
+            for (std::size_t i = 0; i < cell.size(); ++i) {
+                const CutPoint& a = cell[i];
+                const CutPoint& b = cell[(i + 1) % cell.size()];
+                best = std::min(best, std::hypot(a.x - b.x, a.y - b.y));
+            }
+        }
+        return best;
+    };
+    EXPECT_LT(shortest(voronoiCells(square, sites)), 0.02);
+    const auto merged = voronoiCells(square, sites, 0.05);
+    EXPECT_GE(shortest(merged), 0.05);
+    double total = 0.0;
+    for (const auto& cell : merged) total += area(cell);
+    EXPECT_NEAR(total, 1.0, 1e-9);  // (still tiling the square, its corners where they were)
+}
+
+TEST(RootSlices, TheRootLoopFollowsTheOutlineDrawn) {
+    // A big root on a curved scalp: its tube's root loop runs along the drawn outline's edges as
+    // they lie on the scalp (CV to CV), not the flat footprint's.
+    GuideHierarchy h;
+    const auto scalp = head();
+    const std::vector<Vec3f> cvs = ring({0, 1, 0}, 0.45f, 6);
+    const GuideId g = makeRootTube(h, *scalp, cvs, {});
+    h.evaluate(scalp.get());
+    const HierarchyGuide* root = h.guide(g);
+    ASSERT_EQ(root->rootRing.size(), tubeOutline(root->tube).size());
+    // The drawn edges on the scalp, finely.
+    std::vector<Vec3f> drawn;
+    for (std::size_t k = 0; k < cvs.size(); ++k) {
+        const Vec3f a = root->rootOutline.empty() ? cvs[k] : scalp->position(root->rootOutline[k]);
+        const Vec3f b = root->rootOutline.empty() ? cvs[(k + 1) % cvs.size()] : scalp->position(root->rootOutline[(k + 1) % cvs.size()]);
+        for (int s = 0; s < 200; ++s) drawn.push_back(scalp->closestPoint(a + (b - a) * (s / 200.0f)).position);
+    }
+    float off = 0.0f;
+    for (const Vec3f& p : root->rootRing) off = std::max(off, nearestOf(p, drawn));
+    EXPECT_LT(off, 0.004f) << "the root loop leaves the outline drawn";
 }
 
 }  // namespace

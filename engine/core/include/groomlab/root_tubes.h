@@ -31,6 +31,7 @@
 #include "groomlab/guide_hierarchy.h"
 #include "groomlab/math.h"
 #include "groomlab/scalp_mesh.h"
+#include "groomlab/tube.h"
 
 namespace groomlab {
 
@@ -132,6 +133,32 @@ std::size_t deleteRootTubes(GuideHierarchy& h, const ScalpMesh& scalp, const std
 // How far (a share of the root's size) a root tube's footprint lies off its kept outline made
 // kRootTubeOverlap larger: 0 when its tube was fitted to it as it is now.
 float rootFootprintError(const GuideHierarchy& h, const ScalpMesh& scalp, GuideId guide);
+
+// ---- Slices of a tube ----------------------------------------------------------------------------------
+// A tube cut into parts that tile it all along (the hierarchy's splits, a root cut into cells:
+// root_subdivision.h): each part a slice of the tube, its root shape its part of the tube's, its
+// sections the tube's scaled to it, its guide the path its middle takes inside the tube.
+
+constexpr float kSliceInset = 0.99f;  // a slice's sections this share of its part: neighbours a hair apart
+
+// The tube a slice is cut from, as it lies (its guide evaluated on the scalp).
+struct TubeSource {
+    std::vector<Vec3f> points;
+    Vec3f frameUp{1, 0, 0};
+    TubeProfile tube;      // (its roll as the last evaluate worked it out)
+    Vec3f normal, across;  // the scalp's normal at its root, and its footprint's way across
+    GroupId group = kNoGroup;
+};
+TubeSource tubeSourceOf(const GuideHierarchy& h, const ScalpMesh& scalp, GuideId guide);
+// The slice of `source` over `polygon` (points in its root section's coordinates, in order round
+// it): into guide `into` (a child of the source: the parent lays its footprint and turns its
+// sections), or (kNoGuide) a new guide of the source's group, its footprint laid and its sections
+// turned as the source's (HierarchyGuide::acrossTurn, rollOffset) and `outline` (world points on
+// the scalp, given) kept as its root's CVs. Returns the guide, or kNoGuide for a sliver.
+GuideId sliceTube(GuideHierarchy& h, const ScalpMesh& scalp, const TubeSource& source, const std::vector<SectionPoint>& polygon,
+                  GuideId into = kNoGuide, const std::vector<Vec3f>& outline = {});
+// A tube spine of the source laid as its tube lies (its footprint fixed on the scalp).
+TubeSpine sourceSpine(const TubeSource& source, float scale = 1.0f);
 
 // ---- The tube hierarchy ------------------------------------------------------------------------------
 

@@ -660,7 +660,7 @@ Footprint footprintOf(const GuideHierarchy& h, const ScalpMesh& scalp, GuideId i
     const Vec3f at = g->points.front();
     if (!g->isChild() && scalp.contains(g->root) && (scalp.position(g->root) - at).length() <= 1e-3f * std::max(1.0f, at.length())) {
         const Vec3f nrm = scalp.normal(g->root);
-        const Vec3f across = scalp.acrossAt(g->root);
+        const Vec3f across = h.rootAcrossOf(*g, scalp);  // (a cell of a cut: turned as its source)
         if (across.length() > 0.5f) return {V(at), V(across), V(nrm.cross(across)), V(nrm)};
     }
     // Its tube's first section frame, turned onto the scalp's normal there.
@@ -1268,24 +1268,19 @@ std::vector<P2> capPoints(std::vector<P2> poly) {
 }
 
 // A drawn root's tube (or a slice of one) split into `kids` (two, just made by generateChildren):
-// its root shape cut in two across its longer side through its middle, each child taking one half
-// as a root shape of its own, its guide the path the half's middle takes inside the parent's tube
-// (from the parent's footprint on the scalp), its sections the parent's scaled to the half. So the
-// two fill the parent's tube as if it were sliced lengthwise: they meet at the cut and never pass
-// through each other unless groomed so. Left as generateChildren made them when the parent has no
-// shape to cut.
+// its root shape cut in two across its longer side through its middle, each child that half of
+// its tube (sliceTube). So the two fill the parent's tube as if it were sliced lengthwise: they
+// meet at the cut (a hair apart) and never pass through each other unless groomed so. Left as
+// generateChildren made them when the parent has no shape to cut.
 void sliceChildren(GuideHierarchy& h, const ScalpMesh& scalp, GuideId parentId, std::vector<GuideId> kids) {
     const HierarchyGuide* parent = h.guide(parentId);
     if (!parent || kids.size() != 2 || !parent->tube.custom || parent->points.size() < 2 || !scalp.contains(parent->root)) return;
-    const TubeProfile ptube = parent->tube;
-    const std::vector<Vec3f> ppoints = parent->points;
-    const Vec3f pframeUp = parent->frameUp;
-    const StrandRoot proot = parent->root;
-    const double w0 = std::max(1e-9, static_cast<double>(ptube.widthAt(0.0f)));
-    const double h0 = w0 * std::max(1e-6, static_cast<double>(ptube.aspectAt(0.0f)));
+    const TubeSource source = tubeSourceOf(h, scalp, parentId);
+    const double w0 = std::max(1e-9, static_cast<double>(source.tube.widthAt(0.0f)));
+    const double h0 = w0 * std::max(1e-6, static_cast<double>(source.tube.aspectAt(0.0f)));
     // The root shape in scene units (the section's width across, its height up), its middle and longer way.
     std::vector<P2> shape;
-    for (const SectionPoint& q : ptube.custom->points) shape.push_back({q.u * w0, q.v * h0});
+    for (const SectionPoint& q : source.tube.custom->points) shape.push_back({q.u * w0, q.v * h0});
     if (shape.size() < 3) return;
     P2 mid{0.0, 0.0};
     double area = 0.0;
@@ -1306,49 +1301,11 @@ void sliceChildren(GuideHierarchy& h, const ScalpMesh& scalp, GuideId parentId, 
     const double angle = 0.5 * std::atan2(2.0 * sxy, sxx - syy);  // the longer way
     const P2 longer{std::cos(angle), std::sin(angle)};
     const std::vector<P2> halves[2] = {clipSide(shape, mid, longer), clipSide(shape, mid, {-longer.x, -longer.y})};
-
-    TubeSpine spine(ppoints.data(), ppoints.size(), pframeUp, ptube, h.scale());
-    const Vec3f pacross = parent->rootAcross.length() > 0.5f ? parent->rootAcross : scalp.acrossAt(proot);
-    spine.setRootOnScalp(scalp.normal(proot), pacross);
-    const std::size_t n = ppoints.size();
     std::sort(kids.begin(), kids.end());
     for (int k = 0; k < 2; ++k) {
-        const GuideId kid = kids[static_cast<std::size_t>(k)];
-        if (halves[k].size() < 3 || !h.guide(kid)) continue;
-        // The half in the parent's section coordinates, its box, and its points fitted to it.
-        double lo[2] = {1e300, 1e300}, hi[2] = {-1e300, -1e300};
-        std::vector<P2> unit;
-        for (const P2& q : halves[k]) {
-            const P2 uv{q.x / w0, q.y / h0};
-            unit.push_back(uv);
-            lo[0] = std::min(lo[0], uv.x), lo[1] = std::min(lo[1], uv.y), hi[0] = std::max(hi[0], uv.x), hi[1] = std::max(hi[1], uv.y);
-        }
-        const double cu = 0.5 * (lo[0] + hi[0]), cv = 0.5 * (lo[1] + hi[1]);
-        const double su = std::max(1e-6, 0.5 * (hi[0] - lo[0])), sv = std::max(1e-6, 0.5 * (hi[1] - lo[1]));
-        std::vector<SectionPoint> fitted;
-        for (const P2& q : capPoints(unit)) fitted.push_back({static_cast<float>((q.x - cu) / su), static_cast<float>((q.y - cv) / sv)});
-        const std::string name = newShapeName(h);
-        try {
-            h.setTubeShape(name, fitted, false);
-        } catch (const std::invalid_argument&) {
-            continue;  // (a sliver no shape takes: generateChildren's child stays)
-        }
-        TubeProfile tube = ptube;
-        tube.custom = h.tubeShape(name);
-        tube.midShape.reset();
-        tube.tipShape.reset();
-        for (float& x : tube.width) x = static_cast<float>(x * su);
-        for (float& a : tube.aspect) a = static_cast<float>(clampAspect(a * sv / su));
-        tube.rollOnScalp = false;
-        tube.roll.clear();
-        h.setTube(kid, tube);
-        std::vector<Vec3f> path;
-        const float u = static_cast<float>(cu), v = static_cast<float>(cv);
-        for (std::size_t i = 0; i < n; ++i) {
-            path.push_back(i == 0 ? scalp.closestPoint(spine.footprintAt(u, v)).position
-                                  : spine.at(static_cast<float>(i) / static_cast<float>(n - 1), u, v));
-        }
-        h.setPoints(kid, path);
+        std::vector<SectionPoint> half;
+        for (const P2& q : halves[k]) half.push_back({static_cast<float>(q.x / w0), static_cast<float>(q.y / h0)});
+        sliceTube(h, scalp, source, half, kids[static_cast<std::size_t>(k)]);
     }
     h.evaluate(&scalp);
 }
@@ -1508,6 +1465,108 @@ std::map<std::string, bool> tubeLevelVisibility(const GuideHierarchy& h, const s
     std::map<std::string, bool> out;
     for (std::size_t k = 0; k < info.levels.size(); ++k) out[info.levels[k]] = static_cast<int>(k) + 1 == level;
     return out;
+}
+
+// ---- Slices of a tube ----------------------------------------------------------------------------------
+
+TubeSource tubeSourceOf(const GuideHierarchy& h, const ScalpMesh& scalp, GuideId id) {
+    const HierarchyGuide* g = h.guide(id);
+    if (!g || g->points.size() < 2) throw std::invalid_argument("no guide " + std::to_string(id) + " to slice");
+    TubeSource out;
+    out.points = g->points;
+    out.frameUp = g->frameUp;
+    out.tube = g->tube;
+    out.normal = scalp.contains(g->root) ? scalp.normal(g->root) : g->rootNormal;
+    out.across = g->rootAcross.length() > 0.5f ? g->rootAcross : h.rootAcrossOf(*g, scalp);
+    out.group = g->group;
+    return out;
+}
+
+TubeSpine sourceSpine(const TubeSource& source, float scale) {
+    TubeSpine spine(source.points.data(), source.points.size(), source.frameUp, source.tube, scale);
+    if (source.normal.length() > 0.5f && source.across.length() > 0.5f) spine.setRootOnScalp(source.normal, source.across);
+    return spine;
+}
+
+GuideId sliceTube(GuideHierarchy& h, const ScalpMesh& scalp, const TubeSource& source, const std::vector<SectionPoint>& polygon,
+                  GuideId into, const std::vector<Vec3f>& outline) {
+    if (polygon.size() < 3 || source.points.size() < 2) return kNoGuide;
+    if (into != kNoGuide && !h.guide(into)) return kNoGuide;
+    // The polygon's box in the source's section coordinates, and its points fitted to it.
+    double lo[2] = {1e300, 1e300}, hi[2] = {-1e300, -1e300};
+    std::vector<P2> unit;
+    for (const SectionPoint& q : polygon) {
+        unit.push_back({q.u, q.v});
+        lo[0] = std::min(lo[0], static_cast<double>(q.u)), lo[1] = std::min(lo[1], static_cast<double>(q.v));
+        hi[0] = std::max(hi[0], static_cast<double>(q.u)), hi[1] = std::max(hi[1], static_cast<double>(q.v));
+    }
+    const double cu = 0.5 * (lo[0] + hi[0]), cv = 0.5 * (lo[1] + hi[1]);
+    const double su = 0.5 * (hi[0] - lo[0]), sv = 0.5 * (hi[1] - lo[1]);
+    if (!(su > 1e-6) || !(sv > 1e-6)) return kNoGuide;  // (a sliver)
+    std::vector<SectionPoint> fitted;
+    for (const P2& q : capPoints(unit)) fitted.push_back({static_cast<float>((q.x - cu) / su), static_cast<float>((q.y - cv) / sv)});
+    const std::string name = newShapeName(h);
+    try {
+        h.setTubeShape(name, fitted, false);
+    } catch (const std::invalid_argument&) {
+        return kNoGuide;  // (a shape no library takes)
+    }
+    // Its sections: the source's, scaled to the slice (a hair inside it: neighbours never touch).
+    TubeProfile tube = source.tube;
+    tube.custom = h.tubeShape(name);
+    tube.midShape.reset();
+    tube.tipShape.reset();
+    for (float& x : tube.width) x = static_cast<float>(x * su * kSliceInset);
+    for (float& a : tube.aspect) a = static_cast<float>(clampAspect(a * sv / su));
+    tube.rollOnScalp = false;
+    tube.roll.clear();
+    // Its guide: the path its middle takes inside the source's tube, from the source's footprint on the scalp.
+    const TubeSpine spine = sourceSpine(source, h.scale());
+    const std::size_t n = source.points.size();
+    const float u = static_cast<float>(cu), v = static_cast<float>(cv);
+    std::vector<Vec3f> path;
+    for (std::size_t i = 0; i < n; ++i) {
+        path.push_back(i == 0 ? scalp.closestPoint(spine.footprintAt(u, v)).position
+                              : spine.at(static_cast<float>(i) / static_cast<float>(n - 1), u, v));
+    }
+    GuideId id = into;
+    if (id == kNoGuide) {
+        id = h.addGuide(source.group, path);
+    } else {
+        h.setPoints(id, path);
+    }
+    h.setTube(id, tube);
+    h.evaluate(&scalp);
+    if (into != kNoGuide) return id;  // (a child: its parent lays its footprint and turns its sections)
+    // A guide of its own (a cell of a cut): its footprint laid as the source's, its sections turned as
+    // the source's (acrossTurn, rollOffset), its root's CVs kept.
+    const HierarchyGuide* g = h.guide(id);
+    if (!g || !scalp.contains(g->root)) return id;
+    const Vec3f nrm = scalp.normal(g->root);
+    const Vec3f own = scalp.acrossAt(g->root);
+    Vec3f want = source.across - nrm * source.across.dot(nrm);
+    float turn = 0.0f;
+    if (own.length() > 0.5f && want.length() > 1e-4f) {
+        want = want.normalized();
+        turn = std::atan2(nrm.dot(own.cross(want)), own.dot(want));
+    }
+    h.setRootFrame(id, turn, 0.0f);
+    h.evaluate(&scalp);
+    g = h.guide(id);
+    // Its sections against the source's, past the root (as a slice matches its parent's).
+    const std::vector<Frame> mine = rotationMinimizingFrames(g->points.data(), g->points.size(), g->frameUp);
+    const std::vector<Frame> theirs = rotationMinimizingFrames(source.points.data(), source.points.size(), source.frameUp);
+    const std::size_t j = std::min(g->points.size() - 1, std::max<std::size_t>(2, g->points.size() / 2));
+    const float t = static_cast<float>(j) / static_cast<float>(g->points.size() - 1);
+    const std::size_t pj = std::min(theirs.size() - 1, static_cast<std::size_t>(std::lround(t * static_cast<float>(theirs.size() - 1))));
+    const float pr = source.tube.rollAt(t);
+    const Vec3f along = theirs[pj].normal * std::cos(pr) + theirs[pj].binormal * std::sin(pr);
+    const float matched = std::atan2(along.dot(mine[j].binormal), along.dot(mine[j].normal));
+    const float laid = g->tube.roll.empty() ? 0.0f : g->tube.roll[0];
+    h.setRootFrame(id, turn, matched - laid);
+    if (outline.size() >= 3) h.setRootOutline(id, bindOutline(scalp, toV(outline)));
+    h.evaluate(&scalp);
+    return id;
 }
 
 }  // namespace groomlab
