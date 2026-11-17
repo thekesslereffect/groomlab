@@ -269,8 +269,8 @@ std::vector<const HierarchyGuide*> activeTubeGuides(const GuideHierarchy& hierar
                                                     const std::string& freeze = "freeze");
 // A guide's tube as a shaded surface: its shape's outline at rings along it, each section turned,
 // flattened and sized as the tube says (tube.h; widths times scale, the size shown), open at the tip
-// (no cap): kAlong + 1 = 25 rings of the same count, root to tip.
-// Returns its ring count (root to tip; 0: none drawn).
+// (no cap): rings of the same count, root to tip (a plain round tube: 25; a shaped one: one on each
+// guide point and the same number between each two). Returns its ring count (0: none drawn).
 std::size_t appendTubeSurface(DisplayGeometry& geometry, const HierarchyGuide& guide, float scale = 1.0f);
 // The same tube as a wire (what the hosts draw while the Shape brush is on): its shape's outline at
 // every guide point, where the sections the brush paints sit (every `ringStep`-th point's, the
