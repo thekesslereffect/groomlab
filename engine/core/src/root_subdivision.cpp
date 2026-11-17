@@ -715,7 +715,7 @@ bool recut(GuideHierarchy& h, const ScalpMesh& scalp, std::size_t index, const R
     for (std::size_t k = 0; k < r.samples.size(); ++k) {
         const Vec3f at = scalp.position(r.samples[k]);
         now[k] = subdivisionDensityAt(scalp, at, r.map);
-        if (remultiplied || std::abs(now[k] - r.density[k]) > kDensityChanged) {
+        if (remultiplied || o.force || std::abs(now[k] - r.density[k]) > kDensityChanged) {
             const double before = (r.sizeAtZero + (r.sizeAtOne - r.sizeAtZero) * r.density[k]) * std::max(1.0, rescale);
             const double after = s0 + (s1 - s0) * now[k];
             changed.push_back({cut.plane.to(at), std::max(before, after)});
@@ -741,7 +741,25 @@ bool recut(GuideHierarchy& h, const ScalpMesh& scalp, std::size_t index, const R
         kept.push_back(p);
         keptCells.push_back(live ? r.cells[i] : kNoGuide);
     }
-    const std::vector<P> sites = throwSites(cut.outline, size, hashCombine(r.seed, h.contentHash()), o.relax, kept, inChange);
+    // A cell cut again since (its site's cell gone: a cut of its own now, its map its own) keeps its
+    // place: no new site lands where it could take any of it (within twice its reach of its site).
+    std::vector<std::pair<P, double>> frozen;
+    {
+        std::vector<P> had;
+        for (const StrandRoot& site : r.sites) had.push_back(cut.plane.to(scalp.position(site)));
+        const std::vector<std::vector<P>> was = voronoiCells(cut.outline, had);
+        for (std::size_t i = 0; i < had.size(); ++i) {
+            if (r.cells[i] != kNoGuide && h.guide(r.cells[i])) continue;
+            double reach = 0.0;
+            for (const P& q : was[i]) reach = std::max(reach, dist(q, had[i]));
+            if (reach > 0.0) frozen.push_back({had[i], 2.0 * reach});
+        }
+    }
+    auto allowed = [&](const P& p) {
+        if (!inChange(p)) return false;
+        return std::none_of(frozen.begin(), frozen.end(), [&](const auto& f) { return dist(p, f.first) < f.second; });
+    };
+    const std::vector<P> sites = throwSites(cut.outline, size, hashCombine(r.seed, h.contentHash()), o.relax, kept, allowed);
     const std::vector<std::vector<Vec3f>> cells = liftCells(scalp, cut, voronoiCells(cut.outline, sites, kMergeCorners * std::min(s0, s1)));
 
     // How deep the cells replaced were split (the new cells are split as deep, afresh), and the tube

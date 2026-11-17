@@ -56,6 +56,9 @@ struct RootSubdivisionOptions {
     // smaller by sqrt 2), 0.5 half. A subdivision remembers it; applySubdivisionDensity with another
     // cuts its whole root again at that (0 or less: each keeps its own).
     float multiplier = 1.0f;
+    // applySubdivisionDensity: cut the map's roots again all over, whether or not the density or
+    // the multiplier changed (the card's Apply).
+    bool force = false;
     int relax = 2;                       // passes evening the cells out (Lloyd), each half a step
 };
 

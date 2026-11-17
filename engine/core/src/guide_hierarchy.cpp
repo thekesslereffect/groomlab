@@ -902,9 +902,16 @@ void GuideHierarchy::evaluateGuide(HierarchyGuide& g, const ScalpMesh* scalp, co
         const HierarchyGuide* parent = g.isChild() ? guide(g.parent) : nullptr;
         if (parent && isRootTube(parent->tube, 0) && parent->points.size() >= 2) {
             g.tube.roll = rollToMatch(g.points, g.frameUp, parent->points, parent->frameUp, parent->tube);
-        } else if (g.rollOffsets.size() == g.points.size()) {
-            g.tube.roll.clear();
-            for (const float r : g.rollOffsets) g.tube.roll.push_back(roll + r);
+        } else if (g.rollOffsets.size() >= 2) {
+            // (Per point; resampled along it when the guide was resampled since.)
+            const std::size_t n = g.points.size(), m = g.rollOffsets.size();
+            g.tube.roll.assign(n, roll);
+            for (std::size_t i = 0; i < n; ++i) {
+                const float x = n > 1 ? static_cast<float>(i) / static_cast<float>(n - 1) * static_cast<float>(m - 1) : 0.0f;
+                const std::size_t k = std::min(static_cast<std::size_t>(x), m - 2);
+                const float f = x - static_cast<float>(k);
+                g.tube.roll[i] += g.rollOffsets[k] * (1.0f - f) + g.rollOffsets[k + 1] * f;
+            }
         } else {
             g.tube.roll = {roll};
         }

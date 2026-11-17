@@ -605,5 +605,64 @@ TEST(RootSubdivision, EditingACellsRootLeavesItsGuideWithThePack) {
     EXPECT_GT(((before[1] - before[0]).normalized()).dot((after[1] - after[0]).normalized()), std::cos(8.0f * kPi / 180.0f));
 }
 
+TEST(RootSubdivision, ApplyCutsAgainAllOverEvenWithNothingChanged) {
+    GuideHierarchy h;
+    const auto scalp = head();
+    RootSubdivisionOptions o;
+    o.map = subdivisionDensityMapName(1);
+    const auto first = subdivideRootTubes(h, *scalp, {bigRoot(h, *scalp)}, o).cells;
+    EXPECT_TRUE(applySubdivisionDensity(h, *scalp, {}, o).cells.empty());  // (nothing changed: nothing)
+    o.force = true;
+    const auto again = applySubdivisionDensity(h, *scalp, {}, o);
+    EXPECT_EQ(again.removed, first.size());
+    // (Thrown again, the same density and multiplier: about as many cells.)
+    EXPECT_NEAR(static_cast<double>(again.cells.size()), static_cast<double>(first.size()), 0.35 * first.size());
+}
+
+TEST(RootSubdivision, ACellCutAgainLeavesItsFirstCut) {
+    // A cell of cut 01 cut again (its own cut, map 02): painting 01 again never touches it, its
+    // cells or its place (no new cell of 01 reaches into it).
+    const ScalpMesh before = painted([](const Vec3f&) { return 0.3f; });
+    GuideHierarchy h;
+    RootSubdivisionOptions one;
+    one.map = "tubeSubdivisionDensity";  // (the painted sphere's map)
+    const auto cells = subdivideRootTubes(h, before, {bigRoot(h, before)}, one).cells;
+    ASSERT_GE(cells.size(), 4u);
+    // The middle-most cell cut again with a map of its own.
+    GuideId inner = cells[0];
+    for (const GuideId c : cells) {
+        if (h.guide(c)->points.front().y > h.guide(inner)->points.front().y) inner = c;
+    }
+    const std::vector<Vec3f> place = rootTubeOutline(h, before, inner);
+    RootSubdivisionOptions two;
+    two.map = subdivisionDensityMapName(2);
+    two.multiplier = 2.0f;
+    const auto sub = subdivideRootTubes(h, before, {inner}, two).cells;
+    ASSERT_GE(sub.size(), 2u);
+    std::map<GuideId, std::vector<Vec3f>> had;
+    for (const GuideId c : sub) had[c] = h.guide(c)->points;
+    EXPECT_EQ(subdivisionDensityMapFor(h, {sub[0]}, {}), subdivisionDensityMapName(2));
+    // Cut 01 painted denser everywhere and applied: its new cells stay out of the cell cut again.
+    const ScalpMesh after = painted([](const Vec3f&) { return 1.0f; });
+    const auto again = applySubdivisionDensity(h, after, {}, one);
+    EXPECT_FALSE(again.cells.empty());
+    for (const auto& [c, pts] : had) {
+        ASSERT_NE(h.guide(c), nullptr) << "a cell of the second cut went";
+        for (std::size_t i = 0; i < pts.size(); ++i) EXPECT_LT((h.guide(c)->points[i] - pts[i]).length(), 1e-5f);
+    }
+    // (In the plane of its place: none of cut 01's new roots' CVs inside it.)
+    const Vec3f mid = outlineCentroid(place).normalized();
+    const Vec3f a = mid.cross({0, 0, 1}).normalized(), b = mid.cross(a);
+    std::vector<SectionPoint> poly;
+    for (const Vec3f& q : place) poly.push_back({q.dot(a), q.dot(b)});
+    float size = 0.0f;
+    for (const SectionPoint& q : poly) size = std::max(size, std::hypot(q.u - poly[0].u, q.v - poly[0].v));
+    for (const GuideId c : again.cells) {
+        for (const Vec3f& q : rootTubeOutline(h, after, c)) {
+            EXPECT_FALSE(deepInside(poly, {q.dot(a), q.dot(b)}, 0.02f * size)) << "a new root of cut 01 inside the cell cut again";
+        }
+    }
+}
+
 }  // namespace
 }  // namespace groomlab

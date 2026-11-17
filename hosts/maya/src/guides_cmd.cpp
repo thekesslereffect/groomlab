@@ -994,6 +994,7 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                         o.sizeAtOne = request.value("sizeAtOne", o.sizeAtOne);
                         o.map = request.value("map", o.map);
                         o.multiplier = request.value("multiplier", o.multiplier);
+                        o.force = request.value("force", false);
                         const MeshPtr mapped = groomScalpWithMaps(groomFn);
                         const ScalpMesh& on = mapped ? *mapped : *scalp;
                         const SubdivisionResult done = op == "subdivide" ? subdivideRootTubes(*h, on, ids("guides"), o)

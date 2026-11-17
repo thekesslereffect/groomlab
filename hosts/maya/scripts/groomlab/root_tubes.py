@@ -422,9 +422,15 @@ def density_map_for(groom, guides):
     """The density map to paint for cutting `guides` (root tubes, or tubes of their hierarchies):
     the map of the subdivision the first is a cell of, else a new one (tubeSubdivisionDensity01,
     02, ...: the first no subdivision or map of the groom takes)."""
+    return density_map_info(groom, guides)["map"]
+
+
+def density_map_info(groom, guides):
+    """density_map_for's map and whether it is new ({"map", "fresh"}: fresh when none of `guides`
+    is a cell of a cut, so cutting them starts a cut of their own)."""
     from groomlab import painting
     answer = _request(groom, "densityMap", guides=[int(g) for g in guides], taken=list(painting.list_maps(groom)))
-    return answer["map"]
+    return {"map": answer["map"], "fresh": bool(answer.get("fresh"))}
 
 
 def ensure_density_map(groom, name):
@@ -451,10 +457,12 @@ def subdivide(groom, guides, map=None, multiplier=1.0):
     return _cut(_request(groom, "subdivide", guides=[int(g) for g in guides], map=name, multiplier=float(multiplier)))
 
 
-def apply_density(groom, guides=None, map=None, multiplier=1.0):
+def apply_density(groom, guides=None, map=None, multiplier=1.0, force=False):
     """Painting the density map `map` finished: the subdivisions cut with it cut again where it
-    changed (all of a root again when `multiplier` changed), and `guides` (root tubes not cut yet)
-    cut with it. Without `map`: every subdivision by its own map, each keeping its multiplier. One
-    undo step. Returns {"cells": the root tubes made, "removed", "kept": cells left as they were}."""
-    args = {"guides": [int(g) for g in (guides or [])], "map": map or "", "multiplier": float(multiplier) if map else 0.0}
+    changed (all of a root again when `multiplier` changed, or with `force`: the card's Apply), and
+    `guides` (root tubes not cut yet) cut with it. Without `map`: every subdivision by its own map,
+    each keeping its multiplier. One undo step. Returns {"cells": the root tubes made, "removed",
+    "kept": cells left as they were}."""
+    args = {"guides": [int(g) for g in (guides or [])], "map": map or "", "multiplier": float(multiplier) if map else 0.0,
+            "force": bool(force)}
     return _cut(_request(groom, "applyDensity", **args))

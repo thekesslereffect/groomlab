@@ -1186,9 +1186,9 @@ void appendTubeWire(std::vector<Vec3f>& out, const HierarchyGuide& g, float scal
     }
 }
 
-void appendTubeSurface(DisplayGeometry& batch, const HierarchyGuide& g, float scale) {
+std::size_t appendTubeSurface(DisplayGeometry& batch, const HierarchyGuide& g, float scale) {
     const std::size_t n = g.points.size();
-    if (n < 2) return;
+    if (n < 2) return 0;
     constexpr int kAlong = 24;
     const auto base = static_cast<std::uint32_t>(batch.positions.size() / 3);
     // (Several profiles: the root's perimeter, evenly round, the profiles matched along it: tube.h.)
@@ -1231,23 +1231,14 @@ void appendTubeSurface(DisplayGeometry& batch, const HierarchyGuide& g, float sc
         return blends.empty() ? p : tubeBlendAt(blends[k], p.u, p.v, t);
     };
     // The rings: one on each of the guide's points (where its sections, and the wire's rings, are)
-    // with the rest spread between them, so the surface bends where the wire does; evenly along it
-    // when the guide has more points than rings.
-    std::vector<float> ringAt(kAlong + 1);
+    // and the same number between each two, so the surface bends where the wire does and its rings
+    // lie evenly all along; evenly along it when the guide has more points than kAlong.
     const std::size_t spans = n - 1;
-    if (spans <= static_cast<std::size_t>(kAlong)) {
-        std::size_t j = 0;
-        for (std::size_t i = 0; i < spans; ++i) {
-            const std::size_t steps = kAlong / spans + (i < kAlong % spans ? 1 : 0);
-            for (std::size_t k = 0; k < steps; ++k) {
-                ringAt[j++] = (static_cast<float>(i) + static_cast<float>(k) / static_cast<float>(steps)) / static_cast<float>(spans);
-            }
-        }
-        ringAt[kAlong] = 1.0f;
-    } else {
-        for (int j = 0; j <= kAlong; ++j) ringAt[static_cast<std::size_t>(j)] = static_cast<float>(j) / kAlong;
-    }
-    for (int j = 0; j <= kAlong && !round; ++j) {
+    const std::size_t per = spans <= static_cast<std::size_t>(kAlong) ? std::max<std::size_t>(1, kAlong / spans) : 0;
+    const int along = round ? kAlong : (per ? static_cast<int>(spans * per) : kAlong);
+    std::vector<float> ringAt(static_cast<std::size_t>(along) + 1);
+    for (int j = 0; j <= along; ++j) ringAt[static_cast<std::size_t>(j)] = static_cast<float>(j) / static_cast<float>(along);
+    for (int j = 0; j <= along && !round; ++j) {
         const float t = ringAt[static_cast<std::size_t>(j)];
         const TubeBlendPoint plain;
         const Vec3f center = spine.at(t, 0.0f, 0.0f, plain);
@@ -1270,7 +1261,7 @@ void appendTubeSurface(DisplayGeometry& batch, const HierarchyGuide& g, float sc
             batch.normals.insert(batch.normals.end(), {out.x, out.y, out.z});
         }
     }
-    for (int j = 0; j < kAlong; ++j) {
+    for (int j = 0; j < along; ++j) {
         for (int s = 0; s < kAround; ++s) {
             const std::uint32_t a = base + static_cast<std::uint32_t>(j * kAround + s);
             const std::uint32_t b = base + static_cast<std::uint32_t>(j * kAround + (s + 1) % kAround);
@@ -1279,6 +1270,7 @@ void appendTubeSurface(DisplayGeometry& batch, const HierarchyGuide& g, float sc
         }
     }
     // (Open at the tip: no cap.)
+    return static_cast<std::size_t>(along) + 1;
 }
 
 namespace {
@@ -1286,7 +1278,7 @@ namespace {
 // appendTubeSurface's vertices from `first` on (one guide's tube: rings of the same count, root
 // to tip) in `color`, with what the lit, colored surface needs (DisplayGeometry::scaleSurface):
 // the shading normal again as the bitangent, the tangent along the tube, uvs x root (0) to tip (1).
-void colorTubeSurface(DisplayGeometry& batch, std::size_t first, const std::array<float, 4>& color) {
+void colorTubeSurface(DisplayGeometry& batch, std::size_t first, const std::array<float, 4>& color, std::size_t kRings) {
     const std::size_t end = batch.positions.size() / 3;
     batch.scaleSurface = true;
     batch.uvFloats = 2;
@@ -1294,7 +1286,7 @@ void colorTubeSurface(DisplayGeometry& batch, std::size_t first, const std::arra
     batch.tangents.resize(first * 3, 0.0f);
     batch.bitangents.resize(first * 3, 0.0f);
     batch.uvs.resize(first * 2, 0.0f);
-    constexpr std::size_t kRings = 25;  // (appendTubeSurface: kAlong + 1 rings)
+    if (kRings < 2) kRings = 2;  // (appendTubeSurface's ring count)
     const std::size_t count = end - first;
     const std::size_t around = count % kRings == 0 ? count / kRings : 0;
     auto at = [&](std::size_t v) {
@@ -1397,12 +1389,12 @@ TubeDisplay buildTubeDisplay(const GuideHierarchy& hierarchy, const TubeDisplayO
         constexpr float kInset = 0.997f;  // (the wires on the outline itself stay seen, a hair outside the surface)
         for (const HierarchyGuide* g : guides) {
             const std::size_t before = out.surfaces.positions.size() / 3;
-            appendTubeSurface(out.surfaces, *g, hierarchy.scale() * kInset);
+            const std::size_t rings = appendTubeSurface(out.surfaces, *g, hierarchy.scale() * kInset);
             if (!options.colors && !anyDim) continue;
             std::array<float, 4> c{0.5f, 0.56f, 0.62f, 1.0f};
             if (options.colors && !colorOf(*g, c)) c = {0.5f, 0.56f, 0.62f, 1.0f};
             if (!live.count(g)) c = {c[0] * kDim, c[1] * kDim, c[2] * kDim, 1.0f};
-            colorTubeSurface(out.surfaces, before, c);
+            colorTubeSurface(out.surfaces, before, c, rings);
         }
     }
     return out;
