@@ -698,10 +698,118 @@ void cutRoot(GuideHierarchy& h, const ScalpMesh& scalp, GuideId guide, const Roo
     result.cells.insert(result.cells.end(), made.begin(), made.end());
 }
 
+// A subdivision's outline as its cells lie now: the outer edges of its living cells (each edge
+// only one of them holds, chained into loops; the longest loop), so editing a cell's outer CVs
+// (Edit roots) edits the root the cut fills. A cell cut again since leaves its place out of it
+// (that region is its own cut's). Empty when the cells do not close round (then the outline kept).
+std::vector<Vec3f> outerBoundaryOf(const GuideHierarchy& h, const ScalpMesh& scalp, const RootSubdivisionRecord& r) {
+    std::vector<std::vector<Vec3f>> outlines;
+    for (const GuideId c : r.cells) {
+        if (c == kNoGuide || !h.guide(c)) continue;
+        try {
+            outlines.push_back(rootTubeOutline(h, scalp, c));
+        } catch (const std::exception&) {
+        }
+    }
+    if (outlines.empty()) return {};
+    // Points made one within a thousandth of the root's size (sealed CVs lie a hair apart).
+    float size = 0.0f;
+    for (const auto& o : outlines) {
+        for (const Vec3f& q : o) size = std::max(size, (q - outlines[0][0]).length());
+    }
+    const float tol = std::max(size * 1e-3f, 1e-7f);
+    std::vector<Vec3f> at;
+    auto id = [&](const Vec3f& p) {
+        for (std::size_t i = 0; i < at.size(); ++i) {
+            if ((at[i] - p).length() <= tol) return i;
+        }
+        at.push_back(p);
+        return at.size() - 1;
+    };
+    std::map<std::pair<std::size_t, std::size_t>, int> uses;
+    std::vector<std::pair<std::size_t, std::size_t>> edges;
+    for (const auto& o : outlines) {
+        for (std::size_t i = 0; i < o.size(); ++i) {
+            const std::size_t a = id(o[i]), b = id(o[(i + 1) % o.size()]);
+            if (a == b) continue;
+            edges.push_back({a, b});
+            ++uses[{std::min(a, b), std::max(a, b)}];
+        }
+    }
+    std::map<std::size_t, std::vector<std::size_t>> next;
+    for (const auto& [a, b] : edges) {
+        if (uses[{std::min(a, b), std::max(a, b)}] == 1) next[a].push_back(b);
+    }
+    // The loops, longest kept.
+    std::vector<std::size_t> best;
+    float bestLength = 0.0f;
+    std::set<std::pair<std::size_t, std::size_t>> walked;
+    for (const auto& [start, ends] : next) {
+        for (const std::size_t first : ends) {
+            if (walked.count({start, first})) continue;
+            std::vector<std::size_t> loop{start};
+            std::size_t from = start, to = first;
+            float length = 0.0f;
+            bool closed = false;
+            for (std::size_t steps = 0; steps <= at.size() + 1; ++steps) {
+                walked.insert({from, to});
+                length += (at[to] - at[from]).length();
+                if (to == start) {
+                    closed = true;
+                    break;
+                }
+                loop.push_back(to);
+                const auto it = next.find(to);
+                if (it == next.end()) break;
+                std::size_t pick = it->second.front();
+                for (const std::size_t n : it->second) {
+                    if (!walked.count({to, n})) {
+                        pick = n;
+                        break;
+                    }
+                }
+                from = to, to = pick;
+            }
+            if (closed && loop.size() >= 3 && length > bestLength) best = loop, bestLength = length;
+        }
+    }
+    std::vector<Vec3f> out;
+    for (const std::size_t i : best) out.push_back(at[i]);
+    return out;
+}
+
 // A remembered subdivision cut again where its density changed. False when nothing changed.
 bool recut(GuideHierarchy& h, const ScalpMesh& scalp, std::size_t index, const RootSubdivisionOptions& o, SubdivisionResult& result) {
     RootSubdivisionRecord r = h.rootSubdivisions()[index];
     if (!onScalp(scalp, r.outline) || !onScalp(scalp, r.sites) || !onScalp(scalp, r.samples) || r.outline.size() < 3) return false;
+    // The outline as the cells' outer edges lie now, where they were edited (Edit roots); else the
+    // outline kept (the same edges, CV for CV: the cut as it was).
+    const std::vector<Vec3f> edged = outerBoundaryOf(h, scalp, r);
+    if (edged.size() >= 3) {
+        // (Compared flat, in the plane the root is cut in: points lifted onto the scalp off the
+        // outline's edges come back onto them there.)
+        const Cut was = cutOf(scalp, positions(scalp, r.outline));
+        std::vector<P> kept2, edged2;
+        for (const Vec3f& q : was.outline3) kept2.push_back(was.plane.to(q));
+        for (const Vec3f& q : edged) edged2.push_back(was.plane.to(q));
+        // How far the points of each lie off the other's edges.
+        auto off = [](const std::vector<P>& pts, const std::vector<P>& loop) {
+            double worst = 0.0;
+            for (const P& p : pts) {
+                double best = std::numeric_limits<double>::infinity();
+                for (std::size_t i = 0; i < loop.size(); ++i) {
+                    const P& a = loop[i];
+                    const P ab = loop[(i + 1) % loop.size()] - a;
+                    const double span = dot(ab, ab);
+                    const double f = span > 0.0 ? std::clamp(dot(p - a, ab) / span, 0.0, 1.0) : 0.0;
+                    best = std::min(best, dist(p, a + ab * f));
+                }
+                worst = std::max(worst, best);
+            }
+            return worst;
+        };
+        if (std::max(off(edged2, kept2), off(kept2, edged2)) > 1e-3 * was.rootSize) r.outline = bind(scalp, edged);
+    }
     const Cut cut = cutOf(scalp, positions(scalp, r.outline));
     // The density now at each sample, and where it changed.
     std::vector<float> now(r.samples.size());
@@ -822,6 +930,9 @@ bool recut(GuideHierarchy& h, const ScalpMesh& scalp, std::size_t index, const R
                         if (const HierarchyGuide* kid = h.guide(k)) sources[level].push_back(sourceOf(scalp, *kid));
                     }
                 }
+            } else if (c != kNoGuide && h.guide(c)) {
+                replaced.push_back(c);  // (its middle outside the outline now: an outer edge edited in)
+                continue;
             } else {
                 next.sites.push_back(siteAt.root);
                 next.cells.push_back(c);

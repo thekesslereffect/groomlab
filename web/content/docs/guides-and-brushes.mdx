@@ -361,15 +361,15 @@ density map of its own, `tubeSubdivisionDensity01`, `02`, and so on, made at 0.5
 map list.
 
 **Paint subdivision density** opens the Paint tab on the map picked beside it (the last one you
-used is picked); with a root selected that no cut holds yet, on a new map of its own, the root cut
-by it when you finish. White (1) gives more, smaller roots that fit tightly, for example at the bangs.
-Black (0) gives fewer, larger ones. Ctrl paints toward black. When you are done, click **Finish
-painting**, or just leave the Paint brush (Q in Maya, another tool): either way you are back on the
-Tools tab with the Tube tool, the map's roots are cut again where you changed it (their cells
-elsewhere keep their guides and hierarchies), and **Edit roots** opens on the result. The
-**Multiplier** makes a cut denser overall with its painted density: 1 as painted, 2 about twice
-the roots; **Apply** cuts the picked map's roots again all over, at the multiplier and the map as
-they are. A cell can be cut again (**Subdivide** on it): its cells then belong to the new cut and
+used is picked); with a root selected that no cut holds yet, on a new map of its own. White (1)
+gives more, smaller roots that fit tightly, for example at the bangs. Black (0) gives fewer, larger
+ones. Ctrl paints toward black. **Finish painting**, or leaving the Paint brush any other way (Q in
+Maya, another tool), takes you back to the Tools tab and the Tube tool; nothing is cut until you
+press **Apply**. The **Multiplier** makes a cut denser overall with its painted density: 1 as
+painted, 2 about twice the roots. **Apply** cuts the picked map's roots again all over, at the
+multiplier and the map as they are (a map painted for a new root: that root). Edits to the cut
+roots' outer edges (**Edit roots**) are kept: Apply fills the outline the cells' outer edges make
+now. A cell can be cut again (**Subdivide** on it): its cells then belong to the new cut and
 its map, and painting the first cut's map no longer touches them or their place. The groom
 remembers each cut (saved with its guides), so you can come back and paint again later.
 

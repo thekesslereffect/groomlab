@@ -712,5 +712,51 @@ TEST(RootSubdivision, ACutWhoseRootsAreAllGoneIsForgotten) {
     EXPECT_EQ(h.rootSubdivisions()[0].map, subdivisionDensityMapName(2));
 }
 
+TEST(RootSubdivision, ApplyKeepsTheOuterEdgesAsEdited) {
+    // A cut root's outer CV dragged out (Edit roots on the cell holding it): Apply fills the outline
+    // as the cells' outer edges are now, the CV where it was dragged.
+    GuideHierarchy h;
+    const auto scalp = head();
+    RootSubdivisionOptions o;
+    o.map = subdivisionDensityMapName(1);
+    const auto cells = subdivideRootTubes(h, *scalp, {bigRoot(h, *scalp)}, o).cells;
+    // One of the old outline's CVs held by a single cell.
+    std::vector<Vec3f> outline;
+    for (const StrandRoot& r : h.rootSubdivisions()[0].outline) outline.push_back(scalp->position(r));
+    GuideId owner = kNoGuide;
+    std::size_t at = 0;
+    Vec3f cv;
+    for (const Vec3f& q : outline) {
+        std::vector<std::pair<GuideId, std::size_t>> holders;
+        for (const GuideId c : cells) {
+            const std::vector<Vec3f> cvs = rootTubeOutline(h, *scalp, c);
+            for (std::size_t k = 0; k < cvs.size(); ++k) {
+                if ((cvs[k] - q).length() < 1e-4f) holders.push_back({c, k});
+            }
+        }
+        if (holders.size() == 1) {
+            owner = holders[0].first, at = holders[0].second, cv = q;
+            break;
+        }
+    }
+    ASSERT_NE(owner, kNoGuide);
+    std::vector<Vec3f> edited = rootTubeOutline(h, *scalp, owner);
+    const Vec3f out = (cv - Vec3f{0, 1, 0} * cv.dot({0, 1, 0})).normalized();  // (away from the root's middle)
+    const Vec3f moved = (cv + out * 0.06f).normalized();
+    edited[at] = moved;
+    editRootTube(h, *scalp, owner, edited);
+    o.force = true;
+    const auto again = applySubdivisionDensity(h, *scalp, {}, o);
+    ASSERT_FALSE(again.cells.empty());
+    float nearest = 1e9f;
+    for (const GuideId c : again.cells) {
+        for (const Vec3f& q : rootTubeOutline(h, *scalp, c)) nearest = std::min(nearest, (q - moved).length());
+    }
+    EXPECT_LT(nearest, 1e-3f) << "the dragged CV is not on the new cut's outline";
+    float stayed = 1e9f;
+    for (const StrandRoot& r : h.rootSubdivisions()[0].outline) stayed = std::min(stayed, (scalp->position(r) - moved).length());
+    EXPECT_LT(stayed, 1e-3f) << "the cut's outline did not take the edit";
+}
+
 }  // namespace
 }  // namespace groomlab
