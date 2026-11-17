@@ -130,5 +130,22 @@ struct Primvar {
 // channel of the same name.
 std::vector<Primvar> curvePrimvars(const ExportView& view, const HairLook& look);
 
+// One look for the whole groom: each rman_* primvar's mean over its values (curvePrimvars of the
+// same view and look), for a renderer path with no per-strand primvars (RenderMan XPU through an
+// XGen Interactive Groom, whose curves carry only P, width and N). Missing: the defaults below.
+struct ConstantLook {
+    float melanin = 0.0f;
+    float redness = 0.0f;
+    std::array<float, 3> dye{1.0f, 1.0f, 1.0f};
+    std::array<float, 3> color{0.0f, 0.0f, 0.0f};
+    float rgbShare = 0.0f;
+    float specularGainR = 1.75f;
+    float coneAngleR = 8.0f;
+    float coneAngleTT = 4.0f;
+    float coneAngleTRT = 16.0f;
+    float specularOffset = -3.0f;
+};
+ConstantLook constantLook(const std::vector<Primvar>& primvars);
+
 }  // namespace renderman
 }  // namespace groomlab

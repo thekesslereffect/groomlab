@@ -361,8 +361,8 @@ def export_free(groom, path):
 # RenderMan's XPU renders no procedural of any kind (prman: "Geometry ... is of unsupported type:
 # Ri:Procedural"; RfM's own RenderManArchive is one too), so it leaves grooms out. RfM renders XGen
 # Interactive Groom there through a translator of its own that writes plain curves.
-XPU_NOTE = ("RenderMan XPU renders no procedurals, so it leaves GroomLab's grooms out: render them with RIS "
-            "(Render Settings > Features > Renderer)")
+XPU_NOTE = ("RenderMan XPU renders no procedurals, and GroomLab renders its grooms there through XGen, which "
+            "is not loaded: load xgenToolkit, or render with RIS (Render Settings > Features > Renderer)")
 _xpu_warned = [None]  # the scene the warning was given for
 
 
@@ -388,6 +388,222 @@ def warn_if_xpu(force=False):
     return True
 
 
+# ---------------------------------------------------------------------------
+# RenderMan XPU through XGen (issue #82): XPU renders no procedural, but RfM renders an XGen
+# Interactive Groom there through its own translator. Each groom gets one (<groom>_xpu), fed by
+# a spline cache GroomLab writes (groomLabExportAlembic -xgen), hidden in the viewport, rendered
+# only while rmanGlobals.renderVariant picks XPU (RIS renders the procedural). XGen's curves
+# carry no primvars, so the groom renders with one look: its own RenderMan material when it has
+# one (assigned in the Hypershade), else a PxrHairColor + PxrMarschnerHair network set to the
+# groom's look (create_hair_network with constants), which the artist changes in the Hypershade.
+
+XGEN_PLUGIN = "xgenToolkit"
+XPU_ATTR = "groomLabXpuGroom"  # message on the XGen description: the groom it renders in XPU
+XPU_REVISION_ATTR = "groomLabXpuRevision"  # int: the cache file's number (a new file each update)
+
+
+def _xgen_descriptions():
+    """Every XGen Interactive Groom description, [] while XGen is not loaded (asking for its type
+    then makes Maya warn "Unknown object type")."""
+    try:
+        if not cmds.pluginInfo(XGEN_PLUGIN, query=True, loaded=True):
+            return []
+    except RuntimeError:
+        return []
+    return cmds.ls(type="xgmSplineDescription", long=True) or []
+
+
+def xgen_available():
+    """Whether XGen's plugin is (or can be) loaded."""
+    try:
+        if not cmds.pluginInfo(XGEN_PLUGIN, query=True, loaded=True):
+            cmds.loadPlugin(XGEN_PLUGIN, quiet=True)
+        return bool(cmds.pluginInfo(XGEN_PLUGIN, query=True, loaded=True))
+    except RuntimeError:
+        return False
+
+
+def xpu_grooms_of(groom):
+    """The XGen descriptions rendering `groom` in XPU (its message into their groomLabXpuGroom)."""
+    plugs = cmds.listConnections(groom + ".message", source=False, destination=True, plugs=True) or []
+    nodes = [p.split(".")[0] for p in plugs if p.endswith("." + XPU_ATTR)]
+    return (cmds.ls(nodes, long=True, type="xgmSplineDescription") or []) if nodes else []
+
+
+def _xpu_cache_path(groom, revision):
+    """<scene's renders folder>/renderman/<groom>.xpu.<revision>.abc."""
+    from groomlab.paths import asset_folder, asset_name
+    folder = asset_folder("renders") + "/renderman"
+    if not os.path.isdir(folder):
+        os.makedirs(folder)
+    return "%s/%s.xpu.%d.abc" % (folder, asset_name(groom), revision)
+
+
+def _write_xpu_cache(groom, revision):
+    """The groom's render strands at the current frame as XGen's spline cache: (path, its look)."""
+    import json
+    path = _xpu_cache_path(groom, revision)
+    result = json.loads(cmds.groomLabExportAlembic(groom, file=path, xgen=True, renderOverrides=True))
+    return path, result.get("look") or {}
+
+
+def _base_name(groom):
+    return cmds.listRelatives(groom, parent=True)[0].split("|")[-1].split(":")[-1]
+
+
+def xpu_shading_group(groom, look=None):
+    """The material the groom renders with in XPU: its own RenderMan shading group (assigned in
+    the Hypershade, the procedural's too), else <groom>_xpu_SG, made from `look` (the -xgen
+    export's) when it is not there yet."""
+    sg = groom_shading_group(groom)
+    if sg:
+        return sg
+    name = _base_name(groom) + "_xpu"
+    if cmds.objExists(name + "_SG") and cmds.nodeType(name + "_SG") == "shadingEngine":
+        return name + "_SG"
+    return create_hair_network(name, constants=look or {})
+
+
+def _remove_files(paths):
+    for path in paths:
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+        except OSError:
+            pass  # still open (XGen, an interactive render): the next update removes it
+
+
+def add_xpu_groom(groom):
+    """The groom's XGen Interactive Groom for RenderMan XPU (<groom>_xpu): made from a fresh spline
+    cache, or, when it exists, its cache written again (update_xpu_groom). Returns its description,
+    or None when XGen is not available."""
+    from groomlab.base import _shape_of
+    groom = _shape_of(groom, "groomLabShape")
+    existing = xpu_grooms_of(groom)
+    if existing:
+        update_xpu_groom(groom)
+        # A RenderMan material assigned to the groom since (in the Hypershade) is the XPU hair's too.
+        own = groom_shading_group(groom)
+        if own and own not in (cmds.listConnections(existing[0] + ".instObjGroups", source=False, destination=True,
+                                                    type="shadingEngine") or []):
+            cmds.sets(existing[0], edit=True, forceElement=own)
+        return existing[0]
+    if not xgen_available():
+        return None
+    path, look = _write_xpu_cache(groom, 1)
+    before = set(cmds.ls(long=True))
+    import maya.mel
+    maya.mel.eval('xgmSplineCache -import -file "%s"' % path.replace("\\", "/"))
+    made = [n for n in cmds.ls(long=True) if n not in before]
+    descriptions = cmds.ls(made, type="xgmSplineDescription", long=True) or []
+    if not descriptions:
+        raise RuntimeError("XGen made no Interactive Groom of %s" % path)
+    description = descriptions[0]
+    caches = cmds.ls(made, type="xgmSplineCache") or []
+    # XGen's own default material (hairPhysicalShader) goes: the groom's replaces it.
+    for node in cmds.ls(made, type=("hairPhysicalShader", "shadingEngine", "materialInfo")) or []:
+        if cmds.objExists(node):
+            cmds.delete(node)
+    base = _base_name(groom) + "_xpu"
+    transform = cmds.listRelatives(description, parent=True, fullPath=True)[0]
+    transform = cmds.rename(transform, base)
+    description = cmds.ls(cmds.rename(cmds.listRelatives(transform, shapes=True, fullPath=True)[0], base + "Shape"),
+                          long=True)[0]
+    if caches:
+        cmds.rename(caches[0], base + "_cache")
+    cmds.addAttr(description, longName=XPU_ATTR, attributeType="message")
+    cmds.connectAttr(groom + ".message", description + "." + XPU_ATTR, force=True)
+    cmds.addAttr(description, longName=XPU_REVISION_ATTR, attributeType="long", defaultValue=1)
+    # Rendered, never drawn: the groom draws itself (lodVisibility hides it in the viewport only;
+    # visibility, which RfM honors, follows the render variant: xpu_visibility).
+    cmds.setAttr(description + ".lodVisibility", False)
+    for attr in ("visibleInReflections", "visibleInRefractions"):  # strands lighting strands
+        if cmds.attributeQuery(attr, node=description, exists=True):
+            cmds.setAttr(description + "." + attr, True)
+    for attr in ("translate", "rotate", "scale"):  # the cache is in world space
+        cmds.setAttr("%s.%s" % (transform, attr), lock=True)
+    cmds.sets(description, edit=True, forceElement=xpu_shading_group(groom, look))
+    xpu_visibility()
+    return description
+
+
+def _xpu_cache_node(description):
+    caches = cmds.listConnections(description + ".inSplineData", source=True, destination=False,
+                                  type="xgmSplineCache") or []
+    return caches[0] if caches else None
+
+
+def update_xpu_groom(groom):
+    """Write the groom's spline cache again (a new file: Windows keeps one XGen or a render has
+    open from being replaced) and point its XGen Interactive Groom at it. Returns the path, or
+    None without one."""
+    for description in xpu_grooms_of(groom):
+        cache = _xpu_cache_node(description)
+        if not cache:
+            continue
+        revision = cmds.getAttr(description + "." + XPU_REVISION_ATTR) + 1
+        old = (cmds.getAttr(cache + ".fileName") or "").replace("\\", "/")
+        path, _look = _write_xpu_cache(groom, revision)
+        from groomlab.base import no_undo
+        with no_undo():
+            cmds.setAttr(description + "." + XPU_REVISION_ATTR, revision)
+            cmds.setAttr(cache + ".fileName", path, type="string")
+        # Earlier files of this groom (the one just left may still be open: the next update takes it).
+        folder = os.path.dirname(path)
+        stem = os.path.basename(path).split(".xpu.")[0] + ".xpu."
+        _remove_files([folder + "/" + f for f in os.listdir(folder)
+                       if f.startswith(stem) and f.endswith(".abc") and folder + "/" + f not in (path, old)])
+        _remove_files([old] if old and old != path else [])
+        return path
+    return None
+
+
+def xpu_visibility():
+    """Each XGen groom renders in XPU only (its visibility on while rmanGlobals.renderVariant picks
+    XPU and its groom is visible), and each procedural in RIS only: the hair renders once, whichever
+    renderer is picked."""
+    xpu = renderer_is_xpu()
+    from groomlab.base import no_undo
+    with no_undo():
+        for description in _xgen_descriptions():
+            if not cmds.attributeQuery(XPU_ATTR, node=description, exists=True):
+                continue
+            groom = (cmds.listConnections(description + "." + XPU_ATTR, source=True, destination=False, shapes=True)
+                     or [None])[0]
+            shown = bool(xpu and groom and cmds.getAttr(groom + ".visibility") and
+                         cmds.getAttr(cmds.listRelatives(groom, parent=True, fullPath=True)[0] + ".visibility"))
+            if cmds.getAttr(description + ".visibility") != shown:
+                cmds.setAttr(description + ".visibility", shown)
+        for node in cmds.ls(type=NODE_TYPE, long=True) or []:
+            if cmds.attributeQuery(GROOM_ATTR, node=node, exists=True) and cmds.getAttr(node + ".visibility") == xpu:
+                cmds.setAttr(node + ".visibility", not xpu)
+
+
+def sync_xpu():
+    """While RfM renders with XPU: every groom gets its XGen groom (add_xpu_groom, its cache
+    written at the current frame), and one whose groom is gone is deleted; with RIS, the XGen grooms
+    are left hidden. Never raises. Returns the descriptions."""
+    found = []
+    try:
+        for description in _xgen_descriptions():
+            if cmds.attributeQuery(XPU_ATTR, node=description, exists=True) and not cmds.listConnections(
+                    description + "." + XPU_ATTR, source=True, destination=False):
+                cache = _xpu_cache_node(description)
+                cmds.delete([n for n in (cmds.listRelatives(description, parent=True, fullPath=True)[0], cache) if n])
+        if renderer_is_xpu():
+            if not xgen_available():
+                warn_if_xpu()
+            else:
+                for groom in cmds.ls(type="groomLabShape", long=True, noIntermediate=True) or []:
+                    description = add_xpu_groom(groom)
+                    if description:
+                        found.append(description)
+        xpu_visibility()
+    except Exception as e:  # noqa: BLE001 (a callback: whatever went wrong, warn and go on)
+        cmds.warning("GroomLab: RenderMan XPU: %s" % e)
+    return found
+
+
 def pre_shape(node_or_uuid):
     """RfM's pre-shape script for a GroomLab procedural node: the groom written to its .groom at the
     current frame (groom_file_for), and -file, -frame and (with groomLabShutterFromGlobals on) the
@@ -402,7 +618,6 @@ def pre_shape(node_or_uuid):
         if not groom:
             cmds.warning("GroomLab: %s renders no groom (connect a groom's message to its %s)" % (node, GROOM_ATTR))
             return None
-        warn_if_xpu()
         frame = cmds.currentTime(query=True)
         path, export = groom_file_for(groom, frame)
         if export:
@@ -554,8 +769,8 @@ def sync_renderman():
     scene opens or is imported, when RfM loads, and when a groom is made or deleted: while RfM is
     loaded, each groom gets its procedural (add_renderman_procedural) and an existing one is
     repaired (repair_procedural); a procedural whose groom is gone is deleted (it would go on
-    rendering that groom's last file). Without RfM, nothing. Never raises. Returns the procedural
-    shapes."""
+    rendering that groom's last file); with XPU picked, each its XGen groom too (sync_xpu). Without
+    RfM, nothing. Never raises. Returns the procedural shapes."""
     if cmds is None or not rfm_loaded() or not dso_path():
         return []
     found = []
@@ -570,6 +785,7 @@ def sync_renderman():
         watch_grooms()
     except Exception as e:  # noqa: BLE001 (a callback: whatever went wrong, warn and go on)
         cmds.warning("GroomLab: RenderMan: %s" % e)
+    sync_xpu()  # (XPU renders the grooms through XGen: their caches written now)
     return found
 
 
@@ -636,34 +852,58 @@ def _set(node, attr, value):
         cmds.setAttr(plug, value)
 
 
-def create_hair_network(name="groomLabRman", tilt=3.0):
+def create_hair_network(name="groomLabRman", tilt=3.0, constants=None):
     """The procedural's shading network as RfM nodes (groom.rib's): PxrPrimvar readers of the
     rman_* primvars, a PxrHairColor in Physical mode (melanin, redness, dye) and one in Artistic
     mode (the RGB look), three PxrMix by rman_rgbShare into a PxrMarschnerHair's diffuse, TT and TRT
     colors, the R gain and cones from their primvars, presence from opacity, specularOffset minus
     `tilt` (HairColor's cuticle tilt: the param takes no connection). Returns the shading group.
-    Needs RfM loaded (its node types)."""
+
+    With `constants` (groomLabExportAlembic -xgen's "look": melanin, redness, dye, color, rgbShare,
+    specularGainR, coneAngleR, coneAngleTT, coneAngleTRT, specularOffset), the same network with
+    those values set instead of the primvar readers: one look for the whole groom, for curves that
+    carry no primvars (RenderMan XPU through XGen), every value an artist can change in the
+    Hypershade. Needs RfM loaded (its node types)."""
     if not rfm_loaded():
         raise RuntimeError("RenderMan for Maya is not loaded")
     pv = {}
-    for key, varname, kind, default_param, default in PRIMVARS:
-        node = cmds.shadingNode("PxrPrimvar", asUtility=True, name="%s_pv_%s" % (name, key))
-        _set(node, "varname", varname)
-        _set(node, "type", kind)
-        if default_param:
-            _set(node, default_param, default)
-        pv[key] = node
+    if constants is None:
+        for key, varname, kind, default_param, default in PRIMVARS:
+            node = cmds.shadingNode("PxrPrimvar", asUtility=True, name="%s_pv_%s" % (name, key))
+            _set(node, "varname", varname)
+            _set(node, "type", kind)
+            if default_param:
+                _set(node, default_param, default)
+            pv[key] = node
+    # Each primvar's output and the constants' key for it.
+    outputs = {"melanin": ("resultF", "melanin"), "redness": ("resultF", "redness"), "dye": ("resultRGB", "dye"),
+               "color": ("resultRGB", "color"), "share": ("resultF", "rgbShare"),
+               "gainR": ("resultF", "specularGainR"), "coneR": ("resultF", "coneAngleR"),
+               "coneTT": ("resultF", "coneAngleTT"), "coneTRT": ("resultF", "coneAngleTRT"),
+               "opacity": ("resultF", None)}
+
+    def feed(key, plug):
+        output, constant = outputs[key]
+        if constants is None:
+            cmds.connectAttr("%s.%s" % (pv[key], output), plug, force=True)
+        elif constant and constant in constants:
+            value = constants[constant]
+            if isinstance(value, (list, tuple)):
+                cmds.setAttr(plug, *[float(v) for v in value[:3]])
+            else:
+                cmds.setAttr(plug, float(value))
+
     pigment = cmds.shadingNode("PxrHairColor", asUtility=True, name=name + "_pigment")
     _set(pigment, "mode", 0)
-    cmds.connectAttr(pv["melanin"] + ".resultF", pigment + ".melanin", force=True)
-    cmds.connectAttr(pv["redness"] + ".resultF", pigment + ".redness", force=True)
-    cmds.connectAttr(pv["dye"] + ".resultRGB", pigment + ".dye", force=True)
+    feed("melanin", pigment + ".melanin")
+    feed("redness", pigment + ".redness")
+    feed("dye", pigment + ".dye")
     _set(pigment, "randomMelanin", 0.0)
     _set(pigment, "strayDensity", 0.0)
     _set(pigment, "hairIndexPrimvar", "hair_index")
     rgb = cmds.shadingNode("PxrHairColor", asUtility=True, name=name + "_rgb")
     _set(rgb, "mode", 1)
-    cmds.connectAttr(pv["color"] + ".resultRGB", rgb + ".Color", force=True)
+    feed("color", rgb + ".Color")
     _set(rgb, "randomColor", (0.0, 0.0, 0.0))
     _set(rgb, "strayDensity", 0.0)
     hair = cmds.shadingNode("PxrMarschnerHair", asShader=True, name=name + "_hair")
@@ -671,14 +911,15 @@ def create_hair_network(name="groomLabRman", tilt=3.0):
         mix = cmds.shadingNode("PxrMix", asUtility=True, name="%s_mix_%s" % (name, lobe.lower()))
         cmds.connectAttr(pigment + ".result" + lobe, mix + ".color1", force=True)
         cmds.connectAttr(rgb + ".result" + lobe, mix + ".color2", force=True)
-        cmds.connectAttr(pv["share"] + ".resultF", mix + ".mixer", force=True)
+        feed("share", mix + ".mixer")
         cmds.connectAttr(mix + ".resultRGB", hair + "." + target, force=True)
-    cmds.connectAttr(pv["gainR"] + ".resultF", hair + ".specularGainR", force=True)
-    cmds.connectAttr(pv["coneR"] + ".resultF", hair + ".specularConeAngleR", force=True)
-    cmds.connectAttr(pv["coneTT"] + ".resultF", hair + ".specularConeAngleTT", force=True)
-    cmds.connectAttr(pv["coneTRT"] + ".resultF", hair + ".specularConeAngleTRT", force=True)
-    cmds.connectAttr(pv["opacity"] + ".resultF", hair + ".presence", force=True)
-    for attr, value in (("specularGainTT", 2.0), ("specularGainTRT", 1.2), ("specularOffset", -float(tilt)),
+    feed("gainR", hair + ".specularGainR")
+    feed("coneR", hair + ".specularConeAngleR")
+    feed("coneTT", hair + ".specularConeAngleTT")
+    feed("coneTRT", hair + ".specularConeAngleTRT")
+    feed("opacity", hair + ".presence")
+    offset = float(constants["specularOffset"]) if constants and "specularOffset" in constants else -float(tilt)
+    for attr, value in (("specularGainTT", 2.0), ("specularGainTRT", 1.2), ("specularOffset", offset),
                         ("specularIor", 1.55)):
         _set(hair, attr, value)
     sg = cmds.sets(renderable=True, noSurfaceShader=True, empty=True, name=name + "_SG")
@@ -750,12 +991,18 @@ def watch_grooms():
                 found = cmds.ls(uuid, long=True)
                 if found:
                     touch_procedurals(found[0])
+                    if renderer_is_xpu():
+                        try:
+                            update_xpu_groom(found[0])  # XPU's XGen groom follows the edit
+                        except Exception as e:  # noqa: BLE001 (on idle: warn and go on)
+                            cmds.warning("GroomLab: RenderMan XPU: %s" % e)
 
             _touch_queued.add(uuid)
             maya.utils.executeDeferred(run)
 
         _watched[uuid] = om2.MNodeMessage.addNodeDirtyPlugCallback(sel.getDependNode(0), dirty)
-    # Render Settings switched to XPU with grooms in the scene: the warning at once, not only at render.
+    # Render Settings switched to XPU or back with grooms in the scene: their XGen grooms made or
+    # shown, or hidden again, at once (sync_xpu).
     if cmds.objExists("rmanGlobals") and _watched:
         uuid = cmds.ls("rmanGlobals", uuid=True)[0]
         if uuid not in _watched:
@@ -764,6 +1011,6 @@ def watch_grooms():
 
             def changed(message, plug, *_args):
                 if message & om2.MNodeMessage.kAttributeSet and plug.partialName(useLongNames=True) == "renderVariant":
-                    maya.utils.executeDeferred(lambda: cmds.ls(type="groomLabShape") and warn_if_xpu(force=True))
+                    maya.utils.executeDeferred(lambda: cmds.ls(type="groomLabShape") and sync_xpu())
 
             _watched[uuid] = om2.MNodeMessage.addAttributeChangedCallback(sel.getDependNode(0), changed)

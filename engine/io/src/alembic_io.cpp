@@ -4,7 +4,9 @@
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <cstdio>
 #include <map>
+#include <random>
 #include <unordered_map>
 
 #include <Alembic/AbcCoreOgawa/All.h>
@@ -18,6 +20,7 @@ namespace groomlab {
 
 namespace Abc = Alembic::Abc;
 namespace AbcG = Alembic::AbcGeom;
+namespace AbcA = Alembic::AbcCoreAbstract;
 namespace fs = std::filesystem;
 
 static_assert(sizeof(Imath::V3f) == sizeof(Vec3f), "Imath::V3f and Vec3f must share a layout");
@@ -449,6 +452,186 @@ void AlembicCurvesWriter::close() {
     std::unique_ptr<AtomicArchive> a = std::move(d->archive);
     a->archive = Abc::OArchive();  // closes the file
     commit(*a);
+}
+
+// ---------------------------------------------------------------------------
+// XGen spline cache
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// A GUID as XGen writes one ("{8-4-4-4-12}", upper-case hex), random.
+std::string xgenGuid(std::mt19937_64& random) {
+    const std::uint64_t a = random(), b = random();
+    char text[40];
+    std::snprintf(text, sizeof text, "{%08X-%04X-%04X-%04X-%012llX}", static_cast<unsigned>(a >> 32),
+                  static_cast<unsigned>((a >> 16) & 0xFFFFu), static_cast<unsigned>(a & 0xFFFFu),
+                  static_cast<unsigned>(b >> 48), static_cast<unsigned long long>(b & 0xFFFFFFFFFFFFull));
+    return text;
+}
+
+// A strand of fewer than 4 points (a cubic's least) resampled to 4 along its length, its widths
+// with it; longer ones as they are.
+void atLeastFourPoints(std::vector<Vec3f>& p, std::vector<float>& w) {
+    if (p.size() >= 4 || p.size() < 2) return;
+    std::vector<float> along(p.size(), 0.0f);
+    for (std::size_t i = 1; i < p.size(); ++i) along[i] = along[i - 1] + (p[i] - p[i - 1]).length();
+    const float total = along.back();
+    std::vector<Vec3f> outP(4);
+    std::vector<float> outW(4);
+    for (std::size_t k = 0; k < 4; ++k) {
+        const float target = total * static_cast<float>(k) / 3.0f;
+        std::size_t i = 1;
+        while (i + 1 < p.size() && along[i] < target) ++i;
+        const float span = along[i] - along[i - 1];
+        const float t = span > 0.0f ? std::clamp((target - along[i - 1]) / span, 0.0f, 1.0f)
+                                    : static_cast<float>(k) / 3.0f;
+        outP[k] = p[i - 1] + (p[i] - p[i - 1]) * t;
+        outW[k] = w[i - 1] + (w[i] - w[i - 1]) * t;
+    }
+    p.swap(outP);
+    w.swap(outW);
+}
+
+// The control points whose curve, as RenderMan for Maya draws an XGen spline, passes through `p`:
+// RfM writes the points as a uniform cubic B-spline with an extra point mirrored at each end
+// (2 C0 - C1), so the curve starts and ends on the end points and passes (C[j-1] + 4 C[j] + C[j+1]) / 6
+// at each other one. The ends kept, the rest solved (tridiagonal, Thomas): GroomLab's points
+// themselves as control points would draw a curl about a third smaller.
+void interpolatingControlPoints(const std::vector<Vec3f>& p, std::vector<Vec3f>& c, std::vector<float>& scratch) {
+    const std::size_t n = p.size();
+    c = p;
+    if (n < 3) return;
+    const std::size_t m = n - 2;  // unknowns C[1] .. C[n-2]
+    scratch.resize(m);
+    for (std::size_t k = 0; k < m; ++k) {  // forward: rows 1 4 1 with the right side 6 P[j]
+        const std::size_t j = k + 1;
+        Vec3f rhs = p[j] * 6.0f;
+        if (k == 0) rhs = rhs - p[0];
+        if (k == m - 1) rhs = rhs - p[n - 1];
+        const float denom = k == 0 ? 4.0f : 4.0f - scratch[k - 1];
+        scratch[k] = 1.0f / denom;
+        c[j] = (k == 0 ? rhs : rhs - c[j - 1]) * (1.0f / denom);
+    }
+    for (std::size_t k = m - 1; k-- > 0;) c[k + 1] = c[k + 1] - c[k + 2] * scratch[k];  // back
+}
+
+}  // namespace
+
+XGenSplineCacheStats writeXGenSplineCache(const std::string& path, const StrandSet& strands, const ScalpMesh* scalp,
+                                          std::size_t groupSize) {
+    XGenSplineCacheStats stats;
+    groupSize = std::clamp<std::size_t>(groupSize, 1, 40000);
+    const ExportView view = describeExport(strands, scalp, 0u);
+    const std::vector<Vec3f>& positions = strands.positions();
+    std::vector<std::size_t> kept;  // the strands written: 2 points or more (fewer resampled to 4)
+    kept.reserve(view.strandCount());
+    for (std::size_t s = 0; s < view.strandCount(); ++s) {
+        if (view.counts[s] >= 2) kept.push_back(s);
+        else ++stats.skipped;
+    }
+    auto written = [&](std::size_t s) { return std::max<std::size_t>(4, static_cast<std::size_t>(view.counts[s])); };
+    std::mt19937_64 random(std::random_device{}());
+    AtomicArchive a(path);
+    try {
+        const double frame = 1.0 / 24.0;  // XGen's export: one sample at frame 1
+        const std::uint32_t ts = a.archive.addTimeSampling(AbcA::TimeSampling(frame, frame));
+        AbcG::OXform root(a.archive.getTop(), "groomXgen", ts);
+        AbcG::XformSample identity;
+        root.getSchema().set(identity);
+        Abc::OCompoundProperty user = root.getSchema().getUserProperties();
+        Abc::OFloatProperty(user, "Width").set(1.0f);
+        Abc::OFloatProperty(user, "WidthTaper").set(0.0f);
+        Abc::OFloatProperty(user, "WidthTaperStart").set(0.0f);
+        const std::vector<float> rampPositions{0.0f, 1.0f}, rampValues{1.0f, 1.0f};
+        const std::vector<std::int32_t> rampInterps{1, 1};
+        Abc::OFloatArrayProperty positionsRamp(user, "WidthRampPositions", ts), valuesRamp(user, "WidthRampValues", ts);
+        Abc::OInt32ArrayProperty interpsRamp(user, "WidthRampInterps", ts);
+        for (int k = 0; k < 2; ++k) {  // two samples, as XGen writes them
+            positionsRamp.set(Abc::FloatArraySample(rampPositions));
+            valuesRamp.set(Abc::FloatArraySample(rampValues));
+            interpsRamp.set(Abc::Int32ArraySample(rampInterps));
+        }
+
+        std::vector<Imath::V3f> points, directions;
+        std::vector<Imath::V2f> uvs;
+        std::vector<float> widths, knots;
+        std::vector<std::int32_t> counts;
+        std::vector<std::uint32_t> mask;
+        std::vector<Vec3f> strandPoints, controls;
+        std::vector<float> strandWidths, scratch;
+        for (std::size_t first = 0; first < kept.size(); first += groupSize) {
+            const std::size_t last = std::min(first + groupSize, kept.size());
+            std::size_t pointCount = 0;
+            for (std::size_t k = first; k < last; ++k) pointCount += written(kept[k]);
+            points.resize(pointCount);
+            directions.resize(pointCount);
+            uvs.resize(pointCount);
+            widths.resize(pointCount);
+            counts.resize(last - first);
+            knots.clear();
+            knots.reserve(pointCount + 4 * (last - first));
+            std::size_t at = 0;
+            for (std::size_t k = first; k < last; ++k) {
+                const std::size_t s = kept[k];
+                const std::size_t begin = strands.strandBegin(s), given = static_cast<std::size_t>(view.counts[s]);
+                strandPoints.assign(positions.begin() + static_cast<std::ptrdiff_t>(begin),
+                                    positions.begin() + static_cast<std::ptrdiff_t>(begin + given));
+                strandWidths.resize(given);
+                for (std::size_t j = 0; j < given; ++j) strandWidths[j] = view.width(begin + j);
+                atLeastFourPoints(strandPoints, strandWidths);
+                interpolatingControlPoints(strandPoints, controls, scratch);
+                const std::size_t n = controls.size();
+                counts[k - first] = static_cast<std::int32_t>(n);
+                const Imath::V2f uv = s < view.rootUVs.size() ? Imath::V2f(view.rootUVs[s][0], view.rootUVs[s][1])
+                                                              : Imath::V2f(0.0f, 0.0f);
+                for (std::size_t j = 0; j < n; ++j) {
+                    const Vec3f& p = controls[j];
+                    points[at + j] = Imath::V3f(p.x, p.y, p.z);
+                    uvs[at + j] = uv;
+                    widths[at + j] = strandWidths[j];
+                    // No width direction: RenderMan for Maya writes it as the curves' N, which
+                    // makes them ribbons facing one way (bristly, thin edge-on); zero renders them
+                    // round, as the procedural's curves (no N) render in RIS.
+                    directions[at + j] = Imath::V3f(0.0f, 0.0f, 0.0f);
+                }
+                // Clamped cubic knots, as XGen writes them: 0 0 0 0 1 .. top-1 top top top top.
+                const std::size_t top = n - 3;
+                knots.insert(knots.end(), 4, 0.0f);
+                for (std::size_t i = 1; i < top; ++i) knots.push_back(static_cast<float>(i));
+                knots.insert(knots.end(), 4, static_cast<float>(top));
+                at += n;
+            }
+            AbcG::OCurves curves(root, "SplineGrp" + std::to_string(stats.groups), ts);
+            AbcG::OCurvesSchema::Sample sample(
+                Abc::P3fArraySample(points), Abc::Int32ArraySample(counts), AbcG::kCubic, AbcG::kNonPeriodic,
+                AbcG::OFloatGeomParam::Sample(Abc::FloatArraySample(widths), AbcG::kVertexScope),
+                AbcG::OV2fGeomParam::Sample(Abc::V2fArraySample(uvs), AbcG::kVertexScope), AbcG::ON3fGeomParam::Sample(),
+                AbcG::kBsplineBasis);
+            sample.setKnots(Abc::FloatArraySample(knots));
+            curves.getSchema().set(sample);
+            Abc::OCompoundProperty props = curves.getProperties();
+            Abc::OStringProperty(props, "ItemName").set(".boundMesh[0]");
+            Abc::OStringProperty(props, "guid").set(xgenGuid(random));
+            Abc::OFloatArrayProperty inWidth(props, "InWidthPerCV", ts);
+            Abc::OV3fArrayProperty inDirection(props, "InDirectionPerCV", ts);
+            for (int k = 0; k < 2; ++k) {
+                inWidth.set(Abc::FloatArraySample(widths));
+                inDirection.set(Abc::V3fArraySample(directions));
+            }
+            mask.assign(last - first, 0u);
+            Abc::OUInt32ArrayProperty(props, "densityMask", ts).set(Abc::UInt32ArraySample(mask));
+            stats.splines += last - first;
+            ++stats.groups;
+        }
+    } catch (const std::exception& e) {
+        a.archive = Abc::OArchive();
+        a.discard();
+        throw AlembicError(std::string("cannot write the XGen spline cache: ") + e.what());
+    }
+    a.archive = Abc::OArchive();  // closes the file
+    commit(a);
+    return stats;
 }
 
 // ---------------------------------------------------------------------------

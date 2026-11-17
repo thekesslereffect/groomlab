@@ -27,6 +27,7 @@
 #include "groomlab/graph_io.h"
 #include "groomlab/groom.h"
 #include "groomlab/groom_file.h"
+#include "groomlab/groom_session.h"
 #include "groomlab/hair_color.h"
 #include "groomlab/guide_hierarchy.h"
 #include "groomlab/lod.h"
@@ -757,6 +758,37 @@ TEST(UsdWriter, WritesInstancesAsAPointInstancer) {
     EXPECT_NE(text.find("int64[] ids.timeSamples = {\n        1: [11]"), std::string::npos);
     EXPECT_NE(text.find("def Xform \"snow_flake\""), std::string::npos);
     EXPECT_NE(text.find("quath[] orientations.timeSamples = {\n        1: [("), std::string::npos);
+    fs::remove(path);
+}
+
+TEST(UsdWriter, CarriesTheRenderManPrimvarsWhenAsked) {
+    // XPU lookdev in Maya's Hydra viewport (issue 82): with the groom's look, the curves carry the
+    // procedural's RenderMan primvars, so GroomLab's hair network (PxrPrimvar readers) shades them.
+    StrandSet strands;
+    strands.addStrand(7, {{0, 0, 0}, {0, 1, 0}, {0, 2, 0}});
+    strands.addStrand(8, {{1, 0, 0}, {1, 1, 0}, {1, 2, 0}});
+    strands.addStrandChannel(kMelaninChannel, 0.4f);
+    const fs::path path = fs::temp_directory_path() / "groomlab_rman_primvars.usda";
+    {
+        UsdCurvesWriter w(path.u8string(), "groom", {});
+        w.writeFrame(1.0, strands);
+    }
+    EXPECT_EQ(readText(path).find("rman_melanin"), std::string::npos);  // not asked: none
+    UsdCurvesWriter::Options options;
+    options.rendermanLook = std::make_shared<const HairLook>();
+    {
+        UsdCurvesWriter w(path.u8string(), "groom", options);
+        w.writeFrame(1.0, strands);
+        w.writeFrame(2.0, strands);
+    }
+    const std::string text = readText(path);
+    for (const char* declaration : {"float[] primvars:rman_melanin", "float[] primvars:rman_redness",
+                                    "color3f[] primvars:rman_dye", "float[] primvars:rman_rgbShare",
+                                    "float[] primvars:rman_coneAngleR", "float[] primvars:hair_index"}) {
+        EXPECT_NE(text.find(declaration), std::string::npos) << declaration;
+    }
+    EXPECT_NE(text.find("primvars:rman_dye (\n            interpolation = \"constant\""), std::string::npos) << text.substr(0, 400);
+    EXPECT_NE(text.find("primvars:rman_melanin (\n            interpolation = \"uniform\""), std::string::npos);
     fs::remove(path);
 }
 

@@ -2,7 +2,9 @@
 #include <cmath>
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <functional>
 
@@ -1288,5 +1290,128 @@ TEST(Alembic, WritesScalesAsAnAnimatedMeshWithTheirData) {
     EXPECT_EQ(third.getPositions()->size(), 0u);
     std::remove(path.c_str());
 }
+
+// XGen's spline cache (issue 82: an Interactive Groom is the hair RenderMan XPU renders).
+TEST(XGenSplineCache, WritesXGensLayout) {
+    namespace Abc = Alembic::Abc;
+    namespace AbcG = Alembic::AbcGeom;
+    StrandSet strands;
+    strands.addStrand(1, {{0, 0, 0}, {0, 1, 0}, {0, 2, 0}, {0, 3, 0}, {0, 4, 0}}, {0.05f, 0.04f, 0.03f, 0.02f, 0.01f});
+    strands.addStrand(2, {{1, 0, 0}, {1, 1, 0}, {1, 2, 0}, {1, 3, 0}}, {0.05f, 0.04f, 0.03f, 0.02f});
+    strands.addStrand(3, {{2, 0, 0}, {2, 1, 0}, {2, 2, 0}}, {0.05f, 0.04f, 0.03f});  // resampled to 4
+    const std::string path = tempPath("groomlab_xgen_layout.abc");
+    const XGenSplineCacheStats stats = writeXGenSplineCache(path, strands, nullptr, 1);
+    EXPECT_EQ(stats.splines, 3u);
+    EXPECT_EQ(stats.skipped, 0u);
+    EXPECT_EQ(stats.groups, 3u);  // a group of one each
+
+    {  // (read back, then closed before the file goes)
+    Abc::IArchive archive(Alembic::AbcCoreOgawa::ReadArchive(), path);
+    const Abc::IObject root = archive.getTop().getChild("groomXgen");
+    ASSERT_TRUE(root.valid());
+    const AbcG::IXform xform(root, Abc::kWrapExisting);
+    const Abc::ICompoundProperty user = xform.getSchema().getUserProperties();
+    for (const char* name : {"Width", "WidthTaper", "WidthTaperStart", "WidthRampPositions", "WidthRampValues",
+                             "WidthRampInterps"}) {
+        EXPECT_TRUE(user.getPropertyHeader(name)) << name;
+    }
+    ASSERT_EQ(root.getNumChildren(), 3u);
+    {
+        const AbcG::ICurves short3(root.getChild("SplineGrp2"), Abc::kWrapExisting);
+        EXPECT_EQ((*short3.getSchema().getValue().getCurvesNumVertices())[0], 4);  // a cubic's least
+    }
+    const AbcG::ICurves curves(root.getChild("SplineGrp0"), Abc::kWrapExisting);
+    ASSERT_TRUE(curves.valid());
+    const AbcG::ICurvesSchema::Sample sample = curves.getSchema().getValue();
+    EXPECT_EQ(sample.getType(), AbcG::kCubic);
+    EXPECT_EQ(sample.getBasis(), AbcG::kBsplineBasis);
+    ASSERT_EQ(sample.getCurvesNumVertices()->size(), 1u);
+    EXPECT_EQ((*sample.getCurvesNumVertices())[0], 5);
+    const Abc::FloatArraySamplePtr knots = sample.getKnots();
+    ASSERT_TRUE(knots);
+    const std::vector<float> expected{0, 0, 0, 0, 1, 2, 2, 2, 2};  // clamped: 5 points + 4
+    EXPECT_EQ(std::vector<float>(knots->get(), knots->get() + knots->size()), expected);
+    const Abc::ICompoundProperty props = curves.getProperties();
+    for (const char* name : {"ItemName", "guid", "InWidthPerCV", "InDirectionPerCV", "densityMask"}) {
+        EXPECT_TRUE(props.getPropertyHeader(name)) << name;
+    }
+    std::string guid;
+    Abc::IStringProperty(props, "guid").get(guid);
+    EXPECT_EQ(guid.size(), 38u);  // {8-4-4-4-12}
+    }
+    std::filesystem::remove(path);
+}
+
+// The curve RenderMan for Maya draws from the cache passes through the strand's points: RfM draws
+// a uniform cubic B-spline with a point mirrored past each end (2 C0 - C1), which is at
+// (C[j-1] + 4 C[j] + C[j+1]) / 6 at each control point and on the ends themselves. A tight curl
+// (4 points a turn) written as its points would draw a third smaller.
+TEST(XGenSplineCache, TheCurveRenderManDrawsPassesThroughThePoints) {
+    namespace Abc = Alembic::Abc;
+    namespace AbcG = Alembic::AbcGeom;
+    std::vector<Vec3f> curl;
+    for (int j = 0; j < 17; ++j) {
+        const float a = 1.5707963f * static_cast<float>(j);  // a quarter turn a point
+        curl.push_back({std::cos(a), 0.25f * static_cast<float>(j), std::sin(a)});
+    }
+    StrandSet strands;
+    strands.addStrand(1, curl, std::vector<float>(curl.size(), 0.02f));
+    const std::string path = tempPath("groomlab_xgen_curl.abc");
+    writeXGenSplineCache(path, strands);
+    std::vector<Vec3f> c;
+    {
+        Abc::IArchive archive(Alembic::AbcCoreOgawa::ReadArchive(), path);
+        const AbcG::ICurves curves(archive.getTop().getChild("groomXgen").getChild("SplineGrp0"), Abc::kWrapExisting);
+        const Abc::P3fArraySamplePtr p = curves.getSchema().getValue().getPositions();
+        for (std::size_t i = 0; i < p->size(); ++i) c.push_back({(*p)[i].x, (*p)[i].y, (*p)[i].z});
+    }
+    std::filesystem::remove(path);
+    ASSERT_EQ(c.size(), curl.size());
+    float worst = 0.0f, asPoints = 0.0f;
+    for (std::size_t j = 0; j < c.size(); ++j) {
+        const Vec3f before = j > 0 ? c[j - 1] : c[0] * 2.0f - c[1];
+        const Vec3f after = j + 1 < c.size() ? c[j + 1] : c[j] * 2.0f - c[j - 1];
+        const Vec3f drawn = (before + c[j] * 4.0f + after) * (1.0f / 6.0f);
+        worst = std::max(worst, (drawn - curl[j]).length());
+        if (j > 0 && j + 1 < c.size()) {  // the points themselves as control points
+            asPoints = std::max(asPoints, ((curl[j - 1] + curl[j] * 4.0f + curl[j + 1]) * (1.0f / 6.0f) - curl[j]).length());
+        }
+    }
+    EXPECT_LT(worst, 1e-4f);
+    EXPECT_GT(asPoints, 0.3f);  // what it would be without the fit: a third of the curl's radius
+}
+
+// How long a production groom takes to write (reported, not asserted: issue 82's question is
+// whether a live XPU route costs well under a second). GROOMLAB_XGEN_CACHE_OUT keeps the file.
+TEST(XGenSplineCache, AHundredThousandStrandsWriteFast) {
+    const std::size_t count = 100000, points = 17;
+    StrandSet strands;
+    strands.reserve(count, count * points);
+    std::vector<Vec3f> p(points);
+    std::vector<float> w(points);
+    for (std::size_t i = 0; i < count; ++i) {
+        const float a = 6.2831853f * static_cast<float>(i) / static_cast<float>(count);
+        const float b = 1.2f * static_cast<float>(i % 997) / 997.0f;
+        const Vec3f n{std::sin(b) * std::cos(a), std::cos(b), std::sin(b) * std::sin(a)};
+        for (std::size_t j = 0; j < points; ++j) {
+            const float t = static_cast<float>(j) / static_cast<float>(points - 1);
+            p[j] = n * (10.0f + 4.0f * t) + Vec3f{0.0f, -6.0f * t * t, 0.0f};
+            w[j] = 0.02f * (1.0f - t) + 0.002f;
+        }
+        strands.addStrand(i + 1, p, w);
+    }
+    const char* keep = std::getenv("GROOMLAB_XGEN_CACHE_OUT");
+    const std::string path = keep && *keep ? std::string(keep) : tempPath("groomlab_xgen_100k.abc");
+    const auto start = std::chrono::steady_clock::now();
+    const XGenSplineCacheStats stats = writeXGenSplineCache(path, strands);
+    const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+    std::printf("[ xgen cache ] %zu splines, %zu points, %zu groups: %.0f ms, %.1f MB\n", stats.splines,
+                count * points, stats.groups, ms,
+                static_cast<double>(std::filesystem::file_size(path)) / (1024.0 * 1024.0));
+    EXPECT_EQ(stats.splines, count);
+    EXPECT_EQ(stats.groups, 5u);
+    if (!(keep && *keep)) std::filesystem::remove(path);
+}
+
 }  // namespace
 }  // namespace groomlab

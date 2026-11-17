@@ -58,6 +58,24 @@ public:
 // not in a neighbour (or with other points) is still there (zero).
 std::vector<Vec3f> strandVelocities(const StrandSet& now, const StrandSet* before, const StrandSet* after, double seconds);
 
+// XGen's spline cache: the layout `xgmSplineCache -export` writes, which `xgmSplineCache -import`
+// loads into an XGen Interactive Groom (the hair RenderMan XPU renders, which renders no
+// procedurals). An Xform /groomXgen (XGen's width user properties) over curves objects
+// SplineGrp0, 1, ... of at most `groupSize` strands each (XGen keeps 40,000 of a group and drops
+// the rest silently): cubic B-splines with clamped knots whose control points make the curve
+// RenderMan for Maya draws pass through the strands' points (interpolated: the points themselves
+// would draw curls a third smaller), the width at each, the root's UV at each (from `scalp`; 0
+// without), and XGen's per-CV width and width direction (zero: RenderMan for Maya renders the
+// curves round, not as ribbons). One frame, at 1/24 s, as XGen's export. A strand of 2 or 3 points
+// is resampled to 4 (a cubic's least); one of fewer is left out.
+struct XGenSplineCacheStats {
+    std::size_t splines = 0;  // written
+    std::size_t skipped = 0;  // fewer than 2 points
+    std::size_t groups = 0;
+};
+XGenSplineCacheStats writeXGenSplineCache(const std::string& path, const StrandSet& strands,
+                                          const ScalpMesh* scalp = nullptr, std::size_t groupSize = 20000);
+
 class AlembicCurvesWriter {
 public:
     struct Options {

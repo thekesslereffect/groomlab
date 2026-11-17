@@ -53,6 +53,10 @@
 #include "groomlab/strand_set.h"
 
 namespace groomlab {
+struct HairLook;  // groom_session.h
+}
+
+namespace groomlab {
 
 class UsdError : public std::runtime_error {
 public:
@@ -80,6 +84,11 @@ public:
         // The host's prototype meshes by name, written as the instancers' prototypes (the
         // built-in plates need none); a name it does not find is a placeholder Xform.
         PrototypeLookup prototypes;
+        // With the groom's look (GroomSession::hairLook), the curves also carry the RenderMan
+        // procedural's primvars (renderman::curvePrimvars: rman_*, hair_index), so GroomLab's
+        // RenderMan hair network (PxrPrimvar readers) shades them as in RIS: RenderMan in Maya's
+        // Hydra viewport (XPU lookdev). Null: not written.
+        std::shared_ptr<const HairLook> rendermanLook;
     };
 
     // `name` becomes the root prim's name (made a valid USD identifier).

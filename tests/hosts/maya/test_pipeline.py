@@ -1278,8 +1278,8 @@ class RenderManForMayaTest(unittest.TestCase):
         self.assertFalse(cmds.menuItem(menu.RENDERMAN_ITEM, exists=True))
 
     def test_xpu_warns_once_per_scene(self):
-        # RenderMan XPU renders no procedurals: with RfM's renderer set to XPU (rmanGlobals'
-        # renderVariant), pre_shape warns once per scene, and still writes the data string (RIS).
+        # RenderMan XPU renders no procedurals (GroomLab renders through XGen there): without XGen,
+        # warn_if_xpu warns once per scene, and pre_shape still writes the data string (RIS).
         globals_node = cmds.createNode("network", name="rmanGlobals")
         cmds.addAttr(globals_node, longName="renderVariant", dataType="string")
         cmds.setAttr(globals_node + ".renderVariant", "ris", type="string")

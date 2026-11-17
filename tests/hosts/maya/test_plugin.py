@@ -316,6 +316,37 @@ class PluginTest(unittest.TestCase):
         for a, b in zip(live, exported):
             self.assertAlmostEqual(a, b, delta=1e-3)
 
+    def test_xgen_cache_for_renderman_xpu(self):
+        # Issue 82: RenderMan XPU renders no procedural, so GroomLab hands it an XGen Interactive
+        # Groom fed by -xgen's spline cache, and one look for the whole groom (XGen's curves carry
+        # no primvars).
+        if not hasattr(cmds, "groomLabExportAlembic"):
+            self.skipTest("built without Alembic")
+        import json
+        shape, _ = self._hierarchy_groom()
+        path = os.path.join(cmds.internalVar(userTmpDir=True), "groomlab_xpu.abc").replace("\\", "/")
+        result = json.loads(cmds.groomLabExportAlembic(shape, file=path, xgen=True, renderOverrides=True))
+        self.assertGreater(result["splines"], 100)
+        look = result["look"]
+        for key in ("melanin", "redness", "dye", "color", "rgbShare", "specularGainR", "coneAngleR", "coneAngleTT",
+                    "coneAngleTRT", "specularOffset"):
+            self.assertIn(key, look)
+        self.assertEqual(len(look["dye"]), 3)
+        self.assertGreater(look["coneAngleR"], 0.0)
+        with self.assertRaises(RuntimeError):  # one frame
+            cmds.groomLabExportAlembic(shape, file=path, xgen=True, startFrame=1, endFrame=3)
+        with self.assertRaises(RuntimeError):  # XGen's layout or an engine's, not both
+            cmds.groomLabExportAlembic(shape, file=path, xgen=True, unreal=True)
+        try:
+            cmds.loadPlugin("xgenToolkit", quiet=True)
+        except RuntimeError:
+            self.skipTest("XGen is not installed")
+        import maya.mel
+        maya.mel.eval('xgmSplineCache -import -file "%s"' % path)
+        descriptions = cmds.ls(type="xgmSplineDescription")
+        self.assertEqual(len(descriptions), 1)
+        self.assertEqual(cmds.xgmSplineQuery(descriptions[0], splineCount=True), result["splines"])
+
     # -- Brushes -----------------------------------------------------------
 
     def _guide_points(self, shape, group):

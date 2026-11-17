@@ -259,6 +259,9 @@ PLUGIN_EXPORT MStatus initializePlugin(MObject obj) {
     // folder and repoints them there, before the file is written (groomlab.follow_scene_files):
     // MSceneMessage callbacks, since scriptJob events coalesce and a save before the save
     // would go unseen.
+    // RenderMan for Maya's Hydra plugins registered with USD first (groomlab.hydra_lookdev): before
+    // anything asks USD's shader registry for a shader, which reads RenderMan's shaders only then.
+    callGroomlab("register_renderman_hydra");
     groomlab::maya::refreshMayaPaths();
     // Where the open scene's files live is noted now and when a scene opens, never just before
     // a save: a Save As has renamed the scene by then.

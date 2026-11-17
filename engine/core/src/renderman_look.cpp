@@ -205,4 +205,33 @@ std::vector<Primvar> curvePrimvars(const ExportView& view, const HairLook& look)
     return out;
 }
 
+ConstantLook constantLook(const std::vector<Primvar>& primvars) {
+    ConstantLook out;
+    // The mean of a primvar's values, per component (1 for a float, 3 for a color); false when absent.
+    auto mean = [&](const char* name, float* into, std::size_t components) {
+        for (const Primvar& p : primvars) {
+            if (p.name != name || p.floats.empty() || p.floats.size() % components != 0) continue;
+            const std::size_t n = p.floats.size() / components;
+            for (std::size_t k = 0; k < components; ++k) {
+                double sum = 0.0;
+                for (std::size_t i = 0; i < n; ++i) sum += p.floats[i * components + k];
+                into[k] = static_cast<float>(sum / static_cast<double>(n));
+            }
+            return true;
+        }
+        return false;
+    };
+    mean("rman_melanin", &out.melanin, 1);
+    mean("rman_redness", &out.redness, 1);
+    mean("rman_dye", out.dye.data(), 3);
+    mean("rman_color", out.color.data(), 3);
+    mean("rman_rgbShare", &out.rgbShare, 1);
+    mean("rman_specularGainR", &out.specularGainR, 1);
+    mean("rman_coneAngleR", &out.coneAngleR, 1);
+    mean("rman_coneAngleTT", &out.coneAngleTT, 1);
+    mean("rman_coneAngleTRT", &out.coneAngleTRT, 1);
+    mean("rman_specularOffset", &out.specularOffset, 1);
+    return out;
+}
+
 }  // namespace groomlab::renderman

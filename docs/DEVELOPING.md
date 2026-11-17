@@ -870,8 +870,61 @@ translator of its own (`MayaTransXGenGroom` in rfm.mll: the description's spline
 strands into an Interactive Groom description was tried and gave an empty description every time
 (`xgmSplineCache -import` of GroomLab's Alembic; `xgmCurveToSpline` with `useAlembicCurve` reading
 it, or Maya's own AbcExport curves, spliced before the description `xgmCreateSplineDescription`
-made: `loadedData` stayed empty in mayapy). So: `warn_if_xpu` (pre_shape, once per scene) and a
-callback on `rmanGlobals.renderVariant` (watch_grooms) warn that grooms need RIS.
+made: `loadedData` stayed empty in mayapy).
+
+**XPU through XGen (issue #82, 2026-11-16).** GroomLab's Alembic loads 0 splines because XGen
+wants its own cache layout (docs/research/xgen_xpu_bridge.md). `writeXGenSplineCache` (engine/io)
+writes that layout from a `StrandSet`, and `groomLabExportAlembic -xgen` writes the groom's render
+strands with it (100k strands in about 60 ms) and returns the groom's one look
+(`renderman::constantLook`: the mean of the procedural's `rman_*` primvars). In renderman.py,
+`sync_xpu` (from `sync_renderman`, and from the `rmanGlobals.renderVariant` callback) gives each
+groom an Interactive Groom while the variant is XPU (`add_xpu_groom`: `xgmSplineCache -import`,
+renamed `<groom>_xpu`, tied by `groomLabXpuGroom`, XGen's default shader replaced). Its
+`lodVisibility` is off (no viewport drawing; RfM still renders it), its `visibility` follows the
+variant (`xpu_visibility`: XGen groom in XPU, procedural in RIS). The groom's edits rewrite the
+cache through the same dirty watch as the procedural's `-revision` (`update_xpu_groom`), each time
+to a new file (`<groom>.xpu.<n>.abc`), since Windows can't replace a file XGen holds open; the
+cache node's `fileName` is pointed at it (XGen reads 100k strands again in about 0.25 s).
+RfM's XGen translator writes only `P`, `width` and `N`: no UVs and no custom primvars, even for a
+mesh-bound groom, and PxrHairColor's random melanin gives no variation without an index primvar.
+So the material is one constant network (`create_hair_network(..., constants=look)`), or the
+groom's own RenderMan material. The cache writes zero width directions: RfM turns them into `N`,
+and real directions render the curves as ribbons facing one way (bristly); zero renders them round,
+as the procedural's curves do. RfM draws the spline as a uniform cubic B-spline with a point
+mirrored past each end (`2 C0 - C1`, read from its RIB), so the curve passes the end points and
+`(C[j-1] + 4 C[j] + C[j+1]) / 6` at the others: GroomLab's points written as control points drew
+tight curls a third smaller (32% of the point spacing on a curly test groom). The writer solves
+for control points the curve passes through instead (tridiagonal, `interpolatingControlPoints`),
+and resamples 2- and 3-point strands to 4. `warn_if_xpu` now only warns when XGen can't load. Not
+done: XPU animation (the cache is the current frame), and the XGen groom following the groom's
+transform visibility live (it's set at each sync).
+
+**XPU lookdev in the viewport (hydra_lookdev.py, Maya 2025).** Each groom as USD curves in a
+MayaUSD proxy shape (`<groom>_lookdev`, `doNotWrite`), drawn by Maya Hydra with RenderMan's hdPrman
+(XPU). `groomLabExportUsd -renderman` adds the procedural's `rman_*` primvars and `hair_index`
+(`UsdCurvesWriter::Options::rendermanLook`), so the groom's RenderMan network, translated node for
+node into UsdShade (`write_material`), shades it as RIS does; `primvars:st` carries the root UVs.
+No settings: the plugin calls `register_renderman_hydra` first as it loads, which registers RenderMan
+for Maya's `lib/<year>/usd_plugins_<usd>` with USD at runtime, before anything asks USD's shader
+registry (Sdr) for a shader (it reads RenderMan's shaders only on its first query; registered later,
+hdPrman drops every material). Only where RenderMan's plugins fit the USD Maya runs and that USD
+is 23.11 or newer: Maya 2025. Maya 2026 runs USD 24.11 against RenderMan 27.3's 25.05 plugins (only
+`MULTI_USD_VERSION` fixes that, and with V-Ray it brings a Windows message box at start-up); Maya
+2024's 22.11 matches but doesn't know RenderMan's shader metadata (`uiHints`, `limits`), and the
+first Python call reading the registry then raises ~1,700 warnings as an exception in anyone's code
+(maya.pipeline's USD test did). Maya Hydra draws the groom's own viewport lines as thick hair, so the
+groom's `lodVisibility` is off while lookdev is on. Maya 2025 crashed switching straight from one
+Hydra renderer to another: `enable`/`disable` always go through Viewport 2.0. Each enable writes
+files of its own name (USD keeps layers by path), with the material and its binding in the root
+layer before the proxy loads it. The Hypershade watch covers the network upstream of the surface
+shader only (the shading group's history holds the groom: hiding it rebuilt the material as XPU
+started). An empty string is never written as an input (a PxrTexture's `manifold` is a connection
+in RenderMan and an empty string attribute in Maya). Verified in a Maya 2025 GUI session with no env
+set (build/probe/render_hooks/run_lookdev.ps1): GroomLab's per-strand network in XPU, a Hypershade
+PxrTexture checker by root UV, a Hypershade edit (the texture's colorScale) showing live, groom
+edits. PxrMarschnerHair's diffuseGain is 0 by default: a texture on its diffuseColor shows only with
+it raised. XPU stops after ~3.5 s at the viewport's 64 samples: converged, not failed. Not verified:
+Hypershade edits after an off/on in one session. The findings: docs/research/hydra_xpu_viewport.md.
 
 **Not yet verified:** shutter units.
 

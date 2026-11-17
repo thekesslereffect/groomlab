@@ -527,6 +527,7 @@ def render_from_groom_file_dialog():
 
 RENDER_AS_CURVES_ITEM = "groomLabRenderAsCurvesItem"
 RENDERMAN_ITEM = "groomLabRenderManProceduralItem"
+XPU_LOOKDEV_ITEM = "groomLabXpuLookdevItem"
 
 
 def add_renderman_procedural_action():
@@ -538,6 +539,19 @@ def add_renderman_procedural_action():
     if groom:
         node = renderman.add_renderman_procedural(groom)
         cmds.select(cmds.listRelatives(node, parent=True, fullPath=True)[0])
+
+
+def toggle_xpu_lookdev(*_):
+    """Render > RenderMan XPU Lookdev (Viewport): every groom drawn by RenderMan XPU in the viewport,
+    with its root UVs (maps on the scalp) and per-strand look (groomlab.hydra_lookdev), or off again."""
+    from groomlab import hydra_lookdev
+    try:
+        on = hydra_lookdev.toggle()
+    except RuntimeError as e:
+        cmds.warning("GroomLab: XPU lookdev: %s" % e)
+        on = False
+    if cmds.menuItem(XPU_LOOKDEV_ITEM, exists=True):
+        cmds.menuItem(XPU_LOOKDEV_ITEM, edit=True, checkBox=on)
 
 
 def _sync_renderman_item(parent):
@@ -555,8 +569,18 @@ def _sync_renderman_item(parent):
                                      "through (GroomLab makes one for every groom while RenderMan for Maya is "
                                      "loaded): its density, scales and material",
                           **kwargs)
+            cmds.menuItem(XPU_LOOKDEV_ITEM, parent=parent, label="RenderMan XPU Lookdev (Viewport)",
+                          checkBox=False, insertAfter=RENDERMAN_ITEM, command=toggle_xpu_lookdev,
+                          annotation="Every groom drawn by RenderMan XPU in the viewport through Maya Hydra, "
+                                     "with its root UVs (maps on the scalp) and its per-strand look: edit its "
+                                     "RenderMan material in the Hypershade and the viewport follows")
         elif shown and not wanted:
             cmds.deleteUI(RENDERMAN_ITEM, menuItem=True)
+            if cmds.menuItem(XPU_LOOKDEV_ITEM, exists=True):
+                cmds.deleteUI(XPU_LOOKDEV_ITEM, menuItem=True)
+        if wanted and cmds.menuItem(XPU_LOOKDEV_ITEM, exists=True):
+            from groomlab import hydra_lookdev
+            cmds.menuItem(XPU_LOOKDEV_ITEM, edit=True, checkBox=hydra_lookdev.is_on())
     except Exception as e:  # noqa: BLE001 (a menu must open)
         cmds.warning("GroomLab: the RenderMan menu item: %s" % e)
 

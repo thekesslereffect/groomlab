@@ -86,6 +86,56 @@ any rebuild, measure:
 
 If those are not well under a second for a production groom, the route is not worth building.
 
+## Measured again: fast enough (2026-11-16, issue #82)
+
+`writeXGenSplineCache` (engine/io, C++) writes the layout above from a `StrandSet`. The same
+100,000 strands of 17 points, Maya 2026 and RenderMan 27.3 on the dev laptop:
+
+| Step | Time |
+| --- | --- |
+| Write the cache (C++, 44.6 MB, 5 groups of 20,000) | 51-69 ms |
+| `xgmSplineCache -import` | 0.03 s |
+| First query of the description (XGen reads the splines) | 0.23 s |
+| The cache node's file set again (a rewritten cache read again) | 0.23 s |
+| XPU render, 480x360, 128 samples | 2.9 s |
+
+About 0.3 s from evaluated strands to an Interactive Groom XPU renders, against the 15 s that
+shelved it. The test `XGenSplineCache.AHundredThousandStrandsWriteFast` reports the write time;
+the Maya probe is build/probe/xgen82/load.py.
+
+### Color: one look per description
+
+RfM's XGen groom translator (`MayaTransXGenGroom`, which reads XGen's `XgItSpline`) writes only
+`vertex point P`, `varying float width` and `varying normal N` for Interactive Groom curves
+(RIB written with `rmanRender -ribFile`):
+
+- Arbitrary params in the cache (`Cd`, a custom color, per strand) are dropped.
+- The cache's per-vertex UVs are dropped.
+- A groom bound to a scalp mesh (`xgmCreateSplineDescription` on a mesh) writes no UV primvar
+  either. The `facevarying st` in its RIB is the mesh's own.
+
+So GroomLab's shading network, which reads every color from per-strand `rman_*` primvars, can't
+run as it is. A Pxr material assigned to the description does render in XPU
+(PxrHairColor + PxrMarschnerHair: brown hair, 3.5 s at 480x360). But `PxrHairColor`'s
+`randomMelanin` gives no strand-to-strand variation on these curves: the same scene rendered twice
+differs more (mean 0.0021) than random melanin 0 vs 0.4 (mean 0.0014), since it needs a per-strand
+index primvar XGen doesn't write.
+
+Shape: RfM draws the points as a uniform cubic B-spline with a point mirrored past each end, so
+GroomLab's points used as control points drew curls a third smaller. The writer solves for control
+points whose curve passes through the points, and writes no width direction (RfM's `N`, which
+made the curves ribbons). On a curly groom, XPU then matches RIS's curls (smooth where RIS's linear
+curves are angular).
+
+Root UVs can't reach the shader through XGen either (RfM writes no UV primvar for Interactive
+Groom curves). Maya's Hydra viewport carries them, but needs an env change: hydra_xpu_viewport.md.
+
+What lookdev in XPU can have through XGen:
+- One material per description: melanin, redness, dye, specular, cones and roughness, set as
+  constants (from HairColor), edited live in XPU.
+- Variation only by splitting the groom into several descriptions (clusters of similar color),
+  each with its own constants.
+
 ## Routes without a conversion: both closed
 
 Checked 2026-11-02 against RenderMan for Maya 27.3 on Maya 2026.

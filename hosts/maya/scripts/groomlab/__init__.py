@@ -130,6 +130,8 @@ from groomlab.prman_render import prman_path, render_prman, set_prman_path  # no
 # RenderMan for Maya: each groom's procedural node kept in place while RfM is loaded (the plugin
 # runs it on scene and plugin events).
 from groomlab.renderman import queue_renderman_sync, sync_renderman  # noqa: F401
+# RenderMan XPU lookdev in the viewport (Maya Hydra): RenderMan's Hydra plugins registered as the plugin loads.
+from groomlab.hydra_lookdev import register_renderman_hydra  # noqa: F401
 # Maya Hardware 2.0 renders (no renderer needed: the viewport's drawing into images, in this session).
 from groomlab.hardware2_render import render_hardware2  # noqa: F401
 # Reference photos as cameras (Groom Tools > Photos): groomlab.reference.

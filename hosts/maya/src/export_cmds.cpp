@@ -49,6 +49,7 @@
 #include "groomlab/groom_package.h"
 #include "groomlab/guide_hierarchy.h"
 #include "groomlab/render_overrides.h"
+#include "groomlab/renderman_look.h"
 #include "groomlab/follicle_map.h"
 #include "groomlab/scale_maps.h"
 #include "groomlab/scales.h"
@@ -330,6 +331,12 @@ MSyntax ExportAlembicCmd::newSyntax() {
     syntax.addFlag("-rep", "-report");
     // The scales: their bent mesh beside the curves (mesh, the default) or none.
     syntax.addFlag("-scl", "-scales", MSyntax::kString);
+    // XGen's spline cache instead (writeXGenSplineCache, one frame): what an XGen Interactive
+    // Groom loads (xgmSplineCache), RenderMan XPU's way to render the groom. Returns JSON:
+    // {"splines": strands written, "look": the groom's one look for RenderMan (constantLook of the
+    // procedural's primvars: melanin, redness, dye, color, rgbShare, specularGainR, coneAngleR,
+    // coneAngleTT, coneAngleTRT, specularOffset)}: XGen's curves carry no per-strand primvars.
+    syntax.addFlag("-xg", "-xgen");
     return syntax;
 }
 
@@ -446,6 +453,37 @@ MStatus ExportAlembicCmd::doIt(const MArgList& args) {
         if (!unreal && db.isFlagSet("-fg")) return fail(kName, "-fg goes with -unreal");
         for (const char* flag : {"-bpp", "-msg", "-rep"}) {
             if (!unity && db.isFlagSet(flag)) return fail(kName, MString(flag) + " goes with -unity");
+        }
+        if (db.isFlagSet("-xg")) {
+            if (unreal || unity || guides || adjusted || db.isFlagSet("-vel")) {
+                return fail(kName, "-xgen writes the strands as XGen reads them; leave out the other layout flags");
+            }
+            if (range.count() != 1) return fail(kName, "-xgen writes one frame");
+            XGenSplineCacheStats stats;
+            renderman::ConstantLook constant;
+            auto* shape = dynamic_cast<GroomShape*>(MFnDagNode(path).userNode());
+            try {
+                status = forEachFrame(
+                    kName, path, range,
+                    [&](double, const StrandSet& strands, const MeshPtr& scalp, NodeEvaluator&) {
+                        stats = writeXGenSplineCache(file.asChar(), strands, scalp.get());
+                        if (shape) {
+                            const ExportView view = describeExport(strands, scalp.get(), kExportPointColors);
+                            constant = renderman::constantLook(renderman::curvePrimvars(view, shape->hairLook()));
+                        }
+                    },
+                    &strandTotal, true);
+                if (!status) return status;
+            } catch (const AlembicError& e) {
+                return fail(kName, e.what());
+            }
+            const nlohmann::json look = {
+                {"melanin", constant.melanin}, {"redness", constant.redness}, {"dye", constant.dye},
+                {"color", constant.color}, {"rgbShare", constant.rgbShare}, {"specularGainR", constant.specularGainR},
+                {"coneAngleR", constant.coneAngleR}, {"coneAngleTT", constant.coneAngleTT},
+                {"coneAngleTRT", constant.coneAngleTRT}, {"specularOffset", constant.specularOffset}};
+            setResult(MString(nlohmann::json({{"splines", stats.splines}, {"look", look}}).dump().c_str()));
+            return MS::kSuccess;
         }
         // Either engine's groom as every host writes it (engine_export.h): groom groups, the
         // feathers' shafts and lighter barbs; Unity's curves fitted to its importer.
@@ -612,6 +650,9 @@ void* ExportUsdCmd::creator() { return new ExportUsdCmd(); }
 MSyntax ExportUsdCmd::newSyntax() {
     MSyntax syntax = curveSyntax();
     syntax.addFlag("-scl", "-scales", MSyntax::kString);  // mesh (default), instancer, both, none
+    // The RenderMan procedural's primvars too (rman_*, hair_index: UsdCurvesWriter::Options::
+    // rendermanLook), for GroomLab's RenderMan hair network in Maya's Hydra viewport.
+    syntax.addFlag("-rm", "-renderman");
     return syntax;
 }
 
@@ -637,6 +678,11 @@ MStatus ExportUsdCmd::doIt(const MArgList& args) {
             if (!scalesMode(db, &options.scales)) return fail(kName, "-scales must be mesh, instancer, both or none");
             SceneScales scales;
             options.prototypes = scales.lookup();  // the instancers' prototypes, as the scene has them
+            if (db.isFlagSet("-rm")) {
+                if (auto* shape = dynamic_cast<GroomShape*>(MFnDagNode(path).userNode())) {
+                    options.rendermanLook = std::make_shared<const HairLook>(shape->hairLook());
+                }
+            }
             UsdCurvesWriter writer(file.asChar(), exportName(path), options);
             const bool withScales = options.scales != UsdCurvesWriter::Options::Scales::None;
             status = forEachFrame(

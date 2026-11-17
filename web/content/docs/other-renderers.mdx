@@ -167,11 +167,29 @@ scene, shading network included. The primvars are listed in
   RenderMan Procedural** selects a groom's node, for its density and scales. An interactive render
   (IPR) follows edits to the groom as you make them. RenderMan for Maya 27.3 has no Maya 2027
   version.
-- **XPU:** RenderMan's XPU renderer renders no procedurals, the kind of object GroomLab hands
-  RenderMan its grooms as, so XPU renders leave the grooms out: render them with **RIS** (Render
-  Settings > Features > Renderer). GroomLab warns when the renderer is set to XPU and the scene
-  has grooms. (XGen Interactive Groom renders in XPU because RenderMan for Maya has a translator
-  of its own for it.)
+- **XPU, for look development:** RenderMan's XPU renderer renders no procedurals, so GroomLab
+  renders its grooms there through XGen, which XPU does render. With the renderer set to **XPU**
+  (Render Settings > Features > Renderer), each groom gets a hidden XGen Interactive Groom
+  (`<groom>_xpu`) holding its render strands, rewritten as you edit the groom and drawn only in the
+  render, never in the viewport. Switch back to **RIS** and the groom renders as before. XGen's
+  hair carries no per-strand color, so in XPU a groom renders with **one look**: melanin, redness,
+  dye, highlights and their widths, from the groom's colors on average. Change it in the
+  Hypershade on the `<groom>_xpu_SG` material (a PxrMarschnerHair with PxrHairColor), and an XPU
+  interactive render shows each change. A RenderMan material assigned to the groom itself is used
+  in XPU and RIS alike, so assign the look you settle on to the groom for the final RIS render.
+  Strand-to-strand color variation and painted color maps show only in RIS. XPU renders the
+  current frame (render animation with RIS), and needs XGen (Maya's xgenToolkit plugin).
+- **XPU lookdev in the viewport (Maya 2025, preview):** **GroomLab > Render > RenderMan XPU
+  Lookdev (Viewport)** draws every groom with RenderMan XPU right in the viewport, through Maya
+  Hydra, with what the XGen route above lacks: each strand's root UV (texture maps on the hair
+  material work) and GroomLab's per-strand colors (the same look as RIS). Edit the groom's RenderMan
+  material in the Hypershade and the viewport follows; edit the groom and its hair follows too. The
+  groom itself is hidden in the viewport while it's on: turn it off to groom again. It's for the
+  viewport only (batch renders use RIS, or XPU through XGen as above). Nothing to set up: it needs
+  RenderMan for Maya and MayaUSD, both as installed. Maya 2026 and 2024 aren't supported:
+  RenderMan for Maya 27.3's viewport renderer doesn't fit the USD those versions run. Textures
+  (PxrTexture) read each strand's root UV, so a strand takes the map's color where it grows; on a
+  PxrMarschnerHair, raise **Diffuse Gain** (0 by default) to see a texture on its diffuse color.
 - **Color:** GroomLab's melanin and redness are converted to PxrHairColor's (the `rman_melanin`
   and `rman_redness` primvars). Under a strong key light, light hair can render darker than in
   Arnold, because PxrMarschnerHair transmits less light through many hairs.

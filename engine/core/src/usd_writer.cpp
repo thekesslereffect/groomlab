@@ -11,7 +11,9 @@
 #include <vector>
 
 #include "groomlab/export_view.h"
+#include "groomlab/groom_session.h"
 #include "groomlab/parallel.h"
+#include "groomlab/renderman_look.h"
 #include "groomlab/version.h"
 
 namespace groomlab {
@@ -207,6 +209,13 @@ struct UsdCurvesWriter::Impl {
     bool hasUVs = false;
     bool hasColors = false;  // primvars:displayColor (strandColors: HairColor's RGB, else from melanin)
     bool unrealClumps = false, unrealRoughness = false;  // primvars:groom_clump_id, groom_roughness
+    // The RenderMan primvars written (Options::rendermanLook), as the first frame had them.
+    struct RendermanPrimvar {
+        std::string name;
+        renderman::Detail detail;
+        renderman::Type type;
+    };
+    std::vector<RendermanPrimvar> rendermanPrimvars;
     // Instances (Instance node): a PointInstancer beside the curves, its
     // prototypes placeholders to reference geometry into.
     std::vector<std::string> prototypes;
@@ -308,6 +317,18 @@ void UsdCurvesWriter::writeFrame(double frame, const StrandSet& strands, const S
         d.unrealRoughness = view.strandChannel(kRoughnessChannel) != nullptr;
         if (d.unrealClumps) d.add("int[] primvars:groom_clump_id", "interpolation = \"uniform\"");
         if (d.unrealRoughness) d.add("float[] primvars:groom_roughness", "interpolation = \"uniform\"");
+        if (d.options.rendermanLook) {
+            const ExportView rview = describeExport(strands, scalp, kExportPointColors);
+            for (const renderman::Primvar& p : renderman::curvePrimvars(rview, *d.options.rendermanLook)) {
+                if (p.name.rfind("rman_", 0) != 0 && p.name != "hair_index") continue;  // (the rest written above)
+                d.rendermanPrimvars.push_back({p.name, p.detail, p.type});
+                const char* type = p.type == renderman::Type::Float ? "float[]" : p.type == renderman::Type::Int ? "int[]"
+                                 : p.type == renderman::Type::Color ? "color3f[]" : "float2[]";
+                const char* interpolation = p.detail == renderman::Detail::Constant ? "constant"
+                                          : p.detail == renderman::Detail::Uniform ? "uniform" : "vertex";
+                d.add(std::string(type) + " primvars:" + p.name, std::string("interpolation = \"") + interpolation + "\"");
+            }
+        }
         d.instanceStart = d.attributes.size();
         const InstanceSet* set = strands.instances().get();
         if (set && std::any_of(set->instances.begin(), set->instances.end(), [](const InstanceSet::Instance& i) { return !i.meshed(); })) {
@@ -483,6 +504,36 @@ void UsdCurvesWriter::writeFrame(double frame, const StrandSet& strands, const S
     if (d.unrealRoughness) {
         const std::vector<float>* rough = view.strandChannel(kRoughnessChannel);
         emitList(strandCount, [&](TextBuffer& b, std::size_t s) { b.number(rough ? std::clamp((*rough)[s], 0.0f, 1.0f) : 0.0f); });
+    }
+    if (!d.rendermanPrimvars.empty()) {
+        // As the first frame declared them; one missing from this frame, zeros.
+        const ExportView rview = describeExport(strands, scalp, kExportPointColors);
+        const std::vector<renderman::Primvar> now = renderman::curvePrimvars(rview, *d.options.rendermanLook);
+        for (const Impl::RendermanPrimvar& want : d.rendermanPrimvars) {
+            const auto it = std::find_if(now.begin(), now.end(), [&](const renderman::Primvar& p) {
+                return p.name == want.name && p.detail == want.detail && p.type == want.type;
+            });
+            const std::size_t count = want.detail == renderman::Detail::Constant ? 1
+                                    : want.detail == renderman::Detail::Uniform ? strandCount : pointCount;
+            const std::size_t width = want.type == renderman::Type::Color ? 3 : want.type == renderman::Type::Float2 ? 2 : 1;
+            const renderman::Primvar* p = it != now.end() && it->valueCount() == count ? &*it : nullptr;
+            emitList(count, [&](TextBuffer& b, std::size_t i) {
+                if (want.type == renderman::Type::Int) {
+                    b.integer(p ? static_cast<long long>(p->ints[i]) : 0LL);
+                    return;
+                }
+                if (width == 1) {
+                    b.number(p ? p->floats[i] : 0.0f);
+                    return;
+                }
+                b.raw("(");
+                for (std::size_t k = 0; k < width; ++k) {
+                    if (k) b.raw(", ");
+                    b.number(p ? p->floats[i * width + k] : 0.0f);
+                }
+                b.raw(")");
+            });
+        }
     }
     if (!d.prototypes.empty()) {
         // Only prototypes known from the first frame; others are left out (and the scales:
