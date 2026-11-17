@@ -871,8 +871,9 @@ void GuideHierarchy::evaluateGuide(HierarchyGuide& g, const ScalpMesh* scalp, co
     // and, for a shaped tube, its sections' roll (TubeProfile::roll).
     if (!scalp || scalp->triangleCount() == 0) return;
     if (scalp->contains(g.root)) g.rootNormal = scalp->normal(g.root);
-    if (!g.isChild() && isRootTube(g.tube, 0) && g.points.size() >= 2 && scalp->contains(g.root)) {
-        // A root-first tube: its footprint is fixed on the scalp (TubeSpine::setRootOnScalp), so its
+    if (isRootTube(g.tube, 0) && g.points.size() >= 2 && scalp->contains(g.root)) {
+        // A root-first tube, or a slice of one (a tube of its hierarchy with a root shape of its own:
+        // root_tubes.h addTubeLevel): its footprint is fixed on the scalp (TubeSpine::setRootOnScalp), so its
         // whole tube rolls by one angle to meet it: the root section, turned flat onto the scalp by
         // the least rotation from the guide's root way (as a footprint is laid), lands on the fixed
         // one, and the hair leaving the root area keeps its place round the tube, never twisting
@@ -880,6 +881,7 @@ void GuideHierarchy::evaluateGuide(HierarchyGuide& g, const ScalpMesh* scalp, co
         const std::vector<Frame> frames = rotationMinimizingFrames(g.points.data(), g.points.size(), g.frameUp);
         const Vec3f n = scalp->normal(g.root);
         const Vec3f across = scalp->acrossAt(g.root);
+        g.rootAcross = across;
         const Vec3f way = frames.front().tangent;
         float roll = 0.0f;
         if (across.length() > 0.5f && way.length() > 0.5f && way.normalized().dot(n) > -1.0f + 1e-4f) {
@@ -889,6 +891,21 @@ void GuideHierarchy::evaluateGuide(HierarchyGuide& g, const ScalpMesh* scalp, co
                 laid = laid.normalized();
                 roll = std::atan2(n.dot(laid.cross(across)), laid.dot(across));
             }
+        }
+        // A slice (its parent a drawn root's tube too): its sections turned as its parent's are, so the
+        // slices fill the parent's tube side by side all along. (Its guide leaves the scalp from its
+        // part of the parent's footprint, so its own frames start turned a little off the parent's;
+        // matched past the root, where the tube's sections begin.)
+        const HierarchyGuide* parent = g.isChild() ? guide(g.parent) : nullptr;
+        if (parent && isRootTube(parent->tube, 0) && parent->points.size() >= 2) {
+            // (The parent's frames as its tube lays them: TubeSpine's, from its points and frameUp.)
+            const std::vector<Frame> own = rotationMinimizingFrames(parent->points.data(), parent->points.size(), parent->frameUp);
+            const std::size_t j = std::min(g.points.size() - 1, std::max<std::size_t>(2, g.points.size() / 2));
+            const float t = static_cast<float>(j) / static_cast<float>(g.points.size() - 1);
+            const std::size_t pj = std::min(own.size() - 1, static_cast<std::size_t>(std::lround(t * static_cast<float>(own.size() - 1))));
+            const float pr = parent->tube.rollAt(t);
+            const Vec3f along = own[pj].normal * std::cos(pr) + own[pj].binormal * std::sin(pr);
+            roll = std::atan2(along.dot(frames[j].binormal), along.dot(frames[j].normal));
         }
         g.tube.roll = {roll};
     } else if (g.tube.shaped() && g.tube.rollOnScalp && g.points.size() >= 2) {

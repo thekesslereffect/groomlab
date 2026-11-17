@@ -292,29 +292,16 @@ std::map<int, std::vector<GuideId>> levelsUnder(const GuideHierarchy& h, GuideId
     return out;
 }
 
-// The cells split as deep as the old roots were and each smaller tube shaped as the old ones near
-// it (`old`: the hierarchy before; `sources`: per level, the old guides there).
+// The cells split as deep as the old roots were (`sources`: per level, the old guides there; only
+// how deep they went is read). Each level is made from the new cells alone, as + makes it (a drawn
+// root's split: its root shape sliced in two, root_tubes.h addTubeLevel), never shaped after the
+// old guides: the cells changed, so what was groomed under the old ones does not fit them.
 void rebuildLevels(GuideHierarchy& h, const ScalpMesh& scalp, const std::vector<GuideId>& cells,
                    const std::map<int, std::vector<Source>>& sources) {
     if (cells.empty() || sources.empty()) return;
     const int deepest = sources.rbegin()->first;
     for (int level = 2; level <= deepest && level <= kMaxTubeLevels; ++level) addTubeLevel(h, &scalp, cells);
-    for (const auto& [level, from] : sources) {
-        std::vector<GuideId> now;
-        for (const GuideId c : cells) {
-            const auto under = levelsUnder(h, c);
-            const auto it = under.find(level);
-            if (it != under.end()) now.insert(now.end(), it->second.begin(), it->second.end());
-        }
-        for (const GuideId g : now) {
-            const HierarchyGuide* guide = h.guide(g);
-            if (!guide || guide->points.size() < 2) continue;
-            const Vec3f root = guide->points.front();
-            const std::vector<Vec3f> shape = blendedShape(from, root, scalpPointNormal(scalp, root).normal, guide->points.size());
-            if (!shape.empty()) h.setPoints(g, shape);
-        }
-        h.evaluate(&scalp);
-    }
+    h.evaluate(&scalp);
 }
 
 // ---- Cells to root tubes ------------------------------------------------------------------------------

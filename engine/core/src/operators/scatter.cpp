@@ -310,7 +310,7 @@ public:
         const Vec3f move = root - pts.front();
         for (Vec3f& p : pts) p += move;
         TubeSpine spine(pts.data(), pts.size(), g.frameUp, g.tube);
-        if (isRootTube(g.tube, g.depth)) {
+        if (isRootTube(g.tube, 0)) {  // (a root tube, or a slice of one: a root shape of its own)
             spine.setRootOnScalp(normal, across);  // (fixed on the scalp, as Interpolate fills it)
         } else {
             spine.setRootSurface(normal);

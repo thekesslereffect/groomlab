@@ -2328,7 +2328,7 @@ private:
     // another's as the guide's own points lay it (TubeSpine::setFootprint), not its resampled,
     // smoothed shape.
     static void layFootprint(TubeSpine& spine, const Guide& g, const ScalpMesh& scalp, const Vec3f& normal) {
-        if (isRootTube(g.tube, g.depth) && scalp.contains(g.root)) {
+        if (isRootTube(g.tube, 0) && scalp.contains(g.root)) {  // (a slice of one too: its own root shape)
             spine.setRootOnScalp(normal, scalp.acrossAt(g.root));
             return;
         }

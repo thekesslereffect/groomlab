@@ -9,14 +9,15 @@
 // a gray vertex map of the scalp: 1 full density, 0 the least) is high, the cells are smaller and
 // more numerous. Each cell's guide follows the tube it was cut from: the path a strand rooted
 // there takes inside the old tube (TubeSpine), so the cells keep the old guide's shape, spread
-// and taper. Where the old root had a tube hierarchy under it, each cell is split as deep, and
-// each of its smaller tubes takes the shape of the old ones near it, carried onto its new root.
+// and taper. Where the old root had a tube hierarchy under it, each cell is split as deep, each
+// level made afresh from the new cell (a drawn root sliced in two, as + slices it).
 //
 // The groom remembers each subdivision (GuideHierarchy::rootSubdivisions, saved): the old
 // outline, the cells' sites and the density they were cut at. Painting the map again and
 // finishing (applySubdivisionDensity) cuts again only where the density changed: the sites there
 // are thrown again, the rest kept, and a cell whose outline comes out the same keeps its guide and
-// hierarchy untouched. The cells replaced take their shapes from the cells they replace.
+// hierarchy untouched. The new cells take their level 1 shape from the cells they replace; the
+// levels under them are made afresh from the new cells (none of the old shapes carried).
 //
 // The density is read from the scalp's color set of the map's name (the graph's Map nodes read
 // vertex maps so: scalp_maps.h withVertexMaps); a scalp without one reads kDefaultSubdivisionDensity.

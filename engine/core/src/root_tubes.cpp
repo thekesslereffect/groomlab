@@ -1136,6 +1136,12 @@ GuideId duplicateRootTube(GuideHierarchy& h, const ScalpMesh& scalp, GuideId id,
                 for (float& t : kidTube.twist) t = static_cast<float>(t + turned);
                 kidTube.midShape = old->tube.midShape;
                 kidTube.tipShape = old->tube.tipShape;
+                if (old->tube.custom && isRootTube(old->tube, 0)) {  // a slice: its half, a shape of its own
+                    const std::string name = newShapeName(h);
+                    h.setTubeShape(name, old->tube.custom->points, old->tube.custom->smooth);
+                    kidTube.custom = h.tubeShape(name);
+                    kidTube.rollOnScalp = old->tube.rollOnScalp;
+                }
                 kidTube.rootHold = old->tube.rootHold;
                 kidTube.midHold = old->tube.midHold;
                 kidTube.tipHold = old->tube.tipHold;
@@ -1226,6 +1232,126 @@ struct LevelIndex {
         return it == levelOf.end() ? 0 : it->second;
     }
 };
+// ---- Slicing a drawn root's tube in two (issues 85, 86) ---------------------------------------------
+
+// `poly` clipped to the side of the line through `m` where dot(p - m, n) <= 0 (Sutherland-Hodgman).
+std::vector<P2> clipSide(const std::vector<P2>& poly, const P2& m, const P2& n) {
+    std::vector<P2> out;
+    for (std::size_t i = 0; i < poly.size(); ++i) {
+        const P2& a = poly[i];
+        const P2& b = poly[(i + 1) % poly.size()];
+        const double da = (a.x - m.x) * n.x + (a.y - m.y) * n.y, db = (b.x - m.x) * n.x + (b.y - m.y) * n.y;
+        if (da <= 0.0) out.push_back(a);
+        if ((da < 0.0 && db > 0.0) || (da > 0.0 && db < 0.0)) {
+            const double t = da / (da - db);
+            out.push_back({a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t});
+        }
+    }
+    return out;
+}
+
+// At most kMaxTubeShapePoints points: those mattering least to the shape taken out.
+std::vector<P2> capPoints(std::vector<P2> poly) {
+    while (poly.size() > kMaxTubeShapePoints) {
+        std::size_t at = 0;
+        double least = std::numeric_limits<double>::infinity();
+        for (std::size_t i = 0; i < poly.size(); ++i) {
+            const P2& a = poly[(i + poly.size() - 1) % poly.size()];
+            const P2& b = poly[i];
+            const P2& c = poly[(i + 1) % poly.size()];
+            const double area = std::abs((b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y));
+            if (area < least) least = area, at = i;
+        }
+        poly.erase(poly.begin() + static_cast<std::ptrdiff_t>(at));
+    }
+    return poly;
+}
+
+// A drawn root's tube (or a slice of one) split into `kids` (two, just made by generateChildren):
+// its root shape cut in two across its longer side through its middle, each child taking one half
+// as a root shape of its own, its guide the path the half's middle takes inside the parent's tube
+// (from the parent's footprint on the scalp), its sections the parent's scaled to the half. So the
+// two fill the parent's tube as if it were sliced lengthwise: they meet at the cut and never pass
+// through each other unless groomed so. Left as generateChildren made them when the parent has no
+// shape to cut.
+void sliceChildren(GuideHierarchy& h, const ScalpMesh& scalp, GuideId parentId, std::vector<GuideId> kids) {
+    const HierarchyGuide* parent = h.guide(parentId);
+    if (!parent || kids.size() != 2 || !parent->tube.custom || parent->points.size() < 2 || !scalp.contains(parent->root)) return;
+    const TubeProfile ptube = parent->tube;
+    const std::vector<Vec3f> ppoints = parent->points;
+    const Vec3f pframeUp = parent->frameUp;
+    const StrandRoot proot = parent->root;
+    const double w0 = std::max(1e-9, static_cast<double>(ptube.widthAt(0.0f)));
+    const double h0 = w0 * std::max(1e-6, static_cast<double>(ptube.aspectAt(0.0f)));
+    // The root shape in scene units (the section's width across, its height up), its middle and longer way.
+    std::vector<P2> shape;
+    for (const SectionPoint& q : ptube.custom->points) shape.push_back({q.u * w0, q.v * h0});
+    if (shape.size() < 3) return;
+    P2 mid{0.0, 0.0};
+    double area = 0.0;
+    for (std::size_t i = 0; i < shape.size(); ++i) {
+        const P2& a = shape[i];
+        const P2& b = shape[(i + 1) % shape.size()];
+        const double c = a.x * b.y - b.x * a.y;
+        area += c;
+        mid.x += (a.x + b.x) * c;
+        mid.y += (a.y + b.y) * c;
+    }
+    if (std::abs(area) < 1e-18) return;
+    mid = {mid.x / (3.0 * area), mid.y / (3.0 * area)};
+    double sxx = 0.0, syy = 0.0, sxy = 0.0;
+    for (const P2& q : shape) {
+        sxx += (q.x - mid.x) * (q.x - mid.x), syy += (q.y - mid.y) * (q.y - mid.y), sxy += (q.x - mid.x) * (q.y - mid.y);
+    }
+    const double angle = 0.5 * std::atan2(2.0 * sxy, sxx - syy);  // the longer way
+    const P2 longer{std::cos(angle), std::sin(angle)};
+    const std::vector<P2> halves[2] = {clipSide(shape, mid, longer), clipSide(shape, mid, {-longer.x, -longer.y})};
+
+    TubeSpine spine(ppoints.data(), ppoints.size(), pframeUp, ptube, h.scale());
+    spine.setRootOnScalp(scalp.normal(proot), scalp.acrossAt(proot));
+    const std::size_t n = ppoints.size();
+    std::sort(kids.begin(), kids.end());
+    for (int k = 0; k < 2; ++k) {
+        const GuideId kid = kids[static_cast<std::size_t>(k)];
+        if (halves[k].size() < 3 || !h.guide(kid)) continue;
+        // The half in the parent's section coordinates, its box, and its points fitted to it.
+        double lo[2] = {1e300, 1e300}, hi[2] = {-1e300, -1e300};
+        std::vector<P2> unit;
+        for (const P2& q : halves[k]) {
+            const P2 uv{q.x / w0, q.y / h0};
+            unit.push_back(uv);
+            lo[0] = std::min(lo[0], uv.x), lo[1] = std::min(lo[1], uv.y), hi[0] = std::max(hi[0], uv.x), hi[1] = std::max(hi[1], uv.y);
+        }
+        const double cu = 0.5 * (lo[0] + hi[0]), cv = 0.5 * (lo[1] + hi[1]);
+        const double su = std::max(1e-6, 0.5 * (hi[0] - lo[0])), sv = std::max(1e-6, 0.5 * (hi[1] - lo[1]));
+        std::vector<SectionPoint> fitted;
+        for (const P2& q : capPoints(unit)) fitted.push_back({static_cast<float>((q.x - cu) / su), static_cast<float>((q.y - cv) / sv)});
+        const std::string name = newShapeName(h);
+        try {
+            h.setTubeShape(name, fitted, false);
+        } catch (const std::invalid_argument&) {
+            continue;  // (a sliver no shape takes: generateChildren's child stays)
+        }
+        TubeProfile tube = ptube;
+        tube.custom = h.tubeShape(name);
+        tube.midShape.reset();
+        tube.tipShape.reset();
+        for (float& x : tube.width) x = static_cast<float>(x * su);
+        for (float& a : tube.aspect) a = static_cast<float>(clampAspect(a * sv / su));
+        tube.rollOnScalp = false;
+        tube.roll.clear();
+        h.setTube(kid, tube);
+        std::vector<Vec3f> path;
+        const float u = static_cast<float>(cu), v = static_cast<float>(cv);
+        for (std::size_t i = 0; i < n; ++i) {
+            path.push_back(i == 0 ? scalp.closestPoint(spine.footprintAt(u, v)).position
+                                  : spine.at(static_cast<float>(i) / static_cast<float>(n - 1), u, v));
+        }
+        h.setPoints(kid, path);
+    }
+    h.evaluate(&scalp);
+}
+
 LevelIndex indexLevels(const GuideHierarchy& h, const TubeLevels& info) {
     LevelIndex out;
     for (std::size_t depth = 0; depth < info.levels.size(); ++depth) {
@@ -1314,6 +1440,14 @@ std::size_t addTubeLevel(GuideHierarchy& h, const ScalpMesh* scalp, const std::v
         params.split = true;
         h.generateChildren(group, tubeLevelGroup(info.base, level + 1), params, &parents);
         split += parents.size();
+        // A drawn root's tubes: each split is its parent's root shape sliced in two (sliceChildren).
+        if (scalp) {
+            h.evaluate(scalp);
+            for (const GuideId p : parents) {
+                const HierarchyGuide* g = h.guide(p);
+                if (g && isRootTube(g->tube, 0)) sliceChildren(h, *scalp, p, h.childrenOf(p));
+            }
+        }
     }
     h.evaluate(scalp);
     return split;

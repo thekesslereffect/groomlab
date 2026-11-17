@@ -89,6 +89,11 @@ struct HierarchyGuide {
     // The scalp's normal at its root, from the last evaluate on a scalp (zero before): where its
     // children root on a shaped tube's footprint (generateChildren). Not stored, not hashed.
     Vec3f rootNormal;
+    // A root-first tube's (or a slice of one's: a tube of its hierarchy taking a root shape of its
+    // own) direction across the scalp at its root (ScalpMesh::acrossAt), from the last evaluate on
+    // a scalp (zero before): what lays its footprint on the scalp where it draws (display.h, issue
+    // 86). Not stored, not hashed.
+    Vec3f rootAcross;
 
     // Following children only (GH-5): shape relative to the parent, one entry
     // per parent sample t = i / (n - 1). x and y are the parent tube's section

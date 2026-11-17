@@ -9,8 +9,10 @@
 #include <map>
 #include <set>
 
+#include "groomlab/display.h"
 #include "groomlab/root_subdivision.h"
 #include "groomlab/root_tubes.h"
+#include "groomlab/tube.h"
 #include "test_helpers.h"
 
 namespace groomlab {
@@ -207,6 +209,127 @@ TEST(RootSubdivision, PaintingAgainCutsOnlyWhereTheDensityChanged) {
     }
     const auto roots = rootTubesOf(h);
     EXPECT_EQ(live, std::set<GuideId>(roots.begin(), roots.end()));
+}
+
+// A point's section coordinates in a spine's sample i (its center and axes).
+SectionPoint inSection(const TubeSpine& spine, std::size_t i, const Vec3f& p) {
+    const Vec3f d = p - spine.center(i);
+    const Vec3f a = spine.axisU(i), b = spine.axisV(i);
+    const float aa = a.dot(a), bb = b.dot(b), ab = a.dot(b), da = d.dot(a), db = d.dot(b);
+    const float det = aa * bb - ab * ab;
+    return {(da * bb - db * ab) / det, (db * aa - da * ab) / det};
+}
+
+// Whether `p` lies inside polygon `poly` deeper than `slack` (its distance to the edge), or (with
+// `outside`) outside it farther than `slack`.
+bool deepInside(const std::vector<SectionPoint>& poly, const SectionPoint& p, float slack, bool outside = false) {
+    bool in = false;
+    float edge = 1e30f;
+    for (std::size_t i = 0, j = poly.size() - 1; i < poly.size(); j = i++) {
+        const SectionPoint& a = poly[i];
+        const SectionPoint& b = poly[j];
+        if ((a.v > p.v) != (b.v > p.v) && p.u < (b.u - a.u) * (p.v - a.v) / (b.v - a.v) + a.u) in = !in;
+        const float du = b.u - a.u, dv = b.v - a.v, span = du * du + dv * dv;
+        const float f = span > 0.0f ? std::clamp(((p.u - a.u) * du + (p.v - a.v) * dv) / span, 0.0f, 1.0f) : 0.0f;
+        edge = std::min(edge, std::hypot(p.u - (a.u + du * f), p.v - (a.v + dv * f)));
+    }
+    return (outside ? !in : in) && edge > slack;
+}
+
+// A drawn root's split: two slices of its root shape, side by side, each a shape of its own; all
+// along the tube neither slice reaches into the other (they never pass through each other) and
+// both stay inside their parent's tube.
+void expectSliced(const GuideHierarchy& h, GuideId parentId) {
+    const HierarchyGuide* parent = h.guide(parentId);
+    ASSERT_NE(parent, nullptr);
+    std::vector<GuideId> kids = h.childrenOf(parentId);
+    ASSERT_EQ(kids.size(), 2u);
+    const TubeSpine pspine(parent->points.data(), parent->points.size(), parent->frameUp, parent->tube, h.scale());
+    std::vector<TubeSpine> spines;
+    for (const GuideId k : kids) {
+        const HierarchyGuide* kid = h.guide(k);
+        ASSERT_NE(kid, nullptr);
+        ASSERT_TRUE(kid->tube.custom);
+        EXPECT_TRUE(isRootTube(kid->tube, 0)) << "a slice takes a root shape of its own";
+        EXPECT_NE(kid->tube.custom->name, parent->tube.custom->name);
+        ASSERT_EQ(kid->points.size(), parent->points.size());
+        spines.emplace_back(kid->points.data(), kid->points.size(), kid->frameUp, kid->tube, h.scale());
+    }
+    const std::vector<SectionPoint>& own = tubeOutline(parent->tube);
+    for (std::size_t i = 1; i < parent->points.size(); ++i) {
+        // Each slice's outline at sample i in the parent's section there.
+        std::vector<SectionPoint> at[2];
+        for (std::size_t k = 0; k < 2; ++k) {
+            for (const SectionPoint& q : tubeOutline(h.guide(kids[k])->tube)) at[k].push_back(inSection(pspine, i, spines[k].atSample(i, q.u, q.v)));
+        }
+        for (std::size_t k = 0; k < 2; ++k) {
+            for (const SectionPoint& q : at[k]) {
+                EXPECT_FALSE(deepInside(at[1 - k], q, 0.03f)) << "slice " << k << " reaches into the other at sample " << i;
+                EXPECT_FALSE(deepInside(own, q, 0.05f, true)) << "slice " << k << " leaves its parent's tube at sample " << i;
+            }
+        }
+    }
+}
+
+TEST(RootSlices, ASplitSlicesTheRootShapeInTwo) {
+    GuideHierarchy h;
+    const auto scalp = head();
+    RootTubeOptions o;
+    o.length = 0.8f;
+    o.segments = 8;
+    const std::vector<Vec3f> oval = [] {
+        std::vector<Vec3f> out;
+        const Vec3f up{0, 1, 0};
+        for (int k = 0; k < 10; ++k) {
+            const float t = 2.0f * kPi * static_cast<float>(k) / 10.0f;
+            out.push_back((up + Vec3f{0.3f * std::cos(t), 0.0f, 0.12f * std::sin(t)}).normalized());
+        }
+        return out;
+    }();
+    // Straight off the scalp, and along a drawn curve.
+    const GuideId straight = makeRootTube(h, *scalp, oval, {}, o);
+    addTubeLevel(h, scalp.get(), {straight});
+    expectSliced(h, straight);
+    GuideHierarchy curved;
+    const std::vector<Vec3f> path{{0, 1, 0}, {0.1f, 1.3f, 0}, {0.35f, 1.5f, 0}, {0.7f, 1.55f, 0.05f}};
+    const GuideId bent = makeRootTube(curved, *scalp, oval, path, o);
+    addTubeLevel(curved, scalp.get(), {bent});
+    expectSliced(curved, bent);
+    // A level deeper: each slice sliced again.
+    addTubeLevel(curved, scalp.get(), {bent});
+    for (const GuideId k : curved.childrenOf(bent)) expectSliced(curved, k);
+}
+
+TEST(RootSlices, ADrawnTubeStartsOnItsRootOutline) {
+    // Issue 86: the tube drawn (its wire's first ring) lies on the scalp, on the outline drawn,
+    // however the guide leans; the hair's footprint and the drawn tube meet.
+    GuideHierarchy h;
+    const auto scalp = head();
+    const std::vector<Vec3f> outline = ring({0, 1, 0}, 0.2f, 8);
+    const std::vector<Vec3f> path{{0, 1, 0}, {0.3f, 1.1f, 0}, {0.8f, 1.15f, 0}};  // leaning hard over
+    const GuideId g = makeRootTube(h, *scalp, outline, path);
+    h.evaluate(scalp.get());
+    std::vector<Vec3f> wire;
+    appendTubeWire(wire, *h.guide(g), h.scale(), 8, 1);
+    ASSERT_GE(wire.size(), 64u);
+    float off = 0.0f;
+    for (std::size_t i = 0; i < 64; ++i) off = std::max(off, std::abs(wire[i].length() - 1.0f));  // the first ring
+    // On the footprint, flat on the scalp as the hair's roots are: off the unit sphere by its sag
+    // alone (a root of radius 0.2: about 0.02 at its edge). Drawn as the root section instead, a
+    // guide leaning this far would start its tube some 0.15 above or into the scalp.
+    EXPECT_LT(off, 0.035f) << "the root ring lies on the scalp";
+}
+
+TEST(RootSubdivision, PaintingAgainRebuildsTheLevelsFromTheNewCells) {
+    const ScalpMesh before = painted([](const Vec3f&) { return 0.3f; });
+    GuideHierarchy h;
+    const GuideId root = bigRoot(h, before);
+    addTubeLevel(h, &before, {root});
+    subdivideRootTubes(h, before, {root});
+    const ScalpMesh after = painted([](const Vec3f& p) { return p.x > 0.2f ? 1.0f : 0.3f; });
+    const auto again = applySubdivisionDensity(h, after);
+    ASSERT_FALSE(again.cells.empty());
+    for (const GuideId c : again.cells) expectSliced(h, c);
 }
 
 }  // namespace
