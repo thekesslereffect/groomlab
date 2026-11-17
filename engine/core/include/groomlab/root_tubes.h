@@ -165,6 +165,18 @@ TubeSpine sourceSpine(const TubeSource& source, float scale = 1.0f);
 // (the line misses, or hits far past it).
 Vec3f alongNormal(const ScalpMesh& scalp, const Vec3f& p, const Vec3f& normal);
 
+// Where drawn roots' tubes (root tubes and their slices) pass into each other: each pair of
+// neighbours of one group (`guides`: those; none: every such tube), at each point past the root
+// (the same share of the way along each), how deep one's outline reaches into the other's section
+// (a share of that section's half-width). The deepest of each pair, deepest first; none when they
+// tile. What the tests and the hosts' checks measure.
+struct TubeOverlap {
+    GuideId into = kNoGuide, from = kNoGuide;
+    float at = 0.0f;     // the share of the way along (0 root, 1 tip)
+    float depth = 0.0f;  // how deep, a share of `into`'s half-width
+};
+std::vector<TubeOverlap> tubeOverlaps(const GuideHierarchy& h, const std::vector<GuideId>& guides = {});
+
 // ---- The tube hierarchy ------------------------------------------------------------------------------
 
 // Level `level`'s group (1: the base) in base group `base`'s hierarchy.

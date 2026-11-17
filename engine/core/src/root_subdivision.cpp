@@ -858,8 +858,25 @@ bool recut(GuideHierarchy& h, const ScalpMesh& scalp, std::size_t index, const R
 
 }  // namespace
 
+namespace {
+// The subdivisions with no cell left (every one removed, or cut again into a cut of its own) let
+// go of: nothing of theirs is left to cut again.
+void dropEmptyCuts(GuideHierarchy& h) {
+    std::vector<RootSubdivisionRecord> records = h.rootSubdivisions();
+    const std::size_t had = records.size();
+    records.erase(std::remove_if(records.begin(), records.end(),
+                                 [&](const RootSubdivisionRecord& r) {
+                                     return std::none_of(r.cells.begin(), r.cells.end(),
+                                                         [&](GuideId c) { return c != kNoGuide && h.guide(c); });
+                                 }),
+                  records.end());
+    if (records.size() != had) h.setRootSubdivisions(std::move(records));
+}
+}  // namespace
+
 SubdivisionResult subdivideRootTubes(GuideHierarchy& h, const ScalpMesh& scalp, const std::vector<GuideId>& guides,
                                      const RootSubdivisionOptions& options) {
+    dropEmptyCuts(h);
     if (guides.empty()) throw std::invalid_argument("select a root tube to subdivide");
     const std::vector<GuideId> roots = rootTubesOf(h, guides);  // (a smaller tube of the hierarchy: its root tube)
     if (roots.empty()) throw std::invalid_argument("the selection holds no root tube to subdivide");
@@ -872,6 +889,7 @@ SubdivisionResult subdivideRootTubes(GuideHierarchy& h, const ScalpMesh& scalp, 
 
 SubdivisionResult applySubdivisionDensity(GuideHierarchy& h, const ScalpMesh& scalp, const std::vector<GuideId>& guides,
                                           const RootSubdivisionOptions& options) {
+    dropEmptyCuts(h);
     h.evaluate(&scalp);
     SubdivisionResult result;
     for (std::size_t i = 0; i < h.rootSubdivisions().size(); ++i) {

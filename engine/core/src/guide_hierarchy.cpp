@@ -1333,6 +1333,12 @@ void GuideHierarchy::removeGuides(const std::vector<GuideId>& ids, bool dropEmpt
                                  [&](const HierarchyGuide& g) { return doomed.count(g.id) > 0; }),
                   guides_.end());
     rebuildIndex();
+    // The root subdivisions forget the cells removed (a later guide of the same ID is not theirs).
+    for (RootSubdivisionRecord& r : rootSubdivisions_) {
+        for (GuideId& c : r.cells) {
+            if (doomed.count(c)) c = kNoGuide;
+        }
+    }
     if (!emptied.empty()) {
         for (const GroupId id : std::vector<GroupId>(emptied.begin(), emptied.end())) {
             for (const GuideGroup* g = group(id); g && g->parent != kNoGroup; g = group(g->parent)) emptied.insert(g->parent);

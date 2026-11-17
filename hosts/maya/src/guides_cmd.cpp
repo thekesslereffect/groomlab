@@ -97,7 +97,7 @@ const char* kSymmetry[] = {"-sym", "-symmetry"};
 // Root-first tubes and the tube hierarchy (root_tubes.h), and subdividing roots
 // (root_subdivision.h): one JSON request {"op", ...}. Edits ("make", "edit", "keepOutline",
 // "duplicate", "delete", "addLevel", "removeLevel", "subdivide", "applyDensity") are one undo step; queries
-// ("densityMap" too)
+// ("densityMap", "overlaps" too)
 // ("outline", "sectionOutline", "center", "rootTubes", "levels", "levelVisibility",
 // "footprintError", "carry", "sealed", "surface") change nothing. Returns JSON.
 const char* kRootTubes[] = {"-rtb", "-rootTubes"};
@@ -932,6 +932,13 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                         return answer(tubeLevelVisibility(*h, request.value("base", std::string()), request.value("level", 1)));
                     }
                     if (op == "footprintError") return answer(rootFootprintError(*h, *scalp, guide));
+                    if (op == "overlaps") {  // drawn roots' tubes passing into each other (root_tubes.h tubeOverlaps)
+                        nlohmann::json out = nlohmann::json::array();
+                        for (const TubeOverlap& o : tubeOverlaps(*h, ids("guides"))) {
+                            out.push_back({{"into", o.into}, {"from", o.from}, {"at", o.at}, {"depth", o.depth}});
+                        }
+                        return answer(out);
+                    }
                     if (op == "densityMap") {  // the density map to paint for cutting "guides" (root_subdivision.h)
                         bool fresh = false;
                         std::vector<std::string> taken;

@@ -1469,6 +1469,75 @@ std::map<std::string, bool> tubeLevelVisibility(const GuideHierarchy& h, const s
     return out;
 }
 
+// ---- Overlaps -------------------------------------------------------------------------------------------
+
+std::vector<TubeOverlap> tubeOverlaps(const GuideHierarchy& h, const std::vector<GuideId>& guides) {
+    std::vector<const HierarchyGuide*> tubes;
+    if (guides.empty()) {
+        for (const HierarchyGuide& g : h.guides()) {
+            if (isRootTube(g.tube, 0) && g.points.size() >= 2 && !g.tube.blended()) tubes.push_back(&g);
+        }
+    } else {
+        for (const GuideId id : guides) {
+            const HierarchyGuide* g = h.guide(id);
+            if (g && isRootTube(g->tube, 0) && g->points.size() >= 2 && !g->tube.blended()) tubes.push_back(g);
+        }
+    }
+    std::vector<TubeSpine> spines;
+    std::vector<float> reach;
+    for (const HierarchyGuide* g : tubes) {
+        spines.emplace_back(g->points.data(), g->points.size(), g->frameUp, g->tube, h.scale());
+        reach.push_back(std::max(spines.back().rootWidth(), spines.back().rootHeight()));
+    }
+    // A point's section coordinates at a spine's sample (its center and axes, least squares).
+    auto coords = [](const TubeSpine& s, std::size_t i, const Vec3f& p) {
+        const Vec3f d = p - s.center(i), a = s.axisU(i), b = s.axisV(i);
+        const float aa = a.dot(a), bb = b.dot(b), ab = a.dot(b), da = d.dot(a), db = d.dot(b);
+        const float det = std::max(aa * bb - ab * ab, 1e-30f);
+        return SectionPoint{(da * bb - db * ab) / det, (db * aa - da * ab) / det};
+    };
+    // How far inside the outline (unit coordinates) a point lies; below 0: outside.
+    auto depthIn = [](const std::vector<SectionPoint>& poly, const SectionPoint& p) {
+        bool in = false;
+        float edge = std::numeric_limits<float>::infinity();
+        for (std::size_t i = 0, j = poly.size() - 1; i < poly.size(); j = i++) {
+            const SectionPoint& a = poly[i];
+            const SectionPoint& b = poly[j];
+            if ((a.v > p.v) != (b.v > p.v) && p.u < (b.u - a.u) * (p.v - a.v) / (b.v - a.v) + a.u) in = !in;
+            const float du = b.u - a.u, dv = b.v - a.v, span = du * du + dv * dv;
+            const float f = span > 0.0f ? std::clamp(((p.u - a.u) * du + (p.v - a.v) * dv) / span, 0.0f, 1.0f) : 0.0f;
+            edge = std::min(edge, std::hypot(p.u - (a.u + du * f), p.v - (a.v + dv * f)));
+        }
+        return in ? edge : -edge;
+    };
+    std::vector<TubeOverlap> out;
+    for (std::size_t x = 0; x < tubes.size(); ++x) {
+        for (std::size_t y = 0; y < tubes.size(); ++y) {
+            if (x == y || tubes[x]->group != tubes[y]->group) continue;
+            const float apart = (tubes[x]->points.front() - tubes[y]->points.front()).length();
+            if (apart > 2.0f * (reach[x] + reach[y])) continue;  // (not neighbours)
+            const HierarchyGuide& into = *tubes[x];
+            const HierarchyGuide& from = *tubes[y];
+            const std::vector<SectionPoint>& own = tubeOutline(into.tube);
+            const std::vector<SectionPoint>& theirs = tubeOutline(from.tube);
+            TubeOverlap worst;
+            const std::size_t n = into.points.size(), m = from.points.size();
+            for (std::size_t i = 1; i < n; ++i) {
+                const float t = static_cast<float>(i) / static_cast<float>(n - 1);
+                const std::size_t j = std::min(m - 1, static_cast<std::size_t>(std::lround(t * static_cast<float>(m - 1))));
+                if (j == 0) continue;
+                for (const SectionPoint& q : theirs) {
+                    const float d = depthIn(own, coords(spines[x], i, spines[y].atSample(j, q.u, q.v)));
+                    if (d > worst.depth) worst = {into.id, from.id, t, d};
+                }
+            }
+            if (worst.depth > 0.0f) out.push_back(worst);
+        }
+    }
+    std::sort(out.begin(), out.end(), [](const TubeOverlap& a, const TubeOverlap& b) { return a.depth > b.depth; });
+    return out;
+}
+
 // ---- Slices of a tube ----------------------------------------------------------------------------------
 
 Vec3f alongNormal(const ScalpMesh& scalp, const Vec3f& p, const Vec3f& normal) {

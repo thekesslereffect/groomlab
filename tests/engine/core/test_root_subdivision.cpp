@@ -305,6 +305,7 @@ TEST(RootSlices, ASplitSlicesTheRootShapeInTwo) {
     // A level deeper: each slice sliced again.
     addTubeLevel(curved, scalp.get(), {bent});
     for (const GuideId k : curved.childrenOf(bent)) expectSliced(curved, k);
+    EXPECT_TRUE(tubeOverlaps(curved).empty()) << "tubeOverlaps finds slices passing into each other";
 }
 
 TEST(RootSlices, ADrawnTubeStartsOnItsRootOutline) {
@@ -471,6 +472,7 @@ TEST(RootSubdivision, CellsTileTheTubeAllAlongWithNoPenetration) {
     const TubeSpine pspine = sourceSpine(source, h.scale());
     const std::vector<GuideId> cells = subdivideRootTubes(h, *scalp, {root}).cells;
     ASSERT_GE(cells.size(), 4u);
+    EXPECT_TRUE(tubeOverlaps(h, cells).empty()) << "tubeOverlaps finds cells passing into each other";
     std::vector<TubeSpine> spines;
     for (const GuideId c : cells) {
         const HierarchyGuide* g = h.guide(c);
@@ -662,6 +664,52 @@ TEST(RootSubdivision, ACellCutAgainLeavesItsFirstCut) {
             EXPECT_FALSE(deepInside(poly, {q.dot(a), q.dot(b)}, 0.02f * size)) << "a new root of cut 01 inside the cell cut again";
         }
     }
+}
+
+TEST(RootSubdivision, TubeOverlapsFindsTubesPassingIntoEachOther) {
+    // Two cells, one pushed half its width into the other: the measure says so.
+    GuideHierarchy h;
+    const auto scalp = head();
+    RootTubeOptions o;
+    o.length = 0.8f;
+    const auto cells = subdivideRootTubes(h, *scalp, {makeRootTube(h, *scalp, ring({0, 1, 0}, 0.3f, 10), {}, o)}).cells;
+    ASSERT_GE(cells.size(), 2u);
+    EXPECT_TRUE(tubeOverlaps(h).empty());
+    // The cell nearest the first, moved halfway onto it along the tube.
+    GuideId other = cells[1];
+    for (const GuideId c : cells) {
+        if (c != cells[0] && (h.guide(c)->points.front() - h.guide(cells[0])->points.front()).length() <
+                                 (h.guide(other)->points.front() - h.guide(cells[0])->points.front()).length()) {
+            other = c;
+        }
+    }
+    std::vector<Vec3f> pts = h.guide(other)->points;
+    const Vec3f toward = (h.guide(cells[0])->points.front() - pts.front()) * 0.5f;
+    for (std::size_t i = 1; i < pts.size(); ++i) pts[i] = pts[i] + toward;
+    h.setPoints(other, pts);
+    h.evaluate(scalp.get());
+    const auto found = tubeOverlaps(h);
+    ASSERT_FALSE(found.empty());
+    EXPECT_GT(found.front().depth, 0.1f);
+}
+
+TEST(RootSubdivision, ACutWhoseRootsAreAllGoneIsForgotten) {
+    // Its cells deleted: the cut forgets them at once (a later guide of the same ID is not its),
+    // and the next cut lets the cut go.
+    GuideHierarchy h;
+    const auto scalp = head();
+    RootSubdivisionOptions o;
+    o.map = subdivisionDensityMapName(1);
+    const auto cells = subdivideRootTubes(h, *scalp, {bigRoot(h, *scalp)}, o).cells;
+    deleteRootTubes(h, *scalp, cells);
+    ASSERT_EQ(h.rootSubdivisions().size(), 1u);
+    for (const GuideId c : h.rootSubdivisions()[0].cells) EXPECT_EQ(c, kNoGuide);
+    RootTubeOptions r;
+    const GuideId b = makeRootTube(h, *scalp, ring(Vec3f{0.0f, 0.6f, 0.8f}.normalized(), 0.25f, 8), {}, r);
+    o.map = subdivisionDensityMapName(2);
+    subdivideRootTubes(h, *scalp, {b}, o);
+    ASSERT_EQ(h.rootSubdivisions().size(), 1u);
+    EXPECT_EQ(h.rootSubdivisions()[0].map, subdivisionDensityMapName(2));
 }
 
 }  // namespace
