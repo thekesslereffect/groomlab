@@ -21,6 +21,9 @@ from maya import cmds
 from gui_support import check, finish, say, soon
 
 FIRST, LAST = 1, 10
+# Dense enough for GPU Override to take the wraps (it leaves meshes under its minimum vertex
+# count, a couple of thousand, on the CPU; a real scalp is denser still).
+SUBDIVISIONS = {"subdivisionsX": 80, "subdivisionsY": 40}
 FRAMES = (FIRST, 5, LAST, 3)
 
 
@@ -43,7 +46,11 @@ def grow(groom, angles):
 def wrap(meshes, driver):
     from maya.internal.nodes.proximitywrap import node_interface
     node = cmds.deformer(meshes, type="proximityWrap")[0]
-    node_interface.NodeInterface(node).addDriver(driver)
+    face = node_interface.NodeInterface(node)
+    if hasattr(face, "addDrivers"):  # Maya 2023+
+        face.addDrivers([driver])
+    else:  # Maya 2022
+        face.addDriver(driver)
     return node
 
 
@@ -53,16 +60,16 @@ def scene(kind):
     cmds.file(new=True, force=True)
     cmds.playbackOptions(minTime=FIRST, maxTime=LAST, animationStartTime=FIRST, animationEndTime=LAST,
                          loop="once", playbackSpeed=0, maxPlaybackSpeed=0)
-    body = cmds.polySphere(radius=1, subdivisionsX=30, subdivisionsY=15, name="body")[0]
+    body = cmds.polySphere(radius=1, name="body", **SUBDIVISIONS)[0]
     target = cmds.duplicate(body, name="corrective")[0]
-    cmds.select(target + ".vtx[0:200]")
+    cmds.select(target + ".vtx[0:1200]")
     cmds.move(0.5, 0, 0, relative=True)
     blend = cmds.blendShape(target, body)[0]
     cmds.delete(target)
     cmds.setKeyframe(blend, attribute="w[0]", time=FIRST, value=0)
     cmds.setKeyframe(blend, attribute="w[0]", time=LAST, value=1)
     driver = cmds.listRelatives(body, shapes=True)[0]
-    scalps = [cmds.polySphere(radius=1.01, subdivisionsX=30, subdivisionsY=15, name=n)[0] for n in ("scalpA", "scalpB")]
+    scalps = [cmds.polySphere(radius=1.01, name=n, **SUBDIVISIONS)[0] for n in ("scalpA", "scalpB")]
     angles = ((0.3, 0.7), (1.2, 1.6))
     grooms = []
     if kind == "extra":
@@ -71,9 +78,10 @@ def scene(kind):
         groomlab.add_scalp(groom, scalps[1])
         grow(groom, angles[0] + angles[1])
         grooms.append(groom)
-    elif kind == "rig":
+    elif kind in ("rig", "rig_shared"):
         # Issue #76's setup: the scalps groomed first, then wrapped to the character, whose rig
-        # (a skinned body) moves them.
+        # (a skinned body) moves them; rig_shared: one wrap for every scalp (as the user rigs it:
+        # one Proximity Wrap is lighter than a Wrap per scalp).
         cmds.select(clear=True)
         joint = cmds.joint(position=(0, -1, 0))
         cmds.skinCluster(joint, body, toSelectedBones=True)
@@ -83,8 +91,11 @@ def scene(kind):
             groom = groomlab.create_groom(s)
             grow(groom, a)
             grooms.append(groom)
-        for s in scalps:
-            wrap([s], driver)
+        if kind == "rig_shared":
+            wrap(scalps, driver)
+        else:
+            for s in scalps:
+                wrap([s], driver)
     elif kind == "skinned":
         cmds.select(clear=True)
         joint = cmds.joint(position=(0, 0, 0))
@@ -115,8 +126,12 @@ def scene(kind):
 
 
 def strands(groom):
-    values = cmds.groomLabGraphStats(groom, points=True) or []
-    return hashlib.md5(",".join("%.4f" % v for v in values).encode()).hexdigest()[:12]
+    return tuple(cmds.groomLabGraphStats(groom, points=True) or [])
+
+
+def apart(a, b):
+    """How far two strand point lists are apart: the largest coordinate difference (inf: other counts)."""
+    return max((abs(x - y) for x, y in zip(a, b)), default=0.0) if len(a) == len(b) else float("inf")
 
 
 def shot(folder, name, frame):
@@ -135,13 +150,6 @@ def differ(a, b):
     ib = ib.convertToFormat(QtGui.QImage.Format_RGB32)
     off = sum(1 for y in range(ia.height()) for x in range(ia.width()) if ia.pixel(x, y) != ib.pixel(x, y))
     return off / float(ia.width() * ia.height())
-
-
-def gpu_chains():
-    try:
-        return cmds.deformerEvaluator(query=True, chains=True)
-    except Exception as e:  # noqa: BLE001
-        return "(%s)" % e
 
 
 def set_mode(mode):
@@ -175,14 +183,20 @@ def run_scene(kind, folder):
     for mode in ("parallel", "gpu", "cached"):
         set_mode(mode)
         if mode == "gpu":
-            say("%s gpu: GPU chains %s" % (kind, gpu_chains()))
+            if kind == kinds_run()[0]:
+                try:
+                    say("GPU Override's fewest vertices: %s" % cmds.deformerEvaluator(query=True, minimumVerts=True))
+                except Exception as e:  # noqa: BLE001
+                    say("GPU Override's fewest vertices: (%s)" % e)
         rows = step("%s_%s" % (kind, mode), grooms, scalps, folder)
         for (f, sx, st, pic), (_, rsx, rst, rpic) in zip(rows, reference):
             name = "%s %s frame %d" % (kind, mode, f)
-            if sx != rsx or st != rst:
-                say("%s: scalp x %s (dg %s), strands %s (dg %s)" % (name, sx, rsx, st, rst))
+            far = [apart(a, b) for a, b in zip(st, rst)]
+            if sx != rsx or max(far) > 0:
+                say("%s: scalp x %s (dg %s), strands apart from the DG's by %s" % (name, sx, rsx, ["%.2g" % d for d in far]))
             check(name + ": the scalps deform as with the DG", sx == rsx)
-            check(name + ": the strands follow the scalps as with the DG", st == rst)
+            # (GPU Override's deformers round otherwise than the CPU's: a hair's breadth allowed)
+            check(name + ": the strands follow the scalps as with the DG (%.2g apart)" % max(far), max(far) < 1e-3)
             share = differ(pic, rpic)
             check("%s: the viewport draws what the DG draws (%.4f differ)" % (name, share), share < 0.002)
         for g in range(len(grooms)):
@@ -194,6 +208,13 @@ def run_scene(kind, folder):
     check("%s dg: the viewport's picture changes from frame to frame" % kind, len(pictures) == len(FRAMES))
 
 
+def kinds_run():
+    return [k.strip() for k in os.environ.get("GROOMLAB_GUI_CASES", "").split(",") if k.strip()] or list(KINDS)
+
+
+KINDS = ("rig", "rig_shared", "separate", "shared", "skinned", "extra")
+
+
 def run():
     import gui_cached_playback as cached
     folder = tempfile.mkdtemp(prefix="groomlab_deformers_")
@@ -201,8 +222,7 @@ def run():
            "gpu": cmds.evaluator(name="deformer", query=True, enable=True),
            "cache": cached.cache_manager().enabled}
     try:
-        kinds = [k.strip() for k in os.environ.get("GROOMLAB_GUI_CASES", "").split(",") if k.strip()]
-        for kind in kinds or ("rig", "separate", "shared", "skinned", "extra"):
+        for kind in kinds_run():
             run_scene(kind, folder)
     finally:
         cached.cache_manager().enabled = was["cache"]
