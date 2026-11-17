@@ -460,6 +460,30 @@ class RootTubes(unittest.TestCase):
         self.assertAlmostEqual(tm._dist(a, b), 0.1, delta=0.02)  # half the width apart each side
         self.assertTrue(ids)
 
+    def test_a_root_subdivided_by_its_painted_density(self):
+        """Issue 85: Subdivide cuts a root into cells (one undo step), the density map makes more of
+        them where it is white, and Finish painting cuts again only where the map changed."""
+        guide = root_tubes.make_root_tube(self.groom, ring((0.0, 1.0, 0.0), 0.35, count=12), length=0.8)
+        before = len(groomlab.get_hierarchy(self.groom)["guides"])
+        cut = root_tubes.subdivide(self.groom, [guide])
+        self.assertGreaterEqual(len(cut["cells"]), 4)
+        self.assertEqual(sorted(root_tubes.root_tubes(self.groom)), sorted(cut["cells"]))
+        cmds.undo()
+        self.assertEqual(len(groomlab.get_hierarchy(self.groom)["guides"]), before)
+        self.assertEqual(root_tubes.root_tubes(self.groom), [guide])
+        cmds.redo()
+        self.assertEqual(sorted(root_tubes.root_tubes(self.groom)), sorted(cut["cells"]))
+        # Nothing painted since: nothing cut again.
+        self.assertEqual(root_tubes.apply_density(self.groom)["cells"], [])
+        # The map made at 0.5, then white everywhere: more, smaller roots.
+        self.assertEqual(root_tubes.ensure_density_map(self.groom), root_tubes.DENSITY_MAP)
+        from groomlab import painting
+        self.assertEqual(painting.map_kind(self.groom, root_tubes.DENSITY_MAP), "vertices")
+        painting.fill_map(self.groom, root_tubes.DENSITY_MAP, value=1.0)
+        again = root_tubes.apply_density(self.groom)
+        self.assertGreater(len(again["cells"]), len(cut["cells"]))
+        self.assertGreater(again["removed"], 0)
+
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 

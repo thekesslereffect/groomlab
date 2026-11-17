@@ -7,11 +7,14 @@ Tube roots (issue 61)   Draw root: the root's outline clicked on the scalp CV by
                         middle and drag it over the scalp), with Duplicate and Delete for the
                         selected root. A mode's button again leaves it (Draw and Select: as they
                         are; Edit: finished). Undo CV, Delete, Duplicate; the new tubes' Length,
-                        Segments and Taper; Snap to neighbours.
-Tube hierarchy (#62)    Add splits the selected tubes (or every tube of the base group) in two, a
-                        level deeper; a row of level buttons, 1 (the base) always there, shows and
+                        Segments and Taper; Snap to neighbours. Subdivide (#85) cuts the selected
+                        root into Voronoi cells; Paint subdivision density paints the map that
+                        makes them smaller and more numerous, and Finish painting cuts again.
+Tube hierarchy (#62)    + splits the selected tubes (or every tube of the base group) in two, a
+                        level deeper; - undoes a split (the selected tubes', else the deepest
+                        level); then a row of level buttons, 1 (the base) always there, shows and
                         picks a level to work on (the Tube tool and the brushes then edit that
-                        level's tubes; the others hidden). Remove undoes a split: the selected tubes', else the deepest level.
+                        level's tubes; the others hidden).
 
 The viewport side is groomlab.ui.root_tube_tool; the work, groomlab.root_tubes.
 """
@@ -64,6 +67,19 @@ class RootTubeCard(QtCore.QObject):
                                            "hierarchy. Again: stop", False, "rootTubeDuplicate")
         self.duplicate_root.clicked.connect(self.duplicate_clicked)
         self.root_block.add(widgets.chip_row((self.undo_cv, self.delete_root, self.duplicate_root)))
+        self.subdivide_root = widgets.chip("Subdivide", "Cut the selected root (Select root) into Voronoi cells, each "
+                                           "a root tube of its own following the old tube, smaller and more numerous "
+                                           "where Paint subdivision density painted it white; the tube hierarchy under "
+                                           "it is made again in each", None, "rootTubeSubdivide")
+        self.subdivide_root.clicked.connect(self.subdivide_clicked)
+        self.paint_density = widgets.chip("Paint subdivision density", "Paint the tubeSubdivisionDensity map (made "
+                                          "at 0.5 if missing) on the scalp: white, more and smaller roots; black, fewer "
+                                          "and larger. Again (Finish painting): the selected root cut by it, and the "
+                                          "roots cut before cut again only where the map changed", False,
+                                          "rootTubePaintDensity")
+        self.paint_density.clicked.connect(self.paint_density_clicked)
+        self.root_block.add(widgets.chip_row((self.subdivide_root, self.paint_density)))
+        self._painting = None  # the roots to cut when painting finishes (painting: a list)
         self.snap = widgets.switch("Snap to neighbours", "A CV near a neighbouring root's CV or edge snaps onto it, "
                                    "so the tubes meet with no gap", True, "rootTubeSnap")
         self.snap.toggled.connect(lambda on: self._set(snap=on))
@@ -98,28 +114,44 @@ class RootTubeCard(QtCore.QObject):
         self.draw_toggled(self.extrude_draw.isChecked(), remember=False)
 
         # -- Tube hierarchy ----------------------------------------------------------------
-        self.add_level = widgets.chip("Add", "Split each selected tube in two (with none selected: every tube of "
+        self.add_level = widgets.chip("+", "Split each selected tube in two (with none selected: every tube of "
                                       "the base group), sharing its root shape: a level deeper. Again: 2 to 4...",
                                       None, "tubeLevelAdd")
         self.add_level.clicked.connect(self.add_clicked)
-        self.remove_level = widgets.chip("Remove", "Undo a split: with tubes selected, theirs only (a split tube's "
+        self.remove_level = widgets.chip("\u2212", "Undo a split: with tubes selected, theirs only (a split tube's "
                                          "deepest split tubes, or a split tube back into its parent); with none, the "
                                          "deepest level everywhere", None, "tubeLevelRemove")
         self.remove_level.clicked.connect(self.remove_clicked)
         self.hierarchy_block = widgets.Block("Tube hierarchy", name="tubeHierarchy")
         self.hierarchy_block.setToolTip("Tube levels: each level splits the tubes above it in two. Shaping "
                                         "a tube carries the smaller tubes inside it; pick a level to edit its tubes")
-        self.hierarchy_block.add(widgets.chip_row((self.add_level, self.remove_level)))
+        for b in (self.add_level, self.remove_level):
+            b.setFixedWidth(theme.px(28))
+            font = b.font()
+            font.setBold(True)
+            b.setFont(font)
         self.base_label = QtWidgets.QLabel()
         self.base_label.setProperty("role", "about")
         self.hierarchy_block.add(self.base_label)
         self.level_group = QtWidgets.QButtonGroup(self)
         self.level_group.setExclusive(True)
         self.level_group.buttonClicked.connect(self.level_clicked)
+        # One row: + and -, a line, then the level buttons (fill_levels fills them).
         self.level_row = QtWidgets.QWidget()
-        self.level_layout = QtWidgets.QHBoxLayout(self.level_row)
+        row = QtWidgets.QHBoxLayout(self.level_row)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(theme.px(4))
+        row.addWidget(self.add_level)
+        row.addWidget(self.remove_level)
+        line = QtWidgets.QFrame()
+        line.setFrameShape(QtWidgets.QFrame.VLine)
+        line.setFrameShadow(QtWidgets.QFrame.Sunken)
+        row.addWidget(line)
+        levels = QtWidgets.QWidget()
+        self.level_layout = QtWidgets.QHBoxLayout(levels)
         self.level_layout.setContentsMargins(0, 0, 0, 0)
         self.level_layout.setSpacing(theme.px(4))
+        row.addWidget(levels, 1)
         self.hierarchy_block.add(self.level_row)
         self._levels = None  # (base, [groups]) shown
         self._base = None
@@ -153,6 +185,10 @@ class RootTubeCard(QtCore.QObject):
         self.delete_root.setEnabled(picked)
         self.duplicate_root.setEnabled(picked)
         self.duplicate_root.setChecked(mode == "duplicate")
+        self.subdivide_root.setEnabled(picked)
+        painting = self._painting is not None
+        self.paint_density.setChecked(painting)
+        self.paint_density.setText("Finish painting" if painting else "Paint subdivision density")
         self.fill_levels(groom)
 
     def fill_levels(self, groom):
@@ -295,6 +331,57 @@ class RootTubeCard(QtCore.QObject):
 
     def delete_clicked(self):
         self._run(self.tool.delete_selected)
+
+    # -- Subdividing roots (#85) -----------------------------------------------------------
+
+    def _said_cut(self, info, verb):
+        if not info:
+            return
+        made, kept = len(info["cells"]), info["kept"]
+        if not made and not info["removed"]:
+            self.owner.status.setText("The density did not change: no root cut again.")
+            return
+        self.owner.status.setText("%s: %d root%s made%s." % (verb, made, "" if made == 1 else "s",
+                                                              ", %d kept" % kept if kept else ""))
+
+    def subdivide_clicked(self):
+        groom = self.owner.groom()
+        roots = self.tool.picked if self._mode() in ("select", "duplicate") else []
+        if not groom or not roots:
+            self.owner.status.setText("Select a root first (Select root), then Subdivide.")
+            return
+        self.tool.leave()
+        info = self._run(root_tubes.subdivide, groom, roots)
+        self._said_cut(info, "Subdivided")
+        self._enter("select", self.select_root)
+
+    def paint_density_clicked(self, _on=None):
+        groom = self.owner.groom()
+        if not groom:
+            self.owner.status.setText("Select a groom first.")
+            self.paint_density.setChecked(False)
+            return
+        if self._painting is not None:  # Finish painting: cut by the map
+            roots, self._painting = self._painting, None
+            self.back_to_brush()
+            self._said_cut(self._run(root_tubes.apply_density, groom, roots), "Density applied")
+            return
+        roots = self.tool.picked if self._mode() in ("select", "duplicate") else []
+        try:
+            root_tubes.ensure_density_map(groom)
+            self.tool.leave()
+            from groomlab import painting
+            painting.paint_map(groom, root_tubes.DENSITY_MAP, value=1.0)
+        except Exception as e:  # noqa: BLE001 (a button never ends in a bare traceback)
+            from groomlab.ui import messages
+            self.owner.status.setText(messages.error("Paint subdivision density", e))
+            self.refresh(groom)
+            return
+        self._painting = list(roots)
+        self.owner.status.setText("Paint the density on the scalp (white: more, smaller roots; Ctrl: toward black). "
+                                  "Finish painting cuts %s." % ("the selected root" if roots else
+                                                               "again where the map changed"))
+        self.refresh(groom)
 
     def back_to_brush(self):
         """The Tube brush again (the root tool put away)."""

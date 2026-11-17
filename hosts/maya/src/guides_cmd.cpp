@@ -35,7 +35,9 @@
 #include "groomlab/display.h"
 #include "groomlab/guide_hierarchy.h"
 #include "groomlab/guide_set.h"
+#include "groomlab/root_subdivision.h"
 #include "groomlab/root_tubes.h"
+#include "groomlab/scalp_maps.h"
 #include "groomlab/guide_selection.h"
 #include "maya_inputs.h"
 
@@ -92,8 +94,9 @@ const char* kFromNegative[] = {"-fn", "-fromNegative"};
 // -symmetry (x, y, z or topology; default x) and -center; a side, -group: only that root group's.
 const char* kMirrorShapes[] = {"-msh", "-mirrorShapes"};
 const char* kSymmetry[] = {"-sym", "-symmetry"};
-// Root-first tubes and the tube hierarchy (root_tubes.h): one JSON request {"op", ...}. Edits
-// ("make", "edit", "keepOutline", "duplicate", "delete", "addLevel", "removeLevel") are one undo step; queries
+// Root-first tubes and the tube hierarchy (root_tubes.h), and subdividing roots
+// (root_subdivision.h): one JSON request {"op", ...}. Edits ("make", "edit", "keepOutline",
+// "duplicate", "delete", "addLevel", "removeLevel", "subdivide", "applyDensity") are one undo step; queries
 // ("outline", "sectionOutline", "center", "rootTubes", "levels", "levelVisibility",
 // "footprintError", "carry", "sealed", "surface") change nothing. Returns JSON.
 const char* kRootTubes[] = {"-rtb", "-rootTubes"};
@@ -263,6 +266,23 @@ MeshPtr groomScalp(const MFnDagNode& groomFn) {
     const MeshPtr joined = joinedScalpFromNode(groomFn.object());
     auto* shape = dynamic_cast<GroomShape*>(groomFn.userNode());
     return shape && joined ? shape->session().refineAsScalp(joined) : joined;
+}
+
+// The same scalp with the groom's vertex maps on it as color sets (scalp_maps.h withVertexMaps),
+// refined with it: what reads a painted map at a point (Subdivide's density). The same topology
+// as groomScalp, so the guides root on it alike.
+MeshPtr groomScalpWithMaps(const MFnDagNode& groomFn) {
+    MeshPtr joined = joinedScalpFromNode(groomFn.object());
+    if (!joined) return joined;
+    const MPlug plug = groomFn.findPlug("scalpMaps", true);
+    if (!plug.isNull()) {
+        try {
+            joined = withVertexMaps(joined, ScalpMaps::fromJson(plug.asString().asChar()), "", nullptr, nullptr);
+        } catch (const std::exception&) {  // (maps that do not read: none, as the groom shows them)
+        }
+    }
+    auto* shape = dynamic_cast<GroomShape*>(groomFn.userNode());
+    return shape ? shape->session().refineAsScalp(joined) : joined;
 }
 
 }  // namespace
@@ -960,6 +980,16 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                         result = addTubeLevel(*h, scalp.get(), ids("guides"), request.value("picked", std::string()));
                     } else if (op == "removeLevel") {
                         result = removeTubeLevel(*h, scalp.get(), request.value("base", std::string()), ids("guides"));
+                    } else if (op == "subdivide" || op == "applyDensity") {
+                        RootSubdivisionOptions o;
+                        o.sizeAtZero = request.value("sizeAtZero", o.sizeAtZero);
+                        o.sizeAtOne = request.value("sizeAtOne", o.sizeAtOne);
+                        o.map = request.value("map", o.map);
+                        const MeshPtr mapped = groomScalpWithMaps(groomFn);
+                        const ScalpMesh& on = mapped ? *mapped : *scalp;
+                        const SubdivisionResult done = op == "subdivide" ? subdivideRootTubes(*h, on, ids("guides"), o)
+                                                                         : applySubdivisionDensity(*h, on, ids("guides"), o);
+                        result = {{"cells", done.cells}, {"removed", done.removed}, {"kept", done.kept}};
                     } else {
                         return fail(kName, ("-rootTubes: no op named '" + op + "'").c_str());
                     }

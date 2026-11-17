@@ -25,6 +25,14 @@ child group of the one above it ("<base>_L<n>"), its guides following their pare
     root_tubes.add_tube_level(groom)                          # every leaf tube split in two
     root_tubes.tube_levels(groom)                             # {"base", "levels": [groups]}
     root_tubes.show_tube_level(groom, "tubes", 2)             # level 2 shown, the others hidden
+
+Subdividing roots (issue 85): a root cut into Voronoi cells, each a root tube of its own, smaller
+and more numerous where the vertex map tubeSubdivisionDensity is high (1) than where it is low
+(0); the groom remembers each cut, so painting the map again re-cuts only where it changed.
+
+    root_tubes.subdivide(groom, [guide])                     # {"cells", "removed", "kept"}
+    root_tubes.ensure_density_map(groom)                      # the map, made at 0.5 if missing
+    root_tubes.apply_density(groom)                           # cut again where the map changed
 """
 
 import colorsys
@@ -45,6 +53,8 @@ ROOT_OVERLAP = 0.015        # a root tube's footprint this share larger than its
 CLEARANCE = 0.35            # a drawn guide popped this many root sizes out where it dips into the scalp ...
 _CLEAR_RAMP = 2.0           # ... reached this many root sizes along it from the root (root_tubes.cpp)
 MAX_LEAN = 0.8726646259971648  # (50 degrees) a root tube's guide leaves the scalp leaning at most this far off its normal
+DENSITY_MAP = "tubeSubdivisionDensity"  # the vertex map Subdivide reads (1: the most, smallest roots)
+DENSITY_START = 0.5                     # its value where nothing is painted
 
 
 # ---------------------------------------------------------------------------
@@ -401,3 +411,36 @@ def show_tube_level(groom, base, level):
         if visible:
             picked = name
     return picked
+
+
+# ---------------------------------------------------------------------------
+# Subdividing roots (issue 85)
+
+
+def ensure_density_map(groom):
+    """The subdivision density map (a gray vertex map), made at DENSITY_START when the groom has
+    none. Returns its name."""
+    from groomlab import painting
+    if DENSITY_MAP not in painting.list_maps(groom):
+        painting.add_map(groom, DENSITY_MAP, value=DENSITY_START, kind="vertices")
+    return DENSITY_MAP
+
+
+def _cut(answer):
+    return {"cells": [int(g) for g in answer.get("cells", [])], "removed": int(answer.get("removed", 0)),
+            "kept": int(answer.get("kept", 0))}
+
+
+def subdivide(groom, guides):
+    """Cut root tubes `guides` (a smaller tube of the hierarchy stands for its root tube) into
+    Voronoi cells at the density the map gives (DENSITY_START where there is no map), each a level
+    1 root tube following the old tube, the hierarchy under it made again in each. One undo step.
+    Returns {"cells": the new root tubes, "removed": guides taken out, "kept": 0}."""
+    return _cut(_request(groom, "subdivide", guides=[int(g) for g in guides]))
+
+
+def apply_density(groom, guides=None):
+    """Painting the density finished: every cut root whose density changed cut again there (its
+    other cells kept as they are), and `guides` (root tubes not cut yet) cut. One undo step.
+    Returns {"cells": the root tubes made, "removed", "kept": cells left as they were}."""
+    return _cut(_request(groom, "applyDensity", guides=[int(g) for g in (guides or [])]))
