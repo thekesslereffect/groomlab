@@ -54,7 +54,7 @@ ROOT_OVERLAP = 0.015        # a root tube's footprint this share larger than its
 CLEARANCE = 0.35            # a drawn guide popped this many root sizes out where it dips into the scalp ...
 _CLEAR_RAMP = 2.0           # ... reached this many root sizes along it from the root (root_tubes.cpp)
 MAX_LEAN = 0.8726646259971648  # (50 degrees) a root tube's guide leaves the scalp leaning at most this far off its normal
-DENSITY_MAP = "tubeSubdivisionDensity"  # each subdivision's vertex map: this, numbered (01, 02, ...; 1: the most, smallest roots)
+DENSITY_MAP = "tubeSubdivisionDensity"  # the one subdivision density vertex map (1: the most, smallest roots)
 DENSITY_START = 0.5                     # its value where nothing is painted
 
 

@@ -1005,6 +1005,14 @@ std::vector<float> rollToMatch(const std::vector<Vec3f>& points, const Vec3f& fr
         }
         out.push_back(roll);
     }
+    // Smoothed along the tube (two [1 2 1] passes, its ends kept): matched point by point, the
+    // frames' small differences make it jitter, which twists the sections, and the hair filling
+    // them, back and forth at each point (bands in its shading). Smoothed, a slice stays well inside
+    // the gap its neighbours keep (root_tubes.h kSliceGap).
+    for (int pass = 0; pass < 2 && out.size() >= 3; ++pass) {
+        std::vector<float> was = out;
+        for (std::size_t i = 1; i + 1 < out.size(); ++i) out[i] = 0.25f * was[i - 1] + 0.5f * was[i] + 0.25f * was[i + 1];
+    }
     return out;
 }
 

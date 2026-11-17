@@ -1573,8 +1573,33 @@ TubeSpine sourceSpine(const TubeSource& source, float scale) {
     return spine;
 }
 
+std::vector<Vec3f> slicePath(const ScalpMesh& scalp, const TubeSource& source, float u, float v, float extent, float scale) {
+    // Rooted in its middle on the scalp (its part of the footprint taken onto the scalp along the
+    // footprint's normal, as its CVs were taken off it), then the path its middle takes inside the
+    // source's tube, joined from the root as a strand rooted there joins it (TubeSpine::rootJoin's
+    // (1 - t / join)^2, over a few of its own widths), along the tube only (square to its sections:
+    // across it, where its neighbours meet it, it stays its part of the tube).
+    const TubeSpine spine = sourceSpine(source, scale);
+    const std::size_t n = source.points.size();
+    std::vector<Vec3f> path;
+    if (n < 2) return path;
+    const Vec3f rooted = alongNormal(scalp, spine.footprintAt(u, v), source.normal);
+    const Vec3f lift = rooted - spine.at(0.0f, u, v);
+    float length = 0.0f;
+    for (std::size_t i = 1; i < n; ++i) length += (source.points[i] - source.points[i - 1]).length();
+    const float join = length > 0.0f ? std::clamp(3.0f * extent / length, 1e-3f, 1.0f) : 1.0f;
+    const std::vector<Frame> frames = rotationMinimizingFrames(source.points.data(), n, source.frameUp);
+    for (std::size_t i = 0; i < n; ++i) {
+        const float t = static_cast<float>(i) / static_cast<float>(n - 1);
+        const float k = t < join ? (1.0f - t / join) * (1.0f - t / join) : 0.0f;
+        const Vec3f way = frames[i].tangent;
+        path.push_back(i == 0 ? rooted : spine.at(t, u, v) + way * (lift.dot(way) * k));
+    }
+    return path;
+}
+
 GuideId sliceTube(GuideHierarchy& h, const ScalpMesh& scalp, const TubeSource& source, const std::vector<SectionPoint>& polygon,
-                  GuideId into, const std::vector<Vec3f>& outline) {
+                  GuideId into, const std::vector<Vec3f>& outline, const std::function<Vec3f(float)>& deviation) {
     if (polygon.size() < 3 || source.points.size() < 2) return kNoGuide;
     if (into != kNoGuide && !h.guide(into)) return kNoGuide;
     // The polygon's box in the source's section coordinates, and its points fitted to it.
@@ -1611,25 +1636,11 @@ GuideId sliceTube(GuideHierarchy& h, const ScalpMesh& scalp, const TubeSource& s
     // inside the source's tube, joined from the root as a strand rooted there joins it
     // (TubeSpine::rootJoin's (1 - t / join)^2, over a few of its own widths), along the tube: it
     // starts where its hair grows and runs with its neighbours.
-    const TubeSpine spine = sourceSpine(source, h.scale());
-    const std::size_t n = source.points.size();
-    const float u = static_cast<float>(cu), v = static_cast<float>(cv);
-    const Vec3f rooted = alongNormal(scalp, spine.footprintAt(u, v), source.normal);
-    const Vec3f lift = rooted - spine.at(0.0f, u, v);
-    float length = 0.0f;
-    for (std::size_t i = 1; i < n; ++i) length += (source.points[i] - source.points[i - 1]).length();
     const float extent = static_cast<float>(std::max(su * source.tube.widthAt(0.0f), sv * source.tube.widthAt(0.0f) * source.tube.aspectAt(0.0f))) *
                          h.scale();
-    const float join = length > 0.0f ? std::clamp(3.0f * extent / length, 1e-3f, 1.0f) : 1.0f;
-    // (Only along the tube: across it, where its neighbours meet it, it stays its part of the tube.)
-    // (Along the tube as its sections lie: square to them, along its frames' tangent.)
-    const std::vector<Frame> frames = rotationMinimizingFrames(source.points.data(), n, source.frameUp);
-    std::vector<Vec3f> path;
-    for (std::size_t i = 0; i < n; ++i) {
-        const float t = static_cast<float>(i) / static_cast<float>(n - 1);
-        const float k = t < join ? (1.0f - t / join) * (1.0f - t / join) : 0.0f;
-        const Vec3f way = frames[i].tangent;
-        path.push_back(i == 0 ? rooted : spine.at(t, u, v) + way * (lift.dot(way) * k));
+    std::vector<Vec3f> path = slicePath(scalp, source, static_cast<float>(cu), static_cast<float>(cv), extent, h.scale());
+    if (deviation) {  // (grooming kept: the shape the guides near it were given, on top)
+        for (std::size_t i = 1; i < path.size(); ++i) path[i] = path[i] + deviation(static_cast<float>(i) / static_cast<float>(path.size() - 1));
     }
     GuideId id = into;
     if (id == kNoGuide) {

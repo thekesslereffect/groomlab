@@ -33,8 +33,10 @@
 
 namespace groomlab {
 
-// Each subdivision paints its own gray vertex map: kSubdivisionDensityMap with a two-digit number
-// (tubeSubdivisionDensity01, 02, ...: subdivisionDensityMapName), made at kDefaultSubdivisionDensity.
+// One gray vertex map paints every subdivision: kSubdivisionDensityMap, made at
+// kDefaultSubdivisionDensity. (Cuts made with the older numbered maps, tubeSubdivisionDensity01, ...,
+// read it when applied with it.) A cell of a cut cut again is a destructive cut: not remembered, the
+// map leaves it be.
 constexpr const char* kSubdivisionDensityMap = "tubeSubdivisionDensity";
 constexpr float kDefaultSubdivisionDensity = 0.5f;  // the map's value when made, and where there is none
 
@@ -49,8 +51,9 @@ struct RootSubdivisionOptions {
     float sizeAtZero = 0.5f;
     float sizeAtOne = 0.12f;
     std::uint64_t seed = 0x85;           // where the sites fall (the same seed: the same cells)
-    // The density map the cut reads (subdivisionDensityMapFor). applySubdivisionDensity with one:
-    // only the subdivisions painted with it are cut again; "": each with its own.
+    // The density map the cut reads. applySubdivisionDensity with one: the subdivisions painted with
+    // it (or a numbered map named after it) are cut again by it; "": each with its own. Cut again,
+    // the new cells keep the shape the cells near them were groomed to, and their point count.
     std::string map = kSubdivisionDensityMap;
     // How dense overall, with the painted density: 1 as painted, 2 about twice the cells (each
     // smaller by sqrt 2), 0.5 half. A subdivision remembers it; applySubdivisionDensity with another

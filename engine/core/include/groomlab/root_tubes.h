@@ -157,8 +157,14 @@ TubeSource tubeSourceOf(const GuideHierarchy& h, const ScalpMesh& scalp, GuideId
 // sections), or (kNoGuide) a new guide of the source's group, its footprint laid and its sections
 // turned as the source's (HierarchyGuide::acrossTurn, rollOffsets) and `outline` (world points on
 // the scalp, given) kept as its root's CVs. Returns the guide, or kNoGuide for a sliver.
+// `deviation` (given): added along its guide past its root (its share of the way: 0 root, 1 tip),
+// the shape the guides near it were given (a cut again keeping their grooming).
 GuideId sliceTube(GuideHierarchy& h, const ScalpMesh& scalp, const TubeSource& source, const std::vector<SectionPoint>& polygon,
-                  GuideId into = kNoGuide, const std::vector<Vec3f>& outline = {});
+                  GuideId into = kNoGuide, const std::vector<Vec3f>& outline = {},
+                  const std::function<Vec3f(float)>& deviation = {});
+// The guide of the slice whose middle is (u, v) of `source`'s root section, `extent` its larger
+// half-extent (scene units): rooted there on the scalp, then along the source's tube (sliceTube's).
+std::vector<Vec3f> slicePath(const ScalpMesh& scalp, const TubeSource& source, float u, float v, float extent, float scale = 1.0f);
 // A tube spine of the source laid as its tube lies (its footprint fixed on the scalp).
 TubeSpine sourceSpine(const TubeSource& source, float scale = 1.0f);
 // `p` taken onto the scalp along `normal` (the nearer hit either way), else its nearest point

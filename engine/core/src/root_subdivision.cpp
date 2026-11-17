@@ -643,6 +643,7 @@ void cutRoot(GuideHierarchy& h, const ScalpMesh& scalp, GuideId guide, const Roo
     // The old guide, its tube and the hierarchy under it, as they were.
     const TubeSource source = tubeSourceOf(h, scalp, guide);
     const TubeSpine spine = sourceSpine(source, h.scale());
+    const bool destructive = !g->rollOffsets.empty();
     std::map<int, std::vector<Source>> sources;
     for (const auto& [level, ids] : levelsUnder(h, guide)) {
         for (const GuideId k : ids) {
@@ -693,7 +694,10 @@ void cutRoot(GuideHierarchy& h, const ScalpMesh& scalp, GuideId guide, const Roo
     record.sizeAtOne = static_cast<float>(s1);
     record.multiplier = o.multiplier > 0.0f ? o.multiplier : 1.0f;
     record.source = snapshot(source, scalp);
-    records.push_back(std::move(record));
+    // A cell of a cut cut again (its sections turned as its cut's: rollOffsets) is a destructive cut:
+    // not remembered, so painting the map and applying it again leave it be (its place in its
+    // first cut kept for it). A root drawn is remembered, its cells cut again by the map.
+    if (!destructive) records.push_back(std::move(record));
     h.setRootSubdivisions(std::move(records));
     result.cells.insert(result.cells.end(), made.begin(), made.end());
 }
@@ -781,6 +785,7 @@ std::vector<Vec3f> outerBoundaryOf(const GuideHierarchy& h, const ScalpMesh& sca
 // A remembered subdivision cut again where its density changed. False when nothing changed.
 bool recut(GuideHierarchy& h, const ScalpMesh& scalp, std::size_t index, const RootSubdivisionOptions& o, SubdivisionResult& result) {
     RootSubdivisionRecord r = h.rootSubdivisions()[index];
+    if (!o.map.empty()) r.map = o.map;  // (the one map: a cut made with a numbered one reads it now)
     if (!onScalp(scalp, r.outline) || !onScalp(scalp, r.sites) || !onScalp(scalp, r.samples) || r.outline.size() < 3) return false;
     // The outline as the cells' outer edges lie now, where they were edited (Edit roots); else the
     // outline kept (the same edges, CV for CV: the cut as it was).
@@ -889,6 +894,16 @@ bool recut(GuideHierarchy& h, const ScalpMesh& scalp, std::size_t index, const R
     for (const GuideId c : keptCells) {
         if (some == kNoGuide && c != kNoGuide && h.guide(c)) some = c, group = h.guide(c)->group;
     }
+    // The shape the cells were given since (combed, drawn): each living cell's guide against the
+    // slice of the tube it would be, along it; a new cell takes that of the cells nearest it (as a
+    // share of the way: 0 root, 1 tip), so a cut again keeps the grooming.
+    struct Groomed {
+        Vec3f root;
+        std::vector<Vec3f> off;  // along its guide, evenly by length
+    };
+    std::vector<Groomed> groomed;
+    std::size_t points = 0;
+    std::map<std::size_t, std::size_t> counts;
     TubeSource source;
     if (!sourceOf(r.source, scalp, &source)) {
         if (some == kNoGuide) return false;
@@ -900,6 +915,45 @@ bool recut(GuideHierarchy& h, const ScalpMesh& scalp, std::size_t index, const R
     }
     source.group = group;
     const TubeSpine spine = sourceSpine(source, h.scale());
+    constexpr std::size_t kAlongDeviation = 24;
+    for (const GuideId c : r.cells) {
+        const HierarchyGuide* g = c != kNoGuide ? h.guide(c) : nullptr;
+        if (!g || g->points.size() < 2) continue;
+        ++counts[g->points.size()];
+        const SectionPoint uv = spine.rootCoords(g->points.front());
+        const float w0 = g->tube.widthAt(0.0f) * h.scale();
+        const std::vector<Vec3f> was = slicePath(scalp, source, uv.u, uv.v, std::max(w0, w0 * g->tube.aspectAt(0.0f)), h.scale());
+        if (was.size() < 2) continue;
+        const std::vector<Vec3f> a = resamplePolyline(g->points, kAlongDeviation + 1);
+        const std::vector<Vec3f> b = resamplePolyline(was, kAlongDeviation + 1);
+        Groomed gr{g->points.front(), {}};
+        for (std::size_t i = 0; i <= kAlongDeviation; ++i) gr.off.push_back(a[i] - b[i]);
+        groomed.push_back(std::move(gr));
+    }
+    for (const auto& [count, many] : counts) {
+        if (!points || many > counts[points]) points = count;  // (the cells' usual point count: kept)
+    }
+    auto deviationAt = [&](const Vec3f& root) -> std::function<Vec3f(float)> {
+        if (groomed.empty()) return {};
+        std::vector<std::pair<float, const Groomed*>> near;
+        for (const Groomed& gr : groomed) near.push_back({(gr.root - root).length(), &gr});
+        std::sort(near.begin(), near.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+        near.resize(std::min<std::size_t>(near.size(), 3));
+        return [near](float t) {
+            const float x = std::clamp(t, 0.0f, 1.0f) * static_cast<float>(kAlongDeviation);
+            const std::size_t k = std::min(static_cast<std::size_t>(x), kAlongDeviation - 1);
+            const float f = x - static_cast<float>(k);
+            Vec3f sum;
+            double total = 0.0;
+            const float eps = std::max(near.front().first * 1e-3f, 1e-6f);
+            for (const auto& [d, gr] : near) {
+                const double w = 1.0 / std::pow(static_cast<double>(d) + eps, 2.0);
+                sum = sum + (gr->off[k] * (1.0f - f) + gr->off[k + 1] * f) * static_cast<float>(w);
+                total += w;
+            }
+            return sum * static_cast<float>(1.0 / total);
+        };
+    };
 
     RootSubdivisionRecord next = r;
     next.sites.clear();
@@ -940,8 +994,13 @@ bool recut(GuideHierarchy& h, const ScalpMesh& scalp, std::size_t index, const R
             }
         }
         if (cells[i].size() < 3) continue;
-        const GuideId id = sliceTube(h, scalp, source, sectionPolygon(spine, cells[i]), kNoGuide, cells[i]);
+        const GuideId id = sliceTube(h, scalp, source, sectionPolygon(spine, cells[i]), kNoGuide, cells[i],
+                                     deviationAt(scalpPointNormal(scalp, outlineCentroid(cells[i])).point));
         if (id == kNoGuide) continue;
+        // (As many points as the cells had: resampled, the cut keeps them.)
+        if (points >= 2 && h.guide(id)->points.size() != points) {
+            h.setPoints(id, resamplePolyline(h.guide(id)->points, points));
+        }
         made.push_back(id);
         next.sites.push_back(siteAt.root);
         next.cells.push_back(id);
@@ -1005,7 +1064,8 @@ SubdivisionResult applySubdivisionDensity(GuideHierarchy& h, const ScalpMesh& sc
     SubdivisionResult result;
     for (std::size_t i = 0; i < h.rootSubdivisions().size(); ++i) {
         // (Given a map: only the subdivisions painted with it.)
-        if (!options.map.empty() && h.rootSubdivisions()[i].map != options.map) continue;
+        const std::string& its = h.rootSubdivisions()[i].map;
+        if (!options.map.empty() && its != options.map && its.rfind(options.map, 0) != 0) continue;
         recut(h, scalp, i, options, result);
     }
     // The roots given that are not already cells of a subdivision: cut.

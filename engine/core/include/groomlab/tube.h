@@ -128,7 +128,8 @@ bool isRootTube(const TubeProfile& tube, int depth);
 // The roll (radians per point of `points`, as TubeProfile::roll) that turns a tube along `points`
 // (frames from `frameUp`, no roll) so its sections lie as `other`'s do at the same share of the
 // way (its frames from `otherPoints` and `otherUp`, turned by its roll): a slice of `other`
-// turned with it all along. Unwrapped (no jump of a turn between points). Empty for fewer than 2.
+// turned with it all along. Unwrapped (no jump of a turn between points) and smoothed along it
+// (no jitter point to point). Empty for fewer than 2.
 std::vector<float> rollToMatch(const std::vector<Vec3f>& points, const Vec3f& frameUp, const std::vector<Vec3f>& otherPoints,
                                const Vec3f& otherUp, const TubeProfile& other);
 

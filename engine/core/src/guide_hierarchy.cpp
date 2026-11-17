@@ -912,6 +912,12 @@ void GuideHierarchy::evaluateGuide(HierarchyGuide& g, const ScalpMesh* scalp, co
                 const float f = x - static_cast<float>(k);
                 g.tube.roll[i] += g.rollOffsets[k] * (1.0f - f) + g.rollOffsets[k + 1] * f;
             }
+            // (Smoothed as rollToMatch smooths: offsets saved before it did, jittering point to point,
+            // would twist the hair into bands.)
+            for (int pass = 0; pass < 2 && n >= 3; ++pass) {
+                const std::vector<float> was = g.tube.roll;
+                for (std::size_t i = 1; i + 1 < n; ++i) g.tube.roll[i] = 0.25f * was[i - 1] + 0.5f * was[i] + 0.25f * was[i + 1];
+            }
         } else {
             g.tube.roll = {roll};
         }

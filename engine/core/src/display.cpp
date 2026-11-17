@@ -7,6 +7,7 @@
 #include "groomlab/portable_math.h"
 
 #include <algorithm>
+#include <set>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -1245,34 +1246,79 @@ std::size_t appendTubeSurface(DisplayGeometry& batch, const HierarchyGuide& g, f
     const int along = round ? kAlong : static_cast<int>(spans * per);
     std::vector<float> ringAt(static_cast<std::size_t>(along) + 1);
     for (int j = 0; j <= along; ++j) ringAt[static_cast<std::size_t>(j)] = static_cast<float>(j) / static_cast<float>(along);
+    // Round each ring: every other outline point, and every corner of the shape (where the wire's
+    // lines along the tube run), so the surface turns where the wire does. At a corner of a shape
+    // with corners (not a smooth library curve) the faces meet at a hard edge: two points there,
+    // each with its face's normal.
+    std::vector<std::size_t> cols;
+    std::set<std::size_t> corners;
+    if (!round) {
+        for (std::size_t k = 0; k < outline.size(); k += 2) cols.push_back(k);
+        if (!g.tube.blended()) {
+            for (const std::size_t c : tubeOutlineCorners(g.tube)) {
+                if (c < outline.size()) corners.insert(c), cols.push_back(c);
+            }
+        }
+        std::sort(cols.begin(), cols.end());
+        cols.erase(std::unique(cols.begin(), cols.end()), cols.end());
+    }
+    const bool hard = !corners.empty() && !(g.tube.custom && g.tube.custom->smooth);
+    const std::size_t m = cols.size();
+    // Each column's points in a ring: its left one (where the face before it ends) and its right one
+    // (where the face after it starts): the same point but at a hard corner.
+    std::vector<std::uint32_t> left(m), right(m);
+    std::uint32_t perRing = 0;
+    for (std::size_t k = 0; k < m; ++k) {
+        left[k] = perRing;
+        if (hard && corners.count(cols[k])) ++perRing;
+        right[k] = perRing++;
+    }
     for (int j = 0; j <= along && !round; ++j) {
         const float t = ringAt[static_cast<std::size_t>(j)];
         const TubeBlendPoint plain;
         const Vec3f center = spine.at(t, 0.0f, 0.0f, plain);
         const Vec3f axisU = spine.at(t, 1.0f, 0.0f, plain) - center, axisV = spine.at(t, 0.0f, 1.0f, plain) - center;
         const float uu = std::max(axisU.dot(axisU), 1e-20f), vv = std::max(axisV.dot(axisV), 1e-20f);
-        for (int s = 0; s < kAround; ++s) {
-            const SectionPoint p = placed(static_cast<std::size_t>(2 * s), t);
-            const SectionPoint next = placed(static_cast<std::size_t>((2 * s + 1) % outline.size()), t);
-            const SectionPoint prev = placed((static_cast<std::size_t>(2 * s) + outline.size() - 1) % outline.size(), t);
-            // Out of the outline (counter-clockwise: its edge's right), through the section's axes.
+        // Out of the outline from `prev` to `next` (counter-clockwise: its edge's right), through the axes.
+        auto outward = [&](const SectionPoint& prev, const SectionPoint& next) {
             const float nu = next.v - prev.v, nv = prev.u - next.u;
-            Vec3f out = axisU * (nu / uu) + axisV * (nv / vv);
-            out = out.length() > 0.0f ? out.normalized() : axisU.normalized();
+            const Vec3f out = axisU * (nu / uu) + axisV * (nv / vv);
+            return out.length() > 0.0f ? out.normalized() : axisU.normalized();
+        };
+        for (std::size_t k = 0; k < m; ++k) {
+            const std::size_t c = cols[k];
+            const SectionPoint p = placed(c, t);
             Vec3f at = center + axisU * p.u + axisV * p.v;
             if (loop && t < join) {  // (from its root loop on the scalp, joining the sections as the wire does)
-                const float k = 1.0f - t / join;
-                at = at + ((*loop)[static_cast<std::size_t>(2 * s)] - spine.at(0.0f, p.u, p.v, plain)) * (k * k);
+                const float w = 1.0f - t / join;
+                at = at + ((*loop)[c] - spine.at(0.0f, p.u, p.v, plain)) * (w * w);
             }
-            batch.positions.insert(batch.positions.end(), {at.x, at.y, at.z});
-            batch.normals.insert(batch.normals.end(), {out.x, out.y, out.z});
+            auto emit = [&](const Vec3f& out) {
+                batch.positions.insert(batch.positions.end(), {at.x, at.y, at.z});
+                batch.normals.insert(batch.normals.end(), {out.x, out.y, out.z});
+            };
+            if (hard && corners.count(c)) {
+                emit(outward(placed(cols[(k + m - 1) % m], t), p));  // (the face before it)
+                emit(outward(p, placed(cols[(k + 1) % m], t)));      // (the face after it)
+            } else {
+                emit(outward(placed((c + outline.size() - 1) % outline.size(), t), placed((c + 1) % outline.size(), t)));
+            }
         }
     }
+    const std::uint32_t ring = round ? static_cast<std::uint32_t>(kAround) : perRing;
     for (int j = 0; j < along; ++j) {
-        for (int s = 0; s < kAround; ++s) {
-            const std::uint32_t a = base + static_cast<std::uint32_t>(j * kAround + s);
-            const std::uint32_t b = base + static_cast<std::uint32_t>(j * kAround + (s + 1) % kAround);
-            const std::uint32_t c = a + kAround, d = b + kAround;
+        const std::uint32_t r0 = base + static_cast<std::uint32_t>(j) * ring, r1 = r0 + ring;
+        if (round) {
+            for (int s = 0; s < kAround; ++s) {
+                const std::uint32_t a = r0 + static_cast<std::uint32_t>(s), b = r0 + static_cast<std::uint32_t>((s + 1) % kAround);
+                const std::uint32_t c = a + ring, d = b + ring;
+                batch.indices.insert(batch.indices.end(), {a, b, d, a, d, c});
+            }
+            continue;
+        }
+        for (std::size_t k = 0; k < m; ++k) {
+            const std::uint32_t a = r0 + right[k], b = r0 + left[(k + 1) % m];
+            const std::uint32_t c = r1 + right[k], d = r1 + left[(k + 1) % m];
             batch.indices.insert(batch.indices.end(), {a, b, d, a, d, c});
         }
     }
