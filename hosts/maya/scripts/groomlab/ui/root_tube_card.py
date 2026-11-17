@@ -241,10 +241,10 @@ class RootTubeCard(QtCore.QObject):
         self.level_row = QtWidgets.QWidget()
         LeadTrailLayout(levels, edits, self.level_row)
         self.hierarchy_block.add(self.level_row)
-        self.lock_view = widgets.switch("Lock view", "Keep the level shown now in view while you pick other levels "
-                                        "to work on (step down to level 1 and comb it while a deeper level's tubes "
-                                        "stay in view and follow). Only the levels' view: the other visibility "
-                                        "controls work as they do", False, "tubeLockView")
+        self.lock_view = widgets.switch("Lock view", "Keep the level shown now as the one in view while you pick "
+                                        "other levels to work on, which stay hidden (step down to level 1 and comb "
+                                        "it while a deeper level's tubes stay in view and follow). Only the levels' "
+                                        "view: the other visibility controls work as they do", False, "tubeLockView")
         self.lock_view.toggled.connect(self.lock_toggled)
         self.hierarchy_block.add(self.lock_view.row)
         self._locked = 0  # Lock view: the level kept in view (0: none), of hierarchy _locked_base
@@ -600,7 +600,7 @@ class RootTubeCard(QtCore.QObject):
         except (RuntimeError, ValueError) as e:
             self.owner.status.setText(str(e).strip())
             return
-        self.owner.status.setText("Level %d kept in view while you work on other levels." % self._locked if self._locked
+        self.owner.status.setText("Level %d alone in view while you work on any level." % self._locked if self._locked
                                   else "Lock view off: only the picked level shows.")
 
     def _unlock(self):

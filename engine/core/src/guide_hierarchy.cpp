@@ -900,6 +900,20 @@ void GuideHierarchy::evaluateGuide(HierarchyGuide& g, const ScalpMesh* scalp, co
         // point (rollToMatch), so the slices fill the parent's tube side by side all along. A cell of
         // a cut: as the tube it was cut from was (its rollOffsets, per point, on its laid roll).
         const HierarchyGuide* parent = g.isChild() ? guide(g.parent) : nullptr;
+        g.tube.joinScale = 1.0f;
+        if (parent && isRootTube(parent->tube, 0)) {
+            // (Joined from its root as its level 1 root is: over that root's size.)
+            const HierarchyGuide* top = parent;
+            std::set<GuideId> up;
+            while (top->isChild() && up.insert(top->id).second) {
+                const HierarchyGuide* next = guide(top->parent);
+                if (!next) break;
+                top = next;
+            }
+            auto extent = [](const TubeProfile& t) { return t.widthAt(0.0f) * std::max(1.0f, t.aspectAt(0.0f)); };
+            const float own = extent(g.tube);
+            if (own > 1e-12f) g.tube.joinScale = std::max(1.0f, extent(top->tube) / own);
+        }
         if (parent && isRootTube(parent->tube, 0) && parent->points.size() >= 2) {
             g.tube.roll = rollToMatch(g.points, g.frameUp, parent->points, parent->frameUp, parent->tube);
         } else if (g.rollOffsets.size() >= 2) {

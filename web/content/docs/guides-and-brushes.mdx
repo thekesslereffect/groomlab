@@ -396,8 +396,9 @@ across its longer side, sharing its root shape, in the next level's group (`<bas
 `<base>_L3`, ... up to level 9); pressing it again splits those in two (2 to 4, and on).
 The numbered buttons show one level at a time (the other levels' groups hidden) and pick its group,
 so the Tube tool and the brushes edit that level's tubes. **Lock view**, under them (off at
-first), keeps the level shown when you switch it on in view while you pick other levels: step down
-to level 1 and comb it while level 6's tubes stay in view and follow. It only locks the levels'
+first), keeps the level shown when you switch it on as the only level in view while you pick other
+levels to work on (they stay hidden): step down to level 1 and comb it while level 6's tubes stay
+in view and follow. It only locks the levels'
 view; the other visibility controls work alongside it. Every level's tubes follow their parent:
 shaping a level 1 tube carries all the smaller tubes inside it, while each smaller tube keeps its
 own edits. **−** undoes a split: with tubes selected, only theirs (a split tube loses its deepest split tubes; a split tube goes back into its parent with its siblings), with none the deepest level everywhere. **+** likewise splits only the selected tubes when some are. A slid guide stays its own tube's clump center wherever its root moves within its root. Every tube split from a root tube, and every
@@ -409,7 +410,7 @@ may reach past its level 1 tube's outline).
 ```python
 root_tubes.add_tube_level(groom)                   # every leaf tube split in two
 root_tubes.show_tube_level(groom, "rootTubes", 2)  # level 2 shown and returned
-root_tubes.show_tube_level(groom, "rootTubes", 1, locked=6)  # level 1 picked, level 6 kept in view
+root_tubes.show_tube_level(groom, "rootTubes", 1, locked=6)  # level 1 picked, level 6 alone in view
 groomlab.generate_children(groom, "tubes", count=2, split=True)  # the split itself (-split true)
 ```
 

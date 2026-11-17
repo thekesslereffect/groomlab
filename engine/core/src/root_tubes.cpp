@@ -1467,7 +1467,7 @@ std::map<std::string, bool> tubeLevelVisibility(const GuideHierarchy& h, const s
     std::map<std::string, bool> out;
     for (std::size_t k = 0; k < info.levels.size(); ++k) {
         const int at = static_cast<int>(k) + 1;
-        out[info.levels[k]] = at == level || (locked > 0 && at == locked);
+        out[info.levels[k]] = locked > 0 ? at == locked : at == level;
     }
     return out;
 }
@@ -1601,14 +1601,80 @@ std::vector<Vec3f> slicePath(const ScalpMesh& scalp, const TubeSource& source, f
     return path;
 }
 
+namespace {
+
+// `polygon` with each edge off `outline` (both section coordinates) moved `gap` into it, the edges
+// along the outline kept: each point where its two edges' lines, so moved, meet.
+std::vector<SectionPoint> gapInside(const std::vector<SectionPoint>& polygon, const std::vector<SectionPoint>& outline, float gap) {
+    const std::size_t n = polygon.size();
+    if (n < 3 || outline.size() < 3 || gap <= 0.0f) return polygon;
+    float size = 0.0f;
+    for (const SectionPoint& q : outline) size = std::max(size, std::hypot(q.u, q.v));
+    const float near = 1e-2f * size;
+    auto offOutline = [&](const SectionPoint& p) {
+        float best = std::numeric_limits<float>::infinity();
+        for (std::size_t k = 0; k < outline.size(); ++k) {
+            const SectionPoint& a = outline[k];
+            const SectionPoint& b = outline[(k + 1) % outline.size()];
+            const float du = b.u - a.u, dv = b.v - a.v, span = du * du + dv * dv;
+            const float f = span > 0.0f ? std::clamp(((p.u - a.u) * du + (p.v - a.v) * dv) / span, 0.0f, 1.0f) : 0.0f;
+            best = std::min(best, std::hypot(p.u - (a.u + du * f), p.v - (a.v + dv * f)));
+        }
+        return best;
+    };
+    double area = 0.0;
+    for (std::size_t i = 0; i < n; ++i) {
+        const SectionPoint& a = polygon[i];
+        const SectionPoint& b = polygon[(i + 1) % n];
+        area += static_cast<double>(a.u) * b.v - static_cast<double>(b.u) * a.v;
+    }
+    const float inward = area >= 0.0 ? 1.0f : -1.0f;  // (counter-clockwise: the inside on the left)
+    // Each edge's line moved: a point on it and its way.
+    std::vector<SectionPoint> at(n), way(n);
+    bool any = false;
+    for (std::size_t i = 0; i < n; ++i) {
+        const SectionPoint& a = polygon[i];
+        const SectionPoint& b = polygon[(i + 1) % n];
+        const SectionPoint mid{0.5f * (a.u + b.u), 0.5f * (a.v + b.v)};
+        float du = b.u - a.u, dv = b.v - a.v;
+        const float len = std::hypot(du, dv);
+        way[i] = len > 0.0f ? SectionPoint{du / len, dv / len} : SectionPoint{1.0f, 0.0f};
+        const bool cut = offOutline(mid) > near || offOutline(a) > near || offOutline(b) > near;
+        const float d = cut ? gap : 0.0f;
+        any = any || cut;
+        at[i] = {a.u - way[i].v * d * inward, a.v + way[i].u * d * inward};
+    }
+    if (!any) return polygon;
+    std::vector<SectionPoint> out(n);
+    for (std::size_t i = 0; i < n; ++i) {
+        const std::size_t e0 = (i + n - 1) % n, e1 = i;  // (the edges before and after point i)
+        const float cross = way[e0].u * way[e1].v - way[e0].v * way[e1].u;
+        if (std::abs(cross) < 1e-4f) {
+            // (Its edges in a line: moved as the edge after it is.)
+            out[i] = {polygon[i].u + (at[e1].u - polygon[i].u), polygon[i].v + (at[e1].v - polygon[i].v)};
+            continue;
+        }
+        const float wu = at[e1].u - at[e0].u, wv = at[e1].v - at[e0].v;
+        const float s = (wu * way[e1].v - wv * way[e1].u) / cross;
+        out[i] = {at[e0].u + way[e0].u * s, at[e0].v + way[e0].v * s};
+    }
+    return out;
+}
+
+}  // namespace
+
 GuideId sliceTube(GuideHierarchy& h, const ScalpMesh& scalp, const TubeSource& source, const std::vector<SectionPoint>& polygon,
                   GuideId into, const std::vector<Vec3f>& outline, const std::function<Vec3f(float)>& deviation) {
     if (polygon.size() < 3 || source.points.size() < 2) return kNoGuide;
     if (into != kNoGuide && !h.guide(into)) return kNoGuide;
+    // The gap: kSliceGap in from each edge where it meets another slice (an edge off the source's
+    // outline), none along the source's outline, so the slices keep the source's outer shape at every
+    // level (slices of slices never shrink) with a slight gap only between them.
+    const std::vector<SectionPoint> gapped = gapInside(polygon, tubeOutline(source.tube), static_cast<float>(kSliceGap));
     // The polygon's box in the source's section coordinates, and its points fitted to it.
     double lo[2] = {1e300, 1e300}, hi[2] = {-1e300, -1e300};
     std::vector<P2> unit;
-    for (const SectionPoint& q : polygon) {
+    for (const SectionPoint& q : gapped) {
         unit.push_back({q.u, q.v});
         lo[0] = std::min(lo[0], static_cast<double>(q.u)), lo[1] = std::min(lo[1], static_cast<double>(q.v));
         hi[0] = std::max(hi[0], static_cast<double>(q.u)), hi[1] = std::max(hi[1], static_cast<double>(q.v));
@@ -1624,9 +1690,10 @@ GuideId sliceTube(GuideHierarchy& h, const ScalpMesh& scalp, const TubeSource& s
     } catch (const std::invalid_argument&) {
         return kNoGuide;  // (a shape no library takes)
     }
-    // Its sections: the source's, scaled to the slice, kSliceGap inside it all round (neighbours never touch).
-    const double inset = std::clamp(1.0 - kSliceGap / std::min(su, sv), 0.75, 1.0);
+    // Its sections: the source's, scaled to the slice (its gap already in the polygon).
+    const double inset = 1.0;
     TubeProfile tube = source.tube;
+    tube.joinScale = 1.0f;
     tube.custom = h.tubeShape(name);
     tube.midShape.reset();
     tube.tipShape.reset();
@@ -1639,8 +1706,13 @@ GuideId sliceTube(GuideHierarchy& h, const ScalpMesh& scalp, const TubeSource& s
     // inside the source's tube, joined from the root as a strand rooted there joins it
     // (TubeSpine::rootJoin's (1 - t / join)^2, over a few of its own widths), along the tube: it
     // starts where its hair grows and runs with its neighbours.
-    const float extent = static_cast<float>(std::max(su * source.tube.widthAt(0.0f), sv * source.tube.widthAt(0.0f) * source.tube.aspectAt(0.0f))) *
-                         h.scale();
+    // (A slice joins from its root as the whole tube does: over its level 1 root's size; a cell of a
+    // cut, a root of its own, over its own.)
+    const float whole = static_cast<float>(source.tube.widthAt(0.0f) * std::max(1.0f, source.tube.aspectAt(0.0f)) * source.tube.joinScale) *
+                        h.scale();
+    const float extent = into != kNoGuide ? whole
+                                          : static_cast<float>(std::max(su * source.tube.widthAt(0.0f), sv * source.tube.widthAt(0.0f) * source.tube.aspectAt(0.0f))) *
+                                                h.scale();
     std::vector<Vec3f> path = slicePath(scalp, source, static_cast<float>(cu), static_cast<float>(cv), extent, h.scale());
     if (deviation) {  // (grooming kept: the shape the guides near it were given, on top)
         for (std::size_t i = 1; i < path.size(); ++i) path[i] = path[i] + deviation(static_cast<float>(i) / static_cast<float>(path.size() - 1));

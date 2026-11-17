@@ -485,6 +485,7 @@ std::uint64_t hashTube(std::uint64_t h, const TubeProfile& tube) {
         h = hashFloat(hashFloat(hashFloat(hashFloat(hashCombine(h, 0xB01Du), tube.rootHold), tube.midHold), tube.tipHold), tube.midAt);
     }
     if (!tube.rollOnScalp) h = hashCombine(h, 0x5011u);
+    if (tube.joinScale != 1.0f) h = hashFloat(hashCombine(h, 0x701Du), tube.joinScale);
     return h;
 }
 
@@ -917,7 +918,7 @@ TubeSpine::TubeSpine(const Vec3f* points, std::size_t count, const Vec3f& frameU
     constexpr float kJoinExtents = 3.0f;
     float length = 0.0f;
     for (std::size_t i = 1; i < count; ++i) length += (points[i] - points[i - 1]).length();
-    const float join = kJoinExtents * std::max(rootWidth_, rootHeight_);
+    const float join = kJoinExtents * std::max(rootWidth_, rootHeight_) * std::max(tube.joinScale, 1e-3f);
     rootJoin_ = length > 0.0f && join < length ? std::max(join / length, 1e-3f) : 1.0f;
 }
 

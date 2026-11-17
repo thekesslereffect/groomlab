@@ -404,8 +404,8 @@ def remove_tube_level(groom, base, guides=None):
 
 def show_tube_level(groom, base, level, locked=0):
     """Show level `level` (1: the base) of `base`'s hierarchy and hide its other levels (the guide
-    groups' eyes; groups outside the hierarchy are left as they are); `locked` (Lock view: a level
-    kept in view) shows too. Returns the level's group."""
+    groups' eyes; groups outside the hierarchy are left as they are); with `locked` (Lock view)
+    level `locked` alone shows instead, whichever level is picked. Returns level `level`'s group."""
     shown = _request(groom, "levelVisibility", base=base, level=int(level), locked=int(locked or 0))
     levels = tube_levels(groom, picked=base)["levels"]
     for name, visible in shown.items():

@@ -256,6 +256,10 @@ struct TubeProfile {
     // minimizing frames alone, as a section swept from its root out (a root-first tube: its root
     // outline drawn on the scalp, the tube extruded from it with no twist). Saved when off.
     bool rollOnScalp = true;
+    // How far its root joins its sections, against its own root's size (TubeSpine::rootJoin): 1 its
+    // own; a slice of a drawn root's tube its level 1 root's (GuideHierarchy::evaluate lays it, not
+    // saved), so the slices leave the root as the whole tube does, bending no other way.
+    float joinScale = 1.0f;
 
     float widthAt(float t) const;
     float aspectAt(float t) const;  // clamped
