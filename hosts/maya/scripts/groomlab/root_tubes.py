@@ -30,9 +30,10 @@ Subdividing roots (issue 85): a root cut into Voronoi cells, each a root tube of
 and more numerous where the vertex map tubeSubdivisionDensity is high (1) than where it is low
 (0); the groom remembers each cut, so painting the map again re-cuts only where it changed.
 
-    root_tubes.subdivide(groom, [guide])                     # {"cells", "removed", "kept"}
-    root_tubes.ensure_density_map(groom)                      # the map, made at 0.5 if missing
-    root_tubes.apply_density(groom)                           # cut again where the map changed
+    name = root_tubes.density_map_for(groom, [guide])         # its own map: tubeSubdivisionDensity01, ...
+    root_tubes.ensure_density_map(groom, name)                # made at 0.5 if missing
+    root_tubes.subdivide(groom, [guide], name, multiplier=1)  # {"cells", "removed", "kept"}
+    root_tubes.apply_density(groom, [cell], name)             # cut again where its map changed
 """
 
 import colorsys
@@ -53,7 +54,7 @@ ROOT_OVERLAP = 0.015        # a root tube's footprint this share larger than its
 CLEARANCE = 0.35            # a drawn guide popped this many root sizes out where it dips into the scalp ...
 _CLEAR_RAMP = 2.0           # ... reached this many root sizes along it from the root (root_tubes.cpp)
 MAX_LEAN = 0.8726646259971648  # (50 degrees) a root tube's guide leaves the scalp leaning at most this far off its normal
-DENSITY_MAP = "tubeSubdivisionDensity"  # the vertex map Subdivide reads (1: the most, smallest roots)
+DENSITY_MAP = "tubeSubdivisionDensity"  # each subdivision's vertex map: this, numbered (01, 02, ...; 1: the most, smallest roots)
 DENSITY_START = 0.5                     # its value where nothing is painted
 
 
@@ -417,13 +418,22 @@ def show_tube_level(groom, base, level):
 # Subdividing roots (issue 85)
 
 
-def ensure_density_map(groom):
-    """The subdivision density map (a gray vertex map), made at DENSITY_START when the groom has
-    none. Returns its name."""
+def density_map_for(groom, guides):
+    """The density map to paint for cutting `guides` (root tubes, or tubes of their hierarchies):
+    the map of the subdivision the first is a cell of, else a new one (tubeSubdivisionDensity01,
+    02, ...: the first no subdivision or map of the groom takes)."""
     from groomlab import painting
-    if DENSITY_MAP not in painting.list_maps(groom):
-        painting.add_map(groom, DENSITY_MAP, value=DENSITY_START, kind="vertices")
-    return DENSITY_MAP
+    answer = _request(groom, "densityMap", guides=[int(g) for g in guides], taken=list(painting.list_maps(groom)))
+    return answer["map"]
+
+
+def ensure_density_map(groom, name):
+    """The subdivision density map `name` (a gray vertex map), made at DENSITY_START when the groom
+    has none of that name. Returns its name."""
+    from groomlab import painting
+    if name not in painting.list_maps(groom):
+        painting.add_map(groom, name, value=DENSITY_START, kind="vertices")
+    return name
 
 
 def _cut(answer):
@@ -431,16 +441,20 @@ def _cut(answer):
             "kept": int(answer.get("kept", 0))}
 
 
-def subdivide(groom, guides):
+def subdivide(groom, guides, map=None, multiplier=1.0):
     """Cut root tubes `guides` (a smaller tube of the hierarchy stands for its root tube) into
-    Voronoi cells at the density the map gives (DENSITY_START where there is no map), each a level
-    1 root tube following the old tube, the hierarchy under it made again in each. One undo step.
-    Returns {"cells": the new root tubes, "removed": guides taken out, "kept": 0}."""
-    return _cut(_request(groom, "subdivide", guides=[int(g) for g in guides]))
+    Voronoi cells at the density its map `map` gives (density_map_for; DENSITY_START where the
+    groom has no such map), times `multiplier` (2: about twice the cells), each a level 1 root tube
+    following the old tube, the hierarchy under it made again in each. One undo step. Returns
+    {"cells": the new root tubes, "removed": guides taken out, "kept": 0}."""
+    name = map or density_map_for(groom, guides)
+    return _cut(_request(groom, "subdivide", guides=[int(g) for g in guides], map=name, multiplier=float(multiplier)))
 
 
-def apply_density(groom, guides=None):
-    """Painting the density finished: every cut root whose density changed cut again there (its
-    other cells kept as they are), and `guides` (root tubes not cut yet) cut. One undo step.
-    Returns {"cells": the root tubes made, "removed", "kept": cells left as they were}."""
-    return _cut(_request(groom, "applyDensity", guides=[int(g) for g in (guides or [])]))
+def apply_density(groom, guides=None, map=None, multiplier=1.0):
+    """Painting the density map `map` finished: the subdivisions cut with it cut again where it
+    changed (all of a root again when `multiplier` changed), and `guides` (root tubes not cut yet)
+    cut with it. Without `map`: every subdivision by its own map, each keeping its multiplier. One
+    undo step. Returns {"cells": the root tubes made, "removed", "kept": cells left as they were}."""
+    args = {"guides": [int(g) for g in (guides or [])], "map": map or "", "multiplier": float(multiplier) if map else 0.0}
+    return _cut(_request(groom, "applyDensity", **args))

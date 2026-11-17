@@ -880,7 +880,15 @@ void GuideHierarchy::evaluateGuide(HierarchyGuide& g, const ScalpMesh* scalp, co
         // (whichever way the guide is combed).
         const std::vector<Frame> frames = rotationMinimizingFrames(g.points.data(), g.points.size(), g.frameUp);
         const Vec3f n = scalp->normal(g.root);
-        const Vec3f across = scalp->acrossAt(g.root);
+        // A slice lays its footprint as its parent does (the parent's across, onto the scalp here), so
+        // the slices of a root lie as one with it, whichever way the scalp's own across turns
+        // between their roots (an edge, a corner of the scalp).
+        const HierarchyGuide* above = g.isChild() ? guide(g.parent) : nullptr;
+        Vec3f across = scalp->acrossAt(g.root);
+        if (above && isRootTube(above->tube, 0) && above->rootAcross.length() > 0.5f) {
+            const Vec3f flat = above->rootAcross - n * above->rootAcross.dot(n);
+            if (flat.length() > 1e-4f) across = flat.normalized();
+        }
         g.rootAcross = across;
         const Vec3f way = frames.front().tangent;
         float roll = 0.0f;
@@ -908,12 +916,36 @@ void GuideHierarchy::evaluateGuide(HierarchyGuide& g, const ScalpMesh* scalp, co
             roll = std::atan2(along.dot(frames[j].binormal), along.dot(frames[j].normal));
         }
         g.tube.roll = {roll};
+        // Its root loop on the scalp (HierarchyGuide::rootRing): its footprint's outline, each point
+        // taken onto the scalp along the footprint's normal (the nearer hit either way; the scalp's
+        // nearest point where the line misses it).
+        g.rootRing.clear();
+        if (!g.tube.blended()) {
+            TubeSpine spine(g.points.data(), g.points.size(), g.frameUp, g.tube, scale_);
+            spine.setRootOnScalp(n, across);
+            const std::vector<SectionPoint>& outline = tubeOutline(g.tube);
+            g.rootRing.reserve(outline.size());
+            for (const SectionPoint& q : outline) {
+                const Vec3f p = spine.footprintAt(q.u, q.v);
+                const SurfacePoint near = scalp->closestPoint(p);
+                Vec3f at = near.position;
+                float best = std::numeric_limits<float>::infinity();
+                for (const Vec3f& way : {n, n * -1.0f}) {
+                    SurfacePoint hit;
+                    float d = 0.0f;
+                    if (scalp->intersectRay(p, way, &hit, &d) && std::abs(d) < best) best = std::abs(d), at = hit.position;
+                }
+                if (!std::isinf(best) && best > 4.0f * (near.position - p).length() + 1e-6f) at = near.position;
+                g.rootRing.push_back(at);
+            }
+        }
     } else if (g.tube.shaped() && g.tube.rollOnScalp && g.points.size() >= 2) {
         g.tube.roll = sectionRoll(g.points, rotationMinimizingFrames(g.points.data(), g.points.size(), g.frameUp), g.tube,
                                   *scalp, scale_);
     } else {
         g.tube.roll.clear();
     }
+    if (!isRootTube(g.tube, 0)) g.rootRing.clear();
 }
 
 void GuideHierarchy::placeGuide(HierarchyGuide& g, const ScalpMesh* scalp, const std::vector<Frame>* parentFrames) {
@@ -1588,8 +1620,35 @@ void GuideHierarchy::setTube(GuideId id, TubeProfile tube) {
         const bool parent = std::any_of(guides_.begin(), guides_.end(), [&](const HierarchyGuide& c) { return c.parent == id; });
         if (!parent) g->layFrame = true;
     }
+    const TubeProfile before = g->tube;
     g->tube = std::move(tube);
     adoptTubeShape(g->tube);
+    if (isRootTube(g->tube, 0) &&
+        (before.width != g->tube.width || before.aspect != g->tube.aspect || before.twist != g->tube.twist)) {
+        const TubeProfile after = g->tube;
+        carryToSlices(id, before, after);
+    }
+}
+
+void GuideHierarchy::carryToSlices(GuideId id, const TubeProfile& before, const TubeProfile& after) {
+    for (const GuideId k : childrenOf(id)) {
+        HierarchyGuide* c = mutableGuide(k);
+        if (!c || !isRootTube(c->tube, 0)) continue;
+        const TubeProfile was = c->tube;
+        const std::size_t n = std::max<std::size_t>(c->points.size(), 2);
+        std::vector<float> width(n), aspect(n), twist(n);
+        for (std::size_t i = 0; i < n; ++i) {
+            const float t = static_cast<float>(i) / static_cast<float>(n - 1);
+            width[i] = was.widthAt(t) * after.widthAt(t) / std::max(before.widthAt(t), 1e-9f);
+            aspect[i] = std::clamp(was.aspectAt(t) * after.aspectAt(t) / std::max(before.aspectAt(t), 1e-6f), 0.01f, 100.0f);
+            twist[i] = was.twistAt(t) + after.twistAt(t) - before.twistAt(t);
+        }
+        c->tube.width = std::move(width);
+        c->tube.aspect = std::move(aspect);
+        c->tube.twist = std::move(twist);
+        invalidateHash();
+        carryToSlices(k, was, c->tube);
+    }
 }
 
 void GuideHierarchy::adoptTubeShape(TubeProfile& tube) {
@@ -1656,7 +1715,7 @@ bool sameRoots(const std::vector<StrandRoot>& a, const std::vector<StrandRoot>& 
 bool RootSubdivisionRecord::operator==(const RootSubdivisionRecord& o) const {
     return id == o.id && map == o.map && sameRoots(outline, o.outline) && sameRoots(sites, o.sites) && cells == o.cells &&
            sameRoots(samples, o.samples) && density == o.density && sizeAtZero == o.sizeAtZero && sizeAtOne == o.sizeAtOne &&
-           seed == o.seed;
+           multiplier == o.multiplier && seed == o.seed;
 }
 
 void GuideHierarchy::setRootSubdivisions(std::vector<RootSubdivisionRecord> records) {
@@ -1881,6 +1940,7 @@ GuideSet GuideHierarchy::flattenGroup(GroupId groupId) const {
         out.tube = g.tube;
         out.tube.scaleWidth(scale_);
         out.frameUp = g.frameUp;
+        out.rootAcross = g.rootAcross;
         out.depth = depth;
         out.baseRoot = baseRootOf(g);
         out.baseId = baseIdOf(g);
@@ -1905,6 +1965,7 @@ GuideSet GuideHierarchy::flatten(int level) const {
         out.tube = g.tube;
         out.tube.scaleWidth(scale_);
         out.frameUp = g.frameUp;
+        out.rootAcross = g.rootAcross;
         out.depth = depths[g.group];
         out.baseRoot = baseRootOf(g);
         out.baseId = baseIdOf(g);
@@ -1944,7 +2005,7 @@ nlohmann::json rootSubdivisionsJson(const std::vector<RootSubdivisionRecord>& re
     for (const RootSubdivisionRecord& r : records) {
         out.push_back({{"id", r.id}, {"map", r.map}, {"outline", rootsJson(r.outline)}, {"sites", rootsJson(r.sites)},
                        {"cells", r.cells}, {"samples", rootsJson(r.samples)}, {"density", r.density},
-                       {"sizeAtZero", r.sizeAtZero}, {"sizeAtOne", r.sizeAtOne}, {"seed", r.seed}});
+                       {"sizeAtZero", r.sizeAtZero}, {"sizeAtOne", r.sizeAtOne}, {"multiplier", r.multiplier}, {"seed", r.seed}});
     }
     return out;
 }
@@ -1962,6 +2023,7 @@ std::vector<RootSubdivisionRecord> rootSubdivisionsFromJson(const nlohmann::json
         r.density = j.value("density", std::vector<float>{});
         r.sizeAtZero = j.value("sizeAtZero", 0.0f);
         r.sizeAtOne = j.value("sizeAtOne", 0.0f);
+        r.multiplier = j.value("multiplier", 1.0f);
         r.seed = j.value("seed", std::uint64_t{0});
         if (r.cells.size() != r.sites.size() || r.density.size() != r.samples.size()) {
             throw std::runtime_error("a subdivision's cells or samples do not match");

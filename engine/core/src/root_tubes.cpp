@@ -1308,7 +1308,8 @@ void sliceChildren(GuideHierarchy& h, const ScalpMesh& scalp, GuideId parentId, 
     const std::vector<P2> halves[2] = {clipSide(shape, mid, longer), clipSide(shape, mid, {-longer.x, -longer.y})};
 
     TubeSpine spine(ppoints.data(), ppoints.size(), pframeUp, ptube, h.scale());
-    spine.setRootOnScalp(scalp.normal(proot), scalp.acrossAt(proot));
+    const Vec3f pacross = parent->rootAcross.length() > 0.5f ? parent->rootAcross : scalp.acrossAt(proot);
+    spine.setRootOnScalp(scalp.normal(proot), pacross);
     const std::size_t n = ppoints.size();
     std::sort(kids.begin(), kids.end());
     for (int k = 0; k < 2; ++k) {

@@ -32,6 +32,10 @@ struct Guide {
     bool hasTube = false;
     TubeProfile tube;
     Vec3f frameUp{1, 0, 0};
+    // A drawn root's tube or a slice of one: the direction across the scalp its footprint is laid
+    // along (GuideHierarchy: its root's, a slice its parent's, so the slices of a root lie as one).
+    // Zero: the scalp's own at its root (ScalpMesh::acrossAt). Not saved.
+    Vec3f rootAcross;
     // The level of the hierarchy it comes from (0: a root group's): where tubes of several levels
     // hold a strand's root, fillTubes takes the deepest.
     int depth = 0;

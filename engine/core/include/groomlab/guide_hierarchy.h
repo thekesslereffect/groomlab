@@ -94,6 +94,12 @@ struct HierarchyGuide {
     // a scalp (zero before): what lays its footprint on the scalp where it draws (display.h, issue
     // 86). Not stored, not hashed.
     Vec3f rootAcross;
+    // Such a tube's root loop on the scalp: each point of its shape's outline (tubeOutline) on its
+    // footprint, taken onto the scalp along the footprint's normal, from the last evaluate on a
+    // scalp (empty before, and for any other tube). What its drawn tube starts from, so it sits on
+    // the root drawn with no gap however the scalp curves (display.h, issue 86). Not stored, not
+    // hashed.
+    std::vector<Vec3f> rootRing;
 
     // Following children only (GH-5): shape relative to the parent, one entry
     // per parent sample t = i / (n - 1). x and y are the parent tube's section
@@ -167,6 +173,7 @@ struct RootSubdivisionRecord {
     std::vector<StrandRoot> samples;  // where the density was read ...
     std::vector<float> density;       // ... and what it was
     float sizeAtZero = 0.0f, sizeAtOne = 0.0f;  // the cells' size (scene units) at density 0 and 1
+    float multiplier = 1.0f;                    // how dense overall it was cut (RootSubdivisionOptions)
     std::uint64_t seed = 0;
     bool operator==(const RootSubdivisionRecord& o) const;
 };
@@ -467,6 +474,10 @@ private:
     void bindOffsets(HierarchyGuide& child, const HierarchyGuide& parent) const;
     // A tube's library shape made this hierarchy's entry of that name (added when it has none).
     void adoptTubeShape(TubeProfile& tube);
+    // A drawn root's tube (or a slice) given a new tube: its slices (children taking root shapes of
+    // their own) follow what changed, along them: widths and flatness scaled as the parent's
+    // changed there, the twist turned as much, their own edits kept; and theirs, level by level.
+    void carryToSlices(GuideId id, const TubeProfile& before, const TubeProfile& after);
     void rebuildIndex();
     void invalidateHash() { hashMemo_.valid.store(false, std::memory_order_relaxed); }
 

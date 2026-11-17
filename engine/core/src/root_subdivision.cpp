@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <limits>
 #include <map>
 #include <set>
@@ -606,8 +607,9 @@ void cutRoot(GuideHierarchy& h, const ScalpMesh& scalp, GuideId guide, const Roo
     if (!g) throw std::invalid_argument("no guide " + std::to_string(guide));
     const Cut cut = cutOf(scalp, rootTubeOutline(h, scalp, guide));
     if (cut.rootSize <= 0.0) throw std::invalid_argument("root tube " + std::to_string(guide) + " has no area to cut");
-    double s0 = std::max(1e-4, static_cast<double>(o.sizeAtZero)) * cut.rootSize;
-    double s1 = std::max(1e-4, static_cast<double>(o.sizeAtOne)) * cut.rootSize;
+    const double denser = 1.0 / std::sqrt(std::max(0.01, static_cast<double>(o.multiplier > 0.0f ? o.multiplier : 1.0f)));
+    double s0 = std::max(1e-4, static_cast<double>(o.sizeAtZero)) * cut.rootSize * denser;
+    double s1 = std::max(1e-4, static_cast<double>(o.sizeAtOne)) * cut.rootSize * denser;
     fitSizes(cut.rootSize * cut.rootSize, &s0, &s1);
     const DensityGrid grid = densityGrid(scalp, cut.plane, cut.outline, 0.5 * std::min(s0, s1), o.map);
     auto size = [&](const P& p) { return static_cast<float>(s0 + (s1 - s0) * grid.at(p)); };
@@ -669,6 +671,7 @@ void cutRoot(GuideHierarchy& h, const ScalpMesh& scalp, GuideId guide, const Roo
     }
     record.sizeAtZero = static_cast<float>(s0);
     record.sizeAtOne = static_cast<float>(s1);
+    record.multiplier = o.multiplier > 0.0f ? o.multiplier : 1.0f;
     records.push_back(std::move(record));
     h.setRootSubdivisions(std::move(records));
     result.cells.insert(result.cells.end(), made.begin(), made.end());
@@ -682,12 +685,18 @@ bool recut(GuideHierarchy& h, const ScalpMesh& scalp, std::size_t index, const R
     // The density now at each sample, and where it changed.
     std::vector<float> now(r.samples.size());
     std::vector<std::pair<P, double>> changed;  // (point, reach)
-    const double s0 = r.sizeAtZero, s1 = r.sizeAtOne;
+    // Another multiplier: the sizes scaled to it, and the whole root cut again.
+    const float had = r.multiplier > 0.0f ? r.multiplier : 1.0f;
+    const bool remultiplied = o.multiplier > 0.0f && std::abs(o.multiplier - had) > 1e-4f;
+    const double rescale = remultiplied ? std::sqrt(static_cast<double>(had) / static_cast<double>(o.multiplier)) : 1.0;
+    double s0 = r.sizeAtZero * rescale, s1 = r.sizeAtOne * rescale;
+    fitSizes(cut.rootSize * cut.rootSize, &s0, &s1);
     for (std::size_t k = 0; k < r.samples.size(); ++k) {
         const Vec3f at = scalp.position(r.samples[k]);
         now[k] = subdivisionDensityAt(scalp, at, r.map);
-        if (std::abs(now[k] - r.density[k]) > kDensityChanged) {
-            const double before = s0 + (s1 - s0) * r.density[k], after = s0 + (s1 - s0) * now[k];
+        if (remultiplied || std::abs(now[k] - r.density[k]) > kDensityChanged) {
+            const double before = (r.sizeAtZero + (r.sizeAtOne - r.sizeAtZero) * r.density[k]) * std::max(1.0, rescale);
+            const double after = s0 + (s1 - s0) * now[k];
             changed.push_back({cut.plane.to(at), std::max(before, after)});
         }
     }
@@ -786,6 +795,9 @@ bool recut(GuideHierarchy& h, const ScalpMesh& scalp, std::size_t index, const R
     }
     rebuildLevels(h, scalp, made, sources);
     next.density = now;
+    next.sizeAtZero = static_cast<float>(s0);
+    next.sizeAtOne = static_cast<float>(s1);
+    next.multiplier = remultiplied ? o.multiplier : had;
     std::vector<RootSubdivisionRecord> records = h.rootSubdivisions();
     records[index] = std::move(next);
     h.setRootSubdivisions(std::move(records));
@@ -811,7 +823,11 @@ SubdivisionResult applySubdivisionDensity(GuideHierarchy& h, const ScalpMesh& sc
                                           const RootSubdivisionOptions& options) {
     h.evaluate(&scalp);
     SubdivisionResult result;
-    for (std::size_t i = 0; i < h.rootSubdivisions().size(); ++i) recut(h, scalp, i, options, result);
+    for (std::size_t i = 0; i < h.rootSubdivisions().size(); ++i) {
+        // (Given a map: only the subdivisions painted with it.)
+        if (!options.map.empty() && h.rootSubdivisions()[i].map != options.map) continue;
+        recut(h, scalp, i, options, result);
+    }
     // The roots given that are not already cells of a subdivision: cut.
     std::set<GuideId> cells;
     for (const RootSubdivisionRecord& r : h.rootSubdivisions()) cells.insert(r.cells.begin(), r.cells.end());
@@ -821,9 +837,39 @@ SubdivisionResult applySubdivisionDensity(GuideHierarchy& h, const ScalpMesh& sc
             if (!cells.count(g)) fresh.push_back(g);
         }
     }
-    for (const GuideId g : fresh) cutRoot(h, scalp, g, options, result);
+    RootSubdivisionOptions fresh0 = options;
+    if (fresh0.map.empty()) fresh0.map = subdivisionDensityMapName(1);
+    for (const GuideId g : fresh) cutRoot(h, scalp, g, fresh0, result);
     h.evaluate(&scalp);
     return result;
+}
+
+std::string subdivisionDensityMapName(int n) {
+    char digits[16];
+    std::snprintf(digits, sizeof digits, "%02d", std::max(n, 1));
+    return std::string(kSubdivisionDensityMap) + digits;
+}
+
+std::string subdivisionDensityMapFor(const GuideHierarchy& h, const std::vector<GuideId>& guides,
+                                     const std::vector<std::string>& taken, bool* fresh) {
+    // A cell of a subdivision (or a tube of a cell's hierarchy): that subdivision's map.
+    for (const GuideId g : rootTubesOf(h, guides)) {
+        for (const RootSubdivisionRecord& r : h.rootSubdivisions()) {
+            if (!r.map.empty() && std::find(r.cells.begin(), r.cells.end(), g) != r.cells.end()) {
+                if (fresh) *fresh = false;
+                return r.map;
+            }
+        }
+    }
+    std::set<std::string> used(taken.begin(), taken.end());
+    for (const RootSubdivisionRecord& r : h.rootSubdivisions()) used.insert(r.map);
+    for (int n = 1;; ++n) {
+        const std::string name = subdivisionDensityMapName(n);
+        if (!used.count(name)) {
+            if (fresh) *fresh = true;
+            return name;
+        }
+    }
 }
 
 }  // namespace groomlab

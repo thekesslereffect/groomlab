@@ -473,16 +473,25 @@ class RootTubes(unittest.TestCase):
         self.assertEqual(root_tubes.root_tubes(self.groom), [guide])
         cmds.redo()
         self.assertEqual(sorted(root_tubes.root_tubes(self.groom)), sorted(cut["cells"]))
-        # Nothing painted since: nothing cut again.
-        self.assertEqual(root_tubes.apply_density(self.groom)["cells"], [])
+        # Its own map: a cell of it paints tubeSubdivisionDensity01; nothing painted, nothing cut again.
+        name = root_tubes.density_map_for(self.groom, [cut["cells"][0]])
+        self.assertEqual(name, root_tubes.DENSITY_MAP + "01")
+        self.assertEqual(root_tubes.apply_density(self.groom, [cut["cells"][0]], name)["cells"], [])
         # The map made at 0.5, then white everywhere: more, smaller roots.
-        self.assertEqual(root_tubes.ensure_density_map(self.groom), root_tubes.DENSITY_MAP)
+        self.assertEqual(root_tubes.ensure_density_map(self.groom, name), name)
         from groomlab import painting
-        self.assertEqual(painting.map_kind(self.groom, root_tubes.DENSITY_MAP), "vertices")
-        painting.fill_map(self.groom, root_tubes.DENSITY_MAP, value=1.0)
-        again = root_tubes.apply_density(self.groom)
+        self.assertEqual(painting.map_kind(self.groom, name), "vertices")
+        painting.fill_map(self.groom, name, value=1.0)
+        again = root_tubes.apply_density(self.groom, [cut["cells"][0]], name)
         self.assertGreater(len(again["cells"]), len(cut["cells"]))
         self.assertGreater(again["removed"], 0)
+        # Another root gets the next map; the multiplier makes a cut denser.
+        other = root_tubes.make_root_tube(self.groom, ring((0.0, 0.6, 0.8), 0.3, count=12), length=0.8)
+        self.assertEqual(root_tubes.density_map_for(self.groom, [other]), root_tubes.DENSITY_MAP + "02")
+        plain = len(root_tubes.subdivide(self.groom, [other], multiplier=1.0)["cells"])
+        cmds.undo()
+        dense = len(root_tubes.subdivide(self.groom, [other], multiplier=3.0)["cells"])
+        self.assertGreater(dense, 2 * plain)
 
 
 HERE = os.path.dirname(os.path.abspath(__file__))

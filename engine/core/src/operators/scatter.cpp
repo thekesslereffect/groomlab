@@ -523,7 +523,8 @@ public:
                 const Vec3f root = binding.stablePosition(g.root, g.points[0]);
                 if (g.hasTube && g.tube.edited() && g.points.size() >= 2) {
                     shaped->add(g, root, surface.contains(g.root) ? surface.normal(g.root) : Vec3f{},
-                                surface.contains(g.root) ? surface.acrossAt(g.root) : Vec3f{});
+                                g.rootAcross.length() > 0.5f ? g.rootAcross
+                                                             : (surface.contains(g.root) ? surface.acrossAt(g.root) : Vec3f{}));
                 } else {
                     positions.push_back(root);
                 }

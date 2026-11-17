@@ -33,6 +33,8 @@
 
 namespace groomlab {
 
+// Each subdivision paints its own gray vertex map: kSubdivisionDensityMap with a two-digit number
+// (tubeSubdivisionDensity01, 02, ...: subdivisionDensityMapName), made at kDefaultSubdivisionDensity.
 constexpr const char* kSubdivisionDensityMap = "tubeSubdivisionDensity";
 constexpr float kDefaultSubdivisionDensity = 0.5f;  // the map's value when made, and where there is none
 
@@ -47,9 +49,24 @@ struct RootSubdivisionOptions {
     float sizeAtZero = 0.5f;
     float sizeAtOne = 0.12f;
     std::uint64_t seed = 0x85;           // where the sites fall (the same seed: the same cells)
+    // The density map the cut reads (subdivisionDensityMapFor). applySubdivisionDensity with one:
+    // only the subdivisions painted with it are cut again; "": each with its own.
     std::string map = kSubdivisionDensityMap;
+    // How dense overall, with the painted density: 1 as painted, 2 about twice the cells (each
+    // smaller by sqrt 2), 0.5 half. A subdivision remembers it; applySubdivisionDensity with another
+    // cuts its whole root again at that (0 or less: each keeps its own).
+    float multiplier = 1.0f;
     int relax = 2;                       // passes evening the cells out (Lloyd), each half a step
 };
+
+// The density map named for subdivision number `n` (1 on): tubeSubdivisionDensity01, ...
+std::string subdivisionDensityMapName(int n);
+// The density map for cutting `guides` (root tubes, or tubes of their hierarchies): the map of the
+// subdivision the first of them is a cell of (painting it again cuts that subdivision again), else
+// a new one: the first subdivisionDensityMapName that no subdivision and none of `taken` (the
+// groom's maps) uses. `fresh` says which.
+std::string subdivisionDensityMapFor(const GuideHierarchy& h, const std::vector<GuideId>& guides,
+                                     const std::vector<std::string>& taken, bool* fresh = nullptr);
 
 // A flat cut: `outline` (a simple polygon, either way round) filled with Voronoi cells about
 // `sites`, each cell the outline clipped to its site's side of every other site; each counter-

@@ -314,10 +314,10 @@ TEST(RootSlices, ADrawnTubeStartsOnItsRootOutline) {
     ASSERT_GE(wire.size(), 64u);
     float off = 0.0f;
     for (std::size_t i = 0; i < 64; ++i) off = std::max(off, std::abs(wire[i].length() - 1.0f));  // the first ring
-    // On the footprint, flat on the scalp as the hair's roots are: off the unit sphere by its sag
-    // alone (a root of radius 0.2: about 0.02 at its edge). Drawn as the root section instead, a
-    // guide leaning this far would start its tube some 0.15 above or into the scalp.
-    EXPECT_LT(off, 0.035f) << "the root ring lies on the scalp";
+    // The root loop on the scalp itself (its footprint's outline taken onto it): no gap however the
+    // scalp curves. (Drawn as the root section, a guide leaning this far would start its tube
+    // some 0.15 above or into the scalp.)
+    EXPECT_LT(off, 0.002f) << "the root ring lies on the scalp";
 }
 
 TEST(RootSubdivision, PaintingAgainRebuildsTheLevelsFromTheNewCells) {
@@ -330,6 +330,112 @@ TEST(RootSubdivision, PaintingAgainRebuildsTheLevelsFromTheNewCells) {
     const auto again = applySubdivisionDensity(h, after);
     ASSERT_FALSE(again.cells.empty());
     for (const GuideId c : again.cells) expectSliced(h, c);
+}
+
+TEST(RootSlices, SlicesLieAsTheirParentWhereTheScalpsAcrossTurns) {
+    // The scalp's across direction switches from x to z where the scalp faces along x (more than
+    // 0.8): a root drawn across that line keeps its slices' footprints lying as its own (no turn
+    // between levels), and they still slice it cleanly.
+    GuideHierarchy h;
+    const auto scalp = head();
+    const Vec3f at = Vec3f{0.8f, 0.6f, 0.0f}.normalized();
+    const GuideId root = makeRootTube(h, *scalp, ring(at, 0.3f, 10), {});
+    addTubeLevel(h, scalp.get(), {root});
+    addTubeLevel(h, scalp.get(), {root});
+    h.evaluate(scalp.get());
+    const HierarchyGuide* parent = h.guide(root);
+    ASSERT_GT(parent->rootAcross.length(), 0.5f);
+    std::vector<GuideId> todo = h.childrenOf(root);
+    std::size_t checked = 0;
+    while (!todo.empty()) {
+        const GuideId k = todo.back();
+        todo.pop_back();
+        const HierarchyGuide* kid = h.guide(k);
+        const HierarchyGuide* up = h.guide(kid->parent);
+        EXPECT_GT(kid->rootAcross.dot(up->rootAcross), 0.97f) << "a slice's footprint turned against its parent's";
+        for (const GuideId c : h.childrenOf(k)) todo.push_back(c);
+        ++checked;
+    }
+    EXPECT_EQ(checked, 6u);
+    expectSliced(h, root);
+    for (const GuideId k : h.childrenOf(root)) expectSliced(h, k);
+}
+
+TEST(RootSlices, SlicesFollowTheirParentsPaintedTube) {
+    // Width, flatness and twist painted on a level 1 tube carry to its slices (and theirs), along
+    // them; a slice's own edits stay.
+    GuideHierarchy h;
+    const auto scalp = head();
+    RootTubeOptions o;
+    o.length = 0.8f;
+    o.segments = 8;
+    const GuideId root = makeRootTube(h, *scalp, ring({0, 1, 0}, 0.25f, 10), {}, o);
+    addTubeLevel(h, scalp.get(), {root});
+    addTubeLevel(h, scalp.get(), {root});
+    const std::vector<GuideId> kids = h.childrenOf(root);
+    const GuideId grandkid = h.childrenOf(kids[0])[0];
+    const float kidTip = h.guide(kids[0])->tube.widthAt(1.0f), kidRoot = h.guide(kids[0])->tube.widthAt(0.0f);
+    const float deepTip = h.guide(grandkid)->tube.widthAt(1.0f);
+    const float kidTwist = h.guide(kids[0])->tube.twistAt(1.0f);
+    TubeProfile painted = h.guide(root)->tube;
+    const std::size_t n = h.guide(root)->points.size();
+    painted.width.assign(n, painted.widthAt(0.0f));
+    painted.twist.assign(n, painted.twistAt(0.0f));
+    const float w0 = painted.width[0];
+    for (std::size_t i = 0; i < n; ++i) {
+        const float t = static_cast<float>(i) / static_cast<float>(n - 1);
+        painted.width[i] = h.guide(root)->tube.widthAt(t) * (1.0f + t);  // twice as wide at the tip
+        painted.twist[i] += 0.5f * t;
+    }
+    painted.width[0] = w0;
+    h.setTube(root, painted);
+    h.evaluate(scalp.get());
+    EXPECT_NEAR(h.guide(kids[0])->tube.widthAt(1.0f), 2.0f * kidTip, 0.02f * kidTip);
+    EXPECT_NEAR(h.guide(kids[0])->tube.widthAt(0.0f), kidRoot, 1e-4f * kidRoot);
+    EXPECT_NEAR(h.guide(grandkid)->tube.widthAt(1.0f), 2.0f * deepTip, 0.02f * deepTip);
+    EXPECT_NEAR(h.guide(kids[0])->tube.twistAt(1.0f), kidTwist + 0.5f, 1e-3f);
+    expectSliced(h, root);
+}
+
+TEST(RootSubdivision, EachSubdivisionPaintsItsOwnMap) {
+    GuideHierarchy h;
+    const auto scalp = head();
+    const GuideId a = bigRoot(h, *scalp);
+    bool fresh = false;
+    EXPECT_EQ(subdivisionDensityMapFor(h, {a}, {}, &fresh), "tubeSubdivisionDensity01");
+    EXPECT_TRUE(fresh);
+    EXPECT_EQ(subdivisionDensityMapFor(h, {a}, {"tubeSubdivisionDensity01"}), "tubeSubdivisionDensity02");
+    RootSubdivisionOptions o;
+    o.map = subdivisionDensityMapName(1);
+    const auto cells = subdivideRootTubes(h, *scalp, {a}, o).cells;
+    // A cell of it: its map, to paint again; another root: the next.
+    EXPECT_EQ(subdivisionDensityMapFor(h, {cells[0]}, {}, &fresh), "tubeSubdivisionDensity01");
+    EXPECT_FALSE(fresh);
+    RootTubeOptions r;
+    const GuideId b = makeRootTube(h, *scalp, ring(Vec3f{0.0f, 0.6f, 0.8f}.normalized(), 0.2f, 8), {}, r);
+    EXPECT_EQ(subdivisionDensityMapFor(h, {b}, {}), "tubeSubdivisionDensity02");
+    // Saved with it.
+    const GuideHierarchy back = GuideHierarchy::fromJson(h.toJson());
+    EXPECT_EQ(back.rootSubdivisions().at(0).map, "tubeSubdivisionDensity01");
+}
+
+TEST(RootSubdivision, TheMultiplierMakesTheCutDenser) {
+    const auto scalp = head();
+    GuideHierarchy one, two;
+    RootSubdivisionOptions o;
+    const std::size_t plain = subdivideRootTubes(one, *scalp, {bigRoot(one, *scalp)}, o).cells.size();
+    o.multiplier = 3.0f;
+    const std::size_t dense = subdivideRootTubes(two, *scalp, {bigRoot(two, *scalp)}, o).cells.size();
+    EXPECT_GT(dense, 2 * plain);
+    EXPECT_FLOAT_EQ(two.rootSubdivisions().at(0).multiplier, 3.0f);
+    // Applied again at another multiplier: the whole root cut again at it (nothing painted).
+    o.multiplier = 1.0f;
+    const auto again = applySubdivisionDensity(two, *scalp, {}, o);
+    EXPECT_GT(again.removed, 0u);
+    EXPECT_LT(rootTubesOf(two).size(), dense);
+    EXPECT_FLOAT_EQ(two.rootSubdivisions().at(0).multiplier, 1.0f);
+    // The same multiplier and density: nothing.
+    EXPECT_TRUE(applySubdivisionDensity(two, *scalp, {}, o).cells.empty());
 }
 
 }  // namespace

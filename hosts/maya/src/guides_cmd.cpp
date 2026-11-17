@@ -97,6 +97,7 @@ const char* kSymmetry[] = {"-sym", "-symmetry"};
 // Root-first tubes and the tube hierarchy (root_tubes.h), and subdividing roots
 // (root_subdivision.h): one JSON request {"op", ...}. Edits ("make", "edit", "keepOutline",
 // "duplicate", "delete", "addLevel", "removeLevel", "subdivide", "applyDensity") are one undo step; queries
+// ("densityMap" too)
 // ("outline", "sectionOutline", "center", "rootTubes", "levels", "levelVisibility",
 // "footprintError", "carry", "sealed", "surface") change nothing. Returns JSON.
 const char* kRootTubes[] = {"-rtb", "-rootTubes"};
@@ -931,6 +932,13 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                         return answer(tubeLevelVisibility(*h, request.value("base", std::string()), request.value("level", 1)));
                     }
                     if (op == "footprintError") return answer(rootFootprintError(*h, *scalp, guide));
+                    if (op == "densityMap") {  // the density map to paint for cutting "guides" (root_subdivision.h)
+                        bool fresh = false;
+                        std::vector<std::string> taken;
+                        for (const nlohmann::json& m : request.value("taken", nlohmann::json::array())) taken.push_back(m.get<std::string>());
+                        const std::string map = subdivisionDensityMapFor(*h, ids("guides"), taken, &fresh);
+                        return answer({{"map", map}, {"fresh", fresh}});
+                    }
                     if (op == "carry") {
                         std::set<int> held;
                         if (request.contains("held")) held = request["held"].get<std::set<int>>();
@@ -985,6 +993,7 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                         o.sizeAtZero = request.value("sizeAtZero", o.sizeAtZero);
                         o.sizeAtOne = request.value("sizeAtOne", o.sizeAtOne);
                         o.map = request.value("map", o.map);
+                        o.multiplier = request.value("multiplier", o.multiplier);
                         const MeshPtr mapped = groomScalpWithMaps(groomFn);
                         const ScalpMesh& on = mapped ? *mapped : *scalp;
                         const SubdivisionResult done = op == "subdivide" ? subdivideRootTubes(*h, on, ids("guides"), o)

@@ -379,10 +379,6 @@ public:
     SectionPoint rootCoords(const Vec3f& p, float* along = nullptr) const;
     // The world point of section coordinates (u, v) on the root footprint.
     Vec3f footprintAt(float u, float v) const { return centers_.front() + footU_ * u + footV_ * v; }
-    // The point of (u, v) at sample i as a strand rooted on the footprint takes it: starting on the
-    // footprint and joining the sections by (1 - t / rootJoin)^2 (Interpolate's fillTubes). What a
-    // root-first tube's drawn surface follows, so it meets its root outline on the scalp (issue 86).
-    Vec3f joinedAt(std::size_t i, float u, float v) const;
     // The root section's half-width and half-height in scene units.
     float rootWidth() const { return rootWidth_; }
     float rootHeight() const { return rootHeight_; }

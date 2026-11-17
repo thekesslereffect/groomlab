@@ -980,15 +980,6 @@ void TubeSpine::setRootOnScalp(const Vec3f& normal, const Vec3f& across) {
     footNormal_ = n;
 }
 
-Vec3f TubeSpine::joinedAt(std::size_t i, float u, float v) const {
-    const std::size_t n = centers_.size();
-    const Vec3f at = atSample(i, u, v);
-    const float t = n > 1 ? static_cast<float>(i) / static_cast<float>(n - 1) : 0.0f;
-    if (t >= rootJoin_) return at;
-    const float k = 1.0f - t / rootJoin_;
-    return at + (footprintAt(u, v) - atSample(0, u, v)) * (k * k);
-}
-
 bool isRootTube(const TubeProfile& tube, int depth) {
     return depth == 0 && tube.custom && tube.custom->name.rfind(kOwnedTubeShapePrefix, 0) == 0;
 }

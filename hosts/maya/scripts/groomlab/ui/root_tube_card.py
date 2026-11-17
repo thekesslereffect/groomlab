@@ -8,8 +8,10 @@ Tube roots (issue 61)   Draw root: the root's outline clicked on the scalp CV by
                         selected root. A mode's button again leaves it (Draw and Select: as they
                         are; Edit: finished). Undo CV, Delete, Duplicate; the new tubes' Length,
                         Segments and Taper; Snap to neighbours. Subdivide (#85) cuts the selected
-                        root into Voronoi cells; Paint subdivision density paints the map that
-                        makes them smaller and more numerous, and Finish painting cuts again.
+                        root into Voronoi cells; Paint subdivision density paints the selected
+                        root's own map (tubeSubdivisionDensity01, 02, ...) that makes them smaller
+                        and more numerous, and Finish painting cuts again; Subdivision multiplier
+                        makes the cut denser overall.
 Tube hierarchy (#62)    + splits the selected tubes (or every tube of the base group) in two, a
                         level deeper; - undoes a split (the selected tubes', else the deepest
                         level); then a row of level buttons, 1 (the base) always there, shows and
@@ -147,7 +149,13 @@ class RootTubeCard(QtCore.QObject):
             b.setMinimumWidth(theme.px(40))
             cut_layout.addWidget(b, stretch)
         self.root_block.add(cut_row)
-        self._painting = None  # the roots to cut when painting finishes (painting: a list)
+        self.multiplier = widgets.SoftSlider(1.0, 0.25, 4.0, minimum=0.05, maximum=20.0,
+                                             key="palette.rootSubdivisionMultiplier", label="Subdivision multiplier")
+        self.multiplier.setToolTip("How dense the cut is overall, with the painted density: 1 as painted, 2 about twice "
+                                   "the roots (each smaller), 0.5 half. A root cut again at another multiplier is cut "
+                                   "again all over")
+        self.root_block.add(self.multiplier)
+        self._painting = None  # painting a density map: (the roots to cut when it finishes, the map)
         self.snap = widgets.switch("Snap to neighbours", "A CV near a neighbouring root's CV or edge snaps onto it, "
                                    "so the tubes meet with no gap", True, "rootTubeSnap")
         self.snap.toggled.connect(lambda on: self._set(snap=on))
@@ -417,9 +425,14 @@ class RootTubeCard(QtCore.QObject):
             self.owner.status.setText("Select a root first (Select root), then Subdivide.")
             return
         self.tool.leave()
-        info = self._run(root_tubes.subdivide, groom, roots)
+        info = self._run(self._subdivide, groom, roots)
         self._said_cut(info, "Subdivided")
         self._enter("select", self.select_root)
+
+    def _subdivide(self, groom, roots):
+        """Its own density map (made at 0.5: paint it later to change the cut), the multiplier."""
+        name = root_tubes.ensure_density_map(groom, root_tubes.density_map_for(groom, roots))
+        return root_tubes.subdivide(groom, roots, name, multiplier=self.multiplier.value())
 
     def paint_density_clicked(self, _on=None):
         groom = self.owner.groom()
@@ -431,15 +444,21 @@ class RootTubeCard(QtCore.QObject):
             self.finish_painting()
             return
         roots = self.tool.picked if self._mode() in ("select", "duplicate") else []
+        if not roots:
+            self.owner.status.setText("Select a root first (Select root): a root to cut, or a root cut before to "
+                                      "paint its density again.")
+            self.paint_density.setChecked(False)
+            return
         paint = self.owner.paint_tab
         try:
-            root_tubes.ensure_density_map(groom)
+            # The root's own map: a root cut before paints its subdivision's, a new root a new one.
+            name = root_tubes.ensure_density_map(groom, root_tubes.density_map_for(groom, roots))
             self.tool.leave()
             # The Paint tab on the density map, painting toward white (as picking it there would).
             paint.refresh(force=True)
-            paint.select(root_tubes.DENSITY_MAP)
+            paint.select(name)
             paint.value.setValue(1.0)
-            self._painting = list(roots)
+            self._painting = (list(roots), name)
             if self._paint_ended not in paint.painting_ended:
                 paint.painting_ended.append(self._paint_ended)
             self.owner.activate("paint")
@@ -449,9 +468,8 @@ class RootTubeCard(QtCore.QObject):
             self.owner.status.setText(messages.error("Paint subdivision density", e))
             self.refresh(groom)
             return
-        self.owner.status.setText("Paint the density on the scalp (white: more, smaller roots; Ctrl: toward black). "
-                                  "Done painting (Finish painting, Q or another tool) cuts %s." %
-                                  ("the selected root" if roots else "again where the map changed"))
+        self.owner.status.setText("Painting %s (white: more, smaller roots; Ctrl: toward black). Done painting "
+                                  "(Finish painting, Q or another tool) cuts by it." % name)
         self.refresh(groom)
 
     def _paint_ended(self):
@@ -467,13 +485,13 @@ class RootTubeCard(QtCore.QObject):
         undo step), then Edit roots, showing the new roots."""
         if self._painting is None:
             return
-        roots, self._painting = self._painting, None
+        (roots, name), self._painting = self._painting, None
         groom = self.owner.groom()
         self.owner.show_tab("tools")
         self.back_to_brush()
         if not groom:
             return
-        info = self._run(root_tubes.apply_density, groom, roots)
+        info = self._run(root_tubes.apply_density, groom, roots, name, self.multiplier.value())
         self._said_cut(info, "Density applied")
         status = self.owner.status.text()
         self._enter("edit", self.edit_root)

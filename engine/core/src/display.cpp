@@ -1108,14 +1108,13 @@ std::vector<const HierarchyGuide*> activeTubeGuides(const GuideHierarchy& hierar
 }
 
 namespace {
-// A root-first tube (or a slice of one) laid on the scalp as the strands fill it: its footprint
-// fixed where its root outline was drawn (the last evaluate's normal and across at its root), so
-// its drawn surface starts on that outline and joins its sections (TubeSpine::joinedAt, issue 86).
-// False for any other tube, or one not yet evaluated on a scalp.
-bool layOnScalp(TubeSpine& spine, const HierarchyGuide& g) {
-    if (spine.empty() || !isRootTube(g.tube, 0) || g.rootAcross.length() < 0.5f || g.rootNormal.length() < 0.5f) return false;
-    spine.setRootOnScalp(g.rootNormal, g.rootAcross);
-    return true;
+// A drawn root's tube (or a slice of one) starts from its root loop on the scalp
+// (HierarchyGuide::rootRing: its root drawn, fixed there), then its own sections from the guide's
+// next point on, as they are (no smoothing): it sits on the root with no gap (issue 86). Null for
+// any other tube, or one not yet evaluated on a scalp.
+const std::vector<Vec3f>* rootLoop(const HierarchyGuide& g, const std::vector<SectionPoint>& outline) {
+    return isRootTube(g.tube, 0) && !g.tube.blended() && g.rootRing.size() == outline.size() && g.points.size() >= 2 ? &g.rootRing
+                                                                                                                         : nullptr;
 }
 }  // namespace
 
@@ -1144,14 +1143,17 @@ void appendTubeWire(std::vector<Vec3f>& out, const HierarchyGuide& g, float scal
         for (std::size_t s = 0; s < kAround; ++s) ring[s] = own.perimeterPoint(static_cast<float>(s) / static_cast<float>(kAround));
         cornerSlots.clear();
     }
-    TubeSpine spine(g.points.data(), n, g.frameUp, g.tube, scale);
-    const bool laid = layOnScalp(spine, g);
-    auto point = [&](std::size_t i, float u, float v) { return laid ? spine.joinedAt(i, u, v) : spine.atSample(i, u, v); };
+    const TubeSpine spine(g.points.data(), n, g.frameUp, g.tube, scale);
+    const std::vector<Vec3f>* loop = g.tube.blended() ? nullptr : rootLoop(g, outline);
+    // Ring point s at sample i (index[s]: its outline point).
+    auto point = [&](std::size_t i, std::size_t s) {
+        return i == 0 && loop ? (*loop)[index[s]] : spine.atSample(i, ring[s].u, ring[s].v);
+    };
     const std::size_t step = std::max<std::size_t>(ringStep, 1);
     std::array<Vec3f, kAround> at;
     for (std::size_t i = 0; i < n; ++i) {
         if (i % step != 0 && i + 1 != n) continue;
-        for (std::size_t s = 0; s < kAround; ++s) at[s] = point(i, ring[s].u, ring[s].v);
+        for (std::size_t s = 0; s < kAround; ++s) at[s] = point(i, s);
         for (std::size_t s = 0; s < kAround; ++s) {
             out.push_back(at[s]);
             out.push_back(at[(s + 1) % kAround]);
@@ -1177,10 +1179,9 @@ void appendTubeWire(std::vector<Vec3f>& out, const HierarchyGuide& g, float scal
         along.push_back(best);
     }
     for (const std::size_t slot : along) {
-        const SectionPoint& p = ring[slot];
         for (std::size_t i = 0; i + 1 < n; ++i) {
-            out.push_back(point(i, p.u, p.v));
-            out.push_back(point(i + 1, p.u, p.v));
+            out.push_back(point(i, slot));
+            out.push_back(point(i + 1, slot));
         }
     }
 }
@@ -1216,8 +1217,9 @@ void appendTubeSurface(DisplayGeometry& batch, const HierarchyGuide& g, float sc
     }
     // Any other: the tube's sections (tube.h) along the guide, its shape's outline (every other
     // point) at each ring, turned, flattened and sized as the sections say.
-    TubeSpine spine = round ? TubeSpine() : TubeSpine(g.points.data(), n, g.frameUp, g.tube, scale);
-    const bool laid = !round && layOnScalp(spine, g);
+    const TubeSpine spine = round ? TubeSpine() : TubeSpine(g.points.data(), n, g.frameUp, g.tube, scale);
+    const std::vector<Vec3f>* loop = round ? nullptr : rootLoop(g, outline);
+    const float first = 1.0f / static_cast<float>(n - 1);  // the guide's second point (t)
     // Several profiles (tube.h): each outline point carried along them.
     std::vector<TubeBlendPoint> blends;
     if (!round && spine.blended()) {
@@ -1243,9 +1245,9 @@ void appendTubeSurface(DisplayGeometry& batch, const HierarchyGuide& g, float sc
             Vec3f out = axisU * (nu / uu) + axisV * (nv / vv);
             out = out.length() > 0.0f ? out.normalized() : axisU.normalized();
             Vec3f at = center + axisU * p.u + axisV * p.v;
-            if (laid && t < spine.rootJoin()) {  // (from its root outline on the scalp, as joinedAt)
-                const float k = 1.0f - t / spine.rootJoin();
-                at = at + (spine.footprintAt(p.u, p.v) - spine.at(0.0f, p.u, p.v, plain)) * (k * k);
+            if (loop && t < first) {  // (from its root loop on the scalp straight to its second section)
+                const Vec3f next = spine.at(first, p.u, p.v, plain);
+                at = (*loop)[static_cast<std::size_t>(2 * s)] + (next - (*loop)[static_cast<std::size_t>(2 * s)]) * (t / first);
             }
             batch.positions.insert(batch.positions.end(), {at.x, at.y, at.z});
             batch.normals.insert(batch.normals.end(), {out.x, out.y, out.z});
