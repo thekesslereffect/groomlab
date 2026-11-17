@@ -7,11 +7,13 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <set>
 
 #include <nlohmann/json.hpp>
 
 #include "groomlab/cards.h"
 #include "groomlab/correctives.h"
+#include "groomlab/display.h"
 #include "groomlab/export_view.h"
 #include "groomlab/groom_session.h"
 #include "groomlab/hair_color.h"
@@ -514,6 +516,43 @@ TEST(Session, ViewsANodeAndCountsWhatItShows) {
                             "times", "channels", "notes", "scalpHistory", "instances", "restEvaluations", "cardsStale"}) {
         EXPECT_TRUE(json.contains(key)) << key;
     }
+}
+
+// Chained Clumps writing the same channel (clumpId): a Clump's Clump Colors read that channel as
+// that node wrote it ("clumpId@clump", issue #77), not as the later Clump overwrote it.
+TEST(Session, ANodesStrandChannelIsItsOwnThoughALaterNodeWritesTheSameChannel) {
+    const std::string graph = withNode(R"({"name": "clump2", "type": "Clump", "params": {"strength": 0.4, "count": 7, "seed": 5}})", "clump2");
+    GroomSession session(groomData(graph));
+    ViewRequest request;
+    const ViewResult& view = session.evaluate(request);
+    ASSERT_TRUE(view.strands);
+    const StrandSet& shown = *view.strands;
+    const std::vector<float>* last = shown.strandChannel("clumpId");
+    ASSERT_TRUE(last);
+    const auto first = session.nodeStrandChannel("clump", "clumpId", shown);
+    const auto second = session.nodeStrandChannel("clump2", "clumpId", shown);
+    ASSERT_TRUE(first && second);
+    ASSERT_EQ(first->size(), shown.strandCount());
+    EXPECT_EQ(*second, *last);  // the last Clump's: what the strands carry
+    std::set<float> firstGroups(first->begin(), first->end()), lastGroups(last->begin(), last->end());
+    EXPECT_NE(*first, *last);   // the first Clump's own numbers
+    EXPECT_GT(firstGroups.size(), lastGroups.size());  // 40 clumps against 7
+    EXPECT_FALSE(session.nodeStrandChannel("nope", "clumpId", shown));
+    EXPECT_FALSE(session.nodeStrandChannel("clump", "noChannel", shown));
+
+    // The colors: the given channel, else the source's own channel without its node.
+    std::string channel, node;
+    EXPECT_TRUE(splitNodeColorSource("clumpId@clump", &channel, &node));
+    EXPECT_EQ(channel, "clumpId");
+    EXPECT_EQ(node, "clump");
+    EXPECT_FALSE(splitNodeColorSource("clumpId", &channel, &node));
+    EXPECT_EQ(channel, "clumpId");
+    EXPECT_TRUE(node.empty());
+    const auto own = strandColors(shown, nullptr, kClumpColors, "clumpId@clump", 0.0f, 1.0f, first.get());
+    const auto plain = strandColors(shown, nullptr, kClumpColors, "clumpId", 0.0f, 1.0f);
+    const auto fallback = strandColors(shown, nullptr, kClumpColors, "clumpId@clump", 0.0f, 1.0f);
+    EXPECT_EQ(fallback, plain);  // no values handed: the strands' own channel
+    EXPECT_NE(own, plain);
 }
 
 TEST(Session, CardsAtTheirDensityKeepABakedAtlas) {

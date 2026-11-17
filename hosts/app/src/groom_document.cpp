@@ -861,6 +861,23 @@ std::string GroomDocument::insertOnLink(const std::string& node, const NodeLink&
     });
 }
 
+std::string GroomDocument::detachNodes(const std::vector<std::string>& nodes, int* detached) {
+    if (detached) *detached = 0;
+    int count = 0;
+    for (const std::string& node : nodes) {
+        if (!nodeJson(node)) return "no node '" + node + "'";
+    }
+    const std::string error = editGraph(nodes.size() == 1 ? "detach " + nodes.front() : "detach nodes", [&](json& g) {
+        GraphEdit edit(g.dump());
+        for (const std::string& node : nodes) {
+            if (edit.detach(node).changed) ++count;
+        }
+        g = json::parse(edit.toJson());
+    });
+    if (error.empty() && detached) *detached = count;
+    return error;
+}
+
 std::vector<std::string> GroomDocument::shownInnerParams(const std::string& compound) const {
     std::vector<std::string> out;
     const json* n = nodeJson(compound);
@@ -1177,7 +1194,7 @@ std::string GroomDocument::removeNode(const std::string& node) {
     if (graph_.value("output", std::string()) == node) return "the output node stays";
     return editGraph("remove " + node, [&](json& g) {
         GraphEdit edit(g.dump());
-        edit.removeNode(node);  // with its connections
+        edit.removeNodeKeepingFlow(node);  // its links go; what fed it feeds what it fed (issue #80)
         g = json::parse(edit.toJson());
     });
 }
@@ -1191,7 +1208,7 @@ std::string GroomDocument::removeNodes(const std::vector<std::string>& nodes) {
     if (gone.size() == 1) return removeNode(gone.front());
     return editGraph("remove " + std::to_string(gone.size()) + " nodes", [&](json& g) {
         GraphEdit edit(g.dump());
-        for (const std::string& n : gone) edit.removeNode(n);
+        for (const std::string& n : gone) edit.removeNodeKeepingFlow(n);  // the flow passes through (issue #80)
         g = json::parse(edit.toJson());
     });
 }

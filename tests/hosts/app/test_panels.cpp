@@ -2034,8 +2034,10 @@ TEST(AppPanels, LookCardEditsTheGroomHairColorAndSavesIt) {
             if (c.to == "color") from = c.from;
             if (c.from == "color") to = c.to;
         }
-        ASSERT_EQ(doc->removeNode("color"), "");
-        ASSERT_EQ(doc->connectNodes(from, "", to, "strands"), "");
+        ASSERT_EQ(doc->removeNode("color"), "");  // what fed it feeds what it fed (issue #80)
+        bool bridged = false;
+        for (const GroomDocument::ConnectionInfo& c : doc->connections()) bridged = bridged || (c.from == from && c.to == to);
+        ASSERT_TRUE(bridged);
         doc->save(bare);
     }
     ASSERT_TRUE(window.openGroom(QString::fromStdString(bare)));

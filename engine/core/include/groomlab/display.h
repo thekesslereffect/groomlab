@@ -160,8 +160,16 @@ enum StrandColorMode { kSolidColors = 0, kColorSetColors, kAttributeColors, kRan
 // One color per strand for a color mode: the color set `source` at the root, the strand channel
 // `source` from lo to hi on the ramp, a random hue per strand, a hue per clump (channel
 // `source`), the density heatmap; kDefaultStrandColor where there is nothing to read.
+// A strand channel source may name the node it is read from, "<channel>@<node>" (a Clump's Clump
+// Colors: its clumpChannel as that node wrote it, though a later Clump writes the same channel):
+// the host hands that node's values in `channel` (GroomSession::nodeStrandChannel); without them
+// the strands' own `<channel>` is read.
 std::vector<std::array<float, 3>> strandColors(const StrandSet& strands, const ScalpMesh* scalp, int mode,
-                                               const std::string& source, float lo, float hi);
+                                               const std::string& source, float lo, float hi,
+                                               const std::vector<float>* channel = nullptr);
+// Splits "<channel>@<node>" (see strandColors): true with both set when it names a node; else
+// false, *channel the source as it is and *node empty.
+bool splitNodeColorSource(const std::string& source, std::string* channel, std::string* node);
 // The lowest and highest value of the strand channel `channel` (the attribute colors' Auto Range:
 // the ramp from blue to red over every strand); non-finite values skipped. False: no such channel
 // or nothing finite in it (lo and hi left as they are).
@@ -501,6 +509,11 @@ struct DisplayInputs {
     ScalpMapView scalpMap;
     bool scalpMapTexture = false;
     std::uint64_t scalpMapTextureGeneration = 0;
+    // The colors' strand channel when the source names a node ("<channel>@<node>": that node's
+    // values per strand, GroomSession::nodeStrandChannel), with a counter that moves when it changed.
+    // Null: the strands' own channel.
+    std::shared_ptr<const std::vector<float>> colorChannel;
+    std::uint64_t colorChannelVersion = 0;
     // The colored strand lines may take new colors alone (the host still has them as built).
     bool recolorable = true;
 

@@ -79,6 +79,22 @@ public:
                        const std::string& output = {});
     // Removes what feeds dst's input; false when nothing did.
     bool disconnect(const std::string& dst, const std::string& input);
+    // Detach (every host's node menu, Ctrl+Shift+X): takes a node out of the flow as if it were
+    // not there, the node kept. What fed its first connected input (in its spec's order) feeds
+    // each input the node fed instead, where that fits (connect's checks; an input it does not fit
+    // is left unconnected), and becomes the graph's output when the node was. Every other link to
+    // or from the node goes. The node moves below the new link: midway between that source and
+    // the first node it fed, `drop` lower (y grows downward, as every editor draws). GraphError
+    // for no such node.
+    struct Detached {
+        std::string source;                                    // what fed it ("": nothing)
+        std::vector<std::pair<std::string, std::string>> relinked;  // (node, input) the source feeds now
+        bool changed = false;                                  // any link went or was made
+    };
+    Detached detach(const std::string& name, double drop = 90.0);
+    // Delete as every host's graph editor does (issue #80): the node detached (what fed it feeds what
+    // it fed, the output passes to it) and then removed. GraphError for no such node.
+    Detached removeNodeKeepingFlow(const std::string& name);
     // Every connection checked and made again in order (connect's checks), as when a host loads a
     // graph to edit it. Throws GraphError at the first that does not fit.
     void checkConnections();

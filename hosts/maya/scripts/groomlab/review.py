@@ -46,7 +46,8 @@ def auto_strand_color_range(groom, source=None):
     `source` (the groom's strandColorSource) as shown: the attribute colors' ramp, blue to red, over
     every strand. Returns (lo, hi); ValueError when the strands have no such channel."""
     source = source or cmds.getAttr(groom + ".strandColorSource")
-    lo_hi = cmds.groomLabGraphStats(groom, channelRange=source) or []
+    channel = source.rpartition("@")[0] or source  # "<channel>@<node>" (Clump Colors): its channel
+    lo_hi = cmds.groomLabGraphStats(groom, channelRange=channel) or []
     if len(lo_hi) != 2:
         raise ValueError("The strands have no channel %r" % source)
     cmds.setAttr(groom + ".strandColorMin", lo_hi[0])

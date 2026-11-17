@@ -1932,7 +1932,15 @@ json Helper::run(const std::string& cmd, const json& args) {
             if (args.contains("y") && args["y"].is_number()) y = args["y"].get<double>();
             r["name"] = edit.addNode(needString(args, "type"), optString(args, "name", ""), params.dump(), x, y, scalpSize(s));
         } else if (op == "remove_node") {
-            edit.removeNode(needString(args, "name"));
+            // keepFlow (the Graph Editor's Delete, issue #80): what fed it feeds what it fed.
+            if (args.value("keepFlow", false)) {
+                const GraphEdit::Detached done = edit.removeNodeKeepingFlow(needString(args, "name"));
+                json relinked = json::array();
+                for (const auto& [node, input] : done.relinked) relinked.push_back({{"node", node}, {"input", input}});
+                r["relinked"] = relinked;
+            } else {
+                edit.removeNode(needString(args, "name"));
+            }
         } else if (op == "rename_node") {
             edit.renameNode(needString(args, "name"), needString(args, "newName"));
         } else if (op == "connect") {

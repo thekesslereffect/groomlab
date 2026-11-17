@@ -697,6 +697,35 @@ void bindGraph(py::module_& m) {
              "A link the user drew: connect, then the node set to use it (a Clump of centersFrom pick fed centers: "
              "inputPoints). True when a param changed.")
         .def("disconnect", &GraphEdit::disconnect, py::arg("dst"), py::arg("input"))
+        .def(
+            "detach",
+            [](GraphEdit& e, const std::string& name, double drop) {
+                const GraphEdit::Detached d = e.detach(name, drop);
+                py::dict out;
+                out["source"] = d.source;
+                py::list relinked;
+                for (const auto& [node, input] : d.relinked) relinked.append(py::make_tuple(node, input));
+                out["relinked"] = relinked;
+                out["changed"] = d.changed;
+                return out;
+            },
+            py::arg("name"), py::arg("drop") = 90.0,
+            "Detach (Ctrl+Shift+X): the node taken out of the flow, what fed it feeding what it fed, the node kept "
+            "below the new link. {'source', 'relinked': [(node, input)], 'changed'}.")
+        .def(
+            "remove_node_keeping_flow",
+            [](GraphEdit& e, const std::string& name) {
+                const GraphEdit::Detached d = e.removeNodeKeepingFlow(name);
+                py::dict out;
+                out["source"] = d.source;
+                py::list relinked;
+                for (const auto& [node, input] : d.relinked) relinked.append(py::make_tuple(node, input));
+                out["relinked"] = relinked;
+                return out;
+            },
+            py::arg("name"),
+            "Delete (every host's graph editor): the node removed, what fed it feeding what it fed. "
+            "{'source', 'relinked': [(node, input)]}.")
         .def("check_connections", &GraphEdit::checkConnections)
         .def("node_spec_json", &GraphEdit::nodeSpecJson, py::arg("name"))
         .def("output_type", &GraphEdit::outputType, py::arg("name"), py::arg("output") = std::string())

@@ -786,6 +786,84 @@ bool GraphEdit::disconnect(const std::string& dst, const std::string& input) {
     return found;
 }
 
+GraphEdit::Detached GraphEdit::detach(const std::string& name, double drop) {
+    impl_->node(name);
+    Detached out;
+    const json spec = impl_->spec(name);
+    const json links = impl_->connectionsView();
+    // The flow in: the first connected input, as the node lists them.
+    std::string sourceOutput;
+    for (const json& port : spec["inputs"]) {
+        const std::string input = port.value("name", std::string());
+        for (const json& c : links) {
+            if (c.value("to", std::string()) == name && c.value("input", std::string()) == input) {
+                out.source = c.value("from", std::string());
+                sourceOutput = c.value("output", std::string());
+                break;
+            }
+        }
+        if (!out.source.empty()) break;
+    }
+    // Every link of the node goes; what it fed is fed by the source where that fits.
+    std::vector<json> fed;
+    json kept = json::array();
+    for (const json& c : links) {
+        const bool from = c.value("from", std::string()) == name, to = c.value("to", std::string()) == name;
+        if (from && !to) fed.push_back(c);
+        if (from || to) {
+            out.changed = true;
+        } else {
+            kept.push_back(c);
+        }
+    }
+    if (!out.changed) return out;
+    impl_->connections() = std::move(kept);
+    if (!out.source.empty()) {
+        for (const json& c : fed) {
+            const std::string dst = c.value("to", std::string()), input = c.value("input", std::string());
+            try {
+                impl_->connect(out.source, dst, input, sourceOutput);
+                out.relinked.emplace_back(dst, input);
+            } catch (const GraphError&) {
+                // (a source that does not fit that input: it is left unconnected)
+            }
+        }
+        if (impl_->graph.value("output", std::string()) == name) impl_->graph["output"] = out.source;
+    }
+    // Below the new link: midway between the source and the first node it feeds now (else what
+    // the node fed first, else just below the source).
+    auto position = [&](const std::string& node, double* x, double* y) {
+        const json* n = impl_->find(node);
+        if (!n) return false;
+        const auto ui = n->find("ui");
+        if (ui == n->end() || !ui->is_object() || !ui->contains("x") || !ui->contains("y")) return false;
+        *x = (*ui)["x"].get<double>();
+        *y = (*ui)["y"].get<double>();
+        return true;
+    };
+    const std::string after = !out.relinked.empty() ? out.relinked.front().first
+                              : !fed.empty()        ? fed.front().value("to", std::string())
+                                                    : std::string();
+    double sx = 0.0, sy = 0.0, dx = 0.0, dy = 0.0;
+    const bool hasSource = !out.source.empty() && position(out.source, &sx, &sy);
+    const bool hasAfter = !after.empty() && position(after, &dx, &dy);
+    if (hasSource || hasAfter) {
+        const double x = hasSource && hasAfter ? 0.5 * (sx + dx) : hasSource ? sx : dx;
+        const double y = (hasSource && hasAfter ? std::max(sy, dy) : hasSource ? sy : dy) + drop;
+        for (json& n : impl_->nodes()) {
+            if (n.is_object() && n.value("name", std::string()) == name) n["ui"] = {{"x", x}, {"y", y}};
+        }
+    }
+    return out;
+}
+
+GraphEdit::Detached GraphEdit::removeNodeKeepingFlow(const std::string& name) {
+    Detached out = detach(name);
+    removeNode(name);
+    out.changed = true;
+    return out;
+}
+
 void GraphEdit::checkConnections() {
     const nlohmann::json links = impl_->connectionsView();
     impl_->connections() = nlohmann::json::array();

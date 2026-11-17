@@ -759,6 +759,14 @@ public:
     // levels): what a live drag (setLiveDrag) hands on.
     bool viewRefinesStrands() const;
 
+    // The strand channel `channel` as node `node` of the view's graph left it in the last
+    // evaluation, one value per strand of `shown` (matched by strand ID; NaN for a strand the node
+    // did not have): a Clump's own clump numbers though a later Clump writes the same channel
+    // (Clump Colors, "<channel>@<node>": strandColors). Null when the node is not in the graph, has
+    // no cached strands (caching off) or no such channel.
+    std::shared_ptr<const std::vector<float>> nodeStrandChannel(const std::string& node, const std::string& channel,
+                                                                const StrandSet& shown) const;
+
 private:
     void parseAll();  // GroomData's texts
     // The document the last view evaluated (its times, notes and channels are the stats').

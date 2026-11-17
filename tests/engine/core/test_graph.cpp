@@ -979,6 +979,87 @@ TEST(GraphEdit, MovedGuidesLinkedByHandMakeAClumpFollowThem) {
     }
 }
 
+TEST(GraphEdit, DetachTakesANodeOutOfTheFlowAndKeepsIt) {
+    // Detach (every host's node menu, Ctrl+Shift+X; issue #80): what fed the node feeds what it fed,
+    // the graph's output passes on, the node stays unlinked below the new link.
+    const nlohmann::json g = {
+        {"version", 1},
+        {"nodes",
+         {{{"name", "s"}, {"type", "Scatter"}, {"ui", {{"x", 0.0}, {"y", 0.0}}}},
+          {{"name", "c"}, {"type", "Clump"}, {"ui", {{"x", 200.0}, {"y", 0.0}}}},
+          {{"name", "n"}, {"type", "Noise"}, {"ui", {{"x", 400.0}, {"y", 20.0}}}},
+          {{"name", "w"}, {"type", "Width"}, {"ui", {{"x", 600.0}, {"y", 0.0}}}}}},
+        {"connections",
+         {{{"from", "s"}, {"to", "c"}, {"input", "strands"}},
+          {{"from", "c"}, {"to", "n"}, {"input", "strands"}},
+          {{"from", "n"}, {"to", "w"}, {"input", "strands"}}}},
+        {"output", "w"}};
+    GraphEdit edit(g.dump());
+    const GraphEdit::Detached done = edit.detach("n");
+    EXPECT_TRUE(done.changed);
+    EXPECT_EQ(done.source, "c");
+    ASSERT_EQ(done.relinked.size(), 1u);
+    EXPECT_EQ(done.relinked[0], std::make_pair(std::string("w"), std::string("strands")));
+    nlohmann::json now = nlohmann::json::parse(edit.toJson());
+    for (const nlohmann::json& c : now["connections"]) {
+        EXPECT_NE(c["from"], "n");
+        EXPECT_NE(c["to"], "n");
+    }
+    EXPECT_TRUE(edit.hasNode("n"));
+    EXPECT_EQ(edit.upstream("w"), (std::vector<std::string>{"c", "s"}));
+    const nlohmann::json& ui = now["nodes"][2]["ui"];
+    EXPECT_DOUBLE_EQ(ui["x"].get<double>(), 400.0);  // midway between c and w
+    EXPECT_DOUBLE_EQ(ui["y"].get<double>(), 90.0);   // below the new link
+    EXPECT_FALSE(edit.detach("n").changed);            // already out: nothing to do
+
+    // The output node: the output passes to what fed it.
+    GraphEdit last(g.dump());
+    last.detach("w");
+    EXPECT_EQ(last.outputNode(), "n");
+    // The first node: nothing fed it, so what it fed is left unconnected.
+    GraphEdit first(g.dump());
+    const GraphEdit::Detached head = first.detach("s");
+    EXPECT_TRUE(head.changed);
+    EXPECT_TRUE(head.source.empty());
+    EXPECT_TRUE(first.upstream("c").empty());
+    EXPECT_THROW(first.detach("nope"), GraphError);
+}
+
+TEST(GraphEdit, DeletingANodeKeepsTheFlowThroughIt) {
+    // Delete (every host's graph editor; issue #80): as Detach, then the node goes.
+    const nlohmann::json g = {
+        {"version", 1},
+        {"nodes",
+         {{{"name", "s"}, {"type", "Scatter"}},
+          {{"name", "c"}, {"type", "Clump"}},
+          {{"name", "n"}, {"type", "Noise"}},
+          {{"name", "w"}, {"type", "Width"}}}},
+        {"connections",
+         {{{"from", "s"}, {"to", "c"}, {"input", "strands"}},
+          {{"from", "c"}, {"to", "n"}, {"input", "strands"}},
+          {{"from", "n"}, {"to", "w"}, {"input", "strands"}}}},
+        {"output", "w"}};
+    GraphEdit edit(g.dump());
+    const GraphEdit::Detached done = edit.removeNodeKeepingFlow("n");
+    EXPECT_EQ(done.source, "c");
+    EXPECT_FALSE(edit.hasNode("n"));
+    EXPECT_EQ(edit.upstream("w"), (std::vector<std::string>{"c", "s"}));
+    // Two chained nodes, one after the other: the flow skips both.
+    GraphEdit both(g.dump());
+    both.removeNodeKeepingFlow("c");
+    both.removeNodeKeepingFlow("n");
+    EXPECT_EQ(both.upstream("w"), (std::vector<std::string>{"s"}));
+    // The output node: the output passes to what fed it.
+    GraphEdit last(g.dump());
+    last.removeNodeKeepingFlow("w");
+    EXPECT_EQ(last.outputNode(), "n");
+    // The first node: nothing fed it, so it simply goes; no output when the last node goes alone.
+    GraphEdit first(g.dump());
+    first.removeNodeKeepingFlow("s");
+    EXPECT_TRUE(first.upstream("c").empty());
+    EXPECT_THROW(first.removeNodeKeepingFlow("nope"), GraphError);
+}
+
 TEST(GraphEdit, NewNodesFitTheGroomsSize) {
     // The spec defaults are authored at a 20-unit scalp (a head in cm, as the presets are): a node
     // added to a groom of another size takes the defaults that measure something fitted to it, as

@@ -293,10 +293,24 @@ void densityColors(const StrandSet& s, std::vector<std::array<float, 3>>& out) {
     }, kStrandGrain);
 }
 
+bool splitNodeColorSource(const std::string& source, std::string* channel, std::string* node) {
+    const std::size_t at = source.rfind('@');
+    if (at == std::string::npos || at == 0 || at + 1 >= source.size()) {
+        if (channel) *channel = source;
+        if (node) node->clear();
+        return false;
+    }
+    if (channel) *channel = source.substr(0, at);
+    if (node) *node = source.substr(at + 1);
+    return true;
+}
+
 std::vector<std::array<float, 3>> strandColors(const StrandSet& s, const ScalpMesh* scalp, int mode, const std::string& source,
-                                               float lo, float hi) {
+                                               float lo, float hi, const std::vector<float>* given) {
     std::vector<std::array<float, 3>> out(s.strandCount(), kDefaultStrandColor);
-    const std::vector<float>* channel = s.strandChannel(source);
+    std::string own;
+    splitNodeColorSource(source, &own, nullptr);
+    const std::vector<float>* channel = given && given->size() == s.strandCount() ? given : s.strandChannel(own);
     if (mode == kDensityColors) {
         densityColors(s, out);
         return out;
@@ -314,13 +328,13 @@ std::vector<std::array<float, 3>> strandColors(const StrandSet& s, const ScalpMe
                 break;
             }
             case kAttributeColors:
-                if (channel) out[i] = rampColor(hi != lo ? ((*channel)[i] - lo) / (hi - lo) : 0.5f);
+                if (channel && std::isfinite((*channel)[i])) out[i] = rampColor(hi != lo ? ((*channel)[i] - lo) / (hi - lo) : 0.5f);
                 break;
             case kRandomColors:
                 out[i] = hueColor(unitFloat(hash64(s.ids()[i])), 0.6f, 0.95f);
                 break;
             case kClumpColors:
-                if (channel) {
+                if (channel && std::isfinite((*channel)[i])) {  // (NaN: a strand the named node did not have)
                     const auto group = static_cast<std::int64_t>(std::floor((*channel)[i]));
                     out[i] = hueColor(unitFloat(hash64(static_cast<std::uint64_t>(group) ^ 0xC1A5)), 0.7f, 0.95f);
                 }
@@ -1925,7 +1939,7 @@ void DisplayBuilder::buildStrands(const DisplayInputs& in, const DisplaySettings
     strandShape = hashFloat(strandShape, s.ribbonWidthScale);
     strandShape = hashCombine(strandShape, (s.ribbons ? 1u : 0u) + (lit ? 2u : 0u) + (rootDots ? 4u : 0u) + (cardsView ? 8u : 0u) +
                                                (s.strandLookColors ? 16u : 0u) + (scaleLayout ? 32u : 0u) + (s.appearanceColors ? 64u : 0u));
-    std::uint64_t strandKey = hashChars(strandShape, s.colorSource);
+    std::uint64_t strandKey = hashCombine(hashChars(strandShape, s.colorSource), in.colorChannel ? in.colorChannelVersion : 0);
     strandKey = hashFloat(hashFloat(strandKey, s.colorMin), s.colorMax);
     // Flat ribbons in the solid color carry it per strand (the lines take it as the item's color).
     if (s.ribbons && !lit && colorMode == kSolidColors) {
@@ -1940,7 +1954,7 @@ void DisplayBuilder::buildStrands(const DisplayInputs& in, const DisplaySettings
         colored.vertexCount == strands->pointCount() && colored.vertexCount > 0) {
         keys_[strandsPart] = strandKey;
         colored.recolored = std::make_shared<const StrandColors>(
-            StrandColors{strands, strandColors(*strands, scalp, colorMode, s.colorSource, s.colorMin, s.colorMax)});
+            StrandColors{strands, strandColors(*strands, scalp, colorMode, s.colorSource, s.colorMin, s.colorMax, in.colorChannel.get())});
         colored.colorVersion = ++counter_;
         colored.recolor = true;
         if (!retain_) colored.geometry.reset();
@@ -1955,7 +1969,7 @@ void DisplayBuilder::buildStrands(const DisplayInputs& in, const DisplaySettings
     if (shown && !rootDots && (colorMode != kSolidColors || s.ribbons)) {
         // (Ribbons in the solid color: the plain lines' one color, each strand.)
         colors = colorMode == kSolidColors ? std::vector<std::array<float, 3>>(shown->strandCount(), s.hairColor)
-                                           : strandColors(*shown, scalp, colorMode, s.colorSource, s.colorMin, s.colorMax);
+                                           : strandColors(*shown, scalp, colorMode, s.colorSource, s.colorMin, s.colorMax, in.colorChannel.get());
     }
     // Lit, each strand in its own color (HairColor's) where the strands' colors vary: lines (not
     // dimmed for a stroke: those draw flat) and ribbons. Uniform, none: the item's color.

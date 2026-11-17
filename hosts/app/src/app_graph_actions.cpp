@@ -111,6 +111,16 @@ void AppActions::addGraphBindings(ui::Bindings& b, MainWindow& w) {
                         },
                         [m, selected, str](const json& value) { return m->document_ && m->document_->paramExposed(selected(), str(value)); },
                         nodeOn};
+    // Detach: the node out of the flow, kept (what fed it feeds what it fed); the selected nodes
+    // when the right-clicked one is among them.
+    b["node.detach"] = {run([m, selected] {
+                            const std::string node = selected();
+                            if (!m->document_ || node.empty()) return;
+                            const std::vector<std::string>& chosen = m->graph_->selectedNodes();
+                            const bool all = std::find(chosen.begin(), chosen.end(), node) != chosen.end();
+                            m->graph_->detachNodes(all ? chosen : std::vector<std::string>{node});
+                        }),
+                        {}, nodeOn};
     b["node.update"] = {run([m, selected] { m->graph_->updateLibraryNode(selected()); }), {}, nodeOn};
     b["script.edit"] = {run([m, selected] { m->graph_->openScriptEditor(selected()); }), {}, nodeOn};
     b["script.saveToLibrary"] = {run([m, selected] {

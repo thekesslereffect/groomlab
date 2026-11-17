@@ -825,7 +825,7 @@ json setControls(Session& s, const json& args) {
 
 bool runGraphAuthoring(Session& s, const std::string& op, const json& args, json& result) {
     static const std::set<std::string> kOps = {"group",          "ungroup",           "expose_param", "unexpose_param", "compound_expose",
-                                               "compound_unexpose", "insert_on_link", "add_control",  "link_control",   "unlink_control"};
+                                               "compound_unexpose", "insert_on_link", "add_control",  "link_control",   "unlink_control", "detach"};
     if (!kOps.count(op)) return false;
     GraphEdit edit(graphTextOf(*s.groom));
     const std::string before = edit.toJson();
@@ -863,6 +863,15 @@ bool runGraphAuthoring(Session& s, const std::string& op, const json& args, json
         if (!edit.hasNode(to)) fail("not_found", "no node '" + to + "'");
         insertOnLink(edit, from, to, needString(args, "input"), needString(args, "node"), optString(args, "output", ""));
         label = "insert node";
+    } else if (op == "detach") {
+        // Detach (every host's node menu): each node out of the flow, kept (graph_edit.h detach).
+        int detached = 0;
+        for (const std::string& name : namesOf(need(args, "names"), "names")) {
+            if (!edit.hasNode(name)) fail("not_found", "no node '" + name + "'");
+            if (edit.detach(name).changed) ++detached;
+        }
+        r["detached"] = detached;
+        label = "detach";
     } else if (op == "add_control") {
         r.update(addControl(s, edit, args));
         label = "control";

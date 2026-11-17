@@ -3369,4 +3369,32 @@ std::uint64_t GroomSession::simulationStamp(const std::string& node) const {
     return SimSettings::fromParams(doc_->graph.node(it->second).params()).hash();
 }
 
+std::shared_ptr<const std::vector<float>> GroomSession::nodeStrandChannel(const std::string& node, const std::string& channel,
+                                                                          const StrandSet& shown) const {
+    const GraphDocument* doc = viewDoc();
+    if (!doc || channel.empty()) return nullptr;
+    const auto found = doc->nodesByName.find(node);
+    if (found == doc->nodesByName.end()) return nullptr;
+    const Value value = doc->graph.cachedValue(found->second);
+    const StrandsPtr* strands = std::get_if<StrandsPtr>(&value);
+    if (!strands || !*strands) return nullptr;
+    const std::vector<float>* values = (*strands)->strandChannel(channel);
+    if (!values || values->size() != (*strands)->strandCount()) return nullptr;
+    const std::vector<StrandId>& from = (*strands)->ids();
+    const std::vector<StrandId>& to = shown.ids();
+    // The same strands in the same order (no node after it adds, drops or reorders strands): as they are.
+    if (from.size() == to.size() && std::equal(from.begin(), from.end(), to.begin())) {
+        return std::make_shared<const std::vector<float>>(*values);
+    }
+    std::unordered_map<StrandId, std::size_t> index;
+    index.reserve(from.size());
+    for (std::size_t i = 0; i < from.size(); ++i) index.emplace(from[i], i);
+    auto out = std::make_shared<std::vector<float>>(to.size(), std::numeric_limits<float>::quiet_NaN());
+    for (std::size_t i = 0; i < to.size(); ++i) {
+        const auto it = index.find(to[i]);
+        if (it != index.end()) (*out)[i] = (*values)[it->second];
+    }
+    return out;
+}
+
 }  // namespace groomlab
