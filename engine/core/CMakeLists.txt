@@ -26,6 +26,7 @@ add_library(groomlab_core_objects OBJECT
     src/retriangulate.cpp
     src/root_tubes.cpp
     src/root_tube_tool.cpp
+    src/root_subdivision.cpp
     src/groom_package.cpp
     src/control_keys.cpp
     src/engine_cards.cpp

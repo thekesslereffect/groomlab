@@ -1515,6 +1515,17 @@ void GuideHierarchy::transfer(const ScalpMapping& mapping) {
         }
         return mapping.byNormals() && !mapping.options().keepLengths ? mapping.fit().scale : 1.0f;
     };
+    // The root subdivisions' points mapped as roots are (one that lands nowhere stays: its record
+    // then reads it as off the scalp and cuts that root afresh).
+    for (RootSubdivisionRecord& r : rootSubdivisions_) {
+        for (std::vector<StrandRoot>* list : {&r.outline, &r.sites, &r.samples}) {
+            for (StrandRoot& p : *list) {
+                if (!from.contains(p)) continue;
+                const MappedPoint at = mapping.map(p);
+                if (at.target.root.face >= 0) p = at.target.root;
+            }
+        }
+    }
     for (HierarchyGuide& g : guides_) {
         const float scale = scaleOf(g);
         g.tube.scaleWidth(scale);
@@ -1614,6 +1625,25 @@ void GuideHierarchy::renameTubeShape(const std::string& from, const std::string&
 
 void GuideHierarchy::setLengthKeys(LengthKeySet keys) {
     lengthKeys_ = std::move(keys);
+    invalidateHash();
+}
+
+namespace {
+bool sameRoots(const std::vector<StrandRoot>& a, const std::vector<StrandRoot>& b) {
+    return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(), [](const StrandRoot& x, const StrandRoot& y) {
+               return x.face == y.face && x.u == y.u && x.v == y.v;
+           });
+}
+}  // namespace
+
+bool RootSubdivisionRecord::operator==(const RootSubdivisionRecord& o) const {
+    return id == o.id && map == o.map && sameRoots(outline, o.outline) && sameRoots(sites, o.sites) && cells == o.cells &&
+           sameRoots(samples, o.samples) && density == o.density && sizeAtZero == o.sizeAtZero && sizeAtOne == o.sizeAtOne &&
+           seed == o.seed;
+}
+
+void GuideHierarchy::setRootSubdivisions(std::vector<RootSubdivisionRecord> records) {
+    rootSubdivisions_ = std::move(records);
     invalidateHash();
 }
 
@@ -1875,6 +1905,57 @@ std::uint64_t GuideHierarchy::contentHash() const {
     return h;
 }
 
+namespace {
+
+// RootSubdivisionRecord as JSON: points on the scalp as [face, u, v], as rootOutline.
+nlohmann::json rootsJson(const std::vector<StrandRoot>& roots) {
+    nlohmann::json out = nlohmann::json::array();
+    for (const StrandRoot& r : roots) out.push_back({r.face, r.u, r.v});
+    return out;
+}
+std::vector<StrandRoot> rootsFromJson(const nlohmann::json& a) {
+    std::vector<StrandRoot> out;
+    if (!a.is_array()) return out;
+    for (const nlohmann::json& r : a) {
+        if (!r.is_array() || r.size() != 3) throw std::runtime_error("a point on the scalp is [face, u, v]");
+        out.push_back({r.at(0).get<std::int32_t>(), r.at(1).get<float>(), r.at(2).get<float>()});
+    }
+    return out;
+}
+nlohmann::json rootSubdivisionsJson(const std::vector<RootSubdivisionRecord>& records) {
+    nlohmann::json out = nlohmann::json::array();
+    for (const RootSubdivisionRecord& r : records) {
+        out.push_back({{"id", r.id}, {"map", r.map}, {"outline", rootsJson(r.outline)}, {"sites", rootsJson(r.sites)},
+                       {"cells", r.cells}, {"samples", rootsJson(r.samples)}, {"density", r.density},
+                       {"sizeAtZero", r.sizeAtZero}, {"sizeAtOne", r.sizeAtOne}, {"seed", r.seed}});
+    }
+    return out;
+}
+std::vector<RootSubdivisionRecord> rootSubdivisionsFromJson(const nlohmann::json& a) {
+    std::vector<RootSubdivisionRecord> out;
+    if (!a.is_array()) throw std::runtime_error("not a list");
+    for (const nlohmann::json& j : a) {
+        RootSubdivisionRecord r;
+        r.id = j.value("id", 0u);
+        r.map = j.value("map", std::string());
+        r.outline = rootsFromJson(j.value("outline", nlohmann::json::array()));
+        r.sites = rootsFromJson(j.value("sites", nlohmann::json::array()));
+        r.cells = j.value("cells", std::vector<GuideId>{});
+        r.samples = rootsFromJson(j.value("samples", nlohmann::json::array()));
+        r.density = j.value("density", std::vector<float>{});
+        r.sizeAtZero = j.value("sizeAtZero", 0.0f);
+        r.sizeAtOne = j.value("sizeAtOne", 0.0f);
+        r.seed = j.value("seed", std::uint64_t{0});
+        if (r.cells.size() != r.sites.size() || r.density.size() != r.samples.size()) {
+            throw std::runtime_error("a subdivision's cells or samples do not match");
+        }
+        out.push_back(std::move(r));
+    }
+    return out;
+}
+
+}  // namespace
+
 std::uint64_t GuideHierarchy::computeContentHash() const {
     std::uint64_t h = hashCombine(hash64(groups_.size()), boundTopology_);
     if (scale_ != 1.0f) h = hashFloat(h, scale_);  // (a hierarchy at 1 hashes as it always has)
@@ -1888,6 +1969,7 @@ std::uint64_t GuideHierarchy::computeContentHash() const {
         for (const auto& [name, shape] : tubeShapes_) h = hashCombine(hashString(h, name), shape->hash);
     }
     if (!lengthKeys_.empty()) h = hashString(hashCombine(h, 0x1E6Bu), lengthKeys_.toJson());  // (none: as it always has)
+    if (!rootSubdivisions_.empty()) h = hashString(hashCombine(h, 0x5B85u), rootSubdivisionsJson(rootSubdivisions_).dump());
     h = hashCombine(h, guides_.size());
     for (const HierarchyGuide& g : guides_) {
         h = hashCombine(hashCombine(hashCombine(h, g.id), g.group), g.parent);
@@ -2153,6 +2235,7 @@ std::string GuideHierarchy::toJson() const {
     }
     out += ']';
     if (!lengthKeys_.empty()) out += ",\"lengthKeys\":" + lengthKeys_.toJson();
+    if (!rootSubdivisions_.empty()) out += ",\"rootSubdivisions\":" + rootSubdivisionsJson(rootSubdivisions_).dump();
     if (boundTopology_ != 0) out += ",\"scalpTopology\":" + json(boundTopology_).dump();
     if (!tubeShapes_.empty()) {
         // The shape library: each shape's name, its control points (u, v, u, v, ...) and smooth.
@@ -2234,6 +2317,13 @@ GuideHierarchy GuideHierarchy::fromJson(const std::string& text) {
                 h.lengthKeys_ = LengthKeySet::fromJson(root.at("lengthKeys").dump());
             } catch (const std::invalid_argument& e) {
                 h.loadWarnings_.push_back(std::string(e.what()) + " (left out)");
+            }
+        }
+        if (root.contains("rootSubdivisions")) {
+            try {
+                h.rootSubdivisions_ = rootSubdivisionsFromJson(root.at("rootSubdivisions"));
+            } catch (const std::exception& e) {
+                h.loadWarnings_.push_back(std::string("root subdivisions: ") + e.what() + " (left out)");
             }
         }
 

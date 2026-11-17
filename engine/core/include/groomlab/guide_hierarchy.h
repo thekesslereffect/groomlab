@@ -150,6 +150,22 @@ std::string guideGroupName(const std::string& text);
 // their parents' tubes, grandchildren inside the children's tubes, and so on.
 // Children store offsets in their parent's frame, so editing a parent carries
 // every descendant with it.
+// A root tube cut into cells (root_subdivision.h, issue 85), remembered so painting its density
+// again cuts again only where it changed. Points on the scalp the guides root on (as
+// HierarchyGuide::root). Saved with the hierarchy.
+struct RootSubdivisionRecord {
+    std::uint32_t id = 0;
+    std::string map;                  // the density map it was cut by
+    std::vector<StrandRoot> outline;  // the root it cut, as drawn
+    std::vector<StrandRoot> sites;    // each cell's site ...
+    std::vector<GuideId> cells;       // ... and its root tube (kNoGuide: gone)
+    std::vector<StrandRoot> samples;  // where the density was read ...
+    std::vector<float> density;       // ... and what it was
+    float sizeAtZero = 0.0f, sizeAtOne = 0.0f;  // the cells' size (scene units) at density 0 and 1
+    std::uint64_t seed = 0;
+    bool operator==(const RootSubdivisionRecord& o) const;
+};
+
 class GuideHierarchy {
 public:
     // ---- Groups ---------------------------------------------------------
@@ -367,6 +383,10 @@ public:
     // be placed again. They change no guide by themselves.
     const LengthKeySet& lengthKeys() const { return lengthKeys_; }
     void setLengthKeys(LengthKeySet keys);
+    // ---- Root subdivisions ----------------------------------------------
+    // The root tubes cut into cells (root_subdivision.h), saved with the hierarchy (toJson).
+    const std::vector<RootSubdivisionRecord>& rootSubdivisions() const { return rootSubdivisions_; }
+    void setRootSubdivisions(std::vector<RootSubdivisionRecord> records);
 
     // What fromJson could not read as saved, said for the user: guides whose library shape was
     // missing (each loads round).
@@ -471,6 +491,7 @@ private:
     void pruneOwnedTubeShapes();
     TubeShapeLibrary tubeShapes_;
     LengthKeySet lengthKeys_;
+    std::vector<RootSubdivisionRecord> rootSubdivisions_;
     std::vector<std::string> loadWarnings_;
 };
 
