@@ -113,6 +113,16 @@ public:
     std::string outputType(const std::string& name, const std::string& output = {}) const;
     // Every node feeding `name`, directly or not.
     std::vector<std::string> upstream(const std::string& name) const;
+    // Clump Colors (every host's button on a Clump, issue #77). clumpChannel: the strand channel a
+    // Clump writes (its clumpChannel, "clumpId" unset; "" for another node, or none). clumpColorSource:
+    // the color source showing that node's clumps as it wrote them, "<channel>@<node>" (strandColors;
+    // "" when it writes none). clumpColored: whether a clump color `source` shows the node's
+    // clumps: its own source, or the bare channel (grooms from before) when the node is the last
+    // Clump writing it (every other one feeds it: the clumps the strands show). Missing nodes: "",
+    // false.
+    std::string clumpChannel(const std::string& node) const;
+    std::string clumpColorSource(const std::string& node) const;
+    bool clumpColored(const std::string& node, const std::string& source) const;
 
     // Writes every param each node leaves out with its spec default, and each node's version
     // when it has none (its operator's newest), compounds' inner nodes too: what saved grooms hold,

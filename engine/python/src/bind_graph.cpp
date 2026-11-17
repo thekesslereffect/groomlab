@@ -7,6 +7,7 @@
 #include <sstream>
 
 #include "groomlab/attributes.h"
+#include "groomlab/display.h"
 #include "groomlab/field.h"
 #include "groomlab/graph.h"
 #include "groomlab/graph_controls.h"
@@ -145,6 +146,8 @@ void bindGraph(py::module_& m) {
         .value("Value", PortType::Value);
     m.def("port_types_match", &portTypesMatch, py::arg("out"), py::arg("in"), "Whether an output type can feed an input type.");
     m.def("port_type_name", &portTypeName, py::arg("type"));
+    m.def("renamed_color_source", &renamedColorSource, py::arg("source"), py::arg("old"), py::arg("new"),
+          "A color source naming node `old` ('<channel>@<old>') once it is renamed `new`; any other as it is.");
     m.def("set_verify_incremental", &Graph::setVerifyIncremental, py::arg("on"),
           "Every incremental evaluation checked against a full one (GraphError when they differ): tests, benchmarks.");
     m.def("release_process_caches", &releaseProcessCaches,
@@ -730,6 +733,13 @@ void bindGraph(py::module_& m) {
         .def("node_spec_json", &GraphEdit::nodeSpecJson, py::arg("name"))
         .def("output_type", &GraphEdit::outputType, py::arg("name"), py::arg("output") = std::string())
         .def("upstream", &GraphEdit::upstream, py::arg("name"))
+        .def("clump_channel", &GraphEdit::clumpChannel, py::arg("node"),
+             "The strand channel a Clump writes (its clumpChannel; '' for another node, or none).")
+        .def("clump_color_source", &GraphEdit::clumpColorSource, py::arg("node"),
+             "Clump Colors' source for this Clump: '<channel>@<node>' ('' when it writes no channel).")
+        .def("clump_colored", &GraphEdit::clumpColored, py::arg("node"), py::arg("source"),
+             "Whether a clump color source shows this Clump's clumps (its own source, or the bare channel when "
+             "it is the last Clump writing it).")
         .def("seed_warnings", &GraphEdit::seedWarnings)
         .def("channels", [](const GraphEdit& e, const std::vector<std::string>& guideMaps) { return jsonLoads(e.channelsJson(guideMaps)); },
              py::arg("guide_maps") = std::vector<std::string>(),

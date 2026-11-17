@@ -963,6 +963,15 @@ class GraphModel(object):
         if edit.disconnect(dst, input_name):
             self.connections = json.loads(edit.to_json()).get("connections", [])
 
+    def clump_color_source(self, name):
+        """Clump Colors' source for this Clump: "<channel>@<node>" ("" when it writes no channel)."""
+        return self._edit().clump_color_source(name) if name in self.nodes else ""
+
+    def clump_colored(self, name, source):
+        """Whether a clump color source shows this Clump's clumps (the core's GraphEdit.clump_colored:
+        its own source, or the bare channel of grooms from before when it is the last Clump writing it)."""
+        return name in self.nodes and self._edit().clump_colored(name, source or "")
+
     def upstream(self, name):
         """All nodes feeding `name`, directly or not."""
         if name not in self.nodes:

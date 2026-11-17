@@ -3270,7 +3270,15 @@ json display(ToolState& t, const json& args) {
         json colors = {{"mode", colorModeName(mode)}, {"version", t.colorsVersion}, {"perPoint", perPoint}};
         const bool want = t.colorsVersion != haveVersion(have, versionName);
         if (mode != kSolidColors && strands && want) {
-            const std::vector<std::array<float, 3>> per = strandColors(*strands, last.scalp ? last.scalp.get() : in.scalp.get(), mode, source, lo, hi);
+            // A source naming a node ("<channel>@<node>", a Clump's Clump Colors, issue #77): the
+            // channel as that node wrote it, though a later Clump writes the same one.
+            std::string ofChannel, ofNode;
+            std::shared_ptr<const std::vector<float>> nodeValues;
+            if ((mode == kClumpColors || mode == kAttributeColors) && splitNodeColorSource(source, &ofChannel, &ofNode)) {
+                nodeValues = session.nodeStrandChannel(ofNode, ofChannel, *strands);
+            }
+            const std::vector<std::array<float, 3>> per =
+                strandColors(*strands, last.scalp ? last.scalp.get() : in.scalp.get(), mode, source, lo, hi, nodeValues.get());
             std::vector<float> flat;
             std::size_t count = 0;
             if (perPoint) {

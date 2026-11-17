@@ -2436,6 +2436,9 @@ const DisplayFrame& GroomDocument::updateDisplay(const DisplaySettings& settings
         };
         inputs.selectionHash = selectionVersion_;
     }
+    // Clump Colors of one Clump among chained ones writing the same channel ("<channel>@<node>",
+    // issue #77): the channel as that node wrote it.
+    colorChannel_.fill(settings, inputs, [this]() -> const GroomSession& { return session(); });
     const bool ownColors = !groupColors_.empty() && settings.guideGroupColors.empty();
     const std::string seed = settings.guideColorSeed.empty() ? guideColorSeed() : std::string();
     if (ownColors || !seed.empty()) {

@@ -1396,6 +1396,7 @@ class GROOMLAB_OT_graph_rename(_NodeOp):
             process.call("edit_graph", session=rt.session, op="rename_node", name=old, newName=self.new_name)
         except HelperError as e:
             return _fail(self, e)
+        graph_tree.follow_renamed(scalp, rt, old, self.new_name)
         if scalp.groomlab.view_node == old:
             with props.quiet():
                 scalp.groomlab.view_node = self.new_name

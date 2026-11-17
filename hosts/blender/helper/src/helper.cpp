@@ -27,6 +27,7 @@
 #include "groomlab/card_maps.h"
 #include "groomlab/shortcuts.h"
 #include "groomlab/color_patterns.h"
+#include "groomlab/display.h"
 #include "groomlab/export_view.h"
 #include "groomlab/expression.h"
 #include "groomlab/follow_scalp.h"
@@ -1862,6 +1863,24 @@ json Helper::run(const std::string& cmd, const json& args) {
         const std::string text = g.is_string() ? g.get<std::string>() : g.dump();
         s.groom->setGraphJson(text);  // GraphError for a bad graph: the session keeps its own
         return {{"nodes", GraphEdit(graphText(*s.groom)).nodeNames().size()}};
+    }
+    if (cmd == "clump_colors") {
+        // Clump Colors (issue #77): each Clump's own color source ("<channel>@<node>") and the
+        // Clumps a clump color `source` shows (GraphEdit::clumpColored).
+        Session& s = session(args);
+        const GraphEdit edit(graphText(*s.groom));
+        const std::string source = optString(args, "source", "");
+        json sources = json::object(), lit = json::array();
+        for (const std::string& name : edit.nodeNames()) {
+            if (edit.nodeType(name) != "Clump") continue;
+            sources[name] = edit.clumpColorSource(name);
+            if (edit.clumpColored(name, source)) lit.push_back(name);
+        }
+        return {{"sources", sources}, {"lit", lit}};
+    }
+    if (cmd == "renamed_color_source") {
+        // A color source naming a renamed node follows it (renamedColorSource).
+        return {{"source", renamedColorSource(needString(args, "source"), needString(args, "old"), needString(args, "new"))}};
     }
     if (cmd == "list_nodes") {
         Session& s = session(args);

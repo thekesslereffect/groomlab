@@ -5152,20 +5152,11 @@ class GraphEditor(QtWidgets.QWidget):
         except Exception:  # noqa: BLE001 - a node gone
             return None
 
-    @staticmethod
-    def clump_source(name, channel):
-        """The color source naming this Clump's own channel, "<channel>@<node>": chained Clumps
-        writing the same channel each show their own clumps (strandColors in the core, #77)."""
-        return "%s@%s" % (channel, name)
-
     def clump_colored(self, name):
         """Whether the strands show this Clump's clumps: colored by clump from its channel as this
-        node wrote it ("<channel>@<node>"); a source of the bare channel (scenes from before) lights
-        the last Clump writing it, as that is the one the strands show."""
+        node wrote it ("<channel>@<node>"; a bare channel, from scenes before, lights the last Clump
+        writing it: the core's GraphEdit.clump_colored)."""
         if not self.groom:
-            return False
-        channel = self.clump_channel(name)
-        if not channel:
             return False
         from maya import cmds
         from groomlab import review
@@ -5175,26 +5166,10 @@ class GraphEditor(QtWidgets.QWidget):
             source = cmds.getAttr(self.groom + ".strandColorSource") or ""
         except (RuntimeError, ValueError):
             return False
-        if source == self.clump_source(name, channel):
-            return True
-        if source != channel:
-            return False
-        return self._last_clump_writing(channel) == name
-
-    def _last_clump_writing(self, channel):
-        """The Clump nearest the output among those writing `channel`: the one every other such
-        Clump feeds (None: none, or no one of them is after all the others)."""
         try:
-            names = [n for n in self.model.of_type("Clump") if self.clump_channel(n) == channel]
-            if len(names) <= 1:
-                return names[0] if names else None
-            for name in names:
-                feeding = self.model.upstream(name)
-                if all(other in feeding for other in names if other != name):
-                    return name
+            return self.model.clump_colored(name, source)
         except Exception:  # noqa: BLE001 - a node gone
-            pass
-        return None
+            return False
 
     def toggle_clump_colors(self, name):
         """A Clump's Clump Colors: the strands colored by its clumps (its clumpChannel), the focus left
@@ -5218,7 +5193,7 @@ class GraphEditor(QtWidgets.QWidget):
         groom = self.groom
 
         def colored():
-            cmds.setAttr(groom + ".strandColorSource", self.clump_source(name, channel), type="string")
+            cmds.setAttr(groom + ".strandColorSource", self.model.clump_color_source(name), type="string")
             cmds.setAttr(groom + ".strandColorMode", review.CLUMP_MODE)
         self.silently(colored)
         self._repaint_toggles()
@@ -6145,10 +6120,11 @@ class GraphEditor(QtWidgets.QWidget):
             source = cmds.getAttr(self.groom + ".strandColorSource") or ""
         except (RuntimeError, ValueError):
             return
-        channel, at, node = source.rpartition("@")
-        if at and channel and node == old:
+        import groomlab_core
+        renamed = groomlab_core.renamed_color_source(source, old, new)
+        if renamed != source:
             groom = self.groom
-            self.silently(lambda: cmds.setAttr(groom + ".strandColorSource", "%s@%s" % (channel, new), type="string"))
+            self.silently(lambda: cmds.setAttr(groom + ".strandColorSource", renamed, type="string"))
 
     def keyed(self, name, param):
         """Whether a param is keyed (linked to its attribute on the groom): edits then go there."""

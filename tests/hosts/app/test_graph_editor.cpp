@@ -322,6 +322,44 @@ TEST(AppGraphEditor, AClumpsClumpColorsButtonColorsByItsClumps) {
     EXPECT_FALSE(graph->clumpColored(clump)) << "another channel's clumps";
 }
 
+TEST(AppGraphEditor, ChainedClumpsOnOneChannelEachShowTheirOwnClumps) {
+    // Issue #77: two Clumps writing the same channel; each one's Clump Colors names it
+    // ("<channel>@<node>") and lights alone; a rename keeps it on; a bare channel (grooms from
+    // before) lights the last Clump writing it.
+    Window w;
+    NodeGraphView* graph = w.graph();
+    GroomDocument* doc = w.doc();
+    std::string first = nodeOf(*doc, "Clump");
+    if (first.empty()) ASSERT_EQ(doc->addNode("Clump", 0.0f, 0.0f, &first), "");
+    GroomDocument::AddOptions after;
+    after.after = first;
+    std::string second;
+    ASSERT_EQ(doc->addNode("Clump", 0.0f, 0.0f, &second, after), "");
+    ASSERT_EQ(doc->setParam(second, "clumpChannel", json("clumpId")), "");
+    graph->refresh();
+    QCoreApplication::processEvents();
+    emit graph->clumpColorsToggled(first);
+    EXPECT_EQ(w.window.displaySettings().colorSource, "clumpId@" + first);
+    EXPECT_EQ(w.window.displaySettings().colorMode, kClumpColors);
+    EXPECT_TRUE(graph->clumpColored(first));
+    EXPECT_FALSE(graph->clumpColored(second)) << "the later Clump on the same channel stays dark";
+    emit graph->clumpColorsToggled(second);
+    EXPECT_EQ(w.window.displaySettings().colorSource, "clumpId@" + second);
+    EXPECT_TRUE(graph->clumpColored(second));
+    EXPECT_FALSE(graph->clumpColored(first));
+    // Renamed: the source follows the node.
+    ASSERT_EQ(doc->renameNode(second, "later"), "");
+    emit graph->nodeRenamed(second, "later");
+    second = "later";
+    graph->refresh();
+    EXPECT_EQ(w.window.displaySettings().colorSource, "clumpId@later");
+    EXPECT_TRUE(graph->clumpColored(second));
+    // A bare channel: the last Clump writing it.
+    ASSERT_TRUE(w.window.setDisplayText(QStringLiteral("colorSource=clumpId")));
+    EXPECT_TRUE(graph->clumpColored(second));
+    EXPECT_FALSE(graph->clumpColored(first));
+}
+
 TEST(AppGraphEditor, ShowInnerParamPutsAnInnerParamOnTheCompound) {
     Window w;
     GroomDocument* doc = w.doc();

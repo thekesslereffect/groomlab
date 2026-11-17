@@ -170,9 +170,12 @@ std::vector<std::array<float, 3>> strandColors(const StrandSet& strands, const S
 // Splits "<channel>@<node>" (see strandColors): true with both set when it names a node; else
 // false, *channel the source as it is and *node empty.
 bool splitNodeColorSource(const std::string& source, std::string* channel, std::string* node);
+// A color source naming node `from` ("<channel>@<from>") once the node is renamed `to`: the same
+// channel at `to`. Any other source as it is (every host's Rename keeps Clump Colors on).
+std::string renamedColorSource(const std::string& source, const std::string& from, const std::string& to);
 // The lowest and highest value of the strand channel `channel` (the attribute colors' Auto Range:
-// the ramp from blue to red over every strand); non-finite values skipped. False: no such channel
-// or nothing finite in it (lo and hi left as they are).
+// the ramp from blue to red over every strand; "<channel>@<node>": the channel); non-finite values
+// skipped. False: no such channel or nothing finite in it (lo and hi left as they are).
 bool strandChannelRange(const StrandSet& strands, const std::string& channel, float& lo, float& hi);
 // Per point RGBA (alpha 1) from one color per strand.
 std::vector<float> strandPointColors(const StrandSet& strands, const std::vector<std::array<float, 3>>& colors);
@@ -470,6 +473,22 @@ struct DisplaySettings {
 };
 
 // What the host evaluated (a GroomSession's ViewResult) and what only it knows.
+struct DisplayInputs;
+struct DisplaySettings;
+// The strand channel a "<channel>@<node>" color source reads (a Clump's Clump Colors, issue #77):
+// that node's values per strand shown (GroomSession::nodeStrandChannel), read again only for other
+// strands or another source. Every host's display keeps one and hands it on in its DisplayInputs
+// (colorChannel, colorChannelVersion) before building; another source or color mode clears it.
+// `session` is asked for only when the values are read again (Maya waits for a pending commit there).
+class NodeColorChannel {
+public:
+    void fill(const DisplaySettings& settings, DisplayInputs& in, const std::function<const GroomSession&()>& session);
+
+private:
+    std::shared_ptr<const std::vector<float>> channel_;
+    std::uint64_t key_ = 0, version_ = 0;
+};
+
 struct DisplayInputs {
     StrandsPtr strands;
     bool viewedRoots = false;  // the strands are a Scatter's roots: dots

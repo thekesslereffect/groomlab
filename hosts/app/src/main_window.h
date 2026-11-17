@@ -720,6 +720,7 @@ private:
     // clumpChannel), the view left as it is; on a lit one, the color mode before.
     void toggleClumpColors(const std::string& node);
     void refreshClumpColored();  // which Clumps' buttons are lit, from the display
+    void followRenamedNode(const std::string& from, const std::string& to);  // the color source naming it
     std::string clumpChannelOf(const std::string& node, bool* isClump = nullptr) const;
     int colorModeBeforeClump_ = 0;  // kSolidColors
     // While the Paint brush is on a map (Maya's show_while_painting): the strands colored by it

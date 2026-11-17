@@ -388,7 +388,7 @@ class GROOMLAB_OT_graph_clump_colors(_GraphOperator):
             return {"CANCELLED"}
         if d.strand_color != "clump":
             _COLOR_BEFORE_CLUMP[uid] = d.strand_color
-        d.strand_color_source = channel
+        d.strand_color_source = graph_tree.clump_color_source(scalp, node)  # its own clumps (#77)
         d.strand_color = "clump"
         self.report({"INFO"}, "Strands colored by %s's clumps (%s)" % (node.gl_name, channel))
         return {"FINISHED"}

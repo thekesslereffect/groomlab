@@ -2035,6 +2035,7 @@ void NodeGraphView::renameSelected() {
         selection_ = {selected_};
         emit edited();
         refresh();
+        emit nodeRenamed(name, selected_);
         emit selectionChanged(selected_);
     });
     setPromptText(QString::fromStdString(name));

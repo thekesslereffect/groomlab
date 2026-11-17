@@ -886,6 +886,39 @@ std::vector<std::string> GraphEdit::upstream(const std::string& name) const {
     return {found.begin(), found.end()};
 }
 
+std::string GraphEdit::clumpChannel(const std::string& node) const {
+    const nlohmann::json* n = impl_->find(node);
+    if (!n || n->value("type", std::string()) != "Clump") return {};
+    const auto params = n->find("params");
+    if (params == n->end() || !params->is_object()) return "clumpId";
+    const auto it = params->find("clumpChannel");
+    if (it == params->end()) return "clumpId";
+    return it->is_string() ? it->get<std::string>() : std::string();
+}
+
+std::string GraphEdit::clumpColorSource(const std::string& node) const {
+    const std::string channel = clumpChannel(node);
+    return channel.empty() ? std::string() : channel + "@" + node;
+}
+
+bool GraphEdit::clumpColored(const std::string& node, const std::string& source) const {
+    const std::string channel = clumpChannel(node);
+    if (channel.empty() || source.empty()) return false;
+    if (source == channel + "@" + node) return true;
+    if (source != channel) return false;
+    // A bare channel: the last Clump writing it is the one shown.
+    std::vector<std::string> writers;
+    for (const nlohmann::json& n : impl_->nodesView()) {
+        const std::string name = n.is_object() ? n.value("name", std::string()) : std::string();
+        if (!name.empty() && clumpChannel(name) == channel) writers.push_back(name);
+    }
+    const std::set<std::string> feeding = impl_->upstream(node);
+    for (const std::string& other : writers) {
+        if (other != node && !feeding.count(other)) return false;
+    }
+    return true;
+}
+
 std::string GraphEdit::channelsJson(const std::vector<std::string>& guideMaps) const {
     return graphChannelsJson(impl_->graph.dump(), guideMaps);
 }

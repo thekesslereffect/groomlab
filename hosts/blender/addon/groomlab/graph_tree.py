@@ -1568,6 +1568,7 @@ def sync_from_tree(tree):
     for node in nodes:
         if node.gl_name and node.gl_name in gnodes and node.name != node.gl_name:
             if edit(op="rename_node", name=node.gl_name, newName=node.name) is not None:
+                follow_renamed(scalp, None, node.gl_name, node.name)
                 if scalp.groomlab.view_node == node.gl_name:
                     with props.quiet():
                         scalp.groomlab.view_node = node.name
@@ -1766,14 +1767,57 @@ def clump_channel(node):
         return "clumpId"
 
 
+_CLUMP_COLORS = {}  # groom uid -> ((graph text, source), the helper's clump_colors answer)
+
+
+def clump_colors(scalp):
+    """The Clumps' own color sources and those the groom's clump color source shows (the core's
+    GraphEdit::clumpColored, through the helper): {"sources": {node: "<channel>@<node>"}, "lit":
+    [nodes]}, asked again only when the graph or the source changed."""
+    empty = {"sources": {}, "lit": []}
+    if scalp is None:
+        return empty
+    source = scalp.groomlab_tools.strand_color_source or "clumpId"
+    key = (scalp.groomlab.graph_json, source)
+    hit = _CLUMP_COLORS.get(scalp.groomlab.uid)
+    if hit is not None and hit[0] == key:
+        return hit[1]
+    rt = groom.runtime_if_any(scalp)
+    if rt is None or rt.session is None or not process.running():
+        return empty
+    try:
+        answer = _call("clump_colors", session=rt.session, source=source)
+    except HelperError:
+        return empty
+    _CLUMP_COLORS[scalp.groomlab.uid] = (key, answer)
+    return answer
+
+
 def clump_colored(scalp, node):
     """Whether the strands show this Clump's clumps (its Clump Colors lit): colored by clump from its
-    channel."""
-    channel = clump_channel(node)
-    if not channel or scalp is None:
+    channel as this node wrote it ("<channel>@<node>"; a bare channel, from grooms before, lights the
+    last Clump writing it)."""
+    if scalp is None or not clump_channel(node) or scalp.groomlab_tools.strand_color != "clump":
         return False
+    return node.gl_name in clump_colors(scalp)["lit"]
+
+
+def clump_color_source(scalp, node):
+    """The color source showing this Clump's own clumps ("<channel>@<node>", issue #77)."""
+    return clump_colors(scalp)["sources"].get(node.gl_name) or clump_channel(node) or ""
+
+
+def follow_renamed(scalp, rt, old, new):
+    """A strand color source naming the renamed node ("<channel>@<node>", Clump Colors) follows it."""
     d = scalp.groomlab_tools
-    return d.strand_color == "clump" and (d.strand_color_source or "clumpId") == channel
+    if "@" not in (d.strand_color_source or ""):
+        return
+    try:
+        renamed = _call("renamed_color_source", source=d.strand_color_source, old=old, new=new)["source"]
+    except HelperError:
+        return
+    if renamed != d.strand_color_source:
+        d.strand_color_source = renamed
 
 
 def view_node(scalp, name):

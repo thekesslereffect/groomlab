@@ -285,9 +285,8 @@ private:
     StrandsPtr followRest_;          // the strands at rest the builder was handed (held: their pointer names them)
     std::uint64_t followRestVersion_ = 0;  // ... their version for the builder and key for the engine
     // A color source naming a node ("<channel>@<node>", a Clump's Clump Colors): that node's values
-    // per strand (GroomSession::nodeStrandChannel), read again for other strands or another source.
-    std::shared_ptr<const std::vector<float>> colorChannel_;
-    std::uint64_t colorChannelKey_ = 0, colorChannelVersion_ = 0;
+    // per strand, read again for other strands or another source.
+    NodeColorChannel colorChannel_;
     MeshPtr followRootsFrom_;        // the rest scalp followRoots_ were found on
     StrandsPtr followRootsOf_;       // ... and the strands whose roots they are
     std::vector<FollowRoot> followRoots_;

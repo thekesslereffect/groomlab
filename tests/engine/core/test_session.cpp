@@ -553,6 +553,39 @@ TEST(Session, ANodesStrandChannelIsItsOwnThoughALaterNodeWritesTheSameChannel) {
     const auto fallback = strandColors(shown, nullptr, kClumpColors, "clumpId@clump", 0.0f, 1.0f);
     EXPECT_EQ(fallback, plain);  // no values handed: the strands' own channel
     EXPECT_NE(own, plain);
+
+    // Every host's display hands the named node's values on (NodeColorChannel), read again only
+    // for another source or other strands; another mode or a bare source hands none.
+    DisplaySettings settings;
+    settings.colorMode = kClumpColors;
+    settings.colorSource = "clumpId@clump";
+    DisplayInputs in = DisplayInputs::fromView(view, false);
+    NodeColorChannel cache;
+    int asked = 0;
+    auto sessionOf = [&]() -> const GroomSession& { ++asked; return session; };
+    cache.fill(settings, in, sessionOf);
+    ASSERT_TRUE(in.colorChannel);
+    EXPECT_EQ(*in.colorChannel, *first);
+    const std::uint64_t version = in.colorChannelVersion;
+    DisplayInputs again = DisplayInputs::fromView(view, false);
+    cache.fill(settings, again, sessionOf);
+    EXPECT_EQ(asked, 1) << "the same strands and source: not read again";
+    EXPECT_EQ(again.colorChannelVersion, version);
+    settings.colorSource = "clumpId@clump2";
+    cache.fill(settings, again, sessionOf);
+    EXPECT_EQ(asked, 2);
+    EXPECT_EQ(*again.colorChannel, *second);
+    EXPECT_NE(again.colorChannelVersion, version);
+    settings.colorSource = "clumpId";
+    DisplayInputs bare = DisplayInputs::fromView(view, false);
+    cache.fill(settings, bare, sessionOf);
+    EXPECT_FALSE(bare.colorChannel);
+    // Auto Range of a source naming a node: its channel's range.
+    float lo = 0.0f, hi = 0.0f, plainLo = 0.0f, plainHi = 0.0f;
+    EXPECT_TRUE(strandChannelRange(shown, "clumpId@clump", lo, hi));
+    EXPECT_TRUE(strandChannelRange(shown, "clumpId", plainLo, plainHi));
+    EXPECT_EQ(lo, plainLo);
+    EXPECT_EQ(hi, plainHi);
 }
 
 TEST(Session, CardsAtTheirDensityKeepABakedAtlas) {

@@ -875,23 +875,7 @@ void GroomSubSceneOverride::updateGuarded(MHWRender::MSubSceneContainer& contain
     in.strandsVersion = follow_ ? followRestVersion_ : shape_->strandsVersion();
     // Clump Colors of one Clump among chained ones writing the same channel ("<channel>@<node>"):
     // the channel as that node wrote it (issue #77), else the strands' own (strandColors).
-    std::string colorChannel, colorNode;
-    if (strands && (settings.colorMode == kClumpColors || settings.colorMode == kAttributeColors) &&
-        splitNodeColorSource(settings.colorSource, &colorChannel, &colorNode)) {
-        const std::uint64_t key = hashChars(hashCombine(hashCombine(hash64(in.strandsVersion), strands->strandCount()),
-                                                        reinterpret_cast<std::uintptr_t>(strands.get())),
-                                            settings.colorSource);
-        if (key != colorChannelKey_) {
-            colorChannelKey_ = key;
-            colorChannel_ = shape_->session().nodeStrandChannel(colorNode, colorChannel, *strands);
-            ++colorChannelVersion_;
-        }
-        in.colorChannel = colorChannel_;
-        in.colorChannelVersion = colorChannelVersion_;
-    } else if (colorChannel_) {
-        colorChannel_.reset();
-        colorChannelKey_ = 0;
-    }
+    colorChannel_.fill(settings, in, [this]() -> const GroomSession& { return shape_->session(); });
     in.strandsSerial = follow_ ? 0 : shape_->strandsSerial();
     in.changesBase = follow_ ? 0 : shape_->strandsChangesBase();
     in.strandsChanges = follow_ ? nullptr : shape_->strandsChanges();

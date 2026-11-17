@@ -324,6 +324,8 @@ signals:
     // A Clump header's Clump Colors button: the host colors the strands by that node's clumps (or,
     // lit, back as they were).
     void clumpColorsToggled(const std::string& node);
+    // A node renamed through this view (after edited): the host's color source naming it follows.
+    void nodeRenamed(const std::string& from, const std::string& to);
 
 protected:
     void paintEvent(QPaintEvent* event) override;

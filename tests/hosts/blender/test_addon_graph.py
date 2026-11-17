@@ -701,11 +701,34 @@ class GraphEditorTest(unittest.TestCase):
         d.strand_color = "random"
         self.assertFalse(gt.clump_colored(head, node_of(self.tree(), made)))
         self.assertEqual(bpy.ops.groomlab.graph_clump_colors(node=made), {"FINISHED"})
-        self.assertEqual((d.strand_color, d.strand_color_source, head.groomlab.view_node), ("clump", "bigClumpId", ""))
+        # Its own clumps, named ("<channel>@<node>", #77).
+        self.assertEqual((d.strand_color, d.strand_color_source, head.groomlab.view_node), ("clump", "bigClumpId@" + made, ""))
         self.assertTrue(gt.clump_colored(head, node_of(self.tree(), made)))
         self.assertEqual(bpy.ops.groomlab.graph_clump_colors(node=made), {"FINISHED"})
         self.assertEqual((d.strand_color, head.groomlab.view_node), ("random", ""))
+        # Issue #77: a second Clump after it on the same channel; each one's button lights alone,
+        # and a bare channel (grooms from before) lights the last one writing it.
+        later, error = graph.add_node(head, "Clump", after=made)
+        self.assertFalse(error)
+        graph.set_param(head, later, "clumpChannel", "bigClumpId")
+        settle(head)
+        self.assertEqual(bpy.ops.groomlab.graph_clump_colors(node=made), {"FINISHED"})
+        self.assertTrue(gt.clump_colored(head, node_of(self.tree(), made)))
+        self.assertFalse(gt.clump_colored(head, node_of(self.tree(), later)))
+        settle(head)
+        self.assertEqual(bpy.ops.groomlab.graph_clump_colors(node=later), {"FINISHED"})
+        self.assertEqual(d.strand_color_source, "bigClumpId@" + later)
+        self.assertTrue(gt.clump_colored(head, node_of(self.tree(), later)))
+        self.assertFalse(gt.clump_colored(head, node_of(self.tree(), made)))
+        d.strand_color_source = "bigClumpId"
+        self.assertTrue(gt.clump_colored(head, node_of(self.tree(), later)))
+        self.assertFalse(gt.clump_colored(head, node_of(self.tree(), made)))
+        # Renamed: the source naming it follows.
+        d.strand_color_source = "bigClumpId@" + later
+        gt.follow_renamed(head, None, later, "laterClump")
+        self.assertEqual(d.strand_color_source, "bigClumpId@laterClump")
         d.strand_color = "solid"
+        graph.remove_node(head, later)
         graph.remove_node(head, made)
         settle(head)
         # Set as Output.

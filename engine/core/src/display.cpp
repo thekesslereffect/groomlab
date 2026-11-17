@@ -346,7 +346,36 @@ std::vector<std::array<float, 3>> strandColors(const StrandSet& s, const ScalpMe
     return out;
 }
 
-bool strandChannelRange(const StrandSet& s, const std::string& channel, float& lo, float& hi) {
+std::string renamedColorSource(const std::string& source, const std::string& from, const std::string& to) {
+    std::string channel, node;
+    if (!splitNodeColorSource(source, &channel, &node) || node != from || to.empty()) return source;
+    return channel + "@" + to;
+}
+
+void NodeColorChannel::fill(const DisplaySettings& settings, DisplayInputs& in, const std::function<const GroomSession&()>& session) {
+    std::string channel, node;
+    const StrandsPtr& strands = in.strands;
+    if (!strands || (settings.colorMode != kClumpColors && settings.colorMode != kAttributeColors) ||
+        !splitNodeColorSource(settings.colorSource, &channel, &node)) {
+        channel_.reset();
+        key_ = 0;
+        return;
+    }
+    const std::uint64_t key = hashChars(hashCombine(hashCombine(hash64(in.strandsVersion), strands->strandCount()),
+                                                    reinterpret_cast<std::uintptr_t>(strands.get())),
+                                        settings.colorSource);
+    if (key != key_) {
+        key_ = key;
+        channel_ = session().nodeStrandChannel(node, channel, *strands);
+        ++version_;
+    }
+    in.colorChannel = channel_;
+    in.colorChannelVersion = version_;
+}
+
+bool strandChannelRange(const StrandSet& s, const std::string& source, float& lo, float& hi) {
+    std::string channel;
+    splitNodeColorSource(source, &channel, nullptr);
     const std::vector<float>* values = s.strandChannel(channel);
     if (!values) return false;
     float low = std::numeric_limits<float>::infinity(), high = -low;

@@ -12,6 +12,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "groomlab/display.h"
 #include "groomlab/field.h"
 #include "groomlab/graph.h"
 #include "groomlab/graph_controls.h"
@@ -1023,6 +1024,46 @@ TEST(GraphEdit, DetachTakesANodeOutOfTheFlowAndKeepsIt) {
     EXPECT_TRUE(head.source.empty());
     EXPECT_TRUE(first.upstream("c").empty());
     EXPECT_THROW(first.detach("nope"), GraphError);
+}
+
+TEST(GraphEdit, ClumpColorsNameTheirClumpAndLightIt) {
+    // Clump Colors (every host's button, issue #77): each Clump's source names it, so chained
+    // Clumps writing one channel light alone; a bare channel (grooms from before) lights the last.
+    const nlohmann::json g = {
+        {"version", 1},
+        {"nodes",
+         {{{"name", "s"}, {"type", "Scatter"}},
+          {{"name", "c1"}, {"type", "Clump"}},
+          {{"name", "c2"}, {"type", "Clump"}, {"params", {{"clumpChannel", "clumpId"}}}},
+          {{"name", "big"}, {"type", "Clump"}, {"params", {{"clumpChannel", "bigClumpId"}}}},
+          {{"name", "none"}, {"type", "Clump"}, {"params", {{"clumpChannel", ""}}}},
+          {{"name", "w"}, {"type", "Width"}}}},
+        {"connections",
+         {{{"from", "s"}, {"to", "c1"}, {"input", "strands"}},
+          {{"from", "c1"}, {"to", "c2"}, {"input", "strands"}},
+          {{"from", "c2"}, {"to", "big"}, {"input", "strands"}},
+          {{"from", "big"}, {"to", "none"}, {"input", "strands"}},
+          {{"from", "none"}, {"to", "w"}, {"input", "strands"}}}},
+        {"output", "w"}};
+    const GraphEdit edit(g.dump());
+    EXPECT_EQ(edit.clumpChannel("c1"), "clumpId") << "unset: the default";
+    EXPECT_EQ(edit.clumpChannel("w"), "") << "not a Clump";
+    EXPECT_EQ(edit.clumpColorSource("c1"), "clumpId@c1");
+    EXPECT_EQ(edit.clumpColorSource("big"), "bigClumpId@big");
+    EXPECT_EQ(edit.clumpColorSource("none"), "") << "writes no channel";
+    EXPECT_EQ(edit.clumpColorSource("nope"), "");
+    EXPECT_TRUE(edit.clumpColored("c1", "clumpId@c1"));
+    EXPECT_FALSE(edit.clumpColored("c2", "clumpId@c1")) << "the other Clump on the channel stays dark";
+    EXPECT_FALSE(edit.clumpColored("big", "clumpId@c1"));
+    EXPECT_FALSE(edit.clumpColored("c1", "clumpId")) << "a bare channel: the last Clump writing it";
+    EXPECT_TRUE(edit.clumpColored("c2", "clumpId"));
+    EXPECT_TRUE(edit.clumpColored("big", "bigClumpId"));
+    EXPECT_FALSE(edit.clumpColored("none", ""));
+    EXPECT_FALSE(edit.clumpColored("nope", "clumpId"));
+    // Renamed, the source follows; others as they are.
+    EXPECT_EQ(renamedColorSource("clumpId@c1", "c1", "front"), "clumpId@front");
+    EXPECT_EQ(renamedColorSource("clumpId@c2", "c1", "front"), "clumpId@c2");
+    EXPECT_EQ(renamedColorSource("clumpId", "c1", "front"), "clumpId");
 }
 
 TEST(GraphEdit, DeletingANodeKeepsTheFlowThroughIt) {

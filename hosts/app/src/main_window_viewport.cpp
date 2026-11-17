@@ -139,14 +139,25 @@ void MainWindow::refreshClumpColored() {
     if (!graph_) return;
     std::vector<std::string> lit;
     if (document_ && settings_.colorMode == kClumpColors) {
+        const GraphEdit edit(document_->graph().dump());
         for (const nlohmann::json& n : document_->graph().value("nodes", nlohmann::json::array())) {
             const std::string name = n.value("name", std::string());
-            bool isClump = false;
-            const std::string channel = clumpChannelOf(name, &isClump);
-            if (isClump && !channel.empty() && channel == settings_.colorSource) lit.push_back(name);
+            // Its own source ("<channel>@<node>"), or a bare channel's last writer (GraphEdit::clumpColored).
+            if (n.value("type", std::string()) == "Clump" && edit.clumpColored(name, settings_.colorSource)) lit.push_back(name);
         }
     }
     graph_->setClumpColoredNodes(std::move(lit));
+}
+
+void MainWindow::followRenamedNode(const std::string& from, const std::string& to) {
+    // A color source naming the node (Clump Colors, "<channel>@<node>") follows it.
+    const std::string renamed = renamedColorSource(settings_.colorSource, from, to);
+    if (renamed == settings_.colorSource || !colorSource_) return;
+    {
+        const QSignalBlocker block(colorSource_);
+        colorSource_->setEditText(QString::fromStdString(renamed));
+    }
+    applyDisplayOptions();
 }
 
 void MainWindow::toggleClumpColors(const std::string& node) {
@@ -165,8 +176,9 @@ void MainWindow::toggleClumpColors(const std::string& node) {
     const int mode = colorMode_->currentData().toInt();
     if (mode != kClumpColors) colorModeBeforeClump_ = mode;
     {
+        // The node's own clumps ("<channel>@<node>", issue #77), though a later Clump writes the same channel.
         const QSignalBlocker block(colorSource_);
-        colorSource_->setEditText(QString::fromStdString(channel));
+        colorSource_->setEditText(QString::fromStdString(GraphEdit(document_->graph().dump()).clumpColorSource(node)));
     }
     if (mode != kClumpColors) colorMode_->setCurrentIndex(std::max(0, colorMode_->findData(kClumpColors)));
     else applyDisplayOptions();

@@ -1039,6 +1039,7 @@ private:
     std::optional<std::string> cardBlock_;  // set since the scene was made
     std::optional<std::string> referencePhotos_;  // set since the scene was made  // set since the scene was made
     DisplayBuilder display_;
+    NodeColorChannel colorChannel_;  // a "<channel>@<node>" color source's values (updateDisplay)
     std::vector<GuideId> selection_;
     std::uint64_t selectionVersion_ = 1;
     bool tubePreview_ = false;  // previewTubeShape's preview is the session's
