@@ -61,10 +61,11 @@ struct HierarchyGuide {
     std::vector<StrandRoot> rootOutline;
     // A root-first tube cut from another (root_subdivision.h): how far (radians, about the scalp's
     // normal at its root) its footprint is turned from the scalp's own across there, so it lies as
-    // the tube it was cut from did; and the roll added to its sections (TubeProfile::roll) so they
-    // turn as that tube's did. So the cells of a cut tile it all along. Saved; 0 for any other.
+    // the tube it was cut from did; and per point, the roll added to its sections
+    // (TubeProfile::roll) so they turn as that tube's did there. So the cells of a cut tile it all
+    // along. Saved; 0 and empty for any other.
     float acrossTurn = 0.0f;
-    float rollOffset = 0.0f;
+    std::vector<float> rollOffsets;
     TubeProfile tube;  // tube.h: its shape and sections, the volume its children (and fillTubes' strands) fill
     // Reference direction for this guide's first frame normal (projected
     // perpendicular to the root tangent). Fixed at creation so the frame, and
@@ -388,8 +389,8 @@ public:
     void setPoints(GuideId id, std::vector<Vec3f> points);
     // A root-first tube's root outline (HierarchyGuide::rootOutline: its CVs on the scalp).
     void setRootOutline(GuideId id, std::vector<StrandRoot> outline);
-    // A root tube's footprint turn and section roll (HierarchyGuide::acrossTurn, rollOffset).
-    void setRootFrame(GuideId id, float acrossTurn, float rollOffset);
+    // A root tube's footprint turn and section roll per point (HierarchyGuide::acrossTurn, rollOffsets).
+    void setRootFrame(GuideId id, float acrossTurn, std::vector<float> rollOffsets);
     // The direction across the scalp a root-first tube's footprint is laid along (unit, flat on the
     // scalp at its root): a slice's its parent's (HierarchyGuide::rootAcross, onto the scalp here),
     // a cell's the scalp's turned by its acrossTurn, any other's the scalp's own (ScalpMesh::acrossAt).

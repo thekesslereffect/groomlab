@@ -896,24 +896,18 @@ void GuideHierarchy::evaluateGuide(HierarchyGuide& g, const ScalpMesh* scalp, co
                 roll = std::atan2(n.dot(laid.cross(across)), laid.dot(across));
             }
         }
-        // A slice (its parent a drawn root's tube too): its sections turned as its parent's are, so the
-        // slices fill the parent's tube side by side all along. (Its guide leaves the scalp from its
-        // part of the parent's footprint, so its own frames start turned a little off the parent's;
-        // matched past the root, where the tube's sections begin.)
+        // A slice (its parent a drawn root's tube too): its sections turned as its parent's are at each
+        // point (rollToMatch), so the slices fill the parent's tube side by side all along. A cell of
+        // a cut: as the tube it was cut from was (its rollOffsets, per point, on its laid roll).
         const HierarchyGuide* parent = g.isChild() ? guide(g.parent) : nullptr;
         if (parent && isRootTube(parent->tube, 0) && parent->points.size() >= 2) {
-            // (The parent's frames as its tube lays them: TubeSpine's, from its points and frameUp.)
-            const std::vector<Frame> own = rotationMinimizingFrames(parent->points.data(), parent->points.size(), parent->frameUp);
-            const std::size_t j = std::min(g.points.size() - 1, std::max<std::size_t>(2, g.points.size() / 2));
-            const float t = static_cast<float>(j) / static_cast<float>(g.points.size() - 1);
-            const std::size_t pj = std::min(own.size() - 1, static_cast<std::size_t>(std::lround(t * static_cast<float>(own.size() - 1))));
-            const float pr = parent->tube.rollAt(t);
-            const Vec3f along = own[pj].normal * std::cos(pr) + own[pj].binormal * std::sin(pr);
-            roll = std::atan2(along.dot(frames[j].binormal), along.dot(frames[j].normal));
+            g.tube.roll = rollToMatch(g.points, g.frameUp, parent->points, parent->frameUp, parent->tube);
+        } else if (g.rollOffsets.size() == g.points.size()) {
+            g.tube.roll.clear();
+            for (const float r : g.rollOffsets) g.tube.roll.push_back(roll + r);
         } else {
-            roll += g.rollOffset;  // (a cell of a cut: its sections as the tube it was cut from)
+            g.tube.roll = {roll};
         }
-        g.tube.roll = {roll};
         layRootRing(g, *scalp, n, across);
     } else if (g.tube.shaped() && g.tube.rollOnScalp && g.points.size() >= 2) {
         g.tube.roll = sectionRoll(g.points, rotationMinimizingFrames(g.points.data(), g.points.size(), g.frameUp), g.tube,
@@ -1547,11 +1541,11 @@ GuideHierarchy::MirrorShapesResult GuideHierarchy::mirrorShapes(const Mirror& mi
     return out;
 }
 
-void GuideHierarchy::setRootFrame(GuideId id, float acrossTurn, float rollOffset) {
+void GuideHierarchy::setRootFrame(GuideId id, float acrossTurn, std::vector<float> rollOffsets) {
     invalidateHash();
     if (HierarchyGuide* g = mutableGuide(id)) {
         g->acrossTurn = acrossTurn;
-        g->rollOffset = rollOffset;
+        g->rollOffsets = std::move(rollOffsets);
     }
 }
 
@@ -2191,7 +2185,10 @@ std::uint64_t GuideHierarchy::computeContentHash() const {
                 h = hashFloat(hashFloat(hashCombine(h, static_cast<std::uint64_t>(static_cast<std::int64_t>(r.face))), r.u), r.v);
             }
         }
-        if (g.acrossTurn != 0.0f || g.rollOffset != 0.0f) h = hashFloat(hashFloat(hashCombine(h, 0xAC05u), g.acrossTurn), g.rollOffset);
+        if (g.acrossTurn != 0.0f || !g.rollOffsets.empty()) {
+            h = hashFloat(hashCombine(h, 0xAC05u + g.rollOffsets.size()), g.acrossTurn);
+            for (const float r : g.rollOffsets) h = hashFloat(h, r);
+        }
         h = hashVec(h, g.frameUp);
         h = hashTube(h, g.tube);
         for (const auto& [k, v] : g.attributes) h = hashFloat(hashString(h, k), v);
@@ -2263,7 +2260,7 @@ json guideToJson(const HierarchyGuide& g) {
         j["rootOutline"] = std::move(cvs);
     }
     if (g.acrossTurn != 0.0f) j["acrossTurn"] = g.acrossTurn;
-    if (g.rollOffset != 0.0f) j["rollOffset"] = g.rollOffset;
+    if (!g.rollOffsets.empty()) j["rollOffsets"] = g.rollOffsets;
     if (!g.attributes.empty()) j["attributes"] = g.attributes;
     if (!g.pointAttributes.empty()) j["pointAttributes"] = g.pointAttributes;
     if (g.followsParent()) {
@@ -2346,7 +2343,7 @@ HierarchyGuide guideFromJson(const json& j, const TubeShapeLibrary& library, std
         }
     }
     g.acrossTurn = j.value("acrossTurn", 0.0f);
-    g.rollOffset = j.value("rollOffset", 0.0f);
+    g.rollOffsets = j.value("rollOffsets", std::vector<float>{});
     if (j.contains("attributes")) g.attributes = j.at("attributes").get<std::map<std::string, float>>();
     if (j.contains("pointAttributes")) {
         g.pointAttributes = j.at("pointAttributes").get<std::map<std::string, std::vector<float>>>();

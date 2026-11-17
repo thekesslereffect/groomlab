@@ -139,7 +139,9 @@ float rootFootprintError(const GuideHierarchy& h, const ScalpMesh& scalp, GuideI
 // root_subdivision.h): each part a slice of the tube, its root shape its part of the tube's, its
 // sections the tube's scaled to it, its guide the path its middle takes inside the tube.
 
-constexpr float kSliceInset = 0.99f;  // a slice's sections this share of its part: neighbours a hair apart
+// A slice's sections drawn this far (a share of the tube's half-width) inside its part all round:
+// neighbours a slight gap apart, never touching, whatever their size.
+constexpr float kSliceGap = 0.02f;
 
 // The tube a slice is cut from, as it lies (its guide evaluated on the scalp).
 struct TubeSource {
@@ -153,12 +155,15 @@ TubeSource tubeSourceOf(const GuideHierarchy& h, const ScalpMesh& scalp, GuideId
 // The slice of `source` over `polygon` (points in its root section's coordinates, in order round
 // it): into guide `into` (a child of the source: the parent lays its footprint and turns its
 // sections), or (kNoGuide) a new guide of the source's group, its footprint laid and its sections
-// turned as the source's (HierarchyGuide::acrossTurn, rollOffset) and `outline` (world points on
+// turned as the source's (HierarchyGuide::acrossTurn, rollOffsets) and `outline` (world points on
 // the scalp, given) kept as its root's CVs. Returns the guide, or kNoGuide for a sliver.
 GuideId sliceTube(GuideHierarchy& h, const ScalpMesh& scalp, const TubeSource& source, const std::vector<SectionPoint>& polygon,
                   GuideId into = kNoGuide, const std::vector<Vec3f>& outline = {});
 // A tube spine of the source laid as its tube lies (its footprint fixed on the scalp).
 TubeSpine sourceSpine(const TubeSource& source, float scale = 1.0f);
+// `p` taken onto the scalp along `normal` (the nearer hit either way), else its nearest point
+// (the line misses, or hits far past it).
+Vec3f alongNormal(const ScalpMesh& scalp, const Vec3f& p, const Vec3f& normal);
 
 // ---- The tube hierarchy ------------------------------------------------------------------------------
 

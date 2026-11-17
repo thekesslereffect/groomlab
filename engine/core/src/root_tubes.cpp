@@ -160,10 +160,10 @@ V leaned(const V& direction, const V& normal, double most = kMaxLean) {
     return n * std::cos(most) + side * std::sin(most);
 }
 
-Pts seat(Pts pts, const V& normal) {
+Pts seat(Pts pts, const V& normal, double most = kMaxLean) {
     if (pts.size() < 2) return pts;
     const V first = pts[1] - pts[0];
-    pts[1] = pts[0] + leaned(first, normal) * first.length();
+    pts[1] = pts[0] + leaned(first, normal, most) * first.length();
     return pts;
 }
 
@@ -895,10 +895,12 @@ void editRootTube(GuideHierarchy& h, const ScalpMesh& scalp, GuideId id, const s
     outline = projectAll(scalp, outline);
     const Pts old = toV(h.guide(id)->points);
     auto [root, normal] = surface(centroidOf(outline));
+    // (The guide keeps the lean it had: an edit moves its root, it never stands it up.)
+    const double had = old.size() >= 2 ? std::max(kMaxLean, lean(old[1] - old[0], surface(old[0]).second)) : kMaxLean;
     V move = root - old[0];
     Pts moved{root};
     for (std::size_t i = 1; i < old.size(); ++i) moved.push_back(old[i] + move);
-    moved = seat(moved, normal);
+    moved = seat(moved, normal, had);
     reshape(h, scalp, id, moved);
     Section s = fitShape(h, scalp, id, shape, outline);
     for (int pass = 0; pass < kRecenterPasses; ++pass) {
@@ -909,7 +911,7 @@ void editRootTube(GuideHierarchy& h, const ScalpMesh& scalp, GuideId id, const s
         move = root2 - moved[0];
         Pts next{root2};
         for (std::size_t i = 1; i < moved.size(); ++i) next.push_back(moved[i] + move);
-        moved = seat(next, normal2);
+        moved = seat(next, normal2, had);
         reshape(h, scalp, id, moved);
         s = fitShape(h, scalp, id, shape, outline);
     }
@@ -1469,6 +1471,20 @@ std::map<std::string, bool> tubeLevelVisibility(const GuideHierarchy& h, const s
 
 // ---- Slices of a tube ----------------------------------------------------------------------------------
 
+Vec3f alongNormal(const ScalpMesh& scalp, const Vec3f& p, const Vec3f& normal) {
+    const SurfacePoint near = scalp.closestPoint(p);
+    if (normal.length() < 0.5f) return near.position;
+    Vec3f at = near.position;
+    float best = std::numeric_limits<float>::infinity();
+    for (const Vec3f& way : {normal, normal * -1.0f}) {
+        SurfacePoint hit;
+        float d = 0.0f;
+        if (scalp.intersectRay(p, way, &hit, &d) && std::abs(d) < best) best = std::abs(d), at = hit.position;
+    }
+    if (std::isinf(best) || best > 4.0f * (near.position - p).length() + 1e-6f) return near.position;
+    return at;
+}
+
 TubeSource tubeSourceOf(const GuideHierarchy& h, const ScalpMesh& scalp, GuideId id) {
     const HierarchyGuide* g = h.guide(id);
     if (!g || g->points.size() < 2) throw std::invalid_argument("no guide " + std::to_string(id) + " to slice");
@@ -1511,23 +1527,40 @@ GuideId sliceTube(GuideHierarchy& h, const ScalpMesh& scalp, const TubeSource& s
     } catch (const std::invalid_argument&) {
         return kNoGuide;  // (a shape no library takes)
     }
-    // Its sections: the source's, scaled to the slice (a hair inside it: neighbours never touch).
+    // Its sections: the source's, scaled to the slice, kSliceGap inside it all round (neighbours never touch).
+    const double inset = std::clamp(1.0 - kSliceGap / std::min(su, sv), 0.75, 1.0);
     TubeProfile tube = source.tube;
     tube.custom = h.tubeShape(name);
     tube.midShape.reset();
     tube.tipShape.reset();
-    for (float& x : tube.width) x = static_cast<float>(x * su * kSliceInset);
+    for (float& x : tube.width) x = static_cast<float>(x * su * inset);
     for (float& a : tube.aspect) a = static_cast<float>(clampAspect(a * sv / su));
     tube.rollOnScalp = false;
     tube.roll.clear();
-    // Its guide: the path its middle takes inside the source's tube, from the source's footprint on the scalp.
+    // Its guide: rooted in its middle on the scalp (its part of the footprint taken onto the scalp
+    // along the footprint's normal, as its CVs were taken off it), then the path its middle takes
+    // inside the source's tube, joined from the root as a strand rooted there joins it
+    // (TubeSpine::rootJoin's (1 - t / join)^2, over a few of its own widths), along the tube: it
+    // starts where its hair grows and runs with its neighbours.
     const TubeSpine spine = sourceSpine(source, h.scale());
     const std::size_t n = source.points.size();
     const float u = static_cast<float>(cu), v = static_cast<float>(cv);
+    const Vec3f rooted = alongNormal(scalp, spine.footprintAt(u, v), source.normal);
+    const Vec3f lift = rooted - spine.at(0.0f, u, v);
+    float length = 0.0f;
+    for (std::size_t i = 1; i < n; ++i) length += (source.points[i] - source.points[i - 1]).length();
+    const float extent = static_cast<float>(std::max(su * source.tube.widthAt(0.0f), sv * source.tube.widthAt(0.0f) * source.tube.aspectAt(0.0f))) *
+                         h.scale();
+    const float join = length > 0.0f ? std::clamp(3.0f * extent / length, 1e-3f, 1.0f) : 1.0f;
+    // (Only along the tube: across it, where its neighbours meet it, it stays its part of the tube.)
+    // (Along the tube as its sections lie: square to them, along its frames' tangent.)
+    const std::vector<Frame> frames = rotationMinimizingFrames(source.points.data(), n, source.frameUp);
     std::vector<Vec3f> path;
     for (std::size_t i = 0; i < n; ++i) {
-        path.push_back(i == 0 ? scalp.closestPoint(spine.footprintAt(u, v)).position
-                              : spine.at(static_cast<float>(i) / static_cast<float>(n - 1), u, v));
+        const float t = static_cast<float>(i) / static_cast<float>(n - 1);
+        const float k = t < join ? (1.0f - t / join) * (1.0f - t / join) : 0.0f;
+        const Vec3f way = frames[i].tangent;
+        path.push_back(i == 0 ? rooted : spine.at(t, u, v) + way * (lift.dot(way) * k));
     }
     GuideId id = into;
     if (id == kNoGuide) {
@@ -1539,7 +1572,7 @@ GuideId sliceTube(GuideHierarchy& h, const ScalpMesh& scalp, const TubeSource& s
     h.evaluate(&scalp);
     if (into != kNoGuide) return id;  // (a child: its parent lays its footprint and turns its sections)
     // A guide of its own (a cell of a cut): its footprint laid as the source's, its sections turned as
-    // the source's (acrossTurn, rollOffset), its root's CVs kept.
+    // the source's (acrossTurn, rollOffsets), its root's CVs kept.
     const HierarchyGuide* g = h.guide(id);
     if (!g || !scalp.contains(g->root)) return id;
     const Vec3f nrm = scalp.normal(g->root);
@@ -1550,20 +1583,16 @@ GuideId sliceTube(GuideHierarchy& h, const ScalpMesh& scalp, const TubeSource& s
         want = want.normalized();
         turn = std::atan2(nrm.dot(own.cross(want)), own.dot(want));
     }
-    h.setRootFrame(id, turn, 0.0f);
+    h.setRootFrame(id, turn, {});
     h.evaluate(&scalp);
     g = h.guide(id);
-    // Its sections against the source's, past the root (as a slice matches its parent's).
-    const std::vector<Frame> mine = rotationMinimizingFrames(g->points.data(), g->points.size(), g->frameUp);
-    const std::vector<Frame> theirs = rotationMinimizingFrames(source.points.data(), source.points.size(), source.frameUp);
-    const std::size_t j = std::min(g->points.size() - 1, std::max<std::size_t>(2, g->points.size() / 2));
-    const float t = static_cast<float>(j) / static_cast<float>(g->points.size() - 1);
-    const std::size_t pj = std::min(theirs.size() - 1, static_cast<std::size_t>(std::lround(t * static_cast<float>(theirs.size() - 1))));
-    const float pr = source.tube.rollAt(t);
-    const Vec3f along = theirs[pj].normal * std::cos(pr) + theirs[pj].binormal * std::sin(pr);
-    const float matched = std::atan2(along.dot(mine[j].binormal), along.dot(mine[j].normal));
+    // Its sections against the source's at each point (as a slice matches its parent's), kept as
+    // offsets from the roll its footprint lays (so they follow as it is combed).
+    const std::vector<float> matched = rollToMatch(g->points, g->frameUp, source.points, source.frameUp, source.tube);
     const float laid = g->tube.roll.empty() ? 0.0f : g->tube.roll[0];
-    h.setRootFrame(id, turn, matched - laid);
+    std::vector<float> offsets;
+    for (const float r : matched) offsets.push_back(r - laid);
+    h.setRootFrame(id, turn, std::move(offsets));
     if (outline.size() >= 3) h.setRootOutline(id, bindOutline(scalp, toV(outline)));
     h.evaluate(&scalp);
     return id;

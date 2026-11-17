@@ -128,33 +128,47 @@ class RootTubeCard(QtCore.QObject):
                                            "hierarchy. Again: stop", False, "rootTubeDuplicate")
         self.duplicate_root.clicked.connect(self.duplicate_clicked)
         self.root_block.add(widgets.chip_row((self.undo_cv, self.delete_root, self.duplicate_root)))
+        # Subdividing roots (#85): Subdivide | Subdivision multiplier | Apply, then
+        # Paint subdivision density | the density map (each cut has its own).
         self.subdivide_root = widgets.chip("Subdivide", "Cut the selected root (Select root) into Voronoi cells, each "
-                                           "a root tube of its own following the old tube, smaller and more numerous "
-                                           "where Paint subdivision density painted it white; the tube hierarchy under "
-                                           "it is made again in each", None, "rootTubeSubdivide")
+                                           "a root tube of its own, a slice of the old tube; with a density map of its "
+                                           "own (tubeSubdivisionDensity01, 02, ..., made at 0.5 and picked beside Paint "
+                                           "subdivision density) and the multiplier; the tube hierarchy under it is "
+                                           "made again in each", None, "rootTubeSubdivide")
         self.subdivide_root.clicked.connect(self.subdivide_clicked)
-        self.paint_density = widgets.chip("Paint subdivision density", "Paint the tubeSubdivisionDensity map (made "
-                                          "at 0.5 if missing) on the scalp: white, more and smaller roots; black, fewer "
-                                          "and larger. Again (Finish painting): the selected root cut by it, and the "
-                                          "roots cut before cut again only where the map changed", False,
+        self.multiplier = widgets.SoftSlider(1.0, 0.25, 4.0, minimum=0.05, maximum=20.0,
+                                             key="palette.rootSubdivisionMultiplier", label="Multiplier")
+        self.multiplier.setToolTip("Subdivision multiplier: how dense a cut is overall, with its painted density: 1 as "
+                                   "painted, 2 about twice the roots (each smaller), 0.5 half. Apply cuts the picked "
+                                   "map's roots again at it (all over when it changed)")
+        self.apply_density = widgets.chip("Apply", "Cut the roots of the picked density map again: where the map "
+                                          "changed since, and all over when the multiplier did", None,
+                                          "rootTubeApplyDensity")
+        self.apply_density.clicked.connect(self.apply_clicked)
+        self.paint_density = widgets.chip("Paint subdivision density", "Paint the picked density map on the scalp: "
+                                          "white, more and smaller roots; black, fewer and larger. Again (Finish "
+                                          "painting), Q or another tool: its roots cut again where it changed (with no "
+                                          "map yet: a new one for the selected root, cut by it)", False,
                                           "rootTubePaintDensity")
         self.paint_density.clicked.connect(self.paint_density_clicked)
-        # One row, however narrow the card (the chip grid would put the long label on a row of its own).
-        cut_row = QtWidgets.QWidget()
-        cut_layout = QtWidgets.QHBoxLayout(cut_row)
-        cut_layout.setContentsMargins(0, 0, 0, 0)
-        cut_layout.setSpacing(theme.px(4))
-        for b, stretch in ((self.subdivide_root, 2), (self.paint_density, 3)):
-            b.setSizePolicy(QtWidgets.QSizePolicy.Ignored, b.sizePolicy().verticalPolicy())
-            b.setMinimumWidth(theme.px(40))
-            cut_layout.addWidget(b, stretch)
-        self.root_block.add(cut_row)
-        self.multiplier = widgets.SoftSlider(1.0, 0.25, 4.0, minimum=0.05, maximum=20.0,
-                                             key="palette.rootSubdivisionMultiplier", label="Subdivision multiplier")
-        self.multiplier.setToolTip("How dense the cut is overall, with the painted density: 1 as painted, 2 about twice "
-                                   "the roots (each smaller), 0.5 half. A root cut again at another multiplier is cut "
-                                   "again all over")
-        self.root_block.add(self.multiplier)
+        self.density_map = QtWidgets.QComboBox()
+        self.density_map.setObjectName("rootTubeDensityMap")
+        self.density_map.setToolTip("The density map Paint subdivision density paints and Apply cuts by (each cut root "
+                                    "has its own; the last used is picked)")
+        self.density_map.activated.connect(self._map_picked)
+        self._last_map = None  # the density map last used (painted, cut, applied)
+        for parts in (((self.subdivide_root, 2), (self.multiplier, 4), (self.apply_density, 1)),
+                      ((self.paint_density, 3), (self.density_map, 2))):
+            row = QtWidgets.QWidget()
+            layout = QtWidgets.QHBoxLayout(row)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setSpacing(theme.px(4))
+            for w, stretch in parts:
+                # (One row however narrow the card: the long label gives first.)
+                w.setSizePolicy(QtWidgets.QSizePolicy.Ignored, w.sizePolicy().verticalPolicy())
+                w.setMinimumWidth(theme.px(40))
+                layout.addWidget(w, stretch)
+            self.root_block.add(row)
         self._painting = None  # painting a density map: (the roots to cut when it finishes, the map)
         self.snap = widgets.switch("Snap to neighbours", "A CV near a neighbouring root's CV or edge snaps onto it, "
                                    "so the tubes meet with no gap", True, "rootTubeSnap")
@@ -260,6 +274,7 @@ class RootTubeCard(QtCore.QObject):
         self.duplicate_root.setEnabled(picked)
         self.duplicate_root.setChecked(mode == "duplicate")
         self.subdivide_root.setEnabled(picked)
+        self.fill_density_maps(groom)
         painting = self._painting is not None
         self.paint_density.setChecked(painting)
         self.paint_density.setText("Finish painting" if painting else "Paint subdivision density")
@@ -418,6 +433,45 @@ class RootTubeCard(QtCore.QObject):
         self.owner.status.setText("%s: %d root%s made%s." % (verb, made, "" if made == 1 else "s",
                                                               ", %d kept" % kept if kept else ""))
 
+    def density_maps(self, groom):
+        """The groom's density maps (names holding tubeSubdivisionDensity), in name order."""
+        from groomlab import painting
+        try:
+            return sorted(m for m in painting.list_maps(groom) if root_tubes.DENSITY_MAP in m)
+        except RuntimeError:
+            return []
+
+    def fill_density_maps(self, groom):
+        """The map picker: the groom's density maps, the last used picked (else the newest)."""
+        names = self.density_maps(groom) if groom else []
+        want = self._last_map if self._last_map in names else (self.density_map.currentText() or None)
+        if want not in names:
+            want = names[-1] if names else None
+        if [self.density_map.itemText(i) for i in range(self.density_map.count())] != names:
+            self.density_map.blockSignals(True)
+            self.density_map.clear()
+            self.density_map.addItems(names)
+            self.density_map.blockSignals(False)
+        if want:
+            self.density_map.setCurrentIndex(names.index(want))
+        self.density_map.setEnabled(bool(names))
+        self.apply_density.setEnabled(bool(names))
+
+    def _map_picked(self, _index=None):
+        self._last_map = self.density_map.currentText() or None
+
+    def _picked_map(self):
+        return self.density_map.currentText() or None
+
+    def _selected_roots(self, groom):
+        """The roots picked in Select root, else the guides selected."""
+        if self._mode() in ("select", "duplicate") and self.tool.picked:
+            return list(self.tool.picked)
+        try:
+            return list(groomlab.selected_guides(groom))
+        except (RuntimeError, ValueError):
+            return []
+
     def subdivide_clicked(self):
         groom = self.owner.groom()
         roots = self.tool.picked if self._mode() in ("select", "duplicate") else []
@@ -430,27 +484,21 @@ class RootTubeCard(QtCore.QObject):
         self._enter("select", self.select_root)
 
     def _subdivide(self, groom, roots):
-        """Its own density map (made at 0.5: paint it later to change the cut), the multiplier."""
-        name = root_tubes.ensure_density_map(groom, root_tubes.density_map_for(groom, roots))
+        """A new density map of its own (made at 0.5: paint it later to change the cut), the multiplier."""
+        name = root_tubes.ensure_density_map(groom, root_tubes.density_map_for(groom, []))
+        self._last_map = name
         return root_tubes.subdivide(groom, roots, name, multiplier=self.multiplier.value())
 
-    def _density_roots(self, groom):
-        """The roots Paint subdivision density is for: those picked in Select root, else the guides
-        selected (their root tubes), else a cell of the last root cut (painting its map again)."""
-        if self._mode() in ("select", "duplicate") and self.tool.picked:
-            return list(self.tool.picked)
-        try:
-            selected = groomlab.selected_guides(groom)
-        except (RuntimeError, ValueError):
-            selected = []
-        if selected:
-            return list(selected)
-        cuts = (groomlab.get_hierarchy(groom) or {}).get("rootSubdivisions") or []
-        for cut in reversed(cuts):
-            live = [int(c) for c in cut.get("cells") or [] if c]
-            if live:
-                return live[:1]
-        return []
+    def apply_clicked(self):
+        """The picked map's roots cut again at the multiplier."""
+        groom = self.owner.groom()
+        name = self._picked_map()
+        if not groom or not name:
+            self.owner.status.setText("No density map yet: Subdivide a root first.")
+            return
+        self._last_map = name
+        self.tool.leave()
+        self._said_cut(self._run(root_tubes.apply_density, groom, [], name, self.multiplier.value()), "Applied " + name)
 
     def paint_density_clicked(self, _on=None):
         groom = self.owner.groom()
@@ -461,22 +509,28 @@ class RootTubeCard(QtCore.QObject):
         if self._painting is not None:  # Finish painting: cut by the map
             self.finish_painting()
             return
-        roots = self._density_roots(groom)
-        if not roots:
-            self.owner.status.setText("Select a root first (Select root): a root to cut, or a root cut before to "
-                                      "paint its density again.")
-            self.paint_density.setChecked(False)
-            return
+        # The picked map (its roots cut again when painting finishes); with none yet, a new one for
+        # the selected roots (cut by it when painting finishes).
+        name, roots = self._picked_map(), []
+        if not name:
+            roots = self._selected_roots(groom)
+            if not roots:
+                self.owner.status.setText("Subdivide a root first, or select one (Select root) to paint a density map "
+                                          "for it.")
+                self.paint_density.setChecked(False)
+                return
         paint = self.owner.paint_tab
         try:
-            # The root's own map: a root cut before paints its subdivision's, a new root a new one.
-            name = root_tubes.ensure_density_map(groom, root_tubes.density_map_for(groom, roots))
+            if not name:
+                name = root_tubes.density_map_for(groom, [])
+            root_tubes.ensure_density_map(groom, name)
+            self._last_map = name
             self.tool.leave()
             # The Paint tab on the density map, painting toward white (as picking it there would).
             paint.refresh(force=True)
             paint.select(name)
             paint.value.setValue(1.0)
-            self._painting = (list(roots), name)
+            self._painting = (roots, name)
             if self._paint_ended not in paint.painting_ended:
                 paint.painting_ended.append(self._paint_ended)
             self.owner.activate("paint")

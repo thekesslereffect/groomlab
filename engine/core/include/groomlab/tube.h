@@ -125,6 +125,12 @@ constexpr float kRootTubeOverlap = 0.015f;
 // whose footprint stays fixed on the scalp (TubeSpine::setRootOnScalp).
 struct TubeProfile;
 bool isRootTube(const TubeProfile& tube, int depth);
+// The roll (radians per point of `points`, as TubeProfile::roll) that turns a tube along `points`
+// (frames from `frameUp`, no roll) so its sections lie as `other`'s do at the same share of the
+// way (its frames from `otherPoints` and `otherUp`, turned by its roll): a slice of `other`
+// turned with it all along. Unwrapped (no jump of a turn between points). Empty for fewer than 2.
+std::vector<float> rollToMatch(const std::vector<Vec3f>& points, const Vec3f& frameUp, const std::vector<Vec3f>& otherPoints,
+                               const Vec3f& otherUp, const TubeProfile& other);
 
 // Points round every outline, built-in or custom.
 constexpr std::size_t kTubeOutlinePoints = 96;

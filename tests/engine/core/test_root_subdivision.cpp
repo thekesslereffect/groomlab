@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <cstdio>
 #include <map>
 #include <set>
 
@@ -270,7 +271,7 @@ void expectSliced(const GuideHierarchy& h, GuideId parentId) {
         }
         for (std::size_t k = 0; k < 2; ++k) {
             for (const SectionPoint& q : at[k]) {
-                EXPECT_FALSE(deepInside(at[1 - k], q, 0.03f)) << "slice " << k << " reaches into the other at sample " << i;
+                EXPECT_FALSE(deepInside(at[1 - k], q, 0.0f)) << "slice " << k << " reaches into the other at sample " << i;
                 EXPECT_FALSE(deepInside(own, q, 0.05f, true)) << "slice " << k << " leaves its parent's tube at sample " << i;
             }
         }
@@ -485,7 +486,7 @@ TEST(RootSubdivision, CellsTileTheTubeAllAlongWithNoPenetration) {
             for (std::size_t b = 0; b < cells.size(); ++b) {
                 if (a == b) continue;
                 for (const SectionPoint& q : at[a]) {
-                    EXPECT_FALSE(deepInside(at[b], q, 0.02f)) << "cell " << a << " reaches into cell " << b << " at sample " << i;
+                    EXPECT_FALSE(deepInside(at[b], q, 0.0f)) << "cell " << a << " reaches into cell " << b << " at sample " << i;
                 }
             }
         }
@@ -535,6 +536,73 @@ TEST(RootSlices, TheRootLoopFollowsTheOutlineDrawn) {
     float off = 0.0f;
     for (const Vec3f& p : root->rootRing) off = std::max(off, nearestOf(p, drawn));
     EXPECT_LT(off, 0.004f) << "the root loop leaves the outline drawn";
+}
+
+TEST(RootSubdivision, EachCellsGuideSitsInItsMiddleOnACurvedScalp) {
+    // A big root over much of the sphere (its flat footprint far off the scalp at its edge): each
+    // cell's guide still roots in its cell's middle, its tube starting where its hair grows.
+    GuideHierarchy h;
+    const auto scalp = head();
+    RootTubeOptions o;
+    o.length = 0.8f;
+    o.segments = 3;  // (a guide of few points, as drawn quickly)
+    const std::vector<Vec3f> path{{0, 1, 0}, {0.2f, 1.35f, 0.0f}, {0.6f, 1.55f, 0.1f}};
+    const GuideId root = makeRootTube(h, *scalp, ring({0, 1, 0}, 0.7f, 10), path, o);
+    RootSubdivisionOptions cut;
+    cut.multiplier = 2.0f;
+    h.evaluate(scalp.get());
+    const TubeSpine pspine = sourceSpine(tubeSourceOf(h, *scalp, root), h.scale());
+    const std::size_t n = h.guide(root)->points.size();
+    const auto cells = subdivideRootTubes(h, *scalp, {root}, cut).cells;
+    ASSERT_GE(cells.size(), 6u);
+    // And they tile it past the root, none reaching into another.
+    for (std::size_t i = 1; i < n; ++i) {
+        std::vector<std::vector<SectionPoint>> at;
+        for (const GuideId c : cells) {
+            const HierarchyGuide* g = h.guide(c);
+            ASSERT_EQ(g->points.size(), n);
+            const TubeSpine spine(g->points.data(), n, g->frameUp, g->tube, h.scale());
+            at.emplace_back();
+            for (const SectionPoint& q : tubeOutline(g->tube)) at.back().push_back(inSection(pspine, i, spine.atSample(i, q.u, q.v)));
+        }
+        for (std::size_t a = 0; a < at.size(); ++a) {
+            for (std::size_t b = 0; b < at.size(); ++b) {
+                if (a == b) continue;
+                for (const SectionPoint& q : at[a]) EXPECT_FALSE(deepInside(at[b], q, 0.0f)) << "cell " << a << " reaches into " << b << " at " << i;
+            }
+        }
+    }
+    for (const GuideId c : cells) {
+        const std::vector<Vec3f> outline = rootTubeOutline(h, *scalp, c);
+        const Vec3f mid = scalpPointNormal(*scalp, outlineCentroid(outline)).point;
+        float size = 0.0f;
+        for (const Vec3f& q : outline) size = std::max(size, (q - mid).length());
+        EXPECT_LT((h.guide(c)->points.front() - mid).length(), 0.35f * size) << "cell " << c << "'s guide off its middle";
+        EXPECT_LT(std::abs(h.guide(c)->points.front().length() - 1.0f), 1e-3f) << "on the scalp";
+    }
+}
+
+TEST(RootSubdivision, EditingACellsRootLeavesItsGuideWithThePack) {
+    // A cell's root edited (moved a little): its guide goes on the way it went, never stood up.
+    GuideHierarchy h;
+    const auto scalp = head();
+    RootTubeOptions o;
+    o.length = 0.8f;
+    const std::vector<Vec3f> path{{0, 1, 0}, {0.3f, 1.1f, 0.0f}, {0.8f, 1.15f, 0.0f}};  // leaning hard over
+    const GuideId root = makeRootTube(h, *scalp, ring({0, 1, 0}, 0.35f, 10), path, o);
+    const auto cells = subdivideRootTubes(h, *scalp, {root}).cells;
+    ASSERT_FALSE(cells.empty());
+    const GuideId c = cells[0];
+    const std::vector<Vec3f> before = h.guide(c)->points;
+    const Vec3f wayBefore = (before.back() - before.front()).normalized();
+    std::vector<Vec3f> outline = rootTubeOutline(h, *scalp, c);
+    const Vec3f mid = outlineCentroid(outline);
+    outline = carryOutline(*scalp, outline, mid, (mid + Vec3f{0.01f, 0.0f, 0.01f}).normalized());
+    editRootTube(h, *scalp, c, outline);
+    const std::vector<Vec3f>& after = h.guide(c)->points;
+    const Vec3f wayAfter = (after.back() - after.front()).normalized();
+    EXPECT_GT(wayBefore.dot(wayAfter), std::cos(5.0f * kPi / 180.0f));
+    EXPECT_GT(((before[1] - before[0]).normalized()).dot((after[1] - after[0]).normalized()), std::cos(8.0f * kPi / 180.0f));
 }
 
 }  // namespace

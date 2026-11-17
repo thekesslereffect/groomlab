@@ -778,13 +778,13 @@ bool recut(GuideHierarchy& h, const ScalpMesh& scalp, std::size_t index, const R
     RootSubdivisionRecord next = r;
     next.sites.clear();
     next.cells.clear();
-    std::vector<GuideId> made;
+    std::vector<GuideId> made, reslice;
     for (std::size_t i = 0; i < sites.size(); ++i) {
         const SurfacePoint siteAt = lift(scalp, cut.plane, sites[i]);
         if (i < kept.size()) {
             const GuideId c = keptCells[i];
             if (c != kNoGuide && cells[i].size() >= 3) {
-                // A kept cell whose outline moved (a neighbour changed): its root refitted, its guide kept.
+                // A kept cell: kept as it is while its outline comes out the same.
                 const std::vector<Vec3f> had = rootTubeOutline(h, scalp, c);
                 bool same = had.size() == cells[i].size();
                 for (std::size_t k = 0; same && k < had.size(); ++k) {
@@ -792,16 +792,23 @@ bool recut(GuideHierarchy& h, const ScalpMesh& scalp, std::size_t index, const R
                 }
                 if (same) {
                     ++result.kept;
-                } else {
-                    try {
-                        editRootTube(h, scalp, c, cells[i]);
-                    } catch (const std::exception&) {
+                    next.sites.push_back(siteAt.root);
+                    next.cells.push_back(c);
+                    continue;
+                }
+                // Its outline moved (a neighbour changed): sliced again from the tube, as the new
+                // cells are, so it keeps tiling with them (refitted, it would not).
+                reslice.push_back(c);
+                for (const auto& [level, ids] : levelsUnder(h, c)) {  // (its levels made again too)
+                    for (const GuideId k : ids) {
+                        if (const HierarchyGuide* kid = h.guide(k)) sources[level].push_back(sourceOf(scalp, *kid));
                     }
                 }
+            } else {
+                next.sites.push_back(siteAt.root);
+                next.cells.push_back(c);
+                continue;
             }
-            next.sites.push_back(siteAt.root);
-            next.cells.push_back(c);
-            continue;
         }
         if (cells[i].size() < 3) continue;
         const GuideId id = sliceTube(h, scalp, source, sectionPolygon(spine, cells[i]), kNoGuide, cells[i]);
@@ -812,6 +819,7 @@ bool recut(GuideHierarchy& h, const ScalpMesh& scalp, std::size_t index, const R
     }
     h.evaluate(&scalp);
     // The cells replaced out with their hierarchies (after the new ones are in: the group never empties).
+    replaced.insert(replaced.end(), reslice.begin(), reslice.end());
     if (!replaced.empty()) {
         const std::size_t before = h.guides().size();
         h.removeGuides(replaced, true);

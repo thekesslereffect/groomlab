@@ -980,6 +980,34 @@ void TubeSpine::setRootOnScalp(const Vec3f& normal, const Vec3f& across) {
     footNormal_ = n;
 }
 
+std::vector<float> rollToMatch(const std::vector<Vec3f>& points, const Vec3f& frameUp, const std::vector<Vec3f>& otherPoints,
+                               const Vec3f& otherUp, const TubeProfile& other) {
+    std::vector<float> out;
+    if (points.size() < 2 || otherPoints.size() < 2) return out;
+    const std::vector<Frame> mine = rotationMinimizingFrames(points.data(), points.size(), frameUp);
+    const std::vector<Frame> theirs = rotationMinimizingFrames(otherPoints.data(), otherPoints.size(), otherUp);
+    const std::size_t n = points.size(), m = otherPoints.size();
+    out.reserve(n);
+    for (std::size_t i = 0; i < n; ++i) {
+        const float t = static_cast<float>(i) / static_cast<float>(n - 1);
+        // Theirs at t (between their samples), turned by their roll there.
+        const float x = t * static_cast<float>(m - 1);
+        const std::size_t k = std::min(static_cast<std::size_t>(x), m - 2);
+        const float f = x - static_cast<float>(k);
+        const float r = other.rollAt(t);
+        const Vec3f n0 = theirs[k].normal * (1.0f - f) + theirs[k + 1].normal * f;
+        const Vec3f b0 = theirs[k].binormal * (1.0f - f) + theirs[k + 1].binormal * f;
+        const Vec3f along = n0 * std::cos(r) + b0 * std::sin(r);
+        float roll = std::atan2(along.dot(mine[i].binormal), along.dot(mine[i].normal));
+        if (!out.empty()) {  // (unwrapped: the nearest turn to the last)
+            while (roll - out.back() > 3.14159265f) roll -= 6.2831853f;
+            while (roll - out.back() < -3.14159265f) roll += 6.2831853f;
+        }
+        out.push_back(roll);
+    }
+    return out;
+}
+
 bool isRootTube(const TubeProfile& tube, int depth) {
     return depth == 0 && tube.custom && tube.custom->name.rfind(kOwnedTubeShapePrefix, 0) == 0;
 }
