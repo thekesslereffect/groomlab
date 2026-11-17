@@ -342,6 +342,12 @@ def pick(context, tool):
     t = scene.groomlab_tools
     if tool not in [x["id"] for x in catalog()["tools"]]:
         raise HelperError("bad_request", "no GroomLab tool %r" % tool)
+    if t.root_painting and tool != "paint":
+        # Painting the subdivision density left for another tool: finished (the Tube tool, its
+        # roots cut, Edit roots), as Maya's Tube card finishes it.
+        from . import tool_ops
+        tool_ops.finish_density_painting(context)
+        return None
     if t.root_mode:
         # The Tube tool's root mode put away first (an edit not finished given to its roots).
         scalp = active(context)

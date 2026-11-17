@@ -907,6 +907,7 @@ bool MapsPanel::paintSelected() {
 }
 
 void MapsPanel::endPainting() {
+    emit paintingEnded();
     const std::string shown = paintShown_;
     paintShown_.clear();
     if (!document_ || shown.empty() || document_->scalpMapDisplay() != shown) return;

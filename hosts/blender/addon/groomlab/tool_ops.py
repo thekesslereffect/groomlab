@@ -461,6 +461,7 @@ class ToolSession(object):
             with props.quiet():
                 context.scene.groomlab_tools.tool = ""
             display.mark(active(context))  # the views without the tool (no paint view, no tube wires)
+            finish_density_later(context)
         display.redraw()
 
 
@@ -590,6 +591,7 @@ def stop_tool(context):
         _session[0].leave(context)
     display.mark(active(context))
     display.redraw()
+    finish_density_later(context)
 
 
 def start_modal(context):
@@ -1672,13 +1674,7 @@ class GROOMLAB_OT_root_tube(GroomToolOperator):
         """Paint subdivision density, or (painting) Finish painting: cut by the map."""
         t = context.scene.groomlab_tools
         if t.root_painting:
-            roots = [int(x) for x in t.root_paint_roots.split(",") if x]
-            with props.quiet():
-                t.root_painting = False
-                t.root_paint_roots = ""
-            tools.pick(context, "shape")
-            r = tools.root_subdivide(scalp, apply=True, guides=roots)
-            tools.status(context.scene, _cut_said(r, "Density applied"))
+            finish_density_painting(context)
             return
         state = (tools.root_state(scalp) or {}).get("roots") or {}
         roots = list(state.get("selected") or []) if t.root_mode in ("select", "duplicate") else []
@@ -1691,6 +1687,54 @@ class GROOMLAB_OT_root_tube(GroomToolOperator):
         tools.status(context.scene, "Paint the density on the scalp (white: more, smaller roots; Ctrl: toward black). "
                                     "Finish painting cuts %s." % ("the selected roots" if roots else
                                                                  "again where the map changed"))
+
+
+def finish_density_painting(context):
+    """Painting the subdivision density done (Finish painting, or the paint tool left any other
+    way): the Tools tab and the Tube tool again, the roots cut by the map (one undo step), then
+    Edit roots, showing the new roots. None when not painting it."""
+    t = context.scene.groomlab_tools
+    if not t.root_painting:
+        return None
+    roots = [int(x) for x in t.root_paint_roots.split(",") if x]
+    with props.quiet():
+        t.root_painting = False
+        t.root_paint_roots = ""
+        t.tab = "TOOLS"
+    scalp = active(context)
+    if scalp is None:
+        return None
+    tools.pick(context, "shape")
+    r = tools.root_subdivide(scalp, apply=True, guides=roots)
+    said = _cut_said(r, "Density applied")
+    tools.root_edit(scalp, "start", mode="edit")
+    start_modal(context)
+    tools.status(context.scene, said)
+    display.redraw()
+    return r
+
+
+def finish_density_later(context):
+    """finish_density_painting once the tool that ended painting has let go (a modal operator
+    ends first): on a timer, in the window's 3D view."""
+    if not context.scene.groomlab_tools.root_painting:
+        return
+
+    def later():
+        ctx = bpy.context
+        window = next(iter(ctx.window_manager.windows), None)
+        if window is None:
+            return None
+        area = next((a for a in window.screen.areas if a.type == "VIEW_3D"), None)
+        region = next((r for r in area.regions if r.type == "WINDOW"), None) if area else None
+        try:
+            with ctx.temp_override(window=window, area=area, region=region):
+                finish_density_painting(bpy.context)
+        except HelperError as e:
+            tools.status(ctx.scene, e.message)
+        return None
+
+    bpy.app.timers.register(later, first_interval=0.05)
 
 
 def _cut_said(r, verb):

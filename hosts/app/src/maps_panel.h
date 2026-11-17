@@ -125,6 +125,7 @@ public:
 signals:
     void edited();          // the document changed (maps made, renamed, removed): evaluate, undo, redisplay
     void paintRequested();  // the brush is set on a map: the host enters brush mode
+    void paintingEnded();   // endPainting ran (the host left the Paint brush): the Tube card's density painting finishes
     void displayChanged();  // the map shown on the scalp changed: the host redisplays
     void brushChanged();    // the brush's paint settings changed: the host refreshes the brush panels
     void message(const QString& text);

@@ -354,11 +354,13 @@ inside the old tube, so the cells keep its shape, spread and taper. If the old r
 hierarchy under it, each cell is split as deep, and its smaller tubes take the shapes of the old
 ones near them. It is one undo step.
 
-**Paint subdivision density** paints the gray vertex map `tubeSubdivisionDensity` (made at 0.5
-the first time). White (1) gives more, smaller roots that fit tightly, for example at the bangs.
-Black (0) gives fewer, larger ones. Ctrl paints toward black. The button then reads **Finish
-painting**. Click it to cut the selected roots by the map. Roots you cut before are cut again
-only where the map changed: their cells elsewhere keep their guides and hierarchies as they are,
+**Paint subdivision density** (beside **Subdivide**) opens the Paint tab on the gray vertex map
+`tubeSubdivisionDensity` (made at 0.5 the first time). White (1) gives more, smaller roots that
+fit tightly, for example at the bangs. Black (0) gives fewer, larger ones. Ctrl paints toward
+black. When you are done, click **Finish painting**, or just leave the Paint brush (Q in Maya,
+another tool): either way you are back on the Tools tab with the Tube tool, the selected roots are
+cut by the map, and **Edit roots** opens on the result so you can check and adjust the new roots.
+Roots you cut before are cut again only where the map changed: their cells elsewhere keep their guides and hierarchies as they are,
 and the new cells take their shapes from the cells they replace. The groom remembers each cut
 (saved with its guides), so you can come back and paint again later.
 
@@ -374,8 +376,9 @@ root_tubes.apply_density(groom)                          # cut again where the m
 
 ### Tube hierarchy
 
-The Tube tool's **Tube hierarchy** block subdivides tubes, level by level. Its one row holds **+**
-and **−**, a line, then a button a level. **+** splits each
+The Tube tool's **Tube hierarchy** block subdivides tubes, level by level. Its row holds a button
+a level on the left and **+** and **−** on the right (when the levels grow that far, **+** and **−**
+move down to a row of their own). **+** splits each
 selected tube (or, with none selected, every tube of the base group) into two tubes side by side
 across its longer side, sharing its root shape, in the next level's group (`<base>_L2`,
 `<base>_L3`, ... up to level 9); pressing it again splits those in two (2 to 4, and on).

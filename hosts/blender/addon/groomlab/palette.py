@@ -751,28 +751,31 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
         sliders.prop(t, "root_taper", slider=True)
 
     def draw_levels(self, card, context, t):
-        """Tube hierarchy: the base group, then one row: + and - (split, undo a split), a line, and a
-        button a level (1, the base, always)."""
+        """Tube hierarchy: the base group, then one row: a button a level (1, the base, always) on
+        the left, + and - (split, undo a split) on the right (under the levels when they reach)."""
         col, head = fold_block(card, "Tube hierarchy", t, "fold_levels")
         if col is None:
             return
         levels = [x for x in t.tube_levels.split(",") if x]
         col.label(text="Base: %s" % t.tube_base if t.tube_base else "No guides yet.")
-        row = col.row(align=False)
-        row.alignment = "LEFT"
-        sub = row.row(align=True)
-        add = sub.row(align=True)
+        count = max(len(levels), 1)
+        # A button is about a UI unit wide: + and - beside the levels while the card has room.
+        unit = 20.0 * context.preferences.system.ui_scale
+        width = context.region.width if context.region else 0
+        one_row = width <= 0 or (count + 2) * unit + 3 * unit <= width
+        line = col.row(align=False)
+        levels_row = line.row(align=True)
+        levels_row.alignment = "LEFT"
+        edits = (line if one_row else col.row(align=False)).row(align=True)
+        edits.alignment = "RIGHT"
+        add = edits.row(align=True)
         add.enabled = bool(t.tube_base) and len(levels) < 9
         add.operator("groomlab.tube_level", text="", icon="ADD").action = "ADD"
-        remove = sub.row(align=True)
+        remove = edits.row(align=True)
         remove.enabled = len(levels) > 1
         remove.operator("groomlab.tube_level", text="", icon="REMOVE").action = "REMOVE"
-        try:
-            row.separator(type="LINE")  # (Blender 4.2 on)
-        except TypeError:
-            row.separator()
-        row = row.row(align=True)
-        for k in range(max(len(levels), 1)):
+        row = levels_row
+        for k in range(count):
             op = row.operator("groomlab.tube_level", text=str(k + 1), depress=k + 1 == t.tube_level)
             op.action = "SHOW"
             op.level = k + 1

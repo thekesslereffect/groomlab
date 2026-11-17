@@ -191,8 +191,9 @@ signals:
     // The root mode started, left or changed its outlines (the host: the viewport's tool and
     // overlay, the guides hidden while editing).
     void rootModeChanged();
-    // Paint subdivision density: the host picks the density map in the Maps panel and paints it; on
-    // Finish painting, the Tube brush again.
+    // Paint subdivision density: the host picks the density map in the Maps panel and paints it (the
+    // Paint tab shown); on Finish painting (or the host leaving the Paint brush any other way: it
+    // calls paintDensity again), the Tools tab and the Tube brush again, then Edit roots.
     void paintDensityRequested(const std::string& map);
     void paintDensityFinished();
 
@@ -259,6 +260,7 @@ private:
     QPushButton *addLevel_ = nullptr, *removeLevel_ = nullptr;
     QLabel* levelBaseLabel_ = nullptr;
     QHBoxLayout* levelRow_ = nullptr;
+    QWidget* levelLine_ = nullptr;  // the levels on the left, + and - on the right (LeadTrailLayout)
     std::vector<QAbstractButton*> levelButtons_;
     std::string levelBase_;
     std::vector<std::string> levels_;

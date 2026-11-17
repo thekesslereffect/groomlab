@@ -26,6 +26,65 @@ from groomlab import root_tubes
 from groomlab.ui import theme, widgets
 
 
+class LeadTrailLayout(QtWidgets.QLayout):
+    """Two widgets on a row: `lead` at the left at its own width, `trail` at the right, the space
+    between them free. When the lead grows into the trail (more level buttons than fit), the trail
+    goes down to a row of its own, still on the right."""
+
+    def __init__(self, lead, trail, parent=None):
+        super(LeadTrailLayout, self).__init__(parent)
+        self._items = []
+        self._gap = theme.px(8)
+        self.setContentsMargins(0, 0, 0, 0)
+        self.addWidget(lead)
+        self.addWidget(trail)
+
+    def addItem(self, item):
+        self._items.append(item)
+
+    def count(self):
+        return len(self._items)
+
+    def itemAt(self, index):
+        return self._items[index] if 0 <= index < len(self._items) else None
+
+    def takeAt(self, index):
+        return self._items.pop(index) if 0 <= index < len(self._items) else None
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, width):
+        return self._arrange(QtCore.QRect(0, 0, width, 0), move=False)
+
+    def setGeometry(self, rect):
+        super(LeadTrailLayout, self).setGeometry(rect)
+        self._arrange(rect, move=True)
+
+    def sizeHint(self):
+        return self.minimumSize()
+
+    def minimumSize(self):
+        size = QtCore.QSize()
+        for item in self._items:
+            size = size.expandedTo(item.minimumSize())
+        return size
+
+    def _arrange(self, rect, move):
+        if len(self._items) < 2:
+            return 0
+        lead, trail = self._items[0].sizeHint(), self._items[1].sizeHint()
+        one_row = lead.width() + self._gap + trail.width() <= rect.width()
+        lead_w = min(lead.width(), rect.width())
+        if move:
+            self._items[0].setGeometry(QtCore.QRect(rect.x(), rect.y(), lead_w, lead.height()))
+            y = rect.y() if one_row else rect.y() + lead.height() + theme.px(4)
+            self._items[1].setGeometry(QtCore.QRect(rect.right() + 1 - trail.width(), y, trail.width(), trail.height()))
+        if one_row:
+            return max(lead.height(), trail.height())
+        return lead.height() + theme.px(4) + trail.height()
+
+
 class RootTubeCard(QtCore.QObject):
     """Owns the two blocks (root_block, hierarchy_block); `owner` is the Groom Tools palette."""
 
@@ -78,7 +137,16 @@ class RootTubeCard(QtCore.QObject):
                                           "roots cut before cut again only where the map changed", False,
                                           "rootTubePaintDensity")
         self.paint_density.clicked.connect(self.paint_density_clicked)
-        self.root_block.add(widgets.chip_row((self.subdivide_root, self.paint_density)))
+        # One row, however narrow the card (the chip grid would put the long label on a row of its own).
+        cut_row = QtWidgets.QWidget()
+        cut_layout = QtWidgets.QHBoxLayout(cut_row)
+        cut_layout.setContentsMargins(0, 0, 0, 0)
+        cut_layout.setSpacing(theme.px(4))
+        for b, stretch in ((self.subdivide_root, 2), (self.paint_density, 3)):
+            b.setSizePolicy(QtWidgets.QSizePolicy.Ignored, b.sizePolicy().verticalPolicy())
+            b.setMinimumWidth(theme.px(40))
+            cut_layout.addWidget(b, stretch)
+        self.root_block.add(cut_row)
         self._painting = None  # the roots to cut when painting finishes (painting: a list)
         self.snap = widgets.switch("Snap to neighbours", "A CV near a neighbouring root's CV or edge snaps onto it, "
                                    "so the tubes meet with no gap", True, "rootTubeSnap")
@@ -136,22 +204,20 @@ class RootTubeCard(QtCore.QObject):
         self.level_group = QtWidgets.QButtonGroup(self)
         self.level_group.setExclusive(True)
         self.level_group.buttonClicked.connect(self.level_clicked)
-        # One row: + and -, a line, then the level buttons (fill_levels fills them).
-        self.level_row = QtWidgets.QWidget()
-        row = QtWidgets.QHBoxLayout(self.level_row)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(theme.px(4))
-        row.addWidget(self.add_level)
-        row.addWidget(self.remove_level)
-        line = QtWidgets.QFrame()
-        line.setFrameShape(QtWidgets.QFrame.VLine)
-        line.setFrameShadow(QtWidgets.QFrame.Sunken)
-        row.addWidget(line)
+        # One row: the level buttons on the left (fill_levels fills them), + and - on the right;
+        # levels reaching + and - push them down to a row of their own.
         levels = QtWidgets.QWidget()
         self.level_layout = QtWidgets.QHBoxLayout(levels)
         self.level_layout.setContentsMargins(0, 0, 0, 0)
         self.level_layout.setSpacing(theme.px(4))
-        row.addWidget(levels, 1)
+        edits = QtWidgets.QWidget()
+        edit_layout = QtWidgets.QHBoxLayout(edits)
+        edit_layout.setContentsMargins(0, 0, 0, 0)
+        edit_layout.setSpacing(theme.px(4))
+        edit_layout.addWidget(self.add_level)
+        edit_layout.addWidget(self.remove_level)
+        self.level_row = QtWidgets.QWidget()
+        LeadTrailLayout(levels, edits, self.level_row)
         self.hierarchy_block.add(self.level_row)
         self._levels = None  # (base, [groups]) shown
         self._base = None
@@ -220,7 +286,7 @@ class RootTubeCard(QtCore.QObject):
             b.setFixedWidth(theme.px(28))
             self.level_group.addButton(b, k + 1)
             self.level_layout.addWidget(b)
-        self.level_layout.addStretch(1)
+        self.level_row.layout().invalidate()
         self.add_level.setEnabled(bool(base) and len(levels) < root_tubes.MAX_LEVELS)
         self.remove_level.setEnabled(len(levels) > 1)
 
@@ -362,26 +428,57 @@ class RootTubeCard(QtCore.QObject):
             self.paint_density.setChecked(False)
             return
         if self._painting is not None:  # Finish painting: cut by the map
-            roots, self._painting = self._painting, None
-            self.back_to_brush()
-            self._said_cut(self._run(root_tubes.apply_density, groom, roots), "Density applied")
+            self.finish_painting()
             return
         roots = self.tool.picked if self._mode() in ("select", "duplicate") else []
+        paint = self.owner.paint_tab
         try:
             root_tubes.ensure_density_map(groom)
             self.tool.leave()
-            from groomlab import painting
-            painting.paint_map(groom, root_tubes.DENSITY_MAP, value=1.0)
+            # The Paint tab on the density map, painting toward white (as picking it there would).
+            paint.refresh(force=True)
+            paint.select(root_tubes.DENSITY_MAP)
+            paint.value.setValue(1.0)
+            self._painting = list(roots)
+            if self._paint_ended not in paint.painting_ended:
+                paint.painting_ended.append(self._paint_ended)
+            self.owner.activate("paint")
         except Exception as e:  # noqa: BLE001 (a button never ends in a bare traceback)
+            self._painting = None
             from groomlab.ui import messages
             self.owner.status.setText(messages.error("Paint subdivision density", e))
             self.refresh(groom)
             return
-        self._painting = list(roots)
         self.owner.status.setText("Paint the density on the scalp (white: more, smaller roots; Ctrl: toward black). "
-                                  "Finish painting cuts %s." % ("the selected root" if roots else
-                                                               "again where the map changed"))
+                                  "Done painting (Finish painting, Q or another tool) cuts %s." %
+                                  ("the selected root" if roots else "again where the map changed"))
         self.refresh(groom)
+
+    def _paint_ended(self):
+        """Painting stopped some other way (Q, another tool or brush): finished as the button
+        finishes it, once the tool change that ended it is through."""
+        if self._painting is None:
+            return
+        from maya import cmds
+        cmds.evalDeferred(self.finish_painting)
+
+    def finish_painting(self):
+        """Finish painting: the Tools tab and the Tube tool again, the roots cut by the map (one
+        undo step), then Edit roots, showing the new roots."""
+        if self._painting is None:
+            return
+        roots, self._painting = self._painting, None
+        groom = self.owner.groom()
+        self.owner.show_tab("tools")
+        self.back_to_brush()
+        if not groom:
+            return
+        info = self._run(root_tubes.apply_density, groom, roots)
+        self._said_cut(info, "Density applied")
+        status = self.owner.status.text()
+        self._enter("edit", self.edit_root)
+        if info and not self.owner.status.text().strip():
+            self.owner.status.setText(status)
 
     def back_to_brush(self):
         """The Tube brush again (the root tool put away)."""

@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <cmath>
 #include <set>
+#include <utility>
+#include <vector>
 
 #include <QAction>
 #include <QActionGroup>
@@ -42,6 +44,65 @@
 #include "tube_shape_editor.h"
 
 namespace groomlab::app {
+
+namespace {
+
+// Two widgets on a row: the lead at the left at its own width, the trail at the right, the space
+// between them free. When the lead grows into the trail (more level buttons than fit), the trail
+// goes down to a row of its own, still on the right (Maya's root_tube_card.LeadTrailLayout).
+class LeadTrailLayout : public QLayout {
+public:
+    LeadTrailLayout(QWidget* lead, QWidget* trail, QWidget* parent) : QLayout(parent) {
+        setContentsMargins(0, 0, 0, 0);
+        addWidget(lead);
+        addWidget(trail);
+    }
+    ~LeadTrailLayout() override {
+        for (QLayoutItem* item : items_) delete item;
+    }
+    void addItem(QLayoutItem* item) override { items_.push_back(item); }
+    int count() const override { return static_cast<int>(items_.size()); }
+    QLayoutItem* itemAt(int index) const override {
+        return index >= 0 && index < count() ? items_[static_cast<std::size_t>(index)] : nullptr;
+    }
+    QLayoutItem* takeAt(int index) override {
+        if (index < 0 || index >= count()) return nullptr;
+        QLayoutItem* item = items_[static_cast<std::size_t>(index)];
+        items_.erase(items_.begin() + index);
+        return item;
+    }
+    Qt::Orientations expandingDirections() const override { return {}; }
+    bool hasHeightForWidth() const override { return true; }
+    int heightForWidth(int width) const override { return place(QRect(0, 0, width, 0), false); }
+    QSize minimumSize() const override {
+        QSize size;
+        for (QLayoutItem* item : items_) size = size.expandedTo(item->minimumSize());
+        return size;
+    }
+    QSize sizeHint() const override { return minimumSize(); }
+    void setGeometry(const QRect& rect) override {
+        QLayout::setGeometry(rect);
+        place(rect, true);
+    }
+
+private:
+    int place(const QRect& rect, bool apply) const {
+        if (items_.size() < 2) return 0;
+        const QSize lead = items_[0]->sizeHint(), trail = items_[1]->sizeHint();
+        const int gap = 8, below = 4;
+        const bool oneRow = lead.width() + gap + trail.width() <= rect.width();
+        if (apply) {
+            items_[0]->setGeometry(QRect(rect.x(), rect.y(), std::min(lead.width(), rect.width()), lead.height()));
+            const int y = oneRow ? rect.y() : rect.y() + lead.height() + below;
+            items_[1]->setGeometry(QRect(rect.right() + 1 - trail.width(), y, trail.width(), trail.height()));
+        }
+        return oneRow ? std::max(lead.height(), trail.height()) : lead.height() + below + trail.height();
+    }
+    std::vector<QLayoutItem*> items_;
+};
+
+}  // namespace
+
 
 namespace {
 
@@ -376,13 +437,24 @@ TubePanel::TubePanel(QWidget* parent) : QWidget(parent) {
         // Rows of chips that wrap on a narrow card (the modes; Undo CV, Delete, Duplicate; Subdivide
         // and Paint subdivision density).
         for (const std::vector<QAbstractButton*>& row : {std::vector<QAbstractButton*>{drawRoot_, editRoots_, selectRoot_},
-                                                         std::vector<QAbstractButton*>{undoCv_, deleteRoots_, duplicateRoots_},
-                                                         std::vector<QAbstractButton*>{subdivideRoots_, paintDensity_}}) {
+                                                         std::vector<QAbstractButton*>{undoCv_, deleteRoots_, duplicateRoots_}}) {
             FlowLayout* flow = nullptr;
             QWidget* line = chipRow(rootsBlock_, &flow);
             for (QAbstractButton* b : row) flow->addWidget(b);
             rootsBlock_->rows()->addWidget(line);
         }
+        // Subdivide and Paint subdivision density: one row however narrow the card (the chip grid
+        // would put the long label on a row of its own).
+        auto* cutRow = new QWidget(rootsBlock_);
+        auto* cutLayout = new QHBoxLayout(cutRow);
+        cutLayout->setContentsMargins(0, 0, 0, 0);
+        cutLayout->setSpacing(4);
+        for (const auto& [b, stretch] : {std::pair<QAbstractButton*, int>{subdivideRoots_, 2}, std::pair<QAbstractButton*, int>{paintDensity_, 3}}) {
+            b->setSizePolicy(QSizePolicy::Ignored, b->sizePolicy().verticalPolicy());
+            b->setMinimumWidth(40);
+            cutLayout->addWidget(b, stretch);
+        }
+        rootsBlock_->rows()->addWidget(cutRow);
         rootSnap_ = new QCheckBox(tr("Snap to neighbours"), rootsBlock_);
         rootSnap_->setObjectName(QStringLiteral("rootTubeSnap"));
         rootSnap_->setToolTip(tr("A CV near a neighbouring root's CV or edge snaps onto it, so the tubes meet with no gap"));
@@ -444,21 +516,21 @@ TubePanel::TubePanel(QWidget* parent) : QWidget(parent) {
         levelBaseLabel_->setObjectName(QStringLiteral("tubeLevelBase"));
         levelBaseLabel_->setProperty("role", "hint");
         levelsBlock_->rows()->addWidget(levelBaseLabel_);
-        // One row: + and -, a line, then the level buttons (fillLevels fills them).
-        auto* line = new QHBoxLayout();
-        line->setContentsMargins(0, 0, 0, 0);
-        line->setSpacing(4);
-        line->addWidget(addLevel_);
-        line->addWidget(removeLevel_);
-        auto* rule = new QFrame(levelsBlock_);
-        rule->setFrameShape(QFrame::VLine);
-        rule->setFrameShadow(QFrame::Sunken);
-        line->addWidget(rule);
-        levelRow_ = new QHBoxLayout();
+        // One row: the level buttons on the left (fillLevels fills them), + and - on the right;
+        // levels reaching + and - push them down to a row of their own.
+        levelLine_ = new QWidget(levelsBlock_);
+        auto* levels = new QWidget(levelLine_);
+        levelRow_ = new QHBoxLayout(levels);
         levelRow_->setContentsMargins(0, 0, 0, 0);
         levelRow_->setSpacing(4);
-        line->addLayout(levelRow_, 1);
-        levelsBlock_->rows()->addLayout(line);
+        auto* edits = new QWidget(levelLine_);
+        auto* editRow = new QHBoxLayout(edits);
+        editRow->setContentsMargins(0, 0, 0, 0);
+        editRow->setSpacing(4);
+        editRow->addWidget(addLevel_);
+        editRow->addWidget(removeLevel_);
+        new LeadTrailLayout(levels, edits, levelLine_);
+        levelsBlock_->rows()->addWidget(levelLine_);
     }
     column->addWidget(levelsBlock_);
     column->addWidget(profileBlock_);
@@ -690,6 +762,7 @@ void TubePanel::paintDensity() {
             return;
         }
         emit guidesEdited();
+        startRoots(RootTubeTool::Mode::Edit);  // the new roots shown, to check and adjust
         emit message(done.cells.empty() && done.removed == 0
                          ? tr("The density did not change: no root cut again.")
                          : tr("Density applied: %1 root(s) made, %2 kept.").arg(done.cells.size()).arg(done.kept));
@@ -710,10 +783,10 @@ void TubePanel::paintDensity() {
     paintingDensity_ = true;
     emit paintDensityRequested(kSubdivisionDensityMap);
     rootsDone(true);
-    emit message(densityRoots_.empty() ? tr("Paint the density (white: more, smaller roots; Ctrl: toward black). Finish painting cuts "
-                                            "again where the map changed.")
-                                       : tr("Paint the density (white: more, smaller roots; Ctrl: toward black). Finish painting cuts "
-                                            "the selected roots."));
+    emit message(densityRoots_.empty() ? tr("Paint the density (white: more, smaller roots; Ctrl: toward black). Done painting "
+                                            "(Finish painting, or another tool) cuts again where the map changed.")
+                                       : tr("Paint the density (white: more, smaller roots; Ctrl: toward black). Done painting "
+                                            "(Finish painting, or another tool) cuts the selected roots."));
 }
 
 void TubePanel::setRootSnap(bool on) {
@@ -812,7 +885,7 @@ void TubePanel::fillLevels() {
             levelRow_->addWidget(b);
             levelButtons_.push_back(b);
         }
-        levelRow_->addStretch(1);
+        levelLine_->layout()->invalidate();
     }
     for (std::size_t k = 0; k < levelButtons_.size(); ++k) {
         QSignalBlocker block(levelButtons_[k]);
