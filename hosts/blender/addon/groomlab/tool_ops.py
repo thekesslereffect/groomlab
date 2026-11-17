@@ -1604,6 +1604,12 @@ ROOT_TIPS = {
     "DELETE": "Delete the selected roots: their tubes and the tube hierarchy under them",
     "DUPLICATE": "Copy the selected roots: the copies follow the cursor over the scalp, a click sets them down. "
                  "Again: stop",
+    "SUBDIVIDE": "Cut the selected roots into Voronoi cells, each a root tube of its own following the old tube, "
+                 "smaller and more numerous where the density map is white; the tube hierarchy under each is made "
+                 "again in its cells",
+    "PAINT_DENSITY": "Paint the tubeSubdivisionDensity map (made at 0.5 if missing) on the scalp: white, more and "
+                     "smaller roots; black, fewer and larger. Again (Finish painting): the selected roots cut by it, "
+                     "and the roots cut before cut again only where the map changed",
 }
 
 
@@ -1620,6 +1626,8 @@ class GROOMLAB_OT_root_tube(GroomToolOperator):
     def description(cls, context, properties):
         if properties.action == "EDIT" and context.scene.groomlab_tools.root_mode == "edit":
             return "Give the roots their edited CVs (one undo step) and leave Edit roots"
+        if properties.action == "PAINT_DENSITY" and context.scene.groomlab_tools.root_painting:
+            return "Cut by the painted density: the selected roots, and the roots cut before where the map changed"
         return ROOT_TIPS.get(properties.action, cls.__doc__)
 
     def execute(self, context):
@@ -1650,10 +1658,46 @@ class GROOMLAB_OT_root_tube(GroomToolOperator):
                 tools.root_edit(scalp, "delete")
             elif self.action == "DUPLICATE":
                 tools.root_edit(scalp, "endDuplicate" if mode == "duplicate" else "duplicate")
+            elif self.action == "SUBDIVIDE":
+                r = tools.root_subdivide(scalp)
+                tools.status(context.scene, _cut_said(r, "Subdivided"))
+            elif self.action == "PAINT_DENSITY":
+                self.paint_density(context, scalp)
         except HelperError as e:
             return _fail(self, e)
         display.redraw()
         return {"FINISHED"}
+
+    def paint_density(self, context, scalp):
+        """Paint subdivision density, or (painting) Finish painting: cut by the map."""
+        t = context.scene.groomlab_tools
+        if t.root_painting:
+            roots = [int(x) for x in t.root_paint_roots.split(",") if x]
+            with props.quiet():
+                t.root_painting = False
+                t.root_paint_roots = ""
+            tools.pick(context, "shape")
+            r = tools.root_subdivide(scalp, apply=True, guides=roots)
+            tools.status(context.scene, _cut_said(r, "Density applied"))
+            return
+        state = (tools.root_state(scalp) or {}).get("roots") or {}
+        roots = list(state.get("selected") or []) if t.root_mode in ("select", "duplicate") else []
+        leave_roots(context, scalp)
+        tools.ensure_density_map(scalp)
+        tools.pick(context, "paint")
+        with props.quiet():
+            t.root_painting = True
+            t.root_paint_roots = ",".join(str(int(g)) for g in roots)
+        tools.status(context.scene, "Paint the density on the scalp (white: more, smaller roots; Ctrl: toward black). "
+                                    "Finish painting cuts %s." % ("the selected roots" if roots else
+                                                                 "again where the map changed"))
+
+
+def _cut_said(r, verb):
+    made, kept = len(r.get("cells") or []), int(r.get("kept") or 0)
+    if not made and not r.get("removed"):
+        return "The density did not change: no root cut again."
+    return "%s: %d root%s made%s." % (verb, made, "" if made == 1 else "s", ", %d kept" % kept if kept else "")
 
     def begin(self, context, scalp, mode):
         t = context.scene.groomlab_tools

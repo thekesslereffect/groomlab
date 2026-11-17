@@ -121,6 +121,13 @@ public:
     void undoCv();
     void deleteRoots();
     void duplicateRoots();
+    // Subdivide (issue 85): the selected roots cut into Voronoi cells (root_subdivision.h), one undo
+    // step. Paint subdivision density: the density map (made at 0.5 when missing) painted
+    // (paintDensityRequested); again, Finish painting (paintDensityFinished, then the selected roots
+    // cut by it and the roots cut before cut again where it changed, one undo step).
+    void subdivideRoots();
+    void paintDensity();
+    bool paintingDensity() const { return paintingDensity_; }
     void setRootSnap(bool on);
     void setRootDrawPath(bool on);
     void setRootDensity(double density);
@@ -184,6 +191,10 @@ signals:
     // The root mode started, left or changed its outlines (the host: the viewport's tool and
     // overlay, the guides hidden while editing).
     void rootModeChanged();
+    // Paint subdivision density: the host picks the density map in the Maps panel and paints it; on
+    // Finish painting, the Tube brush again.
+    void paintDensityRequested(const std::string& map);
+    void paintDensityFinished();
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -240,6 +251,9 @@ private:
     // (The modes and Duplicate: chips, checked while on; Undo CV and Delete: buttons.)
     QAbstractButton *drawRoot_ = nullptr, *editRoots_ = nullptr, *selectRoot_ = nullptr;
     QAbstractButton *undoCv_ = nullptr, *deleteRoots_ = nullptr, *duplicateRoots_ = nullptr;
+    QAbstractButton *subdivideRoots_ = nullptr, *paintDensity_ = nullptr;
+    bool paintingDensity_ = false;
+    std::vector<GuideId> densityRoots_;  // the roots to cut when painting finishes
     QCheckBox *rootSnap_ = nullptr, *rootDrawPath_ = nullptr, *colors_ = nullptr, *always_ = nullptr;
     ValueSlider *rootDensity_ = nullptr, *rootLength_ = nullptr, *rootSegments_ = nullptr, *rootTaper_ = nullptr;
     QPushButton *addLevel_ = nullptr, *removeLevel_ = nullptr;

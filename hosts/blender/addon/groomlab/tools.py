@@ -1134,6 +1134,40 @@ def root_edit(scalp, edit, mode=None):
     return r
 
 
+DENSITY_MAP = "tubeSubdivisionDensity"  # the vertex map Subdivide reads (1: the most, smallest roots)
+DENSITY_START = 0.5                     # its value where nothing is painted
+
+
+def root_subdivide(scalp, apply=False, guides=None):
+    """Subdivide (the selected roots, or `guides`, cut into Voronoi cells) or, with `apply`,
+    Finish painting (the roots cut before cut again where the density map changed; `guides` not
+    cut yet, cut); one undo step (helper root_subdivide). Returns {"cells", "removed", "kept"}."""
+    scene = groom.scene_of(scalp)
+    args = {"apply": bool(apply)}
+    if guides is not None:
+        args["guides"] = [int(g) for g in guides]
+    r = call(scalp, "root_subdivide", **args)
+    if r.get("committed"):
+        after_edit(scalp, scene, r.get("undo"), refresh=True)
+        push_undo_step((r.get("undo") or {}).get("undoLabel") or "subdivide root")
+    root_state(scalp)
+    return r
+
+
+def ensure_density_map(scalp):
+    """The subdivision density map (a gray vertex map), made at DENSITY_START when missing, picked
+    to paint toward 1."""
+    scene = groom.scene_of(scalp)
+    t = scene.groomlab_tools
+    refresh_info(scalp, scene)
+    if not any(m.name == DENSITY_MAP for m in t.maps):
+        map_create(scalp, DENSITY_MAP, kind="vertices", value=DENSITY_START)
+    with props.quiet():
+        t.paint_map = DENSITY_MAP
+        t.value = 1.0
+    return DENSITY_MAP
+
+
 def root_state(scalp):
     """The root tool read again (after an undo or redo its outlines follow the groom)."""
     return take_roots(scalp, call(scalp, "root_state"))

@@ -38,6 +38,7 @@
 #include "groomlab/parts.h"
 #include "groomlab/paths.h"
 #include "groomlab/random.h"
+#include "groomlab/root_subdivision.h"
 #include "groomlab/root_tubes.h"
 #include "groomlab/scalp_maps.h"
 #include "groomlab/scalp_paint.h"
@@ -3510,7 +3511,7 @@ bool isToolCommand(const std::string& cmd) {
         "length_state", "length_edit",
         // The Tube tool's root-first mode and the tube hierarchy (the Tube card's Tube roots and
         // Tube hierarchy blocks).
-        "root_state", "root_edit", "tube_levels", "tube_level_add", "tube_level_remove", "tube_level_show"};
+        "root_state", "root_edit", "root_subdivide", "tube_levels", "tube_level_add", "tube_level_remove", "tube_level_show"};
     return kCommands.count(cmd) > 0;
 }
 
@@ -4040,6 +4041,37 @@ bool runToolCommandIn(Session& s, ToolState& t, const std::string& cmd, const js
             t.redoMaps.clear();
         }
         pruneSelection(t);
+        result["undo"] = undoJson(t);
+        return true;
+    }
+    if (cmd == "root_subdivide") {
+        // The Tube roots block's Subdivide ("apply" false: the roots "guides", else those the root
+        // tool has selected, cut into cells) and Finish painting ("apply" true: the cut roots cut
+        // again where the density map changed, and "guides" not cut yet cut), root_subdivision.h;
+        // one undo step. The session's scalp carries the painted maps.
+        requireScalp(s);
+        pruneSelection(t);
+        std::vector<GuideId> guides;
+        if (args.contains("guides") && !args["guides"].is_null()) {
+            guides = idsOf(args["guides"]);
+        } else {
+            const auto& picked = t.tool.roots().selected();
+            guides.assign(picked.begin(), picked.end());
+        }
+        const bool apply = optBool(args, "apply", false);
+        if (!apply && guides.empty()) fail("state", "select a root first (Select root), then Subdivide");
+        const std::size_t before = t.host.edits().size();
+        const MeshPtr scalp = s.groom->scalp();
+        SubdivisionResult done;
+        editGuides(t, apply ? "root density" : "subdivide root", [&](GuideHierarchy& g) {
+            done = apply ? applySubdivisionDensity(g, *scalp, guides) : subdivideRootTubes(g, *scalp, guides);
+        });
+        result = {{"cells", done.cells}, {"removed", done.removed}, {"kept", done.kept}};
+        result["committed"] = t.host.edits().size() != before;
+        if (result["committed"].get<bool>()) {
+            t.redoLabels.clear();
+            t.redoMaps.clear();
+        }
         result["undo"] = undoJson(t);
         return true;
     }

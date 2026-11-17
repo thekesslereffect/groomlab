@@ -594,6 +594,10 @@ class GroomLabTools(bpy.types.PropertyGroup):
     # settings new root tubes take.
     root_mode: StringProperty()
     root_selected: IntProperty()
+    # Paint subdivision density (issue 85): painting the density map, and the roots to cut when it
+    # finishes ("1,4,7"; "": only the roots cut before, cut again where the map changed).
+    root_painting: BoolProperty()
+    root_paint_roots: StringProperty()
     root_cvs: IntProperty()
     root_snap: BoolProperty(name="Snap to neighbours", default=True, update=_root_settings,
                             description="A CV near a neighbouring root's CV or edge snaps onto it, so the tubes "

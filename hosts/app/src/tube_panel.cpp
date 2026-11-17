@@ -10,6 +10,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QEvent>
+#include <QFont>
 #include <QFormLayout>
 #include <QFrame>
 #include <QHBoxLayout>
@@ -27,6 +28,7 @@
 #include <nlohmann/json.hpp>
 
 #include "groomlab/brush.h"
+#include "groomlab/root_subdivision.h"
 #include "groomlab/root_tubes.h"
 #include "groomlab/tube.h"
 
@@ -361,9 +363,21 @@ TubePanel::TubePanel(QWidget* parent) : QWidget(parent) {
                                  tr("Copy the selected roots: the copies follow the cursor over the scalp, a click sets them down. "
                                     "Again: stop"),
                                  true, &TubePanel::duplicateRoots);
-        // Two rows of chips that wrap on a narrow card (the modes; then Undo CV, Delete, Duplicate).
-        for (const std::array<QAbstractButton*, 3>& row : {std::array<QAbstractButton*, 3>{drawRoot_, editRoots_, selectRoot_},
-                                                           std::array<QAbstractButton*, 3>{undoCv_, deleteRoots_, duplicateRoots_}}) {
+        subdivideRoots_ = button(tr("Subdivide"), "rootTubeSubdivide",
+                                 tr("Cut the selected roots into Voronoi cells, each a root tube of its own following the old tube, "
+                                    "smaller and more numerous where the density map is white; the tube hierarchy under each is "
+                                    "made again in its cells"),
+                                 false, &TubePanel::subdivideRoots);
+        paintDensity_ = button(tr("Paint subdivision density"), "rootTubePaintDensity",
+                               tr("Paint the tubeSubdivisionDensity map (made at 0.5 if missing) on the scalp: white, more and smaller "
+                                  "roots; black, fewer and larger. Again (Finish painting): the selected roots cut by it, and the "
+                                  "roots cut before cut again only where the map changed"),
+                               true, &TubePanel::paintDensity);
+        // Rows of chips that wrap on a narrow card (the modes; Undo CV, Delete, Duplicate; Subdivide
+        // and Paint subdivision density).
+        for (const std::vector<QAbstractButton*>& row : {std::vector<QAbstractButton*>{drawRoot_, editRoots_, selectRoot_},
+                                                         std::vector<QAbstractButton*>{undoCv_, deleteRoots_, duplicateRoots_},
+                                                         std::vector<QAbstractButton*>{subdivideRoots_, paintDensity_}}) {
             FlowLayout* flow = nullptr;
             QWidget* line = chipRow(rootsBlock_, &flow);
             for (QAbstractButton* b : row) flow->addWidget(b);
@@ -410,30 +424,41 @@ TubePanel::TubePanel(QWidget* parent) : QWidget(parent) {
     levelsBlock_->titleLabel()->setToolTip(tr("Tube levels: each level splits the tubes above it in two. Shaping a tube carries the "
                                               "smaller tubes inside it; pick a level to edit its tubes"));
     {
-        addLevel_ = new QPushButton(tr("Add"), levelsBlock_);
+        addLevel_ = new QPushButton(QStringLiteral("+"), levelsBlock_);
         addLevel_->setObjectName(QStringLiteral("tubeLevelAdd"));
         addLevel_->setToolTip(tr("Split each selected tube in two (with none selected: every tube of the base group), sharing its "
                                  "root shape: a level deeper"));
         connect(addLevel_, &QPushButton::clicked, this, [this] { addLevel(); });
-        removeLevel_ = new QPushButton(tr("Remove"), levelsBlock_);
+        removeLevel_ = new QPushButton(QString(QChar(0x2212)), levelsBlock_);
         removeLevel_->setObjectName(QStringLiteral("tubeLevelRemove"));
         removeLevel_->setToolTip(tr("Undo a split: with tubes selected, theirs only (a split tube's deepest split tubes, or a split "
                                     "tube back into its parent); with none, the deepest level everywhere"));
         connect(removeLevel_, &QPushButton::clicked, this, [this] { removeLevel(); });
-        auto* line = new QHBoxLayout();
-        line->setContentsMargins(0, 0, 0, 0);
-        line->setSpacing(4);
-        line->addWidget(addLevel_, 1);
-        line->addWidget(removeLevel_, 1);
-        levelsBlock_->rows()->addLayout(line);
+        for (QPushButton* b : {addLevel_, removeLevel_}) {
+            QFont font = b->font();
+            font.setBold(true);
+            b->setFont(font);
+            b->setFixedWidth(30);
+        }
         levelBaseLabel_ = new QLabel(levelsBlock_);
         levelBaseLabel_->setObjectName(QStringLiteral("tubeLevelBase"));
         levelBaseLabel_->setProperty("role", "hint");
         levelsBlock_->rows()->addWidget(levelBaseLabel_);
+        // One row: + and -, a line, then the level buttons (fillLevels fills them).
+        auto* line = new QHBoxLayout();
+        line->setContentsMargins(0, 0, 0, 0);
+        line->setSpacing(4);
+        line->addWidget(addLevel_);
+        line->addWidget(removeLevel_);
+        auto* rule = new QFrame(levelsBlock_);
+        rule->setFrameShape(QFrame::VLine);
+        rule->setFrameShadow(QFrame::Sunken);
+        line->addWidget(rule);
         levelRow_ = new QHBoxLayout();
         levelRow_->setContentsMargins(0, 0, 0, 0);
         levelRow_->setSpacing(4);
-        levelsBlock_->rows()->addLayout(levelRow_);
+        line->addLayout(levelRow_, 1);
+        levelsBlock_->rows()->addLayout(line);
     }
     column->addWidget(levelsBlock_);
     column->addWidget(profileBlock_);
@@ -624,6 +649,73 @@ void TubePanel::duplicateRoots() {
     }));
 }
 
+void TubePanel::subdivideRoots() {
+    GroomDocument* doc = document();
+    if (!doc || !session_ || !session_->rootMode()) return;
+    const std::vector<GuideId> roots = session_->roots().selected();
+    if (roots.empty()) {
+        emit message(tr("Select a root first (Select root), then Subdivide."));
+        return;
+    }
+    const MeshPtr scalp = doc->session().scalp();  // (with the painted maps on it)
+    SubdivisionResult done;
+    const std::string error = doc->editGuides("subdivide root", [&](GuideHierarchy& g) {
+        if (scalp) done = subdivideRootTubes(g, *scalp, roots);
+    });
+    if (!error.empty()) {
+        emit message(QString::fromStdString(error));
+        return;
+    }
+    emit guidesEdited();
+    rootsDone(session_->editRoots("roots", [](RootTubeTool& t, StrokeHost& h) { t.sync(h); }));
+    emit message(tr("Subdivided: %1 root(s) made.").arg(done.cells.size()));
+}
+
+void TubePanel::paintDensity() {
+    GroomDocument* doc = document();
+    if (!doc) return;
+    if (paintingDensity_) {  // Finish painting: cut by the map
+        paintingDensity_ = false;
+        const std::vector<GuideId> roots = std::move(densityRoots_);
+        densityRoots_.clear();
+        emit paintDensityFinished();
+        const MeshPtr scalp = doc->session().scalp();
+        SubdivisionResult done;
+        const std::string error = doc->editGuides("root density", [&](GuideHierarchy& g) {
+            if (scalp) done = applySubdivisionDensity(g, *scalp, roots);
+        });
+        refreshRoots();
+        if (!error.empty()) {
+            emit message(QString::fromStdString(error));
+            return;
+        }
+        emit guidesEdited();
+        emit message(done.cells.empty() && done.removed == 0
+                         ? tr("The density did not change: no root cut again.")
+                         : tr("Density applied: %1 root(s) made, %2 kept.").arg(done.cells.size()).arg(done.kept));
+        return;
+    }
+    const bool selecting = session_ && session_->rootMode() &&
+                           (session_->roots().mode() == RootTubeTool::Mode::Select || session_->roots().mode() == RootTubeTool::Mode::Duplicate);
+    densityRoots_ = selecting ? session_->roots().selected() : std::vector<GuideId>{};
+    if (!doc->map(kSubdivisionDensityMap)) {
+        const std::string error = doc->createMap(kSubdivisionDensityMap, "vertices", false, kDefaultSubdivisionDensity);
+        if (!error.empty()) {
+            emit message(QString::fromStdString(error));
+            refreshRoots();
+            return;
+        }
+    }
+    if (session_ && session_->rootMode()) session_->leaveRoots();
+    paintingDensity_ = true;
+    emit paintDensityRequested(kSubdivisionDensityMap);
+    rootsDone(true);
+    emit message(densityRoots_.empty() ? tr("Paint the density (white: more, smaller roots; Ctrl: toward black). Finish painting cuts "
+                                            "again where the map changed.")
+                                       : tr("Paint the density (white: more, smaller roots; Ctrl: toward black). Finish painting cuts "
+                                            "the selected roots."));
+}
+
 void TubePanel::setRootSnap(bool on) {
     if (!session_) return;
     session_->roots().settings.snap = on;
@@ -661,7 +753,7 @@ void TubePanel::refreshRoots() {
     const bool editing = on && mode == RootTubeTool::Mode::Edit;
     const bool selecting = on && (mode == RootTubeTool::Mode::Select || mode == RootTubeTool::Mode::Duplicate);
     const bool picked = selecting && !session_->roots().selected().empty();
-    QSignalBlocker b1(drawRoot_), b2(editRoots_), b3(selectRoot_), b4(duplicateRoots_);
+    QSignalBlocker b1(drawRoot_), b2(editRoots_), b3(selectRoot_), b4(duplicateRoots_), b5(paintDensity_);
     drawRoot_->setChecked(placing);
     editRoots_->setChecked(editing);
     editRoots_->setText(editing ? tr("Finish edit") : tr("Edit roots"));
@@ -670,6 +762,9 @@ void TubePanel::refreshRoots() {
     deleteRoots_->setEnabled(picked);
     duplicateRoots_->setEnabled(picked);
     duplicateRoots_->setChecked(on && mode == RootTubeTool::Mode::Duplicate);
+    subdivideRoots_->setEnabled(picked);
+    paintDensity_->setChecked(paintingDensity_);
+    paintDensity_->setText(paintingDensity_ ? tr("Finish painting") : tr("Paint subdivision density"));
     if (on && session_->roots().messageCount() != rootsHeard_) {
         rootsHeard_ = session_->roots().messageCount();
         if (!session_->roots().message().empty()) emit message(QString::fromStdString(session_->roots().message()));

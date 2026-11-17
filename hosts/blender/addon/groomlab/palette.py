@@ -734,6 +734,12 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
         sub.enabled = mode in ("select", "duplicate") and t.root_selected > 0
         sub.operator("groomlab.root_tube", text="Delete").action = "DELETE"
         sub.operator("groomlab.root_tube", text="Duplicate", depress=mode == "duplicate").action = "DUPLICATE"
+        row = col.row(align=True)
+        sub = row.row(align=True)
+        sub.enabled = mode in ("select", "duplicate") and t.root_selected > 0
+        sub.operator("groomlab.root_tube", text="Subdivide").action = "SUBDIVIDE"
+        row.operator("groomlab.root_tube", text="Finish painting" if t.root_painting else "Paint subdivision density",
+                     depress=t.root_painting).action = "PAINT_DENSITY"
         col.prop(t, "root_snap")
         col.prop(t, "root_draw_path")
         sliders = col.column(align=True)
@@ -745,21 +751,27 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
         sliders.prop(t, "root_taper", slider=True)
 
     def draw_levels(self, card, context, t):
-        """Tube hierarchy: Add and Remove, the base group, a button a level (1, the base, always)."""
+        """Tube hierarchy: the base group, then one row: + and - (split, undo a split), a line, and a
+        button a level (1, the base, always)."""
         col, head = fold_block(card, "Tube hierarchy", t, "fold_levels")
         if col is None:
             return
         levels = [x for x in t.tube_levels.split(",") if x]
-        row = col.row(align=True)
-        sub = row.row(align=True)
-        sub.enabled = bool(t.tube_base) and len(levels) < 9
-        sub.operator("groomlab.tube_level", text="Add").action = "ADD"
-        sub = row.row(align=True)
-        sub.enabled = len(levels) > 1
-        sub.operator("groomlab.tube_level", text="Remove").action = "REMOVE"
         col.label(text="Base: %s" % t.tube_base if t.tube_base else "No guides yet.")
-        row = col.row(align=True)
+        row = col.row(align=False)
         row.alignment = "LEFT"
+        sub = row.row(align=True)
+        add = sub.row(align=True)
+        add.enabled = bool(t.tube_base) and len(levels) < 9
+        add.operator("groomlab.tube_level", text="", icon="ADD").action = "ADD"
+        remove = sub.row(align=True)
+        remove.enabled = len(levels) > 1
+        remove.operator("groomlab.tube_level", text="", icon="REMOVE").action = "REMOVE"
+        try:
+            row.separator(type="LINE")  # (Blender 4.2 on)
+        except TypeError:
+            row.separator()
+        row = row.row(align=True)
         for k in range(max(len(levels), 1)):
             op = row.operator("groomlab.tube_level", text=str(k + 1), depress=k + 1 == t.tube_level)
             op.action = "SHOW"
