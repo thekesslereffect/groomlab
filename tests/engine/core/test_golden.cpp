@@ -240,10 +240,11 @@ std::vector<Case> cases() {
          R"({"name": "op", "type": "Instance", "params": {"probability": 0.2, "seed": 5, "tMin": 0.1, "tMax": 0.3,
              "sizeMode": "fitStrand", "fitScale": 0.5, "aspect": 0.3, "spinRandom": 0.0, "deform": "alongStrand"}})",
          link("interp", "op", "strands")},
-        {"Braid", "op", R"({"name": "op", "type": "Braid", "params": {"region": 0.6, "width": 0.3, "seed": 1}})",
+        // (version 1: the braid as recorded. Version 2 presses the sections; test_look.cpp's Braid.Pressed*.)
+        {"Braid", "op", R"({"name": "op", "type": "Braid", "version": 1, "params": {"region": 0.6, "width": 0.3, "seed": 1}})",
          link("interp", "op", "strands") + "," + link("guides", "op", "braids")},
         {"BraidFed", "op",
-         R"({"name": "op", "type": "Braid", "params": {"style": "cornrow", "feed": true, "region": 0.4, "width": 0.2, "seed": 1}})",
+         R"({"name": "op", "type": "Braid", "version": 1, "params": {"style": "cornrow", "feed": true, "region": 0.4, "width": 0.2, "seed": 1}})",
          link("interp", "op", "strands") + "," + link("guides", "op", "braids")},
         {"InterpolateRadius", "op",
          R"({"name": "comb", "type": "Bend", "params": {"angle": 90.0, "along": "direction", "direction": [1, 0, 0]}},

@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <algorithm>
 #include <cmath>
 #include <set>
@@ -193,6 +194,52 @@ TEST(Presets, ShippedPresetsAreFoundDescribedAndLoad) {
     EXPECT_EQ(presetNameError("mine"), "");
     EXPECT_NE(presetNameError("bad/name"), "");
     EXPECT_NE(presetNameError(""), "");
+}
+
+TEST(Presets, NoShippedPresetHoldsANodeOlderThanItsOperator) {
+    // A shipped preset is what a new groom starts from: every node of it, those inside its compounds
+    // too, is of its operator's newest version. A node without a version field is; one pinned to an
+    // older version would hand every groom made from the preset an outdated node (and its Upgrade
+    // button). When an operator's version is raised, the presets' nodes are upgraded with it.
+    const OperatorRegistry& registry = OperatorRegistry::instance();
+    const std::vector<std::string> names = registry.typeNames();
+    const std::set<std::string> types(names.begin(), names.end());
+    std::size_t nodes = 0;
+    std::string preset;
+    const std::function<void(const json&)> check = [&](const json& value) {
+        if (value.is_object()) {
+            if (value.contains("type") && value["type"].is_string() && types.count(value["type"].get<std::string>())) {
+                ++nodes;
+                if (value.contains("version") && value["version"].is_number_integer()) {
+                    const std::string type = value["type"].get<std::string>();
+                    const bool older = value["version"].get<int>() < registry.create(type)->version();
+                    EXPECT_FALSE(older) << preset << ": node '" << value.value("name", std::string()) << "' (" << type
+                                        << ") is pinned to an older version";
+                }
+            }
+            for (const auto& item : value.items()) {
+                // (a compound's definition may be held as text)
+                if (item.key() == "definition" && item.value().is_string()) {
+                    const json inner = json::parse(item.value().get<std::string>(), nullptr, false);
+                    if (!inner.is_discarded()) check(inner);
+                } else {
+                    check(item.value());
+                }
+            }
+        } else if (value.is_array()) {
+            for (const json& item : value) check(item);
+        }
+    };
+    const std::vector<PresetInfo> presets = listPresets(presetSearchDirs({}, kShipped));
+    ASSERT_GT(presets.size(), 10u);
+    for (const PresetInfo& p : presets) {
+        std::ifstream in(std::filesystem::u8path(p.path));
+        const json file = json::parse(in, nullptr, false);
+        ASSERT_FALSE(file.is_discarded()) << p.name;
+        preset = p.name;
+        check(file.contains("graph") ? file["graph"] : file.value("nodes", json::array()));
+    }
+    EXPECT_GT(nodes, 200u) << "the presets' nodes were found";
 }
 
 TEST(Presets, AnEarlierDirectoryHidesALaterOne) {
