@@ -166,6 +166,9 @@ struct TubeSource {
     TubeProfile tube;      // (its roll as the last evaluate worked it out)
     Vec3f normal, across;  // the scalp's normal at its root, and its footprint's way across
     GroupId group = kNoGroup;
+    // A new slice's parent (sliceTube with no `into`): kNoGuide, a primary guide of `group` (a root
+    // group); a guide, a child of it in `group` (a subdivision's cells, in the level below their root).
+    GuideId parent = kNoGuide;
 };
 TubeSource tubeSourceOf(const GuideHierarchy& h, const ScalpMesh& scalp, GuideId guide);
 // The slice of `source` over `polygon` (points in its root section's coordinates, in order round

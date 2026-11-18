@@ -1091,12 +1091,7 @@ std::size_t appendGuideCurve(DisplayGeometry& batch, const std::vector<Vec3f>& p
 }
 
 bool tubeDrawn(const std::string& view, const std::string& name, bool hidden) {
-    if (view.empty()) return !hidden;
-    if (view.rfind("show:", 0) == 0) {
-        const std::string list = " " + view.substr(5) + " ";
-        return list.find(" " + name + " ") != std::string::npos || !hidden;
-    }
-    return name == view;
+    return view.empty() ? !hidden : name == view;
 }
 
 std::vector<const HierarchyGuide*> activeTubeGuides(const GuideHierarchy& hierarchy, const std::string& hiddenGuideGroups,

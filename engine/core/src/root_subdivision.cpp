@@ -761,6 +761,7 @@ void cutRoot(GuideHierarchy& h, const ScalpMesh& scalp, GuideId guide, const Roo
     GroupId childGroup = h.findGroup(childName);
     if (childGroup == kNoGroup) childGroup = h.addGroup(childName, rootGroup);
     source.group = childGroup;
+    source.parent = guide;  // (the cells made its children: they follow it)
 
     // Each cell a slice of the tube cut (sliceTube): its root shape its part of the tube's root, its
     // sections the tube's scaled to it, turned as the tube's; so the cells tile the tube all along.
@@ -774,9 +775,6 @@ void cutRoot(GuideHierarchy& h, const ScalpMesh& scalp, GuideId guide, const Roo
         siteRoots.push_back(lift(scalp, cut.plane, sites[i]).root);
     }
     if (made.empty()) throw std::invalid_argument("root tube " + std::to_string(guide) + " is too small to cut");
-    h.evaluate(&scalp);
-    // The cells follow the root (each keeping its shape: its offsets bound to it now).
-    h.reparent(made, guide);
     std::vector<RootSubdivisionRecord> records = h.rootSubdivisions();
     h.evaluate(&scalp);
     // The levels the root had, made again under the cells (one level deeper each).
@@ -1024,6 +1022,7 @@ bool recut(GuideHierarchy& h, const ScalpMesh& scalp, std::size_t index, const R
         if (group == kNoGroup) group = h.addGroup(kRootTubeGroup);
     }
     source.group = group;
+    source.parent = cellsParent != kNoGuide && h.guide(cellsParent) ? cellsParent : kNoGuide;  // (the new cells follow it too)
     const TubeSpine spine = sourceSpine(source, h.scale());
     constexpr std::size_t kAlongDeviation = 24;
     for (const GuideId c : r.cells) {
@@ -1116,10 +1115,6 @@ bool recut(GuideHierarchy& h, const ScalpMesh& scalp, std::size_t index, const R
         next.cells.push_back(id);
     }
     h.evaluate(&scalp);
-    if (cellsParent != kNoGuide && h.guide(cellsParent) && !made.empty()) {
-        h.reparent(made, cellsParent);
-        h.evaluate(&scalp);
-    }
     // The cells replaced out with their hierarchies (after the new ones are in: the group never empties).
     replaced.insert(replaced.end(), reslice.begin(), reslice.end());
     if (!replaced.empty()) {

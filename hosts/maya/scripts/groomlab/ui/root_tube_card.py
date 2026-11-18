@@ -492,6 +492,20 @@ class RootTubeCard(QtCore.QObject):
         self.tool.leave()
         info = self._run(self._subdivide, groom, roots)
         self._said_cut(info, "Subdivided")
+        if info and info.get("cells"):
+            # (The cells are in the level below the root cut: that level shown, so they are seen.)
+            try:
+                self._levels = None
+                self.fill_levels(groom)
+                info_levels = root_tubes.tube_levels(groom, [int(info["cells"][0])])
+                data = groomlab.get_hierarchy(groom) or {}
+                cell = int(info["cells"][0])
+                gid = next((x.get("group") for x in data.get("guides", []) if int(x["id"]) == cell), None)
+                group = next((gr.get("name") for gr in data.get("groups", []) if gr.get("id") == gid), None)
+                level = info_levels["levels"].index(group) + 1 if group in info_levels["levels"] else self._current + 1
+                self._after_levels(groom, info_levels["base"], level)
+            except (RuntimeError, ValueError, KeyError, IndexError):
+                pass
         self._enter("select", self.select_root)
         self._redraw()
 

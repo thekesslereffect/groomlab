@@ -1896,7 +1896,7 @@ GuideId sliceTube(GuideHierarchy& h, const ScalpMesh& scalp, const TubeSource& s
     }
     GuideId id = into;
     if (id == kNoGuide) {
-        id = h.addGuide(source.group, path);
+        id = source.parent != kNoGuide ? h.addChildGuide(source.group, source.parent, path, tube) : h.addGuide(source.group, path);
     } else {
         h.setPoints(id, path);
     }
