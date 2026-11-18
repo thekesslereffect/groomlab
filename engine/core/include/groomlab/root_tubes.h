@@ -169,6 +169,11 @@ struct TubeSource {
     // A new slice's parent (sliceTube with no `into`): kNoGuide, a primary guide of `group` (a root
     // group); a guide, a child of it in `group` (a subdivision's cells, in the level below their root).
     GuideId parent = kNoGuide;
+    // Its root loop on the scalp (HierarchyGuide::rootRing) and its shape's outline (tubeOutline):
+    // a slice into a child (+) takes its part of the loop as its root's CVs (the levels cut the
+    // roots too). Empty: none.
+    std::vector<Vec3f> ring;
+    std::vector<SectionPoint> cage;
 };
 TubeSource tubeSourceOf(const GuideHierarchy& h, const ScalpMesh& scalp, GuideId guide);
 // The slice of `source` over `polygon` (points in its root section's coordinates, in order round

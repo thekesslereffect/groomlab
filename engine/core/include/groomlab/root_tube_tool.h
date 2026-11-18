@@ -168,6 +168,7 @@ private:
     std::vector<Vec3f> cvs_, stroke_;
     std::optional<ScalpPointNormal> center_;
     Outlines neighbours_;
+    std::set<std::string> hidden_;  // the guide groups hidden when the roots were last read (shownRoots)
     std::map<GuideId, std::vector<Vec3f>> edits_, original_;
     std::vector<std::pair<GuideId, int>> drag_;
     std::set<GuideId> touched_;

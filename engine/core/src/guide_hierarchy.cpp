@@ -2172,6 +2172,7 @@ GuideSet GuideHierarchy::flattenGroup(GroupId groupId) const {
         out.tube.scaleWidth(scale_);
         out.frameUp = g.frameUp;
         out.rootAcross = g.rootAcross;
+        out.rootRing = g.rootRing;
         out.rootFoot = g.rootFoot;
         out.rootFootSet = g.rootFootSet;
         out.depth = depth;
@@ -2199,6 +2200,7 @@ GuideSet GuideHierarchy::flatten(int level) const {
         out.tube.scaleWidth(scale_);
         out.frameUp = g.frameUp;
         out.rootAcross = g.rootAcross;
+        out.rootRing = g.rootRing;
         out.rootFoot = g.rootFoot;
         out.rootFootSet = g.rootFootSet;
         out.depth = depths[g.group];

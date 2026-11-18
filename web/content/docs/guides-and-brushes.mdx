@@ -387,7 +387,9 @@ root_tubes.apply_density(groom, [], name, force=True)     # every cut by it agai
 
 The Tube tool's **Tube hierarchy** block subdivides tubes, level by level. Its row holds a button
 a level on the left and **+** and **−** on the right (when the levels grow that far, **+** and **−**
-move down to a row of their own). For a drawn root, **+** slices its root shape in two across its
+move down to a row of their own). For a drawn root, **+** cuts its root in two as well (each half a root of its own, with its
+part of the root's CVs, sealed to the other half: pick, edit or subdivide it at its level; stepping
+through the levels shows that level's roots), and slices its root shape in two across its
 longer side: each half a tube of its own filling its half of the parent tube, so the two never pass
 through each other unless groomed so, and what you paint on a tube (Width, Flatness, Twist) carries
 to the slices under it. A drawn root's tube always starts on its root drawn: the Tube brush shapes

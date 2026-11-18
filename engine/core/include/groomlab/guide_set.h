@@ -36,6 +36,10 @@ struct Guide {
     // along (GuideHierarchy: its root's, a slice its parent's, so the slices of a root lie as one).
     // Zero: the scalp's own at its root (ScalpMesh::acrossAt). Not saved.
     Vec3f rootAcross;
+    // A drawn root's tube (or a slice of one): its root loop on the scalp (HierarchyGuide::rootRing),
+    // how deep under its footprint its patch reaches (Interpolate takes no strand rooted deeper:
+    // one on the far side of the head, under a big root). Empty: none. Not saved.
+    std::vector<Vec3f> rootRing;
     // A slice of a drawn root's tube: its footprint's center, its place in its level 1 root's
     // footprint (GuideHierarchy: HierarchyGuide::rootFoot). Unset: its root. Not saved.
     Vec3f rootFoot;

@@ -1705,6 +1705,10 @@ TubeSource tubeSourceOf(const GuideHierarchy& h, const ScalpMesh& scalp, GuideId
     out.normal = scalp.contains(g->root) ? scalp.normal(g->root) : g->rootNormal;
     out.across = g->rootAcross.length() > 0.5f ? g->rootAcross : h.rootAcrossOf(*g, scalp);
     out.group = g->group;
+    if (g->tube.custom && !g->tube.blended() && g->rootRing.size() == tubeOutline(g->tube).size()) {
+        out.ring = g->rootRing;
+        out.cage = tubeOutline(g->tube);
+    }
     return out;
 }
 
@@ -1901,6 +1905,13 @@ GuideId sliceTube(GuideHierarchy& h, const ScalpMesh& scalp, const TubeSource& s
         h.setPoints(id, path);
     }
     h.setTube(id, tube);
+    if (into != kNoGuide && source.ring.size() >= 3 && source.ring.size() == source.cage.size()) {
+        // (A level's slice cuts its root too: its part of the parent's root loop, as cut (no gap: the
+        // halves share the cut's CVs and seal), its root's CVs. It is a root of its own then.)
+        std::vector<Vec3f> cvs;
+        for (const SectionPoint& q : polygon) cvs.push_back(scalp.closestPoint(cageMap(source.cage, source.ring, q)).position);
+        if (cvs.size() >= 3) h.setRootOutline(id, bindOutline(scalp, toV(cvs)));
+    }
     h.evaluate(&scalp);
     if (into != kNoGuide) return id;  // (a child: its parent lays its footprint and turns its sections)
     // A guide of its own (a cell of a cut): its footprint laid as the source's, its sections turned as
