@@ -94,8 +94,9 @@ StrandsPtr curledBends(std::size_t n, const std::map<std::string, ParamValue>& p
 
 TEST(Curl, ChangedStrandsCurlAgainWithThePointsTheyHad) {
     // Points added (1.8 points a turn coming in): strands moved a little curl again into the last
-    // result, as a full evaluation makes them; a strand whose count would change: in full. Evenly
-    // spaced, and tightening toward the tip at random spacing.
+    // result, as a full evaluation makes them; a strand whose count changes, into the last result
+    // laid out anew, said as recounted (StrandChanges::recounted). Evenly spaced, and tightening
+    // toward the tip at random spacing.
     for (const bool spaced : {false, true}) {
         SCOPED_TRACE(spaced ? "spaced" : "even");
         auto curl = OperatorRegistry::instance().create(op::kCurl);
@@ -122,17 +123,20 @@ TEST(Curl, ChangedStrandsCurlAgainWithThePointsTheyHad) {
             StrandChanges changed;
             const bool done = curl->evaluateIncremental(ctx, {Value(StrandsPtr(moved))}, incremental, &got, &changed);
             const StrandsPtr fresh = valueAs<StrandsPtr>(curl->evaluate(ctx, {Value(StrandsPtr(moved))}));
+            ASSERT_TRUE(done);
+            const StrandsPtr out = valueAs<StrandsPtr>(got);
+            ASSERT_EQ(out->offsets(), fresh->offsets());
+            EXPECT_EQ(out->positions(), fresh->positions());
+            EXPECT_EQ(out->widths(), fresh->widths());
+            EXPECT_EQ(out->contentHash(), fresh->contentHash());
+            EXPECT_EQ(changed.strands, (std::vector<std::uint32_t>{1, 5}));
             if (push < 0.01f) {
-                ASSERT_TRUE(done);
-                const StrandsPtr out = valueAs<StrandsPtr>(got);
-                ASSERT_EQ(out->offsets(), fresh->offsets());
-                EXPECT_EQ(out->positions(), fresh->positions());
-                EXPECT_EQ(out->widths(), fresh->widths());
-                EXPECT_EQ(changed.strands, (std::vector<std::uint32_t>{1, 5}));
+                EXPECT_FALSE(changed.all);
+                EXPECT_EQ(fresh->pointCount(), last->pointCount());
             } else {
                 // Stretched to many more turns: more points, another layout.
                 EXPECT_NE(fresh->pointCount(), last->pointCount());
-                EXPECT_FALSE(done);
+                EXPECT_TRUE(changed.all && changed.recounted);
             }
         }
     }

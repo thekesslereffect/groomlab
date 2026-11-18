@@ -10,13 +10,6 @@
 #include <memory>
 #include <mutex>
 
-#if defined(_M_X64) || defined(__SSE2__)
-#define GROOMLAB_SMOOTH_SSE2 1
-#include <emmintrin.h>
-#else
-#define GROOMLAB_SMOOTH_SSE2 0  // (WebAssembly: the scalar loop, the same bits)
-#endif
-
 #include "groomlab/curve.h"
 #include "groomlab/field.h"
 #include "groomlab/graph.h"
@@ -172,31 +165,10 @@ private:
         const ScalarField strength(params(), "strength", scalpOf(ctx));
         strength.validate(*in);
         const auto scale = std::clamp(static_cast<float>(params().getDouble("scale")), 0.0f, 1.0f);
-        if (!(scale > 0.0f) || in->empty()) {
-            if (incremental) return false;  // the input handed on: the graph passes its changes on
-            *result = in;
-            return true;
-        }
         // look.slang's SmoothCS, the GPU preview's own (look_cpu.h): in full, or the strands the input
-        // changed in, into the last result's copy.
-        if (!incremental) {
-            *result = gpu::runStage(gpu::StageKind::Smooth, params(), in, scalpOf(ctx));
-            return true;
-        }
-        const StrandChanges* changes = someStrandsChanged(*incremental, 0);
-        const StrandsPtr last = changes ? previousStrandsFor(*incremental, *in) : nullptr;
-        if (!last || !strength.strandLocal()) return false;
-        if (changes->none()) {  // the same strands in: the same result
-            *result = last;
-            *changed = *changes;
-            return true;
-        }
-        auto out = std::make_shared<StrandSet>(*in);
-        positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made
-        gpu::runStageOnStrands(gpu::StageKind::Smooth, params(), in, changes->strands, scalpOf(ctx), *out);
-        *changed = *changes;
-        *result = StrandsPtr(out);
-        return true;
+        // changed in, into the last result's copy; no scale: the input handed on.
+        return reshapeEach(in, !(scale > 0.0f), strength.strandLocal(), incremental, true, result, changed,
+                           EngineStage{gpu::StageKind::Smooth, params(), scalpOf(ctx)});
     }
 };
 

@@ -352,8 +352,10 @@ private:
         const StrandChanges* changes = nullptr;
         StrandsPtr last;  // the last result, to color again only the strands the input changed in
         if (incremental) {
-            changes = someStrandsChanged(*incremental, 0);
-            last = changes ? previousStrandsFor(*incremental, *in) : nullptr;
+            // (Some strands recounted before it, a Curl adding points: its colors a strand stay, the
+            // tip's colors a point are laid out as the input is now.)
+            changes = someStrandsChangedOrRecounted(*incremental, 0);
+            last = changes ? previousStrandsFor(*incremental, *in, *changes) : nullptr;
             if (!last || !melaninField.strandLocal() || !rednessField.strandLocal() || !greysField.strandLocal() ||
                 !tipField.strandLocal() || !specularField.strandLocal() || !roughnessField.strandLocal() ||
                 !dyeField.strandLocal() || !pickedField.strandLocal() || !tipColorField.strandLocal()) {
@@ -394,7 +396,8 @@ private:
             // Without a tip the color is per strand only: an earlier color node's per-point colors
             // would go stale (exporters prefer per-point), so they go.
             if (tipped) {
-                point[k] = last ? out->copyPointChannelFrom(kColorChannels[k], *last) : &out->addPointChannel(kColorChannels[k], fallback[k]);
+                point[k] = last ? pointChannelOfLast(*out, kColorChannels[k], *last, *changes)
+                                : &out->addPointChannel(kColorChannels[k], fallback[k]);
             } else {
                 out->removePointChannel(kColorChannels[k]);
             }
@@ -944,6 +947,13 @@ private:
             iridescenceOn != "pattern" && iridescenceOn != "notPattern") {
             throw GraphError(where + "iridescenceOn must be all, leftVane, rightVane, pattern or notPattern");
         }
+        // (Read once: every point asks.)
+        enum class ShineOn { All, LeftVane, RightVane, Pattern, NotPattern };
+        const ShineOn shineOn = iridescenceOn == "all"         ? ShineOn::All
+                                : iridescenceOn == "leftVane"  ? ShineOn::LeftVane
+                                : iridescenceOn == "rightVane" ? ShineOn::RightVane
+                                : iridescenceOn == "pattern"   ? ShineOn::Pattern
+                                                               : ShineOn::NotPattern;
         const bool recolors = patterned || downColored;
 
         const StrandChanges* changes = nullptr;
@@ -984,9 +994,12 @@ private:
         auto recolor = [&](std::size_t s) {
             const std::size_t n = out->strandPointCount(s), begin = out->strandBegin(s);
             const Rgb own = incoming.strand(s);
-            const Rgb patternColor = melaninColor(patternMelanin, patternRedness, patternDye.at(*out, s));
-            const Rgb downColor = downColorField.at(*out, s);
             const bool feather = vanes.available() && vanes.inFeather(s);
+            // (Only a drawn pattern on a feather's strand reads it: patternAt.)
+            const Rgb patternColor = feather && patterned && pattern.kind != VanePattern::Texture
+                                         ? melaninColor(patternMelanin, patternRedness, patternDye.at(*out, s))
+                                         : Rgb{};
+            const Rgb downColor = downColorField.at(*out, s);
             const std::uint64_t key = feather ? vanes.featherKey(s) : 0;
             const FeatherJitter jitter = feather && patterned ? featherJitter(pattern, key) : FeatherJitter{};
             // The pattern's weight and color at point i (0: none).
@@ -1008,6 +1021,12 @@ private:
                 *tint = patternColor;
                 return strength * vanePatternMask(pattern, vp, jitter, key);
             };
+            // The pattern's weight at each point as the colors found it, where the iridescence asks
+            // for it too (a pattern recolors: `colors` is there).
+            thread_local std::vector<float> weights;
+            const bool keepWeights =
+                colors && patterned && feather && iridescenceOut && (shineOn == ShineOn::Pattern || shineOn == ShineOn::NotPattern);
+            if (keepWeights) weights.resize(n);
             if (colors) {
                 const bool down = downColored && (*downChannel)[s] > 0.5f;
                 for (std::size_t i = 0; i < n; ++i) {
@@ -1015,6 +1034,7 @@ private:
                     if (patterned) {
                         Rgb tint{};
                         const float w = patternAt(i, &tint);
+                        if (keepWeights) weights[i] = w;
                         if (w > 0.0f) {
                             for (int k = 0; k < 3; ++k) c[k] += (tint[k] - c[k]) * w;
                         }
@@ -1028,16 +1048,16 @@ private:
             if (iridescenceOut) {
                 for (std::size_t i = 0; i < n; ++i) {
                     float on = 1.0f;
-                    if (iridescenceOn != "all") {
+                    if (shineOn != ShineOn::All) {
                         if (!feather) {
-                            on = iridescenceOn == "notPattern" ? 1.0f : 0.0f;
-                        } else if (iridescenceOn == "leftVane" || iridescenceOn == "rightVane") {
+                            on = shineOn == ShineOn::NotPattern ? 1.0f : 0.0f;
+                        } else if (shineOn == ShineOn::LeftVane || shineOn == ShineOn::RightVane) {
                             const int side = vanes.at(s, i, n).side;
-                            on = (iridescenceOn == "leftVane" ? side < 0 : side > 0) ? 1.0f : 0.0f;
+                            on = (shineOn == ShineOn::LeftVane ? side < 0 : side > 0) ? 1.0f : 0.0f;
                         } else {
                             Rgb tint{};
-                            const float w = patterned ? std::clamp(patternAt(i, &tint), 0.0f, 1.0f) : 0.0f;
-                            on = iridescenceOn == "pattern" ? w : 1.0f - w;
+                            const float w = patterned ? std::clamp(keepWeights ? weights[i] : patternAt(i, &tint), 0.0f, 1.0f) : 0.0f;
+                            on = shineOn == ShineOn::Pattern ? w : 1.0f - w;
                         }
                     }
                     (*iridescenceOut)[begin + i] = std::clamp(iridescenceField.atPoint(*out, s, i), 0.0f, 1.0f) * on;

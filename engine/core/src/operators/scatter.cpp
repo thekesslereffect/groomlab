@@ -65,6 +65,7 @@
 #include "groomlab/parallel.h"
 #include "groomlab/point_index.h"
 #include "groomlab/preview_core.h"
+#include "groomlab/profile.h"
 #include "groomlab/random.h"
 #include "groomlab/scalp_pieces.h"
 #include "groomlab/subdivision.h"
@@ -77,6 +78,22 @@ namespace groomlab {
 namespace {
 
 constexpr double kMaxStrands = 50.0e6;
+
+// Scatter's sampling, which ScatterOp::place and scatterSpots share (the same spots: internal.h):
+// the samples on a face expected to hold `expected` of them (its rest area times the density,
+// positive): its whole part, and one more by a hash of the face for the rest; and a sample's spot
+// on its face, from its ID.
+inline std::uint64_t faceSampleCount(double expected, std::uint64_t faceHash) {
+    auto count = static_cast<std::uint64_t>(std::min(expected, kMaxStrands));
+    if (unitFloat(hash64(faceHash)) < static_cast<float>(expected - static_cast<double>(count))) ++count;
+    return count;
+}
+inline StrandRoot sampleRoot(std::uint64_t id, std::int32_t face) {
+    Rng rng(id);
+    const float su = std::sqrt(rng.nextFloat());
+    const float r2 = rng.nextFloat();
+    return {face, su * (1.0f - r2), su * r2};
+}
 // Past this many strands (the render's, every one) the Scatter says it is heavy: a human head has
 // about 100-150k hairs, and renders, exports and the viewport at full preview density hold them all.
 constexpr double kHeavyStrands = 2.0e6;
@@ -187,6 +204,7 @@ template <typename Spacing, typename Allowed>
 void relaxRoots(std::vector<StrandRoot>& roots, const ScalpMesh& rest, float edgeStep, Spacing spacing, Allowed allowed) {
     const std::size_t n = roots.size();
     if (n < 2) return;
+    ProfilePhases phase("scatter.relax.setup");
     std::vector<Vec3f> pos(n), nrm(n);
     std::vector<float> space(n);
     parallelFor(0, n, [&](std::size_t i) {
@@ -200,6 +218,7 @@ void relaxRoots(std::vector<StrandRoot>& roots, const ScalpMesh& rest, float edg
     // found at its start) one that can push it is within that plus kRelaxBlock half spacings, and a
     // sample of it within half a step more.
     const float widest = *std::max_element(space.begin(), space.end());
+    phase.next("scatter.relax.openEdges");
     const OpenEdges open(rest, 0.5f * edgeStep, widest * (1.0f + 0.5f * static_cast<float>(kRelaxBlock)) + edgeStep);
     std::vector<std::int64_t> wall(n, -1);  // each root's nearest open edge
     // Neighbors are found once per block and reused (roots move less than a
@@ -209,7 +228,9 @@ void relaxRoots(std::vector<StrandRoot>& roots, const ScalpMesh& rest, float edg
     for (int iteration = 0; iteration < kRelaxIterations; ++iteration) {
         ++relaxIterationCount;
         if (iteration % kRelaxBlock == 0) {
+            phase.next("scatter.relax.index");
             const PointIndex index(pos);
+            phase.next("scatter.relax.neighbors");
             parallelFor(0, n, [&](std::size_t i) {
                 std::size_t found[kRelaxNeighbors];
                 float d2[kRelaxNeighbors];
@@ -220,6 +241,7 @@ void relaxRoots(std::vector<StrandRoot>& roots, const ScalpMesh& rest, float edg
                 wall[i] = open.nearest(pos[i]);
             });
         }
+        phase.next("scatter.relax.push");
         parallelFor(0, n, [&](std::size_t i) {
             moved[i] = pos[i];
             if (!(space[i] > 0.0f)) return;
@@ -266,6 +288,7 @@ void relaxRoots(std::vector<StrandRoot>& roots, const ScalpMesh& rest, float edg
             continue;
         }
         // Onto the surface.
+        phase.next("scatter.relax.snap");
         parallelFor(0, n, [&](std::size_t i) {
             if (!(space[i] > 0.0f)) return;
             const SurfacePoint hit = rest.closestPoint(moved[i], 4.0f * space[i]);
@@ -287,6 +310,7 @@ std::vector<StrandRoot> mixRoots(const std::vector<StrandRoot>& even, const std:
                                  const ScalpMesh& rest, float randomness) {
     if (randomness == 0.0f) return even;
     if (randomness == 1.0f) return random;
+    const ProfileScope scope("scatter.mixRoots");
     std::vector<StrandRoot> mixed(even.size());
     parallelFor(0, even.size(), [&](std::size_t i) {
         const Vec3f a = rest.position(even[i]), b = rest.position(random[i]);
@@ -375,14 +399,17 @@ public:
         thinned_ = other->thinned_.load();
         std::vector<std::pair<std::uint64_t, std::shared_ptr<const Placed>>> memo;
         std::vector<Mixed> mixed;
+        Made made;
         {
             const std::lock_guard<std::mutex> lock(other->memoMutex_);
             memo = other->memo_;
             mixed = other->mixed_;
+            made = other->made_;
         }
         const std::lock_guard<std::mutex> lock(memoMutex_);
         memo_ = std::move(memo);
         mixed_ = std::move(mixed);
+        if (made_.output.expired()) made_ = std::move(made);  // (the result it names: the copy's node holds it too)
     }
     // Guides for density from a guide layer (guide map), and for guideRadius.
     std::vector<PortSpec> inputs() const override { return {{"scalp", PortType::Mesh}, {"guides", PortType::Guides, true}}; }
@@ -450,12 +477,35 @@ public:
         };
     }
 
+    // A brush dab moves the guides' points, not their roots: what a Scatter reads of its guides
+    // (guidesRead: their roots and values, a shaped tube's footprint) is then what its last result
+    // read, on the scalp it was placed on, and that result stands as it is: the nodes after it go
+    // on incrementally from the strands the dab reaches, instead of every node in full after a
+    // Scatter made again to the same roots. Anything else: in full.
+    bool evaluateIncremental(const EvalContext&, const std::vector<Value>& inputs, const IncrementalInputs& incremental, Value* out,
+                             StrandChanges* changed) const override {
+        const StrandsPtr last = valueAs<StrandsPtr>(incremental.previous);
+        const MeshPtr mesh = valueAs<MeshPtr>(inputs.at(0));
+        if (!last || !mesh || incremental.inputs.empty() || !incremental.inputs[0] || !incremental.inputs[0]->none()) return false;
+        const GuidesPtr guides = inputs.size() > 1 ? valueAs<GuidesPtr>(inputs[1]) : nullptr;
+        Made made;
+        {
+            const std::lock_guard<std::mutex> lock(memoMutex_);
+            made = made_;
+        }
+        if (made.output.lock() != last || made.scalp != mesh->surfaceHash() || made.guidesRead != guidesRead(guides.get())) return false;
+        *out = incremental.previous;
+        *changed = StrandChanges::listed({});
+        return true;
+    }
+
     Value evaluate(const EvalContext& ctx, const std::vector<Value>& inputs) const override {
         auto out = std::make_shared<StrandSet>();
         const MeshPtr mesh = valueAs<MeshPtr>(inputs.at(0));
         if (!mesh || mesh->triangleCount() == 0) return StrandsPtr(out);
         // Roots are placed on the cage (the scalp itself unless it is refined from one) and
         // carried onto the scalp at the end.
+        ProfilePhases phase("scatter.cageBinding");
         const CageBinding binding(mesh.get());
         const ScalpMesh& surface = *binding.cage();
 
@@ -463,6 +513,7 @@ public:
         // probability map / maximum, decided by the strand ID: stable IDs, and
         // painting more density only adds strands.
         GuidesPtr guides = inputs.size() > 1 ? valueAs<GuidesPtr>(inputs[1]) : nullptr;
+        const std::uint64_t read = guidesRead(guides.get());  // (as they come: evaluateIncremental's)
         // One of several scalps (scalp_pieces.h): the guides' roots (on the whole mesh) read on it,
         // and each root placed on it lands on the whole mesh at the end (toWholeRoot).
         if (mesh->isPiece() && guides) {
@@ -475,6 +526,7 @@ public:
             }
             guides = std::move(local);
         }
+        phase.next("scatter.densityProbe");
         const ScalarField densityField(params(), "density", mesh.get(), guides.get());
         double density = std::max(0.0f, densityField.maximum());
         if (!densityField.isConstant()) {
@@ -484,14 +536,19 @@ public:
             // little keeps it, and so the roots far from the edit).
             float sampled = 0.0f;
             constexpr float kAt[4][2] = {{0.0f, 0.0f}, {1.0f, 0.0f}, {0.0f, 1.0f}, {1.0f / 3.0f, 1.0f / 3.0f}};
-            for (std::size_t f = 0; f < surface.triangleCount(); ++f) {
+            std::vector<float> faceMost(surface.triangleCount(), 0.0f);  // each face's largest (a maximum: in any order)
+            parallelFor(0, faceMost.size(), [&](std::size_t f) {
+                float most = 0.0f;
                 for (const auto& uv : kAt) {
                     const float v = densityField.atCageRoot(StrandRoot{static_cast<std::int32_t>(f), uv[0], uv[1]});
-                    if (std::isfinite(v)) sampled = std::max(sampled, v);
+                    if (std::isfinite(v)) most = std::max(most, v);
                 }
-            }
+                faceMost[f] = most;
+            }, 256);
+            for (const float most : faceMost) sampled = std::max(sampled, most);
             if (sampled > density) density = roundToDecadeStep(sampled, 8, true);
         }
+        phase.next("scatter.guideFootprints");
         const auto seed = static_cast<std::uint64_t>(params().getInt("seed"));
         const float length = static_cast<float>(params().getDouble("length"));
         // Strand resolution comes from the Resample node (EvalContext::strandSegments).
@@ -691,6 +748,7 @@ public:
                 std::uint64_t id;
                 std::int32_t face;
             };
+            ProfilePhases placing("scatter.place.sample");
             std::vector<Sample> samples;
             samples.reserve(static_cast<std::size_t>(surface.restTotalArea() * density * (needEven ? 1.0f : emitted) * 1.1) + 16);
 
@@ -699,9 +757,7 @@ public:
                 const std::uint64_t faceHash = hashCombine(seedHash, f);
                 const double expected = surface.restTriangleArea(f) * density;  // rest: same strands every frame
                 if (!(expected > 0.0)) continue;  // none (or not a number)
-                auto count = static_cast<std::uint64_t>(std::min(expected, kMaxStrands));
-                if (unitFloat(hash64(faceHash)) < static_cast<float>(expected - static_cast<double>(count))) ++count;
-
+                const std::uint64_t count = faceSampleCount(expected, faceHash);
                 for (std::uint64_t k = 0; k < count; ++k) {
                     const std::uint64_t id = hashCombine(faceHash, k);
                     // Relaxed, every root (the preview's are taken after); else those it holds.
@@ -709,14 +765,12 @@ public:
                 }
             }
 
+            placing.next("scatter.place.keep");
             std::vector<StrandRoot> roots(samples.size());
             std::vector<char> keep(samples.size(), 1);
             parallelFor(0, samples.size(), [&](std::size_t i) {
                 const Sample& s = samples[i];
-                Rng rng(s.id);
-                const float su = std::sqrt(rng.nextFloat());
-                const float r2 = rng.nextFloat();
-                roots[i] = {s.face, su * (1.0f - r2), su * r2};
+                roots[i] = sampleRoot(s.id, s.face);
                 if (!densityField.isConstant() && density > 0.0) {
                     const float p = densityField.atCageRoot(roots[i]) / static_cast<float>(density);
                     keep[i] = unitFloat(hashCombine(s.id, 0xD3A5)) < p ? 1 : 0;
@@ -735,6 +789,7 @@ public:
             samples.resize(kept);
             roots.resize(kept);
 
+            placing.next("scatter.place.relax");
             auto placed = std::make_shared<Placed>();
             if (needEven && !roots.empty()) {
                 constexpr float kHexSpacing = 1.0746f;  // sqrt(2 / sqrt(3)): hexagonal packing at 1 per unit area
@@ -758,6 +813,7 @@ public:
                 });
                 ++relaxCount;
             }
+            placing.next("scatter.place.ids");
             placed->ids.reserve(samples.size());
             for (const Sample& sample : samples) placed->ids.push_back(sample.id);
             placed->random = std::move(roots);
@@ -766,6 +822,7 @@ public:
         // Kept: placements with even spots (every root relaxed), keyed on all they come from but the
         // randomness and the preview, and the last mixes of what a preview holds of them, keyed on
         // that, the randomness and the preview's share.
+        phase.next("scatter.place");
         std::uint64_t memoKey = 0;
         const bool memoize = needEven && placementKey(binding, guides.get(), seed, density, guideRootsHash, &memoKey);
         std::shared_ptr<const Placed> placed = memoize ? findPlaced(memoKey) : nullptr;
@@ -774,6 +831,7 @@ public:
             if (memoize) keepPlaced(memoKey, placed);
         }
         // What the preview holds of them, by ID, and each one's role in it (preview_core.h).
+        phase.next("scatter.previewRoles");
         std::vector<std::size_t> held;
         std::vector<float> roles;
         held.reserve(placed->ids.size());
@@ -799,6 +857,7 @@ public:
         };
         std::vector<StrandId> ids(held.size());
         for (std::size_t k = 0; k < held.size(); ++k) ids[k] = placed->ids[held[k]];
+        phase.next("scatter.mix");
         std::shared_ptr<const std::vector<StrandRoot>> rootsHeld;
         if (grid || randomness == 1.0f) {
             rootsHeld = rootsOf(placed->random);
@@ -822,6 +881,7 @@ public:
         // not, so a preview shows the extras the render has). Unit j's t-th possible extra exists
         // where its draw falls under follicles x (follicleHairs - 1) / the trials: raising follicles
         // only adds hairs.
+        phase.next("scatter.follicles");
         const ScalarField folliclesField(params(), "follicles", mesh.get(), guides.get());
         std::vector<StrandRoot> shownRoots;
         if (!(folliclesField.isConstant() && !(folliclesField.maximum() > 0.0f)) && density > 0.0) {
@@ -883,7 +943,7 @@ public:
                         // Beside its unit's root: a spot within `reach` on the surface, from its ID.
                         const float angle = 6.2831853f * unitFloat(hashCombine(id, 1));
                         const float radius = reach * (0.35f + 0.65f * std::sqrt(unitFloat(hashCombine(id, 2))));
-                        const Vec3f spot = p + (u * std::cos(angle) + v * std::sin(angle)) * radius;
+                        const Vec3f spot = p + (u * pm::cos(angle) + v * pm::sin(angle)) * radius;
                         const SurfacePoint hit = rest.closestPoint(spot, 2.0f * reach + 1e-6f);
                         shownRoots[at] = hit.root.face >= 0 ? hit.root : r;
                         ids[at] = id;
@@ -897,6 +957,7 @@ public:
         }
         const std::vector<StrandRoot>& roots = *rootsShown;
 
+        phase.next("scatter.writeStrands");
         const std::size_t pointsPerStrand = segments + 1;
         // Every point is written below (the widths stay 1): the positions come as they are.
         out->resizeUniform(ids.size(), pointsPerStrand, StrandSet::kLeavePositions);
@@ -918,10 +979,47 @@ public:
             }
         });
 
+        {
+            const std::lock_guard<std::mutex> lock(memoMutex_);
+            made_ = {out, mesh->surfaceHash(), read};
+        }
         return StrandsPtr(out);
     }
 
 private:
+    // What an evaluation reads of its guides input, hashed: every guide's root and first point
+    // (where it is rooted: guideRadius, a guide map of the density or the follicles), its values
+    // (a guide map's), and with a guideRadius whether its tube was set and, where it was, all its
+    // footprint is laid from (GuideFootprints::add: its points, frame and profile); the other
+    // levels' (GuideSet::levelTubes) alike. Not the points of a guide past its first otherwise: a
+    // dab combing the guides leaves this as it was. 0 without guides.
+    std::uint64_t guidesRead(const GuideSet* guides) const {
+        if (!guides) return 0;
+        const bool footprints = params().getDouble("guideRadius") > 0.0;
+        auto one = [footprints](std::uint64_t h, const Guide& g) {
+            h = hashCombine(h, static_cast<std::uint64_t>(static_cast<std::int64_t>(g.root.face)));
+            h = hashFloat(hashFloat(h, g.root.u), g.root.v);
+            h = hashCombine(h, std::min<std::size_t>(g.points.size(), 2));
+            if (!g.points.empty()) h = hashFloat(hashFloat(hashFloat(h, g.points[0].x), g.points[0].y), g.points[0].z);
+            h = hashCombine(h, g.attributes.size());
+            for (const auto& [name, value] : g.attributes) h = hashFloat(hashString(h, name), value);
+            if (!footprints || !g.hasTube || !g.tube.edited() || g.points.size() < 2) return hashCombine(h, 0x70u);
+            h = hashTube(hashCombine(h, g.tube.roll.size() + 0x7EBEu), g.tube);
+            for (const float r : g.tube.roll) h = hashFloat(h, r);
+            h = hashCombine(h, g.points.size());
+            for (const Vec3f& p : g.points) h = hashFloat(hashFloat(hashFloat(h, p.x), p.y), p.z);
+            h = hashFloat(hashFloat(hashFloat(h, g.frameUp.x), g.frameUp.y), g.frameUp.z);
+            return hashCombine(h, static_cast<std::uint64_t>(static_cast<std::int64_t>(g.depth)));
+        };
+        std::uint64_t h = hash64(guides->size() + 0x6D5u);
+        for (const Guide& g : guides->guides()) h = one(h, g);
+        if (guides->levelTubes()) {
+            h = hashCombine(h, guides->levelTubes()->size() + 0x7B5u);
+            for (const Guide& g : *guides->levelTubes()) h = one(h, g);
+        }
+        return h;
+    }
+
     // Strand IDs and each one's random and even spots (empty: not worked out), as placed by an
     // evaluation. uvGrid: the grid's roots as the random ones.
     struct Placed {
@@ -1000,9 +1098,17 @@ private:
         std::shared_ptr<const Placed> placed;
         std::shared_ptr<const std::vector<StrandRoot>> roots;
     };
+    // What the last result was made from (evaluateIncremental): the result (by identity, not kept
+    // alive), the scalp's surface and what it read of its guides (guidesRead).
+    struct Made {
+        std::weak_ptr<const StrandSet> output;
+        std::uint64_t scalp = 0;
+        std::uint64_t guidesRead = 0;
+    };
     mutable std::mutex memoMutex_;
     mutable std::vector<std::pair<std::uint64_t, std::shared_ptr<const Placed>>> memo_;  // newest first
     mutable std::vector<Mixed> mixed_;                                                   // newest first
+    mutable Made made_;
     // thinnedLastRun: 1 thinned, 0 not, -1 not known (never run here nor taken on: as thinned).
     mutable std::atomic<int> thinned_{-1};
 };
@@ -1020,14 +1126,10 @@ ScatteredSpots scatterSpots(const ScalpMesh& rest, double density, std::uint64_t
         const std::uint64_t faceHash = hashCombine(seedHash, f);
         const double expected = rest.restTriangleArea(f) * density;
         if (!(expected > 0.0)) continue;
-        auto count = static_cast<std::uint64_t>(std::min(expected, kMaxStrands));
-        if (unitFloat(hash64(faceHash)) < static_cast<float>(expected - static_cast<double>(count))) ++count;
+        const std::uint64_t count = faceSampleCount(expected, faceHash);
         for (std::uint64_t k = 0; k < count; ++k) {
             const std::uint64_t id = hashCombine(faceHash, k);
-            Rng rng(id);
-            const float su = std::sqrt(rng.nextFloat());
-            const float r2 = rng.nextFloat();
-            const StrandRoot root{static_cast<std::int32_t>(f), su * (1.0f - r2), su * r2};
+            const StrandRoot root = sampleRoot(id, static_cast<std::int32_t>(f));
             if (kept && !kept(root)) continue;
             out.ids.push_back(id);
             out.roots.push_back(root);

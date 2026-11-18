@@ -57,6 +57,7 @@ StrandSet::StrandSet(const StrandSet& o)
       strandChannels_(o.strandChannels_), pointChannels_(o.pointChannels_), instances_(o.instances_),
       cardLayers_(o.cardLayers_), featherLayers_(o.featherLayers_) {
     copyExtent(o);
+    widthsSet_.store(o.widthsSet_.load(std::memory_order_acquire), std::memory_order_release);
 }
 
 StrandSet::StrandSet(StrandSet&& o) noexcept
@@ -65,7 +66,9 @@ StrandSet::StrandSet(StrandSet&& o) noexcept
       pointChannels_(std::move(o.pointChannels_)), instances_(std::move(o.instances_)),
       cardLayers_(std::move(o.cardLayers_)), featherLayers_(std::move(o.featherLayers_)) {
     copyExtent(o);
+    widthsSet_.store(o.widthsSet_.load(std::memory_order_acquire), std::memory_order_release);
     o.dropExtent();
+    o.dropWidthsSet();
     o.offsets_.reset().push_back(0);
 }
 
@@ -82,6 +85,7 @@ StrandSet& StrandSet::operator=(const StrandSet& o) {
     cardLayers_ = o.cardLayers_;
     featherLayers_ = o.featherLayers_;
     copyExtent(o);
+    widthsSet_.store(o.widthsSet_.load(std::memory_order_acquire), std::memory_order_release);
     return *this;
 }
 
@@ -98,7 +102,9 @@ StrandSet& StrandSet::operator=(StrandSet&& o) noexcept {
     cardLayers_ = std::move(o.cardLayers_);
     featherLayers_ = std::move(o.featherLayers_);
     copyExtent(o);
+    widthsSet_.store(o.widthsSet_.load(std::memory_order_acquire), std::memory_order_release);
     o.dropExtent();
+    o.dropWidthsSet();
     o.offsets_.reset().push_back(0);
     return *this;
 }
@@ -113,6 +119,7 @@ void StrandSet::reserve(std::size_t strands, std::size_t points) {
 
 void StrandSet::clear() {
     dropExtent();
+    dropWidthsSet();
     ids_.reset();
     roots_.reset();
     offsets_.reset().push_back(0);
@@ -164,6 +171,7 @@ void StrandSet::resizeUniform(std::size_t strands, std::size_t pointsPerStrand, 
     }, 1);
     sizedAndFilled(positions_, points, Vec3f{}, (leave & kLeavePositions) != 0);
     sizedAndFilled(widths_, points, 1.0f, (leave & kLeaveWidths) != 0);
+    widthsSet_.store((leave & kLeaveWidths) != 0 ? kWidthsUnknown : std::int8_t{0}, std::memory_order_release);  // (every one 1)
     for (auto& [name, ch] : strandChannels_) sizedAndFilled(ch.values, strands, ch.defaultValue);
     for (auto& [name, ch] : pointChannels_) sizedAndFilled(ch.values, points, ch.defaultValue);
 }
@@ -179,8 +187,22 @@ void StrandSet::resize(const std::vector<std::size_t>& pointsPerStrand, unsigned
     sizedAndFilled(roots_, strands, StrandRoot{});
     sizedAndFilled(positions_, points, Vec3f{}, (leave & kLeavePositions) != 0);
     sizedAndFilled(widths_, points, 1.0f, (leave & kLeaveWidths) != 0);
+    widthsSet_.store((leave & kLeaveWidths) != 0 ? kWidthsUnknown : std::int8_t{0}, std::memory_order_release);  // (every one 1)
     for (auto& [name, ch] : strandChannels_) sizedAndFilled(ch.values, strands, ch.defaultValue);
     for (auto& [name, ch] : pointChannels_) sizedAndFilled(ch.values, points, ch.defaultValue);
+}
+
+void StrandSet::relayout(const std::vector<std::size_t>& pointsPerStrand) {
+    dropExtent();
+    dropWidthsSet();
+    const std::size_t strands = pointsPerStrand.size();
+    std::vector<std::size_t>& offsets = offsets_.sized(strands + 1);
+    offsets[0] = 0;
+    for (std::size_t i = 0; i < strands; ++i) offsets[i + 1] = offsets[i] + pointsPerStrand[i];
+    const std::size_t points = offsets[strands];
+    positions_.sizedWithRoom(points);
+    widths_.sizedWithRoom(points);
+    for (auto& [name, ch] : pointChannels_) ch.values.sizedWithRoom(points);
 }
 
 std::size_t StrandSet::uniformPointCount() const {
@@ -204,6 +226,7 @@ std::size_t StrandSet::addStrand(StrandId id, const std::vector<Vec3f>& points,
         throw std::invalid_argument("StrandSet::addStrand: widths must be empty or match points");
     }
     dropExtent();
+    dropWidthsSet();
     std::vector<StrandId>& ids = ids_.mut(lock_);
     std::vector<Vec3f>& positions = positions_.mut(lock_);
     std::vector<float>& w = widths_.mut(lock_);
@@ -226,9 +249,14 @@ std::size_t StrandSet::addStrand(StrandId id, const std::vector<Vec3f>& points,
     return index;
 }
 
+// (A channel's array as the set's other arrays are made: from the pool when it keeps one of the
+// size, filled across the threads, a fresh one's pages faulted in across them (sizedAndFilled):
+// a groom's per-point channel is not one thread's to allocate and write. Inside a parallel loop's
+// body: serially.)
 std::vector<float>& StrandSet::addStrandChannel(const std::string& name, float defaultValue) {
     auto& ch = strandChannels_[name];
     ch.defaultValue = defaultValue;
+    if (!insideParallelBody()) return sizedAndFilled(ch.values, strandCount(), defaultValue);
     std::vector<float>& values = ch.values.reset();
     values.assign(strandCount(), defaultValue);
     return values;
@@ -237,6 +265,7 @@ std::vector<float>& StrandSet::addStrandChannel(const std::string& name, float d
 std::vector<float>& StrandSet::addPointChannel(const std::string& name, float defaultValue) {
     auto& ch = pointChannels_[name];
     ch.defaultValue = defaultValue;
+    if (!insideParallelBody()) return sizedAndFilled(ch.values, pointCount(), defaultValue);
     std::vector<float>& values = ch.values.reset();
     values.assign(pointCount(), defaultValue);
     return values;
@@ -277,7 +306,10 @@ std::vector<Vec3f>& StrandSet::copyPositionsFrom(const StrandSet& from) {
     return positions_.copyOf(from.positions_);
 }
 
-std::vector<float>& StrandSet::copyWidthsFrom(const StrandSet& from) { return widths_.copyOf(from.widths_); }
+std::vector<float>& StrandSet::copyWidthsFrom(const StrandSet& from) {
+    dropWidthsSet();
+    return widths_.copyOf(from.widths_);
+}
 
 void StrandSet::sharePositionsOf(const StrandSet& from) {
     if (&from == this) return;
@@ -291,7 +323,11 @@ std::vector<Vec3f>& StrandSet::takePositionsFrom(StrandSet& from) {
     return positions_.takeFrom(from.positions_);
 }
 
-std::vector<float>& StrandSet::takeWidthsFrom(StrandSet& from) { return widths_.takeFrom(from.widths_); }
+std::vector<float>& StrandSet::takeWidthsFrom(StrandSet& from) {
+    dropWidthsSet();
+    from.dropWidthsSet();
+    return widths_.takeFrom(from.widths_);
+}
 
 std::vector<float>* StrandSet::copyStrandChannelFrom(const std::string& name, const StrandSet& from) {
     const auto it = from.strandChannels_.find(name);
@@ -335,6 +371,7 @@ StrandSet StrandSet::withDensity(float density) const {
 
 void StrandSet::append(const StrandSet& other) {
     dropExtent();
+    dropWidthsSet();
     const std::size_t strandsBefore = strandCount();
     const std::size_t base = positions_.get().size();
     // (A copy's shared arrays made once at their new size and filled in parallel: CowArray::appended.)
@@ -554,6 +591,30 @@ std::uint64_t StrandSet::contentHash() const {
     return h;
 }
 
+bool StrandSet::widthsSet() const {
+    std::int8_t known = widthsSet_.load(std::memory_order_acquire);
+    if (known == kWidthsUnknown) {
+        const std::vector<float>& widths = widths_.get();
+        const std::size_t points = widths.size();
+        std::atomic<bool> set{false};
+        if (points > 0 && points == pointCount()) {
+            parallelFor(0, (points + kFillBlock - 1) / kFillBlock, [&](std::size_t b) {
+                if (set.load(std::memory_order_relaxed)) return;
+                const std::size_t begin = b * kFillBlock, end = std::min(points, begin + kFillBlock);
+                for (std::size_t i = begin; i < end; ++i) {
+                    if (widths[i] != 1.0f) {
+                        set.store(true, std::memory_order_relaxed);
+                        return;
+                    }
+                }
+            }, 1);
+        }
+        known = set.load() ? 1 : 0;
+        widthsSet_.store(known, std::memory_order_release);
+    }
+    return known > 0;
+}
+
 void StrandSet::copyExtent(const StrandSet& o) {
     if (&o == this) return;
     std::shared_ptr<const Extent> theirs;
@@ -584,8 +645,8 @@ StrandSet::Extent blockExtent(const std::vector<std::size_t>& offsets, const std
         const std::size_t n = offsets[s + 1] - offsets[s];
         float length = 0.0f;
         for (std::size_t k = 0; k < n; ++k) {
-            e.lo = Vec3f(std::min(e.lo.x, p[k].x), std::min(e.lo.y, p[k].y), std::min(e.lo.z, p[k].z));
-            e.hi = Vec3f(std::max(e.hi.x, p[k].x), std::max(e.hi.y, p[k].y), std::max(e.hi.z, p[k].z));
+            e.lo = minPerAxis(e.lo, p[k]);
+            e.hi = maxPerAxis(e.hi, p[k]);
             sum += (p[k].x - p[k].x) + (p[k].y - p[k].y) + (p[k].z - p[k].z);  // 0, or NaN for a NaN or an infinity
             if (k > 0) length += (p[k] - p[k - 1]).length();
         }
@@ -600,8 +661,8 @@ StrandSet::Extent combineExtents(const std::vector<StrandSet::Extent>& parts) {
     constexpr float kBig = std::numeric_limits<float>::max();
     StrandSet::Extent out{Vec3f(kBig, kBig, kBig), Vec3f(-kBig, -kBig, -kBig), 0.0f};
     for (const StrandSet::Extent& e : parts) {
-        out.lo = Vec3f(std::min(out.lo.x, e.lo.x), std::min(out.lo.y, e.lo.y), std::min(out.lo.z, e.lo.z));
-        out.hi = Vec3f(std::max(out.hi.x, e.hi.x), std::max(out.hi.y, e.hi.y), std::max(out.hi.z, e.hi.z));
+        out.lo = minPerAxis(out.lo, e.lo);
+        out.hi = maxPerAxis(out.hi, e.hi);
         out.longestStrand = std::max(out.longestStrand, e.longestStrand);
         out.finite = out.finite && e.finite;
     }

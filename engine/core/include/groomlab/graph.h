@@ -394,6 +394,10 @@ struct ParamSpec {
     // graph: GraphEdit's completed params). 0: never changed.
     int since = 0;
     ParamValue before = {};
+    // The version of its operator that added the param (0: it always had it). A node saved at an
+    // older version does nothing with it until it is upgraded, so no panel lists it there
+    // (param_conditions.h paramInVersion; the spec JSON's "addedIn").
+    int added = 0;
 
     // The spec with hard limits (and the slider's range, unless one is set).
     ParamSpec range(double lo, double hi) const {
@@ -417,6 +421,12 @@ struct ParamSpec {
     ParamSpec in(std::string groupName) const {
         ParamSpec s = *this;
         s.group = std::move(groupName);
+        return s;
+    }
+    // The param came with version `version` of its operator (added).
+    ParamSpec addedIn(int version) const {
+        ParamSpec s = *this;
+        s.added = version;
         return s;
     }
     // The default this param had before version `version` of its operator (since, before).
@@ -664,11 +674,26 @@ struct StrandChanges {
     // they sit on may differ): a node taking these evaluates in full (its result then compared
     // with its last), a host draws the instances anew.
     bool instancesChanged = false;
+    // With `all`: the two still hold the same strands in the same order (count, IDs, roots, channel
+    // names and defaults, instances, card and feather layers), but the strands listed in `strands`
+    // may hold another number of points than they did (a Resample by curvature or a Curl adding
+    // points, after a comb dab), so every array a point is laid out anew: the strands not listed
+    // hold the points, widths and channel values they held, each at its new place. `all` stays
+    // set, so whoever reads the changes without knowing of it takes everything as changed; an
+    // operator that lays its last result out anew reads it (incremental.h someStrandsRecounted).
+    bool recounted = false;
 
     bool none() const { return !all && strands.empty(); }
     static StrandChanges listed(std::vector<std::uint32_t> strands) {
         StrandChanges c;
         c.all = false;
+        c.strands = std::move(strands);
+        return c;
+    }
+    // The same strands, the listed ones made again at whatever number of points (`recounted`).
+    static StrandChanges recountedIn(std::vector<std::uint32_t> strands) {
+        StrandChanges c;
+        c.recounted = true;
         c.strands = std::move(strands);
         return c;
     }
@@ -681,6 +706,8 @@ using ChangesPtr = std::shared_ptr<const StrandChanges>;
 // channel values differ, byte for byte, found in
 // parallel blocks, the arrays the two share skipped. Null when they do not hold the same strands
 // (or either is null). What a node that evaluated in full hands on (Graph::setDiffFullResults).
+// The same strands with some at other point counts (the offsets differ, all else the same): those
+// and the ones that differ, as StrandChanges::recounted.
 ChangesPtr strandChangesBetween(const StrandsPtr& previous, const StrandsPtr& next);
 
 // What an incremental evaluation gets besides the inputs: the node's last result (its primary
@@ -692,11 +719,20 @@ ChangesPtr strandChangesBetween(const StrandsPtr& previous, const StrandsPtr& ne
 // what the last result holds is then not read again. For an operator with several outputs
 // (Operator::evaluateOutputsIncremental) `previous` is empty and `previousOutputs` holds every
 // output's last value, in outputs() order (`sole` as for `previous`, for each).
+// `spare`: the points of the result before `previous` (its points alone, in a set that holds
+// nothing else), kept by the graph when the operator could not take `previous`'s (the nodes after
+// it share them: a HairColor's or a Width's result holds its input's points), with `spareChanges`,
+// how `previous` differs from it (a list: the same layout). By now nobody else holds them, so the
+// operator takes them instead of copying `previous`'s and writes the strands of that list from
+// `previous` (incremental.h positionsOfLast): a comb dab then copies the strands of two dabs, not
+// every point. Null when the graph kept none.
 struct IncrementalInputs {
     Value previous;
     std::vector<ChangesPtr> inputs;
     bool sole = false;
     std::vector<Value> previousOutputs;
+    std::shared_ptr<StrandSet> spare;
+    ChangesPtr spareChanges;
 };
 
 class Operator;
@@ -977,11 +1013,9 @@ public:
     const std::string& label(NodeId id) const { return nodeRecord(id).label; }
 
     // Milliseconds each node's operator took in the last evaluation: 0 for a node whose cached
-    // result served (nodes that never ran are absent). What a profile of one evaluation shows.
+    // result served all of it (one that ran in it keeps its time however many read it: a Braid's
+    // strands and ties; nodes that never ran are absent). What a profile of one evaluation shows.
     const std::map<NodeId, double>& lastEvaluationTimes() const { return lastTimes_; }
-    // Milliseconds each node's operator took the last time it ran, cache hits since left out of
-    // it (nodes that never ran are absent): what a node costs when it does run.
-    const std::map<NodeId, double>& lastRunTimes() const { return lastRunTimes_; }
     // How each node made its result the last time it ran: "full", "full N" (in full, its result
     // differing from its last one in N strands: Graph::setDiffFullResults), "incremental N" (N
     // strands made again; "incremental all"), "bypass" (its input handed on). Profiles and tests.
@@ -1055,6 +1089,13 @@ public:
     // the kept work of the node of its name and type there (adoptKeptWork), so
     // what it keeps for the results it reuses (Interpolate's binding) stays.
     void adoptCache(const Graph& previous);
+    // Another graph's cached results offered to this graph's next evaluation by their keys alone:
+    // a node keyed as one of them (the same operator, params, inputs and external data) takes its
+    // result instead of running, as with adoptCache; a node whose own result is keyed as asked
+    // keeps it, and the nodes' last results and the operators' kept work stay as they are. For a
+    // copy of a graph evaluated beside it from inputs that may be the same ones (the rest pose of
+    // a groom that is at rest: RestPose::pin). What matches nothing goes when that evaluation ends.
+    void offerResults(const Graph& evaluated);
 
     // A copy: the same nodes (each operator made again by its type through OperatorRegistry,
     // so a node added as an operator of an unregistered type throws GraphError), params,
@@ -1102,7 +1143,6 @@ public:
     // results are the full evaluation's, bit for bit, and keyed as ever. Process-wide, on by
     // default; off, every node whose key changed evaluates in full.
     static void setIncrementalEvaluation(bool on);
-    static bool incrementalEvaluation();
     // Testing: each incremental result is checked against a full evaluation of the same inputs
     // (contentHash), and the strands it says it left alone against the node's last result; a
     // difference throws GraphError naming the node. Process-wide, off by default.
@@ -1157,6 +1197,12 @@ private:
         std::vector<ChangesPtr> changes;  // per output (missing: unknown)
         std::uint64_t changesBase = 0;
         bool passedOn = false;
+        // Whether the result's points are an array the node made (not one of its inputs'), and the
+        // points of its result before (IncrementalInputs::spare) with how the result differs from
+        // them: kept after an incremental evaluation that left the last result its points.
+        bool ownPoints = false;
+        std::shared_ptr<StrandSet> spare;
+        ChangesPtr spareChanges;
         std::uint64_t usedTick = 0;  // the last evaluation reaching it (the cache limit's age)
         // What the callers were handed of the result (preview_core.h: shownStrands): per output,
         // the shown strands made from cachedValues (by identity), and for the result's serial
@@ -1197,6 +1243,8 @@ private:
         // Each node's strand segments (strandResolutions), when the context leaves them to the
         // graph; empty when it sets them for every node.
         std::map<NodeId, Resolution> segments;
+        // The nodes whose operators ran in this evaluation (their times are this evaluation's).
+        std::set<NodeId> ran;
     };
     // The context node `id` is evaluated (and keyed) with: its own strand segments.
     EvalContext nodeContext(NodeId id, const EvalContext& ctx, const Keys& keys) const;
