@@ -266,8 +266,10 @@ std::size_t appendGuideCurve(DisplayGeometry& geometry, const std::vector<Vec3f>
 // hidden group (parseHiddenGuideGroups of `hiddenGuideGroups`) and not frozen (its `freeze` layer,
 // inherited, 0.5 or more): the ones the brush can shape. In the hierarchy's order.
 // `tubeViewGroup` (Lock view): that group's guides instead, hidden or not.
+// `mixedView` (MixedView): its hierarchy's guides shown or not as it says, hidden groups or not.
 std::vector<const HierarchyGuide*> activeTubeGuides(const GuideHierarchy& hierarchy, const std::string& hiddenGuideGroups,
-                                                    const std::string& freeze = "freeze", const std::string& tubeViewGroup = "");
+                                                    const std::string& freeze = "freeze", const std::string& tubeViewGroup = "",
+                                                    const std::string& mixedView = "");
 // A guide's tube as a shaded surface: its shape's outline at rings along it, each section turned,
 // flattened and sized as the tube says (tube.h; widths times scale, the size shown), open at the tip
 // (no cap): rings of the same count, root to tip (a plain round tube: 25; a shaped one: one on each
@@ -297,6 +299,22 @@ struct TubeDisplayOptions {
     // The tube hierarchy's Lock view: a guide group's name whose tubes alone draw (shown or hidden as
     // guides); the guides draw as hiddenGuideGroups says. "": tubes as their guides.
     std::string tubeViewGroup;
+    std::string mixedView;  // the tube hierarchy's Mixed view (MixedView): "<base group>:<level>", "" off
+};
+// The tube hierarchy's Mixed view ("<base group>:<level>", "" off): working on a level, its guides
+// and tubes, and each of the levels above's that no level below continues (a guide there with no
+// children), are shown, the hierarchy's others not, whichever of its groups are hidden.
+class MixedView {
+public:
+    MixedView(const GuideHierarchy* hierarchy, const std::string& spec);
+    // 1 shown, 0 not, -1 not the hierarchy's (or the view off): as its group says.
+    int shows(const GuideHierarchy& hierarchy, const HierarchyGuide& g) const;
+    bool on() const { return level_ > 0; }
+
+private:
+    std::string base_;
+    int level_ = 0;
+    std::set<GuideId> parents_;
 };
 // Whether a guide of group `name` (hidden: its guides hidden) draws its tube under `tubeViewGroup`.
 bool tubeDrawn(const std::string& tubeViewGroup, const std::string& name, bool hidden);
@@ -473,6 +491,7 @@ struct DisplaySettings {
     int guideSmoothing = 4;  // pieces per segment (1 straight)
     std::string hiddenGuideGroups, guideGroupColors;
     std::string tubeViewGroup;  // Lock view: the group whose tubes alone draw ("": tubes as their guides; TubeDisplayOptions)
+    std::string mixedView;      // Mixed view: "<base group>:<level>" (MixedView), "" off
     // Overlays and cards.
     bool flow = true;
     bool drawCards = false;     // the cards draw here (cardsView, and no card mesh draws them)

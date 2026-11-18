@@ -247,6 +247,11 @@ class RootTubeCard(QtCore.QObject):
                                         "view: the other visibility controls work as they do", False, "tubeLockView")
         self.lock_view.toggled.connect(self.lock_toggled)
         self.hierarchy_block.add(self.lock_view.row)
+        self.mixed_view = widgets.switch("Mixed view", "Working on a level, also show the levels above where no level "
+                                         "below continues them (a level 1 tube not split to level 2 shows while you "
+                                         "work on level 2), their guides and tubes", False, "tubeMixedView")
+        self.mixed_view.toggled.connect(self.mixed_toggled)
+        self.hierarchy_block.add(self.mixed_view.row)
         self._locked = 0  # Lock view: the level kept in view (0: none), of hierarchy _locked_base
         self._locked_base = None
         self._current = 1  # the level picked
@@ -602,6 +607,7 @@ class RootTubeCard(QtCore.QObject):
         """The level `level` shown and picked (the brushes and new guides work there)."""
         self.owner.fill_levels(groom)
         group = root_tubes.show_tube_level(groom, base, level, self._locked)
+        root_tubes.set_mixed_view(groom, base, level if self.mixed_view.isChecked() else 0)
         self.owner.pick_group(group)
         self._levels = None
         self.fill_levels(groom)
@@ -625,6 +631,19 @@ class RootTubeCard(QtCore.QObject):
             return
         self.owner.status.setText("Level %d's tubes kept in view; the level you pick shows its guides." % self._locked if self._locked
                                   else "Lock view off: only the picked level shows.")
+
+    def mixed_toggled(self, on):
+        """Mixed view: the levels above shown where no level below continues them, on the level picked."""
+        groom = self.owner.groom()
+        if not groom:
+            return
+        try:
+            root_tubes.set_mixed_view(groom, self._base, self._current if on and self._base else 0)
+        except RuntimeError as e:
+            self.owner.status.setText(str(e).strip())
+            return
+        self.owner.status.setText("Mixed view: level %d with the levels above it doesn't continue." % self._current if on
+                                  else "Mixed view off: the picked level alone.")
 
     def _unlock(self):
         self._locked = 0

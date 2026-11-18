@@ -411,6 +411,17 @@ def set_tube_view(groom, group):
             cmds.setAttr(groom + ".tubeViewGroup", group or "", type="string")
 
 
+def set_mixed_view(groom, base, level):
+    """The Tube hierarchy's Mixed view: working on level `level` of `base`'s hierarchy, the levels
+    above shown where no level below continues them (their guides with no children); 0 (or no base):
+    off. The groom's mixedView ("<base>:<level>")."""
+    from maya import cmds
+    want = "%s:%d" % (base, int(level)) if base and level and int(level) > 0 else ""
+    if cmds.attributeQuery("mixedView", node=groom, exists=True):
+        if (cmds.getAttr(groom + ".mixedView") or "") != want:
+            cmds.setAttr(groom + ".mixedView", want, type="string")
+
+
 def show_tube_level(groom, base, level, locked=0):
     """Show level `level` (1: the base) of `base`'s hierarchy and hide its other levels (the guide
     groups' eyes; groups outside the hierarchy are left as they are); with `locked` (Lock view)

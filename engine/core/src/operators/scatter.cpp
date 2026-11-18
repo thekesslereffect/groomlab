@@ -302,7 +302,9 @@ std::vector<StrandRoot> mixRoots(const std::vector<StrandRoot>& even, const std:
 // the scalp), each holding the roots on it or within `margin` half-widths of its outline.
 class GuideFootprints {
 public:
-    explicit GuideFootprints(float margin) : margin_(margin) {}
+    // `scalp` (given): a drawn root's footprint holds no point with the scalp above it, outward
+    // (a point on the head's far side, under a big root: underScalp).
+    explicit GuideFootprints(float margin, const ScalpMesh* scalp = nullptr) : margin_(margin), scalp_(scalp) {}
     // A guide's tube, its root moved to `root` (where the scatter reads it: the rest pose), laid
     // on the surface of normal `normal` there.
     void add(const Guide& g, const Vec3f& root, const Vec3f& normal, const Vec3f& across = Vec3f{}) {
@@ -316,11 +318,25 @@ public:
             spine.setRootSurface(normal);
         }
         if (spine.empty() || !(spine.rootWidth() > 0.0f) || !(spine.rootHeight() > 0.0f)) return;
+        // How deep under the footprint a root may lie and be on it: a little under the root loop's
+        // deepest point (a drawn root's patch reaches no deeper; past it, the head's far side).
+        float deepest = -std::numeric_limits<float>::infinity();
+        if (isRootTube(g.tube, 0) && g.rootRing.size() >= 3) {
+            float lowest = 0.0f;
+            for (const Vec3f& q : g.rootRing) {
+                float along = 0.0f;
+                spine.rootCoords(q + move, &along);
+                lowest = std::min(lowest, along);
+            }
+            deepest = lowest - 0.25f * std::max(spine.rootWidth(), spine.rootHeight());
+            hash_ = hashFloat(hash_, deepest);
+        }
         hash_ = hashTube(hashCombine(hash_, g.tube.roll.size()), g.tube);
         for (const float r : g.tube.roll) hash_ = hashFloat(hash_, r);
         for (const Vec3f& p : pts) hash_ = hashFloat(hashFloat(hashFloat(hash_, p.x), p.y), p.z);
         for (const Vec3f& v : {g.frameUp, normal}) hash_ = hashFloat(hashFloat(hashFloat(hash_, v.x), v.y), v.z);
         spines_.push_back(std::move(spine));
+        deepest_.push_back(deepest);
     }
     bool empty() const { return spines_.empty(); }
     std::uint64_t hash() const { return hashFloat(hashCombine(hash_, spines_.size()), margin_); }
@@ -341,6 +357,8 @@ public:
             float along = 0.0f;
             const SectionPoint at = s.rootCoords(p, &along);
             if (std::abs(along) > kAlong * std::max(s.rootWidth(), s.rootHeight())) return true;
+            if (along < deepest_[i]) return true;  // (under its patch: the head's far side)
+            if (underScalp(s, p)) return true;
             in = tubeOutsideDistance(s.tube(), s.rootHeight() / s.rootWidth(), at.u, at.v, margin_) <= margin_;
             return !in;
         });
@@ -351,6 +369,19 @@ private:
     static constexpr float kAlong = 4.0f;  // how far off the footprint's plane a root may lie, in root extents (Interpolate's)
     float margin_;
     std::vector<TubeSpine> spines_;
+    std::vector<float> deepest_;  // per spine: how deep under its footprint a root may lie (add)
+    const ScalpMesh* scalp_ = nullptr;
+    // Whether the scalp lies over `p` outward from a drawn root's footprint (a ray along its normal
+    // meets it past a tenth of the root's extent): `p` is on the head's far side, not the patch.
+    bool underScalp(const TubeSpine& s, const Vec3f& p) const {
+        if (!scalp_ || !isRootTube(s.tube(), 0)) return false;
+        const Vec3f n = s.footprintNormal();
+        if (n.length() < 0.5f) return false;
+        const float extent = std::max(s.rootWidth(), s.rootHeight());
+        SurfacePoint hit;
+        float t = 0.0f;
+        return scalp_->intersectRay(p + n * (0.01f * extent), n, &hit, &t) && t > 0.1f * extent;
+    }
     std::unique_ptr<CellGrid> grid_;
     std::uint64_t hash_ = 0x7EBEu;
 };
@@ -517,7 +548,7 @@ public:
             const float margin = static_cast<float>(std::max(params().getDouble("tubeMargin"), 0.0));
             std::vector<Vec3f> positions;
             positions.reserve(guides->size());
-            auto shaped = std::make_unique<GuideFootprints>(margin);
+            auto shaped = std::make_unique<GuideFootprints>(margin, &surface);
             auto around = [&](const Guide& g) {
                 if (g.points.empty()) return;
                 const Vec3f root = binding.stablePosition(g.root, g.points[0]);

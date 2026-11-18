@@ -402,6 +402,8 @@ public:
     // The share of the guide (in t) over which a strand rooted on the footprint joins the tube's
     // sections: a few of the root section's larger half-extents along the guide, at most all of it.
     float rootJoin() const { return rootJoin_; }
+    // The root footprint's normal (its outward side: setRootOnScalp's, setRootSurface's).
+    const Vec3f& footprintNormal() const { return footNormal_; }
 
 private:
     TubeProfile tube_;

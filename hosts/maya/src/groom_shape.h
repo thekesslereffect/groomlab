@@ -201,7 +201,8 @@ public:
     static MObject aGuideWidth;
     static MObject aGuidePoints;       // dots on guide points: off, roots and tips, all
     static MObject aGuideSmoothing;    // guides draw smooth: pieces per segment (1: straight)
-    static MObject aTubeViewGroup;     // Lock view (Tube hierarchy): the guide group whose tubes alone draw ("": as their guides)
+    static MObject aTubeViewGroup;
+    static MObject aMixedView;         // Mixed view (Tube hierarchy): "<base group>:<level>" ("": off; display.h MixedView)     // Lock view (Tube hierarchy): the guide group whose tubes alone draw ("": as their guides)
     static MObject aHiddenGuideGroups; // guide groups hidden in the viewport (names): not drawn, brushed or selected
     static MObject aGuideGroupColors;  // guide groups' own viewport colors (name:#rrggbb)
     static MObject aDisplayLighting;

@@ -568,7 +568,9 @@ void GroomSubSceneOverride::updateTubeWires(MHWRender::MSubSceneContainer& conta
     }
     const std::string hidden = MPlug(object_, GroomShape::aHiddenGuideGroups).asString().asChar();
     const std::string tubeView = MPlug(object_, GroomShape::aTubeViewGroup).asString().asChar();
-    std::uint64_t key = hashCombine(hashCombine(shape_->hierarchyVersion(), uiSelection_), hashChars(hashChars(0x7B3u, hidden), tubeView));
+    const std::string mixedView = MPlug(object_, GroomShape::aMixedView).asString().asChar();
+    std::uint64_t key = hashCombine(hashCombine(shape_->hierarchyVersion(), uiSelection_),
+                                    hashChars(hashChars(hashChars(0x7B3u, hidden), tubeView), mixedView));
     key = hashCombine(key, reinterpret_cast<std::uintptr_t>(hierarchy.get()));
     key = hashCombine(key, (tubeShadedDrawn_ ? 2u : 1u) + (tubeWireframeDrawn_ ? 4u : 0u) + (tubeColorsDrawn_ ? 8u : 0u) + (tubeLevelColorsDrawn_ ? 16u : 0u));
     if (key == tubeWiresKey_ && (container.find(kTubeWiresItem) || container.find(kTubeSurfacesItem))) return;
@@ -587,6 +589,7 @@ void GroomSubSceneOverride::updateTubeWires(MHWRender::MSubSceneContainer& conta
     options.levelColors = tubeLevelColorsDrawn_;
     options.hiddenGuideGroups = hidden;
     options.tubeViewGroup = tubeView;
+    options.mixedView = mixedView;
     TubeDisplay tubes = buildTubeDisplay(*hierarchy, options, selected);
     auto shared = [](DisplayGeometry& g) -> std::shared_ptr<const DisplayGeometry> {
         if (g.positions.empty()) return nullptr;
@@ -749,6 +752,7 @@ DisplaySettings GroomSubSceneOverride::readSettings() {
     s.guideSmoothing = MPlug(object_, GroomShape::aGuideSmoothing).asInt();
     s.hiddenGuideGroups = MPlug(object_, GroomShape::aHiddenGuideGroups).asString().asChar();
     s.tubeViewGroup = MPlug(object_, GroomShape::aTubeViewGroup).asString().asChar();
+    s.mixedView = MPlug(object_, GroomShape::aMixedView).asString().asChar();
     s.guideGroupColors = MPlug(object_, GroomShape::aGuideGroupColors).asString().asChar();  // "name:#rrggbb ..."
     s.guideColorSeed = guideColorSeedOf(object_);  // the groom's own hue: two grooms' groups differ
     s.flow = displayFlag(GroomShape::aDisplayFlow);
