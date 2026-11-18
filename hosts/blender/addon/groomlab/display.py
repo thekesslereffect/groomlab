@@ -148,6 +148,12 @@ def settings_for(scalp, scene):
         s["tubeWires"] = bool(t.tube_wireframe)
         s["tubeShaded"] = bool(t.tube_shaded)
         s["tubeColors"] = bool(t.tube_colors)
+        s["tubeLevelColors"] = bool(t.tube_level_colors)
+    # The Tube hierarchy's Lock view (that level's tubes alone) and Mixed view ("<base>:<level>").
+    levels = [x for x in t.tube_levels.split(",") if x]
+    locked = t.tube_locked_level if t.tube_lock_view else 0
+    s["tubeViewGroup"] = levels[locked - 1] if 0 < locked <= len(levels) else ""
+    s["mixedView"] = "%s:%d" % (t.tube_base, t.tube_level) if t.tube_mixed_view and t.tube_base else ""
     if t.isolate:
         _level, group = tools.group_target(scene)
         s["isolateGroup"] = group or ""

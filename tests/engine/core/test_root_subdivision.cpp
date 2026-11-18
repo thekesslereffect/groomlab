@@ -118,15 +118,22 @@ TEST(RootSubdivision, SitesAreSpacedByTheirSize) {
     for (std::size_t i = 0; i < fine.size(); ++i) EXPECT_EQ(again[i].x, fine[i].x);
 }
 
-TEST(RootSubdivision, ARootIsReplacedByCellsThatSealAndAreRemembered) {
+TEST(RootSubdivision, ARootIsCutIntoCellsInTheLevelBelowThatSealAndAreRemembered) {
     GuideHierarchy h;
     const auto scalp = head();
     const GuideId root = bigRoot(h, *scalp);
     const SubdivisionResult cut = subdivideRootTubes(h, *scalp, {root});
     EXPECT_GE(cut.cells.size(), 4u);
-    EXPECT_EQ(h.guide(root), nullptr);
+    // The root kept (its guide and tube shape them all), the cells its children a level below.
+    ASSERT_NE(h.guide(root), nullptr);
+    const TubeLevels levels = tubeLevels(h, {root});
+    ASSERT_EQ(levels.levels.size(), 2u);
+    for (const GuideId c : cut.cells) {
+        EXPECT_EQ(h.guide(c)->parent, root);
+        EXPECT_EQ(h.group(h.guide(c)->group)->name, levels.levels[1]);
+    }
     const std::vector<GuideId> roots = rootTubesOf(h);
-    EXPECT_EQ(roots.size(), cut.cells.size());
+    EXPECT_EQ(roots.size(), cut.cells.size() + 1) << "the root and its cells (a cell is picked and cut as a root)";
     // The cells share CVs: each cell touches another.
     std::vector<std::vector<Vec3f>> outlines;
     for (const GuideId c : cut.cells) outlines.push_back(rootTubeOutline(h, *scalp, c));
@@ -146,11 +153,18 @@ TEST(RootSubdivision, ARootIsReplacedByCellsThatSealAndAreRemembered) {
     }
     ASSERT_EQ(h.rootSubdivisions().size(), 1u);
     EXPECT_EQ(h.rootSubdivisions()[0].cells, cut.cells);
-    // Saved with the groom.
-    const GuideHierarchy back = GuideHierarchy::fromJson(h.toJson());
+    // Saved with the groom (the cells following the root: their shape from it, evaluated).
+    GuideHierarchy back = GuideHierarchy::fromJson(h.toJson());
+    back.evaluate(scalp.get());
     ASSERT_EQ(back.rootSubdivisions().size(), 1u);
     EXPECT_TRUE(back.rootSubdivisions()[0] == h.rootSubdivisions()[0]);
-    EXPECT_EQ(back.contentHash(), h.contentHash());
+    for (const GuideId c : cut.cells) {
+        const HierarchyGuide* was = h.guide(c);
+        const HierarchyGuide* now = back.guide(c);
+        ASSERT_NE(now, nullptr);
+        ASSERT_EQ(now->points.size(), was->points.size());
+        for (std::size_t i = 0; i < was->points.size(); ++i) EXPECT_LT((now->points[i] - was->points[i]).length(), 1e-4f);
+    }
 }
 
 TEST(RootSubdivision, ThePaintedDensityMakesMoreSmallerCells) {
@@ -176,13 +190,15 @@ TEST(RootSubdivision, TheHierarchyUnderTheRootIsMadeAgainInEachCell) {
     const GuideId root = bigRoot(h, *scalp);
     addTubeLevel(h, scalp.get(), {root});
     addTubeLevel(h, scalp.get(), {root});
+    // The cells take the root's level 2; its level 3 made again under them.
     const auto cut = subdivideRootTubes(h, *scalp, {root});
     const TubeLevels levels = tubeLevels(h, cut.cells);
     ASSERT_EQ(levels.levels.size(), 3u);
+    EXPECT_EQ(h.childrenOf(root).size(), cut.cells.size());
     for (const GuideId c : cut.cells) {
         const auto kids = h.childrenOf(c);
         ASSERT_EQ(kids.size(), 2u);
-        for (const GuideId k : kids) EXPECT_EQ(h.childrenOf(k).size(), 2u);
+        for (const GuideId k : kids) EXPECT_EQ(h.childrenOf(k).size(), 0u);
     }
 }
 
@@ -214,8 +230,11 @@ TEST(RootSubdivision, PaintingAgainCutsOnlyWhereTheDensityChanged) {
     for (const GuideId c : r.cells) {
         if (c != kNoGuide) live.insert(c);
     }
-    const auto roots = rootTubesOf(h);
-    EXPECT_EQ(live, std::set<GuideId>(roots.begin(), roots.end()));
+    std::set<GuideId> cells;
+    for (const GuideId g : rootTubesOf(h)) {
+        if (h.guide(g)->isChild()) cells.insert(g);  // (the root cut is a root too)
+    }
+    EXPECT_EQ(live, cells);
 }
 
 // A point's section coordinates in a spine's sample i (its center and axes).
@@ -333,6 +352,7 @@ TEST(RootSubdivision, PaintingAgainRebuildsTheLevelsFromTheNewCells) {
     GuideHierarchy h;
     const GuideId root = bigRoot(h, before);
     addTubeLevel(h, &before, {root});
+    addTubeLevel(h, &before, {root});  // (the cells take level 2: level 3 is made again under them)
     subdivideRootTubes(h, before, {root});
     const ScalpMesh after = painted([](const Vec3f& p) { return p.x > 0.2f ? 1.0f : 0.3f; });
     const auto again = applySubdivisionDensity(h, after);
@@ -643,7 +663,8 @@ TEST(RootSubdivision, ACellCutAgainLeavesItsFirstCut) {
     ASSERT_GE(sub.size(), 2u);
     std::map<GuideId, std::vector<Vec3f>> had;
     for (const GuideId c : sub) had[c] = h.guide(c)->points;
-    EXPECT_EQ(subdivisionDensityMapFor(h, {sub[0]}, {}), subdivisionDensityMapName(2));
+    for (const GuideId c : sub) EXPECT_EQ(h.guide(c)->parent, inner) << "the cells of a cell cut again: its children";
+    EXPECT_EQ(h.rootSubdivisions().size(), 1u) << "a destructive cut is not remembered";
     // Cut 01 painted denser everywhere and applied: its new cells stay out of the cell cut again.
     const ScalpMesh after = painted([](const Vec3f&) { return 1.0f; });
     const auto again = applySubdivisionDensity(h, after, {}, one);

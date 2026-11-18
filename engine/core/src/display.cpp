@@ -2574,7 +2574,8 @@ void DisplayBuilder::buildBrushTubes(const DisplayInputs& in, const DisplaySetti
     const bool colors = on && s.tubeColors;
     if (colors) item(DisplayItemId::TubeWires).color = {0.62f, 0.62f, 0.62f, s.theme.tubeWires[3]};  // (buildTubeDisplay's gray)
     std::uint64_t key = on ? hashCombine(hashCombine(hash64(in.hierarchyVersion), in.selectionHash),
-                                         (s.tubeWires ? 1u : 0u) + (s.tubeShaded ? 2u : 0u) + (colors ? 4u : 0u))
+                                         (s.tubeWires ? 1u : 0u) + (s.tubeShaded ? 2u : 0u) + (colors ? 4u : 0u) +
+                                             (s.tubeLevelColors ? 8u : 0u))
                            : 0;
     if (on) key = hashCombine(hashChars(hashChars(hashChars(key, s.hiddenGuideGroups), s.tubeViewGroup), s.mixedView), reinterpret_cast<std::uintptr_t>(hierarchy.get()));
     if (!rebuild(DisplayPart::BrushTubes, key)) return;
@@ -2592,6 +2593,7 @@ void DisplayBuilder::buildBrushTubes(const DisplayInputs& in, const DisplaySetti
         options.wireframe = s.tubeWires;
         options.shaded = s.tubeShaded;
         options.colors = colors;
+        options.levelColors = s.tubeLevelColors;
         options.hiddenGuideGroups = s.hiddenGuideGroups;
         options.tubeViewGroup = s.tubeViewGroup;
         options.mixedView = s.mixedView;

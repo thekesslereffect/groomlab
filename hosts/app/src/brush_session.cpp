@@ -32,6 +32,7 @@ public:
         return true;
     }
     std::set<std::string> hiddenGroups() override { return document_.hiddenGroups(); }
+    std::string mixedView() override { return document_.mixedView(); }
     void commit(StrokeEdit edit) override { document_.commitStroke(std::move(edit)); }
     // Texture maps paint the document's paints (opened from the files beside the groom, written
     // back after each stroke): the session host's own list stays empty.

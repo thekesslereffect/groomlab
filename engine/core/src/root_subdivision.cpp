@@ -947,12 +947,21 @@ bool recut(GuideHierarchy& h, const ScalpMesh& scalp, std::size_t index, const R
     const DensityGrid grid = densityGrid(scalp, cut.plane, cut.outline, 0.5 * std::min(s0, s1), r.map);
     auto size = [&](const P& p) { return static_cast<float>(s0 + (s1 - s0) * grid.at(p)); };
 
+    // A cell cut again since (a destructive cut: its cells, children of it, turned as a cut's,
+    // rollOffsets) is left as it is, as a cell gone is: the map leaves it be.
+    auto cutAgain = [&](GuideId c) {
+        for (const GuideId k : h.childrenOf(c)) {
+            const HierarchyGuide* kid = h.guide(k);
+            if (kid && !kid->rollOffsets.empty() && kid->rootOutline.size() >= 3) return true;
+        }
+        return false;
+    };
     // The sites kept (out of the change, or whose cell is gone: cut further, or removed), the rest replaced.
     std::vector<P> kept;
     std::vector<GuideId> keptCells, replaced;
     for (std::size_t i = 0; i < r.sites.size(); ++i) {
         const P p = cut.plane.to(scalp.position(r.sites[i]));
-        const bool live = r.cells[i] != kNoGuide && h.guide(r.cells[i]);
+        const bool live = r.cells[i] != kNoGuide && h.guide(r.cells[i]) && !cutAgain(r.cells[i]);
         if (live && inChange(p)) {
             replaced.push_back(r.cells[i]);
             continue;
@@ -968,7 +977,7 @@ bool recut(GuideHierarchy& h, const ScalpMesh& scalp, std::size_t index, const R
         for (const StrandRoot& site : r.sites) had.push_back(cut.plane.to(scalp.position(site)));
         const std::vector<std::vector<P>> was = voronoiCells(cut.outline, had);
         for (std::size_t i = 0; i < had.size(); ++i) {
-            if (r.cells[i] != kNoGuide && h.guide(r.cells[i])) continue;
+            if (r.cells[i] != kNoGuide && h.guide(r.cells[i]) && !cutAgain(r.cells[i])) continue;
             double reach = 0.0;
             for (const P& q : was[i]) reach = std::max(reach, dist(q, had[i]));
             if (reach > 0.0) frozen.push_back({had[i], 2.0 * reach});

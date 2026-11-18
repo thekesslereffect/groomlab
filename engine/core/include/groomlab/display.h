@@ -475,6 +475,7 @@ struct DisplaySettings {
     // a shaded surface a little inside it (tubeShaded), each in its root tube's color with
     // tubeColors (buildTubeDisplay).
     bool tubeWires = false, tubeShaded = false, tubeColors = false;
+    bool tubeLevelColors = false;  // Colors (Tube levels): each split tube a shade of its own (TubeDisplayOptions::levelColors)
     bool movingGuides = true;  // the moving guides (DisplayInputs::movingGuides) over the groomed ones
     float guideWidth = 2.0f;
     // 1: the painted layer guideColorLayer, black 0 to white 1; anything else (0): each group's

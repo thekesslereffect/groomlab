@@ -3033,6 +3033,9 @@ DisplaySettings displaySettingsOf(ToolState& t, const json& v) {
         else if (key == "tubeWires") s.tubeWires = settingBool(x, k);    // the Tube brush's tubes (the core's display)
         else if (key == "tubeShaded") s.tubeShaded = settingBool(x, k);
         else if (key == "tubeColors") s.tubeColors = settingBool(x, k);
+        else if (key == "tubeLevelColors") s.tubeLevelColors = settingBool(x, k);  // Colors (Tube levels)
+        else if (key == "tubeViewGroup") s.tubeViewGroup = settingString(x, k);   // Lock view: that group's tubes alone
+        else if (key == "mixedView") s.mixedView = settingString(x, k);           // Mixed view: "<base>:<level>"
         else if (key == "guideWidth") s.guideWidth = settingNumber(x, k);
         else if (key == "guideColorMode") {
             if (x.is_string()) {
@@ -3082,6 +3085,7 @@ DisplaySettings displaySettingsOf(ToolState& t, const json& v) {
             th.version = hashString(hash64(0x7E3E), x.dump());
         } else fail("bad_request", "no display setting '" + key + "'");
     }
+    t.host.setMixedView(s.mixedView);  // (the root tool shows the roots as Mixed view does)
     return s;
 }
 
@@ -4060,13 +4064,25 @@ bool runToolCommandIn(Session& s, ToolState& t, const std::string& cmd, const js
         }
         const bool apply = optBool(args, "apply", false);
         if (!apply && guides.empty()) fail("state", "select a root first (Select root), then Subdivide");
+        // The density map ("map", default the one map) and the multiplier; Apply ("apply") cuts every
+        // cut by them again all over ("force", default true: the card's Apply).
+        RootSubdivisionOptions options;
+        options.map = optString(args, "map", kSubdivisionDensityMap);
+        options.multiplier = static_cast<float>(optNumber(args, "multiplier", 1.0));
+        options.force = apply && optBool(args, "force", true);
         const std::size_t before = t.host.edits().size();
         const MeshPtr scalp = s.groom->scalp();
         SubdivisionResult done;
-        editGuides(t, apply ? "root density" : "subdivide root", [&](GuideHierarchy& g) {
-            done = apply ? applySubdivisionDensity(g, *scalp, guides) : subdivideRootTubes(g, *scalp, guides);
+        editGuides(t, apply ? "apply root density" : "subdivide root", [&](GuideHierarchy& g) {
+            done = apply ? applySubdivisionDensity(g, *scalp, {}, options) : subdivideRootTubes(g, *scalp, guides, options);
         });
         result = {{"cells", done.cells}, {"removed", done.removed}, {"kept", done.kept}};
+        // (The level the cells are in: the card shows it.)
+        if (!done.cells.empty()) {
+            const std::shared_ptr<const GuideHierarchy> after = s.groom->authoredHierarchy();
+            const HierarchyGuide* cell = after ? after->guide(done.cells.front()) : nullptr;
+            if (cell) result["cellLevel"] = after->groupDepth(cell->group) + 1;
+        }
         result["committed"] = t.host.edits().size() != before;
         if (result["committed"].get<bool>()) {
             t.redoLabels.clear();

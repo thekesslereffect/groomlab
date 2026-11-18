@@ -92,7 +92,8 @@ public:
     // The last thing the tool has to say (the card's status line), and a count bumped with each.
     const std::string& message() const { return message_; }
     std::uint64_t messageCount() const { return messageCount_; }
-    bool hidesGuides() const { return started_ && mode_ == Mode::Edit && !edits_.empty(); }
+    // (Edit roots leaves the guides and tubes as the hosts' Visibility switches say: never hidden.)
+    bool hidesGuides() const { return false; }
     const std::vector<GuideId>& selected() const { return picked_; }
     std::size_t outlineCvs() const { return cvs_.size(); }  // Place: the CVs placed so far
 

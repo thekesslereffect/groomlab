@@ -1144,12 +1144,13 @@ DENSITY_MAP = "tubeSubdivisionDensity"  # the vertex map Subdivide reads (1: the
 DENSITY_START = 0.5                     # its value where nothing is painted
 
 
-def root_subdivide(scalp, apply=False, guides=None):
-    """Subdivide (the selected roots, or `guides`, cut into Voronoi cells) or, with `apply`,
-    Finish painting (the roots cut before cut again where the density map changed; `guides` not
-    cut yet, cut); one undo step (helper root_subdivide). Returns {"cells", "removed", "kept"}."""
+def root_subdivide(scalp, apply=False, guides=None, multiplier=1.0):
+    """Subdivide (the selected roots, or `guides`, cut into Voronoi cells in the level below, by the
+    density map and `multiplier`) or, with `apply`, Apply (every cut by the map and the multiplier
+    again, all over); one undo step (helper root_subdivide). Returns {"cells", "removed", "kept",
+    "cellLevel": the level the cells are in}."""
     scene = groom.scene_of(scalp)
-    args = {"apply": bool(apply)}
+    args = {"apply": bool(apply), "map": DENSITY_MAP, "multiplier": float(multiplier)}
     if guides is not None:
         args["guides"] = [int(g) for g in guides]
     r = call(scalp, "root_subdivide", **args)
@@ -1160,17 +1161,18 @@ def root_subdivide(scalp, apply=False, guides=None):
     return r
 
 
-def ensure_density_map(scalp):
-    """The subdivision density map (a gray vertex map), made at DENSITY_START when missing, picked
-    to paint toward 1."""
+def ensure_density_map(scalp, pick=True):
+    """The subdivision density map (a gray vertex map), made at DENSITY_START when missing; `pick`:
+    picked to paint toward 1."""
     scene = groom.scene_of(scalp)
     t = scene.groomlab_tools
     refresh_info(scalp, scene)
     if not any(m.name == DENSITY_MAP for m in t.maps):
         map_create(scalp, DENSITY_MAP, kind="vertices", value=DENSITY_START)
-    with props.quiet():
-        t.paint_map = DENSITY_MAP
-        t.value = 1.0
+    if pick:
+        with props.quiet():
+            t.paint_map = DENSITY_MAP
+            t.value = 1.0
     return DENSITY_MAP
 
 

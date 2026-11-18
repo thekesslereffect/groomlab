@@ -734,12 +734,19 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
         sub.enabled = mode in ("select", "duplicate") and t.root_selected > 0
         sub.operator("groomlab.root_tube", text="Delete").action = "DELETE"
         sub.operator("groomlab.root_tube", text="Duplicate", depress=mode == "duplicate").action = "DUPLICATE"
+        # Subdivide | the paint brush (the density map) | Multiplier | Apply (Maya's row).
+        has_map = any(m.name == "tubeSubdivisionDensity" for m in t.maps)
         row = col.row(align=True)
         sub = row.row(align=True)
         sub.enabled = mode in ("select", "duplicate") and t.root_selected > 0
         sub.operator("groomlab.root_tube", text="Subdivide").action = "SUBDIVIDE"
-        row.operator("groomlab.root_tube", text="Finish painting" if t.root_painting else "Paint subdivision density",
-                     depress=t.root_painting).action = "PAINT_DENSITY"
+        sub = row.row(align=True)
+        sub.enabled = has_map or t.root_painting
+        sub.operator("groomlab.root_tube", text="", icon="BRUSH_DATA", depress=t.root_painting).action = "PAINT_DENSITY"
+        row.prop(t, "root_multiplier", text="Multiplier", slider=True)
+        sub = row.row(align=True)
+        sub.enabled = has_map
+        sub.operator("groomlab.root_tube", text="Apply").action = "APPLY_DENSITY"
         col.prop(t, "root_snap")
         col.prop(t, "root_draw_path")
         sliders = col.column(align=True)
@@ -779,6 +786,8 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
             op = row.operator("groomlab.tube_level", text=str(k + 1), depress=k + 1 == t.tube_level)
             op.action = "SHOW"
             op.level = k + 1
+        col.prop(t, "tube_lock_view")
+        col.prop(t, "tube_mixed_view")
 
     def draw_profile(self, card, context, t):
         """Profile (the shape picked, Apply, the library with its New / Duplicate / Rename / Delete:
@@ -795,6 +804,7 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
             col.prop(t, "tube_shaded")
             col.prop(t, "tube_wireframe")
             col.prop(t, "tube_colors")
+            col.prop(t, "tube_level_colors")
             col.prop(t, "tubes_always")
         # Root, Mid and Tip (Maya's rows): each profile's picker and Apply (the shape and its
         # Length to every targeted guide), its Length under it.
