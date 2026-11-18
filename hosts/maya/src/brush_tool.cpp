@@ -794,6 +794,7 @@ public:
     }
     float softSelectRadius() override { return readSoftSelectRadius(c_.groom_.node()); }
     std::set<std::string> hiddenGroups() override { return readHiddenGuideGroups(c_.groom_.node()); }
+    std::string mixedView() override { return MPlug(c_.shape_->thisMObject(), GroomShape::aMixedView).asString().asChar(); }
     int guideSmoothing() override { return MPlug(c_.shape_->thisMObject(), GroomShape::aGuideSmoothing).asInt(); }
     bool shotSculpt() override { return plug("shotSculpt").asBool(); }
     double seconds() override { return mayaSeconds(plug("time").asMTime()); }

@@ -302,12 +302,13 @@ struct TubeDisplayOptions {
     std::string mixedView;  // the tube hierarchy's Mixed view (MixedView): "<base group>:<level>", "" off
 };
 // The tube hierarchy's Mixed view ("<base group>:<level>", "" off): working on a level, its guides
-// and tubes, and each of the levels above's that no level below continues (a guide there with no
-// children), are shown, the hierarchy's others not, whichever of its groups are hidden.
+// and tubes show, and the tubes (not the guides) of the levels above that no level below continues
+// (a guide there with no children); the hierarchy's others not, whichever of its groups are hidden.
 class MixedView {
 public:
     MixedView(const GuideHierarchy* hierarchy, const std::string& spec);
-    // 1 shown, 0 not, -1 not the hierarchy's (or the view off): as its group says.
+    // 1 its guide and tube shown (the level worked on), 2 its tube alone (a level above, not
+    // continued), 0 neither, -1 not the hierarchy's (or the view off): as its group says.
     int shows(const GuideHierarchy& hierarchy, const HierarchyGuide& g) const;
     bool on() const { return level_ > 0; }
 

@@ -1113,7 +1113,7 @@ int MixedView::shows(const GuideHierarchy& hierarchy, const HierarchyGuide& g) c
     if (!top || top->name != base_) return -1;
     const int level = hierarchy.groupDepth(g.group) + 1;
     if (level == level_) return 1;
-    return level < level_ && !parents_.count(g.id) ? 1 : 0;
+    return level < level_ && !parents_.count(g.id) ? 2 : 0;
 }
 
 bool tubeDrawn(const std::string& view, const std::string& name, bool hidden) {
@@ -1133,7 +1133,7 @@ std::vector<const HierarchyGuide*> activeTubeGuides(const GuideHierarchy& hierar
             const GuideGroup* grp = hierarchy.group(g.group);
             const std::string name = grp ? grp->name : std::string();
             const int m = mixed.shows(hierarchy, g);
-            if (!tubeDrawn(tubeViewGroup, name, m >= 0 ? m == 0 : grp && hidden.count(name) > 0)) continue;
+            if (!tubeDrawn(tubeViewGroup, name, m >= 0 ? m == 0 : grp && hidden.count(name) > 0)) continue;  // (tubes: 1 and 2)
         }
         float frozen = 0.0f;
         if (layers && hierarchy.effectiveAttribute(g, freeze, &frozen) && frozen >= 0.5f) continue;
@@ -2372,10 +2372,12 @@ void DisplayBuilder::buildGuides(const DisplayInputs& in, const DisplaySettings&
     const std::map<std::string, std::array<float, 3>> groupColors = parseGuideGroupColors(s.guideGroupColors);
     const std::set<std::string> hiddenNames = parseHiddenGuideGroups(s.hiddenGuideGroups);
     const MixedView mixed(hierarchy.get(), s.mixedView);
+    // (Mixed view: its hierarchy's guides as it says: the level worked on alone; their tubes, also
+    // the levels above it does not continue: hiddenTube.)
     auto hiddenGuide = [&](const HierarchyGuide& g) {
-        if (hierarchy && mixed.on()) {  // (Mixed view: its hierarchy's guides as it says)
+        if (hierarchy && mixed.on()) {
             const int m = mixed.shows(*hierarchy, g);
-            if (m >= 0) return m == 0;
+            if (m >= 0) return m != 1;
         }
         if (hiddenNames.empty() || !hierarchy) return false;
         const GuideGroup* grp = hierarchy->group(g.group);
@@ -2419,7 +2421,9 @@ void DisplayBuilder::buildGuides(const DisplayInputs& in, const DisplaySettings&
             if (level < 0 || level >= kMaxDrawnGuideLevels) continue;
             // (Lock view: the tubes of that group alone, whatever guides show.)
             const GuideGroup* viewed = s.tubeViewGroup.empty() ? nullptr : hierarchy->group(g.group);
-            const bool tubeShown = s.tubeViewGroup.empty() ? !hiddenGuide(g) : tubeDrawn(s.tubeViewGroup, viewed ? viewed->name : std::string(), hiddenGuide(g));
+            const int mixedAt = mixed.on() ? mixed.shows(*hierarchy, g) : -1;
+            const bool tubeHidden = mixedAt >= 0 ? mixedAt == 0 : hiddenGuide(g);
+            const bool tubeShown = s.tubeViewGroup.empty() ? !tubeHidden : tubeDrawn(s.tubeViewGroup, viewed ? viewed->name : std::string(), tubeHidden);
             if (s.tubes && tubeShown) appendTubeSurface(tubes, g, hierarchy->scale());
             if (hiddenGuide(g)) continue;
             if (!s.guides || g.points.size() < 2) continue;
@@ -2485,7 +2489,7 @@ void DisplayBuilder::buildGuides(const DisplayInputs& in, const DisplaySettings&
     if (moving) {
         for (const Guide& g : moving->guides()) {
             if (g.points.size() < 2) continue;
-            if (hierarchy && !hiddenNames.empty()) {
+            if (hierarchy && (!hiddenNames.empty() || mixed.on())) {
                 const HierarchyGuide* own = hierarchy->guide(g.id);
                 if (own && hiddenGuide(*own)) continue;
             }
@@ -2546,7 +2550,7 @@ void DisplayBuilder::buildSelection(const DisplayInputs& in, const DisplaySettin
             const HierarchyGuide* g = hierarchy->guide(id);
             if (!g) continue;
             const int m = mixed.shows(*hierarchy, *g);
-            if (m == 0) continue;
+            if (m == 0 || m == 2) continue;
             const GuideGroup* grp = hiddenNames.empty() || m == 1 ? nullptr : hierarchy->group(g->group);
             if (grp && hiddenNames.count(grp->name) > 0) continue;
             appendGuideCurve(weight >= 0.999f ? selected : soft, g->points, smoothing);

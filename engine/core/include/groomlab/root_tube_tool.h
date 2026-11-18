@@ -169,6 +169,7 @@ private:
     std::optional<ScalpPointNormal> center_;
     Outlines neighbours_;
     std::set<std::string> hidden_;  // the guide groups hidden when the roots were last read (shownRoots)
+    std::string mixed_;             // ... and the Mixed view
     std::map<GuideId, std::vector<Vec3f>> edits_, original_;
     std::vector<std::pair<GuideId, int>> drag_;
     std::set<GuideId> touched_;

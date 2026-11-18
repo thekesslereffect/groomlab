@@ -247,9 +247,10 @@ class RootTubeCard(QtCore.QObject):
                                         "view: the other visibility controls work as they do", False, "tubeLockView")
         self.lock_view.toggled.connect(self.lock_toggled)
         self.hierarchy_block.add(self.lock_view.row)
-        self.mixed_view = widgets.switch("Mixed view", "Working on a level, also show the levels above where no level "
-                                         "below continues them (a level 1 tube not split to level 2 shows while you "
-                                         "work on level 2), their guides and tubes", False, "tubeMixedView")
+        self.mixed_view = widgets.switch("Mixed view", "Working on a level, also show the tubes (not the guides) of the "
+                                         "levels above where no level below continues them (a level 1 tube not split "
+                                         "to level 2 shows while you work on level 2), and their roots in Select root "
+                                         "and Edit roots", True, "tubeMixedView")
         self.mixed_view.toggled.connect(self.mixed_toggled)
         self.hierarchy_block.add(self.mixed_view.row)
         self._locked = 0  # Lock view: the level kept in view (0: none), of hierarchy _locked_base
@@ -313,6 +314,11 @@ class RootTubeCard(QtCore.QObject):
         picked = self.owner.current_group()
         current = levels.index(picked) + 1 if picked in levels else 1
         self._current = current
+        if groom and base:
+            try:  # (Mixed view follows the level shown)
+                root_tubes.set_mixed_view(groom, base, current if self.mixed_view.isChecked() else 0)
+            except RuntimeError:
+                pass
         if self._locked and (base != self._locked_base or self._locked > len(levels)):
             self._unlock()  # (another hierarchy, or its locked level gone)
         state = (base, tuple(levels), current)

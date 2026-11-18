@@ -428,6 +428,7 @@ public:
     virtual bool paintSelection(const std::vector<GuideId>& /*selection*/, bool /*final*/) { return false; }
     virtual float softSelectRadius() { return 0.0f; }
     virtual std::set<std::string> hiddenGroups() { return {}; }
+    virtual std::string mixedView() { return {}; }  // the tube hierarchy's Mixed view (display.h MixedView)
     virtual int guideSmoothing() { return 0; }  // how hover lines are drawn (smoothPolyline)
     // Shot sculpting: strokes reshape the groom as shown and record a corrective at this time.
     virtual bool shotSculpt() { return false; }

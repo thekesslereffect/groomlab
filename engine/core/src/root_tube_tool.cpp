@@ -8,6 +8,7 @@
 #include <cmath>
 #include <stdexcept>
 
+#include "groomlab/display.h"
 #include "groomlab/stroke.h"
 #include "groomlab/tube.h"
 #include "groomlab/view_projection.h"
@@ -122,10 +123,15 @@ namespace {
 std::vector<GuideId> shownRoots(StrokeHost& host, const GuideHierarchy& h, const std::vector<GuideId>& selected = {}) {
     std::vector<GuideId> out = rootTubesOf(h, selected);
     const std::set<std::string> hidden = host.hiddenGroups();
-    if (hidden.empty()) return out;
+    const MixedView mixed(&h, host.mixedView());
+    if (hidden.empty() && !mixed.on()) return out;
     out.erase(std::remove_if(out.begin(), out.end(), [&](GuideId id) {
                   const HierarchyGuide* g = h.guide(id);
-                  const GuideGroup* grp = g ? h.group(g->group) : nullptr;
+                  if (!g) return true;
+                  // (Mixed view: the level worked on, and the levels above it does not continue.)
+                  const int m = mixed.on() ? mixed.shows(h, *g) : -1;
+                  if (m >= 0) return m == 0;
+                  const GuideGroup* grp = h.group(g->group);
                   return grp && hidden.count(grp->name) > 0;
               }),
               out.end());
@@ -1020,9 +1026,12 @@ std::vector<RootTubeTool::Item> RootTubeTool::overlay(StrokeHost& host) {
     {
         // (The levels shown changed: the roots of those shown, read again.)
         std::set<std::string> hidden = host.hiddenGroups();
-        if (hidden != hidden_) {
+        std::string mixed = host.mixedView();
+        if (hidden != hidden_ || mixed != mixed_) {
             hidden_ = std::move(hidden);
+            mixed_ = std::move(mixed);
             if (mode_ == Mode::Select || mode_ == Mode::Place) reloadRoots(host);
+            if (mode_ == Mode::Edit) beginEdit(host);  // (Edit roots: the roots shown now)
         }
     }
     if (!started_) return out;
