@@ -19,6 +19,8 @@
 #endif
 #include <cstdio>
 
+#include "groomlab/profile.h"
+
 namespace groomlab::app {
 
 namespace {
@@ -199,20 +201,30 @@ OffscreenResult OffscreenView::frame(GroomRenderer& renderer, const OrbitCamera&
     timer.start();
     QRhiCommandBuffer* cb = nullptr;
     if (rhi_->beginOffscreenFrame(&cb) != QRhi::FrameOpSuccess) return result;
+    // The profiler's rows (profile.h): the renderer's CPU side (its uploads and the passes it
+    // records, "app.render.*" inside it), the frame handed to the device, the wait for the GPU to
+    // finish it (everything it ran: the passes, and what a strand change makes it build again).
+    ProfilePhases phase("app.frame.render");
     renderer.render(rhi_, cb, target_.get(), camera);
+    phase.next("app.frame.submit");
     if (readback) {
         QRhiResourceUpdateBatch* batch = rhi_->nextResourceUpdateBatch();
         batch->readBackTexture(QRhiReadbackDescription(texture_.get()), &read);
         cb->resourceUpdate(batch);
     }
     rhi_->endOffscreenFrame();
+    phase.next("app.frame.waitGpu");
     waitForGpu(rhi_);  // the time is the whole frame's
+    phase.stop();
     printDebugMessages(rhi_);
     result.firstFrameMs = result.msPerFrame = timer.nsecsElapsed() / 1e6;
     // (The last frame whose timestamps came back: this one, or on some backends the one before.)
     result.gpuMsPerFrame = cb->lastCompletedGpuTime() * 1000.0;
     result.frames = 1;
-    if (readback && rhi_->backend() != QRhi::Null) result.image = imageFromReadback(read, rhi_->isYUpInFramebuffer());
+    if (readback && rhi_->backend() != QRhi::Null) {
+        const ProfileScope scope("app.frame.readImage");
+        result.image = imageFromReadback(read, rhi_->isYUpInFramebuffer());
+    }
     return result;
 }
 

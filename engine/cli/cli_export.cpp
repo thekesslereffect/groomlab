@@ -11,6 +11,7 @@
 #include "groomlab/frame_time.h"
 #include "groomlab/groom_scene.h"
 #include "groomlab/groom_session.h"
+#include "groomlab/profile.h"
 #include "groomlab/scales.h"
 #include "groomlab/usd_writer.h"
 #include "groomlab/vrscene_writer.h"
@@ -130,6 +131,11 @@ ExportReport exportStrands(GroomScene& scene, const ExportOptions& a, std::ostre
             auto times = scene.nodeTimes();
             std::sort(times.begin(), times.end(), [](const auto& x, const auto& y) { return x.second > y.second; });
             for (const auto& [node, ms] : times) *log << "  " << node << ": " << ms << " ms\n";
+            // The phases inside the nodes (profile.h, GROOMLAB_PROFILE=1), this frame's.
+            if (profileEnabled()) {
+                *log << "  profile:\n" << profileReportText("    ");
+                profileReset();
+            }
         }
     }
     if (vrsceneWriter) vrsceneWriter->close();

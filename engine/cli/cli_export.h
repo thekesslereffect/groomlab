@@ -20,7 +20,7 @@ struct ExportOptions {
     double end = 1.0;
     double step = 1.0;
     float density = 1.0f;
-    bool timings = false;         // the milliseconds each graph node took, per frame
+    bool timings = false;         // the milliseconds each graph node took, per frame (GROOMLAB_PROFILE=1: their phases too, profile.h)
     bool stats = false;           // the session's stats (GroomStats JSON) after the first frame
     std::string scales = "mesh";  // how scales are written (USD: mesh, instancer, both, none)
     bool velocities = false;      // Alembic: each point's velocity (.velocities), for motion blur

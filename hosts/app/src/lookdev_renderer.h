@@ -116,13 +116,11 @@ public:
     // Partial texture writes (default on; GROOMLAB_APP_PARTIAL_UPLOADS=0 turns them off): off,
     // every change writes the textures whole (the tests compare both).
     void setPartialUploads(bool on) { partialUploads_ = on; }
-    bool partialUploads() const { return partialUploads_; }
     // Whole writes built ahead (default off: tests, scripted runs): setHair builds the buffers a
     // whole write needs on a thread of their own, and until they are built the frames keep
     // drawing the hair the textures hold (wantsAnotherFrame), so the frame a commit lands in
     // costs the writes alone, not the build. Partial writes are built in the frame, as ever.
     void setBuildAhead(bool on) { buildAhead_ = on; }
-    bool buildAhead() const { return buildAhead_; }
     // Whether a whole write's buffers are building (the hair drawn is the one before).
     bool hairBuilding() const;
     // How the hair is drawn.

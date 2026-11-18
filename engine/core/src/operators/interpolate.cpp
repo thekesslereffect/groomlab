@@ -180,6 +180,7 @@
 #include "groomlab/paths.h"
 #include "groomlab/point_index.h"
 #include "groomlab/portable_math.h"
+#include "groomlab/profile.h"
 #include "groomlab/ramp.h"
 #include "groomlab/random.h"
 #include "groomlab/scalp_pieces.h"
@@ -218,7 +219,7 @@ void smoothAlong(const T* x, std::size_t n, float sigma, T* out, const T& before
     thread_local std::vector<float> weights;
     weights.resize(static_cast<std::size_t>(radius) + 1);
     const float inv = -0.5f / (sigma * sigma);
-    for (int k = 0; k <= radius; ++k) weights[static_cast<std::size_t>(k)] = std::exp(static_cast<float>(k * k) * inv);
+    for (int k = 0; k <= radius; ++k) weights[static_cast<std::size_t>(k)] = pm::exp(static_cast<float>(k * k) * inv);
     auto at = [&](int i) { return i < 0 ? before : i > last ? after : x[static_cast<std::size_t>(i)]; };
     for (int i = 0; i <= last; ++i) {
         T sum = x[static_cast<std::size_t>(i)] * weights[0];
@@ -345,8 +346,8 @@ struct Clearance {
         const std::vector<Vec3f>& points = scalp->hasRest() ? scalp->restPoints() : scalp->points();
         Vec3f lo = points.empty() ? Vec3f{} : points.front(), hi = lo;
         for (const Vec3f& p : points) {
-            lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
-            hi = {std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
+            lo = minPerAxis(lo, p);
+            hi = maxPerAxis(hi, p);
         }
         const float diagonal = (hi - lo).length();
         if (!(diagonal > 0.0f) || !std::isfinite(diagonal)) return c;
@@ -381,25 +382,6 @@ std::shared_ptr<const InterpolateClearance> clearanceInputs(const Clearance& c, 
 
 // Tests: the binding as first written (setInterpolateReferencePaths), to compare.
 std::atomic<bool> referencePaths{false};
-
-// A polyline held as rows (x, y and z arrays) below: each operation is Vec3f's, in its order,
-// four points at a time in SSE lanes where the CPU has them, so every point comes out as the
-// Vec3f code makes it, bit for bit.
-
-// len[j] = |p[j] - p[j - 1]| for j in [1, n): (p[j] - p[j - 1]).length() for each.
-void segmentLengths(const float* x, const float* y, const float* z, std::size_t n, float* len) {
-    std::size_t j = 1;
-#if GROOMLAB_INTERPOLATE_SSE2
-    for (; j + 4 <= n; j += 4) {
-        const __m128 dx = _mm_sub_ps(_mm_loadu_ps(x + j), _mm_loadu_ps(x + j - 1));
-        const __m128 dy = _mm_sub_ps(_mm_loadu_ps(y + j), _mm_loadu_ps(y + j - 1));
-        const __m128 dz = _mm_sub_ps(_mm_loadu_ps(z + j), _mm_loadu_ps(z + j - 1));
-        const __m128 d2 = _mm_add_ps(_mm_add_ps(_mm_mul_ps(dx, dx), _mm_mul_ps(dy, dy)), _mm_mul_ps(dz, dz));
-        _mm_storeu_ps(len + j, _mm_sqrt_ps(d2));
-    }
-#endif
-    for (; j < n; ++j) len[j] = (Vec3f(x[j], y[j], z[j]) - Vec3f(x[j - 1], y[j - 1], z[j - 1])).length();
-}
 
 constexpr std::size_t kBindingMemo = 2;  // bindings an Interpolate keeps (a preview and a render, say)
 constexpr std::size_t kBindChunk = 256;  // strands bound per task
@@ -615,8 +597,8 @@ public:
             for (std::size_t s = c * kChunk; s < end; ++s) {
                 const Vec3f& q = queries[s];
                 if (!wanted(s) || !finite(q)) continue;
-                lo = {std::min(lo.x, q.x), std::min(lo.y, q.y), std::min(lo.z, q.z)};
-                hi = {std::max(hi.x, q.x), std::max(hi.y, q.y), std::max(hi.z, q.z)};
+                lo = minPerAxis(lo, q);
+                hi = maxPerAxis(hi, q);
                 ++chunkCount[c];
             }
             chunkLo[c] = lo;
@@ -625,8 +607,8 @@ public:
         Vec3f lo(kHuge, kHuge, kHuge), hi(-kHuge, -kHuge, -kHuge);
         std::size_t searching = 0;
         for (std::size_t c = 0; c < chunks; ++c) {
-            lo = {std::min(lo.x, chunkLo[c].x), std::min(lo.y, chunkLo[c].y), std::min(lo.z, chunkLo[c].z)};
-            hi = {std::max(hi.x, chunkHi[c].x), std::max(hi.y, chunkHi[c].y), std::max(hi.z, chunkHi[c].z)};
+            lo = minPerAxis(lo, chunkLo[c]);
+            hi = maxPerAxis(hi, chunkHi[c]);
             searching += chunkCount[c];
         }
         // A few strands (a dab binding again near the guides it moved), or few to each guide, ask
@@ -834,8 +816,6 @@ private:
     std::vector<float> rows_;
 };
 
-  // strands blended per task
-
 // fillTubes: how far off the plane of a tube's root footprint a strand's root may lie and still
 // be in the tube, in the root section's larger half-extents.
 constexpr float kTubeAlongReach = 4.0f;
@@ -879,26 +859,7 @@ Vec3f scalpNormalAt(const ScalpMesh& scalp, const StrandRoot& root, const Vec3f&
 
 // A thread's working memory for the blend, kept from strand to strand.
 struct Scratch {
-    std::vector<float> rows;  // a strand's x, y and z rows, its segments' lengths, its arc lengths
-    // Per guide of a strand: its root's normal, whether it turns, its rows, its weight and its twist.
-    std::vector<Vec3f> from;
-    std::vector<char> turned;
-    std::vector<const float*> guideRows;
-    std::vector<std::uint32_t> guides;
-    std::vector<float> weights, twists;
-    std::vector<Vec3f> guided, blended, edged;
     std::vector<float> blendedLayer, strandArc;
-    void reserve(std::size_t stride) {
-        if (rows.size() < 5 * stride) rows.resize(5 * stride);
-        if (from.size() < kMaxCandidates) {
-            from.resize(kMaxCandidates);
-            turned.resize(kMaxCandidates);
-            guideRows.resize(kMaxCandidates);
-            guides.resize(kMaxCandidates);
-            weights.resize(kMaxCandidates);
-            twists.resize(kMaxCandidates);
-        }
-    }
 };
 
 // The same guide to the bit: ID, root, points, painted values and layers (what a guide's rows,
@@ -1560,6 +1521,7 @@ private:
              StrandChanges* changed) const {
         const StrandsPtr strands = valueAs<StrandsPtr>(inputs.at(0));
         if (!strands) throw GraphError("Interpolate: strands input not connected");
+        ProfilePhases phase("interpolate.setup");
         const GuidesPtr guides = valueAs<GuidesPtr>(inputs.at(1));
         // With a limitDistance, the influence channel is always there (0 without guides), so
         // params reading it (a Clump's strength, say) work before any guide is placed.
@@ -1623,6 +1585,7 @@ private:
 
         // Guides at a common resolution: at least the strands' own (the core strands', preview_core.h:
         // the same at every preview density), so detail survives.
+        phase.next("interpolate.guideRows");
         const std::size_t samples = interpolateSamples(*strands);
 
         // Guide roots, root normals and offset curves. The offsets are held as rows, x then y then z
@@ -1687,7 +1650,9 @@ private:
         guideLengths.resize(kept.size());
         const bool smoothGuides = true;  // (each guide the smooth curve through its points)
         // keepClearance: the scalp's field.
+        phase.next("interpolate.clearanceField");
         const Clearance clearance = align && !lengthOnly && params().getBool("keepClearance") ? clearanceOf(scalp) : Clearance{};
+        phase.next("interpolate.guideRows");
         // fillTubes: each kept guide's tube laid along its shape as the blend reads it.
         std::shared_ptr<TubeFill> fill;
         const std::vector<Guide>* levelTubes = fillTubes && guides->levelTubes() ? guides->levelTubes().get() : nullptr;
@@ -1760,6 +1725,7 @@ private:
         for (std::size_t g = 0; g < normals.size(); ++g) guideTurns[g] = normals[g].length() == 0.0f ? 0 : 1;
 
         // Guide attributes (GH-7), one row per name over the guides kept above.
+        phase.next("interpolate.guideAttributes");
         std::vector<std::string> attrNames;
         for (const Guide& g : guides->guides()) {
             for (const auto& [name, value] : g.attributes) {
@@ -1805,6 +1771,7 @@ private:
         }
         if (last && (attrNames != made.attrNames || layerNames != made.layerNames)) return false;
         // Parts: strands skip guides across a part.
+        phase.next("interpolate.regions");
         const PartsPtr parts = params().getBool("respectParts") ? valueAs<PartsPtr>(ctx.external("parts")) : nullptr;
         BindParams b = bindParams(roots.size(), parts.get(), align);
 
@@ -1917,6 +1884,7 @@ private:
         // and the params it reads. When only guide roots moved, the strands they cannot reach keep
         // theirs. Incrementally, the strands, scalp, parts and params are the last result's: so is
         // the base key.
+        phase.next("interpolate.bindKey");
         std::uint64_t baseKey = made.baseKey;
         if (!last) {
             findQueries();
@@ -1933,6 +1901,7 @@ private:
         const std::uint64_t key = weighedKey(hashPoints(baseKey, roots), guideWeights);
         std::shared_ptr<const Binding> previous;
         std::shared_ptr<const Binding> binding = findBinding(key, baseKey, &previous);
+        phase.next("interpolate.bind");
         if (!binding) {
             b.guideWeights = guideWeights.empty() ? nullptr : &guideWeights;
             if (!queries) {
@@ -1951,6 +1920,7 @@ private:
             keepBinding(key, binding);
         }
         const Binding& bindings = *binding;
+        phase.next("interpolate.tubes");
         // The strands' tubes: found anew, or (a live stroke's dab) each strand's kept, the tubes whose
         // guides changed noted (their strands blend again).
         std::vector<char> tubeChanged;
@@ -1988,6 +1958,7 @@ private:
 
         // Incrementally, the strands to blend again: those bound to a guide that changed, and
         // (another binding: guide roots moved) those whose guides or weights did.
+        phase.next("interpolate.dirty");
         std::vector<std::uint32_t> dirty;
         if (last) {
             const Binding& boundBefore = *made.binding;
@@ -2016,6 +1987,7 @@ private:
             }
         }
 
+        phase.next("interpolate.copyStrands");
         auto out = std::make_shared<StrandSet>(*strands);
         // The influence varies only with a radius (else it is 1 everywhere): only then is it written.
         const bool influenceWritten = !influenceName.empty() && radius > 0.0f;
@@ -2095,6 +2067,7 @@ private:
             auto strandAt = [&](std::size_t k) { return which ? static_cast<std::size_t>((*which)[k]) : k; };
             std::shared_ptr<const InterpolateClearance> field;
             std::shared_ptr<const std::vector<std::uint32_t>> cursors;
+            ProfileScope clearanceScope("interpolate.engineInputs.clearance");
             if (clearance) {
                 std::string whyNot;
                 field = clearanceInputs(clearance, scalp, &whyNot, true);
@@ -2111,6 +2084,7 @@ private:
                     }
                 }
             }
+            clearanceScope.stop();
             auto data = std::make_shared<gpu::InterpolateInputs>();
             {
                 const std::lock_guard<std::mutex> lock(madeMutex_);
@@ -2212,6 +2186,7 @@ private:
         // (look_cpu.h): in full, or the strands to blend again on a view of them (each one's
         // channels from their defaults, as a fresh output's); the channels, layers, regions and tubes
         // written here.
+        phase.next("interpolate.engineInputs");
         gpu::StageInputs blend;
         engineInputs(last ? &dirty : nullptr, &blend);
         gpu::StageParamReader reader(params(), "");
@@ -2253,12 +2228,15 @@ private:
                 return due;
             });
         };
+        phase.next("interpolate.blend");
         if (!last) {
             gpu::runStageInto(gpu::StageKind::Interpolate, reader, strands, scalp.get(), *out, std::move(blend));
+            phase.next("interpolate.keepCurls");
             if (!guideCurls.empty()) {
                 curlPoints = out->strandPoints(0);
                 parallelFor(0, strandCount, keepCurls, 256);
             }
+            phase.next("interpolate.channels");
             parallelFor(0, strandCount, blendChannels, 1024);
             if (!layerChannels.empty()) {
                 parallelFor(0, strandCount, [&](std::size_t s) {
@@ -2274,6 +2252,7 @@ private:
             if (fill) writeTubeChannels(*out, *fill);
         } else {
             gpu::runStageOnStrands(gpu::StageKind::Interpolate, reader, strands, dirty, scalp.get(), *out, std::move(blend));
+            phase.next("interpolate.channels");
             if (!guideCurls.empty()) curlPoints = out->strandPoints(0);
             forEachListed(dirty, [&](std::size_t s) {
                 thread_local Scratch scratch;
@@ -2288,6 +2267,7 @@ private:
             if (fill) writeTubeChannels(*out, *fill);  // (every strand's tube as it was)
             *changed = StrandChanges::listed(std::move(dirty));
         }
+        phase.next("interpolate.remember");
         const StrandsPtr blended = out;
         remember(blended, strands, guides, kept, binding, attrNames, layerNames, scalpKey, baseKey,
                  regionSource, regions, rowsMade, fill);
@@ -2307,6 +2287,11 @@ private:
         std::vector<float>& bases = out.addStrandChannel("tubeBase", -1.0f);
         std::unordered_map<std::uint64_t, float> numberOf;  // a tube's ID: its number
         for (std::size_t k = 0; k < fill.ids.size() && k < fill.numbers.size(); ++k) numberOf[fill.ids[k]] = fill.numbers[k];
+        std::vector<float> baseNumbers(fill.numbers);  // per tube: its level-0 ancestor's number (its own without one)
+        for (std::size_t k = 0; k < baseNumbers.size() && k < fill.bases.size(); ++k) {
+            const auto base = numberOf.find(fill.bases[k]);
+            if (base != numberOf.end()) baseNumbers[k] = base->second;
+        }
         parallelFor(0, ids.size(), [&](std::size_t s) {
             const std::int32_t t = fill.tubeOf[s];
             if (t < 0) {
@@ -2318,8 +2303,7 @@ private:
             ids[s] = fill.numbers[k];
             us[s] = fill.at[s].u;
             vs[s] = fill.at[s].v;
-            const auto base = k < fill.bases.size() ? numberOf.find(fill.bases[k]) : numberOf.end();
-            bases[s] = base != numberOf.end() ? base->second : fill.numbers[k];
+            bases[s] = baseNumbers[k];
         }, 4096);
     }
 
@@ -2411,6 +2395,13 @@ private:
         const std::vector<float> numbers = stableGroupNumbers(ids);
         for (std::size_t i = 0; i < tubes.size(); ++i) fill.numbers[tubes[i]] = numbers[i];
         const CellGrid grid(centers, cell);
+        // A tube of the strand's lineage within reach along of its root: the root's section
+        // coordinates in it, and whether its outline holds them.
+        struct Reached {
+            std::uint32_t k;
+            SectionPoint at;
+            bool held;
+        };
         parallelFor(0, count, [&](std::size_t s) {
             if (strands.strandPointCount(s) < 2) return;
             const Vec3f root = strands.strandPoints(s)[0];
@@ -2449,7 +2440,11 @@ private:
             std::int32_t best = -1;
             float bestDepth = 0.0f;
             SectionPoint bestAt;
-            // The tubes holding the root.
+            // Its lineage's tubes within reach, gathered once in the grid's order: the three picks
+            // below each go through them in that order.
+            thread_local std::vector<Reached> reachedScratch;
+            std::vector<Reached>& reached = reachedScratch;
+            reached.clear();
             grid.around(root, [&](std::uint32_t i) {
                 const std::uint32_t k = tubes[i];
                 if (!ours(k)) return true;
@@ -2457,8 +2452,15 @@ private:
                 float along = 0.0f;
                 const SectionPoint at = spine.rootCoords(root, &along);
                 if (std::abs(along) > kTubeAlongReach * std::max(spine.rootWidth(), spine.rootHeight())) return true;
-                if (!(tubeShapeDepth(spine.tube(), at.u, at.v) >= 0.0f)) return true;
-                const float depth = footprintDepth(spine, at);
+                reached.push_back({k, at, tubeShapeDepth(spine.tube(), at.u, at.v) >= 0.0f});
+                return true;
+            });
+            // The tubes holding the root.
+            for (const Reached& r : reached) {
+                if (!r.held) continue;
+                const std::uint32_t k = r.k;
+                const SectionPoint at = r.at;
+                const float depth = footprintDepth(fill.spines[k], at);
                 const int level = fill.depths[k];
                 const int bestLevel = best < 0 ? -1 : fill.depths[static_cast<std::size_t>(best)];
                 if (best < 0 || level > bestLevel ||
@@ -2467,8 +2469,7 @@ private:
                     bestDepth = depth;
                     bestAt = at;
                 }
-                return true;
-            });
+            }
             // Its root's deeper tubes holding none of it (a split's slices leave gaps between them
             // and short of the root's edge, or it lies in no tube at all): the nearest of the
             // deepest level within reach takes it, so every strand of a split root rides (and
@@ -2480,17 +2481,15 @@ private:
                 int adoptLevel = -1;
                 float adoptDepth = 0.0f;
                 SectionPoint adoptAt;
-                grid.around(root, [&](std::uint32_t i) {
-                    const std::uint32_t k = tubes[i];
+                for (const Reached& r : reached) {
+                    const std::uint32_t k = r.k;
                     const int level = fill.depths[k];
-                    if (!ours(k) || level <= heldLevel) return true;
+                    if (level <= heldLevel) continue;
                     const TubeSpine& spine = fill.spines[k];
                     const float extent = std::max(spine.rootWidth(), spine.rootHeight());
-                    float along = 0.0f;
-                    const SectionPoint at = spine.rootCoords(root, &along);
-                    if (std::abs(along) > kTubeAlongReach * extent) return true;
+                    const SectionPoint at = r.at;
                     const float depth = footprintDepth(spine, at);
-                    if (depth < -kTubeAdoptReach * extent) return true;
+                    if (depth < -kTubeAdoptReach * extent) continue;
                     if (adopt < 0 || level > adoptLevel ||
                         (level == adoptLevel && (depth > adoptDepth || (depth == adoptDepth && static_cast<std::int32_t>(k) < adopt)))) {
                         adopt = static_cast<std::int32_t>(k);
@@ -2498,8 +2497,7 @@ private:
                         adoptDepth = depth;
                         adoptAt = at;
                     }
-                    return true;
-                });
+                }
                 if (adopt >= 0) {
                     best = adopt;
                     bestAt = adoptAt;
@@ -2514,17 +2512,14 @@ private:
             std::int32_t edge = -1;
             float edgeDistance = blend;
             SectionPoint edgeAt;
-            grid.around(root, [&](std::uint32_t i) {
-                const std::uint32_t k = tubes[i];
+            for (const Reached& r : reached) {
+                const std::uint32_t k = r.k;
                 const int level = fill.depths[k];
-                if (level <= ownLevel || !ours(k)) return true;
+                if (level <= ownLevel || r.held) continue;
                 const TubeSpine& spine = fill.spines[k];
-                float along = 0.0f;
-                const SectionPoint at = spine.rootCoords(root, &along);
-                if (std::abs(along) > kTubeAlongReach * std::max(spine.rootWidth(), spine.rootHeight())) return true;
-                if (tubeShapeDepth(spine.tube(), at.u, at.v) >= 0.0f) return true;
+                const SectionPoint at = r.at;
                 const float d = tubeOutsideDistance(spine.tube(), spine.rootHeight() / spine.rootWidth(), at.u, at.v, blend);
-                if (!(d < blend)) return true;
+                if (!(d < blend)) continue;
                 const int edgeLevel = edge < 0 ? -1 : fill.depths[static_cast<std::size_t>(edge)];
                 if (edge < 0 || d < edgeDistance ||
                     (d == edgeDistance && (level > edgeLevel || (level == edgeLevel && static_cast<std::int32_t>(k) < edge)))) {
@@ -2532,8 +2527,7 @@ private:
                     edgeDistance = d;
                     edgeAt = at;
                 }
-                return true;
-            });
+            }
             if (edge < 0) return;
             const float x = edgeDistance / blend;
             fill.edgeOf[s] = edge;
@@ -2585,6 +2579,7 @@ private:
                                                const std::shared_ptr<const RegionSource>& regionSource,
                                                const std::shared_ptr<const RegionSplit>& regions) {
         ++bindCount;
+        ProfilePhases phase("interpolate.bind.reaches");
         const bool nearestOnly = b.nearestOnly;
         const float reach = b.reach, power = b.power;
         const PartLines* parts = b.parts;
@@ -2701,6 +2696,7 @@ private:
         // do not depend on the paths; binding again, which strands search does).
         const bool referenced = referencePaths.load(std::memory_order_relaxed);
         auto makeCells = [&](auto&& searches) {
+            const ProfileScope scope("interpolate.bind.cells");
             for (std::size_t k = 0; k < subsets.size(); ++k) {
                 Subset& sub = subsets[k];
                 if (!sub.used) continue;
@@ -2711,16 +2707,19 @@ private:
         };
         auto makeFronts = [&] {
             if (!graph) return;
+            const ProfileScope scope("interpolate.bind.fronts");
             out->strandRoots = strandRoots;
             out->guideRoots = guideRoots;
             out->fronts = std::make_shared<const SurfaceFronts>(graph, guideRoots, limits, previous ? previous->fronts.get() : nullptr);
         };
+        phase.next("interpolate.bind.frontsAndCells");
         if (previous) {
             makeFronts();
         } else {
             parallelInvoke(makeFronts, [&] { makeCells([](std::size_t) { return true; }); });
         }
         const SurfaceFronts* fronts = out->fronts.get();
+        phase.next("interpolate.bind.reuse");
 
         // Only some guide roots moved: what changed, where it was and is (the moved guides,
         // before and after, and the guides whose reach or paths changed). A strand none of these
@@ -2752,8 +2751,8 @@ private:
         Vec3f lo{0.0f, 0.0f, 0.0f}, hi = lo;
         if (!changed.empty()) lo = hi = changed[0];
         for (const Vec3f& p : changed) {
-            lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
-            hi = {std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
+            lo = minPerAxis(lo, p);
+            hi = maxPerAxis(hi, p);
         }
         const PointIndex changes(reuse ? changed : std::vector<Vec3f>{});
         auto untouched = [&](const Vec3f& q, float reach2) {
@@ -2808,6 +2807,7 @@ private:
         }
         if (previous) makeCells([&](std::size_t s) { return !(reuse && (shared[s / kBindChunk] || keeps[s])); });
         std::atomic<std::size_t> searchedTotal{0};
+        phase.next("interpolate.bind.search");
         parallelFor(0, chunks, [&](std::size_t c) {
             if (reuse && shared[c]) {
                 out->chunks[c] = previous->chunks[c];
@@ -3085,8 +3085,8 @@ private:
                 const Vec3f& q = queries[s];
                 const std::size_t i = s - first;
                 if (!chunk->any) chunk->lo = chunk->hi = q;
-                chunk->lo = {std::min(chunk->lo.x, q.x), std::min(chunk->lo.y, q.y), std::min(chunk->lo.z, q.z)};
-                chunk->hi = {std::max(chunk->hi.x, q.x), std::max(chunk->hi.y, q.y), std::max(chunk->hi.z, q.z)};
+                chunk->lo = minPerAxis(chunk->lo, q);
+                chunk->hi = maxPerAxis(chunk->hi, q);
                 chunk->farthest2 = std::max(chunk->farthest2, chunk->reach2[i]);
                 chunk->allStrict = chunk->allStrict && chunk->strict[i];
                 chunk->any = true;

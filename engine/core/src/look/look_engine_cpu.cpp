@@ -14,6 +14,7 @@
 #include "groomlab/flow.h"
 #include "groomlab/operator_state.h"
 #include "groomlab/parallel.h"
+#include "groomlab/profile.h"
 #include "groomlab/look/look_engine_internal.h"
 #include "look_kernels_cpu_support.h"
 #include "slang-cpp-prelude.h"
@@ -364,12 +365,19 @@ protected:
         // Every group a thread's work (the kernels write apart, as on the GPU), a row's groups split
         // across the core's threads.
         const std::size_t groups = groupsX * groupsY;
+        // (The profiler's row a kernel, profile.h: "look.kernel.<Name>".)
+        const bool timed = profileEnabled();
+        const auto started = timed ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
         parallelFor(0, groups, [&](std::size_t i) {
             ComputeVaryingInput v{};
             v.startGroupID = {static_cast<uint32_t>(i % groupsX), static_cast<uint32_t>(i / groupsX), 0};
             v.endGroupID = {v.startGroupID.x + 1, v.startGroupID.y + 1, 1};
             fn(&v, nullptr, &g);
         }, 1);  // (a group is 64 or 256 threads' work: each its own task)
+        if (timed) {
+            const std::string label = std::string("look.kernel.") + kernelName(kernel);
+            profileAdd(label.c_str(), std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count());
+        }
     }
     std::size_t countedGroups(int id, std::uint32_t word, std::uint32_t per, std::size_t groups) override {
         if (!has(id) || buffers_.at(id)->size() <= word) return groups;
