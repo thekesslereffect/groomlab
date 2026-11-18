@@ -367,18 +367,22 @@ void GroomShape::setTubesAlwaysVisible(bool always) {
     M3dView::scheduleRefreshAllViews();
 }
 
-void GroomShape::setTubeWires(bool on, bool shaded, bool wireframe, bool colors) {
+void GroomShape::setTubeWires(bool on, bool shaded, bool wireframe, bool colors, bool levelColors) {
     if (!on) {  // (the look kept, for Always visible)
         if (!tubeWires_) return;
         tubeWires_ = false;
         M3dView::scheduleRefreshAllViews();
         return;
     }
-    if (on == tubeWires_ && shaded == tubeShaded_ && wireframe == tubeWireframe_ && colors == tubeColors_) return;
+    if (on == tubeWires_ && shaded == tubeShaded_ && wireframe == tubeWireframe_ && colors == tubeColors_ &&
+        levelColors == tubeLevelColors_) {
+        return;
+    }
     tubeWires_ = on;
     tubeShaded_ = shaded;
     tubeWireframe_ = wireframe;
     tubeColors_ = colors;
+    tubeLevelColors_ = levelColors;
     M3dView::scheduleRefreshAllViews();
 }
 

@@ -358,27 +358,41 @@ struct Surface {
     }
 };
 
-// A drawn root's middle on the scalp: the apex of the patch it outlines, the scalp's outermost
-// point along the patch's mean normal (its CVs' scalp normals) through the outline's centroid. Not
-// the scalp point nearest the centroid: a root drawn over much of a head has its centroid deep
-// inside, nearer some other side of it (the ear, the neck) than the patch's top.
+// A drawn root's middle on the scalp: the apex of the patch it outlines. The patch is the side of
+// the drawn loop's plane (Newell's normal, through its centroid) holding less of the scalp (the
+// convex dome the loop goes round: a small patch's bump, or the top of a head the loop circles
+// about the ears and neck); its apex the scalp's outermost point that way through the centroid, and
+// that way its normal (the root's guide's default way out). Not the scalp point nearest the
+// centroid, nor the CVs' mean normal: round a whole head those cancel, or tip it down the neck.
 std::pair<V, V> patchApex(const ScalpMesh& scalp, const Pts& outline) {
     const Surface surface{&scalp};
     const V c = centroidOf(outline);
-    V sum(0, 0, 0);
+    V n(0, 0, 0);
     double reach = 0.0;
-    for (const V& p : outline) {
-        sum = sum + surface(p).second;
-        reach = std::max(reach, dist(c, p));
+    for (std::size_t i = 0; i < outline.size(); ++i) {
+        n = n + outline[i].cross(outline[(i + 1) % outline.size()]);
+        reach = std::max(reach, dist(c, outline[i]));
     }
-    const double len = std::sqrt(sum.dot(sum));
-    if (!(len > 1e-9) || !(reach > 0.0)) return surface(c);
-    const V n = sum * (1.0 / len);
+    const double len = n.length();
+    if (!(len > 1e-12) || !(reach > 0.0) || scalp.triangleCount() == 0) return surface(c);
+    n = n * (1.0 / len);
+    // The side holding less of the scalp's area (each triangle by its middle).
+    double side[2] = {0.0, 0.0};
+    const std::vector<Vec3f>& pts = scalp.points();
+    for (const ScalpMesh::Triangle& t : scalp.triangles()) {
+        const V a(pts[static_cast<std::size_t>(t[0])]), b(pts[static_cast<std::size_t>(t[1])]), d(pts[static_cast<std::size_t>(t[2])]);
+        const double area = 0.5 * (b - a).cross(d - a).length();
+        side[((a + b + d) * (1.0 / 3.0) - c).dot(n) > 0.0 ? 0 : 1] += area;
+    }
+    if (side[1] < side[0]) n = n * -1.0;
+    // Its outermost point that way, through the centroid (the first hit coming in from outside).
+    double extent = reach;
+    for (const Vec3f& p : pts) extent = std::max(extent, dist(c, V(p)));
     SurfacePoint hit;
     float d = 0.0f;
-    const V from = c + n * (4.0 * reach + 1e-3);
-    if (!scalp.intersectRay(from.f(), (n * -1.0).f(), &hit, &d) || hit.root.face < 0) return surface(c);
-    return {V(hit.position), unit(V(scalp.normal(hit.root)))};
+    const V from = c + n * (2.0 * extent + 1e-3);
+    if (!scalp.intersectRay(from.f(), (n * -1.0).f(), &hit, &d) || hit.root.face < 0) return {surface(c).first, n};
+    return {V(hit.position), n};
 }
 
 Pts clearOfScalp(Pts pts, const Surface* surface, double size) {
@@ -996,8 +1010,8 @@ std::vector<SliceFitSample> sliceFit(const GuideHierarchy& h, GuideId slice, int
     const HierarchyGuide* g = h.guide(slice);
     const HierarchyGuide* p = within != kNoGuide ? h.guide(within) : g && g->isChild() ? h.guide(g->parent) : nullptr;
     if (!g || !p || g->points.size() < 2 || p->points.size() < 2) throw std::invalid_argument("guide " + std::to_string(slice) + " is not a slice");
-    TubeSpine own(g->points.data(), g->points.size(), g->frameUp, g->tube, h.scale());
-    TubeSpine parent(p->points.data(), p->points.size(), p->frameUp, p->tube, h.scale());
+    TubeSpine own(g->tubePath().data(), g->points.size(), g->frameUp, g->tube, h.scale());
+    TubeSpine parent(p->tubePath().data(), p->points.size(), p->frameUp, p->tube, h.scale());
     if (p->rootNormal.length() > 0.5f && p->rootAcross.length() > 0.5f) parent.setRootOnScalp(p->rootNormal, p->rootAcross);
     if (g->rootNormal.length() > 0.5f && g->rootAcross.length() > 0.5f) own.setRootOnScalp(g->rootNormal, g->rootAcross);
     const std::vector<SectionPoint>& outline = tubeOutline(g->tube);
@@ -1775,6 +1789,26 @@ std::vector<SectionPoint> gapInside(const std::vector<SectionPoint>& polygon, co
         const float s = (wu * way[e1].v - wv * way[e1].u) / cross;
         out[i] = {at[e0].u + way[e0].u * s, at[e0].v + way[e0].v * s};
     }
+    // (Kept only when it is still the polygon, a little smaller: each point near where it was, the
+    // same way round, most of its area. A sharp corner can throw the meeting point far off, which
+    // makes a shape no library takes and loses the slice. Else the whole polygon kSliceGap in, about
+    // its middle.)
+    double after = 0.0;
+    bool close = true;
+    for (std::size_t i = 0; i < n; ++i) {
+        const SectionPoint& a = out[i];
+        const SectionPoint& b = out[(i + 1) % n];
+        after += static_cast<double>(a.u) * b.v - static_cast<double>(b.u) * a.v;
+        close = close && std::hypot(out[i].u - polygon[i].u, out[i].v - polygon[i].v) <= 4.0f * gap;
+    }
+    if (close && after * area > 0.0 && std::abs(after) >= 0.25 * std::abs(area)) return out;
+    float cu = 0.0f, cv = 0.0f;
+    for (const SectionPoint& q : polygon) cu += q.u, cv += q.v;
+    cu /= static_cast<float>(n), cv /= static_cast<float>(n);
+    float reach = 0.0f;
+    for (const SectionPoint& q : polygon) reach = std::max(reach, std::hypot(q.u - cu, q.v - cv));
+    const float k = reach > 0.0f ? std::clamp(1.0f - gap / reach, 0.75f, 1.0f) : 1.0f;
+    for (std::size_t i = 0; i < n; ++i) out[i] = {cu + (polygon[i].u - cu) * k, cv + (polygon[i].v - cv) * k};
     return out;
 }
 
@@ -1788,25 +1822,33 @@ GuideId sliceTube(GuideHierarchy& h, const ScalpMesh& scalp, const TubeSource& s
     // outline), none along the source's outline, so the slices keep the source's outer shape at every
     // level (slices of slices never shrink) with a slight gap only between them.
     const std::vector<SectionPoint> gapped = gapInside(polygon, tubeOutline(source.tube), static_cast<float>(kSliceGap));
-    // The polygon's box in the source's section coordinates, and its points fitted to it.
-    double lo[2] = {1e300, 1e300}, hi[2] = {-1e300, -1e300};
-    std::vector<P2> unit;
-    for (const SectionPoint& q : gapped) {
-        unit.push_back({q.u, q.v});
-        lo[0] = std::min(lo[0], static_cast<double>(q.u)), lo[1] = std::min(lo[1], static_cast<double>(q.v));
-        hi[0] = std::max(hi[0], static_cast<double>(q.u)), hi[1] = std::max(hi[1], static_cast<double>(q.v));
-    }
-    const double cu = 0.5 * (lo[0] + hi[0]), cv = 0.5 * (lo[1] + hi[1]);
-    const double su = 0.5 * (hi[0] - lo[0]), sv = 0.5 * (hi[1] - lo[1]);
-    if (!(su > 1e-6) || !(sv > 1e-6)) return kNoGuide;  // (a sliver)
-    std::vector<SectionPoint> fitted;
-    for (const P2& q : capPoints(unit)) fitted.push_back({static_cast<float>((q.x - cu) / su), static_cast<float>((q.y - cv) / sv)});
-    const std::string name = newShapeName(h);
-    try {
-        h.setTubeShape(name, fitted, false);
-    } catch (const std::invalid_argument&) {
-        return kNoGuide;  // (a shape no library takes)
-    }
+    // The polygon's box in the source's section coordinates, and its points fitted to it as its
+    // shape (the gapped polygon's, else the polygon's as cut: a slice is never lost to a shape no
+    // library takes).
+    double cu = 0.0, cv = 0.0, su = 0.0, sv = 0.0;
+    std::string name;
+    auto fit = [&](const std::vector<SectionPoint>& poly) {
+        double lo[2] = {1e300, 1e300}, hi[2] = {-1e300, -1e300};
+        std::vector<P2> unit;
+        for (const SectionPoint& q : poly) {
+            unit.push_back({q.u, q.v});
+            lo[0] = std::min(lo[0], static_cast<double>(q.u)), lo[1] = std::min(lo[1], static_cast<double>(q.v));
+            hi[0] = std::max(hi[0], static_cast<double>(q.u)), hi[1] = std::max(hi[1], static_cast<double>(q.v));
+        }
+        cu = 0.5 * (lo[0] + hi[0]), cv = 0.5 * (lo[1] + hi[1]);
+        su = 0.5 * (hi[0] - lo[0]), sv = 0.5 * (hi[1] - lo[1]);
+        if (!(su > 1e-6) || !(sv > 1e-6)) return false;  // (a sliver)
+        std::vector<SectionPoint> fitted;
+        for (const P2& q : capPoints(unit)) fitted.push_back({static_cast<float>((q.x - cu) / su), static_cast<float>((q.y - cv) / sv)});
+        name = newShapeName(h);
+        try {
+            h.setTubeShape(name, fitted, false);
+        } catch (const std::invalid_argument&) {
+            return false;
+        }
+        return true;
+    };
+    if (!fit(gapped) && !fit(polygon)) return kNoGuide;
     // Its sections: the source's, scaled to the slice (its gap already in the polygon).
     const double inset = 1.0;
     TubeProfile tube = source.tube;

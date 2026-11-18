@@ -40,6 +40,9 @@ struct Guide {
     // footprint (GuideHierarchy: HierarchyGuide::rootFoot). Unset: its root. Not saved.
     Vec3f rootFoot;
     bool rootFootSet = false;
+    // A slice of a drawn root's tube: the path its tube takes (HierarchyGuide::tubePoints), its
+    // guide's points with the root joined to the scalp. Empty: its tube along its points. Not saved.
+    std::vector<Vec3f> tubePoints;
     // The level of the hierarchy it comes from (0: a root group's): where tubes of several levels
     // hold a strand's root, fillTubes takes the deepest.
     int depth = 0;

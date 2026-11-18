@@ -1717,7 +1717,13 @@ private:
                     const Guide& g = (*levelTubes)[i];
                     if (!g.hasTube || samples < 2) return;
                     thread_local std::vector<Vec3f> resampled;
-                    guideShape(g, samples, smoothGuides, resampled);
+                    if (g.tubePoints.size() == g.points.size() && g.points.size() >= 2) {  // (a slice: its tube's path)
+                        Guide path = g;
+                        path.points = g.tubePoints;
+                        guideShape(path, samples, smoothGuides, resampled);
+                    } else {
+                        guideShape(g, samples, smoothGuides, resampled);
+                    }
                     TubeSpine& spine = fill->spines[kept.size() + i];
                     spine = TubeSpine(resampled.data(), samples, g.frameUp, g.tube);
                     if (align) layFootprint(spine, g, *scalp, scalpNormalAt(*scalp, g.root, resampled.front()));
@@ -1740,8 +1746,16 @@ private:
             roots[k] = restRootOr(align ? scalp.get() : nullptr, g.root, resampled.front());
             normals[k] = align && scalp->contains(g.root) ? scalp->normal(g.root) : Vec3f{};
             if (fill && g.hasTube && samples >= 2) {
-                // The tube along the guide, its root footprint laid on the scalp.
-                fill->spines[k] = TubeSpine(resampled.data(), samples, g.frameUp, g.tube);
+                // The tube along the guide (a slice: along its tube's path), its root footprint laid on the scalp.
+                if (g.tubePoints.size() == g.points.size() && g.points.size() >= 2) {
+                    Guide path = g;
+                    path.points = g.tubePoints;
+                    thread_local std::vector<Vec3f> tubeShape;
+                    guideShape(path, samples, smoothGuides, tubeShape);
+                    fill->spines[k] = TubeSpine(tubeShape.data(), samples, g.frameUp, g.tube);
+                } else {
+                    fill->spines[k] = TubeSpine(resampled.data(), samples, g.frameUp, g.tube);
+                }
                 if (align) {
                     layFootprint(fill->spines[k], g, *scalp, scalpNormalAt(*scalp, g.root, resampled.front()));
                 } else {

@@ -290,6 +290,9 @@ struct TubeDisplayOptions {
     // Each tube in its root tube's color (rootTubeColor: a tube's split tubes and children in its
     // color), else its own from its ID; with Shaded the colors on the surfaces, the wires gray.
     bool colors = false;
+    // Colors (Tube levels): each tube of a tube hierarchy's levels (a split tube) a shade of its own
+    // on top of its color (its root tube's with Colors), so a level's tubes tell apart.
+    bool levelColors = false;
     std::string hiddenGuideGroups;
     // The tube hierarchy's Lock view: a guide group's name whose tubes alone draw (shown or hidden as
     // guides); the guides draw as hiddenGuideGroups says. "": tubes as their guides.

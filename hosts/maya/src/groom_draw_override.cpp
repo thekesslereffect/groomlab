@@ -249,7 +249,8 @@ bool GroomSubSceneOverride::requiresUpdate(const MHWRender::MSubSceneContainer&,
         // The CPU's dots are built for one camera and viewport size: another one rebuilds them.
         // The tube wires turned on or off (their guides and selection: needsUpdate's versions).
         if (shape_->tubeWires() != tubeWiresDrawn_ || shape_->tubeShaded() != tubeShadedDrawn_ ||
-            shape_->tubeWireframe() != tubeWireframeDrawn_ || shape_->tubeColors() != tubeColorsDrawn_) {
+            shape_->tubeWireframe() != tubeWireframeDrawn_ || shape_->tubeColors() != tubeColorsDrawn_ ||
+            shape_->tubeLevelColors() != tubeLevelColorsDrawn_) {
             return true;
         }
         if (!points_.empty() && !gpuDots_) {
@@ -554,6 +555,7 @@ void GroomSubSceneOverride::updateTubeWires(MHWRender::MSubSceneContainer& conta
     tubeShadedDrawn_ = shape_ && shape_->tubeShaded();
     tubeWireframeDrawn_ = shape_ && shape_->tubeWireframe();
     tubeColorsDrawn_ = shape_ && shape_->tubeColors();
+    tubeLevelColorsDrawn_ = shape_ && shape_->tubeLevelColors();
     uiSelection_ = shape_ ? shape_->selectionHash() : 0;  // the selected tubes stand out
     if (!tubeWiresDrawn_) {
         giveBack();
@@ -568,7 +570,7 @@ void GroomSubSceneOverride::updateTubeWires(MHWRender::MSubSceneContainer& conta
     const std::string tubeView = MPlug(object_, GroomShape::aTubeViewGroup).asString().asChar();
     std::uint64_t key = hashCombine(hashCombine(shape_->hierarchyVersion(), uiSelection_), hashChars(hashChars(0x7B3u, hidden), tubeView));
     key = hashCombine(key, reinterpret_cast<std::uintptr_t>(hierarchy.get()));
-    key = hashCombine(key, (tubeShadedDrawn_ ? 2u : 1u) + (tubeWireframeDrawn_ ? 4u : 0u) + (tubeColorsDrawn_ ? 8u : 0u));
+    key = hashCombine(key, (tubeShadedDrawn_ ? 2u : 1u) + (tubeWireframeDrawn_ ? 4u : 0u) + (tubeColorsDrawn_ ? 8u : 0u) + (tubeLevelColorsDrawn_ ? 16u : 0u));
     if (key == tubeWiresKey_ && (container.find(kTubeWiresItem) || container.find(kTubeSurfacesItem))) return;
     tubeWiresKey_ = key;
     // The core's tubes (buildTubeDisplay, every host's): every guide shown, the selected ones
@@ -582,6 +584,7 @@ void GroomSubSceneOverride::updateTubeWires(MHWRender::MSubSceneContainer& conta
     options.wireframe = tubeWireframeDrawn_;
     options.shaded = tubeShadedDrawn_;
     options.colors = tubeColorsDrawn_;
+    options.levelColors = tubeLevelColorsDrawn_;
     options.hiddenGuideGroups = hidden;
     options.tubeViewGroup = tubeView;
     TubeDisplay tubes = buildTubeDisplay(*hierarchy, options, selected);

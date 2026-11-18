@@ -143,20 +143,47 @@ std::vector<P> ccw(std::vector<P> poly) {
 // Corners (points the cells share, welded: exactly equal) nearer each other than `below` along an
 // edge made one: each group of them their middle, or the outline's CV among them where there is
 // one (two CVs never merge: the outline stays as drawn). Shortest edges first; cells tidied after.
+// `p` taken onto the closed polyline `outline` (its nearest point), and how far it was.
+P ontoOutline(const std::vector<P>& outline, const P& p, double* far = nullptr) {
+    P best = p;
+    double bestD = std::numeric_limits<double>::infinity();
+    for (std::size_t i = 0; i < outline.size(); ++i) {
+        const P a = outline[i], b = outline[(i + 1) % outline.size()];
+        const P d = b - a;
+        const double span = d.x * d.x + d.y * d.y;
+        const double f = span > 0.0 ? std::clamp(((p.x - a.x) * d.x + (p.y - a.y) * d.y) / span, 0.0, 1.0) : 0.0;
+        const P q = a + d * f;
+        const double dd = dist(p, q);
+        if (dd < bestD) bestD = dd, best = q;
+    }
+    if (far) *far = bestD;
+    return best;
+}
+
 void mergeCorners(std::vector<std::vector<P>>& cells, const std::vector<P>& outline, double below) {
+    // Corners nearer than `below` merged into one (no sliver edges). A drawn CV keeps its place; a
+    // corner on the drawn border (an inside edge meeting it) stays on it (merged with an inside
+    // corner, at its own place; with another on the border, at their middle taken onto it), so the
+    // cells keep the border just as drawn. Then a corner left lying on a straight edge of every cell
+    // that has it (not a CV) goes: no needless point on a straight edge.
     using Key = std::pair<double, double>;
     std::map<Key, std::size_t> index;
     std::vector<P> at;
-    std::vector<bool> fixed;
+    std::vector<int> rank;  // 2 a CV, 1 on the border, 0 inside
+    double size = 0.0;
+    for (const P& q : outline) size = std::max(size, dist(q, outline.front()));
+    const double onBorder = 1e-6 * std::max(size, 1e-9);
     auto id = [&](const P& p) {
         const auto it = index.find({p.x, p.y});
         if (it != index.end()) return it->second;
         index.emplace(Key{p.x, p.y}, at.size());
         at.push_back(p);
-        fixed.push_back(false);
+        double far = 0.0;
+        ontoOutline(outline, p, &far);
+        rank.push_back(far <= onBorder ? 1 : 0);
         return at.size() - 1;
     };
-    for (const P& p : outline) fixed[id(p)] = true;
+    for (const P& p : outline) rank[id(p)] = 2;
     std::vector<std::pair<double, std::pair<std::size_t, std::size_t>>> edges;
     for (const auto& cell : cells) {
         for (std::size_t i = 0; i < cell.size(); ++i) {
@@ -174,17 +201,53 @@ void mergeCorners(std::vector<std::vector<P>>& cells, const std::vector<P>& outl
         if (length >= below) break;
         std::size_t a = top(ends.first), b = top(ends.second);
         if (a == b || dist(place[a], place[b]) >= below) continue;
-        if (fixed[a] && fixed[b]) continue;
-        if (fixed[b]) std::swap(a, b);
-        // a takes b in: a CV keeps its place, else the group's middle.
+        if (rank[a] == 2 && rank[b] == 2) continue;
+        if (rank[b] > rank[a]) std::swap(a, b);
+        // a takes b in: a CV keeps its place, a border corner stays on the border, else the middle.
         up[b] = a;
-        if (!fixed[a]) place[a] = (place[a] * count[a] + place[b] * count[b]) * (1.0 / (count[a] + count[b]));
+        if (rank[a] == 0) {
+            place[a] = (place[a] * count[a] + place[b] * count[b]) * (1.0 / (count[a] + count[b]));
+        } else if (rank[a] == 1 && rank[b] == 1) {
+            place[a] = ontoOutline(outline, (place[a] * count[a] + place[b] * count[b]) * (1.0 / (count[a] + count[b])));
+        }
         count[a] += count[b];
-        fixed[a] = fixed[a] || fixed[b];
     }
     for (auto& cell : cells) {
         for (P& p : cell) p = place[top(index.at({p.x, p.y}))];
         cell = tidy(cell, 0.0);
+    }
+    // A corner (not a CV) on a straight edge in every cell that has it: dropped from them all.
+    std::map<Key, std::vector<std::pair<std::size_t, std::size_t>>> where;
+    for (std::size_t c = 0; c < cells.size(); ++c) {
+        for (std::size_t i = 0; i < cells[c].size(); ++i) where[{cells[c][i].x, cells[c][i].y}].push_back({c, i});
+    }
+    std::set<Key> cvs;
+    for (const P& q : outline) cvs.insert({q.x, q.y});
+    std::set<Key> drop;
+    for (const auto& [key, uses] : where) {
+        if (cvs.count(key)) continue;
+        bool straight = true;
+        for (const auto& [c, i] : uses) {
+            const auto& cell = cells[c];
+            if (cell.size() <= 3) {
+                straight = false;
+                break;
+            }
+            const P a = cell[(i + cell.size() - 1) % cell.size()], m = cell[i], b = cell[(i + 1) % cell.size()];
+            const double ab = dist(a, b);
+            const double off = ab > 0.0 ? std::abs((b.x - a.x) * (m.y - a.y) - (b.y - a.y) * (m.x - a.x)) / ab : 0.0;
+            if (!(ab > 0.0) || off > 1e-3 * ab) straight = false;
+        }
+        if (straight) drop.insert(key);
+    }
+    if (!drop.empty()) {
+        for (auto& cell : cells) {
+            std::vector<P> kept;
+            for (const P& q : cell) {
+                if (!drop.count({q.x, q.y})) kept.push_back(q);
+            }
+            if (kept.size() >= 3) cell = std::move(kept);
+        }
     }
 }
 

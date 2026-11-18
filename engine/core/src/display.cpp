@@ -1147,7 +1147,7 @@ void appendTubeWire(std::vector<Vec3f>& out, const HierarchyGuide& g, float scal
         for (std::size_t s = 0; s < kAround; ++s) ring[s] = own.perimeterPoint(static_cast<float>(s) / static_cast<float>(kAround));
         cornerSlots.clear();
     }
-    const TubeSpine spine(g.points.data(), n, g.frameUp, g.tube, scale);
+    const TubeSpine spine(g.tubePath().data(), n, g.frameUp, g.tube, scale);  // (a slice: along its tube's path)
     const std::vector<Vec3f>* loop = g.tube.blended() ? nullptr : rootLoop(g, outline);
     // Ring point s at sample i (index[s]: its outline point): from its root loop on the scalp at the
     // root, joining the tube's sections over its first few root widths (as its hair joins them:
@@ -1228,7 +1228,7 @@ std::size_t appendTubeSurface(DisplayGeometry& batch, const HierarchyGuide& g, f
     }
     // Any other: the tube's sections (tube.h) along the guide, its shape's outline (every other
     // point) at each ring, turned, flattened and sized as the sections say.
-    const TubeSpine spine = round ? TubeSpine() : TubeSpine(g.points.data(), n, g.frameUp, g.tube, scale);
+    const TubeSpine spine = round ? TubeSpine() : TubeSpine(g.tubePath().data(), n, g.frameUp, g.tube, scale);
     const std::vector<Vec3f>* loop = round ? nullptr : rootLoop(g, outline);
     const float join = round || spine.empty() ? 1.0f : spine.rootJoin();  // (the root loop joining the sections)
     // Several profiles (tube.h): each outline point carried along them.
@@ -1379,13 +1379,34 @@ TubeDisplay buildTubeDisplay(const GuideHierarchy& hierarchy, const TubeDisplayO
     constexpr float kDim = 0.3f;
     const std::vector<GuideId> rootTubes = options.colors ? hierarchy.rootTubeIds() : std::vector<GuideId>{};
     // Each tube's color (Colors): its root tube's, else its own from its ID; false: the plain color.
+    // A split tube's own shade (Colors (Tube levels)): its color mixed with a hue of its own (its
+    // ID's), so the tubes of a level tell apart, each still of its root's color.
+    auto levelShade = [&](const HierarchyGuide& g, std::array<float, 4>& c) {
+        if (!options.levelColors || !g.isChild()) return;
+        const std::uint64_t h = hashCombine(0x1E7E1C010Bull, static_cast<std::uint64_t>(g.id));
+        const float hue = static_cast<float>(h % 997u) / 997.0f;
+        const float value = 0.7f + 0.5f * static_cast<float>((h >> 20) % 101u) / 100.0f;
+        const float k[3] = {5.0f, 3.0f, 1.0f};
+        for (int i = 0; i < 3; ++i) {
+            const float x = std::fmod(k[i] + hue * 6.0f, 6.0f);
+            const float own = 0.95f * (1.0f - 0.7f * std::max(0.0f, std::min({x, 4.0f - x, 1.0f})));
+            const std::size_t j = static_cast<std::size_t>(i);
+            c[j] = std::clamp((c[j] * 0.55f + own * 0.45f) * value, 0.0f, 1.0f);
+        }
+    };
     auto colorOf = [&](const HierarchyGuide& g, std::array<float, 4>& c) {
-        if (!options.colors) return false;
+        if (!options.colors && !options.levelColors) return false;
+        if (!options.colors) {  // (Colors (Tube levels) alone: the shades on the plain color)
+            c = {0.5f, 0.56f, 0.62f, 1.0f};
+            levelShade(g, c);
+            return g.isChild();
+        }
         const GuideId base = hierarchy.baseIdOf(g);
         const auto at = std::lower_bound(rootTubes.begin(), rootTubes.end(), base);
         if (at != rootTubes.end() && *at == base) {
             const std::array<float, 3> r = rootTubeColor(static_cast<std::size_t>(at - rootTubes.begin()));
             c = {r[0], r[1], r[2], 1.0f};
+            levelShade(g, c);
             return true;
         }
         const std::uint64_t h = hashCombine(0x9E3779B97F4A7C15ull, static_cast<std::uint64_t>(g.id));
@@ -1396,6 +1417,7 @@ TubeDisplay buildTubeDisplay(const GuideHierarchy& hierarchy, const TubeDisplayO
             c[static_cast<std::size_t>(i)] = 0.95f * (1.0f - 0.65f * std::max(0.0f, std::min({x, 4.0f - x, 1.0f})));
         }
         c[3] = 1.0f;
+        levelShade(g, c);
         return true;
     };
     constexpr float kWireAlpha = 0.6f;

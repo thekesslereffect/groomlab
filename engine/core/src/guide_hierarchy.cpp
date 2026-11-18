@@ -726,8 +726,16 @@ void GuideHierarchy::resolveFollower(HierarchyGuide& child, const HierarchyGuide
                                      const std::vector<Frame>* parentFrames) {
     invalidateHash();
     const std::size_t n = parent.points.size();
+    // A slice of a drawn root's tube (isSliceOf): placed along its parent's tube (tubePath), its
+    // frames that path's.
+    const bool slice = isSliceOf(child, parent);
+    const std::vector<Vec3f>& along = slice ? parent.tubePath() : parent.points;
     std::vector<Frame> computed;
-    if (!parentFrames || parentFrames->size() != n) computed = parent.frames();
+    if (slice && along.data() != parent.points.data()) {
+        computed = rotationMinimizingFrames(along.data(), along.size(), parent.frameUp);
+    } else if (!parentFrames || parentFrames->size() != n) {
+        computed = parent.frames();
+    }
     const std::vector<Frame>& frames = computed.empty() ? *parentFrames : computed;
     child.points.resize(n);
     const bool blended = parent.tube.blended();
@@ -736,7 +744,7 @@ void GuideHierarchy::resolveFollower(HierarchyGuide& child, const HierarchyGuide
     // groomed away from its parent follows the parent round a bend keeping its own shape, never
     // zig-zagging back across it (alongCurve; offsetsFromWorld's inverse).
     const bool slides = child.offsetsAlongCurve;
-    const std::vector<float> arc = slides ? arcLengthsOf(parent.points) : std::vector<float>{};
+    const std::vector<float> arc = slides ? arcLengthsOf(along) : std::vector<float>{};
     // The offsets are the parent tube's section coordinates (tube.h): across in its sections,
     // along in scene units. A plain round tube's sections (no twist, aspect 1) give the offsets
     // times the width, to the bit as before sections.
@@ -747,20 +755,48 @@ void GuideHierarchy::resolveFollower(HierarchyGuide& child, const HierarchyGuide
         const SectionPoint q = blended ? tubeBlendAt(parent.tube.blendPoint(off.x, off.y), off.x, off.y, t) : SectionPoint{off.x, off.y};
         const Vec3f o = sectionOffset(parent.tube.sectionAt(t), q.u, q.v, scale_);
         if (slides) {
-            const AlongCurve at = alongCurve(parent.points, frames, arc, arc[i] + off.z * scale_);
+            const AlongCurve at = alongCurve(along, frames, arc, arc[i] + off.z * scale_);
             child.points[i] = at.point + at.frame.toWorld({o.x, o.y, 0.0f});
         } else {
-            child.points[i] = parent.points[i] + frames[i].toWorld({o.x, o.y, off.z * scale_});
+            child.points[i] = along[i] + frames[i].toWorld({o.x, o.y, off.z * scale_});
         }
     }
     // A shaped tube's children keep their frames started from its root's, so their own tubes lie
     // as the parent's does however it turns.
     if (parent.tube.shaped() && n > 0) child.frameUp = frames[0].normal;
 
-    // A slice of a drawn root's tube (isSliceOf): left in its parent's sections; its root the
-    // scalp's point nearest its guide's first.
-    const bool slice = isSliceOf(child, parent);
-    if (slice && scalp && scalp->triangleCount() > 0 && n > 0) child.root = scalp->closestPoint(child.points[0]).root;
+    // A slice of a drawn root's tube: its tube's path as placed (in the parent's sections all along);
+    // its guide the same with its root taken onto the scalp (along the parent's root normal) and
+    // joined back over the tube's join, (1 - t / join)^2, so the guide grows from the scalp while
+    // the tube nests in its parent.
+    child.tubePoints.clear();
+    if (slice && scalp && scalp->triangleCount() > 0 && n >= 2) {
+        child.tubePoints = child.points;
+        const Vec3f start = child.tubePoints[0];
+        const Vec3f nrm = parent.rootNormal.length() > 0.5f ? parent.rootNormal.normalized() : Vec3f{};
+        const SurfacePoint near = scalp->closestPoint(start);
+        Vec3f rooted = near.position;
+        if (nrm.length() > 0.5f) {
+            float best = std::numeric_limits<float>::infinity();
+            for (const Vec3f& way : {nrm, nrm * -1.0f}) {
+                SurfacePoint hit;
+                float d = 0.0f;
+                if (scalp->intersectRay(start, way, &hit, &d) && std::abs(d) < best) best = std::abs(d), rooted = hit.position;
+            }
+            if (std::isinf(best) || best > 4.0f * (near.position - start).length() + 1e-6f) rooted = near.position;
+        }
+        float length = 0.0f;
+        for (std::size_t i = 1; i < n; ++i) length += (child.tubePoints[i] - child.tubePoints[i - 1]).length();
+        const float extent = child.tube.widthAt(0.0f) * std::max(1.0f, child.tube.aspectAt(0.0f)) * scale_ * std::max(child.tube.joinScale, 1e-3f);
+        const float join = length > 0.0f ? std::clamp(3.0f * extent / length, 1e-3f, 1.0f) : 1.0f;
+        const Vec3f lift = rooted - start;
+        for (std::size_t i = 0; i < n; ++i) {
+            const float t = paramAt(i, n);
+            const float w = t < join ? (1.0f - t / join) * (1.0f - t / join) : 0.0f;
+            child.points[i] = child.tubePoints[i] + lift * w;
+        }
+        child.root = scalp->closestPoint(rooted).root;
+    }
     // A shaped tube's parent leaving the scalp at a slant: its children's roots on its root
     // footprint (footprintTurn), not snapped straight down from its root section.
     if (!slice && scalp && scalp->triangleCount() > 0 && n >= 2) {
@@ -795,6 +831,7 @@ void GuideHierarchy::resolveFollower(HierarchyGuide& child, const HierarchyGuide
     // Its own point count: the shape respaced along its smooth curve (the root stays where it is).
     if (child.pointCount >= 2 && child.pointCount != n && n >= 2) {
         child.points = resampleSmoothCurve(child.points.data(), n, child.pointCount);
+        if (child.tubePoints.size() == n) child.tubePoints = resampleSmoothCurve(child.tubePoints.data(), n, child.pointCount);
     }
 }
 
@@ -803,11 +840,29 @@ std::vector<Vec3f> GuideHierarchy::offsetsFromWorld(const HierarchyGuide& child,
     const std::vector<Vec3f> pts = child.points.size() == n
                                        ? child.points
                                        : resampleByArcLength(child.points.data(), child.points.size(), n);
-    const std::vector<Frame> frames = parent.frames();
-    const bool blended = parent.tube.blended();
-    // (A slice of a drawn root's tube, isSliceOf: no footprint shift to take out.)
+    // (A slice: along its parent's tube path, its root's join to the scalp taken back out, as
+    // resolveFollower put it in: the same pull, faded the same way.)
     const bool slice = isSliceOf(child, parent);
-    const std::vector<Vec3f>& from = pts;
+    const std::vector<Vec3f>& path = slice ? parent.tubePath() : parent.points;
+    const std::vector<Frame> frames = slice && path.data() != parent.points.data()
+                                          ? rotationMinimizingFrames(path.data(), path.size(), parent.frameUp)
+                                          : parent.frames();
+    const bool blended = parent.tube.blended();
+    std::vector<Vec3f> unjoined;
+    if (slice && child.tubePoints.size() == child.points.size() && child.points.size() >= 2 && n >= 2) {
+        // The pull the guide's root had (its points against its tube's), taken out of the new shape
+        // by its share at each point (resampled to the parent's count as `pts` is).
+        const std::vector<Vec3f> was = resampleByArcLength(child.points.data(), child.points.size(), n);
+        const std::vector<Vec3f> tube = resampleByArcLength(child.tubePoints.data(), child.tubePoints.size(), n);
+        const Vec3f lift = was[0] - tube[0];
+        const float l2 = lift.dot(lift);
+        unjoined = pts;
+        for (std::size_t i = 0; i < n; ++i) {
+            const float w = l2 > 0.0f ? std::clamp((was[i] - tube[i]).dot(lift) / l2, 0.0f, 1.0f) : 0.0f;
+            unjoined[i] = pts[i] - lift * w;
+        }
+    }
+    const std::vector<Vec3f>& from = unjoined.empty() ? pts : unjoined;
     // A child on its parent's root footprint (resolveFollower): the footprint's shift taken back
     // out, so the offsets give the same shape again.
     Vec3f shift;
@@ -818,11 +873,11 @@ std::vector<Vec3f> GuideHierarchy::offsetsFromWorld(const HierarchyGuide& child,
     }
     std::vector<Vec3f> offsets(n);
     const bool slides = followsAlongCurve(child);
-    const std::vector<float> arc = slides ? arcLengthsOf(parent.points) : std::vector<float>{};
+    const std::vector<float> arc = slides ? arcLengthsOf(path) : std::vector<float>{};
     for (std::size_t i = 0; i < n; ++i) {
         const float t = paramAt(i, n);
         const Vec3f p = from[i] - shift * foot.fade(t);
-        Vec3f local = frames[i].toLocal(p - parent.points[i]);
+        Vec3f local = frames[i].toLocal(p - path[i]);
         float along = local.z;
         if (slides) {
             // (resolveFollower's inverse: the spot along the parent's curve whose section holds it)
@@ -838,7 +893,7 @@ std::vector<Vec3f> GuideHierarchy::offsetsFromWorld(const HierarchyGuide& child,
                         hi = arc.back() - arc[i] + 0.5f * length + 2.0f * std::sqrt(p.dot(p) + 1.0f);
             const float before = child.offsets.empty() ? local.z : sampleEven(child.offsets, t, Vec3f{}).z * scale_;
             auto ahead = [&](float a) {  // (how far ahead of the spot's section plane the point lies)
-                const AlongCurve c = alongCurve(parent.points, frames, arc, arc[i] + a);
+                const AlongCurve c = alongCurve(path, frames, arc, arc[i] + a);
                 return (p - c.point).dot(c.frame.tangent);
             };
             const int steps = static_cast<int>(std::clamp<std::size_t>(16 * n, 64, 4096));
@@ -875,7 +930,7 @@ std::vector<Vec3f> GuideHierarchy::offsetsFromWorld(const HierarchyGuide& child,
                 best = 0.5f * (a0 + a1);
             }
             along = best;
-            const AlongCurve at = alongCurve(parent.points, frames, arc, arc[i] + along);
+            const AlongCurve at = alongCurve(path, frames, arc, arc[i] + along);
             local = at.frame.toLocal(p - at.point);
         }
         SectionPoint at = sectionCoords(parent.tube.sectionAt(t), local.x, local.y, scale_);
@@ -969,7 +1024,7 @@ void GuideHierarchy::evaluateGuide(HierarchyGuide& g, const ScalpMesh* scalp, co
             if (own > 1e-12f) g.tube.joinScale = std::max(1e-3f, extent(top->tube) * length(g.points) / own);
         }
         if (parent && isRootTube(parent->tube, 0) && parent->points.size() >= 2) {
-            g.tube.roll = rollToMatch(g.points, g.frameUp, parent->points, parent->frameUp, parent->tube);
+            g.tube.roll = rollToMatch(g.tubePath(), g.frameUp, parent->tubePath(), parent->frameUp, parent->tube);
         } else if (g.rollOffsets.size() >= 2) {
             // (Per point; resampled along it when the guide was resampled since.)
             const std::size_t n = g.points.size(), m = g.rollOffsets.size();
@@ -2174,6 +2229,7 @@ GuideSet GuideHierarchy::flattenGroup(GroupId groupId) const {
         out.rootAcross = g.rootAcross;
         out.rootFoot = g.rootFoot;
         out.rootFootSet = g.rootFootSet;
+        out.tubePoints = g.tubePoints.size() == g.points.size() ? g.tubePoints : std::vector<Vec3f>{};
         out.depth = depth;
         out.baseRoot = baseRootOf(g);
         out.baseId = baseIdOf(g);
@@ -2201,6 +2257,7 @@ GuideSet GuideHierarchy::flatten(int level) const {
         out.rootAcross = g.rootAcross;
         out.rootFoot = g.rootFoot;
         out.rootFootSet = g.rootFootSet;
+        out.tubePoints = g.tubePoints.size() == g.points.size() ? g.tubePoints : std::vector<Vec3f>{};
         out.depth = depths[g.group];
         out.baseRoot = baseRootOf(g);
         out.baseId = baseIdOf(g);

@@ -1437,6 +1437,14 @@ class ToolPalette(QtWidgets.QWidget):
                                           "tubeColors")
         self.tube_colors.toggled.connect(lambda on: self.push(tubeColors=bool(on)))
         self.tube_channel_box.add(self.tube_colors.row)
+        # Colors (Tube levels): each split tube of a tube hierarchy a shade of its own on top of its
+        # root's color, so the tubes of a level tell apart (off at first).
+        self.tube_level_colors = widgets.switch("Colors (Tube levels)", "Each tube of a tube hierarchy's levels (a split "
+                                                "tube) in a shade of its own on top of its root tube's color, so the "
+                                                "tubes of a level tell apart. Tubes with no levels stay as they are",
+                                                False, "tubeLevelColors")
+        self.tube_level_colors.toggled.connect(lambda on: self.push(tubeLevelColors=bool(on)))
+        self.tube_channel_box.add(self.tube_level_colors.row)
         # Always visible: the tubes drawn whichever tool is up (Comb, Select, ...), as set above.
         self.tube_always = widgets.switch("Always visible", "Keep the tubes drawn with every tool (Comb, "
                                           "Select, ...), not only the Tube tool", False, "tubesAlwaysVisible")
@@ -2438,7 +2446,8 @@ class ToolPalette(QtWidgets.QWidget):
             groomlab.brush_tool(tool, **kwargs)
             # (The context's own: not stroke settings.)
             self.push(tubeShaded=self.tube_shaded.isChecked(), tubeWireframe=self.tube_wireframe.isChecked(),
-                      tubeColors=self.tube_colors.isChecked(), tubesAlwaysVisible=self.tube_always.isChecked())
+                      tubeColors=self.tube_colors.isChecked(), tubeLevelColors=self.tube_level_colors.isChecked(),
+                      tubesAlwaysVisible=self.tube_always.isChecked())
         except (RuntimeError, ValueError) as e:
             self.tool_failed(e)
         self.show_tool_settings()
