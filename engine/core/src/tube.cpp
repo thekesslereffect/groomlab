@@ -1022,7 +1022,7 @@ bool isRootTube(const TubeProfile& tube, int depth) {
 }
 
 SectionPoint TubeSpine::rootCoords(const Vec3f& p, float* along) const {
-    const Vec3f d = p - centers_.front();
+    const Vec3f d = p - footOrigin();
     const float off = d.dot(footNormal_);
     if (along) *along = off;
     // The footprint's axes are perpendicular (the section's, turned): each coordinate on its own.

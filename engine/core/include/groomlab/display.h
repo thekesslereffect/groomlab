@@ -265,8 +265,9 @@ std::size_t appendGuideCurve(DisplayGeometry& geometry, const std::vector<Vec3f>
 // The guides whose tubes the Shape brush's wire shows: every guide of two or more points not in a
 // hidden group (parseHiddenGuideGroups of `hiddenGuideGroups`) and not frozen (its `freeze` layer,
 // inherited, 0.5 or more): the ones the brush can shape. In the hierarchy's order.
+// `tubeViewGroup` (Lock view): that group's guides instead, hidden or not.
 std::vector<const HierarchyGuide*> activeTubeGuides(const GuideHierarchy& hierarchy, const std::string& hiddenGuideGroups,
-                                                    const std::string& freeze = "freeze");
+                                                    const std::string& freeze = "freeze", const std::string& tubeViewGroup = "");
 // A guide's tube as a shaded surface: its shape's outline at rings along it, each section turned,
 // flattened and sized as the tube says (tube.h; widths times scale, the size shown), open at the tip
 // (no cap): rings of the same count, root to tip (a plain round tube: 25; a shaped one: one on each
@@ -290,6 +291,9 @@ struct TubeDisplayOptions {
     // color), else its own from its ID; with Shaded the colors on the surfaces, the wires gray.
     bool colors = false;
     std::string hiddenGuideGroups;
+    // The tube hierarchy's Lock view: a guide group's name whose tubes alone draw (shown or hidden as
+    // guides); the guides draw as hiddenGuideGroups says. "": tubes as their guides.
+    std::string tubeViewGroup;
 };
 struct TubeDisplay {
     // Line lists (a segment's two ends a pair). `wires` carries colors (r g b a per vertex) when
@@ -463,6 +467,7 @@ struct DisplaySettings {
     int guidePoints = 1;     // dots: 0 off, 1 roots and tips, 2 all
     int guideSmoothing = 4;  // pieces per segment (1 straight)
     std::string hiddenGuideGroups, guideGroupColors;
+    std::string tubeViewGroup;  // Lock view: the group whose tubes alone draw ("": tubes as their guides; TubeDisplayOptions)
     // Overlays and cards.
     bool flow = true;
     bool drawCards = false;     // the cards draw here (cardsView, and no card mesh draws them)

@@ -381,7 +381,7 @@ Vec3f RootTubeTool::snapped(const ToolView& view, const Vec3f& p, RootSnap* how)
 
 void RootTubeTool::close(StrokeHost& host) {
     const MeshPtr scalp = host.scalp();
-    center_ = scalpPointNormal(*scalp, outlineCentroid(cvs_));
+    center_ = rootOutlineCenter(*scalp, cvs_);
     if (settings.drawPath) {
         mode_ = Mode::Draw;
         stroke_ = {center_->point};
@@ -754,7 +754,7 @@ void RootTubeTool::reloadRoots(StrokeHost& host) {
             try {
                 const std::vector<Vec3f> cvs = rootTubeOutline(*h, *scalp, g);
                 roots_[g] = cvs;
-                middles_[g] = scalpPointNormal(*scalp, outlineCentroid(cvs));
+                middles_[g] = rootOutlineCenter(*scalp, cvs);
             } catch (const std::exception&) {
             }
         }

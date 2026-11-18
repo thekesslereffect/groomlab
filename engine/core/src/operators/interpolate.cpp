@@ -2330,6 +2330,7 @@ private:
     static void layFootprint(TubeSpine& spine, const Guide& g, const ScalpMesh& scalp, const Vec3f& normal) {
         if (isRootTube(g.tube, 0) && scalp.contains(g.root)) {  // (a slice of one too: its own root shape)
             spine.setRootOnScalp(normal, g.rootAcross.length() > 0.5f ? g.rootAcross : scalp.acrossAt(g.root));
+            if (g.rootFootSet) spine.setFootprintCenter(g.rootFoot);  // (a slice: its place in its root's footprint)
             return;
         }
         if (g.points.size() >= 2) {

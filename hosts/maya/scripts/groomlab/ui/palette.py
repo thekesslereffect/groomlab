@@ -2264,8 +2264,8 @@ class ToolPalette(QtWidgets.QWidget):
             self.length_keys.refresh()
         if any(b.isVisible() for b in self.tube_panel.blocks):  # (Shape, Select, Place, Draw) a selection or solo
             self.tube_panel.refresh(groom, full=self._ticks % 3 == 0)
-        if self.root_card.visible():  # the root tool's state and the hierarchy's levels
-            self.root_card.refresh(groom)
+        if self.root_card.visible():  # the root tool's state; the hierarchy's levels now and then
+            self.root_card.refresh(groom, full=self._ticks % 5 == 0)
         # Weights change with the frame: read them every tick, the stack itself now and then
         # (keys edited in the timeline) and whenever the groom's correctives change (its callback);
         # only while the Correctives box shows.

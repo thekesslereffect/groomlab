@@ -101,6 +101,11 @@ struct HierarchyGuide {
     // a scalp (zero before): what lays its footprint on the scalp where it draws (display.h, issue
     // 86). Not stored, not hashed.
     Vec3f rootAcross;
+    // A slice of a drawn root's tube: its footprint's center, its place in its level 1 root's
+    // footprint (GuideHierarchy::placeInRoot of its middle), so its footprint is exactly its part
+    // of the root's and the hair rooted there is its. Unset for any other guide. Not stored.
+    Vec3f rootFoot;
+    bool rootFootSet = false;
     // Such a tube's root loop on the scalp: each point of its shape's outline (tubeOutline) on its
     // footprint, taken onto the scalp along the footprint's normal, from the last evaluate on a
     // scalp (empty before, and for any other tube). What its drawn tube starts from, so it sits on
@@ -486,6 +491,13 @@ public:
 private:
     HierarchyGuide* mutableGuide(GuideId id);
     GuideId nextGuideId();
+    // Whether `child` is a slice of a drawn root's tube `parent` (both root tubes): kept in the
+    // parent's sections all along by resolveFollower, its root section its part of the parent's.
+    static bool isSliceOf(const HierarchyGuide& child, const HierarchyGuide& parent);
+    // A slice's section point (u, v) (its own section coordinates) in its level 1 root's: through
+    // each level's place in its parent (the middle it was cut around, its offsets at the root, and
+    // its size there against its parent's). Null when `g` is no slice of a drawn root's tube.
+    const HierarchyGuide* placeInRoot(const HierarchyGuide& g, SectionPoint* q) const;
     // `parentFrames`: the parent's rotation-minimizing frames when already known (null: computed).
     void resolveFollower(HierarchyGuide& child, const HierarchyGuide& parent, const ScalpMesh* scalp,
                          const std::vector<Frame>* parentFrames = nullptr);
@@ -560,5 +572,11 @@ TubeTargets tubeTargetsOf(const GuideHierarchy& hierarchy, const std::vector<Gui
 // Root tube k's color (in GuideHierarchy::rootTubeIds' order): hues a golden step apart, three
 // brightnesses, none black; root_tubes.region_colors in the Maya scripts makes the same.
 std::array<float, 3> rootTubeColor(std::size_t k);
+
+// The point (u, v) carried by the map a closed polygon `cage` (section coordinates) makes onto
+// `to` (a world point per cage point): mean value coordinates (Floater), so a point on the cage
+// lands on `to` (linearly along each edge) and one inside moves smoothly with it. (A slice's root
+// loop on its root's drawn loop: GuideHierarchy::layRootRing.)
+Vec3f cageMap(const std::vector<SectionPoint>& cage, const std::vector<Vec3f>& to, const SectionPoint& q);
 
 }  // namespace groomlab

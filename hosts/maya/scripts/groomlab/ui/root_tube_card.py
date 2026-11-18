@@ -241,9 +241,9 @@ class RootTubeCard(QtCore.QObject):
         self.level_row = QtWidgets.QWidget()
         LeadTrailLayout(levels, edits, self.level_row)
         self.hierarchy_block.add(self.level_row)
-        self.lock_view = widgets.switch("Lock view", "Keep the level shown now as the one in view while you pick "
-                                        "other levels to work on, which stay hidden (step down to level 1 and comb "
-                                        "it while a deeper level's tubes stay in view and follow). Only the levels' "
+        self.lock_view = widgets.switch("Lock view", "Keep the tubes of the level shown now in view while you pick "
+                                        "other levels to work on, whose guides show (step down to level 1 and comb "
+                                        "its guides while level 5's tubes stay in view and follow). Only the tubes' "
                                         "view: the other visibility controls work as they do", False, "tubeLockView")
         self.lock_view.toggled.connect(self.lock_toggled)
         self.hierarchy_block.add(self.lock_view.row)
@@ -267,8 +267,10 @@ class RootTubeCard(QtCore.QObject):
     def visible(self):
         return self.root_block.isVisible()
 
-    def refresh(self, groom):
-        """The buttons as the tool stands, and the hierarchy's levels."""
+    def refresh(self, groom, full=True):
+        """The buttons as the tool stands, and the hierarchy's levels. `full` False (the palette's
+        frequent tick): the levels and the density map read again only for another groom or after
+        an action here (each read parses the guides and lays the scalp: a hitch every tick)."""
         self.tool.poll()  # (after an undo the tool reads the groom again: its outlines follow)
         mode = self._mode()
         editing = mode == "edit"
@@ -283,10 +285,16 @@ class RootTubeCard(QtCore.QObject):
         self.duplicate_root.setEnabled(picked)
         self.duplicate_root.setChecked(mode == "duplicate")
         self.subdivide_root.setEnabled(picked)
-        self.fill_density_maps(groom)
+        heavy = full or groom != getattr(self, "_read_groom", "?") or self._levels is None
+        self._read_groom = groom
+        if heavy:
+            self.fill_density_maps(groom)
+        else:
+            self.paint_density.setEnabled(getattr(self, "_has_map", False) or self._painting is not None)
         painting = self._painting is not None
         self.paint_density.setChecked(painting)
-        self.fill_levels(groom)
+        if heavy:
+            self.fill_levels(groom)
 
     def fill_levels(self, groom):
         info = {"base": None, "levels": []}
@@ -462,6 +470,7 @@ class RootTubeCard(QtCore.QObject):
     def fill_density_maps(self, groom):
         """Paint and Apply usable once Subdivide has made the map (Paint too while painting, to finish)."""
         has = bool(groom) and self.density_map(groom) is not None
+        self._has_map = has
         self.apply_density.setEnabled(has)
         self.paint_density.setEnabled(has or self._painting is not None)
 
@@ -600,11 +609,17 @@ class RootTubeCard(QtCore.QObject):
         except (RuntimeError, ValueError) as e:
             self.owner.status.setText(str(e).strip())
             return
-        self.owner.status.setText("Level %d alone in view while you work on any level." % self._locked if self._locked
+        self.owner.status.setText("Level %d's tubes kept in view; the level you pick shows its guides." % self._locked if self._locked
                                   else "Lock view off: only the picked level shows.")
 
     def _unlock(self):
         self._locked = 0
+        try:
+            groom = self.owner.groom()
+            if groom:
+                root_tubes.set_tube_view(groom, "")
+        except RuntimeError:
+            pass
         self.lock_view.blockSignals(True)
         self.lock_view.setChecked(False)
         self.lock_view.blockSignals(False)

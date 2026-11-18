@@ -695,6 +695,33 @@ GuideId GuideHierarchy::addChildGuide(GroupId groupId, GuideId parentId, std::ve
     return id;
 }
 
+const HierarchyGuide* GuideHierarchy::placeInRoot(const HierarchyGuide& g, SectionPoint* q) const {
+    const HierarchyGuide* at = &g;
+    std::set<GuideId> seen;
+    bool any = false;
+    while (at->isChild() && seen.insert(at->id).second) {
+        const HierarchyGuide* parent = guide(at->parent);
+        if (!parent || !isSliceOf(*at, *parent) || at->offsets.empty()) return nullptr;
+        // (Its box in its parent's section: its middle, and its half-extents against the parent's.)
+        const Vec3f middle = sampleEven(at->offsets, 0.0f, Vec3f{});
+        const float pw = parent->tube.widthAt(0.0f), pa = parent->tube.aspectAt(0.0f);
+        if (!(pw > 0.0f) || !(pa > 0.0f)) return nullptr;
+        const float su = at->tube.widthAt(0.0f) / pw, sv = su * at->tube.aspectAt(0.0f) / pa;
+        *q = {middle.x + su * q->u, middle.y + sv * q->v};
+        at = parent;
+        any = true;
+    }
+    return any ? at : nullptr;
+}
+
+bool GuideHierarchy::isSliceOf(const HierarchyGuide& child, const HierarchyGuide& parent) {
+    // A slice of a drawn root's tube (root_tubes.h addTubeLevel): its guide in its parent's sections
+    // all along, its root section its part of the parent's (not snapped onto the scalp and bent
+    // there), so its tube, drawn and its hair grown joined from its root loop on the scalp as the
+    // parent's are, lies exactly in its part of the parent's tube at every level.
+    return isRootTube(parent.tube, 0) && isRootTube(child.tube, 0) && parent.points.size() >= 2;
+}
+
 void GuideHierarchy::resolveFollower(HierarchyGuide& child, const HierarchyGuide& parent, const ScalpMesh* scalp,
                                      const std::vector<Frame>* parentFrames) {
     invalidateHash();
@@ -730,9 +757,13 @@ void GuideHierarchy::resolveFollower(HierarchyGuide& child, const HierarchyGuide
     // as the parent's does however it turns.
     if (parent.tube.shaped() && n > 0) child.frameUp = frames[0].normal;
 
+    // A slice of a drawn root's tube (isSliceOf): left in its parent's sections; its root the
+    // scalp's point nearest its guide's first.
+    const bool slice = isSliceOf(child, parent);
+    if (slice && scalp && scalp->triangleCount() > 0 && n > 0) child.root = scalp->closestPoint(child.points[0]).root;
     // A shaped tube's parent leaving the scalp at a slant: its children's roots on its root
     // footprint (footprintTurn), not snapped straight down from its root section.
-    if (scalp && scalp->triangleCount() > 0 && n >= 2) {
+    if (!slice && scalp && scalp->triangleCount() > 0 && n >= 2) {
         const FootprintTurn foot = footprintTurn(parent, frames[0], scale_);
         if (foot.active) {
             const Vec3f rootOffset = child.points[0] - parent.points[0];
@@ -743,7 +774,7 @@ void GuideHierarchy::resolveFollower(HierarchyGuide& child, const HierarchyGuide
 
     // The cross-section at the root is not the scalp surface: snap the root
     // onto the scalp and fade the correction out toward the tip.
-    if (scalp && scalp->triangleCount() > 0 && n > 0) {
+    if (!slice && scalp && scalp->triangleCount() > 0 && n > 0) {
         // The root sits in the parent's tube, around the parent's root on the scalp: the scalp
         // is no farther than that point, so the search is bounded by it. A bounded search that
         // finds a point finds the nearest (the same as unbounded); one that finds none (the
@@ -774,12 +805,15 @@ std::vector<Vec3f> GuideHierarchy::offsetsFromWorld(const HierarchyGuide& child,
                                        : resampleByArcLength(child.points.data(), child.points.size(), n);
     const std::vector<Frame> frames = parent.frames();
     const bool blended = parent.tube.blended();
+    // (A slice of a drawn root's tube, isSliceOf: no footprint shift to take out.)
+    const bool slice = isSliceOf(child, parent);
+    const std::vector<Vec3f>& from = pts;
     // A child on its parent's root footprint (resolveFollower): the footprint's shift taken back
     // out, so the offsets give the same shape again.
     Vec3f shift;
-    const FootprintTurn foot = n >= 2 ? footprintTurn(parent, frames[0], scale_) : FootprintTurn{};
+    const FootprintTurn foot = n >= 2 && !slice ? footprintTurn(parent, frames[0], scale_) : FootprintTurn{};
     if (foot.active) {
-        const Vec3f onFoot = pts[0] - parent.points[0];
+        const Vec3f onFoot = from[0] - parent.points[0];
         shift = onFoot - foot.back(onFoot);
     }
     std::vector<Vec3f> offsets(n);
@@ -787,7 +821,7 @@ std::vector<Vec3f> GuideHierarchy::offsetsFromWorld(const HierarchyGuide& child,
     const std::vector<float> arc = slides ? arcLengthsOf(parent.points) : std::vector<float>{};
     for (std::size_t i = 0; i < n; ++i) {
         const float t = paramAt(i, n);
-        const Vec3f p = pts[i] - shift * foot.fade(t);
+        const Vec3f p = from[i] - shift * foot.fade(t);
         Vec3f local = frames[i].toLocal(p - parent.points[i]);
         float along = local.z;
         if (slides) {
@@ -886,6 +920,19 @@ void GuideHierarchy::evaluateGuide(HierarchyGuide& g, const ScalpMesh* scalp, co
         // cut from (its acrossTurn): rootAcrossOf.
         const Vec3f across = rootAcrossOf(g, *scalp);
         g.rootAcross = across;
+        // A slice: its footprint centered on its place in its level 1 root's (placeInRoot), so it is
+        // exactly its part of the root's footprint (the hair rooted there, its).
+        g.rootFootSet = false;
+        {
+            SectionPoint middle{0.0f, 0.0f};
+            const HierarchyGuide* top = g.isChild() ? placeInRoot(g, &middle) : nullptr;
+            if (top && top->points.size() >= 2 && top->rootNormal.length() > 0.5f && top->rootAcross.length() > 0.5f) {
+                TubeSpine laid(top->points.data(), top->points.size(), top->frameUp, top->tube, scale_);
+                laid.setRootOnScalp(top->rootNormal, top->rootAcross);
+                g.rootFoot = laid.footprintAt(middle.u, middle.v);
+                g.rootFootSet = true;
+            }
+        }
         const Vec3f way = frames.front().tangent;
         float roll = 0.0f;
         if (across.length() > 0.5f && way.length() > 0.5f && way.normalized().dot(n) > -1.0f + 1e-4f) {
@@ -910,9 +957,16 @@ void GuideHierarchy::evaluateGuide(HierarchyGuide& g, const ScalpMesh* scalp, co
                 if (!next) break;
                 top = next;
             }
+            // (The same share of the way as its level 1 root: its root's size over its root's length,
+            // against its own over its own length; TubeSpine::rootJoin.)
             auto extent = [](const TubeProfile& t) { return t.widthAt(0.0f) * std::max(1.0f, t.aspectAt(0.0f)); };
-            const float own = extent(g.tube);
-            if (own > 1e-12f) g.tube.joinScale = std::max(1.0f, extent(top->tube) / own);
+            auto length = [](const std::vector<Vec3f>& pts) {
+                float l = 0.0f;
+                for (std::size_t i = 1; i < pts.size(); ++i) l += (pts[i] - pts[i - 1]).length();
+                return l;
+            };
+            const float own = extent(g.tube) * length(top->points);
+            if (own > 1e-12f) g.tube.joinScale = std::max(1e-3f, extent(top->tube) * length(g.points) / own);
         }
         if (parent && isRootTube(parent->tube, 0) && parent->points.size() >= 2) {
             g.tube.roll = rollToMatch(g.points, g.frameUp, parent->points, parent->frameUp, parent->tube);
@@ -945,11 +999,6 @@ void GuideHierarchy::evaluateGuide(HierarchyGuide& g, const ScalpMesh* scalp, co
     if (!isRootTube(g.tube, 0)) g.rootRing.clear(), g.rootRingFlat.clear();
 }
 
-namespace {
-
-// The point (u, v) carried by the map a closed polygon `cage` (section coordinates) makes onto
-// `to` (a world point per cage point): mean value coordinates (Floater), so a point on the cage
-// lands on `to` (linearly along each edge) and one inside moves smoothly with it.
 Vec3f cageMap(const std::vector<SectionPoint>& cage, const std::vector<Vec3f>& to, const SectionPoint& q) {
     const std::size_t m = cage.size();
     std::vector<double> dx(m), dy(m), r(m);
@@ -982,8 +1031,6 @@ Vec3f cageMap(const std::vector<SectionPoint>& cage, const std::vector<Vec3f>& t
     if (std::abs(total) < 1e-300) return to.front();
     return sum * static_cast<float>(1.0 / total);
 }
-
-}  // namespace
 
 void GuideHierarchy::layRootRing(HierarchyGuide& g, const ScalpMesh& scalp, const Vec3f& n, const Vec3f& across) const {
     // Its root loop on the scalp (HierarchyGuide::rootRing). First its footprint's outline, each
@@ -1067,15 +1114,16 @@ void GuideHierarchy::layRootRing(HierarchyGuide& g, const ScalpMesh& scalp, cons
     if (base == &g || base->rootRing.empty() || base->points.size() < 2 || !scalp.contains(base->root)) return;
     const std::vector<SectionPoint>& cage = tubeOutline(base->tube);
     if (cage.size() != base->rootRing.size() || cage.size() < 3) return;
-    TubeSpine root(base->points.data(), base->points.size(), base->frameUp, base->tube, scale_);
-    root.setRootOnScalp(scalp.normal(base->root), base->rootAcross);
     // (A point within the slices' gap of the root's edge goes onto it: the slices' outer edges are
     // the root drawn, the gap left only between them.)
     float size = 0.0f;
     for (const SectionPoint& c : cage) size = std::max(size, std::hypot(c.u, c.v));
     const float snap = 0.03f * size;
     for (std::size_t i = 0; i < g.rootRing.size(); ++i) {
-        SectionPoint q = root.rootCoords(spine.footprintAt(outline[i].u, outline[i].v));
+        // (Its place in the root's section through each level's: not its own footprint projected
+        // there, which a tube leaving the scalp at a slant foreshortens.)
+        SectionPoint q = outline[i];
+        if (placeInRoot(g, &q) != base) return;
         float nearest = snap;
         SectionPoint onEdge = q;
         for (std::size_t k = 0; k < cage.size(); ++k) {
@@ -2124,6 +2172,8 @@ GuideSet GuideHierarchy::flattenGroup(GroupId groupId) const {
         out.tube.scaleWidth(scale_);
         out.frameUp = g.frameUp;
         out.rootAcross = g.rootAcross;
+        out.rootFoot = g.rootFoot;
+        out.rootFootSet = g.rootFootSet;
         out.depth = depth;
         out.baseRoot = baseRootOf(g);
         out.baseId = baseIdOf(g);
@@ -2149,6 +2199,8 @@ GuideSet GuideHierarchy::flatten(int level) const {
         out.tube.scaleWidth(scale_);
         out.frameUp = g.frameUp;
         out.rootAcross = g.rootAcross;
+        out.rootFoot = g.rootFoot;
+        out.rootFootSet = g.rootFootSet;
         out.depth = depths[g.group];
         out.baseRoot = baseRootOf(g);
         out.baseId = baseIdOf(g);

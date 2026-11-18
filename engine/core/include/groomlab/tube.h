@@ -389,7 +389,13 @@ public:
     // (signed, scene units).
     SectionPoint rootCoords(const Vec3f& p, float* along = nullptr) const;
     // The world point of section coordinates (u, v) on the root footprint.
-    Vec3f footprintAt(float u, float v) const { return centers_.front() + footU_ * u + footV_ * v; }
+    Vec3f footprintAt(float u, float v) const { return footOrigin() + footU_ * u + footV_ * v; }
+    // The footprint centered on `center` instead of the guide's root point (a slice of a drawn
+    // root's tube: its place in its level 1 root's footprint, GuideHierarchy's rootFoot).
+    void setFootprintCenter(const Vec3f& center) {
+        footCenter_ = center;
+        footCentered_ = true;
+    }
     // The root section's half-width and half-height in scene units.
     float rootWidth() const { return rootWidth_; }
     float rootHeight() const { return rootHeight_; }
@@ -402,6 +408,9 @@ private:
     bool blended_ = false;
     std::vector<Vec3f> centers_, axisU_, axisV_;
     Vec3f footU_, footV_, footNormal_;
+    Vec3f footCenter_;
+    bool footCentered_ = false;
+    Vec3f footOrigin() const { return footCentered_ ? footCenter_ : centers_.front(); }
     float rootWidth_ = 0.0f, rootHeight_ = 0.0f, rootJoin_ = 1.0f;
 };
 

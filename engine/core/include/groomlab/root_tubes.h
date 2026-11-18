@@ -69,6 +69,10 @@ struct ScalpPointNormal {
     Vec3f point, normal;
 };
 ScalpPointNormal scalpPointNormal(const ScalpMesh& scalp, const Vec3f& p);
+// A drawn root's middle on the scalp (where its guide starts, the Tube tool's green point): the apex
+// of the patch `outline` draws, the scalp's outermost point along the patch's mean normal through its
+// centroid, so a root drawn over much of a head starts on its top, not inside.
+ScalpPointNormal rootOutlineCenter(const ScalpMesh& scalp, const std::vector<Vec3f>& outline);
 
 // ---- Root tubes --------------------------------------------------------------------------------------
 
@@ -100,6 +104,18 @@ std::vector<Vec3f> rootTubeOutline(const GuideHierarchy& h, const ScalpMesh& sca
 // A root tube's root footprint as world points: its shape's control points placed in its root
 // section laid flat on the scalp, taken onto the scalp along the footprint's normal (`onScalp`).
 std::vector<Vec3f> rootTubeSectionOutline(const GuideHierarchy& h, const ScalpMesh& scalp, GuideId guide, bool onScalp = true);
+// How a slice lies in its parent's tube (a check): at each of `samples` places along it (t evenly,
+// the root's first), its tube's outline in its parent's section coordinates at the same t (the
+// parent's section at t: its center plus u and v times its section axes; `off`, how far off that
+// section's plane, scene units). Its parent's outline is tubeOutline(parent's tube).
+struct SliceFitSample {
+    float t = 0.0f;
+    std::vector<SectionPoint> outline;
+    std::vector<float> off;
+    float turn = 0.0f;  // its sections' u axis against its parent's there (radians, about the parent's tangent)
+};
+// `within`: an ancestor's sections instead of its parent's (its level 1 root's, say).
+std::vector<SliceFitSample> sliceFit(const GuideHierarchy& h, GuideId slice, int samples = 11, GuideId within = kNoGuide);
 // Root tube `guide`'s CVs kept as `outline` (world points, taken onto the scalp), its tube as it
 // is: an outline read from elsewhere (Maya's first root tubes kept theirs on the scene). Throws
 // std::invalid_argument for a guide that is not a root tube or fewer than 3 CVs.
@@ -164,7 +180,11 @@ GuideId sliceTube(GuideHierarchy& h, const ScalpMesh& scalp, const TubeSource& s
                   const std::function<Vec3f(float)>& deviation = {});
 // The guide of the slice whose middle is (u, v) of `source`'s root section, `extent` its larger
 // half-extent (scene units): rooted there on the scalp, then along the source's tube (sliceTube's).
-std::vector<Vec3f> slicePath(const ScalpMesh& scalp, const TubeSource& source, float u, float v, float extent, float scale = 1.0f);
+// `alongOnly`: the root's pull joined along the tube only (a cell of a cut: across it stays its
+// part of the tube where its neighbours meet it); else all of it (a slice of the hierarchy, as its
+// parent's tube and hair join their root: GuideHierarchy's resolveFollower).
+std::vector<Vec3f> slicePath(const ScalpMesh& scalp, const TubeSource& source, float u, float v, float extent, float scale = 1.0f,
+                             bool alongOnly = true);
 // A tube spine of the source laid as its tube lies (its footprint fixed on the scalp).
 TubeSpine sourceSpine(const TubeSource& source, float scale = 1.0f);
 // `p` taken onto the scalp along `normal` (the nearer hit either way), else its nearest point
@@ -207,8 +227,8 @@ std::size_t addTubeLevel(GuideHierarchy& h, const ScalpMesh* scalp, const std::v
 std::size_t removeTubeLevel(GuideHierarchy& h, const ScalpMesh* scalp, const std::string& base,
                             const std::vector<GuideId>& guides = {});
 // Showing level `level` of `base`'s hierarchy: each level's group and whether it shows (that level
-// alone; with `locked`, the card's Lock view, level `locked` alone whatever level is picked to work
-// on: the level shown when it was switched on). The host hides the others.
+// alone; `locked`, the card's Lock view, changes nothing here: that level's tubes stay drawn through
+// the display's tubeViewGroup, display.h). The host hides the others.
 std::map<std::string, bool> tubeLevelVisibility(const GuideHierarchy& h, const std::string& base, int level, int locked = 0);
 
 }  // namespace groomlab

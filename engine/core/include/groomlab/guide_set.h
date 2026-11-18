@@ -36,6 +36,10 @@ struct Guide {
     // along (GuideHierarchy: its root's, a slice its parent's, so the slices of a root lie as one).
     // Zero: the scalp's own at its root (ScalpMesh::acrossAt). Not saved.
     Vec3f rootAcross;
+    // A slice of a drawn root's tube: its footprint's center, its place in its level 1 root's
+    // footprint (GuideHierarchy: HierarchyGuide::rootFoot). Unset: its root. Not saved.
+    Vec3f rootFoot;
+    bool rootFootSet = false;
     // The level of the hierarchy it comes from (0: a root group's): where tubes of several levels
     // hold a strand's root, fillTubes takes the deepest.
     int depth = 0;

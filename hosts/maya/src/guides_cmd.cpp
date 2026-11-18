@@ -933,6 +933,17 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                                                   request.value("locked", 0)));
                     }
                     if (op == "footprintError") return answer(rootFootprintError(*h, *scalp, guide));
+                    if (op == "sliceFit") {  // a slice's outline in its parent's sections along it (root_tubes.h sliceFit)
+                        if (request.value("evaluate", false)) h->evaluate(scalp.get());  // (as evaluated now, not as saved)
+                        nlohmann::json out = nlohmann::json::array();
+                        for (const SliceFitSample& s : sliceFit(*h, guide, request.value("samples", 11),
+                                                                          request.value("within", static_cast<GuideId>(kNoGuide)))) {
+                            nlohmann::json uv = nlohmann::json::array();
+                            for (const SectionPoint& q : s.outline) uv.push_back({q.u, q.v});
+                            out.push_back({{"t", s.t}, {"outline", uv}, {"off", s.off}, {"turn", s.turn}});
+                        }
+                        return answer(out);
+                    }
                     if (op == "overlaps") {  // drawn roots' tubes passing into each other (root_tubes.h tubeOverlaps)
                         nlohmann::json out = nlohmann::json::array();
                         for (const TubeOverlap& o : tubeOverlaps(*h, ids("guides"))) {

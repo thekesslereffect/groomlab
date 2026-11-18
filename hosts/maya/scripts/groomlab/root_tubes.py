@@ -402,14 +402,25 @@ def remove_tube_level(groom, base, guides=None):
     return out
 
 
+def set_tube_view(groom, group):
+    """Lock view (the Tube hierarchy's): only guide group `group`'s tubes draw, whichever guides
+    show ("": the tubes as their guides). The groom's tubeViewGroup."""
+    from maya import cmds
+    if cmds.attributeQuery("tubeViewGroup", node=groom, exists=True):
+        if (cmds.getAttr(groom + ".tubeViewGroup") or "") != (group or ""):
+            cmds.setAttr(groom + ".tubeViewGroup", group or "", type="string")
+
+
 def show_tube_level(groom, base, level, locked=0):
     """Show level `level` (1: the base) of `base`'s hierarchy and hide its other levels (the guide
     groups' eyes; groups outside the hierarchy are left as they are); with `locked` (Lock view)
-    level `locked` alone shows instead, whichever level is picked. Returns level `level`'s group."""
+    level `locked`'s tubes alone draw (set_tube_view), its guides as the level picked. Returns level
+    `level`'s group."""
     shown = _request(groom, "levelVisibility", base=base, level=int(level), locked=int(locked or 0))
     levels = tube_levels(groom, picked=base)["levels"]
     for name, visible in shown.items():
         groomlab.show_guide_group(groom, name, visible=bool(visible))
+    set_tube_view(groom, levels[int(locked) - 1] if locked and 0 < int(locked) <= len(levels) else "")
     level = max(1, min(int(level), len(levels))) if levels else 1
     return levels[level - 1] if levels else None
 

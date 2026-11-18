@@ -1091,13 +1091,16 @@ std::size_t appendGuideCurve(DisplayGeometry& batch, const std::vector<Vec3f>& p
 }
 
 std::vector<const HierarchyGuide*> activeTubeGuides(const GuideHierarchy& hierarchy, const std::string& hiddenGuideGroups,
-                                                    const std::string& freeze) {
+                                                    const std::string& freeze, const std::string& tubeViewGroup) {
     const std::set<std::string> hidden = parseHiddenGuideGroups(hiddenGuideGroups);
     const bool layers = hierarchy.hasAttributes();
     std::vector<const HierarchyGuide*> out;
     for (const HierarchyGuide& g : hierarchy.guides()) {
         if (g.points.size() < 2) continue;
-        if (!hidden.empty()) {
+        if (!tubeViewGroup.empty()) {  // (Lock view: that group's tubes alone, hidden or not)
+            const GuideGroup* grp = hierarchy.group(g.group);
+            if (!grp || grp->name != tubeViewGroup) continue;
+        } else if (!hidden.empty()) {
             const GuideGroup* grp = hierarchy.group(g.group);
             if (grp && hidden.count(grp->name)) continue;
         }
@@ -1369,9 +1372,9 @@ void colorTubeSurface(DisplayGeometry& batch, std::size_t first, const std::arra
 TubeDisplay buildTubeDisplay(const GuideHierarchy& hierarchy, const TubeDisplayOptions& options,
                              const std::set<GuideId>& selected) {
     TubeDisplay out;
-    const std::vector<const HierarchyGuide*> guides = activeTubeGuides(hierarchy, options.hiddenGuideGroups, "");
+    const std::vector<const HierarchyGuide*> guides = activeTubeGuides(hierarchy, options.hiddenGuideGroups, "", options.tubeViewGroup);
     std::set<const HierarchyGuide*> live;
-    for (const HierarchyGuide* g : activeTubeGuides(hierarchy, options.hiddenGuideGroups)) live.insert(g);
+    for (const HierarchyGuide* g : activeTubeGuides(hierarchy, options.hiddenGuideGroups, "freeze", options.tubeViewGroup)) live.insert(g);
     const bool anyDim = live.size() != guides.size();
     constexpr float kDim = 0.3f;
     const std::vector<GuideId> rootTubes = options.colors ? hierarchy.rootTubeIds() : std::vector<GuideId>{};
@@ -2279,7 +2282,7 @@ void DisplayBuilder::buildGuides(const DisplayInputs& in, const DisplaySettings&
                                                                      32u * static_cast<unsigned>(pointMode));
     key = hashCombine(key, theme.version);
     key = hashCombine(key, static_cast<std::uint64_t>(smoothing));
-    key = hashChars(key, s.hiddenGuideGroups);
+    key = hashChars(hashChars(key, s.hiddenGuideGroups), s.tubeViewGroup);
     key = hashChars(key, s.guideGroupColors);
     key = hashChars(key, s.isolateGroup);
     key = hashChars(key, s.guideColorLayer);
@@ -2354,8 +2357,12 @@ void DisplayBuilder::buildGuides(const DisplayInputs& in, const DisplaySettings&
         const std::vector<GuideId> rootTubes = s.guideRootColors ? hierarchy->rootTubeIds() : std::vector<GuideId>{};
         for (const HierarchyGuide& g : hierarchy->guides()) {
             const int level = hierarchy->groupDepth(g.group);
-            if (level < 0 || level >= kMaxDrawnGuideLevels || hiddenGuide(g)) continue;
-            if (s.tubes) appendTubeSurface(tubes, g, hierarchy->scale());
+            if (level < 0 || level >= kMaxDrawnGuideLevels) continue;
+            // (Lock view: the tubes of that group alone, whatever guides show.)
+            const GuideGroup* viewed = s.tubeViewGroup.empty() ? nullptr : hierarchy->group(g.group);
+            const bool tubeShown = s.tubeViewGroup.empty() ? !hiddenGuide(g) : viewed && viewed->name == s.tubeViewGroup;
+            if (s.tubes && tubeShown) appendTubeSurface(tubes, g, hierarchy->scale());
+            if (hiddenGuide(g)) continue;
             if (!s.guides || g.points.size() < 2) continue;
             const auto automatic = autoColors.find(g.group);
             std::array<float, 3> c = automatic != autoColors.end() ? automatic->second : std::array<float, 3>{0.5f, 0.5f, 0.5f};
@@ -2469,7 +2476,7 @@ void DisplayBuilder::buildSelection(const DisplayInputs& in, const DisplaySettin
     const int smoothing = std::clamp(s.guideSmoothing, 1, 16);
     std::uint64_t key = hashCombine(hashCombine(hash64(in.hierarchyVersion), in.selectionHash),
                                     (s.guides ? 1u : 0u) + 2u * static_cast<unsigned>(smoothing));
-    key = hashChars(key, s.hiddenGuideGroups);
+    key = hashChars(hashChars(key, s.hiddenGuideGroups), s.tubeViewGroup);
     if (!rebuild(DisplayPart::Selection, key)) return;
     DisplayGeometry selected, soft;
     const HierarchyPtr& hierarchy = in.hierarchy;
@@ -2503,7 +2510,7 @@ void DisplayBuilder::buildBrushTubes(const DisplayInputs& in, const DisplaySetti
     std::uint64_t key = on ? hashCombine(hashCombine(hash64(in.hierarchyVersion), in.selectionHash),
                                          (s.tubeWires ? 1u : 0u) + (s.tubeShaded ? 2u : 0u) + (colors ? 4u : 0u))
                            : 0;
-    if (on) key = hashCombine(hashChars(key, s.hiddenGuideGroups), reinterpret_cast<std::uintptr_t>(hierarchy.get()));
+    if (on) key = hashCombine(hashChars(hashChars(key, s.hiddenGuideGroups), s.tubeViewGroup), reinterpret_cast<std::uintptr_t>(hierarchy.get()));
     if (!rebuild(DisplayPart::BrushTubes, key)) return;
     TubeDisplay tubes;
     tubes.surfaces.triangles = true;
@@ -2520,6 +2527,7 @@ void DisplayBuilder::buildBrushTubes(const DisplayInputs& in, const DisplaySetti
         options.shaded = s.tubeShaded;
         options.colors = colors;
         options.hiddenGuideGroups = s.hiddenGuideGroups;
+        options.tubeViewGroup = s.tubeViewGroup;
         tubes = buildTubeDisplay(*hierarchy, options, selected);
     }
     tubes.wires.overlay = tubes.selectedWires.overlay = true;
