@@ -377,8 +377,6 @@ public:
     // the footprint's plane along its normal), and (with `along`) how far off that plane it lies
     // (signed, scene units).
     SectionPoint rootCoords(const Vec3f& p, float* along = nullptr) const;
-    // The world point of section coordinates (u, v) on the root footprint.
-    Vec3f footprintAt(float u, float v) const { return centers_.front() + footU_ * u + footV_ * v; }
     // The root section's half-width and half-height in scene units.
     float rootWidth() const { return rootWidth_; }
     float rootHeight() const { return rootHeight_; }

@@ -126,9 +126,8 @@ void measureDepth(TubeOutline& t) {
 
 // The farthest crossing of the ray from the center at angle `a` with a closed polygon: how far
 // out (0: none), and on which edge (from points[edge] to the next) how far along it.
-float farthestCrossing(const std::vector<SectionPoint>& poly, float a, std::size_t* edge, float* along) {
+float farthestCrossing(const SectionPoint* poly, std::size_t n, float a, std::size_t* edge, float* along) {
     const float du = pm::cos(a), dv = pm::sin(a);
-    const std::size_t n = poly.size();
     float far = 0.0f;
     *edge = 0;
     *along = 0.0f;
@@ -149,6 +148,10 @@ float farthestCrossing(const std::vector<SectionPoint>& poly, float a, std::size
     return far;
 }
 
+float farthestCrossing(const std::vector<SectionPoint>& poly, float a, std::size_t* edge, float* along) {
+    return farthestCrossing(poly.data(), poly.size(), a, edge, along);
+}
+
 // The outline's radius each way out from the center (TubeOutline::radius: along each bin's ray
 // the farthest crossing of its edges), its perimeter walked evenly from where the +u ray crosses
 // it, and where along that each bin's ray crosses (TubeOutline::perimeter, perimeterAt).
@@ -163,7 +166,7 @@ void measureRadius(TubeOutline& t) {
     for (std::size_t i = 0; i < n; ++i) {
         const SectionPoint& a = poly[i];
         const SectionPoint& b = poly[(i + 1) % n];
-        at[i + 1] = at[i] + std::hypot(b.u - a.u, b.v - a.v);
+        at[i + 1] = at[i] + pm::hypot(b.u - a.u, b.v - a.v);
     }
     const float total = std::max(at[n], 1e-6f);
     auto arcOf = [&](std::size_t edge, float along) { return at[edge] + (at[edge + 1] - at[edge]) * along; };
@@ -395,7 +398,7 @@ TubeBlendPoint TubeProfile::blendPoint(float u, float v) const {
     // Where its ray crosses the root's perimeter, and how far out it lies (1 on the outline).
     const TubeOutline& root = tubeShapeOutline(rootShape());
     const float s = root.perimeterParam(u, v);
-    const float r = std::hypot(u, v) / std::max(root.radiusAt(u, v), 1e-4f);
+    const float r = pm::hypot(u, v) / std::max(root.radiusAt(u, v), 1e-4f);
     auto place = [&](const std::optional<TubeShapeRef>& profile) -> SectionPoint {
         if (!profile) return {u, v};  // (no tip: the root's)
         const SectionPoint p = tubeShapeOutline(*profile).perimeterPoint(s);
@@ -416,7 +419,7 @@ SectionPoint TubeProfile::unblend(float u, float v, float t) const {
     const TubeOutline& root = tubeShapeOutline(rootShape());
     const TubeOutline& mid = tubeShapeOutline(midShape ? *midShape : rootShape());
     const TubeOutline& tip = tubeShapeOutline(tipShape ? *tipShape : rootShape());
-    std::vector<SectionPoint> curve(kTubePerimeterPoints);
+    std::array<SectionPoint, kTubePerimeterPoints> curve;  // (on the stack: this runs per point of a child guide)
     for (std::size_t k = 0; k < kTubePerimeterPoints; ++k) {
         const float s = static_cast<float>(k) / static_cast<float>(kTubePerimeterPoints);
         const SectionPoint a = root.perimeterPoint(s), b = mid.perimeterPoint(s), c = tip.perimeterPoint(s);
@@ -426,9 +429,9 @@ SectionPoint TubeProfile::unblend(float u, float v, float t) const {
     float along = 0.0f;
     float a = pm::atan2(v, u);
     if (a < 0.0f) a += 2.0f * kPi;
-    const float far = farthestCrossing(curve, a, &edge, &along);
+    const float far = farthestCrossing(curve.data(), curve.size(), a, &edge, &along);
     if (!(far > 1e-6f)) return {u, v};
-    const float r = std::hypot(u, v) / far;
+    const float r = pm::hypot(u, v) / far;
     const SectionPoint p = root.perimeterPoint((static_cast<float>(edge) + along) / static_cast<float>(kTubePerimeterPoints));
     return {p.u * r, p.v * r};
 }
@@ -650,7 +653,7 @@ std::vector<SectionPoint> denseCurve(const std::vector<SectionPoint>& pts, bool 
             // root of each span's length): through every point, with no loops or cusps where the
             // points crowd (a point added between two near ones bends the curve, never knots it).
             auto knot = [](const SectionPoint& a, const SectionPoint& b) {
-                return std::max(std::sqrt(std::hypot(b.u - a.u, b.v - a.v)), 1e-4f);
+                return std::max(std::sqrt(pm::hypot(b.u - a.u, b.v - a.v)), 1e-4f);
             };
             const float k0 = 0.0f, k1 = k0 + knot(p0, p1), k2 = k1 + knot(p1, p2), k3 = k2 + knot(p2, p3);
             const float x = k1 + (k2 - k1) * t;
@@ -675,7 +678,7 @@ std::vector<SectionPoint> evenlyAlong(const std::vector<SectionPoint>& poly, std
     for (std::size_t i = 0; i < n; ++i) {
         const SectionPoint& a = poly[i];
         const SectionPoint& b = poly[(i + 1) % n];
-        at[i + 1] = at[i] + std::hypot(b.u - a.u, b.v - a.v);
+        at[i + 1] = at[i] + pm::hypot(b.u - a.u, b.v - a.v);
     }
     std::vector<SectionPoint> out(count);
     std::size_t seg = 0;
@@ -758,10 +761,10 @@ CustomTubeShapePtr buildCustomTubeShape(const std::string& name, const std::vect
     }
     float size = given.empty() ? 0.0f : std::max(hu - lu, hv - lv);
     for (const SectionPoint& p : given) {
-        if (!pts.empty() && std::hypot(p.u - pts.back().u, p.v - pts.back().v) <= 1e-4f * size) continue;
+        if (!pts.empty() && pm::hypot(p.u - pts.back().u, p.v - pts.back().v) <= 1e-4f * size) continue;
         pts.push_back(p);
     }
-    while (pts.size() > 1 && std::hypot(pts.front().u - pts.back().u, pts.front().v - pts.back().v) <= 1e-4f * size) pts.pop_back();
+    while (pts.size() > 1 && pm::hypot(pts.front().u - pts.back().u, pts.front().v - pts.back().v) <= 1e-4f * size) pts.pop_back();
     if (pts.size() < 3) throw std::invalid_argument("tube shape '" + name + "': at least 3 points, apart");
     const std::size_t per = samplesPerSpan(pts.size());
     std::vector<SectionPoint> dense;
@@ -800,19 +803,19 @@ CustomTubeShapePtr buildCustomTubeShape(const std::string& name, const std::vect
     // between straight edges, 60 on a smooth curve) put in place of the nearest outline points.
     TubeOutline& t = shape->outline;
     t.points = evenlyAlong(dense, kOutlinePoints);
-    const float sharp = std::cos((smooth ? 60.0f : 20.0f) * kPi / 180.0f);
+    const float sharp = pm::cos((smooth ? 60.0f : 20.0f) * kPi / 180.0f);
     const std::size_t n = pts.size();
     for (std::size_t i = 0; i < n; ++i) {
         const SectionPoint& a = pts[(i + n - 1) % n];
         const SectionPoint& b = pts[i];
         const SectionPoint& c = pts[(i + 1) % n];
         const float iu = b.u - a.u, iv = b.v - a.v, ou = c.u - b.u, ov = c.v - b.v;
-        const float li = std::hypot(iu, iv), lo = std::hypot(ou, ov);
+        const float li = pm::hypot(iu, iv), lo = pm::hypot(ou, ov);
         if (!(li > 0.0f && lo > 0.0f) || (iu * ou + iv * ov) / (li * lo) > sharp) continue;
         std::size_t best = 0;
         float bestD = std::numeric_limits<float>::max();
         for (std::size_t k = 0; k < t.points.size(); ++k) {
-            const float d = std::hypot(t.points[k].u - b.u, t.points[k].v - b.v);
+            const float d = pm::hypot(t.points[k].u - b.u, t.points[k].v - b.v);
             if (d < bestD) bestD = d, best = k;
         }
         if (std::find(t.corners.begin(), t.corners.end(), best) != t.corners.end()) continue;
@@ -974,7 +977,7 @@ void TubeSpine::setRootOnScalp(const Vec3f& normal, const Vec3f& across) {
     u = u * (1.0f / ul);
     const Vec3f v = n.cross(u);  // (as a laid footprint: v = n x u)
     const float twist = tube_.twistAt(0.0f);
-    const float c = std::cos(twist), s = std::sin(twist);
+    const float c = pm::cos(twist), s = pm::sin(twist);
     footU_ = (u * c + v * s) * rootWidth_;
     footV_ = (u * -s + v * c) * rootHeight_;
     footNormal_ = n;

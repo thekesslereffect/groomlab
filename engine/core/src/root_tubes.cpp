@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Root-first tubes and the tube hierarchy (root_tubes.h): a port of the Maya Tube tool's Python
-// (root_tubes.py, tube_mesh.py's section fitting) to the core, so every host draws, edits and
-// splits root tubes alike. The math runs in doubles, as the Python did.
+// (root_tubes.py) to the core, so every host draws, edits and splits root tubes alike; the section
+// fitting is tube_mesh.h's, shared with the modeled tubes' conversions. The math runs in doubles,
+// as the Python did.
 
 #include "groomlab/root_tubes.h"
 
@@ -14,6 +15,7 @@
 
 #include "groomlab/frames.h"
 #include "groomlab/tube.h"
+#include "groomlab/tube_mesh.h"
 
 namespace groomlab {
 
@@ -78,9 +80,8 @@ std::vector<Vec3f> toF(const Pts& pts) {
 }
 V sideAxis(const V& n) { return std::abs(n.x) < 0.9 ? V(1, 0, 0) : V(0, 1, 0); }
 
-struct P2 {
-    double x = 0, y = 0;
-};
+using P2 = Vec2d;
+using Section = SectionFit;
 P2 toPlane(const V& p, const V& c, const V& u, const V& v) {
     const V d = p - c;
     return {d.dot(u), d.dot(v)};
@@ -432,128 +433,7 @@ V turn(const V& vec, const V& a0, const V& b0) {
     return vec * c + k.cross(vec) + k * (k.dot(vec) / (1.0 + c));
 }
 
-// ---- Section fitting (tube_mesh.py) ---------------------------------------------------------------------
-
-double signedArea(const std::vector<P2>& pts) {
-    double a = 0.0;
-    for (std::size_t i = 0; i < pts.size(); ++i) {
-        const P2& p = pts[i];
-        const P2& q = pts[(i + 1) % pts.size()];
-        a += p.x * q.y - q.x * p.y;
-    }
-    return 0.5 * a;
-}
-
-// A section's points as a shape's control points: counter-clockwise, at most kMaxTubeShapePoints.
-std::vector<P2> shapePoints(const std::vector<P2>& points) {
-    const std::size_t n = points.size(), limit = kMaxTubeShapePoints;
-    std::vector<std::size_t> indices(n);
-    for (std::size_t i = 0; i < n; ++i) indices[i] = i;
-    if (n > limit) {
-        std::set<std::size_t> picked;
-        for (std::size_t i = 0; i < limit; ++i) {
-            picked.insert(static_cast<std::size_t>(std::lround(static_cast<double>(i) * n / static_cast<double>(limit))) % n);
-        }
-        indices.assign(picked.begin(), picked.end());
-    }
-    std::vector<P2> pts;
-    for (const std::size_t i : indices) pts.push_back(points[i]);
-    if (signedArea(pts) < 0.0) std::reverse(pts.begin(), pts.end());
-    return pts;
-}
-
-struct Fit {
-    double n = 0, mu = 0, mv = 0, suu = 0, svv = 0, sx = 0, sy = 0, xu = 0, yu = 0, xv = 0, yv = 0, sxx = 0, syy = 0, sxy = 0;
-    Fit(const std::vector<P2>& points, const std::vector<P2>& shape) {
-        n = static_cast<double>(points.size());
-        for (const P2& p : shape) mu += p.x, mv += p.y;
-        mu /= n;
-        mv /= n;
-        for (std::size_t i = 0; i < points.size(); ++i) {
-            const double du = shape[i].x - mu, dv = shape[i].y - mv;
-            const P2& p = points[i];
-            suu += du * du;
-            svv += dv * dv;
-            sx += p.x;
-            sy += p.y;
-            xu += p.x * du;
-            yu += p.y * du;
-            xv += p.x * dv;
-            yv += p.y * dv;
-            sxx += p.x * p.x;
-            syy += p.y * p.y;
-            sxy += p.x * p.y;
-        }
-    }
-};
-
-struct FitAt {
-    double error, w, h, ox, oy;
-};
-FitAt fitAt(double angle, const Fit& f) {
-    const double c = std::cos(-angle), s = std::sin(-angle);
-    const double mqx = (f.sx * c - f.sy * s) / f.n;
-    const double mqy = (f.sx * s + f.sy * c) / f.n;
-    const double qxx = c * c * f.sxx - 2.0 * c * s * f.sxy + s * s * f.syy - f.n * mqx * mqx;
-    const double qyy = s * s * f.sxx + 2.0 * c * s * f.sxy + c * c * f.syy - f.n * mqy * mqy;
-    const double cxu = c * f.xu - s * f.yu;
-    const double cyv = s * f.xv + c * f.yv;
-    const double w = f.suu > 1e-18 ? std::max(cxu / f.suu, 0.0) : 0.0;
-    const double h = f.svv > 1e-18 ? std::max(cyv / f.svv, 0.0) : 0.0;
-    const double ex = std::max(qxx - w * cxu, 0.0), ey = std::max(qyy - h * cyv, 0.0);
-    return {ex + ey, w, h, mqx - w * f.mu, mqy - h * f.mv};
-}
-
-struct Section {
-    double twist = 0, width = 0, height = 0;
-    P2 offset;
-};
-// The section that best puts `shape`'s points on `points` (each its own, in order), in the
-// points' axes at twist 0 (fit_section).
-Section fitSection(const std::vector<P2>& points, const std::vector<P2>& shape) {
-    double spread = 0.0, mx = 0.0, my = 0.0;
-    for (const P2& p : points) {
-        spread = std::max(spread, std::hypot(p.x, p.y));
-        mx += p.x;
-        my += p.y;
-    }
-    mx /= static_cast<double>(points.size());
-    my /= static_cast<double>(points.size());
-    double most = 0.0;
-    for (const P2& p : points) most = std::max(most, std::hypot(p.x - mx, p.y - my));
-    if (most < 1e-9 * std::max(spread, 1.0)) return {0.0, 0.0, 0.0, {mx, my}};
-    const Fit fit(points, shape);
-    const int steps = 120;
-    const double step = 2.0 * kPi / steps;
-    double bestAngle = 0.0, bestError = std::numeric_limits<double>::infinity();
-    for (int i = 0; i < steps; ++i) {
-        const FitAt f = fitAt(step * i, fit);
-        if (f.error < bestError) bestError = f.error, bestAngle = step * i;
-    }
-    double lo = bestAngle - step, hi = bestAngle + step;
-    const double golden = 0.5 * (std::sqrt(5.0) - 1.0);
-    for (int it = 0; it < 30; ++it) {
-        const double a1 = hi - golden * (hi - lo), a2 = lo + golden * (hi - lo);
-        if (fitAt(a1, fit).error < fitAt(a2, fit).error) {
-            hi = a2;
-        } else {
-            lo = a1;
-        }
-    }
-    const double angle = 0.5 * (lo + hi);
-    const FitAt f = fitAt(angle, fit);
-    const double c = std::cos(angle), s = std::sin(angle);
-    return {angle, f.w, f.h, {f.ox * c - f.oy * s, f.ox * s + f.oy * c}};
-}
-
-std::vector<P2> placeOutline(const std::vector<SectionPoint>& outline, double twist, double width, double height, const P2& center) {
-    const double c = std::cos(twist), s = std::sin(twist);
-    std::vector<P2> out;
-    for (const SectionPoint& p : outline) {
-        out.push_back({center.x + p.u * width * c - p.v * height * s, center.y + p.u * width * s + p.v * height * c});
-    }
-    return out;
-}
+// ---- Section fitting (signedArea, shapePoints, fitSection, placeOutline: tube_mesh.h) -------------------
 
 bool solve3(double m[3][3], const double r[3], double out[3]) {
     auto det = [](const double a[3][3]) {
@@ -627,7 +507,7 @@ bool bestSection(const std::vector<P2>& pts, const std::vector<P2>& stored, Sect
     bool any = false;
     for (const std::vector<P2>& fitted : candidates(pts, stored)) {
         const Section s = fitSection(pts, fitted);
-        const double off = std::hypot(s.offset.x, s.offset.y);
+        const double off = std::hypot(s.center.x, s.center.y);
         if (!any || off < best - 1e-12) {
             best = off;
             *out = s;
@@ -669,7 +549,7 @@ Footprint footprintOf(const GuideHierarchy& h, const ScalpMesh& scalp, GuideId i
     if (n >= 2) {
         const std::vector<Frame> frames = rotationMinimizingFrames(g->points.data(), n, g->frameUp);
         const float roll = g->tube.rollAt(0.0f);
-        const float c = std::cos(roll), s = std::sin(roll);
+        const float c = pm::cos(roll), s = pm::sin(roll);
         u = unit(V(frames[0].normal * c + frames[0].binormal * s));
         v = V(frames[0].normal * -s + frames[0].binormal * c);
         v = unit(v - u * v.dot(u));
@@ -857,10 +737,10 @@ GuideId makeRootTube(GuideHierarchy& h, const ScalpMesh& scalp, const std::vecto
     Section s = fitShape(h, scalp, id, shape, outline);
     // The shape fills its box: the guide moved onto the box's middle and fitted again, till it holds.
     for (int pass = 0; pass < kRecenterPasses; ++pass) {
-        if (std::hypot(s.offset.x, s.offset.y) <= 1e-5 * std::max(s.width, 1e-9)) break;
+        if (std::hypot(s.center.x, s.center.y) <= 1e-5 * std::max(s.width, 1e-9)) break;
         Footprint fp;
         rootFit(h, scalp, id, outline, &fp);
-        const auto [movedRoot, movedNormal] = surface(fromPlane(s.offset, fp.center, fp.u, fp.v));
+        const auto [movedRoot, movedNormal] = surface(fromPlane(s.center, fp.center, fp.u, fp.v));
         if (path.size() >= 2) {  // the drawn curve moved with its root
             const V delta = movedRoot - points[0];
             for (V& p : path) p = p + delta;
@@ -902,10 +782,10 @@ void editRootTube(GuideHierarchy& h, const ScalpMesh& scalp, GuideId id, const s
     reshape(h, scalp, id, moved);
     Section s = fitShape(h, scalp, id, shape, outline);
     for (int pass = 0; pass < kRecenterPasses; ++pass) {
-        if (std::hypot(s.offset.x, s.offset.y) <= 1e-5 * std::max(s.width, 1e-9)) break;
+        if (std::hypot(s.center.x, s.center.y) <= 1e-5 * std::max(s.width, 1e-9)) break;
         Footprint fp;
         rootFit(h, scalp, id, outline, &fp);
-        const auto [root2, normal2] = surface(fromPlane(s.offset, fp.center, fp.u, fp.v));
+        const auto [root2, normal2] = surface(fromPlane(s.center, fp.center, fp.u, fp.v));
         move = root2 - moved[0];
         Pts next{root2};
         for (std::size_t i = 1; i < moved.size(); ++i) next.push_back(moved[i] + move);
@@ -952,7 +832,9 @@ std::vector<Vec3f> rootTubeSectionOutline(const GuideHierarchy& h, const ScalpMe
     const Footprint fp = footprintOf(h, scalp, id);
     const double w = g->tube.width.empty() ? 0.0 : g->tube.width[0];
     const double ht = w * (g->tube.aspect.empty() ? 1.0 : g->tube.aspect[0]);
-    const std::vector<P2> flat = placeOutline(g->tube.custom->points, g->tube.twist.empty() ? 0.0 : g->tube.twist[0], w, ht, {});
+    std::vector<P2> shape;
+    for (const SectionPoint& p : g->tube.custom->points) shape.push_back({p.u, p.v});
+    const std::vector<P2> flat = placeOutline(shape, g->tube.twist.empty() ? 0.0 : g->tube.twist[0], w, ht);
     Pts world;
     for (const P2& q : flat) world.push_back(fromPlane(q, fp.center, fp.u, fp.v));
     return toF(onScalp ? projectAlong(scalp, world, fp.n) : world);
