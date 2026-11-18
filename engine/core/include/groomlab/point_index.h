@@ -31,6 +31,11 @@ public:
     // Index of the nearest point, or SIZE_MAX when empty.
     std::size_t nearest(const Vec3f& p, float* distance2 = nullptr) const;
 
+    // The nearest point if it is within the squared distance `within2` (at it counts), else
+    // SIZE_MAX: the index and distance nearest() gives then, found without searching past the
+    // reach (a query far from every point looks at few of them).
+    std::size_t nearestWithin(const Vec3f& p, float within2, float* distance2 = nullptr) const;
+
     // Up to k nearest points, closest first. Writes indices and squared
     // distances (both must hold k entries); returns how many were found.
     std::size_t kNearest(const Vec3f& p, std::size_t k, std::size_t* indices, float* distances2) const;

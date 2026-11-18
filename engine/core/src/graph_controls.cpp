@@ -166,6 +166,102 @@ void exposeParam(GraphEdit& edit, const std::string& node, const std::string& pa
     edit = GraphEdit(g.dump());
 }
 
+bool unexposeParam(GraphEdit& edit, const std::string& node, const std::string& param) {
+    json g = graphOf(edit);
+    json& n = nodeIn(g, node);
+    if (!n.contains("paramInputs") || !n["paramInputs"].is_array()) return false;
+    json& exposed = n["paramInputs"];
+    const auto it = std::find(exposed.begin(), exposed.end(), json(param));
+    if (it == exposed.end()) return false;
+    exposed.erase(it);
+    if (exposed.empty()) n.erase("paramInputs");
+    // The port goes with what fed it.
+    if (g.contains("connections") && g["connections"].is_array()) {
+        json links = json::array();
+        for (const json& c : g["connections"]) {
+            if (!(c.is_object() && c.value("to", std::string()) == node && c.value("input", std::string()) == param)) links.push_back(c);
+        }
+        g["connections"] = std::move(links);
+    }
+    edit = GraphEdit(g.dump());
+    return true;
+}
+
+namespace {
+
+// A compound's definition in its node (an object; made when it has none).
+json& definitionOf(json& compound) {
+    json& params = compound["params"];
+    if (!params.is_object()) params = json::object();
+    json& definition = params["definition"];
+    if (definition.is_string()) definition = json::parse(definition.get<std::string>(), nullptr, false);
+    if (!definition.is_object()) definition = json::object();
+    return definition;
+}
+
+json* innerNode(json& definition, const std::string& name) {
+    if (!definition.contains("graph") || !definition["graph"].is_object()) return nullptr;
+    json& graph = definition["graph"];
+    if (!graph.contains("nodes") || !graph["nodes"].is_array()) return nullptr;
+    for (json& n : graph["nodes"]) {
+        if (n.is_object() && n.value("name", std::string()) == name) return &n;
+    }
+    return nullptr;
+}
+
+}  // namespace
+
+void compoundExpose(GraphEdit& edit, const std::string& compound, const std::string& name, const std::string& target) {
+    if (edit.nodeType(compound) != "Compound") throw GraphError(compound + " is not a Compound");
+    if (name.empty()) throw GraphError("an exposed param needs a name");
+    const auto dot = target.find('.');
+    if (dot == std::string::npos) throw GraphError("an inner param is \"node.param\" inside the compound");
+    const std::string innerName = target.substr(0, dot), param = target.substr(dot + 1);
+    json g = graphOf(edit);
+    json& definition = definitionOf(nodeIn(g, compound));
+    bool known = false;
+    if (const json* inner = innerNode(definition, innerName)) {
+        try {
+            const json spec = json::parse(nodeSpecJson(inner->dump()));
+            for (const json& p : spec.value("params", json::array())) known = known || p.value("name", std::string()) == param;
+        } catch (const std::exception&) {  // a node this build cannot read has no params to show
+        }
+    }
+    if (!known) throw GraphError("the compound has no param '" + target + "'");
+    json& expose = definition["expose"];
+    if (!expose.is_object()) expose = json::object();
+    expose[name] = target;
+    edit = GraphEdit(g.dump());
+}
+
+bool compoundUnexpose(GraphEdit& edit, const std::string& compound, const std::string& target) {
+    if (edit.nodeType(compound) != "Compound") throw GraphError(compound + " is not a Compound");
+    json g = graphOf(edit);
+    json& n = nodeIn(g, compound);
+    if (!n.contains("params") || !n["params"].is_object() || !n["params"].contains("definition")) return false;
+    json& definition = definitionOf(n);
+    if (!definition.contains("expose") || !definition["expose"].is_object()) return false;
+    json& expose = definition["expose"];
+    std::vector<std::string> names;
+    for (const auto& [name, t] : expose.items()) {
+        if (t.is_string() && t.get<std::string>() == target) names.push_back(name);
+    }
+    if (names.empty()) return false;
+    const auto dot = target.find('.');
+    const std::string innerName = dot == std::string::npos ? target : target.substr(0, dot);
+    const std::string param = dot == std::string::npos ? std::string() : target.substr(dot + 1);
+    json& params = n["params"];
+    for (const std::string& name : names) {
+        if (params.contains(name)) {
+            if (json* inner = innerNode(definition, innerName)) (*inner)["params"][param] = params[name];
+            params.erase(name);
+        }
+        expose.erase(name);
+    }
+    edit = GraphEdit(g.dump());
+    return true;
+}
+
 std::string addControl(GraphEdit& edit, const std::string& node, const std::string& param, const std::string& name,
                        std::optional<double> defaultValue, double min, double max, std::optional<double> groomSize) {
     const json spec = paramSpec(edit, node, param);

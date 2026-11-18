@@ -387,6 +387,34 @@ class ToolsTest(unittest.TestCase):
         self.assertIn(("prop", "match_neighbors"), log)
         self.assertIn(("prop", "spacing"), log)
 
+    def test_2b_brush_values_are_the_catalogs(self):
+        # Blender declares properties before the helper runs, so GroomLabTools writes each brush
+        # value's default and limits itself. They are the core's (brush_catalog.h), in Blender's
+        # units: a length in meters (the groom's centimeters / 100), the stamp spacing in percent.
+        specs = tools.catalog()["settings"]
+        rna = bpy.context.scene.groomlab_tools.bl_rna.properties
+        for prop, sid, shown in (("radius", "radius", 1.0), ("strength", "strength", 1.0), ("falloff", "falloff", 1.0),
+                                 ("smooth_strength", "smoothStrength", 1.0), ("length", "length", 0.01),
+                                 ("segments", "segments", 1.0), ("spacing", "spacing", 0.01),
+                                 ("alpha_angle", "alphaAngle", 1.0), ("alpha_spacing", "alphaSpacing", 100.0)):
+            s, p = specs[sid], rna[prop]
+            self.assertIn(s["kind"], ("int", "float"), sid)
+            # (Strength: one property for every tool, so its slider spans both ways as a signed tool's does.)
+            soft_min = -s["softMax"] if sid == "strength" else s["softMin"]
+            for what, mine, core in (("default", p.default, s["default"]), ("min", p.hard_min, s["min"]),
+                                     ("max", p.hard_max, s["max"]), ("soft_min", p.soft_min, soft_min),
+                                     ("soft_max", p.soft_max, s["softMax"])):
+                want = core * shown
+                self.assertAlmostEqual(mine, want, delta=1e-5 * abs(want) + 1e-9, msg="%s.%s is the catalog's %s" % (prop, what, sid))
+        for prop, sid in (("selected_only", "selectedOnly"), ("pressure", "pressure"), ("collide", "collide"),
+                          ("front_facing", "frontFacingOnly"), ("stretch", "stretch"), ("straighten", "straighten"),
+                          ("match_neighbors", "matchNeighbors"), ("solo_new_guides", "soloNewGuides"),
+                          ("alpha_invert", "alphaInvert")):
+            self.assertEqual(specs[sid]["kind"], "bool", sid)
+            self.assertEqual(rna[prop].default, specs[sid]["default"], "%s starts as the catalog's %s" % (prop, sid))
+        self.assertEqual(specs["newGuides"]["kind"], "")  # a block of controls: no value of its own
+        self.assertNotIn("default", specs["newGuides"])
+
     def test_3_strokes_through_the_modal_tool(self):
         head = self.head
         cam = self.cam

@@ -14,8 +14,6 @@ namespace groomlab {
 
 // The kinds of files a scene keeps, each a folder of its own: masks (texture maps), cards (card
 // and scalp bakes), exports, caches (guide caches, simulation bakes), renders, references (photos).
-inline const char* const kAssetKinds[] = {"masks", "cards", "exports", "caches", "renders", "references"};
-
 // <base>/groomlab/<name>/<kind> (no <kind>: the scene's own folder), forward slashes: so two
 // scenes in one folder (shot_v001, shot_v002) never share files. `name` is made file safe.
 std::string assetFolder(const std::string& base, const std::string& name, const std::string& kind = {});

@@ -8,6 +8,8 @@
 #include <fstream>
 #include <iterator>
 
+#include "groomlab/color.h"
+
 #if defined(_MSC_VER)
 #pragma warning(push, 0)
 #endif
@@ -344,7 +346,7 @@ void convertTexel(const float* in, int inChannels, int alpha, float* out, int ch
         }
     }
     if (channels == 1 && inChannels >= 3 && !gray)
-        out[0] = 0.2126f * in[0] + 0.7152f * in[1] + 0.0722f * in[2];
+        out[0] = rec709Luminance(in[0], in[1], in[2]);
 }
 
 using Uv = std::array<float, 2>;

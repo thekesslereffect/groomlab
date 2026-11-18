@@ -800,8 +800,14 @@ std::vector<Vec3f> GuideHierarchy::offsetsFromWorld(const HierarchyGuide& child,
             // before kept (so a stroke's dabs never jump it to another turn of a spiral), then
             // found exactly (bisection).
             const float length = std::max(arc.back(), 1e-6f);
-            const float lo = -arc[i] - 0.5f * length - 2.0f * std::sqrt(p.dot(p) + 1.0f),
-                        hi = arc.back() - arc[i] + 0.5f * length + 2.0f * std::sqrt(p.dot(p) + 1.0f);
+            // The scan's range: the parent's length and, past either end (where it runs on straight
+            // along its tangent), no further than the point is from that end: a crossing there lies
+            // within that distance. By the parent's own size and the point's place beside it, never
+            // by where the groom stands in the world or a scene unit (a range padded by the point's
+            // distance from the origin made the steps longer than the parent on a groom far from it,
+            // several crossings to a step).
+            const float lo = -arc[i] - 0.5f * length - (p - parent.points.front()).length(),
+                        hi = arc.back() - arc[i] + 0.5f * length + (p - parent.points.back()).length();
             const float before = child.offsets.empty() ? local.z : sampleEven(child.offsets, t, Vec3f{}).z * scale_;
             auto ahead = [&](float a) {  // (how far ahead of the spot's section plane the point lies)
                 const AlongCurve c = alongCurve(parent.points, frames, arc, arc[i] + a);
@@ -830,6 +836,7 @@ std::vector<Vec3f> GuideHierarchy::offsetsFromWorld(const HierarchyGuide& child,
             if (bestGap < std::numeric_limits<float>::max()) {
                 for (int pass = 0; pass < 60; ++pass) {
                     const float mid = 0.5f * (a0 + a1);
+                    const bool spent = mid == a0 || mid == a1;  // no float left between them: every pass after gives the same
                     const float gm = ahead(mid);
                     if ((gm > 0.0f) == (g0 > 0.0f)) {
                         a0 = mid;
@@ -837,6 +844,7 @@ std::vector<Vec3f> GuideHierarchy::offsetsFromWorld(const HierarchyGuide& child,
                     } else {
                         a1 = mid;
                     }
+                    if (spent) break;
                 }
                 best = 0.5f * (a0 + a1);
             }

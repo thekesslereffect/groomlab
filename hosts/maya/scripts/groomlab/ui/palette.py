@@ -58,8 +58,8 @@ NO_TOOL = "Pick a tool, then drag over the groom in the viewport."
 # The brush block's chips: a short name each (their tooltips: the catalog's hints).
 CHIP_LABELS = {"pressure": "Pressure", "collide": "Keep off scalp"}
 # A brush's radius (screen pixels) and falloff until it has its own (ToolPalette.recall_brush).
-DEFAULT_RADIUS = 60
-DEFAULT_FALLOFF = 1.0
+DEFAULT_RADIUS = int(SETTINGS["radius"]["default"])
+DEFAULT_FALLOFF = SETTINGS["falloff"]["default"]
 
 
 SMOOTHING = ("Shape", "Trim")  # the groups whose tools smooth on Shift+drag (Create's, Paint's and Guides' don't say)
@@ -126,6 +126,24 @@ def _setting(setting, field):
     return value
 
 
+def _default(setting):
+    """What one of the catalog's values starts at (brush_settings: the core's BrushToolSettings')."""
+    return SETTINGS[setting]["default"]
+
+
+def _slider(setting, factor=1.0, **options):
+    """A SoftSlider for one of the catalog's values: its default, its span and what a typed value
+    may reach are the spec's, shown `factor` times it (a length in the shown unit, a fraction in
+    percent). `options`: SoftSlider's own (integer, key, label, suffix)."""
+    spec = SETTINGS[setting]
+    integer = options.pop("integer", spec["kind"] == "int")
+    shown = (lambda v: int(round(v * factor))) if integer else (lambda v: v * factor)
+    if not integer:
+        options.setdefault("shown_decimals", widgets.display_decimals(spec["decimals"], factor))
+    return widgets.SoftSlider(shown(spec["default"]), shown(spec["soft_min"]), shown(spec["soft_max"]), integer=integer,
+                              minimum=shown(spec["min"]), maximum=shown(spec["max"]), **options)
+
+
 def _options(name):
     """A choices.json list as (value, label, tooltip)."""
     return [(c["value"], c["label"], c.get("tip", "")) for c in definitions.choices(name)]
@@ -149,11 +167,6 @@ def section_shown(section, tool, tab):
     if section.get("tools") and tool not in section["tools"]:
         return False
     return not section.get("tabs") or tab in section["tabs"]
-
-
-def tools_of(*ids):
-    """(tool, label, tooltip) for the catalog's tools `ids`, in the catalog's order."""
-    return [(t["id"], t["label"], t["hint"]) for t in CATALOG if t["id"] in ids]
 
 
 STARTER_VAR = "groomLabHideStarter"
@@ -1308,24 +1321,22 @@ class ToolPalette(QtWidgets.QWidget):
         fields = QtWidgets.QVBoxLayout(self.brush_form)
         fields.setContentsMargins(0, 0, 0, 0)
         fields.setSpacing(theme.px(4))
-        self.radius = widgets.SoftSlider(DEFAULT_RADIUS, 5, 400, integer=True, minimum=1, key="palette.radius",
-                                         label=_setting("radius", "label"), suffix="px")
+        self.radius = _slider("radius", integer=True, key="palette.radius", label=_setting("radius", "label"), suffix="px")
         self.radius.unit_tip = "Screen pixels: the circle's radius on screen, whatever the zoom"
         self.radius.setToolTip(_setting("radius", "hint"))
         self.radius.committed.connect(lambda v: self.push(radius=v))
         self.radius.dragged.connect(lambda v: self.push(radius=v))
-        self.strength = widgets.SoftSlider(1.0, 0.0, 1.0, key=None, label=_setting("strength", "label"))
+        self.strength = _slider("strength", key=None, label=_setting("strength", "label"))
         self.strength.setToolTip(_setting("strength", "hint"))
         self.strength.committed.connect(self.set_strength)
         self.strength.dragged.connect(self.set_strength)
         # Falloff as the catalog names it in both hosts: 0 hard (full strength to the edge), 1 soft
         # (fading from the center out); the brush's hardness is 1 - falloff.
-        self.falloff = widgets.SoftSlider(DEFAULT_FALLOFF, 0.0, 1.0, key="palette.falloff", label=_setting("falloff", "label"))
+        self.falloff = _slider("falloff", key="palette.falloff", label=_setting("falloff", "label"))
         self.falloff.setToolTip(_setting("falloff", "hint"))
         self.falloff.committed.connect(lambda v: self.push(hardness=1.0 - v))
         self.falloff.dragged.connect(lambda v: self.push(hardness=1.0 - v))
-        self.smooth_strength = widgets.SoftSlider(1.0, 0.0, 3.0, key="palette.smoothStrength",
-                                                  label=_setting("smoothStrength", "label"))
+        self.smooth_strength = _slider("smoothStrength", key="palette.smoothStrength", label=_setting("smoothStrength", "label"))
         self.smooth_strength.setToolTip(_setting("smoothStrength", "hint"))
         self.smooth_strength.committed.connect(lambda v: self.push(smoothStrength=v))
         self.smooth_strength.dragged.connect(lambda v: self.push(smoothStrength=v))
@@ -1339,13 +1350,13 @@ class ToolPalette(QtWidgets.QWidget):
         # straight line); then the brush's curves as chips (each off until its chip is on, then
         # drawn in a curve editor under the chips; right-click: presets). Selected only and Front
         # only are not in the panel: the brushes keep their defaults (off and on).
-        self.pressure = self.setting_switch("pressure", True)
+        self.pressure = self.setting_switch("pressure", _default("pressure"))
         self.pressure.toggled.connect(lambda on: self.push(pressure=on))
-        self.collide = self.setting_switch("collide", True)
+        self.collide = self.setting_switch("collide", _default("collide"))
         self.collide.toggled.connect(lambda on: self.push(collide=on))
-        self.stretch = widgets.switch("Stretch", _setting("stretch", "hint"), False, "stretch")
+        self.stretch = widgets.switch("Stretch", _setting("stretch", "hint"), _default("stretch"), "stretch")
         self.stretch.toggled.connect(lambda on: self.push(stretch=on))
-        self.straighten = widgets.switch("Straighten", _setting("straighten", "hint"), False, "straighten")
+        self.straighten = widgets.switch("Straighten", _setting("straighten", "hint"), _default("straighten"), "straighten")
         self.straighten.toggled.connect(lambda on: self.push(straighten=on))
         for toggle in (self.pressure, self.collide, self.stretch, self.straighten):
             self.brush_block.add(toggle.row)
@@ -1379,24 +1390,21 @@ class ToolPalette(QtWidgets.QWidget):
         self.create_box.setToolTip(_setting("newGuides", "hint"))
         self.length_factor = units.factor("length")  # shown in real units, stored in scene units
         length_key = "palette.length@" + units.unit("length")[0]
-        self.length = widgets.SoftSlider(0.5 * self.length_factor, minimum=0.001 * self.length_factor, key=length_key,
-                                         label="Length", suffix=units.label("length"))
+        self.length = _slider("length", self.length_factor, key=length_key, label="Length", suffix=units.label("length"))
         self.length.committed.connect(lambda v: self.push(length=v / self.length_factor))
-        self.segments = widgets.SoftSlider(12, 1, 32, integer=True, minimum=1, maximum=256, key="palette.segments",
-                                           label="Segments")
+        self.segments = _slider("segments", key="palette.segments", label="Segments")
         self.segments.committed.connect(lambda v: self.push(segments=v))
-        self.spacing = widgets.SoftSlider(0.1 * self.length_factor, minimum=0.0,
-                                          key="palette.spacing@" + units.unit("length")[0], label="Spacing",
-                                          suffix=units.label("length"))
+        self.spacing = _slider("spacing", self.length_factor, key="palette.spacing@" + units.unit("length")[0], label="Spacing",
+                               suffix=units.label("length"))
         self.spacing.setToolTip(_setting("spacing", "hint"))
         self.spacing.committed.connect(lambda v: self.push(spacing=v / self.length_factor))
         for field in (self.length, self.segments, self.spacing):
             self.create_box.add(field)  # the name inside the field
         self.match = widgets.switch("Match nearby", "New guides take the shape, length and painted maps of the nearest "
                                     "guides: the group's own, or the groups around it while it has none. Draw takes the "
-                                    "maps. Off: they stand straight up, with no maps", True, "matchNearby")
+                                    "maps. Off: they stand straight up, with no maps", _default("matchNeighbors"), "matchNearby")
         self.match.toggled.connect(lambda on: self.push(matchNeighbors=on))
-        self.solo_new = widgets.switch("Solo new", _setting("soloNewGuides", "hint"), False, "soloNewGuides")
+        self.solo_new = widgets.switch("Solo new", _setting("soloNewGuides", "hint"), _default("soloNewGuides"), "soloNewGuides")
         self.solo_new.toggled.connect(lambda on: self.push(soloNewGuides=on))  # (off: placing freezes nothing)
         self.create_box.add(self.match.row)
         self.create_box.add(self.solo_new.row)
@@ -1728,19 +1736,20 @@ class ToolPalette(QtWidgets.QWidget):
         self.alpha_rotation.currentIndexChanged.connect(self.alpha_rotation_changed)
         rotation_row, _rotation = widgets.field_row("Rotation", self.alpha_rotation)
         options.addWidget(rotation_row)
-        self.alpha_angle = widgets.SoftSlider(0, 0, 360, integer=True, minimum=-360, maximum=360, label="Stamp angle",
-                                              suffix=u"°")
+        self.alpha_angle = _slider("alphaAngle", integer=True, label="Stamp angle", suffix=u"°")
         self.alpha_angle.setToolTip("The stamp's angle in degrees, counterclockwise (Follow Stroke: added to the stroke's way)")
         self.alpha_angle.committed.connect(lambda v: self.push(alphaAngle=v))
         self.alpha_angle.dragged.connect(lambda v: self.push(alphaAngle=v))
         options.addWidget(self.alpha_angle)
-        self.alpha_spacing = widgets.SoftSlider(25, 5, 100, integer=True, minimum=2, maximum=400, key="palette.alphaSpacing",
-                                                label="Stamp spacing", suffix="%")
+        # (the spec's is a share of the brush's diameter: shown in percent)
+        self.alpha_spacing = _slider("alphaSpacing", 100.0, integer=True, key="palette.alphaSpacing", label="Stamp spacing",
+                                     suffix="%")
         self.alpha_spacing.setToolTip("How far apart the stamps fall along a stroke, in percent of the brush's "
                                       "diameter: low for a smooth trail, 100 and up for separate stamps")
         self.alpha_spacing.committed.connect(lambda v: self.push(alphaSpacing=v / 100.0))
         options.addWidget(self.alpha_spacing)
-        self.alpha_invert = widgets.switch("Invert", "Paint where the stamp is black instead", False, "alphaInvert")
+        self.alpha_invert = widgets.switch("Invert", "Paint where the stamp is black instead", _default("alphaInvert"),
+                                           "alphaInvert")
         self.alpha_invert.toggled.connect(lambda on: self.push(alphaInvert=on))
         options.addWidget(self.alpha_invert.row)
         self.alpha_options.setVisible(False)
@@ -2548,7 +2557,8 @@ class ToolPalette(QtWidgets.QWidget):
         self.show_sections()
         if tool in self.strengths:
             signed = tool in SIGNED
-            self.strength.setRange(-1.0 if signed else 0.0, 1.0)
+            span = SETTINGS["strength"]  # (a signed tool's: as far the other way)
+            self.strength.setRange(-span["soft_max"] if signed else span["soft_min"], span["soft_max"])
             self.strength.setValue(self.strengths[tool])
             self.strength.setLabel("Strength (±)" if signed else "Strength")
 

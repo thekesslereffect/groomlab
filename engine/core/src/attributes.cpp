@@ -44,6 +44,7 @@ std::string conditionText(const ParamValue& value) {
 
 // Whether a UI shows the param as its node is set (its showWhen, and so on up).
 bool shown(const Operator& op, const std::vector<ParamSpec>& specs, const ParamSpec& spec, int depth = 0) {
+    if (spec.added > op.nodeVersion()) return false;  // (added by a later version: param_conditions.h paramInVersion)
     if (spec.showWhen.empty()) return true;
     if (depth > 8) return true;
     const ParamSpec* other = nullptr;

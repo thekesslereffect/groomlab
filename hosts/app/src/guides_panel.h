@@ -71,7 +71,6 @@ public:
     QMenu* contextMenu(const QPoint& pos);
     void editCurrentName();  // the current group's name edited in place (Rename)
     int childrenCount() const;
-    void setChildrenCount(int count);
 
     // The edits, as the bar and menus do them; false (and a message) when refused.
     bool addGroup(const std::string& parent, const std::string& name = {});  // parent "": a root group

@@ -28,6 +28,7 @@
 #include "groomlab/graph.h"
 #include "groomlab/graph_controls.h"
 #include "groomlab/graph_edit.h"
+#include "groomlab/graph_inserts.h"
 #include "groomlab/graph_io.h"
 #include "groomlab/groom_session.h"
 #include "groomlab/node_library.h"
@@ -156,116 +157,30 @@ void exposeParamRequest(GraphEdit& edit, const std::string& node, const std::str
     }
 }
 
-// GraphModel.unexpose_param: the port goes with what fed it; the param keeps its own value.
-void unexposeParam(GraphEdit& edit, const std::string& node, const std::string& param) {
+// GraphModel.unexpose_param: the port goes with what fed it; the param keeps its own value (the
+// core's, graph_controls.h).
+void unexposeParamRequest(GraphEdit& edit, const std::string& node, const std::string& param) {
     paramSpecOf(edit, node, param);
-    {
-        json g = graphJsonOf(edit);
-        const json& n = nodeIn(g, node);
-        if (!n.contains("paramInputs") || !n["paramInputs"].is_array()) return;
-        if (std::find(n["paramInputs"].begin(), n["paramInputs"].end(), json(param)) == n["paramInputs"].end()) return;
-    }
-    edit.disconnect(node, param);
-    json g = graphJsonOf(edit);
-    json& n = nodeIn(g, node);
-    json& exposed = n["paramInputs"];
-    exposed.erase(std::find(exposed.begin(), exposed.end(), json(param)));
-    if (exposed.empty()) n.erase("paramInputs");
-    edit = GraphEdit(g.dump());
+    groomlab::unexposeParam(edit, node, param);
 }
 
-// GraphModel.expose (a Compound's panel): inner param `target` ("node.param") shown as `name`.
-void compoundExpose(GraphEdit& edit, const std::string& compound, const std::string& name, const std::string& target) {
-    if (edit.nodeType(compound) != "Compound") fail("bad_request", compound + " is not a Compound");
-    if (name.empty()) fail("bad_request", "an exposed param needs a name");
-    const auto dot = target.find('.');
-    if (dot == std::string::npos) fail("bad_request", "target is \"node.param\" inside the compound");
-    const std::string innerName = target.substr(0, dot), param = target.substr(dot + 1);
-    json g = graphJsonOf(edit);
-    json& n = nodeIn(g, compound);
-    json& definition = n["params"]["definition"];
-    if (!definition.is_object()) definition = json::object();
-    const json* inner = nullptr;
-    if (definition.contains("graph") && definition["graph"].is_object() && definition["graph"].contains("nodes") &&
-        definition["graph"]["nodes"].is_array()) {
-        for (const json& x : definition["graph"]["nodes"]) {
-            if (x.is_object() && x.value("name", std::string()) == innerName) inner = &x;
-        }
+// GraphModel.expose (a Compound's panel): inner param `target` ("node.param") shown as `name`; and
+// GraphModel.unexpose: the compound stops showing `target`, its value inside what it set last. The
+// core's (graph_controls.h compoundExpose, compoundUnexpose), its GraphError a bad request.
+void compoundExposeRequest(GraphEdit& edit, const std::string& compound, const std::string& name, const std::string& target) {
+    try {
+        groomlab::compoundExpose(edit, compound, name, target);
+    } catch (const GraphError& e) {
+        fail("bad_request", e.what());
     }
-    bool known = false;
-    if (inner) {
-        try {
-            const json spec = json::parse(nodeSpecJson(inner->dump()));
-            for (const json& p : spec.value("params", json::array())) known = known || p.value("name", std::string()) == param;
-        } catch (const std::exception&) {
-        }
-    }
-    if (!known) fail("not_found", "the compound has no param '" + target + "'");
-    json& expose = definition["expose"];
-    if (!expose.is_object()) expose = json::object();
-    expose[name] = target;
-    edit = GraphEdit(g.dump());
 }
 
-// GraphModel.unexpose: the compound stops showing `target`; its value inside stays what it set last.
-void compoundUnexpose(GraphEdit& edit, const std::string& compound, const std::string& target) {
-    if (edit.nodeType(compound) != "Compound") fail("bad_request", compound + " is not a Compound");
-    json g = graphJsonOf(edit);
-    json& n = nodeIn(g, compound);
-    if (!n.contains("params") || !n["params"].is_object()) return;
-    json& params = n["params"];
-    if (!params.contains("definition") || !params["definition"].is_object()) return;
-    json& definition = params["definition"];
-    if (!definition.contains("expose") || !definition["expose"].is_object()) return;
-    json& expose = definition["expose"];
-    std::vector<std::string> names;
-    for (const auto& [name, t] : expose.items()) {
-        if (t.is_string() && t.get<std::string>() == target) names.push_back(name);
+void compoundUnexposeRequest(GraphEdit& edit, const std::string& compound, const std::string& target) {
+    try {
+        groomlab::compoundUnexpose(edit, compound, target);
+    } catch (const GraphError& e) {
+        fail("bad_request", e.what());
     }
-    const auto dot = target.find('.');
-    const std::string innerName = dot == std::string::npos ? target : target.substr(0, dot);
-    const std::string param = dot == std::string::npos ? std::string() : target.substr(dot + 1);
-    for (const std::string& name : names) {
-        if (params.contains(name) && definition.contains("graph") && definition["graph"].is_object()) {
-            for (json& inner : definition["graph"]["nodes"]) {
-                if (inner.is_object() && inner.value("name", std::string()) == innerName) inner["params"][param] = params[name];
-            }
-            params.erase(name);
-        }
-        expose.erase(name);
-    }
-    edit = GraphEdit(g.dump());
-}
-
-// GraphModel.insert_on_link: the one link from (its output) -> to.input routed through `node`:
-// node reads from on its first input that takes from's output, to reads node.
-void insertOnLink(GraphEdit& edit, const std::string& from, const std::string& to, const std::string& input,
-                  const std::string& node, const std::string& output) {
-    if (!edit.hasNode(node)) fail("not_found", "no node '" + node + "'");
-    const json g = graphJsonOf(edit);
-    bool linked = false;
-    for (const json& c : g.value("connections", json::array())) {
-        if (c.value("from", std::string()) == from && c.value("to", std::string()) == to && c.value("input", std::string()) == input &&
-            c.value("output", std::string()) == output) {
-            linked = true;
-        }
-    }
-    if (!linked) fail("not_found", from + (output.empty() ? "" : "." + output) + " is not connected to " + to + "." + input);
-    std::string why;
-    for (const json& p : specOf(edit, node).value("inputs", json::array())) {
-        GraphEdit trial = edit;
-        try {
-            trial.connect(from, node, p.value("name", std::string()), output);
-            trial.connect(node, to, input);
-        } catch (const GraphError& e) {
-            if (why.empty()) why = e.what();
-            continue;
-        }
-        edit = std::move(trial);
-        return;
-    }
-    throw GraphError(node + " has no input that takes " + from + "'s " + edit.outputType(from, output) + " and feeds " + to + "." +
-                     input + (why.empty() ? "" : " (" + why + ")"));
 }
 
 // ---- Controls (params.py): Control nodes' sliders, Expression variables, keyed params ----------
@@ -845,23 +760,26 @@ bool runGraphAuthoring(Session& s, const std::string& op, const json& args, json
         exposeParamRequest(edit, needString(args, "name"), needString(args, "param"));
         label = "expose param";
     } else if (op == "unexpose_param") {
-        unexposeParam(edit, needString(args, "name"), needString(args, "param"));
+        unexposeParamRequest(edit, needString(args, "name"), needString(args, "param"));
         label = "unexpose param";
     } else if (op == "compound_expose") {
         const std::string name = needString(args, "name");
         if (!edit.hasNode(name)) fail("not_found", "no node '" + name + "'");
-        compoundExpose(edit, name, needString(args, "param"), needString(args, "target"));
+        compoundExposeRequest(edit, name, needString(args, "param"), needString(args, "target"));
         label = "expose compound param";
     } else if (op == "compound_unexpose") {
         const std::string name = needString(args, "name");
         if (!edit.hasNode(name)) fail("not_found", "no node '" + name + "'");
-        compoundUnexpose(edit, name, needString(args, "target"));
+        compoundUnexposeRequest(edit, name, needString(args, "target"));
         label = "unexpose compound param";
     } else if (op == "insert_on_link") {
         const std::string from = needString(args, "from"), to = needString(args, "to");
         if (!edit.hasNode(from)) fail("not_found", "no node '" + from + "'");
         if (!edit.hasNode(to)) fail("not_found", "no node '" + to + "'");
-        insertOnLink(edit, from, to, needString(args, "input"), needString(args, "node"), optString(args, "output", ""));
+        const std::string node = needString(args, "node");
+        if (!edit.hasNode(node)) fail("not_found", "no node '" + node + "'");
+        // Every host's node dropped on a wire (graph_inserts.h insertOnLink): its first input that takes it.
+        insertOnLink(edit, from, to, needString(args, "input"), node, optString(args, "output", ""));
         label = "insert node";
     } else if (op == "detach") {
         // Detach (every host's node menu): each node out of the flow, kept (graph_edit.h detach).

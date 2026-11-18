@@ -183,5 +183,25 @@ class ScreenStrokeTest(unittest.TestCase):
         self.assertEqual(paint.values(), painted)
 
 
+class BrushCatalogTest(unittest.TestCase):
+    def test_a_values_default_span_and_limits_come_with_its_setting(self):
+        # What Maya's Groom Tools build their sliders and switches from (brush_catalog.h).
+        specs = dict((s["id"], s) for s in gl.brush_settings())
+        self.assertEqual(specs["radius"], dict(specs["radius"], kind="float", default=60.0, soft_min=5.0, soft_max=400.0, min=1.0,
+                                               max=2000.0, decimals=0, unit="pixels"))
+        segments = specs["segments"]
+        self.assertEqual((segments["kind"], segments["default"], segments["soft_max"], segments["max"]), ("int", 12, 32, 256))
+        self.assertIsInstance(segments["default"], int)
+        self.assertEqual((specs["length"]["unit"], specs["length"]["default"], specs["spacing"]["unit"]), ("length", 0.5, "length"))
+        self.assertEqual((specs["alphaSpacing"]["default"], specs["alphaSpacing"]["unit"]), (0.25, "fraction"))
+        self.assertIs(specs["pressure"]["default"], True)
+        self.assertIs(specs["stretch"]["default"], False)
+        self.assertEqual(specs["newGuides"]["kind"], "")  # a block of controls: no value of its own
+        self.assertNotIn("default", specs["newGuides"])
+        for s in specs.values():
+            if s["kind"] in ("int", "float"):
+                self.assertTrue(s["min"] <= s["soft_min"] <= s["default"] <= s["soft_max"] <= s["max"], s["id"])
+
+
 if __name__ == "__main__":
     unittest.main()

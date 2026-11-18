@@ -32,4 +32,10 @@ bool conditionHolds(const nlohmann::json& condition, const nlohmann::json& value
     return false;
 }
 
+bool paramInVersion(const nlohmann::json& spec, int nodeVersion) {
+    if (!spec.is_object()) return true;
+    const auto added = spec.find("addedIn");
+    return added == spec.end() || !added->is_number() || added->get<int>() <= nodeVersion;
+}
+
 }  // namespace groomlab

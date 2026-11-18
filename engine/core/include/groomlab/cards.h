@@ -265,6 +265,9 @@ struct CardMesh {
         // cornrow's, open toward the scalp). `width` is its diameter; across the texture is the
         // angle, from -tubeArc / 2 (u0) to tubeArc / 2 (u1) around from `normal` toward `side`.
         float tubeArc = 0.0f;
+        // Whether the tube goes all the way round (its arc a full turn, less a rounding): the one
+        // answer for the cards, their bake and the atlas.
+        bool tubeClosed() const { return tubeArc >= 6.28318530718f - 1e-4f; }
         // A tube's cross-section is an ellipse: `width` across it along `normal`, tubeAspect times
         // that along `side` (a flat braid's: wider than it is deep, turned with the braid). The angle
         // around it is the ellipse's parameter (a point at angle t lies at cos t along the normal's

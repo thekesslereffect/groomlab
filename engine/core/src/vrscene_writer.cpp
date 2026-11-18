@@ -75,20 +75,28 @@ HairArrays hairArrays(const StrandSet& strands, const ScalpMesh* scalp, float sc
     if (out.hasTransparency) out.transparency.reserve(3 * pointTotal);
     const std::vector<Vec3f>& positions = strands.positions();
     const std::array<float, 3> fallback = defaultHairColor();
+    // The color written for point p of strand s. The same all along a strand unless its colors
+    // or its wetness are per point: then worked out once for the strand.
+    const bool colorPerPoint = view.hasPointColors() || (wetness && wetPerPoint);
+    auto colorOf = [&](std::size_t s, std::size_t p) {
+        std::array<float, 3> c = view.hasPointColors() ? view.pointColors[p] : view.hasColors() ? view.colors[s] : fallback;
+        const float wet = wetness ? (*wetness)[wetPerPoint ? p : s] : 0.0f;
+        if (wet > 0.0f) {  // the fiber's absorption up (hair_color.h wetShading)
+            std::array<float, 3> a = hairColorAbsorption(c);
+            const float absorption = wetShading(wet).absorption;
+            for (float& v : a) v *= absorption;
+            c = hairAbsorptionColor(a);
+        }
+        return vrayDyeColor(c);
+    };
     for (const std::size_t s : kept) {
+        std::array<float, 3> c = fallback;
         for (std::size_t p = offsets[s]; p < offsets[s + 1]; ++p) {
             out.xyz.push_back(positions[p].x * scale);
             out.xyz.push_back(positions[p].y * scale);
             out.xyz.push_back(positions[p].z * scale);
             out.widths.push_back(view.radius(p) * scale);
-            std::array<float, 3> c = view.hasPointColors() ? view.pointColors[p] : view.hasColors() ? view.colors[s] : fallback;
-            const float wet = wetness ? (*wetness)[wetPerPoint ? p : s] : 0.0f;
-            if (wet > 0.0f) {  // the fiber's absorption up (hair_color.h wetShading)
-                std::array<float, 3> a = hairColorAbsorption(c);
-                for (float& v : a) v *= wetShading(wet).absorption;
-                c = hairAbsorptionColor(a);
-            }
-            c = vrayDyeColor(c);
+            if (colorPerPoint || p == offsets[s]) c = colorOf(s, p);
             out.colors.insert(out.colors.end(), c.begin(), c.end());
             if (out.hasTransparency) {
                 const float t = opacity ? 1.0f - std::clamp((*opacity)[p], 0.0f, 1.0f) : 0.0f;

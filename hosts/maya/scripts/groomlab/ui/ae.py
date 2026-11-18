@@ -226,24 +226,11 @@ def _from_selection(groom, kind, ask=True):
     return pick.set_input(groom, kind, mesh, ask=ask)
 
 
-def pick_scalp(groom, ask=True):
-    """Grow `groom` on the selected mesh (not its scalp). A groom with guides asks how they move
-    (closest point, or fit the old scalp's bounds first). Returns a message;
-    raises ValueError when nothing usable is selected. (The AE's Pick: _pick_button.)"""
-    return _from_selection(groom, "scalp", ask)
-
-
 def pick_extra_scalp(groom):
     """Make the selected mesh (not the scalp, nor a scalp it has) another scalp of `groom`, its
     branch wired (groomlab.add_scalp); returns a message. Raises ValueError when nothing usable is
     selected."""
     return _from_selection(groom, "extraScalp")
-
-
-def pick_collider(groom):
-    """Make the selected mesh (not the scalp, nor a collider it has) a collider of `groom`; returns
-    a message. Raises ValueError when nothing usable is selected."""
-    return _from_selection(groom, "collider")
 
 
 # The eyedroppers on show: input -> (text field, button, the field's text). One AE at a time.

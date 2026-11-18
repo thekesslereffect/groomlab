@@ -1296,10 +1296,6 @@ class ReferenceWindow(QtWidgets.QWidget):
         self._guide_overlay = (key, lines)
         return lines
 
-    def _guides_changed(self):
-        self._guides_serial += 1
-        self.photo_view.update()
-
     # ---- The preview: the mask and the field ------------------------------------------------------
 
     def _preview_key(self):

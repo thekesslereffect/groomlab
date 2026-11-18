@@ -34,13 +34,17 @@ namespace {
 // of its root); sigma below about a third of a sample: as it is.
 void gaussian(const std::vector<Vec3f>& x, float sigma, std::vector<Vec3f>& out, const Vec3f& before, const Vec3f& after) {
     const std::size_t n = x.size();
-    out = x;
-    if (n < 2 || !(sigma > 0.3f)) return;
+    if (n < 2 || !(sigma > 0.3f)) {
+        out = x;
+        return;
+    }
+    out.resize(n);  // (every sample written below)
     const int last = static_cast<int>(n) - 1;
     const int radius = std::max(1, static_cast<int>(std::ceil(3.0f * sigma)));
-    std::vector<float> weights(static_cast<std::size_t>(radius) + 1);
+    thread_local std::vector<float> weights;  // (a thread's, kept from strand to strand)
+    weights.resize(static_cast<std::size_t>(radius) + 1);
     const float inv = -0.5f / (sigma * sigma);
-    for (int k = 0; k <= radius; ++k) weights[static_cast<std::size_t>(k)] = std::exp(static_cast<float>(k * k) * inv);
+    for (int k = 0; k <= radius; ++k) weights[static_cast<std::size_t>(k)] = pm::exp(static_cast<float>(k * k) * inv);
     auto at = [&](int i) { return i < 0 ? before : i > last ? after : x[static_cast<std::size_t>(i)]; };
     for (int i = 0; i <= last; ++i) {
         Vec3f sum = x[static_cast<std::size_t>(i)] * weights[0];
@@ -114,7 +118,7 @@ public:
         out->mutablePositions();
         const RampAlong along(profile, *out);
         // A Gaussian halves a swing of wavelength L where its sigma is L sqrt(ln 2 / 2) / pi.
-        const float toSigma = std::sqrt(std::log(2.0f) / 2.0f) / 3.14159265f;
+        const float toSigma = std::sqrt(pm::log(2.0f) / 2.0f) / 3.14159265f;
         parallelFor(0, out->strandCount(), [&](std::size_t s) {
             const std::size_t n = out->strandPointCount(s);
             if (n < 3) return;
@@ -123,8 +127,11 @@ public:
             Vec3f* p = out->strandPoints(s);
             // Each segment's length and way, and the strand's overall way (its chord, root to tip).
             const std::size_t segs = n - 1;
-            std::vector<float> len(segs);
-            std::vector<Vec3f> way(segs);
+            // (A thread's working memory, kept from strand to strand.)
+            thread_local std::vector<float> len;
+            thread_local std::vector<Vec3f> way, low, smooth;
+            len.resize(segs);
+            way.resize(segs);
             Vec3f overall{};
             float total = 0.0f;
             for (std::size_t i = 0; i < segs; ++i) {
@@ -140,7 +147,6 @@ public:
             // The bands, by the strand's mean segment: low (smoothed over lowWavelength) and low +
             // middle (over highWavelength); the high band what is left.
             const float step = total / static_cast<float>(segs);
-            std::vector<Vec3f> low, smooth;
             // (The low band goes on past the ends as the strand's overall way; low + middle as the
             // low band's ends, so taking the frizz out keeps a root's own lean.)
             gaussian(way, toSigma * lowWave / step, low, overall, overall);

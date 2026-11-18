@@ -633,6 +633,8 @@ void ParamPanel::build() {
         Row row;
         row.name = p.value("name", std::string());
         row.kind = p.value("kind", std::string());
+        // A param a later version of the operator added: the node does nothing with it until it is upgraded.
+        if (!groomlab::paramInVersion(p, std::get<0>(document_->nodeVersion(node_)))) continue;
         // A Compound's definition is its inner graph, not a value to edit: its exposed params are the rows.
         if ((type == "Compound" || type == "Script") && row.name == "definition") continue;
         row.section = sectionFor(p, headed);

@@ -18,19 +18,9 @@ using json = nlohmann::json;
 
 namespace {
 
-struct Box {
-    Vec3f lo{std::numeric_limits<float>::max(), std::numeric_limits<float>::max(), std::numeric_limits<float>::max()};
-    Vec3f hi{-std::numeric_limits<float>::max(), -std::numeric_limits<float>::max(), -std::numeric_limits<float>::max()};
-    Vec3f center() const { return (lo + hi) * 0.5f; }
-    float diagonal() const { return (hi - lo).length(); }
-};
-
-Box boxOf(const ScalpMesh& mesh) {
-    Box b;
-    for (const Vec3f& p : mesh.points()) {
-        b.lo = {std::min(b.lo.x, p.x), std::min(b.lo.y, p.y), std::min(b.lo.z, p.z)};
-        b.hi = {std::max(b.hi.x, p.x), std::max(b.hi.y, p.y), std::max(b.hi.z, p.z)};
-    }
+Aabb boxOf(const ScalpMesh& mesh) {
+    Aabb b;
+    for (const Vec3f& p : mesh.points()) b.expand(p);
     return b;
 }
 
@@ -337,8 +327,8 @@ bool uvFrame(const ScalpMesh& mesh, const StrandRoot& root, Mat3f* frame, float*
 
 ScalpFit ScalpFit::boundingBoxes(const ScalpMesh& from, const ScalpMesh& to) {
     if (from.pointCount() == 0 || to.pointCount() == 0) return {};
-    const Box a = boxOf(from);
-    const Box b = boxOf(to);
+    const Aabb a = boxOf(from);
+    const Aabb b = boxOf(to);
     ScalpFit fit;
     fit.fromCenter = a.center();
     fit.toCenter = b.center();

@@ -979,8 +979,8 @@ std::optional<double> presetScalpSize(const ScalpMesh& scalp) {
     if (points.empty()) return std::nullopt;
     Vec3f lo = points[0], hi = points[0];
     for (const Vec3f& p : points) {
-        lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
-        hi = {std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
+        lo = minPerAxis(lo, p);
+        hi = maxPerAxis(hi, p);
     }
     const double size = std::max({hi.x - lo.x, hi.y - lo.y, hi.z - lo.z});
     return size > 0.0 ? std::optional<double>(size) : std::nullopt;

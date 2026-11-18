@@ -197,7 +197,7 @@ public:
             std::copy(nearOf[s].begin(), nearOf[s].begin() + keptOf[s], state->neighbors.begin() + state->offsets[s]);
             std::copy(shareOf[s].begin(), shareOf[s].begin() + keptOf[s], state->weights.begin() + state->offsets[s]);
         }
-        state->normals = normals;
+        state->normals = std::move(normals);
 
         // look.slang's BlendNeighborsCS, the GPU preview's own (look_cpu.h), on the neighbours found here.
         gpu::StageInputs neighbours;

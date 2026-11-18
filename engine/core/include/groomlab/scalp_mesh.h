@@ -17,6 +17,36 @@
 
 namespace groomlab {
 
+namespace detail {
+
+// An array a mesh's copies share (read like a std::vector, never written in place): what a mesh
+// made by ScalpMesh::withPoints keeps of its source (triangles, UVs, rest pose) costs a pointer,
+// not a copy a frame of a deforming scalp. Set whole (from a vector); empty until then.
+template <class T>
+class SharedVector {
+public:
+    SharedVector() = default;
+    SharedVector(std::vector<T> values) : values_(std::make_shared<const std::vector<T>>(std::move(values))) {}
+
+    const std::vector<T>& get() const { return values_ ? *values_ : none(); }
+    operator const std::vector<T>&() const { return get(); }
+    std::size_t size() const { return values_ ? values_->size() : 0; }
+    bool empty() const { return size() == 0; }
+    const T& operator[](std::size_t i) const { return (*values_)[i]; }
+    const T* data() const { return get().data(); }
+    auto begin() const { return get().begin(); }
+    auto end() const { return get().end(); }
+
+private:
+    static const std::vector<T>& none() {
+        static const std::vector<T> empty;
+        return empty;
+    }
+    std::shared_ptr<const std::vector<T>> values_;
+};
+
+}  // namespace detail
+
 // A point on the scalp: triangle + barycentric (u, v) and the evaluated
 // position and smooth normal there. Barycentrics follow StrandRoot:
 // position = a * (1 - u - v) + b * u + c * v.
@@ -219,6 +249,9 @@ public:
     void setRestPoints(std::vector<Vec3f> points);
     bool hasRest() const { return !restPoints_.empty(); }
     const std::vector<Vec3f>& restPoints() const { return restPoints_; }
+    // Whether the mesh is in its rest pose (its points the rest points, or no rest pose): told
+    // once as the mesh is made, not by comparing the points at every question.
+    bool atRest() const { return atRest_; }
     float restTriangleArea(std::size_t tri) const { return restPoints_.empty() ? areas_[tri] : restAreas_[tri]; }
     float restTotalArea() const { return restPoints_.empty() ? totalArea_ : restTotalArea_; }
     // Where a root sits on the rest pose; `fallback` without a rest pose or for an unrooted root.
@@ -315,7 +348,7 @@ private:
     void updateHash();  // combines the parts below, whatever order they were set in
 
     std::vector<Vec3f> points_;
-    std::vector<Triangle> triangles_;
+    detail::SharedVector<Triangle> triangles_;  // (shared with the meshes withPoints makes, as the arrays below)
     std::vector<Vec3f> vertexNormals_;
     std::vector<float> areas_;
     float totalArea_ = 0.0f;
@@ -326,12 +359,13 @@ private:
     std::uint64_t uvHash_ = 0;
     std::uint64_t restHash_ = 0;
     std::map<std::string, std::uint64_t> colorHashes_;
-    std::vector<UV> cornerUVs_;
-    std::map<std::string, std::vector<Color>> colorSets_;
-    std::vector<Vec3f> restPoints_;
-    std::vector<float> restAreas_;
+    detail::SharedVector<UV> cornerUVs_;
+    std::map<std::string, std::shared_ptr<const std::vector<Color>>> colorSets_;
+    detail::SharedVector<Vec3f> restPoints_;
+    detail::SharedVector<float> restAreas_;
     float restTotalArea_ = 0.0f;
-    std::vector<std::int32_t> polygons_;
+    bool atRest_ = true;
+    detail::SharedVector<std::int32_t> polygons_;
     std::uint64_t polygonHash_ = 0;
     int renderSubdivision_ = 0;
     std::string renderSubdivisionFrom_;

@@ -7,6 +7,7 @@
 // step), saving the groom's graph as a user preset, and the whole graph as text for the
 // clipboard (Copy Graph, Paste Graph). No widgets: the tests drive it on a document.
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -37,6 +38,10 @@ std::string shippedMeshFolder();
 // shipped ones).
 std::vector<std::string> presetDirectories();
 std::vector<PresetInfo> availablePresets();
+
+// The scalp size presets, new nodes and the brushes' lengths are fitted to (presetScalpSize, the
+// groom's own scale divided out); nullopt without a scalp.
+std::optional<double> scalpSizeOf(const GroomDocument& document);
 
 // What applying a preset did.
 struct PresetApplied {

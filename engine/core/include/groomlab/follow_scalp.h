@@ -57,21 +57,18 @@ RootMotion rootMotion(const ScalpMesh& from, const ScalpMesh& to, const StrandRo
 // strand without a root on the scalp stays), Instance nodes' fixed directions turned with their
 // strand's root, the Cards nodes' cards (each by its first strand's root; its strands, for
 // baking, carried too) and Propagate nodes' rachis rings (each shaft by the scalp point nearest
-// its base on `from`). `strands` itself when nothing moves.
-StrandsPtr carryStrands(const StrandsPtr& strands, const ScalpMesh& from, const ScalpMesh& to);
+// its base on `from`). `strands` itself when nothing moves. `boxes`: strandBoxes(*strands, from),
+// when the caller keeps them (strands carried frame after frame): each root's frame on `from` is
+// read from them, not found again; the same result.
+struct StrandBoxes;
+StrandsPtr carryStrands(const StrandsPtr& strands, const ScalpMesh& from, const ScalpMesh& to, const StrandBoxes* boxes = nullptr);
 
-// Whether carryStrands moves nothing of `strands` but each strand's points: no card layers,
-// rachis rings or instances ride on them (what a host carrying the points alone may take).
-bool carriesPointsAlone(const StrandSet& strands);
-// The same, or instances ride on them too, each placed by a matrix on its strand alone (no scale
-// or instance bent onto the skin or along its strand: InstanceSet::hasMeshes): placing them on
+// Whether carryStrands moves nothing of `strands` but each strand's points (no card layers or
+// rachis rings ride on them), or instances ride on them too, each placed by a matrix on its strand
+// alone (no scale or instance bent onto the skin or along its strand: InstanceSet::hasMeshes): placing them on
 // their strands carried (carryStrands of those strands, then InstanceSet::resolve) gives what
 // placing them on all the strands carried does.
 bool carriesPointsAndInstances(const StrandSet& strands);
-
-// The extent carryStrands(strands, from, to) would have (its points carried the same way), without
-// making it: no copy of the strands.
-StrandSet::Extent carriedExtent(const StrandSet& strands, const ScalpMesh& from, const ScalpMesh& to);
 
 // Each strand's box at rest (its finite points' center and half extents) and its root's frame on
 // the rest pose rom (rootMotion's: its face's longest edge there), made once for strands carried
@@ -86,7 +83,7 @@ struct StrandBoxes {
 std::shared_ptr<const StrandBoxes> strandBoxes(const StrandSet& strands, const ScalpMesh& from);
 // A box holding every point of carryStrands(strands, from, to) (the strands and rest pose `boxes` were made from):
 // each strand's box at rest turned and moved by its root's motion, the boxes' union (a little more
-// than carriedExtent's, never less; a pass over the strands, not their points).
+// than the carried points' extent, never less; a pass over the strands, not their points).
 StrandSet::Extent carriedBounds(const StrandSet& strands, const StrandBoxes& boxes, const ScalpMesh& to);
 
 // Strands evaluated at rest, handed to a host that carries them to the scalp now itself

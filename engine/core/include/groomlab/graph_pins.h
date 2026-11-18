@@ -10,8 +10,9 @@
 //
 // A route lists the pins the link into to.input runs through, source first ("output" only when
 // it is not the source's first, as a connection's). A pin carries one signal: every route through
-// it comes from the same output, so links from one output can share pins (a bundle). Maya's Graph
-// Editor keeps the same rules in Python (hosts/maya/scripts/groomlab/graph.py, GraphModel's pins).
+// it comes from the same output, so links from one output can share pins (a bundle). Every host's:
+// the app calls these, Maya's GraphModel through groomlab_core.GraphPins, the Blender add-on (whose
+// reroutes are the pins) through its helper.
 //
 // The functions take the graph's JSON (its "connections" say what each link comes from) and keep
 // "pins" pruned and in order: a route whose link is gone, or comes from another source now, is
@@ -36,8 +37,11 @@ struct PinLink {
     std::size_t index = 0;
 };
 
-// Drops what no longer holds (see above) and puts "pins" in order.
-void prunePins(nlohmann::json& graph);
+// Drops what no longer holds (see above) and puts "pins" in order. oneFeed: for a host whose pin
+// has one input (Blender's reroute), only the routes it can draw are kept: a route passing a pin
+// twice, or reaching a pin from another place (the source, the pin before) than a route kept
+// before it does, is dropped too, its link drawn straight.
+void prunePins(nlohmann::json& graph, bool oneFeed = false);
 // The pin ids, by number.
 std::vector<std::string> pinIds(const nlohmann::json& graph);
 bool pinPosition(const nlohmann::json& graph, const std::string& pin, double* x, double* y);

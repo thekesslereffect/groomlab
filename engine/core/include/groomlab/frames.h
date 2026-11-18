@@ -23,6 +23,13 @@ struct Frame {
 // A unit vector perpendicular to v (deterministic).
 Vec3f anyPerpendicular(const Vec3f& v);
 
+// A polyline's unit tangent at point i by central differences: from the point before to the one
+// after (an end: from or to itself); zero where those are the same point.
+inline Vec3f centralTangent(const Vec3f* points, std::size_t count, std::size_t i) {
+    return (points[std::min(i + 1, count - 1)] - points[i > 0 ? i - 1 : 0]).normalized();
+}
+inline Vec3f centralTangent(const std::vector<Vec3f>& points, std::size_t i) { return centralTangent(points.data(), points.size(), i); }
+
 // Rotation-minimizing frames along a polyline, by the double reflection
 // method (Wang et al. 2008). Tangents use central differences. The first
 // normal is `initialNormal` made perpendicular to the first tangent (or any

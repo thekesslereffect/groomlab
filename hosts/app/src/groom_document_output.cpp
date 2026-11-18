@@ -34,9 +34,6 @@ using nlohmann::json;
 
 namespace {
 
-// A new node's place beside another (the core's column and row, Maya's LAYOUT_DX / LAYOUT_DY).
-constexpr double kDX = 240.0, kDY = 140.0;
-
 struct Feed {
     std::string from, output;  // "" nothing feeds it
 };
@@ -89,15 +86,6 @@ std::vector<std::string> ofType(const json& g, const std::string& type) {
     return out;
 }
 
-// Where a node is drawn (nullopt: the view lays it out).
-std::optional<std::pair<double, double>> positionOf(const json& g, const std::string& name) {
-    const json* n = nodeIn(g, name);
-    if (!n || !n->contains("ui") || !(*n)["ui"].is_object()) return std::nullopt;
-    const json& ui = (*n)["ui"];
-    if (!ui.contains("x") || !ui.contains("y") || !ui["x"].is_number() || !ui["y"].is_number()) return std::nullopt;
-    return std::make_pair(ui["x"].get<double>(), ui["y"].get<double>());
-}
-
 // The graph edited as GraphEdit sees it, its JSON read back for the lookups between the edits.
 struct GraphEdits {
     GraphEdit e;
@@ -110,43 +98,8 @@ struct GraphEdits {
         return e.addNode(type, name, params.is_null() ? std::string() : params.dump(), at ? std::optional<double>(at->first) : std::nullopt,
                          at ? std::optional<double>(at->second) : std::nullopt, size);
     }
-    // src -> node -> dst in place of every src -> dst link (Blender's insert_between).
-    void insertBetween(const std::string& src, const std::string& dst, const std::string& node, const std::string& nodeInput) {
-        const json g = now();
-        std::vector<std::pair<std::string, std::string>> links;  // (input, output)
-        for (const json& c : g.value("connections", json::array())) {
-            if (c.value("from", std::string()) == src && c.value("to", std::string()) == dst) {
-                links.emplace_back(c.value("input", std::string()), c.value("output", std::string()));
-            }
-        }
-        if (links.empty()) throw std::runtime_error(src + " is not connected to " + dst);
-        e.connect(src, node, nodeInput, links.front().second);
-        for (const auto& [input, output] : links) e.connect(node, dst, input);
-    }
-    // `node` on what feeds `anchor`'s `input`, drawn a row under the anchor.
-    void insertBefore(const std::string& anchor, const std::string& node, const std::string& input = "strands",
-                      const std::string& nodeInput = "strands") {
-        const json g = now();
-        const Feed feed = feedOf(g, anchor, input);
-        if (feed.from.empty()) throw std::runtime_error(anchor + " has no " + input + " input to insert before");
-        insertBetween(feed.from, anchor, node, nodeInput);
-        place(node, anchor, 0.0, kDY);
-    }
-    void place(const std::string& node, const std::string& beside, double dx, double dy) {
-        if (const auto at = positionOf(now(), beside)) {
-            json positions = json::object();
-            positions[node] = {at->first + dx, at->second + dy};
-            setPositions(positions);
-        }
-    }
-    void setPositions(const json& positions) {
-        json g = now();
-        for (json& n : g["nodes"]) {
-            const std::string name = n.value("name", std::string());
-            if (positions.contains(name)) n["ui"] = {{"x", positions[name][0]}, {"y", positions[name][1]}};
-        }
-        e = GraphEdit(g.dump());
-    }
+    // `node` on what feeds `anchor`'s strands, drawn a row under the anchor: every host's (graph_inserts.h).
+    void insertBefore(const std::string& anchor, const std::string& node) { groomlab::insertBefore(e, anchor, node); }
 };
 
 // Where a motion node goes (Maya's motion_anchor): just before the output, but before the Collide

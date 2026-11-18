@@ -32,8 +32,8 @@ ScalpMirror::ScalpMirror(const ScalpMesh& scalp)
     const std::vector<Vec3f>& pts = rest.points();
     Vec3f lo = pts.front(), hi = pts.front();
     for (const Vec3f& p : pts) {
-        lo = Vec3f(std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z));
-        hi = Vec3f(std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z));
+        lo = minPerAxis(lo, p);
+        hi = maxPerAxis(hi, p);
     }
     const float middle = 0.5f * (lo.x + hi.x);
     // A vertex this close to the mirrored spot is its partner (a symmetric mesh's twin).

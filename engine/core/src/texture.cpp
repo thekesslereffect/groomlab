@@ -161,18 +161,18 @@ std::uint64_t stampOf(const fs::path& path) {
 }
 
 // The file's stamp with its path in it: a cache keyed by it never takes another file of the same
-// size and time (a search path changed, a copy keeping its time) for this one.
-std::uint64_t stampFromDisk(const std::string& path);
-std::uint64_t stampWithPath(const std::string& path) {
-    const std::uint64_t stamp = stampFromDisk(path);
+// size and time (a search path changed, a copy keeping its time) for this one. `pattern`: the
+// path's udimPattern (found once: it lists the folder).
+std::uint64_t stampFromDisk(const std::string& path, const std::string& pattern);
+std::uint64_t stampWithPath(const std::string& path, const std::string& pattern) {
+    const std::uint64_t stamp = stampFromDisk(path, pattern);
     if (!stamp) return 0;
-    const std::string pattern = udimPattern(path);  // a tile's: its set's (the set is what it stamps)
+    // (A tile's: its set's, the set is what it stamps.)
     const std::uint64_t h = hashString(stamp, pattern.empty() ? path : pattern);
     return h ? h : 1;
 }
 
-std::uint64_t stampFromDisk(const std::string& path) {
-    const std::string pattern = udimPattern(path);
+std::uint64_t stampFromDisk(const std::string& path, const std::string& pattern) {
     if (pattern.empty()) return stampOf(toPath(path));
     const Tiles tiles = tilesOf(pattern);
     std::uint64_t h = 0;
@@ -186,6 +186,16 @@ std::uint64_t stampFromDisk(const std::string& path) {
 
 // The stamps of the innermost ScopedFileStamps' owner on this thread (null: none).
 thread_local std::unordered_map<std::string, std::uint64_t>* tStamps = nullptr;
+
+// fileStamp(path); `pattern`: the path's udimPattern when the caller has it (null: found here,
+// and only when the stamp is not already known).
+std::uint64_t fileStampOf(const std::string& path, const std::string* pattern) {
+    auto fromDisk = [&] { return stampWithPath(path, pattern ? *pattern : udimPattern(path)); };
+    if (!tStamps) return fromDisk();
+    auto it = tStamps->find(path);
+    if (it == tStamps->end()) it = tStamps->emplace(path, fromDisk()).first;
+    return it->second;
+}
 
 bool isPnm(const std::string& path) {
     std::ifstream in(toPath(path), std::ios::binary);
@@ -238,6 +248,15 @@ std::array<float, 4> Texture::Image::texel(int x, int y) const {
     return {p[0], p[1], p[2], p[3]};
 }
 
+namespace {
+
+// texel(x, y) of coordinates already wrapped into the image (as texel wraps them).
+inline const float* wrappedTexel(const Texture::Image& image, int x, int y) {
+    return image.rgba.data() + (static_cast<std::size_t>(y) * image.width + x) * 4;
+}
+
+}  // namespace
+
 std::array<float, 4> Texture::Image::sample(float u, float v) const {
     // Texel centers at (i + 0.5) / size; row 0 is the top of the image.
     const float fx = u * width - 0.5f;
@@ -245,7 +264,13 @@ std::array<float, 4> Texture::Image::sample(float u, float v) const {
     const float x0f = std::floor(fx), y0f = std::floor(fy);
     const float tx = fx - x0f, ty = fy - y0f;
     const int x0 = static_cast<int>(x0f), y0 = static_cast<int>(y0f);
-    const auto a = texel(x0, y0), b = texel(x0 + 1, y0), c = texel(x0, y0 + 1), d = texel(x0 + 1, y0 + 1);
+    // The four texels around it, wrapped as texel wraps them (each column and row once).
+    const int xa = ((x0 % width) + width) % width, xb = (((x0 + 1) % width) + width) % width;
+    const int ya = ((y0 % height) + height) % height, yb = (((y0 + 1) % height) + height) % height;
+    const float* a = wrappedTexel(*this, xa, ya);
+    const float* b = wrappedTexel(*this, xb, ya);
+    const float* c = wrappedTexel(*this, xa, yb);
+    const float* d = wrappedTexel(*this, xb, yb);
     std::array<float, 4> out{};
     for (int k = 0; k < 4; ++k) {
         const float top = a[k] + (b[k] - a[k]) * tx;
@@ -350,12 +375,7 @@ bool isGrayImage(const Texture& image) {
     return true;
 }
 
-std::uint64_t fileStamp(const std::string& path) {
-    if (!tStamps) return stampWithPath(path);
-    auto it = tStamps->find(path);
-    if (it == tStamps->end()) it = tStamps->emplace(path, stampWithPath(path)).first;
-    return it->second;
-}
+std::uint64_t fileStamp(const std::string& path) { return fileStampOf(path, nullptr); }
 
 ScopedFileStamps::ScopedFileStamps() {
     if (tStamps) return;  // nested: the outer scope's answers
@@ -504,7 +524,7 @@ TexturePtr cachedTexture(const std::string& path) {
 TexturePtr loadTexture(const std::string& path) {
     const std::string pattern = udimPattern(path);
     const std::string key = pattern.empty() ? path : pattern;
-    const std::uint64_t stamp = fileStamp(path);
+    const std::uint64_t stamp = fileStampOf(path, &pattern);
     if (stamp == 0) throw TextureError("cannot read '" + path + "': file not found");
     if (TexturePtr cached = textureCache().find(key, stamp)) return cached;
     TexturePtr texture;  // decoded outside the lock: decoding can be slow

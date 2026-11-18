@@ -421,11 +421,28 @@ void bindStroke(py::module_& m) {
                 d["id"] = s.id;
                 d["label"] = s.label;
                 d["hint"] = s.hint;
+                d["kind"] = brushSettingKindName(s.kind);
+                if (s.kind == BrushSettingKind::Bool) {
+                    d["default"] = s.defaultValue != 0.0;
+                } else if (s.isValue()) {
+                    const bool whole = s.kind == BrushSettingKind::Int;
+                    auto number = [whole](double v) { return whole ? py::object(py::int_(std::llround(v))) : py::object(py::float_(v)); };
+                    d["default"] = number(s.defaultValue);
+                    d["soft_min"] = number(s.softMin);
+                    d["soft_max"] = number(s.softMax);
+                    d["min"] = number(s.min);
+                    d["max"] = number(s.max);
+                    d["decimals"] = s.decimals;
+                    d["unit"] = s.unit;
+                }
                 out.append(d);
             }
             return out;
         },
-        "The settings the tools' cards show: {id, label, hint} (falloff: 0 hard, 1 soft).");
+        "The settings the tools' cards show: {id, label, hint, kind} (falloff: 0 hard, 1 soft). kind \"\" is a block of "
+        "controls; \"bool\" has a default; \"int\" and \"float\" have default, soft_min, soft_max (the slider's span), min, max "
+        "(what a typed value may reach), decimals and unit (\"length\": scene units on a scalp of 20, else pixels, angle, "
+        "fraction or \"\").");
 
     m.def(
         "paintable_settings",

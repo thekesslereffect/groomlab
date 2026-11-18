@@ -131,24 +131,24 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
     brush_->setObjectName(QStringLiteral("brushBlock"));
     brush_->titleLabel()->hide();  // (the card's header names the tool: no "Brush" over its first block)
     QVBoxLayout* rows = brush_->rows();
-    radius_ = slider(rows, settingLabel("radius"), 5.0, 400.0, 1.0, 2000.0, 0, [this] { return session_->settings().screenRadius; },
+    radius_ = slider(rows, "radius", settingLabel("radius"), [this] { return session_->settings().screenRadius; },
                      [this](double v) { session_->settings().setScreenRadius(static_cast<float>(v)); },
                      withShortcut(tr("Screen pixels: the circle's radius on screen, whatever the zoom (middle-drag sets it too)"), "brush.radius"));
     radius_->setObjectName(QStringLiteral("radius"));
     radius_->setFixedHeight(theme::rowHeight() + 4);  // the brush's two numbers: the card's tallest fields
     radius_->setFormat([](double v) { return QString::number(std::lround(v)) + QStringLiteral(" px"); });
-    strength_ = slider(rows, settingLabel("strength"), 0.0, 1.0, -10.0, 10.0, 2, [this] { return session_->settings().brush.strength; },
+    strength_ = slider(rows, "strength", settingLabel("strength"), [this] { return session_->settings().brush.strength; },
                        [this](double v) { session_->settings().brush.strength = static_cast<float>(v); },
                        withShortcut(settingHint("strength") + tr(" (Shift+middle-drag sets it too)"), "brush.strength"));
     strength_->setObjectName(QStringLiteral("strength"));
     strength_->setFixedHeight(theme::rowHeight() + 4);
     // Falloff as the catalog names it in both hosts: 0 hard to the edge, 1 soft from the center
     // (the core's hardness is 1 - falloff).
-    falloff_ = slider(rows, settingLabel("falloff"), 0.0, 1.0, 0.0, 1.0, 2, [this] { return 1.0 - session_->settings().brush.hardness; },
+    falloff_ = slider(rows, "falloff", settingLabel("falloff"), [this] { return 1.0 - session_->settings().brush.hardness; },
                       [this](double v) { session_->settings().setHardness(static_cast<float>(1.0 - v)); }, settingHint("falloff"));
     falloff_->setObjectName(QStringLiteral("falloff"));
     falloff_->setFixedHeight(theme::rowHeight() + 4);
-    smooth_ = slider(rows, settingLabel("smoothStrength"), 0.0, 3.0, 0.0, 100.0, 2, [this] { return session_->settings().smoothStrength; },
+    smooth_ = slider(rows, "smoothStrength", settingLabel("smoothStrength"), [this] { return session_->settings().smoothStrength; },
                      [this](double v) { session_->settings().setSmoothStrength(static_cast<float>(v)); }, settingHint("smoothStrength"));
     smooth_->setObjectName(QStringLiteral("smoothStrength"));
     {
@@ -245,16 +245,16 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
             alphaRotation_->setCurrentIndex(std::max(0, alphaRotation_->findData(qs(session_->settings().alphaRotationName()))));
             alphaAngle_->setEnabled(session_->settings().alphaRotation != BrushToolSettings::AlphaRotation::Random);
         });
-        alphaAngle_ = slider(options, tr("Stamp angle"), 0.0, 360.0, -360.0, 360.0, 0, [this] { return session_->settings().alphaAngle; },
+        alphaAngle_ = slider(options, "alphaAngle", tr("Stamp angle"), [this] { return session_->settings().alphaAngle; },
                              [this](double v) { session_->settings().alphaAngle = static_cast<float>(v); },
                              tr("The alpha's angle in degrees, counterclockwise (Follow Stroke: added to the stroke's way)"));
         alphaAngle_->setObjectName(QStringLiteral("alphaAngle"));
         alphaAngle_->setFormat([](double v) { return QString::number(std::lround(v)) + QStringLiteral("°"); });
-        alphaSpacing_ = slider(options, tr("Stamp spacing"), 5.0, 100.0, 100.0 * BrushToolSettings::kMinAlphaSpacing,
-                               100.0 * BrushToolSettings::kMaxAlphaSpacing, 0, [this] { return 100.0 * session_->settings().alphaSpacing; },
+        alphaSpacing_ = slider(options, "alphaSpacing", tr("Stamp spacing"), [this] { return 100.0 * session_->settings().alphaSpacing; },
                                [this](double v) { session_->settings().setAlphaSpacing(static_cast<float>(v / 100.0)); },
                                tr("How far apart the stamps fall along a stroke, in percent of the brush's diameter: low for a smooth "
-                                  "trail, 100 and up for separate stamps"));
+                                  "trail, 100 and up for separate stamps"),
+                               100.0);
         alphaSpacing_->setObjectName(QStringLiteral("alphaSpacing"));
         alphaSpacing_->setFormat([](double v) { return QString::number(std::lround(v)) + QStringLiteral("%"); });
         QCheckBox* invert = switchSetting(options, tr("Invert"), [this] { return session_->settings().alphaInvert; },
@@ -276,16 +276,15 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
     newGuides_ = new CardBlock(tr("New guides"), this);
     newGuides_->setObjectName(QStringLiteral("newGuidesBox"));
     rows = newGuides_->rows();
-    ValueSlider* length = slider(rows, tr("Length"), 0.01, 50.0, 0.001, 1e4, 3, [this] { return session_->settings().place.length; },
+    ValueSlider* length = slider(rows, "length", tr("Length"), [this] { return session_->settings().place.length; },
                                  [this](double v) { session_->settings().place.length = static_cast<float>(v); },
                                  tr("New guides' length (standing, or without neighbors to match)"));
     length->setObjectName(QStringLiteral("newGuideLength"));
-    ValueSlider* segments = slider(rows, tr("Segments"), 1.0, 32.0, 1.0, 256.0, 0, [this] { return double(session_->settings().place.segments); },
+    ValueSlider* segments = slider(rows, "segments", tr("Segments"), [this] { return double(session_->settings().place.segments); },
                                    [this](double v) { session_->settings().setSegments(static_cast<int>(std::lround(v))); },
                                    tr("Points along each new guide"));
     segments->setObjectName(QStringLiteral("segments"));
-    segments->setInteger(true);
-    spacing_ = slider(rows, settingLabel("spacing"), 0.0, 10.0, 0.0, 1e4, 3, [this] { return session_->settings().place.spacing; },
+    spacing_ = slider(rows, "spacing", settingLabel("spacing"), [this] { return session_->settings().place.spacing; },
                       [this](double v) { session_->settings().place.spacing = static_cast<float>(v); },
                       tr("Place many: no new root closer than this to another of the group"));
     spacing_->setObjectName(QStringLiteral("spacing"));
@@ -616,12 +615,38 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
     setEnabled(false);
 }
 
-ValueSlider* BrushPanel::slider(QVBoxLayout* into, const QString& label, double min, double max, double limitMin, double limitMax, int decimals,
-                                std::function<double()> get, std::function<void(double)> set, const QString& tip) {
+double BrushPanel::lengthScale() const {
+    const GroomDocument* document = session_ ? session_->document() : nullptr;
+    const std::optional<double> size = document ? scalpSizeOf(*document) : std::nullopt;
+    if (!size || !(*size > 0.0)) return 1.0;
+    // To the nearest power of ten: a head in centimeters, millimeters or meters gets the same
+    // round span in its own unit, and a head a little bigger than another the same one.
+    const double k = unitScaleFactor("length", *size / kDefaultsScalpSize).value_or(1.0);
+    return std::pow(10.0, std::round(std::log10(k)));
+}
+
+ValueSlider* BrushPanel::slider(QVBoxLayout* into, const char* id, const QString& label, std::function<double()> get,
+                                std::function<void(double)> set, const QString& tip, double shown) {
+    const groomlab::BrushSettingSpec spec = *brushSettingSpec(id);
     auto* editor = new ValueSlider(this);
-    editor->setRange(min, max);
-    editor->setLimits(limitMin, limitMax);
-    editor->setDecimals(decimals);
+    // The spec's span and limits at `scale` field units per unit of the spec's, as many digits shown.
+    auto fit = [editor, spec](double scale) {
+        editor->setRange(spec.softMin * scale, spec.softMax * scale);
+        editor->setLimits(spec.min * scale, spec.max * scale);
+        editor->setDecimals(std::clamp(spec.decimals - static_cast<int>(std::lround(std::log10(scale))), 0, 8));
+    };
+    fit(shown);
+    editor->setInteger(spec.kind == groomlab::BrushSettingKind::Int);
+    if (spec.unit == "length") {
+        // A length's span is the spec's on a scalp of the size it is written for: on this groom, as
+        // much bigger as its scalp is (before the value is shown: refreshers_ run in order).
+        refreshers_.push_back([this, fit, shown, fitted = 1.0]() mutable {
+            const double k = lengthScale();
+            if (k == fitted) return;  // (a span the user widened by typing stays while the groom's size does)
+            fitted = k;
+            fit(shown * k);
+        });
+    }
     editor->setFill(theme::sliderFill(theme::blue()));
     editor->setCaption(label);
     if (!tip.isEmpty()) editor->setToolTip(tip);
@@ -773,7 +798,8 @@ void BrushPanel::setTool(const std::string& id) {
     brush_->titleLabel()->setVisible(uses("map"));  // under Paint's own block: titled
     // The strength's span: -1..1 for the tools that work both ways, else 0..1 (Maya's).
     if (entry) {
-        strength_->setRange(entry->signedStrength ? -1.0 : 0.0, 1.0);
+        const groomlab::BrushSettingSpec* strength = brushSettingSpec("strength");
+        strength_->setRange(entry->signedStrength ? -strength->softMax : strength->softMin, strength->softMax);
         strength_->setCaption(entry->signedStrength ? tr("Strength (±)") : settingLabel("strength"));
     }
     // The tool's own block.

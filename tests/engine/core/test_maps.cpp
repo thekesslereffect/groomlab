@@ -842,6 +842,101 @@ TEST(Texture, UdimStampsFollowTheTilesOnDisk) {
     EXPECT_EQ(fileStamp(pattern), 0u);
 }
 
+TEST(Maps, EveryHostFindsAndUnlinksAMapsReadersAlike) {
+    // scalp_maps.h mapReaders / unlinkMapReaders: Maya's map_users and remove_map, the Blender
+    // helper's map_users and map_remove and the app's GroomDocument go through these.
+    using nlohmann::json;
+    const std::string graph = R"({"version": 1, "output": "out", "nodes": [
+        {"name": "m", "type": "Map", "params": {"name": "density"}},
+        {"name": "dflt", "type": "Map"},
+        {"name": "scatter", "type": "Scatter", "params": {"density": 5.0}, "paramInputs": ["density", "seed"]},
+        {"name": "len", "type": "Length", "params": {"keep": {"guide": "density", "min": 0.0, "max": 1.0}, "fraction": 0.5}},
+        {"name": "wid", "type": "Width", "params": {"width": {"colorSet": "density"}}},
+        {"name": "col", "type": "HairColor", "params": {"map": "density"}},
+        {"name": "interp", "type": "Interpolate", "params": {"regionMap": "density"}},
+        {"name": "grp", "type": "Compound", "params": {"definition": {"graph": {"version": 1, "output": "x", "nodes": [
+            {"name": "x", "type": "Map", "params": {"name": "density"}}], "connections": []}}}},
+        {"name": "out", "type": "Output"}],
+      "connections": [{"from": "m", "to": "scatter", "input": "density"}, {"from": "dflt", "to": "scatter", "input": "seed"},
+                      {"from": "scatter", "to": "len", "input": "strands"}]})";
+    using Pairs = std::vector<std::pair<std::string, std::string>>;
+    const MapReaders readers = mapReaders(graph, "density");
+    EXPECT_EQ(readers.nodes, std::vector<std::string>{"m"});
+    // The inputs its Map nodes feed, then the params naming it: a map source, HairColor's map,
+    // Interpolate's regionMap. The graph's own nodes only.
+    const Pairs users = {{"scatter", "density"}, {"len", "keep"}, {"wid", "width"}, {"col", "map"}, {"interp", "regionMap"}};
+    EXPECT_EQ(readers.users, users);
+    EXPECT_EQ(mapReaders(graph, "mask").nodes, std::vector<std::string>{"dflt"}) << "a Map node without a name reads mask";
+    EXPECT_TRUE(mapReaders(graph, "other").users.empty());
+    EXPECT_TRUE(mapReaders("not a graph", "density").nodes.empty());
+
+    bool changed = false;
+    Pairs unlinked;
+    const json after = json::parse(unlinkMapReaders(graph, "density", &changed, &unlinked));
+    EXPECT_TRUE(changed);
+    EXPECT_EQ(unlinked, users);
+    std::map<std::string, json> nodes;
+    for (const json& n : after["nodes"]) nodes[n["name"].get<std::string>()] = n;
+    EXPECT_FALSE(nodes.count("m")) << "its Map node goes";
+    EXPECT_TRUE(nodes.count("dflt"));
+    // The exposed param it fed reads its own value again; the other port stays.
+    EXPECT_EQ(nodes["scatter"]["paramInputs"], json::array({"seed"}));
+    EXPECT_DOUBLE_EQ(nodes["scatter"]["params"]["density"].get<double>(), 5.0);
+    ASSERT_EQ(after["connections"].size(), 2u);
+    EXPECT_EQ(after["connections"][0]["from"], "dflt");
+    // The params naming it: back to their spec's defaults, the rest as written.
+    auto defaultOf = [](const std::string& type, const std::string& param) {
+        for (const json& op : json::parse(operatorSpecsJson())) {
+            if (op["type"] != type) continue;
+            for (const json& p : op["params"]) {
+                if (p["name"] == param) return p["default"];
+            }
+        }
+        return json();
+    };
+    EXPECT_EQ(nodes["len"]["params"]["keep"], defaultOf("Length", "keep"));
+    EXPECT_EQ(nodes["len"]["params"]["fraction"], 0.5);
+    EXPECT_EQ(nodes["wid"]["params"]["width"], defaultOf("Width", "width"));
+    EXPECT_EQ(nodes["col"]["params"]["map"], defaultOf("HairColor", "map"));
+    EXPECT_EQ(nodes["interp"]["params"]["regionMap"], defaultOf("Interpolate", "regionMap"));
+    EXPECT_EQ(nodes["grp"]["params"]["definition"]["graph"]["nodes"][0]["params"]["name"], "density") << "compounds are left";
+    EXPECT_EQ(after["output"], "out");
+    // Nothing reads it: the same text.
+    EXPECT_EQ(unlinkMapReaders(graph, "other", &changed, &unlinked), graph);
+    EXPECT_FALSE(changed);
+    EXPECT_TRUE(unlinked.empty());
+    // A Map node that is the graph's output: the output cleared with it.
+    const json bare = json::parse(unlinkMapReaders(R"({"output": "m", "nodes": [{"name": "m", "type": "Map"}]})", "mask", &changed));
+    EXPECT_TRUE(changed);
+    EXPECT_TRUE(bare["nodes"].empty());
+    EXPECT_FALSE(bare.contains("output"));
+}
+
+TEST(Maps, ARemovedMapIsLetGoOfInsideCompoundsToo) {
+    // A param naming the map inside a compound (and a compound in it) goes back to its default, as
+    // a rename follows it there; with no reader at the top the graph still changes.
+    using json = nlohmann::json;
+    const std::string graph = R"({"version": 1, "output": "out", "nodes": [
+        {"name": "grp", "type": "Compound", "params": {"definition": {"graph": {"version": 1, "output": "col", "nodes": [
+            {"name": "col", "type": "HairColor", "params": {"map": "density"}},
+            {"name": "deep", "type": "Compound", "params": {"definition": {"graph": {"version": 1, "output": "interp", "nodes": [
+                {"name": "interp", "type": "Interpolate", "params": {"regionMap": "density"}}], "connections": []}}}},
+            {"name": "other", "type": "HairColor", "params": {"map": "kept"}}], "connections": []}}}},
+        {"name": "out", "type": "Output"}], "connections": []})";
+    bool changed = false;
+    std::vector<std::pair<std::string, std::string>> unlinked;
+    const json after = json::parse(unlinkMapReaders(graph, "density", &changed, &unlinked));
+    EXPECT_TRUE(changed);
+    EXPECT_TRUE(unlinked.empty()) << "the top level's readers alone are listed";
+    const json& inner = after["nodes"][0]["params"]["definition"]["graph"]["nodes"];
+    EXPECT_NE(inner[0]["params"].value("map", json()), json("density"));
+    EXPECT_NE(inner[1]["params"]["definition"]["graph"]["nodes"][0]["params"].value("regionMap", json()), json("density"));
+    EXPECT_EQ(inner[2]["params"]["map"], "kept");
+    // A map no compound names: the same text.
+    EXPECT_EQ(unlinkMapReaders(graph, "none", &changed), graph);
+    EXPECT_FALSE(changed);
+}
+
 TEST(Maps, OneNameRuleAndOneRenameForEveryHost) {
     // Maya's rule (scalp_maps.h): letters, digits and _, not starting with a digit.
     for (const char* good : {"density", "Tint_2", "_1st", "a"}) EXPECT_TRUE(validMapName(good)) << good;

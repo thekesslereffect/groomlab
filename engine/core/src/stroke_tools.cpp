@@ -216,6 +216,28 @@ std::string BrushToolSettings::symmetryName() const { return brush.mirrorTopolog
 
 const char* symmetryAxisName(int axis) { return axis == 0 ? "x" : axis == 1 ? "y" : axis == 2 ? "z" : "none"; }
 
+std::optional<double> brushSettingValue(const BrushToolSettings& s, const std::string& id) {
+    if (id == "radius") return s.screenRadius;
+    if (id == "strength") return s.brush.strength;
+    if (id == "falloff") return 1.0 - s.brush.hardness;
+    if (id == "smoothStrength") return s.smoothStrength;
+    if (id == "selectedOnly") return s.selectedOnly ? 1.0 : 0.0;
+    if (id == "pressure") return s.pressure ? 1.0 : 0.0;
+    if (id == "collide") return s.brush.collide ? 1.0 : 0.0;
+    if (id == "frontFacingOnly") return s.maskByScalp ? 1.0 : 0.0;
+    if (id == "stretch") return s.brush.stretch ? 1.0 : 0.0;
+    if (id == "straighten") return s.brush.straighten ? 1.0 : 0.0;
+    if (id == "length") return s.place.length;
+    if (id == "segments") return s.place.segments;
+    if (id == "matchNeighbors") return s.place.matchNeighbors ? 1.0 : 0.0;
+    if (id == "spacing") return s.place.spacing;
+    if (id == "soloNewGuides") return s.place.soloNewGuides ? 1.0 : 0.0;
+    if (id == "alphaAngle") return s.alphaAngle;
+    if (id == "alphaSpacing") return s.alphaSpacing;
+    if (id == "alphaInvert") return s.alphaInvert ? 1.0 : 0.0;
+    return std::nullopt;
+}
+
 // ---- Place, Draw, Part, Flow ------------------------------------------------------------------
 
 std::string placeGroup(GuideHierarchy& h, const BrushSettings& b) {

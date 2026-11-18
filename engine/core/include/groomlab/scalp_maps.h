@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "groomlab/graph.h"
@@ -81,6 +82,24 @@ inline std::string paramMapName(const std::string& node, const std::string& para
 // whether any reader moved (the same text when none did).
 std::string retargetMapReaders(const std::string& graphJson, const std::string& from, const std::string& to,
                                bool* changed = nullptr);
+// What reads map `name` in the graph (its JSON), every host's "Read by": the Map nodes of that
+// name (a Map node without one reads "mask"), and the (node, param) pairs it feeds: each input a
+// Map node of it is linked to, then per node the map params whose guide or colorSet source names
+// it and HairColor's map and Interpolate's regionMap naming it. The graph's own nodes: those inside
+// compounds are not listed (retargetMapReaders does follow a rename into them).
+struct MapReaders {
+    std::vector<std::string> nodes;
+    std::vector<std::pair<std::string, std::string>> users;
+};
+MapReaders mapReaders(const std::string& graphJson, const std::string& name);
+// The graph with every reader of map `name` (mapReaders) letting go of it, as when the map is
+// removed: its Map nodes go with their links (the graph's output cleared when it was one), an
+// exposed param they fed loses its port and reads its own value again, and the params naming the
+// map go back to their spec's default, inside compounds too (a param naming it there, as a rename
+// follows it there; a compound's own Map nodes stay). `unlinked`: the pairs that read it (mapReaders' users);
+// `changed`: whether anything read it (the same text when nothing did).
+std::string unlinkMapReaders(const std::string& graphJson, const std::string& name, bool* changed = nullptr,
+                             std::vector<std::pair<std::string, std::string>>* unlinked = nullptr);
 // A texture map's file renamed with its map: the stored path with the map's name in the file's
 // stem replaced (<map>.png, a numbered <map>_2.png, an older <groom>_<map>.png), "" when the file
 // is not named after the map. Where the new name is taken is the host's to resolve (a free name).

@@ -674,6 +674,14 @@ class GroomTest(HelperTestCase):
         self.assertEqual(e.exception.code, "type_mismatch")
         self.assert_matches_cli(s, 0.1, "param")
 
+        # The auto layout every host uses (graph_inserts.h layoutPositions): columns by depth, rows in order.
+        graph = self.h.call("get_graph", session=s)["graph"]
+        at = self.h.call("graph_layout", graph=graph)["positions"]
+        self.assertEqual(sorted(at), sorted(n["name"] for n in graph["nodes"]))
+        self.assertEqual((at["scalp"], at["guides"], at["scatter"]), ([0.0, 0.0], [0.0, 140.0], [240.0, 0.0]))
+        with self.assertRaises(HelperError):
+            self.h.call("graph_layout")
+
         # Graph edits as an editor makes them, and a preset inserted as a compound.
         made = self.h.call("edit_graph", session=s, op="add_node", type="Gravity")["name"]
         self.assertEqual(self.h.call("edit_graph", session=s, op="connect", **{"from": "noise", "to": made, "input": "strands"})
@@ -1032,6 +1040,14 @@ class ToolsTest(HelperTestCase):
         corrective = set(t["id"] for t in cat["tools"] if t.get("corrective"))
         self.assertEqual(corrective, {"comb", "slide", "smooth", "lift", "twist", "attract", "cut", "length", "select"})
         self.assertIn("falloff", [s["id"] for s in cat["settings"]])
+        # A value's default, span and limits come with it (brush_catalog.h), a length in the groom's units.
+        specs = dict((s["id"], s) for s in cat["settings"])
+        self.assertEqual([specs["radius"][k] for k in ("kind", "default", "softMin", "softMax", "min", "max", "decimals", "unit")],
+                         ["float", 60.0, 5.0, 400.0, 1.0, 2000.0, 0, "pixels"])
+        self.assertEqual((specs["segments"]["kind"], specs["segments"]["default"]), ("int", 12))
+        self.assertEqual((specs["pressure"]["kind"], specs["pressure"]["default"]), ("bool", True))
+        self.assertEqual((specs["length"]["unit"], specs["length"]["default"]), ("length", 0.5))
+        self.assertEqual(specs["alpha"]["kind"], "")
         r = self.call("tool_set", tool="comb", settings={"radius": 42, "falloff": 0.25, "symmetry": "y", "symmetryCenter": 0.01,
                                                         "length": 0.03, "frontFacingOnly": False, "targets": ["guides", "parts"]})
         st = r["settings"]

@@ -41,12 +41,6 @@ def parse_roots(text):
     return roots, dirs
 
 
-def format_roots(roots, search_dirs=()):
-    """parse_roots' text for (roots, search_dirs)."""
-    lines = ["%s=%s" % (k, v) for k, v in sorted((roots or {}).items())]
-    return "\n".join(lines + list(search_dirs or ()))
-
-
 class PathResolver(object):
     def __init__(self, tokens=None, roots=None, search_dirs=None, environ=None):
         self.tokens = dict(tokens or {})

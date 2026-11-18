@@ -10,6 +10,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "groomlab/graph_edit.h"
 #include "groomlab/groom.h"
 #include "groomlab/guide_hierarchy.h"
 #include "groomlab/random.h"
@@ -261,6 +262,144 @@ std::string retargetMapReaders(const std::string& graphJson, const std::string& 
     if (!retargetNodes(graph, from, to, 0)) return graphJson;
     if (changed) *changed = true;
     return graph.dump();
+}
+
+namespace {
+
+// The params naming a map as text: HairColor's map and Interpolate's regionMap.
+constexpr std::pair<const char*, const char*> kNamedMapParams[] = {{"HairColor", "map"}, {"Interpolate", "regionMap"}};
+
+// The params of `node` reading map `name`: a guide or colorSet source naming it, then the text params.
+std::vector<std::string> mapParamsOf(const nlohmann::json& node, const std::string& name) {
+    std::vector<std::string> out;
+    if (!node.is_object() || !node.contains("params") || !node["params"].is_object()) return out;
+    const nlohmann::json& params = node["params"];
+    for (const auto& [param, v] : params.items()) {
+        if (v.is_object() && (v.value("guide", nlohmann::json()) == name || v.value("colorSet", nlohmann::json()) == name)) out.push_back(param);
+    }
+    for (const auto& [type, param] : kNamedMapParams) {
+        if (node.value("type", std::string()) == type && params.contains(param) && params[param].is_string() &&
+            params[param].get<std::string>() == name) {
+            out.push_back(param);
+        }
+    }
+    return out;
+}
+
+MapReaders readersIn(const nlohmann::json& graph, const std::string& name) {
+    MapReaders out;
+    if (!graph.is_object() || !graph.contains("nodes") || !graph["nodes"].is_array()) return out;
+    std::set<std::string> readers;
+    for (const nlohmann::json& n : graph["nodes"]) {
+        if (!n.is_object() || n.value("type", std::string()) != "Map") continue;
+        const nlohmann::json params = n.contains("params") && n["params"].is_object() ? n["params"] : nlohmann::json::object();
+        const nlohmann::json read = params.contains("name") ? params["name"] : nlohmann::json("mask");
+        if (read == name && readers.insert(n.value("name", std::string())).second) out.nodes.push_back(n.value("name", std::string()));
+    }
+    if (graph.contains("connections") && graph["connections"].is_array()) {
+        for (const nlohmann::json& c : graph["connections"]) {
+            if (c.is_object() && readers.count(c.value("from", std::string()))) {
+                out.users.emplace_back(c.value("to", std::string()), c.value("input", std::string()));
+            }
+        }
+    }
+    for (const nlohmann::json& n : graph["nodes"]) {
+        for (const std::string& param : mapParamsOf(n, name)) out.users.emplace_back(n.value("name", std::string()), param);
+    }
+    return out;
+}
+
+// The params of `n` naming map `name` (mapParamsOf) back to their spec's default (none: gone).
+// Whether any did.
+bool letGoOfMap(nlohmann::json& n, const std::string& name) {
+    const std::vector<std::string> reset = mapParamsOf(n, name);
+    if (reset.empty()) return false;
+    nlohmann::json spec;
+    try {
+        spec = nlohmann::json::parse(nodeSpecJson(n.dump()));
+    } catch (const std::exception&) {  // a node this build cannot read: the params just go
+    }
+    const nlohmann::json specs = spec.is_object() ? spec.value("params", nlohmann::json::array()) : nlohmann::json::array();
+    for (const std::string& param : reset) {
+        nlohmann::json value;
+        for (const nlohmann::json& p : specs) {
+            if (p.is_object() && p.value("name", std::string()) == param && p.contains("default")) value = p["default"];
+        }
+        if (value.is_null()) {
+            n["params"].erase(param);
+        } else {
+            n["params"][param] = std::move(value);
+        }
+    }
+    return true;
+}
+
+// Inside the compounds of `graph` (their definitions, and theirs): every param naming map `name`
+// let go of (letGoOfMap), as retargetNodes follows a rename there. Whether any did.
+bool letGoInCompounds(nlohmann::json& graph, const std::string& name, int depth) {
+    bool changed = false;
+    const auto nodes = graph.find("nodes");
+    if (nodes == graph.end() || !nodes->is_array()) return false;
+    for (nlohmann::json& node : *nodes) {
+        if (!node.is_object() || node.value("type", std::string()) != "Compound" || depth >= 16) continue;
+        if (!node.contains("params") || !node["params"].is_object() || !node["params"].contains("definition")) continue;
+        nlohmann::json& definition = node["params"]["definition"];
+        if (!definition.is_object() || !definition.contains("graph") || !definition["graph"].is_object()) continue;
+        nlohmann::json& inner = definition["graph"];
+        if (inner.contains("nodes") && inner["nodes"].is_array()) {
+            for (nlohmann::json& n : inner["nodes"]) changed = (n.is_object() && letGoOfMap(n, name)) || changed;
+        }
+        changed = letGoInCompounds(inner, name, depth + 1) || changed;
+    }
+    return changed;
+}
+
+}  // namespace
+
+MapReaders mapReaders(const std::string& graphJson, const std::string& name) {
+    return readersIn(nlohmann::json::parse(graphJson, nullptr, false), name);
+}
+
+std::string unlinkMapReaders(const std::string& graphJson, const std::string& name, bool* changed,
+                             std::vector<std::pair<std::string, std::string>>* unlinked) {
+    if (changed) *changed = false;
+    if (unlinked) unlinked->clear();
+    nlohmann::json graph = nlohmann::json::parse(graphJson, nullptr, false);
+    const MapReaders readers = readersIn(graph, name);
+    const bool inCompounds = graph.is_object() && letGoInCompounds(graph, name, 0);
+    if (readers.nodes.empty() && readers.users.empty()) {
+        if (!inCompounds) return graphJson;
+        if (changed) *changed = true;
+        return graph.dump();
+    }
+    const std::set<std::string> gone(readers.nodes.begin(), readers.nodes.end());
+    const nlohmann::json links = graph.contains("connections") && graph["connections"].is_array() ? graph["connections"] : nlohmann::json::array();
+    for (nlohmann::json& n : graph["nodes"]) {
+        if (!n.is_object() || gone.count(n.value("name", std::string()))) continue;
+        const std::string node = n.value("name", std::string());
+        // The ports of exposed params a Map node of it fed go (the param reads its own value again).
+        if (n.contains("paramInputs") && n["paramInputs"].is_array()) {
+            nlohmann::json ports = nlohmann::json::array();
+            for (const nlohmann::json& port : n["paramInputs"]) {
+                const bool fed = std::any_of(links.begin(), links.end(), [&](const nlohmann::json& c) {
+                    return c.is_object() && gone.count(c.value("from", std::string())) && c.value("to", std::string()) == node &&
+                           c.value("input", nlohmann::json()) == port;
+                });
+                if (!fed) ports.push_back(port);
+            }
+            if (ports.empty()) {
+                n.erase("paramInputs");
+            } else {
+                n["paramInputs"] = std::move(ports);
+            }
+        }
+        letGoOfMap(n, name);  // the params naming it: back to the spec's default
+    }
+    GraphEdit edit(graph.dump());
+    for (const std::string& node : readers.nodes) edit.removeNode(node);  // with every link to or from it
+    if (changed) *changed = true;
+    if (unlinked) *unlinked = readers.users;
+    return edit.toJson();
 }
 
 std::string renamedMapTexture(const std::string& stored, const std::string& from, const std::string& to) {

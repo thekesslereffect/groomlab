@@ -107,10 +107,15 @@ private:
     QLabel* toolIcon_ = nullptr;   // the card's header: the tool's icon and name
     QLabel* toolTitle_ = nullptr;
     QLabel* toolHint_ = nullptr;   // under the title: what the tool does (setSubtitle)
-    // A fill field (the name inside) bound to a float: its span `min`..`max`, a typed value
-    // reaching `limitMin`..`limitMax`.
-    ValueSlider* slider(QVBoxLayout* into, const QString& label, double min, double max, double limitMin, double limitMax, int decimals,
-                        std::function<double()> get, std::function<void(double)> set, const QString& tip = {});
+    // A fill field (the name inside) bound to a value of the catalog's (BrushSettingSpec `id`): its
+    // span, what a typed value may reach and its decimals are the spec's, in what the field shows
+    // (`shown` per unit of the spec's: 100 for a fraction shown in percent). A length's follow the
+    // groom's size (lengthScale).
+    ValueSlider* slider(QVBoxLayout* into, const char* id, const QString& label, std::function<double()> get,
+                        std::function<void(double)> set, const QString& tip = {}, double shown = 1.0);
+    // What a length of the catalog's is times on this groom: its scalp's size over the size the
+    // specs are written for (kDefaultsScalpSize), to the nearest power of ten; 1 without a scalp.
+    double lengthScale() const;
     // A chip bound to a bool.
     QToolButton* chip(FlowLayout* into, const QString& label, std::function<bool()> get, std::function<void(bool)> set,
                       const QString& tip = {});

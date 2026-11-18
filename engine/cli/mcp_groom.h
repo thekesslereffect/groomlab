@@ -57,7 +57,6 @@ public:
     std::string shown(const std::string& path) const;
 
     // GroomLab's own folders: beside the executable when installed, else the source tree's.
-    const std::string& presetDir() const { return presetDir_; }  // "" none
     const std::string& meshDir() const { return meshDir_; }
     const std::string& docsDir() const { return docsDir_; }
     std::vector<std::string> presetDirs() const;  // the user's presets, then the shipped ones

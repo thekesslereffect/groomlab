@@ -101,20 +101,30 @@ StrandMesh strandTubes(const StrandSet& strands, const ScalpMesh* scalp, const S
     const std::size_t n = strands.strandCount();
     layer->offsets.reserve(n + 1);
     layer->featherIds.reserve(n);
-    layer->rings.reserve(strands.pointCount());
     const ScalpMesh* rooted = rootingScalp(strands, scalp);
-    std::vector<Frame> frames;
-    std::vector<float> arc;
+    // Each strand's rings in a range of their own (none for fewer than two points), filled side by side.
+    std::vector<std::size_t> first(n);
+    std::size_t total = 0;
     for (std::size_t k = 0; k < n; ++k) {
         const std::size_t count = strands.strandPointCount(k);
-        if (count >= 2) {
-            const std::size_t at = layer->rings.size();
-            layer->rings.resize(at + count);
-            strandRings(strands, k, rooted, options, frames, arc, layer->rings.data() + at);
-        }
-        layer->offsets.push_back(layer->rings.size());
+        first[k] = total;
+        if (count >= 2) total += count;
+        layer->offsets.push_back(total);
         layer->featherIds.push_back(static_cast<int>(k));
     }
+    layer->rings.resize(total);
+    RachisRing* rings = layer->rings.data();
+    constexpr std::size_t kBlock = 64;  // strands a task takes, with scratch of its own
+    parallelFor(
+        0, (n + kBlock - 1) / kBlock,
+        [&](std::size_t b) {
+            std::vector<Frame> frames;
+            std::vector<float> arc;
+            for (std::size_t k = b * kBlock; k < std::min(n, (b + 1) * kBlock); ++k) {
+                if (strands.strandPointCount(k) >= 2) strandRings(strands, k, rooted, options, frames, arc, rings + first[k]);
+            }
+        },
+        1);
 
     StrandMesh out;
     out.mesh = buildRachisMesh({layer});
@@ -216,11 +226,11 @@ void weldPieces(RachisMesh& m, const std::vector<Vec3f>& rest, float share) {
         Vec3f lo = rest[begin], hi = lo, bentLo = m.points[begin], bentHi = bentLo;
         for (std::size_t v = begin; v < end; ++v) {
             const Vec3f& p = rest[v];
-            lo = Vec3f(std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z));
-            hi = Vec3f(std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z));
+            lo = minPerAxis(lo, p);
+            hi = maxPerAxis(hi, p);
             const Vec3f& q = m.points[v];
-            bentLo = Vec3f(std::min(bentLo.x, q.x), std::min(bentLo.y, q.y), std::min(bentLo.z, q.z));
-            bentHi = Vec3f(std::max(bentHi.x, q.x), std::max(bentHi.y, q.y), std::max(bentHi.z, q.z));
+            bentLo = minPerAxis(bentLo, q);
+            bentHi = maxPerAxis(bentHi, q);
         }
         const float size = (hi - lo).length();
         if (size > 0.0f && (bentHi - bentLo).length() <= 1e-6f * size * std::max(1.0f, (bentHi + bentLo).length())) {
@@ -244,10 +254,12 @@ void weldPieces(RachisMesh& m, const std::vector<Vec3f>& rest, float share) {
     }
     // The faces on the welded points, without the corners that merged into the one before.
     std::vector<int> counts, vertices, uvs, feathers;
+    std::vector<int> fv, fu;  // a face's corners kept: their points and uvs
     std::size_t corner = 0;
     for (std::size_t f = 0; f < m.faceCounts.size(); ++f) {
         const int count = m.faceCounts[f];
-        std::vector<int> fv, fu;
+        fv.clear();
+        fu.clear();
         bool gone = false;
         for (int c = 0; c < count; ++c) {
             const int v = remap[static_cast<std::size_t>(m.faceVertices[corner + static_cast<std::size_t>(c)])];

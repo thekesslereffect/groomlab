@@ -519,6 +519,7 @@ bool BrushTool::startStroke(StrokeHost& host, const ToolView& view, float x, flo
             return false;
         }
         sculptEdits_ = sculptIn_.edits;
+        sculptRecord_.clear();
         sculpt_ = true;
         shot_ = false;
     }
@@ -609,10 +610,10 @@ void BrushTool::previewGuides(StrokeHost& host) {
         host.previewHierarchy(working_, shot_);
         return;
     }
-    // The node's edits as this stroke leaves them: the guides it moved recorded again.
+    // The node's edits as this stroke leaves them: the guides it moved recorded again (those the
+    // dabs since the last preview changed; the others keep what they recorded).
     try {
-        sculptEdits_ = sculptIn_.edits;
-        recordSculptStroke(sculptEdits_, *sculptIn_.guides, *working_, sculptIn_.strength, sculptIn_.scalp.get());
+        sculptRecord_.record(sculptEdits_, sculptIn_.edits, *sculptIn_.guides, *working_, sculptIn_.strength, sculptIn_.scalp.get());
     } catch (const std::exception& e) {
         host.warn(std::string("GroomLab sculpt: ") + e.what());
         return;
@@ -623,6 +624,7 @@ void BrushTool::previewGuides(StrokeHost& host) {
 void BrushTool::commitSculpt(StrokeHost& host) {
     host.previewSculpt(sculptIn_.node, nullptr, nullptr);  // the stored edits take over
     host.liveStroke(false);
+    sculptRecord_.clear();
     if (!changed_ || !working_) return;
     try {
         sculptEdits_ = sculptIn_.edits;
@@ -1022,6 +1024,7 @@ void BrushTool::cancel(StrokeHost* host) {
     if (sculpt_ && host) host->previewSculpt(sculptIn_.node, nullptr, nullptr);
     sculpt_ = false;
     sculptIn_ = SculptInput{};
+    sculptRecord_.clear();
     base_.reset();
     working_.reset();
     workingParts_.reset();

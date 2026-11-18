@@ -9,6 +9,7 @@
 
 #include <gtest/gtest.h>
 
+#include "groomlab/brush.h"
 #include "groomlab/curve.h"
 #include "groomlab/graph_edit.h"
 #include "groomlab/groom.h"
@@ -156,6 +157,67 @@ TEST(SculptNode, EditsFollowIdsAndWaitForMissingOnes) {
     SculptEdits elsewhere;
     elsewhere.guides[999] = edits.guides[second.id];
     EXPECT_EQ(applySculpts(set, elsewhere, 1.0f, plane.get()), set);
+}
+
+TEST(SculptNode, AStrokesRecordKeptDabAfterDabIsTheWholeRecord) {
+    // A live stroke records only the guides its dabs changed (SculptStrokeRecord): after every dab,
+    // the edits recordSculptStroke gives from the stored ones, to the bit.
+    const auto plane = test::makePlane(8, 2.0f);
+    auto set = std::make_shared<GuideSet>();
+    for (std::uint64_t k = 0; k < 40; ++k) {
+        const Vec3f root{0.15f + 0.21f * static_cast<float>(k % 8), 0.0f, 0.3f + 0.3f * static_cast<float>(k / 8)};
+        set->guides().push_back(planeGuide(1000 + k * 7919u, root, 10, 0.6f, 0.2f, *plane));
+    }
+    SculptEdits stored;
+    for (const std::size_t k : {std::size_t{3}, std::size_t{11}, std::size_t{12}, std::size_t{30}}) {
+        const Guide& g = set->guides()[k];
+        stored.guides[g.id] = recordSculpt(g, hooked(g.points, 3, 0.4f), 1.0f, plane.get());
+    }
+    stored.guides[5] = stored.guides.begin()->second;  // an ID the input does not have: kept as it is
+    for (const float strength : {1.0f, 0.6f}) {
+        const std::shared_ptr<GuideHierarchy> working =
+            sculptHierarchy(*applySculpts(set, stored, strength, plane.get()), "sculpt1", plane.get());
+        const GuideHierarchy start = *working;
+        BrushSettings brush;
+        brush.mode = BrushMode::Comb;
+        brush.radius = 0.35f;
+        SculptStrokeRecord record;
+        SculptEdits edits;
+        std::size_t recordedGuides = 0;
+        const auto check = [&](const char* when) {
+            record.record(edits, stored, *set, *working, strength, plane.get());
+            SculptEdits whole = stored;
+            recordedGuides = recordSculptStroke(whole, *set, *working, strength, plane.get()).size();
+            EXPECT_EQ(edits, whole) << when;
+            EXPECT_EQ(edits.contentHash(), whole.contentHash()) << when;
+        };
+        check("before any dab");
+        for (int dab = 0; dab < 6; ++dab) {
+            const Vec3f center{0.3f + 0.25f * static_cast<float>(dab), 0.3f, 0.5f + 0.15f * static_cast<float>(dab)};
+            applyBrushStamp(*working, plane.get(), brush, center, {0.05f, 0.0f, 0.03f});
+            check("after a dab");
+            check("with nothing changed since");
+        }
+        EXPECT_GT(recordedGuides, 0u);
+        EXPECT_LT(recordedGuides, set->guides().size());  // the brush reached some guides only
+        EXPECT_FALSE(edits == stored);
+        // A guide with a stored edit and one without put back as they were: their stored edits again.
+        for (const std::size_t k : {std::size_t{3}, std::size_t{4}}) {
+            const GuideId id = set->guides()[k].id;
+            working->pose(id, start.guide(id)->points);
+            check("after a guide went back");
+        }
+        // A guide gone from the stroke's guides keeps its stored edit; another length is left alone.
+        working->removeGuides({set->guides()[11].id});
+        check("after a guide went");
+        std::vector<Vec3f> shorter = working->guide(set->guides()[12].id)->points;
+        shorter.pop_back();
+        working->pose(set->guides()[12].id, std::move(shorter));
+        check("after a guide lost a point");
+        // Cleared: recorded whole again.
+        record.clear();
+        check("after clear");
+    }
 }
 
 TEST(SculptNode, ScaleInvariantAndDeterministic) {

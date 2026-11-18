@@ -51,17 +51,42 @@ struct BrushEntry {
     bool hasSetting(const std::string& setting) const;
 };
 
+// What a setting is: a card's block of several controls (Group: "newGuides", "map", "alpha"...), or
+// one value every host shows as a switch (Bool) or a slider (Int, Float).
+enum class BrushSettingKind { Group, Bool, Int, Float };
+const char* brushSettingKindName(BrushSettingKind kind);  // "", "bool", "int", "float"
+
 struct BrushSettingSpec {
     std::string id;
     std::string label;  // the caption every host shows
     std::string hint;   // the tooltip, with the direction a number runs in
+    // A value's facts, the one place they are written (hosts build their sliders and switches from
+    // them; a Group has none). The default is BrushToolSettings' own (brushSettingValue of a fresh
+    // one, stroke.h; a Bool: 0 or 1; "strength": a tool starts at its BrushEntry::defaultStrength
+    // instead). softMin..softMax is the slider's span (a signed tool's strength: -softMax..softMax),
+    // min..max what a typed value may reach, `decimals` what a host shows.
+    BrushSettingKind kind = BrushSettingKind::Group;
+    double defaultValue = 0.0;
+    double softMin = 0.0, softMax = 1.0;
+    double min = 0.0, max = 1.0;
+    int decimals = 0;
+    // What the number measures, as ParamSpec::unit names it (graph.h): "pixels", "angle" (degrees),
+    // "fraction" (0-1, shown as a percentage), "length" (scene units, written for a scalp of
+    // kDefaultsScalpSize, presets.h: a host that knows the groom's size scales the span and the
+    // limits by unitScaleFactor("length", size / kDefaultsScalpSize)); empty: unitless.
+    std::string unit = {};
+
+    bool isValue() const { return kind != BrushSettingKind::Group; }
 };
 
 // Every tool in the palette's order, grouped by category (Create, Shape, Trim, Paint, Guides).
 const std::vector<BrushEntry>& brushCatalog();
 // A tool by id; null for an unknown one.
 const BrushEntry* brushEntry(const std::string& id);
-// The settings the tools' cards show, by id.
+// The settings the tools' cards show, by id, and the values inside their blocks ("length",
+// "segments" and "matchNeighbors" in New guides; "alphaAngle", "alphaSpacing" and "alphaInvert" in
+// Alpha): a value's id is the name hosts set it by (the Blender helper's tool settings, Maya's
+// groomLabBrushCtx flags).
 const std::vector<BrushSettingSpec>& brushSettingSpecs();
 const BrushSettingSpec* brushSettingSpec(const std::string& id);
 // The tools of one category, in order.

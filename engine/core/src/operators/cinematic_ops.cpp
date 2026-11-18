@@ -760,10 +760,12 @@ public:
         auto layer = std::make_shared<CardMesh>();
         layer->nodes = {nodePath()};  // every card: node 0
         layer->cards = makeCards(*source, scalpOf(ctx), s);
+        const float strandsRootFade = static_cast<float>(params().getDouble("strandsRootFade"));
+        const float featherRootFade = static_cast<float>(params().getDouble("featherRootFade"));
         for (CardMesh::Card& card : layer->cards) {
             card.source = source;
-            card.strandsRootFade = static_cast<float>(params().getDouble("strandsRootFade"));
-            card.featherRootFade = static_cast<float>(params().getDouble("featherRootFade"));
+            card.strandsRootFade = strandsRootFade;
+            card.featherRootFade = featherRootFade;
         }
         layer->atlasSize = static_cast<int>(params().getInt("atlasSize"));
         layer->thinnestStrand = static_cast<float>(params().getDouble("thinnestStrand"));

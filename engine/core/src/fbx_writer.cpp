@@ -242,6 +242,9 @@ void writeFbx(const std::string& path, const std::vector<FbxMesh>& meshes, const
         }
         leaf(g, "PolygonVertexIndex", pAi(polygons));
         const std::size_t corners = m.faceIndices.size();
+        const std::vector<std::int32_t> cornerIndices = !m.uvs.empty() || !m.uvSets.empty() || !m.colors.empty()
+                                                            ? sequence(corners)
+                                                            : std::vector<std::int32_t>();  // every uv and color set's indices
         auto element = [&](const std::string& kind, int index, const std::string& name, const std::string& mapping,
                            const std::string& reference) -> Node& {
             Node& e = g.add(kind);
@@ -265,12 +268,12 @@ void writeFbx(const std::string& path, const std::vector<FbxMesh>& meshes, const
         for (std::size_t k = 0; k < uvs.size(); ++k) {
             Node& e = element("LayerElementUV", static_cast<int>(k), uvs[k].first, "ByPolygonVertex", "IndexToDirect");
             leaf(e, "UV", pAd(std::vector<double>(uvs[k].second->begin(), uvs[k].second->end())));
-            leaf(e, "UVIndex", pAi(sequence(corners)));
+            leaf(e, "UVIndex", pAi(cornerIndices));
         }
         for (std::size_t k = 0; k < m.colors.size(); ++k) {
             Node& e = element("LayerElementColor", static_cast<int>(k), m.colors[k].first, "ByPolygonVertex", "IndexToDirect");
             leaf(e, "Colors", pAd(std::vector<double>(m.colors[k].second.begin(), m.colors[k].second.end())));
-            leaf(e, "ColorIndex", pAi(sequence(corners)));
+            leaf(e, "ColorIndex", pAi(cornerIndices));
         }
         const bool material = !m.material.empty();
         if (material) {

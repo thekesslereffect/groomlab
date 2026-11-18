@@ -103,6 +103,62 @@ TEST(BrushCatalog, EveryStrokeToolModeIsListedWithItsSettings) {
     EXPECT_EQ(brushSettingSpec("no such setting"), nullptr);
 }
 
+TEST(BrushCatalog, EveryValuesDefaultIsTheSettingsOwn) {
+    // A value's default is written once, in BrushToolSettings: its spec says the same, so a host
+    // building a slider from the spec starts where a fresh tool does.
+    const BrushToolSettings fresh;
+    std::set<std::string> values;
+    for (const BrushSettingSpec& s : brushSettingSpecs()) {
+        const std::optional<double> own = brushSettingValue(fresh, s.id);
+        EXPECT_EQ(own.has_value(), s.isValue()) << s.id << ": a value has a field in the settings, a group none";
+        if (!own) continue;
+        values.insert(s.id);
+        EXPECT_NEAR(*own, s.defaultValue, 1e-6) << s.id;
+    }
+    EXPECT_EQ(values, (std::set<std::string>{"radius", "strength", "falloff", "smoothStrength", "selectedOnly", "pressure", "collide",
+                                             "frontFacingOnly", "stretch", "straighten", "length", "segments", "matchNeighbors",
+                                             "spacing", "soloNewGuides", "alphaAngle", "alphaSpacing", "alphaInvert"}));
+    EXPECT_EQ(brushSettingValue(fresh, "newGuides"), std::nullopt);
+    EXPECT_EQ(brushSettingValue(fresh, "no such setting"), std::nullopt);
+}
+
+TEST(BrushCatalog, EveryValuesDefaultIsInsideItsSpanAndLimits) {
+    for (const BrushSettingSpec& s : brushSettingSpecs()) {
+        if (!s.isValue()) {
+            EXPECT_STREQ(brushSettingKindName(s.kind), "") << s.id;
+            continue;
+        }
+        EXPECT_STRNE(brushSettingKindName(s.kind), "") << s.id;
+        EXPECT_LE(s.min, s.softMin) << s.id;
+        EXPECT_LE(s.softMin, s.defaultValue) << s.id;
+        EXPECT_LE(s.defaultValue, s.softMax) << s.id;
+        EXPECT_LE(s.softMax, s.max) << s.id;
+        EXPECT_LT(s.softMin, s.softMax) << s.id;
+        EXPECT_GE(s.decimals, 0) << s.id;
+        if (s.kind == BrushSettingKind::Bool) EXPECT_TRUE(s.defaultValue == 0.0 || s.defaultValue == 1.0) << s.id;
+        if (s.kind != BrushSettingKind::Float) EXPECT_EQ(s.decimals, 0) << s.id;
+        // A length is written for a scalp of kDefaultsScalpSize; no other unit scales with the groom.
+        EXPECT_TRUE(s.unit.empty() || s.unit == "pixels" || s.unit == "angle" || s.unit == "fraction" || s.unit == "length") << s.id;
+    }
+    EXPECT_EQ(brushSettingSpec("length")->unit, "length");
+    EXPECT_EQ(brushSettingSpec("spacing")->unit, "length");
+    // The limits are what the settings' setters keep: a value at a limit stays, one past it is brought back.
+    BrushToolSettings s;
+    const auto limits = [](const char* id) { return std::pair<double, double>(brushSettingSpec(id)->min, brushSettingSpec(id)->max); };
+    s.setScreenRadius(static_cast<float>(limits("radius").first - 1.0));
+    EXPECT_DOUBLE_EQ(*brushSettingValue(s, "radius"), limits("radius").first);
+    s.setSegments(static_cast<int>(limits("segments").first) - 1);
+    EXPECT_DOUBLE_EQ(*brushSettingValue(s, "segments"), limits("segments").first);
+    s.setSmoothStrength(static_cast<float>(limits("smoothStrength").first - 1.0));
+    EXPECT_DOUBLE_EQ(*brushSettingValue(s, "smoothStrength"), limits("smoothStrength").first);
+    for (const double falloff : {-1.0, 2.0}) {
+        s.setHardness(static_cast<float>(1.0 - falloff));
+        EXPECT_DOUBLE_EQ(*brushSettingValue(s, "falloff"), falloff < 0.0 ? limits("falloff").first : limits("falloff").second);
+    }
+    EXPECT_FLOAT_EQ(static_cast<float>(limits("alphaSpacing").first), BrushToolSettings::kMinAlphaSpacing);
+    EXPECT_FLOAT_EQ(static_cast<float>(limits("alphaSpacing").second), BrushToolSettings::kMaxAlphaSpacing);
+}
+
 TEST(BrushCatalog, TheCorrectivesTabShowsTheToolsThatRecordIntoACorrective) {
     // A corrective keeps point offsets: the shaping brushes and Select work on one; the tools that
     // add or remove things, paint attributes (Paint, Freeze) or paint tubes do not (BrushTool

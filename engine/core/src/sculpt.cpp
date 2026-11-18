@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <stdexcept>
 
 #include <nlohmann/json.hpp>
@@ -311,6 +312,37 @@ std::shared_ptr<const GuideSet> applySculpts(const std::shared_ptr<const GuideSe
     return out ? std::shared_ptr<const GuideSet>(out) : input;
 }
 
+namespace {
+
+// One guide of a stroke's result recorded into `edits` (recordSculptStroke); whether it was.
+bool recordStrokeGuide(SculptEdits& edits, const Guide& g, const HierarchyGuide* s, float strength, const ScalpMesh* scalp) {
+    if (!s || s->points.size() != g.points.size() || g.points.size() < 2) return false;
+    const auto it = edits.guides.find(g.id);
+    const std::vector<Vec3f> now = it == edits.guides.end() ? g.points : applySculpt(g, it->second, strength, scalp);
+    // Compared segment by segment (the root is the input's: a stroke never moves it).
+    const float moved = kMoved * arcLength(now);
+    bool changed = false;
+    for (std::size_t k = 1; k < now.size() && !changed; ++k) {
+        const Vec3f d = (s->points[k] - s->points[0]) - (now[k] - now[0]);
+        changed = d.dot(d) > moved * moved;
+    }
+    if (!changed) return false;
+    GuideSculpt edit = recordSculpt(g, s->points, strength, scalp);
+    if (edit.identity()) {
+        edits.guides.erase(g.id);
+    } else {
+        edits.guides[g.id] = std::move(edit);
+    }
+    return true;
+}
+
+// Whether two guides' points are the same bits (a -0 for a 0 records another edit).
+bool samePoints(const std::vector<Vec3f>& a, const std::vector<Vec3f>& b) {
+    return a.size() == b.size() && (a.empty() || std::memcmp(a.data(), b.data(), a.size() * sizeof(Vec3f)) == 0);
+}
+
+}  // namespace
+
 std::vector<GuideId> recordSculptStroke(SculptEdits& edits, const GuideSet& input, const GuideHierarchy& sculpted,
                                         float strength, const ScalpMesh* scalp) {
     if (std::abs(strength) < kMinStrength) {
@@ -318,27 +350,67 @@ std::vector<GuideId> recordSculptStroke(SculptEdits& edits, const GuideSet& inpu
     }
     std::vector<GuideId> recorded;
     for (const Guide& g : input.guides()) {
-        const HierarchyGuide* s = sculpted.guide(g.id);
-        if (!s || s->points.size() != g.points.size() || g.points.size() < 2) continue;
-        const auto it = edits.guides.find(g.id);
-        const std::vector<Vec3f> now = it == edits.guides.end() ? g.points : applySculpt(g, it->second, strength, scalp);
-        // Compared segment by segment (the root is the input's: a stroke never moves it).
-        const float moved = kMoved * arcLength(now);
-        bool changed = false;
-        for (std::size_t k = 1; k < now.size() && !changed; ++k) {
-            const Vec3f d = (s->points[k] - s->points[0]) - (now[k] - now[0]);
-            changed = d.dot(d) > moved * moved;
-        }
-        if (!changed) continue;
-        GuideSculpt edit = recordSculpt(g, s->points, strength, scalp);
-        if (edit.identity()) {
-            edits.guides.erase(g.id);
-        } else {
-            edits.guides[g.id] = std::move(edit);
-        }
-        recorded.push_back(g.id);
+        if (recordStrokeGuide(edits, g, sculpted.guide(g.id), strength, scalp)) recorded.push_back(g.id);
     }
     return recorded;
+}
+
+void SculptStrokeRecord::clear() {
+    seen_.clear();
+    started_ = false;
+}
+
+void SculptStrokeRecord::record(SculptEdits& edits, const SculptEdits& stored, const GuideSet& input, const GuideHierarchy& sculpted,
+                                float strength, const ScalpMesh* scalp) {
+    if (std::abs(strength) < kMinStrength) {
+        throw std::invalid_argument("the Sculpt node's strength is 0: raise it to sculpt");
+    }
+    const std::vector<Guide>& guides = input.guides();
+    static const std::vector<Vec3f> none;
+    const auto shown = [&](const Guide& g) -> const std::vector<Vec3f>& {
+        const HierarchyGuide* s = sculpted.guide(g.id);
+        return s ? s->points : none;
+    };
+    if (!started_ || seen_.size() != guides.size()) {
+        // The first dab: every guide, from the stored edits.
+        edits = stored;
+        seen_.assign(guides.size(), {});
+        started_ = true;
+        try {
+            for (std::size_t i = 0; i < guides.size(); ++i) {
+                recordStrokeGuide(edits, guides[i], sculpted.guide(guides[i].id), strength, scalp);
+                seen_[i] = shown(guides[i]);
+            }
+        } catch (...) {
+            clear();
+            throw;
+        }
+        return;
+    }
+    // A guide's edit follows from its input, its stored edit and its sculpted points alone: only
+    // the guides whose points changed since the last dab are recorded again, from their stored
+    // edits and in the input's order (guides sharing an ID change together, and record in turn).
+    std::vector<std::size_t> changed;
+    for (std::size_t i = 0; i < guides.size(); ++i) {
+        if (!samePoints(seen_[i], shown(guides[i]))) changed.push_back(i);
+    }
+    try {
+        for (const std::size_t i : changed) {
+            const auto it = stored.guides.find(guides[i].id);
+            if (it == stored.guides.end()) {
+                edits.guides.erase(guides[i].id);
+            } else {
+                edits.guides[guides[i].id] = it->second;
+            }
+        }
+        for (const std::size_t i : changed) {
+            recordStrokeGuide(edits, guides[i], sculpted.guide(guides[i].id), strength, scalp);
+            seen_[i] = shown(guides[i]);
+        }
+    } catch (...) {
+        clear();
+        throw;
+    }
 }
 
 std::shared_ptr<GuideHierarchy> sculptHierarchy(const GuideSet& guides, const std::string& group, const ScalpMesh* scalp) {

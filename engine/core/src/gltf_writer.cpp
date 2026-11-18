@@ -126,24 +126,29 @@ json build(const GltfDocument& doc, Buffer& buffer, bool imagesInBuffer) {
             check(p.tints.empty() || p.tints.size() == n, where + "_TINT does not match the positions");
             check(p.material >= -1 && p.material < static_cast<int>(doc.materials.size()), where + "no such material");
             check(n <= std::numeric_limits<std::uint32_t>::max(), where + "too many vertices");
-            for (const std::uint32_t i : p.indices) check(i < n, where + "an index is out of range");
-            for (const Vec3f& v : p.positions) check(finite(v.x) && finite(v.y) && finite(v.z), where + "a position is not finite");
+            // Each array tested whole, its message made once (not a string a vertex).
+            bool ok = true;
+            for (const std::uint32_t i : p.indices) ok = ok && i < n;
+            check(ok, where + "an index is out of range");
+            for (const Vec3f& v : p.positions) ok = ok && finite(v.x) && finite(v.y) && finite(v.z);
+            check(ok, where + "a position is not finite");
             for (const Vec3f& v : p.normals) {
-                check(finite(v.x) && finite(v.y) && finite(v.z) && std::abs(v.length() - 1.0f) < 1e-3f,
-                      where + "a normal is not a unit vector");
+                ok = ok && finite(v.x) && finite(v.y) && finite(v.z) && std::abs(v.length() - 1.0f) < 1e-3f;
             }
+            check(ok, where + "a normal is not a unit vector");
             for (const auto& t : p.tangents) {
-                check(finite(t[0]) && finite(t[1]) && finite(t[2]) && (t[3] == 1.0f || t[3] == -1.0f) &&
-                          std::abs(std::sqrt(t[0] * t[0] + t[1] * t[1] + t[2] * t[2]) - 1.0f) < 1e-3f,
-                      where + "a tangent is not a unit vector with w +1 or -1");
+                ok = ok && finite(t[0]) && finite(t[1]) && finite(t[2]) && (t[3] == 1.0f || t[3] == -1.0f) &&
+                     std::abs(std::sqrt(t[0] * t[0] + t[1] * t[1] + t[2] * t[2]) - 1.0f) < 1e-3f;
             }
+            check(ok, where + "a tangent is not a unit vector with w +1 or -1");
             for (const auto* set : {&p.uv0, &p.uv1}) {
-                for (const auto& uv : *set) check(finite(uv[0]) && finite(uv[1]), where + "a UV is not finite");
+                for (const auto& uv : *set) ok = ok && finite(uv[0]) && finite(uv[1]);
             }
-            for (const auto& c : p.colors) {
-                check(finite(c[0]) && finite(c[1]) && finite(c[2]) && finite(c[3]), where + "a color is not finite");
-            }
-            for (const auto& c : p.tints) check(finite(c[0]) && finite(c[1]) && finite(c[2]), where + "a tint is not finite");
+            check(ok, where + "a UV is not finite");
+            for (const auto& c : p.colors) ok = ok && finite(c[0]) && finite(c[1]) && finite(c[2]) && finite(c[3]);
+            check(ok, where + "a color is not finite");
+            for (const auto& c : p.tints) ok = ok && finite(c[0]) && finite(c[1]) && finite(c[2]);
+            check(ok, where + "a tint is not finite");
 
             json attributes;
             attributes["POSITION"] = floats(&p.positions[0].x, n, 3, "VEC3", kArrayBuffer, true);
@@ -408,7 +413,7 @@ std::vector<std::array<float, 4>> meshTangents(const std::vector<Vec3f>& positio
     std::vector<Vec3f> du(n), dv(n);
     for (std::size_t t = 0; t + 2 < indices.size(); t += 3) {
         const std::uint32_t i0 = indices[t], i1 = indices[t + 1], i2 = indices[t + 2];
-        check(i0 < n && i1 < n && i2 < n, "an index is out of range");
+        if (!(i0 < n && i1 < n && i2 < n)) check(false, "an index is out of range");
         const Vec3f e1 = positions[i1] - positions[i0], e2 = positions[i2] - positions[i0];
         const float s1 = uvs[i1][0] - uvs[i0][0], t1 = uvs[i1][1] - uvs[i0][1];
         const float s2 = uvs[i2][0] - uvs[i0][0], t2 = uvs[i2][1] - uvs[i0][1];
@@ -632,8 +637,8 @@ float scalpCapLift(const ScalpMesh& scalp) {
     if (points.empty()) return 0.0f;
     Vec3f lo = points.front(), hi = lo;
     for (const Vec3f& p : points) {
-        lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
-        hi = {std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
+        lo = minPerAxis(lo, p);
+        hi = maxPerAxis(hi, p);
     }
     return 0.004f * std::max({hi.x - lo.x, hi.y - lo.y, hi.z - lo.z});
 }

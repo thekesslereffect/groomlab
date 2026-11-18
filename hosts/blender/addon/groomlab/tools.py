@@ -63,8 +63,9 @@ def available():
 
 
 def catalog():
-    """{"tools": [...], "categories": [...], "settings": {id: {label, hint}}, "paintable": [{id, label,
-    type, param, hint}] (what New Map > For offers first)} (cached)."""
+    """{"tools": [...], "categories": [...], "settings": {id: {label, hint, kind, and a value's default,
+    softMin, softMax, min, max, decimals, unit}}, "paintable": [{id, label, type, param, hint}] (what
+    New Map > For offers first)} (cached)."""
     if not _catalog:
         r = process.call("tool_catalog")
         _catalog.update(tools=r["tools"], categories=r["categories"], settings={s["id"]: s for s in r["settings"]},
@@ -95,11 +96,6 @@ def sections():
 def setting_label(sid, fallback=""):
     s = (_catalog.get("settings") or {}).get(sid)
     return s["label"] if s else fallback
-
-
-def setting_hint(sid):
-    s = (_catalog.get("settings") or {}).get(sid)
-    return s["hint"] if s else ""
 
 
 def shows(tool):
@@ -485,13 +481,6 @@ def stroke_end(scalp):
     warn = r.get("warnings") or []
     status(scene, "; ".join(warn) if warn else "")
     return r
-
-
-def push_quiet(scalp, scene):
-    try:
-        push(scalp, scene)
-    except HelperError as e:
-        status(scene, e.message)
 
 
 def stroke_cancel(scalp):

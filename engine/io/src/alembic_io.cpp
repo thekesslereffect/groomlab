@@ -1109,7 +1109,21 @@ void flatten(const Abc::IObject& obj, const Imath::M44d& parentWorld, bool inclu
         AbcG::IXform xform(obj, Abc::kWrapExisting);
         AbcG::XformSample xs;
         xform.getSchema().get(xs, st.sel);
-        world = xform.getSchema().getInheritsXforms() ? xs.getMatrix() * parentWorld : xs.getMatrix();
+        Imath::M44d local = xs.getMatrix();
+        // Between two samples the transform is blended as the positions are (appendCurves; the
+        // matrices linearly, as alembic_mesh.cpp's xformAt): a moving parent read at a subframe
+        // is where it is then, not at the nearest sample.
+        const TimeBracket br = timeBracket(xform.getSchema().getTimeSampling(), xform.getSchema().getNumSamples(), st.seconds);
+        if (br.blends()) {
+            AbcG::XformSample a, b;
+            xform.getSchema().get(a, Abc::ISampleSelector(br.a));
+            xform.getSchema().get(b, Abc::ISampleSelector(br.b));
+            const Imath::M44d ma = a.getMatrix(), mb = b.getMatrix();
+            for (int i = 0; i < 4; ++i) {
+                for (int j = 0; j < 4; ++j) local[i][j] = ma[i][j] * (1.0 - br.t) + mb[i][j] * br.t;
+            }
+        }
+        world = xform.getSchema().getInheritsXforms() ? local * parentWorld : local;
     }
     included = included || obj.getName() == st.objectName;
     if (included && AbcG::ICurves::matches(obj.getHeader())) {

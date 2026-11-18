@@ -299,6 +299,15 @@ public:
                              vaneNormals[static_cast<std::size_t>(k)]->size() == in->strandCount();
         }
 
+        // The swept boxes' turns, 0 .. maxAngle: each one's cosine and sine (every feather's).
+        constexpr int kSweep = 4;
+        const float slice = maxAngle / static_cast<float>(kSweep);
+        std::array<float, kSweep + 1> sweepCos{}, sweepSin{};
+        for (int k = 0; k <= kSweep; ++k) {
+            const float t = slice * static_cast<float>(k);
+            sweepCos[static_cast<std::size_t>(k)] = pm::cos(t);
+            sweepSin[static_cast<std::size_t>(k)] = pm::sin(t);
+        }
         // Each feather's frame: its root (the shaft's base), up, the way it points and its reach.
         parallelFor(0, feathers.size(), [&](std::size_t fi) {
             Feather& f = feathers[fi];
@@ -358,10 +367,8 @@ public:
             if (!std::isfinite(f.strength)) f.strength = 0.0f;
             // Its swept box: every point turned through 0 .. maxAngle about the side (sampled, and
             // grown by the most an arc between samples bulges past its chord).
-            constexpr int kSweep = 4;
             const float big = std::numeric_limits<float>::max();
             Vec3f lo{big, big, big}, hi{-big, -big, -big};
-            const float slice = maxAngle / static_cast<float>(kSweep);
             const float bulge = f.reach * (1.0f - pm::cos(0.5f * slice));
             for (const std::uint32_t s : f.strands) {
                 const Vec3f* pts = in->strandPoints(s);
@@ -369,10 +376,10 @@ public:
                     const Vec3f d = pts[i] - f.root;
                     const float a = d.dot(f.along), w = d.dot(f.side), n = d.dot(f.up);
                     for (int k = 0; k <= kSweep; ++k) {
-                        const float t = slice * static_cast<float>(k), c = pm::cos(t), sn = pm::sin(t);
+                        const float c = sweepCos[static_cast<std::size_t>(k)], sn = sweepSin[static_cast<std::size_t>(k)];
                         const Vec3f q{a * c - n * sn, w, a * sn + n * c};
-                        lo = {std::min(lo.x, q.x), std::min(lo.y, q.y), std::min(lo.z, q.z)};
-                        hi = {std::max(hi.x, q.x), std::max(hi.y, q.y), std::max(hi.z, q.z)};
+                        lo = minPerAxis(lo, q);
+                        hi = maxPerAxis(hi, q);
                     }
                 }
             }
@@ -567,8 +574,8 @@ public:
                 for (std::size_t k = 0; k < samples.size(); ++k) {
                     const Vec3f p = f.turned(samples[k].p, f.turnAt(samples[k].u));
                     turnedNow[k] = p;
-                    lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
-                    hi = {std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
+                    lo = minPerAxis(lo, p);
+                    hi = maxPerAxis(hi, p);
                 }
                 near.clear();
                 for (const HeightMap* map : lower) {
@@ -742,8 +749,8 @@ private:
                 x1 = std::max(x1, d.dot(map.x));
                 y0 = std::min(y0, d.dot(map.y));
                 y1 = std::max(y1, d.dot(map.y));
-                lo = {std::min(lo.x, pts[i].x), std::min(lo.y, pts[i].y), std::min(lo.z, pts[i].z)};
-                hi = {std::max(hi.x, pts[i].x), std::max(hi.y, pts[i].y), std::max(hi.z, pts[i].z)};
+                lo = minPerAxis(lo, pts[i]);
+                hi = maxPerAxis(hi, pts[i]);
             }
         }
         if (!(x1 > x0) && !(y1 > y0)) return map;

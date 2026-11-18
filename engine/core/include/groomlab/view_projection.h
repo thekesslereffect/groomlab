@@ -76,7 +76,6 @@ public:
     std::uint64_t key() const { return key_; }
     static std::uint64_t keyOf(const ScalpMesh& scalp, const Vec3f& eye, const Vec3f& viewDirection, bool orthographic);
     float cellSize() const { return cell_; }
-    std::size_t cellsCast() const;
 
 private:
     bool cast(std::int64_t ix, std::int64_t iy, std::int64_t iz) const;

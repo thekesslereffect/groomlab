@@ -440,6 +440,8 @@ std::string paramSpecJson(const ParamSpec& p) {
     if (!p.unitWhen.param.empty()) param["unitWhen"] = {{"param", p.unitWhen.param}, {"in", p.unitWhen.in}};
     // A changed default: nodes saved before version `since` take `before` (ParamSpec::since).
     if (p.since > 0) param["formerDefault"] = {{"since", p.since}, {"value", paramToJson(p.before)}};
+    // Added by a later version of the operator (ParamSpec::added): a node older than it does not show it.
+    if (p.added > 0) param["addedIn"] = p.added;
     // The input port it takes when exposed (none: it cannot be an input).
     PortSpec port;
     if (paramPortSpec(p, &port)) {

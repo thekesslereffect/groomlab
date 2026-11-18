@@ -193,7 +193,7 @@ bool GroomSubSceneOverride::writeGpuLines(gpu::LineFrames& engine, ItemBuffers& 
     // the widths alone where only they changed; else written (whole, or the changed strands').
     const std::uint64_t uvsKey = hashCombine(lines.layoutKey(), lines.widthsKey()) | 1u;
     const bool idsHeld = b.uvsIdsKey == lines.idsKey();
-    const float* widths = s.widths().size() == s.pointCount() ? s.widths().data() : nullptr;
+    const float* widths = displayWidths(s);
     if (b.uvsKey == uvsKey && idsHeld) {
         // as they are
     } else if (runs) {
@@ -379,7 +379,7 @@ bool GroomSubSceneOverride::writeGpuRibbons(gpu::LineFrames& engine, ItemBuffers
     bool uvsWritten = false;
     if (b.ribbonUvsKey != uvsKey || !idsHeld) {
         uvsWritten = true;
-        const float* widths = s.widths().size() == s.pointCount() ? s.widths().data() : nullptr;
+        const float* widths = displayWidths(s);
         if (widths && idsHeld) {
             bytes += static_cast<double>(engine.writeWidths(t[GpuRibbonStreams::kLineUvs], widths));
         } else {
@@ -781,8 +781,8 @@ void GroomSubSceneOverride::updateHairGrid(const MHWRender::MFrameContext&) {
         const StrandSet& s = *strands;
         const std::size_t count = s.pointCount();
         std::vector<float> uvs(count * 2, 0.0f);
-        const bool widths = s.widths().size() == count;
-        for (std::size_t i = 0; i < count; ++i) uvs[i * 2 + 1] = widths ? s.widths()[i] : kNoLineWidth;
+        const float* widths = displayWidths(s);
+        for (std::size_t i = 0; i < count; ++i) uvs[i * 2 + 1] = widths ? widths[i] : kNoLineWidth;
         gpu::LineFrames::DensityGrid g;
         for (int k = 0; k < 3; ++k) {
             g.origin[k] = origin[k];
@@ -1179,7 +1179,8 @@ nlohmann::json ribbonsCheck(gpu::LineFrames& frames, GroomShape& shape, const vo
                 const Vec3f q = strands->positions()[i];
                 const Vec3f a{positions[g * 3], positions[g * 3 + 1], positions[g * 3 + 2]};
                 const Vec3f b{positions[g * 3 + 3], positions[g * 3 + 4], positions[g * 3 + 5]};
-                const float width = strands->widths().size() == n ? strands->widths()[i] : kRibbonDefaultWidth;
+                const float* widths = displayWidths(*strands);
+                const float width = widths ? widths[i] : kRibbonDefaultWidth;
                 const Vec3f toward = facing->orthographic ? Vec3f{facing->eye[0], facing->eye[1], facing->eye[2]}
                                                           : Vec3f{facing->eye[0], facing->eye[1], facing->eye[2]} - q;
                 const float distance = facing->orthographic ? 1.0f : toward.length();

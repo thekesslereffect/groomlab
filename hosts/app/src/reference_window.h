@@ -173,12 +173,10 @@ public:
     const MarkerHover& hover() const override { return hover_; }
 
     // ---- What the photo view draws ----
-    void setOverlay(Overlay overlay);
     Overlay overlay() const;
     double overlayOpacity() const;
     void setMaskTint(bool on);
     void setFieldLines(bool on);
-    void setGuidesShown(bool on);  // the last Generate's guides over the photo (Guides)
     bool maskTint() const;
     bool fieldLines() const;
     bool guidesShown() const;

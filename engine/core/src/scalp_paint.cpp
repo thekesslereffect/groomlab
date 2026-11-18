@@ -19,6 +19,7 @@
 #include <tuple>
 #include <unordered_map>
 
+#include "groomlab/color.h"
 #include "groomlab/parallel.h"
 #include "groomlab/png.h"
 #include "groomlab/point_index.h"
@@ -56,7 +57,7 @@ void requireOneImage(const Texture& image) {
     }
 }
 
-float luminance(const std::array<float, 4>& c) { return 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2]; }
+float luminance(const std::array<float, 4>& c) { return rec709Luminance(c[0], c[1], c[2]); }
 
 // The image's luminance at a UV, clamped to the texel centers at the border so an edge of
 // the scalp on the UV border does not blend with the opposite edge (Texture wraps).
@@ -822,8 +823,8 @@ void buildTexelGrid(TexelTable& t) {
             lo = hi = p;
             first = false;
         } else {
-            lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
-            hi = {std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
+            lo = minPerAxis(lo, p);
+            hi = maxPerAxis(hi, p);
         }
     }
     // Cells about as many as the covered texels' cube root squared: a few dozen texels each.

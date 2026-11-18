@@ -292,19 +292,16 @@ void deflate(const std::vector<std::uint8_t>& data, std::vector<std::uint8_t>& o
         Matcher m(bytes, n);
         for (std::size_t p = i > static_cast<std::size_t>(kWindow) ? i - kWindow : 0; p < i; ++p) m.insert(p);
         auto at = s.starts.begin();
-        bool joined = false;
         while (i < s.end) {
             at = std::lower_bound(at, s.starts.end(), std::make_pair(i, std::uint64_t{0}),
                                   [](const auto& a, const auto& b) { return a.first < b.first; });
             if (at != s.starts.end() && at->first == i) {
                 w.append(s.bytes, at->second, s.bits);
                 i = s.reached;
-                joined = true;
                 break;
             }
             i = step(m, bytes, i, w);  // past the recorded starts this simply runs to the end
         }
-        (void)joined;
     }
     literal(w, 256);  // end of block
     w.flush();

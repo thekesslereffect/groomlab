@@ -110,10 +110,6 @@ def plumbing(fallback=None):
     return {tuple(p) for p in items} if items else set(fallback or ())
 
 
-def key_states():
-    return get("graph/keyStates", {})
-
-
 # ---- Resolving a container (Maya's definitions.resolve) ------------------------------------------
 
 _FIELD = re.compile(r"\{(\w+)\}")

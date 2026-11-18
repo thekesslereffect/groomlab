@@ -250,8 +250,9 @@ bool idChannel(const std::string& name) { return name.size() > 2 && name.compare
 }  // namespace
 
 StrandsPtr applyAffect(const StrandSet& in, const StrandsPtr& out, const ScalarField& affect) {
-    if (!out || in.strandCount() != out->strandCount() || in.pointCount() != out->pointCount() || in.ids() != out->ids() ||
-        in.offsets() != out->offsets()) {
+    // (An array the two share is the same without a look through it.)
+    if (!out || in.strandCount() != out->strandCount() || in.pointCount() != out->pointCount() ||
+        (&in.ids() != &out->ids() && in.ids() != out->ids()) || (&in.offsets() != &out->offsets() && in.offsets() != out->offsets())) {
         return nullptr;
     }
     affect.validate(in);  // read on the strands as they came in

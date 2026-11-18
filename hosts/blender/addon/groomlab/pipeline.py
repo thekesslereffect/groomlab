@@ -756,37 +756,12 @@ def add_scalp(scalp, obj, name=None, wire=True):
     if existing or not wire:
         groom.mark(scalp, "eval")
         return name
+    # Every host's graph (graph_inserts.h insertScalp): a Scalp node reading it, a Scatter and an
+    # Interpolate as the groom's own, merged with the hair; a Scalp node reading it already: the graph stays.
     g = GraphEdits(scalp)
-    if any(g.param(n, "input") == name for n in g.of_type("Scalp")):
+    if g.edit(op="insert_scalp", mesh=name)["merge"] is None:
         groom.mark(scalp, "eval")
         return name
-    own_scalp = next((n for n in g.of_type("Scalp") if g.param(n, "input", "scalp") == "scalp"), None)
-    own_scatter = next((c for c, _ in g.downstream_of(own_scalp) if g.node_type(c) == "Scatter"), None) if own_scalp else None
-    own_interp = next((c for c, _ in g.downstream_of(own_scatter) if g.node_type(c) == "Interpolate"), None) if own_scatter else None
-    guides = next(iter(g.of_type("Guides")), None)
-    node = g.add("Scalp", base="scalp_" + name, params={"input": name, "subdivision": g.param(own_scalp, "subdivision", "matchRender")
-                                                         if own_scalp else "matchRender"})
-    params = dict((g.node(own_scatter) or {}).get("params") or {}) if own_scatter else {}
-    params.pop("seed", None)
-    scatter = g.add("Scatter", base="scatter_" + name, params=params)
-    g.connect(node, scatter, "scalp")
-    last = scatter
-    if own_interp:
-        interp = g.add("Interpolate", base="interpolate_" + name, params=dict((g.node(own_interp) or {}).get("params") or {}))
-        g.connect(scatter, interp, "strands")
-        if guides:
-            g.connect(guides, interp, "guides")
-        g.connect(node, interp, "scalp")
-        last = interp
-    merge = g.add("Merge", base="merge_" + name)
-    anchor = own_interp or own_scatter
-    if anchor and g.downstream_of(anchor):
-        g.insert_after(anchor, merge, node_input="a")
-    elif g.output and g.source_of(g.output, "strands"):
-        g.insert_before(g.output, merge, node_input="a")
-    g.connect(last, merge, "b")
-    x, y = g.position(merge)
-    g.set_positions({n: (x - 660.0 + 220.0 * i, y + 160.0) for i, n in enumerate((node, scatter, last)) if n})
     g.finish()
     return name
 
@@ -819,9 +794,6 @@ def prototype_from_selection(scalp, node, obj):
 
 
 # ---- Graph inserts: Maya's add_simulate, add_collider, create_cards, add_feathers, add_braid ------------
-
-LAYOUT_DX, LAYOUT_DY = 240, 140  # the core's column and row (graph_edit.cpp), as Maya's GraphModel
-
 
 class GraphEdits(object):
     """Edits of a groom's graph as Maya's GraphModel makes them, through the helper's edit_graph (each
@@ -902,31 +874,19 @@ class GraphEdits(object):
         if positions:
             self.edit(op="set_positions", positions={k: [float(v[0]), float(v[1])] for k, v in positions.items()})
 
+    # A node into the flow, every host's (graph_inserts.h insertBetween, insertBefore, insertAfter).
+
     def insert_between(self, src, dst, node, node_input="strands"):
         """src -> node -> dst in place of every src -> dst link."""
-        links = [c for c in self.graph["connections"] if c["from"] == src and c["to"] == dst]
-        if not links:
-            raise HelperError("graph", "%s is not connected to %s" % (src, dst))
-        self.connect(src, node, node_input, output=links[0].get("output"))
-        for c in links:
-            self.connect(node, dst, c["input"])
+        self.edit(op="insert_between", node=node, nodeInput=node_input, **{"from": src, "to": dst})
 
     def insert_before(self, anchor, node, input_name="strands", node_input="strands"):
-        upstream = self.source_of(anchor, input_name)
-        if upstream is None:
-            raise HelperError("graph", "%s has no %s input to insert before" % (anchor, input_name))
-        self.insert_between(upstream, anchor, node, node_input)
-        x, y = self.position(anchor)
-        self.set_positions({node: (x, y + LAYOUT_DY)})
+        """`node` between what feeds anchor's input and anchor, a row below it."""
+        self.edit(op="insert_before", anchor=anchor, node=node, input=input_name, nodeInput=node_input)
 
     def insert_after(self, anchor, node, node_input="strands"):
-        downstream = self.downstream_of(anchor)
-        if downstream:
-            self.insert_between(anchor, downstream[0][0], node, node_input)
-        else:
-            self.connect(anchor, node, node_input)
-        x, y = self.position(anchor)
-        self.set_positions({node: (x + LAYOUT_DX / 2, y + LAYOUT_DY)})
+        """`node` right after anchor in its chain, half a column right of and a row below it."""
+        self.edit(op="insert_after", anchor=anchor, node=node, nodeInput=node_input)
 
     def finish(self):
         from . import graph as graph_mod

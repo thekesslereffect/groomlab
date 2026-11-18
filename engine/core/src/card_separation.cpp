@@ -32,16 +32,6 @@ float freedom(float u) {
     return t * t * (3.0f - 2.0f * t);
 }
 
-struct Box {
-    Vec3f lo, hi;
-    bool overlaps(const Box& o) const {
-        return lo.x <= o.hi.x && o.lo.x <= hi.x && lo.y <= o.hi.y && o.lo.y <= hi.y && lo.z <= o.hi.z && o.lo.z <= hi.z;
-    }
-    bool contains(const Vec3f& p) const {
-        return p.x >= lo.x && p.x <= hi.x && p.y >= lo.y && p.y <= hi.y && p.z >= lo.z && p.z <= hi.z;
-    }
-};
-
 // A card's shape for the solver: per reference station its center (shifted), side, normal, half
 // width, and its folds (a spine card's).
 struct Shape {
@@ -49,14 +39,28 @@ struct Shape {
     std::vector<float> half, foldRight, foldLeft;
     float spineOffset = 0.0f;
     bool spine = false;
-    Box box;
+    Aabb box;
 };
+
+// A shape's centers (the card's, shifted) and its box, grown by `gap`: all of a shape that a pass
+// changes (the rest is made once, shapeOf).
+void placeShape(Shape& s, const CardMesh::Card& card, float gap) {
+    const std::size_t n = card.refCenter.size();
+    s.center.resize(n);
+    for (std::size_t i = 0; i < n; ++i) s.center[i] = card.refCenter[i] + (card.refShift.size() == n ? card.refShift[i] : Vec3f{});
+    Vec3f lo(1e30f, 1e30f, 1e30f), hi(-1e30f, -1e30f, -1e30f);
+    for (std::size_t i = 0; i < n; ++i) {
+        const float lift = s.spine ? s.half[i] * 2.0f * std::max(std::abs(s.foldRight[i]), std::abs(s.foldLeft[i])) : 0.0f;
+        const float r = s.half[i] + lift + gap;
+        lo = {std::min(lo.x, s.center[i].x - r), std::min(lo.y, s.center[i].y - r), std::min(lo.z, s.center[i].z - r)};
+        hi = {std::max(hi.x, s.center[i].x + r), std::max(hi.y, s.center[i].y + r), std::max(hi.z, s.center[i].z + r)};
+    }
+    s.box = {lo, hi};
+}
 
 Shape shapeOf(const CardMesh::Card& card, float gap) {
     Shape s;
     const std::size_t n = card.refCenter.size();
-    s.center.resize(n);
-    for (std::size_t i = 0; i < n; ++i) s.center[i] = card.refCenter[i] + (card.refShift.size() == n ? card.refShift[i] : Vec3f{});
     s.side = card.refSide;
     s.normal = card.refNormal;
     s.half.resize(n);
@@ -67,14 +71,7 @@ Shape shapeOf(const CardMesh::Card& card, float gap) {
         s.foldLeft = card.refFoldLeft;
         s.spineOffset = card.spineOffset;
     }
-    Vec3f lo(1e30f, 1e30f, 1e30f), hi(-1e30f, -1e30f, -1e30f);
-    for (std::size_t i = 0; i < n; ++i) {
-        const float lift = s.spine ? s.half[i] * 2.0f * std::max(std::abs(s.foldRight[i]), std::abs(s.foldLeft[i])) : 0.0f;
-        const float r = s.half[i] + lift + gap;
-        lo = {std::min(lo.x, s.center[i].x - r), std::min(lo.y, s.center[i].y - r), std::min(lo.z, s.center[i].z - r)};
-        hi = {std::max(hi.x, s.center[i].x + r), std::max(hi.y, s.center[i].y + r), std::max(hi.z, s.center[i].z + r)};
-    }
-    s.box = {lo, hi};
+    placeShape(s, card, gap);
     return s;
 }
 
@@ -151,6 +148,27 @@ bool over(const Shape& s, const Vec3f& q, Over* out) {
     return found;
 }
 
+// A point of one card that lies over another (over): the station of its own card it belongs to,
+// and where it lies. A pair's points in order (station, then the station's three points).
+struct Hit {
+    std::size_t station = 0;
+    Over over;
+};
+
+// The points of card `of` that lie over card `on` (inside its box, grown by its gap: a point
+// outside can't be within reach of it), in order.
+void pointsOver(const Shape& of, const Shape& on, std::vector<Hit>& out) {
+    out.clear();
+    for (std::size_t i = 0; i < of.center.size(); ++i) {
+        Vec3f pts[3];
+        stationPoints(of, i, pts);
+        for (const Vec3f& q : pts) {
+            Over o;
+            if (on.box.contains(q) && over(on, q, &o)) out.push_back({i, o});
+        }
+    }
+}
+
 // A share of each pass's correction (the rest left to the next): neighbours pushing each other
 // settle instead of overshooting.
 constexpr float kDamping = 0.7f;
@@ -224,11 +242,19 @@ void separateCards(std::vector<CardMesh::Card>& cards, float hairGap, float feat
     for (CardMesh::Card& card : cards) {
         if (card.refCenter.size() >= 2 && card.refShift.size() != card.refCenter.size()) card.refShift.assign(card.refCenter.size(), Vec3f{});
     }
+    // The shapes: made once, moved (centers and box) with their cards' shifts each pass.
+    std::vector<Shape> shapes(count);
+    parallelFor(0, count, [&](std::size_t c) {
+        if (cards[c].refCenter.size() >= 2) shapes[c] = shapeOf(cards[c], gapOf(c));
+    }, 16);
+    // Each pair's points over the other card (a's over b, b's over a), found once per pass.
+    std::vector<std::vector<Hit>> aOverB, bOverA;
     for (int pass = 0; pass < iterations; ++pass) {
-        std::vector<Shape> shapes(count);
-        parallelFor(0, count, [&](std::size_t c) {
-            if (cards[c].refCenter.size() >= 2) shapes[c] = shapeOf(cards[c], gapOf(c));
-        }, 16);
+        if (pass > 0) {
+            parallelFor(0, count, [&](std::size_t c) {
+                if (cards[c].refCenter.size() >= 2) placeShape(shapes[c], cards[c], gapOf(c));
+            }, 16);
+        }
         // The pairs whose boxes meet (sorted by their low x: the sweep), each card's partners in order.
         std::vector<std::size_t> order;
         for (std::size_t c = 0; c < count; ++c) {
@@ -259,19 +285,15 @@ void separateCards(std::vector<CardMesh::Card>& cards, float hairGap, float feat
         for (auto& p : partners) std::sort(p.begin(), p.end());
         // Each pair's side: the side of a most of b's points within reach lie on (a card through
         // another goes to that side), b above when they are even. Once per pair and pass.
+        if (aOverB.size() < pairs.size()) aOverB.resize(pairs.size()), bOverA.resize(pairs.size());
         parallelFor(0, pairs.size(), [&](std::size_t k) {
             const std::size_t a = pairs[k].a, b = pairs[k].b;
-            const Shape& sa = shapes[a];
-            const Shape& sb = shapes[b];
+            pointsOver(shapes[a], shapes[b], aOverB[k]);
+            pointsOver(shapes[b], shapes[a], bOverA[k]);
             const float reach = reachOf(a, b);
             float sum = 0.0f;
-            for (std::size_t i = 0; i < sb.center.size(); ++i) {
-                Vec3f pts[3];
-                stationPoints(sb, i, pts);
-                for (const Vec3f& q : pts) {
-                    Over o;
-                    if (sa.box.contains(q) && over(sa, q, &o) && std::abs(o.distance) < reach) sum += o.distance;
-                }
+            for (const Hit& hit : bOverA[k]) {
+                if (std::abs(hit.over.distance) < reach) sum += hit.over.distance;
             }
             pairs[k].side = sum >= 0.0f ? 1.0f : -1.0f;
         }, 16);
@@ -291,33 +313,26 @@ void separateCards(std::vector<CardMesh::Card>& cards, float hairGap, float feat
                 const float gap = pairGap(c, p), reach = reachOf(c, p);
                 // The side c keeps of p (the pair's side is b's of a).
                 const float side = c == pairs[k].b ? pairs[k].side : -pairs[k].side;
-                const Shape& sp = shapes[p];
-                for (std::size_t i = 0; i < n; ++i) {  // c's points over p
-                    Vec3f pts[3];
-                    stationPoints(sc, i, pts);
-                    for (const Vec3f& q : pts) {
-                        Over o;
-                        if (!sp.box.contains(q) || !over(sp, q, &o) || std::abs(o.distance) >= reach) continue;
-                        const float need = gap - side * o.distance;
-                        if (need <= 0.0f) continue;
-                        sum[i] += o.normal.dot(sc.normal[i]) * side * 0.5f * need;
-                        weight[i] += 1.0f;
-                    }
+                const bool isA = c == pairs[k].a;
+                for (const Hit& hit : isA ? aOverB[k] : bOverA[k]) {  // c's points over p
+                    const Over& o = hit.over;
+                    const std::size_t i = hit.station;
+                    if (std::abs(o.distance) >= reach) continue;
+                    const float need = gap - side * o.distance;
+                    if (need <= 0.0f) continue;
+                    sum[i] += o.normal.dot(sc.normal[i]) * side * 0.5f * need;
+                    weight[i] += 1.0f;
                 }
-                for (std::size_t i = 0; i < sp.center.size(); ++i) {  // p's points over c
-                    Vec3f pts[3];
-                    stationPoints(sp, i, pts);
-                    for (const Vec3f& q : pts) {
-                        Over o;
-                        if (!sc.box.contains(q) || !over(sc, q, &o) || std::abs(o.distance) >= reach) continue;
-                        const float need = gap + side * o.distance;  // p keeps the side opposite c's
-                        if (need <= 0.0f) continue;
-                        const float push = side * 0.5f * need;  // along c's normal there
-                        sum[o.station] += push * (1.0f - o.t);
-                        weight[o.station] += 1.0f - o.t;
-                        sum[o.station + 1] += push * o.t;
-                        weight[o.station + 1] += o.t;
-                    }
+                for (const Hit& hit : isA ? bOverA[k] : aOverB[k]) {  // p's points over c
+                    const Over& o = hit.over;
+                    if (std::abs(o.distance) >= reach) continue;
+                    const float need = gap + side * o.distance;  // p keeps the side opposite c's
+                    if (need <= 0.0f) continue;
+                    const float push = side * 0.5f * need;  // along c's normal there
+                    sum[o.station] += push * (1.0f - o.t);
+                    weight[o.station] += 1.0f - o.t;
+                    sum[o.station + 1] += push * o.t;
+                    weight[o.station + 1] += o.t;
                 }
             }
             std::vector<float> asked(n, 0.0f);

@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "texel_padding.h"
-#include "groomlab/portable_math.h"
 #include "groomlab/scale_maps.h"
 
 #include <algorithm>
@@ -9,6 +8,7 @@
 #include <map>
 #include <stdexcept>
 
+#include "groomlab/color.h"
 #include "groomlab/parallel.h"
 #include "groomlab/png.h"
 #include "groomlab/scales.h"
@@ -19,11 +19,6 @@ namespace groomlab {
 namespace {
 
 constexpr int kBandRows = 32;  // rows a task bakes: a texel is written by one task only
-
-float linearToSrgb(float x) {
-    x = std::clamp(x, 0.0f, 1.0f);
-    return x <= 0.0031308f ? 12.92f * x : 1.055f * pm::pow(x, 1.0f / 2.4f) - 0.055f;
-}
 
 std::uint8_t to8(float x) { return static_cast<std::uint8_t>(std::lround(std::clamp(x, 0.0f, 1.0f) * 255.0f)); }
 
@@ -138,7 +133,7 @@ ScaleMaps bakeScaleMaps(const ScalpMesh& skin, const ScaleMesh& scales, const Sc
             baked.normal[3 * i] = 128;
             baked.normal[3 * i + 1] = 128;
             baked.normal[3 * i + 2] = 255;
-            for (int k = 0; k < 3; ++k) baked.color[4 * i + static_cast<std::size_t>(k)] = to8(linearToSrgb(options.background[static_cast<std::size_t>(k)]));
+            for (int k = 0; k < 3; ++k) baked.color[4 * i + static_cast<std::size_t>(k)] = to8(linearToSrgb01(options.background[static_cast<std::size_t>(k)]));
             baked.color[4 * i + 3] = 0;
         }
         out.tiles.push_back(std::move(baked));
@@ -199,7 +194,7 @@ ScaleMaps bakeScaleMaps(const ScalpMesh& skin, const ScaleMesh& scales, const Sc
                         const std::size_t ch = static_cast<std::size_t>(k);
                         const float c = scales.colors[corner(0)][ch] * b0 + scales.colors[corner(1)][ch] * hit.root.u +
                                         scales.colors[corner(2)][ch] * hit.root.v;
-                        baked.color[4 * i + ch] = to8(linearToSrgb(c));
+                        baked.color[4 * i + ch] = to8(linearToSrgb01(c));
                     }
                     baked.color[4 * i + 3] = 255;
                     ++coveredCount;

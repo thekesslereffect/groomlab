@@ -323,7 +323,6 @@ void GuidesPanel::editCurrentName() {
 }
 
 int GuidesPanel::childrenCount() const { return static_cast<int>(std::lround(count_->value())); }
-void GuidesPanel::setChildrenCount(int count) { count_->setValue(count); }
 
 void GuidesPanel::invalidate() {
     stale_ = true;

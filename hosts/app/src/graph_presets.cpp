@@ -30,14 +30,6 @@ std::string readFile(const std::string& path) {
     return buffer.str();
 }
 
-std::optional<double> scalpSizeOf(const GroomDocument& document) {
-    // At the size the params are at: the groom's 1x when it is scaled with its scalp.
-    const MeshPtr& scalp = document.file().data.scalp;
-    std::optional<double> size = scalp ? presetScalpSize(*scalp) : std::nullopt;
-    if (size) *size /= document.session().groomScale();
-    return size;
-}
-
 std::string titleOf(const json& preset, const std::string& fallback) {
     if (preset.contains("about") && preset["about"].is_object() && preset["about"].contains("title") && preset["about"]["title"].is_string()) {
         const std::string title = preset["about"]["title"].get<std::string>();
@@ -47,6 +39,14 @@ std::string titleOf(const json& preset, const std::string& fallback) {
 }
 
 }  // namespace
+
+std::optional<double> scalpSizeOf(const GroomDocument& document) {
+    // At the size the params are at: the groom's 1x when it is scaled with its scalp.
+    const MeshPtr& scalp = document.file().data.scalp;
+    std::optional<double> size = scalp ? presetScalpSize(*scalp) : std::nullopt;
+    if (size) *size /= document.session().groomScale();
+    return size;
+}
 
 QString appResourceDir() {
     const QString exe = QCoreApplication::applicationDirPath();

@@ -575,6 +575,27 @@ void bindGroom(py::module_& m) {
           },
           py::arg("graph_json"), py::arg("old"), py::arg("new"),
           "(graph_json, changed): every reader of map `old` (Map nodes, map params, inside compounds) reading `new`.");
+    m.def("map_readers",
+          [](const std::string& graphJson, const std::string& name) {
+              const MapReaders readers = mapReaders(graphJson, name);
+              py::dict out;
+              out["nodes"] = readers.nodes;
+              out["users"] = readers.users;
+              return out;
+          },
+          py::arg("graph_json"), py::arg("name"),
+          "What reads map `name` in the graph (scalp_maps.h mapReaders): {\"nodes\": its Map nodes, \"users\": [(node, param)] "
+          "it feeds through them and the params naming it}.");
+    m.def("unlink_map_readers",
+          [](const std::string& graphJson, const std::string& name) {
+              bool changed = false;
+              std::vector<std::pair<std::string, std::string>> unlinked;
+              std::string text = unlinkMapReaders(graphJson, name, &changed, &unlinked);
+              return py::make_tuple(text, changed, unlinked);
+          },
+          py::arg("graph_json"), py::arg("name"),
+          "(graph_json, changed, [(node, param)]): every reader of map `name` letting go of it, as when the map is removed "
+          "(scalp_maps.h unlinkMapReaders).");
     m.def("renamed_map_texture", &renamedMapTexture, py::arg("stored"), py::arg("old"), py::arg("new"),
           "A texture map's file renamed with its map (\"\" when the file is not named after it).");
     // Ptex files (ptex.h): XGen's paint maps read into maps at a scalp's UVs or vertices.

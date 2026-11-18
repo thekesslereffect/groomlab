@@ -267,8 +267,6 @@ TransferMethod TransferWindow::method() const {
 
 void TransferWindow::setSymmetry(bool on) { symmetry_->setChecked(on); }
 bool TransferWindow::symmetry() const { return symmetry_->isChecked(); }
-void TransferWindow::setKeepLengths(bool on) { keepLengths_->setChecked(on); }
-void TransferWindow::setProjectMaps(bool on) { maps_->setChecked(on); }
 
 MarkerPoint TransferWindow::snapped(MarkerSide side, const Vec3f& world) const {
     MarkerPoint p{StrandRoot{}, world, 0};

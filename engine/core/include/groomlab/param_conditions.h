@@ -20,4 +20,9 @@ std::string conditionText(const nlohmann::json& value);
 // (conditionText) among `in`. No condition (not an object, or no param): it holds.
 bool conditionHolds(const nlohmann::json& condition, const nlohmann::json& value);
 
+// Whether a node at `nodeVersion` has the param of `spec` (a param's spec as JSON): not when a later
+// version of its operator added it ("addedIn", ParamSpec::added). Such a node does nothing with the
+// param until it is upgraded, so every panel leaves the param out there.
+bool paramInVersion(const nlohmann::json& spec, int nodeVersion);
+
 }  // namespace groomlab

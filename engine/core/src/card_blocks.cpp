@@ -550,11 +550,11 @@ std::vector<FbxMesh> cardBlockShapes(const CardBlockAtlas& atlas, const CardShap
             const float a = bend * f;
             if (std::abs(bend) > 1e-6f) {
                 const float r = length / bend;
-                center[static_cast<std::size_t>(k)] = {0.0f, -r * std::sin(a), r * (1.0f - std::cos(a))};
+                center[static_cast<std::size_t>(k)] = {0.0f, -r * pm::sin(a), r * (1.0f - pm::cos(a))};
             } else {
                 center[static_cast<std::size_t>(k)] = {0.0f, -length * f, 0.0f};
             }
-            normal[static_cast<std::size_t>(k)] = {0.0f, std::sin(a), std::cos(a)};
+            normal[static_cast<std::size_t>(k)] = {0.0f, pm::sin(a), pm::cos(a)};
         }
         std::vector<Vec3f> normals;
         for (int k = 0; k <= along; ++k) {

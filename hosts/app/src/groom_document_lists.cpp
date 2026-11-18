@@ -77,9 +77,6 @@ bool hexColor(const std::string& text) {
            std::all_of(text.begin() + 1, text.end(), [](char c) { return std::isxdigit(static_cast<unsigned char>(c)) != 0; });
 }
 
-// The map names HairColor and Interpolate read by a string param.
-constexpr std::pair<const char*, const char*> kNamedMapParams[] = {{"HairColor", "map"}, {"Interpolate", "regionMap"}};
-
 }  // namespace
 
 // ---- Side effects of a step: files and group colors -------------------------------------------------
@@ -190,28 +187,7 @@ std::vector<std::pair<std::string, std::string>> GroomDocument::groupUsers(const
 // ---- Maps: what reads them --------------------------------------------------------------------
 
 std::vector<std::pair<std::string, std::string>> GroomDocument::mapUsers(const std::string& name) const {
-    std::vector<std::pair<std::string, std::string>> users;
-    std::set<std::string> readers;
-    const json nodes = graph_.value("nodes", json::array());
-    for (const json& n : nodes) {
-        if (!n.is_object()) continue;
-        const json params = n.contains("params") && n["params"].is_object() ? n["params"] : json::object();
-        if (n.value("type", std::string()) == "Map" && params.value("name", std::string("mask")) == name) readers.insert(n.value("name", std::string()));
-    }
-    for (const json& c : graph_.value("connections", json::array())) {
-        if (c.is_object() && readers.count(c.value("from", std::string()))) users.emplace_back(c.value("to", std::string()), c.value("input", std::string()));
-    }
-    for (const json& n : nodes) {
-        if (!n.is_object() || !n.contains("params") || !n["params"].is_object()) continue;
-        const std::string node = n.value("name", std::string()), type = n.value("type", std::string());
-        for (const auto& [param, v] : n["params"].items()) {
-            if (v.is_object() && (v.value("guide", std::string()) == name || v.value("colorSet", std::string()) == name)) users.emplace_back(node, param);
-        }
-        for (const auto& [t, param] : kNamedMapParams) {
-            if (type == t && n["params"].value(param, json()).is_string() && n["params"][param].get<std::string>() == name) users.emplace_back(node, param);
-        }
-    }
-    return users;
+    return mapReaders(graph_.dump(), name).users;  // the core's (scalp_maps.h), every host's "Read by"
 }
 
 std::string GroomDocument::missingMapFile(const std::string& name) const {
@@ -270,76 +246,16 @@ std::string GroomDocument::removeMap(const std::string& name, bool deleteFile, b
     if (!source) return "no map named '" + name + "'";
     const std::string kind = source->kind;
     const std::string label = "remove map " + name;
-    // What reads it lets go of it (Maya's _unlink_map): its Map nodes go with their links (an
-    // exposed param's port with them), map params naming it and the map names HairColor and
-    // Interpolate read go back to the node's defaults.
+    // What reads it lets go of it (the core's unlinkMapReaders, Maya's and Blender's too): its Map
+    // nodes go with their links (an exposed param's port with them), map params naming it and the
+    // map names HairColor and Interpolate read go back to the node's defaults.
     json graph = graph_;
     bool graphChanged = false;
-    {
-        std::set<std::string> gone;
-        for (const json& n : graph.value("nodes", json::array())) {
-            if (!n.is_object() || n.value("type", std::string()) != "Map") continue;
-            const json params = n.contains("params") && n["params"].is_object() ? n["params"] : json::object();
-            if (params.value("name", std::string("mask")) == name) gone.insert(n.value("name", std::string()));
-        }
-        auto defaultOf = [&](const std::string& type, const std::string& param) {
-            const json* s = spec(type);
-            if (s && s->contains("params")) {
-                for (const json& p : (*s)["params"]) {
-                    if (p.value("name", std::string()) == param && p.contains("default")) return p["default"];
-                }
-            }
-            return json();
-        };
-        json kept = json::array();
-        for (json& n : graph["nodes"]) {
-            if (!n.is_object()) continue;
-            const std::string node = n.value("name", std::string()), type = n.value("type", std::string());
-            if (gone.count(node)) {
-                graphChanged = true;
-                continue;
-            }
-            if (n.contains("paramInputs") && n["paramInputs"].is_array()) {
-                json ports = json::array();
-                for (const json& port : n["paramInputs"]) {
-                    bool fed = false;
-                    for (const json& c : graph.value("connections", json::array())) {
-                        if (c.is_object() && gone.count(c.value("from", std::string())) && c.value("to", std::string()) == node && c.value("input", json()) == port) fed = true;
-                    }
-                    if (!fed) ports.push_back(port);
-                }
-                if (ports.size() != n["paramInputs"].size()) {
-                    if (ports.empty()) n.erase("paramInputs");
-                    else n["paramInputs"] = ports;
-                }
-            }
-            if (n.contains("params") && n["params"].is_object()) {
-                json& params = n["params"];
-                std::vector<std::string> reset;
-                for (const auto& [param, v] : params.items()) {
-                    if (v.is_object() && (v.value("guide", std::string()) == name || v.value("colorSet", std::string()) == name)) reset.push_back(param);
-                }
-                for (const auto& [t, param] : kNamedMapParams) {
-                    if (type == t && params.value(param, json()).is_string() && params[param].get<std::string>() == name) reset.push_back(param);
-                }
-                for (const std::string& param : reset) {
-                    const json d = defaultOf(type, param);
-                    if (d.is_null()) params.erase(param);
-                    else params[param] = d;
-                    graphChanged = true;
-                }
-            }
-            kept.push_back(std::move(n));
-        }
-        graph["nodes"] = std::move(kept);
-        if (!gone.empty() && graph.contains("connections") && graph["connections"].is_array()) {
-            json links = json::array();
-            for (const json& c : graph["connections"]) {
-                if (c.is_object() && (gone.count(c.value("from", std::string())) || gone.count(c.value("to", std::string())))) continue;
-                links.push_back(c);
-            }
-            graph["connections"] = std::move(links);
-        }
+    try {
+        const std::string unlinked = unlinkMapReaders(graph_.dump(), name, &graphChanged);
+        if (graphChanged) graph = json::parse(unlinked);
+    } catch (const std::exception& e) {
+        return e.what();
     }
     const std::size_t undoBefore = undoIndex_;
     std::vector<Edit::FileState> files;

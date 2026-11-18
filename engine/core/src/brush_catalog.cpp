@@ -139,40 +139,102 @@ const BrushEntry* brushEntry(const std::string& id) {
     return nullptr;
 }
 
+const char* brushSettingKindName(BrushSettingKind kind) {
+    switch (kind) {
+        case BrushSettingKind::Group: return "";
+        case BrushSettingKind::Bool: return "bool";
+        case BrushSettingKind::Int: return "int";
+        case BrushSettingKind::Float: return "float";
+    }
+    return "";
+}
+
+namespace {
+
+// A switch: on or off to start with.
+BrushSettingSpec flag(BrushSettingSpec s, bool on) {
+    s.kind = BrushSettingKind::Bool;
+    s.defaultValue = on ? 1.0 : 0.0;
+    return s;
+}
+
+// A slider: its default, the span it shows (soft) and what a typed value may reach.
+BrushSettingSpec number(BrushSettingSpec s, BrushSettingKind kind, double value, double softMin, double softMax, double min, double max,
+                        int decimals, const char* unit = "") {
+    s.kind = kind;
+    s.defaultValue = value;
+    s.softMin = softMin;
+    s.softMax = softMax;
+    s.min = min;
+    s.max = max;
+    s.decimals = decimals;
+    s.unit = unit;
+    return s;
+}
+
+}  // namespace
+
 const std::vector<BrushSettingSpec>& brushSettingSpecs() {
+    using K = BrushSettingKind;
+    // A value's default is BrushToolSettings' own and its limits hold what the settings' setters
+    // keep (setScreenRadius, setSegments, setHardness, setSmoothStrength, setAlphaSpacing):
+    // BrushCatalog.EveryValuesDefaultIsTheSettingsOwn.
     static const std::vector<BrushSettingSpec> specs = {
-        {"radius", "Radius", "The brush circle (middle-drag, or B held + drag, sets it)"},
-        {"strength", "Strength", "How much each stamp does (Comb: the fraction of the drag); negative reverses the "
-                                 "tools that work both ways (Shift+middle-drag, or M held + drag, sets it)"},
-        {"falloff", "Falloff", "How the brush fades toward its edge: 0 not at all (hard to the edge), 1 from the center out (soft)"},
+        number({"radius", "Radius", "The brush circle (middle-drag, or B held + drag, sets it)"}, K::Float, 60.0, 5.0, 400.0, 1.0,
+               2000.0, 0, "pixels"),
+        number({"strength", "Strength", "How much each stamp does (Comb: the fraction of the drag); negative reverses the "
+                                        "tools that work both ways (Shift+middle-drag, or M held + drag, sets it)"},
+               K::Float, 1.0, 0.0, 1.0, -10.0, 10.0, 2),
+        number({"falloff", "Falloff", "How the brush fades toward its edge: 0 not at all (hard to the edge), 1 from the center out (soft)"},
+               K::Float, 1.0, 0.0, 1.0, 0.0, 1.0, 2),
         {"falloffProfile", "Falloff curve", "The falloff drawn as a curve instead: the weight from the brush's center (left) "
                                             "to its edge (right); none: the Falloff slider's"},
         {"strengthProfile", "Root to tip", "How much of the strength each part of a guide gets, root (left) to tip (right): "
                                            "tips more than roots, or the reverse; flat: the whole guide alike"},
         {"symmetry", "Symmetry", "Mirror every stroke: across world X, or across the scalp's own topology (its left "
                                  "and right, whatever its pose; for heads turned or not quite symmetric)"},
-        {"selectedOnly", "Selected only", "Only the selected guides, scaled by the soft selection"},
-        {"pressure", "Pen pressure", "A tablet's pressure scales the strength"},
-        {"collide", "Keep off scalp", "Guides never dip into the scalp"},
-        {"frontFacingOnly", "Front facing only", "What the scalp hides from the camera gets no weight: a stroke never reaches "
-                                                 "guides, parts, flow arrows or paint on the far side of the head"},
-        {"stretch", "Stretch", "On: guides get longer (or shorter) as you pull them. Off: they keep their length"},
-        {"straighten", "Straighten", "On: guides relax toward the straight line along their root direction. Off: only "
-                                     "their kinks are taken out"},
+        flag({"selectedOnly", "Selected only", "Only the selected guides, scaled by the soft selection"}, false),
+        flag({"pressure", "Pen pressure", "A tablet's pressure scales the strength"}, true),
+        flag({"collide", "Keep off scalp", "Guides never dip into the scalp"}, true),
+        flag({"frontFacingOnly", "Front facing only", "What the scalp hides from the camera gets no weight: a stroke never reaches "
+                                                      "guides, parts, flow arrows or paint on the far side of the head"},
+             true),
+        flag({"stretch", "Stretch", "On: guides get longer (or shorter) as you pull them. Off: they keep their length"}, false),
+        flag({"straighten", "Straighten", "On: guides relax toward the straight line along their root direction. Off: only "
+                                          "their kinks are taken out"},
+             false),
         {"targets", "Acts on", "What the brush shapes: guides, part lines, flow arrows"},
         {"erases", "Erases", "What Erase removes: guides (with their children), parts, flow arrows"},
         {"newGuides", "New guides", "Match nearby guides' shape and maps, or the length and segments of a standing guide"},
-        {"spacing", "Spacing", "The distance between the guides a drag places"},
-        {"soloNewGuides", "Solo new guides", "New guides stay unfrozen and every other guide is frozen, so the brushes "
-                                             "work on the new ones at once (the Select tool solos others, "
-                                             "Unfreeze All frees them all)"},
+        // New guides' values. The lengths are scene units on a scalp of kDefaultsScalpSize (unit "length").
+        number({"length", "Length", "New guides' length (standing, or without neighbors to match)"}, K::Float, 0.5, 0.01, 50.0, 0.001,
+               1e4, 3, "length"),
+        number({"segments", "Segments", "Points along each new guide"}, K::Int, 12.0, 1.0, 32.0, 1.0, 256.0, 0),
+        flag({"matchNeighbors", "Match nearby", "New guides take the shape, length and painted maps of the nearest guides: the "
+                                                "group's own, or the groups around it while it has none. Off: they stand "
+                                                "straight up, with no maps"},
+             true),
+        number({"spacing", "Spacing", "The distance between the guides a drag places"}, K::Float, 0.1, 0.0, 10.0, 0.0, 1e4, 3, "length"),
+        flag({"soloNewGuides", "Solo new guides", "New guides stay unfrozen and every other guide is frozen, so the brushes "
+                                                  "work on the new ones at once (the Select tool solos others, "
+                                                  "Unfreeze All frees them all)"},
+             false),
         {"parts", "Parts", "The next part's name, and the parts drawn so far"},
         {"flow", "Flow", "What a click or drag lays: arrows, or a sink (brush-sized) hair turns around"},
         {"map", "Map", "The map painted, the value (or color and channels) it is painted toward"},
-        {"smoothStrength", "Smooth", "How much Shift+drag smooths a map per stamp (past 1: several passes)"},
+        number({"smoothStrength", "Smooth", "How much Shift+drag smooths a map per stamp (past 1: several passes)"}, K::Float, 1.0, 0.0,
+               3.0, 0.0, 100.0, 2),
         {"alpha", "Alpha", "An image stamped inside the brush on scalp maps (speckles, noise, streaks): white paints, black "
                            "does not. Rotation turns it (fixed, along the stroke, random per stamp), Spacing sets how far "
                            "apart the stamps fall. Add your own images to the library (right-click)"},
+        // The alpha's values: the spacing a share of the brush's diameter (hosts show percent).
+        number({"alphaAngle", "Stamp angle", "The alpha's angle in degrees, counterclockwise (Follow Stroke: added to the "
+                                             "stroke's way)"},
+               K::Float, 0.0, 0.0, 360.0, -360.0, 360.0, 0, "angle"),
+        number({"alphaSpacing", "Stamp spacing", "How far apart the stamps fall along a stroke, in percent of the brush's "
+                                                 "diameter: low for a smooth trail, 100 and up for separate stamps"},
+               K::Float, 0.25, 0.05, 1.0, 0.02, 4.0, 2, "fraction"),
+        flag({"alphaInvert", "Invert", "Paint where the alpha is black instead"}, false),
         {"selection", "Selection", "How the lasso adds to or replaces the selection, and the soft radius"},
         {"freezeMask", "Freeze mask", "The frozen guides draw blue; Unfreeze All clears the mask"},
         {"tubeChannel", "Paints", "What the Tube brush paints on the tubes near it: their width, their flatness (toward "

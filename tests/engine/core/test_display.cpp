@@ -29,6 +29,7 @@
 #include "groomlab/parts.h"
 #include "groomlab/random.h"
 #include "groomlab/retriangulate.h"
+#include "groomlab/strand_lod.h"
 #include "test_helpers.h"
 
 namespace groomlab {
@@ -605,6 +606,30 @@ TEST(Display, LinesUvsCarryTheWidths) {
     EXPECT_EQ(bare.widthsKey(), 0u);
     bare.writeUvs(parts.data(), 2);
     for (std::size_t p = 0; p < n; ++p) EXPECT_EQ(parts[p * 2 + 1], kNoLineWidth);
+    // None set (1 on every point, a Scatter's strands with no Width node after it): drawn as
+    // strands without widths, not a scene unit wide: the lines' uvs, the ribbons, the LOD's thinning.
+    auto unset = std::make_shared<StrandSet>(*strands);
+    for (float& w : unset->mutableWidths()) w = 1.0f;
+    EXPECT_EQ(displayWidths(*strands), strands->widths().data());
+    EXPECT_EQ(displayWidths(*unset), nullptr);
+    EXPECT_EQ(displayWidths(*none), nullptr);
+    const StrandLines plain(unset, nullptr, false, nullptr);
+    EXPECT_EQ(plain.widthsKey(), 0u);
+    std::fill(parts.begin(), parts.end(), -9.0f);
+    plain.writeUvs(parts.data(), 2);
+    for (std::size_t p = 0; p < n; ++p) EXPECT_EQ(parts[p * 2 + 1], kNoLineWidth);
+    const std::vector<std::array<float, 3>> white(strands->strandCount(), std::array<float, 3>{1.0f, 1.0f, 1.0f});
+    const DisplayGeometry ribbons = strandRibbons(*unset, nullptr, white, 1.0f, false);
+    ASSERT_FALSE(ribbons.positions.empty());
+    EXPECT_EQ(ribbons.positions, strandRibbons(*none, nullptr, white, 1.0f, false).positions);  // kRibbonDefaultWidth wide
+    const Vec3f across(ribbons.positions[3] - ribbons.positions[0], ribbons.positions[4] - ribbons.positions[1],
+                       ribbons.positions[5] - ribbons.positions[2]);
+    EXPECT_NEAR(across.length(), kRibbonDefaultWidth, 1e-5f);
+    StrandLod lod;
+    lod.setStrands(strands, "");
+    EXPECT_TRUE(lod.hasWidths());
+    lod.setStrands(unset, "");
+    EXPECT_FALSE(lod.hasWidths());  // nothing thinned
     // idsKey: the uvs' first float's (the counts and IDs), whatever the widths and points.
     EXPECT_EQ(StrandLines(thinner, nullptr, false, nullptr).idsKey(), lines.idsKey());
     EXPECT_EQ(StrandLines(moved, nullptr, false, nullptr).idsKey(), lines.idsKey());

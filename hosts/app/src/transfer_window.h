@@ -78,8 +78,6 @@ public:
     bool markerEditing() const override { return usesMarkers(method()); }
     void setSymmetry(bool on);
     bool symmetry() const;
-    void setKeepLengths(bool on);
-    void setProjectMaps(bool on);
 
     // ---- Marker edits (the clicks call these after picking; scripts and tests call them) ----
     // A point snapped onto the side's mesh at the end of its list (with Symmetry X, its mirror

@@ -116,42 +116,15 @@ def add_scalp(groom, mesh, name=None, rest=True, wire=True):
     cmds.setAttr(element + ".extraScalpName", name, type="string")
     if existing or not wire:
         return name
+    # Every host's graph (graph_inserts.h insertScalp): a Scalp node reading it, a Scatter and an
+    # Interpolate as the groom's own, merged with the hair.
     model = gm.GraphModel.from_groom(groom)
-    if any(model.node_type(n) == "Scalp" and model.param(n, "input") == name for n in model.order):
+    edit = model._edit()
+    with gm._core_errors():
+        made = edit.insert_scalp(name, model.groom_size)
+    if made["merge"] is None:
         return name  # a Scalp node reads it already: the graph stays
-    own_scalp = next((n for n in model.order if model.node_type(n) == "Scalp" and model.param(n, "input") == "scalp"), None)
-    own_scatter = next((c for c, port in model.downstream_of(own_scalp) if model.node_type(c) == "Scatter"), None) \
-        if own_scalp else None
-    own_interp = next((c for c, port in model.downstream_of(own_scatter) if model.node_type(c) == "Interpolate"), None) \
-        if own_scatter else None
-    # The guides the hair reads (its Interpolate's): never the first Guides node there is (a braid's).
-    guides = model.source_of(own_interp, "guides") if own_interp else None
-    scalp_node = model.add_node("Scalp", name=model.unique_name("scalp_" + name), params={
-        "input": name, "subdivision": model.param(own_scalp, "subdivision") if own_scalp else "matchRender"})
-    scatter_params = dict(model.nodes[own_scatter]["params"]) if own_scatter else {}
-    scatter_params.pop("seed", None)  # a seed of its own (add_node picks one)
-    scatter = model.add_node("Scatter", name=model.unique_name("scatter_" + name), params=scatter_params)
-    model.connect(scalp_node, scatter, "scalp")
-    last = scatter
-    if own_interp:
-        interp = model.add_node("Interpolate", name=model.unique_name("interpolate_" + name),
-                                params=dict(model.nodes[own_interp]["params"]))
-        model.connect(scatter, interp, "strands")
-        if guides:
-            model.connect(guides, interp, "guides")
-        model.connect(scalp_node, interp, "scalp")
-        last = interp
-    merge = model.add_node("Merge", name=model.unique_name("merge_" + name))
-    anchor = own_interp or own_scatter
-    if anchor and model.downstream_of(anchor):
-        model.insert_after(anchor, merge)  # anchor -> merge.a -> what anchor fed
-    elif model.output and model.source_of(model.output, "strands"):
-        model.insert_before(model.output, merge)
-    model.connect(last, merge, "b")
-    x, y = model.position(merge)
-    for i, node in enumerate((scalp_node, scatter, last if last != scatter else None)):
-        if node:
-            model.set_position(node, x - 660.0 + 220.0 * i, y + 160.0)
+    model._take(edit)
     model.save(groom)
     return name
 

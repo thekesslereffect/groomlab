@@ -10,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include "groomlab/color.h"
 #include "groomlab/curve.h"
 #include "groomlab/display.h"
 #include "groomlab/frames.h"
@@ -31,8 +32,8 @@ void buildFlowOverlay(const FlowField& flowField, const ScalpMesh& scalpMesh, Di
     if (scalp->pointCount() == 0) return;
     Vec3f lo = scalp->points().front(), hi = lo;
     for (const Vec3f& p : scalp->points()) {
-        lo = Vec3f(std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z));
-        hi = Vec3f(std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z));
+        lo = minPerAxis(lo, p);
+        hi = maxPerAxis(hi, p);
     }
     const float size = (hi - lo).length();
     const float lift = size * 0.002f;  // off the skin, so the lines don't z-fight it
@@ -282,12 +283,9 @@ std::vector<std::uint8_t> combineCardMaps(const std::uint8_t* c, const std::uint
     float toLinear[256];
     for (int i = 0; i < 256; ++i) {
         const float v = static_cast<float>(i) / 255.0f;
-        toLinear[i] = v <= 0.04045f ? v / 12.92f : pm::pow((v + 0.055f) / 1.055f, 2.4f);
+        toLinear[i] = srgbToLinear(v);
     }
-    auto toSrgb = [](float v) {
-        v = std::clamp(v, 0.0f, 1.0f);
-        return static_cast<std::uint8_t>((v <= 0.0031308f ? 12.92f * v : 1.055f * pm::pow(v, 1.0f / 2.4f) - 0.055f) * 255.0f + 0.5f);
-    };
+    auto toSrgb = [](float v) { return static_cast<std::uint8_t>(linearToSrgb01(v) * 255.0f + 0.5f); };
     const std::size_t pixels = width * height;
     std::vector<std::uint8_t> rgba(pixels * 4);
     parallelFor(0, pixels, [&](std::size_t i) {
@@ -382,8 +380,8 @@ DisplayGeometry scalpMapGeometry(const ScalpMesh* scalp, const ScalpMapView& vie
     std::vector<Vec3f> normals(points.size());
     Vec3f lo = points.empty() ? Vec3f{} : points[0], hi = lo;
     for (const Vec3f& p : points) {
-        lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
-        hi = {std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
+        lo = minPerAxis(lo, p);
+        hi = maxPerAxis(hi, p);
     }
     for (const auto& tri : scalp->triangles()) {
         const Vec3f& a = points[static_cast<std::size_t>(tri[0])];

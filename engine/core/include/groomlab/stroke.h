@@ -16,6 +16,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <utility>
@@ -166,6 +167,12 @@ struct BrushToolSettings {
     void prepareMask(const GuideHierarchy& h, std::set<std::string> hiddenGroups, const std::vector<GuideId>& selection,
                      float softRadius, const ScalpMesh* scalp = nullptr);
 };
+
+// A value of the brush catalog's (brush_catalog.h: a BrushSettingSpec that isValue) as the
+// settings hold it: a switch as 0 or 1, "falloff" as 1 - brush.hardness, "frontFacingOnly" as
+// maskByScalp. A fresh BrushToolSettings gives each spec's default. nullopt for a Group or an id
+// the catalog does not have.
+std::optional<double> brushSettingValue(const BrushToolSettings& settings, const std::string& id);
 
 // The colors every host draws the tool in (RGB 0..1): the ring under the cursor (red for Part and
 // Erase, orange for Flow, green for the guide-making tools, else yellow), a Part or Flow stroke's
@@ -726,6 +733,7 @@ private:
     bool sculpt_ = false;
     SculptInput sculptIn_;
     SculptEdits sculptEdits_;
+    SculptStrokeRecord sculptRecord_;  // the guides' points at the last preview: a dab records the ones it changed
     // Ctrl+Shift with a Shape brush: the selection painted (StrokeHost::paintSelection). The
     // selection when it began, the guides the circle has passed over (in order), and whether it
     // moved (a drag over nothing clears; a click on nothing does not).

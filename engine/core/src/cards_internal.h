@@ -188,6 +188,21 @@ std::vector<Frame> cardFrames(const std::vector<Vec3f>& center, const ScalpMesh*
 // points from the one nearest the mean). Empty groups are renumbered away.
 std::vector<int> kMeans(const std::vector<std::vector<float>>& f, std::size_t k, int iterations);
 
+// Each group's most typical member (labels: kMeans'): the one whose features lie nearest the
+// group's mean (the first of equals).
+std::vector<int> mostTypical(const std::vector<std::vector<float>>& features, const std::vector<int>& labels);
+
+// Clear of the scalp: a card lying on the skin (roots, hair combed flat; a feather on the body)
+// sits a hair above it, so the scalp doesn't cut through or shade it. Measured at the card's
+// center line (its fixed-resolution shape), then the pushes are smoothed along the card: a wide
+// card on a curved head has its edges dip below the surface by the curvature, and lifting each
+// station by its own edges' dip kinked the card at the root.
+void liftClearOfScalp(CardMesh::Card& card, const ScalpMesh& scalp);
+
+// A width per station (kRefStations of them) with its notches filled: a dip narrower than a fifth
+// of the card fills to the lower of its flanks.
+std::vector<float> notchesFilled(const std::vector<float>& w);
+
 // A feather: its strands (barbs and the kept shaft) and which one is the shaft (-1: none kept).
 struct Feather {
     std::vector<std::size_t> strands;
