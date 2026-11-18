@@ -17,6 +17,7 @@
 #include <map>
 #include <set>
 #include <tuple>
+#include <utility>
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
@@ -696,6 +697,36 @@ std::string blendingOffsets(const std::string& graphJson) {
 }
 
 GroomData deformedGroom(const std::string& graphJson, float bend = 0.6f);
+
+// A plan copies the fields it read before: the copies share the values (no float copied), and a
+// write to one leaves the others as they were.
+TEST(GpuPreview, CopiedFieldsShareTheirValuesUntilWritten) {
+    gpu::LookFields read;
+    read.stages.resize(1);
+    gpu::FieldValues& v = read.stages[0].field[0];
+    v.mode = gpu::FieldValues::kPerStrand;
+    v.values.assign(4, 0.0f);
+    for (std::size_t i = 0; i < 4; ++i) v.values[i] = static_cast<float>(i);
+    const float* held = v.values.data();
+    EXPECT_EQ(v.values.data(), held);  // (its own: writing its elements made no copy)
+
+    gpu::LookFields plan = read;
+    EXPECT_EQ(plan.stages[0].field[0].values.data(), held);
+    EXPECT_EQ(plan.stages[0].field[0].values.size(), 4u);
+    EXPECT_EQ(std::vector<float>(plan.stages[0].field[0].values.begin(), plan.stages[0].field[0].values.end()),
+              (std::vector<float>{0.0f, 1.0f, 2.0f, 3.0f}));
+
+    plan.stages[0].field[0].values[2] = 9.0f;  // a write: its own values from here
+    EXPECT_NE(plan.stages[0].field[0].values.data(), held);
+    EXPECT_EQ(std::as_const(read).stages[0].field[0].values[2], 2.0f);
+    EXPECT_EQ(std::as_const(plan).stages[0].field[0].values[2], 9.0f);
+    EXPECT_EQ(std::as_const(read).stages[0].field[0].values.data(), held);
+
+    plan.stages[0].field[0].values = std::vector<float>{5.0f};
+    EXPECT_EQ(plan.stages[0].field[0].values.size(), 1u);
+    EXPECT_EQ(read.stages[0].field[0].values.size(), 4u);
+    EXPECT_TRUE(gpu::FieldValues{}.values.empty());
+}
 
 TEST(GpuPreview, EngagesOnTheGraphsGroomsStartFrom) {
     // The default graph (its Resample even) and hair_basics run on the GPU from Interpolate, keeping

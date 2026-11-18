@@ -45,6 +45,7 @@ static_assert(sizeof(StageConstants) == kConstantSlotBytes, "look.slang's cbuffe
 // texture's and fields' always).
 using KernelSet = std::bitset<static_cast<std::size_t>(LookEngine::Kernel::Count)>;
 KernelSet kernelsOf(const LookRun& run);
+KernelSet kernelsOf(const LookParams& params, const std::vector<StageInputs>& inputs);
 // The kernels' names ("Collide, Clearance"), for a host to say what is compiling.
 std::string kernelNames(KernelSet kernels);
 // "Collide" for Kernel::Collide.

@@ -543,7 +543,18 @@ protected:
         for (int i = 0; i < 3; ++i) {
             if (binding.out[i]) out[i] = rawAccess(static_cast<ID3D11Buffer*>(binding.out[i]), binding.outBytes[i]);
         }
-        if (follow) out[1] = rawAccess(buffers_[kRootNormals].buffer, std::max<std::size_t>(strandCount() * 16, 16));  // (gOut2)
+        if (follow) {  // (gOut2: the engine's own buffer, its view kept while the buffer and the strands' count are)
+            Raw& normals = buffers_[kRootNormals];
+            const std::size_t bytes = std::max<std::size_t>(strandCount() * 16, 16);
+            if (!normals.uav || normals.uavBytes != bytes) {
+                if (normals.uav) normals.uav->Release();
+                normals.uav = nullptr;
+                normals.uav = rawAccess(normals.buffer, bytes);
+                normals.uavBytes = bytes;
+            }
+            out[1] = normals.uav;
+            out[1]->AddRef();  // (released with the targets' views below)
+        }
         context_->UpdateSubresource(constants_, 0, nullptr, constants, 0, 0);
         // The compute state touched, kept and put back (the renderer owns the context).
         constexpr UINT kSrvs = 7;  // t0-t6: look.slang's gOffsets, gStrandData, gIn, (gRamps, gFields), gAux0, gAux1
@@ -746,13 +757,16 @@ private:
     struct Raw {
         ID3D11Buffer* buffer = nullptr;
         ID3D11ShaderResourceView* srv = nullptr;
-        std::size_t bytes = 0;
+        ID3D11UnorderedAccessView* uav = nullptr;  // kRootNormals: what runFollow's kernel writes through, `uavBytes` long
+        std::size_t bytes = 0, uavBytes = 0;
         void reset() {
+            if (uav) uav->Release();
             if (srv) srv->Release();
             if (buffer) buffer->Release();
+            uav = nullptr;
             srv = nullptr;
             buffer = nullptr;
-            bytes = 0;
+            bytes = uavBytes = 0;
         }
     };
 
@@ -915,37 +929,44 @@ struct Gl {
     }
 };
 
-// The bindings a run touches (uniform block 0, shader storage 1-6, 9 and 10), the program and the
-// generic bindings, kept and put back (the renderer owns the context).
+// The bindings a dispatch touches (uniform block 0, shader storage 1-6, 9 and 10), the program and
+// the generic bindings (the copy-write one: the constants' and the size checks'), kept and put back
+// (the renderer owns the context). Each is a query, which a threaded driver answers only by waiting
+// on its thread: none for what a dispatch leaves alone.
 struct GlKept {
     struct Indexed {
         GLint name = 0;
         GLint64 start = 0, size = 0;
     };
-    static constexpr GLuint kStorages = 11;
-    GLint program = 0, storage = 0, uniform = 0, copyRead = 0, copyWrite = 0;
+    static constexpr GLuint kStorages = 8;
+    static constexpr GLuint kStorageAt[kStorages] = {1, 2, 3, 4, 5, 6, 9, 10};
+    GLint program = 0, storage = 0, uniform = 0, copyWrite = 0;
     Indexed storages[kStorages], uniform0;
 
     void save(const Gl& gl) {
         glGetIntegerv(kCurrentProgram, &program);
         glGetIntegerv(kShaderStorageBinding, &storage);
         glGetIntegerv(kUniformBinding, &uniform);
-        glGetIntegerv(kCopyReadBuffer, &copyRead);
         glGetIntegerv(kCopyWriteBuffer, &copyWrite);
-        for (GLuint i = 0; i < kStorages; ++i) indexed(gl, kShaderStorageBinding, kShaderStorageStart, kShaderStorageSize, i, &storages[i]);
+        for (GLuint i = 0; i < kStorages; ++i) {
+            indexed(gl, kShaderStorageBinding, kShaderStorageStart, kShaderStorageSize, kStorageAt[i], &storages[i]);
+        }
         indexed(gl, kUniformBinding, kUniformStart, kUniformSize, 0, &uniform0);
     }
     void restore(const Gl& gl) const {
         gl.UseProgram(static_cast<GLuint>(program));
-        for (GLuint i = 0; i < kStorages; ++i) bind(gl, kShaderStorageBuffer, i, storages[i]);
+        for (GLuint i = 0; i < kStorages; ++i) bind(gl, kShaderStorageBuffer, kStorageAt[i], storages[i]);
         bind(gl, kUniformBuffer, 0, uniform0);
+        // Indexed binds set the generic binding too: it goes back last.
         gl.BindBuffer(kShaderStorageBuffer, static_cast<GLuint>(storage));
         gl.BindBuffer(kUniformBuffer, static_cast<GLuint>(uniform));
-        gl.BindBuffer(kCopyReadBuffer, static_cast<GLuint>(copyRead));
         gl.BindBuffer(kCopyWriteBuffer, static_cast<GLuint>(copyWrite));
     }
+    // (A binding of no buffer has no range to ask for.)
     static void indexed(const Gl& gl, GLenum binding, GLenum start, GLenum size, GLuint i, Indexed* out) {
         gl.GetIntegeri_v(binding, i, &out->name);
+        out->start = out->size = 0;
+        if (!out->name) return;
         gl.GetInteger64i_v(start, i, &out->start);
         gl.GetInteger64i_v(size, i, &out->size);
     }
@@ -1030,12 +1051,12 @@ public:
         std::vector<float> out(count);
         if (!target || !count) return out;
         requireReachable();
-        GlKept kept;
-        kept.save(gl_);
+        GLint copyRead = 0;  // (the one binding it touches)
+        glGetIntegerv(kCopyReadBuffer, &copyRead);
         gl_.MemoryBarrier(kBufferUpdateBarrier);
         gl_.BindBuffer(kCopyReadBuffer, glName(target));
         gl_.GetBufferSubData(kCopyReadBuffer, 0, static_cast<GLsizeiptr>(count * 4), out.data());
-        kept.restore(gl_);
+        gl_.BindBuffer(kCopyReadBuffer, static_cast<GLuint>(copyRead));
         return out;
     }
 
@@ -1050,10 +1071,10 @@ protected:
 
     void upload(Buffer which, const void* data, std::size_t bytes) override {
         requireReachable();
-        GlKept kept;
-        kept.save(gl_);
+        GLint copyWrite = 0;  // (the one binding put touches)
+        glGetIntegerv(kCopyWriteBuffer, &copyWrite);
         put(buffers_[which], data, bytes, kStaticDraw);
-        kept.restore(gl_);
+        gl_.BindBuffer(kCopyWriteBuffer, static_cast<GLuint>(copyWrite));
     }
 
     void dispatch(Kernel kernel, const void* constants, std::size_t constantBytes, const Binding& binding, std::uint32_t groupsX,
@@ -1167,8 +1188,14 @@ private:
     };
     GLuint density_[3] = {};
     Named grid_;
-    void requireReachable() const {
+    // Asks the driver (glIsProgram, which a threaded driver answers only by waiting on its thread)
+    // once per context made current, as the look engine does (look_engine_gl.cpp): a frame's
+    // writes, uploads and dispatches then ask nothing.
+    void requireReachable() {
+        const HGLRC current = wglGetCurrentContext();
+        if (current && current == verified_) return;
         if (!reachable()) throw std::runtime_error("GPU frames: the OpenGL context they were made in is gone");
+        verified_ = current;
     }
     GLuint program(const char* source, const char* entry) {
         const GLuint shader = gl_.CreateShader(kComputeShader);
@@ -1225,7 +1252,7 @@ private:
     }
 
     Gl gl_{};
-    HGLRC context_ = nullptr;
+    HGLRC context_ = nullptr, verified_ = nullptr;
     GLuint programs_[static_cast<int>(Kernel::Count)] = {};  // by Kernel: FramesCS, WidthsCS, RibbonsCS, RibbonLayoutCS, RibbonColorsCS, FollowCS
     Named buffers_[kBufferCount];
     Named constants_;

@@ -299,6 +299,8 @@ private:
         MeshPtr tablesScalp;  // Flow: the scalp its tables (their rings welded) were made for
         MeshDistanceField::Tables tables;
         float reach = 0.0f;
+        StrandsPtr ref;  // RestoreLength's reference a stage of the run makes: its strands as cached, their longest
+        float refReach = 0.0f;
     };
     std::map<NodeId, ShaperMemo> shaper_;
     // RestoreLength, BlendNeighbors, Tangle (stage k of `chain`; `before`: the nodes the run moves

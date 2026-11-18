@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "groomlab/distance_field.h"
@@ -200,6 +201,34 @@ struct FieldProgram {
     std::vector<std::uint32_t> core;
     bool longest = false;
 };
+// A mapped param's values (a float a strand or a point), shared by the copies of the fields that
+// hold them: a plan takes the fields read before (a preview's, a branch's memo) and an engine's
+// sibling run its branch's, each copying pointers, not the values. Read as a vector; a write
+// (assign, an element of one not const) makes the values its own first.
+class FieldFloats {
+public:
+    FieldFloats() = default;
+    FieldFloats(std::vector<float> values) : shared_(std::make_shared<std::vector<float>>(std::move(values))) {}
+    std::size_t size() const { return shared_ ? shared_->size() : 0; }
+    bool empty() const { return size() == 0; }
+    const float* data() const { return shared_ ? shared_->data() : nullptr; }
+    const float* begin() const { return data(); }
+    const float* end() const { return data() + size(); }
+    const float& operator[](std::size_t i) const { return (*shared_)[i]; }
+    void assign(std::size_t count, float value) { shared_ = std::make_shared<std::vector<float>>(count, value); }
+    // (Its own already after assign: threads writing each their elements then change nothing shared.)
+    float& operator[](std::size_t i) {
+        if (!shared_) {
+            shared_ = std::make_shared<std::vector<float>>();
+        } else if (shared_.use_count() != 1) {
+            shared_ = std::make_shared<std::vector<float>>(*shared_);
+        }
+        return (*shared_)[i];
+    }
+
+private:
+    std::shared_ptr<std::vector<float>> shared_;
+};
 // A mapped param's values as its operator's ScalarField reads them (field.h), on the strands that
 // operator takes, without the multiplier (StageParams). kNumber: the param is a plain number.
 struct FieldValues {
@@ -214,7 +243,7 @@ struct FieldValues {
     bool binding = false;
     // The strands' widths (a coil's radius): they hold while no Width before the node runs.
     bool widths = false;
-    std::vector<float> values;
+    FieldFloats values;
     // Evaluated on the GPU per strand (`values` the CPU's, as read): it holds whatever moves.
     std::shared_ptr<const FieldProgram> program;
 };

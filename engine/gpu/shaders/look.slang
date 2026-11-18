@@ -149,7 +149,7 @@ float3 anyPerpendicular(float3 v) {
     return normalized(cross(v, axis));
 }
 
-// look_ops.cpp frameSeed: the normal a curve's frames start from: the root's normal (zero: none)
+// The normal a curve's frames start from: the root's normal (zero: none)
 // square to the first segment, else anyPerpendicular of the segment.
 float3 frameSeed(float3 normal, float3 first, float3 second) {
     const float3 t = second - first;
@@ -166,7 +166,7 @@ struct Frame {
     float3 t, n, b;
 };
 
-// look_ops.cpp frameBetween: the frame between sample frames a and b at f, made orthonormal again.
+// The frame between sample frames a and b at f, made orthonormal again.
 Frame frameBetween(Frame a, Frame b, float f) {
     if (f <= 0.0f) return a;
     if (f >= 1.0f) return b;
@@ -2720,6 +2720,28 @@ float3 kinkAt(float3 base, float u) {
     const float3 below = kinkKnot(base, k), above = kinkKnot(base, k + 1.0f);
     return below + (above - below) * (u - k);
 }
+// kinkAt along a strand: the knots around the last point kept (points between the same two knots
+// read them again; a point past the upper one keeps it as its lower), so a strand draws each knot
+// once, not twice a point. kinkAt's value, bit for bit.
+struct KinkKnots {
+    float k;
+    float3 below, above;
+    bool held;
+}
+float3 kinkAlong(inout KinkKnots knots, float3 base, float u) {
+    const float k = floor(u);
+    if (!knots.held || k != knots.k) {
+        if (knots.held && k == knots.k + 1.0f) {
+            knots.below = knots.above;
+        } else {
+            knots.below = kinkKnot(base, k);
+        }
+        knots.above = kinkKnot(base, k + 1.0f);
+        knots.k = k;
+        knots.held = true;
+    }
+    return knots.below + (knots.above - knots.below) * (u - k);
+}
 
 // The noise's amplitude at point i of n of strand s (the set's point p); 0 where it has none.
 float noiseAmplitude(uint s, uint i, uint n, uint p) {
@@ -2747,17 +2769,54 @@ float3 noiseAt(uint s, uint i, uint n, uint p, float3 v) {
     return v + vectorNoise(q, spacing) * a;
 }
 
+// A strand's points past its root moved by the noise: noiseAt's values, bit for bit, with what is
+// the strand's taken once (its length in world space, not summed again at every point; kinky, its
+// knots: kinkAlong).
+void noiseStrand(uint s, uint begin, uint n) {
+    const float length = gFlag.z == 0u && gFlag.y != 0u ? strandLength(begin, n) : 0.0f;
+    const float3 base = strandData(s).xyz;
+    KinkKnots knots;
+    knots.k = 0.0f;
+    knots.below = float3(0.0f, 0.0f, 0.0f);
+    knots.above = float3(0.0f, 0.0f, 0.0f);
+    knots.held = false;
+    for (uint i = 1; i < n; ++i) {
+        const float3 v = loadPoint(begin + i);
+        const float a = noiseAmplitude(s, i, n, begin + i);
+        float3 moved = v;
+        if (a != 0.0f) {
+            const float t = paramAt(i, n);
+            if (gFlag.z != 0u) {
+                moved = v + kinkAlong(knots, base, t * gValue.y) * a;
+            } else {
+                const float3 q = gFlag.y != 0 ? v * gValue.y : base + float3(0, 0, t * gValue.y);
+                const float segments = float(n - 1);
+                const float spacing = gFlag.y != 0 ? length * gValue.y / segments : gValue.y / segments;
+                moved = v + vectorNoise(q, spacing) * a;
+            }
+        }
+        storePoint(gOut, begin + i, moved);
+    }
+}
+
 // Kinky in world space: knots from the noise at the root, by the arc length (as it came).
 void noiseKinkyWorld(uint s, uint begin, uint n) {
     float3 previous = loadPoint(begin);
     const float3 base = previous * gValue.y;
     float arc = 0.0f;
+    KinkKnots knots;
+    knots.k = 0.0f;
+    knots.below = float3(0.0f, 0.0f, 0.0f);
+    knots.above = float3(0.0f, 0.0f, 0.0f);
+    knots.held = false;
     for (uint i = 1; i < n; ++i) {
         const float3 v = loadPoint(begin + i);
         arc += len3(v - previous);
         previous = v;
         const float a = noiseAmplitude(s, i, n, begin + i);
-        storePoint(gOut, begin + i, a == 0.0f ? v : v + kinkAt(base, arc * gValue.y) * a);
+        float3 moved = v;
+        if (a != 0.0f) moved = v + kinkAlong(knots, base, arc * gValue.y) * a;
+        storePoint(gOut, begin + i, moved);
     }
 }
 
@@ -2779,7 +2838,7 @@ float3 cachedNoise(inout NoiseCache c, float3 p) {
 // The CPU's NoiseCS: smooth noise in strand space through the strand's cache.
 void noiseStrandAlone(uint s, uint begin, uint n) {
     if (gFlag.z != 0u || gFlag.y != 0u || n < 2) {  // kinky or world space: as the GPU's
-        for (uint i = 1; i < n; ++i) storePoint(gOut, begin + i, noiseAt(s, i, n, begin + i, loadPoint(begin + i)));
+        noiseStrand(s, begin, n);
         return;
     }
     // Each octave's seed and its weight at the strand's spacing (vectorNoise's: octaveWeights).
@@ -2823,7 +2882,7 @@ void NoiseCS(uint3 id : SV_DispatchThreadID) {
     case cpp:
         noiseStrandAlone(s, begin, n);
     default:
-        for (uint i = 1; i < n; ++i) storePoint(gOut, begin + i, noiseAt(s, i, n, begin + i, loadPoint(begin + i)));
+        noiseStrand(s, begin, n);
     }
 }
 
@@ -3029,7 +3088,7 @@ float3 strandSlopeExact(uint begin, uint n, uint i) {
     const uint which = i == 0u ? 0u : i + 1u == n ? 2u : 1u;
     return slopeOf3Exact(loadPoint(begin + a), loadPoint(begin + a + 1), loadPoint(begin + a + 2), which);
 }
-// curl_op.cpp Curve::pointAt, exactly.
+// curvePointAt (below), exactly.
 float3 curvePointAtExact(uint begin, uint n, float t) {
     if (n == 1u) return loadPoint(begin);
     PRECISE float x = t * float(n - 1);
@@ -3156,7 +3215,7 @@ float3 strandSlope(uint begin, uint n, uint i) {
     const uint which = i == 0u ? 0u : i + 1u == n ? 2u : 1u;
     return slopeOf3(loadPoint(begin + a), loadPoint(begin + a + 1), loadPoint(begin + a + 2), which);
 }
-// curl_op.cpp Curve::pointAt: the point at share t of the strand's points, on its curve.
+// The point at share t of the strand's points, on its curve.
 float3 curvePointAt(uint begin, uint n, float t) {
     if (n == 1u) return loadPoint(begin);
     const float x = t * float(n - 1);

@@ -19,6 +19,7 @@
 #include "groomlab/parallel.h"
 #include "groomlab/portable_math.h"
 #include "groomlab/preview_core.h"
+#include "groomlab/profile.h"
 #include "incremental.h"
 #include "internal.h"
 
@@ -99,7 +100,9 @@ public:
     }
     // Each strand is pushed against the meshes alone, never against other strands: with the same
     // meshes in (the scalp's and the collider's inputs unchanged: the same surfaces, as the Scalp
-    // node's key is its surface), only the strands the input changed in are walked again.
+    // node's key is its surface), only the strands the input changed in are walked again, also
+    // when some of them hold another number of points than they did (a Resample by curvature
+    // before it, after a comb dab: StrandChanges::recounted).
     bool evaluateIncremental(const EvalContext& ctx, const std::vector<Value>& inputs, const IncrementalInputs& incremental,
                              Value* out, StrandChanges* changed) const override {
         return run(ctx, inputs, &incremental, out, changed);
@@ -136,6 +139,7 @@ private:
                 return true;
             }
         }
+        ProfilePhases phase("collide.fields");
         const auto offset = static_cast<float>(params().getDouble("offset"));
         const auto maxDepth = static_cast<float>(params().getDouble("maxDepth"));
         // Only points this close to the surface can need a push; the bound keeps far points cheap.
@@ -159,6 +163,7 @@ private:
         // look.slang's CollideCS, the GPU preview's own (look_cpu.h), on its surfaces' fields (a
         // deformed mesh through the host, its rest pose's walk; method exact or a field without a grid:
         // the mesh itself; collideRestPush): in full, or the strands the input changed in.
+        phase.next("collide.inputs");
         const bool exact = params().getString("method") == "exact";
         gpu::StageParamReader reader(params(), "");
         reader.exactHost = exact;
@@ -171,19 +176,22 @@ private:
         if (!incremental) {
             gpu::StageInputs all;
             all.collide = gpu::collideHostRoots(*surfaces, *in);
+            phase.next("collide.run");
             *result = gpu::runStage(gpu::StageKind::Collide, reader, in, nullptr, std::move(all));
             return true;
         }
-        const StrandChanges* changes = someStrandsChanged(*incremental, 0);
-        const StrandsPtr last = changes ? previousStrandsFor(*incremental, *in) : nullptr;
+        const StrandChanges* changes = someStrandsChangedOrRecounted(*incremental, 0);
+        const StrandsPtr last = changes ? previousStrandsFor(*incremental, *in, *changes) : nullptr;
         if (!last || !inputUnchanged(*incremental, 1) || !inputUnchanged(*incremental, 2)) return false;
         if (changes->none()) {  // the same strands in: the same result
             *result = last;
             *changed = *changes;
             return true;
         }
+        phase.next("collide.lastPoints");
         auto out = std::make_shared<StrandSet>(*in);
-        positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made
+        if (!pointsOfLast(*out, last, *incremental, *changes)) return false;  // the strands left alone, as they were made
+        phase.next("collide.run");
         gpu::StageInputs listed;  // (each strand's root: those listed, in that order)
         listed.collide = gpu::collideHostRoots(*surfaces, *in, &changes->strands);
         gpu::runStageOnStrands(gpu::StageKind::Collide, reader, in, changes->strands, nullptr, *out, std::move(listed));
@@ -393,51 +401,17 @@ private:
         const VectorField worldDirection(params(), "direction", scalp);
         worldDirection.validate(*in);
 
-        const StrandChanges* changes = nullptr;
-        StrandsPtr last;  // the last result, to make again only the strands the input changed in
-        if (incremental) {
-            changes = someStrandsChanged(*incremental, 0);
-            last = changes ? previousStrandsFor(*incremental, *in) : nullptr;
-            if (!last || !strength.strandLocal() || !worldDirection.strandLocal()) return false;
-            if (changes->none()) {  // the same strands in: the same result
-                *result = last;
-                *changed = *changes;
-                return true;
-            }
+        // look.slang's GravityCS, the GPU preview's own (look_cpu.h): one way down, or each strand's
+        // (its field's: unit, or zero); in full, or the strands the input changed in, into the last
+        // result's copy.
+        EngineStage engine{gpu::StageKind::Gravity, params(), scalp};
+        if (!worldDirection.isConstant()) {
+            engine.direction = [&](std::size_t s) {
+                const Vec3f down = worldDirection.at(*in, s);
+                return down.length() < 1e-6f ? Vec3f{} : down.normalized();
+            };
         }
-        // Each strand's way down (its field's): unit, or zero.
-        auto downOf = [&](std::size_t s) {
-            const Vec3f down = worldDirection.at(*in, s);
-            return down.length() < 1e-6f ? Vec3f{} : down.normalized();
-        };
-        // On the CPU engine (look.slang GravityCS): one way down, or each strand's
-        // (StageInputs::directions; `which`: those strands alone, in that order).
-        const bool perStrand = !worldDirection.isConstant();
-        auto engineRun = [&](const std::vector<std::uint32_t>* which, gpu::StageInputs* inputs) {
-            gpu::StageParamReader reader(params(), "");
-            reader.directions = perStrand;
-            if (perStrand) {
-                auto downs = std::make_shared<std::vector<Vec3f>>(which ? which->size() : in->strandCount());
-                parallelFor(0, downs->size(), [&](std::size_t k) { (*downs)[k] = downOf(which ? (*which)[k] : k); }, 4096);
-                inputs->directions = std::move(downs);
-            }
-            return reader;
-        };
-        // look.slang's GravityCS, the GPU preview's own (look_cpu.h): in full, or the strands the
-        // input changed in, into the last result's copy.
-        gpu::StageInputs stage;
-        if (!last) {
-            const gpu::StageParamReader reader = engineRun(nullptr, &stage);
-            *result = gpu::runStage(gpu::StageKind::Gravity, reader, in, scalp, std::move(stage));
-            return true;
-        }
-        auto out = std::make_shared<StrandSet>(*in);
-        positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made
-        const gpu::StageParamReader reader = engineRun(&changes->strands, &stage);
-        gpu::runStageOnStrands(gpu::StageKind::Gravity, reader, in, changes->strands, scalp, *out, std::move(stage));
-        *changed = *changes;
-        *result = StrandsPtr(out);
-        return true;
+        return rerunChanged(in, strength.strandLocal() && worldDirection.strandLocal(), incremental, result, changed, engine);
     }
 };
 
@@ -489,45 +463,11 @@ private:
         directionField.validate(*in);
         auto unit = [](Vec3f d) { return d.length() > 1e-6f ? d.normalized() : Vec3f{}; };
 
-        const StrandChanges* changes = nullptr;
-        StrandsPtr last;  // the last result, to make again only the strands the input changed in
-        if (incremental) {
-            changes = someStrandsChanged(*incremental, 0);
-            last = changes ? previousStrandsFor(*incremental, *in) : nullptr;
-            if (!last || !amount.strandLocal() || !directionField.strandLocal()) return false;
-            if (changes->none()) {  // the same strands in: the same result
-                *result = last;
-                *changed = *changes;
-                return true;
-            }
-        }
-        // On the CPU engine (look.slang DisplaceCS): one direction, or each strand's unit one
-        // (StageInputs::directions; `which`: those strands alone, in that order).
-        auto engineRun = [&](const std::vector<std::uint32_t>* which, gpu::StageInputs* inputs) {
-            gpu::StageParamReader reader(params(), "");
-            reader.directions = !directionField.isConstant();
-            if (reader.directions) {
-                auto ways = std::make_shared<std::vector<Vec3f>>(which ? which->size() : in->strandCount());
-                parallelFor(0, ways->size(), [&](std::size_t k) { (*ways)[k] = unit(directionField.at(*in, which ? (*which)[k] : k)); }, 4096);
-                inputs->directions = std::move(ways);
-            }
-            return reader;
-        };
-        // look.slang's DisplaceCS, the GPU preview's own (look_cpu.h): in full, or the strands the
-        // input changed in, into the last result's copy.
-        gpu::StageInputs stage;
-        if (!last) {
-            const gpu::StageParamReader reader = engineRun(nullptr, &stage);
-            *result = gpu::runStage(gpu::StageKind::Displace, reader, in, scalp, std::move(stage));
-            return true;
-        }
-        auto out = std::make_shared<StrandSet>(*in);
-        positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made
-        const gpu::StageParamReader reader = engineRun(&changes->strands, &stage);
-        gpu::runStageOnStrands(gpu::StageKind::Displace, reader, in, changes->strands, scalp, *out, std::move(stage));
-        *changed = *changes;
-        *result = StrandsPtr(out);
-        return true;
+        // look.slang's DisplaceCS, the GPU preview's own (look_cpu.h): one direction, or each
+        // strand's unit one; in full, or the strands the input changed in, into the last result's copy.
+        EngineStage engine{gpu::StageKind::Displace, params(), scalp};
+        if (!directionField.isConstant()) engine.direction = [&](std::size_t s) { return unit(directionField.at(*in, s)); };
+        return rerunChanged(in, amount.strandLocal() && directionField.strandLocal(), incremental, result, changed, engine);
     }
 };
 

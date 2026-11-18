@@ -11,6 +11,7 @@
 #include <functional>
 #include <limits>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <unordered_map>
@@ -196,7 +197,7 @@ std::vector<MeshPtr> collideMeshes(const Graph& graph, NodeId id, std::uint32_t*
 // (RestPoseCollision), which the GPU does not. The CPU's: the GPU runs from the node after it.
 bool collidesWithADeformedMesh(const Graph& graph, NodeId id) {
     for (const MeshPtr& mesh : collideMeshes(graph, id)) {
-        if (mesh->hasRest() && mesh->restPoints() != mesh->points()) return true;
+        if (!mesh->atRest()) return true;
     }
     return false;
 }
@@ -620,10 +621,6 @@ const double* overriddenNumber(const GraphDocument& doc, const Overrides& overri
     return v ? std::get_if<double>(v) : nullptr;
 }
 
-
-bool mappedParam(const ParamSet& params, const std::string& name) { return ownMap(params, name) || params.field(name); }
-
-
 // A vector param that is one world vector for every strand (a VectorField without an expression),
 // a drag's in place of the node's own; false for one per strand.
 bool constantVector(const GraphDocument& doc, const Overrides& overrides, NodeId id, const ParamSet& params, const std::string& name,
@@ -813,9 +810,15 @@ bool readLookParams(const GraphDocument& doc, const LookChain& chain, const Over
         }
         mergedA = a->strandCount();
     }
+    std::optional<ParamSet> evaluated;  // the last node's (a Wet's levels: its stages in a row read them once)
+    NodeId evaluatedFor = 0;
     for (const LookStage& stage : chain.stages) {
         const NodeId id = stage.node;
-        const ParamSet params = evaluatedParams(graph, id);
+        if (!evaluated || evaluatedFor != id) {
+            evaluated = evaluatedParams(graph, id);
+            evaluatedFor = id;
+        }
+        const ParamSet& params = *evaluated;
         StageParams s;
         s.stage = stage;
         if (stage.prefix) s.strands = mergedA;
@@ -1383,8 +1386,15 @@ bool readLookFields(const GraphDocument& doc, const LookChain& chain, const Scal
         const LookStage& stage = chain.stages[k];
         const NodeId id = stage.node;
         const StrandsPtr in = inputStrands(graph, id);
+        // The node's params as evaluated: made once a stage, for each of its params read (and only
+        // where one is: a Wet's later levels read none).
+        std::optional<ParamSet> evaluated;
+        auto paramsOf = [&]() -> const ParamSet& {
+            if (!evaluated) evaluated = evaluatedParams(graph, id);
+            return *evaluated;
+        };
         auto read = [&](const char* name, bool pointsAllowed, FieldValues* values) {
-            const ParamSet params = evaluatedParams(graph, id);
+            const ParamSet& params = paramsOf();
             const bool mapped = ownMap(params, name) || params.field(name);
             if (!mapped) return true;
             if (!in) {
@@ -1474,7 +1484,7 @@ bool readLookFields(const GraphDocument& doc, const LookChain& chain, const Scal
             case StageKind::Bend: ok = read("angle", false, &v[0]); break;
             case StageKind::Direction: {
                 // The first two of its mapped params (readLookParams refuses a third).
-                const std::vector<std::string> mapped = directionMapped(evaluatedParams(graph, id));
+                const std::vector<std::string> mapped = directionMapped(paramsOf());
                 for (std::size_t i = 0; i < mapped.size() && i < 2 && ok; ++i) ok = read(mapped[i].c_str(), false, &v[i]);
                 break;
             }
@@ -1522,12 +1532,14 @@ bool lookFieldsHold(const GraphDocument& doc, const LookChain& chain, const Look
         const LookStage& stage = chain.stages[k];
         // Its mapped params, then its affect (i 2: read on what it takes, mixing what it made after:
         // no point read after the ones before it moved).
+        std::optional<std::vector<std::string>> directions;  // a Direction's mapped params (found once a stage)
         for (int i = 0; i < 3; ++i) {
             const FieldValues& v = i < 2 ? fields.stages[k].field[i] : fields.stages[k].affect;
             if (!v.mode) continue;
             std::string param = i < 2 ? kNames[static_cast<int>(stage.kind)][i] : kAffectParam;
             if (i < 2 && stage.kind == StageKind::Direction) {
-                const std::vector<std::string> mapped = directionMapped(evaluatedParams(doc.graph, stage.node));
+                if (!directions) directions = directionMapped(evaluatedParams(doc.graph, stage.node));
+                const std::vector<std::string>& mapped = *directions;
                 param = static_cast<std::size_t>(i) < mapped.size() ? mapped[static_cast<std::size_t>(i)] : "?";
             }
             const std::string name = doc.nameOf(stage.node) + "." + param;
@@ -1823,6 +1835,12 @@ bool LookInputs::read(const GraphDocument& doc, const LookChain& chain, const Lo
         const LookStage& stage = chain.stages[k];
         const NodeId id = stage.node;
         const std::string name = doc.nameOf(id);
+        // The node's params as evaluated, made once a stage where it reads them.
+        std::optional<ParamSet> evaluated;
+        auto evaluatedOnce = [&]() -> const ParamSet& {
+            if (!evaluated) evaluated = evaluatedParams(graph, id);
+            return *evaluated;
+        };
         if (stage.kind == StageKind::Interpolate) {
             InterpolateState state;
             const StrandsPtr result = cachedStrands(graph, id);
@@ -1921,7 +1939,7 @@ bool LookInputs::read(const GraphDocument& doc, const LookChain& chain, const Lo
                 // a root moved over a painted scalp) bind again too.
                 std::vector<float> weights;
                 try {
-                    weights = interpolateGuideWeights(evaluatedParams(graph, id), kept, guides.get(), scalp.get());
+                    weights = interpolateGuideWeights(evaluatedOnce(), kept, guides.get(), scalp.get());
                 } catch (const GraphError&) {
                     *why = name + ": its guideWeight map cannot be read (the CPU's)";
                     return false;
@@ -2018,7 +2036,7 @@ bool LookInputs::read(const GraphDocument& doc, const LookChain& chain, const Lo
             // The guides' influence as its cached result holds it: the same binding, radius and
             // falloff (what a centerWeight reading it picked the Clump's centers by).
             rebound = rebound || memo.rebound;
-            const ParamSet own = evaluatedParams(graph, id);
+            const ParamSet& own = evaluatedOnce();
             influenceHolds = influenceHolds && !memo.rebound && p->value[0] == static_cast<float>(own.getDouble("limitDistance")) &&
                              p->ramp == own.getRamp("falloff");
         } else if (stage.kind == StageKind::Clump) {
@@ -2194,7 +2212,7 @@ bool LookInputs::read(const GraphDocument& doc, const LookChain& chain, const Lo
                     const StrandsPtr in = inputStrands(graph, id);
                     bool holds = false;
                     try {
-                        const ScalarField weight(evaluatedParams(graph, id), "centerWeight", groomScalp);
+                        const ScalarField weight(evaluatedOnce(), "centerWeight", groomScalp);
                         if (in) weight.validate(*in);
                         const FieldRead r = whatItReads(graph, chain, k, weight);
                         holds = in && !r.unknown && !r.layer && !r.positions && (!r.binding || !rebound) &&
@@ -2827,9 +2845,17 @@ bool LookInputs::readShaper(const GraphDocument& doc, const LookChain& chain, st
                     *why = name + "'s reference is other strands than it takes (the CPU's)";
                     return false;
                 }
-                for (std::size_t s = 0; s < ref->strandCount(); ++s) {
-                    out->reach = std::max(out->reach, arcLength(ref->strandPoints(s), ref->strandPointCount(s)));
+                // Its longest strand, found once for those strands (as the nodes' reach is: every plan of a drag asks).
+                if (memo.ref != ref) {
+                    std::vector<float> lengths(ref->strandCount(), 0.0f);
+                    parallelFor(0, ref->strandCount(),
+                                [&](std::size_t s) { lengths[s] = arcLength(ref->strandPoints(s), ref->strandPointCount(s)); }, 4096);
+                    float longest = 0.0f;
+                    for (const float length : lengths) longest = std::max(longest, length);
+                    memo.ref = ref;
+                    memo.refReach = longest;
                 }
+                out->reach = std::max(out->reach, memo.refReach);
                 return true;
             }
             NodeId src = 0;
@@ -2927,7 +2953,7 @@ bool LookInputs::readShaper(const GraphDocument& doc, const LookChain& chain, st
                 *why = name + ": the scalp it lays its strands over is not at hand";
                 return false;
             }
-            if (traced && traced->hasRest() && traced->restPoints() != traced->points()) {
+            if (traced && !traced->atRest()) {
                 *why = name + ": its scalp is deformed away from its rest pose (the CPU's)";
                 return false;
             }

@@ -11,6 +11,7 @@
 #include "groomlab/parallel.h"
 #include "groomlab/portable_math.h"
 #include "groomlab/preview_core.h"
+#include "groomlab/profile.h"
 #include "groomlab/random.h"
 #include "groomlab/look/look_engine_internal.h"
 #include "groomlab/look/look_stage_params.h"
@@ -42,7 +43,9 @@ std::string kernelNames(KernelSet kernels) {
     return names;
 }
 
-KernelSet kernelsOf(const LookRun& run) {
+KernelSet kernelsOf(const LookRun& run) { return kernelsOf(run.params, run.inputs); }
+
+KernelSet kernelsOf(const LookParams& params, const std::vector<StageInputs>& inputs) {
     using K = LookEngine::Kernel;
     auto bit = [](K k) { return KernelSet().set(static_cast<std::size_t>(k)); };
     KernelSet set;
@@ -50,9 +53,9 @@ KernelSet kernelsOf(const LookRun& run) {
                 K::Longest, K::Width, K::WidthPoints}) {
         set |= bit(k);
     }
-    const std::vector<StageParams>& stages = run.params.stages;
+    const std::vector<StageParams>& stages = params.stages;
     for (std::size_t k = 0; k < stages.size(); ++k) {
-        const StageInputs* in = k < run.inputs.size() ? &run.inputs[k] : nullptr;
+        const StageInputs* in = k < inputs.size() ? &inputs[k] : nullptr;
         switch (stages[k].stage.kind) {
             case StageKind::Interpolate:
                 set |= bit(K::Interpolate);
@@ -64,10 +67,7 @@ KernelSet kernelsOf(const LookRun& run) {
                 set |= bit(K::Clump) | bit(K::Centers) | bit(K::Share);
                 if (in && in->clump && in->clump->centersRun) {
                     const LookCentersRun& centers = *in->clump->centersRun;
-                    LookRun branch;
-                    branch.params = centers.params;
-                    branch.inputs = centers.inputs;
-                    set |= kernelsOf(branch);
+                    set |= kernelsOf(centers.params, centers.inputs);
                 }
                 break;
             case StageKind::Noise: set |= bit(K::Noise) | bit(K::NoisePoints); break;
@@ -107,12 +107,7 @@ KernelSet kernelsOf(const LookRun& run) {
             case StageKind::Split:
             case StageKind::Mirror: set |= bit(K::Layout); [[fallthrough]];  // (and the run up its input's)
             case StageKind::Merge:  // (copies; b's own run's kernels where the drag moves b)
-                if (in && in->merged) {
-                    LookRun branch;
-                    branch.params = in->merged->params;
-                    branch.inputs = in->merged->inputs;
-                    set |= kernelsOf(branch);
-                }
+                if (in && in->merged) set |= kernelsOf(in->merged->params, in->merged->inputs);
                 break;
             default: set.set(); break;  // (a stage this does not know: every kernel)
         }
@@ -1523,8 +1518,10 @@ void LookEngine::prepare(const LookRun& run, bool frames) {
     if (!run.fields.stages.empty() && run.fields.stages.size() != run.params.stages.size()) {
         throw std::runtime_error("GPU preview: mapped values read for another chain");
     }
+    ProfilePhases phase("look.prepare.strandData");
     putStrandData(run, frames);
     prepareParts_[0] = since(start);
+    phase.next("look.prepare.fields");
     if (run.fields.stages.empty()) {
         if (fieldLayout_.size() != run.params.stages.size() * kFieldSlots * 2 || fieldSerial_ != 0) {
             fieldLayout_.assign(run.params.stages.size() * kFieldSlots * 2, 0);
@@ -1538,6 +1535,7 @@ void LookEngine::prepare(const LookRun& run, bool frames) {
         putFields(run.fields, run.params.stages);
     }
     prepareParts_[1] = since(start);
+    phase.next("look.prepare.stageInputs");
     putStageInputs(run);
     runUploadMs_ = since(start);
     prepareParts_[2] = runUploadMs_;
@@ -1556,6 +1554,7 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
         if (need.test(static_cast<std::size_t>(k))) kernelReady(static_cast<Kernel>(k), true);
     }
     prepare(r, frames);
+    ProfilePhases phase("look.run.plan");
     const std::vector<StageParams>& stages = r.params.stages;
     const std::size_t bytes = pointCount_ * 12;
     outPoints_ = gather ? shownPoints_.size() : pointCount_;
@@ -1570,24 +1569,25 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
     // The profiles: each stage's keys (position, value, tangent each: Ramp's own tangents) and,
     // where it reads them by point index and every strand has the same count, the CPU's RampAlong
     // table.
-    ramps_.clear();
+    std::vector<float> ramps;
+    ramps.reserve(ramps_.size());
     struct RampAt {
         std::uint32_t count = 0, offset = 0, straight = 0, tableCount = 0xffffffffu, tableOffset = 0;
     };
     auto putRamp = [&](const Ramp& ramp, bool tabled) {
         RampAt at;
         at.count = static_cast<std::uint32_t>(ramp.keys.size());
-        at.offset = static_cast<std::uint32_t>(ramps_.size());
+        at.offset = static_cast<std::uint32_t>(ramps.size());
         at.straight = ramp.straight ? 1u : 0u;
         for (std::size_t i = 0; i < ramp.keys.size(); ++i) {
-            ramps_.push_back(ramp.keys[i].first);
-            ramps_.push_back(ramp.keys[i].second);
-            ramps_.push_back(ramp.tangent(i));
+            ramps.push_back(ramp.keys[i].first);
+            ramps.push_back(ramp.keys[i].second);
+            ramps.push_back(ramp.tangent(i));
         }
         if (tabled && uniformCount_ > 0) {
             at.tableCount = static_cast<std::uint32_t>(uniformCount_);
-            at.tableOffset = static_cast<std::uint32_t>(ramps_.size());
-            for (std::size_t i = 0; i < uniformCount_; ++i) ramps_.push_back(ramp(paramAt(i, uniformCount_)));
+            at.tableOffset = static_cast<std::uint32_t>(ramps.size());
+            for (std::size_t i = 0; i < uniformCount_; ++i) ramps.push_back(ramp(paramAt(i, uniformCount_)));
         }
         return at;
     };
@@ -1596,8 +1596,15 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
         rampAt[k] = putRamp(stages[k].ramp, stages[k].tabled);
         if (stages[k].hasRamp2) rampAt2[k] = putRamp(stages[k].ramp2, true);  // (RampAlong: by point index)
     }
-    if (ramps_.empty()) ramps_.push_back(0.0f);
-    write(kRamps, ramps_.data(), ramps_.size() * 4, false);
+    if (ramps.empty()) ramps.push_back(0.0f);
+    // The same profiles as the buffer holds (bit for bit: a drag of another param, a playback):
+    // nothing to write (a write may wait on what the GPU still has to do with the buffer).
+    const bool rampsHeld = has(kRamps) && ramps.size() == ramps_.size() && std::memcmp(ramps.data(), ramps_.data(), ramps.size() * 4) == 0;
+    if (!rampsHeld) {
+        ramps_.clear();  // (held only once written)
+        write(kRamps, ramps.data(), ramps.size() * 4, false);
+        ramps_ = std::move(ramps);
+    }
 
     // The dispatches: each stage reads the points the one before wrote (the base first) and writes
     // the next of two buffers, the last stage that moves points the output; Width writes widths.
@@ -2532,6 +2539,7 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
     if (view_) {
         for (StageConstants& c : slots) c.table2[3] = 1u;  // (look.slang strandBegin: a view's two words a strand)
     }
+    phase.next("look.run.dispatch");
     beginRun();
     setConstants(slots.data(), slots.size(), sizeof(StageConstants));
     stamped_.clear();

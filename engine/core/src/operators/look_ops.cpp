@@ -37,6 +37,7 @@
 #include "groomlab/point_index.h"
 #include "groomlab/portable_math.h"
 #include "groomlab/preview_core.h"
+#include "groomlab/profile.h"
 #include "groomlab/random.h"
 #include "incremental.h"
 #include "internal.h"
@@ -77,40 +78,13 @@ std::uint64_t hashChannel(const std::vector<float>& values) {
     return h;
 }
 
-// The normal a curve's rotation-minimizing frames start from (Clump's locks and ribbons): the scalp's normal at its root (`normal`; zero: none), taken square
-// to the curve's first segment, so the frames turn with the scalp and neighbours' agree.
-// anyPerpendicular of the segment, which flips where the segment crosses a diagonal of the
-// world axes (a head turning a few degrees curls in another plane), only without a normal or
-// where the segment runs along it. (look.slang frameSeed repeats this.)
-Vec3f frameSeed(const Vec3f& normal, const Vec3f& first, const Vec3f& second) {
-    const Vec3f t = second - first;
-    const float tt = t.dot(t);
-    if (tt > 0.0f) {
-        const Vec3f across = normal - t * (normal.dot(t) / tt);
-        if (across.dot(across) > 1e-8f) return across.normalized();
-    }
-    return anyPerpendicular(t);
-}
+// The number a group's key asks for (stableGroupNumbers: the one it gets unless another key of
+// the set took it first; a key on its own always).
+std::uint64_t wantedGroupNumber(std::uint64_t key) { return hash64(key ^ 0xC1D5ull) % static_cast<std::uint64_t>(kGroupNumbers); }
+
 // The scalp's normal at a root on it; zero without a scalp or for a root off it.
 Vec3f rootNormalOr(const ScalpMesh* scalp, const StrandRoot& root) {
     return scalp && scalp->contains(root) ? scalp->normal(root) : Vec3f{};
-}
-
-// The frame between a curve's sample frames `a` and `b` at f (0 to 1): tangent and normal
-// blended and made orthonormal again, so an offset held in it moves smoothly along the curve
-// rather than jumping at each sample (a lock's strands on a tight bend). (look.slang
-// frameBetween repeats this.)
-Frame frameBetween(const Frame& a, const Frame& b, float f) {
-    if (f <= 0.0f) return a;
-    if (f >= 1.0f) return b;
-    Frame out;
-    const Vec3f t = a.tangent * (1.0f - f) + b.tangent * f;
-    out.tangent = t.dot(t) > 0.0f ? t.normalized() : a.tangent;
-    Vec3f nrm = a.normal * (1.0f - f) + b.normal * f;
-    nrm = nrm - out.tangent * nrm.dot(out.tangent);
-    out.normal = nrm.dot(nrm) > 1e-12f ? nrm.normalized() : anyPerpendicular(out.tangent);
-    out.binormal = out.tangent.cross(out.normal);
-    return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -128,15 +102,6 @@ constexpr const char* kBarbIndexChannel = "barbIndex";
 using VaneKey = std::pair<std::int64_t, std::int64_t>;  // (featherId, side)
 
 bool hasVanes(const StrandSet& s) { return s.strandChannel(kFeatherChannel) && s.strandChannel(kSideChannel); }
-
-bool isShaft(const StrandSet& s, std::size_t i) {
-    const std::vector<float>* shafts = s.strandChannel(kIsShaftChannel);
-    return shafts && (*shafts)[i] > 0.5f;
-}
-
-VaneKey vaneOf(const StrandSet& s, std::size_t i) {
-    return {std::llround((*s.strandChannel(kFeatherChannel))[i]), std::llround((*s.strandChannel(kSideChannel))[i])};
-}
 
 // A center as Clump reads it: a guide, or a strand (its points read in place, never copied).
 // Its region (the regionChannel's value), feather and side: its attributes or channels of those
@@ -180,7 +145,7 @@ public:
     // vane without centers.
     std::size_t nearest(std::size_t s, const Vec3f& start) const {
         if (shafts_ && (*shafts_)[s] > 0.5f) return SIZE_MAX;  // isShaft, its channel looked up once
-        const auto it = index_.find(VaneKey{std::llround((*feathers_)[s]), std::llround((*sides_)[s])});  // vaneOf
+        const auto it = index_.find(VaneKey{std::llround((*feathers_)[s]), std::llround((*sides_)[s])});
         if (it == index_.end()) return SIZE_MAX;
         const std::size_t k = trees_[it->second].nearest(start);
         return k == SIZE_MAX ? SIZE_MAX : members_[it->second][k];
@@ -227,9 +192,12 @@ GuidesPtr vaneCenters(const StrandSet& in, ClumpSizing sizing, const ScalarField
     const std::vector<float>* barbIndex = in.strandChannel(kBarbIndexChannel);
     std::size_t barbs = 0;
     const PreviewCore core(in);  // the barbs every preview holds (preview_core.h)
+    const std::vector<float>* shafts = in.strandChannel(kIsShaftChannel);
+    const std::vector<float>* feathers = in.strandChannel(kFeatherChannel);
+    const std::vector<float>* sides = in.strandChannel(kSideChannel);
     for (std::size_t s = 0; s < in.strandCount(); ++s) {
-        if (isShaft(in, s) || in.strandPointCount(s) < 2 || !core.core(s)) continue;
-        const VaneKey key = vaneOf(in, s);
+        if ((shafts && (*shafts)[s] > 0.5f) || in.strandPointCount(s) < 2 || !core.core(s)) continue;  // (a shaft: no barb)
+        const VaneKey key{std::llround((*feathers)[s]), std::llround((*sides)[s])};
         const auto [it, fresh] = index.emplace(key, vanes.size());
         if (fresh) {
             vanes.emplace_back();
@@ -455,8 +423,8 @@ CenterPlan planClumpCenters(const StrandSet& in, const ScalpMesh* scalp, std::si
                 part.lo = part.hi = r;
                 part.any = true;
             } else {
-                part.lo = {std::min(part.lo.x, r.x), std::min(part.lo.y, r.y), std::min(part.lo.z, r.z)};
-                part.hi = {std::max(part.hi.x, r.x), std::max(part.hi.y, r.y), std::max(part.hi.z, r.z)};
+                part.lo = minPerAxis(part.lo, r);
+                part.hi = maxPerAxis(part.hi, r);
             }
         }
     }, 1);
@@ -475,8 +443,8 @@ CenterPlan planClumpCenters(const StrandSet& in, const ScalpMesh* scalp, std::si
             hi = part.hi;
             anyRoot = true;
         } else {
-            lo = {std::min(lo.x, part.lo.x), std::min(lo.y, part.lo.y), std::min(lo.z, part.lo.z)};
-            hi = {std::max(hi.x, part.hi.x), std::max(hi.y, part.hi.y), std::max(hi.z, part.hi.z)};
+            lo = minPerAxis(lo, part.lo);
+            hi = maxPerAxis(hi, part.hi);
         }
     }
     if (candidateStrands.empty()) return plan;  // no core strand with a curve
@@ -512,15 +480,19 @@ CenterPlan planClumpCenters(const StrandSet& in, const ScalpMesh* scalp, std::si
     for (std::size_t i = 0; i < n; ++i) positions[i] = rootPositions[candidateStrands[i]];
     const float spacing2 = spacing * spacing;
     const bool weighted = !weight.isConstant() || weight.maximum() < 1.0f;
-    auto letThrough = [&](std::size_t i) {  // centerWeight's chance, by the strand's ID
-        const std::size_t s = candidateStrands[i];
-        return !weighted || unitFloat(hashCombine(in.ids()[s], seed ^ 0xC3E7ull)) < weight.at(in, s);
-    };
+    // centerWeight's chance, by the strand's ID: each candidate's worked out once (weighted only).
+    std::vector<char> through;
+    if (weighted) {
+        through.resize(n);
+        parallelFor(0, n, [&](std::size_t i) {
+            const std::size_t s = candidateStrands[i];
+            through[i] = unitFloat(hashCombine(in.ids()[s], seed ^ 0xC3E7ull)) < weight.at(in, s) ? 1 : 0;
+        }, 1024);
+    }
+    auto letThrough = [&](std::size_t i) { return !weighted || through[i] != 0; };
     struct Dart {
         std::uint64_t priority;
         std::uint32_t candidate;
-        std::int32_t face = -1;  // centers on the scalp: the dart's face of the cage and its spot there
-        Vec3f at;
     };
     std::vector<Dart> darts;
     plan.onSpots = spots && onScalp;
@@ -610,14 +582,8 @@ CenterPlan planClumpCenters(const StrandSet& in, const ScalpMesh* scalp, std::si
         }
         rooted = std::make_shared<const PointIndex>(positions);
         const PointIndex& nearest = *rooted;
-        // Where strands grow: a dart within the spacing of a candidate; with centers on the scalp,
-        // spaced finer than the core strands can be, within twice their spacing (a spot farther
-        // from every one of them is bald scalp: past 2 spacings, about 1 in 300000 at random).
-        float land2 = spacing2;
-        if (plan.onSpots) {
-            const float coreSpacing = std::sqrt(static_cast<float>(area) / static_cast<float>(n));
-            land2 = std::max(spacing2, 4.0f * coreSpacing * coreSpacing);
-        }
+        // Where strands grow: a dart within the spacing of a candidate.
+        const float land2 = spacing2;
         darts.resize(first[faces]);
         parallelFor(0, faces, [&](std::size_t f) {
             const std::uint64_t faceHash = hashCombine(seedHash, f);
@@ -631,8 +597,7 @@ CenterPlan planClumpCenters(const StrandSet& in, const ScalpMesh* scalp, std::si
                 const Vec3f spot = cage->restPositionOr(root, cage->position(root));
                 const std::size_t c = nearest.nearest(spot, &d2);
                 const bool lands = c != SIZE_MAX && d2 <= land2 && letThrough(c);
-                darts[at] = {hash64(id), lands ? static_cast<std::uint32_t>(c) : std::numeric_limits<std::uint32_t>::max(),
-                             static_cast<std::int32_t>(f), spot};
+                darts[at] = {hash64(id), lands ? static_cast<std::uint32_t>(c) : std::numeric_limits<std::uint32_t>::max()};
             }
         }, 64);
     } else {
@@ -671,14 +636,11 @@ CenterPlan planClumpCenters(const StrandSet& in, const ScalpMesh* scalp, std::si
     // apart, and a distance at the very edge would go either way with the rounding of the scene's
     // scale; this keeps such a pair on one side at every scale.
     const float barred = apart * (1.0f - 1e-4f);
-    std::vector<std::int32_t> evenFaces;  // centers on the scalp: each one's face of the cage
     for (const Dart& dart : darts) {
         const std::uint32_t i = dart.candidate;
         if (i >= n) continue;  // no strands grow here
-        // Centers on the scalp: the dart's spot, however many share the strand nearest it; else
-        // that strand's root, once.
-        if (!plan.onSpots && taken[i]) continue;
-        const Vec3f& r = plan.onSpots ? dart.at : positions[i];
+        if (taken[i]) continue;  // (the strand's root, once)
+        const Vec3f& r = positions[i];
         bool tooClose = false;
         centersNear.around(r, [&](const Vec3f& q, std::uint32_t) {
             tooClose = (q - r).length() < barred;
@@ -688,11 +650,8 @@ CenterPlan planClumpCenters(const StrandSet& in, const ScalpMesh* scalp, std::si
         centersNear.add(r, i);
         taken[i] = 1;
         plan.even.push_back(candidateStrands[i]);
-        // A spot's ID: its dart's (the same while the scalp's faces and the sizing are), apart
-        // from the strands' (a hash of a 64-bit number, 0 never).
-        plan.ids.push_back(plan.onSpots ? (hashCombine(dart.priority, 0x5B07ull) | 1u) : in.ids()[candidateStrands[i]]);
+        plan.ids.push_back(in.ids()[candidateStrands[i]]);
         plan.evenAt.push_back(r);
-        if (plan.onSpots) evenFaces.push_back(dart.face);
     }
     // 3. Each center's way to its random spot: anywhere in the disc kRandomReach spacings around it
     // on the scalp (square to its rest face's normal; off one, in the ball), by a hash of its ID.
@@ -704,7 +663,7 @@ CenterPlan planClumpCenters(const StrandSet& in, const ScalpMesh* scalp, std::si
         // scalp is turned (a groom read in another up axis grows the same clumps, turned).
         Vec3f normal{}, edge{};
         if (onScalp) {
-            const std::int32_t face = plan.onSpots ? evenFaces[c] : binding.toCage(in.roots()[plan.even[c]]).face;
+            const std::int32_t face = binding.toCage(in.roots()[plan.even[c]]).face;
             const auto& tri = cage->triangles()[static_cast<std::size_t>(face)];
             const std::vector<Vec3f>& pts = cage->hasRest() ? cage->restPoints() : cage->points();
             const Vec3f a = pts[static_cast<std::size_t>(tri[0])];
@@ -1207,6 +1166,7 @@ private:
     bool run(const EvalContext& ctx, const std::vector<Value>& inputs, const IncrementalInputs* incremental, Value* result,
              StrandChanges* changed) const {
         const StrandsPtr in = requireStrands(inputs, 0, op::kClump);
+        ProfilePhases phase("clump.centers");
         const std::string from = params().getString("centersFrom");
         const bool own = from == "pick";
         if (!own && from != "inputPoints" && from != "inputCurves") {
@@ -1362,6 +1322,7 @@ private:
 
         // Nearest center by root, on the rest scalp when it has one (stable while it deforms), on
         // a refined scalp's cage (CageBinding: each strand the same center whatever the subdivision).
+        phase.next("clump.centerCurves");
         const ScalpMesh* scalp = scalpOf(ctx);
         const CageBinding binding(scalp);
         std::vector<Vec3f> roots;
@@ -1448,11 +1409,11 @@ private:
                     std::fill(curve, curve + kCenterSamples, starts[c]);
                     return;
                 }
-                const auto resampled = resampleByArcLength(in->strandPoints(axes[c]), in->strandPointCount(axes[c]), kCenterSamples);
-                std::copy(resampled.begin(), resampled.end(), curve);
+                resampleByArcLengthInto(in->strandPoints(axes[c]), in->strandPointCount(axes[c]), curve, kCenterSamples);
             }, 64);
             shareCenters(roots, curves, &axes);
         };
+        phase.next("clump.regions");
         const ScalarField volumize(params(), "volumize", scalp);
         volumize.validate(*in);
         const FeatherVanes vanes(*in, used, starts);
@@ -1562,6 +1523,26 @@ private:
             if (in->strandPointCount(s) == 0) return Vec3f(std::numeric_limits<float>::quiet_NaN(), 0.0f, 0.0f);
             return binding.stablePosition(in->roots()[s], in->strandPoints(s)[0]);
         };
+        // The core strands with points (the core's nearest: preview_core.h) and an index over their
+        // queries, made when first asked for (null: no such strand).
+        std::vector<std::uint32_t> coreRooted;
+        std::optional<PointIndex> coreNearest;
+        bool coreIndexed = false;
+        auto nearestCoreStrand = [&]() -> const PointIndex* {
+            if (!coreIndexed) {
+                coreIndexed = true;
+                for (std::size_t s = 0; s < in->strandCount(); ++s) {
+                    if (in->strandPointCount(s) == 0 || !core.core(s)) continue;
+                    coreRooted.push_back(static_cast<std::uint32_t>(s));
+                }
+                if (!coreRooted.empty()) {
+                    std::vector<Vec3f> at(coreRooted.size());
+                    parallelFor(0, at.size(), [&](std::size_t k) { at[k] = queryOf(coreRooted[k]); }, 4096);
+                    coreNearest.emplace(std::move(at));
+                }
+            }
+            return coreNearest ? &*coreNearest : nullptr;
+        };
         // The centers' regions (kept incrementally), then each region's centers and an index over them.
         if (strandRegions && !last) {
             const float none = std::numeric_limits<float>::quiet_NaN();
@@ -1585,7 +1566,8 @@ private:
                     continue;
                 }
                 if (!heldTubes.empty()) {
-                    const float number = stableGroupNumbers({static_cast<std::uint64_t>(used[c]->id)}).front();
+                    // (stableGroupNumbers of the ID on its own.)
+                    const float number = static_cast<float>(wantedGroupNumber(static_cast<std::uint64_t>(used[c]->id)));
                     if (heldTubes.count(number)) {
                         centerRegions[c] = kTubeRegionBase + number;
                         ownTube[c] = 1;
@@ -1600,18 +1582,10 @@ private:
             }
             if (!unknown.empty()) {
                 regionsFromStrands = true;
-                std::vector<std::uint32_t> rooted;
-                std::vector<Vec3f> at;
-                for (std::size_t s = 0; s < in->strandCount(); ++s) {
-                    if (in->strandPointCount(s) == 0 || !core.core(s)) continue;  // the core's nearest
-                    rooted.push_back(static_cast<std::uint32_t>(s));
-                    at.push_back(queryOf(s));
-                }
-                if (!rooted.empty()) {
-                    const PointIndex nearestStrand(std::move(at));
+                if (const PointIndex* nearestStrand = nearestCoreStrand()) {
                     parallelFor(0, unknown.size(), [&](std::size_t k) {
                         const std::size_t c = unknown[k];
-                        centerRegions[c] = (*strandRegions)[rooted[nearestStrand.nearest(roots[c])]];
+                        centerRegions[c] = (*strandRegions)[coreRooted[nearestStrand->nearest(roots[c])]];
                     });
                 }
             }
@@ -1653,17 +1627,13 @@ private:
             return channelRegions ? (*channelRegions)[s] : std::numeric_limits<float>::quiet_NaN();
         };
         if (tubeIds && picked.empty() && (tubeBases || channelRegions) && strandRegions == &tubeRegions && !roots.empty()) {
-            std::vector<std::uint32_t> rooted;
-            std::vector<Vec3f> at;
-            for (std::size_t s = 0; s < in->strandCount(); ++s) {
-                if (in->strandPointCount(s) == 0 || !core.core(s)) continue;
-                rooted.push_back(static_cast<std::uint32_t>(s));
-                at.push_back(queryOf(s));
-            }
-            if (!rooted.empty()) {
-                const PointIndex nearestStrand(std::move(at));
+            if (const PointIndex* nearestStrand = nearestCoreStrand()) {
+                std::vector<float> fallbacks(roots.size());
+                parallelFor(0, roots.size(), [&](std::size_t c) {
+                    fallbacks[c] = fallbackOf(coreRooted[nearestStrand->nearest(roots[c])]);
+                });
                 for (std::size_t c = 0; c < roots.size(); ++c) {
-                    const float r = fallbackOf(rooted[nearestStrand.nearest(roots[c])]);
+                    const float r = fallbacks[c];
                     if (r == r) fallbackCenters[r].centers.push_back(static_cast<std::uint32_t>(c));
                 }
                 for (auto& [region, group] : fallbackCenters) {
@@ -1684,6 +1654,7 @@ private:
         }
         // In full: the last full run's assignment when it was searched from these queries, centers'
         // roots and parts (a tweak of the strength, profile, flatness...), else searched again.
+        phase.next("clump.queries");
         std::shared_ptr<const std::vector<Vec3f>> queries;
         std::shared_ptr<const std::vector<std::uint32_t>> reuse;
         if (!last && !vanes.active()) {
@@ -1716,6 +1687,7 @@ private:
         }
         if (last && fromStrands && !queries) return false;
 
+        phase.next("clump.copyStrands");
         auto out = std::make_shared<StrandSet>(*in);
         std::vector<float>* clumpIds = nullptr;
         std::shared_ptr<std::vector<std::uint32_t>> assigned;
@@ -1782,6 +1754,7 @@ private:
             }
             return static_cast<std::uint32_t>(c);
         };
+        phase.next("clump.assign");
         if (last) {
             forEachListed(dirty, [&](std::size_t s) { (*assigned)[s] = centerOf(s); });
             // From the strands, the axes hold while no strand changes its center.
@@ -1837,7 +1810,8 @@ private:
         }
 
         // Round locks and ribbons: each center's cross-section frames, from the scalp's normal at
-        // its root (frameSeed), so the locks turn with the scalp.
+        // its root (look.slang frameSeed), so the locks turn with the scalp.
+        phase.next("clump.inputs");
         auto centerNormals = std::make_shared<std::vector<Vec3f>>(roots.size());
         parallelFor(0, roots.size(), [&](std::size_t c) { (*centerNormals)[c] = rootNormalOr(scalp, used[c]->root); }, 256);
         const auto curvesMade = std::make_shared<const std::vector<Vec3f>>(std::move(curves));
@@ -1879,7 +1853,9 @@ private:
             auto inputs = gpu::clumpInputs(assigned, curvesMade, normalsMade, ids, seed);
             inputs->spots = !axisOffsets.empty();  // centers on the scalp (ClumpInputs::spots)
             taken.clump = std::move(inputs);
+            phase.next("clump.run");
             gpu::runStageInto(gpu::StageKind::Clump, params(), in, scalp, *out, std::move(taken));
+            phase.next("clump.channel");
             if (clumpIds) {
                 parallelFor(0, assigned->size(), [&](std::size_t s) {
                     const std::uint32_t c = (*assigned)[s];
@@ -1898,6 +1874,7 @@ private:
             }
             *changed = StrandChanges::listed(std::move(dirty));
         }
+        phase.next("clump.keep");
         keep();
         *result = StrandsPtr(out);
         return true;
@@ -1992,6 +1969,9 @@ public:
         const std::vector<std::string> layers = channels ? in->pointChannelNames() : std::vector<std::string>{};
         // Guides of the core strands (preview_core.h): the same guides at every preview density.
         const PreviewCore core(*in);
+        std::vector<const std::vector<float>*> strandValues, pointValues;  // the channels of `names` and `layers`
+        for (const std::string& name : names) strandValues.push_back(in->strandChannel(name));
+        for (const std::string& name : layers) pointValues.push_back(in->pointChannel(name));
         for (std::size_t s = 0; s < in->strandCount(); ++s) {
             if (!core.core(s)) continue;
             if (fraction < 1.0f && unitFloat(hashCombine(in->ids()[s], seed ^ 0x70C0)) >= fraction) continue;
@@ -1999,11 +1979,11 @@ public:
             const std::size_t begin = in->strandBegin(s), n = in->strandPointCount(s);
             Guide& g = out->add(in->ids()[s], std::vector<Vec3f>(pts, pts + n));
             g.root = in->roots()[s];
-            for (const std::string& name : names) g.attributes[name] = (*in->strandChannel(name))[s];
+            for (std::size_t k = 0; k < names.size(); ++k) g.attributes[names[k]] = (*strandValues[k])[s];
             // The guide has the strand's points: a point channel is its layer as it is.
-            for (const std::string& name : layers) {
-                const std::vector<float>& values = *in->pointChannel(name);
-                g.pointAttributes[name].assign(values.begin() + static_cast<std::ptrdiff_t>(begin),
+            for (std::size_t k = 0; k < layers.size(); ++k) {
+                const std::vector<float>& values = *pointValues[k];
+                g.pointAttributes[layers[k]].assign(values.begin() + static_cast<std::ptrdiff_t>(begin),
                                                values.begin() + static_cast<std::ptrdiff_t>(begin + n));
             }
         }
@@ -2077,8 +2057,9 @@ private:
         const StrandChanges* changes = nullptr;
         StrandsPtr last;  // the last result, to make again only the strands the input changed in
         if (incremental) {
-            changes = someStrandsChanged(*incremental, 0);
-            last = changes ? previousStrandsFor(*incremental, *in) : nullptr;
+            // (Some strands recounted before it: the last result's points laid out as the input is now.)
+            changes = someStrandsChangedOrRecounted(*incremental, 0);
+            last = changes ? previousStrandsFor(*incremental, *in, *changes) : nullptr;
             if (!last || !longest_.local(last, {&amplitudeField, &fractionField})) return false;
             if (changes->none()) {  // the same strands in: the same result
                 *result = last;
@@ -2105,7 +2086,7 @@ private:
             out = gpu::runStage(gpu::StageKind::Noise, params(), in, scalpOf(ctx));
         } else {
             auto made = std::make_shared<StrandSet>(*in);
-            positionsOfLast(*made, last, *incremental);  // the strands left alone, as they were made
+            if (!pointsOfLast(*made, last, *incremental, *changes)) return false;  // the strands left alone, as they were made
             gpu::runStageOnStrands(gpu::StageKind::Noise, params(), in, changes->strands, scalpOf(ctx), *made);
             *changed = *changes;
             out = made;
@@ -3002,14 +2983,15 @@ void offsetGroupIds(const StrandSet& a, StrandSet& b) {
             if (core.core(s)) top = std::max(top, std::floor((*mine)[s]));
         }
         if (top < 0.0f) continue;
+        const auto base = static_cast<float>(groupNumberBase(static_cast<std::int64_t>(top)));
         for (float& v : *b.mutableStrandChannel(name)) {
-            if (v >= 0.0f) v += static_cast<float>(groupNumberBase(static_cast<std::int64_t>(top)));
+            if (v >= 0.0f) v += base;
         }
     }
 }
 std::vector<float> stableGroupNumbers(const std::vector<std::uint64_t>& keys) {
     std::vector<std::tuple<std::uint64_t, std::uint64_t, std::size_t>> order(keys.size());
-    for (std::size_t k = 0; k < keys.size(); ++k) order[k] = {hash64(keys[k] ^ 0xC1D5ull) % static_cast<std::uint64_t>(kGroupNumbers), keys[k], k};
+    for (std::size_t k = 0; k < keys.size(); ++k) order[k] = {wantedGroupNumber(keys[k]), keys[k], k};
     std::sort(order.begin(), order.end());
     std::vector<float> numbers(keys.size());
     std::unordered_set<std::uint64_t> used;

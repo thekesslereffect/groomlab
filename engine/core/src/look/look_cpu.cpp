@@ -9,6 +9,7 @@
 
 #include "groomlab/graph.h"
 #include "groomlab/parallel.h"
+#include "groomlab/profile.h"
 
 namespace groomlab::gpu {
 
@@ -59,10 +60,32 @@ LookEngine& cpuEngineOfThread() {
 
 namespace {
 
+// A phase of stage `kind`'s run on the CPU engine as the profiler counts it (profile.h):
+// "look.<stage>.<phase>".
+class StagePhase {
+public:
+    StagePhase(StageKind kind, const char* phase) {
+        if (!profileEnabled()) return;
+        label_ = std::string("look.") + stageName(kind) + "." + phase;
+        start_ = std::chrono::steady_clock::now();
+    }
+    ~StagePhase() {
+        if (label_.empty()) return;
+        profileAdd(label_.c_str(), std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start_).count());
+    }
+    StagePhase(const StagePhase&) = delete;
+    StagePhase& operator=(const StagePhase&) = delete;
+
+private:
+    std::string label_;
+    std::chrono::steady_clock::time_point start_{};
+};
+
 // The stage `kind` of an operator's run: its params, its inputs and its mapped params' values on `in`
 // (the strands `which` alone: a view's), or the node's error where the engine cannot take them.
 LookRun stageRun(StageKind kind, const StageParamReader& reader, const StrandsPtr& in, const ScalpMesh* scalp, StageInputs inputs,
                  const std::vector<std::uint32_t>* which) {
+    const StagePhase phase(kind, "params");
     const ParamSet& params = reader.params();
     LookRun run;
     StageParams& s = run.params.stages.emplace_back();
@@ -102,6 +125,7 @@ LookRun stageRun(StageKind kind, const StageParamReader& reader, const StrandsPt
 
 // `run` on `engine` into `targets`, the engine's errors the node's.
 void runOn(LookEngine& engine, StageKind kind, const LookRun& run, const LookTargets& targets) {
+    const StagePhase phase(kind, "run");
     try {
         engine.run(run, false, targets);
     } catch (const GraphError&) {
@@ -125,7 +149,11 @@ StrandsPtr runStage(StageKind kind, const ParamSet& params, const StrandsPtr& in
 
 StrandsPtr runStage(StageKind kind, const StageParamReader& reader, const StrandsPtr& in, const ScalpMesh* scalp, StageInputs inputs) {
     if (!in || in->empty()) return in;
-    auto out = std::make_shared<StrandSet>(*in);
+    std::shared_ptr<StrandSet> out;
+    {
+        const StagePhase phase(kind, "copyStrands");
+        out = std::make_shared<StrandSet>(*in);
+    }
     runStageInto(kind, reader, in, scalp, *out, std::move(inputs));
     return out;
 }
@@ -165,7 +193,10 @@ void runStageInto(StageKind kind, const StageParamReader& reader, const StrandsP
     const LookRun run = stageRun(kind, reader, in, scalp, std::move(inputs), nullptr);
     // (Bend's, Direction's, Transform's and Displace's root frames: the engine's own, LookEngine::putStageInputs.)
     LookEngine& engine = cpuEngineOfThread();
-    engine.setBase(in, scalp);
+    {
+        const StagePhase phase(kind, "setBase");
+        engine.setBase(in, scalp);
+    }
     LookTargets targets;
     targets.baseAsOutput = true;
     if (kind == StageKind::Width) {

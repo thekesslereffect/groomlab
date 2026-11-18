@@ -64,8 +64,6 @@ private:
     std::string name_;
 };
 
-// Whether readStageParams reads a stage of `kind`'s params.
-bool readsStageParams(StageKind kind);
 // A stage of `kind`'s params (Interpolate (its samples, flag[0], the caller's), Length, Clump (not a Wet's level), Noise, Curl, Width, Part, Gravity, Flyaway, Wind, Collide, the shapers working on
 // each strand alone, Smooth, BlendNeighbors, Tangle, Flow, RestoreLength (its reference's place the
 // preview's: flag[1]), MeshCut) into *s: its numbers, flags and ramps, not its stage, seed or mask (the reader's).

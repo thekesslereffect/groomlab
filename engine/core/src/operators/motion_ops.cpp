@@ -419,27 +419,12 @@ private:
                 return true;
             }
         }
-        const std::vector<double> weights =
-            springLagWeights(static_cast<int>(frames), history->step, params().getDouble("frequency"),
-                             params().getDouble("damping"));
-        const auto& tris = scalp.triangles();
-
-        // Per vertex, the lag of a point riding it; per face, how its turning drags a point hung off
-        // it (jiggleVertexLag, jiggleFaceTurn).
-        auto lagOfVertex = [&](std::size_t v) { return jiggleVertexLag(past, now, weights, v); };
-        auto turnOfFace = [&](std::size_t f, Mat3* turn) { return jiggleFaceTurn(past, now, weights, tris[f], turn); };
-
-        // Worked out once for the faces and vertices strands grow from, in full; each strand made
-        // again works out its own.
-        JiggleLags lags;
-        std::vector<Vec3f>& vertexLag = lags.vertexLag;
-        std::vector<Mat3>& faceTurn = lags.faceTurn;
-        std::vector<char>& faceTurned = lags.faceTurned;
         // The lags of the faces and vertices the strands it runs grow from (all, or those the input
-        // changed in), then look.slang's JiggleCS, the GPU preview's own (look_cpu.h), on them: in
-        // full, or on a view of those strands.
+        // changed in: jiggleLags, per vertex the lag of a point riding it, per face how its turning
+        // drags a point hung off it), then look.slang's JiggleCS, the GPU preview's own (look_cpu.h),
+        // on them: in full, or on a view of those strands.
         const std::vector<std::uint32_t>* which = last ? &changes->strands : nullptr;
-        std::vector<char> usedFace(tris.size(), 0), usedVertex(now.size(), 0);
+        std::vector<char> usedFace(scalp.triangleCount(), 0);
         auto use = [&](std::size_t s) {
             const StrandRoot& root = in->roots()[s];
             if (scalp.contains(root)) usedFace[static_cast<std::size_t>(root.face)] = 1;
@@ -449,25 +434,8 @@ private:
         } else {
             for (std::size_t s = 0; s < in->strandCount(); ++s) use(s);
         }
-        std::vector<std::size_t> faces;
-        for (std::size_t f = 0; f < tris.size(); ++f) {
-            if (!usedFace[f]) continue;
-            faces.push_back(f);
-            for (const std::int32_t v : tris[f]) usedVertex[static_cast<std::size_t>(v)] = 1;
-        }
-        std::vector<std::size_t> vertices;
-        for (std::size_t v = 0; v < now.size(); ++v) {
-            if (usedVertex[v]) vertices.push_back(v);
-        }
-        vertexLag.assign(now.size(), Vec3f{});
-        parallelFor(0, vertices.size(), [&](std::size_t i) { vertexLag[vertices[i]] = lagOfVertex(vertices[i]); });
-        faceTurn.assign(tris.size(), Mat3{});
-        faceTurned.assign(tris.size(), 0);
-        parallelFor(0, faces.size(), [&](std::size_t i) {
-            const std::size_t f = faces[i];
-            faceTurned[f] = turnOfFace(f, &faceTurn[f]) ? 1 : 0;
-        });
-        lags.frames = frames;
+        JiggleLags lags;
+        jiggleLags(params(), JiggleState{scalpPtr, history, nowFrame, fps}, usedFace, &lags);
         gpu::StageInputs lagged;
         lagged.jiggle = gpu::jiggleInputs(*in, scalp, lags, which);
         if (!last) {

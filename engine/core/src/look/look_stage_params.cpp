@@ -37,38 +37,6 @@ bool StageParamReader::mappable(const std::string& param, float* value, std::str
     return true;
 }
 
-bool readsStageParams(StageKind kind) {
-    switch (kind) {
-        case StageKind::Interpolate:
-        case StageKind::Length:
-        case StageKind::Clump:
-        case StageKind::Noise:
-        case StageKind::Curl:
-        case StageKind::Width:
-        case StageKind::Part:
-        case StageKind::Gravity:
-        case StageKind::Flyaway:
-        case StageKind::Collide:
-        case StageKind::Wind:
-        case StageKind::Bend:
-        case StageKind::Direction:
-        case StageKind::Transform:
-        case StageKind::Displace:
-        case StageKind::Twist:
-        case StageKind::Smooth:
-        case StageKind::BlendNeighbors:
-        case StageKind::Tangle:
-        case StageKind::Flow:
-        case StageKind::SelfCollide:
-        case StageKind::Static:
-        case StageKind::RestoreLength:
-        case StageKind::MeshCut:
-        case StageKind::Blend:
-        case StageKind::Jiggle: return true;
-        default: return false;
-    }
-}
-
 bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, std::string* why) {
     const ParamSet& params = r.params();
     auto number = [&](const char* name) { return r.number(name); };
@@ -728,8 +696,8 @@ std::shared_ptr<CollideInputs> collideInputs(const std::vector<MeshPtr>& meshes,
         const MeshPtr& mesh = meshes[m];
         Vec3f lo = mesh->points().empty() ? Vec3f{} : mesh->points().front(), hi = lo;
         for (const Vec3f& q : mesh->points()) {
-            lo = {std::min(lo.x, q.x), std::min(lo.y, q.y), std::min(lo.z, q.z)};
-            hi = {std::max(hi.x, q.x), std::max(hi.y, q.y), std::max(hi.z, q.z)};
+            lo = minPerAxis(lo, q);
+            hi = maxPerAxis(hi, q);
         }
         made->boxes.push_back(lo);
         made->boxes.push_back(hi);
