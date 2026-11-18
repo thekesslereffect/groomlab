@@ -106,13 +106,6 @@ struct HierarchyGuide {
     // of the root's and the hair rooted there is its. Unset for any other guide. Not stored.
     Vec3f rootFoot;
     bool rootFootSet = false;
-    // A slice of a drawn root's tube: the path its tube takes, in its parent's (tube) sections all the
-    // way to the root, its root section its part of the parent's, so it lies exactly in its part of
-    // the parent's tube; `points` (the guide) is the same with its root on the scalp, joined to it
-    // over the tube's join. Its tube is drawn, its hair filled and its own slices placed along this.
-    // Empty for any other guide (its tube along `points`: tubePath). Not stored.
-    std::vector<Vec3f> tubePoints;
-    const std::vector<Vec3f>& tubePath() const { return tubePoints.size() == points.size() ? tubePoints : points; }
     // Such a tube's root loop on the scalp: each point of its shape's outline (tubeOutline) on its
     // footprint, taken onto the scalp along the footprint's normal, from the last evaluate on a
     // scalp (empty before, and for any other tube). What its drawn tube starts from, so it sits on

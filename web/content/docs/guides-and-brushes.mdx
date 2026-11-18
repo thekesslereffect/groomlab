@@ -349,7 +349,8 @@ Draw one big root, then let GroomLab fill it with smaller ones. One row under **
 it: **Subdivide**, the paint brush, the **Multiplier** and **Apply**.
 
 **Subdivide** cuts the selected roots (**Select root**) into Voronoi cells. Each cell becomes a
-root tube of its own at level 1. Neighbouring cells share their CVs, so they seal with no gap, and
+root tube of its own in the tube hierarchy's next level (subdivide a level 1 root and its cells are
+level 2), following the root you cut: its guide and tube, still there at level 1, shape them all. Neighbouring cells share their CVs, so they seal with no gap, and
 the cells along the edge keep the old root's CVs, so they stay sealed to the roots around it.
 Each cell is a slice of the old tube: its root is its part of the old root, its guide starts in
 its middle and runs inside the old tube, and its sections are the old tube's scaled to it and
@@ -394,8 +395,9 @@ it from there up, never the root itself. **+** splits each
 selected tube (or, with none selected, every tube of the base group) into two tubes side by side
 across its longer side, sharing its root shape, in the next level's group (`<base>_L2`,
 `<base>_L3`, ... up to level 9); pressing it again splits those in two (2 to 4, and on).
-The numbered buttons show one level at a time (the other levels' groups hidden) and pick its group,
-so the Tube tool and the brushes edit that level's tubes. **Lock view**, under them (off at
+The numbered buttons show one level's guides at a time (the other levels' guides hidden; every
+level's tubes stay drawn, as the Visibility switches say) and pick its group, so the Tube tool and
+the brushes edit that level's tubes. **Lock view**, under them (off at
 first), keeps the tubes of the level shown when you switch it on in view while you pick other
 levels to work on, whose guides show instead: step down to level 1 and comb its guides while level
 5's tubes stay in view and follow. It only locks the levels'

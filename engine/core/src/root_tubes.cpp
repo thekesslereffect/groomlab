@@ -379,7 +379,11 @@ std::pair<V, V> patchApex(const ScalpMesh& scalp, const Pts& outline) {
     // The side holding less of the scalp's area (each triangle by its middle).
     double side[2] = {0.0, 0.0};
     const std::vector<Vec3f>& pts = scalp.points();
-    for (const ScalpMesh::Triangle& t : scalp.triangles()) {
+    // (A spread of at most about 4000 triangles: which side holds less, not how much.)
+    const std::vector<ScalpMesh::Triangle>& tris = scalp.triangles();
+    const std::size_t step = std::max<std::size_t>(1, tris.size() / 4000);
+    for (std::size_t k = 0; k < tris.size(); k += step) {
+        const ScalpMesh::Triangle& t = tris[k];
         const V a(pts[static_cast<std::size_t>(t[0])]), b(pts[static_cast<std::size_t>(t[1])]), d(pts[static_cast<std::size_t>(t[2])]);
         const double area = 0.5 * (b - a).cross(d - a).length();
         side[((a + b + d) * (1.0 / 3.0) - c).dot(n) > 0.0 ? 0 : 1] += area;
@@ -387,7 +391,8 @@ std::pair<V, V> patchApex(const ScalpMesh& scalp, const Pts& outline) {
     if (side[1] < side[0]) n = n * -1.0;
     // Its outermost point that way, through the centroid (the first hit coming in from outside).
     double extent = reach;
-    for (const Vec3f& p : pts) extent = std::max(extent, dist(c, V(p)));
+    for (std::size_t k = 0; k < pts.size(); k += std::max<std::size_t>(1, pts.size() / 4000)) extent = std::max(extent, dist(c, V(pts[k])));
+    extent *= 1.5;  // (sampled: room to spare)
     SurfacePoint hit;
     float d = 0.0f;
     const V from = c + n * (2.0 * extent + 1e-3);
@@ -845,7 +850,9 @@ Pts checkedOutline(const std::vector<Vec3f>& outline) {
 }
 
 bool isRootTubeGuide(const HierarchyGuide& g) {
-    return !g.isChild() && g.tube.custom && g.tube.custom->name.rfind(kOwnedTubeShapePrefix, 0) == 0;
+    // A drawn root, or a cell of a subdivided one (a child in the level below, its CVs its own: it
+    // is picked, edited and cut again as a root). A slice of the hierarchy (+) is not.
+    return (!g.isChild() || g.rootOutline.size() >= 3) && g.tube.custom && g.tube.custom->name.rfind(kOwnedTubeShapePrefix, 0) == 0;
 }
 
 }  // namespace
@@ -983,7 +990,7 @@ std::vector<GuideId> rootTubesOf(const GuideHierarchy& h, const std::vector<Guid
     } else {
         for (const GuideId id : guides) {
             const HierarchyGuide* g = h.guide(id);
-            while (g && g->isChild()) g = h.guide(g->parent);
+            while (g && g->isChild() && !isRootTubeGuide(*g)) g = h.guide(g->parent);  // (up to a root, or a cell)
             if (g && isRootTubeGuide(*g)) roots.insert(g->id);
         }
     }
@@ -1010,8 +1017,8 @@ std::vector<SliceFitSample> sliceFit(const GuideHierarchy& h, GuideId slice, int
     const HierarchyGuide* g = h.guide(slice);
     const HierarchyGuide* p = within != kNoGuide ? h.guide(within) : g && g->isChild() ? h.guide(g->parent) : nullptr;
     if (!g || !p || g->points.size() < 2 || p->points.size() < 2) throw std::invalid_argument("guide " + std::to_string(slice) + " is not a slice");
-    TubeSpine own(g->tubePath().data(), g->points.size(), g->frameUp, g->tube, h.scale());
-    TubeSpine parent(p->tubePath().data(), p->points.size(), p->frameUp, p->tube, h.scale());
+    TubeSpine own(g->points.data(), g->points.size(), g->frameUp, g->tube, h.scale());
+    TubeSpine parent(p->points.data(), p->points.size(), p->frameUp, p->tube, h.scale());
     if (p->rootNormal.length() > 0.5f && p->rootAcross.length() > 0.5f) parent.setRootOnScalp(p->rootNormal, p->rootAcross);
     if (g->rootNormal.length() > 0.5f && g->rootAcross.length() > 0.5f) own.setRootOnScalp(g->rootNormal, g->rootAcross);
     const std::vector<SectionPoint>& outline = tubeOutline(g->tube);

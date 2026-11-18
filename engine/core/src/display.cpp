@@ -1090,6 +1090,15 @@ std::size_t appendGuideCurve(DisplayGeometry& batch, const std::vector<Vec3f>& p
     return smooth.size();
 }
 
+bool tubeDrawn(const std::string& view, const std::string& name, bool hidden) {
+    if (view.empty()) return !hidden;
+    if (view.rfind("show:", 0) == 0) {
+        const std::string list = " " + view.substr(5) + " ";
+        return list.find(" " + name + " ") != std::string::npos || !hidden;
+    }
+    return name == view;
+}
+
 std::vector<const HierarchyGuide*> activeTubeGuides(const GuideHierarchy& hierarchy, const std::string& hiddenGuideGroups,
                                                     const std::string& freeze, const std::string& tubeViewGroup) {
     const std::set<std::string> hidden = parseHiddenGuideGroups(hiddenGuideGroups);
@@ -1097,12 +1106,10 @@ std::vector<const HierarchyGuide*> activeTubeGuides(const GuideHierarchy& hierar
     std::vector<const HierarchyGuide*> out;
     for (const HierarchyGuide& g : hierarchy.guides()) {
         if (g.points.size() < 2) continue;
-        if (!tubeViewGroup.empty()) {  // (Lock view: that group's tubes alone, hidden or not)
+        {
             const GuideGroup* grp = hierarchy.group(g.group);
-            if (!grp || grp->name != tubeViewGroup) continue;
-        } else if (!hidden.empty()) {
-            const GuideGroup* grp = hierarchy.group(g.group);
-            if (grp && hidden.count(grp->name)) continue;
+            const std::string name = grp ? grp->name : std::string();
+            if (!tubeDrawn(tubeViewGroup, name, grp && hidden.count(name) > 0)) continue;
         }
         float frozen = 0.0f;
         if (layers && hierarchy.effectiveAttribute(g, freeze, &frozen) && frozen >= 0.5f) continue;
@@ -1147,7 +1154,7 @@ void appendTubeWire(std::vector<Vec3f>& out, const HierarchyGuide& g, float scal
         for (std::size_t s = 0; s < kAround; ++s) ring[s] = own.perimeterPoint(static_cast<float>(s) / static_cast<float>(kAround));
         cornerSlots.clear();
     }
-    const TubeSpine spine(g.tubePath().data(), n, g.frameUp, g.tube, scale);  // (a slice: along its tube's path)
+    const TubeSpine spine(g.points.data(), n, g.frameUp, g.tube, scale);
     const std::vector<Vec3f>* loop = g.tube.blended() ? nullptr : rootLoop(g, outline);
     // Ring point s at sample i (index[s]: its outline point): from its root loop on the scalp at the
     // root, joining the tube's sections over its first few root widths (as its hair joins them:
@@ -1228,7 +1235,7 @@ std::size_t appendTubeSurface(DisplayGeometry& batch, const HierarchyGuide& g, f
     }
     // Any other: the tube's sections (tube.h) along the guide, its shape's outline (every other
     // point) at each ring, turned, flattened and sized as the sections say.
-    const TubeSpine spine = round ? TubeSpine() : TubeSpine(g.tubePath().data(), n, g.frameUp, g.tube, scale);
+    const TubeSpine spine = round ? TubeSpine() : TubeSpine(g.points.data(), n, g.frameUp, g.tube, scale);
     const std::vector<Vec3f>* loop = round ? nullptr : rootLoop(g, outline);
     const float join = round || spine.empty() ? 1.0f : spine.rootJoin();  // (the root loop joining the sections)
     // Several profiles (tube.h): each outline point carried along them.
@@ -2382,7 +2389,7 @@ void DisplayBuilder::buildGuides(const DisplayInputs& in, const DisplaySettings&
             if (level < 0 || level >= kMaxDrawnGuideLevels) continue;
             // (Lock view: the tubes of that group alone, whatever guides show.)
             const GuideGroup* viewed = s.tubeViewGroup.empty() ? nullptr : hierarchy->group(g.group);
-            const bool tubeShown = s.tubeViewGroup.empty() ? !hiddenGuide(g) : viewed && viewed->name == s.tubeViewGroup;
+            const bool tubeShown = s.tubeViewGroup.empty() ? !hiddenGuide(g) : tubeDrawn(s.tubeViewGroup, viewed ? viewed->name : std::string(), hiddenGuide(g));
             if (s.tubes && tubeShown) appendTubeSurface(tubes, g, hierarchy->scale());
             if (hiddenGuide(g)) continue;
             if (!s.guides || g.points.size() < 2) continue;

@@ -294,10 +294,14 @@ struct TubeDisplayOptions {
     // on top of its color (its root tube's with Colors), so a level's tubes tell apart.
     bool levelColors = false;
     std::string hiddenGuideGroups;
-    // The tube hierarchy's Lock view: a guide group's name whose tubes alone draw (shown or hidden as
-    // guides); the guides draw as hiddenGuideGroups says. "": tubes as their guides.
+    // Which tubes draw, apart from which guides do (the tube hierarchy's levels): "" the tubes as
+    // their guides; "show:<group> <group> ..." those groups' tubes whether their guides show or not
+    // (stepping through the levels: every level's tubes stay, the picked level's guides alone), the
+    // others as their guides; any other a group's name, whose tubes alone draw (Lock view).
     std::string tubeViewGroup;
 };
+// Whether a guide of group `name` (hidden: its guides hidden) draws its tube under `tubeViewGroup`.
+bool tubeDrawn(const std::string& tubeViewGroup, const std::string& name, bool hidden);
 struct TubeDisplay {
     // Line lists (a segment's two ends a pair). `wires` carries colors (r g b a per vertex) when
     // they vary (Colors, a solo), else draw it in wireColor; `selectedWires` warm, opaque, thicker.

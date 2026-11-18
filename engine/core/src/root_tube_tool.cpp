@@ -958,11 +958,21 @@ void RootTubeTool::laid(const ScalpMesh& scalp, const std::vector<Vec3f>& cvs, b
     if (!loop && n > 0) edge.push_back(on(cvs.back()));
     std::vector<Vec3f> tris;
     if (filled && loop) {
-        const Vec3f c = on(middle);
+        // From the root's apex (rootOutlineCenter: the patch's convex side), its rings over a dome
+        // about it (from a center `reach` under the apex), so a root drawn round much of a head
+        // fills its top, not straight through the head onto the face.
+        const ScalpPointNormal apex = rootOutlineCenter(scalp, cvs);
+        const Vec3f c = apex.point;
+        const Vec3f o = c - apex.normal.normalized() * reach;
         std::vector<std::vector<Vec3f>> rings{std::vector<Vec3f>(edge.size(), c)};
         for (const float t : {1.0f / 3.0f, 2.0f / 3.0f}) {
             std::vector<Vec3f> ring;
-            for (const Vec3f& q : edge) ring.push_back(on(c + (q - c) * t));
+            for (const Vec3f& q : edge) {
+                const Vec3f a = c - o, b = q - o;
+                const Vec3f way = a * (1.0f - t) + b * t;
+                const float len = a.length() * (1.0f - t) + b.length() * t;
+                ring.push_back(on(way.length() > 1e-9f ? o + way.normalized() * len : c + (q - c) * t));
+            }
             rings.push_back(std::move(ring));
         }
         rings.push_back(edge);

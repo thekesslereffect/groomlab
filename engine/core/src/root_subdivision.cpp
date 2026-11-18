@@ -263,7 +263,9 @@ struct Plane {
 };
 
 Plane planeOf(const ScalpMesh& scalp, const std::vector<Vec3f>& outline) {
-    const ScalpPointNormal at = scalpPointNormal(scalp, outlineCentroid(outline));
+    // (At the root's apex, square to its patch's way out: rootOutlineCenter. Not the scalp point
+    // nearest the outline's centroid: a root drawn round much of a head would be cut on the face.)
+    const ScalpPointNormal at = rootOutlineCenter(scalp, outline);
     Plane pl;
     pl.c = at.point;
     pl.n = at.normal.normalized();
@@ -494,6 +496,26 @@ std::vector<std::vector<Vec3f>> liftCells(const ScalpMesh& scalp, const Cut& cut
     for (const auto& [p, n] : uses) {
         if (n > 1 || lifted.count(p)) keep.insert(p);
     }
+    // A corner on the drawn border lies where the root's (and its neighbours') loop draws that edge:
+    // its place along its CVs' edge, between their CVs, taken onto the scalp (GuideHierarchy's
+    // layRootRing), so the cells' border seals to the roots around; any other lifted along the
+    // plane's normal.
+    double size = 0.0;
+    for (const P& q : cut.outline) size = std::max(size, dist(q, cut.outline.front()));
+    auto onBorderOrLift = [&](const P& p) {
+        for (std::size_t i = 0; i < cut.outline.size(); ++i) {
+            const std::size_t j = (i + 1) % cut.outline.size();
+            const P a = cut.outline[i], d = cut.outline[j] - a;
+            const double span = d.x * d.x + d.y * d.y;
+            if (!(span > 0.0)) continue;
+            const double f = std::clamp(((p.x - a.x) * d.x + (p.y - a.y) * d.y) / span, 0.0, 1.0);
+            if (dist(p, a + d * f) <= 1e-6 * std::max(size, 1e-9)) {
+                const Vec3f a3 = cut.outline3[i], b3 = cut.outline3[j];
+                return scalp.closestPoint(a3 + (b3 - a3) * static_cast<float>(f)).position;
+            }
+        }
+        return lift(scalp, cut.plane, p).position;
+    };
     std::vector<std::vector<Vec3f>> out;
     for (const auto& cell : cells) {
         std::vector<Vec3f> cvs;
@@ -501,7 +523,7 @@ std::vector<std::vector<Vec3f>> liftCells(const ScalpMesh& scalp, const Cut& cut
             for (const P& p : capped(cell, keep)) {
                 const auto key = std::make_pair(p.x, p.y);
                 auto it = lifted.find(key);
-                if (it == lifted.end()) it = lifted.emplace(key, lift(scalp, cut.plane, p).position).first;
+                if (it == lifted.end()) it = lifted.emplace(key, onBorderOrLift(p)).first;
                 cvs.push_back(it->second);
             }
         }
@@ -704,15 +726,41 @@ void cutRoot(GuideHierarchy& h, const ScalpMesh& scalp, GuideId guide, const Roo
     const std::vector<std::vector<Vec3f>> cells = liftCells(scalp, cut, voronoiCells(cut.outline, sites, kMergeCorners * std::min(s0, s1)));
 
     // The old guide, its tube and the hierarchy under it, as they were.
-    const TubeSource source = tubeSourceOf(h, scalp, guide);
+    TubeSource source = tubeSourceOf(h, scalp, guide);
     const TubeSpine spine = sourceSpine(source, h.scale());
     const bool destructive = !g->rollOffsets.empty();
     std::map<int, std::vector<Source>> sources;
+    std::vector<GuideId> below;
     for (const auto& [level, ids] : levelsUnder(h, guide)) {
         for (const GuideId k : ids) {
             if (const HierarchyGuide* kid = h.guide(k)) sources[level].push_back(sourceOf(scalp, *kid));
+            below.push_back(k);
         }
     }
+    // The cells go in the tube hierarchy's level below the root's, children of the root (kept: its
+    // guide and tube still shape them all): <base>_L<n+1>, made under the root's group if missing.
+    const TubeLevels levels = tubeLevels(h, {guide});
+    int at = 1;
+    if (const GuideGroup* own = h.group(g->group)) {
+        for (std::size_t k = 0; k < levels.levels.size(); ++k) {
+            if (levels.levels[k] == own->name) at = static_cast<int>(k) + 1;
+        }
+    }
+    if (levels.base.empty() || at >= kMaxTubeLevels) {
+        throw std::invalid_argument("root tube " + std::to_string(guide) + " is " + std::to_string(kMaxTubeLevels) +
+                                    " levels deep already: no level below for its cells");
+    }
+    const std::string childName = tubeLevelGroup(levels.base, at + 1);
+    const GroupId rootGroup = g->group;
+    // Its levels below now: made again under the cells (rebuildLevels).
+    if (!below.empty()) {
+        const std::size_t was = h.guides().size();
+        h.removeGuides(below, true);
+        result.removed += was - h.guides().size();
+    }
+    GroupId childGroup = h.findGroup(childName);
+    if (childGroup == kNoGroup) childGroup = h.addGroup(childName, rootGroup);
+    source.group = childGroup;
 
     // Each cell a slice of the tube cut (sliceTube): its root shape its part of the tube's root, its
     // sections the tube's scaled to it, turned as the tube's; so the cells tile the tube all along.
@@ -727,19 +775,16 @@ void cutRoot(GuideHierarchy& h, const ScalpMesh& scalp, GuideId guide, const Roo
     }
     if (made.empty()) throw std::invalid_argument("root tube " + std::to_string(guide) + " is too small to cut");
     h.evaluate(&scalp);
-    // The old root and its hierarchy out (after the cells are in: its group never empties).
-    const std::size_t before = h.guides().size();
-    h.removeGuides({guide}, true);
-    result.removed += before - h.guides().size();
-    // Its record dropped from any record it was a cell of.
+    // The cells follow the root (each keeping its shape: its offsets bound to it now).
+    h.reparent(made, guide);
     std::vector<RootSubdivisionRecord> records = h.rootSubdivisions();
-    for (RootSubdivisionRecord& r : records) {
-        for (GuideId& c : r.cells) {
-            if (c == guide) c = kNoGuide;
-        }
-    }
     h.evaluate(&scalp);
-    rebuildLevels(h, scalp, made, sources);
+    // The levels the root had, made again under the cells (one level deeper each).
+    std::map<int, std::vector<Source>> deeper;
+    for (const auto& [level, list] : sources) {
+        if (level > 2) deeper[level - 1] = list;
+    }
+    rebuildLevels(h, scalp, made, deeper);
 
     record.map = o.map;
     record.outline = bind(scalp, cut.outline3);
@@ -957,6 +1002,8 @@ bool recut(GuideHierarchy& h, const ScalpMesh& scalp, std::size_t index, const R
     for (const GuideId c : keptCells) {
         if (some == kNoGuide && c != kNoGuide && h.guide(c)) some = c, group = h.guide(c)->group;
     }
+    // (The root the cells follow, in the level above: the new cells follow it too.)
+    const GuideId cellsParent = some != kNoGuide && h.guide(some)->isChild() ? h.guide(some)->parent : kNoGuide;
     // The shape the cells were given since (combed, drawn): each living cell's guide against the
     // slice of the tube it would be, along it; a new cell takes that of the cells nearest it (as a
     // share of the way: 0 root, 1 tip), so a cut again keeps the grooming.
@@ -1069,6 +1116,10 @@ bool recut(GuideHierarchy& h, const ScalpMesh& scalp, std::size_t index, const R
         next.cells.push_back(id);
     }
     h.evaluate(&scalp);
+    if (cellsParent != kNoGuide && h.guide(cellsParent) && !made.empty()) {
+        h.reparent(made, cellsParent);
+        h.evaluate(&scalp);
+    }
     // The cells replaced out with their hierarchies (after the new ones are in: the group never empties).
     replaced.insert(replaced.end(), reslice.begin(), reslice.end());
     if (!replaced.empty()) {
