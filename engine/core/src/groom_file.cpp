@@ -15,6 +15,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "groomlab/braid_tubes.h"
 #include "groomlab/drive_guides.h"
 #include "groomlab/export_view.h"
 #include "groomlab/graph_edit.h"
@@ -523,6 +524,7 @@ json groomObject(FloatArrays& arrays, const GroomFile& file) {
     }
     if (!file.guideGroupColors.empty()) root["guideGroupColors"] = file.guideGroupColors;
     if (!file.hiddenGuideGroups.empty()) root["hiddenGuideGroups"] = file.hiddenGuideGroups;
+    if (const std::vector<std::string> tubes = braidTubeNames(file.braidTubes); !tubes.empty()) root["braidTubes"] = tubes;
     if (!file.cardBlock.empty()) {
         json block = json::parse(file.cardBlock, nullptr, false);
         if (block.is_object()) root["cardBlock"] = std::move(block);
@@ -660,6 +662,13 @@ GroomFile groomFromObject(const json& root, const std::string& baseDir) {
         }
         if (root.contains("hiddenGuideGroups") && root.at("hiddenGuideGroups").is_string()) {
             file.hiddenGuideGroups = root.at("hiddenGuideGroups").get<std::string>();
+        }
+        if (root.contains("braidTubes") && root.at("braidTubes").is_array()) {
+            std::vector<std::string> tubes;
+            for (const json& name : root.at("braidTubes")) {
+                if (name.is_string()) tubes.push_back(name.get<std::string>());
+            }
+            file.braidTubes = braidTubesText(tubes);
         }
         if (root.contains("cardBlock") && root.at("cardBlock").is_object()) file.cardBlock = root.at("cardBlock").dump();
         if (root.contains("scalps") && root.at("scalps").is_array()) {

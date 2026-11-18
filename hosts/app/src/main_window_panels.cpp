@@ -395,6 +395,7 @@ void MainWindow::wireOverlay() {
         if (document_) reevaluate();
     });
     connect(graph_, &NodeGraphView::clumpColorsToggled, this, [this](const std::string& node) { toggleClumpColors(node); });
+    connect(graph_, &NodeGraphView::braidTubesToggled, this, [this](const std::string& node) { toggleBraidTubes(node); });
     connect(graph_, &NodeGraphView::nodeRenamed, this, [this](const std::string& from, const std::string& to) { followRenamedNode(from, to); });
     connect(graph_, &NodeGraphView::edited, this, [this] { graphEdited(); });
     connect(graph_, &NodeGraphView::message, this, [this](const QString& text) { report(text); });

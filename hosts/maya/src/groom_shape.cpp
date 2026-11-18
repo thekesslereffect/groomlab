@@ -233,6 +233,7 @@ MObject GroomShape::aGuidePoints;
 MObject GroomShape::aGuideSmoothing;
 MObject GroomShape::aHiddenGuideGroups;
 MObject GroomShape::aGuideGroupColors;
+MObject GroomShape::aBraidTubes;
 MObject GroomShape::aGuideSelection;
 MObject GroomShape::aSoftSelectRadius;
 MObject GroomShape::aGroomFile;
@@ -991,6 +992,12 @@ MStatus GroomShape::initialize() {
     aHiddenGuideGroups = tAttr.create("hiddenGuideGroups", "glhgg", MFnData::kString, stringData.create(""), &status);
     CHECK_MSTATUS_AND_RETURN_IT(status);
     tAttr.setStorable(true);
+    // Show Tubes: the Braid nodes whose section tubes the viewport draws (their names, one a line),
+    // set by the Graph Editor's button on a Braid node. It affects nothing the groom evaluates.
+    aBraidTubes = tAttr.create("braidTubes", "glbtb", MFnData::kString, stringData.create(""), &status);
+    CHECK_MSTATUS_AND_RETURN_IT(status);
+    tAttr.setStorable(true);
+    tAttr.setHidden(true);
     // A Card Atlas block's card and the atlas' settings (card_blocks.h cardBlockToJson; "" not a
     // block): the Card Atlas window's, groomLabCardAtlas's and the groom file's. It affects nothing
     // the groom shows.
@@ -1165,7 +1172,7 @@ MStatus GroomShape::initialize() {
     tAttr.setHidden(true);
 
     for (MObject* attr : {&aInMesh, &aRestMesh, &aFollowScalp, &aScalpTopology, &aScalpSplit, &aScaleSource, &aScaleReference, &aScaleTransformReference, &aGroomScale, &aScaleArea, &aScaleTransform, &aColliderMeshes, &aExtraScalps, &aRenderDensity, &aRenderWidthScale, &aRenderLengthScale, &aRenderView, &aSimGuides, &aGuideCache, &aGuideCacheObject, &aSimCaches, &aTransferMarkers, &aGuideCurves, &aDriverCurves, &aDriverTwist, &aDriverBind, &aTime, &aGraph, &aGuideData, &aPartData, &aGraphUi, &aViewNode, &aLocked, &aDisplayInstances, &aGuideSelection, &aSoftSelectRadius, &aStrandColorMode, &aStrandColorSource, &aStrandColorMin, &aStrandColorMax, &aDisplayRibbons, &aRibbonWidthScale, &aDisplayWidthCoverage, &aDisplayCoverageDensity, &aDisplayClumpLod, &aClumpLodError, &aDisplayLighting, &aDisplayShadows, &aDisplayHairShading, &aDisplaySelfShadowing, &aDisplayStrandVariation, &aGuideWidth, &aCorrectiveData, &aCorrectiveWeight, &aSculptData, &aSculptNode, &aFlowData, &aDisplayFlow, &aShotSculpt, &aShotLayer, &aLodDistance, &aLodNear, &aLodFar, &aLodMinDensity,
-                          &aLodWidthCompensation, &aCameraCull, &aCullMargin, &aBackfaceCull, &aBackfaceAngle, &aDisplayColor, &aUseMaterialColor, &aSculptDisplay, &aSculptDensity, &aIsolateGroup, &aGuideColorMode, &aGuideColorLayer, &aGuidePoints, &aGuideSmoothing, &aHiddenGuideGroups, &aGuideGroupColors, &aCardBlock, &aRenderMode, &aGroomFile, &aPreviewDensity, &aPreviewPointBudget, &aDisplayGuides, &aDisplayHair,
+                          &aLodWidthCompensation, &aCameraCull, &aCullMargin, &aBackfaceCull, &aBackfaceAngle, &aDisplayColor, &aUseMaterialColor, &aSculptDisplay, &aSculptDensity, &aIsolateGroup, &aGuideColorMode, &aGuideColorLayer, &aGuidePoints, &aGuideSmoothing, &aHiddenGuideGroups, &aGuideGroupColors, &aBraidTubes, &aCardBlock, &aRenderMode, &aGroomFile, &aPreviewDensity, &aPreviewPointBudget, &aDisplayGuides, &aDisplayHair,
                           &aDisplayTubes, &aBrushTick, &aCardDensity, &aOutCards, &aOutRachis, &aOutMesh, &aDisplayCards, &aDisplayMesh, &aDisplayCardTextures, &aDisplayOverlaysOnTop, &aCardMaps, &aScalpMaps, &aScalpMapDisplay, &aScalpMapChannel, &aOutStrandCount, &aLastError, &aOutVrayPluginData, &aOutFrame}) {
         CHECK_MSTATUS_AND_RETURN_IT(addAttribute(*attr));
     }
@@ -1182,7 +1189,7 @@ MStatus GroomShape::initialize() {
         CHECK_MSTATUS_AND_RETURN_IT(attributeAffects(*input, aOutVrayPluginData));
     }
     for (MObject* input : {&aInMesh, &aRestMesh, &aFollowScalp, &aScalpTopology, &aScaleSource, &aScaleReference, &aScaleTransformReference, &aColliderMeshes, &aColliderMesh, &aColliderName, &aColliderRestMesh,
-                           &aExtraScalps, &aExtraScalpMesh, &aExtraScalpName, &aExtraScalpRestMesh, &aSimGuides, &aSimCurve, &aSimGuideId, &aGuideCache, &aGuideCacheObject, &aSimCaches, &aGuideCurves, &aDriverCurves, &aDriverTwist, &aDriverBind, &aTime, &aGraph, &aGuideData, &aCorrectiveData, &aCorrectiveWeight, &aSculptData, &aSculptNode, &aFlowData, &aPartData, &aPreviewDensity, &aPreviewPointBudget, &aRenderView, &aSculptDensity, &aViewNode, &aBrushTick, &aCardDensity, &aDisplayCards, &aDisplayMesh, &aCardMaps, &aScalpMaps}) {
+                           &aBraidTubes, &aExtraScalps, &aExtraScalpMesh, &aExtraScalpName, &aExtraScalpRestMesh, &aSimGuides, &aSimCurve, &aSimGuideId, &aGuideCache, &aGuideCacheObject, &aSimCaches, &aGuideCurves, &aDriverCurves, &aDriverTwist, &aDriverBind, &aTime, &aGraph, &aGuideData, &aCorrectiveData, &aCorrectiveWeight, &aSculptData, &aSculptNode, &aFlowData, &aPartData, &aPreviewDensity, &aPreviewPointBudget, &aRenderView, &aSculptDensity, &aViewNode, &aBrushTick, &aCardDensity, &aDisplayCards, &aDisplayMesh, &aCardMaps, &aScalpMaps}) {
         CHECK_MSTATUS_AND_RETURN_IT(attributeAffects(*input, aOutStrandCount));
         CHECK_MSTATUS_AND_RETURN_IT(attributeAffects(*input, aLastError));
         CHECK_MSTATUS_AND_RETURN_IT(attributeAffects(*input, aOutCards));
@@ -1860,6 +1867,10 @@ MStatus GroomShape::evaluate(MDataBlock& data, Lane& lane) {
     request.cardDensity = data.inputValue(aCardDensity).asFloat();
     // The ToMesh nodes' meshes the viewport draws (displayMesh).
     request.wantStrandMeshes = session.hasStrandMeshNode() && data.inputValue(aDisplayMesh).asBool();
+    // Show Tubes: the Braid nodes whose tubes draw. Their inputs are evaluated though the hair is
+    // hidden or a node before them is viewed, and the frame's version moves when the tubes would
+    // be another mesh (ViewRequest::braidTubes), so the viewport draws them again.
+    request.braidTubes = data.inputValue(aBraidTubes).asString().asChar();
     // The hair hidden (displayHair, the eye) or the groom itself hidden (Maya's Evaluation Manager
     // computes the groom whenever the scalp moves, drawn or not): no strands evaluated, only the
     // scalp and the guides (what still draws), while nothing else reads the strands here (a card
@@ -2177,7 +2188,7 @@ MStatus GroomShape::setDependentsDirty(const MPlug& plug, MPlugArray& affected) 
         plug == aStrandColorSource || plug == aStrandColorMin || plug == aStrandColorMax || plug == aDisplayRibbons ||
         plug == aRibbonWidthScale || plug == aDisplayWidthCoverage || plug == aDisplayCoverageDensity || plug == aDisplayClumpLod || plug == aClumpLodError || plug == aSculptDisplay || plug == aIsolateGroup || plug == aGuideColorMode ||
         plug == aGuideColorLayer || plug == aDisplayInstances || plug == aDisplayLighting || plug == aDisplayShadows || plug == aDisplayHairShading || plug == aDisplaySelfShadowing || plug == aDisplayStrandVariation ||
-        plug == aGuideWidth || plug == aGuidePoints || plug == aGuideSmoothing || plug == aHiddenGuideGroups || plug == aGuideGroupColors ||
+        plug == aGuideWidth || plug == aGuidePoints || plug == aGuideSmoothing || plug == aHiddenGuideGroups || plug == aGuideGroupColors || plug == aBraidTubes ||
         plug == aDisplayFlow || plug == aDisplayColor ||
         plug == aUseMaterialColor || plug == aDisplayGuides || plug == aDisplayHair || plug == aDisplayTubes || plug == aDisplayCards || plug == aDisplayMesh ||
         plug == aDisplayCardTextures || plug == aDisplayOverlaysOnTop || plug == aCardMaps || plug == aScalpMapDisplay || plug == aScalpMapChannel;

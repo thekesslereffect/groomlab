@@ -52,6 +52,8 @@
 #include "viewport.h"
 
 #include "groomlab/graph.h"
+#include "groomlab/graph_edit.h"
+#include "groomlab/graph_inserts.h"
 #include "groomlab/graph_pins.h"
 #include "groomlab/node_catalog.h"
 #include "groomlab/node_library.h"
@@ -307,8 +309,8 @@ void NodeGraphView::rebuild() {
         // gets a row for it: the type never runs into the port names.
         const bool typeRow = node.type != node.name && node.inputs.size() <= 1 && node.outputs.size() <= 1;
         const std::size_t rows = std::max<std::size_t>(std::max(node.inputs.size(), node.outputs.size()), 1) + (typeRow ? 1 : 0);
-        // (A Clump a button wider: its header holds Clump Colors too.)
-        node.size = QSizeF(kNodeWidth + (clumpColorable(node) ? 23.0 : 0.0), kHeader + kBodyPadding * 2 + rows * kRow);
+        // (A Clump a button wider: its header holds Clump Colors too; a Braid, Show Tubes.)
+        node.size = QSizeF(kNodeWidth + (hasOwnToggle(node) ? 23.0 : 0.0), kHeader + kBodyPadding * 2 + rows * kRow);
         float x = 0.0f, y = 0.0f;
         if (document_->nodePosition(info.name, &x, &y)) {
             node.pos = QPointF(x, y);
@@ -378,47 +380,32 @@ void NodeGraphView::rebuild() {
 
 void NodeGraphView::autoLayout() {
     // Nodes without a position: columns by how far they are from the sources (the longest path
-    // in), rows in the graph's order; placed to the right of what has a position already.
-    std::vector<int> depth(nodes_.size(), 0);
-    if (document_) {
-        std::map<std::string, int> index;
-        for (std::size_t i = 0; i < nodes_.size(); ++i) index[nodes_[i].name] = static_cast<int>(i);
-        const std::vector<GroomDocument::ConnectionInfo> connections = document_->connections();
-        // Relax the longest paths: graphs are acyclic and small.
-        for (std::size_t pass = 0; pass < nodes_.size() + 1; ++pass) {
-            bool changed = false;
-            for (const GroomDocument::ConnectionInfo& c : connections) {
-                const auto a = index.find(c.from), b = index.find(c.to);
-                if (a == index.end() || b == index.end()) continue;
-                if (depth[b->second] < depth[a->second] + 1) {
-                    depth[b->second] = depth[a->second] + 1;
-                    changed = true;
-                }
-            }
-            if (!changed) break;
-        }
+    // in), rows in the graph's order; placed to the right of what has a position already. The
+    // core's layout (graph_inserts.h layoutPositions, Maya's and Blender's too) at this view's spacing.
+    std::vector<std::string> unplaced;
+    for (const Node& node : nodes_) {
+        if (std::isnan(node.pos.x())) unplaced.push_back(node.name);
     }
+    if (unplaced.empty()) return;
     // Over the viewport (a tall view), a long chain wraps into blocks of columns, one under the
     // other, so the whole graph fits at a readable scale; docked (a wide, short strip, as Maya's
     // Graph Editor), it runs in one row and frameReadable shows its look end.
-    const int kColumnsPerBlock = viewport_ ? 7 : std::numeric_limits<int>::max() / 2;
-    std::map<int, int> rows;
-    std::map<int, int> blockRows;  // the tallest column in each block, for the block's height
-    for (std::size_t i = 0; i < nodes_.size(); ++i) {
-        if (std::isnan(nodes_[i].pos.x())) blockRows[depth[i] / kColumnsPerBlock] = std::max(blockRows[depth[i] / kColumnsPerBlock], ++rows[depth[i]]);
+    GraphLayout layout;
+    layout.column = kColumn;
+    layout.row = kRowGap;
+    layout.columnsPerBlock = viewport_ ? 7 : 0;
+    std::map<std::string, std::pair<double, double>> placed;
+    if (document_) {
+        try {
+            placed = layoutPositions(GraphEdit(document_->graph().dump()), layout, &unplaced);
+        } catch (const std::exception&) {  // (a graph the core cannot read: one column below)
+        }
     }
-    rows.clear();
-    std::map<int, qreal> blockTop;
-    qreal top = 0.0;
-    for (const auto& [block, count] : blockRows) {
-        blockTop[block] = top;
-        top += count * kRowGap + 60.0;
-    }
-    for (std::size_t i = 0; i < nodes_.size(); ++i) {
-        Node& node = nodes_[i];
+    int row = 0;
+    for (Node& node : nodes_) {
         if (!std::isnan(node.pos.x())) continue;
-        const int row = rows[depth[i]]++;
-        node.pos = QPointF((depth[i] % kColumnsPerBlock) * kColumn, blockTop[depth[i] / kColumnsPerBlock] + row * kRowGap);
+        const auto at = placed.find(node.name);
+        node.pos = at != placed.end() ? QPointF(at->second.first, at->second.second) : QPointF(0.0, row++ * kRowGap);
         laidOut_[node.name] = node.pos;
     }
 }
@@ -809,6 +796,22 @@ bool NodeGraphView::clumpColorsButtonAt(const QPointF& scene, int* node) const {
     return false;
 }
 
+bool NodeGraphView::braidTubesButtonAt(const QPointF& scene, int* node) const {
+    for (std::size_t i = 0; i < nodes_.size(); ++i) {
+        if (showsTubes(nodes_[i]) && braidTubesButtonRect(nodes_[i]).adjusted(-2, -2, 2, 2).contains(scene)) {
+            *node = static_cast<int>(i);
+            return true;
+        }
+    }
+    return false;
+}
+
+void NodeGraphView::setBraidTubeNodes(std::vector<std::string> nodes) {
+    if (nodes == braidTubes_) return;
+    braidTubes_ = std::move(nodes);
+    update();
+}
+
 void NodeGraphView::setClumpColoredNodes(std::vector<std::string> nodes) {
     if (nodes == clumpColored_) return;
     clumpColored_ = std::move(nodes);
@@ -941,7 +944,7 @@ void NodeGraphView::drawNode(QPainter& painter, const Node& node, bool selected)
     const NodeBadges badges = nodeBadges(node.name);
     const bool filled = header == QLatin1String("filled");
     const qreal row = rect.y() + kHeader / 2.0;
-    qreal x = (clumpColorable(node) ? clumpColorsButtonRect(node)
+    qreal x = (hasOwnToggle(node) ? clumpColorsButtonRect(node)
                : !node.linkableParams.empty() ? inputsButtonRect(node)
                : viewable(node) ? viewButtonRect(node)
                                 : bypassButtonRect(node))
@@ -1087,6 +1090,34 @@ void NodeGraphView::drawNode(QPainter& painter, const Node& node, bool selected)
             }
             painter.drawEllipse(at[k], 2.6, 2.6);
         }
+    }
+    // A Braid's Show Tubes toggle (a short tube: its open end and its two sides): the node's section
+    // tubes drawn in the viewport; dim until they are, then lit on a tile.
+    if (showsTubes(node)) {
+        const QRectF tube = braidTubesButtonRect(node);
+        const bool on = braidTubesShown(node.name);
+        QColor ink = filled ? headerText(color) : (on ? theme::uiColor("accent") : theme::textDim());
+        if (on) {
+            QColor tile = ink;
+            tile.setAlpha(60);
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(tile);
+            painter.drawRoundedRect(tube, 4.0, 4.0);
+        } else {
+            ink.setAlpha(filled ? 140 : 170);
+        }
+        const QPointF c = tube.center();
+        QPen pen(ink, 1.4);
+        pen.setCapStyle(Qt::RoundCap);
+        painter.setPen(pen);
+        painter.setBrush(Qt::NoBrush);
+        // Lying left to right: the far end's half ellipse, the two sides, the near end's whole one.
+        const QRectF far(c.x() - 6.6, c.y() - 4.0, 4.4, 8.0), near(c.x() + 2.2, c.y() - 4.0, 4.4, 8.0);
+        painter.drawArc(far, 90 * 16, 180 * 16);
+        painter.drawLine(QPointF(far.center().x(), far.top()), QPointF(near.center().x(), near.top()));
+        painter.drawLine(QPointF(far.center().x(), far.bottom()), QPointF(near.center().x(), near.bottom()));
+        if (on) painter.setBrush(ink);
+        painter.drawEllipse(near);
     }
     if (!node.linkableParams.empty()) {
         const QRectF inputs = inputsButtonRect(node);
@@ -1375,6 +1406,10 @@ void NodeGraphView::mousePressEvent(QMouseEvent* event) {
     }
     if (clumpColorsButtonAt(pressScene_, &node)) {
         emit clumpColorsToggled(nodes_[node].name);
+        return;
+    }
+    if (braidTubesButtonAt(pressScene_, &node)) {
+        emit braidTubesToggled(nodes_[node].name);
         return;
     }
     if (viewButtonAt(pressScene_, &node)) {
@@ -1994,6 +2029,8 @@ bool NodeGraphView::event(QEvent* event) {
             tip = tr("Expand Inputs: show or hide all connectable parameter ports");
         } else if (clumpColorsButtonAt(scene, &node)) {
             tip = tr("Clump Colors: color the strands by this node's clumps (its clumpChannel); again: as they were");
+        } else if (braidTubesButtonAt(scene, &node)) {
+            tip = tr("Show Tubes: draws the braid's section tubes in the viewport");
         } else if (viewButtonAt(scene, &node)) {
             tip = tr("View: show the groom up to this node in the viewport (V); again: the output");
         } else if (bypassButtonAt(scene, &node)) {

@@ -19,6 +19,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "groomlab/color.h"
 #include "groomlab/distance_field.h"
 #include "groomlab/export_view.h"
 #include "groomlab/flow.h"
@@ -31,6 +32,7 @@
 #include "groomlab/operator_state.h"
 #include "groomlab/parts.h"
 #include "groomlab/presets.h"
+#include "groomlab/profile.h"
 #include "groomlab/paths.h"
 #include "groomlab/random.h"
 #include "groomlab/scalp_paint.h"
@@ -831,11 +833,6 @@ void GroomSession::setScalpMaps(ScalpMaps maps) {
     data_.maps = scalpMaps_.catalog();
 }
 
-void GroomSession::setMapCatalog(MapCatalog maps) {
-    if (scalpMapsSet_) return;  // the scalp maps' own catalog
-    data_.maps = std::move(maps);
-}
-
 MeshPtr GroomSession::scalp() {
     std::vector<std::string> errors;
     bindScalp(errors);
@@ -1073,6 +1070,7 @@ void GroomSession::setCacheIntermediates(bool enabled) {
 void GroomSession::setPreviewHierarchy(std::shared_ptr<GuideHierarchy> preview, bool final) {
     previewHierarchy_ = std::move(preview);
     previewFinal_ = previewHierarchy_ && final;
+    followPreview_.reset();
 }
 
 void GroomSession::setPreviewOverlays(std::shared_ptr<const PartSet> parts, std::shared_ptr<const FlowSet> flow) {
@@ -1424,6 +1422,7 @@ void GroomSession::fillExternals(ExternalInputs& externals) const {
 
 void GroomSession::prepareFollow(std::vector<SessionMessage>& messages) {
     following_ = false;
+    followPreview_.reset();
     if (!data_.followScalp || !scalp_) return;
     if (!scalp_->hasRest()) {
         if (!followNoRestSaid_) {
@@ -1434,7 +1433,7 @@ void GroomSession::prepareFollow(std::vector<SessionMessage>& messages) {
         return;
     }
     followNoRestSaid_ = false;
-    if (scalp_->points() == scalp_->restPoints()) return;  // at rest: as it is, to the bit
+    if (scalp_->atRest()) return;  // at rest: as it is, to the bit
     following_ = true;
 
     // The scalp at rest (its maps as color sets), the same on every frame.
@@ -1475,7 +1474,11 @@ void GroomSession::prepareFollow(std::vector<SessionMessage>& messages) {
         if (previewing || key != followActiveKey_) {
             followActiveKey_ = key;
             HierarchyPtr base = followRooted_;
-            if (previewing) base = carryHierarchyBack(*previewHierarchy_, *followRest_, *scalp_);
+            if (previewing) {
+                base = carryHierarchyBack(*previewHierarchy_, *followRest_, *scalp_);
+                followPreview_ = base;  // (evaluate's rest pose asks the same)
+                followPreviewOn_ = scalp_;
+            }
             if (previewFinal_ || !base) {
                 followActive_ = base;  // shot sculpting: the preview has its poses and correctives
             } else if (!(poses && base) && !correcting) {
@@ -1544,10 +1547,15 @@ StrandsPtr GroomSession::carry(const StrandsPtr& strands, int slot) {
     if (!following_ || !strands) return strands;
     Carried& c = carried_[slot];
     if (c.out && c.in == strands && c.from == followRest_ && c.to == scalp_) return c.out;
+    // The view's strands carried again (the same at rest, the scalp moved: a playback): their
+    // roots' frames at rest made once (followBoxes; the boxes kept for other strands are left).
+    const bool again = slot == 0 && c.in == strands && c.from == followRest_;
+    const bool boxed = followBoxes_ && followBoxesOf_.lock() == strands && followBoxesFrom_ == followRest_;
+    const StrandBoxes* boxes = again || boxed ? &followBoxes(strands) : nullptr;
     c.in = strands;
     c.from = followRest_;
     c.to = scalp_;
-    c.out = carryStrands(strands, *followRest_, *scalp_);
+    c.out = carryStrands(strands, *followRest_, *scalp_, boxes);
     return c.out;
 }
 
@@ -1611,6 +1619,8 @@ std::shared_ptr<const std::vector<Vec3f>> GroomSession::clumpCenterDots(GraphDoc
 // ---- Evaluation -----------------------------------------------------------------------------
 
 const ViewResult& GroomSession::evaluate(const ViewRequest& request) {
+    const ProfileScope whole("session.evaluate");
+    ProfilePhases phase("session.prepareTime");
     std::vector<std::string> errors;
     std::vector<SessionMessage> messages;
     failure_ = nullptr;
@@ -1627,7 +1637,9 @@ const ViewResult& GroomSession::evaluate(const ViewRequest& request) {
     detachedMessages_.clear();
     // The Simulate nodes' frames at this time (stepping on where they are live): frames on the
     // way are fed by the host, and the inputs bound at this time again after.
+    phase.next("session.simulations");
     stepSimulations(request, errors);
+    phase.next("session.setup");
     // A live brush stroke edits the preview in place: every stamp is a change.
     bool hierarchyChanged = activeHierarchy_.get() != previousActive.get() || previewHierarchy_ != nullptr;
     const HierarchyPtr previousShown = view_.hierarchy;
@@ -1715,7 +1727,9 @@ const ViewResult& GroomSession::evaluate(const ViewRequest& request) {
                 out.viewedRoots = viewed->graph.node(shown).typeName() == "Scatter";
                 if (viewed->graph.node(shown).typeName() == op::kClump) centersOf = shown;
             }
+            phase.next("session.graph");
             StrandsPtr strands = viewed->graph.evaluateStrands(shown, ctx);
+            phase.next("session.after");
             const StrandsPtr evaluated = strands;  // the node's result (before pinning or carrying)
             out.movingGuides = movingGuidesOf(viewed->graph, shown, ctx);
             if (centersOf) {
@@ -1725,7 +1739,8 @@ const ViewResult& GroomSession::evaluate(const ViewRequest& request) {
                 out.clumpCenters.reset();
             }
             // Instances pinned or fitted to their rest length: the rest pose (its own copy of the
-            // graph, a cache hit from frame to frame) gives each its distance from the root.
+            // graph, a cache hit from frame to frame; this evaluation's results where the groom is
+            // at rest as it is) gives each its distance from the root.
             if (strands && strands->instances() && strands->instances()->needsRestPose()) {
                 if (!restPose_) {
                     restPose_ = std::make_unique<RestPose>(parsed_->clone());
@@ -1735,8 +1750,11 @@ const ViewResult& GroomSession::evaluate(const ViewRequest& request) {
                 rest.scalp = following_ ? followRest_ : scalp_;
                 if (previewHierarchy_ && !previewFinal_) {
                     // The stroke's working copy, on this scalp (taken to rest while following).
-                    rest.hierarchy = following_ ? HierarchyPtr(carryHierarchyBack(*previewHierarchy_, *followRest_, *scalp_))
-                                                : HierarchyPtr(previewHierarchy_);
+                    // (prepareFollow's, made for this evaluation from the same preview and scalps.)
+                    rest.hierarchy = !following_ ? HierarchyPtr(previewHierarchy_)
+                                     : followPreview_ && followPreviewOn_ == scalp_
+                                         ? followPreview_
+                                         : HierarchyPtr(carryHierarchyBack(*previewHierarchy_, *followRest_, *scalp_));
                     rest.hierarchyOnScalp = true;
                 } else if (!(hierarchyFromText_ && blank(data_.hierarchyJson))) {
                     rest.hierarchy = parsedHierarchy_;  // as authored, evaluated on the rest scalp
@@ -1746,7 +1764,9 @@ const ViewResult& GroomSession::evaluate(const ViewRequest& request) {
                 rest.flow = shownFlow_;
                 rest.controls = scaledControls();
                 rest.maps = data_.maps;
-                strands = restPose_->pin(strands, out.viewedNode, rest, ctx);
+                phase.next("session.restPose");
+                strands = restPose_->pin(strands, out.viewedNode, rest, ctx, &viewed->graph);
+                phase.next("session.after");
             } else {
                 restPose_.reset();
             }
@@ -1880,8 +1900,8 @@ const ViewResult& GroomSession::evaluate(const ViewRequest& request) {
         constexpr float kBig = std::numeric_limits<float>::max();
         Vec3f lo(kBig, kBig, kBig), hi(-kBig, -kBig, -kBig);
         auto expand = [&](const Vec3f& p) {
-            lo = Vec3f(std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z));
-            hi = Vec3f(std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z));
+            lo = minPerAxis(lo, p);
+            hi = maxPerAxis(hi, p);
         };
         if (out.strands) {  // one parallel pass, kept on the strands (drawing asks them too)
             // Only some strands changed since the strands the view had: their blocks measured again.
@@ -1912,7 +1932,34 @@ const ViewResult& GroomSession::evaluate(const ViewRequest& request) {
         out.bounds.hi = out.bounds.valid ? hi : Vec3f();
     }
     const bool strandMeshesChanged = out.versions.strandMeshes != previousStrandMeshes;
-    if (strandsChanged || hierarchyChanged || cardsChanged || overlaysChanged || strandMeshesChanged) ++out.versions.evaluation;
+    // Show Tubes: each shown Braid's inputs evaluated though no strands were asked for, or the node
+    // viewed lies before it (cached where the evaluation above made them), and the tubes' version
+    // moved when what they are built from changed: a param of the Braid, a node before it, the scalp.
+    bool tubesChanged = false;
+    {
+        std::uint64_t source = 0;
+        if (viewed && !request.braidTubes.empty()) {
+            try {
+                for (const std::string& name : braidTubeNames(request.braidTubes)) {
+                    const auto found = viewed->nodesByName.find(name);
+                    if (found == viewed->nodesByName.end() || viewed->graph.node(found->second).typeName() != op::kBraid) continue;
+                    if (viewed->graph.bypassedFor(found->second, ctx.viewport)) continue;
+                    const std::size_t slots = viewed->graph.inputSpecs(found->second).size();
+                    for (std::size_t slot = 0; slot < slots; ++slot) {
+                        NodeId from = 0;
+                        std::size_t output = 0;
+                        if (viewed->graph.inputSource(found->second, slot, &from, &output)) viewed->graph.evaluateOutput(from, output, ctx);
+                    }
+                }
+            } catch (const std::exception&) {  // (what fails before a Braid: the evaluation says so itself)
+            }
+            source = braidTubesSource(request.braidTubes, nullptr);
+        }
+        tubesChanged = source != braidTubesShown_;
+        braidTubesShown_ = source;
+        if (tubesChanged) ++out.versions.braidTubes;
+    }
+    if (strandsChanged || hierarchyChanged || cardsChanged || overlaysChanged || strandMeshesChanged || tubesChanged) ++out.versions.evaluation;
 
     out.scalp = scalp_;
     out.cageScalp = cageScalp_;
@@ -2596,7 +2643,7 @@ std::shared_ptr<std::vector<float>> textureMapAtVertices(const ScalpMapView& vie
                 if (per == 1) c[0] = (c[0] + c[1] + c[2]) / 3.0f;  // the preview shows a gray map's value in r g b
             } else {
                 c = image->sample(u, w);
-                if (per == 1) c[0] = 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2];  // as a gray map reads its file
+                if (per == 1) c[0] = rec709Luminance(c[0], c[1], c[2]);  // as a gray map reads its file
             }
             for (std::size_t i = 0; i < per; ++i) (*values)[v * per + i] = c[i];
         }
@@ -3357,11 +3404,6 @@ void GroomSession::setBakedSimulation(const std::string& node, BakedSimulationPt
     sim->baked = std::move(baked);
 }
 
-BakedSimulationPtr GroomSession::bakedSimulation(const std::string& node) const {
-    const auto it = sims_.find(node);
-    return it == sims_.end() ? nullptr : it->second->baked;
-}
-
 std::uint64_t GroomSession::simulationStamp(const std::string& node) const {
     if (!doc_) return 0;
     const auto it = doc_->nodesByName.find(node);
@@ -3395,6 +3437,100 @@ std::shared_ptr<const std::vector<float>> GroomSession::nodeStrandChannel(const 
         if (it != index.end()) (*out)[i] = (*values)[it->second];
     }
     return out;
+}
+
+std::uint64_t GroomSession::braidTubesSource(const std::string& shown,
+                                             std::vector<std::pair<const Operator*, std::vector<Value>>>* nodes) const {
+    const GraphDocument* doc = viewDoc();
+    if (!doc || shown.empty()) return 0;
+    const Graph& graph = doc->graph;
+    // The scalp the graph evaluated on (the rest pose while following: the tubes are carried after).
+    const MeshPtr& scalp = following_ ? followRest_ : scalp_;
+    const bool carried = following_ && followRest_ && scalp_ && followRest_ != scalp_;
+    std::uint64_t key = hashCombine(hash64(0xB7A1D7), reinterpret_cast<std::uintptr_t>(scalp.get()));
+    if (carried) key = hashCombine(key, reinterpret_cast<std::uintptr_t>(scalp_.get()));
+    // A result's identity: shared results are immutable, so the same object is the same value.
+    auto identity = [](const Value& v) {
+        return std::visit(
+            [](const auto& x) -> std::uint64_t {
+                if constexpr (std::is_same_v<std::decay_t<decltype(x)>, std::monostate>) return 0;
+                else return reinterpret_cast<std::uintptr_t>(x.get());
+            },
+            v);
+    };
+    std::size_t count = 0;
+    for (const std::string& name : braidTubeNames(shown)) {
+        const auto found = doc->nodesByName.find(name);
+        if (found == doc->nodesByName.end()) continue;
+        const NodeId id = found->second;
+        const Operator& op = graph.node(id);
+        if (op.typeName() != op::kBraid || graph.bypassedFor(id, lastViewContext_.viewport)) continue;
+        // Its inputs as the last evaluation left them, as the nodes made them (a preview's hidden
+        // core strands with them: a fed braid grows by those).
+        std::vector<Value> inputs(op.inputs().size());
+        key = hashCombine(hashString(key, name), op.params().hash());
+        key = hashCombine(key, static_cast<std::uint64_t>(op.nodeVersion()));
+        for (std::size_t slot = 0; slot < inputs.size(); ++slot) {
+            NodeId source = 0;
+            std::size_t output = 0;
+            if (graph.inputSource(id, slot, &source, &output)) inputs[slot] = graph.cachedValue(source, output);
+            key = hashCombine(key, identity(inputs[slot]));
+        }
+        if (!valueAs<StrandsPtr>(inputs.front())) continue;  // (nothing evaluated yet, or let go by the cache)
+        ++count;
+        if (nodes) nodes->emplace_back(&op, std::move(inputs));
+    }
+    if (count == 0) return 0;
+    return key == 0 ? 1 : key;
+}
+
+std::shared_ptr<const BraidTubeMesh> GroomSession::braidTubeMesh(const std::string& shown, int around) const {
+    std::vector<std::pair<const Operator*, std::vector<Value>>> nodes;
+    std::uint64_t key = braidTubesSource(shown, &nodes);
+    if (nodes.empty()) return nullptr;
+    key = hashCombine(key, static_cast<std::uint64_t>(std::max(around, 3)));
+    if (key == 0) key = 1;
+    if (braidTubesKey_ == key) return braidTubes_;  // (null: these nodes braid nothing)
+    const MeshPtr& scalp = following_ ? followRest_ : scalp_;
+    const bool carried = following_ && followRest_ && scalp_ && followRest_ != scalp_;
+
+    ExternalInputs externals;
+    if (scalp) externals.set("scalp", scalp, scalp->surfaceHash());
+    EvalContext ctx = lastViewContext_;
+    ctx.externals = &externals;
+    ctx.keepPreviewCore = true;
+    auto mesh = std::make_shared<BraidTubeMesh>();
+    BraidTubeDetail detail;
+    detail.maxPoints = kBraidTubePoints / nodes.size();
+    const ProfileScope profile("session.braidTubes");
+    for (const auto& node : nodes) {
+        detail.around = around > 0 ? around : braidTubesAround(*node.first);
+        BraidTubes tubes;
+        try {
+            tubes = braidTubes(*node.first, ctx, node.second, detail);
+        } catch (const std::exception&) {
+            continue;  // (an input that does not fit: the evaluation says so)
+        }
+        if (carried) {
+            // Each tube with its path's root, as the strands are carried with theirs.
+            for (std::size_t t = 0; t < tubes.tubes.size(); ++t) {
+                BraidTubes::Tube& tube = tubes.tubes[t];
+                const RootMotion motion = rootMotion(*followRest_, *scalp_, tube.root);
+                if (motion.still()) continue;
+                const std::size_t end = t + 1 < tubes.tubes.size() ? tubes.tubes[t + 1].firstPoint : tubes.points.size();
+                for (std::size_t p = tube.firstPoint; p < end; ++p) tubes.points[p] = motion.point(tubes.points[p]);
+                for (Vec3f& c : tube.centers) c = motion.point(c);
+                for (Vec3f& v : tube.across) v = motion.direction(v);
+                for (Vec3f& v : tube.thick) v = motion.direction(v);
+            }
+        }
+        appendBraidTubes(*mesh, std::move(tubes));
+    }
+    mesh->key = key;
+    ++braidTubeBuilds_;
+    braidTubesKey_ = key;
+    braidTubes_ = mesh->empty() ? nullptr : std::shared_ptr<const BraidTubeMesh>(std::move(mesh));
+    return braidTubes_;
 }
 
 }  // namespace groomlab

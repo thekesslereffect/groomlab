@@ -36,6 +36,7 @@
 #include "groomlab/graph_inserts.h"
 #include "groomlab/graph_edit.h"
 #include "groomlab/graph_io.h"
+#include "groomlab/graph_pins.h"
 #include "groomlab/groom_file.h"
 #include "groomlab/groom_package.h"
 #include "groomlab/retriangulate.h"
@@ -1763,6 +1764,7 @@ json Helper::run(const std::string& cmd, const json& args) {
             request.density = static_cast<float>(optNumber(args, "density", 1.0));
             request.pointBudget = optNumber(args, "pointBudget", 0.0);
             request.viewNode = optString(args, "viewNode", "");
+            request.braidTubes = optString(args, "braidTubes", "");  // Show Tubes' nodes (ViewRequest::braidTubes)
             // While a stroke is live the strands step back to this fraction (the app's 0.35), so
             // each dab evaluates fast; the evaluation after the stroke has every strand again.
             request.sculptDensity = static_cast<float>(optNumber(args, "sculptDensity", 1.0));
@@ -1842,6 +1844,32 @@ json Helper::run(const std::string& cmd, const json& args) {
         Session& s = session(args);
         return {{"graph", parseGraph(*s.groom)}};
     }
+    if (cmd == "graph_problems") {
+        // What would stop the groom from evaluating, as every host's editor says it (graph_edit.h
+        // GraphEdit::problems; Maya's GraphModel.validate and unused_problems): "problems" of the nodes
+        // the output is made from and the graph's own, "unused" of the other nodes (warnings).
+        Session& s = session(args);
+        const GraphEdit edit(graphText(*s.groom));
+        return {{"problems", edit.problems(true)}, {"unused", edit.problems(false)}, {"feeding", edit.feedingOutput()}};
+    }
+    if (cmd == "graph_layout") {
+        // The auto layout every host uses for a graph without positions and for Tidy Layout
+        // (graph_inserts.h layoutPositions; Maya's GraphModel.auto_layout): "positions" {node: [x, y]}
+        // of the graph given here ("graph": the add-on asks for the one it is about to draw), no session.
+        if (!args.contains("graph") || !args["graph"].is_object()) fail("bad_request", "graph is the graph's JSON object");
+        json positions = json::object();
+        for (const auto& [node, at] : layoutPositions(GraphEdit(args["graph"].dump()))) positions[node] = {at.first, at.second};
+        return {{"positions", positions}};
+    }
+    if (cmd == "prune_pins") {
+        // The pins of a graph given here ("connections", "pins": {points, routes}) that hold, in order
+        // (graph_pins.h prunePins: every host's rules); oneFeed (true): only the routes a reroute, a
+        // pin with one input, can draw. No session: the add-on asks for the links its tree shows.
+        json g = {{"connections", args.contains("connections") ? args["connections"] : json::array()}};
+        if (args.contains("pins") && args["pins"].is_object()) g["pins"] = args["pins"];
+        prunePins(g, optBool(args, "oneFeed", true));
+        return {{"pins", g.contains("pins") ? g["pins"] : json()}};
+    }
     if (cmd == "feather_groups") {
         // The feather designs' groom groups ({name: id}) and the guide groups growing one feather
         // per guide (graph_inserts.h): Maya's feather_groups and feather_guide_groups.
@@ -1877,6 +1905,23 @@ json Helper::run(const std::string& cmd, const json& args) {
             if (edit.clumpColored(name, source)) lit.push_back(name);
         }
         return {{"sources", sources}, {"lit", lit}};
+    }
+    if (cmd == "braid_tubes") {
+        // Show Tubes (the core's rules, graph_edit.h): the Braid nodes showing their section tubes
+        // (`shown`: names, one a line) after a rename (`old`, `new`: renamedBraidTubes), a click on a
+        // node's button (`toggle`: GraphEdit::braidTubesToggled) and, with `keep`, without the names
+        // that are no Braid node of the graph now (braidTubesKept); and the nodes lit.
+        Session& s = session(args);
+        const GraphEdit edit(graphText(*s.groom));
+        std::string shown = optString(args, "shown", "");
+        if (args.contains("old") && args.contains("new")) shown = renamedBraidTubes(shown, needString(args, "old"), needString(args, "new"));
+        if (args.contains("toggle")) shown = edit.braidTubesToggled(needString(args, "toggle"), shown);
+        if (optBool(args, "keep", false)) shown = edit.braidTubesKept(shown);
+        json lit = json::array();
+        for (const std::string& name : braidTubeNames(shown)) {
+            if (edit.braidTubesShown(name, shown)) lit.push_back(name);
+        }
+        return {{"shown", shown}, {"lit", lit}};
     }
     if (cmd == "renamed_color_source") {
         // A color source naming a renamed node follows it (renamedColorSource).
@@ -1962,6 +2007,11 @@ json Helper::run(const std::string& cmd, const json& args) {
             }
         } else if (op == "rename_node") {
             edit.renameNode(needString(args, "name"), needString(args, "newName"));
+            json g = json::parse(edit.toJson());  // the pins on its links follow (graph_pins.h), as in Maya and the app
+            if (g.contains("pins")) {
+                renamePinNode(g, needString(args, "name"), needString(args, "newName"));
+                edit = GraphEdit(g.dump());
+            }
         } else if (op == "connect") {
             // The add-on's links are the user's (its node tree, its chain edits): a Clump fed centers
             // takes them (GraphEdit::connectByHand).
@@ -1974,6 +2024,21 @@ json Helper::run(const std::string& cmd, const json& args) {
             r["upgraded"] = edit.upgradeNode(needString(args, "name"));
         } else if (op == "update_library_node") {  // a node from the library takes its newer copy
             r["updated"] = edit.updateLibraryNode(needString(args, "name"), scalpSize(s));
+        } else if (op == "insert_between") {  // a node into the flow, every host's (graph_inserts.h)
+            insertBetween(edit, needString(args, "from"), needString(args, "to"), needString(args, "node"),
+                          optString(args, "nodeInput", "strands"));
+        } else if (op == "insert_before") {
+            insertBefore(edit, needString(args, "anchor"), needString(args, "node"), optString(args, "input", "strands"),
+                         optString(args, "nodeInput", "strands"));
+        } else if (op == "insert_after") {
+            insertAfter(edit, needString(args, "anchor"), needString(args, "node"), optString(args, "nodeInput", ""));
+        } else if (op == "insert_scalp") {  // Add > Scalp's graph, every host's
+            const ScalpNodes made = insertScalp(edit, needString(args, "mesh"), scalpSize(s));
+            auto orNull = [](const std::string& name) { return name.empty() ? json() : json(name); };
+            r["name"] = made.scalp;
+            r["scatter"] = orNull(made.scatter);
+            r["interpolate"] = orNull(made.interpolate);
+            r["merge"] = orNull(made.merge);
         } else if (op == "insert_simulate") {  // Add > Simulate, every host's (graph_inserts.h)
             const json& params = args.contains("params") && args["params"].is_object() ? args["params"] : json::object();
             r["name"] = insertSimulate(edit, params.dump(), scalpSize(s));
@@ -2102,6 +2167,7 @@ json Helper::run(const std::string& cmd, const json& args) {
                     } else {
                         g["pins"] = {{"points", std::move(points)}, {"routes", std::move(routes)}};
                     }
+                    prunePins(g);  // kept as every host keeps them (graph_pins.h): those that hold, in order
                 }
                 const json positions = args.contains("positions") && !args["positions"].is_null() ? args["positions"] : json::object();
                 if (!args.contains("positions") && !args.contains("backdrops") && !args.contains("pins")) need(args, "positions");
@@ -2154,8 +2220,13 @@ json Helper::run(const std::string& cmd, const json& args) {
                  "op is add_node, remove_node, rename_node, connect, disconnect, set_output, upgrade_node, set_positions, "
                  "set_bypass or set_evaluation");
         }
-        // A graph that does not load yet (an input left open) is kept: the session says why.
-        const std::string text = edit.toJson();
+        // A graph that does not load yet (an input left open) is kept: the session says why. The pins
+        // of links gone, or fed from elsewhere now, go with them (graph_pins.h, as in Maya and the app).
+        std::string text = edit.toJson();
+        if (json g = json::parse(text); g.contains("pins")) {
+            prunePins(g);
+            text = g.dump();
+        }
         try {
             s.groom->setGraphJson(text);
             r["graphError"] = "";

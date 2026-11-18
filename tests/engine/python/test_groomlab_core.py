@@ -749,6 +749,102 @@ class GraphTest(SceneMixin, unittest.TestCase):
         self.assertLessEqual(out.strand_count, 2 * grown.strand_count)
         self.assertTrue(out.is_valid())
 
+    def test_braid_sections_and_tubes(self):
+        # braid_tubes.h through the bindings: one cycle of a weave in the braid's cross-section (a
+        # version 1 node's plain ellipses, which overlap; a version 2 node's sections pressed against
+        # each other: their outlines, what to draw), and a Braid node's sections as tubes along its path.
+        plain = gl.braid_sections(style="three", version=1)
+        self.assertEqual((plain["sections"], plain["cycle"], plain["perStep"], plain["round"]), (3, 6, 16, False))
+        self.assertEqual([len(plain[k]) for k in ("centers", "across", "thick", "outlines")], [3, 3, 3, 3])
+        self.assertEqual(len(plain["centers"][0]), 6 * 16)
+        self.assertFalse(plain["pressed"])
+        self.assertGreater(plain["overlap"], 0.1)
+        self.assertEqual(plain["keep"], (1.0, 1.0))
+        # (a version 1 node's outline is its ellipse: point k at center + across cos + thick sin)
+        self.assertEqual((plain["around"], len(plain["outlines"][0]), len(plain["outlines"][0][0])), (48, 6 * 16, 48))
+        for c in range(2):
+            self.assertAlmostEqual(plain["outlines"][1][5][0][c], plain["centers"][1][5][c] + plain["across"][1][5][c], places=6)
+            self.assertAlmostEqual(plain["outlines"][1][5][12][c], plain["centers"][1][5][c] + plain["thick"][1][5][c], places=6)
+        pressed = gl.braid_sections(style="three")  # the node's defaults: version 2, separate 1, inflate 0.5
+        self.assertTrue(pressed["pressed"])
+        # (The sections are tubes along their own courses, kept apart in 3D: seen along the braid,
+        # as here, two that pass one over the other overlap a little where their rings lean.)
+        self.assertLess(pressed["overlap"], 0.02)
+        self.assertGreater(pressed["grown"], 1.2)
+        for k in pressed["keep"]:  # solved at the plain braid's reach: next to nothing left to scale
+            self.assertAlmostEqual(k, 1.0, delta=0.05)
+        for c in range(2):
+            self.assertAlmostEqual(pressed["reach"][c], plain["reach"][c], delta=0.02 * plain["reach"][c])
+        self.assertGreater(pressed["areas"][1], 0.9 * plain["areas"][1])  # as much hair a section, in the same braid
+        self.assertLess(pressed["areas"][2], 2.6 * pressed["areas"][0])  # (thinnest where it passes between the other two)
+        # An outline point lies along its ellipse's ray, nearer the center where another section presses.
+        rays = gl.braid_sections(style="three", per_step=4, around=8)
+        self.assertEqual((rays["perStep"], rays["around"], len(rays["outlines"][2][3])), (4, 8, 8))
+        fat = gl.braid_sections(style="three", inflate=1.0)
+        self.assertGreater(fat["grown"], pressed["grown"])
+        self.assertLess(fat["overlap"], 0.02)
+        off = gl.braid_sections(style="three", separate=0.0)
+        self.assertGreater(off["overlap"], 0.05)
+        self.assertNotEqual(gl.braid_sections(style="three", tightness=2.0)["across"], pressed["across"])  # cut steeper
+        self.assertTrue(gl.braid_sections(style="rope", sections=3)["round"])
+        self.assertRaises(gl.GraphError, gl.braid_sections, style="zigzag")
+
+        doc = gl.load_graph_json({
+            "version": 1, "output": "braid",
+            "nodes": [{"name": "scalp", "type": "Scalp"}, {"name": "paths", "type": "Guides"},
+                      {"name": "scatter", "type": "Scatter", "params": {"density": 800.0}},
+                      {"name": "braid", "type": "Braid", "params": {"style": "three", "region": 0.4}}],
+            "connections": [{"from": "scalp", "to": "scatter", "input": "scalp"},
+                            {"from": "scatter", "to": "braid", "input": "strands"},
+                            {"from": "paths", "to": "braid", "input": "braids"}]})
+        guides = gl.GuideSet()
+        guides.add(1, straight((0.0, 1.0, 0.0), (0.1, 1.2, 0.0)))
+        guides.root_on_mesh(self.scalp)
+        externals = gl.ExternalInputs()
+        externals.set_groom(scalp=self.scalp, guides=guides)
+        ctx = gl.EvalContext(externals=externals)
+        tubes = doc.graph.braid_tubes(doc.node("braid"), ctx, around=8)
+        self.assertEqual(tubes["around"], 8)
+        self.assertTrue(tubes["pressed"])  # a new node: version 2
+        self.assertEqual([(t["path"], t["section"], t["braidId"]) for t in tubes["tubes"]], [(0, 0, 0.0), (0, 1, 0.0), (0, 2, 0.0)])
+        rings = len(tubes["tubes"][0]["centers"])
+        self.assertGreater(rings, 8)
+        for t in tubes["tubes"]:
+            self.assertEqual([len(t[k]) for k in ("at", "centers", "across", "thick")], [rings] * 4)
+        self.assertEqual([t["firstPoint"] for t in tubes["tubes"]], [0, rings * 8, 2 * rings * 8])
+        self.assertEqual(len(tubes["points"]), 3 * rings * 8)
+        self.assertEqual(len(tubes["quads"]), 3 * (rings - 1) * 8)
+        self.assertEqual(tubes["quads"][0], (0, 8, 9, 1))
+        self.assertEqual(tubes["quadTube"][:2] + tubes["quadTube"][-1:], [0, 0, 2])
+        # A ring's first point lies along its ellipse's half axis across its band, as far as the
+        # press leaves it (a version 1 node's: at the axis's end).
+        first = tubes["tubes"][1]
+        point = tubes["points"][first["firstPoint"]]
+        off = [point[c] - first["centers"][0][c] for c in range(3)]
+        along = sum(off[c] * first["across"][0][c] for c in range(3)) / sum(v * v for v in first["across"][0])
+        self.assertGreater(along, 0.3)
+        self.assertLess(along, 2.0)
+        for c in range(3):
+            self.assertAlmostEqual(off[c], along * first["across"][0][c], places=5)
+        old = gl.load_graph_json({
+            "version": 1, "output": "braid",
+            "nodes": [{"name": "scalp", "type": "Scalp"}, {"name": "paths", "type": "Guides"},
+                      {"name": "scatter", "type": "Scatter", "params": {"density": 800.0}},
+                      {"name": "braid", "type": "Braid", "version": 1, "params": {"style": "three", "region": 0.4}}],
+            "connections": [{"from": "scalp", "to": "scatter", "input": "scalp"},
+                            {"from": "scatter", "to": "braid", "input": "strands"},
+                            {"from": "paths", "to": "braid", "input": "braids"}]})
+        plain_tubes = old.graph.braid_tubes(old.node("braid"), ctx, around=8)
+        self.assertFalse(plain_tubes["pressed"])
+        first = plain_tubes["tubes"][1]
+        point = plain_tubes["points"][first["firstPoint"]]
+        for c in range(3):
+            self.assertAlmostEqual(point[c], first["centers"][0][c] + first["across"][0][c], places=5)
+        # (the braid whose hair the node makes: three sections)
+        hair = doc.graph.evaluate_strands(doc.node("braid"), ctx)
+        self.assertEqual(max(hair.strand_channel("braidSection")), 2.0)
+        self.assertRaises(gl.GraphError, doc.graph.braid_tubes, doc.node("scatter"), ctx)
+
     def test_document_from_json_evaluates(self):
         doc = gl.load_graph_json(LOOK_GRAPH)  # a dict is accepted too
         self.assertEqual(set(doc.names), {n["name"] for n in LOOK_GRAPH["nodes"]})
@@ -1330,6 +1426,131 @@ class ExtrasTest(SceneMixin, unittest.TestCase):
         with self.assertRaises(gl.GraphError):
             edit.add_node("Teleport")
 
+    def test_graph_inserts(self):
+        # A node into the flow and Add Scalp's graph (graph_inserts.h), as Maya's GraphModel makes them.
+        edit = gl.GraphEdit(gl.default_graph_json())
+
+        def links():
+            return {(c["from"], c["to"], c["input"]) for c in json.loads(edit.to_json())["connections"]}
+
+        fed = next(c for c in json.loads(edit.to_json())["connections"] if c["from"] == "interpolate")
+        curl = edit.add_node("Curl")
+        edit.insert_after("interpolate", curl)
+        self.assertIn(("interpolate", curl, "strands"), links())
+        self.assertIn((curl, fed["to"], fed["input"]), links())
+        sim = edit.add_node("Simulate")
+        edit.insert_on_link("guides", "interpolate", "guides", sim)
+        self.assertIn(("guides", sim, "guides"), links())
+        self.assertIn((sim, "interpolate", "guides"), links())
+        before = edit.to_json()
+        with self.assertRaises(gl.GraphError):
+            edit.insert_on_link("guides", "interpolate", "guides", curl)  # that link goes through the Simulate now
+        self.assertEqual(edit.to_json(), before)
+        made = edit.insert_scalp("ear")
+        self.assertEqual(made, {"scalp": "scalp_ear", "scatter": "scatter_ear", "interpolate": "interpolate_ear", "merge": "merge_ear"})
+        self.assertIn((sim, "interpolate_ear", "guides"), links())  # the guides the hair's Interpolate reads
+        self.assertIn(("interpolate", "merge_ear", "a"), links())
+        self.assertIn(("interpolate_ear", "merge_ear", "b"), links())
+        self.assertEqual(edit.insert_scalp("ear"), {"scalp": "scalp_ear", "scatter": None, "interpolate": None, "merge": None})
+
+    def test_graph_problems(self):
+        # What would stop the groom from evaluating (graph_edit.h GraphEdit::problems), as Maya's
+        # GraphModel.validate and unused_problems say it: a node off to the side only warns.
+        edit = gl.GraphEdit(gl.default_graph_json())
+        self.assertEqual((edit.problems(), edit.problems(False)), ([], []))
+        self.assertEqual(edit.feeding_output(), [n["name"] for n in json.loads(edit.to_json())["nodes"]])
+        side = edit.add_node("Clump")
+        self.assertEqual(edit.problems(), [])
+        self.assertIn(side + ".strands is not connected", edit.problems(False))
+        self.assertNotIn(side, edit.feeding_output())
+        edit.disconnect("length", "strands")
+        self.assertEqual(edit.problems(True), ["length.strands is not connected"])
+        data = json.loads(gl.default_graph_json())
+        del data["output"]
+        self.assertEqual(gl.GraphEdit(json.dumps(data)).problems(), ["no output node"])
+
+    def test_graph_layout_clipboard_and_exposes(self):
+        # The edits every host's editor makes through the core (graph_inserts.h layoutPositions,
+        # graph_edit.h copyNodes / pasteNodes, graph_controls.h unexposeParam and the compound's).
+        edit = gl.GraphEdit(gl.default_graph_json())
+        at = edit.layout_positions()
+        self.assertEqual((at["scalp"], at["guides"], at["scatter"]), ((0.0, 0.0), (0.0, 140.0), (240.0, 0.0)))
+        wrapped = edit.layout_positions(230.0, 120.0, columns_per_block=7)
+        self.assertEqual(wrapped["resample"], (0.0, 300.0))
+        self.assertEqual(sorted(edit.layout_positions(only=["guides"])), ["guides"])
+        text = edit.copy_nodes(["length", "noise", "output"])
+        self.assertEqual([n["name"] for n in json.loads(text)["nodes"]], ["length", "noise"])
+        self.assertEqual(edit.copy_nodes(["output"]), "")
+        self.assertEqual(edit.paste_nodes(text, 40.0, 40.0), [("length1", "length"), ("noise1", "noise")])
+        with self.assertRaises(gl.GraphError):
+            edit.paste_nodes("{}")
+        edit.expose_param("noise", "amplitude")
+        self.assertTrue(edit.unexpose_param("noise", "amplitude"))
+        self.assertFalse(edit.unexpose_param("noise", "amplitude"))
+        compound = edit.collapse(["length", "noise"], "")
+        edit.compound_expose(compound, "wave", "noise.amplitude")
+        with self.assertRaises(gl.GraphError):
+            edit.compound_expose(compound, "wave", "noise.nope")
+        self.assertTrue(edit.compound_unexpose(compound, "noise.amplitude"))
+        self.assertFalse(edit.compound_unexpose(compound, "noise.amplitude"))
+
+    def test_map_readers(self):
+        # What reads a map and letting go of it (scalp_maps.h), every host's.
+        data = json.loads(gl.default_graph_json())
+        data["nodes"].append({"name": "mask", "type": "Map", "params": {"name": "crown"}})
+        for n in data["nodes"]:
+            if n["name"] == "color":
+                n["params"] = {"map": "crown"}
+            if n["name"] == "scatter":
+                n["paramInputs"] = ["density"]
+        data["connections"].append({"from": "mask", "to": "scatter", "input": "density"})
+        text = json.dumps(data)
+        self.assertEqual(gl.map_readers(text, "crown"), {"nodes": ["mask"], "users": [("scatter", "density"), ("color", "map")]})
+        after, changed, unlinked = gl.unlink_map_readers(text, "crown")
+        self.assertTrue(changed)
+        self.assertEqual(unlinked, [("scatter", "density"), ("color", "map")])
+        self.assertEqual(gl.map_readers(after, "crown"), {"nodes": [], "users": []})
+        self.assertEqual(gl.unlink_map_readers(text, "other"), (text, False, []))
+
+    def test_graph_pins(self):
+        # A graph's pins (graph_pins.h), every host's rules: Maya's GraphModel keeps its pins through this.
+        data = json.loads(gl.default_graph_json())
+        pins = gl.GraphPins(json.dumps(data))
+        self.assertEqual(pins.pins_json(), "")
+        a = pins.add("width", "strands", 10, 20)
+        b = pins.add("width", "strands", 30, 40, 0)
+        self.assertEqual((a, b), ("pin1", "pin2"))
+        self.assertEqual(pins.add("scalp", "mesh", 0, 0), "")  # nothing feeds it
+        self.assertEqual(pins.route("width", "strands"), [b, a])
+        self.assertEqual(pins.route_to(a), [b, a])
+        self.assertEqual(pins.position(a), (10.0, 20.0))
+        self.assertIsNone(pins.position("pin9"))
+        self.assertEqual(pins.source(a), ("color", ""))
+        self.assertIsNone(pins.source("pin9"))
+        self.assertEqual(pins.links(b), [(("width", "strands"), 0)])
+        self.assertTrue(pins.set_route("resample", "strands", [pins.add("resample", "strands", 0, 0)]))
+        self.assertFalse(pins.merge(a, "pin3"))  # another signal
+        self.assertTrue(pins.merge(a, b))
+        self.assertTrue(pins.move(a, 1, 2))
+        stored = json.loads(pins.pins_json())
+        self.assertEqual(stored["points"], [{"id": "pin1", "x": 1.0, "y": 2.0}, {"id": "pin3", "x": 0.0, "y": 0.0}])
+        self.assertEqual(stored["routes"], [{"from": "width", "to": "resample", "input": "strands", "via": ["pin3"]},
+                                            {"from": "color", "to": "width", "input": "strands", "via": ["pin1"]}])
+        # A link from elsewhere now: its route goes at the next prune; a rename is followed.
+        for c in data["connections"]:
+            if c["to"] == "width":
+                c["from"] = "length"
+            if c["to"] == "resample":
+                c["to"] = "even"
+        again = gl.GraphPins(json.dumps(dict(data, pins=stored)))
+        again.rename_node("resample", "even")
+        self.assertEqual(again.ids(), ["pin3"])
+        self.assertEqual(again.route("even", "strands"), ["pin3"])
+        self.assertTrue(again.remove("pin3"))
+        self.assertEqual(again.pins_json(), "")
+        with self.assertRaises(gl.GraphError):
+            gl.GraphPins("[]")
+
     def test_portable_path(self):
         # The one rule for stored paths (paths.h), Maya's Python's portable_path too.
         root = tempfile.mkdtemp(prefix="groomlab_py_paths_").replace("\\", "/")
@@ -1537,6 +1758,93 @@ class ReferenceGuidesTest(unittest.TestCase):
             self.assertIn("melanin", out["look"])
         finally:
             shutil.rmtree(folder, ignore_errors=True)
+
+
+class TubeMeshTest(unittest.TestCase):
+    """groomlab_core.tube_mesh: modeled tubes read off a mesh (tube_mesh.h), as plain points and polygons."""
+
+    @staticmethod
+    def tube(loops=5, sides=6, taper=0.4, pointed=False, base=0):
+        """Points and quads of an open tube up the Y axis, tapering to `taper` of its root."""
+        points, polygons = [], []
+        for k in range(loops):
+            r = 0.2 * (1.0 + (taper - 1.0) * k / float(loops - 1))
+            points += [(r * math.cos(2 * math.pi * i / sides), 0.3 * k, r * math.sin(2 * math.pi * i / sides)) for i in range(sides)]
+        for k in range(loops - 1):
+            for i in range(sides):
+                j = (i + 1) % sides
+                polygons.append([base + k * sides + i, base + k * sides + j, base + (k + 1) * sides + j, base + (k + 1) * sides + i])
+        if pointed:
+            points.append((0.0, 0.3 * loops, 0.0))
+            last = (loops - 1) * sides
+            polygons += [[base + last + i, base + last + (i + 1) % sides, base + len(points) - 1] for i in range(sides)]
+        return points, polygons
+
+    def test_tubes_read_root_first(self):
+        tm = gl.tube_mesh
+        points, polygons = self.tube()
+        (tube,) = tm.read_tubes(points, list(reversed(polygons)), name="lock", smooth=True)
+        self.assertEqual((tube.name, len(tube.rings), tube.sides, tube.pointed, tube.signature), ("lock", 5, 6, False, (5, 6)))
+        self.assertIsInstance(tube.rings[0][0], tuple)
+        self.assertEqual(len(tube.smooth_rings), 5)
+        self.assertIsNone(tube.cage_rings)
+        # The wider end first, or the end nearer what the host says is the scalp.
+        self.assertEqual(tm.orient_tube(tube), tube.flipped)
+        self.assertGreater(*tube.end_sizes())
+        self.assertTrue(tm.orient_tube(tube, lambda p: abs(p[1] - 1.2)))
+        self.assertLess(*tube.end_sizes())
+        tube.source = "a host's own note"  # (a host may keep what it likes on a tube)
+        self.assertIs(tube.use_smooth(), tube)
+        self.assertTrue(tube.smooth)
+        self.assertEqual(len(tube.cage_rings), 5)
+        self.assertEqual(len(tube.columns()), 6)
+        self.assertEqual(len(tube.volume_curves(7)), 7)
+        centers = tube.centers()
+        self.assertAlmostEqual(centers[0][1], 1.2)
+        self.assertAlmostEqual(tm.section_center(tube.rings[2])[0], 0.0)
+        copy = tm.ModeledTube(tube.rings, name="copy", pointed=True)
+        self.assertEqual((copy.name, copy.pointed, copy.pointed_root, copy.smooth_rings), ("copy", True, False, None))
+        # Two shells, and what is not a tube said (a ValueError).
+        more, quads = self.tube(loops=4, pointed=True, base=len(points))
+        both = tm.read_tubes(points + more, polygons + quads, "locks")
+        self.assertEqual([(t.name, t.shell, t.pointed) for t in both], [("locks_1", 0, False), ("locks_2", 1, True)])
+        with self.assertRaisesRegex(tm.TubeMeshError, "closed"):
+            tm.read_tubes(points, polygons + [[5, 4, 3, 2, 1, 0], [24, 25, 26, 27, 28, 29]], "capped")
+        self.assertTrue(issubclass(tm.TubeMeshError, ValueError))
+
+    def test_curves_values_and_sections(self):
+        tm = gl.tube_mesh
+        self.assertEqual(tm.region_values(2), [0.3333, 0.6667])
+        self.assertEqual(len(set(tm.extra_region_values([0.3333, 0.6667], 3)) - {0.3333, 0.6667}), 3)
+        self.assertTrue(tm.is_tube_map_name("tubes2"))
+        self.assertEqual(tm.unused_name(tm.SHAPE_GROUP, ["tubesShape"]), "tubesShape2")
+        self.assertEqual(tm.shape_name_for("round", [], ["Round"]), "round_shape")
+        self.assertEqual(tm.volume_layout(1), [])
+        self.assertEqual(len(tm.volume_layout(10)), 9)
+        rooted = tm.rooted_curve([(0, 0, 0), (0, 0.5, 0), (0, 1, 0), (0, 4, 0)], (0.4, 0.0, 0.0))
+        self.assertEqual(rooted[0], (0.4, 0.0, 0.0))
+        self.assertAlmostEqual(rooted[1][0], 0.2)
+        self.assertEqual(rooted[3], (0.0, 4.0, 0.0))
+        # A straight tube's sections along a guide up its middle: each loop's own width.
+        points, polygons = self.tube(loops=7, sides=8)
+        (tube,) = tm.read_tubes(points, polygons)
+        tm.prepare_tube(tube, True)
+        frames = {"points": [[0.0, 0.3 * k, 0.0] for k in range(7)], "u": [[1.0, 0.0, 0.0]] * 7, "v": [[0.0, 0.0, -1.0]] * 7}
+        shape, smooth, at = tm.root_shape(tube, frames, 0.0)
+        self.assertEqual((len(shape), smooth, sorted(at)), (8, False, list(range(8))))
+        unit = [(x / 0.2, y / 0.2) for x, y in shape]
+        sections = tm.fit_sections(frames, tube, [unit[at[i]] for i in sorted(at)], sorted(at), outline=unit, uncovered=0.05)
+        self.assertEqual(len(sections), 7)
+        for k, s in enumerate(sections):
+            self.assertAlmostEqual(s["width"], 0.2 * (1.0 - 0.6 * k / 6.0), places=6)
+            self.assertAlmostEqual(s["center"][1], 0.3 * k, places=6)
+        self.assertEqual(tm.smoothed_cover(sections, 0), [1.0] * 7)
+        for a in tm.section_aspects(sections):
+            self.assertAlmostEqual(a, 1.0, places=6)
+        twist, w, h, c = tm.fit_section([(0.1 + 0.3 * u, 0.2 * v) for u, v in unit], unit, near=6.0)
+        self.assertAlmostEqual(twist, 2.0 * math.pi, places=4)
+        self.assertAlmostEqual(w, 0.3, places=5)
+        self.assertAlmostEqual(c[0], 0.1, places=5)
 
 
 if __name__ == "__main__":

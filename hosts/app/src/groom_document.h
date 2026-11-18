@@ -554,6 +554,14 @@ public:
     const std::set<std::string>& hiddenGroups() const { return hiddenGroups_; }
     void setGroupHidden(const std::string& name, bool hidden);
     std::string hiddenGroupsText() const;  // DisplaySettings::hiddenGuideGroups' form
+    // Show Tubes (the core's braid_tubes.h): the Braid nodes whose section tubes the viewport draws,
+    // in DisplaySettings::braidTubes' form (names, one a line). Saved with the groom ("braidTubes");
+    // a rename takes it along and a removed node's goes, in the edit's own undo step. Display only.
+    const std::string& braidTubes() const { return braidTubes_; }
+    void setBraidTubes(const std::string& shown);
+    // A click on a node's Show Tubes: on, or off again (GraphEdit::braidTubesToggled). Not in the
+    // history (as the hidden groups are not).
+    void toggleBraidTubes(const std::string& node);
     // The groups' own viewport colors ("#rrggbb" by group name, Maya's guideGroupColors): the
     // other groups' colors are automatic (their level's in the theme, Maya 0.19.4's). Kept with
     // the window's session (as the hidden groups are), drawn by updateDisplay.
@@ -983,6 +991,8 @@ private:
             std::string from;
         };
         std::optional<std::pair<Subdivision, Subdivision>> subdivision;
+        // Show Tubes' nodes before and after (a rename, a removal: editGraph).
+        std::optional<std::pair<std::string, std::string>> braidTubes;
     };
     void record(Edit edit);
     // The files and colors an edit changed, onto the step it recorded (the history held
@@ -1044,6 +1054,7 @@ private:
     std::uint64_t selectionVersion_ = 1;
     bool tubePreview_ = false;  // previewTubeShape's preview is the session's
     std::set<std::string> hiddenGroups_;
+    std::string braidTubes_;  // Show Tubes' nodes (braidTubes)
     std::map<std::string, std::string> groupColors_;
     RenderOverrides renderOverrides_;
     double time_ = 0.0;

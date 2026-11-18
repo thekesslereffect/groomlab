@@ -42,6 +42,7 @@ inline const MString kCardWiresItem("groomLabCardWires");  // (not the builder's
 inline const MString kScalpMapItem("groomLabScalpMap");
 inline const MString kScalpMapWiresItem("groomLabScalpMapWires");  // (not the builder's: updateMapWires)
 inline const MString kStrandMeshItem("groomLabStrandMesh");
+inline const MString kBraidTubesItem("groomLabBraidTubes");  // Show Tubes: the Braid nodes' section tubes
 inline const MString kFlowFieldItem("groomLabFlowField");
 inline const MString kSoftSelectedItem("groomLabSoftSelectedGuides");
 inline const MString kDotsItem("groomLabDots");  // (not the builder's: updateDots)
@@ -59,7 +60,8 @@ inline const MString kLodImpostorsItem("groomLabStrandsLodImpostors");
 inline const MString kItemNames[kDisplayItemCount] = {
     kDimStrandsItem, kStrandsItem,       kColoredStrandsItem, kRibbonsItem, kInstancesItem,
     kInstanceMeshesItem, kScalesItem,    kGuidesItem,         kTubesItem,   kSelectedItem, kSoftSelectedItem,
-    kPartsItem,      kFlowItem,          kFlowFieldItem,      kCardsItem,   kScalpMapItem, kStrandMeshItem};
+    kPartsItem,      kFlowItem,          kFlowFieldItem,      kCardsItem,   kScalpMapItem, kStrandMeshItem,
+    kBraidTubesItem};
 
 // ---- Shaders (groom_draw_override_fragments.cpp, groom_draw_override_shaders.cpp) ----
 

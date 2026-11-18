@@ -394,6 +394,24 @@ class GROOMLAB_OT_graph_clump_colors(_GraphOperator):
         return {"FINISHED"}
 
 
+class GROOMLAB_OT_graph_braid_tubes(_GraphOperator):
+    """Show Tubes: draws the braid's section tubes in the viewport"""
+    bl_idname = "groomlab.graph_braid_tubes"
+    bl_label = "Show Tubes"
+
+    node: StringProperty(options={"SKIP_SAVE"}, description="The Braid node")
+
+    def execute(self, context):
+        scalp = context_groom(context)
+        tree = graph_tree.tree_of(scalp)
+        node = graph_tree.node_named(tree, self.node)
+        if node is None or node.gl_type != "Braid":
+            return {"CANCELLED"}
+        shown = graph_tree.toggle_braid_tubes(scalp, node.gl_name)
+        self.report({"INFO"}, "%s's tubes %s" % (node.gl_name, "shown" if shown else "hidden"))
+        return {"FINISHED"}
+
+
 class GROOMLAB_OT_graph_bypass(_GraphOperator):
     """Bypass: pass the selected nodes' input straight through (B; Blender's M mutes the same way)"""
     bl_idname = "groomlab.graph_bypass"
@@ -1171,7 +1189,10 @@ def draw_params(layout, context, node, scene):
 
     spec_of = {s["name"]: s for s in specs}.get  # what a showWhen names
     shown = []
+    version = getattr(node, "gl_version", 0) or 1 << 30
     for spec in specs:
+        if spec.get("addedIn", 0) > version:
+            continue  # added by a later version of the operator: nothing here until Upgrade (the core's paramInVersion)
         name = spec["name"]
         if op_type in ("Compound", "Script") and name == "definition":
             continue  # (a script node's file: Edit Node..., its text blocks)
@@ -1620,7 +1641,7 @@ def _draw_overlay_now():
 _keymaps = []
 
 classes = (GROOMLAB_OT_graph_open, GROOMLAB_OT_graph_add_search, GROOMLAB_OT_graph_frame, GROOMLAB_OT_graph_duplicate,
-           GROOMLAB_OT_graph_view_node, GROOMLAB_OT_graph_clump_colors, GROOMLAB_OT_graph_bypass, GROOMLAB_OT_graph_detach, GROOMLAB_OT_graph_evaluation, GROOMLAB_OT_graph_set_output,
+           GROOMLAB_OT_graph_view_node, GROOMLAB_OT_graph_clump_colors, GROOMLAB_OT_graph_braid_tubes, GROOMLAB_OT_graph_bypass, GROOMLAB_OT_graph_detach, GROOMLAB_OT_graph_evaluation, GROOMLAB_OT_graph_set_output,
            GROOMLAB_OT_graph_upgrade_node, GROOMLAB_OT_graph_fold, GROOMLAB_OT_graph_pick_attribute, GROOMLAB_OT_graph_tidy, GROOMLAB_OT_graph_reload,
            GROOMLAB_OT_graph_preset, GROOMLAB_OT_graph_presets_refresh, GROOMLAB_MT_graph_presets,
            GROOMLAB_MT_graph_edit, GROOMLAB_PT_graph_node, GROOMLAB_PT_graph_groom, GROOMLAB_PT_graph_presets)

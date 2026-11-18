@@ -84,6 +84,8 @@
 // holds them ("name:#rrggbb name:#rrggbb", sRGB; display.h parseGuideGroupColors), and
 // "hiddenGuideGroups": the groups hidden in the viewport ("name name", Maya's attribute). Display
 // only, read by no evaluation; absent when empty.
+// "braidTubes": the Braid nodes whose section tubes the viewport shows (Show Tubes, braid_tubes.h):
+// their names (["braid", ...]). Display only, read by no evaluation; absent when none is shown.
 
 #include <cstdint>
 #include <map>
@@ -150,6 +152,9 @@ struct GroomFile {
     // Maya's attributes' text; "" none).
     std::string guideGroupColors;
     std::string hiddenGuideGroups;
+    // The Braid nodes whose tubes show ("braidTubes"; DisplaySettings::braidTubes' form: names, one a
+    // line). Display only.
+    std::string braidTubes;
     // A Card Atlas block's card and the atlas' settings ("cardBlock", card_blocks.h
     // cardBlockToJson; "" not a block): a file whose grooms are blocks is a Card Atlas.
     std::string cardBlock;

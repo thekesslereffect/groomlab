@@ -26,6 +26,7 @@ add_library(groomlab_core_objects OBJECT
     src/retriangulate.cpp
     src/root_tubes.cpp
     src/root_tube_tool.cpp
+    src/tube_mesh.cpp
     src/groom_package.cpp
     src/control_keys.cpp
     src/engine_cards.cpp
@@ -38,6 +39,7 @@ add_library(groomlab_core_objects OBJECT
     src/renderman_look.cpp
     src/curve.cpp
     src/distance_field.cpp
+    src/braid_tubes.cpp
     src/display.cpp
     src/drive_guides.cpp
     src/display_overlays.cpp
@@ -84,6 +86,7 @@ add_library(groomlab_core_objects OBJECT
     src/param_conditions.cpp
     src/paths.cpp
     src/presets.cpp
+    src/profile.cpp
     src/shortcuts.cpp
     src/png.cpp
     src/ptex.cpp

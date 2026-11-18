@@ -4071,12 +4071,49 @@ class GroomingTest(unittest.TestCase):
         draw("flow and parts depth-tested")
         self.assertGreater(cmds.getAttr(self.groom + ".outStrandCount"), 0)
 
+    def test_show_tubes_names_save_with_the_scene(self):
+        # Show Tubes (the Graph Editor's button on a Braid node): the groom's braidTubes names the
+        # Braid nodes whose section tubes the viewport draws, one a line. Display only (setting it
+        # evaluates nothing again and leaves the graph and the strands as they are), saved with the
+        # scene; the rules are the core's (which nodes, the toggle, a rename, a delete).
+        import groomlab_core
+        from groomlab import graph as gm
+        self.assertEqual(cmds.getAttr(self.groom + ".braidTubes") or "", "")
+        path = cmds.curve(degree=3, point=[(0, 1.0, 0), (0, 1.5, 0.1), (0.1, 2.0, 0.3), (0.1, 2.4, 0.7), (0, 2.6, 1.2)])
+        plait = groomlab.add_braid(self.groom, [path], style="three", region=0.6, width=0.2)
+        strands = cmds.getAttr(self.groom + ".outStrandCount")
+        graph = cmds.getAttr(self.groom + ".graph")
+        runs = cmds.groomLabGraphStats(self.groom, evaluations=True)
+        model = gm.GraphModel.from_groom(self.groom)
+        self.assertFalse(model.braid_tubes_shown(plait, ""))
+        shown = model.braid_tubes_toggled(plait, "")
+        self.assertEqual(shown, plait)
+        self.assertEqual(model.braid_tubes_toggled("interpolate", shown), shown)  # not a Braid: no button
+        cmds.setAttr(self.groom + ".braidTubes", shown, type="string")
+        self.assertTrue(model.braid_tubes_shown(plait, cmds.getAttr(self.groom + ".braidTubes")))
+        self.assertEqual(cmds.getAttr(self.groom + ".outStrandCount"), strands)
+        self.assertEqual(cmds.getAttr(self.groom + ".graph"), graph)
+        # (The shown nodes are named to the evaluation, ViewRequest::braidTubes, so their inputs are
+        # there whatever is hidden or viewed: turning the tubes on asks once, from the caches.)
+        self.assertLessEqual(cmds.groomLabGraphStats(self.groom, evaluations=True), runs + 1)
+        self.assertEqual(groomlab.errors(self.groom), [])
+        # A name that is no Braid node is kept out by the core's rule; a rename follows.
+        self.assertEqual(model.braid_tubes_kept(plait + "\ninterpolate\ngone"), plait)
+        self.assertEqual(groomlab_core.renamed_braid_tubes(plait, plait, "crown"), "crown")
+        scene = os.path.join(tempfile.mkdtemp(), "show_tubes.ma")
+        cmds.file(rename=scene)
+        cmds.file(save=True, type="mayaAscii", force=True)
+        cmds.file(scene, open=True, force=True)
+        self.assertEqual(cmds.getAttr(self.groom + ".braidTubes"), plait)
+        self.assertEqual(cmds.getAttr(self.groom + ".outStrandCount"), strands)
+        cmds.setAttr(self.groom + ".braidTubes", "", type="string")
+        self.assertEqual(cmds.getAttr(self.groom + ".outStrandCount"), strands)
+
 
 def strand_length_stats(groom):
     """(count, points) of the groom as evaluated."""
     stats = json.loads(cmds.groomLabGraphStats(groom))
     return stats.get("strands", 0), stats.get("points", 0)
-
 
 
 class ControlsAndExamplesTest(unittest.TestCase):
@@ -6291,7 +6328,9 @@ class MotionTest(unittest.TestCase):
         self.viewport_axes(5)
         self.viewport_axes(7)
         stats = json.loads(cmds.groomLabGraphStats(self.groom))
-        self.assertEqual(stats["restEvaluations"], 1)  # fitStrand alone: the rest pose once, not per frame
+        # fitStrand alone asks for the rest pose: frame 1's own evaluation (the guides at rest there),
+        # so no node ran a second time for it, then or on the frames after.
+        self.assertEqual(stats["restEvaluations"], 0)
 
         # The USD export writes the per-axis scales the viewport shows.
         path = os.path.join(tempfile.mkdtemp(prefix="groomlab_fit_"), "fitted.usda")

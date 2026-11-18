@@ -15,6 +15,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "groomlab/color.h"
 #include "groomlab/color_patterns.h"
 #include "groomlab/curve.h"
 #include "groomlab/export_view.h"
@@ -156,7 +157,7 @@ Vec3f rootNormal(const StrandSet& s, const ScalpMesh* scalp, std::size_t i, cons
 // combed hair shades like the surface under it and standing fur (tangent along the normal)
 // still faces out, not sideways.
 void strandFrame(const Vec3f* p, std::size_t n, std::size_t k, const Vec3f& up, Vec3f& tangent, Vec3f& normal, Vec3f& side) {
-    tangent = (p[std::min(k + 1, n - 1)] - p[k > 0 ? k - 1 : 0]).normalized();
+    tangent = centralTangent(p, n, k);
     side = tangent.cross(up);
     if (side.length() < 1e-4f) side = anyPerpendicular(tangent);
     side = side.normalized();
@@ -181,6 +182,8 @@ void resizeFrames(DisplayGeometry& g, std::size_t vertices) {
 
 // Strands per parallel task: a strand's few points are little work.
 constexpr std::size_t kStrandGrain = 1024;
+// Guides drawn side by side (each smoothed into its curve): the fewest a task takes.
+constexpr std::size_t kGuideGrain = 64;
 
 }  // namespace
 
@@ -305,6 +308,10 @@ bool splitNodeColorSource(const std::string& source, std::string* channel, std::
     return true;
 }
 
+std::array<float, 3> clumpColor(std::int64_t group) {
+    return hueColor(unitFloat(hash64(static_cast<std::uint64_t>(group) ^ 0xC1A5)), 0.7f, 0.95f);
+}
+
 std::vector<std::array<float, 3>> strandColors(const StrandSet& s, const ScalpMesh* scalp, int mode, const std::string& source,
                                                float lo, float hi, const std::vector<float>* given) {
     std::vector<std::array<float, 3>> out(s.strandCount(), kDefaultStrandColor);
@@ -336,7 +343,7 @@ std::vector<std::array<float, 3>> strandColors(const StrandSet& s, const ScalpMe
             case kClumpColors:
                 if (channel && std::isfinite((*channel)[i])) {  // (NaN: a strand the named node did not have)
                     const auto group = static_cast<std::int64_t>(std::floor((*channel)[i]));
-                    out[i] = hueColor(unitFloat(hash64(static_cast<std::uint64_t>(group) ^ 0xC1A5)), 0.7f, 0.95f);
+                    out[i] = clumpColor(group);
                 }
                 break;
             default:
@@ -371,6 +378,10 @@ void NodeColorChannel::fill(const DisplaySettings& settings, DisplayInputs& in, 
     }
     in.colorChannel = channel_;
     in.colorChannelVersion = version_;
+}
+
+void fillBraidTubes(const DisplaySettings& settings, DisplayInputs& in, const std::function<const GroomSession&()>& session) {
+    in.braidTubes = settings.braidTubes.empty() ? nullptr : session().braidTubeMesh(settings.braidTubes);
 }
 
 bool strandChannelRange(const StrandSet& s, const std::string& source, float& lo, float& hi) {
@@ -608,7 +619,7 @@ std::map<std::string, std::array<float, 3>> parseGuideGroupColors(const std::str
             const long v = std::strtol(hex.c_str(), &stop, 16);
             ok = stop && *stop == '\0';
             const float srgb = static_cast<float>(v) / 255.0f;
-            rgb[static_cast<std::size_t>(k)] = srgb <= 0.04045f ? srgb / 12.92f : pm::pow((srgb + 0.055f) / 1.055f, 2.4f);
+            rgb[static_cast<std::size_t>(k)] = srgbToLinear(srgb);
         }
         if (ok) groupColors[word.substr(0, colon)] = rgb;
     }
@@ -619,8 +630,7 @@ std::string guideColorHex(const std::array<float, 3>& linear) {
     static const char* const kDigits = "0123456789abcdef";
     std::string text = "#";
     for (const float c : linear) {
-        const float v = std::clamp(c, 0.0f, 1.0f);
-        const float srgb = v <= 0.0031308f ? 12.92f * v : 1.055f * pm::pow(v, 1.0f / 2.4f) - 0.055f;
+        const float srgb = linearToSrgb01(c);
         const int byte = std::clamp(static_cast<int>(std::lround(srgb * 255.0f)), 0, 255);
         text += kDigits[byte >> 4];
         text += kDigits[byte & 15];
@@ -649,25 +659,6 @@ void appendPolyline(DisplayGeometry& batch, const Vec3f* pts, std::size_t n) {
     const auto base = static_cast<std::uint32_t>(batch.positions.size() / 3);
     appendPoints(batch.positions, pts, n);
     appendSegments(batch.indices, base, n);
-}
-
-void appendStrandLines(DisplayGeometry& batch, const StrandSet& s) {
-    const auto& pts = s.positions();
-    const auto base = static_cast<std::uint32_t>(batch.positions.size() / 3);
-    appendPoints(batch.positions, pts.data(), pts.size());
-    const std::size_t count = s.strandCount();
-    // Each strand's segments at an offset of its own (the segments before it), written in parallel.
-    std::vector<std::size_t> offsets(count + 1, 0);
-    for (std::size_t i = 0; i < count; ++i) {
-        const std::size_t n = s.strandPointCount(i);
-        offsets[i + 1] = offsets[i] + (n < 2 ? 0 : 2 * (n - 1));
-    }
-    const std::size_t at = batch.indices.size();
-    batch.indices.resize(at + offsets[count]);
-    std::uint32_t* out = batch.indices.data() + at;
-    parallelFor(0, count, [&](std::size_t i) {
-        writeSegments(out + offsets[i], base + static_cast<std::uint32_t>(s.strandBegin(i)), s.strandPointCount(i));
-    }, kStrandGrain);
 }
 
 namespace {
@@ -706,25 +697,13 @@ void writeLineUvs(const StrandSet& s, const float* widths, std::size_t i, std::s
     }
 }
 
-// The set's widths when it carries one a point (else null: none).
-const float* pointWidths(const StrandSet& s) {
-    return s.widths().size() == s.pointCount() && s.pointCount() > 0 ? s.widths().data() : nullptr;
-}
-
 // Points per parallel task when copying a whole stream.
 constexpr std::size_t kCopyGrain = 1 << 16;
 
 }  // namespace
 
-void addLineFrames(DisplayGeometry& batch, const StrandSet& s, const ScalpMesh* scalp) {
-    const std::size_t first = batch.uvs.size();
-    resizeFrames(batch, first + s.pointCount());
-    const VaneNormals vanes(s);
-    parallelFor(0, s.strandCount(), [&](std::size_t i) {
-        const std::size_t at = first + s.strandBegin(i);
-        writeLineFrames(s, scalp, vanes, i, at, batch.normals.data(), batch.tangents.data());
-        writeLineUvs(s, nullptr, i, at, batch.uvs.data(), 1);
-    }, kStrandGrain);
+const float* displayWidths(const StrandSet& s) {
+    return s.pointCount() > 0 && s.widths().size() == s.pointCount() && s.widthsSet() ? s.widths().data() : nullptr;
 }
 
 StrandLines::StrandLines(StrandsPtr strandSet, MeshPtr scalpMesh, bool litLines, std::shared_ptr<const StrandColors> pointColors)
@@ -764,7 +743,7 @@ StrandLines::StrandLines(StrandsPtr strandSet, MeshPtr scalpMesh, bool litLines,
     const std::uint64_t idsDigest = bufferDigest(idParts.data(), idParts.size() * sizeof(std::uint64_t));
     idsKey_ = hashCombine(layoutKey_, idsDigest) | 1u;
     // The widths' hash, with the IDs'; never 0 with widths.
-    if (const float* widths = pointWidths(*strands)) {
+    if (const float* widths = displayWidths(*strands)) {
         const std::size_t points = strands->pointCount(), widthChunks = (points + kChunk - 1) / kChunk;
         std::vector<std::uint64_t> parts(widthChunks);
         parallelFor(0, widthChunks, [&](std::size_t c) {
@@ -879,7 +858,7 @@ void StrandLines::writeUvs(float* uvs, std::size_t floatsPerVertex, std::size_t 
     if (!strands || first >= end) return;
     const StrandSet& s = *strands;
     const std::size_t floats = std::max<std::size_t>(1, floatsPerVertex), base = s.strandBegin(first);
-    const float* widths = pointWidths(s);
+    const float* widths = displayWidths(s);
     parallelFor(first, end, [&](std::size_t i) { writeLineUvs(s, widths, i, s.strandBegin(i) - base, uvs, floats); }, kStrandGrain);
 }
 
@@ -978,7 +957,7 @@ DisplayGeometry strandRibbons(const StrandSet& s, const ScalpMesh* scalp, const 
     batch.indices.resize(indexAt[count]);
     if (lit) resizeFrames(batch, vertices);
     if (!lit || litColors) batch.colors.resize(vertices * 4);
-    const std::vector<float>& widths = s.widths();
+    const float* widths = displayWidths(s);
     const VaneNormals vanes(s);
     parallelFor(0, count, [&](std::size_t i) {
         const std::size_t n = s.strandPointCount(i);
@@ -990,7 +969,7 @@ DisplayGeometry strandRibbons(const StrandSet& s, const ScalpMesh* scalp, const 
             Vec3f tangent, normal, side;
             strandFrame(p, n, k, up, tangent, normal, side);
             const std::size_t w = s.strandBegin(i) + k;
-            const float half = 0.5f * widthScale * (w < widths.size() ? widths[w] : kRibbonDefaultWidth);
+            const float half = 0.5f * widthScale * (widths ? widths[w] : kRibbonDefaultWidth);
             const std::size_t v = first + 2 * k;
             put3(batch.positions.data() + v * 3, p[k] - side * half);
             put3(batch.positions.data() + v * 3 + 3, p[k] + side * half);
@@ -1022,59 +1001,6 @@ DisplayGeometry strandRibbons(const StrandSet& s, const ScalpMesh* scalp, const 
         }
     }, kStrandGrain);
     return batch;
-}
-
-void appendRootDots(DisplayGeometry& batch, const StrandSet& strands, const ScalpMesh* scalp) {
-    const std::size_t count = strands.strandCount();
-    if (count == 0) return;
-    const float area = scalp && scalp->totalArea() > 0.0f ? scalp->totalArea() : 1.0f;
-    const float radius = 0.3f * std::sqrt(area / static_cast<float>(count));
-    constexpr int kSides = 6;
-    batch.triangles = true;
-    const std::size_t firstVertex = batch.positions.size() / 3, firstIndex = batch.indices.size();
-    batch.positions.resize((firstVertex + count * (kSides + 1)) * 3);
-    batch.indices.resize(firstIndex + count * kSides * 3);
-    parallelFor(0, count, [&](std::size_t s) {
-        const Vec3f* pts = strands.strandPoints(s);
-        const Vec3f root = pts[0];
-        Vec3f up = scalp && scalp->contains(strands.roots()[s]) ? scalp->normal(strands.roots()[s])
-                   : strands.strandPointCount(s) > 1         ? (pts[1] - pts[0]).normalized()
-                                                             : Vec3f{0.0f, 1.0f, 0.0f};
-        if (up.length() < 0.5f) up = {0.0f, 1.0f, 0.0f};
-        const Vec3f side = (std::abs(up.x) < 0.9f ? Vec3f{1.0f, 0.0f, 0.0f} : Vec3f{0.0f, 0.0f, 1.0f}).cross(up).normalized();
-        const Vec3f other = up.cross(side);
-        const Vec3f center = root + up * (0.2f * radius);  // just above the surface, clear of z-fighting
-        const std::size_t v = firstVertex + s * (kSides + 1);
-        const auto base = static_cast<std::uint32_t>(v);
-        float* pos = batch.positions.data() + v * 3;
-        std::uint32_t* idx = batch.indices.data() + firstIndex + s * kSides * 3;
-        put3(pos, center);
-        for (int k = 0; k < kSides; ++k) {
-            const float a = 6.2831853f * static_cast<float>(k) / kSides;
-            const Vec3f p = center + (side * pm::cos(a) + other * pm::sin(a)) * radius;
-            put3(pos + 3 + 3 * k, p);
-            idx[3 * k] = base;
-            idx[3 * k + 1] = base + 1 + static_cast<std::uint32_t>(k);
-            idx[3 * k + 2] = base + 1 + static_cast<std::uint32_t>((k + 1) % kSides);
-        }
-    }, kStrandGrain);
-}
-
-float overlayPullDistance(const StrandSet* strands) {
-    if (!strands) return 0.0f;
-    // Each strand's length in parallel (summed in its own order), then the longest.
-    const std::size_t count = strands->strandCount();
-    std::vector<float> lengths(count);
-    parallelFor(0, count, [&](std::size_t i) {
-        const Vec3f* p = strands->strandPoints(i);
-        const std::size_t n = strands->strandPointCount(i);
-        float length = 0.0f;
-        for (std::size_t k = 1; k < n; ++k) length += (p[k] - p[k - 1]).length();
-        lengths[i] = length;
-    }, kStrandGrain);
-    float longest = 0.0f;
-    for (const float length : lengths) longest = std::max(longest, length);
-    return longest * 1.05f;
 }
 
 // ---- Guides -----------------------------------------------------------------------------------
@@ -1378,8 +1304,8 @@ RootOverlayGeometry rootOverlayGeometry(const std::vector<RootTubeTool::Item>& i
     if (scalp && scalp->triangleCount() > 0 && !scalp->points().empty()) {
         Vec3f lo = scalp->points().front(), hi = lo;
         for (const Vec3f& q : scalp->points()) {
-            lo = Vec3f(std::min(lo.x, q.x), std::min(lo.y, q.y), std::min(lo.z, q.z));
-            hi = Vec3f(std::max(hi.x, q.x), std::max(hi.y, q.y), std::max(hi.z, q.z));
+            lo = minPerAxis(lo, q);
+            hi = maxPerAxis(hi, q);
         }
         lift = 0.0015f * (hi - lo).length();
     }
@@ -1660,7 +1586,7 @@ DisplayGeometry strandMeshGeometry(const std::vector<StrandMeshSource>& meshes, 
             };
             Vec3f tangent;
             for (std::size_t i = 0; i < c; ++i) {
-                tangent = (p[std::min(i + 1, c - 1)] - p[i > 0 ? i - 1 : 0]).normalized();
+                tangent = centralTangent(p, c, i);
                 const float along = static_cast<float>(i) / static_cast<float>(c - 1);
                 const std::size_t ring = first[k] + i * sides;
                 if (ribbon) {
@@ -1815,6 +1741,7 @@ constexpr ItemSpec kItems[kDisplayItemCount] = {
     {DisplayItemId::Cards, DisplayPart::Cards, "cards", DisplayLayer::DormantFilled},
     {DisplayItemId::ScalpMap, DisplayPart::ScalpMap, "scalpMap", DisplayLayer::DormantFilled},
     {DisplayItemId::StrandMesh, DisplayPart::StrandMesh, "strandMesh", DisplayLayer::DormantFilled},
+    {DisplayItemId::BraidTubes, DisplayPart::BraidTubes, "braidTubes", DisplayLayer::DormantFilled},
     {DisplayItemId::TubeSurfaces, DisplayPart::BrushTubes, "tubeSurfaces", DisplayLayer::DormantFilled},
     {DisplayItemId::TubeWires, DisplayPart::BrushTubes, "tubeWires", DisplayLayer::ActiveWire},
     {DisplayItemId::SelectedTubeWires, DisplayPart::BrushTubes, "selectedTubeWires", DisplayLayer::Selection},
@@ -1932,7 +1859,7 @@ const DisplayFrame& DisplayBuilder::update(const DisplayInputs& in, const Displa
     // How deep the hair is (the overlays' pull): the longest strand.
     if (in.strandsVersion != pullVersion_) {
         pullVersion_ = in.strandsVersion;
-        // overlayPullDistance's: the longest strand, from the strands' extent (the session's bounds
+        // How far overlays are pulled toward the camera: the longest strand (x 1.05), from the strands' extent (the session's bounds
         // pass keeps it on them).
         frame_.overlayPull = in.strands ? in.strands->extent().longestStrand * 1.05f : 0.0f;
     }
@@ -1940,6 +1867,7 @@ const DisplayFrame& DisplayBuilder::update(const DisplayInputs& in, const Displa
     buildGuides(in, s);
     buildSelection(in, s);
     buildBrushTubes(in, s);
+    buildBraidTubes(in);
     buildOverlays(in, s);
     buildCards(in, s);
     buildStrandMesh(in, s);
@@ -2269,19 +2197,68 @@ void DisplayBuilder::buildGuides(const DisplayInputs& in, const DisplaySettings&
             return false;
         };
         const std::vector<GuideId> rootTubes = s.guideRootColors ? hierarchy->rootTubeIds() : std::vector<GuideId>{};
+        // What a guide takes from its group, found once per group (a stroke's every stamp draws
+        // the guides again): its level, whether it is hidden or dimmed, its color.
+        struct GroupDraw {
+            int level = -1;
+            bool hidden = false, dimmed = false;
+            std::array<float, 3> color{0.5f, 0.5f, 0.5f};
+        };
+        std::unordered_map<GroupId, GroupDraw> groupDraws;
+        groupDraws.reserve(hierarchy->groups().size());
+        for (const GuideGroup& grp : hierarchy->groups()) {
+            if (groupDraws.count(grp.id)) continue;  // (group(id): the first of the ID)
+            GroupDraw d;
+            d.level = hierarchy->groupDepth(grp.id);
+            d.hidden = !hiddenNames.empty() && hiddenNames.count(grp.name) > 0;
+            d.dimmed = isolated != kNoGroup && !inIsolated(grp.id);
+            const auto automatic = autoColors.find(grp.id);
+            if (automatic != autoColors.end()) d.color = automatic->second;
+            if (grp.hasColor) d.color = grp.color;  // its own (a ToGuides node's), whatever the mode
+            if (!groupColors.empty()) {  // the host's color for the group, over everything
+                const auto own = groupColors.find(grp.name);
+                if (own != groupColors.end()) d.color = own->second;
+            }
+            groupDraws.emplace(grp.id, d);
+        }
+        // The curves drawn, each one's vertices and indices placed before any is made (a guide's
+        // curve has a known size), so they are made side by side into the same streams as one
+        // after another.
+        struct DrawnGuide {
+            const HierarchyGuide* guide = nullptr;
+            const GroupDraw* group = nullptr;
+            std::size_t first = 0, count = 0, firstIndex = 0;
+            std::array<float, 3> color{};
+        };
+        std::vector<DrawnGuide> drawn;
+        std::size_t vertexCount = 0, indexCount = 0;
         for (const HierarchyGuide& g : hierarchy->guides()) {
-            const int level = hierarchy->groupDepth(g.group);
-            if (level < 0 || level >= kMaxDrawnGuideLevels || hiddenGuide(g)) continue;
+            const auto found = groupDraws.find(g.group);
+            if (found == groupDraws.end()) continue;
+            const GroupDraw& d = found->second;
+            if (d.level < 0 || d.level >= kMaxDrawnGuideLevels || d.hidden) continue;
             if (s.tubes) appendTubeSurface(tubes, g, hierarchy->scale());
             if (!s.guides || g.points.size() < 2) continue;
-            const auto automatic = autoColors.find(g.group);
-            std::array<float, 3> c = automatic != autoColors.end() ? automatic->second : std::array<float, 3>{0.5f, 0.5f, 0.5f};
-            const GuideGroup* grp = hierarchy->group(g.group);
-            if (grp && grp->hasColor) c = grp->color;  // its own (a ToGuides node's), whatever the mode
-            if (!groupColors.empty()) {  // the host's color for the group, over everything
-                auto own = grp ? groupColors.find(grp->name) : groupColors.end();
-                if (own != groupColors.end()) c = own->second;
-            }
+            DrawnGuide item;
+            item.guide = &g;
+            item.group = &d;
+            item.first = vertexCount;
+            item.firstIndex = indexCount;
+            // (appendGuideCurve's count: smoothPolyline's for three points or more.)
+            item.count = smoothing < 2 || g.points.size() < 3 ? g.points.size()
+                                                              : (g.points.size() - 1) * static_cast<std::size_t>(smoothing) + 1;
+            vertexCount += item.count;
+            indexCount += (item.count - 1) * 2;
+            drawn.push_back(item);
+        }
+        guides.positions.resize(vertexCount * 3);
+        guides.indices.resize(indexCount);
+        guides.colors.resize(vertexCount * 4);
+        const std::string freezeLayer = "freeze";
+        parallelFor(0, drawn.size(), [&](std::size_t i) {
+            DrawnGuide& item = drawn[i];
+            const HierarchyGuide& g = *item.guide;
+            std::array<float, 3> c = item.group->color;
             bool isFrozen = false;
             if (attributes) {
                 if (byLayer) {
@@ -2291,7 +2268,7 @@ void DisplayBuilder::buildGuides(const DisplayInputs& in, const DisplaySettings&
                     c = {0.08f + 0.92f * v, 0.08f + 0.92f * v, 0.08f + 0.92f * v};
                 }
                 float frozen = 0.0f;
-                if (hierarchy->effectiveAttribute(g, "freeze", &frozen) && frozen >= 0.5f) {
+                if (hierarchy->effectiveAttribute(g, freezeLayer, &frozen) && frozen >= 0.5f) {
                     c = theme.frozen;
                     isFrozen = true;
                 }
@@ -2307,27 +2284,35 @@ void DisplayBuilder::buildGuides(const DisplayInputs& in, const DisplaySettings&
                 }
                 if (isFrozen) c = {c[0] * 0.3f, c[1] * 0.3f, c[2] * 0.3f};
             }
-            const bool dimmed = isolated != kNoGroup && !inIsolated(g.group);
-            if (dimmed) c = {c[0] * 0.25f, c[1] * 0.25f, c[2] * 0.25f};
+            if (item.group->dimmed) c = {c[0] * 0.25f, c[1] * 0.25f, c[2] * 0.25f};
             if (moving) c = {c[0] * 0.4f, c[1] * 0.4f, c[2] * 0.4f};  // the groomed pose, under the moving guides
-            const std::size_t first = guides.positions.size() / 3;
-            const std::size_t drawn = appendGuideCurve(guides, g.points, smoothing);
-            guides.colors.resize((first + drawn) * 4);
-            for (float* out = guides.colors.data() + first * 4; out < guides.colors.data() + guides.colors.size(); out += 4) {
+            item.color = c;
+            if (item.count == g.points.size()) {
+                std::memcpy(guides.positions.data() + item.first * 3, g.points.data(), item.count * sizeof(Vec3f));
+            } else {
+                const std::vector<Vec3f> smooth = smoothPolyline(g.points.data(), g.points.size(), smoothing);
+                std::memcpy(guides.positions.data() + item.first * 3, smooth.data(), item.count * sizeof(Vec3f));
+            }
+            writeSegments(guides.indices.data() + item.firstIndex, static_cast<std::uint32_t>(item.first), item.count);
+            float* out = guides.colors.data() + item.first * 4;
+            for (const float* end = out + item.count * 4; out < end; out += 4) {
                 out[0] = c[0];
                 out[1] = c[1];
                 out[2] = c[2];
                 out[3] = 1.0f;
             }
-            if (pointMode == 0) continue;
+        }, kGuideGrain);
+        if (pointMode != 0) {
             // Dots on the guide's own points, in the curve's color (dimmed, frozen or by map with it).
-            const std::vector<Vec3f>& points = g.points;
-            const std::size_t n = points.size();
-            for (std::size_t k = 0; k < n; ++k) {
-                const bool end = k == 0 || k + 1 == n;
-                if (pointMode == 1 ? !end : !(end || k % stride == 0)) continue;
-                dots.points.push_back(points[k]);
-                dots.colors.push_back(c);
+            for (const DrawnGuide& item : drawn) {
+                const std::vector<Vec3f>& points = item.guide->points;
+                const std::size_t n = points.size();
+                for (std::size_t k = 0; k < n; ++k) {
+                    const bool end = k == 0 || k + 1 == n;
+                    if (pointMode == 1 ? !end : !(end || k % stride == 0)) continue;
+                    dots.points.push_back(points[k]);
+                    dots.colors.push_back(item.color);
+                }
             }
         }
     }
@@ -2443,6 +2428,55 @@ void DisplayBuilder::buildBrushTubes(const DisplayInputs& in, const DisplaySetti
     put(DisplayItemId::TubeSurfaces, std::move(tubes.surfaces));
     put(DisplayItemId::TubeWires, std::move(tubes.wires));
     put(DisplayItemId::SelectedTubeWires, std::move(tubes.selectedWires));
+}
+
+void DisplayBuilder::buildBraidTubes(const DisplayInputs& in) {
+    // Show Tubes: the mesh the host handed (fillBraidTubes), built again only for another one. A lit
+    // surface in the sections' colors, as the scales and the Tube brush's colored tubes draw.
+    const BraidTubeMesh* mesh = in.braidTubes && !in.braidTubes->empty() ? in.braidTubes.get() : nullptr;
+    // (The mesh's key says what it holds; the pointer too, for a host's own mesh without one.)
+    const std::uint64_t key = mesh ? hashCombine(hashCombine(hash64(0xB7A1D), mesh->key), mesh->key ? 0 : reinterpret_cast<std::uintptr_t>(mesh)) : 0;
+    if (!rebuild(DisplayPart::BraidTubes, key)) return;
+    DisplayGeometry g;
+    g.triangles = true;
+    g.scaleSurface = true;
+    g.uvFloats = 2;
+    if (mesh) {
+        const std::size_t n = mesh->points.size();
+        g.positions.resize(n * 3);
+        g.normals.resize(n * 3);
+        g.bitangents.resize(n * 3);
+        g.tangents.resize(n * 3);
+        g.colors.resize(n * 4);
+        g.uvs.resize(n * 2);
+        parallelFor(0, n, [&](std::size_t v) {
+            const Vec3f& p = mesh->points[v];
+            const Vec3f& normal = mesh->normals[v];
+            const std::array<float, 3>& c = mesh->colors[v];
+            const float xyz[3] = {p.x, p.y, p.z}, out[3] = {normal.x, normal.y, normal.z};
+            for (std::size_t i = 0; i < 3; ++i) {
+                g.positions[v * 3 + i] = xyz[i];
+                g.normals[v * 3 + i] = g.bitangents[v * 3 + i] = out[i];
+                g.colors[v * 4 + i] = c[i];
+            }
+            g.colors[v * 4 + 3] = 1.0f;
+            g.uvs[v * 2] = mesh->uvs[v][0];
+            g.uvs[v * 2 + 1] = mesh->uvs[v][1];
+        }, 4096);
+        // Tangents along each tube: from quad to quad (a quad's first edge runs along it).
+        for (const std::array<std::uint32_t, 4>& q : mesh->quads) {
+            const Vec3f along = mesh->points[q[1]] - mesh->points[q[0]];
+            const float length = along.length();
+            const Vec3f t = length > 0.0f ? along * (1.0f / length) : Vec3f(0.0f, 1.0f, 0.0f);
+            for (const std::uint32_t v : {q[0], q[1]}) {
+                g.tangents[v * 3] = t.x;
+                g.tangents[v * 3 + 1] = t.y;
+                g.tangents[v * 3 + 2] = t.z;
+            }
+        }
+        g.indices = mesh->triangles();
+    }
+    put(DisplayItemId::BraidTubes, std::move(g));
 }
 
 void DisplayBuilder::buildOverlays(const DisplayInputs& in, const DisplaySettings& s) {

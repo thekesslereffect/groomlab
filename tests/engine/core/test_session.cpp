@@ -11,6 +11,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "groomlab/braid_tubes.h"
 #include "groomlab/cards.h"
 #include "groomlab/correctives.h"
 #include "groomlab/display.h"
@@ -586,6 +587,229 @@ TEST(Session, ANodesStrandChannelIsItsOwnThoughALaterNodeWritesTheSameChannel) {
     EXPECT_TRUE(strandChannelRange(shown, "clumpId", plainLo, plainHi));
     EXPECT_EQ(lo, plainLo);
     EXPECT_EQ(hi, plainHi);
+}
+
+TEST(Session, ShownTubesAreEvaluatedToThoughTheHairIsHiddenOrANodeBeforeThemIsViewed) {
+    // ViewRequest::braidTubes names the Braid nodes whose tubes the host draws: their inputs are
+    // evaluated whatever else is asked (no strands wanted: a host's hair hidden; a node before the
+    // Braid viewed), and ViewVersions::braidTubes (and evaluation, which every host redraws by)
+    // moves when braidTubeMesh would build another mesh: after an edit of the Braid, or of a node
+    // before it. Without it a host drew the old tubes until something else made it draw again.
+    const std::string graph = withNodes(R"({"name": "braid", "type": "Braid", "params": {"region": 0.5, "width": 0.12, "fuzz": 0.0}})",
+                                        "braid", R"({"name": "after", "type": "Width", "params": {"width": 0.01}})", "after");
+    const auto with = [](std::string text, const std::string& from, const std::string& to) {
+        const std::size_t at = text.find(from);
+        EXPECT_NE(at, std::string::npos) << from;
+        if (at != std::string::npos) text.replace(at, from.size(), to);
+        return text;
+    };
+    const std::string fatter = with(graph, R"("fuzz": 0.0)", R"("fuzz": 0.0, "inflate": 0.9)");
+    const std::string looser = with(fatter, R"("strength": 0.6)", R"("strength": 0.2)");
+    for (const bool hidden : {true, false}) {
+        GroomSession session(groomData(graph));
+        ViewRequest request;
+        request.density = 0.5f;
+        request.viewport = true;
+        request.braidTubes = "braid";
+        if (hidden) request.wantStrands = false;  // the hair hidden
+        else request.viewNode = "clump";          // a node before the Braid viewed
+        const ViewResult first = session.evaluate(request);
+        ASSERT_TRUE(first.errors.empty());
+        EXPECT_GT(first.versions.braidTubes, 0u);
+        const std::shared_ptr<const BraidTubeMesh> mesh = session.braidTubeMesh("braid");
+        ASSERT_TRUE(mesh) << (hidden ? "hidden" : "viewed before") << ": the Braid's inputs were evaluated";
+        const ViewResult again = session.evaluate(request);
+        EXPECT_EQ(again.versions.braidTubes, first.versions.braidTubes) << "nothing changed: nothing to draw again";
+        EXPECT_EQ(again.versions.evaluation, first.versions.evaluation);
+        EXPECT_EQ(session.braidTubeMesh("braid"), mesh);
+
+        session.setGraphJson(fatter);  // the Braid's own param
+        const ViewResult edited = session.evaluate(request);
+        EXPECT_GT(edited.versions.braidTubes, first.versions.braidTubes);
+        EXPECT_GT(edited.versions.evaluation, first.versions.evaluation);
+        const std::shared_ptr<const BraidTubeMesh> fat = session.braidTubeMesh("braid");
+        ASSERT_TRUE(fat);
+        EXPECT_NE(fat->key, mesh->key);
+        ASSERT_EQ(fat->points.size(), mesh->points.size());
+        float moved = 0.0f;
+        for (std::size_t i = 0; i < fat->points.size(); ++i) moved = std::max(moved, (fat->points[i] - mesh->points[i]).length());
+        EXPECT_GT(moved, 0.002f) << "inflate makes the tubes fatter";
+
+        session.setGraphJson(looser);  // a node before the Braid
+        const ViewResult upstream = session.evaluate(request);
+        EXPECT_GT(upstream.versions.braidTubes, edited.versions.braidTubes);
+        EXPECT_GT(upstream.versions.evaluation, edited.versions.evaluation);
+        const std::shared_ptr<const BraidTubeMesh> after = session.braidTubeMesh("braid");
+        ASSERT_TRUE(after);
+        EXPECT_NE(after->key, fat->key);
+    }
+    // No tubes shown: nothing more is evaluated (the hair hidden: nothing of the graph at all).
+    GroomSession session(groomData(graph));
+    ViewRequest request;
+    request.density = 0.5f;
+    request.viewport = true;
+    request.wantStrands = false;
+    const ViewResult none = session.evaluate(request);
+    EXPECT_EQ(none.versions.braidTubes, 0u);
+    EXPECT_FALSE(session.braidTubeMesh("braid")) << "the Braid's inputs were not evaluated";
+    request.braidTubes = "braid";
+    const ViewResult shown = session.evaluate(request);
+    EXPECT_GT(shown.versions.braidTubes, 0u) << "turned on with the hair hidden: evaluated to at once";
+    EXPECT_GT(shown.versions.evaluation, none.versions.evaluation);
+    EXPECT_TRUE(session.braidTubeMesh("braid"));
+    request.braidTubes.clear();
+    EXPECT_GT(session.evaluate(request).versions.braidTubes, shown.versions.braidTubes) << "turned off: the tubes go";
+}
+
+TEST(Session, ShowTubesDrawsTheBraidsSectionsAndKeepsThemWhileTheyStay) {
+    // Show Tubes (braid_tubes.h): the session's mesh of the Braid nodes shown, from what the last
+    // view left (no evaluation), kept while the node's params and inputs stay, and every host's
+    // display item of it. The view itself never changes for it.
+    const std::string graph = withNodes(R"({"name": "braid", "type": "Braid", "params": {"region": 0.5, "width": 0.12, "fuzz": 0.0}})",
+                                        "braid", R"({"name": "after", "type": "Width", "params": {"width": 0.01}})", "after");
+    GroomSession session(groomData(graph));
+    ViewRequest request;
+    request.density = 0.5f;
+    request.viewport = true;
+    const ViewResult view = session.evaluate(request);
+    ASSERT_TRUE(view.strands);
+    const std::size_t evaluations = session.evaluationCount();
+    const std::uint64_t strandsVersion = view.versions.strands;
+
+    EXPECT_FALSE(session.braidTubeMesh("")) << "nothing shown";
+    EXPECT_FALSE(session.braidTubeMesh("clump")) << "not a Braid node";
+    EXPECT_FALSE(session.braidTubeMesh("gone"));
+    EXPECT_EQ(session.braidTubeBuilds(), 0u);
+    const std::shared_ptr<const BraidTubeMesh> mesh = session.braidTubeMesh("braid");
+    ASSERT_TRUE(mesh);
+    EXPECT_EQ(session.braidTubeBuilds(), 1u);
+    EXPECT_EQ(session.evaluationCount(), evaluations) << "read off the last view's results: nothing evaluated";
+    EXPECT_NE(mesh->key, 0u);
+    // Three sections a path, a ring of quads between two rings; 24 points a ring (a version 2
+    // node's sections are pressed: braidTubesAround).
+    const std::size_t around = static_cast<std::size_t>(BraidTubeDetail::kPressedAround);
+    ASSERT_GT(mesh->tubes, 0u);
+    EXPECT_EQ(mesh->tubes % 3, 0u);
+    ASSERT_EQ(mesh->points.size() % around, 0u);
+    EXPECT_EQ(mesh->normals.size(), mesh->points.size());
+    EXPECT_EQ(mesh->colors.size(), mesh->points.size());
+    EXPECT_EQ(mesh->uvs.size(), mesh->points.size());
+    EXPECT_EQ(mesh->quads.size(), mesh->points.size() - mesh->tubes * around);
+    EXPECT_EQ(mesh->triangles().size(), mesh->quads.size() * 6);
+    // Each section in its own color; the normals unit, out of the tube.
+    std::set<std::array<float, 3>> colors(mesh->colors.begin(), mesh->colors.end());
+    EXPECT_EQ(colors, (std::set<std::array<float, 3>>{braidSectionColor(0), braidSectionColor(1), braidSectionColor(2)}));
+    std::size_t outward = 0;
+    for (std::size_t ring = 0; ring * around < mesh->points.size(); ++ring) {
+        Vec3f center;
+        for (std::size_t k = 0; k < around; ++k) center = center + mesh->points[ring * around + k] * (1.0f / static_cast<float>(around));
+        for (std::size_t k = 0; k < around; ++k) {
+            const Vec3f& n = mesh->normals[ring * around + k];
+            EXPECT_NEAR(n.length(), 1.0f, 1e-3f);
+            outward += n.dot(mesh->points[ring * around + k] - center) > 0.0f;
+        }
+    }
+    EXPECT_GT(outward, mesh->points.size() * 99 / 100) << "of " << mesh->points.size();
+    // The tubes lie where the braided hair is: within the strands' bounds.
+    const StrandSet::Extent extent = view.strands->extent();
+    for (const Vec3f& p : mesh->points) {
+        ASSERT_TRUE(p.x > extent.lo.x - 0.2f && p.x < extent.hi.x + 0.2f && p.y > extent.lo.y - 0.2f && p.y < extent.hi.y + 0.2f &&
+                    p.z > extent.lo.z - 0.2f && p.z < extent.hi.z + 0.2f);
+    }
+
+    // Asked again, and after a view that changed nothing: the same mesh, nothing built.
+    EXPECT_EQ(session.braidTubeMesh("braid"), mesh);
+    session.evaluate(request);
+    EXPECT_EQ(session.braidTubeMesh("braid"), mesh);
+    EXPECT_EQ(session.braidTubeBuilds(), 1u);
+    EXPECT_EQ(session.braidTubeMesh("gone\nbraid\nclump"), mesh) << "names that are no Braid node: ignored";
+    // An edit elsewhere (the node after the Braid): the strands change, the tubes do not.
+    auto withParam = [&](const std::string& node, const std::string& param, double value) {
+        nlohmann::json g = nlohmann::json::parse(graph);
+        for (nlohmann::json& n : g["nodes"]) {
+            if (n["name"] == node) n["params"][param] = value;
+        }
+        return g.dump();
+    };
+    session.setGraphJson(withParam("after", "width", 0.02));
+    const ViewResult wider = session.evaluate(request);
+    EXPECT_NE(wider.versions.strands, strandsVersion);
+    EXPECT_EQ(session.braidTubeMesh("braid"), mesh) << "an unrelated edit: the mesh kept";
+    EXPECT_EQ(session.braidTubeBuilds(), 1u);
+    // The Braid's own param: built again, another mesh (its sections fatter).
+    session.setGraphJson(withParam("braid", "inflate", 1.0));
+    session.evaluate(request);
+    const std::shared_ptr<const BraidTubeMesh> apart = session.braidTubeMesh("braid");
+    ASSERT_TRUE(apart);
+    EXPECT_EQ(session.braidTubeBuilds(), 2u);
+    EXPECT_NE(apart->key, mesh->key);
+    ASSERT_EQ(apart->points.size(), mesh->points.size());
+    EXPECT_NE(apart->points, mesh->points);
+    // What feeds it (a Clump before it): built again too.
+    session.setGraphJson(withParam("clump", "strength", 0.3));
+    session.evaluate(request);
+    const std::shared_ptr<const BraidTubeMesh> fed = session.braidTubeMesh("braid");
+    ASSERT_TRUE(fed);
+    EXPECT_EQ(session.braidTubeBuilds(), 3u);
+    EXPECT_NE(fed->key, apart->key);
+
+    // Every host's display: the mesh handed on while a node is shown (fillBraidTubes), drawn as a lit
+    // surface in the sections' colors, triangulated here; built again only for another mesh.
+    DisplaySettings settings;
+    DisplayBuilder builder;
+    int asked = 0;
+    auto sessionOf = [&]() -> const GroomSession& { ++asked; return session; };
+    const ViewResult& now = session.last();
+    DisplayInputs off = DisplayInputs::fromView(now, false);
+    fillBraidTubes(settings, off, sessionOf);
+    EXPECT_EQ(asked, 0) << "nothing shown: the session is not asked";
+    EXPECT_FALSE(off.braidTubes);
+    const std::uint64_t strandsDigest = builder.update(off, settings).item(DisplayItemId::Strands).geometry->digest();
+    EXPECT_FALSE(builder.frame().item(DisplayItemId::BraidTubes).shown);
+    settings.braidTubes = "braid";
+    DisplayInputs on = DisplayInputs::fromView(now, false);
+    fillBraidTubes(settings, on, sessionOf);
+    EXPECT_EQ(asked, 1);
+    EXPECT_EQ(on.braidTubes, fed);
+    const DisplayFrame& frame = builder.update(on, settings);
+    const DisplayItem& tubes = frame.item(DisplayItemId::BraidTubes);
+    EXPECT_STREQ(tubes.name, "braidTubes");
+    EXPECT_TRUE(tubes.rebuilt);
+    ASSERT_TRUE(tubes.shown);
+    const DisplayGeometry& g = *tubes.geometry;
+    EXPECT_TRUE(g.triangles);
+    EXPECT_TRUE(g.scaleSurface);
+    EXPECT_EQ(g.vertexCount(), fed->points.size());
+    EXPECT_EQ(g.indices.size(), fed->quads.size() * 6);
+    EXPECT_EQ(g.normals.size(), g.positions.size());
+    EXPECT_EQ(g.bitangents, g.normals);
+    EXPECT_EQ(g.tangents.size(), g.positions.size());
+    EXPECT_EQ(g.colors.size(), fed->points.size() * 4);
+    EXPECT_EQ(g.uvs.size(), fed->points.size() * 2);
+    EXPECT_FLOAT_EQ(g.colors[0], fed->colors[0][0]);
+    EXPECT_FLOAT_EQ(g.colors[3], 1.0f);
+    EXPECT_FALSE(frame.rebuilt[static_cast<std::size_t>(DisplayPart::Strands)]) << "the strands are not built again for the tubes";
+    EXPECT_EQ(frame.item(DisplayItemId::Strands).geometry->digest(), strandsDigest);
+    // The same mesh again: not rebuilt. Off: the item goes, the strands as they are.
+    DisplayInputs again = DisplayInputs::fromView(now, false);
+    fillBraidTubes(settings, again, sessionOf);
+    EXPECT_FALSE(builder.update(again, settings).item(DisplayItemId::BraidTubes).rebuilt);
+    settings.braidTubes.clear();
+    DisplayInputs gone = DisplayInputs::fromView(now, false);
+    fillBraidTubes(settings, gone, sessionOf);
+    const DisplayFrame& without = builder.update(gone, settings);
+    EXPECT_TRUE(without.item(DisplayItemId::BraidTubes).rebuilt);
+    EXPECT_FALSE(without.item(DisplayItemId::BraidTubes).shown);
+    EXPECT_EQ(without.item(DisplayItemId::Strands).geometry->digest(), strandsDigest);
+
+    // A bypassed Braid braids nothing: no tubes.
+    nlohmann::json bypassed = nlohmann::json::parse(graph);
+    for (nlohmann::json& n : bypassed["nodes"]) {
+        if (n["name"] == "braid") n["bypass"] = true;
+    }
+    session.setGraphJson(bypassed.dump());
+    session.evaluate(request);
+    EXPECT_FALSE(session.braidTubeMesh("braid"));
 }
 
 TEST(Session, CardsAtTheirDensityKeepABakedAtlas) {

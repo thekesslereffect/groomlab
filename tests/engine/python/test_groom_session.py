@@ -129,6 +129,67 @@ class SessionTest(unittest.TestCase):
         session.set_scalp_maps_json({"tint": {"kind": "vertices", "values": values}})
         return session, points, values
 
+    def test_show_tubes_names_mesh_and_display_item(self):
+        # Show Tubes (a Braid node's button in every host's graph editor) through the bindings: the
+        # core's rules for the names, the session's mesh of the nodes shown, the builder's item.
+        session, _points, _values = self.make()
+        graph = json.loads(json.dumps(LOOK_GRAPH))
+        last = [c for c in graph["connections"] if c["to"] == graph["output"]][0]
+        graph["nodes"].append({"name": "side braid", "type": "Braid", "params": {"region": 0.6, "width": 0.15, "fuzz": 0.0}})
+        graph["connections"].remove(last)
+        graph["connections"] += [{"from": last["from"], "to": "side braid", "input": "strands"},
+                                 {"from": "side braid", "to": graph["output"], "input": last["input"]}]
+        session.set_graph_json(graph)
+        edit = gl.GraphEdit(json.dumps(graph))
+        self.assertTrue(edit.braid_tubes_offered("side braid"))
+        self.assertFalse(edit.braid_tubes_offered("scatter"))
+        shown = edit.braid_tubes_toggled("side braid", "")
+        self.assertEqual(shown, "side braid")
+        self.assertEqual(edit.braid_tubes_toggled("scatter", shown), shown)
+        self.assertTrue(edit.braid_tubes_shown("side braid", shown))
+        self.assertEqual(edit.braid_tubes_toggled("side braid", shown), "")
+        self.assertEqual(gl.braid_tube_names("a\n\nb\na"), ["a", "b"])
+        self.assertEqual(gl.braid_tubes_text(["a", "b"]), "a\nb")
+        self.assertEqual(gl.renamed_braid_tubes(shown, "side braid", "plait"), "plait")
+        self.assertEqual(edit.braid_tubes_kept("gone\nscatter\nside braid"), "side braid")
+        self.assertNotEqual(gl.braid_section_color(0), gl.braid_section_color(1))
+
+        view = session.view()
+        self.assertEqual(view.errors, [])
+        self.assertIsNone(session.braid_tube_mesh(""))
+        self.assertIsNone(session.braid_tube_mesh("scatter"))
+        mesh = session.braid_tube_mesh(shown)
+        self.assertIsNotNone(mesh)
+        self.assertGreater(mesh.tubes, 0)
+        points = memoryview(mesh.points)
+        self.assertEqual(points.shape[1], 3)
+        self.assertEqual(points.shape[0] % 24, 0)  # (a version 2 node's pressed sections: 24 points a ring)
+        self.assertEqual(memoryview(mesh.normals).shape, points.shape)
+        self.assertEqual(memoryview(mesh.colors).shape, points.shape)
+        self.assertEqual(memoryview(mesh.uvs).shape, (points.shape[0], 2))
+        quads = memoryview(mesh.quads)
+        self.assertEqual(quads.shape, (points.shape[0] - 24 * mesh.tubes, 4))
+        self.assertEqual(len(mesh.triangles()), 6 * quads.shape[0])
+        builds = session.braid_tube_builds
+        self.assertEqual(session.braid_tube_mesh(shown).key, mesh.key)
+        self.assertEqual(session.braid_tube_builds, builds)  # kept: nothing built again
+
+        builder = gl.DisplayBuilder()
+        settings = gl.DisplaySettings()
+        items = builder.update(view, settings, session=session)
+        self.assertEqual(items["braidTubes"].vertex_count, 0)
+        strands = items["strands"].geometry.digest
+        settings.braid_tubes = shown
+        items = builder.update(view, settings, session=session)
+        tubes = items["braidTubes"]
+        self.assertTrue(tubes.rebuilt)
+        self.assertEqual(tubes.vertex_count, points.shape[0])
+        self.assertEqual(memoryview(tubes.geometry.indices).shape, (2 * quads.shape[0], 3))
+        self.assertEqual(memoryview(tubes.geometry.colors).shape, (points.shape[0], 4))
+        self.assertEqual(items["strands"].geometry.digest, strands)  # the strands as they were
+        self.assertNotIn("strands", builder.rebuilt_parts)
+        self.assertIn("braidTubes", builder.rebuilt_parts)
+
     def test_inputs_from_buffers_and_setters_that_change_nothing(self):
         session, points, values = self.make()
         first = session.view()

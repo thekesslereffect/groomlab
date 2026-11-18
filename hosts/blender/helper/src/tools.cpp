@@ -2269,89 +2269,29 @@ int resolutionOf(const json& args) {
                       BrushToolSettings::kMaxPaintResolution);
 }
 
-// The Map nodes reading map `name` and the (node, param) pairs it feeds through them and map
-// params naming it (Maya's map_nodes, map_users).
-void mapReaders(const json& graph, const std::string& name, json& nodes, json& users) {
-    nodes = json::array();
-    users = json::array();
-    if (!graph.is_object() || !graph.contains("nodes") || !graph["nodes"].is_array()) return;
-    std::set<std::string> readers;
-    for (const json& n : graph["nodes"]) {
-        if (!n.is_object() || n.value("type", std::string()) != "Map") continue;
-        const json params = n.contains("params") && n["params"].is_object() ? n["params"] : json::object();
-        if (params.value("name", std::string("mask")) == name) {
-            readers.insert(n.value("name", std::string()));
-            nodes.push_back(n.value("name", std::string()));
-        }
-    }
-    if (graph.contains("connections") && graph["connections"].is_array()) {
-        for (const json& c : graph["connections"]) {
-            if (c.is_object() && readers.count(c.value("from", std::string()))) {
-                users.push_back({c.value("to", std::string()), c.value("input", std::string())});
-            }
-        }
-    }
-    for (const json& n : graph["nodes"]) {
-        if (!n.is_object() || !n.contains("params") || !n["params"].is_object()) continue;
-        for (const auto& [param, v] : n["params"].items()) {
-            if (v.is_object() && (v.value("guide", std::string()) == name || v.value("colorSet", std::string()) == name)) {
-                users.push_back({n.value("name", std::string()), param});
-            }
-        }
-    }
-}
-
+// The Map nodes reading map `name` and the (node, param) pairs it feeds through them and the
+// params naming it (Maya's map_nodes, map_users): the core's (scalp_maps.h mapReaders).
 json mapUsers(ToolState& t, const json& args) {
     const std::string name = needMap(t.session, args);
-    json nodes, users;
-    const std::string& text = t.session.groom->data().graphJson;
-    mapReaders(text.empty() ? json::object() : json::parse(text, nullptr, false), name, nodes, users);
-    return {{"name", name}, {"nodes", nodes}, {"users", users}};
+    const MapReaders readers = mapReaders(t.session.groom->data().graphJson, name);
+    json users = json::array();
+    for (const auto& [node, param] : readers.users) users.push_back({node, param});
+    return {{"name", name}, {"nodes", readers.nodes}, {"users", users}};
 }
 
 // What reads map `name` lets go of it (Maya's _unlink_map): its Map nodes removed, the params they
-// fed reading their own values again (an exposed param's port removed with them), map params
-// naming it back to the node's default. Returns the graph ("" unchanged); `changed` the pairs.
+// fed reading their own values again (an exposed param's port removed with them), the params
+// naming it back to the node's default: the core's (scalp_maps.h unlinkMapReaders). Returns the
+// graph ("" unchanged); `changed` the pairs.
 std::string unlinkMapReaders(const std::string& graphText, const std::string& name, json& changed) {
     changed = json::array();
     if (graphText.empty()) return {};
-    json graph = json::parse(graphText, nullptr, false);
-    if (!graph.is_object()) return {};
-    json readers, fed;
-    mapReaders(graph, name, readers, fed);
-    if (readers.empty() && fed.empty()) return {};
-    std::set<std::string> gone;
-    for (const json& r : readers) gone.insert(r.get<std::string>());
-    for (json& n : graph["nodes"]) {
-        if (!n.is_object()) continue;
-        const std::string node = n.value("name", std::string());
-        // Ports of exposed params a reader fed: removed (the param keeps its value).
-        if (graph.contains("connections") && graph["connections"].is_array() && n.contains("paramInputs") && n["paramInputs"].is_array()) {
-            for (const json& c : graph["connections"]) {
-                if (!c.is_object() || !gone.count(c.value("from", std::string())) || c.value("to", std::string()) != node) continue;
-                json& ports = n["paramInputs"];
-                const std::string input = c.value("input", std::string());
-                for (auto p = ports.begin(); p != ports.end(); ++p) {
-                    if (*p == input) {
-                        ports.erase(p);
-                        break;
-                    }
-                }
-            }
-            if (n["paramInputs"].empty()) n.erase("paramInputs");
-        }
-        if (!n.contains("params") || !n["params"].is_object()) continue;
-        std::vector<std::string> drop;
-        for (const auto& [param, v] : n["params"].items()) {
-            if (v.is_object() && (v.value("guide", std::string()) == name || v.value("colorSet", std::string()) == name)) drop.push_back(param);
-        }
-        for (const std::string& param : drop) n["params"].erase(param);  // the operator's default
-    }
-    for (const json& f : fed) changed.push_back(f);
     try {
-        GraphEdit edit(graph.dump());
-        for (const std::string& node : gone) edit.removeNode(node);  // with every connection to or from it
-        return edit.toJson();
+        bool touched = false;
+        std::vector<std::pair<std::string, std::string>> unlinked;
+        std::string graph = groomlab::unlinkMapReaders(graphText, name, &touched, &unlinked);
+        for (const auto& [node, param] : unlinked) changed.push_back({node, param});
+        return touched ? graph : std::string();
     } catch (const std::exception& e) {
         fail("graph", std::string("cannot unlink the map's readers: ") + e.what());
     }
@@ -3062,6 +3002,16 @@ DisplaySettings displaySettingsOf(ToolState& t, const json& v) {
                 s.hiddenGuideGroups = settingString(x, k);
             }
         } else if (key == "guideGroupColors") s.guideGroupColors = settingString(x, k);
+        else if (key == "braidTubes") {
+            // Show Tubes: the Braid nodes whose section tubes draw (names, one a line, or a list).
+            if (x.is_array()) {
+                std::vector<std::string> names;
+                for (const json& n : x) names.push_back(settingString(n, k));
+                s.braidTubes = braidTubesText(names);
+            } else {
+                s.braidTubes = settingString(x, k);
+            }
+        }
         else if (key == "theme") {
             if (!x.is_object()) fail("bad_request", "theme is an object");
             DisplayTheme& th = s.theme;
@@ -3093,10 +3043,11 @@ const char* layerName(DisplayLayer layer) {
     }
 }
 
-constexpr std::array<DisplayItemId, 11> kShownItems{DisplayItemId::Guides,       DisplayItemId::Tubes,     DisplayItemId::Selected,
+constexpr std::array<DisplayItemId, 12> kShownItems{DisplayItemId::Guides,       DisplayItemId::Tubes,     DisplayItemId::Selected,
                                                     DisplayItemId::SoftSelected, DisplayItemId::Parts,     DisplayItemId::Flow,
                                                     DisplayItemId::FlowField,    DisplayItemId::ScalpMap,  DisplayItemId::TubeSurfaces,
-                                                    DisplayItemId::TubeWires,    DisplayItemId::SelectedTubeWires};
+                                                    DisplayItemId::TubeWires,    DisplayItemId::SelectedTubeWires,
+                                                    DisplayItemId::BraidTubes};  // Show Tubes: the Braid nodes' section tubes
 
 std::uint64_t haveVersion(const json& have, const std::string& name) {
     if (!have.is_object()) return 0;
@@ -3167,6 +3118,8 @@ json display(ToolState& t, const json& args) {
         in.scalpMapTexture = !image.key.empty();
         in.scalpMapTextureGeneration = image.texture;
     }
+    // Show Tubes: the shown Braid nodes' section tubes (the session's mesh, kept while they stay).
+    fillBraidTubes(settings, in, [&session]() -> const GroomSession& { return session; });
     const DisplayFrame& frame = t.builder.update(in, settings);
 
     // What changed against what the host holds: those items' arrays, in one block.
@@ -3428,7 +3381,17 @@ json toolCatalogJson() {
     json categories = json::array();
     for (const BrushCategory c : brushCategories()) categories.push_back(brushCategoryName(c));
     json settings = json::array();
-    for (const BrushSettingSpec& s : brushSettingSpecs()) settings.push_back({{"id", s.id}, {"label", s.label}, {"hint", s.hint}});
+    for (const BrushSettingSpec& s : brushSettingSpecs()) {
+        json j = {{"id", s.id}, {"label", s.label}, {"hint", s.hint}, {"kind", brushSettingKindName(s.kind)}};
+        // A value's facts as the core writes them (a length in the groom's units, not the host's).
+        if (s.kind == BrushSettingKind::Bool) {
+            j["default"] = s.defaultValue != 0.0;
+        } else if (s.isValue()) {
+            j.update({{"default", s.defaultValue}, {"softMin", s.softMin}, {"softMax", s.softMax}, {"min", s.min}, {"max", s.max},
+                      {"decimals", s.decimals}, {"unit", s.unit}});
+        }
+        settings.push_back(std::move(j));
+    }
     // What New Map > For offers first (stroke.h paintableSettings): the node type and its param.
     json paintable = json::array();
     for (const PaintableSetting& p : paintableSettings()) {

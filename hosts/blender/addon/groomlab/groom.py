@@ -933,6 +933,9 @@ def evaluate(scalp, rt, mode="preview", **extra):
         args.update(preview_args(scalp))
         if scalp.groomlab.view_node:  # the Graph Editor's View: this node's strands (renders keep the output)
             args["viewNode"] = scalp.groomlab.view_node
+        shown = getattr(scalp.groomlab_tools, "braid_tubes", "")
+        if shown:  # Show Tubes: those Braid nodes are evaluated to, whatever is viewed or hidden
+            args["braidTubes"] = shown
     r = _call("evaluate", **args)
     rt.notes = dict(r.get("notes") or {})
     rt.errors = list(r.get("errors") or [])

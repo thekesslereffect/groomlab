@@ -113,7 +113,7 @@ void MainWindow::applyDisplayOptions() {
     if (document_) document_->setScalpMapDisplay(scalpMap_->currentData().toString().toStdString(), scalpMapChannel_->currentText().toStdString());
     // The colored modes are the line path's (the builder colors the lines): the lookdev ribbons
     // step aside while one is on and come back with the solid mode.
-    viewport_->renderer().setLookdev(lookdevWanted_ && mode == kSolidColors);
+    applyLookdev();
     if (modeChanged) refreshDisplayChoices();
     if (maps_) maps_->invalidate();
     refreshClumpColored();
@@ -158,6 +158,31 @@ void MainWindow::followRenamedNode(const std::string& from, const std::string& t
         colorSource_->setEditText(QString::fromStdString(renamed));
     }
     applyDisplayOptions();
+}
+
+void MainWindow::toggleBraidTubes(const std::string& node) {
+    if (!document_) return;
+    document_->toggleBraidTubes(node);
+    if (refreshBraidTubes()) redisplay();
+    refreshTitle();  // (saved with the groom: the document is changed)
+}
+
+bool MainWindow::refreshBraidTubes() {
+    const std::string shown = document_ ? document_->braidTubes() : std::string();
+    if (graph_) {
+        std::vector<std::string> lit;
+        if (document_ && !shown.empty()) {
+            const GraphEdit edit(document_->graph().dump());
+            for (const std::string& name : braidTubeNames(shown)) {
+                if (edit.braidTubesShown(name, shown)) lit.push_back(name);
+            }
+        }
+        graph_->setBraidTubeNodes(std::move(lit));
+    }
+    if (shown == settings_.braidTubes) return false;
+    settings_.braidTubes = shown;
+    applyLookdev();  // (the tubes are the line path's to draw)
+    return true;
 }
 
 void MainWindow::toggleClumpColors(const std::string& node) {
@@ -911,8 +936,12 @@ void MainWindow::setLookdev(bool on) {
         return;
     }
     lookdevWanted_ = on;
-    viewport_->renderer().setLookdev(on && settings_.colorMode == kSolidColors);
+    applyLookdev();
     viewport_->update();
+}
+
+void MainWindow::applyLookdev() {
+    viewport_->renderer().setLookdev(lookdevWanted_ && settings_.colorMode == kSolidColors && settings_.braidTubes.empty());
 }
 
 }  // namespace groomlab::app

@@ -222,6 +222,8 @@ def refresh_params(scalp):
     defaults = {ps["name"]: ps.get("default") for ps in spec.get("params", [])}
     with props.quiet():
         for ps in spec.get("params", []):
+            if ps.get("addedIn", 0) > spec.get("nodeVersion", ps.get("addedIn", 0)):
+                continue  # added by a later version of the operator: nothing here until Upgrade (the core's paramInVersion)
             p = g.params.add()
             p.name = ps["name"]
             p.kind = ps.get("kind", "")
@@ -354,6 +356,8 @@ def remove_node(scalp, name):
     rt = _ensure(scalp)
     # What fed it feeds what it fed (the core's removeNodeKeepingFlow, as every graph editor's Delete).
     error = _edit(rt, op="remove_node", name=name, keepFlow=True)["graphError"]
+    from . import graph_tree
+    graph_tree.follow_braid_tubes(scalp)  # a deleted Braid's Show Tubes goes with it
     _changed(scalp, rt)
     return error
 

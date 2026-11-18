@@ -2,7 +2,9 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <chrono>
 #include <sstream>
+#include <thread>
 #include <regex>
 #include <cmath>
 #include <map>
@@ -12,6 +14,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "groomlab/braid_tubes.h"
 #include "groomlab/display.h"
 #include "groomlab/field.h"
 #include "groomlab/graph.h"
@@ -283,6 +286,47 @@ TEST(Graph, AMultiOutputNodeRunsOnceForAllItsConsumers) {
             EXPECT_EQ(g.evaluationCount(), 4u);
         }
     }
+}
+
+// A SplitOp taking a while, so its time shows.
+class SlowSplitOp : public SplitOp {
+public:
+    using SplitOp::SplitOp;
+    std::vector<Value> evaluateOutputs(const EvalContext& ctx, const std::vector<Value>& inputs) const override {
+        std::this_thread::sleep_for(std::chrono::milliseconds(3));
+        return SplitOp::evaluateOutputs(ctx, inputs);
+    }
+};
+
+TEST(Graph, ANodeReadTwiceInOneEvaluationKeepsItsTime) {
+    // Its second output read in the evaluation it ran in is served from its cache: its time stays
+    // (a Braid with its ties connected showed 0 ms). An evaluation it did not run in: 0.
+    int runs = 0;
+    Graph g;
+    const NodeId src = g.addNode(std::make_unique<LinesOp>());
+    const NodeId split = g.addNode(std::make_unique<SlowSplitOp>(&runs));
+    const NodeId join = g.addNode(std::make_unique<JoinOp>());
+    g.connect(src, split, 0);
+    g.connect(split, join, 0);
+    g.connect(split, join, 1, 1);
+    ASSERT_TRUE(g.evaluateStrands(join));
+    EXPECT_EQ(runs, 1);
+    ASSERT_EQ(g.lastEvaluationTimes().count(split), 1u);
+    EXPECT_GE(g.lastEvaluationTimes().at(split), 1.0);
+    // Nothing ran: the node asked for is served (the nodes before it are not reached).
+    ASSERT_TRUE(g.evaluateStrands(join));
+    EXPECT_EQ(runs, 1);
+    EXPECT_EQ(g.lastEvaluationTimes().at(join), 0.0);
+    // Only the node after it runs (its link moved to another output): the split's is served.
+    g.connect(split, join, 1, 0);
+    ASSERT_TRUE(g.evaluateStrands(join));
+    EXPECT_EQ(runs, 1);
+    EXPECT_EQ(g.lastEvaluationTimes().at(split), 0.0);
+    // It runs again and is read twice again.
+    g.node(split).params().set("dy", 5.0);
+    ASSERT_TRUE(g.evaluateStrands(join));
+    EXPECT_EQ(runs, 2);
+    EXPECT_GE(g.lastEvaluationTimes().at(split), 1.0);
 }
 
 TEST(Graph, ConnectionsTypeCheckTheOutputTheyRead) {
@@ -637,6 +681,186 @@ TEST(GraphInserts, DriversGoRightAfterTheGuidesAndASimulationAfterThem) {
     EXPECT_NO_THROW(loadGraphJson(other.toJson())) << "a graph that loads";
 }
 
+TEST(GraphInserts, ANodeGoesIntoTheFlowAlikeInEveryHost) {
+    // insertBetween, insertAfter and insertOnLink: Maya's GraphModel.insert_*, the Blender helper's
+    // edit_graph ops and the app's node graph (a node dropped on a wire) make these.
+    using nlohmann::json;
+    auto feeds = [](const GraphEdit& e, const std::string& from, const std::string& to, const std::string& input) {
+        const json g = json::parse(e.toJson());
+        for (const json& c : g["connections"]) {
+            if (c["from"] == from && c["to"] == to && c["input"] == input) return true;
+        }
+        return false;
+    };
+    auto firstFedBy = [](const GraphEdit& e, const std::string& from) {
+        const json g = json::parse(e.toJson());
+        for (const json& c : g["connections"]) {
+            if (c["from"] == from) return std::make_pair(c["to"].get<std::string>(), c["input"].get<std::string>());
+        }
+        return std::make_pair(std::string(), std::string());
+    };
+    GraphEdit edit(defaultGraphJson());
+    setNodePosition(edit, "interpolate", 300.0, 20.0);
+    const auto [next, nextInput] = firstFedBy(edit, "interpolate");
+    ASSERT_FALSE(next.empty());
+    // After a node: into its chain, half a column right of and a row below it.
+    const std::string curl = edit.addNode("Curl");
+    insertAfter(edit, "interpolate", curl);
+    EXPECT_TRUE(feeds(edit, "interpolate", curl, "strands"));
+    EXPECT_TRUE(feeds(edit, curl, next, nextInput));
+    EXPECT_FALSE(feeds(edit, "interpolate", next, nextInput));
+    EXPECT_EQ(nodePosition(edit, curl), std::make_pair(300.0 + kInsertColumn / 2.0, 20.0 + kInsertRow));
+    // After a node feeding nothing: fed by it, on its first input or the one named.
+    const std::string leaf = edit.addNode("Noise");
+    const std::string tail = edit.addNode("Noise");
+    insertAfter(edit, leaf, tail);
+    EXPECT_TRUE(feeds(edit, leaf, tail, "strands"));
+    const std::string merge = edit.addNode("Merge");
+    insertAfter(edit, tail, merge, "b");
+    EXPECT_TRUE(feeds(edit, tail, merge, "b"));
+    EXPECT_THROW(insertAfter(edit, "nope", curl), GraphError);
+    // Between two nodes, on the node's first input when none is named; nothing changes when it cannot.
+    const std::string between = edit.addNode("Merge");
+    insertBetween(edit, curl, next, between, "");
+    EXPECT_TRUE(feeds(edit, curl, between, "a"));
+    EXPECT_TRUE(feeds(edit, between, next, nextInput));
+    std::string before = edit.toJson();
+    EXPECT_THROW(insertBetween(edit, "scalp", next, leaf), GraphError) << "the scalp does not feed it";
+    EXPECT_THROW(insertBetween(edit, curl, between, "scalp", ""), GraphError) << "a Scalp node has no input";
+    EXPECT_EQ(edit.toJson(), before);
+
+    // On a link: the node reads the source on its first input that takes it (a Collide's strands, a
+    // Simulate's guides), whatever the link's own input is named.
+    GraphEdit wire(defaultGraphJson());
+    const std::string sim = wire.addNode("Simulate");
+    insertOnLink(wire, "guides", "interpolate", "guides", sim);
+    EXPECT_TRUE(feeds(wire, "guides", sim, "guides"));
+    EXPECT_TRUE(feeds(wire, sim, "interpolate", "guides"));
+    EXPECT_FALSE(feeds(wire, "guides", "interpolate", "guides"));
+    const auto [fed, fedInput] = firstFedBy(wire, "interpolate");
+    const std::string noise = wire.addNode("Noise");
+    const std::string firstOutput = json::parse(wire.nodeSpecJson("interpolate"))["outputs"][0]["name"].get<std::string>();
+    insertOnLink(wire, "interpolate", fed, fedInput, noise, firstOutput);  // the first output by its name: the same link
+    EXPECT_TRUE(feeds(wire, "interpolate", noise, "strands"));
+    EXPECT_TRUE(feeds(wire, noise, fed, fedInput));
+    EXPECT_NO_THROW(loadGraphJson(wire.toJson())) << "a graph that loads";
+    // What it refuses, the graph as it was: a link that is not there, an end of the link, an unknown
+    // node or output, a node with no input, a node that cannot feed the far end.
+    before = wire.toJson();
+    EXPECT_THROW(insertOnLink(wire, "interpolate", fed, fedInput, sim), GraphError) << "that link went through the Noise";
+    EXPECT_THROW(insertOnLink(wire, "interpolate", noise, "strands", noise), GraphError);
+    EXPECT_THROW(insertOnLink(wire, "interpolate", noise, "strands", "interpolate"), GraphError);
+    EXPECT_THROW(insertOnLink(wire, "interpolate", noise, "strands", "nope"), GraphError);
+    EXPECT_THROW(insertOnLink(wire, "nope", noise, "strands", sim), GraphError);
+    EXPECT_THROW(insertOnLink(wire, "interpolate", noise, "strands", noise, "nope"), GraphError);
+    const std::string scalp2 = wire.addNode("Scalp");
+    const std::string withScalp = wire.toJson();
+    EXPECT_THROW(insertOnLink(wire, "interpolate", noise, "strands", scalp2), GraphError) << "no input at all";
+    const std::string collider = wire.addNode("ColliderMesh");
+    EXPECT_THROW(insertOnLink(wire, "interpolate", noise, "strands", collider), GraphError) << "a mesh cannot feed strands";
+    wire.removeNode(collider);
+    EXPECT_EQ(wire.toJson(), withScalp);
+    wire.removeNode(scalp2);
+    EXPECT_EQ(wire.toJson(), before);
+}
+
+TEST(GraphInserts, AddScalpGrowsTheSameHairOnAnotherMesh) {
+    // graph_inserts.h insertScalp: Maya's extra_scalps.py and the Blender add-on's add_scalp.
+    using nlohmann::json;
+    auto feeds = [](const GraphEdit& e, const std::string& from, const std::string& to, const std::string& input) {
+        const json g = json::parse(e.toJson());
+        for (const json& c : g["connections"]) {
+            if (c["from"] == from && c["to"] == to && c["input"] == input) return true;
+        }
+        return false;
+    };
+    auto param = [](const GraphEdit& e, const std::string& node, const std::string& name) {
+        const json g = json::parse(e.toJson());
+        for (const json& n : g["nodes"]) {
+            if (n["name"] == node) return n["params"].value(name, json());
+        }
+        return json();
+    };
+    auto fedBy = [](const GraphEdit& e, const std::string& from) {
+        std::vector<std::pair<std::string, std::string>> out;
+        const json g = json::parse(e.toJson());
+        for (const json& c : g["connections"]) {
+            if (c["from"] == from) out.emplace_back(c["to"].get<std::string>(), c["input"].get<std::string>());
+        }
+        return out;
+    };
+    GraphEdit edit(defaultGraphJson());
+    // A braid's Guides node first in the graph: the new Interpolate reads the hair's guides, not it.
+    json g = json::parse(edit.toJson());
+    g["nodes"].insert(g["nodes"].begin(), json{{"name", "braidPaths"}, {"type", "Guides"}, {"params", {{"group", "braids"}}}});
+    for (json& n : g["nodes"]) {
+        if (n["name"] == "scatter") n["params"]["density"] = 7.5;
+        if (n["name"] == "interpolate") n["params"]["guideCount"] = 2;
+        if (n["name"] == "scalp") n["params"]["subdivision"] = "2";
+    }
+    edit = GraphEdit(g.dump());
+    const auto fedByInterpolate = fedBy(edit, "interpolate");
+    ASSERT_FALSE(fedByInterpolate.empty());
+    const ScalpNodes made = insertScalp(edit, "ear");
+    EXPECT_EQ(made.scalp, "scalp_ear");
+    EXPECT_EQ(made.scatter, "scatter_ear");
+    EXPECT_EQ(made.interpolate, "interpolate_ear");
+    EXPECT_EQ(made.merge, "merge_ear");
+    EXPECT_EQ(param(edit, made.scalp, "input"), "ear");
+    EXPECT_EQ(param(edit, made.scalp, "subdivision"), "2") << "the own Scalp's";
+    EXPECT_EQ(param(edit, made.scatter, "density"), 7.5) << "the own Scatter's params";
+    EXPECT_NE(param(edit, made.scatter, "seed"), param(edit, "scatter", "seed")) << "a seed of its own";
+    EXPECT_EQ(param(edit, made.interpolate, "guideCount"), 2) << "the own Interpolate's params";
+    EXPECT_TRUE(feeds(edit, made.scalp, made.scatter, "scalp"));
+    EXPECT_TRUE(feeds(edit, made.scatter, made.interpolate, "strands"));
+    EXPECT_TRUE(feeds(edit, made.scalp, made.interpolate, "scalp"));
+    EXPECT_TRUE(feeds(edit, "guides", made.interpolate, "guides"));
+    EXPECT_FALSE(feeds(edit, "braidPaths", made.interpolate, "guides"));
+    // The Merge right after the own Interpolate, the new hair on its b.
+    EXPECT_TRUE(feeds(edit, "interpolate", made.merge, "a"));
+    EXPECT_TRUE(feeds(edit, made.interpolate, made.merge, "b"));
+    EXPECT_TRUE(feeds(edit, made.merge, fedByInterpolate.front().first, fedByInterpolate.front().second));
+    const auto at = nodePosition(edit, made.merge);
+    ASSERT_TRUE(at.has_value());
+    EXPECT_EQ(nodePosition(edit, made.scalp), std::make_pair(at->first - 660.0, at->second + 160.0));
+    EXPECT_EQ(nodePosition(edit, made.scatter), std::make_pair(at->first - 440.0, at->second + 160.0));
+    EXPECT_EQ(nodePosition(edit, made.interpolate), std::make_pair(at->first - 220.0, at->second + 160.0));
+    EXPECT_NO_THROW(loadGraphJson(edit.toJson())) << "a graph that loads";
+    // The same mesh again: its Scalp node, the graph as it is.
+    const std::string before = edit.toJson();
+    const ScalpNodes again = insertScalp(edit, "ear");
+    EXPECT_EQ(again.scalp, made.scalp);
+    EXPECT_TRUE(again.scatter.empty() && again.interpolate.empty() && again.merge.empty());
+    EXPECT_EQ(edit.toJson(), before);
+    EXPECT_THROW(insertScalp(edit, "scalp"), GraphError);
+    EXPECT_THROW(insertScalp(edit, ""), GraphError);
+    EXPECT_EQ(edit.toJson(), before);
+
+    // No Interpolate of its own (scattered hair alone): the Merge after the own Scatter, no Interpolate made.
+    GraphEdit bare(R"({"nodes": [{"name": "scalp", "type": "Scalp"}, {"name": "scatter", "type": "Scatter"},
+                                  {"name": "width", "type": "Width"}],
+                       "connections": [{"from": "scalp", "to": "scatter", "input": "scalp"},
+                                       {"from": "scatter", "to": "width", "input": "strands"}], "output": "width"})");
+    const ScalpNodes few = insertScalp(bare, "brow L");
+    EXPECT_EQ(few.scalp, "scalp_brow_L") << "a node name of letters, digits and _";
+    EXPECT_EQ(param(bare, few.scalp, "input"), "brow L");
+    EXPECT_EQ(param(bare, few.scalp, "subdivision"), "matchRender");
+    EXPECT_TRUE(few.interpolate.empty());
+    EXPECT_TRUE(feeds(bare, "scatter", few.merge, "a"));
+    EXPECT_TRUE(feeds(bare, few.scatter, few.merge, "b"));
+    EXPECT_TRUE(feeds(bare, few.merge, "width", "strands"));
+    // The own Scatter feeding nothing: the Merge before the output.
+    GraphEdit loose(R"({"nodes": [{"name": "scalp", "type": "Scalp"}, {"name": "scatter", "type": "Scatter"},
+                                   {"name": "other", "type": "Scatter"}, {"name": "width", "type": "Width"}],
+                        "connections": [{"from": "scalp", "to": "scatter", "input": "scalp"},
+                                        {"from": "scalp", "to": "other", "input": "scalp"},
+                                        {"from": "other", "to": "width", "input": "strands"}], "output": "width"})");
+    const ScalpNodes last = insertScalp(loose, "ear");
+    EXPECT_TRUE(feeds(loose, "other", last.merge, "a"));
+    EXPECT_TRUE(feeds(loose, last.merge, "width", "strands"));
+    EXPECT_TRUE(feeds(loose, last.scatter, last.merge, "b"));
+}
+
 TEST(GraphInserts, BraidsAndFeathersLandAlikeInEveryHost) {
     // graph_inserts.h insertBraid / insertFeathers: Maya's braids.py and feathers.py, the Blender
     // helper and the app add them through these.
@@ -911,6 +1135,167 @@ TEST(GraphEdit, EveryHostEditsAGraphAlike) {
 }
 
 
+TEST(GraphInserts, EveryHostLaysAGraphOutAlike) {
+    // graph_inserts.h layoutPositions: Maya's and Blender's auto layout and the app's (its own
+    // spacing, a long chain wrapped into blocks over the viewport).
+    const GraphEdit edit(defaultGraphJson());
+    const auto at = layoutPositions(edit);
+    EXPECT_EQ(at.size(), edit.nodeNames().size());
+    // Columns by the longest path in from a source, rows in the graph's order.
+    EXPECT_EQ(at.at("scalp"), std::make_pair(0.0, 0.0));
+    EXPECT_EQ(at.at("guides"), std::make_pair(0.0, kInsertRow));
+    EXPECT_EQ(at.at("scatter"), std::make_pair(kInsertColumn, 0.0));
+    EXPECT_EQ(at.at("interpolate"), std::make_pair(2 * kInsertColumn, 0.0));
+    EXPECT_EQ(at.at("output"), std::make_pair(8 * kInsertColumn, 0.0));
+    // Blocks of 7 columns, one under the other, each as tall as its tallest column plus the gap.
+    GraphLayout wrapped;
+    wrapped.column = 230.0;
+    wrapped.row = 120.0;
+    wrapped.columnsPerBlock = 7;
+    const auto blocks = layoutPositions(edit, wrapped);
+    EXPECT_EQ(blocks.at("guides"), std::make_pair(0.0, 120.0));
+    EXPECT_EQ(blocks.at("width"), std::make_pair(6 * 230.0, 0.0));
+    EXPECT_EQ(blocks.at("resample"), std::make_pair(0.0, 2 * 120.0 + 60.0));
+    EXPECT_EQ(blocks.at("output"), std::make_pair(230.0, 2 * 120.0 + 60.0));
+    // Only some nodes (the ones with no position yet): their columns the whole graph's, the rows
+    // counted among them.
+    const std::vector<std::string> only = {"guides", "output"};
+    const auto some = layoutPositions(edit, {}, &only);
+    EXPECT_EQ(some.size(), 2u);
+    EXPECT_EQ(some.at("guides"), std::make_pair(0.0, 0.0));
+    EXPECT_EQ(some.at("output"), std::make_pair(8 * kInsertColumn, 0.0));
+    // A cycle (a graph written by hand) still lays out.
+    const GraphEdit loop(R"({"nodes": [{"name": "a", "type": "Noise"}, {"name": "b", "type": "Noise"}], "connections": [
+        {"from": "a", "to": "b", "input": "strands"}, {"from": "b", "to": "a", "input": "strands"}]})");
+    EXPECT_EQ(layoutPositions(loop).size(), 2u);
+    EXPECT_TRUE(layoutPositions(GraphEdit("{}")).empty());
+}
+
+TEST(GraphEdit, EveryHostCopiesAndPastesNodesAlike) {
+    // graph_edit.h copyNodes / pasteNodes: Maya's GraphModel.copy_nodes / paste_nodes and the app's
+    // GroomDocument make them through these.
+    using nlohmann::json;
+    GraphEdit edit(defaultGraphJson());
+    setNodePosition(edit, "length", 100.0, 50.0);
+    exposeParam(edit, "noise", "amplitude");
+    // In the graph's order, with the links among them; the Output node is one of a kind.
+    const std::string text = edit.copyNodes({"output", "noise", "length", "nope"});
+    const json copied = json::parse(text);
+    EXPECT_EQ(copied["groomlabNodes"], 1);
+    ASSERT_EQ(copied["nodes"].size(), 2u);
+    EXPECT_EQ(copied["nodes"][0]["name"], "length");
+    EXPECT_EQ(copied["nodes"][1]["name"], "noise");
+    ASSERT_EQ(copied["connections"].size(), 1u);
+    EXPECT_EQ(copied["connections"][0]["from"], "length");
+    EXPECT_EQ(edit.copyNodes({"output"}), "");
+    EXPECT_EQ(edit.copyNodes({}), "");
+
+    const std::string before = edit.toJson();
+    const auto made = edit.pasteNodes(text, 40.0, 60.0);
+    ASSERT_EQ(made.size(), 2u);
+    EXPECT_EQ(made[0], std::make_pair(std::string("length1"), std::string("length")));
+    EXPECT_EQ(made[1], std::make_pair(std::string("noise1"), std::string("noise")));
+    const json g = json::parse(edit.toJson());
+    json length1, noise1, length;
+    for (const json& n : g["nodes"]) {
+        if (n["name"] == "length1") length1 = n;
+        if (n["name"] == "noise1") noise1 = n;
+        if (n["name"] == "length") length = n;
+    }
+    // Every field as copied, moved by the offset.
+    EXPECT_EQ(length1["params"], length["params"]);
+    EXPECT_DOUBLE_EQ(length1["ui"]["x"].get<double>(), 140.0);
+    EXPECT_DOUBLE_EQ(length1["ui"]["y"].get<double>(), 110.0);
+    EXPECT_EQ(noise1["paramInputs"], json::array({"amplitude"}));
+    // The link among them made again, none to the rest of the graph.
+    int links = 0;
+    for (const json& c : g["connections"]) {
+        if (c["to"] == "noise1") {
+            EXPECT_EQ(c["from"], "length1");
+            ++links;
+        }
+        EXPECT_NE(c["to"], "length1");
+        EXPECT_FALSE(c["from"] == "noise1");
+    }
+    EXPECT_EQ(links, 1);
+    EXPECT_EQ(edit.outputNode(), "output");
+    // Pasted again: the next free names.
+    EXPECT_EQ(edit.pasteNodes(text)[0].first, "length2");
+
+    // Text that holds no nodes, a type this build lacks, a link that does not fit: the graph as it was.
+    GraphEdit same(before);
+    EXPECT_THROW(same.pasteNodes("not nodes"), GraphError);
+    EXPECT_THROW(same.pasteNodes("{}"), GraphError);
+    EXPECT_THROW(same.pasteNodes(R"({"groomlabNodes": 1, "nodes": []})"), GraphError);
+    EXPECT_THROW(same.pasteNodes(R"({"groomlabNodes": 1, "nodes": [{"name": "x", "type": "NoSuchNode"}]})"), GraphError);
+    EXPECT_THROW(same.pasteNodes(R"({"groomlabNodes": 1, "nodes": [{"name": "a", "type": "Scalp"}, {"name": "b", "type": "Noise"}],
+        "connections": [{"from": "a", "to": "b", "input": "strands"}]})"), GraphError);
+    EXPECT_EQ(same.toJson(), before);
+    // An Output node in a clipboard (one copied before the rule) is left out.
+    const auto one = same.pasteNodes(R"({"groomlabNodes": 1, "nodes": [{"name": "output", "type": "Output"}, {"type": "Noise"}]})");
+    ASSERT_EQ(one.size(), 1u);
+    EXPECT_EQ(one[0].first, "noise1");
+    EXPECT_THROW(same.pasteNodes(R"({"groomlabNodes": 1, "nodes": [{"name": "output", "type": "Output"}]})"), GraphError);
+}
+
+TEST(GraphControls, EveryHostExposesAndUnexposesParamsAlike) {
+    // graph_controls.h unexposeParam, compoundExpose, compoundUnexpose: Maya's GraphModel, the
+    // Blender helper's edit_graph ops and the app's GroomDocument make them through these.
+    using nlohmann::json;
+    GraphEdit edit(defaultGraphJson());
+    auto nodeOf = [&](const std::string& name) {
+        const json g = json::parse(edit.toJson());
+        for (const json& n : g["nodes"]) {
+            if (n["name"] == name) return n;
+        }
+        return json();
+    };
+    exposeParam(edit, "noise", "amplitude");
+    exposeParam(edit, "noise", "frequency");
+    const std::string field = edit.addNode("FieldNoise");
+    edit.connect(field, "noise", "amplitude");
+    // The port goes with what fed it; the others stay.
+    EXPECT_TRUE(unexposeParam(edit, "noise", "amplitude"));
+    EXPECT_EQ(nodeOf("noise")["paramInputs"], json::array({"frequency"}));
+    const json unexposed = json::parse(edit.toJson());
+    for (const json& c : unexposed["connections"]) EXPECT_NE(c["from"], field);
+    EXPECT_FALSE(unexposeParam(edit, "noise", "amplitude")) << "no port: nothing changes";
+    EXPECT_TRUE(unexposeParam(edit, "noise", "frequency"));
+    EXPECT_FALSE(nodeOf("noise").contains("paramInputs"));
+    EXPECT_THROW(unexposeParam(edit, "nope", "amplitude"), GraphError);
+
+    // A compound shows an inner param under a name, and stops: the value it set goes back inside.
+    const std::string compound = edit.collapse({"length", "noise"});
+    compoundExpose(edit, compound, "wave", "noise.amplitude");
+    EXPECT_EQ(nodeOf(compound)["params"]["definition"]["expose"]["wave"], "noise.amplitude");
+    bool shown = false;
+    const json spec = json::parse(edit.nodeSpecJson(compound));
+    for (const json& p : spec["params"]) shown = shown || p["name"] == "wave";
+    EXPECT_TRUE(shown);
+    EXPECT_THROW(compoundExpose(edit, compound, "", "noise.amplitude"), GraphError);
+    EXPECT_THROW(compoundExpose(edit, compound, "x", "amplitude"), GraphError);
+    EXPECT_THROW(compoundExpose(edit, compound, "x", "noise.nope"), GraphError);
+    EXPECT_THROW(compoundExpose(edit, compound, "x", "nope.amplitude"), GraphError);
+    EXPECT_THROW(compoundExpose(edit, "width", "x", "noise.amplitude"), GraphError);
+    {
+        json g = json::parse(edit.toJson());
+        for (json& n : g["nodes"]) {
+            if (n["name"] == compound) n["params"]["wave"] = 0.75;
+        }
+        edit = GraphEdit(g.dump());
+    }
+    compoundExpose(edit, compound, "wave2", "noise.amplitude");
+    EXPECT_TRUE(compoundUnexpose(edit, compound, "noise.amplitude"));
+    const json after = nodeOf(compound);
+    EXPECT_TRUE(after["params"]["definition"]["expose"].empty());
+    EXPECT_FALSE(after["params"].contains("wave"));
+    for (const json& inner : after["params"]["definition"]["graph"]["nodes"]) {
+        if (inner["name"] == "noise") EXPECT_DOUBLE_EQ(inner["params"]["amplitude"].get<double>(), 0.75);
+    }
+    EXPECT_FALSE(compoundUnexpose(edit, compound, "noise.amplitude"));
+    EXPECT_THROW(compoundUnexpose(edit, "width", "noise.amplitude"), GraphError);
+}
+
 TEST(ParamSpecs, EachDefaultIsWrittenOnceInItsSpec) {
     // A param's default lives in its spec alone: every getter falls back to it (ParamSet), so an
     // operator reads its params without a fallback of its own. A stored value of another type
@@ -955,6 +1340,53 @@ TEST(ParamSpecs, EachDefaultIsWrittenOnceInItsSpec) {
         }
     }
     EXPECT_GT(files, 15u);
+}
+
+TEST(GraphEdit, ProblemsSayWhatStopsTheGroomFromEvaluating) {
+    // Every host's check before a graph is applied (Maya's GraphModel.validate and unused_problems
+    // read these): the graph's own problems and those of the nodes the output is made from stop
+    // it; a node off to the side only warns.
+    const auto has = [](const std::vector<std::string>& all, const std::string& one) {
+        return std::find(all.begin(), all.end(), one) != all.end();
+    };
+    GraphEdit edit(defaultGraphJson());
+    EXPECT_TRUE(edit.problems().empty());
+    EXPECT_TRUE(edit.problems(false).empty());
+    const std::vector<std::string> feeding = edit.feedingOutput();
+    EXPECT_EQ(feeding.size(), edit.nodeNames().size());
+    edit.addNode("Clump", "side");
+    EXPECT_FALSE(has(edit.feedingOutput(), "side"));
+    EXPECT_TRUE(edit.problems().empty());  // never evaluated: a warning
+    EXPECT_TRUE(has(edit.problems(false), "side.strands is not connected"));
+    edit.disconnect("length", "strands");
+    EXPECT_EQ(edit.problems(), (std::vector<std::string>{"length.strands is not connected"}));
+    // (What fed length is off to the side now, whole.)
+    EXPECT_FALSE(has(edit.feedingOutput(), "interpolate"));
+
+    // Graphs edited outside connect's checks: a link to an output its source lacks, a link whose
+    // types do not fit, a map with no name, in the graph's order.
+    nlohmann::json g = nlohmann::json::parse(defaultGraphJson());
+    for (nlohmann::json& c : g["connections"]) {
+        if (c["to"] == "length" && c["input"] == "strands") c["from"] = "scalp";
+        if (c["to"] == "noise" && c["input"] == "strands") c["output"] = "q";
+    }
+    for (nlohmann::json& n : g["nodes"]) {
+        if (n["name"] == "length") n["params"]["fraction"] = {{"texture", ""}};
+        if (n["name"] == "width") n["params"]["width"] = {{"guide", "taper"}};  // named: fine
+    }
+    EXPECT_EQ(GraphEdit(g.dump()).problems(),
+              (std::vector<std::string>{"scalp gives Mesh but length.strands takes strands or guides", "length.fraction: the texture has no name",
+                                        "length has no output 'q' (noise.strands reads it)"}));
+    // The graph's own, first.
+    g["output"] = "ghost";
+    EXPECT_EQ(GraphEdit(g.dump()).problems(), (std::vector<std::string>{"output node 'ghost' does not exist"}));
+    EXPECT_EQ(GraphEdit(g.dump()).problems(false).size(), 3u);  // nothing feeds an output: every node's are warnings
+    g.erase("output");
+    EXPECT_EQ(GraphEdit(g.dump()).problems(), (std::vector<std::string>{"no output node"}));
+    // A node this GroomLab has no type for is a problem, not a throw.
+    g["output"] = "output";
+    g["nodes"].push_back({{"name", "odd"}, {"type", "Teleport"}});
+    EXPECT_TRUE(has(GraphEdit(g.dump()).problems(false), "odd: unknown operator type 'Teleport'"));
 }
 
 TEST(GraphEdit, MovedGuidesLinkedByHandMakeAClumpFollowThem) {
@@ -1064,6 +1496,67 @@ TEST(GraphEdit, ClumpColorsNameTheirClumpAndLightIt) {
     EXPECT_EQ(renamedColorSource("clumpId@c1", "c1", "front"), "clumpId@front");
     EXPECT_EQ(renamedColorSource("clumpId@c2", "c1", "front"), "clumpId@c2");
     EXPECT_EQ(renamedColorSource("clumpId", "c1", "front"), "clumpId");
+}
+
+TEST(GraphEdit, ShowTubesIsABraidNodesAndFollowsIt) {
+    // Show Tubes (every host's button on a Braid node): the nodes showing their tubes are a display
+    // setting, names one a line; offered on Braid nodes alone, toggled per node (several may show),
+    // following a rename, dropped with the node.
+    const nlohmann::json g = {
+        {"version", 1},
+        {"nodes",
+         {{{"name", "s"}, {"type", "Scatter"}},
+          {{"name", "plait"}, {"type", "Braid"}},
+          {{"name", "side braid, left"}, {"type", "Braid"}},
+          {{"name", "c"}, {"type", "Clump"}}}},
+        {"connections",
+         {{{"from", "s"}, {"to", "plait"}, {"input", "strands"}},
+          {{"from", "plait"}, {"to", "side braid, left"}, {"input", "strands"}},
+          {{"from", "side braid, left"}, {"to", "c"}, {"input", "strands"}}}},
+        {"output", "c"}};
+    GraphEdit edit(g.dump());
+    EXPECT_TRUE(edit.braidTubesOffered("plait"));
+    EXPECT_TRUE(edit.braidTubesOffered("side braid, left"));
+    EXPECT_FALSE(edit.braidTubesOffered("c")) << "not a Braid";
+    EXPECT_FALSE(edit.braidTubesOffered("nope"));
+    std::string shown;
+    EXPECT_FALSE(edit.braidTubesShown("plait", shown));
+    shown = edit.braidTubesToggled("plait", shown);
+    EXPECT_EQ(shown, "plait");
+    EXPECT_TRUE(edit.braidTubesShown("plait", shown));
+    EXPECT_FALSE(edit.braidTubesShown("side braid, left", shown)) << "each node its own";
+    shown = edit.braidTubesToggled("side braid, left", shown);
+    EXPECT_EQ(braidTubeNames(shown), (std::vector<std::string>{"plait", "side braid, left"})) << "a name with a space and a comma";
+    EXPECT_TRUE(edit.braidTubesShown("plait", shown));
+    EXPECT_TRUE(edit.braidTubesShown("side braid, left", shown));
+    EXPECT_EQ(edit.braidTubesToggled("c", shown), shown) << "a node without the button changes nothing";
+    EXPECT_FALSE(edit.braidTubesShown("c", "c")) << "named, but no Braid: not lit";
+    EXPECT_EQ(edit.braidTubesToggled("plait", shown), "side braid, left") << "again: off";
+    // The names as text: each once, blank lines left out.
+    EXPECT_EQ(braidTubeNames("a\n\nb\r\na\n"), (std::vector<std::string>{"a", "b"}));
+    EXPECT_EQ(braidTubesText({"a", "", "b"}), "a\nb");
+    EXPECT_TRUE(braidTubeNames("").empty());
+    // Renamed, the name follows; another node's rename leaves it.
+    EXPECT_EQ(renamedBraidTubes(shown, "plait", "crown"), "crown\nside braid, left");
+    EXPECT_EQ(renamedBraidTubes(shown, "c", "crown"), shown);
+    EXPECT_EQ(renamedBraidTubes(shown, "plait", ""), shown);
+    edit.renameNode("plait", "crown");
+    shown = renamedBraidTubes(shown, "plait", "crown");
+    EXPECT_TRUE(edit.braidTubesShown("crown", shown));
+    EXPECT_EQ(edit.braidTubesKept(shown), shown) << "every name a Braid node: kept";
+    // Deleted, its name goes; so does one that is no Braid.
+    edit.removeNode("crown");
+    EXPECT_EQ(edit.braidTubesKept(shown), "side braid, left");
+    EXPECT_EQ(edit.braidTubesKept("c\nside braid, left\ngone"), "side braid, left");
+    EXPECT_EQ(edit.braidTubesKept(""), "");
+    // The sections' colors: each its own, any two of a braid's (up to seven sections) well apart.
+    for (int a = 0; a < 7; ++a) {
+        for (int b = a + 1; b < 7; ++b) {
+            const std::array<float, 3> x = braidSectionColor(a), y = braidSectionColor(b);
+            const float apart = std::abs(x[0] - y[0]) + std::abs(x[1] - y[1]) + std::abs(x[2] - y[2]);
+            EXPECT_GT(apart, 0.3f) << a << " and " << b;
+        }
+    }
 }
 
 TEST(GraphEdit, DeletingANodeKeepsTheFlowThroughIt) {

@@ -21,6 +21,7 @@
 #include "groomlab/flow.h"
 #include "groomlab/graph_controls.h"
 #include "groomlab/graph_edit.h"
+#include "groomlab/graph_inserts.h"
 #include "groomlab/graph_pins.h"
 #include "groomlab/graph_io.h"
 #include "groomlab/node_library.h"
@@ -160,6 +161,7 @@ GroomDocument::GroomDocument(GroomFile file, std::string path) : path_(std::move
         }
     }
     hiddenGroups_ = parseHiddenGuideGroups(scene_->file().hiddenGuideGroups);
+    braidTubes_ = scene_->file().braidTubes;  // Show Tubes' nodes
     // The caches' first frame is where an animated groom opens (Maya opens at the range's start).
     double first = 0.0;
     if (scene_->timeRange(&first, nullptr)) time_ = first;
@@ -648,6 +650,19 @@ std::string GroomDocument::editGraph(const std::string& label, const std::functi
         entry.stroke = std::make_shared<const StrokeEdit>(std::move(stroke));
     }
     if (target != session().sculptTarget()) session().setSculptTarget(target);
+    if (!braidTubes_.empty()) {
+        // Show Tubes follows the edit: a renamed node's name, a removed node's gone (the core's rules).
+        std::string shown = braidTubes_;
+        for (const auto& [from, to] : moved) shown = renamedBraidTubes(shown, from, to);
+        try {
+            shown = GraphEdit(graph_.dump()).braidTubesKept(shown);
+        } catch (const std::exception&) {
+        }
+        if (shown != braidTubes_) {
+            entry.braidTubes = std::make_pair(braidTubes_, shown);
+            braidTubes_ = shown;
+        }
+    }
     record(std::move(entry));
     dirty_ = true;
     return {};
@@ -744,36 +759,10 @@ std::string GroomDocument::addNode(const std::string& type, float x, float y, st
 
 namespace {
 
-// GraphModel.insert_on_link (Maya's graph.py, the Blender helper's too): the one link from (its
-// output) -> to.input routed through `node`: node reads from on its first input that takes from's
-// output, to reads node. Throws GraphError (the edit as it was) when the link is not there or no
-// input of node fits.
+// A node into a link, every host's (graph_inserts.h insertOnLink): Maya's GraphModel.insert_on_link
+// and the Blender helper's edit_graph op make the same edit.
 void insertOnLinkIn(GraphEdit& edit, const GroomDocument::NodeLink& link, const std::string& node) {
-    if (!edit.hasNode(node)) throw GraphError("no node '" + node + "'");
-    if (node == link.from || node == link.to) throw GraphError(node + " is an end of that link");
-    const json g = json::parse(edit.toJson());
-    bool linked = false;
-    for (const json& c : g.value("connections", json::array())) {
-        linked = linked || (c.value("from", std::string()) == link.from && c.value("to", std::string()) == link.to &&
-                            c.value("input", std::string()) == link.input && c.value("output", std::string()) == link.output);
-    }
-    if (!linked) throw GraphError(link.from + " is not connected to " + link.to + "." + link.input);
-    std::string why;
-    const json spec = json::parse(edit.nodeSpecJson(node));
-    for (const json& p : spec.value("inputs", json::array())) {
-        GraphEdit trial = edit;
-        try {
-            trial.connect(link.from, node, p.value("name", std::string()), link.output);
-            trial.connect(node, link.to, link.input);
-        } catch (const GraphError& e) {
-            if (why.empty()) why = e.what();
-            continue;
-        }
-        edit = std::move(trial);
-        return;
-    }
-    throw GraphError(node + " has no input that takes " + link.from + "'s " + edit.outputType(link.from, link.output) + " and feeds " +
-                     link.to + "." + link.input + (why.empty() ? "" : " (" + why + ")"));
+    insertOnLink(edit, link.from, link.to, link.input, node, link.output);
 }
 
 }  // namespace
@@ -910,45 +899,13 @@ std::string GroomDocument::showInnerParam(const std::string& compound, const std
             }
         }
     }
+    // The core's (graph_controls.h compoundExpose, compoundUnexpose), as Maya and Blender show and
+    // hide an inner param: hidden, its value goes back inside.
     return editGraph((shown ? "show " : "hide ") + target + " on " + compound, [&](json& g) {
-        for (json& c : g["nodes"]) {
-            if (c.value("name", std::string()) != compound) continue;
-            json& params = c["params"];
-            if (!params.is_object()) params = json::object();
-            json& definition = params["definition"];
-            if (!definition.is_object()) definition = json::object();
-            json& expose = definition["expose"];
-            if (!expose.is_object()) expose = json::object();
-            json* innerNode = nullptr;
-            if (definition.contains("graph") && definition["graph"].is_object() && definition["graph"].contains("nodes")) {
-                for (json& x : definition["graph"]["nodes"]) {
-                    if (x.is_object() && x.value("name", std::string()) == inner) innerNode = &x;
-                }
-            }
-            if (shown) {
-                bool known = false;
-                if (innerNode) {
-                    if (const json* s = spec(innerNode->value("type", std::string()))) {
-                        for (const json& p : s->value("params", json::array())) known = known || p.value("name", std::string()) == param;
-                    }
-                }
-                if (!known) throw std::invalid_argument("the compound has no param '" + target + "'");
-                expose[name] = target;
-            } else {
-                // Its value goes back inside: the inner node keeps what the compound set last.
-                std::vector<std::string> names;
-                for (const auto& [key, t] : expose.items()) {
-                    if (t.is_string() && t.get<std::string>() == target) names.push_back(key);
-                }
-                for (const std::string& key : names) {
-                    if (params.contains(key)) {
-                        if (innerNode) (*innerNode)["params"][param] = params[key];
-                        params.erase(key);
-                    }
-                    expose.erase(key);
-                }
-            }
-        }
+        GraphEdit edit(g.dump());
+        if (shown) compoundExpose(edit, compound, name, target);
+        else compoundUnexpose(edit, compound, target);
+        g = json::parse(edit.toJson());
     });
 }
 
@@ -1213,61 +1170,27 @@ std::string GroomDocument::removeNodes(const std::vector<std::string>& nodes) {
     });
 }
 
-namespace {
-
-constexpr const char* kClipboardKey = "groomlabNodes";  // Maya's graph.py CLIPBOARD_KEY
-
-}  // namespace
-
 std::string GroomDocument::copyNodes(const std::vector<std::string>& nodes) const {
-    json data = {{kClipboardKey, 1}, {"nodes", json::array()}, {"connections", json::array()}};
-    std::set<std::string> copied;
-    // In the graph's order, as Maya's copy_nodes.
-    for (const json& n : graph_.value("nodes", json::array())) {
-        const std::string name = n.value("name", std::string());
-        if (n.value("type", std::string()) == "Output") continue;
-        if (std::find(nodes.begin(), nodes.end(), name) == nodes.end()) continue;
-        data["nodes"].push_back(n);
-        copied.insert(name);
+    // The core's (graph_edit.h copyNodes, Maya's copy_nodes too): in the graph's order, never the Output node.
+    try {
+        return GraphEdit(graph_.dump()).copyNodes(nodes);
+    } catch (const std::exception&) {
+        return {};
     }
-    if (copied.empty()) return {};
-    for (const json& c : graph_.value("connections", json::array())) {
-        if (copied.count(c.value("from", std::string())) && copied.count(c.value("to", std::string()))) data["connections"].push_back(c);
-    }
-    return data.dump();
 }
 
 std::string GroomDocument::pasteNodes(const std::string& text, float dx, float dy, std::vector<std::string>* made) {
+    // The core's (graph_edit.h pasteNodes, Maya's paste_nodes too): new names, the links among them.
     const json data = json::parse(text, nullptr, false);
-    if (!data.is_object() || !data.contains(kClipboardKey) || !data.value("nodes", json()).is_array() || data["nodes"].empty()) {
-        return "the clipboard holds no GroomLab nodes";
-    }
-    for (const json& n : data["nodes"]) {
-        if (!n.is_object() || !spec(n.value("type", std::string()))) return "the clipboard names an unknown node type";
-    }
-    std::map<std::string, std::string> renamed;  // copied name -> pasted name
+    const std::size_t count = data.is_object() && data.value("nodes", json()).is_array() ? data["nodes"].size() : 0;
     std::map<std::string, std::string> copiedSculpts;
     std::vector<std::string> names;
-    const std::string error = editGraph("paste " + std::to_string(data["nodes"].size()) + " nodes", [&](json& g) {
-        if (!g.contains("nodes") || !g["nodes"].is_array()) g["nodes"] = json::array();
-        for (const json& n : data["nodes"]) {
-            const std::string from = n.value("name", std::string());
-            const std::string name = GraphEdit(g.dump()).uniqueName(from.empty() ? n.value("type", std::string()) : from);
-            json node = n;
-            node["name"] = name;
-            const json ui = n.value("ui", json::object());
-            node["ui"] = {{"x", (ui.is_object() ? ui.value("x", 0.0) : 0.0) + dx}, {"y", (ui.is_object() ? ui.value("y", 0.0) : 0.0) + dy}};
-            g["nodes"].push_back(node);
-            renamed[from] = name;
-            names.push_back(name);
-            const std::string type = node.value("type", std::string());
-            if ((type == op::kSculpt || type == "Compound") && nodeJson(from)) copiedSculpts[name] = from;
-        }
+    const std::string error = editGraph("paste " + std::to_string(count) + " nodes", [&](json& g) {
         GraphEdit edit(g.dump());
-        for (const json& c : data.value("connections", json::array())) {
-            const auto a = renamed.find(c.value("from", std::string())), b = renamed.find(c.value("to", std::string()));
-            if (a == renamed.end() || b == renamed.end()) continue;
-            edit.connect(a->second, b->second, c.value("input", std::string()), c.value("output", std::string()));
+        for (const auto& [name, from] : edit.pasteNodes(text, dx, dy)) {
+            names.push_back(name);
+            const std::string type = edit.nodeType(name);
+            if ((type == op::kSculpt || type == "Compound") && nodeJson(from)) copiedSculpts[name] = from;
         }
         g = json::parse(edit.toJson());
     }, {}, copiedSculpts);
@@ -2018,37 +1941,15 @@ std::string GroomDocument::exposeParam(const std::string& node, const std::strin
 std::string GroomDocument::exposeParams(const std::string& node, const std::vector<std::string>& names, bool exposed) {
     if (!nodeJson(node)) return "no node '" + node + "'";
     if (names.empty()) return {};
-    const std::set<std::string> changed(names.begin(), names.end());
-    std::map<std::string, std::size_t> rank;
-    if (const json* spec = nodeSpec(node)) {
-        std::size_t i = 0;
-        for (const json& p : spec->value("params", json::array())) rank[p.value("name", std::string())] = i++;
-    }
+    // The core's (graph_controls.h exposeParam, unexposeParam), as Maya and Blender: a param that
+    // cannot be an input is refused; a port taken away goes with what fed it.
     return editGraph((exposed ? "expose inputs on " : "collapse inputs on ") + node, [&](json& g) {
-        for (json& n : g["nodes"]) {
-            if (n.value("name", std::string()) != node) continue;
-            json inputs = json::array();
-            for (const json& p : n.value("paramInputs", json::array())) {
-                if (!(p.is_string() && changed.count(p.get<std::string>()))) inputs.push_back(p);
-            }
-            if (exposed) {
-                for (const std::string& name : names) inputs.push_back(name);
-                std::stable_sort(inputs.begin(), inputs.end(), [&](const json& a, const json& b) {
-                    const auto ai = rank.find(a.get<std::string>()), bi = rank.find(b.get<std::string>());
-                    return (ai == rank.end() ? rank.size() : ai->second) < (bi == rank.end() ? rank.size() : bi->second);
-                });
-            }
-            if (inputs.empty()) n.erase("paramInputs");
-            else n["paramInputs"] = inputs;
+        GraphEdit edit(g.dump());
+        for (const std::string& name : names) {
+            if (exposed) groomlab::exposeParam(edit, node, name);
+            else unexposeParam(edit, node, name);
         }
-        if (!exposed) {
-            // The port goes with what fed it.
-            json connections = json::array();
-            for (const json& c : g.value("connections", json::array())) {
-                if (!(c.value("to", std::string()) == node && changed.count(c.value("input", std::string())))) connections.push_back(c);
-            }
-            g["connections"] = connections;
-        }
+        g = json::parse(edit.toJson());
     });
 }
 
@@ -2276,6 +2177,19 @@ void GroomDocument::setGroupHidden(const std::string& name, bool hidden) {
     if (changed) dirty_ = true;
 }
 
+void GroomDocument::setBraidTubes(const std::string& shown) {
+    if (shown == braidTubes_) return;
+    braidTubes_ = shown;
+    dirty_ = true;  // saved with the groom ("braidTubes")
+}
+
+void GroomDocument::toggleBraidTubes(const std::string& node) {
+    try {
+        setBraidTubes(GraphEdit(graph_.dump()).braidTubesToggled(node, braidTubes_));
+    } catch (const std::exception&) {
+    }
+}
+
 std::string GroomDocument::hiddenGroupsText() const {
     std::string text;
     for (const std::string& name : hiddenGroups_) text += (text.empty() ? "" : ",") + name;
@@ -2362,6 +2276,7 @@ std::string GroomDocument::undo() {
         error = applyGraph();
     }
     applySide(edit, false);  // its files and group colors
+    if (edit.braidTubes) braidTubes_ = edit.braidTubes->first;
     --undoIndex_;
     dirty_ = true;
     return error;
@@ -2390,6 +2305,7 @@ std::string GroomDocument::redo() {
         error = applyGraph();
     }
     applySide(edit, true);
+    if (edit.braidTubes) braidTubes_ = edit.braidTubes->second;
     ++undoIndex_;
     dirty_ = true;
     return error;
@@ -2439,6 +2355,8 @@ const DisplayFrame& GroomDocument::updateDisplay(const DisplaySettings& settings
     // Clump Colors of one Clump among chained ones writing the same channel ("<channel>@<node>",
     // issue #77): the channel as that node wrote it.
     colorChannel_.fill(settings, inputs, [this]() -> const GroomSession& { return session(); });
+    // Show Tubes: the shown Braid nodes' section tubes (the session's mesh, kept while they stay).
+    fillBraidTubes(settings, inputs, [this]() -> const GroomSession& { return session(); });
     const bool ownColors = !groupColors_.empty() && settings.guideGroupColors.empty();
     const std::string seed = settings.guideColorSeed.empty() ? guideColorSeed() : std::string();
     if (ownColors || !seed.empty()) {
@@ -2483,6 +2401,7 @@ GroomFile GroomDocument::currentFile() const {
     file.guideGroupColors = groupColorsText();
     file.hiddenGuideGroups.clear();
     for (const std::string& name : hiddenGroups_) file.hiddenGuideGroups += (file.hiddenGuideGroups.empty() ? "" : " ") + name;
+    file.braidTubes = braidTubes_;
     file.data.graphJson = graph_.dump();
     // The guides and overlays as the session holds them now: the strokes' and edits' results.
     const GroomData& data = session().data();

@@ -481,6 +481,7 @@ void MainWindow::attachDocument() {
     framed_ = false;
     lastDabMs_ = 0.0;
     settings_.hiddenGuideGroups = document_ ? document_->hiddenGroupsText() : std::string();  // (saved with the groom)
+    refreshBraidTubes();  // Show Tubes' nodes (saved with the groom too)
     // The old groom's photo camera goes with it.
     if (!lookPhoto_.isEmpty()) {
         viewport_->camera().leaveLookThrough();
@@ -573,6 +574,7 @@ void MainWindow::attachDocument() {
 ViewRequest MainWindow::viewRequest() const {
     ViewRequest request;
     request.viewport = true;  // renderOnly nodes off, viewportOnly ones on (exports: the other way)
+    if (document_) request.braidTubes = document_->braidTubes();  // Show Tubes' nodes: evaluated to, whatever node is viewed
     request.density = static_cast<float>(density_->value());
     request.pointBudget = budget_->value() * 1000.0;
     request.sculptDensity = brush_.sculptDensity;
@@ -917,6 +919,7 @@ void MainWindow::refreshGroomColor() {
 
 void MainWindow::graphEdited() {
     refreshClumpColored();  // (a Clump's clumpChannel edited, a Clump added or removed)
+    refreshBraidTubes();    // (a Braid renamed or removed, an undo: the document's names; drawn by the evaluation below)
     reevaluate();
     refreshTimeline();  // a node reading the time (Wind, Simulate) shows it
     refreshUndoActions();

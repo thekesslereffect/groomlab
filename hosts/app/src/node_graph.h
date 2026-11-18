@@ -146,7 +146,6 @@ public:
     // What fitAll keeps clear around the graph (the chrome over the view); unchanged margins
     // change nothing (the view stays where it was panned).
     void setFitMargins(const QMargins& margins);
-    QMargins fitMargins() const { return fitMargins_; }
     // The add-node search at the cursor (off the view: its middle), or at a point of the view. Over
     // a wire, the node it adds goes into that wire (Maya's Tab on a wire).
     void openSearch();
@@ -226,6 +225,12 @@ public:
     void setClumpColoredNodes(std::vector<std::string> nodes);
     bool clumpColored(const std::string& node) const {
         return std::find(clumpColored_.begin(), clumpColored_.end(), node) != clumpColored_.end();
+    }
+    // The Braid nodes whose section tubes the viewport draws (their headers' Show Tubes buttons lit):
+    // the host's to say, from its display (DisplaySettings::braidTubes).
+    void setBraidTubeNodes(std::vector<std::string> nodes);
+    bool braidTubesShown(const std::string& node) const {
+        return std::find(braidTubes_.begin(), braidTubes_.end(), node) != braidTubes_.end();
     }
     void toggleViewSelected();  // V
     // Copy and paste (Ctrl+C, Ctrl+V): the clipboard's text, as Maya's Graph Editor writes it.
@@ -324,6 +329,9 @@ signals:
     // A Clump header's Clump Colors button: the host colors the strands by that node's clumps (or,
     // lit, back as they were).
     void clumpColorsToggled(const std::string& node);
+    // A Braid header's Show Tubes button: the host draws that node's section tubes in the viewport
+    // (or, lit, no more).
+    void braidTubesToggled(const std::string& node);
     // A node renamed through this view (after edited): the host's color source naming it follows.
     void nodeRenamed(const std::string& from, const std::string& to);
 
@@ -407,6 +415,11 @@ private:
     bool viewButtonAt(const QPointF& scene, int* node) const;
     bool clumpColorsButtonAt(const QPointF& scene, int* node) const;
     static bool clumpColorable(const Node& node) { return node.type == "Clump"; }
+    // Show Tubes: a Braid's button, where a Clump has Clump Colors (left of the other toggles).
+    bool braidTubesButtonAt(const QPointF& scene, int* node) const;
+    static bool showsTubes(const Node& node) { return node.type == "Braid"; }
+    // A node with a toggle of its own left of the shared ones (Clump Colors, Show Tubes).
+    static bool hasOwnToggle(const Node& node) { return clumpColorable(node) || showsTubes(node); }
     bool viewable(const Node& node) const;  // a strands output: View Up to Here can show it
     // The backdrop whose title bar (or, `grip`, resize corner) is under a scene point; -1 none.
     int backdropTitleAt(const QPointF& scene, bool* grip = nullptr) const;
@@ -415,6 +428,7 @@ private:
     QRectF inputsButtonRect(const Node& node) const;
     QRectF viewButtonRect(const Node& node) const;  // the header's View eye (left of Expand Inputs / Bypass)
     QRectF clumpColorsButtonRect(const Node& node) const;  // a Clump's: left of the other toggles
+    QRectF braidTubesButtonRect(const Node& node) const { return clumpColorsButtonRect(node); }  // a Braid's, there too
     void drawNode(QPainter& painter, const Node& node, bool selected);
     void forwardToViewport(QEvent* event);
     void addFromSearch();
@@ -450,6 +464,7 @@ private:
     std::map<std::string, std::string> errors_;  // an error per failing node
     std::string viewed_;  // View Up to Here ("" the output)
     std::vector<std::string> clumpColored_;  // setClumpColoredNodes
+    std::vector<std::string> braidTubes_;    // setBraidTubeNodes
     std::map<std::string, QPointF> laidOut_;  // positions the view chose (the document has none)
     std::string selected_;
     std::vector<std::string> selection_;

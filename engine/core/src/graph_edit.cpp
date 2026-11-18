@@ -9,6 +9,7 @@
 #include <nlohmann/json.hpp>
 
 #include "groomlab/attributes.h"
+#include "groomlab/braid_tubes.h"
 #include "groomlab/graph_io.h"
 #include "groomlab/node_library.h"
 #include "groomlab/operators.h"
@@ -864,6 +865,74 @@ GraphEdit::Detached GraphEdit::removeNodeKeepingFlow(const std::string& name) {
     return out;
 }
 
+namespace {
+
+constexpr const char* kClipboardKey = "groomlabNodes";
+
+}  // namespace
+
+std::string GraphEdit::copyNodes(const std::vector<std::string>& names) const {
+    nlohmann::json data = {{kClipboardKey, 1}, {"nodes", nlohmann::json::array()}, {"connections", nlohmann::json::array()}};
+    std::set<std::string> copied;
+    for (const nlohmann::json& n : impl_->nodesView()) {
+        if (!n.is_object() || n.value("type", std::string()) == "Output") continue;  // the output node is one of a kind
+        const std::string name = n.value("name", std::string());
+        if (std::find(names.begin(), names.end(), name) == names.end()) continue;
+        data["nodes"].push_back(n);
+        copied.insert(name);
+    }
+    if (copied.empty()) return {};
+    for (const nlohmann::json& c : impl_->connectionsView()) {
+        if (c.is_object() && copied.count(c.value("from", std::string())) && copied.count(c.value("to", std::string()))) {
+            data["connections"].push_back(c);
+        }
+    }
+    return data.dump();
+}
+
+std::vector<std::pair<std::string, std::string>> GraphEdit::pasteNodes(const std::string& clipboard, double dx, double dy) {
+    const nlohmann::json data = nlohmann::json::parse(clipboard, nullptr, false);
+    const char* const none = "the clipboard holds no GroomLab nodes";
+    if (!data.is_object() || !data.contains(kClipboardKey) || !data.contains("nodes") || !data["nodes"].is_array()) throw GraphError(none);
+    std::vector<const nlohmann::json*> nodes;
+    for (const nlohmann::json& n : data["nodes"]) {
+        const std::string type = n.is_object() ? n.value("type", std::string()) : std::string();
+        if (type == "Output") continue;  // (a clipboard from before copyNodes left it out)
+        try {
+            operatorSpec(type);
+        } catch (const GraphError&) {
+            throw GraphError("the clipboard names an unknown node type");
+        }
+        nodes.push_back(&n);
+    }
+    if (nodes.empty()) throw GraphError(none);
+    GraphEdit pasted(*this);  // a link that does not fit leaves this graph as it was
+    std::map<std::string, std::string> renamed;  // copied name -> pasted name
+    std::vector<std::pair<std::string, std::string>> made;
+    for (const nlohmann::json* n : nodes) {
+        const std::string from = n->value("name", std::string());
+        const std::string name = pasted.uniqueName(from.empty() ? n->value("type", std::string()) : from);
+        nlohmann::json node = *n;
+        node["name"] = name;
+        const nlohmann::json ui = n->value("ui", nlohmann::json::object());
+        auto at = [&](const char* axis) { return ui.is_object() && ui.contains(axis) && ui[axis].is_number() ? ui[axis].get<double>() : 0.0; };
+        node["ui"] = {{"x", at("x") + dx}, {"y", at("y") + dy}};
+        pasted.impl_->nodes().push_back(std::move(node));
+        renamed[from] = name;
+        made.emplace_back(name, from);
+    }
+    const nlohmann::json noLinks = nlohmann::json::array();
+    const nlohmann::json& links = data.contains("connections") && data["connections"].is_array() ? data["connections"] : noLinks;
+    for (const nlohmann::json& c : links) {
+        if (!c.is_object()) continue;
+        const auto a = renamed.find(c.value("from", std::string())), b = renamed.find(c.value("to", std::string()));
+        if (a == renamed.end() || b == renamed.end()) continue;
+        pasted.impl_->connect(a->second, b->second, c.value("input", std::string()), c.value("output", std::string()));
+    }
+    *impl_ = *pasted.impl_;
+    return made;
+}
+
 void GraphEdit::checkConnections() {
     const nlohmann::json links = impl_->connectionsView();
     impl_->connections() = nlohmann::json::array();
@@ -919,6 +988,33 @@ bool GraphEdit::clumpColored(const std::string& node, const std::string& source)
     return true;
 }
 
+bool GraphEdit::braidTubesOffered(const std::string& node) const {
+    const nlohmann::json* n = impl_->find(node);
+    return n && n->value("type", std::string()) == "Braid";
+}
+
+bool GraphEdit::braidTubesShown(const std::string& node, const std::string& shown) const {
+    if (!braidTubesOffered(node)) return false;
+    const std::vector<std::string> names = braidTubeNames(shown);
+    return std::find(names.begin(), names.end(), node) != names.end();
+}
+
+std::string GraphEdit::braidTubesToggled(const std::string& node, const std::string& shown) const {
+    if (!braidTubesOffered(node)) return shown;
+    std::vector<std::string> names = braidTubeNames(shown);
+    const auto at = std::find(names.begin(), names.end(), node);
+    if (at != names.end()) names.erase(at);
+    else names.push_back(node);
+    return braidTubesText(names);
+}
+
+std::string GraphEdit::braidTubesKept(const std::string& shown) const {
+    std::vector<std::string> names = braidTubeNames(shown);
+    names.erase(std::remove_if(names.begin(), names.end(), [&](const std::string& name) { return !braidTubesOffered(name); }),
+                names.end());
+    return braidTubesText(names);
+}
+
 std::string GraphEdit::channelsJson(const std::vector<std::string>& guideMaps) const {
     return graphChannelsJson(impl_->graph.dump(), guideMaps);
 }
@@ -940,6 +1036,111 @@ std::vector<std::string> GraphEdit::seedWarnings() const {
             std::string joined;
             for (const std::string& n : names) joined += (joined.empty() ? "" : " and ") + n;
             found.push_back(joined + " share seed " + std::to_string(seed) + ": " + why + "; give each its own seed");
+        }
+    }
+    return found;
+}
+
+std::vector<std::string> GraphEdit::feedingOutput() const {
+    const std::string output = outputNode();
+    if (output.empty() || !impl_->find(output)) return {};
+    std::set<std::string> feeding = impl_->upstream(output);
+    feeding.insert(output);
+    std::vector<std::string> out;
+    for (const std::string& name : nodeNames()) {
+        if (feeding.count(name)) out.push_back(name);
+    }
+    return out;
+}
+
+namespace {
+
+// A port's type as a problem names it: a Value's with its kind ("number Value").
+std::string problemLabel(const std::string& type, const json& port) {
+    const std::string kind = port.value("valueKind", std::string());
+    return type == "Value" && !kind.empty() && kind != "any" ? kind + " Value" : kindLabel(type);
+}
+
+// Whether an output (its type as connected, its port) can feed an input: the types (typesMatch),
+// and for a Value its kind (a Field takes a number unless its port says otherwise).
+bool portsFit(const std::string& outType, const json& out, const json& in) {
+    const std::string inType = in.value("type", std::string());
+    if (!typesMatch(outType, inType)) return false;
+    if (outType != "Value") return true;
+    try {
+        return valueKindsMatch(valueKindFromName(out.value("valueKind", std::string("any"))),
+                               valueKindFromName(in.value("valueKind", std::string(inType == "Field" ? "number" : "any"))));
+    } catch (const GraphError&) {  // a name no kind has
+        return outType == inType;
+    }
+}
+
+// Whether a param's value is unset as Python reads one (None, "", 0, False, nothing in it).
+bool unset(const json& value) {
+    if (value.is_null()) return true;
+    if (value.is_string()) return value.get_ref<const std::string&>().empty();
+    if (value.is_boolean()) return !value.get<bool>();
+    if (value.is_number()) return value.get<double>() == 0.0;
+    return value.empty();
+}
+
+}  // namespace
+
+std::vector<std::string> GraphEdit::problems(bool feedingOutput) const {
+    // A map param's sources and what a problem calls them (the editors' map kinds).
+    static const std::pair<const char*, const char*> mapSources[] = {
+        {"texture", "texture"}, {"colorSet", "color set"}, {"attribute", "attribute"}, {"expression", "expression"}, {"guide", "painted map"}};
+    std::vector<std::string> found;
+    const std::string output = outputNode();
+    if (feedingOutput && output.empty()) found.push_back("no output node");
+    else if (feedingOutput && !impl_->find(output)) found.push_back("output node '" + output + "' does not exist");
+    const std::vector<std::string> made = this->feedingOutput();
+    const std::set<std::string> feeding(made.begin(), made.end());
+    for (const json& n : impl_->nodesView()) {
+        const std::string name = n.is_object() ? n.value("name", std::string()) : std::string();
+        if (name.empty() || (feeding.count(name) > 0) != feedingOutput) continue;
+        try {
+            const json spec = specOfNode(n);
+            for (const json& port : spec["inputs"]) {
+                const std::string input = port.value("name", std::string());
+                std::string sourceOutput;
+                const std::string source = impl_->sourceOf(name, input, &sourceOutput);
+                if (source.empty()) {
+                    if (!port.value("optional", false)) found.push_back(name + "." + input + " is not connected");
+                    continue;
+                }
+                const std::vector<std::string> outputs = impl_->outputNames(source);
+                if (sourceOutput.empty() && !outputs.empty()) sourceOutput = outputs.front();
+                if (std::find(outputs.begin(), outputs.end(), sourceOutput) == outputs.end()) {  // e.g. a Compound's definition changed
+                    found.push_back(source + " has no output '" + sourceOutput + "' (" + name + "." + input + " reads it)");
+                    continue;
+                }
+                // e.g. a Noise now fed guides, still linked to a strands-only input; a Value node set
+                // to give a vector, still linked to a count
+                const json out = impl_->outputSpec(source, sourceOutput);
+                std::string outType = out.value("type", std::string());
+                try {
+                    std::set<std::string> seen;
+                    outType = impl_->outputType(source, sourceOutput, seen);
+                } catch (const GraphError&) {  // a link further up reads an output its source lacks: said there, once
+                }
+                if (!portsFit(outType, out, port)) {
+                    found.push_back(source + " gives " + problemLabel(outType, out) + " but " + name + "." + input + " takes " +
+                                    problemLabel(port.value("type", std::string()), port));
+                }
+            }
+        } catch (const GraphError& e) {  // a node or a source the graph cannot read (an unknown type, a link from no node)
+            found.push_back(name + ": " + e.what());
+        }
+        const auto params = n.find("params");
+        if (params == n.end() || !params->is_object()) continue;
+        for (const auto& [param, value] : params->items()) {
+            if (!value.is_object()) continue;
+            for (const auto& [key, label] : mapSources) {
+                if (!value.contains(key)) continue;
+                if (unset(value[key])) found.push_back(name + "." + param + ": the " + label + " has no name");
+                break;
+            }
         }
     }
     return found;

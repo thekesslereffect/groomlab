@@ -95,6 +95,19 @@ public:
     // Delete as every host's graph editor does (issue #80): the node detached (what fed it feeds what
     // it fed, the output passes to it) and then removed. GraphError for no such node.
     Detached removeNodeKeepingFlow(const std::string& name);
+    // Copy (every host's node editor, Ctrl+C): the nodes `names` (unknown names dropped) with every
+    // field, in the graph's order, and the links among them, as JSON text for the clipboard
+    // ({"groomlabNodes": 1, "nodes", "connections"}). An Output node is never copied (a graph has
+    // one). "" when that leaves nothing.
+    std::string copyNodes(const std::vector<std::string>& names) const;
+    // Paste (Ctrl+V, Duplicate): the copied nodes added with every field as copied (their seeds and
+    // the controls keying their params too), each named afresh when its name is taken (uniqueName)
+    // and moved by (dx, dy), the links among them made again (connect's checks). Returns (the new
+    // node, the node it copies) per node, in the clipboard's order: what a host keeps by node
+    // outside the graph is copied with them (a Sculpt node's edits). GraphError, the graph
+    // unchanged, for text that holds no copied nodes, a node type this build lacks, or a link that
+    // does not fit.
+    std::vector<std::pair<std::string, std::string>> pasteNodes(const std::string& clipboard, double dx = 0.0, double dy = 0.0);
     // Every connection checked and made again in order (connect's checks), as when a host loads a
     // graph to edit it. Throws GraphError at the first that does not fit.
     void checkConnections();
@@ -123,6 +136,18 @@ public:
     std::string clumpChannel(const std::string& node) const;
     std::string clumpColorSource(const std::string& node) const;
     bool clumpColored(const std::string& node, const std::string& source) const;
+    // Show Tubes (every host's button on a Braid node): the node's section tubes drawn in the
+    // viewport (braid_tubes.h). `shown`: the nodes showing theirs, a display setting
+    // (DisplaySettings::braidTubes: names, one a line). braidTubesOffered: whether the node has the
+    // button (a Braid). braidTubesShown: whether it is lit (offered, and named in `shown`).
+    // braidTubesToggled: `shown` after a click on the node's button (the node added, or taken out;
+    // a node without the button changes nothing). braidTubesKept: `shown` without the names that are
+    // no Braid node of the graph now (a node deleted, or made another type: what a host stores after
+    // an edit). Both keep the other names' order. A rename: renamedBraidTubes.
+    bool braidTubesOffered(const std::string& node) const;
+    bool braidTubesShown(const std::string& node, const std::string& shown) const;
+    std::string braidTubesToggled(const std::string& node, const std::string& shown) const;
+    std::string braidTubesKept(const std::string& shown) const;
 
     // Writes every param each node leaves out with its spec default, and each node's version
     // when it has none (its operator's newest), compounds' inner nodes too: what saved grooms hold,
@@ -138,6 +163,21 @@ public:
     // The strand channels (attributes) per node as the graph is now: graphChannelsJson
     // (attributes.h), `guideMaps` the maps painted on the guides.
     std::string channelsJson(const std::vector<std::string>& guideMaps = {}) const;
+
+    // The nodes the output is made from (the output node and everything upstream of it, bypassed
+    // nodes included): the ones the groom evaluates. In the graph's order; none without an output.
+    std::vector<std::string> feedingOutput() const;
+    // What would stop the groom from evaluating, as every host's editor says it (no problems: fine).
+    // feedingOutput true: the graph's own ("no output node", "output node 'x' does not exist"), then
+    // those of the nodes the output is made from; false: those of the other nodes, which evaluate
+    // only when viewed (warnings: never a reason not to apply the graph). Per node in the graph's
+    // order, per input in its spec's: a required input left open ("length.strands is not
+    // connected"), a link reading an output its source does not have ("mask has no output 'q'
+    // (clump.strength reads it)": a Compound's definition changed), a link whose types no longer
+    // fit ("noise gives guides but frizz.strands takes strands": connect's checks, on a graph
+    // edited since); then each param set to a map with no name ("length.keep: the texture has no
+    // name").
+    std::vector<std::string> problems(bool feedingOutput = true) const;
 
     // Nodes of one type sharing a seed where that is likely a mistake (two Scatters: their
     // strands coincide; two Instances or Flyaways: they pick the same strands), as warnings.

@@ -25,6 +25,7 @@
 #include <string_view>
 #include <vector>
 
+#include "groomlab/braid_tubes.h"
 #include "groomlab/cards.h"
 #include "groomlab/flow.h"
 #include "groomlab/graph.h"
@@ -157,6 +158,8 @@ void densityColors(const StrandSet& strands, std::vector<std::array<float, 3>>& 
 
 // Strand color modes (Maya's strandColorMode).
 enum StrandColorMode { kSolidColors = 0, kColorSetColors, kAttributeColors, kRandomColors, kClumpColors, kDensityColors };
+// Clump Colors' color of a clump number (linear RGB): a hue of its own from the number's hash.
+std::array<float, 3> clumpColor(std::int64_t group);
 // One color per strand for a color mode: the color set `source` at the root, the strand channel
 // `source` from lo to hi on the ramp, a random hue per strand, a hue per clump (channel
 // `source`), the density heatmap; kDefaultStrandColor where there is nothing to read.
@@ -235,11 +238,6 @@ std::set<std::string> parseHiddenGuideGroups(const std::string& text);
 // ---- Strands ----------------------------------------------------------------------------------
 
 void appendPolyline(DisplayGeometry& geometry, const Vec3f* points, std::size_t count);
-// Every strand as line segments.
-void appendStrandLines(DisplayGeometry& geometry, const StrandSet& strands);
-// Shading frames per strand point (lit lines): normals leaning out of the scalp, tangents along
-// the strand, u root to tip (uvFloats 1).
-void addLineFrames(DisplayGeometry& geometry, const StrandSet& strands, const ScalpMesh* scalp);
 // Ribbons facing away from the scalp at each root, as wide as the strand x widthScale. Lit:
 // shading frames (the uvs u plus twice the strand's number, lineIdOf, as the lines'), and
 // `litColors` per vertex when given (the strands' own colors); else `colors` (per strand) with a
@@ -252,10 +250,13 @@ Vec3f ribbonKeyLight();
 // The width ribbons take where the strands carry none (a host reading the lines' uvs: where they
 // say kNoLineWidth).
 constexpr float kRibbonDefaultWidth = 0.01f;
-// Roots as small hexagonal dots on the scalp (a Scatter shown alone).
-void appendRootDots(DisplayGeometry& geometry, const StrandSet& strands, const ScalpMesh* scalp);
-// How far overlays are pulled toward the camera: the longest strand (x 1.05).
-float overlayPullDistance(const StrandSet* strands);
+// The widths a display draws the strands with, one a point; null when they carry none: not one a
+// point, or none set (StrandSet::widthsSet: every one the 1 a Scatter leaves, no Width node after
+// it; a scene unit wide they would draw as slabs, and cost a rasteriser that much). Strands
+// without draw kRibbonDefaultWidth wide (their lines opaque: kNoLineWidth) and are not thinned
+// (StrandLod), in every host: the lines, the ribbons and the look-dev view read their widths
+// here. The strands themselves, and what is exported of them, keep the widths they carry.
+const float* displayWidths(const StrandSet& strands);
 
 // ---- Guides -----------------------------------------------------------------------------------
 
@@ -469,6 +470,11 @@ struct DisplaySettings {
     // The StrandMesh nodes' meshes show instead of the strands (when there are any).
     bool strandMeshView = false;
     bool drawStrandMesh = false;  // ... and draw here (no mesh of the host's shows them)
+    // Show Tubes: the Braid nodes whose section tubes draw (braid_tubes.h braidTubeNames: their names,
+    // one a line; every host's button on a Braid node, saved with the groom). The host hands their
+    // mesh in its DisplayInputs (fillBraidTubes); a name that is no Braid node of the graph draws
+    // nothing. A viewport toggle: evaluations, renders and exports never read it.
+    std::string braidTubes;
     DisplayTheme theme;
 };
 
@@ -488,6 +494,12 @@ private:
     std::shared_ptr<const std::vector<float>> channel_;
     std::uint64_t key_ = 0, version_ = 0;
 };
+
+// The tubes Show Tubes draws (DisplaySettings::braidTubes), handed on in a host's DisplayInputs
+// (braidTubes) before building: the session's mesh of the nodes shown (GroomSession::braidTubeMesh,
+// kept there while the nodes' params and inputs stay), none while no node is shown. `session` is
+// asked for only while one is (Maya waits for a pending commit there).
+void fillBraidTubes(const DisplaySettings& settings, DisplayInputs& in, const std::function<const GroomSession&()>& session);
 
 struct DisplayInputs {
     StrandsPtr strands;
@@ -535,15 +547,20 @@ struct DisplayInputs {
     std::uint64_t colorChannelVersion = 0;
     // The colored strand lines may take new colors alone (the host still has them as built).
     bool recolorable = true;
+    // Show Tubes' mesh (fillBraidTubes); null: none shown.
+    std::shared_ptr<const BraidTubeMesh> braidTubes;
 
     static DisplayInputs fromView(const ViewResult& view, bool stroke = false);
 };
 
-enum class DisplayPart { Strands, Instances, Guides, Selection, Parts, Flow, Cards, ScalpMap, StrandMesh, BrushTubes, Count };
+enum class DisplayPart { Strands, Instances, Guides, Selection, Parts, Flow, Cards, ScalpMap, StrandMesh, BraidTubes, BrushTubes, Count };
 // In drawing (upload) order.
 enum class DisplayItemId {
     DimStrands, Strands, ColoredStrands, Ribbons, InstanceMarkers, InstanceMeshes, Scales, Guides, Tubes, Selected,
     SoftSelected, Parts, Flow, FlowField, Cards, ScalpMap, StrandMesh,
+    // Show Tubes (DisplaySettings::braidTubes): the Braid nodes' section tubes, a lit surface in each
+    // section's color (drawn as the scales are: scaleSurface).
+    BraidTubes,
     // The Tube brush's tubes (DisplaySettings::tubeWires, tubeShaded): shaded surfaces, wires, the
     // selected guides' wires.
     TubeSurfaces, TubeWires, SelectedTubeWires, Count
@@ -619,9 +636,9 @@ struct StrandLines {
     // A hash of the strands' point counts: the indices and the uvs of one float a point depend on
     // nothing else, so a host keeps them while it stays the same (a tweak, a frame of playback).
     std::uint64_t layoutKey() const { return layoutKey_; }
-    // A hash of the strands' widths and IDs (0: they carry no widths, StrandSet::widths not one a
-    // point): the uvs of two floats a point (u with the strand's number, width) hold while it and
-    // the layout stay.
+    // A hash of the strands' widths and IDs (0: they carry no widths, displayWidths: not one a
+    // point, or none set): the uvs of two floats a point (u with the strand's number, width) hold
+    // while it and the layout stay.
     std::uint64_t widthsKey() const { return widthsKey_; }
     // A hash of the strands' point counts and IDs (never 0): the uvs' first float a point (u with
     // the strand's number) holds while it stays, whatever the widths (a host writing the widths
@@ -836,6 +853,7 @@ private:
     void buildGuides(const DisplayInputs& in, const DisplaySettings& s);
     void buildSelection(const DisplayInputs& in, const DisplaySettings& s);
     void buildBrushTubes(const DisplayInputs& in, const DisplaySettings& s);
+    void buildBraidTubes(const DisplayInputs& in);
     void buildOverlays(const DisplayInputs& in, const DisplaySettings& s);
     void buildCards(const DisplayInputs& in, const DisplaySettings& s);
     void buildStrandMesh(const DisplayInputs& in, const DisplaySettings& s);

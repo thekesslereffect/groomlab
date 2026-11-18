@@ -38,7 +38,7 @@ import bpy
 from . import drawn, graph_tree, groom, uikit
 
 NODE_W = 176.0
-CLUMP_W = 23.0      # a Clump's header holds Clump Colors too
+CLUMP_W = 23.0      # a Clump's header holds Clump Colors too (a Braid's, Show Tubes)
 HEADER = 28.0
 ROW = 18.0
 PAD = 8.0
@@ -217,10 +217,11 @@ class Graph(object):
         ins = [s for s in node.inputs if s.enabled and not s.hide]
         outs = [s for s in node.outputs if s.enabled and not s.hide]
         clump = node.gl_type == "Clump"
+        braid = node.gl_type == "Braid"
         label = graph_tree.label_of(node.gl_type)
         type_row = node.name != label and node.name != node.gl_type and len(ins) <= 1 and len(outs) <= 1
         rows = max(len(ins), len(outs), 1) + (1 if type_row else 0)
-        w, h = NODE_W + (CLUMP_W if clump else 0.0), HEADER + PAD * 2 + rows * ROW
+        w, h = NODE_W + (CLUMP_W if clump or braid else 0.0), HEADER + PAD * 2 + rows * ROW
         gx, gy = graph_tree.get_location(node)
         x, top = self.at(gx, gy)
         k = self.k
@@ -245,6 +246,9 @@ class Graph(object):
         if clump:
             right -= step
             toggles.append(("clump", (right, y, size, size)))
+        elif braid:  # Show Tubes, where a Clump has Clump Colors
+            right -= step
+            toggles.append(("tubes", (right, y, size, size)))
         box.toggles = list(reversed(toggles))
         return box
 
@@ -654,6 +658,9 @@ def _draw_toggle(p, t, box, ident, r, viewed):
         exposed = set(json.loads(node.gl_inputs or "[]"))
         names = [s["name"] for s in graph_tree.node_param_specs(node) if s.get("port")]
         on = bool(names) and all(n in exposed for n in names)
+    elif ident == "tubes":
+        scalp = getattr(node.id_data, "gl_scalp", None)
+        on = bool(scalp) and graph_tree.braid_tubes_shown(scalp, node)
     else:  # clump
         scalp = getattr(node.id_data, "gl_scalp", None)
         on = bool(scalp) and graph_tree.clump_colored(scalp, node)
@@ -676,6 +683,15 @@ def _draw_toggle(p, t, box, ident, r, viewed):
         for dy in (5.0, 9.0, 13.0):
             yy = r[1] + r[3] - dy * k
             p.lines([(r[0] + 4 * k, yy), (r[0] + r[2] - 4 * k, yy)], col, width)
+    elif ident == "tubes":  # a short tube: its far end's half, its two sides, its open near end
+        top, bottom = c[1] + 4.0 * k, c[1] - 4.0 * k
+        far, near = c[0] - 4.4 * k, c[0] + 4.4 * k
+        half = [(far - 2.2 * k * math.sin(a * math.pi / 8), c[1] + 4.0 * k * math.cos(a * math.pi / 8)) for a in range(9)]
+        p.lines(half, col, 1.4)
+        p.lines([(far, top), (near, top)], col, 1.4)
+        p.lines([(far, bottom), (near, bottom)], col, 1.4)
+        ring = [(near + 2.2 * k * math.cos(a * math.pi / 8), c[1] + 4.0 * k * math.sin(a * math.pi / 8)) for a in range(17)]
+        p.lines(ring, col, 1.4)
     else:
         hues = ((0.87, 0.16, 0.1, 1.0), (0.1, 0.58, 0.19, 1.0), (0.13, 0.3, 0.91, 1.0))
         for (dx, dy), hue in zip(((0.0, 3.4), (-3.6, -2.6), (3.6, -2.6)), hues):
@@ -1642,6 +1658,8 @@ def _toggle(context, tree, node, ident):
         bpy.ops.groomlab.graph_toggle_inputs("INVOKE_DEFAULT", node=node.gl_name)
     elif ident == "clump":
         bpy.ops.groomlab.graph_clump_colors("INVOKE_DEFAULT", node=node.gl_name)
+    elif ident == "tubes":
+        bpy.ops.groomlab.graph_braid_tubes("INVOKE_DEFAULT", node=node.gl_name)
 
 
 class GROOMLAB_OT_graph_canvas_scroll(bpy.types.Operator):

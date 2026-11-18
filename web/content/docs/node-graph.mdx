@@ -61,6 +61,11 @@ follow it.
   from the middle of a chain keeps the chain connected.
 - **Clump Colors** on a Clump node's header colors the strands by that node's own clumps, even
   when a later Clump writes the same `clumpChannel`.
+- **Show Tubes** on a Braid node's header draws the braid's section tubes in the viewport, each
+  section in its own color, so you can see how `separate`, `inflate`, `pancake` and the other
+  params shape them: each tube is swept along its own section, flat where it touches another.
+  Click it again to hide them. A Braid saved before `separate` and `inflate` existed does not list
+  them until you click **Upgrade** on it.
 - **Ramps** (root-to-tip profiles) have a curve editor.
 - **Units:** lengths are shown in cm, widths in µm, densities in strands per cm² (**...** >
   **Units**). Internally all lengths are in scene units, which GroomLab keeps in centimeters in

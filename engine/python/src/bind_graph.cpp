@@ -4,9 +4,11 @@
 
 #include "bind_common.h"
 
+#include <limits>
 #include <sstream>
 
 #include "groomlab/attributes.h"
+#include "groomlab/braid_tubes.h"
 #include "groomlab/display.h"
 #include "groomlab/field.h"
 #include "groomlab/graph.h"
@@ -14,6 +16,7 @@
 #include "groomlab/graph_edit.h"
 #include "groomlab/graph_inserts.h"
 #include "groomlab/graph_io.h"
+#include "groomlab/graph_pins.h"
 #include "groomlab/groom.h"
 #include "groomlab/operator_state.h"
 #include "groomlab/operators.h"
@@ -135,6 +138,15 @@ py::dict paramSpecDict(const ParamSpec& s) {
 
 }  // namespace
 
+namespace {
+
+// A graph's JSON as groomlab_core.GraphPins holds it (graph_pins.h's functions take it).
+struct GraphPins {
+    nlohmann::json graph;
+};
+
+}  // namespace
+
 void bindGraph(py::module_& m) {
     py::enum_<PortType>(m, "PortType", "What a port carries.")
         .value("Strands", PortType::Strands)
@@ -148,6 +160,13 @@ void bindGraph(py::module_& m) {
     m.def("port_type_name", &portTypeName, py::arg("type"));
     m.def("renamed_color_source", &renamedColorSource, py::arg("source"), py::arg("old"), py::arg("new"),
           "A color source naming node `old` ('<channel>@<old>') once it is renamed `new`; any other as it is.");
+    m.def("braid_tube_names", &braidTubeNames, py::arg("shown"),
+          "Show Tubes: the Braid nodes named in a display setting's text (DisplaySettings.braid_tubes: one a line).");
+    m.def("braid_tubes_text", &braidTubesText, py::arg("names"), "braid_tube_names' reverse: the names, one a line.");
+    m.def("renamed_braid_tubes", &renamedBraidTubes, py::arg("shown"), py::arg("old"), py::arg("new"),
+          "Show Tubes' names once node `old` is renamed `new` (the same when it was not shown).");
+    m.def("braid_section_color", &braidSectionColor, py::arg("section"),
+          "A braid section's color in Show Tubes (linear RGB): Clump Colors' color of that number.");
     m.def("set_verify_incremental", &Graph::setVerifyIncremental, py::arg("on"),
           "Every incremental evaluation checked against a full one (GraphError when they differ): tests, benchmarks.");
     m.def("release_process_caches", &releaseProcessCaches,
@@ -428,6 +447,49 @@ void bindGraph(py::module_& m) {
              py::arg("id"), py::arg("ctx") = nullptr,
              "The parts a Part node opens (PartLines, None without any): with partsFrom auto the ones found in "
              "the strands it takes, else the groom's painted ones. For drawing a selected Part's parts.")
+        .def("braid_tubes",
+             [](Graph& g, NodeId id, const PyEvalContext* ctx, int around) {
+                 BraidTubes tubes;
+                 {
+                     py::gil_scoped_release release;
+                     tubes = braidTubes(g, id, contextOr(ctx), around);
+                 }
+                 auto points = [](const std::vector<Vec3f>& from) {
+                     py::list out;
+                     for (const Vec3f& p : from) out.append(toTuple(p));
+                     return out;
+                 };
+                 py::list list;
+                 for (const BraidTubes::Tube& t : tubes.tubes) {
+                     py::dict tube;
+                     tube["path"] = t.path;
+                     tube["braidId"] = t.braidId;
+                     tube["section"] = t.section;
+                     tube["at"] = t.at;
+                     tube["centers"] = points(t.centers);
+                     tube["across"] = points(t.across);
+                     tube["thick"] = points(t.thick);
+                     tube["firstPoint"] = t.firstPoint;
+                     tube["firstQuad"] = t.firstQuad;
+                     list.append(tube);
+                 }
+                 py::list quads;
+                 for (const auto& q : tubes.quads) quads.append(py::make_tuple(q[0], q[1], q[2], q[3]));
+                 py::dict out;
+                 out["around"] = tubes.around;
+                 out["pressed"] = tubes.pressed;
+                 out["tubes"] = list;
+                 out["points"] = points(tubes.points);
+                 out["quads"] = quads;
+                 out["quadTube"] = tubes.quadTube;
+                 return out;
+             },
+             py::arg("id"), py::arg("ctx") = nullptr, py::arg("around") = 12,
+             "A Braid node's sections as tubes along its paths (braid_tubes.h): {around, pressed, tubes: [{path, braidId, "
+             "section, at, centers, across, thick, firstPoint, firstQuad}], points, quads, quadTube}: per path and section "
+             "a center line with its ellipse's half axes at each ring, and all of them as one quad mesh (around points a "
+             "ring, open ends; pressed, a version 2 node's: each ring on its section's pressed outline). Its inputs are "
+             "evaluated through the graph; the Braid itself is not. GraphError for a node that is not a Braid.")
         .def("evaluate_strands",
              [](Graph& g, NodeId id, const PyEvalContext* ctx) -> py::object {
                  StrandsPtr s;
@@ -591,6 +653,68 @@ void bindGraph(py::module_& m) {
     m.def("controls_json", &controlsJson, py::arg("graph_json"),
           "Every control the graph reads: {name: {kind, node, default, ...}} as JSON (graph_controls.h).");
 
+    // A graph's pins, the reroute points its links are drawn through (graph_pins.h): every host's rules
+    // for which survive a graph edit, their order and joining. Maya's GraphModel keeps its pins through this.
+    py::class_<GraphPins>(m, "GraphPins",
+                          "The pins of a graph's JSON (its \"connections\" and \"pins\": {points, routes}), read and edited as "
+                          "every host does (graph_pins.h).")
+        .def(py::init([](const std::string& graphJson) {
+                 GraphPins p{nlohmann::json::parse(graphJson, nullptr, false)};
+                 if (!p.graph.is_object()) throw GraphError("the graph is not a JSON object");
+                 return p;
+             }),
+             py::arg("graph_json"))
+        .def("pins_json", [](const GraphPins& p) { return p.graph.contains("pins") ? p.graph["pins"].dump() : std::string(); },
+             "The graph's \"pins\" as JSON, in order (\"\" when it has none).")
+        .def("prune", [](GraphPins& p, bool oneFeed) { prunePins(p.graph, oneFeed); }, py::arg("one_feed") = false,
+             "Drops the routes whose link is gone or comes from elsewhere now and the pins no route passes. one_feed: only "
+             "the routes a pin with one input (Blender's reroute) can draw.")
+        .def("ids", [](const GraphPins& p) { return pinIds(p.graph); }, "The pin ids, by number.")
+        .def("position",
+             [](const GraphPins& p, const std::string& pin) -> py::object {
+                 double x = 0.0, y = 0.0;
+                 if (!pinPosition(p.graph, pin, &x, &y)) return py::none();
+                 return py::make_tuple(x, y);
+             },
+             py::arg("pin"), "(x, y), or None for no such pin.")
+        .def("route", [](const GraphPins& p, const std::string& to, const std::string& input) { return pinRoute(p.graph, to, input); },
+             py::arg("to"), py::arg("input"), "The pins the link into to.input runs through, source first.")
+        .def("source",
+             [](const GraphPins& p, const std::string& pin) -> py::object {
+                 const std::optional<PinSource> source = pinSource(p.graph, pin);
+                 if (!source) return py::none();
+                 return py::make_tuple(source->from, source->output);
+             },
+             py::arg("pin"), "(from, output) of the signal a pin carries (output \"\": the source's first), or None.")
+        .def("links",
+             [](const GraphPins& p, const std::string& pin) {
+                 py::list out;
+                 for (const PinLink& l : pinLinks(p.graph, pin)) out.append(py::make_tuple(py::make_tuple(l.to, l.input), l.index));
+                 return out;
+             },
+             py::arg("pin"), "[((to, input), index)]: the links through a pin and its place in each one's route.")
+        .def("route_to", [](const GraphPins& p, const std::string& pin) { return pinRouteTo(p.graph, pin); }, py::arg("pin"),
+             "The pins from the source up to and including `pin`: what a link drawn out of it runs through.")
+        .def("add",
+             [](GraphPins& p, const std::string& to, const std::string& input, double x, double y, int index) {
+                 return addPin(p.graph, to, input, x, y, index);
+             },
+             py::arg("to"), py::arg("input"), py::arg("x"), py::arg("y"), py::arg("index") = -1,
+             "A new pin on the link into to.input, at `index` in its route (-1: last); its id, \"\" when nothing feeds to.input.")
+        .def("move", [](GraphPins& p, const std::string& pin, double x, double y) { return movePin(p.graph, pin, x, y); }, py::arg("pin"),
+             py::arg("x"), py::arg("y"))
+        .def("remove", [](GraphPins& p, const std::string& pin) { return removePin(p.graph, pin); }, py::arg("pin"),
+             "The pin out of every route through it.")
+        .def("merge", [](GraphPins& p, const std::string& keep, const std::string& drop) { return mergePins(p.graph, keep, drop); },
+             py::arg("keep"), py::arg("drop"), "Routes through `drop` run through `keep` instead: only pins of one signal join.")
+        .def("set_route",
+             [](GraphPins& p, const std::string& to, const std::string& input, const std::vector<std::string>& via) {
+                 return setPinRoute(p.graph, to, input, via);
+             },
+             py::arg("to"), py::arg("input"), py::arg("via"), "The link into to.input runs through `via`; False when nothing feeds it.")
+        .def("rename_node", [](GraphPins& p, const std::string& from, const std::string& to) { renamePinNode(p.graph, from, to); },
+             py::arg("old"), py::arg("new"), "A node renamed: the routes from and to it follow (the connections renamed first).");
+
     // The editors' edits of a graph's JSON every host makes (graph_edit.h): Maya's GraphModel
     // and the standalone app's node graph.
     py::class_<GraphEdit>(m, "GraphEdit",
@@ -664,11 +788,70 @@ void bindGraph(py::module_& m) {
                  insertBetween(e, src, dst, node, nodeInput);
              },
              py::arg("src"), py::arg("dst"), py::arg("node"), py::arg("node_input") = std::string("strands"),
-             "Every link from src into dst through `node` (graph_inserts.h).")
+             "Every link from src into dst through `node`, on its node_input (\"\": its first input) (graph_inserts.h).")
+        .def("insert_after",
+             [](GraphEdit& e, const std::string& anchor, const std::string& node, const std::string& nodeInput) {
+                 insertAfter(e, anchor, node, nodeInput);
+             },
+             py::arg("anchor"), py::arg("node"), py::arg("node_input") = std::string(),
+             "`node` right after anchor in its chain (before the first node it fed), half a column right of and a row below it "
+             "(graph_inserts.h).")
+        .def("insert_on_link",
+             [](GraphEdit& e, const std::string& src, const std::string& dst, const std::string& input, const std::string& node,
+                const std::string& output) { insertOnLink(e, src, dst, input, node, output); },
+             py::arg("src"), py::arg("dst"), py::arg("input"), py::arg("node"), py::arg("output") = std::string(),
+             "The one link src -> dst.input through `node`, on its first input that takes it: a node dropped on a wire "
+             "(graph_inserts.h).")
+        .def("insert_scalp",
+             [](GraphEdit& e, const std::string& mesh, std::optional<double> groomSize) {
+                 const ScalpNodes made = insertScalp(e, mesh, groomSize);
+                 py::dict out;
+                 auto orNone = [](const std::string& s) { return s.empty() ? py::object(py::none()) : py::object(py::str(s)); };
+                 out["scalp"] = made.scalp;
+                 out["scatter"] = orNone(made.scatter);
+                 out["interpolate"] = orNone(made.interpolate);
+                 out["merge"] = orNone(made.merge);
+                 return out;
+             },
+             py::arg("mesh_name"), py::arg("groom_size") = py::none(),
+             "Add Scalp's graph (graph_inserts.h): a Scalp node reading the mesh, a Scatter and an Interpolate as the groom's own, "
+             "merged with the hair; returns {scalp, scatter, interpolate, merge} (the Scalp node alone when one reads it already).")
         .def("not_keyable", [](const GraphEdit& e, const std::string& node, const std::string& param) { return notKeyable(e, node, param); },
              py::arg("node"), py::arg("param"), "Why node.param cannot be keyed in place (\"\" when it can).")
         .def("expose_param", [](GraphEdit& e, const std::string& node, const std::string& param) { exposeParam(e, node, param); },
              py::arg("node"), py::arg("param"), "node.param as an input port (graph_controls.h).")
+        .def("unexpose_param", [](GraphEdit& e, const std::string& node, const std::string& param) { return unexposeParam(e, node, param); },
+             py::arg("node"), py::arg("param"),
+             "node.param's input port gone with what fed it, the param keeping its own value; False when it was no port.")
+        .def("compound_expose",
+             [](GraphEdit& e, const std::string& compound, const std::string& name, const std::string& target) {
+                 compoundExpose(e, compound, name, target);
+             },
+             py::arg("compound"), py::arg("name"), py::arg("target"),
+             "A compound's inner param `target` (\"node.param\") shown on it as its param `name` (graph_controls.h).")
+        .def("compound_unexpose",
+             [](GraphEdit& e, const std::string& compound, const std::string& target) { return compoundUnexpose(e, compound, target); },
+             py::arg("compound"), py::arg("target"),
+             "The compound stops showing `target`, its value going back inside; False when it was not shown.")
+        .def("copy_nodes", &GraphEdit::copyNodes, py::arg("names"),
+             "The nodes (never an Output node) and the links among them as JSON text for the clipboard; \"\" for none.")
+        .def("paste_nodes", &GraphEdit::pasteNodes, py::arg("clipboard"), py::arg("dx") = 0.0, py::arg("dy") = 0.0,
+             "The copied nodes added under free names, moved by (dx, dy), with the links among them: [(new node, the node it "
+             "copies)]. GraphError (nothing changed) for text that holds no copied nodes.")
+        .def("layout_positions",
+             [](const GraphEdit& e, double column, double row, int columnsPerBlock, double blockGap,
+                const std::optional<std::vector<std::string>>& only) {
+                 GraphLayout layout;
+                 layout.column = column;
+                 layout.row = row;
+                 layout.columnsPerBlock = columnsPerBlock;
+                 layout.blockGap = blockGap;
+                 return layoutPositions(e, layout, only ? &*only : nullptr);
+             },
+             py::arg("column") = kInsertColumn, py::arg("row") = kInsertRow, py::arg("columns_per_block") = 0,
+             py::arg("block_gap") = 60.0, py::arg("only") = py::none(),
+             "The auto layout every host uses (graph_inserts.h layoutPositions): {node: (x, y)}, columns by depth from the "
+             "sources, rows in the graph's order; columns_per_block wraps a long chain into blocks; only: just these nodes.")
         .def("add_control",
              [](GraphEdit& e, const std::string& node, const std::string& param, const std::string& name, std::optional<double> value,
                 double min, double max, std::optional<double> groomSize) {
@@ -740,7 +923,20 @@ void bindGraph(py::module_& m) {
         .def("clump_colored", &GraphEdit::clumpColored, py::arg("node"), py::arg("source"),
              "Whether a clump color source shows this Clump's clumps (its own source, or the bare channel when "
              "it is the last Clump writing it).")
+        .def("braid_tubes_offered", &GraphEdit::braidTubesOffered, py::arg("node"),
+             "Show Tubes: whether the node has the button (a Braid node).")
+        .def("braid_tubes_shown", &GraphEdit::braidTubesShown, py::arg("node"), py::arg("shown"),
+             "Whether the node's Show Tubes is lit: a Braid node named in `shown` (names, one a line).")
+        .def("braid_tubes_toggled", &GraphEdit::braidTubesToggled, py::arg("node"), py::arg("shown"),
+             "`shown` after a click on the node's Show Tubes: the node added or taken out (not a Braid: as it is).")
+        .def("braid_tubes_kept", &GraphEdit::braidTubesKept, py::arg("shown"),
+             "`shown` without the names that are no Braid node of the graph now (a node deleted).")
         .def("seed_warnings", &GraphEdit::seedWarnings)
+        .def("feeding_output", &GraphEdit::feedingOutput,
+             "The nodes the output is made from (it and everything upstream), in the graph's order: the ones the groom evaluates.")
+        .def("problems", &GraphEdit::problems, py::arg("feeding_output") = true,
+             "What would stop the groom from evaluating (graph_edit.h): the graph's own and those of the nodes the output is made "
+             "from, or with feeding_output False those of the other nodes (warnings).")
         .def("channels", [](const GraphEdit& e, const std::vector<std::string>& guideMaps) { return jsonLoads(e.channelsJson(guideMaps)); },
              py::arg("guide_maps") = std::vector<std::string>(),
              "The strand channels (attributes) per node: graph_channels.")
@@ -813,6 +1009,78 @@ void bindGraph(py::module_& m) {
     m.attr("MAX_PRESET_TEXT") = kMaxPresetText;
     m.attr("MAX_PRESET_NODES") = kMaxPresetNodes;
     m.def("preset_user_dir", &presetUserDir, "The user's preset folder (GROOMLAB_USER_PRESETS, else Maya's user folder).");
+
+    m.def("braid_sections",
+          [](const std::string& style, int sections, bool dutch, float flatness, float pancake, float tightness, float separate,
+             float inflate, int version, int perStep, int around) {
+              BraidWeaveSettings settings;
+              settings.style = style;
+              settings.sections = sections;
+              settings.dutch = dutch;
+              settings.flatness = flatness;
+              settings.pancake = pancake;
+              settings.tightness = tightness;
+              settings.separate = separate;
+              settings.inflate = inflate;
+              settings.version = version;
+              const BraidSections made = braidSections(settings, perStep, around);
+              auto pairs = [](const std::vector<std::vector<std::array<float, 2>>>& from) {
+                  py::list out;
+                  for (const auto& section : from) {
+                      py::list track;
+                      for (const auto& v : section) track.append(py::make_tuple(v[0], v[1]));
+                      out.append(track);
+                  }
+                  return out;
+              };
+              // Each section's outline per sample: [section][sample] a list of (side, depth) points.
+              py::list outlines;
+              double least = std::numeric_limits<double>::infinity(), most = 0.0, sum = 0.0;
+              for (int k = 0; k < made.sections; ++k) {
+                  py::list track;
+                  for (std::size_t i = 0; i < made.samples(); ++i) {
+                      py::list ring;
+                      const std::array<float, 2>* p = made.outline(k, i);
+                      for (int r = 0; r < made.around; ++r) ring.append(py::make_tuple(p[r][0], p[r][1]));
+                      track.append(ring);
+                      const double area = made.area(k, i);
+                      least = std::min(least, area);
+                      most = std::max(most, area);
+                      sum += area;
+                  }
+                  outlines.append(track);
+              }
+              const std::array<float, 2> reach = made.reach();
+              py::dict out;
+              out["sections"] = made.sections;
+              out["cycle"] = made.cycle;
+              out["perStep"] = made.perStep;
+              out["around"] = made.around;
+              out["round"] = made.round;
+              out["pressed"] = made.pressed;
+              out["halfWidth"] = made.halfWidth;
+              out["halfThick"] = made.halfThick;
+              out["centers"] = pairs(made.centers);
+              out["across"] = pairs(made.across);
+              out["thick"] = pairs(made.thick);
+              out["outlines"] = outlines;
+              out["keep"] = py::make_tuple(made.keep[0], made.keep[1]);
+              out["grown"] = made.grown;
+              out["overlap"] = made.overlap();
+              out["reach"] = py::make_tuple(reach[0], reach[1]);
+              const double count = static_cast<double>(made.sections) * static_cast<double>(made.samples());
+              out["areas"] = py::make_tuple(count > 0.0 ? least : 0.0, count > 0.0 ? sum / count : 0.0, most);
+              return out;
+          },
+          py::arg("style") = std::string("three"), py::arg("sections") = 0, py::arg("dutch") = false, py::arg("flatness") = 0.3f,
+          py::arg("pancake") = 0.0f, py::arg("tightness") = 1.0f, py::arg("separate") = 1.0f, py::arg("inflate") = 0.5f,
+          py::arg("version") = 2, py::arg("per_step") = 16, py::arg("around") = 48,
+          "One cycle of a Braid's weave in the braid's cross-section (braid_tubes.h), in braid widths ([0] side to side, "
+          "[1] depth), as a node of this version lays it (1: plain ellipses; 2: pressed against each other): {sections, "
+          "cycle, perStep, around, round, pressed, halfWidth, halfThick, centers, across, thick (each [section][sample]: "
+          "the center and the ellipse's two half axes), outlines ([section][sample]: `around` points, what to draw), keep "
+          "(the cross-section's scale that keeps the braid's reach), grown, overlap (the deepest one outline lies in "
+          "another), reach (side, depth), areas (least, mean, most)}.");
 
     // Compound nodes (node_library.h): the .glnode library every host shares.
     m.def("check_node_file", &checkNodeFile, py::arg("text"),

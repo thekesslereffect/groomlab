@@ -44,6 +44,18 @@ groomlab.add_braid(groom, ["braidCurve1"], style="three", width=0.25, tightness=
 - **Seeing the weave:** `display` paths shows each braid's path and the center curve of each
   of its sections in place of the hair (a `braidSection` channel tells them apart: -1 the path),
   handy for tuning `tightness`, `width` and the feed; set it back to hair before rendering.
+- **Seeing the sections:** **Show Tubes**, the button on the Braid node's header in the Graph
+  Editor (Maya, Blender and the app; where a Clump node has Clump Colors), draws the tube each
+  section's hair runs in: solid, lit, each section in its own color, in the viewport over the
+  hair (the woven hair lies inside its tube; fed and loose hair stay in view). Handy while tuning
+  `inflate`, `separate`, `pancake`, `flatness`, `tightness` and `width`: the tubes follow every
+  edit, and a version 2 node's are its pressed tubes: rings square to each section's own course,
+  flat where two sections touch. A version 1 node has no `separate` or `inflate` (its panel lists
+  them after **Upgrade**). Click it again to hide them. Several Braid nodes can show theirs at once; a node with
+  hundreds of braids draws coarser tubes. It is a viewport display only (renders and exports
+  never show the tubes) and is saved with the groom (Maya: with the scene). In the app the
+  lookdev view steps aside for plain lit strands while tubes show, as it does for the strand
+  color modes.
 - **Paths output:** the node's second output, `paths`, hands on the paths it braids along as
   guides (the braids input's, evenly resampled, or those it picked for box braids), for nodes
   downstream: a second Braid, a Twist's axes, cards.
@@ -79,8 +91,42 @@ groomlab.add_braid(groom, ["braidCurve1"], style="three", width=0.25, tightness=
   hand); `loops` is the share of the crossings where a bundle of one section's hair breaks away
   from the braid in an arc (`loopSize` braid widths out, each a little more or less) and comes
   back, as sections do from a loose braid. Ties still hold them (the `braids_loose` preset).
+- **Sections pressed against each other** (Braid version 2: `separate`, `inflate`): each section
+  is a tube swept along its own course, its rings square to that course, and the tubes lie against
+  each other: flat where one touches another (the surface halfway between the two), round where it
+  lies free (the grooves between a braid's strands), never inside another, so no hair of one runs
+  through another's. The hair of a section runs along its tube like the tube's own lengthwise
+  lines, and the tube's surface is where the section's outermost hair lies. Where two courses
+  cross closer than the sections' thickness lets them, they are moved apart in depth first, so a
+  section keeps its hair's room all along instead of being pinched where it passes under another:
+  a ring's area stays within a few percent of the tube's mean at `inflate` 0, within about a tenth
+  at 0.5, and dips by up to three tenths at 1, where three sections lie side by side.
+  `inflate` (0 to 1, 0.5 by default) is how fat the sections are for the room they have: at 0
+  their own size, touching only where they would overlap (gaps stay where they lie apart); at 1
+  grown until they fill the braid, the grooves shallow (a three-strand section's mean radius is
+  0.148 of the braid's width at 0, 0.166 at 0.5 and 0.174 at 1). The braid stays as wide and as
+  deep as its `width` and `flatness` say, whatever `inflate`: the sections grow fat for their
+  spacing, the braid no bigger. `separate` (1 by default) blends it in: at 0 the sections are
+  plain round tubes that pass through each other where they cross. Ties, the taper, `pancake`,
+  `loops` and a fed braid's pick-up read the same tubes, and a braid on the scalp (a cornrow, a
+  fed braid) lies on it. Version 2 also plaits the four- and five-strand braids as hands do:
+  every section runs from one edge of the braid to the other and back, over one section and
+  under the next (version 1 takes an outer section two places in a step, through the ones it
+  passes); the braid is as wide and as deep as version 1's. It gives the strands of four- and
+  five-strand braids and ropes eight points a weave step (the others keep four). A fishtail is
+  the exception: its thin strips cross too fast for tubes swept along them (the hair inside a
+  strip's turn would fold), so its strips are pressed in the braid's cross-section as before
+  (their outlines there, the halves taking turns), and Show Tubes draws its rings in that plane.
+  **A Braid node saved before version 2 stays as it was** (version 1: plain sections,
+  `separate` and `inflate` do nothing on it) until you click **Upgrade** on the node (in every
+  host's Graph Editor, beside the node's name). The shipped braid presets are version 2. What is not solved: hair at a section's rim still turns more than in plain
+  tubes where another section comes to lie on it (a three-strand's sharpest turn from point to
+  point is about 32 degrees, against 15); along a curving, tapering or fed braid the tubes lie
+  a little in each other (a tenth of a section's width or so) where the weave's steps stretch; a fishtail's strip bridges the hollow front of its half
+  while it crosses, clear of the other strips for a moment.
 - **Ends** (`end`): `fan` (over the last `tail` the sections let go and the ends spread),
-  `tuft` (they let go into a gathered tuft, as below a hair tie) or `bound` (woven right to the
+  `tuft` (they let go into a gathered tuft, as below a hair tie), `free` (the hair leaves its sections
+  for one plain bundle along the path: below) or `bound` (woven right to the
   tip, narrowing: sealed box-braid ends, no tail).
 - **Ties, beads, cuffs** (`ties`): that many ties along each braid, the last where the weave ends,
   the rest spread back toward where the braid forms (or `tieSpacing` braid widths apart), each
@@ -91,11 +137,35 @@ groomlab.add_braid(groom, ["braidCurve1"], style="three", width=0.25, tightness=
   `aspect` 1, and a mesh goes round each tie: the built-in `groomlab:bead`, `groomlab:cuff` and
   `groomlab:hairTie`, or a mesh of your own modelled round a bore of radius 0.5 up +Y from 0 to 1
   (the `braids_beaded` preset).
+- **A free end** (`end` free, `release`): past the weave (`tail` is the share of the path it
+  leaves) the hair lets go of its sections and runs on along the braid's own path as one plain
+  round bundle, a ponytail: the Braid gives it no shape of its own (no fan, no tuft), so the
+  nodes after it style it as ordinary hair. `release` (braid widths, 1.5 by default) is how long
+  the letting go takes: at 0 the weave stops at once, as under a hair tie; more, and over that
+  length the weave flattens out (its crossings no tighter) while each strand moves from its place
+  in its section to its place in the bundle. The bundle is as thick as the sections' hair
+  together, each section in its own sector of it, so the tail is one body and neighbours stay
+  neighbours. It never reaches past the path's end, and a tie (`ties` 1) still sits where the
+  weave ends. Every style, fed braids and version 1 nodes take it. With `display` paths the
+  section curves run onto the path there; Show Tubes' tubes close onto it at the release's end.
+  Letting go bends the hair a little more than a gentle weave does (a rope: about 31 degrees a
+  point against 20).
 - **Shaping the ends** (`braidTail`): the node writes a per-point channel, 0 within the braid and
-  rising to 1 down its tail, so nodes after it can work on the ends alone: a Curl whose `radius`
-  is mapped by the expression `$braidTail` curls the ends (the `braids_curly_ends` preset), a
-  Clump or Noise with `affect` set to `$braidTail` clumps or frizzes them. (`affect` mixes per
-  point only for nodes that keep the points: for Curl, map its per-point `radius` instead.)
+  rising to 1 down its tail (free: over the release, 1 in the free tail), so nodes after it can
+  work on the ends alone: a Curl whose `radius` is mapped by the expression `$braidTail` curls
+  the ends (the `braids_curly_ends` preset), a Clump whose `strength` is mapped by it gathers
+  them (the `braids_free_ends` preset), a Noise with `affect` set to `$braidTail` frizzes them.
+  (`affect` mixes per point only for nodes that keep the points: for Curl, map its per-point
+  `radius` instead.) Read per point, in the viewport's GPU preview as on the CPU: Clump's
+  `strength`, Curl's `radius`, Noise's `amplitude`, Width's `width`, Displace's `distance`,
+  Blend's `mix`; a Length's `keep` and `fraction`, a Clump's `volumize` and a Noise's `fraction`
+  are one value a strand.
+- **Recipe: a braid into a ponytail, the ends clumped.** Draw the braid's path to where the
+  ponytail should end. On the Braid set `end` to free and `tail` to the share of the path the
+  ponytail takes (0.4, say), `ties` to 1 for a hair tie where the weave stops. Add a Clump after
+  the Braid, right-click its `strength`, choose Expression and type `$braidTail`, with the
+  largest strength as its max: the weave stays as it is and the ponytail gathers into locks. A
+  Curl after it with `radius` mapped the same way curls it.
 
 ## Scales
 

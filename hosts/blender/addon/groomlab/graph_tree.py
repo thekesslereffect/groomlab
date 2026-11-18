@@ -40,11 +40,9 @@ NODE_WIDTH = 200
 LAYOUT_DX, LAYOUT_DY = 240, 140  # the core's column and row for a new node (graph_edit.cpp), as Maya's
 
 # Maya's Graph Editor (hosts/maya/scripts/groomlab/ui/graph_editor.py): port and category colors and
-# the plumbing params from the shared UI definitions (engine/ui/graph_ui.json; these defaults when
-# the files are missing), the Add menu's order, the spec categories' names.
-TYPE_COLORS = graph_ui.port_colors({"Strands": (232, 168, 92), "Guides": (92, 196, 232), "Mesh": (140, 206, 110),
-                                    "Field": (214, 122, 214), "Curve": (245, 215, 90), "Curves": (206, 210, 218),
-                                    "Value": (120, 214, 190)})
+# the plumbing params from the shared UI definitions (engine/ui/graph_ui.json: the add-on ships them
+# and does not load without, definitions.py), the Add menu's order, the spec categories' names.
+TYPE_COLORS = graph_ui.port_colors()
 # The Add menu's categories in the core's order (node_catalog.h, each spec's "categoryTitle"): Blender
 # registers its node categories before the helper runs, so their titles are listed here; which node
 # goes where, its label and its order come from the specs. A test checks this list against them.
@@ -53,11 +51,7 @@ CATEGORY_TITLES = ["Sources", "Grow", "Shape", "Deform", "Collide", "Look", "Mot
 HIDDEN_TYPES = {"Compound", "Input", "Script"}  # made by grouping (Maya), a preset or the node library, not from the Add menu
 # When a node runs (its "evaluation"; always when absent): the labels of the other two.
 EVALUATION_LABELS = {"viewportOnly": "Viewport only", "renderOnly": "Render only"}
-CATEGORY_COLORS = graph_ui.category_colors({
-    "Sources": (72, 190, 170), "Grow": (79, 209, 197), "Color": (255, 122, 182), "Shape": (90, 150, 240),
-    "Deform": (110, 170, 250), "Collide": (100, 180, 200), "Look": (170, 120, 240), "Fields & Curves": (214, 122, 214),
-    "Utility": (140, 148, 158), "Output": (245, 176, 66), "Compound": (110, 200, 120), "Games": (90, 200, 230),
-    "Convert": (240, 140, 95), "Motion": (120, 200, 255), "Feathers": (226, 186, 90)})
+CATEGORY_COLORS = graph_ui.category_colors()
 # Params naming the host's inputs: plumbing, hidden from the panel unless changed (as in Maya).
 PLUMBING = graph_ui.plumbing({("Scalp", "input"), ("Guides", "input"), ("Guides", "hierarchy")})
 # Nodes whose `path` names a file (graph_ui.json's filePathFilters): Blender's file browser button.
@@ -359,8 +353,14 @@ class GroomLabNodeBase(object):
     def draw_buttons(self, context, layout):
         linkable = [p["name"] for p in node_param_specs(self) if p.get("port")]
         clump = self.gl_type == "Clump"
-        if linkable or clump:
+        braid = self.gl_type == "Braid"
+        if linkable or clump or braid:
             row = layout.row(align=True)
+        if braid:  # Show Tubes: this node's section tubes drawn in the viewport
+            scalp = getattr(self.id_data, "gl_scalp", None)
+            op = row.operator("groomlab.graph_braid_tubes", text="", icon="MESH_CYLINDER",
+                              depress=braid_tubes_shown(scalp, self))
+            op.node = self.gl_name
         if clump:  # Clump Colors: the strands colored by this node's clumps
             scalp = getattr(self.id_data, "gl_scalp", None)
             op = row.operator("groomlab.graph_clump_colors", text="", icon="GROUP_VCOL",
@@ -1092,7 +1092,7 @@ def pin_of(reroute):
 
 
 def _pin_number(pin):
-    """pin12 -> 12 (0 for another name): pins sort and number by it (Maya's)."""
+    """pin12 -> 12 (0 for another name): a new reroute takes the next number (assign_pins)."""
     digits = pin[3:] if pin.startswith("pin") else ""
     return int(digits) if digits.isdigit() else 0
 
@@ -1103,38 +1103,29 @@ def connections_of(data):
 
 
 def prune_pins(pins, connections):
-    """The graph's pins ({"points", "routes"}) that hold, as Blender can draw them: routes whose link
-    is there, from the same source, through pins that exist, none twice; each pin fed from one place
-    (a reroute has one input: a route feeding it from elsewhere is left out, its link drawn straight);
-    pins no route passes left out. Returns (points {id: [x, y]}, routes {(to, input): (from, output,
-    [via])})."""
-    pins = pins if isinstance(pins, dict) else {}
-    points = {}
-    for p in pins.get("points") or []:
-        if isinstance(p, dict) and p.get("id") and isinstance(p.get("x"), (int, float)) and isinstance(p.get("y"), (int, float)):
-            points[str(p["id"])] = [float(p["x"]), float(p["y"])]
-    routes, fed = {}, {}
-    for r in pins.get("routes") or []:
-        if not isinstance(r, dict) or not r.get("to") or not r.get("input"):
-            continue
-        key, source = (r["to"], r["input"]), (r.get("from"), r.get("output") or "")
-        via = [str(v) for v in r.get("via") or []]
-        if not via or connections.get(key) != source or key in routes or len(set(via)) != len(via):
-            continue
-        if any(v not in points for v in via):
-            continue
-        feeds = [("node",) + source] + [("pin", v) for v in via[:-1]]
-        if any(fed.get(v, f) != f for v, f in zip(via, feeds)):
-            continue
-        fed.update(zip(via, feeds))
-        routes[key] = (source[0], source[1], via)
-    used = {v for r in routes.values() for v in r[2]}
-    return {k: v for k, v in points.items() if k in used}, routes
+    """The graph's pins ({"points", "routes"}) that hold, as Blender can draw them: the core's rules
+    (graph_pins.h prunePins with oneFeed, through the helper's prune_pins): routes whose link is
+    there, from the same source, through pins that exist, none twice; each pin fed from one place (a
+    reroute has one input: a route feeding it from elsewhere is left out, its link drawn straight);
+    pins no route passes left out. `connections`: {(to, input): (from, output)}, the links the tree
+    shows. Returns (points {id: [x, y]}, routes {(to, input): (from, output, [via])})."""
+    if not isinstance(pins, dict) or not pins.get("routes"):
+        return {}, {}
+    links = []
+    for (to, input_name), (src, output) in connections.items():
+        link = {"from": src, "to": to, "input": input_name}
+        if output:
+            link["output"] = output
+        links.append(link)
+    kept = _call("prune_pins", connections=links, pins=pins, oneFeed=True)["pins"] or {}
+    points = {p["id"]: [float(p["x"]), float(p["y"])] for p in kept.get("points", [])}
+    routes = {(r["to"], r["input"]): (r["from"], r.get("output") or "", list(r["via"])) for r in kept.get("routes", [])}
+    return points, routes
 
 
 def pins_dict(points, routes):
-    """{"points", "routes"} as the graph keeps them (Maya's _pins_dict: routes by (to, input), points
-    by number, "output" only when not the first)."""
+    """{"points", "routes"} as the tree's reroutes give them, in one order (the text kept to tell
+    when they changed; the helper stores them pruned and ordered by the core, graph_pins.h)."""
     out_routes = []
     for (to, input_name), (src, output, via) in sorted(routes.items()):
         entry = {"from": src, "to": to, "input": input_name, "via": list(via)}
@@ -1219,28 +1210,13 @@ def _same_pins(a, b):
 
 
 def auto_layout(data):
-    """Columns by depth from the sources, rows in the graph's order (Maya's auto_layout): every
-    node's "ui". Returns {node: [x, y]}."""
-    depth = {}
-    feeds = {}
-    for c in data.get("connections", []):
-        feeds.setdefault(c["to"], []).append(c["from"])
-
-    def depth_of(name, trail=()):
-        if name in depth:
-            return depth[name]
-        sources = [s for s in feeds.get(name, []) if s not in trail]
-        d = 0 if not sources else 1 + max(depth_of(s, trail + (name,)) for s in sources)
-        depth[name] = d
-        return d
-
-    rows, out = {}, {}
+    """Columns by depth from the sources, rows in the graph's order (the core's layoutPositions, as
+    Maya's auto_layout and the app's: the helper's graph_layout): every node's "ui". Returns
+    {node: [x, y]}."""
+    out = {name: [float(at[0]), float(at[1])] for name, at in _call("graph_layout", graph=data)["positions"].items()}
     for n in data.get("nodes", []):
-        col = depth_of(n["name"])
-        row = rows.get(col, 0)
-        rows[col] = row + 1
-        out[n["name"]] = [float(col * LAYOUT_DX), float(row * LAYOUT_DY)]
-        n["ui"] = {"x": out[n["name"]][0], "y": out[n["name"]][1]}
+        if n.get("name") in out:
+            n["ui"] = {"x": out[n["name"]][0], "y": out[n["name"]][1]}
     return out
 
 
@@ -1569,6 +1545,7 @@ def sync_from_tree(tree):
         if node.gl_name and node.gl_name in gnodes and node.name != node.gl_name:
             if edit(op="rename_node", name=node.gl_name, newName=node.name) is not None:
                 follow_renamed(scalp, None, node.gl_name, node.name)
+                follow_braid_tubes(scalp, old=node.gl_name, new=node.name)
                 if scalp.groomlab.view_node == node.gl_name:
                     with props.quiet():
                         scalp.groomlab.view_node = node.name
@@ -1579,6 +1556,7 @@ def sync_from_tree(tree):
     # those links are kept below unless the tree feeds that input from elsewhere.
     present = {n.gl_name for n in nodes if n.gl_name}
     bridged = set()
+    deleted = [name for name in gnodes if name not in present]
     for name in list(gnodes):
         if name not in present:
             r = edit(op="remove_node", name=name, keepFlow=True)
@@ -1588,6 +1566,8 @@ def sync_from_tree(tree):
             if scalp.groomlab.view_node == name:
                 with props.quiet():
                     scalp.groomlab.view_node = ""
+    if deleted:  # (a Braid deleted: its Show Tubes goes with it)
+        follow_braid_tubes(scalp)
     # New nodes (the Add menu, a duplicate or a paste: the copied node's params).
     for node in nodes:
         if node.gl_name:
@@ -1767,6 +1747,16 @@ def clump_channel(node):
         return "clumpId"
 
 
+def graph_problems(scalp):
+    """What would stop the groom's graph from evaluating, as every host says it (the core's
+    GraphEdit::problems, through the helper; Maya's GraphModel.validate and unused_problems):
+    {"problems": [...] of the nodes the output is made from and the graph's own, "unused": [...] of
+    the other nodes (warnings), "feeding": [the nodes the output is made from]}. Nothing shows them
+    here yet."""
+    rt = groom.ensure(scalp)
+    return _call("graph_problems", session=rt.session)
+
+
 _CLUMP_COLORS = {}  # groom uid -> ((graph text, source), the helper's clump_colors answer)
 
 
@@ -1818,6 +1808,69 @@ def follow_renamed(scalp, rt, old, new):
         return
     if renamed != d.strand_color_source:
         d.strand_color_source = renamed
+
+
+# ---- Show Tubes: a Braid's header button (the groom's braid_tubes: the nodes whose tubes draw) -------
+
+_BRAID_TUBES = {}  # groom uid -> ((graph text, shown), the nodes lit)
+
+
+def braid_tubes_lit(scalp):
+    """The Braid nodes whose Show Tubes is lit: those the groom's braid_tubes names that are Braid
+    nodes of its graph (the core's GraphEdit::braidTubesShown, through the helper), asked again only
+    when the graph or the names changed."""
+    if scalp is None:
+        return []
+    shown = scalp.groomlab_tools.braid_tubes or ""
+    if not shown:
+        return []
+    key = (scalp.groomlab.graph_json, shown)
+    hit = _BRAID_TUBES.get(scalp.groomlab.uid)
+    if hit is not None and hit[0] == key:
+        return hit[1]
+    rt = groom.runtime_if_any(scalp)
+    if rt is None or rt.session is None or not process.running():
+        return []
+    try:
+        lit = _call("braid_tubes", session=rt.session, shown=shown)["lit"]
+    except HelperError:
+        return []
+    _BRAID_TUBES[scalp.groomlab.uid] = (key, lit)
+    return lit
+
+
+def braid_tubes_shown(scalp, node):
+    """Whether the viewport draws this Braid's section tubes (its Show Tubes lit)."""
+    return node.gl_type == "Braid" and node.gl_name in braid_tubes_lit(scalp)
+
+
+def toggle_braid_tubes(scalp, name):
+    """A click on a Braid's Show Tubes: its section tubes drawn in the viewport, or (lit) no more.
+    True when they show now. Display only: nothing evaluates again."""
+    rt = groom.ensure(scalp)
+    d = scalp.groomlab_tools
+    r = _call("braid_tubes", session=rt.session, shown=d.braid_tubes or "", toggle=name)
+    if r["shown"] != (d.braid_tubes or ""):
+        d.braid_tubes = r["shown"]
+    return name in r["lit"]
+
+
+def follow_braid_tubes(scalp, old=None, new=None):
+    """Show Tubes after an edit of the graph: a renamed node's name follows it, a deleted node's goes
+    (the core's renamedBraidTubes and GraphEdit::braidTubesKept, through the helper)."""
+    d = scalp.groomlab_tools
+    if not d.braid_tubes:
+        return
+    rt = groom.runtime_if_any(scalp)
+    if rt is None or rt.session is None or not process.running():
+        return
+    args = {"old": old, "new": new} if old and new else {}
+    try:
+        shown = _call("braid_tubes", session=rt.session, shown=d.braid_tubes, keep=True, **args)["shown"]
+    except HelperError:
+        return
+    if shown != d.braid_tubes:
+        d.braid_tubes = shown
 
 
 def view_node(scalp, name):

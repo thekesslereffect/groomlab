@@ -2652,6 +2652,23 @@ TEST(AppPanels, BrushPanelCurvesSymmetryAndAWidthMap) {
     EXPECT_DOUBLE_EQ(panel.findChild<ValueSlider*>(QStringLiteral("strength"))->minimum(), -1.0);
     tools.setTool("comb");
     EXPECT_DOUBLE_EQ(panel.findChild<ValueSlider*>(QStringLiteral("strength"))->minimum(), 0.0);
+    // The sliders' spans are the catalog's (brush_catalog.h), as every host's. A length's is the
+    // catalog's on a scalp of kDefaultsScalpSize: on this groom, as much bigger as its scalp is
+    // (to a power of ten), not a fixed number of scene units.
+    EXPECT_DOUBLE_EQ(panel.findChild<ValueSlider*>(QStringLiteral("radius"))->minimum(), brushSettingSpec("radius")->softMin);
+    EXPECT_DOUBLE_EQ(panel.findChild<ValueSlider*>(QStringLiteral("radius"))->maximum(), brushSettingSpec("radius")->softMax);
+    EXPECT_DOUBLE_EQ(panel.findChild<ValueSlider*>(QStringLiteral("segments"))->maximum(), brushSettingSpec("segments")->softMax);
+    {
+        const std::optional<double> size = scalpSizeOf(*doc);
+        ASSERT_TRUE(size);
+        const double k = std::pow(10.0, std::round(std::log10(*size / kDefaultsScalpSize)));
+        for (const auto& [name, id] : {std::pair<const char*, const char*>{"newGuideLength", "length"}, {"spacing", "spacing"}}) {
+            const ValueSlider* slider = panel.findChild<ValueSlider*>(QString::fromLatin1(name));
+            ASSERT_TRUE(slider) << name;
+            EXPECT_DOUBLE_EQ(slider->minimum(), std::min(brushSettingSpec(id)->softMin * k, slider->value())) << name;
+            EXPECT_DOUBLE_EQ(slider->maximum(), std::max(brushSettingSpec(id)->softMax * k, slider->value())) << name;
+        }
+    }
     // Paint on a scalp map shows the Alpha picker (not on a guide map, nor with Comb): its grid
     // lists None and the library; a pick reaches the settings, its rows shown while one is picked.
     QWidget* alphaBox = panel.findChild<QWidget*>(QStringLiteral("alphaBox"));
@@ -2816,6 +2833,36 @@ TEST(AppPanels, ParamPanelShowsTheLayersAStackHolds) {
         ASSERT_TRUE(header);
         EXPECT_GE(header->height(), header->fontMetrics().height() + 6) << section;
     }
+}
+
+TEST(AppPanels, AParamALaterVersionAddedIsLeftOutOfAnOlderNodesPanelUntilUpgrade) {
+    // Braid's separate and inflate came with its version 2 (ParamSpec::added): a version 1 node does
+    // nothing with them, so its panel lists neither; Upgrade brings both.
+    auto doc = GroomDocument::open(kSampleGroom);
+    ASSERT_TRUE(doc);
+    ParamPanel panel;
+    panel.setDocument(doc.get());
+    std::string braid;
+    ASSERT_EQ(doc->addNode("Braid", 0.0f, 0.0f, &braid), "");
+    panel.showNode(braid);
+    EXPECT_EQ(panel.sectionOf("separate"), "Sections");
+    EXPECT_EQ(panel.sectionOf("inflate"), "Sections");
+    nlohmann::json graph = nlohmann::json::parse(doc->graphJson());
+    for (nlohmann::json& node : graph["nodes"]) {
+        if (node.value("name", std::string()) == braid) node["version"] = 1;
+    }
+    ASSERT_EQ(doc->replaceGraph(graph.dump()), "");
+    panel.showNode(braid);
+    EXPECT_EQ(std::get<0>(doc->nodeVersion(braid)), 1);
+    EXPECT_FALSE(panel.rowShown("separate"));
+    EXPECT_FALSE(panel.rowShown("inflate"));
+    EXPECT_EQ(panel.sectionOf("separate"), "");
+    EXPECT_EQ(panel.sectionOf("inflate"), "");
+    EXPECT_EQ(panel.sectionOf("pancake"), "Loose") << "the params it always had stay";
+    ASSERT_EQ(doc->upgradeNode(braid), "");
+    panel.showNode(braid);
+    EXPECT_EQ(panel.sectionOf("separate"), "Sections");
+    EXPECT_EQ(panel.sectionOf("inflate"), "Sections");
 }
 
 TEST(AppPanels, ParamPanelGroupsFoldsShowWhenUnitsAndUpgrade) {

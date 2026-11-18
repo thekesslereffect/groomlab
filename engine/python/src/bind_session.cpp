@@ -297,8 +297,10 @@ void bindSession(py::module_& m) {
         .def(
             "view",
             [](GroomSession& s, float density, double time, double pointBudget, const std::string& viewNode, float sculptDensity,
-               bool buildCards, bool wantCards, float cardDensity, bool gameExport) {
+               bool buildCards, bool wantCards, float cardDensity, bool gameExport, bool wantStrands, const std::string& braidTubes) {
                 ViewRequest request;
+                request.wantStrands = wantStrands;
+                request.braidTubes = braidTubes;
                 request.density = density;
                 request.time = time;
                 request.pointBudget = pointBudget;
@@ -317,8 +319,11 @@ void bindSession(py::module_& m) {
             },
             py::arg("density") = 1.0f, py::arg("time") = 0.0, py::arg("point_budget") = 0.0, py::arg("view_node") = std::string{},
             py::arg("sculpt_density") = 1.0f, py::arg("build_cards") = false, py::arg("want_cards") = false,
-            py::arg("card_density") = 1.0f, py::arg("game_export") = false,
-            "Evaluates and returns a ViewResult (game_export: for a game engine, the Output's rootDepth left off). Never raises for the graph: failures are in errors.")
+            py::arg("card_density") = 1.0f, py::arg("game_export") = false, py::arg("want_strands") = true,
+            py::arg("braid_tubes") = std::string{},
+            "Evaluates and returns a ViewResult (game_export: for a game engine, the Output's rootDepth left off; want_strands false: "
+            "the strands as they were, nothing of the graph evaluated; braid_tubes: the Braid nodes whose tubes show, their inputs "
+            "evaluated whatever else is asked). Never raises for the graph: failures are in errors.")
         .def(
             "evaluate",
             [](GroomSession& g, float density, double seconds, bool buildCards, bool gameExport) -> py::object {

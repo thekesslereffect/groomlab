@@ -893,6 +893,8 @@ class NodeItem(QtWidgets.QGraphicsItem):
             left -= size + 4
         if self.op_type == "Clump":  # Clump Colors: the strands colored by its clumps
             rects["clumpColors"] = QtCore.QRectF(left, 8, size, size)
+        elif self.op_type == "Braid":  # Show Tubes: its section tubes drawn in the viewport
+            rects["braidTubes"] = QtCore.QRectF(left, 8, size, size)
         return rects
 
     def paint_toggles(self, painter, viewed, bypassed):
@@ -903,12 +905,13 @@ class NodeItem(QtWidgets.QGraphicsItem):
             available = self.mappable() if kind == "inputs" else []
             on = (viewed if kind == "focus" else
                   self.editor.clump_colored(self.name) if kind == "clumpColors" else
+                  self.editor.braid_tubes_shown(self.name) if kind == "braidTubes" else
                   (all(p in self.editor.model.param_inputs(self.name) for p in available) if kind == "inputs" else bypassed))
             ink = getattr(self, "header_ink", None)  # on a filled header: its readable color
             idle = QtGui.QColor(ink) if ink is not None else QtGui.QColor(MUTED)
             if ink is not None:
                 idle.setAlpha(150)
-            active = FOCUS if kind in ("focus", "inputs", "clumpColors") else WARNING
+            active = FOCUS if kind in ("focus", "inputs", "clumpColors", "braidTubes") else WARNING
             color = (ink if ink is not None else active) if on else idle
             if on:  # lit: a tile of its color under a bolder glyph (View in the blue: plainly on)
                 fill = QtGui.QColor(color)
@@ -936,6 +939,17 @@ class NodeItem(QtWidgets.QGraphicsItem):
                         painter.setPen(QtGui.QPen(color, 1.3))
                         painter.setBrush(QtCore.Qt.NoBrush)
                     painter.drawEllipse(c + at, 2.6, 2.6)
+            elif kind == "braidTubes":  # a short tube: its far end's half, its two sides, its open near end
+                far = QtCore.QRectF(c.x() - 6.6, c.y() - 4.0, 4.4, 8.0)
+                near = QtCore.QRectF(c.x() + 2.2, c.y() - 4.0, 4.4, 8.0)
+                painter.setPen(QtGui.QPen(color, 1.4))
+                painter.drawArc(far, 90 * 16, 180 * 16)
+                painter.drawLine(QtCore.QPointF(far.center().x(), far.top()), QtCore.QPointF(near.center().x(), near.top()))
+                painter.drawLine(QtCore.QPointF(far.center().x(), far.bottom()),
+                                 QtCore.QPointF(near.center().x(), near.bottom()))
+                if on:
+                    painter.setBrush(color)
+                painter.drawEllipse(near)
             elif kind == "inputs":  # Maya Hypershade's three-line expand-inputs glyph
                 for dy in (-4, 0, 4):
                     painter.drawLine(c + QtCore.QPointF(-5, dy), c + QtCore.QPointF(5, dy))
@@ -957,6 +971,8 @@ class NodeItem(QtWidgets.QGraphicsItem):
                         later(lambda: editor.toggle_param_inputs(name))
                     elif kind == "clumpColors":
                         later(lambda: editor.toggle_clump_colors(name))
+                    elif kind == "braidTubes":
+                        later(lambda: editor.toggle_braid_tubes(name))
                     else:
                         later(lambda: editor.set_bypass([name], not editor.model.bypassed(name)))
                     return
@@ -967,6 +983,7 @@ class NodeItem(QtWidgets.QGraphicsItem):
                          "dots" % shortcut_keys("graph.view"),
                 "inputs": "Expand Inputs: show or hide all connectable parameter ports",
                 "clumpColors": "Clump Colors: color the strands by this node's clumps (its clumpChannel); again: as they were",
+                "braidTubes": "Show Tubes: draws the braid's section tubes in the viewport",
                 "disable": "Bypass: pass the input straight through (%s)" % shortcut_keys("graph.bypass")}
         over = next((k for k, r in self.toggle_rects().items() if r.contains(event.pos())), None)
         self.setToolTip(tips[over] if over else (self.editor.node_errors.get(self.name)
@@ -2378,7 +2395,10 @@ class ParamPanel(QtWidgets.QScrollArea):
             if scene:
                 form.addRow(scene)
             rows = []  # (spec, label, widget), laid out by section below
+            saved_version = model.node_version(name)[0]
             for spec in model.node_spec(name)["params"]:
+                if spec.get("addedIn", 0) > saved_version:
+                    continue  # added by a later version of the operator: nothing here until Upgrade (the core's paramInVersion)
                 if op_type in ("Compound", "Script") and spec["name"] == "definition":
                     continue  # edited by grouping and expose() (a script node: Edit Node...), not as text
                 if op_type == "Expression" and spec["name"] in ("expression", "variables"):
@@ -5203,6 +5223,65 @@ class GraphEditor(QtWidgets.QWidget):
         for item in self.items.values():
             item.update()
 
+    # -- Show Tubes: a Braid header's button (the groom's braidTubes: the nodes whose tubes draw) --
+
+    def braid_tubes(self):
+        """The Braid nodes showing their section tubes, as the groom keeps them (names, one a line)."""
+        if not self.groom:
+            return ""
+        from maya import cmds
+        try:
+            return cmds.getAttr(self.groom + ".braidTubes") or ""
+        except (RuntimeError, ValueError):
+            return ""
+
+    def _set_braid_tubes(self, shown):
+        if not self.groom or shown == self.braid_tubes():
+            return
+        from maya import cmds
+        groom = self.groom
+        self.silently(lambda: cmds.setAttr(groom + ".braidTubes", shown, type="string"))
+        self._repaint_toggles()
+
+    def braid_tubes_shown(self, name):
+        """Whether the viewport draws this Braid's section tubes (its Show Tubes lit: the core's
+        GraphEdit.braid_tubes_shown)."""
+        shown = self.braid_tubes()
+        if not shown:
+            return False
+        try:
+            return self.model.braid_tubes_shown(name, shown)
+        except Exception:  # noqa: BLE001 - a node gone
+            return False
+
+    def toggle_braid_tubes(self, name):
+        """A Braid's Show Tubes: its section tubes drawn in the viewport (the hair as it is); on a lit
+        one, no more. Display only: nothing evaluates again."""
+        if not self.groom:
+            return
+        try:
+            shown = self.model.braid_tubes_toggled(name, self.braid_tubes())
+        except Exception as e:  # noqa: BLE001 - a node gone
+            self.report(str(e))
+            return
+        self._set_braid_tubes(shown)
+        self.report("%s's tubes %s" % (name, "shown" if self.braid_tubes_shown(name) else "hidden"))
+
+    def _follow_braid_tubes(self, old=None, new=None):
+        """Show Tubes after an edit: a renamed node's name follows it, a deleted node's goes (the
+        core's renamed_braid_tubes and GraphEdit.braid_tubes_kept)."""
+        shown = self.braid_tubes()
+        if not shown:
+            return
+        import groomlab_core
+        try:
+            if old and new:
+                shown = groomlab_core.renamed_braid_tubes(shown, old, new)
+            shown = self.model.braid_tubes_kept(shown)
+        except Exception:  # noqa: BLE001 - a graph the core cannot read: left as it is
+            return
+        self._set_braid_tubes(shown)
+
     def set_bypass(self, names, on):
         for name in names:
             self.model.set_bypass(name, on)
@@ -5233,9 +5312,13 @@ class GraphEditor(QtWidgets.QWidget):
 
     def copy_selected(self):
         names = [i.name for i in self.scene.selectedItems() if isinstance(i, NodeItem)]
-        if names:
-            QtWidgets.QApplication.clipboard().setText(self.model.copy_nodes(names))
-            self.report("copied %d node%s" % (len(names), "s" if len(names) > 1 else ""))
+        text = self.model.copy_nodes(names) if names else ""
+        if text:
+            count = len(json.loads(text)["nodes"])
+            QtWidgets.QApplication.clipboard().setText(text)
+            self.report("copied %d node%s" % (count, "s" if count > 1 else ""))
+        elif names:
+            self.report("the output node is one of a kind")
 
     def paste(self, offset=(40.0, 40.0)):
         try:
@@ -5253,7 +5336,11 @@ class GraphEditor(QtWidgets.QWidget):
     def duplicate(self, names):
         if not names:
             return []
-        QtWidgets.QApplication.clipboard().setText(self.model.copy_nodes(names))
+        text = self.model.copy_nodes(names)
+        if not text:
+            self.report("the output node is one of a kind")
+            return []
+        QtWidgets.QApplication.clipboard().setText(text)
         return self.paste()
 
     def add_backdrop(self, title="Backdrop"):
@@ -5963,6 +6050,7 @@ class GraphEditor(QtWidgets.QWidget):
     def delete_nodes(self, names):
         for name in names:
             self.model.remove_node(name, keep_flow=True)  # the flow passes through (issue #80)
+        self._follow_braid_tubes()  # a deleted Braid's Show Tubes goes with it
         self.rebuild()
         self.changed()
 
@@ -6058,6 +6146,8 @@ class GraphEditor(QtWidgets.QWidget):
             self.model.disconnect(e.dst_item.name, e.input_name)
         for name in nodes:
             self.model.remove_node(name, keep_flow=True)  # the flow passes through (issue #80)
+        if nodes:
+            self._follow_braid_tubes()  # a deleted Braid's Show Tubes goes with it
         for data in backdrops:
             self.model.backdrops.remove(data)
             self._layout_dirty = True
@@ -6108,6 +6198,7 @@ class GraphEditor(QtWidgets.QWidget):
                 self.report(str(e))
                 return
             self._rename_color_source(name, new)
+            self._follow_braid_tubes(name, new)
             self.rebuild()
             self.changed()
 

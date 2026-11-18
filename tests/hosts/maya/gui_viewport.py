@@ -46,6 +46,10 @@ def run():
         clump_centers_check(os.environ.get("GROOMLAB_VIEWPORT_SNAPSHOTS"))
         finish()
         return
+    if os.environ.get("GROOMLAB_VIEWPORT_CASE") == "tubes":  # Show Tubes alone (a Braid's section tubes)
+        braid_tubes_check(os.environ.get("GROOMLAB_VIEWPORT_SNAPSHOTS"))
+        finish()
+        return
     if os.environ.get("GROOMLAB_VIEWPORT_CASE") == "colors":  # the strands' own colors alone
         strand_colors_check(os.environ.get("GROOMLAB_VIEWPORT_SNAPSHOTS"))
         finish()
@@ -338,6 +342,7 @@ def run():
     true_width_check(snapshots)
     overlay_check(snapshots)
     clump_centers_check(snapshots)
+    braid_tubes_check(snapshots)
     cards_check(snapshots)
     strand_colors_check(snapshots)
     hair_color_randomness_check(snapshots)
@@ -927,12 +932,16 @@ def lod_check(snapshots=None):
             close = abs(ink_on - lines_on) <= 0.1 * max(lines_on, 1e-3) and abs(ink_on - ink_off) <= 0.33 * max(ink_off, 1e-3)
         else:
             close = abs(ink_on - ink_off) <= 0.1 * max(ink_off, 1e-3)
+        # Near, the segments of the groups drawn whole blend. (The preset's Clump, version 2, spaces its
+        # clumps evenly: at this framing every one is thinned a step and none is whole; version 1 left
+        # 5 of 874 whole. Any nearer and the camera is in the hair.)
+        blends = stats["blendSegments"] > 0 or stats["thinnedGroups"] == stats["groups"]
         check("level of detail on %s, %s (%d strands): drawn %d strands, %d impostors, %d blendable segments; the ink "
               "%.3f against every strand's %.3f%s"
               % (api, name, strands, stats["drawnStrands"], stats["impostors"], stats["blendSegments"], ink_on, ink_off,
                  " and the thinned lines' %.3f" % lines_on if lines_on is not None else ""),
               stats["on"] and close and
-              (stats["drawnStrands"] < 0.6 * strands if name in ("mid", "far", "veryfar") else stats["blendSegments"] > 0) and
+              (stats["drawnStrands"] < 0.6 * strands if name in ("mid", "far", "veryfar") else blends) and
               (stats["impostors"] > 0 if name == "veryfar" else True))
     # A still view draws the same picture twice; an orbit keeps the strands drawn and changes few pixels.
     frame(0.19)
@@ -2082,6 +2091,117 @@ def clump_centers_check(snapshots=None):
           "(%d drawn), none without" % (on[1], on[0], on[2], smooth[0]),
           36 <= on[1] <= 44 and on[0] == on[1] and smooth[1] == on[1] and smooth[0] == on[1] and off[0] == 0 and back[0] == 0
           and on[2] > 100 and on[2] > 5 * max(off[2], 1) and not groomlab.errors(groom))
+    cmds.file(new=True, force=True)
+
+
+def braid_tubes_check(snapshots=None):
+    """Show Tubes (the Graph Editor's button on a Braid node: the groom's braidTubes): the node's
+    section tubes draw as a solid lit surface, each section in its own color, where the braided
+    hair is; a param of the Braid edited, they follow; off again, the viewport is as it was (no
+    tubes left behind). On the device the session runs (OpenGL, DirectX 11)."""
+    import tempfile
+    import groomlab
+    cmds.file(new=True, force=True)
+    scalp = cmds.polySphere(radius=1, subdivisionsX=24, subdivisionsY=16)[0]
+    groom = groomlab.create_groom(scalp)
+    cmds.setAttr(groom + ".previewDensity", 1.0)
+    cmds.setAttr(groom + ".displayGuides", 0)
+    # A ponytail braid off the top of the sphere: the hair round its root swept in and woven.
+    path = cmds.curve(degree=3, point=[(0, 1.0, 0), (0, 1.7, 0.1), (0.15, 2.5, 0.3), (0.15, 3.3, 0.6), (0, 4.0, 0.9)])
+    braid = groomlab.add_braid(groom, [path], style="three", region=0.9, width=0.5)
+    groomlab.set_param(groom, braid, "fuzz", 0.0)
+    groomlab.set_param(groom, "scatter", "length", 3.6)
+    cmds.setAttr(path + ".visibility", 0)
+    cmds.select(clear=True)
+    cmds.viewFit("persp", fitFactor=0.9)
+    cmds.setAttr("persp.translate", 5.5, 4.2, 6.0)
+    cmds.viewLookAt("persp", position=(0.05, 2.3, 0.4))
+    folder = snapshots or tempfile.mkdtemp(prefix="groomlab_braid_tubes_")
+
+    def shot(name):
+        """The capture, its pixels in a light saturated color (the tubes': the hair is brown, the
+        scalp and the background grey), the hues among them, and whether the viewport's last
+        upload held the tubes' item."""
+        from groomlab.ui.qt import QtGui
+        cmds.refresh(currentView=True, force=True)
+        items = json.loads(cmds.groomLabGraphStats(groom, drawTimes=True))["draw"]["items"]
+        path_ = os.path.join(folder, "braid_tubes_%s.png" % name)
+        cmds.playblast(frame=[1], format="image", compression="png", viewer=False, showOrnaments=False,
+                       percent=100, widthHeight=(960, 720), completeFilename=path_)
+        image = QtGui.QImage(path_).convertToFormat(QtGui.QImage.Format_RGB32)
+        data = bytes(image.constBits())[:image.sizeInBytes()]  # B, G, R, A
+        vivid, hues = 0, {"r": 0, "g": 0, "b": 0}
+        for i in range(0, len(data), 4):
+            b, g, r = data[i], data[i + 1], data[i + 2]
+            hi, lo = max(r, g, b), min(r, g, b)
+            # (Not the hair's browns: those are dark, or red over green over blue by wide steps.)
+            if hi > 140 and hi - lo > 0.3 * hi and not (r > g > b and r - b > 0.55 * r):
+                vivid += 1
+                hues["rgb"[(r, g, b).index(hi)]] += 1
+        return vivid, sorted(k for k, n in hues.items() if n > 150), "groomLabBraidTubes" in items, path_
+
+    strands = cmds.getAttr(groom + ".outStrandCount")
+    off = shot("off")
+    cmds.setAttr(groom + ".braidTubes", braid, type="string")
+    on = shot("on")
+    groomlab.set_param(groom, braid, "separate", 1.0)
+    groomlab.set_param(groom, braid, "inflate", 1.0)
+    apart = shot("on_separate")
+
+    def capture(name):
+        """A capture as Maya's own loop draws it (its events and idles: no forced refresh), and the
+        draw's stats then."""
+        from groomlab.ui.qt import QtGui, QtWidgets
+        for _ in range(8):
+            QtWidgets.QApplication.processEvents()
+            cmds.flushIdleQueue()
+        path_ = os.path.join(folder, "braid_tubes_%s.png" % name)
+        cmds.playblast(frame=[1], format="image", compression="png", viewer=False, showOrnaments=False,
+                       percent=100, widthHeight=(960, 720), completeFilename=path_)
+        image = QtGui.QImage(path_).convertToFormat(QtGui.QImage.Format_RGB32)
+        return bytes(image.constBits())[:image.sizeInBytes()], json.loads(cmds.groomLabGraphStats(groom, drawTimes=True))["draw"]
+
+    def differing(a, b):
+        return sum(1 for i in range(0, min(len(a), len(b)), 4)
+                   if abs(a[i] - b[i]) + abs(a[i + 1] - b[i + 1]) + abs(a[i + 2] - b[i + 2]) > 24)
+
+    # A param of the Braid edited while its tubes show: the picture changes, with the hair shown and
+    # with it hidden (displayHair off: no strands are evaluated then, the tubes still follow), as
+    # Maya draws by itself (nobody moves the camera or forces a refresh).
+    fat, fat_draw = capture("shown_inflate1")
+    groomlab.set_param(groom, braid, "inflate", 0.0)
+    thin, thin_draw = capture("shown_inflate0")
+    cmds.setAttr(groom + ".displayHair", 0)
+    hidden_thin, hidden_thin_draw = capture("hidden_inflate0")
+    groomlab.set_param(groom, braid, "inflate", 1.0)
+    hidden_fat, hidden_fat_draw = capture("hidden_inflate1")
+    groomlab.set_param(groom, "scatter", "length", 3.0)  # a node before the Braid
+    hidden_short, hidden_short_draw = capture("hidden_shorter")
+    cmds.setAttr(groom + ".displayHair", 1)
+    groomlab.set_param(groom, "scatter", "length", 3.6)
+    shown_moved, hidden_moved, upstream_moved = differing(fat, thin), differing(hidden_thin, hidden_fat), differing(hidden_fat, hidden_short)
+    say("braid tubes after a param edit: %d pixels differ with the hair shown, %d with it hidden, %d after an edit before "
+        "the Braid with it hidden; draw stats %s" % (shown_moved, hidden_moved, upstream_moved,
+                                                     json.dumps({k: v for k, v in hidden_fat_draw.items() if not isinstance(v, (dict, list))},
+                                                                sort_keys=True)))
+    # (The edit before the Braid, a shorter Scatter, leaves these tubes where they were: they lie along
+    # the path. That the tubes are built again then: Session.ShownTubesAreEvaluatedTo... in the core.)
+    check("Show Tubes follows an edit of the Braid's inflate with the hair shown (%d pixels differ) and hidden (%d), "
+          "drawn by Maya's own loop (%d differ after an edit before the Braid)" % (shown_moved, hidden_moved, upstream_moved),
+          shown_moved > 1500 and hidden_moved > 1500)
+    apart = shot("on_separate")
+    cmds.setAttr(groom + ".braidTubes", "scatter", type="string")  # not a Braid node: nothing drawn
+    other = shot("not_a_braid")
+    cmds.setAttr(groom + ".braidTubes", "", type="string")
+    back = shot("back")
+    say("braid tubes: off %s, on %s, separate 1 %s, a node that is no Braid %s, off again %s "
+        "(vivid pixels, their hues, the item uploaded, capture)" % (off, on, apart, other, back))
+    check("Show Tubes draws a Braid's section tubes in the sections' colors (%d pixels in %s; %d apart), nothing "
+          "for a node that is no Braid, and nothing is left when it goes off (%d, %d before)"
+          % (on[0], "".join(on[1]), apart[0], back[0], off[0]),
+          on[2] and apart[2] and on[0] > off[0] + 1500 and len(on[1]) >= 2 and apart[0] > off[0] + 1500
+          and abs(other[0] - apart[0]) > 1500 and other[0] <= back[0] + 60 and abs(back[0] - other[0]) <= 60
+          and cmds.getAttr(groom + ".outStrandCount") == strands and not groomlab.errors(groom))
     cmds.file(new=True, force=True)
 
 

@@ -426,9 +426,13 @@ class GroomLabTools(bpy.types.PropertyGroup):
     status: StringProperty()
     strengths: StringProperty()  # {tool: strength}: each tool keeps its own, as in Maya
     brushes: StringProperty()  # {tool: {radius, falloff, falloff_curve, strength_profile}}: each brush's own
+    # The brush values' defaults and limits are the core's (brush_catalog.h, the helper's tool_catalog
+    # "settings"), written out here because Blender declares properties before the helper runs: a
+    # length in meters (the catalog's centimeters / 100), the stamp spacing in percent. Change one
+    # in the catalog and here: ToolsTest.test_2b_brush_values_are_the_catalogs fails when they differ.
     radius: IntProperty(name="Radius", default=60, min=1, max=2000, soft_min=5, soft_max=400, subtype="PIXEL",
                         description="The brush circle (B held + drag sets it)", update=_push("radius"))
-    strength: FloatProperty(name="Strength", default=1.0, min=-1.0, max=1.0, update=_strength,
+    strength: FloatProperty(name="Strength", default=1.0, min=-10.0, max=10.0, soft_min=-1.0, soft_max=1.0, update=_strength,
                             description="How much each stamp does (Comb: the fraction of the drag); negative reverses "
                                         "the tools that work both ways (M held + drag sets it)")
     falloff: FloatProperty(name="Falloff", default=1.0, min=0.0, max=1.0, subtype="FACTOR", update=_push(),
@@ -442,7 +446,7 @@ class GroomLabTools(bpy.types.PropertyGroup):
                                    update=_push(),
                                    description="How much of the strength each part of a guide gets, root to tip: tips "
                                                "more than roots, or the reverse; Flat: the whole guide alike")
-    smooth_strength: FloatProperty(name="Smooth", default=1.0, min=0.0, max=3.0, update=_push(),
+    smooth_strength: FloatProperty(name="Smooth", default=1.0, min=0.0, max=100.0, soft_max=3.0, update=_push(),
                                    description="How much Shift+drag smooths a map per stamp (past 1: several passes)")
     symmetry: BoolProperty(name="Symmetry", default=False, update=_push(),
                            description="Mirror every stroke: across world X, or across the scalp's own topology")
@@ -476,11 +480,11 @@ class GroomLabTools(bpy.types.PropertyGroup):
                                   description="New guides stay unfrozen and every other guide is frozen, so the brushes "
                                               "work on the new ones at once (Ctrl+click guides with a brush to "
                                               "select them, Unfreeze All to free them all)")
-    length: FloatProperty(name="Length", default=0.005, min=1e-6, soft_max=1.0, subtype="DISTANCE", unit="LENGTH",
-                          precision=4, update=_push(), description="A standing new guide's length")
+    length: FloatProperty(name="Length", default=0.005, min=1e-5, max=100.0, soft_min=1e-4, soft_max=0.5, subtype="DISTANCE",
+                          unit="LENGTH", precision=4, update=_push(), description="A standing new guide's length")
     segments: IntProperty(name="Segments", default=12, min=1, max=256, soft_max=32, update=_push(),
                           description="A new guide's segments")
-    spacing: FloatProperty(name="Spacing", default=0.001, min=0.0, soft_max=0.1, subtype="DISTANCE", unit="LENGTH",
+    spacing: FloatProperty(name="Spacing", default=0.001, min=0.0, max=100.0, soft_max=0.1, subtype="DISTANCE", unit="LENGTH",
                            precision=4, update=_push(), description="The distance between the guides a drag places")
     part_name: StringProperty(name="Name", default="part", update=_push(), description="Name for the next part (made unique)")
     flow_sink_item: EnumProperty(name=defs.get("choices/flowSink")["label"], items=FLOW_ITEMS,
@@ -739,6 +743,10 @@ class GroomLabGroomDisplay(bpy.types.PropertyGroup):
     strand_color_source: StringProperty(name="Source", default="clumpId", update=_display, search=_strand_sources,
                                         description="The color set or channel the strands show")
     strand_color_min: FloatProperty(name="Min", default=0.0, update=_display)
+    # Show Tubes (the Graph Editor's button on a Braid node): the Braid nodes whose section tubes the
+    # viewport draws, their names one a line (the core's rules, through the helper's braid_tubes).
+    braid_tubes: StringProperty(name="Show Tubes", update=_display,
+                                description="The Braid nodes whose section tubes the viewport draws")
     strand_color_max: FloatProperty(name="Max", default=1.0, update=_display)
     state: StringProperty()  # the groom's state (get_state) kept in the .blend: guides, maps, selection
     # Where GroomLab's own undo history stood after the groom's last edit (the helper's undoDepth):

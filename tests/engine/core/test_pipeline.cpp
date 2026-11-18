@@ -18,6 +18,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "groomlab/braid_tubes.h"
 #include "groomlab/camera_solve.h"
 #include "groomlab/cards.h"
 #include "groomlab/curve.h"
@@ -616,9 +617,77 @@ TEST(InstancePinToRest, StretchedStrandsKeepTheirInstancesDistanceFromTheRoot) {
         const StrandsPtr shrunk = groom.evaluate(1.0f, 2.0 / 24.0);
         expectInstancesAt(*rest, *shrunk, pin, 0.0f);
 
-        // The rest pose doesn't change with the poses: evaluated once, when first needed.
-        EXPECT_EQ(groom.restEvaluations(), pin ? 1u : 0u);
+        // The rest pose doesn't change with the poses, and it is the first evaluation's own (the
+        // groom at rest then): no node ran a second time for it.
+        EXPECT_EQ(groom.restEvaluations(), 0u);
     }
+}
+
+TEST(InstancePinToRest, AGroomAtRestIsNotEvaluatedASecondTimeForItsRestPose) {
+    // A static scalp and guides as authored: the rest pose reads what the evaluation read, node by
+    // node under the same keys, so it takes that evaluation's results and runs nothing (it was the
+    // whole graph again, on a copy). The pinned and fitted instances are the ones a rest pose
+    // evaluated apart gives, to the bit.
+    const auto scalp = sphere();
+    GroomData d = groomData(scalp);
+    d.graphJson = instanceGraph(true, R"(, "sizeMode": "fitStrand", "fitScale": 0.5, "aspect": 0.2)");
+    Groom groom(d);
+    const StrandsPtr pinned = groom.evaluate(1.0f, 0.0);
+    ASSERT_TRUE(pinned && pinned->instances());
+    ASSERT_TRUE(pinned->instances()->needsRestPose());
+    const std::size_t ran = groom.evaluationCount();
+    EXPECT_GT(ran, 3u);
+    EXPECT_EQ(groom.restEvaluations(), 0u);
+    // Apart: a session that keeps no results evaluates its rest pose through its own graph.
+    Groom apart(d);
+    apart.setCacheIntermediates(false);
+    const StrandsPtr separate = apart.evaluate(1.0f, 0.0);
+    EXPECT_EQ(apart.restEvaluations(), 1u);
+    ASSERT_TRUE(separate && separate->instances());
+    EXPECT_EQ(pinned->contentHash(), separate->contentHash());
+    auto sameRest = [](const StrandSet& a, const StrandSet& b) {
+        const auto& x = a.instances()->instances;
+        const auto& y = b.instances()->instances;
+        if (x.size() != y.size()) return false;
+        std::size_t known = 0;
+        for (std::size_t i = 0; i < x.size(); ++i) {
+            if (x[i].id != y[i].id || std::memcmp(&x[i].restDistance, &y[i].restDistance, sizeof(float)) != 0 ||
+                std::memcmp(&x[i].restLength, &y[i].restLength, sizeof(float)) != 0) {
+                return false;
+            }
+            known += x[i].restDistance >= 0.0f && x[i].restLength > 0.0f;
+        }
+        return known == x.size() && known > 0;
+    };
+    EXPECT_TRUE(sameRest(*pinned, *separate));
+    // The next frames: nothing runs, here or at rest.
+    const StrandsPtr next = groom.evaluate(1.0f, 1.0 / 24.0);
+    ASSERT_TRUE(next);
+    EXPECT_EQ(next->contentHash(), pinned->contentHash());
+    EXPECT_EQ(groom.evaluationCount(), ran);
+    EXPECT_EQ(groom.restEvaluations(), 0u);
+    // Posed guides (a simulation): the evaluation is no longer the rest pose, which stands as it
+    // was taken; the strands stretch, the rest distances stay.
+    groom.setGuidePoses(scaledPoses(scalp, 1.5f));
+    const StrandsPtr stretched = groom.evaluate(1.0f, 2.0 / 24.0);
+    ASSERT_TRUE(stretched && stretched->instances());
+    EXPECT_NE(stretched->contentHash(), pinned->contentHash());
+    EXPECT_TRUE(sameRest(*stretched, *separate));
+    EXPECT_EQ(groom.restEvaluations(), 0u);
+    // An edit while posed: the evaluation's results are not the rest pose's from the guides on, so
+    // the rest pose runs those nodes itself, to what a session opened on the edited graph gives.
+    GroomData e = d;
+    const std::string was = R"("fitScale": 0.5)";
+    e.graphJson.replace(e.graphJson.find(was), was.size(), R"("fitScale": 0.7)");
+    groom.setGraphJson(e.graphJson);
+    const StrandsPtr edited = groom.evaluate(1.0f, 2.0 / 24.0);
+    EXPECT_EQ(groom.restEvaluations(), 1u);
+    Groom fresh(e);
+    fresh.setGuidePoses(scaledPoses(scalp, 1.5f));
+    const StrandsPtr expected = fresh.evaluate(1.0f, 2.0 / 24.0);
+    ASSERT_TRUE(edited && expected && edited->instances() && expected->instances());
+    EXPECT_EQ(edited->contentHash(), expected->contentHash());
+    EXPECT_TRUE(sameRest(*edited, *expected));
 }
 
 TEST(InstancePinToRest, RestPoseIsEvaluatedOncePerEditNotPerFrame) {
@@ -684,7 +753,7 @@ TEST(InstanceFitStrand, SizeComesFromTheRestLengthWhileStrandsStretch) {
     Groom groom(d);
     const StrandsPtr rest = groom.evaluate(1.0f, 0.0);
     ASSERT_TRUE(rest->instances());
-    EXPECT_EQ(groom.restEvaluations(), 1u);  // fitStrand alone asks for the rest pose
+    EXPECT_EQ(groom.restEvaluations(), 0u);  // fitStrand alone asks for the rest pose: this evaluation's own, at rest
     expectFittedToRest(*rest, *rest, 0.5f, 0.2f, 2.0f);
 
     // Fixed mode (the same node otherwise) never reads the rest pose, and keeps its size.
@@ -706,7 +775,7 @@ TEST(InstanceFitStrand, SizeComesFromTheRestLengthWhileStrandsStretch) {
             EXPECT_NEAR(p.y.length(), 0.02f, 1e-6f);
         }
     }
-    EXPECT_EQ(groom.restEvaluations(), 1u);  // once, not per frame
+    EXPECT_EQ(groom.restEvaluations(), 0u);  // never again: not per frame
     EXPECT_EQ(fixed.restEvaluations(), 0u);
 
     // Renders (caching off) on a deforming scalp with a rest pose: once across frames and motion keys.
@@ -1028,6 +1097,20 @@ TEST(GroomFile, KeepsTheGuideGroupsDisplayAsMayasAttributes) {
     EXPECT_EQ(back.hiddenGuideGroups, file.hiddenGuideGroups);
     EXPECT_EQ(parseGuideGroupColors(back.guideGroupColors).size(), 2u);
     EXPECT_EQ(parseHiddenGuideGroups(back.hiddenGuideGroups), (std::set<std::string>{"nape", "fringe"}));
+}
+
+TEST(GroomFile, KeepsTheBraidNodesShowingTheirTubes) {
+    // Show Tubes (braid_tubes.h): the Braid nodes shown, a list of names; absent when none is, and
+    // a file from before (no "braidTubes") opens with none shown.
+    GroomFile file;
+    EXPECT_EQ(groomFileToJson(file).find("braidTubes"), std::string::npos);
+    EXPECT_TRUE(groomFileFromJson(R"({"format": "groomlab.groom", "version": 1})").braidTubes.empty());
+    file.braidTubes = braidTubesText({"plait", "side braid, left"});
+    const std::string json = groomFileToJson(file);
+    EXPECT_NE(json.find("\"braidTubes\""), std::string::npos);
+    const GroomFile back = groomFileFromJson(json);
+    EXPECT_EQ(back.braidTubes, file.braidTubes);
+    EXPECT_EQ(braidTubeNames(back.braidTubes), (std::vector<std::string>{"plait", "side braid, left"}));
 }
 
 TEST(GroomFile, WritesAnEmptyColorSet) {

@@ -23,7 +23,8 @@ Pins are reroute points (Unreal's Blueprint reroute nodes) that links are drawn 
 the wires: {"points": [{"id", "x", "y"}], "routes": [{"from", "output"?, "to", "input", "via":
 [pin ids, source to destination]}]}. A pin carries one signal (its routes share a source), so
 several links from one output can run through the same pins as a bundle. A route whose link is
-gone, or comes from another source now, is dropped, and a pin no route passes goes with it.
+gone, or comes from another source now, is dropped, and a pin no route passes goes with it: the
+core's rules (graph_pins.h, through groomlab_core.GraphPins), every host's.
 
 A node can have several outputs (a Map node: luminance, r, g, b, a); a connection
 {"from", "to", "input"} reads the source's first output, or the one its "output" names
@@ -102,9 +103,6 @@ class OperatorCatalog(object):
             return self._specs[op_type]
         except KeyError:
             raise GraphError("unknown operator type %r" % op_type)
-
-    def input_names(self, op_type):
-        return [p["name"] for p in self.spec(op_type)["inputs"]]
 
     def input_spec(self, op_type, input_name):
         for p in self.spec(op_type)["inputs"]:
@@ -216,14 +214,7 @@ def map_source(value):
 
 
 BACKDROPS_KEY = "__backdrops__"
-
-
-def _pin_number(pin):
-    """pin12 -> 12 (0 for another name): pins sort and number by it."""
-    digits = pin[3:] if pin.startswith("pin") else ""
-    return int(digits) if digits.isdigit() else 0
 CLIPBOARD_KEY = "groomlabNodes"
-
 
 
 def linkable(spec):
@@ -247,8 +238,8 @@ class GraphModel(object):
         self.connections = []    # [{"from": src, "to": dst, "input": port[, "output": src's output]}]
         self.output = None
         self.backdrops = []      # [{"title", "x", "y", "w", "h", "color"}]: layout only
-        self.pins = {}           # pin id -> [x, y]: layout only (see the module's notes)
-        self.routes = {}         # (to, input) -> {"from", "output", "via": [pin ids]}
+        self._pins = None        # the graph's "pins" ({"points", "routes"}; None: none): layout only (the
+                                 # module's notes), kept by the core (graph_pins.h); `pins` and `routes` read it
         self.renamed = {}        # old name -> new name (a path inside a compound: "compound1/sculpt1") since
                                  # the last save (the groom's viewNode and Sculpt edits follow)
         self.copied = {}         # pasted node -> the node it copies, since the last save (Sculpt edits follow)
@@ -309,19 +300,34 @@ class GraphModel(object):
             self.order.append(n["name"])
         self.output = data.get("output")
         self.backdrops = [dict(b) for b in data.get("backdrops") or [] if isinstance(b, dict)]
-        self._load_pins(data.get("pins"))
+        self._pins = None
         # Every connection made again as connect makes it (its checks), in one go in the core.
         self.connections = [dict(c) for c in data.get("connections", [])]
         edit = self._edit()
         with _core_errors():
             edit.check_connections()
         self.connections = json.loads(edit.to_json()).get("connections", [])
+        self._load_pins(data.get("pins"))
 
     # -- The core's edits (graph_edit.h): what every host's editor does to a graph ----------
 
     def _edit(self):
         """The graph as the core edits it."""
         return groomlab_core.GraphEdit(json.dumps(self.to_dict()))
+
+    # The last graph the core read for a question, and its text (_query).
+    _query_text = None
+    _query_edit = None
+
+    def _query(self):
+        """The graph as the core reads it, for questions only (never edited through this one): the
+        one made for the last question again while the graph's text is the same, so a repaint or a
+        run of questions parses the graph once."""
+        text = json.dumps(self.to_dict())
+        if text != self._query_text:
+            self._query_edit = groomlab_core.GraphEdit(text)
+            self._query_text = text
+        return self._query_edit
 
     def _take(self, edit):
         """The core's edited graph back into the model (a node that did not change keeps its dict)."""
@@ -360,12 +366,6 @@ class GraphModel(object):
             data = without_layout(data)
         return json.dumps(data, indent=indent, separators=None if indent else (",", ":"))
 
-    def layout_json(self):
-        layout = {n: list(self.position(n)) for n in self.order if "ui" in self.nodes[n]}
-        if self.backdrops:
-            layout[BACKDROPS_KEY] = self.backdrops
-        return json.dumps(layout)
-
     # -- Bypass --------------------------------------------------------------
 
     def bypassed(self, name):
@@ -396,34 +396,21 @@ class GraphModel(object):
     # -- Copy and paste ---------------------------------------------------------
 
     def copy_nodes(self, names):
-        """The nodes and the links between them, as JSON text for the clipboard."""
-        names = [n for n in self.order if n in set(names)]
-        data = {CLIPBOARD_KEY: 1, "nodes": [], "connections": []}
-        for name in names:
-            n = copy.deepcopy(self.nodes[name])
-            n["name"] = name
-            data["nodes"].append(n)
-        data["connections"] = [c for c in self.connections if c["from"] in names and c["to"] in names]
-        return json.dumps(data)
+        """The nodes and the links between them, as JSON text for the clipboard (the core's
+        GraphEdit.copy_nodes, the app's too): never the Output node; "" when that leaves none."""
+        return self._query().copy_nodes(list(names))
 
     def paste_nodes(self, text, offset=(40.0, 40.0)):
-        """Add copied nodes (new names, moved by `offset`) with their links. Returns the new names."""
-        data = json.loads(text)
-        if not isinstance(data, dict) or CLIPBOARD_KEY not in data:
-            raise GraphError("the clipboard holds no GroomLab nodes")
-        renamed = {}
-        for n in data["nodes"]:
-            new = self.unique_name(n["name"])
-            renamed[n["name"]] = new
-            x, y = n.get("ui", {}).get("x", 0.0), n.get("ui", {}).get("y", 0.0)
-            self.catalog.spec(n["type"])
-            self.nodes[new] = {k: copy.deepcopy(v) for k, v in n.items() if k != "name"}
-            self.nodes[new]["ui"] = {"x": x + offset[0], "y": y + offset[1]}
-            self.order.append(new)
-            self.copied[new] = n["name"]
-        for c in data["connections"]:
-            self.connect(renamed[c["from"]], renamed[c["to"]], c["input"], output=c.get("output"))
-        return [renamed[n["name"]] for n in data["nodes"]]
+        """Add copied nodes (new names, moved by `offset`) with their links (the core's
+        GraphEdit.paste_nodes, the app's too). Returns the new names. A GraphError (text that holds
+        no copied nodes, a link that does not fit) leaves the graph as it was."""
+        edit = self._edit()
+        with _core_errors():
+            made = edit.paste_nodes(text or "", float(offset[0]), float(offset[1]))
+        self._take(edit)
+        for new, source in made:
+            self.copied[new] = source  # its Sculpt edits are copied on save
+        return [new for new, _source in made]
 
     def save(self, groom):
         """Validate, then store the graph and its layout on the groom: one undo step.
@@ -603,12 +590,10 @@ class GraphModel(object):
                 c["to"] = new
         if self.output == old:
             self.output = new
-        routes = {}
-        for (to, input_name), route in self.routes.items():
-            if route["from"] == old:
-                route["from"] = new
-            routes[(new if to == old else to, input_name)] = route
-        self.routes = routes
+        if self._pins:  # the routes from and to it follow (the core's renamePinNode)
+            pins = self._pin_edit()
+            pins.rename_node(old, new)
+            self._take_pins(pins)
         self._moved([(old, new)])
 
     def _moved(self, moves):
@@ -689,18 +674,13 @@ class GraphModel(object):
 
     def unexpose_param(self, name, param):
         """Remove a param's input port (and what was connected to it); the param keeps its own value."""
-        node = self._node(name)
-        if param in node.get("paramInputs", []):
-            node["paramInputs"].remove(param)
-            if not node["paramInputs"]:
-                del node["paramInputs"]
-            self.disconnect(name, param)
+        self._node(name)
+        edit = self._edit()
+        with _core_errors():  # the core's (graph_controls.h unexposeParam), every host's
+            if edit.unexpose_param(name, param):
+                self._take(edit)
 
     # -- Keyed params: a param linked to the groom's control attribute(s), set from them per frame
-
-    def param_controls(self, name):
-        """{param: control} of the node's keyed params: a control name, or [x, y, z] names for a vector."""
-        return copy.deepcopy(self._node(name).get("paramControls", {}))
 
     def control_of(self, name, param):
         """The control(s) keying a param (a name, or three for a vector), or None."""
@@ -711,7 +691,7 @@ class GraphModel(object):
         if self.param_spec(name, param) is None:
             return "%s has no param %r" % (self.node_type(name), param)
         with _core_errors():  # the core's reasons (graph_controls.h notKeyable), every host's
-            why = self._edit().not_keyable(name, param)
+            why = self._query().not_keyable(name, param)
         return why or None
 
     def link_control(self, name, param, control):
@@ -735,10 +715,6 @@ class GraphModel(object):
     def driver_of(self, name, param):
         """The node driving an exposed param, or None."""
         return self.source_of(name, param) if param in self.param_inputs(name) else None
-
-    def _base_inputs(self, name):
-        spec = self.node_spec(name)
-        return [p for p in spec["inputs"] if not p.get("param")]
 
     def input_spec(self, name, input_name):
         for port in self.node_spec(name)["inputs"]:
@@ -767,24 +743,30 @@ class GraphModel(object):
         if out != "Curves":
             return out
         with _core_errors():
-            return (_edit or self._edit()).output_type(name, output or "")
+            return (_edit or self._query()).output_type(name, output or "")
 
     def param_spec(self, name, param):
         return next((p for p in self.node_spec(name)["params"] if p["name"] == param), None)
 
     # -- Pins (layout: links drawn through reroute points) ----------------------
 
+    # The rules are the core's (graph_pins.h, as the app's and Blender's): which routes and pins hold
+    # after a graph edit, their order, the next pin's id, joining. The model keeps the graph's
+    # "pins" as the core wrote it.
+
+    def _pin_edit(self):
+        """The graph's links and pins as the core reads and edits them (groomlab_core.GraphPins)."""
+        return groomlab_core.GraphPins(json.dumps({"connections": self.connections, "pins": self._pins or {}}))
+
+    def _take_pins(self, edit):
+        text = edit.pins_json()
+        self._pins = json.loads(text) if text else None
+
     def _load_pins(self, data):
-        self.pins, self.routes = {}, {}
-        if not isinstance(data, dict):
-            return
-        for p in data.get("points") or []:
-            if isinstance(p, dict) and p.get("id"):
-                self.pins[str(p["id"])] = [float(p.get("x", 0.0)), float(p.get("y", 0.0))]
-        for r in data.get("routes") or []:
-            if isinstance(r, dict) and r.get("to") and r.get("input") and r.get("via"):
-                self.routes[(r["to"], r["input"])] = {"from": r.get("from"), "output": r.get("output"),
-                                                      "via": [str(v) for v in r["via"]]}
+        self._pins = None
+        if isinstance(data, dict) and data.get("routes"):
+            self._pins = data
+            self.prune_pins()
 
     def _source(self, to, input_name):
         """(from, output) of the link into to.input (output None: its first), or None."""
@@ -793,111 +775,89 @@ class GraphModel(object):
                 return c["from"], c.get("output")
         return None
 
+    @property
+    def pins(self):
+        """{pin id: [x, y]}."""
+        return {p["id"]: [p["x"], p["y"]] for p in (self._pins or {}).get("points", [])}
+
+    @property
+    def routes(self):
+        """{(to, input): {"from", "output" (None: the source's first), "via": [pin ids, source first]}}."""
+        return {(r["to"], r["input"]): {"from": r["from"], "output": r.get("output"), "via": list(r["via"])}
+                for r in (self._pins or {}).get("routes", [])}
+
     def prune_pins(self):
         """Drops what no longer holds: routes whose link is gone or comes from elsewhere now, pins
         they name that are gone, and pins no route passes."""
-        routes = {}
-        for key, route in self.routes.items():
-            via = [v for v in route["via"] if v in self.pins]
-            if via and self._source(*key) == (route["from"], route["output"]):
-                routes[key] = dict(route, via=via)
-        self.routes = routes
-        used = {v for r in routes.values() for v in r["via"]}
-        self.pins = {k: v for k, v in self.pins.items() if k in used}
+        if self._pins:
+            pins = self._pin_edit()
+            pins.prune()
+            self._take_pins(pins)
 
     def _pins_dict(self):
         self.prune_pins()
-        if not self.routes:
-            return None
-        routes = []
-        for (to, input_name), r in sorted(self.routes.items()):
-            entry = {"from": r["from"], "to": to, "input": input_name, "via": list(r["via"])}
-            if r["output"]:
-                entry["output"] = r["output"]
-            routes.append(entry)
-        points = [{"id": k, "x": v[0], "y": v[1]} for k, v in sorted(self.pins.items(), key=lambda kv: _pin_number(kv[0]))]
-        return {"points": points, "routes": routes}
+        return copy.deepcopy(self._pins) if self._pins else None
 
     def route(self, to, input_name):
         """The pins the link into to.input runs through, source first (ids; [] for none)."""
-        r = self.routes.get((to, input_name))
-        if not r or self._source(to, input_name) != (r["from"], r["output"]):
-            return []
-        return [v for v in r["via"] if v in self.pins]
+        return list(self._pin_edit().route(to, input_name)) if self._pins else []
 
     def pin_source(self, pin):
-        """(from, output) of the signal a pin carries, or None."""
-        for r in self.routes.values():
-            if pin in r["via"]:
-                return r["from"], r["output"]
-        return None
+        """(from, output) of the signal a pin carries (output None: the source's first), or None."""
+        source = self._pin_edit().source(pin) if self._pins else None
+        return (source[0], source[1] or None) if source else None
 
     def pin_links(self, pin):
         """The links (to, input) running through a pin, and each one's place of it in its route."""
-        return [(key, r["via"].index(pin)) for key, r in sorted(self.routes.items())
-                if pin in r["via"] and self._source(*key) == (r["from"], r["output"])]
+        return [(tuple(key), index) for key, index in self._pin_edit().links(pin)] if self._pins else []
 
     def route_to(self, pin):
         """The pins from the source up to and including `pin` (a link drawn out of it runs through
         these): the first of its links' routes, [] for none."""
-        links = self.pin_links(pin)
-        if not links:
-            return []
-        (key, index), = links[:1]
-        return list(self.routes[key]["via"][:index + 1])
+        return list(self._pin_edit().route_to(pin)) if self._pins else []
 
     def set_route(self, to, input_name, via):
         """The link into to.input runs through `via` (pin ids), from its source as it is now."""
-        source = self._source(to, input_name)
-        if source is None:
+        pins = self._pin_edit()
+        if not pins.set_route(to, input_name, list(via or [])):
             raise GraphError("%s.%s has no link to route" % (to, input_name))
-        if via:
-            self.routes[(to, input_name)] = {"from": source[0], "output": source[1], "via": list(via)}
-        else:
-            self.routes.pop((to, input_name), None)
+        self._take_pins(pins)
 
     def add_pin(self, to, input_name, x, y, index=None):
         """A new pin at (x, y) on the link into to.input, at `index` in its route (None: last, by
         the destination). Returns its id."""
-        source = self._source(to, input_name)
-        if source is None:
+        pins = self._pin_edit()
+        pin = pins.add(to, input_name, float(x), float(y), -1 if index is None else max(0, int(index)))
+        if not pin:
             raise GraphError("%s.%s has no link to pin" % (to, input_name))
-        pin = "pin%d" % (1 + max([_pin_number(k) for k in self.pins] or [0]))
-        self.pins[pin] = [float(x), float(y)]
-        via = self.route(to, input_name)
-        via.insert(len(via) if index is None else max(0, min(index, len(via))), pin)
-        self.routes[(to, input_name)] = {"from": source[0], "output": source[1], "via": via}
+        self._take_pins(pins)
         return pin
 
     def move_pin(self, pin, x, y):
-        self.pins[pin] = [float(x), float(y)]
+        if self._pins:
+            pins = self._pin_edit()
+            if pins.move(pin, float(x), float(y)):
+                self._take_pins(pins)
 
     def pin_position(self, pin):
         return tuple(self.pins[pin])
 
     def remove_pin(self, pin):
         """Takes the pin out of every route through it (those links straighten there)."""
-        self.pins.pop(pin, None)
-        for r in self.routes.values():
-            r["via"] = [v for v in r["via"] if v != pin]
-        self.prune_pins()
+        if self._pins:
+            pins = self._pin_edit()
+            if pins.remove(pin):
+                self._take_pins(pins)
 
     def merge_pins(self, keep, drop):
         """Routes through `drop` run through `keep` instead (a pin dropped on another): only pins
         carrying the same signal merge. Returns whether they did."""
-        if keep == drop or keep not in self.pins or drop not in self.pins:
+        if not self._pins:
             return False
-        if self.pin_source(keep) != self.pin_source(drop):
+        pins = self._pin_edit()
+        if not pins.merge(keep, drop):
             return False
-        for r in self.routes.values():
-            via = []
-            for v in r["via"]:
-                v = keep if v == drop else v
-                if not via or via[-1] != v:
-                    via.append(v)
-            r["via"] = via
-        self.pins.pop(drop, None)
-        self.prune_pins()
+        self._take_pins(pins)
         return True
 
     def set_position(self, name, x, y):
@@ -965,19 +925,32 @@ class GraphModel(object):
 
     def clump_color_source(self, name):
         """Clump Colors' source for this Clump: "<channel>@<node>" ("" when it writes no channel)."""
-        return self._edit().clump_color_source(name) if name in self.nodes else ""
+        return self._query().clump_color_source(name) if name in self.nodes else ""
 
     def clump_colored(self, name, source):
         """Whether a clump color source shows this Clump's clumps (the core's GraphEdit.clump_colored:
         its own source, or the bare channel of grooms from before when it is the last Clump writing it)."""
-        return name in self.nodes and self._edit().clump_colored(name, source or "")
+        return name in self.nodes and self._query().clump_colored(name, source or "")
+
+    def braid_tubes_shown(self, name, shown):
+        """Whether a Braid node's Show Tubes is lit: a Braid named in `shown` (the groom's braidTubes:
+        names, one a line; the core's GraphEdit.braid_tubes_shown)."""
+        return name in self.nodes and self._query().braid_tubes_shown(name, shown or "")
+
+    def braid_tubes_toggled(self, name, shown):
+        """`shown` after a click on the node's Show Tubes: the node added or taken out (the core's)."""
+        return self._query().braid_tubes_toggled(name, shown or "")
+
+    def braid_tubes_kept(self, shown):
+        """`shown` without the names that are no Braid node of the graph now (a node deleted)."""
+        return self._query().braid_tubes_kept(shown or "")
 
     def upstream(self, name):
         """All nodes feeding `name`, directly or not."""
         if name not in self.nodes:
             return set()
         with _core_errors():
-            return set(self._edit().upstream(name))
+            return set(self._query().upstream(name))
 
     def channels(self, guide_maps=()):
         """The attributes (strand channels) per node, as the graph is set, without evaluating it
@@ -991,56 +964,36 @@ class GraphModel(object):
     def downstream_of(self, src):
         return [(c["to"], c["input"]) for c in self.connections if c["from"] == src]
 
+    # A node into the flow, every host's (graph_inserts.h): the Blender helper's edit_graph ops and
+    # the app's node graph make the same edits.
+
+    def _insert(self, how, *args):
+        """One of the core's inserts (GraphEdit.insert_*) made on the model; a GraphError leaves it as it was."""
+        edit = self._edit()
+        with _core_errors():
+            getattr(edit, how)(*args)
+        self._take(edit)
+
     def insert_between(self, src, dst, node, node_input=None):
         """Route src -> node -> dst in place of every src -> dst connection (node reading the
-        output of src the first of them read)."""
-        node_input = node_input or self.node_spec(node)["inputs"][0]["name"]
-        links = [c for c in self.connections if c["from"] == src and c["to"] == dst]
-        if not links:
-            raise GraphError("%s is not connected to %s" % (src, dst))
-        self.connect(src, node, node_input, output=links[0].get("output"))
-        for c in links:
-            self.connect(node, dst, c["input"])
+        output of src the first of them read, on `node_input`; None: its first input)."""
+        self._insert("insert_between", src, dst, node, node_input or "")
 
     def insert_on_link(self, src, dst, input_name, node, output=None):
         """Route the one link src (its output `output`; None: its first) -> dst.input_name through
         `node`: node reads src on its first input that takes src's output, dst reads node. A
         GraphError (nothing changed) when no input of node takes it or node can't feed dst."""
-        first = self.output_names(src)[0]
-        if not any(c["from"] == src and c["to"] == dst and c["input"] == input_name and
-                   (c.get("output") or first) == (output or first) for c in self.connections):
-            raise GraphError("%s is not connected to %s.%s" % (src, dst, input_name))
-        out_type = self.output_type(src, output)
-        node_input = next((p["name"] for p in self.node_spec(node)["inputs"] if types_match(out_type, p["type"])), None)
-        if node_input is None:
-            raise GraphError("%s has no input that takes %s's %s" % (node, src, out_type))
-        before = copy.deepcopy(self.connections)
-        try:
-            self.connect(src, node, node_input, output=output)
-            self.connect(node, dst, input_name)
-        except GraphError:
-            self.connections = before
-            raise
+        self._insert("insert_on_link", src, dst, input_name, node, output or "")
 
     def insert_after(self, anchor, node, input_name=None):
         """Put `node` right after `anchor` in its chain (anchor -> node -> anchor's first
-        consumer), under the anchor; with no consumer, just after it."""
-        downstream = self.downstream_of(anchor)
-        if downstream:
-            self.insert_between(anchor, downstream[0][0], node)
-        else:
-            self.connect(anchor, node, input_name or self.node_spec(node)["inputs"][0]["name"])
-        x, y = self.position(anchor)
-        self.set_position(node, x + LAYOUT_DX / 2, y + LAYOUT_DY)
+        consumer), under the anchor; with no consumer, just after it (on `input_name`; None: its
+        first input)."""
+        self._insert("insert_after", anchor, node, input_name or "")
 
     def insert_before(self, anchor, node, input_name="strands"):
         """Put `node` between `anchor`'s `input_name` source and `anchor` (e.g. before the output)."""
-        upstream = self.source_of(anchor, input_name)
-        if upstream is None:
-            raise GraphError("%s has no %s input to insert before" % (anchor, input_name))
-        self.insert_between(upstream, anchor, node)
-        x, y = self.position(anchor)
-        self.set_position(node, x, y + LAYOUT_DY)
+        self._insert("insert_before", anchor, node, input_name, "")
 
     def set_output(self, name):
         self._node(name)
@@ -1067,38 +1020,31 @@ class GraphModel(object):
         return name
 
     def expose(self, compound, name, target):
-        """Show an inner param ("node.param") as the compound param `name`."""
-        node = self._node(compound)
-        if node["type"] != "Compound":
-            raise GraphError("%s is not a Compound" % compound)
-        inner_name, _, param = target.partition(".")
-        definition = node["params"].setdefault("definition", {})
-        inner = next((n for n in definition.get("graph", {}).get("nodes", []) if n["name"] == inner_name), None)
-        if inner is None or self.catalog.param_spec(inner["type"], param) is None:
-            raise GraphError("the compound has no param %r" % target)
-        definition.setdefault("expose", {})[name] = target
+        """Show an inner param ("node.param") as the compound param `name` (the core's
+        graph_controls.h compoundExpose, every host's)."""
+        self._node(compound)
+        edit = self._edit()
+        with _core_errors():
+            edit.compound_expose(compound, name, target)
+        self._take(edit)
 
     def unexpose(self, compound, target):
         """Stop showing inner param `target` ("node.param") on the compound (its value inside stays
-        what the compound set last)."""
-        node = self._node(compound)
-        definition = (node.get("params") or {}).get("definition") or {}
-        expose = definition.get("expose") or {}
-        for name in [n for n, t in expose.items() if t == target]:
-            inner_name, _, param = target.partition(".")
-            for inner in definition.get("graph", {}).get("nodes", []):
-                if inner["name"] == inner_name and name in node["params"]:
-                    inner.setdefault("params", {})[param] = node["params"].pop(name)
-            del expose[name]
+        what the compound set last; the core's compoundUnexpose, every host's)."""
+        self._node(compound)
+        edit = self._edit()
+        with _core_errors():
+            if edit.compound_unexpose(compound, target):
+                self._take(edit)
 
-    def detach(self, name, drop=140.0):
+    def detach(self, name, drop=None):
         """Detach (Ctrl+Shift+X; the core's GraphEdit.detach): the node taken out of the flow as if it
         were not there, what fed it feeding what it fed, the node kept, unlinked, `drop` below the
-        new link. Returns the core's {"source", "relinked", "changed"}."""
+        new link (None: the core's, every host's). Returns the core's {"source", "relinked", "changed"}."""
         self._node(name)
         edit = self._edit()
         with _core_errors():
-            done = edit.detach(name, float(drop))
+            done = edit.detach(name) if drop is None else edit.detach(name, float(drop))
         if done["changed"]:
             self._take(edit)
             self.prune_pins()  # the reroute points of links that went
@@ -1123,60 +1069,23 @@ class GraphModel(object):
 
     def feeding_output(self):
         """The nodes the output is made from (the output and everything upstream of it, bypassed
-        nodes included): the ones the groom evaluates."""
-        feeding = {self.output} if self.output in self.nodes else set()
-        frontier = list(feeding)
-        while frontier:
-            name = frontier.pop()
-            for c in self.connections:
-                if c["to"] == name and c["from"] in self.nodes and c["from"] not in feeding:
-                    feeding.add(c["from"])
-                    frontier.append(c["from"])
-        return feeding
+        nodes included): the ones the groom evaluates (the core's GraphEdit.feeding_output)."""
+        return set(self._query().feeding_output())
 
     def validate(self):
         """Problems that would stop the groom from evaluating (empty list: fine): only those of the
         nodes the output is made from. A node off to the side (its output unplugged, say) never
         evaluates, so its problems are warnings (unused_problems), never a reason to stop applying
-        the graph."""
-        return self._problems(self.feeding_output())
+        the graph. The core's (graph_edit.h GraphEdit::problems), every host's: an input left open,
+        no output node, a link reading an output its source lacks or whose types no longer fit, a
+        map with no name."""
+        with _core_errors():
+            return list(self._query().problems(True))
 
     def unused_problems(self):
         """The problems of nodes the output isn't made from (they evaluate only when viewed)."""
-        feeding = self.feeding_output()
-        return self._problems([n for n in self.order if n not in feeding], graph_level=False)
-
-    def _problems(self, names, graph_level=True):
-        problems = []
-        edit = self._edit()  # one for every output type asked below
-        if graph_level and not self.output:
-            problems.append("no output node")
-        elif graph_level and self.output not in self.nodes:
-            problems.append("output node %r does not exist" % self.output)
-        for name in [n for n in self.order if n in set(names)]:
-            for port in self.node_spec(name)["inputs"]:
-                source = self.source_of(name, port["name"])
-                if not port["optional"] and source is None:
-                    problems.append("%s.%s is not connected" % (name, port["name"]))
-                    continue
-                if source is None:
-                    continue
-                output = self.output_of(name, port["name"])
-                if output not in self.output_names(source):  # e.g. a Compound's definition changed
-                    problems.append("%s has no output %r (%s.%s reads it)" % (source, output, name, port["name"]))
-                elif not types_match(self.output_type(source, output, edit), port["type"],
-                                     self.output_spec(source, output).get("valueKind"), port.get("valueKind")):
-                    # e.g. a Noise now fed guides, still linked to a strands-only input; a Value
-                    # node set to give a vector, still linked to a count
-                    out_spec = self.output_spec(source, output)
-                    problems.append("%s gives %s but %s.%s takes %s" % (
-                        source, port_label(self.output_type(source, output, edit), out_spec.get("valueKind")), name,
-                        port["name"], port_label(port["type"], port.get("valueKind"))))
-            for param, value in self.nodes[name]["params"].items():
-                source = map_source(value)
-                if source is not None and not value[source]:
-                    problems.append("%s.%s: the %s has no name" % (name, param, MAP_LABELS[source]))
-        return problems
+        with _core_errors():
+            return list(self._query().problems(False))
 
     def warnings(self):
         """Things that evaluate but are likely mistakes (the editor shows them; save does not stop).
@@ -1185,26 +1094,13 @@ class GraphModel(object):
         Merge renumbers the second's IDs but the roots still coincide); two
         Instances or Flyaways with one seed pick the same strands (the core's)."""
         with _core_errors():
-            return list(self._edit().seed_warnings())
+            return list(self._query().seed_warnings())
 
     def auto_layout(self):
-        """Columns by depth from the sources, rows in insertion order."""
-        depth = {}
-
-        def depth_of(name, trail=()):
-            if name in depth:
-                return depth[name]
-            sources = [c["from"] for c in self.connections if c["to"] == name and c["from"] not in trail]
-            d = 0 if not sources else 1 + max(depth_of(s, trail + (name,)) for s in sources)
-            depth[name] = d
-            return d
-
-        rows = {}
-        for name in self.order:
-            col = depth_of(name)
-            row = rows.get(col, 0)
-            rows[col] = row + 1
-            self.set_position(name, col * LAYOUT_DX, row * LAYOUT_DY)
+        """Columns by depth from the sources, rows in insertion order (the core's layoutPositions,
+        graph_inserts.h: Blender's and the app's layout too)."""
+        for name, (x, y) in self._query().layout_positions(LAYOUT_DX, LAYOUT_DY).items():
+            self.set_position(name, x, y)
 
     def _node(self, name):
         try:

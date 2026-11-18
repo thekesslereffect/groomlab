@@ -744,6 +744,7 @@ DisplaySettings GroomSubSceneOverride::readSettings() {
     s.guideSmoothing = MPlug(object_, GroomShape::aGuideSmoothing).asInt();
     s.hiddenGuideGroups = MPlug(object_, GroomShape::aHiddenGuideGroups).asString().asChar();
     s.guideGroupColors = MPlug(object_, GroomShape::aGuideGroupColors).asString().asChar();  // "name:#rrggbb ..."
+    s.braidTubes = MPlug(object_, GroomShape::aBraidTubes).asString().asChar();  // Show Tubes' nodes
     s.guideColorSeed = guideColorSeedOf(object_);  // the groom's own hue: two grooms' groups differ
     s.flow = displayFlag(GroomShape::aDisplayFlow);
     s.theme = displayTheme();
@@ -876,6 +877,9 @@ void GroomSubSceneOverride::updateGuarded(MHWRender::MSubSceneContainer& contain
     // Clump Colors of one Clump among chained ones writing the same channel ("<channel>@<node>"):
     // the channel as that node wrote it (issue #77), else the strands' own (strandColors).
     colorChannel_.fill(settings, in, [this]() -> const GroomSession& { return shape_->session(); });
+    // Show Tubes: the shown Braid nodes' section tubes (the session's mesh, where the strands are
+    // drawn: carried to the scalp now while following it), kept there while they stay.
+    fillBraidTubes(settings, in, [this]() -> const GroomSession& { return shape_->session(); });
     in.strandsSerial = follow_ ? 0 : shape_->strandsSerial();
     in.changesBase = follow_ ? 0 : shape_->strandsChangesBase();
     in.strandsChanges = follow_ ? nullptr : shape_->strandsChanges();

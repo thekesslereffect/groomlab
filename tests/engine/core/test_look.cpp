@@ -17,7 +17,9 @@
 #include <tbb/task_arena.h>
 #endif
 
+#include "groomlab/param_conditions.h"
 #include "groomlab/strand_geometry.h"
+#include "groomlab/braid_tubes.h"
 #include "groomlab/brush.h"
 #include "groomlab/cards.h"
 #include "groomlab/curve.h"
@@ -26,6 +28,7 @@
 #include "groomlab/guide_hierarchy.h"
 #include "groomlab/hair_color.h"
 #include "groomlab/map_ref.h"
+#include "groomlab/graph_edit.h"
 #include "groomlab/graph_io.h"
 #include "groomlab/groom.h"
 #include "groomlab/noise.h"
@@ -181,6 +184,47 @@ TEST(PointIndex, MatchesBruteForce) {
         EXPECT_EQ(index.nearest(p), all[0].second);
     }
     EXPECT_EQ(PointIndex().nearest({0, 0, 0}), SIZE_MAX);
+}
+
+TEST(PointIndex, NearestWithinIsNearestsPointWhenThatIsInReach) {
+    // A lattice (a query between its points has several equally near, a point doubled too) and
+    // points at random: nearestWithin gives the very point and distance nearest() gives when that
+    // is within the reach (at the reach counts), and none when it is not, whatever the reach.
+    Rng rng(11);
+    std::vector<Vec3f> pts;
+    for (int x = 0; x < 12; ++x) {
+        for (int y = 0; y < 12; ++y) {
+            for (int z = 0; z < 3; ++z) pts.emplace_back(0.25f * static_cast<float>(x), 0.25f * static_cast<float>(y), 0.25f * static_cast<float>(z));
+        }
+    }
+    pts.push_back(pts[40]);
+    for (int i = 0; i < 300; ++i) pts.emplace_back(rng.uniform(-1, 4), rng.uniform(-1, 4), rng.uniform(-1, 2));
+    const PointIndex index(pts);
+    const float inf = std::numeric_limits<float>::infinity(), most = std::numeric_limits<float>::max();
+    for (int q = 0; q < 600; ++q) {
+        Vec3f p(rng.uniform(-2, 5), rng.uniform(-2, 5), rng.uniform(-2, 3));
+        if (q % 3 == 0) {  // midway between lattice points: ties
+            p = Vec3f(0.125f + 0.25f * static_cast<float>(q % 11), 0.125f + 0.25f * static_cast<float>(q % 7), 0.25f * static_cast<float>(q % 3));
+        } else if (q % 3 == 1 && q % 2 == 0) {  // on a point
+            p = pts[static_cast<std::size_t>(q) % pts.size()];
+        }
+        float d2 = -1.0f;
+        const std::size_t nearest = index.nearest(p, &d2);
+        ASSERT_NE(nearest, SIZE_MAX);
+        for (const float within : {d2, std::nextafter(d2, inf), 4.0f * d2 + 0.1f, most, inf}) {
+            float found2 = -1.0f;
+            ASSERT_EQ(index.nearestWithin(p, within, &found2), nearest) << "query " << q << " within " << within;
+            ASSERT_EQ(found2, d2);
+        }
+        for (const float within : {std::nextafter(d2, -inf), 0.5f * d2, -1.0f, std::numeric_limits<float>::quiet_NaN()}) {
+            if (within == d2) continue;  // (a query on a point: half of 0)
+            float found2 = -1.0f;
+            ASSERT_EQ(index.nearestWithin(p, within, &found2), SIZE_MAX) << "query " << q << " within " << within;
+            ASSERT_EQ(found2, -1.0f);
+        }
+    }
+    EXPECT_EQ(PointIndex().nearestWithin({0, 0, 0}, 1.0f), SIZE_MAX);
+    EXPECT_EQ(PointIndex().nearestWithin({0, 0, 0}, inf), SIZE_MAX);
 }
 
 // The kd-tree as it was built before the implicit layout (nodes with child links), to check the
@@ -2000,9 +2044,11 @@ TEST(Braid, FeedUntilStopsThePickUpPartWayAlongThePath) {
 }
 
 TEST(Braid, PonytailSweepsOverTheScalpIntoTheBraid) {
-    // A standing path in the middle of the plane gathering hair from far around it.
+    // A standing path in the middle of the plane gathering hair from far around it. (Version 1:
+    // the points below are counted along its strands of four points a weave step.)
     {
         BraidScene scene("three");
+        scene.lg.g.node(scene.braid).setNodeVersion(1);
         scene.setParam("region", 0.45);
         const StrandsPtr before = scene.lg.eval(scene.lg.scatter);
         const StrandsPtr after = scene.lg.eval(scene.braid);
@@ -2224,7 +2270,18 @@ TEST(Braid, BraidIdIsMinusOneForLooseStrandsAndStrays) {
 
 TEST(Braid, AddsPointsSoEveryWeaveRepeatIsDrawn) {
     // A path 1 long, 0.25 wide narrowing to 0.55 of that, at tightness 1: a step 0.6 widths long,
-    // about 8.9 steps of 4 points each (36 segments), on strands of 24 segments.
+    // about 8.9 steps of 4 points each (36 segments), on strands of 24 segments: a version 1 node's
+    // and a version 2 node's alike.
+    {
+        BraidScene plain("three");
+        plain.lg.g.node(plain.braid).setNodeVersion(1);
+        const StrandsPtr braided = plain.lg.eval(plain.braid);
+        for (std::size_t s = 0; s < braided->strandCount(); ++s) {
+            if ((*braided->strandChannel("braidId"))[s] < 0.0f) continue;
+            EXPECT_GE(braided->strandPointCount(s), 37u) << s;
+            EXPECT_LE(braided->strandPointCount(s), 38u) << s;
+        }
+    }
     BraidScene scene("three");
     const StrandsPtr before = scene.lg.eval(scene.lg.scatter);
     const StrandsPtr after = scene.lg.eval(scene.braid);
@@ -2624,6 +2681,722 @@ TEST(Braid, PancakeLoosensAndLoopsPullSectionsOut) {
     EXPECT_GT(looped.second, 10u);    // whole bundles out
     EXPECT_GT(looped.first, 0.2f);
     EXPECT_EQ(spread(0.0, 0.4), looped);
+}
+
+// ---- Version 2: the sections pressed against each other (separate, inflate) ----
+
+const char* const kBraidStyles[] = {"three", "four", "five", "fishtail", "rope", "cornrow"};
+
+BraidSections sectionsOf(const char* style, float pancake, float inflate, int version = 2, int perStep = 16) {
+    BraidWeaveSettings settings;
+    settings.style = style;
+    settings.pancake = pancake;
+    settings.inflate = inflate;
+    settings.version = version;
+    return braidSections(settings, perStep);
+}
+
+// A point's distance to a closed polygon's boundary in the plane, and whether it lies inside.
+float distanceToPolygon(const std::array<float, 2>& p, const std::array<float, 2>* poly, std::size_t count, bool* inside = nullptr) {
+    float least = 1e30f;
+    bool in = false;
+    for (std::size_t i = 0; i < count; ++i) {
+        const std::array<float, 2>& a = poly[i];
+        const std::array<float, 2>& b = poly[(i + 1) % count];
+        const float abx = b[0] - a[0], aby = b[1] - a[1], apx = p[0] - a[0], apy = p[1] - a[1];
+        const float length2 = abx * abx + aby * aby;
+        const float t = length2 > 0.0f ? std::clamp((apx * abx + apy * aby) / length2, 0.0f, 1.0f) : 0.0f;
+        least = std::min(least, std::hypot(apx - t * abx, apy - t * aby));
+        if ((a[1] > p[1]) != (b[1] > p[1]) && p[0] < abx * (p[1] - a[1]) / aby + a[0]) in = !in;
+    }
+    if (inside) *inside = in;
+    return least;
+}
+
+// How a weave's sections lie against each other over the cycle: each section's distance to its
+// nearest neighbour's outline (the mean and the widest over every sample and section: 0 where they
+// touch), and the share of all outline points that lie on another section's outline (within `tol`).
+struct Contact {
+    float meanGap = 0.0f, widestGap = 0.0f, share = 0.0f;
+};
+Contact contactOf(const BraidSections& s, float tol = 0.004f) {
+    Contact out;
+    const std::size_t around = static_cast<std::size_t>(s.around);
+    std::size_t touching = 0, points = 0, count = 0;
+    for (std::size_t i = 0; i < s.samples(); ++i) {
+        for (int k = 0; k < s.sections; ++k) {
+            float nearest = 1e30f;
+            for (std::size_t r = 0; r < around; ++r) {
+                float least = 1e30f;
+                for (int o = 0; o < s.sections; ++o) {
+                    if (o != k) least = std::min(least, distanceToPolygon(s.outline(k, i)[r], s.outline(o, i), around));
+                }
+                touching += least <= tol;
+                ++points;
+                nearest = std::min(nearest, least);
+            }
+            out.meanGap += nearest;
+            out.widestGap = std::max(out.widestGap, nearest);
+            ++count;
+        }
+    }
+    out.meanGap /= static_cast<float>(count);
+    out.share = static_cast<float>(touching) / static_cast<float>(points);
+    return out;
+}
+
+TEST(Braid, SeparateAndInflateCameWithVersionTwo) {
+    // ParamSpec::added: the version of the operator that added a param. A node saved before it does
+    // nothing with the param, so every panel leaves it out there (param_conditions.h paramInVersion,
+    // the spec JSON's "addedIn"; the attributes' listing too).
+    const std::unique_ptr<Operator> braid = OperatorRegistry::instance().create("Braid");
+    std::size_t found = 0;
+    for (const ParamSpec& spec : braid->paramSpecs()) {
+        const bool later = spec.name == "separate" || spec.name == "inflate";
+        EXPECT_EQ(spec.added, later ? 2 : 0) << spec.name;
+        found += later ? 1 : 0;
+    }
+    EXPECT_EQ(found, 2u);
+    EXPECT_FALSE(paramInVersion(nlohmann::json{{"name", "inflate"}, {"addedIn", 2}}, 1));
+    EXPECT_TRUE(paramInVersion(nlohmann::json{{"name", "inflate"}, {"addedIn", 2}}, 2));
+    EXPECT_TRUE(paramInVersion(nlohmann::json{{"name", "width"}}, 1));
+}
+
+TEST(Braid, AVersionOneNodeBraidsAsBeforeWhateverSeparateAndInflateHold) {
+    // Version 2 presses the sections against each other. A node saved before (version 1) braids as
+    // it did, to the bit, whatever separate and inflate hold; a new node (version 2) differs.
+    for (const char* style : kBraidStyles) {
+        BraidScene plain(style);
+        plain.lg.g.node(plain.braid).setNodeVersion(1);
+        plain.setParam("pancake", 0.3);
+        const StrandsPtr was = plain.lg.eval(plain.braid);
+        ASSERT_TRUE(was->validate()) << style;
+        for (const std::array<double, 2> held : {std::array<double, 2>{0.0, 0.5}, {1.0, 0.0}, {1.0, 1.0}, {0.4, 0.7}}) {
+            BraidScene scene(style);
+            scene.lg.g.node(scene.braid).setNodeVersion(1);
+            scene.setParam("pancake", 0.3);
+            scene.setParam("separate", held[0]);
+            scene.setParam("inflate", held[1]);
+            const StrandsPtr out = scene.lg.eval(scene.braid);
+            ASSERT_EQ(out->pointCount(), was->pointCount()) << style;
+            EXPECT_EQ(out->contentHash(), was->contentHash()) << style << " separate " << held[0] << " inflate " << held[1];
+            std::size_t moved = 0;
+            for (std::size_t s = 0; s < out->strandCount(); ++s) moved += strandMoved(*was, *out, s) ? 1 : 0;
+            EXPECT_EQ(moved, 0u) << style;
+        }
+        BraidScene pressed(style);
+        EXPECT_EQ(pressed.lg.g.node(pressed.braid).nodeVersion(), 2) << "a new node is the newest";
+        pressed.setParam("pancake", 0.3);
+        const StrandsPtr out = pressed.lg.eval(pressed.braid);
+        ASSERT_TRUE(out->validate()) << style;
+        ASSERT_EQ(out->strandCount(), was->strandCount()) << style;
+        EXPECT_NE(out->contentHash(), was->contentHash()) << style;
+        std::size_t moved = 0;
+        for (std::size_t s = 0; s < out->strandCount(); ++s) moved += strandMoved(*was, *out, s) ? 1 : 0;
+        EXPECT_GT(moved, 100u) << style;
+        EXPECT_EQ(*out->strandChannel("braidId"), *was->strandChannel("braidId")) << style;
+        // The same strands, of as many points (twice the points a weave step for a four- and a
+        // five-strand braid and a rope), in the same sections where version 2 keeps the courses: it
+        // plaits a four- and a five-strand braid anew and lets a fishtail's halves take turns.
+        const std::string name = style;
+        if (name == "four" || name == "five" || name == "rope") {
+            EXPECT_GT(out->pointCount(), was->pointCount()) << style;
+            EXPECT_LE(out->pointCount(), 2 * was->pointCount()) << style;
+        } else {
+            EXPECT_EQ(out->pointCount(), was->pointCount()) << style;
+        }
+        if (name == "three" || name == "rope" || name == "cornrow") {
+            EXPECT_EQ(*out->strandChannel("braidSection"), *was->strandChannel("braidSection")) << style;
+        }
+        // separate 0 on a version 2 node: its sections plain ellipses again (not version 1's points:
+        // its hair is laid in the braid's cross-section), another braid than pressed.
+        BraidScene off(style);
+        off.setParam("pancake", 0.3);
+        off.setParam("separate", 0.0);
+        EXPECT_NE(off.lg.eval(off.braid)->contentHash(), out->contentHash()) << style;
+    }
+}
+
+TEST(Braid, APressedCornrowStaysOnTheScalp) {
+    // Pressed, the sections' undersides lie elsewhere than the ellipses': the row is raised to
+    // them, so it lies on the scalp, not in it (and with feed, a braid along the scalp).
+    for (const bool feed : {false, true}) {
+        for (const double inflate : {0.0, 0.5, 1.0}) {
+            BraidScene row(feed ? "three" : "cornrow", {{0.2f, 0.01f, 0.5f}, {0.8f, 0.01f, 0.5f}});
+            row.setParam("region", 0.12);
+            row.setParam("tail", 0.0);
+            row.setParam("fuzz", 0.0);
+            row.setParam("feed", feed);
+            row.setParam("inflate", inflate);
+            const StrandsPtr out = row.lg.eval(row.braid);
+            const std::vector<float>* ids = out->strandChannel("braidId");
+            const std::vector<float>* woven = out->pointChannel("braidWoven");
+            std::size_t checked = 0;
+            float lowest = 1e9f;
+            for (std::size_t s = 0; s < out->strandCount(); ++s) {
+                if ((*ids)[s] < 0.0f) continue;
+                for (std::size_t i = 0; i < out->strandPointCount(s); ++i) {
+                    if ((*woven)[out->strandBegin(s) + i] < 1.0f) continue;
+                    lowest = std::min(lowest, out->strandPoints(s)[i].y);
+                    ++checked;
+                }
+            }
+            EXPECT_GT(checked, 200u) << feed;
+            EXPECT_GT(lowest, -2e-3f) << feed << " inflate " << inflate;
+            EXPECT_LT(lowest, 0.03f) << feed << " inflate " << inflate;
+        }
+    }
+}
+
+// A braid's section tubes as triangles, for telling whether a point lies inside one: a ray cast
+// from the point square to the braid (along `aside`; the braid runs along y) crosses a tube's wall
+// an odd number of times from inside it.
+struct TubeWalls {
+    struct Triangle {
+        Vec3f a, b, c;
+    };
+    std::vector<std::vector<Triangle>> ofTube;       // each tube's triangles
+    std::vector<std::vector<std::size_t>> firstOfRing;  // each tube's first triangle per ring of quads
+    std::vector<std::vector<std::array<float, 2>>> spanOfRing;  // the y each ring of quads spans
+
+    explicit TubeWalls(const BraidTubes& tubes) {
+        const std::size_t around = static_cast<std::size_t>(tubes.around);
+        ofTube.resize(tubes.tubes.size());
+        firstOfRing.resize(tubes.tubes.size());
+        spanOfRing.resize(tubes.tubes.size());
+        for (std::size_t t = 0; t < tubes.tubes.size(); ++t) {
+            const BraidTubes::Tube& tube = tubes.tubes[t];
+            const std::size_t rings = tube.centers.size();
+            for (std::size_t j = 0; j + 1 < rings; ++j) {
+                firstOfRing[t].push_back(ofTube[t].size());
+                std::array<float, 2> span{1e30f, -1e30f};
+                for (std::size_t k = 0; k < around; ++k) {
+                    const std::array<std::uint32_t, 4>& q = tubes.quads[tube.firstQuad + j * around + k];
+                    const Vec3f p0 = tubes.points[q[0]], p1 = tubes.points[q[1]], p2 = tubes.points[q[2]], p3 = tubes.points[q[3]];
+                    ofTube[t].push_back({p0, p1, p2});
+                    ofTube[t].push_back({p0, p2, p3});
+                    for (const Vec3f& p : {p0, p1, p2, p3}) span = {std::min(span[0], p.y), std::max(span[1], p.y)};
+                }
+                spanOfRing[t].push_back(span);
+            }
+            firstOfRing[t].push_back(ofTube[t].size());
+        }
+    }
+    static float distanceTo(const Triangle& t, const Vec3f& p) {  // (Ericson's closest point on a triangle)
+        const Vec3f ab = t.b - t.a, ac = t.c - t.a, ap = p - t.a;
+        const float d1 = ab.dot(ap), d2 = ac.dot(ap);
+        if (d1 <= 0.0f && d2 <= 0.0f) return ap.length();
+        const Vec3f bp = p - t.b;
+        const float d3 = ab.dot(bp), d4 = ac.dot(bp);
+        if (d3 >= 0.0f && d4 <= d3) return bp.length();
+        const float vc = d1 * d4 - d3 * d2;
+        if (vc <= 0.0f && d1 >= 0.0f && d3 <= 0.0f) return (ap - ab * (d1 / (d1 - d3))).length();
+        const Vec3f cp = p - t.c;
+        const float d5 = ab.dot(cp), d6 = ac.dot(cp);
+        if (d6 >= 0.0f && d5 <= d6) return cp.length();
+        const float vb = d5 * d2 - d1 * d6;
+        if (vb <= 0.0f && d2 >= 0.0f && d6 <= 0.0f) return (ap - ac * (d2 / (d2 - d6))).length();
+        const float va = d3 * d6 - d5 * d4;
+        if (va <= 0.0f && d4 - d3 >= 0.0f && d5 - d6 >= 0.0f) return (bp - (t.c - t.b) * ((d4 - d3) / ((d4 - d3) + (d5 - d6)))).length();
+        const float denom = 1.0f / (va + vb + vc);
+        return (ap - ab * (vb * denom) - ac * (vc * denom)).length();
+    }
+    // How deep `p` lies inside tube `t` (its distance to the tube's wall), 0 outside it. (Two rays,
+    // and inside only when both say so: one that grazes an edge may count it twice or not at all.)
+    float depthIn(std::size_t t, const Vec3f& p) const {
+        const Vec3f asides[2] = {Vec3f{0.9285f, 0.0f, 0.3714f}, Vec3f{-0.3162f, 0.0f, 0.9487f}};
+        std::size_t crossings[2] = {0, 0};
+        float nearest = 1e30f;
+        for (std::size_t j = 0; j + 1 < firstOfRing[t].size(); ++j) {
+            if (p.y < spanOfRing[t][j][0] || p.y > spanOfRing[t][j][1]) continue;
+            for (std::size_t i = firstOfRing[t][j]; i < firstOfRing[t][j + 1]; ++i) {
+                const Triangle& tri = ofTube[t][i];
+                nearest = std::min(nearest, distanceTo(tri, p));
+                for (std::size_t ray = 0; ray < 2; ++ray) {  // (Moller and Trumbore)
+                    const Vec3f& aside = asides[ray];
+                    const Vec3f e1 = tri.b - tri.a, e2 = tri.c - tri.a, h = aside.cross(e2);
+                    const float det = e1.dot(h);
+                    if (std::abs(det) < 1e-12f) continue;
+                    const Vec3f s = p - tri.a;
+                    const float u = s.dot(h) / det;
+                    if (u < 0.0f || u >= 1.0f) continue;
+                    const Vec3f q = s.cross(e1);
+                    const float v = aside.dot(q) / det;
+                    if (v < 0.0f || u + v >= 1.0f) continue;
+                    crossings[ray] += e2.dot(q) / det > 0.0f;
+                }
+            }
+        }
+        return crossings[0] % 2 == 1 && crossings[1] % 2 == 1 ? nearest : 0.0f;
+    }
+    // How far `p` lies from tube `t`'s wall, inside or out (among the rings of quads it lies beside).
+    float nearest(std::size_t t, const Vec3f& p) const {
+        float least = 1e30f;
+        for (std::size_t j = 0; j + 1 < firstOfRing[t].size(); ++j) {
+            if (p.y < spanOfRing[t][j][0] || p.y > spanOfRing[t][j][1]) continue;
+            for (std::size_t i = firstOfRing[t][j]; i < firstOfRing[t][j + 1]; ++i) least = std::min(least, distanceTo(ofTube[t][i], p));
+        }
+        return least;
+    }
+};
+
+// The deepest any point of a tube's wall lies inside another tube of its braid (the tubes' ends left
+// out: open, a ray may leave through them; every other ring and point round it).
+float deepestInAnother(const BraidTubes& tubes, const TubeWalls& walls) {
+    float most = 0.0f;
+    const std::size_t around = static_cast<std::size_t>(tubes.around);
+    for (std::size_t a = 0; a < tubes.tubes.size(); ++a) {
+        const BraidTubes::Tube& tube = tubes.tubes[a];
+        const std::size_t rings = tube.centers.size();
+        // (a fishtail's twelve long tubes: every fifth ring)
+        for (std::size_t j = 2; j + 3 < rings; j += tubes.tubes.size() > 8 ? 5 : 2) {
+            for (std::size_t k = 0; k < around; k += 2) {
+                // (a point of the wall between two rings: a ray from a ring's own point runs along
+                // the other tubes' rings there)
+                const std::size_t at = tube.firstPoint + j * around + k;
+                const Vec3f p = tubes.points[at] * 0.63f + tubes.points[at + around] * 0.37f;
+                for (std::size_t b = 0; b < tubes.tubes.size(); ++b) {
+                    if (b != a && tubes.tubes[b].path == tube.path) most = std::max(most, walls.depthIn(b, p));
+                }
+            }
+        }
+    }
+    return most;
+}
+
+// A braid's tubes ring by ring: how far a ring leans off square to its section's course (degrees,
+// the most), each tube's smallest and largest ring area against its mean (the least and most over
+// the tubes), and the mean radius of a disc of a ring's area.
+struct RingStats {
+    float lean = 0.0f, least = 1.0f, most = 1.0f, radius = 0.0f;
+};
+RingStats ringsOf(const BraidTubes& tubes) {
+    RingStats out;
+    const std::size_t around = static_cast<std::size_t>(tubes.around);
+    double radii = 0.0;
+    std::size_t counted = 0;
+    for (const BraidTubes::Tube& tube : tubes.tubes) {
+        const std::size_t rings = tube.centers.size();
+        std::vector<float> areas;
+        for (std::size_t j = 2; j + 2 < rings; ++j) {
+            const Vec3f c = tube.centers[j];
+            Vec3f normal;
+            for (std::size_t k = 0; k < around; ++k) {
+                normal += (tubes.points[tube.firstPoint + j * around + k] - c).cross(tubes.points[tube.firstPoint + j * around + (k + 1) % around] - c);
+            }
+            const float area = 0.5f * normal.length();
+            areas.push_back(area);
+            const Vec3f course = (tube.centers[j + 1] - tube.centers[j - 1]).normalized();
+            const float cosine = std::min(std::abs(normal.normalized().dot(course)), 1.0f);
+            out.lean = std::max(out.lean, std::acos(cosine) * 57.29578f);
+            radii += std::sqrt(area / 3.14159265f);
+            ++counted;
+        }
+        if (areas.empty()) continue;
+        double mean = 0.0;
+        for (const float a : areas) mean += a;
+        mean /= static_cast<double>(areas.size());
+        out.least = std::min(out.least, static_cast<float>(*std::min_element(areas.begin(), areas.end()) / mean));
+        out.most = std::max(out.most, static_cast<float>(*std::max_element(areas.begin(), areas.end()) / mean));
+    }
+    out.radius = counted ? static_cast<float>(radii / static_cast<double>(counted)) : 0.0f;
+    return out;
+}
+
+TEST(Braid, PressedSectionsAreTubesAlongTheirOwnCourses) {
+    // A version 2 node's sections as tubes (braid_tubes.h, read off the node's own stations): each
+    // swept along its own course, its rings square to it. In 3D: no tube's wall lies inside another
+    // tube of its braid (as plain ellipses, version 1, they pass a tenth of the braid's width
+    // through each other), a tube's ring holds about the same area all along (the same hair), the
+    // hair of a section lies in its tube and in no other, and `inflate` makes the tubes fatter. (The
+    // tubes as fine meshes: 48 points a ring, 16 rings a weave step; flat quads cut a tube's
+    // corners, by less the finer the mesh.)
+    const float width = 0.25f;
+    for (const char* style : kBraidStyles) {
+        const std::string name = style;
+        float radius[3] = {0.0f, 0.0f, 0.0f};
+        std::size_t at = 0;
+        for (const float inflate : {0.0f, 0.5f, 1.0f}) {
+            BraidScene scene(style);
+            scene.setParam("widthProfile", Ramp::constant(1.0f));
+            scene.setParam("fuzz", 0.0);
+            scene.setParam("tail", 0.2);
+            scene.setParam("inflate", static_cast<double>(inflate));
+            EvalContext ctx;
+            ctx.externals = &scene.lg.ext;
+            BraidTubeDetail detail;
+            detail.around = 48;
+            detail.perStep = 16.0f;
+            const BraidTubes tubes = braidTubes(scene.lg.g, scene.braid, ctx, detail);
+            ASSERT_TRUE(tubes.pressed) << style;
+            ASSERT_EQ(tubes.around, 48);
+            ASSERT_EQ(tubes.tubes.size(), static_cast<std::size_t>(sectionsOf(style, 0.0f, 0.5f).sections)) << style;
+            const TubeWalls walls(tubes);
+            const float through = deepestInAnother(tubes, walls) / width;
+            const RingStats rings = ringsOf(tubes);
+            radius[at++] = rings.radius / width;
+            EXPECT_LE(through, 0.01f) << style << " inflate " << inflate;
+            // (a fishtail's thin fast strips are pressed in the braid's cross-section, pressAcross: its rings lie in that plane)
+            if (name != "fishtail") EXPECT_LE(rings.lean, 5.0f) << style << " inflate " << inflate << ": rings square to their courses";
+            float outOfOwn = 0.0f, inAnother = 0.0f, sharpest = 0.0f;
+            std::size_t checked = 0;
+            if (inflate == 0.5f) {
+                const StrandsPtr hair = scene.lg.eval(scene.braid);
+                const std::vector<float>* ids = hair->strandChannel("braidId");
+                const std::vector<float>* section = hair->strandChannel("braidSection");
+                const std::vector<float>* woven = hair->pointChannel("braidWoven");
+                const std::vector<float>* tail = hair->pointChannel("braidTail");
+                for (std::size_t s = 0; s < hair->strandCount(); s += 3) {
+                    if ((*ids)[s] < 0.0f) continue;
+                    const std::size_t own = static_cast<std::size_t>((*section)[s]);
+                    const Vec3f* points = hair->strandPoints(s);
+                    for (std::size_t i = 1; i + 1 < hair->strandPointCount(s); ++i) {
+                        const std::size_t point = hair->strandBegin(s) + i;
+                        if ((*woven)[point] < 1.0f || (*tail)[point] > 0.0f || (*woven)[point - 1] < 1.0f || (*woven)[point + 1] < 1.0f) continue;
+                        const Vec3f p = points[i];
+                        const float turn = std::acos(std::clamp((p - points[i - 1]).normalized().dot((points[i + 1] - p).normalized()), -1.0f, 1.0f));
+                        sharpest = std::max(sharpest, turn * 57.29578f);
+                        if (p.y < 0.22f || p.y > 0.73f) continue;  // (within the tubes: they run from 0.15 to 0.8 of the path)
+                        ++checked;
+                        if (walls.depthIn(own, p) == 0.0f) outOfOwn = std::max(outOfOwn, walls.nearest(own, p) / width);
+                        for (std::size_t t = 0; t < tubes.tubes.size(); ++t) {
+                            if (t != own) inAnother = std::max(inAnother, walls.depthIn(t, p) / width);
+                        }
+                    }
+                }
+                EXPECT_GT(checked, 1000u) << style;
+                EXPECT_LE(outOfOwn, 0.01f) << style << ": hair out of its section's tube";
+                EXPECT_LE(inAnother, 0.01f) << style << ": hair in another section's tube";
+            }
+            std::printf("  %-8s inflate %.1f: tubes deepest in another %.4f of the braid's width; rings lean %.1f deg, area %.2f..%.2f of a tube's mean, "
+                        "mean radius %.4f; hair out of its tube %.4f, in another %.4f, sharpest turn %.1f deg\n",
+                        style, inflate, through, rings.lean, rings.least, rings.most, rings.radius / width, outOfOwn, inAnother, sharpest);
+            // The same hair all along: a tube's ring area within a band of its mean (wider the fatter
+            // the sections are made: where three lie side by side there is less room than where two do).
+            if (name != "fishtail") {
+                EXPECT_GT(rings.least, inflate == 0.0f ? 0.9f : inflate == 0.5f ? 0.7f : 0.5f) << style << " inflate " << inflate;
+                EXPECT_LT(rings.most, inflate == 0.0f ? 1.05f : inflate == 0.5f ? 1.15f : 1.3f) << style << " inflate " << inflate;
+            }
+        }
+        // Fatter with inflate, by an amount one sees.
+        EXPECT_GT(radius[1], 1.04f * radius[0]) << style;
+        EXPECT_GT(radius[2], 1.02f * radius[1]) << style;
+    }
+    // Asked of a node that is not a Braid: an error; of a bypassed one: nothing.
+    BraidScene scene("three");
+    EvalContext ctx;
+    ctx.externals = &scene.lg.ext;
+    EXPECT_THROW(braidTubes(scene.lg.g, scene.lg.scatter, ctx), GraphError);
+    EXPECT_EQ(braidTubesAround(scene.lg.g.node(scene.braid)), BraidTubeDetail::kPressedAround);
+    scene.lg.g.node(scene.braid).setNodeVersion(1);
+    EXPECT_EQ(braidTubesAround(scene.lg.g.node(scene.braid)), BraidTubeDetail::kAround);
+    scene.lg.g.setBypass(scene.braid, true);
+    EXPECT_TRUE(braidTubes(scene.lg.g, scene.braid, ctx).tubes.empty());
+}
+
+TEST(Braid, APressedBraidIsAsWideAndDeepAsVersionOnes) {
+    // The tubes are solved at the reach the weave has with plain sections: `inflate` makes the
+    // sections fat for their spacing, not the braid wider or deeper. And separate 0 leaves the
+    // sections plain: they pass through each other as version 1's do.
+    for (const char* style : kBraidStyles) {
+        float reach[3][2];
+        std::size_t at = 0;
+        for (const int version : {1, 2, 2}) {
+            BraidScene scene(style);
+            scene.lg.g.node(scene.braid).setNodeVersion(version);
+            scene.setParam("widthProfile", Ramp::constant(1.0f));
+            scene.setParam("fuzz", 0.0);
+            scene.setParam("inflate", at == 2 ? 1.0 : 0.5);
+            const StrandsPtr hair = scene.lg.eval(scene.braid);
+            const std::vector<float>* woven = hair->pointChannel("braidWoven");
+            Vec3f lo{1e30f, 1e30f, 1e30f}, hi{-1e30f, -1e30f, -1e30f};
+            for (std::size_t p = 0; p < hair->positions().size(); ++p) {
+                const Vec3f& q = hair->positions()[p];
+                if ((*woven)[p] < 1.0f || q.y < 0.3f || q.y > 0.7f) continue;
+                lo = minPerAxis(lo, q), hi = maxPerAxis(hi, q);
+            }
+            reach[at][0] = hi.x - lo.x, reach[at][1] = hi.z - lo.z;
+            ++at;
+        }
+        std::printf("  %-8s reach side to side, in depth: version 1 %.4f %.4f; pressed %.4f %.4f; inflate 1 %.4f %.4f\n", style, reach[0][0],
+                    reach[0][1], reach[1][0], reach[1][1], reach[2][0], reach[2][1]);
+        for (std::size_t k = 1; k < 3; ++k) {
+            EXPECT_NEAR(reach[k][0], reach[0][0], 0.06f * reach[0][0]) << style;
+            // (a fishtail's bundle of strips is pressed flatter than its plain strips pile up)
+            EXPECT_NEAR(reach[k][1], reach[0][1], (std::string(style) == "fishtail" ? 0.25f : 0.10f) * reach[0][1]) << style;
+        }
+    }
+    BraidScene scene("three");
+    scene.setParam("widthProfile", Ramp::constant(1.0f));
+    scene.setParam("separate", 0.0);
+    EvalContext ctx;
+    ctx.externals = &scene.lg.ext;
+    BraidTubeDetail detail;
+    detail.around = 48;
+    detail.perStep = 16.0f;
+    const BraidTubes plain = braidTubes(scene.lg.g, scene.braid, ctx, detail);
+    EXPECT_GT(deepestInAnother(plain, TubeWalls(plain)) / 0.25f, 0.08f);
+    std::printf("  separate 0: rings lean %.1f deg\n", ringsOf(plain).lean);
+    scene.setParam("separate", 0.5);
+    const BraidTubes half = braidTubes(scene.lg.g, scene.braid, ctx, detail);
+    const float between = deepestInAnother(half, TubeWalls(half)) / 0.25f;
+    EXPECT_GT(between, 0.01f);
+    EXPECT_LT(between, deepestInAnother(plain, TubeWalls(plain)) / 0.25f);
+}
+
+TEST(Braid, ACurvingTaperingFedBraidsPressedTubesKeepApartToo) {
+    // The same along curving paths, with a taper, two braids, fed and not: the tubes are the
+    // weave's, laid by each station's own frame and width.
+    for (const bool feed : {false, true}) {
+        BraidScene scene("three", {{0.3f, 0.0f, 0.5f}, {0.32f, 0.4f, 0.5f}, {0.5f, 0.8f, 0.55f}, {0.8f, 1.0f, 0.6f}});
+        scene.addPath({{0.7f, 0.0f, 0.3f}, {0.72f, 0.5f, 0.32f}, {0.6f, 0.9f, 0.2f}});
+        scene.setParam("fuzz", 0.0);
+        scene.setParam("feed", feed);
+        scene.setParam("region", 0.2);
+        EvalContext ctx;
+        ctx.externals = &scene.lg.ext;
+        BraidTubeDetail detail;
+        detail.around = 32;
+        detail.perStep = 12.0f;
+        const BraidTubes tubes = braidTubes(scene.lg.g, scene.braid, ctx, detail);
+        ASSERT_EQ(tubes.tubes.size(), 6u);
+        const float through = deepestInAnother(tubes, TubeWalls(tubes));
+        float width = 0.0f;  // (about a section's own width, at its widest)
+        for (const BraidTubes::Tube& tube : tubes.tubes) {
+            for (const Vec3f& across : tube.across) width = std::max(width, 2.0f * across.length());
+        }
+        std::printf("  curving, %s: tubes deepest in another %.4f of a section's width\n", feed ? "fed" : "not fed", through / width);
+        // (a taper and a feed stretch the weave's steps: the tubes worked out for its own tilt lie a
+        // little in each other, a tenth of a section's width or so, where plain ones lie half of it)
+        EXPECT_LE(through, (feed ? 0.18f : 0.12f) * width) << (feed ? "fed" : "not fed");
+    }
+}
+
+TEST(Braid, UpgradeTurnsAVersionOneNodeIntoVersionTwo) {
+    // A graph saved before version 2 keeps its Braid at version 1 (separate off, as it loads) until
+    // the node is upgraded: then it presses its sections (separate takes its new default, a value
+    // the user set stays), and is not outdated. Saving and loading keep the version.
+    const std::string saved = R"({"nodes": [{"name": "old", "type": "Braid", "version": 1, "params": {"style": "five"}},
+                                            {"name": "set", "type": "Braid", "version": 1, "params": {"separate": 0.25}},
+                                            {"name": "new", "type": "Braid", "params": {}}], "output": "old"})";
+    GraphDocument doc = loadGraphJson(saved);
+    auto separateOf = [](const GraphDocument& d, const char* name) { return d.graph.node(d.node(name)).params().getDouble("separate"); };
+    EXPECT_EQ(doc.graph.node(doc.node("old")).nodeVersion(), 1);
+    EXPECT_EQ(doc.graph.node(doc.node("new")).nodeVersion(), 2) << "none stored: the newest";
+    EXPECT_EQ(separateOf(doc, "old"), 0.0);
+    EXPECT_EQ(separateOf(doc, "set"), 0.25);
+    EXPECT_EQ(separateOf(doc, "new"), 1.0);
+    const nlohmann::json written = nlohmann::json::parse(saveGraphJson(doc));
+    for (const nlohmann::json& n : written["nodes"]) {
+        EXPECT_EQ(n["version"].get<int>(), n["name"] == "new" ? 2 : 1) << n["name"];
+        EXPECT_TRUE(n["params"].contains("inflate")) << n["name"];
+    }
+    GraphDocument again = loadGraphJson(written.dump());
+    EXPECT_EQ(again.graph.node(again.node("old")).nodeVersion(), 1);
+    EXPECT_EQ(separateOf(again, "old"), 0.0);
+
+    GraphEdit edit(saved);
+    const nlohmann::json spec = nlohmann::json::parse(edit.nodeSpecJson("old"));
+    EXPECT_EQ(spec["version"].get<int>(), 2);
+    EXPECT_EQ(spec["nodeVersion"].get<int>(), 1);
+    EXPECT_TRUE(spec["outdated"].get<bool>());
+    EXPECT_FALSE(nlohmann::json::parse(edit.nodeSpecJson("new"))["outdated"].get<bool>());
+    edit.completeParams();
+    EXPECT_TRUE(edit.upgradeNode("old"));
+    EXPECT_TRUE(edit.upgradeNode("set"));
+    EXPECT_FALSE(edit.upgradeNode("old"));
+    EXPECT_FALSE(edit.upgradeNode("new"));
+    EXPECT_EQ(edit.nodeVersion("old"), 2);
+    EXPECT_FALSE(nlohmann::json::parse(edit.nodeSpecJson("old"))["outdated"].get<bool>());
+    GraphDocument upgraded = loadGraphJson(edit.toJson());
+    EXPECT_EQ(upgraded.graph.node(upgraded.node("old")).nodeVersion(), 2);
+    EXPECT_EQ(separateOf(upgraded, "old"), 1.0);
+    EXPECT_EQ(separateOf(upgraded, "set"), 0.25);
+
+    // On hair: the loaded version 1 node braids as a node set to version 1 does, the upgraded one
+    // as a new node.
+    auto braided = [](const std::string& graph, const char* name) {
+        BraidScene scene("three");
+        GraphDocument d = loadGraphJson(graph);
+        const Operator& from = d.graph.node(d.node(name));
+        Operator& to = scene.lg.g.node(scene.braid);
+        to.setNodeVersion(from.nodeVersion());
+        to.params().set("style", from.params().getString("style"));
+        to.params().set("separate", from.params().getDouble("separate"));
+        return scene.lg.eval(scene.braid)->contentHash();
+    };
+    BraidScene one("five"), two("five");
+    one.lg.g.node(one.braid).setNodeVersion(1);
+    EXPECT_EQ(braided(saved, "old"), one.lg.eval(one.braid)->contentHash());
+    EXPECT_EQ(braided(edit.toJson(), "old"), two.lg.eval(two.braid)->contentHash());
+    EXPECT_NE(braided(saved, "old"), braided(edit.toJson(), "old"));
+}
+
+TEST(Braid, AFreeEndLeavesTheSectionsForOneBundleAlongThePath) {
+    // end free: past the weave the sections let go over `release` braid widths (the weave flattens
+    // out), and from there the hair runs along the path as one round bundle, each strand at its
+    // own place in it: no weave left, no shape of the Braid's own. braidTail is 0 in the weave,
+    // rises over the release and is 1 in the free tail. Every style, version 1 and 2, fed too.
+    const float width = 0.25f;
+    struct Case {
+        const char* style;
+        int version;
+        bool feed;
+    };
+    std::vector<Case> cases;
+    for (const char* style : kBraidStyles) {
+        cases.push_back({style, 2, false});
+        cases.push_back({style, 1, false});
+    }
+    cases.push_back({"three", 2, true});
+    for (const Case& c : cases) {
+        BraidScene scene(c.style);
+        scene.lg.g.node(scene.braid).setNodeVersion(c.version);
+        scene.setParam("widthProfile", Ramp::constant(1.0f));
+        scene.setParam("fuzz", 0.0);
+        scene.setParam("end", std::string("free"));
+        scene.setParam("tail", 0.6);     // the weave ends at y = 0.4 of the path
+        scene.setParam("release", 1.4);  // let go over 1.4 braid widths: to y = 0.75
+        if (c.feed) scene.setParam("feed", true);
+        const StrandsPtr hair = scene.lg.eval(scene.braid);
+        const std::string what = std::string(c.style) + " version " + std::to_string(c.version) + (c.feed ? " fed" : "");
+        const std::vector<float>* ids = hair->strandChannel("braidId");
+        const std::vector<float>* tail = hair->pointChannel("braidTail");
+        ASSERT_TRUE(ids && tail) << what;
+        const BraidSections sections = sectionsOf(c.style, 0.0f, 0.5f, c.version);
+        const float bundle = width * std::sqrt(static_cast<float>(sections.sections) * sections.halfWidth * sections.halfThick);
+        float farthest = 0.0f, nearest = 1e30f, wander = 0.0f, inWeave = 0.0f, acrossRelease = 0.0f;
+        std::vector<float> radii;
+        std::size_t freePoints = 0;
+        for (std::size_t s = 0; s < hair->strandCount(); ++s) {
+            if ((*ids)[s] < 0.0f) continue;
+            const Vec3f* points = hair->strandPoints(s);
+            const std::size_t n = hair->strandPointCount(s), begin = hair->strandBegin(s);
+            Vec3f first;
+            bool any = false;
+            for (std::size_t i = 0; i < n; ++i) {
+                const float t = (*tail)[begin + i];
+                if (i > 0) EXPECT_GE(t, (*tail)[begin + i - 1]) << what << ": braidTail never falls along a strand";
+                if (points[i].y < 0.33f) EXPECT_EQ(t, 0.0f) << what << ": 0 in the weave";  // (a ring leans along the braid by up to its radius)
+                if (points[i].y > 0.76f) EXPECT_EQ(t, 1.0f) << what << ": 1 in the free tail";
+                if (i > 0 && i + 1 < n) {
+                    const float turn = std::acos(std::clamp((points[i] - points[i - 1]).normalized().dot((points[i + 1] - points[i]).normalized()), -1.0f, 1.0f)) * 57.29578f;
+                    if (t == 0.0f && points[i].y > 0.22f) inWeave = std::max(inWeave, turn);
+                    else if (t > 0.0f) acrossRelease = std::max(acrossRelease, turn);
+                }
+                if (t < 1.0f) continue;
+                // In the free tail: within the bundle of the path (x 0.5, z 0.5), at one place all along.
+                const Vec3f off{points[i].x - 0.5f, 0.0f, points[i].z - 0.5f};
+                farthest = std::max(farthest, off.length());
+                nearest = std::min(nearest, off.length());
+                radii.push_back(off.length());
+                if (any) wander = std::max(wander, (off - first).length());
+                first = any ? first : off;
+                any = true;
+                ++freePoints;
+            }
+        }
+        ASSERT_GT(freePoints, 500u) << what;
+        std::sort(radii.begin(), radii.end());
+        const float median = radii[radii.size() / 2];
+        std::printf("  %-8s v%d%s: free tail within %.3f of the path (bundle %.3f), nearest %.3f, median %.3f; a strand wanders %.5f; "
+                    "sharpest turn in the weave %.1f deg, across the release and tail %.1f\n",
+                    c.style, c.version, c.feed ? " fed" : "", farthest, bundle, nearest, median, wander, inWeave, acrossRelease);
+        EXPECT_LE(farthest, 1.02f * bundle + 1e-4f) << what << ": inside the one bundle";
+        EXPECT_LT(nearest, 0.35f * bundle) << what << ": no hole down its middle";
+        EXPECT_GT(median, 0.35f * bundle) << what;
+        EXPECT_LT(median, 0.85f * bundle) << what << ": one body, filled";
+        EXPECT_LT(wander, 2e-3f * width) << what << ": no weave left";
+        // Letting go bends the hair about as the weave does: a few degrees more where the weave is
+        // gentle (a version 1 three-strand: 12 degrees a point in the weave, 18 letting go; a rope:
+        // 20 and 31), less where it is not (four, five, a fishtail, a fed braid).
+        EXPECT_LE(acrossRelease, std::max(inWeave + 14.0f, 26.0f)) << what;
+    }
+    // No tail: nothing let go. No release: the weave stops at once (as under a hair tie). A long
+    // one ends with the path.
+    for (const double release : {0.0, 8.0}) {
+        BraidScene scene("three");
+        scene.setParam("fuzz", 0.0);
+        scene.setParam("end", std::string("free"));
+        scene.setParam("tail", 0.5);
+        scene.setParam("release", release);
+        const StrandsPtr hair = scene.lg.eval(scene.braid);
+        const std::vector<float>* tail = hair->pointChannel("braidTail");
+        ASSERT_TRUE(tail);
+        float between = 0.0f, most = 0.0f;
+        for (std::size_t i = 0; i < tail->size(); ++i) {
+            ASSERT_TRUE(std::isfinite(hair->positions()[i].x + hair->positions()[i].y + hair->positions()[i].z));
+            most = std::max(most, (*tail)[i]);
+            if ((*tail)[i] > 0.0f && (*tail)[i] < 1.0f) between += 1.0f;
+        }
+        if (release == 0.0) EXPECT_EQ(between, 0.0f) << "at once: in the weave or free";
+        else EXPECT_GT(between, 100.0f) << "letting go all the way to the path's end";
+        EXPECT_GT(most, 0.9f);
+    }
+    BraidScene none("three");
+    none.setParam("end", std::string("free"));
+    none.setParam("tail", 0.0);
+    const StrandsPtr whole = none.lg.eval(none.braid);
+    for (const float t : *whole->pointChannel("braidTail")) ASSERT_EQ(t, 0.0f);
+}
+
+TEST(Braid, ReleaseIsTheFreeEndsAloneAndAClumpByBraidTailStylesTheTailAlone) {
+    // The other ends are as they were whatever `release` holds.
+    for (const char* end : {"fan", "tuft", "bound"}) {
+        BraidScene a("three"), b("three");
+        for (BraidScene* scene : {&a, &b}) {
+            scene->setParam("end", std::string(end));
+            scene->setParam("tail", 0.3);
+        }
+        b.setParam("release", 5.0);
+        const StrandsPtr one = a.lg.eval(a.braid), other = b.lg.eval(b.braid);
+        ASSERT_EQ(one->positions().size(), other->positions().size()) << end;
+        EXPECT_EQ(std::memcmp(one->positions().data(), other->positions().data(), one->positions().size() * sizeof(Vec3f)), 0) << end;
+    }
+    // A Clump after the Braid, its strength mapped by $braidTail (per point): the weave stays as it
+    // was, the free tail gathers into clumps.
+    BraidScene scene("three");
+    scene.setParam("fuzz", 0.0);
+    scene.setParam("end", std::string("free"));
+    scene.setParam("tail", 0.5);
+    scene.setParam("release", 1.0);
+    const NodeId clump = scene.lg.add(op::kClump, scene.braid);
+    MapRef map;
+    map.source = MapRef::Source::Expression;
+    map.name = "$braidTail * 0.9";
+    scene.lg.g.node(clump).params().set("strength", map);
+    scene.lg.g.node(clump).params().set("clumpBy", std::string("count"));
+    scene.lg.g.node(clump).params().set("count", std::int64_t{40});
+    const StrandsPtr braided = scene.lg.eval(scene.braid);
+    const StrandsPtr clumped = scene.lg.eval(clump);
+    const std::vector<float>* tail = braided->pointChannel("braidTail");
+    ASSERT_TRUE(tail);
+    ASSERT_EQ(braided->positions().size(), clumped->positions().size());
+    float weave = 0.0f, ends = 0.0f;
+    for (std::size_t i = 0; i < tail->size(); ++i) {
+        const float moved = (clumped->positions()[i] - braided->positions()[i]).length();
+        if ((*tail)[i] == 0.0f) weave = std::max(weave, moved);
+        if ((*tail)[i] == 1.0f) ends = std::max(ends, moved);
+    }
+    std::printf("  a Clump by $braidTail: a weave point moves at most %.6f, a tail point up to %.4f\n", weave, ends);
+    EXPECT_LT(weave, 1e-5f);
+    EXPECT_GT(ends, 0.01f);
+    // Show Tubes: the section tubes run to the end of the release (y 0.75) and close onto the path
+    // there; another release, other tubes.
+    EvalContext ctx;
+    ctx.externals = &scene.lg.ext;
+    BraidTubeDetail detail;
+    const BraidTubes tubes = braidTubes(scene.lg.g, scene.braid, ctx, detail);
+    ASSERT_FALSE(tubes.tubes.empty());
+    EXPECT_NEAR(tubes.tubes.front().at.back(), 0.75f, 1e-3f);
+    const BraidTubes::Tube& tube = tubes.tubes.front();
+    const std::size_t last = tube.firstPoint + (tube.centers.size() - 1) * static_cast<std::size_t>(tubes.around);
+    for (int k = 0; k < tubes.around; ++k) {
+        EXPECT_LT((tubes.points[last + static_cast<std::size_t>(k)] - Vec3f{0.5f, tubes.points[last].y, 0.5f}).length(), 1e-3f) << "closed onto the path";
+    }
+    scene.setParam("release", 0.4);
+    const BraidTubes shorter = braidTubes(scene.lg.g, scene.braid, ctx, detail);
+    EXPECT_NEAR(shorter.tubes.front().at.back(), 0.6f, 1e-3f);
 }
 
 TEST(Braid, BraidTailMasksANodeAfterItToTheEnds) {

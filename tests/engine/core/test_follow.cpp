@@ -8,7 +8,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
+#include "groomlab/braid_tubes.h"
 #include "groomlab/display.h"
 #include "groomlab/follow_scalp.h"
 #include "groomlab/groom_file.h"
@@ -273,6 +275,50 @@ TEST(FollowScalp, AtRestOrWithoutARestPoseItIsTheGroomAsItIs) {
     EXPECT_TRUE(follow.evaluate(ViewRequest{}).messages.empty());
 }
 
+TEST(FollowScalp, ShowTubesAreCarriedWithTheHair) {
+    // Show Tubes while following the scalp: the Braid's section tubes are made at rest, as the hair
+    // is, and carried to the scalp now with their braids' roots: where the carried hair is drawn.
+    std::string graph = kLookGraph;
+    const std::string output = R"({"name": "output", "type": "Output"})";
+    graph.replace(graph.find(output), output.size(),
+                  R"({"name": "braid", "type": "Braid", "params": {"region": 0.6, "width": 0.15, "fuzz": 0.0}}, )" + output);
+    const std::string link = R"({"from": "width", "to": "output", "input": "strands"})";
+    graph.replace(graph.find(link), link.size(),
+                  R"({"from": "width", "to": "braid", "input": "strands"}, {"from": "braid", "to": "output", "input": "strands"})");
+    GroomData data = followData(graph.c_str());
+    GroomSession still(data);
+    still.evaluate(1.0f, 0.0);
+    const std::shared_ptr<const BraidTubeMesh> rest = still.braidTubeMesh("braid");
+    ASSERT_TRUE(rest);
+    const Rigid motion;
+    std::vector<Vec3f> points = data.scalp->points();
+    for (Vec3f& p : points) p = motion(p);
+    data.followScalp = true;
+    GroomSession follow(data);
+    follow.updateScalpPoints(points);
+    follow.evaluate(1.0f, 0.0);
+    ASSERT_TRUE(follow.following());
+    const std::shared_ptr<const BraidTubeMesh> carried = follow.braidTubeMesh("braid");
+    ASSERT_TRUE(carried);
+    ASSERT_EQ(carried->points.size(), rest->points.size());
+    float worst = 0.0f;
+    for (std::size_t i = 0; i < rest->points.size(); ++i) worst = std::max(worst, (carried->points[i] - motion(rest->points[i])).length());
+    EXPECT_LT(worst, 1e-4f) << "the rest tubes, moved rigidly with the scalp";
+    EXPECT_EQ(carried->quads, rest->quads);
+    // The scalp moved on: the tubes are made again (another mesh), there too.
+    const Rigid further{Vec3f(0.0f, 1.0f, 0.0f), 0.2f, Vec3f{0.1f, 0.0f, 0.0f}};
+    std::vector<Vec3f> next = data.scalp->points();
+    for (Vec3f& p : next) p = further(p);
+    follow.updateScalpPoints(next);
+    follow.evaluate(1.0f, 0.0);
+    const std::shared_ptr<const BraidTubeMesh> moved = follow.braidTubeMesh("braid");
+    ASSERT_TRUE(moved);
+    EXPECT_NE(moved->key, carried->key);
+    worst = 0.0f;
+    for (std::size_t i = 0; i < rest->points.size(); ++i) worst = std::max(worst, (moved->points[i] - further(rest->points[i])).length());
+    EXPECT_LT(worst, 1e-4f);
+}
+
 TEST(FollowScalp, ARigidlyMovedScalpCarriesTheGroomAtRestRigidly) {
     GroomData data = followData(kLookGraph);
     const StrandsPtr rest = GroomSession(data).evaluate(1.0f, 0.0);
@@ -296,6 +342,42 @@ TEST(FollowScalp, ARigidlyMovedScalpCarriesTheGroomAtRestRigidly) {
     // Off, the same frame grows on the moved scalp (Noise is in world space): not the same.
     follow.setFollowScalp(false);
     EXPECT_GT(maxDistance(*follow.evaluate(1.0f, 0.0), *carried), 1e-3f);
+}
+
+TEST(FollowScalp, CarryingWithTheStrandsBoxesIsTheSameCarry) {
+    // carryStrands reading each root's frame at rest from the strands' boxes (kept for a playback)
+    // gives the points it gives finding them again, to the bit; a strand off the scalp stays.
+    const std::shared_ptr<ScalpMesh> rest = headWithEverything();
+    constexpr std::size_t kStrands = 3000, kPoints = 7;
+    auto strands = std::make_shared<StrandSet>();
+    strands->resizeUniform(kStrands, kPoints);
+    Rng rng(5);
+    for (std::size_t s = 0; s < kStrands; ++s) {
+        strands->mutableIds()[s] = hashCombine(hash64(s), 0xB0C5u);
+        StrandRoot root;
+        root.face = s % 97 == 0 ? -1 : static_cast<std::int32_t>(rng.uniform(0.0f, 1.0f) * static_cast<float>(rest->triangleCount() - 1));
+        root.u = rng.uniform(0.0f, 0.5f);
+        root.v = rng.uniform(0.0f, 0.5f);
+        strands->mutableRoots()[s] = root;
+        const Vec3f at = root.face < 0 ? Vec3f(2.0f, 0.1f * static_cast<float>(s % 13), 0.0f) : rest->position(root);
+        const Vec3f n = root.face < 0 ? Vec3f(0.0f, 1.0f, 0.0f) : rest->normal(root);
+        for (std::size_t k = 0; k < kPoints; ++k) strands->mutablePositions()[s * kPoints + k] = at + n * (0.03f * static_cast<float>(k));
+    }
+    const std::shared_ptr<const StrandBoxes> boxes = strandBoxes(*strands, *rest);
+    for (const int frame : {1, 4, 9}) {
+        const ScalpMesh now = rest->withPoints(deformedPoints(*rest, frame));
+        const StrandsPtr plain = carryStrands(strands, *rest, now);
+        const StrandsPtr boxed = carryStrands(strands, *rest, now, boxes.get());
+        ASSERT_NE(plain, strands);
+        ASSERT_EQ(plain->positions().size(), boxed->positions().size());
+        EXPECT_EQ(std::memcmp(plain->positions().data(), boxed->positions().data(), plain->positions().size() * sizeof(Vec3f)), 0) << frame;
+        for (std::size_t k = 0; k < kPoints; ++k) EXPECT_EQ(boxed->positions()[k], strands->positions()[k]);  // (strand 0: unrooted)
+    }
+    // Boxes of other strands (another count) are not read.
+    const StrandSet fewer = strands->subset({1, 2, 3});
+    const ScalpMesh now = rest->withPoints(deformedPoints(*rest, 3));
+    const StrandsPtr boxed = carryStrands(strands, *rest, now, strandBoxes(fewer, *rest).get());
+    EXPECT_EQ(boxed->positions(), carryStrands(strands, *rest, now)->positions());
 }
 
 TEST(FollowScalp, MotionKeysShareTheRestEvaluation) {

@@ -158,7 +158,7 @@ The **Graph Editor** is a dockable node editor for the selected groom:
     an input's link end on a pin and that input takes the pin's signal. Delete takes a selected pin
     out (the link straightens there). Pins are
     layout, as node positions are: no undo step, nothing evaluates again, and the groom file keeps
-    them (the "pins" of its graph, graph_pins.h): the app draws and edits them the same way (there
+    them (the "pins" of its graph, kept by the core's rules in every host, graph_pins.h): the app draws and edits them the same way (there
     adding, removing, joining and feeding a pin are undo steps, as its backdrops are), and Blender
     shows them as its own reroute nodes.
   - **Refused links:** mismatched types and cycles are refused, with the reason in the status
@@ -221,7 +221,14 @@ The **Graph Editor** is a dockable node editor for the selected groom:
 - **Header toggles:** every node header has two, as in Yeti. **Focus** (eye) shows the groom
   up to that node in the viewport, and **Bypass** (power, B) passes the node's input straight
   through; the node dims. Focus on a **Clump** draws its clump centers as dots on the scalp over
-  its result (in the theme's `clumpCenters` color).
+  its result (in the theme's `clumpCenters` color). Two node types have one more, left of the
+  others: a **Clump**'s **Clump Colors** colors the strands by that node's clumps, and a
+  **Braid**'s **Show Tubes** draws the braid's section tubes in the viewport
+  ([braids](feathers-braids-scales.md#braids)); click again to turn either off. The tubes follow
+  an edit of the Braid or of a node before it also while the hair is hidden or an earlier node is
+  viewed. A param that a later version of a node's operator added (a Braid's `separate` and
+  `inflate`, version 2) is left out of an older node's panel until **Upgrade**: it does nothing
+  there.
 - **Live dragging:** every slider in the side panel (params and an Expression node's variables)
   shows the groom change while you drag; letting go makes one undo step.
 - **Real units:** lengths, widths and densities show in real units (**...** > Units):
@@ -308,6 +315,7 @@ gets more clumps of the same size than a head, not the same number stretched ove
 | Braids | `braids` | Box braids with no curves to draw: the Braid node picks its own paths, one per 2.6 cm of scalp (`region`, exposed as `braidSpacing`), every strand into the nearest, woven to a sealed end (`end` bound) |
 | Braids | `braids_beaded` | Box braids with beads and cuffs near the tips: the Braid's `ties` tighten it (`cinch`) and its `ties` output feeds an Instance node's `along` input, the built-in `groomlab:bead` and `groomlab:cuff` round each tie (`fitWidth`) |
 | Braids | `braids_curly_ends` | Box braids tied off near the end (`groomlab:hairTie`), the ends curling: a Curl's `radius` mapped by the Braid's per-point `braidTail` |
+| Braids | `braids_free_ends` | Box braids that come undone below a hair tie (`end` free): the free ends gathered by a Clump and curled by a Curl, both mapped by `braidTail` |
 | Braids | `braids_twists` | Two-strand twists all over the head: the Braid's `rope` style (`sections` 3 for three-strand twists) |
 | Braids | `braids_cornrows` | Cornrows along rows you draw (the braids group): `feed` picks the hair up into every crossing from its side, the rows parting halfway, hanging as braids past `feedUntil`, a bead at each end |
 | Braids | `braids_french` | A French braid along one path you draw down the back: fed from both sides down the head, hanging free past `feedUntil`, a hair tie and a tuft at the end (`dutch` for a Dutch braid) |
@@ -384,7 +392,7 @@ from groomlab import graph, presets
 
 model = graph.GraphModel.from_groom(groom)
 model.add_node("Curl", name="curl")
-model.insert_between("length", "width", "curl")
+model.insert_between("length", "width", "curl")   # insert_before, insert_after, insert_on_link too: the core's, as in every host
 model.set_param("curl", "radius", 0.08)
 model.save(groom)                  # validates, then writes the graph (undoable)
 
