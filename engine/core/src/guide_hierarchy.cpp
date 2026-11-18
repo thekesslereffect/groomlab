@@ -760,7 +760,16 @@ void GuideHierarchy::resolveFollower(HierarchyGuide& child, const HierarchyGuide
     // A slice of a drawn root's tube (isSliceOf): left in its parent's sections; its root the
     // scalp's point nearest its guide's first.
     const bool slice = isSliceOf(child, parent);
-    if (slice && scalp && scalp->triangleCount() > 0 && n > 0) child.root = scalp->closestPoint(child.points[0]).root;
+    if (slice && scalp && scalp->triangleCount() > 0 && n > 0) {
+        // (No point of it inside the head: one there, a parent combed down onto the scalp or a
+        // point groomed so, taken out onto the scalp; the others left as they are.)
+        for (Vec3f& p : child.points) {
+            const SurfacePoint near = scalp->closestPoint(p);
+            if (near.root.face < 0) continue;
+            if ((p - near.position).dot(scalp->normal(near.root)) < 0.0f) p = near.position;
+        }
+        child.root = scalp->closestPoint(child.points[0]).root;
+    }
     // A shaped tube's parent leaving the scalp at a slant: its children's roots on its root
     // footprint (footprintTurn), not snapped straight down from its root section.
     if (!slice && scalp && scalp->triangleCount() > 0 && n >= 2) {
@@ -887,6 +896,11 @@ std::vector<Vec3f> GuideHierarchy::offsetsFromWorld(const HierarchyGuide& child,
 
 bool GuideHierarchy::followsAlongCurve(const HierarchyGuide& child) const {
     if (!child.isChild()) return false;
+    // (Not a tube with a root shape of its own, a slice or a subdivision's cell: it lies in its
+    // parent's tube, each point by its parent's point; sliding along the curve, a point groomed
+    // away could take a place before the parent's root, carried on along its first way: into the
+    // head.)
+    if (isRootTube(child.tube, 0)) return false;
     const HierarchyGuide* base = guide(baseIdOf(child));
     return base && !base->isChild() && isRootTube(base->tube, 0);
 }
