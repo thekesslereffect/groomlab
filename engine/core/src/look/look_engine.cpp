@@ -166,9 +166,10 @@ float paramAt(std::size_t i, std::size_t n) { return n > 1 ? static_cast<float>(
 // its strays' noise offset and draw, then its lengthening's draw; Transform two: its seven draws).
 std::size_t strandDataBlocks(StageKind kind) { return kind == StageKind::Flyaway || kind == StageKind::Transform ? 2 : 1; }
 
-constexpr std::size_t kCenterFloats = kClumpCenterSamples * 3;   // a center's curve
-constexpr std::size_t kFrameFloats = kClumpCenterSamples * 9;    // its frames
-constexpr std::size_t kNormalFloats = 4;                         // its root normal (xyz, a pad)
+// A Clump's center: its curve, 3 floats a sample (ClumpInputs::samples), its frames, 9 a sample,
+// and its root normal (xyz, a pad).
+constexpr std::size_t kNormalFloats = 4;
+constexpr std::size_t kCurlAxisSamples = 32;  // a Curl's clump axis (look.slang CURL_SAMPLES)
 constexpr int kClearanceStamp = -5;  // a run's span kind: Interpolate's walk keeping clearance
 constexpr int kPointStrandsStamp = -6;  // ... each point's strand made (counted in the total alone)
 constexpr std::size_t kSameOffset = static_cast<std::size_t>(-1);  // a copy's source offset: its target's
@@ -1043,10 +1044,13 @@ void LookEngine::putStageInputs(const LookRun& run) {
             // where they make them), then their root normals (a float4 each: what the frames
             // start from), then their variation (a float4 each).
             // Then each center's cumulative arc lengths at its samples (CentersCS writes them).
-            const std::size_t variationAt = data->centers * (kCenterFloats + kFrameFloats + kNormalFloats);
+            const std::size_t samples = data->samples;
+            if (samples < 2) throw std::runtime_error("GPU preview: Clump's centers have no samples");
+            const std::size_t centerFloats = samples * 3, frameFloats = samples * 9;
+            const std::size_t variationAt = data->centers * (centerFloats + frameFloats + kNormalFloats);
             const std::size_t arcsAt = variationAt + data->centers * 4;
-            const std::size_t bytes = (arcsAt + data->centers * kClumpCenterSamples) * 4;
-            held.aux[1] = static_cast<std::uint32_t>(data->centers * kCenterFloats);
+            const std::size_t bytes = (arcsAt + data->centers * samples) * 4;
+            held.aux[1] = static_cast<std::uint32_t>(data->centers * centerFloats);
             held.aux[2] = static_cast<std::uint32_t>(variationAt);
             held.aux[3] = static_cast<std::uint32_t>(arcsAt);
             if (!data->normals || data->normals->size() != data->centers) {
@@ -1056,7 +1060,7 @@ void LookEngine::putStageInputs(const LookRun& run) {
                 throw std::runtime_error("GPU preview: Clump's variation missing");
             }
             auto withNormals = [&](float* words) {
-                float* at = words + data->centers * (kCenterFloats + kFrameFloats);
+                float* at = words + data->centers * (centerFloats + frameFloats);
                 for (std::size_t c = 0; c < data->centers; ++c, at += kNormalFloats) {
                     const Vec3f& n = (*data->normals)[c];
                     at[0] = n.x;
@@ -1070,7 +1074,7 @@ void LookEngine::putStageInputs(const LookRun& run) {
             };
             if (data->curves) {
                 if (held.b != data->curves.get() || !has(auxBuffer(k, 1))) {
-                    if (data->curves->size() != data->centers * kClumpCenterSamples) {
+                    if (data->curves->size() != data->centers * samples) {
                         throw std::runtime_error("GPU preview: Clump's centers do not match its curves");
                     }
                     // (On the CPU written in place: the frames and arcs the kernels write left as they are.)
@@ -1090,7 +1094,7 @@ void LookEngine::putStageInputs(const LookRun& run) {
                 }
             } else {
                 if (!data->chosen || data->chosen->size() != data->centers) throw std::runtime_error("GPU preview: Clump's centers chosen missing");
-                if (held.b != data->chosen.get()) {
+                if (held.b != data->chosen.get() || held.samples != samples) {
                     std::vector<float> words(bytes / 4, 0.0f);  // the curves and frames the kernels write
                     withNormals(words.data());
                     write(auxBuffer(k, 1), words.data(), bytes, true);
@@ -1104,6 +1108,7 @@ void LookEngine::putStageInputs(const LookRun& run) {
                     }
                     write(auxBuffer(k, 2), centers.data(), centers.size() * 4, false);
                     held.b = data->chosen.get();
+                    held.samples = samples;
                     held.alive[1] = data->chosen;
                     held.framesMade = false;
                     runUploadMegabytes_ += static_cast<double>(bytes) / 1e6;
@@ -1114,7 +1119,7 @@ void LookEngine::putStageInputs(const LookRun& run) {
                 // they share (ShareCS reads them).
                 if (data->neighbors && held.d != data->neighbors.get()) {
                     write(auxBuffer(k, 4), data->neighbors->data(), data->neighbors->size() * 4, false);
-                    allocate(auxBuffer(k, 5), std::max<std::size_t>(data->centers * kCenterFloats * 4, 4));
+                    allocate(auxBuffer(k, 5), std::max<std::size_t>(data->centers * centerFloats * 4, 4));
                     held.d = data->neighbors.get();
                     held.alive[3] = data->neighbors;
                 }
@@ -1138,7 +1143,7 @@ void LookEngine::putStageInputs(const LookRun& run) {
             }
             if (held.b != data->members.get()) {
                 write(auxBuffer(k, 1), data->members->data(), data->members->size() * 4, false);
-                allocate(auxBuffer(k, 3), std::max<std::size_t>(data->count * kClumpCenterSamples * 18 * 4, 4));  // (look.slang CLUMP_AXIS_FLOATS)
+                allocate(auxBuffer(k, 3), std::max<std::size_t>(data->count * kCurlAxisSamples * 18 * 4, 4));  // (look.slang CLUMP_AXIS_FLOATS)
                 held.b = data->members.get();
                 held.alive[1] = data->members;
             }
@@ -1724,6 +1729,7 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
         if (p.stage.kind == StageKind::Clump) {
             const ClumpInputs* in = k < r.inputs.size() ? r.inputs[k].clump.get() : nullptr;
             c.flag[3] = in ? static_cast<std::uint32_t>(in->centers) : 0u;  // (its root normals follow its frames)
+            c.dispatch[1] = in ? static_cast<std::uint32_t>(in->samples) : 0u;  // a center's samples (look.slang clumpSamples)
         }
         if (p.stage.kind == StageKind::Transform) std::memcpy(c.octaveSeeds, p.more, sizeof c.octaveSeeds);  // (look.slang gMore)
         return c;

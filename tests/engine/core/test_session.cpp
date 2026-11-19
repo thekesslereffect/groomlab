@@ -371,7 +371,7 @@ TEST(Session, AStrokeAHostRunsPastANodeEvaluatesWhatFeedsItAlone) {
     ClumpState clumped;
     ASSERT_TRUE(clumpState(doc.graph.node(clump), valueAs<StrandsPtr>(doc.graph.cachedValue(clump)), &clumped));
     EXPECT_EQ(clumped.assigned->size(), blended->strandCount());
-    EXPECT_EQ(clumped.curves.size(), clumped.centerGuides.size() * kClumpCenterSamples);
+    EXPECT_EQ(clumped.curves.size(), clumped.centerGuides.size() * clumped.samples);
     EXPECT_FALSE(clumped.chosen.empty());  // its own centers, chosen by root
 
     // A dab: every guide bent; evaluated up to Interpolate's inputs alone.

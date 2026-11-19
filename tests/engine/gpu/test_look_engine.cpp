@@ -1648,6 +1648,37 @@ TEST_P(LookEngineTest, ClumpDragsGiveWhatTheCpuClumps) {
     EXPECT_GPU_MATCHES(mapped.json(), gpu::Overrides{}, mapped.json());
 }
 
+TEST_P(LookEngineTest, ClumpOnCoiledCentersGivesWhatTheCpuClumps) {
+    // Centers coiled a dozen times (a sparse Scatter's strands through a Curl, centersFrom
+    // inputCurves: Tonic's ringlets, hair clumped onto curled guides). The CPU samples them finer
+    // than 32 points (ClumpState::samples); the GPU clumps onto the same samples, dragged, and with
+    // a thin lock round each (its frames carried through every coil, 256 of them). (pastTip extend
+    // with a lock 0.05 wide on these coils puts the tangents of the Curl after it 1.2e-3 from the
+    // CPU's on DirectX 11, past the tolerance: a GPU's rounding of the arcs and frames.)
+    LookGraph g;
+    g.clump = R"("params": {"centersFrom": "inputCurves", "strength": 0.9})";
+    g.nodes = R"(, {"name": "spots", "type": "Scatter", "params": {"density": 0.4, "seed": 4, "length": 3.0}},
+        {"name": "spotsCoil", "type": "Curl", "params": {"frequency": 4.0, "radius": 0.08, "profile": [[0.0, 1.0]]}})";
+    g.connections = R"(, {"from": "scalp", "to": "spots", "input": "scalp"}, {"from": "spots", "to": "spotsCoil", "input": "strands"},
+        {"from": "spotsCoil", "to": "clump", "input": "centers"})";
+    {
+        GroomSession session(groom(g.json()));
+        ASSERT_TRUE(session.evaluate(ViewRequest{}).strands);
+        const Prepared held = prepare(session, {{"clump", {{"strength", 0.6}}}});
+        ASSERT_FALSE(held.run.inputs.empty());
+        ASSERT_TRUE(held.run.inputs.front().clump);
+        EXPECT_GT(held.run.inputs.front().clump->samples, kClumpCenterSamples) << "the coils sampled finer";
+    }
+    LookGraph c = g;
+    c.clump = R"("params": {"centersFrom": "inputCurves", "strength": 0.6})";
+    EXPECT_GPU_MATCHES(g.json(), (gpu::Overrides{{"clump", {{"strength", 0.6}}}}), c.json());
+    LookGraph lock = g;
+    lock.clump = R"("params": {"centersFrom": "inputCurves", "strength": 1.0, "volumize": 0.015})";
+    LookGraph locked = g;
+    locked.clump = R"("params": {"centersFrom": "inputCurves", "strength": 1.0, "volumize": 0.025})";
+    EXPECT_GPU_MATCHES(lock.json(), (gpu::Overrides{{"clump", {{"volumize", 0.025}}}}), locked.json());
+}
+
 TEST_P(LookEngineTest, ANegativeClumpRepelsAsTheCpuDoes) {
     // A negative strength pushes the strands near each center away from it (off the skin, lengths
     // kept): as the graph holds it, dragged from a pull across 0 into a push, the repel radius
@@ -6526,6 +6557,7 @@ TEST(CpuEngine, TheOperatorsGiveTheirStagesBits) {
             auto clump = gpu::clumpInputs(state.assigned, state.curves, state.centerNormals, state.centerIds,
                                           static_cast<std::uint64_t>(op.params().getInt("seed")));
             clump->spots = !state.offsets.empty();  // centers on the scalp (version 2), as ClumpOp says
+            clump->samples = state.samples;
             stageInputs.clump = std::move(clump);
         }
         if (kind == gpu::StageKind::Tangle || kind == gpu::StageKind::BlendNeighbors) {

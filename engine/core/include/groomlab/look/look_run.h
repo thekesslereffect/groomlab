@@ -292,7 +292,8 @@ struct InterpolateInputs {
 struct ClumpInputs {
     std::shared_ptr<const std::vector<std::uint32_t>> assigned;  // per strand: its center (kNoClumpCenter: none)
     std::size_t centers = 0;
-    // The centers' curves (kClumpCenterSamples points each) as the CPU made them, when the run
+    std::size_t samples = kClumpCenterSamples;  // points a center's curve (ClumpState::samples)
+    // The centers' curves (`samples` points each) as the CPU made them, when the run
     // leaves them as they are; else null and `chosen` (per center: the strand of the stage's input
     // its curve is, the Clump's own choice or, with centersFrom inputPoints, its axis strand) has the GPU
     // make them from the strands it moved.

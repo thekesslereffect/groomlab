@@ -1604,7 +1604,7 @@ std::shared_ptr<const std::vector<Vec3f>> GroomSession::clumpCenterDots(GraphDoc
                 if (s < in->strandCount() && in->strandPointCount(s) > 0) dots->push_back(at(in->roots()[s], in->strandPoints(s)[0]));
             }
         } else {
-            for (std::size_t c = 0; c * kClumpCenterSamples < state.curves.size(); ++c) dots->push_back(state.curves[c * kClumpCenterSamples]);
+            for (std::size_t c = 0; c * state.samples < state.curves.size(); ++c) dots->push_back(state.curves[c * state.samples]);
         }
         return dots;
     }

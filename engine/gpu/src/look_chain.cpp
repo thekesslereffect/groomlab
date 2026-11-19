@@ -2068,6 +2068,7 @@ bool LookInputs::read(const GraphDocument& doc, const LookChain& chain, const Lo
                 auto fixed = std::make_shared<ClumpInputs>();
                 fixed->assigned = state.assigned;
                 fixed->centers = state.centerGuides.size();
+                fixed->samples = state.samples;
                 fixed->curves = std::make_shared<const std::vector<Vec3f>>(state.curves);
                 fixed->normals = std::make_shared<const std::vector<Vec3f>>(state.centerNormals);
                 fixed->spots = !state.offsets.empty();  // centers on the scalp (Clump's version 2)
@@ -2128,9 +2129,10 @@ bool LookInputs::read(const GraphDocument& doc, const LookChain& chain, const Lo
                 out[k].clump = memo.fixed;
             } else if (guidesNow) {
                 ClumpState kept;
-                constexpr std::size_t K = kClumpCenterSamples;
                 bool ok = clumpParams.getDouble("copyAmount") <= 0.0 && memo.fixed && memo.fixed->curves && keptState(&kept) &&
-                          kept.curves.size() == kept.centerGuides.size() * K && kept.centerIds.size() == kept.centerGuides.size();
+                          kept.samples == memo.fixed->samples && kept.curves.size() == kept.centerGuides.size() * kept.samples &&
+                          kept.centerIds.size() == kept.centerGuides.size();
+                const std::size_t K = kept.samples;
                 auto curves = std::make_shared<std::vector<Vec3f>>(ok ? kept.curves.size() : 0);
                 for (std::size_t c = 0; ok && c < kept.centerGuides.size(); ++c) {
                     const std::size_t g = kept.centerGuides[c];
@@ -2139,7 +2141,9 @@ bool LookInputs::read(const GraphDocument& doc, const LookChain& chain, const Lo
                     const Guide& guide = guidesNow->guides()[g];
                     ok = guide.id == kept.centerIds[c] && !guide.points.empty();
                     if (!ok) break;
-                    clumpGuideCurve(guide.points.data(), guide.points.size(), curves->data() + c * K);
+                    // (As many samples as the CPU's last: a stroke curling a guide past them is followed
+                    // with those, the release's evaluation taking more.)
+                    clumpGuideCurve(guide.points.data(), guide.points.size(), curves->data() + c * K, K);
                     const Vec3f& was = kept.curves[c * K];
                     ok = ((*curves)[c * K] - was).length() <= 1e-5f * std::max(1.0f, was.length());  // (its root stays)
                 }

@@ -624,6 +624,70 @@ TEST(Clump, VolumizeProfileShapesTheLockAlongItsLength) {
     EXPECT_GT(widest(1), widest(4));
 }
 
+TEST(Clump, StrandsFollowCoiledCentersTurnByTurn) {
+    // A center coiled 12 times round y (radius 0.05, 2 long, 200 points: some 17 a turn), as a guide
+    // a Curl coiled (Tonic's ringlets: hair clumped onto curled guides), and strands of 300 points
+    // pulled all the way onto it (strength 1 along them). Clump samples such a center finer than
+    // its 32 points (clumpCenterSamples: a sample every 15 degrees of turning), so the strands keep
+    // the coil round instead of cutting across its turns (32 samples: under 3 a turn).
+    constexpr float kRadius = 0.05f, kHeight = 2.0f, kTurns = 12.0f;
+    auto coilAt = [&](float t) {
+        const float a = 6.2831853f * kTurns * t;
+        return Vec3f(kRadius * std::cos(a), kHeight * t, kRadius * std::sin(a));
+    };
+    std::vector<Vec3f> coil;
+    for (int k = 0; k < 200; ++k) coil.push_back(coilAt(static_cast<float>(k) / 199.0f));
+    const std::size_t samples = clumpCenterSamples(coil.data(), coil.size());
+    EXPECT_GT(samples, 7 * kClumpCenterSamples) << "some 20 samples a turn";
+    EXPECT_LE(samples, kClumpCenterSamplesMost);
+    const std::vector<Vec3f> straight = test::straightCurve({0, 0, 0}, {0, 1, 0}, 200);
+    EXPECT_EQ(clumpCenterSamples(straight.data(), straight.size()), kClumpCenterSamples) << "a straight center as before";
+    std::vector<Vec3f> arc;  // a quarter turn: as before
+    for (int k = 0; k < 40; ++k) arc.push_back(Vec3f(1.0f - std::cos(0.04f * k), std::sin(0.04f * k), 0.0f));
+    EXPECT_EQ(clumpCenterSamples(arc.data(), arc.size()), kClumpCenterSamples);
+
+    auto centers = std::make_shared<GuideSet>();
+    centers->add(1, coil);
+    auto strands = std::make_shared<StrandSet>();
+    for (int k = 0; k < 6; ++k) {
+        const float a = 1.0471976f * static_cast<float>(k);
+        strands->addStrand(static_cast<StrandId>(k + 1),
+                           test::straightCurve({0.12f * std::cos(a), 0, 0.12f * std::sin(a)}, {0, kHeight, 0}, 300));
+    }
+    auto clump = OperatorRegistry::instance().create(op::kClump);
+    clump->params().set("strength", 1.0);
+    clump->params().set("profile", Ramp::constant(1.0f));
+    clump->params().set("centersFrom", std::string("inputCurves"));
+    EvalContext ctx;
+    const StrandsPtr out = valueAs<StrandsPtr>(clump->evaluate(ctx, {Value(StrandsPtr(strands)), Value(GuidesPtr(centers))}));
+    ASSERT_TRUE(out);
+    ClumpState state;
+    ASSERT_TRUE(clumpState(*clump, out, &state));
+    EXPECT_EQ(state.samples, samples);
+    EXPECT_EQ(state.curves.size(), samples);
+    // The densely sampled coil, to measure how far the clumped points lie from it.
+    std::vector<Vec3f> fine;
+    for (int k = 0; k <= 24000; ++k) fine.push_back(coilAt(static_cast<float>(k) / 24000.0f));
+    float farthest = 0.0f, sharpest = 0.0f;
+    for (std::size_t s = 0; s < out->strandCount(); ++s) {
+        const Vec3f* p = out->strandPoints(s);
+        const std::size_t n = out->strandPointCount(s);
+        for (std::size_t i = 1; i < n; ++i) {
+            float nearest = std::numeric_limits<float>::max();
+            for (const Vec3f& q : fine) nearest = std::min(nearest, (p[i] - q).length());
+            farthest = std::max(farthest, nearest);
+            if (i + 1 < n && i > 1) {
+                const Vec3f a = (p[i] - p[i - 1]).normalized(), b = (p[i + 1] - p[i]).normalized();
+                sharpest = std::max(sharpest, std::acos(std::clamp(a.dot(b), -1.0f, 1.0f)) * 57.29578f);
+            }
+        }
+    }
+    EXPECT_LT(farthest, 0.05f * kRadius) << "on the coil, not across its turns";
+    EXPECT_LT(sharpest, 30.0f) << "no corners where the samples were";
+    std::printf("[ clump  ] coiled center: %zu samples, the strands within %.5f of the coil, turning %.1f degrees at most\n",
+                samples, farthest, sharpest);
+}
+
 TEST(Clump, FitLaysEachStrandAlongItsCenterTipToTipAndExtendByItsOwnLength) {
     // A long, a short and a longer strand beside a straight center 1 long up y, at strength 1 all
     // along. pastTip fit (the default, Yeti's and XGen's clumping): each point lands on the
@@ -851,7 +915,7 @@ TEST(Clump, ScatteredPointsAsCentersPlaceClumpsTheStrandsShape) {
         const std::uint32_t a = state.axes[c];
         EXPECT_EQ((*state.assigned)[a], c) << "an axis is a strand of its own clump";
         const Vec3f tip = before->strandPoints(a)[before->strandPointCount(a) - 1];
-        EXPECT_NEAR((state.curves[(c + 1) * kClumpCenterSamples - 1] - tip).length(), 0.0f, 1e-4f) << "its curve is the axis strand";
+        EXPECT_NEAR((state.curves[(c + 1) * state.samples - 1] - tip).length(), 0.0f, 1e-4f) << "its curve is the axis strand";
     }
     // The spikes' own shape (inputCurves): onto 1-long spikes, the strands lose their
     // length and their tips move to the spikes' tips, every point to the bit as before.
@@ -3925,10 +3989,10 @@ TEST(Expression, ClumpsOnlyTheLongStrands) {
     const StrandsPtr after = lg.eval(clump);
     ClumpState state;
     ASSERT_TRUE(clumpState(lg.g.node(clump), after, &state));
-    const std::size_t picked = state.curves.size() / kClumpCenterSamples;
+    const std::size_t picked = state.curves.size() / state.samples;
     ASSERT_GT(picked, 5u);
     for (std::size_t c = 0; c < picked; ++c) {
-        EXPECT_GT(arcLength(state.curves.data() + c * kClumpCenterSamples, kClumpCenterSamples), 0.7f * longest * 0.999f);
+        EXPECT_GT(arcLength(state.curves.data() + c * state.samples, state.samples), 0.7f * longest * 0.999f);
     }
 
     std::size_t moved = 0;

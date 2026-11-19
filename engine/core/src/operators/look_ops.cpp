@@ -46,7 +46,6 @@ namespace groomlab {
 
 namespace {
 
-constexpr std::size_t kCenterSamples = 32;
 constexpr float kTwoPi = 6.28318530718f;
 // The randomness default of a Clump picking its own centers (and Braid its paths).
 constexpr double kCenterRandomness = 0.3;
@@ -115,6 +114,18 @@ struct ClumpCenter {
     float feather = std::numeric_limits<float>::quiet_NaN();
     float side = std::numeric_limits<float>::quiet_NaN();
 };
+
+// The points each of a run's `count` centers' curves takes (clumpCenterSamples): the most any of
+// them does. `curveOf(c)`: center c's points and their count (none: no curve of its own).
+template <class CurveOf>
+std::size_t runCenterSamples(std::size_t count, const CurveOf& curveOf) {
+    std::vector<std::size_t> each(count, kClumpCenterSamples);
+    parallelFor(0, count, [&](std::size_t c) {
+        const std::pair<const Vec3f*, std::size_t> curve = curveOf(c);
+        each[c] = clumpCenterSamples(curve.first, curve.second);
+    }, 64);
+    return each.empty() ? kClumpCenterSamples : *std::max_element(each.begin(), each.end());
+}
 
 // Clump's centers grouped by vane, when the strands are barbs and every center names its vane.
 class FeatherVanes {
@@ -1061,6 +1072,7 @@ public:
     bool state(const StrandsPtr& output, ClumpState* state) const {
         const std::lock_guard<std::mutex> lock(madeMutex_);
         if (!output || !sameOrShown(made_.output.lock(), output) || !made_.assigned || !made_.curves) return false;
+        state->samples = made_.samples;
         state->curves = *made_.curves;
         state->centerNormals = *made_.centerNormals;
         state->assigned = made_.assigned;
@@ -1081,13 +1093,13 @@ public:
 
 private:
     static constexpr std::uint32_t kNoCenter = kNoClumpCenter;
-    static_assert(kCenterSamples == kClumpCenterSamples, "operator_state.h says how Clump samples its centers");
     // What the last result was made from (evaluateIncremental): the result (by identity), the
     // centers' search roots and curves, and each strand's center (kNoCenter: not clumped).
     struct Made {
         std::weak_ptr<const StrandSet> output;
         std::vector<Vec3f> roots;
         std::shared_ptr<const PointIndex> index;  // over `roots`
+        std::size_t samples = kClumpCenterSamples;  // points a center's curve (ClumpState::samples)
         std::shared_ptr<const std::vector<Vec3f>> curves, centerNormals;  // (shared with the run's ClumpInputs)
         std::shared_ptr<const std::vector<std::uint32_t>> assigned;
         // What the assignment was searched from besides the centers' roots: each strand's query
@@ -1327,8 +1339,8 @@ private:
         const CageBinding binding(scalp);
         std::vector<Vec3f> roots;
         std::vector<Vec3f> starts;  // per center: its first point (what vanes search from)
-        // Center c occupies [c * kCenterSamples, (c + 1) * kCenterSamples); from the strands, made
-        // once the strands are assigned (axisCurves).
+        // Center c occupies [c * samples, (c + 1) * samples); from the strands, made once the
+        // strands are assigned (axisCurves).
         std::vector<Vec3f> curves;
         std::vector<const ClumpCenter*> used;  // the centers, in `roots` order
         std::vector<std::size_t> centerGuides;
@@ -1336,6 +1348,15 @@ private:
         // listed first, then each made on its own.)
         for (std::size_t k = 0; k < given.size(); ++k) {
             if (given[k].count >= (fromStrands ? 1u : 2u)) centerGuides.push_back(k);
+        }
+        // The points a center's curve takes: more where the centers curl (clumpCenterSamples), so
+        // the strands follow each turn. From the strands, by their axis strands (axisCurves).
+        std::size_t samples = kClumpCenterSamples;
+        if (!fromStrands) {
+            samples = runCenterSamples(centerGuides.size(), [&](std::size_t c) {
+                const ClumpCenter& g = given[centerGuides[c]];
+                return std::make_pair(g.points, g.count);
+            });
         }
         // Incrementally, what the last run made (its result checked below), and the centers (strands)
         // the centers input left as they were: their search roots and curves as it made them (when
@@ -1350,7 +1371,7 @@ private:
         std::vector<char> centerMoved;
         if (incremental && !own && centerStrands && !fromStrands && !(params().getDouble("copyAmount") > 0.0) &&
             made.centerGuides == centerGuides && made.roots.size() == centerGuides.size() && made.curves &&
-            made.curves->size() == centerGuides.size() * kCenterSamples) {
+            made.samples == samples && made.curves->size() == centerGuides.size() * samples) {
             if (const StrandChanges* moved = someStrandsChanged(*incremental, 1)) {
                 centerMoved.assign(centerStrands->strandCount(), 0);
                 for (const std::uint32_t c : moved->strands) centerMoved[c] = 1;
@@ -1364,31 +1385,31 @@ private:
             curves.assign(made.curves->begin(), made.curves->end());
         } else {
             roots.resize(centerGuides.size());
-            if (!fromStrands) curves.resize(centerGuides.size() * kCenterSamples);
+            if (!fromStrands) curves.resize(centerGuides.size() * samples);
         }
         parallelFor(0, centerGuides.size(), [&](std::size_t c) {
             const std::size_t guide = centerGuides[c];
             const ClumpCenter& g = given[guide];
             used[c] = &g;
             if (!centerMoved.empty() && !centerMoved[centerIndices[guide]]) {  // as the last run made it
-                starts[c] = curves[c * kCenterSamples];
+                starts[c] = curves[c * samples];
                 return;
             }
             if (fromStrands) {
                 starts[c] = g.points[0];
             } else {
                 thread_local std::vector<Vec3f> resampled;
-                resampled.resize(kCenterSamples);
+                resampled.resize(samples);
                 if (!centerStrands) {
-                    clumpGuideCurve(g.points, g.count, resampled.data());  // (a guide: its smooth curve)
+                    clumpGuideCurve(g.points, g.count, resampled.data(), samples);  // (a guide: its smooth curve)
                 } else {
-                    resampleByArcLengthInto(g.points, g.count, resampled.data(), kCenterSamples);
+                    resampleByArcLengthInto(g.points, g.count, resampled.data(), samples);
                 }
                 if (guide < axisOffsets.size()) {
                     for (Vec3f& q : resampled) q = q + axisOffsets[guide];
                 }
                 starts[c] = resampled.front();
-                std::copy(resampled.begin(), resampled.end(), curves.begin() + static_cast<std::ptrdiff_t>(c * kCenterSamples));
+                std::copy(resampled.begin(), resampled.end(), curves.begin() + static_cast<std::ptrdiff_t>(c * samples));
             }
             roots[c] = guide < pickedAt.size() ? pickedAt[guide] : binding.stablePosition(g.root, starts[c]);
         }, 256);
@@ -1397,21 +1418,25 @@ private:
             *result = unclumped(in);
             return true;
         }
-        if (!fromStrands) shareCenters(roots, curves, nullptr);
+        if (!fromStrands) shareCenters(roots, curves, samples, nullptr);
         // From the strands: each center's axis strand (kNoCenter: it gathers none; its curve is its
         // first point), resampled as its curve, then shared (copyAmount) among those with one.
         std::vector<std::uint32_t> axes;
         auto axisCurves = [&] {
-            curves.resize(roots.size() * kCenterSamples);
+            samples = runCenterSamples(roots.size(), [&](std::size_t c) {
+                if (axes[c] == kNoCenter) return std::make_pair(static_cast<const Vec3f*>(nullptr), std::size_t{0});
+                return std::make_pair(in->strandPoints(axes[c]), static_cast<std::size_t>(in->strandPointCount(axes[c])));
+            });
+            curves.resize(roots.size() * samples);
             parallelFor(0, roots.size(), [&](std::size_t c) {
-                Vec3f* curve = curves.data() + c * kCenterSamples;
+                Vec3f* curve = curves.data() + c * samples;
                 if (axes[c] == kNoCenter) {
-                    std::fill(curve, curve + kCenterSamples, starts[c]);
+                    std::fill(curve, curve + samples, starts[c]);
                     return;
                 }
-                resampleByArcLengthInto(in->strandPoints(axes[c]), in->strandPointCount(axes[c]), curve, kCenterSamples);
+                resampleByArcLengthInto(in->strandPoints(axes[c]), in->strandPointCount(axes[c]), curve, samples);
             }, 64);
-            shareCenters(roots, curves, &axes);
+            shareCenters(roots, curves, samples, &axes);
         };
         phase.next("clump.regions");
         const ScalarField volumize(params(), "volumize", scalp);
@@ -1476,15 +1501,15 @@ private:
                 axes = made.axes;
                 axisCurves();
             }
-            if (!made.curves || made.curves->size() != curves.size()) return false;
+            if (!made.curves || made.samples != samples || made.curves->size() != curves.size()) return false;
             // The centers whose curves moved, then the strands to clump again: those that moved and
             // those clumped toward a center that did.
             std::vector<char> movedCenter(roots.size(), 0);
             bool anyMoved = false;
             for (std::size_t c = 0; c < roots.size(); ++c) {
                 if (!centerMoved.empty() && !centerMoved[centerIndices[centerGuides[c]]]) continue;  // (its curve kept)
-                movedCenter[c] = std::memcmp(curves.data() + c * kCenterSamples, made.curves->data() + c * kCenterSamples,
-                                             kCenterSamples * sizeof(Vec3f)) != 0;
+                movedCenter[c] = std::memcmp(curves.data() + c * samples, made.curves->data() + c * samples,
+                                             samples * sizeof(Vec3f)) != 0;
                 anyMoved = anyMoved || movedCenter[c];
             }
             std::vector<char> again(in->strandCount(), 0);
@@ -1826,6 +1851,7 @@ private:
             // The last curves' array kept for the next run's when nothing else reads it.
             std::shared_ptr<const std::vector<Vec3f>> before = std::move(made_.curves);
             if (before && before.use_count() == 1) spareCurves_ = std::move(const_cast<std::vector<Vec3f>&>(*before));
+            made_.samples = samples;
             made_.curves = curvesMade;
             made_.centerNormals = normalsMade;
             made_.assigned = std::move(assigned);
@@ -1852,6 +1878,7 @@ private:
         if (!last) {
             auto inputs = gpu::clumpInputs(assigned, curvesMade, normalsMade, ids, seed);
             inputs->spots = !axisOffsets.empty();  // centers on the scalp (ClumpInputs::spots)
+            inputs->samples = samples;
             taken.clump = std::move(inputs);
             phase.next("clump.run");
             gpu::runStageInto(gpu::StageKind::Clump, params(), in, scalp, *out, std::move(taken));
@@ -1867,6 +1894,7 @@ private:
             for (std::size_t k = 0; k < dirty.size(); ++k) (*theirs)[k] = (*assigned)[dirty[k]];
             auto inputs = gpu::clumpInputs(theirs, curvesMade, normalsMade, ids, seed);
             inputs->spots = !axisOffsets.empty();  // centers on the scalp (ClumpInputs::spots)
+            inputs->samples = samples;
             taken.clump = std::move(inputs);
             gpu::runStageOnStrands(gpu::StageKind::Clump, params(), in, dirty, scalp, *out, std::move(taken));
             if (clumpIds) {
@@ -1880,13 +1908,13 @@ private:
         return true;
     }
 
-    // Copy (XGen's and Yeti's), on the centers' curves (kCenterSamples points each, root first)
+    // Copy (XGen's and Yeti's), on the centers' curves (`samples` points each, root first)
     // before any strand clumps toward them: each curve takes on `copyAmount` of the shape (its
     // points less its root) of its nearest centers by root, weighed by distance (clumpCopyNeighbors).
     // Roots stay; nothing changes at the default (0). (Clump noise: a Noise node on the centers
     // before the Clump.)
     // With `axes` (centersFrom inputPoints), a center without an axis strand neither gives nor takes.
-    void shareCenters(const std::vector<Vec3f>& roots, std::vector<Vec3f>& curves,
+    void shareCenters(const std::vector<Vec3f>& roots, std::vector<Vec3f>& curves, std::size_t samples,
                       const std::vector<std::uint32_t>* axes) const {
         const std::size_t count = roots.size();
         const auto copyAmount = static_cast<float>(params().getDouble("copyAmount"));
@@ -1899,16 +1927,17 @@ private:
                 std::array<std::uint32_t, kClumpCopyWords> near{};
                 clumpCopyNeighbors(index, roots, c, shapeless, near.data());
                 if (near[0] == 0) return;
-                std::array<Vec3f, kCenterSamples> shape{};
+                thread_local std::vector<Vec3f> shape;
+                shape.assign(samples, Vec3f());
                 for (std::uint32_t j = 0; j < near[0]; ++j) {
-                    const Vec3f* other = own.data() + static_cast<std::size_t>(near[1 + j]) * kCenterSamples;
+                    const Vec3f* other = own.data() + static_cast<std::size_t>(near[1 + j]) * samples;
                     float w = 0.0f;
                     std::memcpy(&w, &near[5 + j], sizeof w);
-                    for (std::size_t i = 0; i < kCenterSamples; ++i) shape[i] += (other[i] - other[0]) * w;
+                    for (std::size_t i = 0; i < samples; ++i) shape[i] += (other[i] - other[0]) * w;
                 }
-                const Vec3f* mine = own.data() + c * kCenterSamples;
-                Vec3f* curve = curves.data() + c * kCenterSamples;
-                for (std::size_t i = 1; i < kCenterSamples; ++i) {
+                const Vec3f* mine = own.data() + c * samples;
+                Vec3f* curve = curves.data() + c * samples;
+                for (std::size_t i = 1; i < samples; ++i) {
                     const Vec3f offset = mine[i] - mine[0];
                     curve[i] = mine[0] + offset + (shape[i] - offset) * copyAmount;
                 }
@@ -3105,15 +3134,38 @@ void clumpCopyNeighbors(const PointIndex& index, const std::vector<Vec3f>& roots
     }
 }
 
-void clumpGuideCurve(const Vec3f* points, std::size_t count, Vec3f* out) {
-    if (count >= 3 && count < kClumpCenterSamples) {
+std::size_t clumpCenterSamples(const Vec3f* points, std::size_t count) {
+    // A sample every 15 degrees of turning (in radians): a coil keeps some 24 a turn.
+    constexpr double kTurnPerSample = 15.0 * 3.14159265358979323846 / 180.0;
+    if (!points || count < 3) return kClumpCenterSamples;
+    double turned = 0.0;
+    Vec3f before;
+    bool first = true;
+    for (std::size_t i = 1; i < count; ++i) {
+        const Vec3f way = points[i] - points[i - 1];
+        const float length = way.length();
+        if (!(length > 0.0f)) continue;  // (a repeated point turns nothing)
+        const Vec3f along = way / length;
+        if (!first) turned += std::acos(std::clamp(static_cast<double>(before.dot(along)), -1.0, 1.0));
+        before = along;
+        first = false;
+    }
+    const double wanted = std::ceil(turned / kTurnPerSample) + 1.0;
+    if (!(wanted > static_cast<double>(kClumpCenterSamples))) return kClumpCenterSamples;
+    if (!(wanted < static_cast<double>(kClumpCenterSamplesMost))) return kClumpCenterSamplesMost;
+    const auto steps = static_cast<std::size_t>(std::ceil(wanted / static_cast<double>(kClumpCenterSamples)));
+    return std::min(steps * kClumpCenterSamples, kClumpCenterSamplesMost);
+}
+
+void clumpGuideCurve(const Vec3f* points, std::size_t count, Vec3f* out, std::size_t samples) {
+    if (count >= 3 && count < samples) {
         thread_local std::vector<Vec3f> smooth;
-        const int perSpan = std::max(4, static_cast<int>((2 * kClumpCenterSamples + count - 2) / (count - 1)));
+        const int perSpan = std::max(4, static_cast<int>((2 * samples + count - 2) / (count - 1)));
         smooth = smoothPolyline(points, count, perSpan);
-        resampleByArcLengthInto(smooth.data(), smooth.size(), out, kClumpCenterSamples);
+        resampleByArcLengthInto(smooth.data(), smooth.size(), out, samples);
         return;
     }
-    resampleByArcLengthInto(points, count, out, kClumpCenterSamples);
+    resampleByArcLengthInto(points, count, out, samples);
 }
 
 }  // namespace groomlab

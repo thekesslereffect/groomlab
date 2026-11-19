@@ -355,6 +355,7 @@ private:
         const void* b = nullptr;  // Interpolate: rows; Clump: curves (fixed) or chosen; Curl: members; Collide: the collider's
         const void* c = nullptr;  // Clump: its variation; Curl: its clumps' numbers
         const void* d = nullptr;  // Clump: its neighbors
+        std::size_t samples = 0;  // Clump: its centers' samples the buffers are laid for (made from `chosen`)
         std::uint32_t aux[4] = {};
         std::shared_ptr<const void> alive[4];  // what a, b, c and d are of where nothing else keeps it (compared by address)
         bool framesMade = false;
