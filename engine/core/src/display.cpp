@@ -27,6 +27,7 @@
 #include "groomlab/parallel.h"
 #include "groomlab/point_index.h"
 #include "groomlab/random.h"
+#include "groomlab/scalp_paint.h"
 
 namespace groomlab {
 
@@ -2721,7 +2722,12 @@ void DisplayBuilder::buildScalpMap(const DisplayInputs& in, const DisplaySetting
     const ScalpMapView& view = in.scalpMap;
     const MeshPtr scalp = view.kind.empty() ? nullptr : in.scalp;
     const bool texture = scalp && view.kind == "texture" && in.scalpMapTexture;
-    const std::uint64_t shownKey = texture ? hashCombine(hash64(0x5CA1E), in.scalpMapTextureGeneration) : view.version;
+    std::uint64_t shownKey = texture ? hashCombine(hash64(0x5CA1E), in.scalpMapTextureGeneration) : view.version;
+    // (A tile set's mosaic: its uvs go through the preview's layout and tiles' size.)
+    if (texture && view.preview && view.preview->udimLayout()) {
+        shownKey = hashCombine(hashCombine(shownKey, reinterpret_cast<std::uintptr_t>(view.preview->udimLayout().get())),
+                               hashCombine(static_cast<std::uint64_t>(view.preview->tileWidth()), static_cast<std::uint64_t>(view.preview->tileHeight())));
+    }
     const std::uint64_t key =
         hashCombine(hashCombine(hash64(0x5CA1D), shownKey), hashCombine(scalp ? scalp->contentHash() : 0, texture ? 1u : 0u));
     if (!rebuild(DisplayPart::ScalpMap, key)) return;

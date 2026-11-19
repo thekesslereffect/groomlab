@@ -302,8 +302,9 @@ std::string GroomDocument::createMap(const std::string& name, const std::string&
         if (folder.empty()) return "save the groom first: a texture map's image goes in the groomlab folder beside it";
         // groomlab/<groom>/masks/<name>.png beside the groom file, a free <name>_2.png when that is taken
         // (as the Maya host names them), the file written now so the map reads from the start.
+        // (Taken: a file, or a tile set of that name: fileStamp sees either.)
         std::filesystem::path file = std::filesystem::u8path(folder) / (name + ".png");
-        for (int k = 2; std::filesystem::exists(file); ++k) file = std::filesystem::u8path(folder) / (name + "_" + std::to_string(k) + ".png");
+        for (int k = 2; fileStamp(file.u8string()) != 0; ++k) file = std::filesystem::u8path(folder) / (name + "_" + std::to_string(k) + ".png");
         try {
             std::filesystem::create_directories(file.parent_path());
             const int size = std::clamp(resolution, 4, 16384);
@@ -350,11 +351,13 @@ std::string GroomDocument::renameMap(const std::string& from, const std::string&
             if (!renamed.empty()) {
                 std::filesystem::path target = std::filesystem::u8path(renamed);
                 const std::string stem = target.stem().u8string();
-                for (int k = 2; std::filesystem::exists(target); ++k) {
+                for (int k = 2; fileStamp(target.generic_u8string()) != 0; ++k) {  // (a file, or a tile set of that name)
                     target = full.parent_path() / (stem + "_" + std::to_string(k) + full.extension().u8string());
                 }
                 std::error_code ec;
-                std::filesystem::rename(full, target, ec);
+                for (const auto& [a, b] : mapImageMoves(full.generic_u8string(), target.generic_u8string())) {  // (a tile set: each tile)
+                    if (!ec) std::filesystem::rename(std::filesystem::u8path(a), std::filesystem::u8path(b), ec);
+                }
                 if (!ec) {
                     entry.texture = pathFromGroomFolder(target.u8string(), std::filesystem::u8path(path_).parent_path().u8string());
                     paints_.erase(from);
@@ -1722,7 +1725,7 @@ std::string GroomDocument::transferToScalp(MeshPtr scalp, const TransferOptions&
                     std::error_code ec;
                     std::filesystem::create_directories(std::filesystem::u8path(folder), ec);
                     std::string target = folder + "/" + name + ".png";
-                    for (int k = 2; std::filesystem::exists(std::filesystem::u8path(target), ec); ++k) {
+                    for (int k = 2; fileStamp(target) != 0; ++k) {  // (a file, or a tile set of that name)
                         target = folder + "/" + name + "_" + std::to_string(k) + ".png";
                     }
                     paint.save(target);

@@ -403,13 +403,29 @@ DisplayGeometry scalpMapGeometry(const ScalpMesh* scalp, const ScalpMapView& vie
     if (textured) {
         batch.mapTexture = true;  // the image at the corners' uvs
         const auto& uvs = scalp->cornerUVs();
+        // A tile set's image is its mosaic (the preview's, udim.h): each corner's uv moved from
+        // its triangle's tile into the tile's slot.
+        const UdimLayout* mosaic = view.preview && view.preview->udimLayout() && view.preview->udimLayout()->udim()
+                                       ? view.preview->udimLayout().get()
+                                       : nullptr;
+        UdimLayout own;
+        if (mosaic && mosaic->triangleTile.size() != scalp->triangleCount()) {
+            own = udimLayoutOf(*scalp);
+            mosaic = &own;
+        }
+        const int tw = view.preview ? view.preview->tileWidth() : 0, th = view.preview ? view.preview->tileHeight() : 0;
+        auto putUv = [&](std::size_t corner) {
+            ScalpMesh::UV uv = uvs[corner];
+            if (mosaic && tw > 0 && th > 0) uv = mosaic->toMosaic(uv, mosaic->triangleTile[corner / 3], tw, th);
+            batch.uvs.push_back(uv[0]);
+            batch.uvs.push_back(uv[1]);
+        };
         std::uint32_t next = 0;
         for (std::size_t tri = 0; tri < scalp->triangleCount(); ++tri) {
             for (std::size_t k = 0; k < 3; ++k) {
                 const auto v = static_cast<std::size_t>(scalp->triangles()[tri][k]);
                 put(batch.positions, points[v] + normals[v] * lift);
-                batch.uvs.push_back(uvs[tri * 3 + k][0]);
-                batch.uvs.push_back(uvs[tri * 3 + k][1]);
+                putUv(tri * 3 + k);
                 batch.indices.push_back(next++);
             }
         }
@@ -418,8 +434,7 @@ DisplayGeometry scalpMapGeometry(const ScalpMesh* scalp, const ScalpMapView& vie
             for (const std::size_t corner : corners) {
                 const auto v = static_cast<std::size_t>(scalp->triangles()[corner / 3][corner % 3]);
                 put(batch.positions, points[v] + normals[v] * lift);
-                batch.uvs.push_back(uvs[corner][0]);
-                batch.uvs.push_back(uvs[corner][1]);
+                putUv(corner);
                 batch.indices.push_back(next++);
             }
         }

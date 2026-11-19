@@ -631,23 +631,6 @@ TEST(ScalpPaint, ColorTexturesPaintFillRoundTripAndConvert) {
     std::remove(path.c_str());
 }
 
-TEST(ScalpPaint, UdimTileSetsAreRefused) {
-    // A scalp map is one image over UVs 0-1: a tile set (whose size is not even known before a
-    // tile is read) is refused with a clear error, not read as one blurred texel.
-    const auto plane = uvPlane(4);
-    const Texture tiles((std::filesystem::temp_directory_path() / "groomlab_none.<UDIM>.png").u8string());
-    ASSERT_TRUE(tiles.isUdim());
-    try {
-        TexturePaint paint(*plane, tiles);
-        FAIL() << "a UDIM set was accepted";
-    } catch (const std::invalid_argument& e) {
-        EXPECT_NE(std::string(e.what()).find("UDIM"), std::string::npos);
-    }
-    EXPECT_THROW(vertexMapFromTexture(tiles, *plane), std::invalid_argument);
-    EXPECT_THROW(rootValuesFromTexture(tiles, *plane, {StrandRoot{}}), std::invalid_argument);
-    EXPECT_THROW(projectTexture(tiles, kGrayMap, *plane, *plane), std::invalid_argument);
-}
-
 TEST(ScalpPaint, ImagesOfAnyFormatCopyAsPngTexelForTexel) {
     // A texture map linked to a TGA (or JPEG, PSD...) paints into a PNG copy: the copy holds the
     // same texels, RGBA for a color image and gray for a gray one.

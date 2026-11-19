@@ -1412,9 +1412,13 @@ json transfer(Session& s, const json& args, BlockReader& blocks) {
                     std::error_code ec;
                     fs::create_directories(fs::u8path(folder), ec);
                     fs::path target = fs::u8path(folder) / fs::u8path(name + ".png");
-                    for (int n = 2; fs::exists(target, ec); ++n) target = fs::u8path(folder) / fs::u8path(name + "_" + std::to_string(n) + ".png");
+                    // (Taken: a file, or a tile set of that name.)
+                    for (int n = 2; fileStamp(target.generic_u8string()) != 0; ++n) target = fs::u8path(folder) / fs::u8path(name + "_" + std::to_string(n) + ".png");
                     const std::string path = target.generic_u8string();
-                    sideFileBefore(s, path);  // undo takes the new image away, redo writes it again
+                    // Undo takes the new image (a tile set's every tile, udim.h) away, redo writes it again.
+                    for (const std::string& file : mapImageFiles(path, paint.udim() ? paint.udimLayout()->tiles : std::vector<int>{})) {
+                        sideFileBefore(s, file);
+                    }
                     paint.save(path);
                     return path;
                 };

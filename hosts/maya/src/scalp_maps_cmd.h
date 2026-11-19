@@ -76,7 +76,9 @@ private:
         std::vector<std::uint8_t> before, after;
     };
     std::vector<FileEdit> rewritten_;
-    FileEdit created_;  // a new file -relink wrote (its bytes in `after`): removed on undo, written on redo
+    // New files -relink wrote (each one's bytes in `after`; a tile set's every tile): removed on
+    // undo, written on redo.
+    std::vector<FileEdit> created_;
     FileEdit deleted_;  // the file -remove -deleteFile deleted (its bytes in `before`): put back on undo
     void removeDeleted();  // deletes deleted_'s file (doIt, redoIt)
 };

@@ -1068,6 +1068,11 @@ private:
     std::uint64_t previewMapVersion_ = 0;
     std::uint64_t mapViewKey_ = 0;
     std::shared_ptr<const std::vector<float>> mapViewValues_;
+    // A texture map's tile set shown (scalpMapView): its mosaic as the preview, kept per files,
+    // scalp and display.
+    std::shared_ptr<const TexturePreview> udimViewPreview(const ScalpMapView& view);
+    std::uint64_t udimViewKey_ = 0;
+    std::shared_ptr<const TexturePreview> udimViewPreview_;
 
     bool liveStroke_ = false;
     bool strokeDensityUsed_ = false;

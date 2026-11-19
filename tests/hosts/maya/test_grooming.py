@@ -3210,6 +3210,48 @@ class GroomingTest(unittest.TestCase):
         self.assertEqual(cmds.getAttr(self.groom + ".scalpMapDisplay"), "crown")
         groomlab.show_map_on_scalp(self.groom, None)
 
+    def test_udim_texture_maps_paint_across_tiles(self):
+        # Issue #87: a scalp over two UDIM tiles (its UVs stretched to u 0-2: the right half on
+        # tile 1002). A texture map is a tile set (its file dens.png stands for dens.1001.png and
+        # dens.1002.png); a stroke on the tiles' border paints both; undo puts both back; the map
+        # converts to vertices reading each vertex's own tile.
+        folder = tempfile.mkdtemp(prefix="groomlab_udim_")
+        cmds.workspace(folder, openWorkspace=True)
+        plane = cmds.polyPlane(width=2, height=1, subdivisionsX=8, subdivisionsY=4)[0]
+        cmds.polyEditUV(plane + ".map[*]", scaleU=2.0, pivotU=0.0, pivotV=0.0)
+        groom = groomlab.create_groom(plane)
+        groomlab.add_map(groom, "dens", 0.0, kind="texture", resolution=32)
+        path = groomlab.map_texture(groom, "dens")
+        stem = path[:-len(".png")]
+        self.assertFalse(os.path.exists(path))
+        tiles = [stem + ".1001.png", stem + ".1002.png"]
+        for tile in tiles:
+            self.assertTrue(os.path.exists(tile), tile)
+        def read(files):
+            out = []
+            for name in files:
+                with open(name, "rb") as f:
+                    out.append(f.read())
+            return out
+        before = read(tiles)
+        groomlab.brush_stroke(groom, "paint", [(0.0, 0.0, 0.0)], radius=0.3, strength=1.0, attribute="dens",
+                              value=1.0, paint_kind="texture", paint_texture=path)
+        painted = read(tiles)
+        self.assertNotEqual(painted[0], before[0])  # both sides of the border
+        self.assertNotEqual(painted[1], before[1])
+        self.assertEqual(groomlab.errors(groom), [])
+        cmds.undo()
+        self.assertEqual(read(tiles), before)
+        cmds.redo()
+        self.assertEqual(read(tiles), painted)
+        self.assertEqual(groomlab.convert_map(groom, "dens", "vertices"), "vertices")
+        values = cmds.groomLabScalpMaps(groom, values="dens")
+        at = [cmds.pointPosition("%s.vtx[%d]" % (plane, i), world=True) for i in range(len(values))]
+        near = [v for v, p in zip(values, at) if abs(p[0]) < 0.05 and abs(p[2]) < 0.1]  # under the brush, on the border
+        far = [v for v, p in zip(values, at) if abs(p[0]) > 0.6]
+        self.assertGreater(min(near), 0.5)  # the border, painted on both tiles
+        self.assertLess(max(far), 0.05)
+
     def test_color_maps_paint_fill_convert_and_pack_channels(self):
         # A color vertex map: r g b a per vertex, filled with a color; the stored entry says so.
         cmds.setAttr(self.groom + ".previewDensity", 1.0)

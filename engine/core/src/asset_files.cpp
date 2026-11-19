@@ -272,7 +272,9 @@ std::string freeFilePath(const std::string& path) {
     const fs::path p = fs::u8path(path);
     std::error_code ec;
     fs::path out = p;
-    for (int k = 2; fs::exists(out, ec); ++k) out = p.parent_path() / (p.stem().u8string() + "_" + std::to_string(k) + p.extension().u8string());
+    // (Taken: a file, or an image's tile set of that name: "density.1001.png"... for "density.png".)
+    auto taken = [&](const fs::path& at) { return fs::exists(at, ec) || (isImagePath(at.u8string()) && fileStamp(at.generic_u8string()) != 0); };
+    for (int k = 2; taken(out); ++k) out = p.parent_path() / (p.stem().u8string() + "_" + std::to_string(k) + p.extension().u8string());
     return out.generic_u8string();
 }
 

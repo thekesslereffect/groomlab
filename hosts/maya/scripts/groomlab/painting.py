@@ -544,7 +544,7 @@ def set_map_texture(groom, name, path, copy=None):
     if not path:
         raise ValueError("give the image's path")
     full = (resolve_path(path, groom) or path).replace("\\", "/")
-    if not os.path.isfile(full):
+    if not groomlab_core.file_stamp(full):  # (a UDIM tile set: any of its tiles)
         raise ValueError("no image at %s" % full)
     png = full.lower().endswith(".png")
     if copy is None:
@@ -571,7 +571,7 @@ def import_map(groom, path, name=None, color=None, copy=None):
     PNG is used in place and any other format copied into the masks folder as a PNG, as
     set_map_texture does (`copy`). One undo step. Returns the map's name."""
     full = (resolve_path(path, groom) or path).replace("\\", "/") if path else ""
-    if not full or not os.path.isfile(full):
+    if not full or not groomlab_core.file_stamp(full):  # (a UDIM tile set: any of its tiles)
         raise ValueError("no image at %s" % (full or path))
     if name is None:
         stem = re.sub(r"[^A-Za-z0-9_]", "_", os.path.splitext(os.path.basename(full))[0]).strip("_") or "map"

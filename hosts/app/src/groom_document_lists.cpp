@@ -38,6 +38,25 @@ std::optional<std::string> readBytes(const std::string& path) {
     return out.str();
 }
 
+// The files a map's image is (udim.h mapImageFiles: the one image, or each tile of a tile set,
+// `tiles` among them), each as it reads now; finishStates reads them after a write and adds them.
+template <class State>
+std::vector<State> statesOf(const std::string& path, const std::vector<int>& tiles = {}) {
+    std::vector<State> out;
+    for (const std::string& file : mapImageFiles(path, tiles)) out.push_back(State{file, readBytes(file), std::nullopt});
+    return out;
+}
+
+template <class State>
+void finishStates(std::vector<State>& states, std::vector<State>& into) {
+    for (State& state : states) {
+        state.after = readBytes(state.path);
+        into.push_back(std::move(state));
+    }
+}
+
+std::vector<int> tilesOf(const TexturePaint& paint) { return paint.udim() ? paint.udimLayout()->tiles : std::vector<int>{}; }
+
 void writeBytes(const std::string& path, const std::optional<std::string>& bytes) {
     std::error_code ec;
     const std::filesystem::path p = std::filesystem::u8path(path);
@@ -195,8 +214,7 @@ std::string GroomDocument::missingMapFile(const std::string& name) const {
     const auto it = maps.maps.find(name);
     if (it == maps.maps.end() || it->second.kind != "texture" || it->second.texture.empty()) return {};
     const std::string full = resolveMapPath(it->second.texture);
-    std::error_code ec;
-    return std::filesystem::is_regular_file(std::filesystem::u8path(full), ec) ? std::string() : full;
+    return fileStamp(full) != 0 ? std::string() : full;  // (a tile set: any of its tiles)
 }
 
 // ---- Maps: files --------------------------------------------------------------------------------
@@ -213,28 +231,31 @@ std::string GroomDocument::storedMapPath(const std::string& full) const {
 std::string GroomDocument::mapImageFile(const std::string& map, const std::string& path, std::vector<Edit::FileState>* copied, int* channels) {
     if (path.empty()) throw std::runtime_error("give the image's path");
     std::error_code ec;
-    if (!std::filesystem::is_regular_file(std::filesystem::u8path(path), ec)) throw std::runtime_error("no image at " + path);
+    if (fileStamp(path) == 0) throw std::runtime_error("no image at " + path);  // (a tile set: any tile)
     TexturePtr image;
     try {
         image = loadTexture(path);
     } catch (const std::exception& e) {
         throw std::runtime_error(path + " does not read as an image: " + e.what());
     }
-    if (!image || image->isUdim() || !image->image()) throw std::runtime_error("a map's image is one file over UVs 0-1, not a UDIM tile set");
+    if (!image || (!image->isUdim() && !image->image())) throw std::runtime_error(path + " does not read as an image");
     if (channels) *channels = isGrayImage(*image) ? kGrayMap : kColorMap;
     if (isPngPath(path)) return forwardSlashes(std::filesystem::u8path(path).u8string());  // in place: painting edits it
     // Another format is copied into the maps folder as a PNG (painting writes PNG).
     if (mapsDirectory().empty()) throw std::runtime_error("save the groom first: a JPEG, TGA, PSD... is copied as a PNG into the groomlab folder beside it");
     const std::string target = freeMapFile(map);
-    Edit::FileState state{target, readBytes(target), std::nullopt};
+    std::vector<Edit::FileState> states = statesOf<Edit::FileState>(target, image->isUdim() ? image->udimTiles() : std::vector<int>{});
     std::filesystem::create_directories(std::filesystem::u8path(target).parent_path(), ec);
     try {
-        writeImagePng(*image, target);
+        writeImagePng(*image, target);  // (a tile set: each tile, udimPathFor(target))
     } catch (const std::exception& e) {
         throw std::runtime_error("could not write " + target + ": " + e.what());
     }
-    state.after = readBytes(target);
-    if (copied) copied->push_back(std::move(state));
+    std::vector<Edit::FileState> made;
+    finishStates(states, made);
+    if (copied) {
+        for (Edit::FileState& state : made) copied->push_back(std::move(state));
+    }
     return target;
 }
 
@@ -270,12 +291,15 @@ std::string GroomDocument::removeMap(const std::string& name, bool deleteFile, b
             return m.second.kind == "texture" && !file.empty() && sameFile(resolveMapPath(m.second.texture), file);
         });
         std::error_code ec;
-        if (deleteFile && !file.empty() && !shared && insideFolder(file, mapsDirectory()) && std::filesystem::is_regular_file(std::filesystem::u8path(file), ec)) {
-            Edit::FileState state{file, readBytes(file), std::nullopt};
-            std::filesystem::remove(std::filesystem::u8path(file), ec);
-            if (!ec) {
-                files.push_back(std::move(state));
-                if (fileDeleted) *fileDeleted = true;
+        if (deleteFile && !file.empty() && !shared && insideFolder(file, mapsDirectory()) && fileStamp(file) != 0) {
+            // (A tile set: every tile's file.)
+            for (Edit::FileState& state : statesOf<Edit::FileState>(file)) {
+                if (!state.before) continue;
+                std::filesystem::remove(std::filesystem::u8path(state.path), ec);
+                if (!ec) {
+                    files.push_back(std::move(state));
+                    if (fileDeleted) *fileDeleted = true;
+                }
             }
         }
         paints_.erase(name);
@@ -428,7 +452,7 @@ std::string GroomDocument::convertMap(const std::string& name, const std::string
             } catch (const std::exception& e) {
                 return "map " + name + "'s image does not read: " + e.what();
             }
-            if (!image || image->isUdim()) return "a map's image is one file over UVs 0-1, not a UDIM tile set";
+            if (!image) return "map " + name + "'s image does not read";
         }
         if (to == "vertices") {
             ScalpMapEntry entry;
@@ -442,12 +466,11 @@ std::string GroomDocument::convertMap(const std::string& name, const std::string
             const std::string file = freeMapFile(name);
             const TexturePaint paint = from == "guides" ? textureFromGuides(flat, name, *scalp, size, size)
                                                         : textureFromVertexMap(vertices, channels, *scalp, size, size);
-            Edit::FileState state{file, readBytes(file), std::nullopt};
+            std::vector<Edit::FileState> states = statesOf<Edit::FileState>(file, tilesOf(paint));
             std::error_code ec;
             std::filesystem::create_directories(std::filesystem::u8path(file).parent_path(), ec);
             paint.save(file);
-            state.after = readBytes(file);
-            files.push_back(std::move(state));
+            finishStates(states, files);
             ScalpMapEntry entry;
             entry.kind = "texture";
             entry.texture = storedMapPath(file);
@@ -508,10 +531,9 @@ std::string GroomDocument::setMapChannels(const std::string& name, int wanted) {
             requirePaintablePng(full);
             const std::shared_ptr<TexturePaint> paint = openTexturePaint(*scalp, full, entry.channels == kColorMap ? kColorMap : kGrayMap, 1024);
             paint->setChannels(wanted);
-            Edit::FileState state{full, readBytes(full), std::nullopt};
+            std::vector<Edit::FileState> states = statesOf<Edit::FileState>(full, tilesOf(*paint));
             paint->save(full);
-            state.after = readBytes(full);
-            files.push_back(std::move(state));
+            finishStates(states, files);
         } catch (const std::exception& e) {
             return e.what();
         }
@@ -584,10 +606,9 @@ std::string GroomDocument::fillMap(const std::string& name, float value, bool se
         const std::shared_ptr<TexturePaint> paint = openTexturePaint(*scalp, full, channels, 1024);
         if (channels == kColorMap) paint->fill(fill, mask, mode);
         else paint->fill(value, mode);
-        Edit::FileState state{full, readBytes(full), std::nullopt};
+        std::vector<Edit::FileState> states = statesOf<Edit::FileState>(full, tilesOf(*paint));
         paint->save(full);
-        state.after = readBytes(full);
-        files.push_back(std::move(state));
+        finishStates(states, files);
     } catch (const std::exception& e) {
         return e.what();
     }

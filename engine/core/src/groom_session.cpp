@@ -35,6 +35,7 @@
 #include "groomlab/profile.h"
 #include "groomlab/paths.h"
 #include "groomlab/random.h"
+#include "groomlab/display.h"
 #include "groomlab/scalp_paint.h"
 #include "groomlab/subdivision.h"
 #include "groomlab/strand_geometry.h"
@@ -2623,8 +2624,16 @@ std::shared_ptr<std::vector<float>> textureMapAtVertices(const ScalpMapView& vie
         } catch (const std::exception&) {
         }
     }
-    const Texture::Image* image = texture ? texture->image() : nullptr;
-    if (!view.preview && !image) return nullptr;
+    if (!view.preview && !texture) return nullptr;
+    // A tile set's preview is its mosaic (udim.h): each corner's uv through it.
+    const UdimLayout* mosaic = view.preview && view.preview->udimLayout() && view.preview->udimLayout()->udim()
+                                   ? view.preview->udimLayout().get()
+                                   : nullptr;
+    UdimLayout own;
+    if (mosaic && mosaic->triangleTile.size() != scalp.triangleCount()) {
+        own = udimLayoutOf(scalp);
+        mosaic = &own;
+    }
     const std::size_t per = view.channels == 4 ? 4 : 1;
     auto values = std::make_shared<std::vector<float>>(scalp.pointCount() * per, 0.0f);
     std::vector<std::uint8_t> seen(scalp.pointCount(), 0);
@@ -2635,7 +2644,9 @@ std::shared_ptr<std::vector<float>> textureMapAtVertices(const ScalpMapView& vie
             const auto v = static_cast<std::size_t>(triangles[t][k]);
             if (seen[v]) continue;
             seen[v] = 1;
-            const float u = uvs[t * 3 + k][0], w = uvs[t * 3 + k][1];
+            ScalpMesh::UV at = uvs[t * 3 + k];
+            if (mosaic) at = mosaic->toMosaic(at, mosaic->triangleTile[t], view.preview->tileWidth(), view.preview->tileHeight());
+            const float u = at[0], w = at[1];
             std::array<float, 4> c{};
             if (view.preview) {
                 // The preview's rows are bottom-up (v = 0 the bottom row), 8-bit RGBA.
@@ -2649,13 +2660,39 @@ std::shared_ptr<std::vector<float>> textureMapAtVertices(const ScalpMapView& vie
                 for (std::size_t i = 0; i < 4; ++i) c[i] = rgba[at + i] / 255.0f;
                 if (per == 1) c[0] = (c[0] + c[1] + c[2]) / 3.0f;  // the preview shows a gray map's value in r g b
             } else {
-                c = image->sample(u, w);
+                c = texture->sample(u, w);  // (a tile set: the corner's tile)
                 if (per == 1) c[0] = rec709Luminance(c[0], c[1], c[2]);  // as a gray map reads its file
             }
             for (std::size_t i = 0; i < per; ++i) (*values)[v * per + i] = c[i];
         }
     }
     return values;
+}
+
+std::shared_ptr<const TexturePreview> GroomSession::udimViewPreview(const ScalpMapView& view) {
+    if (!scalp_ || !scalp_->hasUVs()) return nullptr;
+    const std::uint64_t stamp = fileStamp(view.texture);
+    if (stamp == 0) return nullptr;
+    const int pick = view.channels == 4 ? scalpMapPick(view.channel) : -1;
+    const std::uint64_t key = hashCombine(hashCombine(hashText(hash64(0x0D1A), view.texture), stamp),
+                                          hashCombine(hashCombine(scalp_->surfaceHash(), static_cast<std::uint64_t>(view.channels)),
+                                                      static_cast<std::uint64_t>(pick + 1)));
+    if (key == udimViewKey_ && udimViewPreview_) return udimViewPreview_;
+    udimViewKey_ = key;
+    udimViewPreview_.reset();
+    try {
+        TexturePaint paint(*scalp_, *loadTexture(view.texture), view.channels == 4 ? kColorMap : kGrayMap);
+        auto preview = std::make_shared<TexturePreview>();
+        MapDisplay display;
+        display.mapChannels = paint.channels();
+        display.pick = pick;
+        display.keepAlpha = false;  // (a file's image, as the hosts show one)
+        preview->update(paint, display);
+        udimViewPreview_ = std::move(preview);
+    } catch (const std::exception&) {
+        // (A set missing the scalp's tiles, unreadable files: nothing shown, as for a missing image.)
+    }
+    return udimViewPreview_;
 }
 
 ScalpMapView GroomSession::scalpMapView(const std::string& name, const std::string& channel) {
@@ -2700,7 +2737,14 @@ ScalpMapView GroomSession::scalpMapView(const std::string& name, const std::stri
                 const ScopedPathResolver scope(paths());
                 view.texture = resolvePath(it->second.texture);
             }
-            if (previewing && previewMapImage_) view.preview = previewMapImage_;
+            if (previewing && previewMapImage_) {
+                view.preview = previewMapImage_;
+            } else if (isUdimPath(view.texture) || udimLayoutOf(*scalp_).udim()) {
+                // A tile set (or a scalp over several tiles): hosts draw one image, so the
+                // session gives them its mosaic (udim.h) as the preview, made again when the
+                // files, the scalp or what is shown change.
+                view.preview = udimViewPreview(view);
+            }
             view.version = hashCombine(hashCombine(hashCombine(hashText(hash64(0x5CA1BB), view.texture), fileStamp(view.texture)),
                                                    hashCombine(previewing && previewMapImage_ ? previewMapVersion_ : 0, scalp_->contentHash())),
                                        shownKey);

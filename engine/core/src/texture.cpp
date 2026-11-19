@@ -117,8 +117,30 @@ Tiles tilesOf(const std::string& pattern) {
 
 // The UDIM pattern of a path ("<UDIM>" where the tile number goes), or empty
 // for a plain image. A "1001"-style number in the file name only counts when
-// another tile of the set exists beside it: a lone 1001 is just a name.
+// another tile of the set exists beside it: a lone 1001 is just a name. A plain
+// name whose file is missing names the tile set "<name>.<UDIM><ext>" when any of
+// its tiles exists: a map stored as "density.png" and painted over several tiles
+// writes "density.1001.png", "density.1002.png"... (udim.h udimPathFor).
+std::string udimPatternNamed(const std::string& path);
+
 std::string udimPattern(const std::string& path) {
+    std::string named = udimPatternNamed(path);
+    if (!named.empty() || path.empty()) return named;
+    std::error_code ec;
+    if (fs::exists(toPath(path), ec)) return {};
+    const std::size_t slash = path.find_last_of("/\\");
+    const std::size_t nameStart = slash == std::string::npos ? 0 : slash + 1;
+    const std::size_t dot = path.find_last_of('.');
+    const std::size_t end = dot == std::string::npos || dot < nameStart ? path.size() : dot;
+    const std::string pattern = path.substr(0, end) + "." + kUdimToken + path.substr(end);
+    const Tiles tiles = tilesOf(pattern);
+    for (const bool there : tiles) {
+        if (there) return pattern;
+    }
+    return {};
+}
+
+std::string udimPatternNamed(const std::string& path) {
     const std::size_t slash = path.find_last_of("/\\");
     const std::size_t nameStart = slash == std::string::npos ? 0 : slash + 1;
     std::string name = path.substr(nameStart);
@@ -241,6 +263,8 @@ std::unique_ptr<Texture::Image> decode(const std::string& path) {
 
 }  // namespace
 
+std::string udimPatternOf(const std::string& path) { return udimPattern(path); }
+
 std::array<float, 4> Texture::Image::texel(int x, int y) const {
     x = ((x % width) + width) % width;
     y = ((y % height) + height) % height;
@@ -315,6 +339,22 @@ std::size_t Texture::bytes() const {
     return tileBytes_.load(std::memory_order_relaxed);
 }
 
+const Texture::Image* Texture::udimTile(int tile) const {
+    if (udimPattern_.empty() || tile < kTileBase || tile >= kTileEnd) return nullptr;
+    const Image* image = this->tile(tile - kTileBase);
+    return image == &kMissingTile ? nullptr : image;
+}
+
+std::vector<int> Texture::udimTiles() const {
+    std::vector<int> out;
+    if (udimPattern_.empty()) return out;
+    const Tiles tiles = tilesOf(udimPattern_);
+    for (int t = kTileBase; t < kTileEnd; ++t) {
+        if (tiles[static_cast<std::size_t>(t - kTileBase)]) out.push_back(t);
+    }
+    return out;
+}
+
 std::string Texture::error() const {
     std::lock_guard<std::mutex> lock(tileLock_);
     return error_;
@@ -367,12 +407,23 @@ bool isPngPath(const std::string& path) {
 }
 
 bool isGrayImage(const Texture& image) {
-    const Texture::Image* im = image.image();
-    if (!im) return false;
-    for (std::size_t i = 0; i + 2 < im->rgba.size(); i += 4) {
-        if (im->rgba[i] != im->rgba[i + 1] || im->rgba[i + 1] != im->rgba[i + 2]) return false;
+    auto gray = [](const Texture::Image& im) {
+        for (std::size_t i = 0; i + 2 < im.rgba.size(); i += 4) {
+            if (im.rgba[i] != im.rgba[i + 1] || im.rgba[i + 1] != im.rgba[i + 2]) return false;
+        }
+        return true;
+    };
+    if (image.isUdim()) {  // a tile set: every tile there gray
+        const std::vector<int> tiles = image.udimTiles();
+        if (tiles.empty()) return false;
+        for (const int tile : tiles) {
+            const Texture::Image* im = image.udimTile(tile);
+            if (im && !gray(*im)) return false;
+        }
+        return true;
     }
-    return true;
+    const Texture::Image* im = image.image();
+    return im && gray(*im);
 }
 
 std::uint64_t fileStamp(const std::string& path) { return fileStampOf(path, nullptr); }

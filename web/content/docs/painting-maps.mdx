@@ -83,6 +83,20 @@ A map whose image is missing shows a warning in the list; its tooltip names the 
 The Map node's panel in the Graph Editor shows the same warning, with a **Relink Image...**
 button. To relink many files at once, use **GroomLab > Utilities > Find Missing Files...**.
 
+## UDIM tiles
+
+A scalp whose UVs leave the 0-1 square (laid out over several UDIM tiles: 1001, 1002, ... 1011)
+gets its texture maps as a **tile set**: one PNG per tile its faces use, painted, filled,
+converted and transferred as one map. A stroke crosses from one tile to the next as it crosses a
+UV seam. The map keeps its name (`density.png`); its tiles sit beside it as `density.1001.png`,
+`density.1002.png`, ... and the nodes that read it find them.
+
+You can also **Import** or **Relink** an existing tile set: pick any of its tiles. GroomLab reads
+`name.1001.png`, `name_1001.png` and the `<UDIM>`, `<udim>` and `%(UDIM)d` tokens, and writes
+back in the naming the set already uses. **Transfer** carries a map between scalps of any
+layout: one tile to several, several to one, or one tile layout to another. A scalp whose UVs
+stay in tile 1001 keeps one PNG per map, as before.
+
 ## Color maps and packed masks
 
 A vertex or texture map can store a **color** (RGBA) instead of a grayscale value: choose

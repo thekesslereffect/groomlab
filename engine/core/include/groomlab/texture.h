@@ -60,6 +60,12 @@ public:
 
     std::array<float, 4> sample(float u, float v) const;
 
+    // A tile set's tile (1001-1100) as read (read now the first time); null when its file is
+    // missing or unreadable, or for one image.
+    const Image* udimTile(int tile) const;
+    // The tiles of a tile set whose files exist, ascending (one listing of the folder); {} for one image.
+    std::vector<int> udimTiles() const;
+
     // Memory held now: the image, or the tiles read so far.
     std::size_t bytes() const;
     // Why the last tile failed to read (empty when none did).
@@ -104,11 +110,15 @@ TexturePtr cachedTexture(const std::string& path);
 // extension loadTexture reads (.png, .jpg, .jpeg, .tga, .bmp, .psd, .gif, .hdr, .pic, .pnm, .ppm,
 // .pgm, any case), or names a UDIM tile set (<UDIM>). Nothing is read.
 bool isImagePath(const std::string& name);
+// The tile set a path names, as "<UDIM>" where the tile number goes ("<udim>", "%(UDIM)d" and
+// "<name>.1001.png" / "<name>_1001.png" with other tiles beside it all count); "" for one image.
+// Lists the folder for a numbered name.
+std::string udimPatternOf(const std::string& path);
 // Whether the file name ends in .png (any case). Painting a texture map writes PNG bytes to its
 // file, so a map is painted only into a .png: a map linked to a JPEG, TGA, PSD... paints a PNG
 // copy, never the source.
 bool isPngPath(const std::string& path);
-// Whether every texel's r, g and b agree (a gray map's image); false for a UDIM set.
+// Whether every texel's r, g and b agree (a gray map's image); a tile set's every tile there.
 bool isGrayImage(const Texture& image);
 
 // A cheap hash of the file's path, size and modification time (0 if missing), for

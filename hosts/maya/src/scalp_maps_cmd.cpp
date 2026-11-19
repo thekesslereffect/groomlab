@@ -257,9 +257,14 @@ MStatus ScalpMapsCmd::doIt(const MArgList& args) {
             std::error_code ec;
             const std::filesystem::path folder = std::filesystem::u8path(full).parent_path();
             if (!folder.empty()) std::filesystem::create_directories(folder, ec);
-            std::vector<std::uint8_t> before = fileStamp(full) != 0 ? fileBytes(full) : std::vector<std::uint8_t>{};
+            // (A tile set: each tile's file, udim.h.)
+            const std::vector<std::string> files = mapImageFiles(full, paint.udim() ? paint.udimLayout()->tiles : std::vector<int>{});
+            std::vector<std::vector<std::uint8_t>> before;
+            for (const std::string& file : files) before.push_back(fileStamp(file) != 0 ? fileBytes(file) : std::vector<std::uint8_t>{});
             paint.save(full);
-            if (!before.empty()) rewritten_.push_back({full, std::move(before), fileBytes(full)});
+            for (std::size_t k = 0; k < files.size(); ++k) {
+                if (!before[k].empty()) rewritten_.push_back({files[k], std::move(before[k]), fileBytes(files[k])});
+            }
         };
         // Before rewriting a texture map's file another groom reads too: this groom's own copy.
         auto ownFile = [&](const std::string& name) {
@@ -374,12 +379,15 @@ MStatus ScalpMapsCmd::doIt(const MArgList& args) {
                             copied_ = fileUsedByOtherGroom(groomNode, source);
                             std::error_code ec;
                             std::filesystem::create_directories(std::filesystem::u8path(target).parent_path(), ec);
-                            if (copied_) {
-                                std::filesystem::copy_file(std::filesystem::u8path(source), std::filesystem::u8path(target), ec);
-                            } else {
-                                std::filesystem::rename(std::filesystem::u8path(source), std::filesystem::u8path(target), ec);
+                            // (A tile set: each tile, its set's naming kept: udim.h.)
+                            for (const auto& [from, to] : mapImageMoves(source, target)) {
+                                if (copied_) {
+                                    std::filesystem::copy_file(std::filesystem::u8path(from), std::filesystem::u8path(to), ec);
+                                } else {
+                                    std::filesystem::rename(std::filesystem::u8path(from), std::filesystem::u8path(to), ec);
+                                }
+                                if (ec) return fail(kName, ("could not rename " + from + ": " + ec.message()).c_str());
                             }
-                            if (ec) return fail(kName, ("could not rename " + source + ": " + ec.message()).c_str());
                             moved_ = {source, target};
                         }
                         node.mapped().texture = texturePath;
@@ -510,25 +518,23 @@ MStatus ScalpMapsCmd::doIt(const MArgList& args) {
                     const std::string source = resolve(flagString(db, kCopyFrom[0]).asChar());
                     if (fileStamp(source) == 0) return fail(kName, ("no image at " + source).c_str());
                     const TexturePtr image = loadTexture(source);  // throws when it is not an image
-                    if (image->isUdim()) return fail(kName, "a map's image is one file over UVs 0-1, not a UDIM tile set");
                     stored = freshTexture(texturePath);
                     const std::string full = resolve(stored);
                     std::error_code ec;
                     const std::filesystem::path folder = std::filesystem::u8path(full).parent_path();
                     if (!folder.empty()) std::filesystem::create_directories(folder, ec);
-                    if (isPngPath(source)) {
+                    if (isPngPath(source) && !image->isUdim()) {
                         std::filesystem::copy_file(std::filesystem::u8path(source), std::filesystem::u8path(full), ec);
                         if (ec) return fail(kName, ("could not copy " + source + ": " + ec.message()).c_str());
                     } else {
-                        writeImagePng(*image, full);
+                        writeImagePng(*image, full);  // (a tile set: each tile, at udimPathFor(full))
                     }
-                    created_ = {full, {}, fileBytes(full)};
+                    for (const std::string& file : mapImageFiles(full, image->isUdim() ? image->udimTiles() : std::vector<int>{})) {
+                        created_.push_back({file, {}, fileBytes(file)});
+                    }
                 } else {
                     const std::string full = resolve(stored);
-                    if (fileStamp(full) == 0) return fail(kName, ("no image at " + full).c_str());
-                    if (loadTexture(full)->isUdim()) {
-                        return fail(kName, "a map's image is one file over UVs 0-1, not a UDIM tile set");
-                    }
+                    if (fileStamp(full) == 0) return fail(kName, ("no image at " + full).c_str());  // (a tile set: any tile)
                 }
                 if (kind == "guides") {
                     h->removeAttribute(name);
@@ -596,9 +602,11 @@ namespace {
 // the map then names a file that is not there, and the Map node reports it).
 void moveFile(const std::string& from, const std::string& to) {
     if (from.empty() || to.empty()) return;
-    std::error_code ec;
-    std::filesystem::rename(std::filesystem::u8path(from), std::filesystem::u8path(to), ec);
-    if (ec) MGlobal::displayWarning(MString(ScalpMapsCmd::kName) + ": could not move " + from.c_str() + " to " + to.c_str());
+    for (const auto& [a, b] : mapImageMoves(from, to)) {  // (a tile set: each tile)
+        std::error_code ec;
+        std::filesystem::rename(std::filesystem::u8path(a), std::filesystem::u8path(b), ec);
+        if (ec) MGlobal::displayWarning(MString(ScalpMapsCmd::kName) + ": could not move " + a.c_str() + " to " + b.c_str());
+    }
 }
 
 // A renamed map's shared file, copied from -> to (redo), or the copy removed (undo: to only).
@@ -606,12 +614,13 @@ void copyFile(const std::string& from, const std::string& to) {
     if (to.empty()) return;
     std::error_code ec;
     if (from.empty()) {
-        std::filesystem::remove(std::filesystem::u8path(to), ec);
+        for (const std::string& file : mapImageFiles(to)) std::filesystem::remove(std::filesystem::u8path(file), ec);  // (a tile set: each tile)
         return;
     }
-    std::filesystem::copy_file(std::filesystem::u8path(from), std::filesystem::u8path(to),
-                               std::filesystem::copy_options::overwrite_existing, ec);
-    if (ec) MGlobal::displayWarning(MString(ScalpMapsCmd::kName) + ": could not copy " + from.c_str() + " to " + to.c_str());
+    for (const auto& [a, b] : mapImageMoves(from, to)) {
+        std::filesystem::copy_file(std::filesystem::u8path(a), std::filesystem::u8path(b), std::filesystem::copy_options::overwrite_existing, ec);
+        if (ec) MGlobal::displayWarning(MString(ScalpMapsCmd::kName) + ": could not copy " + a.c_str() + " to " + b.c_str());
+    }
 }
 
 }  // namespace
@@ -627,7 +636,7 @@ MStatus ScalpMapsCmd::redoIt() {
     return groomlab::maya::guarded("ScalpMapsCmd::redoIt", [&]() -> MStatus {
         noteFileWritten();  // texture files may change: what kept their bytes reads them again
         for (const FileEdit& edit : rewritten_) putFileBytes(edit.path, edit.after, kName);
-        if (!created_.path.empty()) putFileBytes(created_.path, created_.after, kName);
+        for (const FileEdit& made : created_) putFileBytes(made.path, made.after, kName);
         if (copied_) {
             copyFile(moved_.first, moved_.second);
         } else {
@@ -645,9 +654,9 @@ MStatus ScalpMapsCmd::undoIt() {
         if (!deleted_.path.empty()) putFileBytes(deleted_.path, deleted_.before, kName);  // before the map names it again
         for (auto edit = rewritten_.rbegin(); edit != rewritten_.rend(); ++edit) putFileBytes(edit->path, edit->before, kName);
         MStatus status = modifier_.undoIt();
-        if (!created_.path.empty()) {
+        for (const FileEdit& made : created_) {
             std::error_code ec;
-            std::filesystem::remove(std::filesystem::u8path(created_.path), ec);
+            std::filesystem::remove(std::filesystem::u8path(made.path), ec);
         }
         if (copied_) {
             copyFile("", moved_.second);

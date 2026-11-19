@@ -816,6 +816,18 @@ void fileAfter(ToolState& t, FileEdit e) {
     t.pending.files.push_back(std::move(e));
 }
 
+// The same for every file a map's image is (udim.h mapImageFiles: each tile of a tile set,
+// `tiles` among them).
+std::vector<FileEdit> filesBefore(const std::string& path, const std::vector<int>& tiles = {}) {
+    std::vector<FileEdit> out;
+    for (const std::string& file : mapImageFiles(path, tiles)) out.push_back(fileBefore(file));
+    return out;
+}
+
+void filesAfter(ToolState& t, std::vector<FileEdit> edits) {
+    for (FileEdit& e : edits) fileAfter(t, std::move(e));
+}
+
 void applySide(ToolState& t, const SideEdit& side, bool after) {
     if (after) {
         for (const FileEdit& f : side.files) putFile(f.path, f.after, f.afterBytes);
@@ -1955,7 +1967,7 @@ json mapsList(ToolState& t) {
             const std::string file = resolveMapFile(s, entry.texture);
             std::error_code ec;
             m["file"] = file;
-            m["missing"] = file.empty() || !fs::is_regular_file(fs::u8path(file), ec);  // the Paint tab's missing-file marker
+            m["missing"] = file.empty() || fileStamp(file) == 0;  // the Paint tab's missing-file marker (a tile set: no tile)
         }
         maps.push_back(m);
     }
@@ -2073,7 +2085,8 @@ ScalpMapEntry newScalpMapEntry(Session& s, const ScalpMesh& scalpMesh, const std
         if (!scalp->hasUVs()) fail("state", "the scalp has no UVs to paint a texture map on");
         const fs::path folder = fs::u8path(mapsFolder(s));
         fs::path file = folder / (name + ".png");
-        for (int k = 2; fs::exists(file); ++k) file = folder / (name + "_" + std::to_string(k) + ".png");
+        // (Taken: a file, or a tile set of that name.)
+        for (int k = 2; fileStamp(file.generic_u8string()) != 0; ++k) file = folder / (name + "_" + std::to_string(k) + ".png");
         try {
             fs::create_directories(file.parent_path());
             const int size = std::clamp(resolution, BrushToolSettings::kMinPaintResolution, BrushToolSettings::kMaxPaintResolution);
@@ -2241,15 +2254,15 @@ std::string defaultMapFile(Session& s, const std::string& name) { return freeFil
 
 // A texture paint written to `file` (made or rewritten) as part of the next commit's undo step.
 void writePaint(ToolState& t, const TexturePaint& paint, const std::string& file) {
-    FileEdit e = fileBefore(file);
+    std::vector<FileEdit> e = filesBefore(file, paint.udim() ? paint.udimLayout()->tiles : std::vector<int>{});
     try {
         std::error_code ec;
         fs::create_directories(fs::u8path(file).parent_path(), ec);
-        paint.save(file);
+        paint.save(file);  // (a tile set: each tile, udimPathFor(file))
     } catch (const std::exception& ex) {
         fail("io", std::string("cannot write the map's image: ") + ex.what());
     }
-    fileAfter(t, std::move(e));
+    filesAfter(t, std::move(e));
 }
 
 // A texture map's paint as every host opens it (scalp_paint.h), to fill or convert.
@@ -2323,10 +2336,13 @@ json mapRemove(ToolState& t, const json& args) {
         });
         std::error_code ec;
         if (optBool(args, "deleteFile", false) && !file.empty() && !shared && insideFolder(file, mapsFolder(s)) &&
-            fs::is_regular_file(fs::u8path(file), ec)) {
-            FileEdit e = fileBefore(file);
-            fs::remove(fs::u8path(file), ec);
-            fileAfter(t, std::move(e));
+            fileStamp(file) != 0) {
+            // (A tile set: every tile's file.)
+            std::vector<FileEdit> edits = filesBefore(file);
+            for (const FileEdit& e : edits) {
+                if (e.before) fs::remove(fs::u8path(e.path), ec);
+            }
+            filesAfter(t, std::move(edits));
             deleted = true;
         }
         dropPaints(t);
@@ -2370,6 +2386,23 @@ json mapRename(ToolState& t, const json& args) {
                 if (!ec) {
                     fileAfter(t, std::move(source));
                     fileAfter(t, std::move(made));
+                    entry.texture = target;
+                    movedFrom = full;
+                }
+            } else if (!renamed.empty() && insideFolder(full, mapsFolder(s)) && isUdimPath(full)) {
+                // A tile set: each tile renamed, the set's naming kept for the new name.
+                const std::string target = freeFilePath(renamed);
+                const std::string fromSet = udimPathFor(full), toSet = udimPathFor(target);
+                std::vector<FileEdit> sources = filesBefore(full), made;
+                for (const int tile : Texture(fromSet).udimTiles()) made.push_back(fileBefore(udimTilePath(toSet, tile)));
+                bool moved = true;
+                for (const int tile : Texture(fromSet).udimTiles()) {
+                    fs::rename(fs::u8path(udimTilePath(fromSet, tile)), fs::u8path(udimTilePath(toSet, tile)), ec);
+                    moved = moved && !ec;
+                }
+                filesAfter(t, std::move(sources));
+                filesAfter(t, std::move(made));
+                if (moved) {
                     entry.texture = target;
                     movedFrom = full;
                 }
@@ -2432,7 +2465,7 @@ json mapConvert(ToolState& t, const json& args) {
         } catch (const std::exception& e) {
             fail("io", "map " + name + "'s image does not read: " + e.what());
         }
-        if (!image || image->isUdim()) fail("bad_request", "a map's image is one file over UVs 0-1, not a UDIM tile set");
+        if (!image) fail("io", "map " + name + "'s image does not read");
     }
     StrokeEdit edit;
     edit.mode = "convert map " + name;
@@ -2639,31 +2672,39 @@ std::string mapImageFile(ToolState& t, const std::string& name, const std::strin
     std::string full = resolveMapFile(s, path);
     if (full.empty()) full = path;
     std::error_code ec;
-    if (!fs::is_regular_file(fs::u8path(full), ec)) fail("not_found", "no image at " + full);
+    if (fileStamp(full) == 0) fail("not_found", "no image at " + full);  // (a tile set: any tile)
     try {
         image = loadTexture(full);
     } catch (const std::exception& e) {
         fail("bad_request", full + " does not read as an image: " + e.what());
     }
-    if (!image || image->isUdim() || !image->image()) fail("bad_request", "a map's image is one file over UVs 0-1, not a UDIM tile set");
+    if (!image || (!image->isUdim() && !image->image())) fail("bad_request", full + " does not read as an image");
     const bool png = isPngPath(full);
     const bool copy = given(args, "copy") ? settingBool(args["copy"], "copy") : !png;
     if (!copy && !png) fail("bad_request", full + " is not a PNG: painting writes PNG, so another format is copied as one (copy true)");
     if (!copy) return fs::u8path(full).generic_u8string();
     const std::string target = defaultMapFile(s, name);
-    FileEdit e = fileBefore(target);
+    const std::vector<int> tiles = image->isUdim() ? image->udimTiles() : std::vector<int>{};
+    std::vector<FileEdit> e = filesBefore(target, tiles);
     fs::create_directories(fs::u8path(target).parent_path(), ec);
-    if (png) {
+    if (png && !image->isUdim()) {
         fs::copy_file(fs::u8path(full), fs::u8path(target), ec);
         if (ec) fail("io", "could not copy " + full + ": " + ec.message());
+    } else if (png) {
+        // A tile set of PNGs: each tile copied, into the set udimPathFor(target) names.
+        const std::string fromSet = udimPathFor(full), toSet = udimPathFor(target);
+        for (const int tile : tiles) {
+            fs::copy_file(fs::u8path(udimTilePath(fromSet, tile)), fs::u8path(udimTilePath(toSet, tile)), fs::copy_options::overwrite_existing, ec);
+            if (ec) fail("io", "could not copy " + udimTilePath(fromSet, tile) + ": " + ec.message());
+        }
     } else {
         try {
-            writeImagePng(*image, target);
+            writeImagePng(*image, target);  // (a tile set: each tile)
         } catch (const std::exception& ex) {
             fail("io", std::string("could not write ") + target + ": " + ex.what());
         }
     }
-    fileAfter(t, std::move(e));
+    filesAfter(t, std::move(e));
     return target;
 }
 
@@ -3444,7 +3485,9 @@ void commitStep(Session& s, const std::string& label, const std::vector<std::pai
     pruneTargets(t);
 }
 
-void sideFileBefore(Session& s, const std::string& path) { toolsOf(s).pendingFiles.push_back(fileBefore(path)); }
+void sideFileBefore(Session& s, const std::string& path) {
+    for (FileEdit& e : filesBefore(path)) toolsOf(s).pendingFiles.push_back(std::move(e));  // (a tile set: each tile)
+}
 
 void dropSideFiles(Session& s) {
     ToolState& t = toolsOf(s);

@@ -87,8 +87,10 @@ std::vector<std::string> TransferCmd::projectMaps(ScalpMaps& maps, const std::se
         std::error_code ec;
         std::filesystem::create_directories(std::filesystem::u8path(folder), ec);
         const std::string target = freeFilePath(folder + "/" + name + ".png");
-        paint.save(target);
-        written_.push_back({target, fileBytes(target)});
+        paint.save(target);  // (a tile set: each tile, udim.h)
+        for (const std::string& file : mapImageFiles(target, paint.udim() ? paint.udimLayout()->tiles : std::vector<int>{})) {
+            written_.push_back({file, fileBytes(file)});
+        }
         return portableMayaPath(target);
     };
     std::vector<std::string> warnings;

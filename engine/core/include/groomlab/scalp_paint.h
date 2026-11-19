@@ -25,6 +25,7 @@
 #include "groomlab/scalp_mesh.h"
 #include "groomlab/texture.h"
 #include "groomlab/transfer.h"
+#include "groomlab/udim.h"
 
 namespace groomlab {
 
@@ -238,22 +239,35 @@ struct TextureEdit {
 // lies in a UV triangle knows its point on the scalp, so a brush sphere in
 // world space finds its texels through a grid over them. Texel (0, 0) is the
 // image's top-left, as files store it (v = 1 at the top, as Texture samples).
+//
+// UDIM (udim.h): on a scalp whose triangles leave tile 1001 the map is a tile set, painted as its
+// mosaic: width() x height() is the mosaic's, tileWidth() x tileHeight() each tile's, and the
+// table is the scalp's seen through the mosaic's UVs (mosaicScalp), so a stroke crosses tiles as
+// it crosses UV seams. save() writes one file per tile.
 class TexturePaint {
 public:
     static constexpr int kEditTile = 32;
 
-    // A blank gray map (every texel `value`) of width x height on `scalp` (which needs UVs;
-    // throws std::invalid_argument without them, or on a non-positive size).
+    // A blank gray map (every texel `value`) of tiles width x height on `scalp` (which needs UVs;
+    // throws std::invalid_argument without them, or on a non-positive size): one image, or the
+    // tile set's mosaic when the scalp leaves tile 1001.
     TexturePaint(const ScalpMesh& scalp, int width, int height, float value = 0.0f);
     // A blank color map, every texel `color`.
     TexturePaint(const ScalpMesh& scalp, int width, int height, const PaintColor& color);
     // The image as the map (any size; the table is built at that size): its luminance for a
-    // gray map (channels 1), its r g b a for a color map (4). Throws std::invalid_argument for
-    // a UDIM tile set (as the conversions below do).
+    // gray map (channels 1), its r g b a for a color map (4). A tile set (or one image on a
+    // scalp that leaves tile 1001: each tile the image, as it repeats) as the mosaic of the
+    // scalp's tiles, at its tiles' size (the first of the scalp's tiles the set has); a tile the
+    // set lacks blank. Throws std::invalid_argument when the set has none of the scalp's tiles.
     TexturePaint(const ScalpMesh& scalp, const Texture& image, int channels = kGrayMap);
 
     int width() const { return width_; }
     int height() const { return height_; }
+    // A tile set (the scalp leaves tile 1001): the mosaic's layout; one tile's size.
+    bool udim() const { return layout_ && layout_->udim(); }
+    const std::shared_ptr<const UdimLayout>& udimLayout() const { return layout_; }
+    int tileWidth() const { return tileWidth_; }
+    int tileHeight() const { return tileHeight_; }
     int channels() const { return channels_; }
     // channels() values per texel, interleaved, rows top-down. The writable one counts as a
     // change of every texel (dirty()).
@@ -363,10 +377,17 @@ public:
     std::vector<std::uint8_t> toPreviewBytes() const;
     // The map as 8-bit gray (toBytes; a color map's luminance).
     std::vector<std::uint8_t> toGray8(int padding = 8) const;
-    // Writes the map as a PNG of its channels, gray or RGBA (toBytes).
-    void save(const std::string& path, int padding = 8) const;
-    // The PNG save() writes, as bytes (written to a file they are that file).
+    // Writes the map as a PNG of its channels, gray or RGBA (toBytes), and returns the path
+    // written: `path` for one image; for a tile set (udim(), or `path` naming one) a PNG per
+    // tile of the scalp at udimPathFor(path) ("density.png" -> density.1001.png,
+    // density.1002.png...; "head_1001.png" keeps its "_"), which it returns. Readers find the
+    // set from the plain path too (texture.h), so a map's stored path need not change.
+    std::string save(const std::string& path, int padding = 8) const;
+    // The PNG save() writes, as bytes (written to a file they are that file). One image only:
+    // throws std::logic_error for a tile set.
     std::vector<std::uint8_t> pngBytes(int padding = 8) const;
+    // A tile's texels of toBytes(padding) (tileWidth() x tileHeight(), channels() per texel).
+    std::vector<std::uint8_t> tileBytes(const std::vector<std::uint8_t>& mosaic, int tile) const;
 
 private:
     std::size_t index(int x, int y) const { return static_cast<std::size_t>(y) * static_cast<std::size_t>(width_) + static_cast<std::size_t>(x); }
@@ -377,7 +398,12 @@ private:
     float editStartValue(std::size_t texel, std::size_t channel) const;
     void requireNotEditing(const char* what) const;
 
+    // The scalp's layout and table at tiles width x height (the mosaic's size set, values sized).
+    void layOut(const ScalpMesh& scalp, int width, int height);
+
     int width_ = 0, height_ = 0;
+    int tileWidth_ = 0, tileHeight_ = 0;
+    std::shared_ptr<const UdimLayout> layout_;
     int channels_ = kGrayMap;
     std::vector<float> values_;  // channels_ per texel
     std::shared_ptr<const TexelTable> table_;
@@ -458,9 +484,16 @@ public:
     // The texels (rows top-down) changed after `revision` of `layout`: the whole image for
     // another layout or a revision older than the kept history; empty when it is current.
     TexelRect changedSince(std::uint64_t revision, std::uint64_t layout) const;
+    // A tile set's mosaic (the paint's, TexturePaint::udimLayout; null or not udim(): one image)
+    // and its tiles' size: the scalp's UVs go through it to this image (scalpMapGeometry).
+    const std::shared_ptr<const UdimLayout>& udimLayout() const { return udim_; }
+    int tileWidth() const { return tileWidth_; }
+    int tileHeight() const { return tileHeight_; }
 
 private:
     int width_ = 0, height_ = 0;
+    std::shared_ptr<const UdimLayout> udim_;
+    int tileWidth_ = 0, tileHeight_ = 0;
     MapDisplay display_;
     std::vector<std::uint8_t> rgba_;
     std::uint64_t revision_ = 0, layout_ = 0;

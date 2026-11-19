@@ -51,6 +51,7 @@
 #include "groomlab/schema.h"
 #include "groomlab/subdivision.h"
 #include "groomlab/usd_writer.h"
+#include "groomlab/udim.h"
 #include "groomlab/version.h"
 
 #if GROOMLAB_HAS_ALEMBIC
@@ -1244,7 +1245,18 @@ json getState(Session& s, const json& args) {
             if (info.kind != "texture" || info.texture.empty()) continue;
             const std::string full = resolveMapFile(s, info.texture);
             std::error_code ec;
-            if (full.empty() || !fs::is_regular_file(fs::u8path(full), ec)) continue;
+            if (full.empty()) continue;
+            if (!fs::is_regular_file(fs::u8path(full), ec)) {
+                // A tile set (udim.h): each tile's PNG, by its number.
+                if (!isUdimPath(full)) continue;
+                const std::string pattern = udimPathFor(full);
+                json tiles = json::array();
+                for (const int tile : Texture(pattern).udimTiles()) {
+                    tiles.push_back({{"tile", tile}, {"png", base64Encode(readText(udimTilePath(pattern, tile)))}});
+                }
+                if (!tiles.empty()) textures.push_back({{"name", name}, {"stored", info.texture}, {"tiles", tiles}});
+                continue;
+            }
             textures.push_back({{"name", name}, {"stored", info.texture}, {"png", base64Encode(readText(full))}});
         }
     }
@@ -1286,7 +1298,20 @@ json setState(Session& s, const json& args) {
             if (it == file.data.maps.end()) continue;
             std::error_code ec;
             const std::string stored = it->second.texture;
-            if (!stored.empty() && fs::u8path(stored).is_absolute() && fs::is_regular_file(fs::u8path(stored), ec)) continue;
+            if (!stored.empty() && fs::u8path(stored).is_absolute() && fileStamp(stored) != 0) continue;  // (a tile set: any tile)
+            if (t.contains("tiles") && t["tiles"].is_array()) {
+                // A tile set: its tiles written as <name>.<tile>.png in a free name's set, the map's
+                // path the plain name (texture.h finds the set from it).
+                fs::create_directories(folder, ec);
+                fs::path target = folder / (name + ".png");
+                for (int k = 2; fileStamp(target.generic_u8string()) != 0; ++k) target = folder / (name + "_" + std::to_string(k) + ".png");
+                const std::string pattern = udimPathFor(target.generic_u8string());
+                for (const json& tile : t["tiles"]) {
+                    writeAtomically(udimTilePath(pattern, tile.value("tile", kFirstUdimTile)), base64Decode(needString(tile, "png")));
+                }
+                it->second.texture = target.generic_u8string();
+                continue;
+            }
             const std::string bytes = base64Decode(needString(t, "png"));
             fs::create_directories(folder, ec);
             fs::path target = folder / (name + ".png");
