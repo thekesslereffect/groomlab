@@ -581,6 +581,16 @@ void bindGroom(py::module_& m) {
           "A map's name made from an image file's (every host's Import Map), free among `taken`.");
     m.def("param_map_name", &paramMapName, py::arg("node"), py::arg("param"),
           "The map a param's own map is named (<node>_<param>, sanitized); one of that name already is linked again.");
+    m.def(
+        "refit_vertex_maps",
+        [](const std::string& mapsJson, const ScalpCounts& before, const ScalpCounts& after) {
+            ScalpMaps maps = ScalpMaps::fromJson(mapsJson);
+            const bool changed = refitVertexMaps(maps, before, after);
+            return py::make_tuple(changed ? maps.toJson() : mapsJson, changed);
+        },
+        py::arg("maps_json"), py::arg("before"), py::arg("after"),
+        "(maps_json, changed): the painted vertex maps refitted when scalps join or leave (scalp_maps.h); "
+        "`before`/`after`: [(scalp name, vertex count)] in join order, the groom's own (\"scalp\") first.");
     m.def("retarget_map_readers",
           [](const std::string& graphJson, const std::string& from, const std::string& to) {
               bool changed = false;

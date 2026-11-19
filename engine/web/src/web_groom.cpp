@@ -16,6 +16,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "groomlab/retriangulate.h"
 #include "groomlab/display.h"
 #include "groomlab/graph.h"
 #include "groomlab/graph_edit.h"
@@ -90,9 +91,15 @@ std::shared_ptr<const ScalpMesh> parseObj(const std::string& text) {
             }
             if (corners.size() < 3) throw std::runtime_error("OBJ: a face needs 3 corners: " + line);
             polygons.push_back(static_cast<std::int32_t>(corners.size() - 2));
-            for (std::size_t k = 1; k + 1 < corners.size(); ++k) {
-                triangles.push_back({corners[0], corners[k], corners[k + 1]});
-                if (allUVs) cornerUVs.insert(cornerUVs.end(), {faceUVs[0], faceUVs[k], faceUVs[k + 1]});
+            // Split as every host splits it (retriangulate.h: Maya's), the same triangles as there.
+            std::vector<Vec3f> facePoints;
+            for (const std::int32_t v : corners) facePoints.push_back(points[static_cast<std::size_t>(v)]);
+            for (const std::array<int, 3>& tri : polygonTriangles(facePoints)) {
+                triangles.push_back({corners[static_cast<std::size_t>(tri[0])], corners[static_cast<std::size_t>(tri[1])],
+                                     corners[static_cast<std::size_t>(tri[2])]});
+                if (allUVs) {
+                    for (const int k : tri) cornerUVs.push_back(faceUVs[static_cast<std::size_t>(k)]);
+                }
             }
         }
     }

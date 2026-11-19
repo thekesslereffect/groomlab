@@ -810,6 +810,13 @@ def paint_param(groom, node, param, kind="guides", name=None, resolution=1024, p
     that channel only. A map made here with `faces` (scalp polygon indices: selected_scalp_faces)
     is white on those faces only, black elsewhere (a map the param already reads is left as it
     is). The map, its link and what painting shows are one undo step. Returns the map's name."""
+    # What drives the param must be a painted map, or nothing: an expression, a channel or an image
+    # no map of the groom holds is refused (every host's: stroke.h paramMapOf).
+    try:
+        groomlab_core.param_map(json.dumps(get_graph(groom, expand_default=True)), cmds.getAttr(groom + ".scalpMaps") or "",
+                                node, param)
+    except RuntimeError as e:
+        raise ValueError(str(e))
     with undo_chunk("paint %s.%s" % (node, param)):
         found = param_map(groom, node, param)
         if found and not name:

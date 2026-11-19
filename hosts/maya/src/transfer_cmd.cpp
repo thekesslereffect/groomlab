@@ -277,6 +277,12 @@ MStatus TransferCmd::doIt(const MArgList& args) {
         if (partPlug.asString().length() > 0) modifier_.newPlugValueString(partPlug, partJson.c_str());
         if (flowPlug.asString().length() > 0) modifier_.newPlugValueString(flowPlug, flowJson.c_str());
         if (setMaps) modifier_.newPlugValueString(mapsPlug, mapsJson.c_str());
+        // What was made on the old scalp goes, as every host's transfer drops it (the app's, the
+        // Blender helper's): the guide cache and the simulation's bakes.
+        for (const char* stale : {"guideCache", "guideCacheObject", "simCaches"}) {
+            MPlug plug = fn.findPlug(stale, true);
+            if (!plug.isNull() && plug.asString().length() > 0) modifier_.newPlugValueString(plug, "");
+        }
         if (!markersJson.empty()) modifier_.newPlugValueString(markersPlug, markersJson.c_str());
         undoable_ = true;
         setResult(static_cast<int>(moved));

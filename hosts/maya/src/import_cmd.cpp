@@ -30,6 +30,7 @@
 #include "guarded.h"
 #include "groomlab/asset_files.h"
 #include "groomlab/card_files.h"
+#include "groomlab/groom_package.h"
 #include "groomlab/correctives.h"
 #include "groomlab/groom_session.h"
 #include "groomlab/paths.h"
@@ -69,29 +70,7 @@ bool exists(const std::string& path) { return fileThere(path); }
 // and an index past its grooms too.
 GroomFile readForMaya(const std::string& path, int index = 0, std::string* fileUpAxis = nullptr,
                       std::vector<std::string>* names = nullptr) {
-    std::vector<GroomFile> grooms = readGroomFiles(path);
-    if (index < 0 || index >= static_cast<int>(grooms.size())) {
-        throw GroomFileError(path + " holds " + std::to_string(grooms.size()) + " groom" + (grooms.size() == 1 ? "" : "s") +
-                             ", no groom " + std::to_string(index));
-    }
-    if (names) {
-        names->clear();
-        for (const GroomFile& g : grooms) names->push_back(g.name);
-    }
-    GroomFile file = std::move(grooms[static_cast<std::size_t>(index)]);
-    if (file.units != "cm") {
-        throw GroomFileError(path + ": its units are " + file.units + "; GroomLab imports grooms in centimeters (Maya's own unit)");
-    }
-    if (fileUpAxis) *fileUpAxis = file.upAxis;
-    convertUpAxis(file, sceneUpAxis());
-    if (file.cardBake.empty()) {
-        // A bake the app wrote beside the groom after saving it (groomlab/<stem>/cards/<stem>/<stem>_*,
-        // or earlier versions' places), as the app adopts one: its stamp unknown (every Cards node
-        // reads as stale until a bake).
-        const CardBakePaths beside = CardBakePaths::foundBesideGroomFile(path);
-        if (beside.exists()) file.cardBake.prefix = beside.prefix;
-    }
-    return file;
+    return readGroomForHost(path, index, sceneUpAxis(), names, fileUpAxis);  // every host's (groom_package.h)
 }
 
 // A path the file stores, as its readers resolve it: variables expanded, a relative one against

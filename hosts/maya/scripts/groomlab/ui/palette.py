@@ -21,6 +21,7 @@ keeps its own radius, strength, falloff and curves: picked again, it has them ba
 from groomlab.ui import qt
 from groomlab.ui.qt import QtCore, QtWidgets
 
+import json
 import re
 import groomlab
 import groomlab_core
@@ -179,9 +180,9 @@ LOOK_TYPES = set(definitions.get("palette/starter/lookTypes"))
 def starter_progress(groom):
     """{step key: done} for the first-groom card."""
     groups = groomlab.list_guide_groups(groom)
-    # The default graph has a look of its own (Noise, HairColor): the step is the groom's own graph.
-    types = {n.get("type") for n in groomlab.get_graph(groom).get("nodes", [])}
-    return {"guides": any(g["count"] for g in groups), "look": bool(types & LOOK_TYPES)}
+    # A look node beyond the default graph's own (its Noise, HairColor): every host's (presets.h).
+    graph = json.dumps(groomlab.get_graph(groom, expand_default=True))
+    return {"guides": any(g["count"] for g in groups), "look": groomlab_core.starter_look_given(graph, sorted(LOOK_TYPES))}
 
 
 class StarterCard(QtWidgets.QFrame):

@@ -857,6 +857,9 @@ public:
     // Add > Cards > Hero/Mid/Low, every host's: a Cards node before the output only when the graph
     // has none, then every Cards node set for `lod` (one undo step); the first Cards node in *made.
     std::string addCards(const std::string& lod, std::string* made = nullptr);
+    // A Part node so drawn parts open the hair (every host's part tools: graph_inserts.h insertPart),
+    // one undo step when one is made; "" or the error.
+    std::string ensurePartNode(std::string* made = nullptr);
     // Sets a Cards node for a level of detail ("hero", "mid", "low": the core's presets,
     // card_presets.h, as Maya's cards_preset sets them, by what the node cards), one undo step.
     // "" or the error.

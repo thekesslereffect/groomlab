@@ -25,6 +25,7 @@
 #include "groomlab/correctives.h"
 #include "groomlab/expression.h"
 #include "groomlab/frame_time.h"
+#include "groomlab/node_library.h"
 #include "groomlab/graph.h"
 #include "groomlab/graph_controls.h"
 #include "groomlab/graph_edit.h"
@@ -320,21 +321,14 @@ void setScript(GraphEdit& edit, const std::string& node, const json& definition)
     const json errors = scriptErrors(definition);
     if (!errors.empty()) fail("script", errorsText(errors));
     if (!edit.hasNode(node) || edit.nodeType(node) != "Script") fail("bad_request", node + " is not a script node");
-    json g = graphJsonOf(edit);
-    json& n = nodeIn(g, node);
-    json& params = n["params"];
-    if (!params.is_object()) params = json::object();
-    std::set<std::string> kept;
-    for (const json& p : definition.value("params", json::array())) kept.insert(p.value("name", std::string()));
-    if (params.contains("definition") && params["definition"].is_object()) {
-        for (const json& p : params["definition"].value("params", json::array())) {
-            const std::string name = p.value("name", std::string());
-            if (!kept.count(name)) params.erase(name);
-        }
+    // Every host's (node_library.h withScriptDefinition): gone params lose their ports and links,
+    // params at their old default take the new one.
+    try {
+        edit = GraphEdit(withScriptDefinition(edit.toJson(), node, definition.dump()));
+    } catch (const std::invalid_argument& e) {
+        fail("script", e.what());
     }
-    params["definition"] = definition;
-    edit = GraphEdit(g.dump());
-    edit.completeParams();  // the new params at their defaults
+    edit.completeParams();
 }
 
 json scriptDefinition(const GraphEdit& edit, const std::string& node) {

@@ -58,6 +58,16 @@ GroomWriteReport writeGroomsToFile(const std::string& path, std::vector<GroomFil
 // such name in a file of one groom: 0; else -1.
 int groomIndex(const std::vector<GroomFile>& grooms, const std::string& name);
 
+// Groom `index` of a groom file as a host opens it, every host's (Maya's groomLabImportGroom, the
+// Blender helper's load_groom): checked to be there and in centimeters (the unit grooms are kept
+// in), turned into `upAxis` ("Y" or "Z"), and a card bake written beside the file (the app's
+// layout, CardBakePaths::foundBesideGroomFile) taken when the file names none. `names`: every
+// groom's name in the file's order; `fileUpAxis`: the axis it was written in. Throws
+// GroomFileError for a file that does not read or is in another unit, std::invalid_argument for
+// an index past its grooms.
+GroomFile readGroomForHost(const std::string& path, int index, const std::string& upAxis, std::vector<std::string>* names = nullptr,
+                           std::string* fileUpAxis = nullptr);
+
 // The groom file text `existing` with the grooms of `written` (both groom files' text) in it:
 // each replaces the groom of its name (a file of one unnamed groom: that one), new ones are added
 // at the end, the others kept as they are. Throws GroomFileError for text that is not a groom file.

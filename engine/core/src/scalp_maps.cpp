@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "groomlab/scalp_maps.h"
 
+#include <map>
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -536,6 +537,59 @@ std::map<std::string, std::string> sanitizeMapNames(GroomData& data) {
     if (scalp) data.scalp = scalp;
     if (layers) data.hierarchyJson = hierarchy->toJson();
     return renames;
+}
+
+bool refitVertexMaps(ScalpMaps& maps, const ScalpCounts& before, const ScalpCounts& after) {
+    if (before == after) return false;
+    std::size_t total = 0;
+    std::map<std::string, std::pair<std::size_t, std::size_t>> was;  // name -> (first vertex, count)
+    for (const auto& [name, count] : before) {
+        was[name] = {total, count};
+        total += count;
+    }
+    bool changed = false;
+    for (auto& [name, entry] : maps.maps) {
+        if (entry.kind != "vertices") continue;
+        const std::size_t per = entry.channels == kColorMap ? 4 : 1;
+        if (entry.values.size() != total * per) continue;  // fits no layout it had: left alone
+        std::vector<float> values;
+        for (const auto& [scalp, count] : after) {
+            const auto it = was.find(scalp);
+            if (it != was.end() && it->second.second == count) {
+                const auto from = entry.values.begin() + static_cast<std::ptrdiff_t>(it->second.first * per);
+                values.insert(values.end(), from, from + static_cast<std::ptrdiff_t>(count * per));
+            } else {
+                for (std::size_t v = 0; v < count; ++v) {  // a new scalp (or one remeshed): unpainted (a color: black, opaque)
+                    for (std::size_t c = 0; c < per; ++c) values.push_back(per == 4 && c == 3 ? 1.0f : 0.0f);
+                }
+            }
+        }
+        if (values != entry.values) {
+            entry.values = std::move(values);
+            changed = true;
+        }
+    }
+    return changed;
+}
+
+namespace {
+bool hasGuideLayer(const GuideHierarchy* guides, const std::string& name) {
+    if (!guides) return false;
+    const std::vector<std::string> names = guides->attributeNames();
+    return std::find(names.begin(), names.end(), name) != names.end();
+}
+}  // namespace
+
+std::string mapKindOf(const ScalpMaps& maps, const GuideHierarchy* guides, const std::string& name) {
+    const auto it = maps.maps.find(name);
+    if (it != maps.maps.end()) return it->second.kind;
+    return hasGuideLayer(guides, name) ? "guides" : "";
+}
+
+int mapChannelsOf(const ScalpMaps& maps, const GuideHierarchy* guides, const std::string& name) {
+    const auto it = maps.maps.find(name);
+    if (it != maps.maps.end()) return it->second.channels == kColorMap ? kColorMap : kGrayMap;
+    return hasGuideLayer(guides, name) ? kGrayMap : 0;
 }
 
 }  // namespace groomlab

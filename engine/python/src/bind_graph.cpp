@@ -741,6 +741,14 @@ void bindGraph(py::module_& m) {
              py::arg("type"), py::arg("params_json") = std::string(), py::arg("groom_size") = py::none(),
              "Add > Wind / Jiggle (graph_inserts.h): the node before the output, before a Collide or Cards ending the chain.")
         .def("motion_anchor", &motionAnchor, "The node a motion node goes before (graph_inserts.h).")
+        .def("insert_part",
+             [](GraphEdit& e, const std::string& paramsJson, const std::string& after, std::optional<double> groomSize) {
+                 bool made = false;
+                 std::string name = insertPart(e, paramsJson, after, groomSize, &made);
+                 return py::make_tuple(name, made);
+             },
+             py::arg("params_json") = std::string(), py::arg("after") = std::string(), py::arg("groom_size") = py::none(),
+             "(name, made): the graph's Part node, or one made after `after` (graph_inserts.h: every host's part tools).")
         .def("remove_scalp_nodes", [](GraphEdit& e, const std::string& mesh) { return removeScalpNodes(e, mesh); }, py::arg("mesh_name"),
              "Remove > Scalp's graph (graph_inserts.h): its Scalp nodes and what they alone feed; a Merge left alone passes through.")
         .def("remove_collider_nodes", [](GraphEdit& e, const std::string& mesh) { return removeColliderNodes(e, mesh); },
@@ -1049,6 +1057,67 @@ void bindGraph(py::module_& m) {
           "ValueError saying why.");
     m.attr("MAX_PRESET_TEXT") = kMaxPresetText;
     m.attr("MAX_PRESET_NODES") = kMaxPresetNodes;
+    m.def("preset_search_dirs", &presetSearchDirs, py::arg("user_dir"), py::arg("shipped_dir"),
+          "Where presets are looked up, in order (presets.h): $GROOMLAB_PRESET_PATH's folders, the user's, the shipped.");
+    m.def(
+        "list_presets",
+        [](const std::vector<std::string>& dirs) {
+            py::list out;
+            for (const PresetInfo& p : listPresets(dirs)) {
+                py::dict d;
+                d["name"] = p.name;
+                d["title"] = p.title;
+                d["description"] = p.description;
+                d["category"] = p.category;
+                d["path"] = p.path;
+                out.append(d);
+            }
+            return out;
+        },
+        py::arg("dirs"), "Every preset in `dirs` (the first folder holding a name wins), sorted: [{name, title, description, category, path}].");
+    m.def("preset_path", &presetPath, py::arg("name"), py::arg("dirs"), "A preset's file by name in `dirs` (\"\": none).");
+    m.def(
+        "preset_info",
+        [](const std::string& name, const std::string& path) {
+            const PresetInfo p = presetInfo(name, path);
+            py::dict d;
+            d["name"] = p.name;
+            d["title"] = p.title;
+            d["description"] = p.description;
+            d["category"] = p.category;
+            d["path"] = p.path;
+            return d;
+        },
+        py::arg("name"), py::arg("path"), "What the Presets menu shows of a preset (a broken file: \"Cannot be read: ...\").");
+    m.def("preset_name_error", &presetNameError, py::arg("name"), "Why a preset name cannot name a file (\"\": it can).");
+    m.def(
+        "preset_required_maps",
+        [](const std::string& presetJson) {
+            py::list out;
+            for (const PresetMap& m : presetRequiredMaps(presetJson)) {
+                py::dict d;
+                d["name"] = m.name;
+                d["kind"] = m.kind;
+                d["value"] = m.value;
+                d["color"] = m.color.empty() ? py::object(py::none()) : py::object(py::cast(m.color));
+                out.append(d);
+            }
+            return out;
+        },
+        py::arg("preset_json"), "The painted maps a preset's graph reads: [{name, kind, value, color}] (presets.h).");
+    m.def(
+        "preset_required_groups",
+        [](const std::string& presetJson) {
+            py::list out;
+            for (const PresetGroup& g : presetRequiredGroups(presetJson)) {
+                py::dict d;
+                d["name"] = g.name;
+                d["draw"] = g.draw;
+                out.append(d);
+            }
+            return out;
+        },
+        py::arg("preset_json"), "The guide groups a preset's graph reads: [{name, draw}] (presets.h).");
     m.def("preset_user_dir", &presetUserDir, "The user's preset folder (GROOMLAB_USER_PRESETS, else Maya's user folder).");
 
     m.def("braid_sections",
@@ -1172,6 +1241,11 @@ void bindGraph(py::module_& m) {
           "The functions a script has beyond an expression's: [{'name', 'arguments', 'about'}].");
     m.attr("SCRIPT_STEP_BUDGET") = kScriptStepBudget;
 
+    m.def("starter_look_given", &starterLookGiven, py::arg("graph_json"), py::arg("look_types"),
+          "The first-groom card's look step (presets.h): a look node beyond the default graph's own.");
+    m.def("with_script_definition", &withScriptDefinition, py::arg("graph_json"), py::arg("node"), py::arg("definition_json"),
+          "The graph with script node `node` given an edited definition (node_library.h: every host's Edit Script); "
+          "ValueError listing what does not check.");
     m.def("with_imported_curves", &withImportedCurves, py::arg("graph_json"), py::arg("path"), py::arg("object") = std::string(),
           py::arg("samples") = 24,
           "The graph with its guides node an ImportCurves node reading `path` (graph_inserts.h: every host's Import Alembic Curves).");

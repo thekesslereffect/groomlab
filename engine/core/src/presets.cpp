@@ -1003,6 +1003,21 @@ std::optional<double> presetScalpSize(const ScalpMesh& scalp) {
     return size > 0.0 ? std::optional<double>(size) : std::nullopt;
 }
 
+bool starterLookGiven(const std::string& graphJson, const std::vector<std::string>& lookTypes) {
+    const json g = json::parse(graphJson, nullptr, false);
+    if (!g.is_object()) return false;
+    std::set<std::pair<std::string, std::string>> own;  // the default graph's (name, type)
+    for (const json& n : json::parse(defaultGraphJson()).value("nodes", json::array())) {
+        own.emplace(n.value("name", std::string()), n.value("type", std::string()));
+    }
+    for (const json& n : g.value("nodes", json::array())) {
+        const std::string type = n.value("type", std::string());
+        if (std::find(lookTypes.begin(), lookTypes.end(), type) == lookTypes.end()) continue;
+        if (!own.count({n.value("name", std::string()), type})) return true;
+    }
+    return false;
+}
+
 std::optional<double> paramScalpSize(const ScalpMesh* scalp, double groomScale) {
     std::optional<double> size = scalp ? presetScalpSize(*scalp) : std::nullopt;
     if (size && groomScale > 0.0) *size /= groomScale;

@@ -2210,4 +2210,25 @@ CardMesh buildCards(const StrandSet& s, const ScalpMesh* scalp, const CardSettin
     return mesh;
 }
 
+bool cardsUniqueUVs(const CardMesh& cards, std::vector<float>& u, std::vector<float>& v) {
+    const std::size_t n = cards.positions.size();
+    if (cards.worldU.size() == n && cards.worldV.size() == n && n) {
+        u = cards.worldU;
+        v = cards.worldV;
+        return true;
+    }
+    u.clear();
+    v.clear();
+    const bool rebuildable = !cards.cards.empty() && std::all_of(cards.cards.begin(), cards.cards.end(), [](const CardMesh::Card& c) {
+        return c.stations >= 2 && c.center.size() == static_cast<std::size_t>(c.stations) && c.width.size() == static_cast<std::size_t>(c.stations);
+    });
+    if (!rebuildable) return false;
+    CardMesh unique = cards;
+    layoutCardsUnique(unique, unique.padding);
+    if (unique.u.size() != n || unique.v.size() != n) return false;
+    u = std::move(unique.u);
+    v = std::move(unique.v);
+    return true;
+}
+
 }  // namespace groomlab

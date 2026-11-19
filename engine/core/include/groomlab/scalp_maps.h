@@ -127,4 +127,19 @@ std::map<std::string, std::string> sanitizeMapNames(GroomData& data);
 // without a color set of every corner is left out; guide layers are the hierarchy's.
 ScalpMaps scalpMapsFromGroomData(const GroomData& data);
 
+// The painted vertex maps refitted when the groom's scalps change (every host's Add / Remove
+// Scalp): a vertex map's values are per vertex of the scalps joined in order (the groom's own
+// first, scalp_pieces.h); a scalp kept keeps its values, a new one's vertices take 0 (a color map black, opaque), a removed
+// one's go. `before` / `after`: (name, vertex count) in that order. A map whose values fit
+// `before` in neither its channel count is left alone. Whether any map changed.
+using ScalpCounts = std::vector<std::pair<std::string, std::size_t>>;
+bool refitVertexMaps(ScalpMaps& maps, const ScalpCounts& before, const ScalpCounts& after);
+
+// Which map a name means, every host's: a scalp map of `maps` first (its kind: "vertices" or
+// "texture"), else a layer of the guides `guides` ("guides"), else none (""). Its channels: 1 (gray:
+// guide layers too) or 4 (color), 0 for no map.
+class GuideHierarchy;
+std::string mapKindOf(const ScalpMaps& maps, const GuideHierarchy* guides, const std::string& name);
+int mapChannelsOf(const ScalpMaps& maps, const GuideHierarchy* guides, const std::string& name);
+
 }  // namespace groomlab

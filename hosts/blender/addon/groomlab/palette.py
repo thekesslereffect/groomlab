@@ -307,6 +307,24 @@ def header_buttons(row, context):
     row.menu("GROOMLAB_MT_tools_more", text="", icon="DOWNARROW_HLT")
 
 
+
+_starter = {"key": None, "look": False}
+
+
+def _starter_look(scalp):
+    """The first-groom card's look step (the helper's starter_look: every host's rule), asked again
+    only when the graph changed (the graph kept on the scalp object) so a redraw stays cheap."""
+    key = (scalp.name, hash(scalp.groomlab.graph_json))
+    if _starter["key"] != key:
+        try:
+            rt = groom.ensure(scalp)
+            types = list(defs.get("palette/starter/lookTypes") or [])
+            _starter["look"] = bool(process.call("starter_look", session=rt.session, lookTypes=types).get("look"))
+        except Exception:  # noqa: BLE001 - no helper yet: not done
+            _starter["look"] = False
+        _starter["key"] = key
+    return _starter["look"]
+
 class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
@@ -352,8 +370,8 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
                 layout.operator("groomlab.update", text="Start GroomLab", icon="FILE_REFRESH")
                 return
         _lists_current(context, scalp)
-        if t.guide_count == 0 and not t.starter_dismissed:
-            self.draw_starter(layout, context)
+        if not t.starter_dismissed and not (t.guide_count > 0 and _starter_look(scalp)):
+            self.draw_starter(layout, context, scalp)
         if t.status:
             _wrap(layout, t.status, icon="INFO", width=_chars(context))
         # The tabs, then the tool grid (the Tools and Correctives tabs; on Paint, one full-width
@@ -413,20 +431,21 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
             elif item["kind"] == "submenu":
                 box.menu(menu.submenu_idname("empty", item["id"]), text=item["label"], icon="IMPORT")
 
-    def draw_starter(self, layout, context):
+    def draw_starter(self, layout, context, scalp=None):
         box = layout.box()
         row = box.row()
         look(row, "title").label(text=defs.get("palette/starter/title"))
         row.prop(context.scene.groomlab_tools, "starter_dismissed", text="", icon="X", emboss=False)
-        first = True
+        t = context.scene.groomlab_tools
+        done = {"guides": t.guide_count > 0, "look": bool(scalp is not None and _starter_look(scalp))}
+        current = next((key for key, _text, _tip in STARTER if not done.get(key)), None)
         for key, text, tip in STARTER:
-            op = box.operator("groomlab.tool" if key == "guides" else "groomlab.graph_open",
-                              text=("▶  " if first else "○  ") + text, emboss=False)
+            mark = "✓  " if done.get(key) else "▶  " if key == current else "○  "
+            op = box.operator("groomlab.tool" if key == "guides" else "groomlab.graph_open", text=mark + text, emboss=False)
             if key == "guides":
                 op.tool = "place"
-            if first:
+            if key == current:
                 _wrap(box, tip, width=_chars(context))
-            first = False
 
     def draw_groups(self, layout, context, t):
         """The Tools tab's list (palette.json's one section, Guide groups): the groups (a click picks

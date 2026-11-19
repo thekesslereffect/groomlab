@@ -9,6 +9,7 @@
 
 #include "groomlab/brush.h"
 #include "groomlab/correctives.h"
+#include "groomlab/drive_guides.h"
 #include "groomlab/groom_transfer.h"
 #include "groomlab/guide_hierarchy.h"
 #include "groomlab/guide_selection.h"
@@ -236,6 +237,24 @@ void bindHierarchy(py::module_& m) {
         },
         py::arg("points"), "Each point's mirror image's index (its own on the axis; None when it has none), tube.h.");
     m.attr("MIRROR_AXIS") = kMirrorAxis;
+    m.def(
+        "driver_bind_attach",
+        [](const std::string& text, const std::vector<std::uint64_t>& guides, std::uint64_t driver) {
+            DriverBind bind = DriverBind::fromJson(text);
+            bind.attachGuides(guides, driver);
+            return bind.toJson();
+        },
+        py::arg("bind_json"), py::arg("guides"), py::arg("driver"),
+        "The bind (its JSON) with `guides` attached to driver `driver` too (drive_guides.h: every host's).");
+    m.def(
+        "driver_bind_detach",
+        [](const std::string& text, const std::vector<std::uint64_t>& guides, std::optional<std::uint64_t> driver) {
+            DriverBind bind = DriverBind::fromJson(text);
+            const std::size_t count = bind.detachGuides(guides, driver);
+            return py::make_tuple(bind.toJson(), count);
+        },
+        py::arg("bind_json"), py::arg("guides"), py::arg("driver") = py::none(),
+        "(bind_json, count): `guides` detached from `driver` (None: every driver), drive_guides.h.");
     m.def("root_tube_color", [](std::size_t k) { const auto c = rootTubeColor(k); return py::make_tuple(c[0], c[1], c[2]); },
           py::arg("k"), "Root tube k's color, as every host draws it (guide_hierarchy.h rootTubeColor).");
     m.def("free_tube_shape_name", &freeTubeShapeName, py::arg("base"), py::arg("library"),

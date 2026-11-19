@@ -1413,7 +1413,7 @@ json guidesEdit(ToolState& t, const json& args) {
             }
             if (id == kNoGroup) fail("state", "the groom has no guides yet");
             ChildGenerationParams p;
-            p.count = static_cast<std::size_t>(std::max(1.0, optNumber(args, "count", 5.0)));
+            p.count = static_cast<std::size_t>(std::clamp(optNumber(args, "count", 5.0), 1.0, static_cast<double>(kMaxChildrenPerGuide)));
             p.rootSpread = static_cast<float>(optNumber(args, "rootSpread", p.rootSpread));
             p.tipSpread = static_cast<float>(optNumber(args, "tipSpread", p.tipSpread));
             p.twist = static_cast<float>(optNumber(args, "twist", p.twist));
@@ -1433,15 +1433,7 @@ json guidesEdit(ToolState& t, const json& args) {
                 fail("state", "the group has no guides to be parents");
             }
             made = optString(args, "childGroup", "");
-            if (made.empty()) {
-                for (const GuideGroup& g : h.groups()) {
-                    if (g.parent == id) {
-                        made = g.name;
-                        break;
-                    }
-                }
-            }
-            if (made.empty()) made = uniqueGroupName(h, h.group(id)->name + "_children");
+            if (made.empty()) made = h.childGroupFor(id);  // every host's (guide_hierarchy.h)
             const std::size_t before = h.guides().size();
             h.generateChildren(id, made, p, selected ? &parents : nullptr);
             count = h.guides().size() >= before ? h.guides().size() - before : 0;
@@ -1452,7 +1444,7 @@ json guidesEdit(ToolState& t, const json& args) {
         std::vector<GuideId> ids;
         editGuides(t, "delete guides", [&](GuideHierarchy& h) {
             ids = targets(h);
-            h.removeGuides(ids);
+            h.removeGuides(ids, true);  // (a child group left empty goes too: every host's delete)
         });
         r["removed"] = ids.size();
     } else if (op == "lock" || op == "unlock") {
@@ -1549,20 +1541,15 @@ json guidesEdit(ToolState& t, const json& args) {
         // curve through its points (as the viewport draws it), its shape kept; frozen guides kept.
         // A whole group, a level or every guide: their groups' new guides get these segments too.
         const int segments = settingInt(need(args, "segments"), "segments");
-        if (segments < 1 || segments > 256) fail("bad_request", "segments: 1 to 256");
+        if (segments < 1 || segments > kMaxGuideSegments) fail("bad_request", "segments: 1 to 256");
         std::size_t count = 0;
         t.session.groom->setPreviewHierarchy(nullptr);  // a live preview (guides_preview) ends with its commit
         editGuides(t, "resample guides", [&](GuideHierarchy& h) {
             const std::vector<GuideId> ids = targetGuides(t, h, args, true, "resample");
             const bool groupWide = resampleGroupWide(t, args);
-            if (groupWide) {
-                const GroupId only = given(args, "group") ? h.findGroup(needString(args, "group")) : kNoGroup;
-                const int level = given(args, "level") ? settingInt(args["level"], "level") : -1;
-                for (const GuideGroup& g : h.groups()) {
-                    if (only != kNoGroup ? g.id == only : (level < 0 || h.groupDepth(g.id) == level)) h.setGroupSegments(g.id, segments);
-                }
-            }
-            count = h.resample(ids, segments, groupWide);
+            const GroupId only = given(args, "group") ? h.findGroup(needString(args, "group")) : kNoGroup;
+            const int level = given(args, "level") ? settingInt(args["level"], "level") : -1;
+            count = h.resampleGuides(ids, segments, groupWide, only, level);  // every host's (guide_hierarchy.h)
         });
         r["resampled"] = count;
     } else if (op == "mirror_selection") {
@@ -2162,16 +2149,15 @@ bool hasLayer(Session& s, const std::string& name) {
 
 // "vertices", "texture", "guides", or "" for no map of that name.
 std::string mapKindOf(Session& s, const std::string& name) {
-    const auto it = s.groom->scalpMaps().maps.find(name);
-    if (it != s.groom->scalpMaps().maps.end()) return it->second.kind;
-    return hasLayer(s, name) ? "guides" : "";
+    const auto h = s.groom->storedHierarchy();  // (the layers as stored, as hasLayer reads them)
+    return groomlab::mapKindOf(s.groom->scalpMaps(), h.get(), name);  // every host's (scalp_maps.h)
 }
 
-// 1 (gray) or 4 (color); guide layers are gray.
+// 1 (gray) or 4 (color); guide layers are gray (an unknown name: gray, as a new map starts).
 int mapChannelsOf(Session& s, const std::string& name) {
-    const auto it = s.groom->scalpMaps().maps.find(name);
-    if (it != s.groom->scalpMaps().maps.end()) return it->second.channels == kColorMap ? kColorMap : kGrayMap;
-    return kGrayMap;
+    const auto h = s.groom->storedHierarchy();
+    const int channels = groomlab::mapChannelsOf(s.groom->scalpMaps(), h.get(), name);
+    return channels == 0 ? kGrayMap : channels;
 }
 
 std::string needMap(Session& s, const json& args, const char* key = "name") {
@@ -3223,34 +3209,8 @@ void adoptMaps(Session& s, const GroomData& data) {
 
 void writeMaps(const Session& s, GroomFile& file) {
     if (!s.mapsOwned) return;
-    const ScalpMaps& maps = s.groom->scalpMaps();
-    MapCatalog catalog;
-    for (const auto& [name, info] : s.fileCatalog) {
-        if (info.kind == "guides") catalog[name] = info;
-    }
-    for (const auto& [name, info] : maps.catalog()) catalog[name] = info;
-    file.data.maps = catalog;
-    if (!file.data.scalp) return;
-    const ScalpMesh& was = *file.data.scalp;
-    auto scalp = std::make_shared<ScalpMesh>(was.points(), was.triangles());
-    if (was.hasUVs()) scalp->setCornerUVs(was.cornerUVs());
-    if (was.hasRest()) scalp->setRestPoints(was.restPoints());
-    scalp->setPolygons(was.polygons());
-    scalp->setRenderSubdivision(was.renderSubdivision(), was.renderSubdivisionFrom());
-    for (const std::string& set : was.colorSetNames()) {
-        const auto it = s.fileCatalog.find(set);
-        const bool wasMap = it != s.fileCatalog.end() && it->second.kind == "vertices";
-        if (wasMap && !maps.maps.count(set)) continue;
-        if (maps.maps.count(set)) continue;  // written from the map below
-        if (const auto* colors = was.cornerColors(set)) scalp->setCornerColors(set, *colors);
-    }
-    for (const auto& [name, entry] : maps.maps) {
-        if (entry.kind != "vertices") continue;
-        const std::size_t per = entry.channels == kColorMap ? 4 : 1;
-        if (entry.values.size() != was.pointCount() * per) continue;
-        scalp->setCornerColors(name, cornerColorsFromVertexMap(entry.values, was, static_cast<int>(per)));
-    }
-    file.data.scalp = scalp;
+    // Every host's save (groom_file.h storeScalpMaps): with other scalps each keeps its own share.
+    storeScalpMaps(file.data, s.groom->scalpMaps(), s.fileCatalog);
 }
 
 // ---- Commands ---------------------------------------------------------------------------------------

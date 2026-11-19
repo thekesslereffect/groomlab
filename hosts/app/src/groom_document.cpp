@@ -1356,58 +1356,13 @@ std::string GroomDocument::addScriptNode(float x, float y, std::string* made) {
 std::string GroomDocument::setScriptDefinition(const std::string& node, const json& definition) {
     const json* n = nodeJson(node);
     if (!n || n->value("type", std::string()) != "Script") return node + " is not a script node";
-    // Checked first: its errors, a line each.
-    std::string errors;
-    const json checked = json::parse(scriptNodeErrorsJson(definition.dump()));
-    for (const json& e : checked["errors"]) {
-        if (!errors.empty()) errors += "\n";
-        if (e.value("line", 0) > 0) errors += "line " + std::to_string(e["line"].get<int>()) + ", column " + std::to_string(e["column"].get<int>()) + ": ";
-        errors += e.value("message", std::string());
+    std::string graph;
+    try {
+        graph = withScriptDefinition(graph_.dump(), node, definition.dump());  // every host's (node_library.h)
+    } catch (const std::exception& e) {
+        return e.what();
     }
-    if (!errors.empty()) return errors;
-    auto defaults = [](const json& node) {
-        std::map<std::string, json> out;
-        for (const json& p : json::parse(nodeSpecJson(node.dump())).value("params", json::array())) out[p.value("name", std::string())] = p.value("default", json());
-        return out;
-    };
-    auto names = [](const json& d) {
-        std::set<std::string> out;
-        for (const json& p : d.value("params", json::array())) {
-            if (p.is_object() && p.value("name", json()).is_string()) out.insert(p["name"].get<std::string>());
-        }
-        return out;
-    };
-    return editGraph("edit " + node, [&](json& g) {
-        for (json& item : g["nodes"]) {
-            if (item.value("name", std::string()) != node) continue;
-            const std::map<std::string, json> before = defaults(item);
-            json& params = item["params"];
-            const std::set<std::string> oldNames = names(params.value("definition", json::object())), newNames = names(definition);
-            params["definition"] = definition;
-            for (const std::string& gone : oldNames) {
-                if (newNames.count(gone)) continue;
-                params.erase(gone);
-                if (item.contains("paramInputs") && item["paramInputs"].is_array()) {
-                    json kept = json::array();
-                    for (const json& p : item["paramInputs"]) {
-                        if (p != gone) kept.push_back(p);
-                    }
-                    item["paramInputs"] = kept;
-                }
-                json links = json::array();
-                for (const json& c : g.value("connections", json::array())) {
-                    if (c.value("to", std::string()) != node || c.value("input", std::string()) != gone) links.push_back(c);
-                }
-                g["connections"] = links;
-            }
-            // A param still at its old default takes the new one.
-            for (const auto& [name, value] : defaults(item)) {
-                if (!newNames.count(name)) continue;
-                const auto old = before.find(name);
-                if (!params.contains(name) || (old != before.end() && params[name] == old->second)) params[name] = value;
-            }
-        }
-    });
+    return editGraph("edit " + node, [&](json& g) { g = json::parse(graph); });
 }
 
 std::string GroomDocument::saveScriptNode(const std::string& node, bool asNew, std::string* path) {
@@ -2343,51 +2298,7 @@ GroomFile GroomDocument::currentFile() const {
     // The painted maps as the file keeps them: the catalog (the guide layers' entries as read,
     // the scalp maps as they are now) and the vertex maps as color sets of the scalp, a removed
     // map's color set gone with it (a color set that was never a map stays: the graph may read it).
-    const ScalpMaps& maps = session().scalpMaps();
-    MapCatalog catalog;
-    for (const auto& [name, info] : fileCatalog_) {
-        if (info.kind == "guides") catalog[name] = info;
-    }
-    for (const auto& [name, info] : maps.catalog()) catalog[name] = info;
-    file.data.maps = catalog;
-    if (file.data.scalp) {
-        const ScalpMesh& was = *file.data.scalp;
-        auto scalp = std::make_shared<ScalpMesh>(was.points(), was.triangles());
-        if (was.hasUVs()) scalp->setCornerUVs(was.cornerUVs());
-        if (was.hasRest()) scalp->setRestPoints(was.restPoints());
-        scalp->setPolygons(was.polygons());  // what Catmull-Clark refines, and the render's level
-        scalp->setRenderSubdivision(was.renderSubdivision(), was.renderSubdivisionFrom());
-        for (const std::string& set : was.colorSetNames()) {
-            const auto it = fileCatalog_.find(set);
-            const bool wasMap = it != fileCatalog_.end() && it->second.kind == "vertices";
-            if (wasMap && !maps.maps.count(set)) continue;
-            if (const auto* colors = was.cornerColors(set)) scalp->setCornerColors(set, *colors);
-        }
-        // With other scalps (scalp_pieces.h) the vertex maps are per vertex of the scalps joined:
-        // laid on the joined mesh, each scalp keeps its own share as its color sets.
-        const MeshPtr joined = combineScalps(scalp, file.data.scalps);
-        std::shared_ptr<ScalpMesh> mapped = joined == scalp ? scalp : std::make_shared<ScalpMesh>(*joined);
-        for (const auto& [name, entry] : maps.maps) {
-            if (entry.kind != "vertices") continue;
-            const std::size_t per = entry.channels == kColorMap ? 4 : 1;
-            if (entry.values.size() != mapped->pointCount() * per) continue;
-            mapped->setCornerColors(name, cornerColorsFromVertexMap(entry.values, *mapped, static_cast<int>(per)));
-        }
-        if (mapped != scalp) {
-            const auto pieces = scalpPieces(mapped);
-            auto own = [&](const std::string& name, const MeshPtr& as) -> MeshPtr {
-                const auto it = pieces.find(name);
-                if (it == pieces.end()) return as;
-                auto mesh = std::make_shared<ScalpMesh>(*as);
-                for (const std::string& set : it->second->colorSetNames()) mesh->setCornerColors(set, *it->second->cornerColors(set));
-                return mesh;
-            };
-            file.data.scalp = own(kMainScalpName, scalp);
-            for (auto& [name, mesh] : file.data.scalps) mesh = own(name, mesh);
-        } else {
-            file.data.scalp = scalp;
-        }
-    }
+    storeScalpMaps(file.data, session().scalpMaps(), fileCatalog_);  // every host's save (groom_file.h)
     file.data.followScalp = data.followScalp;
     // Scaling with the scalp: the reference in use (the first area measured when the file had none).
     file.data.scaleSource = data.scaleSource;

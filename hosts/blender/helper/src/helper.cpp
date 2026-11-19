@@ -612,6 +612,7 @@ json setHierarchyGuides(Session& s, GuideCurves curves, bool keepMissing, const 
         // braid's paths or feathers' shafts (Maya's guides_from_curves group=).
         group = h.findGroup(groupName);
         if (group == kNoGroup) group = h.addGroup(groupName);
+        else if (h.groupDepth(group) != 0) fail("bad_request", "'" + groupName + "' is a child group: add guides to a root group");
     }
     for (const GuideGroup& g : h.groups()) {
         if (group != kNoGroup) break;
@@ -627,7 +628,10 @@ json setHierarchyGuides(Session& s, GuideCurves curves, bool keepMissing, const 
         const std::uint64_t id = curves.ids[i];
         if (id == 0 || !h.guide(id)) {
             if (group == kNoGroup) group = h.addGroup("guides");
-            const GuideId made = h.addGuide(group, curves.points[i], TubeProfile{}, id);
+            // A named group's guides take its own segments, as every host's Curves to Guides
+            // (Maya's -fromCurves, guide_hierarchy.h addBakedGuides).
+            const GuideId made = h.addGuide(group, groupName.empty() ? curves.points[i] : h.withGroupSegments(group, curves.points[i]),
+                                            TubeProfile{}, id);
             added.push_back({{"index", i}, {"id", made}});
             given.insert(made);
             continue;
@@ -727,13 +731,7 @@ json writeStrands(Session& s, const ViewResult& view, const json& args, bool gro
             const VaneNormals vanes(st);
             const ScalpMesh* scalp = view.scalp.get();
             for (std::size_t i = 0; i < S; ++i) {
-                Vec3f up{0.0f, 1.0f, 0.0f};
-                if (vanes.at(i, &up)) {
-                } else if (scalp && i < st.roots().size() && scalp->contains(st.roots()[i])) {
-                    up = scalp->normal(st.roots()[i]);
-                } else if (st.strandPointCount(i) >= 2) {
-                    up = (st.strandPoints(i)[1] - st.strandPoints(i)[0]).normalized();
-                }
+                const Vec3f up = iridescenceRootNormal(st, i, scalp, vanes);  // every host's (color_patterns.h)
                 if (groomSpace) {
                     rootNormals[i * 3] = up.x;
                     rootNormals[i * 3 + 1] = up.y;
@@ -1521,7 +1519,8 @@ json Helper::run(const std::string& cmd, const json& args) {
         }
     }
     if (cmd == "make_preset") {
-        const double size = optNumber(args, "size", 0.0);
+        // The size presets record: a session's (paramScalpSize: the groom's 1x, every host's), else "size".
+        const double size = args.contains("session") ? scalpSize(session(args)).value_or(0.0) : optNumber(args, "size", 0.0);
         const json controls = args.value("controls", json::object());
         return {{"text", makePresetJson(graphArg(args), size > 0.0 ? std::optional<double>(size) : std::nullopt, optString(args, "title", ""),
                                         optString(args, "description", ""), optString(args, "category", ""),
@@ -1549,6 +1548,14 @@ json Helper::run(const std::string& cmd, const json& args) {
     if (cmd == "with_graph_file_params") {
         const std::map<std::string, std::string> paths = args.value("paths", json::object()).get<std::map<std::string, std::string>>();
         return {{"graph", json::parse(withGraphFileParams(graphArg(args), paths))}};
+    }
+    if (cmd == "starter_look") {  // the first-groom card's look step, every host's (presets.h)
+        Session& s = session(args);
+        std::vector<std::string> types;
+        for (const json& t : args.value("lookTypes", json::array())) {
+            if (t.is_string()) types.push_back(t.get<std::string>());
+        }
+        return {{"look", starterLookGiven(graphText(*s.groom), types)}};
     }
     if (cmd == "follow_groom_file") {  // Save As: the scene's own groom file, every host's (asset_files.h)
         const FollowedGroomFile f = followSceneGroomFile(needString(args, "file"), needString(args, "old"), needString(args, "new"));
@@ -1596,6 +1603,7 @@ json Helper::run(const std::string& cmd, const json& args) {
         GroomFile& file = s.file;
         for (auto& [node, ref] : file.simCaches) ref.file = f.follow(ref.file);
         file.guideCache.file = f.follow(file.guideCache.file);
+        file.driverCache.file = f.follow(file.driverCache.file);  // (a driver cache a file names goes along too)
         file.scalpCache.file = f.follow(file.scalpCache.file);
         if (!file.cardBake.prefix.empty()) {
             std::vector<std::string> suffixes = cardBakeSuffixes();
@@ -1629,20 +1637,19 @@ json Helper::run(const std::string& cmd, const json& args) {
         std::error_code ec;
         const std::string path = fs::absolute(fs::u8path(needString(args, "path")), ec).u8string();
         if (!fs::is_regular_file(fs::u8path(path), ec)) fail("io", "no groom file '" + path + "'");
-        std::vector<GroomFile> grooms = readGroomFiles(path);
-        const int index = static_cast<int>(optNumber(args, "index", 0.0));
-        if (index < 0 || index >= static_cast<int>(grooms.size())) {
-            fail("bad_request", path + " holds " + std::to_string(grooms.size()) + " groom(s), no groom " + std::to_string(index));
+        // Every host's reader (groom_package.h readGroomForHost): checked, in groom space (Y up: the
+        // host's axis is turned at the boundary), a card bake beside the file taken.
+        std::vector<std::string> grooms;
+        std::string fileAxis;
+        // (A file that does not read, another unit: GroomFileError, "parse"; an index past its grooms: a bad request.)
+        GroomFile file;
+        try {
+            file = readGroomForHost(path, static_cast<int>(optNumber(args, "index", 0.0)), "Y", &grooms, &fileAxis);
+        } catch (const std::invalid_argument& e) {
+            fail("bad_request", e.what());
         }
-        json names = json::array();
-        for (const GroomFile& g : grooms) names.push_back(g.name);
-        GroomFile file = std::move(grooms[static_cast<std::size_t>(index)]);
+        const json names = grooms;
         const std::string name = file.name;
-        if (file.units != "cm") {
-            fail("unsupported", path + ": its units are " + file.units + "; GroomLab reads grooms in centimeters (Maya's own unit)");
-        }
-        const std::string fileAxis = file.upAxis.empty() ? "Y" : file.upAxis;
-        convertUpAxis(file, "Y");  // groom space; the host's axis is turned at the boundary
         adopt(s, std::move(file));
         s.seconds = 0.0;
         json info = groomInfo(s);
@@ -1682,6 +1689,7 @@ json Helper::run(const std::string& cmd, const json& args) {
         GroomFile& f = s.file;
         f.scalpCache.file = rebase(f.scalpCache.file, oldDir, newDir);
         f.guideCache.file = rebase(f.guideCache.file, oldDir, newDir);
+        f.driverCache.file = rebase(f.driverCache.file, oldDir, newDir);
         f.cardBake.prefix = rebase(f.cardBake.prefix, oldDir, newDir);
         for (auto& [node, ref] : f.simCaches) ref.file = rebase(ref.file, oldDir, newDir);
         // The graph's relative paths (texture maps, ImportCurves) still resolve where they did: the
@@ -2165,6 +2173,11 @@ json Helper::run(const std::string& cmd, const json& args) {
             r["changed"] = removeScalpNodes(edit, needString(args, "mesh"));
         } else if (op == "remove_collider_nodes") {  // Remove > Collider's graph, every host's (graph_inserts.h)
             r["changed"] = removeColliderNodes(edit, needString(args, "mesh"));
+        } else if (op == "insert_part") {  // drawn parts open the hair, every host's (graph_inserts.h)
+            const json& params = args.contains("params") && args["params"].is_object() ? args["params"] : json::object();
+            bool made = false;
+            r["name"] = insertPart(edit, params.dump(), optString(args, "after", ""), scalpSize(s), &made);
+            r["made"] = made;
         } else if (op == "insert_cards") {  // Add > Cards, every host's (graph_inserts.h): one only when there is none
             const json& params = args.contains("params") && args["params"].is_object() ? args["params"] : json::object();
             bool made = false;

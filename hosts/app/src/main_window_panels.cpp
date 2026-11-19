@@ -535,6 +535,11 @@ void MainWindow::chooseTool(const QString& id) {
         report(QString::fromUtf8(e.what()));
         return;
     }
+    if (tool == "part" && document_) {
+        // Drawn parts open the hair: a Part node when the graph has none (Maya's draw_part_tool).
+        std::string made;
+        if (document_->ensurePartNode(&made).empty() && !made.empty()) graphEdited();
+    }
     if (tool != before) {
         BrushToolSettings& s = brush_.settings();
         ToolBrush kept;

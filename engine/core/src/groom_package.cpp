@@ -8,6 +8,7 @@
 #include <map>
 #include <set>
 #include <sstream>
+#include <stdexcept>
 
 #include <nlohmann/json.hpp>
 
@@ -120,6 +121,32 @@ std::string groomFileFolder(const std::string& groomFilePath, const std::string&
     const std::string stem = file.stem().u8string();
     const std::string folder = assetFolder(file.parent_path().generic_u8string(), stem, kind);
     return folder + "/" + fileSafeName(groomName.empty() ? stem : groomName);
+}
+
+GroomFile readGroomForHost(const std::string& path, int index, const std::string& upAxis, std::vector<std::string>* names,
+                           std::string* fileUpAxis) {
+    std::vector<GroomFile> grooms = readGroomFiles(path);
+    if (index < 0 || index >= static_cast<int>(grooms.size())) {
+        throw std::invalid_argument(path + " holds " + std::to_string(grooms.size()) + " groom" + (grooms.size() == 1 ? "" : "s") +
+                                    ", no groom " + std::to_string(index));
+    }
+    if (names) {
+        names->clear();
+        for (const GroomFile& g : grooms) names->push_back(g.name);
+    }
+    GroomFile file = std::move(grooms[static_cast<std::size_t>(index)]);
+    if (file.units != "cm") {
+        throw GroomFileError(path + ": its units are " + file.units + "; GroomLab reads grooms in centimeters (Maya's own unit)");
+    }
+    if (fileUpAxis) *fileUpAxis = file.upAxis.empty() ? std::string("Y") : file.upAxis;
+    convertUpAxis(file, upAxis);
+    if (file.cardBake.empty()) {
+        // A bake the app wrote beside the groom after saving it (or earlier versions' places), as
+        // the app adopts one: its stamp unknown (every Cards node reads as stale until a bake).
+        const CardBakePaths beside = CardBakePaths::foundBesideGroomFile(path);
+        if (beside.exists()) file.cardBake.prefix = beside.prefix;
+    }
+    return file;
 }
 
 int groomIndex(const std::vector<GroomFile>& grooms, const std::string& name) {

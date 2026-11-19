@@ -321,6 +321,21 @@ std::string GroomDocument::addCardsNode(std::string* made) {
     return error;
 }
 
+std::string GroomDocument::ensurePartNode(std::string* made) {
+    for (const NodeInfo& node : nodes()) {
+        if (node.type == "Part") return {};  // one there: the parts open already
+    }
+    std::string name;
+    const std::optional<double> size = paramScalpSize(file().data.scalp.get(), session().groomScale());
+    const std::string error = editGraph("part node", [&](json& g) {
+        GraphEdit edit(g.dump());
+        name = insertPart(edit, {}, {}, size);  // every host's (graph_inserts.h)
+        g = json::parse(edit.toJson());
+    });
+    if (error.empty() && made) *made = name;
+    return error;
+}
+
 std::string GroomDocument::addCards(const std::string& lod, std::string* made) {
     // Every host's Add > Cards (graph_inserts.h insertCards, card_presets.h): a Cards node only when
     // the graph has none, then every Cards node set for the level of detail; one undo step.

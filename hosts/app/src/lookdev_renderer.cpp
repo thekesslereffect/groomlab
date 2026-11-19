@@ -189,13 +189,7 @@ struct HairChannels {
         for (int c = 0; c < 3; ++c) sd[4 + c] = colors[c] ? (*colors[c])[i] : brown[c];
         sd[7] = static_cast<float>(n);
         // The root's normal: a feather's vane's, the scalp's there, else the way the strand sets out.
-        Vec3f normal{0.0f, 1.0f, 0.0f};
-        if (vanes.at(i, &normal)) {
-        } else if (scalp && i < roots.size() && scalp->contains(roots[i])) {
-            normal = scalp->normal(roots[i]);
-        } else if (n >= 2) {
-            normal = (p[1] - p[0]).normalized();
-        }
+        const Vec3f normal = iridescenceRootNormal(s, i, scalp, vanes);  // every host's (color_patterns.h)
         sd[8] = normal.x;
         sd[9] = normal.y;
         sd[10] = normal.z;

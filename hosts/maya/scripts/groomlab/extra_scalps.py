@@ -3,9 +3,9 @@
 eyebrow patches), joined after the groom's own scalp (inMesh). A Scalp node whose `input` names one
 grows on it alone (scalp_pieces.h)."""
 
-import json
 import re
 
+import groomlab_core
 from maya import cmds
 
 from groomlab.base import undoable, _original_shape, _shape_of
@@ -41,35 +41,28 @@ def valid_name(name):
     return bool(name) and name != "scalp" and bool(NAME.match(name))
 
 
-def _point_counts(groom):
-    """The vertex counts of the groom's scalps in the order they join: its own, then the others."""
+def _scalp_counts(groom):
+    """[(name, vertex count)] of the groom's scalps in the order they join: its own ("scalp"), then
+    the others."""
     from groomlab.groom import scalp_mesh
     own = scalp_mesh(groom)
-    counts = [cmds.polyEvaluate(own, vertex=True) if own else 0]
-    counts += [cmds.polyEvaluate(s["mesh"], vertex=True) for s in scalps(groom)]
+    counts = [("scalp", cmds.polyEvaluate(own, vertex=True) if own else 0)]
+    counts += [(s["name"], cmds.polyEvaluate(s["mesh"], vertex=True)) for s in scalps(groom)]
     return counts
 
 
-def _resize_vertex_maps(groom, edit):
-    """The painted vertex maps (scalpMaps) refitted when a scalp joins or leaves: `edit(values,
-    channels)` returns each map's new values."""
+def _refit_vertex_maps(groom, before, after):
+    """The painted vertex maps (scalpMaps) refitted when a scalp joins or leaves: every host's
+    (scalp_maps.h refitVertexMaps: a kept scalp keeps its values, a new one unpainted)."""
     text = cmds.getAttr(groom + ".scalpMaps") or ""
     if not text.strip():
         return
     try:
-        maps = json.loads(text)
+        refit, changed = groomlab_core.refit_vertex_maps(text, before, after)
     except ValueError:
-        return
-    changed = False
-    for entry in maps.values() if isinstance(maps, dict) else []:
-        if not isinstance(entry, dict) or entry.get("kind") != "vertices" or not isinstance(entry.get("values"), list):
-            continue
-        values = edit(entry["values"], 4 if entry.get("channels") == 4 else 1)
-        if values is not None:
-            entry["values"] = values
-            changed = True
+        return  # bad scalpMaps text: the shape reports it
     if changed:
-        cmds.setAttr(groom + ".scalpMaps", json.dumps(maps, separators=(",", ":")), type="string")
+        cmds.setAttr(groom + ".scalpMaps", refit, type="string")
 
 
 @undoable("add scalp")
@@ -106,10 +99,9 @@ def add_scalp(groom, mesh, name=None, rest=True, wire=True):
     else:
         used = set(cmds.getAttr(groom + ".extraScalps", multiIndices=True) or [])
         index = max(used) + 1 if used else 0  # after every other: the order they join in
-        # Painted vertex maps: the new scalp's vertices unpainted (0), after the others'.
-        added = cmds.polyEvaluate(shape, vertex=True)
-        _resize_vertex_maps(groom, lambda values, per: values + ([0.0, 0.0, 0.0, 1.0] * added if per == 4 else [0.0] * added)
-                            if len(values) == sum(_point_counts(groom)) * per else None)
+        # Painted vertex maps: the new scalp's vertices unpainted, after the others'.
+        before = _scalp_counts(groom)
+        _refit_vertex_maps(groom, before, before + [(name, cmds.polyEvaluate(shape, vertex=True))])
     element = "%s.extraScalps[%d]" % (groom, index)
     cmds.connectAttr(shape + ".worldMesh[0]", element + ".extraScalpMesh", force=True)
     _connect_rest(element, shape, rest)
@@ -154,19 +146,9 @@ def remove_scalp(groom, name):
     if not found:
         return False
     # Painted vertex maps: the scalp's vertices taken out (before the connection goes).
-    counts = _point_counts(groom)
-    order = [s["name"] for s in current]
-    for s in found:
-        at = order.index(s["name"]) + 1  # after the groom's own
-
-        def cut(values, per, at=at, counts=list(counts)):
-            if len(values) != sum(counts) * per:
-                return None
-            start = sum(counts[:at]) * per
-            return values[:start] + values[start + counts[at] * per:]
-        _resize_vertex_maps(groom, cut)
-        del counts[at]
-        order.remove(s["name"])
+    before = _scalp_counts(groom)
+    gone = {s["name"] for s in found}
+    _refit_vertex_maps(groom, before, [c for c in before if c[0] not in gone])
     for s in found:
         element = "%s.extraScalps[%d]" % (groom, s["index"])
         for plug in (".extraScalpMesh", ".extraScalpRestMesh"):

@@ -1070,19 +1070,6 @@ class GROOMLAB_OT_graph_save_preset(_Op):
 
 # ---- Copy Graph / Paste Graph --------------------------------------------------------------------
 
-def scalp_size(scalp):
-    """The scalp's size as presets record it (its largest extent in centimeters, groom space)."""
-    rt = groom.ensure(scalp)
-    got = process.call("get_scalp", session=rt.session, space="groom")
-    if not got.get("scalp"):
-        return None
-    pts = process.client().array(got["arrays"]["points"])
-    if not len(pts):
-        return None
-    size = float((pts.max(axis=0) - pts.min(axis=0)).max())
-    return size if size > 0.0 else None
-
-
 def copy_text(scalp):
     """The groom's look as text (Maya's copy_graph_text): the preset Save as Preset writes (the
     graph, the scalp's size, the layout, the backdrops), titled after the groom, with its control
@@ -1092,7 +1079,8 @@ def copy_text(scalp):
     g = process.call("get_graph", session=rt.session)["graph"]
     values = {c["name"]: c["value"] for c in graph.controls(scalp) if c.get("set") and isinstance(c.get("value"), (int, float))}
     # The preset's fields in their order: the core's, every host's (presets.h makePresetJson).
-    return process.call("make_preset", graph=g, size=scalp_size(scalp) or 0.0, title=scalp.name, category=SHARED_CATEGORY,
+    # (The size at the groom's 1x, as every host records it: the helper's paramScalpSize.)
+    return process.call("make_preset", graph=g, session=rt.session, title=scalp.name, category=SHARED_CATEGORY,
                         description="Copied from %s (GroomLab for Blender)" % scalp.name, controls=values)["text"]
 
 

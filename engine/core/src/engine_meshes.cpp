@@ -20,20 +20,8 @@ FbxMesh cardsFbxMesh(const CardMesh& cards, const std::string& name) {
     m.faceIndices.reserve(cards.quads.size());
     // The unique layout: as the bake laid it out, else laid out again (cards that carry their stations).
     const std::size_t n = cards.positions.size();
-    std::vector<float> worldU = cards.worldU, worldV = cards.worldV;
-    if (worldU.size() != n || worldV.size() != n) {
-        const bool rebuildable = !cards.cards.empty() && std::all_of(cards.cards.begin(), cards.cards.end(), [](const CardMesh::Card& c) {
-            return c.stations >= 2 && c.center.size() == static_cast<std::size_t>(c.stations) &&
-                   c.width.size() == static_cast<std::size_t>(c.stations);
-        });
-        worldU.clear();
-        worldV.clear();
-        if (rebuildable) {
-            CardMesh unique = cards;
-            layoutCardsUnique(unique, unique.padding);
-            if (unique.u.size() == n && unique.v.size() == n) worldU = std::move(unique.u), worldV = std::move(unique.v);
-        }
-    }
+    std::vector<float> worldU, worldV;
+    cardsUniqueUVs(cards, worldU, worldV);  // every host's (cards.h)
     std::vector<float> aoWorld, tint;
     for (const std::uint32_t v : cards.quads) {
         m.faceIndices.push_back(static_cast<int>(v));

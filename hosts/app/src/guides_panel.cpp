@@ -550,17 +550,9 @@ bool GuidesPanel::generateChildren(const std::string& parent, int count) {
             if (h.guidesInGroup(id).empty()) throw std::invalid_argument("the group " + h.group(id)->name + " has no guides to be parents");
         }
         ChildGenerationParams params;
-        params.count = static_cast<std::size_t>(std::max(count, 1));
-        // The group's existing child group when it has one, else a new one named after it.
-        std::string childName;
-        for (const GuideGroup& g : h.groups()) {
-            if (g.parent == id) {
-                childName = g.name;
-                break;
-            }
-        }
-        if (childName.empty()) childName = uniqueName(h, h.group(id)->name + "_children");
-        h.generateChildren(id, childName, params, parents.empty() ? nullptr : &parents);
+        params.count = std::clamp<std::size_t>(static_cast<std::size_t>(std::max(count, 1)), 1, kMaxChildrenPerGuide);
+        // The group's existing child group when it has one, else a new one (every host's).
+        h.generateChildren(id, h.childGroupFor(id), params, parents.empty() ? nullptr : &parents);
     });
 }
 
@@ -673,17 +665,14 @@ bool GuidesPanel::resampleGuides(int segments) {
     if (!document_) return false;
     const std::vector<GuideId> selected = document_->selection();
     const std::string group = selected.empty() ? currentGroup() : std::string();
-    segments = std::clamp(segments, 1, 256);
+    segments = std::clamp(segments, 1, kMaxGuideSegments);
     // Maya's -resample: along the smooth curve through their points, frozen guides kept. Selected
     // guides get segments of their own; a whole group (with none picked: every group) keeps the
     // count for its new guides and leaves guides with their own as they are.
     return edit("resample the guides", "resample guides", [&](GuideHierarchy& h) {
         std::vector<GuideId> ids = selected;
+        const GroupId gid = group.empty() ? kNoGroup : h.findGroup(group);
         if (ids.empty()) {
-            const GroupId gid = group.empty() ? kNoGroup : h.findGroup(group);
-            for (const GuideGroup& g : h.groups()) {
-                if (gid == kNoGroup || g.id == gid) h.setGroupSegments(g.id, segments);
-            }
             if (gid != kNoGroup) {
                 ids = h.guidesInGroup(gid);
             } else {
@@ -691,7 +680,8 @@ bool GuidesPanel::resampleGuides(int segments) {
             }
         }
         if (h.guides().empty()) throw std::invalid_argument("the groom has no guides to resample");
-        h.resample(ids, segments, selected.empty());  // a group: guides with segments of their own keep them
+        // Every host's (guide_hierarchy.h resampleGuides): a group (none picked) keeps the count.
+        h.resampleGuides(ids, segments, selected.empty(), gid);
     });
 }
 

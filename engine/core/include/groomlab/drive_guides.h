@@ -21,6 +21,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -60,6 +61,10 @@ struct DriverBind {
     std::map<std::uint64_t, std::vector<std::uint64_t>> attached;
 
     bool empty() const { return drivers.empty(); }
+    // Attach / Detach Guides, every host's: `guides` follow driver `driver` too; or they let go of
+    // `driver` (none: of every driver), returning how many did.
+    void attachGuides(const std::vector<std::uint64_t>& guides, std::uint64_t driver);
+    std::size_t detachGuides(const std::vector<std::uint64_t>& guides, std::optional<std::uint64_t> driver = std::nullopt);
     std::string toJson() const;
     // Throws std::invalid_argument ("driverBind: <why>") on malformed text; empty text: no bind.
     static DriverBind fromJson(const std::string& text);

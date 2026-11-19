@@ -365,6 +365,23 @@ const GuideGroup* GuideHierarchy::group(GroupId id) const {
     return nullptr;
 }
 
+std::size_t GuideHierarchy::resampleGuides(const std::vector<GuideId>& ids, int segments, bool groupWide, GroupId group, int level) {
+    if (groupWide) {
+        for (const GuideGroup& g : groups_) {
+            if (group != kNoGroup ? g.id == group : (level < 0 || groupDepth(g.id) == level)) setGroupSegments(g.id, segments);
+        }
+    }
+    return resample(ids, segments, groupWide);
+}
+
+std::string GuideHierarchy::childGroupFor(GroupId parent) const {
+    for (const GuideGroup& g : groups_) {
+        if (g.parent == parent) return g.name;
+    }
+    const GuideGroup* p = group(parent);
+    return freeGroupName((p ? p->name : std::string("group")) + "_children");
+}
+
 std::string GuideHierarchy::freeGroupName(const std::string& base) const {
     if (findGroup(base) == kNoGroup) return base;
     for (int k = 2;; ++k) {

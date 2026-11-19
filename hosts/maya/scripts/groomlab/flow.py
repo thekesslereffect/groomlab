@@ -129,9 +129,15 @@ def add_part_node(groom, width=0.1, strength=1.0, after="interpolate", if_missin
     from groomlab import graph as gm
     model = gm.GraphModel.from_groom(groom)
     if if_missing:
-        existing = model.first_of("Part")
-        if existing:
-            return existing
+        # Every host's (graph_inserts.h insertPart): the Part node there, or one after `after`.
+        edit = model._edit()
+        with gm._core_errors():
+            node, made = edit.insert_part(json.dumps({"width": width, "strength": strength}),
+                                          after if after in model.nodes else "", model.groom_size)
+        if made:
+            model._take(edit)
+            model.save(groom)
+        return node
     if after not in model.nodes:
         after = next((n for kind in ("Interpolate", "Flow", "Bend", "Scatter") for n in model.order
                       if model.node_type(n) == kind), None)

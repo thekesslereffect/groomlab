@@ -58,28 +58,27 @@ def user_dir():
 
 
 def search_dirs():
-    import groomlab
-    return groomlab.library_dirs("GROOMLAB_PRESET_PATH", user_dir, SHIPPED_DIR)
+    """$GROOMLAB_PRESET_PATH's folders, the user's (Maya's user folder), the shipped: the core's
+    order (presets.h presetSearchDirs), every host's."""
+    try:
+        user = user_dir()
+    except (ImportError, RuntimeError, AttributeError):  # maya.cmds before initialize()
+        user = ""
+    return list(groomlab_core.preset_search_dirs(user, SHIPPED_DIR))
 
 
 def list_presets(details=False):
     """Names of every available preset, sorted. With `details`, a dict per preset instead:
-    {"name", "title", "description", "category", "path"} (preset_info)."""
-    names = set()
-    for d in search_dirs():
-        if os.path.isdir(d):
-            names.update(f[:-5] for f in os.listdir(d) if f.endswith(".json"))
-    if not details:
-        return sorted(names)
-    return [preset_info(name) for name in sorted(names)]
+    {"name", "title", "description", "category", "path"} (preset_info): the core's (presets.h)."""
+    found = groomlab_core.list_presets(search_dirs())
+    return [dict(p) for p in found] if details else [p["name"] for p in found]
 
 
 def preset_path(name):
-    for d in search_dirs():
-        path = os.path.join(d, name + ".json")
-        if os.path.isfile(path):
-            return path
-    raise ValueError("no preset named %r (looked in %s)" % (name, ", ".join(search_dirs())))
+    path = groomlab_core.preset_path(name, search_dirs())
+    if not path:
+        raise ValueError("no preset named %r (looked in %s)" % (name, ", ".join(search_dirs())))
+    return path
 
 
 def read_preset(name):
@@ -94,27 +93,21 @@ def title_of(name):
 
 def preset_info(name):
     """What the Presets menu shows of a preset: {"name", "title", "description", "category",
-    "path"}. A preset that cannot be read says why in its description (category "")."""
-    info = {"name": name, "title": title_of(name), "description": "", "category": "", "path": ""}
+    "path"}. A preset that cannot be read says why in its description (category ""): the core's."""
     try:
-        info["path"] = preset_path(name)
-        about = read_preset(name).get("about") or {}
-    except (ValueError, IOError, OSError) as e:
-        info["description"] = "Cannot be read: %s" % e
-        return info
-    if isinstance(about, dict):
-        for key in ("title", "description", "category"):
-            if isinstance(about.get(key), str) and about[key].strip():
-                info[key] = about[key].strip()
-    return info
+        path = preset_path(name)
+    except ValueError as e:
+        return {"name": name, "title": title_of(name), "description": "Cannot be read: %s" % e, "category": "", "path": ""}
+    return dict(groomlab_core.preset_info(name, path))
 
 
 def save_preset(groom, name, overwrite=False, about=None):
     """Save the groom's graph (the default graph if it has none) as a user preset, with its node
     layout and backdrops as the Graph Editor shows them. `about`: {"title", "description",
     "category"} for the Presets menu."""
-    if not name or any(c in name for c in '\\/:*?"<>|'):
-        raise ValueError("invalid preset name %r" % name)
+    why = groomlab_core.preset_name_error(name or "")  # every host's (presets.h presetNameError)
+    if why:
+        raise ValueError(why)
     graph = preset_data(groom, about=about)
     path = os.path.join(user_dir(), name + ".json")
     if os.path.exists(path) and not overwrite:
@@ -216,9 +209,8 @@ def required_maps(name):
 
 
 def required_maps_of(data):
-    requires = data.get("requires") or {}
-    maps = requires.get("maps") if isinstance(requires, dict) else None
-    return [dict(m) for m in maps or [] if isinstance(m, dict) and isinstance(m.get("name"), str) and m["name"]]
+    """[{name, kind, value, color}] the preset's graph reads: the core's (presets.h presetRequiredMaps)."""
+    return [dict(m) for m in groomlab_core.preset_required_maps(json.dumps(data))]
 
 
 def required_groups(name):
@@ -227,14 +219,8 @@ def required_groups(name):
 
 
 def required_groups_of(data):
-    requires = data.get("requires") or {}
-    groups = requires.get("groups") if isinstance(requires, dict) else None
-    out = []
-    for g in groups or []:
-        if isinstance(g, dict) and isinstance(g.get("name"), str) and g["name"] and \
-                g["name"] not in [o["name"] for o in out]:
-            out.append({"name": g["name"], "draw": g.get("draw") is True})
-    return out
+    """[{name, draw}] the preset's graph reads, each once: the core's (presets.h presetRequiredGroups)."""
+    return [dict(g) for g in groomlab_core.preset_required_groups(json.dumps(data))]
 
 
 def draw_group(name):

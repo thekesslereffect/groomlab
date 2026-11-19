@@ -174,6 +174,13 @@ std::string resolveGroomPath(const GroomFile& file, const std::string& stored, c
 // when given (where the groom was saved to since), the folder the file was read from, then its
 // search paths; empty ones and repeats left out.
 std::vector<std::string> groomFileFolders(const GroomFile& file, const std::string& first = {});
+// The painted maps into the data a groom file saves, every host's save (the app's, the Blender
+// helper's): the catalog (the guide layers' entries of `fileCatalog`, the maps as read, then the
+// scalp maps as they are now) and the vertex maps as the scalps' color sets, a removed map's color
+// set gone with it (a color set that was never a map stays: the graph may read it). With other
+// scalps (data.scalps, scalp_pieces.h) the maps are per vertex of the scalps joined: each scalp
+// keeps its own share.
+void storeScalpMaps(GroomData& data, const ScalpMaps& maps, const MapCatalog& fileCatalog);
 // The "simCaches" object alone as text, and back (Maya keeps it in a groom's simCaches attribute,
 // paths relative to the scene): relative paths join `baseDir` (empty: kept as they are). Blank
 // text is no bakes; throws GroomFileError for text that is not such an object.

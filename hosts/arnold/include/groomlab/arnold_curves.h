@@ -266,13 +266,7 @@ inline void setStrandData(AtNode* curves, const ExportView& view, const ScalpMes
         auto* n = static_cast<AtRGB*>(AiArrayMap(normals));
         const VaneNormals vanes(s);
         for (uint32_t i = 0; i < strandCount; ++i) {
-            Vec3f up{0.0f, 1.0f, 0.0f};
-            if (vanes.at(i, &up)) {
-            } else if (scalp && i < s.roots().size() && scalp->contains(s.roots()[i])) {
-                up = scalp->normal(s.roots()[i]);
-            } else if (s.strandPointCount(i) >= 2) {
-                up = (s.strandPoints(i)[1] - s.strandPoints(i)[0]).normalized();
-            }
+            const Vec3f up = iridescenceRootNormal(s, i, scalp, vanes);  // every host's (color_patterns.h)
             n[i] = AtRGB(up.x, up.y, up.z);
         }
         AiArrayUnmap(normals);

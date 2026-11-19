@@ -73,6 +73,14 @@ void insertOnLink(GraphEdit& edit, const std::string& src, const std::string& ds
 // and a row below the Guides node. GraphError when no Guides node feeds an Interpolate. Returns the
 // node's name.
 // (After a DriveGuides or GuideCache node posing the guides, when the Guides node feeds one.)
+// A Part node so drawn parts open the hair (every host's part tools: Maya's add_part_node, the
+// Blender add-on's and the app's Part brush): the graph's first Part node, or with none one with
+// `paramsJson` over its defaults after `after` ("": the first Interpolate, else Flow, else Bend,
+// else Scatter). Returns its name; `made` says whether it is new. GraphError for a graph with no
+// strands to part.
+std::string insertPart(GraphEdit& edit, const std::string& paramsJson = {}, const std::string& after = {},
+                       std::optional<double> groomSize = std::nullopt, bool* made = nullptr);
+
 // Add > Wind / Jiggle (every host's): a node of `type` (Wind, Jiggle) with `paramsJson` over its
 // spec's defaults, just before the output but before the Collide and Cards nodes ending its chain
 // (motionAnchor), so the strands collide where they moved to and the cards (every export and render)

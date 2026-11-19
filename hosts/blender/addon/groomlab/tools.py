@@ -371,6 +371,17 @@ def pick(context, tool):
         if current_map(scene) is None:
             status(scene, "Make a map to paint (New Map).")
     session(scalp, scene)
+    if tool == "part":
+        # Drawn parts open the hair: a Part node when the graph has none (Maya's draw_part_tool,
+        # every host's: graph_inserts.h insertPart).
+        try:
+            from . import pipeline
+            g = pipeline.GraphEdits(scalp)
+            if not g.of_type("Part"):  # (none there: one edit, no empty step otherwise)
+                g.edit(op="insert_part")
+                g.finish()
+        except HelperError:
+            pass  # (a graph with nothing to part: the brush still draws)
     r = push(scalp, scene)
     status(scene, "")
     from . import display

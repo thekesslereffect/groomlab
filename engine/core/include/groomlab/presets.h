@@ -198,6 +198,10 @@ std::vector<std::string> presetParamProblems(const std::string& graphJson);
 // The scalp size a preset is made on and fitted to: the largest extent of the mesh's bounding
 // box; nullopt for a mesh without points.
 std::optional<double> presetScalpSize(const ScalpMesh& scalp);
+// The first-groom card's look step, every host's: the graph has a node of one of `lookTypes`
+// (palette.json starter lookTypes) beyond the default graph's own (its Noise and HairColor are no
+// look of the groom's).
+bool starterLookGiven(const std::string& graphJson, const std::vector<std::string>& lookTypes);
 // The size a new node's defaults are fitted to on a groom (every host's Add menu and inserts):
 // presetScalpSize at the size the params are at, the groom's 1x when it is scaled with its scalp
 // (`groomScale`: GroomSession::groomScale). None without a scalp.

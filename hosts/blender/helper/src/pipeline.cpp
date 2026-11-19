@@ -147,20 +147,8 @@ MeshOut cardsMesh(const CardMesh& cards, const std::string& key) {
     std::vector<float>& tint = m.colors["groomLabTint"];
     // The unique layout: as the bake laid it out, else laid out again (cards that carry their stations).
     const std::size_t n = cards.positions.size();
-    std::vector<float> worldU = cards.worldU, worldV = cards.worldV;
-    if (worldU.size() != n || worldV.size() != n) {
-        const bool rebuildable = !cards.cards.empty() && std::all_of(cards.cards.begin(), cards.cards.end(), [](const CardMesh::Card& c) {
-            return c.stations >= 2 && c.center.size() == static_cast<std::size_t>(c.stations) &&
-                   c.width.size() == static_cast<std::size_t>(c.stations);
-        });
-        worldU.clear();
-        worldV.clear();
-        if (rebuildable) {
-            CardMesh unique = cards;
-            layoutCardsUnique(unique, unique.padding);
-            if (unique.u.size() == n && unique.v.size() == n) worldU = std::move(unique.u), worldV = std::move(unique.v);
-        }
-    }
+    std::vector<float> worldU, worldV;
+    cardsUniqueUVs(cards, worldU, worldV);  // every host's (cards.h)
     std::vector<float>* aoWorld = worldU.empty() ? nullptr : &m.uvSets["aoWorld"];
     for (const std::uint32_t v : cards.quads) {
         m.faceIndices.push_back(static_cast<std::int32_t>(v));
@@ -645,15 +633,14 @@ json exportUnityFeathers(Session& s, const json& args) {
     if (most < 0.0) fail("bad_request", "maxStrandsPerGroup must be 0 (no limit) or more");
     e.maxStrandsPerGroup = static_cast<std::size_t>(most);
     if (args.contains("shafts") && !args["shafts"].is_null()) e.shafts = optBool(args, "shafts", true);
-    double barbDensity = 1.0;
     if (!lod.empty()) {
-        static const std::map<std::string, double> kLods = {{"high", 1.0}, {"mid", 0.5}, {"low", 0.25}};
-        const auto it = kLods.find(lod);
-        if (it == kLods.end()) fail("bad_request", "lod is high, mid or low");
-        barbDensity = it->second;
-        e.barbDensity = static_cast<float>(barbDensity);
-        e.barbWidthScale = static_cast<float>(1.0 / std::sqrt(barbDensity));
+        try {
+            setBarbLod(e, lod);  // every host's barb LOD table (engine_export.h)
+        } catch (const std::invalid_argument& ex) {
+            fail("bad_request", ex.what());
+        }
     }
+    const double barbDensity = e.barbDensity;
     const std::string abc = outFile(folder, name + "_strands.abc");
     ViewRequest request;
     request.density = static_cast<float>(optNumber(args, "density", 1.0));
@@ -1150,7 +1137,16 @@ json setScalps(Session& s, const json& args, BlockReader& blocks) {
         }
         scalps.emplace_back(name, meshEntry(m, existing, s.space, blocks, "scalp " + name));
     }
+    // The painted vertex maps follow the scalps joining or leaving (every host's: scalp_maps.h).
+    auto countsOf = [&](const NamedScalps& list) {
+        ScalpCounts counts{{kMainScalpName, s.groom->rawScalp() ? s.groom->rawScalp()->pointCount() : 0}};
+        for (const auto& [n, mesh] : list) counts.emplace_back(n, mesh ? mesh->pointCount() : 0);
+        return counts;
+    };
+    ScalpMaps maps = s.groom->scalpMaps();
+    const bool refit = refitVertexMaps(maps, countsOf(now), countsOf(scalps));
     s.groom->setScalps(std::move(scalps));
+    if (refit) s.groom->setScalpMaps(std::move(maps));
     return meshesJson(s);
 }
 
@@ -1782,33 +1778,15 @@ json driverCommand(Session& s, const std::string& cmd, const json& args) {
     if (cmd == "attach_guides") {
         const std::uint64_t driver = static_cast<std::uint64_t>(optNumber(args, "driver", -1.0));
         const std::vector<std::uint64_t> guides = idList(args, "guides");
-        return changeAttachments(s, [&](DriverBind& bind) {
-            for (const std::uint64_t g : guides) {
-                std::vector<std::uint64_t>& ids = bind.attached[g];
-                if (std::find(ids.begin(), ids.end(), driver) == ids.end()) ids.push_back(driver);
-            }
-        });
+        return changeAttachments(s, [&](DriverBind& bind) { bind.attachGuides(guides, driver); });  // every host's (drive_guides.h)
     }
     if (cmd == "detach_guides") {
         const std::vector<std::uint64_t> guides = idList(args, "guides");
         const bool one = args.contains("driver") && args["driver"].is_number_integer();
         const std::uint64_t driver = one ? args["driver"].get<std::uint64_t>() : 0;
-        int count = 0;
-        json r = changeAttachments(s, [&](DriverBind& bind) {
-            for (const std::uint64_t g : guides) {
-                const auto it = bind.attached.find(g);
-                if (it == bind.attached.end()) continue;
-                if (one) {
-                    auto& ids = it->second;
-                    const auto at = std::find(ids.begin(), ids.end(), driver);
-                    if (at == ids.end()) continue;
-                    ids.erase(at);
-                    if (ids.empty()) bind.attached.erase(it);
-                } else {
-                    bind.attached.erase(it);
-                }
-                ++count;
-            }
+        std::size_t count = 0;
+        json r = changeAttachments(s, [&](DriverBind& bind) {  // every host's (drive_guides.h)
+            count = bind.detachGuides(guides, one ? std::optional<std::uint64_t>(driver) : std::nullopt);
         });
         r["detached"] = count;
         return r;

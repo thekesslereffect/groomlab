@@ -372,6 +372,11 @@ std::vector<CardNodeSummary> summarizeCardNodes(const CardMesh& mesh, const Stra
 // builds the vertices, normals, UVs and quads. Rebuilds from scratch.
 void layoutCards(CardMesh& mesh, float padding);
 // Gives every card its own cell (no shared variations) and rebuilds its vertices and UVs.
+// The cards' second, unique UV set (AO_world's: every card its own non-overlapping island), every
+// host's card mesh (Maya's, the Blender helper's, the FBX and glTF writers): the bake's worldU/V,
+// else the cards laid out again when every card carries its stations (layoutCardsUnique). False,
+// `u` and `v` empty, when neither: a mesh made by hand keeps its one atlas.
+bool cardsUniqueUVs(const CardMesh& cards, std::vector<float>& u, std::vector<float>& v);
 void layoutCardsUnique(CardMesh& mesh, float padding);
 
 // makeCards + layoutCards.

@@ -3,6 +3,7 @@
 
 #include "reference_window.h"
 #include "card_atlas_window.h"
+#include "groomlab/presets.h"
 #include "groomlab/asset_files.h"
 #include "transfer_window.h"
 #include "main_window_internal.h"
@@ -955,20 +956,12 @@ void MainWindow::refreshStarter() {
         // past its first steps: the card is for one started on a mesh here (untitled).
         const ViewResult& view = document_->lastView();
         if (!guides && !document_->path().empty() && view.strands && view.strands->strandCount() > 0) guides = true;
-        const ui::json& types = ui::Definitions::shipped().get("palette/starter/lookTypes");
-        // A new groom's own graph has look nodes already: only one added since counts (a groom
-        // from a file counts what it has).
-        if (starterDocument_ != document_.get()) {
-            starterDocument_ = document_.get();
-            starterBase_.clear();
-            if (document_->path().empty()) {
-                for (const GroomDocument::NodeInfo& n : document_->nodes()) starterBase_.insert(n.name);
-            }
+        // A look node of the groom's own: one beyond the default graph's (every host's: presets.h).
+        std::vector<std::string> types;
+        for (const ui::json& t : ui::Definitions::shipped().get("palette/starter/lookTypes")) {
+            if (t.is_string()) types.push_back(t.get<std::string>());
         }
-        for (const GroomDocument::NodeInfo& n : document_->nodes()) {
-            if (starterBase_.count(n.name)) continue;
-            if (std::find(types.begin(), types.end(), n.type) != types.end()) look = true;
-        }
+        look = starterLookGiven(document_->graphJson(), types);
     }
     host_->setStarterProgress(guides, look);
 }

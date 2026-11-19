@@ -24,6 +24,7 @@ none, and binds the drivers at the bind frame (the attachments are kept when bin
 
 import json
 
+import groomlab_core
 from maya import cmds
 
 from groomlab.base import undoable, _shape_of
@@ -134,15 +135,11 @@ def _attach(groom, guides_by_driver, frame):
     """Connect the drivers ({driver curve: guide IDs}), record the attachments and bind once."""
     add_drivers(groom, list(guides_by_driver))
     index_of = dict((d["curve"], d["index"]) for d in driver_curves(groom))
+    text = cmds.getAttr(groom + ".driverBind") or ""
+    for driver, ids in guides_by_driver.items():  # every host's (drive_guides.h attachGuides)
+        text = groomlab_core.driver_bind_attach(text, [int(g) for g in ids], int(index_of[_long(_shape_of(driver, "nurbsCurve"))]))
+    cmds.setAttr(groom + ".driverBind", text, type="string")
     bind = _bind(groom)
-    attached = bind.setdefault("attached", {})
-    for driver, ids in guides_by_driver.items():
-        index = index_of[_long(_shape_of(driver, "nurbsCurve"))]
-        for g in ids:
-            drivers = attached.setdefault(str(g), [])
-            if index not in drivers:
-                drivers.append(index)
-    _store(groom, bind)
     bind_drivers(groom, frame=bind.get("frame", 0) if frame is None else frame)
 
 
@@ -224,29 +221,18 @@ def detach_guides(groom, guides=None, group=None, driver=None):
     """Detach guides (`guides`, else `group`'s, else the selected ones) from `driver`, or from every
     driver: they stay as groomed again. Returns how many guides were detached."""
     ids = _guide_targets(groom, guides, group)
-    bind = _bind(groom)
-    attached = bind.get("attached", {})
     index = None
     if driver is not None:
         shape = _long(_shape_of(driver, "nurbsCurve"))
         index = next((d["index"] for d in driver_curves(groom) if d["curve"] == shape), None)
-    count = 0
-    for g in ids:
-        drivers = attached.get(str(g))
-        if not drivers:
-            continue
         if index is None:
-            del attached[str(g)]
-        elif index in drivers:
-            drivers.remove(index)
-            if not drivers:
-                del attached[str(g)]
-        else:
-            continue
-        count += 1
-    if not attached:
-        bind.pop("attached", None)
-    _store(groom, bind)
+            return 0  # not one of the groom's drivers: nothing is attached to it
+    text = cmds.getAttr(groom + ".driverBind") or ""
+    if not text:
+        return 0
+    # Every host's (drive_guides.h detachGuides).
+    text, count = groomlab_core.driver_bind_detach(text, [int(g) for g in ids], None if index is None else int(index))
+    cmds.setAttr(groom + ".driverBind", text, type="string")
     return count
 
 

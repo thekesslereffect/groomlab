@@ -32,6 +32,10 @@
 #include "groomlab/operators.h"
 #include "groomlab/groom_session.h"
 #include "groomlab/scales.h"
+#include "groomlab/drive_guides.h"
+#include "groomlab/guide_hierarchy.h"
+#include "groomlab/scalp_maps.h"
+#include "groomlab/scalp_paint.h"
 
 namespace groomlab {
 namespace {
@@ -729,6 +733,65 @@ TEST(GraphInserts, RemovingAScalpOrColliderTakesItsNodesBackOut) {
     bool made = true;
     EXPECT_EQ(edit.nodeType(insertCards(edit, {}, std::nullopt, &made)), "Cards");
     EXPECT_FALSE(made) << "one there: kept";
+}
+
+TEST(GraphInserts, PartsOpenTheHairAndTheStarterCountsTheGroomsOwnLook) {
+    // insertPart: every host's part tools give the graph a Part node, one only.
+    GraphEdit edit(defaultGraphJson());
+    bool made = false;
+    const std::string part = insertPart(edit, R"({"width": 0.2})", {}, std::nullopt, &made);
+    EXPECT_TRUE(made);
+    EXPECT_EQ(edit.nodeType(part), "Part");
+    EXPECT_EQ(insertPart(edit, {}, {}, std::nullopt, &made), part);
+    EXPECT_FALSE(made) << "one there: kept";
+    EXPECT_NO_THROW(loadGraphJson(edit.toJson()));
+    // starterLookGiven: the default graph's own look nodes are no look of the groom's.
+    const std::vector<std::string> looks = {"Clump", "Noise", "Curl", "HairColor"};
+    EXPECT_FALSE(starterLookGiven(defaultGraphJson(), looks));
+    GraphEdit curled(defaultGraphJson());
+    curled.addNode("Curl");
+    EXPECT_TRUE(starterLookGiven(curled.toJson(), looks));
+}
+
+TEST(GuideHierarchy, EveryHostsGuideEditsAlike) {
+    // childGroupFor: Generate Children adds to the group's own child group, else a new one.
+    GuideHierarchy h;
+    const GroupId primary = h.addGroup("primary");
+    EXPECT_EQ(h.childGroupFor(primary), "primary_children");
+    h.addGroup("primary_children", primary);
+    EXPECT_EQ(h.childGroupFor(primary), "primary_children") << "its own child group, not primary_children2";
+    // DriverBind attach and detach: a driver not attached detaches nothing.
+    DriverBind bind;
+    bind.attachGuides({1, 2}, 7);
+    bind.attachGuides({1}, 8);
+    EXPECT_EQ(bind.detachGuides({1, 2}, std::uint64_t{9}), 0u);
+    EXPECT_EQ(bind.detachGuides({1}, std::uint64_t{7}), 1u);
+    EXPECT_EQ(bind.attached.at(1), (std::vector<std::uint64_t>{8}));
+    EXPECT_EQ(bind.detachGuides({1, 2}), 2u);
+    EXPECT_TRUE(bind.attached.empty());
+}
+
+TEST(ScalpMaps, VertexMapsFollowTheScalpsJoiningOrLeaving) {
+    // refitVertexMaps: Add / Remove Scalp in every host; a kept scalp keeps its values.
+    ScalpMaps maps;
+    ScalpMapEntry gray;
+    gray.kind = "vertices";
+    gray.values = {1, 2, 3, 4, 5};  // the groom's own 3 vertices, then a patch's 2
+    maps.maps["dens"] = gray;
+    ScalpMapEntry color;
+    color.kind = "vertices";
+    color.channels = kColorMap;
+    color.values.assign(5 * 4, 0.5f);
+    maps.maps["tint"] = color;
+    const ScalpCounts before{{"scalp", 3}, {"patch", 2}};
+    EXPECT_TRUE(refitVertexMaps(maps, before, {{"scalp", 3}, {"patch", 2}, {"ear", 1}}));
+    EXPECT_EQ(maps.maps["dens"].values, (std::vector<float>{1, 2, 3, 4, 5, 0}));
+    EXPECT_EQ(std::vector<float>(maps.maps["tint"].values.end() - 4, maps.maps["tint"].values.end()), (std::vector<float>{0, 0, 0, 1}));
+    EXPECT_TRUE(refitVertexMaps(maps, {{"scalp", 3}, {"patch", 2}, {"ear", 1}}, {{"scalp", 3}, {"ear", 1}}));
+    EXPECT_EQ(maps.maps["dens"].values, (std::vector<float>{1, 2, 3, 0}));
+    EXPECT_EQ(mapKindOf(maps, nullptr, "dens"), "vertices");
+    EXPECT_EQ(mapChannelsOf(maps, nullptr, "tint"), kColorMap);
+    EXPECT_EQ(mapChannelsOf(maps, nullptr, "nope"), 0);
 }
 
 TEST(GraphInserts, AGuideGroupsReadersFollowItsRename) {

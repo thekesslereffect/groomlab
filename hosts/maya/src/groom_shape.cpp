@@ -2409,16 +2409,11 @@ MStatus GroomShape::computeCards(MDataBlock& data, Lane& lane) {
                 mesh.assignUVs(counts, connects);  // UV ids follow the vertex ids
                 // A second, unique atlas for AO_world: every card owns a non-overlapping shell,
                 // even when map1 deliberately shares a small set of texture variations.
-                CardMesh unique;
-                const std::vector<float>* worldU = &cards->worldU;
-                const std::vector<float>* worldV = &cards->worldV;
-                if (worldU->size() != cards->positions.size() || worldV->size() != cards->positions.size()) {
-                    unique = *cards;
-                    layoutCardsUnique(unique, unique.padding);
-                    worldU = &unique.u;
-                    worldV = &unique.v;
-                }
-                if (worldU->size() == cards->positions.size() && worldV->size() == cards->positions.size()) {
+                // (Every host's: cards.h cardsUniqueUVs, laid out again only when every card has its stations.)
+                std::vector<float> uniqueU, uniqueV;
+                const std::vector<float>* worldU = &uniqueU;
+                const std::vector<float>* worldV = &uniqueV;
+                if (cardsUniqueUVs(*cards, uniqueU, uniqueV)) {
                     MString worldSet("aoWorld");
                     worldSet = mesh.createUVSetDataMesh(worldSet);
                     MFloatArray worldUs, worldVs;

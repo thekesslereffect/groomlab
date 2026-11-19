@@ -479,26 +479,12 @@ int addCardsToGltf(GltfDocument& doc, const CardMesh& cards, const CardTextures&
     if (settings.tangents) p.tangents = meshTangents(p.positions, p.normals, mayaUVs, p.indices);
     if (cards.tints.size() == n) p.tints = cards.tints;  // each card's own color over its shared texture's
     if (settings.rootToTip) {
-        const std::vector<float>* worldU = &cards.worldU;
-        const std::vector<float>* worldV = &cards.worldV;
-        CardMesh unique;
-        // Laying the cards out again needs each card's stations (a mesh built by buildCards has
-        // them); one made by hand or without them keeps the per-card grid: across 0..1 by column,
-        // root (0) to tip (1).
-        const bool rebuildable = std::all_of(cards.cards.begin(), cards.cards.end(), [](const CardMesh::Card& c) {
-            return c.stations >= 2 && c.center.size() == static_cast<std::size_t>(c.stations) &&
-                   c.width.size() == static_cast<std::size_t>(c.stations);
-        });
-        if (worldU->size() != n || worldV->size() != n) {
-            if (rebuildable) {
-                unique = cards;
-                layoutCardsUnique(unique, unique.padding);
-                worldU = &unique.u;
-                worldV = &unique.v;
-            } else {
-                worldU = worldV = nullptr;
-            }
-        }
+        // The unique layout (cards.h cardsUniqueUVs, every host's); one made by hand without
+        // stations keeps the per-card grid: across 0..1 by column, root (0) to tip (1).
+        std::vector<float> uniqueU, uniqueV;
+        const bool unique = cardsUniqueUVs(cards, uniqueU, uniqueV);
+        const std::vector<float>* worldU = unique ? &uniqueU : nullptr;
+        const std::vector<float>* worldV = unique ? &uniqueV : nullptr;
         p.uv1.assign(n, {0.0f, 0.0f});
         if (worldU && worldU->size() == n && worldV->size() == n) {
             for (std::size_t i = 0; i < n; ++i) p.uv1[i] = {(*worldU)[i], 1.0f - (*worldV)[i]};

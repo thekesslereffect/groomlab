@@ -69,18 +69,11 @@ bool hasLayer(const GuideHierarchy& h, const std::string& name) {
     return std::find(names.begin(), names.end(), name) != names.end();
 }
 
-std::string kindOf(const ScalpMaps& maps, const GuideHierarchy& h, const std::string& name) {
-    const auto it = maps.maps.find(name);
-    if (it != maps.maps.end()) return it->second.kind;
-    return hasLayer(h, name) ? "guides" : "";
-}
+// (Every host's: scalp_maps.h mapKindOf / mapChannelsOf.)
+std::string kindOf(const ScalpMaps& maps, const GuideHierarchy& h, const std::string& name) { return mapKindOf(maps, &h, name); }
 
 // 1 (gray) or 4 (color); guide layers are gray; 0 for no map.
-int channelsOf(const ScalpMaps& maps, const GuideHierarchy& h, const std::string& name) {
-    const auto it = maps.maps.find(name);
-    if (it != maps.maps.end()) return it->second.channels == kColorMap ? kColorMap : kGrayMap;
-    return hasLayer(h, name) ? kGrayMap : 0;
-}
+int channelsOf(const ScalpMaps& maps, const GuideHierarchy& h, const std::string& name) { return mapChannelsOf(maps, &h, name); }
 
 }  // namespace
 

@@ -694,17 +694,6 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
             return MS::kSuccess;
         }
     
-        // The root group new primaries go into (-group, default "primary"), made when missing.
-        auto rootGroup = [&](GroupId* gid) -> MStatus {
-            const MString groupName = flagString(db, kGroup[0], "primary");
-            *gid = h->findGroup(groupName.asChar());
-            if (*gid == kNoGroup) {
-                *gid = h->addGroup(groupName.asChar());
-            } else if (h->groupDepth(*gid) != 0) {
-                return fail(kName, groupName + " is not a root group");
-            }
-            return MS::kSuccess;
-        };
         auto tubeFlags = [&]() {
             const double rootRadius = flagDouble(db, kTubeRadius[0], 0.1);
             TubeProfile tube;
@@ -715,17 +704,19 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
         // Edits.
         try {
             if (db.isFlagSet(kFromCurves[0])) {
-                GroupId gid = kNoGroup;
-                if (!rootGroup(&gid)) return MS::kFailure;
-                const TubeProfile tube = tubeFlags();
-
-                MStringArray added;
+                // The curves as new primaries of the root group, at its own segments: every host's
+                // (guide_hierarchy.h addBakedGuides).
+                GuideSet curves;  // (IDs kNoGuide: each guide a new ID, never one a guide had before)
                 for (const MString& curve : multiStrings(db, kFromCurves[0])) {
                     MObject data;
                     if (!curveWorldData(curve, data)) return fail(kName, curve + " is not a nurbsCurve");
                     std::vector<Vec3f> pts = sampleCurveData(data);
                     if (pts.size() < 2) return fail(kName, curve + " is too short");
-                    added.append(std::to_string(h->addGuide(gid, h->withGroupSegments(gid, std::move(pts)), tube)).c_str());
+                    curves.add(kNoGuide, std::move(pts));
+                }
+                MStringArray added;
+                for (const GuideId id : h->addBakedGuides(flagString(db, kGroup[0], "primary").asChar(), curves, tubeFlags())) {
+                    added.append(std::to_string(id).c_str());
                 }
                 setResult(added);
             } else if (db.isFlagSet(kFromNode[0])) {
@@ -772,7 +763,7 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                 ChildGenerationParams p;
                 int count = static_cast<int>(p.count);
                 if (db.isFlagSet(kCount[0])) db.getFlagArgument(kCount[0], 0, count);
-                if (count < 1 || count > 1000) return fail(kName, "-count must be between 1 and 1000");
+                if (count < 1 || count > static_cast<int>(kMaxChildrenPerGuide)) return fail(kName, "-count must be between 1 and 1000");
                 p.count = static_cast<std::size_t>(count);
                 p.rootSpread = static_cast<float>(flagDouble(db, kRootSpread[0], p.rootSpread));
                 p.tipSpread = static_cast<float>(flagDouble(db, kTipSpread[0], p.tipSpread));
@@ -784,8 +775,8 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                 p.seed = static_cast<std::uint64_t>(seed);
                 if (db.isFlagSet(kSplit[0])) db.getFlagArgument(kSplit[0], 0, p.split);
     
-                const MString childName = db.isFlagSet(kNameFlag[0]) ? flagString(db, kNameFlag[0], "")
-                                                                     : MString(h->freeGroupName((parentName + "_children").asChar()).c_str());
+                // (Its existing child group, else a new one: every host's, guide_hierarchy.h childGroupFor.)
+                const MString childName = db.isFlagSet(kNameFlag[0]) ? flagString(db, kNameFlag[0], "") : MString(h->childGroupFor(parent).c_str());
                 const GroupId child = h->generateChildren(parent, childName.asChar(), p, restricted ? &only : nullptr);
                 setResult(static_cast<int>(h->guidesInGroup(child).size()));
             } else if (db.isFlagSet(kRemoveGroup[0])) {
@@ -1061,25 +1052,16 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
             } else if (db.isFlagSet(kResample[0])) {
                 int segments = 0;
                 db.getFlagArgument(kResample[0], 0, segments);
-                if (segments < 1 || segments > 256) return fail(kName, "-resample takes 1 to 256 segments");
+                if (segments < 1 || segments > kMaxGuideSegments) return fail(kName, "-resample takes 1 to 256 segments");
                 const std::vector<GuideId> ids = resampleTargets(*h);
                 if (ids.empty()) return fail(kName, "the groom has no guides to resample");
                 // A whole group, a level or every guide: their groups' new guides get these segments too.
                 const bool groupWide = resampleGroupWide();
-                std::vector<GroupId> groups;
-                if (db.isFlagSet(kGroup[0])) {
-                    groups.push_back(h->findGroup(flagString(db, kGroup[0], "").asChar()));
-                } else if (groupWide) {
-                    int level = -1;
-                    if (db.isFlagSet(kLevel[0])) db.getFlagArgument(kLevel[0], 0, level);
-                    for (const GuideGroup& g : h->groups()) {
-                        if (level < 0 || h->groupDepth(g.id) == level) groups.push_back(g.id);
-                    }
-                }
-                for (const GroupId gid : groups) {
-                    if (gid != kNoGroup) h->setGroupSegments(gid, segments);
-                }
-                setResult(static_cast<int>(h->resample(ids, segments, groupWide)));  // frozen guides kept
+                const GroupId only = db.isFlagSet(kGroup[0]) ? h->findGroup(flagString(db, kGroup[0], "").asChar()) : kNoGroup;
+                int level = -1;
+                if (db.isFlagSet(kLevel[0])) db.getFlagArgument(kLevel[0], 0, level);
+                // Every host's (guide_hierarchy.h resampleGuides), frozen guides kept.
+                setResult(static_cast<int>(h->resampleGuides(ids, segments, groupWide, only, level)));
             } else if (db.isFlagSet(kSetGroupSegments[0])) {
                 int segments = 0;
                 db.getFlagArgument(kSetGroupSegments[0], 0, segments);

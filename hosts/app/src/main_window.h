@@ -956,8 +956,6 @@ private:
     QAction* export_ = nullptr;
     QWidget* menuCorner_ = nullptr;
     Segmented* modeSwitch_ = nullptr;
-    const GroomDocument* starterDocument_ = nullptr;  // the groom the first-groom steps count for
-    std::set<std::string> starterBase_;              // ... a new groom's own nodes (not a look given)
     QToolButton* cornerRender_ = nullptr;
     QToolButton* cornerExport_ = nullptr;
     QAction* saveImage_ = nullptr;
