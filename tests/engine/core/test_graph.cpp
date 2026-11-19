@@ -1644,7 +1644,7 @@ TEST(GraphEdit, ClumpColorsNameTheirClumpAndLightIt) {
 
 TEST(GraphEdit, ShowTubesIsABraidNodesAndFollowsIt) {
     // Show Tubes (every host's button on a Braid node): the nodes showing their tubes are a display
-    // setting, names one a line; offered on Braid nodes alone, toggled per node (several may show),
+    // setting, names one a line; offered on Braid nodes (and nodes giving guides: Session.ShowTubesOnANodeGivingGuides...), toggled per node (several may show),
     // following a rename, dropped with the node.
     const nlohmann::json g = {
         {"version", 1},
@@ -1661,7 +1661,7 @@ TEST(GraphEdit, ShowTubesIsABraidNodesAndFollowsIt) {
     GraphEdit edit(g.dump());
     EXPECT_TRUE(edit.braidTubesOffered("plait"));
     EXPECT_TRUE(edit.braidTubesOffered("side braid, left"));
-    EXPECT_FALSE(edit.braidTubesOffered("c")) << "not a Braid";
+    EXPECT_FALSE(edit.braidTubesOffered("c")) << "not a Braid (a Clump of strands)";
     EXPECT_FALSE(edit.braidTubesOffered("nope"));
     std::string shown;
     EXPECT_FALSE(edit.braidTubesShown("plait", shown));

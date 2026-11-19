@@ -1047,7 +1047,9 @@ class GraphEditorTest(unittest.TestCase):
             gx, gy = gt.get_location(node)
             self.assertAlmostEqual(x, ox + gx * g.k, 3)
             self.assertAlmostEqual(y + h, oy + gy * g.k, 3)  # (the location is the card's top left)
-            self.assertAlmostEqual(w, (canvas.NODE_W + (canvas.CLUMP_W if node.gl_type == "Clump" else 0.0)) * g.k, 3)
+            # (A button wider: a Clump's Clump Colors, a Braid's or a guide node's Show Tubes, as the app's.)
+            own = node.gl_type == "Clump" or gt.shows_tubes(node)
+            self.assertAlmostEqual(w, (canvas.NODE_W + (canvas.CLUMP_W if own else 0.0)) * g.k, 3)
             rows = max(len(box.inputs), len(box.outputs), 1) + (1 if box.type_row else 0)
             self.assertAlmostEqual(h, (canvas.HEADER + 2 * canvas.PAD + rows * canvas.ROW) * g.k, 3)
             for i, (_s, (px, py)) in enumerate(box.inputs):

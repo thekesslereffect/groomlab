@@ -990,7 +990,17 @@ bool GraphEdit::clumpColored(const std::string& node, const std::string& source)
 
 bool GraphEdit::braidTubesOffered(const std::string& node) const {
     const nlohmann::json* n = impl_->find(node);
-    return n && n->value("type", std::string()) == "Braid";
+    if (!n) return false;
+    const std::string type = n->value("type", std::string());
+    if (type == "Braid") return true;
+    // A node giving guides (a Guides node, a Curl on them, a Sculpt): the tubes they carry. Not a
+    // Clump (fed guides): its header's own button is Clump Colors.
+    if (type == "Clump") return false;
+    try {
+        return outputType(node, "") == "Guides";
+    } catch (const std::exception&) {
+        return false;
+    }
 }
 
 bool GraphEdit::braidTubesShown(const std::string& node, const std::string& shown) const {

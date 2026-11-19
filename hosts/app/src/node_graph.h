@@ -226,7 +226,7 @@ public:
     bool clumpColored(const std::string& node) const {
         return std::find(clumpColored_.begin(), clumpColored_.end(), node) != clumpColored_.end();
     }
-    // The Braid nodes whose section tubes the viewport draws (their headers' Show Tubes buttons lit):
+    // The nodes whose tubes the viewport draws (their headers' Show Tubes buttons lit):
     // the host's to say, from its display (DisplaySettings::braidTubes).
     void setBraidTubeNodes(std::vector<std::string> nodes);
     bool braidTubesShown(const std::string& node) const {
@@ -366,6 +366,7 @@ private:
         std::vector<std::string> linkableParams;  // params the header's Expand Inputs button toggles
         std::string libraryLabel;      // a node from the node library: its label
         bool updateAvailable = false;  // the library has a newer copy of it
+        bool tubes = false;            // Show Tubes on its header (GraphEdit::braidTubesOffered)
     };
     struct Wire {
         int from = -1, to = -1;  // node indices
@@ -415,9 +416,10 @@ private:
     bool viewButtonAt(const QPointF& scene, int* node) const;
     bool clumpColorsButtonAt(const QPointF& scene, int* node) const;
     static bool clumpColorable(const Node& node) { return node.type == "Clump"; }
-    // Show Tubes: a Braid's button, where a Clump has Clump Colors (left of the other toggles).
+    // Show Tubes: a Braid's button, and a node's giving guides (their tubes), where a Clump has
+    // Clump Colors (left of the other toggles).
     bool braidTubesButtonAt(const QPointF& scene, int* node) const;
-    static bool showsTubes(const Node& node) { return node.type == "Braid"; }
+    static bool showsTubes(const Node& node) { return node.tubes; }
     // A node with a toggle of its own left of the shared ones (Clump Colors, Show Tubes).
     static bool hasOwnToggle(const Node& node) { return clumpColorable(node) || showsTubes(node); }
     bool viewable(const Node& node) const;  // a strands output: View Up to Here can show it

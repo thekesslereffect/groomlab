@@ -457,7 +457,8 @@ the next `display`):
   the nodes' params and inputs stay). The add-on shades the colors by the normals and draws it
   with the scene's depth, writing its own (`display.SOLID`). The rules (which nodes have the
   button, the toggle, a rename, a delete) are the core's, asked through the command `braid_tubes`
-  {`shown`, `toggle`?, `old`?, `new`?, `keep`?} -> {`shown`, `lit`}.
+  {`shown`, `toggle`?, `old`?, `new`?, `keep`?} -> {`shown`, `lit`, `offered`: the nodes with the
+  button (Braids, and nodes giving guides: the tubes those guides carry)}.
 - `brush`: the overlay `hover` and the strokes build: the ring (`brushRingColor`: yellow, red for
   Part and Erase, orange for Flow, green for Place and Draw, which show a 6-pixel dot), the guides
   the brush would touch (`brushHoverColor`, while hovering) and a Part or Flow stroke's path,

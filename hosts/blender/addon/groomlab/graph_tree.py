@@ -353,10 +353,10 @@ class GroomLabNodeBase(object):
     def draw_buttons(self, context, layout):
         linkable = [p["name"] for p in node_param_specs(self) if p.get("port")]
         clump = self.gl_type == "Clump"
-        braid = self.gl_type == "Braid"
+        braid = shows_tubes(self)
         if linkable or clump or braid:
             row = layout.row(align=True)
-        if braid:  # Show Tubes: this node's section tubes drawn in the viewport
+        if braid:  # Show Tubes: this node's section tubes (a Braid's) or its guides' tubes drawn in the viewport
             scalp = getattr(self.id_data, "gl_scalp", None)
             op = row.operator("groomlab.graph_braid_tubes", text="", icon="MESH_CYLINDER",
                               depress=braid_tubes_shown(scalp, self))
@@ -1813,6 +1813,35 @@ def follow_renamed(scalp, rt, old, new):
 # ---- Show Tubes: a Braid's header button (the groom's braid_tubes: the nodes whose tubes draw) -------
 
 _BRAID_TUBES = {}  # groom uid -> ((graph text, shown), the nodes lit)
+_TUBE_NODES = {}  # groom uid -> (graph text, the nodes with Show Tubes)
+
+
+def tube_nodes(scalp):
+    """The nodes with Show Tubes on their headers: Braids (their section tubes) and nodes giving
+    guides (the tubes those carry), the core's GraphEdit::braidTubesOffered through the helper, asked
+    again only when the graph changed."""
+    if scalp is None:
+        return ()
+    key = scalp.groomlab.graph_json
+    hit = _TUBE_NODES.get(scalp.groomlab.uid)
+    if hit is not None and hit[0] == key:
+        return hit[1]
+    rt = groom.runtime_if_any(scalp)
+    if rt is None or rt.session is None or not process.running():
+        return ()
+    try:
+        offered = frozenset(_call("braid_tubes", session=rt.session, shown="")["offered"])
+    except HelperError:
+        return ()
+    _TUBE_NODES[scalp.groomlab.uid] = (key, offered)
+    return offered
+
+
+def shows_tubes(node):
+    """Whether the node has Show Tubes (a Braid always; a node giving guides as tube_nodes says)."""
+    if node.gl_type == "Braid":
+        return True
+    return node.gl_name in tube_nodes(getattr(node.id_data, "gl_scalp", None))
 
 
 def braid_tubes_lit(scalp):
@@ -1840,8 +1869,8 @@ def braid_tubes_lit(scalp):
 
 
 def braid_tubes_shown(scalp, node):
-    """Whether the viewport draws this Braid's section tubes (its Show Tubes lit)."""
-    return node.gl_type == "Braid" and node.gl_name in braid_tubes_lit(scalp)
+    """Whether the viewport draws this node's tubes (its Show Tubes lit)."""
+    return node.gl_name in braid_tubes_lit(scalp)
 
 
 def toggle_braid_tubes(scalp, name):

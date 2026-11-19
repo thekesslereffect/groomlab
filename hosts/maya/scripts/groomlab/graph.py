@@ -932,9 +932,14 @@ class GraphModel(object):
         its own source, or the bare channel of grooms from before when it is the last Clump writing it)."""
         return name in self.nodes and self._query().clump_colored(name, source or "")
 
+    def braid_tubes_offered(self, name):
+        """Whether the node has Show Tubes: a Braid (its section tubes), or a node giving guides (the
+        tubes they carry; the core's GraphEdit.braid_tubes_offered)."""
+        return name in self.nodes and self._query().braid_tubes_offered(name)
+
     def braid_tubes_shown(self, name, shown):
-        """Whether a Braid node's Show Tubes is lit: a Braid named in `shown` (the groom's braidTubes:
-        names, one a line; the core's GraphEdit.braid_tubes_shown)."""
+        """Whether a node's Show Tubes is lit: a node with the button named in `shown` (the groom's
+        braidTubes: names, one a line; the core's GraphEdit.braid_tubes_shown)."""
         return name in self.nodes and self._query().braid_tubes_shown(name, shown or "")
 
     def braid_tubes_toggled(self, name, shown):
@@ -942,7 +947,7 @@ class GraphModel(object):
         return self._query().braid_tubes_toggled(name, shown or "")
 
     def braid_tubes_kept(self, shown):
-        """`shown` without the names that are no Braid node of the graph now (a node deleted)."""
+        """`shown` without the names of nodes that have no Show Tubes now (a node deleted)."""
         return self._query().braid_tubes_kept(shown or "")
 
     def upstream(self, name):

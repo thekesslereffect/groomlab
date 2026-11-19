@@ -107,6 +107,9 @@ struct BraidTubes {
         std::vector<Vec3f> centers, across, thick;
         std::size_t firstPoint = 0;  // its points in `points`: `around` a ring, ring after ring
         std::size_t firstQuad = 0;   // its quads in `quads`: `around` between two rings
+        // Its own color (linear RGB; guideTubes: its guide's), else its section's (braidSectionColor).
+        bool colored = false;
+        std::array<float, 3> color{};
     };
     int around = 0;        // points round a ring
     float perStep = 8.0f;  // rings a weave step (BraidTubeDetail: fewer when its point budget asked)
@@ -147,6 +150,17 @@ BraidTubes braidTubes(const Operator& braid, const EvalContext& ctx, const std::
 // reused; the Braid itself is not evaluated).
 BraidTubes braidTubes(Graph& graph, NodeId braid, const EvalContext& ctx = {}, int around = 12);
 BraidTubes braidTubes(Graph& graph, NodeId braid, const EvalContext& ctx, const BraidTubeDetail& detail);
+// Show Tubes on a node that gives guides (a Guides node, a Curl or a Noise on them, a Sculpt): the
+// tubes the guides carry (each guide's with a tube of two points or more, then the other levels'
+// tubes: GuideSet::levelTubes), each along its guide's shape and sections as the guide holds them
+// (tube.h TubeSpine), in a color of its guide's ID (guideTubeColor), its root its guide's. Rings
+// along a tube: one every 12 degrees of its guide's turning, 24 at least, 512 at most (a coiled
+// tube stays round); `maxPoints` (0: no limit) takes fewer rings from every tube alike, 2 at least.
+// `around` points round a ring (3 at least), on the section's outline (`pressed`: drawn as laid).
+BraidTubes guideTubes(const GuideSet& guides, int around = 16, std::size_t maxPoints = 0);
+// A guide's tube's color there (linear RGB): Clump Colors' saturation and value, its hue drawn from
+// its ID, so neighbouring locks read apart (Tonic's look) and keep their colors from view to view.
+std::array<float, 3> guideTubeColor(std::uint64_t id);
 // The points round a ring a display draws a Braid node's tubes with (BraidTubeDetail::kAround, or
 // kPressedAround for a version 2 node: its sections are pressed).
 int braidTubesAround(const Operator& braid);
@@ -167,7 +181,7 @@ std::string renamedBraidTubes(const std::string& shown, const std::string& from,
 // Colors' own hues, hashed from the number, put sections 0 and 2 both in pink).
 std::array<float, 3> braidSectionColor(int section);
 
-// The tubes of the Braid nodes shown as a host draws them: one quad mesh (open tubes, facing out)
+// The tubes of the nodes shown (Braid nodes', and those of nodes giving guides: guideTubes) as a host draws them: one quad mesh (open tubes, facing out)
 // with a normal and its section's color at each point, in the space the strands are drawn in. A
 // host triangulates at the draw call (triangles: each quad's two). An elliptical section's ring is
 // drawn round its outline, not inside it (its sides touch the outline, its corners lie 1 / cos(pi /

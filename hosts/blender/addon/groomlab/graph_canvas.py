@@ -217,7 +217,7 @@ class Graph(object):
         ins = [s for s in node.inputs if s.enabled and not s.hide]
         outs = [s for s in node.outputs if s.enabled and not s.hide]
         clump = node.gl_type == "Clump"
-        braid = node.gl_type == "Braid"
+        braid = not clump and graph_tree.shows_tubes(node)
         label = graph_tree.label_of(node.gl_type)
         type_row = node.name != label and node.name != node.gl_type and len(ins) <= 1 and len(outs) <= 1
         rows = max(len(ins), len(outs), 1) + (1 if type_row else 0)

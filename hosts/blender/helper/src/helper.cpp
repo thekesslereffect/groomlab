@@ -2037,7 +2037,8 @@ json Helper::run(const std::string& cmd, const json& args) {
         // Show Tubes (the core's rules, graph_edit.h): the Braid nodes showing their section tubes
         // (`shown`: names, one a line) after a rename (`old`, `new`: renamedBraidTubes), a click on a
         // node's button (`toggle`: GraphEdit::braidTubesToggled) and, with `keep`, without the names
-        // that are no Braid node of the graph now (braidTubesKept); and the nodes lit.
+        // that have no button now (braidTubesKept); the nodes lit, and those with the button
+        // (`offered`: Braids, and nodes giving guides: braidTubesOffered).
         Session& s = session(args);
         const GraphEdit edit(graphText(*s.groom));
         std::string shown = optString(args, "shown", "");
@@ -2048,7 +2049,11 @@ json Helper::run(const std::string& cmd, const json& args) {
         for (const std::string& name : braidTubeNames(shown)) {
             if (edit.braidTubesShown(name, shown)) lit.push_back(name);
         }
-        return {{"shown", shown}, {"lit", lit}};
+        json offered = json::array();
+        for (const std::string& name : edit.nodeNames()) {
+            if (edit.braidTubesOffered(name)) offered.push_back(name);
+        }
+        return {{"shown", shown}, {"lit", lit}, {"offered", offered}};
     }
     if (cmd == "renamed_color_source") {
         // A color source naming a renamed node follows it (renamedColorSource).

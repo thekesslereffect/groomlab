@@ -1135,7 +1135,9 @@ private:
     // params and node versions, their inputs as last evaluated, the scalp; 0: no such node with
     // strands): braidTubeMesh's key and what evaluate moves ViewVersions::braidTubes by. `nodes`:
     // each node and its inputs.
-    std::uint64_t braidTubesSource(const std::string& shown, std::vector<std::pair<const Operator*, std::vector<Value>>>* nodes) const;
+    // (`guides`: the nodes shown that give guides, their last results: their tubes, guideTubes.)
+    std::uint64_t braidTubesSource(const std::string& shown, std::vector<std::pair<const Operator*, std::vector<Value>>>* nodes,
+                                   std::vector<GuidesPtr>* guides = nullptr) const;
     std::uint64_t braidTubesShown_ = 0;  // braidTubesSource at the last evaluation
     mutable std::size_t braidTubeBuilds_ = 0;
     bool boundsStale_ = false;  // the strands or guides changed while no view wanted bounds

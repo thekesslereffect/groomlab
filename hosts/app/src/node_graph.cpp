@@ -278,10 +278,12 @@ void NodeGraphView::rebuild() {
         }
     }
     if (selectedBackdrop_ >= static_cast<int>(backdrops_.size())) selectedBackdrop_ = -1;
+    const GraphEdit edit(graph.dump());  // (which nodes have Show Tubes)
     for (const GroomDocument::NodeInfo& info : document_->nodes()) {
         Node node;
         node.name = info.name;
         node.type = info.type;
+        node.tubes = edit.braidTubesOffered(info.name);
         node.bypass = info.bypass;
         node.evaluation = info.evaluation;
         // The node's ports as it is set (its exposed params' after its own: Field, Curve or Value).
@@ -309,7 +311,8 @@ void NodeGraphView::rebuild() {
         // gets a row for it: the type never runs into the port names.
         const bool typeRow = node.type != node.name && node.inputs.size() <= 1 && node.outputs.size() <= 1;
         const std::size_t rows = std::max<std::size_t>(std::max(node.inputs.size(), node.outputs.size()), 1) + (typeRow ? 1 : 0);
-        // (A Clump a button wider: its header holds Clump Colors too; a Braid, Show Tubes.)
+        // (A Clump a button wider: its header holds Clump Colors too; a Braid or a node giving
+        // guides, Show Tubes.)
         node.size = QSizeF(kNodeWidth + (hasOwnToggle(node) ? 23.0 : 0.0), kHeader + kBodyPadding * 2 + rows * kRow);
         float x = 0.0f, y = 0.0f;
         if (document_->nodePosition(info.name, &x, &y)) {
@@ -1091,8 +1094,8 @@ void NodeGraphView::drawNode(QPainter& painter, const Node& node, bool selected)
             painter.drawEllipse(at[k], 2.6, 2.6);
         }
     }
-    // A Braid's Show Tubes toggle (a short tube: its open end and its two sides): the node's section
-    // tubes drawn in the viewport; dim until they are, then lit on a tile.
+    // Show Tubes (a short tube: its open end and its two sides): a Braid's section tubes, or the
+    // tubes of the guides a node gives, drawn in the viewport; dim until they are, then lit on a tile.
     if (showsTubes(node)) {
         const QRectF tube = braidTubesButtonRect(node);
         const bool on = braidTubesShown(node.name);

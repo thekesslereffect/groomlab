@@ -1942,8 +1942,9 @@ const ViewResult& GroomSession::evaluate(const ViewRequest& request) {
     }
     const bool strandMeshesChanged = out.versions.strandMeshes != previousStrandMeshes;
     // Show Tubes: each shown Braid's inputs evaluated though no strands were asked for, or the node
-    // viewed lies before it (cached where the evaluation above made them), and the tubes' version
-    // moved when what they are built from changed: a param of the Braid, a node before it, the scalp.
+    // viewed lies before it (cached where the evaluation above made them), a shown node giving guides
+    // itself, and the tubes' version moved when what they are built from changed: a param of the
+    // node, a node before it, the scalp.
     bool tubesChanged = false;
     {
         std::uint64_t source = 0;
@@ -1951,8 +1952,14 @@ const ViewResult& GroomSession::evaluate(const ViewRequest& request) {
             try {
                 for (const std::string& name : braidTubeNames(request.braidTubes)) {
                     const auto found = viewed->nodesByName.find(name);
-                    if (found == viewed->nodesByName.end() || viewed->graph.node(found->second).typeName() != op::kBraid) continue;
-                    if (viewed->graph.bypassedFor(found->second, ctx.viewport)) continue;
+                    if (found == viewed->nodesByName.end() || viewed->graph.bypassedFor(found->second, ctx.viewport)) continue;
+                    if (viewed->graph.node(found->second).typeName() != op::kBraid) {
+                        if (viewed->graph.node(found->second).output().type == PortType::Curves ||
+                            viewed->graph.node(found->second).output().type == PortType::Guides) {
+                            viewed->graph.evaluateOutput(found->second, 0, ctx);
+                        }
+                        continue;
+                    }
                     const std::size_t slots = viewed->graph.inputSpecs(found->second).size();
                     for (std::size_t slot = 0; slot < slots; ++slot) {
                         NodeId from = 0;
@@ -3501,7 +3508,8 @@ std::shared_ptr<const std::vector<float>> GroomSession::nodeStrandChannel(const 
 }
 
 std::uint64_t GroomSession::braidTubesSource(const std::string& shown,
-                                             std::vector<std::pair<const Operator*, std::vector<Value>>>* nodes) const {
+                                             std::vector<std::pair<const Operator*, std::vector<Value>>>* nodes,
+                                             std::vector<GuidesPtr>* guides) const {
     const GraphDocument* doc = viewDoc();
     if (!doc || shown.empty()) return 0;
     const Graph& graph = doc->graph;
@@ -3525,7 +3533,19 @@ std::uint64_t GroomSession::braidTubesSource(const std::string& shown,
         if (found == doc->nodesByName.end()) continue;
         const NodeId id = found->second;
         const Operator& op = graph.node(id);
-        if (op.typeName() != op::kBraid || graph.bypassedFor(id, lastViewContext_.viewport)) continue;
+        if (graph.bypassedFor(id, lastViewContext_.viewport)) continue;
+        if (op.typeName() != op::kBraid) {
+            // A node giving guides: the tubes its last result carries (none: nothing shown).
+            const GuidesPtr given = valueAs<GuidesPtr>(graph.cachedValue(id));
+            if (!given) continue;
+            bool tubed = false;
+            for (const Guide& g : given->guides()) tubed = tubed || g.hasTube;
+            if (!tubed && !(given->levelTubes() && !given->levelTubes()->empty())) continue;
+            key = hashCombine(hashString(key, name), identity(Value(given)));
+            ++count;
+            if (guides) guides->push_back(given);
+            continue;
+        }
         // Its inputs as the last evaluation left them, as the nodes made them (a preview's hidden
         // core strands with them: a fed braid grows by those).
         std::vector<Value> inputs(op.inputs().size());
@@ -3547,8 +3567,9 @@ std::uint64_t GroomSession::braidTubesSource(const std::string& shown,
 
 std::shared_ptr<const BraidTubeMesh> GroomSession::braidTubeMesh(const std::string& shown, int around) const {
     std::vector<std::pair<const Operator*, std::vector<Value>>> nodes;
-    std::uint64_t key = braidTubesSource(shown, &nodes);
-    if (nodes.empty()) return nullptr;
+    std::vector<GuidesPtr> guides;
+    std::uint64_t key = braidTubesSource(shown, &nodes, &guides);
+    if (nodes.empty() && guides.empty()) return nullptr;
     key = hashCombine(key, static_cast<std::uint64_t>(std::max(around, 3)));
     if (key == 0) key = 1;
     if (braidTubesKey_ == key) return braidTubes_;  // (null: these nodes braid nothing)
@@ -3562,7 +3583,7 @@ std::shared_ptr<const BraidTubeMesh> GroomSession::braidTubeMesh(const std::stri
     ctx.keepPreviewCore = true;
     auto mesh = std::make_shared<BraidTubeMesh>();
     BraidTubeDetail detail;
-    detail.maxPoints = kBraidTubePoints / nodes.size();
+    detail.maxPoints = kBraidTubePoints / (nodes.size() + guides.size());
     const ProfileScope profile("session.braidTubes");
     for (const auto& node : nodes) {
         detail.around = around > 0 ? around : braidTubesAround(*node.first);
@@ -3583,6 +3604,20 @@ std::shared_ptr<const BraidTubeMesh> GroomSession::braidTubeMesh(const std::stri
                 for (Vec3f& c : tube.centers) c = motion.point(c);
                 for (Vec3f& v : tube.across) v = motion.direction(v);
                 for (Vec3f& v : tube.thick) v = motion.direction(v);
+            }
+        }
+        appendBraidTubes(*mesh, std::move(tubes));
+    }
+    // The guides' tubes, carried with their guides' roots as the strands are.
+    for (const GuidesPtr& given : guides) {
+        BraidTubes tubes = guideTubes(*given, around > 0 ? around : 16, detail.maxPoints);
+        if (carried) {
+            for (std::size_t t = 0; t < tubes.tubes.size(); ++t) {
+                const BraidTubes::Tube& tube = tubes.tubes[t];
+                const RootMotion motion = rootMotion(*followRest_, *scalp_, tube.root);
+                if (motion.still()) continue;
+                const std::size_t end = t + 1 < tubes.tubes.size() ? tubes.tubes[t + 1].firstPoint : tubes.points.size();
+                for (std::size_t p = tube.firstPoint; p < end; ++p) tubes.points[p] = motion.point(tubes.points[p]);
             }
         }
         appendBraidTubes(*mesh, std::move(tubes));

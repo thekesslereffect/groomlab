@@ -16,6 +16,7 @@
 #include "groomlab/correctives.h"
 #include "groomlab/display.h"
 #include "groomlab/export_view.h"
+#include "groomlab/graph_edit.h"
 #include "groomlab/groom_session.h"
 #include "groomlab/hair_color.h"
 #include "groomlab/guide_hierarchy.h"
@@ -587,6 +588,59 @@ TEST(Session, ANodesStrandChannelIsItsOwnThoughALaterNodeWritesTheSameChannel) {
     EXPECT_TRUE(strandChannelRange(shown, "clumpId", plainLo, plainHi));
     EXPECT_EQ(lo, plainLo);
     EXPECT_EQ(hi, plainHi);
+}
+
+TEST(Session, ShowTubesOnANodeGivingGuidesDrawsTheTubesItGives) {
+    // Show Tubes on a node giving guides (a Guides node, a Curl on its guides): the tubes those
+    // guides carry, as the node shaped them (a Curl coils them), a tube a guide in its guide's own
+    // color; evaluated to with the hair hidden. Offered on such nodes and on Braids, not on nodes
+    // giving strands nor on a Clump (its header's button is Clump Colors).
+    std::string graph = kGraph;
+    const std::string guidesLink = R"({"from": "guides", "to": "interpolate", "input": "guides"})";
+    graph.replace(graph.find(guidesLink), guidesLink.size(),
+                  R"({"from": "guides", "to": "curl", "input": "strands"}, {"from": "curl", "to": "interpolate", "input": "guides"})");
+    const std::string output = R"({"name": "output", "type": "Output"})";
+    graph.replace(graph.find(output), output.size(),
+                  R"({"name": "curl", "type": "Curl", "params": {"frequency": 6.0, "radius": 0.08, "profile": [[0.0, 1.0]]}}, )" + output);
+    const GraphEdit edit(graph);
+    EXPECT_TRUE(edit.braidTubesOffered("guides"));
+    EXPECT_TRUE(edit.braidTubesOffered("curl")) << "fed guides: gives guides";
+    EXPECT_FALSE(edit.braidTubesOffered("interpolate"));
+    EXPECT_FALSE(edit.braidTubesOffered("width")) << "a Curves node fed strands";
+    EXPECT_FALSE(edit.braidTubesOffered("clump"));
+
+    GroomSession session(groomData(graph));
+    ViewRequest request;
+    request.density = 0.5f;
+    request.viewport = true;
+    request.wantStrands = false;  // the hair hidden
+    request.braidTubes = "guides\ncurl";
+    const ViewResult first = session.evaluate(request);
+    ASSERT_TRUE(first.errors.empty());
+    EXPECT_GT(first.versions.braidTubes, 0u);
+    const std::shared_ptr<const BraidTubeMesh> straight = session.braidTubeMesh("guides");
+    const std::shared_ptr<const BraidTubeMesh> coiled = session.braidTubeMesh("curl");
+    ASSERT_TRUE(straight);
+    ASSERT_TRUE(coiled);
+    EXPECT_EQ(straight->tubes, 8u) << "a tube a guide";
+    EXPECT_EQ(coiled->tubes, 8u);
+    EXPECT_GT(coiled->points.size(), straight->points.size()) << "more rings where the tubes coil";
+    EXPECT_EQ(coiled->triangles().size(), coiled->quads.size() * 6);
+    for (const std::array<std::uint32_t, 4>& q : coiled->quads) {
+        for (const std::uint32_t i : q) ASSERT_LT(i, coiled->points.size());
+    }
+    // The coiled tubes stray from where the straight ones lie, by about the curl's radius.
+    float strayed = 0.0f;
+    for (std::size_t i = 0; i < coiled->points.size(); ++i) {
+        float nearest = 1e30f;
+        for (const Vec3f& p : straight->points) nearest = std::min(nearest, (coiled->points[i] - p).length());
+        strayed = std::max(strayed, nearest);
+    }
+    EXPECT_GT(strayed, 0.05f);
+    // Each tube its guide's color, several apart.
+    std::set<std::array<float, 3>> colors(coiled->colors.begin(), coiled->colors.end());
+    EXPECT_EQ(colors.size(), 8u);
+    EXPECT_EQ(session.braidTubeMesh("guides\ncurl")->tubes, 16u) << "both nodes' tubes";
 }
 
 TEST(Session, ShownTubesAreEvaluatedToThoughTheHairIsHiddenOrANodeBeforeThemIsViewed) {

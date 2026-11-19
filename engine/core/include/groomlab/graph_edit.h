@@ -139,10 +139,10 @@ public:
     // Show Tubes (every host's button on a Braid node): the node's section tubes drawn in the
     // viewport (braid_tubes.h). `shown`: the nodes showing theirs, a display setting
     // (DisplaySettings::braidTubes: names, one a line). braidTubesOffered: whether the node has the
-    // button (a Braid). braidTubesShown: whether it is lit (offered, and named in `shown`).
+    // button (a Braid, or a node giving guides: their tubes, braid_tubes.h guideTubes). braidTubesShown: whether it is lit (offered, and named in `shown`).
     // braidTubesToggled: `shown` after a click on the node's button (the node added, or taken out;
-    // a node without the button changes nothing). braidTubesKept: `shown` without the names that are
-    // no Braid node of the graph now (a node deleted, or made another type: what a host stores after
+    // a node without the button changes nothing). braidTubesKept: `shown` without the names of
+    // nodes that have no button now (a node deleted, or made another type: what a host stores after
     // an edit). Both keep the other names' order. A rename: renamedBraidTubes.
     bool braidTubesOffered(const std::string& node) const;
     bool braidTubesShown(const std::string& node, const std::string& shown) const;

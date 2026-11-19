@@ -628,6 +628,8 @@ class NodeItem(QtWidgets.QGraphicsItem):
         if self.library:
             self.category = library_category(self.library)
         spec = model.node_spec(name)
+        # Show Tubes on its header: a Braid's section tubes, a node giving guides the tubes they carry.
+        self.tubes = model.braid_tubes_offered(name)
         self.inputs = {}
         y = HEADER_H + ROW_H / 2 + 4
         for port in spec["inputs"]:
@@ -886,7 +888,7 @@ class NodeItem(QtWidgets.QGraphicsItem):
             left -= size + 4
         if self.op_type == "Clump":  # Clump Colors: the strands colored by its clumps
             rects["clumpColors"] = QtCore.QRectF(left, 8, size, size)
-        elif self.op_type == "Braid":  # Show Tubes: its section tubes drawn in the viewport
+        elif self.tubes:  # Show Tubes: its section tubes (a Braid's) or its guides' tubes drawn in the viewport
             rects["braidTubes"] = QtCore.QRectF(left, 8, size, size)
         return rects
 
@@ -976,7 +978,8 @@ class NodeItem(QtWidgets.QGraphicsItem):
                          "dots" % shortcut_keys("graph.view"),
                 "inputs": "Expand Inputs: show or hide all connectable parameter ports",
                 "clumpColors": "Clump Colors: color the strands by this node's clumps (its clumpChannel); again: as they were",
-                "braidTubes": "Show Tubes: draws the braid's section tubes in the viewport",
+                "braidTubes": ("Show Tubes: draws the braid's section tubes in the viewport" if self.op_type == "Braid" else
+                               "Show Tubes: draws the tubes of the guides this node gives in the viewport"),
                 "disable": "Bypass: pass the input straight through (%s)" % shortcut_keys("graph.bypass")}
         over = next((k for k, r in self.toggle_rects().items() if r.contains(event.pos())), None)
         self.setToolTip(tips[over] if over else (self.editor.node_errors.get(self.name)

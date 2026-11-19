@@ -8,8 +8,11 @@
 #include <cmath>
 #include <sstream>
 
+#include "groomlab/curve.h"
 #include "groomlab/display.h"
 #include "groomlab/parallel.h"
+#include "groomlab/random.h"
+#include "groomlab/tube.h"
 
 namespace groomlab {
 
@@ -47,6 +50,115 @@ std::array<float, 3> braidSectionColor(int section) {
     // Clump Colors' saturation and value (clumpColor), each section's hue a golden-ratio step on.
     const float turn = 0.02f + 0.6180339887f * static_cast<float>(section);
     return hueColor(turn - std::floor(turn), 0.7f, 0.95f);
+}
+
+std::array<float, 3> guideTubeColor(std::uint64_t id) {
+    return hueColor(unitFloat(hashCombine(id, 0x7B5C01u)), 0.7f, 0.95f);
+}
+
+namespace {
+
+// The rings a guide's tube is drawn with (guideTubes): one every 12 degrees of its turning.
+std::size_t guideTubeRings(const std::vector<Vec3f>& points) {
+    constexpr double kTurnPerRing = 12.0 * 3.14159265358979323846 / 180.0;
+    double turned = 0.0;
+    Vec3f before;
+    bool first = true;
+    for (std::size_t i = 1; i < points.size(); ++i) {
+        const Vec3f way = points[i] - points[i - 1];
+        const float length = way.length();
+        if (!(length > 0.0f)) continue;
+        const Vec3f along = way / length;
+        if (!first) turned += std::acos(std::clamp(static_cast<double>(before.dot(along)), -1.0, 1.0));
+        before = along;
+        first = false;
+    }
+    const double wanted = std::ceil(turned / kTurnPerRing) + 1.0;
+    return static_cast<std::size_t>(std::clamp(wanted, 24.0, 512.0));
+}
+
+}  // namespace
+
+BraidTubes guideTubes(const GuideSet& guides, int around, std::size_t maxPoints) {
+    BraidTubes out;
+    out.around = std::max(around, 3);
+    out.pressed = true;  // (the rings lie on the sections' outlines)
+    const auto ringPoints = static_cast<std::size_t>(out.around);
+    std::vector<const Guide*> tubed;
+    auto take = [&](const Guide& g) {
+        if (g.hasTube && g.points.size() >= 2) tubed.push_back(&g);
+    };
+    for (const Guide& g : guides.guides()) take(g);
+    if (guides.levelTubes()) {
+        for (const Guide& g : *guides.levelTubes()) take(g);
+    }
+    if (tubed.empty()) return out;
+    std::vector<std::size_t> rings(tubed.size());
+    parallelFor(0, tubed.size(), [&](std::size_t i) { rings[i] = guideTubeRings(tubed[i]->points); }, 64);
+    std::size_t total = 0;
+    for (const std::size_t r : rings) total += r;
+    if (maxPoints > 0 && total * ringPoints > maxPoints) {
+        const double keep = static_cast<double>(maxPoints) / static_cast<double>(total * ringPoints);
+        for (std::size_t& r : rings) r = std::max<std::size_t>(2, static_cast<std::size_t>(static_cast<double>(r) * keep));
+    }
+    out.tubes.resize(tubed.size());
+    std::size_t points = 0, quads = 0;
+    for (std::size_t i = 0; i < tubed.size(); ++i) {
+        BraidTubes::Tube& tube = out.tubes[i];
+        tube.path = static_cast<int>(i);
+        tube.root = tubed[i]->root;
+        tube.colored = true;
+        tube.color = guideTubeColor(tubed[i]->id);
+        tube.firstPoint = points;
+        tube.firstQuad = quads;
+        points += rings[i] * ringPoints;
+        quads += (rings[i] - 1) * ringPoints;
+    }
+    out.points.resize(points);
+    out.quads.resize(quads);
+    out.quadTube.resize(quads);
+    parallelFor(0, tubed.size(), [&](std::size_t i) {
+        const Guide& g = *tubed[i];
+        BraidTubes::Tube& tube = out.tubes[i];
+        const std::size_t n = rings[i];
+        // Its shape evenly by arc length, a sample a ring, and its sections along it.
+        const std::vector<Vec3f> shape = resampleByArcLength(g.points.data(), g.points.size(), n);
+        const TubeSpine spine(shape.data(), shape.size(), g.frameUp, g.tube);
+        if (spine.samples() != n) return;
+        // Its outline (the root's, carried along the profiles where they change), `around` points evenly round.
+        const std::vector<SectionPoint>& outline = g.tube.blended() ? tubeShapeOutline(g.tube).perimeter : tubeOutline(g.tube);
+        if (outline.empty()) return;
+        std::vector<SectionPoint> ring(ringPoints);
+        std::vector<TubeBlendPoint> blends;
+        for (std::size_t k = 0; k < ringPoints; ++k) ring[k] = outline[k * outline.size() / ringPoints];
+        if (spine.blended()) {
+            for (const SectionPoint& p : ring) blends.push_back(g.tube.blendPoint(p.u, p.v));
+        }
+        Vec3f* p = out.points.data() + tube.firstPoint;
+        tube.at.resize(n);
+        tube.centers.resize(n);
+        for (std::size_t j = 0; j < n; ++j) {
+            tube.at[j] = static_cast<float>(j) / static_cast<float>(n - 1);
+            tube.centers[j] = spine.center(j);
+            for (std::size_t k = 0; k < ringPoints; ++k) {
+                p[j * ringPoints + k] = blends.empty() ? spine.atSample(j, ring[k].u, ring[k].v)
+                                                       : spine.atSample(j, ring[k].u, ring[k].v, blends[k]);
+            }
+        }
+        // The quads between each two rings, facing out as a Braid's (braid_op.cpp).
+        const auto first = static_cast<std::uint32_t>(tube.firstPoint);
+        for (std::size_t j = 1; j < n; ++j) {
+            const std::uint32_t last = first + static_cast<std::uint32_t>((j - 1) * ringPoints);
+            const std::uint32_t now = first + static_cast<std::uint32_t>(j * ringPoints);
+            for (std::size_t k = 0; k < ringPoints; ++k) {
+                const auto a = static_cast<std::uint32_t>(k), b = static_cast<std::uint32_t>((k + 1) % ringPoints);
+                const std::size_t q = tube.firstQuad + (j - 1) * ringPoints + k;
+                out.quads[q] = {last + a, now + a, now + b, last + b};
+                out.quadTube[q] = static_cast<std::uint32_t>(i);
+            }
+        }
+    }, 4);
+    return out;
 }
 
 std::vector<std::uint32_t> BraidTubeMesh::triangles() const {
@@ -87,7 +199,7 @@ void appendBraidTubes(BraidTubeMesh& mesh, BraidTubes tubes) {
         const std::size_t first = tube.firstPoint;
         const std::size_t end = t + 1 < tubes.tubes.size() ? tubes.tubes[t + 1].firstPoint : count;
         const std::size_t rings = (end - first) / around;
-        const std::array<float, 3> color = braidSectionColor(tube.section);
+        const std::array<float, 3> color = tube.colored ? tube.color : braidSectionColor(tube.section);
         Vec3f* p = mesh.points.data() + base + first;
         for (std::size_t j = 0; out != 1.0f && j < rings && j < tube.centers.size(); ++j) {
             const Vec3f& center = tube.centers[j];
