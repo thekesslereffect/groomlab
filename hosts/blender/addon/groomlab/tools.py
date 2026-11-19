@@ -543,6 +543,10 @@ def pick_level(scalp, view, x, y):
 # ---- Edits that are one undo step each ----------------------------------------------------------
 
 def undo(scalp, redo=False):
+    scene = groom.scene_of(scalp)
+    t = scene.groomlab_tools
+    had_levels = [x for x in (t.tube_levels or "").split(",") if x]
+    _level, had_group = group_target(scene)
     r = call(scalp, "redo" if redo else "undo")
     # A transfer taken back or done again (the step undone is now the one to redo, and the other way
     # round; scalpChanged misses a scalp of the same shape): its owner follows (pipeline.py).
@@ -551,6 +555,15 @@ def undo(scalp, redo=False):
         scalp = pipeline.follow_helper_undo(scalp, redo)
     follow_graph(scalp, r)
     after_edit(scalp, groom.scene_of(scalp), r, refresh=bool(r.get("done")))
+    if r.get("done") and had_group and had_group in had_levels:
+        # The tube level shown taken away (its split or Subdivide's cut undone): the deepest level
+        # left shown and picked, as Add and Remove leave it (else its parents stay hidden).
+        try:
+            levels = list(tube_levels(scalp, picked=had_levels[0]).get("levels") or [])
+            if levels and had_group not in levels:
+                tube_level_show(scalp, len(levels))
+        except HelperError:
+            pass
     if r.get("done") and groom.scene_of(scalp).groomlab_tools.root_mode:
         try:
             root_state(scalp)  # the root tool reads the groom again: an undone tube's outline back

@@ -1695,6 +1695,19 @@ class GROOMLAB_OT_root_tube(GroomToolOperator):
         tools.status(context.scene, "Painting the density map (white: more, smaller roots; Ctrl: toward black). The "
                                     "brush again (or another tool) stops painting; then Apply to cut by it.")
 
+    def begin(self, context, scalp, mode):
+        t = context.scene.groomlab_tools
+        if t.tool != "shape":
+            tools.pick(context, "shape")
+        if mode == "place":
+            # A deeper level picked: level 1 shown and picked instead (a new root tube is a level 1 guide).
+            tools.tube_levels(scalp)
+            levels = [x for x in t.tube_levels.split(",") if x]
+            if len(levels) > 1 and t.tube_level > 1:
+                tools.tube_level_show(scalp, 1)
+        tools.root_edit(scalp, "start", mode=mode)
+        start_modal(context)
+
 
 def finish_density_painting(context):
     """Painting the subdivision density done (the brush again, or the paint tool left any other
@@ -1743,19 +1756,6 @@ def _cut_said(r, verb):
     if not made and not r.get("removed"):
         return "The density did not change: no root cut again."
     return "%s: %d root%s made%s." % (verb, made, "" if made == 1 else "s", ", %d kept" % kept if kept else "")
-
-    def begin(self, context, scalp, mode):
-        t = context.scene.groomlab_tools
-        if t.tool != "shape":
-            tools.pick(context, "shape")
-        if mode == "place":
-            # A deeper level picked: level 1 shown and picked instead (a new root tube is a level 1 guide).
-            tools.tube_levels(scalp)
-            levels = [x for x in t.tube_levels.split(",") if x]
-            if len(levels) > 1 and t.tube_level > 1:
-                tools.tube_level_show(scalp, 1)
-        tools.root_edit(scalp, "start", mode=mode)
-        start_modal(context)
 
 
 def leave_roots(context, scalp):

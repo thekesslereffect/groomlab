@@ -12,7 +12,7 @@
 // (drawing its path again, or the outline open); redoing it puts the outline away.
 //
 // Edit: the root tubes (the selected guides' or every one) as their outlines with their CVs, the
-// guides hidden (hidesGuides); a drag moves a CV on the scalp (CVs sealed with a neighbour move
+// guides and tubes as the Visibility switches have them (hidesGuides: never, since #85); a drag moves a CV on the scalp (CVs sealed with a neighbour move
 // together; with Snap onto another root's CVs and edges, never its own), Ctrl+click on an edge adds
 // a CV on every outline sharing it, Ctrl+click on a CV takes it out of the root meant (the one last
 // touched). undoCv takes back a CV move; finishEdit gives each changed root its outline (one undo
