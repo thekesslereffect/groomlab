@@ -367,6 +367,7 @@ private:
         std::string libraryLabel;      // a node from the node library: its label
         bool updateAvailable = false;  // the library has a newer copy of it
         bool tubes = false;            // Show Tubes on its header (GraphEdit::braidTubesOffered)
+        bool viewable = false;         // View Up to Here (GraphEdit::viewable)
     };
     struct Wire {
         int from = -1, to = -1;  // node indices

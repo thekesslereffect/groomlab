@@ -244,6 +244,12 @@ DriverAttachments attachmentsOf(const DriverBind& bind, const GuideHierarchy* hi
     return out;
 }
 
+std::string reboundDriversJson(const GuideSet& drivers, const ScalpMesh* scalp, int frame, const DriverBind& before) {
+    DriverBind bind = bindDrivers(drivers, scalp, frame);
+    bind.attached = before.attached;  // the guides attached stay attached
+    return bind.empty() && bind.attached.empty() ? std::string() : bind.toJson();
+}
+
 DriverBind bindDrivers(const GuideSet& drivers, const ScalpMesh* scalp, int frame) {
     DriverBind bind;
     bind.frame = frame;

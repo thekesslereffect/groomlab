@@ -715,8 +715,12 @@ std::string newShapeName(const GuideHierarchy& h) {
 }
 
 GroupId rootGroup(GuideHierarchy& h, const std::string& name) {
-    const std::string wanted = name.empty() ? kRootTubeGroup : name;
-    const GroupId found = h.findGroup(wanted);
+    // The group picked when it is a top group (every host's Tube tool), else kRootTubeGroup: a
+    // root tube starts a hierarchy of its own, never inside another's levels.
+    GroupId found = name.empty() ? kNoGroup : h.findGroup(name);
+    if (found != kNoGroup && h.groupDepth(found) == 0) return found;
+    const std::string wanted = found != kNoGroup || name.empty() ? std::string(kRootTubeGroup) : name;
+    found = h.findGroup(wanted);
     if (found != kNoGroup) return found;
     return h.addGroup(wanted);
 }

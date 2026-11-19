@@ -525,21 +525,16 @@ def scale_tube(groom, factor, guides=None, group=None, level=None):
     return cmds.groomLabGuides(groom, setTube=json.dumps({"scaleWidth": float(factor)}), **_targets(guides, group, level))
 
 
-# smooth_tube's channels: the Shape brush's names, and what the tube calls each list.
-_TUBE_LISTS = {"width": "width", "flatness": "aspect", "twist": "twist", "all": "all"}
-
-
 def smooth_tube(groom, guides=None, channel=None, passes=3, group=None, level=None):
     """Smooth guides' tubes along each guide (what the Shape brush painted, evened out): each
     section moved toward its neighbours' mean, one value per guide point, `passes` times, the
     root's and the tip's kept. `channel`: "width", "flatness", "twist", or "all" (None: all).
     Targets as in set_tube (else the selected guides). One undo step. Returns how many guides
     changed."""
-    name = "all" if channel is None else channel
-    if name not in _TUBE_LISTS:
-        raise ValueError("channel must be one of width, flatness, twist or all")
-    edit = {"smooth": _TUBE_LISTS[name], "passes": max(1, min(int(passes), 100))}
-    return cmds.groomLabGuides(groom, setTube=json.dumps(edit), **_targets(guides, group, level))
+    import groomlab_core
+    # The Shape brush's channel names (tube_smooth_edit, every host's; ValueError for another).
+    edit = groomlab_core.tube_smooth_edit("all" if channel is None else channel, int(passes))
+    return cmds.groomLabGuides(groom, setTube=edit, **_targets(guides, group, level))
 
 
 def _interpolate_nodes(graph):

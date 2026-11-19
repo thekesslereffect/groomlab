@@ -45,6 +45,10 @@ void adoptMaps(Session& s, const GroomData& data);
 // The session's painted maps into a file about to be written: the catalog, and the vertex maps as
 // color sets of its scalp (as the app writes them).
 void writeMaps(const Session& s, GroomFile& file);
+// The viewport's guide group colors and hidden groups (the tools' state) into a file about to be
+// written ("guideGroupColors", "hiddenGuideGroups": every host's .groom), and from a file adopted.
+void writeGroupDisplay(const Session& s, GroomFile& file);
+void adoptGroupDisplay(Session& s, const GroomFile& file);
 
 // A texture map's file as the session reads it: the stored path resolved against the groom's
 // folder and search paths ("" for none).

@@ -651,6 +651,53 @@ void bindGraph(py::module_& m) {
     // Controls every host makes and reads (graph_controls.h): Control nodes' sliders, Expression
     // variables with a control, keyed params.
     m.def("control_name", &controlName, py::arg("wanted"), "A control's name from any text (letters, digits, _).");
+    m.def(
+        "param_sections", [](const std::string& paramsJson) { return paramSections(nlohmann::json::parse(paramsJson)); },
+        py::arg("params_json"),
+        "The Node panel's section of each param of a spec's params (param_conditions.h, every host's): "
+        "'Advanced', its group when there are two groups or more, else ''.");
+    m.def(
+        "param_shown",
+        [](const std::string& paramsJson, const std::string& name, const std::string& valuesJson) {
+            const nlohmann::json values = nlohmann::json::parse(valuesJson);
+            return paramShown(nlohmann::json::parse(paramsJson), name, [&](const std::string& param) {
+                const auto it = values.find(param);
+                return it == values.end() ? nlohmann::json() : *it;
+            });
+        },
+        py::arg("params_json"), py::arg("name"), py::arg("values_json"),
+        "Whether a param shows: its showWhen holds for the node's values ({param: value}), and up the chain.");
+    m.def(
+        "node_search_rank",
+        [](const std::string& text, const py::dict& words) {
+            NodeSearchWords w;
+            auto get = [&](const char* key) { return words.contains(key) ? py::cast<std::string>(words[key]) : std::string(); };
+            w.name = get("name");
+            w.label = get("label");
+            w.keywords = get("keywords");
+            w.params = get("params");
+            w.about = get("about");
+            w.details = get("details");
+            const int rank = nodeSearchRank(text, w);
+            return rank < 0 ? py::object(py::none()) : py::object(py::int_(rank));
+        },
+        py::arg("text"), py::arg("words"),
+        "The Add Node search's rank of an entry ({name, label, keywords, params, about, details}, lower case), "
+        "None for no match (node_catalog.h nodeSearchRank, every host's).");
+    m.def(
+        "node_search_words",
+        [](const std::string& specJson) {
+            const NodeSearchWords w = nodeSearchWords(specJson);
+            py::dict out;
+            out["name"] = w.name;
+            out["label"] = w.label;
+            out["keywords"] = w.keywords;
+            out["params"] = w.params;
+            out["about"] = w.about;
+            out["details"] = w.details;
+            return out;
+        },
+        py::arg("spec_json"), "An operator spec's search words (node_catalog.h nodeSearchWords).");
     m.def("condition_text", [](const std::string& valueJson) { return conditionText(nlohmann::json::parse(valueJson)); },
           py::arg("value_json"),
           "A param's value as a showWhen/unitWhen condition reads it (param_conditions.h, every host's): "
@@ -948,6 +995,15 @@ void bindGraph(py::module_& m) {
         .def("check_connections", &GraphEdit::checkConnections)
         .def("node_spec_json", &GraphEdit::nodeSpecJson, py::arg("name"))
         .def("output_type", &GraphEdit::outputType, py::arg("name"), py::arg("output") = std::string())
+        .def("output_types", &GraphEdit::outputTypes, py::arg("name"),
+             "Each of the node's outputs' types as connected, in its spec's order.")
+        .def("viewable", &GraphEdit::viewable, py::arg("name"),
+             "View Up to Here: whether an output gives strands as connected (Strands, or Curves fed nothing).")
+        .def("bakeable", &GraphEdit::bakeable, py::arg("name"),
+             "Bake Node to Guides: not the Output node, its first output giving strands or guides as connected.")
+        .def("value_kind_for_input", &GraphEdit::valueKindForInput, py::arg("src"), py::arg("dst"), py::arg("input"),
+             "The kind a Value node no link leaves takes when drawn into dst's param input ('' none); "
+             "connect_by_hand sets it.")
         .def("upstream", &GraphEdit::upstream, py::arg("name"))
         .def("clump_channel", &GraphEdit::clumpChannel, py::arg("node"),
              "The strand channel a Clump writes (its clumpChannel; '' for another node, or none).")

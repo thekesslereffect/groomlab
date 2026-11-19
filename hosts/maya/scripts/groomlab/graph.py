@@ -578,18 +578,13 @@ class GraphModel(object):
         self.renamed = {k: v for k, v in self.renamed.items() if v != name and not v.startswith(name + "/")}
 
     def rename_node(self, old, new):
+        """Rename a node: its links and the output follow (the core's GraphEdit.rename_node, every
+        host's: a name that is empty or taken refused)."""
         self._node(old)
-        if new in self.nodes:
-            raise GraphError("a node named %r exists" % new)
-        self.nodes[new] = self.nodes.pop(old)
-        self.order[self.order.index(old)] = new
-        for c in self.connections:
-            if c["from"] == old:
-                c["from"] = new
-            if c["to"] == old:
-                c["to"] = new
-        if self.output == old:
-            self.output = new
+        edit = self._edit()
+        with _core_errors():
+            edit.rename_node(old, new)
+        self._take(edit)
         if self._pins:  # the routes from and to it follow (the core's renamePinNode)
             pins = self._pin_edit()
             pins.rename_node(old, new)
@@ -931,6 +926,22 @@ class GraphModel(object):
         """Whether a clump color source shows this Clump's clumps (the core's GraphEdit.clump_colored:
         its own source, or the bare channel of grooms from before when it is the last Clump writing it)."""
         return name in self.nodes and self._query().clump_colored(name, source or "")
+
+    def viewable(self, name):
+        """Whether View Up to Here takes the node: an output giving strands as connected (the
+        core's GraphEdit.viewable, every host's eye button and V key)."""
+        return name in self.nodes and self._query().viewable(name)
+
+    def bakeable(self, name):
+        """Whether Bake Node to Guides takes the node (the core's GraphEdit.bakeable)."""
+        return name in self.nodes and self._query().bakeable(name)
+
+    def value_kind_for_input(self, src, dst, input_name):
+        """The kind a Value node no link leaves yet takes when drawn into dst's param input (the
+        core's GraphEdit.value_kind_for_input; a link drawn by hand sets it), else None."""
+        if src not in self.nodes or dst not in self.nodes:
+            return None
+        return self._query().value_kind_for_input(src, dst, input_name) or None
 
     def braid_tubes_offered(self, name):
         """Whether the node has Show Tubes: a Braid (its section tubes), or a node giving guides (the

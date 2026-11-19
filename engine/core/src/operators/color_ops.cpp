@@ -170,7 +170,7 @@ public:
                       "The channel naming each strand's clump, for clumpShare: a Clump's clumpChannel (clumpId by default; "
                       "with chained Clumps, the one whose clumps should share a color)"}
                 .in("Random")
-                .readsChannel(true),
+                .readsChannel(true, "clumpShare"),
             notAnimatable({"seed", std::int64_t{0}, "Random seed"}).in("Advanced").adv(),
             // ---- The tips.
             ParamSpec{"tipColor", Vec3f(0.55f, 0.42f, 0.28f),

@@ -26,6 +26,7 @@
 #include "groomlab/cards.h"
 #include "groomlab/display.h"
 #include "groomlab/drive_guides.h"
+#include "groomlab/engine_meshes.h"
 #include "groomlab/export_view.h"
 #include "groomlab/feathers.h"
 #include "groomlab/flow.h"
@@ -134,100 +135,38 @@ bool groomSpaceOf(const json& args) {
     return space == "groom";
 }
 
-// The cards as Maya's card mesh has them: a quad per card segment, the atlas UVs, the second UV
-// set aoWorld (each card its own island, the layout AO_world is baked in), the strands' own
-// normals, the tint as color set groomLabTint (half its value: 0.5 none), linear.
+// The core's engine meshes (engine_meshes.h, every host's: Maya's and the app's FBX) as the
+// helper answers them to Blender's own exporter.
+MeshOut meshOut(FbxMesh&& f, const std::string& key) {
+    MeshOut m;
+    m.key = key;
+    m.points = std::move(f.points);
+    m.faceCounts.assign(f.faceCounts.begin(), f.faceCounts.end());
+    m.faceIndices.assign(f.faceIndices.begin(), f.faceIndices.end());
+    m.uvs = std::move(f.uvs);
+    m.normals = std::move(f.normals);
+    for (auto& [name, values] : f.uvSets) m.uvSets[name] = std::move(values);
+    for (auto& [name, values] : f.colors) m.colors[name] = std::move(values);
+    return m;
+}
+
 MeshOut cardsMesh(const CardMesh& cards, const std::string& key) {
-    MeshOut m;
-    m.key = key;
-    m.points = cards.positions;
-    const std::size_t quads = cards.quads.size() / 4;
-    m.faceCounts.assign(quads, 4);
-    m.faceIndices.reserve(cards.quads.size());
-    std::vector<float>& tint = m.colors["groomLabTint"];
-    // The unique layout: as the bake laid it out, else laid out again (cards that carry their stations).
-    const std::size_t n = cards.positions.size();
-    std::vector<float> worldU, worldV;
-    cardsUniqueUVs(cards, worldU, worldV);  // every host's (cards.h)
-    std::vector<float>* aoWorld = worldU.empty() ? nullptr : &m.uvSets["aoWorld"];
-    for (const std::uint32_t v : cards.quads) {
-        m.faceIndices.push_back(static_cast<std::int32_t>(v));
-        m.uvs.push_back(v < cards.u.size() ? cards.u[v] : 0.0f);
-        m.uvs.push_back(v < cards.v.size() ? cards.v[v] : 0.0f);
-        if (aoWorld) aoWorld->insert(aoWorld->end(), {v < n ? worldU[v] : 0.0f, v < n ? worldV[v] : 0.0f});
-        m.normals.push_back(v < cards.normals.size() ? cards.normals[v] : Vec3f{0.0f, 1.0f, 0.0f});
-        const std::array<float, 3> t = v < cards.tints.size() ? cards.tints[v] : std::array<float, 3>{1.0f, 1.0f, 1.0f};
-        tint.insert(tint.end(), {0.5f * t[0], 0.5f * t[1], 0.5f * t[2], 1.0f});
-    }
-    m.info = {{"cards", cards.cards.size()}, {"triangles", 2 * quads}};
+    MeshOut m = meshOut(cardsFbxMesh(cards, key), key);
+    m.info = {{"cards", cards.cards.size()}, {"triangles", 2 * (cards.quads.size() / 4)}};
     return m;
 }
 
-// The hair cap: the scalp's polygons pushed out along its normals by scalpCapLift (0.4% of its
-// size), its UVs (Maya's scalp_cap: a polyMoveVertex on the scalp mesh).
 MeshOut scalpCapMesh(const ScalpMesh& scalp, const std::string& key) {
-    MeshOut m;
-    m.key = key;
-    const float lift = scalpCapLift(scalp);
-    const std::vector<Vec3f>& normals = scalp.vertexNormals();
-    m.points = scalp.points();
-    for (std::size_t i = 0; i < m.points.size() && i < normals.size(); ++i) m.points[i] = m.points[i] + normals[i] * lift;
-    bool exact = true;
-    hostMeshFaces(scalp, m.faceCounts, m.faceIndices, m.uvs, exact);
-    m.info = {{"lift", lift}};
+    MeshOut m = meshOut(scalpCapFbxMesh(scalp, key), key);
+    m.info = {{"lift", scalpCapLift(scalp)}};
     return m;
 }
 
-// A polygon mesh of RachisMesh's layout (rachis tubes, strands as a mesh): its UVs per corner.
-MeshOut rachisLayoutMesh(const RachisMesh& r, const std::string& key) {
-    MeshOut m;
-    m.key = key;
-    m.points = r.points;
-    m.faceCounts.assign(r.faceCounts.begin(), r.faceCounts.end());
-    m.faceIndices.assign(r.faceVertices.begin(), r.faceVertices.end());
-    if (r.faceUVs.size() == r.faceVertices.size()) {
-        m.uvs.reserve(2 * r.faceUVs.size());
-        for (const int k : r.faceUVs) {
-            const auto i = static_cast<std::size_t>(k);
-            m.uvs.push_back(i < r.u.size() ? r.u[i] : 0.0f);
-            m.uvs.push_back(i < r.v.size() ? r.v[i] : 0.0f);
-        }
-    }
-    return m;
-}
+MeshOut rachisLayoutMesh(const RachisMesh& r, const std::string& key) { return meshOut(rachisFbxMesh(r, key), key); }
 
-// The scales bent onto the skin as Maya's groomLabScaleMesh makes them: triangles, the plates'
-// uvs, uv sets scaleUV (the skin's uv at each scale's root) and scaleData (its random, its
-// variant), color sets scaleColor (per vertex) and scaleRootColor (per scale), its own normals.
 MeshOut scalesMesh(const ScaleMesh& sm, const std::string& key) {
-    MeshOut m;
-    m.key = key;
-    m.points = sm.points;
-    const std::size_t faces = sm.triangleCount();
-    m.faceCounts.assign(faces, 3);
-    const std::vector<std::uint32_t> owner = sm.triangleOwners();  // every host's (scales.h)
-    std::vector<float>& scaleUV = m.uvSets["scaleUV"];
-    std::vector<float>& scaleData = m.uvSets["scaleData"];
-    std::vector<float>& color = m.colors["scaleColor"];
-    std::vector<float>& rootColor = m.colors["scaleRootColor"];
-    for (std::size_t c = 0; c < sm.triangles.size(); ++c) {
-        const std::uint32_t v = sm.triangles[c];
-        m.faceIndices.push_back(static_cast<std::int32_t>(v));
-        m.uvs.push_back(sm.uvs[v][0]);
-        m.uvs.push_back(sm.uvs[v][1]);
-        m.normals.push_back(sm.normals[v]);
-        color.insert(color.end(), {sm.colors[v][0], sm.colors[v][1], sm.colors[v][2], 1.0f});
-        if (sm.scales.empty()) continue;
-        const ScaleMesh::Scale& sc = sm.scales[owner[c / 3]];
-        scaleUV.insert(scaleUV.end(), {sc.rootUv[0], sc.rootUv[1]});
-        scaleData.insert(scaleData.end(), {sc.random, static_cast<float>(sc.variant)});
-        rootColor.insert(rootColor.end(), {sc.color[0], sc.color[1], sc.color[2], 1.0f});
-    }
-    if (sm.scales.empty()) {
-        m.uvSets.clear();
-        m.colors.erase("scaleRootColor");
-    }
-    m.info = {{"scales", sm.scales.size()}, {"triangles", faces}};
+    MeshOut m = meshOut(scalesFbxMesh(sm, key), key);
+    m.info = {{"scales", sm.scales.size()}, {"triangles", sm.triangleCount()}};
     return m;
 }
 

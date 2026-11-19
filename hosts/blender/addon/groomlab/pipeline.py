@@ -1026,18 +1026,10 @@ def bake_to_guides(scalp, node="", group="baked", density=1.0):
 
 
 def bakeable_nodes(scalp):
-    """The graph's nodes giving strands or guides, but the output node (Bake Node to Guides' choices)."""
-    from . import graph as graph_mod
+    """The graph's nodes Bake Node to Guides takes (its choices): the core's GraphEdit::bakeable."""
     rt = groom.ensure(scalp)
-    g = process.call("get_graph", session=rt.session)["graph"]
-    specs = graph_mod.operator_specs()
-    out = []
-    for n in g.get("nodes") or []:
-        spec = specs.get(n.get("type")) or {}
-        ports = spec.get("outputs") or [spec.get("output")]
-        if n["name"] != g.get("output") and any(p and p.get("type") in ("Strands", "Guides") for p in ports):
-            out.append(n["name"])
-    return out
+    facts = process.call("graph_nodes", session=rt.session)["nodes"]
+    return [name for name, f in facts.items() if f.get("bakeable")]
 
 
 def import_alembic_curves(scalp, path, object_name="", samples=24):

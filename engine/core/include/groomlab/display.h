@@ -238,6 +238,8 @@ std::map<std::string, std::string> guideGroupColorWords(const std::string& text)
 std::string guideGroupColorsText(const std::map<std::string, std::string>& colors);
 // Hidden guide groups: names separated by spaces or commas.
 std::set<std::string> parseHiddenGuideGroups(const std::string& text);
+// parseHiddenGuideGroups' text of `groups` ("name name": a .groom's hiddenGuideGroups, Maya's attribute).
+std::string hiddenGuideGroupsText(const std::set<std::string>& groups);
 
 // ---- Strands ----------------------------------------------------------------------------------
 
@@ -488,7 +490,8 @@ struct DisplaySettings {
     int guideColorMode = 0;
     // Each guide drawn in its root tube's color (rootTubeColor: the root-first tube its hierarchy
     // starts from, so a tube's split tubes and children take its color); a guide of no root tube as
-    // the mode says.
+    // the mode says. On by itself while the Tube brush's tubes show (tubeWires, tubeShaded: every
+    // host's Tube tool).
     bool guideRootColors = false;
     // The groom's name: the automatic guide colors start from its hue (guideHueSeed).
     std::string guideColorSeed;

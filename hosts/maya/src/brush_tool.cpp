@@ -1445,13 +1445,7 @@ void BrushContext::showSymmetry() {
         seam_.center = b.mirrorCenter;
         seam_.topology = topology;
         seam_.points.clear();
-        // Lifted off the surface by a little of the scalp's size, so the line is not hidden in it.
-        Vec3f lo = scalp->points().front(), hi = lo;
-        for (const Vec3f& p : scalp->points()) {
-            lo = Vec3f(std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z));
-            hi = Vec3f(std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z));
-        }
-        seam_.points = symmetrySeam(*scalp, StrokeSymmetry::of(b, scalp.get()), 0.002f * (hi - lo).length());
+        seam_.points = symmetrySeam(*scalp, StrokeSymmetry::of(b, scalp.get()));  // (lifted off the surface a little)
     }
     shape_->setSymmetrySeam(seam_.points);  // (nothing when it is the line the groom has)
 }

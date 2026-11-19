@@ -1253,6 +1253,9 @@ def load_groom(context, path, scalp=None, index=0):
     rt = ensure(scalp, scene)
     info = _call("load_groom", session=rt.session, path=path, index=int(index))
     g.groom_name = info.get("name") or ""  # its name in groom files, kept
+    from . import props
+    with props.quiet():
+        scalp.groomlab_tools.braid_tubes = info.get("braidTubes") or ""  # Show Tubes' nodes, as saved
     # A groom of flat guides (Maya's guide curves) keeps them as a Blender Curves object (B2); every
     # other groom's guides live in the helper's hierarchy, edited with GroomLab's own tools.
     hierarchy = info.get("flatGuides", 0) == 0
@@ -1371,7 +1374,8 @@ def save_groom(scalp, path, up_axis="Y", merge=True):
     sync(scalp, evaluate_now=False)
     for fn in before_save:
         fn()
-    r = _call("save_groom", session=rt.session, path=path, upAxis=up_axis, name=groom_entry_name(scalp), merge=bool(merge))
+    r = _call("save_groom", session=rt.session, path=path, upAxis=up_axis, name=groom_entry_name(scalp), merge=bool(merge),
+              braidTubes=scalp.groomlab_tools.braid_tubes or "")  # (Show Tubes' nodes: every host's .groom)
     for w in r.get("warnings") or []:
         print("GroomLab: %s" % w)
     remember_graph(scalp, rt)

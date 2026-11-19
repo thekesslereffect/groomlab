@@ -6,6 +6,7 @@
 #include "groomlab/cards.h"
 #include "groomlab/feathers.h"
 #include "groomlab/gltf_writer.h"
+#include "groomlab/retriangulate.h"
 #include "groomlab/scales.h"
 #include "groomlab/scalp_mesh.h"
 
@@ -44,43 +45,29 @@ FbxMesh scalpCapFbxMesh(const ScalpMesh& scalp, const std::string& name) {
     const std::vector<Vec3f>& normals = scalp.vertexNormals();
     m.points = scalp.points();
     for (std::size_t i = 0; i < m.points.size() && i < normals.size(); ++i) m.points[i] = m.points[i] + normals[i] * lift;
-    // The host's polygons when the triangles fan them (as the helper's scalpFaces finds them), else triangles.
+    // The host's polygons (retriangulate.h polygonLoops: each polygon's corners from its triangles,
+    // whatever split they are), else a face of each triangle: every host's cap the same.
     const auto& tris = scalp.triangles();
-    const auto& polys = scalp.polygons();
     const auto& cornerUVs = scalp.cornerUVs();
     const bool hasUVs = scalp.hasUVs();
-    auto corner = [&](std::size_t tri, int c) {
-        m.faceIndices.push_back(static_cast<int>(tris[tri][static_cast<std::size_t>(c)]));
+    auto corner = [&](int vertex, std::size_t triangleCorner) {
+        m.faceIndices.push_back(vertex);
         if (hasUVs) {
-            m.uvs.push_back(cornerUVs[3 * tri + static_cast<std::size_t>(c)][0]);
-            m.uvs.push_back(cornerUVs[3 * tri + static_cast<std::size_t>(c)][1]);
+            m.uvs.push_back(cornerUVs[triangleCorner][0]);
+            m.uvs.push_back(cornerUVs[triangleCorner][1]);
         }
     };
-    auto triangle = [&](std::size_t tri) {
-        m.faceCounts.push_back(3);
-        for (int c = 0; c < 3; ++c) corner(tri, c);
-    };
-    std::size_t total = 0;
-    for (const std::int32_t c : polys) total += static_cast<std::size_t>(std::max(0, c));
-    if (polys.empty() || total != tris.size()) {
-        for (std::size_t t = 0; t < tris.size(); ++t) triangle(t);
+    const PolygonLoops loops = polygonLoops(scalp);
+    if (loops.vertices.empty()) {
+        for (std::size_t t = 0; t < tris.size(); ++t) {
+            m.faceCounts.push_back(3);
+            for (std::size_t c = 0; c < 3; ++c) corner(static_cast<int>(tris[t][c]), 3 * t + c);
+        }
         return m;
     }
-    std::size_t t = 0;
-    for (const std::int32_t count : polys) {
-        const auto k = static_cast<std::size_t>(count);
-        bool fan = k >= 1;
-        for (std::size_t i = 1; fan && i < k; ++i) fan = tris[t + i][0] == tris[t][0] && tris[t + i][1] == tris[t + i - 1][2];
-        if (fan) {
-            m.faceCounts.push_back(static_cast<int>(k + 2));
-            corner(t, 0);
-            corner(t, 1);
-            corner(t, 2);
-            for (std::size_t i = 1; i < k; ++i) corner(t + i, 2);
-        } else {
-            for (std::size_t i = 0; i < k; ++i) triangle(t + i);
-        }
-        t += k;
+    for (std::size_t f = 0; f < loops.vertices.size(); ++f) {
+        m.faceCounts.push_back(static_cast<int>(loops.vertices[f].size()));
+        for (std::size_t k = 0; k < loops.vertices[f].size(); ++k) corner(loops.vertices[f][k], static_cast<std::size_t>(loops.corners[f][k]));
     }
     return m;
 }

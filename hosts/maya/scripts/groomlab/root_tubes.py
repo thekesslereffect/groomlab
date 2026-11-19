@@ -46,15 +46,15 @@ from groomlab import tube_mesh as tm
 
 ROOT_GROUP = "rootTubes"   # the root group new root tubes go into (when no group is picked)
 SHAPE_PREFIX = "rootTube_"  # each root tube's library shape: its root outline
-MAX_LEVELS = 9              # the tube hierarchy's deepest level (1: the base)
+MAX_LEVELS = gl.MAX_TUBE_LEVELS  # the tube hierarchy's deepest level (1: the base; root_tubes.h)
 LEVEL_SUFFIX = "_L"         # level n's group: <base>_L<n>
 SNAP_PIXELS = 12            # how near (in view pixels) a CV snaps to a neighbouring root's CV or edge
 ROOT_OVERLAP = 0.015        # a root tube's footprint this share larger than its outline (tube.h kRootTubeOverlap)
 CLEARANCE = 0.35            # a drawn guide popped this many root sizes out where it dips into the scalp ...
 _CLEAR_RAMP = 2.0           # ... reached this many root sizes along it from the root (root_tubes.cpp)
 MAX_LEAN = 0.8726646259971648  # (50 degrees) a root tube's guide leaves the scalp leaning at most this far off its normal
-DENSITY_MAP = "tubeSubdivisionDensity"  # the one subdivision density vertex map (1: the most, smallest roots)
-DENSITY_START = 0.5                     # its value where nothing is painted
+DENSITY_MAP = gl.SUBDIVISION_DENSITY_MAP      # the one subdivision density vertex map (1: the most, smallest roots)
+DENSITY_START = gl.DEFAULT_SUBDIVISION_DENSITY  # its value where nothing is painted (root_subdivision.h)
 
 
 # ---------------------------------------------------------------------------
@@ -462,7 +462,7 @@ def ensure_density_map(groom, name):
 
 def _cut(answer):
     return {"cells": [int(g) for g in answer.get("cells", [])], "removed": int(answer.get("removed", 0)),
-            "kept": int(answer.get("kept", 0))}
+            "kept": int(answer.get("kept", 0)), "cellLevel": int(answer.get("cellLevel", 0))}
 
 
 def subdivide(groom, guides, map=None, multiplier=1.0):

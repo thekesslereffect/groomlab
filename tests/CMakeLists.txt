@@ -56,6 +56,7 @@ add_executable(groomlab_tests
     engine/core/test_card_separation.cpp
     engine/core/test_card_maps.cpp
     engine/core/test_card_blocks.cpp
+    engine/core/test_host_rules.cpp
     engine/core/test_fields.cpp
     engine/core/test_game_exports.cpp
     engine/core/test_cinematic.cpp

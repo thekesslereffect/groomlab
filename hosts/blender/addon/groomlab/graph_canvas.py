@@ -337,17 +337,15 @@ def _segment_distance2(pt, a, b):
     return (pt[0] - cx) ** 2 + (pt[1] - cy) ** 2
 
 
-def compatible(a, b):
-    """Whether a wire can join ports of these types (the helper has the last word: a wire it
-    refuses is taken back and the panel says why). Strands-or-guides and Any take either; a mesh
-    goes only into a mesh."""
-    if "Mesh" in (a, b):
-        return a == b or "Any" in (a, b)
-    return a == b or a in ("Any", "Curves") or b in ("Any", "Curves")
+def compatible(a, b, out=True):
+    """Whether a wire can join ports of these types: `a` the wire's own end (an output when `out`,
+    else an input), `b` the other (the core's portTypesMatch through the helper, which has the last
+    word: a wire it refuses is taken back and the panel says why)."""
+    return graph_tree.port_types_match(a, b) if out else graph_tree.port_types_match(b, a)
 
 
 def viewable(box):
-    return any(_port_type(s) in ("Strands", "Curves") for s, _p in box.outputs)
+    return graph_tree.viewable(box.node)
 
 
 def linkable(node):
@@ -474,7 +472,7 @@ def _draw_wire_drag(p, g, t):
         if box.node == _wire["from"].node:
             continue
         for s, (px, py) in (box.inputs if _wire["out"] else box.outputs):
-            if compatible(kind, _port_type(s)):
+            if compatible(kind, _port_type(s), _wire["out"]):
                 r = (PORT_R + 3.0) * k
                 p.rect((px - r, py - r, 2 * r, 2 * r), (0, 0, 0, 0), r, with_alpha(t["selected"], 0.9), 1.5 * k)
 
@@ -1179,7 +1177,7 @@ def _wire_target(g, x, y):
     port = g.port_at(x, y, outputs=not _wire["out"], inputs=_wire["out"])
     if port is None or port[0].node == _wire["from"].node:
         return None
-    return port if compatible(_port_type(_wire["from"]), _port_type(port[1])) else None
+    return port if compatible(_port_type(_wire["from"]), _port_type(port[1]), _wire["out"]) else None
 
 
 def _connect(tree, out_socket, in_socket):
@@ -1196,7 +1194,7 @@ def _drop_wire(context, tree, g, x, y, moved):
         box = g.box_at(x, y)
         if box is not None and box.node != source.node:
             ports = box.inputs if out else box.outputs
-            free = [s for s, _p in ports if compatible(_port_type(source), _port_type(s))
+            free = [s for s, _p in ports if compatible(_port_type(source), _port_type(s), out)
                     and not (out and s.is_linked)]
             if free:
                 target = (box, free[0], not out, None)
@@ -1318,11 +1316,11 @@ def _add_node(context, item, at):
     if source is not None:
         try:
             if _search.get("out"):
-                into = [s for s in node.inputs if s.enabled and compatible(_port_type(source), _port_type(s))]
+                into = [s for s in node.inputs if s.enabled and compatible(_port_type(source), _port_type(s), True)]
                 if into:
                     _connect(tree, source, into[0])
             else:
-                outs = [s for s in node.outputs if s.enabled and compatible(_port_type(source), _port_type(s))]
+                outs = [s for s in node.outputs if s.enabled and compatible(_port_type(source), _port_type(s), False)]
                 if outs:
                     _connect(tree, outs[0], source)
         except ReferenceError:  # (the wire's node went meanwhile)

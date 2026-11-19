@@ -18,19 +18,7 @@ namespace {
 // cache's poses, the driver cache's curves (evaluate and view share it, so a view sees what a render sees; a simulation
 // steps over other frames with the same).
 GuidesPtr curvesAt(const AlembicCurvesReader& cache, double seconds, const char* layer = nullptr) {
-    const StrandSet curves = cache.at(seconds);
-    auto out = std::make_shared<GuideSet>();
-    const std::vector<float>* channel = layer ? curves.pointChannel(layer) : nullptr;
-    for (std::size_t s = 0; s < curves.strandCount(); ++s) {
-        const Vec3f* p = curves.strandPoints(s);
-        Guide& g = out->add(curves.ids()[s], std::vector<Vec3f>(p, p + curves.strandPointCount(s)));
-        if (channel) {
-            const auto begin = channel->begin() + static_cast<std::ptrdiff_t>(curves.strandBegin(s));
-            std::vector<float> values(begin, begin + static_cast<std::ptrdiff_t>(curves.strandPointCount(s)));
-            if (std::any_of(values.begin(), values.end(), [](float v) { return v != 0.0f; })) g.pointAttributes[layer] = std::move(values);
-        }
-    }
-    return out;
+    return std::make_shared<GuideSet>(guidesOfCurves(cache.at(seconds), layer));  // (every host's: groom.h)
 }
 
 void feedTime(GroomSession& session, GroomScene& scene, const AlembicCurvesReader* guideCache,

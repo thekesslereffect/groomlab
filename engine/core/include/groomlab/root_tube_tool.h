@@ -58,7 +58,7 @@ public:
         int segments = 12;     // ... and spans
         float taper = 0.5f;    // the tip's width, a share of the root's
         float density = 1.0f;  // a drawn path's points, times this
-        std::string group;     // where new roots go ("": kRootTubeGroup)
+        std::string group;     // where new roots go: the group picked when a top group, else kRootTubeGroup
     };
     Settings settings;
 

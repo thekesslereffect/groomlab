@@ -83,6 +83,10 @@ DriverAttachments attachmentsOf(const DriverBind& bind, const GuideHierarchy* hi
 // pose (the scalp itself when it has none). Drivers of fewer than 2 points are left out. Without
 // a scalp (null or empty), the drivers as they are, anchored nowhere.
 DriverBind bindDrivers(const GuideSet& drivers, const ScalpMesh* scalp, int frame);
+// Bind Drivers (every host's): the drivers bound again (bindDrivers), the guides attached in
+// `before` (the groom's bind until now) staying attached. Its JSON ("" when nothing is bound or
+// attached), what the groom stores as its driverBind.
+std::string reboundDriversJson(const GuideSet& drivers, const ScalpMesh* scalp, int frame, const DriverBind& before);
 
 // The drivers as bound and as they are now, both in the space the graph evaluates in: `graph` is
 // the scalp the graph evaluates on (the rest pose while following the scalp, else the scalp now),

@@ -482,12 +482,13 @@ TEST(AppGraphEditor, ABraidsShowTubesButtonShowsItsTubes) {
     QCoreApplication::processEvents();
     EXPECT_TRUE(window.shell()->graph()->braidTubesShown(braid));
     EXPECT_TRUE(window.document()->updateDisplay(window.displaySettings()).item(DisplayItemId::BraidTubes).shown);
-    // The display option a scripted run sets (--display braidTubes=...): a Braid node's name, * every one.
+    // The display option a scripted run sets (--display braidTubes=...): a node's name, * every one
+    // with the button (the Braid, and the Guides node: the tubes its guides carry).
     EXPECT_TRUE(window.setDisplayText(QStringLiteral("braidTubes=")));
     EXPECT_TRUE(window.displaySettings().braidTubes.empty());
     EXPECT_FALSE(window.setDisplayText(QStringLiteral("braidTubes=nope")));
     EXPECT_TRUE(window.setDisplayText(QStringLiteral("braidTubes=*")));
-    EXPECT_EQ(window.displaySettings().braidTubes, braid);
+    EXPECT_EQ(braidTubeNames(window.displaySettings().braidTubes), (std::vector<std::string>{braid, "guides"}));
     std::error_code ec;
     std::filesystem::remove(std::filesystem::u8path(path), ec);
 }

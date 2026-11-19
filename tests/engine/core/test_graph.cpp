@@ -1642,6 +1642,52 @@ TEST(GraphEdit, ClumpColorsNameTheirClumpAndLightIt) {
     EXPECT_EQ(renamedColorSource("clumpId", "c1", "front"), "clumpId");
 }
 
+TEST(GraphEdit, ViewBakeAndValueKindsAreOneRuleForEveryHost) {
+    // View Up to Here, Bake Node to Guides and a Value node taking a param's kind: the core's rules,
+    // every host's editor asking them (they were three of each before).
+    const nlohmann::json g = {
+        {"version", 1},
+        {"nodes",
+         {{{"name", "g"}, {"type", "Guides"}},
+          {{"name", "curl"}, {"type", "Curl"}},
+          {{"name", "free"}, {"type", "Curl"}},
+          {{"name", "s"}, {"type", "Scatter"}},
+          {{"name", "c"}, {"type", "Clump"}, {"paramInputs", {"strength"}}},
+          {{"name", "v"}, {"type", "Value"}, {"params", {{"kind", "integer"}}}},
+          {{"name", "o"}, {"type", "Output"}}}},
+        {"connections",
+         {{{"from", "g"}, {"to", "curl"}, {"input", "strands"}},
+          {{"from", "s"}, {"to", "c"}, {"input", "strands"}},
+          {{"from", "c"}, {"to", "o"}, {"input", "strands"}}}},
+        {"output", "o"}};
+    GraphEdit edit(g.dump());
+    EXPECT_EQ(edit.outputTypes("curl"), (std::vector<std::string>{"Guides"})) << "a Curl on guides gives guides";
+    EXPECT_EQ(edit.outputTypes("free"), (std::vector<std::string>{"Curves"}));
+    EXPECT_TRUE(edit.viewable("s"));
+    EXPECT_TRUE(edit.viewable("c"));
+    EXPECT_TRUE(edit.viewable("free")) << "a Curves node fed nothing yet";
+    EXPECT_FALSE(edit.viewable("curl")) << "guides: no strands to view";
+    EXPECT_FALSE(edit.viewable("g"));
+    EXPECT_FALSE(edit.viewable("v"));
+    EXPECT_FALSE(edit.viewable("nope"));
+    EXPECT_TRUE(edit.bakeable("s"));
+    EXPECT_TRUE(edit.bakeable("curl")) << "guides bake too";
+    EXPECT_TRUE(edit.bakeable("g"));
+    EXPECT_FALSE(edit.bakeable("free")) << "nothing fed: neither strands nor guides";
+    EXPECT_FALSE(edit.bakeable("o")) << "the Output node";
+    EXPECT_FALSE(edit.bakeable("v"));
+    // A Value no link leaves, drawn into a float param's input: it becomes a number.
+    EXPECT_EQ(edit.valueKindForInput("v", "c", "strength"), "number");
+    EXPECT_EQ(edit.valueKindForInput("s", "c", "strength"), "") << "not a Value";
+    EXPECT_EQ(edit.valueKindForInput("v", "c", "nope"), "");
+    EXPECT_TRUE(edit.connectByHand("v", "c", "strength")) << "its kind changed";
+    const nlohmann::json after = nlohmann::json::parse(edit.toJson());
+    for (const nlohmann::json& n : after["nodes"]) {
+        if (n["name"] == "v") EXPECT_EQ(n["params"]["kind"], "number");
+    }
+    EXPECT_EQ(edit.valueKindForInput("v", "c", "strength"), "") << "it feeds a param now: its kind kept";
+}
+
 TEST(GraphEdit, ShowTubesIsABraidNodesAndFollowsIt) {
     // Show Tubes (every host's button on a Braid node): the nodes showing their tubes are a display
     // setting, names one a line; offered on Braid nodes (and nodes giving guides: Session.ShowTubesOnANodeGivingGuides...), toggled per node (several may show),

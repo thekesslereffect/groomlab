@@ -580,7 +580,7 @@ void GroomSubSceneOverride::updateTubeWires(MHWRender::MSubSceneContainer& conta
     // with Colors.
     std::set<GuideId> selected;
     for (const auto& [id, weight] : shape_->guideSelectionWeights()) {
-        if (weight >= 1.0f) selected.insert(id);
+        if (weight >= 0.999f) selected.insert(id);  // (as DisplayBuilder::buildBrushTubes, every host's)
     }
     TubeDisplayOptions options;
     options.wireframe = tubeWireframeDrawn_;
@@ -595,11 +595,10 @@ void GroomSubSceneOverride::updateTubeWires(MHWRender::MSubSceneContainer& conta
         if (g.positions.empty()) return nullptr;
         return std::make_shared<DisplayGeometry>(std::move(g));
     };
-    const float warm[4] = {1.0f, 0.7f, 0.15f, 1.0f};  // the selected: warm, opaque, thicker
+    const DisplayTheme theme;  // the core's colors (DisplayBuilder::buildBrushTubes): the selected warm, opaque, thicker
     updateItem(container, kTubeWiresItem, tubes.wireColor.data(), 5, shared(tubes.wires), 1.0f);
-    updateItem(container, kTubeWiresSelectedItem, warm, 5, shared(tubes.selectedWires), 2.0f);
-    const float shade[4] = {0.5f, 0.56f, 0.62f, 1.0f};
-    updateItem(container, kTubeSurfacesItem, shade, MHWRender::MRenderItem::sDormantFilledDepthPriority,
+    updateItem(container, kTubeWiresSelectedItem, theme.selectedTubeWires.data(), 5, shared(tubes.selectedWires), 2.0f);
+    updateItem(container, kTubeSurfacesItem, theme.tubeSurfaces.data(), MHWRender::MRenderItem::sDormantFilledDepthPriority,
                tubeShadedDrawn_ ? shared(tubes.surfaces) : nullptr, 1.0f);
 }
 

@@ -266,12 +266,9 @@ def bind_drivers(groom, frame=0):
     their place round their drivers as they were there. The attachments are kept. Stored in the
     groom's driverBind (saved with the scene and in .groom files). Returns how many drivers were
     bound."""
+    # (the attached guides kept by the command: the core's reboundDriversJson, every host's)
     text = cmds.groomLabDrivers(groom, bind=True, frame=float(frame)) or ""
     bind = json.loads(text) if text else {}
-    attached = _bind(groom).get("attached")
-    if attached:
-        bind["attached"] = attached
-        bind.setdefault("frame", int(round(frame)))
     _store(groom, bind)
     return len(bind.get("drivers", []))
 

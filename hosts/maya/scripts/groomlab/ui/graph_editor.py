@@ -120,12 +120,6 @@ CATEGORY_COLORS = dict((name, QtGui.QColor(color)) for name, color in definition
 # plumbing for scripts and compounds, hidden from the panel unless changed.
 PLUMBING = set(tuple(pair) for pair in definitions.get("graph/plumbing"))
 
-# Reads whose "no node upstream writes it" note waits until the user sets them, or the param that
-# uses them, off its default (as the core's own note on HairColor does): a fresh groom's HairColor
-# shares its randomness per clump (clumpShare) with no Clump before it, and nothing needs fixing
-# until one is added or the share is changed. (node type, reading param) -> the param using it.
-QUIET_READS = {("HairColor", "clumpChannel"): "clumpShare"}
-
 SCATTER_LENGTH_TIP = ("An Interpolate after this Scatter gives its strands the guides' shapes and lengths, so this "
                       "length only shows where no guide reaches (and before any guide is placed). To make the hair "
                       "longer or shorter, brush the guides (Length, Cut) or trim with the Length node.")
@@ -362,22 +356,9 @@ def search_rank(text, op_type, words):
     """Where node type `op_type` ranks for the search `text` (lower first), None when it doesn't
     match: its name or label starting with it, containing it, a search keyword or its category title, a param's name, its
     description, then a param's description. `words`: NodeSearch's entry (lowercase texts)."""
-    if not text:
-        return 5
-    name = op_type.lower()
-    label = words.get("label", name)
-    parts = text.split()
-    if name.startswith(text) or label.startswith(text):
-        return 0
-    if text in name or text in label or text.replace(" ", "") in name:
-        return 1
-    for rank, key in ((2, "keywords"), (3, "params"), (4, "about")):
-        if all(part in words.get(key, "") or part in name for part in parts):
-            return rank
-    everything = " ".join([name] + [words.get(k, "") for k in ("keywords", "params", "about", "details")])
-    if all(part in everything for part in parts):
-        return 5
-    return None
+    import groomlab_core
+    # (the core's nodeSearchRank, every host's search)
+    return groomlab_core.node_search_rank(text, dict(words, name=op_type.lower(), label=words.get("label", op_type.lower())))
 
 
 ADVANCED = "Advanced"  # the section the advanced params fold away in, last (and a group of that name)
@@ -386,21 +367,12 @@ ADVANCED = "Advanced"  # the section the advanced params fold away in, last (and
 def param_sections(specs):
     """[(section, [spec, ...])] in the panel's order: the main params ("" : no header), each group in
     the order the spec lists them, then Advanced (every advanced param, whatever its group). With
-    fewer than two groups there are no group headers: the params read as one list, as before."""
-    groups = []
-    for spec in specs:
-        group = spec.get("group") or ""
-        if group and group != ADVANCED and not spec.get("advanced") and group not in groups:
-            groups.append(group)
-    headed = len(groups) >= 2
-
-    def section_of(spec):
-        group = spec.get("group") or ""
-        if spec.get("advanced") or group == ADVANCED:
-            return ADVANCED
-        return group if headed else ""
-
-    sections = [(key, [s for s in specs if section_of(s) == key]) for key in [""] + groups + [ADVANCED]]
+    fewer than two groups there are no group headers: the params read as one list, as before (the
+    core's param_sections, every host's)."""
+    import groomlab_core
+    of = groomlab_core.param_sections(json.dumps(list(specs)))
+    order = [""] + [s for s in dict.fromkeys(of) if s not in ("", ADVANCED)] + [ADVANCED]
+    sections = [(key, [s for s, section in zip(specs, of) if section == key]) for key in order]
     return [(key, members) for key, members in sections if members]
 
 
@@ -630,6 +602,7 @@ class NodeItem(QtWidgets.QGraphicsItem):
         spec = model.node_spec(name)
         # Show Tubes on its header: a Braid's section tubes, a node giving guides the tubes they carry.
         self.tubes = model.braid_tubes_offered(name)
+        self.can_view = model.viewable(name)  # View Up to Here (the core's rule, every host's)
         self.inputs = {}
         y = HEADER_H + ROW_H / 2 + 4
         for port in spec["inputs"]:
@@ -872,8 +845,8 @@ class NodeItem(QtWidgets.QGraphicsItem):
     # -- Header toggles: exposed inputs, Focus (view up to here) and Bypass, as in Yeti --
 
     def viewable(self):
-        """Focus shows a node giving strands (a Clump's centers as dots)."""
-        return self.output.port_type == "Strands"
+        """Focus shows a node giving strands as connected (GraphEdit.viewable)."""
+        return self.can_view
 
     def toggle_rects(self):
         """Header button rectangles; only nodes with linkable params get Expand Inputs."""
@@ -1042,7 +1015,7 @@ class NodeItem(QtWidgets.QGraphicsItem):
             state.add("node.viewable")
         if self.op_type == "Sculpt":
             state.add("node.sculpt")
-        if self.output.port_type in ("Strands", "Guides") and self.op_type != "Output":
+        if self.editor.model.bakeable(self.name):  # (the core's rule, every host's)
             state.add("node.bakeable")
         if self.mappable():
             state.add("node.mappable")
@@ -1432,19 +1405,16 @@ class NodeSearch(QtWidgets.QFrame):
         layout.addWidget(self.about)
         self.entries = []
         self.labels = {}
+        import groomlab_core
         catalog = editor.catalog
         refresh_library(catalog)
         for category, types in categories(catalog):
             for op_type in types:
                 spec = catalog.spec(op_type) if catalog is not None else {}
-                params = spec.get("params", [])
                 self.labels[op_type] = (spec.get("label") or op_type, spec.get("description", ""))
-                self.entries.append((op_type, category, {
-                    "label": (spec.get("label") or pretty(op_type)).lower(),
-                    "keywords": " ".join([spec.get("keywords") or "", category]).lower(),
-                    "params": " ".join([p["name"] for p in params] + [pretty(p["name"]) for p in params]).lower(),
-                    "about": " ".join([category, spec.get("description", "")]).lower(),
-                    "details": " ".join(p.get("description", "") for p in params).lower()}))
+                # What it is found by: the core's (node_search_words, every host's search).
+                self.entries.append((op_type, category, groomlab_core.node_search_words(
+                    json.dumps(dict(spec, type=op_type, categoryTitle=category)))))
         # The groom's painted maps: each a Map node reading it, found by its name (or map, mask, paint).
         for m in editor.painted_maps():
             key = MAP_ENTRY + m["name"]
@@ -4067,7 +4037,7 @@ class ParamPanel(QtWidgets.QScrollArea):
                                 "Clumps: lockId, then clumpId) unless replacing it is what you want.")
         else:
             read = next((r for r in info.get("reads", []) if r["param"] == spec["name"]), None)
-            if read is not None and not read["reaches"] and not editor.quiet_read(node, spec["name"]):
+            if read is not None and not read["reaches"] and not read.get("quiet"):  # (the core's: its user at its default too)
                 why = ("none applies" if read.get("optional")
                        else "this node ignores it")
                 line = QtWidgets.QLabel(u"\u24d8 no node upstream writes %s: %s" % (read["name"], why))
@@ -5866,8 +5836,7 @@ class GraphEditor(QtWidgets.QWidget):
         """A grey note (the node's "i") on each node reading an attribute no node upstream writes."""
         notes = {}
         for name, info in self.channels().items():
-            missing = [r for r in info.get("reads", []) if not r["reaches"] and not r.get("optional")
-                       and not self.quiet_read(name, r["param"])]
+            missing = [r for r in info.get("reads", []) if not r["reaches"] and not r.get("optional")]
             if missing:
                 notes[name] = "; ".join("reads the attribute %s (%s), which no node upstream writes: it is ignored"
                                         % (r["name"], r["param"]) for r in missing)
@@ -5876,20 +5845,6 @@ class GraphEditor(QtWidgets.QWidget):
         if changed:
             for item in self.items.values():
                 item.update()
-
-    def quiet_read(self, name, param):
-        """Whether node `name`'s attribute-reading `param` keeps its "nothing upstream writes it"
-        note to itself (QUIET_READS): both it and the param using it at their defaults."""
-        if self.model is None or name not in self.model.nodes:
-            return False
-        uses = QUIET_READS.get((self.model.node_type(name), param))
-        if uses is None:
-            return False
-        defaults = {s["name"]: s.get("default") for s in self.model.node_spec(name)["params"]}
-        try:
-            return all(self.model.param(name, p) == defaults.get(p) for p in (param, uses))
-        except gm.GraphError:
-            return False
 
     def note_of(self, name):
         """The node's grey note: what its last evaluation said, and an attribute it reads that does not reach it."""
@@ -5945,9 +5900,7 @@ class GraphEditor(QtWidgets.QWidget):
         try:
             if detach and detach != (dst, input_name):
                 self.model.disconnect(*detach)
-            kind = self.value_kind_for_input(src, dst, input_name)
-            if kind is not None:
-                self.model.set_param(src, "kind", kind)
+            # (by hand: a Value node no link leaves takes the param's kind, GraphEdit.connect_by_hand)
             self.model.connect(src, dst, input_name, output=output, by_hand=True)
         except gm.GraphError as e:
             self.report(str(e))
@@ -5957,24 +5910,8 @@ class GraphEditor(QtWidgets.QWidget):
         self.changed()
 
     def value_kind_for_input(self, src, dst, input_name):
-        """A kind an unconnected Value node can adopt for a parameter input, else None."""
-        if self.model.node_type(src) != "Value" or self.model.downstream_of(src):
-            return None
-        spec = self.model.param_spec(dst, input_name)
-        if spec is None:
-            return None
-        kind = spec.get("kind")
-        if kind == "float":
-            return "number"
-        if kind == "int":
-            return "integer"
-        if kind == "bool":
-            return "bool"
-        if kind == "vec3":
-            return "color" if spec.get("unit") == "color" else "vector"
-        if kind == "string":
-            return "text"
-        return None
+        """A kind an unconnected Value node adopts for a parameter input, else None (the core's)."""
+        return self.model.value_kind_for_input(src, dst, input_name)
 
     def set_param_exposed(self, name, param, exposed):
         """Give a param an input port (a field node can then drive it), or take it away."""
@@ -6046,6 +5983,7 @@ class GraphEditor(QtWidgets.QWidget):
         except gm.GraphError as e:
             self.report(str(e))
             return None
+        self._follow_braid_tubes()  # (a grouped node's Show Tubes goes: only the graph's own nodes show)
         self.rebuild()
         self.items[name].setSelected(True)
         self.changed()
@@ -6111,6 +6049,7 @@ class GraphEditor(QtWidgets.QWidget):
             except (gm.GraphError, ValueError) as e:
                 self.report("%s: %s" % (name, e))
         if done:
+            self._follow_braid_tubes()
             self.rebuild()
             self.changed()
 

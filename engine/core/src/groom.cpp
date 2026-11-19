@@ -140,6 +140,33 @@ bool graphReadsTime(const Graph& graph, NodeId output) {
     return false;
 }
 
+StrandSet guideCurves(const GuideSet& guides) {
+    StrandSet out;
+    for (const Guide& g : guides.guides()) {
+        if (g.points.size() >= 2) out.addStrand(g.id, g.points, {}, g.root);
+    }
+    return out;
+}
+
+GuideSet guidesOfCurves(const StrandSet& curves, const char* pointLayer) {
+    GuideSet out;
+    const std::vector<float>* channel = pointLayer ? curves.pointChannel(pointLayer) : nullptr;
+    for (std::size_t s = 0; s < curves.strandCount(); ++s) {
+        const Vec3f* p = curves.strandPoints(s);
+        Guide& g = out.add(curves.ids()[s], std::vector<Vec3f>(p, p + curves.strandPointCount(s)));
+        if (channel) {
+            const auto begin = channel->begin() + static_cast<std::ptrdiff_t>(curves.strandBegin(s));
+            std::vector<float> values(begin, begin + static_cast<std::ptrdiff_t>(curves.strandPointCount(s)));
+            if (std::any_of(values.begin(), values.end(), [](float v) { return v != 0.0f; })) g.pointAttributes[pointLayer] = std::move(values);
+        }
+    }
+    return out;
+}
+
+StrandSet primaryGuideCurves(const HierarchyPtr& hierarchy) {
+    return hierarchy ? guideCurves(hierarchy->flatten(0)) : StrandSet{};
+}
+
 GuideSet guidesToSimulate(const HierarchyPtr& hierarchy, const GuidesPtr& flat, const std::string& group) {
     if (group != "*") {
         const GroupId gid = hierarchy ? hierarchy->findGroup(group) : kNoGroup;

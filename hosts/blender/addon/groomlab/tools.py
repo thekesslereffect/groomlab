@@ -1141,17 +1141,13 @@ def root_edit(scalp, edit, mode=None):
     return r
 
 
-DENSITY_MAP = "tubeSubdivisionDensity"  # the vertex map Subdivide reads (1: the most, smallest roots)
-DENSITY_START = 0.5                     # its value where nothing is painted
-
-
 def root_subdivide(scalp, apply=False, guides=None, multiplier=1.0):
     """Subdivide (the selected roots, or `guides`, cut into Voronoi cells in the level below, by the
     density map and `multiplier`) or, with `apply`, Apply (every cut by the map and the multiplier
     again, all over); one undo step (helper root_subdivide). Returns {"cells", "removed", "kept",
     "cellLevel": the level the cells are in}."""
     scene = groom.scene_of(scalp)
-    args = {"apply": bool(apply), "map": DENSITY_MAP, "multiplier": float(multiplier)}
+    args = {"apply": bool(apply), "multiplier": float(multiplier)}  # (the helper finds the density map)
     if guides is not None:
         args["guides"] = [int(g) for g in guides]
     r = call(scalp, "root_subdivide", **args)
@@ -1163,18 +1159,22 @@ def root_subdivide(scalp, apply=False, guides=None, multiplier=1.0):
 
 
 def ensure_density_map(scalp, pick=True):
-    """The subdivision density map (a gray vertex map), made at DENSITY_START when missing; `pick`:
-    picked to paint toward 1."""
+    """The subdivision density map (a gray vertex map: the one map, else an older numbered one,
+    the helper's density_map), made at its start value when missing; `pick`: picked to paint
+    toward 1. Returns its name."""
     scene = groom.scene_of(scalp)
     t = scene.groomlab_tools
+    found = call(scalp, "density_map")
+    name = found["map"]
+    if not name:
+        name = found["name"]
+        map_create(scalp, name, kind="vertices", value=float(found["start"]))
     refresh_info(scalp, scene)
-    if not any(m.name == DENSITY_MAP for m in t.maps):
-        map_create(scalp, DENSITY_MAP, kind="vertices", value=DENSITY_START)
     if pick:
         with props.quiet():
-            t.paint_map = DENSITY_MAP
+            t.paint_map = name
             t.value = 1.0
-    return DENSITY_MAP
+    return name
 
 
 def root_state(scalp):
@@ -1328,7 +1328,8 @@ def refresh_info(scalp, scene=None):
     gt = groom_tools(scalp)
     try:
         info = call(scalp, "guides_info", guideColorSeed=scalp.name)  # the automatic colors as drawn
-        maps = call(scalp, "maps_list")["maps"]
+        listed = call(scalp, "maps_list")
+        maps = listed["maps"]
         gt.undo = call(scalp, "undo_state")
     except HelperError as e:
         status(scene, e.message)
@@ -1337,6 +1338,7 @@ def refresh_info(scalp, scene=None):
     gt.maps = maps
     t = scene.groomlab_tools
     with props.quiet():
+        t.root_density_map = listed.get("densityMap") or ""
         t.maps.clear()
         for m in maps:
             if m.get("freezeMask"):
@@ -1521,13 +1523,11 @@ def refresh_tubes(scalp, scene=None):
                 t.tube_root_hold = float(tube.get("rootHold", 0.0)) * 100.0
                 t.tube_mid_hold = float(tube.get("midHold", 0.0)) * 100.0
                 t.tube_tip_hold = float(tube.get("tipHold", 0.0)) * 100.0
-            widths = tube.get("width") or [0.1]
-            aspects = tube.get("aspect") or [1.0]
-            twists = tube.get("twist") or [0.0]
-            t.tube_reference = max(widths)
-            t.tube_width = max(widths)
-            t.tube_flatness = min(max(1.0 - sum(aspects) / len(aspects), 0.0), 0.99)
-            t.tube_twist = min(max(sum(twists) / len(twists), -3.14159265), 3.14159265)
+            card = info.get("card") or {}  # Width, Flatness, Twist: the core's (tubeCardValues, every host's)
+            t.tube_reference = float(card.get("width", 0.1))
+            t.tube_width = t.tube_reference
+            t.tube_flatness = float(card.get("flatness", 0.0))
+            t.tube_twist = float(card.get("twist", 0.0))
         if t.tube_choice in names:  # the library list follows the shape picked
             t.tube_shape_index = names.index(t.tube_choice)
         try:

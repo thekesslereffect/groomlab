@@ -73,8 +73,9 @@ public:
     // (inputPoints; guides, a Guides node's, an ImportCurves', a GuideCache's or a Simulate's, through
     // any curve nodes after them: inputCurves, each clump along its guide), a Cards node of
     // cardsFrom strands fed guides lays its cards along them (guides).
-    // Disconnecting changes nothing back; connect alone (pastes, compounds, scripts,
-    // loading) never changes a param. True when a param changed.
+    // A Value node no link leaves yet, drawn into a param's input, takes that param's kind first
+    // (valueKindForInput). Disconnecting changes nothing back; connect alone (pastes, compounds,
+    // scripts, loading) never changes a param. True when a param changed.
     bool connectByHand(const std::string& src, const std::string& dst, const std::string& input,
                        const std::string& output = {});
     // Removes what feeds dst's input; false when nothing did.
@@ -124,6 +125,20 @@ public:
     // A node's output type as connected (`output` "": its first): Curves gives what feeds its
     // first Curves input.
     std::string outputType(const std::string& name, const std::string& output = {}) const;
+    // Each of a node's outputs' types as connected (outputType), in its spec's order.
+    std::vector<std::string> outputTypes(const std::string& name) const;
+    // View Up to Here (every host's eye on a node's header, and its V key): a node with an output
+    // giving strands as connected (outputType: Strands, or Curves with nothing feeding it), not one
+    // giving only guides, fields, values or a mesh. False for no such node.
+    bool viewable(const std::string& name) const;
+    // Bake Node to Guides (every host's node menu, its choices): a node, not the Output node, whose
+    // first output gives strands or guides as connected (outputType). False for no such node.
+    bool bakeable(const std::string& name) const;
+    // A Value node no link leaves yet, drawn into a param's input (an exposed param's port): the
+    // kind it takes to fit that param (a float "number", an int "integer", a bool "bool", a vec3
+    // "vector", or "color" for a color, a string "text"); "" for anything else. connectByHand sets
+    // it; editors offer the link while dragging when this is not "".
+    std::string valueKindForInput(const std::string& src, const std::string& dst, const std::string& input) const;
     // Every node feeding `name`, directly or not.
     std::vector<std::string> upstream(const std::string& name) const;
     // Clump Colors (every host's button on a Clump, issue #77). clumpChannel: the strand channel a

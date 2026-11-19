@@ -35,6 +35,7 @@
 #include "tube_panel.h"
 
 #include "groomlab/graph_controls.h"
+#include "groomlab/graph_edit.h"
 #include "groomlab/node_catalog.h"
 #include "groomlab/node_library.h"
 
@@ -376,15 +377,17 @@ std::set<std::string> AppActions::nodeState(MainWindow& w, const std::string& no
     }
     if (type.empty()) return s;
     const json* spec = w.document_->nodeSpec(node);
-    bool strands = false, mappable = false;
+    bool mappable = false;
     if (spec) {
-        for (const json& p : spec->value("outputs", json::array())) {
-            const std::string t = p.value("type", std::string());
-            strands = strands || t == "Strands" || t == "Guides";
-        }
         for (const json& p : spec->value("params", json::array())) mappable = mappable || (p.contains("port") && p["port"].is_object());
     }
-    if (strands && type != "Output") s.insert({"node.viewable", "node.bakeable"});
+    // View Up to Here and Bake Node to Guides: the core's rules (every host's menu).
+    try {
+        const GraphEdit edit(w.document_->graph().dump());
+        if (edit.viewable(node)) s.insert("node.viewable");
+        if (edit.bakeable(node)) s.insert("node.bakeable");
+    } catch (const std::exception&) {
+    }
     s.insert("type." + type);  // (graph_ui.json's nodeActions: by the node's type)
     if (type == "Sculpt") s.insert("node.sculpt");
     if (mappable) s.insert("node.mappable");

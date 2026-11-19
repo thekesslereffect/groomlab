@@ -123,6 +123,13 @@ bool cardCellsOverlap(const std::array<float, 4>& a, const std::array<float, 4>&
 // Where a new block of `width` goes in a scene: to the right of the others (its root band's
 // center), a gap of half the widest card between them.
 Vec3f nextCardBlockOrigin(const CardBlockAtlas& atlas, float width);
+// Card Atlas names (every host's): Add's "block<N>", the first N from the block count on that no
+// block of `atlas` has; Duplicate's "<name>_copy" (then _copy2, _copy3...) that none has.
+std::string newCardBlockName(const CardBlockAtlas& atlas);
+std::string cardBlockCopyName(const CardBlockAtlas& atlas, const std::string& name);
+// Whether `to` puts the block on another root band than `from` (its width, thickness or root
+// rotation changed): its groom moves onto the new band (moveCardBlockGuides), every host's.
+bool cardBlockBandChanged(const CardBlock& from, const CardBlock& to);
 
 // ---- What a host makes of a block -------------------------------------------------------------
 

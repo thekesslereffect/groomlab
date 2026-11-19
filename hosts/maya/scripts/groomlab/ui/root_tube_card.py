@@ -464,17 +464,12 @@ class RootTubeCard(QtCore.QObject):
                                                               ", %d kept" % kept if kept else ""))
 
     def density_map(self, groom):
-        """The density map's name when the groom has it (an older numbered one, named the one map
-        now, its painting kept), else None."""
+        """The density map's name when the groom has it (the one map, else an older numbered one,
+        its painting read as it is: the core's subdivision_density_map_in, every host's), else None."""
+        import groomlab_core
         from groomlab import painting
         try:
-            names = painting.list_maps(groom)
-            if root_tubes.DENSITY_MAP not in names:
-                older = sorted(m for m in names if m.startswith(root_tubes.DENSITY_MAP))
-                if not older:
-                    return None
-                painting.rename_map(groom, older[0], root_tubes.DENSITY_MAP)
-            return root_tubes.DENSITY_MAP
+            return groomlab_core.subdivision_density_map_in(list(painting.list_maps(groom))) or None
         except RuntimeError:
             return None
 
@@ -509,11 +504,7 @@ class RootTubeCard(QtCore.QObject):
                 self._levels = None
                 self.fill_levels(groom)
                 info_levels = root_tubes.tube_levels(groom, [int(info["cells"][0])])
-                data = groomlab.get_hierarchy(groom) or {}
-                cell = int(info["cells"][0])
-                gid = next((x.get("group") for x in data.get("guides", []) if int(x["id"]) == cell), None)
-                group = next((gr.get("name") for gr in data.get("groups", []) if gr.get("id") == gid), None)
-                level = info_levels["levels"].index(group) + 1 if group in info_levels["levels"] else self._current + 1
+                level = int(info.get("cellLevel") or self._current + 1)  # (the core's: the level the cells are in)
                 self._after_levels(groom, info_levels["base"], level)
             except (RuntimeError, ValueError, KeyError, IndexError):
                 pass

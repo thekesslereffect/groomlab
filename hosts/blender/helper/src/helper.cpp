@@ -258,6 +258,7 @@ void adopt(Session& s, GroomFile file) {
     s.groom = std::move(session);
     adoptMaps(s, data);  // painted maps outlive the host's scalp (no color sets)
     resetTools(s);       // the stroke host was the old groom's
+    adoptGroupDisplay(s, file);  // the file's guide group colors and hidden groups
     s.restGuides = nullptr;
     s.restMesh = nullptr;
     s.file = std::move(file);
@@ -278,6 +279,7 @@ GroomFile currentFile(const Session& s) {
     file.data.scaleReference = s.groom->scaleReference();  // in use: the first area measured when none was set
     file.framesPerSecond = s.groom->framesPerSecond();
     writeMaps(s, file);
+    writeGroupDisplay(s, file);  // the guide groups' colors, the hidden ones (every host's .groom)
     return file;
 }
 
@@ -285,13 +287,7 @@ GroomFile currentFile(const Session& s) {
 void feedTime(Session& s) {
 #if GROOMLAB_HAS_ALEMBIC
     if (s.guideCache) {
-        const StrandSet curves = s.guideCache->at(s.seconds);
-        auto poses = std::make_shared<GuideSet>();
-        for (std::size_t i = 0; i < curves.strandCount(); ++i) {
-            const Vec3f* p = curves.strandPoints(i);
-            poses->add(curves.ids()[i], std::vector<Vec3f>(p, p + curves.strandPointCount(i)));
-        }
-        s.groom->setGuidePoses(poses);
+        s.groom->setGuidePoses(std::make_shared<GuideSet>(guidesOfCurves(s.guideCache->at(s.seconds))));  // (groom.h)
     }
 #else
     (void)s;
@@ -966,16 +962,6 @@ std::unique_ptr<ExportJob> openExport(Session& s, const json& args) {
     return job;
 }
 
-// The primary guides as curves (what Unreal simulates): the hierarchy's level 0.
-StrandSet primaryCurves(const HierarchyPtr& hierarchy) {
-    StrandSet out;
-    if (!hierarchy) return out;
-    for (const Guide& g : hierarchy->flatten(0).guides()) {
-        if (g.points.size() >= 2) out.addStrand(g.id, g.points, {}, g.root);
-    }
-    return out;
-}
-
 std::size_t exportFrame(Session& s, ExportJob& job, double frame, float density) {
     if (frame <= job.lastFrame) fail("bad_request", "export frames must increase");
     s.seconds = frameToSeconds(frame, s.groom->framesPerSecond());
@@ -985,13 +971,11 @@ std::size_t exportFrame(Session& s, ExportJob& job, double frame, float density)
         ViewRequest at;  // (the groom evaluated at the frame: its hierarchy posed on that scalp)
         at.time = s.seconds;
         at.wantBounds = false;
-        const ViewResult& view = s.groom->evaluate(at);
+        s.groom->evaluate(at);
         StrandSet curves;
         try {
-            const GuideSet guides = guidesToSimulate(view.hierarchy, s.groom->data().guides, job.guideGroup);
-            for (const Guide& g : guides.guides()) {
-                if (g.points.size() >= 2) curves.addStrand(g.id, g.points, {}, g.root);
-            }
+            // (posed, no shot sculpts: they apply on top of the simulated guides, GroomSession::simulationGuides)
+            curves = groomlab::guideCurves(s.groom->simulationGuides(job.guideGroup));
             job.abc->writeFrame(curves);
         } catch (const std::exception& e) {
             fail("io", e.what());
@@ -1028,7 +1012,7 @@ std::size_t exportFrame(Session& s, ExportJob& job, double frame, float density)
 #if GROOMLAB_HAS_ALEMBIC
         if (job.abc) job.abc->writeFrame(st, scalp.get(), scaleMesh.get());
         if (job.engine) {
-            const StrandSet primaries = job.unreal ? primaryCurves(view.hierarchy) : StrandSet{};
+            const StrandSet primaries = job.unreal ? primaryGuideCurves(view.hierarchy) : StrandSet{};
             job.engine->writeFrame(st, job.unreal ? &primaries : nullptr, scalp.get());
         }
 #endif
@@ -1650,6 +1634,7 @@ json Helper::run(const std::string& cmd, const json& args) {
         }
         const json names = grooms;
         const std::string name = file.name;
+        const std::string braidTubes = file.braidTubes;
         adopt(s, std::move(file));
         s.seconds = 0.0;
         json info = groomInfo(s);
@@ -1657,6 +1642,7 @@ json Helper::run(const std::string& cmd, const json& args) {
         info["space"] = spaceJson(s.space);
         info["name"] = name;
         info["grooms"] = names;  // every groom's name, in the file's order
+        info["braidTubes"] = braidTubes;  // Show Tubes' nodes, as saved (the add-on keeps them)
         return info;
     }
     if (cmd == "save_groom") {
@@ -1675,6 +1661,7 @@ json Helper::run(const std::string& cmd, const json& args) {
         GroomFile file = currentFile(s);  // (its paths as the session reads them: from oldDir)
         file.directory = oldDir;
         file.name = optString(args, "name", "");
+        if (args.contains("braidTubes")) file.braidTubes = optString(args, "braidTubes", "");  // Show Tubes' nodes (the add-on's)
         if (file.source.empty()) file.source = "Blender";
         if (axis == "Z") convertUpAxis(file, "Z");
         GroomWriteOptions options;
@@ -2054,6 +2041,39 @@ json Helper::run(const std::string& cmd, const json& args) {
             if (edit.braidTubesOffered(name)) offered.push_back(name);
         }
         return {{"shown", shown}, {"lit", lit}, {"offered", offered}};
+    }
+    if (cmd == "graph_nodes") {
+        // What each node of the groom's graph is to the editors (the core's rules, graph_edit.h): its
+        // outputs' types as connected (outputTypes), View Up to Here (viewable), Bake Node to Guides
+        // (bakeable), Show Tubes (braidTubesOffered).
+        Session& s = session(args);
+        const GraphEdit edit(graphText(*s.groom));
+        json nodes = json::object();
+        for (const std::string& name : edit.nodeNames()) {
+            json outputs = json::array();
+            try {
+                for (const std::string& type : edit.outputTypes(name)) outputs.push_back(type);
+            } catch (const std::exception&) {
+                // (a node no operator makes: no outputs said)
+            }
+            nodes[name] = {{"outputs", outputs}, {"viewable", edit.viewable(name)}, {"bakeable", edit.bakeable(name)},
+                           {"tubes", edit.braidTubesOffered(name)}};
+        }
+        return {{"nodes", nodes}};
+    }
+    if (cmd == "port_types") {
+        // Which port types a link joins (the core's portTypesMatch, output type first): {out: [ins]}.
+        static const PortType kTypes[] = {PortType::Strands, PortType::Guides, PortType::Mesh, PortType::Field,
+                                          PortType::Curve,   PortType::Curves, PortType::Value};
+        json table = json::object();
+        for (PortType out : kTypes) {
+            json ins = json::array();
+            for (PortType in : kTypes) {
+                if (portTypesMatch(out, in)) ins.push_back(portTypeName(in));
+            }
+            table[portTypeName(out)] = ins;
+        }
+        return {{"matches", table}};
     }
     if (cmd == "renamed_color_source") {
         // A color source naming a renamed node follows it (renamedColorSource).

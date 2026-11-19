@@ -712,6 +712,11 @@ public:
     HierarchyPtr hierarchy();
     // The active hierarchy with poses but no correctives: what shot sculpts are recorded against.
     HierarchyPtr posedHierarchy();
+    // Export Guides for Simulation (every host's): guidesToSimulate of the posed hierarchy (no
+    // correctives: shot sculpts apply on top of the simulated guides, so the sim never starts from
+    // them) at the session's time and scalp. `group` "*" every guide, else one guide group's
+    // (std::runtime_error for no such group). Empty without guides. No graph run.
+    GuideSet simulationGuides(const std::string& group = "*");
     // The guides as stored, rooted on the scalp as given: no poses, correctives or preview (what
     // brush strokes edit and write back). Null without guides. No graph run.
     HierarchyPtr authoredHierarchy() { return rootedHierarchy(); }

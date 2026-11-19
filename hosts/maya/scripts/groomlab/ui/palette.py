@@ -340,7 +340,7 @@ class TubePanel(QtWidgets.QWidget):
         self.flatness.setObjectName("tubeFlatness")
         self.flatness.setToolTip("0: as the shape is drawn; toward 1 a flat ribbon (the sections' aspect 1 - this, "
                                  "the same root to tip)")
-        self.flatness.committed.connect(lambda v: self.apply(aspect=max(1.0 - v, 0.01)))
+        self.flatness.committed.connect(lambda v: self.apply(aspect=groomlab_core.tube_aspect_of_flatness(v)))
         self.twist = widgets.SoftSlider(0.0, -180.0, 180.0, key=None, label="Twist", suffix=u"°")
         self.twist.setObjectName("tubeTwist")
         self.twist.setToolTip("Degrees: the sections turned about the guide from lying flat on the scalp, the same "
@@ -601,8 +601,9 @@ class TubePanel(QtWidgets.QWidget):
             count = len(self._selection)
             how = "selected" if self._source == "selection" else "soloed"
             self.targets.setText("%d guide%s %s." % (count, "" if count == 1 else "s", how))
-            widths, aspects, twists = tube.get("width") or [0.1], tube.get("aspect") or [1.0], tube.get("twist") or [0.0]
-            self._reference = max(widths)
+            # Width, Flatness, Twist: the core's (tube_card_values, every host's).
+            card = groomlab_core.tube_card_values(tube.get("width") or [], tube.get("aspect") or [], tube.get("twist") or [])
+            self._reference = card["width"]
             for w in tuple(self.profile_combos.values()) + self.fields:
                 w.blockSignals(True)
             # The choices follow the targets when they (or their profiles) change, and are left
@@ -619,8 +620,8 @@ class TubePanel(QtWidgets.QWidget):
                     slider.setValue(round(float(tube.get(profile + "Hold", 0.0)) * 100.0))  # (shown in percent)
                     slider.blockSignals(False)
             self.width.setValue(self._reference * self.length_factor)
-            self.flatness.setValue(min(max(1.0 - sum(aspects) / len(aspects), 0.0), 0.99))
-            self.twist.setValue(sum(twists) / len(twists) * 180.0 / 3.14159265358979)
+            self.flatness.setValue(card["flatness"])
+            self.twist.setValue(card["twist"] * 180.0 / 3.14159265358979)
             for w in tuple(self.profile_combos.values()) + self.fields:
                 w.blockSignals(False)
         mixed = {"root": len(shapes) > 1, "mid": len(mids) > 1, "tip": len(tips) > 1} if tube is not None else None

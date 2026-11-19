@@ -504,12 +504,18 @@ def _author(scalp, **args):
 
 def group(scalp, names, name=None):
     """Group nodes into one Compound (Ctrl+G); returns its name."""
-    return _author(scalp, op="group", names=list(names), name=name or "")["name"]
+    from . import graph_tree
+    made = _author(scalp, op="group", names=list(names), name=name or "")["name"]
+    graph_tree.follow_braid_tubes(scalp)  # (a grouped node's Show Tubes goes: only the graph's own nodes show)
+    return made
 
 
 def ungroup(scalp, name):
     """A Compound's nodes back in the graph (Ctrl+Shift+G); returns their names."""
-    return _author(scalp, op="ungroup", name=name)["names"]
+    from . import graph_tree
+    names = _author(scalp, op="ungroup", name=name)["names"]
+    graph_tree.follow_braid_tubes(scalp)
+    return names
 
 
 def expose_param(scalp, node, param):

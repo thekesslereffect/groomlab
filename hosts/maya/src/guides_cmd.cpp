@@ -999,6 +999,7 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                         const SubdivisionResult done = op == "subdivide" ? subdivideRootTubes(*h, on, ids("guides"), o)
                                                                          : applySubdivisionDensity(*h, on, ids("guides"), o);
                         result = {{"cells", done.cells}, {"removed", done.removed}, {"kept", done.kept}};
+                        if (done.cellLevel > 0) result["cellLevel"] = done.cellLevel;  // (the level the cells are in)
                     } else {
                         return fail(kName, ("-rootTubes: no op named '" + op + "'").c_str());
                     }

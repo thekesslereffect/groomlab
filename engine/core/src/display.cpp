@@ -665,6 +665,12 @@ std::string guideColorHex(const std::array<float, 3>& linear) {
     return text;
 }
 
+std::string hiddenGuideGroupsText(const std::set<std::string>& groups) {
+    std::string out;
+    for (const std::string& name : groups) out += (out.empty() ? "" : " ") + name;
+    return out;
+}
+
 std::set<std::string> parseHiddenGuideGroups(const std::string& text) {
     std::set<std::string> names;
     std::string word;
@@ -2295,7 +2301,8 @@ void DisplayBuilder::buildGuides(const DisplayInputs& in, const DisplaySettings&
     key = hashChars(key, s.isolateGroup);
     key = hashChars(key, s.guideColorLayer);
     key = hashChars(key, s.guideColorSeed);
-    key = hashCombine(key, s.guideRootColors ? 0x2007u : 0x2006u);
+    const bool rootColors = s.guideRootColors || s.tubeWires || s.tubeShaded;  // (the Tube tool's tubes up)
+    key = hashCombine(key, rootColors ? 0x2007u : 0x2006u);
     if (in.clumpCenters) {
         // Hashed once per set of centers (the same pointer: the same centers, held here so no
         // other set takes its address), not on every update.
@@ -2369,7 +2376,7 @@ void DisplayBuilder::buildGuides(const DisplayInputs& in, const DisplaySettings&
             }
             return false;
         };
-        const std::vector<GuideId> rootTubes = s.guideRootColors ? hierarchy->rootTubeIds() : std::vector<GuideId>{};
+        const std::vector<GuideId> rootTubes = rootColors ? hierarchy->rootTubeIds() : std::vector<GuideId>{};
         // What a guide takes from its group, found once per group (a stroke's every stamp draws
         // the guides again): its level, whether it is hidden or dimmed, its color.
         struct GroupDraw {
@@ -2456,7 +2463,7 @@ void DisplayBuilder::buildGuides(const DisplayInputs& in, const DisplaySettings&
             } else if (byLayer) {
                 c = {0.08f, 0.08f, 0.08f};
             }
-            if (s.guideRootColors) {  // its root tube's color; a frozen one (soloed out) dimmed
+            if (rootColors) {  // its root tube's color; a frozen one (soloed out) dimmed
                 const GuideId base = hierarchy->baseIdOf(g);
                 const auto at = std::lower_bound(rootTubes.begin(), rootTubes.end(), base);
                 if (at != rootTubes.end() && *at == base) {

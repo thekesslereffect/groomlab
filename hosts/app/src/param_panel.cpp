@@ -144,15 +144,7 @@ DisplayUnit displayUnit(const std::string& unit, bool integer, int specDecimals)
 
 namespace {
 
-const std::string kAdvanced = "Advanced";
-
-// The section a param's row goes in: Advanced for an advanced param (or one of that group), its
-// group when the node has two groups or more (`headed`), else the main params ("").
-std::string sectionFor(const json& p, bool headed) {
-    const std::string group = p.value("group", std::string());
-    if (p.value("advanced", false) || group == kAdvanced) return kAdvanced;
-    return headed ? group : std::string();
-}
+const std::string kAdvanced = kAdvancedSection;
 
 // Whether a showWhen's (or unitWhen's) own part holds: the core's rule (param_conditions.h), so a
 // 3.0 stored for an int param reads "3" here as in the Graph Editors.
@@ -451,7 +443,7 @@ QWidget* ParamPanel::attributeEditor(Row& row, const json& p, const json& value,
         }
     } else {
         for (const json& r : channels.value("reads", json::array())) {
-            if (r.value("param", std::string()) != name || r.value("reaches", false)) continue;
+            if (r.value("param", std::string()) != name || r.value("reaches", false) || r.value("quiet", false)) continue;
             note = QStringLiteral("\u24d8 no node upstream writes ") + QString::fromStdString(r.value("name", std::string())) +
                    (r.value("optional", false) ? tr(": none applies") : tr(": this node ignores it"));
         }
@@ -611,20 +603,16 @@ void ParamPanel::build() {
 
     const std::string type = spec->value("type", std::string());
     type_ = type;
-    // The groups, in the order the spec lists them: headers only with two or more (one group reads
-    // as the main params, as before the groups were named); every advanced param in Advanced.
-    std::vector<std::string> groups;
-    for (const json& p : spec->value("params", json::array())) {
-        const std::string section = sectionFor(p, true);
-        if (!section.empty() && section != kAdvanced && std::find(groups.begin(), groups.end(), section) == groups.end()) {
-            groups.push_back(section);
-        }
-    }
-    const bool headed = groups.size() >= 2;
+    // The sections (the core's, every host's: paramSections): headers only with two groups or more;
+    // every advanced param in Advanced.
+    const std::vector<std::string> sections = paramSections(spec->value("params", json::array()));
+    std::size_t paramIndex = 0;
     // The attributes reaching the node, written and read (graphChannels), for the attribute params.
     const json allChannels = document_->channels();
     const json nodeChannels = allChannels.value(node_, json::object());
     for (const json& p : spec->value("params", json::array())) {
+        const std::string section = paramIndex < sections.size() ? sections[paramIndex] : std::string();
+        ++paramIndex;
         Row row;
         row.name = p.value("name", std::string());
         row.kind = p.value("kind", std::string());
@@ -632,7 +620,7 @@ void ParamPanel::build() {
         if (!groomlab::paramInVersion(p, std::get<0>(document_->nodeVersion(node_)))) continue;
         // A Compound's definition is its inner graph, not a value to edit: its exposed params are the rows.
         if ((type == "Compound" || type == "Script") && row.name == "definition") continue;
-        row.section = sectionFor(p, headed);
+        row.section = section;
         row.showWhen = p.value("showWhen", json());
         const json value = document_->paramOrDefault(node_, row.name);
         const QString description = QString::fromStdString(p.value("description", std::string()));
@@ -931,7 +919,9 @@ void ParamPanel::build() {
     }
     // The rows by section: the main params, each group under its header, Advanced last.
     std::vector<std::string> order{std::string()};
-    if (headed) order.insert(order.end(), groups.begin(), groups.end());
+    for (const std::string& section : sections) {
+        if (!section.empty() && section != kAdvanced && std::find(order.begin(), order.end(), section) == order.end()) order.push_back(section);
+    }
     order.push_back(kAdvanced);
     for (const std::string& section : order) {
         if (std::none_of(rows_.begin(), rows_.end(), [&](const Row& r) { return r.section == section; })) continue;
@@ -1002,16 +992,11 @@ void ParamPanel::updateVisibility() {
     }
     // A row's showWhen holds, and the row of the param it names shows too, and so on up (Clump's
     // count hides with clumpBy).
+    // (the core's paramShown, every host's)
+    const json* spec = document_->nodeSpec(node_);
+    const json params = spec ? spec->value("params", json::array()) : json::array();
     auto shownByCondition = [&](const Row& row) {
-        const Row* r = &row;
-        for (std::size_t hops = 0; r && hops <= rows_.size(); ++hops) {
-            const std::string on = r->showWhen.is_null() ? std::string() : r->showWhen.value("param", std::string());
-            if (on.empty()) return true;
-            if (!conditionHolds(r->showWhen, document_->paramOrDefault(node_, on))) return false;
-            const auto next = std::find_if(rows_.begin(), rows_.end(), [&](const Row& o) { return o.name == on; });
-            r = next == rows_.end() ? nullptr : &*next;
-        }
-        return true;
+        return paramShown(params, row.name, [&](const std::string& on) { return document_->paramOrDefault(node_, on); });
     };
     for (const Section& s : sections_) {
         const bool open = !folded(s.name);

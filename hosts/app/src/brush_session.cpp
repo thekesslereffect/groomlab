@@ -332,13 +332,7 @@ void BrushSession::rebuildOverlay(const QPointF& at, bool withLines) {
         const MeshPtr scalp = (b.mirrorTopology || (axis >= 0 && axis <= 2)) ? host_->scalp() : nullptr;
         if (scalp && scalp->triangleCount() > 0) {
             if (seam_.scalp != scalp || seam_.axis != axis || seam_.center != b.mirrorCenter || seam_.topology != b.mirrorTopology) {
-                Vec3f lo = scalp->points().front(), hi = lo;
-                for (const Vec3f& q : scalp->points()) {
-                    lo = Vec3f(std::min(lo.x, q.x), std::min(lo.y, q.y), std::min(lo.z, q.z));
-                    hi = Vec3f(std::max(hi.x, q.x), std::max(hi.y, q.y), std::max(hi.z, q.z));
-                }
-                seam_ = {scalp, axis, b.mirrorCenter, b.mirrorTopology,
-                         symmetrySeam(*scalp, StrokeSymmetry::of(b, scalp.get()), 0.002f * (hi - lo).length())};
+                seam_ = {scalp, axis, b.mirrorCenter, b.mirrorTopology, symmetrySeam(*scalp, StrokeSymmetry::of(b, scalp.get()))};
             }
             for (std::size_t i = 0; i + 1 < seam_.points.size(); i += 2) {
                 appendColoredLine(overlay_, {seam_.points[i], seam_.points[i + 1]}, {1.0f, 0.15f, 0.15f});

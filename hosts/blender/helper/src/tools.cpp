@@ -818,6 +818,22 @@ void dropPending(ToolState& t) {
 // "name:#rrggbb name:#rrggbb".
 std::string groupColorsText(const ToolState& t) { return guideGroupColorsText(t.groupColors); }  // (display.h)
 
+}  // namespace
+
+void writeGroupDisplay(const Session& s, GroomFile& file) {
+    if (!s.tools) return;  // (no tools yet: as the file had them)
+    file.guideGroupColors = groupColorsText(*s.tools);
+    file.hiddenGuideGroups = hiddenGuideGroupsText(s.tools->hidden);
+}
+
+void adoptGroupDisplay(Session& s, const GroomFile& file) {
+    ToolState& t = toolsOf(s);
+    t.groupColors = guideGroupColorWords(file.guideGroupColors);
+    t.hidden = parseHiddenGuideGroups(file.hiddenGuideGroups);
+}
+
+namespace {
+
 // ---- Undo ---------------------------------------------------------------------------------------
 
 json undoJson(const ToolState& t) {
@@ -1033,12 +1049,7 @@ void rebuildOverlay(ToolState& t, float x, float y, bool withLines) {
             const std::uint64_t key = hashCombine(hashCombine(scalp->contentHash(), static_cast<std::uint64_t>(sym.axis + 1)),
                                                   hashCombine(hashFloat(hash64(0x5EA4), sym.center), sym.topology() ? 1u : 0u));
             if (key != t.seamKey) {
-                Vec3f lo = scalp->points().front(), hi = lo;
-                for (const Vec3f& p : scalp->points()) {
-                    lo = Vec3f(std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z));
-                    hi = Vec3f(std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z));
-                }
-                t.seam = symmetrySeam(*scalp, sym, 0.002f * (hi - lo).length());
+                t.seam = symmetrySeam(*scalp, sym);
                 t.seamKey = key;
             }
             for (std::size_t k = 0; k + 1 < t.seam.size(); k += 2) appendColoredLine(t.overlay, {t.seam[k], t.seam[k + 1]}, {1.0f, 0.15f, 0.15f});
@@ -1698,13 +1709,14 @@ json tubeScale(ToolState& t, const json& args) {
 }
 
 json tubeSmooth(ToolState& t, const json& args) {
-    // The Shape brush's channel names, and what the tube calls each list (Maya's smooth_tube).
-    static const std::map<std::string, std::string> lists = {
-        {"width", "width"}, {"flatness", "aspect"}, {"aspect", "aspect"}, {"twist", "twist"}, {"all", "all"}};
-    const auto list = lists.find(optString(args, "channel", "all"));
-    if (list == lists.end()) fail("bad_request", "channel is width, flatness, twist or all");
-    const int passes = std::clamp(static_cast<int>(optNumber(args, "passes", 3.0)), 1, 100);
-    return tubeEdit(t, args, "smooth tube", json{{"smooth", list->second}, {"passes", passes}});
+    // The Shape brush's channel names (tubeSmoothEdit: every host's).
+    std::string edit;
+    try {
+        edit = tubeSmoothEdit(optString(args, "channel", "all"), static_cast<int>(optNumber(args, "passes", 3.0)));
+    } catch (const std::invalid_argument& e) {
+        fail("bad_request", e.what());
+    }
+    return tubeEdit(t, args, "smooth tube", json::parse(edit));
 }
 
 json tubeGet(ToolState& t, const json& args) {
@@ -1714,6 +1726,12 @@ json tubeGet(ToolState& t, const json& args) {
     const HierarchyGuide* g = h ? h->guide(id.get<GuideId>()) : nullptr;
     if (!g) fail("not_found", "no guide " + std::to_string(id.get<GuideId>()));
     return {{"tube", tubeToHost(t.session.space, tubeToJson(g->tube, h->scale()))}};
+}
+
+// The Tube card's Width (host units), Flatness and Twist for a tube (tubeCardValues, every host's).
+json tubeCardJson(const HostSpace& space, const TubeProfile& tube, float scale) {
+    const TubeCardValues v = tubeCardValues(tube.width, tube.aspect, tube.twist);
+    return {{"width", toHostLength(space, v.width * scale)}, {"flatness", v.flatness}, {"twist", v.twist}};
 }
 
 // The guides the Tubes section edits and their profiles (every host's: tubeTargetsOf).
@@ -1733,7 +1751,8 @@ json tubeTargets(ToolState& t) {
             {"tipShapes", targets.tipShapes},
             {"inUse", inUse},
             {"tube", targets.guides.empty() ? json(nullptr)
-                                            : tubeToHost(t.session.space, tubeToJson(h->guide(targets.guides.front())->tube, h->scale()))}};
+                                            : tubeToHost(t.session.space, tubeToJson(h->guide(targets.guides.front())->tube, h->scale()))},
+            {"card", targets.guides.empty() ? json(nullptr) : tubeCardJson(t.session.space, h->guide(targets.guides.front())->tube, h->scale())}};
 }
 
 json sectionPointsJson(const std::vector<SectionPoint>& points) {
@@ -1903,9 +1922,14 @@ json flowClear(ToolState& t) {
 
 // ---- Maps ---------------------------------------------------------------------------------------
 
-json mapsList(ToolState& t) {
+json mapsList(ToolState& t, json* densityMap = nullptr) {
     Session& s = t.session;
     json maps = json::array();
+    if (densityMap) {  // the Tube tool's density map among them (subdivisionDensityMapIn, every host's; "" none)
+        std::vector<std::string> names;
+        for (const auto& [name, entry] : s.groom->scalpMaps().maps) names.push_back(name);
+        *densityMap = subdivisionDensityMapIn(names);
+    }
     for (const auto& [name, entry] : s.groom->scalpMaps().maps) {
         json m = {{"name", name}, {"kind", entry.kind}, {"channels", entry.channels}};
         if (entry.kind == "texture") {
@@ -1957,11 +1981,6 @@ std::vector<std::int32_t> facesArg(const json& args) {
     }
     if (faces.empty()) fail("bad_request", "faces names no face");
     return faces;
-}
-
-// Whether guide `g`'s root lies on the flagged triangles (polygonTriangles of the faces).
-bool rootedOn(const HierarchyGuide& g, const std::vector<std::uint8_t>& triangles) {
-    return g.root.face >= 0 && static_cast<std::size_t>(g.root.face) < triangles.size() && triangles[static_cast<std::size_t>(g.root.face)] != 0;
 }
 
 json mapCreate(ToolState& t, const json& args) {
@@ -2049,7 +2068,6 @@ json mapForParam(ToolState& t, const json& args) {
     std::string map = found.map, mapKind = found.kind;
     // A map made here with `faces` is white on them, black elsewhere (one the param reads already stays).
     const std::vector<std::int32_t> faces = facesArg(args);
-    const std::vector<std::uint8_t> faceTriangles = faces.empty() ? std::vector<std::uint8_t>{} : polygonTriangles(*scalp, faces);
     // The param's own map (paramMapName) there already, its link gone: linked again, whatever its
     // kind, its painting back (every host does).
     bool reused = false;
@@ -2085,13 +2103,10 @@ json mapForParam(ToolState& t, const json& args) {
         // the look stays), children inherit it, strands blend it; the layer and its link one step.
         map = paramMapName(node, param);  // (free: one of that name was linked above)
         GuideHierarchy h = editedGuides(t, [&](GuideHierarchy& hh) {
-            bool any = false;
-            for (const HierarchyGuide& g : hh.guides()) {
-                if (g.parent != kNoGuide) continue;  // children inherit their primary's
-                hh.setAttribute(g.id, map, faces.empty() || rootedOn(g, faceTriangles) ? 1.0f : 0.0f);
-                any = true;
+            // (on faces: 1 on the guides rooted on them, 0 on the rest: addGuideLayer, every host's)
+            if (!addGuideLayer(hh, map, 1.0f, scalp.get(), faces)) {
+                fail("state", "the groom has no guides to paint on: add guides, or paint on the scalp's vertices");
             }
-            if (!any) fail("state", "the groom has no guides to paint on: add guides, or paint on the scalp's vertices");
         });
         std::string graph;
         try {
@@ -3326,7 +3341,7 @@ bool isToolCommand(const std::string& cmd) {
         "length_state", "length_edit",
         // The Tube tool's root-first mode and the tube hierarchy (the Tube card's Tube roots and
         // Tube hierarchy blocks).
-        "root_state", "root_edit", "root_subdivide", "tube_levels", "tube_level_add", "tube_level_remove", "tube_level_show"};
+        "root_state", "root_edit", "root_subdivide", "density_map", "tube_levels", "tube_level_add", "tube_level_remove", "tube_level_show"};
     return kCommands.count(cmd) > 0;
 }
 
@@ -3713,7 +3728,17 @@ bool runToolCommandIn(Session& s, ToolState& t, const std::string& cmd, const js
         return true;
     }
     if (cmd == "maps_list") {
-        result = mapsList(t);
+        json density;
+        result = mapsList(t, &density);
+        result["densityMap"] = density;
+        return true;
+    }
+    if (cmd == "density_map") {
+        // The Tube tool's density map (subdivisionDensityMapIn: the one map, else an older numbered
+        // one; "" none yet), the name Subdivide makes it under and its value then.
+        std::vector<std::string> names;
+        for (const auto& [name, entry] : s.groom->scalpMaps().maps) names.push_back(name);
+        result = {{"map", subdivisionDensityMapIn(names)}, {"name", kSubdivisionDensityMap}, {"start", kDefaultSubdivisionDensity}};
         return true;
     }
     if (cmd == "map_create") {
@@ -3878,7 +3903,14 @@ bool runToolCommandIn(Session& s, ToolState& t, const std::string& cmd, const js
         // The density map ("map", default the one map) and the multiplier; Apply ("apply") cuts every
         // cut by them again all over ("force", default true: the card's Apply).
         RootSubdivisionOptions options;
-        options.map = optString(args, "map", kSubdivisionDensityMap);
+        // ("map" unset: the groom's density map, an older numbered one too: subdivisionDensityMapIn)
+        options.map = optString(args, "map", "");
+        if (options.map.empty()) {
+            std::vector<std::string> names;
+            for (const auto& [name, entry] : s.groom->scalpMaps().maps) names.push_back(name);
+            options.map = subdivisionDensityMapIn(names);
+            if (options.map.empty()) options.map = kSubdivisionDensityMap;
+        }
         options.multiplier = static_cast<float>(optNumber(args, "multiplier", 1.0));
         options.force = apply && optBool(args, "force", true);
         const std::size_t before = t.host.edits().size();
@@ -3888,12 +3920,7 @@ bool runToolCommandIn(Session& s, ToolState& t, const std::string& cmd, const js
             done = apply ? applySubdivisionDensity(g, *scalp, {}, options) : subdivideRootTubes(g, *scalp, guides, options);
         });
         result = {{"cells", done.cells}, {"removed", done.removed}, {"kept", done.kept}};
-        // (The level the cells are in: the card shows it.)
-        if (!done.cells.empty()) {
-            const std::shared_ptr<const GuideHierarchy> after = s.groom->authoredHierarchy();
-            const HierarchyGuide* cell = after ? after->guide(done.cells.front()) : nullptr;
-            if (cell) result["cellLevel"] = after->groupDepth(cell->group) + 1;
-        }
+        if (done.cellLevel > 0) result["cellLevel"] = done.cellLevel;  // (the level the cells are in: the card shows it)
         result["committed"] = t.host.edits().size() != before;
         if (result["committed"].get<bool>()) {
             t.redoLabels.clear();

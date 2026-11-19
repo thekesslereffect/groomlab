@@ -5,7 +5,9 @@
 // unitWhen) held against the node's value of another param. Every host's rule, so the Node panel,
 // the Graph Editors and the core's own readers agree on what a value reads as.
 
+#include <functional>
 #include <string>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
@@ -24,5 +26,17 @@ bool conditionHolds(const nlohmann::json& condition, const nlohmann::json& value
 // version of its operator added it ("addedIn", ParamSpec::added). Such a node does nothing with the
 // param until it is upgraded, so every panel leaves the param out there.
 bool paramInVersion(const nlohmann::json& spec, int nodeVersion);
+
+// The Node panel's sections (every host's): for each of `params` (a node spec's "params", in its
+// order) its section: kAdvancedSection for an advanced param (or one of that group), its group
+// when the params name two groups or more (one group reads as the main params), else "" (the
+// main params, no header). The panels show "", the groups in the spec's order, then Advanced.
+constexpr const char* kAdvancedSection = "Advanced";
+std::vector<std::string> paramSections(const nlohmann::json& params);
+
+// Whether param `name` of `params` shows: its showWhen holds for the node's value of the param it
+// names (valueOf), and that param shows too, and so on up (Clump's count hides with clumpBy). No
+// condition, or no such param: it shows.
+bool paramShown(const nlohmann::json& params, const std::string& name, const std::function<nlohmann::json(const std::string&)>& valueOf);
 
 }  // namespace groomlab

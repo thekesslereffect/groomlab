@@ -672,9 +672,7 @@ void GroomSession::setDriverBindJson(const std::string& json) {
 
 std::string GroomSession::bindDrivers(int frame) const {
     if (!data_.drivers) return {};
-    DriverBind bind = groomlab::bindDrivers(*data_.drivers, cageScalp_.get(), frame);
-    bind.attached = driverBind_.attached;  // the guides attached stay attached
-    return bind.empty() && bind.attached.empty() ? std::string() : bind.toJson();
+    return reboundDriversJson(*data_.drivers, cageScalp_.get(), frame, driverBind_);
 }
 
 void GroomSession::setCorrectiveWeights(std::map<int, float> weights) {
@@ -1293,6 +1291,11 @@ HierarchyPtr GroomSession::hierarchy() {
     bindScalp(errors);
     updateActiveHierarchy();
     return activeHierarchy_;
+}
+
+GuideSet GroomSession::simulationGuides(const std::string& group) {
+    if (!hierarchy()) return guidesToSimulate(nullptr, data_.guides, group);  // (bound, posed: as now)
+    return guidesToSimulate(posedHierarchy(), data_.guides, group);
 }
 
 HierarchyPtr GroomSession::posedHierarchy() {

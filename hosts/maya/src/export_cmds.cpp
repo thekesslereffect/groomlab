@@ -337,14 +337,6 @@ MSyntax ExportAlembicCmd::newSyntax() {
 
 namespace {
 
-StrandSet toCurves(const GuideSet& guides) {
-    StrandSet out;
-    for (const Guide& g : guides.guides()) {
-        if (g.points.size() >= 2) out.addStrand(g.id, g.points, {}, g.root);
-    }
-    return out;
-}
-
 // What the guide export keeps from frame to frame: the inputs converted, and the groom (its
 // hierarchy parsed once; each frame gives it the scalp and poses of its time).
 struct GuideFrames {
@@ -359,7 +351,7 @@ MStatus guidesAtFrame(const char* command, const MObject& node, const MString& g
     try {
         if (drivers) {  // the curves exactly as the groom samples them (driverCurvesFromNode): the farm drives the same
             const GuidesPtr curves = driverCurvesFromNode(node);
-            *out = curves ? toCurves(*curves) : StrandSet{};
+            *out = curves ? guideCurves(*curves) : StrandSet{};
             // Their twist as a point channel on every frame (0 where none: the first frame decides
             // what the file carries, and a rig's twist may start at 0), read back as the layer.
             if (curves) {
@@ -378,19 +370,18 @@ MStatus guidesAtFrame(const char* command, const MObject& node, const MString& g
         }
         if (poses) {
             const GuidesPtr posed = guidePosesFromNode(node, &frames.inputs);
-            *out = posed ? toCurves(*posed) : StrandSet{};
+            *out = posed ? guideCurves(*posed) : StrandSet{};
             return MS::kSuccess;
         }
         if (!frames.groom) {
-            GroomData data = groomDataFromNode(node, &frames.inputs);
-            data.correctivesJson.clear();  // posed guides feed sim caches: shot sculpts apply on top of those
-            frames.groom = std::make_unique<GroomSession>(std::move(data));
+            frames.groom = std::make_unique<GroomSession>(groomDataFromNode(node, &frames.inputs));
         } else {  // another time: only the scalp and the poses change what the hierarchy is
             frames.groom->setScalp(scalpFromNode(node, &frames.inputs, nullptr, false));  // the maps as first read
             frames.groom->setGuidePoses(guidePosesFromNode(node, &frames.inputs));
         }
-        // "*": every guide the Guides node feeds (what a GuideCache node poses), else one group's.
-        *out = toCurves(guidesToSimulate(frames.groom->hierarchy(), frames.groom->data().guides, group.asChar()));
+        // "*": every guide the Guides node feeds (what a GuideCache node poses), else one group's;
+        // posed, no shot sculpts (they apply on top of those: GroomSession::simulationGuides).
+        *out = guideCurves(frames.groom->simulationGuides(group.asChar()));
         return MS::kSuccess;
     } catch (const std::exception& e) {
         return fail(command, e.what());
@@ -533,7 +524,7 @@ MStatus ExportAlembicCmd::doIt(const MArgList& args) {
                     [&](double, const StrandSet& evaluated, const MeshPtr& scalp, NodeEvaluator& evaluator) {
                         StrandSet primaries;  // the hierarchy's level 0: what Unreal simulates
                         if (unreal) {
-                            if (const HierarchyPtr h = evaluator.hierarchy()) primaries = toCurves(h->flatten(0));
+                            primaries = primaryGuideCurves(evaluator.hierarchy());
                         }
                         writer.writeFrame(evaluated, unreal ? &primaries : nullptr, scalp.get());
                     },
@@ -858,6 +849,11 @@ MStatus ExportGroomCmd::doIt(const MArgList& args) {
         }
         // A Card Atlas block's card (the file of blocks is the atlas).
         groom.cardBlock = MFnDependencyNode(path.node()).findPlug("cardBlock", true).asString().asChar();
+        // The viewport's guide group colors, hidden groups and Show Tubes' nodes: the groom's in
+        // every host (the app and Blender read and write them too).
+        groom.guideGroupColors = MFnDependencyNode(path.node()).findPlug("guideGroupColors", true).asString().asChar();
+        groom.hiddenGuideGroups = MFnDependencyNode(path.node()).findPlug("hiddenGuideGroups", true).asString().asChar();
+        groom.braidTubes = MFnDependencyNode(path.node()).findPlug("braidTubes", true).asString().asChar();
         // The last transfer's marker pairs (the next transfer reuses them).
         try {
             const MPlug markers = MFnDependencyNode(path.node()).findPlug("transferMarkers", true);

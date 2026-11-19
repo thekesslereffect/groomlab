@@ -440,9 +440,23 @@ private:
 // (smoothedTube, at `points` samples or the lists' own count where that is more) "passes" times
 // (default 3). Widths are divided by scale (a host's shown size to the stored).
 // Throws std::invalid_argument on a bad shape, a negative width or an empty list.
+//
+// tubeSmoothEdit: the Tube card's Smooth (every host's) as that edit's JSON text: `channel` the
+// Shape brush's name ("width", "flatness", "twist", "all"; "aspect", flatness' list, too) smoothed
+// `passes` times (kept to 1 to 100). std::invalid_argument for another channel.
 std::string tubeToJson(const TubeProfile& tube, float scale = 1.0f);
 TubeProfile editedTube(const TubeProfile& base, const std::string& editJson, float scale = 1.0f, std::size_t points = 0,
                        const TubeShapeLibrary* library = nullptr);
+std::string tubeSmoothEdit(const std::string& channel, int passes = 3);
+
+// The Tube card's Width, Flatness and Twist (every host's) for a tube's lists: its widest width
+// (0.1 for none: what Width scales from), 1 - its mean aspect (0 to 0.99) and its mean twist
+// (radians, -pi to pi). tubeAspectOfFlatness: the aspect Flatness sets (1 - it, at least 0.01).
+struct TubeCardValues {
+    float width = 0.1f, flatness = 0.0f, twist = 0.0f;
+};
+TubeCardValues tubeCardValues(const std::vector<float>& width, const std::vector<float>& aspect, const std::vector<float>& twist);
+float tubeAspectOfFlatness(float flatness);
 
 // The lists a tube holds, as a mask (smoothedTube).
 enum TubeLists : unsigned { kTubeWidthList = 1u, kTubeAspectList = 2u, kTubeTwistList = 4u, kTubeAllLists = 7u };

@@ -626,6 +626,9 @@ class GroomLabTools(bpy.types.PropertyGroup):
     # Subdividing roots (issue 85): painting the density map (the paint brush beside Subdivide), and
     # the Subdivision multiplier Subdivide and Apply cut at.
     root_painting: BoolProperty()
+    # The groom's density map (the helper's maps_list densityMap: the one map, else an older
+    # numbered one; "" none yet: Subdivide makes it).
+    root_density_map: StringProperty()
     root_multiplier: FloatProperty(name="Multiplier", default=1.0, min=0.05, max=20.0, soft_min=0.25, soft_max=4.0,
                                    description="Subdivision multiplier: how dense the cuts are overall, with the "
                                                "painted density: 1 as painted, 2 about twice the roots (each "

@@ -48,15 +48,6 @@ std::size_t FrameRange::count() const {
 
 namespace {
 
-// The primary guides as curves (what Unreal simulates): the hierarchy's level 0.
-StrandSet toCurves(const GuideSet& guides) {
-    StrandSet out;
-    for (const Guide& g : guides.guides()) {
-        if (g.points.size() >= 2) out.addStrand(g.id, g.points, {}, g.root);
-    }
-    return out;
-}
-
 // The export's name: the file's stem, as every host names it (export_view.h; Maya: the groom's transform).
 std::string exportName(const std::string& path) { return exportObjectName(fs::u8path(path).stem().u8string()); }
 
@@ -118,8 +109,8 @@ ExportResult GroomDocument::exportGuides(const std::string& path, const std::str
             ViewRequest request;
             request.time = frameToSeconds(range.frame(i), fps);
             request.wantBounds = false;
-            const ViewResult& view = scene_->view(request);  // (the guides at that frame: the scalp, the poses)
-            const StrandSet curves = toCurves(guidesToSimulate(view.hierarchy, session().data().guides, group));
+            scene_->view(request);  // (the guides at that frame: the scalp, the poses; no shot sculpts)
+            const StrandSet curves = guideCurves(session().simulationGuides(group));
             writer.writeFrame(curves);
             result.strands = curves.strandCount();
             result.frames = i + 1;
@@ -269,7 +260,7 @@ ExportResult GroomDocument::exportEngineGroom(const std::string& path, const Exp
             // The hair simulates on the primary guides (the hierarchy's level 0 at this time).
             StrandSet primaries;
             if (!unity && options.guides) {
-                if (const HierarchyPtr h = session().hierarchy()) primaries = toCurves(h->flatten(0));
+                primaries = primaryGuideCurves(session().hierarchy());
             }
             writer.writeFrame(*evaluated, unity ? nullptr : &primaries, scalp.get());
             result.strands = evaluated->strandCount();

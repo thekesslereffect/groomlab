@@ -101,6 +101,15 @@ void applyGuidePoses(GuideHierarchy& hierarchy, const GuideSet& poses, const Sca
 // feeds (the hierarchy's every level, then the flat guides), else one guide group's (throws
 // std::runtime_error for no such group). Each keeps its guide's ID.
 GuideSet guidesToSimulate(const HierarchyPtr& hierarchy, const GuidesPtr& flat, const std::string& group = "*");
+// Guides as curves (every host's guide exports): each guide of two points or more, its ID, points
+// and root.
+StrandSet guideCurves(const GuideSet& guides);
+// An Unreal export's guides (what Unreal simulates): the hierarchy's level 0 as curves; empty for none.
+StrandSet primaryGuideCurves(const HierarchyPtr& hierarchy);
+// guideCurves the other way (every host's guide cache and driver cache read as guides): each curve
+// a guide of its ID and points; `pointLayer` (a point channel of the curves, e.g. the drivers'
+// twist) kept on the guides where it is not all 0.
+GuideSet guidesOfCurves(const StrandSet& curves, const char* pointLayer = nullptr);
 
 // Registers control values for the graph's Control nodes (by name).
 void setControlExternals(ExternalInputs& externals, const std::map<std::string, float>& controls);

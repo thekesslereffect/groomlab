@@ -167,6 +167,9 @@ struct StrokeSymmetry {
 // each lifted off the surface by `lift` along its triangle's normal so a line drawn there shows.
 // Empty when symmetry is off or nothing of the scalp lies on the seam.
 std::vector<Vec3f> symmetrySeam(const ScalpMesh& scalp, const StrokeSymmetry& sym, float lift);
+// The line as every host draws it: lifted by a little of the scalp's size (0.002 of its bounds'
+// diagonal), so it is not hidden in the surface.
+std::vector<Vec3f> symmetrySeam(const ScalpMesh& scalp, const StrokeSymmetry& sym);
 
 // The guide mirroring guide `id` under `sym`: of its group, the one whose root is nearest the
 // mirror image of its root (itself, for a guide on the seam). kNoGuide when symmetry is off or

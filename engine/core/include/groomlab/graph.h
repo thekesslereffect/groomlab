@@ -386,6 +386,9 @@ struct ParamSpec {
     // design (Clump's regionChannel: region, written only with an Interpolate's regionMap): a read
     // of the default that does not reach is no mistake (ChannelRead::optional, attributes.h).
     bool channelOptional = false;
+    // An optional read's user (HairColor's clumpChannel: clumpShare): while that param and the read
+    // keep their defaults the read is quiet (ChannelRead::quiet): no host notes it.
+    std::string channelFor;
     // The input port it takes when exposed (paramPortSpec): Auto (a Curve port for a ramp, a Field
     // port for a mappable number or a colorField color, a Value port for the rest), Value (a Value
     // port whatever it is: a compound's exposed params), or None: it cannot be an input (it sets the
@@ -487,10 +490,11 @@ struct ParamSpec {
     }
     // A channel the node reads, by the name the param holds (empty: none); `optional`: its default
     // may well be missing (channelOptional).
-    ParamSpec readsChannel(bool optional = false) const {
+    ParamSpec readsChannel(bool optional = false, std::string usedBy = {}) const {
         ParamSpec s = *this;
         s.channel = ChannelUse::Reads;
         s.channelOptional = optional;
+        s.channelFor = std::move(usedBy);
         return s;
     }
     // A param that cannot be an input (port None).

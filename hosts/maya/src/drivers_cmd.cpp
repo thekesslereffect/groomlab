@@ -8,6 +8,8 @@
 #include <maya/MDGContext.h>
 #include <maya/MDGContextGuard.h>
 #include <maya/MDagPath.h>
+#include <maya/MFnDependencyNode.h>
+#include <maya/MPlug.h>
 #include <maya/MTime.h>
 
 #include "command_args.h"
@@ -57,8 +59,14 @@ MStatus DriversCmd::doIt(const MArgList& args) {
                 setResult(MString());
                 return MS::kSuccess;
             }
-            const DriverBind bind = bindDrivers(*drivers, scalp.get(), static_cast<int>(std::lround(frame)));
-            setResult(MString(bind.empty() ? "" : bind.toJson().c_str()));
+            // The guides attached until now stay attached (reboundDriversJson, every host's).
+            DriverBind before;
+            try {
+                before = DriverBind::fromJson(MFnDependencyNode(node).findPlug("driverBind", true).asString().asChar());
+            } catch (const std::exception&) {
+                // (a bind that does not read: none attached)
+            }
+            setResult(MString(reboundDriversJson(*drivers, scalp.get(), static_cast<int>(std::lround(frame)), before).c_str()));
             return MS::kSuccess;
         }
         displayError("groomLabDrivers: say -bind or -count");

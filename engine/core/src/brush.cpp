@@ -74,6 +74,16 @@ int StrokeSymmetry::side(const Vec3f& p, const StrandRoot* root) const {
     return std::abs(d) <= seam ? 0 : (d > 0.0f ? 1 : -1);
 }
 
+std::vector<Vec3f> symmetrySeam(const ScalpMesh& scalp, const StrokeSymmetry& sym) {
+    if (!sym.on() || scalp.points().empty()) return {};
+    Vec3f lo = scalp.points().front(), hi = lo;
+    for (const Vec3f& p : scalp.points()) {
+        lo = Vec3f(std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z));
+        hi = Vec3f(std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z));
+    }
+    return symmetrySeam(scalp, sym, 0.002f * (hi - lo).length());
+}
+
 std::vector<Vec3f> symmetrySeam(const ScalpMesh& scalp, const StrokeSymmetry& sym, float lift) {
     std::vector<Vec3f> out;
     if (!sym.on()) return out;

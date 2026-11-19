@@ -57,4 +57,19 @@ std::string nodeLabel(const std::string& type);
 // radius", "rootUV" -> "Root UV"); underscores as spaces.
 std::string paramLabel(const std::string& name);
 
+// The Add Node search (every host's): what an entry is found by, each lower case: its type name,
+// the label shown, its search keywords and category title, its params' names (as written and as
+// labelled), its category and description, its params' descriptions.
+struct NodeSearchWords {
+    std::string name, label, keywords, params, about, details;
+};
+// An operator spec's words (operatorSpecsJson's form: "type", "label", "keywords",
+// "categoryTitle", "description", "params").
+NodeSearchWords nodeSearchWords(const std::string& specJson);
+// Where an entry ranks for the search `text` (lower first): 0 its name or label starts with it,
+// 1 either holds it (or the name holds it without spaces), then every word of it in its keywords
+// (2), its params (3), its about (4), anywhere (5; the name counts for each); -1 no match. An empty
+// search: 5.
+int nodeSearchRank(const std::string& text, const NodeSearchWords& words);
+
 }  // namespace groomlab

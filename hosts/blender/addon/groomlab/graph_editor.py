@@ -328,8 +328,8 @@ def _strands_output(node):
 
 
 def _viewable(node):
-    """Focus shows a node giving strands (a Clump's centers as dots)."""
-    return bool(_strands_output(node))
+    """Focus shows a node giving strands as connected (the core's GraphEdit::viewable)."""
+    return graph_tree.viewable(node)
 
 
 class GROOMLAB_OT_graph_view_node(_GraphOperator):
@@ -684,8 +684,7 @@ def node_state(node):
         state.add("node.viewable")
     if node.gl_type == "Sculpt":
         state.add("node.sculpt")
-    if len(node.outputs) and node.outputs[0].bl_idname in ("GroomLabSocketStrands", "GroomLabSocketGuides") \
-            and node.gl_type != "Output":
+    if graph_tree.bakeable(node):  # (the core's rule, every host's)
         state.add("node.bakeable")
     if graph_authoring.linkable(node):
         state.add("node.mappable")
@@ -1363,7 +1362,7 @@ def draw_attribute_param(layout, node, spec, prop, label):
             col.label(text="overwrites " + ", ".join("%s from %s" % (o["name"], o["node"]) for o in over), icon="ERROR")
     else:
         read = next((r for r in info.get("reads", []) if r.get("param") == name), None)
-        if read is not None and not read.get("reaches"):
+        if read is not None and not read.get("reaches") and not read.get("quiet"):
             col.label(text="no node upstream writes %s: %s" % (read["name"], "none applies" if read.get("optional")
                                                                 else "this node ignores it"), icon="INFO")
 

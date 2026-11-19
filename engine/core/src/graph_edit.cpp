@@ -735,6 +735,26 @@ void GraphEdit::connect(const std::string& src, const std::string& dst, const st
 
 bool GraphEdit::connectByHand(const std::string& src, const std::string& dst, const std::string& input,
                               const std::string& output) {
+    const std::string kind = valueKindForInput(src, dst, input);
+    if (!kind.empty()) {
+        json* found = nullptr;
+        for (json& n : impl_->nodes()) {
+            if (n.is_object() && n.value("name", std::string()) == src) found = &n;
+        }
+        json& value = *found;  // (valueKindForInput found it)
+        const json before = value;
+        json& params = value["params"];
+        if (!params.is_object()) params = json::object();
+        const bool changed = params.value("kind", std::string("number")) != kind;
+        params["kind"] = kind;
+        try {
+            impl_->connect(src, dst, input, output);
+        } catch (...) {
+            value = before;  // (the graph as it was: the link refused)
+            throw;
+        }
+        return changed;
+    }
     impl_->connect(src, dst, input, output);
     // A Clump picking its own centers takes the centers linked to it (its centersFrom: inputPoints;
     // guides, through any curve nodes after them, inputCurves: each clump along its guide); a Cards
@@ -947,6 +967,60 @@ std::string GraphEdit::nodeSpecJson(const std::string& name) const { return impl
 std::string GraphEdit::outputType(const std::string& name, const std::string& output) const {
     std::set<std::string> seen;
     return impl_->outputType(name, output, seen);
+}
+
+std::vector<std::string> GraphEdit::outputTypes(const std::string& name) const {
+    std::vector<std::string> out;
+    for (const std::string& output : impl_->outputNames(name)) out.push_back(outputType(name, output));
+    return out;
+}
+
+bool GraphEdit::viewable(const std::string& name) const {
+    if (!impl_->find(name)) return false;
+    try {
+        for (const std::string& type : outputTypes(name)) {
+            if (type == "Strands" || type == "Curves") return true;
+        }
+    } catch (const std::exception&) {
+        // (a node no operator makes: nothing to view)
+    }
+    return false;
+}
+
+bool GraphEdit::bakeable(const std::string& name) const {
+    const json* n = impl_->find(name);
+    if (!n || n->value("type", std::string()) == op::kOutput) return false;
+    try {
+        const std::string type = outputType(name, "");
+        return type == "Strands" || type == "Guides";
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
+std::string GraphEdit::valueKindForInput(const std::string& src, const std::string& dst, const std::string& input) const {
+    const json* value = impl_->find(src);
+    if (!value || value->value("type", std::string()) != op::kValue || !impl_->find(dst)) return {};
+    for (const json& c : impl_->connectionsView()) {
+        if (c.value("from", std::string()) == src) return {};  // (it feeds a param already: its kind kept)
+    }
+    json spec;
+    try {
+        spec = impl_->spec(dst);
+    } catch (const std::exception&) {
+        return {};
+    }
+    for (const json& p : spec.value("params", json::array())) {
+        if (!p.is_object() || p.value("name", std::string()) != input) continue;
+        const std::string kind = p.value("kind", std::string());
+        if (kind == "float") return "number";
+        if (kind == "int") return "integer";
+        if (kind == "bool") return "bool";
+        if (kind == "vec3") return p.value("unit", std::string()) == "color" ? "color" : "vector";
+        if (kind == "string") return "text";
+        return {};
+    }
+    return {};
 }
 
 std::vector<std::string> GraphEdit::upstream(const std::string& name) const {

@@ -754,7 +754,7 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
         sub.operator("groomlab.root_tube", text="Delete").action = "DELETE"
         sub.operator("groomlab.root_tube", text="Duplicate", depress=mode == "duplicate").action = "DUPLICATE"
         # Subdivide | the paint brush (the density map) | Multiplier | Apply (Maya's row).
-        has_map = any(m.name == "tubeSubdivisionDensity" for m in t.maps)
+        has_map = bool(t.root_density_map)  # (the one map, or an older numbered one)
         row = col.row(align=True)
         sub = row.row(align=True)
         sub.enabled = mode in ("select", "duplicate") and t.root_selected > 0

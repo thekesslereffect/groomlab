@@ -47,6 +47,22 @@ void bindCardBlocks(py::module_& m) {
         },
         py::arg("block_json"),
         "The block's root band: {points, face_counts, face_indices, uvs (2 per point)}.");
+    m.def("card_block_new_name", [](const std::string& atlasJson) { return newCardBlockName(cardBlockAtlasFromJson(atlasJson)); },
+          py::arg("atlas_json"), "Add Block's name: block<N> no block has (card_blocks.h, every host's).");
+    m.def(
+        "card_block_copy_name",
+        [](const std::string& atlasJson, const std::string& name) { return cardBlockCopyName(cardBlockAtlasFromJson(atlasJson), name); },
+        py::arg("atlas_json"), py::arg("name"), "Duplicate Block's name: <name>_copy (then _copy2...) no block has.");
+    m.def(
+        "card_block_band_changed",
+        [](const std::string& fromJson, const std::string& toJson) {
+            CardBlock from, to;
+            CardAtlasSettings settings;
+            if (!cardBlockFromJson(fromJson, &from, &settings) || !cardBlockFromJson(toJson, &to, &settings)) return false;
+            return cardBlockBandChanged(from, to);
+        },
+        py::arg("from_json"), py::arg("to_json"),
+        "Whether a block's edit puts it on another root band (width, thickness or root rotation).");
     m.def("card_block_json", [](const std::string& atlasJson, const std::string& name) {
             const CardBlockAtlas atlas = cardBlockAtlasFromJson(atlasJson);
             for (const CardBlock& b : atlas.blocks) {

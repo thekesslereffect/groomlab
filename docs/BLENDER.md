@@ -147,9 +147,9 @@ All but the process ones take `"session": <id>`.
 | `new_session` | `space`, `fps` | `{"session", "space"}` |
 | `close_session` / `set_space` | `upAxis`, `metersPerUnit` | |
 | `set_options` | `followScalp`, `mapsDir` | `{"followScalp", "mapsDir"}` (followScalp: the groom's option, saved in its file; mapsDir: where new texture maps' images go, default a folder of the session's in the temp folder) |
-| `load_groom` | `path`, `index` (0: the file's groom of that number, a file of several grooms) | groom info: `fileUpAxis`, `fps`, `scalp` counts and topology, `flatGuides`, `hierarchyGuides`, `nodes`, `output`, `followScalp`, `scalpCache`/`guideCache` refs, `notes`, `inputErrors`, `name`, `grooms` (every groom's name) |
+| `load_groom` | `path`, `index` (0: the file's groom of that number, a file of several grooms) | groom info: `fileUpAxis`, `fps`, `scalp` counts and topology, `flatGuides`, `hierarchyGuides`, `nodes`, `output`, `followScalp`, `scalpCache`/`guideCache` refs, `notes`, `inputErrors`, `name`, `grooms` (every groom's name), `braidTubes` (Show Tubes' nodes, as saved: the add-on's `braid_tubes`); the file's guide group colors and hidden groups go to the tools |
 | `groom_file_names` | `path` | `{"grooms": [name, ...]}`: a file's grooms in order (the app saves a document of several in one file; Open Groom File opens each on its own scalp, not linked to the file) |
-| `save_groom` | `path`, `upAxis` ("Y") | `{"path", "upAxis", "units"}` |
+| `save_groom` | `path`, `upAxis` ("Y"), `braidTubes`? (Show Tubes' nodes, the add-on's) | `{"path", "upAxis", "units"}`; the file holds the tools' guide group colors and hidden groups too (every host's .groom) |
 | `groom_info` | | as `load_groom` |
 | `set_scalp` | `points` (n,3), `faceCounts`, `faceIndices`, `uvs` (per face corner, 2), `restPoints`, `colorSets` `{name: (corners,4)}` | `{"points", "triangles", "topology", "matchesGroom", "guidesRerooted"}` |
 | `update_scalp` | `points`, `restPoints` | the scalp's points at this frame on its topology (a deforming scalp) |
@@ -331,7 +331,7 @@ the symmetry in the **host's axes**; strengths, values and pixels are as in Maya
 | `guide_segments` | `ids`, `group` or `level` (else the selection, else every guide) | `{"ids", "segments"}`: each guide's points - 1 (the Segments slider) |
 | `guides_preview` | `segments`, targets as resample | `{"previewed"}`: the guides shown resampled (`setPreviewHierarchy`, from the stored guides each time), no change, no undo step; `guides_edit resample` commits |
 | `guides_preview_end` | | `{"ended"}`: the stored guides shown again (after `guides_preview` or `tube_shape_preview`) |
-| `tube_targets` | | `{"source" (selection, solo, none), "guides", "shapes", "tube" (the first's, or null)}`: what the Shape and Select cards' Profile and Selected guides edit (Maya's `-tubeTargets`: the selection, else the soloed guides) |
+| `tube_targets` | | `{"source" (selection, solo, none), "guides", "shapes", "tube" (the first's, or null), "card" ({width, flatness, twist}: the Tube card's values for it, the core's tubeCardValues, or null)}`: what the Shape and Select cards' Profile and Selected guides edit (Maya's `-tubeTargets`: the selection, else the soloed guides) |
 | `tube_get` | `guide` (an ID) | `{"tube": {"shape", "width" (host units), "aspect", "twist" (radians)}}`, lists evenly spaced root to tip |
 | `tube_set` | `shape`, `width` (host units), `aspect`, `twist` (each a number or a list root to tip), `samples`; targets `ids`, `group` or `level`, else the selection | `{"changed", "undo"}` (Maya's `-setTube`, `editedTube`) |
 | `tube_scale` | `factor` (0 or more), targets | `{"changed", "undo"}`: every width times it, the taper kept |
@@ -345,7 +345,8 @@ the symmetry in the **host's axes**; strengths, values and pixels are as in Maya
 | `part_add` | `points` (host space, a list or a shared memory array of (n, 3)), `name` ("part") | `{"name", "undo"}`: a part through them bound to the cage, resampled to 64 points, named name, name1... (Maya's `groomLabParts -fromCurves`) |
 | `part_remove` | `name` | `{"removed", "undo"}` |
 | `parts_clear` / `flow_clear` | | `{"cleared", "undo"}` (nothing to clear: no undo step) |
-| `maps_list` | | `{"maps": [{name, kind (vertices, texture, guides), channels, texture?, file?, missing? (its file is not there), freezeMask?}], "folder"}` |
+| `maps_list` | | `{"maps": [{name, kind (vertices, texture, guides), channels, texture?, file?, missing? (its file is not there), freezeMask?}], "folder", "densityMap" (the Tube tool's density map: the one map, else an older numbered one, "" none: subdivisionDensityMapIn)}` |
+| `density_map` | | `{"map" (as maps_list's densityMap), "name" (what Subdivide makes it as), "start" (its value then)}` |
 | `map_create` | `name`, `kind` (vertices, texture, guides), `color`, `value`, `fill` [r,g,b(,a)], `resolution` (1024), `faces` (scalp polygon indices: the value or fill on them only, 0 elsewhere; a guide layer on the guides rooted there) | `{"name", "kind", "file"?, "undo"}` (a texture map's PNG written in the maps folder) |
 | `map_remove` | `name`, `deleteFile` (false) | `{"removed", "unlinked" [[node, param]...], "graphChanged", "fileDeleted", "undo"}`: Maya's `remove_map`. What reads the map lets go of it (its Map nodes removed, the params they fed read their own values again, map params naming it back to their defaults); a texture's file stays unless `deleteFile`, it is in the maps folder (GroomLab made it) and no other map reads it (undo writes it back) |
 | `map_rename` | `name`, `to` | `{"name", "renamed", "graphChanged", "file"?, "undo"}`: Maya's `rename_map`; the readers follow (`retargetMapReaders`), a texture's file too when it is named after the map and in the maps folder (`renamedMapTexture`, a free name) |
@@ -458,7 +459,11 @@ the next `display`):
   with the scene's depth, writing its own (`display.SOLID`). The rules (which nodes have the
   button, the toggle, a rename, a delete) are the core's, asked through the command `braid_tubes`
   {`shown`, `toggle`?, `old`?, `new`?, `keep`?} -> {`shown`, `lit`, `offered`: the nodes with the
-  button (Braids, and nodes giving guides: the tubes those guides carry)}.
+  button (Braids, and nodes giving guides: the tubes those guides carry)}. The graph editor asks
+  `graph_nodes` once per graph: {`nodes`: {name: {`outputs` (their types as connected),
+  `viewable` (View Up to Here), `bakeable` (Bake Node to Guides), `tubes` (Show Tubes)}}}, and
+  `port_types` once: {`matches`: {output type: [input types it feeds]}} (the core's
+  portTypesMatch), the canvas's wire checks.
 - `brush`: the overlay `hover` and the strokes build: the ring (`brushRingColor`: yellow, red for
   Part and Erase, orange for Flow, green for Place and Draw, which show a 6-pixel dot), the guides
   the brush would touch (`brushHoverColor`, while hovering) and a Part or Flow stroke's path,

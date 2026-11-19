@@ -1082,6 +1082,28 @@ std::string tubeToJson(const TubeProfile& tube, float scale) {
     return j.dump();
 }
 
+TubeCardValues tubeCardValues(const std::vector<float>& width, const std::vector<float>& aspect, const std::vector<float>& twist) {
+    TubeCardValues out;
+    if (!width.empty()) out.width = *std::max_element(width.begin(), width.end());
+    float a = 0.0f, t = 0.0f;
+    for (const float v : aspect) a += v;
+    for (const float v : twist) t += v;
+    const float meanAspect = aspect.empty() ? 1.0f : a / static_cast<float>(aspect.size());
+    out.flatness = std::clamp(1.0f - meanAspect, 0.0f, 0.99f);
+    out.twist = std::clamp(twist.empty() ? 0.0f : t / static_cast<float>(twist.size()), -kPi, kPi);
+    return out;
+}
+
+float tubeAspectOfFlatness(float flatness) { return std::max(1.0f - flatness, 0.01f); }
+
+std::string tubeSmoothEdit(const std::string& channel, int passes) {
+    if (channel != "width" && channel != "flatness" && channel != "aspect" && channel != "twist" && channel != "all") {
+        throw std::invalid_argument("the channel is width, flatness, twist or all");
+    }
+    nlohmann::json edit = {{"smooth", channel == "flatness" ? std::string("aspect") : channel}, {"passes", std::clamp(passes, 1, 100)}};
+    return edit.dump();
+}
+
 TubeProfile editedTube(const TubeProfile& base, const std::string& editJson, float scale, std::size_t points,
                        const TubeShapeLibrary* library) {
     json j;
@@ -1173,7 +1195,8 @@ TubeProfile editedTube(const TubeProfile& base, const std::string& editJson, flo
         tube.twist = resampled(tube.twist, n, 0.0f);
     }
     if (j.contains("smooth")) {
-        const std::string which = j["smooth"].is_string() ? j["smooth"].get<std::string>() : "";
+        std::string which = j["smooth"].is_string() ? j["smooth"].get<std::string>() : "";
+        if (which == "flatness") which = "aspect";  // (the Shape brush's name for it)
         const unsigned lists = which == "width" ? kTubeWidthList : which == "aspect" ? kTubeAspectList
                                : which == "twist" ? kTubeTwistList : which == "all" ? kTubeAllLists : 0u;
         if (lists == 0) throw std::invalid_argument("tube smooth: width, aspect, twist or all");

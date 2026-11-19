@@ -67,6 +67,11 @@ struct RootSubdivisionOptions {
 
 // The density map named for subdivision number `n` (1 on): tubeSubdivisionDensity01, ...
 std::string subdivisionDensityMapName(int n);
+// The density map the Tube tool's Subdivide, Paint and Apply use among the groom's maps `maps`
+// (every host's): kSubdivisionDensityMap, else an older numbered one (the first by name: a groom
+// from before the one map, its painting read as it is, nothing renamed), else "" (Subdivide makes
+// kSubdivisionDensityMap at kDefaultSubdivisionDensity).
+std::string subdivisionDensityMapIn(const std::vector<std::string>& maps);
 // The density map for cutting `guides` (root tubes, or tubes of their hierarchies): the map of the
 // subdivision the first of them is a cell of (painting it again cuts that subdivision again), else
 // a new one: the first subdivisionDensityMapName that no subdivision and none of `taken` (the
@@ -92,6 +97,7 @@ struct SubdivisionResult {
     std::vector<GuideId> cells;  // the root tubes made (level 1)
     std::size_t removed = 0;     // the guides taken out (the old root, or the cells replaced, with their hierarchies)
     std::size_t kept = 0;        // cells left as they were (applySubdivisionDensity)
+    int cellLevel = 0;           // the tube level the first cell is in (the root tubes' is 1: cells cut from them 2; 0 no cells)
 };
 
 // Root tubes `guides` (rootTubesOf) each cut into cells at the density the scalp's map gives,

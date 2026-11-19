@@ -688,13 +688,8 @@ void TubePanel::startRoots(RootTubeTool::Mode mode) {
     s.length = static_cast<float>(rootLength_->value());
     s.segments = static_cast<int>(std::lround(rootSegments_->value()));
     s.taper = static_cast<float>(rootTaper_->value());
-    // New roots go into the picked group when it is a top group, else rootTubes.
-    s.group.clear();
-    if (const HierarchyPtr h = session_->document()->session().authoredHierarchy()) {
-        const std::string& picked = session_->settings().brush.group;
-        const GroupId id = picked.empty() ? kNoGroup : h->findGroup(picked);
-        if (id != kNoGroup && h->groupDepth(id) == 0) s.group = picked;
-    }
+    // New roots go into the picked group when it is a top group, else rootTubes (the core's rule).
+    s.group = session_->settings().brush.group;
     rootsDone(session_->startRoots(mode));
 }
 
@@ -760,6 +755,18 @@ void TubePanel::duplicateRoots() {
     }));
 }
 
+namespace {
+
+// The density map Subdivide, Paint and Apply use: the one map, else an older numbered one
+// (subdivisionDensityMapIn, every host's); "" when the groom has none.
+std::string densityMapOf(const GroomDocument& doc) {
+    std::vector<std::string> names;
+    for (const PaintedMap& m : doc.maps()) names.push_back(m.name);
+    return subdivisionDensityMapIn(names);
+}
+
+}  // namespace
+
 void TubePanel::subdivideRoots() {
     GroomDocument* doc = document();
     if (!doc || !session_ || !session_->rootMode()) return;
@@ -769,16 +776,18 @@ void TubePanel::subdivideRoots() {
         return;
     }
     // The density map, made at 0.5 the first time (paint it, then Apply).
-    if (!doc->map(kSubdivisionDensityMap)) {
+    std::string map = densityMapOf(*doc);
+    if (map.empty()) {
         const std::string error = doc->createMap(kSubdivisionDensityMap, "vertices", false, kDefaultSubdivisionDensity);
         if (!error.empty()) {
             emit message(QString::fromStdString(error));
             return;
         }
+        map = kSubdivisionDensityMap;
     }
     const MeshPtr scalp = doc->session().scalp();  // (with the painted maps on it)
     RootSubdivisionOptions options;
-    options.map = kSubdivisionDensityMap;
+    options.map = map;
     options.multiplier = static_cast<float>(multiplier_->value());
     SubdivisionResult done;
     const std::string error = doc->editGuides("subdivide root", [&](GuideHierarchy& g) {
@@ -790,13 +799,9 @@ void TubePanel::subdivideRoots() {
     }
     emit guidesEdited();
     // (The cells are in the level below the root cut: that level shown, so they are seen.)
-    if (!done.cells.empty()) {
-        const HierarchyPtr h = doc->session().authoredHierarchy();
-        const HierarchyGuide* cell = h ? h->guide(done.cells.front()) : nullptr;
-        if (cell) {
-            fillLevels();
-            showLevel(h->groupDepth(cell->group) + 1);
-        }
+    if (done.cellLevel > 0) {
+        fillLevels();
+        showLevel(done.cellLevel);
     }
     rootsDone(session_->editRoots("roots", [](RootTubeTool& t, StrokeHost& h) { t.sync(h); }));
     emit message(tr("Subdivided: %1 root(s) made.").arg(done.cells.size()));
@@ -812,14 +817,15 @@ void TubePanel::paintDensity() {
         emit message(tr("Painted the density map: Apply cuts its roots by it."));
         return;
     }
-    if (!doc->map(kSubdivisionDensityMap)) {
+    const std::string map = densityMapOf(*doc);
+    if (map.empty()) {
         emit message(tr("No density map yet: Subdivide a root first (it makes the map)."));
         refreshRoots();
         return;
     }
     if (session_ && session_->rootMode()) session_->leaveRoots();
     paintingDensity_ = true;
-    emit paintDensityRequested(kSubdivisionDensityMap);
+    emit paintDensityRequested(map);
     rootsDone(true);
     emit message(tr("Painting the density map (white: more, smaller roots; Ctrl: toward black). The brush again (or another "
                     "tool) stops painting; then Apply to cut by it."));
@@ -828,13 +834,14 @@ void TubePanel::paintDensity() {
 void TubePanel::applyDensity() {
     GroomDocument* doc = document();
     if (!doc) return;
-    if (!doc->map(kSubdivisionDensityMap)) {
+    const std::string map = densityMapOf(*doc);
+    if (map.empty()) {
         emit message(tr("No density map yet: Subdivide a root first."));
         return;
     }
     const MeshPtr scalp = doc->session().scalp();
     RootSubdivisionOptions options;
-    options.map = kSubdivisionDensityMap;
+    options.map = map;
     options.multiplier = static_cast<float>(multiplier_->value());
     options.force = true;
     SubdivisionResult done;
@@ -910,7 +917,7 @@ void TubePanel::refreshRoots() {
     duplicateRoots_->setChecked(on && mode == RootTubeTool::Mode::Duplicate);
     subdivideRoots_->setEnabled(picked);
     paintDensity_->setChecked(paintingDensity_);
-    const bool hasMap = document() && document()->map(kSubdivisionDensityMap);
+    const bool hasMap = document() && !densityMapOf(*document()).empty();
     paintDensity_->setEnabled(hasMap || paintingDensity_);
     applyDensity_->setEnabled(hasMap);
     if (on && session_->roots().messageCount() != rootsHeard_) {
@@ -1134,13 +1141,8 @@ void TubePanel::refresh(bool force) {
                                    .arg(count)
                                    .arg(count == 1 ? QString() : QStringLiteral("s"), how, count == 1 ? tr("it") : tr("them")));
         const TubeProfile& tube = *info.tube;
-        const float widest = tube.width.empty() ? 0.1f : *std::max_element(tube.width.begin(), tube.width.end());
-        reference_ = widest * info.scale;
-        float aspect = 0.0f, twist = 0.0f;
-        for (const float a : tube.aspect) aspect += a;
-        for (const float t : tube.twist) twist += t;
-        aspect = tube.aspect.empty() ? 1.0f : aspect / static_cast<float>(tube.aspect.size());
-        twist = tube.twist.empty() ? 0.0f : twist / static_cast<float>(tube.twist.size());
+        const TubeCardValues card = tubeCardValues(tube.width, tube.aspect, tube.twist);  // (every host's)
+        reference_ = card.width * info.scale;
         // The choice follows the targets when they (or their shapes) change, and is left alone
         // otherwise (a shape made or picked here while they stay selected).
         std::string key;
@@ -1161,8 +1163,8 @@ void TubePanel::refresh(bool force) {
             if (hold && std::find(held_.begin(), held_.end(), hold) == held_.end() && !hold->editing()) hold->setValue(held[k] * 100.0);
         }
         width_->setValue(reference_ * lengthFactor_);
-        flatness_->setValue(std::clamp(1.0 - aspect, 0.0, 0.99));
-        twist_->setValue(twist * 180.0 / kPi);
+        flatness_->setValue(card.flatness);
+        twist_->setValue(card.twist * 180.0 / kPi);
     }
     updating_ = false;
     refreshTips();
@@ -1277,7 +1279,7 @@ void TubePanel::showChoice(bool mixed) {
 std::string TubePanel::placement() const {
     return json{{"shape", choice_},
                 {"width", width_->value() / lengthFactor_},
-                {"aspect", std::max(1.0 - flatness_->value(), 0.01)},
+                {"aspect", tubeAspectOfFlatness(static_cast<float>(flatness_->value()))},
                 {"twist", twist_->value() * kPi / 180.0}}
         .dump();
 }
@@ -1375,7 +1377,7 @@ void TubePanel::refreshUnits() {
 
 void TubePanel::setFlatness(double flatness) {
     GroomDocument* doc = document();
-    if (doc && !targets_.empty()) edited(doc->editTubes(targets_, json{{"aspect", std::max(1.0 - flatness, 0.01)}}));
+    if (doc && !targets_.empty()) edited(doc->editTubes(targets_, json{{"aspect", tubeAspectOfFlatness(static_cast<float>(flatness))}}));
     pushPlacement();
 }
 

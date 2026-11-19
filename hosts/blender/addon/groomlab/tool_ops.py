@@ -1684,7 +1684,7 @@ class GROOMLAB_OT_root_tube(GroomToolOperator):
         if t.root_painting:
             finish_density_painting(context)
             return
-        if not any(m.name == tools.DENSITY_MAP for m in t.maps):
+        if not t.root_density_map:
             tools.status(context.scene, "No density map yet: Subdivide a root first (it makes the map).")
             return
         leave_roots(context, scalp)

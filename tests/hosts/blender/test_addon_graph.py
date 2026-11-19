@@ -1095,6 +1095,9 @@ class GraphEditorTest(unittest.TestCase):
         self.assertTrue(canvas.compatible("Curves", "Guides"))
         self.assertFalse(canvas.compatible("Strands", "Guides"))
         self.assertFalse(canvas.compatible("Mesh", "Strands"))
+        self.assertTrue(canvas.compatible("Value", "Field"), "a number on every strand (the core's portTypesMatch)")
+        self.assertFalse(canvas.compatible("Field", "Value"))
+        self.assertTrue(canvas.compatible("Field", "Value", out=False), "dragged from a Field input")
         link = next(l for l in tree.links if canvas._port_type(l.from_socket) == "Strands"
                     and l.to_node.bl_idname != "NodeReroute")
         source, target, into = link.from_node.name, link.to_node.name, link.to_socket.identifier

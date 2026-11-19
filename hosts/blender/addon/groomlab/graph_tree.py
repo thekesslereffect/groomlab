@@ -584,26 +584,6 @@ def _make_sockets(node, ports):
     return True
 
 
-def _output_type(graph, name, spec_of, seen=None):
-    """A node's first output type as connected: Curves gives what feeds its first Curves input."""
-    spec = spec_of(name)
-    if not spec:
-        return "Curves"
-    outs = spec.get("outputs") or [spec.get("output")]
-    t = outs[0]["type"] if outs and outs[0] else "Curves"
-    if t != "Curves":
-        return t
-    seen = seen or set()
-    if name in seen:
-        return t
-    seen.add(name)
-    curves_in = next((p["name"] for p in spec.get("inputs", []) if p["type"] in ("Curves", "Strands", "Guides")), None)
-    for c in graph.get("connections", []):
-        if c.get("to") == name and c.get("input") == curves_in:
-            return _output_type(graph, c["from"], spec_of, seen)
-    return t
-
-
 # ---- Values: graph params into a node's properties and back -------------------------------------
 
 def _unit_of(node, spec):
@@ -1341,6 +1321,12 @@ def build_tree(scalp, tree, data, rt=None):
         t = next((n.get("type") for n in gnodes if n["name"] == name), None)
         return specs.get(t)
 
+    # Each node's outputs as connected (a Curves node gives what feeds it): the core's outputTypes.
+    try:
+        facts = _call("graph_nodes", session=rt.session)["nodes"]
+    except HelperError:
+        facts = {}
+
     view = scalp.groomlab.view_node
     with building():
         existing = {}
@@ -1408,8 +1394,8 @@ def build_tree(scalp, tree, data, rt=None):
             node.gl_controls = json.dumps(controls) if isinstance(controls, dict) and controls else ""
             ins = [(p["name"], p["type"], bool(p.get("param"))) for p in spec.get("inputs", [])]
             outs = [(p["name"], p["type"]) for p in (spec.get("outputs") or [spec.get("output")]) if p]
-            if outs:
-                outs[0] = (outs[0][0], _output_type(data, name, spec_of))
+            connected = (facts.get(name) or {}).get("outputs") or []
+            outs = [(o[0], connected[i] if i < len(connected) else o[1]) for i, o in enumerate(outs)]
             _make_sockets(node, (ins, outs))
             inputs = list(gnode.get("paramInputs") or [])
             drivers = _drivers(data, name, inputs)
@@ -1813,28 +1799,65 @@ def follow_renamed(scalp, rt, old, new):
 # ---- Show Tubes: a Braid's header button (the groom's braid_tubes: the nodes whose tubes draw) -------
 
 _BRAID_TUBES = {}  # groom uid -> ((graph text, shown), the nodes lit)
-_TUBE_NODES = {}  # groom uid -> (graph text, the nodes with Show Tubes)
+_NODE_FACTS = {}  # groom uid -> (graph text, {node: its facts, the helper's graph_nodes})
+_PORT_TYPES = {}  # output type -> the input types it feeds (the helper's port_types), once asked
 
 
-def tube_nodes(scalp):
-    """The nodes with Show Tubes on their headers: Braids (their section tubes) and nodes giving
-    guides (the tubes those carry), the core's GraphEdit::braidTubesOffered through the helper, asked
-    again only when the graph changed."""
+def node_facts(scalp):
+    """What each node of the groom's graph is to the editors, the core's rules through the helper
+    (graph_nodes): {name: {"outputs": its outputs' types as connected, "viewable": View Up to Here,
+    "bakeable": Bake Node to Guides, "tubes": Show Tubes}}, asked again only when the graph changed."""
     if scalp is None:
-        return ()
+        return {}
     key = scalp.groomlab.graph_json
-    hit = _TUBE_NODES.get(scalp.groomlab.uid)
+    hit = _NODE_FACTS.get(scalp.groomlab.uid)
     if hit is not None and hit[0] == key:
         return hit[1]
     rt = groom.runtime_if_any(scalp)
     if rt is None or rt.session is None or not process.running():
-        return ()
+        return {}
     try:
-        offered = frozenset(_call("braid_tubes", session=rt.session, shown="")["offered"])
+        facts = _call("graph_nodes", session=rt.session)["nodes"]
     except HelperError:
-        return ()
-    _TUBE_NODES[scalp.groomlab.uid] = (key, offered)
-    return offered
+        return {}
+    _NODE_FACTS[scalp.groomlab.uid] = (key, facts)
+    return facts
+
+
+def _fact(node, what):
+    facts = node_facts(getattr(node.id_data, "gl_scalp", None))
+    return bool((facts.get(node.gl_name) or {}).get(what))
+
+
+def tube_nodes(scalp):
+    """The nodes with Show Tubes on their headers: Braids (their section tubes) and nodes giving
+    guides (the tubes those carry), the core's GraphEdit::braidTubesOffered (node_facts)."""
+    return frozenset(name for name, f in node_facts(scalp).items() if f.get("tubes"))
+
+
+def viewable(node):
+    """Whether View Up to Here takes the node: an output giving strands as connected (the core's
+    GraphEdit::viewable, every host's eye button and V key)."""
+    return _fact(node, "viewable")
+
+
+def bakeable(node):
+    """Whether Bake Node to Guides takes the node (the core's GraphEdit::bakeable)."""
+    return _fact(node, "bakeable")
+
+
+def port_types_match(out_type, in_type):
+    """Whether a link joins an output of `out_type` to an input of `in_type`: the core's
+    portTypesMatch (the helper's port_types, asked once); "Any" (a port the add-on cannot type)
+    takes anything, the helper having the last word."""
+    if out_type == in_type or "Any" in (out_type, in_type):
+        return True
+    if not _PORT_TYPES and process.running():
+        try:
+            _PORT_TYPES.update(_call("port_types")["matches"])
+        except HelperError:
+            pass
+    return in_type in _PORT_TYPES.get(out_type, ())
 
 
 def shows_tubes(node):

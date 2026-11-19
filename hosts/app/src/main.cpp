@@ -449,7 +449,7 @@ int main(int argc, char** argv) {
                         "display options: colorMode (solid, colorset, attribute, random, clump, density), colorSource, colorMin,\n"
                         "                colorMax, guides, tubes, guidePoints (0-2), scalpMap, scalpMapChannel (rgb, r, g, b, a), cardsView,\n"
                         "                lookdev, scalp, widthCoverage, coverageDensity, clumpLod, clumpLodError,\n"
-                        "                braidTubes (Show Tubes: a Braid node's name, several as a|b, * for every one)\n"
+                        "                braidTubes (Show Tubes: a node's name, several as a|b, * for every one with the button)\n"
                         "brush settings: mode (comb, smooth, slide, lift, length, cut, curl, twist, straighten, attract,\n"
                         "                clump, paint, tube, erase, place, draw, part, flow, freeze), radius (px), strength, hardness,\n"
                         "                symmetry (x|y|z|none), symmetryCenter, level, group, pressure, maskByScalp, selectedOnly,\n"

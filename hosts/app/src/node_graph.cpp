@@ -284,6 +284,7 @@ void NodeGraphView::rebuild() {
         node.name = info.name;
         node.type = info.type;
         node.tubes = edit.braidTubesOffered(info.name);
+        node.viewable = edit.viewable(info.name);
         node.bypass = info.bypass;
         node.evaluation = info.evaluation;
         // The node's ports as it is set (its exposed params' after its own: Field, Curve or Value).
@@ -292,8 +293,16 @@ void NodeGraphView::rebuild() {
             for (const nlohmann::json& p : spec->value("inputs", nlohmann::json::array())) {
                 node.inputs.push_back({p.value("name", std::string()), p.value("type", std::string()), p.value("optional", false)});
             }
-            for (const nlohmann::json& p : spec->value("outputs", nlohmann::json::array())) {
-                node.outputs.push_back({p.value("name", std::string()), p.value("type", std::string()), false});
+            // Outputs as connected (a Curves node gives what feeds it: GraphEdit::outputType).
+            std::vector<std::string> types;
+            try {
+                types = edit.outputTypes(info.name);
+            } catch (const std::exception&) {
+            }
+            const nlohmann::json outputs = spec->value("outputs", nlohmann::json::array());
+            for (std::size_t o = 0; o < outputs.size(); ++o) {
+                const std::string type = o < types.size() ? types[o] : outputs[o].value("type", std::string());
+                node.outputs.push_back({outputs[o].value("name", std::string()), type, false});
             }
             for (const nlohmann::json& p : spec->value("params", nlohmann::json::array())) {
                 if (p.contains("port") && p["port"].is_object()) node.linkableParams.push_back(p.value("name", std::string()));
@@ -821,11 +830,7 @@ void NodeGraphView::setClumpColoredNodes(std::vector<std::string> nodes) {
     update();
 }
 
-bool NodeGraphView::viewable(const Node& node) const {
-    return std::any_of(node.outputs.begin(), node.outputs.end(), [](const Port& p) {
-        return p.type == "strands" || p.type == "Strands" || p.type == "curves" || p.type == "Curves";
-    });
-}
+bool NodeGraphView::viewable(const Node& node) const { return node.viewable; }
 
 bool NodeGraphView::viewButtonAt(const QPointF& scene, int* node) const {
     for (std::size_t i = 0; i < nodes_.size(); ++i) {
@@ -1941,10 +1946,7 @@ void NodeGraphView::toggleViewSelected() {
     }
     const int i = nodeIndex(selected_);
     if (i < 0) return;
-    const bool strands = std::any_of(nodes_[i].outputs.begin(), nodes_[i].outputs.end(), [](const Port& p) {
-        return p.type == "strands" || p.type == "Strands" || p.type == "curves" || p.type == "Curves";
-    });
-    if (!strands) {
+    if (!viewable(nodes_[i])) {
         emit message(tr("%1 gives no strands to view: pick a node with a strands output").arg(QString::fromStdString(selected_)));
         return;
     }
@@ -2877,61 +2879,9 @@ void NodeGraphView::closeSearch() {
     update();
 }
 
-namespace {
-
-// A param name as words: "guideRadius" reads "guide radius" (Maya's pretty(), lowercase).
-QString spacedName(const QString& name) {
-    QString out;
-    for (int i = 0; i < name.size(); ++i) {
-        const QChar ch = name[i];
-        if (ch == QLatin1Char('_')) {
-            out += QLatin1Char(' ');
-            continue;
-        }
-        if (i > 0 && ch.isUpper() && (name[i - 1].isLower() || name[i - 1].isDigit())) out += QLatin1Char(' ');
-        out += ch;
-    }
-    return out.toLower();
-}
-
-bool allIn(const QStringList& words, const QString& text, const QString& orIn) {
-    for (const QString& w : words) {
-        if (!text.contains(w) && !orIn.contains(w)) return false;
-    }
-    return true;
-}
-
-}  // namespace
-
 int nodeSearchRank(const QString& search, const nlohmann::json& spec) {
-    const QString text = search.trimmed().toLower();
-    if (text.isEmpty()) return 5;
-    const std::string type = spec.value("type", std::string());
-    const QString name = QString::fromStdString(type).toLower();
-    const std::string label = spec.value("label", std::string());
-    const QString shown = QString::fromStdString(label.empty() ? nodeLabel(type) : label).toLower();
-    if (name.startsWith(text) || shown.startsWith(text)) return 0;
-    if (name.contains(text) || shown.contains(text) || name.contains(QString(text).remove(QLatin1Char(' ')))) return 1;
-    const QStringList words = text.split(QLatin1Char(' '), Qt::SkipEmptyParts);
-    // Rank 2's words: the search keywords and the menu category's title ("deform" finds Bend first).
-    const QString keywords = (QString::fromStdString(spec.value("keywords", std::string())) + QLatin1Char(' ') +
-                              QString::fromStdString(spec.value("categoryTitle", std::string())))
-                                 .toLower();
-    QString params, details;
-    for (const nlohmann::json& p : spec.value("params", nlohmann::json::array())) {
-        const QString pname = QString::fromStdString(p.value("name", std::string()));
-        params += pname.toLower() + QLatin1Char(' ') + spacedName(pname) + QLatin1Char(' ');
-        details += QString::fromStdString(p.value("description", std::string())).toLower() + QLatin1Char(' ');
-    }
-    const QString about =
-        (QString::fromStdString(spec.value("categoryTitle", std::string())) + QLatin1Char(' ') + QString::fromStdString(spec.value("description", std::string())))
-            .toLower();
-    if (allIn(words, keywords, name)) return 2;
-    if (allIn(words, params, name)) return 3;
-    if (allIn(words, about, name)) return 4;
-    const QString everything = name + QLatin1Char(' ') + keywords + QLatin1Char(' ') + params + QLatin1Char(' ') + about + QLatin1Char(' ') + details;
-    if (allIn(words, everything, everything)) return 5;
-    return -1;
+    // The core's (node_catalog.h, every host's search).
+    return groomlab::nodeSearchRank(search.toStdString(), nodeSearchWords(spec.dump()));
 }
 
 std::vector<std::string> nodeSearchResults(const GroomDocument& document, const QString& text) {

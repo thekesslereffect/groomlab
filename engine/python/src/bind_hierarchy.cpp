@@ -13,6 +13,7 @@
 #include "groomlab/groom_transfer.h"
 #include "groomlab/guide_hierarchy.h"
 #include "groomlab/guide_selection.h"
+#include "groomlab/root_subdivision.h"
 #include "groomlab/root_tubes.h"
 #include "groomlab/transfer.h"
 #include "groomlab/transfer_markers_edit.h"
@@ -255,8 +256,30 @@ void bindHierarchy(py::module_& m) {
         },
         py::arg("bind_json"), py::arg("guides"), py::arg("driver") = py::none(),
         "(bind_json, count): `guides` detached from `driver` (None: every driver), drive_guides.h.");
+    m.def("subdivision_density_map_in", &subdivisionDensityMapIn, py::arg("maps"),
+          "The Tube tool's density map among the groom's maps: the one map, else an older numbered one, "
+          "else '' (root_subdivision.h, every host's).");
+    m.attr("SUBDIVISION_DENSITY_MAP") = kSubdivisionDensityMap;
+    m.attr("DEFAULT_SUBDIVISION_DENSITY") = kDefaultSubdivisionDensity;
+    m.attr("MAX_TUBE_LEVELS") = kMaxTubeLevels;
     m.def("root_tube_color", [](std::size_t k) { const auto c = rootTubeColor(k); return py::make_tuple(c[0], c[1], c[2]); },
           py::arg("k"), "Root tube k's color, as every host draws it (guide_hierarchy.h rootTubeColor).");
+    m.def(
+        "tube_card_values",
+        [](const std::vector<float>& width, const std::vector<float>& aspect, const std::vector<float>& twist) {
+            const TubeCardValues v = tubeCardValues(width, aspect, twist);
+            py::dict out;
+            out["width"] = v.width;
+            out["flatness"] = v.flatness;
+            out["twist"] = v.twist;
+            return out;
+        },
+        py::arg("width"), py::arg("aspect"), py::arg("twist"),
+        "The Tube card's {width, flatness, twist} for a tube's lists (tube.h tubeCardValues, every host's).");
+    m.def("tube_aspect_of_flatness", &tubeAspectOfFlatness, py::arg("flatness"),
+          "The aspect the Tube card's Flatness sets (tube.h).");
+    m.def("tube_smooth_edit", &tubeSmoothEdit, py::arg("channel"), py::arg("passes") = 3,
+          "The Tube card's Smooth as a tube edit's JSON (tube.h tubeSmoothEdit); ValueError for no such channel.");
     m.def("free_tube_shape_name", &freeTubeShapeName, py::arg("base"), py::arg("library"),
           "A new library shape's name: \"<base> 1\", \"<base> 2\"... no built-in or `library` shape has (tube.h).");
     m.def(

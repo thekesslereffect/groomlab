@@ -153,7 +153,7 @@ std::string GroomDocument::addGuideCacheNode(const std::string& path, std::strin
 }
 
 std::string GroomDocument::addCollider(const std::string& meshName, std::string* made) {
-    if (meshName.empty() || meshName == "scalp") return "pick another collider name than '" + meshName + "'";
+    // (The name's rules: insertCollider's. A mesh that collides already: no undo step for nothing.)
     for (const std::string& n : ofType(graph_, "ColliderMesh")) {
         const json own = paramOf(graph_, n, "name");
         if (own.is_string() && own.get<std::string>() == meshName) {

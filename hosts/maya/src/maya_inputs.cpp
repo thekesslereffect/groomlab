@@ -965,10 +965,8 @@ GuidesPtr toGuidePoses(const std::vector<SimCurveData>& curves, const std::strin
             } else {
                 cached = readAlembicCurvesAt(path, seconds, cacheObject);
             }
-            for (std::size_t s = 0; s < cached.strandCount(); ++s) {
-                const Vec3f* p = cached.strandPoints(s);
-                poses[cached.ids()[s]].assign(p, p + cached.strandPointCount(s));
-            }
+            GuideSet read = guidesOfCurves(cached);  // (every host's: groom.h)
+            for (Guide& g : read.guides()) poses[g.id] = std::move(g.points);
         } catch (const std::exception& e) {
             if (error) *error = std::string("guideCache: ") + e.what();
         }
