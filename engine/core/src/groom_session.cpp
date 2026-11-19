@@ -1068,6 +1068,7 @@ void GroomSession::setCacheIntermediates(bool enabled) {
 // ---- Previews -------------------------------------------------------------------------------
 
 void GroomSession::setPreviewHierarchy(std::shared_ptr<GuideHierarchy> preview, bool final) {
+    if (previewHierarchy_ && !preview) releaseSpares();  // a guide stroke's preview over
     previewHierarchy_ = std::move(preview);
     previewFinal_ = previewHierarchy_ && final;
     followPreview_.reset();
@@ -1172,7 +1173,13 @@ bool GroomSession::setLiveStroke(bool on) {
     }
     const bool again = strokeDensityUsed_;  // something evaluated at the stroke's density
     strokeDensityUsed_ = false;
+    releaseSpares();
     return again;
+}
+
+void GroomSession::releaseSpares() {
+    if (doc_) doc_->graph.releaseSpares();
+    if (sculptDoc_) sculptDoc_->graph.releaseSpares();
 }
 
 // ---- Guides ---------------------------------------------------------------------------------

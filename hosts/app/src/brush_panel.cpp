@@ -618,11 +618,7 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
 double BrushPanel::lengthScale() const {
     const GroomDocument* document = session_ ? session_->document() : nullptr;
     const std::optional<double> size = document ? scalpSizeOf(*document) : std::nullopt;
-    if (!size || !(*size > 0.0)) return 1.0;
-    // To the nearest power of ten: a head in centimeters, millimeters or meters gets the same
-    // round span in its own unit, and a head a little bigger than another the same one.
-    const double k = unitScaleFactor("length", *size / kDefaultsScalpSize).value_or(1.0);
-    return std::pow(10.0, std::round(std::log10(k)));
+    return size ? brushLengthScale(*size) : 1.0;  // (the core's rule, brush_catalog.h)
 }
 
 ValueSlider* BrushPanel::slider(QVBoxLayout* into, const char* id, const QString& label, std::function<double()> get,

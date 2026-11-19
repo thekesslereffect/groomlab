@@ -909,6 +909,10 @@ std::uint64_t SimSettings::hash() const {
     // Only when on (else the hash made before it).
     if (groomedUnderGravity) h = hashCombine(h, 0x6A7E);
     if (groomedUnderGravity && preload) h = hashCombine(h, 0x9E10);
+    // The preload takes drag over the mass as the substep does (it took the drag alone before): a
+    // node with a mass of its own simulates otherwise, so its bakes made before read as out of date.
+    // Mass 1: the same frames, the hash made before.
+    if (groomedUnderGravity && preload && mass != 1.0f) h = hashCombine(h, 0xD4A6);
     // Dry: the hash made before water (the stamps of bakes made then still match).
     if (!wetting()) return h;
     h = hashCombine(h, water ? 0x3A7E : 0x3A7F);

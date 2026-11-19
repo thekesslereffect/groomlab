@@ -939,6 +939,8 @@ private:
     // The graph parsed from data_.graphJson scaled by k (scaleGraphJson), its compounds as their
     // nodes inline (`flat`: where they went); throws as loadGraphJson.
     std::unique_ptr<GraphDocument> parseScaled(const std::string& graphJson, GraphEdit::FlatCompounds* flat) const;
+    // A stroke over: the graphs' spares let go (Graph::releaseSpares).
+    void releaseSpares();
     // Swaps in a parsed graph: every document adopts its old one's cache.
     void installGraph(std::unique_ptr<GraphDocument> parsed);
     // Measures the scalp and, when k changes, parses the graph again and scales the guides.

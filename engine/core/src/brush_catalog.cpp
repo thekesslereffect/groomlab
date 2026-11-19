@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "groomlab/brush_catalog.h"
 
+#include "groomlab/presets.h"
+
 #include <algorithm>
+#include <cmath>
 #include <set>
 
 namespace groomlab {
@@ -264,6 +267,12 @@ std::vector<const BrushEntry*> brushesInCategory(BrushCategory category) {
         if (e.category == category) out.push_back(&e);
     }
     return out;
+}
+
+double brushLengthScale(double scalpSize) {
+    if (!(scalpSize > 0.0)) return 1.0;
+    const double k = unitScaleFactor("length", scalpSize / kDefaultsScalpSize).value_or(1.0);
+    return k > 0.0 ? std::pow(10.0, std::round(std::log10(k))) : 1.0;
 }
 
 }  // namespace groomlab

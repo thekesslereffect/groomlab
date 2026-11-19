@@ -1122,6 +1122,10 @@ public:
     // megabytes from the environment, else kDefaultCacheLimit.
     static constexpr std::size_t kDefaultCacheLimit = std::size_t{2048} << 20;
     void setCacheLimit(std::size_t bytes) { cacheLimit_ = bytes; }
+    // Lets every node's spare go (the points of its result before the last, kept for the next dab
+    // to write over): a stroke ended, nothing to write over until the next one. A node's points at
+    // 500k strands are ~96 MB, so spares are not kept between strokes.
+    void releaseSpares();
     std::size_t cacheLimit() const { return cacheLimit_; }
     // The bytes the cached strands hold, as the limit counts them; how many results it let go so far.
     std::size_t cachedBytes() const;

@@ -73,7 +73,7 @@ struct BrushSettingSpec {
     // What the number measures, as ParamSpec::unit names it (graph.h): "pixels", "angle" (degrees),
     // "fraction" (0-1, shown as a percentage), "length" (scene units, written for a scalp of
     // kDefaultsScalpSize, presets.h: a host that knows the groom's size scales the span and the
-    // limits by unitScaleFactor("length", size / kDefaultsScalpSize)); empty: unitless.
+    // limits by brushLengthScale(size)); empty: unitless.
     std::string unit = {};
 
     bool isValue() const { return kind != BrushSettingKind::Group; }
@@ -89,6 +89,11 @@ const BrushEntry* brushEntry(const std::string& id);
 // groomLabBrushCtx flags).
 const std::vector<BrushSettingSpec>& brushSettingSpecs();
 const BrushSettingSpec* brushSettingSpec(const std::string& id);
+// What a "length" setting's span and limits are times on a groom whose scalp is `scalpSize`
+// across: its size over the size the specs are written for (kDefaultsScalpSize), to the nearest
+// power of ten (a head in centimeters, millimeters or meters gets the same round span in its own
+// unit, and a head a little bigger than another the same one); 1 for no size.
+double brushLengthScale(double scalpSize);
 // The tools of one category, in order.
 std::vector<const BrushEntry*> brushesInCategory(BrushCategory category);
 

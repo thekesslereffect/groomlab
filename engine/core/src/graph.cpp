@@ -1535,11 +1535,15 @@ std::vector<Value> Graph::evaluateWithKeys(NodeId id, const EvalContext& graphCt
                         for (StrandChanges& c : made) changes.push_back(std::make_shared<const StrandChanges>(std::move(c)));
                         // The last result's points left with it (shared with the nodes after it, so
                         // copied, or the spare taken in their place), its own, and only some strands
-                        // changed at the counts they had: kept as the next evaluation's spare.
+                        // changed at the counts they had: kept as the next evaluation's spare. Not
+                        // when the new result shares those points (a widths-only change): the spare
+                        // would hold them too, and the next dab could neither take them nor it.
                         const StrandsPtr last = multi ? nullptr : valueAs<StrandsPtr>(node.cachedValues[0]);
+                        const StrandsPtr made = multi ? nullptr : valueAs<StrandsPtr>(result[0]);
                         if (last && node.ownPoints && cacheIntermediates_ && !changes[0]->all &&
                             !sameValue(result[0], node.cachedValues[0]) && last->pointCount() > 0 &&
-                            last->positions().size() == last->offsets().back()) {
+                            last->positions().size() == last->offsets().back() &&
+                            !(made && made->positions().data() == last->positions().data())) {
                             spareNext = std::make_shared<StrandSet>();
                             spareNext->sharePositionsOf(*last);
                         }
@@ -1771,6 +1775,13 @@ void Graph::adoptCache(const Graph& previous) {
         node.changesBase = 0;
         node.passedOn = was.passedOn;
         node.ownPoints = false;
+        node.spare.reset();
+        node.spareChanges.reset();
+    }
+}
+
+void Graph::releaseSpares() {
+    for (auto& [id, node] : nodes_) {
         node.spare.reset();
         node.spareChanges.reset();
     }
