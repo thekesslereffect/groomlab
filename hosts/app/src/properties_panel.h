@@ -90,7 +90,6 @@ public:
     QWidget* control(const std::string& key) const;  // null: none
     QLabel* label(const std::string& key) const;     // null: none (a block)
     bool shown(const std::string& key) const;        // an item with a control, its row not hidden
-    std::vector<std::string> boundKeys() const;      // the keys with a control, in order
     // The row of an item shown or hidden (an item that applies only now and then: Source with the
     // color modes that read one).
     void setRowVisible(const std::string& key, bool visible);

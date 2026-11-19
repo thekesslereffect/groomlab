@@ -92,7 +92,6 @@ public:
 
     // ---- The edits, as the controls do them --------------------------------------------------
     void pick(const std::string& name);     // the picker: the targets take it, and new guides
-    void applyShape();                      // Apply to Selected (the root's row)
     void pickProfile(int profile, const std::string& name);  // the mid's or the tip's picker ("" unset)
     void applyProfile(int profile);         // a row's Apply: its shape and its Length to every target
     void setHold(int profile, double percent);  // a row's Length (percent of the tube)
@@ -157,14 +156,10 @@ public:
     QAbstractButton* selectRootButton() const { return selectRoot_; }
     QAbstractButton* deleteRootsButton() const { return deleteRoots_; }
     QAbstractButton* duplicateRootsButton() const { return duplicateRoots_; }
-    QAbstractButton* colorsBox() const;
-    QAbstractButton* alwaysVisibleBox() const;
     QComboBox* shapeBox() const { return shape_; }
     QComboBox* profileBox(int profile) const { return profile == 0 ? shape_ : profile == 1 ? mid_ : tip_; }
-    QPushButton* profileApply(int profile) const { return profileApply_[static_cast<std::size_t>(profile)]; }
     ValueSlider* holdSlider(int profile) const { return holds_[static_cast<std::size_t>(profile)]; }
     QAbstractButton* shadedBox() const;
-    QAbstractButton* wireframeBox() const;
     TubeShapeEditor* editor() const { return editor_; }
     QLabel* targetsLabel() const { return targetsLabel_; }
     TubeShapeEditor* preview() const { return preview_; }  // New's small read-only profile
@@ -175,12 +170,9 @@ public:
     QToolButton* deleteButton() const { return delete_; }
     QPushButton* applyButton() const { return apply_; }
     QToolButton* smoothButton() const { return smooth_; }  // Selected guides' Smooth (its menu: which channels)
-    QAbstractButton* mirrorBox() const;
-    QAbstractButton* shapeSmoothBox() const;
     QLineEdit* renameField() const { return renameField_; }
     ValueSlider* widthSlider() const { return width_; }
     ValueSlider* flatnessSlider() const { return flatness_; }
-    ValueSlider* twistSlider() const { return twist_; }
     CardBlock* tubeBlock() const { return tubeBlock_; }          // New
     CardBlock* profileBlock() const { return profileBlock_; }    // Edit
     CardBlock* selectedBlock() const { return selectedBlock_; }  // Edit

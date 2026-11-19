@@ -1330,8 +1330,6 @@ void OverlayHost::setTool(const std::string& brushMode, bool select) {
     refreshToolLabel();
 }
 
-QString OverlayHost::toolText() const { return toolLabel_->isVisibleTo(this) ? toolName_->text() : QString(); }
-
 void OverlayHost::refreshToolLabel() {
     // The name and the key that brings the tool back: S for Select, B for the brushes (Groom mode).
     const bool shown = groomOpen() && mode_ == Mode::Groom && (toolSelect_ || !toolMode_.empty());
@@ -1704,8 +1702,6 @@ void OverlayHost::setMode(Mode mode) {
     refreshStarter();
     relayout();
 }
-
-bool OverlayHost::viewportResizePending() const { return viewportTimer_->isActive(); }
 
 void OverlayHost::placeViewport() {
     // At once, unless a mouse button is held (a dock's or a splitter's drag): then a moment after

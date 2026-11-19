@@ -2155,16 +2155,9 @@ json mapForParam(ToolState& t, const json& args) {
 
 // ---- Map management (Maya's painting.py over groomLabScalpMaps) ---------------------------------------
 
-bool hasLayer(Session& s, const std::string& name) {
-    const auto h = s.groom->storedHierarchy();
-    if (!h) return false;
-    const std::vector<std::string> layers = h->attributeNames();
-    return std::find(layers.begin(), layers.end(), name) != layers.end();
-}
-
 // "vertices", "texture", "guides", or "" for no map of that name.
 std::string mapKindOf(Session& s, const std::string& name) {
-    const auto h = s.groom->storedHierarchy();  // (the layers as stored, as hasLayer reads them)
+    const auto h = s.groom->storedHierarchy();  // (the layers as stored)
     return groomlab::mapKindOf(s.groom->scalpMaps(), h.get(), name);  // every host's (scalp_maps.h)
 }
 

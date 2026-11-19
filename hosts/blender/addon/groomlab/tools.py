@@ -833,17 +833,6 @@ def set_group_color(scalp, group, color):
 TUBE_CHANNELS = ("width", "flatness", "twist")
 
 
-def tube_tool(scalp, channel=None, tube=None):
-    """The Shape brush's channel (`channel`: width, flatness or twist) and the tube Place and Draw
-    give new guides (`tube`: {shape, width (scene units), aspect, twist}): helper tool_set."""
-    settings = {}
-    if channel is not None:
-        settings["tubeChannel"] = channel
-    if tube is not None:
-        settings["tube"] = dict(tube)
-    return call(scalp, "tool_set", settings=settings)
-
-
 def tube_targets(scalp):
     """The guides the Tubes section edits: {source (selection, solo, none), guides, shapes, tube}."""
     return call(scalp, "tube_targets")

@@ -60,14 +60,6 @@ def linear(c):
 _LINEAR_BYTES = [linear(i / 255.0) for i in range(256)]
 
 
-def _rgba(value, palette, alpha=1.0):
-    value = palette.get(value, value)
-    if not isinstance(value, str) or not value.startswith("#"):
-        return (1.0, 0.0, 1.0, 1.0)
-    h = value.lstrip("#")
-    return (_LINEAR_BYTES[int(h[0:2], 16)], _LINEAR_BYTES[int(h[2:4], 16)], _LINEAR_BYTES[int(h[4:6], 16)], alpha)
-
-
 def _srgb(value, palette):
     """A theme color ("#RRGGBB" or a palette name) as sRGB (0-1), or None."""
     value = palette.get(value, value)

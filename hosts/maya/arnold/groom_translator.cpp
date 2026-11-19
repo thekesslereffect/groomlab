@@ -71,7 +71,6 @@
 
 namespace {
 
-const AtString kShader("shader");
 const AtString kMelanin("melanin");
 const char* const kDefaultShaderTag = "defaultHairShader";
 

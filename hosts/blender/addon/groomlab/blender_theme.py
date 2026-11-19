@@ -9,7 +9,6 @@ when a preset is picked (Preferences > Themes, where it is listed as GroomLab Ch
 any other theme switches back). It is applied only when asked: GROOMLAB_OT_theme_apply (the
 add-on's preferences and the Graph Editor's GroomLab panel)."""
 
-import json
 import os
 
 import bpy

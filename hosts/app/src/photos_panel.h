@@ -117,10 +117,7 @@ public:
     QListWidget* list() const { return list_; }
     QPushButton* lookButton() const { return look_; }
     QToolButton* lockButton() const { return lock_; }
-    ValueSlider* opacitySlider() const { return opacity_; }
     ValueSlider* focalSlider() const { return focal_; }
-    QToolButton* depthButton(bool front) const { return front ? front_ : behind_; }
-    QToolButton* visibleButton() const { return visible_; }
     QPushButton* alignButton() const { return align_; }
 
     // Morph to Photos: the groom's scalp as it was before the first morph (kept while the panel

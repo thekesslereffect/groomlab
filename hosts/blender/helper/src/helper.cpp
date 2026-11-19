@@ -1336,10 +1336,6 @@ std::string shippedMeshesDir() {
 // ---- Shared with pipeline.cpp ---------------------------------------------------------------------
 
 MeshPtr hostMesh(const json& args, const HostSpace& space, BlockReader& blocks) { return scalpFrom(args, space, blocks); }
-void hostMeshFaces(const ScalpMesh& mesh, std::vector<std::int32_t>& counts, std::vector<std::int32_t>& indices,
-                   std::vector<float>& uvs, bool& exact) {
-    scalpFaces(mesh, counts, indices, uvs, exact);
-}
 void feedSessionTime(Session& s) { feedTime(s); }
 PrototypeLookup sessionPrototypes(const Session& s) { return storedPrototypes(s); }
 void handSessionRestGuides(Session& s) { handRestGuides(s); }

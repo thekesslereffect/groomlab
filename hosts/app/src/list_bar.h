@@ -81,7 +81,6 @@ QMenu* listMenu(QWidget* parent, const ui::json& entries, const ui::Bindings& bi
 // theme's text color.
 QIcon glyphIcon(const std::string& glyph, qreal devicePixelRatio, int size = 18);
 // A list's "about" sentence (rich text, wrapped, the theme's muted text).
-QLabel* aboutLabel(const std::string& html, QWidget* parent);
 // The window's bindings and fill options a list's bar and menus use (no live keys: the menu bar
 // holds them).
 struct ListActions {

@@ -459,14 +459,6 @@ void RoundButton::setCheckedRing(const QColor& color, qreal width) {
     update();
 }
 
-void RoundButton::setTileLabel(const QString& name, int labelX, qreal opacity) {
-    if (name == tileLabel_ && labelX == tileLabelX_ && opacity == tileOpacity_) return;
-    tileLabel_ = name;
-    tileLabelX_ = labelX;
-    tileOpacity_ = opacity;
-    update();
-}
-
 QSize RoundButton::sizeHint() const {
     if (text().isEmpty()) return QSize(diameter_, diameter_);
     const QFontMetrics metrics(theme::uiFont(fontSize_, fontWeight_));
@@ -1112,8 +1104,6 @@ bool ValueSlider::commitEdit() {
 
 void ValueSlider::cancelEdit() { closeEditor(); }
 
-QString ValueSlider::editText() const { return editing() ? editor_->text() : QString(); }
-
 void ValueSlider::setEditText(const QString& text) {
     if (editing()) editor_->setText(text);
 }
@@ -1291,11 +1281,6 @@ bool ShadowText::setRuns(std::vector<Run> runs) {
     updateGeometry();
     update();
     return true;
-}
-
-void ShadowText::setShadow(bool shadow) {
-    shadow_ = shadow;
-    update();
 }
 
 void ShadowText::setChip(const QColor& fill) {

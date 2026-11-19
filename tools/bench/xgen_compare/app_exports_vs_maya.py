@@ -18,8 +18,6 @@ JSON as run_bench.py wrote them. The app's are one run each.
 """
 
 import json
-import os
-import platform
 import subprocess
 import sys
 

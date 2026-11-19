@@ -176,7 +176,6 @@ public:
     QToolButton* eyeButton() const { return eye_; }
     QToolButton* guidesEyeButton() const { return guidesEye_; }
     QToolButton* graphButton() const { return graph_; }
-    QMenu* moreMenu() const { return moreMenu_; }
     QWidget* emptyState() const { return empty_; }
     QWidget* header() const { return header_; }  // pinned: not in the scroll area
     QWidget* topPart() const { return top_; }

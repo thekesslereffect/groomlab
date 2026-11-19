@@ -140,7 +140,6 @@ public:
         if (path != hairPath_) sceneChanged();
         hairPath_ = path;
     }
-    HairPath hairPath() const { return hairPath_; }
     // What the last frame drew with (Legacy on a device that cannot compute).
     HairPath lastHairPath() const { return lastPath_; }
     // The visibility path's level of detail (DisplaySettings::clumpLod, its error), on by default.
@@ -150,14 +149,10 @@ public:
     }
     // The strands the visibility path's last frame drew (fewer than the set's with the level of
     // detail thinning clumps), and whether it thinned any.
-    std::size_t lastDrawnStrands() const { return drawnStrands_; }
-    bool lastLodActive() const { return lodActive_; }
     // The interactive frame shaded once per point (hair_lookdev.frag under HAIR_POINT_SHADE,
     // the ribbons lit from the shaded points: the default) or per fragment, every overlapping
     // layer (GROOMLAB_APP_HAIR_SHADING=fragment: the reference the tests compare against).
     // The legacy path's alone.
-    void setPointShading(bool on) { pointShading_ = on; }
-    bool pointShading() const { return pointShading_; }
     // The last upload: whether it wrote only the changed strands, and how many.
     bool lastUploadPartial() const { return uploadPartial_; }
     std::size_t lastUploadStrands() const { return uploadStrands_; }
@@ -207,8 +202,6 @@ public:
     void setInteracting(bool on) { interacting_ = on; }
     void settle();
     bool lastFrameReduced() const { return reduced_; }
-    float lastFrameScale() const { return frameScale_; }
-    double fullFrameMs() const { return fullFrameMs_; }
     static constexpr double kTargetFrameMs = 12.0;  // under a 60 Hz refresh with room for the rest of the frame
     static constexpr float kMinScale = 0.25f;
 

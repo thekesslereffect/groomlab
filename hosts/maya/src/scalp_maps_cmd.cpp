@@ -63,12 +63,6 @@ const char* kDeleteFile[] = {"-df", "-deleteFile"};
 // rooted on them.
 const char* kFaces[] = {"-fcs", "-faces"};
 
-
-bool hasLayer(const GuideHierarchy& h, const std::string& name) {
-    const std::vector<std::string> names = h.attributeNames();
-    return std::find(names.begin(), names.end(), name) != names.end();
-}
-
 // (Every host's: scalp_maps.h mapKindOf / mapChannelsOf.)
 std::string kindOf(const ScalpMaps& maps, const GuideHierarchy& h, const std::string& name) { return mapKindOf(maps, &h, name); }
 

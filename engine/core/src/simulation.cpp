@@ -338,7 +338,6 @@ inline F4 maxOf(const F4& a, const F4& b) { return select(a < b, b, a); }
 struct V3 {
     F4 x, y, z;
 };
-inline V3 v3(const Vec3f& a) { return {all(a.x), all(a.y), all(a.z)}; }
 inline V3 operator+(const V3& a, const V3& b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
 inline V3 operator-(const V3& a, const V3& b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
 inline V3 operator*(const V3& a, const F4& s) { return {a.x * s, a.y * s, a.z * s}; }

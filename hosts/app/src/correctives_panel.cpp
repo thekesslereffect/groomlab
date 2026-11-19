@@ -164,13 +164,6 @@ std::string CorrectivesPanel::currentLayer() const {
                                                                                  : std::string();
 }
 
-std::string CorrectivesPanel::currentNode() const {
-    if (stale_) const_cast<CorrectivesPanel*>(this)->refresh();
-    QTreeWidgetItem* item = tree_->currentItem();
-    return item && item->data(0, kKindRole).toString() == QLatin1String("node") ? item->data(0, kNameRole).toString().toStdString()
-                                                                                : std::string();
-}
-
 std::vector<std::string> CorrectivesPanel::layerNames() const {
     std::vector<std::string> names;
     if (!document_) return names;

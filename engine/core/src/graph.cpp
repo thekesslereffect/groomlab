@@ -565,8 +565,6 @@ void takeTube(Guide& g, const Guide& from) {
 
 }  // namespace
 
-GuidesPtr strandsAsGuides(const StrandSet& strands) { return guidesOfStrands(strands); }
-
 StrandsPtr levelTubesAsStrands(const GuideSet& guides) {
     if (!guides.levelTubes() || guides.levelTubes()->empty()) return nullptr;
     GuideSet levels;

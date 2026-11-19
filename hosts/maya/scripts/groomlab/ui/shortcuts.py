@@ -8,7 +8,6 @@ shortcuts.h: the app's sheet and Blender's popup read the same rows).
     print(shortcuts.text())                  # Help > Keyboard Shortcuts
 """
 
-HOTKEY_SET_NOTE = "GroomLab hotkey set"
 
 _rows = None
 

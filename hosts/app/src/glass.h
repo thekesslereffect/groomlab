@@ -129,7 +129,6 @@ public:
     void setFontSize(int pixelSize);
     // A pill's text may hold a dim part after the name ("Comb" and "C"): drawn in the muted color.
     void setDimText(const QString& dim);
-    QString dimText() const { return dim_; }
     // A pill whose icon keeps its own colors (the logo).
     void setIconColored(bool colored);
     // The corners: half the height (a circle or pill) unless set.
@@ -140,7 +139,6 @@ public:
     // A tile: the circle (the diameter) at the left with a name beside it at `labelX`, faded by
     // `opacity` (the brush rail's rows as they widen). The whole widget is the hit target and
     // the hover covers it as one, under the circle and the name; "" goes back to a plain button.
-    void setTileLabel(const QString& name, int labelX, qreal opacity);
     QSize sizeHint() const override;
 
 protected:
@@ -214,14 +212,12 @@ public:
     // A param's state shown on the field (Maya's keyed, animated or driven colors: ui.keyed,
     // ui.animated, ui.driven); invalid: none.
     void setStateColor(const QColor& color);
-    QColor stateColor() const { return state_; }
     bool editing() const;  // the inline edit is open
     void beginEdit();      // opens the inline edit (a click, Enter, F2), the number selected
     // Enter: the text parsed and set as one change (pressed, valueChanged, released); false
     // when the text is no number (the edit stays open).
     bool commitEdit();
     void cancelEdit();         // Escape: closed, the value as it was
-    QString editText() const;  // what the inline edit holds ("" when closed)
     void setEditText(const QString& text);
     QSize sizeHint() const override;
     QSize minimumSizeHint() const override;
@@ -341,7 +337,6 @@ public:
     // false then, true when they changed.
     bool setRuns(std::vector<Run> runs);
     const std::vector<Run>& runs() const { return runs_; }
-    void setShadow(bool shadow);
     // A chip behind the whole line (a pill of `fill` with a faint edge; invalid: none, the words over the view).
     void setChip(const QColor& fill);
     QSize sizeHint() const override;

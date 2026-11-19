@@ -7,7 +7,6 @@ closeup, beauty), GROOMLAB_PLUGIN and GROOMLAB_SCRIPTS set; MAYA_VP2_DEVICE_OVER
 for DirectX 11. Made for the wolf groom (its node and mesh names); another scene needs its names here.
 """
 
-import json
 import os
 import sys
 import traceback

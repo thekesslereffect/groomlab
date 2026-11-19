@@ -23,7 +23,6 @@ namespace {
 constexpr double kDensityChanged = 0.02;  // a sample's density moved more than this: the map changed there
 constexpr std::size_t kMaxCells = 400;    // a root cut into at most this many cells (the sizes grown to fit)
 constexpr std::size_t kMaxGrid = 40000;   // the candidate grid's and the density grid's points, at most
-constexpr int kBlendNearest = 3;          // a new guide's shape blended from this many old guides near it
 constexpr double kMergeCorners = 0.2;     // cell corners nearer than this share of the smallest cell size made one
 
 using P = CutPoint;

@@ -42,12 +42,10 @@ void applyScalpFrames(Session& s);
 void applyCardBake(Session& s);
 
 // helper.cpp's, shared: a mesh as set_scalp takes it (points, faceCounts, faceIndices, uvs,
-// restPoints, colorSets) in groom space; a mesh's polygons back; the time's inputs that come with
+// restPoints, colorSets) in groom space; the time's inputs that come with
 // the file; the file's instance prototypes; flat guides kept at rest handed on; the sample meshes'
 // folder.
 MeshPtr hostMesh(const nlohmann::json& args, const HostSpace& space, BlockReader& blocks);
-void hostMeshFaces(const ScalpMesh& mesh, std::vector<std::int32_t>& counts, std::vector<std::int32_t>& indices,
-                   std::vector<float>& uvs, bool& exact);
 void feedSessionTime(Session& s);
 PrototypeLookup sessionPrototypes(const Session& s);
 void handSessionRestGuides(Session& s);

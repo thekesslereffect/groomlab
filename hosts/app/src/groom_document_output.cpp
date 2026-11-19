@@ -34,29 +34,6 @@ using nlohmann::json;
 
 namespace {
 
-struct Feed {
-    std::string from, output;  // "" nothing feeds it
-};
-
-// What feeds `to`'s `input`.
-Feed feedOf(const json& g, const std::string& to, const std::string& input) {
-    for (const json& c : g.value("connections", json::array())) {
-        if (c.value("to", std::string()) == to && c.value("input", std::string()) == input) {
-            return {c.value("from", std::string()), c.value("output", std::string())};
-        }
-    }
-    return {};
-}
-
-// Every (node, input) `from` feeds.
-std::vector<std::pair<std::string, std::string>> fedBy(const json& g, const std::string& from) {
-    std::vector<std::pair<std::string, std::string>> out;
-    for (const json& c : g.value("connections", json::array())) {
-        if (c.value("from", std::string()) == from) out.emplace_back(c.value("to", std::string()), c.value("input", std::string()));
-    }
-    return out;
-}
-
 const json* nodeIn(const json& g, const std::string& name) {
     const auto nodes = g.find("nodes");  // (a pointer into g itself, not into a copy)
     if (nodes == g.end() || !nodes->is_array()) return nullptr;
@@ -64,11 +41,6 @@ const json* nodeIn(const json& g, const std::string& name) {
         if (n.is_object() && n.value("name", std::string()) == name) return &n;
     }
     return nullptr;
-}
-
-std::string typeOf(const json& g, const std::string& name) {
-    const json* n = nodeIn(g, name);
-    return n ? n->value("type", std::string()) : std::string();
 }
 
 json paramOf(const json& g, const std::string& node, const std::string& param) {

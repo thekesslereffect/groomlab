@@ -480,15 +480,6 @@ class RootTubeCard(QtCore.QObject):
         self.apply_density.setEnabled(has)
         self.paint_density.setEnabled(has or self._painting is not None)
 
-    def _selected_roots(self, groom):
-        """The roots picked in Select root, else the guides selected."""
-        if self._mode() in ("select", "duplicate") and self.tool.picked:
-            return list(self.tool.picked)
-        try:
-            return list(groomlab.selected_guides(groom))
-        except (RuntimeError, ValueError):
-            return []
-
     def subdivide_clicked(self):
         groom = self.owner.groom()
         roots = self.tool.picked if self._mode() in ("select", "duplicate") else []

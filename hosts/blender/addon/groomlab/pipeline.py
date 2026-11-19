@@ -20,8 +20,6 @@ from .helper_client import HelperError
 # export's formats the helper writes alone, and those whose meshes come back for an FBX.
 STRAND_FORMATS = ("alembic", "usd", "scalesUsd", "vrscene", "guides", "unrealGroom", "unityStrands")
 MESH_FORMATS = ("unrealCards", "unityCards", "scalesFbx", "unityFeathers")
-LODS = ("hero", "mid", "low")            # cards' levels of detail (gltfCards' lods)
-BARB_LODS = ("high", "mid", "low")       # lighter feather grooms (unrealGroom, unityStrands, unityFeathers)
 TRANSFER_METHODS = ("closest", "bounds", "markersAlign", "markersWarp", "uv")
 
 

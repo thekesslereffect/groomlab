@@ -17,7 +17,7 @@ import bpy
 from bpy.props import BoolProperty, EnumProperty, FloatProperty, StringProperty
 
 from . import definitions as defs
-from . import graph, graph_tree, graph_ui, groom, process, props
+from . import graph, graph_tree, groom, process, props
 from .graph_tree import ours
 from .graph_ui import ActionTip, action_prop, bind
 from .helper_client import cancelled, HelperError

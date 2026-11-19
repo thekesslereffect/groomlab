@@ -49,7 +49,6 @@ constexpr double kNominalWidth = 1.0 / 4000.0;  // ... without a scalp, a width 
 constexpr std::int64_t kMostBlocks = std::int64_t{1} << 23;  // the block table's cells at most (coarser cells beyond)
 
 constexpr int kB = 4;  // a block's nodes along each axis
-constexpr int kBlockNodes = kB * kB * kB;
 
 // A node's grid: the core strands it splats at most (a power-of-two share by ID beyond), the salt
 // of that share, the nodes laid past the samples each way, the rings of blocks around those, and

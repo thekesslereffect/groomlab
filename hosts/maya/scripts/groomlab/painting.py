@@ -13,7 +13,7 @@ import groomlab_core
 
 from groomlab.base import no_undo, undo_chunk, undoable
 from groomlab.params import get_graph, set_graph, set_param
-from groomlab.paths import asset_folder, asset_name, portable_path, resolve_path, _bump, _unique_path
+from groomlab.paths import asset_folder, asset_name, portable_path, resolve_path, _bump
 from groomlab.guides import list_guide_groups, selected_guides, _targets
 from groomlab.brushes import brush_tool, _rgba
 

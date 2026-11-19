@@ -73,19 +73,6 @@ int UdimLayout::fromMosaic(float x, float y, int width, int height, ScalpMesh::U
     return tile;
 }
 
-UdimLayout UdimLayout::ofTiles(std::vector<int> tiles) {
-    UdimLayout out;
-    std::sort(tiles.begin(), tiles.end());
-    tiles.erase(std::unique(tiles.begin(), tiles.end()), tiles.end());
-    tiles.erase(std::remove_if(tiles.begin(), tiles.end(), [](int t) { return t < kFirstUdimTile || t >= kFirstUdimTile + kUdimTiles; }),
-                tiles.end());
-    if (tiles.empty()) tiles.push_back(kFirstUdimTile);
-    out.tiles = std::move(tiles);
-    out.udim_ = !(out.tiles.size() == 1 && out.tiles[0] == kFirstUdimTile);
-    out.arrange();
-    return out;
-}
-
 UdimLayout udimLayoutOf(const ScalpMesh& scalp) {
     UdimLayout out;
     if (!scalp.hasUVs()) {

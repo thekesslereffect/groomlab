@@ -152,7 +152,6 @@ public:
 
     // ---- The timeline -------------------------------------------------------------------------
     void setTimelineShown(bool shown);  // the strip shows while the groom animates
-    bool timelineShown() const { return timelineShown_; }
 
     // ---- The tiles' names ---------------------------------------------------------------------
     // The tool tiles' names under their icons (View > Rail Labels; off: compact icon tiles).

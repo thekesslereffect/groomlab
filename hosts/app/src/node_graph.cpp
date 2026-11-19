@@ -522,13 +522,6 @@ QPointF NodeGraphView::pinPos(const std::string& pin) const {
     return QPointF(std::nan(""), 0.0);
 }
 
-std::vector<std::string> NodeGraphView::wirePins(int wire) const {
-    std::vector<std::string> ids;
-    if (wire < 0 || wire >= wireCount()) return ids;
-    for (int p : wires_[wire].pins) ids.push_back(pins_[p].id);
-    return ids;
-}
-
 std::string NodeGraphView::selectedPin() const { return selectedPin_ >= 0 ? pins_[selectedPin_].id : std::string(); }
 
 void NodeGraphView::selectPin(const std::string& pin) {

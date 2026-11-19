@@ -131,9 +131,6 @@ def _key(groom, name, frame, value):
     cmds.setKeyframe(_source(groom, name), time=frame, value=value, inTangentType="flat", outTangentType="flat")
 
 
-_layers_cache = {}  # groom -> (state, layers): the palette asks every tick
-
-
 def layers(groom):
     """The corrective stack, bottom first: [{"name", "enabled", "guides", "slot", "weight" (now),
     "keyed", "keys": [(frame, weight)], "all_frames" (not keyed), "frame" (its strongest key, or None)}]."""

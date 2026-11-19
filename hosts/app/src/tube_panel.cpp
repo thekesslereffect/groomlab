@@ -116,17 +116,6 @@ constexpr int kPreviewMs = 60;  // a drag's live preview at most this often
 const ui::Definitions& defs() { return ui::Definitions::shipped(); }
 QString qs(const std::string& s) { return QString::fromStdString(s); }
 
-QFormLayout* makeForm() {
-    auto* form = new QFormLayout();
-    form->setContentsMargins(0, 0, 0, 0);
-    form->setHorizontalSpacing(10);
-    form->setVerticalSpacing(6);
-    form->setLabelAlignment(Qt::AlignRight | Qt::AlignVCenter);
-    form->setRowWrapPolicy(QFormLayout::DontWrapRows);
-    form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
-    return form;
-}
-
 std::vector<std::string> builtinNames() {
     std::vector<std::string> out;
     for (const ui::json& item : defs().choices("tubeShape")) out.push_back(item.value("value", std::string()));
@@ -662,16 +651,12 @@ void TubePanel::refreshTips() {
     if (selectedBlock_) selectedBlock_->titleLabel()->setToolTip(targets);
 }
 
-QAbstractButton* TubePanel::mirrorBox() const { return mirror_; }
 QAbstractButton* TubePanel::shadedBox() const { return shaded_; }
-QAbstractButton* TubePanel::wireframeBox() const { return wireframe_; }
 bool TubePanel::shaded() const { return shaded_ && shaded_->isChecked(); }
 bool TubePanel::wireframe() const { return wireframe_ && wireframe_->isChecked(); }
 bool TubePanel::colors() const { return colors_ && colors_->isChecked(); }
 bool TubePanel::levelColors() const { return levelColors_ && levelColors_->isChecked(); }
 bool TubePanel::alwaysVisible() const { return always_ && always_->isChecked(); }
-QAbstractButton* TubePanel::colorsBox() const { return colors_; }
-QAbstractButton* TubePanel::alwaysVisibleBox() const { return always_; }
 
 // ---- Tube roots ------------------------------------------------------------------------------------
 
@@ -1054,7 +1039,6 @@ void TubePanel::setActiveProfile(int profile) {
     }
     showChoice(active_ == 0 && shapes_.size() > 1 && !targets_.empty());
 }
-QAbstractButton* TubePanel::shapeSmoothBox() const { return shapeSmooth_; }
 
 QString TubePanel::widthCaption() const { return width_->caption(); }
 
@@ -1315,8 +1299,6 @@ void TubePanel::pick(const std::string& name) {
     }
     pushPlacement();
 }
-
-void TubePanel::applyShape() { applyProfile(0); }
 
 void TubePanel::pickProfile(int profile, const std::string& name) {
     (profile == 1 ? midChoice_ : tipChoice_) = name;

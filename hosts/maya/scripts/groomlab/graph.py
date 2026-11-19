@@ -132,9 +132,6 @@ class OperatorCatalog(object):
         return None
 
 
-CURVE_KINDS = ("Strands", "Guides", "Curves")
-
-
 # Nodes whose output port is set by a param: a Value's kind, an Expression's output (a field or a value).
 VALUE_SETS = {"Value": ("kind",), "Expression": ("output",)}
 
@@ -201,8 +198,6 @@ MAP_SOURCES = ("texture", "colorSet", "attribute", "expression", "guide")
 # When a node runs (a node's "evaluation"; none: always): viewportOnly nodes are bypassed in
 # renders, exports, the Arnold procedural and the CLI, renderOnly ones in the viewport.
 EVALUATION_MODES = ("always", "viewportOnly", "renderOnly")
-MAP_LABELS = {"texture": "texture", "colorSet": "color set", "attribute": "attribute", "expression": "expression",
-              "guide": "painted map"}
 
 
 def map_source(value):
@@ -214,7 +209,6 @@ def map_source(value):
 
 
 BACKDROPS_KEY = "__backdrops__"
-CLIPBOARD_KEY = "groomlabNodes"
 
 
 def linkable(spec):

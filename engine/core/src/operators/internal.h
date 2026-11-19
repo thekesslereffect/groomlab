@@ -125,10 +125,6 @@ private:
 // as strand channels and per-point layers as point channels. For nodes taking either kind on
 // an input whose output is not Curves (Propagate's shafts).
 StrandsPtr guidesAsStrands(const GuideSet& guides);
-// Strands as guides (graph.cpp, as a Curves node hands guides back): IDs, roots, points, strand
-// channels as attributes and point channels as per-point layers. For an input taking either kind
-// whose operator reads guides. The roles' channel (preview_core.h) never comes along.
-GuidesPtr strandsAsGuides(const StrandSet& strands);
 // A Curves node run on guides (Curl, Noise, Twist... on a Guides node's output) hands guides back
 // from the strands it made (`shaped`, from guidesAsStrands of `source`), each keeping what a strand
 // has no room for, by ID (its tube, frameUp, roots' footprint, depth and base: Interpolate's

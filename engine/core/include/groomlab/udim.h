@@ -70,9 +70,6 @@ struct UdimLayout {
     // tile (-1 in a gutter or an empty slot).
     int fromMosaic(float x, float y, int width, int height, ScalpMesh::UV* uv) const;
 
-    // A layout of these tiles (a tile set read with no scalp to lay it out: transfers, tests).
-    static UdimLayout ofTiles(std::vector<int> tiles);
-
 private:
     friend UdimLayout udimLayoutOf(const ScalpMesh& scalp);
     void arrange();

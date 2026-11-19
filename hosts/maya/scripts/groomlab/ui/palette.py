@@ -40,9 +40,6 @@ SECTIONS = [(c, [(t["id"], t["label"], t["hint"]) for t in CATALOG if t["categor
 TOOL_SETTINGS = dict((t["id"], set(t["settings"])) for t in CATALOG)
 SIGNED = set(t["id"] for t in CATALOG if t["signed"])
 DEFAULT_STRENGTH = dict((t["id"], t["default_strength"]) for t in CATALOG)
-CREATORS = set(t for t, s in TOOL_SETTINGS.items() if "newGuides" in s)
-# Brushes that also shape part lines and flow arrows (the Brushes box picks what they act on).
-TARGETABLE = set(t for t, s in TOOL_SETTINGS.items() if "targets" in s)
 # The tools that work on a corrective: the Correctives tab shows only these.
 CORRECTIVE = set(t["id"] for t in CATALOG if t.get("corrective"))
 PART = "part"

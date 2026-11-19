@@ -35,7 +35,7 @@ import time
 
 import bpy
 
-from . import drawn, graph_tree, groom, uikit
+from . import drawn, graph_tree, uikit
 
 NODE_W = 176.0
 CLUMP_W = 23.0      # a Clump's header holds Clump Colors too (a Braid's, Show Tubes)
@@ -744,7 +744,6 @@ class Dock(uikit.Window):
     def __init__(self, context, region):
         state = panel_state
         self.state, self.theme = state, uikit._theme()
-        t = self.theme
         self.scale = s = context.preferences.system.ui_scale
         self.interaction = state.interaction
         self.hover, self.mouse = state.hover, state.mouse

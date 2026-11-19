@@ -246,7 +246,6 @@ public:
     // runs through, and the selected one ("" none).
     std::vector<std::string> pinIds() const;
     QPointF pinPos(const std::string& pin) const;
-    std::vector<std::string> wirePins(int wire) const;
     std::string selectedPin() const;
     void selectPin(const std::string& pin);
     // While a wire is dragged over a port: why it cannot connect there ("" when it can, or when

@@ -70,7 +70,6 @@ public:
     // The new scalp from a mesh file (.obj, .abc): the right view reloads, the left is kept. False
     // (and why in the status line) when it cannot be read.
     bool setNewScalpPath(const QString& path);
-    const QString& newScalpPath() const { return newScalpPath_; }
     std::shared_ptr<const ScalpMesh> meshOf(MarkerSide side) const;
 
     void setMethod(TransferMethod method);
