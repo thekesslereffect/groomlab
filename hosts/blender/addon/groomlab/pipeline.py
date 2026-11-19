@@ -1567,7 +1567,13 @@ def file_exists(path):
             folder, base = os.path.split(path)
             pattern = glob.escape(base).replace(glob.escape(token), "[1-9][0-9][0-9][0-9]")
             return bool(glob.glob(os.path.join(glob.escape(folder), pattern) if folder else pattern))
-    return os.path.isfile(path)
+    if os.path.isfile(path):
+        return True
+    # A texture map's plain path standing for a tile set (the core's udim.h: density.png names
+    # density.1001.png...): any tile.
+    import glob
+    stem, ext = os.path.splitext(path)
+    return bool(ext) and bool(glob.glob(glob.escape(stem) + ".[1-9][0-9][0-9][0-9]" + glob.escape(ext)))
 
 
 def resolve_path(path):
@@ -1625,7 +1631,12 @@ def _match_file(index, stored):
     base = parts[-1]
     token = next((t for t in UDIM_TOKENS if t in base), None)
     candidates = index.get(os.path.normcase(base.replace(token, "1001") if token else base), [])
-    if token:
+    tile_set = False
+    if not candidates and not token:  # a texture map's plain path standing for a tile set (udim.h)
+        stem, ext = os.path.splitext(base)
+        candidates = index.get(os.path.normcase(stem + ".1001" + ext), [])
+        tile_set = True
+    if token or tile_set:
         candidates = [os.path.dirname(c) + "/" + base for c in candidates]
     if len(candidates) == 1:
         return candidates[0], []

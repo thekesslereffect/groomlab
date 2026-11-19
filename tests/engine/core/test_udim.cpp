@@ -7,9 +7,11 @@
 #include <cmath>
 #include <filesystem>
 
+#include "groomlab/asset_files.h"
 #include "groomlab/graph.h"
 #include "groomlab/map_ref.h"
 #include "groomlab/operators.h"
+#include "groomlab/paths.h"
 #include "groomlab/scalp_paint.h"
 #include "groomlab/texture.h"
 #include "groomlab/udim.h"
@@ -242,6 +244,69 @@ TEST(Udim, ConversionsAndNodesReadTileSets) {
         if (strands->strandPoints(i)[0].x < 0.95f) ++onFirst;
     }
     EXPECT_EQ(onFirst, 0u);
+    fs::remove_all(dir);
+}
+
+TEST(Udim, SaveAsTakesATileSetAlong) {
+    // A map painted while the scene was untitled (its plain path standing for a tile set): a save
+    // copies every tile into the new scene's folder and the map names the copy; other content
+    // there takes a free name; the same tiles there are used as they are.
+    const fs::path dir = freshFolder("groomlab_udim_follow");
+    const auto scalp = twoTilePlane();
+    TexturePaint paint(*scalp, 16, 16, 0.25f);
+    const std::string oldBase = (dir / "project").generic_u8string(), newBase = (dir / "shot").generic_u8string();
+    const std::string stored = "groomlab/untitled/masks/g/mask.png";
+    fs::create_directories(fs::u8path(oldBase + "/groomlab/untitled/masks/g"));
+    paint.save(oldBase + "/" + stored);
+    ASSERT_TRUE(fs::exists(fs::u8path(oldBase + "/groomlab/untitled/masks/g/mask.1002.png")));
+    FileFollower first(oldBase, oldBase + "/groomlab/untitled", newBase, newBase + "/groomlab/hero");
+    EXPECT_EQ(first.follow(stored), "groomlab/hero/masks/g/mask.png");
+    EXPECT_EQ(first.copied().size(), 2u);
+    for (const char* tile : {"1001", "1002"}) {
+        EXPECT_TRUE(fs::exists(fs::u8path(newBase + "/groomlab/hero/masks/g/mask." + tile + ".png"))) << tile;
+    }
+    EXPECT_TRUE(sameMapImage(oldBase + "/" + stored, newBase + "/groomlab/hero/masks/g/mask.png"));
+    EXPECT_GT(loadTexture(newBase + "/groomlab/hero/masks/g/mask.png")->udimTiles().size(), 1u);
+    // Again: the same tiles there, nothing copied.
+    FileFollower again(oldBase, oldBase + "/groomlab/untitled", newBase, newBase + "/groomlab/hero");
+    EXPECT_EQ(again.follow(stored), "groomlab/hero/masks/g/mask.png");
+    EXPECT_TRUE(again.copied().empty());
+    // Other content there: a free name, every tile.
+    TexturePaint other(*scalp, 16, 16, 0.75f);
+    fs::remove_all(fs::u8path(newBase + "/groomlab/hero"));
+    fs::create_directories(fs::u8path(newBase + "/groomlab/hero/masks/g"));
+    other.save(newBase + "/groomlab/hero/masks/g/mask.png");
+    FileFollower clash(oldBase, oldBase + "/groomlab/untitled", newBase, newBase + "/groomlab/hero");
+    EXPECT_EQ(clash.follow(stored), "groomlab/hero/masks/g/mask_2.png");
+    EXPECT_EQ(clash.warnings().size(), 1u);
+    EXPECT_TRUE(sameMapImage(oldBase + "/" + stored, newBase + "/groomlab/hero/masks/g/mask_2.png"));
+    fs::remove_all(dir);
+}
+
+TEST(Udim, ResolveAndCollectFindATileSetByItsPlainPath) {
+    // A map's plain path standing for a tile set is there for the resolver (the folder holding
+    // the tiles, not the first one searched) and Collect Files (every tile, under one name).
+    const fs::path dir = freshFolder("groomlab_udim_collect");
+    const auto scalp = twoTilePlane();
+    TexturePaint paint(*scalp, 16, 16, 0.5f);
+    const std::string project = (dir / "project").generic_u8string(), scene = (dir / "scene").generic_u8string();
+    fs::create_directories(fs::u8path(project + "/masks"));
+    fs::create_directories(fs::u8path(scene));
+    paint.save(project + "/masks/dens.png");
+    EXPECT_EQ(fs::u8path(resolvePathIn("masks/dens.png", {scene, project})).generic_u8string(), project + "/masks/dens.png");
+    std::vector<std::string> copied;
+    const std::string copy = collectFile(project + "/masks/dens.png", scene + "/masks", &copied);
+    EXPECT_EQ(copy, scene + "/masks/dens.png");
+    EXPECT_EQ(copied.size(), 2u);
+    EXPECT_TRUE(sameMapImage(project + "/masks/dens.png", copy));
+    // Again: the same tiles there, used as they are; other content there: a free name.
+    copied.clear();
+    EXPECT_EQ(collectFile(project + "/masks/dens.png", scene + "/masks", &copied), copy);
+    EXPECT_TRUE(copied.empty());
+    TexturePaint other(*scalp, 16, 16, 0.9f);
+    fs::create_directories(fs::u8path(scene + "/other"));
+    other.save(scene + "/other/dens.png");
+    EXPECT_EQ(collectFile(project + "/masks/dens.png", scene + "/other"), scene + "/other/dens_2.png");
     fs::remove_all(dir);
 }
 

@@ -293,6 +293,12 @@ def collect_files(grooms=None):
                     report["inside"] += 1
                     continue
                 files = _tiles(resolved)
+                if not files and groomlab_core.file_stamp(resolved) != 0:
+                    # A texture map's plain path standing for a tile set (udim.h): every tile, under
+                    # one name (the core's Collect Files, as the app's and Blender's).
+                    target = "%s/%s" % (asset_folder(_COLLECT_FOLDERS.get(kind, "caches")), asset_name(groom))
+                    note("copied", groom, kind, key, repath_file(groom, kind, key, groomlab_core.collect_file(resolved, target)))
+                    continue
                 if not files:
                     note("missing", groom, kind, key, f["path"])
                     continue

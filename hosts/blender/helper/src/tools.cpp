@@ -2785,12 +2785,6 @@ json mapReload(ToolState& t, const json& args) {
     return {{"files", files}};
 }
 
-// A file's bytes ("" when it cannot be read).
-std::string readFile(const std::string& path) {
-    std::ifstream in(fs::u8path(path), std::ios::binary);
-    return in ? std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()) : std::string();
-}
-
 // Whether `path` is in a maps folder a session made in the temp folder while its .blend was
 // untitled: <temp>/groomlab_<pid>_s<n>maps_<k>/, gl_ on macOS (blockName: this session's or an
 // earlier helper's).
@@ -2825,18 +2819,16 @@ json mapsMoveTo(ToolState& t, const json& args) {
     for (auto& [name, entry] : maps.maps) {
         if (entry.kind != "texture" || entry.texture.empty()) continue;
         const std::string file = resolveMapFile(s, entry.texture);
-        if (insideFolder(file, now) || !(insideFolder(file, old) || inTempMapsFolder(file)) || !fs::is_regular_file(fs::u8path(file), ec)) continue;
+        // (A tile set: any tile there, udim.h.)
+        if (insideFolder(file, now) || !(insideFolder(file, old) || inTempMapsFolder(file)) || fileStamp(file) == 0) continue;
         fs::create_directories(fs::u8path(now), ec);
-        // Under its name, or the same image already there (copied before); else a free name.
+        // Under its name, or the same image already there (copied before); else a free name. A
+        // tile set: every tile.
         const fs::path wanted = fs::u8path(now) / fs::u8path(file).filename();
         std::string target = wanted.generic_u8string();
-        if (!fs::exists(wanted, ec) || readFile(target) != readFile(file)) {
+        if (!sameMapImage(file, target)) {
             target = freeFilePath(target);
-            fs::copy_file(fs::u8path(file), fs::u8path(target), fs::copy_options::none, ec);
-            if (ec) {
-                ec.clear();
-                continue;
-            }
+            if (copyMapImage(file, target).empty()) continue;
         }
         moved.push_back({{"name", name}, {"from", file}, {"to", target}});
         entry.texture = target;

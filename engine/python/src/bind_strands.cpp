@@ -14,6 +14,8 @@
 #include "groomlab/scales.h"
 #include "groomlab/subdivision.h"
 #include "groomlab/texture.h"
+#include "groomlab/asset_files.h"
+#include "groomlab/udim.h"
 
 namespace groomlab::py_bind {
 
@@ -469,6 +471,15 @@ void bindStrands(py::module_& m) {
           [](const std::string& path) { return std::const_pointer_cast<Texture>(loadTexture(path)); },
           py::arg("path"), "Loads an image through the process-wide cache. Raises TextureError.");
     m.def("file_stamp", &fileStamp, py::arg("path"), "Hash of a file's path, size and modification time (0 if missing).");
+    m.def("same_map_image", &sameMapImage, py::arg("source"), py::arg("target"),
+          "Whether a texture map's image at target is the one at source (a UDIM tile set: every tile).");
+    m.def("copy_map_image", &copyMapImage, py::arg("source"), py::arg("target"),
+          "A texture map's image copied (a UDIM tile set: every tile), nothing overwritten; the files written.");
+    m.def("map_image_moves", &mapImageMoves, py::arg("source"), py::arg("target"),
+          "The (from, to) files a texture map's image copied or moved from source to target is (a tile set: each tile).");
+    m.def("collect_file", [](const std::string& path, const std::string& folder) { return collectFile(path, folder); },
+          py::arg("path"), py::arg("folder"),
+          "Collect Files: a file copied into folder under its own name (a UDIM set: every tile); the copy's path, '' when none is there.");
     m.def("is_image_path", &isImagePath, py::arg("name"),
           "Whether a map name is an image file the core reads (its extension, or a <UDIM> pattern): every host's rule.");
 

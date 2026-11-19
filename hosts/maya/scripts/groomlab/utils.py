@@ -994,15 +994,20 @@ def _copy_map(source, target, name, entry):
             return None, "a vertex map, and the scalps' vertices differ"
         return dict(entry), None
     if kind == "texture":
+        from groomlab import presets
+        import groomlab_core
         path = groomlab.resolve_path(entry.get("texture", ""), source)
-        if not path or not os.path.exists(path):
+        if not path or not presets.file_exists(path):  # (a tile set: any tile)
             return None, "its image is missing (%s)" % entry.get("texture", "")
         dest = groomlab.resolve_path(groomlab._map_texture_default(target, name), target) or \
             groomlab.asset_folder("masks") + "/%s/%s.png" % (groomlab.asset_name(target), name)
         dest = groomlab._unique_path(dest)
         if not os.path.isdir(os.path.dirname(dest)):
             os.makedirs(os.path.dirname(dest))
-        shutil.copyfile(path, dest)
+        if os.path.isfile(path):
+            shutil.copyfile(path, dest)
+        else:
+            groomlab_core.copy_map_image(path, dest)  # a tile set (udim.h): every tile
         copied = dict(entry)
         copied["texture"] = groomlab.portable_path(dest)
         return copied, None

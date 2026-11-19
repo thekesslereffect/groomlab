@@ -100,5 +100,11 @@ std::vector<std::string> mapImageFiles(const std::string& path, const std::vecto
 // to: `from` and `to` for one image; for a tile set each tile there now, from its file of
 // udimPathFor(from) to its file of udimPathFor(to).
 std::vector<std::pair<std::string, std::string>> mapImageMoves(const std::string& from, const std::string& to);
+// Whether the image at `to` is the one at `from` (one image: the same bytes; a tile set: each of
+// `from`'s tiles at its file of `to`, the same bytes). False when `from` has no file.
+bool sameMapImage(const std::string& from, const std::string& to);
+// The image at `from` copied to `to` (a tile set: each tile, mapImageMoves), no file overwritten,
+// folders made. Returns the files written.
+std::vector<std::string> copyMapImage(const std::string& from, const std::string& to);
 
 }  // namespace groomlab

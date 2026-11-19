@@ -4,6 +4,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 
 #include "groomlab/texture.h"
 
@@ -148,6 +151,40 @@ std::vector<std::pair<std::string, std::string>> mapImageMoves(const std::string
     std::vector<std::pair<std::string, std::string>> out;
     for (const int tile : Texture(fromSet).udimTiles()) out.emplace_back(udimTilePath(fromSet, tile), udimTilePath(toSet, tile));
     return out;
+}
+
+namespace {
+std::string fileText(const std::string& path) {
+    std::ifstream in(std::filesystem::u8path(path), std::ios::binary);
+    return in ? std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()) : std::string();
+}
+}  // namespace
+
+bool sameMapImage(const std::string& from, const std::string& to) {
+    if (fileStamp(from) == 0) return false;
+    for (const auto& [a, b] : mapImageMoves(from, to)) {
+        std::error_code ec;
+        if (!std::filesystem::is_regular_file(std::filesystem::u8path(b), ec)) return false;
+        if (std::filesystem::file_size(std::filesystem::u8path(a), ec) != std::filesystem::file_size(std::filesystem::u8path(b), ec)) {
+            return false;
+        }
+        if (fileText(a) != fileText(b)) return false;
+    }
+    return true;
+}
+
+std::vector<std::string> copyMapImage(const std::string& from, const std::string& to) {
+    std::vector<std::string> written;
+    if (fileStamp(from) == 0) return written;
+    for (const auto& [a, b] : mapImageMoves(from, to)) {
+        std::error_code ec;
+        const std::filesystem::path target = std::filesystem::u8path(b);
+        if (std::filesystem::exists(target, ec)) continue;
+        if (target.has_parent_path()) std::filesystem::create_directories(target.parent_path(), ec);
+        std::filesystem::copy_file(std::filesystem::u8path(a), target, std::filesystem::copy_options::none, ec);
+        if (!ec) written.push_back(b);
+    }
+    return written;
 }
 
 std::vector<std::string> mapImageFiles(const std::string& path, const std::vector<int>& tiles) {

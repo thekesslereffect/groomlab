@@ -156,7 +156,7 @@ def follow_scene_files():
 
     def _follow_once(rel):
         if not source(rel):
-            return None
+            return _follow_tiles(rel)
         src = os.path.join(source(rel), rel)
         new_rel = home(rel)
         dst = os.path.join(new_base, new_rel)
@@ -166,6 +166,31 @@ def follow_scene_files():
             cmds.warning("GroomLab: %s is already beside the saved scene with other content; this scene now uses "
                          "a copy, %s" % (rel, new_rel))
         copy(src, dst, new_rel)
+        return new_rel
+
+    def _follow_tiles(rel):
+        """A texture map's tile set (udim.h: "density.png" standing for density.1001.png...): its
+        tiles copied together, the map's path kept as it was named (None: no tiles there)."""
+        stamp = groomlab_core.file_stamp
+        root = next((b for b in (old_base, project_root()) if b and stamp(os.path.join(b, rel)) != 0), None)
+        if root is None:
+            return None
+        src = os.path.join(root, rel)
+        new_rel = home(rel)
+        dst = os.path.join(new_base, new_rel)
+        if _same_file(src, dst):
+            return new_rel
+        if stamp(dst) != 0 and not groomlab_core.same_map_image(src, dst):
+            stem, ext = os.path.splitext(dst)
+            n = 2
+            while stamp("%s_%d%s" % (stem, n, ext)) != 0:
+                n += 1
+            dst = "%s_%d%s" % (stem, n, ext)
+            new_rel = os.path.relpath(dst, new_base).replace("\\", "/")
+            cmds.warning("GroomLab: %s is already beside the saved scene with other content; this scene now uses "
+                         "a copy, %s" % (rel, new_rel))
+        for written in groomlab_core.copy_map_image(src, dst):
+            copied.append(os.path.relpath(written, new_base).replace("\\", "/"))
         return new_rel
 
     old_stem, new_stem = os.path.basename(old_prefix), os.path.basename(new_prefix)
@@ -350,13 +375,19 @@ def resolve_path(path, node=None):
     return cmds.groomLabPaths(resolve=path)
 
 
+def _taken(path):
+    """Whether something is at `path`: a file, or a texture map's tile set its plain path names (udim.h)."""
+    return os.path.exists(path) or (groomlab_core.is_image_path(path) and groomlab_core.file_stamp(path) != 0)
+
+
 def _unique_path(path):
-    """`path` when nothing is there, else the first free <stem>_2<ext>, <stem>_3<ext>..."""
-    if not os.path.exists(path):
+    """`path` when nothing is there, else the first free <stem>_2<ext>, <stem>_3<ext>... (a tile set
+    of the name counts as there)."""
+    if not _taken(path):
         return path.replace("\\", "/")
     stem, ext = os.path.splitext(path)
     n = 2
-    while os.path.exists("%s_%d%s" % (stem, n, ext)):
+    while _taken("%s_%d%s" % (stem, n, ext)):
         n += 1
     return ("%s_%d%s" % (stem, n, ext)).replace("\\", "/")
 

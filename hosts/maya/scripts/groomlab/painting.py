@@ -341,7 +341,7 @@ def rename_map(groom, old, new):
     target = groomlab_core.renamed_map_texture(stored, old, new) if stored else ""
     if target:  # the file is named after the map (scalp_maps.h's rule, the app's too)
         full = resolve_path(target, groom)
-        if full and os.path.exists(full):
+        if full and _unique_path(full) != full.replace("\\", "/"):  # (taken: a file, or a tile set)
             target = portable_path(_unique_path(full))
         kwargs["texture"] = target
     with undo_chunk("rename map"):
@@ -498,11 +498,14 @@ def export_map(groom, name, path, resolution=1024):
     if folder and not os.path.isdir(folder):
         os.makedirs(folder)
     if kind == "texture":
+        from groomlab import presets
         source = map_texture(groom, name)
-        if not source or not os.path.exists(source):
+        if not source or not presets.file_exists(source):
             raise ValueError("map %s's image is missing: %s" % (name, source))
         if os.path.normcase(os.path.abspath(source)) != os.path.normcase(path):
-            shutil.copyfile(source, path)
+            # (A tile set, udim.h: each tile, into the set `path` names: <path stem>.1001.png...)
+            for src, dst in groomlab_core.map_image_moves(source, path):
+                shutil.copyfile(src, dst)
         return path
     # Rasterized through a conversion to a texture at `path`, then the map put back as it was.
     before = cmds.getAttr(groom + ".scalpMaps")
@@ -664,7 +667,12 @@ def _match_file(index, stored):
     base = parts[-1]
     token = next((t for t in presets.UDIM_TOKENS if t in base), None)
     candidates = index.get(os.path.normcase(base.replace(token, "1001") if token else base), [])
-    if token:
+    tile_set = False
+    if not candidates and not token:  # a texture map's plain path standing for a tile set (udim.h)
+        stem, ext = os.path.splitext(base)
+        candidates = index.get(os.path.normcase(stem + ".1001" + ext), [])
+        tile_set = True
+    if token or tile_set:
         candidates = [os.path.dirname(c) + "/" + base for c in candidates]
     if len(candidates) == 1:
         return candidates[0], []

@@ -22,6 +22,8 @@
 #include "groomlab/asset_files.h"
 #include "groomlab/card_files.h"
 #include "groomlab/scalp_maps.h"
+#include "groomlab/texture.h"
+#include "groomlab/udim.h"
 
 namespace groomlab::maya {
 
@@ -139,6 +141,9 @@ std::string forkTextureFile(const MDagPath& groom, const std::string& mapName, c
         noteFileWritten();
         fs::copy_file(fs::u8path(full), fs::u8path(target), ec);
         if (ec) throw std::runtime_error("could not copy " + full + " to " + target + ": " + ec.message());
+    } else if (fileStamp(full) != 0) {  // a tile set (udim.h): every tile
+        noteFileWritten();
+        if (copyMapImage(full, target).empty()) throw std::runtime_error("could not copy " + full + " to " + target);
     }
     MGlobal::displayInfo(MString("GroomLab: ") + mapName.c_str() + "'s file is shared with another groom; this groom " +
                          "now paints its own copy, " + target.c_str());

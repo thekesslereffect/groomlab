@@ -15,6 +15,8 @@
 #include "groomlab/card_files.h"
 #include "groomlab/display.h"
 #include "groomlab/paths.h"
+#include "groomlab/texture.h"
+#include "groomlab/udim.h"
 
 namespace groomlab {
 
@@ -55,7 +57,12 @@ public:
             target = fs::u8path(folder_) / (name.stem().u8string() + "_" + std::to_string(k) + name.extension().u8string());
         }
         taken_[key(target)] = key(fs::u8path(source));
-        copy(source, target.generic_u8string());
+        if (!isFile(source) && isUdimPath(source)) {
+            // A texture map's tile set (udim.h): each tile, into the set the copy's path names.
+            for (const auto& [from, to] : mapImageMoves(source, target.generic_u8string())) copy(from, to);
+        } else {
+            copy(source, target.generic_u8string());
+        }
         return target.generic_u8string();
     }
 
@@ -169,7 +176,7 @@ GroomWriteReport writeGroomsToFile(const std::string& path, std::vector<GroomFil
             if (info.kind != "texture" || info.texture.empty()) continue;
             const std::string source = resolved(info.texture);
             std::string at = source;
-            if (!isFile(source)) {
+            if (fileStamp(source) == 0) {  // (a tile set: any tile, udim.h)
                 report.warnings.push_back("map " + name + "'s image " + source + " is not there; the file names it as it is");
             } else if (options.copyFiles) {
                 at = masks.place(source);

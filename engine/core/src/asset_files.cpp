@@ -12,6 +12,7 @@
 
 #include "groomlab/paths.h"
 #include "groomlab/texture.h"
+#include "groomlab/udim.h"
 
 namespace groomlab {
 
@@ -103,7 +104,24 @@ std::string FileFollower::follow(const std::string& storedPath) {
     const std::string source =
         (relative ? fs::u8path(oldBase_) / fs::u8path(storedPath) : fs::u8path(storedPath)).lexically_normal().generic_u8string();
     std::error_code ec;
-    if (!fs::is_regular_file(fs::u8path(source), ec)) return storedPath;
+    if (!fs::is_regular_file(fs::u8path(source), ec)) {
+        // A texture map's tile set (udim.h: "density.png" standing for density.1001.png...): its
+        // tiles go together, the map's path kept as it was named.
+        if (!isUdimPath(source)) return storedPath;
+        std::string target = destination(source, storedPath, relative);
+        if (target.empty() || key(target) == key(source)) return relative ? stored(source, true) : storedPath;
+        if (fileStamp(target) != 0 && !sameMapImage(source, target)) {
+            const std::string free = freeFilePath(target);  // (free of tile sets too)
+            warnings_.push_back(target + " holds other content: this scene now uses " + free);
+            target = free;
+        }
+        if (fileStamp(target) == 0) {
+            const std::vector<std::string> written = copyMapImage(source, target);
+            if (written.empty()) return storedPath;
+            copied_.insert(copied_.end(), written.begin(), written.end());
+        }
+        return stored(target, relative);
+    }
     std::string target = destination(source, storedPath, relative);
     if (target.empty() || key(target) == key(source)) return relative ? stored(source, true) : storedPath;
     if (fs::exists(fs::u8path(target), ec) && !sameContent(source, target)) {
@@ -209,6 +227,16 @@ std::string collectFile(const std::string& path, const std::string& folder, std:
         }
     } else if (fs::is_regular_file(fs::u8path(path), ec)) {
         tiles.emplace_back(path, name);
+    } else if (isUdimPath(path)) {
+        // A texture map's plain path standing for a tile set (udim.h): every tile, under one name
+        // (a free one, every tile, when any would land on other content).
+        fs::create_directories(fs::u8path(folder), ec);
+        std::string target = (fs::u8path(folder) / fs::u8path(name)).generic_u8string();
+        if (fileStamp(target) != 0 && !sameMapImage(path, target)) target = freeFilePath(target);
+        for (const std::string& written : copyMapImage(path, target)) {
+            if (copied) copied->push_back(written);
+        }
+        return target;
     }
     if (tiles.empty()) return {};
     fs::create_directories(fs::u8path(folder), ec);

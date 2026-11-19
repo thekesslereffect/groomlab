@@ -3252,6 +3252,46 @@ class GroomingTest(unittest.TestCase):
         self.assertGreater(min(near), 0.5)  # the border, painted on both tiles
         self.assertLess(max(far), 0.05)
 
+    def test_udim_maps_made_untitled_follow_the_first_save(self):
+        # Issue #87 (as reported): a tile set painted while the scene is untitled (under the
+        # project's groomlab/untitled) is copied beside the scene by its first save, every tile,
+        # and the map names the copy: nothing reads a missing file after the save.
+        home = tempfile.mkdtemp(prefix="groomlab_udim_save_").replace("\\", "/")
+        cmds.workspace(home, openWorkspace=True)
+        cmds.file(new=True, force=True)  # untitled under this project
+        plane = cmds.polyPlane(width=2, height=1, subdivisionsX=8, subdivisionsY=4)[0]
+        cmds.polyEditUV(plane + ".map[*]", scaleU=2.0, pivotU=0.0, pivotV=0.0)
+        groom = groomlab.create_groom(plane)
+        groomlab.add_map(groom, "dens", 0.0, kind="texture", resolution=16)
+        path = groomlab.map_texture(groom, "dens")
+        self.assertIn("groomlab/untitled/", path)
+        groomlab.brush_stroke(groom, "paint", [(0.0, 0.0, 0.0)], radius=0.3, strength=1.0, attribute="dens",
+                              value=1.0, paint_kind="texture", paint_texture=path)
+        os.makedirs(home + "/shot")
+        cmds.file(rename=home + "/shot/udims.ma")
+        cmds.file(save=True, type="mayaAscii", force=True)  # the plugin's save callbacks copy the files
+        stored = next(m["texture"] for m in groomlab.maps(groom))
+        self.assertEqual(stored, "groomlab/udims/masks/groomLab1/dens.png")
+        for tile in ("1001", "1002"):
+            self.assertTrue(os.path.isfile(home + "/shot/groomlab/udims/masks/groomLab1/dens.%s.png" % tile), tile)
+        self.assertEqual(groomlab.errors(groom), [])
+        self.assertEqual(groomlab.follow_scene_files(), [])  # once
+        # Everything else a map touches sees the tile set by its plain path: not missing (the maps
+        # list, the File Path Editor), Export Map writes its tiles, a missing set is found again.
+        self.assertEqual(groomlab.missing_files(groom)["maps"], {})
+        deps = {(f["kind"], f["key"]): f for f in groomlab.file_dependencies(groom)}
+        self.assertTrue(deps[("map", "dens")]["exists"])
+        exported = groomlab.export_map(groom, "dens", home + "/out/dens_export.png")
+        for tile in ("1001", "1002"):
+            self.assertTrue(os.path.isfile(home + "/out/dens_export.%s.png" % tile), tile)
+        self.assertEqual(exported, home + "/out/dens_export.png")
+        moved = home + "/found"
+        shutil.move(home + "/shot/groomlab/udims/masks/groomLab1", moved)
+        self.assertIn("dens", groomlab.missing_files(groom)["maps"])
+        report = groomlab.find_missing_files([groom], moved)
+        self.assertEqual(groomlab.missing_files(groom)["maps"], {}, report)
+        self.assertEqual(groomlab.map_texture(groom, "dens").replace("\\", "/"), moved + "/dens.png")
+
     def test_color_maps_paint_fill_convert_and_pack_channels(self):
         # A color vertex map: r g b a per vertex, filled with a color; the stored entry says so.
         cmds.setAttr(self.groom + ".previewDensity", 1.0)

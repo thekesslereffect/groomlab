@@ -154,7 +154,8 @@ bool fileThere(const std::string& path) {
         }
         return false;
     }
-    return fs::is_regular_file(fs::u8path(path), ec);
+    // (A texture map's plain path standing for a tile set, udim.h: any tile.)
+    return fs::is_regular_file(fs::u8path(path), ec) || (groomlab::isImagePath(path) && fileStamp(path) != 0);
 }
 
 bool isImagePath(const std::string& s) {
@@ -224,10 +225,17 @@ std::string matchFile(const std::map<std::string, std::vector<std::string>>& ind
     const char* token = udimToken(base);
     std::string key = base;
     if (token) key.replace(key.find(token), std::string(token).size(), "1001");
-    const auto it = index.find(lower(key));
+    auto it = index.find(lower(key));
+    bool tileSet = false;
+    if (it == index.end() && !token) {
+        // A texture map's plain path standing for a tile set (udim.h): found by its tile 1001.
+        const fs::path b = fs::u8path(base);
+        it = index.find(lower(b.stem().u8string() + ".1001" + b.extension().u8string()));
+        tileSet = true;
+    }
     if (it == index.end()) return {};
     std::vector<std::string> candidates = it->second;
-    if (token) {
+    if (token || tileSet) {
         for (std::string& c : candidates) c = fs::u8path(c).parent_path().generic_u8string() + "/" + base;
     }
     if (candidates.size() == 1) return candidates.front();
