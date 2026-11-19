@@ -1009,6 +1009,11 @@ void bindGraph(py::module_& m) {
     m.def("preset_fields", [] { return presetFields(); }, "A preset's own fields: size, about, requires, backdrops, controls, exposed.");
     m.def("preset_categories", [] { return presetCategories(); }, "The Presets menu's categories, in order.");
     m.def("preset_title", &presetTitle, py::arg("name"), "A preset's title when its file gives none: its name in words.");
+    m.def("compound_inner_params_json", &compoundInnerParamsJson, py::arg("definition_json"),
+          "A Compound's Show Inner Param list (graph_controls.h, every host's): [{node, params: [spec]}] as JSON.");
+    m.def("make_preset_json", &makePresetJson, py::arg("graph_json"), py::arg("size"), py::arg("title") = std::string(),
+          py::arg("description") = std::string(), py::arg("category") = std::string(), py::arg("controls_json") = std::string(),
+          "The preset a groom's graph makes (Save as Preset, Copy Graph): presets.h, every host's.");
     m.def("preset_param_problems", &presetParamProblems, py::arg("graph_json"),
           "What is wrong with a graph's params against their specs (presets.h, every host's check): [] when fine.");
     m.def("preset_from_text", &presetFromText, py::arg("text"),

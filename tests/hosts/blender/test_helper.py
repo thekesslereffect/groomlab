@@ -798,6 +798,48 @@ class SpaceTest(HelperTestCase):
 
 
 @unittest.skipIf(HEAD is None, "no test head")
+class CoreRulesTest(HelperTestCase):
+    """The helper commands through which the add-on uses the core's rules instead of copies of its own
+    (every host's: Find Missing, presets, keying, New Map > For, Show Inner Param, file names)."""
+
+    def test_every_hosts_rules_through_the_helper(self):
+        s = self.head_session()
+        graph = self.h.call("get_graph", session=s)["graph"]
+        # Copy Graph's text and a paste's checks (presets.h makePresetJson, presetFromText).
+        text = self.h.call("make_preset", graph=graph, size=20.0, title="head", category="Shared", controls={})["text"]
+        preset = self.h.call("preset_from_text", text="```json\n" + text + "\n```")["preset"]
+        self.assertEqual(preset["about"]["title"], "head")
+        self.assertEqual(preset["size"], 20.0)
+        bad = {"version": 1, "output": "out", "nodes": [{"name": "n", "type": "Noise", "params": {"space": "galaxy"}},
+                                                        {"name": "out", "type": "Output"}], "connections": []}
+        error = self.h.request("preset_from_text", text=json.dumps(bad))["error"]
+        self.assertEqual(error["code"], "bad_request")
+        self.assertIn("'galaxy' is not one of", error["message"])
+        # Keying (graph_controls.h notKeyable): Scatter's density sets where the strands go.
+        self.assertNotEqual(self.h.call("not_keyable", session=s, node="scatter", param="density")["why"], "")
+        # New Map > For (stroke.h settingTargetsJson) and the maps a graph reads.
+        targets = self.h.call("setting_targets", session=s)
+        self.assertTrue(any(t["id"] == "density" and t["node"] for t in targets["settings"]))
+        self.assertTrue(targets["others"])
+        self.assertIsInstance(self.h.call("graph_map_names", graph=graph)["maps"], list)
+        # Show Inner Param (graph_controls.h compoundInnerParamsJson): Input nodes left out.
+        definition = {"graph": {"version": 1, "output": "w", "nodes": [{"name": "i", "type": "Input"},
+                                                                       {"name": "w", "type": "Noise"}], "connections": []}}
+        inner = self.h.call("compound_inner_params", definition=definition)["inner"]
+        self.assertEqual([n["node"] for n in inner], ["w"])
+        # Files: names, missing files and their matches (asset_files.h).
+        self.assertEqual(self.h.call("file_safe_name", text="|my groom.")["name"], "my_groom")
+        folder = os.path.join(self.tmp, "found", "maps")
+        os.makedirs(folder)
+        for tile in (1001, 1002):
+            with open(os.path.join(folder, "dens.%d.png" % tile), "wb") as f:
+                f.write(b"x")
+        self.assertEqual(self.h.call("files_there", paths=[os.path.join(folder, "dens.png"), os.path.join(folder, "gone.png")])["there"],
+                         [True, False])
+        match = self.h.call("files_match", folder=os.path.join(self.tmp, "found"), stored=["old/maps/dens.png"])["matches"][0]
+        self.assertTrue(match["found"].replace("\\", "/").endswith("found/maps/dens.png"))
+
+
 class UdimTest(HelperTestCase):
     """Issue #87: a scalp over two UDIM tiles (its right half's UVs on tile 1002): a texture map is a
     tile set, written tile by tile, filled per face (one tile changing), undone, shown as one image

@@ -853,23 +853,9 @@ def setting_targets(groom):
     its type (kind: where its new map lives unless picked otherwise, "guides" for the regions); then
     every mappable param of the graph (Other) as {"id": "node.param", ...}. Returns
     (settings, others)."""
-    graph = get_graph(groom, expand_default=True)
-    specs = dict((s["type"], s) for s in groomlab_core.operator_specs())
-    settings = []
-    for s in groomlab_core.paintable_settings():
-        node = next((n["name"] for n in graph["nodes"] if n.get("type") == s["type"]), "")
-        settings.append({"id": s["id"], "label": s["label"], "node": node, "param": s["param"], "type": s["type"],
-                         "hint": s["hint"] if node else "Add a %s node first (Graph Editor)" % s["type"],
-                         "kind": s.get("kind", "vertices")})
-    others = []
-    for n in graph["nodes"]:
-        spec = specs.get(n.get("type"))
-        for p in (spec or {}).get("params", []):
-            if p.get("mappable"):
-                others.append({"id": "%s.%s" % (n["name"], p["name"]), "label": "%s.%s" % (n["name"], p["name"]),
-                               "node": n["name"], "param": p["name"], "type": n["type"],
-                               "hint": p.get("description", "")})
-    return settings, others
+    # The core's list, every host's (stroke.h settingTargetsJson).
+    targets = json.loads(groomlab_core.setting_targets_json(json.dumps(get_graph(groom, expand_default=True))))
+    return targets["settings"], targets["others"]
 
 
 # ---------------------------------------------------------------------------

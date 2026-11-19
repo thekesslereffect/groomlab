@@ -141,16 +141,12 @@ def preset_data(groom, about=None):
             if node.get("name") in layout:
                 x, y = layout[node["name"]]
                 node["ui"] = {"x": float(x), "y": float(y)}
-    data = {"version": graph.pop("version")} if "version" in graph else {}
-    size = scalp_size(groom)
-    if size:
-        data["size"] = size  # applied elsewhere, it is fitted from this
-    if about:
-        data["about"] = {k: v for k, v in about.items() if k in ("title", "description", "category") and v}
-    data.update(graph)
     if backdrops:
-        data["backdrops"] = backdrops
-    return data
+        graph["backdrops"] = backdrops
+    about = about or {}
+    # The preset's fields in their order: the core's, every host's (presets.h makePresetJson).
+    return json.loads(groomlab_core.make_preset_json(json.dumps(graph), scalp_size(groom) or None, about.get("title") or "",
+                                                     about.get("description") or "", about.get("category") or ""))
 
 
 def apply_preset(groom, name, fit=True):

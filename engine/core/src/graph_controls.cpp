@@ -6,11 +6,13 @@
 #include <cmath>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <set>
 
 #include <nlohmann/json.hpp>
 
 #include "groomlab/graph.h"
+#include "groomlab/graph_io.h"
 
 namespace groomlab {
 
@@ -146,6 +148,32 @@ std::string notKeyable(const GraphEdit& edit, const std::string& node, const std
         }
     }
     return {};
+}
+
+std::string compoundInnerParamsJson(const std::string& definitionJson) {
+    std::map<std::string, json> specs;
+    for (const json& op : json::parse(operatorSpecsJson())) specs[op.value("type", std::string())] = op.value("params", json::array());
+    const json definition = json::parse(definitionJson.empty() ? std::string("{}") : definitionJson, nullptr, false);
+    const json graph = definition.is_object() ? definition.value("graph", json::object()) : json::object();
+    const json nodes = graph.is_object() ? graph.value("nodes", json::array()) : json::array();
+    json out = json::array();
+    for (const json& n : nodes) {
+        if (!n.is_object()) continue;
+        const std::string type = n.value("type", std::string());
+        const auto it = specs.find(type);
+        if (type == "Input" || it == specs.end()) continue;
+        json params = json::array();
+        for (const json& p : it->second) {
+            const std::string kind = p.value("kind", std::string()), name = p.value("name", std::string());
+            if (kind != "float" && kind != "int" && kind != "bool" && kind != "vec3" && kind != "string") continue;
+            const json channel = p.contains("channel") ? p["channel"] : json();
+            const bool namesChannel = channel.is_boolean() ? channel.get<bool>() : channel.is_string() ? !channel.get<std::string>().empty() : !channel.is_null();
+            if (name == "definition" || namesChannel) continue;
+            params.push_back(p);
+        }
+        if (!params.empty()) out.push_back({{"node", n.value("name", std::string())}, {"params", params}});
+    }
+    return out.dump();
 }
 
 void exposeParam(GraphEdit& edit, const std::string& node, const std::string& param) {

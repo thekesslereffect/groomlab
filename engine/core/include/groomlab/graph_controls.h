@@ -42,6 +42,12 @@ std::string notKeyable(const GraphEdit& edit, const std::string& node, const std
 // node has.
 void exposeParam(GraphEdit& edit, const std::string& node, const std::string& param);
 
+// What a Compound's Show Inner Param offers (every host's node menu): per inner node but its Input
+// nodes, in order, its params a compound can show (numbers, switches, vectors and words; not a param
+// naming a channel, nor a definition), as [{"node", "params": [param spec, ...]}]; `definitionJson`
+// the Compound's definition ({"graph", "expose"}). Nodes this build has no operator for are left out.
+std::string compoundInnerParamsJson(const std::string& definitionJson);
+
 // node.param's input port gone with what fed it; the param keeps its own value: every host's
 // unexpose. False when it was no port (nothing changed). GraphError for no such node.
 bool unexposeParam(GraphEdit& edit, const std::string& node, const std::string& param);

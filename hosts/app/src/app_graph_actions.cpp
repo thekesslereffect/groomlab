@@ -34,6 +34,7 @@
 #include "theme.h"
 #include "tube_panel.h"
 
+#include "groomlab/graph_controls.h"
 #include "groomlab/node_catalog.h"
 #include "groomlab/node_library.h"
 
@@ -273,29 +274,20 @@ void AppActions::addGraphGenerators(ui::Generators& g, MainWindow& w) {
                 if (n.is_object() && n.value("name", std::string()) == node) found = n;
             }
         }
-        const json* compound = &found;
-        if (!found.is_object() || compound->value("type", std::string()) != "Compound") return out;
-        const json params = compound->value("params", json::object());
+        if (!found.is_object() || found.value("type", std::string()) != "Compound") return out;
+        const json params = found.value("params", json::object());
         const json definition = params.is_object() ? params.value("definition", json::object()) : json::object();
-        const json inner = definition.is_object() ? definition.value("graph", json::object()) : json::object();
-        for (const json& n : inner.is_object() ? inner.value("nodes", json::array()) : json::array()) {
-            const std::string type = n.value("type", std::string()), name = n.value("name", std::string());
-            const json* spec = m->document_->spec(type);
-            if (!spec || type == "Input") continue;
+        // The core's list, every host's (graph_controls.h compoundInnerParamsJson).
+        for (const json& n : json::parse(compoundInnerParamsJson(definition.dump()))) {
+            const std::string name = n.value("node", std::string());
             json items = json::array();
-            for (const json& p : spec->value("params", json::array())) {
-                const std::string kind = p.value("kind", std::string()), param = p.value("name", std::string());
-                if (kind != "float" && kind != "int" && kind != "bool" && kind != "vec3" && kind != "string") continue;
-                // (Not a param naming a channel: its "channel" set, a word or true.)
-                const json channel = p.contains("channel") ? p["channel"] : json();
-                const bool names = channel.is_boolean() ? channel.get<bool>() : channel.is_string() ? !channel.get<std::string>().empty() : !channel.is_null();
-                if (param == "definition" || names) continue;
+            for (const json& p : n["params"]) {
                 items.push_back({{"id", entry.value("action", std::string("compound.showInner"))},
-                                 {"value", name + "." + param},
-                                 {"label", param},
+                                 {"value", name + "." + p.value("name", std::string())},
+                                 {"label", p.value("name", std::string())},
                                  {"tip", p.value("description", std::string())}});
             }
-            if (!items.empty()) out.push_back({{"submenu", name}, {"id", "inner/" + name}, {"items", items}});
+            out.push_back({{"submenu", name}, {"id", "inner/" + name}, {"items", items}});
         }
         return out;
     };

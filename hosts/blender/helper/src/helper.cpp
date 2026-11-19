@@ -20,6 +20,7 @@
 #include <utility>
 #include <vector>
 
+#include "groomlab/stroke.h"
 #include "groomlab/graph_controls.h"
 #include "groomlab/asset_files.h"
 #include "groomlab/brush_alpha.h"
@@ -1500,6 +1501,28 @@ json Helper::run(const std::string& cmd, const json& args) {
         } catch (const GraphError& e) {
             fail("not_found", e.what());
         }
+    }
+    if (cmd == "preset_from_text") {
+        try {
+            return {{"preset", json::parse(presetFromText(needString(args, "text")))}};
+        } catch (const std::invalid_argument& e) {
+            fail("bad_request", e.what());
+        }
+    }
+    if (cmd == "make_preset") {
+        const double size = optNumber(args, "size", 0.0);
+        const json controls = args.value("controls", json::object());
+        return {{"text", makePresetJson(graphArg(args), size > 0.0 ? std::optional<double>(size) : std::nullopt, optString(args, "title", ""),
+                                        optString(args, "description", ""), optString(args, "category", ""),
+                                        controls.is_object() && !controls.empty() ? controls.dump() : std::string())}};
+    }
+    if (cmd == "compound_inner_params") {
+        const json definition = args.value("definition", json::object());
+        return {{"inner", json::parse(compoundInnerParamsJson(definition.is_string() ? definition.get<std::string>() : definition.dump()))}};
+    }
+    if (cmd == "setting_targets") {
+        Session& s = session(args);
+        return json::parse(settingTargetsJson(graphText(*s.groom)));
     }
     if (cmd == "graph_map_names") {
         json out = json::array();

@@ -592,23 +592,10 @@ def setting_targets(scalp):
     Length...), each {id, label, type, param, hint, node} with node "" while the graph has no node of
     its type; then every mappable param of the graph (Other) as {id: "node.param", label, node,
     param, hint}. Returns (settings, others)."""
-    from . import graph
     rt = groom.ensure(scalp)
-    g = process.call("get_graph", session=rt.session)["graph"]
-    nodes = g.get("nodes") or []
-    settings = []
-    for s in catalog().get("paintable") or []:
-        node = next((n["name"] for n in nodes if n.get("type") == s["type"]), "")
-        settings.append(dict(s, node=node))
-    specs = graph.operator_specs()
-    others = []
-    for n in nodes:
-        for p in (specs.get(n.get("type")) or {}).get("params", []):
-            if p.get("mappable"):
-                key = "%s.%s" % (n["name"], p["name"])
-                others.append({"id": key, "label": key, "node": n["name"], "param": p["name"],
-                               "hint": p.get("description", "")})
-    return settings, others
+    # The core's list, every host's (stroke.h settingTargetsJson, through the helper).
+    targets = process.call("setting_targets", session=rt.session)
+    return targets["settings"], targets["others"]
 
 
 def map_for_param(scalp, node, param, kind="vertices", resolution=1024, faces=None):

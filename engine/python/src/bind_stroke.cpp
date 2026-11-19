@@ -445,6 +445,9 @@ void bindStroke(py::module_& m) {
         "fraction or \"\").");
 
     m.def(
+        "setting_targets_json", &settingTargetsJson, py::arg("graph_json"),
+        "What New Map > For offers on a graph (stroke.h, every host's): {settings, others} as JSON.");
+    m.def(
         "paintable_settings",
         [] {
             py::list out;

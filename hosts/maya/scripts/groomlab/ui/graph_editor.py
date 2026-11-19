@@ -1061,21 +1061,13 @@ class NodeItem(QtWidgets.QGraphicsItem):
             return [{"id": entry["action"], "value": param, "label": param, "tip": ""} for param in self.mappable()]
 
         def inner(entry):
+            import groomlab_core
             definition = (self.editor.model.nodes[self.name].get("params") or {}).get("definition") or {}
-            subs = []
-            for node in definition.get("graph", {}).get("nodes", []):
-                try:
-                    specs = self.editor.catalog.spec(node.get("type", ""))["params"]
-                except gm.GraphError:
-                    continue
-                specs = [p for p in specs if p.get("kind") in ("float", "int", "bool", "vec3", "string")
-                         and p["name"] not in ("definition",) and not p.get("channel")]
-                if not specs or node.get("type") == "Input":
-                    continue
-                subs.append({"submenu": node["name"], "items": [
-                    {"id": entry["action"], "value": "%s.%s" % (node["name"], p["name"]), "label": pretty(p["name"]),
-                     "tip": p.get("description", "")} for p in specs]})
-            return subs
+            # The core's list, every host's (graph_controls.h compoundInnerParamsJson).
+            inner_params = json.loads(groomlab_core.compound_inner_params_json(json.dumps(definition)))
+            return [{"submenu": n["node"], "items": [
+                {"id": entry["action"], "value": "%s.%s" % (n["node"], p["name"]), "label": pretty(p["name"]),
+                 "tip": p.get("description", "")} for p in n["params"]]} for n in inner_params]
         return {"exposeParams": expose, "innerParams": inner}
 
     def contextMenuEvent(self, event):

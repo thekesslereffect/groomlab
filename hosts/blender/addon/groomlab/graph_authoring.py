@@ -141,17 +141,8 @@ class GROOMLAB_OT_graph_ungroup(_NodeOp):
 def inner_params(node):
     """[(inner node, [param spec])] a Compound's inner nodes offer to show on it (Maya's innerParams)."""
     definition = graph_tree.values(node).get("definition") or {}
-    specs = graph.operator_specs()
-    out = []
-    for inner in (definition.get("graph") or {}).get("nodes", []):
-        if inner.get("type") == "Input":
-            continue
-        params = [p for p in (specs.get(inner.get("type")) or {}).get("params", [])
-                  if p.get("kind") in ("float", "int", "bool", "vec3", "string") and p["name"] != "definition"
-                  and not p.get("channel")]
-        if params:
-            out.append((inner["name"], params))
-    return out
+    # The core's list, every host's (graph_controls.h compoundInnerParamsJson, through the helper).
+    return [(n["node"], n["params"]) for n in process.call("compound_inner_params", definition=definition)["inner"]]
 
 
 def shown_inner(node):
@@ -1100,47 +1091,23 @@ def copy_text(scalp):
     values. Pasted in Maya, the app or Blender, or saved as a .json preset."""
     graph_tree.push_positions(scalp)
     rt = groom.ensure(scalp)
-    g = dict(process.call("get_graph", session=rt.session)["graph"])
-    data = {"version": g.pop("version")} if "version" in g else {}
-    size = scalp_size(scalp)
-    if size:
-        data["size"] = size
-    data["about"] = {"title": scalp.name, "category": SHARED_CATEGORY,
-                     "description": "Copied from %s (GroomLab for Blender)" % scalp.name}
-    backdrops = g.pop("backdrops", [])
-    data.update(g)
-    if backdrops:
-        data["backdrops"] = backdrops
+    g = process.call("get_graph", session=rt.session)["graph"]
     values = {c["name"]: c["value"] for c in graph.controls(scalp) if c.get("set") and isinstance(c.get("value"), (int, float))}
-    if values:
-        data["controls"] = values
-    return json.dumps(data, indent=2)
-
-
-def _unfenced(text):
-    text = text.strip()
-    if text.startswith("```"):
-        first, _, rest = text.partition("\n")
-        if rest.rstrip().endswith("```") and len(first.strip("`").strip()) <= 10:
-            return rest.rstrip()[:-3].strip()
-    return text
+    # The preset's fields in their order: the core's, every host's (presets.h makePresetJson).
+    return process.call("make_preset", graph=g, size=scalp_size(scalp) or 0.0, title=scalp.name, category=SHARED_CATEGORY,
+                        description="Copied from %s (GroomLab for Blender)" % scalp.name, controls=values)["text"]
 
 
 def parse_text(text):
-    """The preset a pasted text holds (JSON only, never run): ValueError saying why otherwise."""
+    """The preset a pasted text holds (JSON only, never run): the core's checks, every host's
+    (presets.h presetFromText through the helper: a ``` block, a .groom's graph, the limits, the
+    shape, the node types, the params against their specs). ValueError saying why otherwise."""
     if not isinstance(text, str) or not text.strip():
         raise ValueError("cannot paste a graph: the clipboard is empty")
-    if len(text) > 4 * 1024 * 1024:  # the core's limit (presets.h kMaxPresetText; the helper checks the rest)
-        raise ValueError("cannot paste a graph: the text is more than any groom's graph (at most 4 MB)")
     try:
-        data = json.loads(_unfenced(text))
-    except ValueError as e:
-        raise ValueError("cannot paste a graph: the text is not a GroomLab graph (%s)" % e)
-    if isinstance(data, dict) and isinstance(data.get("graph"), dict) and "nodes" not in data:
-        data = data["graph"]  # a .groom's graph
-    if not isinstance(data, dict) or not isinstance(data.get("nodes"), list):
-        raise ValueError("cannot paste a graph: the text is not a GroomLab graph (no nodes)")
-    return data
+        return process.call("preset_from_text", text=text)["preset"]
+    except HelperError as e:
+        raise ValueError("cannot paste a graph: %s" % e.message)
 
 
 def paste_text(scalp, text):

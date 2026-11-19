@@ -4,6 +4,7 @@
 #include "groomlab/stroke.h"
 
 #include <algorithm>
+#include <map>
 #include <cctype>
 #include <cmath>
 #include <stdexcept>
@@ -427,6 +428,40 @@ const char* const kRemovedParamBrushes =
     "map)";
 
 float grayCtrlTarget(float value) { return value > 0.0f ? 0.0f : 1.0f; }
+
+std::string settingTargetsJson(const std::string& graphJson) {
+    const nlohmann::json graph = nlohmann::json::parse(graphJson.empty() ? std::string("{}") : graphJson, nullptr, false);
+    const nlohmann::json nodes = graph.is_object() ? graph.value("nodes", nlohmann::json::array()) : nlohmann::json::array();
+    nlohmann::json settings = nlohmann::json::array();
+    for (const PaintableSetting& s : paintableSettings()) {
+        std::string node;
+        for (const nlohmann::json& n : nodes) {
+            if (n.is_object() && n.value("type", std::string()) == s.type) {
+                node = n.value("name", std::string());
+                break;
+            }
+        }
+        settings.push_back({{"id", s.id}, {"label", s.label}, {"node", node}, {"param", s.param}, {"type", s.type},
+                            {"hint", node.empty() ? std::string("Add a ") + s.type + " node first (Graph Editor)" : std::string(s.hint)},
+                            {"kind", s.kind}});
+    }
+    std::map<std::string, nlohmann::json> specs;
+    for (const nlohmann::json& op : nlohmann::json::parse(operatorSpecsJson())) specs[op.value("type", std::string())] = op.value("params", nlohmann::json::array());
+    nlohmann::json others = nlohmann::json::array();
+    for (const nlohmann::json& n : nodes) {
+        if (!n.is_object()) continue;
+        const std::string name = n.value("name", std::string()), type = n.value("type", std::string());
+        const auto it = specs.find(type);
+        if (it == specs.end()) continue;
+        for (const nlohmann::json& p : it->second) {
+            if (!p.value("mappable", false)) continue;
+            const std::string key = name + "." + p.value("name", std::string());
+            others.push_back({{"id", key}, {"label", key}, {"node", name}, {"param", p.value("name", std::string())}, {"type", type},
+                              {"hint", p.value("description", std::string())}});
+        }
+    }
+    return nlohmann::json{{"settings", settings}, {"others", others}}.dump();
+}
 
 const std::vector<PaintableSetting>& paintableSettings() {
     static const std::vector<PaintableSetting> settings = {
