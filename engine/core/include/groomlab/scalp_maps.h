@@ -73,6 +73,11 @@ std::string sanitizeMapName(const std::string& name);
 // letters, digits and _ (any other character _), the _ trimmed from both ends ("map" when none is
 // left), "map_" before a leading digit, then _2, _3... while `taken` says the name is in use.
 std::string mapNameFromFile(const std::string& path, const std::function<bool(const std::string&)>& taken = {});
+// The painted maps a graph reads by name, each with how (every host's Copy Graph and Transfer
+// checks): Map nodes' maps ("map"), HairColor's map and Interpolate's regionMap when not an image
+// file's path ("map"), guide layers ({"guide": name}: "guides") and color sets ({"colorSet":
+// name}: "colorSet"), inside compounds too; each name once, as first found, in the graph's order.
+std::vector<std::pair<std::string, std::string>> graphMapNames(const std::string& graphJson);
 // The map a param's own map is named (Paint on a setting, New Map > for a setting): "<node>_<param>",
 // sanitized. When the groom has a map of that name already (made for the param before, its link
 // since gone), every host links that map again, whatever its kind, its painting back, rather than

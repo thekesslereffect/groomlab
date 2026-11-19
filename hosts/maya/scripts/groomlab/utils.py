@@ -916,30 +916,11 @@ def transfer_to_scalp(groom, scalp, fit=False, maps=True, color_sets=False, meth
 
 def graph_maps(graph):
     """Painted maps a graph reads by name: Map nodes' maps, HairColor's map and Interpolate's
-    regionMap (not an image file's path: the core's rule, presets.is_image_path), guide maps (guide
-    layers) and color set maps (a vertex map or a mesh color set: color set maps), inside compounds
-    too. {name: how it is read}."""
-    from groomlab import presets
-    found = {}
-    for node in graph.get("nodes", []):
-        params = node.get("params") or {}
-        if node.get("type") == "Map":
-            found.setdefault(params.get("name", "mask"), "map")
-        for param, how, kind in (("map", "map", "HairColor"), ("regionMap", "map", "Interpolate")):
-            value = params.get(param) if node.get("type") == kind else None
-            if isinstance(value, str) and value and not presets.is_image_path(value):
-                found.setdefault(value, how)
-        for value in params.values():
-            if isinstance(value, dict):
-                if value.get("guide"):
-                    found.setdefault(value["guide"], "guides")
-                if value.get("colorSet"):
-                    found.setdefault(value["colorSet"], "colorSet")
-        if node.get("type") == "Compound":
-            for name, how in graph_maps((params.get("definition") or {}).get("graph") or {}).items():
-                found.setdefault(name, how)
-    return found
-
+    regionMap (not an image file's path), guide maps (guide layers) and color set maps, inside
+    compounds too. {name: how it is read}, in the graph's order: the core's list, every host's
+    (scalp_maps.h graphMapNames)."""
+    import groomlab_core
+    return dict(groomlab_core.graph_map_names(json.dumps(graph or {})))
 
 def _topology(mesh):
     return (cmds.polyEvaluate(mesh, vertex=True), cmds.polyEvaluate(mesh, face=True),

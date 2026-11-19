@@ -37,7 +37,6 @@ import colorsys
 import math
 
 import bpy
-import numpy as np
 
 GROUP = "GroomLab Hair Color"
 GROUP_VERSION = 1
@@ -123,30 +122,13 @@ def cycles_color(melanin, redness, color, ra):
     return [math.exp(-fc * math.sqrt(s)) for s in absorption(melanin, redness, color, ra)]
 
 
-# The appearance of a base color (hair_color.h hairAppearanceColor, fitted with kick on a lock
-# under a white dome): s + (1 - s) exp(-k a^q), a Chiang's absorption of it at the azimuthal
-# roughness 0.2 (kHairAzimuthalRoughness). White stays white.
-APPEARANCE_SHEEN, APPEARANCE_SCALE, APPEARANCE_POWER = 0.03, 3.52, 0.79
-AZIMUTHAL_ROUGHNESS = 0.2
-APPEARANCE_SAMPLES = 100000  # strands averaged at most (evenly spread) for the viewport color
-
-
-def appearance_colors(base):
-    """(n, 3) linear base colors (what a hair BSDF takes: the hair's groomlab_color) to how the
-    hair looks: the color Solid shading and other plain drawing show."""
-    base = np.clip(np.asarray(base, np.float64), 1e-8, 1.0)
-    sigma = (np.log(base) / roughness_factor(AZIMUTHAL_ROUGHNESS)) ** 2
-    return APPEARANCE_SHEEN + (1.0 - APPEARANCE_SHEEN) * np.exp(-APPEARANCE_SCALE * sigma ** APPEARANCE_POWER)
-
-
-def set_viewport_color(mat, base):
-    """The material's viewport color (Solid shading's) the strands' mean appearance, for a
-    material the add-on made; `base`: the strands' (n, 3) base colors. True when it changed."""
-    if mat is None or not mat.get("groomlab") or base is None or not len(base):
+def set_viewport_color(mat, appearance):
+    """The material's viewport color (Solid shading's) the strands' mean appearance (the helper's
+    `appearance`: hair_color.h meanHairAppearance, every host's), for a material the add-on made.
+    True when it changed."""
+    if mat is None or not mat.get("groomlab") or not appearance:
         return False
-    step = max(1, len(base) // APPEARANCE_SAMPLES)
-    rgb = appearance_colors(np.asarray(base)[::step, :3]).mean(axis=0)
-    color = (float(rgb[0]), float(rgb[1]), float(rgb[2]), 1.0)
+    color = (float(appearance[0]), float(appearance[1]), float(appearance[2]), 1.0)
     if max(abs(a - b) for a, b in zip(mat.diffuse_color, color)) < 1e-4:
         return False
     mat.diffuse_color = color

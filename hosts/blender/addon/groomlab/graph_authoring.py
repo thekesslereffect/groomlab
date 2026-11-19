@@ -337,19 +337,16 @@ def key_state(scalp, node, param):
     return "animated"
 
 
-def keyable_why(node, param, spec):
-    """Why a param cannot be keyed ("" when it can), as Maya's GraphModel.keyable says it."""
-    if spec is None or spec.get("kind") not in KEYABLE_KINDS:
-        return "only numbers, switches and vectors are keyed"
-    if spec.get("animatable") is False:
-        return "a count or a seed changes the strands themselves"
-    if node.gl_type == "Control":
-        return "a Control node is its slider"
-    if param in json.loads(node.gl_mapped or "{}"):
-        return "it reads a map"
-    if param in json.loads(node.gl_drivers or "{}"):
-        return "an input drives it"
-    return ""
+def keyable_why(scalp, node, param):
+    """Why a param cannot be keyed ("" when it can): the core's rule, every host's (graph_controls.h
+    notKeyable, through the helper). Without a groom, nothing to ask: ""."""
+    if scalp is None:
+        return ""
+    try:
+        from . import pipeline
+        return pipeline.call(scalp, "not_keyable", node=node.gl_name, param=param)["why"]
+    except HelperError as e:
+        return str(e)
 
 
 def ensure_control_props(scalp, names, values, spec=None):
@@ -404,8 +401,7 @@ class GROOMLAB_OT_graph_set_key(_ParamOp):
         node = _node(context, self.node)
         if node is None:
             return {"CANCELLED"}
-        why = keyable_why(node, self.param, (node.gl_param_specs or {}).get(self.param) if not node.gl_spec_json else
-                          next((s for s in graph_tree.node_param_specs(node) if s["name"] == self.param), None))
+        why = keyable_why(scalp, node, self.param)
         if why and not control_names(node, self.param):
             self.report({"WARNING"}, "Cannot be keyed: %s" % why)
             return {"CANCELLED"}

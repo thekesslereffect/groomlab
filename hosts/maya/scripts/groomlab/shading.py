@@ -367,9 +367,8 @@ def iridescent_tint(color, shift, grazing):
     """The structural color at `grazing` (0 facing the view .. 1 edge-on): `color`'s hue turned
     by `shift` x grazing turns, its saturation and value kept (color_patterns.h's iridescentTint,
     as the viewport and the app shade it)."""
-    import colorsys
-    h, s, v = colorsys.rgb_to_hsv(*[max(0.0, float(c)) for c in color])
-    return colorsys.hsv_to_rgb((h + shift * min(max(grazing, 0.0), 1.0)) % 1.0, s, v)
+    import groomlab_core
+    return tuple(groomlab_core.iridescent_tint([float(c) for c in color[:3]], float(shift), float(grazing)))
 
 
 def _iridescence_network(hair, params, specular_tint):

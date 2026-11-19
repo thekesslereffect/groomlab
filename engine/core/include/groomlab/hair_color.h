@@ -106,6 +106,10 @@ constexpr float kAppearancePower = 0.79f;
 std::array<float, 3> hairAppearanceColor(const std::array<float, 3>& baseColor);
 // Its inverse: the base color that looks like `appearance`.
 std::array<float, 3> hairBaseOfAppearance(const std::array<float, 3>& appearance);
+// The mean appearance (hairAppearanceColor) of `count` base colors (r g b at the start of every
+// `stride` floats of `rgb`), at most `samples` of them evenly spread: the one color a host's plain
+// drawing shows for the groom (Blender's Solid shading). Mid gray for none.
+std::array<float, 3> meanHairAppearance(const float* rgb, std::size_t count, std::size_t stride = 3, std::size_t samples = 100000);
 
 // ---- Wet hair -----------------------------------------------------------------------------------
 //

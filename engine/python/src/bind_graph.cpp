@@ -1009,6 +1009,8 @@ void bindGraph(py::module_& m) {
     m.def("preset_fields", [] { return presetFields(); }, "A preset's own fields: size, about, requires, backdrops, controls, exposed.");
     m.def("preset_categories", [] { return presetCategories(); }, "The Presets menu's categories, in order.");
     m.def("preset_title", &presetTitle, py::arg("name"), "A preset's title when its file gives none: its name in words.");
+    m.def("preset_param_problems", &presetParamProblems, py::arg("graph_json"),
+          "What is wrong with a graph's params against their specs (presets.h, every host's check): [] when fine.");
     m.def("preset_from_text", &presetFromText, py::arg("text"),
           "The preset a pasted text holds, every host's checks (presets.h presetFromText): its JSON; ValueError saying why.");
     m.attr("MAX_PRESET_TEXT") = kMaxPresetText;

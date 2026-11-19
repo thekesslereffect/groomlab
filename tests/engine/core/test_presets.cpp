@@ -973,4 +973,28 @@ TEST(Presets, EditingAnExposedParamEqualsEditingTheInnerNode) {
     EXPECT_GE(changed, compared / 2) << "most presets' edits change the groom";
 }
 
+TEST(Presets, ParamsAreCheckedAgainstTheirSpecsInEveryHost) {
+    // presetParamProblems (Maya's presets.check, every host's paste): kinds, choices, maps on
+    // params that take none, inputs and keys that cannot be, a Compound's exposed names.
+    const std::string graph = R"({"version": 1, "output": "out", "nodes": [
+        {"name": "scalp", "type": "Scalp"},
+        {"name": "noise", "type": "Noise", "params": {"amplitud": 0.2, "space": "galaxy"}},
+        {"name": "resample", "type": "Resample", "params": {"segments": 12.5}},
+        {"name": "width", "type": "Width", "params": {"profile": "tapered"}},
+        {"name": "grp", "type": "Compound", "params": {"definition": {"graph": {"version": 1, "output": "w", "nodes": [
+            {"name": "w", "type": "Noise", "params": {"octave": 2}}], "connections": []}, "expose": {"gone": "w.nothing"}}}},
+        {"name": "out", "type": "Output"}], "connections": []})";
+    std::string all;
+    for (const std::string& p : presetParamProblems(graph)) all += p + " | ";
+    for (const char* expected : {"Noise has no param 'amplitud'", "'galaxy' is not one of", "wants a whole number", "wants a ramp",
+                                 "grp/w: Noise has no param 'octave'", "exposed 'gone' names 'w.nothing'"}) {
+        EXPECT_NE(all.find(expected), std::string::npos) << expected << " in " << all;
+    }
+    // A paste: the params no operator has dropped (a newer GroomLab's), a wrong kind refused.
+    EXPECT_THROW(presetFromText(graph), std::invalid_argument);
+    const std::string newer = R"({"version": 1, "output": "out", "nodes": [{"name": "noise", "type": "Noise", "params": {"someday": 1}},
+        {"name": "out", "type": "Output"}], "connections": []})";
+    EXPECT_NO_THROW(presetFromText(newer));
+}
+
 }  // namespace groomlab

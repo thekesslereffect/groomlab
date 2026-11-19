@@ -12,6 +12,7 @@
 
 #include "groomlab/graph_edit.h"
 #include "groomlab/groom.h"
+#include "groomlab/texture.h"
 #include "groomlab/guide_hierarchy.h"
 #include "groomlab/random.h"
 #include "groomlab/scalp_paint.h"
@@ -253,6 +254,46 @@ std::string sanitizeMapName(const std::string& name) {
     if (out.empty()) return "map";
     if (std::isdigit(static_cast<unsigned char>(out[0]))) out = "_" + out;
     return out;
+}
+
+namespace {
+
+void collectGraphMapNames(const nlohmann::json& graph, std::vector<std::pair<std::string, std::string>>& found) {
+    auto note = [&](const std::string& name, const char* how) {
+        if (name.empty()) return;
+        for (const auto& [n, h] : found) {
+            if (n == name) return;
+        }
+        found.emplace_back(name, how);
+    };
+    if (!graph.is_object() || !graph.contains("nodes") || !graph["nodes"].is_array()) return;
+    for (const nlohmann::json& node : graph["nodes"]) {
+        if (!node.is_object()) continue;
+        const std::string type = node.value("type", std::string());
+        const nlohmann::json params = node.contains("params") && node["params"].is_object() ? node["params"] : nlohmann::json::object();
+        if (type == "Map") note(params.value("name", std::string("mask")), "map");
+        for (const auto& [param, kind] : {std::pair<const char*, const char*>{"map", "HairColor"}, {"regionMap", "Interpolate"}}) {
+            if (type != kind || !params.contains(param) || !params[param].is_string()) continue;
+            const std::string value = params[param].get<std::string>();
+            if (!value.empty() && !isImagePath(value)) note(value, "map");
+        }
+        for (const auto& [key, value] : params.items()) {
+            if (!value.is_object()) continue;
+            if (value.contains("guide") && value["guide"].is_string()) note(value["guide"].get<std::string>(), "guides");
+            if (value.contains("colorSet") && value["colorSet"].is_string()) note(value["colorSet"].get<std::string>(), "colorSet");
+        }
+        if (type == "Compound" && params.contains("definition") && params["definition"].is_object() && params["definition"].contains("graph")) {
+            collectGraphMapNames(params["definition"]["graph"], found);
+        }
+    }
+}
+
+}  // namespace
+
+std::vector<std::pair<std::string, std::string>> graphMapNames(const std::string& graphJson) {
+    std::vector<std::pair<std::string, std::string>> found;
+    collectGraphMapNames(nlohmann::json::parse(graphJson, nullptr, false), found);
+    return found;
 }
 
 std::string mapNameFromFile(const std::string& path, const std::function<bool(const std::string&)>& taken) {

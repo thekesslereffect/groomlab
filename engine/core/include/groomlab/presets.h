@@ -175,6 +175,14 @@ constexpr int kMaxPresetDepth = 16;
 // preset's JSON (compact); throws std::invalid_argument saying why ("the clipboard holds no
 // GroomLab graph...", three problems at most).
 std::string presetFromText(const std::string& text);
+// What is wrong with a graph's params against their operators' specs (every host's paste and
+// preset check, Maya's presets.check): a param the operator does not have, a value of the wrong
+// kind or not among its choices, a map on a param that takes none, an input or a key on a param
+// that cannot take one, a Compound's exposed param naming none, an Expression's variables that
+// are not JSON; inside compounds too ("compound/inner: ..."). Empty: fine. Unknown node types are
+// left to presetFromText.
+// presetFromText refuses a text with any (after dropping the params no operator has).
+std::vector<std::string> presetParamProblems(const std::string& graphJson);
 
 // The scalp size a preset is made on and fitted to: the largest extent of the mesh's bounding
 // box; nullopt for a mesh without points.

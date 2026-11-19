@@ -138,6 +138,13 @@ std::string notKeyable(const GraphEdit& edit, const std::string& node, const std
     const json& n = nodeIn(g, node);
     const json params = n.value("params", json::object());
     if (params.is_object() && params.contains(param) && params[param].is_object()) return "it reads a map: set it back to a value to key it";
+    if (g.contains("connections") && g["connections"].is_array()) {
+        for (const json& c : g["connections"]) {
+            if (c.is_object() && c.value("to", std::string()) == node && c.value("input", std::string()) == param) {
+                return "an input drives it: unplug its input to key it";
+            }
+        }
+    }
     return {};
 }
 

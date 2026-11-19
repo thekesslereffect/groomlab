@@ -538,5 +538,23 @@ TEST(HairColor, AMapsRgbOutputColorsTheStrands) {
     std::filesystem::remove(path);
 }
 
+TEST(HairColor, MeanAppearanceIsTheGroomsOneColor) {
+    // The one color a host's plain drawing shows (Blender's Solid shading): each strand's
+    // appearance averaged; white stays white, a darker base looks darker; none: mid gray.
+    const std::vector<float> white = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
+    const auto w = meanHairAppearance(white.data(), 2);
+    for (const float c : w) EXPECT_NEAR(c, 1.0f, 1e-5f);
+    const std::vector<float> dark = {0.04f, 0.015f, 0.003f}, light = {0.3f, 0.2f, 0.1f};
+    const auto a = meanHairAppearance(dark.data(), 1), b = meanHairAppearance(light.data(), 1);
+    for (std::size_t k = 0; k < 3; ++k) {
+        EXPECT_LT(a[k], b[k]);
+        EXPECT_GT(a[k], 0.03f);
+    }
+    const std::vector<float> both = {0.04f, 0.015f, 0.003f, 9.0f, 0.3f, 0.2f, 0.1f, 9.0f};  // stride 4
+    const auto mean = meanHairAppearance(both.data(), 2, 4);
+    EXPECT_NEAR(mean[0], 0.5f * (a[0] + b[0]), 1e-5f);
+    EXPECT_FLOAT_EQ(meanHairAppearance(nullptr, 0)[0], 0.5f);
+}
+
 }  // namespace
 }  // namespace groomlab

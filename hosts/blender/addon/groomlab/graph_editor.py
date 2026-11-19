@@ -1135,7 +1135,7 @@ def param_state(node, spec, scalp):
     values = {"why": ""}
     if spec.get("kind") in graph_authoring.KEYABLE_KINDS:
         state.add("param.keyable")
-        why = graph_authoring.keyable_why(node, name, spec)
+        why = graph_authoring.keyable_why(scalp, node, name)
         linked = bool(graph_authoring.control_names(node, name))
         if linked or not why:
             state.add("param.canKey")

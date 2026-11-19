@@ -32,7 +32,8 @@ std::string controlsJson(const std::string& graphJson);
 
 // Why node.param cannot be keyed in place ("" when it can): a Control node's own params, a param
 // that is not animatable (it sets how many strands there are, or where), one that is not a number,
-// switch or vector, or one reading a map. GraphError for no such node or param.
+// switch or vector, one reading a map, or one an input drives (its port connected): every host's
+// rule. GraphError for no such node or param.
 std::string notKeyable(const GraphEdit& edit, const std::string& node, const std::string& param);
 
 // node.param as an input port of the node (a mappable number or color a Field port, a ramp a Curve

@@ -379,7 +379,8 @@ def check(preset, catalog=None, warnings=True):
     from groomlab import graph as gm
     if catalog is None:
         catalog = gm.OperatorCatalog.from_maya()
-    problems = []
+    # The params against their specs: the core's check, every host's (presets.h presetParamProblems).
+    problems = list(groomlab_core.preset_param_problems(json.dumps(preset)))
     _check_graph(preset, catalog, "", problems, warnings)
     about = preset.get("about")
     if about is not None:
@@ -404,7 +405,6 @@ def _check_graph(graph, catalog, where, problems, warnings=True):
         if op_type not in catalog.types():
             problems.append("%s: unknown node type %r" % (label, op_type))
             continue
-        _check_params(node, catalog, label, problems)
         if op_type == "Compound":
             definition = node.get("params", {}).get("definition")
             if isinstance(definition, dict):
@@ -421,90 +421,8 @@ def _check_graph(graph, catalog, where, problems, warnings=True):
         problems.append(where + warning)
 
 
-def _check_params(node, catalog, label, problems):
-    op_type = node["type"]
-    params = node.get("params", {})
-    specs = {p["name"]: p for p in catalog.spec(op_type)["params"]}
-    exposed = {}
-    if op_type == "Compound":
-        definition = params.get("definition")
-        if not isinstance(definition, dict):
-            problems.append("%s: the Compound has no definition" % label)
-            definition = {}
-        inner = {n.get("name"): n for n in definition.get("graph", {}).get("nodes", [])}
-        for name, target in (definition.get("expose") or {}).items():
-            inner_name, _, param = str(target).partition(".")
-            spec = None
-            if inner_name in inner and inner[inner_name].get("type") in catalog.types():
-                spec = catalog.param_spec(inner[inner_name]["type"], param)
-            if spec is None:
-                problems.append("%s: exposed %r names %r, which is no param" % (label, name, target))
-            exposed[name] = spec
-    for name, value in params.items():
-        if op_type == "Compound" and name == "definition":
-            continue
-        spec = exposed.get(name) if name in exposed else specs.get(name)
-        if spec is None:
-            if name not in exposed:
-                problems.append("%s: %s has no param %r" % (label, op_type, name))
-            continue
-        problem = _value_problem(value, spec)
-        if problem:
-            problems.append("%s.%s: %s" % (label, name, problem))
-    for name in node.get("paramInputs") or []:
-        spec = exposed.get(name) if name in exposed else specs.get(name)
-        if spec is None or not spec.get("port"):  # every param takes a port but a few (graph.linkable)
-            problems.append("%s: %r is exposed as an input but cannot be one" % (label, name))
-    for name, control in (node.get("paramControls") or {}).items():
-        spec = exposed.get(name) if name in exposed else specs.get(name)
-        if spec is None or spec.get("animatable") is False or spec.get("kind") not in ("float", "int", "bool", "vec3"):
-            problems.append("%s: %r is keyed but cannot be" % (label, name))
-        elif (spec["kind"] == "vec3") != isinstance(control, list):
-            problems.append("%s: %r is keyed by %r, which does not fit a %s" % (label, name, control, spec["kind"]))
-    if op_type == "Expression" and isinstance(params.get("variables"), str):
-        try:
-            json.loads(params["variables"])
-        except ValueError as e:
-            problems.append("%s.variables: not JSON (%s)" % (label, e))
-
-
 def _is_number(v):
     return isinstance(v, (int, float)) and not isinstance(v, bool)
-
-
-def _value_problem(value, spec):
-    """Why `value` does not fit a param of `spec`, or None."""
-    from groomlab import graph as gm
-    kind = spec.get("kind")
-    if isinstance(value, dict) and gm.map_source(value) is not None:
-        if not spec.get("mappable"):
-            return "a map on a param that takes none"
-        return None
-    if kind == "bool":
-        return None if isinstance(value, bool) else "wants true or false, has %r" % (value,)
-    if kind == "int":
-        if _is_number(value) and float(value).is_integer():
-            return None
-        return "wants a whole number, has %r" % (value,)
-    if kind == "float":
-        return None if _is_number(value) else "wants a number, has %r" % (value,)
-    if kind == "string":
-        if not isinstance(value, str):
-            return "wants text, has %r" % (value,)
-        if spec.get("choices") and value not in spec["choices"]:
-            return "%r is not one of %s" % (value, ", ".join(spec["choices"]))
-        return None
-    if kind == "vec3":
-        ok = isinstance(value, list) and len(value) == 3 and all(_is_number(v) for v in value)
-        return None if ok else "wants [x, y, z], has %r" % (value,)
-    if kind == "ramp":
-        keys = value.get("keys") if isinstance(value, dict) else value
-        if _is_number(keys):
-            return None
-        ok = isinstance(keys, list) and keys and all(
-            isinstance(k, list) and len(k) == 2 and all(_is_number(v) for v in k) for k in keys)
-        return None if ok else "wants a ramp [[position, value], ...], has %r" % (value,)
-    return None
 
 
 # ---------------------------------------------------------------------------

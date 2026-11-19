@@ -20,6 +20,7 @@
 #include <utility>
 #include <vector>
 
+#include "groomlab/graph_controls.h"
 #include "groomlab/asset_files.h"
 #include "groomlab/brush_alpha.h"
 #include "groomlab/attributes.h"
@@ -706,7 +707,13 @@ json writeStrands(Session& s, const ViewResult& view, const json& args, bool gro
     }
     if (derived) {
         if (ev.rootUVs.size() == S && S) offer("rootUV", 0, 2, ev.rootUVs.front().data());
-        if (ev.colors.size() == S && S) offer("color", 0, 3, ev.colors.front().data());
+        if (ev.colors.size() == S && S) {
+            offer("color", 0, 3, ev.colors.front().data());
+            // How the hair looks as one color (hair_color.h meanHairAppearance, every host's): the
+            // add-on's material viewport color (Solid shading).
+            const std::array<float, 3> look = meanHairAppearance(ev.colors.front().data(), S);
+            result["appearance"] = {look[0], look[1], look[2]};
+        }
         if (ev.pointColors.size() == P && P) offer("pointColor", 1, 3, ev.pointColors.front().data());
     } else {
         if (view.scalp && view.scalp->hasUVs()) offer("rootUV", 0, 2, nullptr);
@@ -1485,6 +1492,20 @@ json Helper::run(const std::string& cmd, const json& args) {
         const json& g = need(a, "graph");
         return g.is_string() ? g.get<std::string>() : g.dump();
     };
+    // Why a param cannot be keyed ("" when it can): the core's rule, every host's (graph_controls.h).
+    if (cmd == "not_keyable") {
+        Session& s = session(args);
+        try {
+            return {{"why", notKeyable(GraphEdit(graphText(*s.groom)), needString(args, "node"), needString(args, "param"))}};
+        } catch (const GraphError& e) {
+            fail("not_found", e.what());
+        }
+    }
+    if (cmd == "graph_map_names") {
+        json out = json::array();
+        for (const auto& [name, how] : graphMapNames(graphArg(args))) out.push_back({{"name", name}, {"how", how}});
+        return {{"maps", out}};
+    }
     if (cmd == "file_safe_name") return {{"name", fileSafeName(optString(args, "text", ""))}};
     if (cmd == "graph_file_params") {
         json out = json::array();

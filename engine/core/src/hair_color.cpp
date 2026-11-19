@@ -173,4 +173,17 @@ float packWetLook(float iridescence, float wetness) {
     return kWetPacked + std::round(std::clamp(wetness, 0.0f, 1.0f) * 1000.0f) + 0.5f * std::clamp(iridescence, 0.0f, 1.0f);
 }
 
+std::array<float, 3> meanHairAppearance(const float* rgb, std::size_t count, std::size_t stride, std::size_t samples) {
+    if (!rgb || count == 0) return {0.5f, 0.5f, 0.5f};
+    const std::size_t step = std::max<std::size_t>(1, count / std::max<std::size_t>(1, samples));
+    double sum[3] = {0.0, 0.0, 0.0};
+    std::size_t n = 0;
+    for (std::size_t i = 0; i < count; i += step, ++n) {
+        const float* c = rgb + i * stride;
+        const std::array<float, 3> a = hairAppearanceColor({c[0], c[1], c[2]});
+        for (int k = 0; k < 3; ++k) sum[k] += a[static_cast<std::size_t>(k)];
+    }
+    return {static_cast<float>(sum[0] / n), static_cast<float>(sum[1] / n), static_cast<float>(sum[2] / n)};
+}
+
 }  // namespace groomlab

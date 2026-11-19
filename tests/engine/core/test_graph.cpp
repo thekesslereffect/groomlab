@@ -994,6 +994,7 @@ TEST(GraphControls, EveryHostMakesAndReadsControlsAlike) {
     EXPECT_EQ(linkControl(edit, "length", "randomness", {}, {"length_randomness"}), "\"length_randomness1\"") << "a name the host holds";
     EXPECT_NE(notKeyable(edit, "scatter", "density"), "") << "not animatable";
     EXPECT_NE(notKeyable(edit, control, "default"), "") << "a Control node's own";
+    EXPECT_EQ(notKeyable(edit, "width", "width"), "an input drives it: unplug its input to key it") << "a Control drives it";
     EXPECT_THROW(linkControl(edit, "scatter", "density"), GraphError);
     // Every control read back: a keyed param's default its own value, else its spec's.
     const json controls = json::parse(controlsJson(edit.toJson()));

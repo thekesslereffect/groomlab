@@ -7,6 +7,7 @@
 #include <set>
 #include <sstream>
 
+#include "groomlab/color_patterns.h"
 #include "groomlab/card_files.h"
 #include "groomlab/card_maps.h"
 #include "groomlab/card_presets.h"
@@ -565,6 +566,10 @@ void bindGroom(py::module_& m) {
     m.def("valid_map_name", &validMapName, py::arg("name"), "Letters, digits and _, not starting with a digit.");
     m.def("map_name_error", &mapNameError, py::arg("name"), "Why a name cannot name a map (\"\" when it can).");
     m.def("sanitize_map_name", &sanitizeMapName, py::arg("name"), "A valid map name made from any text.");
+    m.def("iridescent_tint", &iridescentTint, py::arg("color"), py::arg("shift"), py::arg("grazing"),
+          "The structural color at `grazing` (0 facing .. 1 edge-on): color_patterns.h, every host's.");
+    m.def("graph_map_names", &graphMapNames, py::arg("graph_json"),
+          "[(name, how)]: the painted maps a graph reads (Map nodes, image-less map params, guide layers, color sets), every host's list.");
     m.def("map_name_from_file",
           [](const std::string& path, const std::vector<std::string>& taken) {
               const std::set<std::string> used(taken.begin(), taken.end());

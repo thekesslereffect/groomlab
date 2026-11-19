@@ -1474,28 +1474,9 @@ def follow_helper_undo(scalp, redo=False):
 # ---- Copy Graph to Other Grooms -------------------------------------------------------------------------
 
 def graph_maps(graph):
-    """Painted maps a graph reads by name (Maya's utils.graph_maps): Map nodes' maps, HairColor's map
-    and Interpolate's regionMap (not an image's path), guide maps and color set maps, inside compounds.
-    {name: how it is read}."""
-    found = {}
-    for node in graph.get("nodes", []):
-        params = node.get("params") or {}
-        if node.get("type") == "Map":
-            found.setdefault(params.get("name", "mask"), "map")
-        for param, how, kind in (("map", "map", "HairColor"), ("regionMap", "map", "Interpolate")):
-            value = params.get(param) if node.get("type") == kind else None
-            if isinstance(value, str) and value and not is_image_path(value):
-                found.setdefault(value, how)
-        for value in params.values():
-            if isinstance(value, dict):
-                if value.get("guide"):
-                    found.setdefault(value["guide"], "guides")
-                if value.get("colorSet"):
-                    found.setdefault(value["colorSet"], "colorSet")
-        if node.get("type") == "Compound":
-            for name, how in graph_maps((params.get("definition") or {}).get("graph") or {}).items():
-                found.setdefault(name, how)
-    return found
+    """Painted maps a graph reads by name ({name: how}, in the graph's order): the core's list, every
+    host's (scalp_maps.h graphMapNames, through the helper)."""
+    return {p["name"]: p["how"] for p in process.call("graph_map_names", graph=graph or {})["maps"]}
 
 
 def _map_names(scalp):
@@ -1546,13 +1527,7 @@ def copy_graph(source, targets):
 
 # ---- Find Missing Files ----------------------------------------------------------------------------------
 
-# The images the core reads (texture.h isImagePath, stb_image): an .exr or .tif is no map it can read.
-IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".tga", ".bmp", ".psd", ".gif", ".hdr", ".pic", ".pnm", ".ppm", ".pgm")
 CONTROL_PREFIX = "ctl_"  # graph_authoring's: a slider's value on the groom (its scalp object)
-
-
-def is_image_path(name):
-    return isinstance(name, str) and (name.lower().endswith(IMAGE_EXTENSIONS) or "<UDIM>" in name)
 
 
 def files_there(paths):

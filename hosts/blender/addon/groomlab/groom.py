@@ -811,7 +811,6 @@ def write_hair(scalp, r):
             radius = client.view(a["widths"]) * np.float32(0.5)
             _attribute(curves, "radius", "FLOAT", "POINT").data.foreach_set("value", radius)
     present = set()
-    base = None  # the strands' base colors (the look's RGB, or its pigment's): the viewport color
     if s:
         ids = np.ascontiguousarray(client.view(a["ids"])).view(np.int32)
         _attribute(curves, STRAND_ID, "INT32_2D", "CURVE").data.foreach_set("value", ids)
@@ -828,8 +827,6 @@ def write_hair(scalp, r):
                 rgba = np.ones((n, 4), np.float32)
                 rgba[:, :3] = values[:, :3]
                 attr.data.foreach_set("color", rgba.ravel())
-                if target == COLOR:
-                    base = values[:, :3]
             elif kind == "FLOAT":
                 attr.data.foreach_set("value", values.ravel())
             else:
@@ -845,7 +842,7 @@ def write_hair(scalp, r):
             pass
     curves.update_tag()
     mat = shading.ensure_material(scalp, hair, present, r.get("look") or {})
-    shading.set_viewport_color(mat, base)  # Solid shading: the hair's look, not the default gray
+    shading.set_viewport_color(mat, r.get("appearance"))  # Solid shading: the hair's look, not the default gray
 
 
 # ---- Objects ----------------------------------------------------------------------------------
