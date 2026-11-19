@@ -946,25 +946,27 @@ std::uint64_t parseSimulationStamp(const std::string& text) {
 
 const std::vector<std::string>& simulationMapParams() {
     static const std::vector<std::string> kNames{"stretchStiffness", "bend", "twist", "damping",
-                                                 "drag", "rootStiffness", "mass", "strength"};
+                                                 "drag", "rootStiffness", "mass", "strength", "collisionOffset"};
     return kNames;
 }
 
 std::uint64_t SimMaps::hash() const {
     std::uint64_t h = hash64(0x3A97);
-    for (const std::vector<float>* values : {&stiffness, &bend, &twist, &damping, &drag, &rootStiffness, &mass, &strength}) {
-        h = hashCombine(h, values->size());
+    const auto add = [&h](const std::vector<float>& values) {
+        h = hashCombine(h, values.size());
         // FNV-1a over the values' bits, two at a time (a hashCombine per value costs more than the maps).
         std::uint64_t f = 1469598103934665603ull;
-        const std::size_t n = values->size();
+        const std::size_t n = values.size();
         for (std::size_t i = 0; i + 1 < n; i += 2) {
             std::uint64_t word = 0;
-            std::memcpy(&word, values->data() + i, sizeof word);
+            std::memcpy(&word, values.data() + i, sizeof word);
             f = (f ^ word) * 1099511628211ull;
         }
-        if (n % 2 == 1) f = hashFloat(f, values->back());
+        if (n % 2 == 1) f = hashFloat(f, values.back());
         h = hashCombine(h, f);
-    }
+    };
+    for (const std::vector<float>* values : {&stiffness, &bend, &twist, &damping, &drag, &rootStiffness, &mass, &strength}) add(*values);
+    if (!collisionOffset.empty()) add(collisionOffset);  // (maps without it hash as they did)
     return h;
 }
 
@@ -977,7 +979,7 @@ SimMapsPtr simulationMaps(const ParamSet& params, const GuideSet& guides, const 
     const StrandsPtr strands = guidesAsStrands(guides);
     auto maps = std::make_shared<SimMaps>();
     std::vector<float>* out[] = {&maps->stiffness, &maps->bend, &maps->twist, &maps->damping,
-                                 &maps->drag, &maps->rootStiffness, &maps->mass, &maps->strength};
+                                 &maps->drag, &maps->rootStiffness, &maps->mass, &maps->strength, &maps->collisionOffset};
     for (std::size_t k = 0; k < names.size(); ++k) {
         if (!mapped(names[k])) continue;
         // On the guides as strands: their layers are its channels (no guide set to blend from).
@@ -1036,6 +1038,7 @@ struct GuideSolver::Impl {
         std::vector<float> invMass;          // 1 / mass; 0: held to the input shape (strength 0)
         std::vector<float> perMass;          // 1 / mass (held or not)
         std::vector<float> weight;           // strength, 0-1
+        std::vector<float> offset;           // collisionOffset mapped (empty: the setting's for every point)
         bool blends = false;                 // some weight between 0 and 1: the frames blend
     };
     PointSettings ps;
@@ -1386,6 +1389,10 @@ void GuideSolver::Impl::solve(const SimInputs& in, int frames, const std::functi
         const float* mRoot = maps ? mapOf(maps->rootStiffness) : nullptr;
         const float* mMass = maps ? mapOf(maps->mass) : nullptr;
         const float* mStrength = maps ? mapOf(maps->strength) : nullptr;
+        if (const float* mOffset = maps ? mapOf(maps->collisionOffset) : nullptr) {
+            ps.offset.resize(points);
+            for (std::size_t i = 0; i < points; ++i) ps.offset[i] = std::max(0.0f, mOffset[i]);
+        }
         for (std::vector<float>* values : {&ps.stretch, &ps.stretchCompliance, &ps.bend, &ps.bendCompliance, &ps.twistCompliance,
                                            &ps.damp, &ps.drag, &ps.attract, &ps.invMass, &ps.perMass, &ps.weight}) {
             values->resize(points);
@@ -1434,9 +1441,12 @@ void GuideSolver::Impl::solve(const SimInputs& in, int frames, const std::functi
     // fields are made for the longest guide's (their reach that search rounded up to a power of
     // two: the same fields while guides elsewhere change, unless the longest crosses one).
     phase.next("simulate.collisionFields");
+    // (A mapped collisionOffset: each point keeps its own; the fields reach for the largest.)
     const float offset = s.collisionOffset;
-    const float fieldDepth = std::max(offset * 2.0f, 0.5f * longest);
-    const float fieldSearch = std::max(offset, fieldDepth) * 1.001f + 1e-6f;
+    float largestOffset = offset;
+    for (const float o : ps.offset) largestOffset = std::max(largestOffset, o);
+    const float fieldDepth = std::max(largestOffset * 2.0f, 0.5f * longest);
+    const float fieldSearch = std::max(largestOffset, fieldDepth) * 1.001f + 1e-6f;
     CollisionSurface scalpRest, scalpNow;
     if (s.collideScalp && in.scalp && in.scalp->triangleCount() > 0) {
         if (restScalp) scalpRest = CollisionSurface::of(restScalp, offset, fieldDepth, fieldSearch);
@@ -1642,8 +1652,9 @@ void GuideSolver::Impl::solve(const SimInputs& in, int frames, const std::functi
     // The rest of guide st.g's substep, after its rod's solve: lengths kept, collisions, velocities.
     auto substepEnd = [&](GuideStep& st, bool frameEnd) {
         const std::size_t g = st.g, b = st.b, n = st.n;
-        const float pushDepth = std::max(offset * 2.0f, 0.5f * length[g]);  // (collisions)
-        const float pushSearch = std::max(offset, pushDepth) * 1.001f + 1e-6f;
+        const float pushDepth = std::max(largestOffset * 2.0f, 0.5f * length[g]);  // (collisions)
+        const float pushSearch = std::max(largestOffset, pushDepth) * 1.001f + 1e-6f;
+        const auto offsetOf = [&](std::size_t i) { return ps.offset.empty() ? offset : ps.offset[i]; };
         const RootPose& r1 = st.r1;
         std::vector<Vec3f>& p = st.p;
         const std::vector<Vec3f>& tgt = st.tgt;
@@ -1686,16 +1697,16 @@ void GuideSolver::Impl::solve(const SimInputs& in, int frames, const std::functi
                 bool againstScalp = false;
                 if (viaRest) {
                     Vec3f at = rest.toWorld(r1.toLocal(p[j]));
-                    if (scalpRest.pushOut(at, offset, pushDepth, pushSearch, unused)) {
+                    if (scalpRest.pushOut(at, offsetOf(i), pushDepth, pushSearch, unused)) {
                         p[j] = r1.toWorld(rest.toLocal(at));
                         mu = frictionMu;
                         againstScalp = true;
                     }
                 } else if (scalpNow.mesh) {
-                    if (scalpNow.pushOut(p[j], offset, pushDepth, pushSearch, scalpCursor)) mu = frictionMu;
+                    if (scalpNow.pushOut(p[j], offsetOf(i), pushDepth, pushSearch, scalpCursor)) mu = frictionMu;
                 }
                 for (std::size_t c = 0; c < colliders.size(); ++c) {
-                    if (colliders[c].pushOut(p[j], offset, pushDepth, pushSearch, colliderCursors[c])) mu = std::max(mu, colliderFriction[c]);
+                    if (colliders[c].pushOut(p[j], offsetOf(i), pushDepth, pushSearch, colliderCursors[c])) mu = std::max(mu, colliderFriction[c]);
                 }
                 if (p[j] == before) continue;
                 const Vec3f push = p[j] - before;
@@ -1734,11 +1745,11 @@ void GuideSolver::Impl::solve(const SimInputs& in, int frames, const std::functi
                     if (held(i)) continue;
                     if (viaRest) {
                         Vec3f at = rest.toWorld(r1.toLocal(p[j]));
-                        if (scalpRest.pushOut(at, offset, pushDepth, pushSearch, unused)) p[j] = r1.toWorld(rest.toLocal(at));
+                        if (scalpRest.pushOut(at, offsetOf(i), pushDepth, pushSearch, unused)) p[j] = r1.toWorld(rest.toLocal(at));
                     } else if (scalpNow.mesh) {
-                        scalpNow.pushOut(p[j], offset, pushDepth, pushSearch, scalpCursor);
+                        scalpNow.pushOut(p[j], offsetOf(i), pushDepth, pushSearch, scalpCursor);
                     }
-                    for (std::size_t c = 0; c < colliders.size(); ++c) colliders[c].pushOut(p[j], offset, pushDepth, pushSearch, colliderCursors[c]);
+                    for (std::size_t c = 0; c < colliders.size(); ++c) colliders[c].pushOut(p[j], offsetOf(i), pushDepth, pushSearch, colliderCursors[c]);
                 }
             }
         }

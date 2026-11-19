@@ -8,7 +8,7 @@
 // water or rain the frame's wetness comes along as each guide's "wetness" point layer (0 without
 // a frame: the look's maps reading it always find it).
 //
-// Its stiffnesses, damping, drag, rootStiffness, mass and strength are mappable: per guide and
+// Its stiffnesses, damping, drag, rootStiffness, mass, strength and collisionOffset are mappable: per guide and
 // per point (a painted guide layer, a texture, an expression, a Field node plugged in), read by the
 // session on the guides it is fed each frame (simulationMaps, simulation.h).
 
@@ -87,7 +87,9 @@ public:
                                            "root; lower: less floppy)", "fraction"})
                 .range(0, 1),
             notAnimatable({"collideScalp", true, "Keep the guides out of the scalp"}).in("Collisions"),
-            notAnimatable({"collisionOffset", 0.05, "Distance kept from the scalp and the collider", "length"})
+            notAnimatable({"collisionOffset", 0.05, "Distance kept from the scalp and the collider (mappable, per point, "
+                                                    "scene units: for braids, half the Braid's width, so a thick braid "
+                                                    "keeps its own thickness off the shoulders)", "length"})
                 .atLeast(0)
                 .soft(0, 0.5)
                 .in("Collisions"),

@@ -131,6 +131,40 @@ TEST(SimAttributes, StrengthZeroHoldsPaintedGuidesAtTheirInputShape) {
     EXPECT_TRUE(sameBits(p, runOnOneThread(s, in, 24))) << "one thread and many differ";
 }
 
+TEST(SimAttributes, CollisionOffsetMappedKeepsEachGuideItsOwnDistance) {
+    // collisionOffset painted per guide (a braid's guides keep half its width, thin ones less):
+    // guides falling onto the scalp each rest at their own distance from it.
+    const auto sphere = test::makeSphere(24, 48);
+    const GuidesPtr guides = guidesOnSphere(*sphere, 60, 16, 1.2f);
+    SimSettings s = unitSettings();
+    s.bend = 0.3f;
+    s.rootStiffnessProfile = Ramp::constant(0.0f);
+    MapRef thick = guideMap("mask");  // (1 on every third guide)
+    thick.min = 0.02f;
+    thick.max = 0.12f;
+    ParamSet params;
+    params.set("collisionOffset", thick);
+    SimInputs in{guides, sphere, {}};
+    in.maps = simulationMaps(params, *guides, sphere);
+    ASSERT_TRUE(in.maps);
+    ASSERT_EQ(in.maps->collisionOffset.size(), guides->size() * 16u);
+    const std::vector<Vec3f> p = run(s, in, 60);
+    float lowestThick = 1e9f, lowestThin = 1e9f;
+    for (std::size_t g = 0; g < guides->size(); ++g) {
+        const bool isThick = guides->guides()[g].attributes.at("mask") > 0.5f;
+        for (std::size_t j = 1; j < 16; ++j) {
+            const Vec3f& at = p[g * 16 + j];
+            const SurfacePoint sp = sphere->closestPoint(at);
+            const float height = (at - sp.position).dot(sp.normal);
+            (isThick ? lowestThick : lowestThin) = std::min(isThick ? lowestThick : lowestThin, height);
+        }
+    }
+    EXPECT_GE(lowestThick, 0.12f * 0.75f) << "a thick guide sank to " << lowestThick;
+    EXPECT_GE(lowestThin, 0.02f * 0.75f) << "a thin guide sank to " << lowestThin;
+    EXPECT_LT(lowestThin, 0.06f) << "the thin guides rest nearer the scalp than the thick ones";
+    EXPECT_TRUE(sameBits(p, runOnOneThread(s, in, 60))) << "one thread and many differ";
+}
+
 TEST(SimAttributes, StrengthHeldAlongTheLengthAndBlendedInBetween) {
     const GuidesPtr guides = rowOfGuides(2);
     SimSettings s = unitSettings();
