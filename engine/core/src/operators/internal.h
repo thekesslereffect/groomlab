@@ -129,6 +129,14 @@ StrandsPtr guidesAsStrands(const GuideSet& guides);
 // channels as attributes and point channels as per-point layers. For an input taking either kind
 // whose operator reads guides. The roles' channel (preview_core.h) never comes along.
 GuidesPtr strandsAsGuides(const StrandSet& strands);
+// A Curves node run on guides (Curl, Noise, Twist... on a Guides node's output) hands guides back
+// from the strands it made (`shaped`, from guidesAsStrands of `source`), each keeping what a strand
+// has no room for, by ID (its tube, frameUp, roots' footprint, depth and base: Interpolate's
+// fillTubes fills the shaped tubes), and the display color. The other levels' tubes
+// (GuideSet::levelTubes: levelTubesAsStrands, null without) the node shaped too, apart, so every
+// tube of the hierarchy is shaped alike: `levelsShaped`; null, kept as they came.
+StrandsPtr levelTubesAsStrands(const GuideSet& guides);
+GuidesPtr shapedGuides(const StrandSet& shaped, const StrandSet* levelsShaped, const GuideSet& source);
 
 // Numbers b's groups after a's highest (look_ops.cpp): its clumpId, braidId and featherId (each
 // channel both have) offset by groupNumberBase of the largest of a's core strands (strand_set.h,

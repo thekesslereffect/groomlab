@@ -9,7 +9,10 @@ User guide: [Node graph](https://www.getgroomlab.com/docs/node-graph), [Color pa
 **Strands or guides.** The shaping nodes (Noise, Curl, Smooth, Twist, Bend,
 Length, Collide, Gravity, Displace, Mirror, Flow, Cull) take either: fed strands they give strands, fed guides they give
 guides, each keeping its ID, root and painted maps. So guides can be shaped in the graph with no
-conversion, e.g. `ToGuides -> Noise -> Clump.centers` for wavy clumps. Their ports show the
+conversion, e.g. `ToGuides -> Noise -> Clump.centers` for wavy clumps. Guides with tubes keep
+their tubes (and their hierarchy's other levels' tubes take the same node), so `Guides -> Curl ->
+Interpolate.guides` with `fillTubes` coils the tubes themselves, every hair in a tube coiling with
+it (ringlets as in Disney's Tonic; tubes thin against the curl's radius read best). Their ports show the
 kind they carry (strands, guides, or grey while unconnected), links are checked against it, and a
 link that stops fitting after a change upstream is reported. Nodes that are about strands
 (Scatter, Interpolate, Width, HairColor, Braid, Instance, Cards) keep fixed types; ToGuides and

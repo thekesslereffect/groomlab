@@ -522,7 +522,9 @@ StrandsPtr guidesAsStrands(const GuideSet& guides) {
     return out;
 }
 
-GuidesPtr strandsAsGuides(const StrandSet& strands) {
+namespace {
+
+std::shared_ptr<GuideSet> guidesOfStrands(const StrandSet& strands) {
     auto out = std::make_shared<GuideSet>();
     std::vector<std::string> names = strands.strandChannelNames();
     names.erase(std::remove(names.begin(), names.end(), std::string(kPreviewChannel)), names.end());
@@ -544,6 +546,66 @@ GuidesPtr strandsAsGuides(const StrandSet& strands) {
         }
     }, 64);
     return out;
+}
+
+// What a guide holds besides its curve and maps (its tube and where it lies: guide_set.h), from
+// the guide `from` it was shaped from.
+void takeTube(Guide& g, const Guide& from) {
+    g.hasTube = from.hasTube;
+    g.tube = from.tube;
+    g.frameUp = from.frameUp;
+    g.rootAcross = from.rootAcross;
+    g.rootRing = from.rootRing;
+    g.rootFoot = from.rootFoot;
+    g.rootFootSet = from.rootFootSet;
+    g.depth = from.depth;
+    g.baseRoot = from.baseRoot;
+    g.baseId = from.baseId;
+}
+
+}  // namespace
+
+GuidesPtr strandsAsGuides(const StrandSet& strands) { return guidesOfStrands(strands); }
+
+StrandsPtr levelTubesAsStrands(const GuideSet& guides) {
+    if (!guides.levelTubes() || guides.levelTubes()->empty()) return nullptr;
+    GuideSet levels;
+    levels.guides() = *guides.levelTubes();
+    return guidesAsStrands(levels);
+}
+
+GuidesPtr shapedGuides(const StrandSet& shaped, const StrandSet* levelsShaped, const GuideSet& source) {
+    std::shared_ptr<GuideSet> made = guidesOfStrands(shaped);
+    if (source.hasDisplayColor()) made->setDisplayColor(source.displayColor());
+    // Each guide its own guide's tube (by ID; one the node made, a Mirror's copy, has none).
+    std::unordered_map<std::uint64_t, const Guide*> own;
+    for (const Guide& g : source.guides()) own.emplace(g.id, &g);
+    for (Guide& g : made->guides()) {
+        const auto mine = own.find(g.id);
+        if (mine != own.end()) takeTube(g, *mine->second);
+    }
+    // The levels' tubes as the node shaped them, each its own tube (with no maps, as they came);
+    // one without a tube of its own (made by the node) left out.
+    if (source.levelTubes()) {
+        std::unordered_map<std::uint64_t, const Guide*> levels;
+        for (const Guide& g : *source.levelTubes()) levels.emplace(g.id, &g);
+        std::vector<Guide> levelTubes;
+        if (!levelsShaped) {
+            levelTubes = *source.levelTubes();
+        } else {
+            std::shared_ptr<GuideSet> shapedLevels = guidesOfStrands(*levelsShaped);
+            for (Guide& g : shapedLevels->guides()) {
+                const auto level = levels.find(g.id);
+                if (level == levels.end()) continue;
+                takeTube(g, *level->second);
+                g.attributes.clear();
+                g.pointAttributes.clear();
+                levelTubes.push_back(std::move(g));
+            }
+        }
+        made->setLevelTubes(std::make_shared<const std::vector<Guide>>(std::move(levelTubes)));
+    }
+    return made;
 }
 
 namespace {
@@ -1444,7 +1506,8 @@ std::vector<Value> Graph::evaluateWithKeys(NodeId id, const EvalContext& graphCt
         const bool onGuides = node.op->output().type == PortType::Curves && !ownSpecs.empty() &&
                               ownSpecs[0].type == PortType::Curves && valueAs<GuidesPtr>(inputValues[0]) != nullptr;
         const Value original = inputValues.empty() ? Value{} : inputValues[0];
-        if (onGuides && !passThrough) inputValues[0] = guidesAsStrands(*valueAs<GuidesPtr>(inputValues[0]));
+        const GuidesPtr guidesIn = onGuides ? valueAs<GuidesPtr>(inputValues[0]) : nullptr;
+        if (onGuides && !passThrough) inputValues[0] = guidesAsStrands(*guidesIn);
         // Its own key is its last result's (the same params, salts, externals and context), so only
         // its inputs changed: the operator may make again only what their changes reach.
         const bool incremental = !transient && incrementalOn.load(std::memory_order_relaxed) && node.hasCache &&
@@ -1608,9 +1671,35 @@ std::vector<Value> Graph::evaluateWithKeys(NodeId id, const EvalContext& graphCt
                 changes[0] = changed.empty() ? nullptr : changed[0];
             }
             if (onGuides && !passThrough) {
+                // The other levels' tubes (GuideSet::levelTubes) shaped as the guides were, by a twin
+                // of the operator (its params and fields), so what it keeps between evaluations
+                // is the guides' result's.
+                std::vector<Value> levelResult;
+                if (const StrandsPtr levels = levelTubesAsStrands(*guidesIn)) {
+                    std::unique_ptr<Operator> twin;
+                    if (OperatorRegistry::instance().contains(node.op->typeName())) {
+                        twin = OperatorRegistry::instance().create(node.op->typeName());
+                        twin->params() = node.op->params();
+                        twin->setNodeVersion(node.op->nodeVersion());
+                        twin->setNodePath(node.op->nodePath());
+                    }
+                    if (twin) {
+                        std::vector<Value> levelInputs = inputValues;
+                        levelInputs[0] = levels;
+                        try {
+                            levelResult = twin->evaluateOutputs(ctx, levelInputs);
+                        } catch (const std::exception& e) {  // (a field made for the guides alone, say)
+                            levelResult.clear();
+                            ctx.note(std::string("the guides' other levels' tubes are left as they came: ") + e.what());
+                        }
+                    }
+                }
                 for (std::size_t o = 0; o < result.size(); ++o) {
                     if (outSpecs[o].type != PortType::Curves) continue;
-                    if (const StrandsPtr shaped = valueAs<StrandsPtr>(result[o])) result[o] = strandsAsGuides(*shaped);
+                    const StrandsPtr levelsShaped = o < levelResult.size() ? valueAs<StrandsPtr>(levelResult[o]) : nullptr;
+                    if (const StrandsPtr shaped = valueAs<StrandsPtr>(result[o])) {
+                        result[o] = shapedGuides(*shaped, levelsShaped.get(), *guidesIn);
+                    }
                 }
             }
         } catch (const GraphError& e) {
