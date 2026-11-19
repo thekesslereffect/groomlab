@@ -16,6 +16,7 @@
 #include <iterator>
 #include <limits>
 #include <map>
+#include <set>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
@@ -2524,6 +2525,83 @@ bool addGuideLayer(GuideHierarchy& h, const std::string& name, float value, cons
         any = true;
     }
     return any;
+}
+
+MapConverted convertMap(const std::string& name, const MapSource& from, const std::string& to, const ScalpMesh& cage,
+                        GuideHierarchy& guides, int resolution) {
+    if (to != "guides" && to != "vertices" && to != "texture") throw std::invalid_argument("a map's kind is guides, vertices or texture");
+    if (from.kind != "guides" && from.kind != "vertices" && from.kind != "texture") throw std::invalid_argument("no map " + name + " to convert");
+    MapConverted out;
+    if (from.kind == to) return out;
+    const int channels = from.channels;
+    if (from.kind == "vertices" && from.vertices.size() != cage.pointCount() * static_cast<std::size_t>(channels)) {
+        throw std::invalid_argument("map " + name + " does not fit this scalp");
+    }
+    if (from.kind == "texture" && !from.image) throw std::invalid_argument("map " + name + "'s image does not read");
+    const GuideSet flat = from.kind == "guides" ? guides.flatten() : GuideSet{};
+    if (to == "vertices") {
+        out.vertices = from.kind == "guides" ? vertexMapFromGuides(flat, name, cage) : vertexMapFromTexture(*from.image, cage, channels);
+    } else if (to == "texture") {
+        if (!cage.hasUVs()) throw std::invalid_argument("the scalp has no UVs for a texture map");
+        const int size = std::clamp(resolution, BrushToolSettings::kMinPaintResolution, BrushToolSettings::kMaxPaintResolution);
+        out.texture = std::make_shared<TexturePaint>(from.kind == "guides" ? textureFromGuides(flat, name, cage, size, size)
+                                                                           : textureFromVertexMap(from.vertices, channels, cage, size, size));
+    }
+    if (from.kind == "guides") guides.removeAttribute(name);
+    if (to == "guides") {
+        out.colorLost = channels == kColorMap;
+        const std::vector<float> gray = from.kind == "vertices" && channels == kColorMap ? convertMapChannels(from.vertices, kColorMap, kGrayMap)
+                                                                                         : from.vertices;
+        // Each guide's root as it lies on the cage (where vertex maps are painted).
+        GuideHierarchy onCage = guides;
+        onCage.evaluate(&cage);
+        std::vector<StrandRoot> roots;
+        for (const HierarchyGuide& g : onCage.guides()) roots.push_back(g.root);
+        const std::vector<float> values = from.kind == "vertices" ? rootValuesFromVertexMap(gray, cage, roots) : rootValuesFromTexture(*from.image, cage, roots);
+        std::size_t k = 0;
+        for (const HierarchyGuide& g : onCage.guides()) guides.setAttribute(g.id, name, values[k++]);
+    }
+    return out;
+}
+
+void fillGuideLayer(GuideHierarchy& h, const std::string& name, float value, PaintMode mode, const std::vector<GuideId>& only,
+                    const ScalpMesh* scalp, const std::vector<std::int32_t>& faces) {
+    const std::vector<std::uint8_t> triangles = scalp && !faces.empty() ? polygonTriangles(*scalp, faces) : std::vector<std::uint8_t>{};
+    const std::set<GuideId> picked(only.begin(), only.end());
+    for (const HierarchyGuide& g : h.guides()) {
+        if (!picked.empty() && !picked.count(g.id)) continue;
+        if (!faces.empty() && !(g.root.face >= 0 && static_cast<std::size_t>(g.root.face) < triangles.size() &&
+                                triangles[static_cast<std::size_t>(g.root.face)] != 0)) {
+            continue;
+        }
+        float current = 0.0f;
+        h.effectiveAttribute(g, name, &current);
+        h.setAttribute(g.id, name, compositePaintValue(current, value, mode));
+    }
+}
+
+void fillVertexMap(std::vector<float>& values, int channels, unsigned mask, const PaintColor& fill, PaintMode mode, const ScalpMesh& scalp,
+                   const std::vector<std::int32_t>& faces) {
+    const auto per = static_cast<std::size_t>(channels);
+    if (values.size() != scalp.pointCount() * per) values = newVertexMapValues(scalp, channels, PaintColor{0.0f, 0.0f, 0.0f, 1.0f});
+    const PaintColor target = per == 1 ? PaintColor{fill[0], fill[0], fill[0], fill[0]} : fill;
+    if (!faces.empty()) {
+        fillVertexMapFaces(values, channels, mask, target, mode, scalp, faces);
+    } else {
+        fillMapValues(values, channels, mask, target, mode);
+    }
+}
+
+void fillTexturePaint(TexturePaint& paint, unsigned mask, const PaintColor& fill, PaintMode mode, const ScalpMesh& scalp,
+                      const std::vector<std::int32_t>& faces) {
+    const PaintColor target = paint.channels() == kColorMap ? fill : PaintColor{fill[0], fill[0], fill[0], fill[0]};
+    if (!faces.empty()) {
+        paint.fillTriangles(polygonTriangles(scalp, faces), target, mask, mode);
+    } else if (paint.channels() == kColorMap) {
+        paint.fill(fill, mask, mode);
+    } else {
+        paint.fill(fill[0], mode);
+    }
 }
 
 }  // namespace groomlab

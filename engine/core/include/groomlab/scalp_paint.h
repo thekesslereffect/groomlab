@@ -612,4 +612,39 @@ TexturePaint newTextureMapPaint(const ScalpMesh& scalp, int channels, const Pain
 bool addGuideLayer(GuideHierarchy& h, const std::string& name, float value, const ScalpMesh* scalp = nullptr,
                    const std::vector<std::int32_t>& faces = {});
 
+// A map converted to another kind (every host's Convert Map): `from` the map as its kind holds it
+// (a vertex map's values on `cage`, a texture's image, or the guides' layer `name` in `guides`) and
+// what it becomes: a vertex map's values, a texture paint `resolution` square (kept to the paint
+// limits; the host writes it), or a guide layer, each guide's value read at its root on `cage`
+// (the hierarchy evaluated there: where vertex maps are painted). `guides` loses the layer when it
+// was the source and gains it when it is the target; a color map on the guides keeps its luminance
+// (colorLost). Throws std::invalid_argument for a vertex map that does not fit `cage`, a texture
+// target on a scalp without UVs, or another kind.
+struct MapSource {
+    std::string kind;              // "vertices", "texture" or "guides"
+    std::vector<float> vertices;   // a vertex map's values
+    TexturePtr image;              // a texture map's image
+    int channels = kGrayMap;
+};
+struct MapConverted {
+    std::vector<float> vertices;  // to "vertices"
+    std::shared_ptr<TexturePaint> texture;  // to "texture"
+    bool colorLost = false;  // a color map onto the guides: its luminance
+};
+MapConverted convertMap(const std::string& name, const MapSource& from, const std::string& to, const ScalpMesh& cage,
+                        GuideHierarchy& guides, int resolution);
+
+// Fill Map, every host's: `fill` composited in `mode` (a gray map takes fill[0]; a color map the
+// channels in `mask`), everywhere or only on the polygons `faces` of `scalp`.
+// A guide layer: on the guides `only` names (empty: every guide; with faces, those rooted on them),
+// each from its value now (inherited when it has none of its own).
+void fillGuideLayer(GuideHierarchy& h, const std::string& name, float value, PaintMode mode, const std::vector<GuideId>& only = {},
+                    const ScalpMesh* scalp = nullptr, const std::vector<std::int32_t>& faces = {});
+// A vertex map (refitted to `scalp` first, 0 and alpha 1, when it does not fit it).
+void fillVertexMap(std::vector<float>& values, int channels, unsigned mask, const PaintColor& fill, PaintMode mode, const ScalpMesh& scalp,
+                   const std::vector<std::int32_t>& faces = {});
+// A texture map's paint.
+void fillTexturePaint(TexturePaint& paint, unsigned mask, const PaintColor& fill, PaintMode mode, const ScalpMesh& scalp,
+                      const std::vector<std::int32_t>& faces = {});
+
 }  // namespace groomlab

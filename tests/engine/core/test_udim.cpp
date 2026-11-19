@@ -4,6 +4,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 
@@ -90,6 +91,62 @@ TEST(Udim, NewMapsEveryHostsWay) {
     EXPECT_EQ(paint.tileWidth(), BrushToolSettings::kMinPaintResolution);  // (kept within the limits)
     GuideHierarchy h;
     EXPECT_FALSE(addGuideLayer(h, "len", 0.5f));
+}
+
+TEST(Udim, ConvertMapEveryHostsWay) {
+    // Convert Map (every host's): a vertex map onto the guides (read at their roots on the cage),
+    // the guides' layer into a texture over the scalp's tiles (the layer gone from the guides).
+    const auto scalp = twoTilePlane();
+    GuideHierarchy h;
+    const GroupId group = h.addGroup("g");
+    for (const float x : {0.25f, 1.75f}) h.addGuide(group, {Vec3f{x, 0.0f, 0.5f}, Vec3f{x, 1.0f, 0.5f}});
+    h.evaluate(scalp.get());
+    MapSource vertices;
+    vertices.kind = "vertices";
+    for (std::size_t v = 0; v < scalp->pointCount(); ++v) vertices.vertices.push_back(scalp->points()[v].x > 1.0f ? 1.0f : 0.0f);
+    MapConverted onGuides = convertMap("len", vertices, "guides", *scalp, h, 16);
+    EXPECT_FALSE(onGuides.colorLost);
+    std::vector<float> got;
+    for (const HierarchyGuide& g : h.guides()) got.push_back(g.attributes.at("len"));
+    ASSERT_EQ(got.size(), 2u);
+    EXPECT_LT(got[0], 0.1f);
+    EXPECT_GT(got[1], 0.9f);
+    MapSource guides;
+    guides.kind = "guides";
+    MapConverted texture = convertMap("len", guides, "texture", *scalp, h, 2);
+    ASSERT_TRUE(texture.texture);
+    EXPECT_TRUE(texture.texture->udim());
+    EXPECT_EQ(texture.texture->tileWidth(), BrushToolSettings::kMinPaintResolution);
+    for (const HierarchyGuide& g : h.guides()) EXPECT_EQ(g.attributes.count("len"), 0u);
+    MapSource bad = vertices;
+    bad.vertices.pop_back();
+    EXPECT_THROW(convertMap("len", bad, "texture", *scalp, h, 16), std::invalid_argument);
+}
+
+TEST(Udim, FillMapEveryHostsWay) {
+    // Fill Map (every host's): a vertex map refitted then filled on faces; a guide layer on the
+    // guides named or rooted on faces, composited; a texture on faces.
+    const auto scalp = twoTilePlane();
+    std::vector<float> values = {9.0f};  // does not fit: refitted
+    fillVertexMap(values, kGrayMap, kAllChannels, PaintColor{0.5f, 0.5f, 0.5f, 1.0f}, PaintMode::Replace, *scalp, {0});
+    ASSERT_EQ(values.size(), scalp->pointCount());
+    EXPECT_FLOAT_EQ(values.front(), 0.5f);
+    EXPECT_FLOAT_EQ(values.back(), 0.0f);
+    GuideHierarchy h;
+    const GroupId group = h.addGroup("g");
+    const GuideId a = h.addGuide(group, {Vec3f{0.25f, 0.0f, 0.5f}, Vec3f{0.25f, 1.0f, 0.5f}});
+    const GuideId b = h.addGuide(group, {Vec3f{1.75f, 0.0f, 0.5f}, Vec3f{1.75f, 1.0f, 0.5f}});
+    h.evaluate(scalp.get());
+    fillGuideLayer(h, "len", 0.4f, PaintMode::Replace, {b});
+    EXPECT_EQ(h.guide(a)->attributes.count("len"), 0u);
+    EXPECT_FLOAT_EQ(h.guide(b)->attributes.at("len"), 0.4f);
+    fillGuideLayer(h, "len", 0.2f, PaintMode::Add);
+    EXPECT_NEAR(h.guide(b)->attributes.at("len"), 0.6f, 1e-6f);
+    TexturePaint paint(*scalp, 8, 8, 0.0f);
+    fillTexturePaint(paint, kAllChannels, PaintColor{1.0f, 1.0f, 1.0f, 1.0f}, PaintMode::Replace, *scalp, {0});
+    const std::vector<std::uint8_t> bytes = paint.toBytes();
+    EXPECT_GT(*std::max_element(bytes.begin(), bytes.end()), 200);
+    EXPECT_EQ(*std::min_element(bytes.begin(), bytes.end()), 0);
 }
 
 TEST(Udim, LayoutsSlotsAndTilePaths) {

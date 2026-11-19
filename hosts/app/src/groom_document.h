@@ -633,7 +633,8 @@ public:
     // The map set to `value` (a guide layer on the selected guides only with `selectedOnly`), or a
     // color map to `color` in the channels of `channelMask` (Maya's fill_map). One undo step.
     std::string fillMap(const std::string& name, float value, bool selectedOnly = false, const PaintColor* color = nullptr,
-                        unsigned channelMask = kAllChannels, PaintMode mode = PaintMode::Replace);
+                        unsigned channelMask = kAllChannels, PaintMode mode = PaintMode::Replace,
+                        const std::vector<std::int32_t>& faces = {});
     // Where the groom keeps a kind of file (masks, cards, exports, caches, renders, references), as
     // Maya keeps a scene's: <groom folder>/groomlab/<groom name>/<kind>; an untitled groom's in a
     // temp folder of its own, taken along when it is first saved (save).

@@ -375,43 +375,47 @@ std::string GroomDocument::convertMap(const std::string& name, const std::string
     const MeshPtr scalp = session().cageScalp();
     if (!scalp || scalp->pointCount() == 0) return "no scalp to hold the map";
     const int channels = source->channels;
-    const int size = std::clamp(resolution, kMinBakeResolution, kMaxMapBakeResolution);
     ScalpMaps maps = session().scalpMaps();
-    std::vector<float> vertices;
-    TexturePtr image;
     const HierarchyPtr authored = session().authoredHierarchy();
-    GuideSet flat;
     std::vector<Edit::FileState> files;
     const std::string label = "convert map " + name;
     StrokeEdit edit;
     edit.mode = label;
     try {
+        // The source as its kind holds it, converted (every host's: scalp_paint.h convertMap; a
+        // guide layer read at the guides' roots on the cage).
+        MapSource sourceMap;
+        sourceMap.kind = from;
+        sourceMap.channels = channels;
         if (from == "guides") {
             if (!authored) return "the groom has no guides";
-            flat = authored->flatten();
         } else if (from == "vertices") {
-            vertices = maps.maps[name].values;
-            if (vertices.size() != scalp->pointCount() * static_cast<std::size_t>(channels)) return "map " + name + " does not fit this scalp";
+            sourceMap.vertices = maps.maps[name].values;
         } else {
             try {
-                image = loadTexture(resolveMapPath(maps.maps[name].texture));
+                sourceMap.image = loadTexture(resolveMapPath(maps.maps[name].texture));
             } catch (const std::exception& e) {
                 return "map " + name + "'s image does not read: " + e.what();
             }
-            if (!image) return "map " + name + "'s image does not read";
+            if (!sourceMap.image) return "map " + name + "'s image does not read";
+        }
+        if (to == "texture" && mapsDirectory().empty()) return "save the groom first: a texture map's image goes in the groomlab folder beside it";
+        GuideHierarchy h = authored ? *authored : GuideHierarchy{};
+        MapConverted converted;
+        try {
+            converted = groomlab::convertMap(name, sourceMap, to, *scalp, h, resolution);
+        } catch (const std::invalid_argument& e) {
+            return e.what();
         }
         if (to == "vertices") {
             ScalpMapEntry entry;
             entry.kind = "vertices";
-            entry.values = from == "guides" ? vertexMapFromGuides(flat, name, *scalp) : vertexMapFromTexture(*image, *scalp, channels);
+            entry.values = std::move(converted.vertices);
             entry.channels = channels;
             maps.maps[name] = std::move(entry);
         } else if (to == "texture") {
-            if (!scalp->hasUVs()) return "the scalp has no UVs for a texture map";
-            if (mapsDirectory().empty()) return "save the groom first: a texture map's image goes in the groomlab folder beside it";
             const std::string file = freeMapFile(name);
-            const TexturePaint paint = from == "guides" ? textureFromGuides(flat, name, *scalp, size, size)
-                                                        : textureFromVertexMap(vertices, channels, *scalp, size, size);
+            const TexturePaint& paint = *converted.texture;
             std::vector<Edit::FileState> states = mapImageStates(file, tilesOf(paint));
             std::error_code ec;
             std::filesystem::create_directories(std::filesystem::u8path(file).parent_path(), ec);
@@ -424,23 +428,9 @@ std::string GroomDocument::convertMap(const std::string& name, const std::string
             entry.channels = channels;
             maps.maps[name] = std::move(entry);
         } else {
-            if (channels == kColorMap && from == "vertices") vertices = convertMapChannels(vertices, kColorMap, kGrayMap);  // a guide layer is gray
-            maps.maps.erase(name);
+            maps.maps.erase(name);  // (a guide layer is gray: a color map keeps its luminance)
         }
         if (to == "guides" || from == "guides") {
-            GuideHierarchy h = authored ? *authored : GuideHierarchy{};
-            if (from == "guides") h.removeAttribute(name);
-            if (to == "guides") {
-                // Each guide's root as it lies on the cage (where vertex maps are painted).
-                GuideHierarchy onCage = h;
-                onCage.evaluate(scalp.get());
-                std::vector<StrandRoot> roots;
-                for (const HierarchyGuide& g : onCage.guides()) roots.push_back(g.root);
-                const std::vector<float> values =
-                    from == "vertices" ? rootValuesFromVertexMap(vertices, *scalp, roots) : rootValuesFromTexture(*image, *scalp, roots);
-                std::size_t i = 0;
-                for (const HierarchyGuide& g : onCage.guides()) h.setAttribute(g.id, name, values[i++]);
-            }
             h.evaluate(session().scalp().get());
             edit.set(StrokeField::Guides, h.toJson());
         }
@@ -496,7 +486,7 @@ std::string GroomDocument::setMapChannels(const std::string& name, int wanted) {
 }
 
 std::string GroomDocument::fillMap(const std::string& name, float value, bool selectedOnly, const PaintColor* color, unsigned mask,
-                                   PaintMode mode) {
+                                   PaintMode mode, const std::vector<std::int32_t>& faces) {
     const PaintedMap* source = map(name);
     if (!source) return "no map named '" + name + "'";
     const std::string kind = source->kind;
@@ -504,43 +494,24 @@ std::string GroomDocument::fillMap(const std::string& name, float value, bool se
     value = std::clamp(value, 0.0f, 1.0f);
     if (color && channels != kColorMap) return "a color fills a color map; " + name + " is gray (a value fills it)";
     if (selectedOnly && kind != "guides") return "Fill Selected sets a guide layer on the selected guides; " + name + " lives on the scalp";
+    if (selectedOnly && !faces.empty()) return "fill the selected guides or the selected faces, not both";
     PaintColor fill = color ? *color : PaintColor{value, value, value, 1.0f};
     if (!color) mask &= 0x7u;  // a value fills a color map's r g b
     const std::string label = "fill map " + name;
     if (kind == "guides") {
         const std::vector<GuideId> picked = selection_;
         if (selectedOnly && picked.empty()) return "no guides selected";
+        // (Every host's Fill: scalp_paint.h fillGuideLayer, fillVertexMap, fillTexturePaint.)
+        const MeshPtr cage = session().cageScalp();
         return editGuides(label, [&](GuideHierarchy& h) {
-            if (selectedOnly) {
-                for (const GuideId id : picked) {
-                    if (const HierarchyGuide* g = h.guide(id)) {
-                        float current = 0.0f;
-                        h.effectiveAttribute(*g, name, &current);
-                        h.setAttribute(id, name, compositePaintValue(current, value, mode));
-                    }
-                }
-            } else {
-                for (const HierarchyGuide& g : h.guides()) {
-                    float current = 0.0f;
-                    h.effectiveAttribute(g, name, &current);
-                    h.setAttribute(g.id, name, compositePaintValue(current, value, mode));
-                }
-            }
+            fillGuideLayer(h, name, value, mode, selectedOnly ? picked : std::vector<GuideId>{}, cage.get(), faces);
         });
     }
     if (kind == "vertices") {
         const MeshPtr scalp = session().cageScalp();
         if (!scalp) return "no scalp";
         ScalpMaps maps = session().scalpMaps();
-        ScalpMapEntry& entry = maps.maps[name];
-        const auto per = static_cast<std::size_t>(channels);
-        if (entry.values.size() != scalp->pointCount() * per) {
-            entry.values.assign(scalp->pointCount() * per, 0.0f);
-            if (per == 4) {
-                for (std::size_t i = 3; i < entry.values.size(); i += 4) entry.values[i] = 1.0f;
-            }
-        }
-        fillMapValues(entry.values, channels, mask, fill, mode);
+        fillVertexMap(maps.maps[name].values, channels, mask, fill, mode, *scalp, faces);
         commitMaps(label, maps);
         return {};
     }
@@ -552,8 +523,7 @@ std::string GroomDocument::fillMap(const std::string& name, float value, bool se
     try {
         requirePaintablePng(full);
         const std::shared_ptr<TexturePaint> paint = openTexturePaint(*scalp, full, channels, 1024);
-        if (channels == kColorMap) paint->fill(fill, mask, mode);
-        else paint->fill(value, mode);
+        fillTexturePaint(*paint, mask, fill, mode, *scalp, faces);
         std::vector<Edit::FileState> states = mapImageStates(full, tilesOf(*paint));
         paint->save(full);
         finishFileStates(states);
