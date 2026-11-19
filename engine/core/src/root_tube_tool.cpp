@@ -8,6 +8,7 @@
 #include <cmath>
 #include <stdexcept>
 
+#include "groomlab/display.h"
 #include "groomlab/stroke.h"
 #include "groomlab/tube.h"
 #include "groomlab/view_projection.h"
@@ -115,12 +116,36 @@ bool RootTubeTool::commit(StrokeHost& host, const std::string& label,
     return true;
 }
 
+namespace {
+
+// The roots the tool works on: those (rootTubesOf) whose guide group shows (a tube hierarchy's
+// levels: stepping through them shows that level's roots, cells and halves alone).
+std::vector<GuideId> shownRoots(StrokeHost& host, const GuideHierarchy& h, const std::vector<GuideId>& selected = {}) {
+    std::vector<GuideId> out = rootTubesOf(h, selected);
+    const std::set<std::string> hidden = host.hiddenGroups();
+    const MixedView mixed(&h, host.mixedView());
+    if (hidden.empty() && !mixed.on()) return out;
+    out.erase(std::remove_if(out.begin(), out.end(), [&](GuideId id) {
+                  const HierarchyGuide* g = h.guide(id);
+                  if (!g) return true;
+                  // (Mixed view: the level worked on, and the levels above it does not continue.)
+                  const int m = mixed.on() ? mixed.shows(h, *g) : -1;
+                  if (m >= 0) return m == 0;
+                  const GuideGroup* grp = h.group(g->group);
+                  return grp && hidden.count(grp->name) > 0;
+              }),
+              out.end());
+    return out;
+}
+
+}  // namespace
+
 RootTubeTool::Outlines RootTubeTool::snapTargets(StrokeHost& host, const std::set<GuideId>& skip) const {
     Outlines out;
     const std::shared_ptr<const GuideHierarchy> h = host.authoredHierarchy();
     const MeshPtr scalp = host.scalp();
     if (!h || !scalp) return out;
-    for (const GuideId g : rootTubesOf(*h)) {
+    for (const GuideId g : shownRoots(host, *h)) {
         if (skip.count(g)) continue;
         try {
             out.emplace_back(g, rootTubeOutline(*h, *scalp, g));
@@ -190,7 +215,7 @@ void RootTubeTool::sync(StrokeHost& host) {
     if (now == seen_) return;
     seen_ = now;
     const std::shared_ptr<const GuideHierarchy> h = host.authoredHierarchy();
-    const std::vector<GuideId> tubes = h ? rootTubesOf(*h) : std::vector<GuideId>{};
+    const std::vector<GuideId> tubes = h ? shownRoots(host, *h) : std::vector<GuideId>{};
     auto has = [&](GuideId g) { return std::find(tubes.begin(), tubes.end(), g) != tubes.end(); };
     if (mode_ == Mode::Select || mode_ == Mode::Duplicate) return reloadRoots(host);
     if (mode_ == Mode::Edit) return reconcileEdits(host);
@@ -381,7 +406,7 @@ Vec3f RootTubeTool::snapped(const ToolView& view, const Vec3f& p, RootSnap* how)
 
 void RootTubeTool::close(StrokeHost& host) {
     const MeshPtr scalp = host.scalp();
-    center_ = scalpPointNormal(*scalp, outlineCentroid(cvs_));
+    center_ = rootOutlineCenter(*scalp, cvs_);
     if (settings.drawPath) {
         mode_ = Mode::Draw;
         stroke_ = {center_->point};
@@ -461,9 +486,9 @@ void RootTubeTool::beginEdit(StrokeHost& host) {
         return;
     }
     const std::vector<GuideId> selected = host.selectedGuides();
-    std::vector<GuideId> tubes = selected.empty() ? std::vector<GuideId>{} : rootTubesOf(*h, selected);
+    std::vector<GuideId> tubes = selected.empty() ? std::vector<GuideId>{} : shownRoots(host, *h, selected);
     scope_ = !tubes.empty();  // (only the selected guides' roots: an undo brings no others in)
-    if (tubes.empty()) tubes = rootTubesOf(*h);
+    if (tubes.empty()) tubes = shownRoots(host, *h);
     if (tubes.empty()) {
         mode_ = Mode::Place;
         say("The groom has no root tubes to edit: draw one first.");
@@ -627,7 +652,7 @@ void RootTubeTool::reconcileEdits(StrokeHost& host) {
     const std::shared_ptr<const GuideHierarchy> h = host.authoredHierarchy();
     const MeshPtr scalp = host.scalp();
     if (!h || !scalp) return;
-    const std::vector<GuideId> tubes = rootTubesOf(*h);
+    const std::vector<GuideId> tubes = shownRoots(host, *h);
     const std::set<GuideId> now(tubes.begin(), tubes.end());
     std::size_t changed = 0;
     for (auto it = edits_.begin(); it != edits_.end();) {
@@ -689,7 +714,7 @@ int RootTubeTool::finishEdit(StrokeHost& host) {
     const std::shared_ptr<const GuideHierarchy> h = host.authoredHierarchy();
     std::set<GuideId> now;
     if (h) {
-        const std::vector<GuideId> tubes = rootTubesOf(*h);
+        const std::vector<GuideId> tubes = shownRoots(host, *h);
         now.insert(tubes.begin(), tubes.end());
     }
     std::vector<GuideId> changed;
@@ -750,11 +775,11 @@ void RootTubeTool::reloadRoots(StrokeHost& host) {
     const std::shared_ptr<const GuideHierarchy> h = host.authoredHierarchy();
     const MeshPtr scalp = host.scalp();
     if (h && scalp) {
-        for (const GuideId g : rootTubesOf(*h)) {
+        for (const GuideId g : shownRoots(host, *h)) {
             try {
                 const std::vector<Vec3f> cvs = rootTubeOutline(*h, *scalp, g);
                 roots_[g] = cvs;
-                middles_[g] = scalpPointNormal(*scalp, outlineCentroid(cvs));
+                middles_[g] = rootOutlineCenter(*scalp, cvs);
             } catch (const std::exception&) {
             }
         }
@@ -958,11 +983,21 @@ void RootTubeTool::laid(const ScalpMesh& scalp, const std::vector<Vec3f>& cvs, b
     if (!loop && n > 0) edge.push_back(on(cvs.back()));
     std::vector<Vec3f> tris;
     if (filled && loop) {
-        const Vec3f c = on(middle);
+        // From the root's apex (rootOutlineCenter: the patch's convex side), its rings over a dome
+        // about it (from a center `reach` under the apex), so a root drawn round much of a head
+        // fills its top, not straight through the head onto the face.
+        const ScalpPointNormal apex = rootOutlineCenter(scalp, cvs);
+        const Vec3f c = apex.point;
+        const Vec3f o = c - apex.normal.normalized() * reach;
         std::vector<std::vector<Vec3f>> rings{std::vector<Vec3f>(edge.size(), c)};
         for (const float t : {1.0f / 3.0f, 2.0f / 3.0f}) {
             std::vector<Vec3f> ring;
-            for (const Vec3f& q : edge) ring.push_back(on(c + (q - c) * t));
+            for (const Vec3f& q : edge) {
+                const Vec3f a = c - o, b = q - o;
+                const Vec3f way = a * (1.0f - t) + b * t;
+                const float len = a.length() * (1.0f - t) + b.length() * t;
+                ring.push_back(on(way.length() > 1e-9f ? o + way.normalized() * len : c + (q - c) * t));
+            }
             rings.push_back(std::move(ring));
         }
         rings.push_back(edge);
@@ -988,6 +1023,17 @@ void RootTubeTool::laid(const ScalpMesh& scalp, const std::vector<Vec3f>& cvs, b
 
 std::vector<RootTubeTool::Item> RootTubeTool::overlay(StrokeHost& host) {
     std::vector<Item> out;
+    {
+        // (The levels shown changed: the roots of those shown, read again.)
+        std::set<std::string> hidden = host.hiddenGroups();
+        std::string mixed = host.mixedView();
+        if (hidden != hidden_ || mixed != mixed_) {
+            hidden_ = std::move(hidden);
+            mixed_ = std::move(mixed);
+            if (mode_ == Mode::Select || mode_ == Mode::Place) reloadRoots(host);
+            if (mode_ == Mode::Edit) beginEdit(host);  // (Edit roots: the roots shown now)
+        }
+    }
     if (!started_) return out;
     sync(host);
     const MeshPtr scalp = host.scalp();

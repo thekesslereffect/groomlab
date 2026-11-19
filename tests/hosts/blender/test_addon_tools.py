@@ -1206,6 +1206,13 @@ class ToolsTest(unittest.TestCase):
         self.assertEqual(t.root_mode, "select")
         self.click(ts, cx, cy)
         self.assertEqual(t.root_selected, 1)
+        # Subdivide (issue 85): the root cut into cells, one undo step; Ctrl+Z takes it back.
+        self.assertEqual(bpy.ops.groomlab.root_tube(action="SUBDIVIDE"), {"FINISHED"})
+        self.assertGreater(t.guide_count, guides + 1)
+        self.send(ts, Event("Z", "PRESS", cx, cy, ctrl=True))
+        self.assertEqual(t.guide_count, guides + 1)
+        self.click(ts, cx, cy)  # (picked again)
+        self.assertEqual(t.root_selected, 1)
         self.assertEqual(bpy.ops.groomlab.root_tube(action="DELETE"), {"FINISHED"})
         self.assertEqual(t.guide_count, guides)
         # Esc leaves the root mode for the Tube brush.

@@ -120,20 +120,35 @@ void DensitySplatCS(uint3 id : SV_DispatchThreadID, uint3 lane : SV_GroupThreadI
         const float3 q = asfloat(gIn.Load3(p * 12));
         float width = asfloat(gAux1.Load(p * 8 + 4));
         if (!(width >= 0.0f)) width = gValue2.y;  // (no width: kNoLineWidth)
+        // The point's piece of its strand: from halfway to the point before it to halfway to the one
+        // after (its neighbors of the same strand: u, the way along it, rising), splatted evenly
+        // along it, half a cell apart at most. (A point alone in its cells, its strand's points
+        // farther apart than a cell, leaves rows in the grid where every strand's points lie: bands
+        // across the hair's shadows.)
         const float amount = width * gValue2.x * kFixed;
         if (amount > 0.0f) {
-            const float3 g = (q - gValue.xyz) / gValue.w - 0.5f;
-            const float3 lo = floor(g);
-            const float3 f = g - lo;
-            const int3 b = int3(lo);
-            [ForceUnroll]
-            for (int k = 0; k < 8; ++k) {
-                const int3 o = int3(k & 1, (k >> 1) & 1, (k >> 2) & 1);
-                const int3 c = b + o;
-                if (!inside(c)) continue;
-                const float3 t = float3(o.x != 0 ? f.x : 1.0f - f.x, o.y != 0 ? f.y : 1.0f - f.y, o.z != 0 ? f.z : 1.0f - f.z);
-                const uint add = uint(amount * t.x * t.y * t.z + 0.5f);
-                if (add != 0u) splatAdd(cellIndex(c), add);
+            const float u = asfloat(gAux1.Load(p * 8));
+            float3 from = q, to = q;
+            if (p > 0u && asfloat(gAux1.Load((p - 1u) * 8)) < u) from = 0.5f * (q + asfloat(gIn.Load3((p - 1u) * 12)));
+            if (p + 1u < gFlag.w && asfloat(gAux1.Load((p + 1u) * 8)) > u) to = 0.5f * (q + asfloat(gIn.Load3((p + 1u) * 12)));
+            const float span = length(to - from) / gValue.w;
+            const int pieces = int(clamp(ceil(span * 2.0f), 1.0f, 16.0f));
+            const float share = amount / float(pieces);
+            for (int j = 0; j < pieces; ++j) {
+                const float3 at = from + (to - from) * ((float(j) + 0.5f) / float(pieces));
+                const float3 g = (at - gValue.xyz) / gValue.w - 0.5f;
+                const float3 lo = floor(g);
+                const float3 f = g - lo;
+                const int3 b = int3(lo);
+                [ForceUnroll]
+                for (int k = 0; k < 8; ++k) {
+                    const int3 o = int3(k & 1, (k >> 1) & 1, (k >> 2) & 1);
+                    const int3 c = b + o;
+                    if (!inside(c)) continue;
+                    const float3 t = float3(o.x != 0 ? f.x : 1.0f - f.x, o.y != 0 ? f.y : 1.0f - f.y, o.z != 0 ? f.z : 1.0f - f.z);
+                    const uint add = uint(share * t.x * t.y * t.z + 0.5f);
+                    if (add != 0u) splatAdd(cellIndex(c), add);
+                }
             }
         }
     }

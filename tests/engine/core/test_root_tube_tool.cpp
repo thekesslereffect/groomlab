@@ -176,7 +176,7 @@ TEST(RootTubeTool, EditMovesAddsAndTakesOutCvsAndFinishesInOneStep) {
 
     tool.start(*head.host, RootTubeTool::Mode::Edit);
     EXPECT_EQ(tool.mode(), RootTubeTool::Mode::Edit);
-    EXPECT_TRUE(tool.hidesGuides());
+    EXPECT_FALSE(tool.hidesGuides()) << "Edit roots leaves the guides to the Visibility switches";
     // Ctrl+click the edge both roots share: a CV added on both, dragged out together.
     const Vec3f mid = onSphere((ca[0] + ca[1]) * 0.5f);
     std::array<float, 2> s = px(view, mid);

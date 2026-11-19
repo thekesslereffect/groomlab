@@ -428,6 +428,7 @@ public:
     virtual bool paintSelection(const std::vector<GuideId>& /*selection*/, bool /*final*/) { return false; }
     virtual float softSelectRadius() { return 0.0f; }
     virtual std::set<std::string> hiddenGroups() { return {}; }
+    virtual std::string mixedView() { return {}; }  // the tube hierarchy's Mixed view (display.h MixedView)
     virtual int guideSmoothing() { return 0; }  // how hover lines are drawn (smoothPolyline)
     // Shot sculpting: strokes reshape the groom as shown and record a corrective at this time.
     virtual bool shotSculpt() { return false; }
@@ -483,6 +484,7 @@ public:
     bool paintSelection(const std::vector<GuideId>& selection, bool final) override;
     float softSelectRadius() override { return softRadius_; }
     std::set<std::string> hiddenGroups() override { return hidden_; }
+    std::string mixedView() override { return mixedView_; }
     int guideSmoothing() override { return smoothing_; }
     bool shotSculpt() override { return shot_; }
     double seconds() override { return seconds_; }
@@ -508,6 +510,7 @@ public:
         softRadius_ = softRadius;
     }
     void setHiddenGroups(std::set<std::string> groups) { hidden_ = std::move(groups); }
+    void setMixedView(std::string view) { mixedView_ = std::move(view); }  // the Tube hierarchy's Mixed view (display.h MixedView)
     void setGuideSmoothing(int smoothing) { smoothing_ = smoothing; }
     void setShotSculpt(bool on, double seconds = 0.0, long frame = 0, std::string layer = {});
     // The session's live corrective weights (setCorrectiveWeights), for recording shot sculpts.
@@ -530,6 +533,7 @@ private:
     std::vector<GuideId> selection_;
     float softRadius_ = 0.0f;
     std::set<std::string> hidden_;
+    std::string mixedView_;
     int smoothing_ = 0;
     bool shot_ = false;
     double seconds_ = 0.0;

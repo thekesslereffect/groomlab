@@ -125,6 +125,13 @@ constexpr float kRootTubeOverlap = 0.015f;
 // whose footprint stays fixed on the scalp (TubeSpine::setRootOnScalp).
 struct TubeProfile;
 bool isRootTube(const TubeProfile& tube, int depth);
+// The roll (radians per point of `points`, as TubeProfile::roll) that turns a tube along `points`
+// (frames from `frameUp`, no roll) so its sections lie as `other`'s do at the same share of the
+// way (its frames from `otherPoints` and `otherUp`, turned by its roll): a slice of `other`
+// turned with it all along. Unwrapped (no jump of a turn between points) and smoothed along it
+// (no jitter point to point). Empty for fewer than 2.
+std::vector<float> rollToMatch(const std::vector<Vec3f>& points, const Vec3f& frameUp, const std::vector<Vec3f>& otherPoints,
+                               const Vec3f& otherUp, const TubeProfile& other);
 
 // Points round every outline, built-in or custom.
 constexpr std::size_t kTubeOutlinePoints = 96;
@@ -249,6 +256,10 @@ struct TubeProfile {
     // minimizing frames alone, as a section swept from its root out (a root-first tube: its root
     // outline drawn on the scalp, the tube extruded from it with no twist). Saved when off.
     bool rollOnScalp = true;
+    // How far its root joins its sections, against its own root's size (TubeSpine::rootJoin): 1 its
+    // own; a slice of a drawn root's tube its level 1 root's (GuideHierarchy::evaluate lays it, not
+    // saved), so the slices leave the root as the whole tube does, bending no other way.
+    float joinScale = 1.0f;
 
     float widthAt(float t) const;
     float aspectAt(float t) const;  // clamped
@@ -378,19 +389,30 @@ public:
     // (signed, scene units).
     SectionPoint rootCoords(const Vec3f& p, float* along = nullptr) const;
     // The world point of section coordinates (u, v) on the root footprint.
-    Vec3f footprintAt(float u, float v) const { return centers_.front() + footU_ * u + footV_ * v; }
+    Vec3f footprintAt(float u, float v) const { return footOrigin() + footU_ * u + footV_ * v; }
+    // The footprint centered on `center` instead of the guide's root point (a slice of a drawn
+    // root's tube: its place in its level 1 root's footprint, GuideHierarchy's rootFoot).
+    void setFootprintCenter(const Vec3f& center) {
+        footCenter_ = center;
+        footCentered_ = true;
+    }
     // The root section's half-width and half-height in scene units.
     float rootWidth() const { return rootWidth_; }
     float rootHeight() const { return rootHeight_; }
     // The share of the guide (in t) over which a strand rooted on the footprint joins the tube's
     // sections: a few of the root section's larger half-extents along the guide, at most all of it.
     float rootJoin() const { return rootJoin_; }
+    // The root footprint's normal (its outward side: setRootOnScalp's, setRootSurface's).
+    const Vec3f& footprintNormal() const { return footNormal_; }
 
 private:
     TubeProfile tube_;
     bool blended_ = false;
     std::vector<Vec3f> centers_, axisU_, axisV_;
     Vec3f footU_, footV_, footNormal_;
+    Vec3f footCenter_;
+    bool footCentered_ = false;
+    Vec3f footOrigin() const { return footCentered_ ? footCenter_ : centers_.front(); }
     float rootWidth_ = 0.0f, rootHeight_ = 0.0f, rootJoin_ = 1.0f;
 };
 

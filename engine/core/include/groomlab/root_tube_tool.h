@@ -12,7 +12,7 @@
 // (drawing its path again, or the outline open); redoing it puts the outline away.
 //
 // Edit: the root tubes (the selected guides' or every one) as their outlines with their CVs, the
-// guides hidden (hidesGuides); a drag moves a CV on the scalp (CVs sealed with a neighbour move
+// guides and tubes as the Visibility switches have them (hidesGuides: never, since #85); a drag moves a CV on the scalp (CVs sealed with a neighbour move
 // together; with Snap onto another root's CVs and edges, never its own), Ctrl+click on an edge adds
 // a CV on every outline sharing it, Ctrl+click on a CV takes it out of the root meant (the one last
 // touched). undoCv takes back a CV move; finishEdit gives each changed root its outline (one undo
@@ -92,7 +92,8 @@ public:
     // The last thing the tool has to say (the card's status line), and a count bumped with each.
     const std::string& message() const { return message_; }
     std::uint64_t messageCount() const { return messageCount_; }
-    bool hidesGuides() const { return started_ && mode_ == Mode::Edit && !edits_.empty(); }
+    // (Edit roots leaves the guides and tubes as the hosts' Visibility switches say: never hidden.)
+    bool hidesGuides() const { return false; }
     const std::vector<GuideId>& selected() const { return picked_; }
     std::size_t outlineCvs() const { return cvs_.size(); }  // Place: the CVs placed so far
 
@@ -168,6 +169,8 @@ private:
     std::vector<Vec3f> cvs_, stroke_;
     std::optional<ScalpPointNormal> center_;
     Outlines neighbours_;
+    std::set<std::string> hidden_;  // the guide groups hidden when the roots were last read (shownRoots)
+    std::string mixed_;             // ... and the Mixed view
     std::map<GuideId, std::vector<Vec3f>> edits_, original_;
     std::vector<std::pair<GuideId, int>> drag_;
     std::set<GuideId> touched_;

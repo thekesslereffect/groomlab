@@ -1437,6 +1437,14 @@ class ToolPalette(QtWidgets.QWidget):
                                           "tubeColors")
         self.tube_colors.toggled.connect(lambda on: self.push(tubeColors=bool(on)))
         self.tube_channel_box.add(self.tube_colors.row)
+        # Colors (Tube levels): each split tube of a tube hierarchy a shade of its own on top of its
+        # root's color, so the tubes of a level tell apart (off at first).
+        self.tube_level_colors = widgets.switch("Colors (Tube levels)", "Each tube of a tube hierarchy's levels (a split "
+                                                "tube) in a shade of its own on top of its root tube's color, so the "
+                                                "tubes of a level tell apart. Tubes with no levels stay as they are",
+                                                False, "tubeLevelColors")
+        self.tube_level_colors.toggled.connect(lambda on: self.push(tubeLevelColors=bool(on)))
+        self.tube_channel_box.add(self.tube_level_colors.row)
         # Always visible: the tubes drawn whichever tool is up (Comb, Select, ...), as set above.
         self.tube_always = widgets.switch("Always visible", "Keep the tubes drawn with every tool (Comb, "
                                           "Select, ...), not only the Tube tool", False, "tubesAlwaysVisible")
@@ -2264,8 +2272,8 @@ class ToolPalette(QtWidgets.QWidget):
             self.length_keys.refresh()
         if any(b.isVisible() for b in self.tube_panel.blocks):  # (Shape, Select, Place, Draw) a selection or solo
             self.tube_panel.refresh(groom, full=self._ticks % 3 == 0)
-        if self.root_card.visible():  # the root tool's state and the hierarchy's levels
-            self.root_card.refresh(groom)
+        if self.root_card.visible():  # the root tool's state; the hierarchy's levels now and then
+            self.root_card.refresh(groom, full=self._ticks % 5 == 0)
         # Weights change with the frame: read them every tick, the stack itself now and then
         # (keys edited in the timeline) and whenever the groom's correctives change (its callback);
         # only while the Correctives box shows.
@@ -2438,7 +2446,8 @@ class ToolPalette(QtWidgets.QWidget):
             groomlab.brush_tool(tool, **kwargs)
             # (The context's own: not stroke settings.)
             self.push(tubeShaded=self.tube_shaded.isChecked(), tubeWireframe=self.tube_wireframe.isChecked(),
-                      tubeColors=self.tube_colors.isChecked(), tubesAlwaysVisible=self.tube_always.isChecked())
+                      tubeColors=self.tube_colors.isChecked(), tubeLevelColors=self.tube_level_colors.isChecked(),
+                      tubesAlwaysVisible=self.tube_always.isChecked())
         except (RuntimeError, ValueError) as e:
             self.tool_failed(e)
         self.show_tool_settings()

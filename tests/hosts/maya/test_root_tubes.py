@@ -293,7 +293,10 @@ class RootTubes(unittest.TestCase):
         self.assertEqual(count(), 7)
         b = root_tubes.duplicate_root_tube(self.groom, a, on_sphere((0.5, 0.85, 0.1)))
         self.assertEqual(count(), 14)
-        self.assertEqual(root_tubes.root_tubes(self.groom), sorted([int(a), int(b)]))
+        # (The drawn roots: + cut their roots too, each half a root of its own at its level.)
+        data = {int(x["id"]): x for x in groomlab.get_hierarchy(self.groom)["guides"]}
+        drawn = [g for g in root_tubes.root_tubes(self.groom) if data[g].get("parent") in (None, -1)]
+        self.assertEqual(drawn, sorted([int(a), int(b)]))
         o1, o2 = root_tubes.root_outline(self.groom, a), root_tubes.root_outline(self.groom, b)
         sides = lambda o: [tm._dist(x, y) for x, y in zip(o, o[1:] + o[:1])]  # noqa: E731
         for x, y in zip(sides(o1), sides(o2)):
@@ -317,7 +320,9 @@ class RootTubes(unittest.TestCase):
         root_tubes.delete_root_tubes(self.groom, [b])
         self.assertEqual(count(), 7)
         # (each root's CVs are kept with its guide, saved with the groom: the deleted root's went with it)
-        kept = [int(g["id"]) for g in groomlab.get_hierarchy(self.groom)["guides"] if g.get("rootOutline")]
+        # (a's halves keep theirs too: + cut its root)
+        kept = [int(g["id"]) for g in groomlab.get_hierarchy(self.groom)["guides"]
+                if g.get("rootOutline") and g.get("parent") in (None, -1)]
         self.assertEqual(kept, [int(a)])
         self.assertNotIn(shape, [x["name"] for x in groomlab.tube_shapes(self.groom)])
         cmds.undo()
@@ -459,6 +464,36 @@ class RootTubes(unittest.TestCase):
         a, b = (self.points(k)[0] for k in kids)
         self.assertAlmostEqual(tm._dist(a, b), 0.1, delta=0.02)  # half the width apart each side
         self.assertTrue(ids)
+
+    def test_a_root_subdivided_by_its_painted_density(self):
+        """Issue 85: Subdivide cuts a root into cells in the level below, its children (one undo
+        step), by the one density map (made at 0.5); Apply cuts again by the map as painted, and the
+        multiplier makes a cut denser."""
+        from groomlab import painting
+        guide = root_tubes.make_root_tube(self.groom, ring((0.0, 1.0, 0.0), 0.35, count=12), length=0.8)
+        before = len(groomlab.get_hierarchy(self.groom)["guides"])
+        name = root_tubes.ensure_density_map(self.groom, root_tubes.DENSITY_MAP)
+        self.assertEqual(name, "tubeSubdivisionDensity")
+        self.assertEqual(painting.map_kind(self.groom, name), "vertices")
+        cut = root_tubes.subdivide(self.groom, [guide], name)
+        self.assertGreaterEqual(len(cut["cells"]), 4)
+        # The root kept, its cells a level below it: roots of their own too.
+        self.assertEqual(sorted(root_tubes.root_tubes(self.groom)), sorted([guide] + cut["cells"]))
+        self.assertEqual(len(root_tubes.tube_levels(self.groom)["levels"]), 2)
+        cmds.undo()
+        self.assertEqual(len(groomlab.get_hierarchy(self.groom)["guides"]), before)
+        self.assertEqual(root_tubes.root_tubes(self.groom), [guide])
+        cmds.redo()
+        self.assertEqual(sorted(root_tubes.root_tubes(self.groom)), sorted([guide] + cut["cells"]))
+        # Nothing painted: nothing cut again; white everywhere and Apply: more, smaller roots.
+        self.assertEqual(root_tubes.apply_density(self.groom, [], name)["cells"], [])
+        painting.fill_map(self.groom, name, value=1.0)
+        again = root_tubes.apply_density(self.groom, [], name)
+        self.assertGreater(len(again["cells"]), len(cut["cells"]))
+        self.assertGreater(again["removed"], 0)
+        # Apply forced at a higher multiplier: denser still.
+        denser = root_tubes.apply_density(self.groom, [], name, multiplier=3.0, force=True)
+        self.assertGreater(len(denser["cells"]), 2 * len(again["cells"]))
 
 
 HERE = os.path.dirname(os.path.abspath(__file__))

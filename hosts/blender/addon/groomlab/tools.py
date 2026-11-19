@@ -342,6 +342,12 @@ def pick(context, tool):
     t = scene.groomlab_tools
     if tool not in [x["id"] for x in catalog()["tools"]]:
         raise HelperError("bad_request", "no GroomLab tool %r" % tool)
+    if t.root_painting and tool != "paint":
+        # Painting the subdivision density left for another tool: finished (the Tube tool, its
+        # roots cut, Edit roots), as Maya's Tube card finishes it.
+        from . import tool_ops
+        tool_ops.finish_density_painting(context)
+        return None
     if t.root_mode:
         # The Tube tool's root mode put away first (an edit not finished given to its roots).
         scalp = active(context)
@@ -537,6 +543,10 @@ def pick_level(scalp, view, x, y):
 # ---- Edits that are one undo step each ----------------------------------------------------------
 
 def undo(scalp, redo=False):
+    scene = groom.scene_of(scalp)
+    t = scene.groomlab_tools
+    had_levels = [x for x in (t.tube_levels or "").split(",") if x]
+    _level, had_group = group_target(scene)
     r = call(scalp, "redo" if redo else "undo")
     # A transfer taken back or done again (the step undone is now the one to redo, and the other way
     # round; scalpChanged misses a scalp of the same shape): its owner follows (pipeline.py).
@@ -545,6 +555,15 @@ def undo(scalp, redo=False):
         scalp = pipeline.follow_helper_undo(scalp, redo)
     follow_graph(scalp, r)
     after_edit(scalp, groom.scene_of(scalp), r, refresh=bool(r.get("done")))
+    if r.get("done") and had_group and had_group in had_levels:
+        # The tube level shown taken away (its split or Subdivide's cut undone): the deepest level
+        # left shown and picked, as Add and Remove leave it (else its parents stay hidden).
+        try:
+            levels = list(tube_levels(scalp, picked=had_levels[0]).get("levels") or [])
+            if levels and had_group not in levels:
+                tube_level_show(scalp, len(levels))
+        except HelperError:
+            pass
     if r.get("done") and groom.scene_of(scalp).groomlab_tools.root_mode:
         try:
             root_state(scalp)  # the root tool reads the groom again: an undone tube's outline back
@@ -1132,6 +1151,42 @@ def root_edit(scalp, edit, mode=None):
         after_edit(scalp, scene, r.get("undo"), refresh=True)
         push_undo_step((r.get("undo") or {}).get("undoLabel") or "root tubes")
     return r
+
+
+DENSITY_MAP = "tubeSubdivisionDensity"  # the vertex map Subdivide reads (1: the most, smallest roots)
+DENSITY_START = 0.5                     # its value where nothing is painted
+
+
+def root_subdivide(scalp, apply=False, guides=None, multiplier=1.0):
+    """Subdivide (the selected roots, or `guides`, cut into Voronoi cells in the level below, by the
+    density map and `multiplier`) or, with `apply`, Apply (every cut by the map and the multiplier
+    again, all over); one undo step (helper root_subdivide). Returns {"cells", "removed", "kept",
+    "cellLevel": the level the cells are in}."""
+    scene = groom.scene_of(scalp)
+    args = {"apply": bool(apply), "map": DENSITY_MAP, "multiplier": float(multiplier)}
+    if guides is not None:
+        args["guides"] = [int(g) for g in guides]
+    r = call(scalp, "root_subdivide", **args)
+    if r.get("committed"):
+        after_edit(scalp, scene, r.get("undo"), refresh=True)
+        push_undo_step((r.get("undo") or {}).get("undoLabel") or "subdivide root")
+    root_state(scalp)
+    return r
+
+
+def ensure_density_map(scalp, pick=True):
+    """The subdivision density map (a gray vertex map), made at DENSITY_START when missing; `pick`:
+    picked to paint toward 1."""
+    scene = groom.scene_of(scalp)
+    t = scene.groomlab_tools
+    refresh_info(scalp, scene)
+    if not any(m.name == DENSITY_MAP for m in t.maps):
+        map_create(scalp, DENSITY_MAP, kind="vertices", value=DENSITY_START)
+    if pick:
+        with props.quiet():
+            t.paint_map = DENSITY_MAP
+            t.value = 1.0
+    return DENSITY_MAP
 
 
 def root_state(scalp):

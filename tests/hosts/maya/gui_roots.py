@@ -115,7 +115,9 @@ def edit_and_leave():
     from groomlab.ui import root_tube_tool
     shown = groomlab.guides_visible(state["groom"])
     tool = root_tube_tool.start(state["groom"], "edit")
-    check("Edit roots hides the guides", tool.state.get("hidesGuides") and not groomlab.guides_visible(state["groom"]))
+    # (Edit roots leaves the guides and tubes to the Visibility switches: #85)
+    check("Edit roots leaves the guides as the switches have them",
+          not tool.state.get("hidesGuides") and groomlab.guides_visible(state["groom"]) == shown)
     guide = _roots()[0]
     cvs = root_tubes.root_outline(state["groom"], guide)
     x, y = to_view(cvs[0])
@@ -123,7 +125,7 @@ def edit_and_leave():
     tool.finish_edit()
     after = root_tubes.root_outline(state["groom"], guide)
     check("Finish edit gives the root its moved CV", math.sqrt(sum((a - b) ** 2 for a, b in zip(after[0], cvs[0]))) > 0.01)
-    check("and shows the guides again", groomlab.guides_visible(state["groom"]) == shown)
+    check("and the guides as they were", groomlab.guides_visible(state["groom"]) == shown)
     tool.leave()
     check("leaving puts the tool away", not tool.poll().get("active"))
     finish()

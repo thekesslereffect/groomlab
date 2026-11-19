@@ -78,7 +78,9 @@ class RootTubeTool(object):
             self.state = json.loads(cmds.groomLabBrushCtx(BRUSH_CONTEXT, query=True, rootState=True) or "{}")
         except (RuntimeError, ValueError):
             self.state = {}
-        self.show_guides(not self.state.get("hidesGuides"))
+        # (Edit roots no longer hides the guides and tubes on its own: they show as the Visibility
+        # switches say; one hidden by an older build is shown again.)
+        self.show_guides(True)
         count = self.state.get("messageCount", 0)
         if count != self._heard:
             self._heard = count

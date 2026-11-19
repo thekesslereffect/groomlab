@@ -856,6 +856,10 @@ struct TubeFill {
     std::vector<int> depths;
     std::vector<std::uint64_t> ids;
     std::vector<std::uint64_t> bases;  // each tube's level-0 ancestor's ID (Guide::baseId; its own when 0)
+    // How far under each tube's footprint (along its normal, scene units) a strand's root may lie and
+    // still be its: a little under its root loop's deepest point (a drawn root's patch is no deeper);
+    // -infinity for a tube with no loop (kTubeAlongReach alone).
+    std::vector<float> deepest;
     std::vector<float> numbers;
     std::vector<std::int32_t> tubeOf;
     // Each strand's level-0 tube: the one holding its root, else the nearest within reach (-1: none;
@@ -1704,6 +1708,7 @@ private:
             fill->spines.resize(tubes);
             fill->numbers.assign(tubes, -1.0f);
             fill->depths.resize(tubes);
+            fill->deepest.assign(tubes, -std::numeric_limits<float>::infinity());
             fill->ids.resize(tubes);
             fill->bases.resize(tubes);
             for (std::size_t k = 0; k < tubes; ++k) {
@@ -1721,13 +1726,17 @@ private:
                     TubeSpine& spine = fill->spines[kept.size() + i];
                     spine = TubeSpine(resampled.data(), samples, g.frameUp, g.tube);
                     if (align) layFootprint(spine, g, *scalp, scalpNormalAt(*scalp, g.root, resampled.front()));
+                    fill->deepest[kept.size() + i] = deepestOf(spine, g);
                 }, 8);
             }
         }
         parallelFor(0, kept.size(), [&](std::size_t k) {
             const Guide& g = *kept[k];
             if (before && !guideChanged[k]) {
-                if (fill) fill->spines[k] = fillBefore->spines[k];  // (a live stroke's dab: its tube as it was)
+                if (fill) {
+                    fill->spines[k] = fillBefore->spines[k];  // (a live stroke's dab: its tube as it was)
+                    if (k < fill->deepest.size() && k < fillBefore->deepest.size()) fill->deepest[k] = fillBefore->deepest[k];
+                }
                 roots[k] = before->roots[k];
                 normals[k] = before->normals[k];
                 guideLengths[k] = before->lengths[k];
@@ -1747,6 +1756,7 @@ private:
                 } else {
                     fill->spines[k].setRootSurface(Vec3f{});
                 }
+                if (k < fill->deepest.size()) fill->deepest[k] = align ? deepestOf(fill->spines[k], g) : -std::numeric_limits<float>::infinity();
             }
             float* rows = offsets.data() + k * 3 * stride;
             for (std::size_t j = 0; j < samples; ++j) {
@@ -1978,7 +1988,8 @@ private:
                 }
             }
         } else if (fill) {
-            findTubes(*strands, *fill, std::clamp(static_cast<float>(params().getDouble("tubeBlend")), 0.0f, 1.0f));
+            findTubes(*strands, *fill, std::clamp(static_cast<float>(params().getDouble("tubeBlend")), 0.0f, 1.0f),
+                      align ? scalp.get() : nullptr);
         }
         auto inChangedTube = [&](std::size_t s) {
             if (tubeChanged.empty()) return false;
@@ -2327,9 +2338,23 @@ private:
     // scalp (TubeSpine::setRootOnScalp, as Scatter roots its strands and the root outline is fitted),
     // another's as the guide's own points lay it (TubeSpine::setFootprint), not its resampled,
     // smoothed shape.
+    // How deep under the footprint `spine` lays a strand of `g`'s may root (TubeFill::deepest): its
+    // root loop's deepest point, a quarter of its root's extent lower still; none without a loop.
+    static float deepestOf(const TubeSpine& spine, const Guide& g) {
+        if (g.rootRing.size() < 3 || spine.empty()) return -std::numeric_limits<float>::infinity();
+        float lowest = 0.0f;
+        for (const Vec3f& p : g.rootRing) {
+            float along = 0.0f;
+            spine.rootCoords(p, &along);
+            lowest = std::min(lowest, along);
+        }
+        return lowest - 0.25f * std::max(spine.rootWidth(), spine.rootHeight());
+    }
+
     static void layFootprint(TubeSpine& spine, const Guide& g, const ScalpMesh& scalp, const Vec3f& normal) {
-        if (isRootTube(g.tube, g.depth) && scalp.contains(g.root)) {
-            spine.setRootOnScalp(normal, scalp.acrossAt(g.root));
+        if (isRootTube(g.tube, 0) && scalp.contains(g.root)) {  // (a slice of one too: its own root shape)
+            spine.setRootOnScalp(normal, g.rootAcross.length() > 0.5f ? g.rootAcross : scalp.acrossAt(g.root));
+            if (g.rootFootSet) spine.setFootprintCenter(g.rootFoot);  // (a slice: its place in its root's footprint)
             return;
         }
         if (g.points.size() >= 2) {
@@ -2382,7 +2407,19 @@ private:
     // nearest as its base (none beyond reach); of the
     // deeper tubes whose edge holds it the nearest, then the deepest, then the first: the same
     // whichever threads ran.
-    static void findTubes(const StrandSet& strands, TubeFill& fill, float blend) {
+    // Whether the scalp lies over `p` outward from a drawn root's footprint (a ray along its normal
+    // meets it past a tenth of the root's extent): `p` is on the head's far side, under a big root.
+    static bool underScalp(const ScalpMesh* scalp, const TubeSpine& spine, const Vec3f& p) {
+        if (!scalp || !isRootTube(spine.tube(), 0)) return false;
+        const Vec3f n = spine.footprintNormal();
+        if (n.length() < 0.5f) return false;
+        const float extent = std::max(spine.rootWidth(), spine.rootHeight());
+        SurfacePoint hit;
+        float t = 0.0f;
+        return scalp->intersectRay(p + n * (0.01f * extent), n, &hit, &t) && t > 0.1f * extent;
+    }
+
+    static void findTubes(const StrandSet& strands, TubeFill& fill, float blend, const ScalpMesh* scalp = nullptr) {
         const std::size_t count = strands.strandCount();
         fill.tubeOf.assign(count, -1);
         fill.baseOf.assign(count, -1);
@@ -2428,6 +2465,8 @@ private:
                 float along = 0.0f;
                 const SectionPoint at = spine.rootCoords(root, &along);
                 if (std::abs(along) > kTubeAlongReach * std::max(spine.rootWidth(), spine.rootHeight())) return true;
+                if (k < fill.deepest.size() && along < fill.deepest[k]) return true;  // (under its patch: the head's far side)
+                if (underScalp(scalp, spine, root)) return true;
                 const float depth = footprintDepth(spine, at);
                 const bool held = tubeShapeDepth(spine.tube(), at.u, at.v) >= 0.0f;
                 std::int32_t& pick = held ? base : near;
@@ -2457,6 +2496,8 @@ private:
                 float along = 0.0f;
                 const SectionPoint at = spine.rootCoords(root, &along);
                 if (std::abs(along) > kTubeAlongReach * std::max(spine.rootWidth(), spine.rootHeight())) return true;
+                if (k < fill.deepest.size() && along < fill.deepest[k]) return true;  // (under its patch: the head's far side)
+                if (mine < 0 && underScalp(scalp, spine, root)) return true;
                 if (!(tubeShapeDepth(spine.tube(), at.u, at.v) >= 0.0f)) return true;
                 const float depth = footprintDepth(spine, at);
                 const int level = fill.depths[k];
@@ -2489,6 +2530,8 @@ private:
                     float along = 0.0f;
                     const SectionPoint at = spine.rootCoords(root, &along);
                     if (std::abs(along) > kTubeAlongReach * extent) return true;
+                    if (k < fill.deepest.size() && along < fill.deepest[k]) return true;
+                    if (mine < 0 && underScalp(scalp, spine, root)) return true;
                     const float depth = footprintDepth(spine, at);
                     if (depth < -kTubeAdoptReach * extent) return true;
                     if (adopt < 0 || level > adoptLevel ||
@@ -2522,6 +2565,8 @@ private:
                 float along = 0.0f;
                 const SectionPoint at = spine.rootCoords(root, &along);
                 if (std::abs(along) > kTubeAlongReach * std::max(spine.rootWidth(), spine.rootHeight())) return true;
+                if (k < fill.deepest.size() && along < fill.deepest[k]) return true;  // (under its patch: the head's far side)
+                if (mine < 0 && underScalp(scalp, spine, root)) return true;
                 if (tubeShapeDepth(spine.tube(), at.u, at.v) >= 0.0f) return true;
                 const float d = tubeOutsideDistance(spine.tube(), spine.rootHeight() / spine.rootWidth(), at.u, at.v, blend);
                 if (!(d < blend)) return true;

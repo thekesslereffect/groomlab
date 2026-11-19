@@ -264,10 +264,10 @@ const std::vector<std::string>& tubeShapeNames() {
     return names;
 }
 
-float TubeProfile::widthAt(float t) const { return sampleEven(width, t, 0.1f); }
-float TubeProfile::aspectAt(float t) const { return std::clamp(sampleEven(aspect, t, 1.0f), kMinTubeAspect, kMaxTubeAspect); }
-float TubeProfile::twistAt(float t) const { return sampleEven(twist, t, 0.0f); }
-float TubeProfile::rollAt(float t) const { return sampleEven(roll, t, 0.0f); }
+float TubeProfile::widthAt(float t) const { return sampleSmooth(width, t, 0.1f); }
+float TubeProfile::aspectAt(float t) const { return std::clamp(sampleSmooth(aspect, t, 1.0f), kMinTubeAspect, kMaxTubeAspect); }
+float TubeProfile::twistAt(float t) const { return sampleSmooth(twist, t, 0.0f); }
+float TubeProfile::rollAt(float t) const { return sampleSmooth(roll, t, 0.0f); }
 TubeSection TubeProfile::sectionAt(float t) const { return {widthAt(t), aspectAt(t), twistAt(t) + rollAt(t)}; }
 
 std::string TubeProfile::shapeName() const { return custom ? custom->name : tubeShapeName(shape); }
@@ -485,6 +485,7 @@ std::uint64_t hashTube(std::uint64_t h, const TubeProfile& tube) {
         h = hashFloat(hashFloat(hashFloat(hashFloat(hashCombine(h, 0xB01Du), tube.rootHold), tube.midHold), tube.tipHold), tube.midAt);
     }
     if (!tube.rollOnScalp) h = hashCombine(h, 0x5011u);
+    if (tube.joinScale != 1.0f) h = hashFloat(hashCombine(h, 0x701Du), tube.joinScale);
     return h;
 }
 
@@ -917,7 +918,7 @@ TubeSpine::TubeSpine(const Vec3f* points, std::size_t count, const Vec3f& frameU
     constexpr float kJoinExtents = 3.0f;
     float length = 0.0f;
     for (std::size_t i = 1; i < count; ++i) length += (points[i] - points[i - 1]).length();
-    const float join = kJoinExtents * std::max(rootWidth_, rootHeight_);
+    const float join = kJoinExtents * std::max(rootWidth_, rootHeight_) * std::max(tube.joinScale, 1e-3f);
     rootJoin_ = length > 0.0f && join < length ? std::max(join / length, 1e-3f) : 1.0f;
 }
 
@@ -980,12 +981,48 @@ void TubeSpine::setRootOnScalp(const Vec3f& normal, const Vec3f& across) {
     footNormal_ = n;
 }
 
+std::vector<float> rollToMatch(const std::vector<Vec3f>& points, const Vec3f& frameUp, const std::vector<Vec3f>& otherPoints,
+                               const Vec3f& otherUp, const TubeProfile& other) {
+    std::vector<float> out;
+    if (points.size() < 2 || otherPoints.size() < 2) return out;
+    const std::vector<Frame> mine = rotationMinimizingFrames(points.data(), points.size(), frameUp);
+    const std::vector<Frame> theirs = rotationMinimizingFrames(otherPoints.data(), otherPoints.size(), otherUp);
+    const std::size_t n = points.size(), m = otherPoints.size();
+    out.reserve(n);
+    for (std::size_t i = 0; i < n; ++i) {
+        const float t = static_cast<float>(i) / static_cast<float>(n - 1);
+        // Theirs at t (between their samples), turned by their roll there.
+        const float x = t * static_cast<float>(m - 1);
+        const std::size_t k = std::min(static_cast<std::size_t>(x), m - 2);
+        const float f = x - static_cast<float>(k);
+        const float r = other.rollAt(t);
+        const Vec3f n0 = theirs[k].normal * (1.0f - f) + theirs[k + 1].normal * f;
+        const Vec3f b0 = theirs[k].binormal * (1.0f - f) + theirs[k + 1].binormal * f;
+        const Vec3f along = n0 * std::cos(r) + b0 * std::sin(r);
+        float roll = std::atan2(along.dot(mine[i].binormal), along.dot(mine[i].normal));
+        if (!out.empty()) {  // (unwrapped: the nearest turn to the last)
+            while (roll - out.back() > 3.14159265f) roll -= 6.2831853f;
+            while (roll - out.back() < -3.14159265f) roll += 6.2831853f;
+        }
+        out.push_back(roll);
+    }
+    // Smoothed along the tube (two [1 2 1] passes, its ends kept): matched point by point, the
+    // frames' small differences make it jitter, which twists the sections, and the hair filling
+    // them, back and forth at each point (bands in its shading). Smoothed, a slice stays well inside
+    // the gap its neighbours keep (root_tubes.h kSliceGap).
+    for (int pass = 0; pass < 2 && out.size() >= 3; ++pass) {
+        std::vector<float> was = out;
+        for (std::size_t i = 1; i + 1 < out.size(); ++i) out[i] = 0.25f * was[i - 1] + 0.5f * was[i] + 0.25f * was[i + 1];
+    }
+    return out;
+}
+
 bool isRootTube(const TubeProfile& tube, int depth) {
     return depth == 0 && tube.custom && tube.custom->name.rfind(kOwnedTubeShapePrefix, 0) == 0;
 }
 
 SectionPoint TubeSpine::rootCoords(const Vec3f& p, float* along) const {
-    const Vec3f d = p - centers_.front();
+    const Vec3f d = p - footOrigin();
     const float off = d.dot(footNormal_);
     if (along) *along = off;
     // The footprint's axes are perpendicular (the section's, turned): each coordinate on its own.

@@ -324,6 +324,9 @@ Edit brushGuide(const HierarchyGuide& g, const ScalpMesh* scalp, const BrushSett
                 weights[i] = weigh(pts[i]) * (profiled ? std::max(rootToTip[i], 0.0f) : 1.0f);
                 touched = touched || weights[i] > 0.0f;
             }
+            // A drawn root's tube (or a slice of one): its root section is the root drawn, fixed on
+            // the scalp; the brush shapes the tube from there up, never the root itself.
+            if (isRootTube(g.tube, 0)) weights[0] = 0.0f;
             if (!touched) return e;
             if (s.smoothTube) {
                 // Shift+drag: the channel smoothed along the guide where the brush weighs it, each

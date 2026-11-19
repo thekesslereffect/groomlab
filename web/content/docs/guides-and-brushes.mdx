@@ -343,23 +343,71 @@ The Tube tool's **Tube roots** section draws a tube the way Tonic does: its root
 - Clicking **Draw root** or **Select root** again leaves that mode; **Finish edit** applies the
   edits and leaves (Ctrl+Z takes them back in one step).
 
+#### Subdividing a root
+
+Draw one big root, then let GroomLab fill it with smaller ones. One row under **Duplicate** does
+it: **Subdivide**, the paint brush, the **Multiplier** and **Apply**.
+
+**Subdivide** cuts the selected roots (**Select root**) into Voronoi cells. Each cell becomes a
+root tube of its own in the tube hierarchy's next level (subdivide a level 1 root and its cells are
+level 2), following the root you cut: its guide and tube, still there at level 1, shape them all. Neighbouring cells share their CVs, so they seal with no gap, and
+the cells along the edge keep the old root's CVs, so they stay sealed to the roots around it.
+Each cell is a slice of the old tube: its root is its part of the old root, its guide starts in
+its middle and runs inside the old tube, and its sections are the old tube's scaled to it and
+turned as the old tube's, so the cells keep its shape, spread, taper, flatness and twist and fill
+it side by side, a slight gap apart, never passing through each other. If the old root had a tube
+hierarchy under it, each cell is split as deep, afresh. It is one undo step. The first
+**Subdivide** makes the groom's one density map, `tubeSubdivisionDensity`, at 0.5; every cut reads
+it.
+
+The paint brush beside **Subdivide** opens the Paint tab on the density map (it is there once a root
+is cut). White (1) gives more, smaller roots that fit tightly, for example at the bangs. Black (0)
+gives fewer, larger ones. Ctrl paints toward black. The brush again, or leaving the Paint brush any
+other way (Q in Maya, another tool), takes you back to the Tools tab and the Tube tool; nothing is
+cut until you press **Apply**. The **Multiplier** makes the cuts denser overall with the painted
+density: 1 as painted, 2 about twice the roots. **Apply** cuts the subdivided roots again all over,
+at the multiplier and the map as they are. It keeps your work: edits to the cut roots' outer edges
+(**Edit roots**) are kept, since Apply fills the outline the cells' outer edges make now, and the
+new cells take the shape the cells near them were groomed to (combed, drawn) and their point
+count, with their tube hierarchy made again under them. A cell can be cut again (**Subdivide** on
+it): that is a destructive cut, which the map and **Apply** leave be, keeping its place. The groom
+remembers each cut (saved with its guides), so you can come back and paint again later.
+
 ```python
 from groomlab import root_tubes
 guide = root_tubes.make_root_tube(groom, outline_points, path=None, length=2.0, taper=0.5)
 root_tubes.edit_root_tube(groom, guide, moved_points)
 root_tubes.update_regions(groom)
+cells = root_tubes.subdivide(groom, [guide], root_tubes.DENSITY_MAP, multiplier=1.0)["cells"]  # Voronoi cells, each a root tube
+name = root_tubes.ensure_density_map(groom, root_tubes.DENSITY_MAP)  # the one map, made at 0.5
+root_tubes.apply_density(groom, [], name, force=True)     # every cut by it again (Apply)
 ```
 
 ### Tube hierarchy
 
-The Tube tool's **Tube hierarchy** block subdivides tubes, level by level. **Add** splits each
+The Tube tool's **Tube hierarchy** block subdivides tubes, level by level. Its row holds a button
+a level on the left and **+** and **−** on the right (when the levels grow that far, **+** and **−**
+move down to a row of their own). For a drawn root, **+** cuts its root in two as well (each half a root of its own, with its
+part of the root's CVs, sealed to the other half: pick, edit or subdivide it at its level; stepping
+through the levels shows that level's roots), and slices its root shape in two across its
+longer side: each half a tube of its own filling its half of the parent tube, so the two never pass
+through each other unless groomed so, and what you paint on a tube (Width, Flatness, Twist) carries
+to the slices under it. A drawn root's tube always starts on its root drawn: the Tube brush shapes
+it from there up, never the root itself. **+** splits each
 selected tube (or, with none selected, every tube of the base group) into two tubes side by side
 across its longer side, sharing its root shape, in the next level's group (`<base>_L2`,
 `<base>_L3`, ... up to level 9); pressing it again splits those in two (2 to 4, and on).
 The numbered buttons show one level at a time (the other levels' groups hidden) and pick its group,
-so the Tube tool and the brushes edit that level's tubes. Every level's tubes follow their parent:
+so the Tube tool and the brushes edit that level's tubes. **Lock view**, under them (off at
+first), keeps the tubes of the level shown when you switch it on in view while you pick other
+levels to work on, whose guides show instead: step down to level 1 and comb its guides while level
+5's tubes stay in view and follow. It only locks the levels'
+view; the other visibility controls work alongside it. **Mixed view**, under it (on at first),
+also shows, while you work on a level, the tubes (not the guides) of the levels above it where no
+level below continues them: a level 1 tube that was never split shows while you work on level 2.
+Select root and Edit roots show those levels' roots too. Every level's tubes follow their parent:
 shaping a level 1 tube carries all the smaller tubes inside it, while each smaller tube keeps its
-own edits. **Remove** undoes a split: with tubes selected, only theirs (a split tube loses its deepest split tubes; a split tube goes back into its parent with its siblings), with none the deepest level everywhere. **Add** likewise splits only the selected tubes when some are. A slid guide stays its own tube's clump center wherever its root moves within its root. Every tube split from a root tube, and every
+own edits. **−** undoes a split: with tubes selected, only theirs (a split tube loses its deepest split tubes; a split tube goes back into its parent with its siblings), with none the deepest level everywhere. **+** likewise splits only the selected tubes when some are. A slid guide stays its own tube's clump center wherever its root moves within its root. Every tube split from a root tube, and every
 guide under it, belongs to that root, so the smaller tubes' hair stays inside the root they came
 from. Fill Tubes fills a strand rooted in a
 level 1 tube only with that tube's own smaller tubes, never a neighbour's (a split tube's corners
@@ -368,6 +416,7 @@ may reach past its level 1 tube's outline).
 ```python
 root_tubes.add_tube_level(groom)                   # every leaf tube split in two
 root_tubes.show_tube_level(groom, "rootTubes", 2)  # level 2 shown and returned
+root_tubes.show_tube_level(groom, "rootTubes", 1, locked=6)  # level 1's guides, level 6's tubes
 groomlab.generate_children(groom, "tubes", count=2, split=True)  # the split itself (-split true)
 ```
 

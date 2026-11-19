@@ -201,6 +201,8 @@ public:
     static MObject aGuideWidth;
     static MObject aGuidePoints;       // dots on guide points: off, roots and tips, all
     static MObject aGuideSmoothing;    // guides draw smooth: pieces per segment (1: straight)
+    static MObject aTubeViewGroup;
+    static MObject aMixedView;         // Mixed view (Tube hierarchy): "<base group>:<level>" ("": off; display.h MixedView)     // Lock view (Tube hierarchy): the guide group whose tubes alone draw ("": as their guides)
     static MObject aHiddenGuideGroups; // guide groups hidden in the viewport (names): not drawn, brushed or selected
     static MObject aGuideGroupColors;  // guide groups' own viewport colors (name:#rrggbb)
     static MObject aDisplayLighting;
@@ -622,12 +624,13 @@ public:
     // gray), else its wires'.
     // Off keeps the last Shaded, Wireframe and Colors. `always` (the Tube card's Always visible):
     // the tubes drawn as last set whichever tool is up (Comb, Select, ...), not only the Tube brush.
-    void setTubeWires(bool on, bool shaded = false, bool wireframe = true, bool colors = true);
+    void setTubeWires(bool on, bool shaded = false, bool wireframe = true, bool colors = true, bool levelColors = false);
     void setTubesAlwaysVisible(bool always);
     bool tubeWires() const { return tubeWires_ || tubesAlways_; }
     bool tubeShaded() const { return tubeWires() && tubeShaded_; }
     bool tubeWireframe() const { return tubeWires() && tubeWireframe_; }
     bool tubeColors() const { return tubeWires() && tubeColors_; }
+    bool tubeLevelColors() const { return tubeWires() && tubeLevelColors_; }  // Colors (Tube levels)
 
     // Selection weights on the evaluated hierarchy (1: selected, below 1: soft),
     // and a hash of what they depend on, for the draw override.
@@ -801,6 +804,7 @@ private:
     bool tubeShaded_ = false;
     bool tubeWireframe_ = true;
     bool tubeColors_ = true;
+    bool tubeLevelColors_ = false;
     bool tubesAlways_ = false;
     std::string reported_;  // the last message sent to the Script Editor
     std::string reportedHeavy_;  // the last "heavy" Scatter note warned about (finishView)

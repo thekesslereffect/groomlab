@@ -7,6 +7,7 @@
 #include "groomlab/portable_math.h"
 
 #include <algorithm>
+#include <set>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -1089,16 +1090,50 @@ std::size_t appendGuideCurve(DisplayGeometry& batch, const std::vector<Vec3f>& p
     return smooth.size();
 }
 
+MixedView::MixedView(const GuideHierarchy* hierarchy, const std::string& spec) {
+    const std::size_t at = spec.rfind(':');
+    if (!hierarchy || at == std::string::npos || at == 0) return;
+    base_ = spec.substr(0, at);
+    try {
+        level_ = std::stoi(spec.substr(at + 1));
+    } catch (const std::exception&) {
+        level_ = 0;
+    }
+    if (level_ <= 0) return;
+    for (const HierarchyGuide& g : hierarchy->guides()) {
+        if (g.isChild()) parents_.insert(g.parent);
+    }
+}
+
+int MixedView::shows(const GuideHierarchy& hierarchy, const HierarchyGuide& g) const {
+    if (level_ <= 0) return -1;
+    const GuideGroup* grp = hierarchy.group(g.group);
+    const GuideGroup* top = grp;
+    for (int guard = 0; top && top->parent != kNoGroup && guard < 64; ++guard) top = hierarchy.group(top->parent);
+    if (!top || top->name != base_) return -1;
+    const int level = hierarchy.groupDepth(g.group) + 1;
+    if (level == level_) return 1;
+    return level < level_ && !parents_.count(g.id) ? 2 : 0;
+}
+
+bool tubeDrawn(const std::string& view, const std::string& name, bool hidden) {
+    return view.empty() ? !hidden : name == view;
+}
+
 std::vector<const HierarchyGuide*> activeTubeGuides(const GuideHierarchy& hierarchy, const std::string& hiddenGuideGroups,
-                                                    const std::string& freeze) {
+                                                    const std::string& freeze, const std::string& tubeViewGroup,
+                                                    const std::string& mixedView) {
     const std::set<std::string> hidden = parseHiddenGuideGroups(hiddenGuideGroups);
+    const MixedView mixed(&hierarchy, mixedView);
     const bool layers = hierarchy.hasAttributes();
     std::vector<const HierarchyGuide*> out;
     for (const HierarchyGuide& g : hierarchy.guides()) {
         if (g.points.size() < 2) continue;
-        if (!hidden.empty()) {
+        {
             const GuideGroup* grp = hierarchy.group(g.group);
-            if (grp && hidden.count(grp->name)) continue;
+            const std::string name = grp ? grp->name : std::string();
+            const int m = mixed.shows(hierarchy, g);
+            if (!tubeDrawn(tubeViewGroup, name, m >= 0 ? m == 0 : grp && hidden.count(name) > 0)) continue;  // (tubes: 1 and 2)
         }
         float frozen = 0.0f;
         if (layers && hierarchy.effectiveAttribute(g, freeze, &frozen) && frozen >= 0.5f) continue;
@@ -1106,6 +1141,17 @@ std::vector<const HierarchyGuide*> activeTubeGuides(const GuideHierarchy& hierar
     }
     return out;
 }
+
+namespace {
+// A drawn root's tube (or a slice of one) starts from its root loop on the scalp
+// (HierarchyGuide::rootRing: its root drawn, fixed there) and joins its own sections over its
+// first few root widths, as its hair does: it sits on the root with no gap (issue 86), its rings
+// rising evenly from it. Null for any other tube, or one not yet evaluated on a scalp.
+const std::vector<Vec3f>* rootLoop(const HierarchyGuide& g, const std::vector<SectionPoint>& outline) {
+    return isRootTube(g.tube, 0) && !g.tube.blended() && g.rootRing.size() == outline.size() && g.points.size() >= 2 ? &g.rootRing
+                                                                                                                         : nullptr;
+}
+}  // namespace
 
 void appendTubeWire(std::vector<Vec3f>& out, const HierarchyGuide& g, float scale, std::size_t lengthwise, std::size_t ringStep) {
     const std::size_t n = g.points.size();
@@ -1133,11 +1179,23 @@ void appendTubeWire(std::vector<Vec3f>& out, const HierarchyGuide& g, float scal
         cornerSlots.clear();
     }
     const TubeSpine spine(g.points.data(), n, g.frameUp, g.tube, scale);
+    const std::vector<Vec3f>* loop = g.tube.blended() ? nullptr : rootLoop(g, outline);
+    // Ring point s at sample i (index[s]: its outline point): from its root loop on the scalp at the
+    // root, joining the tube's sections over its first few root widths (as its hair joins them:
+    // TubeSpine::rootJoin's (1 - t / join)^2), so its rings rise from the root evenly.
+    const float join = spine.empty() ? 1.0f : spine.rootJoin();
+    auto point = [&](std::size_t i, std::size_t s) {
+        const Vec3f at = spine.atSample(i, ring[s].u, ring[s].v);
+        const float t = static_cast<float>(i) / static_cast<float>(n - 1);
+        if (!loop || t >= join) return at;
+        const float k = 1.0f - t / join;
+        return at + ((*loop)[index[s]] - spine.atSample(0, ring[s].u, ring[s].v)) * (k * k);
+    };
     const std::size_t step = std::max<std::size_t>(ringStep, 1);
     std::array<Vec3f, kAround> at;
     for (std::size_t i = 0; i < n; ++i) {
         if (i % step != 0 && i + 1 != n) continue;
-        for (std::size_t s = 0; s < kAround; ++s) at[s] = spine.atSample(i, ring[s].u, ring[s].v);
+        for (std::size_t s = 0; s < kAround; ++s) at[s] = point(i, s);
         for (std::size_t s = 0; s < kAround; ++s) {
             out.push_back(at[s]);
             out.push_back(at[(s + 1) % kAround]);
@@ -1163,17 +1221,16 @@ void appendTubeWire(std::vector<Vec3f>& out, const HierarchyGuide& g, float scal
         along.push_back(best);
     }
     for (const std::size_t slot : along) {
-        const SectionPoint& p = ring[slot];
         for (std::size_t i = 0; i + 1 < n; ++i) {
-            out.push_back(spine.atSample(i, p.u, p.v));
-            out.push_back(spine.atSample(i + 1, p.u, p.v));
+            out.push_back(point(i, slot));
+            out.push_back(point(i + 1, slot));
         }
     }
 }
 
-void appendTubeSurface(DisplayGeometry& batch, const HierarchyGuide& g, float scale) {
+std::size_t appendTubeSurface(DisplayGeometry& batch, const HierarchyGuide& g, float scale) {
     const std::size_t n = g.points.size();
-    if (n < 2) return;
+    if (n < 2) return 0;
     constexpr int kAlong = 24;
     const auto base = static_cast<std::uint32_t>(batch.positions.size() / 3);
     // (Several profiles: the root's perimeter, evenly round, the profiles matched along it: tube.h.)
@@ -1203,6 +1260,8 @@ void appendTubeSurface(DisplayGeometry& batch, const HierarchyGuide& g, float sc
     // Any other: the tube's sections (tube.h) along the guide, its shape's outline (every other
     // point) at each ring, turned, flattened and sized as the sections say.
     const TubeSpine spine = round ? TubeSpine() : TubeSpine(g.points.data(), n, g.frameUp, g.tube, scale);
+    const std::vector<Vec3f>* loop = round ? nullptr : rootLoop(g, outline);
+    const float join = round || spine.empty() ? 1.0f : spine.rootJoin();  // (the root loop joining the sections)
     // Several profiles (tube.h): each outline point carried along them.
     std::vector<TubeBlendPoint> blends;
     if (!round && spine.blended()) {
@@ -1213,34 +1272,92 @@ void appendTubeSurface(DisplayGeometry& batch, const HierarchyGuide& g, float sc
         const SectionPoint& p = outline[k];
         return blends.empty() ? p : tubeBlendAt(blends[k], p.u, p.v, t);
     };
-    for (int j = 0; j <= kAlong && !round; ++j) {
-        const float t = static_cast<float>(j) / kAlong;
+    // The rings: one on each of the guide's points (where its sections, and the wire's rings, are)
+    // and the same number between each two, so the surface bends where the wire does and its rings
+    // lie evenly all along (a ring on each point when the guide has more points than kAlong).
+    const std::size_t spans = n - 1;
+    const std::size_t per = spans <= static_cast<std::size_t>(kAlong) ? std::max<std::size_t>(1, kAlong / spans) : 1;
+    const int along = round ? kAlong : static_cast<int>(spans * per);
+    std::vector<float> ringAt(static_cast<std::size_t>(along) + 1);
+    for (int j = 0; j <= along; ++j) ringAt[static_cast<std::size_t>(j)] = static_cast<float>(j) / static_cast<float>(along);
+    // Round each ring: every other outline point, and every corner of the shape (where the wire's
+    // lines along the tube run), so the surface turns where the wire does. At a corner of a shape
+    // with corners (not a smooth library curve) the faces meet at a hard edge: two points there,
+    // each with its face's normal.
+    std::vector<std::size_t> cols;
+    std::set<std::size_t> corners;
+    if (!round) {
+        for (std::size_t k = 0; k < outline.size(); k += 2) cols.push_back(k);
+        if (!g.tube.blended()) {
+            for (const std::size_t c : tubeOutlineCorners(g.tube)) {
+                if (c < outline.size()) corners.insert(c), cols.push_back(c);
+            }
+        }
+        std::sort(cols.begin(), cols.end());
+        cols.erase(std::unique(cols.begin(), cols.end()), cols.end());
+    }
+    const bool hard = !corners.empty() && !(g.tube.custom && g.tube.custom->smooth);
+    const std::size_t m = cols.size();
+    // Each column's points in a ring: its left one (where the face before it ends) and its right one
+    // (where the face after it starts): the same point but at a hard corner.
+    std::vector<std::uint32_t> left(m), right(m);
+    std::uint32_t perRing = 0;
+    for (std::size_t k = 0; k < m; ++k) {
+        left[k] = perRing;
+        if (hard && corners.count(cols[k])) ++perRing;
+        right[k] = perRing++;
+    }
+    for (int j = 0; j <= along && !round; ++j) {
+        const float t = ringAt[static_cast<std::size_t>(j)];
         const TubeBlendPoint plain;
         const Vec3f center = spine.at(t, 0.0f, 0.0f, plain);
         const Vec3f axisU = spine.at(t, 1.0f, 0.0f, plain) - center, axisV = spine.at(t, 0.0f, 1.0f, plain) - center;
         const float uu = std::max(axisU.dot(axisU), 1e-20f), vv = std::max(axisV.dot(axisV), 1e-20f);
-        for (int s = 0; s < kAround; ++s) {
-            const SectionPoint p = placed(static_cast<std::size_t>(2 * s), t);
-            const SectionPoint next = placed(static_cast<std::size_t>((2 * s + 1) % outline.size()), t);
-            const SectionPoint prev = placed((static_cast<std::size_t>(2 * s) + outline.size() - 1) % outline.size(), t);
-            // Out of the outline (counter-clockwise: its edge's right), through the section's axes.
+        // Out of the outline from `prev` to `next` (counter-clockwise: its edge's right), through the axes.
+        auto outward = [&](const SectionPoint& prev, const SectionPoint& next) {
             const float nu = next.v - prev.v, nv = prev.u - next.u;
-            Vec3f out = axisU * (nu / uu) + axisV * (nv / vv);
-            out = out.length() > 0.0f ? out.normalized() : axisU.normalized();
-            const Vec3f at = center + axisU * p.u + axisV * p.v;
-            batch.positions.insert(batch.positions.end(), {at.x, at.y, at.z});
-            batch.normals.insert(batch.normals.end(), {out.x, out.y, out.z});
+            const Vec3f out = axisU * (nu / uu) + axisV * (nv / vv);
+            return out.length() > 0.0f ? out.normalized() : axisU.normalized();
+        };
+        for (std::size_t k = 0; k < m; ++k) {
+            const std::size_t c = cols[k];
+            const SectionPoint p = placed(c, t);
+            Vec3f at = center + axisU * p.u + axisV * p.v;
+            if (loop && t < join) {  // (from its root loop on the scalp, joining the sections as the wire does)
+                const float w = 1.0f - t / join;
+                at = at + ((*loop)[c] - spine.at(0.0f, p.u, p.v, plain)) * (w * w);
+            }
+            auto emit = [&](const Vec3f& out) {
+                batch.positions.insert(batch.positions.end(), {at.x, at.y, at.z});
+                batch.normals.insert(batch.normals.end(), {out.x, out.y, out.z});
+            };
+            if (hard && corners.count(c)) {
+                emit(outward(placed(cols[(k + m - 1) % m], t), p));  // (the face before it)
+                emit(outward(p, placed(cols[(k + 1) % m], t)));      // (the face after it)
+            } else {
+                emit(outward(placed((c + outline.size() - 1) % outline.size(), t), placed((c + 1) % outline.size(), t)));
+            }
         }
     }
-    for (int j = 0; j < kAlong; ++j) {
-        for (int s = 0; s < kAround; ++s) {
-            const std::uint32_t a = base + static_cast<std::uint32_t>(j * kAround + s);
-            const std::uint32_t b = base + static_cast<std::uint32_t>(j * kAround + (s + 1) % kAround);
-            const std::uint32_t c = a + kAround, d = b + kAround;
+    const std::uint32_t ring = round ? static_cast<std::uint32_t>(kAround) : perRing;
+    for (int j = 0; j < along; ++j) {
+        const std::uint32_t r0 = base + static_cast<std::uint32_t>(j) * ring, r1 = r0 + ring;
+        if (round) {
+            for (int s = 0; s < kAround; ++s) {
+                const std::uint32_t a = r0 + static_cast<std::uint32_t>(s), b = r0 + static_cast<std::uint32_t>((s + 1) % kAround);
+                const std::uint32_t c = a + ring, d = b + ring;
+                batch.indices.insert(batch.indices.end(), {a, b, d, a, d, c});
+            }
+            continue;
+        }
+        for (std::size_t k = 0; k < m; ++k) {
+            const std::uint32_t a = r0 + right[k], b = r0 + left[(k + 1) % m];
+            const std::uint32_t c = r1 + right[k], d = r1 + left[(k + 1) % m];
             batch.indices.insert(batch.indices.end(), {a, b, d, a, d, c});
         }
     }
     // (Open at the tip: no cap.)
+    return static_cast<std::size_t>(along) + 1;
 }
 
 namespace {
@@ -1248,7 +1365,7 @@ namespace {
 // appendTubeSurface's vertices from `first` on (one guide's tube: rings of the same count, root
 // to tip) in `color`, with what the lit, colored surface needs (DisplayGeometry::scaleSurface):
 // the shading normal again as the bitangent, the tangent along the tube, uvs x root (0) to tip (1).
-void colorTubeSurface(DisplayGeometry& batch, std::size_t first, const std::array<float, 4>& color) {
+void colorTubeSurface(DisplayGeometry& batch, std::size_t first, const std::array<float, 4>& color, std::size_t kRings) {
     const std::size_t end = batch.positions.size() / 3;
     batch.scaleSurface = true;
     batch.uvFloats = 2;
@@ -1256,7 +1373,7 @@ void colorTubeSurface(DisplayGeometry& batch, std::size_t first, const std::arra
     batch.tangents.resize(first * 3, 0.0f);
     batch.bitangents.resize(first * 3, 0.0f);
     batch.uvs.resize(first * 2, 0.0f);
-    constexpr std::size_t kRings = 25;  // (appendTubeSurface: kAlong + 1 rings)
+    if (kRings < 2) kRings = 2;  // (appendTubeSurface's ring count)
     const std::size_t count = end - first;
     const std::size_t around = count % kRings == 0 ? count / kRings : 0;
     auto at = [&](std::size_t v) {
@@ -1286,20 +1403,42 @@ void colorTubeSurface(DisplayGeometry& batch, std::size_t first, const std::arra
 TubeDisplay buildTubeDisplay(const GuideHierarchy& hierarchy, const TubeDisplayOptions& options,
                              const std::set<GuideId>& selected) {
     TubeDisplay out;
-    const std::vector<const HierarchyGuide*> guides = activeTubeGuides(hierarchy, options.hiddenGuideGroups, "");
+    const std::vector<const HierarchyGuide*> guides =
+        activeTubeGuides(hierarchy, options.hiddenGuideGroups, "", options.tubeViewGroup, options.mixedView);
     std::set<const HierarchyGuide*> live;
-    for (const HierarchyGuide* g : activeTubeGuides(hierarchy, options.hiddenGuideGroups)) live.insert(g);
+    for (const HierarchyGuide* g : activeTubeGuides(hierarchy, options.hiddenGuideGroups, "freeze", options.tubeViewGroup, options.mixedView)) live.insert(g);
     const bool anyDim = live.size() != guides.size();
     constexpr float kDim = 0.3f;
     const std::vector<GuideId> rootTubes = options.colors ? hierarchy.rootTubeIds() : std::vector<GuideId>{};
     // Each tube's color (Colors): its root tube's, else its own from its ID; false: the plain color.
+    // A split tube's own shade (Colors (Tube levels)): its color mixed with a hue of its own (its
+    // ID's), so the tubes of a level tell apart, each still of its root's color.
+    auto levelShade = [&](const HierarchyGuide& g, std::array<float, 4>& c) {
+        if (!options.levelColors || !g.isChild()) return;
+        const std::uint64_t h = hashCombine(0x1E7E1C010Bull, static_cast<std::uint64_t>(g.id));
+        const float hue = static_cast<float>(h % 997u) / 997.0f;
+        const float value = 0.7f + 0.5f * static_cast<float>((h >> 20) % 101u) / 100.0f;
+        const float k[3] = {5.0f, 3.0f, 1.0f};
+        for (int i = 0; i < 3; ++i) {
+            const float x = std::fmod(k[i] + hue * 6.0f, 6.0f);
+            const float own = 0.95f * (1.0f - 0.7f * std::max(0.0f, std::min({x, 4.0f - x, 1.0f})));
+            const std::size_t j = static_cast<std::size_t>(i);
+            c[j] = std::clamp((c[j] * 0.55f + own * 0.45f) * value, 0.0f, 1.0f);
+        }
+    };
     auto colorOf = [&](const HierarchyGuide& g, std::array<float, 4>& c) {
-        if (!options.colors) return false;
+        if (!options.colors && !options.levelColors) return false;
+        if (!options.colors) {  // (Colors (Tube levels) alone: the shades on the plain color)
+            c = {0.5f, 0.56f, 0.62f, 1.0f};
+            levelShade(g, c);
+            return g.isChild();
+        }
         const GuideId base = hierarchy.baseIdOf(g);
         const auto at = std::lower_bound(rootTubes.begin(), rootTubes.end(), base);
         if (at != rootTubes.end() && *at == base) {
             const std::array<float, 3> r = rootTubeColor(static_cast<std::size_t>(at - rootTubes.begin()));
             c = {r[0], r[1], r[2], 1.0f};
+            levelShade(g, c);
             return true;
         }
         const std::uint64_t h = hashCombine(0x9E3779B97F4A7C15ull, static_cast<std::uint64_t>(g.id));
@@ -1310,6 +1449,7 @@ TubeDisplay buildTubeDisplay(const GuideHierarchy& hierarchy, const TubeDisplayO
             c[static_cast<std::size_t>(i)] = 0.95f * (1.0f - 0.65f * std::max(0.0f, std::min({x, 4.0f - x, 1.0f})));
         }
         c[3] = 1.0f;
+        levelShade(g, c);
         return true;
     };
     constexpr float kWireAlpha = 0.6f;
@@ -1356,15 +1496,15 @@ TubeDisplay buildTubeDisplay(const GuideHierarchy& hierarchy, const TubeDisplayO
     out.surfaces.triangles = true;
     out.surfaces.surface = true;
     if (options.shaded) {
-        constexpr float kInset = 0.985f;  // (the wires on the outline itself stay seen)
+        constexpr float kInset = 0.997f;  // (the wires on the outline itself stay seen, a hair outside the surface)
         for (const HierarchyGuide* g : guides) {
             const std::size_t before = out.surfaces.positions.size() / 3;
-            appendTubeSurface(out.surfaces, *g, hierarchy.scale() * kInset);
+            const std::size_t rings = appendTubeSurface(out.surfaces, *g, hierarchy.scale() * kInset);
             if (!options.colors && !anyDim) continue;
             std::array<float, 4> c{0.5f, 0.56f, 0.62f, 1.0f};
             if (options.colors && !colorOf(*g, c)) c = {0.5f, 0.56f, 0.62f, 1.0f};
             if (!live.count(g)) c = {c[0] * kDim, c[1] * kDim, c[2] * kDim, 1.0f};
-            colorTubeSurface(out.surfaces, before, c);
+            colorTubeSurface(out.surfaces, before, c, rings);
         }
     }
     return out;
@@ -2196,7 +2336,7 @@ void DisplayBuilder::buildGuides(const DisplayInputs& in, const DisplaySettings&
                                                                      32u * static_cast<unsigned>(pointMode));
     key = hashCombine(key, theme.version);
     key = hashCombine(key, static_cast<std::uint64_t>(smoothing));
-    key = hashChars(key, s.hiddenGuideGroups);
+    key = hashChars(hashChars(hashChars(key, s.hiddenGuideGroups), s.tubeViewGroup), s.mixedView);
     key = hashChars(key, s.guideGroupColors);
     key = hashChars(key, s.isolateGroup);
     key = hashChars(key, s.guideColorLayer);
@@ -2231,7 +2371,14 @@ void DisplayBuilder::buildGuides(const DisplayInputs& in, const DisplaySettings&
     // ToGuides node's) wins.
     const std::map<std::string, std::array<float, 3>> groupColors = parseGuideGroupColors(s.guideGroupColors);
     const std::set<std::string> hiddenNames = parseHiddenGuideGroups(s.hiddenGuideGroups);
+    const MixedView mixed(hierarchy.get(), s.mixedView);
+    // (Mixed view: its hierarchy's guides as it says: the level worked on alone; their tubes, also
+    // the levels above it does not continue: hiddenTube.)
     auto hiddenGuide = [&](const HierarchyGuide& g) {
+        if (hierarchy && mixed.on()) {
+            const int m = mixed.shows(*hierarchy, g);
+            if (m >= 0) return m != 1;
+        }
         if (hiddenNames.empty() || !hierarchy) return false;
         const GuideGroup* grp = hierarchy->group(g.group);
         return grp && hiddenNames.count(grp->name) > 0;
@@ -2271,8 +2418,14 @@ void DisplayBuilder::buildGuides(const DisplayInputs& in, const DisplaySettings&
         const std::vector<GuideId> rootTubes = s.guideRootColors ? hierarchy->rootTubeIds() : std::vector<GuideId>{};
         for (const HierarchyGuide& g : hierarchy->guides()) {
             const int level = hierarchy->groupDepth(g.group);
-            if (level < 0 || level >= kMaxDrawnGuideLevels || hiddenGuide(g)) continue;
-            if (s.tubes) appendTubeSurface(tubes, g, hierarchy->scale());
+            if (level < 0 || level >= kMaxDrawnGuideLevels) continue;
+            // (Lock view: the tubes of that group alone, whatever guides show.)
+            const GuideGroup* viewed = s.tubeViewGroup.empty() ? nullptr : hierarchy->group(g.group);
+            const int mixedAt = mixed.on() ? mixed.shows(*hierarchy, g) : -1;
+            const bool tubeHidden = mixedAt >= 0 ? mixedAt == 0 : hiddenGuide(g);
+            const bool tubeShown = s.tubeViewGroup.empty() ? !tubeHidden : tubeDrawn(s.tubeViewGroup, viewed ? viewed->name : std::string(), tubeHidden);
+            if (s.tubes && tubeShown) appendTubeSurface(tubes, g, hierarchy->scale());
+            if (hiddenGuide(g)) continue;
             if (!s.guides || g.points.size() < 2) continue;
             const auto automatic = autoColors.find(g.group);
             std::array<float, 3> c = automatic != autoColors.end() ? automatic->second : std::array<float, 3>{0.5f, 0.5f, 0.5f};
@@ -2336,7 +2489,7 @@ void DisplayBuilder::buildGuides(const DisplayInputs& in, const DisplaySettings&
     if (moving) {
         for (const Guide& g : moving->guides()) {
             if (g.points.size() < 2) continue;
-            if (hierarchy && !hiddenNames.empty()) {
+            if (hierarchy && (!hiddenNames.empty() || mixed.on())) {
                 const HierarchyGuide* own = hierarchy->guide(g.id);
                 if (own && hiddenGuide(*own)) continue;
             }
@@ -2386,16 +2539,19 @@ void DisplayBuilder::buildSelection(const DisplayInputs& in, const DisplaySettin
     const int smoothing = std::clamp(s.guideSmoothing, 1, 16);
     std::uint64_t key = hashCombine(hashCombine(hash64(in.hierarchyVersion), in.selectionHash),
                                     (s.guides ? 1u : 0u) + 2u * static_cast<unsigned>(smoothing));
-    key = hashChars(key, s.hiddenGuideGroups);
+    key = hashChars(hashChars(hashChars(key, s.hiddenGuideGroups), s.tubeViewGroup), s.mixedView);
     if (!rebuild(DisplayPart::Selection, key)) return;
     DisplayGeometry selected, soft;
     const HierarchyPtr& hierarchy = in.hierarchy;
     if (hierarchy && s.guides && in.selection) {
         const std::set<std::string> hiddenNames = parseHiddenGuideGroups(s.hiddenGuideGroups);
+        const MixedView mixed(hierarchy.get(), s.mixedView);
         for (const auto& [id, weight] : in.selection()) {
             const HierarchyGuide* g = hierarchy->guide(id);
             if (!g) continue;
-            const GuideGroup* grp = hiddenNames.empty() ? nullptr : hierarchy->group(g->group);
+            const int m = mixed.shows(*hierarchy, *g);
+            if (m == 0 || m == 2) continue;
+            const GuideGroup* grp = hiddenNames.empty() || m == 1 ? nullptr : hierarchy->group(g->group);
             if (grp && hiddenNames.count(grp->name) > 0) continue;
             appendGuideCurve(weight >= 0.999f ? selected : soft, g->points, smoothing);
         }
@@ -2418,9 +2574,10 @@ void DisplayBuilder::buildBrushTubes(const DisplayInputs& in, const DisplaySetti
     const bool colors = on && s.tubeColors;
     if (colors) item(DisplayItemId::TubeWires).color = {0.62f, 0.62f, 0.62f, s.theme.tubeWires[3]};  // (buildTubeDisplay's gray)
     std::uint64_t key = on ? hashCombine(hashCombine(hash64(in.hierarchyVersion), in.selectionHash),
-                                         (s.tubeWires ? 1u : 0u) + (s.tubeShaded ? 2u : 0u) + (colors ? 4u : 0u))
+                                         (s.tubeWires ? 1u : 0u) + (s.tubeShaded ? 2u : 0u) + (colors ? 4u : 0u) +
+                                             (s.tubeLevelColors ? 8u : 0u))
                            : 0;
-    if (on) key = hashCombine(hashChars(key, s.hiddenGuideGroups), reinterpret_cast<std::uintptr_t>(hierarchy.get()));
+    if (on) key = hashCombine(hashChars(hashChars(hashChars(key, s.hiddenGuideGroups), s.tubeViewGroup), s.mixedView), reinterpret_cast<std::uintptr_t>(hierarchy.get()));
     if (!rebuild(DisplayPart::BrushTubes, key)) return;
     TubeDisplay tubes;
     tubes.surfaces.triangles = true;
@@ -2436,7 +2593,10 @@ void DisplayBuilder::buildBrushTubes(const DisplayInputs& in, const DisplaySetti
         options.wireframe = s.tubeWires;
         options.shaded = s.tubeShaded;
         options.colors = colors;
+        options.levelColors = s.tubeLevelColors;
         options.hiddenGuideGroups = s.hiddenGuideGroups;
+        options.tubeViewGroup = s.tubeViewGroup;
+        options.mixedView = s.mixedView;
         tubes = buildTubeDisplay(*hierarchy, options, selected);
     }
     tubes.wires.overlay = tubes.selectedWires.overlay = true;

@@ -25,6 +25,15 @@ child group of the one above it ("<base>_L<n>"), its guides following their pare
     root_tubes.add_tube_level(groom)                          # every leaf tube split in two
     root_tubes.tube_levels(groom)                             # {"base", "levels": [groups]}
     root_tubes.show_tube_level(groom, "tubes", 2)             # level 2 shown, the others hidden
+
+Subdividing roots (issue 85): a root cut into Voronoi cells, each a root tube of its own, smaller
+and more numerous where the vertex map tubeSubdivisionDensity is high (1) than where it is low
+(0); the groom remembers each cut, so painting the map again re-cuts only where it changed.
+
+    name = root_tubes.density_map_for(groom, [guide])         # its own map: tubeSubdivisionDensity01, ...
+    root_tubes.ensure_density_map(groom, name)                # made at 0.5 if missing
+    root_tubes.subdivide(groom, [guide], name, multiplier=1)  # {"cells", "removed", "kept"}
+    root_tubes.apply_density(groom, [cell], name)             # cut again where its map changed
 """
 
 import colorsys
@@ -45,6 +54,8 @@ ROOT_OVERLAP = 0.015        # a root tube's footprint this share larger than its
 CLEARANCE = 0.35            # a drawn guide popped this many root sizes out where it dips into the scalp ...
 _CLEAR_RAMP = 2.0           # ... reached this many root sizes along it from the root (root_tubes.cpp)
 MAX_LEAN = 0.8726646259971648  # (50 degrees) a root tube's guide leaves the scalp leaning at most this far off its normal
+DENSITY_MAP = "tubeSubdivisionDensity"  # the one subdivision density vertex map (1: the most, smallest roots)
+DENSITY_START = 0.5                     # its value where nothing is painted
 
 
 # ---------------------------------------------------------------------------
@@ -391,13 +402,90 @@ def remove_tube_level(groom, base, guides=None):
     return out
 
 
-def show_tube_level(groom, base, level):
+def set_tube_view(groom, group):
+    """Lock view (the Tube hierarchy's): only guide group `group`'s tubes draw, whichever guides
+    show ("": the tubes as their guides). The groom's tubeViewGroup."""
+    from maya import cmds
+    if cmds.attributeQuery("tubeViewGroup", node=groom, exists=True):
+        if (cmds.getAttr(groom + ".tubeViewGroup") or "") != (group or ""):
+            cmds.setAttr(groom + ".tubeViewGroup", group or "", type="string")
+
+
+def set_mixed_view(groom, base, level):
+    """The Tube hierarchy's Mixed view: working on level `level` of `base`'s hierarchy, the levels
+    above shown where no level below continues them (their guides with no children); 0 (or no base):
+    off. The groom's mixedView ("<base>:<level>")."""
+    from maya import cmds
+    want = "%s:%d" % (base, int(level)) if base and level and int(level) > 0 else ""
+    if cmds.attributeQuery("mixedView", node=groom, exists=True):
+        if (cmds.getAttr(groom + ".mixedView") or "") != want:
+            cmds.setAttr(groom + ".mixedView", want, type="string")
+
+
+def show_tube_level(groom, base, level, locked=0):
     """Show level `level` (1: the base) of `base`'s hierarchy and hide its other levels (the guide
-    groups' eyes; groups outside the hierarchy are left as they are). Returns the level's group."""
-    shown = _request(groom, "levelVisibility", base=base, level=int(level))
-    picked = None
+    groups' eyes; groups outside the hierarchy are left as they are); with `locked` (Lock view)
+    level `locked`'s tubes alone draw (set_tube_view), its guides as the level picked. Returns level
+    `level`'s group."""
+    shown = _request(groom, "levelVisibility", base=base, level=int(level), locked=int(locked or 0))
+    levels = tube_levels(groom, picked=base)["levels"]
     for name, visible in shown.items():
         groomlab.show_guide_group(groom, name, visible=bool(visible))
-        if visible:
-            picked = name
-    return picked
+    # (The tubes: Lock view's level alone; else as their guides.)
+    set_tube_view(groom, levels[int(locked) - 1] if locked and 0 < int(locked) <= len(levels) else "")
+    level = max(1, min(int(level), len(levels))) if levels else 1
+    return levels[level - 1] if levels else None
+
+
+# ---------------------------------------------------------------------------
+# Subdividing roots (issue 85)
+
+
+def density_map_for(groom, guides):
+    """The density map to paint for cutting `guides` (root tubes, or tubes of their hierarchies):
+    the map of the subdivision the first is a cell of, else a new one (tubeSubdivisionDensity01,
+    02, ...: the first no subdivision or map of the groom takes)."""
+    return density_map_info(groom, guides)["map"]
+
+
+def density_map_info(groom, guides):
+    """density_map_for's map and whether it is new ({"map", "fresh"}: fresh when none of `guides`
+    is a cell of a cut, so cutting them starts a cut of their own)."""
+    from groomlab import painting
+    answer = _request(groom, "densityMap", guides=[int(g) for g in guides], taken=list(painting.list_maps(groom)))
+    return {"map": answer["map"], "fresh": bool(answer.get("fresh"))}
+
+
+def ensure_density_map(groom, name):
+    """The subdivision density map `name` (a gray vertex map), made at DENSITY_START when the groom
+    has none of that name. Returns its name."""
+    from groomlab import painting
+    if name not in painting.list_maps(groom):
+        painting.add_map(groom, name, value=DENSITY_START, kind="vertices")
+    return name
+
+
+def _cut(answer):
+    return {"cells": [int(g) for g in answer.get("cells", [])], "removed": int(answer.get("removed", 0)),
+            "kept": int(answer.get("kept", 0))}
+
+
+def subdivide(groom, guides, map=None, multiplier=1.0):
+    """Cut root tubes `guides` (a smaller tube of the hierarchy stands for its root tube) into
+    Voronoi cells at the density its map `map` gives (density_map_for; DENSITY_START where the
+    groom has no such map), times `multiplier` (2: about twice the cells), each a level 1 root tube
+    following the old tube, the hierarchy under it made again in each. One undo step. Returns
+    {"cells": the new root tubes, "removed": guides taken out, "kept": 0}."""
+    name = map or density_map_for(groom, guides)
+    return _cut(_request(groom, "subdivide", guides=[int(g) for g in guides], map=name, multiplier=float(multiplier)))
+
+
+def apply_density(groom, guides=None, map=None, multiplier=1.0, force=False):
+    """Painting the density map `map` finished: the subdivisions cut with it cut again where it
+    changed (all of a root again when `multiplier` changed, or with `force`: the card's Apply), and
+    `guides` (root tubes not cut yet) cut with it. Without `map`: every subdivision by its own map,
+    each keeping its multiplier. One undo step. Returns {"cells": the root tubes made, "removed",
+    "kept": cells left as they were}."""
+    args = {"guides": [int(g) for g in (guides or [])], "map": map or "", "multiplier": float(multiplier) if map else 0.0,
+            "force": bool(force)}
+    return _cut(_request(groom, "applyDensity", **args))

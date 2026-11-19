@@ -31,6 +31,7 @@
 #include "groomlab/guide_hierarchy.h"
 #include "groomlab/math.h"
 #include "groomlab/scalp_mesh.h"
+#include "groomlab/tube.h"
 
 namespace groomlab {
 
@@ -68,6 +69,10 @@ struct ScalpPointNormal {
     Vec3f point, normal;
 };
 ScalpPointNormal scalpPointNormal(const ScalpMesh& scalp, const Vec3f& p);
+// A drawn root's middle on the scalp (where its guide starts, the Tube tool's green point): the apex
+// of the patch `outline` draws, the scalp's outermost point along the patch's mean normal through its
+// centroid, so a root drawn over much of a head starts on its top, not inside.
+ScalpPointNormal rootOutlineCenter(const ScalpMesh& scalp, const std::vector<Vec3f>& outline);
 
 // ---- Root tubes --------------------------------------------------------------------------------------
 
@@ -99,6 +104,18 @@ std::vector<Vec3f> rootTubeOutline(const GuideHierarchy& h, const ScalpMesh& sca
 // A root tube's root footprint as world points: its shape's control points placed in its root
 // section laid flat on the scalp, taken onto the scalp along the footprint's normal (`onScalp`).
 std::vector<Vec3f> rootTubeSectionOutline(const GuideHierarchy& h, const ScalpMesh& scalp, GuideId guide, bool onScalp = true);
+// How a slice lies in its parent's tube (a check): at each of `samples` places along it (t evenly,
+// the root's first), its tube's outline in its parent's section coordinates at the same t (the
+// parent's section at t: its center plus u and v times its section axes; `off`, how far off that
+// section's plane, scene units). Its parent's outline is tubeOutline(parent's tube).
+struct SliceFitSample {
+    float t = 0.0f;
+    std::vector<SectionPoint> outline;
+    std::vector<float> off;
+    float turn = 0.0f;  // its sections' u axis against its parent's there (radians, about the parent's tangent)
+};
+// `within`: an ancestor's sections instead of its parent's (its level 1 root's, say).
+std::vector<SliceFitSample> sliceFit(const GuideHierarchy& h, GuideId slice, int samples = 11, GuideId within = kNoGuide);
 // Root tube `guide`'s CVs kept as `outline` (world points, taken onto the scalp), its tube as it
 // is: an outline read from elsewhere (Maya's first root tubes kept theirs on the scene). Throws
 // std::invalid_argument for a guide that is not a root tube or fewer than 3 CVs.
@@ -133,6 +150,67 @@ std::size_t deleteRootTubes(GuideHierarchy& h, const ScalpMesh& scalp, const std
 // kRootTubeOverlap larger: 0 when its tube was fitted to it as it is now.
 float rootFootprintError(const GuideHierarchy& h, const ScalpMesh& scalp, GuideId guide);
 
+// ---- Slices of a tube ----------------------------------------------------------------------------------
+// A tube cut into parts that tile it all along (the hierarchy's splits, a root cut into cells:
+// root_subdivision.h): each part a slice of the tube, its root shape its part of the tube's, its
+// sections the tube's scaled to it, its guide the path its middle takes inside the tube.
+
+// A slice's sections drawn this far (a share of the tube's half-width) inside its part all round:
+// neighbours a slight gap apart, never touching, whatever their size.
+constexpr float kSliceGap = 0.02f;
+
+// The tube a slice is cut from, as it lies (its guide evaluated on the scalp).
+struct TubeSource {
+    std::vector<Vec3f> points;
+    Vec3f frameUp{1, 0, 0};
+    TubeProfile tube;      // (its roll as the last evaluate worked it out)
+    Vec3f normal, across;  // the scalp's normal at its root, and its footprint's way across
+    GroupId group = kNoGroup;
+    // A new slice's parent (sliceTube with no `into`): kNoGuide, a primary guide of `group` (a root
+    // group); a guide, a child of it in `group` (a subdivision's cells, in the level below their root).
+    GuideId parent = kNoGuide;
+    // Its root loop on the scalp (HierarchyGuide::rootRing) and its shape's outline (tubeOutline):
+    // a slice into a child (+) takes its part of the loop as its root's CVs (the levels cut the
+    // roots too). Empty: none.
+    std::vector<Vec3f> ring;
+    std::vector<SectionPoint> cage;
+};
+TubeSource tubeSourceOf(const GuideHierarchy& h, const ScalpMesh& scalp, GuideId guide);
+// The slice of `source` over `polygon` (points in its root section's coordinates, in order round
+// it): into guide `into` (a child of the source: the parent lays its footprint and turns its
+// sections), or (kNoGuide) a new guide of the source's group, its footprint laid and its sections
+// turned as the source's (HierarchyGuide::acrossTurn, rollOffsets) and `outline` (world points on
+// the scalp, given) kept as its root's CVs. Returns the guide, or kNoGuide for a sliver.
+// `deviation` (given): added along its guide past its root (its share of the way: 0 root, 1 tip),
+// the shape the guides near it were given (a cut again keeping their grooming).
+GuideId sliceTube(GuideHierarchy& h, const ScalpMesh& scalp, const TubeSource& source, const std::vector<SectionPoint>& polygon,
+                  GuideId into = kNoGuide, const std::vector<Vec3f>& outline = {},
+                  const std::function<Vec3f(float)>& deviation = {});
+// The guide of the slice whose middle is (u, v) of `source`'s root section, `extent` its larger
+// half-extent (scene units): rooted there on the scalp, then along the source's tube (sliceTube's).
+// `alongOnly`: the root's pull joined along the tube only (a cell of a cut: across it stays its
+// part of the tube where its neighbours meet it); else all of it (a slice of the hierarchy, as its
+// parent's tube and hair join their root: GuideHierarchy's resolveFollower).
+std::vector<Vec3f> slicePath(const ScalpMesh& scalp, const TubeSource& source, float u, float v, float extent, float scale = 1.0f,
+                             bool alongOnly = true);
+// A tube spine of the source laid as its tube lies (its footprint fixed on the scalp).
+TubeSpine sourceSpine(const TubeSource& source, float scale = 1.0f);
+// `p` taken onto the scalp along `normal` (the nearer hit either way), else its nearest point
+// (the line misses, or hits far past it).
+Vec3f alongNormal(const ScalpMesh& scalp, const Vec3f& p, const Vec3f& normal);
+
+// Where drawn roots' tubes (root tubes and their slices) pass into each other: each pair of
+// neighbours of one group (`guides`: those; none: every such tube), at each point past the root
+// (the same share of the way along each), how deep one's outline reaches into the other's section
+// (a share of that section's half-width). The deepest of each pair, deepest first; none when they
+// tile. What the tests and the hosts' checks measure.
+struct TubeOverlap {
+    GuideId into = kNoGuide, from = kNoGuide;
+    float at = 0.0f;     // the share of the way along (0 root, 1 tip)
+    float depth = 0.0f;  // how deep, a share of `into`'s half-width
+};
+std::vector<TubeOverlap> tubeOverlaps(const GuideHierarchy& h, const std::vector<GuideId>& guides = {});
+
 // ---- The tube hierarchy ------------------------------------------------------------------------------
 
 // Level `level`'s group (1: the base) in base group `base`'s hierarchy.
@@ -157,7 +235,8 @@ std::size_t addTubeLevel(GuideHierarchy& h, const ScalpMesh* scalp, const std::v
 std::size_t removeTubeLevel(GuideHierarchy& h, const ScalpMesh* scalp, const std::string& base,
                             const std::vector<GuideId>& guides = {});
 // Showing level `level` of `base`'s hierarchy: each level's group and whether it shows (that level
-// alone). The host hides the others.
-std::map<std::string, bool> tubeLevelVisibility(const GuideHierarchy& h, const std::string& base, int level);
+// alone; `locked`, the card's Lock view, changes nothing here: that level's tubes stay drawn through
+// the display's tubeViewGroup, display.h). The host hides the others.
+std::map<std::string, bool> tubeLevelVisibility(const GuideHierarchy& h, const std::string& base, int level, int locked = 0);
 
 }  // namespace groomlab

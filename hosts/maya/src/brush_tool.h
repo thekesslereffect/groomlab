@@ -167,6 +167,8 @@ public:
     // The Tube card's Colors (on by default): each tube in its region's color on the tube root
     // region map (tubeRoots), a color of its own without one (GroomShape::setTubeWires).
     bool tubeColors = true;
+    // Colors (Tube levels) (off by default): each split tube a shade of its own on top (TubeDisplayOptions::levelColors).
+    bool tubeLevelColors = false;
     // The Tube card's Always visible: the tubes drawn whichever tool is up (GroomShape::setTubesAlwaysVisible).
     bool tubesAlwaysVisible = false;
 

@@ -136,4 +136,26 @@ T sampleEven(const std::vector<T>& values, float t, T fallback) {
     return values[i] * (1.0f - f) + values[i + 1] * f;
 }
 
+// The same values placed evenly on t in [0, 1], sampled along a smooth curve through them (a
+// monotone cubic: no kink at a value, as the linear sample has, and no overshoot between two):
+// a tube's width/aspect/twist/roll lists, so what follows a tube (its strands) bends smoothly
+// through its sections instead of turning at each.
+inline float sampleSmooth(const std::vector<float>& values, float t, float fallback) {
+    if (values.size() < 3) return sampleEven(values, t, fallback);
+    const std::size_t n = values.size();
+    const float x = std::clamp(t, 0.0f, 1.0f) * static_cast<float>(n - 1);
+    const std::size_t i = std::min(static_cast<std::size_t>(x), n - 2);
+    const float f = x - static_cast<float>(i);
+    auto slope = [&](std::size_t k) {  // (Fritsch-Carlson: 0 at a peak or a flat, else the mean, capped)
+        const float before = k > 0 ? values[k] - values[k - 1] : values[1] - values[0];
+        const float after = k + 1 < n ? values[k + 1] - values[k] : values[n - 1] - values[n - 2];
+        if (before * after <= 0.0f) return 0.0f;
+        const float m = 0.5f * (before + after), cap = 3.0f * std::min(std::abs(before), std::abs(after));
+        return std::abs(m) > cap ? (m > 0.0f ? cap : -cap) : m;
+    };
+    const float y0 = values[i], y1 = values[i + 1], m0 = slope(i), m1 = slope(i + 1);
+    const float f2 = f * f, f3 = f2 * f;
+    return y0 * (2.0f * f3 - 3.0f * f2 + 1.0f) + m0 * (f3 - 2.0f * f2 + f) + y1 * (-2.0f * f3 + 3.0f * f2) + m1 * (f3 - f2);
+}
+
 }  // namespace groomlab

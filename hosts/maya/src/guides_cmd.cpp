@@ -35,7 +35,9 @@
 #include "groomlab/display.h"
 #include "groomlab/guide_hierarchy.h"
 #include "groomlab/guide_set.h"
+#include "groomlab/root_subdivision.h"
 #include "groomlab/root_tubes.h"
+#include "groomlab/scalp_maps.h"
 #include "groomlab/guide_selection.h"
 #include "maya_inputs.h"
 
@@ -92,8 +94,10 @@ const char* kFromNegative[] = {"-fn", "-fromNegative"};
 // -symmetry (x, y, z or topology; default x) and -center; a side, -group: only that root group's.
 const char* kMirrorShapes[] = {"-msh", "-mirrorShapes"};
 const char* kSymmetry[] = {"-sym", "-symmetry"};
-// Root-first tubes and the tube hierarchy (root_tubes.h): one JSON request {"op", ...}. Edits
-// ("make", "edit", "keepOutline", "duplicate", "delete", "addLevel", "removeLevel") are one undo step; queries
+// Root-first tubes and the tube hierarchy (root_tubes.h), and subdividing roots
+// (root_subdivision.h): one JSON request {"op", ...}. Edits ("make", "edit", "keepOutline",
+// "duplicate", "delete", "addLevel", "removeLevel", "subdivide", "applyDensity") are one undo step; queries
+// ("densityMap", "overlaps" too)
 // ("outline", "sectionOutline", "center", "rootTubes", "levels", "levelVisibility",
 // "footprintError", "carry", "sealed", "surface") change nothing. Returns JSON.
 const char* kRootTubes[] = {"-rtb", "-rootTubes"};
@@ -263,6 +267,23 @@ MeshPtr groomScalp(const MFnDagNode& groomFn) {
     const MeshPtr joined = joinedScalpFromNode(groomFn.object());
     auto* shape = dynamic_cast<GroomShape*>(groomFn.userNode());
     return shape && joined ? shape->session().refineAsScalp(joined) : joined;
+}
+
+// The same scalp with the groom's vertex maps on it as color sets (scalp_maps.h withVertexMaps),
+// refined with it: what reads a painted map at a point (Subdivide's density). The same topology
+// as groomScalp, so the guides root on it alike.
+MeshPtr groomScalpWithMaps(const MFnDagNode& groomFn) {
+    MeshPtr joined = joinedScalpFromNode(groomFn.object());
+    if (!joined) return joined;
+    const MPlug plug = groomFn.findPlug("scalpMaps", true);
+    if (!plug.isNull()) {
+        try {
+            joined = withVertexMaps(joined, ScalpMaps::fromJson(plug.asString().asChar()), "", nullptr, nullptr);
+        } catch (const std::exception&) {  // (maps that do not read: none, as the groom shows them)
+        }
+    }
+    auto* shape = dynamic_cast<GroomShape*>(groomFn.userNode());
+    return shape ? shape->session().refineAsScalp(joined) : joined;
 }
 
 }  // namespace
@@ -908,9 +929,35 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                         return answer({{"base", t.base.empty() ? nlohmann::json() : nlohmann::json(t.base)}, {"levels", t.levels}});
                     }
                     if (op == "levelVisibility") {
-                        return answer(tubeLevelVisibility(*h, request.value("base", std::string()), request.value("level", 1)));
+                        return answer(tubeLevelVisibility(*h, request.value("base", std::string()), request.value("level", 1),
+                                                  request.value("locked", 0)));
                     }
                     if (op == "footprintError") return answer(rootFootprintError(*h, *scalp, guide));
+                    if (op == "sliceFit") {  // a slice's outline in its parent's sections along it (root_tubes.h sliceFit)
+                        if (request.value("evaluate", false)) h->evaluate(scalp.get());  // (as evaluated now, not as saved)
+                        nlohmann::json out = nlohmann::json::array();
+                        for (const SliceFitSample& s : sliceFit(*h, guide, request.value("samples", 11),
+                                                                          request.value("within", static_cast<GuideId>(kNoGuide)))) {
+                            nlohmann::json uv = nlohmann::json::array();
+                            for (const SectionPoint& q : s.outline) uv.push_back({q.u, q.v});
+                            out.push_back({{"t", s.t}, {"outline", uv}, {"off", s.off}, {"turn", s.turn}});
+                        }
+                        return answer(out);
+                    }
+                    if (op == "overlaps") {  // drawn roots' tubes passing into each other (root_tubes.h tubeOverlaps)
+                        nlohmann::json out = nlohmann::json::array();
+                        for (const TubeOverlap& o : tubeOverlaps(*h, ids("guides"))) {
+                            out.push_back({{"into", o.into}, {"from", o.from}, {"at", o.at}, {"depth", o.depth}});
+                        }
+                        return answer(out);
+                    }
+                    if (op == "densityMap") {  // the density map to paint for cutting "guides" (root_subdivision.h)
+                        bool fresh = false;
+                        std::vector<std::string> taken;
+                        for (const nlohmann::json& m : request.value("taken", nlohmann::json::array())) taken.push_back(m.get<std::string>());
+                        const std::string map = subdivisionDensityMapFor(*h, ids("guides"), taken, &fresh);
+                        return answer({{"map", map}, {"fresh", fresh}});
+                    }
                     if (op == "carry") {
                         std::set<int> held;
                         if (request.contains("held")) held = request["held"].get<std::set<int>>();
@@ -960,6 +1007,18 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                         result = addTubeLevel(*h, scalp.get(), ids("guides"), request.value("picked", std::string()));
                     } else if (op == "removeLevel") {
                         result = removeTubeLevel(*h, scalp.get(), request.value("base", std::string()), ids("guides"));
+                    } else if (op == "subdivide" || op == "applyDensity") {
+                        RootSubdivisionOptions o;
+                        o.sizeAtZero = request.value("sizeAtZero", o.sizeAtZero);
+                        o.sizeAtOne = request.value("sizeAtOne", o.sizeAtOne);
+                        o.map = request.value("map", o.map);
+                        o.multiplier = request.value("multiplier", o.multiplier);
+                        o.force = request.value("force", false);
+                        const MeshPtr mapped = groomScalpWithMaps(groomFn);
+                        const ScalpMesh& on = mapped ? *mapped : *scalp;
+                        const SubdivisionResult done = op == "subdivide" ? subdivideRootTubes(*h, on, ids("guides"), o)
+                                                                         : applySubdivisionDensity(*h, on, ids("guides"), o);
+                        result = {{"cells", done.cells}, {"removed", done.removed}, {"kept", done.kept}};
                     } else {
                         return fail(kName, ("-rootTubes: no op named '" + op + "'").c_str());
                     }
