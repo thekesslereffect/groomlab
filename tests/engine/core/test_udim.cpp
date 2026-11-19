@@ -311,6 +311,53 @@ TEST(Udim, AMapWhoseScalpReachesAnotherTileBecomesATileSet) {
     fs::remove_all(dir);
 }
 
+TEST(Udim, HairColorReadsAColorTileSet) {
+    // A color texture map over two tiles (1001 red, 1002 blue), read by HairColor's map by its
+    // plain path: each strand takes its root's tile's color.
+    const fs::path dir = freshFolder("groomlab_udim_color");
+    const auto scalp = twoTilePlane();
+    TexturePaint paint(*scalp, 16, 16, PaintColor{0.0f, 0.0f, 0.0f, 1.0f});
+    paint.assignColor([](const StrandRoot&, const Vec3f& p) {
+        return p.x > 1.0f ? PaintColor{0.0f, 0.0f, 1.0f, 1.0f} : PaintColor{1.0f, 0.0f, 0.0f, 1.0f};
+    });
+    const std::string plain = (dir / "tint.png").u8string();
+    paint.save(plain);
+    ASSERT_TRUE(loadTexture(plain)->isUdim());
+    Graph g;
+    ExternalInputs ext;
+    ext.set("scalp", MeshPtr(scalp), scalp->contentHash());
+    const NodeId s = g.addNode(op::kScalp), scatter = g.addNode(op::kScatter), color = g.addNode(op::kHairColor);
+    g.connect(s, scatter, 0);
+    g.connect(scatter, color, 0);
+    g.node(scatter).params().set("density", 200.0);
+    g.node(color).params().set("mode", std::string("color"));
+    g.node(color).params().set("map", plain);
+    g.node(color).params().set("valueRandom", 0.0);
+    g.node(color).params().set("hueRandom", 0.0);
+    g.node(color).params().set("saturationRandom", 0.0);
+    EvalContext ctx;
+    ctx.externals = &ext;
+    const StrandsPtr strands = g.evaluateStrands(color, ctx);
+    ASSERT_TRUE(strands);
+    const std::vector<float>* r = strands->strandChannel("colorR");
+    const std::vector<float>* b = strands->strandChannel("colorB");
+    ASSERT_TRUE(r && b);
+    std::size_t red = 0, blue = 0;
+    for (std::size_t i = 0; i < strands->strandCount(); ++i) {
+        const float x = strands->strandPoints(i)[0].x;
+        if (x < 0.9f) {
+            EXPECT_GT((*r)[i], (*b)[i]) << x;
+            ++red;
+        } else if (x > 1.1f) {
+            EXPECT_GT((*b)[i], (*r)[i]) << x;
+            ++blue;
+        }
+    }
+    EXPECT_GT(red, 20u);
+    EXPECT_GT(blue, 20u);
+    fs::remove_all(dir);
+}
+
 TEST(Udim, ResolveAndCollectFindATileSetByItsPlainPath) {
     // A map's plain path standing for a tile set is there for the resolver (the folder holding
     // the tiles, not the first one searched) and Collect Files (every tile, under one name).
