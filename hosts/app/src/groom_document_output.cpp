@@ -611,28 +611,17 @@ std::string GroomDocument::collectFiles(CollectReport* out) {
         const std::string found = resolveMapPath(stored);
         return found.empty() ? (fs::u8path(dir) / fs::u8path(stored)).generic_u8string() : fs::u8path(found).generic_u8string();
     };
+    // The bookkeeping every host's Collect Files keeps (asset_files.h FileCollector).
+    FileCollector files(dir);
     // `stored` from outside the folder into `kind`: the path to store now, or `stored` itself.
     auto collect = [&](const std::string& what, const std::string& stored, const std::string& kind) -> std::string {
-        if (stored.empty()) return stored;
-        const std::string full = resolve(stored);
-        if (insideFolder(full, dir)) {
-            ++r.inside;
-            return stored;
-        }
-        std::vector<std::string> copied;
         // A map or an image into the groom's maps folder (Maya's masks/<groom>), else the kind's.
         // ("groomCaches": the groom's own folder in caches, as its Simulate bakes are written.)
-        const std::string copy = collectFile(full,
-                                             kind == "masks"         ? mapsDirectory()
-                                             : kind == "groomCaches" ? assetFolder("caches") + "/" + fileSafeName(displayName())
-                                                                     : assetFolder(kind),
-                                             &copied);
-        if (copy.empty()) {
-            r.missing.emplace_back(what, stored);
-            return stored;
-        }
-        r.copied.emplace_back(what, copy);
-        return pathFromGroomFolder(copy, dir);
+        const std::string folder = kind == "masks"         ? mapsDirectory()
+                                   : kind == "groomCaches" ? assetFolder("caches") + "/" + fileSafeName(displayName())
+                                                           : assetFolder(kind);
+        const std::string now = files.collect(what, stored, resolve(stored), folder);
+        return now == stored ? stored : pathFromGroomFolder(now, dir);
     };
     ScalpMaps maps = session().scalpMaps();
     bool mapsChanged = false;
@@ -654,15 +643,10 @@ std::string GroomDocument::collectFiles(CollectReport* out) {
     }
     if (!collected.empty()) graph_ = json::parse(withGraphFileParams(graph_.dump(), collected, &graphChanged));
     if (graphChanged) applyGraph();
-    if (bake_ && !bake_->prefix.empty() && !insideFolder(bake_->prefix + "x", dir)) {
+    if (bake_ && !bake_->prefix.empty()) {
         // The card bake as a whole: every file of its prefix into cards.
-        FileFollower f(dir, "", dir, assetFolder(""), {{fs::u8path(bake_->prefix).parent_path().generic_u8string(), defaultBakeDirectory()}});
-        std::vector<std::string> suffixes;
-        for (const std::string& file : CardBakePaths(bake_->prefix).files()) suffixes.push_back(file.substr(bake_->prefix.size()));
-        suffixes.push_back("Preview.png");
-        const std::string prefix = bake_->prefix, followed = f.followPrefix(prefix, suffixes);
-        if (followed != prefix) {
-            const std::string full = isAbsolutePath(followed) ? followed : (fs::u8path(dir) / fs::u8path(followed)).generic_u8string();
+        const std::string prefix = bake_->prefix, full = files.collectCardBake(prefix, defaultBakeDirectory());
+        if (full != prefix) {
             auto moved = [&](std::string& p) {
                 if (p.compare(0, prefix.size(), prefix) == 0) p = full + p.substr(prefix.size());
             };
@@ -671,7 +655,6 @@ std::string GroomDocument::collectFiles(CollectReport* out) {
             moved(bake_->preview);
             moved(bake_->atlas);
             session().setCardMaps(formatCardMaps(full, bake_->stamp, 0));
-            r.copied.emplace_back("card bake", full);
         }
     }
     for (auto& [node, ref] : simBakes_) ref.file = collect("simulation " + node, ref.file, "groomCaches");
@@ -689,6 +672,9 @@ std::string GroomDocument::collectFiles(CollectReport* out) {
         }
         if (photosChanged) referencePhotos_ = photos.dump();
     }
+    r.copied = files.copied();
+    r.missing = files.missing();
+    r.inside = files.inside();
     if (!r.copied.empty()) dirty_ = true;
     if (out) *out = std::move(r);
     return {};

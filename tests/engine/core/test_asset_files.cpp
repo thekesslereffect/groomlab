@@ -349,3 +349,27 @@ TEST(AssetFiles, CardBakeNamesNeverLandOnAnotherBake) {
     EXPECT_EQ(freeCardBakeName(root, "scalp"), "scalp");  // (no card bake's files there)
     fs::remove_all(fs::u8path(root));
 }
+
+TEST(AssetFiles, FileCollectorGathersAScenesFiles) {
+    // Every host's Collect Files: inside the folder stays (counted), missing stays (noted), the
+    // rest copied in; a card bake as a set under one prefix.
+    const std::string root = scratch("collector");
+    write(root + "/scene/groomlab/masks/in.png", "in");
+    write(root + "/elsewhere/out.png", "out");
+    write(root + "/elsewhere/bake_Atlas.json", "{}");
+    write(root + "/elsewhere/bake_Color.tga", "c");
+    FileCollector c(root + "/scene");
+    EXPECT_EQ(c.collect("map in", "groomlab/masks/in.png", root + "/scene/groomlab/masks/in.png", root + "/scene/masks"),
+              "groomlab/masks/in.png");
+    EXPECT_EQ(c.collect("map out", "D:/x/out.png", root + "/elsewhere/out.png", root + "/scene/masks"), root + "/scene/masks/out.png");
+    EXPECT_EQ(c.collect("map gone", "gone.png", root + "/elsewhere/gone.png", root + "/scene/masks"), "gone.png");
+    EXPECT_EQ(c.collect("nothing", "", "", root + "/scene/masks"), "");
+    EXPECT_EQ(c.collectCardBake(root + "/elsewhere/bake_", root + "/scene/cards"), root + "/scene/cards/bake_");
+    EXPECT_EQ(read(root + "/scene/cards/bake_Color.tga"), "c");
+    EXPECT_EQ(c.inside(), 1);
+    ASSERT_EQ(c.missing().size(), 1u);
+    EXPECT_EQ(c.missing()[0].first, "map gone");
+    ASSERT_EQ(c.copied().size(), 2u);
+    EXPECT_EQ(c.copied()[1].first, "card bake");
+    fs::remove_all(fs::u8path(root));
+}

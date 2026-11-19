@@ -2780,22 +2780,10 @@ json filesCollect(ToolState& t, const json& args) {
     Session& s = t.session;
     const std::string dir = needString(args, "dir"), masks = needString(args, "masks"), cards = needString(args, "cards"),
                       caches = needString(args, "caches");
-    json copied = json::array(), missing = json::array();
-    int inside = 0;
+    // The bookkeeping every host's Collect Files keeps (asset_files.h FileCollector).
+    FileCollector files(dir);
     auto collect = [&](const std::string& what, const std::string& stored, const std::string& full, const std::string& folder) {
-        if (stored.empty()) return stored;
-        if (insideFolder(full, dir)) {
-            ++inside;
-            return stored;
-        }
-        std::vector<std::string> written;
-        const std::string copy = collectFile(full, folder, &written);
-        if (copy.empty()) {
-            missing.push_back({what, stored});
-            return stored;
-        }
-        copied.push_back({what, copy});
-        return copy;
+        return files.collect(what, stored, full, folder);
     };
     for (const auto& kept : t.host.kept) writeTexture(t, kept.first);
     ScalpMaps maps = s.groom->scalpMaps();
@@ -2821,18 +2809,11 @@ json filesCollect(ToolState& t, const json& args) {
         &graphChanged);
     if (graphChanged) s.groom->setGraphJson(graph);
     for (auto& [node, ref] : s.file.simCaches) ref.file = collect("simulation " + node, ref.file, ref.file, caches);
-    if (!s.file.cardBake.prefix.empty() && !insideFolder(s.file.cardBake.prefix + "x", dir)) {
-        const std::string prefix = s.file.cardBake.prefix;
-        FileFollower f(dir, "", dir, cards, {{fs::u8path(prefix).parent_path().generic_u8string(), cards}});
-        std::vector<std::string> suffixes = cardBakeSuffixes();
-        suffixes.push_back("Preview.png");
-        const std::string now = f.followPrefix(prefix, suffixes);
-        if (now != prefix) {
-            s.file.cardBake.prefix = now;
-            copied.push_back({"card bake", now});
-        }
-    }
-    return {{"copied", copied}, {"missing", missing}, {"inside", inside}, {"mapsChanged", mapsChanged}, {"graphChanged", graphChanged}};
+    s.file.cardBake.prefix = files.collectCardBake(s.file.cardBake.prefix, cards);
+    json copied = json::array(), missing = json::array();
+    for (const auto& [what, path] : files.copied()) copied.push_back({what, path});
+    for (const auto& [what, path] : files.missing()) missing.push_back({what, path});
+    return {{"copied", copied}, {"missing", missing}, {"inside", files.inside()}, {"mapsChanged", mapsChanged}, {"graphChanged", graphChanged}};
 }
 
 // The map shown on the scalp: the session's view of a vertex map or guide layer; a texture map

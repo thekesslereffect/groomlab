@@ -70,6 +70,30 @@ private:
 bool insideFolder(const std::string& path, const std::string& folder);
 std::string collectFile(const std::string& path, const std::string& folder, std::vector<std::string>* copied = nullptr);
 
+// Collect Files' bookkeeping, every host's (Maya's collect_files, the app's, the Blender helper's):
+// each file a groom names gathered into the scene's folder `dir`.
+class FileCollector {
+public:
+    explicit FileCollector(std::string dir) : dir_(std::move(dir)) {}
+    // A stored path (`full`: as it resolves) into `folder`: one inside `dir` stays (counted), a
+    // missing one stays (noted under `what`), any other is copied (collectFile: a UDIM set's every
+    // tile, other content a free name) and its copy (absolute) returned and noted. "" stays "".
+    std::string collect(const std::string& what, const std::string& stored, const std::string& full, const std::string& folder);
+    // A card bake (every file of `prefix`: cardBakeSuffixes and the preview) into `folder` under one
+    // prefix (a free one when any file would land on other content): the new prefix (absolute), or
+    // `prefix` itself when it is inside `dir` or has no files.
+    std::string collectCardBake(const std::string& prefix, const std::string& folder);
+
+    const std::vector<std::pair<std::string, std::string>>& copied() const { return copied_; }   // (what, copy)
+    const std::vector<std::pair<std::string, std::string>>& missing() const { return missing_; } // (what, stored)
+    int inside() const { return inside_; }
+
+private:
+    std::string dir_;
+    std::vector<std::pair<std::string, std::string>> copied_, missing_;
+    int inside_ = 0;
+};
+
 // Every graph param naming a file (Maya's presets._file_params): ImportCurves' and GuideCache's
 // path, FeatherColor's textures, a {"texture": ...} value, HairColor's map and Interpolate's
 // regionMap when an image's path; inside compounds too. Each one's value given to `follow` and

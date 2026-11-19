@@ -10,6 +10,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "groomlab/card_files.h"
 #include "groomlab/paths.h"
 #include "groomlab/texture.h"
 #include "groomlab/udim.h"
@@ -262,6 +263,33 @@ std::string collectFile(const std::string& path, const std::string& folder, std:
     }
     const std::string stored = suffix.empty() ? name : stem + suffix + ext;
     return (fs::u8path(folder) / fs::u8path(stored)).generic_u8string();
+}
+
+std::string FileCollector::collect(const std::string& what, const std::string& stored, const std::string& full, const std::string& folder) {
+    if (stored.empty()) return stored;
+    if (insideFolder(full, dir_)) {
+        ++inside_;
+        return stored;
+    }
+    const std::string copy = collectFile(full, folder);
+    if (copy.empty()) {
+        missing_.emplace_back(what, stored);
+        return stored;
+    }
+    copied_.emplace_back(what, copy);
+    return copy;
+}
+
+std::string FileCollector::collectCardBake(const std::string& prefix, const std::string& folder) {
+    if (prefix.empty() || insideFolder(prefix + "x", dir_)) return prefix;
+    FileFollower f(dir_, "", dir_, folder, {{fs::u8path(prefix).parent_path().generic_u8string(), folder}});
+    std::vector<std::string> suffixes = cardBakeSuffixes();
+    suffixes.push_back("Preview.png");
+    const std::string now = f.followPrefix(prefix, suffixes);
+    if (now == prefix) return prefix;
+    const std::string full = isAbsolutePath(now) ? now : (fs::u8path(dir_) / fs::u8path(now)).generic_u8string();
+    copied_.emplace_back("card bake", full);
+    return full;
 }
 
 std::string followGraphFiles(const std::string& graphJson, const std::function<std::string(const std::string&)>& follow, bool* changed) {
