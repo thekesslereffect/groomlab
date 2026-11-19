@@ -785,6 +785,22 @@ class GraphTest(SceneMixin, unittest.TestCase):
         self.assertLess(fat["overlap"], 0.02)
         off = gl.braid_sections(style="three", separate=0.0)
         self.assertGreater(off["overlap"], 0.05)
+        # Pressed, the sections' courses bend no sharper in depth than plain ones: the depth a
+        # crossing asks for swells in and out over about a step, never at corners (jagged tubes).
+        def sharpest(d):
+            worst = 0.0
+            for k in range(d["sections"]):
+                c = d["centers"][k]
+                for i in range(len(c)):
+                    worst = max(worst, abs(c[i - 1][1] - 2.0 * c[i][1] + c[(i + 1) % len(c)][1]))
+            return worst
+        for style in ("three", "four", "five"):
+            self.assertLess(sharpest(gl.braid_sections(style=style)), 1.2 * sharpest(gl.braid_sections(style=style, separate=0.0)), style)
+        # Inflate grows the sections whatever separate is: with separate 0 they overlap, fatter.
+        thin = gl.braid_sections(style="three", separate=0.0, inflate=0.0)
+        fat0 = gl.braid_sections(style="three", separate=0.0, inflate=1.0)
+        for k in range(3):
+            self.assertGreater(fat0["areas"][k], 1.5 * thin["areas"][k])
         self.assertNotEqual(gl.braid_sections(style="three", tightness=2.0)["across"], pressed["across"])  # cut steeper
         self.assertTrue(gl.braid_sections(style="rope", sections=3)["round"])
         self.assertRaises(gl.GraphError, gl.braid_sections, style="zigzag")
@@ -844,6 +860,78 @@ class GraphTest(SceneMixin, unittest.TestCase):
         hair = doc.graph.evaluate_strands(doc.node("braid"), ctx)
         self.assertEqual(max(hair.strand_channel("braidSection")), 2.0)
         self.assertRaises(gl.GraphError, doc.graph.braid_tubes, doc.node("scatter"), ctx)
+
+
+    def test_fed_braid_off_the_head_stays_on_its_guide(self):
+        # Feed raises a braid only as far as keeps its underside out of the scalp: a guide that
+        # leaves the head (straight up off the crown here) keeps the braid centered on it, feed or not.
+        def axis_off(feed):
+            doc = gl.load_graph_json({
+                "version": 1, "output": "braid",
+                "nodes": [{"name": "scalp", "type": "Scalp"}, {"name": "paths", "type": "Guides"},
+                          {"name": "scatter", "type": "Scatter", "params": {"density": 800.0}},
+                          {"name": "braid", "type": "Braid", "params": {"style": "three", "region": 0.4, "feed": feed}}],
+                "connections": [{"from": "scalp", "to": "scatter", "input": "scalp"},
+                                {"from": "scatter", "to": "braid", "input": "strands"},
+                                {"from": "paths", "to": "braid", "input": "braids"}]})
+            guides = gl.GuideSet()
+            guides.add(1, straight((0.0, 1.0, 0.0), (0.0, 1.5, 0.0), segments=12))
+            guides.root_on_mesh(self.scalp)
+            externals = gl.ExternalInputs()
+            externals.set_groom(scalp=self.scalp, guides=guides)
+            tubes = doc.graph.braid_tubes(doc.node("braid"), gl.EvalContext(externals=externals), around=8)["tubes"]
+            worst = 0.0
+            for r in range(len(tubes[0]["at"])):
+                if not 0.3 < tubes[0]["at"][r] < 1.2:  # well off the head, short of the end
+                    continue
+                mid = [sum(t["centers"][r][c] for t in tubes) / len(tubes) for c in range(3)]
+                worst = max(worst, (mid[0] ** 2 + mid[2] ** 2) ** 0.5)  # off the guide's line (x = z = 0)
+            return worst
+        plain = axis_off(False)
+        self.assertLess(axis_off(True), plain + 0.01)  # (the braid's width is 0.25: half of it was the old push)
+
+    def test_braid_along_the_scalp_lies_on_it_feed_or_not(self):
+        # The scalp collides with a version 2 braid, fed or not: drawn along the scalp (an arc on the
+        # unit sphere), it lies higher than a version 1 braid not fed (which sank into the scalp),
+        # every section's middle outside the sphere.
+        import math
+        arc = [(math.sin(a), math.cos(a), 0.0) for a in [0.9 * i / 16 for i in range(17)]]
+
+        def heights(version, feed):
+            node = {"name": "braid", "type": "Braid", "params": {"style": "three", "region": 0.4, "feed": feed}}
+            if version == 1:
+                node["version"] = 1
+            doc = gl.load_graph_json({
+                "version": 1, "output": "braid",
+                "nodes": [{"name": "scalp", "type": "Scalp"}, {"name": "paths", "type": "Guides"},
+                          {"name": "scatter", "type": "Scatter", "params": {"density": 800.0}}, node],
+                "connections": [{"from": "scalp", "to": "scatter", "input": "scalp"},
+                                {"from": "scatter", "to": "braid", "input": "strands"},
+                                {"from": "paths", "to": "braid", "input": "braids"}]})
+            guides = gl.GuideSet()
+            guides.add(1, arc)
+            guides.root_on_mesh(self.scalp)
+            externals = gl.ExternalInputs()
+            externals.set_groom(scalp=self.scalp, guides=guides)
+            tubes = doc.graph.braid_tubes(doc.node("braid"), gl.EvalContext(externals=externals), around=8)["tubes"]
+            middle, lowest = [], []
+            for r in range(len(tubes[0]["at"])):
+                if 0.2 < tubes[0]["at"][r] < 0.7:
+                    mid = [sum(t["centers"][r][c] for t in tubes) / len(tubes) for c in range(3)]
+                    middle.append(sum(v * v for v in mid) ** 0.5)
+                    lowest.append(min(sum(v * v for v in t["centers"][r]) ** 0.5 for t in tubes))
+            return min(middle), min(lowest)
+
+        sank = heights(1, False)[0]
+        self.assertLess(sank, 1.0)  # (version 1, not fed: its middle on the guide, its underside in the scalp)
+        for feed in (False, True):
+            middle, lowest = heights(2, feed)
+            self.assertGreater(middle, sank + 0.005, feed)
+            self.assertGreater(lowest, 1.0, feed)
+        # A guide sunk into the scalp (a simulation let it in): the braid comes out all the same.
+        arc[:] = [(0.96 * x, 0.96 * y, 0.0) for (x, y, _) in arc]
+        arc[0] = (math.sin(0.0), math.cos(0.0), 0.0)  # (its root on the scalp)
+        self.assertGreater(heights(2, False)[1], 1.0)
 
     def test_document_from_json_evaluates(self):
         doc = gl.load_graph_json(LOOK_GRAPH)  # a dict is accepted too

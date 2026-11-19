@@ -97,19 +97,30 @@ groomlab.add_braid(groom, ["braidCurve1"], style="three", width=0.25, tightness=
   lies free (the grooves between a braid's strands), never inside another, so no hair of one runs
   through another's. The hair of a section runs along its tube like the tube's own lengthwise
   lines, and the tube's surface is where the section's outermost hair lies. Where two courses
-  cross closer than the sections' thickness lets them, they are moved apart in depth first, so a
-  section keeps its hair's room all along instead of being pinched where it passes under another:
+  cross closer than the sections' thickness lets them, they are moved apart in depth first (that
+  depth eased in and out over about a weave step, so a tube never bends at a corner where a
+  crossing starts or ends), so a section keeps its hair's room all along instead of being pinched
+  where it passes under another:
   a ring's area stays within a few percent of the tube's mean at `inflate` 0, within about a tenth
   at 0.5, and dips by up to three tenths at 1, where three sections lie side by side.
-  `inflate` (0 to 1, 0.5 by default) is how fat the sections are for the room they have: at 0
-  their own size, touching only where they would overlap (gaps stay where they lie apart); at 1
-  grown until they fill the braid, the grooves shallow (a three-strand section's mean radius is
-  0.148 of the braid's width at 0, 0.166 at 0.5 and 0.174 at 1). The braid stays as wide and as
-  deep as its `width` and `flatness` say, whatever `inflate`: the sections grow fat for their
-  spacing, the braid no bigger. `separate` (1 by default) blends it in: at 0 the sections are
-  plain round tubes that pass through each other where they cross. Ties, the taper, `pancake`,
-  `loops` and a fed braid's pick-up read the same tubes, and a braid on the scalp (a cornrow, a
-  fed braid) lies on it. Version 2 also plaits the four- and five-strand braids as hands do:
+  `inflate` (0 to 1 on the slider, 0.5 by default; typed up to 4) is how fat the sections are,
+  whatever `separate` is: at 0 their own size, touching only where they would overlap (gaps stay
+  where they lie apart); at 1 grown until, pressed, they fill the braid, the grooves shallow (a
+  three-strand section's mean radius is 0.148 of the braid's width at 0, 0.166 at 0.5 and 0.174
+  at 1); above 1 overdriven: pressed, the fat sections bulge into chunky lobes and squeeze the one
+  passing between them. Pressed (`separate` 1) the braid stays as wide and as deep as its `width`
+  and `flatness` say, whatever `inflate`: the sections grow fat for their spacing, the braid no
+  bigger. `separate` (1 by default) is how far they are pressed against each other: at 0 they
+  are plain round tubes, as fat as `inflate` makes them, that pass through each other where they
+  cross (and reach farther as they grow). Ties, the taper, `pancake`, `loops` and a fed braid's
+  pick-up read the same tubes. The scalp collides with the braid, fed or not: a braid is raised
+  only as far as keeps its underside out of the scalp, so one drawn along the scalp lies on it and
+  one whose guide is drawn above the scalp or leaves the head stays on its guide (version 1 raised
+  a fed braid alone, by its whole underside, all along the pick-up, and let one not fed sink in).
+  A guide below the scalp (a simulation let it sink in) counts, down to a braid width: the braid
+  comes out all the same. Simulated, the braid follows its simulated guides frame by frame; for
+  body colliders (shoulders) give the Simulate node's `collisionOffset` half the braid's width
+  (mappable per guide and along it, for braids of other widths or a taper). Version 2 also plaits the four- and five-strand braids as hands do:
   every section runs from one edge of the braid to the other and back, over one section and
   under the next (version 1 takes an outer section two places in a step, through the ones it
   passes); the braid is as wide and as deep as version 1's. It gives the strands of four- and
