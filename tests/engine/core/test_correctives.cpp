@@ -235,5 +235,38 @@ TEST(Correctives, GroomAppliesThemAtEvaluationTime) {
     EXPECT_GT((later->guide(p)->points.back() - sculpted.guide(p)->points.back()).length(), 0.05f);
 }
 
+TEST(Correctives, StackEditsEveryHostsWay) {
+    // The stack's edits as every host makes them (correctives.h): add, move, solo, weight, keys,
+    // rename (a taken name refused), remove.
+    Correctives c;
+    const std::string sculpt = c.addLayer(true, 0.0, 1.0, 0.25, 0.25);
+    const std::string shot = c.addLayer(false, 2.0, 48.0, 0.25, 0.5);
+    EXPECT_EQ(sculpt, "sculpt1");
+    EXPECT_EQ(shot, "shot48");
+    EXPECT_TRUE(c.need(sculpt).allFrames());
+    EXPECT_DOUBLE_EQ(c.need(shot).fadeOut, 0.5);
+    EXPECT_EQ(c.moveLayer(shot, -5), 0u);  // kept within the stack
+    EXPECT_EQ(c.layers.front().name, shot);
+    EXPECT_TRUE(c.soloLayer(shot));
+    EXPECT_FALSE(c.need(sculpt).enabled);
+    EXPECT_FALSE(c.soloLayer(shot));  // already alone: every layer back on
+    EXPECT_TRUE(c.need(sculpt).enabled);
+    c.setLayerWeight(sculpt, 2.0f, 0.0);
+    EXPECT_FLOAT_EQ(c.need(sculpt).weight, 1.0f);  // clamped
+    c.keyLayerWeight(shot, 2.0, 0.5f);  // the fix's fades become keys first
+    EXPECT_EQ(c.need(shot).weightCurve.size(), 3u);
+    EXPECT_FLOAT_EQ(c.need(shot).weightAt(2.0), 0.5f);
+    c.clearLayerKeys(shot, 2.0);
+    EXPECT_TRUE(c.need(shot).allFrames());
+    EXPECT_FLOAT_EQ(c.need(shot).weight, 0.5f);
+    EXPECT_THROW(c.renameLayer(shot, sculpt), std::invalid_argument);
+    EXPECT_THROW(c.renameLayer(shot, "2 bad"), std::invalid_argument);
+    c.renameLayer(shot, "lift");
+    EXPECT_NE(c.layer("lift"), nullptr);
+    c.removeLayer("lift");
+    EXPECT_EQ(c.layers.size(), 1u);
+    EXPECT_THROW(c.removeLayer("lift"), std::invalid_argument);
+}
+
 }  // namespace
 }  // namespace groomlab

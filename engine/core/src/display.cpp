@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <set>
+#include <cctype>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -602,6 +603,30 @@ std::vector<std::uint8_t> rootToTipRamp(unsigned width) {
         pixels[x * 4 + 3] = 255;
     }
     return pixels;
+}
+
+std::map<std::string, std::string> guideGroupColorWords(const std::string& text) {
+    // The words as written (lower case): name:#rrggbb, the name not empty, six hex digits.
+    std::map<std::string, std::string> out;
+    std::size_t at = 0;
+    while (at < text.size()) {
+        const std::size_t end = std::min(text.find_first_of(" \t\r\n", at), text.size());
+        const std::string word = text.substr(at, end - at);
+        at = end + 1;
+        const std::size_t colon = word.rfind(':');
+        if (colon == std::string::npos || colon == 0 || word.size() != colon + 8 || word[colon + 1] != '#') continue;
+        std::string color = word.substr(colon + 1);
+        if (!std::all_of(color.begin() + 1, color.end(), [](unsigned char c) { return std::isxdigit(c) != 0; })) continue;
+        std::transform(color.begin(), color.end(), color.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        out[word.substr(0, colon)] = color;
+    }
+    return out;
+}
+
+std::string guideGroupColorsText(const std::map<std::string, std::string>& colors) {
+    std::string out;
+    for (const auto& [name, color] : colors) out += (out.empty() ? "" : " ") + name + ":" + color;
+    return out;
 }
 
 std::map<std::string, std::array<float, 3>> parseGuideGroupColors(const std::string& colorText) {

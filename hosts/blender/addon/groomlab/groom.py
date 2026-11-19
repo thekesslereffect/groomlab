@@ -11,7 +11,6 @@ transform carries the whole groom. The helper turns that into groom space (Y up,
 import hashlib
 import json
 import os
-import re
 import tempfile
 import threading
 import time
@@ -239,8 +238,15 @@ def _build(scalp, rt, scene):
     send_maps_dir(scalp, rt)  # a map still in a temp folder (made while untitled) copied beside the file
 
 
+_FILE_SAFE = {}
+
+
 def _file_safe(name):
-    return re.sub(r"[^A-Za-z0-9_.-]", "_", name) or "_"
+    """Text safe in a file name: the core's rule, every host's (asset_files.h fileSafeName, through
+    the helper; each name asked once)."""
+    if name not in _FILE_SAFE:
+        _FILE_SAFE[name] = process.call("file_safe_name", text=name)["name"]
+    return _FILE_SAFE[name]
 
 
 def asset_folder(kind="", blend_path=None):

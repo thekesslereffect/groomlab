@@ -32,6 +32,7 @@
 #include "groomlab/png.h"
 #include "groomlab/usd_writer.h"
 #include "groomlab/vrscene_writer.h"
+#include "groomlab/texture.h"
 
 namespace groomlab::app {
 
@@ -236,8 +237,12 @@ EngineExportOptions engineOptions(const ExportOptions& options, EngineExportOpti
     e.shafts = options.shafts;
     e.featherGuides = options.featherGuides;
     e.iridescenceAo = options.iridescenceAo;
-    e.barbDensity = options.barbDensity;
-    e.barbWidthScale = options.barbWidthScale;
+    // The barbs kept and widened as every host sets them (engine_export.h setBarbLod).
+    try {
+        setBarbLod(e, "", static_cast<double>(options.barbDensity), static_cast<double>(options.barbWidthScale));
+    } catch (const std::invalid_argument& error) {
+        throw std::runtime_error(error.what());  // (the app's exports report runtime errors)
+    }
     // Unreal: written in its space from the app's (Y up, a Z-up file turned on load; the file's
     // unit), so the importer's defaults line it up with an FBX of the same scene.
     e.upAxis = "Y";
@@ -259,7 +264,7 @@ ExportResult GroomDocument::exportEngineGroom(const std::string& path, const Exp
     ExportResult result;
     const EngineExportOptions engine =
         engineOptions(options, unity ? EngineExportOptions::Engine::Unity : EngineExportOptions::Engine::Unreal, file().units);
-    if (options.pointsPerStrand < 0 || options.barbPoints < 0) throw std::runtime_error("points per strand must be 0 or 2 to 4096");
+    if (options.pointsPerStrand < 0 || options.barbPoints < 0) throw std::runtime_error("points per strand must be 0 or more");
     const std::string problem = engine.problem();
     if (!problem.empty()) throw std::runtime_error(problem);
     try {
@@ -345,27 +350,13 @@ std::string GroomDocument::addCardsNode(std::string* made) {
 
 std::string GroomDocument::applyCardPreset(const std::string& node, const std::string& lod) {
     if (!nodeJson(node)) return "no node '" + node + "'";
-    std::vector<std::pair<std::string, ParamValue>> params;
+    std::string graph;
     try {
-        params = cardPresetParams(lod, cardNodeKind(graph_.dump(), node));
+        graph = withCardPreset(graph_.dump(), lod, {node});  // (every host's: card_presets.h)
     } catch (const std::exception& e) {
         return e.what();
     }
-    return editGraph(lod + " cards on " + node, [&](json& g) {
-        for (json& n : g["nodes"]) {
-            if (n.value("name", std::string()) != node) continue;
-            for (const auto& [name, value] : params) {
-                std::visit(
-                    [&](const auto& v) {
-                        using T = std::decay_t<decltype(v)>;
-                        if constexpr (std::is_same_v<T, bool> || std::is_same_v<T, std::int64_t> || std::is_same_v<T, double>) {
-                            n["params"][name] = v;
-                        }
-                    },
-                    value);
-            }
-        }
-    });
+    return editGraph(lod + " cards on " + node, [&](json& g) { g = json::parse(graph); });
 }
 
 std::string GroomDocument::applySimulatePreset(const std::string& node, const std::string& preset) {
@@ -440,8 +431,8 @@ CardBakeFiles GroomDocument::bakeCards(const std::string& directory, const std::
     const CardBake bake = bakeCardsInMemory(resolution, occlusion);
     // Never over another groom's bake (Maya's _free_bake_name): this groom's own is rewritten, a
     // bake there that is not its own keeps its files and this one takes name_2, name_3...
-    CardBakePaths at = CardBakePaths::in(directory, name);
-    for (int k = 2; at.exists() && !(bake_ && bake_->prefix == at.prefix); ++k) at = CardBakePaths::in(directory, name + "_" + std::to_string(k));
+    // (Every host's: card_files.h freeCardBakeName.)
+    const CardBakePaths at = CardBakePaths::in(directory, freeCardBakeName(directory, name, bake_ ? bake_->prefix : std::string()));
     CardBakeFiles files;
     try {
         // Unreal's hair card maps, the atlas and the viewport's map (a PNG the renderer reads as
@@ -603,7 +594,7 @@ ExportResult GroomDocument::exportCards(const std::string& path, const ExportOpt
 
 std::vector<std::string> GroomDocument::exportEngineCards(const std::string& directory, const std::string& name, bool unity, int resolution,
                                                           float occlusion, std::vector<std::string>* warnings) {
-    resolution = resolution > 0 ? std::clamp(resolution, 16, 16384) : 0;
+    resolution = resolution > 0 ? std::clamp(resolution, kMinBakeResolution, kMaxCardBakeResolution) : 0;
     const CardBake bake = bakeCardsInMemory(resolution, occlusion);
     const GroomStats stats = session().stats();  // the cards' counts, as Maya's card_stats has them
     const HairLook look = session().hairLook();

@@ -7,6 +7,7 @@
 #include <limits>
 #include <sstream>
 
+#include "groomlab/param_conditions.h"
 #include "groomlab/attributes.h"
 #include "groomlab/braid_tubes.h"
 #include "groomlab/display.h"
@@ -650,6 +651,10 @@ void bindGraph(py::module_& m) {
     // Controls every host makes and reads (graph_controls.h): Control nodes' sliders, Expression
     // variables with a control, keyed params.
     m.def("control_name", &controlName, py::arg("wanted"), "A control's name from any text (letters, digits, _).");
+    m.def("condition_text", [](const std::string& valueJson) { return conditionText(nlohmann::json::parse(valueJson)); },
+          py::arg("value_json"),
+          "A param's value as a showWhen/unitWhen condition reads it (param_conditions.h, every host's): "
+          "true/false, a string as it is, a whole number without its .0.");
     m.def("controls_json", &controlsJson, py::arg("graph_json"),
           "Every control the graph reads: {name: {kind, node, default, ...}} as JSON (graph_controls.h).");
 

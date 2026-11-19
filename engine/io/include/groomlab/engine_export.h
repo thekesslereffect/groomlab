@@ -27,6 +27,10 @@
 
 namespace groomlab {
 
+// The particle counts Unity's hair package (com.unity.demoteam.hair) resamples a strand to.
+constexpr std::size_t kUnityMinStrandPoints = 3;
+constexpr std::size_t kUnityMaxStrandPoints = 128;
+
 struct EngineExportOptions {
     enum class Engine { Unreal, Unity };
     Engine engine = Engine::Unreal;
@@ -46,16 +50,17 @@ struct EngineExportOptions {
     float barbDensity = 1.0f;    // barbs kept (0 to 1, by ID), each widened by barbWidthScale
     float barbWidthScale = 1.0f;
     // Unity: the curves scaled (scene units to the engine's) and resampled to pointsPerStrand
-    // (0: as they are; else 2 to 4096); a feather group's strands to barbPoints (0: as the rest);
-    // a group past maxStrandsPerGroup in parts (0: no limit).
+    // (0: as they are; else kUnityMinStrandPoints to kUnityMaxStrandPoints, the particle counts
+    // Unity's hair package takes); a feather group's strands to barbPoints (0: as the rest); a
+    // group past maxStrandsPerGroup in parts (0: no limit).
     float scale = 1.0f;
     std::size_t pointsPerStrand = 0;
     std::size_t barbPoints = 0;
     std::size_t maxStrandsPerGroup = kUnityMaxStrandsPerGroup;
 
     // Why the options cannot be written ("" when they can): a density outside (0, 1], a width
-    // scale or a scale of 0 or less, a point count of 1 or past 4096, an up axis not "Y" or "Z",
-    // centimeters per unit of 0 or less.
+    // scale or a scale of 0 or less, a Unity point count outside 3 to 128 (0: as they are), an up
+    // axis not "Y" or "Z", centimeters per unit of 0 or less: every host's check.
     std::string problem() const;
 };
 

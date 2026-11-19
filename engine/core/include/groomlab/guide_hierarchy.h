@@ -215,6 +215,8 @@ public:
     const GuideGroup* group(GroupId id) const;
     // kNoGroup if absent; a name as typed finds the group it made (guideGroupName).
     GroupId findGroup(const std::string& name) const;
+    // A group name not yet taken: `base`, else base2, base3... (every host's New Group).
+    std::string freeGroupName(const std::string& base) const;
     int groupDepth(GroupId id) const;                   // 0 for root groups, -1 if unknown
     int maxDepth() const;                               // -1 when there are no groups
     // The deepest groups of each family: those holding guides (2 points or more) with no group

@@ -146,6 +146,15 @@ std::string udimTilePath(const std::string& pattern, int tile) {
 
 bool isUdimPath(const std::string& path) { return !udimPatternOf(path).empty(); }
 
+const char* udimTokenIn(const std::string& path) {
+    const std::size_t slash = path.find_last_of("/\\");
+    const std::string name = slash == std::string::npos ? path : path.substr(slash + 1);
+    for (const char* token : kUdimTokens) {
+        if (name.find(token) != std::string::npos) return token;
+    }
+    return nullptr;
+}
+
 std::vector<std::pair<std::string, std::string>> mapImageMoves(const std::string& from, const std::string& to) {
     if (!isUdimPath(from)) return {{from, to}};
     const std::string fromSet = udimPathFor(from), toSet = udimPathFor(to);

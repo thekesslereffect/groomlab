@@ -949,6 +949,13 @@ TEST(Maps, OneNameRuleAndOneRenameForEveryHost) {
     EXPECT_EQ(sanitizeMapName("hair-mask"), "hair_mask");
     EXPECT_EQ(sanitizeMapName("2nd.pass"), "_2nd_pass");
     EXPECT_EQ(sanitizeMapName(""), "map");
+    // A map's name from an image file (every host's Import Map): the stem's letters, digits and _,
+    // trimmed of _, map_ before a digit, then a free one.
+    EXPECT_EQ(mapNameFromFile("C:/maps/hair-mask.png"), "hair_mask");
+    EXPECT_EQ(mapNameFromFile("textures/01_x.v2.png"), "map_01_x_v2");
+    EXPECT_EQ(mapNameFromFile("/a/__.png"), "map");
+    EXPECT_EQ(mapNameFromFile("density.1001.png"), "density_1001");
+    EXPECT_EQ(mapNameFromFile("d.png", [](const std::string& n) { return n == "d" || n == "d_2"; }), "d_3");
 
     // A rename's readers: Map nodes (the default name is "mask"), map params, inside compounds.
     const std::string graph = R"({"version": 1, "output": "out", "nodes": [

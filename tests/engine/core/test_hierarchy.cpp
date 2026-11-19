@@ -789,5 +789,15 @@ TEST(Hierarchy, ARemeshedScalpReRootsInsteadOfUsingStaleFaces) {
     EXPECT_EQ(GuideHierarchy::fromJson(s.h.toJson()).boundTopology(), finer->topologyHash());
 }
 
+TEST(Hierarchy, FreeGroupNamesCountFromTwo) {
+    // Every host's New Group: the name, else name2, name3...
+    GuideHierarchy h;
+    EXPECT_EQ(h.freeGroupName("base"), "base");
+    h.addGroup("base");
+    EXPECT_EQ(h.freeGroupName("base"), "base2");
+    h.addGroup("base2");
+    EXPECT_EQ(h.freeGroupName("base"), "base3");
+}
+
 }  // namespace
 }  // namespace groomlab

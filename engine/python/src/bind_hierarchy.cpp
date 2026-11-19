@@ -927,6 +927,9 @@ void bindHierarchy(py::module_& m) {
                  return false;
              },
              py::arg("name"))
+        .def("free_layer_name", &Correctives::freeLayerName, py::arg("wanted"), py::arg("current") = std::string(),
+             py::arg("taken") = std::vector<std::string>{},
+             "A layer's name as every host makes it from `wanted` (letters, digits, _; free among the layers and `taken`).")
         .def("to_json", &Correctives::toJson)
         .def_static("from_json", &Correctives::fromJson, py::arg("text"))
         .def("apply",

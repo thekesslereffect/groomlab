@@ -630,17 +630,9 @@ def is_image_path(name):
 
 
 def file_exists(path):
-    """Whether a file is there; a UDIM tile set (<UDIM>, <udim> or %(UDIM)d in its name) when any tile is."""
-    if not path:
-        return False
-    for token in UDIM_TOKENS:
-        if token in path:
-            import glob
-            folder, base = os.path.split(path)
-            pattern = glob.escape(base).replace(glob.escape(token), "[1-9][0-9][0-9][0-9]")
-            return bool(glob.glob(os.path.join(glob.escape(folder), pattern) if folder else pattern))
-    # (A texture map's plain path standing for a tile set, udim.h: any tile.)
-    return os.path.isfile(path) or (is_image_path(path) and groomlab_core.file_stamp(path) != 0)
+    """Whether a file is there; a UDIM tile set (any token, or a texture map's plain path standing
+    for one) when any tile is: the core's check, every host's (asset_files.h fileThere)."""
+    return bool(path) and groomlab_core.file_there(path)
 
 
 def missing_files(groom, graph, network=False):

@@ -36,6 +36,11 @@ namespace groomlab {
 
 constexpr int kFirstUdimTile = 1001;
 constexpr int kUdimTiles = 100;  // 1001-1100: u and v in [0, 10)
+// The tokens a tile set's path names its tiles with (Mari's and most renderers' <UDIM>, <udim>,
+// and Arnold/RenderMan's %(UDIM)d): every host's list.
+constexpr const char* kUdimTokens[] = {"<UDIM>", "<udim>", "%(UDIM)d"};
+// The token in `path`'s file name, or nullptr.
+const char* udimTokenIn(const std::string& path);
 
 // The tile of a UV (1001 + floor(u) + 10 floor(v)); -1 off the 10 x 10 grid.
 int udimTileAt(float u, float v);

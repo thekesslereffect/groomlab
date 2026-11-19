@@ -61,6 +61,7 @@
 #if GROOMLAB_HAS_ALEMBIC
 #include "groomlab/alembic_io.h"
 #include "groomlab/engine_export.h"
+#include "groomlab/texture.h"
 #endif
 
 namespace groomlab::maya {
@@ -519,7 +520,7 @@ MStatus ExportAlembicCmd::doIt(const MArgList& args) {
                 engine.pointsPerStrand = options.pointsPerStrand;
                 int barbPoints = 0;
                 if (db.isFlagSet("-bpp")) db.getFlagArgument("-bpp", 0, barbPoints);
-                if (barbPoints != 0 && (barbPoints < 2 || barbPoints > 4096)) return fail(kName, "-barbPoints must be 0 or 2 to 4096");
+                if (barbPoints < 0) return fail(kName, "-barbPoints must be 0 or more");  // (its range: EngineExportOptions::problem)
                 int maxStrands = static_cast<int>(kUnityMaxStrandsPerGroup);
                 if (db.isFlagSet("-msg")) db.getFlagArgument("-msg", 0, maxStrands);
                 if (maxStrands < 0) return fail(kName, "-maxStrandsPerGroup must be 0 (no limit) or more");
@@ -946,7 +947,7 @@ MStatus ExportGltfCmd::doIt(const MArgList& args) {
         int resolution = 0, capResolution = 0;
         if (db.isFlagSet("-r")) db.getFlagArgument("-r", 0, resolution);
         if (db.isFlagSet("-cr")) db.getFlagArgument("-cr", 0, capResolution);
-        resolution = resolution > 0 ? std::clamp(resolution, 16, 16384) : 0;  // 0: the Cards nodes' atlasSize
+        resolution = resolution > 0 ? std::clamp(resolution, kMinBakeResolution, kMaxCardBakeResolution) : 0;  // 0: the Cards nodes' atlasSize
         bool binary = true, cap = true, rootToTip = true, tangents = true;
         if (db.isFlagSet("-bin")) db.getFlagArgument("-bin", 0, binary);
         if (db.isFlagSet("-cap")) db.getFlagArgument("-cap", 0, cap);
@@ -1189,7 +1190,7 @@ MStatus BakeScaleMapsCmd::doIt(const MArgList& args) {
         options.resolution = static_cast<int>(flagDouble(db, "-r", 2048));
         options.maxHeight = static_cast<float>(flagDouble(db, "-mh", 0.0));
         options.padding = static_cast<int>(flagDouble(db, "-p", 8));
-        if (options.resolution < 16 || options.resolution > 8192) return fail(kName, "-resolution must be 16 to 8192");
+        if (options.resolution < kMinBakeResolution || options.resolution > kMaxMapBakeResolution) return fail(kName, "-resolution must be 16 to 8192");
         if (options.maxHeight < 0.0f) return fail(kName, "-maxHeight must be 0 (measured) or more");
         std::shared_ptr<const ScaleMesh> mesh;
         MeshPtr scalp;
@@ -1250,7 +1251,7 @@ MStatus BakeFollicleMapCmd::doIt(const MArgList& args) {
         options.resolution = static_cast<int>(flagDouble(db, "-r", 2048));
         options.radius = static_cast<float>(flagDouble(db, "-rad", 0.0));
         options.padding = static_cast<int>(flagDouble(db, "-p", 8));
-        if (options.resolution < 16 || options.resolution > 8192) return fail(kName, "-resolution must be 16 to 8192");
+        if (options.resolution < kMinBakeResolution || options.resolution > kMaxMapBakeResolution) return fail(kName, "-resolution must be 16 to 8192");
         if (options.radius < 0.0f) return fail(kName, "-radius must be 0 (from the roots' spacing) or more");
         // Every root at the current time (none buried: a game's strands), on the scalp it grew on.
         NodeEvaluator evaluator(path.node(), false);

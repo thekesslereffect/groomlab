@@ -232,6 +232,10 @@ std::vector<std::uint8_t> rootToTipRamp(unsigned width = 32);
 std::map<std::string, std::array<float, 3>> parseGuideGroupColors(const std::string& text);
 // A linear color as "#rrggbb" (sRGB, lower case): parseGuideGroupColors' reverse (hosts' swatches).
 std::string guideColorHex(const std::array<float, 3>& linear);
+// The same text as each group's "#rrggbb" (lower case; a word that is no name:#rrggbb left out),
+// and back ("name:#rrggbb name:#rrggbb", by name): every host's group colors as stored.
+std::map<std::string, std::string> guideGroupColorWords(const std::string& text);
+std::string guideGroupColorsText(const std::map<std::string, std::string>& colors);
 // Hidden guide groups: names separated by spaces or commas.
 std::set<std::string> parseHiddenGuideGroups(const std::string& text);
 

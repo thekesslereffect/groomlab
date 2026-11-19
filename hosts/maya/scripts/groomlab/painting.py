@@ -306,16 +306,14 @@ def _follow_file_readers(groom, graph, old_file, new_stored):
     """The graph's file params reading `old_file` (absolute; a texture param a groom painted in
     the app or Blender reads its map by the file) read `new_stored` instead; True when any did.
     `graph` changes in place."""
-    from groomlab import presets
     if not old_file or not new_stored:
         return False
-    key = os.path.normcase(os.path.normpath(old_file))
-    changed = False
-    for _label, params, param, stored in list(presets._file_params(graph)):
-        full = resolve_path(stored, groom) or stored
-        if os.path.normcase(os.path.normpath(full)) == key:
-            presets.set_file_param(params, param, new_stored)
-            changed = True
+    # The core's rule, every host's (asset_files.h retargetFileReaders).
+    text, changed = groomlab_core.retarget_file_readers(json.dumps(graph), old_file, new_stored,
+                                                        lambda stored: resolve_path(stored, groom) or stored)
+    if changed:
+        graph.clear()
+        graph.update(json.loads(text))
     return changed
 
 
@@ -576,14 +574,8 @@ def import_map(groom, path, name=None, color=None, copy=None):
     full = (resolve_path(path, groom) or path).replace("\\", "/") if path else ""
     if not full or not groomlab_core.file_stamp(full):  # (a UDIM tile set: any of its tiles)
         raise ValueError("no image at %s" % (full or path))
-    if name is None:
-        stem = re.sub(r"[^A-Za-z0-9_]", "_", os.path.splitext(os.path.basename(full))[0]).strip("_") or "map"
-        if stem[0].isdigit():
-            stem = "map_" + stem
-        taken = set(list_maps(groom))
-        name, n = stem, 2
-        while name in taken:
-            name, n = "%s_%d" % (stem, n), n + 1
+    if name is None:  # the core's rule, every host's (scalp_maps.h mapNameFromFile)
+        name = groomlab_core.map_name_from_file(full, list(list_maps(groom)))
     if color is None:
         color = not _image_is_gray(full)
     with undo_chunk("import map"):
@@ -594,14 +586,12 @@ def import_map(groom, path, name=None, color=None, copy=None):
 
 
 def _image_is_gray(path):
-    """Whether the image holds no color (every pixel r = g = b); unreadable here: False."""
+    """Whether the image holds no color (every pixel r = g = b; a UDIM tile set: every tile, the
+    core's isGrayImage, as the app and Blender ask); unreadable: False."""
     try:
-        from groomlab.ui.qt import QtGui
-        image = QtGui.QImage(path)
-        return not image.isNull() and image.allGray()
-    except Exception:  # (no Qt: mayapy without its GUI libraries)
+        return groomlab_core.is_gray_image(path)
+    except (RuntimeError, ValueError, groomlab_core.TextureError):
         return False
-
 
 def reload_map(groom, name=None):
     """Read texture map `name`'s image again (None: every texture map's) after it changed outside
@@ -643,56 +633,6 @@ def missing_files(groom):
     return out
 
 
-def _files_by_name(folder, recursive=True):
-    """{file name as the file system compares it (case-insensitive on Windows): [paths]} under `folder`."""
-    index = {}
-    for root, dirs, files in os.walk(folder):
-        for f in files:
-            index.setdefault(os.path.normcase(f), []).append(os.path.join(root, f).replace("\\", "/"))
-        if not recursive:
-            break
-        dirs.sort()
-    return index
-
-
-def _match_file(index, stored):
-    """The file of `index` that `stored` names: (path, []) when one fits, else (None, candidates).
-    Matched by file name; when several share it, the one whose folders end like the stored path's
-    does (groomlab/shot/masks/hair/density.png over another density.png), if only one does. A
-    UDIM set (<UDIM> in the name) matches its tile 1001 and keeps the token."""
-    from groomlab import presets
-    parts = [p for p in stored.replace("\\", "/").split("/") if p and p != "."]
-    if not parts:
-        return None, []
-    base = parts[-1]
-    token = next((t for t in presets.UDIM_TOKENS if t in base), None)
-    candidates = index.get(os.path.normcase(base.replace(token, "1001") if token else base), [])
-    tile_set = False
-    if not candidates and not token:  # a texture map's plain path standing for a tile set (udim.h)
-        stem, ext = os.path.splitext(base)
-        candidates = index.get(os.path.normcase(stem + ".1001" + ext), [])
-        tile_set = True
-    if token or tile_set:
-        candidates = [os.path.dirname(c) + "/" + base for c in candidates]
-    if len(candidates) == 1:
-        return candidates[0], []
-    if not candidates:
-        return None, []
-
-    def tail(path):
-        mine = [os.path.normcase(p) for p in reversed(parts)]
-        theirs = [os.path.normcase(p) for p in reversed(path.split("/"))]
-        n = 0
-        while n < min(len(mine), len(theirs)) and mine[n] == theirs[n]:
-            n += 1
-        return n
-
-    scores = sorted(((tail(c), c) for c in candidates), reverse=True)
-    if scores[0][0] > 1 and scores[0][0] > scores[1][0]:
-        return scores[0][1], []
-    return None, sorted(candidates)
-
-
 def find_missing_files(grooms, folder, recursive=True):
     """Relink the files grooms name that are missing (missing_files: texture maps, graph params,
     the guide cache and groom file) to files of the same name in `folder` (and its subfolders
@@ -708,7 +648,7 @@ def find_missing_files(grooms, folder, recursive=True):
         grooms = [grooms]
     if not folder or not os.path.isdir(folder):
         raise ValueError("no folder %s" % folder)
-    index = _files_by_name(os.path.abspath(folder), recursive)
+    index = groomlab_core.index_folder(os.path.abspath(folder), recursive)  # (every host's matching: asset_files.h)
     report = {"relinked": {}, "still_missing": {}, "ambiguous": {}}
 
     def note(section, groom, kind, key, value):
@@ -719,7 +659,7 @@ def find_missing_files(grooms, folder, recursive=True):
             missing = missing_files(groom)
 
             def look(kind, key, stored):
-                found, candidates = _match_file(index, stored)
+                found, candidates = groomlab_core.match_missing_file(index, stored)
                 if found:
                     return found
                 if candidates:

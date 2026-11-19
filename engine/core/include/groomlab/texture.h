@@ -126,6 +126,11 @@ bool isGrayImage(const Texture& image);
 // that exists (0 when none does).
 std::uint64_t fileStamp(const std::string& path);
 
+// The image sizes the core's bakes take, every host's limits: card bakes (atlases) 16 to 16384
+// square; baked maps (follicle and scale maps, card map exports, a map converted to a texture)
+// 16 to 8192. (A painted texture map: BrushToolSettings::kMin/kMaxPaintResolution.)
+constexpr int kMinBakeResolution = 16, kMaxCardBakeResolution = 16384, kMaxMapBakeResolution = 8192;
+
 // While one is alive on a thread, fileStamp there asks the file system once per path and then
 // answers from memory: one graph evaluation (Graph::evaluateOutputs holds one) reads each
 // file's stamp once for all its cache keys and texture loads. Nested scopes share the

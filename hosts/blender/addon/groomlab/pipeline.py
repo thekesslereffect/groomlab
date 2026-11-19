@@ -1546,8 +1546,6 @@ def copy_graph(source, targets):
 
 # ---- Find Missing Files ----------------------------------------------------------------------------------
 
-UDIM_TOKENS = ("<UDIM>", "<udim>", "%(UDIM)d")
-FILE_PARAM_NAMES = ("path", "texture", "textureRight")  # ImportCurves' Alembic file, FeatherColor's images
 # The images the core reads (texture.h isImagePath, stb_image): an .exr or .tif is no map it can read.
 IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".tga", ".bmp", ".psd", ".gif", ".hdr", ".pic", ".pnm", ".ppm", ".pgm")
 CONTROL_PREFIX = "ctl_"  # graph_authoring's: a slider's value on the groom (its scalp object)
@@ -1557,23 +1555,21 @@ def is_image_path(name):
     return isinstance(name, str) and (name.lower().endswith(IMAGE_EXTENSIONS) or "<UDIM>" in name)
 
 
+def files_there(paths):
+    """Which of `paths` are there: a file, or a UDIM tile set when any tile is (the core's check,
+    every host's: asset_files.h fileThere, through the helper)."""
+    paths = list(paths)
+    return process.call("files_there", paths=paths)["there"] if paths else []
+
+
 def file_exists(path):
-    """Whether a file is there; a UDIM tile set when any tile is."""
-    if not path:
-        return False
-    for token in UDIM_TOKENS:
-        if token in path:
-            import glob
-            folder, base = os.path.split(path)
-            pattern = glob.escape(base).replace(glob.escape(token), "[1-9][0-9][0-9][0-9]")
-            return bool(glob.glob(os.path.join(glob.escape(folder), pattern) if folder else pattern))
-    if os.path.isfile(path):
-        return True
-    # A texture map's plain path standing for a tile set (the core's udim.h: density.png names
-    # density.1001.png...): any tile.
-    import glob
-    stem, ext = os.path.splitext(path)
-    return bool(ext) and bool(glob.glob(glob.escape(stem) + ".[1-9][0-9][0-9][0-9]" + glob.escape(ext)))
+    return bool(path) and files_there([path])[0]
+
+
+def graph_file_params(graph):
+    """[(label, path)] of every graph param naming a file (node.param; compound/inner.param): the
+    core's list, every host's (asset_files.h graphFileParams)."""
+    return [(p["label"], p["path"]) for p in process.call("graph_file_params", graph=graph)["params"]]
 
 
 def resolve_path(path):
@@ -1585,76 +1581,24 @@ def resolve_path(path):
     return path
 
 
-def file_params(graph, where=""):
-    """(label, params, param, path) of every graph param naming a file (Maya's presets._file_params):
-    texture maps, ImportCurves' and FeatherColor's files, HairColor's map and Interpolate's regionMap
-    when an image's path, inside compounds too (compound/inner.param)."""
-    for node in graph.get("nodes", []) if isinstance(graph, dict) else []:
-        params = node.get("params") or {}
-        for name, value in list(params.items()):
-            named = name in FILE_PARAM_NAMES or (
-                (name, node.get("type")) in (("map", "HairColor"), ("regionMap", "Interpolate")) and is_image_path(value))
-            path = value.get("texture") if isinstance(value, dict) else (value if named else None)
-            if isinstance(path, str) and path.strip():
-                yield "%s%s.%s" % (where, node.get("name"), name), params, name, path
-        definition = params.get("definition") if node.get("type") == "Compound" else None
-        if isinstance(definition, dict):
-            for found in file_params(definition.get("graph", {}), "%s%s/" % (where, node.get("name"))):
-                yield found
-
-
 def missing_files(scalp):
     """The files a groom names that are not there (Maya's missing_files): {"maps": {map: path} (texture
     maps), "params": {"node.param": path} (graph params naming files), "attributes": {"groom_file": path}
     (its linked groom file)}, paths as stored."""
     rt = _session(scalp)
-    out = {"maps": {}, "params": {}, "attributes": {}}
+    entries = []  # (section, key, stored)
     for m in process.call("maps_list", session=rt.session).get("maps") or []:
-        if m.get("kind") == "texture" and m.get("texture") and not file_exists(resolve_path(m["texture"])):
-            out["maps"][m["name"]] = m["texture"]
+        if m.get("kind") == "texture" and m.get("texture"):
+            entries.append(("maps", m["name"], m["texture"]))
     graph = process.call("get_graph", session=rt.session)["graph"]
-    for label, _params, _name, path in file_params(graph):
-        if not file_exists(resolve_path(path)):
-            out["params"][label] = path
-    stored = scalp.groomlab.groom_file
-    if stored and not file_exists(resolve_path(stored)):
-        out["attributes"]["groom_file"] = stored
+    entries += [("params", label, path) for label, path in graph_file_params(graph) if path.strip()]
+    if scalp.groomlab.groom_file:
+        entries.append(("attributes", "groom_file", scalp.groomlab.groom_file))
+    out = {"maps": {}, "params": {}, "attributes": {}}
+    for (section, key, stored), there in zip(entries, files_there(resolve_path(e[2]) for e in entries)):
+        if not there:
+            out[section][key] = stored
     return out
-
-
-def _match_file(index, stored):
-    """The file of `index` that `stored` names (Maya's painting._match_file): (path, []) when one fits,
-    else (None, candidates); by name, several sharing it told apart by their folders' ends."""
-    parts = [p for p in stored.replace("\\", "/").split("/") if p and p != "."]
-    if not parts:
-        return None, []
-    base = parts[-1]
-    token = next((t for t in UDIM_TOKENS if t in base), None)
-    candidates = index.get(os.path.normcase(base.replace(token, "1001") if token else base), [])
-    tile_set = False
-    if not candidates and not token:  # a texture map's plain path standing for a tile set (udim.h)
-        stem, ext = os.path.splitext(base)
-        candidates = index.get(os.path.normcase(stem + ".1001" + ext), [])
-        tile_set = True
-    if token or tile_set:
-        candidates = [os.path.dirname(c) + "/" + base for c in candidates]
-    if len(candidates) == 1:
-        return candidates[0], []
-    if not candidates:
-        return None, []
-
-    def tail(path):
-        mine = [os.path.normcase(p) for p in reversed(parts)]
-        theirs = [os.path.normcase(p) for p in reversed(path.split("/"))]
-        n = 0
-        while n < min(len(mine), len(theirs)) and mine[n] == theirs[n]:
-            n += 1
-        return n
-
-    scores = sorted(((tail(c), c) for c in candidates), reverse=True)
-    if scores[0][0] > 1 and scores[0][0] > scores[1][0]:
-        return scores[0][1], []
-    return None, sorted(candidates)
 
 
 def collect_files(scalps):
@@ -1708,13 +1652,6 @@ def find_missing_files(scalps, folder, recursive=True):
     from . import tools
     if not folder or not os.path.isdir(folder):
         raise HelperError("not_found", "no folder %s" % folder)
-    index = {}
-    for root, dirs, files in os.walk(os.path.abspath(folder)):
-        for f in files:
-            index.setdefault(os.path.normcase(f), []).append(os.path.join(root, f).replace("\\", "/"))
-        if not recursive:
-            break
-        dirs.sort()
     report = {"relinked": {}, "still_missing": {}, "ambiguous": {}}
 
     def note(section, scalp, kind, key, value):
@@ -1722,9 +1659,13 @@ def find_missing_files(scalps, folder, recursive=True):
 
     for scalp in scalps:
         missing = missing_files(scalp)
+        stored_all = [p for kind in ("maps", "params", "attributes") for p in missing[kind].values()]
+        matches = process.call("files_match", folder=os.path.abspath(folder), recursive=recursive,
+                               stored=stored_all)["matches"] if stored_all else []
+        matched = {p: (m["found"], m["candidates"]) for p, m in zip(stored_all, matches)}
 
         def look(kind, key, stored):
-            found, candidates = _match_file(index, stored)
+            found, candidates = matched.get(stored, ("", []))
             if found:
                 return found
             note("ambiguous" if candidates else "still_missing", scalp, kind, key, candidates or stored)
@@ -1738,19 +1679,17 @@ def find_missing_files(scalps, folder, recursive=True):
         if missing["params"]:
             rt = _session(scalp)
             graph = process.call("get_graph", session=rt.session)["graph"]
-            changed = False
-            for label, params, param, stored in file_params(graph):
+            relinked = {}
+            for label, stored in graph_file_params(graph):
                 if missing["params"].get(label) != stored:
                     continue
                 found = look("params", label, stored)
                 if found:
-                    if isinstance(params.get(param), dict):
-                        params[param]["texture"] = found
-                    else:
-                        params[param] = found
+                    relinked[label] = found
                     note("relinked", scalp, "params", label, found)
-                    changed = True
+            changed = bool(relinked)
             if changed:
+                graph = process.call("with_graph_file_params", graph=graph, paths=relinked)["graph"]
                 from . import graph as graph_mod
                 process.call("set_graph", session=rt.session, graph=graph)
                 graph_mod._changed(scalp, rt)

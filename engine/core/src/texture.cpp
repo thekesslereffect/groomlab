@@ -28,6 +28,7 @@
 
 #include "groomlab/parallel.h"
 #include "groomlab/random.h"
+#include "groomlab/udim.h"
 #include "groomlab/process_caches.h"
 
 #define STB_IMAGE_IMPLEMENTATION
@@ -391,7 +392,7 @@ std::array<float, 4> Texture::sample(float u, float v) const {
 }
 
 bool isImagePath(const std::string& name) {
-    if (name.find("<UDIM>") != std::string::npos) return true;
+    if (udimTokenIn(name)) return true;  // (a tile set, any token: udim.h)
     const std::size_t dot = name.find_last_of('.');
     if (dot == std::string::npos || name.find_first_of("/\\", dot) != std::string::npos) return false;
     std::string ext = name.substr(dot + 1);

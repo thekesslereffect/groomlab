@@ -35,6 +35,8 @@
 #include "groomlab/subdivision.h"
 #include "groomlab/texture.h"
 #include "groomlab/transfer.h"
+#include "groomlab/stroke.h"
+#include "groomlab/groom_transfer.h"
 #include "graph_presets.h"
 
 namespace groomlab::app {
@@ -150,16 +152,7 @@ GroomDocument::GroomDocument(GroomFile file, std::string path) : path_(std::move
     loadMaps();
     controlKeys_ = scene_->file().controlKeys;
     // The groups' own colors and the hidden groups as the file keeps them (Maya's attributes' text).
-    {
-        std::istringstream words(scene_->file().guideGroupColors);
-        for (std::string word; words >> word;) {
-            const std::size_t colon = word.rfind(':');
-            if (colon == std::string::npos || colon == 0 || word.size() != colon + 8 || word[colon + 1] != '#') continue;
-            std::string color = word.substr(colon + 1);
-            std::transform(color.begin(), color.end(), color.begin(), [](char c) { return static_cast<char>(std::tolower(static_cast<unsigned char>(c))); });
-            groupColors_[word.substr(0, colon)] = color;
-        }
-    }
+    for (const auto& [group, color] : guideGroupColorWords(scene_->file().guideGroupColors)) groupColors_[group] = color;  // (display.h)
     hiddenGroups_ = parseHiddenGuideGroups(scene_->file().hiddenGuideGroups);
     braidTubes_ = scene_->file().braidTubes;  // Show Tubes' nodes
     // The caches' first frame is where an animated groom opens (Maya opens at the range's start).
@@ -272,44 +265,29 @@ std::string GroomDocument::createMap(const std::string& name, const std::string&
     if (!scalp) return "no scalp to paint on";
     if (kind == "guides") {
         if (color) return "a guide layer is gray: make a color map on the scalp's vertices or as a texture";
-        return editGuides("create map " + name, [&](GuideHierarchy& h) {
-            bool any = false;
-            for (const HierarchyGuide& g : h.guides()) {
-                if (g.parent != kNoGuide) continue;  // children inherit their primary's
-                h.setAttribute(g.id, name, value);
-                any = true;
-            }
-            if (!any) throw std::invalid_argument("no primary guides to carry the layer: place some first");
+        return editGuides("create map " + name, [&](GuideHierarchy& h) {  // (every host's: addGuideLayer)
+            if (!addGuideLayer(h, name, value)) throw std::invalid_argument("no primary guides to carry the layer: place some first");
         });
     }
     ScalpMaps maps = session().scalpMaps();
     ScalpMapEntry entry;
     entry.channels = color ? kColorMap : kGrayMap;
+    // (Every host's New Map: scalp_paint.h newVertexMapValues, newTextureMapPaint.)
+    const PaintColor filled = color ? fill : PaintColor{value, value, value, 1.0f};
     if (kind == "vertices") {
         entry.kind = "vertices";
-        const std::size_t n = scalp->pointCount();
-        entry.values.resize(n * static_cast<std::size_t>(entry.channels));
-        for (std::size_t v = 0; v < n; ++v) {
-            if (color) {
-                for (std::size_t c = 0; c < 4; ++c) entry.values[v * 4 + c] = fill[c];
-            } else {
-                entry.values[v] = value;
-            }
-        }
+        entry.values = newVertexMapValues(*scalp, entry.channels, filled);
     } else if (kind == "texture") {
         if (!scalp->hasUVs()) return "the scalp has no UVs to paint a texture map on";
         const std::string folder = mapsDirectory();
         if (folder.empty()) return "save the groom first: a texture map's image goes in the groomlab folder beside it";
         // groomlab/<groom>/masks/<name>.png beside the groom file, a free <name>_2.png when that is taken
         // (as the Maya host names them), the file written now so the map reads from the start.
-        // (Taken: a file, or a tile set of that name: fileStamp sees either.)
-        std::filesystem::path file = std::filesystem::u8path(folder) / (name + ".png");
-        for (int k = 2; fileStamp(file.u8string()) != 0; ++k) file = std::filesystem::u8path(folder) / (name + "_" + std::to_string(k) + ".png");
+        // (asset_files.h freeFilePath: a file or a tile set of that name is taken.)
+        const std::filesystem::path file = std::filesystem::u8path(freeFilePath(folder + "/" + name + ".png"));
         try {
             std::filesystem::create_directories(file.parent_path());
-            const int size = std::clamp(resolution, 4, 16384);
-            const TexturePaint paint = color ? TexturePaint(*scalp, size, size, fill) : TexturePaint(*scalp, size, size, value);
-            paint.save(forwardSlashes(file.u8string()));
+            newTextureMapPaint(*scalp, entry.channels, filled, resolution).save(forwardSlashes(file.u8string()));
         } catch (const std::exception& e) {
             return std::string("cannot write the map's image: ") + e.what();
         }
@@ -349,11 +327,7 @@ std::string GroomDocument::renameMap(const std::string& from, const std::string&
             const std::filesystem::path full = std::filesystem::u8path(resolveMapPath(entry.texture));
             const std::string renamed = renamedMapTexture(full.generic_u8string(), from, to);
             if (!renamed.empty()) {
-                std::filesystem::path target = std::filesystem::u8path(renamed);
-                const std::string stem = target.stem().u8string();
-                for (int k = 2; fileStamp(target.generic_u8string()) != 0; ++k) {  // (a file, or a tile set of that name)
-                    target = full.parent_path() / (stem + "_" + std::to_string(k) + full.extension().u8string());
-                }
+                const std::filesystem::path target = std::filesystem::u8path(freeFilePath(renamed));  // (a file or a tile set: taken)
                 std::error_code ec;
                 for (const auto& [a, b] : mapImageMoves(full.generic_u8string(), target.generic_u8string())) {  // (a tile set: each tile)
                     if (!ec) std::filesystem::rename(std::filesystem::u8path(a), std::filesystem::u8path(b), ec);
@@ -1675,12 +1649,11 @@ std::string GroomDocument::transferToScalp(MeshPtr scalp, const TransferOptions&
     const MeshPtr from = scene_->file().data.scalp;
     if (!from || from->triangleCount() == 0) return "the groom has no scalp to move from";
     TransferOptions options = given;
-    // Fitting the size: the groom's scale grows the guides about their roots; the mapping only turns them.
-    if (options.fitSize && session().scaleWithScalp()) options.keepLengths = true;
     if (usesMarkers(options.method) && options.markers.empty()) options.markers = transferMarkers();
     std::unique_ptr<ScalpMapping> mapping;
     try {
-        if (!options.markers.empty()) options.markers = snapTransferMarkers(options.markers, *from, *scalp);
+        // (Every host's: groom_transfer.h; the size fitted keeps the lengths, the markers snapped.)
+        options = preparedTransferOptions(options, options.fitSize, session().scaleWithScalp(), *from, *scalp);
         mapping = std::make_unique<ScalpMapping>(*from, *scalp, options, warnings);
     } catch (const std::exception& e) {
         return e.what();
@@ -1690,31 +1663,12 @@ std::string GroomDocument::transferToScalp(MeshPtr scalp, const TransferOptions&
     if (!options.markers.empty()) file.transferMarkers = options.markers;
     ScalpMaps projected = session().scalpMaps();
     try {
-        // The guides, parts and flow re-rooted (the core's transfer, Maya's groomLabTransfer's).
-        if (!file.data.hierarchyJson.empty()) {
-            GuideHierarchy h = GuideHierarchy::fromJson(file.data.hierarchyJson);
-            h.setScale(static_cast<float>(session().groomScale()));  // moved as shown: the groom keeps its scale
-            h.transfer(*mapping);
-            file.data.hierarchyJson = h.toJson();
-        }
-        if (!file.data.partsJson.empty()) {
-            const PartSet parts = PartSet::fromJson(file.data.partsJson);
-            const PartSet out = parts.transferred(*mapping);
-            if (out.parts.size() < parts.parts.size() && warnings) warnings->push_back("some parts fell apart on the new scalp and were dropped");
-            file.data.partsJson = out.empty() ? std::string() : out.toJson();
-        }
-        if (!file.data.flowJson.empty()) {
-            const FlowSet flow = FlowSet::fromJson(file.data.flowJson);
-            const FlowSet out = flow.transferred(*mapping);
-            if ((out.pins.size() < flow.pins.size() || out.sinks.size() < flow.sinks.size()) && warnings) {
-                warnings->push_back("some flow arrows did not fit the new scalp and were dropped");
-            }
-            file.data.flowJson = out.empty() ? std::string() : out.toJson();
-        }
-        if (mapping->uvMisses() > 0 && warnings) {
-            warnings->push_back(std::to_string(mapping->uvMisses()) +
-                                " roots found no matching UV on the new scalp and went to the closest point");
-        }
+        // The guides, parts and flow re-rooted (every host's: groom_transfer.h).
+        const GroomTransferTexts moved = transferGroomTexts(file.data.hierarchyJson, file.data.partsJson, file.data.flowJson, *mapping,
+                                                            session().groomScale(), warnings);
+        file.data.hierarchyJson = moved.hierarchyJson;
+        file.data.partsJson = moved.partsJson;
+        file.data.flowJson = moved.flowJson;
         // The maps through the same mapping: a texture map's new image beside the groom (the groom saved).
         if (maps) {
             MapProjectionFiles files;
@@ -1724,10 +1678,7 @@ std::string GroomDocument::transferToScalp(MeshPtr scalp, const TransferOptions&
                 files.write = [this, folder](const std::string& name, const TexturePaint& paint) {
                     std::error_code ec;
                     std::filesystem::create_directories(std::filesystem::u8path(folder), ec);
-                    std::string target = folder + "/" + name + ".png";
-                    for (int k = 2; fileStamp(target) != 0; ++k) {  // (a file, or a tile set of that name)
-                        target = folder + "/" + name + "_" + std::to_string(k) + ".png";
-                    }
+                    const std::string target = freeFilePath(folder + "/" + name + ".png");  // (a file or a tile set: taken)
                     paint.save(target);
                     return pathFromGroomFolder(target, std::filesystem::u8path(path_).parent_path().u8string());
                 };

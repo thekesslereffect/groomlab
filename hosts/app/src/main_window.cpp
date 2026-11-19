@@ -53,6 +53,7 @@
 #include "groomlab/node_catalog.h"
 #include "groomlab/shortcuts.h"
 #include "graph_presets.h"  // appResourceDir
+#include "groomlab/color.h"
 
 namespace groomlab::app {
 
@@ -68,7 +69,7 @@ MainWindow::MainWindow() {
         // The brush ring in the theme's tone (viewport.brushRing, else the accent's ink), linear.
         const QColor named = theme::viewportColor("brushRing");
         const QColor ring = named.isValid() ? named : theme::accentInk();
-        auto lin = [](qreal c) { return static_cast<float>(c <= 0.04045 ? c / 12.92 : std::pow((c + 0.055) / 1.055, 2.4)); };
+        auto lin = [](qreal c) { return groomlab::srgbToLinear(static_cast<float>(c)); };  // (color.h)
         brush_.setRingTone({lin(ring.redF()), lin(ring.greenF()), lin(ring.blueF())});
     }
     viewport_ = new Viewport();

@@ -36,6 +36,7 @@
 #include "groomlab/retriangulate.h"
 #include "groomlab/scalp_maps.h"
 #include "groomlab/scalp_paint.h"
+#include "groomlab/udim.h"
 #include "maya_inputs.h"
 
 namespace groomlab::maya {
@@ -59,9 +60,10 @@ std::string sceneUpAxis() { return MGlobal::isZAxisUp() ? "Z" : "Y"; }
 
 std::string generic(const std::string& path) { return path.empty() ? path : fs::u8path(path).generic_u8string(); }
 
+// (A texture map's plain path standing for a tile set, udim.h: there when any tile is.)
 bool exists(const std::string& path) {
     std::error_code ec;
-    return !path.empty() && fs::exists(fs::u8path(path), ec);
+    return !path.empty() && (fs::exists(fs::u8path(path), ec) || (isImagePath(path) && fileStamp(path) != 0));
 }
 
 // Groom `index` of the file (a file holds one groom or several: groom_file.h), read and turned
@@ -400,10 +402,12 @@ MStatus ImportGroomCmd::doIt(const MArgList& args) {
                 std::string to = masks + "/" + name + fs::u8path(from).extension().u8string();
                 if (sameFile(fs::u8path(from).parent_path().u8string(), masks)) {
                     to = generic(from);  // the groom's own (the file came from this scene): read in place
-                } else if (exists(to) && fileBytes(to) != fileBytes(from)) {
+                } else if (exists(to) && !sameMapImage(from, to)) {
                     to = freeFilePath(to);
                 }
-                if (!sameFile(from, to)) copyFor(from, to);
+                if (!sameFile(from, to)) {
+                    for (const auto& [a, b] : mapImageMoves(from, to)) copyFor(a, b);  // (a tile set: each tile)
+                }
                 entry.texture = portableMayaPath(to);
                 if (!sameFile(from, to)) movedImages.emplace_back(from, entry.texture);
             }

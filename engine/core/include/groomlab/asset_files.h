@@ -6,6 +6,9 @@
 // else (Maya's paths.asset_folder and follow_scene_files, for the app and the Blender helper).
 
 #include <functional>
+#include <map>
+#include <optional>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -73,6 +76,50 @@ std::string collectFile(const std::string& path, const std::string& folder, std:
 // replaced by what it returns; the graph's text back (`changed`: whether any value changed).
 std::string followGraphFiles(const std::string& graphJson, const std::function<std::string(const std::string&)>& follow,
                              bool* changed = nullptr);
+// The same params by label ("node.param"; inside a compound "compound/inner.param"), each with
+// its path as stored (empty ones left out), in the graph's order: Find Missing Files, the File
+// Path Editor and Collect Files in every host.
+std::vector<std::pair<std::string, std::string>> graphFileParams(const std::string& graphJson);
+// The graph with the params `paths` labels (graphFileParams) naming their new paths (a texture
+// value keeps its other fields); the text back (`changed`: whether any value changed).
+std::string withGraphFileParams(const std::string& graphJson, const std::map<std::string, std::string>& paths,
+                                bool* changed = nullptr);
+
+// A file as an edit found it and left it (every host's undo of the files an edit writes, moves
+// or deletes): its bytes, or none when there was no file.
+struct FileState {
+    std::string path;
+    std::optional<std::string> before, after;
+};
+// A file's bytes now (none when it is not there).
+std::optional<std::string> readFileState(const std::string& path);
+// The bytes written (folders made), or the file removed for none.
+void putFileState(const std::string& path, const std::optional<std::string>& bytes);
+// Every file a texture map's image is (udim.h mapImageFiles: a tile set's every tile, `tiles`
+// among them; the one image a tile set replaces), each as it reads before an edit...
+std::vector<FileState> mapImageStates(const std::string& path, const std::vector<int>& tiles = {});
+// ... each one's bytes after it (`after` read now) ...
+void finishFileStates(std::vector<FileState>& states);
+// ... and put back as before (undo: the last first) or after (redo).
+void restoreFileStates(const std::vector<FileState>& states, bool after);
+
+// Whether a file a groom names is there: a file, or a UDIM tile set when any tile is (any token,
+// or a texture map's plain path standing for a set: udim.h). Every host's missing-file check.
+bool fileThere(const std::string& path);
+
+// Find Missing Files (every host's): a folder's files by name (case-blind on Windows), and the UDIM
+// tile sets among them by the set's name ("dens.<udim>.png", and "dens.png" for a set named
+// dens.1001.png..., the plain path a texture map stores: udim.h), each with the folders holding it.
+struct FileIndex {
+    std::map<std::string, std::vector<std::string>> files;  // a name's key -> the files (absolute)
+    std::map<std::string, std::set<std::string>> sets;      // a set's name's key -> its folders
+};
+FileIndex indexFolder(const std::string& folder, bool recursive = true);
+// The file of `index` a stored path names: by its file name (a tile set's by its set name, the
+// token or plain path kept); several of that name told apart by how many of the stored path's
+// folders end theirs, when one ends it best by at least two parts. "" when none fits or several
+// do (then `candidates` gets them, sorted).
+std::string matchMissingFile(const FileIndex& index, const std::string& stored, std::vector<std::string>* candidates = nullptr);
 
 // Whether two paths name the same file as the file system compares them (normal, case-blind on
 // Windows), whether or not it is there.

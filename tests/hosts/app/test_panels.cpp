@@ -1361,14 +1361,15 @@ TEST(AppPanels, CorrectivesPanelAddsLayersAndAimsTheBrush) {
     EXPECT_EQ(panel.targetLayer(), "shot12") << "an edit of another layer keeps the target";
     EXPECT_TRUE(panel.renameLayer("shot12", "lift"));
     EXPECT_EQ(panel.targetLayer(), "lift");
-    // A name taken (or one of other characters): made free, as Maya and Blender rename layers.
-    EXPECT_TRUE(panel.renameLayer("lift", "sculpt1"));
-    EXPECT_EQ(panel.targetLayer(), "sculpt1_2");
+    // A name taken (or one of other characters): refused with one to try, as every host renames
+    // layers (correctives.h renameLayer).
+    EXPECT_FALSE(panel.renameLayer("lift", "sculpt1"));
+    EXPECT_EQ(panel.targetLayer(), "lift");
     // Back to the base groom: ordinary strokes; a removed target lets the brush go too.
     panel.setTargetLayer({});
     EXPECT_FALSE(session.shotSculpt());
-    panel.setTargetLayer("sculpt1_2");
-    EXPECT_TRUE(panel.removeLayer("sculpt1_2"));
+    panel.setTargetLayer("lift");
+    EXPECT_TRUE(panel.removeLayer("lift"));
     EXPECT_EQ(panel.targetLayer(), "");
     EXPECT_FALSE(session.shotSculpt());
     EXPECT_FALSE(panel.removeLayer("nope"));

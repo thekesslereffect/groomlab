@@ -396,7 +396,7 @@ def _corrective_weight(groom, layer, fps, keep_keys):
     name, slot, curve = layer["name"], int(layer["slot"]), layer.get("weightCurve") or []
     source = shots._source(groom, name)
     if keep_keys and curve and cmds.objExists(source) and \
-            all(abs(cmds.getAttr(source, time=t * fps) - w) < 1e-3 for t, w in curve):
+            all(abs(cmds.getAttr(source, time=groomlab_core.seconds_to_frame(t, fps)) - w) < 1e-3 for t, w in curve):
         target = shots._shape_plug(groom, slot)
         if not cmds.isConnected(source, target):
             cmds.connectAttr(source, target, force=True)
@@ -407,7 +407,8 @@ def _corrective_weight(groom, layer, fps, keep_keys):
         cmds.warning("GroomLab: corrective %s keeps its weight unkeyed (%s)" % (name, e))
         return
     for t, w in curve:
-        cmds.setKeyframe(source, time=t * fps, value=w, inTangentType="linear", outTangentType="linear")
+        cmds.setKeyframe(source, time=groomlab_core.seconds_to_frame(t, fps), value=w, inTangentType="linear",
+                         outTangentType="linear")
 
 
 def _import_scalp_cache(cache, obj, name, count):

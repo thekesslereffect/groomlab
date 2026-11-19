@@ -37,8 +37,11 @@ std::string EngineExportOptions::problem() const {
     if (!(barbDensity > 0.0f && barbDensity <= 1.0f)) return "the barb density must be above 0 and at most 1";
     if (!(barbWidthScale > 0.0f)) return "the barb width scale must be positive";
     if (!(scale > 0.0f)) return "the scale must be positive";
-    if (pointsPerStrand != 0 && (pointsPerStrand < 2 || pointsPerStrand > 4096)) return "points per strand must be 0 or 2 to 4096";
-    if (barbPoints != 0 && (barbPoints < 2 || barbPoints > 4096)) return "barb points must be 0 or 2 to 4096";
+    if (engine == Engine::Unity) {
+        auto outside = [](std::size_t n) { return n != 0 && (n < kUnityMinStrandPoints || n > kUnityMaxStrandPoints); };
+        if (outside(pointsPerStrand)) return "points per strand must be 3 to 128 (Unity's strand particle counts), or 0: as they are";
+        if (outside(barbPoints)) return "barb points must be 3 to 128 (Unity's strand particle counts), or 0: as they are";
+    }
     if (upAxis != "Y" && upAxis != "Z") return "the up axis must be Y or Z";
     if (!(centimetersPerUnit > 0.0) || !std::isfinite(centimetersPerUnit)) return "the centimeters per unit must be positive";
     return {};

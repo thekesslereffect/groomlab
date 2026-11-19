@@ -35,6 +35,7 @@
 #include "glass.h"
 #include "list_bar.h"
 #include "theme.h"
+#include "groomlab/color.h"
 
 namespace groomlab::app {
 
@@ -43,20 +44,13 @@ namespace {
 const ui::Definitions& defs() { return ui::Definitions::shipped(); }
 QString qs(const std::string& s) { return QString::fromStdString(s); }
 
-// A group name not yet taken: base, base1, base2...
-std::string uniqueName(const GuideHierarchy& h, const std::string& base) {
-    if (h.findGroup(base) == kNoGroup) return base;
-    for (int k = 1;; ++k) {
-        const std::string name = base + std::to_string(k);
-        if (h.findGroup(name) == kNoGroup) return name;
-    }
-}
+// A group name not yet taken: base, base2, base3... (every host's rule, GuideHierarchy::freeGroupName).
+std::string uniqueName(const GuideHierarchy& h, const std::string& base) { return h.freeGroupName(base); }
 
 // A linear color as the screen shows it (sRGB).
 QColor shownColor(const std::array<float, 3>& linear) {
     auto channel = [](float c) {
-        c = std::clamp(c, 0.0f, 1.0f);
-        const float s = c <= 0.0031308f ? 12.92f * c : 1.055f * std::pow(c, 1.0f / 2.4f) - 0.055f;
+        const float s = groomlab::linearToSrgb01(c);  // (color.h)
         return static_cast<int>(std::lround(s * 255.0f));
     };
     return QColor(channel(linear[0]), channel(linear[1]), channel(linear[2]));

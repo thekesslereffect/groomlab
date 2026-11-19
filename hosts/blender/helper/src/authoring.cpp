@@ -476,22 +476,10 @@ json correctiveNew(Session& s, const json& args) {
     bool fades = optBool(args, "fix", false);  // the app's Fix Frame: fades of 6 frames
     for (const char* key : {"fade", "fadeIn", "fadeOut"}) fades = fades || (args.contains(key) && !args[key].is_null());
     const bool all = optBool(args, "allFrames", !fades);
-    CorrectiveLayer layer;
-    // Every host's names (correctives.h): sculpt<N> or shot<F>, made free.
-    layer.name = c.freeLayerName(optString(args, "name", c.newLayerName(all, frame)));
-    layer.time = secondsOf(s, frame);
-    layer.holdBefore = layer.holdAfter = all;
-    if (all) {
-        layer.fadeIn = layer.fadeOut = 0.5;
-    } else {
-        double in = 6.0, out = 6.0;
-        fadesOf(args, in, out, 6.0, 6.0);
-        layer.fadeIn = in / fpsOf(s);
-        layer.fadeOut = out / fpsOf(s);
-    }
-    layer.weight = 1.0f;
-    const std::string name = layer.name;
-    c.layers.push_back(std::move(layer));
+    double in = 6.0, out = 6.0;
+    if (!all) fadesOf(args, in, out, 6.0, 6.0);
+    // Every host's (correctives.h addLayer): sculpt<N> or shot<F>, made free.
+    const std::string name = c.addLayer(all, secondsOf(s, frame), frame, in / fpsOf(s), out / fpsOf(s), optString(args, "name", ""));
     commitTexts(s, "add corrective", {{StrokeField::Correctives, c.toJson()}});
     // What the next strokes sculpt into (shots.py's set_target): no Sculpt node then.
     s.groom->setSculptTarget({});
@@ -549,12 +537,7 @@ json correctiveSet(Session& s, const json& args) {
         l.holdBefore = l.holdAfter = false;
         l.weight = weighted ? weightArg(args) : peak;
     } else if (weighted) {
-        const float w = weightArg(args);
-        if (!l.weightCurve.empty()) {
-            l.keyAt(s.seconds, w);
-        } else {
-            l.weight = w;
-        }
+        c.setLayerWeight(l.name, weightArg(args), s.seconds);  // (correctives.h)
     }
     const std::string name = l.name;
     return commitLayers(s, "edit corrective", c, {{"name", name}});
@@ -563,13 +546,13 @@ json correctiveSet(Session& s, const json& args) {
 json correctiveRename(Session& s, const json& args) {
     Correctives c = correctivesOf(s);
     const std::string name = needString(args, "name"), to = needString(args, "to");
-    CorrectiveLayer& l = layerOf(c, name);
+    layerOf(c, name);
     if (to == name) return commitLayers(s, "rename corrective", c, {{"name", name}});
-    const std::string clean = c.freeLayerName(to, name);
-    if (clean != to) {
-        fail("bad_request", "'" + to + "' cannot name a corrective (taken, or not letters, digits and _): try '" + clean + "'");
+    try {
+        c.renameLayer(name, to);  // (correctives.h: a taken or invalid name refused, one to try given)
+    } catch (const std::invalid_argument& e) {
+        fail("bad_request", e.what());
     }
-    l.name = to;
     const bool target = shotLayer(s) == name;
     json r = commitLayers(s, "rename corrective", c, {{"name", to}, {"renamed", name}});
     if (target) {
@@ -585,13 +568,7 @@ json correctiveMove(Session& s, const json& args) {
     layerOf(c, name);
     const double stepArg = optNumber(args, "step", 1.0);
     if (!std::isfinite(stepArg)) fail("bad_request", "step is a whole number (+1 up the stack, -1 down)");
-    const long step = std::lround(stepArg);
-    auto it = std::find_if(c.layers.begin(), c.layers.end(), [&](const CorrectiveLayer& l) { return l.name == name; });
-    const long i = static_cast<long>(it - c.layers.begin());
-    const long j = std::clamp(i + step, 0L, static_cast<long>(c.layers.size()) - 1);
-    CorrectiveLayer moved = std::move(*it);
-    c.layers.erase(it);
-    c.layers.insert(c.layers.begin() + j, std::move(moved));
+    const std::size_t j = c.moveLayer(name, std::lround(stepArg));  // (correctives.h)
     return commitLayers(s, "move corrective", c, {{"name", name}, {"index", j}});
 }
 
@@ -600,29 +577,23 @@ json correctiveSolo(Session& s, const json& args) {
     Correctives c = correctivesOf(s);
     const std::string name = needString(args, "name");
     layerOf(c, name);
-    const bool alone = std::all_of(c.layers.begin(), c.layers.end(), [&](const CorrectiveLayer& l) { return l.enabled == (l.name == name); });
-    for (CorrectiveLayer& l : c.layers) l.enabled = alone || l.name == name;
-    return commitLayers(s, "solo corrective", c, {{"name", name}, {"soloed", !alone}});
+    const bool soloed = c.soloLayer(name);  // (correctives.h)
+    return commitLayers(s, "solo corrective", c, {{"name", name}, {"soloed", soloed}});
 }
 
 json correctiveDelete(Session& s, const json& args) {
     Correctives c = correctivesOf(s);
     const std::string name = needString(args, "name");
     layerOf(c, name);
-    c.layers.erase(std::remove_if(c.layers.begin(), c.layers.end(), [&](const CorrectiveLayer& l) { return l.name == name; }), c.layers.end());
+    c.removeLayer(name);  // (correctives.h)
     return commitLayers(s, "remove corrective", c, {{"removed", name}});  // the target goes with it (tools.cpp pruneTargets)
 }
 
 // shots.py's clear_keys: the keys (or a fix's fades) dropped, the layer on every frame at its weight now.
 json correctiveClearKeys(Session& s, const json& args) {
     Correctives c = correctivesOf(s);
-    CorrectiveLayer& l = layerOf(c, needString(args, "name"));
-    if (!l.allFrames()) {
-        l.weight = l.weightAt(s.seconds);
-        l.weightCurve.clear();
-        l.holdBefore = l.holdAfter = true;
-    }
-    const std::string name = l.name;
+    const std::string name = layerOf(c, needString(args, "name")).name;
+    c.clearLayerKeys(name, s.seconds);  // (correctives.h)
     return commitLayers(s, "clear corrective keys", c, {{"name", name}});
 }
 

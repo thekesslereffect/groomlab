@@ -12,6 +12,7 @@
 //    "detail": {"kind": "texture", "texture": "groomlab/shot/masks/hair/detail.png"},
 //    "packed": {"kind": "texture", "channels": 4, "texture": "groomlab/shot/masks/hair/packed.png"}}
 
+#include <functional>
 #include <cstdint>
 #include <map>
 #include <string>
@@ -68,6 +69,10 @@ bool validMapName(const std::string& name);
 std::string mapNameError(const std::string& name);
 // A valid name made from `name`: every other character _, a leading digit after a _ ("map" for "").
 std::string sanitizeMapName(const std::string& name);
+// A map's name made from an image file's (every host's Import Map): the file name's stem, its
+// letters, digits and _ (any other character _), the _ trimmed from both ends ("map" when none is
+// left), "map_" before a leading digit, then _2, _3... while `taken` says the name is in use.
+std::string mapNameFromFile(const std::string& path, const std::function<bool(const std::string&)>& taken = {});
 // The map a param's own map is named (Paint on a setting, New Map > for a setting): "<node>_<param>",
 // sanitized. When the groom has a map of that name already (made for the param before, its link
 // since gone), every host links that map again, whatever its kind, its painting back, rather than

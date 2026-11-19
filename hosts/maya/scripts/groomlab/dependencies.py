@@ -231,34 +231,6 @@ def _inside(path, folder):
     return _relative_to(path, folder) is not None
 
 
-def _tiles(path):
-    """The files a path names: itself, or a UDIM set's tiles."""
-    from groomlab import presets
-    import glob
-    for token in presets.UDIM_TOKENS:
-        if token in path:
-            folder, base = os.path.split(path)
-            pattern = glob.escape(base).replace(glob.escape(token), "[1-9][0-9][0-9][0-9]")
-            return sorted(glob.glob(os.path.join(glob.escape(folder), pattern)))
-    return [path] if os.path.isfile(path) else []
-
-
-def _copy_into(src, folder):
-    """`src` copied into `folder` under its own name (the same content there already: that file; other
-    content: a free name). Returns the copy's path."""
-    import filecmp
-    import shutil
-    from groomlab.paths import _unique_path
-    if not os.path.isdir(folder):
-        os.makedirs(folder)
-    dst = os.path.join(folder, os.path.basename(src)).replace("\\", "/")
-    if os.path.exists(dst) and not filecmp.cmp(src, dst, shallow=False):
-        dst = _unique_path(dst)
-    if not os.path.exists(dst):
-        shutil.copy2(src, dst)
-    return dst
-
-
 def collect_files(grooms=None):
     """Copy every file the grooms use (file_dependencies) that lies outside the scene's folder into
     its asset folder (groomlab/<scene>/masks/<groom>, caches/<groom>, cards/<groom>...) and point the
@@ -268,7 +240,6 @@ def collect_files(grooms=None):
     a groom or a list (default every groom). One undo step (the copies stay). Returns {"copied":
     {groom: {kind: {key: stored path}}}, "missing": {groom: {kind: {key: path}}}, "inside": files
     already in the scene's folder}. Raises ValueError while the scene is untitled."""
-    from groomlab import presets
     from groomlab.base import undo_chunk
     from groomlab.paths import asset_folder, asset_name, scene_folder
     if not scene_folder():
@@ -292,14 +263,7 @@ def collect_files(grooms=None):
                 if _inside(resolved, scene_folder()):
                     report["inside"] += 1
                     continue
-                files = _tiles(resolved)
-                if not files and groomlab_core.file_stamp(resolved) != 0:
-                    # A texture map's plain path standing for a tile set (udim.h): every tile, under
-                    # one name (the core's Collect Files, as the app's and Blender's).
-                    target = "%s/%s" % (asset_folder(_COLLECT_FOLDERS.get(kind, "caches")), asset_name(groom))
-                    note("copied", groom, kind, key, repath_file(groom, kind, key, groomlab_core.collect_file(resolved, target)))
-                    continue
-                if not files:
+                if not groomlab_core.file_there(resolved):  # (a UDIM set: any tile)
                     note("missing", groom, kind, key, f["path"])
                     continue
                 if kind == "cardBake":  # the bake moves as a whole: every file of its prefix
@@ -312,9 +276,10 @@ def collect_files(grooms=None):
                 if kind == "attribute" and key == "groomFile":
                     folder = "exports"
                 target = "%s/%s" % (asset_folder(folder), asset_name(groom))
-                copies = [_copy_into(t, target) for t in files]
-                udim = any(t in resolved for t in presets.UDIM_TOKENS)  # its token kept, in the new folder
-                stored = target + "/" + os.path.basename(resolved) if udim else copies[0]
+                # The core's Collect Files, every host's: under its own name, the same file there as
+                # it is, other content a free name; a UDIM set's every tile under one name, its
+                # token or plain path kept (asset_files.h collectFile).
+                stored = groomlab_core.collect_file(resolved, target)
                 note("copied", groom, kind, key, repath_file(groom, kind, key, stored))
     return report
 

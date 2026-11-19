@@ -365,6 +365,14 @@ const GuideGroup* GuideHierarchy::group(GroupId id) const {
     return nullptr;
 }
 
+std::string GuideHierarchy::freeGroupName(const std::string& base) const {
+    if (findGroup(base) == kNoGroup) return base;
+    for (int k = 2;; ++k) {
+        const std::string name = base + std::to_string(k);
+        if (findGroup(name) == kNoGroup) return name;
+    }
+}
+
 GroupId GuideHierarchy::findGroup(const std::string& name) const {
     for (const GuideGroup& g : groups_) {
         if (g.name == name) return g.id;

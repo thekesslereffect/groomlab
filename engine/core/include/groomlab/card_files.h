@@ -21,6 +21,7 @@
 // changes when the files are rewritten in place (so a viewport reads them again).
 
 #include <memory>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -67,6 +68,14 @@ struct CardBakePaths {
 // The file suffixes of a bake (Depth.tga ... AO.tga, Atlas.json): CardBakePaths::files without
 // the prefix.
 const std::vector<std::string>& cardBakeSuffixes();
+
+// A card bake's free name in `directory` (every host's Bake Maps, Bake Scalp): `name` made file
+// safe, else name_2, name_3...: a name is taken when another bake's files are there (`suffixes`;
+// none given: cardBakeSuffixes and the preview) or `takenElsewhere(prefix)` says so (Maya: another
+// groom reads that prefix); files at `own` (the groom's own bake, rewritten in place) do not count.
+std::string freeCardBakeName(const std::string& directory, const std::string& name, const std::string& own = {},
+                             const std::function<bool(const std::string&)>& takenElsewhere = {},
+                             const std::vector<std::string>& suffixes = {});
 // "groomlab/<stem>/cards/<stem>/<stem>_": where a groom file's bake sits, relative to the file's
 // folder (the stem made file safe in the folders' names, as assetFolder does).
 std::string groomFileCardBakePrefix(const std::string& stem);

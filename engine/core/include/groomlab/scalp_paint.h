@@ -591,4 +591,25 @@ std::vector<std::string> projectScalpMaps(ScalpMaps& maps, const std::set<std::s
 std::vector<std::string> projectScalpMaps(ScalpMaps& maps, const std::set<std::string>& only, const ScalpMapping& mapping,
                                           const MapProjectionFiles& files, std::vector<std::string>* warnings = nullptr);
 
+// ---- New maps (every host's New Map) ----------------------------------------------------------
+
+class GuideHierarchy;
+
+// A new vertex map's values (`channels` 1 or 4 per vertex of `scalp`): `fill` everywhere, or with
+// `faces` given `fill` on their vertices and 0 elsewhere (a color map black, alpha 1). A gray map
+// takes fill[0].
+std::vector<float> newVertexMapValues(const ScalpMesh& scalp, int channels, const PaintColor& fill,
+                                      const std::vector<std::int32_t>& faces = {});
+// A new texture map's paint, `resolution` square (kept to BrushToolSettings' kMin/kMaxPaintResolution;
+// a tile set's tiles at that size), filled as newVertexMapValues fills a vertex map; the host
+// writes it where it keeps the map's image (TexturePaint::save). Throws std::invalid_argument for
+// a scalp without UVs.
+TexturePaint newTextureMapPaint(const ScalpMesh& scalp, int channels, const PaintColor& fill, int resolution,
+                                const std::vector<std::int32_t>& faces = {});
+// A new guide layer `name` on the primary guides (their children inherit it): `value`, or with
+// `faces` given (polygons of `scalp`) `value` on the guides rooted on them and 0 on the rest.
+// Returns whether any guide took it (none: no primary guides).
+bool addGuideLayer(GuideHierarchy& h, const std::string& name, float value, const ScalpMesh* scalp = nullptr,
+                   const std::vector<std::int32_t>& faces = {});
+
 }  // namespace groomlab

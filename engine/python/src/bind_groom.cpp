@@ -565,6 +565,13 @@ void bindGroom(py::module_& m) {
     m.def("valid_map_name", &validMapName, py::arg("name"), "Letters, digits and _, not starting with a digit.");
     m.def("map_name_error", &mapNameError, py::arg("name"), "Why a name cannot name a map (\"\" when it can).");
     m.def("sanitize_map_name", &sanitizeMapName, py::arg("name"), "A valid map name made from any text.");
+    m.def("map_name_from_file",
+          [](const std::string& path, const std::vector<std::string>& taken) {
+              const std::set<std::string> used(taken.begin(), taken.end());
+              return mapNameFromFile(path, [&](const std::string& n) { return used.count(n) > 0; });
+          },
+          py::arg("path"), py::arg("taken") = std::vector<std::string>{},
+          "A map's name made from an image file's (every host's Import Map), free among `taken`.");
     m.def("param_map_name", &paramMapName, py::arg("node"), py::arg("param"),
           "The map a param's own map is named (<node>_<param>, sanitized); one of that name already is linked again.");
     m.def("retarget_map_readers",

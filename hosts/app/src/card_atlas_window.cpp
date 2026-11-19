@@ -29,6 +29,7 @@
 #include "glass.h"
 #include "main_window.h"
 #include "theme.h"
+#include "groomlab/color.h"
 
 namespace groomlab::app {
 
@@ -40,8 +41,7 @@ constexpr int kSizes[] = {512, 1024, 2048, 4096, 8192};
 std::uint8_t byte(float v) { return static_cast<std::uint8_t>(std::lround(255.0f * std::clamp(v, 0.0f, 1.0f))); }
 
 float srgb(float linear) {
-    linear = std::max(linear, 0.0f);
-    return linear <= 0.0031308f ? 12.92f * linear : 1.055f * std::pow(linear, 1.0f / 2.4f) - 0.055f;
+    return groomlab::linearToSrgb(std::max(linear, 0.0f));  // (color.h)
 }
 
 // One map of a bake as an image to look at.

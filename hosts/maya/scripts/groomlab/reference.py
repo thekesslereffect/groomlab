@@ -36,11 +36,9 @@ z]}, ...], pixels from the photo's top-left, world space), glRefDepth ("front" o
 solve keeps the focal length: set by hand, or Keep focal length).
 """
 
-import filecmp
 import json
 import os
 import re
-import shutil
 
 from maya import cmds
 
@@ -162,14 +160,9 @@ def image_size(path):
 def _copy_in(path):
     """The photo copied into the scene's references folder (the same file when it is there or
     one with the same content is); a free name when another file has its name."""
-    folder = groomlab.asset_folder(KIND)
-    destination = os.path.join(folder, os.path.basename(path)).replace("\\", "/")
-    if os.path.exists(destination):
-        if groomlab._same_file(path, destination) or filecmp.cmp(path, destination, shallow=False):
-            return destination
-        destination = groomlab._unique_path(destination)
-    shutil.copy2(path, destination)
-    return destination
+    import groomlab_core
+    # The core's Collect Files, every host's (asset_files.h collectFile).
+    return groomlab_core.collect_file(os.path.abspath(path), groomlab.asset_folder(KIND)) or path
 
 
 def _unique_name(base):

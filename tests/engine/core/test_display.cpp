@@ -1280,6 +1280,14 @@ TEST(Display, ParsesGroupColorsAndHiddenGroups) {
     EXPECT_EQ(parseHiddenGuideGroups(" a,b  c,"), (std::set<std::string>{"a", "b", "c"}));
 }
 
+TEST(Display, GroupColorWordsKeepTheTextAsWritten) {
+    // Every host's group colors as stored: the words as written (lower case), malformed ones out.
+    const auto words = guideGroupColorWords("a:#FF0000 b:#00ff80 bad:#12 c:#zz0000 d#ffffff :#123456");
+    EXPECT_EQ(words, (std::map<std::string, std::string>{{"a", "#ff0000"}, {"b", "#00ff80"}}));
+    EXPECT_EQ(guideGroupColorsText(words), "a:#ff0000 b:#00ff80");
+    EXPECT_EQ(guideGroupColorsText({}), "");
+}
+
 TEST(Display, GuideColorHexIsTheParsersReverse) {
     EXPECT_EQ(guideColorHex({1.0f, 0.0f, 0.2158605f}), "#ff0080");
     EXPECT_EQ(guideColorHex({-1.0f, 2.0f, 0.0f}), "#00ff00");  // clamped

@@ -255,6 +255,22 @@ std::string sanitizeMapName(const std::string& name) {
     return out;
 }
 
+std::string mapNameFromFile(const std::string& path, const std::function<bool(const std::string&)>& taken) {
+    // The stem: after the last folder separator, before the last dot.
+    const std::size_t slash = path.find_last_of("/\\");
+    std::string stem = slash == std::string::npos ? path : path.substr(slash + 1);
+    const std::size_t dot = stem.find_last_of('.');
+    if (dot != std::string::npos && dot > 0) stem = stem.substr(0, dot);
+    std::string base;
+    for (const char c : stem) base += nameChar(c) ? c : '_';
+    const std::size_t first = base.find_first_not_of('_'), last = base.find_last_not_of('_');
+    base = first == std::string::npos ? std::string("map") : base.substr(first, last - first + 1);
+    if (std::isdigit(static_cast<unsigned char>(base[0]))) base = "map_" + base;
+    std::string name = base;
+    for (int n = 2; taken && taken(name); ++n) name = base + "_" + std::to_string(n);
+    return name;
+}
+
 std::string retargetMapReaders(const std::string& graphJson, const std::string& from, const std::string& to, bool* changed) {
     if (changed) *changed = false;
     nlohmann::json graph = nlohmann::json::parse(graphJson, nullptr, false);

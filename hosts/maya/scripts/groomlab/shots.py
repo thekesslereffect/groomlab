@@ -22,9 +22,10 @@ animation; renders and groom files fade them as keyed.
 """
 
 import json
-import re
 
 from maya import cmds, mel
+
+import groomlab_core
 
 from groomlab import undoable
 
@@ -115,17 +116,15 @@ def _free_slot(groom, data):
 
 def _clean_name(groom, data, wanted, current=None):
     """A layer name that also works as the weight's attribute: letters, digits and _, unique."""
-    base = re.sub(r"\W", "_", wanted.strip()) or "corrective"
-    if base[0].isdigit():
-        base = "c" + base
-    taken = {l["name"] for l in data["layers"] if l["name"] != current}
-    name, n = base, 1
-    xform = _transform(groom)
-    while name in taken or (name != current and (cmds.attributeQuery(name, node=groom, exists=True) or
-                                                 cmds.attributeQuery(name, node=xform, exists=True))):
-        n += 1
-        name = "%s_%d" % (base, n)
-    return name
+    # The core's rule, every host's (correctives.h freeLayerName), the groom's and its transform's
+    # attributes taken too (a layer's weight is an attribute named after it).
+    stack = groomlab_core.Correctives()
+    for layer in data["layers"]:
+        entry = groomlab_core.CorrectiveLayer()
+        entry.name = layer["name"]
+        stack.add_layer(entry)
+    taken = [a for node in (groom, _transform(groom)) for a in (cmds.listAttr(node) or []) if a != current]
+    return stack.free_layer_name(wanted.strip(), current or "", taken)
 
 
 def _key(groom, name, frame, value):
@@ -177,7 +176,7 @@ def add_layer(groom, name=None, frame=None, fade=None, all_frames=None, fade_in=
     slot = _free_slot(groom, data)
     _make_weight(groom, name, slot)
     fps = _fps()
-    data["layers"].append({"name": name, "time": frame / fps, "fadeIn": 0.5, "fadeOut": 0.5, "holdBefore": True,
+    data["layers"].append({"name": name, "time": groomlab_core.frame_to_seconds(frame, fps), "fadeIn": 0.5, "fadeOut": 0.5, "holdBefore": True,
                            "holdAfter": True, "weight": 1.0, "enabled": True, "slot": slot, "offsets": {}})
     _store(groom, data)
     if not all_frames:

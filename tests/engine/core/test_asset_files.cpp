@@ -9,6 +9,7 @@
 #include <nlohmann/json.hpp>
 
 #include "groomlab/asset_files.h"
+#include "groomlab/card_files.h"
 #include "groomlab/groom_file.h"
 #include "groomlab/groom_package.h"
 #include "groomlab/texture.h"
@@ -260,4 +261,91 @@ TEST(GroomPackage, WritesGroomsWithTheirFilesBesideTheFile) {
     const std::vector<GroomFile> replaced = readGroomFiles(root + "/legacy.groom");
     ASSERT_EQ(replaced.size(), 1u);
     EXPECT_EQ(replaced[0].name, "beard");
+}
+
+TEST(AssetFiles, FindMissingFilesEveryHostsWay) {
+    // The graph's file params by label (inside compounds too), pointed elsewhere by label.
+    const std::string graph = R"({"version": 1, "output": "out", "nodes": [
+        {"name": "curves", "type": "ImportCurves", "params": {"path": "a/curves.abc"}},
+        {"name": "tint", "type": "HairColor", "params": {"map": "maps/tint.png"}},
+        {"name": "byname", "type": "HairColor", "params": {"map": "density"}},
+        {"name": "len", "type": "Length", "params": {"keep": {"texture": "maps/keep.<UDIM>.png", "min": 0.0}}},
+        {"name": "grp", "type": "Compound", "params": {"definition": {"graph": {"version": 1, "output": "x", "nodes": [
+            {"name": "x", "type": "ImportCurves", "params": {"path": "b/inner.abc"}}], "connections": []}}}}],
+        "connections": []})";
+    const auto params = graphFileParams(graph);
+    ASSERT_EQ(params.size(), 4u);
+    EXPECT_EQ(params[0], std::make_pair(std::string("curves.path"), std::string("a/curves.abc")));
+    EXPECT_EQ(params[1].first, "tint.map");
+    EXPECT_EQ(params[2], std::make_pair(std::string("len.keep"), std::string("maps/keep.<UDIM>.png")));
+    EXPECT_EQ(params[3].first, "grp/x.path");
+    bool changed = false;
+    const std::string moved = withGraphFileParams(graph, {{"len.keep", "new/keep.<UDIM>.png"}, {"grp/x.path", "c/inner.abc"}}, &changed);
+    EXPECT_TRUE(changed);
+    const auto after = graphFileParams(moved);
+    EXPECT_EQ(after[2].second, "new/keep.<UDIM>.png");
+    EXPECT_EQ(after[3].second, "c/inner.abc");
+    EXPECT_EQ(nlohmann::json::parse(moved)["nodes"][3]["params"]["keep"]["min"], 0.0);  // (its other fields kept)
+
+    // A folder's files and tile sets, matched by name: a tile set by its token or a texture
+    // map's plain path (from any tile, either separator); several of a name by their folders.
+    const std::string root = scratch("groomlab_find_missing");
+    for (const char* f : {"x/maps/tint.png", "y/maps/tint.png", "z/hero/tint.png", "s/keep.1002.png", "s/keep.1003.png",
+                          "t/head_1001.png", "u/dens.1004.png", "a/curves.abc"}) {
+        write(root + "/" + f, f);
+    }
+    EXPECT_TRUE(fileThere(root + "/u/dens.png"));  // a set from tile 1004
+    EXPECT_TRUE(fileThere(root + "/s/keep.<udim>.png"));
+    EXPECT_FALSE(fileThere(root + "/u/gone.png"));
+    const FileIndex index = indexFolder(root);
+    std::vector<std::string> candidates;
+    EXPECT_EQ(matchMissingFile(index, "D:/old/a/curves.abc"), root + "/a/curves.abc");
+    EXPECT_EQ(matchMissingFile(index, "old/keep.<UDIM>.png"), root + "/s/keep.<UDIM>.png");
+    EXPECT_EQ(matchMissingFile(index, "old/head_<UDIM>.png"), root + "/t/head_<UDIM>.png");
+    EXPECT_EQ(matchMissingFile(index, "masks/dens.png"), root + "/u/dens.png");
+    EXPECT_EQ(matchMissingFile(index, "D:/show/y/maps/tint.png"), root + "/y/maps/tint.png");  // its folders end best
+    EXPECT_EQ(matchMissingFile(index, "D:/elsewhere/tint.png", &candidates), "");
+    EXPECT_EQ(candidates.size(), 3u);
+    EXPECT_EQ(matchMissingFile(index, "nowhere.png"), "");
+    fs::remove_all(fs::u8path(root));
+}
+
+TEST(AssetFiles, FileStatesUndoAndRedoAnEdit) {
+    // Every host's undo of the files an edit writes: a map's one image replaced by a tile set (the
+    // image removed, tiles written), put back as before (the last first) and again as after.
+    const std::string root = scratch("file_states");
+    write(root + "/dens.png", "one image");
+    std::vector<FileState> states = mapImageStates(root + "/dens.png", {1001, 1002});
+    ASSERT_EQ(states.size(), 3u);  // the image, then its tiles
+    EXPECT_EQ(states[0].before, std::optional<std::string>("one image"));
+    EXPECT_FALSE(states[1].before);
+    fs::remove(fs::u8path(root + "/dens.png"));
+    write(root + "/dens.1001.png", "tile 1");
+    write(root + "/dens.1002.png", "tile 2");
+    finishFileStates(states);
+    EXPECT_FALSE(states[0].after);
+    EXPECT_EQ(states[2].after, std::optional<std::string>("tile 2"));
+    restoreFileStates(states, false);
+    EXPECT_EQ(read(root + "/dens.png"), "one image");
+    EXPECT_FALSE(fs::exists(fs::u8path(root + "/dens.1001.png")));
+    restoreFileStates(states, true);
+    EXPECT_FALSE(fs::exists(fs::u8path(root + "/dens.png")));
+    EXPECT_EQ(read(root + "/dens.1001.png"), "tile 1");
+    EXPECT_EQ(readFileState(root + "/gone.png"), std::nullopt);
+    fs::remove_all(fs::u8path(root));
+}
+
+TEST(AssetFiles, CardBakeNamesNeverLandOnAnotherBake) {
+    // Every host's Bake Maps: the name made file safe; another bake's files there (or a prefix
+    // another groom reads) take name_2...; the groom's own bake is rewritten in place.
+    const std::string root = scratch("card_bake_names");
+    EXPECT_EQ(freeCardBakeName(root, "hero hair"), "hero_hair");
+    write(root + "/hero_Atlas.json", "{}");
+    EXPECT_EQ(freeCardBakeName(root, "hero"), "hero_2");
+    EXPECT_EQ(freeCardBakeName(root, "hero", root + "/hero_"), "hero");
+    EXPECT_EQ(freeCardBakeName(root, "hero", root + "/hero_", [&](const std::string& p) { return p == root + "/hero_"; }), "hero_2");
+    write(root + "/scalp_ScalpColor.tga", "x");
+    EXPECT_EQ(freeCardBakeName(root, "scalp", {}, {}, {"ScalpColor.tga", "ScalpCoverage.tga"}), "scalp_2");
+    EXPECT_EQ(freeCardBakeName(root, "scalp"), "scalp");  // (no card bake's files there)
+    fs::remove_all(fs::u8path(root));
 }

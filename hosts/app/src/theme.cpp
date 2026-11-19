@@ -18,6 +18,7 @@
 #include <nlohmann/json.hpp>
 
 #include "groomlab/presets.h"
+#include "groomlab/color.h"
 
 namespace groomlab::app::theme {
 
@@ -257,7 +258,7 @@ QColor emeraldChip() {
     return c;
 }
 QColor readableOn(const QColor& fill) {
-    auto channel = [](qreal c) { return c <= 0.04045 ? c / 12.92 : std::pow((c + 0.055) / 1.055, 2.4); };
+    auto channel = [](qreal c) { return static_cast<qreal>(groomlab::srgbToLinear(static_cast<float>(c))); };  // (color.h)
     auto luminance = [&](const QColor& c) { return 0.2126 * channel(c.redF()) + 0.7152 * channel(c.greenF()) + 0.0722 * channel(c.blueF()); };
     const qreal l = luminance(fill);
     const qreal withInk = (l + 0.05) / (luminance(ink()) + 0.05), withWhite = 1.05 / (l + 0.05);
@@ -715,7 +716,7 @@ DisplayTheme displayTheme() {
     const nlohmann::json& data = current();
     const nlohmann::json viewport = data.contains("viewport") && data["viewport"].is_object() ? data["viewport"] : nlohmann::json::object();
     auto linear = [](const QColor& c) {
-        auto channel = [](float v) { return v <= 0.04045f ? v / 12.92f : std::pow((v + 0.055f) / 1.055f, 2.4f); };
+        auto channel = [](float v) { return groomlab::srgbToLinear(v); };  // (color.h)
         return DisplayTheme::RGB{channel(c.redF()), channel(c.greenF()), channel(c.blueF())};
     };
     auto color = [&](const char* key, const char* fallback) {

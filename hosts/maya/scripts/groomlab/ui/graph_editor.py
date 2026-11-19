@@ -415,15 +415,8 @@ def shown_when(spec, value_of, spec_of=None):
         param = condition.get("param")
         if not param:
             return True
-        value = value_of(param)
-        if isinstance(value, bool):
-            text = "true" if value else "false"
-        elif isinstance(value, str):
-            text = value
-        elif isinstance(value, float) and value.is_integer():
-            text = str(int(value))  # 3.0 stored for an int param reads as the core's "3"
-        else:
-            text = json.dumps(value)
+        import groomlab_core
+        text = groomlab_core.condition_text(json.dumps(value_of(param)))  # (the core's rule, every host's)
         if text not in (condition.get("in") or []):
             return False
         seen.add(spec.get("name"))

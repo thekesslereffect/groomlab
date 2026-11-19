@@ -9,6 +9,8 @@
 
 #include "groomlab/asset_files.h"
 #include "groomlab/graph.h"
+#include "groomlab/guide_hierarchy.h"
+#include "groomlab/stroke.h"
 #include "groomlab/map_ref.h"
 #include "groomlab/operators.h"
 #include "groomlab/paths.h"
@@ -69,6 +71,25 @@ fs::path freshFolder(const char* name) {
     fs::remove_all(dir, ec);
     fs::create_directories(dir);
     return dir;
+}
+
+TEST(Udim, NewMapsEveryHostsWay) {
+    // New Map (every host's): filled everywhere, or on faces with 0 elsewhere (a color map black,
+    // alpha 1); a texture map over every tile the scalp uses; a guide layer on the primaries.
+    const auto scalp = twoTilePlane();
+    const std::vector<float> gray = newVertexMapValues(*scalp, kGrayMap, PaintColor{0.4f, 0.4f, 0.4f, 1.0f});
+    ASSERT_EQ(gray.size(), scalp->pointCount());
+    EXPECT_FLOAT_EQ(gray.front(), 0.4f);
+    const std::vector<float> color = newVertexMapValues(*scalp, kColorMap, PaintColor{1.0f, 0.5f, 0.0f, 1.0f}, {0});
+    ASSERT_EQ(color.size(), scalp->pointCount() * 4);
+    EXPECT_FLOAT_EQ(color[0], 1.0f);  // vertex 0 is on face 0
+    EXPECT_FLOAT_EQ(color[color.size() - 4], 0.0f);  // the far corner is not
+    EXPECT_FLOAT_EQ(color[color.size() - 1], 1.0f);
+    const TexturePaint paint = newTextureMapPaint(*scalp, kGrayMap, PaintColor{0.7f, 0.7f, 0.7f, 1.0f}, 2);
+    EXPECT_TRUE(paint.udim());
+    EXPECT_EQ(paint.tileWidth(), BrushToolSettings::kMinPaintResolution);  // (kept within the limits)
+    GuideHierarchy h;
+    EXPECT_FALSE(addGuideLayer(h, "len", 0.5f));
 }
 
 TEST(Udim, LayoutsSlotsAndTilePaths) {
@@ -355,6 +376,29 @@ TEST(Udim, HairColorReadsAColorTileSet) {
     }
     EXPECT_GT(red, 20u);
     EXPECT_GT(blue, 20u);
+    fs::remove_all(dir);
+}
+
+TEST(Udim, EveryTokenNamesATileSet) {
+    // <UDIM>, <udim> and %(UDIM)d: an image path, and Collect Files takes every tile of each.
+    for (const char* token : kUdimTokens) {
+        const std::string name = std::string("dens.") + token + ".png";
+        EXPECT_TRUE(isImagePath(name)) << token;
+        EXPECT_STREQ(udimTokenIn("a/b/" + name), token);
+    }
+    EXPECT_EQ(udimTokenIn("a/<UDIM>/dens.png"), nullptr);  // (a folder's name is not the file's)
+    const fs::path dir = freshFolder("groomlab_udim_tokens");
+    const auto scalp = twoTilePlane();
+    TexturePaint paint(*scalp, 8, 8, 0.5f);
+    fs::create_directories(dir / "from");
+    paint.save((dir / "from" / "dens.png").generic_u8string());
+    for (const char* token : {"<udim>", "%(UDIM)d"}) {
+        std::vector<std::string> copied;
+        const std::string to = (dir / ("to" + std::string(token[0] == '<' ? "1" : "2"))).generic_u8string();
+        const std::string copy = collectFile((dir / "from").generic_u8string() + "/dens." + token + ".png", to, &copied);
+        EXPECT_EQ(copied.size(), 2u) << token;
+        EXPECT_EQ(copy, to + "/dens." + token + ".png");
+    }
     fs::remove_all(dir);
 }
 

@@ -796,7 +796,8 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                 p.seed = static_cast<std::uint64_t>(seed);
                 if (db.isFlagSet(kSplit[0])) db.getFlagArgument(kSplit[0], 0, p.split);
     
-                const MString childName = flagString(db, kNameFlag[0], parentName + "_children");
+                const MString childName = db.isFlagSet(kNameFlag[0]) ? flagString(db, kNameFlag[0], "")
+                                                                     : MString(h->freeGroupName((parentName + "_children").asChar()).c_str());
                 const GroupId child = h->generateChildren(parent, childName.asChar(), p, restricted ? &only : nullptr);
                 setResult(static_cast<int>(h->guidesInGroup(child).size()));
             } else if (db.isFlagSet(kRemoveGroup[0])) {

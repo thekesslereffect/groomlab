@@ -3,10 +3,8 @@
 paths kept portable, files that follow a scene saved elsewhere, and the libraries shared across
 scenes."""
 
-import filecmp
 import json
 import os
-import shutil
 
 from maya import cmds
 
@@ -107,8 +105,10 @@ def follow_scene_files():
     their path under the new folder) and the grooms repointed there, so the saved scene is whole
     and never shares files with the scene it came from. A file already at a destination with
     other content is never adopted: the copy takes a free name (a Script Editor warning says so).
-    Referenced grooms are left alone (their paths resolve against their own file). The plugin
-    calls it just before every save. Returns the copied paths (relative to the new scene)."""
+    The copying is the core's, every host's (asset_files.h FileFollower: a UDIM set's every tile
+    under one name); a file the old folder does not hold is looked for in the project. Referenced
+    grooms are left alone (their paths resolve against their own file). The plugin calls it just
+    before every save. Returns the copied paths (relative to the new scene)."""
     from groomlab import reference
     from groomlab.cards import _BAKE_FILES, _existing_scalp_cap, _material_textures, card_mesh
     old_base, old_prefix = _scene_files_from[0]
@@ -118,98 +118,46 @@ def follow_scene_files():
         return []
     if _same_file(old_base, new_base) and old_prefix == new_prefix:
         return []
-    copied = []
+    new_root = new_base + "/" + new_prefix
+    # The old scene's folder, and the project for a file it does not hold (as paths resolve).
+    followers = [(base, groomlab_core.FileFollower(base, base + "/" + old_prefix, new_base, new_root))
+                 for base in (old_base, project_root()) if base]
+    if len(followers) == 2 and _same_file(followers[0][0], followers[1][0]):
+        followers = followers[:1]
 
-    def home(rel):
-        """Where a relative path goes in the new scene: its asset folder for the old one's files."""
-        if old_prefix and rel.startswith(old_prefix + "/"):
-            return new_prefix + rel[len(old_prefix):]
-        return rel
-
-    def conflict(src, dst):
-        return os.path.exists(dst) and not _same_file(src, dst) and not filecmp.cmp(src, dst, shallow=False)
-
-    def copy(src, dst, rel):
-        if _same_file(src, dst) or os.path.exists(dst):
-            return  # the same file, or one with the same content
-        folder = os.path.dirname(dst)
-        if folder and not os.path.isdir(folder):
-            os.makedirs(folder)
-        shutil.copy2(src, dst)
-        copied.append(rel)
-
-    def source(rel):
-        """The folder a relative path was found in: the old scene's, else the project (as it resolves)."""
-        for base in (old_base, project_root()):
-            if base and os.path.isfile(os.path.join(base, rel)):
-                return base
-        return None
+    def follower_of(rel):
+        """The follower whose folder holds `rel` (a file, or a UDIM set's tiles); None: nowhere."""
+        return next((f for base, f in followers if groomlab_core.file_there(os.path.join(base, rel))), None)
 
     followed = {}  # a file's new path, once: a map and the params reading its image name the same copy
 
     def follow(rel):
-        """A single file: its new stored path (None: nothing to copy, the path stays)."""
+        """A file (a UDIM set: every tile): its new stored path (None: nothing to copy, the path stays)."""
         key = os.path.normcase(os.path.normpath(rel))
         if key not in followed:
-            followed[key] = _follow_once(rel)
+            f = follower_of(rel)
+            followed[key] = f.follow(rel) if f else None
         return followed[key]
 
-    def _follow_once(rel):
-        if not source(rel):
-            return _follow_tiles(rel)
-        src = os.path.join(source(rel), rel)
-        new_rel = home(rel)
-        dst = os.path.join(new_base, new_rel)
-        if conflict(src, dst):
-            dst = _unique_path(dst)
-            new_rel = os.path.relpath(dst, new_base).replace("\\", "/")
-            cmds.warning("GroomLab: %s is already beside the saved scene with other content; this scene now uses "
-                         "a copy, %s" % (rel, new_rel))
-        copy(src, dst, new_rel)
-        return new_rel
-
-    def _follow_tiles(rel):
-        """A texture map's tile set (udim.h: "density.png" standing for density.1001.png...): its
-        tiles copied together, the map's path kept as it was named (None: no tiles there)."""
-        stamp = groomlab_core.file_stamp
-        root = next((b for b in (old_base, project_root()) if b and stamp(os.path.join(b, rel)) != 0), None)
-        if root is None:
-            return None
-        src = os.path.join(root, rel)
-        new_rel = home(rel)
-        dst = os.path.join(new_base, new_rel)
-        if _same_file(src, dst):
-            return new_rel
-        if stamp(dst) != 0 and not groomlab_core.same_map_image(src, dst):
-            stem, ext = os.path.splitext(dst)
-            n = 2
-            while stamp("%s_%d%s" % (stem, n, ext)) != 0:
-                n += 1
-            dst = "%s_%d%s" % (stem, n, ext)
-            new_rel = os.path.relpath(dst, new_base).replace("\\", "/")
-            cmds.warning("GroomLab: %s is already beside the saved scene with other content; this scene now uses "
-                         "a copy, %s" % (rel, new_rel))
-        for written in groomlab_core.copy_map_image(src, dst):
-            copied.append(os.path.relpath(written, new_base).replace("\\", "/"))
-        return new_rel
-
     old_stem, new_stem = os.path.basename(old_prefix), os.path.basename(new_prefix)
+    copied = []
 
     def follow_groom_file(rel):
         """A groom file named after the scene, beside it (<scene>.groom: menu.groom_source_file),
         copied as the new scene's (<new scene>.groom), so the two scenes never write one. Others
         (a file of another name, elsewhere): as any file."""
         stem, ext = os.path.splitext(rel)
-        if "/" in rel or not source(rel) or not old_stem or stem != old_stem or not new_stem:
+        base = next((b for b, _f in followers if os.path.isfile(os.path.join(b, rel))), None)
+        if "/" in rel or not base or not old_stem or stem != old_stem or not new_stem:
             return follow(rel)
-        new_rel = new_stem + ext
-        src, dst = os.path.join(source(rel), rel), os.path.join(new_base, new_rel)
-        if conflict(src, dst):
+        src, dst = os.path.join(base, rel), os.path.join(new_base, new_stem + ext)
+        if os.path.exists(dst) and not _same_file(src, dst) and not groomlab_core.same_map_image(src, dst):
             dst = _unique_path(dst)
-            new_rel = os.path.relpath(dst, new_base).replace("\\", "/")
             cmds.warning("GroomLab: a groom file of that name is already beside the saved scene with other "
-                         "content; this scene now uses %s" % new_rel)
-        copy(src, dst, new_rel)
+                         "content; this scene now uses %s" % os.path.relpath(dst, new_base).replace("\\", "/"))
+        new_rel = os.path.relpath(dst, new_base).replace("\\", "/")
+        if not os.path.exists(dst) and groomlab_core.copy_map_image(src, dst):  # (a file copied, folders made)
+            copied.append(new_rel)
         return new_rel
 
     for groom in cmds.ls(type=GROOM_TYPE, long=True) or []:
@@ -231,20 +179,9 @@ def follow_scene_files():
         # The card bake: every file of its prefix moves together
         prefix = groomlab_core.card_maps_prefix(cmds.getAttr(groom + ".cardMaps") or "").replace("\\", "/")
         if prefix and _relative(prefix + "Color.tga"):
-            old_root = source(prefix + "Color.tga") or source(prefix + "Atlas.json") or old_base
-            files = [f for f in _BAKE_FILES if os.path.isfile(os.path.join(old_root, prefix + f))]
-            if files:
-                new_prefix_rel = home(prefix)
-                if any(conflict(os.path.join(old_root, prefix + f), os.path.join(new_base, new_prefix_rel + f))
-                       for f in files):
-                    stem, n = new_prefix_rel.rstrip("_"), 2
-                    while any(os.path.exists(os.path.join(new_base, "%s_%d_%s" % (stem, n, f))) for f in _BAKE_FILES):
-                        n += 1
-                    new_prefix_rel = "%s_%d_" % (stem, n)
-                    cmds.warning("GroomLab: %s's card bake is already beside the saved scene with other content; this "
-                                 "scene now uses a copy, %s*" % (groom, new_prefix_rel))
-                for f in files:
-                    copy(os.path.join(old_root, prefix + f), os.path.join(new_base, new_prefix_rel + f), new_prefix_rel + f)
+            f = follower_of(prefix + "Color.tga") or follower_of(prefix + "Atlas.json")
+            if f:
+                new_prefix_rel = f.follow_prefix(prefix, list(_BAKE_FILES))
                 if new_prefix_rel != prefix:
                     cmds.setAttr(groom + ".cardMaps", groomlab_core.with_card_maps_prefix(
                         cmds.getAttr(groom + ".cardMaps") or "", new_prefix_rel), type="string")
@@ -268,38 +205,22 @@ def follow_scene_files():
                     touched = True
         if touched:
             cmds.setAttr(groom + ".simCaches", json.dumps(bakes), type="string")
+
         # The files the graph reads (images, Alembic files, texture maps in params; inside
-        # compounds too). A UDIM set's tiles go together.
-        from groomlab import presets
-        graph = get_graph(groom)
-        touched = False
-        for _label, params, name, path in list(presets._file_params(graph)):
-            value = path.replace("\\", "/")
-            if not _relative(value):
-                continue
-            token = next((t for t in presets.UDIM_TOKENS if t in value), None)
-            if token:  # a UDIM set: its tiles follow together, the token kept
-                import glob
-                folder, base = os.path.split(value)
-                root = next((b for b in (old_base, project_root()) if b and os.path.isdir(os.path.join(b, folder))), None)
-                pattern = glob.escape(base).replace(glob.escape(token), "[1-9][0-9][0-9][0-9]")
-                tiles = sorted(glob.glob(os.path.join(glob.escape(os.path.join(root, folder)), pattern))) if root else []
-                for tile in tiles:
-                    follow(folder + "/" + os.path.basename(tile))
-                new = home(value) if tiles else None
-            else:
-                new = follow(value)
-            if new and new != value:
-                presets.set_file_param(params, name, new)
-                touched = True
+        # compounds too; a UDIM set's tiles together): the core's list (followGraphFiles).
+        def follow_param(stored):
+            value = stored.replace("\\", "/")
+            return (follow(value) or stored) if _relative(value) else stored
+
+        graph_text, touched = groomlab_core.follow_graph_files(json.dumps(get_graph(groom)), follow_param)
         if touched:
             from groomlab.params import set_graph
-            set_graph(groom, graph)
+            set_graph(groom, json.loads(graph_text))
         # The card mesh's and hair cap's materials (absolute paths into the old scene's folder).
         for texture in _material_textures(card_mesh(groom)) + _material_textures(_existing_scalp_cap(groom)):
             value = cmds.getAttr(texture + ".fileTextureName") or ""
             rel = _relative_to(value, old_base) if value else None
-            if rel is not None and home(rel) != rel:
+            if rel is not None and old_prefix and rel.startswith(old_prefix + "/"):
                 new = follow(rel)
                 if new:
                     cmds.setAttr(texture + ".fileTextureName", new_base + "/" + new, type="string")
@@ -312,6 +233,10 @@ def follow_scene_files():
             new = follow(value)
             if new and new != value:
                 reference._set_image(camera, new, new_base + "/" + new)
+    for _base, f in followers:
+        for w in f.warnings():
+            cmds.warning("GroomLab: %s (the saved scene's copy)" % w)
+        copied.extend(os.path.relpath(c, new_base).replace("\\", "/") for c in f.copied())
     cmds.groomLabPaths()  # the resolver follows the new scene folder
     if copied:
         for groom in cmds.ls(type=GROOM_TYPE) or []:

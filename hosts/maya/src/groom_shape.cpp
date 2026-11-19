@@ -2554,10 +2554,10 @@ namespace {
 // The file name base of a bake into `directory`: `base` made file safe, with _2, _3... when
 // another groom's card bake has that prefix there (its viewport reads those files).
 std::string freeBakeBase(const MObject& groom, const std::string& directory, const std::string& base) {
-    const std::string safe = fileSafeName(base);
-    std::string name = safe;
-    for (int n = 2; bakePrefixUsedByOtherGroom(groom, directory + "/" + name + "_"); ++n) name = safe + "_" + std::to_string(n);
-    return name;
+    // Every host's rule (card_files.h freeCardBakeName): the name asked for is this groom's to
+    // rewrite unless another groom reads it; a further name also never lands on files there.
+    return freeCardBakeName(directory, base, CardBakePaths::in(directory, fileSafeName(base)).prefix,
+                            [&](const std::string& prefix) { return bakePrefixUsedByOtherGroom(groom, prefix); });
 }
 
 }  // namespace

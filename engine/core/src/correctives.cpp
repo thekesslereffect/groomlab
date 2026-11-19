@@ -260,4 +260,87 @@ std::string Correctives::newLayerName(bool allFrames, double frame) const {
     return allFrames ? "sculpt" + std::to_string(layers.size() + 1) : "shot" + std::to_string(std::lround(frame));
 }
 
+CorrectiveLayer& Correctives::need(const std::string& name) {
+    CorrectiveLayer* l = layer(name);
+    if (!l) throw std::invalid_argument("no corrective named " + name);
+    return *l;
+}
+
+std::string Correctives::addLayer(bool allFrames, double seconds, double frame, double fadeIn, double fadeOut, const std::string& wanted) {
+    CorrectiveLayer l;
+    l.name = freeLayerName(wanted.empty() ? newLayerName(allFrames, frame) : wanted);
+    l.time = seconds;
+    l.holdBefore = l.holdAfter = allFrames;
+    l.fadeIn = allFrames ? 0.5 : std::max(0.0, fadeIn);
+    l.fadeOut = allFrames ? 0.5 : std::max(0.0, fadeOut);
+    l.weight = 1.0f;
+    layers.push_back(std::move(l));
+    return layers.back().name;
+}
+
+void Correctives::removeLayer(const std::string& name) {
+    need(name);
+    layers.erase(std::remove_if(layers.begin(), layers.end(), [&](const CorrectiveLayer& l) { return l.name == name; }), layers.end());
+}
+
+std::size_t Correctives::moveLayer(const std::string& name, long step) {
+    need(name);
+    const auto it = std::find_if(layers.begin(), layers.end(), [&](const CorrectiveLayer& l) { return l.name == name; });
+    const long i = static_cast<long>(it - layers.begin());
+    const long j = std::clamp(i + step, 0L, static_cast<long>(layers.size()) - 1);
+    if (i != j) {
+        CorrectiveLayer moved = std::move(*it);
+        layers.erase(it);
+        layers.insert(layers.begin() + j, std::move(moved));
+    }
+    return static_cast<std::size_t>(j);
+}
+
+bool Correctives::soloLayer(const std::string& name) {
+    need(name);
+    const bool alone = std::all_of(layers.begin(), layers.end(), [&](const CorrectiveLayer& l) { return l.enabled == (l.name == name); });
+    for (CorrectiveLayer& l : layers) l.enabled = alone || l.name == name;
+    return !alone;
+}
+
+void Correctives::renameLayer(const std::string& name, const std::string& wanted, const std::vector<std::string>& taken) {
+    CorrectiveLayer& l = need(name);
+    if (wanted == name) return;
+    const std::string clean = freeLayerName(wanted, name, taken);
+    if (clean != wanted) {
+        throw std::invalid_argument("'" + wanted + "' cannot name a corrective (taken, or not letters, digits and _): try '" + clean + "'");
+    }
+    l.name = wanted;
+}
+
+void Correctives::setLayerWeight(const std::string& name, float w, double seconds) {
+    CorrectiveLayer& l = need(name);
+    w = std::clamp(w, 0.0f, 1.0f);
+    if (!l.weightCurve.empty()) {
+        l.keyAt(seconds, w);  // keyed: keyed here, as auto key does
+    } else {
+        l.weight = w;
+    }
+}
+
+void Correctives::keyLayerWeight(const std::string& name, double seconds, float w) {
+    CorrectiveLayer& l = need(name);
+    if (l.weightCurve.empty() && !l.allFrames()) {
+        // A fix's fades become keys first (Maya's Fix Frame keys them), so keying keeps its shape.
+        if (!l.holdBefore) l.weightCurve.emplace_back(l.time - l.fadeIn, 0.0f);
+        l.weightCurve.emplace_back(l.time, l.weight);
+        if (!l.holdAfter) l.weightCurve.emplace_back(l.time + l.fadeOut, 0.0f);
+    }
+    l.keyAt(seconds, w);
+    l.holdBefore = l.holdAfter = true;  // the curve holds past its ends
+}
+
+void Correctives::clearLayerKeys(const std::string& name, double seconds) {
+    CorrectiveLayer& l = need(name);
+    if (l.allFrames()) return;
+    l.weight = l.weightAt(seconds);
+    l.weightCurve.clear();
+    l.holdBefore = l.holdAfter = true;
+}
+
 }  // namespace groomlab

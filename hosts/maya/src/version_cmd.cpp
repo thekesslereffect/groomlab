@@ -27,6 +27,7 @@
 #include "groomlab/graph_io.h"
 #include "groomlab/parts.h"
 #include "groomlab/version.h"
+#include "groomlab/texture.h"
 #include "hair_shading.h"
 #include "maya_inputs.h"
 
@@ -417,7 +418,7 @@ MStatus BakeCardsCmd::doIt(const MArgList& args) {
                     throw std::runtime_error("no card map preset named '" + text + "'");
                 }
                 CardMapExport settings;
-                settings.resolution = resolution > 0 ? std::clamp(resolution, 16, 8192) : 0;
+                settings.resolution = resolution > 0 ? std::clamp(resolution, kMinBakeResolution, kMaxMapBakeResolution) : 0;
                 MString value;
                 if (db.isFlagSet("-fmt") && db.getFlagArgument("-fmt", 0, value) == MS::kSuccess) settings.format = value.asChar();
                 if (db.isFlagSet("-bd")) db.getFlagArgument("-bd", 0, settings.bitDepth);
@@ -432,7 +433,7 @@ MStatus BakeCardsCmd::doIt(const MArgList& args) {
             }
             if (scalp) {  // the groom baked onto its scalp, in the scalp's UVs
                 for (const std::string& p : shape->bakeScalp(directory.asChar(), name.asChar(),
-                                                             resolution > 0 ? std::clamp(resolution, 16, 16384) : 2048,
+                                                             resolution > 0 ? std::clamp(resolution, kMinBakeResolution, kMaxCardBakeResolution) : 2048,
                                                              static_cast<float>(reach), static_cast<float>(density),
                                                              layout.asChar())) {
                     result.append(p.c_str());
@@ -440,7 +441,7 @@ MStatus BakeCardsCmd::doIt(const MArgList& args) {
                 setResult(result);
                 return MS::kSuccess;
             }
-            for (const std::string& p : shape->bakeCards(directory.asChar(), name.asChar(), resolution > 0 ? std::clamp(resolution, 16, 16384) : 0,
+            for (const std::string& p : shape->bakeCards(directory.asChar(), name.asChar(), resolution > 0 ? std::clamp(resolution, kMinBakeResolution, kMaxCardBakeResolution) : 0,
                                                              static_cast<float>(occlusion), store, layout.asChar())) {
                 result.append(p.c_str());
             }

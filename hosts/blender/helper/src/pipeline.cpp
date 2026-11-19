@@ -18,6 +18,7 @@
 #include <set>
 #include <utility>
 
+#include "groomlab/asset_files.h"
 #include "groomlab/follicle_map.h"
 #include "groomlab/engine_cards.h"
 #include "groomlab/card_files.h"
@@ -53,6 +54,8 @@
 #if GROOMLAB_HAS_ALEMBIC
 #include "groomlab/engine_export.h"
 #include "groomlab/sim_cache.h"
+#include "groomlab/texture.h"
+#include "groomlab/groom_transfer.h"
 #endif
 
 #include "request.h"
@@ -274,43 +277,14 @@ CardBake bakeCardsNow(Session& s, int resolution, float occlusion) {
     }
 }
 
-// The graph's own Cards nodes (not those inside compounds), in graph order.
-std::vector<std::string> cardsNodes(const json& graph) {
-    std::vector<std::string> names;
-    for (const json& n : graph.value("nodes", json::array())) {
-        if (n.is_object() && n.value("type", std::string()) == "Cards") names.push_back(n.value("name", std::string()));
-    }
-    return names;
-}
-
-// A copy of the graph with every Cards node set for level of detail `lod` (Maya's cards_preset
-// into a copy: hero, mid, low; each node by what it cards, card_presets.h).
+// A copy of the graph with every Cards node set for level of detail `lod` (every host's Cards
+// preset, card_presets.h withCardPreset).
 std::string graphAtLod(const std::string& graphText, const std::string& lod) {
-    json graph = json::parse(graphText);
-    const std::vector<std::string> nodes = cardsNodes(graph);
-    if (nodes.empty()) fail("state", "the graph has no Cards node: add one first");
-    for (const std::string& node : nodes) {
-        std::vector<std::pair<std::string, ParamValue>> params;
-        try {
-            params = cardPresetParams(lod, cardNodeKind(graphText, node));
-        } catch (const std::invalid_argument& e) {
-            fail("bad_request", e.what());
-        }
-        for (json& n : graph["nodes"]) {
-            if (n.value("name", std::string()) != node) continue;
-            for (const auto& [name, value] : params) {
-                std::visit(
-                    [&](const auto& v) {
-                        using T = std::decay_t<decltype(v)>;
-                        if constexpr (std::is_same_v<T, bool> || std::is_same_v<T, std::int64_t> || std::is_same_v<T, double>) {
-                            n["params"][name] = v;
-                        }
-                    },
-                    value);
-            }
-        }
+    try {
+        return withCardPreset(graphText, lod);
+    } catch (const std::invalid_argument& e) {
+        fail(cardsNodeNames(graphText).empty() ? "state" : "bad_request", e.what());
     }
-    return graph.dump();
 }
 
 // cards_preset: the session's Cards nodes (or `node`) set for a level of detail, each by what it
@@ -319,43 +293,28 @@ std::string graphAtLod(const std::string& graphText, const std::string& lod) {
 json cardsPreset(Session& s, const json& args) {
     const std::string lod = needString(args, "lod");
     const std::string text = s.groom->data().graphJson;
-    json graph = json::parse(text);
-    std::vector<std::string> nodes = cardsNodes(graph);
     const std::string only = optString(args, "node", "");
-    if (!only.empty()) {
-        if (std::find(nodes.begin(), nodes.end(), only) == nodes.end()) fail("not_found", "no Cards node '" + only + "'");
-        nodes = {only};
-    }
-    if (nodes.empty()) fail("state", "the graph has no Cards node: add one first");
+    const std::vector<std::string> nodes = only.empty() ? cardsNodeNames(text) : std::vector<std::string>{only};
     std::optional<int> triangles;
     if (args.contains("triangles") && args["triangles"].is_number()) triangles = args["triangles"].get<int>();
-    json set = json::object();
-    for (const std::string& node : nodes) {
-        std::vector<std::pair<std::string, ParamValue>> params;
-        try {
-            params = cardPresetParams(lod, cardNodeKind(text, node), triangles);
-        } catch (const std::invalid_argument& e) {
-            fail("bad_request", e.what());
-        }
-        set = json::object();
-        for (json& n : graph["nodes"]) {
-            if (n.value("name", std::string()) != node) continue;
-            if (!n.contains("params") || !n["params"].is_object()) n["params"] = json::object();
-            for (const auto& [name, value] : params) {
-                std::visit(
-                    [&](const auto& v) {
-                        using T = std::decay_t<decltype(v)>;
-                        if constexpr (std::is_same_v<T, bool> || std::is_same_v<T, std::int64_t> || std::is_same_v<T, double> ||
-                                      std::is_same_v<T, std::string>) {
-                            n["params"][name] = v;
-                            set[name] = v;
-                        }
-                    },
-                    value);
-            }
-        }
+    std::vector<std::pair<std::string, ParamValue>> params;
+    std::string graph;
+    try {
+        graph = withCardPreset(text, lod, nodes, triangles, &params);  // (every host's: card_presets.h)
+    } catch (const std::invalid_argument& e) {
+        fail(cardsNodeNames(text).empty() ? "state" : !only.empty() ? "not_found" : "bad_request", e.what());
     }
-    s.groom->setGraphJson(graph.dump());
+    json set = json::object();
+    for (const auto& [name, value] : params) {
+        std::visit([&](const auto& v) {
+            using T = std::decay_t<decltype(v)>;
+            if constexpr (std::is_same_v<T, bool> || std::is_same_v<T, std::int64_t> || std::is_same_v<T, double> ||
+                          std::is_same_v<T, std::string>) {
+                set[name] = v;
+            }
+        }, value);
+    }
+    s.groom->setGraphJson(graph);
     return {{"nodes", nodes}, {"params", set}};
 }
 
@@ -410,7 +369,7 @@ json exportGltfCards(Session& s, const json& args) {
     std::string name = optString(args, "name", fs::u8path(path).stem().u8string());
     if (name.empty()) name = "groom";
     int resolution = static_cast<int>(optNumber(args, "resolution", 0.0));
-    resolution = resolution > 0 ? std::clamp(resolution, 16, 16384) : 0;  // 0: the Cards nodes' atlasSize
+    resolution = resolution > 0 ? std::clamp(resolution, kMinBakeResolution, kMaxCardBakeResolution) : 0;  // 0: the Cards nodes' atlasSize
     const int capResolution = static_cast<int>(optNumber(args, "capResolution", 0.0));
     CardGltfSettings settings;
     const std::string alpha = optString(args, "alphaMode", "mask");
@@ -491,7 +450,7 @@ json exportEngineCards(Session& s, const json& args, bool unity) {
     const std::string lod = optString(args, "lod", "");
     if (!lod.empty() && !args.contains("name")) name += "_" + lod;
     int resolution = static_cast<int>(optNumber(args, "resolution", 0.0));
-    resolution = resolution > 0 ? std::clamp(resolution, 16, 16384) : 0;
+    resolution = resolution > 0 ? std::clamp(resolution, kMinBakeResolution, kMaxCardBakeResolution) : 0;
     const float occlusion = static_cast<float>(optNumber(args, "occlusion", 1.0));
     bool withScalp = optBool(args, "scalp", true);
     const CardBake bake = bakeCardsNow(s, resolution, occlusion);
@@ -612,7 +571,7 @@ json bakeFollicleMapNow(Session& s, const json& args) {
     options.resolution = static_cast<int>(optNumber(args, "resolution", 2048));
     options.radius = static_cast<float>(optNumber(args, "radius", 0.0));
     options.padding = static_cast<int>(optNumber(args, "padding", 8));
-    if (options.resolution < 16 || options.resolution > 8192) fail("bad_request", "resolution must be 16 to 8192");
+    if (options.resolution < kMinBakeResolution || options.resolution > kMaxMapBakeResolution) fail("bad_request", "resolution must be 16 to 8192");
     if (options.radius < 0.0f) fail("bad_request", "radius must be 0 (from the roots' spacing) or more");
     const ViewResult& view = evaluateNow(s, false);  // (every root, none buried)
     const MeshPtr scalp = view.scalp ? view.scalp : s.groom->rawScalp();
@@ -644,7 +603,7 @@ json bakeScaleMapsNow(Session& s, const json& args) {
     options.resolution = static_cast<int>(optNumber(args, "resolution", 2048));
     options.maxHeight = static_cast<float>(optNumber(args, "maxHeight", 0.0));
     options.padding = static_cast<int>(optNumber(args, "padding", 8));
-    if (options.resolution < 16 || options.resolution > 8192) fail("bad_request", "resolution must be 16 to 8192");
+    if (options.resolution < kMinBakeResolution || options.resolution > kMaxMapBakeResolution) fail("bad_request", "resolution must be 16 to 8192");
     if (options.maxHeight < 0.0f) fail("bad_request", "maxHeight must be 0 (measured) or more");
     MeshPtr scalp;
     const auto mesh = scalesNow(s, &scalp);
@@ -1346,23 +1305,24 @@ json transfer(Session& s, const json& args, BlockReader& blocks) {
     options.keepLengths = optBool(args, "keepLengths", false);
     const bool fitSize = optBool(args, "fitSize", false);
     const bool scaling = s.groom->scaleWithScalp();
-    if (fitSize && scaling) options.keepLengths = true;  // the groom's scale grows the guides; the mapping only turns them
-    bool markersGiven = false;
     try {
         if (args.contains("markers") && !args["markers"].is_null()) {
-            options.markers = snapTransferMarkers(markersFrom(args["markers"], s.space), *from, *to);
-            markersGiven = true;
+            options.markers = markersFrom(args["markers"], s.space);
         } else if (usesMarkers(options.method)) {
-            options.markers = snapTransferMarkers(s.file.transferMarkers, *from, *to);
+            options.markers = s.file.transferMarkers;
         }
+        if (optBool(args, "snapMarkers", false)) {  // nothing changed
+            return {{"markers", markersJson(snapTransferMarkers(options.markers, *from, *to), s.space)}};
+        }
+        // (Every host's: groom_transfer.h; the size fitted keeps the lengths, the markers snapped,
+        // the method's markers checked.)
+        options = preparedTransferOptions(options, fitSize, scaling, *from, *to);
     } catch (const RequestError&) {
         throw;
     } catch (const std::exception& e) {
         fail("bad_request", e.what());
     }
-    if (optBool(args, "snapMarkers", false)) return {{"markers", markersJson(options.markers, s.space)}};  // nothing changed
-    const std::string requirement = markerRequirement(options.method, options.markers.size());
-    if (!requirement.empty()) fail("bad_request", requirement);
+    const bool markersGiven = args.contains("markers") && !args["markers"].is_null();
     std::vector<std::string> warnings;
     std::unique_ptr<ScalpMapping> mapping;
     try {
@@ -1377,28 +1337,13 @@ json transfer(Session& s, const json& args, BlockReader& blocks) {
     std::size_t moved = 0;
     json projected = json::array(), missing = json::array();
     try {
+        // The guides, parts and flow re-rooted (every host's: groom_transfer.h).
         const HierarchyPtr stored = s.groom->storedHierarchy();
-        if (stored && !d.hierarchyJson.empty()) {
-            GuideHierarchy h = GuideHierarchy::fromJson(d.hierarchyJson);
-            h.setScale(static_cast<float>(k));  // moved as shown: the groom keeps its scale
-            h.transfer(*mapping);
-            moved = h.guides().size();
-            texts.emplace_back(StrokeField::Guides, h.toJson());
-        }
-        if (!d.partsJson.empty()) {
-            const PartSet parts = PartSet::fromJson(d.partsJson);
-            const PartSet out = parts.transferred(*mapping);
-            if (out.parts.size() < parts.parts.size()) warnings.push_back("some parts fell apart on the new scalp and were dropped");
-            texts.emplace_back(StrokeField::Parts, out.empty() ? std::string() : out.toJson());
-        }
-        if (!d.flowJson.empty()) {
-            const FlowSet flow = FlowSet::fromJson(d.flowJson);
-            const FlowSet out = flow.transferred(*mapping);
-            if (out.pins.size() < flow.pins.size() || out.sinks.size() < flow.sinks.size()) {
-                warnings.push_back("some flow arrows did not fit the new scalp and were dropped");
-            }
-            texts.emplace_back(StrokeField::Flow, out.empty() ? std::string() : out.toJson());
-        }
+        const GroomTransferTexts out = transferGroomTexts(stored ? d.hierarchyJson : std::string(), d.partsJson, d.flowJson, *mapping, k, &warnings);
+        moved = out.guidesMoved;
+        if (stored && !d.hierarchyJson.empty()) texts.emplace_back(StrokeField::Guides, out.hierarchyJson);
+        if (!d.partsJson.empty()) texts.emplace_back(StrokeField::Parts, out.partsJson);
+        if (!d.flowJson.empty()) texts.emplace_back(StrokeField::Flow, out.flowJson);
         // The painted maps through the same mapping: a vertex map gets values for the new vertices,
         // a texture map a new image at the new scalp's UVs (a free name in the maps folder; the
         // old file is left as it is). Not projected, vertex maps cannot fit another scalp: they go.
@@ -1411,9 +1356,7 @@ json transfer(Session& s, const json& args, BlockReader& blocks) {
                 files.write = [&s, folder](const std::string& name, const TexturePaint& paint) {
                     std::error_code ec;
                     fs::create_directories(fs::u8path(folder), ec);
-                    fs::path target = fs::u8path(folder) / fs::u8path(name + ".png");
-                    // (Taken: a file, or a tile set of that name.)
-                    for (int n = 2; fileStamp(target.generic_u8string()) != 0; ++n) target = fs::u8path(folder) / fs::u8path(name + "_" + std::to_string(n) + ".png");
+                    const fs::path target = fs::u8path(freeFilePath(folder + "/" + name + ".png"));  // (a file or a tile set: taken)
                     const std::string path = target.generic_u8string();
                     // Undo takes the new image (a tile set's every tile, udim.h) away, redo writes it again.
                     for (const std::string& file : mapImageFiles(path, paint.udim() ? paint.udimLayout()->tiles : std::vector<int>{})) {
@@ -1719,28 +1662,6 @@ std::string cardBakePrefixOf(const Session& s) {
 // `name`, or name_2, name_3...: the first whose files (<directory>/<name>_<suffix>) are free or
 // already the groom's own (`own`, a prefix), so a bake never writes over files it does not own
 // (Maya's _free_bake_name).
-std::string freeBakeName(const std::string& directory, const std::string& name, const std::vector<std::string>& suffixes,
-                         const std::string& own) {
-    const auto same = [](const std::string& a, const std::string& b) {
-        std::string x = fs::u8path(a).lexically_normal().generic_u8string(), y = fs::u8path(b).lexically_normal().generic_u8string();
-#ifdef _WIN32
-        std::transform(x.begin(), x.end(), x.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-        std::transform(y.begin(), y.end(), y.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-#endif
-        return x == y;
-    };
-    std::string candidate = name;
-    for (int k = 2;; ++k) {
-        const std::string prefix = directory + "/" + candidate + "_";
-        bool taken = false;
-        if (own.empty() || !same(prefix, own)) {
-            std::error_code ec;
-            for (const std::string& f : suffixes) taken = taken || fs::exists(fs::u8path(prefix + f), ec);
-        }
-        if (!taken) return candidate;
-        candidate = name + "_" + std::to_string(k);
-    }
-}
 
 // bake_cards (Maya's bake_cards, the app's Bake Maps): the Cards nodes' maps baked into
 // `directory` as <name>_<map>.tga (Unreal's hair card layout), the atlas and the viewport's
@@ -1750,11 +1671,11 @@ json bakeCardsCommand(Session& s, const json& args) {
     const std::string directory = fs::u8path(needString(args, "directory")).generic_u8string();
     const std::string requested = optString(args, "name", "groom");
     int resolution = static_cast<int>(optNumber(args, "resolution", 0.0));
-    resolution = resolution > 0 ? std::clamp(resolution, 16, 16384) : 0;  // 0: the Cards nodes' atlasSize
+    resolution = resolution > 0 ? std::clamp(resolution, kMinBakeResolution, kMaxCardBakeResolution) : 0;  // 0: the Cards nodes' atlasSize
     const CardBake bake = bakeCardsNow(s, resolution, static_cast<float>(optNumber(args, "occlusion", 1.0)));
     std::vector<std::string> suffixes = cardBakeSuffixes();
     suffixes.push_back("Preview.png");
-    const std::string name = optBool(args, "exact", false) ? requested : freeBakeName(directory, requested, suffixes, cardBakePrefixOf(s));
+    const std::string name = optBool(args, "exact", false) ? requested : freeCardBakeName(directory, requested, cardBakePrefixOf(s), {}, suffixes);
     const CardBakePaths at = CardBakePaths::in(directory, name);
     std::string stamp;
     try {
@@ -1784,7 +1705,7 @@ json bakeScalpCommand(Session& s, const json& args) {
     const std::string directory = fs::u8path(needString(args, "directory")).generic_u8string();
     const std::string requested = optString(args, "name", "groom");
     ScalpBakeSettings settings;
-    settings.size = std::clamp(static_cast<int>(optNumber(args, "resolution", 2048.0)), 16, 16384);
+    settings.size = std::clamp(static_cast<int>(optNumber(args, "resolution", 2048.0)), kMinBakeResolution, kMaxCardBakeResolution);
     settings.reach = std::max(0.0f, static_cast<float>(optNumber(args, "reach", 0.0)));
     ViewRequest request;
     request.density = std::clamp(static_cast<float>(optNumber(args, "density", 1.0)), 0.0f, 1.0f);
@@ -1806,7 +1727,7 @@ json bakeScalpCommand(Session& s, const json& args) {
     }
     const std::string name = optBool(args, "exact", false)
                                  ? requested
-                                 : freeBakeName(directory, requested, {"ScalpColor.tga", "ScalpCoverage.tga"}, optString(args, "own", ""));
+                                 : freeCardBakeName(directory, requested, optString(args, "own", ""), {}, {"ScalpColor.tga", "ScalpCoverage.tga"});
     std::vector<std::string> paths;
     try {
         std::error_code ec;

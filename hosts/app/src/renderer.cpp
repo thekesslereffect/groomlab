@@ -20,6 +20,7 @@
 #include "groomlab/math.h"
 #include "groomlab/profile.h"
 #include "groomlab/scalp_paint.h"
+#include "groomlab/color.h"
 
 // Q_INIT_RESOURCE cannot sit in a namespace: the shaders' resources (a static library's) are
 // pulled in here.
@@ -1495,7 +1496,7 @@ void GroomRenderer::render(QRhi* rhi, QRhiCommandBuffer* cb, QRhiRenderTarget* t
     // (LightingSetup::exposure): their color goes in divided by the exposure and decoded from sRGB,
     // so they read as the same dark gray as in the line path, not lit up.
     const float unexpose = std::pow(2.0f, -lookdev_.lighting().exposure);
-    auto fromSrgb = [](float c) { return c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f); };
+    auto fromSrgb = [](float c) { return groomlab::srgbToLinear(c); };  // (color.h)
     for (auto& item : otherItems_) {
         item->fresh = false;
         if (!item->shown || !hair) continue;

@@ -17,11 +17,14 @@
 #include <maya/MDagPath.h>
 #include <maya/MObject.h>
 
+#include "groomlab/asset_files.h"
+
 namespace groomlab::maya {
 
-// Text safe in a file name: every character outside [A-Za-z0-9_.-] becomes '_' (so ':' and
-// '|' never reach a path), leading '_' from a leading '|' dropped, trailing dots dropped.
-std::string fileSafeName(const std::string& text);
+// Text safe in a file name (every host's rule: the core's, asset_files.h): every character outside
+// [A-Za-z0-9_.-] becomes '_' (so ':' and '|' never reach a path), leading '|' dropped, trailing
+// dots dropped, "groom" for nothing.
+using groomlab::fileSafeName;
 // The groom's asset name (the shape or its transform): its transform's full path, file safe.
 std::string assetName(const MDagPath& groom);
 // The scene's folder for `kind` (absolute, forward slashes; not created).

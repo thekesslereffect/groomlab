@@ -2,6 +2,9 @@
 #include "groomlab/portable_math.h"
 #include "groomlab/scalp_paint.h"
 
+#include "groomlab/guide_hierarchy.h"
+#include "groomlab/stroke.h"
+
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -2476,6 +2479,51 @@ std::vector<std::string> projectScalpMaps(ScalpMaps& maps, const std::set<std::s
         }
     }
     return projected;
+}
+
+// ---- New maps ----------------------------------------------------------------------------------
+
+std::vector<float> newVertexMapValues(const ScalpMesh& scalp, int channels, const PaintColor& fill,
+                                      const std::vector<std::int32_t>& faces) {
+    requireChannels(channels, "newVertexMapValues");
+    const PaintColor everywhere = faces.empty() ? fill : PaintColor{0.0f, 0.0f, 0.0f, 1.0f};
+    std::vector<float> values;
+    values.reserve(scalp.pointCount() * static_cast<std::size_t>(channels));
+    for (std::size_t v = 0; v < scalp.pointCount(); ++v) {
+        if (channels == kColorMap) {
+            values.insert(values.end(), everywhere.begin(), everywhere.end());
+        } else {
+            values.push_back(everywhere[0]);
+        }
+    }
+    if (!faces.empty()) fillVertexMapFaces(values, channels, kAllChannels, fill, PaintMode::Replace, scalp, faces);
+    return values;
+}
+
+TexturePaint newTextureMapPaint(const ScalpMesh& scalp, int channels, const PaintColor& fill, int resolution,
+                                const std::vector<std::int32_t>& faces) {
+    requireChannels(channels, "newTextureMapPaint");
+    if (!scalp.hasUVs()) throw std::invalid_argument("the scalp has no UVs to paint a texture map on");
+    const int size = std::clamp(resolution, BrushToolSettings::kMinPaintResolution, BrushToolSettings::kMaxPaintResolution);
+    const PaintColor everywhere = faces.empty() ? fill : PaintColor{0.0f, 0.0f, 0.0f, 1.0f};
+    TexturePaint paint = channels == kColorMap ? TexturePaint(scalp, size, size, everywhere) : TexturePaint(scalp, size, size, everywhere[0]);
+    if (!faces.empty()) paint.fillTriangles(polygonTriangles(scalp, faces), fill, kAllChannels);
+    return paint;
+}
+
+bool addGuideLayer(GuideHierarchy& h, const std::string& name, float value, const ScalpMesh* scalp,
+                   const std::vector<std::int32_t>& faces) {
+    const std::vector<std::uint8_t> triangles = scalp && !faces.empty() ? polygonTriangles(*scalp, faces) : std::vector<std::uint8_t>{};
+    auto rootedOn = [&](const HierarchyGuide& g) {
+        return g.root.face >= 0 && static_cast<std::size_t>(g.root.face) < triangles.size() && triangles[static_cast<std::size_t>(g.root.face)] != 0;
+    };
+    bool any = false;
+    for (const HierarchyGuide& g : h.guides()) {
+        if (g.parent != kNoGuide) continue;  // children inherit their primary's
+        h.setAttribute(g.id, name, faces.empty() || rootedOn(g) ? value : 0.0f);
+        any = true;
+    }
+    return any;
 }
 
 }  // namespace groomlab

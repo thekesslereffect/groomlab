@@ -94,11 +94,7 @@ struct PaintTarget {
 
 // A file an edit wrote, moved or removed (a texture map's image): its bytes before and after (not
 // `before` / not `after`: no file then), so undo and redo put it back as the edit found and left it.
-struct FileEdit {
-    std::string path;
-    bool before = false, after = false;
-    std::string beforeBytes, afterBytes;
-};
+using FileEdit = FileState;  // a file as an edit found and left it (asset_files.h: every host's)
 
 // What an undo step did beside the stored texts the host's stack keeps: files, and the guide
 // groups' own colors (display only, kept with the tools' state as Maya keeps guideGroupColors on
@@ -772,28 +768,6 @@ std::vector<GuideId> idsOf(const json& v) {
 
 // ---- Side edits: files and group colors ---------------------------------------------------------
 
-bool readBytes(const std::string& path, std::string& out) {
-    out.clear();
-    std::error_code ec;
-    if (path.empty() || !fs::is_regular_file(fs::u8path(path), ec)) return false;
-    std::ifstream f(fs::u8path(path), std::ios::binary);
-    if (!f) return false;
-    out.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
-    return true;
-}
-
-// A file put as an edit found or left it: its bytes, or no file.
-void putFile(const std::string& path, bool present, const std::string& bytes) {
-    std::error_code ec;
-    const fs::path p = fs::u8path(path);
-    if (!present) {
-        fs::remove(p, ec);
-        return;
-    }
-    if (p.has_parent_path()) fs::create_directories(p.parent_path(), ec);
-    std::ofstream f(p, std::ios::binary | std::ios::trunc);
-    f.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
-}
 
 // The texture maps' paints kept open between strokes let go: a file an edit wrote (or undo put
 // back) is read again by the next stroke, fill or undo of a stroke.
@@ -803,16 +777,11 @@ void dropPaints(ToolState& t) {
 }
 
 // `path` as it is now, before the edit that is about to change it (FileEdit::before)...
-FileEdit fileBefore(const std::string& path) {
-    FileEdit e;
-    e.path = path;
-    e.before = readBytes(path, e.beforeBytes);
-    return e;
-}
+FileEdit fileBefore(const std::string& path) { return FileEdit{path, readFileState(path), std::nullopt}; }
 
 // ... and after it: kept for the next commit's undo step.
 void fileAfter(ToolState& t, FileEdit e) {
-    e.after = readBytes(e.path, e.afterBytes);
+    e.after = readFileState(e.path);
     t.pending.files.push_back(std::move(e));
 }
 
@@ -829,11 +798,7 @@ void filesAfter(ToolState& t, std::vector<FileEdit> edits) {
 }
 
 void applySide(ToolState& t, const SideEdit& side, bool after) {
-    if (after) {
-        for (const FileEdit& f : side.files) putFile(f.path, f.after, f.afterBytes);
-    } else {
-        for (auto f = side.files.rbegin(); f != side.files.rend(); ++f) putFile(f->path, f->before, f->beforeBytes);
-    }
+    restoreFileStates(side.files, after);
     if (!side.files.empty()) dropPaints(t);
     if (side.colors) t.groupColors = after ? side.colorsAfter : side.colorsBefore;
     if (after) {
@@ -851,11 +816,7 @@ void dropPending(ToolState& t) {
 
 // The guide groups' colors as the display reads them (DisplaySettings::guideGroupColors):
 // "name:#rrggbb name:#rrggbb".
-std::string groupColorsText(const ToolState& t) {
-    std::string out;
-    for (const auto& [group, color] : t.groupColors) out += (out.empty() ? "" : " ") + group + ":" + color;
-    return out;
-}
+std::string groupColorsText(const ToolState& t) { return guideGroupColorsText(t.groupColors); }  // (display.h)
 
 // ---- Undo ---------------------------------------------------------------------------------------
 
@@ -1273,13 +1234,7 @@ void requireScalp(Session& s) {
 
 // ---- Guides ---------------------------------------------------------------------------------------
 
-std::string uniqueGroupName(const GuideHierarchy& h, const std::string& base) {
-    if (h.findGroup(base) == kNoGroup) return base;
-    for (int k = 2;; ++k) {
-        const std::string name = base + std::to_string(k);
-        if (h.findGroup(name) == kNoGroup) return name;
-    }
-}
+std::string uniqueGroupName(const GuideHierarchy& h, const std::string& base) { return h.freeGroupName(base); }
 
 GroupId groupNamed(const GuideHierarchy& h, const json& args, const char* key) {
     const std::string name = needString(args, key);
@@ -2040,16 +1995,9 @@ json mapCreate(ToolState& t, const json& args) {
     const std::vector<std::int32_t> faces = facesArg(args);
     if (kind == "guides") {
         if (color) fail("bad_request", "a guide layer is gray: make a color map on the scalp's vertices or as a texture");
-        // On faces: the value on the guides rooted on them, 0 on the rest.
-        const std::vector<std::uint8_t> triangles = faces.empty() ? std::vector<std::uint8_t>{} : polygonTriangles(*scalp, faces);
+        // On faces: the value on the guides rooted on them, 0 on the rest (every host's: addGuideLayer).
         editGuides(t, "create map " + name, [&](GuideHierarchy& h) {
-            bool any = false;
-            for (const HierarchyGuide& g : h.guides()) {
-                if (g.parent != kNoGuide) continue;  // children inherit their primary's
-                h.setAttribute(g.id, name, faces.empty() || rootedOn(g, triangles) ? value : 0.0f);
-                any = true;
-            }
-            if (!any) fail("state", "no primary guides to carry the layer: place some first");
+            if (!addGuideLayer(h, name, value, scalp.get(), faces)) fail("state", "no primary guides to carry the layer: place some first");
         });
         return {{"name", name}, {"kind", kind}, {"undo", undoJson(t)}};
     }
@@ -2066,33 +2014,18 @@ ScalpMapEntry newScalpMapEntry(Session& s, const ScalpMesh& scalpMesh, const std
     const ScalpMesh* scalp = &scalpMesh;
     ScalpMapEntry entry;
     entry.channels = color ? kColorMap : kGrayMap;
-    // On faces: 0 (a color map black, alpha 1) with the value or fill on them.
-    const PaintColor onFaces = color ? fill : PaintColor{value, value, value, value};
-    const PaintColor everywhere = faces.empty() ? onFaces : PaintColor{0.0f, 0.0f, 0.0f, color ? 1.0f : 0.0f};
+    // (Every host's New Map: scalp_paint.h newVertexMapValues, newTextureMapPaint.)
+    const PaintColor filled = color ? fill : PaintColor{value, value, value, 1.0f};
     if (kind == "vertices") {
         entry.kind = "vertices";
-        const std::size_t n = scalp->pointCount();
-        entry.values.resize(n * static_cast<std::size_t>(entry.channels));
-        for (std::size_t v = 0; v < n; ++v) {
-            if (color) {
-                for (std::size_t c = 0; c < 4; ++c) entry.values[v * 4 + c] = everywhere[c];
-            } else {
-                entry.values[v] = everywhere[0];
-            }
-        }
-        if (!faces.empty()) fillVertexMapFaces(entry.values, entry.channels, kAllChannels, onFaces, PaintMode::Replace, *scalp, faces);
+        entry.values = newVertexMapValues(*scalp, entry.channels, filled, faces);
     } else if (kind == "texture") {
         if (!scalp->hasUVs()) fail("state", "the scalp has no UVs to paint a texture map on");
         const fs::path folder = fs::u8path(mapsFolder(s));
-        fs::path file = folder / (name + ".png");
-        // (Taken: a file, or a tile set of that name.)
-        for (int k = 2; fileStamp(file.generic_u8string()) != 0; ++k) file = folder / (name + "_" + std::to_string(k) + ".png");
+        const fs::path file = fs::u8path(freeFilePath((folder / (name + ".png")).generic_u8string()));  // (a file or a tile set: taken)
         try {
             fs::create_directories(file.parent_path());
-            const int size = std::clamp(resolution, BrushToolSettings::kMinPaintResolution, BrushToolSettings::kMaxPaintResolution);
-            TexturePaint paint = color ? TexturePaint(*scalp, size, size, everywhere) : TexturePaint(*scalp, size, size, everywhere[0]);
-            if (!faces.empty()) paint.fillTriangles(polygonTriangles(*scalp, faces), onFaces, kAllChannels);
-            paint.save(file.generic_u8string());
+            newTextureMapPaint(*scalp, entry.channels, filled, resolution, faces).save(file.generic_u8string());
         } catch (const std::exception& e) {
             fail("io", std::string("cannot write the map's image: ") + e.what());
         }
@@ -2379,29 +2312,22 @@ json mapRename(ToolState& t, const json& args) {
             const std::string full = resolveMapFile(s, entry.texture);
             const std::string renamed = renamedMapTexture(full, from, to);
             std::error_code ec;
-            if (!renamed.empty() && insideFolder(full, mapsFolder(s)) && fs::is_regular_file(fs::u8path(full), ec)) {
+            if (!renamed.empty() && insideFolder(full, mapsFolder(s)) && fileStamp(full) != 0) {
+                // The image renamed (a tile set: each tile, its naming kept: udim.h mapImageMoves,
+                // every host's), each file's before and after kept for undo.
                 const std::string target = freeFilePath(renamed);
-                FileEdit source = fileBefore(full), made = fileBefore(target);
-                fs::rename(fs::u8path(full), fs::u8path(target), ec);
-                if (!ec) {
-                    fileAfter(t, std::move(source));
-                    fileAfter(t, std::move(made));
-                    entry.texture = target;
-                    movedFrom = full;
+                const auto moves = mapImageMoves(full, target);
+                std::vector<FileEdit> edits;
+                for (const auto& [a, b] : moves) {
+                    edits.push_back(fileBefore(a));
+                    edits.push_back(fileBefore(b));
                 }
-            } else if (!renamed.empty() && insideFolder(full, mapsFolder(s)) && isUdimPath(full)) {
-                // A tile set: each tile renamed, the set's naming kept for the new name.
-                const std::string target = freeFilePath(renamed);
-                const std::string fromSet = udimPathFor(full), toSet = udimPathFor(target);
-                std::vector<FileEdit> sources = filesBefore(full), made;
-                for (const int tile : Texture(fromSet).udimTiles()) made.push_back(fileBefore(udimTilePath(toSet, tile)));
                 bool moved = true;
-                for (const int tile : Texture(fromSet).udimTiles()) {
-                    fs::rename(fs::u8path(udimTilePath(fromSet, tile)), fs::u8path(udimTilePath(toSet, tile)), ec);
+                for (const auto& [a, b] : moves) {
+                    fs::rename(fs::u8path(a), fs::u8path(b), ec);
                     moved = moved && !ec;
                 }
-                filesAfter(t, std::move(sources));
-                filesAfter(t, std::move(made));
+                filesAfter(t, std::move(edits));
                 if (moved) {
                     entry.texture = target;
                     movedFrom = full;
@@ -2715,15 +2641,7 @@ json mapImport(ToolState& t, const json& args) {
     Session& s = t.session;
     const std::string path = needString(args, "path");
     std::string name = optString(args, "name", "");
-    if (name.empty()) {
-        std::string stem;
-        for (const char c : fs::u8path(path).stem().u8string()) stem += std::isalnum(static_cast<unsigned char>(c)) || c == '_' ? c : '_';
-        const auto first = stem.find_first_not_of('_'), last = stem.find_last_not_of('_');
-        stem = first == std::string::npos ? std::string("map") : stem.substr(first, last - first + 1);
-        if (std::isdigit(static_cast<unsigned char>(stem[0]))) stem = "map_" + stem;
-        name = stem;
-        for (int n = 2; !mapKindOf(s, name).empty(); ++n) name = stem + "_" + std::to_string(n);
-    }
+    if (name.empty()) name = mapNameFromFile(path, [&](const std::string& n) { return !mapKindOf(s, n).empty(); });  // (every host's rule)
     if (!validMapName(name)) fail("bad_request", mapNameError(name));
     if (!mapKindOf(s, name).empty()) fail("bad_request", "the groom already has a map named '" + name + "'");
     TexturePtr image;
@@ -3483,7 +3401,7 @@ void sideFileBefore(Session& s, const std::string& path) {
 
 void dropSideFiles(Session& s) {
     ToolState& t = toolsOf(s);
-    for (auto f = t.pendingFiles.rbegin(); f != t.pendingFiles.rend(); ++f) putFile(f->path, f->before, f->beforeBytes);
+    for (auto f = t.pendingFiles.rbegin(); f != t.pendingFiles.rend(); ++f) putFileState(f->path, f->before);
     if (!t.pendingFiles.empty()) dropPaints(t);
     t.pendingFiles.clear();
 }

@@ -78,18 +78,6 @@ bool inBake(const std::string& full, const std::string& prefixFile) {
 
 }  // namespace
 
-std::string fileSafeName(const std::string& text) {
-    std::string out;
-    std::size_t start = 0;
-    while (start < text.size() && text[start] == '|') ++start;
-    for (std::size_t i = start; i < text.size(); ++i) {
-        const unsigned char c = static_cast<unsigned char>(text[i]);
-        out += std::isalnum(c) || c == '_' || c == '.' || c == '-' ? static_cast<char>(c) : '_';
-    }
-    while (!out.empty() && out.back() == '.') out.pop_back();
-    return out.empty() ? std::string("groom") : out;
-}
-
 std::string assetName(const MDagPath& groom) {
     MDagPath transform = groom;
     if (transform.node().hasFn(MFn::kShape)) transform.pop();

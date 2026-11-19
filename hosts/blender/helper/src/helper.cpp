@@ -807,13 +807,10 @@ PrototypeLookup storedPrototypes(const Session& s) {
     };
 }
 
-// Unity's hair package resamples strands to 3..128 particles (HairSim.MIN/MAX_STRAND_PARTICLE_COUNT),
-// as Maya's groomlab.game checks a count it is given.
+// A Unity point count: a whole number (its range, Unity's 3 to 128 or 0, EngineExportOptions::problem).
 std::size_t unityPoints(const json& args, const char* key) {
     const double v = optNumber(args, key, 0.0);
-    if (v != 0.0 && (v < 3.0 || v > 128.0 || v != std::floor(v))) {
-        fail("bad_request", std::string(key) + " must be 3 to 128 (Unity's strand particle counts), or 0: as they are");
-    }
+    if (v < 0.0 || v != std::floor(v)) fail("bad_request", std::string(key) + " must be a whole number, 0 or more");
     return static_cast<std::size_t>(v);
 }
 
@@ -1303,8 +1300,7 @@ json setState(Session& s, const json& args) {
                 // A tile set: its tiles written as <name>.<tile>.png in a free name's set, the map's
                 // path the plain name (texture.h finds the set from it).
                 fs::create_directories(folder, ec);
-                fs::path target = folder / (name + ".png");
-                for (int k = 2; fileStamp(target.generic_u8string()) != 0; ++k) target = folder / (name + "_" + std::to_string(k) + ".png");
+                const fs::path target = fs::u8path(freeFilePath((folder / (name + ".png")).generic_u8string()));  // (a file or a tile set: taken)
                 const std::string pattern = udimPathFor(target.generic_u8string());
                 for (const json& tile : t["tiles"]) {
                     writeAtomically(udimTilePath(pattern, tile.value("tile", kFirstUdimTile)), base64Decode(needString(tile, "png")));
@@ -1481,6 +1477,38 @@ json Helper::run(const std::string& cmd, const json& args) {
         }
         if (args.contains("mapsDir") && !args["mapsDir"].is_null()) s.mapsDir = optString(args, "mapsDir", "");
         return {{"followScalp", s.groom->followScalp()}, {"mapsDir", mapsFolderOf(s)}};
+    }
+    // Find Missing Files and the File Path Editor's checks, every host's (asset_files.h): the
+    // graph's file params by label, a graph with some pointed elsewhere, which files are there, and
+    // the files of a folder that stored paths name.
+    auto graphArg = [](const json& a) {
+        const json& g = need(a, "graph");
+        return g.is_string() ? g.get<std::string>() : g.dump();
+    };
+    if (cmd == "file_safe_name") return {{"name", fileSafeName(optString(args, "text", ""))}};
+    if (cmd == "graph_file_params") {
+        json out = json::array();
+        for (const auto& [label, path] : graphFileParams(graphArg(args))) out.push_back({{"label", label}, {"path", path}});
+        return {{"params", out}};
+    }
+    if (cmd == "with_graph_file_params") {
+        const std::map<std::string, std::string> paths = args.value("paths", json::object()).get<std::map<std::string, std::string>>();
+        return {{"graph", json::parse(withGraphFileParams(graphArg(args), paths))}};
+    }
+    if (cmd == "files_there") {
+        json out = json::array();
+        for (const json& p : args.value("paths", json::array())) out.push_back(p.is_string() && fileThere(p.get<std::string>()));
+        return {{"there", out}};
+    }
+    if (cmd == "files_match") {
+        const FileIndex index = indexFolder(needString(args, "folder"), optBool(args, "recursive", true));
+        json out = json::array();
+        for (const json& p : args.value("stored", json::array())) {
+            std::vector<std::string> candidates;
+            const std::string found = p.is_string() ? matchMissingFile(index, p.get<std::string>(), &candidates) : std::string();
+            out.push_back({{"found", found}, {"candidates", candidates}});
+        }
+        return {{"matches", out}};
     }
     if (cmd == "files_follow") {
         // Save As (Maya's follow_scene_files): the files the groom names come along into the new

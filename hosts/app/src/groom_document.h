@@ -21,6 +21,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "groomlab/asset_files.h"
 #include "groomlab/card_blocks.h"
 #include "groomlab/card_files.h"
 #include "groomlab/card_maps.h"
@@ -985,10 +986,7 @@ private:
         nlohmann::json graphBefore, graphAfter;
         // Besides (or alone: `side`, named by `label`): files written or deleted (their bytes
         // before and after, nullopt: no file), the group colors before and after.
-        struct FileState {
-            std::string path;
-            std::optional<std::string> before, after;
-        };
+        using FileState = groomlab::FileState;  // (asset_files.h: every host's)
         std::vector<FileState> files;
         bool side = false;
         bool colors = false;
