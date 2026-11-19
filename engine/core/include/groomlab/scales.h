@@ -100,6 +100,9 @@ struct ScaleMesh {
     std::vector<Scale> scales;
     std::size_t vertexCount() const { return points.size(); }
     std::size_t triangleCount() const { return triangles.size() / 3; }
+    // Each triangle's scale (its index in `scales`; 0 for a triangle no scale owns): every host's
+    // per-face scale data (scaleUV, scaleData, scaleRootColor) reads it.
+    std::vector<std::uint32_t> triangleOwners() const;
 };
 
 struct ScaleMeshOptions {

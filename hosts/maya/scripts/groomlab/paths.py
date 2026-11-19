@@ -146,17 +146,19 @@ def follow_scene_files():
         """A groom file named after the scene, beside it (<scene>.groom: menu.groom_source_file),
         copied as the new scene's (<new scene>.groom), so the two scenes never write one. Others
         (a file of another name, elsewhere): as any file."""
-        stem, ext = os.path.splitext(rel)
         base = next((b for b, _f in followers if os.path.isfile(os.path.join(b, rel))), None)
-        if "/" in rel or not base or not old_stem or stem != old_stem or not new_stem:
+        if "/" in rel or not base or not old_stem or not new_stem:
             return follow(rel)
-        src, dst = os.path.join(base, rel), os.path.join(new_base, new_stem + ext)
-        if os.path.exists(dst) and not _same_file(src, dst) and not groomlab_core.same_map_image(src, dst):
-            dst = _unique_path(dst)
+        # Every host's rule (asset_files.h followSceneGroomFile).
+        f = groomlab_core.follow_scene_groom_file(os.path.join(base, rel), os.path.join(base, old_stem + ".ma"),
+                                                  os.path.join(new_base, new_stem + ".ma"))
+        if not f["path"]:
+            return follow(rel)
+        if f["renamed"]:
             cmds.warning("GroomLab: a groom file of that name is already beside the saved scene with other "
-                         "content; this scene now uses %s" % os.path.relpath(dst, new_base).replace("\\", "/"))
-        new_rel = os.path.relpath(dst, new_base).replace("\\", "/")
-        if not os.path.exists(dst) and groomlab_core.copy_map_image(src, dst):  # (a file copied, folders made)
+                         "content; this scene now uses %s" % os.path.relpath(f["path"], new_base).replace("\\", "/"))
+        new_rel = os.path.relpath(f["path"], new_base).replace("\\", "/")
+        if f["copied"]:
             copied.append(new_rel)
         return new_rel
 
@@ -300,36 +302,20 @@ def resolve_path(path, node=None):
     return cmds.groomLabPaths(resolve=path)
 
 
-def _taken(path):
-    """Whether something is at `path`: a file, or a texture map's tile set its plain path names (udim.h)."""
-    return os.path.exists(path) or (groomlab_core.is_image_path(path) and groomlab_core.file_stamp(path) != 0)
-
-
 def _unique_path(path):
     """`path` when nothing is there, else the first free <stem>_2<ext>, <stem>_3<ext>... (a tile set
-    of the name counts as there)."""
-    if not _taken(path):
-        return path.replace("\\", "/")
-    stem, ext = os.path.splitext(path)
-    n = 2
-    while _taken("%s_%d%s" % (stem, n, ext)):
-        n += 1
-    return ("%s_%d%s" % (stem, n, ext)).replace("\\", "/")
+    of the name counts as there): the core's (asset_files.h freeFilePath), every host's."""
+    return groomlab_core.free_file_path(path)
 
 
 def absolute_paths(groom):
-    """Absolute file paths stored on a groom (maps, ImportCurves, caches): what breaks when a project moves."""
+    """Absolute file paths stored on a groom (the graph's file params, compounds' too: the core's
+    graphFileParams; its guide cache and groom file): what breaks when a project moves."""
     from groomlab import presets
-    found = []
-    graph = get_graph(groom)
-    for node in graph.get("nodes", []):
-        for key, value in node.get("params", {}).items():
-            path = value.get("texture") if isinstance(value, dict) else (value if key in presets.FILE_PARAM_NAMES else None)
-            if isinstance(path, str) and os.path.isabs(path):
-                found.append(("%s.%s" % (node["name"], key), path))
+    found = [(label, path) for label, path in presets.graph_files(get_graph(groom)) if groomlab_core.is_absolute_path(path)]
     for attr in ("guideCache", "groomFile"):
         value = cmds.getAttr(groom + "." + attr) or ""
-        if os.path.isabs(value):
+        if groomlab_core.is_absolute_path(value):
             found.append((attr, value))
     return found
 

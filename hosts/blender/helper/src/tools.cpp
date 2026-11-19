@@ -33,7 +33,7 @@
 #include "groomlab/flow.h"
 #include "groomlab/frame_time.h"
 #include "groomlab/graph_edit.h"
-#include "groomlab/graph_edit.h"
+#include "groomlab/graph_inserts.h"
 #include "groomlab/guide_selection.h"
 #include "groomlab/parts.h"
 #include "groomlab/paths.h"
@@ -1393,8 +1393,14 @@ json guidesEdit(ToolState& t, const json& args) {
         StrokeEdit stroke;
         stroke.mode = "rename group";
         stroke.set(StrokeField::Guides, h.toJson());
+        // The Guides nodes reading or leaving out the group follow it (every host's: graph_inserts.h),
+        // in the same undo step.
+        bool retargeted = false;
+        const std::string graph = renameGroupReaders(t.session.groom->data().graphJson, from, to, &retargeted);
+        if (retargeted) stroke.set(StrokeField::Graph, graph);
         commitEdit(t, std::move(stroke));
         if (t.hidden.erase(from)) t.hidden.insert(to);
+        r["graphChanged"] = retargeted;
     } else if (op == "generate_children") {
         std::string made;
         std::size_t count = 0;
@@ -1880,9 +1886,7 @@ json partAdd(ToolState& t, const json& args, BlockReader& blocks) {
 json partRemove(ToolState& t, const json& args) {
     const std::string name = needString(args, "name");
     PartSet set = storedParts(t.session);
-    const std::size_t before = set.parts.size();
-    set.parts.erase(std::remove_if(set.parts.begin(), set.parts.end(), [&](const Part& p) { return p.name == name; }), set.parts.end());
-    if (set.parts.size() == before) fail("not_found", "no part named '" + name + "'");
+    if (!set.remove(name)) fail("not_found", "no part named '" + name + "'");
     commitParts(t, "remove part", set);
     return {{"removed", name}, {"undo", undoJson(t)}};
 }
@@ -2268,8 +2272,7 @@ json mapRemove(ToolState& t, const json& args) {
             return m.second.kind == "texture" && sameFile(resolveMapFile(s, m.second.texture), file);
         });
         std::error_code ec;
-        if (optBool(args, "deleteFile", false) && !file.empty() && !shared && insideFolder(file, mapsFolder(s)) &&
-            fileStamp(file) != 0) {
+        if (optBool(args, "deleteFile", false) && mapImageDeletable(file, mapsFolder(s), shared)) {  // every host's rule (asset_files.h)
             // (A tile set: every tile's file.)
             std::vector<FileEdit> edits = filesBefore(file);
             for (const FileEdit& e : edits) {
@@ -2310,12 +2313,11 @@ json mapRename(ToolState& t, const json& args) {
         ScalpMapEntry& entry = node.mapped();
         if (entry.kind == "texture" && !entry.texture.empty()) {
             const std::string full = resolveMapFile(s, entry.texture);
-            const std::string renamed = renamedMapTexture(full, from, to);
+            const std::string target = renamedMapImage(full, from, to, mapsFolder(s));  // every host's rule (asset_files.h)
             std::error_code ec;
-            if (!renamed.empty() && insideFolder(full, mapsFolder(s)) && fileStamp(full) != 0) {
+            if (!target.empty()) {
                 // The image renamed (a tile set: each tile, its naming kept: udim.h mapImageMoves,
                 // every host's), each file's before and after kept for undo.
-                const std::string target = freeFilePath(renamed);
                 const auto moves = mapImageMoves(full, target);
                 std::vector<FileEdit> edits;
                 for (const auto& [a, b] : moves) {

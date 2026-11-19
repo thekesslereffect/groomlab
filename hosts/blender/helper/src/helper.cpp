@@ -31,6 +31,7 @@
 #include "groomlab/color_patterns.h"
 #include "groomlab/display.h"
 #include "groomlab/export_view.h"
+#include "groomlab/tube.h"
 #include "groomlab/expression.h"
 #include "groomlab/follow_scalp.h"
 #include "groomlab/frame_time.h"
@@ -221,9 +222,7 @@ std::string platformName() {
 
 
 void applySearchPaths(Session& s) {
-    std::vector<std::string> dirs;
-    if (!s.file.directory.empty()) dirs.push_back(s.file.directory);
-    dirs.insert(dirs.end(), s.file.searchPaths.begin(), s.file.searchPaths.end());
+    std::vector<std::string> dirs = groomFileFolders(s.file);  // every host's (groom_file.h)
     s.groom->setPathResolver(dirs.empty() ? PathResolver{} : searchPathResolver(std::move(dirs)));
 }
 
@@ -301,10 +300,7 @@ void feedTime(Session& s) {
 
 std::optional<double> scalpSize(const Session& s) {
     // At the size the params are at: the groom's 1x when it is scaled with its scalp.
-    const MeshPtr& scalp = s.groom->rawScalp();
-    std::optional<double> size = scalp ? presetScalpSize(*scalp) : std::nullopt;
-    if (size) *size /= s.groom->groomScale();
-    return size;
+    return paramScalpSize(s.groom->rawScalp().get(), s.groom->groomScale());
 }
 
 // The scalp's rest pose as a mesh (the scalp itself without one), kept while it stays the same.
@@ -885,7 +881,7 @@ std::unique_ptr<ExportJob> openExport(Session& s, const json& args) {
     job->format = format;
     job->path = needString(args, "path");
     job->fps = s.groom->framesPerSecond();
-    const std::string name = optString(args, "name", "groom");
+    const std::string name = exportObjectName(optString(args, "name", "groom"));  // every host's (export_view.h)
     const double start = optNumber(args, "startFrame", 1.0);
     const double step = optNumber(args, "step", 1.0);
     if (!(step > 0.0)) fail("bad_request", "step must be above 0");
@@ -1502,8 +1498,23 @@ json Helper::run(const std::string& cmd, const json& args) {
             fail("not_found", e.what());
         }
     }
+    if (cmd == "tube_shape_symmetric") {  // a cross-section editor's Mirror turned on, every host's (tube.h)
+        std::vector<SectionPoint> points;
+        for (const json& p : need(args, "points")) {
+            if (p.is_array() && p.size() >= 2) points.push_back({p[0].get<float>(), p[1].get<float>()});
+        }
+        json out = json::array();
+        for (const SectionPoint& p : mirroredSectionPoints(points)) out.push_back({p.u, p.v});
+        return {{"points", out}};
+    }
     if (cmd == "preset_from_text") {
         try {
+            // `paste`: a groom's whole graph pasted (every host's Paste Graph: the graph whole,
+            // network paths taken out, "removed" saying which).
+            if (optBool(args, "paste", false)) {
+                const PastedGraph pasted = pastedGraphFromText(needString(args, "text"));
+                return {{"preset", json::parse(pasted.presetJson)}, {"removed", pasted.removed}};
+            }
             return {{"preset", json::parse(presetFromText(needString(args, "text")))}};
         } catch (const std::invalid_argument& e) {
             fail("bad_request", e.what());
@@ -1538,6 +1549,13 @@ json Helper::run(const std::string& cmd, const json& args) {
     if (cmd == "with_graph_file_params") {
         const std::map<std::string, std::string> paths = args.value("paths", json::object()).get<std::map<std::string, std::string>>();
         return {{"graph", json::parse(withGraphFileParams(graphArg(args), paths))}};
+    }
+    if (cmd == "follow_groom_file") {  // Save As: the scene's own groom file, every host's (asset_files.h)
+        const FollowedGroomFile f = followSceneGroomFile(needString(args, "file"), needString(args, "old"), needString(args, "new"));
+        return {{"path", f.path}, {"copied", f.copied}, {"renamed", f.renamed}};
+    }
+    if (cmd == "collect_file") {  // a file copied into a folder, every host's (asset_files.h collectFile)
+        return {{"path", collectFile(needString(args, "path"), needString(args, "folder"))}};
     }
     if (cmd == "files_there") {
         json out = json::array();
@@ -1598,9 +1616,13 @@ json Helper::run(const std::string& cmd, const json& args) {
         std::error_code ec;
         const std::string path = fs::absolute(fs::u8path(needString(args, "path")), ec).u8string();
         if (!fs::is_regular_file(fs::u8path(path), ec)) fail("io", "no groom file '" + path + "'");
+        const std::vector<GroomFile> grooms = readGroomFiles(path);
         json names = json::array();
-        for (const GroomFile& g : readGroomFiles(path)) names.push_back(g.name);
-        return {{"grooms", names}};
+        for (const GroomFile& g : grooms) names.push_back(g.name);
+        json out = {{"grooms", names}};
+        // `name`: that groom's index, every host's (groom_package.h groomIndex; -1 none).
+        if (args.contains("name") && args["name"].is_string()) out["index"] = groomIndex(grooms, args["name"].get<std::string>());
+        return out;
     }
     if (cmd == "load_groom") {
         Session& s = session(args);
@@ -2139,6 +2161,18 @@ json Helper::run(const std::string& cmd, const json& args) {
         } else if (op == "insert_simulate") {  // Add > Simulate, every host's (graph_inserts.h)
             const json& params = args.contains("params") && args["params"].is_object() ? args["params"] : json::object();
             r["name"] = insertSimulate(edit, params.dump(), scalpSize(s));
+        } else if (op == "remove_scalp_nodes") {  // Remove > Scalp's graph, every host's (graph_inserts.h)
+            r["changed"] = removeScalpNodes(edit, needString(args, "mesh"));
+        } else if (op == "remove_collider_nodes") {  // Remove > Collider's graph, every host's (graph_inserts.h)
+            r["changed"] = removeColliderNodes(edit, needString(args, "mesh"));
+        } else if (op == "insert_cards") {  // Add > Cards, every host's (graph_inserts.h): one only when there is none
+            const json& params = args.contains("params") && args["params"].is_object() ? args["params"] : json::object();
+            bool made = false;
+            r["name"] = insertCards(edit, params.dump(), scalpSize(s), &made);
+            r["made"] = made;
+        } else if (op == "insert_motion") {  // Add > Wind / Jiggle, every host's (graph_inserts.h)
+            const json& params = args.contains("params") && args["params"].is_object() ? args["params"] : json::object();
+            r["name"] = insertMotion(edit, needString(args, "type"), params.dump(), scalpSize(s));
         } else if (op == "insert_drive_guides") {  // Simulate > Drivers, every host's (graph_inserts.h)
             r["name"] = insertDriveGuides(edit, scalpSize(s));
         } else if (op == "insert_guide_cache") {  // Load Guide Cache, every host's
@@ -2428,16 +2462,10 @@ json Helper::run(const std::string& cmd, const json& args) {
         Session& s = session(args);
         CardMapPreset preset;
         const json& given = args.contains("preset") ? args["preset"] : json(builtinCardMapPresets().front().name);
-        if (given.is_object()) {
-            try {
-                preset = cardMapPresetFromJson(given.dump());
-            } catch (const std::runtime_error& e) {
-                fail("bad_request", e.what());
-            }
-        } else if (const auto found = findCardMapPreset(given.is_string() ? given.get<std::string>() : std::string())) {
-            preset = *found;
-        } else {
-            fail("not_found", "no card map preset named " + given.dump());
+        try {  // every host's (card_maps.h): its JSON or its name
+            preset = cardMapPresetFromText(given.is_object() ? given.dump() : given.is_string() ? given.get<std::string>() : std::string());
+        } catch (const std::runtime_error& e) {
+            fail(given.is_object() ? "bad_request" : "not_found", e.what());
         }
         CardMapExport settings;
         settings.resolution = static_cast<int>(optNumber(args, "resolution", 0.0));
@@ -2447,7 +2475,7 @@ json Helper::run(const std::string& cmd, const json& args) {
         settings.supersample = static_cast<int>(optNumber(args, "supersample", 1.0));
         settings.nameTemplate = optString(args, "nameTemplate", "{name}_{map}");
         const std::string directory = needString(args, "directory");
-        const std::string name = optString(args, "name", "groom");
+        const std::string name = exportObjectName(optString(args, "name", "groom"));  // every host's (export_view.h)
         // The Cards nodes building their cards at full density, at the session's time.
         ViewRequest request;
         request.density = 1.0f;

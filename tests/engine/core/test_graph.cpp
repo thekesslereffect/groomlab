@@ -681,6 +681,82 @@ TEST(GraphInserts, DriversGoRightAfterTheGuidesAndASimulationAfterThem) {
     EXPECT_NO_THROW(loadGraphJson(other.toJson())) << "a graph that loads";
 }
 
+TEST(GraphInserts, MotionGoesBeforeTheCollideEndingTheChain) {
+    // insertMotion: Maya's add_wind/add_jiggle, the Blender helper's insert_motion and the app's Add
+    // > Wind put the node in one place: before the output, but before a Collide or Cards ending it.
+    auto feeds = [](const GraphEdit& e, const std::string& from, const std::string& to, const std::string& input) {
+        const nlohmann::json g = nlohmann::json::parse(e.toJson());
+        for (const nlohmann::json& c : g["connections"]) {
+            if (c["from"] == from && c["to"] == to && c["input"] == input) return true;
+        }
+        return false;
+    };
+    GraphEdit edit(defaultGraphJson());
+    const std::string output = edit.outputNode();
+    EXPECT_EQ(motionAnchor(edit), output);
+    insertCollider(edit, "collar.obj", true);
+    const std::string collide = motionAnchor(edit);
+    ASSERT_EQ(edit.nodeType(collide), "Collide");
+    const std::string wind = insertMotion(edit, "Wind");
+    EXPECT_EQ(edit.nodeType(wind), "Wind");
+    EXPECT_TRUE(feeds(edit, wind, collide, "strands"));
+    const std::string jiggle = insertMotion(edit, "Jiggle", R"({"strength": 0.5})");
+    EXPECT_TRUE(feeds(edit, jiggle, collide, "strands"));
+    EXPECT_TRUE(feeds(edit, wind, jiggle, "strands"));
+    EXPECT_NO_THROW(loadGraphJson(edit.toJson())) << "a graph that loads";
+}
+
+TEST(GraphInserts, RemovingAScalpOrColliderTakesItsNodesBackOut) {
+    // removeScalpNodes / removeColliderNodes: Maya's remove_scalp and remove_collider, the Blender
+    // add-on's: what insertScalp and insertCollider made goes, the flow as it was.
+    const GraphEdit start(defaultGraphJson());
+    const std::vector<std::string> before = start.nodeNames();
+    GraphEdit edit(defaultGraphJson());
+    const std::string output = edit.outputNode();
+    insertScalp(edit, "patch");
+    insertCollider(edit, "collar", true);
+    insertCards(edit);
+    EXPECT_GT(edit.nodeNames().size(), before.size() + 4);
+    EXPECT_TRUE(removeScalpNodes(edit, "patch"));
+    EXPECT_FALSE(removeScalpNodes(edit, "patch")) << "nothing reads it now";
+    EXPECT_TRUE(removeColliderNodes(edit, "collar"));
+    std::vector<std::string> left = edit.nodeNames();
+    left.erase(std::remove_if(left.begin(), left.end(), [&](const std::string& n) { return edit.nodeType(n) == "Cards"; }), left.end());
+    EXPECT_EQ(left, before) << "the scalp's Scalp, Scatter, Interpolate and Merge, the collider's two nodes: gone";
+    EXPECT_EQ(edit.outputNode(), output);
+    EXPECT_EQ(edit.nodeType(motionAnchor(edit)), "Cards") << "the cards still end the chain";
+    EXPECT_NO_THROW(loadGraphJson(edit.toJson())) << "a graph that loads";
+    bool made = true;
+    EXPECT_EQ(edit.nodeType(insertCards(edit, {}, std::nullopt, &made)), "Cards");
+    EXPECT_FALSE(made) << "one there: kept";
+}
+
+TEST(GraphInserts, AGuideGroupsReadersFollowItsRename) {
+    // groupReaders / renameGroupReaders: every host's "Read by" and group rename (Maya's, the app's,
+    // the Blender helper's), lists split as the Guides node splits them, compounds followed.
+    using nlohmann::json;
+    const json g = {
+        {"nodes",
+         {{{"name", "hair"}, {"type", "Guides"}, {"params", {{"exclude", "b,c"}}}},
+          {{"name", "bangs"}, {"type", "Guides"}, {"params", {{"group", "a b"}}}},
+          {{"name", "other"}, {"type", "Guides"}, {"params", {{"group", "bb"}}}},
+          {{"name", "box"},
+           {"type", "Compound"},
+           {"params", {{"definition", {{"graph", {{"nodes", {{{"name", "inner"}, {"type", "Guides"}, {"params", {{"group", "b"}}}}}}}}}}}}}}},
+        {"connections", json::array()}};
+    EXPECT_EQ(groupReaders(g.dump(), "b"),
+              (std::vector<std::pair<std::string, std::string>>{{"hair", "exclude"}, {"bangs", "group"}}));
+    bool changed = false;
+    const json renamed = json::parse(renameGroupReaders(g.dump(), "b", "back", &changed));
+    EXPECT_TRUE(changed);
+    EXPECT_EQ(renamed["nodes"][0]["params"]["exclude"], "back c");
+    EXPECT_EQ(renamed["nodes"][1]["params"]["group"], "a back");
+    EXPECT_EQ(renamed["nodes"][2]["params"]["group"], "bb") << "another group's name holding it: kept";
+    EXPECT_EQ(renamed["nodes"][3]["params"]["definition"]["graph"]["nodes"][0]["params"]["group"], "back");
+    EXPECT_EQ(renameGroupReaders(g.dump(), "zz", "y", &changed), g.dump());
+    EXPECT_FALSE(changed);
+}
+
 TEST(GraphInserts, ANodeGoesIntoTheFlowAlikeInEveryHost) {
     // insertBetween, insertAfter and insertOnLink: Maya's GraphModel.insert_*, the Blender helper's
     // edit_graph ops and the app's node graph (a node dropped on a wire) make these.
@@ -1273,7 +1349,11 @@ TEST(GraphControls, EveryHostExposesAndUnexposesParamsAlike) {
     const json spec = json::parse(edit.nodeSpecJson(compound));
     for (const json& p : spec["params"]) shown = shown || p["name"] == "wave";
     EXPECT_TRUE(shown);
-    EXPECT_THROW(compoundExpose(edit, compound, "", "noise.amplitude"), GraphError);
+    {  // No name: the param's own, or node + Param when the compound has one of that name (every host's).
+        GraphEdit named = edit;
+        EXPECT_EQ(compoundExpose(named, compound, "", "noise.frequency"), "frequency");
+        EXPECT_EQ(compoundExpose(named, compound, "", "noise.frequency"), "noiseFrequency");
+    }
     EXPECT_THROW(compoundExpose(edit, compound, "x", "amplitude"), GraphError);
     EXPECT_THROW(compoundExpose(edit, compound, "x", "noise.nope"), GraphError);
     EXPECT_THROW(compoundExpose(edit, compound, "x", "nope.amplitude"), GraphError);

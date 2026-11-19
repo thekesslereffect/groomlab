@@ -23,6 +23,8 @@
 #include "groomlab/sim_cache.h"
 #include "groomlab/simulation.h"
 #include "groomlab/card_presets.h"
+#include "groomlab/graph_inserts.h"
+#include "groomlab/presets.h"
 #include "groomlab/engine_export.h"
 #include "groomlab/export_view.h"
 #include "groomlab/feathers.h"
@@ -55,17 +57,8 @@ StrandSet toCurves(const GuideSet& guides) {
     return out;
 }
 
-// The export's name: the file's stem (what Maya names the root after the groom's transform).
-std::string exportName(const std::string& path) {
-    const std::string stem = fs::u8path(path).stem().u8string();
-    std::string name;
-    for (const char c : stem) {
-        const bool plain = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
-        name += plain ? c : '_';
-    }
-    if (name.empty() || (name[0] >= '0' && name[0] <= '9')) name = "groom" + name;
-    return name;
-}
+// The export's name: the file's stem, as every host names it (export_view.h; Maya: the groom's transform).
+std::string exportName(const std::string& path) { return exportObjectName(fs::u8path(path).stem().u8string()); }
 
 bool continueExport(const ExportProgress& progress, std::size_t done, std::size_t count) {
     return !progress || progress(done, count);
@@ -312,39 +305,33 @@ std::vector<std::string> GroomDocument::cardsNodes() const {
 }
 
 std::string GroomDocument::addCardsNode(std::string* made) {
-    // Between what feeds the output and the output: the cards are made from the whole groom.
-    const std::string output = graph_.value("output", std::string());
-    std::string from, fromOutput;
-    for (const ConnectionInfo& c : connections()) {
-        if (c.to == output && c.input == "strands") {
-            from = c.from;
-            fromOutput = c.output;
-        }
-    }
-    float x = 0.0f, y = 0.0f;
-    if (!nodePosition(output, &x, &y)) {
-        x = 0.0f;
-        y = 0.0f;
-    }
-    std::string name;
-    std::string error = addNode("Cards", x - 220.0f, y, &name);
-    if (!error.empty()) return error;
-    if (made) *made = name;
-    if (from.empty() || output.empty()) return {};
-    // One undo step for the whole insertion: the add, then the two wires, folded together.
-    error = editGraph("add " + name, [&](json& g) {
-        GraphEdit edit(g.dump());  // the core's connections (graph_edit.h): checked, what fed the output replaced
-        edit.connect(from, name, "strands", fromOutput);
-        edit.connect(name, output, "strands");
+    // Another Cards node, between what feeds the output and the output (the cards made from the
+    // whole groom): one undo step.
+    const std::string name = GraphEdit(graph_.dump()).uniqueName("cards");
+    const std::optional<double> size = paramScalpSize(file().data.scalp.get(), session().groomScale());
+    const std::string error = editGraph("add " + name, [&](json& g) {
+        GraphEdit edit(g.dump());
+        const std::string output = edit.outputNode();
+        if (output.empty()) throw std::runtime_error("the graph has no output");
+        edit.addNode("Cards", name, {}, std::nullopt, std::nullopt, size);
+        insertBefore(edit, output, name);  // every host's (graph_inserts.h)
         g = json::parse(edit.toJson());
     });
-    if (error.empty() && edits_.size() >= 2) {
-        // The add and its wiring as one step (undo removes the node with its wires).
-        Edit wired = std::move(edits_.back());
-        edits_.pop_back();
-        edits_.back().graphAfter = wired.graphAfter;
-        undoIndex_ = edits_.size();
-    }
+    if (error.empty() && made) *made = name;
+    return error;
+}
+
+std::string GroomDocument::addCards(const std::string& lod, std::string* made) {
+    // Every host's Add > Cards (graph_inserts.h insertCards, card_presets.h): a Cards node only when
+    // the graph has none, then every Cards node set for the level of detail; one undo step.
+    std::string name;
+    const std::optional<double> size = paramScalpSize(file().data.scalp.get(), session().groomScale());
+    const std::string error = editGraph(lod + " cards", [&](json& g) {
+        GraphEdit edit(g.dump());
+        name = insertCards(edit, {}, size);
+        g = json::parse(withCardPreset(edit.toJson(), lod));
+    });
+    if (error.empty() && made) *made = name;
     return error;
 }
 
@@ -505,7 +492,7 @@ std::vector<std::string> GroomDocument::bakeSimulation(double lastFrame, const S
 std::string GroomDocument::defaultBakeDirectory() const {
     // The groom's own folder in cards, as Maya keeps a groom's: groomlab/<name>/cards/<name>
     // (untitled: its own temp folder).
-    return assetFolder("cards") + "/" + fileSafeName(defaultBakeName());
+    return groomFolder("cards");
 }
 
 std::string GroomDocument::defaultBakeName() const { return displayName(); }
@@ -577,10 +564,14 @@ ExportResult GroomDocument::exportCards(const std::string& path, const ExportOpt
         addCardsToGltf(doc, *bake.cards, bake.textures, settings);
         // The hair cap when the scalp has UVs: the groom baked onto the skin, so low LODs show
         // hair color between cards (as the Maya host's export writes it: gltf_writer.h).
-        if (bake.scalp && bake.scalp->hasUVs()) {
+        // From the whole groom at full density, as Maya and the Blender helper bake it (not the
+        // cards' strands).
+        MeshPtr capScalp;
+        const StrandsPtr whole = bake.scalp && bake.scalp->hasUVs() ? exportFrame(time_, 1.0f, &capScalp, false, true) : nullptr;
+        if (whole && capScalp && capScalp->hasUVs()) {
             CardGltfSettings cap = settings;
             cap.name = name + "_scalpCap";
-            addScalpCapToGltf(doc, *bake.strands, *bake.scalp, 0, options.resolution, cap);
+            addScalpCapToGltf(doc, *whole, *capScalp, 0, options.resolution, cap);
         }
         result.files = writeGltf(path, doc, options.binary);
         result.frames = 1;

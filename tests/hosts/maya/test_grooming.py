@@ -7226,14 +7226,14 @@ class UtilitiesTest(unittest.TestCase):
             self.assertTrue(os.path.exists(new[n]))
             self.assertEqual(groomlab.map_texture(self.groom, n), new[n])
         cmds.undo()
-        # Without projection: the maps stay as they were, and the vertex map the graph reads
-        # (another count of values than the new scalp's vertices) is reported.
+        # Without projection: the vertex maps cannot fit the new scalp, so they go (every host's
+        # rule) and are reported; the texture maps keep their images.
         groomlab.use_map(self.groom, "scatter", "density", "grad")
-        stored = cmds.getAttr(self.groom + ".scalpMaps")
         report = {}
-        self.assertEqual(groomlab.transfer_groom(self.groom, head, fit=True, maps=False, report=report), ["grad"])
+        self.assertEqual(groomlab.transfer_groom(self.groom, head, fit=True, maps=False, report=report), ["grad", "tint"])
         self.assertEqual(report["projected"], [])
-        self.assertEqual(cmds.getAttr(self.groom + ".scalpMaps"), stored)
+        kinds = {n: e.get("kind") for n, e in json.loads(cmds.getAttr(self.groom + ".scalpMaps")).items()}
+        self.assertNotIn("vertices", kinds.values())
         self.assertEqual(groomlab.map_texture(self.groom, "gradTex"), old["gradTex"])
 
     def test_transfer_reports_maps_it_cannot_carry(self):

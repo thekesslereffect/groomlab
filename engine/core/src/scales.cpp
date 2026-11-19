@@ -22,6 +22,16 @@
 
 namespace groomlab {
 
+std::vector<std::uint32_t> ScaleMesh::triangleOwners() const {
+    const std::size_t faces = triangleCount();
+    std::vector<std::uint32_t> owner(faces, 0);
+    for (std::size_t k = 0; k < scales.size(); ++k) {
+        const Scale& sc = scales[k];
+        for (std::uint32_t f = sc.firstTriangle; f < sc.firstTriangle + sc.triangleCount && f < faces; ++f) owner[f] = static_cast<std::uint32_t>(k);
+    }
+    return owner;
+}
+
 namespace {
 
 constexpr float kPi = 3.14159265f;

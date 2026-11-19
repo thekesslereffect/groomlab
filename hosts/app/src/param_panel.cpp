@@ -56,13 +56,8 @@ QString shortJson(const json& value) {
 }
 
 QString prettyName(const std::string& name) {
-    // melaninRedness -> Melanin redness: the spec's camel case read as words.
-    QString out;
-    for (const char c : name) {
-        if (std::isupper(static_cast<unsigned char>(c)) && !out.isEmpty()) out += QLatin1Char(' ');
-        out += out.isEmpty() ? QChar(std::toupper(static_cast<unsigned char>(c))) : QChar(std::tolower(static_cast<unsigned char>(c)));
-    }
-    return out;
+    // melaninRedness -> Melanin redness: every host's label (node_catalog.h paramLabel).
+    return QString::fromStdString(paramLabel(name));
 }
 
 }  // namespace

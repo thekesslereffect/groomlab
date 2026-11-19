@@ -36,7 +36,6 @@ and more numerous where the vertex map tubeSubdivisionDensity is high (1) than w
     root_tubes.apply_density(groom, [cell], name)             # cut again where its map changed
 """
 
-import colorsys
 import json
 
 from maya import cmds
@@ -307,14 +306,10 @@ def delete_root_tubes(groom, guides, regions=True):
 
 
 def region_colors(count):
-    """`count` colors far apart (hues a golden step apart, three brightnesses), none black (the
-    engine's rootTubeColor)."""
-    out = []
-    for k in range(count):
-        hue = (k * 0.618033988749895) % 1.0
-        value = (0.95, 0.7, 0.5)[(k // 7) % 3]
-        out.append(colorsys.hsv_to_rgb(hue, 0.8, value))
-    return out
+    """`count` colors far apart (hues a golden step apart, three brightnesses), none black: the
+    core's rootTubeColor, every host's."""
+    import groomlab_core
+    return [tuple(groomlab_core.root_tube_color(k)) for k in range(count)]
 
 
 def root_colors(groom, tubes=None):

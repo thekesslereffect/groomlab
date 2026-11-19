@@ -20,6 +20,7 @@
 #include <nlohmann/json.hpp>
 
 #include "groomlab/color.h"
+#include "groomlab/color_patterns.h"
 #include "groomlab/distance_field.h"
 #include "groomlab/export_view.h"
 #include "groomlab/flow.h"
@@ -2529,6 +2530,15 @@ std::string GroomSession::hairLookJson() const {
                             {"azimuthalRoughness", lobes.azimuthalRoughness},
                             {"ior", lobes.ior},
                             {"shift", lobes.shiftDegrees}}}};
+    // The structural color as five ramp keys by |cos| (0 edge-on .. 1 facing), a host's ramp node's
+    // (color_patterns.h iridescentTint at grazing 1 - key): every host's iridescence ramp.
+    nlohmann::json ramp = nlohmann::json::array();
+    for (const float at : {0.0f, 0.25f, 0.5f, 0.75f, 1.0f}) {
+        const std::array<float, 3> c = iridescentTint({look.iridescenceColor[0], look.iridescenceColor[1], look.iridescenceColor[2]},
+                                                      look.iridescenceShift, 1.0f - at);
+        ramp.push_back({at, {c[0], c[1], c[2]}});
+    }
+    out["iridescenceRamp"] = std::move(ramp);
     nlohmann::json hairColor, renderData, colors = nlohmann::json::array();
     if (doc_) {
         doc_->graph.forEachActiveUpstream(doc_->output, [&](const std::string& at, const Operator& op) {

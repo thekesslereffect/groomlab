@@ -8,6 +8,7 @@
 // clipboard (Copy Graph, Paste Graph). No widgets: the tests drive it on a document.
 
 #include <optional>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -54,6 +55,7 @@ struct PresetApplied {
     double fitFactor = 1.0;
     std::string nodeMade;               // inserting: the Compound's name
     std::string after;                  // inserting: the node it was placed after ("" before the Output)
+    std::map<std::string, std::string> removed;  // pasting: "node.param" -> a path on another machine left out
 };
 // The preset file at `path` onto the document: "" or the error (nothing changes then, except
 // maps made before the graph was refused).

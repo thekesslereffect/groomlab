@@ -244,6 +244,10 @@ public:
     // than 2 points are skipped. Returns the IDs added. Call evaluate after,
     // to root them on the scalp.
     std::vector<GuideId> addGuides(GroupId group, const GuideSet& guides, TubeProfile tube = {});
+    // Bake Node to Guides, every host's: the root group `name` (made when missing; a child group's
+    // name refused with std::invalid_argument), then `guides` added to it as primaries, each at the
+    // group's own segments (withGroupSegments). Their IDs.
+    std::vector<GuideId> addBakedGuides(const std::string& name, const GuideSet& guides, TubeProfile tube = {});
     const std::vector<HierarchyGuide>& guides() const { return guides_; }
     const HierarchyGuide* guide(GuideId id) const;
     std::vector<GuideId> guidesInGroup(GroupId group) const;
@@ -572,7 +576,7 @@ TubeTargets tubeTargetsOf(const GuideHierarchy& hierarchy, const std::vector<Gui
                           const std::string& freeze = "freeze");
 
 // Root tube k's color (in GuideHierarchy::rootTubeIds' order): hues a golden step apart, three
-// brightnesses, none black; root_tubes.region_colors in the Maya scripts makes the same.
+// brightnesses, none black (root_tubes.region_colors in the Maya scripts reads it).
 std::array<float, 3> rootTubeColor(std::size_t k);
 
 // The point (u, v) carried by the map a closed polygon `cage` (section coordinates) makes onto

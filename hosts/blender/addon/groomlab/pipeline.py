@@ -217,7 +217,7 @@ def scale_mesh(scalp, name=None):
     return _mesh_object(scalp, name or scalp.name + "_scales", r["meshes"]["scales"])
 
 
-def to_mesh(scalp, make="auto", style="tube", sides=4, width_scale=1.0, max_strands=100000, density=1.0,
+def to_mesh(scalp, make="auto", style="tube", sides=4, width_scale=1.0, max_strands=20000, density=1.0,
             strand_uvs=False, name=None):
     """The groom as one mesh object (Maya's to_mesh): `make` "strands" (tubes of `sides` sides or
     ribbons along the scalp, UVs root to tip, at most `max_strands`, thinned by strand ID),
@@ -668,19 +668,33 @@ def remove_drivers(scalp, objects=None):
     return count
 
 
-def _guide_shapes(scalp, ids):
-    """{guide ID: its points in the scalp's space} of the guides as groomed (the Guides object)."""
-    g = scalp.groomlab
-    guides = g.guides if g.guides is not None and g.guides.type == "CURVES" else None
-    if guides is None:
+def _guide_shapes(scalp, ids, frame=0):
+    """{guide ID: its points in the scalp's space} of the guides as groomed (not posed), on the scalp
+    as it is at `frame` (Maya's create_drivers: the bind frame), from the helper: the hierarchy's
+    guides or the Guides object's, whichever the groom edits. The scene goes there and back."""
+    scene = groom.scene_of(scalp)
+    now = scene.frame_current
+    if now != frame:
+        scene.frame_set(int(frame))
+    try:
+        rt = _session(scalp, scene)
+        r = process.call("get_guides", session=rt.session, source=rt.target or "auto", pose="rest")
+    finally:
+        if now != frame:
+            scene.frame_set(now)
+    a = r.get("arrays") or {}
+    if not r.get("guides"):
         return {}
-    points, counts, gids = groom.read_guides(scalp, guides)
+    client = process.client()
+    points = client.array(a["points"]).astype(np.float64).reshape(-1, 3)
+    counts = client.array(a["counts"]).astype(np.int64).ravel()
+    gids = client.array(a["ids"]).astype(np.int64).ravel()
     out, start = {}, 0
     wanted = set(ids)
     for n, gid in zip(counts, gids):
         if int(gid) in wanted and n >= 2:
-            out[int(gid)] = np.asarray(points[start:start + n], np.float64)
-        start += n
+            out[int(gid)] = points[start:start + n]
+        start += int(n)
     return out
 
 
@@ -693,7 +707,9 @@ def create_drivers(scalp, guides=None, per_guide=False, frame=None):
     ids = sorted(set(int(g) for g in (guides if guides is not None else tools.selected_guides(scalp))))
     if not ids:
         raise HelperError("bad_request", "no guides to make drivers from: select some with the GroomLab select tool")
-    shapes = _guide_shapes(scalp, ids)
+    if frame is None:
+        frame = driver_bind(scalp).get("frame", 0)
+    shapes = _guide_shapes(scalp, ids, frame)
     if not shapes:
         raise HelperError("state", "the guides %s have no points" % ids)
     count = max(len(p) for p in shapes.values())
@@ -726,7 +742,7 @@ def create_drivers(scalp, guides=None, per_guide=False, frame=None):
     for obj, attached in made:
         entry = next(d for d in scalp.groomlab.drivers if d.object == obj)
         _keep_bind(scalp, call(scalp, "attach_guides", driver=entry.index, guides=attached))
-    bind_drivers(scalp, frame=driver_bind(scalp).get("frame", 0) if frame is None else frame)
+    bind_drivers(scalp, frame=frame)
     return [obj for obj, _ in made]
 
 
@@ -766,13 +782,30 @@ def add_scalp(scalp, obj, name=None, wire=True):
     return name
 
 
+def add_motion(scalp, kind, params=None):
+    """Add > Wind / Jiggle (Maya's add_wind, add_jiggle): a node of `kind` with `params` over its
+    spec's defaults, just before the output but before a Collide or Cards ending the chain: every
+    host's (graph_inserts.h insertMotion). Returns its name."""
+    if kind not in ("Wind", "Jiggle"):
+        raise HelperError("bad_request", "a motion node is Wind or Jiggle, not %s" % kind)
+    g = GraphEdits(scalp)
+    name = g.edit(op="insert_motion", type=kind, params=dict(params or {}))["name"]
+    g.finish()
+    return name
+
+
 def remove_scalp(scalp, name):
-    """A scalp of the groom's dropped (its nodes stay: delete them in the Graph Editor)."""
+    """A scalp of the groom's dropped (Maya's remove_scalp): its mesh, and in the graph its Scalp
+    nodes with what they alone feed (its Scatter, its Interpolate; the Merge joining them passes the
+    rest through): every host's (graph_inserts.h removeScalpNodes)."""
     kept = scalp.groomlab.extra_scalps
     i = kept.find(name)
     if i >= 0:
         kept.remove(i)
     sync_extra_scalps(scalp, _session(scalp), force=True)
+    g = GraphEdits(scalp)
+    if g.edit(op="remove_scalp_nodes", mesh=name).get("changed"):
+        g.finish()
     groom.mark(scalp, "eval")
 
 
@@ -946,12 +979,18 @@ def add_collider(scalp, obj, name=None, wire=True):
 
 
 def remove_collider(scalp, name):
-    """A collider's mesh dropped (its nodes stay: delete them in the Graph Editor)."""
+    """A collider dropped (Maya's remove_collider): its mesh, and in the graph its ColliderMesh nodes
+    with the Collide nodes they feed passing their strands through: every host's (graph_inserts.h
+    removeColliderNodes)."""
     kept = scalp.groomlab.colliders
     i = kept.find(name)
     if i >= 0:
         kept.remove(i)
     sync_colliders(scalp, _session(scalp), force=True)
+    g = GraphEdits(scalp)
+    if g.edit(op="remove_collider_nodes", mesh=name).get("changed"):
+        g.finish()
+    groom.mark(scalp, "eval")
 
 
 def add_cards(scalp, lod="mid"):
@@ -959,15 +998,11 @@ def add_cards(scalp, lod="mid"):
     when the graph has none, then every Cards node set for that level of detail, each by what it cards
     (hair, feathers or both: the core's card presets). Returns the first Cards node."""
     g = GraphEdits(scalp)
-    nodes = g.of_type("Cards")
-    if not nodes:
-        node = g.add("Cards", base="cards")
-        g.insert_before(g.output, node)
-        nodes = [node]
+    node = g.edit(op="insert_cards")["name"]  # every host's (graph_inserts.h insertCards): one only when there is none
     process.call("cards_preset", session=g.rt.session, lod=lod)
     g.reload()
     g.finish()
-    return nodes[0]
+    return node
 
 
 def feather_designs():
@@ -1479,6 +1514,12 @@ def graph_maps(graph):
     return {p["name"]: p["how"] for p in process.call("graph_map_names", graph=graph or {})["maps"]}
 
 
+def _map_kinds(scalp):
+    """{map name: kind} of the groom's own maps (guides, vertices, texture)."""
+    rt = _session(scalp)
+    return {m["name"]: m.get("kind") for m in process.call("maps_list", session=rt.session).get("maps") or []}
+
+
 def _map_names(scalp):
     rt = _session(scalp)
     names = {m["name"] for m in process.call("maps_list", session=rt.session).get("maps") or []}
@@ -1496,7 +1537,7 @@ def copy_graph(source, targets):
         raise HelperError("bad_request", "select the grooms to copy %s's graph to" % source.name)
     graph = process.call("get_graph", session=_session(source).session)["graph"]
     wanted = graph_maps(graph)
-    source_maps = _map_names(source)
+    source_maps = _map_kinds(source)
     report = {}
     for target in targets:
         rt = _session(target)
@@ -1516,8 +1557,9 @@ def copy_graph(source, targets):
             if name in have:
                 continue
             if name not in source_maps:
-                missing[name] = "%s has no map named %s either" % (source.name, name)
-            elif how == "guides":
+                if how != "colorSet":  # (a color set of the source's mesh is no groom's map)
+                    missing[name] = "%s has no map named %s either" % (source.name, name)
+            elif source_maps[name] == "guides":
                 missing[name] = "a guide layer: paint it on %s's guides" % target.name
             else:
                 missing[name] = "a painted map: paint it, or import its image (Groom Tools > Paint)"

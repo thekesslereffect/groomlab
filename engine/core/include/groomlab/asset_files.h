@@ -69,6 +69,28 @@ private:
 // files written.
 bool insideFolder(const std::string& path, const std::string& folder);
 std::string collectFile(const std::string& path, const std::string& folder, std::vector<std::string>* copied = nullptr);
+// Whether Remove Map's "delete the file" deletes a texture map's image, every host's rule: it is
+// there (a tile set: any tile), inside the groom's own maps folder `folder` (a file GroomLab made,
+// never the artist's own), and nothing else reads it (`readElsewhere`: another map of the groom,
+// another groom of the scene or file).
+bool mapImageDeletable(const std::string& file, const std::string& folder, bool readElsewhere);
+// Where a texture map's image goes when the map is renamed `from` -> `to`, every host's rule: a file
+// named after the map (scalp_maps.h renamedMapTexture) inside the groom's own maps folder `folder`
+// (GroomLab's, never the artist's own file) to that name, or a free one beside it when it is taken
+// (freeFilePath); "" when the image stays where it is.
+std::string renamedMapImage(const std::string& full, const std::string& from, const std::string& to, const std::string& folder);
+
+// Save As, every host's (Maya's follow_scene_files, the Blender add-on's): a groom file named after
+// the old scene and beside it (<scene>.groom, its stem as is or file safe) copied beside the new
+// scene as <new scene>.groom, so the two scenes never write one groom file; another one's content
+// there: a free name (`renamed`). "" when `groomFile` is not the scene's own (it follows as any
+// file does, or stays).
+struct FollowedGroomFile {
+    std::string path;      // the new scene's groom file
+    bool copied = false;   // a file was written
+    bool renamed = false;  // a free name: <new scene>.groom held other content
+};
+FollowedGroomFile followSceneGroomFile(const std::string& groomFile, const std::string& oldScene, const std::string& newScene);
 
 // Collect Files' bookkeeping, every host's (Maya's collect_files, the app's, the Blender helper's):
 // each file a groom names gathered into the scene's folder `dir`.
@@ -108,6 +130,13 @@ std::vector<std::pair<std::string, std::string>> graphFileParams(const std::stri
 // value keeps its other fields); the text back (`changed`: whether any value changed).
 std::string withGraphFileParams(const std::string& graphJson, const std::map<std::string, std::string>& paths,
                                 bool* changed = nullptr);
+
+// Whether a path is on another machine (\\host\share, //host/share).
+bool isNetworkPath(const std::string& path);
+// The graph without the params (graphFileParams') naming files on other machines (isNetworkPath):
+// a pasted stranger's graph never makes a host reach out to their server. Their nodes use their
+// defaults. `removed`: label -> path of each taken out. The same text when none was.
+std::string withoutNetworkFileParams(const std::string& graphJson, std::map<std::string, std::string>* removed = nullptr);
 
 // A file as an edit found it and left it (every host's undo of the files an edit writes, moves
 // or deletes): its bytes, or none when there was no file.

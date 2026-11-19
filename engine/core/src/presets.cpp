@@ -6,6 +6,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <map>
 #include <set>
 #include <sstream>
@@ -13,6 +14,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "groomlab/asset_files.h"
 #include "groomlab/graph_edit.h"
 #include "groomlab/graph_io.h"
 #include "groomlab/operators.h"
@@ -41,18 +43,22 @@ const std::vector<std::string>& presetFields() {
 
 std::string presetUserDir() {
     if (const std::optional<std::string> own = environmentVariable("GROOMLAB_USER_PRESETS"); own && !own->empty()) return *own;
-    // Maya's user application folder, where the Maya host saves (internalVar userAppDir).
+    // Maya's user application folder, where the Maya host saves (internalVar userAppDir): MAYA_APP_DIR
+    // when set, else the platform's default.
     fs::path home;
+    if (const std::optional<std::string> mayaApp = environmentVariable("MAYA_APP_DIR"); mayaApp && !mayaApp->empty()) {
+        home = fs::u8path(*mayaApp);
+    }
 #ifdef _WIN32
-    if (const std::optional<std::string> profile = environmentVariable("USERPROFILE"); profile && !profile->empty()) {
+    if (const std::optional<std::string> profile = environmentVariable("USERPROFILE"); home.empty() && profile && !profile->empty()) {
         home = fs::path(*profile) / "Documents" / "maya";
     }
 #elif defined(__APPLE__)
-    if (const std::optional<std::string> h = environmentVariable("HOME"); h && !h->empty()) {
+    if (const std::optional<std::string> h = environmentVariable("HOME"); home.empty() && h && !h->empty()) {
         home = fs::path(*h) / "Library" / "Preferences" / "Autodesk" / "maya";
     }
 #else
-    if (const std::optional<std::string> h = environmentVariable("HOME"); h && !h->empty()) home = fs::path(*h) / "maya";
+    if (const std::optional<std::string> h = environmentVariable("HOME"); home.empty() && h && !h->empty()) home = fs::path(*h) / "maya";
 #endif
     if (home.empty()) return {};
     return (home / "groomlab" / "presets").generic_string();
@@ -482,6 +488,17 @@ json fitted(json graph, std::optional<double> size) {
     const Factors factors = factorsFor(*size / from);
     fitControls(graph, factors);  // by the units the graph's params have before they are fitted
     fitNodes(graph, factors);
+    // (A number fitted past what a double holds would be written as null.)
+    const std::function<bool(const json&)> finite = [&](const json& v) {
+        if (v.is_number_float()) return std::isfinite(v.get<double>());
+        if (v.is_structured()) {
+            for (const json& c : v) {
+                if (!finite(c)) return false;
+            }
+        }
+        return true;
+    };
+    if (!finite(graph)) throw std::runtime_error("fitted to this scalp its sizes are too big to use");
     return graph;
 }
 
@@ -986,6 +1003,12 @@ std::optional<double> presetScalpSize(const ScalpMesh& scalp) {
     return size > 0.0 ? std::optional<double>(size) : std::nullopt;
 }
 
+std::optional<double> paramScalpSize(const ScalpMesh* scalp, double groomScale) {
+    std::optional<double> size = scalp ? presetScalpSize(*scalp) : std::nullopt;
+    if (size && groomScale > 0.0) *size /= groomScale;
+    return size;
+}
+
 // ---- A look as text ---------------------------------------------------------------------------
 
 namespace {
@@ -1240,6 +1263,74 @@ std::string presetFromText(const std::string& text) {
         throw std::invalid_argument(message);
     }
     return data.dump();
+}
+
+namespace {
+
+std::string problemsMessage(const std::vector<std::string>& problems) {
+    std::string message;
+    for (std::size_t i = 0; i < std::min<std::size_t>(3, problems.size()); ++i) {
+        std::string p = problems[i];
+        if (p.size() > 200) p = p.substr(0, 200) + "...";
+        message += (i ? "; " : "") + p;
+    }
+    if (problems.size() > 3) message += " (and " + std::to_string(problems.size() - 3) + " more)";
+    return message;
+}
+
+// The problems of `graph` and its compounds' graphs over all their nodes ("compound/" before an
+// inner one's), two nodes of one name too.
+void pastedProblems(const json& graph, const std::string& where, int depth, std::vector<std::string>& out) {
+    std::set<std::string> names;
+    for (const json& n : graph.value("nodes", json::array())) {
+        const std::string name = n.value("name", std::string());
+        if (!names.insert(name).second) out.push_back(where + name + ": two nodes have this name");
+        const json params = n.value("params", json::object());
+        if (n.value("type", std::string()) == "Compound" && depth < kMaxPresetDepth && params.contains("definition") &&
+            params["definition"].is_object() && params["definition"].contains("graph")) {
+            pastedProblems(params["definition"]["graph"], where + name + "/", depth + 1, out);
+        }
+    }
+    try {
+        const GraphEdit edit(graph.dump());
+        for (const bool feeding : {true, false}) {
+            for (const std::string& p : edit.problems(feeding)) out.push_back(where + p);
+        }
+    } catch (const std::exception& e) {
+        out.push_back(where + e.what());
+    }
+}
+
+}  // namespace
+
+PastedGraph pastedGraphFromText(const std::string& text) {
+    json data = json::parse(presetFromText(text));
+    std::vector<std::string> problems;
+    pastedProblems(data, "", 0, problems);
+    if (!problems.empty()) throw std::invalid_argument(problemsMessage(problems));
+    // The backdrops with only what the Graph Editor draws.
+    if (data.contains("backdrops")) {
+        json kept = json::array();
+        for (const json& b : data["backdrops"].is_array() ? data["backdrops"] : json::array()) {
+            if (!b.is_object() || !isNumber(b.value("x", json())) || !isNumber(b.value("y", json())) || !isNumber(b.value("w", json())) ||
+                !isNumber(b.value("h", json()))) {
+                continue;
+            }
+            json drop = {{"x", b["x"].get<double>()}, {"y", b["y"].get<double>()}, {"w", b["w"].get<double>()}, {"h", b["h"].get<double>()}};
+            const json title = b.value("title", json());
+            drop["title"] = title.is_string() ? title.get<std::string>().substr(0, 200) : std::string("Backdrop");
+            const json color = b.value("color", json());
+            if (color.is_array() && color.size() == 3 && std::all_of(color.begin(), color.end(), [](const json& c) { return isNumber(c); })) {
+                drop["color"] = json::array();
+                for (const json& c : color) drop["color"].push_back(static_cast<int>(std::clamp(c.get<double>(), 0.0, 255.0)));
+            }
+            kept.push_back(std::move(drop));
+        }
+        data["backdrops"] = std::move(kept);
+    }
+    PastedGraph out;
+    out.presetJson = withoutNetworkFileParams(data.dump(), &out.removed);
+    return out;
 }
 
 // ---- Params against their specs (every host's preset check) ------------------------------------

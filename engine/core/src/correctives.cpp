@@ -323,14 +323,19 @@ void Correctives::setLayerWeight(const std::string& name, float w, double second
     }
 }
 
+std::vector<std::pair<double, float>> CorrectiveLayer::fadeKeys() const {
+    std::vector<std::pair<double, float>> keys;
+    if (!weightCurve.empty() || allFrames()) return keys;
+    if (!holdBefore && fadeIn > 0.0) keys.emplace_back(time - fadeIn, 0.0f);
+    keys.emplace_back(time, weight);
+    if (!holdAfter && fadeOut > 0.0) keys.emplace_back(time + fadeOut, 0.0f);
+    return keys;
+}
+
 void Correctives::keyLayerWeight(const std::string& name, double seconds, float w) {
     CorrectiveLayer& l = need(name);
-    if (l.weightCurve.empty() && !l.allFrames()) {
-        // A fix's fades become keys first (Maya's Fix Frame keys them), so keying keeps its shape.
-        if (!l.holdBefore) l.weightCurve.emplace_back(l.time - l.fadeIn, 0.0f);
-        l.weightCurve.emplace_back(l.time, l.weight);
-        if (!l.holdAfter) l.weightCurve.emplace_back(l.time + l.fadeOut, 0.0f);
-    }
+    // A fix's fades become keys first (Maya's Fix Frame keys them), so keying keeps its shape.
+    if (l.weightCurve.empty()) l.weightCurve = l.fadeKeys();
     l.keyAt(seconds, w);
     l.holdBefore = l.holdAfter = true;  // the curve holds past its ends
 }

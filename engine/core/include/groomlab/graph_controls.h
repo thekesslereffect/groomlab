@@ -53,10 +53,11 @@ std::string compoundInnerParamsJson(const std::string& definitionJson);
 bool unexposeParam(GraphEdit& edit, const std::string& node, const std::string& param);
 
 // A compound's inner param `target` ("node.param" inside it) shown on the compound as its param
-// `name` (every host's Show Inner Param; a param of that name shows `target` instead). GraphError
-// for a node that is not a Compound, no name, or a target that is no param of a node inside (a
-// compound inside: its own exposed params).
-void compoundExpose(GraphEdit& edit, const std::string& compound, const std::string& name, const std::string& target);
+// `name` (every host's Show Inner Param; a param of that name shows `target` instead). No name: the
+// param's own, or node + Param when the compound has a param of that name already ("clump.length"
+// -> "clumpLength"). Returns the name. GraphError for a node that is not a Compound, or a target
+// that is no param of a node inside (a compound inside: its own exposed params).
+std::string compoundExpose(GraphEdit& edit, const std::string& compound, const std::string& name, const std::string& target);
 // The compound stops showing `target` (under every name it had): the value the compound set for it
 // goes back inside, the inner node keeping what the compound set last. False when it was not shown.
 // GraphError for a node that is not a Compound.

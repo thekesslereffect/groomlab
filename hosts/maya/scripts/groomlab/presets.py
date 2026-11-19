@@ -451,90 +451,36 @@ def _clip(message, limit=200):
     return message if len(message) <= limit else message[:limit] + "..."
 
 
-def parse_text(text):
-    """The preset (a dict) a text holds, checked against the operators: JSON only, never run as
+def parse_text(text, removed=None):
+    """The preset (a dict) a text pasted as a groom's whole graph holds: JSON only, never run as
     code. ValueError, saying why, for anything else: the core's checks every host makes (presets.h
-    presetFromText: not JSON, not a GroomLab graph, too big, too deep, from a newer GroomLab, unknown
-    node types, fields of the wrong kind), then the params against their specs (check)."""
-    from groomlab import graph as gm
+    pastedGraphFromText: not JSON, not a GroomLab graph, too big, too deep, from a newer GroomLab,
+    unknown node types, fields of the wrong kind, params against their specs, the graph whole), its
+    backdrops as the Graph Editor draws them, params naming files on other machines taken out
+    (`removed`, a dict: "node.param" -> path of those)."""
     if not isinstance(text, str):
         raise ValueError("cannot paste a graph: the clipboard is empty")
     try:
-        data = json.loads(groomlab_core.preset_from_text(text))
+        body, taken = groomlab_core.pasted_graph_from_text(text)
     except ValueError as e:
         raise ValueError("cannot paste a graph: %s" % _clip(str(e), 800))
-    try:
-        problems = check(data, gm.OperatorCatalog.from_maya(), warnings=False)
-    except RecursionError:
-        raise ValueError("cannot paste a graph: the text is nested too deeply")
-    if problems:
-        more = " (and %d more)" % (len(problems) - 3) if len(problems) > 3 else ""
-        raise ValueError("cannot paste the graph: " + "; ".join(_clip(p) for p in problems[:3]) + more)
-    return data
-
-def _finite(value):
-    if isinstance(value, float):
-        return math.isfinite(value)
-    if isinstance(value, dict):
-        return all(_finite(v) for v in value.values())
-    if isinstance(value, list):
-        return all(_finite(v) for v in value)
-    return True
+    if removed is not None:
+        removed.update(taken)
+    return json.loads(body)
 
 
-def _backdrops_of(data):
-    """The text's backdrops with only what the Graph Editor draws (a title, a rectangle, a color)."""
-    out = []
-    for b in data.get("backdrops") or []:
-        if not isinstance(b, dict) or not all(_is_number(b.get(k)) for k in ("x", "y", "w", "h")):
-            continue
-        drop = {k: float(b[k]) for k in ("x", "y", "w", "h")}
-        drop["title"] = b["title"][:200] if isinstance(b.get("title"), str) else "Backdrop"
-        color = b.get("color")
-        if isinstance(color, list) and len(color) == 3 and all(_is_number(c) for c in color):
-            drop["color"] = [int(min(255, max(0, c))) for c in color]
-        out.append(drop)
-    return out
+def graph_files(graph):
+    """[(label, path)] of every param of `graph` (a dict) naming a file: texture maps, ImportCurves'
+    and GuideCache's path, FeatherColor's images, HairColor's map and Interpolate's regionMap when
+    an image's path, inside compounds too (compound/inner.param): the core's (asset_files.h
+    graphFileParams), every host's."""
+    return [tuple(p) for p in groomlab_core.graph_file_params(json.dumps(graph))]
 
 
-def _is_network(path):
-    """A path on another machine (\\\\host\\share, //host/share): never looked up, so pasting a
-    stranger's graph cannot make Maya reach out to their server."""
-    return path.replace("\\", "/").startswith("//")
-
-
-def _file_params(graph, where=""):
-    """(label, params, param, path) of every param naming a file: texture maps, and the text params
-    of FILE_PARAM_NAMES (ImportCurves' Alembic file, FeatherColor's images) and HairColor's map and
-    Interpolate's regionMap when they are an image file's path, inside compounds too
-    (labelled compound/inner.param). A texture map's `params[param]` is a dict holding the path
-    under "texture"; the others hold the path itself."""
-    for node in graph.get("nodes", []) if isinstance(graph, dict) else []:
-        params = node.get("params") or {}
-        for name, value in list(params.items()):
-            named = name in FILE_PARAM_NAMES or (
-                (name, node.get("type")) in (("map", "HairColor"), ("regionMap", "Interpolate")) and is_image_path(value))
-            path = value.get("texture") if isinstance(value, dict) else (value if named else None)
-            if isinstance(path, str) and path.strip():
-                yield "%s%s.%s" % (where, node.get("name"), name), params, name, path
-        definition = params.get("definition") if node.get("type") == "Compound" else None
-        if isinstance(definition, dict):
-            for found in _file_params(definition.get("graph", {}), "%s%s/" % (where, node.get("name"))):
-                yield found
-
-
-def set_file_param(params, name, path):
-    """Point a param _file_params found at another file (a texture map keeps its other fields)."""
-    if isinstance(params.get(name), dict):
-        params[name]["texture"] = path
-    else:
-        params[name] = path
-
-
-UDIM_TOKENS = ("<UDIM>", "<udim>", "%(UDIM)d")
-# Text params naming a file: ImportCurves' Alembic file, FeatherColor's feather images (HairColor's
-# map names one when it is an image's path: is_image_path).
-FILE_PARAM_NAMES = ("path", "texture", "textureRight")
+def with_graph_files(graph, paths):
+    """`graph` (a dict) with the file params `paths` ({label: path}, graph_files' labels) naming their
+    new paths (a texture map keeps its other fields): the core's (withGraphFileParams). A new dict."""
+    return json.loads(groomlab_core.with_graph_file_params(json.dumps(graph), dict(paths)))
 
 
 def is_image_path(name):
@@ -556,22 +502,11 @@ def missing_files(groom, graph, network=False):
     server, but a groom's own graph may name the studio's shares."""
     import groomlab
     out = {}
-    for label, _params, _name, path in _file_params(graph):
-        resolved = None if _is_network(path) and not network else groomlab.resolve_path(path, groom)
+    for label, path in graph_files(graph):
+        resolved = None if groomlab_core.is_network_path(path) and not network else groomlab.resolve_path(path, groom)
         if not resolved or not file_exists(resolved):
             out[label] = path
     return out
-
-
-def without_network_paths(graph):
-    """Takes params naming files on other machines out of `graph` (in place; their nodes use their
-    defaults). Returns {"node.param": path} of those taken out."""
-    removed = {}
-    for label, params, name, path in list(_file_params(graph)):
-        if _is_network(path):
-            params.pop(name, None)
-            removed[label] = path
-    return removed
 
 
 def missing_inputs(groom, graph):
@@ -649,15 +584,15 @@ def paste_text(groom, text, fit=True):
     import groomlab
     from groomlab import graph as gm
     groom = groomlab._shape_of(groom, groomlab.GROOM_TYPE)
-    data = parse_text(text)
-    data["backdrops"] = _backdrops_of(data)
-    removed = without_network_paths(data)
+    removed = {}
+    data = parse_text(text, removed)
     catalog = gm.OperatorCatalog.from_maya()
     size = scalp_size(groom) if fit else None
     recorded = data.get("size")
-    stored = fitted(data, size, catalog)
-    if not _finite(stored):
-        raise ValueError("cannot paste the graph: fitted to this scalp its sizes are too big to use")
+    try:
+        stored = fitted(data, size, catalog)  # (the core refuses sizes fitted past a number)
+    except RuntimeError as e:
+        raise ValueError("cannot paste the graph: %s" % _clip(str(e)))
     try:
         gm.GraphModel(catalog, stored)  # as it will be stored: it loads in the Graph Editor
     except (gm.GraphError, KeyError, TypeError) as e:

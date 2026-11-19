@@ -227,10 +227,10 @@ class GROOMLAB_OT_to_mesh(_Tipped, GroomOperator):
     style: EnumProperty(name="Style", items=[("tube", "Tube", "Tubes round each strand"),
                                              ("ribbon", "Ribbon", "Flat ribbons lying along the scalp")],
                         default="tube")
-    sides: IntProperty(name="Tube Sides", default=4, min=3, max=32)
+    sides: IntProperty(name="Tube Sides", default=4, min=3, max=64)
     width_scale: FloatProperty(name="Width Scale", default=1.0, min=0.001, soft_max=10.0,
                                description="Times the strands' widths")
-    max_strands: IntProperty(name="At Most", default=100000, min=1,
+    max_strands: IntProperty(name="At Most", default=20000, min=1,
                              description="Beyond this many strands, thinned by strand ID")
     strand_uvs: BoolProperty(name="Per-strand UVs", default=False,
                              description="A second UV map, strandUVs: each strand in its own cell of a grid")

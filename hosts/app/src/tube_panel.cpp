@@ -1395,12 +1395,9 @@ void TubePanel::smoothTargets() {
 }
 
 std::string TubePanel::uniqueName(const std::string& base) const {
-    std::set<std::string> taken;
-    for (const std::string& n : builtinNames()) taken.insert(n);
-    for (const LibraryShape& s : library_) taken.insert(s.name);
-    int k = 1;
-    while (taken.count(base + " " + std::to_string(k))) ++k;
-    return base + " " + std::to_string(k);
+    std::vector<std::string> library;
+    for (const LibraryShape& s : library_) library.push_back(s.name);
+    return freeTubeShapeName(base, library);  // every host's (tube.h)
 }
 
 void TubePanel::editAsCustom() {

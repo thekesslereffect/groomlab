@@ -2,8 +2,8 @@
 """Moving a groom onto another scalp mesh: guides, parts, flow, maps and color sets."""
 
 import json
-import math
 
+import groomlab_core
 from groomlab.base import no_undo
 from maya import cmds
 
@@ -11,8 +11,8 @@ from groomlab.base import ensure_plugin, undo_chunk, _original_shape, _scalp_sha
 from groomlab.params import get_graph
 from groomlab.groom import clear_rest_mesh, set_rest_mesh
 
-# The transfer methods (engine transfer.h), in the order the dialogs list them.
-METHODS = ("closest", "bounds", "markersAlign", "markersWarp", "uv")
+# The transfer methods (engine transfer.h), in the order the dialogs list them: the core's.
+METHODS = tuple(groomlab_core.transfer_methods())
 MARKER_METHODS = ("markersAlign", "markersWarp")
 
 
@@ -57,8 +57,8 @@ def transfer_groom(groom, scalp, fit=False, maps=True, color_sets=False, report=
     `maps` (on by default) projects the painted scalp maps onto the new scalp by position: a
     vertex map gets values for the new vertices, a texture map a new image at the new scalp's
     UVs, written under the groom's masks folder with a free name (the old file is left as it
-    is: other grooms or the old scene may read it). Off, vertex maps stay with the old mesh's
-    vertices and texture maps keep their image as it lies on the old UVs.
+    is: other grooms or the old scene may read it). Off, vertex maps are dropped (they cannot fit
+    another scalp: every host's rule) and texture maps keep their image as it lies on the old UVs.
 
     `color_sets` also copies the Maya color sets the graph reads (by name) from the old scalp
     mesh onto the new one (transferAttributes by closest point, after the same fit, its history
@@ -95,14 +95,14 @@ def transfer_groom(groom, scalp, fit=False, maps=True, color_sets=False, report=
         # The groom keeps the scale it had (its params and guides look as they did): the new
         # scalp's size is k times the groom's 1x. Fitting the size: k grows with the area, the
         # new scalp the old one resized (k * sqrt(new area / old area)).
-        if scaling and k > 0.0:
-            area = cmds.getAttr(groom + ".scaleArea")
-            if area > 0.0:
-                target = k * math.sqrt(area / old_area) if fit_size and old_area > 0.0 else k
-                cmds.setAttr(groom + ".scaleReference", area / (target * target))
-                transform = cmds.getAttr(groom + ".scaleTransform")
-                if transform > 0.0:
-                    cmds.setAttr(groom + ".scaleTransformReference", transform / target)
+        scale = groomlab_core.transferred_scale(scaling, k, old_area, cmds.getAttr(groom + ".scaleArea") if scaling else 0.0,
+                                                bool(fit_size))  # every host's (groom_transfer.h)
+        if scale is not None:
+            target, reference = scale
+            cmds.setAttr(groom + ".scaleReference", reference)
+            transform = cmds.getAttr(groom + ".scaleTransform")
+            if transform > 0.0:
+                cmds.setAttr(groom + ".scaleTransformReference", transform / target)
         if color_sets and old_mesh:
             copied_sets, stuck_sets = _copy_color_sets(old_mesh, mesh, _color_sets_read(read, old_mesh, mesh, before),
                                                        method, get_transfer_markers(groom))
@@ -126,6 +126,8 @@ def transfer_groom(groom, scalp, fit=False, maps=True, color_sets=False, report=
     for name, how in read.items():
         if name not in have and (how == "colorSet" or (name in old_sets and name not in after)):
             missing.add(name)
+    # Without maps the vertex maps are dropped (every host's: groom_transfer.h dropVertexMaps).
+    missing.update(n for n, e in before.items() if n not in after and e.get("kind") == "vertices")
     if report is not None:
         report.update({"projected": projected, "colorSets": copied_sets, "missing": sorted(missing)})
     return sorted(missing)

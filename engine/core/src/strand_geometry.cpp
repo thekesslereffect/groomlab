@@ -6,6 +6,8 @@
 #include <cmath>
 #include <memory>
 #include <numeric>
+#include <stdexcept>
+#include <string>
 
 #include "groomlab/export_view.h"
 #include "groomlab/frames.h"
@@ -551,15 +553,46 @@ bool sameStrandMeshes(const std::vector<StrandMeshSource>& a, const std::vector<
     return true;
 }
 
+namespace {
+
+StrandMeshOptions::Make meshMake(const std::string& make, bool strict) {
+    if (make == "strands") return StrandMeshOptions::Make::Strands;
+    if (make == "scales") return StrandMeshOptions::Make::Scales;
+    if (make == "feathers") return StrandMeshOptions::Make::Feathers;
+    if (make == "cards") return StrandMeshOptions::Make::Cards;
+    if (make == "instances") return StrandMeshOptions::Make::Instances;
+    if (strict && make != "auto") throw std::invalid_argument("make is auto, strands, scales, feathers, cards or instances");
+    return StrandMeshOptions::Make::Auto;
+}
+
+}  // namespace
+
+StrandMeshOptions strandMeshOptionsFrom(const std::string& make, const std::string& style, int sides, double widthScale, double minWidth,
+                                        bool strandUVs) {
+    StrandMeshOptions o;
+    o.make = meshMake(make, true);
+    if (style != "tube" && style != "ribbon") throw std::invalid_argument("style is tube or ribbon");
+    o.style = style == "ribbon" ? StrandMeshOptions::Style::Ribbon : StrandMeshOptions::Style::Tube;
+    if (sides < 3 || sides > kMaxMeshSides) throw std::invalid_argument("sides is 3 to " + std::to_string(kMaxMeshSides));
+    o.sides = sides;
+    if (!(widthScale > 0.0) || !std::isfinite(widthScale)) throw std::invalid_argument("widthScale is above 0");
+    o.widthScale = static_cast<float>(widthScale);
+    if (!(minWidth >= 0.0) || !std::isfinite(minWidth)) throw std::invalid_argument("minWidth is 0 or more");
+    o.minWidth = static_cast<float>(minWidth);
+    o.strandUVs = strandUVs;
+    return o;
+}
+
+std::optional<StrandSet> strandsForMesh(const StrandSet& all, const StrandMeshOptions& options, std::size_t maxStrands) {
+    if (resolveMeshMake(all, options) != StrandMeshOptions::Make::Strands) return std::nullopt;
+    const std::vector<std::size_t> keep = thinStrandsById(all, std::max<std::size_t>(maxStrands, 1));
+    if (keep.size() >= all.strandCount()) return std::nullopt;
+    return all.subset(keep);
+}
+
 StrandMeshSettings strandMeshSettings(const ParamSet& params) {
     StrandMeshSettings s;
-    const std::string make = params.getString("make", "auto");
-    s.options.make = make == "strands"     ? StrandMeshOptions::Make::Strands
-                     : make == "scales"    ? StrandMeshOptions::Make::Scales
-                     : make == "feathers"  ? StrandMeshOptions::Make::Feathers
-                     : make == "cards"     ? StrandMeshOptions::Make::Cards
-                     : make == "instances" ? StrandMeshOptions::Make::Instances
-                                           : StrandMeshOptions::Make::Auto;
+    s.options.make = meshMake(params.getString("make", "auto"), false);
     s.options.style = params.getString("style", "tube") == "ribbon" ? StrandMeshOptions::Style::Ribbon
                                                                     : StrandMeshOptions::Style::Tube;
     s.options.sides = static_cast<int>(params.getInt("sides", 4));

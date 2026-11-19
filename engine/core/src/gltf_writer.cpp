@@ -20,6 +20,13 @@
 
 namespace groomlab {
 
+GltfMaterial::AlphaMode gltfAlphaModeNamed(const std::string& name) {
+    if (name == "mask") return GltfMaterial::AlphaMode::Mask;
+    if (name == "blend") return GltfMaterial::AlphaMode::Blend;
+    if (name == "opaque") return GltfMaterial::AlphaMode::Opaque;
+    throw std::invalid_argument("alphaMode is mask, blend or opaque");
+}
+
 namespace fs = std::filesystem;
 using nlohmann::json;
 

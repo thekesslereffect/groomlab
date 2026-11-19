@@ -246,12 +246,22 @@ json* innerNode(json& definition, const std::string& name) {
 
 }  // namespace
 
-void compoundExpose(GraphEdit& edit, const std::string& compound, const std::string& name, const std::string& target) {
+std::string compoundExpose(GraphEdit& edit, const std::string& compound, const std::string& wanted, const std::string& target) {
     if (edit.nodeType(compound) != "Compound") throw GraphError(compound + " is not a Compound");
-    if (name.empty()) throw GraphError("an exposed param needs a name");
     const auto dot = target.find('.');
     if (dot == std::string::npos) throw GraphError("an inner param is \"node.param\" inside the compound");
     const std::string innerName = target.substr(0, dot), param = target.substr(dot + 1);
+    std::string name = wanted;
+    if (name.empty() && !param.empty()) {
+        // The param's own name, or node + Param when the compound has a param of that name.
+        name = param;
+        for (const json& p : json::parse(edit.nodeSpecJson(compound)).value("params", json::array())) {
+            if (p.value("name", std::string()) == param) {
+                name = innerName + static_cast<char>(std::toupper(static_cast<unsigned char>(param[0]))) + param.substr(1);
+            }
+        }
+    }
+    if (name.empty()) throw GraphError("an exposed param needs a name");
     json g = graphOf(edit);
     json& definition = definitionOf(nodeIn(g, compound));
     bool known = false;
@@ -267,6 +277,7 @@ void compoundExpose(GraphEdit& edit, const std::string& compound, const std::str
     if (!expose.is_object()) expose = json::object();
     expose[name] = target;
     edit = GraphEdit(g.dump());
+    return name;
 }
 
 bool compoundUnexpose(GraphEdit& edit, const std::string& compound, const std::string& target) {

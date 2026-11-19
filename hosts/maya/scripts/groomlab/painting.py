@@ -336,12 +336,11 @@ def rename_map(groom, old, new):
     kwargs = {"rename": (old, new)}
     stored = next((m.get("texture") or "" for m in maps(groom) if m["name"] == old and m["kind"] == "texture"), "")
     old_file = map_texture(groom, old) if stored else ""
-    target = groomlab_core.renamed_map_texture(stored, old, new) if stored else ""
-    if target:  # the file is named after the map (scalp_maps.h's rule, the app's too)
-        full = resolve_path(target, groom)
-        if full and _unique_path(full) != full.replace("\\", "/"):  # (taken: a file, or a tile set)
-            target = portable_path(_unique_path(full))
-        kwargs["texture"] = target
+    # Named after the map and in the scene's masks folder (GroomLab's files, a duplicate's shared one
+    # too): to that name, a free one when taken (asset_files.h renamedMapImage, every host's rule).
+    target = groomlab_core.renamed_map_image(old_file, old, new, asset_folder("masks", create=False)) if old_file else ""
+    if target:
+        kwargs["texture"] = portable_path(target)
     with undo_chunk("rename map"):
         cmds.groomLabScalpMaps(groom, **kwargs)
         graph = get_graph(groom)
@@ -674,17 +673,16 @@ def find_missing_files(grooms, folder, recursive=True):
                     note("relinked", groom, "maps", name, set_map_texture(groom, name, found))
             if missing["params"]:
                 graph = get_graph(groom)
-                changed = False
-                for label, params, param, stored in presets._file_params(graph):
+                relinked = {}
+                for label, stored in presets.graph_files(graph):
                     if missing["params"].get(label) != stored:
                         continue
                     found = look("params", label, stored)
                     if found:
-                        presets.set_file_param(params, param, portable_path(found))
+                        relinked[label] = portable_path(found)
                         note("relinked", groom, "params", label, portable_path(found))
-                        changed = True
-                if changed:
-                    set_graph(groom, graph)
+                if relinked:
+                    set_graph(groom, presets.with_graph_files(graph, relinked))
             for attr, stored in sorted(missing["attributes"].items()):
                 found = look("attributes", attr, stored)
                 if found:

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "groomlab/groom_file.h"
 
+#include <algorithm>
 #include <array>
 #include <charconv>
 #include <cmath>
@@ -404,6 +405,17 @@ std::string resolveGroomPath(const GroomFile& file, const std::string& stored, c
     if (!folder.empty()) folders.push_back(folder);
     folders.insert(folders.end(), file.searchPaths.begin(), file.searchPaths.end());
     return resolvePathIn(stored, std::move(folders));
+}
+
+std::vector<std::string> groomFileFolders(const GroomFile& file, const std::string& first) {
+    std::vector<std::string> out;
+    auto add = [&](const std::string& folder) {
+        if (!folder.empty() && std::find(out.begin(), out.end(), folder) == out.end()) out.push_back(folder);
+    };
+    add(first);
+    add(file.directory);
+    for (const std::string& s : file.searchPaths) add(s);
+    return out;
 }
 
 namespace {

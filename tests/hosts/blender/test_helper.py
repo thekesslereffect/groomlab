@@ -2784,7 +2784,7 @@ class PipelineTest(HelperTestCase):
         out = os.path.join(self.tmp, "unity")
         r = self.call("export", session=s, format="unityCards", directory=out, name="head", resolution=32)
         self.assertEqual(sorted(os.path.basename(p) for p in r["maps"]),
-                         sorted(["head_%s.png" % m for m in ("BaseColor", "Mask", "AO", "Tangent", "Depth", "Attribute", "Normal",
+                         sorted(["head_%s.png" % m for m in ("BaseColor", "Mask", "AO", "AO_world", "Tangent", "Depth", "Attribute", "Normal",
                                                               "ScalpBaseColor")]))
         with open(r["manifest"]) as f:
             manifest = json.load(f)

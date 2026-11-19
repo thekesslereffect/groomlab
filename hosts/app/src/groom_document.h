@@ -639,6 +639,9 @@ public:
     // Maya keeps a scene's: <groom folder>/groomlab/<groom name>/<kind>; an untitled groom's in a
     // temp folder of its own, taken along when it is first saved (save).
     std::string assetFolder(const std::string& kind) const;
+    // The groom's own folder in a kind: <kind folder>/<groom name, file safe> (Maya's masks/<groom>,
+    // the core's groomFileFolder for a saved one: groom_package.h).
+    std::string groomFolder(const std::string& kind) const;
     // What the last save took along (Save As: the files the groom names copied into the new
     // file's folders, Maya's follow_scene_files): the files copied, and copies under another name.
     const std::vector<std::string>& savedCopies() const { return savedCopies_; }
@@ -851,6 +854,9 @@ public:
     // Adds a Cards node between what feeds the output and the output (one undo step); the name
     // made is written to *made. "" or the error.
     std::string addCardsNode(std::string* made);
+    // Add > Cards > Hero/Mid/Low, every host's: a Cards node before the output only when the graph
+    // has none, then every Cards node set for `lod` (one undo step); the first Cards node in *made.
+    std::string addCards(const std::string& lod, std::string* made = nullptr);
     // Sets a Cards node for a level of detail ("hero", "mid", "low": the core's presets,
     // card_presets.h, as Maya's cards_preset sets them, by what the node cards), one undo step.
     // "" or the error.

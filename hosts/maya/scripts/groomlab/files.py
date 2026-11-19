@@ -356,17 +356,17 @@ def _after_groom_file(groom, info, keep_keys):
     graph = get_graph(groom)
     dirs = [info.get("directory") or ""] + [os.path.expandvars(p) for p in info.get("searchPaths") or []]
     from groomlab import presets
-    relinked = False
-    for _label, params, param, stored in list(presets._file_params(graph)):
+    relinked = {}
+    for label, stored in presets.graph_files(graph):
         if os.path.isabs(os.path.expandvars(stored)) or presets.file_exists(resolve_path(stored, groom)):
             continue
         for folder in dirs:
             candidate = os.path.join(folder, stored) if folder else None
             if candidate and presets.file_exists(candidate):
-                presets.set_file_param(params, param, portable_path(os.path.normpath(candidate).replace("\\", "/")))
-                relinked = True
+                relinked[label] = portable_path(os.path.normpath(candidate).replace("\\", "/"))
                 break
     if relinked:
+        graph = presets.with_graph_files(graph, relinked)
         set_graph(groom, graph)  # and the controls' attributes
     else:
         sync_controls(groom, graph)

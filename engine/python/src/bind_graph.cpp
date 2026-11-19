@@ -734,6 +734,25 @@ void bindGraph(py::module_& m) {
              [](GraphEdit& e, const std::string& paramsJson, std::optional<double> groomSize) { return insertSimulate(e, paramsJson, groomSize); },
              py::arg("params_json") = std::string(), py::arg("groom_size") = py::none(),
              "Add > Simulate (graph_inserts.h): a Simulate node between the guides and the Interpolates they feed.")
+        .def("insert_motion",
+             [](GraphEdit& e, const std::string& type, const std::string& paramsJson, std::optional<double> groomSize) {
+                 return insertMotion(e, type, paramsJson, groomSize);
+             },
+             py::arg("type"), py::arg("params_json") = std::string(), py::arg("groom_size") = py::none(),
+             "Add > Wind / Jiggle (graph_inserts.h): the node before the output, before a Collide or Cards ending the chain.")
+        .def("motion_anchor", &motionAnchor, "The node a motion node goes before (graph_inserts.h).")
+        .def("remove_scalp_nodes", [](GraphEdit& e, const std::string& mesh) { return removeScalpNodes(e, mesh); }, py::arg("mesh_name"),
+             "Remove > Scalp's graph (graph_inserts.h): its Scalp nodes and what they alone feed; a Merge left alone passes through.")
+        .def("remove_collider_nodes", [](GraphEdit& e, const std::string& mesh) { return removeColliderNodes(e, mesh); },
+             py::arg("mesh_name"), "Remove > Collider's graph (graph_inserts.h): its ColliderMesh nodes, their Collide nodes passing through.")
+        .def("insert_cards",
+             [](GraphEdit& e, const std::string& paramsJson, std::optional<double> groomSize) {
+                 bool made = false;
+                 std::string name = insertCards(e, paramsJson, groomSize, &made);
+                 return py::make_tuple(name, made);
+             },
+             py::arg("params_json") = std::string(), py::arg("groom_size") = py::none(),
+             "(name, made): Add > Cards (graph_inserts.h): the first Cards node, or one made before the output when there is none.")
         .def("insert_guide_cache",
              [](GraphEdit& e, const std::string& path, const std::string& object, std::optional<double> groomSize) {
                  return insertGuideCache(e, path, object, groomSize);
@@ -830,10 +849,11 @@ void bindGraph(py::module_& m) {
              "node.param's input port gone with what fed it, the param keeping its own value; False when it was no port.")
         .def("compound_expose",
              [](GraphEdit& e, const std::string& compound, const std::string& name, const std::string& target) {
-                 compoundExpose(e, compound, name, target);
+                 return compoundExpose(e, compound, name, target);
              },
              py::arg("compound"), py::arg("name"), py::arg("target"),
-             "A compound's inner param `target` (\"node.param\") shown on it as its param `name` (graph_controls.h).")
+             "A compound's inner param `target` (\"node.param\") shown on it as its param `name` (\"\": the param's, or "
+             "node + Param when taken: graph_controls.h). Returns the name.")
         .def("compound_unexpose",
              [](GraphEdit& e, const std::string& compound, const std::string& target) { return compoundUnexpose(e, compound, target); },
              py::arg("compound"), py::arg("target"),
@@ -1018,6 +1038,15 @@ void bindGraph(py::module_& m) {
           "What is wrong with a graph's params against their specs (presets.h, every host's check): [] when fine.");
     m.def("preset_from_text", &presetFromText, py::arg("text"),
           "The preset a pasted text holds, every host's checks (presets.h presetFromText): its JSON; ValueError saying why.");
+    m.def("pasted_graph_from_text",
+          [](const std::string& text) {
+              const PastedGraph pasted = pastedGraphFromText(text);
+              return py::make_tuple(pasted.presetJson, pasted.removed);
+          },
+          py::arg("text"),
+          "(preset_json, removed): a groom's whole graph pasted, every host's checks (presets.h pastedGraphFromText: "
+          "the graph whole, backdrops as drawn, params naming files on other machines taken out: removed {\"node.param\": path}); "
+          "ValueError saying why.");
     m.attr("MAX_PRESET_TEXT") = kMaxPresetText;
     m.attr("MAX_PRESET_NODES") = kMaxPresetNodes;
     m.def("preset_user_dir", &presetUserDir, "The user's preset folder (GROOMLAB_USER_PRESETS, else Maya's user folder).");
@@ -1142,6 +1171,20 @@ void bindGraph(py::module_& m) {
           },
           "The functions a script has beyond an expression's: [{'name', 'arguments', 'about'}].");
     m.attr("SCRIPT_STEP_BUDGET") = kScriptStepBudget;
+
+    m.def("with_imported_curves", &withImportedCurves, py::arg("graph_json"), py::arg("path"), py::arg("object") = std::string(),
+          py::arg("samples") = 24,
+          "The graph with its guides node an ImportCurves node reading `path` (graph_inserts.h: every host's Import Alembic Curves).");
+    m.def("group_readers", &groupReaders, py::arg("graph_json"), py::arg("group"),
+          "[(node, param)] of the Guides nodes whose group or exclude names guide group `group` (graph_inserts.h).");
+    m.def("rename_group_readers",
+          [](const std::string& graphJson, const std::string& from, const std::string& to) {
+              bool changed = false;
+              std::string text = renameGroupReaders(graphJson, from, to, &changed);
+              return py::make_tuple(text, changed);
+          },
+          py::arg("graph_json"), py::arg("old"), py::arg("new"),
+          "(graph_json, changed): every Guides node's group and exclude naming group `old` naming `new`, inside compounds too.");
 
     // Built-in operator type names, for scripts.
     py::dict ops;

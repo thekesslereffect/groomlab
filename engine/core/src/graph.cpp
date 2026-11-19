@@ -25,6 +25,19 @@
 
 namespace groomlab {
 
+std::optional<GuideSet> guidesOfValue(const Value& value) {
+    if (const GuidesPtr* guides = std::get_if<GuidesPtr>(&value); guides && *guides) return **guides;
+    if (const StrandsPtr* strands = std::get_if<StrandsPtr>(&value); strands && *strands) {
+        GuideSet out;
+        for (std::size_t i = 0; i < (*strands)->strandCount(); ++i) {
+            const Vec3f* p = (*strands)->strandPoints(i);
+            out.add((*strands)->ids()[i], std::vector<Vec3f>(p, p + (*strands)->strandPointCount(i)));
+        }
+        return out;
+    }
+    return std::nullopt;
+}
+
 namespace {
 
 std::uint64_t hashBytes(std::uint64_t seed, const void* data, std::size_t size) {

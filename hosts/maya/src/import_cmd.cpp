@@ -60,11 +60,8 @@ std::string sceneUpAxis() { return MGlobal::isZAxisUp() ? "Z" : "Y"; }
 
 std::string generic(const std::string& path) { return path.empty() ? path : fs::u8path(path).generic_u8string(); }
 
-// (A texture map's plain path standing for a tile set, udim.h: there when any tile is.)
-bool exists(const std::string& path) {
-    std::error_code ec;
-    return !path.empty() && (fs::exists(fs::u8path(path), ec) || (isImagePath(path) && fileStamp(path) != 0));
-}
+// (A texture map's plain path standing for a tile set, udim.h: there when any tile is: every host's check.)
+bool exists(const std::string& path) { return fileThere(path); }
 
 // Groom `index` of the file (a file holds one groom or several: groom_file.h), read and turned
 // into the scene's up axis (`fileUpAxis`: the axis it was written in; `names`: every groom's name,
@@ -100,13 +97,8 @@ GroomFile readForMaya(const std::string& path, int index = 0, std::string* fileU
 // A path the file stores, as its readers resolve it: variables expanded, a relative one against
 // the groom file's folder, then its search paths (the first that holds it; else the folder).
 std::string resolveFromFile(const GroomFile& file, const std::string& stored) {
-    const std::string path = expandEnvironment(stored);
-    if (path.empty() || isAbsolutePath(path)) return generic(path);
-    std::vector<std::string> dirs;
-    if (!file.directory.empty()) dirs.push_back(file.directory);
-    for (const std::string& s : file.searchPaths) dirs.push_back(expandEnvironment(s));
-    if (dirs.empty()) return generic(path);
-    return generic(searchPathResolver(std::move(dirs))(path));
+    // Every host's (groom_file.h resolveGroomPath): a moved file found by its trailing folders too.
+    return generic(resolveGroomPath(file, stored));
 }
 
 // Why `mesh` is not the file's scalp as the file's guides, parts and flow are rooted on it ("" when

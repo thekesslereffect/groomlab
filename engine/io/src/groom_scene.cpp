@@ -78,10 +78,7 @@ GroomScene::GroomScene(GroomFile file) : file_(std::move(file)) {
     }
     session_ = std::make_unique<GroomSession>(file_.data);
     // Relative paths in the graph: the groom file's folder, then its search paths.
-    std::vector<std::string> dirs;
-    if (!file_.directory.empty()) dirs.push_back(file_.directory);
-    dirs.insert(dirs.end(), file_.searchPaths.begin(), file_.searchPaths.end());
-    session_->setPathResolver(searchPathResolver(std::move(dirs)));
+    session_->setPathResolver(searchPathResolver(groomFileFolders(file_)));
     // Simulate nodes: frames at the file's rate, the frames on the way to a time fed as a view
     // feeds its own, the bakes the file names.
     session_->setFramesPerSecond(file_.framesPerSecond);

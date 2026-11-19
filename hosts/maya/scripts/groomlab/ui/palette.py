@@ -889,11 +889,9 @@ class TubePanel(QtWidgets.QWidget):
         self.run(groomlab.smooth_tube, groom, guides=self._selection, channel=channel)
 
     def unique_name(self, base):
-        taken = set(n for n, _, _ in TUBE_SHAPES) | set(s["name"] for s in self._library)
-        k = 1
-        while "%s %d" % (base, k) in taken:
-            k += 1
-        return "%s %d" % (base, k)
+        """"<base> 1", "<base> 2"...: no built-in or library shape's (tube.h freeTubeShapeName, every host's)."""
+        import groomlab_core
+        return groomlab_core.free_tube_shape_name(base, [s["name"] for s in self._library])
 
     def edit_as_custom(self):
         """The chosen built-in copied into the library as a new shape, chosen (the targets take it:

@@ -5606,10 +5606,7 @@ class GraphEditor(QtWidgets.QWidget):
         node + Param when taken), or stop showing it. One undo step when Live."""
         try:
             if on:
-                inner, _, param = target.partition(".")
-                taken = set(p["name"] for p in self.model.node_spec(compound)["params"])
-                exposed = param if param not in taken else inner + param[:1].upper() + param[1:]
-                self.model.expose(compound, exposed, target)
+                self.model.expose(compound, "", target)  # (named as every host names it: the core's)
             else:
                 self.model.unexpose(compound, target)
         except gm.GraphError as e:

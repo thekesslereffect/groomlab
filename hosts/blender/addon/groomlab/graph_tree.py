@@ -459,7 +459,7 @@ def param_property(spec, update, file_path=False):
             conv = lambda v: float(v) * scale  # noqa: E731
             return FloatProperty(precision=3, **spec_limits(spec, conv), **common)
         if unit == "fraction":  # a percentage (units.to_ui), as Maya and the app show it
-            kw = spec_limits(spec, lambda v: float(v) * units.FRACTION_FACTOR)
+            kw = spec_limits(spec, lambda v: float(v) * units.fraction_factor())
             kw.setdefault("soft_min", 0.0)
             kw.setdefault("soft_max", 100.0)
             return FloatProperty(subtype="PERCENTAGE", precision=max(0, min(1, int(spec.get("decimals", 3)) - 2)), **kw,

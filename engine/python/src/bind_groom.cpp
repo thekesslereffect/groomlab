@@ -7,8 +7,10 @@
 #include <set>
 #include <sstream>
 
+#include "groomlab/asset_files.h"
 #include "groomlab/color_patterns.h"
 #include "groomlab/card_files.h"
+#include "groomlab/engine_cards.h"
 #include "groomlab/card_maps.h"
 #include "groomlab/card_presets.h"
 #include "groomlab/cards.h"
@@ -608,6 +610,9 @@ void bindGroom(py::module_& m) {
           py::arg("graph_json"), py::arg("name"),
           "(graph_json, changed, [(node, param)]): every reader of map `name` letting go of it, as when the map is removed "
           "(scalp_maps.h unlinkMapReaders).");
+    m.def("renamed_map_image", &renamedMapImage, py::arg("full"), py::arg("old"), py::arg("new"), py::arg("folder"),
+          "Where a texture map's image goes on a rename (asset_files.h, every host's rule): named after the map, inside the "
+          "groom's maps folder `folder`, to a free name; \"\" when it stays.");
     m.def("renamed_map_texture", &renamedMapTexture, py::arg("stored"), py::arg("old"), py::arg("new"),
           "A texture map's file renamed with its map (\"\" when the file is not named after it).");
     // Ptex files (ptex.h): XGen's paint maps read into maps at a scalp's UVs or vertices.
@@ -707,6 +712,31 @@ void bindGroom(py::module_& m) {
     m.def("format_card_maps", &formatCardMaps, py::arg("prefix"), py::arg("stamp") = std::string(), py::arg("bake") = 0,
           "The cardMaps text of a bake at a stored prefix, its stamp and bake number.");
     m.def("parse_card_maps", &parseCardMaps, py::arg("text"), "A cardMaps text as {key: value}.");
+    m.def(
+        "engine_cards_manifest_json",
+        [](bool unity, const py::dict& given) {
+            EngineCardsInfo info;
+            auto text = [&](const char* key) { return given.contains(key) && !given[key].is_none() ? py::str(given[key]).cast<std::string>() : std::string(); };
+            auto count = [&](const char* key) { return given.contains(key) ? given[key].cast<std::size_t>() : std::size_t{0}; };
+            info.mesh = text("mesh");
+            info.scalpCap = text("scalpCap");
+            info.cards = count("cards");
+            info.triangles = count("triangles");
+            info.textures = count("textures");
+            info.feathers = count("feathers");
+            if (given.contains("maps")) info.maps = given["maps"].cast<std::map<std::string, std::string>>();
+            if (given.contains("roughness")) info.roughness = given["roughness"].cast<double>();
+            return engineCardsManifestJson(unity, info);
+        },
+        py::arg("unity"), py::arg("info"),
+        "The engine cards' manifest as JSON text (engine_cards.h: every host's): Unreal's, or Unity's with `unity`. "
+        "`info`: mesh, scalpCap, cards, triangles, textures, feathers, maps {map: file}, roughness.");
+    m.def("unity_feathers_manifest_json",
+          [](const std::string& objectsJson, const std::string& abc, const std::string& fbx, const std::string& lod, double barbDensity) {
+              return unityFeathersManifestJson(objectsJson, abc, fbx, lod, barbDensity);
+          },
+          py::arg("objects_json"), py::arg("abc"), py::arg("fbx"), py::arg("lod"), py::arg("barb_density"),
+          "Unity Feathers' manifest as JSON text (engine_cards.h: every host's).");
     m.def("card_maps_prefix", &cardMapsPrefix, py::arg("text"), "The prefix a cardMaps text names (\"\": none).");
     m.def("with_card_maps_prefix", &withCardMapsPrefix, py::arg("text"), py::arg("prefix"),
           "The cardMaps text with its bake's paths moved to another prefix.");

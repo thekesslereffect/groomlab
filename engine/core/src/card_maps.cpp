@@ -534,6 +534,13 @@ std::optional<CardMapPreset> findCardMapPreset(const std::string& name) {
     return std::nullopt;
 }
 
+CardMapPreset cardMapPresetFromText(const std::string& text) {
+    const std::size_t first = text.find_first_not_of(" \t\r\n");
+    if (first != std::string::npos && text[first] == '{') return cardMapPresetFromJson(text);
+    if (const auto found = findCardMapPreset(text)) return *found;
+    throw std::runtime_error("no card map preset named '" + text + "'");
+}
+
 namespace {
 
 std::string presetFileName(const std::string& name) {

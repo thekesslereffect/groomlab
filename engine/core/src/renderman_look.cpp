@@ -3,7 +3,9 @@
 #include "groomlab/renderman_look.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <cstdio>
 #include <set>
 
 #include "groomlab/export_view.h"
@@ -231,6 +233,65 @@ ConstantLook constantLook(const std::vector<Primvar>& primvars) {
     mean("rman_coneAngleTT", &out.coneAngleTT, 1);
     mean("rman_coneAngleTRT", &out.coneAngleTRT, 1);
     mean("rman_specularOffset", &out.specularOffset, 1);
+    return out;
+}
+
+namespace {
+
+// A number as the RIB writes it (Maya's prman_scene.number): 0 for one under 1e-12, else %.9g.
+std::string ribNumber(double x) {
+    if (std::abs(x) < 1e-12) return "0";
+    char text[32];
+    std::snprintf(text, sizeof text, "%.9g", x);
+    return text;
+}
+
+}  // namespace
+
+std::string hairNetworkRib(const std::string& prefix, float tilt, const std::string& indent) {
+    struct Reader {
+        const char *key, *varname, *type, *defaultParam;
+        double r, g, b;  // the default (a float's in r); no default param: none
+    };
+    static const Reader kReaders[] = {{"melanin", "rman_melanin", "float", nullptr, 0, 0, 0},
+                                      {"redness", "rman_redness", "float", nullptr, 0, 0, 0},
+                                      {"dye", "rman_dye", "color", "defaultColor", 1, 1, 1},
+                                      {"color", "rman_color", "color", nullptr, 0, 0, 0},
+                                      {"share", "rman_rgbShare", "float", nullptr, 0, 0, 0},
+                                      {"gainR", "rman_specularGainR", "float", "defaultFloat", 1.75, 0, 0},
+                                      {"coneR", "rman_coneAngleR", "float", "defaultFloat", 8, 0, 0},
+                                      {"coneTT", "rman_coneAngleTT", "float", "defaultFloat", 4, 0, 0},
+                                      {"coneTRT", "rman_coneAngleTRT", "float", "defaultFloat", 16, 0, 0},
+                                      {"opacity", "opacity", "float", "defaultFloat", 1, 0, 0}};
+    const std::string& p = prefix;
+    std::string out;
+    for (const Reader& r : kReaders) {
+        out += indent + "Pattern \"PxrPrimvar\" \"" + p + "pv_" + r.key + "\" \"string varname\" [\"" + r.varname + "\"] \"string type\" [\"" + r.type + "\"]";
+        if (r.defaultParam) {
+            const bool isColor = std::string(r.type) == "color";
+            out += std::string(" \"") + (isColor ? "color " : "float ") + r.defaultParam + "\" ";
+            out += isColor ? "[" + ribNumber(r.r) + " " + ribNumber(r.g) + " " + ribNumber(r.b) + "]" : "[" + ribNumber(r.r) + "]";
+        }
+        out += "\n";
+    }
+    out += indent + "Pattern \"PxrHairColor\" \"" + p + "pigment\" \"int mode\" [0] \"reference float melanin\" [\"" + p +
+           "pv_melanin:resultF\"] \"reference float redness\" [\"" + p + "pv_redness:resultF\"] \"reference color dye\" [\"" + p +
+           "pv_dye:resultRGB\"] \"float randomMelanin\" [0] \"float strayDensity\" [0] \"string hairIndexPrimvar\" [\"hair_index\"]\n";
+    out += indent + "Pattern \"PxrHairColor\" \"" + p + "rgb\" \"int mode\" [1] \"reference color Color\" [\"" + p +
+           "pv_color:resultRGB\"] \"color randomColor\" [0 0 0] \"float strayDensity\" [0]\n";
+    for (const char* lobe : {"Diff", "TT", "TRT"}) {
+        std::string lower(lobe);
+        for (char& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        out += indent + "Pattern \"PxrMix\" \"" + p + "mix_" + lower + "\" \"reference color color1\" [\"" + p + "pigment:result" + lobe +
+               "\"] \"reference color color2\" [\"" + p + "rgb:result" + lobe + "\"] \"reference float mixer\" [\"" + p + "pv_share:resultF\"]\n";
+    }
+    out += indent + "Bxdf \"PxrMarschnerHair\" \"" + p + "hair\" \"reference color diffuseColor\" [\"" + p +
+           "mix_diff:resultRGB\"] \"reference color specularColorTT\" [\"" + p + "mix_tt:resultRGB\"] \"reference color specularColorTRT\" [\"" + p +
+           "mix_trt:resultRGB\"] \"reference float specularGainR\" [\"" + p + "pv_gainR:resultF\"] \"float specularGainTT\" [2]" +
+           " \"float specularGainTRT\" [1.2] \"reference float specularConeAngleR\" [\"" + p +
+           "pv_coneR:resultF\"] \"reference float specularConeAngleTT\" [\"" + p + "pv_coneTT:resultF\"] \"reference float specularConeAngleTRT\" [\"" +
+           p + "pv_coneTRT:resultF\"] \"float specularOffset\" [" + ribNumber(-static_cast<double>(tilt)) +
+           "] \"float specularIor\" [1.55] \"reference float presence\" [\"" + p + "pv_opacity:resultF\"]\n";
     return out;
 }
 

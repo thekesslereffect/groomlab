@@ -31,7 +31,7 @@ namespace groomlab::app {
 
 namespace tube_editor {
 constexpr float kExtent = 1.25f;  // the square shows -kExtent..kExtent on both axes (the outline is fitted to -1..1)
-constexpr float kAxis = 0.02f;    // points this near the v axis are on it (mirror)
+constexpr float kAxis = kMirrorAxis;  // points this near the v axis are on it (mirror: tube.h)
 constexpr qreal kHit = 7.0;       // pixels: how near a press must be to a point or the outline
 
 // The points made symmetric about the v axis from their right side (u > 0): the right chain in

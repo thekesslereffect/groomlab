@@ -323,6 +323,18 @@ def _tube_hold(profile):
     return update
 
 
+
+def _mirror_on(t):
+    """Mirror turned on: the picked library shape made symmetric from its right side when it is not
+    (every host's: tube.h mirroredSectionPoints, as Maya's and the app's editors do)."""
+    if not t.tube_shape_mirror:
+        return
+    from . import window
+    try:
+        window.make_tube_shape_symmetric(t)
+    except Exception:  # noqa: BLE001 - no helper or shape yet: nothing to make symmetric
+        pass
+
 class GroomLabGroupItem(bpy.types.PropertyGroup):
     # name: the group's
     parent: StringProperty()
@@ -508,7 +520,7 @@ class GroomLabTools(bpy.types.PropertyGroup):
     # Paint on a scalp map through an alpha (Maya's Alpha picker): its file ("" none), shown and
     # picked in the library's grid (alpha_choice), its rotation, angle, spacing and invert.
     alpha: StringProperty(name="Alpha", update=_push(), description="The image stamped inside the brush (a file)")
-    tube_shape_mirror: BoolProperty(name="Mirror", default=True,
+    tube_shape_mirror: BoolProperty(name="Mirror", default=True, update=lambda self, context: _mirror_on(self),
                                     description="The cross-section editor keeps the left and right sides alike: a "
                                                 "point and its mirror image move, come and go together")
     alpha_choice: EnumProperty(name="Alpha", items=alphas.enum_items, get=alphas.choice_get, set=alphas.choice_set,

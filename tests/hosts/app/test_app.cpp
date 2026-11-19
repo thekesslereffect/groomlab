@@ -3898,7 +3898,7 @@ TEST(AppCards, UnrealAndUnityCardsAsFbx) {
     EXPECT_TRUE(has(feathers, "hairF_unity_feathers.json"));
     EXPECT_FALSE(has(feathers, "hairF_rachis.fbx"));
     const std::vector<std::string> unity = doc->exportEngineCards(dir, "hairU", true, 64, 1.0f, &warnings);
-    for (const char* f : {"hairU_BaseColor.png", "hairU_Mask.png", "hairU_unity.json", "hairU_cards.fbx"}) EXPECT_TRUE(has(unity, f)) << f;
+    for (const char* f : {"hairU_BaseColor.png", "hairU_Mask.png", "hairU_AO_world.png", "hairU_unity.json", "hairU_cards.fbx"}) EXPECT_TRUE(has(unity, f)) << f;
     std::ifstream fbx(std::filesystem::u8path(dir + "/hairU_cards.fbx"), std::ios::binary);
     std::string head(23, ' ');
     fbx.read(head.data(), 23);

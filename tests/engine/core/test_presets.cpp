@@ -21,6 +21,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "groomlab/asset_files.h"
 #include "groomlab/graph_edit.h"
 #include "groomlab/graph_io.h"
 #include "groomlab/groom_file.h"
@@ -116,6 +117,45 @@ TEST(Presets, APastedTextIsCheckedAsEveryHostChecksIt) {
     nlohmann::json quoted = nlohmann::json::parse(good);
     quoted["about"]["description"] = std::string(400, '[') + "\\\"" + std::string(400, '{');
     EXPECT_NO_THROW(presetFromText(quoted.dump()));
+}
+
+TEST(Presets, APastedGraphIsWholeAndNeverReachesAnotherMachine) {
+    // presets.h pastedGraphFromText: every host's Paste Graph (Maya's presets.paste_text, the
+    // Blender add-on's, the app's) refuses a graph with problems, keeps backdrops as drawn and
+    // takes params naming files on other machines out.
+    nlohmann::json g = nlohmann::json::parse(makePresetJson(defaultGraphJson(), 20.0, "look", "", "Shared"));
+    std::string interpolate;
+    for (nlohmann::json& n : g["nodes"]) {
+        if (n["type"] == "Interpolate") {
+            interpolate = n["name"].get<std::string>();
+            n["params"]["regionMap"] = "//server/share/regions.png";
+        }
+    }
+    ASSERT_FALSE(interpolate.empty());
+    g["backdrops"] = {{{"x", 0}, {"y", 0}, {"w", 100}, {"h", 50}, {"title", "hair"}, {"color", {300, -5, 10}}, {"script", "x"}},
+                      {{"x", "far"}, {"y", 0}, {"w", 1}, {"h", 1}}};
+    const PastedGraph pasted = pastedGraphFromText(g.dump());
+    EXPECT_EQ(pasted.removed, (std::map<std::string, std::string>{{interpolate + ".regionMap", "//server/share/regions.png"}}));
+    const nlohmann::json out = nlohmann::json::parse(pasted.presetJson);
+    for (const nlohmann::json& n : out["nodes"]) {
+        if (n["name"] == interpolate) EXPECT_FALSE(n.value("params", nlohmann::json::object()).contains("regionMap"));
+    }
+    ASSERT_EQ(out["backdrops"].size(), 1u) << "one without a rectangle: left out";
+    EXPECT_EQ(out["backdrops"][0], (nlohmann::json{{"x", 0.0}, {"y", 0.0}, {"w", 100.0}, {"h", 50.0}, {"title", "hair"}, {"color", {255, 0, 10}}}));
+    EXPECT_TRUE(isNetworkPath("\\\\host\\share\\a.png"));
+    EXPECT_FALSE(isNetworkPath("C:/maps/a.png"));
+    // A graph with problems (the output's strands left open) is refused as Maya refused it.
+    nlohmann::json open = nlohmann::json::parse(makePresetJson(defaultGraphJson(), 20.0, "look", "", "Shared"));
+    const std::string output = GraphEdit(open.dump()).outputNode();
+    nlohmann::json kept = nlohmann::json::array();
+    for (const nlohmann::json& c : open["connections"]) {
+        if (c["to"] != output) kept.push_back(c);
+    }
+    open["connections"] = kept;
+    EXPECT_THROW(pastedGraphFromText(open.dump()), std::invalid_argument);
+    // Fitted past what a number holds: refused rather than written as null.
+    nlohmann::json tiny = nlohmann::json::parse(makePresetJson(defaultGraphJson(), 1e-300, "look", "", "Shared"));
+    EXPECT_THROW(presetGraphJson(tiny.dump(), 1e300), std::runtime_error);
 }
 
 TEST(Presets, APastedGraphLeavesOutParamsItsNodesNoLongerHave) {

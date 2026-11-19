@@ -130,6 +130,11 @@ std::vector<std::array<float, 3>> pointColors(const StrandSet& strands);
 std::vector<std::array<float, 3>> strandAppearanceColors(const StrandSet& strands);
 std::vector<std::array<float, 3>> pointAppearanceColors(const StrandSet& strands);
 
+// The name an export's root object takes, every host's (Maya: the groom's transform, the Blender
+// add-on: the scalp object, the app: the file's stem): letters, digits and _ (every other character
+// _), "groom" before a leading digit or for nothing: an Alembic, USD, vrscene and engine name alike.
+std::string exportObjectName(const std::string& wanted);
+
 // Valid USD identifiers (usdIdentifier) for `names`, in order, unique among
 // themselves and never one of `reserved`: a clash gets a numbered suffix, so
 // "a-b" beside "a_b" becomes a_b and a_b_2.

@@ -33,7 +33,6 @@ it shows the material's viewport color, which is set to the hair's APPEARANCE co
 hairAppearanceColor: what the hair looks like under even white light, as Maya's plain viewport
 shading draws it) averaged over the strands, so the groom shows its look there too, not gray."""
 
-import colorsys
 import math
 
 import bpy
@@ -133,12 +132,6 @@ def set_viewport_color(mat, appearance):
         return False
     mat.diffuse_color = color
     return True
-
-
-def iridescent_tint(color, shift, grazing):
-    """The structural color at `grazing` (0 facing the view .. 1 edge-on): Maya's shading.py's."""
-    h, s, v = colorsys.rgb_to_hsv(*[max(0.0, float(c)) for c in color])
-    return colorsys.hsv_to_rgb((h + shift * min(max(grazing, 0.0), 1.0)) % 1.0, s, v)
 
 
 # ---- The node group ---------------------------------------------------------------------------
@@ -374,7 +367,6 @@ def _iridescence(nodes, links, look, base, present):
     angle between the view and the strand's root normal, mixed over the base color by the
     iridescence channel."""
     color = look.get("iridescenceColor") or (0.05, 0.55, 0.2)
-    shift = float(look.get("iridescenceShift", 0.3))
     geo = nodes.new("ShaderNodeNewGeometry")
     geo.location = (-1500, -500)
     facing = None
@@ -399,12 +391,13 @@ def _iridescence(nodes, links, look, base, present):
     ramp.location = (-850, -450)
     ramp.color_ramp.interpolation = "LINEAR"
     elements = ramp.color_ramp.elements
-    keys = (0.0, 0.25, 0.5, 0.75, 1.0)  # |cos|: 0 edge-on .. 1 facing
+    # The core's ramp keys (|cos|: 0 edge-on .. 1 facing; color_patterns.h iridescentTint), every host's.
+    keys = look.get("iridescenceRamp") or [[at, list(color)] for at in (0.0, 0.25, 0.5, 0.75, 1.0)]
     while len(elements) < len(keys):
         elements.new(0.5)
-    for e, at in zip(elements, keys):
-        e.position = at
-        e.color = tuple(iridescent_tint(color, shift, 1.0 - at)) + (1.0,)
+    for e, (at, tint) in zip(elements, keys):
+        e.position = float(at)
+        e.color = tuple(float(c) for c in tint) + (1.0,)
     if facing is not None:
         absolute = nodes.new("ShaderNodeMath")
         absolute.operation = "ABSOLUTE"

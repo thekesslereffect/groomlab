@@ -7,9 +7,11 @@
 // maps go through projectScalpMaps (scalp_paint.h).
 
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <vector>
 
+#include "groomlab/scalp_maps.h"
 #include "groomlab/scalp_mesh.h"
 #include "groomlab/transfer.h"
 
@@ -31,5 +33,20 @@ struct GroomTransferTexts {
 // `mapping`; what fell off the new scalp, and the roots that found no matching UV, in `warnings`.
 GroomTransferTexts transferGroomTexts(const std::string& hierarchyJson, const std::string& partsJson, const std::string& flowJson,
                                       const ScalpMapping& mapping, double groomScale, std::vector<std::string>* warnings = nullptr);
+
+// The groom's scale after a transfer, every host's: a groom scaled with its scalp (`scaling`, at
+// scale `groomScale` k) keeps the size shown (the new scalp k times its 1x), or with `fitSize` grows
+// with the area (k * sqrt(newArea / oldArea): the new scalp the old one resized). `scale` is that
+// target, `reference` the scale reference it gives on the new scalp (newArea / scale^2). None: the
+// reference stays as it is (a groom not scaled with its scalp, no area to measure).
+struct TransferredScale {
+    double scale = 1.0;
+    double reference = 0.0;
+};
+std::optional<TransferredScale> transferredScale(bool scaling, double groomScale, double oldArea, double newArea, bool fitSize);
+
+// A transfer that does not project the maps, every host's: vertex maps cannot fit another scalp,
+// so they go (their names back, sorted); texture maps keep their image on the new scalp's UVs.
+std::vector<std::string> dropVertexMaps(ScalpMaps& maps);
 
 }  // namespace groomlab

@@ -61,6 +61,9 @@ const char* tubeShapeName(TubeShape shape);
 // False (shape untouched) for an unknown name.
 bool parseTubeShape(const std::string& name, TubeShape* shape);
 const std::vector<std::string>& tubeShapeNames();
+// A new library shape's name, every host's: "<base> 1", "<base> 2"... the first no built-in shape
+// (tubeShapeNames) nor one of `library` has.
+std::string freeTubeShapeName(const std::string& base, const std::vector<std::string>& library);
 
 constexpr float kMinTubeAspect = 0.01f;
 constexpr float kMaxTubeAspect = 100.0f;
@@ -69,6 +72,16 @@ constexpr float kMaxTubeAspect = 100.0f;
 struct SectionPoint {
     float u = 0.0f, v = 0.0f;
 };
+
+// A cross-section editor's Mirror, every host's (Maya's, the app's, the Blender add-on's tube shape
+// editor): points within kMirrorAxis of the v axis are on it.
+constexpr float kMirrorAxis = 0.02f;
+// The points made symmetric about the v axis from their right side (u > 0): the right chain in
+// order, the points on the axis at its ends set on it, its mirror image closing the outline. Points
+// with nothing right of the axis come back mirrored from the left. Fewer than 3 after: as they were.
+std::vector<SectionPoint> mirroredSectionPoints(const std::vector<SectionPoint>& points);
+// Each point's mirror image among the points (its own index on the axis; -1 when it has none).
+std::vector<int> mirrorPartners(const std::vector<SectionPoint>& points);
 
 // A shape's outline and what is measured on it once: a closed polygon, counter-clockwise, in the
 // unit domain (its bounding box -1 to 1 on both axes); its corners and edge points (indices into

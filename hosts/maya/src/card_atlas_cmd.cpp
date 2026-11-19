@@ -139,13 +139,7 @@ MStatus CardAtlasCmd::doIt(const MArgList& args) {
             MString value;
             std::string text = atlas.settings.preset;
             if (db.isFlagSet("-preset") && db.getFlagArgument("-preset", 0, value) == MS::kSuccess) text = value.asChar();
-            if (!text.empty() && text.front() == '{') {
-                preset = cardMapPresetFromJson(text);
-            } else if (const auto found = findCardMapPreset(text)) {
-                preset = *found;
-            } else {
-                throw std::runtime_error("no card map preset named '" + text + "'");
-            }
+            preset = cardMapPresetFromText(text);  // every host's (card_maps.h)
             if (db.isFlagSet("-name") && db.getFlagArgument("-name", 0, value) == MS::kSuccess) name = value.asChar();
             if (db.isFlagSet("-format") && db.getFlagArgument("-format", 0, value) == MS::kSuccess) settings.format = value.asChar();
             if (db.isFlagSet("-bitDepth")) db.getFlagArgument("-bitDepth", 0, settings.bitDepth);

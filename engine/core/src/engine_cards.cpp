@@ -154,6 +154,8 @@ std::vector<std::string> writeUnityCardMaps(const CardTextures& t, float roughne
     png("BaseColor", 4, baseColor);
     png("Mask", 4, mask);
     png("AO", 1, t.occlusion);
+    // The whole groom's card-to-card occlusion on the cards' second UVs (UV1), when the bake made it.
+    if (t.worldOcclusion.size() == t.occlusion.size() && !t.worldOcclusion.empty()) png("AO_world", 1, t.worldOcclusion);
     png("Tangent", 3, t.tangent);
     png("Depth", 1, t.depth);
     png("Attribute", 4, t.attribute);
@@ -212,7 +214,7 @@ std::string unityFeathersManifestJson(const std::string& objectsJson, const std:
         }
         groups.push_back({{"index", index}, {"object", o["object"]}, {"group", o["group"]}, {"groupId", o["groupId"]},
                           {"feathers", o["feathers"]}, {"strands", o["strands"]},
-                          {"pointsPerStrand", o["pointsPerStrand"].is_null() ? o["maxPoints"] : o["pointsPerStrand"]},
+                          {"pointsPerStrand", o.value("pointsPerStrand", json()).is_null() || o["pointsPerStrand"] == 0 ? o["maxPoints"] : o["pointsPerStrand"]},
                           {"hairInstance", instance}});
     }
     const json manifest = {

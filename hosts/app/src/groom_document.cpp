@@ -233,11 +233,16 @@ std::string GroomDocument::assetFolder(const std::string& kind) const {
     return groomlab::assetFolder(forwardSlashes(groom.parent_path().u8string()), groom.stem().u8string(), kind);
 }
 
+std::string GroomDocument::groomFolder(const std::string& kind) const {
+    // (Saved: groom_package.h groomFileFolder, every host's; untitled: in its temp folder.)
+    return path_.empty() ? assetFolder(kind) + "/" + fileSafeName(displayName()) : groomFileFolder(path_, name_, kind);
+}
+
 std::string GroomDocument::mapsDirectory() const {
     if (path_.empty()) return {};
     // The groom's own folder in masks, as Maya keeps a groom's (masks/<groom>) and Blender a
     // scalp's (masks/<scalp>): groomlab/<name>/masks/<name>.
-    return assetFolder("masks") + "/" + fileSafeName(displayName());
+    return groomFolder("masks");
 }
 
 std::string GroomDocument::textureMapFile(const std::string& name) const {
@@ -325,9 +330,10 @@ std::string GroomDocument::renameMap(const std::string& from, const std::string&
             // The file follows when it is named after the map (scalp_maps.h's renamedMapTexture,
             // Maya's rule), to a free name beside it; a file in the way, or one that cannot move, stays.
             const std::filesystem::path full = std::filesystem::u8path(resolveMapPath(entry.texture));
-            const std::string renamed = renamedMapTexture(full.generic_u8string(), from, to);
+            // (Named after the map, in the groom's maps folder: every host's rule, asset_files.h.)
+            const std::string renamed = renamedMapImage(full.generic_u8string(), from, to, mapsDirectory());
             if (!renamed.empty()) {
-                const std::filesystem::path target = std::filesystem::u8path(freeFilePath(renamed));  // (a file or a tile set: taken)
+                const std::filesystem::path target = std::filesystem::u8path(renamed);  // (a free name: a file or a tile set taken)
                 std::error_code ec;
                 for (const auto& [a, b] : mapImageMoves(full.generic_u8string(), target.generic_u8string())) {  // (a tile set: each tile)
                     if (!ec) std::filesystem::rename(std::filesystem::u8path(a), std::filesystem::u8path(b), ec);
@@ -764,8 +770,7 @@ std::string GroomDocument::addNode(const std::string& type, float x, float y, st
     // Its defaults that measure something fitted to the scalp, as a preset's are.
     const MeshPtr& scalp = file().data.scalp;
     // (At the size the params are at: the groom's 1x when it is scaled with its scalp.)
-    std::optional<double> size = scalp ? presetScalpSize(*scalp) : std::nullopt;
-    if (size) *size /= session().groomScale();
+    const std::optional<double> size = paramScalpSize(scalp.get(), session().groomScale());
     std::string after, refused;
     const std::string error = editGraph("add " + chosen, [&](json& g) {
         GraphEdit edit(g.dump());
@@ -864,23 +869,13 @@ std::string GroomDocument::showInnerParam(const std::string& compound, const std
     if (n->value("type", std::string()) != "Compound") return compound + " is not a Compound";
     const auto dot = target.find('.');
     if (dot == std::string::npos) return "an inner param is \"node.param\" inside the compound";
-    const std::string inner = target.substr(0, dot), param = target.substr(dot + 1);
     const std::vector<std::string> now = shownInnerParams(compound);
     if ((std::find(now.begin(), now.end(), target) != now.end()) == shown) return {};
-    // Named after the param, or node + Param when the compound has a param of that name (Maya's).
-    std::string name = param;
-    if (shown) {
-        if (const json* s = nodeSpec(compound)) {
-            for (const json& p : s->value("params", json::array())) {
-                if (p.value("name", std::string()) == param) name = inner + static_cast<char>(std::toupper(static_cast<unsigned char>(param[0]))) + param.substr(1);
-            }
-        }
-    }
     // The core's (graph_controls.h compoundExpose, compoundUnexpose), as Maya and Blender show and
     // hide an inner param: hidden, its value goes back inside.
     return editGraph((shown ? "show " : "hide ") + target + " on " + compound, [&](json& g) {
         GraphEdit edit(g.dump());
-        if (shown) compoundExpose(edit, compound, name, target);
+        if (shown) compoundExpose(edit, compound, {}, target);  // (named after the param, or node + Param when taken)
         else compoundUnexpose(edit, compound, target);
         g = json::parse(edit.toJson());
     });
@@ -903,24 +898,29 @@ std::string GroomDocument::addControl(const std::string& node, const std::string
 }
 
 std::vector<GroomDocument::ControlSlider> GroomDocument::controlSliders() const {
+    // Every slider the graph reads, compounds' too (the core's controlsJson, as Maya's ctl_
+    // attributes and Blender's controls list them): Control nodes and Expression variables; keyed
+    // params have their keys instead.
     std::vector<ControlSlider> out;
     const std::map<std::string, float>& values = session().data().controls;
-    for (const json& n : graph_.value("nodes", json::array())) {
-        if (n.value("type", std::string()) != "Control") continue;
-        const json params = n.value("params", json::object());
-        ControlSlider c;
-        c.node = n.value("name", std::string());
-        c.name = params.value("name", std::string("control"));
+    const json controls = json::parse(controlsJson(graph_.dump()), nullptr, false);
+    if (!controls.is_object()) return out;
+    for (const auto& [name, c] : controls.items()) {
+        const std::string kind = c.value("kind", std::string());
+        if (kind != "control" && kind != "variable") continue;
         const auto number = [&](const char* key, double fallback) {
-            const auto it = params.find(key);
-            return it != params.end() && it->is_number() ? it->get<double>() : fallback;
+            const auto it = c.find(key);
+            return it != c.end() && it->is_number() ? it->get<double>() : fallback;
         };
-        c.min = number("min", 0.0);
-        c.max = number("max", 1.0);
-        if (!(c.max > c.min)) c.max = c.min + 1.0;
-        const auto set = values.find(c.name);
-        c.value = set != values.end() ? static_cast<double>(set->second) : number("default", 0.0);
-        if (std::none_of(out.begin(), out.end(), [&](const ControlSlider& o) { return o.name == c.name; })) out.push_back(c);
+        ControlSlider slider;
+        slider.node = c.value("node", std::string());
+        slider.name = name;
+        slider.min = number("min", 0.0);
+        slider.max = number("max", 1.0);
+        if (!(slider.max > slider.min)) slider.max = slider.min + 1.0;
+        const auto set = values.find(name);
+        slider.value = set != values.end() ? static_cast<double>(set->second) : number("default", 0.0);
+        out.push_back(slider);
     }
     return out;
 }
@@ -1093,32 +1093,16 @@ std::string GroomDocument::bakeNodeToGuides(const std::string& node, const std::
     if (!(density > 0.0f && density <= 1.0f)) return "the density is above 0, at most 1";
     if (!session().scalp()) return "the groom has no scalp";
     // The node as it is now (the last evaluation's inputs), one guide per strand.
-    GuideSet baked;
+    std::optional<GuideSet> baked;
     try {
-        const Value value = session().evaluateNode(node, density, time_);
-        if (const GuidesPtr* guides = std::get_if<GuidesPtr>(&value); guides && *guides) {
-            baked = **guides;
-        } else if (const StrandsPtr* strands = std::get_if<StrandsPtr>(&value); strands && *strands) {
-            for (std::size_t i = 0; i < (*strands)->strandCount(); ++i) {
-                const Vec3f* p = (*strands)->strandPoints(i);
-                baked.add((*strands)->ids()[i], std::vector<Vec3f>(p, p + (*strands)->strandPointCount(i)));
-            }
-        } else {
-            return node + " gives no guides or strands (nothing to bake)";
-        }
+        baked = guidesOfValue(session().evaluateNode(node, density, time_));  // every host's (graph.h)
     } catch (const std::exception& e) {
         return e.what();
     }
-    if (baked.empty()) return node + " made no guides";
+    if (!baked) return node + " gives no guides or strands (nothing to bake)";
+    if (baked->empty()) return node + " made no guides";
     std::size_t added = 0;
-    const std::string error = editGuides("bake " + node, [&](GuideHierarchy& h) {
-        GroupId gid = h.findGroup(group);
-        if (gid == kNoGroup) gid = h.addGroup(group);
-        else if (h.groupDepth(gid) != 0) throw std::invalid_argument("'" + group + "' is a child group: bake into a root group");
-        const std::vector<GuideId> ids = h.addGuides(gid, baked);
-        for (const GuideId id : ids) h.setPoints(id, h.withGroupSegments(gid, h.guide(id)->points));  // the group's segments, if it has its own
-        added = ids.size();
-    });
+    const std::string error = editGuides("bake " + node, [&](GuideHierarchy& h) { added = h.addBakedGuides(group, *baked).size(); });
     if (error.empty() && count) *count = added;
     return error;
 }
@@ -1309,8 +1293,7 @@ json GroomDocument::libraryInfo(const std::string& node) const {
 std::string GroomDocument::updateLibraryNode(const std::string& node, const std::string& id) {
     if (!nodeJson(node)) return "no node '" + node + "'";
     const MeshPtr& scalp = file().data.scalp;
-    std::optional<double> size = scalp ? presetScalpSize(*scalp) : std::nullopt;
-    if (size) *size /= session().groomScale();
+    const std::optional<double> size = paramScalpSize(scalp.get(), session().groomScale());
     bool changed = false;
     const std::string error = editGraph("update " + node, [&](json& g) {
         GraphEdit edit(g.dump());
@@ -1324,8 +1307,7 @@ std::string GroomDocument::updateLibraryNode(const std::string& node, const std:
 std::string GroomDocument::saveAsNode(const std::string& node, const json& header, std::string* path) {
     if (!nodeJson(node)) return "no node '" + node + "'";
     const MeshPtr& scalp = file().data.scalp;
-    std::optional<double> size = scalp ? presetScalpSize(*scalp) : std::nullopt;
-    if (size) *size /= session().groomScale();
+    const std::optional<double> size = paramScalpSize(scalp.get(), session().groomScale());
     std::string id;
     try {
         const std::string text = nodeFileFromCompound(graph_.dump(), node, header.dump(), size);
@@ -1363,8 +1345,7 @@ std::string GroomDocument::addScriptNode(float x, float y, std::string* made) {
     }
     if (made) *made = chosen;
     const MeshPtr& scalp = file().data.scalp;
-    std::optional<double> size = scalp ? presetScalpSize(*scalp) : std::nullopt;
-    if (size) *size /= session().groomScale();
+    const std::optional<double> size = paramScalpSize(scalp.get(), session().groomScale());
     return editGraph("add " + chosen, [&](json& g) {
         GraphEdit edit(g.dump());
         edit.addNode(op::kScript, chosen, json{{"definition", definition}}.dump(), x, y, size);
@@ -1685,14 +1666,9 @@ std::string GroomDocument::transferToScalp(MeshPtr scalp, const TransferOptions&
             }
             projectScalpMaps(projected, {}, *mapping, files, warnings);
         } else {
-            // Not projected: the vertex maps cannot fit another scalp, so they go; textures stay.
-            for (auto it = projected.maps.begin(); it != projected.maps.end();) {
-                if (it->second.kind == "vertices") {
-                    if (warnings) warnings->push_back("the vertex map " + it->first + " was dropped (not projected)");
-                    it = projected.maps.erase(it);
-                } else {
-                    ++it;
-                }
+            // Not projected: the vertex maps cannot fit another scalp, so they go; textures stay (every host's).
+            for (const std::string& name : dropVertexMaps(projected)) {
+                if (warnings) warnings->push_back("the vertex map " + name + " was dropped (not projected)");
             }
         }
     } catch (const std::exception& e) {
@@ -1726,13 +1702,12 @@ std::string GroomDocument::transferToScalp(MeshPtr scalp, const TransferOptions&
     file.simCaches.clear();  // nor the simulation's bakes (made on the other scalp)
     file.data.followScalp = false;
     // The groom keeps the scale it had (the guides moved as shown): the new scalp is k times its 1x.
-    // Fitting the size: k grows with the area (the new scalp the old one resized).
-    double target = session().groomScale();
-    if (options.fitSize && session().scaleWithScalp()) {
-        const double before = restSurfaceArea(*from), after = restSurfaceArea(*mesh);
-        if (before > 0.0 && after > 0.0) target *= std::sqrt(after / before);
+    // Fitting the size: k grows with the area (the new scalp the old one resized). Not scaled with
+    // its scalp: its reference stays (every host's: groom_transfer.h).
+    if (const auto scale = transferredScale(session().scaleWithScalp(), session().groomScale(), restSurfaceArea(*from),
+                                            restSurfaceArea(*mesh), options.fitSize)) {
+        file.data.scaleReference = scale->reference;
     }
-    file.data.scaleReference = restSurfaceArea(*mesh) / (target * target);
     file.data.scalpFingerprint = mesh->topologyFingerprint();  // the groom is on this scalp now
     try {
         scene_ = std::make_unique<GroomScene>(std::move(file));
@@ -2476,10 +2451,7 @@ void GroomDocument::savedAs(const std::string& path, const GroomFile& written) {
     if (moved) {
         // Relative paths (texture maps) resolve against the new folder first, then where the
         // groom came from and its search paths.
-        std::vector<std::string> dirs{std::filesystem::u8path(path_).parent_path().u8string()};
-        if (!scene_->file().directory.empty()) dirs.push_back(scene_->file().directory);
-        dirs.insert(dirs.end(), scene_->file().searchPaths.begin(), scene_->file().searchPaths.end());
-        session().setPathResolver(searchPathResolver(std::move(dirs)));
+        session().setPathResolver(searchPathResolver(groomFileFolders(scene_->file(), std::filesystem::u8path(path_).parent_path().u8string())));
         paints_.clear();
     }
 }

@@ -891,6 +891,12 @@ std::string MainWindow::lastNodeOfType(const char* type) const {
     return found;
 }
 
+std::string MainWindow::hairColorNode() const {
+    if (!document_) return {};
+    const std::string node = document_->session().stats().hairColor;
+    return node.find('/') == std::string::npos ? node : std::string();
+}
+
 void MainWindow::refreshGroomColor() {
     LookCard::GroomColor color;
     color.node = hairColorNode();

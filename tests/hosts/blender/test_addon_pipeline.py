@@ -140,6 +140,31 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(pipeline.remove_drivers(self.head), 1)
         scene.frame_set(1)
 
+    def test_driver_curves_from_hierarchy_guides(self):
+        """Create Driver on a groom made the default way (guides in the hierarchy, no Guides object):
+        the curves follow the hierarchy's guides, one per guide on each guide's own points."""
+        scene = bpy.context.scene
+        groom.create_groom(bpy.context, self.head, preset="hair_basics", guide_count=12)
+        scene.groomlab.groom = self.head
+        self.head.groomlab.preview_density = 0.1
+        groom.flush()
+        self.assertIsNone(self.head.groomlab.guides)
+        rt = groom.ensure(self.head)
+        g = process.call("get_guides", session=rt.session, source="hierarchy")
+        client = process.client()
+        ids = [int(i) for i in client.array(g["arrays"]["ids"]).ravel()[:3]]
+        roots = client.array(g["arrays"]["points"]).reshape(-1, 3)
+        counts = client.array(g["arrays"]["counts"]).ravel()
+        starts = np.concatenate([[0], np.cumsum(counts)])
+        made = pipeline.create_drivers(self.head, guides=ids, per_guide=True)
+        self.assertEqual(len(made), 3)
+        world = np.array(self.head.matrix_world)
+        for k, obj in enumerate(made):
+            root = roots[int(starts[k])]
+            np.testing.assert_allclose(np.array(obj.location), world[:3, :3] @ root + world[:3, 3], atol=1e-4)
+        self.assertEqual(sorted(int(i) for i in pipeline.driver_bind(self.head)["attached"]), sorted(ids))
+        self.assertEqual(pipeline.remove_drivers(self.head), 3)
+
     def test_colliders_scalps_transfer_and_samples(self):
         groom.create_groom(bpy.context, self.head, preset="hair_basics")
         groom.flush()

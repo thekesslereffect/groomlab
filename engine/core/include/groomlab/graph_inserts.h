@@ -73,6 +73,22 @@ void insertOnLink(GraphEdit& edit, const std::string& src, const std::string& ds
 // and a row below the Guides node. GraphError when no Guides node feeds an Interpolate. Returns the
 // node's name.
 // (After a DriveGuides or GuideCache node posing the guides, when the Guides node feeds one.)
+// Add > Wind / Jiggle (every host's): a node of `type` (Wind, Jiggle) with `paramsJson` over its
+// spec's defaults, just before the output but before the Collide and Cards nodes ending its chain
+// (motionAnchor), so the strands collide where they moved to and the cards (every export and render)
+// take the motion. Returns its name. GraphError without an output.
+std::string insertMotion(GraphEdit& edit, const std::string& type, const std::string& paramsJson = {},
+                         std::optional<double> groomSize = std::nullopt);
+// The node a motion node goes before: the output, or the first of the Collide and Cards nodes
+// ending its strands chain. "" without an output.
+std::string motionAnchor(const GraphEdit& edit);
+// Add > Cards (every host's: Maya's create_cards, the Blender add-on's add_cards, the app's Add >
+// Cards > Hero/Mid/Low): the graph's first Cards node (its own, not a compound's), or with none a
+// Cards node named "cards" with `paramsJson` over its defaults just before the output (the cards
+// made from the whole groom). Returns its name; `made` says whether it is new. GraphError without
+// an output.
+std::string insertCards(GraphEdit& edit, const std::string& paramsJson = {}, std::optional<double> groomSize = std::nullopt,
+                        bool* made = nullptr);
 std::string insertSimulate(GraphEdit& edit, const std::string& paramsJson = {}, std::optional<double> groomSize = std::nullopt);
 
 // Load Guide Cache: a GuideCache node reading `path` (`object`: the Alembic object, "" every one)
@@ -116,9 +132,38 @@ struct ScalpNodes {
 // unchanged, that node returned alone. GraphError for the name "scalp" or none.
 ScalpNodes insertScalp(GraphEdit& edit, const std::string& meshName, std::optional<double> groomSize = std::nullopt);
 
+// Remove > Scalp's graph, every host's (insertScalp undone): the Scalp nodes reading `meshName`
+// and what they alone feed (its Scatter and Interpolate: a node every input of which comes from
+// those, Guides nodes aside), their links gone; a Merge left with its `a` alone passes it through
+// (removed, `a` feeding what it fed, the output moved to it). Whether the graph changed.
+bool removeScalpNodes(GraphEdit& edit, const std::string& meshName);
+// Remove > Collider's graph, every host's (insertCollider undone): the ColliderMesh nodes reading
+// `meshName`; the Collide nodes they feed taken out with the flow kept (their strands pass
+// through), another node they feed reading nothing. Whether the graph changed.
+bool removeColliderNodes(GraphEdit& edit, const std::string& meshName);
+
 // Braid paths and feather shafts are not hair: every Guides node reading all guides (no `group`
 // of its own) gets `group` on its exclude list. Returns whether the graph changed.
 bool excludeFromHairGuides(GraphEdit& edit, const std::string& group);
+
+// Import Alembic Curves as Guides, every host's (Maya's import_guides_from_alembic, the Blender
+// helper's import_alembic_curves, the app's): the graph's "guides" node replaced by an ImportCurves
+// node of that name reading `path` (every curve, or those under `object`, resampled to `samples`
+// points: 0 as read), drawn where the Guides node was, fed the scalp when the graph has a "scalp"
+// node; what fed the old node goes. The graph's JSON back. std::invalid_argument for samples past
+// 0..1024.
+std::string withImportedCurves(const std::string& graphJson, const std::string& path, const std::string& object = {}, int samples = 24);
+
+// ---- Guide groups the graph names --------------------------------------------------------------
+// What reads guide group `group` in the graph (its JSON), every host's "Read by": the (node, param)
+// pairs of the Guides nodes whose group or exclude list names it (words split by spaces or commas,
+// as the Guides node reads them). The graph's own nodes: those inside compounds are not listed
+// (renameGroupReaders does follow a rename into them).
+std::vector<std::pair<std::string, std::string>> groupReaders(const std::string& graphJson, const std::string& group);
+// The graph with every Guides node's group and exclude naming group `from` naming `to` instead,
+// inside compounds' definitions too (a list keeps its other names, joined by spaces). Every host's
+// group rename. `changed` says whether any did (the same text when none did).
+std::string renameGroupReaders(const std::string& graphJson, const std::string& from, const std::string& to, bool* changed = nullptr);
 
 // Add > Braid: a Braid node (its params from `paramsJson`, an object; "" none; `feed` left out:
 // on for a cornrow) right after `after` (""/default: the node "interpolate" when it is an

@@ -566,6 +566,7 @@ def guides_edit(scalp, op, **args):
     after_edit(scalp, groom.scene_of(scalp), r.get("undo"), refresh=True)
     if r.get("guides"):
         _fill_groups(groom.scene_of(scalp), r["guides"], groom_tools(scalp))
+    follow_graph(scalp, r)  # (a group renamed: the Guides nodes naming it follow)
     return r
 
 
@@ -1748,11 +1749,8 @@ def _keys_from_layer(scalp, layer):
     """A layer keyed (or faded as a fix) in the helper but with no Blender fcurve yet (Fix Frame, a
     .groom opened): its keys as Blender keyframes, linear, then sent back as the fcurve says."""
     name = layer["name"]
-    keys = [list(k) for k in layer.get("keys") or []]
-    if not keys and layer.get("frame") is not None and (layer.get("fadeIn") or layer.get("fadeOut")):
-        f = float(layer["frame"])
-        keys = [[f - float(layer.get("fadeIn") or 0.0), 0.0], [f, float(layer.get("weight", 1.0))],
-                [f + float(layer.get("fadeOut") or 0.0), 0.0]]
+    # Its keys, or a fix's fades as the core keys them (correctives.h fadeKeys: its holds kept).
+    keys = [list(k) for k in layer.get("keys") or layer.get("fadeKeys") or []]
     if not keys:
         return False
     fc = None

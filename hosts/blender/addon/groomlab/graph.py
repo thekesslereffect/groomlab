@@ -523,8 +523,10 @@ def unexpose_param(scalp, node, param):
 
 
 def compound_expose(scalp, compound, name, target):
-    """Show a Compound's inner param `target` ("node.param") on its panel as `name`."""
-    return _author(scalp, op="compound_expose", name=compound, param=name, target=target)
+    """Show a Compound's inner param `target` ("node.param") on its panel as `name` ("": named after
+    the param, or node + Param when the compound has that name already: the core's)."""
+    args = {"param": name} if name else {}
+    return _author(scalp, op="compound_expose", name=compound, target=target, **args)
 
 
 def compound_unexpose(scalp, compound, target):

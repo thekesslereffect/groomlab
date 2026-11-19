@@ -681,7 +681,9 @@ private:
     // The look card's groom color: the last HairColor node's melanin, redness and roughness (the
     // last node of `type`, nearest the output in flow order).
     std::string lastNodeOfType(const char* type) const;
-    std::string hairColorNode() const { return lastNodeOfType("HairColor"); }
+    // The HairColor node the look comes from (the core's GroomStats::hairColor: the one making the
+    // output, as Maya and Blender edit it); "" without one or for one inside a compound (edited there).
+    std::string hairColorNode() const;
     void refreshGroomColor();
     void refreshGroups();  // the brush panel's group list and the guides panel
     void refreshUndoActions();

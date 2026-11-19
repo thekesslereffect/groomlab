@@ -42,10 +42,7 @@ std::string titleOf(const json& preset, const std::string& fallback) {
 
 std::optional<double> scalpSizeOf(const GroomDocument& document) {
     // At the size the params are at: the groom's 1x when it is scaled with its scalp.
-    const MeshPtr& scalp = document.file().data.scalp;
-    std::optional<double> size = scalp ? presetScalpSize(*scalp) : std::nullopt;
-    if (size) *size /= document.session().groomScale();
-    return size;
+    return paramScalpSize(document.file().data.scalp.get(), document.session().groomScale());
 }
 
 QString appResourceDir() {
@@ -241,8 +238,19 @@ std::string graphAsText(const GroomDocument& document) {
 
 std::string pasteGraphText(GroomDocument& document, const std::string& text, PresetApplied* applied) {
     if (text.find_first_not_of(" \t\r\n") == std::string::npos) return "the clipboard is empty";
-    const std::string error = applyPresetText(document, text, false, applied);
-    return error.empty() ? error : "cannot paste the graph: " + error;
+    // Every host's paste checks (presets.h pastedGraphFromText): the graph whole, network paths out.
+    PastedGraph pasted;
+    try {
+        pasted = pastedGraphFromText(text);
+    } catch (const std::invalid_argument& e) {
+        return std::string("cannot paste the graph: ") + e.what();
+    }
+    PresetApplied done;
+    const std::string error = applyPresetText(document, pasted.presetJson, false, &done);
+    if (!error.empty()) return "cannot paste the graph: " + error;
+    done.removed = std::move(pasted.removed);
+    if (applied) *applied = std::move(done);
+    return {};
 }
 
 std::string presetMessage(const PresetApplied& a) {
@@ -259,6 +267,18 @@ std::string presetMessage(const PresetApplied& a) {
     if (!a.groupsMade.empty()) {
         text += ", made the guide group" + std::string(a.groupsMade.size() == 1 ? " " : "s ");
         for (std::size_t i = 0; i < a.groupsMade.size(); ++i) text += (i ? ", " : "") + a.groupsMade[i];
+    }
+    if (!a.removed.empty()) {
+        text += ", left out " + std::to_string(a.removed.size()) + (a.removed.size() == 1 ? " file" : " files") + " on another machine (";
+        std::size_t i = 0;
+        for (const auto& [label, path] : a.removed) {
+            if (i == 3) {
+                text += ", ...";
+                break;
+            }
+            text += (i++ ? ", " : "") + label;
+        }
+        text += ")";
     }
     return text;
 }

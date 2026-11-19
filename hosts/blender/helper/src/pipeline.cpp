@@ -31,6 +31,7 @@
 #include "groomlab/flow.h"
 #include "groomlab/frame_time.h"
 #include "groomlab/gltf_writer.h"
+#include "groomlab/graph_inserts.h"
 #include "groomlab/graph_edit.h"
 #include "groomlab/graph_io.h"
 #include "groomlab/groom_file.h"
@@ -216,11 +217,7 @@ MeshOut scalesMesh(const ScaleMesh& sm, const std::string& key) {
     m.points = sm.points;
     const std::size_t faces = sm.triangleCount();
     m.faceCounts.assign(faces, 3);
-    std::vector<std::uint32_t> owner(faces, 0);
-    for (std::size_t k = 0; k < sm.scales.size(); ++k) {
-        const ScaleMesh::Scale& sc = sm.scales[k];
-        for (std::uint32_t f = sc.firstTriangle; f < sc.firstTriangle + sc.triangleCount && f < faces; ++f) owner[f] = static_cast<std::uint32_t>(k);
-    }
+    const std::vector<std::uint32_t> owner = sm.triangleOwners();  // every host's (scales.h)
     std::vector<float>& scaleUV = m.uvSets["scaleUV"];
     std::vector<float>& scaleData = m.uvSets["scaleData"];
     std::vector<float>& color = m.colors["scaleColor"];
@@ -366,21 +363,15 @@ json exportGltfCards(Session& s, const json& args) {
     const std::string path = needString(args, "path");
     const std::string ext = fs::u8path(path).extension().u8string();
     const bool binary = optBool(args, "binary", ext != ".gltf");
-    std::string name = optString(args, "name", fs::u8path(path).stem().u8string());
-    if (name.empty()) name = "groom";
+    const std::string name = exportObjectName(optString(args, "name", fs::u8path(path).stem().u8string()));  // every host's
     int resolution = static_cast<int>(optNumber(args, "resolution", 0.0));
     resolution = resolution > 0 ? std::clamp(resolution, kMinBakeResolution, kMaxCardBakeResolution) : 0;  // 0: the Cards nodes' atlasSize
     const int capResolution = static_cast<int>(optNumber(args, "capResolution", 0.0));
     CardGltfSettings settings;
-    const std::string alpha = optString(args, "alphaMode", "mask");
-    if (alpha == "mask") {
-        settings.alphaMode = GltfMaterial::AlphaMode::Mask;
-    } else if (alpha == "blend") {
-        settings.alphaMode = GltfMaterial::AlphaMode::Blend;
-    } else if (alpha == "opaque") {
-        settings.alphaMode = GltfMaterial::AlphaMode::Opaque;
-    } else {
-        fail("bad_request", "alphaMode is mask, blend or opaque");
+    try {
+        settings.alphaMode = gltfAlphaModeNamed(optString(args, "alphaMode", "mask"));  // every host's (gltf_writer.h)
+    } catch (const std::invalid_argument& e) {
+        fail("bad_request", e.what());
     }
     settings.alphaCutoff = static_cast<float>(optNumber(args, "alphaCutoff", 0.5));
     settings.scale = static_cast<float>(optNumber(args, "scale", 0.01));  // groom space's centimeters to glTF's meters
@@ -719,23 +710,13 @@ json exportUnityFeathers(Session& s, const json& args) {
 // ---- The groom as a mesh (Maya's to_mesh, ToMesh nodes) -------------------------------------------
 
 StrandMeshOptions meshOptions(const json& args) {
-    StrandMeshOptions o;
-    const std::string make = optString(args, "make", "auto");
-    if (make == "strands") o.make = StrandMeshOptions::Make::Strands;
-    else if (make == "scales") o.make = StrandMeshOptions::Make::Scales;
-    else if (make == "feathers") o.make = StrandMeshOptions::Make::Feathers;
-    else if (make == "cards") o.make = StrandMeshOptions::Make::Cards;
-    else if (make == "instances") o.make = StrandMeshOptions::Make::Instances;
-    else if (make != "auto") fail("bad_request", "make is auto, strands, scales, feathers, cards or instances");
-    const std::string style = optString(args, "style", "tube");
-    if (style != "tube" && style != "ribbon") fail("bad_request", "style is tube or ribbon");
-    o.style = style == "tube" ? StrandMeshOptions::Style::Tube : StrandMeshOptions::Style::Ribbon;
-    o.sides = static_cast<int>(optNumber(args, "sides", 4));
-    if (o.sides < 3) fail("bad_request", "sides must be 3 or more");
-    o.widthScale = static_cast<float>(optNumber(args, "widthScale", 1.0));
-    o.minWidth = static_cast<float>(optNumber(args, "minWidth", 0.0));
-    o.strandUVs = optBool(args, "strandUVs", false);
-    return o;
+    try {  // every host's (strand_geometry.h)
+        return strandMeshOptionsFrom(optString(args, "make", "auto"), optString(args, "style", "tube"),
+                                     static_cast<int>(optNumber(args, "sides", 4)), optNumber(args, "widthScale", 1.0),
+                                     optNumber(args, "minWidth", 0.0), optBool(args, "strandUVs", false));
+    } catch (const std::invalid_argument& e) {
+        fail("bad_request", e.what());
+    }
 }
 
 MeshOut strandMeshOut(const StrandSet& strands, const ScalpMesh* scalp, const StrandMeshOptions& options, const std::string& key,
@@ -789,27 +770,16 @@ json strandMesh(Session& s, const json& args) {
         if (!view.errors.empty()) fail("evaluation", view.errors.front());
         if (!view.strands) fail("evaluation", "the groom gave no strands");
         const StrandSet& all = *view.strands;
-        const double most = optNumber(args, "maxStrands", 100000.0);
+        const double most = optNumber(args, "maxStrands", static_cast<double>(kDefaultMeshStrands));
         if (most < 1.0) fail("bad_request", "maxStrands must be 1 or more");
-        // Scales, feathers, cards and instances whole (they are the strand set's); tubes thinned.
-        const bool whole = resolveMeshMake(all, options) != StrandMeshOptions::Make::Strands;
-        const std::vector<std::size_t> keep = thinStrandsById(all, whole ? all.strandCount() : static_cast<std::size_t>(most));
-        StrandSet kept;
-        const StrandSet* strands = &all;
-        if (keep.size() < all.strandCount()) {
-            for (const std::size_t i : keep) {
-                const Vec3f* p = all.strandPoints(i);
-                const std::size_t n = all.strandPointCount(i);
-                std::vector<float> w;
-                if (all.widths().size() == all.pointCount()) w.assign(all.widths().begin() + all.strandBegin(i), all.widths().begin() + all.strandBegin(i) + n);
-                kept.addStrand(all.ids()[i], std::vector<Vec3f>(p, p + n), w, i < all.roots().size() ? all.roots()[i] : StrandRoot{});
-            }
-            strands = &kept;
-        }
-        meshes.push_back(strandMeshOut(*strands, scalpOf(s, view).get(), options, "strands", sessionPrototypes(s)));
-        r["strands"] = keep.size();
+        // Scales, feathers, cards and instances whole; tubes thinned (every host's: strand_geometry.h).
+        const std::optional<StrandSet> thinned = strandsForMesh(all, options, static_cast<std::size_t>(most));
+        const StrandSet& strands = thinned ? *thinned : all;
+        meshes.push_back(strandMeshOut(strands, scalpOf(s, view).get(), options, "strands", sessionPrototypes(s)));
+        const std::size_t made = strands.strandCount();
+        r["strands"] = made;
         r["total"] = all.strandCount();
-        r["capped"] = keep.size() < all.strandCount();
+        r["capped"] = made < all.strandCount();
     }
     r["meshes"] = putMeshes(s, meshes, groomSpaceOf(args));
     return r;
@@ -1367,14 +1337,7 @@ json transfer(Session& s, const json& args, BlockReader& blocks) {
                 };
                 for (const std::string& name : projectScalpMaps(maps, {}, *mapping, files, &warnings)) projected.push_back(name);
             } else {
-                for (auto it = maps.maps.begin(); it != maps.maps.end();) {
-                    if (it->second.kind == "vertices") {
-                        missing.push_back(it->first);
-                        it = maps.maps.erase(it);
-                    } else {
-                        ++it;
-                    }
-                }
+                for (const std::string& name : dropVertexMaps(maps)) missing.push_back(name);  // every host's (groom_transfer.h)
             }
             texts.emplace_back(StrokeField::ScalpMaps, maps.maps.empty() ? std::string() : maps.toJson());
         }
@@ -1394,11 +1357,8 @@ json transfer(Session& s, const json& args, BlockReader& blocks) {
     TransferState after = before;
     after.scalp = to;
     after.fingerprint = to->topologyFingerprint();
-    if (scaling && k > 0.0) {
-        double target = k;
-        const double oldArea = restSurfaceArea(*from), newArea = restSurfaceArea(*to);
-        if (fitSize && oldArea > 0.0 && newArea > 0.0) target *= std::sqrt(newArea / oldArea);
-        if (newArea > 0.0) after.scaleReference = newArea / (target * target);
+    if (const auto scale = transferredScale(scaling, k, restSurfaceArea(*from), restSurfaceArea(*to), fitSize)) {
+        after.scaleReference = scale->reference;  // every host's (groom_transfer.h)
     }
     after.caches.scalpCache = {};
     after.caches.guideCache = {};
@@ -1563,30 +1523,14 @@ json bakeToGuides(Session& s, const json& args) {
     } catch (const std::exception& e) {
         fail("graph", e.what());
     }
-    GuideSet baked;
-    if (const GuidesPtr* guides = std::get_if<GuidesPtr>(&value); guides && *guides) {
-        baked = **guides;
-    } else if (const StrandsPtr* strands = std::get_if<StrandsPtr>(&value); strands && *strands) {
-        for (std::size_t i = 0; i < (*strands)->strandCount(); ++i) {  // one guide per strand
-            const Vec3f* p = (*strands)->strandPoints(i);
-            baked.add((*strands)->ids()[i], std::vector<Vec3f>(p, p + (*strands)->strandPointCount(i)));
-        }
-    } else {
-        fail("state", "node '" + node + "' does not output guides or strands (nothing to bake)");
-    }
-    if (baked.empty()) fail("state", "node '" + node + "' made no guides");
+    const std::optional<GuideSet> baked = guidesOfValue(value);  // every host's (graph.h)
+    if (!baked) fail("state", "node '" + node + "' does not output guides or strands (nothing to bake)");
+    if (baked->empty()) fail("state", "node '" + node + "' made no guides");
     const HierarchyPtr authored = s.groom->authoredHierarchy();
     GuideHierarchy h = authored ? *authored : GuideHierarchy{};
     std::vector<GuideId> added;
     try {
-        GroupId gid = h.findGroup(group);
-        if (gid == kNoGroup) {
-            gid = h.addGroup(group);
-        } else if (h.groupDepth(gid) != 0) {
-            fail("bad_request", "'" + group + "' is a child group: bake into a root group");
-        }
-        added = h.addGuides(gid, baked);
-        for (const GuideId id : added) h.setPoints(id, h.withGroupSegments(gid, h.guide(id)->points));  // the group's segments, if it has its own
+        added = h.addBakedGuides(group, *baked);  // every host's (guide_hierarchy.h)
         h.evaluate(scalp.get());
     } catch (const RequestError&) {
         throw;
@@ -1621,26 +1565,8 @@ json importAlembicCurves(Session& s, const json& args) {
 #else
     fail("unsupported", "this helper was built without Alembic");
 #endif
-    json graph = json::parse(graphTextOf(s));
-    json nodes = json::array();
-    bool hasScalp = false;
-    for (const json& n : graph.value("nodes", json::array())) {
-        if (n.value("name", std::string()) == "guides") continue;
-        hasScalp = hasScalp || n.value("name", std::string()) == "scalp";
-        nodes.push_back(n);
-    }
-    json params = {{"path", path}, {"samples", static_cast<std::int64_t>(std::lround(samples))}};
-    if (!object.empty()) params["object"] = object;
-    json made = {{"name", "guides"}, {"type", "ImportCurves"}, {"params", params}};
-    for (const json& n : graph.value("nodes", json::array()))  // where the Guides node was drawn
-        if (n.value("name", std::string()) == "guides" && n.contains("ui")) made["ui"] = n["ui"];
-    nodes.push_back(made);
-    graph["nodes"] = nodes;
-    json connections = json::array();
-    for (const json& c : graph.value("connections", json::array()))
-        if (c.value("to", std::string()) != "guides") connections.push_back(c);
-    if (hasScalp) connections.push_back({{"from", "scalp"}, {"to", "guides"}, {"input", "scalp"}});
-    graph["connections"] = connections;
+    // Every host's graph rewrite (graph_inserts.h withImportedCurves).
+    const json graph = json::parse(withImportedCurves(graphTextOf(s), path, object, static_cast<int>(std::lround(samples))));
     try {
         s.groom->setGraphJson(graph.dump());
     } catch (const std::exception& e) {

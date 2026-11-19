@@ -167,10 +167,8 @@ class GROOMLAB_OT_graph_show_inner(_NodeOp):
             if self.target_param in shown_inner(node):
                 graph.compound_unexpose(scalp, node.gl_name, self.target_param)
             else:
-                inner, _, param = self.target_param.partition(".")
-                taken = {p["name"] for p in graph_tree.node_param_specs(node)}
-                name = param if param not in taken else inner + param[:1].upper() + param[1:]
-                graph.compound_expose(scalp, node.gl_name, name, self.target_param)
+                # Named after the param, or node + Param when taken: the core's (graph_controls.h).
+                graph.compound_expose(scalp, node.gl_name, "", self.target_param)
         except HelperError as e:
             return _fail(self, e)
         _settle(scalp)
@@ -1098,23 +1096,30 @@ def copy_text(scalp):
                         description="Copied from %s (GroomLab for Blender)" % scalp.name, controls=values)["text"]
 
 
-def parse_text(text):
+def parse_text(text, removed=None):
     """The preset a pasted text holds (JSON only, never run): the core's checks, every host's
-    (presets.h presetFromText through the helper: a ``` block, a .groom's graph, the limits, the
-    shape, the node types, the params against their specs). ValueError saying why otherwise."""
+    (presets.h pastedGraphFromText through the helper: a ``` block, a .groom's graph, the limits,
+    the shape, the node types, the params against their specs, the graph whole), params naming
+    files on other machines taken out (`removed`, a dict: "node.param" -> path of those). ValueError
+    saying why otherwise."""
     if not isinstance(text, str) or not text.strip():
         raise ValueError("cannot paste a graph: the clipboard is empty")
     try:
-        return process.call("preset_from_text", text=text)["preset"]
+        r = process.call("preset_from_text", text=text, paste=True)
     except HelperError as e:
         raise ValueError("cannot paste a graph: %s" % e.message)
+    if removed is not None:
+        removed.update(r.get("removed") or {})
+    return r["preset"]
 
 
 def paste_text(scalp, text):
     """Replace the groom's graph with a look copied as text (copy_text, or a preset's JSON): fitted
     to this scalp (from its "size"), its layout, backdrops and control values: the helper applies it
-    as a preset. Returns the helper's answer (nodes, fitFactor, missingMaps)."""
-    data = parse_text(text)
+    as a preset. Returns the helper's answer (nodes, fitFactor, missingMaps) and "removed" ("node.param":
+    path of the params naming files on other machines, taken out)."""
+    removed = {}
+    data = parse_text(text, removed)
     rt = groom.ensure(scalp)
     fd, path = tempfile.mkstemp(prefix="groomlab_paste_", suffix=".json")
     try:
@@ -1135,6 +1140,7 @@ def paste_text(scalp, text):
         graph.set_backdrops(scalp, data["backdrops"])
         graph_tree.rebuild(scalp, replaced=True)
     groom.mark(scalp, "eval")
+    r["removed"] = removed
     return r
 
 
@@ -1178,6 +1184,8 @@ class GROOMLAB_OT_graph_paste(_Op):
             return _fail(self, e)
         missing = [m["name"] for m in r.get("missingMaps", [])]
         note = " It reads maps this groom has not painted: %s." % ", ".join(missing) if missing else ""
+        if r.get("removed"):
+            note += " Left out files on another machine: %s." % ", ".join(sorted(r["removed"]))
         self.report({"INFO"}, "Pasted a graph of %d nodes (Ctrl+Z undoes it).%s" % (r.get("nodes", 0), note))
         if _ge().editor_tree(context) is not None:
             bpy.ops.node.view_all()

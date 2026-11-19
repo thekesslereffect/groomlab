@@ -40,6 +40,7 @@ struct GltfTexture {
 
 struct GltfMaterial {
     enum class AlphaMode { Opaque, Mask, Blend };
+
     std::string name;
     std::array<float, 4> baseColorFactor{1.0f, 1.0f, 1.0f, 1.0f};
     int baseColorTexture = -1;          // an index into GltfDocument::textures; -1: none
@@ -55,6 +56,10 @@ struct GltfMaterial {
     bool doubleSided = true;
     std::string extrasJson;             // a JSON object for the material's "extras" ("" : none)
 };
+
+// A glTF cards export's alphaMode as every host takes it: "mask", "blend" or "opaque". Throws
+// std::invalid_argument for anything else.
+GltfMaterial::AlphaMode gltfAlphaModeNamed(const std::string& name);
 
 struct GltfPrimitive {
     std::vector<Vec3f> positions;

@@ -325,8 +325,7 @@ MStatus ScalpMapsCmd::doIt(const MArgList& args) {
                         std::any_of(maps.maps.begin(), maps.maps.end(), [&](const auto& m) {
                             return m.second.kind == "texture" && sameFile(resolve(m.second.texture), file);
                         }));
-                    const bool ours = insideFolder(file, assetFolder("masks") + "/" + assetName(groomPath));
-                    if (db.isFlagSet(kDeleteFile[0]) && !file.empty() && !shared && ours && fileStamp(file) != 0) {
+                    if (db.isFlagSet(kDeleteFile[0]) && mapImageDeletable(file, assetFolder("masks") + "/" + assetName(groomPath), shared)) {
                         for (FileState& tile : mapImageStates(file)) {
                             if (tile.before) deleted_.push_back(std::move(tile));  // (after: none)
                         }

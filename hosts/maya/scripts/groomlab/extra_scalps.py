@@ -173,44 +173,13 @@ def remove_scalp(groom, name):
             for source in cmds.listConnections(element + plug, source=True, destination=False, plugs=True) or []:
                 cmds.disconnectAttr(source, element + plug)
         cmds.removeMultiInstance(element, b=True)
+    # The graph: its Scalp nodes and what they alone feed, a Merge left alone passing through (every
+    # host's: graph_inserts.h removeScalpNodes).
     model = gm.GraphModel.from_groom(groom)
-    names = {s["name"] for s in found}
-    readers = [n for n in model.order if model.node_type(n) == "Scalp" and model.param(n, "input") in names]
-    if not readers:
-        return True
-    doomed = set(readers)
-    # What the readers alone feed (a Scatter, its Interpolate): every input of theirs from doomed nodes or none.
-    grew = True
-    while grew:
-        grew = False
-        for n in model.order:
-            if n in doomed or model.node_type(n) in ("Merge", "Output", "Guides"):
-                continue
-            feeders = {c["from"] for c in model.connections if c["to"] == n}
-            if feeders and feeders <= doomed | {g for g in model.order if model.node_type(g) == "Guides"} \
-                    and feeders & doomed:
-                doomed.add(n)
-                grew = True
-    merges = set()
-    for n in list(doomed):
-        for consumer, port in list(model.downstream_of(n)):
-            if consumer in doomed:
-                continue
-            model.disconnect(consumer, port)
-            if model.node_type(consumer) == "Merge" and port == "b":
-                merges.add(consumer)
-    for n in doomed:
-        model.remove_node(n)
-    # A Merge left with its a alone (the one add_scalp made): taken out, a feeding what it fed.
-    for merge in merges:
-        if model.source_of(merge, "b") is not None:
-            continue
-        upstream = model.source_of(merge, "a")
-        for to, port in list(model.downstream_of(merge)):
-            if upstream:
-                model.connect(upstream, to, port)
-        if model.output == merge and upstream:
-            model.set_output(upstream)
-        model.remove_node(merge)
-    model.save(groom)
+    edit = model._edit()
+    with gm._core_errors():
+        changed = [edit.remove_scalp_nodes(s["name"]) for s in found]
+    if any(changed):
+        model._take(edit)
+        model.save(groom)
     return True

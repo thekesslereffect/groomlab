@@ -8,6 +8,8 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+
 #include "groomlab/export_view.h"
 #include "groomlab/groom_session.h"
 #include "groomlab/renderman_look.h"
@@ -143,6 +145,17 @@ TEST(RenderManLook, PrimvarsCoverTheStrandsAndTheLook) {
     EXPECT_EQ(p.at("rman_color")->detail, Detail::Vertex);
     EXPECT_LT(p.at("rman_color")->floats[3 * 2], p.at("rman_color")->floats[3 * 1]);  // darker where wet
     EXPECT_FLOAT_EQ(p.at("rman_rgbShare")->floats[1], 1.0f);
+}
+
+TEST(RendermanLook, TheHairNetworkAsEveryHostWritesIt) {
+    // renderman_look.h hairNetworkRib: the app's render and Maya's prman_scene write it; handles
+    // prefixed, the highlight's offset minus the tilt.
+    const std::string rib = renderman::hairNetworkRib("hair_", 3.0f, "  ");
+    EXPECT_NE(rib.find("  Pattern \"PxrPrimvar\" \"hair_pv_melanin\""), std::string::npos);
+    EXPECT_NE(rib.find("\"float defaultFloat\" [1.75]"), std::string::npos);
+    EXPECT_NE(rib.find("Bxdf \"PxrMarschnerHair\" \"hair_hair\""), std::string::npos);
+    EXPECT_NE(rib.find("\"float specularOffset\" [-3]"), std::string::npos);
+    EXPECT_EQ(std::count(rib.begin(), rib.end(), '\n'), 16);  // 10 readers, 2 colors, 3 mixes, the Bxdf
 }
 
 }  // namespace

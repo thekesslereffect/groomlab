@@ -170,6 +170,10 @@ std::string groomFileToJson(const GroomFile& file);
 // (`directory`, or the file's own: GroomFile::directory) and then its search paths, the first
 // that exists (else the folder's join; with neither, as stored).
 std::string resolveGroomPath(const GroomFile& file, const std::string& stored, const std::string& directory = {});
+// The folders a groom file's relative paths resolve from, every host's resolver for it: `first`
+// when given (where the groom was saved to since), the folder the file was read from, then its
+// search paths; empty ones and repeats left out.
+std::vector<std::string> groomFileFolders(const GroomFile& file, const std::string& first = {});
 // The "simCaches" object alone as text, and back (Maya keeps it in a groom's simCaches attribute,
 // paths relative to the scene): relative paths join `baseDir` (empty: kept as they are). Blank
 // text is no bakes; throws GroomFileError for text that is not such an object.

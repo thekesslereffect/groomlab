@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "groomlab/groom_transfer.h"
 
+#include <cmath>
 #include <stdexcept>
 
 #include "groomlab/flow.h"
@@ -47,6 +48,28 @@ GroomTransferTexts transferGroomTexts(const std::string& hierarchyJson, const st
         warnings->push_back(std::to_string(mapping.uvMisses()) + " roots found no matching UV on the new scalp and went to the closest point");
     }
     return out;
+}
+
+std::optional<TransferredScale> transferredScale(bool scaling, double groomScale, double oldArea, double newArea, bool fitSize) {
+    if (!scaling || !(groomScale > 0.0) || !(newArea > 0.0)) return std::nullopt;
+    TransferredScale out;
+    out.scale = groomScale;
+    if (fitSize && oldArea > 0.0) out.scale *= std::sqrt(newArea / oldArea);
+    out.reference = newArea / (out.scale * out.scale);
+    return out;
+}
+
+std::vector<std::string> dropVertexMaps(ScalpMaps& maps) {
+    std::vector<std::string> dropped;
+    for (auto it = maps.maps.begin(); it != maps.maps.end();) {
+        if (it->second.kind == "vertices") {
+            dropped.push_back(it->first);
+            it = maps.maps.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    return dropped;  // (the maps' order: by name)
 }
 
 }  // namespace groomlab

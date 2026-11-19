@@ -1020,13 +1020,15 @@ class GraphModel(object):
         return name
 
     def expose(self, compound, name, target):
-        """Show an inner param ("node.param") as the compound param `name` (the core's
-        graph_controls.h compoundExpose, every host's)."""
+        """Show an inner param ("node.param") as the compound param `name` ("": named after the param,
+        or node + Param when the compound has that name: the core's graph_controls.h compoundExpose,
+        every host's). Returns the name."""
         self._node(compound)
         edit = self._edit()
         with _core_errors():
-            edit.compound_expose(compound, name, target)
+            made = edit.compound_expose(compound, name or "", target)
         self._take(edit)
+        return made
 
     def unexpose(self, compound, target):
         """Stop showing inner param `target` ("node.param") on the compound (its value inside stays

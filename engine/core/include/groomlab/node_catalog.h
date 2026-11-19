@@ -52,5 +52,9 @@ const std::vector<std::string>& builtinNodeTypes();
 // A type's display label: its info's, else its CamelCase spaced ("BlendNeighbors" -> "Blend
 // Neighbors").
 std::string nodeLabel(const std::string& type);
+// A param's display label, every host's (Maya's and Blender's pretty): its camelCase as words, the
+// first capitalized, the rest lower case but for words all in capitals ("guideRadius" -> "Guide
+// radius", "rootUV" -> "Root UV"); underscores as spaces.
+std::string paramLabel(const std::string& name);
 
 }  // namespace groomlab

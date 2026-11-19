@@ -52,6 +52,7 @@
 #include "groomlab/feathers.h"
 #include "groomlab/groom_file.h"
 #include "groomlab/guide_selection.h"
+#include "groomlab/engine_cards.h"
 #include "groomlab/parallel.h"
 #include "groomlab/png.h"
 #include "groomlab/random.h"
@@ -2598,38 +2599,8 @@ std::vector<std::string> GroomShape::bakeCards(const std::string& directory, con
     const CardTextures& t = bake.textures;
     const std::string base = freeBakeBase(thisMObject(), directory, requestedBase);
     std::vector<std::string> paths;
-    if (layout == "unity") {  // an export: PNGs laid out for Unity's materials, never shown by the groom
-        const std::size_t n = static_cast<std::size_t>(t.size) * static_cast<std::size_t>(t.size);
-        const auto smoothness = static_cast<std::uint8_t>(std::lround(255.0f * (1.0f - hairLook().roughness)));
-        std::vector<std::uint8_t> baseColor(4 * n), mask(4 * n);
-        for (std::size_t i = 0; i < n; ++i) {
-            baseColor[4 * i] = t.color[3 * i];
-            baseColor[4 * i + 1] = t.color[3 * i + 1];
-            baseColor[4 * i + 2] = t.color[3 * i + 2];
-            baseColor[4 * i + 3] = t.coverage[i];
-            mask[4 * i] = t.iridescence.size() == n ? t.iridescence[i] : 0;  // metallic: none; the iridescence, if any
-            mask[4 * i + 1] = t.occlusion[i];          // ambient occlusion
-            mask[4 * i + 2] = t.attribute[4 * i + 3];  // root (0) to tip (1), in the detail mask's slot
-            mask[4 * i + 3] = smoothness;              // 1 - the hair look's roughness
-        }
-        const std::vector<std::uint8_t> normal = cardNormalOpenGl(t);  // Unity's green: OpenGL's
-        // Encoded side by side (writeCompressedPngs: the bytes of one at a time).
-        std::vector<PngImage> images;
-        auto png = [&](const char* map, int channels, const std::vector<std::uint8_t>& pixels) {
-            paths.push_back(directory + "/" + base + "_" + map + ".png");
-            images.push_back({t.size, t.size, channels, &pixels});
-        };
-        png("BaseColor", 4, baseColor);
-        png("Mask", 4, mask);
-        png("AO", 1, t.occlusion);
-        png("AO_world", 1, t.worldOcclusion);
-        png("Tangent", 3, t.tangent);
-        png("Depth", 1, t.depth);
-        png("Attribute", 4, t.attribute);
-        png("Normal", 3, normal);
-        writeCompressedPngs(paths, images);
-        return paths;
-    }
+    // An export: PNGs laid out for Unity's materials (every host's engine_cards.h), never shown by the groom.
+    if (layout == "unity") return writeUnityCardMaps(t, hairLook().roughness, directory, base);
     // Unreal's hair card maps and the atlas, as every host writes them (card_files.h); the app's
     // preview is made when the groom is exported for it.
     const CardBakePaths at = CardBakePaths::in(directory, base);
@@ -2676,23 +2647,7 @@ std::vector<std::string> GroomShape::bakeScalp(const std::string& directory, con
     if (layout != "unreal" && layout != "unity") throw std::runtime_error("the layout is unreal or unity, not " + layout);
     ScalpTextures t = bakeScalpInMemory(resolution, reach, density, nullptr);
     const std::string base = freeBakeBase(thisMObject(), directory, requestedBase);
-    if (layout == "unity") {
-        const std::size_t n = static_cast<std::size_t>(t.size) * static_cast<std::size_t>(t.size);
-        std::vector<std::uint8_t> baseColor(4 * n);
-        for (std::size_t i = 0; i < n; ++i) {
-            baseColor[4 * i] = t.color[3 * i];
-            baseColor[4 * i + 1] = t.color[3 * i + 1];
-            baseColor[4 * i + 2] = t.color[3 * i + 2];
-            baseColor[4 * i + 3] = t.coverage[i];
-        }
-        const std::string path = directory + "/" + base + "_ScalpBaseColor.png";
-        writeCompressedPng(path, t.size, t.size, 4, baseColor);
-        return {path};
-    }
-    std::vector<std::string> paths{directory + "/" + base + "_ScalpColor.tga", directory + "/" + base + "_ScalpCoverage.tga"};
-    parallelInvoke([&] { writeTga(paths[0], t.size, t.size, 3, t.color); },
-                   [&] { writeTga(paths[1], t.size, t.size, 1, t.coverage); });
-    return paths;
+    return writeScalpCapMaps(t, layout == "unity", directory, base);  // every host's (engine_cards.h)
 }
 
 std::string GroomShape::graphStatsJson() {

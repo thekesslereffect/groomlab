@@ -9,6 +9,7 @@
 
 #include "groomlab/brush.h"
 #include "groomlab/correctives.h"
+#include "groomlab/groom_transfer.h"
 #include "groomlab/guide_hierarchy.h"
 #include "groomlab/guide_selection.h"
 #include "groomlab/root_tubes.h"
@@ -223,6 +224,23 @@ void bindHierarchy(py::module_& m) {
         "The closed curve through a custom shape's control points, as sampled (not checked or fitted): what an "
         "editor draws while points move.");
     m.def(
+        "mirrored_section_points",
+        [](const std::vector<std::pair<float, float>>& points) { return pairsOf(mirroredSectionPoints(sectionPoints(points))); },
+        py::arg("points"), "The points made symmetric about the v axis from their right side (tube.h: every host's Mirror).");
+    m.def(
+        "mirror_partners",
+        [](const std::vector<std::pair<float, float>>& points) {
+            py::list out;
+            for (const int m : mirrorPartners(sectionPoints(points))) out.append(m < 0 ? py::object(py::none()) : py::object(py::int_(m)));
+            return out;
+        },
+        py::arg("points"), "Each point's mirror image's index (its own on the axis; None when it has none), tube.h.");
+    m.attr("MIRROR_AXIS") = kMirrorAxis;
+    m.def("root_tube_color", [](std::size_t k) { const auto c = rootTubeColor(k); return py::make_tuple(c[0], c[1], c[2]); },
+          py::arg("k"), "Root tube k's color, as every host draws it (guide_hierarchy.h rootTubeColor).");
+    m.def("free_tube_shape_name", &freeTubeShapeName, py::arg("base"), py::arg("library"),
+          "A new library shape's name: \"<base> 1\", \"<base> 2\"... no built-in or `library` shape has (tube.h).");
+    m.def(
         "make_tube_shape",
         [](const std::string& name, const std::vector<std::pair<float, float>>& points, bool smooth) {
             try {
@@ -337,6 +355,15 @@ void bindHierarchy(py::module_& m) {
     m.def("transfer_methods", [] {
         return std::vector<std::string>{"closest", "bounds", "markersAlign", "markersWarp", "uv"};
     });
+    m.def(
+        "transferred_scale",
+        [](bool scaling, double groomScale, double oldArea, double newArea, bool fitSize) -> py::object {
+            const auto s = transferredScale(scaling, groomScale, oldArea, newArea, fitSize);
+            if (!s) return py::none();
+            return py::make_tuple(s->scale, s->reference);
+        },
+        py::arg("scaling"), py::arg("groom_scale"), py::arg("old_area"), py::arg("new_area"), py::arg("fit_size"),
+        "(scale, reference) of a groom after a transfer (groom_transfer.h transferredScale), or None: the reference stays.");
 
     py::class_<Similarity>(m, "Similarity", "p -> scale * rotation * p + translation")
         .def_property_readonly("rotation", [](const Similarity& s) {

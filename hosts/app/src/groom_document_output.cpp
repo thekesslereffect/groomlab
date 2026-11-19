@@ -102,21 +102,6 @@ struct GraphEdits {
     void insertBefore(const std::string& anchor, const std::string& node) { groomlab::insertBefore(e, anchor, node); }
 };
 
-// Where a motion node goes (Maya's motion_anchor): just before the output, but before the Collide
-// and Cards nodes ending its chain, so the strands collide where they moved to and the cards take
-// the motion.
-std::string motionAnchor(const json& g, const std::string& output) {
-    std::string anchor = output;
-    std::set<std::string> seen;
-    while (seen.insert(anchor).second) {
-        const Feed feed = feedOf(g, anchor, "strands");
-        const std::string type = feed.from.empty() ? std::string() : typeOf(g, feed.from);
-        if (type != "Collide" && type != "Cards") break;
-        anchor = feed.from;
-    }
-    return anchor;
-}
-
 // ---- Files ----------------------------------------------------------------------------------------
 
 std::string trimmed(const std::string& s) {
@@ -133,11 +118,8 @@ std::string GroomDocument::addMotionNode(const std::string& type, const json& pa
     std::string name;
     const MeshPtr& scalp = file().data.scalp;
     const std::string error = editGraph("add " + type, [&](json& g) {
-        GraphEdits edit(g, scalp ? presetScalpSize(*scalp) : std::nullopt);
-        const std::string output = edit.e.outputNode();
-        if (output.empty()) throw std::runtime_error("the graph has no output");
-        name = edit.add(type, type, params);
-        edit.insertBefore(motionAnchor(edit.now(), output), name);
+        GraphEdits edit(g, paramScalpSize(scalp.get(), session().groomScale()));
+        name = insertMotion(edit.e, type, params.is_object() ? params.dump() : std::string(), edit.size);  // every host's (graph_inserts.h)
         g = edit.now();
     });
     if (error.empty() && made) *made = name;
@@ -150,7 +132,7 @@ std::string GroomDocument::addSimulateNode(std::string* made) {
     const std::string error = editGraph("add Simulate", [&](json& g) {
         // Every host's (graph_inserts.h): between the guides and the Interpolates they feed.
         GraphEdit edit(g.dump());
-        name = insertSimulate(edit, {}, scalp ? presetScalpSize(*scalp) : std::nullopt);
+        name = insertSimulate(edit, {}, paramScalpSize(scalp.get(), session().groomScale()));
         g = json::parse(edit.toJson());
     });
     if (error.empty() && made) *made = name;
@@ -163,7 +145,7 @@ std::string GroomDocument::addGuideCacheNode(const std::string& path, std::strin
     const std::string error = editGraph("load guide cache", [&](json& g) {
         // Every host's (graph_inserts.h): right after the Guides node, or the GuideCache there.
         GraphEdit edit(g.dump());
-        name = insertGuideCache(edit, path, {}, scalp ? presetScalpSize(*scalp) : std::nullopt);
+        name = insertGuideCache(edit, path, {}, paramScalpSize(scalp.get(), session().groomScale()));
         g = json::parse(edit.toJson());
     });
     if (error.empty() && made) *made = name;
@@ -184,7 +166,7 @@ std::string GroomDocument::addCollider(const std::string& meshName, std::string*
     const std::string error = editGraph("add collider " + meshName, [&](json& g) {
         // Every host's graph (graph_inserts.h): a ColliderMesh, a Collide before the output.
         GraphEdit edit(g.dump());
-        name = insertCollider(edit, meshName, true, std::nullopt, std::nullopt, scalp ? presetScalpSize(*scalp) : std::nullopt);
+        name = insertCollider(edit, meshName, true, std::nullopt, std::nullopt, paramScalpSize(scalp.get(), session().groomScale()));
         g = json::parse(edit.toJson());
     });
     if (error.empty() && made) *made = name;
@@ -211,7 +193,7 @@ std::vector<std::string> GroomDocument::featherGuideGroups() {
 std::string GroomDocument::addFeathers(const std::vector<std::pair<std::string, std::string>>& designs, const std::vector<double>& weights,
                                        const std::string& source, const std::string& group, std::string* made) {
     const MeshPtr& scalp = file().data.scalp;
-    const std::optional<double> size = scalp ? presetScalpSize(*scalp) : std::nullopt;
+    const std::optional<double> size = paramScalpSize(scalp.get(), session().groomScale());
     // Each design's preset fitted to this scalp.
     std::vector<FeatherDesign> fitted;
     for (const auto& [design, text] : designs) {
@@ -259,7 +241,7 @@ std::vector<std::string> GroomDocument::braidStyles() const {
 
 std::string GroomDocument::addBraid(const std::string& style, const std::string& group, std::string* made) {
     const MeshPtr& scalp = file().data.scalp;
-    const std::optional<double> size = scalp ? presetScalpSize(*scalp) : std::nullopt;
+    const std::optional<double> size = paramScalpSize(scalp.get(), session().groomScale());
     // Every host's graph edit (graph_inserts.h insertBraid: the style one of the Braid's, after the
     // Interpolate), tried first: the group is not made for a graph that cannot take a braid.
     auto insert = [&](json& g) {
@@ -295,30 +277,7 @@ std::string GroomDocument::importAlembicCurves(const std::string& path, const st
     }
     if (count == 0) return object.empty() ? "the file has no curves" : "the file has no curves under " + object;
     const std::string error = editGraph("import Alembic curves", [&](json& g) {
-        json nodes = json::array();
-        bool hasScalp = false;
-        json drawn;
-        for (const json& n : g.value("nodes", json::array())) {
-            const std::string name = n.value("name", std::string());
-            if (name == "guides") {
-                if (n.contains("ui")) drawn = n["ui"];  // where the Guides node was drawn
-                continue;
-            }
-            hasScalp = hasScalp || name == "scalp";
-            nodes.push_back(n);
-        }
-        json params = {{"path", path}, {"samples", samples}};
-        if (!object.empty()) params["object"] = object;
-        json made = {{"name", "guides"}, {"type", "ImportCurves"}, {"params", params}};
-        if (!drawn.is_null()) made["ui"] = drawn;
-        nodes.push_back(made);
-        g["nodes"] = nodes;
-        json connections = json::array();
-        for (const json& c : g.value("connections", json::array())) {
-            if (c.value("to", std::string()) != "guides") connections.push_back(c);
-        }
-        if (hasScalp) connections.push_back({{"from", "scalp"}, {"to", "guides"}, {"input", "scalp"}});
-        g["connections"] = connections;
+        g = json::parse(withImportedCurves(g.dump(), path, object, samples));  // every host's (graph_inserts.h)
         GraphEdit check(g.dump());  // (the links checked: an Interpolate takes curves on its guides input)
         check.checkConnections();
     });
@@ -328,30 +287,15 @@ std::string GroomDocument::importAlembicCurves(const std::string& path, const st
 
 std::string GroomDocument::writeStrandMesh(const std::string& objPath, const StrandMeshOptions& options, std::size_t maxStrands,
                                            std::size_t* strandsWritten) {
-    if (options.sides < 3) return "a tube has 3 sides or more";
+    if (options.sides < 3 || options.sides > kMaxMeshSides) return "a tube has 3 to " + std::to_string(kMaxMeshSides) + " sides";
     if (maxStrands < 1) return "at most 1 strand or more";
     try {
         MeshPtr scalp;
         const bool cards = options.make == StrandMeshOptions::Make::Auto || options.make == StrandMeshOptions::Make::Cards;
         const StrandsPtr all = exportFrame(time_, 1.0f, &scalp, cards, true);
-        // Scales, feathers, cards and instances whole (their plates and rachis are the strand set's); tubes thinned.
-        const bool whole = resolveMeshMake(*all, options) != StrandMeshOptions::Make::Strands;
-        const std::vector<std::size_t> keep = thinStrandsById(*all, whole ? all->strandCount() : maxStrands);
-        StrandSet kept;
-        const StrandSet* strands = all.get();
-        if (keep.size() < all->strandCount()) {
-            for (const std::size_t i : keep) {
-                const Vec3f* p = all->strandPoints(i);
-                const std::size_t n = all->strandPointCount(i);
-                std::vector<float> w;
-                if (all->widths().size() == all->pointCount()) {
-                    w.assign(all->widths().begin() + static_cast<std::ptrdiff_t>(all->strandBegin(i)),
-                             all->widths().begin() + static_cast<std::ptrdiff_t>(all->strandBegin(i) + n));
-                }
-                kept.addStrand(all->ids()[i], std::vector<Vec3f>(p, p + n), w, i < all->roots().size() ? all->roots()[i] : StrandRoot{});
-            }
-            strands = &kept;
-        }
+        // Scales, feathers, cards and instances whole; tubes thinned (every host's: strand_geometry.h).
+        const std::optional<StrandSet> thinned = strandsForMesh(*all, options, maxStrands);
+        const StrandSet* strands = thinned ? &*thinned : all.get();
         const GroomFile& groomFile = file();
         const PrototypeLookup prototypes = [&groomFile](const std::string& n) -> const InstancePrototype* {
             const auto it = groomFile.prototypes.find(n);
@@ -618,7 +562,7 @@ std::string GroomDocument::collectFiles(CollectReport* out) {
         // A map or an image into the groom's maps folder (Maya's masks/<groom>), else the kind's.
         // ("groomCaches": the groom's own folder in caches, as its Simulate bakes are written.)
         const std::string folder = kind == "masks"         ? mapsDirectory()
-                                   : kind == "groomCaches" ? assetFolder("caches") + "/" + fileSafeName(displayName())
+                                   : kind == "groomCaches" ? groomFolder("caches")
                                                            : assetFolder(kind);
         const std::string now = files.collect(what, stored, resolve(stored), folder);
         return now == stored ? stored : pathFromGroomFolder(now, dir);
@@ -706,10 +650,7 @@ void GroomDocument::recoveredAs(const std::string& path) {
     if (moved && !path_.empty()) {
         // Relative paths (texture maps) resolve against the file's folder first, then the copy's
         // and its search paths (the autosave's: the file's folder among them).
-        std::vector<std::string> dirs{fs::u8path(path_).parent_path().u8string()};
-        if (!scene_->file().directory.empty()) dirs.push_back(scene_->file().directory);
-        dirs.insert(dirs.end(), scene_->file().searchPaths.begin(), scene_->file().searchPaths.end());
-        session().setPathResolver(searchPathResolver(std::move(dirs)));
+        session().setPathResolver(searchPathResolver(groomFileFolders(scene_->file(), fs::u8path(path_).parent_path().u8string())));
         paints_.clear();
     }
 }

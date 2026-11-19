@@ -181,6 +181,10 @@ using Value = std::variant<std::monostate, StrandsPtr, GuidesPtr, MeshPtr, Hiera
                            UniformPtr,
                            DriverAttachPtr>;  // driver attachments: external only
 
+// A node's value as guides, every host's Bake Node to Guides: its guides, or its strands one guide
+// each (their IDs kept); none for any other value.
+std::optional<GuideSet> guidesOfValue(const Value& value);
+
 // Typed accessor: the pointer held in v, or null if v holds something else.
 template <class Ptr>
 Ptr valueAs(const Value& v) {

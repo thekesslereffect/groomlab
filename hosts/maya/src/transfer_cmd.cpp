@@ -227,6 +227,7 @@ MStatus TransferCmd::doIt(const MArgList& args) {
         MPlug flowPlug = fn.findPlug("flowData", true);
         MPlug mapsPlug = fn.findPlug("scalpMaps", true);
         std::string guideJson, partJson, flowJson, mapsJson;
+        bool setMaps = false;
         std::size_t moved = 0;
         try {
             // The guides (moved as shown: the groom keeps its scale, transfer_groom), parts and flow
@@ -241,10 +242,18 @@ MStatus TransferCmd::doIt(const MArgList& args) {
             partJson = out.partsJson;
             flowJson = out.flowJson;
             for (const std::string& warning : transferWarnings) MGlobal::displayWarning(MString(kName) + ": " + warning.c_str());
+            ScalpMaps maps = ScalpMaps::fromJson(mapsPlug.asString().asChar());
             if (db.isFlagSet(kMaps[0])) {
-                ScalpMaps maps = ScalpMaps::fromJson(mapsPlug.asString().asChar());
-                if (!projectMaps(maps, {}, *mapping, groom.node(), groom).empty()) mapsJson = maps.toJson();
+                if (!projectMaps(maps, {}, *mapping, groom.node(), groom).empty()) setMaps = true;
+            } else {
+                // Not projected: the vertex maps cannot fit another scalp, so they go; textures stay
+                // (every host's: groom_transfer.h).
+                for (const std::string& name : dropVertexMaps(maps)) {
+                    MGlobal::displayWarning(MString(kName) + ": the vertex map " + name.c_str() + " was dropped (not projected)");
+                    setMaps = true;
+                }
             }
+            if (setMaps) mapsJson = maps.toJson();
         } catch (const std::exception& e) {
             return fail(kName, e.what());
         }
@@ -267,7 +276,7 @@ MStatus TransferCmd::doIt(const MArgList& args) {
         if (!guideJson.empty()) modifier_.newPlugValueString(guidePlug, guideJson.c_str());
         if (partPlug.asString().length() > 0) modifier_.newPlugValueString(partPlug, partJson.c_str());
         if (flowPlug.asString().length() > 0) modifier_.newPlugValueString(flowPlug, flowJson.c_str());
-        if (!mapsJson.empty()) modifier_.newPlugValueString(mapsPlug, mapsJson.c_str());
+        if (setMaps) modifier_.newPlugValueString(mapsPlug, mapsJson.c_str());
         if (!markersJson.empty()) modifier_.newPlugValueString(markersPlug, markersJson.c_str());
         undoable_ = true;
         setResult(static_cast<int>(moved));

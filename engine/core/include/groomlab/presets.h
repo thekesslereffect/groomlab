@@ -175,6 +175,17 @@ constexpr int kMaxPresetDepth = 16;
 // preset's JSON (compact); throws std::invalid_argument saying why ("the clipboard holds no
 // GroomLab graph...", three problems at most).
 std::string presetFromText(const std::string& text);
+// A text pasted as a groom's whole graph (every host's Paste Graph, Maya's presets.paste_text):
+// presetFromText's checks, then refused when the graph or a compound's has problems over all its
+// nodes (GraphEdit::problems: a shipped preset's rule) or two nodes of one name; its backdrops kept
+// as the Graph Editor draws them (a title, a rectangle, a color); the params naming files on other
+// machines taken out (asset_files.h withoutNetworkFileParams: a stranger's graph never makes a host
+// reach out to their server). Throws std::invalid_argument saying why, as presetFromText.
+struct PastedGraph {
+    std::string presetJson;
+    std::map<std::string, std::string> removed;  // "node.param" -> the network path taken out
+};
+PastedGraph pastedGraphFromText(const std::string& text);
 // What is wrong with a graph's params against their operators' specs (every host's paste and
 // preset check, Maya's presets.check): a param the operator does not have, a value of the wrong
 // kind or not among its choices, a map on a param that takes none, an input or a key on a param
@@ -187,6 +198,10 @@ std::vector<std::string> presetParamProblems(const std::string& graphJson);
 // The scalp size a preset is made on and fitted to: the largest extent of the mesh's bounding
 // box; nullopt for a mesh without points.
 std::optional<double> presetScalpSize(const ScalpMesh& scalp);
+// The size a new node's defaults are fitted to on a groom (every host's Add menu and inserts):
+// presetScalpSize at the size the params are at, the groom's 1x when it is scaled with its scalp
+// (`groomScale`: GroomSession::groomScale). None without a scalp.
+std::optional<double> paramScalpSize(const ScalpMesh* scalp, double groomScale);
 
 // ---- Scaling a groom with its scalp (GroomSession::groomScale) -----------------------------------
 // The one table of how a measure scales: what a param of `unit` (ParamSpec::unit) is multiplied by

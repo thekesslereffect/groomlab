@@ -101,14 +101,8 @@ const char* kDriverObjectFlagLong = "-driverObject";
 const char* kRenderOverridesFlag = "-ro";
 const char* kRenderOverridesFlagLong = "-renderOverrides";
 
-// Object names in Alembic and USD: the groom's transform, namespaces flattened.
-std::string exportName(const MDagPath& shapePath) {
-    std::string name = MFnDagNode(shapePath.transform()).name().asChar();
-    for (char& c : name) {
-        if (c == ':' || c == '/' || c == '|') c = '_';
-    }
-    return name;
-}
+// Object names in Alembic and USD: the groom's transform, as every host names it (export_view.h).
+std::string exportName(const MDagPath& shapePath) { return exportObjectName(MFnDagNode(shapePath.transform()).name().asChar()); }
 
 MSyntax curveSyntax() {
     MSyntax syntax;
@@ -957,10 +951,11 @@ MStatus ExportGltfCmd::doIt(const MArgList& args) {
         if (!(scale > 0.0)) return fail(kName, "-scale must be positive");
         const MString alpha = flagString(db, "-am", "mask");
         CardGltfSettings settings;
-        if (alpha == "mask") settings.alphaMode = GltfMaterial::AlphaMode::Mask;
-        else if (alpha == "blend") settings.alphaMode = GltfMaterial::AlphaMode::Blend;
-        else if (alpha == "opaque") settings.alphaMode = GltfMaterial::AlphaMode::Opaque;
-        else return fail(kName, "-alphaMode is mask, blend or opaque");
+        try {
+            settings.alphaMode = gltfAlphaModeNamed(alpha.asChar());  // every host's (gltf_writer.h)
+        } catch (const std::invalid_argument& e) {
+            return fail(kName, (std::string("-") + e.what()).c_str());
+        }
         settings.alphaCutoff = static_cast<float>(flagDouble(db, "-ac", 0.5));
         settings.scale = static_cast<float>(scale);
         settings.zUp = MGlobal::isZAxisUp();
@@ -1105,11 +1100,7 @@ MStatus ScaleMeshCmd::redoIt() {
         fn.setName(MFnDagNode(transform_).name() + "Shape");
         fn.assignUVs(counts, connects);
         // Per face: a scale's data in two more uv sets and a color set, every corner the same.
-        std::vector<std::uint32_t> owner(faces, 0);
-        for (std::size_t k = 0; k < m.scales.size(); ++k) {
-            const ScaleMesh::Scale& s = m.scales[k];
-            for (std::uint32_t f = s.firstTriangle; f < s.firstTriangle + s.triangleCount && f < faces; ++f) owner[f] = static_cast<std::uint32_t>(k);
-        }
+        const std::vector<std::uint32_t> owner = m.triangleOwners();  // every host's (scales.h)
         MIntArray perFace(faces * 3);
         for (unsigned i = 0; i < faces * 3; ++i) perFace[i] = static_cast<int>(owner[i / 3]);
         const auto scaleCount = static_cast<unsigned>(m.scales.size());

@@ -14,6 +14,7 @@
 #include <sstream>
 
 #include "groomlab/asset_files.h"
+#include "groomlab/graph_inserts.h"
 #include "groomlab/paths.h"
 #include "groomlab/texture.h"
 
@@ -30,28 +31,6 @@ std::string forwardSlashes(std::string path) {
 
 std::vector<int> tilesOf(const TexturePaint& paint) { return paint.udim() ? paint.udimLayout()->tiles : std::vector<int>{}; }
 
-
-// The group names a Guides node's exclude holds (a list, or names split by commas and spaces).
-std::vector<std::string> groupList(const json& value) {
-    std::vector<std::string> out;
-    if (value.is_array()) {
-        for (const json& v : value) {
-            if (v.is_string() && !v.get<std::string>().empty()) out.push_back(v.get<std::string>());
-        }
-        return out;
-    }
-    if (!value.is_string()) return out;
-    std::string word;
-    for (const char c : value.get<std::string>() + ",") {
-        if (c == ',' || c == ' ' || c == ';' || c == '\t') {
-            if (!word.empty()) out.push_back(word);
-            word.clear();
-        } else {
-            word += c;
-        }
-    }
-    return out;
-}
 
 bool hexColor(const std::string& text) {
     return text.size() == 7 && text[0] == '#' &&
@@ -139,22 +118,27 @@ std::string GroomDocument::renameGroup(const std::string& from, const std::strin
     }
     attachSide(undoBefore, "rename group", {}, &before);
     if (hiddenGroups_.erase(from)) hiddenGroups_.insert(to);
+    // The Guides nodes reading or leaving out the group follow it (the core's rename, every
+    // host's), in the same undo step: the entry holds the graph before and after too.
+    const json graphBefore = graph_;
+    bool retargeted = false;
+    const std::string graph = renameGroupReaders(graph_.dump(), from, to, &retargeted);
+    if (!retargeted) return {};
+    graph_ = json::parse(graph);
+    if (const std::string failed = applyGraph(); !failed.empty()) {
+        graph_ = graphBefore;
+        applyGraph();
+        return failed;
+    }
+    Edit& entry = edits_.back();
+    entry.whole = true;
+    entry.graphBefore = graphBefore;
+    entry.graphAfter = graph_;
     return {};
 }
 
 std::vector<std::pair<std::string, std::string>> GroomDocument::groupUsers(const std::string& group) const {
-    std::vector<std::pair<std::string, std::string>> users;
-    for (const json& n : graph_.value("nodes", json::array())) {
-        if (!n.is_object() || n.value("type", std::string()) != "Guides" || !n.contains("params") || !n["params"].is_object()) continue;
-        const json& params = n["params"];
-        const std::string node = n.value("name", std::string());
-        if (params.value("group", json()).is_string() && params["group"].get<std::string>() == group) users.emplace_back(node, "group");
-        if (params.contains("exclude")) {
-            const std::vector<std::string> names = groupList(params["exclude"]);
-            if (std::find(names.begin(), names.end(), group) != names.end()) users.emplace_back(node, "exclude");
-        }
-    }
-    return users;
+    return groupReaders(graph_.dump(), group);  // the core's (graph_inserts.h), every host's "Read by"
 }
 
 // ---- Maps: what reads them --------------------------------------------------------------------
@@ -246,7 +230,7 @@ std::string GroomDocument::removeMap(const std::string& name, bool deleteFile, b
             return m.second.kind == "texture" && !file.empty() && sameFile(resolveMapPath(m.second.texture), file);
         });
         std::error_code ec;
-        if (deleteFile && !file.empty() && !shared && insideFolder(file, mapsDirectory()) && fileStamp(file) != 0) {
+        if (deleteFile && mapImageDeletable(file, mapsDirectory(), shared)) {  // every host's rule (asset_files.h)
             // (A tile set: every tile's file.)
             for (Edit::FileState& state : mapImageStates(file)) {
                 if (!state.before) continue;

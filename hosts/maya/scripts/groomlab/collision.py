@@ -140,22 +140,13 @@ def remove_collider(groom, name):
         for source in cmds.listConnections(element + ".colliderMesh", source=True, destination=False, plugs=True) or []:
             cmds.disconnectAttr(source, element + ".colliderMesh")
         cmds.removeMultiInstance(element, b=True)
+    # The graph: its ColliderMesh nodes, the Collide nodes they feed passing their strands through
+    # (every host's: graph_inserts.h removeColliderNodes).
     model = gm.GraphModel.from_groom(groom)
-    names = {c["name"] for c in found}
-    readers = [n for n in model.order if model.node_type(n) == "ColliderMesh" and model.param(n, "name") in names]
-    if not readers:
-        return True
-    for reader in readers:
-        for consumer, port in list(model.downstream_of(reader)):
-            if model.node_type(consumer) != "Collide":
-                model.disconnect(consumer, port)  # another reader of the mesh: it reads nothing now
-                continue
-            # The Collide node made for it (add_collider wired the scalp too): strands pass through.
-            upstream = model.source_of(consumer, "strands")
-            for to, to_port in list(model.downstream_of(consumer)):
-                if upstream:
-                    model.connect(upstream, to, to_port)
-            model.remove_node(consumer)
-        model.remove_node(reader)
-    model.save(groom)
+    edit = model._edit()
+    with gm._core_errors():
+        changed = [edit.remove_collider_nodes(c["name"]) for c in found]
+    if any(changed):
+        model._take(edit)
+        model.save(groom)
     return True

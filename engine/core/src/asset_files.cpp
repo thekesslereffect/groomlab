@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "groomlab/asset_files.h"
+#include "groomlab/scalp_maps.h"
 
 #include <algorithm>
 #include <cctype>
@@ -217,6 +218,37 @@ void visitFileParams(nlohmann::json& graph, const std::function<void(const std::
 
 bool insideFolder(const std::string& path, const std::string& folder) { return !inside(path, folder).empty(); }
 
+bool mapImageDeletable(const std::string& file, const std::string& folder, bool readElsewhere) {
+    return !file.empty() && !readElsewhere && insideFolder(file, folder) && fileStamp(file) != 0;
+}
+
+FollowedGroomFile followSceneGroomFile(const std::string& groomFile, const std::string& oldScene, const std::string& newScene) {
+    FollowedGroomFile out;
+    std::error_code ec;
+    const fs::path full = fs::u8path(groomFile), old = fs::u8path(oldScene), now = fs::u8path(newScene);
+    if (groomFile.empty() || oldScene.empty() || newScene.empty() || !fs::is_regular_file(full, ec)) return out;
+    if (!sameFile(full.parent_path().u8string(), old.parent_path().u8string())) return out;
+    const std::string stem = full.stem().u8string(), oldStem = old.stem().u8string();
+    const bool raw = stem == oldStem;
+    if (!raw && stem != fileSafeName(oldStem)) return out;  // a groom file of its own name
+    const std::string newStem = raw ? now.stem().u8string() : fileSafeName(now.stem().u8string());
+    std::string target = (now.parent_path() / fs::u8path(newStem + full.extension().u8string())).generic_u8string();
+    if (sameFile(target, full.generic_u8string())) return out;
+    if (fs::exists(fs::u8path(target), ec) && !sameMapImage(full.generic_u8string(), target)) {
+        target = freeFilePath(target);
+        out.renamed = true;
+    }
+    if (!fs::exists(fs::u8path(target), ec)) out.copied = !copyMapImage(full.generic_u8string(), target).empty();
+    out.path = target;
+    return out;
+}
+
+std::string renamedMapImage(const std::string& full, const std::string& from, const std::string& to, const std::string& folder) {
+    if (full.empty() || fileStamp(full) == 0 || !insideFolder(full, folder)) return {};
+    const std::string renamed = renamedMapTexture(full, from, to);
+    return renamed.empty() ? std::string() : freeFilePath(renamed);
+}
+
 std::string collectFile(const std::string& path, const std::string& folder, std::vector<std::string>* copied) {
     std::error_code ec;
     std::vector<std::pair<std::string, std::string>> tiles;  // (source, name in the folder)
@@ -334,6 +366,49 @@ std::string withGraphFileParams(const std::string& graphJson, const std::map<std
     });
     if (changed) *changed = any;
     return any ? graph.dump() : graphJson;
+}
+
+bool isNetworkPath(const std::string& path) {
+    auto slash = [](char c) { return c == '/' || c == '\\'; };
+    return path.size() >= 2 && slash(path[0]) && slash(path[1]);
+}
+
+namespace {
+
+// The params visitFileParams marked (their value null, or a texture value's "texture") taken out.
+void dropMarkedParams(nlohmann::json& graph) {
+    if (!graph.is_object() || !graph.contains("nodes") || !graph["nodes"].is_array()) return;
+    for (nlohmann::json& node : graph["nodes"]) {
+        if (!node.is_object() || !node.contains("params") || !node["params"].is_object()) continue;
+        nlohmann::json& params = node["params"];
+        for (auto it = params.begin(); it != params.end();) {
+            const nlohmann::json& v = it.value();
+            const bool marked = v.is_null() || (v.is_object() && v.contains("texture") && v["texture"].is_null());
+            it = marked ? params.erase(it) : std::next(it);
+        }
+        if (node.value("type", std::string()) == "Compound" && params.contains("definition") && params["definition"].is_object() &&
+            params["definition"].contains("graph")) {
+            dropMarkedParams(params["definition"]["graph"]);
+        }
+    }
+}
+
+}  // namespace
+
+std::string withoutNetworkFileParams(const std::string& graphJson, std::map<std::string, std::string>* removed) {
+    nlohmann::json graph = nlohmann::json::parse(graphJson, nullptr, false);
+    if (graph.is_discarded()) return graphJson;
+    std::map<std::string, std::string> out;
+    visitFileParams(graph, [&](const std::string& label, nlohmann::json& value) {
+        const std::string stored = value.get<std::string>();
+        if (!isNetworkPath(stored)) return;
+        out[label] = stored;
+        value = nullptr;
+    });
+    if (removed) *removed = out;
+    if (out.empty()) return graphJson;
+    dropMarkedParams(graph);
+    return graph.dump();
 }
 
 std::optional<std::string> readFileState(const std::string& path) {

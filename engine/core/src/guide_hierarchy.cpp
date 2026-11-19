@@ -517,6 +517,18 @@ GuideId GuideHierarchy::addGuide(GroupId groupId, std::vector<Vec3f> points, Tub
     return id;
 }
 
+std::vector<GuideId> GuideHierarchy::addBakedGuides(const std::string& name, const GuideSet& guides, TubeProfile tube) {
+    GroupId gid = findGroup(name);
+    if (gid == kNoGroup) {
+        gid = addGroup(name);
+    } else if (groupDepth(gid) != 0) {
+        throw std::invalid_argument("'" + name + "' is a child group: bake into a root group");
+    }
+    const std::vector<GuideId> ids = addGuides(gid, guides, tube);
+    for (const GuideId id : ids) setPoints(id, withGroupSegments(gid, guide(id)->points));  // the group's segments, if it has its own
+    return ids;
+}
+
 std::vector<GuideId> GuideHierarchy::addGuides(GroupId groupId, const GuideSet& set, TubeProfile tube) {
     invalidateHash();
     std::vector<GuideId> added;

@@ -58,7 +58,7 @@ def file_dependencies(groom):
     for name, entry in sorted(stored.items() if isinstance(stored, dict) else []):
         if isinstance(entry, dict) and entry.get("kind") == "texture":
             add("map", name, entry.get("texture") or "")
-    for label, _params, _name, path in presets._file_params(get_graph(groom)):
+    for label, path in presets.graph_files(get_graph(groom)):
         add("param", label, path)
     for attr in ("guideCache", "groomFile"):
         add("attribute", attr, cmds.getAttr(groom + "." + attr) or "")
@@ -89,13 +89,9 @@ def repath_file(groom, kind, key, path):
     elif kind == "param":
         from groomlab import presets
         graph = get_graph(groom)
-        for label, params, name, _old in presets._file_params(graph):
-            if label == key:
-                presets.set_file_param(params, name, stored)
-                set_graph(groom, graph)
-                break
-        else:
+        if key not in dict(presets.graph_files(graph)):
             raise ValueError("%s has no file param %s" % (groom, key))
+        set_graph(groom, presets.with_graph_files(graph, {key: stored}))
     elif kind == "attribute":
         if key not in ("guideCache", "groomFile"):
             raise ValueError("%s is not a file attribute" % key)

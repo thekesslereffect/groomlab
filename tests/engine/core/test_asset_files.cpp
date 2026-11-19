@@ -124,6 +124,49 @@ TEST(AssetFiles, CollectFileCopiesInNeverOver) {
     EXPECT_EQ(copied.size(), 4u);
 }
 
+TEST(AssetFiles, MapImagesRenameAndDeleteOnlyInTheGroomsFolder) {
+    // asset_files.h mapImageDeletable / renamedMapImage: every host's Remove Map > delete the file
+    // and Rename Map's file, only GroomLab's own files in the groom's maps folder.
+    const std::string root = scratch("map_rules");
+    const std::string masks = root + "/scene/groomlab/s/masks/hair";
+    write(masks + "/density.png", "d");
+    write(masks + "/thickness.png", "taken");
+    write(root + "/library/density.png", "artist's");
+    EXPECT_TRUE(mapImageDeletable(masks + "/density.png", masks, false));
+    EXPECT_FALSE(mapImageDeletable(masks + "/density.png", masks, true)) << "another map or groom reads it";
+    EXPECT_FALSE(mapImageDeletable(root + "/library/density.png", masks, false)) << "the artist's own file";
+    EXPECT_FALSE(mapImageDeletable(masks + "/gone.png", masks, false));
+    EXPECT_EQ(renamedMapImage(masks + "/density.png", "density", "length", masks), masks + "/length.png");
+    EXPECT_EQ(renamedMapImage(masks + "/density.png", "density", "thickness", masks), masks + "/thickness_2.png") << "taken: a free name";
+    EXPECT_EQ(renamedMapImage(root + "/library/density.png", "density", "length", masks), "") << "outside the folder: stays";
+    EXPECT_EQ(renamedMapImage(masks + "/thickness.png", "density", "length", masks), "") << "not named after the map";
+    // Groom file folders: a later save's folder first, repeats left out.
+    GroomFile file;
+    file.directory = root + "/a";
+    file.searchPaths = {root + "/b", root + "/a", ""};
+    EXPECT_EQ(groomFileFolders(file, root + "/c"), (std::vector<std::string>{root + "/c", root + "/a", root + "/b"}));
+    EXPECT_EQ(groomFileFolders(file), (std::vector<std::string>{root + "/a", root + "/b"}));
+}
+
+TEST(AssetFiles, SaveAsTakesTheScenesOwnGroomFileAlong) {
+    // followSceneGroomFile: Maya's follow_scene_files and the Blender add-on's Save As copy
+    // <scene>.groom beside the new scene as <new scene>.groom; another groom file stays.
+    const std::string root = scratch("follow_groom");
+    write(root + "/shots/a.groom", "groom a");
+    write(root + "/shots/other.groom", "other");
+    const FollowedGroomFile f = followSceneGroomFile(root + "/shots/a.groom", root + "/shots/a.ma", root + "/next/b.ma");
+    EXPECT_EQ(f.path, root + "/next/b.groom");
+    EXPECT_TRUE(f.copied);
+    EXPECT_FALSE(f.renamed);
+    EXPECT_EQ(read(root + "/next/b.groom"), "groom a");
+    EXPECT_EQ(followSceneGroomFile(root + "/shots/other.groom", root + "/shots/a.ma", root + "/next/b.ma").path, "");
+    write(root + "/next/c.groom", "someone else's");
+    const FollowedGroomFile clash = followSceneGroomFile(root + "/shots/a.groom", root + "/shots/a.ma", root + "/next/c.ma");
+    EXPECT_EQ(clash.path, root + "/next/c_2.groom");
+    EXPECT_TRUE(clash.renamed);
+    EXPECT_EQ(read(root + "/next/c.groom"), "someone else's");
+}
+
 // A groom's own folder inside the old root takes the new name (the app's masks/<name>): an extra
 // root is looked at before the old root.
 TEST(AssetFiles, AnExtraRootInsideTheOldRootWins) {

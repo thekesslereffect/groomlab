@@ -139,6 +139,9 @@ std::vector<std::string> cardMapPresetDirs();
 // built-in ones.
 std::vector<CardMapPreset> cardMapPresets();
 std::optional<CardMapPreset> findCardMapPreset(const std::string& name);
+// A preset as every host's bake takes it: its JSON (text starting with '{'), else its name
+// (findCardMapPreset). Throws std::runtime_error for a bad preset or no preset of that name.
+CardMapPreset cardMapPresetFromText(const std::string& text);
 // Saves a preset to the user's folder as <name, file safe>.json, replacing one of that name.
 // Returns the file. Throws std::runtime_error (a built-in's name, a bad preset, can't write).
 std::string saveCardMapPreset(const CardMapPreset& preset);

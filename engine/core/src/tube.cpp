@@ -1262,4 +1262,77 @@ TubeProfile blendedTube(const std::vector<const TubeProfile*>& tubes, const std:
     return out;
 }
 
+std::string freeTubeShapeName(const std::string& base, const std::vector<std::string>& library) {
+    auto taken = [&](const std::string& name) {
+        const std::vector<std::string>& builtins = tubeShapeNames();
+        return std::find(builtins.begin(), builtins.end(), name) != builtins.end() ||
+               std::find(library.begin(), library.end(), name) != library.end();
+    };
+    int k = 1;
+    while (taken(base + " " + std::to_string(k))) ++k;
+    return base + " " + std::to_string(k);
+}
+
+// ---- Mirror (every host's cross-section editor) -----------------------------------------------
+
+namespace {
+bool onMirrorAxis(const SectionPoint& p) { return std::fabs(p.u) <= kMirrorAxis; }
+bool samePoint(const SectionPoint& a, const SectionPoint& b) { return a.u == b.u && a.v == b.v; }
+}  // namespace
+
+std::vector<SectionPoint> mirroredSectionPoints(const std::vector<SectionPoint>& pts) {
+    const int n = static_cast<int>(pts.size());
+    if (n < 3) return pts;
+    const float side = std::any_of(pts.begin(), pts.end(), [](const SectionPoint& p) { return p.u > kMirrorAxis; }) ? 1.0f : -1.0f;
+    std::vector<bool> right(static_cast<std::size_t>(n));
+    for (int i = 0; i < n; ++i) right[static_cast<std::size_t>(i)] = side * pts[static_cast<std::size_t>(i)].u > kMirrorAxis;
+    const bool all = std::all_of(right.begin(), right.end(), [](bool r) { return r; });
+    const bool any = std::any_of(right.begin(), right.end(), [](bool r) { return r; });
+    if (all || !any) return pts;
+    auto at = [&](int i) { return static_cast<std::size_t>(((i % n) + n) % n); };
+    // The right chain: from the first right point after a point that is not, round the outline.
+    int start = 0;
+    while (!(right[at(start)] && !right[at(start - 1)])) ++start;
+    std::vector<SectionPoint> chain;
+    int i = start;
+    while (right[at(i)]) {
+        chain.push_back(pts[at(i)]);
+        i = static_cast<int>(at(i + 1));
+    }
+    const SectionPoint before = pts[at(start - 1)], after = pts[at(i)];
+    std::vector<SectionPoint> out;
+    if (onMirrorAxis(before)) out.push_back({0.0f, before.v});
+    out.insert(out.end(), chain.begin(), chain.end());
+    if (onMirrorAxis(after) && (out.empty() || !samePoint(after, before))) out.push_back({0.0f, after.v});
+    for (auto it = chain.rbegin(); it != chain.rend(); ++it) out.push_back({-it->u, it->v});
+    if (side < 0.0f) {  // (the chain was the left one: the same outline, flipped back)
+        std::vector<SectionPoint> flipped;
+        for (auto it = out.rbegin(); it != out.rend(); ++it) flipped.push_back({-it->u, it->v});
+        out = std::move(flipped);
+    }
+    return out.size() >= 3 ? out : pts;
+}
+
+std::vector<int> mirrorPartners(const std::vector<SectionPoint>& points) {
+    std::vector<int> out;
+    for (std::size_t i = 0; i < points.size(); ++i) {
+        const SectionPoint& p = points[i];
+        if (onMirrorAxis(p)) {
+            out.push_back(static_cast<int>(i));
+            continue;
+        }
+        int best = -1;
+        float dist = 1e9f;
+        for (std::size_t j = 0; j < points.size(); ++j) {
+            const float d = std::fabs(points[j].u + p.u) + std::fabs(points[j].v - p.v);
+            if (j != i && d < dist) {
+                best = static_cast<int>(j);
+                dist = d;
+            }
+        }
+        out.push_back(dist < 1e-3f ? best : -1);
+    }
+    return out;
+}
+
 }  // namespace groomlab

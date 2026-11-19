@@ -32,14 +32,6 @@ const char* kList[] = {"-ls", "-list"};
 // Samples per part curve: dense enough to follow a curve drawn on a head.
 constexpr unsigned kPartSamples = 64;
 
-std::string uniqueName(const PartSet& set, const std::string& base) {
-    if (!set.find(base)) return base;
-    for (int i = 1;; ++i) {
-        const std::string name = base + std::to_string(i);
-        if (!set.find(name)) return name;
-    }
-}
-
 }  // namespace
 
 const char* PartsCmd::kName = "groomLabParts";
@@ -97,8 +89,8 @@ MStatus PartsCmd::doIt(const MArgList& args) {
                 MObject data;
                 if (!curveWorldData(curve, data)) return fail(kName, curve + " is not a nurbsCurve");
                 try {
-                    const std::string name = uniqueName(set, base.asChar());
-                    set.parts.push_back(PartSet::fromPoints(name, sampleCurveData(data, kPartSamples), *scalp));
+                    // Every host's (parts.h: named base, base1..., resampled evenly, too short refused).
+                    const std::string name = set.add(base.asChar(), sampleCurveData(data, kPartSamples), *scalp, kPartSamples);
                     added.append(name.c_str());
                 } catch (const std::exception& e) {
                     return fail(kName, curve + ": " + e.what());
@@ -108,11 +100,7 @@ MStatus PartsCmd::doIt(const MArgList& args) {
         } else if (db.isFlagSet(kRemove[0])) {
             MString name;
             db.getFlagArgument(kRemove[0], 0, name);
-            const auto before = set.parts.size();
-            set.parts.erase(std::remove_if(set.parts.begin(), set.parts.end(),
-                                           [&](const Part& p) { return p.name == name.asChar(); }),
-                            set.parts.end());
-            if (set.parts.size() == before) return fail(kName, "no part named " + name);
+            if (!set.remove(name.asChar())) return fail(kName, "no part named " + name);
         } else if (db.isFlagSet(kClear[0])) {
             set.parts.clear();
         } else {

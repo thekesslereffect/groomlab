@@ -87,6 +87,12 @@ std::string PartSet::add(const std::string& base, const std::vector<Vec3f>& poin
     return name;
 }
 
+bool PartSet::remove(const std::string& name) {
+    const std::size_t before = parts.size();
+    parts.erase(std::remove_if(parts.begin(), parts.end(), [&](const Part& p) { return p.name == name; }), parts.end());
+    return parts.size() != before;
+}
+
 PartSet PartSet::onRefined(const SubdivisionPlan& plan) const {
     PartSet out = *this;
     for (Part& part : out.parts) {

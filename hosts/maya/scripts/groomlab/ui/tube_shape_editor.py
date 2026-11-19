@@ -19,61 +19,20 @@ from groomlab.ui import qt, theme
 from groomlab.ui.qt import QtCore, QtGui, QtWidgets
 
 EXTENT = 1.25  # the square shows -EXTENT..EXTENT on both axes (the outline is fitted to -1..1)
-AXIS = 0.02    # points this near the v axis are on it (mirror)
+AXIS = groomlab_core.MIRROR_AXIS  # points this near the v axis are on it (mirror: tube.h)
 HIT = 7.0      # pixels: how near a press must be to a point or the outline
 
 
-def _on_axis(p):
-    return abs(p[0]) <= AXIS
-
-
 def symmetric(points):
-    """The points made symmetric about the v axis from their right side (u > 0): the right chain
-    in order, the points on the axis at its ends set on it, its mirror image closing the outline.
-    Points with nothing right of the axis come back mirrored from the left. Fewer than 3 after:
-    the points as they were."""
-    pts = [tuple(p) for p in points]
-    n = len(pts)
-    if n < 3:
-        return pts
-    side = 1.0 if any(p[0] > AXIS for p in pts) else -1.0
-    right = [side * p[0] > AXIS for p in pts]
-    if all(right) or not any(right):
-        return pts
-    # The right chain: from the first right point after a point that is not, round the outline.
-    start = next(i for i in range(n) if right[i] and not right[i - 1])
-    chain = []
-    i = start
-    while right[i]:
-        chain.append(pts[i])
-        i = (i + 1) % n
-    before, after = pts[start - 1], pts[i]
-    out = []
-    if _on_axis(before):
-        out.append((0.0, before[1]))
-    out.extend(chain)
-    if _on_axis(after) and (not out or after != before):
-        out.append((0.0, after[1]))
-    out.extend((-u, v) for u, v in reversed(chain))
-    if side < 0:  # (the chain was the left one: the same outline, flipped back)
-        out = [(-u, v) for u, v in reversed(out)]
-    return out if len(out) >= 3 else pts
+    """The points made symmetric about the v axis from their right side: every host's mirror (tube.h
+    mirroredSectionPoints)."""
+    return [tuple(p) for p in groomlab_core.mirrored_section_points([tuple(p) for p in points])]
 
 
 def partners(points):
-    """Each point's mirror image among the points (its own index on the axis; None when it has none)."""
-    out = []
-    for i, (u, v) in enumerate(points):
-        if abs(u) <= AXIS:
-            out.append(i)
-            continue
-        best, dist = None, 1e9
-        for j, (a, b) in enumerate(points):
-            d = abs(a + u) + abs(b - v)
-            if j != i and d < dist:
-                best, dist = j, d
-        out.append(best if dist < 1e-3 else None)
-    return out
+    """Each point's mirror image among the points (its own index on the axis; None when it has none):
+    the core's (tube.h mirrorPartners)."""
+    return list(groomlab_core.mirror_partners([tuple(p) for p in points]))
 
 
 class TubeShapeEditor(QtWidgets.QWidget):

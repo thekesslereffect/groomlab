@@ -6,6 +6,8 @@
 #include <functional>
 #include <map>
 #include <set>
+#include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -239,6 +241,41 @@ void insertOnLink(GraphEdit& edit, const std::string& src, const std::string& ds
     }
     throw GraphError(node + " has no input that takes " + src + "'s " + edit.outputType(src, output) + " and feeds " + dst + "." + input +
                      (why.empty() ? "" : " (" + why + ")"));
+}
+
+std::string motionAnchor(const GraphEdit& edit) {
+    std::string anchor = edit.outputNode();
+    if (anchor.empty()) return anchor;
+    const json g = graphOf(edit);
+    std::set<std::string> seen;
+    while (seen.insert(anchor).second) {
+        const std::string from = sourceOf(g, anchor, "strands");
+        const std::string type = from.empty() ? std::string() : typeOf(g, from);
+        if (type != "Collide" && type != "Cards") break;
+        anchor = from;
+    }
+    return anchor;
+}
+
+std::string insertMotion(GraphEdit& edit, const std::string& type, const std::string& paramsJson, std::optional<double> groomSize) {
+    const std::string anchor = motionAnchor(edit);
+    if (anchor.empty()) throw GraphError("the graph has no output");
+    const std::string node = edit.addNode(type, {}, paramsJson, std::nullopt, std::nullopt, groomSize);
+    insertBefore(edit, anchor, node);
+    return node;
+}
+
+std::string insertCards(GraphEdit& edit, const std::string& paramsJson, std::optional<double> groomSize, bool* made) {
+    if (made) *made = false;
+    const json g = graphOf(edit);
+    const std::vector<std::string> cards = ofType(g, "Cards");
+    if (!cards.empty()) return cards.front();
+    const std::string output = edit.outputNode();
+    if (output.empty()) throw GraphError("the graph has no output");
+    const std::string node = edit.addNode("Cards", edit.uniqueName("cards"), paramsJson, std::nullopt, std::nullopt, groomSize);
+    insertBefore(edit, output, node);
+    if (made) *made = true;
+    return node;
 }
 
 std::string insertSimulate(GraphEdit& edit, const std::string& paramsJson, std::optional<double> groomSize) {
@@ -536,6 +573,75 @@ ScalpNodes insertScalp(GraphEdit& edit, const std::string& meshName, std::option
     return nodes;
 }
 
+bool removeColliderNodes(GraphEdit& edit, const std::string& meshName) {
+    const json g = graphOf(edit);
+    std::vector<std::string> readers;
+    for (const std::string& n : ofType(g, "ColliderMesh")) {
+        const json name = paramOf(g, n, "name");
+        if (name.is_string() && name.get<std::string>() == meshName) readers.push_back(n);
+    }
+    for (const std::string& reader : readers) {
+        for (const Link& l : linksFrom(graphOf(edit), reader)) {
+            if (!edit.hasNode(l.to)) continue;
+            if (edit.nodeType(l.to) == "Collide") {
+                edit.removeNodeKeepingFlow(l.to);  // the Collide made for it: strands pass through
+            } else {
+                edit.disconnect(l.to, l.input);  // another reader of the mesh: it reads nothing now
+            }
+        }
+        edit.removeNode(reader);
+    }
+    return !readers.empty();
+}
+
+bool removeScalpNodes(GraphEdit& edit, const std::string& meshName) {
+    if (meshName.empty() || meshName == "scalp") return false;
+    const json g = graphOf(edit);
+    std::set<std::string> doomed;
+    for (const std::string& n : ofType(g, "Scalp")) {
+        const json input = paramOf(g, n, "input");
+        if (input.is_string() && input.get<std::string>() == meshName) doomed.insert(n);
+    }
+    if (doomed.empty()) return false;
+    // What they alone feed: every input of a node from doomed nodes (Guides nodes aside), one at least.
+    const std::set<std::string> guides = [&] {
+        const std::vector<std::string> v = ofType(g, "Guides");
+        return std::set<std::string>(v.begin(), v.end());
+    }();
+    for (bool grew = true; grew;) {
+        grew = false;
+        for (const json& n : g["nodes"]) {
+            const std::string name = n.value("name", std::string()), type = n.value("type", std::string());
+            if (doomed.count(name) || type == "Merge" || type == "Output" || type == "Guides") continue;
+            bool any = false, all = true, fed = false;
+            for (const json& c : g["connections"]) {
+                if (c.value("to", std::string()) != name) continue;
+                fed = true;
+                const std::string from = c.value("from", std::string());
+                if (doomed.count(from)) any = true;
+                else if (!guides.count(from)) all = false;
+            }
+            if (fed && any && all) {
+                doomed.insert(name);
+                grew = true;
+            }
+        }
+    }
+    // The Merges a doomed node fed by `b`: passed through when left with `a` alone.
+    std::set<std::string> merges;
+    for (const std::string& n : doomed) {
+        for (const Link& l : linksFrom(g, n)) {
+            if (!doomed.count(l.to) && typeOf(g, l.to) == "Merge" && l.input == "b") merges.insert(l.to);
+        }
+    }
+    for (const std::string& n : doomed) edit.removeNode(n);
+    for (const std::string& merge : merges) {
+        if (!edit.hasNode(merge) || !sourceOf(graphOf(edit), merge, "b").empty()) continue;
+        edit.removeNodeKeepingFlow(merge);
+    }
+    return true;
+}
+
 bool excludeFromHairGuides(GraphEdit& edit, const std::string& group) {
     if (group.empty()) return false;
     json g = graphOf(edit);
@@ -555,6 +661,90 @@ bool excludeFromHairGuides(GraphEdit& edit, const std::string& group) {
     }
     if (changed) edit = GraphEdit(g.dump());
     return changed;
+}
+
+namespace {
+
+const char* const kGroupParams[] = {"group", "exclude"};
+
+// The Guides nodes of `graph` (one level) naming group `from` in their group or exclude lists named
+// `to` instead, the compounds' definitions too.
+bool renameGroupIn(json& graph, const std::string& from, const std::string& to, int depth) {
+    bool changed = false;
+    if (!graph.is_object() || !graph.contains("nodes") || !graph["nodes"].is_array()) return false;
+    for (json& n : graph["nodes"]) {
+        if (!n.is_object() || !n.contains("params") || !n["params"].is_object()) continue;
+        json& params = n["params"];
+        const std::string type = n.value("type", std::string());
+        if (type == "Compound" && depth < 16 && params.contains("definition") && params["definition"].is_object() &&
+            params["definition"].contains("graph")) {
+            changed = renameGroupIn(params["definition"]["graph"], from, to, depth + 1) || changed;
+            continue;
+        }
+        if (type != "Guides") continue;
+        for (const char* param : kGroupParams) {
+            std::vector<std::string> words = wordsOf(params.value(param, json()));
+            if (std::find(words.begin(), words.end(), from) == words.end()) continue;
+            std::string joined;
+            for (const std::string& w : words) joined += (joined.empty() ? "" : " ") + (w == from ? to : w);
+            params[param] = joined;
+            changed = true;
+        }
+    }
+    return changed;
+}
+
+}  // namespace
+
+std::string withImportedCurves(const std::string& graphJson, const std::string& path, const std::string& object, int samples) {
+    if (samples < 0 || samples > 1024) throw std::invalid_argument("samples is 0 (as read) to 1024");
+    json g = json::parse(graphJson);
+    json nodes = json::array(), drawn;
+    bool hasScalp = false;
+    for (const json& n : g.value("nodes", json::array())) {
+        const std::string name = n.value("name", std::string());
+        if (name == "guides") {
+            if (n.contains("ui")) drawn = n["ui"];  // where the Guides node was drawn
+            continue;
+        }
+        hasScalp = hasScalp || name == "scalp";
+        nodes.push_back(n);
+    }
+    json params = {{"path", path}, {"samples", samples}};
+    if (!object.empty()) params["object"] = object;
+    json made = {{"name", "guides"}, {"type", "ImportCurves"}, {"params", params}};
+    if (!drawn.is_null()) made["ui"] = drawn;
+    nodes.push_back(made);
+    g["nodes"] = nodes;
+    json connections = json::array();
+    for (const json& c : g.value("connections", json::array())) {
+        if (c.value("to", std::string()) != "guides") connections.push_back(c);
+    }
+    if (hasScalp) connections.push_back({{"from", "scalp"}, {"to", "guides"}, {"input", "scalp"}});
+    g["connections"] = connections;
+    return g.dump();
+}
+
+std::vector<std::pair<std::string, std::string>> groupReaders(const std::string& graphJson, const std::string& group) {
+    std::vector<std::pair<std::string, std::string>> out;
+    const json g = json::parse(graphJson, nullptr, false);
+    if (group.empty() || !g.is_object() || !g.contains("nodes") || !g["nodes"].is_array()) return out;
+    for (const json& n : g["nodes"]) {
+        if (!n.is_object() || n.value("type", std::string()) != "Guides" || !n.contains("params") || !n["params"].is_object()) continue;
+        for (const char* param : kGroupParams) {
+            const std::vector<std::string> words = wordsOf(n["params"].value(param, json()));
+            if (std::find(words.begin(), words.end(), group) != words.end()) out.emplace_back(n.value("name", std::string()), param);
+        }
+    }
+    return out;
+}
+
+std::string renameGroupReaders(const std::string& graphJson, const std::string& from, const std::string& to, bool* changed) {
+    if (changed) *changed = false;
+    json g = json::parse(graphJson, nullptr, false);
+    if (from.empty() || to.empty() || from == to || g.is_discarded() || !renameGroupIn(g, from, to, 0)) return graphJson;
+    if (changed) *changed = true;
+    return g.dump();
 }
 
 std::string insertBraid(GraphEdit& edit, const std::string& group, const std::string& paramsJson, const std::string& after,

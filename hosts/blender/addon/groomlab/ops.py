@@ -352,10 +352,12 @@ class GROOMLAB_OT_add_node_before_output(GroomOperator):
 
     def execute(self, context):
         scalp = active_groom(context)
+        from . import pipeline
         try:
-            made, error = graph.add_node(scalp, self.type)
-            if self.type == "Wind":
-                graph.set_param(scalp, made, "strength", 0.3)  # Maya's add_wind
+            if self.type in ("Wind", "Jiggle"):  # every host's place for motion (graph_inserts.h insertMotion)
+                made, error = pipeline.add_motion(scalp, self.type), None
+            else:
+                made, error = graph.add_node(scalp, self.type)
         except HelperError as e:
             return _fail(self, e)
         graph_tree.graph_changed(scalp)

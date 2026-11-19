@@ -488,6 +488,21 @@ void bindStrands(py::module_& m) {
     m.def("with_graph_file_params",
           [](const std::string& graphJson, const std::map<std::string, std::string>& paths) { return withGraphFileParams(graphJson, paths); },
           py::arg("graph_json"), py::arg("paths"), "The graph with the file params `paths` labels naming their new paths.");
+    m.def(
+        "follow_scene_groom_file",
+        [](const std::string& file, const std::string& oldScene, const std::string& newScene) {
+            const FollowedGroomFile f = followSceneGroomFile(file, oldScene, newScene);
+            py::dict out;
+            out["path"] = f.path;
+            out["copied"] = f.copied;
+            out["renamed"] = f.renamed;
+            return out;
+        },
+        py::arg("file"), py::arg("old_scene"), py::arg("new_scene"),
+        "Save As: the scene's own groom file copied beside the new scene (asset_files.h): {path ('' not the scene's), copied, renamed}.");
+    m.def("free_file_path", &freeFilePath, py::arg("path"),
+          "`path` when nothing is there (a file, or a tile set it names), else the first free <stem>_2<ext>... beside it.");
+    m.def("is_network_path", &isNetworkPath, py::arg("path"), "Whether a path is on another machine (//host/share).");
     m.def("file_there", &fileThere, py::arg("path"),
           "Whether a file a groom names is there: a file, or a UDIM tile set when any tile is (every host's check).");
     py::class_<FileIndex>(m, "FileIndex", "A folder's files by name for Find Missing Files (index_folder).");

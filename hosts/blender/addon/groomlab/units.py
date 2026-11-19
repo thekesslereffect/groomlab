@@ -8,8 +8,30 @@ spec's other units with a fixed suffix."""
 import json
 
 SCENE_LENGTH = {"length", "width"}
-FRACTION_FACTOR = 100.0  # a fraction shows as a percentage (every host's: choices.json unitFixed)
-SUFFIX = {"density": "/cm²", "angle": "°", "turns": " turns", "seconds": " s", "pixels": " px"}
+SUFFIX = {"density": "/cm²"}  # hairs per cm² (the fixed units' come from choices.json unitFixed)
+
+
+_FIXED = {}
+
+
+def _fixed():
+    """{unit: (suffix, factor)} of the spec's units no one picks, every host's (engine/ui/choices.json
+    unitFixed): a word after a space, a sign (%, °) right after the number. Read once."""
+    if not _FIXED:
+        from . import definitions
+        for c in definitions.choices("unitFixed"):
+            label = c.get("label") or ""
+            _FIXED[c["value"]] = (label if label[:1] and not label[:1].isalpha() else " " + label, float(c.get("factor", 1.0)))
+    return _FIXED
+
+
+def fraction_factor():
+    """What a fraction is shown times (a percentage: unitFixed's factor)."""
+    return _factor("fraction")
+
+
+def _factor(unit):
+    return _fixed().get(unit, ("", 1.0))[1]
 
 
 def meters_per_unit(scene):
@@ -60,8 +82,8 @@ def to_ui(unit, value, scene):
         return value / cm_per_unit(scene)
     if unit == "perLength":
         return value * cm_per_unit(scene)
-    if unit == "fraction":
-        return value * FRACTION_FACTOR
+    if unit in ("fraction", "angle", "turns", "seconds", "pixels"):
+        return value * _factor(unit)
     return value
 
 
@@ -70,8 +92,8 @@ def from_ui(unit, value, scene):
         return value * cm_per_unit(scene)
     if unit == "perLength":
         return value / cm_per_unit(scene)
-    if unit == "fraction":
-        return value / FRACTION_FACTOR
+    if unit in ("fraction", "angle", "turns", "seconds", "pixels"):
+        return value / _factor(unit)
     return value
 
 
@@ -87,4 +109,6 @@ def suffix(unit, scene):
     if unit == "perLength":
         metric = scene is not None and scene.unit_settings.system != "NONE" and abs(meters_per_unit(scene) - 1.0) < 1e-9
         return " /m" if metric else " /unit"
-    return SUFFIX.get(unit, "")
+    if unit == "fraction":
+        return ""  # (its field shows the percent sign: FloatProperty subtype PERCENTAGE)
+    return SUFFIX.get(unit) or _fixed().get(unit, ("", 1.0))[0]

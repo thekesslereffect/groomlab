@@ -46,6 +46,10 @@ struct CorrectiveLayer {
     float weightAt(double seconds) const;
     // Full weight on every frame: no keys, held before and after (a sculpt; else a shot fix).
     bool allFrames() const { return weightCurve.empty() && holdBefore && holdAfter; }
+    // A fix's fades as keys (seconds, weight), every host's when it is first keyed: 0 at the fade
+    // in's start (none when it holds before or has no fade in), its weight at `time`, 0 at the fade
+    // out's end (likewise). Empty for a keyed layer or one on every frame.
+    std::vector<std::pair<double, float>> fadeKeys() const;
     // The weight curve's value at `seconds` set (a key added, or the one there changed), kept sorted.
     void keyAt(double seconds, float w);
 };

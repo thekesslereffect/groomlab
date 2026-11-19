@@ -221,7 +221,7 @@ MStatus ConvertCmd::doIt(const MArgList& args) {
             const std::string node = flagString(db, kNode[0]).asChar();
             const double density = flagDouble(db, kDensity[0], 1.0);
             if (density <= 0.0 || density > 1.0) return fail(kName, "-density is above 0, at most 1");
-            int maxCount = 20000;
+            int maxCount = static_cast<int>(kDefaultMeshStrands);  // every host's (strand_geometry.h)
             if (db.isFlagSet(kMaxCount[0])) db.getFlagArgument(kMaxCount[0], 0, maxCount);
             if (maxCount < 1) return fail(kName, "-maxCount is at least 1");
             // A mesh that may be of cards: the Cards nodes build them on this evaluation.
@@ -250,28 +250,20 @@ MStatus ConvertCmd::doIt(const MArgList& args) {
             const StrandSet kept = keep.size() == total_ ? *strands : strands->subset(keep);
 
             if (db.isFlagSet(kStrandMesh[0])) {
-                StrandMeshOptions o;
-                const std::string make = flagString(db, kMake[0], "auto").asChar();
-                if (make == "strands") o.make = StrandMeshOptions::Make::Strands;
-                else if (make == "scales") o.make = StrandMeshOptions::Make::Scales;
-                else if (make == "feathers") o.make = StrandMeshOptions::Make::Feathers;
-                else if (make == "cards") o.make = StrandMeshOptions::Make::Cards;
-                else if (make == "instances") o.make = StrandMeshOptions::Make::Instances;
-                else if (make != "auto") return fail(kName, "-make is auto, strands, scales, feathers, cards or instances");
-                const std::string style = flagString(db, kStyle[0], "tube").asChar();
-                if (style != "tube" && style != "ribbon") return fail(kName, "-style is tube or ribbon");
-                o.style = style == "ribbon" ? StrandMeshOptions::Style::Ribbon : StrandMeshOptions::Style::Tube;
+                // Every host's To Mesh (strand_geometry.h): the options checked, scales, feathers,
+                // cards and instances whole, tubes thinned.
                 int sides = 4;
                 if (db.isFlagSet(kSides[0])) db.getFlagArgument(kSides[0], 0, sides);
-                if (sides < 3 || sides > 64) return fail(kName, "-sides is 3 to 64");
-                o.sides = sides;
-                o.widthScale = static_cast<float>(flagDouble(db, kWidthScale[0], 1.0));
-                if (o.widthScale <= 0.0f) return fail(kName, "-widthScale is above 0");
-                o.strandUVs = db.isFlagSet(kStrandUVs[0]);
+                StrandMeshOptions o;
+                try {
+                    o = strandMeshOptionsFrom(flagString(db, kMake[0], "auto").asChar(), flagString(db, kStyle[0], "tube").asChar(), sides,
+                                              flagDouble(db, kWidthScale[0], 1.0), 0.0, db.isFlagSet(kStrandUVs[0]));
+                } catch (const std::invalid_argument& e) {
+                    return fail(kName, (std::string("-") + e.what()).c_str());
+                }
                 const MeshPtr scalp = joinedScalpFromNode(groomPath.node());  // roots on every scalp of the groom
-                // Scales and feathers whole (their plates and rachis are the strand set's); tubes thinned.
-                const bool whole = resolveMeshMake(*strands, o) != StrandMeshOptions::Make::Strands;
-                if (whole) made_ = total_;
+                const std::optional<StrandSet> thinned = strandsForMesh(*strands, o, static_cast<std::size_t>(maxCount));
+                made_ = thinned ? thinned->strandCount() : total_;
                 std::map<std::string, InstancePrototype> scene;  // the instances' prototypes, read once each
                 const PrototypeLookup prototypes = [&scene](const std::string& name) -> const InstancePrototype* {
                     auto it = scene.find(name);
@@ -281,7 +273,7 @@ MStatus ConvertCmd::doIt(const MArgList& args) {
                     }
                     return it->second.found ? &it->second : nullptr;
                 };
-                strandMesh_ = buildStrandMesh(whole ? *strands : kept, scalp.get(), o, prototypes);
+                strandMesh_ = buildStrandMesh(thinned ? *thinned : *strands, scalp.get(), o, prototypes);
                 if (strandMesh_.mesh.faceCounts.empty()) return fail(kName, "nothing to make a mesh of (no faces)");
                 mesh_ = true;
                 rootName_ = flagString(db, kNameFlag[0], (prefix + "_strandMesh").c_str());

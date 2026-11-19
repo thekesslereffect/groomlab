@@ -408,15 +408,7 @@ MStatus BakeCardsCmd::doIt(const MArgList& args) {
             if (db.isFlagSet("-pre")) {  // a card map export, as its preset packs it
                 MString presetText;
                 db.getFlagArgument("-pre", 0, presetText);
-                const std::string text = presetText.asChar();
-                CardMapPreset preset;
-                if (!text.empty() && text.front() == '{') {
-                    preset = cardMapPresetFromJson(text);
-                } else if (const auto found = findCardMapPreset(text)) {
-                    preset = *found;
-                } else {
-                    throw std::runtime_error("no card map preset named '" + text + "'");
-                }
+                const CardMapPreset preset = cardMapPresetFromText(presetText.asChar());  // every host's (card_maps.h)
                 CardMapExport settings;
                 settings.resolution = resolution > 0 ? std::clamp(resolution, kMinBakeResolution, kMaxMapBakeResolution) : 0;
                 MString value;

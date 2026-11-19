@@ -59,10 +59,7 @@ std::string graphTextOf(const GroomSession& g) {
 
 // The groom's scalp size at the size its params are at (helper.cpp's scalpSize).
 std::optional<double> groomSizeOf(const Session& s) {
-    const MeshPtr& scalp = s.groom->rawScalp();
-    std::optional<double> size = scalp ? presetScalpSize(*scalp) : std::nullopt;
-    if (size) *size /= s.groom->groomScale();
-    return size;
+    return paramScalpSize(s.groom->rawScalp().get(), s.groom->groomScale());
 }
 
 json graphJsonOf(const GraphEdit& edit) {
@@ -397,6 +394,8 @@ double secondsOf(const Session& s, double frame) { return frameToSeconds(frame, 
 json layerJson(const Session& s, const CorrectiveLayer& l) {
     json keys = json::array();
     for (const auto& [seconds, w] : l.weightCurve) keys.push_back({frameOf(s, seconds), w});
+    json fadeKeys = json::array();  // a fix's fades as keys, as the core keys them first (correctives.h)
+    for (const auto& [seconds, w] : l.fadeKeys()) fadeKeys.push_back({frameOf(s, seconds), w});
     json frame = nullptr;
     if (!l.weightCurve.empty()) {
         const auto peak = std::max_element(l.weightCurve.begin(), l.weightCurve.end(), [](const auto& a, const auto& b) { return a.second < b.second; });
@@ -411,6 +410,7 @@ json layerJson(const Session& s, const CorrectiveLayer& l) {
               {"weightNow", l.enabled ? l.weightAt(s.seconds) : 0.0f},
               {"keyed", !l.weightCurve.empty()},
               {"keys", keys},
+              {"fadeKeys", fadeKeys},
               {"allFrames", l.allFrames()},
               {"frame", frame},
               {"fadeIn", l.fadeIn * fpsOf(s)},
@@ -736,7 +736,8 @@ bool runGraphAuthoring(Session& s, const std::string& op, const json& args, json
     } else if (op == "compound_expose") {
         const std::string name = needString(args, "name");
         if (!edit.hasNode(name)) fail("not_found", "no node '" + name + "'");
-        compoundExposeRequest(edit, name, needString(args, "param"), needString(args, "target"));
+        // (No "param": named after the inner param, or node + Param when taken: the core's.)
+        compoundExposeRequest(edit, name, optString(args, "param", ""), needString(args, "target"));
         label = "expose compound param";
     } else if (op == "compound_unexpose") {
         const std::string name = needString(args, "name");

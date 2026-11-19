@@ -103,11 +103,7 @@ FbxMesh scalesFbxMesh(const ScaleMesh& sm, const std::string& name) {
     m.points = sm.points;
     const std::size_t faces = sm.triangleCount();
     m.faceCounts.assign(faces, 3);
-    std::vector<std::uint32_t> owner(faces, 0);
-    for (std::size_t k = 0; k < sm.scales.size(); ++k) {
-        const ScaleMesh::Scale& sc = sm.scales[k];
-        for (std::uint32_t f = sc.firstTriangle; f < sc.firstTriangle + sc.triangleCount && f < faces; ++f) owner[f] = static_cast<std::uint32_t>(k);
-    }
+    const std::vector<std::uint32_t> owner = sm.triangleOwners();
     std::vector<float> scaleUV, scaleData, color, rootColor;
     for (std::size_t c = 0; c < sm.triangles.size(); ++c) {
         const std::uint32_t v = sm.triangles[c];

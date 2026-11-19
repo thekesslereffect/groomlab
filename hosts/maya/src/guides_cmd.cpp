@@ -735,24 +735,12 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                 if (!shape) return fail(kName, "the groom node is not loaded");
                 const MString nodeName = flagString(db, kFromNode[0], "");
                 if (nodeName.length() == 0) return fail(kName, "-fromNode needs a graph node name");
-                GroupId gid = kNoGroup;
-                if (!rootGroup(&gid)) return MS::kFailure;
-                const Value value = shape->evaluateNode(nodeName.asChar(), static_cast<float>(flagDouble(db, kDensity[0], 1.0)));
-                GuideSet baked;
-                if (const GuidesPtr* guides = std::get_if<GuidesPtr>(&value); guides && *guides) {
-                    baked = **guides;
-                } else if (const StrandsPtr* strands = std::get_if<StrandsPtr>(&value); strands && *strands) {
-                    for (std::size_t i = 0; i < (*strands)->strandCount(); ++i) {  // one guide per strand
-                        const Vec3f* p = (*strands)->strandPoints(i);
-                        baked.add((*strands)->ids()[i], std::vector<Vec3f>(p, p + (*strands)->strandPointCount(i)));
-                    }
-                } else {
-                    return fail(kName, "node '" + nodeName + "' does not output guides or strands (nothing to bake)");
-                }
-                if (baked.empty()) return fail(kName, "node '" + nodeName + "' made no guides");
+                const std::optional<GuideSet> baked =  // every host's (graph.h, guide_hierarchy.h)
+                    guidesOfValue(shape->evaluateNode(nodeName.asChar(), static_cast<float>(flagDouble(db, kDensity[0], 1.0))));
+                if (!baked) return fail(kName, "node '" + nodeName + "' does not output guides or strands (nothing to bake)");
+                if (baked->empty()) return fail(kName, "node '" + nodeName + "' made no guides");
                 MStringArray added;
-                for (const GuideId id : h->addGuides(gid, baked, tubeFlags())) {
-                    h->setPoints(id, h->withGroupSegments(gid, h->guide(id)->points));  // the group's segments, if it has its own
+                for (const GuideId id : h->addBakedGuides(flagString(db, kGroup[0], "primary").asChar(), *baked, tubeFlags())) {
                     added.append(std::to_string(id).c_str());
                 }
                 setResult(added);
