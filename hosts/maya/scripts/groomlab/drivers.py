@@ -147,25 +147,10 @@ def _attach(groom, guides_by_driver, frame):
 
 
 def _resampled(points, count):
-    """`points` (a polyline) as `count` points evenly spaced along its length."""
-    if len(points) < 2 or count < 2:
-        return [tuple(points[0])] * max(count, 1)
-    lengths = [0.0]
-    for a, b in zip(points, points[1:]):
-        lengths.append(lengths[-1] + sum((b[i] - a[i]) ** 2 for i in range(3)) ** 0.5)
-    total = lengths[-1] or 1.0
-    out, seg = [], 0
-    for k in range(count):
-        s = total * k / (count - 1)
-        while seg < len(points) - 2 and lengths[seg + 1] < s:
-            seg += 1
-        span = lengths[seg + 1] - lengths[seg]
-        t = (s - lengths[seg]) / span if span > 0 else 0.0
-        t = min(max(t, 0.0), 1.0)
-        a, b = points[seg], points[seg + 1]
-        out.append(tuple(a[i] + (b[i] - a[i]) * t for i in range(3)))
-    return out
-
+    """`points` (a polyline) as `count` points evenly spaced along its length (the core's,
+    curve.h resampleByArcLength)."""
+    import groomlab_core
+    return [tuple(p) for p in groomlab_core.resample_by_arc_length([tuple(p) for p in points], count)]
 
 def _guide_points(groom, guide_id):
     """A guide's points as groomed (not posed), on the scalp as it is now, in world space."""

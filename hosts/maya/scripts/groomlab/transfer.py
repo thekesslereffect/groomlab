@@ -14,13 +14,15 @@ from groomlab.groom import clear_rest_mesh, set_rest_mesh
 # The transfer methods (engine transfer.h), in the order the dialogs list them.
 METHODS = ("closest", "bounds", "markersAlign", "markersWarp", "uv")
 MARKER_METHODS = ("markersAlign", "markersWarp")
-METHOD_LABELS = {
-    "closest": "Closest point",
-    "bounds": "Fit bounding boxes",
-    "markersAlign": "Markers: align (move, turn, scale)",
-    "markersWarp": "Markers: warp (follows proportions)",
-    "uv": "Matching UVs",
-}
+
+
+def _method_labels():
+    """The methods' labels: every host's, engine/ui/choices.json's transferMethod."""
+    from groomlab.ui import definitions
+    return {c["value"]: c["label"] for c in definitions.choices("transferMethod")}
+
+
+METHOD_LABELS = _method_labels()
 
 
 def transfer_groom(groom, scalp, fit=False, maps=True, color_sets=False, report=None, method=None, markers=None,

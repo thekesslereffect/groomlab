@@ -13,6 +13,7 @@
 #include "groomlab/scale_maps.h"
 #include "groomlab/scales.h"
 #include "groomlab/subdivision.h"
+#include "groomlab/curve.h"
 #include "groomlab/texture.h"
 #include "groomlab/asset_files.h"
 #include "groomlab/udim.h"
@@ -471,6 +472,9 @@ void bindStrands(py::module_& m) {
           [](const std::string& path) { return std::const_pointer_cast<Texture>(loadTexture(path)); },
           py::arg("path"), "Loads an image through the process-wide cache. Raises TextureError.");
     m.def("file_stamp", &fileStamp, py::arg("path"), "Hash of a file's path, size and modification time (0 if missing).");
+    m.def("resample_by_arc_length",
+          [](const std::vector<Vec3f>& points, std::size_t count) { return resampleByArcLength(points.data(), points.size(), count); },
+          py::arg("points"), py::arg("count"), "A polyline as `count` points evenly spaced along its length (curve.h, every host's).");
     m.def("is_gray_image", [](const std::string& path) { return isGrayImage(*loadTexture(path)); }, py::arg("path"),
           "Whether an image (a UDIM tile set: every tile) holds no color, r = g = b everywhere. Raises TextureError.");
     m.def("same_map_image", &sameMapImage, py::arg("source"), py::arg("target"),

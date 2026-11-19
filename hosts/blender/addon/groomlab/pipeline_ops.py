@@ -800,15 +800,8 @@ class GROOMLAB_OT_add_sample(_Tipped, bpy.types.Operator):
 
 # ---- Transfer Groom to Scalp -----------------------------------------------------------------------------
 
-METHOD_LABELS = {  # Maya's transfer.METHOD_LABELS
-    "closest": ("Closest point", "Where the new scalp is nearest (the same place and size)"),
-    "bounds": ("Fit bounding boxes", "The old scalp's bounds moved and scaled onto the new one's first"),
-    "markersAlign": ("Markers: align (move, turn, scale)",
-                     "3+ marker pairs (the groom's stored ones) give the best move, turn and scale"),
-    "markersWarp": ("Markers: warp (follows proportions)",
-                    "4+ marker pairs (the groom's stored ones) spread over the head bend space onto the new one"),
-    "uv": ("Matching UVs", "Both meshes laid out alike in UV; each root at its UV"),
-}
+# The methods' labels and tips: every host's (engine/ui/choices.json transferMethod).
+METHOD_LABELS = {c["value"]: (c["label"], c.get("tip", "")) for c in defs.choices("transferMethod")}
 
 
 def _target_candidates(context, scalp):
