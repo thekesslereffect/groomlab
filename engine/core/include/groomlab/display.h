@@ -266,12 +266,16 @@ std::size_t appendGuideCurve(DisplayGeometry& geometry, const std::vector<Vec3f>
 // The guides whose tubes the Shape brush's wire shows: every guide of two or more points not in a
 // hidden group (parseHiddenGuideGroups of `hiddenGuideGroups`) and not frozen (its `freeze` layer,
 // inherited, 0.5 or more): the ones the brush can shape. In the hierarchy's order.
+// `tubeViewGroup` (Lock view): that group's guides instead, hidden or not.
+// `mixedView` (MixedView): its hierarchy's guides shown or not as it says, hidden groups or not.
 std::vector<const HierarchyGuide*> activeTubeGuides(const GuideHierarchy& hierarchy, const std::string& hiddenGuideGroups,
-                                                    const std::string& freeze = "freeze");
+                                                    const std::string& freeze = "freeze", const std::string& tubeViewGroup = "",
+                                                    const std::string& mixedView = "");
 // A guide's tube as a shaded surface: its shape's outline at rings along it, each section turned,
 // flattened and sized as the tube says (tube.h; widths times scale, the size shown), open at the tip
-// (no cap): kAlong + 1 = 25 rings of the same count, root to tip.
-void appendTubeSurface(DisplayGeometry& geometry, const HierarchyGuide& guide, float scale = 1.0f);
+// (no cap): rings of the same count, root to tip (a plain round tube: 25; a shaped one: one on each
+// guide point and the same number between each two). Returns its ring count (0: none drawn).
+std::size_t appendTubeSurface(DisplayGeometry& geometry, const HierarchyGuide& guide, float scale = 1.0f);
 // The same tube as a wire (what the hosts draw while the Shape brush is on): its shape's outline at
 // every guide point, where the sections the brush paints sit (every `ringStep`-th point's, the
 // root's and the tip's always), and `lengthwise` lines along the tube through the same outline
@@ -289,8 +293,33 @@ struct TubeDisplayOptions {
     // Each tube in its root tube's color (rootTubeColor: a tube's split tubes and children in its
     // color), else its own from its ID; with Shaded the colors on the surfaces, the wires gray.
     bool colors = false;
+    // Colors (Tube levels): each tube of a tube hierarchy's levels (a split tube) a shade of its own
+    // on top of its color (its root tube's with Colors), so a level's tubes tell apart.
+    bool levelColors = false;
     std::string hiddenGuideGroups;
+    // The tube hierarchy's Lock view: a guide group's name whose tubes alone draw (shown or hidden as
+    // guides); the guides draw as hiddenGuideGroups says. "": tubes as their guides.
+    std::string tubeViewGroup;
+    std::string mixedView;  // the tube hierarchy's Mixed view (MixedView): "<base group>:<level>", "" off
 };
+// The tube hierarchy's Mixed view ("<base group>:<level>", "" off): working on a level, its guides
+// and tubes show, and the tubes (not the guides) of the levels above that no level below continues
+// (a guide there with no children); the hierarchy's others not, whichever of its groups are hidden.
+class MixedView {
+public:
+    MixedView(const GuideHierarchy* hierarchy, const std::string& spec);
+    // 1 its guide and tube shown (the level worked on), 2 its tube alone (a level above, not
+    // continued), 0 neither, -1 not the hierarchy's (or the view off): as its group says.
+    int shows(const GuideHierarchy& hierarchy, const HierarchyGuide& g) const;
+    bool on() const { return level_ > 0; }
+
+private:
+    std::string base_;
+    int level_ = 0;
+    std::set<GuideId> parents_;
+};
+// Whether a guide of group `name` (hidden: its guides hidden) draws its tube under `tubeViewGroup`.
+bool tubeDrawn(const std::string& tubeViewGroup, const std::string& name, bool hidden);
 struct TubeDisplay {
     // Line lists (a segment's two ends a pair). `wires` carries colors (r g b a per vertex) when
     // they vary (Colors, a solo), else draw it in wireColor; `selectedWires` warm, opaque, thicker.
@@ -447,6 +476,7 @@ struct DisplaySettings {
     // a shaded surface a little inside it (tubeShaded), each in its root tube's color with
     // tubeColors (buildTubeDisplay).
     bool tubeWires = false, tubeShaded = false, tubeColors = false;
+    bool tubeLevelColors = false;  // Colors (Tube levels): each split tube a shade of its own (TubeDisplayOptions::levelColors)
     bool movingGuides = true;  // the moving guides (DisplayInputs::movingGuides) over the groomed ones
     float guideWidth = 2.0f;
     // 1: the painted layer guideColorLayer, black 0 to white 1; anything else (0): each group's
@@ -463,6 +493,8 @@ struct DisplaySettings {
     int guidePoints = 1;     // dots: 0 off, 1 roots and tips, 2 all
     int guideSmoothing = 4;  // pieces per segment (1 straight)
     std::string hiddenGuideGroups, guideGroupColors;
+    std::string tubeViewGroup;  // Lock view: the group whose tubes alone draw ("": tubes as their guides; TubeDisplayOptions)
+    std::string mixedView;      // Mixed view: "<base group>:<level>" (MixedView), "" off
     // Overlays and cards.
     bool flow = true;
     bool drawCards = false;     // the cards draw here (cardsView, and no card mesh draws them)

@@ -4,12 +4,17 @@
 #include <algorithm>
 #include <cmath>
 #include <set>
+#include <utility>
+#include <vector>
 
 #include <QAction>
 #include <QActionGroup>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QIcon>
+#include <QSize>
 #include <QEvent>
+#include <QFont>
 #include <QFormLayout>
 #include <QFrame>
 #include <QHBoxLayout>
@@ -27,6 +32,7 @@
 #include <nlohmann/json.hpp>
 
 #include "groomlab/brush.h"
+#include "groomlab/root_subdivision.h"
 #include "groomlab/root_tubes.h"
 #include "groomlab/tube.h"
 
@@ -40,6 +46,65 @@
 #include "tube_shape_editor.h"
 
 namespace groomlab::app {
+
+namespace {
+
+// Two widgets on a row: the lead at the left at its own width, the trail at the right, the space
+// between them free. When the lead grows into the trail (more level buttons than fit), the trail
+// goes down to a row of its own, still on the right (Maya's root_tube_card.LeadTrailLayout).
+class LeadTrailLayout : public QLayout {
+public:
+    LeadTrailLayout(QWidget* lead, QWidget* trail, QWidget* parent) : QLayout(parent) {
+        setContentsMargins(0, 0, 0, 0);
+        addWidget(lead);
+        addWidget(trail);
+    }
+    ~LeadTrailLayout() override {
+        for (QLayoutItem* item : items_) delete item;
+    }
+    void addItem(QLayoutItem* item) override { items_.push_back(item); }
+    int count() const override { return static_cast<int>(items_.size()); }
+    QLayoutItem* itemAt(int index) const override {
+        return index >= 0 && index < count() ? items_[static_cast<std::size_t>(index)] : nullptr;
+    }
+    QLayoutItem* takeAt(int index) override {
+        if (index < 0 || index >= count()) return nullptr;
+        QLayoutItem* item = items_[static_cast<std::size_t>(index)];
+        items_.erase(items_.begin() + index);
+        return item;
+    }
+    Qt::Orientations expandingDirections() const override { return {}; }
+    bool hasHeightForWidth() const override { return true; }
+    int heightForWidth(int width) const override { return place(QRect(0, 0, width, 0), false); }
+    QSize minimumSize() const override {
+        QSize size;
+        for (QLayoutItem* item : items_) size = size.expandedTo(item->minimumSize());
+        return size;
+    }
+    QSize sizeHint() const override { return minimumSize(); }
+    void setGeometry(const QRect& rect) override {
+        QLayout::setGeometry(rect);
+        place(rect, true);
+    }
+
+private:
+    int place(const QRect& rect, bool apply) const {
+        if (items_.size() < 2) return 0;
+        const QSize lead = items_[0]->sizeHint(), trail = items_[1]->sizeHint();
+        const int gap = 8, below = 4;
+        const bool oneRow = lead.width() + gap + trail.width() <= rect.width();
+        if (apply) {
+            items_[0]->setGeometry(QRect(rect.x(), rect.y(), std::min(lead.width(), rect.width()), lead.height()));
+            const int y = oneRow ? rect.y() : rect.y() + lead.height() + below;
+            items_[1]->setGeometry(QRect(rect.right() + 1 - trail.width(), y, trail.width(), trail.height()));
+        }
+        return oneRow ? std::max(lead.height(), trail.height()) : lead.height() + below + trail.height();
+    }
+    std::vector<QLayoutItem*> items_;
+};
+
+}  // namespace
+
 
 namespace {
 
@@ -183,10 +248,14 @@ TubePanel::TubePanel(QWidget* parent) : QWidget(parent) {
         colors_->setToolTip(tr("Color each tube as the root tube it comes from (its split tubes and children in its color), a "
                                "color of its own without one"));
         colors_->setChecked(true);
+        levelColors_ = new QCheckBox(tr("Colors (Tube levels)"), profileBlock_);
+        levelColors_->setObjectName(QStringLiteral("tubeLevelColors"));
+        levelColors_->setToolTip(tr("Each tube of a tube hierarchy's levels (a split tube) in a shade of its own on top of its root "
+                                    "tube's color, so the tubes of a level tell apart"));
         always_ = new QCheckBox(tr("Always visible"), profileBlock_);
         always_->setObjectName(QStringLiteral("tubesAlwaysVisible"));
         always_->setToolTip(tr("Keep the tubes drawn whichever tool is up (Comb, Select, ...), not only the Tube tool"));
-        for (QCheckBox* box : {shaded_, wireframe_, colors_, always_}) {
+        for (QCheckBox* box : {shaded_, wireframe_, colors_, levelColors_, always_}) {
             connect(box, &QCheckBox::toggled, this, [this] { emit displayChanged(); });
             profileBlock_->rows()->addWidget(switchRow(profileBlock_, box));
         }
@@ -361,14 +430,54 @@ TubePanel::TubePanel(QWidget* parent) : QWidget(parent) {
                                  tr("Copy the selected roots: the copies follow the cursor over the scalp, a click sets them down. "
                                     "Again: stop"),
                                  true, &TubePanel::duplicateRoots);
-        // Two rows of chips that wrap on a narrow card (the modes; then Undo CV, Delete, Duplicate).
-        for (const std::array<QAbstractButton*, 3>& row : {std::array<QAbstractButton*, 3>{drawRoot_, editRoots_, selectRoot_},
-                                                           std::array<QAbstractButton*, 3>{undoCv_, deleteRoots_, duplicateRoots_}}) {
+        subdivideRoots_ = button(tr("Subdivide"), "rootTubeSubdivide",
+                                 tr("Cut the selected roots into Voronoi cells, each a root tube in the level below following the old "
+                                    "tube, by the density map (tubeSubdivisionDensity, made at 0.5 the first time) and the "
+                                    "multiplier. A cell cut again is a destructive cut: the map and Apply leave it be"),
+                                 false, &TubePanel::subdivideRoots);
+        paintDensity_ = button(QString(), "rootTubePaintDensity",
+                               tr("Paint subdivision density: the density map on the scalp (Subdivide makes it): white, more and "
+                                  "smaller roots; black, fewer and larger. Again, or another tool, stops painting; Apply cuts by it"),
+                               true, &TubePanel::paintDensity);
+        paintDensity_->setIcon(QIcon(tintedIcon(QStringLiteral(":/groomlab/icons/groomLab_paint.svg"), theme::textMuted(), 22,
+                                                paintDensity_->devicePixelRatioF())));
+        paintDensity_->setIconSize(QSize(22, 22));
+        applyDensity_ = button(tr("Apply"), "rootTubeApplyDensity",
+                               tr("Cut the subdivided roots again all over, by the density map and the multiplier as they are now (the "
+                                  "cells' grooming and tube hierarchy kept)"),
+                               false, &TubePanel::applyDensity);
+        multiplier_ = committingSlider(0.25, 4.0, 0.05, 20.0, 2, &TubePanel::setMultiplier);
+        multiplier_->setObjectName(QStringLiteral("rootSubdivisionMultiplier"));
+        multiplier_->setCaption(tr("Multiplier"));
+        multiplier_->setValue(1.0);
+        multiplier_->setToolTip(tr("Subdivision multiplier: how dense the cuts are overall, with the painted density: 1 as painted, "
+                                   "2 about twice the roots (each smaller), 0.5 half. Apply cuts again at it"));
+        // Rows of chips that wrap on a narrow card (the modes; Undo CV, Delete, Duplicate; Subdivide
+        // and Paint subdivision density).
+        for (const std::vector<QAbstractButton*>& row : {std::vector<QAbstractButton*>{drawRoot_, editRoots_, selectRoot_},
+                                                         std::vector<QAbstractButton*>{undoCv_, deleteRoots_, duplicateRoots_}}) {
             FlowLayout* flow = nullptr;
             QWidget* line = chipRow(rootsBlock_, &flow);
             for (QAbstractButton* b : row) flow->addWidget(b);
             rootsBlock_->rows()->addWidget(line);
         }
+        // Subdivide | the paint brush | Multiplier | Apply: one row however narrow the card.
+        auto* cutRow = new QWidget(rootsBlock_);
+        auto* cutLayout = new QHBoxLayout(cutRow);
+        cutLayout->setContentsMargins(0, 0, 0, 0);
+        cutLayout->setSpacing(4);
+        for (const auto& [w, stretch] : {std::pair<QWidget*, int>{subdivideRoots_, 2}, std::pair<QWidget*, int>{paintDensity_, 0},
+                                         std::pair<QWidget*, int>{multiplier_, 3}, std::pair<QWidget*, int>{applyDensity_, 2}}) {
+            if (stretch) {
+                w->setSizePolicy(QSizePolicy::Ignored, w->sizePolicy().verticalPolicy());
+                w->setMinimumWidth(40);
+            } else {
+                w->setSizePolicy(QSizePolicy::Fixed, w->sizePolicy().verticalPolicy());
+                w->setFixedWidth(34);
+            }
+            cutLayout->addWidget(w, stretch);
+        }
+        rootsBlock_->rows()->addWidget(cutRow);
         rootSnap_ = new QCheckBox(tr("Snap to neighbours"), rootsBlock_);
         rootSnap_->setObjectName(QStringLiteral("rootTubeSnap"));
         rootSnap_->setToolTip(tr("A CV near a neighbouring root's CV or edge snaps onto it, so the tubes meet with no gap"));
@@ -410,30 +519,56 @@ TubePanel::TubePanel(QWidget* parent) : QWidget(parent) {
     levelsBlock_->titleLabel()->setToolTip(tr("Tube levels: each level splits the tubes above it in two. Shaping a tube carries the "
                                               "smaller tubes inside it; pick a level to edit its tubes"));
     {
-        addLevel_ = new QPushButton(tr("Add"), levelsBlock_);
+        addLevel_ = new QPushButton(QStringLiteral("+"), levelsBlock_);
         addLevel_->setObjectName(QStringLiteral("tubeLevelAdd"));
         addLevel_->setToolTip(tr("Split each selected tube in two (with none selected: every tube of the base group), sharing its "
                                  "root shape: a level deeper"));
         connect(addLevel_, &QPushButton::clicked, this, [this] { addLevel(); });
-        removeLevel_ = new QPushButton(tr("Remove"), levelsBlock_);
+        removeLevel_ = new QPushButton(QString(QChar(0x2212)), levelsBlock_);
         removeLevel_->setObjectName(QStringLiteral("tubeLevelRemove"));
         removeLevel_->setToolTip(tr("Undo a split: with tubes selected, theirs only (a split tube's deepest split tubes, or a split "
                                     "tube back into its parent); with none, the deepest level everywhere"));
         connect(removeLevel_, &QPushButton::clicked, this, [this] { removeLevel(); });
-        auto* line = new QHBoxLayout();
-        line->setContentsMargins(0, 0, 0, 0);
-        line->setSpacing(4);
-        line->addWidget(addLevel_, 1);
-        line->addWidget(removeLevel_, 1);
-        levelsBlock_->rows()->addLayout(line);
+        for (QPushButton* b : {addLevel_, removeLevel_}) {
+            QFont font = b->font();
+            font.setBold(true);
+            b->setFont(font);
+            b->setFixedWidth(30);
+        }
         levelBaseLabel_ = new QLabel(levelsBlock_);
         levelBaseLabel_->setObjectName(QStringLiteral("tubeLevelBase"));
         levelBaseLabel_->setProperty("role", "hint");
         levelsBlock_->rows()->addWidget(levelBaseLabel_);
-        levelRow_ = new QHBoxLayout();
+        // One row: the level buttons on the left (fillLevels fills them), + and - on the right;
+        // levels reaching + and - push them down to a row of their own.
+        levelLine_ = new QWidget(levelsBlock_);
+        auto* levels = new QWidget(levelLine_);
+        levelRow_ = new QHBoxLayout(levels);
         levelRow_->setContentsMargins(0, 0, 0, 0);
         levelRow_->setSpacing(4);
-        levelsBlock_->rows()->addLayout(levelRow_);
+        auto* edits = new QWidget(levelLine_);
+        auto* editRow = new QHBoxLayout(edits);
+        editRow->setContentsMargins(0, 0, 0, 0);
+        editRow->setSpacing(4);
+        editRow->addWidget(addLevel_);
+        editRow->addWidget(removeLevel_);
+        new LeadTrailLayout(levels, edits, levelLine_);
+        levelsBlock_->rows()->addWidget(levelLine_);
+        lockView_ = new QCheckBox(tr("Lock view"), levelsBlock_);
+        lockView_->setObjectName(QStringLiteral("tubeLockView"));
+        lockView_->setToolTip(tr("Keep the tubes of the level shown now in view while you pick other levels to work on, whose "
+                                 "guides show. Only the tubes' view: the other visibility controls work as they do"));
+        connect(lockView_, &QCheckBox::toggled, this, [this](bool on) {
+            lockedLevel_ = on ? shownLevel_ : 0;
+            applyTubeViews();
+        });
+        mixedView_ = new QCheckBox(tr("Mixed view"), levelsBlock_);
+        mixedView_->setObjectName(QStringLiteral("tubeMixedView"));
+        mixedView_->setToolTip(tr("Working on a level, also show the tubes (not the guides) of the levels above where no level below "
+                                  "continues them, and their roots in Select root and Edit roots"));
+        mixedView_->setChecked(true);
+        connect(mixedView_, &QCheckBox::toggled, this, [this] { applyTubeViews(); });
+        for (QCheckBox* box : {lockView_, mixedView_}) levelsBlock_->rows()->addWidget(switchRow(levelsBlock_, box));
     }
     column->addWidget(levelsBlock_);
     column->addWidget(profileBlock_);
@@ -533,6 +668,7 @@ QAbstractButton* TubePanel::wireframeBox() const { return wireframe_; }
 bool TubePanel::shaded() const { return shaded_ && shaded_->isChecked(); }
 bool TubePanel::wireframe() const { return wireframe_ && wireframe_->isChecked(); }
 bool TubePanel::colors() const { return colors_ && colors_->isChecked(); }
+bool TubePanel::levelColors() const { return levelColors_ && levelColors_->isChecked(); }
 bool TubePanel::alwaysVisible() const { return always_ && always_->isChecked(); }
 QAbstractButton* TubePanel::colorsBox() const { return colors_; }
 QAbstractButton* TubePanel::alwaysVisibleBox() const { return always_; }
@@ -624,6 +760,108 @@ void TubePanel::duplicateRoots() {
     }));
 }
 
+void TubePanel::subdivideRoots() {
+    GroomDocument* doc = document();
+    if (!doc || !session_ || !session_->rootMode()) return;
+    const std::vector<GuideId> roots = session_->roots().selected();
+    if (roots.empty()) {
+        emit message(tr("Select a root first (Select root), then Subdivide."));
+        return;
+    }
+    // The density map, made at 0.5 the first time (paint it, then Apply).
+    if (!doc->map(kSubdivisionDensityMap)) {
+        const std::string error = doc->createMap(kSubdivisionDensityMap, "vertices", false, kDefaultSubdivisionDensity);
+        if (!error.empty()) {
+            emit message(QString::fromStdString(error));
+            return;
+        }
+    }
+    const MeshPtr scalp = doc->session().scalp();  // (with the painted maps on it)
+    RootSubdivisionOptions options;
+    options.map = kSubdivisionDensityMap;
+    options.multiplier = static_cast<float>(multiplier_->value());
+    SubdivisionResult done;
+    const std::string error = doc->editGuides("subdivide root", [&](GuideHierarchy& g) {
+        if (scalp) done = subdivideRootTubes(g, *scalp, roots, options);
+    });
+    if (!error.empty()) {
+        emit message(QString::fromStdString(error));
+        return;
+    }
+    emit guidesEdited();
+    // (The cells are in the level below the root cut: that level shown, so they are seen.)
+    if (!done.cells.empty()) {
+        const HierarchyPtr h = doc->session().authoredHierarchy();
+        const HierarchyGuide* cell = h ? h->guide(done.cells.front()) : nullptr;
+        if (cell) {
+            fillLevels();
+            showLevel(h->groupDepth(cell->group) + 1);
+        }
+    }
+    rootsDone(session_->editRoots("roots", [](RootTubeTool& t, StrokeHost& h) { t.sync(h); }));
+    emit message(tr("Subdivided: %1 root(s) made.").arg(done.cells.size()));
+}
+
+void TubePanel::paintDensity() {
+    GroomDocument* doc = document();
+    if (!doc) return;
+    if (paintingDensity_) {  // Finish painting: the Tube tool again; Apply cuts by the map
+        paintingDensity_ = false;
+        emit paintDensityFinished();
+        refreshRoots();
+        emit message(tr("Painted the density map: Apply cuts its roots by it."));
+        return;
+    }
+    if (!doc->map(kSubdivisionDensityMap)) {
+        emit message(tr("No density map yet: Subdivide a root first (it makes the map)."));
+        refreshRoots();
+        return;
+    }
+    if (session_ && session_->rootMode()) session_->leaveRoots();
+    paintingDensity_ = true;
+    emit paintDensityRequested(kSubdivisionDensityMap);
+    rootsDone(true);
+    emit message(tr("Painting the density map (white: more, smaller roots; Ctrl: toward black). The brush again (or another "
+                    "tool) stops painting; then Apply to cut by it."));
+}
+
+void TubePanel::applyDensity() {
+    GroomDocument* doc = document();
+    if (!doc) return;
+    if (!doc->map(kSubdivisionDensityMap)) {
+        emit message(tr("No density map yet: Subdivide a root first."));
+        return;
+    }
+    const MeshPtr scalp = doc->session().scalp();
+    RootSubdivisionOptions options;
+    options.map = kSubdivisionDensityMap;
+    options.multiplier = static_cast<float>(multiplier_->value());
+    options.force = true;
+    SubdivisionResult done;
+    const std::string error = doc->editGuides("apply root density", [&](GuideHierarchy& g) {
+        if (scalp) done = applySubdivisionDensity(g, *scalp, {}, options);
+    });
+    refreshRoots();
+    if (!error.empty()) {
+        emit message(QString::fromStdString(error));
+        return;
+    }
+    emit guidesEdited();
+    emit message(tr("Applied: %1 root(s) made%2.").arg(done.cells.size()).arg(done.kept ? tr(", %1 kept").arg(done.kept) : QString()));
+}
+
+void TubePanel::applyTubeViews() {
+    GroomDocument* doc = document();
+    if (!doc) return;
+    std::string locked;
+    if (lockedLevel_ > 0 && lockedLevel_ <= static_cast<int>(levels_.size())) locked = levels_[static_cast<std::size_t>(lockedLevel_ - 1)];
+    const std::string mixed = mixedView_->isChecked() && !levelBase_.empty() ? levelBase_ + ":" + std::to_string(shownLevel_) : std::string();
+    if (locked == doc->tubeViewGroup() && mixed == doc->mixedView()) return;
+    doc->setTubeViews(locked, mixed);
+    if (session_ && session_->rootMode()) session_->refreshRoots();
+    emit displayChanged();
+}
+
 void TubePanel::setRootSnap(bool on) {
     if (!session_) return;
     session_->roots().settings.snap = on;
@@ -661,7 +899,7 @@ void TubePanel::refreshRoots() {
     const bool editing = on && mode == RootTubeTool::Mode::Edit;
     const bool selecting = on && (mode == RootTubeTool::Mode::Select || mode == RootTubeTool::Mode::Duplicate);
     const bool picked = selecting && !session_->roots().selected().empty();
-    QSignalBlocker b1(drawRoot_), b2(editRoots_), b3(selectRoot_), b4(duplicateRoots_);
+    QSignalBlocker b1(drawRoot_), b2(editRoots_), b3(selectRoot_), b4(duplicateRoots_), b5(paintDensity_);
     drawRoot_->setChecked(placing);
     editRoots_->setChecked(editing);
     editRoots_->setText(editing ? tr("Finish edit") : tr("Edit roots"));
@@ -670,6 +908,11 @@ void TubePanel::refreshRoots() {
     deleteRoots_->setEnabled(picked);
     duplicateRoots_->setEnabled(picked);
     duplicateRoots_->setChecked(on && mode == RootTubeTool::Mode::Duplicate);
+    subdivideRoots_->setEnabled(picked);
+    paintDensity_->setChecked(paintingDensity_);
+    const bool hasMap = document() && document()->map(kSubdivisionDensityMap);
+    paintDensity_->setEnabled(hasMap || paintingDensity_);
+    applyDensity_->setEnabled(hasMap);
     if (on && session_->roots().messageCount() != rootsHeard_) {
         rootsHeard_ = session_->roots().messageCount();
         if (!session_->roots().message().empty()) emit message(QString::fromStdString(session_->roots().message()));
@@ -717,7 +960,7 @@ void TubePanel::fillLevels() {
             levelRow_->addWidget(b);
             levelButtons_.push_back(b);
         }
-        levelRow_->addStretch(1);
+        levelLine_->layout()->invalidate();
     }
     for (std::size_t k = 0; k < levelButtons_.size(); ++k) {
         QSignalBlocker block(levelButtons_[k]);
@@ -746,6 +989,7 @@ void TubePanel::showLevel(int level) {
         if (id != kNoGroup) b.level = h->groupDepth(id);
     }
     fillLevels();
+    applyTubeViews();
     emit message(tr("Level %1: its tubes shown; the Tube tool and brushes edit them.").arg(level));
     emit guidesEdited();  // (the groups' eyes and the brush's group: the host shows them)
     emit settingsChanged();

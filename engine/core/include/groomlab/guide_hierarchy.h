@@ -59,6 +59,13 @@ struct HierarchyGuide {
     // it was drawn whatever is done to the guide and moves with a deforming scalp. Saved. Empty
     // for every other guide.
     std::vector<StrandRoot> rootOutline;
+    // A root-first tube cut from another (root_subdivision.h): how far (radians, about the scalp's
+    // normal at its root) its footprint is turned from the scalp's own across there, so it lies as
+    // the tube it was cut from did; and per point, the roll added to its sections
+    // (TubeProfile::roll) so they turn as that tube's did there. So the cells of a cut tile it all
+    // along. Saved; 0 and empty for any other.
+    float acrossTurn = 0.0f;
+    std::vector<float> rollOffsets;
     TubeProfile tube;  // tube.h: its shape and sections, the volume its children (and fillTubes' strands) fill
     // Reference direction for this guide's first frame normal (projected
     // perpendicular to the root tangent). Fixed at creation so the frame, and
@@ -89,6 +96,26 @@ struct HierarchyGuide {
     // The scalp's normal at its root, from the last evaluate on a scalp (zero before): where its
     // children root on a shaped tube's footprint (generateChildren). Not stored, not hashed.
     Vec3f rootNormal;
+    // A root-first tube's (or a slice of one's: a tube of its hierarchy taking a root shape of its
+    // own) direction across the scalp at its root (ScalpMesh::acrossAt), from the last evaluate on
+    // a scalp (zero before): what lays its footprint on the scalp where it draws (display.h, issue
+    // 86). Not stored, not hashed.
+    Vec3f rootAcross;
+    // A slice of a drawn root's tube: its footprint's center, its place in its level 1 root's
+    // footprint (GuideHierarchy::placeInRoot of its middle), so its footprint is exactly its part
+    // of the root's and the hair rooted there is its. Unset for any other guide. Not stored.
+    Vec3f rootFoot;
+    bool rootFootSet = false;
+    // Such a tube's root loop on the scalp: each point of its shape's outline (tubeOutline) on its
+    // footprint, taken onto the scalp along the footprint's normal, from the last evaluate on a
+    // scalp (empty before, and for any other tube). What its drawn tube starts from, so it sits on
+    // the root drawn with no gap however the scalp curves (display.h, issue 86). Not stored, not
+    // hashed.
+    std::vector<Vec3f> rootRing;
+    // The same points of its footprint taken straight onto the scalp (before the drawn outline's
+    // edges were followed): how far its root loop was pulled to the root drawn, which its slices
+    // follow too. Not stored, not hashed.
+    std::vector<Vec3f> rootRingFlat;
 
     // Following children only (GH-5): shape relative to the parent, one entry
     // per parent sample t = i / (n - 1). x and y are the parent tube's section
@@ -150,6 +177,34 @@ std::string guideGroupName(const std::string& text);
 // their parents' tubes, grandchildren inside the children's tubes, and so on.
 // Children store offsets in their parent's frame, so editing a parent carries
 // every descendant with it.
+// The tube a root cut was made from, as it lay then (its cells are slices of it: a cut again makes
+// its new cells of it too, so they tile with the cells kept). World points; lists as its tube's.
+struct RootSubdivisionSource {
+    std::vector<Vec3f> points;  // empty: none kept (a cut from before it was)
+    Vec3f frameUp{1, 0, 0}, normal, across;
+    std::vector<float> width, aspect, twist, roll;
+    StrandRoot root;
+    bool operator==(const RootSubdivisionSource& o) const;
+};
+
+// A root tube cut into cells (root_subdivision.h, issue 85), remembered so painting its density
+// again cuts again only where it changed. Points on the scalp the guides root on (as
+// HierarchyGuide::root). Saved with the hierarchy.
+struct RootSubdivisionRecord {
+    std::uint32_t id = 0;
+    std::string map;                  // the density map it was cut by
+    std::vector<StrandRoot> outline;  // the root it cut, as drawn
+    std::vector<StrandRoot> sites;    // each cell's site ...
+    std::vector<GuideId> cells;       // ... and its root tube (kNoGuide: gone)
+    std::vector<StrandRoot> samples;  // where the density was read ...
+    std::vector<float> density;       // ... and what it was
+    float sizeAtZero = 0.0f, sizeAtOne = 0.0f;  // the cells' size (scene units) at density 0 and 1
+    float multiplier = 1.0f;                    // how dense overall it was cut (RootSubdivisionOptions)
+    RootSubdivisionSource source;               // the tube it cut
+    std::uint64_t seed = 0;
+    bool operator==(const RootSubdivisionRecord& o) const;
+};
+
 class GuideHierarchy {
 public:
     // ---- Groups ---------------------------------------------------------
@@ -339,6 +394,12 @@ public:
     void setPoints(GuideId id, std::vector<Vec3f> points);
     // A root-first tube's root outline (HierarchyGuide::rootOutline: its CVs on the scalp).
     void setRootOutline(GuideId id, std::vector<StrandRoot> outline);
+    // A root tube's footprint turn and section roll per point (HierarchyGuide::acrossTurn, rollOffsets).
+    void setRootFrame(GuideId id, float acrossTurn, std::vector<float> rollOffsets);
+    // The direction across the scalp a root-first tube's footprint is laid along (unit, flat on the
+    // scalp at its root): a slice's its parent's (HierarchyGuide::rootAcross, onto the scalp here),
+    // a cell's the scalp's turned by its acrossTurn, any other's the scalp's own (ScalpMesh::acrossAt).
+    Vec3f rootAcrossOf(const HierarchyGuide& g, const ScalpMesh& scalp) const;
     // A guide's tube. A primary without children given a shape (another shape, or round to
     // shaped) has its frame laid across the scalp at its next evaluate: the new shape lies flat on
     // the head at twist 0, across the way the guide lies over the scalp. A library shape (tube.h:
@@ -367,6 +428,10 @@ public:
     // be placed again. They change no guide by themselves.
     const LengthKeySet& lengthKeys() const { return lengthKeys_; }
     void setLengthKeys(LengthKeySet keys);
+    // ---- Root subdivisions ----------------------------------------------
+    // The root tubes cut into cells (root_subdivision.h), saved with the hierarchy (toJson).
+    const std::vector<RootSubdivisionRecord>& rootSubdivisions() const { return rootSubdivisions_; }
+    void setRootSubdivisions(std::vector<RootSubdivisionRecord> records);
 
     // What fromJson could not read as saved, said for the user: guides whose library shape was
     // missing (each loads round).
@@ -426,6 +491,13 @@ public:
 private:
     HierarchyGuide* mutableGuide(GuideId id);
     GuideId nextGuideId();
+    // Whether `child` is a slice of a drawn root's tube `parent` (both root tubes): kept in the
+    // parent's sections all along by resolveFollower, its root section its part of the parent's.
+    static bool isSliceOf(const HierarchyGuide& child, const HierarchyGuide& parent);
+    // A slice's section point (u, v) (its own section coordinates) in its level 1 root's: through
+    // each level's place in its parent (the middle it was cut around, its offsets at the root, and
+    // its size there against its parent's). Null when `g` is no slice of a drawn root's tube.
+    const HierarchyGuide* placeInRoot(const HierarchyGuide& g, SectionPoint* q) const;
     // `parentFrames`: the parent's rotation-minimizing frames when already known (null: computed).
     void resolveFollower(HierarchyGuide& child, const HierarchyGuide& parent, const ScalpMesh* scalp,
                          const std::vector<Frame>* parentFrames = nullptr);
@@ -442,6 +514,13 @@ private:
     void bindOffsets(HierarchyGuide& child, const HierarchyGuide& parent) const;
     // A tube's library shape made this hierarchy's entry of that name (added when it has none).
     void adoptTubeShape(TubeProfile& tube);
+    // A drawn root's tube (or a slice) given a new tube: its slices (children taking root shapes of
+    // their own) follow what changed, along them: widths and flatness scaled as the parent's
+    // changed there, the twist turned as much, their own edits kept; and theirs, level by level.
+    void carryToSlices(GuideId id, const TubeProfile& before, const TubeProfile& after);
+    // A drawn root's (or a slice's) root loop on the scalp (HierarchyGuide::rootRing, rootRingFlat),
+    // its footprint laid on normal `n` along `across`.
+    void layRootRing(HierarchyGuide& g, const ScalpMesh& scalp, const Vec3f& n, const Vec3f& across) const;
     void rebuildIndex();
     void invalidateHash() { hashMemo_.valid.store(false, std::memory_order_relaxed); }
 
@@ -471,6 +550,7 @@ private:
     void pruneOwnedTubeShapes();
     TubeShapeLibrary tubeShapes_;
     LengthKeySet lengthKeys_;
+    std::vector<RootSubdivisionRecord> rootSubdivisions_;
     std::vector<std::string> loadWarnings_;
 };
 
@@ -492,5 +572,11 @@ TubeTargets tubeTargetsOf(const GuideHierarchy& hierarchy, const std::vector<Gui
 // Root tube k's color (in GuideHierarchy::rootTubeIds' order): hues a golden step apart, three
 // brightnesses, none black; root_tubes.region_colors in the Maya scripts makes the same.
 std::array<float, 3> rootTubeColor(std::size_t k);
+
+// The point (u, v) carried by the map a closed polygon `cage` (section coordinates) makes onto
+// `to` (a world point per cage point): mean value coordinates (Floater), so a point on the cage
+// lands on `to` (linearly along each edge) and one inside moves smoothly with it. (A slice's root
+// loop on its root's drawn loop: GuideHierarchy::layRootRing.)
+Vec3f cageMap(const std::vector<SectionPoint>& cage, const std::vector<Vec3f>& to, const SectionPoint& q);
 
 }  // namespace groomlab

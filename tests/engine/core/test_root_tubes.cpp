@@ -6,6 +6,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 
 #include "groomlab/brush.h"
@@ -206,7 +207,20 @@ TEST(RootTubes, ARootCopiedWithItsHierarchyAndDeleted) {
     EXPECT_EQ(guideCount(h), 7u);
     const GuideId b = duplicateRootTube(h, *scalp, a, onSphere({0.5f, 0.85f, 0.1f}));
     EXPECT_EQ(guideCount(h), 14u) << "the copy and its hierarchy";
-    EXPECT_EQ(rootTubesOf(h), (std::vector<GuideId>{a, b}));
+    // (The drawn roots; + cut their roots too: each half a root of its own, at its level.)
+    auto drawn = [&h] {
+        std::vector<GuideId> out;
+        for (const GuideId g : rootTubesOf(h)) {
+            if (!h.guide(g)->isChild()) out.push_back(g);
+        }
+        return out;
+    };
+    EXPECT_EQ(drawn(), (std::vector<GuideId>{a, b}));
+    for (const GuideId k : h.childrenOf(a)) {
+        const std::vector<GuideId> all = rootTubesOf(h);
+        EXPECT_NE(std::find(all.begin(), all.end(), k), all.end()) << "a half of a + is a root of its own";
+        EXPECT_GE(h.guide(k)->rootOutline.size(), 3u) << "its part of its parent's root as its CVs";
+    }
     const std::vector<Vec3f> o1 = rootTubeOutline(h, *scalp, a), o2 = rootTubeOutline(h, *scalp, b);
     ASSERT_EQ(o1.size(), o2.size());
     for (std::size_t i = 0; i < o1.size(); ++i) {
@@ -221,7 +235,7 @@ TEST(RootTubes, ARootCopiedWithItsHierarchyAndDeleted) {
     EXPECT_EQ(deleteRootTubes(h, *scalp, {b}), 7u);
     EXPECT_EQ(guideCount(h), 7u);
     EXPECT_FALSE(h.tubeShape(shape)) << "its root shape went with it";
-    EXPECT_EQ(rootTubesOf(h), std::vector<GuideId>{a});
+    EXPECT_EQ(drawn(), std::vector<GuideId>{a});
     EXPECT_THROW(duplicateRootTube(h, *scalp, h.childrenOf(a).front(), onSphere({0, 1, 0})), std::invalid_argument)
         << "not a root tube";
 }

@@ -1037,7 +1037,7 @@ void bindHierarchy(py::module_& m) {
     m.def("remove_tube_level", &removeTubeLevel, py::arg("hierarchy"), py::arg("scalp"), py::arg("base"),
           py::arg("guides") = std::vector<GuideId>{}, "Undoes a split (Remove); returns how many guides went (0: a whole level).");
     m.def("tube_level_visibility", &tubeLevelVisibility, py::arg("hierarchy"), py::arg("base"), py::arg("level"),
-          "Each level's group and whether it shows with level `level` shown.");
+          py::arg("locked") = 0, "Each level's group and whether it shows with level `level` shown (`locked`: that level alone, Lock view).");
 }
 
 }  // namespace groomlab::py_bind

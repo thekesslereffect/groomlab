@@ -971,6 +971,9 @@ class PaintTab(_GroomTab):
              "strandColorSource")
     def __init__(self, owner):
         super(PaintTab, self).__init__(owner)
+        # Called (no arguments) each time painting stops (end_painting): the Tube card's Paint
+        # subdivision density finishes then.
+        self.painting_ended = []
         self.paint_color = (1.0, 1.0, 1.0, 1.0)  # what paint puts on a color map (r g b a, 0-1)
         self.paint_channels = CHANNELS          # the channels it changes
         self.paint_mode = "replace"
@@ -1379,6 +1382,8 @@ class PaintTab(_GroomTab):
                 self._sync_views()
             except (RuntimeError, ValueError):
                 pass
+        for done in list(self.painting_ended):
+            done()
 
     def map_changed(self, name, push=True):
         from maya import cmds

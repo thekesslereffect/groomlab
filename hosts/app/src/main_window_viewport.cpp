@@ -563,11 +563,18 @@ void MainWindow::refreshTool() {
                            (tubes && tubes->alwaysVisible() && mode != Viewport::ToolMode::Camera);
     const bool wires = tubeBrush && tubes && tubes->wireframe(), shaded = tubeBrush && tubes && tubes->shaded();
     const bool colors = tubeBrush && tubes && tubes->colors();
+    const bool levelColors = tubeBrush && tubes && tubes->levelColors();
+    const std::string tubeView = document_ ? document_->tubeViewGroup() : std::string();
+    const std::string mixedView = document_ ? document_->mixedView() : std::string();
     const bool hidden = brush_.rootMode() && brush_.roots().hidesGuides();
-    if (settings_.tubeWires != wires || settings_.tubeShaded != shaded || settings_.tubeColors != colors || hidden != rootsHide_) {
+    if (settings_.tubeWires != wires || settings_.tubeShaded != shaded || settings_.tubeColors != colors || hidden != rootsHide_ ||
+        settings_.tubeLevelColors != levelColors || settings_.tubeViewGroup != tubeView || settings_.mixedView != mixedView) {
         settings_.tubeWires = wires;
         settings_.tubeShaded = shaded;
         settings_.tubeColors = colors;
+        settings_.tubeLevelColors = levelColors;
+        settings_.tubeViewGroup = tubeView;
+        settings_.mixedView = mixedView;
         rootsHide_ = hidden;
         redisplay();
     }

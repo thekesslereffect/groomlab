@@ -38,6 +38,7 @@
 #include "groomlab/parts.h"
 #include "groomlab/paths.h"
 #include "groomlab/random.h"
+#include "groomlab/root_subdivision.h"
 #include "groomlab/root_tubes.h"
 #include "groomlab/scalp_maps.h"
 #include "groomlab/scalp_paint.h"
@@ -2972,6 +2973,9 @@ DisplaySettings displaySettingsOf(ToolState& t, const json& v) {
         else if (key == "tubeWires") s.tubeWires = settingBool(x, k);    // the Tube brush's tubes (the core's display)
         else if (key == "tubeShaded") s.tubeShaded = settingBool(x, k);
         else if (key == "tubeColors") s.tubeColors = settingBool(x, k);
+        else if (key == "tubeLevelColors") s.tubeLevelColors = settingBool(x, k);  // Colors (Tube levels)
+        else if (key == "tubeViewGroup") s.tubeViewGroup = settingString(x, k);   // Lock view: that group's tubes alone
+        else if (key == "mixedView") s.mixedView = settingString(x, k);           // Mixed view: "<base>:<level>"
         else if (key == "guideWidth") s.guideWidth = settingNumber(x, k);
         else if (key == "guideColorMode") {
             if (x.is_string()) {
@@ -3031,6 +3035,7 @@ DisplaySettings displaySettingsOf(ToolState& t, const json& v) {
             th.version = hashString(hash64(0x7E3E), x.dump());
         } else fail("bad_request", "no display setting '" + key + "'");
     }
+    t.host.setMixedView(s.mixedView);  // (the root tool shows the roots as Mixed view does)
     return s;
 }
 
@@ -3473,7 +3478,7 @@ bool isToolCommand(const std::string& cmd) {
         "length_state", "length_edit",
         // The Tube tool's root-first mode and the tube hierarchy (the Tube card's Tube roots and
         // Tube hierarchy blocks).
-        "root_state", "root_edit", "tube_levels", "tube_level_add", "tube_level_remove", "tube_level_show"};
+        "root_state", "root_edit", "root_subdivide", "tube_levels", "tube_level_add", "tube_level_remove", "tube_level_show"};
     return kCommands.count(cmd) > 0;
 }
 
@@ -4003,6 +4008,49 @@ bool runToolCommandIn(Session& s, ToolState& t, const std::string& cmd, const js
             t.redoMaps.clear();
         }
         pruneSelection(t);
+        result["undo"] = undoJson(t);
+        return true;
+    }
+    if (cmd == "root_subdivide") {
+        // The Tube roots block's Subdivide ("apply" false: the roots "guides", else those the root
+        // tool has selected, cut into cells) and Finish painting ("apply" true: the cut roots cut
+        // again where the density map changed, and "guides" not cut yet cut), root_subdivision.h;
+        // one undo step. The session's scalp carries the painted maps.
+        requireScalp(s);
+        pruneSelection(t);
+        std::vector<GuideId> guides;
+        if (args.contains("guides") && !args["guides"].is_null()) {
+            guides = idsOf(args["guides"]);
+        } else {
+            const auto& picked = t.tool.roots().selected();
+            guides.assign(picked.begin(), picked.end());
+        }
+        const bool apply = optBool(args, "apply", false);
+        if (!apply && guides.empty()) fail("state", "select a root first (Select root), then Subdivide");
+        // The density map ("map", default the one map) and the multiplier; Apply ("apply") cuts every
+        // cut by them again all over ("force", default true: the card's Apply).
+        RootSubdivisionOptions options;
+        options.map = optString(args, "map", kSubdivisionDensityMap);
+        options.multiplier = static_cast<float>(optNumber(args, "multiplier", 1.0));
+        options.force = apply && optBool(args, "force", true);
+        const std::size_t before = t.host.edits().size();
+        const MeshPtr scalp = s.groom->scalp();
+        SubdivisionResult done;
+        editGuides(t, apply ? "apply root density" : "subdivide root", [&](GuideHierarchy& g) {
+            done = apply ? applySubdivisionDensity(g, *scalp, {}, options) : subdivideRootTubes(g, *scalp, guides, options);
+        });
+        result = {{"cells", done.cells}, {"removed", done.removed}, {"kept", done.kept}};
+        // (The level the cells are in: the card shows it.)
+        if (!done.cells.empty()) {
+            const std::shared_ptr<const GuideHierarchy> after = s.groom->authoredHierarchy();
+            const HierarchyGuide* cell = after ? after->guide(done.cells.front()) : nullptr;
+            if (cell) result["cellLevel"] = after->groupDepth(cell->group) + 1;
+        }
+        result["committed"] = t.host.edits().size() != before;
+        if (result["committed"].get<bool>()) {
+            t.redoLabels.clear();
+            t.redoMaps.clear();
+        }
         result["undo"] = undoJson(t);
         return true;
     }

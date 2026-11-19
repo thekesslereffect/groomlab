@@ -562,6 +562,14 @@ public:
     // A click on a node's Show Tubes: on, or off again (GraphEdit::braidTubesToggled). Not in the
     // history (as the hidden groups are not).
     void toggleBraidTubes(const std::string& node);
+    // The Tube hierarchy's Lock view (a group whose tubes alone draw) and Mixed view ("<base>:<level>"):
+    // DisplaySettings::tubeViewGroup and mixedView, the root tool's (StrokeHost::mixedView). Not saved.
+    const std::string& tubeViewGroup() const { return tubeViewGroup_; }
+    const std::string& mixedView() const { return mixedView_; }
+    void setTubeViews(std::string tubeViewGroup, std::string mixedView) {
+        tubeViewGroup_ = std::move(tubeViewGroup);
+        mixedView_ = std::move(mixedView);
+    }
     // The groups' own viewport colors ("#rrggbb" by group name, Maya's guideGroupColors): the
     // other groups' colors are automatic (their level's in the theme, Maya 0.19.4's). Kept with
     // the window's session (as the hidden groups are), drawn by updateDisplay.
@@ -1075,6 +1083,7 @@ private:
     // refinedFileScalp's meshes by level, for the file's scalp they were refined from.
     mutable MeshPtr refinedFrom_;
     mutable std::map<int, MeshPtr> refinedByLevel_;
+    std::string tubeViewGroup_, mixedView_;  // (setTubeViews)
 };
 
 }  // namespace groomlab::app

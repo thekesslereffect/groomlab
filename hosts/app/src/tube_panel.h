@@ -82,6 +82,7 @@ public:
     bool shaded() const;
     bool wireframe() const;
     bool colors() const;
+    bool levelColors() const;  // Colors (Tube levels)
     bool alwaysVisible() const;
     const std::vector<GuideId>& targets() const { return targets_; }
     const std::string& source() const { return source_; }  // "selection", "solo" or "none"
@@ -121,6 +122,15 @@ public:
     void undoCv();
     void deleteRoots();
     void duplicateRoots();
+    // Subdivide (issue 85): the selected roots cut into Voronoi cells (root_subdivision.h) in the
+    // level below, by the density map (made at 0.5 the first time) and the multiplier, one undo
+    // step. The paint brush: the density map painted (paintDensityRequested); again, painting
+    // stops (paintDensityFinished), nothing cut. Apply: every cut again by the map, one undo step.
+    void subdivideRoots();
+    void paintDensity();
+    void applyDensity();  // Apply: every cut by the density map and the multiplier again, all over
+    void setMultiplier(double) {}  // (read when Subdivide or Apply runs)
+    bool paintingDensity() const { return paintingDensity_; }
     void setRootSnap(bool on);
     void setRootDrawPath(bool on);
     void setRootDensity(double density);
@@ -184,6 +194,11 @@ signals:
     // The root mode started, left or changed its outlines (the host: the viewport's tool and
     // overlay, the guides hidden while editing).
     void rootModeChanged();
+    // Paint subdivision density: the host picks the density map in the Maps panel and paints it (the
+    // Paint tab shown); on Finish painting (or the host leaving the Paint brush any other way: it
+    // calls paintDensity again), the Tools tab and the Tube brush again, then Edit roots.
+    void paintDensityRequested(const std::string& map);
+    void paintDensityFinished();
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -240,11 +255,18 @@ private:
     // (The modes and Duplicate: chips, checked while on; Undo CV and Delete: buttons.)
     QAbstractButton *drawRoot_ = nullptr, *editRoots_ = nullptr, *selectRoot_ = nullptr;
     QAbstractButton *undoCv_ = nullptr, *deleteRoots_ = nullptr, *duplicateRoots_ = nullptr;
+    QAbstractButton *subdivideRoots_ = nullptr, *paintDensity_ = nullptr, *applyDensity_ = nullptr;
+    ValueSlider* multiplier_ = nullptr;  // Subdivision multiplier (RootSubdivisionOptions::multiplier)
+    bool paintingDensity_ = false;
+    QCheckBox *lockView_ = nullptr, *mixedView_ = nullptr, *levelColors_ = nullptr;
+    int lockedLevel_ = 0;  // Lock view: the level whose tubes stay drawn (0: off)
+    void applyTubeViews();  // the document's Lock and Mixed views as the switches and the level say
     QCheckBox *rootSnap_ = nullptr, *rootDrawPath_ = nullptr, *colors_ = nullptr, *always_ = nullptr;
     ValueSlider *rootDensity_ = nullptr, *rootLength_ = nullptr, *rootSegments_ = nullptr, *rootTaper_ = nullptr;
     QPushButton *addLevel_ = nullptr, *removeLevel_ = nullptr;
     QLabel* levelBaseLabel_ = nullptr;
     QHBoxLayout* levelRow_ = nullptr;
+    QWidget* levelLine_ = nullptr;  // the levels on the left, + and - on the right (LeadTrailLayout)
     std::vector<QAbstractButton*> levelButtons_;
     std::string levelBase_;
     std::vector<std::string> levels_;

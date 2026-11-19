@@ -734,6 +734,19 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
         sub.enabled = mode in ("select", "duplicate") and t.root_selected > 0
         sub.operator("groomlab.root_tube", text="Delete").action = "DELETE"
         sub.operator("groomlab.root_tube", text="Duplicate", depress=mode == "duplicate").action = "DUPLICATE"
+        # Subdivide | the paint brush (the density map) | Multiplier | Apply (Maya's row).
+        has_map = any(m.name == "tubeSubdivisionDensity" for m in t.maps)
+        row = col.row(align=True)
+        sub = row.row(align=True)
+        sub.enabled = mode in ("select", "duplicate") and t.root_selected > 0
+        sub.operator("groomlab.root_tube", text="Subdivide").action = "SUBDIVIDE"
+        sub = row.row(align=True)
+        sub.enabled = has_map or t.root_painting
+        sub.operator("groomlab.root_tube", text="", icon="BRUSH_DATA", depress=t.root_painting).action = "PAINT_DENSITY"
+        row.prop(t, "root_multiplier", text="Multiplier", slider=True)
+        sub = row.row(align=True)
+        sub.enabled = has_map
+        sub.operator("groomlab.root_tube", text="Apply").action = "APPLY_DENSITY"
         col.prop(t, "root_snap")
         col.prop(t, "root_draw_path")
         sliders = col.column(align=True)
@@ -745,25 +758,36 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
         sliders.prop(t, "root_taper", slider=True)
 
     def draw_levels(self, card, context, t):
-        """Tube hierarchy: Add and Remove, the base group, a button a level (1, the base, always)."""
+        """Tube hierarchy: the base group, then one row: a button a level (1, the base, always) on
+        the left, + and - (split, undo a split) on the right (under the levels when they reach)."""
         col, head = fold_block(card, "Tube hierarchy", t, "fold_levels")
         if col is None:
             return
         levels = [x for x in t.tube_levels.split(",") if x]
-        row = col.row(align=True)
-        sub = row.row(align=True)
-        sub.enabled = bool(t.tube_base) and len(levels) < 9
-        sub.operator("groomlab.tube_level", text="Add").action = "ADD"
-        sub = row.row(align=True)
-        sub.enabled = len(levels) > 1
-        sub.operator("groomlab.tube_level", text="Remove").action = "REMOVE"
         col.label(text="Base: %s" % t.tube_base if t.tube_base else "No guides yet.")
-        row = col.row(align=True)
-        row.alignment = "LEFT"
-        for k in range(max(len(levels), 1)):
+        count = max(len(levels), 1)
+        # A button is about a UI unit wide: + and - beside the levels while the card has room.
+        unit = 20.0 * context.preferences.system.ui_scale
+        width = context.region.width if context.region else 0
+        one_row = width <= 0 or (count + 2) * unit + 3 * unit <= width
+        line = col.row(align=False)
+        levels_row = line.row(align=True)
+        levels_row.alignment = "LEFT"
+        edits = (line if one_row else col.row(align=False)).row(align=True)
+        edits.alignment = "RIGHT"
+        add = edits.row(align=True)
+        add.enabled = bool(t.tube_base) and len(levels) < 9
+        add.operator("groomlab.tube_level", text="", icon="ADD").action = "ADD"
+        remove = edits.row(align=True)
+        remove.enabled = len(levels) > 1
+        remove.operator("groomlab.tube_level", text="", icon="REMOVE").action = "REMOVE"
+        row = levels_row
+        for k in range(count):
             op = row.operator("groomlab.tube_level", text=str(k + 1), depress=k + 1 == t.tube_level)
             op.action = "SHOW"
             op.level = k + 1
+        col.prop(t, "tube_lock_view")
+        col.prop(t, "tube_mixed_view")
 
     def draw_profile(self, card, context, t):
         """Profile (the shape picked, Apply, the library with its New / Duplicate / Rename / Delete:
@@ -780,6 +804,7 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
             col.prop(t, "tube_shaded")
             col.prop(t, "tube_wireframe")
             col.prop(t, "tube_colors")
+            col.prop(t, "tube_level_colors")
             col.prop(t, "tubes_always")
         # Root, Mid and Tip (Maya's rows): each profile's picker and Apply (the shape and its
         # Length to every targeted guide), its Length under it.

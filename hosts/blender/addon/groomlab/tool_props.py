@@ -25,6 +25,15 @@ def _push(*keys):
     return update
 
 
+def _tube_lock(self, context):
+    """Lock view: the level shown now kept (its tubes stay drawn), or let go."""
+    if props.is_quiet():
+        return
+    with props.quiet():
+        self.tube_locked_level = self.tube_level if self.tube_lock_view else 0
+    _tube_display(self, context)
+
+
 def _tube_display(self, context):
     """The Tube brush's tubes shown otherwise: the display asks the helper again."""
     if props.is_quiet():
@@ -590,6 +599,10 @@ class GroomLabTools(bpy.types.PropertyGroup):
     tube_colors: BoolProperty(name="Colors", default=True, update=_tube_display,
                               description="Color each tube as the root tube it comes from (its split tubes and "
                                           "children in its color), a color of its own without one")
+    tube_level_colors: BoolProperty(name="Colors (Tube levels)", default=False, update=_tube_display,
+                                    description="Each tube of a tube hierarchy's levels (a split tube) in a shade of "
+                                                "its own on top of its root tube's color, so the tubes of a level "
+                                                "tell apart")
     tubes_always: BoolProperty(name="Always visible", default=False, update=_tube_display,
                                description="Keep the tubes drawn whichever GroomLab tool is up (Comb, Select, ...), "
                                            "not only the Tube tool")
@@ -598,6 +611,13 @@ class GroomLabTools(bpy.types.PropertyGroup):
     # settings new root tubes take.
     root_mode: StringProperty()
     root_selected: IntProperty()
+    # Subdividing roots (issue 85): painting the density map (the paint brush beside Subdivide), and
+    # the Subdivision multiplier Subdivide and Apply cut at.
+    root_painting: BoolProperty()
+    root_multiplier: FloatProperty(name="Multiplier", default=1.0, min=0.05, max=20.0, soft_min=0.25, soft_max=4.0,
+                                   description="Subdivision multiplier: how dense the cuts are overall, with the "
+                                               "painted density: 1 as painted, 2 about twice the roots (each "
+                                               "smaller), 0.5 half. Apply cuts again at it")
     root_cvs: IntProperty()
     root_snap: BoolProperty(name="Snap to neighbours", default=True, update=_root_settings,
                             description="A CV near a neighbouring root's CV or edge snaps onto it, so the tubes "
@@ -621,6 +641,16 @@ class GroomLabTools(bpy.types.PropertyGroup):
     tube_base: StringProperty()
     tube_levels: StringProperty()
     tube_level: IntProperty(default=1)
+    # Lock view (the level whose tubes stay drawn while others are picked; 0: off) and Mixed view
+    # (the levels above the one picked show their tubes where no level below continues them).
+    tube_lock_view: BoolProperty(name="Lock view", default=False, update=_tube_lock,
+                                 description="Keep the tubes of the level shown now in view while you pick other "
+                                             "levels to work on, whose guides show. Only the tubes' view")
+    tube_locked_level: IntProperty(default=0)
+    tube_mixed_view: BoolProperty(name="Mixed view", default=True, update=_tube_display,
+                                  description="Working on a level, also show the tubes (not the guides) of the "
+                                              "levels above where no level below continues them, and their roots in "
+                                              "Select root and Edit roots")
     # The Tube card's blocks folded (a click on a block's title).
     fold_roots: BoolProperty(name="Tube roots", default=False)
     fold_levels: BoolProperty(name="Tube hierarchy", default=False)

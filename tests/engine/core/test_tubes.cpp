@@ -156,7 +156,15 @@ TEST(TubeSections, ProfileListsSampleEvenlyAndClampTheAspect) {
     EXPECT_TRUE(t.shaped());
     EXPECT_NEAR(t.widthAt(0.5f), 0.15f, 1e-6f);
     EXPECT_NEAR(t.aspectAt(1.0f), kMinTubeAspect, 1e-7f);
-    EXPECT_NEAR(t.twistAt(0.75f), 2.0f, 1e-6f);
+    // Along a smooth curve through the values (a monotone cubic: through each, between its
+    // neighbours, no kink at one): what follows a tube bends smoothly through its sections.
+    EXPECT_NEAR(t.twistAt(0.5f), 1.0f, 1e-6f);
+    EXPECT_NEAR(t.twistAt(0.75f), 1.9375f, 1e-5f);
+    EXPECT_GT(t.twistAt(0.75f), 1.0f);
+    EXPECT_LT(t.twistAt(0.75f), 3.0f);
+    const float h = 1e-3f;
+    const float before = (t.twistAt(0.5f) - t.twistAt(0.5f - h)) / h, after = (t.twistAt(0.5f + h) - t.twistAt(0.5f)) / h;
+    EXPECT_NEAR(before, after, 0.05f * std::abs(after)) << "no kink at a value";
     EXPECT_NEAR(t.twistAt(2.0f), 3.0f, 1e-6f);  // clamped to the tip
     TubeProfile ribbon;
     ribbon.shape = TubeShape::Ribbon;

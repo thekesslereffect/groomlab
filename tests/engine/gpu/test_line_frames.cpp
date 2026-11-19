@@ -806,20 +806,34 @@ TEST_P(LineFramesTest, DensityGridIsTheCpus) {
         std::vector<std::uint64_t> words(cells, 0);
         auto index = [&](int x, int y, int z) { return std::size_t(x) + size[0] * (std::size_t(y) + size[1] * std::size_t(z)); };
         auto inside = [&](int x, int y, int z) { return x >= 0 && y >= 0 && z >= 0 && x < int(size[0]) && y < int(size[1]) && z < int(size[2]); };
+        const std::vector<Vec3f>& pos = strands->positions();
         for (std::size_t p = 0; p < n; ++p) {
-            const Vec3f q = strands->positions()[p];
+            const Vec3f q = pos[p];
             const float width = uvs[p * 2 + 1] >= 0.0f ? uvs[p * 2 + 1] : grid.defaultWidth;
             const float amount = width * grid.pieceWeight * 65536.0f;
-            const float g[3] = {(q.x - grid.origin[0]) / grid.cell - 0.5f, (q.y - grid.origin[1]) / grid.cell - 0.5f,
-                                (q.z - grid.origin[2]) / grid.cell - 0.5f};
-            const float lo[3] = {std::floor(g[0]), std::floor(g[1]), std::floor(g[2])};
-            for (int k = 0; k < 8; ++k) {
-                const int o[3] = {k & 1, (k >> 1) & 1, (k >> 2) & 1};
-                const int c[3] = {int(lo[0]) + o[0], int(lo[1]) + o[1], int(lo[2]) + o[2]};
-                if (!inside(c[0], c[1], c[2])) continue;
-                float t = 1.0f;
-                for (int a = 0; a < 3; ++a) t *= o[a] ? g[a] - lo[a] : 1.0f - (g[a] - lo[a]);
-                words[index(c[0], c[1], c[2])] += static_cast<std::uint32_t>(amount * t + 0.5f);
+            if (!(amount > 0.0f)) continue;
+            // The point's piece of its strand (halfway to its neighbours of the same strand: u
+            // rising), splatted evenly along it, half a cell apart at most (density.slang).
+            const float u = uvs[p * 2];
+            Vec3f from = q, to = q;
+            if (p > 0 && uvs[(p - 1) * 2] < u) from = (q + pos[p - 1]) * 0.5f;
+            if (p + 1 < n && uvs[(p + 1) * 2] > u) to = (q + pos[p + 1]) * 0.5f;
+            const float span = (to - from).length() / grid.cell;
+            const int pieces = static_cast<int>(std::clamp(std::ceil(span * 2.0f), 1.0f, 16.0f));
+            const float share = amount / static_cast<float>(pieces);
+            for (int j = 0; j < pieces; ++j) {
+                const Vec3f at = from + (to - from) * ((static_cast<float>(j) + 0.5f) / static_cast<float>(pieces));
+                const float g[3] = {(at.x - grid.origin[0]) / grid.cell - 0.5f, (at.y - grid.origin[1]) / grid.cell - 0.5f,
+                                    (at.z - grid.origin[2]) / grid.cell - 0.5f};
+                const float lo[3] = {std::floor(g[0]), std::floor(g[1]), std::floor(g[2])};
+                for (int k = 0; k < 8; ++k) {
+                    const int o[3] = {k & 1, (k >> 1) & 1, (k >> 2) & 1};
+                    const int c[3] = {int(lo[0]) + o[0], int(lo[1]) + o[1], int(lo[2]) + o[2]};
+                    if (!inside(c[0], c[1], c[2])) continue;
+                    float t = 1.0f;
+                    for (int a = 0; a < 3; ++a) t *= o[a] ? g[a] - lo[a] : 1.0f - (g[a] - lo[a]);
+                    words[index(c[0], c[1], c[2])] += static_cast<std::uint32_t>(share * t + 0.5f);
+                }
             }
         }
         float worstSigma = 0.0f, worstOcclusion = 0.0f, largestSigma = 0.0f, lowestOcclusion = 1.0f;

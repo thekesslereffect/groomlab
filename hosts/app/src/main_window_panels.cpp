@@ -20,6 +20,7 @@
 #include <QScrollArea>
 #include <QSettings>
 #include <QSplitter>
+#include <QTimer>
 #include <QGridLayout>
 #include <QVBoxLayout>
 
@@ -30,6 +31,7 @@
 #include "app_actions.h"
 #include "app_shell.h"
 #include "groom_tools.h"
+#include "tube_panel.h"
 #include "marking_menu.h"
 #include "cards_panel.h"
 #include "correctives_panel.h"
@@ -108,6 +110,28 @@ void MainWindow::buildPanels() {
         refreshTool();
     });
     connect(maps_, &MapsPanel::message, this, [this](const QString& text) { report(text); });
+    // The Tube card's Paint subdivision density (issue 85): its map picked and painted; Finish
+    // painting, the Tube brush again.
+    connect(groomTools_->tubePanel(), &TubePanel::paintDensityRequested, this, [this](const std::string& map) {
+        maps_->refresh();
+        maps_->selectMap(map);
+        maps_->setPaintValue(1.0);
+        groomTools_->showTab(QStringLiteral("paint"));
+        if (!maps_->paintSelected()) report(tr("The density map could not be painted."));
+    });
+    connect(groomTools_->tubePanel(), &TubePanel::paintDensityFinished, this, [this] {
+        groomTools_->showTab(QStringLiteral("tools"));
+        chooseTool(QStringLiteral("shape"));
+    });
+    // Painting the density left any other way (another tool, the camera): finished as the button
+    // finishes it, once the change that ended it is through.
+    connect(maps_, &MapsPanel::paintingEnded, this, [this] {
+        TubePanel* tubes = groomTools_->tubePanel();
+        if (!tubes->paintingDensity()) return;
+        QTimer::singleShot(0, tubes, [tubes] {
+            if (tubes->paintingDensity()) tubes->paintDensity();
+        });
+    });
     connect(maps_, &MapsPanel::mapNodeRequested, this, [this](const std::string& map) {
         // A Map node reading the map, in the Graph Editor (shown) to wire into a setting.
         if (!document_) return;
