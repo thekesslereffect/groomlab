@@ -216,6 +216,8 @@ std::vector<std::uint8_t> paintFileBytes(const TexturePaint& paint, const std::s
     if (!paint.udim() && !isUdimPath(path)) return storedPngBytes(paint.width(), paint.height(), paint.channels(), *pixels);
     const std::string pattern = udimPathFor(path);
     TileFiles files;
+    // (The one image the set replaces: removed, TexturePaint::save.)
+    if (isPlainImagePath(path) && pattern != path) files.emplace_back(path, std::vector<std::uint8_t>{});
     for (const int tile : paint.udim() ? paint.udimLayout()->tiles : std::vector<int>{kFirstUdimTile}) {
         files.emplace_back(udimTilePath(pattern, tile),
                            storedPngBytes(paint.tileWidth(), paint.tileHeight(), paint.channels(), paint.tileBytes(*pixels, tile)));

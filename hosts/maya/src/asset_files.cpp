@@ -173,6 +173,11 @@ void noteFileWritten() { ++writes; }
 
 void putFileBytes(const std::string& path, const std::vector<std::uint8_t>& bytes, const char* who) {
     std::error_code ec;
+    if (bytes.empty()) {  // no file (a map's one image a tile set replaced)
+        noteFileWritten();
+        fs::remove(fs::u8path(path), ec);
+        return;
+    }
     const fs::path folder = fs::u8path(path).parent_path();
     if (!folder.empty()) fs::create_directories(folder, ec);
     noteFileWritten();

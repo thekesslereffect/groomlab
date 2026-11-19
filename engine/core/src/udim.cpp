@@ -2,6 +2,7 @@
 #include "groomlab/udim.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
@@ -187,6 +188,24 @@ std::vector<std::string> copyMapImage(const std::string& from, const std::string
     return written;
 }
 
+bool isPlainImagePath(const std::string& path) {
+    const std::filesystem::path p = std::filesystem::u8path(path);
+    const std::string name = p.filename().u8string(), stem = p.stem().u8string();
+    for (const char* token : {"<UDIM>", "<udim>", "%(UDIM)d"}) {
+        if (name.find(token) != std::string::npos) return false;
+    }
+    if (stem.size() >= 5) {
+        const std::string digits = stem.substr(stem.size() - 4);
+        const char sep = stem[stem.size() - 5];
+        const bool number = std::all_of(digits.begin(), digits.end(), [](unsigned char c) { return std::isdigit(c) != 0; });
+        if (number && (sep == '.' || sep == '_')) {
+            const int tile = std::stoi(digits);
+            if (tile >= kFirstUdimTile && tile < kFirstUdimTile + kUdimTiles) return false;
+        }
+    }
+    return !p.extension().empty();
+}
+
 std::vector<std::string> mapImageFiles(const std::string& path, const std::vector<int>& tiles) {
     const bool set = !tiles.empty() || isUdimPath(path);
     if (!set) return {path};
@@ -196,6 +215,7 @@ std::vector<std::string> mapImageFiles(const std::string& path, const std::vecto
     std::sort(all.begin(), all.end());
     all.erase(std::unique(all.begin(), all.end()), all.end());
     std::vector<std::string> out;
+    if (isPlainImagePath(path) && pattern != path) out.push_back(path);  // (the one image the set replaces)
     for (const int tile : all) out.push_back(udimTilePath(pattern, tile));
     return out;
 }

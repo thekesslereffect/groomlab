@@ -40,7 +40,7 @@ std::string forkTextureFile(const MDagPath& groom, const std::string& mapName, c
 
 // A file's bytes (empty when it cannot be read), and the bytes written back (commands keep a
 // file's bytes to undo and redo what they wrote). putFileBytes warns under `who` when it
-// cannot write.
+// cannot write; no bytes: no file there (removed).
 std::vector<std::uint8_t> fileBytes(const std::string& path);
 void putFileBytes(const std::string& path, const std::vector<std::uint8_t>& bytes, const char* who);
 

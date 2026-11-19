@@ -3252,6 +3252,45 @@ class GroomingTest(unittest.TestCase):
         self.assertGreater(min(near), 0.5)  # the border, painted on both tiles
         self.assertLess(max(far), 0.05)
 
+    def test_a_map_painted_after_uvs_reach_another_tile(self):
+        # Issue #87 (as reported): a texture map made on tile 1001, the scalp's UVs then edited to
+        # reach 1002. A stroke there writes the tiles and removes the one image (read before
+        # them, it hid the new paint); undo brings the image back, redo the tiles.
+        folder = tempfile.mkdtemp(prefix="groomlab_udim_grow_")
+        cmds.workspace(folder, openWorkspace=True)
+        plane = cmds.polyPlane(width=2, height=1, subdivisionsX=8, subdivisionsY=4)[0]
+        groom = groomlab.create_groom(plane)
+        groomlab.add_map(groom, "dens", 0.0, kind="texture", resolution=32)
+        path = groomlab.map_texture(groom, "dens")
+        self.assertTrue(os.path.isfile(path))
+        cmds.polyEditUV(plane + ".map[*]", scaleU=2.0, pivotU=0.0, pivotV=0.0)  # the right half on 1002
+        groomlab.brush_stroke(groom, "paint", [(0.5, 0.0, 0.0)], radius=0.2, strength=1.0, attribute="dens",
+                              value=1.0, paint_kind="texture", paint_texture=path)
+        stem = path[:-len(".png")]
+        self.assertFalse(os.path.exists(path))
+        for tile in ("1001", "1002"):
+            self.assertTrue(os.path.isfile("%s.%s.png" % (stem, tile)), tile)
+        self.assertEqual(groomlab.errors(groom), [])
+        self.assertEqual(groomlab.missing_files(groom)["maps"], {})
+
+        def right_half():
+            cmds.undoInfo(openChunk=True)
+            groomlab.convert_map(groom, "dens", "vertices")
+            values = cmds.groomLabScalpMaps(groom, values="dens")
+            cmds.undoInfo(closeChunk=True)
+            cmds.undo()
+            at = [cmds.pointPosition("%s.vtx[%d]" % (plane, i), world=True) for i in range(len(values))]
+            return max(v for v, p in zip(values, at) if abs(p[0] - 0.5) < 0.13 and abs(p[2]) < 0.13)
+
+        cmds.undo()  # the stroke (undo and redo before right_half's own undo chunk)
+        self.assertTrue(os.path.isfile(path))
+        cmds.redo()
+        self.assertFalse(os.path.exists(path))
+        self.assertGreater(right_half(), 0.5)  # the stroke, as nodes read the map
+        cmds.undo()
+        self.assertTrue(os.path.isfile(path))
+        self.assertLess(right_half(), 0.05)
+
     def test_udim_maps_made_untitled_follow_the_first_save(self):
         # Issue #87 (as reported): a tile set painted while the scene is untitled (under the
         # project's groomlab/untitled) is copied beside the scene by its first save, every tile,

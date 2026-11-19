@@ -1796,6 +1796,12 @@ std::string TexturePaint::save(const std::string& path, int padding) const {
     for (const int tile : layout_ ? layout_->tiles : std::vector<int>{kFirstUdimTile}) {
         writePng(udimTilePath(pattern, tile), tileWidth_, tileHeight_, channels_, tileBytes(mosaic, tile));
     }
+    // A map that was one image (its scalp's UVs reached another tile since): the image goes, or
+    // readers would keep reading it before the tiles (texture.h).
+    if (isPlainImagePath(path) && pattern != path) {
+        std::error_code ec;
+        std::filesystem::remove(std::filesystem::u8path(path), ec);
+    }
     return pattern;
 }
 

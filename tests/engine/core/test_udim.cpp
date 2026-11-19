@@ -283,6 +283,34 @@ TEST(Udim, SaveAsTakesATileSetAlong) {
     fs::remove_all(dir);
 }
 
+TEST(Udim, AMapWhoseScalpReachesAnotherTileBecomesATileSet) {
+    // A map painted as one image; the scalp's UVs then reach tile 1002 (edited after): the paint
+    // reads the image into each tile, and its save writes the tiles and removes the image, which
+    // readers would otherwise keep reading before them (the new tiles never seen).
+    const fs::path dir = freshFolder("groomlab_udim_grow");
+    const std::string plain = (dir / "dens.png").generic_u8string();
+    TexturePaint one(*oneImagePlane(), 16, 16, 0.25f);
+    one.save(plain);
+    EXPECT_TRUE(isPlainImagePath(plain));
+    EXPECT_FALSE(isPlainImagePath((dir / "dens.1001.png").generic_u8string()));
+    EXPECT_FALSE(isPlainImagePath((dir / "head_1002.png").generic_u8string()));
+    EXPECT_FALSE(isPlainImagePath((dir / "dens.<UDIM>.png").generic_u8string()));
+    const auto scalp = twoTilePlane();
+    TexturePaint grown(*scalp, *loadTexture(plain), 1);
+    ASSERT_TRUE(grown.udim());
+    grown.fill(0.75f);
+    const std::vector<std::string> files = mapImageFiles(plain, grown.udimLayout()->tiles);
+    ASSERT_EQ(files.size(), 3u);  // the image it replaces, then its tiles
+    EXPECT_EQ(files.front(), plain);
+    grown.save(plain);
+    EXPECT_FALSE(fs::exists(fs::u8path(plain)));
+    const TexturePtr read = loadTexture(plain);
+    ASSERT_TRUE(read->isUdim());
+    EXPECT_EQ(read->udimTiles(), (std::vector<int>{1001, 1002}));
+    EXPECT_NEAR(read->udimTile(1002)->sample(0.5f, 0.5f)[0], 0.75f, 0.01f);
+    fs::remove_all(dir);
+}
+
 TEST(Udim, ResolveAndCollectFindATileSetByItsPlainPath) {
     // A map's plain path standing for a tile set is there for the resolver (the folder holding
     // the tiles, not the first one searched) and Collect Files (every tile, under one name).

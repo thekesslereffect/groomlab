@@ -91,10 +91,17 @@ std::string udimPathFor(const std::string& path);
 std::string udimTilePath(const std::string& pattern, int tile);
 // Whether a path names a tile set (texture.h's rule: a token, or a tile number with tiles beside it).
 bool isUdimPath(const std::string& path);
+// Whether `path` is an image's own name ("density.png"), not a tile set's pattern or a tile's
+// ("density.<UDIM>.png", "density.1001.png", "head_1002.png"): a file there is read before the
+// tiles beside it (texture.h), so a map that becomes a tile set (its scalp's UVs reach another
+// tile) removes it when it writes its tiles (TexturePaint::save).
+bool isPlainImagePath(const std::string& path);
 // Every file a texture map's path stands for, for a host that copies, deletes or keeps the bytes
 // of a map's image (undo): `path` itself for one image; for a tile set (a path naming one, or
 // `tiles` given: a paint's, TexturePaint::udimLayout) each tile's file of udimPathFor(path), the
-// tiles there now and `tiles`, ascending. Files that are not there are listed too (a write makes them).
+// tiles there now and `tiles`, ascending, after `path` itself when it is a plain name
+// (isPlainImagePath: the one image the set replaces). Files that are not there are listed too (a
+// write makes them).
 std::vector<std::string> mapImageFiles(const std::string& path, const std::vector<int>& tiles = {});
 // A texture map's image moved or copied from `from` to `to` (a rename): the files to move, from and
 // to: `from` and `to` for one image; for a tile set each tile there now, from its file of
