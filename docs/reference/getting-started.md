@@ -184,7 +184,10 @@ cmds.setAttr(groom + ".previewDensity", 1.0)
   guides) through it are resampled evenly to it, and every Scatter grows its strands with it in
   the first place (the most any Resample asks for; 8 when there is none), whichever node the
   viewport shows, so nodes before it, like Interpolate, already work at that resolution. Put it
-  after Interpolate (the default graph has it before the Output). Its `mode` is `even` by
+  after Interpolate (the default graph has it before the Output). A Scatter's own `segments`
+  (0 by default) overrides that for its strands: give strands that take detailed guides through
+  an Interpolate (a Braid's `sections` as guides, say) the points the guides need, whatever the
+  Resample after it asks for. Its `mode` is `even` by
   default: every strand gets `segments` (what the GPU look preview hands on); `curvature` spends
   fewer points for render and export: `segments` is the most a strand gets, straighter strands
   get fewer (down to `minSegments`), placed where they bend; `length` gives shorter strands fewer

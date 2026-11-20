@@ -1023,7 +1023,13 @@ std::string Graph::strandResolutionNote(NodeId id, bool viewport) const {
         const Node& r = nodeRecord(n);
         return r.inputs.empty() || r.inputs[0] == kNoNode;
     };
+    // A Scatter with segments of its own: no Resample sets its resolution.
+    auto ownSegments = [&](NodeId n) { return nodeRecord(n).op->params().getInt("segments") > 0; };
     if (type == op::kScatter) {
+        if (const std::int64_t own = node.op->params().getInt("segments"); own > 0) {
+            return "Its strands grow with " + points(static_cast<int>(std::min<std::int64_t>(own, 256))) +
+                   ": its own segments (a Resample after it does not change them)";
+        }
         const Resolution& r = all.at(id);
         if (r.from == kNoNode || r.segments <= 0) {
             return "Its strands grow with " + points(8) + ": no Resample after this Scatter sets their resolution (add one to its "
@@ -1048,7 +1054,7 @@ std::string Graph::strandResolutionNote(NodeId id, bool viewport) const {
     if (fedNothing(id)) {
         std::string list;
         for (const auto& [n, r] : all) {
-            if (r.from == id && nodeRecord(n).op->typeName() == op::kScatter && !off(nodeRecord(n), viewport)) {
+            if (r.from == id && nodeRecord(n).op->typeName() == op::kScatter && !off(nodeRecord(n), viewport) && !ownSegments(n)) {
                 list += (list.empty() ? "" : ", ") + name(n);
             }
         }
@@ -1072,7 +1078,7 @@ std::string Graph::strandResolutionNote(NodeId id, bool viewport) const {
         const Node& up = nodeRecord(n);
         if (up.op->typeName() == op::kScatter && !off(up, viewport)) {
             scatters.push_back(n);
-            if (all.at(n).from == id) sets.push_back(n);
+            if (all.at(n).from == id && !ownSegments(n)) sets.push_back(n);
         }
         stack.insert(stack.end(), up.inputs.begin(), up.inputs.end());
     }

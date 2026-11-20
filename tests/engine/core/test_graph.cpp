@@ -1964,6 +1964,35 @@ TEST(NodeVersions, AChangedDefaultKeepsTheFormerOneForNodesSavedBefore) {
     EXPECT_EQ(upgraded.graph.node(upgraded.node("old")).params().getString("blend"), "directions");
 }
 
+TEST(Graph, AScattersOwnSegmentsOutrankTheResampleAfterIt) {
+    // A Scatter's segments (above 0): its strands grow with them whatever a Resample after it asks
+    // for (strands that take detailed guides through an Interpolate); the notes say so, and the
+    // Resample's no longer claims it. 0: the Resample's, as ever.
+    ExternalInputs ext;
+    ext.set("scalp", test::makePlane(4, 2.0f), 1);
+    auto docWith = [](int segments) {
+        return loadGraphJson(R"({"version": 1, "output": "out", "nodes": [
+            {"name": "scalp", "type": "Scalp"},
+            {"name": "fur", "type": "Scatter", "params": {"density": 10.0, "segments": )" + std::to_string(segments) + R"(}},
+            {"name": "furRes", "type": "Resample", "params": {"segments": 5}}, {"name": "out", "type": "Output"}],
+          "connections": [{"from": "scalp", "to": "fur", "input": "scalp"}, {"from": "fur", "to": "furRes", "input": "strands"},
+            {"from": "furRes", "to": "out", "input": "strands"}]})");
+    };
+    EvalContext ctx;
+    ctx.externals = &ext;
+    for (const int segments : {0, 40}) {
+        GraphDocument doc = docWith(segments);
+        ASSERT_TRUE(doc.graph.evaluateStrands(doc.output, ctx));
+        const StrandsPtr fur = valueAs<StrandsPtr>(doc.graph.cachedValue(doc.node("fur")));
+        ASSERT_TRUE(fur && fur->strandCount() > 0);
+        EXPECT_EQ(fur->strandPointCount(0), segments ? 41u : 6u) << segments;
+        const std::string scatterNote = doc.graph.strandResolutionNote(doc.node("fur"));
+        const std::string resampleNote = doc.graph.strandResolutionNote(doc.node("furRes"));
+        EXPECT_EQ(scatterNote.find("its own segments") != std::string::npos, segments > 0) << scatterNote;
+        EXPECT_EQ(resampleNote.find("Scatter 'fur'") != std::string::npos, segments == 0) << resampleNote;
+    }
+}
+
 TEST(Graph, EachScatterGrowsWithTheResampleOfItsOwnBranch) {
     // Two branches merged, each with its own Resample: each Scatter grows its strands with the most
     // segments a Resample after it asks for, not the most any Resample in the graph does.

@@ -414,12 +414,17 @@ class ScatterOp : public Operator {
 public:
     std::string typeName() const override { return op::kScatter; }
     std::string category() const override { return "grow"; }
-    // The segments it grows its strands with (its branch's, EvalContext::strandSegments): a
-    // Resample's edit makes only the Scatters it sets again.
+    // The segments it grows its strands with: its own `segments`, else its branch's
+    // (EvalContext::strandSegments: the most a Resample after it asks for), else 8. A Resample's
+    // edit makes only the Scatters it sets again.
     std::uint64_t contextSalt(const EvalContext& ctx) const override {
         return hashCombine(hash64(0x5E6), static_cast<std::uint64_t>(segmentsFor(ctx)));
     }
-    static int segmentsFor(const EvalContext& ctx) { return std::clamp(ctx.strandSegments > 0 ? ctx.strandSegments : 8, 1, 256); }
+    int segmentsFor(const EvalContext& ctx) const {
+        const std::int64_t own = params().getInt("segments");
+        if (own > 0) return static_cast<int>(std::min<std::int64_t>(own, 256));
+        return std::clamp(ctx.strandSegments > 0 ? ctx.strandSegments : 8, 1, 256);
+    }
     bool thinnedLastRun() const override { return thinned_.load() != 0; }
     // The same node in another copy of the graph (its cached result taken on): whether that thinned,
     // and its kept placements and mixes (each keyed on all it comes from: a graph parsed again for a
@@ -449,6 +454,12 @@ public:
             notAnimatable({"density", 80.0, "Strands per unit area (mappable: texture, color set, expression, guide layer)", "density"})
                 .atLeast(0)
                 .soft(0, 2000),
+            notAnimatable({"segments", std::int64_t{0},
+                           "Segments its strands grow with (points: one more). 0: as many as the Resample after it asks "
+                           "for, else 8. More for strands that take detailed shapes through an Interpolate (a braid's "
+                           "woven sections as guides) with no Resample of their own before it"})
+                .range(0, 256)
+                .adv(),
             notAnimatable({"seed", std::int64_t{0}, "Random seed"}).adv(),
             ParamSpec{"length", 1.0, "Length of the straight strands grown along the scalp's normal. An Interpolate after "
                                      "it gives the strands the guides' shapes and lengths, so with guides this shows only "
