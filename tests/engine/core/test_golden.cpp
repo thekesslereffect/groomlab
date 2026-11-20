@@ -602,6 +602,12 @@ std::vector<Case> cases() {
         {"Subdivide", "op", R"({"name": "op", "type": "Subdivide", "params": {"levels": 1}})", link("interp", "op", "strands")},
         // Spectrum: the sweep relaxed, the middle band deepened, the high band (any frizz) taken out.
         {"Spectrum", "op", R"({"name": "op", "type": "Spectrum", "params": {"lowGain": 0.7, "midGain": 1.6, "highGain": 0.0, "lowWavelength": 4.0, "highWavelength": 0.6}})", link("interp", "op", "strands")},
+        // SmoothChannel: a HairColor's tip, a step halfway along each strand (per point colorR), smoothed
+        // along the strand: the step a ramp about the length wide.
+        {"SmoothChannel", "op",
+         R"({"name": "tip", "type": "HairColor", "params": {"mode": "color", "color": [0.0, 0.0, 1.0], "tipColor": [1.0, 0.0, 0.0], "tipStrength": 1.0, "tipProfile": [[0.0, 0.0], [0.5, 0.0], [0.52, 1.0], [1.0, 1.0]]}},
+            {"name": "op", "type": "SmoothChannel", "params": {"channel": "colorR", "length": 0.3, "strength": 0.8}})",
+         link("interp", "tip", "strands") + "," + link("tip", "op", "strands")},
     };
 }
 

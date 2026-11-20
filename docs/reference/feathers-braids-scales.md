@@ -185,7 +185,9 @@ groomlab.add_braid(groom, ["braidCurve1"], style="three", width=0.25, tightness=
   right-click the Clump's `strength`, choose Expression and type `1 - $braidPress` (the largest
   strength as its max) and it clumps where the hair lies free and leaves the contacts as the
   Braid pressed them. Set its `regionChannel` to `braidSection` as well, so each clump gathers one
-  section's hair only.
+  section's hair only. The contacts fade in and out over a short stretch, so the clumping changes
+  quickly there: a **SmoothChannel** between the Braid and the Clump (`channel` braidPress,
+  `length` about a crossing's length) spreads the change along the hair, without kinks.
 
 ## Scales
 

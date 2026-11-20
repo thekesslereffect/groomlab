@@ -2330,6 +2330,52 @@ TEST(Braid, BraidPressMarksTheHairLyingAgainstAnotherSection) {
     }
 }
 
+TEST(Braid, SmoothChannelSoftensBraidPressAlongEachStrand) {
+    // A SmoothChannel after the Braid: braidPress changes less from point to point (its contacts
+    // fade in and out over a longer stretch), stays within 0-1 and spreads, no more, over the strand
+    // (its mean about kept); strength 0, length 0, a strand channel or a channel the strands lack:
+    // handed on as they are.
+    BraidScene scene("three");
+    const NodeId smooth = scene.lg.add(op::kSmoothChannel, scene.braid);
+    auto set = [&](const char* name, ParamValue value) { scene.lg.g.node(smooth).params().set(name, std::move(value)); };
+    set("length", 0.2);
+    const StrandsPtr before = scene.lg.eval(scene.braid);
+    const StrandsPtr after = scene.lg.eval(smooth);
+    const std::vector<float>* was = before->pointChannel("braidPress");
+    const std::vector<float>* now = after->pointChannel("braidPress");
+    ASSERT_TRUE(was && now);
+    ASSERT_EQ(was->size(), now->size());
+    double stepsWas = 0.0, stepsNow = 0.0, sumWas = 0.0, sumNow = 0.0;
+    for (std::size_t s = 0; s < after->strandCount(); ++s) {
+        const std::size_t begin = after->strandBegin(s), n = after->strandPointCount(s);
+        for (std::size_t i = 0; i < n; ++i) {
+            EXPECT_GE((*now)[begin + i], -1e-6f);
+            EXPECT_LE((*now)[begin + i], 1.0f + 1e-6f);
+            sumWas += (*was)[begin + i];
+            sumNow += (*now)[begin + i];
+            if (i > 0) {
+                stepsWas += std::abs((*was)[begin + i] - (*was)[begin + i - 1]);
+                stepsNow += std::abs((*now)[begin + i] - (*now)[begin + i - 1]);
+            }
+        }
+    }
+    ASSERT_GT(stepsWas, 0.0);
+    EXPECT_LT(stepsNow, 0.6 * stepsWas) << "smoother along the strands";
+    EXPECT_NEAR(sumNow, sumWas, 0.15 * sumWas) << "spread, not lost";
+    std::printf("  braidPress steps along the strands %.1f -> %.1f\n", stepsWas, stepsNow);
+    EXPECT_EQ(after->positions(), before->positions());  // the shape untouched
+
+    for (const auto& [name, value] : std::vector<std::pair<const char*, ParamValue>>{
+             {"strength", 0.0}, {"length", 0.0}, {"channel", std::string("braidSection")}, {"channel", std::string("noSuch")}}) {
+        BraidScene same("three");
+        const NodeId node = same.lg.add(op::kSmoothChannel, same.braid);
+        same.lg.g.node(node).params().set(name, value);
+        const StrandsPtr in = same.lg.eval(same.braid);
+        const StrandsPtr out = same.lg.eval(node);
+        EXPECT_EQ(*out->pointChannel("braidPress"), *in->pointChannel("braidPress")) << name;
+    }
+}
+
 TEST(Braid, FedHairGetsFeedCardsFromTheScalpIntoTheBraid) {
     // Cards of a fed cornrow (braidCards sections, the default): its section tubes, and the hair's
     // way in (from the roots along the scalp to where it joins) on feed cards lying on the scalp,
