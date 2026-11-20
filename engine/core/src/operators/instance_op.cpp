@@ -287,8 +287,8 @@ public:
     explicit InstanceOp(bool scales) : scales_(scales) {}
     std::string typeName() const override { return scales_ ? op::kScales : op::kInstance; }
     std::string category() const override { return "look"; }
-    // Instance 2: pinToRest on by default.
-    int version() const override { return scales_ ? 1 : 2; }
+    // Instance 2: pinToRest on by default; 3: exposure external and spinAllAxes on by default.
+    int version() const override { return scales_ ? 1 : 3; }
     std::vector<std::string> externalInputs() const override { return {"scalp"}; }
     std::vector<PortSpec> inputs() const override {
         if (scales_) return {{"strands", PortType::Strands}};
@@ -417,11 +417,12 @@ public:
                           "of a fraction of its length now: strands that stretch (simulated guides) don't slide them"}
                     .formerDefault(2, false)
                     .in("Placement"),
-                ParamSpec{"exposure", std::string("both"),
+                ParamSpec{"exposure", std::string("external"),
                           "Where in the hair they go: externally (near the hair's outer surface, where they are seen: "
                           "none hidden inside to render), internally (inside it, away from the surface) or both",
-                          "", {"both", "external", "internal"}}
-                    .choicesNamed({"Instance externally and internally", "Instance externally", "Instance internally"})
+                          "", {"external", "internal", "both"}}
+                    .choicesNamed({"Instance externally", "Instance internally", "Instance externally and internally"})
+                    .formerDefault(3, std::string("both"))
                     .named("Instance")
                     .in("Exposure"),
                 ParamSpec{"exposureFalloff", 1.0,
@@ -455,8 +456,15 @@ public:
                     .range(0, 1)
                     .in("Random"),
                 ParamSpec{"spinRandom", 1.0, "Random turn about their axis, either way, 0-1 (1: up to half a turn either way: "
-                                             "any roll)", "fraction"}
+                                             "any roll); with spinAllAxes about their other two axes too", "fraction"}
                     .range(0, 1)
+                    .in("Random"),
+                ParamSpec{"spinAllAxes", true,
+                          "Spin random turns each about all three of its axes (tumbled any way: snow, debris), not "
+                          "only its long one (beads and ties round a braid). Not the ones bent along their strand"}
+                    .formerDefault(3, false)
+                    .named("All axes")
+                    .onRowOf("spinRandom")
                     .in("Random"),
             };
         }
@@ -646,7 +654,7 @@ private:
         };
         // Instance's own.
         InstanceOrient orient = InstanceOrient::Strand;
-        bool scaleByWidth = false, pinToRest = false, deformed = false, fitWidth = false;
+        bool scaleByWidth = false, pinToRest = false, deformed = false, fitWidth = false, spinAll = false;
         std::uint8_t axisCode = 1;
         // Scales' own.
         std::uint8_t previewCode = 0;
@@ -675,6 +683,7 @@ private:
             orient = orientFrom(params().getString("orient"));
             scaleByWidth = params().getBool("scaleByWidth");
             pinToRest = params().getBool("pinToRest");
+            spinAll = params().getBool("spinAllAxes");
             const std::string deform = params().getString("deform");
             if (deform != "none" && deform != "alongStrand") throw GraphError("Instance: deform must be none or alongStrand");
             const std::string deformAxis = params().getString("deformAxis");
@@ -781,6 +790,12 @@ private:
                     const float a = kTwoPi * rng.nextFloat();
                     const float r = std::sqrt(std::max(0.0f, 1.0f - z * z));
                     inst.direction = {r * pm::cos(a), r * pm::sin(a), z};
+                }
+                if (spinAll && !deformed && spinRandom > 0.0f) {
+                    // About its other two axes as far as about its own (drawn last: the draws above
+                    // stay as they were without).
+                    inst.tiltX = 0.5f * kTwoPi * spinRandom * (2.0f * rng.nextFloat() - 1.0f);
+                    inst.tiltZ = 0.5f * kTwoPi * spinRandom * (2.0f * rng.nextFloat() - 1.0f);
                 }
             }
         };

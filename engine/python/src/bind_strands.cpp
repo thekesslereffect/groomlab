@@ -67,6 +67,8 @@ void bindStrands(py::module_& m) {
         .def_readwrite("orient", &InstanceSet::Instance::orient)
         .def_readwrite("direction", &InstanceSet::Instance::direction)
         .def_readwrite("spin", &InstanceSet::Instance::spin)
+        .def_readwrite("tilt_x", &InstanceSet::Instance::tiltX)
+        .def_readwrite("tilt_z", &InstanceSet::Instance::tiltZ)
         .def_readwrite("scale", &InstanceSet::Instance::scale)
         .def_readwrite("offset", &InstanceSet::Instance::offset)
         .def_readwrite("scale_by_width", &InstanceSet::Instance::scaleByWidth)

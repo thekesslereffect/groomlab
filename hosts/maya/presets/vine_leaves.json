@@ -16,7 +16,7 @@
     {"name": "resample", "type": "Resample", "params": {"segments": 24}, "ui": {"x": 720, "y": 0}},
     {"name": "curl", "type": "Curl", "params": {"radius": 0.6, "frequency": 0.3, "randomness": 0.4}, "ui": {"x": 960, "y": 0}},
     {"name": "width", "type": "Width", "params": {"width": 0.06, "profile": [[0, 1], [1, 0.4]]}, "ui": {"x": 1200, "y": 0}},
-    {"name": "leaves", "type": "Instance", "params": {"prototype": "leaf", "probability": 1.0, "count": 6, "tMin": 0.1, "tMax": 0.95, "sizeMode": "fitStrand", "fitScale": 0.16, "aspect": 0.45, "scaleByWidth": false, "scaleRandom": 0.2, "spinRandom": 0.1, "deform": "alongStrand"}, "ui": {"x": 1440, "y": 0}},
+    {"name": "leaves", "type": "Instance", "params": {"exposure": "both", "spinAllAxes": false, "prototype": "leaf", "probability": 1.0, "count": 6, "tMin": 0.1, "tMax": 0.95, "sizeMode": "fitStrand", "fitScale": 0.16, "aspect": 0.45, "scaleByWidth": false, "scaleRandom": 0.2, "spinRandom": 0.1, "deform": "alongStrand"}, "ui": {"x": 1440, "y": 0}},
     {"name": "output", "type": "Output", "ui": {"x": 1680, "y": 0}}
   ],
   "connections": [

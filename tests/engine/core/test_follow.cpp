@@ -377,8 +377,8 @@ TEST(FollowScalp, AHostCarryingInstancedStrandsDrawsTheInstancesWhereTheSessionP
                      {"from": "dust", "to": "output", "input": "strands"})");
     const std::string lastNode = R"({"name": "output", "type": "Output"})";
     graph.replace(graph.find(lastNode), lastNode.size(),
-                  R"({"name": "snow", "type": "Instance", "params": {"probability": 0.4, "tMin": 0.3, "scale": 0.05}},
-                     {"name": "dust", "type": "Instance", "params": {"probability": 0.2, "orient": "random", "seed": 2}},
+                  R"({"name": "snow", "type": "Instance", "params": {"exposure": "both", "spinAllAxes": false, "probability": 0.4, "tMin": 0.3, "scale": 0.05}},
+                     {"name": "dust", "type": "Instance", "params": {"exposure": "both", "spinAllAxes": false, "probability": 0.2, "orient": "random", "seed": 2}},
                      {"name": "output", "type": "Output"})");
     GroomData data = followData(graph.c_str());
     data.followScalp = true;
@@ -404,7 +404,7 @@ TEST(FollowScalp, AHostCarryingInstancedStrandsDrawsTheInstancesWhereTheSessionP
     }
     // A scale: the session carries (it bends onto the skin as it is now).
     std::string scaled = graph;
-    const std::string snow = R"("type": "Instance", "params": {"probability": 0.4, "tMin": 0.3, "scale": 0.05})";
+    const std::string snow = R"("type": "Instance", "params": {"exposure": "both", "spinAllAxes": false, "probability": 0.4, "tMin": 0.3, "scale": 0.05})";
     scaled.replace(scaled.find(snow), snow.size(), R"("type": "Scales")");
     data.graphJson = scaled;
     GroomSession scales(data);

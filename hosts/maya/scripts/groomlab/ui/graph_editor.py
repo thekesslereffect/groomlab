@@ -4182,6 +4182,7 @@ class ParamPanel(QtWidgets.QScrollArea):
         row.addWidget(box, 1)
         pick = QtWidgets.QToolButton()
         pick.setObjectName("objectsFromSelection")
+        pick.setProperty("role", "bordered")  # a light border: plainly a button beside the field
         pick.setText("Selected")
         pick.setToolTip("Fill it with the meshes selected in the scene, separated by commas (several: variants, "
                         "one per instance)")

@@ -127,6 +127,7 @@ std::uint64_t InstanceSet::hashInstance(std::uint64_t h, const Instance& i) {
         h = hashCombine(h, bits);
     }
     if (i.deform) h = hashCombine(h, 0xDEF0u + i.deformAxis);  // (undeformed ones hash as they always did)
+    if (i.tiltX != 0.0f || i.tiltZ != 0.0f) h = hashFloat(hashFloat(hashCombine(h, 0x7117u), i.tiltX), i.tiltZ);  // (likewise)
     if (i.onSkin) {  // (instances on strands hash as they always did)
         h = hashCombine(h, static_cast<std::uint64_t>(i.variant) | (static_cast<std::uint64_t>(i.preview) << 16) |
                                (i.conform ? 1ull << 24 : 0ull) | (i.aimRoot ? 1ull << 25 : 0ull) |
@@ -382,7 +383,19 @@ std::vector<InstanceSet::Placed> InstanceSet::resolveIn(const StrandSet& strands
         }
         const float c = pm::cos(i.spin), sn = pm::sin(i.spin);
         x = (x * c + y.cross(x) * sn).normalized();  // spin about y
-        const Vec3f z = x.cross(y).normalized();
+        Vec3f z = x.cross(y).normalized();
+        if (!i.deform && (i.tiltX != 0.0f || i.tiltZ != 0.0f)) {
+            // Tumbled (spun on every axis): about its own +X, then its +Z.
+            const float cx = pm::cos(i.tiltX), sx = pm::sin(i.tiltX);
+            const Vec3f yx = y * cx + z * sx, zx = z * cx - y * sx;
+            y = yx;
+            z = zx;
+            const float cz = pm::cos(i.tiltZ), sz = pm::sin(i.tiltZ);
+            const Vec3f xz = x * cz + y * sz, yz = y * cz - x * sz;
+            x = xz.normalized();
+            y = yz.normalized();
+            z = z.normalized();
+        }
         Placed p;
         p.prototype = i.prototype;
         p.id = i.id;

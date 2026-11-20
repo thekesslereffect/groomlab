@@ -791,6 +791,8 @@ QToolButton { background: transparent; border: none; border-radius: %(r)dpx; pad
 QToolButton:hover { background: %(hover)s; }
 QToolButton:checked { background: %(accentSoft)s; color: %(accentInk)s; }
 QToolButton:disabled { color: %(disabled)s; }
+QToolButton[role="bordered"] { border: {{1}}px solid %(dim)s; padding: {{2}}px {{8}}px; }
+QToolButton[role="bordered"]:hover { border-color: %(text)s; }
 QToolButton[role="tool"] { background: transparent; border: {{1}}px solid transparent; border-radius: %(r)dpx; padding: {{4}}px 0;
     color: %(dim)s; font-size: %(fs_tiny)dpx; font-weight: 500; }
 QToolButton[role="tool"]:hover { background: %(hover)s; color: %(text)s; }
