@@ -12,6 +12,9 @@
 // (a Braid node's ties) the instances go on those instead, which are carried
 // with the instances (InstanceSet::anchors) and never drawn as hair: beads,
 // cuffs and hair ties round braids (fitWidth: as thick as the braid there).
+// Where on the hair they go: `exposure` keeps them near the hair's outer surface (external), away from
+// it (internal) or anywhere; `axisFacing` keeps them on the side of the hair facing an axis (snow on
+// top: +Y), each within its falloff's depth under the surface (HairVolume).
 // Scales (Strands -> Strands): one scale at each strand's root instead, lying on the skin along the
 // strand, as long as the strand and as wide as its root (times `size`; scales.h makes their
 // meshes: tilted like roof tiles, bent onto the skin).
@@ -27,6 +30,7 @@
 #include "groomlab/instances.h"
 #include "groomlab/operators.h"
 #include "groomlab/parallel.h"
+#include "groomlab/point_index.h"
 #include "groomlab/portable_math.h"
 #include "groomlab/random.h"
 #include "groomlab/scalp_mesh.h"
@@ -39,6 +43,234 @@ namespace {
 
 constexpr float kTwoPi = 6.2831853f;
 constexpr float kDegrees = 0.017453293f;
+
+// The hair as a volume on a grid (the strands' segments in cells, closed by a cell), for how deep a
+// point lies under its outer surface: straight in (depth) or along an axis from its side
+// (depthAlong). Outside is the empty space reaching the grid's border (a cavity inside is hair).
+class HairVolume {
+public:
+    static constexpr int kCells = 96;  // along the longest side
+
+    // axis 0-2 (x, y, z) and sign +1 / -1: the side depthAlong measures from; axis -1: none.
+    HairVolume(const StrandSet& hair, bool depthIn, int axis, int sign) {
+        const std::vector<Vec3f>& points = hair.positions();
+        if (points.empty()) return;
+        Vec3f lo = points[0], hi = points[0];
+        for (const Vec3f& p : points) {
+            lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
+            hi = {std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
+        }
+        const float extent = std::max({hi.x - lo.x, hi.y - lo.y, hi.z - lo.z});
+        // The gap between neighbouring strands: twice the mean distance from a root to its nearest
+        // (a sample of them). Cells are at least half of it, and the strands grow by it.
+        const float gap = 2.0f * meanRootSpacing(hair);
+        cell_ = std::max(extent / static_cast<float>(kCells), 0.5f * gap);
+        if (!(cell_ > 0.0f)) cell_ = 1.0f;
+        grow_ = std::clamp(static_cast<int>(std::ceil(gap / cell_)), 1, 3);
+        const int kPad = grow_ + 1;
+        origin_ = lo - Vec3f{1, 1, 1} * (cell_ * kPad);
+        n_[0] = static_cast<int>((hi.x - lo.x) / cell_) + 1 + 2 * kPad;
+        n_[1] = static_cast<int>((hi.y - lo.y) / cell_) + 1 + 2 * kPad;
+        n_[2] = static_cast<int>((hi.z - lo.z) / cell_) + 1 + 2 * kPad;
+        const std::size_t total = static_cast<std::size_t>(n_[0]) * n_[1] * n_[2];
+        // The segments, sampled every half cell.
+        std::vector<std::uint8_t> hit(total, 0);
+        for (std::size_t s = 0; s < hair.strandCount(); ++s) {
+            const Vec3f* p = hair.strandPoints(s);
+            const std::size_t count = hair.strandPointCount(s);
+            for (std::size_t i = 0; i < count; ++i) {
+                hit[indexOf(p[i])] = 1;
+                if (i + 1 == count) break;
+                const Vec3f d = p[i + 1] - p[i];
+                const int steps = static_cast<int>(d.length() / (0.5f * cell_));
+                for (int k = 1; k <= steps; ++k) hit[indexOf(p[i] + d * (static_cast<float>(k) / static_cast<float>(steps + 1)))] = 1;
+            }
+        }
+        // Grown by grow_ cells (a box, one axis at a time): the gaps between strands are hair.
+        std::vector<std::uint8_t> solid = hit;
+        for (int a = 0; a < 3; ++a) {
+            std::vector<std::uint8_t> from = solid;
+            const std::size_t step = a == 0 ? 1 : a == 1 ? static_cast<std::size_t>(n_[0])
+                                                         : static_cast<std::size_t>(n_[0]) * static_cast<std::size_t>(n_[1]);
+            for (std::size_t i = 0; i < total; ++i) {
+                if (!from[i]) continue;
+                const int c = coordinate(i, a);
+                for (int d = -grow_; d <= grow_; ++d) {
+                    if (c + d < 0 || c + d >= n_[a]) continue;
+                    solid[static_cast<std::size_t>(static_cast<std::ptrdiff_t>(i) + static_cast<std::ptrdiff_t>(d) *
+                                                                                      static_cast<std::ptrdiff_t>(step))] = 1;
+                }
+            }
+        }
+        // Outside: the empty cells reaching the border.
+        outside_.assign(total, 0);
+        std::vector<std::size_t> stack;
+        auto reach = [&](int x, int y, int z) {
+            const std::size_t i = at(x, y, z);
+            if (!solid[i] && !outside_[i]) {
+                outside_[i] = 1;
+                stack.push_back(i);
+            }
+        };
+        for (int z = 0; z < n_[2]; ++z) {
+            for (int y = 0; y < n_[1]; ++y) {
+                for (int x = 0; x < n_[0]; ++x) {
+                    if (x == 0 || y == 0 || z == 0 || x + 1 == n_[0] || y + 1 == n_[1] || z + 1 == n_[2]) reach(x, y, z);
+                }
+            }
+        }
+        while (!stack.empty()) {
+            const std::size_t i = stack.back();
+            stack.pop_back();
+            const int x = coordinate(i, 0), y = coordinate(i, 1), z = coordinate(i, 2);
+            if (x > 0) reach(x - 1, y, z);
+            if (x + 1 < n_[0]) reach(x + 1, y, z);
+            if (y > 0) reach(x, y - 1, z);
+            if (y + 1 < n_[1]) reach(x, y + 1, z);
+            if (z > 0) reach(x, y, z - 1);
+            if (z + 1 < n_[2]) reach(x, y, z + 1);
+        }
+        if (depthIn) chamfer();
+        if (axis >= 0) along(axis, sign);
+    }
+
+    bool empty() const { return outside_.empty(); }
+    // How deep `p` lies under the hair's outer surface, scene units (0 on it and outside). (The
+    // outermost strands' cells lie grow_ cells in from the outside: they are 0 deep.)
+    float depth(const Vec3f& p) const {
+        if (dist_.empty()) return 0.0f;
+        return std::max(0.0f, static_cast<float>(dist_[indexOf(p)]) / 3.0f - static_cast<float>(grow_ + 1)) * cell_;
+    }
+    // How deep under the hair's surface on the axis' side, along the axis.
+    float depthAlong(const Vec3f& p) const {
+        if (run_.empty()) return 0.0f;
+        return std::max(0.0f, static_cast<float>(run_[indexOf(p)]) - static_cast<float>(grow_ + 1)) * cell_;
+    }
+
+private:
+    // The mean distance from a root to the nearest other root, over a sample of up to 512 strands
+    // (0 for fewer than two).
+    static float meanRootSpacing(const StrandSet& hair) {
+        std::vector<Vec3f> roots;
+        roots.reserve(hair.strandCount());
+        for (std::size_t s = 0; s < hair.strandCount(); ++s) {
+            if (hair.strandPointCount(s)) roots.push_back(hair.strandPoints(s)[0]);
+        }
+        if (roots.size() < 2) return 0.0f;
+        const std::size_t count = roots.size(), samples = std::min<std::size_t>(count, 512);
+        const PointIndex index(roots);
+        double sum = 0.0;
+        std::size_t found = 0;
+        for (std::size_t k = 0; k < samples; ++k) {
+            std::size_t near[2];
+            float d2[2];
+            // (itself first; a root another shares is skipped as itself)
+            if (index.kNearest(roots[k * count / samples], 2, near, d2) == 2 && d2[1] > 0.0f) {
+                sum += std::sqrt(d2[1]);
+                ++found;
+            }
+        }
+        return found ? static_cast<float>(sum / static_cast<double>(found)) : 0.0f;
+    }
+    int coordinate(std::size_t i, int a) const {
+        const auto nx = static_cast<std::size_t>(n_[0]), ny = static_cast<std::size_t>(n_[1]);
+        return static_cast<int>(a == 0 ? i % nx : a == 1 ? i / nx % ny : i / (nx * ny));
+    }
+    std::size_t at(int x, int y, int z) const {
+        return (static_cast<std::size_t>(z) * static_cast<std::size_t>(n_[1]) + static_cast<std::size_t>(y)) *
+                   static_cast<std::size_t>(n_[0]) +
+               static_cast<std::size_t>(x);
+    }
+    std::size_t indexOf(const Vec3f& p) const {
+        const Vec3f g = (p - origin_) / cell_;
+        auto clampTo = [](float v, int n) { return std::clamp(static_cast<int>(v), 0, n - 1); };
+        return at(clampTo(g.x, n_[0]), clampTo(g.y, n_[1]), clampTo(g.z, n_[2]));
+    }
+    // A 3-4-5 chamfer distance (in thirds of a cell) to the nearest outside cell.
+    void chamfer() {
+        constexpr std::int32_t kFar = 1 << 28;
+        dist_.assign(outside_.size(), kFar);
+        for (std::size_t i = 0; i < outside_.size(); ++i) {
+            if (outside_[i]) dist_[i] = 0;
+        }
+        auto pass = [&](int dir) {
+            const int x0 = dir > 0 ? 0 : n_[0] - 1, y0 = dir > 0 ? 0 : n_[1] - 1, z0 = dir > 0 ? 0 : n_[2] - 1;
+            for (int z = z0; z >= 0 && z < n_[2]; z += dir) {
+                for (int y = y0; y >= 0 && y < n_[1]; y += dir) {
+                    for (int x = x0; x >= 0 && x < n_[0]; x += dir) {
+                        std::int32_t& d = dist_[at(x, y, z)];
+                        if (d == 0) continue;
+                        // The 13 neighbours this pass has already been through.
+                        for (int dz = -1; dz <= 0; ++dz) {
+                            for (int dy = -1; dy <= 1; ++dy) {
+                                for (int dx = -1; dx <= 1; ++dx) {
+                                    if (dz == 0 && (dy > 0 || (dy == 0 && dx >= 0))) continue;
+                                    const int nx = x + dx * dir, ny = y + dy * dir, nz = z + dz * dir;
+                                    if (nx < 0 || ny < 0 || nz < 0 || nx >= n_[0] || ny >= n_[1] || nz >= n_[2]) continue;
+                                    const int steps = (dx != 0) + (dy != 0) + (dz != 0);
+                                    const std::int32_t w = steps == 1 ? 3 : steps == 2 ? 4 : 5;
+                                    d = std::min(d, dist_[at(nx, ny, nz)] + w);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        };
+        pass(1);
+        pass(-1);
+    }
+    // Per cell, how many cells in from the outside it is, coming along the axis from its `sign` end.
+    void along(int axis, int sign) {
+        run_.assign(outside_.size(), 0);
+        const int a = axis, b = (axis + 1) % 3, c = (axis + 2) % 3;
+        int idx[3] = {0, 0, 0};
+        for (int j = 0; j < n_[c]; ++j) {
+            for (int i = 0; i < n_[b]; ++i) {
+                std::int32_t run = 0;
+                for (int k = 0; k < n_[a]; ++k) {
+                    idx[a] = sign > 0 ? n_[a] - 1 - k : k;
+                    idx[b] = i;
+                    idx[c] = j;
+                    const std::size_t cellAt = at(idx[0], idx[1], idx[2]);
+                    run = outside_[cellAt] ? 0 : run + 1;
+                    run_[cellAt] = run;
+                }
+            }
+        }
+    }
+
+    float cell_ = 1.0f;
+    int grow_ = 1;  // cells the strands grow by
+    Vec3f origin_;
+    int n_[3] = {0, 0, 0};
+    std::vector<std::uint8_t> outside_;
+    std::vector<std::int32_t> dist_, run_;
+};
+
+// 1 at 0 deep, 0 from `falloff` on, smoothly between (a hard edge with no falloff).
+float within(float depth, float falloff) {
+    if (falloff <= 0.0f) return depth <= 0.0f ? 1.0f : 0.0f;
+    const float x = std::clamp(depth / falloff, 0.0f, 1.0f);
+    return 1.0f - x * x * (3.0f - 2.0f * x);
+}
+
+// The point a fraction `t` of a strand's length along it.
+Vec3f pointAlong(const StrandSet& strands, std::size_t s, float t) {
+    const Vec3f* p = strands.strandPoints(s);
+    const std::size_t count = strands.strandPointCount(s);
+    if (count == 0) return {};
+    if (count == 1) return p[0];
+    float length = 0.0f;
+    for (std::size_t i = 0; i + 1 < count; ++i) length += (p[i + 1] - p[i]).length();
+    float left = std::clamp(t, 0.0f, 1.0f) * length;
+    for (std::size_t i = 0; i + 1 < count; ++i) {
+        const float seg = (p[i + 1] - p[i]).length();
+        if (left <= seg || i + 2 == count) return seg > 0.0f ? p[i] + (p[i + 1] - p[i]) * std::min(left / seg, 1.0f) : p[i];
+        left -= seg;
+    }
+    return p[count - 1];
+}
 
 InstanceOrient orientFrom(const std::string& name) {
     if (name == "strand") return InstanceOrient::Strand;
@@ -55,6 +287,8 @@ public:
     explicit InstanceOp(bool scales) : scales_(scales) {}
     std::string typeName() const override { return scales_ ? op::kScales : op::kInstance; }
     std::string category() const override { return "look"; }
+    // Instance 2: pinToRest on by default.
+    int version() const override { return scales_ ? 1 : 2; }
     std::vector<std::string> externalInputs() const override { return {"scalp"}; }
     std::vector<PortSpec> inputs() const override {
         if (scales_) return {{"strands", PortType::Strands}};
@@ -124,9 +358,10 @@ public:
             };
         } else {
             specs = {
-                {"prototype", std::string("instance"),
-                 "The mesh to instance (its name in the scene); several separated by spaces are variants, one per "
-                 "instance (variantBy)"},
+                ParamSpec{"prototype", std::string("instance"),
+                          "The mesh to instance (its name in the scene); several separated by commas are variants, one "
+                          "per instance (variantBy)"}
+                    .named("Object(s)"),
                 ParamSpec{"variantBy", std::string("random"),
                           "With several prototypes: random (by each instance's ID and the seed) or map (the variant "
                           "param, 0-1 over the list)", "", {"random", "map"}}
@@ -177,10 +412,45 @@ public:
                                                            "random", "", {"strand", "up", "root", "random"}}
                     .in("Placement"),
                 ParamSpec{"offset", 0.0, "Distance off the strand, scene units", "length"}.soft(0, 0.5).in("Placement"),
-                ParamSpec{"pinToRest", false,
+                ParamSpec{"pinToRest", true,
                           "Keep each one at a fixed distance from the root, measured on the strand's rest pose, instead "
                           "of a fraction of its length now: strands that stretch (simulated guides) don't slide them"}
+                    .formerDefault(2, false)
                     .in("Placement"),
+                ParamSpec{"exposure", std::string("both"),
+                          "Where in the hair they go: externally (near the hair's outer surface, where they are seen: "
+                          "none hidden inside to render), internally (inside it, away from the surface) or both",
+                          "", {"both", "external", "internal"}}
+                    .choicesNamed({"Instance externally and internally", "Instance externally", "Instance internally"})
+                    .named("Instance")
+                    .in("Exposure"),
+                ParamSpec{"exposureFalloff", 1.0,
+                          "How deep under the hair's outer surface externally reaches (and internally starts), scene "
+                          "units, fading over it", "length"}
+                    .atLeast(0)
+                    .soft(0, 5)
+                    .named("Falloff")
+                    .onRowOf("exposure")
+                    .when("exposure", {"external", "internal"})
+                    .in("Exposure"),
+                ParamSpec{"axisFacing", false,
+                          "Only on the side of the hair facing an axis (the top of the hair for Y+: snow, dust), "
+                          "fading over the falloff's depth under it"}
+                    .in("Exposure"),
+                ParamSpec{"axis", std::string("+y"), "The side they go on: the hair as seen from this end of the axis",
+                          "", {"+x", "-x", "+y", "-y", "+z", "-z"}}
+                    .choicesNamed({"X+", "X-", "Y+", "Y-", "Z+", "Z-"})
+                    .when("axisFacing", {"true"})
+                    .in("Exposure"),
+                ParamSpec{"axisFalloff", 1.0,
+                          "How deep under the hair's surface facing the axis they go, measured along the axis, scene "
+                          "units, fading over it", "length"}
+                    .atLeast(0)
+                    .soft(0, 5)
+                    .named("Falloff")
+                    .onRowOf("axis")
+                    .when("axisFacing", {"true"})
+                    .in("Exposure"),
                 ParamSpec{"scaleRandom", 0.3, "Each one's size up to this share more or less, at random", "fraction"}
                     .range(0, 1)
                     .in("Random"),
@@ -234,6 +504,7 @@ private:
     struct StrandDraw {
         float chance = 0.0f, size = 0.0f, ratio = 1.0f, variant = 0.0f;
         std::size_t count = 0;
+        std::uint64_t kept = 0;  // which of the node's `count` tries are kept (bit k)
     };
 
     // `made`'s place taken by `next`, a result holding its very instances (the same strands: its
@@ -289,6 +560,23 @@ private:
                 return true;
             }
         }
+        // Where in the hair (Instance's): by the whole hair's volume, so never in part.
+        const std::string exposure = scales ? std::string("both") : params().getString("exposure");
+        if (exposure != "both" && exposure != "external" && exposure != "internal") {
+            throw GraphError("Instance: exposure must be both, external or internal");
+        }
+        const bool axisFacing = !scales && params().getBool("axisFacing");
+        int axis = -1, axisSign = 1;
+        if (axisFacing) {
+            const std::string name = params().getString("axis");
+            if (name.size() != 2 || (name[0] != '+' && name[0] != '-') || name[1] < 'x' || name[1] > 'z') {
+                throw GraphError("Instance: axis must be +x, -x, +y, -y, +z or -z");
+            }
+            axisSign = name[0] == '+' ? 1 : -1;
+            axis = name[1] - 'x';
+        }
+        const bool exposed = exposure != "both" || axisFacing;
+        if (exposed && incremental) return false;
         // The fields read (one read twice for one that is not).
         const ScalarField& probabilityRead = scales ? scale : probability;
         const ScalarField& aspectRead = fitted ? aspect : scale;
@@ -339,6 +627,23 @@ private:
         const float spinRandom = static_cast<float>(params().getDouble("spinRandom"));
         const float offset = static_cast<float>(params().getDouble("offset"));
         const auto seed = static_cast<std::uint64_t>(params().getInt("seed"));
+        std::unique_ptr<HairVolume> volume;
+        float exposureFalloff = 0.0f, axisFalloff = 0.0f;
+        if (exposed) {
+            volume = std::make_unique<HairVolume>(*hair, exposure != "both", axis, axisSign);
+            exposureFalloff = static_cast<float>(params().getDouble("exposureFalloff"));
+            axisFalloff = static_cast<float>(params().getDouble("axisFalloff"));
+        }
+        // How much of its chance an instance at `t` along strand `s` keeps (all of it unless exposed).
+        auto exposureAt = [&](std::size_t s, float t) {
+            if (!volume || volume->empty()) return 1.0f;
+            const Vec3f p = pointAlong(*in, s, t);
+            float w = 1.0f;
+            if (exposure == "external") w *= within(volume->depth(p), exposureFalloff);
+            if (exposure == "internal") w *= 1.0f - within(volume->depth(p), exposureFalloff);
+            if (axisFacing) w *= within(volume->depthAlong(p), axisFalloff);
+            return w;
+        };
         // Instance's own.
         InstanceOrient orient = InstanceOrient::Strand;
         bool scaleByWidth = false, pinToRest = false, deformed = false, fitWidth = false;
@@ -402,14 +707,25 @@ private:
             d.size = scale.at(*in, s);
             d.ratio = fitted ? std::max(aspect.at(*in, s), 0.0f) : 1.0f;
             d.variant = byMap ? variant.at(*in, s) : 0.0f;
-            for (std::size_t k = 0; k < count; ++k) d.count += scales || unitFloat(hash64(instanceId(s, k))) < d.chance ? 1 : 0;
+            for (std::size_t k = 0; k < count; ++k) {
+                const std::uint64_t id = instanceId(s, k);
+                bool keep = scales || unitFloat(hash64(id)) < d.chance;
+                if (keep && volume) {
+                    Rng rng(id);  // its t: the first draw (write)
+                    keep = unitFloat(hash64(id)) < d.chance * exposureAt(s, tMin + (tMax - tMin) * rng.nextFloat());
+                }
+                if (keep) {
+                    ++d.count;
+                    d.kept |= std::uint64_t{1} << k;
+                }
+            }
             return d;
         };
         const std::size_t variantCount = prototypes.size();
         auto write = [&](std::size_t s, const StrandDraw& d, InstanceSet::Instance* at) {
             for (std::size_t k = 0; k < count; ++k) {
                 const std::uint64_t id = instanceId(s, k);
-                if (!scales && unitFloat(hash64(id)) >= d.chance) continue;
+                if (!(d.kept >> k & 1u)) continue;
                 Rng rng(id);
                 InstanceSet::Instance& inst = *at++;  // default-made by the resize
                 // The variant: by the map over the list, else by the ID (its own hash: the draws

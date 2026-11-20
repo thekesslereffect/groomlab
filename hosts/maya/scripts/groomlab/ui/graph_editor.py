@@ -2513,7 +2513,7 @@ class ParamPanel(QtWidgets.QScrollArea):
         """A param's row name (with a ◆ when exposed as an input) and its tooltip: what it does and
         what its right-click offers."""
         model = self.editor.model
-        text = pretty(spec["name"]) + (" ◆" if spec["name"] in model.param_inputs(name) else "")
+        text = (spec.get("label") or pretty(spec["name"])) + (" ◆" if spec["name"] in model.param_inputs(name) else "")
         tip = "%s: %s" % (spec["name"], spec["description"])
         if spec.get("channel") in ATTRIBUTE_TIPS:
             tip = ATTRIBUTE_TIPS[spec["channel"]] + "\n" + tip
@@ -2566,9 +2566,16 @@ class ParamPanel(QtWidgets.QScrollArea):
         column.setContentsMargins(0, 0, 0, 0)
         column.setSpacing(form.verticalSpacing())
         form.addRow(box)
-        self.row_labels = [label for _, label, _ in rows]  # one width once styled (align_labels)
         specs = [spec for spec, _, _ in rows]
         by_name = {spec["name"]: (spec, label, widget) for spec, label, widget in rows}
+        # A param on another's row (its spec's "row": a falloff beside its mode) goes after that
+        # one's field, when both are in the same section.
+        section_of = {spec["name"]: section for section, members in param_sections(specs) for spec in members}
+        inline = {spec["name"] for spec in specs
+                  if spec.get("row") in by_name and section_of.get(spec.get("row")) == section_of[spec["name"]]}
+        # One width once styled (align_labels): the labels starting rows.
+        self.row_labels = [label for spec, label, _ in rows if spec["name"] not in inline]
+        lines = {}  # param -> its row's layout
         for section, members in param_sections(specs):
             header = None
             if section:
@@ -2584,6 +2591,16 @@ class ParamPanel(QtWidgets.QScrollArea):
             entries = []
             for spec in members:
                 _, label, widget = by_name[spec["name"]]
+                if spec["name"] in inline and spec["row"] in lines:
+                    piece = QtWidgets.QWidget()  # its label and field, shown and hidden together
+                    part = QtWidgets.QHBoxLayout(piece)
+                    part.setContentsMargins(0, 0, 0, 0)
+                    part.setSpacing(theme.px(6))
+                    part.addWidget(label, 0, QtCore.Qt.AlignVCenter)
+                    part.addWidget(widget, 1)
+                    lines[spec["row"]].addWidget(piece, 1)
+                    entries.append((spec, piece))
+                    continue
                 row = QtWidgets.QWidget()
                 line = QtWidgets.QHBoxLayout(row)
                 line.setContentsMargins(0, 0, 0, 0)
@@ -2592,6 +2609,7 @@ class ParamPanel(QtWidgets.QScrollArea):
                 label.setMinimumHeight(min(widget.sizeHint().height(), theme.px(26)))
                 line.addWidget(label, 0, QtCore.Qt.AlignTop)
                 line.addWidget(widget, 1)
+                lines[spec["name"]] = line
                 column.addWidget(row)
                 entries.append((spec, row))
             self.sections.append((section, header, entries))
@@ -3479,10 +3497,11 @@ class ParamPanel(QtWidgets.QScrollArea):
             def prototype():
                 picked = groomlab.selected_meshes()  # (a mesh, not the groom selected with it)
                 if not picked:
-                    raise ValueError("select the mesh to instance")
-                return groomlab.set_instance_prototype(groom, name, picked[0], model=self.editor.model)
-            buttons.append(("Prototype from Selection", "Instance the selected mesh (hide it: only its "
-                            "instances render)", run(prototype, lambda m: "instancing %s" % m)))
+                    raise ValueError("select the mesh(es) to instance")
+                return groomlab.set_instance_prototype(groom, name, picked, model=self.editor.model)
+            buttons.append(("Object(s) from Selection", "Instance the selected meshes (several: variants, one per "
+                            "instance; hide them: only their instances render)",
+                            run(prototype, lambda m: "instancing %s" % m)))
         # The shared ones (graph_ui.json's nodeActions) for its type, two to a row.
         table = self.node_action_table(name)
         shared = [item for item in definitions.resolve(definitions.get("graph/nodeActions")["items"],
@@ -3958,12 +3977,13 @@ class ParamPanel(QtWidgets.QScrollArea):
             w.committed.connect(set_value)
         elif spec.get("choices"):  # a fixed set of values
             w = QtWidgets.QComboBox()
-            for choice in spec["choices"]:
-                w.addItem(choice)
+            shown = spec.get("choiceLabels") or spec["choices"]  # what each reads (else the value)
+            for choice, text in zip(spec["choices"], shown):
+                w.addItem(text, choice)
             if str(value) not in spec["choices"]:
-                w.addItem(str(value))
-            w.setCurrentText(str(value))
-            w.activated.connect(lambda i, w=w: set_value(w.itemText(i)))
+                w.addItem(str(value), str(value))
+            w.setCurrentIndex(max(w.findData(str(value)), 0))
+            w.activated.connect(lambda i, w=w: set_value(w.itemData(i)))
         elif spec.get("channel") in ("writes", "reads") and on_change is None:
             w = self.attribute_editor(name, spec, value, set_value)
         elif spec["name"] in ("group", "exclude") and self.editor.model.node_type(name) == "Guides":
@@ -3971,6 +3991,8 @@ class ParamPanel(QtWidgets.QScrollArea):
         elif self.suggestions(name, spec["name"]) is not None:  # free text, with what exists offered
             options, placeholder = self.suggestions(name, spec["name"])
             w = suggest_box(value, options, set_value, placeholder)
+            if spec["name"] == "prototype" and self.editor.model.node_type(name) in ("Instance", "Scales"):
+                w = self.objects_field(w, set_value)
         elif spec["name"] == "path" and self.editor.model.node_type(name) in FILE_PATH_FILTERS:
             w = self.path_field(value, FILE_PATH_FILTERS[self.editor.model.node_type(name)], set_value)
         else:  # string
@@ -4148,6 +4170,34 @@ class ParamPanel(QtWidgets.QScrollArea):
                 names = [a[4:] for a in (cmds.listAttr(groom, userDefined=True) or []) if a.startswith("ctl_")]
             return names, "the slider's name"
         return None
+
+    def objects_field(self, box, set_value):
+        """An Instance node's Object(s) field (`box`: one mesh picked from its dropdown, or names
+        typed) with a button filling it with the meshes selected in the scene, separated by commas."""
+        import groomlab
+        w = QtWidgets.QWidget()
+        row = QtWidgets.QHBoxLayout(w)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(theme.px(4))
+        row.addWidget(box, 1)
+        pick = QtWidgets.QToolButton()
+        pick.setObjectName("objectsFromSelection")
+        pick.setText("Selected")
+        pick.setToolTip("Fill it with the meshes selected in the scene, separated by commas (several: variants, "
+                        "one per instance)")
+
+        def from_selection():
+            picked = groomlab.selected_meshes()  # (meshes only: not the groom selected with them)
+            if not picked:
+                self.editor.report("Select the mesh(es) to instance first")
+                return
+            names = groomlab.instance_object_names(picked)
+            box.setCurrentText(names)
+            set_value(names)
+        pick.clicked.connect(lambda _=False: later(from_selection))
+        row.addWidget(pick)
+        w.box, w.pick = box, pick
+        return w
 
     def group_editor(self, param, value, set_value):
         """The groom's guide groups to pick from, one or several: which to read (group) or leave out (exclude)."""

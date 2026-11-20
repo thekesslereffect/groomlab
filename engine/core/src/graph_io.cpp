@@ -437,6 +437,9 @@ std::string paramSpecJson(const ParamSpec& p) {
     if (p.softMax || p.max) param["softMax"] = p.softMax ? *p.softMax : *p.max;
     if (!p.showWhen.empty()) param["showWhen"] = {{"param", p.showWhen.param}, {"in", p.showWhen.in}};
     if (p.channelOptional) param["channelOptional"] = true;
+    if (!p.label.empty()) param["label"] = p.label;
+    if (!p.choiceLabels.empty()) param["choiceLabels"] = p.choiceLabels;
+    if (!p.row.empty()) param["row"] = p.row;
     if (!p.unitWhen.param.empty()) param["unitWhen"] = {{"param", p.unitWhen.param}, {"in", p.unitWhen.in}};
     // A changed default: nodes saved before version `since` take `before` (ParamSpec::since).
     if (p.since > 0) param["formerDefault"] = {{"since", p.since}, {"value", paramToJson(p.before)}};

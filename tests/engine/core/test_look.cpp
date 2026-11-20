@@ -1684,6 +1684,7 @@ TEST(Instances, NodeSizeModeFitStrand) {
     const NodeId inst = lg.add(op::kInstance, lg.scatter);
     lg.g.node(inst).params().set("probability", 1.0);
     lg.g.node(inst).params().set("scaleRandom", 0.0);
+    lg.g.node(inst).params().set("pinToRest", false);  // (pinned ones need the rest pose too)
     lg.g.node(inst).params().set("aspect", 0.3);
     lg.g.node(inst).params().set("fitScale", 0.5);
     const StrandsPtr fixed = lg.eval(inst);
@@ -1720,16 +1721,120 @@ TEST(Instances, NodeSetsScaleByWidthAndPinToRest) {
     ASSERT_TRUE(defaults->instances() && !defaults->instances()->empty());
     for (const auto& i : defaults->instances()->instances) {
         EXPECT_TRUE(i.scaleByWidth);  // on by default
-        EXPECT_FALSE(i.pinToRest);    // off by default
+        EXPECT_TRUE(i.pinToRest);     // on by default (Instance 2)
     }
     lg.g.node(inst).params().set("scaleByWidth", false);
-    lg.g.node(inst).params().set("pinToRest", true);
+    lg.g.node(inst).params().set("pinToRest", false);
     const StrandsPtr set = lg.eval(inst);
     EXPECT_NE(set->instances()->contentHash(), defaults->instances()->contentHash());
     for (const auto& i : set->instances()->instances) {
         EXPECT_FALSE(i.scaleByWidth);
-        EXPECT_TRUE(i.pinToRest);
+        EXPECT_FALSE(i.pinToRest);
     }
+    // A node saved before Instance 2 that leaves it out keeps it off.
+    GraphDocument doc = loadGraphJson(
+        R"({"nodes": [{"name": "old", "type": "Instance", "version": 1, "params": {}},
+                      {"name": "new", "type": "Instance", "params": {}}], "output": "old"})");
+    EXPECT_FALSE(doc.graph.node(doc.node("old")).params().getBool("pinToRest"));
+    EXPECT_TRUE(doc.graph.node(doc.node("new")).params().getBool("pinToRest"));
+}
+
+// Instances on a unit cube of hair (the plane's strands stand up 1 unit), anywhere along them.
+struct CubeOfHair {
+    LookGraph lg{900.0};
+    NodeId inst = 0;
+    CubeOfHair() {
+        inst = lg.add(op::kInstance, lg.scatter);
+        ParamSet& p = lg.g.node(inst).params();
+        p.set("probability", 1.0);
+        p.set("count", std::int64_t{8});
+        p.set("tMin", 0.0);
+        p.set("tMax", 1.0);
+        p.set("pinToRest", false);
+    }
+    // Where each instance sits.
+    std::vector<Vec3f> placed() {
+        const StrandsPtr s = lg.eval(inst);
+        std::vector<Vec3f> at;
+        if (!s->instances()) return at;
+        for (const auto& p : s->instances()->resolve(*s)) at.push_back(p.origin);
+        return at;
+    }
+};
+
+// How far inside the unit cube of hair a point is (its floor too: the hair's surface under it).
+float insideCube(const Vec3f& p) {
+    return std::min({p.x, 1.0f - p.x, p.z, 1.0f - p.z, p.y, 1.0f - p.y});
+}
+
+TEST(Instances, AxisFacingPutsThemOnTheHairsSideFacingTheAxis) {
+    CubeOfHair cube;
+    const std::vector<Vec3f> everywhere = cube.placed();
+    ASSERT_GT(everywhere.size(), 1000u);
+    ParamSet& p = cube.lg.g.node(cube.inst).params();
+    p.set("axisFacing", true);  // +y by default: the top
+    p.set("axisFalloff", 0.1);
+    const std::vector<Vec3f> top = cube.placed();
+    ASSERT_GT(top.size(), 50u);
+    EXPECT_LT(top.size(), everywhere.size() / 3);
+    for (const Vec3f& v : top) EXPECT_GT(v.y, 0.75f);
+    // -x: the side at x = 0.
+    p.set("axis", std::string("-x"));
+    const std::vector<Vec3f> side = cube.placed();
+    ASSERT_GT(side.size(), 50u);
+    for (const Vec3f& v : side) EXPECT_LT(v.x, 0.25f);
+    // A wider falloff reaches deeper: more of them.
+    p.set("axisFalloff", 0.4);
+    EXPECT_GT(cube.placed().size(), side.size());
+    p.set("axis", std::string("up"));
+    EXPECT_THROW(cube.lg.eval(cube.inst), GraphError);
+}
+
+TEST(Instances, ExposureKeepsThemOutsideOrInsideTheHair) {
+    CubeOfHair cube;
+    const std::vector<Vec3f> all = cube.placed();
+    const std::size_t everywhere = all.size();
+    // The share of `at` within `d` of the hair's surface.
+    auto nearSurface = [](const std::vector<Vec3f>& at, float d) {
+        std::size_t n = 0;
+        for (const Vec3f& v : at) n += insideCube(v) < d ? 1 : 0;
+        return static_cast<double>(n) / static_cast<double>(std::max<std::size_t>(at.size(), 1));
+    };
+    ParamSet& p = cube.lg.g.node(cube.inst).params();
+    p.set("exposure", std::string("external"));
+    p.set("exposureFalloff", 0.1);
+    const std::vector<Vec3f> outer = cube.placed();
+    ASSERT_GT(outer.size(), 50u);
+    EXPECT_LT(outer.size(), everywhere);
+    for (const Vec3f& v : outer) EXPECT_LT(insideCube(v), 0.25f);
+    p.set("exposure", std::string("internal"));
+    const std::vector<Vec3f> inner = cube.placed();
+    ASSERT_GT(inner.size(), 50u);
+    // None but a few within a grid cell (about 0.03 here) of the surface, where a tenth of all are.
+    EXPECT_GT(nearSurface(all, 0.03f), 0.1);
+    EXPECT_LT(nearSurface(inner, 0.03f), 0.02);
+    for (const Vec3f& v : inner) EXPECT_GT(insideCube(v), 0.0f);
+    // Together about all of them (each kept by its share of either).
+    EXPECT_NEAR(static_cast<double>(outer.size() + inner.size()), static_cast<double>(everywhere), 0.15 * everywhere);
+    p.set("exposure", std::string("somewhere"));
+    EXPECT_THROW(cube.lg.eval(cube.inst), GraphError);
+}
+
+TEST(Instances, ParamsCarryTheirUiLabels) {
+    const nlohmann::json ops = nlohmann::json::parse(operatorSpecsJson());
+    for (const nlohmann::json& o : ops) {
+        if (o["type"] != op::kInstance) continue;
+        std::map<std::string, nlohmann::json> by;
+        for (const nlohmann::json& q : o["params"]) by[q["name"].get<std::string>()] = q;
+        EXPECT_EQ(by["prototype"]["label"], "Object(s)");
+        EXPECT_EQ(by["exposure"]["choiceLabels"].size(), by["exposure"]["choices"].size());
+        EXPECT_EQ(by["exposureFalloff"]["row"], "exposure");
+        EXPECT_EQ(by["axis"]["default"], "+y");
+        EXPECT_EQ(by["axisFalloff"]["row"], "axis");
+        EXPECT_FALSE(by["axisFacing"]["default"].get<bool>());
+        return;
+    }
+    FAIL() << "no Instance in the operator specs";
 }
 
 }  // namespace

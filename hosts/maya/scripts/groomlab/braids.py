@@ -56,19 +56,31 @@ def braid_paths_from_curves(groom, braid, curves, model=None):
     return group
 
 
+def instance_object_names(meshes):
+    """What an Instance node's Object(s) param holds for `meshes` (transforms or mesh shapes): each
+    mesh's transform, its short name, once each, in order, separated by commas."""
+    names = []
+    for mesh in meshes:
+        shapes = [mesh] if cmds.nodeType(mesh) == "mesh" else cmds.listRelatives(mesh, shapes=True, type="mesh") or []
+        if not shapes:
+            raise ValueError("%s is not a mesh" % mesh)
+        name = cmds.listRelatives(shapes[0], parent=True)[0] if cmds.nodeType(mesh) == "mesh" else mesh
+        name = name.split("|")[-1]
+        if name not in names:
+            names.append(name)
+    return ", ".join(names)
+
+
 def set_instance_prototype(groom, node, mesh, model=None):
-    """Instance `mesh` (a transform or mesh shape) with the Instance node `node` (in `model` when
-    given, unsaved)."""
+    """Instance `mesh` (a transform or mesh shape, or a list of them: variants, one per instance)
+    with the Instance node `node` (in `model` when given, unsaved). Returns what its Object(s)
+    param now holds."""
     from groomlab import graph as gm
     own = model is None
     model = model or gm.GraphModel.from_groom(groom)
     if node not in model.order or model.node_type(node) not in ("Instance", "Scales"):
         raise ValueError("%s is not an Instance or Scales node" % node)
-    shapes = [mesh] if cmds.nodeType(mesh) == "mesh" else cmds.listRelatives(mesh, shapes=True, type="mesh") or []
-    if not shapes:
-        raise ValueError("%s is not a mesh" % mesh)
-    name = cmds.listRelatives(shapes[0], parent=True)[0] if cmds.nodeType(mesh) == "mesh" else mesh
-    name = name.split("|")[-1]
+    name = instance_object_names([mesh] if isinstance(mesh, str) else list(mesh))
     model.set_param(node, "prototype", name)
     if own:
         model.save(groom)
