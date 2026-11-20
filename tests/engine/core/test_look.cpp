@@ -2250,6 +2250,86 @@ TEST(Braid, EveryBraidedStrandHasItsSectionAndIsWovenOnFromItsWayIn) {
     }
 }
 
+TEST(Braid, BraidPressMarksTheHairLyingAgainstAnotherSection) {
+    // braidPress, per point: 0 where a strand lies free in its section, up to 1 where it lies on a
+    // contact's facet against another section (the sections pressed: separate), for a Clump's
+    // strength mapped by 1 - $braidPress to leave the crossings as the Braid pressed them. Hair it
+    // marks lies nearer the other sections' hair than hair it leaves; 0 at the root, on the way in
+    // and in a free tail; 0 everywhere when the sections pass through each other (separate 0).
+    for (const char* style : {"three", "five", "fishtail", "rope"}) {
+        for (const bool feed : {false, true}) {
+            BraidScene scene(style);
+            scene.setParam("end", std::string("free"));
+            scene.setParam("tail", 0.25);
+            if (feed) {
+                scene.setParam("feed", true);
+                scene.setParam("region", 0.1);
+            }
+            const StrandsPtr after = scene.lg.eval(scene.braid);
+            const std::vector<float>* sections = after->strandChannel("braidSection");
+            const std::vector<float>* press = after->pointChannel("braidPress");
+            const std::vector<float>* woven = after->pointChannel("braidWoven");
+            const std::vector<float>* tail = after->pointChannel("braidTail");
+            ASSERT_TRUE(sections && press && woven && tail) << style;
+            // The braided hair's points by section, the woven part's.
+            std::vector<std::vector<Vec3f>> of(16);
+            for (std::size_t s = 0; s < after->strandCount(); ++s) {
+                const int k = static_cast<int>((*sections)[s]);
+                const std::size_t begin = after->strandBegin(s), n = after->strandPointCount(s);
+                EXPECT_FLOAT_EQ((*press)[begin], 0.0f) << style << " " << s;  // the root
+                for (std::size_t i = 0; i < n; ++i) {
+                    const float p = (*press)[begin + i];
+                    EXPECT_GE(p, 0.0f);
+                    EXPECT_LE(p, 1.0f);
+                    if ((*woven)[begin + i] <= 0.0f || (*tail)[begin + i] >= 1.0f) EXPECT_FLOAT_EQ(p, 0.0f) << style << " " << s << " " << i;
+                    if (k >= 0 && (*woven)[begin + i] >= 1.0f && (*tail)[begin + i] <= 0.0f) {
+                        of[static_cast<std::size_t>(k)].push_back(after->strandPoints(s)[i]);
+                    }
+                }
+            }
+            // How near a point lies to another section's hair, by braidPress: pressed hair nearer.
+            std::vector<PointIndex> indices;
+            std::vector<std::vector<Vec3f>> others(of.size());
+            for (std::size_t k = 0; k < of.size(); ++k) {
+                for (std::size_t o = 0; o < of.size(); ++o) {
+                    if (o != k) others[k].insert(others[k].end(), of[o].begin(), of[o].end());
+                }
+                indices.emplace_back(others[k]);
+            }
+            double nearPressed = 0.0, nearFree = 0.0;
+            std::size_t pressed = 0, free = 0;
+            for (std::size_t s = 0; s < after->strandCount(); ++s) {
+                const int k = static_cast<int>((*sections)[s]);
+                if (k < 0 || others[static_cast<std::size_t>(k)].empty()) continue;
+                const std::size_t begin = after->strandBegin(s);
+                for (std::size_t i = 0; i < after->strandPointCount(s); ++i) {
+                    if ((*woven)[begin + i] < 1.0f || (*tail)[begin + i] > 0.0f) continue;
+                    const float p = (*press)[begin + i];
+                    if (p > 0.5f || p < 0.02f) {
+                        float d2 = 0.0f;
+                        indices[static_cast<std::size_t>(k)].nearest(after->strandPoints(s)[i], &d2);
+                        (p > 0.5f ? nearPressed : nearFree) += std::sqrt(d2);
+                        ++(p > 0.5f ? pressed : free);
+                    }
+                }
+            }
+            EXPECT_GT(pressed, 100u) << style << " feed " << feed;
+            EXPECT_GT(free, 100u) << style << " feed " << feed;
+            if (pressed && free) {
+                // (a fed braid's few strands lie further apart: nearer by less)
+                EXPECT_LT(nearPressed / pressed, (feed ? 0.75 : 0.6) * nearFree / free) << style << " feed " << feed;
+                std::printf("  %s%s: %zu pressed, %zu free; to another section %.4f vs %.4f\n", style, feed ? " fed" : "", pressed, free,
+                            nearPressed / pressed, nearFree / free);
+            }
+            scene.setParam("separate", 0.0);
+            const StrandsPtr plain = scene.lg.eval(scene.braid);
+            const std::vector<float>* none = plain->pointChannel("braidPress");
+            ASSERT_TRUE(none) << style;
+            EXPECT_EQ(*std::max_element(none->begin(), none->end()), 0.0f) << style;
+        }
+    }
+}
+
 TEST(Braid, FedHairGetsFeedCardsFromTheScalpIntoTheBraid) {
     // Cards of a fed cornrow (braidCards sections, the default): its section tubes, and the hair's
     // way in (from the roots along the scalp to where it joins) on feed cards lying on the scalp,

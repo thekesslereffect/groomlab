@@ -83,7 +83,9 @@
 // rising to 1 down its tail (fan, tuft; free: over the release, 1 in the free tail), a mask for nodes after it (Curl, Clump,
 // Noise with affect $braidTail shape the ends alone), and `braidWoven`: 0 on the way in (from
 // the root to where the strand joins the braid: along the scalp when fed), rising to 1 in the
-// braid (Cards builds a braid's tubes from the woven part).
+// braid (Cards builds a braid's tubes from the woven part), and `braidPress`: how much the strand
+// lies against another section there (Braider::pressAt; 0 with plain sections), for a Clump's
+// strength mapped by 1 - $braidPress to leave the contacts as pressed.
 
 #include <algorithm>
 #include <array>
@@ -533,6 +535,9 @@ struct Pressed {
     int span = 0;
     std::vector<std::uint8_t> from;
     std::vector<float> scales;  // [(section * span + sample) * kAround + ray]: the outline's scale along the ray
+    // As `scales`: how much the outline lies against another section along the ray (markContacts),
+    // 0 where it reaches as far as the section's free side, 1 on a contact's flat facet.
+    std::vector<float> contact;
     // [(section * span + sample) * 8]: the tube's ring there, in braid widths: its center (side to
     // side, depth), then the ring's two directions in the path's frame (normal, binormal, tangent),
     // across the band and through it, square to the section's own course, each as long as the
@@ -556,7 +561,29 @@ struct Pressed {
     const float* row(int section, int sample) const { return scales.data() + at(section, sample) * kAround; }
     // Its ring there: 8 numbers.
     const float* ring(int section, int sample) const { return rings.data() + at(section, sample) * 8; }
+    // The contact along each ray (kAround) of the outline that row() gave as `row`.
+    const float* contactOf(const float* row) const { return contact.data() + (row - scales.data()); }
 };
+
+// Marks where each outline lies against another section (Pressed::contact). An outline reaches as
+// far as its section's free side along a ray that touches nothing (pressSections: as far as the
+// grown section's area lets it; pressAcross: its cell's rounded rim) and is pressed in short of
+// that where another section takes over. The free reach is the ring's farthest, at least the
+// grown size (a section pressed on every side); a ray pressed in by kFrom of it or less is free,
+// by kTo or more fully on a contact, smoothly between. The outlines are smoothed round the ring and
+// along the section already, so the contacts fade in and out with them.
+void markContacts(Pressed& p) {
+    constexpr float kFrom = 0.04f, kTo = 0.25f;
+    constexpr std::size_t around = Pressed::kAround;
+    p.contact.assign(p.scales.size(), 0.0f);
+    for (std::size_t at = 0; at + around <= p.scales.size(); at += around) {
+        const float* s = p.scales.data() + at;
+        float free = p.grown;
+        for (std::size_t j = 0; j < around; ++j) free = std::max(free, s[j]);
+        if (!(free > 0.0f)) continue;
+        for (std::size_t j = 0; j < around; ++j) p.contact[at + j] = smoothstep(kFrom, kTo, 1.0f - s[j] / free);
+    }
+}
 
 // The steps after which a weave is as it began with its sections renamed (a three-strand braid
 // after a crossing from each side, a rope after one ply's turn), at most its cycle. `next`: the
@@ -1324,7 +1351,9 @@ std::shared_ptr<const Pressed> pressedFor(const Weave& w, float pancake, float i
                                         [] {
                                             const std::lock_guard<std::mutex> lock(kept.mutex);
                                             std::size_t bytes = 0;
-                                            for (const auto& entry : kept.solved) bytes += entry.second->scales.size() * sizeof(float);
+                                            for (const auto& entry : kept.solved) {
+                                                bytes += (entry.second->scales.size() + entry.second->contact.size()) * sizeof(float);
+                                            }
                                             return bytes;
                                         }),
                                     true);
@@ -1349,7 +1378,9 @@ std::shared_ptr<const Pressed> pressedFor(const Weave& w, float pancake, float i
         }
     }
     const ProfileScope profile("braid.press");
-    auto solved = std::make_shared<const Pressed>(across ? pressAcross(w, pancake, inflate, tilt) : pressSections(w, pancake, inflate, tilt));
+    Pressed made = across ? pressAcross(w, pancake, inflate, tilt) : pressSections(w, pancake, inflate, tilt);
+    markContacts(made);
+    auto solved = std::make_shared<const Pressed>(std::move(made));
     const std::lock_guard<std::mutex> lock(kept.mutex);
     kept.solved.insert(kept.solved.begin(), {key, solved});
     if (kept.solved.size() > 16) kept.solved.pop_back();
@@ -1436,6 +1467,7 @@ struct BraidChannels {
     std::vector<float>* tail = nullptr;  // per point: 0 in the braid, rising to 1 down its tail
     std::vector<float>* section = nullptr;  // the section a strand runs in, -1 when loose
     std::vector<float>* woven = nullptr;    // per point: 0 on the way in, rising to 1 in the braid
+    std::vector<float>* press = nullptr;    // per point: how much it lies against another section (pressAt)
     int first = 0;             // this node's ids start here (after an earlier Braid node's)
     // Paths of its own: each path's number, from its strand's ID (stableGroupNumbers), so an edit
     // of the scalp in one place renumbers no braid elsewhere; null: the path's index (the guides').
@@ -1539,6 +1571,7 @@ struct StrandSpot {
     float across = 0.0f, thick = 0.0f;
     float fanDepth = 0.0f, fanSide = 0.0f;
     float ray = 0.0f;  // pressed sections: the outline's ray the spot lies along, in [0, Pressed::kAround)
+    float out = 0.0f;  // how far out of its section's middle the spot lies (1: at its rim)
     // A strand's (spotOf): with end free it takes its place in the tail's one bundle. Not a
     // section's center line or a tube's rim point: those run onto the path where the sections end.
     bool inBundle = false;
@@ -1622,6 +1655,21 @@ struct Braider {
         const float there = rows[1][j] + (rows[1][next] - rows[1][j]) * u;
         const float plain = pressed->inflated;
         return plain + (here + (there - here) * between - plain) * separate;
+    }
+    // How much a strand at `spot` lies against another section there (braidPress): its outline's
+    // contact along its ray (Pressed::contact, between two samples as outlineAt), more the farther
+    // out of its section's middle the spot lies (a contact's facet is the section's rim: the hair
+    // in its middle lies against none), `separate` of it (sections that pass through each other
+    // press nothing).
+    float pressAt(const float* const rows[2], float between, const StrandSpot& spot) const {
+        if (pressed->contact.empty()) return 0.0f;
+        const int j = std::min(static_cast<int>(spot.ray), Pressed::kAround - 1), next = j + 1 < Pressed::kAround ? j + 1 : 0;
+        const float u = spot.ray - static_cast<float>(j);
+        const float* c0 = pressed->contactOf(rows[0]);
+        const float* c1 = pressed->contactOf(rows[1]);
+        const float here = c0[j] + (c0[next] - c0[j]) * u;
+        const float there = c1[j] + (c1[next] - c1[j]) * u;
+        return (here + (there - here) * between) * smoothstep(0.2f, 0.9f, spot.out) * separate;
     }
 
     float widthAt(const BraidPath& path, float at) const {
@@ -1882,6 +1930,7 @@ struct Braider {
         spot.inBundle = true;
         spot.across = d.inLobe.x * weave.halfWidth * loose;
         spot.thick = d.inLobe.y * weave.halfThick * loose;
+        spot.out = std::min(std::sqrt(d.inLobe.x * d.inLobe.x + d.inLobe.y * d.inLobe.y) / kLobeReach, 1.0f);
         if (end != End::Tuft) {
             spot.fanDepth = style == Style::Cornrow ? std::abs(pm::sin(d.fanAngle)) : pm::sin(d.fanAngle);
             spot.fanSide = pm::cos(d.fanAngle);
@@ -1972,14 +2021,17 @@ struct Braider {
     }
     // The same from the station and its section's band (stationAt, sectionAt: as they are worked
     // out there, or kept in a path's table), for a strand with draws `d` at `spot` (spotOf).
+    // `press` (null: not asked) gets how much it lies against another section there (pressAt), none
+    // as it lets go of the braid or a tie holds it.
     Vec3f braidedFrom(const PathStation& st, const SectionStation& sec, int section, const StrandDraws& d,
-                      const StrandSpot& spot) const {
+                      const StrandSpot& spot, float* press = nullptr) const {
         const float wid = st.wid, letGo = st.letGo;
         const float wander = d.fuzz * pm::sin(d.wanderPhase + 7.0f * st.u);
         // Its spot in its section: of the plain ellipse, or along its ray as far as the pressed
         // outline lets it.
         float pressedTo = 1.0f;
         Vec3f local;
+        if (press) *press = sec.rows[0] ? pressAt(sec.rows, st.between, spot) * (1.0f - letGo) * st.release : 0.0f;
         if (sec.rows[0]) {
             pressedTo = outlineAt(sec.rows, st.between, spot.ray);
             local = (sec.center + (sec.across * (spot.across * wid) + sec.thick * (spot.thick * wid)) * pressedTo) * (1.0f - letGo);
@@ -2077,29 +2129,31 @@ struct Braider {
         return sampling.count(n, paths[static_cast<std::size_t>(path)].repeats, 1.0f);
     }
     // Without feed, the strand's points along its path from root to tip (pts[0], its root, stays);
-    // `tails` (null: not asked) gets each point's braidTail. `table`: the path's stations for a
-    // strand of n points (tableFor), read in place of working each point's out; null: worked out.
+    // `tails` (null: not asked) gets each point's braidTail, `woven` its braidWoven, `presses` its
+    // braidPress. `table`: the path's stations for a strand of n points (tableFor), read in place of
+    // working each point's out; null: worked out.
     int braidAlong(Vec3f* pts, std::size_t n, const BraidPath& path, const StrandDraws& d, float* tails, float* woven = nullptr,
-                   const PathTable* table = nullptr) const {
+                   const PathTable* table = nullptr, float* presses = nullptr) const {
         // The section on its side where it comes in, halfway through the gather.
         const float in = 0.5f * gather * path.length;
         const int section = sectionOfRoot(pts[0] - path.root, path.frames.front(), path.weaveAt(in), d.lobe);
         const StrandSpot spot = spotOf(d);
         if (tails) tails[0] = 0.0f;
         if (woven) woven[0] = 0.0f;
+        if (presses) presses[0] = 0.0f;
         const SectionStation* bands = table ? table->sections.data() + static_cast<std::size_t>(section) * n : nullptr;
         for (std::size_t i = 1; i < n; ++i) {
-            float blend = 0.0f, letGo = 0.0f;  // from the root into the braid; down its tail
+            float blend = 0.0f, letGo = 0.0f, press = 0.0f;  // from the root into the braid; down its tail
             Vec3f braided;
             if (table) {
                 const PathStation& st = table->stations[i];
-                braided = braidedFrom(st, bands[i], section, d, spot);
+                braided = braidedFrom(st, bands[i], section, d, spot, &press);
                 blend = table->blend[i];
                 letGo = st.letGo;
             } else {
                 const float u = static_cast<float>(i) / static_cast<float>(n - 1);
                 const PathStation st = stationAt(path, u * path.length);
-                braided = braidedFrom(st, sectionAt(section, st), section, d, spot);
+                braided = braidedFrom(st, sectionAt(section, st), section, d, spot, &press);
                 blend = smoothstep(0.0f, gather, u);
                 letGo = st.letGo;
             }
@@ -2107,6 +2161,7 @@ struct Braider {
             overScalp.apply(pts[i], blend, (pts[i] - pts[0]).length());
             if (tails) tails[i] = letGo;
             if (woven) woven[i] = blend;
+            if (presses) presses[i] = press * blend;
         }
         return section;
     }
@@ -2277,7 +2332,7 @@ public:
     // version 1 node braids as before, whatever those two params hold.
     int version() const override { return 2; }
     std::vector<ChannelWrite> channelWrites() const override {
-        return {{"braidId", ""}, {"braidFlat", ""}, {"braidSection", ""}, {"braidTail", ""}, {"braidWoven", ""}};
+        return {{"braidId", ""}, {"braidFlat", ""}, {"braidSection", ""}, {"braidTail", ""}, {"braidWoven", ""}, {"braidPress", ""}};
     }
     std::string category() const override { return "look"; }
     std::vector<std::string> externalInputs() const override { return {"scalp"}; }
@@ -2593,7 +2648,7 @@ private:
             }
             firstId = static_cast<int>(groupNumberBase(static_cast<std::int64_t>(highest)));
         }
-        BraidChannels channels{nullptr, nullptr, nullptr, nullptr, nullptr, firstId};
+        BraidChannels channels{nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, firstId};
         std::vector<float> numbers;
         if (own) {
             std::vector<std::uint64_t> ids(br.paths.size());
@@ -2695,7 +2750,8 @@ private:
             channels.tail = made->copyPointChannelFrom("braidTail", *last);
             channels.section = made->copyStrandChannelFrom("braidSection", *last);
             channels.woven = made->copyPointChannelFrom("braidWoven", *last);
-            if (!channels.id || !channels.flat || !channels.tail || !channels.section || !channels.woven) return false;
+            channels.press = made->copyPointChannelFrom("braidPress", *last);
+            if (!channels.id || !channels.flat || !channels.tail || !channels.section || !channels.woven || !channels.press) return false;
             forEachListed(changes->strands, [&](std::size_t s) {
                 for (const auto& [from, to] : strandValues) (*to)[s] = (*from)[s];
                 resampleStrand(*in, *made, s, false, widths, inPoint, outPoint, outWidths);
@@ -2704,6 +2760,7 @@ private:
                 (*channels.section)[s] = -1.0f;
                 std::fill_n(channels.tail->begin() + static_cast<std::ptrdiff_t>(made->strandBegin(s)), made->strandPointCount(s), 0.0f);
                 std::fill_n(channels.woven->begin() + static_cast<std::ptrdiff_t>(made->strandBegin(s)), made->strandPointCount(s), 0.0f);
+                std::fill_n(channels.press->begin() + static_cast<std::ptrdiff_t>(made->strandBegin(s)), made->strandPointCount(s), 0.0f);
                 braidOne(br, *in, joined[s], *made, s, channels);
             });
             *result = StrandsPtr(made);
@@ -2730,6 +2787,7 @@ private:
         channels.tail = &out->addPointChannel("braidTail", 0.0f);
         channels.section = &out->addStrandChannel("braidSection", -1.0f);
         channels.woven = &out->addPointChannel("braidWoven", 0.0f);
+        channels.press = &out->addPointChannel("braidPress", 0.0f);
         if (!earlierIds.empty()) {
             *channels.id = earlierIds;
             if (earlierFlat.size() == channels.flat->size()) *channels.flat = earlierFlat;
@@ -2748,7 +2806,8 @@ private:
                 if (plan.path < 0) return;
                 channels.set(s, plan.path, br.style);
                 (*channels.section)[s] = static_cast<float>(feedOne(br, plan, pts, n, along, channels.tail->data() + out->strandBegin(s),
-                                                                    channels.woven->data() + out->strandBegin(s)));
+                                                                    channels.woven->data() + out->strandBegin(s),
+                                                                    channels.press->data() + out->strandBegin(s)));
             });
         } else {
             // Path by path: a path's strands of the points its weave needs all lie at the same
@@ -2809,7 +2868,8 @@ private:
         const int section = br.braidAlong(pts, n, br.paths[static_cast<std::size_t>(best)], draws,
                                           channels.tail ? channels.tail->data() + out.strandBegin(s) : nullptr,
                                           channels.woven ? channels.woven->data() + out.strandBegin(s) : nullptr,
-                                          table && best == tablePath && n == table->count ? table : nullptr);
+                                          table && best == tablePath && n == table->count ? table : nullptr,
+                                          channels.press ? channels.press->data() + out.strandBegin(s) : nullptr);
         if (channels.section) (*channels.section)[s] = static_cast<float>(section);
     }
 
@@ -2817,7 +2877,7 @@ private:
     // by its own length.
     // Returns the section it joins.
     static int feedOne(const Braider& br, const FedPlan& plan, Vec3f* pts, std::size_t n, const std::vector<float>& along,
-                       float* tail, float* woven) {
+                       float* tail, float* woven, float* press) {
         const BraidPath& path = br.paths[static_cast<std::size_t>(plan.path)];
         // Picked up along the path: the outer section on its side, as a braider adds hair; from
         // the root region: the section on its side of the region.
@@ -2840,6 +2900,7 @@ private:
         const float turn = std::min(0.5f * br.widthAt(path, plan.joinAt), 0.4f * plan.approach);
         tail[0] = 0.0f;
         woven[0] = 0.0f;
+        press[0] = 0.0f;
         for (std::size_t i = 1; i < n; ++i) {
             const float fitted = along[i] * plan.squeeze;
             Vec3f straight = root + way * fitted;
@@ -2855,11 +2916,14 @@ private:
             if (w <= 0.0f) {
                 pts[i] = straight;
                 tail[i] = 0.0f;
+                press[i] = 0.0f;
                 continue;
             }
             const PathStation st = br.stationAt(path, std::max(at, 0.0f));
-            const Vec3f braided = br.braidedFrom(st, br.sectionAt(section, st), section, plan.draws, spot);
+            float pressed = 0.0f;
+            const Vec3f braided = br.braidedFrom(st, br.sectionAt(section, st), section, plan.draws, spot, &pressed);
             pts[i] = straight + (braided - straight) * w;
+            press[i] = pressed * w;
             // (in the braid `at` is not below 0: the station's tail is tailAt's there)
             tail[i] = fitted < plan.approach ? 0.0f : st.letGo;
         }

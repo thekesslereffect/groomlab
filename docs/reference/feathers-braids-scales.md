@@ -81,8 +81,8 @@ groomlab.add_braid(groom, ["braidCurve1"], style="three", width=0.25, tightness=
   for paths of its own a number from the picked strand's ID, so an edit elsewhere renumbers no
   braid; -1 for strands not braided, strays included), `braidFlat` (1 for a cornrow, lying on the
   scalp), `braidSection` (the section the strand runs in, -1 when not braided) and, per point,
-  `braidTail` (rising down a fanned or tufted end) and `braidWoven` (0 on the way in from the
-  root, rising to 1 in the braid); the Cards node uses them to build braid cards (a tube per
+  `braidTail` (rising down a fanned or tufted end), `braidWoven` (0 on the way in from the
+  root, rising to 1 in the braid) and `braidPress` (below); the Cards node uses them to build braid cards (a tube per
   section by default: [game export](game-export.md)).
 - **Braid paths are not hair:** the other Guides nodes list the paths group in `exclude`, so
   Interpolate never uses a path as a hair guide.
@@ -177,6 +177,15 @@ groomlab.add_braid(groom, ["braidCurve1"], style="three", width=0.25, tightness=
   the Braid, right-click its `strength`, choose Expression and type `$braidTail`, with the
   largest strength as its max: the weave stays as it is and the ponytail gathers into locks. A
   Curl after it with `radius` mapped the same way curls it.
+- **Clumps that keep the crossings** (`braidPress`): with the sections pressed (`separate`) the
+  node writes a per-point channel, 0 where a strand lies free in its section, rising to 1 where
+  it lies against another section's flat facet (most at the section's rim, none in its middle,
+  `separate` of it, none on the way in, in a free tail or under a tie). A Clump after the Braid
+  pulls hair toward its centers whatever the sections' outlines are, across a contact as well:
+  right-click the Clump's `strength`, choose Expression and type `1 - $braidPress` (the largest
+  strength as its max) and it clumps where the hair lies free and leaves the contacts as the
+  Braid pressed them. Set its `regionChannel` to `braidSection` as well, so each clump gathers one
+  section's hair only.
 
 ## Scales
 

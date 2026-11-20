@@ -43,6 +43,7 @@
   },
   "braids": {
    "channels": {
+    "point.braidPress": "521a84bb66f3187e",
     "point.braidTail": "af470ec41f62ffc5",
     "point.braidWoven": "69bc77c0e2691cf7",
     "strand.braidFlat": "30608ee6eb63767c",
@@ -54,7 +55,7 @@
     "strand.melanin": "c720e5903ce46757",
     "strand.melaninRedness": "ba12ffef6db79a34"
    },
-   "everything": "26fdde1d1c86529f",
+   "everything": "bce931f8b1ddeba2",
    "ids": "20ed751c376a9e91",
    "points": 532665,
    "positions": "b9be0ca51c03172c",
@@ -64,6 +65,7 @@
   },
   "braids_beaded": {
    "channels": {
+    "point.braidPress": "e60fe804f87da8be",
     "point.braidTail": "af470ec41f62ffc5",
     "point.braidWoven": "69bc77c0e2691cf7",
     "strand.braidFlat": "30608ee6eb63767c",
@@ -75,7 +77,7 @@
     "strand.melanin": "c720e5903ce46757",
     "strand.melaninRedness": "ba12ffef6db79a34"
    },
-   "everything": "bd32681199391bbc",
+   "everything": "078316e92d5aaa2b",
    "ids": "20ed751c376a9e91",
    "points": 532665,
    "positions": "8000fe5188d506ef",
@@ -85,6 +87,7 @@
   },
   "braids_cornrows": {
    "channels": {
+    "point.braidPress": "3130d756cf72bfad",
     "point.braidTail": "68cfa8c799cdc9de",
     "point.braidWoven": "b06b8138b0bb95a4",
     "strand.braidFlat": "0ee8a4b6d97b72dd",
@@ -96,7 +99,7 @@
     "strand.melanin": "c720e5903ce46757",
     "strand.melaninRedness": "ba12ffef6db79a34"
    },
-   "everything": "fd10c598584b702c",
+   "everything": "3c247fef78ddfeae",
    "ids": "20ed751c376a9e91",
    "points": 64866,
    "positions": "f7e7e0388ce7706c",
@@ -106,6 +109,7 @@
   },
   "braids_curly_ends": {
    "channels": {
+    "point.braidPress": "5f33a7a1acd1e53d",
     "point.braidTail": "536d64df7f136dfe",
     "point.braidWoven": "efad884c61927dc0",
     "strand.braidFlat": "30608ee6eb63767c",
@@ -117,7 +121,7 @@
     "strand.melanin": "c720e5903ce46757",
     "strand.melaninRedness": "ba12ffef6db79a34"
    },
-   "everything": "77aae9966d364d34",
+   "everything": "84a02e40e2b8efad",
    "ids": "20ed751c376a9e91",
    "points": 533289,
    "positions": "c4471cf0c9abb31a",
@@ -127,6 +131,7 @@
   },
   "braids_fishtail_ponytail": {
    "channels": {
+    "point.braidPress": "422248f3b80457fa",
     "point.braidTail": "4a8e472769aa423c",
     "point.braidWoven": "0b2c2116e2c99608",
     "strand.braidFlat": "30608ee6eb63767c",
@@ -138,7 +143,7 @@
     "strand.melanin": "c720e5903ce46757",
     "strand.melaninRedness": "ba12ffef6db79a34"
    },
-   "everything": "df2efb4f30036006",
+   "everything": "27d51e0d6c533913",
    "ids": "20ed751c376a9e91",
    "points": 392692,
    "positions": "d798e69975071d2b",
@@ -148,6 +153,7 @@
   },
   "braids_free_ends": {
    "channels": {
+    "point.braidPress": "c797f15e04728a51",
     "point.braidTail": "b3b395cc972da493",
     "point.braidWoven": "69bc77c0e2691cf7",
     "strand.braidFlat": "30608ee6eb63767c",
@@ -160,7 +166,7 @@
     "strand.melanin": "6ff04f37ad3aebf2",
     "strand.melaninRedness": "ba12ffef6db79a34"
    },
-   "everything": "36d9c2eeea499350",
+   "everything": "8192f524a8c5661d",
    "ids": "20ed751c376a9e91",
    "points": 532665,
    "positions": "6e523b34226706bd",
@@ -170,6 +176,7 @@
   },
   "braids_french": {
    "channels": {
+    "point.braidPress": "9531561e92a8a9cb",
     "point.braidTail": "09957cab58def47e",
     "point.braidWoven": "119b862461434056",
     "strand.braidFlat": "30608ee6eb63767c",
@@ -181,7 +188,7 @@
     "strand.melanin": "c720e5903ce46757",
     "strand.melaninRedness": "ba12ffef6db79a34"
    },
-   "everything": "c1011af7efdce52c",
+   "everything": "f18428d68ff4d2b3",
    "ids": "20ed751c376a9e91",
    "points": 93393,
    "positions": "bde70951ad6b824e",
@@ -191,6 +198,7 @@
   },
   "braids_loose": {
    "channels": {
+    "point.braidPress": "5d04bd30e9f0e983",
     "point.braidTail": "57da2b5334ff3e48",
     "point.braidWoven": "3ff098a592bc2750",
     "strand.braidFlat": "30608ee6eb63767c",
@@ -202,7 +210,7 @@
     "strand.melanin": "c720e5903ce46757",
     "strand.melaninRedness": "ba12ffef6db79a34"
    },
-   "everything": "40ed7509e79422ca",
+   "everything": "ae4c1e71c397770b",
    "ids": "20ed751c376a9e91",
    "points": 89037,
    "positions": "b40a2abcca0192d4",
@@ -212,6 +220,7 @@
   },
   "braids_twists": {
    "channels": {
+    "point.braidPress": "140ac29784536775",
     "point.braidTail": "be39b626ff35d27f",
     "point.braidWoven": "4ec29fbcd654c09a",
     "strand.braidFlat": "30608ee6eb63767c",
@@ -223,7 +232,7 @@
     "strand.melanin": "c720e5903ce46757",
     "strand.melaninRedness": "ba12ffef6db79a34"
    },
-   "everything": "49d799095b7e9470",
+   "everything": "3199e084f35fdcec",
    "ids": "20ed751c376a9e91",
    "points": 334818,
    "positions": "d42491f38673bfb9",
