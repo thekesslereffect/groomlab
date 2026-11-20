@@ -250,6 +250,7 @@ struct GroomStats {
     std::map<std::string, double> times;        // ms per node in its last run
     std::map<std::string, std::string> runs;    // how each node ran in the last evaluation (Graph::lastRunKinds; "cached")
     std::map<std::string, std::vector<std::string>> channels;  // each node's strand channels (cached)
+    std::map<std::string, std::vector<std::string>> pointChannels;  // ... and its point channels
     std::map<std::string, std::string> notes;
     int scalpHistoryFrames = 0;
     std::size_t scalpHistoryReads = 0;  // the host's reads of earlier frames (Maya: inMesh at other times)
@@ -262,6 +263,13 @@ struct GroomStats {
     std::size_t cacheBytes = 0, cacheEvictions = 0;
     bool strokeDocument = false;  // a stroke document is kept (a stroke made one, or warmStroke)
     std::vector<SimStatus> simulations;  // the Simulate nodes' caches (GroomSession::simulationStatus)
+
+    // Color by Channel's list of node `node`'s channels (channels and pointChannels): each name
+    // once, by name ignoring case, those starting with "_" (internal) left out, each with "point"
+    // where it has a point channel of the name (the display reads that over a strand channel of
+    // the name: attributePointColors), else "strand". In the JSON as "colorChannels": {node:
+    // [[name, kind], ...]}, every host's node menu.
+    std::vector<std::pair<std::string, std::string>> colorChannels(const std::string& node) const;
 
     std::string toJson() const;
 };
@@ -770,8 +778,11 @@ public:
     // The strand channel `channel` as node `node` of the view's graph left it in the last
     // evaluation, one value per strand of `shown` (matched by strand ID; NaN for a strand the node
     // did not have): a Clump's own clump numbers though a later Clump writes the same channel
-    // (Clump Colors, "<channel>@<node>": strandColors). Null when the node is not in the graph, has
-    // no cached strands (caching off) or no such channel.
+    // (Clump Colors, "<channel>@<node>": strandColors). A point channel (read over a strand channel
+    // of the same name): one value per point of `shown`, each point's read along the node's strand at the same
+    // distance from the root (a Length after it trims the strand, a Resample gives it other
+    // points; NaN for a strand the node did not have): Color by Channel. Null when the node is not in the graph, has no
+    // cached strands (caching off) or no such channel.
     std::shared_ptr<const std::vector<float>> nodeStrandChannel(const std::string& node, const std::string& channel,
                                                                 const StrandSet& shown) const;
 

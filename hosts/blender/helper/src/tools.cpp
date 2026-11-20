@@ -3117,9 +3117,16 @@ json display(ToolState& t, const json& args) {
             }
             const std::vector<std::array<float, 3>> per =
                 strandColors(*strands, last.scalp ? last.scalp.get() : in.scalp.get(), mode, source, lo, hi, nodeValues.get());
+            // A point channel (Color by Channel's braidTail, say): a color a point, whatever was asked.
+            const std::vector<std::array<float, 3>> points = attributePointColors(*strands, mode, source, lo, hi, nodeValues.get());
             std::vector<float> flat;
             std::size_t count = 0;
-            if (perPoint) {
+            if (!points.empty()) {
+                count = points.size();
+                flat.reserve(count * 3);
+                for (const auto& c3 : points) flat.insert(flat.end(), c3.begin(), c3.end());
+                colors["perPoint"] = true;
+            } else if (perPoint) {
                 count = strands->pointCount();
                 flat.reserve(count * 3);
                 for (std::size_t i = 0; i < strands->strandCount(); ++i) {
@@ -3139,7 +3146,10 @@ json display(ToolState& t, const json& args) {
             const ScalpMesh* scalp = last.scalp ? last.scalp.get() : in.scalp.get();
             colors["colorSets"] = scalp ? scalp->colorSetNames() : std::vector<std::string>{};
             float low = 0.0f, high = 0.0f;
-            if (strandChannelRange(*strands, source, low, high)) colors["range"] = {low, high};
+            // (a node's values: theirs, a channel only that node has too)
+            if (nodeValues ? channelRange(*nodeValues, &low, &high) : strandChannelRange(*strands, source, low, high)) {
+                colors["range"] = {low, high};
+            }
         } else {
             colors["changed"] = false;
         }

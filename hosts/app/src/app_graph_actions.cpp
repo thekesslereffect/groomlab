@@ -132,6 +132,11 @@ void AppActions::addGraphBindings(ui::Bindings& b, MainWindow& w) {
                                      if (!error.isEmpty()) m->report(error);
                                  }),
                                  {}, nodeOn};
+    // Color by Channel: the hair colored by the channel (the generator's value) as this node
+    // leaves it; again, the colors as they were.
+    b["node.colorByChannel"] = {[m, selected, str](const json& value, bool on) { m->colorByChannel(selected(), str(value), on); },
+                                [m, selected, str](const json& value) { return m->channelColored(selected()) == str(value); },
+                                nodeOn};
     // Show Inner Param: a compound's inner param (the generator's "node.param") on the compound.
     b["compound.showInner"] = {[m, selected, str](const json& value, bool on) {
                                    if (!m->document_ || selected().empty()) return;
@@ -259,6 +264,16 @@ void AppActions::addGraphGenerators(ui::Generators& g, MainWindow& w) {
             if (!p.contains("port") || !p["port"].is_object()) continue;
             const std::string name = p.value("name", std::string());
             out.push_back({{"id", entry.value("action", std::string("node.expose"))}, {"value", name}, {"label", name}, {"tip", p.value("description", std::string())}});
+        }
+        return out;
+    };
+    // Color by Channel: the channels the node's last result carries (the core's list, every host's).
+    g["nodeChannels"] = [m](const json& entry) {
+        json out = json::array();
+        const std::string node = m->graph_->selectedNode();
+        if (!m->document_ || node.empty()) return out;
+        for (const auto& [name, kind] : m->document_->session().stats().colorChannels(node)) {
+            out.push_back({{"id", entry.value("action", std::string("node.colorByChannel"))}, {"value", name}, {"label", name}, {"tip", "per " + kind}});
         }
         return out;
     };

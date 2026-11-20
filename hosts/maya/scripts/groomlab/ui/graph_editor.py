@@ -982,6 +982,7 @@ class NodeItem(QtWidgets.QGraphicsItem):
     ACTIONS = {
         "node.setOutput": lambda self: later(lambda: self.editor.set_output(self.name)),
         "node.view": lambda self, on: later(lambda: self.editor.view_node(self.name if on else None)),
+        "node.colorByChannel": lambda self, channel, on: later(lambda: self.editor.color_by_channel(self.name, channel, on)),
         "node.bypass": lambda self, on: later(lambda: self.editor.set_bypass([self.name], on)),
         # Out of the flow: what fed it feeds what it fed, the node kept below the new link (#80).
         "node.detach": lambda self: later(lambda: self.editor.detach_nodes(self.editor.menu_targets(self.name))),
@@ -1044,7 +1045,11 @@ class NodeItem(QtWidgets.QGraphicsItem):
             return [{"submenu": n["node"], "items": [
                 {"id": entry["action"], "value": "%s.%s" % (n["node"], p["name"]), "label": pretty(p["name"]),
                  "tip": p.get("description", "")} for p in n["params"]]} for n in inner_params]
-        return {"exposeParams": expose, "innerParams": inner}
+        def channels(entry):
+            # The channels its last result carries (the stats'), per strand and per point.
+            return [{"id": entry["action"], "value": channel, "label": channel, "tip": "per " + kind}
+                    for channel, kind in self.editor.channels_of(self.name)]
+        return {"exposeParams": expose, "innerParams": inner, "nodeChannels": channels}
 
     def contextMenuEvent(self, event):
         editor, name = self.editor, self.name
@@ -1052,7 +1057,9 @@ class NodeItem(QtWidgets.QGraphicsItem):
         exposed = editor.model.param_inputs(name)
         definition = (editor.model.nodes[name].get("params") or {}).get("definition") or {}
         shown = set((definition.get("expose") or {}).values())
+        colored = editor.channel_colored(name)
         checked = {"node.view": lambda item: editor.viewed == name,
+                   "node.colorByChannel": lambda item: item["value"] == colored,
                    "node.bypass": lambda item: editor.model.bypassed(name),
                    "node.evaluate": lambda item: item["value"] == current,
                    "node.brushSculpt": lambda item: editor.sculpt_target() == name,
@@ -4407,6 +4414,7 @@ class GraphEditor(QtWidgets.QWidget):
         self.node_notes = {}       # node -> a note: it does nothing as set (a Clump with no centers)
         self.node_times = {}       # node -> ms of the last evaluation
         self.node_channels = {}    # node -> strand channels in its last result
+        self.node_color_channels = {}  # node -> [[channel, kind]] Color by Channel lists (the stats')
 
         self.scene = GraphScene(self)
         self.scene.selectionChanged.connect(self.selection_changed)
@@ -4787,6 +4795,7 @@ class GraphEditor(QtWidgets.QWidget):
         self.groom = self._groom_uuid = self.model = self.viewed = None
         self._preview_base = self._key_preview = None
         self.node_errors, self.node_warnings, self.node_notes, self.node_times, self.node_channels = {}, {}, {}, {}, {}
+        self.node_color_channels = {}
         self.scene.blockSignals(True)
         try:
             self.scene.clear()
@@ -5149,6 +5158,51 @@ class GraphEditor(QtWidgets.QWidget):
         except Exception:  # noqa: BLE001 - a node gone
             return False
 
+    def channels_of(self, name):
+        """[(channel, "strand" or "point")] its last result carries (the stats' colorChannels, the
+        core's list: none before an evaluation reached it)."""
+        return [tuple(c) for c in self.node_color_channels.get(name, [])]
+
+    def channel_colored(self, name):
+        """The channel Color by Channel shows of this node ("" for none): the Attribute colors read
+        from it ("<channel>@<node>")."""
+        if not self.groom:
+            return ""
+        from maya import cmds
+        from groomlab import review
+        try:
+            if cmds.getAttr(self.groom + ".strandColorMode") != review.ATTRIBUTE_MODE:
+                return ""
+            channel, _, node = (cmds.getAttr(self.groom + ".strandColorSource") or "").rpartition("@")
+        except (RuntimeError, ValueError):
+            return ""
+        return channel if node == name else ""
+
+    def color_by_channel(self, name, channel, on):
+        """Color by Channel: the hair colored by `channel` as node `name` leaves it, point by point
+        (the Attribute colors from "<channel>@<node>", min and max equal: the values' own range);
+        off, the color mode from before."""
+        if not self.groom:
+            return
+        from maya import cmds
+        from groomlab import review
+        groom = self.groom
+        if not on:
+            before = getattr(self, "_color_mode_before_channel", 0)
+            self.silently(lambda: cmds.setAttr(groom + ".strandColorMode", 0 if before == review.ATTRIBUTE_MODE else before))
+            return
+        mode = cmds.getAttr(groom + ".strandColorMode")
+        if mode != review.ATTRIBUTE_MODE:
+            self._color_mode_before_channel = mode
+
+        def colored():
+            cmds.setAttr(groom + ".strandColorSource", "%s@%s" % (channel, name), type="string")
+            cmds.setAttr(groom + ".strandColorMin", 0.0)
+            cmds.setAttr(groom + ".strandColorMax", 0.0)
+            cmds.setAttr(groom + ".strandColorMode", review.ATTRIBUTE_MODE)
+        self.silently(colored)
+        self.report("strands colored by %s at %s, blue to red over its range" % (channel, name))
+
     def toggle_clump_colors(self, name):
         """A Clump's Clump Colors: the strands colored by its clumps (its clumpChannel), the focus left
         as it is; on a lit one, the color mode from before."""
@@ -5349,6 +5403,7 @@ class GraphEditor(QtWidgets.QWidget):
             stats = json.loads(cmds.groomLabGraphStats(self.groom))
             self.node_times = stats.get("times", {})
             self.node_channels = stats.get("channels", {})
+            self.node_color_channels = stats.get("colorChannels", {})
             self.viewed = stats.get("view") or None
             for path, info in (stats.get("cardNodes") or {}).items():
                 top = path.split("/")[0]

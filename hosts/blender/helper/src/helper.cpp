@@ -1927,8 +1927,13 @@ json Helper::run(const std::string& cmd, const json& args) {
         for (const auto& [node, note] : s.groom->nodeNotes()) notes[node] = note;
         json times = json::object();
         for (const auto& [node, ms] : s.groom->nodeTimes()) times[node] = ms;
+        // Each node's channels in its last result, per strand and per point (Color by Channel).
+        const GroomStats stats = s.groom->stats();
+        json channels = json::object();
+        for (const auto& [node, names] : stats.channels) channels[node] = stats.colorChannels(node);
+        for (const auto& [node, names] : stats.pointChannels) channels[node] = stats.colorChannels(node);
         return {{"notes", notes}, {"times", times}, {"errors", s.groom->last().errors}, {"inputErrors", s.groom->inputErrors()},
-                {"graphError", s.groom->graphError()}};
+                {"graphError", s.groom->graphError()}, {"colorChannels", channels}};
     }
 
     // ---- The graph ----

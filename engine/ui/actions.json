@@ -244,6 +244,7 @@
 
     "node.setOutput": {"label": "Set as Output", "tip": "The groom shows this node's strands"},
     "node.view": {"label": "Focus: View Up to Here", "tip": "The viewport shows the groom up to this node", "shortcut": "graph.view", "checkable": true, "needs": ["node.viewable"]},
+    "node.colorByChannel": {"label": "Color by Channel", "tip": "Color the hair by this channel as this node leaves it, along each strand: blue at its least, red at its most (the display's Attribute colors, its min and max equal: fitted). Again: as it was", "checkable": true},
     "node.bypass": {"label": "Bypass", "tip": "Pass the input straight through", "shortcut": "graph.bypass", "checkable": true},
     "node.detach": {"label": "Detach", "tip": "Take the node out of the flow: what fed it feeds what it fed, as if it were not there; the node stays, unlinked, below the new link", "shortcut": "graph.detach"},
     "node.evaluate": {"label": "Evaluate", "tip": "When the node runs", "checkable": true},

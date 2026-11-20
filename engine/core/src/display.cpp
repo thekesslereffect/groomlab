@@ -71,7 +71,7 @@ DisplayGeometry DisplayGeometry::materialized() const {
         // Lit: the lines' colors are the strands' own (per point); unlit: one a strand (the default
         // color where they carry none).
         const StrandSet& strands = *lines->strands;
-        const StrandColors* own = lines->lit ? lines->colors.get() : nullptr;
+        const StrandColors* own = lines->lit || (lines->colors && !lines->colors->pointColors.empty()) ? lines->colors.get() : nullptr;
         std::vector<std::array<float, 3>> fallback;
         const bool byStrand = !lines->lit && lines->colors && lines->colors->colors.size() == strands.strandCount();
         if (!lines->lit && !byStrand) fallback.assign(strands.strandCount(), kDefaultStrandColor);
@@ -311,6 +311,37 @@ bool splitNodeColorSource(const std::string& source, std::string* channel, std::
     return true;
 }
 
+bool channelRange(const std::vector<float>& values, float* lo, float* hi) {
+    float least = std::numeric_limits<float>::infinity(), most = -std::numeric_limits<float>::infinity();
+    for (const float v : values) {
+        if (!std::isfinite(v)) continue;
+        least = std::min(least, v);
+        most = std::max(most, v);
+    }
+    if (!(least <= most)) return false;
+    *lo = least;
+    *hi = most;
+    return true;
+}
+
+std::vector<std::array<float, 3>> attributePointColors(const StrandSet& s, int mode, const std::string& source, float lo, float hi,
+                                                       const std::vector<float>* given) {
+    if (mode != kAttributeColors || s.pointCount() == s.strandCount()) return {};
+    std::string own;
+    splitNodeColorSource(source, &own, nullptr);
+    // (A node's values handed: per point, or per strand and so not these; else the strands' own.)
+    const std::vector<float>* channel = given ? (given->size() == s.pointCount() ? given : nullptr) : s.pointChannel(own);
+    if (!channel || channel->size() != s.pointCount()) return {};
+    if (lo == hi) channelRange(*channel, &lo, &hi);
+    std::vector<std::array<float, 3>> out(s.pointCount(), kDefaultStrandColor);
+    const float span = hi - lo;
+    parallelFor(0, out.size(), [&](std::size_t i) {
+        const float v = (*channel)[i];
+        if (std::isfinite(v)) out[i] = rampColor(span != 0.0f ? (v - lo) / span : 0.5f);
+    }, 4096);
+    return out;
+}
+
 std::array<float, 3> clumpColor(std::int64_t group) {
     return hueColor(unitFloat(hash64(static_cast<std::uint64_t>(group) ^ 0xC1A5)), 0.7f, 0.95f);
 }
@@ -321,6 +352,8 @@ std::vector<std::array<float, 3>> strandColors(const StrandSet& s, const ScalpMe
     std::string own;
     splitNodeColorSource(source, &own, nullptr);
     const std::vector<float>* channel = given && given->size() == s.strandCount() ? given : s.strandChannel(own);
+    if (channel && channel->size() != s.strandCount()) channel = nullptr;
+    if (mode == kAttributeColors && channel && lo == hi) channelRange(*channel, &lo, &hi);
     if (mode == kDensityColors) {
         densityColors(s, out);
         return out;
@@ -390,18 +423,10 @@ void fillBraidTubes(const DisplaySettings& settings, DisplayInputs& in, const st
 bool strandChannelRange(const StrandSet& s, const std::string& source, float& lo, float& hi) {
     std::string channel;
     splitNodeColorSource(source, &channel, nullptr);
-    const std::vector<float>* values = s.strandChannel(channel);
-    if (!values) return false;
-    float low = std::numeric_limits<float>::infinity(), high = -low;
-    for (const float v : *values) {
-        if (!std::isfinite(v)) continue;
-        low = std::min(low, v);
-        high = std::max(high, v);
-    }
-    if (low > high) return false;
-    lo = low;
-    hi = high;
-    return true;
+    // (A point channel over a strand channel of the same name, as attributePointColors reads it.)
+    const std::vector<float>* values = s.pointChannel(channel);
+    if (!values) values = s.strandChannel(channel);
+    return values && channelRange(*values, &lo, &hi);
 }
 
 void writeStrandPointColors(const StrandSet& s, const std::vector<std::array<float, 3>>& colors, float* rgba) {
@@ -456,6 +481,7 @@ std::array<float, 3> strandsLookColor(const StrandSet* strands, std::uint64_t ve
 }
 
 std::array<float, 3> StrandColors::at(std::size_t strand, std::size_t point) const {
+    if (!pointColors.empty()) return pointColors[point];
     if (!channels[0]) return colors[strand];
     const std::size_t i = perPoint ? point : strand;
     const std::array<float, 3> c{(*channels[0])[i], (*channels[1])[i], (*channels[2])[i]};
@@ -1020,7 +1046,7 @@ DisplayGeometry strandRibbons(const StrandSet& s, const ScalpMesh* scalp, const 
                 continue;
             }
             const float shade = 0.35f + 0.65f * std::abs(side.cross(tangent).normalized().dot(light));
-            const auto& c = colors[i];
+            const std::array<float, 3> c = litColors ? litColors->at(i, w) : colors[i];
             const float rgba[8] = {c[0] * shade, c[1] * shade, c[2] * shade, 1.0f, c[0] * shade, c[1] * shade, c[2] * shade, 1.0f};
             std::memcpy(batch.colors.data() + v * 4, rgba, sizeof rgba);
         }
@@ -2082,8 +2108,9 @@ void DisplayBuilder::buildStrands(const DisplayInputs& in, const DisplaySettings
     if (colorLinesOnly && strandShape_ == strandShape && keys_[strandsPart] != strandKey && in.recolorable && colored.shown &&
         colored.vertexCount == strands->pointCount() && colored.vertexCount > 0) {
         keys_[strandsPart] = strandKey;
-        colored.recolored = std::make_shared<const StrandColors>(
-            StrandColors{strands, strandColors(*strands, scalp, colorMode, s.colorSource, s.colorMin, s.colorMax, in.colorChannel.get())});
+        StrandColors recolored{strands, strandColors(*strands, scalp, colorMode, s.colorSource, s.colorMin, s.colorMax, in.colorChannel.get())};
+        recolored.pointColors = attributePointColors(*strands, colorMode, s.colorSource, s.colorMin, s.colorMax, in.colorChannel.get());
+        colored.recolored = std::make_shared<const StrandColors>(std::move(recolored));
         colored.colorVersion = ++counter_;
         colored.recolor = true;
         if (!retain_) colored.geometry.reset();
@@ -2095,6 +2122,11 @@ void DisplayBuilder::buildStrands(const DisplayInputs& in, const DisplaySettings
     // scales: nothing to build.
     const StrandSet* shown = cardsView || scaleLayout || sculpt == 2 ? nullptr : strands.get();
     std::vector<std::array<float, 3>> colors;
+    // A point channel's colors (Color by Channel's braidTail, say): one a point, over `colors`.
+    std::vector<std::array<float, 3>> channelColors;
+    if (shown && !rootDots && colorMode == kAttributeColors) {
+        channelColors = attributePointColors(*shown, colorMode, s.colorSource, s.colorMin, s.colorMax, in.colorChannel.get());
+    }
     if (shown && !rootDots && (colorMode != kSolidColors || s.ribbons)) {
         // (Ribbons in the solid color: the plain lines' one color, each strand.)
         colors = colorMode == kSolidColors ? std::vector<std::array<float, 3>>(shown->strandCount(), s.hairColor)
@@ -2123,8 +2155,12 @@ void DisplayBuilder::buildStrands(const DisplayInputs& in, const DisplaySettings
         std::shared_ptr<const StrandColors> ribbonColors = look;
         if (!lit) {
             StrandColors byStrand{strands, std::move(colors)};
+            byStrand.pointColors = std::move(channelColors);
             if (!byStrand.colors.empty()) {
                 byStrand.key = hashCombine(5u, parallelDigest(byStrand.colors.front().data(), byStrand.colors.size() * 3)) | 1u;
+            }
+            if (!byStrand.pointColors.empty()) {
+                byStrand.key = hashCombine(byStrand.key, parallelDigest(byStrand.pointColors.front().data(), byStrand.pointColors.size() * 3)) | 1u;
             }
             ribbonColors = std::make_shared<const StrandColors>(std::move(byStrand));
         }
@@ -2134,7 +2170,10 @@ void DisplayBuilder::buildStrands(const DisplayInputs& in, const DisplaySettings
         ribbonBatch.ribbonWidthScale = s.ribbonWidthScale;
         ribbonBatch.lines = std::make_shared<const StrandLines>(strands, in.scalp, lit, std::move(ribbonColors));
     } else if (s.ribbons) {
-        ribbonBatch = strandRibbons(*shown, scalp, colors, s.ribbonWidthScale, lit, look.get());
+        StrandColors byPoint{strands, {}};
+        byPoint.pointColors = std::move(channelColors);
+        ribbonBatch = strandRibbons(*shown, scalp, colors, s.ribbonWidthScale, lit,
+                                    !lit && !byPoint.pointColors.empty() ? &byPoint : look.get());
     } else {
         // Lines: colored per point in a color mode; else lit (the look), or flat with lighting
         // off. Dimmed for a stroke they draw flat (no frames), so the guides read over them.
@@ -2142,10 +2181,14 @@ void DisplayBuilder::buildStrands(const DisplayInputs& in, const DisplaySettings
         std::shared_ptr<const StrandColors> pointColors = look;
         if (perPoint) {
             StrandColors byStrand{strands, std::move(colors)};
-            // Keyed by a hash of the colors (one a strand), so a host keeps those it holds while
-            // they stay (a tweak moving the strands alone).
+            byStrand.pointColors = std::move(channelColors);
+            // Keyed by a hash of the colors (one a strand, or a point), so a host keeps those it
+            // holds while they stay (a tweak moving the strands alone).
             if (!byStrand.colors.empty()) {
                 byStrand.key = hashCombine(4u, parallelDigest(byStrand.colors.front().data(), byStrand.colors.size() * 3)) | 1u;
+            }
+            if (!byStrand.pointColors.empty()) {
+                byStrand.key = hashCombine(byStrand.key, parallelDigest(byStrand.pointColors.front().data(), byStrand.pointColors.size() * 3)) | 1u;
             }
             pointColors = std::make_shared<const StrandColors>(std::move(byStrand));
         }

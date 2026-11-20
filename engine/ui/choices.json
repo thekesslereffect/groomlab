@@ -181,7 +181,7 @@
       "items": [
         {"value": "solid", "label": "Solid", "tip": "The hair's own color"},
         {"value": "colorSet", "label": "Color set", "tip": "A color set (map) of the scalp, at each root"},
-        {"value": "attribute", "label": "Attribute", "tip": "A strand channel of the graph, black to white over Min to Max"},
+        {"value": "attribute", "label": "Attribute", "tip": "A channel of the graph, per strand or along each strand for a point channel, over Min to Max (equal: its own range)"},
         {"value": "random", "label": "Random", "tip": "A color per strand"},
         {"value": "clump", "label": "Clump", "tip": "A color per clump"},
         {"value": "density", "label": "Density", "tip": "Strands per area: a heatmap"}

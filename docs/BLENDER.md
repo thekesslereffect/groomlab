@@ -158,7 +158,7 @@ All but the process ones take `"session": <id>`.
 | `set_guides` | `points`, `counts`, `ids` (0: new), `target` ("auto", "flat", "hierarchy"), `keepMissing`, `pose` ("now", "rest"), `group` (hierarchy: the group new guides join, "Pipeline") | `{"pose", "target", "guides", "changed", "added": [{"index", "id"}], "removed", "updated"}` |
 | `set_time` | `frame` or `seconds`, `fps` | `{"seconds", "frame", "fps"}` (frame_time.h's rule) |
 | `evaluate` | `mode` ("preview": the viewport's, renderOnly nodes off; "render": viewportOnly nodes off), `density`, `pointBudget`, `viewNode`, `sculptDensity` (1; while a stroke is live the strands step back to this fraction, the app's 0.35), `attributes` (names or "all"), `space`, `bounds` | strand arrays (below), `errors`, `messages`, `notes` {node: note}, incremental hints, `milliseconds`, `following`, `look` (below) |
-| `stats` / `node_status` | | GroomStats JSON / notes, times, errors, inputErrors, graphError |
+| `stats` / `node_status` | | GroomStats JSON / notes, times, errors, inputErrors, graphError, and `colorChannels` (GroomStats::colorChannels: each node's last result's channels, `[name, "strand" or "point"]`) |
 | `operator_specs` / `default_graph` | | every operator's spec (params with groups, advanced, units, showWhen...) / the default graph |
 | `get_graph` / `set_graph` | `graph` (object or text) | the graph JSON |
 | `graph_channels` | | `channels`: the attributes per node (graphChannelsJson, attributes.h): `incoming` (reaching it, each with its writer), `writes`, `overwrites`, `reads` (`reaches`, `optional`) |

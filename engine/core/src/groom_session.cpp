@@ -3,6 +3,7 @@
 #include "groomlab/preview_core.h"
 
 #include <algorithm>
+#include <cctype>
 #include <array>
 #include <chrono>
 #include <climits>
@@ -31,6 +32,7 @@
 #include "groomlab/instances.h"
 #include "groomlab/operators.h"
 #include "groomlab/operator_state.h"
+#include "groomlab/parallel.h"
 #include "groomlab/parts.h"
 #include "groomlab/presets.h"
 #include "groomlab/profile.h"
@@ -224,6 +226,26 @@ void useLiveWeights(Correctives& correctives, const std::function<float(int slot
     }
 }
 
+std::vector<std::pair<std::string, std::string>> GroomStats::colorChannels(const std::string& node) const {
+    std::map<std::string, std::string> kinds;
+    if (const auto s = channels.find(node); s != channels.end()) {
+        for (const std::string& name : s->second) kinds[name] = "strand";
+    }
+    if (const auto p = pointChannels.find(node); p != pointChannels.end()) {
+        for (const std::string& name : p->second) kinds[name] = "point";
+    }
+    std::vector<std::pair<std::string, std::string>> out;
+    for (const auto& [name, kind] : kinds) {
+        if (!name.empty() && name[0] != '_') out.emplace_back(name, kind);
+    }
+    const auto lower = [](std::string s) {
+        for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        return s;
+    };
+    std::stable_sort(out.begin(), out.end(), [&](const auto& a, const auto& b) { return lower(a.first) < lower(b.first); });
+    return out;
+}
+
 std::string GroomStats::toJson() const {
     nlohmann::json out;
     out["view"] = view;
@@ -256,6 +278,12 @@ std::string GroomStats::toJson() const {
     nlohmann::json c = nlohmann::json::object();
     for (const auto& [name, list] : channels) c[name] = list;
     out["channels"] = std::move(c);
+    nlohmann::json pc = nlohmann::json::object(), cc = nlohmann::json::object();
+    for (const auto& [name, list] : pointChannels) pc[name] = list;
+    out["pointChannels"] = std::move(pc);
+    for (const auto& [name, list] : channels) cc[name] = colorChannels(name);
+    for (const auto& [name, list] : pointChannels) cc[name] = colorChannels(name);
+    out["colorChannels"] = std::move(cc);
     nlohmann::json n = nlohmann::json::object();
     for (const auto& [name, note] : notes) n[name] = note;
     out["notes"] = std::move(n);
@@ -2856,9 +2884,12 @@ GroomStats GroomSession::stats() const {
             auto note = doc.graph.lastNotes().find(id);  // not errors: a Jiggle without scalp motion, say
             if (note != doc.graph.lastNotes().end()) out.notes[name] = note->second;
             // Each node's strand channels (from its cached result): what attribute maps downstream
-            // can read. Not known: left out.
-            std::vector<std::string> names;
-            if (doc.graph.cachedChannels(id, &names)) out.channels[name] = std::move(names);
+            // can read; and its point channels (Color by Channel lists both). Not known: left out.
+            std::vector<std::string> names, pointNames;
+            if (doc.graph.cachedChannels(id, &names, &pointNames)) {
+                out.channels[name] = std::move(names);
+                out.pointChannels[name] = std::move(pointNames);
+            }
         }
         // Each compound as the one node hosts show (its nodes inline): their times summed, how
         // the last of them ran, their notes, its output node's channels.
@@ -2870,6 +2901,7 @@ GroomStats GroomSession::stats() const {
                 if (name.rfind(prefix, 0) == 0 && (!out.runs.count(compound) || run != "cached")) out.runs[compound] = run;
             }
             if (const auto c = out.channels.find(flat_.result(compound)); c != out.channels.end()) out.channels[compound] = c->second;
+            if (const auto c = out.pointChannels.find(flat_.result(compound)); c != out.pointChannels.end()) out.pointChannels[compound] = c->second;
         }
     }
     out.scalpHistoryFrames = scalpHistoryFrames(v.viewedNode, lastViewContext_.viewport ? 1 : 0);
@@ -3482,6 +3514,60 @@ std::uint64_t GroomSession::simulationStamp(const std::string& node) const {
     return SimSettings::fromParams(doc_->graph.node(it->second).params()).hash();
 }
 
+namespace {
+
+// A point channel of `from` read onto the points of `shown`: each strand found by its ID, each of
+// its points at the same distance from the root along the strand in `from` (between two points
+// there, the one value to the other; past its tip, the tip's): a Length after the node trims the
+// strand, a Resample gives it other points, and each point still reads where it was. NaN for a
+// strand `from` lacks.
+std::shared_ptr<const std::vector<float>> pointValuesOn(const StrandSet& from, const std::vector<float>& values, const StrandSet& shown) {
+    const std::vector<StrandId>& ids = from.ids();
+    const bool same = ids.size() == shown.strandCount() && std::equal(ids.begin(), ids.end(), shown.ids().begin());
+    if (same && from.pointCount() == shown.pointCount()) {
+        bool counts = true;
+        for (std::size_t s = 0; s < ids.size() && counts; ++s) counts = from.strandPointCount(s) == shown.strandPointCount(s);
+        if (counts) return std::make_shared<const std::vector<float>>(values);
+    }
+    std::unordered_map<StrandId, std::size_t> index;
+    if (!same) {
+        index.reserve(ids.size());
+        for (std::size_t i = 0; i < ids.size(); ++i) index.emplace(ids[i], i);
+    }
+    auto out = std::make_shared<std::vector<float>>(shown.pointCount(), std::numeric_limits<float>::quiet_NaN());
+    parallelFor(0, shown.strandCount(), [&](std::size_t s) {
+        std::size_t source = s;
+        if (!same) {
+            const auto it = index.find(shown.ids()[s]);
+            if (it == index.end()) return;
+            source = it->second;
+        }
+        const std::size_t m = from.strandPointCount(source), n = shown.strandPointCount(s);
+        if (!m || !n) return;
+        const float* v = values.data() + from.strandBegin(source);
+        const Vec3f* p = from.strandPoints(source);
+        const Vec3f* q = shown.strandPoints(s);
+        float* o = out->data() + shown.strandBegin(s);
+        // Walk both strands from the root: k the segment of `from` that point i's distance lies in.
+        std::size_t k = 0;
+        float before = 0.0f, here = 0.0f;  // `from`'s distance to point k; `shown`'s to point i
+        for (std::size_t i = 0; i < n; ++i) {
+            if (i > 0) here += (q[i] - q[i - 1]).length();
+            while (k + 1 < m && before + (p[k + 1] - p[k]).length() < here) before += (p[k + 1] - p[k]).length(), ++k;
+            if (k + 1 >= m) {
+                o[i] = v[m - 1];
+                continue;
+            }
+            const float span = (p[k + 1] - p[k]).length();
+            const float u = span > 0.0f ? std::clamp((here - before) / span, 0.0f, 1.0f) : 0.0f;
+            o[i] = v[k] + (v[k + 1] - v[k]) * u;
+        }
+    }, 256);
+    return out;
+}
+
+}  // namespace
+
 std::shared_ptr<const std::vector<float>> GroomSession::nodeStrandChannel(const std::string& node, const std::string& channel,
                                                                           const StrandSet& shown) const {
     const GraphDocument* doc = viewDoc();
@@ -3491,9 +3577,14 @@ std::shared_ptr<const std::vector<float>> GroomSession::nodeStrandChannel(const 
     const Value value = doc->graph.cachedValue(found->second);
     const StrandsPtr* strands = std::get_if<StrandsPtr>(&value);
     if (!strands || !*strands) return nullptr;
-    const std::vector<float>* values = (*strands)->strandChannel(channel);
-    if (!values || values->size() != (*strands)->strandCount()) return nullptr;
-    const std::vector<StrandId>& from = (*strands)->ids();
+    const StrandSet& at = **strands;
+    // (A point channel over a strand channel of the same name: HairColor's colorR, its tip too.)
+    if (const std::vector<float>* points = at.pointChannel(channel); points && points->size() == at.pointCount()) {
+        return pointValuesOn(at, *points, shown);
+    }
+    const std::vector<float>* values = at.strandChannel(channel);
+    if (!values || values->size() != at.strandCount()) return nullptr;
+    const std::vector<StrandId>& from = at.ids();
     const std::vector<StrandId>& to = shown.ids();
     // The same strands in the same order (no node after it adds, drops or reorders strands): as they are.
     if (from.size() == to.size() && std::equal(from.begin(), from.end(), to.begin())) {

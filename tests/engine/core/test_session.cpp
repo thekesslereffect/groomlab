@@ -520,6 +520,74 @@ TEST(Session, ViewsANodeAndCountsWhatItShows) {
     }
 }
 
+// Color by Channel: a point channel as a node wrote it ("colorR@color", a tipped HairColor's), read
+// onto the shown strands though a later Resample gives them other points: each point at the same
+// share along its strand; colored per point (attributePointColors), over the range the values
+// span when the range is left equal; the node's point channels listed in the stats.
+TEST(Session, ColorByChannelReadsANodesPointChannelOntoTheShownPoints) {
+    const std::string graph = withNodes(
+        R"({"name": "color", "type": "HairColor", "params": {"mode": "color", "color": [0.0, 0.0, 1.0], "tipColor": [1.0, 0.0, 0.0], "tipStrength": 1.0}})",
+        "color", R"({"name": "resample", "type": "Resample", "params": {"mode": "even", "segments": 5}})", "resample");
+    GroomSession session(groomData(graph));
+    ViewRequest request;
+    const ViewResult& view = session.evaluate(request);
+    ASSERT_TRUE(view.strands);
+    const StrandSet& shown = *view.strands;
+    ASSERT_EQ(shown.strandPointCount(0), 6u);  // Resample's: other points than HairColor saw
+    const auto red = session.nodeStrandChannel("color", "colorR", shown);
+    ASSERT_TRUE(red);
+    ASSERT_EQ(red->size(), shown.pointCount());  // per point, though HairColor writes colorR per strand too
+    std::size_t rising = 0;
+    for (std::size_t s = 0; s < shown.strandCount(); ++s) {
+        const float* v = red->data() + shown.strandBegin(s);
+        const std::size_t n = shown.strandPointCount(s);
+        EXPECT_LT(v[0], 0.2f) << s;      // the root: the color, blue
+        EXPECT_GT(v[n - 1], 0.8f) << s;  // the tip: red
+        bool up = true;
+        for (std::size_t i = 1; i < n; ++i) up = up && v[i] >= v[i - 1] - 1e-5f;
+        rising += up ? 1 : 0;
+    }
+    EXPECT_EQ(rising, shown.strandCount());
+
+    // Colored per point; equal min and max: the values' own range.
+    float lo = 0.0f, hi = 0.0f;
+    ASSERT_TRUE(channelRange(*red, &lo, &hi));
+    EXPECT_LT(lo, 0.2f);
+    EXPECT_GT(hi, 0.8f);
+    const auto fitted = attributePointColors(shown, kAttributeColors, "colorR@color", 0.0f, 0.0f, red.get());
+    const auto given = attributePointColors(shown, kAttributeColors, "colorR@color", lo, hi, red.get());
+    ASSERT_EQ(fitted.size(), shown.pointCount());
+    EXPECT_EQ(fitted, given);
+    EXPECT_NE(fitted[shown.strandBegin(0)], fitted[shown.strandBegin(0) + 5]);  // root and tip apart
+    EXPECT_TRUE(attributePointColors(shown, kClumpColors, "colorR@color", lo, hi, red.get()).empty());  // another mode
+    const auto perStrand = session.nodeStrandChannel("clump", "clumpId", shown);
+    ASSERT_TRUE(perStrand);
+    EXPECT_TRUE(attributePointColors(shown, kAttributeColors, "clumpId@clump", 0.0f, 0.0f, perStrand.get()).empty());  // strandColors'
+
+    // The display: the colored lines' colors per point.
+    DisplaySettings settings;
+    settings.colorMode = kAttributeColors;
+    settings.colorSource = "colorR@color";
+    settings.colorMin = settings.colorMax = 0.0f;
+    DisplayInputs in = DisplayInputs::fromView(view, false);
+    NodeColorChannel channel;
+    channel.fill(settings, in, [&]() -> const GroomSession& { return session; });
+    ASSERT_TRUE(in.colorChannel);
+    DisplayBuilder builder;
+    const DisplayItem& colored = builder.update(in, settings).item(DisplayItemId::ColoredStrands);
+    ASSERT_TRUE(colored.geometry);
+    const DisplayGeometry lines = colored.geometry->materialized();
+    ASSERT_EQ(lines.colors.size(), shown.pointCount() * 4);
+    const std::size_t tip = shown.strandBegin(0) + 5;
+    EXPECT_NE(lines.colors[0], lines.colors[tip * 4]);
+
+    // The stats list each node's point channels too.
+    const nlohmann::json stats = nlohmann::json::parse(session.stats().toJson());
+    ASSERT_TRUE(stats.contains("pointChannels"));
+    const auto& points = stats["pointChannels"]["color"];
+    EXPECT_NE(std::find(points.begin(), points.end(), "colorR"), points.end());
+}
+
 // Chained Clumps writing the same channel (clumpId): a Clump's Clump Colors read that channel as
 // that node wrote it ("clumpId@clump", issue #77), not as the later Clump overwrote it.
 TEST(Session, ANodesStrandChannelIsItsOwnThoughALaterNodeWritesTheSameChannel) {

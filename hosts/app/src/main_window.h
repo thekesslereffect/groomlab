@@ -720,6 +720,12 @@ private:
     // clumpChannel), the view left as it is; on a lit one, the color mode before.
     void toggleClumpColors(const std::string& node);
     void refreshClumpColored();  // which Clumps' buttons are lit, from the display
+    // A node menu's Color by Channel: the hair colored by `channel` as `node` leaves it, point by
+    // point (the Attribute colors from "<channel>@<node>", min and max equal: the values' own
+    // range); off, the color mode before. channelColored: the channel shown of `node` ("": none).
+    void colorByChannel(const std::string& node, const std::string& channel, bool on);
+    std::string channelColored(const std::string& node) const;
+    int colorModeBeforeChannel_ = 0;  // kSolidColors
     void followRenamedNode(const std::string& from, const std::string& to);  // the color source naming it
     // A Braid header's Show Tubes button: that node's section tubes drawn in the viewport, or (lit)
     // no more. The nodes shown are the document's (saved with the groom).

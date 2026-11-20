@@ -210,6 +210,32 @@ void MainWindow::toggleClumpColors(const std::string& node) {
     refreshClumpColored();
 }
 
+std::string MainWindow::channelColored(const std::string& node) const {
+    if (settings_.colorMode != kAttributeColors) return {};
+    std::string channel, of;
+    return splitNodeColorSource(settings_.colorSource, &channel, &of) && of == node ? channel : std::string();
+}
+
+void MainWindow::colorByChannel(const std::string& node, const std::string& channel, bool on) {
+    if (!colorMode_ || node.empty() || channel.empty()) return;
+    if (!on) {
+        colorMode_->setCurrentIndex(
+            std::max(0, colorMode_->findData(colorModeBeforeChannel_ == kAttributeColors ? kSolidColors : colorModeBeforeChannel_)));
+        return;
+    }
+    const int mode = colorMode_->currentData().toInt();
+    if (mode != kAttributeColors) colorModeBeforeChannel_ = mode;
+    {
+        const QSignalBlocker a(colorSource_), b(colorMin_), c(colorMax_);
+        colorSource_->setEditText(QString::fromStdString(channel + "@" + node));
+        colorMin_->setValue(0.0);
+        colorMax_->setValue(0.0);  // equal: the values' own range
+    }
+    if (mode != kAttributeColors) colorMode_->setCurrentIndex(std::max(0, colorMode_->findData(kAttributeColors)));
+    else applyDisplayOptions();
+    report(tr("Strands colored by %1 at %2, blue to red over its range").arg(QString::fromStdString(channel), QString::fromStdString(node)));
+}
+
 MainWindow::PaintView MainWindow::currentPaintView() const {
     PaintView v;
     v.colorMode = settings_.colorMode;

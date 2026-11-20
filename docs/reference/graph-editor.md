@@ -229,6 +229,16 @@ The **Graph Editor** is a dockable node editor for the selected groom:
   viewed. A param that a later version of a node's operator added (a Braid's `separate` and
   `inflate`, version 2) is left out of an older node's panel until **Upgrade**: it does nothing
   there.
+- **Color by Channel:** right-click a node giving strands or curves, **Color by Channel**, and
+  pick one of the channels its last result carries (each marked per strand or per point: a
+  Braid's `braidPress`, `braidTail`, `braidWoven`, a Clump's `clumpId`, HairColor's `colorR`...).
+  The hair is colored by that channel as that node left it, blue at its least and red at its most,
+  a point channel along each strand (the display's Attribute colors from `<channel>@<node>`, Min
+  and Max set equal: fitted to the values; type a range to fix it). Pick it again for the colors
+  as they were. Each point reads the node's value at the same distance from the root, so a Length
+  or Resample after the node keeps it in place; a pattern finer than the final strands' points (a
+  Resample to few segments) blurs, so **Focus** the node to see it on its own points. The list
+  fills once an evaluation reached the node.
 - **Live dragging:** every slider in the side panel (params and an Expression node's variables)
   shows the groom change while you drag; letting go makes one undo step.
 - **Real units:** lengths, widths and densities show in real units (**...** > Units):

@@ -1053,8 +1053,9 @@ public:
     // unconnected). Throws GraphError for an output the node does not have.
     PortType outputType(NodeId id, std::size_t output = 0) const;
     // The strand channels in a node's cached (primary) result: what nodes downstream can
-    // read through attribute maps. False when it has no cached strands.
-    bool cachedChannels(NodeId id, std::vector<std::string>* names) const;
+    // read through attribute maps; `pointNames` (null: not asked) its point channels. False when
+    // it has no cached strands.
+    bool cachedChannels(NodeId id, std::vector<std::string>* names, std::vector<std::string>* pointNames = nullptr) const;
     // A node's cached (primary) result as the last evaluation left it; empty when it has none.
     // No evaluation: what a host reads to run the nodes after it elsewhere (a GPU preview). As the
     // node made it: a preview's hidden core strands and the roles' channel in it (preview_core.h).

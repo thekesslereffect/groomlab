@@ -1814,13 +1814,14 @@ std::vector<Value> Graph::evaluateWithKeys(NodeId id, const EvalContext& graphCt
     return result;
 }
 
-bool Graph::cachedChannels(NodeId id, std::vector<std::string>* names) const {
+bool Graph::cachedChannels(NodeId id, std::vector<std::string>* names, std::vector<std::string>* pointNames) const {
     auto it = nodes_.find(id);
     if (it == nodes_.end() || !it->second.hasCache || it->second.cachedValues.empty()) return false;
     const StrandsPtr strands = valueAs<StrandsPtr>(it->second.cachedValues[0]);
     if (!strands) return false;
     *names = strands->strandChannelNames();
     names->erase(std::remove(names->begin(), names->end(), std::string(kPreviewChannel)), names->end());
+    if (pointNames) *pointNames = strands->pointChannelNames();
     return true;
 }
 

@@ -22,7 +22,7 @@ from .helper_client import cancelled, HelperError
 _folded = {}       # (operator type, section) -> folded, for the session (Maya: unset = Advanced folded)
 _deferred = {}     # key -> (fn, args): run once from a timer (not while Blender draws)
 _pinned_spaces = set()  # the node editors (as_pointer) pinned when last drawn: unpinned, they follow again
-_status = {}       # scalp uid -> {"serial", "times"}: the node timings the overlay shows
+_status = {}       # scalp uid -> {"serial", "times", "channels"}: the node timings the overlay shows, each node's channels
 _channels = {}     # scalp uid -> {"graph", "channels"}: the attributes per node (graph_channels)
 _catalog = {"presets": [], "categories": []}
 
@@ -394,6 +394,45 @@ class GROOMLAB_OT_graph_clump_colors(_GraphOperator):
         return {"FINISHED"}
 
 
+_COLOR_BEFORE_CHANNEL = {}  # groom uid -> its strand color mode before a Color by Channel
+
+
+def channel_colored(scalp, node_name):
+    """The channel Color by Channel shows of node `node_name` ("" for none): the Attribute colors
+    read from it ("<channel>@<node>")."""
+    if scalp is None or scalp.groomlab_tools.strand_color != "attribute":
+        return ""
+    channel, _, node = (scalp.groomlab_tools.strand_color_source or "").rpartition("@")
+    return channel if node == node_name else ""
+
+
+class GROOMLAB_OT_graph_color_by_channel(_GraphOperator):
+    """Color by Channel: color the hair by this channel as this node leaves it, along each strand, blue at its least and red at its most. Again: the colors as they were"""
+    bl_idname = "groomlab.graph_color_by_channel"
+    bl_label = "Color by Channel"
+
+    node: StringProperty(options={"SKIP_SAVE"}, description="The node")
+    channel: StringProperty(options={"SKIP_SAVE"}, description="The channel")
+
+    def execute(self, context):
+        scalp = context_groom(context)
+        if scalp is None or not self.node or not self.channel:
+            return {"CANCELLED"}
+        d = scalp.groomlab_tools
+        uid = scalp.groomlab.uid
+        if channel_colored(scalp, self.node) == self.channel:
+            before = _COLOR_BEFORE_CHANNEL.pop(uid, "solid")
+            d.strand_color = "solid" if before == "attribute" else before
+            return {"FINISHED"}
+        if d.strand_color != "attribute":
+            _COLOR_BEFORE_CHANNEL[uid] = d.strand_color
+        d.strand_color_source = "%s@%s" % (self.channel, self.node)
+        d.strand_color_min = d.strand_color_max = 0.0  # equal: the values' own range
+        d.strand_color = "attribute"
+        self.report({"INFO"}, "Strands colored by %s at %s, blue to red over its range" % (self.channel, self.node))
+        return {"FINISHED"}
+
+
 class GROOMLAB_OT_graph_braid_tubes(_GraphOperator):
     """Show Tubes: draws the braid's section tubes in the viewport"""
     bl_idname = "groomlab.graph_braid_tubes"
@@ -708,7 +747,17 @@ def node_generators(node):
                                               "label": graph_tree.pretty(p["name"]), "tip": p.get("description", "")}
                                              for p in specs]}
                 for name, specs in graph_authoring.inner_params(node)]
-    return {"exposeParams": expose, "innerParams": inner}
+    def channels(entry):
+        # The channels its last result carries (node_status), per strand and per point.
+        return [{"id": entry["action"], "value": channel, "label": channel, "tip": "per " + kind}
+                for channel, kind in result_channels(_node_scalp(node), node.gl_name)]
+    return {"exposeParams": expose, "innerParams": inner, "nodeChannels": channels}
+
+
+def _node_scalp(node):
+    """The groom whose graph holds `node` (its tree's)."""
+    tree = getattr(node, "id_data", None)
+    return getattr(tree, "gl_scalp", None)
 
 
 def draw_node_menu(layout, context, node):
@@ -867,6 +916,8 @@ def _bind_editor():
     bind("node.setOutput", "groomlab.graph_set_output", _n)
     bind("node.view", "groomlab.graph_view_node", _n,
          lambda ctx, item: ctx.scalp is not None and ctx.scalp.groomlab.view_node == ctx.node)
+    bind("node.colorByChannel", "groomlab.graph_color_by_channel", lambda ctx, item: {"node": ctx.node or "", "channel": item["value"]},
+         lambda ctx, item: channel_colored(ctx.scalp, ctx.node) == item["value"])
     bind("node.bypass", "groomlab.graph_bypass", _n,
          lambda ctx, item: bool(_tree_node(ctx) and _tree_node(ctx).mute))
     bind("node.detach", "groomlab.graph_detach", _n)
@@ -1511,8 +1562,9 @@ def header_badges(name, errors, notes, times, viewed):
     return badges
 
 
-def _node_times(scalp):
-    """{node: ms} of the last evaluation (node_status), fetched once per evaluation."""
+def _node_status(scalp, key):
+    """`key` of the last evaluation's node_status ("times": {node: ms}; "channels": {node: [(channel,
+    "strand" or "point")]}), fetched once per evaluation."""
     rt = groom.runtime_if_any(scalp)
     if rt is None or not rt.last:
         return {}
@@ -1523,10 +1575,22 @@ def _node_times(scalp):
         def fetch():
             if rt.session is None or rt.generation != process.generation():
                 return
-            _status[uid] = {"serial": serial, "times": process.call("node_status", session=rt.session).get("times", {})}
+            status = process.call("node_status", session=rt.session)
+            channels = {node: [tuple(c) for c in names] for node, names in status.get("colorChannels", {}).items()}
+            _status[uid] = {"serial": serial, "times": status.get("times", {}), "channels": channels}
         defer(("times", uid), fetch)
-        return cached["times"] if cached else {}
-    return cached["times"]
+        return cached[key] if cached else {}
+    return cached[key]
+
+
+def _node_times(scalp):
+    """{node: ms} of the last evaluation (node_status), fetched once per evaluation."""
+    return _node_status(scalp, "times")
+
+
+def result_channels(scalp, node):
+    """[(channel, "strand" or "point")] node `node`'s last result carries (Color by Channel)."""
+    return _node_status(scalp, "channels").get(node, []) if scalp is not None else []
 
 
 def _draw_overlay():
@@ -1640,7 +1704,7 @@ def _draw_overlay_now():
 _keymaps = []
 
 classes = (GROOMLAB_OT_graph_open, GROOMLAB_OT_graph_add_search, GROOMLAB_OT_graph_frame, GROOMLAB_OT_graph_duplicate,
-           GROOMLAB_OT_graph_view_node, GROOMLAB_OT_graph_clump_colors, GROOMLAB_OT_graph_braid_tubes, GROOMLAB_OT_graph_bypass, GROOMLAB_OT_graph_detach, GROOMLAB_OT_graph_evaluation, GROOMLAB_OT_graph_set_output,
+           GROOMLAB_OT_graph_view_node, GROOMLAB_OT_graph_clump_colors, GROOMLAB_OT_graph_color_by_channel, GROOMLAB_OT_graph_braid_tubes, GROOMLAB_OT_graph_bypass, GROOMLAB_OT_graph_detach, GROOMLAB_OT_graph_evaluation, GROOMLAB_OT_graph_set_output,
            GROOMLAB_OT_graph_upgrade_node, GROOMLAB_OT_graph_fold, GROOMLAB_OT_graph_pick_attribute, GROOMLAB_OT_graph_tidy, GROOMLAB_OT_graph_reload,
            GROOMLAB_OT_graph_preset, GROOMLAB_OT_graph_presets_refresh, GROOMLAB_MT_graph_presets,
            GROOMLAB_MT_graph_edit, GROOMLAB_PT_graph_node, GROOMLAB_PT_graph_groom, GROOMLAB_PT_graph_presets)

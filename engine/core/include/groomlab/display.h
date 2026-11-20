@@ -164,21 +164,32 @@ std::array<float, 3> clumpColor(std::int64_t group);
 // `source` from lo to hi on the ramp, a random hue per strand, a hue per clump (channel
 // `source`), the density heatmap; kDefaultStrandColor where there is nothing to read.
 // A strand channel source may name the node it is read from, "<channel>@<node>" (a Clump's Clump
-// Colors: its clumpChannel as that node wrote it, though a later Clump writes the same channel):
-// the host hands that node's values in `channel` (GroomSession::nodeStrandChannel); without them
-// the strands' own `<channel>` is read.
+// Colors: its clumpChannel as that node wrote it, though a later Clump writes the same channel;
+// Color by Channel): the host hands that node's values in `channel`
+// (GroomSession::nodeStrandChannel); without them the strands' own `<channel>` is read. Equal lo
+// and hi: the channel's own range (its least and most finite values; channelRange).
 std::vector<std::array<float, 3>> strandColors(const StrandSet& strands, const ScalpMesh* scalp, int mode,
                                                const std::string& source, float lo, float hi,
                                                const std::vector<float>* channel = nullptr);
+// kAttributeColors of a point channel (the strands' own `source`, or the node's values the host
+// hands in `channel`, one a point): a color per point from lo to hi on the ramp (equal: the
+// channel's own range), kDefaultStrandColor where a value is not finite. Empty when the channel
+// is not one a point (strandColors colors it per strand) or the mode is another. A point channel
+// is read over a strand channel of the same name (HairColor's colorR, both: the tip shows).
+std::vector<std::array<float, 3>> attributePointColors(const StrandSet& strands, int mode, const std::string& source, float lo,
+                                                       float hi, const std::vector<float>* channel = nullptr);
+// The least and most finite values (false: none), for a color range fitted to a channel.
+bool channelRange(const std::vector<float>& values, float* lo, float* hi);
 // Splits "<channel>@<node>" (see strandColors): true with both set when it names a node; else
 // false, *channel the source as it is and *node empty.
 bool splitNodeColorSource(const std::string& source, std::string* channel, std::string* node);
 // A color source naming node `from` ("<channel>@<from>") once the node is renamed `to`: the same
 // channel at `to`. Any other source as it is (every host's Rename keeps Clump Colors on).
 std::string renamedColorSource(const std::string& source, const std::string& from, const std::string& to);
-// The lowest and highest value of the strand channel `channel` (the attribute colors' Auto Range:
-// the ramp from blue to red over every strand; "<channel>@<node>": the channel); non-finite values
-// skipped. False: no such channel or nothing finite in it (lo and hi left as they are).
+// The lowest and highest value of the channel `channel` (the attribute colors' Auto Range: the
+// ramp from blue to red over every strand; "<channel>@<node>": the channel; a point channel over
+// a strand channel of the name); non-finite values skipped. False: no such channel or nothing
+// finite in it (lo and hi left as they are).
 bool strandChannelRange(const StrandSet& strands, const std::string& channel, float& lo, float& hi);
 // Per point RGBA (alpha 1) from one color per strand.
 std::vector<float> strandPointColors(const StrandSet& strands, const std::vector<std::array<float, 3>>& colors);
@@ -634,6 +645,8 @@ enum class DisplayLayer { DormantWire, DormantFilled, ActiveWire, Selection };
 struct StrandColors {
     StrandsPtr strands;
     std::vector<std::array<float, 3>> colors;  // per strand (without channels)
+    // Per point, when a color mode's channel is (attributePointColors): read before `colors`.
+    std::vector<std::array<float, 3>> pointColors;
     std::array<const std::vector<float>*, 3> channels{};
     bool perPoint = false;
     const std::vector<float>* iridescence = nullptr;  // per point (strandLookColors), held by `strands`
