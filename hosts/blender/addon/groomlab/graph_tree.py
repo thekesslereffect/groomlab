@@ -447,7 +447,7 @@ def param_property(spec, update, file_path=False):
     have it (_unit_of), so the property itself takes none. `file_path`: a string naming a file
     (graph_ui.json's filePathFilters: Blender's file browser button)."""
     kind, unit = spec.get("kind"), "" if spec.get("unitWhen") else (spec.get("unit") or "")
-    common = {"name": pretty(spec["name"]), "description": spec.get("description", ""), "update": update}
+    common = {"name": spec.get("label") or pretty(spec["name"]), "description": spec.get("description", ""), "update": update}
     if file_path and kind == "string" and not spec.get("choices"):
         return StringProperty(subtype="FILE_PATH", **common)
     scale = _scale()
@@ -477,7 +477,8 @@ def param_property(spec, update, file_path=False):
     if kind == "string":
         choices = spec.get("choices") or []
         if choices:
-            items = [(c, pretty(c) if c else "(none)", "") for c in choices]
+            shown = spec.get("choiceLabels") or [pretty(c) if c else "(none)" for c in choices]  # (the core's words)
+            items = [(c, text, "") for c, text in zip(choices, shown)]
             return EnumProperty(items=items, **common)
         return StringProperty(**common)
     return None

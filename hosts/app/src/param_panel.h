@@ -172,6 +172,7 @@ private:
         std::string unit;               // the unit it shows (the spec's while its unitWhen holds)
         nlohmann::json unitWhen;        // the spec's unitWhen (null: none)
         QLabel* attributeNote = nullptr;  // an attribute param's warning or note line
+        std::string rowOf;              // the spec's "row": the param whose row it shows on, after it
     };
     struct Section {
         std::string name;
