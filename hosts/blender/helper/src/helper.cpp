@@ -80,16 +80,8 @@ namespace {
 
 // ---- Graph text ---------------------------------------------------------------------------------
 
-bool blankGraph(const std::string& text) {
-    const auto first = text.find_first_not_of(" \t\r\n");
-    if (first == std::string::npos) return true;
-    const auto last = text.find_last_not_of(" \t\r\n");
-    return text[first] == '{' && text[last] == '}' && text.find_first_not_of(" \t\r\n", first + 1) == last;
-}
-
 std::string graphText(const GroomSession& session) {
-    const std::string& text = session.data().graphJson;
-    return blankGraph(text) ? defaultGraphJson() : text;
+    return graphOrDefault(session.data().graphJson);
 }
 
 json parseGraph(const GroomSession& session) {

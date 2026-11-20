@@ -50,12 +50,7 @@ namespace {
 // ---- The graph ----------------------------------------------------------------------------------
 
 std::string graphTextOf(const GroomSession& g) {
-    const std::string& text = g.data().graphJson;
-    const auto first = text.find_first_not_of(" \t\r\n");
-    if (first == std::string::npos) return defaultGraphJson();
-    const auto last = text.find_last_not_of(" \t\r\n");
-    if (text[first] == '{' && text[last] == '}' && text.find_first_not_of(" \t\r\n", first + 1) == last) return defaultGraphJson();
-    return text;
+    return graphOrDefault(g.data().graphJson);
 }
 
 // The groom's scalp size at the size its params are at (helper.cpp's scalpSize).

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Rules every host used to keep a copy of (host review, pass 4): the Node panel's sections, the Add
 // Node search, Card Atlas names, the Tube card's values and Smooth, guides as curves and back, where
-// new root tubes go, Bind Drivers keeping the attached guides.
+// new root tubes go, Bind Drivers keeping the attached guides, the default graph for a blank one.
 
 #include <gtest/gtest.h>
 
@@ -12,6 +12,7 @@
 
 #include "groomlab/card_blocks.h"
 #include "groomlab/drive_guides.h"
+#include "groomlab/graph_io.h"
 #include "groomlab/groom.h"
 #include "groomlab/guide_hierarchy.h"
 #include "groomlab/node_catalog.h"
@@ -118,4 +119,15 @@ TEST(HostRules, BindDriversKeepsTheAttachedGuides) {
     EXPECT_EQ(after.drivers.size(), 1u);
     EXPECT_EQ(after.attached, before.attached);
     EXPECT_EQ(reboundDriversJson(GuideSet{}, nullptr, 0, DriverBind{}), "") << "nothing bound or attached";
+}
+TEST(HostRules, ABlankGraphIsTheDefaultGraph) {
+    for (const char* blank : {"", "  \n", "{}", " { \r\n } "}) {
+        EXPECT_TRUE(blankGraph(blank)) << blank;
+        EXPECT_EQ(graphOrDefault(blank), defaultGraphJson());
+    }
+    for (const char* text : {"{\"nodes\": []}", "[]", "x", "{}{}"}) {
+        EXPECT_FALSE(blankGraph(text)) << text;
+        EXPECT_EQ(graphOrDefault(text), text);
+    }
+    EXPECT_EQ(loadGraphJson(" {\n} ").nodesByName, loadGraphJson(defaultGraphJson()).nodesByName);
 }

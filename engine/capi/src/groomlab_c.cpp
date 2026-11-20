@@ -155,17 +155,9 @@ void adoptFile(gl_session& s, GroomFile file) {
 
 // ---- The graph as JSON ---------------------------------------------------------------------------
 
-bool blankGraph(const std::string& text) {
-    const auto first = text.find_first_not_of(" \t\r\n");
-    if (first == std::string::npos) return true;
-    const auto last = text.find_last_not_of(" \t\r\n");
-    return text[first] == '{' && text[last] == '}' && text.find_first_not_of(" \t\r\n", first + 1) == last;
-}
-
 // The graph the session evaluates, as text: the default graph's for an empty one.
 std::string graphText(const GroomSession& session) {
-    const std::string& text = session.data().graphJson;
-    return blankGraph(text) ? defaultGraphJson() : text;
+    return graphOrDefault(session.data().graphJson);
 }
 
 json parseGraph(const GroomSession& session) {

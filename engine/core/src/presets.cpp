@@ -939,9 +939,7 @@ bool scales(double k) { return std::isfinite(k) && k > 0.0 && std::abs(k - 1.0) 
 
 // The graph's JSON as an object (blank or "{}": the default graph); null for text that is not one.
 json graphObject(const std::string& graphJson) {
-    const bool blank = graphJson.find_first_not_of(" \t\r\n") == std::string::npos;
-    json graph = json::parse(blank ? defaultGraphJson() : graphJson, nullptr, false);
-    if (graph.is_object() && graph.empty()) graph = json::parse(defaultGraphJson());
+    json graph = json::parse(graphOrDefault(graphJson), nullptr, false);
     return graph.is_object() ? graph : json();
 }
 

@@ -31,13 +31,6 @@ std::string firstFolder(std::initializer_list<fs::path> candidates) {
 
 fs::path sourceFolder(const char* path) { return path ? fs::u8path(path) : fs::path(); }
 
-bool blankGraph(const std::string& text) {
-    const auto first = text.find_first_not_of(" \t\r\n");
-    if (first == std::string::npos) return true;
-    const auto last = text.find_last_not_of(" \t\r\n");
-    return text[first] == '{' && text[last] == '}' && text.find_first_not_of(" \t\r\n", first + 1) == last;
-}
-
 double r4(double v) { return std::round(v * 1e4) / 1e4; }
 json vec(const Vec3f& v) { return json::array({r4(v.x), r4(v.y), r4(v.z)}); }
 
@@ -142,8 +135,7 @@ Groom& Workspace::add(const std::string& name, std::unique_ptr<GroomScene> scene
 }
 
 std::string Workspace::graphText(const Groom& g) {
-    const std::string& text = g.scene->session().data().graphJson;
-    return blankGraph(text) ? defaultGraphJson() : text;
+    return graphOrDefault(g.scene->session().data().graphJson);
 }
 
 std::string Workspace::hierarchyText(const Groom& g) { return g.scene->session().data().hierarchyJson; }

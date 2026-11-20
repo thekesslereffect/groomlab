@@ -492,8 +492,7 @@ const PaintableSetting* paintableSetting(const std::string& id) {
 namespace {
 
 nlohmann::json graphOf(const std::string& graphJson) {
-    const bool none = graphJson.empty() || graphJson == "{}";
-    nlohmann::json g = nlohmann::json::parse(none ? defaultGraphJson() : graphJson, nullptr, false);
+    nlohmann::json g = nlohmann::json::parse(graphOrDefault(graphJson), nullptr, false);
     if (g.is_discarded() || !g.is_object()) throw std::runtime_error("the graph is not valid JSON");
     return g;
 }

@@ -264,8 +264,7 @@ private:
 };
 
 std::string graphTextOf(const Session& s) {
-    const std::string& text = s.groom->data().graphJson;
-    return text.find_first_not_of(" \t\r\n{}") == std::string::npos ? defaultGraphJson() : text;
+    return graphOrDefault(s.groom->data().graphJson);
 }
 
 // <directory>/<name>: the folder made.
