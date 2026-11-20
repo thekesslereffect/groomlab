@@ -2249,8 +2249,9 @@ TEST(Braid, EveryBraidedStrandHasItsSectionAndIsWovenOnFromItsWayIn) {
 
 TEST(Braid, ClumpsMadeBeforeTheBraidStayTogetherInItsSections) {
     // A Clump before the Braid: with clumpChannel (clumpId, the default) each clump's strands go
-    // in one section and lie together in the braid (mid-braid, near their clump's middle); with
-    // it empty each strand takes its own spot and the clumps scatter across their sections.
+    // in one section and lie together in the braid (mid-braid, near their clump's middle, as tight
+    // as the clump came in); with it empty each strand takes its own spot and the clumps scatter
+    // across their sections.
     auto spreadOf = [](const std::string& channel, std::size_t* split) {
         BraidScene scene("three");
         scene.setParam("widthProfile", Ramp::constant(1.0f));
@@ -2296,7 +2297,7 @@ TEST(Braid, ClumpsMadeBeforeTheBraidStayTogetherInItsSections) {
     std::printf("  a clump's strands from its middle, mid-braid: kept %.4f, each its own spot %.4f; clumps split %zu, %zu\n", kept,
                 loose, splitKept, splitLoose);
     ASSERT_GT(loose, 0.0);
-    EXPECT_LT(kept, 0.5 * loose);
+    EXPECT_LT(kept, 0.4 * loose);
     EXPECT_EQ(splitKept, 0u);  // every clump in one section
 }
 

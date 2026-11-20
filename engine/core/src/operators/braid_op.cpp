@@ -1520,7 +1520,9 @@ struct StrandDraws {
 // Clumps kept through the braid (clumpChannel): a clump's place, the same for each of its strands.
 // It goes in the section its roots lie on (their mean), at one spot of that section's disc (by its
 // number), its strands round that spot within the share of the disc its hair takes (the square root
-// of its share of the section's strands), each at its own spot scaled into it.
+// of its share of the section's strands) times how tight it came in (its strands' spread halfway
+// along against their roots': a tight clump stays a thin lock, a loose one spreads), each at its
+// own spot scaled into it.
 struct ClumpPlace {
     int section = 0;
     Vec3f spot;          // its middle in the section's unit disc (within kLobeReach)
@@ -1908,17 +1910,33 @@ struct Braider {
     ClumpPlaces clumpPlaces(const BraidPath& path, const StrandSet& strands, const std::uint32_t* members, std::size_t count,
                             const std::vector<float>& clumps) const {
         struct Sum {
-            Vec3f roots;
+            Vec3f roots, middles;  // summed, then the means
+            double rootSpread = 0.0, middleSpread = 0.0;
             std::size_t count = 0;
         };
         std::unordered_map<std::int64_t, Sum> sums;
+        const auto middleOf = [&](std::size_t s) { return strands.strandPoints(s)[strands.strandPointCount(s) / 2]; };
         for (std::size_t k = 0; k < count; ++k) {
             const std::size_t s = members[k];
             std::int64_t key = 0;
             if (strands.strandPointCount(s) < 1 || !clumpKey(clumps[s], &key)) continue;
             Sum& sum = sums[key];
             sum.roots = sum.roots + strands.strandPoints(s)[0];
+            sum.middles = sum.middles + middleOf(s);
             ++sum.count;
+        }
+        for (auto& [key, sum] : sums) {
+            sum.roots = sum.roots / static_cast<float>(sum.count);
+            sum.middles = sum.middles / static_cast<float>(sum.count);
+        }
+        // How far its strands lie from their mean, at the roots and halfway along (how tight it is).
+        for (std::size_t k = 0; k < count; ++k) {
+            const std::size_t s = members[k];
+            std::int64_t key = 0;
+            if (strands.strandPointCount(s) < 1 || !clumpKey(clumps[s], &key)) continue;
+            Sum& sum = sums[key];
+            sum.rootSpread += (strands.strandPoints(s)[0] - sum.roots).length();
+            sum.middleSpread += (middleOf(s) - sum.middles).length();
         }
         ClumpPlaces places;
         const float perSection = std::max(static_cast<float>(count) / static_cast<float>(std::max(weave.sections, 1)), 1.0f);
@@ -1926,12 +1944,14 @@ struct Braider {
         for (const auto& [key, sum] : sums) {
             Rng rng(hashCombine(static_cast<std::uint64_t>(key), seed ^ 0xC1A3Bull));
             ClumpPlace place;
-            const Vec3f mean = sum.roots / static_cast<float>(sum.count);
+            const Vec3f& mean = sum.roots;
             const int fallback = static_cast<int>(rng.nextU64() % static_cast<std::uint64_t>(std::max(weave.sections, 1)));
             place.section = sectionOfRoot(mean - path.root, path.frames.front(), path.weaveAt(in), fallback);
-            place.share = std::clamp(std::sqrt(static_cast<float>(sum.count) / perSection), 0.05f, 1.0f);
+            const float room = std::clamp(std::sqrt(static_cast<float>(sum.count) / perSection), 0.02f, 1.0f);
+            const double tight = sum.rootSpread > 0.0 ? sum.middleSpread / sum.rootSpread : 1.0;
+            place.share = room * static_cast<float>(std::clamp(tight, 0.02, 1.0));
             const float a = kTwoPi * rng.nextFloat();
-            const float r = kLobeReach * (1.0f - place.share) * std::sqrt(rng.nextFloat());  // (a member's spot within kLobeReach too)
+            const float r = kLobeReach * (1.0f - room) * std::sqrt(rng.nextFloat());  // (a member's spot within kLobeReach too)
             place.spot = Vec3f{r * pm::cos(a), r * pm::sin(a), 0.0f};
             places.emplace(key, place);
         }

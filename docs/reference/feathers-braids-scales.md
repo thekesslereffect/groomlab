@@ -94,8 +94,10 @@ groomlab.add_braid(groom, ["braidCurve1"], style="three", width=0.25, tightness=
 - **Clumps before the braid** (`clumpChannel`, `clumpId` by default): build clumps as usual,
   small ones first, and put the Braid after them: strands sharing a clump number stay together,
   each clump in the section its roots lie on (the whole clump, never split between two), at one
-  spot of it, its strands round that spot as much of the section as its hair takes. The locks
-  then show inside the woven sections, as hair braided from clumped hair does. Empty: each strand
+  spot of it, its strands round that spot as much of the section as its hair takes, times how
+  tight the clump came in (its strands' spread halfway along against their roots'): tight clumps
+  stay thin locks with gaps between them, loose ones spread. The locks then show inside the
+  woven sections, as hair braided from clumped hair does. Empty: each strand
   takes its own spot and earlier clumps blend away. Fed braids (`feed`) place each strand on its
   own still. Larger clumps can follow the Braid as well (a Clump with `regionChannel`
   braidSection, its `strength` mapped by `1 - $braidPress`).
