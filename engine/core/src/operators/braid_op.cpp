@@ -98,6 +98,7 @@
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <unordered_map>
 
 #include "groomlab/braid_tubes.h"
 #include "groomlab/curve.h"
@@ -1495,6 +1496,7 @@ constexpr float kLobeReach = 0.92f;
 // (in the unit disc), how its end fans out.
 struct StrandDraws {
     int lobe = 0;
+    int section = -1;  // the section it goes in, given (its clump's: ClumpPlace); -1: the one on its side
     Vec3f inLobe;
     float fanAngle = 0.0f;
     float endDraw = 0.0f;  // where in the tail a fed strand ends
@@ -1514,6 +1516,29 @@ struct StrandDraws {
         endDraw = rng.nextFloat();
     }
 };
+
+// Clumps kept through the braid (clumpChannel): a clump's place, the same for each of its strands.
+// It goes in the section its roots lie on (their mean), at one spot of that section's disc (by its
+// number), its strands round that spot within the share of the disc its hair takes (the square root
+// of its share of the section's strands), each at its own spot scaled into it.
+struct ClumpPlace {
+    int section = 0;
+    Vec3f spot;          // its middle in the section's unit disc (within kLobeReach)
+    float share = 1.0f;  // the radius its strands take, a share of the disc's
+    // A strand's draws as a member: its section, its spot moved into the clump's.
+    void place(StrandDraws& d) const {
+        d.section = section;
+        d.inLobe = spot + d.inLobe * share;
+    }
+};
+using ClumpPlaces = std::unordered_map<std::int64_t, ClumpPlace>;
+
+// A clump's number from its channel's value (a whole number; none for a negative or non-finite one).
+bool clumpKey(float v, std::int64_t* key) {
+    if (!std::isfinite(v) || v < 0.0f) return false;
+    *key = static_cast<std::int64_t>(std::floor(v));
+    return true;
+}
 
 // The points a braided strand gets: `perStep` a weave step over the share of it that weaves, at
 // most `most` segments, never fewer than it came with.
@@ -1878,6 +1903,40 @@ struct Braider {
         return tightness / std::max(weave.stepLength * w, 1e-6f);
     }
     StrandDraws drawsFor(std::uint64_t id) const { return StrandDraws(id, seed, weave.sections); }
+    // The places of the clumps among `members` (strands of `strands` braided along `path`), by
+    // their numbers in `clumps` (ClumpPlace).
+    ClumpPlaces clumpPlaces(const BraidPath& path, const StrandSet& strands, const std::uint32_t* members, std::size_t count,
+                            const std::vector<float>& clumps) const {
+        struct Sum {
+            Vec3f roots;
+            std::size_t count = 0;
+        };
+        std::unordered_map<std::int64_t, Sum> sums;
+        for (std::size_t k = 0; k < count; ++k) {
+            const std::size_t s = members[k];
+            std::int64_t key = 0;
+            if (strands.strandPointCount(s) < 1 || !clumpKey(clumps[s], &key)) continue;
+            Sum& sum = sums[key];
+            sum.roots = sum.roots + strands.strandPoints(s)[0];
+            ++sum.count;
+        }
+        ClumpPlaces places;
+        const float perSection = std::max(static_cast<float>(count) / static_cast<float>(std::max(weave.sections, 1)), 1.0f);
+        const float in = 0.5f * gather * path.length;
+        for (const auto& [key, sum] : sums) {
+            Rng rng(hashCombine(static_cast<std::uint64_t>(key), seed ^ 0xC1A3Bull));
+            ClumpPlace place;
+            const Vec3f mean = sum.roots / static_cast<float>(sum.count);
+            const int fallback = static_cast<int>(rng.nextU64() % static_cast<std::uint64_t>(std::max(weave.sections, 1)));
+            place.section = sectionOfRoot(mean - path.root, path.frames.front(), path.weaveAt(in), fallback);
+            place.share = std::clamp(std::sqrt(static_cast<float>(sum.count) / perSection), 0.05f, 1.0f);
+            const float a = kTwoPi * rng.nextFloat();
+            const float r = kLobeReach * (1.0f - place.share) * std::sqrt(rng.nextFloat());  // (a member's spot within kLobeReach too)
+            place.spot = Vec3f{r * pm::cos(a), r * pm::sin(a), 0.0f};
+            places.emplace(key, place);
+        }
+        return places;
+    }
 
     // What the path alone gives of the braid's point `at` a distance along it: its point and
     // frame, the braid's width, tail and weave there, the hold of the nearest tie.
@@ -2199,7 +2258,7 @@ struct Braider {
                    const PathTable* table = nullptr, float* presses = nullptr) const {
         // The section on its side where it comes in, halfway through the gather.
         const float in = 0.5f * gather * path.length;
-        const int section = sectionOfRoot(pts[0] - path.root, path.frames.front(), path.weaveAt(in), d.lobe);
+        const int section = d.section >= 0 ? d.section : sectionOfRoot(pts[0] - path.root, path.frames.front(), path.weaveAt(in), d.lobe);
         const StrandSpot spot = spotOf(d);
         if (tails) tails[0] = 0.0f;
         if (woven) woven[0] = 0.0f;
@@ -2481,6 +2540,13 @@ public:
             ParamSpec{"gather", 0.15, "Share of the strand spent leaving the scalp into the braid", "fraction"}
                 .range(0, 0.9)
                 .in("Strands"),
+            ParamSpec{"clumpChannel", std::string("clumpId"),
+                      "Strands sharing a clump number (a Clump before the Braid writes clumpId) stay together in the "
+                      "braid: each clump goes in the section its roots lie on, at one spot of it, its strands round "
+                      "that spot (as many as its share of the section's hair takes), so clumps made before braiding "
+                      "show inside the sections. Empty, or with feed: each strand its own spot"}
+                .readsChannel(true)
+                .in("Strands"),
             ParamSpec{"gatherSmoothness", 0.0, "How gradually the weave starts where the hair has gathered: 0 at once; "
                                                "more, the sections begin as one round bundle and their crossings grow "
                                                "over up to four weave steps", "fraction"}
@@ -2691,8 +2757,13 @@ private:
             *paths = GuidesPtr(made);
         }
 
+        // The clumps coming in (clumpChannel, without feed): each kept together in the braid.
+        const std::string clumpName = params().getString("clumpChannel");
+        const std::vector<float>* clumps = feed || clumpName.empty() ? nullptr : in->strandChannel(clumpName);
+        if (clumps && clumps->size() != in->strandCount()) clumps = nullptr;
+
         // Incrementally: the same paths, no feed, no earlier Braid's ids (numbered on from their
-        // highest), the hair shown.
+        // highest), the hair shown, no clumps kept (a clump's place is all its strands').
         phase.next("braid.channelsBefore");
         const StrandChanges* changes = nullptr;
         StrandsPtr last;
@@ -2700,7 +2771,7 @@ private:
             changes = someStrandsChanged(*incremental, 0);
             last = valueAs<StrandsPtr>(incremental->previous);
             if (!changes || !last || last->strandCount() != in->strandCount() || feed || showPaths ||
-                !inputUnchanged(*incremental, 1) || in->strandChannel("braidId")) {
+                !inputUnchanged(*incremental, 1) || in->strandChannel("braidId") || clumps) {
                 return false;
             }
             if (changes->none()) {
@@ -2913,9 +2984,11 @@ private:
                 const std::size_t points = br.sampling.count(2, path.repeats, 1.0f);
                 if (strands > fewest && points > 2) table = br.tableFor(path, points);
                 const PathTable* stations = table.count ? &table : nullptr;
+                // (the clumps coming in kept together: clumpChannel)
+                const ClumpPlaces places = clumps ? br.clumpPlaces(path, *in, ofPath.data() + first[b], strands, *clumps) : ClumpPlaces{};
                 parallelFor(0, strands, [&](std::size_t k) {
                     const std::size_t s = ofPath[first[b] + k];
-                    braidOne(br, *in, joined[s], *out, s, channels, stations, static_cast<int>(b));
+                    braidOne(br, *in, joined[s], *out, s, channels, stations, static_cast<int>(b), clumps ? &places : nullptr, clumps);
                 }, 64);
             }, 1);
             // (A strand that joined none: braidOne looks again only if its root moved.)
@@ -2932,15 +3005,21 @@ private:
     // it was then (as resampling leaves it; else found again). `table`: the stations of path
     // `tablePath` (Braider::tableFor), read when the strand is braided along that path with the
     // table's points.
+    // `places` (with `clumps`, the clump channel): the clumps of path `tablePath` kept together.
     static void braidOne(const Braider& br, const StrandSet& in, int joined, StrandSet& out, std::size_t s,
-                         const BraidChannels& channels, const PathTable* table = nullptr, int tablePath = -1) {
+                         const BraidChannels& channels, const PathTable* table = nullptr, int tablePath = -1,
+                         const ClumpPlaces* places = nullptr, const std::vector<float>* clumps = nullptr) {
         Vec3f* pts = out.strandPoints(s);
         const std::size_t n = out.strandPointCount(s);
         if (n < 2) return;
         const Vec3f* was = in.strandPointCount(s) >= 2 ? in.strandPoints(s) : nullptr;
         const int best = was && pts[0].x == was->x && pts[0].y == was->y && pts[0].z == was->z ? joined : br.pathOf(pts[0]);
         if (best < 0) return;
-        const StrandDraws draws = br.drawsFor(out.ids()[s]);
+        StrandDraws draws = br.drawsFor(out.ids()[s]);
+        std::int64_t key = 0;
+        if (places && clumps && best == tablePath && clumpKey((*clumps)[s], &key)) {
+            if (const auto it = places->find(key); it != places->end()) it->second.place(draws);
+        }
         channels.set(s, best, br.style);
         const int section = br.braidAlong(pts, n, br.paths[static_cast<std::size_t>(best)], draws,
                                           channels.tail ? channels.tail->data() + out.strandBegin(s) : nullptr,

@@ -2247,6 +2247,59 @@ TEST(Braid, EveryBraidedStrandHasItsSectionAndIsWovenOnFromItsWayIn) {
     }
 }
 
+TEST(Braid, ClumpsMadeBeforeTheBraidStayTogetherInItsSections) {
+    // A Clump before the Braid: with clumpChannel (clumpId, the default) each clump's strands go
+    // in one section and lie together in the braid (mid-braid, near their clump's middle); with
+    // it empty each strand takes its own spot and the clumps scatter across their sections.
+    auto spreadOf = [](const std::string& channel, std::size_t* split) {
+        BraidScene scene("three");
+        scene.setParam("widthProfile", Ramp::constant(1.0f));
+        const NodeId clump = scene.lg.add(op::kClump, scene.lg.scatter);
+        scene.lg.g.node(clump).params().set("count", std::int64_t{30});
+        scene.lg.g.disconnect(scene.braid, 0);
+        scene.lg.g.connect(clump, scene.braid, 0);
+        scene.setParam("clumpChannel", channel);
+        const StrandsPtr out = scene.lg.eval(scene.braid);
+        const std::vector<float>* ids = out->strandChannel("braidId");
+        const std::vector<float>* sections = out->strandChannel("braidSection");
+        const std::vector<float>* clumpIds = out->strandChannel("clumpId");
+        EXPECT_TRUE(ids && sections && clumpIds);
+        if (!ids || !sections || !clumpIds) return 0.0;
+        // Each clump's points halfway along (the braided strands have one point count), and the
+        // sections it went in.
+        std::map<std::int64_t, std::vector<Vec3f>> middles;
+        std::map<std::int64_t, std::set<int>> inSections;
+        std::size_t n = 0;
+        for (std::size_t s = 0; s < out->strandCount(); ++s) {
+            if ((*ids)[s] < 0.0f) continue;
+            if (!n) n = out->strandPointCount(s);
+            if (out->strandPointCount(s) != n) continue;
+            const auto key = static_cast<std::int64_t>((*clumpIds)[s]);
+            middles[key].push_back(out->strandPoints(s)[n / 2]);
+            inSections[key].insert(static_cast<int>((*sections)[s]));
+        }
+        double spread = 0.0;
+        std::size_t counted = 0;
+        *split = 0;
+        for (const auto& [key, points] : middles) {
+            if (points.size() < 4) continue;
+            Vec3f mean;
+            for (const Vec3f& p : points) mean = mean + p;
+            mean = mean / static_cast<float>(points.size());
+            for (const Vec3f& p : points) spread += (p - mean).length(), ++counted;
+            *split += inSections[key].size() > 1 ? 1 : 0;
+        }
+        return counted ? spread / static_cast<double>(counted) : 0.0;
+    };
+    std::size_t splitKept = 0, splitLoose = 0;
+    const double kept = spreadOf("clumpId", &splitKept), loose = spreadOf("", &splitLoose);
+    std::printf("  a clump's strands from its middle, mid-braid: kept %.4f, each its own spot %.4f; clumps split %zu, %zu\n", kept,
+                loose, splitKept, splitLoose);
+    ASSERT_GT(loose, 0.0);
+    EXPECT_LT(kept, 0.5 * loose);
+    EXPECT_EQ(splitKept, 0u);  // every clump in one section
+}
+
 TEST(Braid, TheSectionsOutputGivesEachSectionsWovenCurve) {
     // The sections output (4th): a guide per section of each braid, its center curve as it weaves
     // (over and under the others: side to side across the braid's path), braidId and braidSection
