@@ -386,13 +386,11 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
                 tray = look(layout, "card")  # (the window: a tray, its title inside)
                 look(tray, "tray").label(text=category)
                 grid = tool_grid(tray, ids, t.tool)
-                if "freeze" in ids:  # beside Freeze, a tile: every guide brushable again (its tooltip says so)
-                    sub = grid.row(align=True)
-                    sub.scale_y = TILE_SCALE
-                    sub.operator("groomlab.guides_edit", text="Invert" if in_window(layout) else "Invert Frozen",
-                                 icon_value=icons.icon("invert")).action = "INVERT_FROZEN"
-                    sub.operator("groomlab.guides_edit", text="Unfreeze" if in_window(layout) else "Unfreeze All",
-                                 icon_value=icons.icon("unfreeze")).action = "UNFREEZE_ALL"
+                if "freeze" in ids:  # beside Freeze, two tiles of the grid's own size (their tooltips say what they do)
+                    grid.operator("groomlab.guides_edit", text="Invert" if in_window(layout) else "Invert Frozen",
+                                  icon_value=icons.icon("invert")).action = "INVERT_FROZEN"
+                    grid.operator("groomlab.guides_edit", text="Unfreeze" if in_window(layout) else "Unfreeze All",
+                                  icon_value=icons.icon("unfreeze")).action = "UNFREEZE_ALL"
         elif t.tab == "PAINT":  # Paint: one full-width button over the maps
             row = look(layout, "card").row()
             row.scale_y = TILE_SCALE

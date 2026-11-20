@@ -59,6 +59,7 @@ class Layout(bu.FakeLayout):
         props = bu.FakeLayout.operator(self, idname, **kwargs)
         self.log.append(("op_text", idname, kwargs.get("text", "")))
         self.log.append(("op_props", idname, props))  # what the caller sets on it (a tile's tool)
+        self.log.append(("op_on", idname, props, self))  # the layout it is drawn on (a tile: the grid)
         return props
 
 
@@ -314,6 +315,12 @@ class ToolsTest(unittest.TestCase):
         texts = [e[2] for e in log if e[0] == "op_text" and e[1] == "groomlab.guides_edit"]
         self.assertIn("Unfreeze All", texts)
         self.assertLess(texts.index("Invert Frozen"), texts.index("Unfreeze All"))  # Freeze, Invert, Unfreeze
+        # Invert and Unfreeze are tiles of the Guides grid, each its own cell like Freeze (not two
+        # buttons squeezed into one cell).
+        on = [(getattr(e[2], "tool", None) or getattr(e[2], "action", None), e[3]) for e in log if e[0] == "op_on"]
+        grid = next(where for what, where in on if what == "freeze")
+        for action in ("INVERT_FROZEN", "UNFREEZE_ALL"):
+            self.assertIs(next(where for what, where in on if what == action), grid)
         comb = type("Props", (), {"tool": "comb"})()
         self.assertEqual(tool_ops.GROOMLAB_OT_tool.description(bpy.context, comb), palette.help_text("comb"))
         self.assertTrue(palette.help_text("comb").startswith(
