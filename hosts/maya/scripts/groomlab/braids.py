@@ -135,8 +135,9 @@ def add_braid(groom, curves=None, style="three", group="braids", width=0.25, tig
 @undoable("instances")
 def add_instances(groom, prototype, probability=0.1, count=1, t_range=(0.6, 1.0), scale=0.02, orient="strand",
                   scale_random=0.3, spin_random=1.0, offset=0.0, seed=None, before="output",
-                  scale_by_width=True, pin_to_rest=False, size_mode="fixed", fit_scale=1.0, aspect=0.1,
-                  deform="none", deform_axis="y"):
+                  scale_by_width=True, pin_to_rest=True, size_mode="fixed", fit_scale=1.0, aspect=0.1,
+                  deform="none", deform_axis="y", exposure="external", exposure_falloff=None, axis=None,
+                  axis_falloff=None):
     """Instance the mesh `prototype` on the strands; returns the Instance node's name.
 
     Each strand gets up to `count` instances, each kept with `probability`
@@ -147,6 +148,10 @@ def add_instances(groom, prototype, probability=0.1, count=1, t_range=(0.6, 1.0)
     root width), so they shrink toward thin tips. pin_to_rest: each keeps its
     distance from the root as measured at rest, so strands that stretch
     (simulated guides) don't slide it.
+    exposure: "external" (near the hair's outer surface, where they are seen),
+    "internal" or "both"; exposure_falloff how deep under the surface (scene
+    units). axis: "+x", "-x", "+y", "-y", "+z" or "-z" puts them only on the
+    side of the hair facing it (axis_falloff deep); None: anywhere.
     size_mode "fixed": `scale` is the size in scene units. "fitStrand": each
     spans its strand (leaves, feathers): `fit_scale` of the strand's rest
     length along the prototype's +Y (1: the whole strand; model it 1 unit long
@@ -169,7 +174,13 @@ def add_instances(groom, prototype, probability=0.1, count=1, t_range=(0.6, 1.0)
     params = {"prototype": prototype, "probability": probability, "count": count,
               "tMin": float(t_range[0]), "tMax": float(t_range[1]), "scale": scale,
               "orient": orient, "scaleRandom": scale_random, "spinRandom": spin_random, "offset": offset,
-              "scaleByWidth": bool(scale_by_width), "pinToRest": bool(pin_to_rest)}
+              "scaleByWidth": bool(scale_by_width), "pinToRest": bool(pin_to_rest), "exposure": exposure}
+    if exposure_falloff is not None:
+        params["exposureFalloff"] = float(exposure_falloff)
+    if axis is not None:
+        params.update({"axisFacing": True, "axis": axis})
+        if axis_falloff is not None:
+            params["axisFalloff"] = float(axis_falloff)
     if size_mode != "fixed":
         params.update({"sizeMode": size_mode, "fitScale": fit_scale, "aspect": aspect})
     if deform != "none":

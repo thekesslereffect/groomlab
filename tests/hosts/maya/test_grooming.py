@@ -1743,7 +1743,7 @@ class GroomingTest(unittest.TestCase):
         # as the prototype is edited, swapped for another mesh and deleted).
         cube, maker = cmds.polyCube(name="bead")
         cmds.setAttr(cube + ".visibility", False)
-        node = groomlab.add_instances(self.groom, cube, probability=0.5, scale=0.05, orient="strand")
+        node = groomlab.add_instances(self.groom, exposure="both", prototype=cube, probability=0.5, scale=0.05, orient="strand")
         self.assertEqual(groomlab.errors(self.groom), [])
         self.assertGreater(cmds.getAttr(self.groom + ".outStrandCount"), 0)
         cmds.refresh(force=True)
@@ -6219,8 +6219,8 @@ class MotionTest(unittest.TestCase):
         # Simulated guides that stretch 1.5x by frame 10; one instance per strand, 0.8 along it.
         self.stretch_guides_with_sim_curves(1.5, 10)
         cmds.polySphere(name="flake", radius=1, subdivisionsX=6, subdivisionsY=4)
-        node = groomlab.add_instances(self.groom, "flake", probability=1.0, t_range=(0.8, 0.8), scale=0.02,
-                                      scale_by_width=False)
+        node = groomlab.add_instances(self.groom, exposure="both", prototype="flake", probability=1.0, t_range=(0.8, 0.8), scale=0.02,
+                                      scale_by_width=False, pin_to_rest=False)
         self.assertEqual(groomlab.errors(self.groom), [])
         rest, _ = self.viewport_instances(1)
         rest_length = [self.length(s) for s in rest]
@@ -6273,7 +6273,7 @@ class MotionTest(unittest.TestCase):
         # 0.8 of the strand's rest length along +Y, a quarter of that across.
         self.stretch_guides_with_sim_curves(1.5, 10)
         cmds.polyPlane(name="leaf", width=1, height=1, subdivisionsX=1, subdivisionsY=1)
-        node = groomlab.add_instances(self.groom, "leaf", probability=1.0, t_range=(0.0, 0.0), scale_random=0.0,
+        node = groomlab.add_instances(self.groom, exposure="both", prototype="leaf", probability=1.0, t_range=(0.0, 0.0), scale_random=0.0,
                                       scale_by_width=False, size_mode="fitStrand", fit_scale=0.8, aspect=0.25)
         self.assertEqual(groomlab.errors(self.groom), [])
         rest, axes = self.viewport_axes(1)
