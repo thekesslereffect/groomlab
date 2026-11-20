@@ -79,14 +79,19 @@ groomlab.add_braid(groom, ["braidCurve1"], style="three", width=0.25, tightness=
   `braids` preset).
 - **Channels:** the node writes `braidId` per strand (the path's index in the paths group, or
   for paths of its own a number from the picked strand's ID, so an edit elsewhere renumbers no
-  braid; -1 for strands not braided, strays included), `braidFlat` (1 for a cornrow, lying on the
+  braid; -1 for strands not braided), `braidFlat` (1 for a cornrow, lying on the
   scalp), `braidSection` (the section the strand runs in, -1 when not braided) and, per point,
   `braidTail` (rising down a fanned or tufted end), `braidWoven` (0 on the way in from the
   root, rising to 1 in the braid) and `braidPress` (below); the Cards node uses them to build braid cards (a tube per
   section by default: [game export](game-export.md)).
 - **Braid paths are not hair:** the other Guides nodes list the paths group in `exclude`, so
   Interpolate never uses a path as a hair guide.
-- **Loose hair:** `strays` (a share left loose) and `fuzz` (a wander within the sections).
+- **Smooth starts and ends** (`gatherSmoothness`, `tailSmoothness`, 0-1): 0, the weave starts
+  at full strength where the hair has gathered and stops where the tail begins. More, the
+  sections begin as one round bundle and their crossings grow over up to four weave steps (and
+  at the other end shrink into one bundle before the tail, which then fans, tufts or goes free
+  from it), so there is no hard first or last crossing. Loose hair is the job of the nodes after
+  the Braid: a Noise or a Flyaway, masked by `braidWoven` or `braidTail` where wanted.
 - **Loose braids:** `pancake` pulls the sections apart and loosens them (a braid pulled out by
   hand); `loops` is the share of the crossings where a bundle of one section's hair breaks away
   from the braid in an arc (`loopSize` braid widths out, each a little more or less) and comes

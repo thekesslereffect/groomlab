@@ -1859,7 +1859,6 @@ struct BraidScene {
         braid = lg.add(op::kBraid, lg.scatter);
         lg.g.connect(guides, braid, 1);
         lg.g.node(braid).params().set("style", style);
-        lg.g.node(braid).params().set("strays", 0.0);
     }
     void addPath(std::vector<Vec3f> path) {
         paths->add(paths->size() + 1, std::move(path));
@@ -1949,9 +1948,7 @@ TEST(Braid, FlatnessTightnessRollAndSectionsShapeTheWeave) {
         return scene.lg.eval(scene.braid)->contentHash();
     };
     BraidScene round("three"), flat("three");
-    round.setParam("fuzz", 0.0);
     round.setParam("flatness", 0.0);
-    flat.setParam("fuzz", 0.0);
     flat.setParam("flatness", 1.0);
     EXPECT_LT(spread(flat), 0.9f * spread(round));  // flatter across
 
@@ -2417,7 +2414,6 @@ TEST(Braid, BoxBraidsPickTheirOwnPaths) {
     lg.segments(24);
     const NodeId braid = lg.add(op::kBraid, lg.scatter);
     lg.g.node(braid).params().set("region", 0.25);  // about 16 braids over the unit plane
-    lg.g.node(braid).params().set("strays", 0.0);
     const StrandsPtr before = lg.eval(lg.scatter);
     const StrandsPtr after = lg.eval(braid);
     const std::vector<float>* ids = after->strandChannel("braidId");
@@ -2433,29 +2429,28 @@ TEST(Braid, BoxBraidsPickTheirOwnPaths) {
     EXPECT_GT(moved, 300u);
 }
 
-TEST(Braid, BraidIdIsMinusOneForLooseStrandsAndStrays) {
+TEST(Braid, BraidIdIsMinusOneForLooseStrands) {
+    // Every strand rooted within the region is braided (moved, its braidId set); the rest stay as
+    // they were, braidId -1.
     BraidScene scene("three");
-    scene.setParam("strays", 0.5);
     const StrandsPtr before = scene.lg.eval(scene.lg.scatter);
     const StrandsPtr after = scene.lg.eval(scene.braid);
     const std::vector<float>* ids = after->strandChannel("braidId");
     ASSERT_TRUE(ids);
-    std::size_t inRegion = 0, strays = 0;
+    std::size_t inRegion = 0;
     for (std::size_t s = 0; s < after->strandCount(); ++s) {
         const Vec3f r = before->strandPoints(s)[0];
         const float d = std::hypot(r.x - 0.5f, r.z - 0.5f);
         const bool moved = strandMoved(*before, *after, s);
-        EXPECT_EQ(moved, (*ids)[s] >= 0.0f) << s;  // loose, stray or out of the region: -1
+        EXPECT_EQ(moved, (*ids)[s] >= 0.0f) << s;  // loose (out of the region): -1
         if (d > 0.25f) {
             EXPECT_FALSE(moved) << s;
             continue;
         }
         ++inRegion;
-        strays += moved ? 0 : 1;
+        EXPECT_TRUE(moved) << s;  // no strays: every strand in the region braided
     }
     EXPECT_GT(inRegion, 400u);
-    EXPECT_GT(strays, inRegion * 3 / 10);
-    EXPECT_LT(strays, inRegion * 7 / 10);
 }
 
 TEST(Braid, AddsPointsSoEveryWeaveRepeatIsDrawn) {
@@ -2525,7 +2520,6 @@ TEST(Braid, SectionsArePartedByTheSideTheHairLiesOn) {
     // side, so the sections leave the scalp without crossing each other.
     BraidScene scene("three", {{0.5f, 0.01f, 0.5f}, {1.5f, 0.01f, 0.5f}});
     scene.setParam("tightness", 0.3);
-    scene.setParam("fuzz", 0.0);
     const StrandsPtr before = scene.lg.eval(scene.lg.scatter);
     const StrandsPtr after = scene.lg.eval(scene.braid);
     const std::vector<float>* ids = after->strandChannel("braidId");
@@ -2626,6 +2620,68 @@ TEST(Braid, DisplayPathsShowsEachPathAndItsSections) {
     }
 }
 
+// How much the sections move across the braid between heights `from` and `to` of a standing braid:
+// each section's mean (x, z) in bands 0.02 high, the distance its mean travels from band to band,
+// summed over the sections. Woven, the sections cross from side to side; as one bundle, each keeps
+// its place.
+float sectionMotion(const StrandSet& out, float from, float to) {
+    const std::vector<float>* sections = out.strandChannel("braidSection");
+    constexpr float kBand = 0.02f;
+    const int bands = static_cast<int>(std::ceil((to - from) / kBand));
+    std::vector<std::array<double, 3>> sums(static_cast<std::size_t>(3 * bands), {0.0, 0.0, 0.0});
+    for (std::size_t s = 0; s < out.strandCount(); ++s) {
+        const int k = sections ? static_cast<int>((*sections)[s]) : -1;
+        if (k < 0 || k > 2) continue;
+        for (std::size_t i = 0; i < out.strandPointCount(s); ++i) {
+            const Vec3f q = out.strandPoints(s)[i];
+            const int b = static_cast<int>(std::floor((q.y - from) / kBand));
+            if (b < 0 || b >= bands) continue;
+            std::array<double, 3>& sum = sums[static_cast<std::size_t>(k * bands + b)];
+            sum[0] += q.x, sum[1] += q.z, sum[2] += 1.0;
+        }
+    }
+    double motion = 0.0;
+    for (int k = 0; k < 3; ++k) {
+        for (int b = 0; b + 1 < bands; ++b) {
+            const auto& p = sums[static_cast<std::size_t>(k * bands + b)];
+            const auto& q = sums[static_cast<std::size_t>(k * bands + b + 1)];
+            if (p[2] < 1.0 || q[2] < 1.0) continue;
+            motion += std::hypot(q[0] / q[2] - p[0] / p[2], q[1] / q[2] - p[1] / p[2]);
+        }
+    }
+    return static_cast<float>(motion);
+}
+
+TEST(Braid, SmoothnessFadesTheWeaveInAfterTheGatherAndOutBeforeTheTail) {
+    // gatherSmoothness: just after the gather the sections lie as one bundle, crossing far less than
+    // a plain start's; tailSmoothness: so just before the tail. The weave between is as it was.
+    // 0 (the default) is the braid as ever.
+    BraidScene plain("three");
+    plain.setParam("widthProfile", Ramp::constant(1.0f));
+    const StrandsPtr sharp = plain.lg.eval(plain.braid);
+    BraidScene smooth("three");
+    smooth.setParam("widthProfile", Ramp::constant(1.0f));
+    smooth.setParam("gatherSmoothness", 1.0);
+    smooth.setParam("tailSmoothness", 1.0);
+    const StrandsPtr soft = smooth.lg.eval(smooth.braid);
+    // (gather 0.15 and tail 0.12 of a braid 1 high: the weave from about 0.15 to 0.88)
+    const float startSharp = sectionMotion(*sharp, 0.16f, 0.24f), startSoft = sectionMotion(*soft, 0.16f, 0.24f);
+    const float endSharp = sectionMotion(*sharp, 0.80f, 0.87f), endSoft = sectionMotion(*soft, 0.80f, 0.87f);
+    const float middleSharp = sectionMotion(*sharp, 0.45f, 0.6f), middleSoft = sectionMotion(*soft, 0.45f, 0.6f);
+    std::printf("  section motion: start %.3f -> %.3f, middle %.3f -> %.3f, end %.3f -> %.3f\n", startSharp, startSoft, middleSharp,
+                middleSoft, endSharp, endSoft);
+    EXPECT_LT(startSoft, 0.5f * startSharp);
+    EXPECT_LT(endSoft, 0.5f * endSharp);
+    EXPECT_NEAR(middleSoft, middleSharp, 0.15f * middleSharp);
+    // Every braided strand still braided, its root where it was.
+    const std::vector<float>* ids = soft->strandChannel("braidId");
+    ASSERT_TRUE(ids);
+    for (std::size_t s = 0; s < soft->strandCount(); ++s) {
+        EXPECT_EQ((*ids)[s] >= 0.0f, (*sharp->strandChannel("braidId"))[s] >= 0.0f) << s;
+        EXPECT_EQ(soft->strandPoints(s)[0], sharp->strandPoints(s)[0]) << s;
+    }
+}
+
 // The braid's spread across (x, z) about its axis at height y (+-0.02), over the braided strands.
 float braidSpreadAt(const StrandSet& out, float y) {
     const std::vector<float>* ids = out.strandChannel("braidId");
@@ -2644,7 +2700,6 @@ TEST(Braid, TiesTightenTheBraidAndAreHandedOnAsStrands) {
     // Two ties along a standing braid 1 long: the last where the weave ends (the tail's start),
     // the braid narrower inside each; the ties output a short strand at each, as wide as the braid.
     BraidScene scene("three");
-    scene.setParam("fuzz", 0.0);
     scene.setParam("widthProfile", Ramp::constant(1.0f));
     scene.setParam("ties", std::int64_t{2});
     scene.setParam("cinch", 0.5);
@@ -2673,19 +2728,18 @@ TEST(Braid, TiesTightenTheBraidAndAreHandedOnAsStrands) {
     // bore (half the tie's width round its middle): none pokes out through a bead.
     const StrandsPtr out = scene.lg.eval(scene.braid);
     EXPECT_LT(braidSpreadAt(*out, lastMiddle), 0.75f * braidSpreadAt(*out, lastMiddle - 0.25f));
-    scene.setParam("fuzz", 0.03);
     scene.setParam("cinch", 0.0);  // (held in all the same)
-    const StrandsPtr fuzzy = scene.lg.eval(scene.braid);
-    const StrandsPtr fuzzyTies = valueAs<StrandsPtr>(scene.lg.g.evaluateOutput(scene.braid, 2, ctx));
+    const StrandsPtr uncinched = scene.lg.eval(scene.braid);
+    const StrandsPtr uncinchedTies = valueAs<StrandsPtr>(scene.lg.g.evaluateOutput(scene.braid, 2, ctx));
     std::size_t inside = 0;
-    for (std::size_t t = 0; t < fuzzyTies->strandCount(); ++t) {
-        const std::size_t n = fuzzyTies->strandPointCount(t);
-        const Vec3f* tie = fuzzyTies->strandPoints(t);
-        const float bore = 0.5f * fuzzyTies->widths()[fuzzyTies->strandBegin(t) + n / 2];
-        for (std::size_t s = 0; s < fuzzy->strandCount(); ++s) {
-            if ((*fuzzy->strandChannel("braidId"))[s] < 0.0f) continue;
-            for (std::size_t i = 0; i < fuzzy->strandPointCount(s); ++i) {
-                const Vec3f q = fuzzy->strandPoints(s)[i];
+    for (std::size_t t = 0; t < uncinchedTies->strandCount(); ++t) {
+        const std::size_t n = uncinchedTies->strandPointCount(t);
+        const Vec3f* tie = uncinchedTies->strandPoints(t);
+        const float bore = 0.5f * uncinchedTies->widths()[uncinchedTies->strandBegin(t) + n / 2];
+        for (std::size_t s = 0; s < uncinched->strandCount(); ++s) {
+            if ((*uncinched->strandChannel("braidId"))[s] < 0.0f) continue;
+            for (std::size_t i = 0; i < uncinched->strandPointCount(s); ++i) {
+                const Vec3f q = uncinched->strandPoints(s)[i];
                 if (q.y < tie[1].y || q.y > tie[n - 2].y) continue;  // (the tie's middle part)
                 ++inside;
                 EXPECT_LT(std::hypot(q.x - tie[n / 2].x, q.z - tie[n / 2].z), bore) << s << " " << i;
@@ -2705,7 +2759,6 @@ TEST(Braid, EndsFanGatherIntoATuftOrAreBound) {
     // braidTail rises from 0 in the braid to 1 at the tip (fan, tuft), 0 all along a bound end.
     auto tip = [](const char* end) {
         BraidScene scene("three");
-        scene.setParam("fuzz", 0.0);
         scene.setParam("end", std::string(end));
         scene.setParam("tail", 0.2);
         const StrandsPtr out = scene.lg.eval(scene.braid);
@@ -2784,7 +2837,6 @@ TEST(Braid, NoHairPassesThroughABeadOnACurvingBraid) {
     }
     for (const bool bound : {false, true}) {  // (bound: the last near a sealed end, as the beaded preset)
     BraidScene scene("three", arc);
-    scene.setParam("fuzz", 0.03);
     scene.setParam("ties", std::int64_t{bound ? 3 : 4});
     scene.setParam("tieLength", bound ? 0.5 : 1.0);
     if (bound) {
@@ -2843,7 +2895,6 @@ TEST(Braid, PancakeLoosensAndLoopsPullSectionsOut) {
     // a bundle: many strands together), the rest staying in it; the same draw every time.
     auto spread = [](double pancake, double loops) {
         BraidScene scene("three");
-        scene.setParam("fuzz", 0.0);
         scene.setParam("tail", 0.0);
         scene.setParam("widthProfile", Ramp::constant(1.0f));
         scene.setParam("pancake", pancake);
@@ -3015,7 +3066,6 @@ TEST(Braid, APressedCornrowStaysOnTheScalp) {
             BraidScene row(feed ? "three" : "cornrow", {{0.2f, 0.01f, 0.5f}, {0.8f, 0.01f, 0.5f}});
             row.setParam("region", 0.12);
             row.setParam("tail", 0.0);
-            row.setParam("fuzz", 0.0);
             row.setParam("feed", feed);
             row.setParam("inflate", inflate);
             const StrandsPtr out = row.lg.eval(row.braid);
@@ -3209,7 +3259,6 @@ TEST(Braid, PressedSectionsAreTubesAlongTheirOwnCourses) {
         for (const float inflate : {0.0f, 0.5f, 1.0f}) {
             BraidScene scene(style);
             scene.setParam("widthProfile", Ramp::constant(1.0f));
-            scene.setParam("fuzz", 0.0);
             scene.setParam("tail", 0.2);
             scene.setParam("inflate", static_cast<double>(inflate));
             EvalContext ctx;
@@ -3295,7 +3344,6 @@ TEST(Braid, APressedBraidIsAsWideAndDeepAsVersionOnes) {
             BraidScene scene(style);
             scene.lg.g.node(scene.braid).setNodeVersion(version);
             scene.setParam("widthProfile", Ramp::constant(1.0f));
-            scene.setParam("fuzz", 0.0);
             scene.setParam("inflate", at == 2 ? 1.0 : 0.5);
             const StrandsPtr hair = scene.lg.eval(scene.braid);
             const std::vector<float>* woven = hair->pointChannel("braidWoven");
@@ -3340,7 +3388,6 @@ TEST(Braid, ACurvingTaperingFedBraidsPressedTubesKeepApartToo) {
     for (const bool feed : {false, true}) {
         BraidScene scene("three", {{0.3f, 0.0f, 0.5f}, {0.32f, 0.4f, 0.5f}, {0.5f, 0.8f, 0.55f}, {0.8f, 1.0f, 0.6f}});
         scene.addPath({{0.7f, 0.0f, 0.3f}, {0.72f, 0.5f, 0.32f}, {0.6f, 0.9f, 0.2f}});
-        scene.setParam("fuzz", 0.0);
         scene.setParam("feed", feed);
         scene.setParam("region", 0.2);
         EvalContext ctx;
@@ -3443,7 +3490,6 @@ TEST(Braid, AFreeEndLeavesTheSectionsForOneBundleAlongThePath) {
         BraidScene scene(c.style);
         scene.lg.g.node(scene.braid).setNodeVersion(c.version);
         scene.setParam("widthProfile", Ramp::constant(1.0f));
-        scene.setParam("fuzz", 0.0);
         scene.setParam("end", std::string("free"));
         scene.setParam("tail", 0.6);     // the weave ends at y = 0.4 of the path
         scene.setParam("release", 1.4);  // let go over 1.4 braid widths: to y = 0.75
@@ -3506,7 +3552,6 @@ TEST(Braid, AFreeEndLeavesTheSectionsForOneBundleAlongThePath) {
     // one ends with the path.
     for (const double release : {0.0, 8.0}) {
         BraidScene scene("three");
-        scene.setParam("fuzz", 0.0);
         scene.setParam("end", std::string("free"));
         scene.setParam("tail", 0.5);
         scene.setParam("release", release);
@@ -3546,7 +3591,6 @@ TEST(Braid, ReleaseIsTheFreeEndsAloneAndAClumpByBraidTailStylesTheTailAlone) {
     // A Clump after the Braid, its strength mapped by $braidTail (per point): the weave stays as it
     // was, the free tail gathers into clumps.
     BraidScene scene("three");
-    scene.setParam("fuzz", 0.0);
     scene.setParam("end", std::string("free"));
     scene.setParam("tail", 0.5);
     scene.setParam("release", 1.0);
@@ -3593,7 +3637,6 @@ TEST(Braid, BraidTailMasksANodeAfterItToTheEnds) {
     // A Curl after the Braid, its radius mapped by $braidTail (per point): the braid stays as it
     // was, the tail curls.
     BraidScene scene("three");
-    scene.setParam("fuzz", 0.0);
     scene.setParam("end", std::string("tuft"));
     scene.setParam("tail", 0.3);
     const NodeId curl = scene.lg.add(op::kCurl, scene.braid);

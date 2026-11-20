@@ -17,7 +17,7 @@
     {"name": "guides", "type": "Guides", "ui": {"x": 0, "y": 180}},
     {"name": "scatter", "type": "Scatter", "params": {"density": 80.0, "length": 25.0}, "ui": {"x": 240, "y": 0}},
     {"name": "interpolate", "type": "Interpolate", "ui": {"x": 480, "y": 0}},
-    {"name": "braid", "type": "Braid", "params": {"style": "three", "width": 2.4, "tightness": 2.5, "region": 2.6, "fuzz": 0.2, "strays": 0.0, "end": "free", "tail": 0.4, "release": 1.5, "ties": 1, "cinch": 0.35}, "ui": {"x": 720, "y": 0}},
+    {"name": "braid", "type": "Braid", "params": {"style": "three", "width": 2.4, "tightness": 2.5, "region": 2.6, "end": "free", "tail": 0.4, "release": 1.5, "ties": 1, "cinch": 0.35}, "ui": {"x": 720, "y": 0}},
     {"name": "clumpEnds", "type": "Clump", "params": {"clumpBy": "size", "size": 0.7, "strength": {"expression": "$braidTail", "min": 0.0, "max": 0.85}, "profile": [[0, 1], [1, 1]]}, "ui": {"x": 960, "y": 0}},
     {"name": "curlyEnds", "type": "Curl", "params": {"radius": {"expression": "$braidTail", "min": 0.0, "max": 0.22}, "frequency": 0.7, "randomness": 0.3, "profile": [[0, 1], [1, 1]]}, "ui": {"x": 1200, "y": 0}},
     {"name": "hairTies", "type": "Instance", "params": {"prototype": "groomlab:hairTie", "probability": 1.0, "count": 1, "tMin": 0.0, "tMax": 0.0, "sizeMode": "fitStrand", "fitScale": 1.0, "fitWidth": true, "aspect": 1.0, "scaleByWidth": false, "scaleRandom": 0.0, "spinRandom": 1.0}, "ui": {"x": 1440, "y": 0}},

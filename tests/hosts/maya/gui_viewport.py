@@ -2109,7 +2109,6 @@ def braid_tubes_check(snapshots=None):
     # A ponytail braid off the top of the sphere: the hair round its root swept in and woven.
     path = cmds.curve(degree=3, point=[(0, 1.0, 0), (0, 1.7, 0.1), (0.15, 2.5, 0.3), (0.15, 3.3, 0.6), (0, 4.0, 0.9)])
     braid = groomlab.add_braid(groom, [path], style="three", region=0.9, width=0.5)
-    groomlab.set_param(groom, braid, "fuzz", 0.0)
     groomlab.set_param(groom, "scatter", "length", 3.6)
     cmds.setAttr(path + ".visibility", 0)
     cmds.select(clear=True)

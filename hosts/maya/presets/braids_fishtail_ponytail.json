@@ -17,7 +17,7 @@
     {"name": "scatter", "type": "Scatter", "params": {"density": 80.0, "length": 25.0}, "ui": {"x": 240, "y": 0}},
     {"name": "interpolate", "type": "Interpolate", "ui": {"x": 480, "y": 0}},
     {"name": "braidPaths", "type": "Guides", "params": {"group": "braids"}, "ui": {"x": 480, "y": 360}},
-    {"name": "braid", "type": "Braid", "params": {"style": "fishtail", "width": 3.5, "tightness": 1.0, "region": 12.0, "gather": 0.35, "fuzz": 0.06, "strays": 0.01, "end": "tuft", "tail": 0.15, "ties": 2, "tieSpacing": 0.0, "cinch": 0.35}, "ui": {"x": 720, "y": 0}},
+    {"name": "braid", "type": "Braid", "params": {"style": "fishtail", "width": 3.5, "tightness": 1.0, "region": 12.0, "gather": 0.35, "end": "tuft", "tail": 0.15, "ties": 2, "tieSpacing": 0.0, "cinch": 0.35}, "ui": {"x": 720, "y": 0}},
     {"name": "hairTie", "type": "Instance", "params": {"prototype": "groomlab:hairTie", "probability": 1.0, "count": 1, "tMin": 0.0, "tMax": 0.0, "sizeMode": "fitStrand", "fitScale": 1.0, "fitWidth": true, "aspect": 1.0, "scaleByWidth": false, "scaleRandom": 0.0, "spinRandom": 1.0}, "ui": {"x": 960, "y": 0}},
     {"name": "color", "type": "HairColor", "params": {"melanin": 0.92, "redness": 0.08, "melaninRandom": 0.05}, "ui": {"x": 1200, "y": 0}},
     {"name": "width", "type": "Width", "params": {"width": 0.008, "profile": [[0, 1], [1, 0.3]]}, "ui": {"x": 1440, "y": 0}},

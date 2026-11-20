@@ -135,7 +135,7 @@ class SessionTest(unittest.TestCase):
         session, _points, _values = self.make()
         graph = json.loads(json.dumps(LOOK_GRAPH))
         last = [c for c in graph["connections"] if c["to"] == graph["output"]][0]
-        graph["nodes"].append({"name": "side braid", "type": "Braid", "params": {"region": 0.6, "width": 0.15, "fuzz": 0.0}})
+        graph["nodes"].append({"name": "side braid", "type": "Braid", "params": {"region": 0.6, "width": 0.15}})
         graph["connections"].remove(last)
         graph["connections"] += [{"from": last["from"], "to": "side braid", "input": "strands"},
                                  {"from": "side braid", "to": graph["output"], "input": last["input"]}]

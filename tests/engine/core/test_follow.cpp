@@ -281,7 +281,7 @@ TEST(FollowScalp, ShowTubesAreCarriedWithTheHair) {
     std::string graph = kLookGraph;
     const std::string output = R"({"name": "output", "type": "Output"})";
     graph.replace(graph.find(output), output.size(),
-                  R"({"name": "braid", "type": "Braid", "params": {"region": 0.6, "width": 0.15, "fuzz": 0.0}}, )" + output);
+                  R"({"name": "braid", "type": "Braid", "params": {"region": 0.6, "width": 0.15}}, )" + output);
     const std::string link = R"({"from": "width", "to": "output", "input": "strands"})";
     graph.replace(graph.find(link), link.size(),
                   R"({"from": "width", "to": "braid", "input": "strands"}, {"from": "braid", "to": "output", "input": "strands"})");

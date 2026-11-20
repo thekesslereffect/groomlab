@@ -717,7 +717,7 @@ TEST(Session, ShownTubesAreEvaluatedToThoughTheHairIsHiddenOrANodeBeforeThemIsVi
     // Braid viewed), and ViewVersions::braidTubes (and evaluation, which every host redraws by)
     // moves when braidTubeMesh would build another mesh: after an edit of the Braid, or of a node
     // before it. Without it a host drew the old tubes until something else made it draw again.
-    const std::string graph = withNodes(R"({"name": "braid", "type": "Braid", "params": {"region": 0.5, "width": 0.12, "fuzz": 0.0}})",
+    const std::string graph = withNodes(R"({"name": "braid", "type": "Braid", "params": {"region": 0.5, "width": 0.12}})",
                                         "braid", R"({"name": "after", "type": "Width", "params": {"width": 0.01}})", "after");
     const auto with = [](std::string text, const std::string& from, const std::string& to) {
         const std::size_t at = text.find(from);
@@ -725,7 +725,7 @@ TEST(Session, ShownTubesAreEvaluatedToThoughTheHairIsHiddenOrANodeBeforeThemIsVi
         if (at != std::string::npos) text.replace(at, from.size(), to);
         return text;
     };
-    const std::string fatter = with(graph, R"("fuzz": 0.0)", R"("fuzz": 0.0, "inflate": 0.9)");
+    const std::string fatter = with(graph, R"("width": 0.12)", R"("width": 0.12, "inflate": 0.9)");
     const std::string looser = with(fatter, R"("strength": 0.6)", R"("strength": 0.2)");
     for (const bool hidden : {true, false}) {
         GroomSession session(groomData(graph));
@@ -787,7 +787,7 @@ TEST(Session, ShowTubesDrawsTheBraidsSectionsAndKeepsThemWhileTheyStay) {
     // Show Tubes (braid_tubes.h): the session's mesh of the Braid nodes shown, from what the last
     // view left (no evaluation), kept while the node's params and inputs stay, and every host's
     // display item of it. The view itself never changes for it.
-    const std::string graph = withNodes(R"({"name": "braid", "type": "Braid", "params": {"region": 0.5, "width": 0.12, "fuzz": 0.0}})",
+    const std::string graph = withNodes(R"({"name": "braid", "type": "Braid", "params": {"region": 0.5, "width": 0.12}})",
                                         "braid", R"({"name": "after", "type": "Width", "params": {"width": 0.01}})", "after");
     GroomSession session(groomData(graph));
     ViewRequest request;

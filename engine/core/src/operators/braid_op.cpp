@@ -28,7 +28,9 @@
 // Strands leave their roots over the first `gather` of their length (sweeping
 // over the scalp into the braid, a clearance above it), the braid narrows
 // along `widthProfile`, and over the last `tail` the sections let go and the
-// ends fan out. A share of strands (`strays`) stay loose. The hair is parted
+// ends fan out. `gatherSmoothness` and `tailSmoothness` fade the weave in and
+// out: the sections begin (end) as one round bundle, the crossings growing
+// (shrinking) over up to four weave steps. The hair is parted
 // into the sections as it lies: a strand takes the section on its side of the
 // braid where it joins (the region's roots cut into wedges side to side, one a
 // section), so the sections leave the scalp without crossing each other.
@@ -1395,9 +1397,14 @@ struct BraidPath {
     StrandId id = 0;           // the guide's (a picked strand's) ID
     StrandRoot guideRoot;      // and its root
     std::vector<float> steps;  // weave steps travelled at each point
-    // End free: how the tail's one bundle is turned (Braider::layBundle): section k's sector lies
-    // at bundleTurn + bundleSign x k of a turn's n-th round the path.
+    // End free (or tailSmoothness): how the tail's one bundle is turned (Braider::layBundle):
+    // section k's sector lies at bundleTurn + bundleSign x k of a turn's n-th round the path. And
+    // gatherSmoothness: the bundle the weave starts from, turned so (startTurn, startSign).
     float bundleTurn = 0.0f, bundleSign = 1.0f;
+    float startTurn = 0.0f, startSign = 1.0f;
+    // gatherSmoothness, tailSmoothness: where the weave has faded in (from `weaveFrom` on) and from
+    // where it fades out (to the weave's end), along the path (Braider::bundledAt).
+    float weaveFrom = 0.0f, fadedIn = 0.0f, fadeOut = 0.0f;
     std::vector<float> rate;   // steps a unit of length at each point
     float repeats = 0.0f;      // weave steps along the whole path
     std::vector<float> grown;  // feed: the width's factor at each point (empty: 1)
@@ -1484,27 +1491,26 @@ struct BraidChannels {
 // How far out of its section's disc a strand's spot reaches at most (StrandDraws::inLobe).
 constexpr float kLobeReach = 0.92f;
 
-// A strand's own draws, by its ID: whether it stays loose, a section for a root with no side, its
-// spot within its section (in the unit disc), how its end fans out and wanders.
+// A strand's own draws, by its ID: a section for a root with no side, its spot within its section
+// (in the unit disc), how its end fans out.
 struct StrandDraws {
-    bool stray = false;
     int lobe = 0;
     Vec3f inLobe;
-    float fanAngle = 0.0f, wanderPhase = 0.0f;
+    float fanAngle = 0.0f;
     float endDraw = 0.0f;  // where in the tail a fed strand ends
     float fan = 0.9f;      // the fan-out's reach, in braid widths
-    float fuzz = 0.0f;     // the wander, scene units
 
     StrandDraws() = default;
-    StrandDraws(std::uint64_t id, std::uint64_t seed, float strays, int lobes, float wander) : fuzz(wander) {
+    StrandDraws(std::uint64_t id, std::uint64_t seed, int lobes) {
         Rng rng(hashCombine(id, seed ^ 0xB4A1D5ull));
-        stray = rng.nextFloat() < strays;
+        // (Draws that strays and fuzz used, still drawn: every strand keeps the spot it had.)
+        rng.nextFloat();
         lobe = static_cast<int>(rng.nextU64() % static_cast<std::uint64_t>(lobes));
         const float a = kTwoPi * rng.nextFloat();
         const float r = kLobeReach * std::sqrt(rng.nextFloat());
         inLobe = {r * pm::cos(a), r * pm::sin(a), 0.0f};
         fanAngle = kTwoPi * rng.nextFloat();
-        wanderPhase = kTwoPi * rng.nextFloat();
+        rng.nextFloat();
         endDraw = rng.nextFloat();
     }
 };
@@ -1543,7 +1549,8 @@ struct PathStation {
     float u = 0.0f;                // the share of the path's length gone (at most 1)
     float wid = 0.0f;              // the braid's width
     float letGo = 0.0f;            // how far down its tail (tailAt)
-    float bundleTurn = 0.0f, bundleSign = 1.0f;  // end free: the path's (BraidPath)
+    float bundled = 0.0f;          // how much the sections lie as one round bundle (bundledAt)
+    float bundleTurn = 0.0f, bundleSign = 1.0f;  // that bundle's (the path's start or tail: BraidPath)
     float rate = 0.0f, steps = 0.0f, lift = 0.0f;  // the weave's steps a unit of length, those gone; raised by
     // The nearest tie's hold (braidedFrom): the hair kept within `most` of `tieAxis` (in the
     // frame), let go as `release` rises to 1 (1: no tie holds here).
@@ -1594,7 +1601,12 @@ struct Braider {
     float width = 0.0f, tightness = 1.0f, roll = 0.0f;
     Ramp taper;
     std::vector<float> taperTangents;  // the taper's (Ramp::tangents), for widthAt at every point
-    float region2 = 0.0f, gather = 0.0f, tail = 0.0f, strays = 0.0f, fuzz = 0.0f;
+    float region2 = 0.0f, gather = 0.0f, tail = 0.0f;
+    // How gradually the weave starts after the gather and ends before the tail (0-1: over up to
+    // kFadeSteps weave steps, from and into one round bundle: bundledAt).
+    float gatherSmoothness = 0.0f, tailSmoothness = 0.0f;
+    static constexpr float kFadeSteps = 4.0f;
+    bool feeds = false;  // feed: the braid starts at the path's root (no gather)
     std::uint64_t seed = 0;
     Sampling sampling;
     ScalpGather overScalp;
@@ -1689,8 +1701,38 @@ struct Braider {
     // is, side to side and in depth, where the weave ends: no strand crosses the bundle to get there.
     void layBundle(BraidPath& path) const {
         path.bundleTurn = 0.0f, path.bundleSign = 1.0f;
-        if (end != End::Free || weave.sections < 1) return;
-        const float steps = path.weaveAt(weaveEnd(path)), n = static_cast<float>(weave.sections);
+        path.startTurn = 0.0f, path.startSign = 1.0f;
+        if (weave.sections < 1) return;
+        if (end == End::Free || tailSmoothness > 0.0f) {
+            bundleTurnAt(path.weaveAt(weaveEnd(path)), &path.bundleTurn, &path.bundleSign);
+        }
+        // The weave fading in after the gather and out before the tail (bundledAt): over up to
+        // kFadeSteps steps each, never past the other's.
+        path.weaveFrom = feeds ? 0.0f : std::min(gather * path.length, weaveEnd(path));
+        const float end0 = weaveEnd(path), steps0 = path.weaveAt(path.weaveFrom), steps1 = path.weaveAt(end0);
+        const float room = std::max(steps1 - steps0, 0.0f);
+        const float inSteps = std::min(gatherSmoothness * kFadeSteps, 0.5f * room);
+        const float outSteps = std::min(tailSmoothness * kFadeSteps, 0.5f * room);
+        path.fadedIn = gatherSmoothness > 0.0f ? path.distanceAt(steps0 + inSteps) : path.weaveFrom;
+        path.fadeOut = tailSmoothness > 0.0f ? path.distanceAt(steps1 - outSteps) : end0;
+        if (gatherSmoothness > 0.0f) bundleTurnAt(steps0, &path.startTurn, &path.startSign);
+    }
+    // How much the sections lie as one round bundle at `at` along the path (0: woven): 1 where the
+    // weave starts, fading to 0 by where it has faded in (gatherSmoothness), and back up to 1 where
+    // the weave ends (tailSmoothness), smoothly.
+    float bundledAt(const BraidPath& path, float at) const {
+        float bundled = 0.0f;
+        if (gatherSmoothness > 0.0f && path.fadedIn > path.weaveFrom) bundled = 1.0f - smoothstep(path.weaveFrom, path.fadedIn, at);
+        const float end0 = weaveEnd(path);
+        if (tailSmoothness > 0.0f && end0 > path.fadeOut) bundled = std::max(bundled, smoothstep(path.fadeOut, end0, at));
+        if (tailSmoothness > 0.0f && at >= end0) bundled = 1.0f;
+        return bundled;
+    }
+    // The turn of the one bundle best matching the sections' places `steps` along the weave:
+    // section k's sector at *turnOut + *signOut x k of a turn's n-th, each as near where its section lies.
+    void bundleTurnAt(float steps, float* turnOut, float* signOut) const {
+        const float n = static_cast<float>(weave.sections);
+        *turnOut = 0.0f, *signOut = 1.0f;
         float best = -1.0f;
         for (const float sign : {1.0f, -1.0f}) {
             float re = 0.0f, im = 0.0f;  // the sum of (side - i depth) e^(i sector)
@@ -1703,8 +1745,8 @@ struct Braider {
             const float fit = re * re + im * im;
             if (fit > best) {
                 best = fit;
-                path.bundleSign = sign;
-                path.bundleTurn = fit > 1e-12f ? -pm::atan2(im, re) : 0.0f;
+                *signOut = sign;
+                *turnOut = fit > 1e-12f ? -pm::atan2(im, re) : 0.0f;
             }
         }
     }
@@ -1825,7 +1867,7 @@ struct Braider {
         const float w = width * std::clamp(taper(u), 0.15f * start, start);
         return tightness / std::max(weave.stepLength * w, 1e-6f);
     }
-    StrandDraws drawsFor(std::uint64_t id) const { return StrandDraws(id, seed, strays, weave.sections, fuzz); }
+    StrandDraws drawsFor(std::uint64_t id) const { return StrandDraws(id, seed, weave.sections); }
 
     // What the path alone gives of the braid's point `at` a distance along it: its point and
     // frame, the braid's width, tail and weave there, the hold of the nearest tie.
@@ -1835,7 +1877,10 @@ struct Braider {
         st.u = std::min(at / path.length, 1.0f);
         st.wid = braidWidthAt(path, at);
         st.letGo = tailAt(path, at);
-        st.bundleTurn = path.bundleTurn, st.bundleSign = path.bundleSign;
+        st.bundled = bundledAt(path, at);
+        // (the start's bundle up to the weave's middle, the tail's past it)
+        const bool start = gatherSmoothness > 0.0f && at < 0.5f * (path.weaveFrom + weaveEnd(path));
+        st.bundleTurn = start ? path.startTurn : path.bundleTurn, st.bundleSign = start ? path.startSign : path.bundleSign;
         st.rate = at < path.length ? path.sample(path.rate, at) : path.rate.back();
         st.steps = path.weaveAt(at);
         st.lift = liftAt(path, at);
@@ -2019,19 +2064,41 @@ struct Braider {
         const PathStation st = stationAt(path, at);
         return braidedFrom(st, sectionAt(section, st), section, d, spotOf(d));
     }
+    // A strand's spot in the one round bundle (end free's tail, the weave fading in or out), off
+    // the path in the frame: as large as the sections' hair takes together (their ellipses' area),
+    // each section the wedge of it that its sector is (layBundle, the station's turn). A strand's
+    // spot in its section's disc gives its spot in the wedge: how far out the wedge's way the spot
+    // lies in the disc (`out`) is how far from the path it goes, the disc's side nearest the path
+    // to the path itself and its far side to the bundle's rim, as much of the wedge's hair inside
+    // it there as of the disc's here; where it lies across the disc at that height (`side`) is its
+    // angle across the wedge. Evenly spread hair stays evenly spread, so the bundle is one body with
+    // no seam between the sections' hair, and neighbours in the disc are neighbours in the wedge:
+    // nothing tears as the sections go into it or come out of it.
+    Vec3f bundleSpot(const PathStation& st, int section, const StrandDraws& d) const {
+        const float n = static_cast<float>(weave.sections);
+        const float sector = st.bundleTurn + st.bundleSign * kTwoPi * static_cast<float>(section) / n;
+        const float sn = pm::sin(sector), cs = pm::cos(sector);
+        const float qx = d.inLobe.y / kLobeReach, qy = d.inLobe.x / kLobeReach;  // in the unit disc, the path's frame
+        const float out = std::clamp(qx * sn + qy * cs, -1.0f, 1.0f);
+        const float chord = std::sqrt(std::max(1.0f - out * out, 1e-12f));
+        const float side = std::clamp((qx * cs - qy * sn) / chord, -1.0f, 1.0f);
+        const float within = 1.0f - (pm::acos(out) - out * chord) / kPi;  // the disc's share no farther out
+        const float angle = sector + side * kPi / n;
+        const float radius = std::sqrt(n * weave.halfWidth * weave.halfThick) * (1.0f + 0.6f * pancake) * st.wid;
+        return Vec3f{pm::sin(angle), pm::cos(angle), 0.0f} * (kLobeReach * std::sqrt(std::max(within, 0.0f)) * radius);
+    }
     // The same from the station and its section's band (stationAt, sectionAt: as they are worked
     // out there, or kept in a path's table), for a strand with draws `d` at `spot` (spotOf).
     // `press` (null: not asked) gets how much it lies against another section there (pressAt), none
     // as it lets go of the braid or a tie holds it.
     Vec3f braidedFrom(const PathStation& st, const SectionStation& sec, int section, const StrandDraws& d,
                       const StrandSpot& spot, float* press = nullptr) const {
-        const float wid = st.wid, letGo = st.letGo;
-        const float wander = d.fuzz * pm::sin(d.wanderPhase + 7.0f * st.u);
+        const float wid = st.wid, letGo = st.letGo, bundled = st.bundled;
         // Its spot in its section: of the plain ellipse, or along its ray as far as the pressed
         // outline lets it.
         float pressedTo = 1.0f;
         Vec3f local;
-        if (press) *press = sec.rows[0] ? pressAt(sec.rows, st.between, spot) * (1.0f - letGo) * st.release : 0.0f;
+        if (press) *press = sec.rows[0] ? pressAt(sec.rows, st.between, spot) * (1.0f - letGo) * (1.0f - bundled) * st.release : 0.0f;
         if (sec.rows[0]) {
             pressedTo = outlineAt(sec.rows, st.between, spot.ray);
             local = (sec.center + (sec.across * (spot.across * wid) + sec.thick * (spot.thick * wid)) * pressedTo) * (1.0f - letGo);
@@ -2042,35 +2109,21 @@ struct Braider {
         if (end == End::Tuft) {  // gathered: its spot within the tuft, a little looser down it
             loose = Vec3f{d.inLobe.y, d.inLobe.x, 0.0f} * (letGo * wid * (0.3f + 0.25f * letGo));
         } else if (end == End::Free) {
-            // Free: one round bundle along the path, as large as the sections' hair takes together
-            // (their ellipses' area), each section the wedge of it that its sector is (layBundle).
-            // A strand's spot in its section's disc gives its spot in the wedge: how far out the
-            // wedge's way the spot lies in the disc (`out`) is how far from the path it goes, the
-            // disc's side nearest the path to the path itself and its far side to the bundle's
-            // rim, as much of the wedge's hair inside it there as of the disc's here; where it
-            // lies across the disc at that height (`side`) is its angle across the wedge. Evenly
-            // spread hair stays evenly spread, so the bundle is one body with no seam between the
-            // sections' hair, and neighbours in the disc are neighbours in the wedge: nothing
-            // tears as the sections let go. The Braid adds no shape of its own there.
-            if (spot.inBundle && letGo > 0.0f) {
-                const float n = static_cast<float>(weave.sections);
-                const float sector = st.bundleTurn + st.bundleSign * kTwoPi * static_cast<float>(section) / n;
-                const float sn = pm::sin(sector), cs = pm::cos(sector);
-                const float qx = d.inLobe.y / kLobeReach, qy = d.inLobe.x / kLobeReach;  // in the unit disc, the path's frame
-                const float out = std::clamp(qx * sn + qy * cs, -1.0f, 1.0f);
-                const float chord = std::sqrt(std::max(1.0f - out * out, 1e-12f));
-                const float side = std::clamp((qx * cs - qy * sn) / chord, -1.0f, 1.0f);
-                const float within = 1.0f - (pm::acos(out) - out * chord) / kPi;  // the disc's share no farther out
-                const float angle = sector + side * kPi / n;
-                const float radius = std::sqrt(n * weave.halfWidth * weave.halfThick) * (1.0f + 0.6f * pancake) * wid;
-                loose = Vec3f{pm::sin(angle), pm::cos(angle), 0.0f} * (kLobeReach * std::sqrt(std::max(within, 0.0f)) * letGo * radius);
-            }
+            // Free: one round bundle along the path (bundleSpot). The Braid adds no shape of its own there.
+            if (spot.inBundle && letGo > 0.0f) loose = bundleSpot(st, section, d) * letGo;
         } else {  // fanned out
             loose = Vec3f{spot.fanDepth, spot.fanSide, 0.0f} * (letGo * wid * d.fan);
         }
-        Vec3f offset = local + loose + Vec3f{0.0f, wander, 0.0f};
+        // The weave fading in or out (gatherSmoothness, tailSmoothness): the sections toward the one
+        // round bundle, a strand to its spot there (a section's center line, a tube's rim, onto the
+        // path), so the crossings grow from it or shrink into it.
+        if (bundled > 0.0f) {
+            local = local * (1.0f - bundled);
+            if (spot.inBundle) loose = loose + bundleSpot(st, section, d) * (bundled * (1.0f - letGo));
+        }
+        Vec3f offset = local + loose;
         // Loose bundles looping out of their section (loops) go before the ties: those hold them too.
-        offset = offset + loopAt(section, st.steps, d.inLobe, wid, pressedTo) * (1.0f - letGo);
+        offset = offset + loopAt(section, st.steps, d.inLobe, wid, pressedTo) * ((1.0f - letGo) * (1.0f - bundled));
         if (st.release < 1.0f) {  // held by a tie (stationAt)
             const float n = offset.x - st.tieAxis.x, b = offset.y - st.tieAxis.y, r = std::sqrt(n * n + b * b);
             if (r > st.most) {
@@ -2119,13 +2172,13 @@ struct Braider {
         return best;
     }
     // Without feed, the points strand s of `in` is braided with: as many as it has, or for one
-    // braided (not loose, not a stray) the points its path's weave needs. `joins` gets the path its
+    // braided the points its path's weave needs. `joins` gets the path its
     // root joins (pathOf; -1: none), for braidOne.
     std::size_t pointsFor(const StrandSet& in, std::size_t s, int* joins) const {
         const std::size_t n = in.strandPointCount(s);
         const int path = n < 2 ? -1 : pathOf(in.strandPoints(s)[0]);
         *joins = path;
-        if (path < 0 || drawsFor(in.ids()[s]).stray) return n;
+        if (path < 0) return n;
         return sampling.count(n, paths[static_cast<std::size_t>(path)].repeats, 1.0f);
     }
     // Without feed, the strand's points along its path from root to tip (pts[0], its root, stays);
@@ -2248,7 +2301,6 @@ FedPlan planFed(const Braider& br, const FeedIndex& index, const Vec3f* pts, std
     }
     if (best < 0) return plan;
     plan.draws = br.drawsFor(id);
-    if (plan.draws.stray) return plan;
     const BraidPath& path = br.paths[static_cast<std::size_t>(best)];
     const std::size_t last = path.points.size() - 1;
     const float step = path.length / static_cast<float>(last);
@@ -2416,6 +2468,11 @@ public:
             ParamSpec{"gather", 0.15, "Share of the strand spent leaving the scalp into the braid", "fraction"}
                 .range(0, 0.9)
                 .in("Strands"),
+            ParamSpec{"gatherSmoothness", 0.0, "How gradually the weave starts where the hair has gathered: 0 at once; "
+                                               "more, the sections begin as one round bundle and their crossings grow "
+                                               "over up to four weave steps", "fraction"}
+                .range(0, 1)
+                .in("Strands"),
             ParamSpec{"end", std::string("fan"),
                       "How the braid ends: fan (over the tail the sections let go and the ends spread), tuft (they "
                       "let go into a gathered tuft, as below a hair tie), bound (woven to the tip, narrowing: sealed "
@@ -2426,6 +2483,12 @@ public:
                 .in("Ends"),
             ParamSpec{"tail", 0.12, "Share at the end where the sections let go (fan, tuft, free)", "fraction"}
                 .range(0, 0.9)
+                .in("Ends")
+                .when("end", {"fan", "tuft", "free"}),
+            ParamSpec{"tailSmoothness", 0.0, "How gradually the weave ends before the tail: 0 at once; more, the "
+                                             "crossings shrink over up to four weave steps into one round bundle, "
+                                             "which then lets go as the end says", "fraction"}
+                .range(0, 1)
                 .in("Ends")
                 .when("end", {"fan", "tuft", "free"}),
             ParamSpec{"release", 1.5, "End free: how long the letting go takes past the weave's end, in braid widths. 0: "
@@ -2447,8 +2510,6 @@ public:
                 .soft(0, 4)
                 .in("Ties"),
             ParamSpec{"cinch", 0.35, "How much the braid narrows inside a tie", "fraction"}.range(0, 0.9).in("Ties"),
-            ParamSpec{"strays", 0.03, "Share of the region's strands left loose", "fraction"}.range(0, 1).in("Strands"),
-            ParamSpec{"fuzz", 0.02, "Random wander within the sections, scene units", "length"}.soft(0, 0.1).in("Strands"),
             notAnimatable({"seed", std::int64_t{0}, "Random seed"}).in("Strands").adv(),
             {"display", std::string("hair"), "hair: the braided strands; paths: each braid's path and its sections' "
                                              "center curves in their place, to see the weave",
@@ -2552,10 +2613,11 @@ private:
         br.tieLength = static_cast<float>(params().getDouble("tieLength"));
         br.tieSpacing = static_cast<float>(params().getDouble("tieSpacing"));
         br.cinch = static_cast<float>(params().getDouble("cinch"));
-        br.strays = static_cast<float>(params().getDouble("strays"));
-        br.fuzz = static_cast<float>(params().getDouble("fuzz"));
+        br.gatherSmoothness = std::clamp(static_cast<float>(params().getDouble("gatherSmoothness")), 0.0f, 1.0f);
+        br.tailSmoothness = br.tail > 0.0f ? std::clamp(static_cast<float>(params().getDouble("tailSmoothness")), 0.0f, 1.0f) : 0.0f;
         br.seed = static_cast<std::uint64_t>(params().getInt("seed"));
         const bool feed = params().getBool("feed");
+        br.feeds = feed;
         if (feed) br.feedUntil = static_cast<float>(params().getDouble("feedUntil"));
         if (br.style != Style::Cornrow) {  // (a cornrow lies on the scalp already)
             // Version 2: the scalp collides with every braid; version 1 raised a fed one alone.
@@ -2863,7 +2925,6 @@ private:
         const int best = was && pts[0].x == was->x && pts[0].y == was->y && pts[0].z == was->z ? joined : br.pathOf(pts[0]);
         if (best < 0) return;
         const StrandDraws draws = br.drawsFor(out.ids()[s]);
-        if (draws.stray) return;
         channels.set(s, best, br.style);
         const int section = br.braidAlong(pts, n, br.paths[static_cast<std::size_t>(best)], draws,
                                           channels.tail ? channels.tail->data() + out.strandBegin(s) : nullptr,
