@@ -2247,6 +2247,42 @@ TEST(Braid, EveryBraidedStrandHasItsSectionAndIsWovenOnFromItsWayIn) {
     }
 }
 
+TEST(Braid, TheSectionsOutputGivesEachSectionsWovenCurve) {
+    // The sections output (4th): a guide per section of each braid, its center curve as it weaves
+    // (over and under the others: side to side across the braid's path), braidId and braidSection
+    // attributes set; the paths output stays the one curve per braid along its middle.
+    BraidScene scene("three");
+    scene.setParam("widthProfile", Ramp::constant(1.0f));
+    EvalContext ctx;
+    ctx.externals = &scene.lg.ext;
+    const GuidesPtr paths = valueAs<GuidesPtr>(scene.lg.g.evaluateOutput(scene.braid, 1, ctx));
+    const GuidesPtr sections = valueAs<GuidesPtr>(scene.lg.g.evaluateOutput(scene.braid, 3, ctx));
+    ASSERT_TRUE(paths && sections);
+    ASSERT_EQ(paths->size(), 1u);
+    ASSERT_EQ(sections->size(), 3u);  // three sections
+    std::set<float> numbers;
+    for (const Guide& g : sections->guides()) {
+        ASSERT_TRUE(g.attributes.count("braidId") && g.attributes.count("braidSection"));
+        EXPECT_EQ(g.attributes.at("braidId"), 0.0f);
+        numbers.insert(g.attributes.at("braidSection"));
+        // Off the path (it stands along y at x = z = 0.5), side to side or in depth: within the
+        // weave (from the gather to the tail) each section crosses over to the path's other side,
+        // where the path is one straight curve.
+        std::array<float, 2> least{1e9f, 1e9f}, most{-1e9f, -1e9f};
+        for (const Vec3f& p : g.points) {
+            if (p.y < 0.25f || p.y > 0.8f) continue;
+            const float off[2] = {p.x - 0.5f, p.z - 0.5f};
+            for (int a = 0; a < 2; ++a) least[a] = std::min(least[a], off[a]), most[a] = std::max(most[a], off[a]);
+        }
+        const bool crosses = (least[0] < -0.01f && most[0] > 0.01f) || (least[1] < -0.01f && most[1] > 0.01f);
+        EXPECT_TRUE(crosses) << "section " << g.attributes.at("braidSection") << ": x " << least[0] << ".." << most[0] << ", z "
+                             << least[1] << ".." << most[1];
+        EXPECT_GT(std::max(most[0] - least[0], most[1] - least[1]), 0.04f);
+        EXPECT_GT(g.points.size(), 20u);
+    }
+    EXPECT_EQ(numbers, (std::set<float>{0.0f, 1.0f, 2.0f}));
+}
+
 TEST(Braid, BraidPressMarksTheHairLyingAgainstAnotherSection) {
     // braidPress, per point: 0 where a strand lies free in its section, up to 1 where it lies on a
     // contact's facet against another section (the sections pressed: separate), for a Clump's

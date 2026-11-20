@@ -2404,9 +2404,12 @@ public:
     // The braided strands, and the paths they are braided along (the braids input's, or those it
     // picked among the strands), evenly resampled, for nodes downstream.
     // And its ties (beads, cuffs, hair ties): a short strand along the braid at each, as wide as
-    // the braid there, for an Instance node's `along` input.
+    // the braid there, for an Instance node's `along` input. And its sections: the center curve
+    // of each section of each braid as it weaves (over and under the others, letting go down the
+    // tail), as guides (braidId and braidSection attributes), for nodes downstream: clump centers
+    // per section, tubes, curves of the weave itself.
     std::vector<PortSpec> outputs() const override {
-        return {output(), {"paths", PortType::Guides}, {"ties", PortType::Strands}};
+        return {output(), {"paths", PortType::Guides}, {"ties", PortType::Strands}, {"sections", PortType::Guides}};
     }
     std::vector<ParamSpec> paramSpecs() const override {
         return {
@@ -2532,10 +2535,10 @@ public:
     }
     std::vector<Value> evaluateOutputs(const EvalContext& ctx, const std::vector<Value>& inputs) const override {
         Value out;
-        GuidesPtr paths;
+        GuidesPtr paths, sections;
         StrandsPtr ties;
-        run(ctx, inputs, nullptr, &out, nullptr, &paths, &ties);
-        return {out, paths, ties};
+        run(ctx, inputs, nullptr, &out, nullptr, &paths, &ties, nullptr, 0, &sections);
+        return {out, paths, ties, sections};
     }
     // Without feed each strand is braided by its own root alone (the nearest path's root within
     // the region): while the paths stay, the strands that changed are braided again (each to as
@@ -2543,15 +2546,15 @@ public:
     // the paths are the last ones.
     bool evaluateOutputsIncremental(const EvalContext& ctx, const std::vector<Value>& inputs, const IncrementalInputs& incremental,
                                     std::vector<Value>* outs, std::vector<StrandChanges>* changed) const override {
-        if (incremental.previousOutputs.size() != 3) return false;
+        if (incremental.previousOutputs.size() != 4) return false;
         IncrementalInputs strands;
         strands.previous = incremental.previousOutputs[0];
         strands.inputs = incremental.inputs;
         Value out;
         StrandChanges made;
         if (!run(ctx, inputs, &strands, &out, &made, nullptr, nullptr)) return false;
-        *outs = {out, incremental.previousOutputs[1], incremental.previousOutputs[2]};
-        *changed = {std::move(made), StrandChanges::listed({}), StrandChanges::listed({})};
+        *outs = {out, incremental.previousOutputs[1], incremental.previousOutputs[2], incremental.previousOutputs[3]};
+        *changed = {std::move(made), StrandChanges::listed({}), StrandChanges::listed({}), StrandChanges::listed({})};
         return true;
     }
     // Its sections as tubes along its paths (braid_tubes.h), for these inputs: the paths laid as an
@@ -2566,12 +2569,13 @@ public:
     }
 
 private:
-    // In full (`paths`: the paths' guides, `ties` the ties' strands, null: not asked), or (with
-    // `incremental`) only the strands the input changed in; false when that cannot be done. With
-    // `tubes`: only those are made (sectionTubes), once the paths are laid.
+    // In full (`paths`: the paths' guides, `ties` the ties' strands, `sections` the sections'
+    // center curves as guides, null: not asked), or (with `incremental`) only the strands the input
+    // changed in; false when that cannot be done. With `tubes`: only those are made
+    // (sectionTubes), once the paths are laid.
     bool run(const EvalContext& ctx, const std::vector<Value>& inputs, const IncrementalInputs* incremental, Value* result,
              StrandChanges* changed, GuidesPtr* paths, StrandsPtr* ties, BraidTubes* tubes = nullptr,
-             std::size_t tubePoints = 0) const {
+             std::size_t tubePoints = 0, GuidesPtr* sections = nullptr) const {
         const StrandsPtr in = valueAs<StrandsPtr>(inputs.at(0));
         if (!in) throw GraphError("Braid: strands input not connected");
         GuidesPtr braids = valueAs<GuidesPtr>(inputs.at(1));
@@ -2580,6 +2584,7 @@ private:
             *result = in;
             if (paths) *paths = GuidesPtr(std::make_shared<GuideSet>());
             if (ties) *ties = StrandsPtr(std::make_shared<StrandSet>());
+            if (sections) *sections = GuidesPtr(std::make_shared<GuideSet>());
             return true;
         };
         const ScalpMesh* scalp = valueAs<MeshPtr>(ctx.external("scalp")).get();
@@ -2780,6 +2785,7 @@ private:
         phase.next("braid.ties");
         br.layTieAxes();
         if (ties) *ties = tieStrands(br, channels);
+        if (sections) *sections = sectionGuides(br, channels);
         if (tubes) {
             br.loops = 0.0f;  // (hair let out of its section: not the section's)
             phase.next("braid.tubes");
@@ -3165,6 +3171,26 @@ private:
                 }
             }
         }, 1);
+    }
+
+    // The sections output: each braid's sections' center curves (pathStrands' without the path),
+    // as guides rooted where the braid's path is, each with its braidId and braidSection
+    // attributes and an ID of its own (the path's with its section's number).
+    static GuidesPtr sectionGuides(const Braider& br, const BraidChannels& numbering) {
+        auto out = std::make_shared<GuideSet>();
+        const StrandsPtr curves = pathStrands(br, numbering);
+        const std::vector<float>* id = curves->strandChannel("braidId");
+        const std::vector<float>* section = curves->strandChannel("braidSection");
+        const std::size_t perPath = static_cast<std::size_t>(br.weave.sections) + 1;
+        for (std::size_t s = 0; s < curves->strandCount(); ++s) {
+            if ((*section)[s] < 0.0f) continue;  // (the path itself: the paths output's)
+            const Vec3f* p = curves->strandPoints(s);
+            Guide& g = out->add(curves->ids()[s], std::vector<Vec3f>(p, p + curves->strandPointCount(s)));
+            g.root = br.paths[s / perPath].guideRoot;
+            g.attributes["braidId"] = (*id)[s];
+            g.attributes["braidSection"] = (*section)[s];
+        }
+        return GuidesPtr(out);
     }
 
     // display paths: each braid's path and the center curve of each of its sections, as strands

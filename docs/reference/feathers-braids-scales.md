@@ -58,7 +58,12 @@ groomlab.add_braid(groom, ["braidCurve1"], style="three", width=0.25, tightness=
   color modes.
 - **Paths output:** the node's second output, `paths`, hands on the paths it braids along as
   guides (the braids input's, evenly resampled, or those it picked for box braids), for nodes
-  downstream: a second Braid, a Twist's axes, cards.
+  downstream: a second Braid, a Twist's axes, cards. One curve a braid, along its middle.
+- **Sections output:** the fourth output, `sections`, hands on the woven curves themselves: each
+  section's center curve as it passes over and under the others (what `display` paths draws
+  beside the path), letting go down the tail as the hair does, as guides with `braidId` and
+  `braidSection` attributes: clump centers that follow the weave (a Clump with `centersFrom`
+  inputCurves), tubes or curves of the braid itself.
 - **Feed** (`feed`, on for cornrows by default in `add_braid`): strands within `region` of
   anywhere along a path join it, as hair is picked up into cornrows and French braids; each
   strand goes to the nearer braid, so two rows part halfway. A strand is drawn from its root
