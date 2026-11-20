@@ -46,7 +46,7 @@ const char* kGraph = R"({
     {"name": "interpolate", "type": "Interpolate"},
     {"name": "clump", "type": "Clump", "params": {"count": 30, "strength": 0.6}},
     {"name": "width", "type": "Width"},
-    {"name": "instance", "type": "Instance", "params": {"exposure": "both", "spinAllAxes": false, "probability": 0.2, "prototype": "box", "seed": 3}},
+    {"name": "instance", "type": "Instance", "version": 2, "params": {"probability": 0.2, "prototype": "box", "seed": 3}},
     {"name": "cards", "type": "Cards", "params": {"segments": 4, "maxCards": 30}},
     {"name": "output", "type": "Output"}
   ],

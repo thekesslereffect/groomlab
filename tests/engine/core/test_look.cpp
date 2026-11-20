@@ -1490,7 +1490,7 @@ TEST(Instances, ToMeshMakesEveryInstancesMeshWhereItSits) {
     const NodeId inst = lg.add(op::kInstance, lg.scatter);
     lg.g.node(inst).params().set("probability", 1.0);
     lg.g.node(inst).params().set("exposure", std::string("both"));
-    lg.g.node(inst).params().set("spinAllAxes", false);
+    lg.g.node(inst).setNodeVersion(2);  // (about +Y only)
     lg.g.node(inst).params().set("orient", std::string("up"));
     lg.g.node(inst).params().set("prototype", std::string("square"));
     const StrandsPtr s = lg.eval(inst);
@@ -1521,7 +1521,7 @@ TEST(Instances, PlacedOnTheStrandsAndCarriedDownstream) {
     const NodeId inst = lg.add(op::kInstance, lg.scatter);
     lg.g.node(inst).params().set("probability", 1.0);
     lg.g.node(inst).params().set("exposure", std::string("both"));
-    lg.g.node(inst).params().set("spinAllAxes", false);
+    lg.g.node(inst).setNodeVersion(2);  // (about +Y only)
     lg.g.node(inst).params().set("count", std::int64_t{2});
     lg.g.node(inst).params().set("tMin", 0.8);
     lg.g.node(inst).params().set("orient", std::string("up"));
@@ -1557,7 +1557,7 @@ TEST(Instances, PlacedOnTheStrandsAndCarriedDownstream) {
     const NodeId other = lg.add(op::kInstance, lg.scatter);
     lg.g.node(other).params().set("probability", 1.0);
     lg.g.node(other).params().set("exposure", std::string("both"));
-    lg.g.node(other).params().set("spinAllAxes", false);
+    lg.g.node(other).setNodeVersion(2);
     lg.g.node(other).params().set("prototype", std::string("bead"));
     const NodeId merge = lg.g.addNode(op::kMerge);
     lg.g.connect(inst, merge, 0);
@@ -1690,7 +1690,7 @@ TEST(Instances, NodeSizeModeFitStrand) {
     const NodeId inst = lg.add(op::kInstance, lg.scatter);
     lg.g.node(inst).params().set("probability", 1.0);
     lg.g.node(inst).params().set("exposure", std::string("both"));
-    lg.g.node(inst).params().set("spinAllAxes", false);
+    lg.g.node(inst).setNodeVersion(2);  // (about +Y only)
     lg.g.node(inst).params().set("scaleRandom", 0.0);
     lg.g.node(inst).params().set("pinToRest", false);  // (pinned ones need the rest pose too)
     lg.g.node(inst).params().set("aspect", 0.3);
@@ -1726,7 +1726,7 @@ TEST(Instances, NodeSetsScaleByWidthAndPinToRest) {
     const NodeId inst = lg.add(op::kInstance, lg.scatter);
     lg.g.node(inst).params().set("probability", 1.0);
     lg.g.node(inst).params().set("exposure", std::string("both"));
-    lg.g.node(inst).params().set("spinAllAxes", false);
+    lg.g.node(inst).setNodeVersion(2);  // (about +Y only)
     const StrandsPtr defaults = lg.eval(inst);
     ASSERT_TRUE(defaults->instances() && !defaults->instances()->empty());
     for (const auto& i : defaults->instances()->instances) {
@@ -1747,31 +1747,29 @@ TEST(Instances, NodeSetsScaleByWidthAndPinToRest) {
                       {"name": "new", "type": "Instance", "params": {}}], "output": "old"})");
     EXPECT_FALSE(doc.graph.node(doc.node("old")).params().getBool("pinToRest"));
     EXPECT_TRUE(doc.graph.node(doc.node("new")).params().getBool("pinToRest"));
-    // Instance 3: placed externally and spun on all axes by default; nodes saved before keep both
-    // and their own axis.
+    // Instance 3: placed externally by default; nodes saved before keep both.
     for (const char* name : {"old", "new"}) {
         const ParamSet& p = doc.graph.node(doc.node(name)).params();
-        const bool fresh = std::string(name) == "new";
-        EXPECT_EQ(p.getString("exposure"), fresh ? "external" : "both") << name;
-        EXPECT_EQ(p.getBool("spinAllAxes"), fresh) << name;
+        EXPECT_EQ(p.getString("exposure"), std::string(name) == "new" ? "external" : "both") << name;
     }
 }
 
-TEST(Instances, SpinRandomOnAllAxesTumblesThem) {
+TEST(Instances, SpinRandomTurnsThemOnAllThreeAxes) {
     LookGraph lg(200.0);
     const NodeId inst = lg.add(op::kInstance, lg.scatter);
     ParamSet& p = lg.g.node(inst).params();
     p.set("probability", 1.0);
     p.set("exposure", std::string("both"));
     p.set("orient", std::string("up"));
-    p.set("spinAllAxes", false);
-    // About their own axis only: +Y stays up.
+    // A node saved before Instance 3 turns them about their own axis only: +Y stays up.
+    lg.g.node(inst).setNodeVersion(2);
     StrandsPtr s = lg.eval(inst);
     std::vector<InstanceSet::Placed> placed = s->instances()->resolve(*s);
     ASSERT_GT(placed.size(), 20u);
     for (const auto& q : placed) EXPECT_NEAR(q.y.normalized().y, 1.0f, 1e-4f);
-    // On all three: +Y every way, the frame still square and the size kept.
-    p.set("spinAllAxes", true);
+    // Now: on all three, +Y every way, the frame still square and the size kept.
+    lg.g.node(inst).setNodeVersion(0);  // (its operator's own)
+    lg.g.node(inst).params().set("seed", std::int64_t{1});  // (evaluated again)
     s = lg.eval(inst);
     placed = s->instances()->resolve(*s);
     float lowest = 1.0f;
@@ -1782,6 +1780,13 @@ TEST(Instances, SpinRandomOnAllAxesTumblesThem) {
         EXPECT_NEAR(q.x.length(), q.y.length(), 1e-4f);
     }
     EXPECT_LT(lowest, 0.0f);  // some turned past sideways
+    // Fitted round their strand (beads round a braid's tie): about it only.
+    p.set("sizeMode", std::string("fitStrand"));
+    p.set("fitWidth", true);
+    s = lg.eval(inst);
+    for (const auto& q : s->instances()->resolve(*s)) EXPECT_NEAR(q.y.normalized().y, 1.0f, 1e-4f);
+    p.set("fitWidth", false);
+    p.set("sizeMode", std::string("fixed"));
     // No spin: none tumbled either.
     p.set("spinRandom", 0.0);
     s = lg.eval(inst);
@@ -1883,7 +1888,7 @@ TEST(Instances, ParamsCarryTheirUiLabels) {
         EXPECT_EQ(by["axisFalloff"]["row"], "axis");
         EXPECT_EQ(by["exposure"]["default"], "external");
         EXPECT_EQ(by["exposure"]["choiceLabels"][0], "Instance externally");
-        EXPECT_EQ(by["spinAllAxes"]["row"], "spinRandom");
+        EXPECT_EQ(by.count("spinAllAxes"), 0u);  // (always on all axes: no switch)
         EXPECT_FALSE(by["axisFacing"]["default"].get<bool>());
         return;
     }
@@ -2658,7 +2663,7 @@ TEST(Braid, BeadsGoOnTheTiesWithAnInstanceNode) {
     ParamSet& p = scene.lg.g.node(beads).params();
     p.set("prototype", std::string("groomlab:bead"));
     p.set("exposure", std::string("both"));
-    p.set("spinAllAxes", false);
+    scene.lg.g.node(beads).setNodeVersion(2);  // (about +Y only)
     p.set("probability", 1.0);
     p.set("tMin", 0.0);
     p.set("tMax", 0.0);
@@ -2711,7 +2716,7 @@ TEST(Braid, NoHairPassesThroughABeadOnACurvingBraid) {
     ParamSet& p = scene.lg.g.node(beads).params();
     p.set("prototype", std::string("groomlab:bead"));
     p.set("exposure", std::string("both"));
-    p.set("spinAllAxes", false);
+    scene.lg.g.node(beads).setNodeVersion(2);  // (about +Y only)
     p.set("probability", 1.0);
     p.set("tMin", 0.0);
     p.set("tMax", 0.0);

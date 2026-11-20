@@ -287,7 +287,8 @@ public:
     explicit InstanceOp(bool scales) : scales_(scales) {}
     std::string typeName() const override { return scales_ ? op::kScales : op::kInstance; }
     std::string category() const override { return "look"; }
-    // Instance 2: pinToRest on by default; 3: exposure external and spinAllAxes on by default.
+    // Instance 2: pinToRest on by default; 3: exposure external by default, spinRandom on all three
+    // axes (nodes saved before: about +Y only, nodeVersion).
     int version() const override { return scales_ ? 1 : 3; }
     std::vector<std::string> externalInputs() const override { return {"scalp"}; }
     std::vector<PortSpec> inputs() const override {
@@ -455,16 +456,10 @@ public:
                 ParamSpec{"scaleRandom", 0.3, "Each one's size up to this share more or less, at random", "fraction"}
                     .range(0, 1)
                     .in("Random"),
-                ParamSpec{"spinRandom", 1.0, "Random turn about their axis, either way, 0-1 (1: up to half a turn either way: "
-                                             "any roll); with spinAllAxes about their other two axes too", "fraction"}
+                ParamSpec{"spinRandom", 1.0, "Random turn about each of their three axes, either way, 0-1 (1: up to half a "
+                                             "turn either way: any way round). Fitted round their strand (fitWidth) or "
+                                             "bent along it (deform): about their long axis only", "fraction"}
                     .range(0, 1)
-                    .in("Random"),
-                ParamSpec{"spinAllAxes", true,
-                          "Spin random turns each about all three of its axes (tumbled any way: snow, debris), not "
-                          "only its long one (beads and ties round a braid). Not the ones bent along their strand"}
-                    .formerDefault(3, false)
-                    .named("All axes")
-                    .onRowOf("spinRandom")
                     .in("Random"),
             };
         }
@@ -683,7 +678,7 @@ private:
             orient = orientFrom(params().getString("orient"));
             scaleByWidth = params().getBool("scaleByWidth");
             pinToRest = params().getBool("pinToRest");
-            spinAll = params().getBool("spinAllAxes");
+            spinAll = nodeVersion() >= 3;
             const std::string deform = params().getString("deform");
             if (deform != "none" && deform != "alongStrand") throw GraphError("Instance: deform must be none or alongStrand");
             const std::string deformAxis = params().getString("deformAxis");
@@ -791,7 +786,7 @@ private:
                     const float r = std::sqrt(std::max(0.0f, 1.0f - z * z));
                     inst.direction = {r * pm::cos(a), r * pm::sin(a), z};
                 }
-                if (spinAll && !deformed && spinRandom > 0.0f) {
+                if (spinAll && !deformed && !fitWidth && spinRandom > 0.0f) {
                     // About its other two axes as far as about its own (drawn last: the draws above
                     // stay as they were without).
                     inst.tiltX = 0.5f * kTwoPi * spinRandom * (2.0f * rng.nextFloat() - 1.0f);

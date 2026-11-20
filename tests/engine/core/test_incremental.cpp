@@ -406,7 +406,7 @@ std::unique_ptr<Chain> makeDeformChain(const ChainEdit& edit = {}) {
     chain->node(op::kWind).params().set("turbulence", 0.5);
     chain->node(op::kInstance).params().set("count", std::int64_t{2});
     chain->node(op::kInstance).params().set("exposure", std::string("both"));
-    chain->node(op::kInstance).params().set("spinAllAxes", false);
+    chain->node(op::kInstance).setNodeVersion(2);  // (about +Y only)
     chain->node(op::kInstance).params().set("probability", 0.4);
     const char* order[] = {"held", "diff", op::kCollide, op::kSmooth, op::kGravity, op::kDisplace, op::kFlow, op::kFlyaway,
                            "mask", "random", op::kTwist, op::kWind, op::kRestoreLength, op::kInstance, op::kOutput};
@@ -1511,7 +1511,7 @@ TEST(Incremental, AWidthOrColorEditKeepsThePointsOfWhatFollows) {
         {"name": "whiskerColor", "type": "HairColor", "params": {"melanin": 0.1}},
         {"name": "merge", "type": "Merge"},
         {"name": "collide", "type": "Collide", "params": {"offset": 0.05}},
-        {"name": "snow", "type": "Instance", "params": {"exposure": "both", "spinAllAxes": false, "probability": 0.3, "tMin": 0.4, "scaleByWidth": true}},
+        {"name": "snow", "type": "Instance", "version": 2, "params": {"probability": 0.3, "tMin": 0.4, "scaleByWidth": true}},
         {"name": "resample", "type": "Resample", "params": {"segments": 7}},
         {"name": "out", "type": "Output"}],
       "connections": [
@@ -1703,7 +1703,7 @@ const char* kDeformGraph = R"({"version": 1, "output": "out",
     {"name": "wind", "type": "Wind", "params": {"strength": 0.2}},
     {"name": "jiggle", "type": "Jiggle"},
     {"name": "restore", "type": "RestoreLength", "params": {"affect": 0.6}},
-    {"name": "instance", "type": "Instance", "params": {"exposure": "both", "spinAllAxes": false, "probability": 0.2}},
+    {"name": "instance", "type": "Instance", "version": 2, "params": {"probability": 0.2}},
     {"name": "out", "type": "Output"}],
   "connections": [
     {"from": "scalp", "to": "scatter", "input": "scalp"},

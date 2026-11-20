@@ -540,7 +540,7 @@ std::string instanceGraph(bool pin, const std::string& extra = "") {
     std::string g = kLookGraph;
     const std::string nodes = R"({"name": "output", "type": "Output"})";
     g.replace(g.find(nodes), nodes.size(),
-              std::string(R"({"name": "flakes", "type": "Instance", "params": {"exposure": "both", "spinAllAxes": false, "probability": 1.0, "tMin": 0.8, "tMax": 0.8, "pinToRest": )") +
+              std::string(R"({"name": "flakes", "type": "Instance", "version": 2, "params": {"probability": 1.0, "tMin": 0.8, "tMax": 0.8, "pinToRest": )") +
                   (pin ? "true" : "false") + extra + "}}, " + nodes);
     const std::string link = R"({"from": "width", "to": "output", "input": "strands"})";
     g.replace(g.find(link), link.size(),
