@@ -1475,7 +1475,15 @@ bool readLookFields(const GraphDocument& doc, const LookChain& chain, const Scal
             case StageKind::Width: ok = read("width", true, &v[0]); break;
             case StageKind::Part: ok = read("strength", false, &v[0]); break;
             case StageKind::Gravity: ok = read("strength", false, &v[0]); break;
-            case StageKind::Wind: ok = read("strength", false, &v[0]); break;
+            case StageKind::Wind:
+            case StageKind::Jiggle:
+                // Feathers' shafts hold (feathers.h holdShafts), which the kernels do not do.
+                if (in && hasShafts(*in)) {
+                    *why = doc.nameOf(id) + " holds the feathers' shafts (the CPU's)";
+                    return false;
+                }
+                ok = read("strength", false, &v[0]);
+                break;
             case StageKind::Blend: ok = read("mix", true, &v[0]); break;
             case StageKind::Flyaway: ok = read("stray", false, &v[0]) && read("fraction", false, &v[1]); break;
             case StageKind::Collide: break;
@@ -1498,7 +1506,6 @@ bool readLookFields(const GraphDocument& doc, const LookChain& chain, const Scal
             case StageKind::Tangle: ok = read("strength", false, &v[0]); break;
             case StageKind::RestoreLength: break;
             case StageKind::Flow: ok = read("lift", false, &v[0]); break;
-            case StageKind::Jiggle: ok = read("strength", false, &v[0]); break;
             case StageKind::MeshCut:
             case StageKind::Merge:
             case StageKind::Cull:

@@ -594,5 +594,42 @@ TEST(Split, MapModeAndGuides) {
     EXPECT_EQ(feathers->strandCount(), gb->size() * (1u + 10u));
 }
 
+// Wind after Propagate is the barbs' own flutter: they blow about their roots on the shaft, and
+// the shaft (isShaft 1) holds where Propagate laid it, as its rachis tube does.
+TEST(Propagate, WindAfterTheFeatherBlowsTheBarbsAndHoldsTheShaft) {
+    OneShaft f;
+    const auto prop = f.propagate();
+    const StrandsPtr feather = f.run(*prop);
+    const std::vector<float>* isShaft = feather->strandChannel("isShaft");
+    ASSERT_NE(isShaft, nullptr);
+
+    auto wind = OperatorRegistry::instance().create(op::kWind);
+    wind->params().set("strength", 1.0);
+    wind->params().set("direction", Vec3f{0.0f, 1.0f, 0.0f});
+    EvalContext ctx;
+    ctx.externals = &f.ext;
+    ctx.time = 0.5;
+    const StrandsPtr blown = valueAs<StrandsPtr>(wind->evaluate(ctx, {feather}));
+    ASSERT_EQ(blown->strandCount(), feather->strandCount());
+
+    std::size_t shafts = 0, barbsMoved = 0;
+    for (std::size_t s = 0; s < feather->strandCount(); ++s) {
+        const std::size_t n = feather->strandPointCount(s);
+        float moved = 0.0f;
+        for (std::size_t i = 0; i < n; ++i) {
+            moved = std::max(moved, (blown->strandPoints(s)[i] - feather->strandPoints(s)[i]).length());
+        }
+        if ((*isShaft)[s] > 0.5f) {
+            ++shafts;
+            EXPECT_EQ(moved, 0.0f) << "the shaft holds";
+        } else if (moved > 1e-3f) {
+            ++barbsMoved;
+        }
+        EXPECT_EQ(blown->strandPoints(s)[0], feather->strandPoints(s)[0]) << "roots never move";
+    }
+    EXPECT_EQ(shafts, 1u);
+    EXPECT_GT(barbsMoved, 10u);
+}
+
 }  // namespace
 }  // namespace groomlab

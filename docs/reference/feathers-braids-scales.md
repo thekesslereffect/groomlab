@@ -313,6 +313,11 @@ Curl, Width, HairColor, Clump, Cards...) shape and color them like hair.
   gaps of a ruffled feather). `lengthRandom` and `angleRandom` vary each barb (seeded by its
   ID); `width` sets the barbs' width (0: the shaft's where the barb grows); `keepShaft` keeps
   the shafts in the output.
+- **Feathers in motion.** Motion on the shafts before Propagate (Wind, Jiggle, a Simulate on
+  the guides they follow) moves whole feathers: the barbs grow along the moved shafts every
+  frame. Wind or Jiggle after Propagate is the barbs' own flutter: each barb turns about its
+  root on the shaft and the shafts hold still, as their rachis tubes do. Use both for a feather
+  that sways and flutters.
 - **A down zone.** `down` (0: none) turns the shaft's base, from `start` up to `down` along it,
   into down (an afterfeather: plumulaceous barbs): `downCount` barbs a side (around: twice),
   `downLength` times the vane's length there, `downSegments` segments, curling `downCurl` degrees

@@ -11,7 +11,10 @@ from the time and the scalp's last few frames. So a shot scrubs (any frame, in a
 the same as when played to), renders on a farm frame by frame and caches the same every time.
 Both are non-destructive: bypass or delete them and the groom is exactly what it was, and at
 rest (no wind, a still scalp) they give their strands back to the bit. They keep roots and
-segment lengths (segments turn, never stretch), and work on strands or guides.
+segment lengths (segments turn, never stretch), and work on strands or guides. On feathers they
+move the barbs alone: the shafts (`isShaft` 1) hold where Propagate laid them, as their rachis
+tubes do (see [Feathers](feathers-braids-scales.md#feathers): to move whole feathers, put the
+motion before Propagate).
 
 | Operator | What it does | Main parameters |
 | --- | --- | --- |

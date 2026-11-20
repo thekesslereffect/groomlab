@@ -14,6 +14,7 @@
 #include <mutex>
 #include <vector>
 
+#include "groomlab/feathers.h"
 #include "groomlab/field.h"
 #include "groomlab/frame_time.h"
 #include "groomlab/graph.h"
@@ -38,6 +39,15 @@ constexpr double kTwoPi = 6.283185307179586;
 // Wind
 // ---------------------------------------------------------------------------
 
+// `made` (a motion node's result on `in`) with the feathers' shafts in `in` held as they came in
+// (feathers.h holdShafts): motion after a Propagate is its barbs' own.
+StrandsPtr withShaftsHeld(const StrandsPtr& in, const StrandsPtr& made) {
+    if (!made || made == in || !hasShafts(*in)) return made;
+    auto out = std::make_shared<StrandSet>(*made);
+    holdShafts(*in, *out);
+    return out;
+}
+
 // Bends strands along a wind blowing toward `direction`. Its strength varies over space and time
 // through a noise field that travels with the wind (`frequency`: gust size, `speed`: how fast
 // gusts pass); `gust` is how much it varies, and sways the direction a little. `turbulence` adds
@@ -45,7 +55,8 @@ constexpr double kTwoPi = 6.283185307179586;
 // gust x `profile` along the length, keeping its length; roots never move. With `loop` the wind
 // repeats every loopEnd - loopStart frames, seamlessly (windPhase: the gusts walk a closed path
 // through the noise, the flutter turns whole cycles), for looping animations. A pure function of
-// the strand, the time and the params: strength 0 gives the input back as it is.
+// the strand, the time and the params: strength 0 gives the input back as it is. Feathers' shafts
+// (isShaft 1) hold: after a Propagate the barbs blow about their roots on the shaft.
 class WindOp : public Operator {
 public:
     std::string typeName() const override { return op::kWind; }
@@ -160,12 +171,15 @@ private:
         own.time = ctx.time;
         own.framesPerSecond = ctx.framesPerSecond;
         if (!last) {
-            *result = strength.isConstant() && strength.maximum() <= 0.0f ? in : gpu::runStage(gpu::StageKind::Wind, own, in, scalp);
+            *result = strength.isConstant() && strength.maximum() <= 0.0f
+                          ? in
+                          : withShaftsHeld(in, gpu::runStage(gpu::StageKind::Wind, own, in, scalp));
             return true;
         }
         auto out = std::make_shared<StrandSet>(*in);
         positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made
         gpu::runStageOnStrands(gpu::StageKind::Wind, own, in, changes->strands, scalp, *out);
+        holdShafts(*in, *out);
         *changed = *changes;
         *result = StrandsPtr(out);
         return true;
@@ -328,6 +342,7 @@ bool jiggleFaceTurn(const std::vector<const std::vector<Vec3f>*>& past, const st
 // (jiggleLoopFrame: the host samples them too, scalpHistoryLoopFrames), so a scalp animation
 // looping over loopStart to loopEnd jiggles the same at both ends: a looping animation. Without
 // history, or where the scalp did not move, the strands go through as they are, to the bit.
+// Feathers' shafts (isShaft 1) hold, as with Wind.
 class JiggleOp : public Operator {
 public:
     std::string typeName() const override { return op::kJiggle; }
@@ -439,13 +454,14 @@ private:
         gpu::StageInputs lagged;
         lagged.jiggle = gpu::jiggleInputs(*in, scalp, lags, which);
         if (!last) {
-            *result = gpu::runStage(gpu::StageKind::Jiggle, params(), in, &scalp, std::move(lagged));
+            *result = withShaftsHeld(in, gpu::runStage(gpu::StageKind::Jiggle, params(), in, &scalp, std::move(lagged)));
             remember(valueAs<StrandsPtr>(*result), {scalpPtr, history, nowFrame, fps});
             return true;
         }
         auto out = std::make_shared<StrandSet>(*in);
         positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made
         gpu::runStageOnStrands(gpu::StageKind::Jiggle, params(), in, changes->strands, &scalp, *out, std::move(lagged));
+        holdShafts(*in, *out);
         *changed = *changes;
         *result = StrandsPtr(out);
         remember(StrandsPtr(out), {scalpPtr, history, nowFrame, fps});
