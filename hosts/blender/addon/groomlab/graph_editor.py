@@ -1193,8 +1193,22 @@ def draw_params(layout, context, node, scene):
             op.op_type, op.section = op_type, section
             if folded:
                 continue
+        # A param on another's row (its spec's "row": a falloff beside its mode) goes after that one.
+        names = {s["name"] for s in visible}
+        beside = {}
+        for s in visible:
+            if s.get("row") in names:
+                beside.setdefault(s["row"], []).append(s)
         for spec in visible:
-            draw_param(col, node, spec, scene, mapped, inputs, drivers, collection, context)
+            if spec.get("row") in names:
+                continue
+            if spec["name"] in beside:
+                row = col.row()
+                draw_param(row, node, spec, scene, mapped, inputs, drivers, collection, context)
+                for other in beside[spec["name"]]:
+                    draw_param(row, node, other, scene, mapped, inputs, drivers, collection, context)
+            else:
+                draw_param(col, node, spec, scene, mapped, inputs, drivers, collection, context)
 
 
 def _map_label(value):
@@ -1236,7 +1250,7 @@ def draw_param(layout, node, spec, scene, mapped, inputs, drivers, collection, c
     context = context or bpy.context
     name = spec["name"]
     unit = graph_tree._unit_of(node, spec)  # (unitWhen: as the node's values have it)
-    label = graph_tree.pretty(name) + (" ◆" if name in inputs else "")
+    label = (spec.get("label") or graph_tree.pretty(name)) + (" ◆" if name in inputs else "")
     if unit and units.per_time(node.gl_type, name):  # a rate over time (Simulate's gravity): its length per s²
         label += " (per %s)" % units.per_time(node.gl_type, name).lstrip("/")
     suffix = units.suffix(unit, scene) if unit not in units.SCENE_LENGTH else ""
@@ -1298,6 +1312,10 @@ def draw_param(layout, node, spec, scene, mapped, inputs, drivers, collection, c
         col.row(align=True).prop(node, prop, text="")
     else:
         row.prop(node, prop, text=label + suffix, slider=fill_slider(node, prop, spec))
+        if name == "prototype" and node.gl_type in ("Instance", "Scales"):
+            # Object(s): the meshes selected in the scene, separated by commas (several: variants).
+            op = row.operator("groomlab.prototype_from_selection", text="Selected", icon="RESTRICT_SELECT_OFF")
+            op.node = node.gl_name
     if driver:
         src = graph_tree.node_named(node.id_data, driver)
         row.label(text="x %s" % driver, icon=KEY_ICONS["driven"] if src is not None and src.gl_type == "Control" else "LINKED")

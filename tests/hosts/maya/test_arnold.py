@@ -221,7 +221,7 @@ class ArnoldTest(unittest.TestCase):
     def test_instances_render_through_an_instancer(self):
         flake = cmds.polySphere(name="snowflake", radius=1, subdivisionsX=6, subdivisionsY=4)[0]
         cmds.setAttr(flake + ".visibility", False)
-        groomlab.add_instances(self.groom, flake, probability=0.02, scale=0.01, orient="up")
+        groomlab.add_instances(self.groom, exposure="both", prototype=flake, probability=0.02, scale=0.01, orient="up")
         cmds.refresh(force=True)  # the viewport draws them too
         cmds.arnoldExportAss(filename=ASS_PATH, asciiAss=True)
         with open(ASS_PATH) as f:
@@ -247,7 +247,7 @@ class ArnoldTest(unittest.TestCase):
         leaf_sg = cmds.sets(renderable=True, noSurfaceShader=True, empty=True, name="leafGreenSG")
         cmds.connectAttr(leaf_shader + ".outColor", leaf_sg + ".surfaceShader")
         cmds.sets(leaf, edit=True, forceElement=leaf_sg)
-        node = groomlab.add_instances(self.groom, leaf, probability=0.5, t_range=(0.0, 0.0), size_mode="fitStrand",
+        node = groomlab.add_instances(self.groom, exposure="both", prototype=leaf, probability=0.5, t_range=(0.0, 0.0), size_mode="fitStrand",
                                       fit_scale=0.9, aspect=0.15, spin_random=0.0)
         self.assertEqual(groomlab.errors(self.groom), [])
         for sky in cmds.ls(type="aiSkyDomeLight"):
@@ -999,7 +999,7 @@ class MotionAndProceduralTest(unittest.TestCase):
         self.assertEqual(keys, 1)
         # Instances too: one key of their matrices.
         flake = cmds.polySphere(name="flake", radius=1, subdivisionsX=6, subdivisionsY=4)[0]
-        groomlab.add_instances(self.groom, flake, probability=0.3, scale=0.02)
+        groomlab.add_instances(self.groom, exposure="both", prototype=flake, probability=0.3, scale=0.02)
         count, keys, _ = instance_matrix_keys(block(self.export(), "instancer"))
         self.assertGreater(count, 10)
         self.assertEqual(keys, 1)
@@ -1009,7 +1009,7 @@ class MotionAndProceduralTest(unittest.TestCase):
         # key of instance_matrix per motion step, as the curves get points keys.
         flake = cmds.polySphere(name="flake", radius=1, subdivisionsX=6, subdivisionsY=4)[0]
         cmds.setAttr(flake + ".visibility", False)
-        groomlab.add_instances(self.groom, flake, probability=0.3, scale=0.02)
+        groomlab.add_instances(self.groom, exposure="both", prototype=flake, probability=0.3, scale=0.02)
         self.enable_motion_blur(3)
         text = self.export()
         self.assertEqual(points_keys(text)[0], 3)
@@ -1032,7 +1032,7 @@ class MotionAndProceduralTest(unittest.TestCase):
         # squashes during the shutter, the rest length does not.
         leaf = cmds.polyPlane(name="leaf", width=1, height=1, subdivisionsX=1, subdivisionsY=1)[0]
         cmds.setAttr(leaf + ".visibility", False)
-        groomlab.add_instances(self.groom, leaf, probability=0.3, t_range=(0.0, 0.0), scale_random=0.0,
+        groomlab.add_instances(self.groom, exposure="both", prototype=leaf, probability=0.3, t_range=(0.0, 0.0), scale_random=0.0,
                                scale_by_width=False, size_mode="fitStrand", fit_scale=0.5, aspect=0.25)
         self.enable_motion_blur(3)
         instancer = block(self.export(), "instancer")
@@ -1142,7 +1142,7 @@ class MotionAndProceduralTest(unittest.TestCase):
         # Instances too: the procedural finds the prototype in the scene by name (a visible mesh
         # here, so the .ass holds it).
         cmds.polySphere(name="flake", radius=0.02, subdivisionsX=6, subdivisionsY=4)
-        groomlab.add_instances(self.groom, "flake", probability=0.3, scale=1.0)
+        groomlab.add_instances(self.groom, exposure="both", prototype="flake", probability=0.3, scale=1.0)
         # A tip color: per-point hair_color from the procedural too (checked in the expanded scene).
         groomlab.set_graph(self.groom, with_hair_color(groomlab.get_graph(self.groom, expand_default=True), "tipped", {
             "tipColor": [0.9, 0.9, 0.9], "tipStrength": 1.0}))

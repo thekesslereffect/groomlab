@@ -122,12 +122,26 @@ cmds.setAttr(flake + ".visibility", False)            # only the instances rende
 groomlab.add_instances(groom, flake, probability=0.08, scale=0.03, orient="random", t_range=(0.7, 1.0))
 ```
 
+- **Objects (`prototype`, shown as Object(s)):** the mesh to instance, or several separated by
+  commas: variants, one per instance (`variantBy`). In Maya the field's dropdown picks one mesh
+  and **Selected** fills it with the meshes selected in the scene.
 - **Placement:** each strand gets up to `count` instances. Each is kept with `probability`, a
   number or any map, so you can paint where the snow falls. It sits between `tMin` and `tMax`
   along the strand.
+- **Where in the hair (`exposure`):** `external` (the default, shown as Instance externally)
+  keeps instances near the hair's outer surface, where they are seen, so none render hidden
+  inside the hair; `internal` keeps them inside, away from it; `both` anywhere. Its falloff
+  (`exposureFalloff`, scene units) is how deep under the surface externally reaches and
+  internally starts, fading over it. Nodes saved before keep `both`.
+- **Facing an axis (`axisFacing`, off by default):** only on the side of the hair facing `axis`
+  (X+, X-, Y+ the default, Y-, Z+, Z-): Y+ puts snow or dust on top of the hair. `axisFalloff` is
+  how deep under that side they go, measured along the axis. Both work from the whole hair's
+  volume, so a node using them evaluates in full on every edit.
 - **Look:** `orient` is `strand` (along it), `up`, `root` or `random`: what the prototype's
   **+Y** follows, so model a prototype with its long axis up +Y. `scale` is also mappable, and
-  `scaleRandom`, `spinRandom` and `offset` add variation.
+  `scaleRandom`, `spinRandom` and `offset` add variation. `spinRandom` turns each instance about
+  all three of its axes, except instances fitted round their strand (`fitWidth`) or bent along it
+  (`deform`), which turn about their long axis only.
 - **Size along the strand:** with `scaleByWidth` (on by default) each instance's size is
   multiplied by the strand's width where it sits over the strand's root width, so it follows the
   Width node's profile: smaller toward thin tips, and following width changes over time. A
@@ -158,9 +172,10 @@ groomlab.add_instances(groom, flake, probability=0.08, scale=0.03, orient="rando
 - **Following the strands:** instances remember their strand and position along it, so nodes
   after the Instance node (curl, collide, simulation) carry them along, and preview density
   thins them with the strands. `add_instances` puts the node just before the output.
-- **Stretching strands (`pinToRest`):** an instance sits at a fraction of its strand's length
-  (between `tMin` and `tMax`), so a strand that stretches (simulated guides, a guide cache,
-  correctives) slides it outward. With `pinToRest` on, it keeps the distance from the root that
+- **Stretching strands (`pinToRest`, on by default):** an instance sits at a fraction of its
+  strand's length (between `tMin` and `tMax`), so a strand that stretches (simulated guides, a
+  guide cache, correctives) slides it outward. With `pinToRest` on (nodes saved before it became
+  the default keep it off), it keeps the distance from the root that
   fraction gives on the strand at rest instead, and sits at the tip when the strand is shorter
   than that now. The rest pose is the groom without anything that moves: the scalp's rest pose
   (Rest mesh; its points without one), the guides as authored (no simulation, cache or

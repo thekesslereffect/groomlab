@@ -2395,7 +2395,8 @@ bool sameInstance(const InstanceSet& x, const InstanceSet::Instance& i, const In
         return p < set.prototypes.size() ? set.prototypes[p] : std::string();
     };
     return i.id == j.id && i.strand == j.strand && name(x, i.prototype) == name(y, j.prototype) && i.t == j.t &&
-           i.orient == j.orient && i.direction == j.direction && i.spin == j.spin && i.scale == j.scale &&
+           i.orient == j.orient && i.direction == j.direction && i.spin == j.spin && i.tiltX == j.tiltX &&
+           i.tiltZ == j.tiltZ && i.scale == j.scale &&
            i.offset == j.offset;
 }
 
