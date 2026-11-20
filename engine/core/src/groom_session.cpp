@@ -1771,6 +1771,7 @@ const ViewResult& GroomSession::evaluate(const ViewRequest& request) {
             StrandsPtr strands = viewed->graph.evaluateStrands(shown, ctx);
             phase.next("session.after");
             const StrandsPtr evaluated = strands;  // the node's result (before pinning or carrying)
+            StrandsPtr pinned;  // it with its instances pinned to rest (the same points)
             out.movingGuides = movingGuidesOf(viewed->graph, shown, ctx);
             if (centersOf) {
                 const std::shared_ptr<const std::vector<Vec3f>> dots = clumpCenterDots(*viewed, centersOf, evaluated, ctx);
@@ -1806,6 +1807,7 @@ const ViewResult& GroomSession::evaluate(const ViewRequest& request) {
                 rest.maps = data_.maps;
                 phase.next("session.restPose");
                 strands = restPose_->pin(strands, out.viewedNode, rest, ctx, &viewed->graph);
+                pinned = strands;
                 phase.next("session.after");
             } else {
                 restPose_.reset();
@@ -1837,10 +1839,23 @@ const ViewResult& GroomSession::evaluate(const ViewRequest& request) {
             }
             // What these strands are, and how they differ from the ones this document gave last:
             // the graph's changes of the node shown, when the view hands its strands on as they
-            // are (not carried to the scalp, nor pinned to rest).
+            // are (not carried to the scalp) or with only their instances pinned to rest (the same
+            // points: its instances said changed when they are another set than last time's).
             Shown& was = shown_[sculpting ? 1 : 0];
             const std::uint64_t graphSerial = viewed->graph.resultSerial(shown);
-            const bool asEvaluated = out.strands == evaluated && !following_ && graphSerial != 0;
+            const bool asPinned = pinned && pinned != evaluated && out.strands == pinned;
+            const bool asEvaluated = (out.strands == evaluated || asPinned) && !following_ && graphSerial != 0;
+            const StrandsPtr shownBefore = was.strands.lock();
+            if (asPinned && shownBefore && shownBefore->instances() && out.strands->instances() &&
+                shownBefore->instances() != out.strands->instances() &&
+                shownBefore->instances()->size() == out.strands->instances()->size() &&
+                shownBefore->instances()->contentHash() == out.strands->instances()->contentHash()) {
+                // Pinned again to the same distances (a Width edit makes the rest pose again, its
+                // lengths the same): the instances shown last handed on, so a host sees they stayed.
+                auto same = std::make_shared<StrandSet>(*out.strands);
+                same->setInstances(shownBefore->instances());
+                out.strands = std::move(same);
+            }
             if (asEvaluated && was.serial != 0 && was.node == shown && was.graphSerial == graphSerial &&
                 was.strands.lock() == out.strands) {
                 out.strandsSerial = was.serial;  // the same strands
@@ -1855,6 +1870,13 @@ const ViewResult& GroomSession::evaluate(const ViewRequest& request) {
                 was.node = shown;
                 was.graphSerial = graphSerial;
                 was.strands = out.strands;
+            }
+            if (asPinned && out.strandsChanges && !out.strandsChanges->instancesChanged &&
+                !(shownBefore && shownBefore->instances() == out.strands->instances())) {
+                auto changes = std::make_shared<StrandChanges>(*out.strandsChanges);
+                changes->instancesChanged = true;
+                changes->pointsKept = false;  // (pointsKept says the same instances too)
+                out.strandsChanges = std::move(changes);
             }
             if (request.wantCards) {
                 // Mid-stroke too, while a rebuild is quick enough to follow the brush; slower

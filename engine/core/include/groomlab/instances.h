@@ -64,6 +64,9 @@ public:
         InstanceOrient orient = InstanceOrient::Strand;
         Vec3f direction{0, 1, 0};  // Random: its +Y
         float spin = 0.0f;         // radians about +Y
+        // Tumbled (the Instance node's spinRandom on its other two axes): radians about its +X,
+        // then its +Z, after the spin (not a meshed one: those follow their strand).
+        float tiltX = 0.0f, tiltZ = 0.0f;
         float scale = 1.0f;
         float offset = 0.0f;       // off the strand, along the instance's +X
         // Scale by the strand's width where it sits, over its root width (the

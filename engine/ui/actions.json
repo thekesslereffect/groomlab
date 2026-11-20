@@ -74,7 +74,7 @@
     "cards.textures": {"label": "Show textures", "tip": "Draw the cards with their baked maps (color, coverage cut-out, AO: Material Preview shows them); off shows the flat card geometry", "checkable": true, "hosts": ["blender"]},
     "cards.bakeMaps": {"label": "Bake Maps", "tip": "Depth, coverage, tangent, attribute, color, AO and normal maps for the atlas (TGA, Unreal's hair card layout) into the .blend's groomlab cards folder; the cards view shows them", "hosts": ["blender"]},
     "cards.bakeScalp": {"label": "Bake Scalp", "tip": "The groom baked onto its scalp's UVs (hair color and coverage) into the .blend's groomlab cards folder, with a hair cap mesh that shows it under the cards: no bare skin between low LOD cards", "hosts": ["blender"]},
-    "node.prototypeFromSelection": {"label": "Prototype from Selection", "tip": "Instance the selected mesh with this node (it is hidden: only its instances show and render)", "hosts": ["blender"]},
+    "node.prototypeFromSelection": {"label": "Object(s) from Selection", "tip": "Instance the selected meshes with this node (several: variants, one per instance; they are hidden: only their instances show and render)", "hosts": ["blender"]},
     "add.jiggle": {"label": "Jiggle", "tip": "A Jiggle node before the output: strands lag behind the scalp's motion and settle"},
 
     "sim.add": {"label": "Add Simulate Node", "tip": "GroomLab's own hair simulation (every host's): a Simulate node between the guides and Interpolate; play the timeline to see it"},

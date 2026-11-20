@@ -359,6 +359,14 @@ struct ParamSpec {
     std::string group = {};
     // A tuning knob most grooms never touch (a seed, iterations, a channel's name): UIs may fold it away.
     bool advanced = false;
+    // What UIs call it, when not its name made readable (Instance's prototype: "Object(s)"). Empty:
+    // the name's words.
+    std::string label = {};
+    // What UIs show for each of `choices` (the same order), when not the value itself. Empty: the values.
+    std::vector<std::string> choiceLabels = {};
+    // The param whose row UIs show it on, after that one's field (a falloff beside its mode). Empty:
+    // a row of its own.
+    std::string row = {};
     // When UIs show it (a scales-only param of Instance: mode in [scales]; Clump's count: clumpBy
     // in [count], clumpBy itself only with centersFrom pick).
     ParamCondition showWhen = {};
@@ -441,6 +449,21 @@ struct ParamSpec {
         ParamSpec s = *this;
         s.since = version;
         s.before = std::move(value);
+        return s;
+    }
+    ParamSpec named(std::string text) const {
+        ParamSpec s = *this;
+        s.label = std::move(text);
+        return s;
+    }
+    ParamSpec choicesNamed(std::vector<std::string> labels) const {
+        ParamSpec s = *this;
+        s.choiceLabels = std::move(labels);
+        return s;
+    }
+    ParamSpec onRowOf(std::string param) const {
+        ParamSpec s = *this;
+        s.row = std::move(param);
         return s;
     }
     ParamSpec adv() const {

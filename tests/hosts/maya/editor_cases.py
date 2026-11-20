@@ -755,7 +755,7 @@ class GraphEditorTest(unittest.TestCase):
         cube = cmds.polyCube(name="snowflake")[0]
         self._select_node(instance)
         cmds.select(cube)
-        self._action("Prototype from Selection").click()
+        self._action("Object(s) from Selection").click()
         wait(50)
         self.assertEqual(self.editor.model.param(instance, "prototype"), "snowflake")
 

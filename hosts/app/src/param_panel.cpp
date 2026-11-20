@@ -23,6 +23,7 @@
 #include <QSettings>
 #include <QSignalBlocker>
 #include <QTimer>
+#include <QToolButton>
 #include <QVBoxLayout>
 
 #include "definitions.h"
@@ -32,6 +33,7 @@
 #include "theme.h"
 #include "groomlab/graph_io.h"
 #include "groomlab/param_conditions.h"
+#include "groomlab/scales.h"
 #include "groomlab/node_catalog.h"
 #include "groomlab/simulation.h"
 
@@ -622,6 +624,9 @@ void ParamPanel::build() {
         if ((type == "Compound" || type == "Script") && row.name == "definition") continue;
         row.section = section;
         row.showWhen = p.value("showWhen", json());
+        row.rowOf = p.value("row", std::string());
+        // What it is called: the spec's label ("Object(s)"), else its name as words.
+        const QString shownName = p.contains("label") ? QString::fromStdString(p.value("label", std::string())) : prettyName(row.name);
         const json value = document_->paramOrDefault(node_, row.name);
         const QString description = QString::fromStdString(p.value("description", std::string()));
         const bool mappable = p.value("mappable", false);
@@ -668,21 +673,80 @@ void ParamPanel::build() {
             row.editor = "map";
             field = map;
         } else if (row.kind == "int" || row.kind == "float") {
-            field = numberEditor(row, p, value, prettyName(row.name));
+            field = numberEditor(row, p, value, shownName);
             row.editor = row.kind;
         } else if (row.kind == "string" && (p.value("channel", std::string()) == "writes" || p.value("channel", std::string()) == "reads")) {
             field = attributeEditor(row, p, value, nodeChannels);
         } else if (row.kind == "string") {
             const json choicesList = p.value("choices", json::array());
+            const bool objects = name == "prototype" && (type == "Instance" || type == "Scales");
             if (choicesList.is_array() && !choicesList.empty()) {
+                // Each value shown by the spec's words for it (choiceLabels), else as it is.
+                const json labels = p.value("choiceLabels", json::array());
                 auto* combo = new QComboBox(formHost_);
-                for (const json& c : choicesList) combo->addItem(QString::fromStdString(c.get<std::string>()));
-                combo->setCurrentText(QString::fromStdString(value.is_string() ? value.get<std::string>() : std::string()));
-                connect(combo, &QComboBox::currentTextChanged, this,
-                        [this, name](const QString& text) { edit(name, text.toStdString(), true); });
+                for (std::size_t k = 0; k < choicesList.size(); ++k) {
+                    const QString v = QString::fromStdString(choicesList[k].get<std::string>());
+                    combo->addItem(k < labels.size() && labels[k].is_string() ? QString::fromStdString(labels[k].get<std::string>()) : v, v);
+                }
+                const QString current = QString::fromStdString(value.is_string() ? value.get<std::string>() : std::string());
+                if (combo->findData(current) < 0) combo->addItem(current, current);
+                combo->setCurrentIndex(std::max(0, combo->findData(current)));
+                connect(combo, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+                        [this, name, combo](int i) { edit(name, combo->itemData(i).toString().toStdString(), true); });
                 row.editors = {combo};
                 row.editor = "enum";
                 field = combo;
+            } else if (objects) {
+                // Object(s): one mesh picked from the groom's (and the built-in ones), or several
+                // ticked in the + menu, separated by commas (variants, one per instance).
+                std::vector<std::string> meshes;
+                for (const auto& entry : document_->file().prototypes) meshes.push_back(entry.first);
+                for (const std::string& b : builtinPrototypeNames()) {
+                    if (std::find(meshes.begin(), meshes.end(), b) == meshes.end()) meshes.push_back(b);
+                }
+                const QRegularExpression separators(QStringLiteral("[,\\s]+"));
+                auto* host = new QWidget(formHost_);
+                auto* h = new QHBoxLayout(host);
+                h->setContentsMargins(0, 0, 0, 0);
+                h->setSpacing(4);
+                auto* combo = new QComboBox(host);
+                combo->setEditable(true);
+                combo->setInsertPolicy(QComboBox::NoInsert);
+                for (const std::string& m : meshes) combo->addItem(QString::fromStdString(m));
+                combo->setCurrentText(QString::fromStdString(value.is_string() ? value.get<std::string>() : std::string()));
+                connect(combo, QOverload<int>::of(&QComboBox::activated), this,
+                        [this, name, combo](int i) { edit(name, combo->itemText(i).toStdString(), true); });
+                connect(combo->lineEdit(), &QLineEdit::editingFinished, this,
+                        [this, name, combo] { edit(name, combo->currentText().trimmed().toStdString(), true); });
+                h->addWidget(combo, 1);
+                auto* pick = new QToolButton(host);
+                pick->setObjectName(QStringLiteral("objectsPick"));
+                pick->setText(QStringLiteral("+"));
+                pick->setToolTip(tr("Tick several meshes: they are listed separated by commas (variants, one per instance)"));
+                pick->setPopupMode(QToolButton::InstantPopup);
+                pick->setStyleSheet(QStringLiteral("QToolButton { border: 1px solid %1; border-radius: 4px; padding: 1px 8px; }")
+                                        .arg(theme::textDim().name()));
+                auto* menu = new QMenu(pick);
+                const QStringList current = combo->currentText().split(separators, Qt::SkipEmptyParts);
+                for (const std::string& m : meshes) {
+                    QAction* a = menu->addAction(QString::fromStdString(m));
+                    a->setCheckable(true);
+                    a->setChecked(current.contains(QString::fromStdString(m)));
+                    connect(a, &QAction::toggled, this, [this, name, combo, m, separators](bool on) {
+                        QStringList names = combo->currentText().split(separators, Qt::SkipEmptyParts);
+                        names.removeAll(QString::fromStdString(m));
+                        if (on) names.push_back(QString::fromStdString(m));
+                        const QString text = names.join(QStringLiteral(", "));
+                        combo->setCurrentText(text);
+                        edit(name, text.toStdString(), true);
+                    });
+                }
+                if (meshes.empty()) menu->addAction(tr("(no meshes in the groom yet)"))->setEnabled(false);
+                pick->setMenu(menu);
+                h->addWidget(pick);
+                row.editors = {combo};
+                row.editor = "string";
+                field = host;
             } else {
                 auto* line = new QLineEdit(formHost_);
                 line->setText(QString::fromStdString(value.is_string() ? value.get<std::string>() : std::string()));
@@ -831,7 +895,7 @@ void ParamPanel::build() {
                           : channelUse == "reads" ? tr("Reads an attribute written upstream.\n") + description
                                                   : description);
         auto* rowHost = new QWidget(formHost_);
-        auto* label = new QLabel(prettyName(row.name), rowHost);
+        auto* label = new QLabel(shownName, rowHost);
         label->setToolTip(description);
         label->setStyleSheet(QStringLiteral("color: %1; font-weight: 600;").arg(theme::textDim().name()));
         field->setParent(rowHost);
@@ -948,7 +1012,19 @@ void ParamPanel::build() {
             s.header = header;
         }
         for (const Row& r : rows_) {
-            if (r.section == section) list_->addWidget(r.host);
+            if (r.section != section) continue;
+            // A param on another's row (its spec's "row": a falloff beside its mode): after that
+            // one's field, when both are in this section.
+            const auto partner = std::find_if(rows_.begin(), rows_.end(),
+                                              [&](const Row& o) { return !r.rowOf.empty() && o.name == r.rowOf && o.section == section; });
+            if (partner != rows_.end() && partner->host) {
+                if (auto* line = qobject_cast<QBoxLayout*>(partner->host->layout())) {
+                    r.host->setParent(partner->host);
+                    line->addWidget(r.host, 1);
+                    continue;
+                }
+            }
+            list_->addWidget(r.host);
         }
         sections_.push_back(s);
     }
@@ -1164,7 +1240,10 @@ json ParamPanel::valueOf(const Row& row) const {
         return v;
     }
     if (row.kind == "string") {
-        if (auto* combo = qobject_cast<QComboBox*>(row.editors[0])) return combo->currentText().toStdString();
+        if (auto* combo = qobject_cast<QComboBox*>(row.editors[0])) {
+            const QVariant data = combo->currentData();  // a choice: its value (the text is its label)
+            return (data.isValid() && !combo->isEditable() ? data.toString() : combo->currentText()).toStdString();
+        }
         return static_cast<QLineEdit*>(row.editors[0])->text().toStdString();
     }
     return nullptr;

@@ -317,8 +317,11 @@ The Instance node's meshes (snow, beads, leaves) render through an Arnold `insta
 curves. With deformation blur on, they move with the hair.
 
 - **`scaleByWidth`** (on by default) scales each instance by the strand width at its position.
-- **`pinToRest`** keeps each instance at its rest distance from the root, so strands that stretch
-  in a simulation don't slide it toward the tip.
+- **`pinToRest`** (on by default) keeps each instance at its rest distance from the root, so
+  strands that stretch in a simulation don't slide it toward the tip.
+- **Instance externally** (the default) keeps instances near the hair's outer surface, so none
+  render hidden inside the hair at extra cost. **Axis facing** keeps them on the side of the hair
+  facing an axis (Y+: the top, for snow).
 - **`sizeMode`** `fitStrand` sizes each instance to its strand: `fitScale` times the strand's rest
   length along the prototype's +Y, `aspect` times that across. Model the prototype 1 unit long
   along +Y, with its base at the origin.

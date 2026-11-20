@@ -18,7 +18,7 @@
     {"name": "scatter", "type": "Scatter", "params": {"density": 80.0, "length": 25.0}, "ui": {"x": 240, "y": 0}},
     {"name": "interpolate", "type": "Interpolate", "ui": {"x": 480, "y": 0}},
     {"name": "braid", "type": "Braid", "params": {"style": "three", "width": 2.4, "tightness": 2.5, "region": 2.6, "end": "bound", "ties": 3, "tieSpacing": 2.0, "cinch": 0.3}, "ui": {"x": 720, "y": 0}},
-    {"name": "beads", "type": "Instance", "params": {"prototype": "groomlab:bead groomlab:cuff", "probability": 1.0, "count": 1, "tMin": 0.0, "tMax": 0.0, "sizeMode": "fitStrand", "fitScale": 1.0, "fitWidth": true, "aspect": 1.0, "scaleByWidth": false, "scaleRandom": 0.0, "spinRandom": 1.0}, "ui": {"x": 960, "y": 0}},
+    {"name": "beads", "type": "Instance", "params": {"exposure": "both", "prototype": "groomlab:bead groomlab:cuff", "probability": 1.0, "count": 1, "tMin": 0.0, "tMax": 0.0, "sizeMode": "fitStrand", "fitScale": 1.0, "fitWidth": true, "aspect": 1.0, "scaleByWidth": false, "scaleRandom": 0.0, "spinRandom": 1.0}, "ui": {"x": 960, "y": 0}},
     {"name": "color", "type": "HairColor", "params": {"melanin": 0.92, "redness": 0.08, "melaninRandom": 0.05}, "ui": {"x": 1200, "y": 0}},
     {"name": "width", "type": "Width", "params": {"width": 0.008, "profile": [[0, 1], [1, 0.3]]}, "ui": {"x": 1440, "y": 0}},
     {"name": "output", "type": "Output", "ui": {"x": 1680, "y": 0}}

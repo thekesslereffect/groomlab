@@ -221,7 +221,7 @@ std::vector<Case> cases() {
         // Tapered strands: instances scale with the width where they sit (scaleByWidth, on by default).
         {"Instance", "op",
          R"({"name": "taper", "type": "Width", "params": {"width": 0.01, "profile": [[0, 1], [1, 0.25]]}},
-            {"name": "op", "type": "Instance", "params": {"probability": 0.2, "count": 2, "seed": 4}})",
+            {"name": "op", "type": "Instance", "version": 2, "params": {"probability": 0.2, "count": 2, "seed": 4}})",
          link("interp", "taper", "strands") + "," + link("taper", "op", "strands")},
         // A scale at each root, lying on the skin along its strand, as wide as the strand's root.
         {"Scales", "op",
@@ -232,12 +232,12 @@ std::vector<Case> cases() {
         // aspect of that across, narrowed by the taper where they sit.
         {"InstanceFitStrand", "op",
          R"({"name": "taper", "type": "Width", "params": {"width": 0.01, "profile": [[0, 1], [1, 0.25]]}},
-            {"name": "op", "type": "Instance", "params": {"probability": 0.2, "seed": 5, "tMin": 0.0, "tMax": 0.5,
+            {"name": "op", "type": "Instance", "version": 2, "params": {"probability": 0.2, "seed": 5, "tMin": 0.0, "tMax": 0.5,
              "sizeMode": "fitStrand", "fitScale": 0.4, "aspect": 0.3}})",
          link("interp", "taper", "strands") + "," + link("taper", "op", "strands")},
         // Bent along their strands (deform alongStrand): placed as before, facing the skin.
         {"InstanceDeform", "op",
-         R"({"name": "op", "type": "Instance", "params": {"probability": 0.2, "seed": 5, "tMin": 0.1, "tMax": 0.3,
+         R"({"name": "op", "type": "Instance", "version": 2, "params": {"probability": 0.2, "seed": 5, "tMin": 0.1, "tMax": 0.3,
              "sizeMode": "fitStrand", "fitScale": 0.5, "aspect": 0.3, "spinRandom": 0.0, "deform": "alongStrand"}})",
          link("interp", "op", "strands")},
         // (version 1: the braid as recorded. Version 2 presses the sections; test_look.cpp's Braid.Pressed*.)

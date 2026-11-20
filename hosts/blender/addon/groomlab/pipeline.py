@@ -808,20 +808,28 @@ def remove_scalp(scalp, name):
 
 
 def prototype_from_selection(scalp, node, obj):
-    """An Instance or Scales node's prototype: `obj`'s mesh (Maya's Prototype from Selection), sent as
-    the graph's mesh of its name and named by the node; hidden, so only its instances show and render.
-    Returns the name."""
-    if obj is None or obj.type != "MESH":
-        raise HelperError("bad_request", "select the mesh to instance")
+    """An Instance or Scales node's Object(s): `obj`'s mesh, or each of a list of them (variants, one
+    per instance; Maya's Object(s) from Selection), sent as the graph's meshes of their names and
+    named by the node, separated by commas; hidden, so only their instances show and render.
+    Returns the param's text."""
+    objs = list(obj) if isinstance(obj, (list, tuple)) else [obj]
+    if not objs or any(o is None or o.type != "MESH" for o in objs):
+        raise HelperError("bad_request", "select the mesh(es) to instance")
     g = GraphEdits(scalp)
     if g.node_type(node) not in ("Instance", "Scales"):
         raise HelperError("bad_request", "%s is not an Instance or Scales node" % node)
-    set_prototypes(scalp, [obj], replace=False)
-    g.set_param(node, "prototype", obj.name)
+    set_prototypes(scalp, objs, replace=False)
+    names = []
+    for o in objs:
+        if o.name not in names:
+            names.append(o.name)
+    text = ", ".join(names)
+    g.set_param(node, "prototype", text)
     g.finish()
-    obj.hide_set(True)
-    obj.hide_render = True
-    return obj.name
+    for o in objs:
+        o.hide_set(True)
+        o.hide_render = True
+    return text
 
 
 # ---- Graph inserts: Maya's add_simulate, add_collider, create_cards, add_feathers, add_braid ------------

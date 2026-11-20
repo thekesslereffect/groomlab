@@ -1034,9 +1034,9 @@ class GROOMLAB_OT_add_scalp(_Tipped, GroomOperator):
 
 
 class GROOMLAB_OT_prototype_from_selection(_Tipped, GroomOperator):
-    """Instance the selected mesh with this Instance or Scales node (it is hidden: only its instances show and render)"""
+    """Instance the selected meshes with this Instance or Scales node (several: variants, one per instance; they are hidden: only their instances show and render)"""
     bl_idname = "groomlab.prototype_from_selection"
-    bl_label = "Prototype from Selection"
+    bl_label = "Object(s) from Selection"
     bl_options = {"REGISTER", "UNDO"}
 
     node: StringProperty(name="Node", options={"SKIP_SAVE"})
@@ -1050,10 +1050,10 @@ class GROOMLAB_OT_prototype_from_selection(_Tipped, GroomOperator):
             node = getattr(n, "gl_name", "") if n is not None else ""
         meshes = [o for o in context.selected_objects if o.type == "MESH" and o is not scalp and o.groomlab.role == "NONE"]
         if not node or not meshes:
-            self.report({"ERROR"}, "Select the mesh to instance (and pick the Instance or Scales node)")
+            self.report({"ERROR"}, "Select the mesh(es) to instance (and pick the Instance or Scales node)")
             return {"CANCELLED"}
         try:
-            name = pipeline.prototype_from_selection(scalp, node, meshes[0])
+            name = pipeline.prototype_from_selection(scalp, node, meshes)
         except HelperError as e:
             return _fail(self, e)
         _say(self, "%s instances %s" % (node, name))
