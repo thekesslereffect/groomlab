@@ -101,6 +101,15 @@ void applyGuidePoses(GuideHierarchy& hierarchy, const GuideSet& poses, const Sca
 // feeds (the hierarchy's every level, then the flat guides), else one guide group's (throws
 // std::runtime_error for no such group). Each keeps its guide's ID.
 GuideSet guidesToSimulate(const HierarchyPtr& hierarchy, const GuidesPtr& flat, const std::string& group = "*");
+// Guides as curves (every host's guide exports): each guide of two points or more, its ID, points
+// and root.
+StrandSet guideCurves(const GuideSet& guides);
+// An Unreal export's guides (what Unreal simulates): the hierarchy's level 0 as curves; empty for none.
+StrandSet primaryGuideCurves(const HierarchyPtr& hierarchy);
+// guideCurves the other way (every host's guide cache and driver cache read as guides): each curve
+// a guide of its ID and points; `pointLayer` (a point channel of the curves, e.g. the drivers'
+// twist) kept on the guides where it is not all 0.
+GuideSet guidesOfCurves(const StrandSet& curves, const char* pointLayer = nullptr);
 
 // Registers control values for the graph's Control nodes (by name).
 void setControlExternals(ExternalInputs& externals, const std::map<std::string, float>& controls);
@@ -146,7 +155,10 @@ bool graphReadsTime(const Graph& graph, NodeId output);
 // with time, so it evaluates once per edit, not per frame: RestPose keeps its
 // own copy of the graph, so the host's cache for the current time is
 // untouched, and from frame to frame its evaluation is a cache hit (or, with
-// caching off, skipped by the rest inputs' hash). Rest lengths are taken on
+// caching off, skipped by the rest inputs' hash). A groom that is at rest as
+// the host evaluates it (a static scalp, guides as authored) is not evaluated
+// a second time: the nodes keyed at rest as the host's graph keyed them take
+// its results (RestPose::pin's `evaluated`). Rest lengths are taken on
 // the evaluated node's strands, matched to the current ones by strand ID;
 // a strand missing at rest leaves its instances at their fraction.
 
@@ -189,9 +201,16 @@ public:
     // and segments. `strands` as they are when no instance needs the rest pose
     // (InstanceSet::needsRestPose). The same inputs give the same
     // pointer back (hosts key their redraws on it). Throws GraphError.
-    StrandsPtr pin(const StrandsPtr& strands, const std::string& node, const RestInputs& in, const EvalContext& ctx);
+    // `evaluated`: the graph `strands` were just made on (a copy of this one's, with its cache), or
+    // null. Its results serve the rest pose's nodes keyed as they are (Graph::offerResults: the
+    // same operator, params, inputs and external data, so the same result, to the bit): all of
+    // them for a groom at rest, which then evaluates nothing here; the nodes whose inputs differ at
+    // rest (after a deforming scalp, posed guides, a Wind) evaluate as ever.
+    StrandsPtr pin(const StrandsPtr& strands, const std::string& node, const RestInputs& in, const EvalContext& ctx,
+                   const Graph* evaluated = nullptr);
 
-    // How many times the rest pose was evaluated through the graph (tests).
+    // How many times the rest pose ran nodes of its graph (0 while every result came from the
+    // evaluated graph's: tests).
     std::size_t evaluations() const { return evaluations_; }
 
 private:

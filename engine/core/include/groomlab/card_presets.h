@@ -74,5 +74,14 @@ StrandsReaching strandsReaching(const std::string& graphJson, const std::string&
 // unknown lod or kind.
 std::vector<std::pair<std::string, ParamValue>> cardPresetParams(const std::string& lod, const std::string& kind,
                                                                  std::optional<int> triangles = std::nullopt);
+// The graph's Cards nodes, in its order.
+std::vector<std::string> cardsNodeNames(const std::string& graphJson);
+// The graph with Cards nodes `nodes` (empty: every one) set for `lod`, each by what it cards
+// (cardPresetParams: every host's Cards preset; `triangles` overrides the budget); `params` gets
+// what the last one was set to. Throws std::invalid_argument for an unknown lod, a graph without
+// those nodes or one that is no graph.
+std::string withCardPreset(const std::string& graphJson, const std::string& lod, std::vector<std::string> nodes = {},
+                           std::optional<int> triangles = std::nullopt,
+                           std::vector<std::pair<std::string, ParamValue>>* params = nullptr);
 
 }  // namespace groomlab

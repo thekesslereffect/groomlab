@@ -18,6 +18,7 @@
 #include <nlohmann/json.hpp>
 
 #include "groomlab/presets.h"
+#include "groomlab/color.h"
 
 namespace groomlab::app::theme {
 
@@ -257,7 +258,7 @@ QColor emeraldChip() {
     return c;
 }
 QColor readableOn(const QColor& fill) {
-    auto channel = [](qreal c) { return c <= 0.04045 ? c / 12.92 : std::pow((c + 0.055) / 1.055, 2.4); };
+    auto channel = [](qreal c) { return static_cast<qreal>(groomlab::srgbToLinear(static_cast<float>(c))); };  // (color.h)
     auto luminance = [&](const QColor& c) { return 0.2126 * channel(c.redF()) + 0.7152 * channel(c.greenF()) + 0.0722 * channel(c.blueF()); };
     const qreal l = luminance(fill);
     const qreal withInk = (l + 0.05) / (luminance(ink()) + 0.05), withWhite = 1.05 / (l + 0.05);
@@ -590,10 +591,32 @@ QString brushTitle(const std::string& name) {
 
 // ---- The node graph ------------------------------------------------------------------------------
 
+namespace {
+
+// Every host's node category and port colors (engine/ui/graph_ui.json's graph.categoryColors and
+// graph.portColors, which Maya's and Blender's Graph Editors read; a theme's graph.categories and
+// graph.ports override them, as in Maya): the embedded file ui::Definitions reads (definitions.h,
+// in the library above this one), its "graph" section read once.
+QColor sharedGraphColor(const char* table, const std::string& name) {
+    static const nlohmann::json graph = [] {
+        QFile file(QStringLiteral(":/groomlab/ui/graph_ui.json"));
+        const nlohmann::json parsed = file.open(QIODevice::ReadOnly) ? nlohmann::json::parse(file.readAll().toStdString(), nullptr, false)
+                                                                     : nlohmann::json();
+        const auto section = parsed.is_object() ? parsed.find("graph") : parsed.end();
+        return section != parsed.end() && section->is_object() ? *section : nlohmann::json::object();
+    }();
+    const auto colors = graph.find(table);
+    if (colors == graph.end() || !colors->is_object()) return QColor();
+    const auto color = colors->find(name);
+    return color != colors->end() && color->is_string() ? QColor(QString::fromStdString(color->get<std::string>())) : QColor();
+}
+
+}  // namespace
+
 QColor nodeCategoryColor(const std::string& category) {
     // The theme's graph.categories (the Graph Editor's titles), by the add-node menu's category
-    // ids (node_catalog.h); a category the theme has no color for takes the Maya Graph Editor's
-    // (its CATEGORY_COLORS).
+    // ids (node_catalog.h); a category the theme has no color for takes every host's
+    // (graph_ui.json's graph.categoryColors), and one that file lacks the color here.
     struct Entry {
         const char* id;
         const char* title;
@@ -607,17 +630,21 @@ QColor nodeCategoryColor(const std::string& category) {
         {"color", "Color", QColor(255, 122, 182)},         {"convert", "Convert", QColor(240, 140, 95)},
         {"field", "Fields & Curves", QColor(214, 122, 214)}, {"utility", "Utility", QColor(140, 148, 158)},
         {"games", "Games", QColor(90, 200, 230)},          {"output", "Output", QColor(255, 255, 255)},
+        {"compound", "Compound", QColor(110, 200, 120)},
     };
     const Entry* entry = &entries[11];  // anything else: Utility
     for (const Entry& e : entries) {
         if (category == e.id) entry = &e;
     }
     const QColor themedColor = themed({"graph", "categories"}, entry->title);
-    return themedColor.isValid() ? themedColor : entry->fallback;
+    if (themedColor.isValid()) return themedColor;
+    const QColor shared = sharedGraphColor("categoryColors", entry->title);
+    return shared.isValid() ? shared : entry->fallback;
 }
 
 QColor portColor(const std::string& portType) {
-    // The theme's graph.ports, by the port types' names (Strands, Guides, ...: either case here).
+    // The theme's graph.ports, by the port types' names (Strands, Guides, ...: either case here); a
+    // type the theme has no color for takes every host's (graph_ui.json's graph.portColors).
     std::string type = portType;
     std::transform(type.begin(), type.end(), type.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     const char* name = type == "strands" ? "Strands"
@@ -627,7 +654,8 @@ QColor portColor(const std::string& portType) {
                        : type == "curve"  ? "Curve"
                        : type == "value"  ? "Value"
                                           : "Curves";  // and anything else
-    return themed({"graph", "ports"}, name);
+    const QColor themedColor = themed({"graph", "ports"}, name);
+    return themedColor.isValid() ? themedColor : sharedGraphColor("portColors", name);
 }
 
 QColor nodeBody() { return themed({"graph"}, "node"); }
@@ -688,7 +716,7 @@ DisplayTheme displayTheme() {
     const nlohmann::json& data = current();
     const nlohmann::json viewport = data.contains("viewport") && data["viewport"].is_object() ? data["viewport"] : nlohmann::json::object();
     auto linear = [](const QColor& c) {
-        auto channel = [](float v) { return v <= 0.04045f ? v / 12.92f : std::pow((v + 0.055f) / 1.055f, 2.4f); };
+        auto channel = [](float v) { return groomlab::srgbToLinear(v); };  // (color.h)
         return DisplayTheme::RGB{channel(c.redF()), channel(c.greenF()), channel(c.blueF())};
     };
     auto color = [&](const char* key, const char* fallback) {

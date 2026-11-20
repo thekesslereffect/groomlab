@@ -674,6 +674,14 @@ class GroomTest(HelperTestCase):
         self.assertEqual(e.exception.code, "type_mismatch")
         self.assert_matches_cli(s, 0.1, "param")
 
+        # The auto layout every host uses (graph_inserts.h layoutPositions): columns by depth, rows in order.
+        graph = self.h.call("get_graph", session=s)["graph"]
+        at = self.h.call("graph_layout", graph=graph)["positions"]
+        self.assertEqual(sorted(at), sorted(n["name"] for n in graph["nodes"]))
+        self.assertEqual((at["scalp"], at["guides"], at["scatter"]), ([0.0, 0.0], [0.0, 140.0], [240.0, 0.0]))
+        with self.assertRaises(HelperError):
+            self.h.call("graph_layout")
+
         # Graph edits as an editor makes them, and a preset inserted as a compound.
         made = self.h.call("edit_graph", session=s, op="add_node", type="Gravity")["name"]
         self.assertEqual(self.h.call("edit_graph", session=s, op="connect", **{"from": "noise", "to": made, "input": "strands"})
@@ -790,6 +798,136 @@ class SpaceTest(HelperTestCase):
 
 
 @unittest.skipIf(HEAD is None, "no test head")
+class CoreRulesTest(HelperTestCase):
+    """The helper commands through which the add-on uses the core's rules instead of copies of its own
+    (every host's: Find Missing, presets, keying, New Map > For, Show Inner Param, file names)."""
+
+    def test_every_hosts_rules_through_the_helper(self):
+        s = self.head_session()
+        graph = self.h.call("get_graph", session=s)["graph"]
+        # Copy Graph's text and a paste's checks (presets.h makePresetJson, presetFromText).
+        text = self.h.call("make_preset", graph=graph, size=20.0, title="head", category="Shared", controls={})["text"]
+        preset = self.h.call("preset_from_text", text="```json\n" + text + "\n```")["preset"]
+        self.assertEqual(preset["about"]["title"], "head")
+        self.assertEqual(preset["size"], 20.0)
+        bad = {"version": 1, "output": "out", "nodes": [{"name": "n", "type": "Noise", "params": {"space": "galaxy"}},
+                                                        {"name": "out", "type": "Output"}], "connections": []}
+        error = self.h.request("preset_from_text", text=json.dumps(bad))["error"]
+        self.assertEqual(error["code"], "bad_request")
+        self.assertIn("'galaxy' is not one of", error["message"])
+        # Keying (graph_controls.h notKeyable): Scatter's density sets where the strands go.
+        self.assertNotEqual(self.h.call("not_keyable", session=s, node="scatter", param="density")["why"], "")
+        # New Map > For (stroke.h settingTargetsJson) and the maps a graph reads.
+        targets = self.h.call("setting_targets", session=s)
+        self.assertTrue(any(t["id"] == "density" and t["node"] for t in targets["settings"]))
+        self.assertTrue(targets["others"])
+        self.assertIsInstance(self.h.call("graph_map_names", graph=graph)["maps"], list)
+        # Show Inner Param (graph_controls.h compoundInnerParamsJson): Input nodes left out.
+        definition = {"graph": {"version": 1, "output": "w", "nodes": [{"name": "i", "type": "Input"},
+                                                                       {"name": "w", "type": "Noise"}], "connections": []}}
+        inner = self.h.call("compound_inner_params", definition=definition)["inner"]
+        self.assertEqual([n["node"] for n in inner], ["w"])
+        # Files: names, missing files and their matches (asset_files.h).
+        self.assertEqual(self.h.call("file_safe_name", text="|my groom.")["name"], "my_groom")
+        # Object(s) from Selection and Color by Channel (instances.h, display.h).
+        self.assertEqual(self.h.call("prototype_text", names=["leaf", "bead", "leaf"])["text"], "leaf, bead")
+        self.assertEqual(self.h.call("node_color_source", channel="braidPress", node="braid1")["source"], "braidPress@braid1")
+        folder = os.path.join(self.tmp, "found", "maps")
+        os.makedirs(folder)
+        for tile in (1001, 1002):
+            with open(os.path.join(folder, "dens.%d.png" % tile), "wb") as f:
+                f.write(b"x")
+        self.assertEqual(self.h.call("files_there", paths=[os.path.join(folder, "dens.png"), os.path.join(folder, "gone.png")])["there"],
+                         [True, False])
+        match = self.h.call("files_match", folder=os.path.join(self.tmp, "found"), stored=["old/maps/dens.png"])["matches"][0]
+        self.assertTrue(match["found"].replace("\\", "/").endswith("found/maps/dens.png"))
+
+
+class UdimTest(HelperTestCase):
+    """Issue #87: a scalp over two UDIM tiles (its right half's UVs on tile 1002): a texture map is a
+    tile set, written tile by tile, filled per face (one tile changing), undone, shown as one image
+    (the tile set's mosaic) and carried through the add-on's state."""
+
+    def two_tile_plane(self, cells=4):
+        points, counts, indices, uvs = [], [], [], []
+        nx, nz = 2 * cells, cells
+        for z in range(nz + 1):
+            for x in range(nx + 1):
+                points.append((x / float(cells), z / float(cells), 0.0))
+        at = lambda x, z: z * (nx + 1) + x
+        right = []
+        for z in range(nz):
+            for x in range(nx):
+                quad = [at(x, z), at(x + 1, z), at(x + 1, z + 1), at(x, z + 1)]
+                counts.append(4)
+                indices.extend(quad)
+                uvs.extend([points[v][0], points[v][1]] for v in quad)
+                if x >= cells:
+                    right.append(len(counts) - 1)
+        return (np.array(points, dtype=np.float32), np.array(counts, dtype=np.int32), np.array(indices, dtype=np.int32),
+                np.array(uvs, dtype=np.float32), right)
+
+    def test_texture_maps_are_tile_sets_on_a_scalp_over_several_tiles(self):
+        points, counts, indices, uvs, right = self.two_tile_plane()
+        s = self.h.call("new_session")["session"]
+        self.h.call("set_scalp", session=s, **self.h.put(points=points, faceCounts=counts, faceIndices=indices, uvs=uvs))
+        self.h.call("new_groom", session=s)
+        masks = os.path.join(self.tmp, "masks").replace("\\", "/")
+        self.h.call("set_options", session=s, mapsDir=masks)
+        made = self.h.call("map_create", session=s, name="dens", kind="texture", value=0.0, resolution=32)
+        plain = made["file"]
+        stem = plain[:-len(".png")]
+        self.assertFalse(os.path.exists(plain))
+        for tile in (1001, 1002):
+            self.assertTrue(os.path.exists("%s.%d.png" % (stem, tile)), tile)
+        listed = next(m for m in self.h.call("maps_list", session=s)["maps"] if m["name"] == "dens")
+        self.assertFalse(listed["missing"])  # (the set is the map's file)
+        with open(stem + ".1001.png", "rb") as f:
+            left_before = f.read()
+        with open(stem + ".1002.png", "rb") as f:
+            right_before = f.read()
+        # Filled on the right half's faces: tile 1002 alone changes; undo puts it back.
+        self.h.call("map_fill", session=s, name="dens", value=1.0, faces=right)
+        with open(stem + ".1001.png", "rb") as f:
+            self.assertEqual(f.read(), left_before)
+        with open(stem + ".1002.png", "rb") as f:
+            right_after = f.read()
+        self.assertNotEqual(right_after, right_before)
+        self.assertTrue(self.h.call("undo", session=s)["done"])
+        with open(stem + ".1002.png", "rb") as f:
+            self.assertEqual(f.read(), right_before)
+        self.h.call("redo", session=s)
+        # Shown as one image: the tiles' mosaic (two 32 texel tiles with their gutters), the uvs
+        # in it.
+        disp = self.h.call("display", session=s, map={"name": "dens", "textured": True})
+        item, image = disp["items"]["scalpMap"], disp["items"]["scalpMapImage"]
+        self.assertGreater(item["vertexCount"], 0)
+        shown = self.h.array(item["arrays"]["uvs"])
+        self.assertLessEqual(float(shown.max()), 1.0)
+        self.assertGreaterEqual(float(shown.min()), 0.0)
+        self.assertEqual(image["width"], 2 * (32 + 16))
+        # The add-on's state carries the tiles; a session whose maps folder lacks them writes them.
+        state = self.h.call("get_state", session=s, texts=False, textures=True)
+        tex = next(t for t in state["textures"] if t["name"] == "dens")
+        self.assertEqual(sorted(t["tile"] for t in tex["tiles"]), [1001, 1002])
+        # (Gone from disk: another machine, a temp folder cleaned.)
+        for tile in (1001, 1002):
+            os.remove("%s.%d.png" % (stem, tile))
+        u = self.h.call("new_session")["session"]
+        self.h.call("set_scalp", session=u, **self.h.put(points=points, faceCounts=counts, faceIndices=indices, uvs=uvs))
+        elsewhere = os.path.join(self.tmp, "elsewhere").replace("\\", "/")
+        self.h.call("set_options", session=u, mapsDir=elsewhere)
+        self.h.call("set_state", session=u, groom=state["groom"], textures=state["textures"], tools=state["tools"])
+        restored = json.loads(self.h.call("get_state", session=u, texts=True, textures=False)["texts"]["scalpMaps"])["dens"]["texture"]
+        self.assertEqual(restored, elsewhere + "/dens.png")
+        for tile in (1001, 1002):
+            self.assertTrue(os.path.exists("%s/dens.%d.png" % (elsewhere, tile)), tile)
+        with open(elsewhere + "/dens.1002.png", "rb") as f:
+            self.assertEqual(f.read(), right_after)
+        self.h.call("close_session", session=u)
+        self.h.call("close_session", session=s)
+
+
 class FreeTest(HelperTestCase):
     def test_every_export_with_no_key(self):
         # GroomLab is free for any use: no license in the protocol, every export writes its file,
@@ -1032,6 +1170,14 @@ class ToolsTest(HelperTestCase):
         corrective = set(t["id"] for t in cat["tools"] if t.get("corrective"))
         self.assertEqual(corrective, {"comb", "slide", "smooth", "lift", "twist", "attract", "cut", "length", "select"})
         self.assertIn("falloff", [s["id"] for s in cat["settings"]])
+        # A value's default, span and limits come with it (brush_catalog.h), a length in the groom's units.
+        specs = dict((s["id"], s) for s in cat["settings"])
+        self.assertEqual([specs["radius"][k] for k in ("kind", "default", "softMin", "softMax", "min", "max", "decimals", "unit")],
+                         ["float", 60.0, 5.0, 400.0, 1.0, 2000.0, 0, "pixels"])
+        self.assertEqual((specs["segments"]["kind"], specs["segments"]["default"]), ("int", 12))
+        self.assertEqual((specs["pressure"]["kind"], specs["pressure"]["default"]), ("bool", True))
+        self.assertEqual((specs["length"]["unit"], specs["length"]["default"]), ("length", 0.5))
+        self.assertEqual(specs["alpha"]["kind"], "")
         r = self.call("tool_set", tool="comb", settings={"radius": 42, "falloff": 0.25, "symmetry": "y", "symmetryCenter": 0.01,
                                                         "length": 0.03, "frontFacingOnly": False, "targets": ["guides", "parts"]})
         st = r["settings"]
@@ -2641,7 +2787,7 @@ class PipelineTest(HelperTestCase):
         out = os.path.join(self.tmp, "unity")
         r = self.call("export", session=s, format="unityCards", directory=out, name="head", resolution=32)
         self.assertEqual(sorted(os.path.basename(p) for p in r["maps"]),
-                         sorted(["head_%s.png" % m for m in ("BaseColor", "Mask", "AO", "Tangent", "Depth", "Attribute", "Normal",
+                         sorted(["head_%s.png" % m for m in ("BaseColor", "Mask", "AO", "AO_world", "Tangent", "Depth", "Attribute", "Normal",
                                                               "ScalpBaseColor")]))
         with open(r["manifest"]) as f:
             manifest = json.load(f)

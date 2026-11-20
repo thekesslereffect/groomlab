@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 #include "groomlab/portable_math.h"
@@ -43,6 +44,35 @@ inline Vec3f normalizedRecip(const Vec3f& v, float minLength = 0.0f) {
     const float l = v.length();
     return l > minLength ? v * (1.0f / l) : Vec3f{};
 }
+
+// The smaller and the larger of two points per axis, as std::min(a.x, b.x) and std::max(a.x, b.x)
+// give them (a's where they tie or b's is NaN: the argument order matters for NaN and signed zero).
+inline Vec3f minPerAxis(const Vec3f& a, const Vec3f& b) { return {std::min(a.x, b.x), std::min(a.y, b.y), std::min(a.z, b.z)}; }
+inline Vec3f maxPerAxis(const Vec3f& a, const Vec3f& b) { return {std::max(a.x, b.x), std::max(a.y, b.y), std::max(a.z, b.z)}; }
+
+// An axis-aligned box, empty until a point is added (lo above hi).
+struct Aabb {
+    Vec3f lo{std::numeric_limits<float>::max(), std::numeric_limits<float>::max(), std::numeric_limits<float>::max()};
+    Vec3f hi{-std::numeric_limits<float>::max(), -std::numeric_limits<float>::max(), -std::numeric_limits<float>::max()};
+
+    void expand(const Vec3f& p) {
+        lo = minPerAxis(lo, p);
+        hi = maxPerAxis(hi, p);
+    }
+    void expand(const Aabb& b) {
+        expand(b.lo);
+        expand(b.hi);
+    }
+    Vec3f center() const { return (lo + hi) * 0.5f; }
+    float diagonal() const { return (hi - lo).length(); }
+    // Whether the boxes share a point, and whether `p` is in the box (the faces count).
+    bool overlaps(const Aabb& o) const {
+        return lo.x <= o.hi.x && o.lo.x <= hi.x && lo.y <= o.hi.y && o.lo.y <= hi.y && lo.z <= o.hi.z && o.lo.z <= hi.z;
+    }
+    bool contains(const Vec3f& p) const {
+        return p.x >= lo.x && p.x <= hi.x && p.y >= lo.y && p.y <= hi.y && p.z >= lo.z && p.z <= hi.z;
+    }
+};
 
 // A whole number from a float as C's (int) cast makes one (toward zero; NaN: 0), kept within
 // ±1e9 (a range a loop can walk).

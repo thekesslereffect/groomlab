@@ -30,6 +30,26 @@ StrandSet flatStrands(std::size_t n, std::size_t points = 5) {
 
 }  // namespace
 
+TEST(StrandGeometry, ToMeshAsEveryHostAsksForIt) {
+    // strandMeshOptionsFrom / strandsForMesh: Maya's groomLabConvert, the Blender helper's
+    // strand_mesh and the app's Strands to Mesh check and thin the same way.
+    const StrandMeshOptions o = strandMeshOptionsFrom("strands", "ribbon", 6, 2.0, 0.01, true);
+    EXPECT_EQ(o.make, StrandMeshOptions::Make::Strands);
+    EXPECT_EQ(o.style, StrandMeshOptions::Style::Ribbon);
+    EXPECT_EQ(o.sides, 6);
+    EXPECT_TRUE(o.strandUVs);
+    EXPECT_THROW(strandMeshOptionsFrom("blobs"), std::invalid_argument);
+    EXPECT_THROW(strandMeshOptionsFrom("auto", "cone"), std::invalid_argument);
+    EXPECT_THROW(strandMeshOptionsFrom("auto", "tube", 2), std::invalid_argument);
+    EXPECT_THROW(strandMeshOptionsFrom("auto", "tube", kMaxMeshSides + 1), std::invalid_argument);
+    EXPECT_THROW(strandMeshOptionsFrom("auto", "tube", 4, 0.0), std::invalid_argument);
+    const StrandSet s = flatStrands(200);
+    EXPECT_FALSE(strandsForMesh(s, o, 500).has_value()) << "under the budget: every strand as it is";
+    const std::optional<StrandSet> fifty = strandsForMesh(s, o, 50);
+    ASSERT_TRUE(fifty.has_value());
+    EXPECT_EQ(fifty->strandCount(), thinStrandsById(s, 50).size());
+}
+
 TEST(StrandGeometry, ThinByIdKeepsTheLowestHashesAsASubset) {
     const StrandSet s = flatStrands(200);
     EXPECT_EQ(thinStrandsById(s, 500).size(), 200u);  // under the budget: every strand

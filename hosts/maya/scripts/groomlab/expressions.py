@@ -158,7 +158,8 @@ def find_expression(name):
 
 def control_name(node, variable):
     """The control (the groom attribute ctl_<name>) a keyable variable of `node` reads."""
-    return re.sub(r"[^A-Za-z0-9_]", "_", "%s_%s" % (node, variable))
+    import groomlab_core
+    return groomlab_core.control_name("%s_%s" % (node, variable))  # (the core's rule, every host's)
 
 
 def check_variables(variables):

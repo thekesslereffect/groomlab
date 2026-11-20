@@ -70,7 +70,6 @@ public:
     // The new scalp from a mesh file (.obj, .abc): the right view reloads, the left is kept. False
     // (and why in the status line) when it cannot be read.
     bool setNewScalpPath(const QString& path);
-    const QString& newScalpPath() const { return newScalpPath_; }
     std::shared_ptr<const ScalpMesh> meshOf(MarkerSide side) const;
 
     void setMethod(TransferMethod method);
@@ -78,8 +77,6 @@ public:
     bool markerEditing() const override { return usesMarkers(method()); }
     void setSymmetry(bool on);
     bool symmetry() const;
-    void setKeepLengths(bool on);
-    void setProjectMaps(bool on);
 
     // ---- Marker edits (the clicks call these after picking; scripts and tests call them) ----
     // A point snapped onto the side's mesh at the end of its list (with Symmetry X, its mirror

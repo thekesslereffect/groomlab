@@ -64,6 +64,7 @@
 #include "groomlab/alembic_operators.h"
 #include "groomlab/card_maps.h"
 #include "groomlab/graph.h"
+#include "groomlab/profile.h"
 #include "groomlab/version.h"
 #include "main_window.h"
 #include "glass.h"
@@ -109,6 +110,15 @@ void startLog() {
     gLog = file;
     gQtHandler = qInstallMessageHandler(logMessage);
     qInfo("GroomLab %s started (Qt %s, %s)", groomlab::kVersionString, qVersion(), qPrintable(QSysInfo::prettyProductName()));
+}
+
+// The phases the evaluations spent their time in since the last call (groomlab/profile.h,
+// GROOMLAB_PROFILE=1), printed and cleared; nothing while profiling is off.
+void printProfile(const char* what) {
+    if (!groomlab::profileEnabled()) return;
+    std::printf("GroomLab: profile, %s:\n%s", what, groomlab::profileReportText("    ").c_str());
+    std::fflush(stdout);
+    groomlab::profileReset();
 }
 
 }  // namespace
@@ -438,7 +448,8 @@ int main(int argc, char** argv) {
                         "surface presets: clay, scalp, plastic, metal, skin, skin light, skin dark, eye brown, eye blue, eye green\n"
                         "display options: colorMode (solid, colorset, attribute, random, clump, density), colorSource, colorMin,\n"
                         "                colorMax, guides, tubes, guidePoints (0-2), scalpMap, scalpMapChannel (rgb, r, g, b, a), cardsView,\n"
-                        "                lookdev, scalp, widthCoverage, coverageDensity, clumpLod, clumpLodError\n"
+                        "                lookdev, scalp, widthCoverage, coverageDensity, clumpLod, clumpLodError,\n"
+                        "                braidTubes (Show Tubes: a node's name, several as a|b, * for every one with the button)\n"
                         "brush settings: mode (comb, smooth, slide, lift, length, cut, curl, twist, straighten, attract,\n"
                         "                clump, paint, tube, erase, place, draw, part, flow, freeze), radius (px), strength, hardness,\n"
                         "                symmetry (x|y|z|none), symmetryCenter, level, group, pressure, maskByScalp, selectedOnly,\n"
@@ -529,6 +540,7 @@ int main(int argc, char** argv) {
     // Creation: the groom opened (or made on its mesh with its graph) and evaluated, to the
     // first drawn frame below (headless runs print both).
     const double creationMs = creation.nsecsElapsed() / 1e6;
+    printProfile("opening");
     if (followScalp >= 0 && !window.setFollowScalp(followScalp == 1) && headless) return 1;
     // The simulation first (Simulate Range, or a bake beside the groom), then the frame shown.
     if (simulateFrame >= 0.0 && !window.simulateTo(simulateFrame) && headless) return 1;
@@ -597,8 +609,10 @@ int main(int argc, char** argv) {
         }
         const int steps = v.size() > 2 ? std::max(v[2].toInt(), 1) : 7;
         if (!window.benchmarkDrag(drag.left(dot), drag.mid(dot + 1, equals - dot - 1), v[0].toDouble(), v[1].toDouble(), steps, viewSize)) return 1;
+        printProfile("the drag");
     }
     if (benchmarkOrbit > 0) window.benchmarkOrbit(viewSize, benchmarkOrbit);
+    if (benchmarkOrbit > 0) printProfile("the orbit");
     if (!save.isEmpty() && !window.saveTo(save) && headless) return 1;
     for (const QString& display : displays) {
         if (!window.setDisplayText(display) && scripted) return 1;
@@ -616,8 +630,10 @@ int main(int argc, char** argv) {
     if (!prmanImage.isEmpty() && !window.renderPrman(prmanImage, prmanTurntable, QSize(width, height), true) && scripted) return 1;
     if (liveBenchmark > 0) {
         if (uiGraph) window.setGraphShown(true);
+        printProfile("before the live benchmark");
         window.benchmarkLive(liveBenchmark, liveMode, [](const QString& line) {
             std::printf("GroomLab: %s\n", qPrintable(line));
+            printProfile("the live benchmark");
             QApplication::quit();
         });
         QTimer::singleShot(120000, &app, [] { QApplication::quit(); });
@@ -666,6 +682,7 @@ int main(int argc, char** argv) {
         std::printf("GroomLab: %s\n", qPrintable(window.cameraDescription()));
         double gpuMs = 0.0;
         const QImage image = window.renderOffscreen(viewSize, count, &ms, &api, nullptr, &firstMs, &gpuMs);
+        printProfile("the frames");
         if (benchmark > 0) {
             std::printf("GroomLab: %d frames at %dx%d on %s: %.2f ms/frame (GPU %.2f ms); creation (open, evaluate) %.1f ms, the first frame %.1f ms\n",
                         count, width, height, qPrintable(api), ms, gpuMs, creationMs, firstMs);

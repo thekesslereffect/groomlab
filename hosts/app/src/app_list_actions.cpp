@@ -83,9 +83,7 @@ void AppActions::addListBindings(ui::Bindings& b, MainWindow& w) {
                           if (!m->document_) return;
                           const std::string parent = group();
                           std::string suggestion = "group";
-                          if (const HierarchyPtr h = m->document_->session().authoredHierarchy()) {
-                              for (int k = 1; h->findGroup(suggestion) != kNoGroup; ++k) suggestion = "group" + std::to_string(k);
-                          }
+                          if (const HierarchyPtr h = m->document_->session().authoredHierarchy()) suggestion = h->freeGroupName("group");
                           auto add = [m](const std::string& under, const QString& name) {
                               if (!m->document_ || name.isEmpty()) return;
                               if (!m->guidesPanel_->addGroup(under, name.toStdString())) return;

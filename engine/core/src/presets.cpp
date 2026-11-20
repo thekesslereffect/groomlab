@@ -6,6 +6,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <map>
 #include <set>
 #include <sstream>
@@ -13,6 +14,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "groomlab/asset_files.h"
 #include "groomlab/graph_edit.h"
 #include "groomlab/graph_io.h"
 #include "groomlab/operators.h"
@@ -41,18 +43,22 @@ const std::vector<std::string>& presetFields() {
 
 std::string presetUserDir() {
     if (const std::optional<std::string> own = environmentVariable("GROOMLAB_USER_PRESETS"); own && !own->empty()) return *own;
-    // Maya's user application folder, where the Maya host saves (internalVar userAppDir).
+    // Maya's user application folder, where the Maya host saves (internalVar userAppDir): MAYA_APP_DIR
+    // when set, else the platform's default.
     fs::path home;
+    if (const std::optional<std::string> mayaApp = environmentVariable("MAYA_APP_DIR"); mayaApp && !mayaApp->empty()) {
+        home = fs::u8path(*mayaApp);
+    }
 #ifdef _WIN32
-    if (const std::optional<std::string> profile = environmentVariable("USERPROFILE"); profile && !profile->empty()) {
+    if (const std::optional<std::string> profile = environmentVariable("USERPROFILE"); home.empty() && profile && !profile->empty()) {
         home = fs::path(*profile) / "Documents" / "maya";
     }
 #elif defined(__APPLE__)
-    if (const std::optional<std::string> h = environmentVariable("HOME"); h && !h->empty()) {
+    if (const std::optional<std::string> h = environmentVariable("HOME"); home.empty() && h && !h->empty()) {
         home = fs::path(*h) / "Library" / "Preferences" / "Autodesk" / "maya";
     }
 #else
-    if (const std::optional<std::string> h = environmentVariable("HOME"); h && !h->empty()) home = fs::path(*h) / "maya";
+    if (const std::optional<std::string> h = environmentVariable("HOME"); home.empty() && h && !h->empty()) home = fs::path(*h) / "maya";
 #endif
     if (home.empty()) return {};
     return (home / "groomlab" / "presets").generic_string();
@@ -482,6 +488,17 @@ json fitted(json graph, std::optional<double> size) {
     const Factors factors = factorsFor(*size / from);
     fitControls(graph, factors);  // by the units the graph's params have before they are fitted
     fitNodes(graph, factors);
+    // (A number fitted past what a double holds would be written as null.)
+    const std::function<bool(const json&)> finite = [&](const json& v) {
+        if (v.is_number_float()) return std::isfinite(v.get<double>());
+        if (v.is_structured()) {
+            for (const json& c : v) {
+                if (!finite(c)) return false;
+            }
+        }
+        return true;
+    };
+    if (!finite(graph)) throw std::runtime_error("fitted to this scalp its sizes are too big to use");
     return graph;
 }
 
@@ -922,9 +939,7 @@ bool scales(double k) { return std::isfinite(k) && k > 0.0 && std::abs(k - 1.0) 
 
 // The graph's JSON as an object (blank or "{}": the default graph); null for text that is not one.
 json graphObject(const std::string& graphJson) {
-    const bool blank = graphJson.find_first_not_of(" \t\r\n") == std::string::npos;
-    json graph = json::parse(blank ? defaultGraphJson() : graphJson, nullptr, false);
-    if (graph.is_object() && graph.empty()) graph = json::parse(defaultGraphJson());
+    json graph = json::parse(graphOrDefault(graphJson), nullptr, false);
     return graph.is_object() ? graph : json();
 }
 
@@ -979,11 +994,32 @@ std::optional<double> presetScalpSize(const ScalpMesh& scalp) {
     if (points.empty()) return std::nullopt;
     Vec3f lo = points[0], hi = points[0];
     for (const Vec3f& p : points) {
-        lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
-        hi = {std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
+        lo = minPerAxis(lo, p);
+        hi = maxPerAxis(hi, p);
     }
     const double size = std::max({hi.x - lo.x, hi.y - lo.y, hi.z - lo.z});
     return size > 0.0 ? std::optional<double>(size) : std::nullopt;
+}
+
+bool starterLookGiven(const std::string& graphJson, const std::vector<std::string>& lookTypes) {
+    const json g = json::parse(graphJson, nullptr, false);
+    if (!g.is_object()) return false;
+    std::set<std::pair<std::string, std::string>> own;  // the default graph's (name, type)
+    for (const json& n : json::parse(defaultGraphJson()).value("nodes", json::array())) {
+        own.emplace(n.value("name", std::string()), n.value("type", std::string()));
+    }
+    for (const json& n : g.value("nodes", json::array())) {
+        const std::string type = n.value("type", std::string());
+        if (std::find(lookTypes.begin(), lookTypes.end(), type) == lookTypes.end()) continue;
+        if (!own.count({n.value("name", std::string()), type})) return true;
+    }
+    return false;
+}
+
+std::optional<double> paramScalpSize(const ScalpMesh* scalp, double groomScale) {
+    std::optional<double> size = scalp ? presetScalpSize(*scalp) : std::nullopt;
+    if (size && groomScale > 0.0) *size /= groomScale;
+    return size;
 }
 
 // ---- A look as text ---------------------------------------------------------------------------
@@ -1227,7 +1263,240 @@ std::string presetFromText(const std::string& text) {
         throw std::invalid_argument(message);
     }
     dropUnknownParams(data, 0);
+    // Then the params against their specs (presetParamProblems), as every host refuses a paste.
+    const std::vector<std::string> wrong = presetParamProblems(data.dump());
+    if (!wrong.empty()) {
+        std::string message;
+        for (std::size_t i = 0; i < std::min<std::size_t>(3, wrong.size()); ++i) {
+            std::string p = wrong[i];
+            if (p.size() > 200) p = p.substr(0, 200) + "...";
+            message += (i ? "; " : "") + p;
+        }
+        if (wrong.size() > 3) message += " (and " + std::to_string(wrong.size() - 3) + " more)";
+        throw std::invalid_argument(message);
+    }
     return data.dump();
+}
+
+namespace {
+
+std::string problemsMessage(const std::vector<std::string>& problems) {
+    std::string message;
+    for (std::size_t i = 0; i < std::min<std::size_t>(3, problems.size()); ++i) {
+        std::string p = problems[i];
+        if (p.size() > 200) p = p.substr(0, 200) + "...";
+        message += (i ? "; " : "") + p;
+    }
+    if (problems.size() > 3) message += " (and " + std::to_string(problems.size() - 3) + " more)";
+    return message;
+}
+
+// The problems of `graph` and its compounds' graphs over all their nodes ("compound/" before an
+// inner one's), two nodes of one name too.
+void pastedProblems(const json& graph, const std::string& where, int depth, std::vector<std::string>& out) {
+    std::set<std::string> names;
+    for (const json& n : graph.value("nodes", json::array())) {
+        const std::string name = n.value("name", std::string());
+        if (!names.insert(name).second) out.push_back(where + name + ": two nodes have this name");
+        const json params = n.value("params", json::object());
+        if (n.value("type", std::string()) == "Compound" && depth < kMaxPresetDepth && params.contains("definition") &&
+            params["definition"].is_object() && params["definition"].contains("graph")) {
+            pastedProblems(params["definition"]["graph"], where + name + "/", depth + 1, out);
+        }
+    }
+    try {
+        const GraphEdit edit(graph.dump());
+        for (const bool feeding : {true, false}) {
+            for (const std::string& p : edit.problems(feeding)) out.push_back(where + p);
+        }
+    } catch (const std::exception& e) {
+        out.push_back(where + e.what());
+    }
+}
+
+}  // namespace
+
+PastedGraph pastedGraphFromText(const std::string& text) {
+    json data = json::parse(presetFromText(text));
+    std::vector<std::string> problems;
+    pastedProblems(data, "", 0, problems);
+    if (!problems.empty()) throw std::invalid_argument(problemsMessage(problems));
+    // The backdrops with only what the Graph Editor draws.
+    if (data.contains("backdrops")) {
+        json kept = json::array();
+        for (const json& b : data["backdrops"].is_array() ? data["backdrops"] : json::array()) {
+            if (!b.is_object() || !isNumber(b.value("x", json())) || !isNumber(b.value("y", json())) || !isNumber(b.value("w", json())) ||
+                !isNumber(b.value("h", json()))) {
+                continue;
+            }
+            json drop = {{"x", b["x"].get<double>()}, {"y", b["y"].get<double>()}, {"w", b["w"].get<double>()}, {"h", b["h"].get<double>()}};
+            const json title = b.value("title", json());
+            drop["title"] = title.is_string() ? title.get<std::string>().substr(0, 200) : std::string("Backdrop");
+            const json color = b.value("color", json());
+            if (color.is_array() && color.size() == 3 && std::all_of(color.begin(), color.end(), [](const json& c) { return isNumber(c); })) {
+                drop["color"] = json::array();
+                for (const json& c : color) drop["color"].push_back(static_cast<int>(std::clamp(c.get<double>(), 0.0, 255.0)));
+            }
+            kept.push_back(std::move(drop));
+        }
+        data["backdrops"] = std::move(kept);
+    }
+    PastedGraph out;
+    out.presetJson = withoutNetworkFileParams(data.dump(), &out.removed);
+    return out;
+}
+
+// ---- Params against their specs (every host's preset check) ------------------------------------
+
+namespace {
+
+// The operators' param specs by type, then name (operatorSpecsJson's), read once.
+const std::map<std::string, std::map<std::string, json>>& paramSpecsByType() {
+    static const std::map<std::string, std::map<std::string, json>> specs = [] {
+        std::map<std::string, std::map<std::string, json>> out;
+        for (const json& op : json::parse(operatorSpecsJson())) {
+            auto& params = out[op.value("type", std::string())];
+            for (const json& p : op.value("params", json::array())) params[p.value("name", std::string())] = p;
+        }
+        return out;
+    }();
+    return specs;
+}
+
+// A value as the messages show it (Python's repr, as Maya's check wrote them): text quoted.
+std::string shown(const json& v) { return v.is_string() ? "'" + v.get<std::string>() + "'" : v.dump(); }
+
+
+// Whether a param's value is a map (MapRef: a texture, guide layer, color set, channel, expression).
+bool isMapValue(const json& v) {
+    if (!v.is_object()) return false;
+    for (const char* key : {"texture", "guide", "colorSet", "attribute", "expression", "channel"}) {
+        if (v.contains(key)) return true;
+    }
+    return false;
+}
+
+std::string valueProblem(const json& value, const json& spec) {
+    const std::string kind = spec.value("kind", std::string());
+    if (isMapValue(value)) {
+        const bool plain = kind == "bool" || kind == "int" || kind == "float" || kind == "string" || kind == "vec3";
+        return plain && !spec.value("mappable", false) ? "a map on a param that takes none" : std::string();
+    }
+    if (kind == "bool") return value.is_boolean() ? std::string() : "wants true or false, has " + shown(value);
+    if (kind == "int") {
+        if (value.is_number() && std::floor(value.get<double>()) == value.get<double>()) return {};
+        return "wants a whole number, has " + shown(value);
+    }
+    if (kind == "float") return value.is_number() ? std::string() : "wants a number, has " + shown(value);
+    if (kind == "string") {
+        if (!value.is_string()) return "wants text, has " + shown(value);
+        const json choices = spec.value("choices", json::array());
+        if (!choices.empty() && std::find(choices.begin(), choices.end(), value) == choices.end()) {
+            std::string listed;
+            for (const json& c : choices) listed += (listed.empty() ? "" : ", ") + c.get<std::string>();
+            return shown(value) + " is not one of " + listed;
+        }
+        return {};
+    }
+    if (kind == "vec3") {
+        const bool ok = value.is_array() && value.size() == 3 && std::all_of(value.begin(), value.end(), isNumber);
+        return ok ? std::string() : "wants [x, y, z], has " + shown(value);
+    }
+    if (kind == "ramp") {
+        const json keys = value.is_object() ? value.value("keys", json()) : value;
+        if (keys.is_number()) return {};
+        const bool ok = keys.is_array() && !keys.empty() && std::all_of(keys.begin(), keys.end(), [](const json& k) {
+            return k.is_array() && k.size() == 2 && k[0].is_number() && k[1].is_number();
+        });
+        return ok ? std::string() : "wants a ramp [[position, value], ...], has " + shown(value);
+    }
+    return {};
+}
+
+void paramProblems(const json& graph, const std::string& where, std::vector<std::string>& problems, int depth) {
+    if (depth > 32 || !graph.is_object() || !graph.contains("nodes") || !graph["nodes"].is_array()) return;
+    const auto& all = paramSpecsByType();
+    for (const json& node : graph["nodes"]) {
+        if (!node.is_object() || !node.contains("type") || !node["type"].is_string()) continue;
+        const std::string type = node["type"].get<std::string>();
+        const std::string label = where + node.value("name", std::string());
+        const auto found = all.find(type);
+        if (found == all.end()) continue;  // (an unknown type: presetFromText's)
+        const std::map<std::string, json>& specs = found->second;
+        const json params = node.contains("params") && node["params"].is_object() ? node["params"] : json::object();
+        std::map<std::string, json> exposed;  // a Compound's own params: the inner params they name (null: none)
+        if (type == "Compound") {
+            const json definition = params.value("definition", json());
+            if (!definition.is_object()) {
+                problems.push_back(label + ": the Compound has no definition");
+            } else {
+                std::map<std::string, std::string> inner;
+                const json innerNodes = definition.value("graph", json::object()).value("nodes", json::array());
+                for (const json& n : innerNodes) {
+                    if (n.is_object()) inner[n.value("name", std::string())] = n.value("type", std::string());
+                }
+                const json expose = definition.value("expose", json::object());
+                for (const auto& [name, target] : expose.items()) {
+                    const std::string text = target.is_string() ? target.get<std::string>() : target.dump();
+                    const std::size_t dot = text.find('.');
+                    json spec;
+                    if (dot != std::string::npos && inner.count(text.substr(0, dot)) && all.count(inner[text.substr(0, dot)])) {
+                        const auto& innerSpecs = all.at(inner[text.substr(0, dot)]);
+                        const auto it = innerSpecs.find(text.substr(dot + 1));
+                        if (it != innerSpecs.end()) spec = it->second;
+                    }
+                    if (spec.is_null()) problems.push_back(label + ": exposed '" + name + "' names '" + text + "', which is no param");
+                    exposed[name] = spec;
+                }
+                paramProblems(definition.value("graph", json::object()), label + "/", problems, depth + 1);
+            }
+        }
+        auto specOf = [&](const std::string& name) -> const json* {
+            const auto e = exposed.find(name);
+            if (e != exposed.end()) return e->second.is_null() ? nullptr : &e->second;
+            const auto it = specs.find(name);
+            return it == specs.end() ? nullptr : &it->second;
+        };
+        for (const auto& [name, value] : params.items()) {
+            if (type == "Compound" && name == "definition") continue;
+            const json* spec = specOf(name);
+            if (!spec) {
+                if (!exposed.count(name)) problems.push_back(label + ": " + type + " has no param '" + name + "'");
+                continue;
+            }
+            const std::string problem = valueProblem(value, *spec);
+            if (!problem.empty()) problems.push_back(label + "." + name + ": " + problem);
+        }
+        const json inputs = node.value("paramInputs", json::array());
+        for (const json& p : inputs) {
+            if (!p.is_string()) continue;
+            const json* spec = specOf(p.get<std::string>());
+            if (!spec || !spec->contains("port")) problems.push_back(label + ": '" + p.get<std::string>() + "' is exposed as an input but cannot be one");
+        }
+        const json controls = node.value("paramControls", json::object());
+        for (const auto& [name, control] : controls.items()) {
+            const json* spec = specOf(name);
+            const std::string kind = spec ? spec->value("kind", std::string()) : std::string();
+            if (!spec || !spec->value("animatable", true) || (kind != "float" && kind != "int" && kind != "bool" && kind != "vec3")) {
+                problems.push_back(label + ": '" + name + "' is keyed but cannot be");
+            } else if ((kind == "vec3") != control.is_array()) {
+                problems.push_back(label + ": '" + name + "' is keyed by " + shown(control) + ", which does not fit a " + kind);
+            }
+        }
+        if (type == "Expression" && params.contains("variables") && params["variables"].is_string()) {
+            if (json::parse(params["variables"].get<std::string>(), nullptr, false).is_discarded()) {
+                problems.push_back(label + ".variables: not JSON");
+            }
+        }
+    }
+}
+
+}  // namespace
+
+std::vector<std::string> presetParamProblems(const std::string& graphJson) {
+    std::vector<std::string> problems;
+    paramProblems(json::parse(graphJson, nullptr, false), "", problems, 0);
+    return problems;
 }
 
 }  // namespace groomlab

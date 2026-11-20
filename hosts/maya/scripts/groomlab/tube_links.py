@@ -295,10 +295,9 @@ def _orient_linked(tube, item, distance):
         if item.get("flipped"):
             tube.reverse()
     else:
-        before = tube_mesh.section_center(tube.rings[0])
         tube_mesh.orient(tube, distance)
         item["signature"] = signature
-        item["flipped"] = tube_mesh.section_center(tube.rings[0]) != before
+        item["flipped"] = bool(tube.flipped)
         item["_changed"] = True
     if item.get("ignoreBevels", True):
         tube.merge_bevels()

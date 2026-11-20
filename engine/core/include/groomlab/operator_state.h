@@ -33,22 +33,31 @@ class FlowField;  // flow.h
 
 // ---- Clump --------------------------------------------------------------------------------------
 
-// Each center as Clump follows it: resampled evenly by arc length to this many points.
+// Each center as Clump follows it: resampled evenly by arc length to this many points at the
+// least. Centers that turn more (curled or coiled guides) take more, the same count for every
+// center of a run (clumpCenterSamples), so the strands follow each turn rather than the chords
+// across it; at most kClumpCenterSamplesMost.
 constexpr std::size_t kClumpCenterSamples = 32;
+constexpr std::size_t kClumpCenterSamplesMost = 256;
 constexpr std::uint32_t kNoClumpCenter = 0xffffffffu;
-// A guide's curve as Clump follows it (centers given as guides), kClumpCenterSamples points into
-// `out`: with 3 points or more and fewer than that, the smooth curve through them (as Interpolate
-// blends it), so clumps follow its bends, not the chords between its points; else its points
-// resampled evenly by arc length. The CPU's and the GPU run's alike.
-void clumpGuideCurve(const Vec3f* points, std::size_t count, Vec3f* out);
+// The points a center's curve takes to follow `points`: a sample every 15 degrees of its turning
+// (the sum of the angles between its segments), in steps of kClumpCenterSamples, from
+// kClumpCenterSamples to kClumpCenterSamplesMost. A run takes the most any of its centers does.
+std::size_t clumpCenterSamples(const Vec3f* points, std::size_t count);
+// A guide's curve as Clump follows it (centers given as guides), `samples` points into `out`: with
+// 3 points or more and fewer than that, the smooth curve through them (as Interpolate blends it),
+// so clumps follow its bends, not the chords between its points; else its points resampled evenly
+// by arc length. The CPU's and the GPU run's alike.
+void clumpGuideCurve(const Vec3f* points, std::size_t count, Vec3f* out, std::size_t samples = kClumpCenterSamples);
 
 // What Clump made `output` from: its centers (the ones with 2 points or more, with centersFrom
-// inputPoints 1 or more, in the centers' order), their curves resampled to kClumpCenterSamples
-// points each (the center's own, or its axis strand's: `axes`), and each strand's center (kNoClumpCenter:
+// inputPoints 1 or more, in the centers' order), their curves resampled to `samples` points each
+// (the center's own, or its axis strand's: `axes`), and each strand's center (kNoClumpCenter:
 // not clumped, a shaft or a vane without centers). The assignment is by root (and parts, vanes),
 // so it holds while the strands' and centers' roots stay.
 struct ClumpState {
-    std::vector<Vec3f> curves;  // center c at [c * kClumpCenterSamples, (c + 1) * kClumpCenterSamples)
+    std::size_t samples = kClumpCenterSamples;  // points a center's curve (clumpCenterSamples)
+    std::vector<Vec3f> curves;                  // center c at [c * samples, (c + 1) * samples)
     // Per center: the scalp's normal at its root (zero: none), what its lock and ribbon frames
     // start from (so they turn with the scalp).
     std::vector<Vec3f> centerNormals;

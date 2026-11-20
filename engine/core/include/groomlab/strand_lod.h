@@ -152,7 +152,8 @@ public:
     std::size_t groupCount() const;
     // Grouped by the clump channel (else by cells of the roots).
     bool clumped() const { return clumped_; }
-    // The strands carry widths (one a point): without them lines draw opaque, and nothing is thinned.
+    // The strands carry widths (displayWidths: one a point, some set): without them lines draw
+    // opaque, and nothing is thinned.
     bool hasWidths() const { return hasWidths_; }
     // The strands' bounding sphere (lodView: the center's depth).
     Vec3f center() const { return center_; }

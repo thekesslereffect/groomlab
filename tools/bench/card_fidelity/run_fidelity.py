@@ -49,7 +49,6 @@ from PIL import Image, ImageDraw
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.normpath(os.path.join(HERE, "..", "..", ".."))
 MAYA = os.environ.get("MAYA_LOCATION", r"C:\Program Files\Autodesk\Maya2022")
-WHATS = ("strands", "hero", "mid", "low")
 
 
 # -- Running Maya -------------------------------------------------------------------------------

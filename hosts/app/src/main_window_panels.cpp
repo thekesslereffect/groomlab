@@ -419,6 +419,7 @@ void MainWindow::wireOverlay() {
         if (document_) reevaluate();
     });
     connect(graph_, &NodeGraphView::clumpColorsToggled, this, [this](const std::string& node) { toggleClumpColors(node); });
+    connect(graph_, &NodeGraphView::braidTubesToggled, this, [this](const std::string& node) { toggleBraidTubes(node); });
     connect(graph_, &NodeGraphView::nodeRenamed, this, [this](const std::string& from, const std::string& to) { followRenamedNode(from, to); });
     connect(graph_, &NodeGraphView::edited, this, [this] { graphEdited(); });
     connect(graph_, &NodeGraphView::message, this, [this](const QString& text) { report(text); });
@@ -533,6 +534,11 @@ void MainWindow::chooseTool(const QString& id) {
         groomTools_->setStatus(QString::fromUtf8(e.what()));
         report(QString::fromUtf8(e.what()));
         return;
+    }
+    if (tool == "part" && document_) {
+        // Drawn parts open the hair: a Part node when the graph has none (Maya's draw_part_tool).
+        std::string made;
+        if (document_->ensurePartNode(&made).empty() && !made.empty()) graphEdited();
     }
     if (tool != before) {
         BrushToolSettings& s = brush_.settings();

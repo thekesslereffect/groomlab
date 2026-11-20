@@ -100,6 +100,9 @@ real feathers have.
   shaft (0 root, 1 tip). An expression such as `1 - smoothstep(0.2, 0.5, $shaftU)` is 1 at the
   base and 0 further up the vane; use it for Noise `amplitude` and Curl `radius` to break up the
   lowest barbs into fluff. Multiply by `1 - $isShaft` to exclude the shaft itself.
+- **Feathers in wind:** put Wind (or Jiggle) on the shafts, before Propagate, to sway whole
+  feathers; the barbs regrow along the moving shafts. After Propagate it is the barbs' own
+  flutter: the shafts hold still. Use both for a feather that sways and flutters.
 
 Propagate writes these per-strand attributes, available to expressions, maps and renderers:
 `featherId`, `shaftU`, `side`, `barbIndex`, `isShaft`, `isDown` (with down), `vaneU`,

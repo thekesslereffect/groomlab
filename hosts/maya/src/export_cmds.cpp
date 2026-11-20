@@ -61,6 +61,7 @@
 #if GROOMLAB_HAS_ALEMBIC
 #include "groomlab/alembic_io.h"
 #include "groomlab/engine_export.h"
+#include "groomlab/texture.h"
 #endif
 
 namespace groomlab::maya {
@@ -100,14 +101,8 @@ const char* kDriverObjectFlagLong = "-driverObject";
 const char* kRenderOverridesFlag = "-ro";
 const char* kRenderOverridesFlagLong = "-renderOverrides";
 
-// Object names in Alembic and USD: the groom's transform, namespaces flattened.
-std::string exportName(const MDagPath& shapePath) {
-    std::string name = MFnDagNode(shapePath.transform()).name().asChar();
-    for (char& c : name) {
-        if (c == ':' || c == '/' || c == '|') c = '_';
-    }
-    return name;
-}
+// Object names in Alembic and USD: the groom's transform, as every host names it (export_view.h).
+std::string exportName(const MDagPath& shapePath) { return exportObjectName(MFnDagNode(shapePath.transform()).name().asChar()); }
 
 MSyntax curveSyntax() {
     MSyntax syntax;
@@ -342,14 +337,6 @@ MSyntax ExportAlembicCmd::newSyntax() {
 
 namespace {
 
-StrandSet toCurves(const GuideSet& guides) {
-    StrandSet out;
-    for (const Guide& g : guides.guides()) {
-        if (g.points.size() >= 2) out.addStrand(g.id, g.points, {}, g.root);
-    }
-    return out;
-}
-
 // What the guide export keeps from frame to frame: the inputs converted, and the groom (its
 // hierarchy parsed once; each frame gives it the scalp and poses of its time).
 struct GuideFrames {
@@ -364,7 +351,7 @@ MStatus guidesAtFrame(const char* command, const MObject& node, const MString& g
     try {
         if (drivers) {  // the curves exactly as the groom samples them (driverCurvesFromNode): the farm drives the same
             const GuidesPtr curves = driverCurvesFromNode(node);
-            *out = curves ? toCurves(*curves) : StrandSet{};
+            *out = curves ? guideCurves(*curves) : StrandSet{};
             // Their twist as a point channel on every frame (0 where none: the first frame decides
             // what the file carries, and a rig's twist may start at 0), read back as the layer.
             if (curves) {
@@ -383,19 +370,18 @@ MStatus guidesAtFrame(const char* command, const MObject& node, const MString& g
         }
         if (poses) {
             const GuidesPtr posed = guidePosesFromNode(node, &frames.inputs);
-            *out = posed ? toCurves(*posed) : StrandSet{};
+            *out = posed ? guideCurves(*posed) : StrandSet{};
             return MS::kSuccess;
         }
         if (!frames.groom) {
-            GroomData data = groomDataFromNode(node, &frames.inputs);
-            data.correctivesJson.clear();  // posed guides feed sim caches: shot sculpts apply on top of those
-            frames.groom = std::make_unique<GroomSession>(std::move(data));
+            frames.groom = std::make_unique<GroomSession>(groomDataFromNode(node, &frames.inputs));
         } else {  // another time: only the scalp and the poses change what the hierarchy is
             frames.groom->setScalp(scalpFromNode(node, &frames.inputs, nullptr, false));  // the maps as first read
             frames.groom->setGuidePoses(guidePosesFromNode(node, &frames.inputs));
         }
-        // "*": every guide the Guides node feeds (what a GuideCache node poses), else one group's.
-        *out = toCurves(guidesToSimulate(frames.groom->hierarchy(), frames.groom->data().guides, group.asChar()));
+        // "*": every guide the Guides node feeds (what a GuideCache node poses), else one group's;
+        // posed, no shot sculpts (they apply on top of those: GroomSession::simulationGuides).
+        *out = guideCurves(frames.groom->simulationGuides(group.asChar()));
         return MS::kSuccess;
     } catch (const std::exception& e) {
         return fail(command, e.what());
@@ -519,7 +505,7 @@ MStatus ExportAlembicCmd::doIt(const MArgList& args) {
                 engine.pointsPerStrand = options.pointsPerStrand;
                 int barbPoints = 0;
                 if (db.isFlagSet("-bpp")) db.getFlagArgument("-bpp", 0, barbPoints);
-                if (barbPoints != 0 && (barbPoints < 2 || barbPoints > 4096)) return fail(kName, "-barbPoints must be 0 or 2 to 4096");
+                if (barbPoints < 0) return fail(kName, "-barbPoints must be 0 or more");  // (its range: EngineExportOptions::problem)
                 int maxStrands = static_cast<int>(kUnityMaxStrandsPerGroup);
                 if (db.isFlagSet("-msg")) db.getFlagArgument("-msg", 0, maxStrands);
                 if (maxStrands < 0) return fail(kName, "-maxStrandsPerGroup must be 0 (no limit) or more");
@@ -538,7 +524,7 @@ MStatus ExportAlembicCmd::doIt(const MArgList& args) {
                     [&](double, const StrandSet& evaluated, const MeshPtr& scalp, NodeEvaluator& evaluator) {
                         StrandSet primaries;  // the hierarchy's level 0: what Unreal simulates
                         if (unreal) {
-                            if (const HierarchyPtr h = evaluator.hierarchy()) primaries = toCurves(h->flatten(0));
+                            primaries = primaryGuideCurves(evaluator.hierarchy());
                         }
                         writer.writeFrame(evaluated, unreal ? &primaries : nullptr, scalp.get());
                     },
@@ -863,6 +849,11 @@ MStatus ExportGroomCmd::doIt(const MArgList& args) {
         }
         // A Card Atlas block's card (the file of blocks is the atlas).
         groom.cardBlock = MFnDependencyNode(path.node()).findPlug("cardBlock", true).asString().asChar();
+        // The viewport's guide group colors, hidden groups and Show Tubes' nodes: the groom's in
+        // every host (the app and Blender read and write them too).
+        groom.guideGroupColors = MFnDependencyNode(path.node()).findPlug("guideGroupColors", true).asString().asChar();
+        groom.hiddenGuideGroups = MFnDependencyNode(path.node()).findPlug("hiddenGuideGroups", true).asString().asChar();
+        groom.braidTubes = MFnDependencyNode(path.node()).findPlug("braidTubes", true).asString().asChar();
         // The last transfer's marker pairs (the next transfer reuses them).
         try {
             const MPlug markers = MFnDependencyNode(path.node()).findPlug("transferMarkers", true);
@@ -946,7 +937,7 @@ MStatus ExportGltfCmd::doIt(const MArgList& args) {
         int resolution = 0, capResolution = 0;
         if (db.isFlagSet("-r")) db.getFlagArgument("-r", 0, resolution);
         if (db.isFlagSet("-cr")) db.getFlagArgument("-cr", 0, capResolution);
-        resolution = resolution > 0 ? std::clamp(resolution, 16, 16384) : 0;  // 0: the Cards nodes' atlasSize
+        resolution = resolution > 0 ? std::clamp(resolution, kMinBakeResolution, kMaxCardBakeResolution) : 0;  // 0: the Cards nodes' atlasSize
         bool binary = true, cap = true, rootToTip = true, tangents = true;
         if (db.isFlagSet("-bin")) db.getFlagArgument("-bin", 0, binary);
         if (db.isFlagSet("-cap")) db.getFlagArgument("-cap", 0, cap);
@@ -956,10 +947,11 @@ MStatus ExportGltfCmd::doIt(const MArgList& args) {
         if (!(scale > 0.0)) return fail(kName, "-scale must be positive");
         const MString alpha = flagString(db, "-am", "mask");
         CardGltfSettings settings;
-        if (alpha == "mask") settings.alphaMode = GltfMaterial::AlphaMode::Mask;
-        else if (alpha == "blend") settings.alphaMode = GltfMaterial::AlphaMode::Blend;
-        else if (alpha == "opaque") settings.alphaMode = GltfMaterial::AlphaMode::Opaque;
-        else return fail(kName, "-alphaMode is mask, blend or opaque");
+        try {
+            settings.alphaMode = gltfAlphaModeNamed(alpha.asChar());  // every host's (gltf_writer.h)
+        } catch (const std::invalid_argument& e) {
+            return fail(kName, (std::string("-") + e.what()).c_str());
+        }
         settings.alphaCutoff = static_cast<float>(flagDouble(db, "-ac", 0.5));
         settings.scale = static_cast<float>(scale);
         settings.zUp = MGlobal::isZAxisUp();
@@ -1104,11 +1096,7 @@ MStatus ScaleMeshCmd::redoIt() {
         fn.setName(MFnDagNode(transform_).name() + "Shape");
         fn.assignUVs(counts, connects);
         // Per face: a scale's data in two more uv sets and a color set, every corner the same.
-        std::vector<std::uint32_t> owner(faces, 0);
-        for (std::size_t k = 0; k < m.scales.size(); ++k) {
-            const ScaleMesh::Scale& s = m.scales[k];
-            for (std::uint32_t f = s.firstTriangle; f < s.firstTriangle + s.triangleCount && f < faces; ++f) owner[f] = static_cast<std::uint32_t>(k);
-        }
+        const std::vector<std::uint32_t> owner = m.triangleOwners();  // every host's (scales.h)
         MIntArray perFace(faces * 3);
         for (unsigned i = 0; i < faces * 3; ++i) perFace[i] = static_cast<int>(owner[i / 3]);
         const auto scaleCount = static_cast<unsigned>(m.scales.size());
@@ -1189,7 +1177,7 @@ MStatus BakeScaleMapsCmd::doIt(const MArgList& args) {
         options.resolution = static_cast<int>(flagDouble(db, "-r", 2048));
         options.maxHeight = static_cast<float>(flagDouble(db, "-mh", 0.0));
         options.padding = static_cast<int>(flagDouble(db, "-p", 8));
-        if (options.resolution < 16 || options.resolution > 8192) return fail(kName, "-resolution must be 16 to 8192");
+        if (options.resolution < kMinBakeResolution || options.resolution > kMaxMapBakeResolution) return fail(kName, "-resolution must be 16 to 8192");
         if (options.maxHeight < 0.0f) return fail(kName, "-maxHeight must be 0 (measured) or more");
         std::shared_ptr<const ScaleMesh> mesh;
         MeshPtr scalp;
@@ -1250,7 +1238,7 @@ MStatus BakeFollicleMapCmd::doIt(const MArgList& args) {
         options.resolution = static_cast<int>(flagDouble(db, "-r", 2048));
         options.radius = static_cast<float>(flagDouble(db, "-rad", 0.0));
         options.padding = static_cast<int>(flagDouble(db, "-p", 8));
-        if (options.resolution < 16 || options.resolution > 8192) return fail(kName, "-resolution must be 16 to 8192");
+        if (options.resolution < kMinBakeResolution || options.resolution > kMaxMapBakeResolution) return fail(kName, "-resolution must be 16 to 8192");
         if (options.radius < 0.0f) return fail(kName, "-radius must be 0 (from the roots' spacing) or more");
         // Every root at the current time (none buried: a game's strands), on the scalp it grew on.
         NodeEvaluator evaluator(path.node(), false);

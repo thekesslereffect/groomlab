@@ -28,6 +28,7 @@
 
 #include "groomlab/parallel.h"
 #include "groomlab/random.h"
+#include "groomlab/udim.h"
 #include "groomlab/process_caches.h"
 
 #define STB_IMAGE_IMPLEMENTATION
@@ -117,8 +118,30 @@ Tiles tilesOf(const std::string& pattern) {
 
 // The UDIM pattern of a path ("<UDIM>" where the tile number goes), or empty
 // for a plain image. A "1001"-style number in the file name only counts when
-// another tile of the set exists beside it: a lone 1001 is just a name.
+// another tile of the set exists beside it: a lone 1001 is just a name. A plain
+// name whose file is missing names the tile set "<name>.<UDIM><ext>" when any of
+// its tiles exists: a map stored as "density.png" and painted over several tiles
+// writes "density.1001.png", "density.1002.png"... (udim.h udimPathFor).
+std::string udimPatternNamed(const std::string& path);
+
 std::string udimPattern(const std::string& path) {
+    std::string named = udimPatternNamed(path);
+    if (!named.empty() || path.empty()) return named;
+    std::error_code ec;
+    if (fs::exists(toPath(path), ec)) return {};
+    const std::size_t slash = path.find_last_of("/\\");
+    const std::size_t nameStart = slash == std::string::npos ? 0 : slash + 1;
+    const std::size_t dot = path.find_last_of('.');
+    const std::size_t end = dot == std::string::npos || dot < nameStart ? path.size() : dot;
+    const std::string pattern = path.substr(0, end) + "." + kUdimToken + path.substr(end);
+    const Tiles tiles = tilesOf(pattern);
+    for (const bool there : tiles) {
+        if (there) return pattern;
+    }
+    return {};
+}
+
+std::string udimPatternNamed(const std::string& path) {
     const std::size_t slash = path.find_last_of("/\\");
     const std::size_t nameStart = slash == std::string::npos ? 0 : slash + 1;
     std::string name = path.substr(nameStart);
@@ -161,18 +184,18 @@ std::uint64_t stampOf(const fs::path& path) {
 }
 
 // The file's stamp with its path in it: a cache keyed by it never takes another file of the same
-// size and time (a search path changed, a copy keeping its time) for this one.
-std::uint64_t stampFromDisk(const std::string& path);
-std::uint64_t stampWithPath(const std::string& path) {
-    const std::uint64_t stamp = stampFromDisk(path);
+// size and time (a search path changed, a copy keeping its time) for this one. `pattern`: the
+// path's udimPattern (found once: it lists the folder).
+std::uint64_t stampFromDisk(const std::string& path, const std::string& pattern);
+std::uint64_t stampWithPath(const std::string& path, const std::string& pattern) {
+    const std::uint64_t stamp = stampFromDisk(path, pattern);
     if (!stamp) return 0;
-    const std::string pattern = udimPattern(path);  // a tile's: its set's (the set is what it stamps)
+    // (A tile's: its set's, the set is what it stamps.)
     const std::uint64_t h = hashString(stamp, pattern.empty() ? path : pattern);
     return h ? h : 1;
 }
 
-std::uint64_t stampFromDisk(const std::string& path) {
-    const std::string pattern = udimPattern(path);
+std::uint64_t stampFromDisk(const std::string& path, const std::string& pattern) {
     if (pattern.empty()) return stampOf(toPath(path));
     const Tiles tiles = tilesOf(pattern);
     std::uint64_t h = 0;
@@ -186,6 +209,16 @@ std::uint64_t stampFromDisk(const std::string& path) {
 
 // The stamps of the innermost ScopedFileStamps' owner on this thread (null: none).
 thread_local std::unordered_map<std::string, std::uint64_t>* tStamps = nullptr;
+
+// fileStamp(path); `pattern`: the path's udimPattern when the caller has it (null: found here,
+// and only when the stamp is not already known).
+std::uint64_t fileStampOf(const std::string& path, const std::string* pattern) {
+    auto fromDisk = [&] { return stampWithPath(path, pattern ? *pattern : udimPattern(path)); };
+    if (!tStamps) return fromDisk();
+    auto it = tStamps->find(path);
+    if (it == tStamps->end()) it = tStamps->emplace(path, fromDisk()).first;
+    return it->second;
+}
 
 bool isPnm(const std::string& path) {
     std::ifstream in(toPath(path), std::ios::binary);
@@ -231,12 +264,23 @@ std::unique_ptr<Texture::Image> decode(const std::string& path) {
 
 }  // namespace
 
+std::string udimPatternOf(const std::string& path) { return udimPattern(path); }
+
 std::array<float, 4> Texture::Image::texel(int x, int y) const {
     x = ((x % width) + width) % width;
     y = ((y % height) + height) % height;
     const float* p = rgba.data() + (static_cast<std::size_t>(y) * width + x) * 4;
     return {p[0], p[1], p[2], p[3]};
 }
+
+namespace {
+
+// texel(x, y) of coordinates already wrapped into the image (as texel wraps them).
+inline const float* wrappedTexel(const Texture::Image& image, int x, int y) {
+    return image.rgba.data() + (static_cast<std::size_t>(y) * image.width + x) * 4;
+}
+
+}  // namespace
 
 std::array<float, 4> Texture::Image::sample(float u, float v) const {
     // Texel centers at (i + 0.5) / size; row 0 is the top of the image.
@@ -245,7 +289,13 @@ std::array<float, 4> Texture::Image::sample(float u, float v) const {
     const float x0f = std::floor(fx), y0f = std::floor(fy);
     const float tx = fx - x0f, ty = fy - y0f;
     const int x0 = static_cast<int>(x0f), y0 = static_cast<int>(y0f);
-    const auto a = texel(x0, y0), b = texel(x0 + 1, y0), c = texel(x0, y0 + 1), d = texel(x0 + 1, y0 + 1);
+    // The four texels around it, wrapped as texel wraps them (each column and row once).
+    const int xa = ((x0 % width) + width) % width, xb = (((x0 + 1) % width) + width) % width;
+    const int ya = ((y0 % height) + height) % height, yb = (((y0 + 1) % height) + height) % height;
+    const float* a = wrappedTexel(*this, xa, ya);
+    const float* b = wrappedTexel(*this, xb, ya);
+    const float* c = wrappedTexel(*this, xa, yb);
+    const float* d = wrappedTexel(*this, xb, yb);
     std::array<float, 4> out{};
     for (int k = 0; k < 4; ++k) {
         const float top = a[k] + (b[k] - a[k]) * tx;
@@ -290,6 +340,22 @@ std::size_t Texture::bytes() const {
     return tileBytes_.load(std::memory_order_relaxed);
 }
 
+const Texture::Image* Texture::udimTile(int tile) const {
+    if (udimPattern_.empty() || tile < kTileBase || tile >= kTileEnd) return nullptr;
+    const Image* image = this->tile(tile - kTileBase);
+    return image == &kMissingTile ? nullptr : image;
+}
+
+std::vector<int> Texture::udimTiles() const {
+    std::vector<int> out;
+    if (udimPattern_.empty()) return out;
+    const Tiles tiles = tilesOf(udimPattern_);
+    for (int t = kTileBase; t < kTileEnd; ++t) {
+        if (tiles[static_cast<std::size_t>(t - kTileBase)]) out.push_back(t);
+    }
+    return out;
+}
+
 std::string Texture::error() const {
     std::lock_guard<std::mutex> lock(tileLock_);
     return error_;
@@ -326,7 +392,7 @@ std::array<float, 4> Texture::sample(float u, float v) const {
 }
 
 bool isImagePath(const std::string& name) {
-    if (name.find("<UDIM>") != std::string::npos) return true;
+    if (udimTokenIn(name)) return true;  // (a tile set, any token: udim.h)
     const std::size_t dot = name.find_last_of('.');
     if (dot == std::string::npos || name.find_first_of("/\\", dot) != std::string::npos) return false;
     std::string ext = name.substr(dot + 1);
@@ -342,20 +408,26 @@ bool isPngPath(const std::string& path) {
 }
 
 bool isGrayImage(const Texture& image) {
-    const Texture::Image* im = image.image();
-    if (!im) return false;
-    for (std::size_t i = 0; i + 2 < im->rgba.size(); i += 4) {
-        if (im->rgba[i] != im->rgba[i + 1] || im->rgba[i + 1] != im->rgba[i + 2]) return false;
+    auto gray = [](const Texture::Image& im) {
+        for (std::size_t i = 0; i + 2 < im.rgba.size(); i += 4) {
+            if (im.rgba[i] != im.rgba[i + 1] || im.rgba[i + 1] != im.rgba[i + 2]) return false;
+        }
+        return true;
+    };
+    if (image.isUdim()) {  // a tile set: every tile there gray
+        const std::vector<int> tiles = image.udimTiles();
+        if (tiles.empty()) return false;
+        for (const int tile : tiles) {
+            const Texture::Image* im = image.udimTile(tile);
+            if (im && !gray(*im)) return false;
+        }
+        return true;
     }
-    return true;
+    const Texture::Image* im = image.image();
+    return im && gray(*im);
 }
 
-std::uint64_t fileStamp(const std::string& path) {
-    if (!tStamps) return stampWithPath(path);
-    auto it = tStamps->find(path);
-    if (it == tStamps->end()) it = tStamps->emplace(path, stampWithPath(path)).first;
-    return it->second;
-}
+std::uint64_t fileStamp(const std::string& path) { return fileStampOf(path, nullptr); }
 
 ScopedFileStamps::ScopedFileStamps() {
     if (tStamps) return;  // nested: the outer scope's answers
@@ -504,7 +576,7 @@ TexturePtr cachedTexture(const std::string& path) {
 TexturePtr loadTexture(const std::string& path) {
     const std::string pattern = udimPattern(path);
     const std::string key = pattern.empty() ? path : pattern;
-    const std::uint64_t stamp = fileStamp(path);
+    const std::uint64_t stamp = fileStampOf(path, &pattern);
     if (stamp == 0) throw TextureError("cannot read '" + path + "': file not found");
     if (TexturePtr cached = textureCache().find(key, stamp)) return cached;
     TexturePtr texture;  // decoded outside the lock: decoding can be slow

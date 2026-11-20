@@ -95,8 +95,6 @@ public:
     ColorEditor* groomColorEditor() const { return groomPicked_; }
     ColorEditor* tipColorEditor() const { return tipColor_; }
     ValueSlider* tipStrengthSlider() const { return tipStrength_; }
-    ValueSlider* hueRandomSlider() const { return hueRandom_; }
-    ValueSlider* saturationRandomSlider() const { return saturationRandom_; }
     RoundButton* swatch(int index) const { return swatches_.at(static_cast<std::size_t>(index)); }
     QString colorNote() const;
     // The surfaces to edit (the scalp first); each edit comes back with the surface's index.
@@ -222,7 +220,6 @@ public:
     int recentCount() const { return static_cast<int>(recentButtons_.size()); }
     // The active tool's name at the top-left ("Comb" with the key that brings it back), Groom mode.
     void setTool(const std::string& brushMode, bool select);
-    QString toolText() const;  // "" when hidden
     // The stats line (Groom): strands, the guides (npos: not said; guidesFrom: where guides the
     // groom cannot brush come from, "the graph" or "the file"), the time per dab (0: none yet), and
     // `view` last ("" none: the 2D view through a locked photo, "2D 250% · F whole view").
@@ -271,7 +268,6 @@ public:
     // The viewport's size follows the host at once, except while a mouse button is held (a dock's
     // or a splitter's drag resizes the host every move): then it catches up a moment after the
     // last move, so the QRhiWidget's texture is not made again for every pixel of the drag.
-    bool viewportResizePending() const;
     // Undo and Redo at the top-right (the window's only buttons for them besides Edit and the keys):
     // enabled as the history allows, their tips the step's label and keys ("Undo comb stroke (Ctrl+Z)").
     void setUndoRedo(bool canUndo, bool canRedo, const QString& undoTip, const QString& redoTip);

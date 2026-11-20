@@ -43,7 +43,6 @@ public:
     // The vertical field of view as shown (looking through a photo: for the last projection's
     // aspect, narrowed by the 2D view's zoom).
     float fovDegrees() const;
-    void setFovDegrees(float fov) { fov_ = fov; }
 
     // ---- Looking through a reference photo's camera (the Photos tab's Look Through) ---------------
     // The view becomes the photo's camera: at `eye`, turned by `rotation` (camera axes to world:

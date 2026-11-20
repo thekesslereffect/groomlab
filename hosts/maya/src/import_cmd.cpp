@@ -30,12 +30,14 @@
 #include "guarded.h"
 #include "groomlab/asset_files.h"
 #include "groomlab/card_files.h"
+#include "groomlab/groom_package.h"
 #include "groomlab/correctives.h"
 #include "groomlab/groom_session.h"
 #include "groomlab/paths.h"
 #include "groomlab/retriangulate.h"
 #include "groomlab/scalp_maps.h"
 #include "groomlab/scalp_paint.h"
+#include "groomlab/udim.h"
 #include "maya_inputs.h"
 
 namespace groomlab::maya {
@@ -59,10 +61,8 @@ std::string sceneUpAxis() { return MGlobal::isZAxisUp() ? "Z" : "Y"; }
 
 std::string generic(const std::string& path) { return path.empty() ? path : fs::u8path(path).generic_u8string(); }
 
-bool exists(const std::string& path) {
-    std::error_code ec;
-    return !path.empty() && fs::exists(fs::u8path(path), ec);
-}
+// (A texture map's plain path standing for a tile set, udim.h: there when any tile is: every host's check.)
+bool exists(const std::string& path) { return fileThere(path); }
 
 // Groom `index` of the file (a file holds one groom or several: groom_file.h), read and turned
 // into the scene's up axis (`fileUpAxis`: the axis it was written in; `names`: every groom's name,
@@ -70,41 +70,14 @@ bool exists(const std::string& path) {
 // and an index past its grooms too.
 GroomFile readForMaya(const std::string& path, int index = 0, std::string* fileUpAxis = nullptr,
                       std::vector<std::string>* names = nullptr) {
-    std::vector<GroomFile> grooms = readGroomFiles(path);
-    if (index < 0 || index >= static_cast<int>(grooms.size())) {
-        throw GroomFileError(path + " holds " + std::to_string(grooms.size()) + " groom" + (grooms.size() == 1 ? "" : "s") +
-                             ", no groom " + std::to_string(index));
-    }
-    if (names) {
-        names->clear();
-        for (const GroomFile& g : grooms) names->push_back(g.name);
-    }
-    GroomFile file = std::move(grooms[static_cast<std::size_t>(index)]);
-    if (file.units != "cm") {
-        throw GroomFileError(path + ": its units are " + file.units + "; GroomLab imports grooms in centimeters (Maya's own unit)");
-    }
-    if (fileUpAxis) *fileUpAxis = file.upAxis;
-    convertUpAxis(file, sceneUpAxis());
-    if (file.cardBake.empty()) {
-        // A bake the app wrote beside the groom after saving it (groomlab/<stem>/cards/<stem>/<stem>_*,
-        // or earlier versions' places), as the app adopts one: its stamp unknown (every Cards node
-        // reads as stale until a bake).
-        const CardBakePaths beside = CardBakePaths::foundBesideGroomFile(path);
-        if (beside.exists()) file.cardBake.prefix = beside.prefix;
-    }
-    return file;
+    return readGroomForHost(path, index, sceneUpAxis(), names, fileUpAxis);  // every host's (groom_package.h)
 }
 
 // A path the file stores, as its readers resolve it: variables expanded, a relative one against
 // the groom file's folder, then its search paths (the first that holds it; else the folder).
 std::string resolveFromFile(const GroomFile& file, const std::string& stored) {
-    const std::string path = expandEnvironment(stored);
-    if (path.empty() || isAbsolutePath(path)) return generic(path);
-    std::vector<std::string> dirs;
-    if (!file.directory.empty()) dirs.push_back(file.directory);
-    for (const std::string& s : file.searchPaths) dirs.push_back(expandEnvironment(s));
-    if (dirs.empty()) return generic(path);
-    return generic(searchPathResolver(std::move(dirs))(path));
+    // Every host's (groom_file.h resolveGroomPath): a moved file found by its trailing folders too.
+    return generic(resolveGroomPath(file, stored));
 }
 
 // Why `mesh` is not the file's scalp as the file's guides, parts and flow are rooted on it ("" when
@@ -400,10 +373,12 @@ MStatus ImportGroomCmd::doIt(const MArgList& args) {
                 std::string to = masks + "/" + name + fs::u8path(from).extension().u8string();
                 if (sameFile(fs::u8path(from).parent_path().u8string(), masks)) {
                     to = generic(from);  // the groom's own (the file came from this scene): read in place
-                } else if (exists(to) && fileBytes(to) != fileBytes(from)) {
+                } else if (exists(to) && !sameMapImage(from, to)) {
                     to = freeFilePath(to);
                 }
-                if (!sameFile(from, to)) copyFor(from, to);
+                if (!sameFile(from, to)) {
+                    for (const auto& [a, b] : mapImageMoves(from, to)) copyFor(a, b);  // (a tile set: each tile)
+                }
                 entry.texture = portableMayaPath(to);
                 if (!sameFile(from, to)) movedImages.emplace_back(from, entry.texture);
             }
@@ -461,6 +436,10 @@ MStatus ImportGroomCmd::doIt(const MArgList& args) {
             modifier_.newPlugValueDouble(fn.findPlug("scaleTransformReference", true), file.data.scaleTransformReference);
             modifier_.newPlugValueDouble(fn.findPlug("scaleReference", true), file.data.scaleReference);
             modifier_.newPlugValueString(fn.findPlug("cardBlock", true), file.cardBlock.c_str());
+            // The viewport's guide group colors, hidden groups and Show Tubes' nodes, as saved.
+            modifier_.newPlugValueString(fn.findPlug("guideGroupColors", true), file.guideGroupColors.c_str());
+            modifier_.newPlugValueString(fn.findPlug("hiddenGuideGroups", true), file.hiddenGuideGroups.c_str());
+            modifier_.newPlugValueString(fn.findPlug("braidTubes", true), file.braidTubes.c_str());
             // The last transfer's markers, for the next transfer.
             modifier_.newPlugValueString(fn.findPlug("transferMarkers", true),
                                          file.transferMarkers.empty() ? "" : transferMarkersToJson(file.transferMarkers).c_str());

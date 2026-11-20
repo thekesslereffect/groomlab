@@ -3,6 +3,7 @@
 // patterns drawn in it, the iridescent tint.
 
 #include "groomlab/color_patterns.h"
+#include "groomlab/scalp_mesh.h"
 #include "groomlab/portable_math.h"
 
 #include <algorithm>
@@ -108,6 +109,14 @@ std::uint64_t VaneSpace::featherKey(std::size_t s) const {
 VaneNormals::VaneNormals(const StrandSet& strands) {
     for (int k = 0; k < 3; ++k) c_[k] = sized(strands, kVaneNormalChannels[k]);
     if (!c_[0] || !c_[1] || !c_[2]) c_[0] = c_[1] = c_[2] = nullptr;
+}
+
+Vec3f iridescenceRootNormal(const StrandSet& strands, std::size_t i, const ScalpMesh* scalp, const VaneNormals& vanes) {
+    Vec3f up{0.0f, 1.0f, 0.0f};
+    if (vanes.at(i, &up)) return up;
+    if (scalp && i < strands.roots().size() && scalp->contains(strands.roots()[i])) return scalp->normal(strands.roots()[i]);
+    if (strands.strandPointCount(i) >= 2) return (strands.strandPoints(i)[1] - strands.strandPoints(i)[0]).normalized();
+    return up;
 }
 
 bool VaneNormals::at(std::size_t s, Vec3f* normal) const {

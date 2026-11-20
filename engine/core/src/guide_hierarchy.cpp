@@ -365,6 +365,31 @@ const GuideGroup* GuideHierarchy::group(GroupId id) const {
     return nullptr;
 }
 
+std::size_t GuideHierarchy::resampleGuides(const std::vector<GuideId>& ids, int segments, bool groupWide, GroupId group, int level) {
+    if (groupWide) {
+        for (const GuideGroup& g : groups_) {
+            if (group != kNoGroup ? g.id == group : (level < 0 || groupDepth(g.id) == level)) setGroupSegments(g.id, segments);
+        }
+    }
+    return resample(ids, segments, groupWide);
+}
+
+std::string GuideHierarchy::childGroupFor(GroupId parent) const {
+    for (const GuideGroup& g : groups_) {
+        if (g.parent == parent) return g.name;
+    }
+    const GuideGroup* p = group(parent);
+    return freeGroupName((p ? p->name : std::string("group")) + "_children");
+}
+
+std::string GuideHierarchy::freeGroupName(const std::string& base) const {
+    if (findGroup(base) == kNoGroup) return base;
+    for (int k = 2;; ++k) {
+        const std::string name = base + std::to_string(k);
+        if (findGroup(name) == kNoGroup) return name;
+    }
+}
+
 GroupId GuideHierarchy::findGroup(const std::string& name) const {
     for (const GuideGroup& g : groups_) {
         if (g.name == name) return g.id;
@@ -507,6 +532,18 @@ GuideId GuideHierarchy::addGuide(GroupId groupId, std::vector<Vec3f> points, Tub
     index_[id] = guides_.size();
     guides_.push_back(std::move(guide));
     return id;
+}
+
+std::vector<GuideId> GuideHierarchy::addBakedGuides(const std::string& name, const GuideSet& guides, TubeProfile tube) {
+    GroupId gid = findGroup(name);
+    if (gid == kNoGroup) {
+        gid = addGroup(name);
+    } else if (groupDepth(gid) != 0) {
+        throw std::invalid_argument("'" + name + "' is a child group: bake into a root group");
+    }
+    const std::vector<GuideId> ids = addGuides(gid, guides, tube);
+    for (const GuideId id : ids) setPoints(id, withGroupSegments(gid, guide(id)->points));  // the group's segments, if it has its own
+    return ids;
 }
 
 std::vector<GuideId> GuideHierarchy::addGuides(GroupId groupId, const GuideSet& set, TubeProfile tube) {
@@ -843,8 +880,14 @@ std::vector<Vec3f> GuideHierarchy::offsetsFromWorld(const HierarchyGuide& child,
             // before kept (so a stroke's dabs never jump it to another turn of a spiral), then
             // found exactly (bisection).
             const float length = std::max(arc.back(), 1e-6f);
-            const float lo = -arc[i] - 0.5f * length - 2.0f * std::sqrt(p.dot(p) + 1.0f),
-                        hi = arc.back() - arc[i] + 0.5f * length + 2.0f * std::sqrt(p.dot(p) + 1.0f);
+            // The scan's range: the parent's length and, past either end (where it runs on straight
+            // along its tangent), no further than the point is from that end: a crossing there lies
+            // within that distance. By the parent's own size and the point's place beside it, never
+            // by where the groom stands in the world or a scene unit (a range padded by the point's
+            // distance from the origin made the steps longer than the parent on a groom far from it,
+            // several crossings to a step).
+            const float lo = -arc[i] - 0.5f * length - (p - parent.points.front()).length(),
+                        hi = arc.back() - arc[i] + 0.5f * length + (p - parent.points.back()).length();
             const float before = child.offsets.empty() ? local.z : sampleEven(child.offsets, t, Vec3f{}).z * scale_;
             auto ahead = [&](float a) {  // (how far ahead of the spot's section plane the point lies)
                 const AlongCurve c = alongCurve(parent.points, frames, arc, arc[i] + a);
@@ -873,6 +916,7 @@ std::vector<Vec3f> GuideHierarchy::offsetsFromWorld(const HierarchyGuide& child,
             if (bestGap < std::numeric_limits<float>::max()) {
                 for (int pass = 0; pass < 60; ++pass) {
                     const float mid = 0.5f * (a0 + a1);
+                    const bool spent = mid == a0 || mid == a1;  // no float left between them: every pass after gives the same
                     const float gm = ahead(mid);
                     if ((gm > 0.0f) == (g0 > 0.0f)) {
                         a0 = mid;
@@ -880,6 +924,7 @@ std::vector<Vec3f> GuideHierarchy::offsetsFromWorld(const HierarchyGuide& child,
                     } else {
                         a1 = mid;
                     }
+                    if (spent) break;
                 }
                 best = 0.5f * (a0 + a1);
             }

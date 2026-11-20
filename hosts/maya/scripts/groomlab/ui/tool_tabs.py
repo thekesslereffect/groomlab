@@ -1386,7 +1386,6 @@ class PaintTab(_GroomTab):
             done()
 
     def map_changed(self, name, push=True):
-        from maya import cmds
         if not self.groom:
             self.users.setText("")
             return

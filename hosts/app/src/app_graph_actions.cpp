@@ -34,6 +34,8 @@
 #include "theme.h"
 #include "tube_panel.h"
 
+#include "groomlab/graph_controls.h"
+#include "groomlab/graph_edit.h"
 #include "groomlab/node_catalog.h"
 #include "groomlab/node_library.h"
 
@@ -130,6 +132,11 @@ void AppActions::addGraphBindings(ui::Bindings& b, MainWindow& w) {
                                      if (!error.isEmpty()) m->report(error);
                                  }),
                                  {}, nodeOn};
+    // Color by Channel: the hair colored by the channel (the generator's value) as this node
+    // leaves it; again, the colors as they were.
+    b["node.colorByChannel"] = {[m, selected, str](const json& value, bool on) { m->colorByChannel(selected(), str(value), on); },
+                                [m, selected, str](const json& value) { return m->channelColored(selected()) == str(value); },
+                                nodeOn};
     // Show Inner Param: a compound's inner param (the generator's "node.param") on the compound.
     b["compound.showInner"] = {[m, selected, str](const json& value, bool on) {
                                    if (!m->document_ || selected().empty()) return;
@@ -260,6 +267,16 @@ void AppActions::addGraphGenerators(ui::Generators& g, MainWindow& w) {
         }
         return out;
     };
+    // Color by Channel: the channels the node's last result carries (the core's list, every host's).
+    g["nodeChannels"] = [m](const json& entry) {
+        json out = json::array();
+        const std::string node = m->graph_->selectedNode();
+        if (!m->document_ || node.empty()) return out;
+        for (const auto& [name, kind] : m->document_->session().stats().colorChannels(node)) {
+            out.push_back({{"id", entry.value("action", std::string("node.colorByChannel"))}, {"value", name}, {"label", name}, {"tip", "per " + kind}});
+        }
+        return out;
+    };
     // Show Inner Param: a submenu per inner node of the compound, its params (Maya's
     // menu_generators: numbers, switches, vectors and words, not a channel or the definition).
     g["innerParams"] = [m](const json& entry) {
@@ -273,29 +290,20 @@ void AppActions::addGraphGenerators(ui::Generators& g, MainWindow& w) {
                 if (n.is_object() && n.value("name", std::string()) == node) found = n;
             }
         }
-        const json* compound = &found;
-        if (!found.is_object() || compound->value("type", std::string()) != "Compound") return out;
-        const json params = compound->value("params", json::object());
+        if (!found.is_object() || found.value("type", std::string()) != "Compound") return out;
+        const json params = found.value("params", json::object());
         const json definition = params.is_object() ? params.value("definition", json::object()) : json::object();
-        const json inner = definition.is_object() ? definition.value("graph", json::object()) : json::object();
-        for (const json& n : inner.is_object() ? inner.value("nodes", json::array()) : json::array()) {
-            const std::string type = n.value("type", std::string()), name = n.value("name", std::string());
-            const json* spec = m->document_->spec(type);
-            if (!spec || type == "Input") continue;
+        // The core's list, every host's (graph_controls.h compoundInnerParamsJson).
+        for (const json& n : json::parse(compoundInnerParamsJson(definition.dump()))) {
+            const std::string name = n.value("node", std::string());
             json items = json::array();
-            for (const json& p : spec->value("params", json::array())) {
-                const std::string kind = p.value("kind", std::string()), param = p.value("name", std::string());
-                if (kind != "float" && kind != "int" && kind != "bool" && kind != "vec3" && kind != "string") continue;
-                // (Not a param naming a channel: its "channel" set, a word or true.)
-                const json channel = p.contains("channel") ? p["channel"] : json();
-                const bool names = channel.is_boolean() ? channel.get<bool>() : channel.is_string() ? !channel.get<std::string>().empty() : !channel.is_null();
-                if (param == "definition" || names) continue;
+            for (const json& p : n["params"]) {
                 items.push_back({{"id", entry.value("action", std::string("compound.showInner"))},
-                                 {"value", name + "." + param},
-                                 {"label", param},
+                                 {"value", name + "." + p.value("name", std::string())},
+                                 {"label", p.value("name", std::string())},
                                  {"tip", p.value("description", std::string())}});
             }
-            if (!items.empty()) out.push_back({{"submenu", name}, {"id", "inner/" + name}, {"items", items}});
+            out.push_back({{"submenu", name}, {"id", "inner/" + name}, {"items", items}});
         }
         return out;
     };
@@ -384,15 +392,17 @@ std::set<std::string> AppActions::nodeState(MainWindow& w, const std::string& no
     }
     if (type.empty()) return s;
     const json* spec = w.document_->nodeSpec(node);
-    bool strands = false, mappable = false;
+    bool mappable = false;
     if (spec) {
-        for (const json& p : spec->value("outputs", json::array())) {
-            const std::string t = p.value("type", std::string());
-            strands = strands || t == "Strands" || t == "Guides";
-        }
         for (const json& p : spec->value("params", json::array())) mappable = mappable || (p.contains("port") && p["port"].is_object());
     }
-    if (strands && type != "Output") s.insert({"node.viewable", "node.bakeable"});
+    // View Up to Here and Bake Node to Guides: the core's rules (every host's menu).
+    try {
+        const GraphEdit edit(w.document_->graph().dump());
+        if (edit.viewable(node)) s.insert("node.viewable");
+        if (edit.bakeable(node)) s.insert("node.bakeable");
+    } catch (const std::exception&) {
+    }
     s.insert("type." + type);  // (graph_ui.json's nodeActions: by the node's type)
     if (type == "Sculpt") s.insert("node.sculpt");
     if (mappable) s.insert("node.mappable");

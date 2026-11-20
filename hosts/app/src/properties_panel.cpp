@@ -345,14 +345,6 @@ bool PropertiesPanel::shown(const std::string& key) const {
     return it != byKey_.end() && rows_[it->second].control && rows_[it->second].wanted;
 }
 
-std::vector<std::string> PropertiesPanel::boundKeys() const {
-    std::vector<std::string> out;
-    for (const Row& r : rows_) {
-        if (r.control && !r.rule) out.push_back(r.item.key);
-    }
-    return out;
-}
-
 void PropertiesPanel::setRowVisible(const std::string& key, bool visible) {
     const auto it = byKey_.find(key);
     if (it == byKey_.end()) return;

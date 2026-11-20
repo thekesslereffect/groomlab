@@ -18,7 +18,7 @@
     {"name": "scatter", "type": "Scatter", "params": {"density": 80.0, "length": 25.0}, "ui": {"x": 240, "y": 0}},
     {"name": "interpolate", "type": "Interpolate", "ui": {"x": 480, "y": 0}},
     {"name": "braidPaths", "type": "Guides", "params": {"group": "braids"}, "ui": {"x": 480, "y": 360}},
-    {"name": "braid", "type": "Braid", "params": {"style": "three", "width": 4.5, "tightness": 0.9, "region": 12.0, "gather": 0.3, "fuzz": 0.15, "strays": 0.02, "end": "tuft", "tail": 0.18, "pancake": 0.5, "loops": 0.3, "loopSize": 0.5}, "ui": {"x": 720, "y": 0}},
+    {"name": "braid", "type": "Braid", "params": {"style": "three", "width": 4.5, "tightness": 0.9, "region": 12.0, "gather": 0.3, "end": "tuft", "tail": 0.18, "pancake": 0.5, "loops": 0.3, "loopSize": 0.5}, "ui": {"x": 720, "y": 0}},
     {"name": "color", "type": "HairColor", "params": {"melanin": 0.92, "redness": 0.08, "melaninRandom": 0.05}, "ui": {"x": 960, "y": 0}},
     {"name": "width", "type": "Width", "params": {"width": 0.008, "profile": [[0, 1], [1, 0.3]]}, "ui": {"x": 1200, "y": 0}},
     {"name": "output", "type": "Output", "ui": {"x": 1440, "y": 0}}

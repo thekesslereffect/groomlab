@@ -25,6 +25,16 @@ namespace groomlab {
 // in its place, and a Width node after leaves it (other shafts, a second Propagate's, 0).
 constexpr const char* kRachisChannel = "rachis";
 
+class StrandSet;
+
+// Motion after a Propagate (Wind, Jiggle) is its barbs' own: they turn about their roots on the
+// shaft, so the shafts (isShaft 1) hold where they are, as their rachis tubes do. A whole feather
+// moves by motion on its shafts before Propagate, which grows the barbs along them.
+// True when `strands` carry a shaft (isShaft above 0.5).
+bool hasShafts(const StrandSet& strands);
+// The shafts of `in` put back in `out` (the same strands, as a motion node makes them) as they came in.
+void holdShafts(const StrandSet& in, StrandSet& out);
+
 // A cross-section of a rachis tube at one of its shaft's points: the ring's center, its axes
 // (side = tangent x normal: the right-hand vane; normal: the vane plane's normal), radius
 // and arc position (0 root .. 1 tip). Vertex j of an n-sided ring sits at angle 2 pi j / n

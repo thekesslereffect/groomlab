@@ -33,6 +33,8 @@ using detail::CardPoint;
 using detail::projectOntoCard;
 using detail::cardFrames;
 using detail::kMeans;
+using detail::liftClearOfScalp;
+using detail::notchesFilled;
 using detail::groupFeathers;
 using detail::makeFeatherCards;
 
@@ -236,10 +238,13 @@ CardPoint projectOntoCard(const CardMesh::Card& cardIn, const Vec3f& p, int& seg
         return (card.center[b] - card.center[a]).normalized();
     };
     for (int pass = 0; pass < 2; ++pass) {
+        Vec3f facingB = facing(lo);  // (a segment's far plane is the next one's near plane)
         for (int k = lo; k <= hi; ++k) {
             const Vec3f& a = card.center[static_cast<std::size_t>(k)];
             const Vec3f& b = card.center[static_cast<std::size_t>(k) + 1];
-            const float da = (p - a).dot(facing(k)), db = (p - b).dot(facing(k + 1));
+            const Vec3f facingA = facingB;
+            facingB = facing(k + 1);
+            const float da = (p - a).dot(facingA), db = (p - b).dot(facingB);
             // Past the root or the tip: keep going (it lands outside the texture).
             float t = da - db > 1e-20f ? da / (da - db) : 0.5f;
             const float clamped = std::clamp(t, k == 0 ? -10.0f : 0.0f, k == last ? 10.0f : 1.0f);
@@ -447,6 +452,63 @@ std::vector<int> kMeans(const std::vector<std::vector<float>>& f, std::size_t k,
     return group;
 }
 
+void liftClearOfScalp(CardMesh::Card& card, const ScalpMesh& scalp) {
+    const float clearance = 0.01f * std::max(arcLength(card.refCenter), 1e-6f);
+    std::vector<float> push(kRefStations, 0.0f);
+    std::vector<Vec3f> skin(kRefStations, Vec3f{0, 1, 0});
+    for (std::size_t k = 0; k < kRefStations; ++k) {
+        const SurfacePoint near = scalp.closestPoint(card.refCenter[k], 4.0f * clearance);
+        if (near.root.face < 0) continue;
+        skin[k] = near.normal.normalized();
+        const float h = (card.refCenter[k] - near.position).dot(skin[k]);
+        if (h < clearance) push[k] = clearance - h;
+    }
+    for (int pass = 0; pass < 2; ++pass) {
+        std::vector<float> smooth = push;
+        for (std::size_t k = 1; k + 1 < kRefStations; ++k) smooth[k] = 0.25f * push[k - 1] + 0.5f * push[k] + 0.25f * push[k + 1];
+        push = smooth;
+    }
+    for (std::size_t k = 0; k < kRefStations; ++k) {
+        if (push[k] > 0.0f) card.refCenter[k] += skin[k] * push[k];
+    }
+}
+
+std::vector<float> notchesFilled(const std::vector<float>& w) {
+    std::vector<float> filled = w;
+    constexpr std::size_t kReach = 3;
+    for (std::size_t k = 0; k < kRefStations; ++k) {
+        float before = 0.0f, after = 0.0f;
+        for (std::size_t j = k > kReach ? k - kReach : 0; j <= k; ++j) before = std::max(before, w[j]);
+        for (std::size_t j = k; j <= std::min(k + kReach, kRefStations - 1); ++j) after = std::max(after, w[j]);
+        filled[k] = std::max(w[k], std::min(before, after));
+    }
+    return filled;
+}
+
+std::vector<int> mostTypical(const std::vector<std::vector<float>>& features, const std::vector<int>& labels) {
+    const std::size_t groups = static_cast<std::size_t>(*std::max_element(labels.begin(), labels.end())) + 1;
+    const std::size_t dims = features[0].size();
+    std::vector<std::vector<float>> centers(groups, std::vector<float>(dims, 0.0f));  // each group's mean feature
+    std::vector<float> counts(groups, 0.0f);
+    for (std::size_t i = 0; i < labels.size(); ++i) {
+        const auto l = static_cast<std::size_t>(labels[i]);
+        for (std::size_t d = 0; d < dims; ++d) centers[l][d] += features[i][d];
+        counts[l] += 1.0f;
+    }
+    for (std::size_t l = 0; l < groups; ++l) {
+        for (float& x : centers[l]) x /= counts[l];  // every group has a member
+    }
+    std::vector<int> representative(groups, -1);
+    for (std::size_t i = 0; i < labels.size(); ++i) {
+        const auto l = static_cast<std::size_t>(labels[i]);
+        int& r = representative[l];
+        if (r < 0 || distance2(features[i], centers[l]) < distance2(features[static_cast<std::size_t>(r)], centers[l])) {
+            r = static_cast<int>(i);
+        }
+    }
+    return representative;
+}
+
 }  // namespace detail
 
 namespace {
@@ -484,8 +546,8 @@ std::vector<int> clusterStrands(const StrandSet& s, const CardSettings& settings
     for (std::size_t i = 0; i < s.strandCount(); ++i) {
         if (skipped(i)) continue;
         const Vec3f r = s.strandPoints(i)[0];
-        lo = {std::min(lo.x, r.x), std::min(lo.y, r.y), std::min(lo.z, r.z)};
-        hi = {std::max(hi.x, r.x), std::max(hi.y, r.y), std::max(hi.z, r.z)};
+        lo = minPerAxis(lo, r);
+        hi = maxPerAxis(hi, r);
     }
     const float extent = (hi - lo).length();
     const float spacing = extent / std::sqrt(static_cast<float>(want)) * 0.5f;
@@ -889,7 +951,7 @@ Vec3f cardRootNormal(const StrandSet& s, const std::vector<std::size_t>& members
 // root normal `up` with half its part along the curve there removed.
 Vec3f strandLookNormal(const Vec3f& up, const std::vector<Vec3f>& center, std::size_t k) {
     const std::size_t last = center.size() - 1;
-    const Vec3f forward = (center[std::min(k + 1, last)] - center[k > 0 ? k - 1 : 0]).normalized();
+    const Vec3f forward = centralTangent(center.data(), last + 1, k);
     const Vec3f n = up - forward * (0.5f * up.dot(forward));
     return n.length() > 1e-4f ? n.normalized() : up;
 }
@@ -912,16 +974,16 @@ CardMesh::Card buildTubeCard(const StrandSet& s, const std::vector<std::size_t>&
     card.stations = std::max(settings.segments, 1) + 1;
     const int sides = std::clamp(settings.braidSides, 3, 16);
     const float closed = 6.28318530718f;
-    card.across = card.tubeArc >= closed - 1e-4f
+    card.across = card.tubeClosed()
                       ? sides
                       : std::max(2, static_cast<int>(std::lround(static_cast<float>(sides) * card.tubeArc / closed)));
     card.refCenter = center;
     const bool hasScalp = scalp && scalp->triangleCount() > 0;
     std::vector<Vec3f> tangent(refStations);
     for (std::size_t k = 0; k < refStations; ++k) {
-        tangent[k] = (center[std::min(k + 1, refStations - 1)] - center[k > 0 ? k - 1 : 0]).normalized();
+        tangent[k] = centralTangent(center.data(), refStations, k);
     }
-    if (card.tubeArc < closed - 1e-4f && hasScalp) {
+    if (!card.tubeClosed() && hasScalp) {
         // Open toward the scalp: its normal (the middle of its arc) out of the skin under each station.
         for (std::size_t k = 0; k < refStations; ++k) {
             Vec3f up = scalp->closestPoint(center[k]).normal;
@@ -943,7 +1005,7 @@ CardMesh::Card buildTubeCard(const StrandSet& s, const std::vector<std::size_t>&
     // (Each sample's nearest station searched a sixteenth of the way ahead: a section winds.)
     const std::vector<Offset> shapeOffsets =
         strandOffsets(s, members, center, std::max<std::size_t>(24, refStations), std::max<std::size_t>(4, refStations / 16));
-    if (card.tubeArc >= closed - 1e-4f) {
+    if (card.tubeClosed()) {
         std::vector<float> suu(refStations, 0.0f), svv(refStations, 0.0f), suv(refStations, 0.0f);
         for (const Offset& o : shapeOffsets) {
             for (std::size_t k = o.station > 1 ? o.station - 2 : 0; k <= std::min(o.station + 2, refStations - 1); ++k) {
@@ -1466,7 +1528,7 @@ std::vector<CardMesh::Card> buildGroupCards(const StrandSet& s, const std::vecto
         // each station, whichever way a frame carried along a wavering center line would turn.
         if (spec.braid >= 0 && crossing == 1 && hasScalp) {
             for (std::size_t k = 0; k < kRefStations; ++k) {
-                const Vec3f tangent = (center[std::min(k + 1, kRefStations - 1)] - center[k > 0 ? k - 1 : 0]).normalized();
+                const Vec3f tangent = centralTangent(center.data(), kRefStations, k);
                 Vec3f up = scalp->closestPoint(center[k]).normal;
                 up = up - tangent * up.dot(tangent);
                 if (up.length() < 1e-4f) continue;
@@ -1524,15 +1586,7 @@ std::vector<CardMesh::Card> buildGroupCards(const StrandSet& s, const std::vecto
         // stations (a dip narrower than a fifth of the card fills to the lower of the
         // flanks), and every strand still fits.
         {
-            std::vector<float> filled = spread;
-            constexpr std::size_t kReach = 3;
-            for (std::size_t k = 0; k < kRefStations; ++k) {
-                float before = 0.0f, after = 0.0f;
-                for (std::size_t j = k > kReach ? k - kReach : 0; j <= k; ++j) before = std::max(before, spread[j]);
-                for (std::size_t j = k; j <= std::min(k + kReach, kRefStations - 1); ++j) after = std::max(after, spread[j]);
-                filled[k] = std::max(spread[k], std::min(before, after));
-            }
-            std::vector<float> smooth = filled;
+            std::vector<float> smooth = notchesFilled(spread);
             for (int pass = 0; pass < 2; ++pass) {
                 std::vector<float> next = smooth;
                 for (std::size_t k = 1; k + 1 < kRefStations; ++k) next[k] = 0.25f * smooth[k - 1] + 0.5f * smooth[k] + 0.25f * smooth[k + 1];
@@ -1605,31 +1659,8 @@ std::vector<CardMesh::Card> buildGroupCards(const StrandSet& s, const std::vecto
             const float shell = std::max(percentile(depths, kOuterShell), 0.0f);
             for (std::size_t k = 0; k < kRefStations; ++k) card.refCenter[k] += card.refNormal[k] * (facing * shell);
         }
-        // Clear of the scalp: a card lying on the skin (roots, hair combed flat) sits a hair
-        // above it, so the scalp doesn't cut through or shade it. Measured at the card's
-        // center line, then the pushes are smoothed along the card: a wide card on a curved
-        // head has its edges dip below the surface by the curvature, and lifting each
-        // station by its own edges' dip kinked the card at the root.
-        if (hasScalp) {
-            const float clearance = 0.01f * std::max(arcLength(card.refCenter), 1e-6f);
-            std::vector<float> push(kRefStations, 0.0f);
-            std::vector<Vec3f> skin(kRefStations, Vec3f{0, 1, 0});
-            for (std::size_t k = 0; k < kRefStations; ++k) {
-                const SurfacePoint near = scalp->closestPoint(card.refCenter[k], 4.0f * clearance);
-                if (near.root.face < 0) continue;
-                skin[k] = near.normal.normalized();
-                const float h = (card.refCenter[k] - near.position).dot(skin[k]);
-                if (h < clearance) push[k] = clearance - h;
-            }
-            for (int pass = 0; pass < 2; ++pass) {
-                std::vector<float> smooth = push;
-                for (std::size_t k = 1; k + 1 < kRefStations; ++k) smooth[k] = 0.25f * push[k - 1] + 0.5f * push[k] + 0.25f * push[k + 1];
-                push = smooth;
-            }
-            for (std::size_t k = 0; k < kRefStations; ++k) {
-                if (push[k] > 0.0f) card.refCenter[k] += skin[k] * push[k];
-            }
-        }
+        // Clear of the scalp (cards_internal.h).
+        if (hasScalp) liftClearOfScalp(card, *scalp);
         if (settings.volumeNormals && hasScalp) {
             // Shaded as the strands it stands for are: a strand's lit drawing leans its normal
             // out of the scalp at its root, half its part along the strand taken out
@@ -2177,6 +2208,27 @@ CardMesh buildCards(const StrandSet& s, const ScalpMesh* scalp, const CardSettin
     mesh.cards = makeCards(s, scalp, settings);
     layoutCards(mesh, settings.padding);
     return mesh;
+}
+
+bool cardsUniqueUVs(const CardMesh& cards, std::vector<float>& u, std::vector<float>& v) {
+    const std::size_t n = cards.positions.size();
+    if (cards.worldU.size() == n && cards.worldV.size() == n && n) {
+        u = cards.worldU;
+        v = cards.worldV;
+        return true;
+    }
+    u.clear();
+    v.clear();
+    const bool rebuildable = !cards.cards.empty() && std::all_of(cards.cards.begin(), cards.cards.end(), [](const CardMesh::Card& c) {
+        return c.stations >= 2 && c.center.size() == static_cast<std::size_t>(c.stations) && c.width.size() == static_cast<std::size_t>(c.stations);
+    });
+    if (!rebuildable) return false;
+    CardMesh unique = cards;
+    layoutCardsUnique(unique, unique.padding);
+    if (unique.u.size() != n || unique.v.size() != n) return false;
+    u = std::move(unique.u);
+    v = std::move(unique.v);
+    return true;
 }
 
 }  // namespace groomlab

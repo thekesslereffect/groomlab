@@ -11,6 +11,7 @@
 #include <sstream>
 #include <stdexcept>
 
+#include "groomlab/color.h"
 #include "groomlab/paths.h"
 #include "groomlab/texture.h"
 
@@ -71,7 +72,7 @@ BrushAlpha::BrushAlpha(const Texture& texture, std::string path) : path_(std::mo
     level.values.resize(n);
     for (std::size_t i = 0; i < n; ++i) {
         const float* p = &image->rgba[4 * i];
-        const float v = transparent ? p[3] : 0.2126f * p[0] + 0.7152f * p[1] + 0.0722f * p[2];
+        const float v = transparent ? p[3] : rec709Luminance(p[0], p[1], p[2]);
         level.values[i] = std::clamp(v, 0.0f, 1.0f);
     }
     levels_.push_back(std::move(level));

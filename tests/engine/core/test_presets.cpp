@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <algorithm>
 #include <cmath>
 #include <set>
@@ -20,6 +21,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "groomlab/asset_files.h"
 #include "groomlab/graph_edit.h"
 #include "groomlab/graph_io.h"
 #include "groomlab/groom_file.h"
@@ -117,6 +119,45 @@ TEST(Presets, APastedTextIsCheckedAsEveryHostChecksIt) {
     EXPECT_NO_THROW(presetFromText(quoted.dump()));
 }
 
+TEST(Presets, APastedGraphIsWholeAndNeverReachesAnotherMachine) {
+    // presets.h pastedGraphFromText: every host's Paste Graph (Maya's presets.paste_text, the
+    // Blender add-on's, the app's) refuses a graph with problems, keeps backdrops as drawn and
+    // takes params naming files on other machines out.
+    nlohmann::json g = nlohmann::json::parse(makePresetJson(defaultGraphJson(), 20.0, "look", "", "Shared"));
+    std::string interpolate;
+    for (nlohmann::json& n : g["nodes"]) {
+        if (n["type"] == "Interpolate") {
+            interpolate = n["name"].get<std::string>();
+            n["params"]["regionMap"] = "//server/share/regions.png";
+        }
+    }
+    ASSERT_FALSE(interpolate.empty());
+    g["backdrops"] = {{{"x", 0}, {"y", 0}, {"w", 100}, {"h", 50}, {"title", "hair"}, {"color", {300, -5, 10}}, {"script", "x"}},
+                      {{"x", "far"}, {"y", 0}, {"w", 1}, {"h", 1}}};
+    const PastedGraph pasted = pastedGraphFromText(g.dump());
+    EXPECT_EQ(pasted.removed, (std::map<std::string, std::string>{{interpolate + ".regionMap", "//server/share/regions.png"}}));
+    const nlohmann::json out = nlohmann::json::parse(pasted.presetJson);
+    for (const nlohmann::json& n : out["nodes"]) {
+        if (n["name"] == interpolate) EXPECT_FALSE(n.value("params", nlohmann::json::object()).contains("regionMap"));
+    }
+    ASSERT_EQ(out["backdrops"].size(), 1u) << "one without a rectangle: left out";
+    EXPECT_EQ(out["backdrops"][0], (nlohmann::json{{"x", 0.0}, {"y", 0.0}, {"w", 100.0}, {"h", 50.0}, {"title", "hair"}, {"color", {255, 0, 10}}}));
+    EXPECT_TRUE(isNetworkPath("\\\\host\\share\\a.png"));
+    EXPECT_FALSE(isNetworkPath("C:/maps/a.png"));
+    // A graph with problems (the output's strands left open) is refused as Maya refused it.
+    nlohmann::json open = nlohmann::json::parse(makePresetJson(defaultGraphJson(), 20.0, "look", "", "Shared"));
+    const std::string output = GraphEdit(open.dump()).outputNode();
+    nlohmann::json kept = nlohmann::json::array();
+    for (const nlohmann::json& c : open["connections"]) {
+        if (c["to"] != output) kept.push_back(c);
+    }
+    open["connections"] = kept;
+    EXPECT_THROW(pastedGraphFromText(open.dump()), std::invalid_argument);
+    // Fitted past what a number holds: refused rather than written as null.
+    nlohmann::json tiny = nlohmann::json::parse(makePresetJson(defaultGraphJson(), 1e-300, "look", "", "Shared"));
+    EXPECT_THROW(presetGraphJson(tiny.dump(), 1e300), std::runtime_error);
+}
+
 TEST(Presets, APastedGraphLeavesOutParamsItsNodesNoLongerHave) {
     // A groom saved by an older GroomLab keeps params its nodes have since lost (unread), and Copy
     // Graph copies them: the paste leaves them out (Maya's check refused the graph), with the param
@@ -193,6 +234,52 @@ TEST(Presets, ShippedPresetsAreFoundDescribedAndLoad) {
     EXPECT_EQ(presetNameError("mine"), "");
     EXPECT_NE(presetNameError("bad/name"), "");
     EXPECT_NE(presetNameError(""), "");
+}
+
+TEST(Presets, NoShippedPresetHoldsANodeOlderThanItsOperator) {
+    // A shipped preset is what a new groom starts from: every node of it, those inside its compounds
+    // too, is of its operator's newest version. A node without a version field is; one pinned to an
+    // older version would hand every groom made from the preset an outdated node (and its Upgrade
+    // button). When an operator's version is raised, the presets' nodes are upgraded with it.
+    const OperatorRegistry& registry = OperatorRegistry::instance();
+    const std::vector<std::string> names = registry.typeNames();
+    const std::set<std::string> types(names.begin(), names.end());
+    std::size_t nodes = 0;
+    std::string preset;
+    const std::function<void(const json&)> check = [&](const json& value) {
+        if (value.is_object()) {
+            if (value.contains("type") && value["type"].is_string() && types.count(value["type"].get<std::string>())) {
+                ++nodes;
+                if (value.contains("version") && value["version"].is_number_integer()) {
+                    const std::string type = value["type"].get<std::string>();
+                    const bool older = value["version"].get<int>() < registry.create(type)->version();
+                    EXPECT_FALSE(older) << preset << ": node '" << value.value("name", std::string()) << "' (" << type
+                                        << ") is pinned to an older version";
+                }
+            }
+            for (const auto& item : value.items()) {
+                // (a compound's definition may be held as text)
+                if (item.key() == "definition" && item.value().is_string()) {
+                    const json inner = json::parse(item.value().get<std::string>(), nullptr, false);
+                    if (!inner.is_discarded()) check(inner);
+                } else {
+                    check(item.value());
+                }
+            }
+        } else if (value.is_array()) {
+            for (const json& item : value) check(item);
+        }
+    };
+    const std::vector<PresetInfo> presets = listPresets(presetSearchDirs({}, kShipped));
+    ASSERT_GT(presets.size(), 10u);
+    for (const PresetInfo& p : presets) {
+        std::ifstream in(std::filesystem::u8path(p.path));
+        const json file = json::parse(in, nullptr, false);
+        ASSERT_FALSE(file.is_discarded()) << p.name;
+        preset = p.name;
+        check(file.contains("graph") ? file["graph"] : file.value("nodes", json::array()));
+    }
+    EXPECT_GT(nodes, 200u) << "the presets' nodes were found";
 }
 
 TEST(Presets, AnEarlierDirectoryHidesALaterOne) {
@@ -924,6 +1011,30 @@ TEST(Presets, EditingAnExposedParamEqualsEditingTheInnerNode) {
     }
     EXPECT_GE(compared, 20u);
     EXPECT_GE(changed, compared / 2) << "most presets' edits change the groom";
+}
+
+TEST(Presets, ParamsAreCheckedAgainstTheirSpecsInEveryHost) {
+    // presetParamProblems (Maya's presets.check, every host's paste): kinds, choices, maps on
+    // params that take none, inputs and keys that cannot be, a Compound's exposed names.
+    const std::string graph = R"({"version": 1, "output": "out", "nodes": [
+        {"name": "scalp", "type": "Scalp"},
+        {"name": "noise", "type": "Noise", "params": {"amplitud": 0.2, "space": "galaxy"}},
+        {"name": "resample", "type": "Resample", "params": {"segments": 12.5}},
+        {"name": "width", "type": "Width", "params": {"profile": "tapered"}},
+        {"name": "grp", "type": "Compound", "params": {"definition": {"graph": {"version": 1, "output": "w", "nodes": [
+            {"name": "w", "type": "Noise", "params": {"octave": 2}}], "connections": []}, "expose": {"gone": "w.nothing"}}}},
+        {"name": "out", "type": "Output"}], "connections": []})";
+    std::string all;
+    for (const std::string& p : presetParamProblems(graph)) all += p + " | ";
+    for (const char* expected : {"Noise has no param 'amplitud'", "'galaxy' is not one of", "wants a whole number", "wants a ramp",
+                                 "grp/w: Noise has no param 'octave'", "exposed 'gone' names 'w.nothing'"}) {
+        EXPECT_NE(all.find(expected), std::string::npos) << expected << " in " << all;
+    }
+    // A paste: the params no operator has dropped (a newer GroomLab's), a wrong kind refused.
+    EXPECT_THROW(presetFromText(graph), std::invalid_argument);
+    const std::string newer = R"({"version": 1, "output": "out", "nodes": [{"name": "noise", "type": "Noise", "params": {"someday": 1}},
+        {"name": "out", "type": "Output"}], "connections": []})";
+    EXPECT_NO_THROW(presetFromText(newer));
 }
 
 }  // namespace groomlab

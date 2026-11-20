@@ -2046,7 +2046,8 @@ Maya's specular fragment patched at run time without its bitangent varying (it r
 only as the tube's direction when `tubeDirection` is 1; GroomLab's tubes run along the strand), so
 the lit strands upload three streams a point (positions, normals, tangents: 36 bytes) and their
 `uvCoord` as (u, width) (`StrandLines::writeUvs(out, 2)`: the core's u root to tip and the point's
-width, `kNoLineWidth` for strands without widths), kept while the point counts and the widths
+width, `kNoLineWidth` for strands without widths: `displayWidths`, none a point or none set),
+kept while the point counts and the widths
 (`StrandLines::widthsKey`) stay; cards and scales keep the bitangent stream for their shading
 normal.
 
@@ -2802,8 +2803,10 @@ by a compound's name maps through `GroomSession::flatCompounds` (a view or evalu
 output node; a drag of an exposed param: the inner node's param; its time and notes: its nodes'
 summed and joined). A compound that repeats, reads its pass (`iteration`), is bypassed, runs
 viewport- or render-only or has a control keyed on a param stays one Compound, evaluated as above.
-`Graph::lastEvaluationTimes` gives each node's milliseconds in the last evaluation (0 for a cache
-hit: what the graph stats show per evaluation), `lastRunTimes` what each cost when it last ran. A brush stamp bumps
+`Graph::lastEvaluationTimes` gives each node's milliseconds in the last evaluation (0 for a node
+its cache served all of it; one that ran in it keeps its time however many nodes read it, as a
+Braid whose strands and ties are both connected: what the graph stats show per evaluation). A
+brush stamp bumps
 `brushTick`, which dirties the shape; nodes whose inputs did not change are cache hits.
 
 **The preview core.** A preview at density p must show exactly the render's strands of the IDs it
@@ -2831,7 +2834,11 @@ node's result carries a serial (unique in the process; a result a clone or an ad
 keeps its serial and the serials of what it was made from, so one held from another document
 names that very result or none, and a stroke right after a graph edit is as incremental as
 without it) and how it differs from the result before it (`StrandChanges`: a
-sorted list of strands, or all); a node whose own key (everything but its inputs' keys) is its
+sorted list of strands, or all; `recounted` with all: the same strands still, the listed ones at
+whatever number of points, as after a Resample by curvature or a Curl adding points made a combed
+strand again, so the per-point arrays are laid out anew and every strand not listed holds what it
+held at its new place; whoever reads the changes without knowing of it takes all as changed, as
+the hosts' partial uploads do); a node whose own key (everything but its inputs' keys) is its
 last result's, and whose inputs changed in some strands, asks its operator to make only those
 again (`Operator::evaluateIncremental`, opt in; default: a full evaluation). The result is the
 full evaluation's, bit for bit, and is cached under the same content key, so adoption and clones
@@ -2840,20 +2847,38 @@ value someone may be holding; the graph lets go of the last result while the ope
 (`IncrementalInputs::sole`), so when nothing else holds it or shares its points or widths, the
 operator takes that very array instead: `positionsOfLast`, `widthsOfLast` in
 `operators/incremental.h`, `StrandSet::takePositionsFrom`; at 500k strands a 96 MB copy saved per
-node), makes the changed strands again from its inputs exactly as a full
+node; where the nodes after it share its points, a HairColor's or a Width's result holding its
+input's, the graph keeps the points of the result before the last one, which nobody holds by the
+next dab, and the operator takes those and writes two dabs' strands over them:
+`IncrementalInputs::spare`, counted in the cache's bytes and the first to go at its limit), makes
+the changed strands again from its inputs exactly as a full
 run makes them, and falls back (returns false) when anything its strands depend on beyond
 themselves differs: a whole-set pass (an expression of `longest`, or a field node plugged in
 reading one: each `FieldValue` says whether it is `strandLocal`, true for Map, Constant,
 Control and FieldNoise, for FieldRemap and FieldCombine when what they read is, false for an
-Expression of `longest`), a kept binding or center choice, the layout. Nodes that hand their
+Expression of `longest`), a kept binding or center choice, the layout. With changes that are
+`recounted` an operator that follows them (`someStrandsChangedOrRecounted`, `pointsOfLast`,
+`widthsOfLast`, `pointChannelOfLast`: Collide, Noise, Width, HairColor, Resample, Curl and the
+nodes run through `rerunChanged`, Length, Gravity, Displace, Transform, Bend, Direction) copies
+each strand it leaves alone to its new place (`relayUnlisted`, runs of strands in parallel blocks)
+into arrays made with room to spare, which the next dab's layout, a few points more or less, takes
+again from the pool (`StrandSet::relayout`, `ArrayPool::takeWithRoom`); any other node evaluates
+in full and has its result compared, recounted strands included. Nodes that hand their
 first input on as it came (Output, a
-bypass, a Resample with nothing to do) pass its changes on. Incremental now: Interpolate (each
+bypass, a Resample with nothing to do) pass its changes on. Incremental now: Scatter (reading its
+guides for `guideRadius` or a guide map: its last result as it is while what it reads of them
+stands, their roots, values and shaped tubes' footprints, so a dab that leaves the roots keeps
+the nodes after it incremental; anything else in full), Interpolate (each
 guide told from the last result's to the bit: the strands bound to changed guides, and those
 whose binding changed when roots moved; with fillTubes in full), Clump (the moved strands and the members of moved
 centers; centers it picks stay the same while no root moves, the moved ones taking their
-strands' points), Noise, Curl, Length, Width, HairColor, Bands (guard hairs not by length),
-FeatherColor, RenderData, Resample (even, or by curvature while
-the changed strands keep their counts), Collide (while its meshes' inputs are unchanged: each
+strands' points), Noise, Curl (the strands it adds points to included, its last result laid out
+anew where a changed strand's count is another; coherent by clump, every strand of the clumps a
+changed strand is in or was in, curled apart as a set of their own), Length, Width, HairColor,
+Bands (guard hairs not by length),
+FeatherColor, RenderData, Resample (even, or by curvature: the changed strands resampled again,
+its last result laid out anew where one's count is another; without `segments` and its input
+recounted, in full), Collide (while its meshes' inputs are unchanged: each
 strand is pushed against the meshes alone), Smooth, Bend, Part, Flow, Flyaway, Attribute, Wind,
 Gravity, Displace,
 Jiggle (a made-again strand works out its own face's lag), Twist (around axes that did not
@@ -2870,7 +2895,7 @@ kept per output, so each output's readers get the changed strands it holds, in i
 an output a changed strand left or joined, its select read from what changed, is cut again and
 says `all`, as Cull falls back when its kept strands change). Everything else evaluates in full:
 Tangle, BlendNeighbors, Wet, SelfCollide and Static read other strands, Mirror changes the layout (on guides, the
-Interpolate after it diffs them itself), Curl by clump reads whole clumps. A node with several
+Interpolate after it diffs them itself). A node with several
 outputs that evaluates in full diffs each output against its last. A node that evaluates in full while its own key stayed and its inputs changed in
 only some strands (one of those, or an incremental operator that fell back) then compares its
 result with its last one strand by strand, in parallel blocks, skipping the arrays the two share
@@ -3151,7 +3176,12 @@ correctives, colliders or scalp history, time 0), in a document of its own, and
 scale's) `restLength` into a copy of the strands (sharing every array), which `InstanceSet::resolve`
 then uses. None of the rest inputs change
 with time, so from frame to frame the rest evaluation is a cache hit (with caching off, as in
-renders, the rest inputs' hash skips it). `GroomSession::evaluate` does this for every host
+renders, the rest inputs' hash skips it). A groom that is at rest as the host evaluates it (a
+static scalp, guides as authored) runs nothing a second time: the rest document is offered the
+evaluation's results (`Graph::offerResults`), and each of its nodes keyed as the evaluation keyed
+it takes that result, so only the nodes whose inputs differ at rest (after a deforming scalp, posed
+guides, a Wind) evaluate there; `restEvaluations` counts the rest evaluations that ran a node.
+`GroomSession::evaluate` does this for every host
 (`restPose_`; a guide preview is the authored hierarchy while a stroke is live).
 
 **Scales.** A Scales node (an `InstanceOp` with `scales_` set) makes instances flagged `onSkin`: one per strand,
@@ -3440,14 +3470,37 @@ which `groomFileToJson` applies; Maya's `GraphModel.save`), so a later change of
 changes a saved groom. Loading stays tolerant: a param left out takes its default, an unknown one is
 kept and ignored. Presets stay sparse (they are meant to follow the defaults).
 
-**Node versions.** Each operator has a `version()` (1 for all of them now) and each node the
+**Node versions.** Each operator has a `version()` (1 until its behaviour changed: Clump, Interpolate, Braid... are at 2) and each node the
 behaviour it was saved with (`Operator::nodeVersion`, the node's `"version"` in the graph's JSON,
 written on save; none: the newest). When a change of what an operator makes would alter saved
 grooms, bump its `version()` and keep the old behaviour behind `nodeVersion() < N`: old grooms
 evaluate as before, new nodes take the new behaviour. A node's spec (`GraphEdit::nodeSpecJson`)
 says `"nodeVersion"` and `"outdated"`, so a host can offer Upgrade (`GraphEdit::upgradeNode`,
 `GraphModel.upgrade_node`); a node newer than the build's operator is refused with a clear error.
-The node version joins the cache key. `NodeVersions.OldNodesKeepTheirBehaviourUntilUpgraded`
+Shipped presets hold no node older than its operator's newest version
+(`Presets.NoShippedPresetHoldsANodeOlderThanItsOperator`): when an operator's version is raised,
+upgrade the presets' nodes with it (a newest node carries no `"version"`; retune a preset whose
+look suffers) and re-record `PresetLooks`. Every shipped preset's Clump is version 2. Its centers are
+relaxed apart over the scalp in single precision and land on Scatter's lattice of 1/1024 spacing, so
+the same scalp in other units (x10, x0.1) puts about one center in fifty a lattice step away: its
+strands lie a few hundred-thousandths of the groom's size off, and now and then a strand on the
+border between two clumps joins the other one, a spot takes the other of two core strands as its
+axis, or a strand rooted beside its center turns round its lock (in the presets: 1 or 2 strands of
+38,875 in the furs, 1 of 5,073 in `everyday_sim`). Version 1 has the border case too, more rarely
+(its centers are strands: `agouti_fur` at full density, 781,369 strands, one at x10). So
+`ScaleInvariance.EveryShippedPresetLooksTheSameAtEveryScale` lets a thousandth of the strands lie
+elsewhere, as it lets their clump channel differ, and prints them (`[ ties ]`);
+`ScaleInvariance.AClumpPickingItsOwnCentersGivesTheSameClumpsAtEveryScale` holds a version 2 Clump
+of its own to a ten-thousandth for the rest. (Leaving the centers off the lattice, `relaxSpots`,
+takes the lock and axis cases away and moves every saved version 2 clump a little: measured, not
+done.) Nine presets with a version 2 Clump of large
+clumps are listed in `Locality.AnEditOfTheScalpChangesEveryPresetOnlyNearIt` (`kLargeClumps`): the
+centers relax apart over the scalp, so a re-made scalp moves their far strands a little. A param a later version adds says so
+(`ParamSpec::addedIn(2)`, the spec JSON's `"addedIn"`): a node saved before it does nothing with
+the param, so every host's panel leaves it out until Upgrade (`param_conditions.h`
+`paramInVersion`; the attribute listing's `shown`), as Braid's `separate` and `inflate` are on a
+version 1 node. The node
+version joins the cache key. `NodeVersions.OldNodesKeepTheirBehaviourUntilUpgraded`
 shows the mechanism with a test operator at version 2. The groom file has a format version of its
 own (`schema.h`): a newer file than the build reads is refused with "update GroomLab".
 
@@ -3531,7 +3584,11 @@ same for Unity), exports (`export_alembic`,
 `resolve_path`, `follow_scene_files`), utilities (`groomlab.utils`, GroomLab > Utilities: `guides_to_curves`,
 `curves_to_guides`, `strands_to_curves`, `to_mesh`, `bake_guides`, `transfer_to_scalp`, `copy_graph`,
 `graph_maps`; the menu's actions in `ui/menu.py` take the same choices as arguments and ask only
-when one is None), sims (`groomlab.sim`: the Simulate node's `add_simulate`, `simulate`,
+when one is None; modeled tubes, `tubes_to_curves` and `tubes_to_groomlab_tubes`: what a tube is, its
+curves, each tube's region value and the sections fitted to it are the core's,
+`engine/core/include/groomlab/tube_mesh.h`, bound as `groomlab_core.tube_mesh` for every host, and
+Maya's `tube_mesh.py` only names them; `utils.py` reads the meshes and makes the curves and guides,
+`tube_links.py` keeps them following), sims (`groomlab.sim`: the Simulate node's `add_simulate`, `simulate`,
 `bake_simulation`, `invalidate_simulation`, `simulation_status`; nHair's `create_sim_curves`, `bake_sim`), correctives (`groomlab.shots`), scalp/card bakes
 (`groomlab.bake`), presets (`groomlab.presets`), review snapshots (`groomlab.review`), studio lighting
 (`groomlab.studio`: `add_studio`, `remove_studio`, the presets as data in `studio.PRESETS`) and unit
@@ -3565,7 +3622,10 @@ handling (`groomlab.units`). The UI modules under `groomlab.ui` open with `palet
   math.h) so cm, mm and m round alike; the distance fields sit on world grids of power-of-two
   cells (Interpolate keepClearance's distances by the scalp's size in eighths of an octave), so
   at other scales they differ within their interpolation error. Widths of 1 on every point are
-  unset (no Width node), not a scene unit.
+  unset (no Width node), not a scene unit (`StrandSet::widthsSet`, kept with the set); every
+  viewport draws such strands as strands without widths (`displayWidths`, display.h: the lines
+  opaque, the ribbons and the app's look-dev view `kRibbonDefaultWidth` wide, nothing thinned),
+  while the strands and their exports keep the widths they carry.
 - **A param's default is written once, in its spec.** `ParamSet`'s getters fall back to the spec
   default (`Operator::applyDefaults` hands it over), so operators read `params().getDouble("x")`
   and `ScalarField(params(), "x", scalp)` with no fallback of their own; `ParamSpecs.*` checks
@@ -3612,7 +3672,17 @@ direction); Maya's `palette.py` reads it through `groomlab_core.brush_catalog()`
 NAMES, HINTS and which boxes a tool shows all come from it) and the app's `theme::brushes()`
 and the rail from the C++ side. A tool's card in Maya and the app shows what the catalog's
 `settings` name; a new tool is a catalog entry, an icon in both hosts' icon folders and the
-host's start of it. `presets.h`'s `insertPresetJson` adds a preset to a graph instead of
+host's start of it. A setting that is one value (`BrushSettingSpec::kind` bool, int or float:
+radius, strength, falloff, smoothStrength, length, segments, spacing, alphaAngle, alphaSpacing
+and the switches) carries its default, its slider span (`softMin`, `softMax`), what a typed
+value may reach (`min`, `max`), its decimals and its unit there, once: the default is
+`BrushToolSettings`' own (`brushSettingValue`, `BrushCatalog.EveryValuesDefaultIsTheSettingsOwn`),
+Maya's `palette.py` (`_slider`, `_default`) and the app's `BrushPanel::slider` build from the
+spec, and Blender's `GroomLabTools` properties, declared before the helper runs, repeat the
+numbers under a test that compares them to the helper's `tool_catalog`
+(`test_2b_brush_values_are_the_catalogs`). A `length` is written for a scalp of
+`kDefaultsScalpSize`; the app scales its span by the groom's size (`BrushPanel::lengthScale`).
+`presets.h`'s `insertPresetJson` adds a preset to a graph instead of
 replacing it: the look between the preset's sources and its Output as one Compound after a
 node (GraphEdit checks the wiring; the preset's Scalp or Guides become Compound inputs wired
 to the graph's), used by Maya's `GraphEditor.insert_preset` and the app's `insertPresetFile`;
@@ -3629,7 +3699,16 @@ look here; if a second host needs logic that one host has, move it to the core f
 
 | What | Where | How the hosts reach it |
 | --- | --- | --- |
-| Whole-feature graph edits: Add Simulate, Load Guide Cache, Add Collider, Add Braid, Add Feathers (where the nodes go, their links, the hair's Guides leaving a braid's or feather's group out) | `graph_inserts.h`, on `GraphEdit` | Maya: `GraphEdit.insert_braid`... (`bind_graph.cpp`) on `model._edit()`; Blender: the helper's `edit_graph` ops (`insert_braid`, `insert_feathers`..., [BLENDER.md](BLENDER.md)); the app: inside `editGraph` |
+| A Braid node's sections as geometry: per path and section a tube over the woven stretch (center line, the cross-section's half axes ring by ring, one quad mesh with each quad's tube: its section and braid id), read off the stations the hair is braided with; and one cycle of a weave in the braid's cross-section: each section's center, ellipse and outline, with their overlap, gaps, areas and reach. Braid version 2 presses the sections against each other (`separate`, `inflate`; `pressSections` in `braid_op.cpp`: each section's outline in the cross-section, a scale along 48 rays of its cut ellipse at 64 samples a weave step, is its cell among the sections' centers cut out of its grown ellipse, its corners rounded to a radius (`openOutline`: the outline opened with a disc) and its change along the braid held to a rate, worked out directly and kept for the process by weave, `pancake`, `inflate` and `tightness`; the hair, the tubes' rings, ties, the lift onto the scalp and both evaluation routes read it through `Braider::sectionAt` and `braidedFrom`); version 1 nodes keep plain ellipses (`nodeVersion() < 2`) | `braid_tubes.h` (`braidTubes`, `braidSections`, `braidTubesAround`; `operators/braid_op.cpp`) | `groomlab_core`: `Graph.braid_tubes(id, ctx, around)`, `braid_sections(..., version=)` |
+| Show Tubes: a Braid node's header button in every host's Graph Editor draws its section tubes in the viewport; on a node giving guides (a Guides node, a Curl or Noise on them, a Sculpt: `GraphEdit::braidTubesOffered`, not a Clump) it draws the tubes those guides carry as the node shaped them (`guideTubes`: a ring every 12 degrees of turning, each tube its guide's color, `guideTubeColor`). The nodes shown are a display setting (`DisplaySettings::braidTubes`: names, one a line; the app saves it in the groom file's `"braidTubes"`, Maya on the shape's `braidTubes`, Blender on the groom's `braid_tubes`); the rules (offered on Braid nodes, the toggle, lit, a rename follows, a delete drops) are `GraphEdit::braidTubesOffered` / `braidTubesShown` / `braidTubesToggled` / `braidTubesKept` and `renamedBraidTubes`. The mesh is the session's (`GroomSession::braidTubeMesh`: from the last view's cached results, nothing evaluated, no hair braided; kept by a key of the nodes' params, their versions, their inputs' results and the scalp; within a point budget, `BraidTubeDetail`; 12 points a ring, 24 for a version 2 node's pressed outlines, which are drawn on the outline, not round it: `braidTubesAround`, `BraidTubes::pressed`; carried to the scalp while following it), handed to the builder by `fillBraidTubes` and drawn as the item `braidTubes` (a lit surface in the sections' colors, `scaleSurface`): the app's `Kind::SurfaceColored` in the line path (the lookdev path steps aside), Maya's scale surface shading, Blender's display handler | `braid_tubes.h`, `graph_edit.h`, `groom_session.h`, `display.h` (`src/braid_tubes.cpp`) | `groomlab_core`: `GraphEdit.braid_tubes_*`, `braid_tube_names`, `renamed_braid_tubes`, `GroomSession.braid_tube_mesh(shown)`, `DisplaySettings.braid_tubes`, `DisplayBuilder.update(..., session=)` |
+| Whole-feature graph edits: Add Simulate, Load Guide Cache, Add Collider, Add Braid, Add Feathers, Add Scalp (where the nodes go, their links, the hair's Guides leaving a braid's or feather's group out) | `graph_inserts.h`, on `GraphEdit` | Maya: `GraphEdit.insert_braid`... (`bind_graph.cpp`) on `model._edit()`; Blender: the helper's `edit_graph` ops (`insert_braid`, `insert_feathers`..., [BLENDER.md](BLENDER.md)); the app: inside `editGraph` (Add Scalp: Maya and Blender; the app has no extra scalps yet) |
+| A node put into the flow: between two nodes, before or after one, on a link (a node dropped on a wire: its first input that takes the source, each tried as `connect` checks it) | `graph_inserts.h` (`insertBetween`, `insertBefore`, `insertAfter`, `insertOnLink`) | Maya: `GraphModel.insert_between`, `insert_before`, `insert_after`, `insert_on_link` (wrappers over `GraphEdit.insert_*`); Blender: the helper's `edit_graph` ops of those names (`pipeline.GraphEdits.insert_*`, `graph.insert_on_link`); the app: `GroomDocument::insertOnLink`, `addNode` |
+| A graph's pins (the reroute points links are drawn through): which routes and pins hold after a graph edit, their order, the next pin's id, joining two, a rename followed; for a host whose pin has one input, the routes it can draw | `graph_pins.h` (`prunePins`, `addPin`, `mergePins`, `setPinRoute`, `renamePinNode`...) | Maya: `GraphModel`'s pin methods over `groomlab_core.GraphPins` (`bind_graph.cpp`); Blender: the helper prunes on every `edit_graph` op, and `prune_pins` gives the add-on the pins its reroutes draw (`graph_tree.prune_pins`); the app: `GroomDocument::editGraph` and its pin edits |
+| What would stop a graph from evaluating: no output node, a required input left open, a link reading an output its source lacks or whose types no longer fit, a map with no name; the nodes the output is made from (their problems stop it, the others' are warnings) | `graph_edit.h` (`GraphEdit::problems`, `feedingOutput`) | Maya: `GraphModel.validate`, `unused_problems`, `feeding_output`; Blender: the helper's `graph_problems` (`graph_tree.graph_problems`); the app: `GraphEdit` directly. Only Maya's Graph Editor shows them so far |
+| Auto layout (a graph with no stored positions as it opens, Tidy Layout): columns by the longest path in from a source, rows in the graph's order; the spacing and a wrap into blocks of columns are the host's to pass | `graph_inserts.h` (`layoutPositions`, `GraphLayout`) | Maya: `GraphModel.auto_layout` (`GraphEdit.layout_positions`); Blender: the helper's `graph_layout` (`graph_tree.auto_layout`); the app: `NodeGraphView::autoLayout` (its own spacing, 7 columns a block over the viewport, only the nodes with no position) |
+| Copy and paste of nodes: the clipboard's JSON, the Output node never copied, the links among the copied nodes, free names, every field kept (seeds and keyed controls as copied) | `graph_edit.h` (`GraphEdit::copyNodes`, `pasteNodes`) | Maya: `GraphModel.copy_nodes`, `paste_nodes`; the app: `GroomDocument::copyNodes`, `pasteNodes` (each passes its own paste offset); Blender uses its own node clipboard |
+| A param's input port taken away, and a compound's inner param shown on it or hidden (its value going back inside) | `graph_controls.h` (`exposeParam`, `unexposeParam`, `compoundExpose`, `compoundUnexpose`) | Maya: `GraphModel.expose_param`, `unexpose_param`, `expose`, `unexpose`; Blender: the helper's `edit_graph` ops `expose_param`, `unexpose_param`, `compound_expose`, `compound_unexpose`; the app: `GroomDocument::exposeParams`, `showInnerParam` |
+| What reads a map ("Read by") and what lets go of it when the map is removed: its Map nodes, the params they feed, map params naming it, HairColor's `map` and Interpolate's `regionMap` (the graph's own nodes, not those inside compounds) | `scalp_maps.h` (`mapReaders`, `unlinkMapReaders`, beside `retargetMapReaders`) | Maya: `map_users`, `map_nodes`, `remove_map` (`groomlab_core.map_readers`, `unlink_map_readers`); Blender: the helper's `map_users`, `map_remove`; the app: `GroomDocument::mapUsers`, `removeMap` |
 | Controls and keyed params: names, ranges, placement, linking a param to a control and back | `graph_controls.h` (`linkControl`, `unlinkControl`) | bound as `groomlab_core` functions; the helper's commands; the app directly |
 | When a param shows, and when it measures in its unit (`showWhen`, `unitWhen`) | `param_conditions.h` | every Node panel and Graph Editor, and the core's own readers |
 | Units (their factors and defaults), option lists, curve presets, feather designs | `engine/ui/choices.json` | Maya's `units.py`, the app's Node panel, the add-on |

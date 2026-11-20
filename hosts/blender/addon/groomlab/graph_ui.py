@@ -9,60 +9,30 @@ the operator that runs it (`bind`, filled by graph_editor.py and graph_authoring
 drawn from a container with `draw`: Blender's own menus, submenus through one generic menu class,
 each entry's tooltip its action's tip (`ActionTip`)."""
 
-import json
-import os
-import re
 
 import bpy
 from bpy.props import StringProperty
 
+from . import definitions as _defs
+
 HOST = "blender"
-FILES = ("actions", "menus", "palette", "lists", "choices", "marking_menu", "graph_ui", "properties")
-_HERE = os.path.dirname(os.path.abspath(__file__))
-# The extension's copy (GroomLabBlender/ui), else the source tree's.
-SEARCH = (os.path.join(_HERE, "ui"),
-          os.path.normpath(os.path.join(_HERE, os.pardir, os.pardir, os.pardir, os.pardir, "engine", "ui")))
 
 # Actions the Graph Editor's menus list that Blender has no counterpart for (left out of its menus;
 # a test checks every other id has a binding): Maya's viewport GPU preview.
 NOT_IN_BLENDER = {"graph.gpuPreview"}
 
-_doc = [None]
-
-
-def folder():
-    for d in SEARCH:
-        if os.path.isfile(os.path.join(d, "actions.json")):
-            return d
-    raise IOError("GroomLab's UI definitions are missing (looked in %s)" % ", ".join(SEARCH))
-
-
-def document():
-    """Every file merged into one dict, read once."""
-    if _doc[0] is None:
-        doc = {}
-        base = folder()
-        for name in FILES:
-            path = os.path.join(base, name + ".json")
-            if not os.path.isfile(path):
-                continue
-            with open(path, "rb") as f:
-                data = json.loads(f.read().decode("utf-8"))
-            data.pop("$schema", None)
-            data.pop("version", None)
-            doc.update(data)
-        _doc[0] = doc
-    return _doc[0]
+# The files and their reading: the reader every Python host shares (engine/ui/ui_definitions.py,
+# through definitions.py), here forgiving of a missing value as the menus need.
+folder = _defs.folder
+document = _defs.document
+fill = _defs.fill
 
 
 def get(path, default=None):
     """A value by its slash path ("graph/nodeMenu"); `default` when missing (or the files are)."""
     try:
-        node = document()
-        for part in path.split("/"):
-            node = node[part]
-        return node
-    except (KeyError, IOError, ValueError):
+        return _defs.get(path)
+    except (KeyError, IOError, ValueError, TypeError):
         return default
 
 
@@ -110,135 +80,17 @@ def plumbing(fallback=None):
     return {tuple(p) for p in items} if items else set(fallback or ())
 
 
-def key_states():
-    return get("graph/keyStates", {})
-
-
-# ---- Resolving a container (Maya's definitions.resolve) ------------------------------------------
-
-_FIELD = re.compile(r"\{(\w+)\}")
-
-
-def fill(text, values):
-    if not values or not text or "{" not in text:
-        return text
-    return _FIELD.sub(lambda m: str(values[m.group(1)]) if m.group(1) in values else m.group(0), text)
-
-
-def _met(conditions, state):
-    for c in conditions or ():
-        if c.startswith("!"):
-            if c[1:] in state:
-                return False
-        elif c not in state:
-            return False
-    return True
-
-
-def _for_host(entry, host):
-    hosts = entry.get("hosts")
-    return hosts is None or host in hosts
-
-
-def _container(path):
-    node = get(path, [])
-    return node if isinstance(node, dict) else {"items": node}
-
-
-def _choice_entries(entry):
-    return [{"id": entry["action"], "value": c["value"], "label": c.get("label", c["value"]), "tip": c.get("tip", "")}
-            for c in choices(entry["choices"])]
-
-
-def _backdrop_entries(entry):
-    return [{"id": entry["action"], "value": rgb, "label": text} for text, rgb in backdrop_colors()]
-
-
-BUILTIN_GENERATORS = {"choices": _choice_entries, "backdropColors": _backdrop_entries}
-
+# ---- Resolving a container: the shared reader's (Maya's definitions.resolve) ----------------------
 
 def resolve(entries, state=(), values=None, generators=None, host=HOST):
-    """`entries` for `host`, as items: {"kind": "divider"}, {"kind": "action", "id", "label", "tip",
-    "checkable", "value", "enabled", "entry"}, {"kind": "submenu", "id", "label", "tip", "items"},
-    {"kind": "generator", "name", "entry"} (one `generators` has no function for). `state`: the
-    conditions that hold ("needs" left out otherwise, "enabled" the enabled flag). As Maya's."""
-    state = set(state or ())
-    generators = dict(BUILTIN_GENERATORS, **(generators or {}))
-    out = []
-
-    def extend(items):
-        out.extend(i for i in items if i["kind"] != "divider" or (out and out[-1]["kind"] != "divider"))
-
-    for entry in entries or []:
-        if entry == "-":
-            if out and out[-1]["kind"] != "divider":
-                out.append({"kind": "divider"})
-            continue
-        if not isinstance(entry, dict):
-            entry = {"id": entry}
-        is_action = "id" in entry and not set(entry) & {"submenu", "ref", "generator", "include"}
-        base = action(entry["id"]) if is_action else {}
-        if not _for_host(entry, host) or not _for_host(base, host):
-            continue
-        if not _met(entry["needs"] if "needs" in entry else base.get("needs"), state):
-            continue
-        if "include" in entry:
-            extend(resolve(get(entry["include"], []), state, values, generators, host))
-            continue
-        if "generator" in entry:
-            fn = generators.get(entry["generator"])
-            if fn is None:
-                out.append({"kind": "generator", "name": entry["generator"], "entry": entry})
-            else:
-                extend(resolve(fn(entry) or [], state, values, generators, host))
-            continue
-        if "submenu" in entry or "ref" in entry:
-            container = _container(entry["ref"]) if "ref" in entry else {}
-            items = entry.get("items", container.get("items", []))
-            resolved = resolve(items, state, values, generators, host)
-            if not resolved:
-                continue
-            out.append({"kind": "submenu", "id": entry.get("id", entry.get("ref")),
-                        "label": fill(entry.get("submenu") or container.get("label", ""), values),
-                        "tip": fill(entry.get("tip", container.get("tip", "")), values),
-                        "items": resolved, "entry": entry})
-            continue
-        merged = dict(base)
-        merged.update(entry)
-        enabled = _met(merged.get("enabled"), state)
-        text = merged.get("tip", "") if enabled else merged.get("tipDisabled", merged.get("tip", ""))
-        out.append({"kind": "action", "id": merged["id"], "label": fill(merged.get("label", ""), values),
-                    "tip": fill(text, values), "checkable": bool(merged.get("checkable")),
-                    "value": merged.get("value"), "enabled": enabled, "entry": merged})
-    while out and out[-1]["kind"] == "divider":
-        out.pop()
-    return out
+    """`entries` for `host`, as items ({"kind": "divider" | "action" | "submenu" | "generator", ...}):
+    ui_definitions.resolve, every Python host's (host labels and tips included)."""
+    return _defs.resolve(entries or [], state or (), values, generators, host)
 
 
 def listed_ids(entries, host=HOST):
-    """Every action id `entries` can show on `host` (conditions ignored; generated entries by their
-    "action"): for the binding check."""
-    ids = []
-    if isinstance(entries, dict):
-        entries = entries.get("items", [])
-    for entry in entries or []:
-        if entry == "-":
-            continue
-        if not isinstance(entry, dict):
-            entry = {"id": entry}
-        if not _for_host(entry, host):
-            continue
-        if "include" in entry:
-            ids += listed_ids(get(entry["include"], []), host)
-        elif "generator" in entry:
-            if entry.get("action"):
-                ids.append(entry["action"])
-        elif "submenu" in entry or "ref" in entry:
-            items = entry.get("items", _container(entry["ref"]).get("items", []) if "ref" in entry else [])
-            ids += listed_ids(items, host)
-        elif _for_host(action(entry["id"]), host):
-            ids.append(entry["id"])
-    return ids
+    """Every action id `entries` can show on `host` (conditions ignored): for the binding check."""
+    return _defs._ui.listed_ids(entries or [], host)
 
 
 # ---- Bindings: action id -> the operator that runs it ---------------------------------------------

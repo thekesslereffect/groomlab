@@ -74,6 +74,16 @@ int StrokeSymmetry::side(const Vec3f& p, const StrandRoot* root) const {
     return std::abs(d) <= seam ? 0 : (d > 0.0f ? 1 : -1);
 }
 
+std::vector<Vec3f> symmetrySeam(const ScalpMesh& scalp, const StrokeSymmetry& sym) {
+    if (!sym.on() || scalp.points().empty()) return {};
+    Vec3f lo = scalp.points().front(), hi = lo;
+    for (const Vec3f& p : scalp.points()) {
+        lo = Vec3f(std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z));
+        hi = Vec3f(std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z));
+    }
+    return symmetrySeam(scalp, sym, 0.002f * (hi - lo).length());
+}
+
 std::vector<Vec3f> symmetrySeam(const ScalpMesh& scalp, const StrokeSymmetry& sym, float lift) {
     std::vector<Vec3f> out;
     if (!sym.on()) return out;
@@ -632,8 +642,8 @@ struct BrushStrokeCache::State {
         for (std::size_t i = 0; i < n; ++i) {
             const HierarchyGuide* g = h.guide(targets[i].first);
             roots[i] = g && !g->points.empty() ? g->points.front() : Vec3f{};
-            rlo = Vec3f(std::min(rlo.x, roots[i].x), std::min(rlo.y, roots[i].y), std::min(rlo.z, roots[i].z));
-            rhi = Vec3f(std::max(rhi.x, roots[i].x), std::max(rhi.y, roots[i].y), std::max(rhi.z, roots[i].z));
+            rlo = minPerAxis(rlo, roots[i]);
+            rhi = maxPerAxis(rhi, roots[i]);
         }
         constexpr int kAlong = 8;
         const Vec3f extent = n ? rhi - rlo : Vec3f{};
@@ -669,8 +679,8 @@ struct BrushStrokeCache::State {
             Vec3f l(big, big, big), u(-big, -big, -big);
             if (const HierarchyGuide* g = h.guide(targets[i].first)) {
                 for (const Vec3f& p : g->points) {
-                    l = Vec3f(std::min(l.x, p.x), std::min(l.y, p.y), std::min(l.z, p.z));
-                    u = Vec3f(std::max(u.x, p.x), std::max(u.y, p.y), std::max(u.z, p.z));
+                    l = minPerAxis(l, p);
+                    u = maxPerAxis(u, p);
                 }
             }
             lo[i] = l;
@@ -682,8 +692,8 @@ struct BrushStrokeCache::State {
             Vec3f l(big, big, big), u(-big, -big, -big);
             for (std::uint32_t k = clusterStart[c]; k < clusterStart[c + 1]; ++k) {
                 const std::uint32_t i = clusterMembers[k];
-                l = Vec3f(std::min(l.x, lo[i].x), std::min(l.y, lo[i].y), std::min(l.z, lo[i].z));
-                u = Vec3f(std::max(u.x, hi[i].x), std::max(u.y, hi[i].y), std::max(u.z, hi[i].z));
+                l = minPerAxis(l, lo[i]);
+                u = maxPerAxis(u, hi[i]);
             }
             clusterLo[c] = l;
             clusterHi[c] = u;
@@ -776,8 +786,8 @@ std::size_t stamp(GuideHierarchy& h, const ScalpMesh* scalp, const BrushSettings
             } else {
                 Vec3f lo = g->points.front(), hi = lo;
                 for (const Vec3f& p : g->points) {
-                    lo = Vec3f(std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z));
-                    hi = Vec3f(std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z));
+                    lo = minPerAxis(lo, p);
+                    hi = maxPerAxis(hi, p);
                 }
                 if (!reaches(lo, hi)) continue;
             }

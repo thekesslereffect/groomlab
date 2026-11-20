@@ -6,11 +6,13 @@
 #include <cmath>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <set>
 
 #include <nlohmann/json.hpp>
 
 #include "groomlab/graph.h"
+#include "groomlab/graph_io.h"
 
 namespace groomlab {
 
@@ -138,7 +140,40 @@ std::string notKeyable(const GraphEdit& edit, const std::string& node, const std
     const json& n = nodeIn(g, node);
     const json params = n.value("params", json::object());
     if (params.is_object() && params.contains(param) && params[param].is_object()) return "it reads a map: set it back to a value to key it";
+    if (g.contains("connections") && g["connections"].is_array()) {
+        for (const json& c : g["connections"]) {
+            if (c.is_object() && c.value("to", std::string()) == node && c.value("input", std::string()) == param) {
+                return "an input drives it: unplug its input to key it";
+            }
+        }
+    }
     return {};
+}
+
+std::string compoundInnerParamsJson(const std::string& definitionJson) {
+    std::map<std::string, json> specs;
+    for (const json& op : json::parse(operatorSpecsJson())) specs[op.value("type", std::string())] = op.value("params", json::array());
+    const json definition = json::parse(definitionJson.empty() ? std::string("{}") : definitionJson, nullptr, false);
+    const json graph = definition.is_object() ? definition.value("graph", json::object()) : json::object();
+    const json nodes = graph.is_object() ? graph.value("nodes", json::array()) : json::array();
+    json out = json::array();
+    for (const json& n : nodes) {
+        if (!n.is_object()) continue;
+        const std::string type = n.value("type", std::string());
+        const auto it = specs.find(type);
+        if (type == "Input" || it == specs.end()) continue;
+        json params = json::array();
+        for (const json& p : it->second) {
+            const std::string kind = p.value("kind", std::string()), name = p.value("name", std::string());
+            if (kind != "float" && kind != "int" && kind != "bool" && kind != "vec3" && kind != "string") continue;
+            const json channel = p.contains("channel") ? p["channel"] : json();
+            const bool namesChannel = channel.is_boolean() ? channel.get<bool>() : channel.is_string() ? !channel.get<std::string>().empty() : !channel.is_null();
+            if (name == "definition" || namesChannel) continue;
+            params.push_back(p);
+        }
+        if (!params.empty()) out.push_back({{"node", n.value("name", std::string())}, {"params", params}});
+    }
+    return out.dump();
 }
 
 void exposeParam(GraphEdit& edit, const std::string& node, const std::string& param) {
@@ -164,6 +199,113 @@ void exposeParam(GraphEdit& edit, const std::string& node, const std::string& pa
     };
     std::stable_sort(exposed.begin(), exposed.end(), [&](const json& a, const json& b) { return rank(a) < rank(b); });
     edit = GraphEdit(g.dump());
+}
+
+bool unexposeParam(GraphEdit& edit, const std::string& node, const std::string& param) {
+    json g = graphOf(edit);
+    json& n = nodeIn(g, node);
+    if (!n.contains("paramInputs") || !n["paramInputs"].is_array()) return false;
+    json& exposed = n["paramInputs"];
+    const auto it = std::find(exposed.begin(), exposed.end(), json(param));
+    if (it == exposed.end()) return false;
+    exposed.erase(it);
+    if (exposed.empty()) n.erase("paramInputs");
+    // The port goes with what fed it.
+    if (g.contains("connections") && g["connections"].is_array()) {
+        json links = json::array();
+        for (const json& c : g["connections"]) {
+            if (!(c.is_object() && c.value("to", std::string()) == node && c.value("input", std::string()) == param)) links.push_back(c);
+        }
+        g["connections"] = std::move(links);
+    }
+    edit = GraphEdit(g.dump());
+    return true;
+}
+
+namespace {
+
+// A compound's definition in its node (an object; made when it has none).
+json& definitionOf(json& compound) {
+    json& params = compound["params"];
+    if (!params.is_object()) params = json::object();
+    json& definition = params["definition"];
+    if (definition.is_string()) definition = json::parse(definition.get<std::string>(), nullptr, false);
+    if (!definition.is_object()) definition = json::object();
+    return definition;
+}
+
+json* innerNode(json& definition, const std::string& name) {
+    if (!definition.contains("graph") || !definition["graph"].is_object()) return nullptr;
+    json& graph = definition["graph"];
+    if (!graph.contains("nodes") || !graph["nodes"].is_array()) return nullptr;
+    for (json& n : graph["nodes"]) {
+        if (n.is_object() && n.value("name", std::string()) == name) return &n;
+    }
+    return nullptr;
+}
+
+}  // namespace
+
+std::string compoundExpose(GraphEdit& edit, const std::string& compound, const std::string& wanted, const std::string& target) {
+    if (edit.nodeType(compound) != "Compound") throw GraphError(compound + " is not a Compound");
+    const auto dot = target.find('.');
+    if (dot == std::string::npos) throw GraphError("an inner param is \"node.param\" inside the compound");
+    const std::string innerName = target.substr(0, dot), param = target.substr(dot + 1);
+    std::string name = wanted;
+    if (name.empty() && !param.empty()) {
+        // The param's own name, or node + Param when the compound has a param of that name.
+        name = param;
+        for (const json& p : json::parse(edit.nodeSpecJson(compound)).value("params", json::array())) {
+            if (p.value("name", std::string()) == param) {
+                name = innerName + static_cast<char>(std::toupper(static_cast<unsigned char>(param[0]))) + param.substr(1);
+            }
+        }
+    }
+    if (name.empty()) throw GraphError("an exposed param needs a name");
+    json g = graphOf(edit);
+    json& definition = definitionOf(nodeIn(g, compound));
+    bool known = false;
+    if (const json* inner = innerNode(definition, innerName)) {
+        try {
+            const json spec = json::parse(nodeSpecJson(inner->dump()));
+            for (const json& p : spec.value("params", json::array())) known = known || p.value("name", std::string()) == param;
+        } catch (const std::exception&) {  // a node this build cannot read has no params to show
+        }
+    }
+    if (!known) throw GraphError("the compound has no param '" + target + "'");
+    json& expose = definition["expose"];
+    if (!expose.is_object()) expose = json::object();
+    expose[name] = target;
+    edit = GraphEdit(g.dump());
+    return name;
+}
+
+bool compoundUnexpose(GraphEdit& edit, const std::string& compound, const std::string& target) {
+    if (edit.nodeType(compound) != "Compound") throw GraphError(compound + " is not a Compound");
+    json g = graphOf(edit);
+    json& n = nodeIn(g, compound);
+    if (!n.contains("params") || !n["params"].is_object() || !n["params"].contains("definition")) return false;
+    json& definition = definitionOf(n);
+    if (!definition.contains("expose") || !definition["expose"].is_object()) return false;
+    json& expose = definition["expose"];
+    std::vector<std::string> names;
+    for (const auto& [name, t] : expose.items()) {
+        if (t.is_string() && t.get<std::string>() == target) names.push_back(name);
+    }
+    if (names.empty()) return false;
+    const auto dot = target.find('.');
+    const std::string innerName = dot == std::string::npos ? target : target.substr(0, dot);
+    const std::string param = dot == std::string::npos ? std::string() : target.substr(dot + 1);
+    json& params = n["params"];
+    for (const std::string& name : names) {
+        if (params.contains(name)) {
+            if (json* inner = innerNode(definition, innerName)) (*inner)["params"][param] = params[name];
+            params.erase(name);
+        }
+        expose.erase(name);
+    }
+    edit = GraphEdit(g.dump());
+    return true;
 }
 
 std::string addControl(GraphEdit& edit, const std::string& node, const std::string& param, const std::string& name,

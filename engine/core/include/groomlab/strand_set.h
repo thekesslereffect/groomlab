@@ -44,6 +44,10 @@ class ArrayPool {
 public:
     static constexpr std::size_t kMinBytes = std::size_t{4} << 20;
     static constexpr std::size_t kKept = 2;
+    // Arrays made with room to spare (freshArrayWithRoom) are kept from this size, a few of them
+    // apart from the large ones: takeWithRoom's.
+    static constexpr std::size_t kMinRoomyBytes = std::size_t{256} << 10;
+    static constexpr std::size_t kKeptRoomy = 4;
 
     static ArrayPool& instance() {
         static ArrayPool* pool = new ArrayPool;
@@ -62,42 +66,73 @@ public:
         }
         return nullptr;
     }
-    // Keeps a large array (dropping the oldest kept beyond kKept), deletes a small one.
+    // A kept array with room for `size` elements and at most a quarter to spare, resized to `size`
+    // (contents stale; the elements it grows by, T{}), or null. For an array whose size differs a
+    // little from one evaluation to the next (a result laid out anew on every comb dab:
+    // StrandSet::relayout), which take's exact size never finds: made with room to spare, the
+    // next one fits where this one was.
+    std::vector<T>* takeWithRoom(std::size_t size) {
+        if (size * sizeof(T) < kMinRoomyBytes) return nullptr;
+        std::vector<T>* found = nullptr;
+        {
+            std::lock_guard<std::mutex> guard(lock_);
+            for (std::vector<std::vector<T>*>* list : {&roomy_, &kept_}) {
+                for (auto it = list->begin(); it != list->end(); ++it) {
+                    if ((*it)->capacity() < size || (*it)->capacity() - size > size / 4) continue;
+                    found = *it;
+                    list->erase(it);
+                    break;
+                }
+                if (found) break;
+            }
+        }
+        if (found) found->resize(size);
+        return found;
+    }
+    // Keeps a large array (dropping the oldest kept beyond kKept) and, apart, one made with room
+    // to spare from kMinRoomyBytes (beyond kKeptRoomy); deletes any other small one.
     void give(std::vector<T>* v) {
-        if (v->size() * sizeof(T) < kMinBytes) {
+        const bool large = v->size() * sizeof(T) >= kMinBytes;
+        const bool roomy = !large && v->capacity() > v->size() && v->capacity() * sizeof(T) >= kMinRoomyBytes;
+        if (!large && !roomy) {
             delete v;
             return;
         }
         std::vector<T>* drop = nullptr;
         {
             std::lock_guard<std::mutex> guard(lock_);
-            kept_.push_back(v);
-            if (kept_.size() > kKept) {
-                drop = kept_.front();
-                kept_.erase(kept_.begin());
+            std::vector<std::vector<T>*>& list = large ? kept_ : roomy_;
+            list.push_back(v);
+            if (list.size() > (large ? kKept : kKeptRoomy)) {
+                drop = list.front();
+                list.erase(list.begin());
             }
         }
         delete drop;
     }
     // Every kept array deleted (releaseProcessCaches), and the bytes they held.
     void clear() {
-        std::vector<std::vector<T>*> drop;
+        std::vector<std::vector<T>*> drop, dropRoomy;
         {
             std::lock_guard<std::mutex> guard(lock_);
             drop.swap(kept_);
+            dropRoomy.swap(roomy_);
         }
         for (std::vector<T>* v : drop) delete v;
+        for (std::vector<T>* v : dropRoomy) delete v;
     }
     std::size_t bytes() {
         std::lock_guard<std::mutex> guard(lock_);
         std::size_t total = 0;
         for (const std::vector<T>* v : kept_) total += v->capacity() * sizeof(T);
+        for (const std::vector<T>* v : roomy_) total += v->capacity() * sizeof(T);
         return total;
     }
 
 private:
     std::mutex lock_;
     std::vector<std::vector<T>*> kept_;
+    std::vector<std::vector<T>*> roomy_;  // made with room to spare, under kMinBytes
 };
 
 template <class T>
@@ -123,6 +158,20 @@ std::vector<T>* freshArray(std::size_t size) {
     if (size * sizeof(T) >= ArrayPool<T>::kMinBytes && !insideParallelBody()) {
         array->reserve(size);
         touchPagesParallel(static_cast<void*>(array->data()), size * sizeof(T));
+    }
+    array->resize(size);
+    return array;
+}
+
+// freshArray with room to spare (a sixteenth more than `size`): the next array of about its size,
+// a little more or less, fits where this one was (ArrayPool::takeWithRoom).
+template <class T>
+std::vector<T>* freshArrayWithRoom(std::size_t size) {
+    auto* array = new std::vector<T>();
+    const std::size_t room = size + size / 16 + 16;
+    array->reserve(room);
+    if (room * sizeof(T) >= ArrayPool<T>::kMinBytes && !insideParallelBody()) {
+        touchPagesParallel(static_cast<void*>(array->data()), room * sizeof(T));
     }
     array->resize(size);
     return array;
@@ -226,6 +275,16 @@ public:
         owned_.store(true, std::memory_order_release);
         return *data_;
     }
+    // sized() for an array whose size differs a little on every evaluation (a set laid out anew):
+    // one the pool kept with room for it (ArrayPool::takeWithRoom), or a fresh one with room to
+    // spare; its contents as they come.
+    std::vector<T>& sizedWithRoom(std::size_t size) {
+        std::vector<T>* array = detail::ArrayPool<T>::instance().takeWithRoom(size);
+        if (!array) array = detail::freshArrayWithRoom<T>(size);
+        data_ = std::shared_ptr<std::vector<T>>(array, detail::ToArrayPool<T>{});
+        owned_.store(true, std::memory_order_release);
+        return *data_;
+    }
     // A copy of `from`'s array of its own (recycled when one of the size is kept), copied in
     // parallel; what was shared is not touched.
     std::vector<T>& copyOf(const CowArray& from) {
@@ -253,6 +312,8 @@ public:
         from.owned_.store(true, std::memory_order_release);
         return *data_;
     }
+    // Whether this one alone holds its array (no copy shares it): takeFrom then moves it.
+    bool sole() const { return data_.use_count() == 1; }
     // `tail` appended. An array of this one's own is grown in place (amortized, as insert); one
     // shared with another set (a copy about to grow: Merge's) is not cloned and then grown (two
     // copies and a reallocation) but made once at its new size (recycled when one is kept) and
@@ -346,6 +407,25 @@ public:
     // Replaces the contents with `strands` strands of the given point counts
     // (the same defaults as resizeUniform, `leave` the same).
     void resize(const std::vector<std::size_t>& pointsPerStrand, unsigned leave = kFillAll);
+    // The same strands at other point counts (`pointsPerStrand`: strandCount() of them): the offsets
+    // made anew and the positions, widths and point channels sized for them, arrays of this set's
+    // own with their contents as they come (the caller writes every element). IDs, roots, strand
+    // channels, instances and layers stay as they are, shared with the copies. For an incremental
+    // evaluation laying its last result out anew (StrandChanges::recounted): the arrays come with
+    // room to spare, so the next evaluation's, a few points more or less, reuse them (ArrayPool::
+    // takeWithRoom) instead of being allocated.
+    void relayout(const std::vector<std::size_t>& pointsPerStrand);
+    // The positions (widths) as an array of this set's own of the size they have, its contents as
+    // they come (the caller writes every element), made as relayout makes them: for a copy of a
+    // set that is laid out anew on every evaluation.
+    std::vector<Vec3f>& overwritePositionsWithRoom() {
+        dropExtent();
+        return positions_.sizedWithRoom(positions_.get().size());
+    }
+    std::vector<float>& overwriteWidthsWithRoom() {
+        dropWidthsSet();
+        return widths_.sizedWithRoom(widths_.get().size());
+    }
 
     // Point count shared by every strand; 0 if counts differ or the set is empty.
     std::size_t uniformPointCount() const;
@@ -388,7 +468,10 @@ public:
         dropExtent();
         return positions_.overwrite(lock_);
     }
-    std::vector<float>& mutableWidths() { return widths_.mut(lock_); }
+    std::vector<float>& mutableWidths() {
+        dropWidthsSet();
+        return widths_.mut(lock_);
+    }
 
     // Per-strand and per-point float channels. Adding a channel fills it with
     // defaultValue (a fresh array, shared with nobody); strands appended later
@@ -416,13 +499,18 @@ public:
     // again: an operator's last result the graph let go of (IncrementalInputs::sole).
     std::vector<Vec3f>& takePositionsFrom(StrandSet& from);
     std::vector<float>& takeWidthsFrom(StrandSet& from);
+    // Whether no other set shares this one's points: takePositionsFrom then takes them, no copy.
+    bool positionsSole() const { return positions_.sole(); }
     // `from`'s points as this set's, shared with it (no copy; copy on write as ever), with its
     // extent: for a set holding the same strands as `from` (IDs, roots, offsets), whose points
     // are `from`'s (StrandChanges::pointsKept).
     void sharePositionsOf(const StrandSet& from);
     // The widths for writing every point anew (as overwritePositions): not copied from a set
     // sharing them, so each must be written.
-    std::vector<float>& overwriteWidths() { return widths_.overwrite(lock_); }
+    std::vector<float>& overwriteWidths() {
+        dropWidthsSet();
+        return widths_.overwrite(lock_);
+    }
     std::vector<float>* copyStrandChannelFrom(const std::string& name, const StrandSet& from);
     std::vector<float>* copyPointChannelFrom(const std::string& name, const StrandSet& from);
     void removeStrandChannel(const std::string& name) { strandChannels_.erase(name); }
@@ -471,6 +559,14 @@ public:
     // Order-sensitive content hash, used for cache keys and golden tests.
     std::uint64_t contentHash() const;
 
+    // Whether any width was set: the strands carry one a point, and not every one is the 1 a point
+    // starts with (no Width node, nor anything else, wrote them: 1 everywhere is unset, not a scene
+    // unit). What a display draws by (displayWidths, display.h). Worked out in one parallel pass on
+    // first use (it stops at the first width that is not 1) and kept until the widths are taken for
+    // writing; a set sized and filled knows it as made. Ask a complete set, as extent(). Copies
+    // keep it.
+    bool widthsSet() const;
+
     // The points' bounds and the longest strand's length (each strand's segment lengths summed
     // root to tip, in order), worked out in one parallel pass on first use and kept until the set
     // is written (resizing, appending, a strand added, its points or positions taken for
@@ -503,6 +599,10 @@ private:
         }
     }
     void copyExtent(const StrandSet& o);
+    // widthsSet()'s value (kWidthsUnknown: not worked out), while the widths it came from stand.
+    static constexpr std::int8_t kWidthsUnknown = -1;
+    void dropWidthsSet() { widthsSet_.store(kWidthsUnknown, std::memory_order_release); }
+    mutable std::atomic<std::int8_t> widthsSet_{kWidthsUnknown};
     mutable std::mutex extentLock_;
     mutable std::shared_ptr<const Extent> extent_;
     mutable std::shared_ptr<const std::vector<Extent>> extentBlocks_;  // its parts, block by block

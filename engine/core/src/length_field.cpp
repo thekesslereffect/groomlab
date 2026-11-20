@@ -101,8 +101,8 @@ LengthField::LengthField(const LengthKeySet& keys, const ScalpMesh* scalp) : sca
         Vec3f lo = graph_->position(0), hi = lo;
         for (std::uint32_t v = 1; v < graph_->vertexCount(); ++v) {
             const Vec3f& p = graph_->position(v);
-            lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
-            hi = {std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
+            lo = minPerAxis(lo, p);
+            hi = maxPerAxis(hi, p);
         }
         limit = (hi - lo).length() * kLimitExtents;
     }

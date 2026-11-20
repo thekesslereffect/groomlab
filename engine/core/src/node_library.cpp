@@ -4,6 +4,7 @@
 
 #include "groomlab/node_library.h"
 
+#include <stdexcept>
 #include <algorithm>
 #include <cctype>
 #include <chrono>
@@ -979,6 +980,67 @@ std::string importNodeFile(const std::string& path, const std::string& dir) {
         throw GraphError(fs::u8path(path).filename().u8string() + ": " + e.what());
     }
     return saveNodeFile(text, dir);
+}
+
+std::string withScriptDefinition(const std::string& graphJson, const std::string& node, const std::string& definitionJson) {
+    const json definition = json::parse(definitionJson);
+    std::string errors;
+    const json checked = json::parse(scriptNodeErrorsJson(definition.dump()));  // (held: a temporary's member would dangle)
+    for (const json& e : checked["errors"]) {
+        if (!errors.empty()) errors += "\n";
+        if (e.value("line", 0) > 0) errors += "line " + std::to_string(e["line"].get<int>()) + ", column " + std::to_string(e["column"].get<int>()) + ": ";
+        errors += e.value("message", std::string());
+    }
+    if (!errors.empty()) throw std::invalid_argument(errors);
+    auto defaults = [](const json& n) {
+        std::map<std::string, json> out;
+        for (const json& p : json::parse(nodeSpecJson(n.dump())).value("params", json::array())) out[p.value("name", std::string())] = p.value("default", json());
+        return out;
+    };
+    auto names = [](const json& d) {
+        std::set<std::string> out;
+        for (const json& p : d.value("params", json::array())) {
+            if (p.is_object() && p.value("name", json()).is_string()) out.insert(p["name"].get<std::string>());
+        }
+        return out;
+    };
+    json g = json::parse(graphJson);
+    bool found = false;
+    for (json& item : g["nodes"]) {
+        if (item.value("name", std::string()) != node) continue;
+        if (item.value("type", std::string()) != "Script") break;
+        found = true;
+        const std::map<std::string, json> before = defaults(item);
+        if (!item.contains("params") || !item["params"].is_object()) item["params"] = json::object();
+        json& params = item["params"];
+        const std::set<std::string> oldNames = names(params.value("definition", json::object())), newNames = names(definition);
+        params["definition"] = definition;
+        for (const std::string& gone : oldNames) {
+            if (newNames.count(gone)) continue;
+            params.erase(gone);
+            if (item.contains("paramInputs") && item["paramInputs"].is_array()) {
+                json kept = json::array();
+                for (const json& p : item["paramInputs"]) {
+                    if (p != gone) kept.push_back(p);
+                }
+                item["paramInputs"] = kept;
+            }
+            json links = json::array();
+            for (const json& c : g.value("connections", json::array())) {
+                if (c.value("to", std::string()) != node || c.value("input", std::string()) != gone) links.push_back(c);
+            }
+            g["connections"] = links;
+        }
+        // A param still at its old default takes the new one; a new one, its default.
+        for (const auto& [name, value] : defaults(item)) {
+            if (!newNames.count(name)) continue;
+            const auto old = before.find(name);
+            if (!params.contains(name) || (old != before.end() && params[name] == old->second)) params[name] = value;
+        }
+        break;
+    }
+    if (!found) throw std::invalid_argument(node + " is not a script node");
+    return g.dump();
 }
 
 }  // namespace groomlab

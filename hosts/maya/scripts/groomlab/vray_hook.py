@@ -45,8 +45,6 @@ except ImportError:  # the pure helpers alone (tests/hosts/vray/test_vray_scene.
     cmds = None
 
 REQUIRED = "V-Ray for Maya 2024+ required"
-EXPERIMENTAL_NOTE = ("experimental, untested: V-Ray for Maya supports Maya 2024 and later only; in any Maya, "
-                     "GroomLab > Render > V-Ray Standalone renders the groom")
 VRAY_PLUGIN = "vrayformaya"
 SETTINGS = "vraySettings"
 SCRIPT_ATTR = "postTranslatePython"

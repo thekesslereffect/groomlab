@@ -323,6 +323,18 @@ def _tube_hold(profile):
     return update
 
 
+
+def _mirror_on(t):
+    """Mirror turned on: the picked library shape made symmetric from its right side when it is not
+    (every host's: tube.h mirroredSectionPoints, as Maya's and the app's editors do)."""
+    if not t.tube_shape_mirror:
+        return
+    from . import window
+    try:
+        window.make_tube_shape_symmetric(t)
+    except Exception:  # noqa: BLE001 - no helper or shape yet: nothing to make symmetric
+        pass
+
 class GroomLabGroupItem(bpy.types.PropertyGroup):
     # name: the group's
     parent: StringProperty()
@@ -435,9 +447,13 @@ class GroomLabTools(bpy.types.PropertyGroup):
     status: StringProperty()
     strengths: StringProperty()  # {tool: strength}: each tool keeps its own, as in Maya
     brushes: StringProperty()  # {tool: {radius, falloff, falloff_curve, strength_profile}}: each brush's own
+    # The brush values' defaults and limits are the core's (brush_catalog.h, the helper's tool_catalog
+    # "settings"), written out here because Blender declares properties before the helper runs: a
+    # length in meters (the catalog's centimeters / 100), the stamp spacing in percent. Change one
+    # in the catalog and here: ToolsTest.test_2b_brush_values_are_the_catalogs fails when they differ.
     radius: IntProperty(name="Radius", default=60, min=1, max=2000, soft_min=5, soft_max=400, subtype="PIXEL",
                         description="The brush circle (B held + drag sets it)", update=_push("radius"))
-    strength: FloatProperty(name="Strength", default=1.0, min=-1.0, max=1.0, update=_strength,
+    strength: FloatProperty(name="Strength", default=1.0, min=-10.0, max=10.0, soft_min=-1.0, soft_max=1.0, update=_strength,
                             description="How much each stamp does (Comb: the fraction of the drag); negative reverses "
                                         "the tools that work both ways (M held + drag sets it)")
     falloff: FloatProperty(name="Falloff", default=1.0, min=0.0, max=1.0, subtype="FACTOR", update=_push(),
@@ -451,7 +467,7 @@ class GroomLabTools(bpy.types.PropertyGroup):
                                    update=_push(),
                                    description="How much of the strength each part of a guide gets, root to tip: tips "
                                                "more than roots, or the reverse; Flat: the whole guide alike")
-    smooth_strength: FloatProperty(name="Smooth", default=1.0, min=0.0, max=3.0, update=_push(),
+    smooth_strength: FloatProperty(name="Smooth", default=1.0, min=0.0, max=100.0, soft_max=3.0, update=_push(),
                                    description="How much Shift+drag smooths a map per stamp (past 1: several passes)")
     symmetry: BoolProperty(name="Symmetry", default=False, update=_push(),
                            description="Mirror every stroke: across world X, or across the scalp's own topology")
@@ -485,11 +501,11 @@ class GroomLabTools(bpy.types.PropertyGroup):
                                   description="New guides stay unfrozen and every other guide is frozen, so the brushes "
                                               "work on the new ones at once (Ctrl+click guides with a brush to "
                                               "select them, Unfreeze All to free them all)")
-    length: FloatProperty(name="Length", default=0.005, min=1e-6, soft_max=1.0, subtype="DISTANCE", unit="LENGTH",
-                          precision=4, update=_push(), description="A standing new guide's length")
+    length: FloatProperty(name="Length", default=0.005, min=1e-5, max=100.0, soft_min=1e-4, soft_max=0.5, subtype="DISTANCE",
+                          unit="LENGTH", precision=4, update=_push(), description="A standing new guide's length")
     segments: IntProperty(name="Segments", default=12, min=1, max=256, soft_max=32, update=_push(),
                           description="A new guide's segments")
-    spacing: FloatProperty(name="Spacing", default=0.001, min=0.0, soft_max=0.1, subtype="DISTANCE", unit="LENGTH",
+    spacing: FloatProperty(name="Spacing", default=0.001, min=0.0, max=100.0, soft_max=0.1, subtype="DISTANCE", unit="LENGTH",
                            precision=4, update=_push(), description="The distance between the guides a drag places")
     part_name: StringProperty(name="Name", default="part", update=_push(), description="Name for the next part (made unique)")
     flow_sink_item: EnumProperty(name=defs.get("choices/flowSink")["label"], items=FLOW_ITEMS,
@@ -504,7 +520,7 @@ class GroomLabTools(bpy.types.PropertyGroup):
     # Paint on a scalp map through an alpha (Maya's Alpha picker): its file ("" none), shown and
     # picked in the library's grid (alpha_choice), its rotation, angle, spacing and invert.
     alpha: StringProperty(name="Alpha", update=_push(), description="The image stamped inside the brush (a file)")
-    tube_shape_mirror: BoolProperty(name="Mirror", default=True,
+    tube_shape_mirror: BoolProperty(name="Mirror", default=True, update=lambda self, context: _mirror_on(self),
                                     description="The cross-section editor keeps the left and right sides alike: a "
                                                 "point and its mirror image move, come and go together")
     alpha_choice: EnumProperty(name="Alpha", items=alphas.enum_items, get=alphas.choice_get, set=alphas.choice_set,
@@ -610,6 +626,9 @@ class GroomLabTools(bpy.types.PropertyGroup):
     # Subdividing roots (issue 85): painting the density map (the paint brush beside Subdivide), and
     # the Subdivision multiplier Subdivide and Apply cut at.
     root_painting: BoolProperty()
+    # The groom's density map (the helper's maps_list densityMap: the one map, else an older
+    # numbered one; "" none yet: Subdivide makes it).
+    root_density_map: StringProperty()
     root_multiplier: FloatProperty(name="Multiplier", default=1.0, min=0.05, max=20.0, soft_min=0.25, soft_max=4.0,
                                    description="Subdivision multiplier: how dense the cuts are overall, with the "
                                                "painted density: 1 as painted, 2 about twice the roots (each "
@@ -769,6 +788,10 @@ class GroomLabGroomDisplay(bpy.types.PropertyGroup):
     strand_color_source: StringProperty(name="Source", default="clumpId", update=_display, search=_strand_sources,
                                         description="The color set or channel the strands show")
     strand_color_min: FloatProperty(name="Min", default=0.0, update=_display)
+    # Show Tubes (the Graph Editor's button on a Braid node): the Braid nodes whose section tubes the
+    # viewport draws, their names one a line (the core's rules, through the helper's braid_tubes).
+    braid_tubes: StringProperty(name="Show Tubes", update=_display,
+                                description="The Braid nodes whose section tubes the viewport draws")
     strand_color_max: FloatProperty(name="Max", default=1.0, update=_display)
     state: StringProperty()  # the groom's state (get_state) kept in the .blend: guides, maps, selection
     # Where GroomLab's own undo history stood after the groom's last edit (the helper's undoDepth):

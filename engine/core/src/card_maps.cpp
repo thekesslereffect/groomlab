@@ -17,6 +17,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "groomlab/color.h"
 #include "groomlab/parallel.h"
 #include "groomlab/paths.h"
 #include "groomlab/png.h"
@@ -31,12 +32,6 @@ namespace {
 
 constexpr int kMaxResolution = 8192;
 constexpr std::size_t kRowGrain = 16;
-
-// As the bake writes color (card_bake.cpp): the same float, so 8-bit maps are the same bytes.
-float linearToSrgb(float x) {
-    x = std::clamp(x, 0.0f, 1.0f);
-    return x <= 0.0031308f ? 12.92f * x : 1.055f * pm::pow(x, 1.0f / 2.4f) - 0.055f;
-}
 
 std::uint8_t to8(float x) { return static_cast<std::uint8_t>(std::lround(std::clamp(x, 0.0f, 1.0f) * 255.0f)); }
 std::uint16_t to16(float x) { return static_cast<std::uint16_t>(std::lround(std::clamp(x, 0.0f, 1.0f) * 65535.0f)); }
@@ -236,7 +231,7 @@ CardTextures cardTexturesFromMaps(const CardMaps& m) {
                 t.tangent[p * 3 + k] = to8(0.5f + 0.5f * m.tangent[p * 3 + k]);
                 const float normal = m.normal[p * 3 + k];
                 t.normal[p * 3 + k] = to8(0.5f + 0.5f * (k == 1 ? -normal : normal));  // DirectX's green, as a preset packs it
-                t.color[p * 3 + k] = to8(linearToSrgb(m.color[p * 3 + k]));
+                t.color[p * 3 + k] = to8(linearToSrgb01(m.color[p * 3 + k]));
             }
             t.attribute[p * 4 + 0] = to8(m.rootU[p]);
             t.attribute[p * 4 + 1] = to8(m.rootV[p]);
@@ -539,6 +534,13 @@ std::optional<CardMapPreset> findCardMapPreset(const std::string& name) {
     return std::nullopt;
 }
 
+CardMapPreset cardMapPresetFromText(const std::string& text) {
+    const std::size_t first = text.find_first_not_of(" \t\r\n");
+    if (first != std::string::npos && text[first] == '{') return cardMapPresetFromJson(text);
+    if (const auto found = findCardMapPreset(text)) return *found;
+    throw std::runtime_error("no card map preset named '" + text + "'");
+}
+
 namespace {
 
 std::string presetFileName(const std::string& name) {
@@ -694,7 +696,7 @@ std::vector<float> packFile(const CardMaps& maps, const CardMapFile& file, const
                     v = 0.5f + 0.5f * ((k == 1 && directx) ? -f : f);
                     break;
                 }
-                case kColor: v = srgb ? linearToSrgb(maps.color[p * 3 + k]) : maps.color[p * 3 + k]; break;
+                case kColor: v = srgb ? linearToSrgb01(maps.color[p * 3 + k]) : maps.color[p * 3 + k]; break;
                 case kAo: v = maps.ao[p]; break;
                 case kAoWorld: v = maps.aoWorld.empty() ? 1.0f : maps.aoWorld[p]; break;
                 case kRoot: v = maps.root[p]; break;

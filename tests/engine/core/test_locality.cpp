@@ -48,6 +48,17 @@ constexpr float kBulge = 1.06f;
 constexpr float kFar = -2.0f;  // strands rooted below this x must not change
 constexpr float kDensity = 0.015f;
 
+// Presets whose far strands may change when the scalp is re-made (posed they may not). A Clump
+// (version 2) picking its own centers by size places them on the scalp and relaxes them apart as
+// Scatter relaxes its roots: a re-made scalp reaches kRelaxIterations x kRelaxReach = 48 of its
+// spacings. These presets' clumps are large against the sphere (the far side is about ten of them
+// from the bulge), so the ripple arrives there: most far strands move by thousandths of a unit, a few
+// change clump (everyday_sim's Simulate carries that on: its far strands move). (At randomness 1,
+// no relaxing, hair_basics' far strands stay within 2e-6.
+// EvenRootsTheirPreviewAndOwnClumpsChangeOnlyNearTheEdit holds the small clumps.)
+const std::set<std::string> kLargeClumps = {"blend_two_looks", "braids_free_ends", "curly",        "everyday_sim",   "game_cards",
+                                            "hair_basics",     "merge_layers",     "parted_style", "wind_and_jiggle"};
+
 // Presets whose far strands may change with the edit, and why.
 const std::map<std::string, std::string> kGlobal = {
     // Global by nature.
@@ -215,6 +226,8 @@ TEST(Locality, AnEditOfTheScalpChangesEveryPresetOnlyNearIt) {
             const auto global = kGlobal.find(p.name);
             if (global != kGlobal.end()) {
                 std::printf("[ global   ] %s (%s)\n", what.c_str(), global->second.c_str());
+            } else if (!pose && kLargeClumps.count(p.name)) {
+                std::printf("[ clumps   ] %s\n", what.c_str());
             } else if (!changes.none()) {
                 EXPECT_TRUE(changes.fewChannels()) << what;
                 std::printf("[ few      ] %s\n", what.c_str());

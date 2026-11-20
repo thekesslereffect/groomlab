@@ -125,10 +125,14 @@ private:
 // as strand channels and per-point layers as point channels. For nodes taking either kind on
 // an input whose output is not Curves (Propagate's shafts).
 StrandsPtr guidesAsStrands(const GuideSet& guides);
-// Strands as guides (graph.cpp, as a Curves node hands guides back): IDs, roots, points, strand
-// channels as attributes and point channels as per-point layers. For an input taking either kind
-// whose operator reads guides. The roles' channel (preview_core.h) never comes along.
-GuidesPtr strandsAsGuides(const StrandSet& strands);
+// A Curves node run on guides (Curl, Noise, Twist... on a Guides node's output) hands guides back
+// from the strands it made (`shaped`, from guidesAsStrands of `source`), each keeping what a strand
+// has no room for, by ID (its tube, frameUp, roots' footprint, depth and base: Interpolate's
+// fillTubes fills the shaped tubes), and the display color. The other levels' tubes
+// (GuideSet::levelTubes: levelTubesAsStrands, null without) the node shaped too, apart, so every
+// tube of the hierarchy is shaped alike: `levelsShaped`; null, kept as they came.
+StrandsPtr levelTubesAsStrands(const GuideSet& guides);
+GuidesPtr shapedGuides(const StrandSet& shaped, const StrandSet* levelsShaped, const GuideSet& source);
 
 // Numbers b's groups after a's highest (look_ops.cpp): its clumpId, braidId and featherId (each
 // channel both have) offset by groupNumberBase of the largest of a's core strands (strand_set.h,
@@ -224,10 +228,14 @@ public:
     // until it returns false.
     template <typename Visit>
     void around(const Vec3f& p, Visit visit) const {
+        // (p's cell found once and each neighbour's key built on from it: keyOf(p, dx, dy, dz)'s.)
+        const std::int64_t x = gridCell(p.x, cell_), y = gridCell(p.y, cell_), z = gridCell(p.z, cell_);
         for (std::int64_t dx = -1; dx <= 1; ++dx) {
+            const std::uint64_t keyX = hash64(static_cast<std::uint64_t>(x + dx));
             for (std::int64_t dy = -1; dy <= 1; ++dy) {
+                const std::uint64_t keyXY = hashCombine(keyX, static_cast<std::uint64_t>(y + dy));
                 for (std::int64_t dz = -1; dz <= 1; ++dz) {
-                    const auto it = ranges_.find(keyOf(p, dx, dy, dz));
+                    const auto it = ranges_.find(hashCombine(keyXY, static_cast<std::uint64_t>(z + dz)));
                     if (it == ranges_.end()) continue;
                     for (std::uint32_t k = it->second.first; k < it->second.second; ++k) {
                         if (!visit(members_[k])) return;
@@ -255,10 +263,13 @@ public:
     // Calls visit(point, index) for those added in p's cell and its neighbours until it returns false.
     template <typename Visit>
     void around(const Vec3f& p, Visit visit) const {
+        const std::int64_t x = gridCell(p.x, cell_), y = gridCell(p.y, cell_), z = gridCell(p.z, cell_);  // (as CellGrid::around)
         for (std::int64_t dx = -1; dx <= 1; ++dx) {
+            const std::uint64_t keyX = hash64(static_cast<std::uint64_t>(x + dx));
             for (std::int64_t dy = -1; dy <= 1; ++dy) {
+                const std::uint64_t keyXY = hashCombine(keyX, static_cast<std::uint64_t>(y + dy));
                 for (std::int64_t dz = -1; dz <= 1; ++dz) {
-                    const auto it = cells_.find(keyOf(p, dx, dy, dz));
+                    const auto it = cells_.find(hashCombine(keyXY, static_cast<std::uint64_t>(z + dz)));
                     if (it == cells_.end()) continue;
                     for (const auto& [q, index] : it->second) {
                         if (!visit(q, index)) return;

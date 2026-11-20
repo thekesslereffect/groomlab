@@ -47,6 +47,10 @@ struct ChannelRead {
     bool reaches = false;
     std::string node;
     bool optional = false;
+    // An optional read its user leaves at the default too (ParamSpec::channelFor): nothing to note
+    // until one of them changes (a fresh groom's HairColor with no Clump before it). Every host's
+    // Node panel shows no line for it.
+    bool quiet = false;
 };
 
 struct NodeChannels {

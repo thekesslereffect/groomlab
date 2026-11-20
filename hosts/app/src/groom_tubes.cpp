@@ -83,12 +83,13 @@ std::string GroomDocument::scaleTubes(const std::vector<GuideId>& guides, float 
 }
 
 std::string GroomDocument::smoothTubes(const std::vector<GuideId>& guides, const std::string& channel, int passes) {
-    // The Shape brush's channel names, and what the tube calls each list.
-    static const std::map<std::string, std::string> lists = {
-        {"width", "width"}, {"flatness", "aspect"}, {"aspect", "aspect"}, {"twist", "twist"}, {"all", "all"}};
-    const auto list = lists.find(channel);
-    if (list == lists.end()) return "the channel is width, flatness, twist or all";
-    return editTubes(guides, json{{"smooth", list->second}, {"passes", std::clamp(passes, 1, 100)}}, "smooth tube");
+    std::string edit;
+    try {
+        edit = tubeSmoothEdit(channel, passes);  // (the Shape brush's channel names: every host's)
+    } catch (const std::invalid_argument& e) {
+        return e.what();
+    }
+    return editTubes(guides, json::parse(edit), "smooth tube");
 }
 
 std::string GroomDocument::addTubeShape(const std::string& name, const std::vector<SectionPoint>& points, bool smooth,

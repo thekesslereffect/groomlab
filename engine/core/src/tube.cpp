@@ -126,9 +126,8 @@ void measureDepth(TubeOutline& t) {
 
 // The farthest crossing of the ray from the center at angle `a` with a closed polygon: how far
 // out (0: none), and on which edge (from points[edge] to the next) how far along it.
-float farthestCrossing(const std::vector<SectionPoint>& poly, float a, std::size_t* edge, float* along) {
+float farthestCrossing(const SectionPoint* poly, std::size_t n, float a, std::size_t* edge, float* along) {
     const float du = pm::cos(a), dv = pm::sin(a);
-    const std::size_t n = poly.size();
     float far = 0.0f;
     *edge = 0;
     *along = 0.0f;
@@ -149,6 +148,10 @@ float farthestCrossing(const std::vector<SectionPoint>& poly, float a, std::size
     return far;
 }
 
+float farthestCrossing(const std::vector<SectionPoint>& poly, float a, std::size_t* edge, float* along) {
+    return farthestCrossing(poly.data(), poly.size(), a, edge, along);
+}
+
 // The outline's radius each way out from the center (TubeOutline::radius: along each bin's ray
 // the farthest crossing of its edges), its perimeter walked evenly from where the +u ray crosses
 // it, and where along that each bin's ray crosses (TubeOutline::perimeter, perimeterAt).
@@ -163,7 +166,7 @@ void measureRadius(TubeOutline& t) {
     for (std::size_t i = 0; i < n; ++i) {
         const SectionPoint& a = poly[i];
         const SectionPoint& b = poly[(i + 1) % n];
-        at[i + 1] = at[i] + std::hypot(b.u - a.u, b.v - a.v);
+        at[i + 1] = at[i] + pm::hypot(b.u - a.u, b.v - a.v);
     }
     const float total = std::max(at[n], 1e-6f);
     auto arcOf = [&](std::size_t edge, float along) { return at[edge] + (at[edge + 1] - at[edge]) * along; };
@@ -395,7 +398,7 @@ TubeBlendPoint TubeProfile::blendPoint(float u, float v) const {
     // Where its ray crosses the root's perimeter, and how far out it lies (1 on the outline).
     const TubeOutline& root = tubeShapeOutline(rootShape());
     const float s = root.perimeterParam(u, v);
-    const float r = std::hypot(u, v) / std::max(root.radiusAt(u, v), 1e-4f);
+    const float r = pm::hypot(u, v) / std::max(root.radiusAt(u, v), 1e-4f);
     auto place = [&](const std::optional<TubeShapeRef>& profile) -> SectionPoint {
         if (!profile) return {u, v};  // (no tip: the root's)
         const SectionPoint p = tubeShapeOutline(*profile).perimeterPoint(s);
@@ -416,7 +419,7 @@ SectionPoint TubeProfile::unblend(float u, float v, float t) const {
     const TubeOutline& root = tubeShapeOutline(rootShape());
     const TubeOutline& mid = tubeShapeOutline(midShape ? *midShape : rootShape());
     const TubeOutline& tip = tubeShapeOutline(tipShape ? *tipShape : rootShape());
-    std::vector<SectionPoint> curve(kTubePerimeterPoints);
+    std::array<SectionPoint, kTubePerimeterPoints> curve;  // (on the stack: this runs per point of a child guide)
     for (std::size_t k = 0; k < kTubePerimeterPoints; ++k) {
         const float s = static_cast<float>(k) / static_cast<float>(kTubePerimeterPoints);
         const SectionPoint a = root.perimeterPoint(s), b = mid.perimeterPoint(s), c = tip.perimeterPoint(s);
@@ -426,9 +429,9 @@ SectionPoint TubeProfile::unblend(float u, float v, float t) const {
     float along = 0.0f;
     float a = pm::atan2(v, u);
     if (a < 0.0f) a += 2.0f * kPi;
-    const float far = farthestCrossing(curve, a, &edge, &along);
+    const float far = farthestCrossing(curve.data(), curve.size(), a, &edge, &along);
     if (!(far > 1e-6f)) return {u, v};
-    const float r = std::hypot(u, v) / far;
+    const float r = pm::hypot(u, v) / far;
     const SectionPoint p = root.perimeterPoint((static_cast<float>(edge) + along) / static_cast<float>(kTubePerimeterPoints));
     return {p.u * r, p.v * r};
 }
@@ -651,7 +654,7 @@ std::vector<SectionPoint> denseCurve(const std::vector<SectionPoint>& pts, bool 
             // root of each span's length): through every point, with no loops or cusps where the
             // points crowd (a point added between two near ones bends the curve, never knots it).
             auto knot = [](const SectionPoint& a, const SectionPoint& b) {
-                return std::max(std::sqrt(std::hypot(b.u - a.u, b.v - a.v)), 1e-4f);
+                return std::max(std::sqrt(pm::hypot(b.u - a.u, b.v - a.v)), 1e-4f);
             };
             const float k0 = 0.0f, k1 = k0 + knot(p0, p1), k2 = k1 + knot(p1, p2), k3 = k2 + knot(p2, p3);
             const float x = k1 + (k2 - k1) * t;
@@ -676,7 +679,7 @@ std::vector<SectionPoint> evenlyAlong(const std::vector<SectionPoint>& poly, std
     for (std::size_t i = 0; i < n; ++i) {
         const SectionPoint& a = poly[i];
         const SectionPoint& b = poly[(i + 1) % n];
-        at[i + 1] = at[i] + std::hypot(b.u - a.u, b.v - a.v);
+        at[i + 1] = at[i] + pm::hypot(b.u - a.u, b.v - a.v);
     }
     std::vector<SectionPoint> out(count);
     std::size_t seg = 0;
@@ -759,10 +762,10 @@ CustomTubeShapePtr buildCustomTubeShape(const std::string& name, const std::vect
     }
     float size = given.empty() ? 0.0f : std::max(hu - lu, hv - lv);
     for (const SectionPoint& p : given) {
-        if (!pts.empty() && std::hypot(p.u - pts.back().u, p.v - pts.back().v) <= 1e-4f * size) continue;
+        if (!pts.empty() && pm::hypot(p.u - pts.back().u, p.v - pts.back().v) <= 1e-4f * size) continue;
         pts.push_back(p);
     }
-    while (pts.size() > 1 && std::hypot(pts.front().u - pts.back().u, pts.front().v - pts.back().v) <= 1e-4f * size) pts.pop_back();
+    while (pts.size() > 1 && pm::hypot(pts.front().u - pts.back().u, pts.front().v - pts.back().v) <= 1e-4f * size) pts.pop_back();
     if (pts.size() < 3) throw std::invalid_argument("tube shape '" + name + "': at least 3 points, apart");
     const std::size_t per = samplesPerSpan(pts.size());
     std::vector<SectionPoint> dense;
@@ -801,19 +804,19 @@ CustomTubeShapePtr buildCustomTubeShape(const std::string& name, const std::vect
     // between straight edges, 60 on a smooth curve) put in place of the nearest outline points.
     TubeOutline& t = shape->outline;
     t.points = evenlyAlong(dense, kOutlinePoints);
-    const float sharp = std::cos((smooth ? 60.0f : 20.0f) * kPi / 180.0f);
+    const float sharp = pm::cos((smooth ? 60.0f : 20.0f) * kPi / 180.0f);
     const std::size_t n = pts.size();
     for (std::size_t i = 0; i < n; ++i) {
         const SectionPoint& a = pts[(i + n - 1) % n];
         const SectionPoint& b = pts[i];
         const SectionPoint& c = pts[(i + 1) % n];
         const float iu = b.u - a.u, iv = b.v - a.v, ou = c.u - b.u, ov = c.v - b.v;
-        const float li = std::hypot(iu, iv), lo = std::hypot(ou, ov);
+        const float li = pm::hypot(iu, iv), lo = pm::hypot(ou, ov);
         if (!(li > 0.0f && lo > 0.0f) || (iu * ou + iv * ov) / (li * lo) > sharp) continue;
         std::size_t best = 0;
         float bestD = std::numeric_limits<float>::max();
         for (std::size_t k = 0; k < t.points.size(); ++k) {
-            const float d = std::hypot(t.points[k].u - b.u, t.points[k].v - b.v);
+            const float d = pm::hypot(t.points[k].u - b.u, t.points[k].v - b.v);
             if (d < bestD) bestD = d, best = k;
         }
         if (std::find(t.corners.begin(), t.corners.end(), best) != t.corners.end()) continue;
@@ -975,7 +978,7 @@ void TubeSpine::setRootOnScalp(const Vec3f& normal, const Vec3f& across) {
     u = u * (1.0f / ul);
     const Vec3f v = n.cross(u);  // (as a laid footprint: v = n x u)
     const float twist = tube_.twistAt(0.0f);
-    const float c = std::cos(twist), s = std::sin(twist);
+    const float c = pm::cos(twist), s = pm::sin(twist);
     footU_ = (u * c + v * s) * rootWidth_;
     footV_ = (u * -s + v * c) * rootHeight_;
     footNormal_ = n;
@@ -1079,6 +1082,28 @@ std::string tubeToJson(const TubeProfile& tube, float scale) {
     return j.dump();
 }
 
+TubeCardValues tubeCardValues(const std::vector<float>& width, const std::vector<float>& aspect, const std::vector<float>& twist) {
+    TubeCardValues out;
+    if (!width.empty()) out.width = *std::max_element(width.begin(), width.end());
+    float a = 0.0f, t = 0.0f;
+    for (const float v : aspect) a += v;
+    for (const float v : twist) t += v;
+    const float meanAspect = aspect.empty() ? 1.0f : a / static_cast<float>(aspect.size());
+    out.flatness = std::clamp(1.0f - meanAspect, 0.0f, 0.99f);
+    out.twist = std::clamp(twist.empty() ? 0.0f : t / static_cast<float>(twist.size()), -kPi, kPi);
+    return out;
+}
+
+float tubeAspectOfFlatness(float flatness) { return std::max(1.0f - flatness, 0.01f); }
+
+std::string tubeSmoothEdit(const std::string& channel, int passes) {
+    if (channel != "width" && channel != "flatness" && channel != "aspect" && channel != "twist" && channel != "all") {
+        throw std::invalid_argument("the channel is width, flatness, twist or all");
+    }
+    nlohmann::json edit = {{"smooth", channel == "flatness" ? std::string("aspect") : channel}, {"passes", std::clamp(passes, 1, 100)}};
+    return edit.dump();
+}
+
 TubeProfile editedTube(const TubeProfile& base, const std::string& editJson, float scale, std::size_t points,
                        const TubeShapeLibrary* library) {
     json j;
@@ -1170,7 +1195,8 @@ TubeProfile editedTube(const TubeProfile& base, const std::string& editJson, flo
         tube.twist = resampled(tube.twist, n, 0.0f);
     }
     if (j.contains("smooth")) {
-        const std::string which = j["smooth"].is_string() ? j["smooth"].get<std::string>() : "";
+        std::string which = j["smooth"].is_string() ? j["smooth"].get<std::string>() : "";
+        if (which == "flatness") which = "aspect";  // (the Shape brush's name for it)
         const unsigned lists = which == "width" ? kTubeWidthList : which == "aspect" ? kTubeAspectList
                                : which == "twist" ? kTubeTwistList : which == "all" ? kTubeAllLists : 0u;
         if (lists == 0) throw std::invalid_argument("tube smooth: width, aspect, twist or all");
@@ -1256,6 +1282,79 @@ TubeProfile blendedTube(const std::vector<const TubeProfile*>& tubes, const std:
     out.width = blend(&TubeProfile::widthAt);
     out.aspect = blend(&TubeProfile::aspectAt);
     out.twist = blend(&TubeProfile::twistAt);
+    return out;
+}
+
+std::string freeTubeShapeName(const std::string& base, const std::vector<std::string>& library) {
+    auto taken = [&](const std::string& name) {
+        const std::vector<std::string>& builtins = tubeShapeNames();
+        return std::find(builtins.begin(), builtins.end(), name) != builtins.end() ||
+               std::find(library.begin(), library.end(), name) != library.end();
+    };
+    int k = 1;
+    while (taken(base + " " + std::to_string(k))) ++k;
+    return base + " " + std::to_string(k);
+}
+
+// ---- Mirror (every host's cross-section editor) -----------------------------------------------
+
+namespace {
+bool onMirrorAxis(const SectionPoint& p) { return std::fabs(p.u) <= kMirrorAxis; }
+bool samePoint(const SectionPoint& a, const SectionPoint& b) { return a.u == b.u && a.v == b.v; }
+}  // namespace
+
+std::vector<SectionPoint> mirroredSectionPoints(const std::vector<SectionPoint>& pts) {
+    const int n = static_cast<int>(pts.size());
+    if (n < 3) return pts;
+    const float side = std::any_of(pts.begin(), pts.end(), [](const SectionPoint& p) { return p.u > kMirrorAxis; }) ? 1.0f : -1.0f;
+    std::vector<bool> right(static_cast<std::size_t>(n));
+    for (int i = 0; i < n; ++i) right[static_cast<std::size_t>(i)] = side * pts[static_cast<std::size_t>(i)].u > kMirrorAxis;
+    const bool all = std::all_of(right.begin(), right.end(), [](bool r) { return r; });
+    const bool any = std::any_of(right.begin(), right.end(), [](bool r) { return r; });
+    if (all || !any) return pts;
+    auto at = [&](int i) { return static_cast<std::size_t>(((i % n) + n) % n); };
+    // The right chain: from the first right point after a point that is not, round the outline.
+    int start = 0;
+    while (!(right[at(start)] && !right[at(start - 1)])) ++start;
+    std::vector<SectionPoint> chain;
+    int i = start;
+    while (right[at(i)]) {
+        chain.push_back(pts[at(i)]);
+        i = static_cast<int>(at(i + 1));
+    }
+    const SectionPoint before = pts[at(start - 1)], after = pts[at(i)];
+    std::vector<SectionPoint> out;
+    if (onMirrorAxis(before)) out.push_back({0.0f, before.v});
+    out.insert(out.end(), chain.begin(), chain.end());
+    if (onMirrorAxis(after) && (out.empty() || !samePoint(after, before))) out.push_back({0.0f, after.v});
+    for (auto it = chain.rbegin(); it != chain.rend(); ++it) out.push_back({-it->u, it->v});
+    if (side < 0.0f) {  // (the chain was the left one: the same outline, flipped back)
+        std::vector<SectionPoint> flipped;
+        for (auto it = out.rbegin(); it != out.rend(); ++it) flipped.push_back({-it->u, it->v});
+        out = std::move(flipped);
+    }
+    return out.size() >= 3 ? out : pts;
+}
+
+std::vector<int> mirrorPartners(const std::vector<SectionPoint>& points) {
+    std::vector<int> out;
+    for (std::size_t i = 0; i < points.size(); ++i) {
+        const SectionPoint& p = points[i];
+        if (onMirrorAxis(p)) {
+            out.push_back(static_cast<int>(i));
+            continue;
+        }
+        int best = -1;
+        float dist = 1e9f;
+        for (std::size_t j = 0; j < points.size(); ++j) {
+            const float d = std::fabs(points[j].u + p.u) + std::fabs(points[j].v - p.v);
+            if (j != i && d < dist) {
+                best = static_cast<int>(j);
+                dist = d;
+            }
+        }
+        out.push_back(dist < 1e-3f ? best : -1);
+    }
     return out;
 }
 

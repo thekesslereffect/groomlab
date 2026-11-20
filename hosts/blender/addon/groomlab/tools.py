@@ -63,8 +63,9 @@ def available():
 
 
 def catalog():
-    """{"tools": [...], "categories": [...], "settings": {id: {label, hint}}, "paintable": [{id, label,
-    type, param, hint}] (what New Map > For offers first)} (cached)."""
+    """{"tools": [...], "categories": [...], "settings": {id: {label, hint, kind, and a value's default,
+    softMin, softMax, min, max, decimals, unit}}, "paintable": [{id, label, type, param, hint}] (what
+    New Map > For offers first)} (cached)."""
     if not _catalog:
         r = process.call("tool_catalog")
         _catalog.update(tools=r["tools"], categories=r["categories"], settings={s["id"]: s for s in r["settings"]},
@@ -95,11 +96,6 @@ def sections():
 def setting_label(sid, fallback=""):
     s = (_catalog.get("settings") or {}).get(sid)
     return s["label"] if s else fallback
-
-
-def setting_hint(sid):
-    s = (_catalog.get("settings") or {}).get(sid)
-    return s["hint"] if s else ""
 
 
 def shows(tool):
@@ -375,6 +371,17 @@ def pick(context, tool):
         if current_map(scene) is None:
             status(scene, "Make a map to paint (New Map).")
     session(scalp, scene)
+    if tool == "part":
+        # Drawn parts open the hair: a Part node when the graph has none (Maya's draw_part_tool,
+        # every host's: graph_inserts.h insertPart).
+        try:
+            from . import pipeline
+            g = pipeline.GraphEdits(scalp)
+            if not g.of_type("Part"):  # (none there: one edit, no empty step otherwise)
+                g.edit(op="insert_part")
+                g.finish()
+        except HelperError:
+            pass  # (a graph with nothing to part: the brush still draws)
     r = push(scalp, scene)
     status(scene, "")
     from . import display
@@ -493,13 +500,6 @@ def stroke_end(scalp):
     return r
 
 
-def push_quiet(scalp, scene):
-    try:
-        push(scalp, scene)
-    except HelperError as e:
-        status(scene, e.message)
-
-
 def stroke_cancel(scalp):
     from . import display
     r = call(scalp, "stroke_cancel")
@@ -577,6 +577,7 @@ def guides_edit(scalp, op, **args):
     after_edit(scalp, groom.scene_of(scalp), r.get("undo"), refresh=True)
     if r.get("guides"):
         _fill_groups(groom.scene_of(scalp), r["guides"], groom_tools(scalp))
+    follow_graph(scalp, r)  # (a group renamed: the Guides nodes naming it follow)
     return r
 
 
@@ -603,23 +604,10 @@ def setting_targets(scalp):
     Length...), each {id, label, type, param, hint, node} with node "" while the graph has no node of
     its type; then every mappable param of the graph (Other) as {id: "node.param", label, node,
     param, hint}. Returns (settings, others)."""
-    from . import graph
     rt = groom.ensure(scalp)
-    g = process.call("get_graph", session=rt.session)["graph"]
-    nodes = g.get("nodes") or []
-    settings = []
-    for s in catalog().get("paintable") or []:
-        node = next((n["name"] for n in nodes if n.get("type") == s["type"]), "")
-        settings.append(dict(s, node=node))
-    specs = graph.operator_specs()
-    others = []
-    for n in nodes:
-        for p in (specs.get(n.get("type")) or {}).get("params", []):
-            if p.get("mappable"):
-                key = "%s.%s" % (n["name"], p["name"])
-                others.append({"id": key, "label": key, "node": n["name"], "param": p["name"],
-                               "hint": p.get("description", "")})
-    return settings, others
+    # The core's list, every host's (stroke.h settingTargetsJson, through the helper).
+    targets = process.call("setting_targets", session=rt.session)
+    return targets["settings"], targets["others"]
 
 
 def map_for_param(scalp, node, param, kind="vertices", resolution=1024, faces=None):
@@ -843,17 +831,6 @@ def set_group_color(scalp, group, color):
 # ---- Tubes (the Tubes section; Maya's guides.py tube functions) ------------------------------------
 
 TUBE_CHANNELS = ("width", "flatness", "twist")
-
-
-def tube_tool(scalp, channel=None, tube=None):
-    """The Shape brush's channel (`channel`: width, flatness or twist) and the tube Place and Draw
-    give new guides (`tube`: {shape, width (scene units), aspect, twist}): helper tool_set."""
-    settings = {}
-    if channel is not None:
-        settings["tubeChannel"] = channel
-    if tube is not None:
-        settings["tube"] = dict(tube)
-    return call(scalp, "tool_set", settings=settings)
 
 
 def tube_targets(scalp):
@@ -1153,17 +1130,13 @@ def root_edit(scalp, edit, mode=None):
     return r
 
 
-DENSITY_MAP = "tubeSubdivisionDensity"  # the vertex map Subdivide reads (1: the most, smallest roots)
-DENSITY_START = 0.5                     # its value where nothing is painted
-
-
 def root_subdivide(scalp, apply=False, guides=None, multiplier=1.0):
     """Subdivide (the selected roots, or `guides`, cut into Voronoi cells in the level below, by the
     density map and `multiplier`) or, with `apply`, Apply (every cut by the map and the multiplier
     again, all over); one undo step (helper root_subdivide). Returns {"cells", "removed", "kept",
     "cellLevel": the level the cells are in}."""
     scene = groom.scene_of(scalp)
-    args = {"apply": bool(apply), "map": DENSITY_MAP, "multiplier": float(multiplier)}
+    args = {"apply": bool(apply), "multiplier": float(multiplier)}  # (the helper finds the density map)
     if guides is not None:
         args["guides"] = [int(g) for g in guides]
     r = call(scalp, "root_subdivide", **args)
@@ -1175,18 +1148,22 @@ def root_subdivide(scalp, apply=False, guides=None, multiplier=1.0):
 
 
 def ensure_density_map(scalp, pick=True):
-    """The subdivision density map (a gray vertex map), made at DENSITY_START when missing; `pick`:
-    picked to paint toward 1."""
+    """The subdivision density map (a gray vertex map: the one map, else an older numbered one,
+    the helper's density_map), made at its start value when missing; `pick`: picked to paint
+    toward 1. Returns its name."""
     scene = groom.scene_of(scalp)
     t = scene.groomlab_tools
+    found = call(scalp, "density_map")
+    name = found["map"]
+    if not name:
+        name = found["name"]
+        map_create(scalp, name, kind="vertices", value=float(found["start"]))
     refresh_info(scalp, scene)
-    if not any(m.name == DENSITY_MAP for m in t.maps):
-        map_create(scalp, DENSITY_MAP, kind="vertices", value=DENSITY_START)
     if pick:
         with props.quiet():
-            t.paint_map = DENSITY_MAP
+            t.paint_map = name
             t.value = 1.0
-    return DENSITY_MAP
+    return name
 
 
 def root_state(scalp):
@@ -1340,7 +1317,8 @@ def refresh_info(scalp, scene=None):
     gt = groom_tools(scalp)
     try:
         info = call(scalp, "guides_info", guideColorSeed=scalp.name)  # the automatic colors as drawn
-        maps = call(scalp, "maps_list")["maps"]
+        listed = call(scalp, "maps_list")
+        maps = listed["maps"]
         gt.undo = call(scalp, "undo_state")
     except HelperError as e:
         status(scene, e.message)
@@ -1349,6 +1327,7 @@ def refresh_info(scalp, scene=None):
     gt.maps = maps
     t = scene.groomlab_tools
     with props.quiet():
+        t.root_density_map = listed.get("densityMap") or ""
         t.maps.clear()
         for m in maps:
             if m.get("freezeMask"):
@@ -1533,13 +1512,11 @@ def refresh_tubes(scalp, scene=None):
                 t.tube_root_hold = float(tube.get("rootHold", 0.0)) * 100.0
                 t.tube_mid_hold = float(tube.get("midHold", 0.0)) * 100.0
                 t.tube_tip_hold = float(tube.get("tipHold", 0.0)) * 100.0
-            widths = tube.get("width") or [0.1]
-            aspects = tube.get("aspect") or [1.0]
-            twists = tube.get("twist") or [0.0]
-            t.tube_reference = max(widths)
-            t.tube_width = max(widths)
-            t.tube_flatness = min(max(1.0 - sum(aspects) / len(aspects), 0.0), 0.99)
-            t.tube_twist = min(max(sum(twists) / len(twists), -3.14159265), 3.14159265)
+            card = info.get("card") or {}  # Width, Flatness, Twist: the core's (tubeCardValues, every host's)
+            t.tube_reference = float(card.get("width", 0.1))
+            t.tube_width = t.tube_reference
+            t.tube_flatness = float(card.get("flatness", 0.0))
+            t.tube_twist = float(card.get("twist", 0.0))
         if t.tube_choice in names:  # the library list follows the shape picked
             t.tube_shape_index = names.index(t.tube_choice)
         try:
@@ -1772,11 +1749,8 @@ def _keys_from_layer(scalp, layer):
     """A layer keyed (or faded as a fix) in the helper but with no Blender fcurve yet (Fix Frame, a
     .groom opened): its keys as Blender keyframes, linear, then sent back as the fcurve says."""
     name = layer["name"]
-    keys = [list(k) for k in layer.get("keys") or []]
-    if not keys and layer.get("frame") is not None and (layer.get("fadeIn") or layer.get("fadeOut")):
-        f = float(layer["frame"])
-        keys = [[f - float(layer.get("fadeIn") or 0.0), 0.0], [f, float(layer.get("weight", 1.0))],
-                [f + float(layer.get("fadeOut") or 0.0), 0.0]]
+    # Its keys, or a fix's fades as the core keys them (correctives.h fadeKeys: its holds kept).
+    keys = [list(k) for k in layer.get("keys") or layer.get("fadeKeys") or []]
     if not keys:
         return False
     fc = None

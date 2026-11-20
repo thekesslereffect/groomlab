@@ -125,6 +125,16 @@ ExportView describeExport(const StrandSet& strands, const ScalpMesh* scalp, unsi
     return v;
 }
 
+std::string exportObjectName(const std::string& wanted) {
+    std::string name;
+    for (const char c : wanted) {
+        const bool plain = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
+        name += plain ? c : '_';
+    }
+    if (name.empty() || (name[0] >= '0' && name[0] <= '9')) name = "groom" + name;
+    return name;
+}
+
 std::vector<std::string> usdIdentifiers(const std::vector<std::string>& names, const std::vector<std::string>& reserved) {
     std::set<std::string> taken(reserved.begin(), reserved.end());
     std::vector<std::string> out;

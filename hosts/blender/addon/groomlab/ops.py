@@ -161,55 +161,6 @@ class GROOMLAB_OT_update(GroomOperator):
         return {"FINISHED"}
 
 
-class GROOMLAB_OT_refresh_presets(bpy.types.Operator):
-    """List the shipped and user presets again"""
-    bl_idname = "groomlab.refresh_presets"
-    bl_label = "Refresh Presets"
-
-    def execute(self, context):
-        try:
-            graph.presets(refresh=True)
-        except HelperError as e:
-            return _fail(self, e)
-        return {"FINISHED"}
-
-
-class GROOMLAB_OT_apply_preset(GroomOperator):
-    """Replace the groom's graph with the preset's, fitted to this scalp (the guides stay)"""
-    bl_idname = "groomlab.apply_preset"
-    bl_label = "Apply Preset"
-    bl_options = {"REGISTER", "UNDO"}
-
-    def execute(self, context):
-        scalp = active_groom(context)
-        try:
-            r = graph.apply_preset(scalp, context.scene.groomlab.preset)
-        except HelperError as e:
-            return _fail(self, e)
-        note = graph.preset_maps_note(r)
-        if note:
-            self.report(*note)
-        if r.get("drawGroup"):
-            graph.draw_into(context, scalp, r["drawGroup"])  # a hand-placed look: draw its guides
-        return {"FINISHED"}
-
-
-class GROOMLAB_OT_insert_preset(GroomOperator):
-    """Add the preset's look after the selected node, as one compound node"""
-    bl_idname = "groomlab.insert_preset"
-    bl_label = "Insert Preset"
-    bl_options = {"REGISTER", "UNDO"}
-
-    def execute(self, context):
-        scalp = active_groom(context)
-        node = graph.active_node(scalp)
-        try:
-            graph.insert_preset(scalp, context.scene.groomlab.preset, after=node.name if node and not node.is_output else None)
-        except HelperError as e:
-            return _fail(self, e)
-        return {"FINISHED"}
-
-
 class GROOMLAB_OT_node_add(GroomOperator):
     """Add a node after the selected one on the strands' chain"""
     bl_idname = "groomlab.node_add"
@@ -255,26 +206,6 @@ class GROOMLAB_OT_node_remove(GroomOperator):
             return _fail(self, e)
         if error:
             self.report({"WARNING"}, sentence(error))
-        return {"FINISHED"}
-
-
-class GROOMLAB_OT_node_move(GroomOperator):
-    """Move the selected node along the strands' chain"""
-    bl_idname = "groomlab.node_move"
-    bl_label = "Move Node"
-    bl_options = {"REGISTER", "UNDO"}
-
-    direction: IntProperty(default=-1)
-
-    def execute(self, context):
-        scalp = active_groom(context)
-        node = graph.active_node(scalp)
-        try:
-            if node is None or not graph.move_node(scalp, node.name, self.direction):
-                self.report({"INFO"}, "This node does not move that way: the source and the output stay put")
-                return {"CANCELLED"}
-        except HelperError as e:
-            return _fail(self, e)
         return {"FINISHED"}
 
 
@@ -421,10 +352,12 @@ class GROOMLAB_OT_add_node_before_output(GroomOperator):
 
     def execute(self, context):
         scalp = active_groom(context)
+        from . import pipeline
         try:
-            made, error = graph.add_node(scalp, self.type)
-            if self.type == "Wind":
-                graph.set_param(scalp, made, "strength", 0.3)  # Maya's add_wind
+            if self.type in ("Wind", "Jiggle"):  # every host's place for motion (graph_inserts.h insertMotion)
+                made, error = pipeline.add_motion(scalp, self.type), None
+            else:
+                made, error = graph.add_node(scalp, self.type)
         except HelperError as e:
             return _fail(self, e)
         graph_tree.graph_changed(scalp)
@@ -683,8 +616,7 @@ class GROOMLAB_OT_eye(bpy.types.Operator):
 
 
 classes = (GROOMLAB_OT_eye, GROOMLAB_OT_add_groom, GROOMLAB_OT_remove_groom, GROOMLAB_OT_sculpt_guides, GROOMLAB_OT_update,
-           GROOMLAB_OT_refresh_presets, GROOMLAB_OT_apply_preset, GROOMLAB_OT_insert_preset, GROOMLAB_OT_node_add,
-           GROOMLAB_OT_node_remove, GROOMLAB_OT_node_move, GROOMLAB_OT_toggle_group, GROOMLAB_OT_save_groom,
+           GROOMLAB_OT_node_add, GROOMLAB_OT_node_remove, GROOMLAB_OT_toggle_group, GROOMLAB_OT_save_groom,
            GROOMLAB_OT_load_groom, GROOMLAB_OT_save_groom_linked, GROOMLAB_OT_reload_groom,
            GROOMLAB_OT_add_node_before_output, GROOMLAB_OT_review_heatmap, GROOMLAB_OT_export_alembic,
            GROOMLAB_OT_export_usd, GROOMLAB_OT_export_vrscene, GROOMLAB_OT_bake_card_maps)

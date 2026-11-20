@@ -16,6 +16,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <utility>
@@ -167,6 +168,12 @@ struct BrushToolSettings {
                      float softRadius, const ScalpMesh* scalp = nullptr);
 };
 
+// A value of the brush catalog's (brush_catalog.h: a BrushSettingSpec that isValue) as the
+// settings hold it: a switch as 0 or 1, "falloff" as 1 - brush.hardness, "frontFacingOnly" as
+// maskByScalp. A fresh BrushToolSettings gives each spec's default. nullopt for a Group or an id
+// the catalog does not have.
+std::optional<double> brushSettingValue(const BrushToolSettings& settings, const std::string& id);
+
 // The colors every host draws the tool in (RGB 0..1): the ring under the cursor (red for Part and
 // Erase, orange for Flow, green for the guide-making tools, else yellow), a Part or Flow stroke's
 // path so far on the scalp (red), and the guides the brush would touch under the hover (red while
@@ -295,6 +302,11 @@ struct PaintableSetting {
 };
 const std::vector<PaintableSetting>& paintableSettings();
 const PaintableSetting* paintableSetting(const std::string& id);  // null for no such id
+// What New Map > For offers on a graph (every host's): {"settings": [{"id", "label", "node", "param",
+// "type", "hint", "kind"}] (paintableSettings; node "" with the hint "Add a <type> node first
+// (Graph Editor)" while the graph has no node of its type), "others": [{"id": "node.param",
+// "label", "node", "param", "type", "hint"}] (every mappable param of the graph's nodes)}.
+std::string settingTargetsJson(const std::string& graphJson);
 
 // The name of the graph's first node of type `type`, "" when it has none ("" or "{}": the
 // default graph).
@@ -730,6 +742,7 @@ private:
     bool sculpt_ = false;
     SculptInput sculptIn_;
     SculptEdits sculptEdits_;
+    SculptStrokeRecord sculptRecord_;  // the guides' points at the last preview: a dab records the ones it changed
     // Ctrl+Shift with a Shape brush: the selection painted (StrokeHost::paintSelection). The
     // selection when it began, the guides the circle has passed over (in order), and whether it
     // moved (a drag over nothing clears; a click on nothing does not).

@@ -225,8 +225,8 @@ MeshDistanceField::MeshDistanceField(std::shared_ptr<const ScalpMesh> mesh, floa
     heightScale_ = 8.0f * band_ / 32767.0f;  // heights to +-8 bands at 1/1000th of a cell
     Vec3f lo{kInf, kInf, kInf}, hi{-kInf, -kInf, -kInf};
     for (const Vec3f& p : mesh_->points()) {
-        lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
-        hi = {std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
+        lo = minPerAxis(lo, p);
+        hi = maxPerAxis(hi, p);
     }
     if (mesh_->points().empty() || !(cell_ > 0.0f) || !std::isfinite(cell_)) return;
     inverseCell_ = 1.0f / cell_;
@@ -272,8 +272,8 @@ MeshDistanceField::~MeshDistanceField() = default;
 float MeshDistanceField::cellSizeFor(const ScalpMesh& mesh, float offset) {
     Vec3f lo{kInf, kInf, kInf}, hi{-kInf, -kInf, -kInf};
     for (const Vec3f& p : mesh.points()) {
-        lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
-        hi = {std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
+        lo = minPerAxis(lo, p);
+        hi = maxPerAxis(hi, p);
     }
     const float diagonal = mesh.points().empty() ? 1.0f : std::max((hi - lo).length(), 1e-6f);
     const float wanted = std::clamp(offset, diagonal / 1024.0f, diagonal / 128.0f);
@@ -1017,7 +1017,7 @@ DistanceFieldPtr sharedDistanceField(const std::shared_ptr<const ScalpMesh>& mes
 
 DistanceFieldPtr collisionField(const std::shared_ptr<const ScalpMesh>& mesh, float offset, float searchRadius,
                                 const FieldGrid& grid) {
-    if (!mesh || mesh->triangleCount() == 0 || (mesh->hasRest() && mesh->restPoints() != mesh->points())) return nullptr;
+    if (!mesh || mesh->triangleCount() == 0 || !mesh->atRest()) return nullptr;
     const float cell = grid.cell > 0.0f ? grid.cell : MeshDistanceField::cellSizeFor(*mesh, offset);
     return sharedDistanceField(mesh, cell, MeshDistanceField::reachFor(searchRadius), grid.band);
 }
@@ -1056,6 +1056,7 @@ struct RestPoseCollision::Rest {
     MeshPtr mesh;                                // the rest pose
     std::vector<StrandRoot> corner;              // each vertex's frame: at this corner of a face (face -1: on none)
     std::vector<int> edge;                       // along this edge of the face (the vertex's longest at rest)
+    std::vector<RootFrame> frame;                // each vertex's frame on the rest pose (every frame's motions end there)
     std::vector<std::uint32_t> ringStart, ring;  // each vertex's neighbours along the edges
 };
 
@@ -1116,6 +1117,10 @@ std::shared_ptr<const RestPoseCollision::Rest> makeRest(const ScalpMesh& mesh) {
     for (std::size_t v = 0; v < n; ++v) rest->ringStart[v + 1] += rest->ringStart[v];
     rest->ring.resize(edges.size());
     for (std::size_t k = 0; k < edges.size(); ++k) rest->ring[k] = edges[k].second;  // sorted: each vertex's in order
+    rest->frame.resize(n);
+    parallelFor(0, n, [&](std::size_t v) {
+        if (rest->corner[v].face >= 0) rest->frame[v] = rootFrameOn(*rest->mesh, rest->corner[v], rest->edge[v]);
+    }, 1024);
     return rest;
 }
 
@@ -1129,7 +1134,7 @@ std::shared_ptr<const RestPoseCollision::Frame> makeFrame(const ScalpMesh& now, 
     frame->toRest.resize(n);
     parallelFor(0, n, [&](std::size_t v) {
         if (r.corner[v].face < 0) return;  // on no triangle: no frame (invalid)
-        frame->toRest[v] = {rootFrameOn(now, r.corner[v], r.edge[v]), rootFrameOn(*r.mesh, r.corner[v], r.edge[v])};
+        frame->toRest[v] = {rootFrameOn(now, r.corner[v], r.edge[v]), r.frame[v]};
     }, 1024);
     for (const auto& t : now.triangles()) {
         for (int c = 0; c < 3; ++c) {
@@ -1146,7 +1151,7 @@ float distance2(const Vec3f& a, const Vec3f& b) { return (a - b).dot(a - b); }
 
 std::shared_ptr<const RestPoseCollision> RestPoseCollision::of(const std::shared_ptr<const ScalpMesh>& mesh, float offset,
                                                                float maxDepth, float searchRadius, const FieldGrid& grid) {
-    if (!mesh || mesh->triangleCount() == 0 || !mesh->hasRest() || mesh->restPoints() == mesh->points()) return nullptr;
+    if (!mesh || mesh->triangleCount() == 0 || mesh->atRest()) return nullptr;
     struct FieldEntry {
         std::uint64_t restSurface;
         float cell, reach;

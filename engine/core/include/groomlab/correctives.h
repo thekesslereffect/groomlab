@@ -46,6 +46,10 @@ struct CorrectiveLayer {
     float weightAt(double seconds) const;
     // Full weight on every frame: no keys, held before and after (a sculpt; else a shot fix).
     bool allFrames() const { return weightCurve.empty() && holdBefore && holdAfter; }
+    // A fix's fades as keys (seconds, weight), every host's when it is first keyed: 0 at the fade
+    // in's start (none when it holds before or has no fade in), its weight at `time`, 0 at the fade
+    // out's end (likewise). Empty for a keyed layer or one on every frame.
+    std::vector<std::pair<double, float>> fadeKeys() const;
     // The weight curve's value at `seconds` set (a key added, or the one there changed), kept sorted.
     void keyAt(double seconds, float w);
 };
@@ -68,6 +72,31 @@ public:
     // A new layer's name before freeLayerName: sculpt<N> (every frame; N the stack's size + 1) or
     // shot<F> (a fix at frame F, rounded).
     std::string newLayerName(bool allFrames, double frame) const;
+
+    // The stack's edits, every host's (Maya's shots.py, the Blender helper's corrective_*, the
+    // app's Correctives panel); a layer that is not there throws std::invalid_argument.
+    // The layer named `name`, or the exception.
+    CorrectiveLayer& need(const std::string& name);
+    // A new empty layer on top: on every frame (full weight, held), or a fix at `seconds` fading in
+    // and out over the fades (seconds); named `wanted` or newLayerName, made free. Its name.
+    std::string addLayer(bool allFrames, double seconds, double frame, double fadeIn, double fadeOut,
+                         const std::string& wanted = {});
+    void removeLayer(const std::string& name);
+    // Moved `step` places up (+) or down the stack, kept within it; its index after.
+    std::size_t moveLayer(const std::string& name, long step);
+    // Only this layer on; when it is the only one on already, every one comes back. Whether it is
+    // soloed now.
+    bool soloLayer(const std::string& name);
+    // Renamed to `wanted` when that is a free, valid name (freeLayerName gives it back as it is;
+    // `taken`: names the host holds otherwise); throws std::invalid_argument suggesting one if not.
+    void renameLayer(const std::string& name, const std::string& wanted, const std::vector<std::string>& taken = {});
+    // Its weight `w` (0 to 1): a keyed layer keyed at `seconds` (as auto key does), else its envelope.
+    void setLayerWeight(const std::string& name, float w, double seconds);
+    // Its weight keyed at `seconds` to `w`: a fix's fades become keys first (so its shape stays), the
+    // curve held past its ends.
+    void keyLayerWeight(const std::string& name, double seconds, float w);
+    // Its keys (or a fix's fades) dropped: on every frame at its weight at `seconds`.
+    void clearLayerKeys(const std::string& name, double seconds);
 
     // {"layers": [{"name", "time", "fadeIn", "fadeOut", "holdBefore", "holdAfter",
     //   "weight", "enabled", "slot"?, "weightCurve"?: [[seconds, w], ...],

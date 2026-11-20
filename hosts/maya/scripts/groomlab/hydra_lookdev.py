@@ -415,7 +415,6 @@ def add_lookdev(groom):
     if existing:
         return existing[0]
     from pxr import Sdf, Usd, UsdGeom, UsdShade
-    from groomlab.paths import asset_name
     token = _new_token()
     curves = _write_curves(groom, token, 1)
     root = _stem(groom, token) + ".usda"

@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 
+#include "groomlab/color.h"
 #include "groomlab/expression.h"
 #include "groomlab/field.h"
 #include "groomlab/map_ref.h"
@@ -751,7 +752,7 @@ float layerMaximum(LayerMode mode, float below, float layer) {
 
 std::string layerParam(int k, const char* what) { return "layer" + std::to_string(k) + what; }
 
-float luminanceOf(const std::array<float, 3>& c) { return 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2]; }
+float luminanceOf(const std::array<float, 3>& c) { return rec709Luminance(c[0], c[1], c[2]); }
 
 std::vector<ParamSpec> layerSpecs(bool color) {
     std::vector<ParamSpec> out;

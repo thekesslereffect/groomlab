@@ -76,6 +76,12 @@ Ramp rampFromJson(const std::string& text);
 // Scalp) -> Length (uneven ends) -> Noise -> HairColor -> Width -> Resample (even) -> Output.
 const std::string& defaultGraphJson();
 
+// A graph's text that stands for the default graph: empty, whitespace, or "{}" (spaces allowed).
+bool blankGraph(const std::string& text);
+
+// The graph a groom evaluates, as text: defaultGraphJson() for a blank one, else `text` as is.
+std::string graphOrDefault(const std::string& text);
+
 // Every registered operator as JSON, for editors and docs:
 //   [{"type": "Clump", "version": 1, "category": "look", "fixedChannels": [],
 //     "inputs": [{"name": "strands", "type": "Strands", "optional": false}, ...],

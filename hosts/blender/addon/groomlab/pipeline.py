@@ -20,8 +20,6 @@ from .helper_client import HelperError
 # export's formats the helper writes alone, and those whose meshes come back for an FBX.
 STRAND_FORMATS = ("alembic", "usd", "scalesUsd", "vrscene", "guides", "unrealGroom", "unityStrands")
 MESH_FORMATS = ("unrealCards", "unityCards", "scalesFbx", "unityFeathers")
-LODS = ("hero", "mid", "low")            # cards' levels of detail (gltfCards' lods)
-BARB_LODS = ("high", "mid", "low")       # lighter feather grooms (unrealGroom, unityStrands, unityFeathers)
 TRANSFER_METHODS = ("closest", "bounds", "markersAlign", "markersWarp", "uv")
 
 
@@ -217,7 +215,7 @@ def scale_mesh(scalp, name=None):
     return _mesh_object(scalp, name or scalp.name + "_scales", r["meshes"]["scales"])
 
 
-def to_mesh(scalp, make="auto", style="tube", sides=4, width_scale=1.0, max_strands=100000, density=1.0,
+def to_mesh(scalp, make="auto", style="tube", sides=4, width_scale=1.0, max_strands=20000, density=1.0,
             strand_uvs=False, name=None):
     """The groom as one mesh object (Maya's to_mesh): `make` "strands" (tubes of `sides` sides or
     ribbons along the scalp, UVs root to tip, at most `max_strands`, thinned by strand ID),
@@ -668,19 +666,33 @@ def remove_drivers(scalp, objects=None):
     return count
 
 
-def _guide_shapes(scalp, ids):
-    """{guide ID: its points in the scalp's space} of the guides as groomed (the Guides object)."""
-    g = scalp.groomlab
-    guides = g.guides if g.guides is not None and g.guides.type == "CURVES" else None
-    if guides is None:
+def _guide_shapes(scalp, ids, frame=0):
+    """{guide ID: its points in the scalp's space} of the guides as groomed (not posed), on the scalp
+    as it is at `frame` (Maya's create_drivers: the bind frame), from the helper: the hierarchy's
+    guides or the Guides object's, whichever the groom edits. The scene goes there and back."""
+    scene = groom.scene_of(scalp)
+    now = scene.frame_current
+    if now != frame:
+        scene.frame_set(int(frame))
+    try:
+        rt = _session(scalp, scene)
+        r = process.call("get_guides", session=rt.session, source=rt.target or "auto", pose="rest")
+    finally:
+        if now != frame:
+            scene.frame_set(now)
+    a = r.get("arrays") or {}
+    if not r.get("guides"):
         return {}
-    points, counts, gids = groom.read_guides(scalp, guides)
+    client = process.client()
+    points = client.array(a["points"]).astype(np.float64).reshape(-1, 3)
+    counts = client.array(a["counts"]).astype(np.int64).ravel()
+    gids = client.array(a["ids"]).astype(np.int64).ravel()
     out, start = {}, 0
     wanted = set(ids)
     for n, gid in zip(counts, gids):
         if int(gid) in wanted and n >= 2:
-            out[int(gid)] = np.asarray(points[start:start + n], np.float64)
-        start += n
+            out[int(gid)] = points[start:start + n]
+        start += int(n)
     return out
 
 
@@ -693,7 +705,9 @@ def create_drivers(scalp, guides=None, per_guide=False, frame=None):
     ids = sorted(set(int(g) for g in (guides if guides is not None else tools.selected_guides(scalp))))
     if not ids:
         raise HelperError("bad_request", "no guides to make drivers from: select some with the GroomLab select tool")
-    shapes = _guide_shapes(scalp, ids)
+    if frame is None:
+        frame = driver_bind(scalp).get("frame", 0)
+    shapes = _guide_shapes(scalp, ids, frame)
     if not shapes:
         raise HelperError("state", "the guides %s have no points" % ids)
     count = max(len(p) for p in shapes.values())
@@ -726,7 +740,7 @@ def create_drivers(scalp, guides=None, per_guide=False, frame=None):
     for obj, attached in made:
         entry = next(d for d in scalp.groomlab.drivers if d.object == obj)
         _keep_bind(scalp, call(scalp, "attach_guides", driver=entry.index, guides=attached))
-    bind_drivers(scalp, frame=driver_bind(scalp).get("frame", 0) if frame is None else frame)
+    bind_drivers(scalp, frame=frame)
     return [obj for obj, _ in made]
 
 
@@ -756,48 +770,40 @@ def add_scalp(scalp, obj, name=None, wire=True):
     if existing or not wire:
         groom.mark(scalp, "eval")
         return name
+    # Every host's graph (graph_inserts.h insertScalp): a Scalp node reading it, a Scatter and an
+    # Interpolate as the groom's own, merged with the hair; a Scalp node reading it already: the graph stays.
     g = GraphEdits(scalp)
-    if any(g.param(n, "input") == name for n in g.of_type("Scalp")):
+    if g.edit(op="insert_scalp", mesh=name)["merge"] is None:
         groom.mark(scalp, "eval")
         return name
-    own_scalp = next((n for n in g.of_type("Scalp") if g.param(n, "input", "scalp") == "scalp"), None)
-    own_scatter = next((c for c, _ in g.downstream_of(own_scalp) if g.node_type(c) == "Scatter"), None) if own_scalp else None
-    own_interp = next((c for c, _ in g.downstream_of(own_scatter) if g.node_type(c) == "Interpolate"), None) if own_scatter else None
-    guides = next(iter(g.of_type("Guides")), None)
-    node = g.add("Scalp", base="scalp_" + name, params={"input": name, "subdivision": g.param(own_scalp, "subdivision", "matchRender")
-                                                         if own_scalp else "matchRender"})
-    params = dict((g.node(own_scatter) or {}).get("params") or {}) if own_scatter else {}
-    params.pop("seed", None)
-    scatter = g.add("Scatter", base="scatter_" + name, params=params)
-    g.connect(node, scatter, "scalp")
-    last = scatter
-    if own_interp:
-        interp = g.add("Interpolate", base="interpolate_" + name, params=dict((g.node(own_interp) or {}).get("params") or {}))
-        g.connect(scatter, interp, "strands")
-        if guides:
-            g.connect(guides, interp, "guides")
-        g.connect(node, interp, "scalp")
-        last = interp
-    merge = g.add("Merge", base="merge_" + name)
-    anchor = own_interp or own_scatter
-    if anchor and g.downstream_of(anchor):
-        g.insert_after(anchor, merge, node_input="a")
-    elif g.output and g.source_of(g.output, "strands"):
-        g.insert_before(g.output, merge, node_input="a")
-    g.connect(last, merge, "b")
-    x, y = g.position(merge)
-    g.set_positions({n: (x - 660.0 + 220.0 * i, y + 160.0) for i, n in enumerate((node, scatter, last)) if n})
+    g.finish()
+    return name
+
+
+def add_motion(scalp, kind, params=None):
+    """Add > Wind / Jiggle (Maya's add_wind, add_jiggle): a node of `kind` with `params` over its
+    spec's defaults, just before the output but before a Collide or Cards ending the chain: every
+    host's (graph_inserts.h insertMotion). Returns its name."""
+    if kind not in ("Wind", "Jiggle"):
+        raise HelperError("bad_request", "a motion node is Wind or Jiggle, not %s" % kind)
+    g = GraphEdits(scalp)
+    name = g.edit(op="insert_motion", type=kind, params=dict(params or {}))["name"]
     g.finish()
     return name
 
 
 def remove_scalp(scalp, name):
-    """A scalp of the groom's dropped (its nodes stay: delete them in the Graph Editor)."""
+    """A scalp of the groom's dropped (Maya's remove_scalp): its mesh, and in the graph its Scalp
+    nodes with what they alone feed (its Scatter, its Interpolate; the Merge joining them passes the
+    rest through): every host's (graph_inserts.h removeScalpNodes)."""
     kept = scalp.groomlab.extra_scalps
     i = kept.find(name)
     if i >= 0:
         kept.remove(i)
     sync_extra_scalps(scalp, _session(scalp), force=True)
+    g = GraphEdits(scalp)
+    if g.edit(op="remove_scalp_nodes", mesh=name).get("changed"):
+        g.finish()
     groom.mark(scalp, "eval")
 
 
@@ -813,11 +819,7 @@ def prototype_from_selection(scalp, node, obj):
     if g.node_type(node) not in ("Instance", "Scales"):
         raise HelperError("bad_request", "%s is not an Instance or Scales node" % node)
     set_prototypes(scalp, objs, replace=False)
-    names = []
-    for o in objs:
-        if o.name not in names:
-            names.append(o.name)
-    text = ", ".join(names)
+    text = process.call("prototype_text", names=[o.name for o in objs])["text"]  # (the core's rule)
     g.set_param(node, "prototype", text)
     g.finish()
     for o in objs:
@@ -827,9 +829,6 @@ def prototype_from_selection(scalp, node, obj):
 
 
 # ---- Graph inserts: Maya's add_simulate, add_collider, create_cards, add_feathers, add_braid ------------
-
-LAYOUT_DX, LAYOUT_DY = 240, 140  # the core's column and row (graph_edit.cpp), as Maya's GraphModel
-
 
 class GraphEdits(object):
     """Edits of a groom's graph as Maya's GraphModel makes them, through the helper's edit_graph (each
@@ -910,31 +909,19 @@ class GraphEdits(object):
         if positions:
             self.edit(op="set_positions", positions={k: [float(v[0]), float(v[1])] for k, v in positions.items()})
 
+    # A node into the flow, every host's (graph_inserts.h insertBetween, insertBefore, insertAfter).
+
     def insert_between(self, src, dst, node, node_input="strands"):
         """src -> node -> dst in place of every src -> dst link."""
-        links = [c for c in self.graph["connections"] if c["from"] == src and c["to"] == dst]
-        if not links:
-            raise HelperError("graph", "%s is not connected to %s" % (src, dst))
-        self.connect(src, node, node_input, output=links[0].get("output"))
-        for c in links:
-            self.connect(node, dst, c["input"])
+        self.edit(op="insert_between", node=node, nodeInput=node_input, **{"from": src, "to": dst})
 
     def insert_before(self, anchor, node, input_name="strands", node_input="strands"):
-        upstream = self.source_of(anchor, input_name)
-        if upstream is None:
-            raise HelperError("graph", "%s has no %s input to insert before" % (anchor, input_name))
-        self.insert_between(upstream, anchor, node, node_input)
-        x, y = self.position(anchor)
-        self.set_positions({node: (x, y + LAYOUT_DY)})
+        """`node` between what feeds anchor's input and anchor, a row below it."""
+        self.edit(op="insert_before", anchor=anchor, node=node, input=input_name, nodeInput=node_input)
 
     def insert_after(self, anchor, node, node_input="strands"):
-        downstream = self.downstream_of(anchor)
-        if downstream:
-            self.insert_between(anchor, downstream[0][0], node, node_input)
-        else:
-            self.connect(anchor, node, node_input)
-        x, y = self.position(anchor)
-        self.set_positions({node: (x + LAYOUT_DX / 2, y + LAYOUT_DY)})
+        """`node` right after anchor in its chain, half a column right of and a row below it."""
+        self.edit(op="insert_after", anchor=anchor, node=node, nodeInput=node_input)
 
     def finish(self):
         from . import graph as graph_mod
@@ -994,12 +981,18 @@ def add_collider(scalp, obj, name=None, wire=True):
 
 
 def remove_collider(scalp, name):
-    """A collider's mesh dropped (its nodes stay: delete them in the Graph Editor)."""
+    """A collider dropped (Maya's remove_collider): its mesh, and in the graph its ColliderMesh nodes
+    with the Collide nodes they feed passing their strands through: every host's (graph_inserts.h
+    removeColliderNodes)."""
     kept = scalp.groomlab.colliders
     i = kept.find(name)
     if i >= 0:
         kept.remove(i)
     sync_colliders(scalp, _session(scalp), force=True)
+    g = GraphEdits(scalp)
+    if g.edit(op="remove_collider_nodes", mesh=name).get("changed"):
+        g.finish()
+    groom.mark(scalp, "eval")
 
 
 def add_cards(scalp, lod="mid"):
@@ -1007,15 +1000,11 @@ def add_cards(scalp, lod="mid"):
     when the graph has none, then every Cards node set for that level of detail, each by what it cards
     (hair, feathers or both: the core's card presets). Returns the first Cards node."""
     g = GraphEdits(scalp)
-    nodes = g.of_type("Cards")
-    if not nodes:
-        node = g.add("Cards", base="cards")
-        g.insert_before(g.output, node)
-        nodes = [node]
+    node = g.edit(op="insert_cards")["name"]  # every host's (graph_inserts.h insertCards): one only when there is none
     process.call("cards_preset", session=g.rt.session, lod=lod)
     g.reload()
     g.finish()
-    return nodes[0]
+    return node
 
 
 def feather_designs():
@@ -1039,18 +1028,10 @@ def bake_to_guides(scalp, node="", group="baked", density=1.0):
 
 
 def bakeable_nodes(scalp):
-    """The graph's nodes giving strands or guides, but the output node (Bake Node to Guides' choices)."""
-    from . import graph as graph_mod
+    """The graph's nodes Bake Node to Guides takes (its choices): the core's GraphEdit::bakeable."""
     rt = groom.ensure(scalp)
-    g = process.call("get_graph", session=rt.session)["graph"]
-    specs = graph_mod.operator_specs()
-    out = []
-    for n in g.get("nodes") or []:
-        spec = specs.get(n.get("type")) or {}
-        ports = spec.get("outputs") or [spec.get("output")]
-        if n["name"] != g.get("output") and any(p and p.get("type") in ("Strands", "Guides") for p in ports):
-            out.append(n["name"])
-    return out
+    facts = process.call("graph_nodes", session=rt.session)["nodes"]
+    return [name for name, f in facts.items() if f.get("bakeable")]
 
 
 def import_alembic_curves(scalp, path, object_name="", samples=24):
@@ -1522,28 +1503,15 @@ def follow_helper_undo(scalp, redo=False):
 # ---- Copy Graph to Other Grooms -------------------------------------------------------------------------
 
 def graph_maps(graph):
-    """Painted maps a graph reads by name (Maya's utils.graph_maps): Map nodes' maps, HairColor's map
-    and Interpolate's regionMap (not an image's path), guide maps and color set maps, inside compounds.
-    {name: how it is read}."""
-    found = {}
-    for node in graph.get("nodes", []):
-        params = node.get("params") or {}
-        if node.get("type") == "Map":
-            found.setdefault(params.get("name", "mask"), "map")
-        for param, how, kind in (("map", "map", "HairColor"), ("regionMap", "map", "Interpolate")):
-            value = params.get(param) if node.get("type") == kind else None
-            if isinstance(value, str) and value and not is_image_path(value):
-                found.setdefault(value, how)
-        for value in params.values():
-            if isinstance(value, dict):
-                if value.get("guide"):
-                    found.setdefault(value["guide"], "guides")
-                if value.get("colorSet"):
-                    found.setdefault(value["colorSet"], "colorSet")
-        if node.get("type") == "Compound":
-            for name, how in graph_maps((params.get("definition") or {}).get("graph") or {}).items():
-                found.setdefault(name, how)
-    return found
+    """Painted maps a graph reads by name ({name: how}, in the graph's order): the core's list, every
+    host's (scalp_maps.h graphMapNames, through the helper)."""
+    return {p["name"]: p["how"] for p in process.call("graph_map_names", graph=graph or {})["maps"]}
+
+
+def _map_kinds(scalp):
+    """{map name: kind} of the groom's own maps (guides, vertices, texture)."""
+    rt = _session(scalp)
+    return {m["name"]: m.get("kind") for m in process.call("maps_list", session=rt.session).get("maps") or []}
 
 
 def _map_names(scalp):
@@ -1563,7 +1531,7 @@ def copy_graph(source, targets):
         raise HelperError("bad_request", "select the grooms to copy %s's graph to" % source.name)
     graph = process.call("get_graph", session=_session(source).session)["graph"]
     wanted = graph_maps(graph)
-    source_maps = _map_names(source)
+    source_maps = _map_kinds(source)
     report = {}
     for target in targets:
         rt = _session(target)
@@ -1583,8 +1551,9 @@ def copy_graph(source, targets):
             if name in have:
                 continue
             if name not in source_maps:
-                missing[name] = "%s has no map named %s either" % (source.name, name)
-            elif how == "guides":
+                if how != "colorSet":  # (a color set of the source's mesh is no groom's map)
+                    missing[name] = "%s has no map named %s either" % (source.name, name)
+            elif source_maps[name] == "guides":
                 missing[name] = "a guide layer: paint it on %s's guides" % target.name
             else:
                 missing[name] = "a painted map: paint it, or import its image (Groom Tools > Paint)"
@@ -1594,28 +1563,24 @@ def copy_graph(source, targets):
 
 # ---- Find Missing Files ----------------------------------------------------------------------------------
 
-UDIM_TOKENS = ("<UDIM>", "<udim>", "%(UDIM)d")
-FILE_PARAM_NAMES = ("path", "texture", "textureRight")  # ImportCurves' Alembic file, FeatherColor's images
-# The images the core reads (texture.h isImagePath, stb_image): an .exr or .tif is no map it can read.
-IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".tga", ".bmp", ".psd", ".gif", ".hdr", ".pic", ".pnm", ".ppm", ".pgm")
 CONTROL_PREFIX = "ctl_"  # graph_authoring's: a slider's value on the groom (its scalp object)
 
 
-def is_image_path(name):
-    return isinstance(name, str) and (name.lower().endswith(IMAGE_EXTENSIONS) or "<UDIM>" in name)
+def files_there(paths):
+    """Which of `paths` are there: a file, or a UDIM tile set when any tile is (the core's check,
+    every host's: asset_files.h fileThere, through the helper)."""
+    paths = list(paths)
+    return process.call("files_there", paths=paths)["there"] if paths else []
 
 
 def file_exists(path):
-    """Whether a file is there; a UDIM tile set when any tile is."""
-    if not path:
-        return False
-    for token in UDIM_TOKENS:
-        if token in path:
-            import glob
-            folder, base = os.path.split(path)
-            pattern = glob.escape(base).replace(glob.escape(token), "[1-9][0-9][0-9][0-9]")
-            return bool(glob.glob(os.path.join(glob.escape(folder), pattern) if folder else pattern))
-    return os.path.isfile(path)
+    return bool(path) and files_there([path])[0]
+
+
+def graph_file_params(graph):
+    """[(label, path)] of every graph param naming a file (node.param; compound/inner.param): the
+    core's list, every host's (asset_files.h graphFileParams)."""
+    return [(p["label"], p["path"]) for p in process.call("graph_file_params", graph=graph)["params"]]
 
 
 def resolve_path(path):
@@ -1627,71 +1592,24 @@ def resolve_path(path):
     return path
 
 
-def file_params(graph, where=""):
-    """(label, params, param, path) of every graph param naming a file (Maya's presets._file_params):
-    texture maps, ImportCurves' and FeatherColor's files, HairColor's map and Interpolate's regionMap
-    when an image's path, inside compounds too (compound/inner.param)."""
-    for node in graph.get("nodes", []) if isinstance(graph, dict) else []:
-        params = node.get("params") or {}
-        for name, value in list(params.items()):
-            named = name in FILE_PARAM_NAMES or (
-                (name, node.get("type")) in (("map", "HairColor"), ("regionMap", "Interpolate")) and is_image_path(value))
-            path = value.get("texture") if isinstance(value, dict) else (value if named else None)
-            if isinstance(path, str) and path.strip():
-                yield "%s%s.%s" % (where, node.get("name"), name), params, name, path
-        definition = params.get("definition") if node.get("type") == "Compound" else None
-        if isinstance(definition, dict):
-            for found in file_params(definition.get("graph", {}), "%s%s/" % (where, node.get("name"))):
-                yield found
-
-
 def missing_files(scalp):
     """The files a groom names that are not there (Maya's missing_files): {"maps": {map: path} (texture
     maps), "params": {"node.param": path} (graph params naming files), "attributes": {"groom_file": path}
     (its linked groom file)}, paths as stored."""
     rt = _session(scalp)
-    out = {"maps": {}, "params": {}, "attributes": {}}
+    entries = []  # (section, key, stored)
     for m in process.call("maps_list", session=rt.session).get("maps") or []:
-        if m.get("kind") == "texture" and m.get("texture") and not file_exists(resolve_path(m["texture"])):
-            out["maps"][m["name"]] = m["texture"]
+        if m.get("kind") == "texture" and m.get("texture"):
+            entries.append(("maps", m["name"], m["texture"]))
     graph = process.call("get_graph", session=rt.session)["graph"]
-    for label, _params, _name, path in file_params(graph):
-        if not file_exists(resolve_path(path)):
-            out["params"][label] = path
-    stored = scalp.groomlab.groom_file
-    if stored and not file_exists(resolve_path(stored)):
-        out["attributes"]["groom_file"] = stored
+    entries += [("params", label, path) for label, path in graph_file_params(graph) if path.strip()]
+    if scalp.groomlab.groom_file:
+        entries.append(("attributes", "groom_file", scalp.groomlab.groom_file))
+    out = {"maps": {}, "params": {}, "attributes": {}}
+    for (section, key, stored), there in zip(entries, files_there(resolve_path(e[2]) for e in entries)):
+        if not there:
+            out[section][key] = stored
     return out
-
-
-def _match_file(index, stored):
-    """The file of `index` that `stored` names (Maya's painting._match_file): (path, []) when one fits,
-    else (None, candidates); by name, several sharing it told apart by their folders' ends."""
-    parts = [p for p in stored.replace("\\", "/").split("/") if p and p != "."]
-    if not parts:
-        return None, []
-    base = parts[-1]
-    token = next((t for t in UDIM_TOKENS if t in base), None)
-    candidates = index.get(os.path.normcase(base.replace(token, "1001") if token else base), [])
-    if token:
-        candidates = [os.path.dirname(c) + "/" + base for c in candidates]
-    if len(candidates) == 1:
-        return candidates[0], []
-    if not candidates:
-        return None, []
-
-    def tail(path):
-        mine = [os.path.normcase(p) for p in reversed(parts)]
-        theirs = [os.path.normcase(p) for p in reversed(path.split("/"))]
-        n = 0
-        while n < min(len(mine), len(theirs)) and mine[n] == theirs[n]:
-            n += 1
-        return n
-
-    scores = sorted(((tail(c), c) for c in candidates), reverse=True)
-    if scores[0][0] > 1 and scores[0][0] > scores[1][0]:
-        return scores[0][1], []
-    return None, sorted(candidates)
 
 
 def collect_files(scalps):
@@ -1745,13 +1663,6 @@ def find_missing_files(scalps, folder, recursive=True):
     from . import tools
     if not folder or not os.path.isdir(folder):
         raise HelperError("not_found", "no folder %s" % folder)
-    index = {}
-    for root, dirs, files in os.walk(os.path.abspath(folder)):
-        for f in files:
-            index.setdefault(os.path.normcase(f), []).append(os.path.join(root, f).replace("\\", "/"))
-        if not recursive:
-            break
-        dirs.sort()
     report = {"relinked": {}, "still_missing": {}, "ambiguous": {}}
 
     def note(section, scalp, kind, key, value):
@@ -1759,9 +1670,13 @@ def find_missing_files(scalps, folder, recursive=True):
 
     for scalp in scalps:
         missing = missing_files(scalp)
+        stored_all = [p for kind in ("maps", "params", "attributes") for p in missing[kind].values()]
+        matches = process.call("files_match", folder=os.path.abspath(folder), recursive=recursive,
+                               stored=stored_all)["matches"] if stored_all else []
+        matched = {p: (m["found"], m["candidates"]) for p, m in zip(stored_all, matches)}
 
         def look(kind, key, stored):
-            found, candidates = _match_file(index, stored)
+            found, candidates = matched.get(stored, ("", []))
             if found:
                 return found
             note("ambiguous" if candidates else "still_missing", scalp, kind, key, candidates or stored)
@@ -1775,19 +1690,17 @@ def find_missing_files(scalps, folder, recursive=True):
         if missing["params"]:
             rt = _session(scalp)
             graph = process.call("get_graph", session=rt.session)["graph"]
-            changed = False
-            for label, params, param, stored in file_params(graph):
+            relinked = {}
+            for label, stored in graph_file_params(graph):
                 if missing["params"].get(label) != stored:
                     continue
                 found = look("params", label, stored)
                 if found:
-                    if isinstance(params.get(param), dict):
-                        params[param]["texture"] = found
-                    else:
-                        params[param] = found
+                    relinked[label] = found
                     note("relinked", scalp, "params", label, found)
-                    changed = True
+            changed = bool(relinked)
             if changed:
+                graph = process.call("with_graph_file_params", graph=graph, paths=relinked)["graph"]
                 from . import graph as graph_mod
                 process.call("set_graph", session=rt.session, graph=graph)
                 graph_mod._changed(scalp, rt)

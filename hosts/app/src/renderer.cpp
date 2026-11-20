@@ -18,7 +18,9 @@
 
 #include "gpu_preview.h"
 #include "groomlab/math.h"
+#include "groomlab/profile.h"
 #include "groomlab/scalp_paint.h"
+#include "groomlab/color.h"
 
 // Q_INIT_RESOURCE cannot sit in a namespace: the shaders' resources (a static library's) are
 // pulled in here.
@@ -276,7 +278,12 @@ void GroomRenderer::setFrame(const DisplayFrame& frame) {
                 gpu.pendingUpdated = item.updated;
                 gpu.pendingColors.reset();
                 gpu.overlay = item.geometry->overlay;
-                const Kind kind = kindOf(*gpu.pending, gpu.overlay);
+                Kind kind = kindOf(*gpu.pending, gpu.overlay);
+                // Show Tubes: a lit surface in its vertices' colors (each section its own).
+                if (item.id == DisplayItemId::BraidTubes && gpu.pending->triangles && !gpu.pending->colors.empty() &&
+                    !gpu.pending->normals.empty()) {
+                    kind = Kind::SurfaceColored;
+                }
                 if (kind != gpu.kind && (kind == Kind::MapTextured || gpu.kind == Kind::MapTextured)) {
                     // The scalp map between its image and per-vertex colors: its bindings hold the
                     // texture or not, made again for the new kind.
@@ -818,6 +825,7 @@ void GroomRenderer::ensurePipelines(QRhi* rhi, QRhiRenderPassDescriptor* pass, i
     const QShader strandsFrag = loadShader(masks ? "strands_mask.frag" : "strands.frag");
     const QShader flatFrag = loadShader("flat.frag");
     const QShader surfaceVert = loadShader("surface.vert"), surfaceFrag = loadShader("surface.frag");
+    const QShader surfaceColoredVert = loadShader("surface_colored.vert"), surfaceColoredFrag = loadShader("surface_colored.frag");
     const QShader dotsVert = loadShader("dots.vert");
     const QShader mapVert = loadShader("map.vert"), mapFrag = loadShader("map.frag");
 
@@ -892,6 +900,14 @@ void GroomRenderer::ensurePipelines(QRhi* rhi, QRhiRenderPassDescriptor* pass, i
                 layout.setBindings({{kStrideXYZ}, {kStrideXYZ}});
                 layout.setAttributes({{0, 0, QRhiVertexInputAttribute::Float3, 0},
                                       {1, 1, QRhiVertexInputAttribute::Float3, 0}});
+                triangles = true;
+                break;
+            case Kind::SurfaceColored:
+                ps->setShaderStages({{QRhiShaderStage::Vertex, surfaceColoredVert}, {QRhiShaderStage::Fragment, surfaceColoredFrag}});
+                layout.setBindings({{kStrideXYZ}, {kStrideXYZ}, {kStrideRGBA}});
+                layout.setAttributes({{0, 0, QRhiVertexInputAttribute::Float3, 0},
+                                      {1, 1, QRhiVertexInputAttribute::Float3, 0},
+                                      {2, 2, QRhiVertexInputAttribute::Float4, 0}});
                 triangles = true;
                 break;
             case Kind::Dots:
@@ -1197,7 +1213,7 @@ void GroomRenderer::fillUniforms(QRhiResourceUpdateBatch* batch, QRhiBuffer* uni
     u.camera[0] = eye.x();
     u.camera[1] = eye.y();
     u.camera[2] = eye.z();
-    u.camera[3] = 1.0f;
+    u.camera[3] = hdr ? 0.0f : 1.0f;  // (surface_colored.frag: the window's target takes sRGB, the HDR scene linear)
     u.light[0] = lightDirection_.x();
     u.light[1] = lightDirection_.y();
     u.light[2] = lightDirection_.z();
@@ -1246,6 +1262,11 @@ bool GroomRenderer::setInputs(QRhiCommandBuffer* cb, const GpuItem& item, QRhiBu
         case Kind::Surface:
             if (!item.normals) return false;
             inputs.append({item.normals.get(), 0});
+            break;
+        case Kind::SurfaceColored:
+            if (!item.normals || !item.colors) return false;
+            inputs.append({item.normals.get(), 0});
+            inputs.append({item.colors.get(), 0});
             break;
         case Kind::Dots:
         case Kind::DotsTested:
@@ -1425,6 +1446,10 @@ void GroomRenderer::render(QRhi* rhi, QRhiCommandBuffer* cb, QRhiRenderTarget* t
         mapGpu_ = MapGpu();
         if (gpuPreview_) gpuPreview_->releaseResources();
     }
+    // The profiler's rows of a frame's CPU side (profile.h), one after another: the pipelines, the
+    // lookdev path's uploads and objects ("app.lookdev.*" inside), the items' uploads and uniforms,
+    // the GPU preview's run, the lookdev passes recorded, the line path's.
+    ProfilePhases phase("app.render.setup");
     ensurePipelines(rhi, target->renderPassDescriptor(), target->sampleCount(), main_);
     // The reference photo (looking through it): its texture and quad first, in a batch of its own.
     const bool photo = preparePhoto(rhi, cb, target, camera);
@@ -1442,8 +1467,10 @@ void GroomRenderer::render(QRhi* rhi, QRhiCommandBuffer* cb, QRhiRenderTarget* t
     // The lookdev path: its targets and pipelines first (the HDR pass's descriptor is known
     // then, and the items' pipelines for it follow), the strands its own to draw.
     // (A photo behind: the line path, over it; the lookdev's backdrop is opaque.)
+    phase.next("app.render.lookdevPrepare");
     bool lookdev = lookdevWanted_ && !(photo && !photo_.front) && LookdevRenderer::supported(rhi) && lookdev_.prepare(rhi, cb, target);
     if (lookdev) ensurePipelines(rhi, lookdev_.hdrPassDescriptor(), lookdev_.hdrSampleCount(), hdr_);
+    phase.next("app.render.items");
     const auto strandsIndex = static_cast<std::size_t>(DisplayItemId::Strands);
     const QMatrix4x4 hdrMvp = lookdev ? lookdev_.jitter(size) * mvp : mvp;
 
@@ -1469,7 +1496,7 @@ void GroomRenderer::render(QRhi* rhi, QRhiCommandBuffer* cb, QRhiRenderTarget* t
     // (LightingSetup::exposure): their color goes in divided by the exposure and decoded from sRGB,
     // so they read as the same dark gray as in the line path, not lit up.
     const float unexpose = std::pow(2.0f, -lookdev_.lighting().exposure);
-    auto fromSrgb = [](float c) { return c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f); };
+    auto fromSrgb = [](float c) { return groomlab::srgbToLinear(c); };  // (color.h)
     for (auto& item : otherItems_) {
         item->fresh = false;
         if (!item->shown || !hair) continue;
@@ -1504,7 +1531,9 @@ void GroomRenderer::render(QRhi* rhi, QRhiCommandBuffer* cb, QRhiRenderTarget* t
     }
     // The GPU preview's run, once this frame's uploads are recorded (its targets exist) and
     // before anything draws them.
+    phase.next("app.render.gpuPreview");
     runGpuPreview(rhi, lookdev);
+    phase.next("app.render.lookdevPasses");
     // The overlays over everything, in order: the frame's, the guide dots, the tools'.
     auto drawOverlays = [&](QRhiCommandBuffer* passCb) {
         for (std::size_t i = 0; i < items_.size(); ++i) {
@@ -1537,6 +1566,7 @@ void GroomRenderer::render(QRhi* rhi, QRhiCommandBuffer* cb, QRhiRenderTarget* t
         };
         lookdevActive_ = lookdev_.render(rhi, cb, target, camera, hdrMvp, depthItems);
     }
+    phase.next(lookdevActive_ ? "app.render.composite" : "app.render.linePath");
     if (lookdevActive_) {
         cb->beginPass(target, Qt::black, {1.0f, 0});
         passViewport_ = QRhiViewport(0, 0, static_cast<float>(size.width()), static_cast<float>(size.height()));

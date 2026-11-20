@@ -33,11 +33,19 @@ Pins read(const json& graph) {
     Pins p;
     if (!graph.contains("pins") || !graph["pins"].is_object()) return p;
     const json& pins = graph["pins"];
-    for (const json& point : pins.value("points", json::array())) {
+    const json none = json::array();
+    const auto list = [&](const char* key) -> const json& {
+        const auto it = pins.find(key);
+        return it != pins.end() && it->is_array() ? *it : none;
+    };
+    for (const json& point : list("points")) {
         if (!point.is_object() || text(point, "id").empty()) continue;
-        p.points[text(point, "id")] = {point.value("x", 0.0), point.value("y", 0.0)};
+        // (A coordinate that is no number: no pin, as the Blender add-on read it; none: 0.)
+        const auto x = point.find("x"), y = point.find("y");
+        if ((x != point.end() && !x->is_number()) || (y != point.end() && !y->is_number())) continue;
+        p.points[text(point, "id")] = {x != point.end() ? x->get<double>() : 0.0, y != point.end() ? y->get<double>() : 0.0};
     }
-    for (const json& r : pins.value("routes", json::array())) {
+    for (const json& r : list("routes")) {
         if (!r.is_object() || text(r, "to").empty() || text(r, "input").empty() || !r.contains("via") || !r["via"].is_array()) continue;
         Route route{{text(r, "from"), text(r, "output")}, {}};
         for (const json& v : r["via"]) {
@@ -50,7 +58,7 @@ Pins read(const json& graph) {
 
 // pin12 -> 12 (0 for another name): pins sort and number by it.
 long number(const std::string& pin) {
-    if (pin.size() <= 3 || pin.compare(0, 3, "pin") != 0) return 0;
+    if (pin.size() <= 3 || pin.size() > 12 || pin.compare(0, 3, "pin") != 0) return 0;
     for (std::size_t i = 3; i < pin.size(); ++i) {
         if (!std::isdigit(static_cast<unsigned char>(pin[i]))) return 0;
     }
@@ -59,22 +67,38 @@ long number(const std::string& pin) {
 
 // What feeds to.input now; none for nothing.
 std::optional<PinSource> sourceOf(const json& graph, const std::string& to, const std::string& input) {
-    for (const json& c : graph.value("connections", json::array())) {
+    const auto connections = graph.find("connections");
+    if (connections == graph.end() || !connections->is_array()) return std::nullopt;
+    for (const json& c : *connections) {
         if (c.is_object() && text(c, "to") == to && text(c, "input") == input) return PinSource{text(c, "from"), text(c, "output")};
     }
     return std::nullopt;
 }
 
-// Drops what no longer holds, then writes "pins" back in order (none when empty).
-void write(json& graph, Pins p) {
+// Drops what no longer holds, then writes "pins" back in order (none when empty). oneFeed: only the
+// routes a pin with one input can draw (prunePins).
+void write(json& graph, Pins p, bool oneFeed = false) {
     std::map<Key, Route> routes;
+    std::map<std::string, std::string> fed;  // oneFeed: pin -> what feeds it (the source, or the pin before)
     for (auto& [key, route] : p.routes) {
         std::vector<std::string> via;
         for (const std::string& v : route.via) {
             if (p.points.count(v)) via.push_back(v);
         }
         const std::optional<PinSource> source = sourceOf(graph, key.first, key.second);
-        if (!via.empty() && source && *source == route.source) routes[key] = {route.source, std::move(via)};
+        if (via.empty() || !source || !(*source == route.source)) continue;
+        if (oneFeed) {
+            std::vector<std::string> feeds{"node " + route.source.from + '\n' + route.source.output};
+            for (std::size_t i = 0; i + 1 < via.size(); ++i) feeds.push_back("pin " + via[i]);
+            bool fits = std::set<std::string>(via.begin(), via.end()).size() == via.size();  // no pin twice
+            for (std::size_t i = 0; fits && i < via.size(); ++i) {
+                const auto it = fed.find(via[i]);
+                fits = it == fed.end() || it->second == feeds[i];
+            }
+            if (!fits) continue;
+            for (std::size_t i = 0; i < via.size(); ++i) fed[via[i]] = feeds[i];
+        }
+        routes[key] = {route.source, std::move(via)};
     }
     std::set<std::string> used;
     for (const auto& [key, route] : routes) used.insert(route.via.begin(), route.via.end());
@@ -113,7 +137,7 @@ std::vector<std::string> liveRoute(const json& graph, const Pins& p, const std::
 
 }  // namespace
 
-void prunePins(json& graph) { write(graph, read(graph)); }
+void prunePins(json& graph, bool oneFeed) { write(graph, read(graph), oneFeed); }
 
 std::vector<std::string> pinIds(const json& graph) {
     std::vector<std::string> ids;

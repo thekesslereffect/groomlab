@@ -283,10 +283,6 @@ class TransferWindow(QtWidgets.QWidget):
         return {side: v.editor for side, v in self.views.items() if v.editor}
 
     @property
-    def panes(self):
-        return {side: v.pane for side, v in self.views.items() if v.pane}
-
-    @property
     def cameras(self):
         """side: each view's camera transform."""
         return {side: v.camera for side, v in self.views.items() if v.camera}
@@ -331,10 +327,6 @@ class TransferWindow(QtWidgets.QWidget):
     def _wireframe_changed(self, on):
         for v in self.views.values():
             v.set_wireframe(on)
-
-    def _isolate(self, side, objects):
-        """Only `objects` (long names) show in the side's view."""
-        self.views[side].isolate(objects)
 
     def isolated(self, side):
         """What the side's view shows (long names)."""
@@ -485,9 +477,6 @@ class TransferWindow(QtWidgets.QWidget):
         if hovered == side or self.editor.matched(hovered, i):
             return i if i < self.editor.count(side) else -1
         return -1
-
-    def _schedule_refresh(self, side):
-        self.views[side].schedule_refresh()
 
     def marker_state(self, side):
         """What the side's marker set draws (tests): {"points": [[x, y, z], ...], "matched": [0/1],

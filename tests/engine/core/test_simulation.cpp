@@ -1494,6 +1494,31 @@ TEST(Simulation, GravityPreloadHoldsTheGroomWithItsWeight) {
     }
 }
 
+TEST(Simulation, GravityPreloadHoldsAHeavyOrLightGroomToo) {
+    // The preload takes the drag over the mass as the substep does: a groom with a mass of its own
+    // rests in its groomed shape as one of mass 1 does. A changed mass changes the settings' hash
+    // (bakes made before read as out of date); mass 1 keeps the hash it had.
+    const auto head = test::makeSphere(32, 64, 10.0f);
+    const GuidesPtr onHead = guidesOnSphere(*head, 60, 12, 8.0f);
+    auto still = [](int) { return 0.0f; };
+    SimSettings s;
+    s.bend = 0.78f;
+    s.twist = 0.6f;
+    s.damping = 0.35f;
+    s.drag = 0.4f;
+    s.rootStiffnessProfile = Ramp{{0.0f, 1.0f}, {0.25f, 0.4f}, {0.55f, 0.05f}, {1.0f, 0.0f}};
+    s.groomedUnderGravity = true;
+    s.preload = true;
+    const std::uint64_t one = s.hash();
+    for (const float mass : {0.25f, 3.0f}) {
+        s.mass = mass;
+        EXPECT_NE(s.hash(), one) << mass;
+        const PitchedRun run = pitchedRun(s, onHead, head, still, 0, 96);
+        EXPECT_LT(run.endShape, 0.02f * 8.0f) << "mass " << mass << ": " << run.endShape;
+        EXPECT_LT(run.endMotion, 0.002f * 8.0f) << "mass " << mass << ": " << run.endMotion;
+    }
+}
+
 TEST(Simulation, SimulatePresetsSetTheSameParamsAndDefaultIsTheNodes) {
     // Default is the node's spec defaults; every preset sets the same params (switching leaves no
     // mix behind), all of them the node's.

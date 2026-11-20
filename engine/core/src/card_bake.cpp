@@ -16,6 +16,7 @@
 #include <stdexcept>
 #include <utility>
 
+#include "groomlab/color.h"
 #include "groomlab/curve.h"
 #include "groomlab/parallel.h"
 #include "groomlab/random.h"
@@ -47,11 +48,6 @@ void applyColorMatrix(std::vector<float>& rgb, const ColorMatrix& m) {
     }, 4096);
 }
 
-float linearToSrgb(float x) {
-    x = std::clamp(x, 0.0f, 1.0f);
-    return x <= 0.0031308f ? 12.92f * x : 1.055f * pm::pow(x, 1.0f / 2.4f) - 0.055f;
-}
-
 // Strand points per voxel, for ambient occlusion: how much hair lies further out.
 class DensityGrid {
 public:
@@ -59,8 +55,8 @@ public:
         if (points.empty()) return;
         lo_ = hi_ = points.front();
         for (const Vec3f& p : points) {
-            lo_ = {std::min(lo_.x, p.x), std::min(lo_.y, p.y), std::min(lo_.z, p.z)};
-            hi_ = {std::max(hi_.x, p.x), std::max(hi_.y, p.y), std::max(hi_.z, p.z)};
+            lo_ = minPerAxis(lo_, p);
+            hi_ = maxPerAxis(hi_, p);
         }
         const Vec3f extent = hi_ - lo_;
         voxel_ = std::max({extent.x, extent.y, extent.z, 1e-6f}) / 96.0f;
@@ -203,7 +199,7 @@ void appendDensityStrand(const StrandSet& strands, std::size_t strand, float spa
         const std::size_t j = std::min(static_cast<std::size_t>(f), count - 2);
         const float a = f - static_cast<float>(j);
         const float radius = 0.5f * (strands.widths()[begin + j] * (1.0f - a) + strands.widths()[begin + j + 1] * a);
-        const Vec3f tangent = (points[std::min(i + 1, points.size() - 1)] - points[i > 0 ? i - 1 : 0]).normalized();
+        const Vec3f tangent = centralTangent(points, i);
         const Vec3f axis = std::abs(tangent.z) < 0.9f ? Vec3f{0, 0, 1} : Vec3f{1, 0, 0};
         const Vec3f side = tangent.cross(axis).normalized();
         cloud.push_back(points[i]);
@@ -236,6 +232,33 @@ struct StrandStamp {
 // A round fiber's normal in card space, `offset` (-1..1) of its radius across it toward `side`
 // (the texture's direction across the strand): square to the strand, out of the card at its
 // middle, turning to face `side` at its edge.
+// Each texel's nearest filled one in a size x size image (a filled texel: itself; none filled: -1
+// everywhere), by a flood from all the filled texels at once, 8-connected: each region grows
+// until it meets its neighbours'.
+std::vector<std::int32_t> nearestFilled(const std::vector<char>& filled, int size) {
+    const std::size_t pixels = filled.size();
+    std::vector<std::int32_t> nearest(pixels, -1), queue;
+    queue.reserve(pixels);
+    for (std::size_t pixel = 0; pixel < pixels; ++pixel) {
+        if (!filled[pixel]) continue;
+        nearest[pixel] = static_cast<std::int32_t>(pixel);
+        queue.push_back(static_cast<std::int32_t>(pixel));
+    }
+    for (std::size_t head = 0; head < queue.size(); ++head) {
+        const std::int32_t pixel = queue[head];
+        const int x = pixel % size, y = pixel / size;
+        for (int dy = -1; dy <= 1; ++dy) for (int dx = -1; dx <= 1; ++dx) {
+            const int nx = x + dx, ny = y + dy;
+            if ((dx == 0 && dy == 0) || nx < 0 || ny < 0 || nx >= size || ny >= size) continue;
+            const std::int32_t next = ny * size + nx;
+            if (nearest[static_cast<std::size_t>(next)] >= 0) continue;
+            nearest[static_cast<std::size_t>(next)] = nearest[static_cast<std::size_t>(pixel)];
+            queue.push_back(next);
+        }
+    }
+    return nearest;
+}
+
 Vec3f fiberNormal(const Vec3f& tangent, float offset, const Vec3f& side) {
     const Vec3f out{0.0f, 0.0f, 1.0f};
     Vec3f w = out, across = side;
@@ -352,7 +375,7 @@ CardMaps bakeCardMaps(const StrandSet& strands, const CardMesh& cards, const Car
         // A braid's tube (Card::tubeArc): across its cell is the way around it. A closed one's
         // strands cross the seam (the cell's left and right edges are one place on the tube).
         const bool tube = card.tubeArc > 0.0f;
-        const bool tubeClosed = card.tubeArc >= 6.2831f;
+        const bool tubeClosed = card.tubeClosed();
         const bool tubeOpen = tube && !tubeClosed;
         const std::vector<float>* woven = tube ? s.pointChannel("braidWoven") : nullptr;
         const std::vector<float>* feedWoven = card.braidFeed ? s.pointChannel("braidWoven") : nullptr;
@@ -386,6 +409,19 @@ CardMaps bakeCardMaps(const StrandSet& strands, const CardMesh& cards, const Car
             }
             barbWidth = count > 0.0f ? sum / count : 0.0f;
         }
+        // No wider than the cell lets it stay clear of the edge rows and columns from the
+        // middle (a cell narrower than its hair: the strand draws thinner there).
+        const float inside = 0.5f * static_cast<float>(std::min(x1 - x0, y1 - y0)) - 1.5f;
+        // Per sample: pixel position, radius, and the values it carries.
+        struct Sample {
+            float x, y, radius, depth, coordU, ao, fade, iridescence, along;
+            Vec3f tangent, color;
+            bool in;
+        };
+        // (One set of buffers for all of the card's strands: every sample is written whole.)
+        std::vector<Vec3f> pts(samples);
+        std::vector<Sample> line(samples);
+        std::vector<float> smooth;
 
         for (std::size_t m = 0; m < card.strands.size(); ++m) {
             const std::size_t si = card.strands[m];
@@ -393,21 +429,14 @@ CardMaps bakeCardMaps(const StrandSet& strands, const CardMesh& cards, const Car
             if (n < 2 || arcLength(s.strandPoints(si), n) <= 0.0f) continue;
             const bool rachis = shafts && (*shafts)[si] > 0.5f;
             const float strandFallback = rachis ? 3.0f * fallbackWidth : fallbackWidth;
-            const std::vector<Vec3f> pts = resampleByArcLength(s.strandPoints(si), n, samples);
+            resampleByArcLengthInto(s.strandPoints(si), n, pts.data(), samples);
             const std::size_t begin = s.strandBegin(si);
             const float aoPhase = 6.28318530718f * unitFloat(hashCombine(0xA0F1B3ull, s.ids()[si]));
-            // Per sample: pixel position, radius, and the values it carries.
-            struct Sample {
-                float x, y, radius, depth, coordU, ao, fade, iridescence, along;
-                Vec3f tangent, color;
-                bool in;
-            };
-            std::vector<Sample> line(samples);
             int segment = -1;
             for (std::size_t k = 0; k < samples; ++k) {
                 const float coordU = static_cast<float>(k) / static_cast<float>(samples - 1);
                 const CardPoint cp = projectOntoCard(card, pts[k], segment);
-                const Vec3f dir = (pts[std::min(k + 1, samples - 1)] - pts[k > 0 ? k - 1 : 0]).normalized();
+                const Vec3f dir = centralTangent(pts.data(), samples, k);
                 float width = strandFallback;
                 if (realWidths) {
                     const float f = coordU * static_cast<float>(n - 1);
@@ -466,7 +495,7 @@ CardMaps bakeCardMaps(const StrandSet& strands, const CardMesh& cards, const Car
             // without spreading AO between neighbouring barbs or across their silhouettes.
             if (settings.occlusion > 0.0f && line.size() > 2) {
                 const int radius = std::max(1, static_cast<int>(line.size() / 64));
-                std::vector<float> smooth(line.size(), 1.0f);
+                smooth.assign(line.size(), 1.0f);
                 for (std::size_t k = 0; k < line.size(); ++k) {
                     const int first = std::max(0, static_cast<int>(k) - radius);
                     const int last = std::min(static_cast<int>(line.size()) - 1, static_cast<int>(k) + radius);
@@ -501,9 +530,6 @@ CardMaps bakeCardMaps(const StrandSet& strands, const CardMesh& cards, const Car
                     c.x += wrap;
                     if (second) a.x -= wrap, c.x -= wrap;  // both moved back: the copy on a's far side
                 }
-                // No wider than the cell lets it stay clear of the edge rows and columns from the
-                // middle (a cell narrower than its hair: the strand draws thinner there).
-                const float inside = 0.5f * static_cast<float>(std::min(x1 - x0, y1 - y0)) - 1.5f;
                 const float r = std::min(std::max(0.5f * (a.radius + c.radius), 0.5f * settings.minStrandTexels), std::max(inside, 0.0f));
                 const float keep = std::max(r, 0.5f) + 1.5f;
                 for (Sample* sample : {&a, &c}) {
@@ -532,6 +558,11 @@ CardMaps bakeCardMaps(const StrandSet& strands, const CardMesh& cards, const Car
                 const float ex = c.x - a.x, ey = c.y - a.y, len2 = std::max(ex * ex + ey * ey, 1e-12f);
                 // Thinner than a pixel: fainter, not thinner (the coverage a real strand would give).
                 const float thin = std::min(1.0f, 2.0f * r);
+                // Across the strand (the texture's direction square to it): for its normal as a
+                // round fiber, below.
+                const float axis = std::sqrt(ex * ex + ey * ey);
+                const float axisRadius = axis * std::max(r, 0.5f);
+                const Vec3f side = axis > 1e-6f ? Vec3f{-ey / axis, -ex / axis, 0.0f} : Vec3f{1.0f, 0.0f, 0.0f};
                 for (int y = by0; y <= by1; ++y) {
                     for (int x = bx0; x <= bx1; ++x) {
                         const float px = static_cast<float>(x) + 0.5f - a.x, py = static_cast<float>(y) + 0.5f - a.y;
@@ -564,11 +595,8 @@ CardMaps bakeCardMaps(const StrandSet& strands, const CardMesh& cards, const Car
                         st.tangent = a.tangent + (c.tangent - a.tangent) * tt;
                         st.color = a.color + (c.color - a.color) * tt;
                         st.iridescence = a.iridescence + (c.iridescence - a.iridescence) * tt;
-                        // Across the strand (the texture's direction square to it, and how far
-                        // over, of its radius): its normal as a round fiber.
-                        const float axis = std::sqrt(ex * ex + ey * ey);
-                        const float offset = axis > 1e-6f ? (ex * dy - ey * dx) / (axis * std::max(r, 0.5f)) : 0.0f;
-                        const Vec3f side = axis > 1e-6f ? Vec3f{-ey / axis, -ex / axis, 0.0f} : Vec3f{1.0f, 0.0f, 0.0f};
+                        // How far over across the strand, of its radius: its normal as a round fiber.
+                        const float offset = axis > 1e-6f ? (ex * dy - ey * dx) / axisRadius : 0.0f;
                         st.normal = fiberNormal(st.tangent, offset, side);
                     }
                 }
@@ -618,7 +646,7 @@ CardMaps bakeCardMaps(const StrandSet& strands, const CardMesh& cards, const Car
         if (x1 <= x0 || y1 <= y0) return;
         const int w = x1 - x0, h = y1 - y0;
         std::vector<float> grown(static_cast<std::size_t>(w) * static_cast<std::size_t>(h), 0.0f);
-        const bool closed = card.tubeArc >= 6.2831f;
+        const bool closed = card.tubeClosed();
         for (int y = 0; y < h; ++y) {
             for (int x = 0; x < w; ++x) {
                 float most = 0.0f;
@@ -704,30 +732,7 @@ CardMaps bakeCardMaps(const StrandSet& strands, const CardMesh& cards, const Car
     if (settings.dilate < 0) {
         // All the way: every empty texel the values of its nearest filled one (a flood from all of
         // them at once, 8-connected: each card's region grows until it meets its neighbours').
-        std::vector<std::int32_t> from(pixels, -1);
-        std::vector<std::int32_t> front;
-        for (std::size_t p = 0; p < pixels; ++p)
-            if (filled[p]) {
-                from[p] = static_cast<std::int32_t>(p);
-                front.push_back(static_cast<std::int32_t>(p));
-            }
-        std::vector<std::int32_t> next;
-        while (!front.empty() && front.size() < pixels) {
-            next.clear();
-            for (const std::int32_t p : front) {
-                const int x = p % size, y = p / size;
-                for (int dy = -1; dy <= 1; ++dy)
-                    for (int dx = -1; dx <= 1; ++dx) {
-                        const int nx = x + dx, ny = y + dy;
-                        if ((dx == 0 && dy == 0) || nx < 0 || ny < 0 || nx >= size || ny >= size) continue;
-                        const std::int32_t q = ny * size + nx;
-                        if (from[static_cast<std::size_t>(q)] >= 0) continue;
-                        from[static_cast<std::size_t>(q)] = from[static_cast<std::size_t>(p)];
-                        next.push_back(q);
-                    }
-            }
-            front.swap(next);
-        }
+        const std::vector<std::int32_t> from = nearestFilled(filled, size);
         parallelFor(0, rowPixels, [&](std::size_t y) {
             for (std::size_t p = y * rowPixels; p < (y + 1) * rowPixels; ++p) {
                 if (filled[p] || from[p] < 0) continue;
@@ -859,25 +864,7 @@ std::vector<float> bakeStrandWorldAo(const StrandSet& strands, const CardMesh& c
     }
 
     if (dilate < 0) {
-        std::vector<std::int32_t> nearest(pixels, -1), queue;
-        queue.reserve(pixels);
-        for (std::size_t pixel = 0; pixel < pixels; ++pixel) {
-            if (!filled[pixel]) continue;
-            nearest[pixel] = static_cast<std::int32_t>(pixel);
-            queue.push_back(static_cast<std::int32_t>(pixel));
-        }
-        for (std::size_t head = 0; head < queue.size(); ++head) {
-            const std::int32_t pixel = queue[head];
-            const int x = pixel % size, y = pixel / size;
-            for (int dy = -1; dy <= 1; ++dy) for (int dx = -1; dx <= 1; ++dx) {
-                const int nx = x + dx, ny = y + dy;
-                if ((dx == 0 && dy == 0) || nx < 0 || ny < 0 || nx >= size || ny >= size) continue;
-                const std::int32_t next = ny * size + nx;
-                if (nearest[static_cast<std::size_t>(next)] >= 0) continue;
-                nearest[static_cast<std::size_t>(next)] = nearest[static_cast<std::size_t>(pixel)];
-                queue.push_back(next);
-            }
-        }
+        const std::vector<std::int32_t> nearest = nearestFilled(filled, size);
         parallelFor(0, pixels, [&](std::size_t pixel) {
             if (!filled[pixel] && nearest[pixel] >= 0) image[pixel] = image[static_cast<std::size_t>(nearest[pixel])];
         }, 4096);
@@ -894,7 +881,8 @@ void pushPullFill(std::vector<float>& rgb, std::vector<float>& weight, int size)
         int size;
         std::vector<float> rgb, weight;
     };
-    std::vector<Level> levels{{size, rgb, weight}};
+    std::vector<Level> levels;
+    levels.push_back(Level{size, std::move(rgb), std::move(weight)});  // (handed back below: no copy)
     while (levels.back().size > 1) {
         const Level& fine = levels.back();
         Level coarse{(fine.size + 1) / 2, {}, {}};
@@ -946,8 +934,8 @@ ScalpTextures bakeScalpTextures(const StrandSet& strands, const ScalpMesh& scalp
     const std::size_t pixels = static_cast<std::size_t>(size) * static_cast<std::size_t>(size);
     Vec3f lo = scalp.points().empty() ? Vec3f{} : scalp.points().front(), hi = lo;
     for (const Vec3f& p : scalp.points()) {
-        lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
-        hi = {std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
+        lo = minPerAxis(lo, p);
+        hi = maxPerAxis(hi, p);
     }
     const float extent = std::max((hi - lo).length(), 1e-6f);
     const float reach = settings.reach > 0.0f ? settings.reach : 0.03f * extent;
@@ -1117,7 +1105,7 @@ ScalpTextures bakeScalpTextures(const StrandSet& strands, const ScalpMesh& scalp
             t.coverage[p] = to8(1.0f - open[p]);
             for (int k = 0; k < 3; ++k) {
                 const float c = weight[p] > 0.0f ? rgb[p * 3 + static_cast<std::size_t>(k)] : fallback[static_cast<std::size_t>(k)];
-                t.color[p * 3 + static_cast<std::size_t>(k)] = to8(linearToSrgb(c));
+                t.color[p * 3 + static_cast<std::size_t>(k)] = to8(linearToSrgb01(c));
             }
         }
     }, 16);

@@ -17,6 +17,7 @@
 #include <map>
 #include <set>
 #include <tuple>
+#include <utility>
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
@@ -696,6 +697,36 @@ std::string blendingOffsets(const std::string& graphJson) {
 }
 
 GroomData deformedGroom(const std::string& graphJson, float bend = 0.6f);
+
+// A plan copies the fields it read before: the copies share the values (no float copied), and a
+// write to one leaves the others as they were.
+TEST(GpuPreview, CopiedFieldsShareTheirValuesUntilWritten) {
+    gpu::LookFields read;
+    read.stages.resize(1);
+    gpu::FieldValues& v = read.stages[0].field[0];
+    v.mode = gpu::FieldValues::kPerStrand;
+    v.values.assign(4, 0.0f);
+    for (std::size_t i = 0; i < 4; ++i) v.values[i] = static_cast<float>(i);
+    const float* held = v.values.data();
+    EXPECT_EQ(v.values.data(), held);  // (its own: writing its elements made no copy)
+
+    gpu::LookFields plan = read;
+    EXPECT_EQ(plan.stages[0].field[0].values.data(), held);
+    EXPECT_EQ(plan.stages[0].field[0].values.size(), 4u);
+    EXPECT_EQ(std::vector<float>(plan.stages[0].field[0].values.begin(), plan.stages[0].field[0].values.end()),
+              (std::vector<float>{0.0f, 1.0f, 2.0f, 3.0f}));
+
+    plan.stages[0].field[0].values[2] = 9.0f;  // a write: its own values from here
+    EXPECT_NE(plan.stages[0].field[0].values.data(), held);
+    EXPECT_EQ(std::as_const(read).stages[0].field[0].values[2], 2.0f);
+    EXPECT_EQ(std::as_const(plan).stages[0].field[0].values[2], 9.0f);
+    EXPECT_EQ(std::as_const(read).stages[0].field[0].values.data(), held);
+
+    plan.stages[0].field[0].values = std::vector<float>{5.0f};
+    EXPECT_EQ(plan.stages[0].field[0].values.size(), 1u);
+    EXPECT_EQ(read.stages[0].field[0].values.size(), 4u);
+    EXPECT_TRUE(gpu::FieldValues{}.values.empty());
+}
 
 TEST(GpuPreview, EngagesOnTheGraphsGroomsStartFrom) {
     // The default graph (its Resample even) and hair_basics run on the GPU from Interpolate, keeping
@@ -1615,6 +1646,37 @@ TEST_P(LookEngineTest, ClumpDragsGiveWhatTheCpuClumps) {
     LookGraph mapped = g;
     mapped.clump = R"("params": {"strength": {"expression": "0.3 + 0.05 * pt", "min": 0.0, "max": 1.0}})";
     EXPECT_GPU_MATCHES(mapped.json(), gpu::Overrides{}, mapped.json());
+}
+
+TEST_P(LookEngineTest, ClumpOnCoiledCentersGivesWhatTheCpuClumps) {
+    // Centers coiled a dozen times (a sparse Scatter's strands through a Curl, centersFrom
+    // inputCurves: Tonic's ringlets, hair clumped onto curled guides). The CPU samples them finer
+    // than 32 points (ClumpState::samples); the GPU clumps onto the same samples, dragged, and with
+    // a thin lock round each (its frames carried through every coil, 256 of them). (pastTip extend
+    // with a lock 0.05 wide on these coils puts the tangents of the Curl after it 1.2e-3 from the
+    // CPU's on DirectX 11, past the tolerance: a GPU's rounding of the arcs and frames.)
+    LookGraph g;
+    g.clump = R"("params": {"centersFrom": "inputCurves", "strength": 0.9})";
+    g.nodes = R"(, {"name": "spots", "type": "Scatter", "params": {"density": 0.4, "seed": 4, "length": 3.0}},
+        {"name": "spotsCoil", "type": "Curl", "params": {"frequency": 4.0, "radius": 0.08, "profile": [[0.0, 1.0]]}})";
+    g.connections = R"(, {"from": "scalp", "to": "spots", "input": "scalp"}, {"from": "spots", "to": "spotsCoil", "input": "strands"},
+        {"from": "spotsCoil", "to": "clump", "input": "centers"})";
+    {
+        GroomSession session(groom(g.json()));
+        ASSERT_TRUE(session.evaluate(ViewRequest{}).strands);
+        const Prepared held = prepare(session, {{"clump", {{"strength", 0.6}}}});
+        ASSERT_FALSE(held.run.inputs.empty());
+        ASSERT_TRUE(held.run.inputs.front().clump);
+        EXPECT_GT(held.run.inputs.front().clump->samples, kClumpCenterSamples) << "the coils sampled finer";
+    }
+    LookGraph c = g;
+    c.clump = R"("params": {"centersFrom": "inputCurves", "strength": 0.6})";
+    EXPECT_GPU_MATCHES(g.json(), (gpu::Overrides{{"clump", {{"strength", 0.6}}}}), c.json());
+    LookGraph lock = g;
+    lock.clump = R"("params": {"centersFrom": "inputCurves", "strength": 1.0, "volumize": 0.015})";
+    LookGraph locked = g;
+    locked.clump = R"("params": {"centersFrom": "inputCurves", "strength": 1.0, "volumize": 0.025})";
+    EXPECT_GPU_MATCHES(lock.json(), (gpu::Overrides{{"clump", {{"volumize", 0.025}}}}), locked.json());
 }
 
 TEST_P(LookEngineTest, ANegativeClumpRepelsAsTheCpuDoes) {
@@ -6495,6 +6557,7 @@ TEST(CpuEngine, TheOperatorsGiveTheirStagesBits) {
             auto clump = gpu::clumpInputs(state.assigned, state.curves, state.centerNormals, state.centerIds,
                                           static_cast<std::uint64_t>(op.params().getInt("seed")));
             clump->spots = !state.offsets.empty();  // centers on the scalp (version 2), as ClumpOp says
+            clump->samples = state.samples;
             stageInputs.clump = std::move(clump);
         }
         if (kind == gpu::StageKind::Tangle || kind == gpu::StageKind::BlendNeighbors) {

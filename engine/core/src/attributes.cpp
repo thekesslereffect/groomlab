@@ -44,6 +44,7 @@ std::string conditionText(const ParamValue& value) {
 
 // Whether a UI shows the param as its node is set (its showWhen, and so on up).
 bool shown(const Operator& op, const std::vector<ParamSpec>& specs, const ParamSpec& spec, int depth = 0) {
+    if (spec.added > op.nodeVersion()) return false;  // (added by a later version: param_conditions.h paramInVersion)
     if (spec.showWhen.empty()) return true;
     if (depth > 8) return true;
     const ParamSpec* other = nullptr;
@@ -201,6 +202,12 @@ private:
                 if (spec.channel == ChannelUse::Reads && spec.channelOptional) {
                     const std::string* fallback = std::get_if<std::string>(&spec.defaultValue);
                     read.optional = fallback && *fallback == channel;
+                    if (read.optional && !spec.channelFor.empty()) {
+                        read.quiet = true;  // (its user at its default too)
+                        for (const ParamSpec& user : specs) {
+                            if (user.name == spec.channelFor && op->params().has(user.name)) read.quiet = op->params().get(user.name) == user.defaultValue;
+                        }
+                    }
                 }
                 if (const auto it = incoming.find(channel); it != incoming.end()) {
                     read.reaches = true;
@@ -251,7 +258,8 @@ std::string graphChannelsJson(const std::string& graphJson, const std::vector<st
             overwrites.push_back({{"name", o.name}, {"param", o.param}, {"node", o.node}});
         }
         for (const ChannelRead& r : info.reads) {
-            reads.push_back({{"param", r.param}, {"name", r.name}, {"reaches", r.reaches}, {"node", r.node}, {"optional", r.optional}});
+            reads.push_back({{"param", r.param}, {"name", r.name}, {"reaches", r.reaches}, {"node", r.node}, {"optional", r.optional},
+                             {"quiet", r.quiet}});
         }
         out[name] = {{"incoming", incoming}, {"writes", writes}, {"overwrites", overwrites}, {"reads", reads}};
     }

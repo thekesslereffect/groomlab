@@ -22,6 +22,7 @@
 #include <QDir>
 #include <QImage>
 #include <QSettings>
+#include <QTemporaryDir>
 #include <QVector4D>
 #include <rhi/qrhi.h>
 
@@ -652,6 +653,40 @@ TEST(AppTheme, FontsBrushesAndColors) {
     EXPECT_EQ(theme::uiColor("accent"), theme::blue());  // a ui key naming a palette color
     EXPECT_TRUE(theme::styleSheet().contains(hex(playful["ui"]["hover"]).name()));
     EXPECT_FALSE(theme::styleSheet().contains(QStringLiteral("@")));
+}
+
+TEST(AppTheme, AThemeWithoutGraphColorsTakesEveryHostsFromTheUiDefinitions) {
+    // The node category and port colors a theme leaves out are engine/ui/graph_ui.json's
+    // (graph.categoryColors, graph.portColors), the ones Maya's and Blender's Graph Editors read:
+    // the Output node's amber and the Compound's green, not a table of the app's own.
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    {
+        std::ofstream out(QDir(dir.path()).filePath(QStringLiteral("app_bare.json")).toStdString());
+        out << R"({"name": "app_bare", "extends": "", "graph": {"categories": {"Look": "#010203"}, "ports": {"Mesh": "#040506"}}})";
+    }
+    qputenv("GROOMLAB_THEME_PATH", dir.path().toUtf8());
+    struct Restore {
+        ~Restore() {
+            qunsetenv("GROOMLAB_THEME_PATH");
+            theme::setTheme(theme::defaultTheme());
+        }
+    } restore;
+    ASSERT_TRUE(theme::setTheme(QStringLiteral("app_bare")));
+    std::ifstream in(std::string(GROOMLAB_TEST_DATA) + "/../../engine/ui/graph_ui.json");
+    ASSERT_TRUE(in);
+    const json graph = json::parse(in)["graph"];
+    auto hex = [](const json& value) { return QColor(QString::fromStdString(value.get<std::string>())); };
+    EXPECT_EQ(theme::nodeCategoryColor("output"), hex(graph["categoryColors"]["Output"]));
+    EXPECT_EQ(theme::nodeCategoryColor("output"), QColor(0xF5, 0xB0, 0x42));
+    EXPECT_EQ(theme::nodeCategoryColor("compound"), hex(graph["categoryColors"]["Compound"]));
+    EXPECT_EQ(theme::nodeCategoryColor("field"), hex(graph["categoryColors"]["Fields & Curves"]));
+    EXPECT_EQ(theme::nodeCategoryColor("no such category"), hex(graph["categoryColors"]["Utility"]));
+    EXPECT_EQ(theme::portColor("value"), hex(graph["portColors"]["Value"]));
+    EXPECT_EQ(theme::portColor("Strands"), hex(graph["portColors"]["Strands"]));
+    // What the theme does say still wins.
+    EXPECT_EQ(theme::nodeCategoryColor("look"), QColor(1, 2, 3));
+    EXPECT_EQ(theme::portColor("mesh"), QColor(4, 5, 6));
 }
 
 TEST(AppTheme, EveryShippedThemeIsEmbeddedAndCharcoalIsSolid) {
@@ -3863,7 +3898,7 @@ TEST(AppCards, UnrealAndUnityCardsAsFbx) {
     EXPECT_TRUE(has(feathers, "hairF_unity_feathers.json"));
     EXPECT_FALSE(has(feathers, "hairF_rachis.fbx"));
     const std::vector<std::string> unity = doc->exportEngineCards(dir, "hairU", true, 64, 1.0f, &warnings);
-    for (const char* f : {"hairU_BaseColor.png", "hairU_Mask.png", "hairU_unity.json", "hairU_cards.fbx"}) EXPECT_TRUE(has(unity, f)) << f;
+    for (const char* f : {"hairU_BaseColor.png", "hairU_Mask.png", "hairU_AO_world.png", "hairU_unity.json", "hairU_cards.fbx"}) EXPECT_TRUE(has(unity, f)) << f;
     std::ifstream fbx(std::filesystem::u8path(dir + "/hairU_cards.fbx"), std::ios::binary);
     std::string head(23, ' ');
     fbx.read(head.data(), 23);

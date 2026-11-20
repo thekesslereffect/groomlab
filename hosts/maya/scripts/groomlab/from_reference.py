@@ -544,11 +544,6 @@ def set_view_mask(groom, camera, path):
         _store_views(groom, data)
 
 
-def clear_reference_strokes(groom, camera):
-    """Forget the flow strokes drawn on a reference camera's photo. One undo step."""
-    set_reference_hints(groom, camera, [])
-
-
 def generate(groom, cameras=None, guide_count=300, symmetry="auto", max_length=None, select=True, **options):
     """Guides from Photos as the Groom Tools run it: every reference camera (or `cameras`), each
     with the mask and the flow strokes the groom keeps for it, into the fromReference group

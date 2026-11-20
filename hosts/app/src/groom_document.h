@@ -21,6 +21,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "groomlab/asset_files.h"
 #include "groomlab/card_blocks.h"
 #include "groomlab/card_files.h"
 #include "groomlab/card_maps.h"
@@ -554,6 +555,14 @@ public:
     const std::set<std::string>& hiddenGroups() const { return hiddenGroups_; }
     void setGroupHidden(const std::string& name, bool hidden);
     std::string hiddenGroupsText() const;  // DisplaySettings::hiddenGuideGroups' form
+    // Show Tubes (the core's braid_tubes.h): the Braid nodes whose section tubes the viewport draws,
+    // in DisplaySettings::braidTubes' form (names, one a line). Saved with the groom ("braidTubes");
+    // a rename takes it along and a removed node's goes, in the edit's own undo step. Display only.
+    const std::string& braidTubes() const { return braidTubes_; }
+    void setBraidTubes(const std::string& shown);
+    // A click on a node's Show Tubes: on, or off again (GraphEdit::braidTubesToggled). Not in the
+    // history (as the hidden groups are not).
+    void toggleBraidTubes(const std::string& node);
     // The Tube hierarchy's Lock view (a group whose tubes alone draw) and Mixed view ("<base>:<level>"):
     // DisplaySettings::tubeViewGroup and mixedView, the root tool's (StrokeHost::mixedView). Not saved.
     const std::string& tubeViewGroup() const { return tubeViewGroup_; }
@@ -624,11 +633,15 @@ public:
     // The map set to `value` (a guide layer on the selected guides only with `selectedOnly`), or a
     // color map to `color` in the channels of `channelMask` (Maya's fill_map). One undo step.
     std::string fillMap(const std::string& name, float value, bool selectedOnly = false, const PaintColor* color = nullptr,
-                        unsigned channelMask = kAllChannels, PaintMode mode = PaintMode::Replace);
+                        unsigned channelMask = kAllChannels, PaintMode mode = PaintMode::Replace,
+                        const std::vector<std::int32_t>& faces = {});
     // Where the groom keeps a kind of file (masks, cards, exports, caches, renders, references), as
     // Maya keeps a scene's: <groom folder>/groomlab/<groom name>/<kind>; an untitled groom's in a
     // temp folder of its own, taken along when it is first saved (save).
     std::string assetFolder(const std::string& kind) const;
+    // The groom's own folder in a kind: <kind folder>/<groom name, file safe> (Maya's masks/<groom>,
+    // the core's groomFileFolder for a saved one: groom_package.h).
+    std::string groomFolder(const std::string& kind) const;
     // What the last save took along (Save As: the files the groom names copied into the new
     // file's folders, Maya's follow_scene_files): the files copied, and copies under another name.
     const std::vector<std::string>& savedCopies() const { return savedCopies_; }
@@ -841,6 +854,12 @@ public:
     // Adds a Cards node between what feeds the output and the output (one undo step); the name
     // made is written to *made. "" or the error.
     std::string addCardsNode(std::string* made);
+    // Add > Cards > Hero/Mid/Low, every host's: a Cards node before the output only when the graph
+    // has none, then every Cards node set for `lod` (one undo step); the first Cards node in *made.
+    std::string addCards(const std::string& lod, std::string* made = nullptr);
+    // A Part node so drawn parts open the hair (every host's part tools: graph_inserts.h insertPart),
+    // one undo step when one is made; "" or the error.
+    std::string ensurePartNode(std::string* made = nullptr);
     // Sets a Cards node for a level of detail ("hero", "mid", "low": the core's presets,
     // card_presets.h, as Maya's cards_preset sets them, by what the node cards), one undo step.
     // "" or the error.
@@ -977,10 +996,7 @@ private:
         nlohmann::json graphBefore, graphAfter;
         // Besides (or alone: `side`, named by `label`): files written or deleted (their bytes
         // before and after, nullopt: no file), the group colors before and after.
-        struct FileState {
-            std::string path;
-            std::optional<std::string> before, after;
-        };
+        using FileState = groomlab::FileState;  // (asset_files.h: every host's)
         std::vector<FileState> files;
         bool side = false;
         bool colors = false;
@@ -991,6 +1007,8 @@ private:
             std::string from;
         };
         std::optional<std::pair<Subdivision, Subdivision>> subdivision;
+        // Show Tubes' nodes before and after (a rename, a removal: editGraph).
+        std::optional<std::pair<std::string, std::string>> braidTubes;
     };
     void record(Edit edit);
     // The files and colors an edit changed, onto the step it recorded (the history held
@@ -1052,6 +1070,7 @@ private:
     std::uint64_t selectionVersion_ = 1;
     bool tubePreview_ = false;  // previewTubeShape's preview is the session's
     std::set<std::string> hiddenGroups_;
+    std::string braidTubes_;  // Show Tubes' nodes (braidTubes)
     std::map<std::string, std::string> groupColors_;
     RenderOverrides renderOverrides_;
     double time_ = 0.0;

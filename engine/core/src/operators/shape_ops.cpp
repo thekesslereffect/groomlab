@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -15,6 +16,7 @@
 #include "groomlab/operators.h"
 #include "groomlab/parallel.h"
 #include "groomlab/portable_math.h"
+#include "groomlab/profile.h"
 #include "groomlab/random.h"
 #include "incremental.h"
 #include "internal.h"
@@ -193,31 +195,10 @@ private:
         lengthField.validate(*in);
         const ScalarField fractionField(params(), "fraction", scalpOf(ctx));
         fractionField.validate(*in);
-
-        const StrandChanges* changes = nullptr;
-        StrandsPtr last;  // the last result, to make again only the strands the input changed in
-        if (incremental) {
-            changes = someStrandsChanged(*incremental, 0);
-            last = changes ? previousStrandsFor(*incremental, *in) : nullptr;
-            if (!last || !lengthField.strandLocal() || !fractionField.strandLocal()) return false;
-            if (changes->none()) {  // the same strands in: the same result
-                *result = last;
-                *changed = *changes;
-                return true;
-            }
-        }
         // look.slang's LengthCS, the GPU preview's own (look_cpu.h): in full, or the strands the input
         // changed in, into the last result's copy.
-        if (!last) {
-            *result = gpu::runStage(gpu::StageKind::Length, params(), in, scalpOf(ctx));
-            return true;
-        }
-        auto out = std::make_shared<StrandSet>(*in);
-        positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made
-        gpu::runStageOnStrands(gpu::StageKind::Length, params(), in, changes->strands, scalpOf(ctx), *out);
-        *changed = *changes;
-        *result = StrandsPtr(out);
-        return true;
+        return rerunChanged(in, lengthField.strandLocal() && fractionField.strandLocal(), incremental, result, changed,
+                            EngineStage{gpu::StageKind::Length, params(), scalpOf(ctx)});
     }
 };
 
@@ -267,8 +248,9 @@ private:
         const StrandChanges* changes = nullptr;
         StrandsPtr last;  // the last result, to make again only the strands the input changed in
         if (incremental) {
-            changes = someStrandsChanged(*incremental, 0);
-            last = changes ? previousStrandsFor(*incremental, *in) : nullptr;
+            // (Some strands recounted before it: the last result's widths laid out as the input is now.)
+            changes = someStrandsChangedOrRecounted(*incremental, 0);
+            last = changes ? previousStrandsFor(*incremental, *in, *changes) : nullptr;
             if (!last || !widthField.strandLocal()) return false;
             if (changes->none()) {  // the same strands in: the same result
                 *result = last;
@@ -294,7 +276,7 @@ private:
             gpu::runStageInto(gpu::StageKind::Width, params(), in, scalpOf(ctx), *out);
             if (isShaft) parallelFor(0, out->strandCount(), keepShaft, 4096);
         } else {
-            widthsOfLast(*out, last, *incremental);
+            if (!widthsOfLast(*out, last, *incremental, *changes)) return false;
             gpu::runStageOnStrands(gpu::StageKind::Width, params(), in, changes->strands, scalpOf(ctx), *out);
             if (isShaft) forEachListed(changes->strands, keepShaft);
             *changed = *changes;
@@ -362,15 +344,18 @@ public:
         };
     }
 
-    // Even, or by curvature with every changed strand keeping its point count: only the changed
-    // strands are resampled again, into a copy of the last result (the same layout). By length,
-    // each strand's count depends on every strand's length: in full.
+    // Even or by curvature: only the changed strands are resampled again. Each keeping its point
+    // count, into a copy of the last result (the same layout); with some at another count (by
+    // curvature, a combed strand turning more or less; the input's own strands recounted), into
+    // the last result laid out anew: the strands left alone copied to their new places, the
+    // changes handed on as recounted (StrandChanges::recounted). By length, each strand's count
+    // depends on every strand's length: in full.
     bool evaluateIncremental(const EvalContext&, const std::vector<Value>& inputs, const IncrementalInputs& incremental,
                              Value* out, StrandChanges* changed) const override {
         const StrandsPtr in = requireStrands(inputs, op::kResample);
         const auto segments = static_cast<int>(params().getInt("segments"));
         const std::string mode = params().getString("mode");
-        const StrandChanges* changes = someStrandsChanged(incremental, 0);
+        const StrandChanges* changes = someStrandsChangedOrRecounted(incremental, 0);
         const StrandsPtr last = valueAs<StrandsPtr>(incremental.previous);
         if ((mode != "even" && mode != "curvature") || !changes || !last || last == in || in->empty() ||
             last->strandCount() != in->strandCount() || (segments == 0 && mode == "even")) {
@@ -378,6 +363,9 @@ public:
         }
         const std::size_t count = in->strandCount();
         const std::vector<float>* braid = in->strandChannel("braidId");
+        // Each changed strand's count, as a full evaluation finds it.
+        ProfilePhases phase("resample.counts");
+        std::vector<std::size_t> counts(changes->strands.size());
         if (mode == "even") {
             // Every strand at its count already: a full evaluation hands the input on as it is.
             bool same = true;
@@ -385,9 +373,13 @@ public:
                 same = in->strandPointCount(s) == keptPoints(braid, *in, s, static_cast<std::size_t>(segments) + 1);
             }
             if (same) return false;
+            for (std::size_t k = 0; k < counts.size(); ++k) {
+                counts[k] = keptPoints(braid, *in, changes->strands[k], static_cast<std::size_t>(segments) + 1);
+            }
         } else {
-            // Each changed strand's count by its turning, as a full evaluation finds it: the last
-            // result's, or the layout changed.
+            // By its turning. (Without `segments` the most any strand gets is the input's most
+            // points: with strands recounted before it, every strand's count may be another.)
+            if (segments == 0 && changes->recounted) return false;
             std::size_t mostPoints = 2;
             const PreviewCore core(*in);
             for (std::size_t s = 0; s < count; ++s) {
@@ -396,45 +388,88 @@ public:
             const int most = segments > 0 ? segments : static_cast<int>(std::min<std::size_t>(mostPoints - 1, 1024));
             const int least = std::clamp(static_cast<int>(params().getInt("minSegments")), 1, most);
             const float perSegment = static_cast<float>(params().getDouble("maxAngle")) * 0.0174532925f;
-            std::atomic<bool> moved{false};
-            forEachListed(changes->strands, [&](std::size_t s) {
-                if (keptPoints(braid, *in, s, curvaturePoints(in->strandPoints(s), in->strandPointCount(s), perSegment, least, most)) !=
-                    last->strandPointCount(s)) {
-                    moved = true;
-                }
-            });
-            if (moved) return false;
+            parallelFor(0, counts.size(), [&](std::size_t k) {
+                const std::size_t s = changes->strands[k];
+                const std::size_t points = curvaturePoints(in->strandPoints(s), in->strandPointCount(s), perSegment, least, most);
+                counts[k] = keptPoints(braid, *in, s, points);
+            }, 128);
         }
-        if (changes->none()) {
+        bool recount = false;
+        for (std::size_t k = 0; k < counts.size() && !recount; ++k) recount = counts[k] != last->strandPointCount(changes->strands[k]);
+        if (changes->strands.empty()) {  // the same strands in: the same result
             *out = last;
-            *changed = *changes;
+            *changed = StrandChanges::listed({});
             return true;
         }
-        // The last result's layout and arrays (IDs, roots, instances and layers are the input's,
-        // unchanged), each array this writes copied, then the changed strands resampled again.
+        // The last result's arrays (IDs, roots, instances and layers are the input's, unchanged),
+        // each array this writes copied (or, laid out anew, made at its new size with the strands
+        // left alone copied to their places), then the changed strands resampled again.
+        const std::vector<std::string> pointChannels = in->pointChannelNames();
+        if (pointChannels != last->pointChannelNames() || in->strandChannelNames() != last->strandChannelNames() ||
+            last->positions().size() != last->offsets().back() || last->widths().size() != last->positions().size()) {
+            return false;
+        }
+        phase.next("resample.lastArrays");
         auto made = std::make_shared<StrandSet>(*last);
-        made->copyPositionsFrom(*last);
         const bool widths = in->widths().size() == in->pointCount();
-        std::vector<float>& outWidths = made->copyWidthsFrom(*last);
+        if (recount) {
+            std::vector<std::size_t> points(count);
+            for (std::size_t s = 0; s < count; ++s) points[s] = last->strandPointCount(s);
+            for (std::size_t k = 0; k < counts.size(); ++k) points[changes->strands[k]] = counts[k];
+            made->relayout(points);
+            relayUnlisted(made->overwritePositions().data(), *made, last->positions().data(), *last, changes->strands);
+            relayUnlisted(made->overwriteWidths().data(), *made, last->widths().data(), *last, changes->strands);
+        } else {
+            made->copyPositionsFrom(*last);
+            made->copyWidthsFrom(*last);
+        }
+        std::vector<float>& outWidths = made->mutableWidths();
         std::vector<std::vector<float>*> outPoint;
         std::vector<const std::vector<float>*> inPoint;
-        for (const std::string& name : in->pointChannelNames()) {
-            outPoint.push_back(made->copyPointChannelFrom(name, *last));
-            inPoint.push_back(in->pointChannel(name));
+        std::vector<float> pointDefaults;
+        for (const std::string& name : pointChannels) {
+            const std::vector<float>* from = last->pointChannel(name);
+            if (!from || from->size() != last->pointCount()) return false;
+            if (recount) {
+                outPoint.push_back(made->mutablePointChannel(name));
+                relayUnlisted(outPoint.back()->data(), *made, from->data(), *last, changes->strands);
+            } else {
+                outPoint.push_back(made->copyPointChannelFrom(name, *last));
+            }
             if (!outPoint.back()) return false;
+            inPoint.push_back(in->pointChannel(name));
+            pointDefaults.push_back(in->pointChannelDefault(name));
         }
-        std::vector<std::pair<const std::vector<float>*, std::vector<float>*>> strandValues;
+        // The changed strands' channel values: a channel is taken for writing only where one differs
+        // (the rest stay the last result's very arrays).
         for (const std::string& name : in->strandChannelNames()) {
-            std::vector<float>* to = made->copyStrandChannelFrom(name, *last);
-            if (!to) return false;
-            strandValues.emplace_back(in->strandChannel(name), to);
+            const std::vector<float>& from = *in->strandChannel(name);
+            const std::vector<float>* have = made->strandChannel(name);
+            if (!have || have->size() != count) return false;
+            bool differs = false;
+            for (std::size_t k = 0; k < changes->strands.size() && !differs; ++k) {
+                const std::size_t s = changes->strands[k];
+                differs = std::memcmp(&from[s], &(*have)[s], sizeof(float)) != 0;
+            }
+            if (!differs) continue;
+            std::vector<float>& to = *made->mutableStrandChannel(name);
+            for (const std::uint32_t s : changes->strands) to[s] = from[s];
         }
+        const bool byCurvature = mode == "curvature";
+        phase.next("resample.strands");
         forEachListed(changes->strands, [&](std::size_t s) {
-            for (const auto& [from, to] : strandValues) (*to)[s] = (*from)[s];
-            resampleStrand(*in, *made, s, mode == "curvature", widths, inPoint, outPoint, outWidths);
+            if (recount) {
+                // (What a strand too short to resample keeps: the width and values a fresh set starts with.)
+                const std::size_t begin = made->strandBegin(s), n = made->strandPointCount(s);
+                std::fill_n(outWidths.begin() + static_cast<std::ptrdiff_t>(begin), n, 1.0f);
+                for (std::size_t c = 0; c < outPoint.size(); ++c) {
+                    std::fill_n(outPoint[c]->begin() + static_cast<std::ptrdiff_t>(begin), n, pointDefaults[c]);
+                }
+            }
+            resampleStrand(*in, *made, s, byCurvature, widths, inPoint, outPoint, outWidths);
         });
         *out = StrandsPtr(made);
-        *changed = *changes;
+        *changed = recount ? StrandChanges::recountedIn(changes->strands) : StrandChanges::listed(changes->strands);
         return true;
     }
 
@@ -446,6 +481,7 @@ public:
             throw GraphError("Resample: mode must be even, length or curvature");
         }
         const bool adaptive = mode != "even";
+        const bool byLength = mode == "length";
         if ((segments == 0 && !adaptive) || in->empty()) return in;
         const std::size_t count = in->strandCount();
         std::vector<std::size_t> points(count, static_cast<std::size_t>(segments) + 1);
@@ -456,7 +492,7 @@ public:
             parallelFor(0, count, [&](std::size_t s) {
                 const Vec3f* p = in->strandPoints(s);
                 const std::size_t n = in->strandPointCount(s);
-                if (mode == "length") {
+                if (byLength) {
                     need[s] = arcLength(p, n);
                 } else {
                     thread_local std::vector<float> angle;  // scratch, reused across strands

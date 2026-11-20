@@ -204,9 +204,12 @@ std::uint64_t parseSimulationStamp(const std::string& text);
 // while that param is a number (SimSettings holds it then).
 struct SimMaps {
     std::vector<float> stiffness, bend, twist, damping, drag, rootStiffness, mass, strength;
+    // The distance kept from the scalp and colliders per point (scene units): a braid's guides keep
+    // half its width (its width and taper as the Braid node has them), a thin lock's less.
+    std::vector<float> collisionOffset;
     bool empty() const {
         return stiffness.empty() && bend.empty() && twist.empty() && damping.empty() && drag.empty() &&
-               rootStiffness.empty() && mass.empty() && strength.empty();
+               rootStiffness.empty() && mass.empty() && strength.empty() && collisionOffset.empty();
     }
     std::uint64_t hash() const;
 };

@@ -87,6 +87,12 @@ std::string PartSet::add(const std::string& base, const std::vector<Vec3f>& poin
     return name;
 }
 
+bool PartSet::remove(const std::string& name) {
+    const std::size_t before = parts.size();
+    parts.erase(std::remove_if(parts.begin(), parts.end(), [&](const Part& p) { return p.name == name; }), parts.end());
+    return parts.size() != before;
+}
+
 PartSet PartSet::onRefined(const SubdivisionPlan& plan) const {
     PartSet out = *this;
     for (Part& part : out.parts) {
@@ -179,8 +185,8 @@ std::uint32_t PartLines::buildTree(std::vector<SegmentNode>& tree, const std::ve
     Vec3f lo = line[first], hi = lo;
     for (std::uint32_t i = first + 1; i <= last; ++i) {  // the segments' end points
         const Vec3f& p = line[i];
-        lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
-        hi = {std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
+        lo = minPerAxis(lo, p);
+        hi = maxPerAxis(hi, p);
     }
     tree[index].lo = lo;
     tree[index].hi = hi;
@@ -380,8 +386,8 @@ PartSet findAutoParts(const StrandSet& strands, const ScalpMesh& scalp, float sp
     // summed direction, weight and mean normal.
     Vec3f lo = points[0], hi = points[0];
     for (const Vec3f& p : points) {
-        lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
-        hi = {std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
+        lo = minPerAxis(lo, p);
+        hi = maxPerAxis(hi, p);
     }
     struct Cell {
         Vec3f center, flow, normal;

@@ -35,10 +35,10 @@ import time
 
 import bpy
 
-from . import drawn, graph_tree, groom, uikit
+from . import drawn, graph_tree, uikit
 
 NODE_W = 176.0
-CLUMP_W = 23.0      # a Clump's header holds Clump Colors too
+CLUMP_W = 23.0      # a Clump's header holds Clump Colors too (a Braid's, Show Tubes)
 HEADER = 28.0
 ROW = 18.0
 PAD = 8.0
@@ -217,10 +217,11 @@ class Graph(object):
         ins = [s for s in node.inputs if s.enabled and not s.hide]
         outs = [s for s in node.outputs if s.enabled and not s.hide]
         clump = node.gl_type == "Clump"
+        braid = not clump and graph_tree.shows_tubes(node)
         label = graph_tree.label_of(node.gl_type)
         type_row = node.name != label and node.name != node.gl_type and len(ins) <= 1 and len(outs) <= 1
         rows = max(len(ins), len(outs), 1) + (1 if type_row else 0)
-        w, h = NODE_W + (CLUMP_W if clump else 0.0), HEADER + PAD * 2 + rows * ROW
+        w, h = NODE_W + (CLUMP_W if clump or braid else 0.0), HEADER + PAD * 2 + rows * ROW
         gx, gy = graph_tree.get_location(node)
         x, top = self.at(gx, gy)
         k = self.k
@@ -245,6 +246,9 @@ class Graph(object):
         if clump:
             right -= step
             toggles.append(("clump", (right, y, size, size)))
+        elif braid:  # Show Tubes, where a Clump has Clump Colors
+            right -= step
+            toggles.append(("tubes", (right, y, size, size)))
         box.toggles = list(reversed(toggles))
         return box
 
@@ -333,17 +337,15 @@ def _segment_distance2(pt, a, b):
     return (pt[0] - cx) ** 2 + (pt[1] - cy) ** 2
 
 
-def compatible(a, b):
-    """Whether a wire can join ports of these types (the helper has the last word: a wire it
-    refuses is taken back and the panel says why). Strands-or-guides and Any take either; a mesh
-    goes only into a mesh."""
-    if "Mesh" in (a, b):
-        return a == b or "Any" in (a, b)
-    return a == b or a in ("Any", "Curves") or b in ("Any", "Curves")
+def compatible(a, b, out=True):
+    """Whether a wire can join ports of these types: `a` the wire's own end (an output when `out`,
+    else an input), `b` the other (the core's portTypesMatch through the helper, which has the last
+    word: a wire it refuses is taken back and the panel says why)."""
+    return graph_tree.port_types_match(a, b) if out else graph_tree.port_types_match(b, a)
 
 
 def viewable(box):
-    return any(_port_type(s) in ("Strands", "Curves") for s, _p in box.outputs)
+    return graph_tree.viewable(box.node)
 
 
 def linkable(node):
@@ -470,7 +472,7 @@ def _draw_wire_drag(p, g, t):
         if box.node == _wire["from"].node:
             continue
         for s, (px, py) in (box.inputs if _wire["out"] else box.outputs):
-            if compatible(kind, _port_type(s)):
+            if compatible(kind, _port_type(s), _wire["out"]):
                 r = (PORT_R + 3.0) * k
                 p.rect((px - r, py - r, 2 * r, 2 * r), (0, 0, 0, 0), r, with_alpha(t["selected"], 0.9), 1.5 * k)
 
@@ -654,6 +656,9 @@ def _draw_toggle(p, t, box, ident, r, viewed):
         exposed = set(json.loads(node.gl_inputs or "[]"))
         names = [s["name"] for s in graph_tree.node_param_specs(node) if s.get("port")]
         on = bool(names) and all(n in exposed for n in names)
+    elif ident == "tubes":
+        scalp = getattr(node.id_data, "gl_scalp", None)
+        on = bool(scalp) and graph_tree.braid_tubes_shown(scalp, node)
     else:  # clump
         scalp = getattr(node.id_data, "gl_scalp", None)
         on = bool(scalp) and graph_tree.clump_colored(scalp, node)
@@ -676,6 +681,15 @@ def _draw_toggle(p, t, box, ident, r, viewed):
         for dy in (5.0, 9.0, 13.0):
             yy = r[1] + r[3] - dy * k
             p.lines([(r[0] + 4 * k, yy), (r[0] + r[2] - 4 * k, yy)], col, width)
+    elif ident == "tubes":  # a short tube: its far end's half, its two sides, its open near end
+        top, bottom = c[1] + 4.0 * k, c[1] - 4.0 * k
+        far, near = c[0] - 4.4 * k, c[0] + 4.4 * k
+        half = [(far - 2.2 * k * math.sin(a * math.pi / 8), c[1] + 4.0 * k * math.cos(a * math.pi / 8)) for a in range(9)]
+        p.lines(half, col, 1.4)
+        p.lines([(far, top), (near, top)], col, 1.4)
+        p.lines([(far, bottom), (near, bottom)], col, 1.4)
+        ring = [(near + 2.2 * k * math.cos(a * math.pi / 8), c[1] + 4.0 * k * math.sin(a * math.pi / 8)) for a in range(17)]
+        p.lines(ring, col, 1.4)
     else:
         hues = ((0.87, 0.16, 0.1, 1.0), (0.1, 0.58, 0.19, 1.0), (0.13, 0.3, 0.91, 1.0))
         for (dx, dy), hue in zip(((0.0, 3.4), (-3.6, -2.6), (3.6, -2.6)), hues):
@@ -730,7 +744,6 @@ class Dock(uikit.Window):
     def __init__(self, context, region):
         state = panel_state
         self.state, self.theme = state, uikit._theme()
-        t = self.theme
         self.scale = s = context.preferences.system.ui_scale
         self.interaction = state.interaction
         self.hover, self.mouse = state.hover, state.mouse
@@ -1163,7 +1176,7 @@ def _wire_target(g, x, y):
     port = g.port_at(x, y, outputs=not _wire["out"], inputs=_wire["out"])
     if port is None or port[0].node == _wire["from"].node:
         return None
-    return port if compatible(_port_type(_wire["from"]), _port_type(port[1])) else None
+    return port if compatible(_port_type(_wire["from"]), _port_type(port[1]), _wire["out"]) else None
 
 
 def _connect(tree, out_socket, in_socket):
@@ -1180,7 +1193,7 @@ def _drop_wire(context, tree, g, x, y, moved):
         box = g.box_at(x, y)
         if box is not None and box.node != source.node:
             ports = box.inputs if out else box.outputs
-            free = [s for s, _p in ports if compatible(_port_type(source), _port_type(s))
+            free = [s for s, _p in ports if compatible(_port_type(source), _port_type(s), out)
                     and not (out and s.is_linked)]
             if free:
                 target = (box, free[0], not out, None)
@@ -1302,11 +1315,11 @@ def _add_node(context, item, at):
     if source is not None:
         try:
             if _search.get("out"):
-                into = [s for s in node.inputs if s.enabled and compatible(_port_type(source), _port_type(s))]
+                into = [s for s in node.inputs if s.enabled and compatible(_port_type(source), _port_type(s), True)]
                 if into:
                     _connect(tree, source, into[0])
             else:
-                outs = [s for s in node.outputs if s.enabled and compatible(_port_type(source), _port_type(s))]
+                outs = [s for s in node.outputs if s.enabled and compatible(_port_type(source), _port_type(s), False)]
                 if outs:
                     _connect(tree, outs[0], source)
         except ReferenceError:  # (the wire's node went meanwhile)
@@ -1642,6 +1655,8 @@ def _toggle(context, tree, node, ident):
         bpy.ops.groomlab.graph_toggle_inputs("INVOKE_DEFAULT", node=node.gl_name)
     elif ident == "clump":
         bpy.ops.groomlab.graph_clump_colors("INVOKE_DEFAULT", node=node.gl_name)
+    elif ident == "tubes":
+        bpy.ops.groomlab.graph_braid_tubes("INVOKE_DEFAULT", node=node.gl_name)
 
 
 class GROOMLAB_OT_graph_canvas_scroll(bpy.types.Operator):

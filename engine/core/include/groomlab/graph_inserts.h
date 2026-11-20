@@ -2,9 +2,12 @@
 #pragma once
 
 // The graph edits every host's menus make to add a whole feature (Add > Simulate, Load Guide
-// Cache, Add > Collider, Add > Braid, Add > Feathers), on GraphEdit: Maya's sim.py, collision.py,
-// braids.py and feathers.py, the Blender add-on's pipeline.py and the app's GroomDocument make
-// them through these, so the nodes land in the same place, with the same links, in every host.
+// Cache, Add > Collider, Add > Braid, Add > Feathers, Add Scalp), on GraphEdit: Maya's sim.py,
+// collision.py, braids.py, feathers.py and extra_scalps.py, the Blender add-on's pipeline.py and
+// the app's GroomDocument make them through these, so the nodes land in the same place, with the
+// same links, in every host. And a node put into the flow (between two nodes, before or after
+// one, on a link: a node dropped on a wire), as every host's editor and tools do it: Maya's
+// GraphModel.insert_*, the Blender helper's edit_graph ops and the app's GroomDocument.
 // The hosts make the guide groups (they hold the guides) and read the feather presets.
 
 #include <map>
@@ -26,14 +29,43 @@ void setNodePosition(GraphEdit& edit, const std::string& node, double x, double 
 // A node's position, nullopt when it has none.
 std::optional<std::pair<double, double>> nodePosition(const GraphEdit& edit, const std::string& node);
 
+// Auto layout, every host's (a graph with no stored positions as it opens, Tidy Layout): columns
+// `column` apart by how far a node is from the sources (the longest path in), rows `row` apart in
+// the graph's order. columnsPerBlock above 0 wraps a long chain into blocks of that many columns,
+// one under the other (each as tall as its tallest column, `blockGap` between them): the app's
+// graph over the viewport; 0: one row of columns.
+struct GraphLayout {
+    double column = kInsertColumn;
+    double row = kInsertRow;
+    int columnsPerBlock = 0;
+    double blockGap = 60.0;
+};
+// Each node's place in that layout, by name; nothing is set (setNodePosition). `only`: just these
+// nodes are placed, the rows counted among them (the app's nodes with no position yet, beside the
+// ones that have one); the columns are still the whole graph's.
+std::map<std::string, std::pair<double, double>> layoutPositions(const GraphEdit& edit, const GraphLayout& layout = {},
+                                                                 const std::vector<std::string>* only = nullptr);
+
 // `node` between src and dst: every link from src into dst goes through it (src's output those
-// links read into node's `nodeInput`, node's first output into dst's inputs).
+// links read into node's `nodeInput`, "": its first input; node's first output into dst's
+// inputs). GraphError, the graph unchanged, when src does not feed dst or a link does not fit.
 void insertBetween(GraphEdit& edit, const std::string& src, const std::string& dst, const std::string& node,
                    const std::string& nodeInput = "strands");
 // `node` between what feeds anchor's `input` and anchor (before the output, say), placed a row
 // below anchor. GraphError when nothing feeds that input.
 void insertBefore(GraphEdit& edit, const std::string& anchor, const std::string& node, const std::string& input = "strands",
                   const std::string& nodeInput = "strands");
+// `node` right after anchor in its chain: anchor -> node -> the first node anchor fed
+// (insertBetween); anchor feeding nothing: anchor into node's `nodeInput` ("": its first input).
+// Placed half a column right of and a row below anchor.
+void insertAfter(GraphEdit& edit, const std::string& anchor, const std::string& node, const std::string& nodeInput = {});
+// A node put into a link (a node dropped on a wire, Tab over one): the one link src (its output
+// `output`, "": its first) -> dst.input goes through `node`. node reads src on its first input
+// (its spec's order) that takes it, dst reads node's first output: each input is tried as connect
+// checks it (the types, no cycle). GraphError, the graph unchanged, when that link is not there,
+// node is one of its ends, or no input of node takes src's output with node feeding dst.
+void insertOnLink(GraphEdit& edit, const std::string& src, const std::string& dst, const std::string& input, const std::string& node,
+                  const std::string& output = {});
 
 // Add > Simulate: a Simulate node (its params from `paramsJson`, an object; "" none) between the
 // first Guides node feeding an Interpolate and every Interpolate it feeds, so the strands follow
@@ -41,6 +73,30 @@ void insertBefore(GraphEdit& edit, const std::string& anchor, const std::string&
 // and a row below the Guides node. GraphError when no Guides node feeds an Interpolate. Returns the
 // node's name.
 // (After a DriveGuides or GuideCache node posing the guides, when the Guides node feeds one.)
+// A Part node so drawn parts open the hair (every host's part tools: Maya's add_part_node, the
+// Blender add-on's and the app's Part brush): the graph's first Part node, or with none one with
+// `paramsJson` over its defaults after `after` ("": the first Interpolate, else Flow, else Bend,
+// else Scatter). Returns its name; `made` says whether it is new. GraphError for a graph with no
+// strands to part.
+std::string insertPart(GraphEdit& edit, const std::string& paramsJson = {}, const std::string& after = {},
+                       std::optional<double> groomSize = std::nullopt, bool* made = nullptr);
+
+// Add > Wind / Jiggle (every host's): a node of `type` (Wind, Jiggle) with `paramsJson` over its
+// spec's defaults, just before the output but before the Collide and Cards nodes ending its chain
+// (motionAnchor), so the strands collide where they moved to and the cards (every export and render)
+// take the motion. Returns its name. GraphError without an output.
+std::string insertMotion(GraphEdit& edit, const std::string& type, const std::string& paramsJson = {},
+                         std::optional<double> groomSize = std::nullopt);
+// The node a motion node goes before: the output, or the first of the Collide and Cards nodes
+// ending its strands chain. "" without an output.
+std::string motionAnchor(const GraphEdit& edit);
+// Add > Cards (every host's: Maya's create_cards, the Blender add-on's add_cards, the app's Add >
+// Cards > Hero/Mid/Low): the graph's first Cards node (its own, not a compound's), or with none a
+// Cards node named "cards" with `paramsJson` over its defaults just before the output (the cards
+// made from the whole groom). Returns its name; `made` says whether it is new. GraphError without
+// an output.
+std::string insertCards(GraphEdit& edit, const std::string& paramsJson = {}, std::optional<double> groomSize = std::nullopt,
+                        bool* made = nullptr);
 std::string insertSimulate(GraphEdit& edit, const std::string& paramsJson = {}, std::optional<double> groomSize = std::nullopt);
 
 // Load Guide Cache: a GuideCache node reading `path` (`object`: the Alembic object, "" every one)
@@ -67,9 +123,55 @@ std::string insertCollider(GraphEdit& edit, const std::string& meshName, bool wi
                            std::optional<double> offset = std::nullopt, std::optional<double> friction = std::nullopt,
                            std::optional<double> groomSize = std::nullopt);
 
+// The nodes insertScalp made ("" none).
+struct ScalpNodes {
+    std::string scalp, scatter, interpolate, merge;
+};
+
+// Add Scalp, its graph: hair on another mesh of the groom, the graph's mesh input `meshName`. A
+// Scalp node reading it (scalp_<name>; its subdivision the groom's own Scalp's), a Scatter on it
+// (scatter_<name>) with the params of the groom's own Scatter (the first one its own Scalp, the
+// one reading "scalp", feeds) but a seed of its own, and an Interpolate (interpolate_<name>) with
+// the params of the own Interpolate (the first that Scatter feeds), reading the guides that one
+// reads (never the first Guides node there is: a braid's) and the new Scalp; no own Interpolate:
+// none. A Merge (merge_<name>) joins them to the hair: right after the own Interpolate (the own
+// Scatter with none; insertAfter), else before the output, the new strands on its "b". The three
+// go in a row below and left of the Merge. A Scalp node reading `meshName` already: the graph
+// unchanged, that node returned alone. GraphError for the name "scalp" or none.
+ScalpNodes insertScalp(GraphEdit& edit, const std::string& meshName, std::optional<double> groomSize = std::nullopt);
+
+// Remove > Scalp's graph, every host's (insertScalp undone): the Scalp nodes reading `meshName`
+// and what they alone feed (its Scatter and Interpolate: a node every input of which comes from
+// those, Guides nodes aside), their links gone; a Merge left with its `a` alone passes it through
+// (removed, `a` feeding what it fed, the output moved to it). Whether the graph changed.
+bool removeScalpNodes(GraphEdit& edit, const std::string& meshName);
+// Remove > Collider's graph, every host's (insertCollider undone): the ColliderMesh nodes reading
+// `meshName`; the Collide nodes they feed taken out with the flow kept (their strands pass
+// through), another node they feed reading nothing. Whether the graph changed.
+bool removeColliderNodes(GraphEdit& edit, const std::string& meshName);
+
 // Braid paths and feather shafts are not hair: every Guides node reading all guides (no `group`
 // of its own) gets `group` on its exclude list. Returns whether the graph changed.
 bool excludeFromHairGuides(GraphEdit& edit, const std::string& group);
+
+// Import Alembic Curves as Guides, every host's (Maya's import_guides_from_alembic, the Blender
+// helper's import_alembic_curves, the app's): the graph's "guides" node replaced by an ImportCurves
+// node of that name reading `path` (every curve, or those under `object`, resampled to `samples`
+// points: 0 as read), drawn where the Guides node was, fed the scalp when the graph has a "scalp"
+// node; what fed the old node goes. The graph's JSON back. std::invalid_argument for samples past
+// 0..1024.
+std::string withImportedCurves(const std::string& graphJson, const std::string& path, const std::string& object = {}, int samples = 24);
+
+// ---- Guide groups the graph names --------------------------------------------------------------
+// What reads guide group `group` in the graph (its JSON), every host's "Read by": the (node, param)
+// pairs of the Guides nodes whose group or exclude list names it (words split by spaces or commas,
+// as the Guides node reads them). The graph's own nodes: those inside compounds are not listed
+// (renameGroupReaders does follow a rename into them).
+std::vector<std::pair<std::string, std::string>> groupReaders(const std::string& graphJson, const std::string& group);
+// The graph with every Guides node's group and exclude naming group `from` naming `to` instead,
+// inside compounds' definitions too (a list keeps its other names, joined by spaces). Every host's
+// group rename. `changed` says whether any did (the same text when none did).
+std::string renameGroupReaders(const std::string& graphJson, const std::string& from, const std::string& to, bool* changed = nullptr);
 
 // Add > Braid: a Braid node (its params from `paramsJson`, an object; "" none; `feed` left out:
 // on for a cornrow) right after `after` (""/default: the node "interpolate" when it is an

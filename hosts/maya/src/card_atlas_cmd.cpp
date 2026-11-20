@@ -16,6 +16,7 @@
 #include "command_args.h"
 #include "groomlab/card_blocks.h"
 #include "groomlab/card_maps.h"
+#include "groomlab/texture.h"
 #include "guarded.h"
 #include "hair_shading.h"
 #include "maya_inputs.h"
@@ -125,7 +126,7 @@ MStatus CardAtlasCmd::doIt(const MArgList& args) {
         CardMapExport settings;
         int resolution = preview ? 512 : 0;
         if (db.isFlagSet("-resolution")) db.getFlagArgument("-resolution", 0, resolution);
-        settings.resolution = resolution > 0 ? std::clamp(resolution, 16, 8192) : 0;
+        settings.resolution = resolution > 0 ? std::clamp(resolution, kMinBakeResolution, kMaxMapBakeResolution) : 0;
         CardMapPreset preset;
         std::string name = atlas.settings.name;
         if (preview) {
@@ -138,13 +139,7 @@ MStatus CardAtlasCmd::doIt(const MArgList& args) {
             MString value;
             std::string text = atlas.settings.preset;
             if (db.isFlagSet("-preset") && db.getFlagArgument("-preset", 0, value) == MS::kSuccess) text = value.asChar();
-            if (!text.empty() && text.front() == '{') {
-                preset = cardMapPresetFromJson(text);
-            } else if (const auto found = findCardMapPreset(text)) {
-                preset = *found;
-            } else {
-                throw std::runtime_error("no card map preset named '" + text + "'");
-            }
+            preset = cardMapPresetFromText(text);  // every host's (card_maps.h)
             if (db.isFlagSet("-name") && db.getFlagArgument("-name", 0, value) == MS::kSuccess) name = value.asChar();
             if (db.isFlagSet("-format") && db.getFlagArgument("-format", 0, value) == MS::kSuccess) settings.format = value.asChar();
             if (db.isFlagSet("-bitDepth")) db.getFlagArgument("-bitDepth", 0, settings.bitDepth);

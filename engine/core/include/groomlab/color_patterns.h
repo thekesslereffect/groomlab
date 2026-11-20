@@ -60,6 +60,12 @@ private:
     const std::vector<float>* c_[3] = {nullptr, nullptr, nullptr};
 };
 
+class ScalpMesh;
+// Strand i's root normal, the one the iridescence's angle is taken from (every host's: Arnold's
+// root_normal, the Blender helper's rootNormal, the app's lookdev): a feather's vane normal, else
+// the scalp's under the root, else the way the strand sets out (up for a strand of one point).
+Vec3f iridescenceRootNormal(const StrandSet& strands, std::size_t i, const ScalpMesh* scalp, const VaneNormals& vanes);
+
 // One point in vane space: `side` -1 the left vane, +1 the right one (seen from the vane's top,
 // the tip up), 0 around the shaft (plumes, down) or the shaft itself; `along` its place along its
 // barb (0 at the shaft .. 1 at the barb's tip, the vane's edge); `barb` false for a shaft.

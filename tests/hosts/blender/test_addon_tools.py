@@ -59,6 +59,7 @@ class Layout(bu.FakeLayout):
         props = bu.FakeLayout.operator(self, idname, **kwargs)
         self.log.append(("op_text", idname, kwargs.get("text", "")))
         self.log.append(("op_props", idname, props))  # what the caller sets on it (a tile's tool)
+        self.log.append(("op_on", idname, props, self))  # the layout it is drawn on (a tile: the grid)
         return props
 
 
@@ -314,6 +315,12 @@ class ToolsTest(unittest.TestCase):
         texts = [e[2] for e in log if e[0] == "op_text" and e[1] == "groomlab.guides_edit"]
         self.assertIn("Unfreeze All", texts)
         self.assertLess(texts.index("Invert Frozen"), texts.index("Unfreeze All"))  # Freeze, Invert, Unfreeze
+        # Invert and Unfreeze are tiles of the Guides grid, each its own cell like Freeze (not two
+        # buttons squeezed into one cell).
+        on = [(getattr(e[2], "tool", None) or getattr(e[2], "action", None), e[3]) for e in log if e[0] == "op_on"]
+        grid = next(where for what, where in on if what == "freeze")
+        for action in ("INVERT_FROZEN", "UNFREEZE_ALL"):
+            self.assertIs(next(where for what, where in on if what == action), grid)
         comb = type("Props", (), {"tool": "comb"})()
         self.assertEqual(tool_ops.GROOMLAB_OT_tool.description(bpy.context, comb), palette.help_text("comb"))
         self.assertTrue(palette.help_text("comb").startswith(
@@ -386,6 +393,34 @@ class ToolsTest(unittest.TestCase):
         self.assertNotIn(("prop", "radius"), log)
         self.assertIn(("prop", "match_neighbors"), log)
         self.assertIn(("prop", "spacing"), log)
+
+    def test_2b_brush_values_are_the_catalogs(self):
+        # Blender declares properties before the helper runs, so GroomLabTools writes each brush
+        # value's default and limits itself. They are the core's (brush_catalog.h), in Blender's
+        # units: a length in meters (the groom's centimeters / 100), the stamp spacing in percent.
+        specs = tools.catalog()["settings"]
+        rna = bpy.context.scene.groomlab_tools.bl_rna.properties
+        for prop, sid, shown in (("radius", "radius", 1.0), ("strength", "strength", 1.0), ("falloff", "falloff", 1.0),
+                                 ("smooth_strength", "smoothStrength", 1.0), ("length", "length", 0.01),
+                                 ("segments", "segments", 1.0), ("spacing", "spacing", 0.01),
+                                 ("alpha_angle", "alphaAngle", 1.0), ("alpha_spacing", "alphaSpacing", 100.0)):
+            s, p = specs[sid], rna[prop]
+            self.assertIn(s["kind"], ("int", "float"), sid)
+            # (Strength: one property for every tool, so its slider spans both ways as a signed tool's does.)
+            soft_min = -s["softMax"] if sid == "strength" else s["softMin"]
+            for what, mine, core in (("default", p.default, s["default"]), ("min", p.hard_min, s["min"]),
+                                     ("max", p.hard_max, s["max"]), ("soft_min", p.soft_min, soft_min),
+                                     ("soft_max", p.soft_max, s["softMax"])):
+                want = core * shown
+                self.assertAlmostEqual(mine, want, delta=1e-5 * abs(want) + 1e-9, msg="%s.%s is the catalog's %s" % (prop, what, sid))
+        for prop, sid in (("selected_only", "selectedOnly"), ("pressure", "pressure"), ("collide", "collide"),
+                          ("front_facing", "frontFacingOnly"), ("stretch", "stretch"), ("straighten", "straighten"),
+                          ("match_neighbors", "matchNeighbors"), ("solo_new_guides", "soloNewGuides"),
+                          ("alpha_invert", "alphaInvert")):
+            self.assertEqual(specs[sid]["kind"], "bool", sid)
+            self.assertEqual(rna[prop].default, specs[sid]["default"], "%s starts as the catalog's %s" % (prop, sid))
+        self.assertEqual(specs["newGuides"]["kind"], "")  # a block of controls: no value of its own
+        self.assertNotIn("default", specs["newGuides"])
 
     def test_3_strokes_through_the_modal_tool(self):
         head = self.head
@@ -730,16 +765,10 @@ class ToolsTest(unittest.TestCase):
         self.assertIsNone(hair.attributes.get(display.DISPLAY_COLORS))
         # Solid shading (no material nodes; Blender's Attribute color does not reach hair curves):
         # the material's viewport color is the hair's look, the strands' mean appearance color
-        # (core's hairAppearanceColor of each strand's base color), not Blender's default gray.
+        # (the helper's: hair_color.h meanHairAppearance), not Blender's default gray.
         mat = hair.materials[0]
-        base = np.empty(len(hair.curves) * 4, np.float32)
-        hair.attributes[groom.COLOR].data.foreach_get("color", base)
-        expected = shading.appearance_colors(base.reshape(-1, 4)[:, :3]).mean(axis=0)
-        np.testing.assert_allclose(tuple(mat.diffuse_color)[:3], expected, atol=2e-3)
         self.assertGreater(max(abs(c - 0.8) for c in tuple(mat.diffuse_color)[:3]), 0.2)
-        np.testing.assert_allclose(shading.appearance_colors([[1.0, 1.0, 1.0]]), [[1.0, 1.0, 1.0]], atol=1e-6)
-        a, b = shading.appearance_colors([[0.04, 0.015, 0.003], [0.3, 0.2, 0.1]])  # darker base, darker look
-        self.assertTrue(np.all(a < b) and np.all(a > 0.03))
+        self.assertTrue(all(0.0 < c < 1.0 for c in tuple(mat.diffuse_color)[:3]))
         # Strands hidden: the hair object off in the viewport.
         d.show_strands = False
         self.assertTrue(head.groomlab.hair.hide_viewport)
@@ -1008,6 +1037,12 @@ class ToolsTest(unittest.TestCase):
         self.assertEqual(pipeline.prototype_from_selection(head, node, bead), "Bead")
         self.assertEqual(next(n for n in hcall(head, "get_graph")["graph"]["nodes"] if n["name"] == node)["params"]["prototype"], "Bead")
         self.assertTrue(bead.hide_get())
+        # Several: variants, each once, separated by commas (the core's instancePrototypeText).
+        bpy.ops.mesh.primitive_cube_add(size=0.05)
+        drop = bpy.context.active_object
+        drop.name = "Drop"
+        self.assertEqual(pipeline.prototype_from_selection(head, node, [bead, drop, bead]), "Bead, Drop")
+        bpy.data.objects.remove(drop)
         for obj in (plane, bead):
             bpy.data.objects.remove(obj)
 

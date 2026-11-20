@@ -30,6 +30,7 @@
     "nodeMenu": [
       "node.setOutput",
       "node.view",
+      {"submenu": "Color by Channel", "id": "colorChannels", "needs": ["node.viewable"], "items": [{"generator": "nodeChannels", "action": "node.colorByChannel"}]},
       "node.bypass",
       "node.detach",
       {"submenu": "Evaluate", "id": "evaluate", "items": [{"generator": "choices", "choices": "evaluation", "action": "node.evaluate"}]},

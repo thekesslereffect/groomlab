@@ -730,6 +730,28 @@ bool MainWindow::setDisplayText(const QString& text) {
         redisplay();
     } else if (name == QStringLiteral("guidepoints")) {
         guidePoints_->setCurrentIndex(std::clamp(value.toInt(&ok), 0, 2));
+    } else if (name == QStringLiteral("braidtubes")) {
+        // Show Tubes: the nodes named ("a|b"; "*": every node with the button, Braids and nodes
+        // giving guides; "": none), as their headers' buttons set them.
+        ok = document_ != nullptr;
+        if (ok) {
+            std::vector<std::string> names;
+            if (value == QStringLiteral("*")) {
+                const GraphEdit edit(document_->graph().dump());
+                for (const GroomDocument::NodeInfo& n : document_->nodes()) {
+                    if (edit.braidTubesOffered(n.name)) names.push_back(n.name);
+                }
+            } else {
+                for (const QString& part : value.split(QLatin1Char('|'), Qt::SkipEmptyParts)) names.push_back(part.trimmed().toStdString());
+            }
+            const std::string shown = GraphEdit(document_->graph().dump()).braidTubesKept(braidTubesText(names));
+            ok = braidTubeNames(shown).size() == names.size();  // every name a node with the button
+            if (ok) {
+                document_->setBraidTubes(shown);
+                if (refreshBraidTubes()) redisplay();
+                refreshTitle();
+            }
+        }
     } else if (name == QStringLiteral("scalpmap")) {
         const int index = scalpMap_->findData(value);
         ok = index >= 0 || value.isEmpty();

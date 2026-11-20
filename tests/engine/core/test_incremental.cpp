@@ -746,6 +746,98 @@ TEST(Incremental, SwitchMergeBlendCullAndBraidFollowDabs) {
     }
 }
 
+// held -> diff -> a Braid along held paths -> out.
+std::unique_ptr<Chain> makeBraidChain(const ChainEdit& edit = {}) {
+    auto chain = std::make_unique<Chain>();
+    Graph& g = chain->graph;
+    auto add = [&](const std::string& name, std::unique_ptr<Operator> op) {
+        chain->ids[name] = g.addNode(std::move(op));
+        g.setLabel(chain->ids[name], name);
+    };
+    add("held", std::make_unique<HeldStrandsOp>());
+    add("diff", std::make_unique<DiffOp>());
+    add(op::kBraid, OperatorRegistry::instance().create(op::kBraid));
+    add("out", OperatorRegistry::instance().create(op::kOutput));
+    add("paths", std::make_unique<HeldGuidesOp>());
+    chain->node(op::kBraid).params().set("region", 0.7);
+    g.connect(chain->ids["held"], chain->ids["diff"], 0);
+    g.connect(chain->ids["diff"], chain->ids[op::kBraid], 0);
+    g.connect(chain->ids["paths"], chain->ids[op::kBraid], 1);
+    g.connect(chain->ids[op::kBraid], chain->ids["out"], 0);
+    GuideSet paths;
+    paths.add(1, test::straightCurve(Vec3f(0.2f, 0.0f, 0.1f), Vec3f(0.3f, -1.5f, 0.4f), 8));
+    paths.add(2, test::straightCurve(Vec3f(-0.5f, 0.3f, -0.2f), Vec3f(-0.7f, -1.2f, 0.0f), 8));
+    const auto held = std::make_shared<const GuideSet>(std::move(paths));
+    chain->ext.set("paths", GuidesPtr(held), held->contentHash());
+    if (edit) edit(*chain);
+    return chain;
+}
+
+TEST(Incremental, ABraidAgainGivesThePointsOfItsPathsTables) {
+    // In full a Braid works each path's stations out once (the strands given the weave's points
+    // all lie at the same ones along it: a table a path, read by each strand); a dabbed strand
+    // braided again works its own out. The same points to the bit, whatever the weave, its ends,
+    // ties and loose sections: a version 1 node's (plain sections) and a version 2 node's, its
+    // sections pressed against each other (separate, inflate).
+    const Verified verified;
+    struct Look {
+        const char* style;
+        const char* end;
+        double pancake, loops;
+        std::int64_t ties;
+        int version;
+        double separate, inflate;
+    };
+    for (const Look& look : {Look{"three", "fan", 0.0, 0.0, 0, 1, 0.0, 0.5}, Look{"four", "tuft", 0.5, 0.0, 2, 1, 0.0, 0.5},
+                             Look{"fishtail", "bound", 0.0, 0.6, 1, 1, 0.0, 0.5}, Look{"rope", "fan", 0.3, 0.0, 0, 1, 0.0, 0.5},
+                             Look{"cornrow", "tuft", 0.0, 0.5, 3, 1, 0.0, 0.5}, Look{"five", "bound", 0.2, 0.4, 2, 1, 0.0, 0.5},
+                             Look{"three", "fan", 0.0, 0.0, 0, 2, 1.0, 0.5}, Look{"four", "tuft", 0.5, 0.0, 2, 2, 0.6, 1.0},
+                             Look{"fishtail", "bound", 0.0, 0.6, 1, 2, 1.0, 0.0}, Look{"rope", "fan", 0.3, 0.0, 0, 2, 0.5, 0.5},
+                             Look{"cornrow", "tuft", 0.0, 0.5, 3, 2, 1.0, 1.0}, Look{"five", "bound", 0.2, 0.4, 2, 2, 1.0, 0.2}}) {
+        const ChainEdit edit = [&](Chain& c) {
+            c.node(op::kBraid).setNodeVersion(look.version);
+            auto& p = c.node(op::kBraid).params();
+            p.set("style", std::string(look.style));
+            p.set("end", std::string(look.end));
+            p.set("pancake", look.pancake);
+            p.set("loops", look.loops);
+            p.set("ties", look.ties);
+            p.set("tail", 0.3);
+            p.set("separate", look.separate);
+            p.set("inflate", look.inflate);
+        };
+        auto chain = makeBraidChain(edit);
+        auto fresh = [&](const StrandsPtr& strands) { return makeBraidChain(edit)->run(strands)->contentHash(); };
+        StrandsPtr strands = someStrands(700, 5);
+        const StrandsPtr braided = chain->run(strands);
+        ASSERT_EQ(braided->contentHash(), fresh(strands)) << look.style;
+        if (look.version >= 2) {  // (pressed: other points than without)
+            const ChainEdit plain = [&](Chain& c) {
+                edit(c);
+                c.node(op::kBraid).params().set("separate", 0.0);
+            };
+            EXPECT_NE(braided->contentHash(), makeBraidChain(plain)->run(strands)->contentHash()) << look.style;
+        }
+        // (Braids of enough strands for a table each, many points a strand.)
+        const std::vector<float>* ids = braided->strandChannel("braidId");
+        ASSERT_NE(ids, nullptr);
+        std::size_t inBraids = 0;
+        for (std::size_t s = 0; s < braided->strandCount(); ++s) {
+            if ((*ids)[s] < 0.0f) continue;
+            ++inBraids;
+            ASSERT_GT(braided->strandPointCount(s), 8u) << look.style;
+        }
+        ASSERT_GT(inBraids, 120u) << look.style;
+        Rng rng(3);
+        for (int dab = 0; dab < 4; ++dab) {
+            const std::size_t before = chain->graph.incrementalCount();
+            strands = dabbed(*strands, 6 + static_cast<std::size_t>(dab) * 9, rng);
+            EXPECT_EQ(chain->run(strands)->contentHash(), fresh(strands)) << look.style << " dab " << dab;
+            EXPECT_EQ(chain->graph.incrementalCount() - before, 2u) << look.style << " dab " << dab;  // TestDiff, Braid
+        }
+    }
+}
+
 // held -> diff -> split (a, b, c by thirds), then a -> noise, b -> curl -> length, merged, and c
 // merged in as it comes -> out.
 std::unique_ptr<Chain> makeSplitChain(const ChainEdit& edit = {}) {
@@ -1077,6 +1169,60 @@ TEST(Incremental, InterpolateBlendsAgainOnlyTheStrandsADabReaches) {
             strokeAndCompare(session, host, request, {"comb", "smooth", "clump", "slide", "length", "cut"}, 5);
         EXPECT_GE(incremental, 24u) << "sculptDensity " << sculpt;  // at least every dab after a press
     }
+}
+
+TEST(Incremental, AScatterAroundItsGuidesStandsThroughDabsThatLeaveTheirRoots) {
+    // guideRadius reads the guides' roots: a comb moves their points alone, so the Scatter's last
+    // result stands (the very strands) and Interpolate blends again only what the dab reaches,
+    // where every node ran in full after a Scatter made again to the same roots. A slide moves
+    // roots: the Scatter in full. Every view is a fresh session's (strokeAndCompare), every
+    // incremental result checked against a full one.
+    const Verified verified;
+    std::string graph = kInterpolateGraph;
+    const std::string density = R"("density": 900.0)";
+    graph.replace(graph.find(density), density.size(), density + R"(, "guideRadius": 0.45)");
+    const std::string link = R"({"from": "scalp", "to": "scatter", "input": "scalp"},)";
+    graph.replace(graph.find(link), link.size(), link + R"( {"from": "guides", "to": "scatter", "input": "guides"},)");
+    GroomSession session(sphereGroom(graph, 40, 0));
+    SessionStrokeHost host(session);
+    ViewRequest request;
+    request.sculptDensity = 1.0f;  // (the stroke on the view's own document)
+    auto scattered = [&] {
+        const GraphDocument& doc = *session.viewDocument();
+        return valueAs<StrandsPtr>(doc.graph.cachedValue(doc.nodesByName.at("scatter")));
+    };
+    auto ran = [&](const char* name) {  // (how it last ran: each dab changes the guides, so in that dab's evaluation)
+        const GraphDocument& doc = *session.viewDocument();
+        return doc.graph.lastRunKinds().at(doc.nodesByName.at(name));
+    };
+    ASSERT_TRUE(session.evaluate(request).strands);
+    const StrandsPtr placed = scattered();
+    ASSERT_TRUE(placed);
+    ASSERT_GT(placed->strandCount(), 100u);
+    GroomData whole = session.data();
+    const std::string radius = R"(, "guideRadius": 0.45)";
+    whole.graphJson.replace(whole.graphJson.find(radius), radius.size(), "");
+    GroomSession everywhere(whole);
+    EXPECT_LT(placed->strandCount(), everywhere.evaluate(request).strands->strandCount()) << "bare between the guides";
+    int incremental = 0, full = 0;
+    strokeAndCompare(session, host, request, {"comb", "smooth", "length"}, 5, [&](int) {
+        session.evaluate(request);
+        EXPECT_EQ(scattered(), placed) << "the Scatter's strands, as they were";
+        EXPECT_EQ(ran("scatter"), "incremental 0");
+        incremental += ran("interp").rfind("incremental", 0) == 0;
+        full += ran("interp").rfind("full", 0) == 0;
+    });
+    EXPECT_EQ(scattered(), placed);
+    EXPECT_EQ(incremental, 12);  // every dab of the three strokes
+    EXPECT_EQ(full, 0);
+    // Roots slid along the scalp: other roots to scatter around.
+    bool again = false;
+    strokeAndCompare(session, host, request, {"slide"}, 5, [&](int) {
+        session.evaluate(request);
+        again = again || (scattered() != placed && ran("scatter").rfind("full", 0) == 0);
+    });
+    EXPECT_TRUE(again);
+    EXPECT_NE(scattered(), placed);
 }
 
 TEST(Incremental, FillingTubesALiveStrokesDabsKeepEachStrandsTube) {
@@ -1637,8 +1783,9 @@ const char* kShapeGraph = R"({"version": 1, "output": "out",
     {"from": "even", "to": "out", "input": "strands"}]})";
 
 TEST(Incremental, CombColorAndResampleFollowAStroke) {
-    // Resample by curvature falls back when a dab changes a strand's count (then the next dabs
-    // go on from there); evenly to another count it keeps the last result's layout.
+    // Resample by curvature lays its last result out anew when a dab changes a strand's count
+    // (the nodes after it follow: StrandChanges::recounted); evenly to another count it keeps the
+    // last result's layout.
     const Verified verified;
     GroomSession session(sphereGroom(kShapeGraph, 24, 2));
     SessionStrokeHost host(session);
@@ -2400,6 +2547,376 @@ TEST(Incremental, MergeWritesASideMadeAnewAsThatSidesStrands) {
     g.node(ids["noiseA"]).params().set("amplitude", 0.03);
     run(someStrands(11, 5), b);
     EXPECT_EQ(kind("merge").rfind("full", 0), 0u) << kind("merge");
+}
+
+// Hands on a copy of its input, a new set every time, with no incremental path: the graph finds
+// what changed by comparing its results (Graph::setDiffFullResults).
+class CopyOp : public Operator {
+public:
+    std::string typeName() const override { return "TestCopy"; }
+    std::vector<PortSpec> inputs() const override { return {{"strands", PortType::Strands}}; }
+    Value evaluate(const EvalContext&, const std::vector<Value>& inputs) const override {
+        return StrandsPtr(std::make_shared<StrandSet>(*valueAs<StrandsPtr>(inputs.at(0))));
+    }
+};
+
+// How each node of a chain last ran ("resample: incremental 12, ..."), for a failed count's message.
+std::string runKinds(const Chain& chain) {
+    std::string text;
+    for (const auto& [name, id] : chain.ids) {
+        const auto kinds = chain.graph.lastRunKinds();
+        const auto kind = kinds.find(id);
+        text += (text.empty() ? "" : ", ") + name + ": " + (kind == kinds.end() ? std::string("-") : kind->second);
+    }
+    return text;
+}
+
+// held -> diff -> resample (by curvature) -> collide (the scalp) -> copy -> noise -> color (with a
+// tip: colors a point) -> width -> even (a Resample to one count) -> out.
+std::unique_ptr<Chain> makeRecountChain(const ChainEdit& edit = {}) {
+    auto chain = std::make_unique<Chain>();
+    Graph& g = chain->graph;
+    auto add = [&](const std::string& name, std::unique_ptr<Operator> op) {
+        chain->ids[name] = g.addNode(std::move(op));
+        g.setLabel(chain->ids[name], name);
+    };
+    auto& registry = OperatorRegistry::instance();
+    add("held", std::make_unique<HeldStrandsOp>());
+    add("diff", std::make_unique<DiffOp>());
+    add("scalp", registry.create(op::kScalp));
+    add("resample", registry.create(op::kResample));
+    add("collide", registry.create(op::kCollide));
+    add("copy", std::make_unique<CopyOp>());
+    add("noise", registry.create(op::kNoise));
+    add("color", registry.create(op::kHairColor));
+    add("width", registry.create(op::kWidth));
+    add("even", registry.create(op::kResample));
+    add("out", registry.create(op::kOutput));
+    chain->node("resample").params().set("mode", std::string("curvature"));
+    chain->node("resample").params().set("segments", std::int64_t{24});
+    chain->node("resample").params().set("maxAngle", 10.0);
+    chain->node("collide").params().set("offset", 0.03);
+    chain->node("collide").params().set("maxDepth", 0.3);
+    chain->node("noise").params().set("amplitude", 0.02);
+    chain->node("color").params().set("tipStrength", 0.6);
+    chain->node("color").params().set("melaninRandom", 0.3);
+    chain->node("width").params().set("randomness", 0.4);
+    chain->node("even").params().set("segments", std::int64_t{5});
+    const char* order[] = {"held", "diff", "resample", "collide", "copy", "noise", "color", "width", "even", "out"};
+    for (std::size_t k = 0; k + 1 < std::size(order); ++k) g.connect(chain->ids[order[k]], chain->ids[order[k + 1]], 0);
+    g.connect((*chain)["scalp"], (*chain)["collide"], 1);
+    const auto scalp = test::makeSphere(16, 32, 0.9f);
+    chain->ext.set("scalp", MeshPtr(scalp), scalp->contentHash());
+    if (edit) edit(*chain);
+    return chain;
+}
+
+std::uint64_t freshRecountHash(const StrandsPtr& strands, const ChainEdit& edit = {}) {
+    return makeRecountChain(edit)->run(strands)->contentHash();
+}
+
+// A copy of `strands` with `dabs` strands bent into a wave of their own (each then turns by another
+// angle: resampled by curvature, it holds another number of points).
+std::shared_ptr<StrandSet> bent(const StrandSet& strands, std::size_t dabs, Rng& rng) {
+    auto out = std::make_shared<StrandSet>(strands);
+    for (std::size_t d = 0; d < dabs; ++d) {
+        const auto s = static_cast<std::size_t>(rng.nextFloat() * static_cast<float>(strands.strandCount())) % strands.strandCount();
+        const float turn = rng.uniform(0.4f, 2.5f), size = rng.uniform(0.01f, 0.06f);
+        Vec3f* pts = out->strandPoints(s);
+        for (std::size_t k = 1; k < out->strandPointCount(s); ++k) {
+            const float at = turn * static_cast<float>(k);
+            pts[k] += Vec3f(size * std::sin(at), 0.0f, size * std::cos(at));
+        }
+    }
+    return out;
+}
+
+// A copy of `strands` with `dabs` strands' masks set anew and nothing moved: every strand turns as
+// it did, so none is resampled to another number of points.
+std::shared_ptr<StrandSet> remasked(const StrandSet& strands, std::size_t dabs, Rng& rng) {
+    auto out = std::make_shared<StrandSet>(strands);
+    for (std::size_t d = 0; d < dabs; ++d) {
+        const auto s = static_cast<std::size_t>(rng.nextFloat() * static_cast<float>(strands.strandCount())) % strands.strandCount();
+        (*out->mutableStrandChannel("mask"))[s] = 2.0f + rng.nextFloat();
+    }
+    return out;
+}
+
+TEST(Incremental, ADabThatChangesPointCountsKeepsResampleAndWhatFollowsIncremental) {
+    // Resample by curvature gives a bent strand another number of points: it resamples only the
+    // changed strands again, into its last result laid out anew, and says so (StrandChanges::
+    // recounted); Collide, Noise, HairColor (its tip's colors a point) and Width after it lay their
+    // last results out the same way and make only those strands again; the node in between that
+    // evaluates in full has its results compared, recounted strands and all; the even Resample
+    // after them brings every strand back to one count and hands on a plain list.
+    const Verified verified;
+    auto chain = makeRecountChain();
+    StrandsPtr strands = someStrands(600, 21);
+    ASSERT_EQ(chain->run(strands)->contentHash(), freshRecountHash(strands));
+    Rng rng(31);
+    auto pointsOf = [&](const char* node) { return valueAs<StrandsPtr>(chain->graph.cachedValue((*chain)[node]))->pointCount(); };
+    std::size_t recounts = 0;
+    for (int dab = 0; dab < 12; ++dab) {
+        const std::size_t before = chain->graph.incrementalCount();
+        const std::size_t points = pointsOf("resample");
+        const std::uint64_t serial = chain->graph.resultSerial((*chain)["width"]);
+        const std::uint64_t outSerial = chain->graph.resultSerial((*chain)["out"]);
+        strands = bent(*strands, 1 + static_cast<std::size_t>(rng.nextFloat() * 30.0f), rng);
+        EXPECT_EQ(chain->run(strands)->contentHash(), freshRecountHash(strands)) << "dab " << dab;
+        // TestDiff, Resample, Collide, Noise, HairColor, Width and the even Resample (TestCopy in full).
+        EXPECT_EQ(chain->graph.incrementalCount() - before, 7u) << "dab " << dab << ": " << runKinds(*chain);
+        const ChangesPtr changes = chain->graph.changesSince((*chain)["width"], serial, true);
+        ASSERT_TRUE(changes) << "dab " << dab;
+        if (pointsOf("resample") != points) {
+            ++recounts;
+            EXPECT_TRUE(changes->all && changes->recounted) << "dab " << dab;
+            EXPECT_FALSE(changes->strands.empty());
+        }
+        // After the even Resample: the strands that changed, each at the count it had.
+        const ChangesPtr listed = chain->graph.changesSince((*chain)["out"], outSerial, true);
+        ASSERT_TRUE(listed) << "dab " << dab;
+        EXPECT_FALSE(listed->all) << "dab " << dab;
+        EXPECT_FALSE(listed->recounted);
+        EXPECT_EQ(listed->strands, changes->strands);
+    }
+    EXPECT_GT(recounts, 6u);  // (bending a strand changes its count nearly every time)
+}
+
+TEST(Incremental, ADabThatKeepsPointCountsKeepsTheLayout) {
+    // Strands changed without turning otherwise (a channel's values): Resample by curvature keeps
+    // every count, so its changes and those of the nodes after it are a plain list (a host writes
+    // only those strands again), between dabs that change counts as well.
+    const Verified verified;
+    auto chain = makeRecountChain();
+    StrandsPtr strands = someStrands(400, 22);
+    ASSERT_EQ(chain->run(strands)->contentHash(), freshRecountHash(strands));
+    Rng rng(32);
+    for (int dab = 0; dab < 8; ++dab) {
+        const bool bend = dab % 3 == 2;
+        const std::size_t before = chain->graph.incrementalCount();
+        const std::uint64_t serial = chain->graph.resultSerial((*chain)["width"]);
+        const std::size_t points = valueAs<StrandsPtr>(chain->graph.cachedValue((*chain)["width"]))->pointCount();
+        strands = bend ? bent(*strands, 9, rng) : remasked(*strands, 9, rng);
+        EXPECT_EQ(chain->run(strands)->contentHash(), freshRecountHash(strands)) << "dab " << dab;
+        EXPECT_EQ(chain->graph.incrementalCount() - before, 7u) << "dab " << dab << ": " << runKinds(*chain);
+        if (bend) continue;
+        const ChangesPtr changes = chain->graph.changesSince((*chain)["width"], serial, true);
+        ASSERT_TRUE(changes) << "dab " << dab;
+        EXPECT_FALSE(changes->all) << "dab " << dab;
+        EXPECT_FALSE(changes->recounted) << "dab " << dab;
+        EXPECT_LE(changes->strands.size(), 9u);
+        EXPECT_EQ(valueAs<StrandsPtr>(chain->graph.cachedValue((*chain)["width"]))->pointCount(), points);
+    }
+}
+
+TEST(Incremental, AStrandAddedOrRemovedStillEvaluatesInFull) {
+    // Other strands in (one fewer, then one more): nothing is laid out anew from a last result,
+    // every node evaluates in full; the dabs after go on incrementally from there.
+    const Verified verified;
+    auto chain = makeRecountChain();
+    StrandsPtr strands = someStrands(300, 23);
+    ASSERT_EQ(chain->run(strands)->contentHash(), freshRecountHash(strands));
+    Rng rng(33);
+    strands = bent(*strands, 12, rng);
+    ASSERT_EQ(chain->run(strands)->contentHash(), freshRecountHash(strands));
+    std::vector<std::size_t> kept;
+    for (std::size_t s = 0; s < strands->strandCount(); ++s) {
+        if (s != 17) kept.push_back(s);
+    }
+    const auto fewer = std::make_shared<StrandSet>(strands->subset(kept));
+    std::size_t before = chain->graph.incrementalCount();
+    const std::uint64_t serial = chain->graph.resultSerial((*chain)["width"]);
+    EXPECT_EQ(chain->run(fewer)->contentHash(), freshRecountHash(fewer));
+    EXPECT_EQ(chain->graph.incrementalCount(), before);
+    EXPECT_FALSE(chain->graph.changesSince((*chain)["width"], serial, true));  // other strands: unknown
+    auto more = std::make_shared<StrandSet>(*fewer);
+    auto another = std::make_shared<StrandSet>(*someStrands(1, 99));
+    another->mutableIds()[0] = 9999;
+    more->append(*another);
+    before = chain->graph.incrementalCount();
+    EXPECT_EQ(chain->run(more)->contentHash(), freshRecountHash(more));
+    EXPECT_EQ(chain->graph.incrementalCount(), before);
+    strands = bent(*more, 12, rng);
+    before = chain->graph.incrementalCount();
+    EXPECT_EQ(chain->run(strands)->contentHash(), freshRecountHash(strands));
+    EXPECT_EQ(chain->graph.incrementalCount() - before, 7u) << runKinds(*chain);
+}
+
+// someStrands in clumps of 7 by a "clumpId" channel (every 11th strand in none).
+std::shared_ptr<StrandSet> clumpedStrands(std::size_t count, std::uint64_t seed) {
+    auto out = someStrands(count, seed);
+    std::vector<float>& clump = out->addStrandChannel("clumpId", -1.0f);
+    for (std::size_t s = 0; s < count; ++s) clump[s] = s % 11 == 10 ? -1.0f : static_cast<float>(s / 7);
+    return out;
+}
+
+// held -> diff -> curl (tight enough to add points for its tolerance) -> noise -> color (with a
+// tip) -> even (a Resample to one count) -> out.
+std::unique_ptr<Chain> makeCurlChain(bool byClump, const ChainEdit& edit = {}) {
+    auto chain = std::make_unique<Chain>();
+    Graph& g = chain->graph;
+    auto add = [&](const std::string& name, std::unique_ptr<Operator> op) {
+        chain->ids[name] = g.addNode(std::move(op));
+        g.setLabel(chain->ids[name], name);
+    };
+    auto& registry = OperatorRegistry::instance();
+    add("held", std::make_unique<HeldStrandsOp>());
+    add("diff", std::make_unique<DiffOp>());
+    add("curl", registry.create(op::kCurl));
+    add("noise", registry.create(op::kNoise));
+    add("color", registry.create(op::kHairColor));
+    add("even", registry.create(op::kResample));
+    add("out", registry.create(op::kOutput));
+    chain->node("curl").params().set("radius", 0.03);
+    chain->node("curl").params().set("frequency", 5.0);
+    chain->node("curl").params().set("tolerance", 0.1);
+    chain->node("curl").params().set("maxSegments", std::int64_t{96});
+    chain->node("curl").params().set("coherence", std::string(byClump ? "clump" : "strand"));
+    chain->node("noise").params().set("amplitude", 0.01);
+    chain->node("color").params().set("tipStrength", 0.5);
+    chain->node("even").params().set("segments", std::int64_t{20});
+    const char* order[] = {"held", "diff", "curl", "noise", "color", "even", "out"};
+    for (std::size_t k = 0; k + 1 < std::size(order); ++k) g.connect(chain->ids[order[k]], chain->ids[order[k + 1]], 0);
+    const auto scalp = test::makeSphere(16, 32, 0.9f);
+    chain->ext.set("scalp", MeshPtr(scalp), scalp->contentHash());
+    if (edit) edit(*chain);
+    return chain;
+}
+
+// A copy of `strands` with `dabs` strands pulled longer or shorter from their roots (each one's
+// longest segment another length: a Curl adding points for its tolerance adds another number).
+std::shared_ptr<StrandSet> stretched(const StrandSet& strands, std::size_t dabs, Rng& rng) {
+    auto out = std::make_shared<StrandSet>(strands);
+    for (std::size_t d = 0; d < dabs; ++d) {
+        const auto s = static_cast<std::size_t>(rng.nextFloat() * static_cast<float>(strands.strandCount())) % strands.strandCount();
+        const float by = rng.uniform(0.6f, 1.7f);
+        Vec3f* pts = out->strandPoints(s);
+        for (std::size_t k = 1; k < out->strandPointCount(s); ++k) pts[k] = pts[0] + (pts[k] - pts[0]) * by;
+    }
+    return out;
+}
+
+TEST(Incremental, ACurlAddingPointsCurlsOnlyTheChangedStrandsAgain) {
+    // Curl adds points to strands too few a turn for its tolerance, as many as each one's longest
+    // segment needs: a dab stretching strands gives them another number of points, and Curl makes
+    // only those again, into its last result laid out anew; Noise and HairColor follow, and the
+    // even Resample after them hands on a plain list.
+    const Verified verified;
+    auto chain = makeCurlChain(false);
+    const auto fresh = [](const StrandsPtr& s) { return makeCurlChain(false)->run(s)->contentHash(); };
+    StrandsPtr strands = clumpedStrands(500, 41);
+    ASSERT_EQ(chain->run(strands)->contentHash(), fresh(strands));
+    auto curled = [&] { return valueAs<StrandsPtr>(chain->graph.cachedValue((*chain)["curl"])); };
+    ASSERT_GT(curled()->pointCount(), strands->pointCount());  // points added
+    Rng rng(51);
+    std::size_t recounts = 0;
+    for (int dab = 0; dab < 10; ++dab) {
+        const std::size_t before = chain->graph.incrementalCount(), points = curled()->pointCount();
+        const std::uint64_t serial = chain->graph.resultSerial((*chain)["color"]);
+        const bool stretch = dab % 3 != 2;
+        strands = stretch ? stretched(*strands, 1 + static_cast<std::size_t>(rng.nextFloat() * 20.0f), rng) : remasked(*strands, 5, rng);
+        EXPECT_EQ(chain->run(strands)->contentHash(), fresh(strands)) << "dab " << dab;
+        // TestDiff, Curl, Noise, HairColor and Resample.
+        EXPECT_EQ(chain->graph.incrementalCount() - before, 5u) << "dab " << dab << ": " << runKinds(*chain);
+        const ChangesPtr changes = chain->graph.changesSince((*chain)["color"], serial, true);
+        ASSERT_TRUE(changes) << "dab " << dab;
+        EXPECT_LE(changes->strands.size(), 21u) << "dab " << dab;
+        if (curled()->pointCount() != points) {
+            ++recounts;
+            EXPECT_TRUE(changes->recounted) << "dab " << dab;
+        }
+        if (!stretch) EXPECT_FALSE(changes->all) << "dab " << dab;  // nothing moved: every count kept
+    }
+    EXPECT_GT(recounts, 3u);
+}
+
+TEST(Incremental, ACurlByClumpCurlsOnlyTheClumpsADabReaches) {
+    // Coherent by clump, a strand curls around its clump's middle: a dab curls again every strand of
+    // the clumps its strands are in, and of those they were in (a strand moved to another clump),
+    // the other clumps stay; with the points Curl adds, the last result laid out anew.
+    const Verified verified;
+    auto chain = makeCurlChain(true);
+    const auto fresh = [](const StrandsPtr& s) { return makeCurlChain(true)->run(s)->contentHash(); };
+    StrandsPtr strands = clumpedStrands(500, 42);
+    ASSERT_EQ(chain->run(strands)->contentHash(), fresh(strands));
+    ASSERT_NE(chain->run(strands)->contentHash(), makeCurlChain(false)->run(strands)->contentHash());  // the clumps' curls
+    Rng rng(52);
+    for (int dab = 0; dab < 10; ++dab) {
+        const std::size_t before = chain->graph.incrementalCount();
+        const std::uint64_t serial = chain->graph.resultSerial((*chain)["curl"]);
+        const std::size_t moved = 1 + static_cast<std::size_t>(dab % 4);
+        auto next = dab % 2 == 0 ? stretched(*strands, moved, rng) : dabbed(*strands, moved, rng);
+        if (dab % 3 == 1) {  // a strand into another clump, and one out of every clump
+            (*next->mutableStrandChannel("clumpId"))[static_cast<std::size_t>(dab) * 13] = static_cast<float>(40 + dab);
+            (*next->mutableStrandChannel("clumpId"))[static_cast<std::size_t>(dab) * 17] = -1.0f;
+        }
+        strands = next;
+        EXPECT_EQ(chain->run(strands)->contentHash(), fresh(strands)) << "dab " << dab;
+        EXPECT_EQ(chain->graph.incrementalCount() - before, 5u) << "dab " << dab << ": " << runKinds(*chain);
+        // The dab's strands and their clumps' (7 strands a clump): never the whole set.
+        const ChangesPtr changes = chain->graph.changesSince((*chain)["curl"], serial, true);
+        ASSERT_TRUE(changes) << "dab " << dab;
+        EXPECT_TRUE(!changes->all || changes->recounted) << "dab " << dab;
+        EXPECT_GE(changes->strands.size(), moved);
+        EXPECT_LE(changes->strands.size(), (moved + 2) * 2 * 7) << "dab " << dab;
+    }
+}
+
+TEST(Incremental, PointsTheNodesAfterShareAreNotCopiedWholeOnEveryDab) {
+    // Length's points are Width's too (a Width's result holds its input's points), so on a dab
+    // Length cannot take its last result's array: the nodes after it hold it still. From the second
+    // dab on the graph hands it the points of the result before that one, which nobody holds any
+    // more (IncrementalInputs::spare), and it writes two dabs' strands over them instead of copying
+    // every point: Noise, Curl and Length each take an array a dab, where Length copied.
+    const Verified verified;
+    auto chain = makeChain();
+    StrandsPtr strands = someStrands(400, 61);
+    ASSERT_EQ(chain->run(strands)->contentHash(), freshHash(strands));
+    Rng rng(62);
+    for (int dab = 0; dab < 8; ++dab) {
+        const std::size_t before = detail::arraysTaken();
+        strands = dabbed(*strands, 1 + static_cast<std::size_t>(dab) * 3, rng);
+        EXPECT_EQ(chain->run(strands)->contentHash(), freshHash(strands)) << "dab " << dab;
+        // (Without the spare two at most, Noise's and Curl's: Length's last points are never its alone.)
+        if (dab >= 2) EXPECT_GE(detail::arraysTaken() - before, 3u) << "dab " << dab;
+    }
+    // What the spares hold counts as cached, and goes first under a limit.
+    const std::size_t held = chain->graph.cachedBytes();
+    chain->graph.setCacheLimit(held - 1);
+    strands = dabbed(*strands, 4, rng);
+    EXPECT_EQ(chain->run(strands)->contentHash(), freshHash(strands));
+    EXPECT_LT(chain->graph.cachedBytes(), held);
+    chain->graph.setCacheLimit(0);
+    for (int dab = 0; dab < 3; ++dab) {
+        strands = dabbed(*strands, 4, rng);
+        EXPECT_EQ(chain->run(strands)->contentHash(), freshHash(strands)) << "after the limit, dab " << dab;
+    }
+}
+
+TEST(Incremental, ResultsComparedStrandByStrandSayWhichWereRecounted) {
+    // Two results of the same strands, one of them at another number of points and one moved:
+    // those two are listed as recounted; other strands (an ID), unknown.
+    const auto a = someStrands(50, 24);
+    std::vector<std::size_t> counts(50, 8);
+    counts[11] = 5;
+    auto b = std::make_shared<StrandSet>();
+    b->addStrandChannel("mask", 1.0f);
+    b->resize(counts);
+    b->mutableIds() = a->ids();
+    b->mutableRoots() = a->roots();
+    *b->mutableStrandChannel("mask") = *a->strandChannel("mask");
+    for (std::size_t s = 0; s < 50; ++s) {
+        for (std::size_t k = 0; k < counts[s]; ++k) b->strandPoints(s)[k] = a->strandPoints(s)[k];
+    }
+    b->strandPoints(30)[2] += Vec3f(0.0f, 0.1f, 0.0f);
+    const ChangesPtr changes = strandChangesBetween(a, b);
+    ASSERT_TRUE(changes);
+    EXPECT_TRUE(changes->all);
+    EXPECT_TRUE(changes->recounted);
+    EXPECT_EQ(changes->strands, (std::vector<std::uint32_t>{11, 30}));
+    auto renamed = std::make_shared<StrandSet>(*b);
+    renamed->mutableIds()[3] = 77;
+    EXPECT_FALSE(strandChangesBetween(a, renamed));
 }
 
 }  // namespace

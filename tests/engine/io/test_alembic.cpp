@@ -607,8 +607,21 @@ TEST(Alembic, EngineExportsTakeEveryOptionInEveryHost) {
     bad.barbDensity = 0.0f;
     EXPECT_FALSE(bad.problem().empty());
     EXPECT_THROW(EngineGroomWriter(tempPath("groomlab_engine_bad.abc"), "bird", 0.0, 1.0 / 24.0, bad), std::invalid_argument);
+    // Unity's point counts: 0 (as they are) or 3 to 128, the particle counts its hair package
+    // takes (every host's check); Unreal resamples nothing.
     bad = EngineExportOptions();
     bad.barbPoints = 1;
+    EXPECT_TRUE(bad.problem().empty());
+    bad.engine = EngineExportOptions::Engine::Unity;
+    EXPECT_FALSE(bad.problem().empty());
+    for (const std::size_t n : {0u, 3u, 128u}) {
+        bad.barbPoints = n;
+        bad.pointsPerStrand = n;
+        EXPECT_TRUE(bad.problem().empty()) << n;
+    }
+    bad.pointsPerStrand = 2;
+    EXPECT_FALSE(bad.problem().empty());
+    bad.pointsPerStrand = 129;
     EXPECT_FALSE(bad.problem().empty());
 
     // Unity: an object per group past 2 strands in parts, the barbs resampled to 4 points.

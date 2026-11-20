@@ -94,6 +94,12 @@ ScriptNodeHeader scriptNodeHeader(const std::string& definitionJson);
 //   {"errors": [{"part": "json" | "header" | "script", "message": "...", "line": 3, "column": 9}]}
 // (line and column of the script's text, 0 for a header's error); no errors when it checks.
 std::string scriptNodeErrorsJson(const std::string& text);
+// The graph with script node `node` given an edited `definitionJson` (every host's Edit Script):
+// the params its header no longer has go, with their input ports and the links into them; a param
+// still at its old default takes the new default; the new ones are written at theirs. Throws
+// std::invalid_argument for a definition that does not check (its errors, a line each, as
+// "line L, column C: message") or a node that is no Script node.
+std::string withScriptDefinition(const std::string& graphJson, const std::string& node, const std::string& definitionJson);
 // A new script node file (JSON text) to start from: a param and a short per point script, the id
 // from the label and author (suggestNodeId).
 std::string scriptNodeTemplate(const std::string& label = "My Script", const std::string& author = {});

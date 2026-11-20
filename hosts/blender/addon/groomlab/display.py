@@ -21,8 +21,11 @@ import numpy as np
 from . import groom, process
 from .helper_client import HelperError
 
-ORDER = ("scalpMap", "tubes", "tubeSurfaces", "guides", "tubeWires", "flowField", "selectedGuides", "softSelectedGuides",
-         "selectedTubeWires", "parts", "flowArrows")
+ORDER = ("scalpMap", "braidTubes", "tubes", "tubeSurfaces", "guides", "tubeWires", "flowField", "selectedGuides",
+         "softSelectedGuides", "selectedTubeWires", "parts", "flowArrows")
+# Solid surfaces drawn with the scene's depth and writing their own (the scalp map lifted off the
+# scalp; Show Tubes' braid tubes, which cross each other).
+SOLID = {"scalpMap", "braidTubes"}
 # Pulled toward the camera by the hair's depth, so they show through the strands round them (the
 # tubes too: a guide's tube sits inside its clump).
 PULLED = {"tubes", "guides", "tubeWires", "flowField", "selectedGuides", "softSelectedGuides", "selectedTubeWires", "parts",
@@ -137,6 +140,8 @@ def settings_for(scalp, scene):
          "guideColorSeed": scalp.name, "theme": tools.theme()}
     if d.guide_color_mode == "layer" and d.guide_color_layer:
         s["guideColorLayer"] = d.guide_color_layer
+    if d.braid_tubes:  # Show Tubes: the Braid nodes' section tubes (a Braid's header button)
+        s["braidTubes"] = d.braid_tubes
     m = tools.current_map(scene)
     painting = t.tool == "paint" or t.tab == "PAINT"
     if painting and t.show_on_guides and m is not None and m.kind == "guides":
@@ -435,6 +440,18 @@ def lit_colors(item):
     return out
 
 
+def lit_vertex_colors(item):
+    """A surface's own colors (Show Tubes: each section's) shaded by the fixed light, as lit_colors
+    shades a plain one."""
+    colors, n = item.colors, item.normals
+    if n is None or len(n) != len(colors):
+        return colors
+    shade = 0.6 + 0.4 * np.abs(n @ LIGHT)
+    out = np.array(colors, np.float32)
+    out[:, :3] *= shade[:, None]
+    return out
+
+
 def draw_list(scalp):
     """[(name, primitive, positions, indices, colors (n, 4) or None, uniform color, width, pulled,
     depth)] in Maya's layer order: filled, wires, selection, dots, then the brush (no depth test)."""
@@ -454,6 +471,8 @@ def draw_list(scalp):
         colors = it.colors
         if it.primitive == "triangles" and colors is None:
             colors = lit_colors(it)
+        elif name == "braidTubes" and colors is not None:
+            colors = lit_vertex_colors(it)  # solid, lit, each section in its own color
         out.append((name, it.primitive, it.positions, it.indices, colors, it.color, it.width, name in PULLED, True))
     if gd.dots.shown and len(gd.dots.positions):
         out.append(("dots", "points", gd.dots.positions, gd.dots.indices, gd.dots.colors, (1, 1, 1, 1), gd.point_size,
@@ -582,7 +601,8 @@ def draw_groom(scalp, region_size):
             gpu.state.depth_test_set("LESS_EQUAL" if depth else "NONE")
             # The scalp map writes its depth: lifted off the scalp, a fold's far side (the neck under
             # the jaw) passes the scene's depth too, and without its own the later face would win.
-            gpu.state.depth_mask_set(name == "scalpMap")
+            # (Show Tubes' tubes too: they cross each other.)
+            gpu.state.depth_mask_set(name in SOLID)
             with gpu.matrix.push_pop_projection():
                 if is_pulled:
                     gpu.matrix.load_projection_matrix(pulled)

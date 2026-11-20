@@ -149,6 +149,11 @@ struct HierarchyGuide {
 // section's area rather than squeezed onto a line, its point joining the section over a few
 // section widths along the parent. Leaning up to 30 degrees from the scalp's normal: the root
 // section snapped onto the scalp as it always was; the footprint in full from 60 degrees.
+// Segments a Resample may ask for, every host's.
+constexpr int kMaxGuideSegments = 256;
+// Children per parent guide a Generate Children may ask for, every host's.
+constexpr std::size_t kMaxChildrenPerGuide = 1000;
+
 struct ChildGenerationParams {
     std::size_t count = 5;         // children per parent guide
     float rootSpread = 0.8f;       // share of the parent's section the roots spread over
@@ -215,6 +220,11 @@ public:
     const GuideGroup* group(GroupId id) const;
     // kNoGroup if absent; a name as typed finds the group it made (guideGroupName).
     GroupId findGroup(const std::string& name) const;
+    // A group name not yet taken: `base`, else base2, base3... (every host's New Group).
+    std::string freeGroupName(const std::string& base) const;
+    // The group Generate Children adds to under `parent`, every host's: its existing child group,
+    // else a new one's free name (freeGroupName of "<parent>_children").
+    std::string childGroupFor(GroupId parent) const;
     int groupDepth(GroupId id) const;                   // 0 for root groups, -1 if unknown
     int maxDepth() const;                               // -1 when there are no groups
     // The deepest groups of each family: those holding guides (2 points or more) with no group
@@ -242,6 +252,10 @@ public:
     // than 2 points are skipped. Returns the IDs added. Call evaluate after,
     // to root them on the scalp.
     std::vector<GuideId> addGuides(GroupId group, const GuideSet& guides, TubeProfile tube = {});
+    // Bake Node to Guides, every host's: the root group `name` (made when missing; a child group's
+    // name refused with std::invalid_argument), then `guides` added to it as primaries, each at the
+    // group's own segments (withGroupSegments). Their IDs.
+    std::vector<GuideId> addBakedGuides(const std::string& name, const GuideSet& guides, TubeProfile tube = {});
     const std::vector<HierarchyGuide>& guides() const { return guides_; }
     const HierarchyGuide* guide(GuideId id) const;
     std::vector<GuideId> guidesInGroup(GroupId group) const;
@@ -378,6 +392,10 @@ public:
     // again); `groupWide` (a whole group, a level, every guide) leaves guides with their own as
     // they are. Returns how many were rebuilt.
     std::size_t resample(const std::vector<GuideId>& ids, int segments, bool groupWide = false);
+    // Resample as every host's Resample does: `ids` to `segments`; `groupWide` (a whole group, a
+    // level or every guide) also gives their groups' new guides the count: `group` alone, else the
+    // groups at `level` (-1: every group). How many guides changed.
+    std::size_t resampleGuides(const std::vector<GuideId>& ids, int segments, bool groupWide, GroupId group = kNoGroup, int level = -1);
     // Every guide of a group back to the group's segments, those with their own too (they follow
     // the group again); frozen guides are left as they are. A group without segments of its own
     // takes its guides' most common count first. Returns the segments (0: the group has no
@@ -570,7 +588,7 @@ TubeTargets tubeTargetsOf(const GuideHierarchy& hierarchy, const std::vector<Gui
                           const std::string& freeze = "freeze");
 
 // Root tube k's color (in GuideHierarchy::rootTubeIds' order): hues a golden step apart, three
-// brightnesses, none black; root_tubes.region_colors in the Maya scripts makes the same.
+// brightnesses, none black (root_tubes.region_colors in the Maya scripts reads it).
 std::array<float, 3> rootTubeColor(std::size_t k);
 
 // The point (u, v) carried by the map a closed polygon `cage` (section coordinates) makes onto

@@ -2,6 +2,7 @@
 #include "mesh_files.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstdlib>
 #include <filesystem>
@@ -10,6 +11,7 @@
 #include <vector>
 
 #include "groomlab/alembic_io.h"
+#include "groomlab/retriangulate.h"
 
 namespace groomlab::cli {
 
@@ -88,12 +90,15 @@ std::shared_ptr<const ScalpMesh> parseObjMesh(const std::string& text, const std
                 }
             }
             polygons.push_back(static_cast<std::int32_t>(corners.size() - 2));
-            for (std::size_t k = 1; k + 1 < corners.size(); ++k) {
-                triangles.push_back({vertices[0], vertices[k], vertices[k + 1]});
+            // Split as every host splits it (retriangulate.h: Maya's, a quad across its shorter
+            // diagonal), so a groom made here meets the same triangles in Maya, Blender and the app.
+            std::vector<Vec3f> facePoints;
+            for (const std::int32_t v : vertices) facePoints.push_back(points[static_cast<std::size_t>(v)]);
+            for (const std::array<int, 3>& tri : polygonTriangles(facePoints)) {
+                triangles.push_back({vertices[static_cast<std::size_t>(tri[0])], vertices[static_cast<std::size_t>(tri[1])],
+                                     vertices[static_cast<std::size_t>(tri[2])]});
                 if (everyCornerHasUV) {
-                    cornerUVs.push_back(faceUVs[0]);
-                    cornerUVs.push_back(faceUVs[k]);
-                    cornerUVs.push_back(faceUVs[k + 1]);
+                    for (const int k : tri) cornerUVs.push_back(faceUVs[static_cast<std::size_t>(k)]);
                 }
             }
         }

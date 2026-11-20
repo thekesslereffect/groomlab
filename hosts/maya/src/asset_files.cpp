@@ -22,6 +22,8 @@
 #include "groomlab/asset_files.h"
 #include "groomlab/card_files.h"
 #include "groomlab/scalp_maps.h"
+#include "groomlab/texture.h"
+#include "groomlab/udim.h"
 
 namespace groomlab::maya {
 
@@ -76,18 +78,6 @@ bool inBake(const std::string& full, const std::string& prefixFile) {
 
 }  // namespace
 
-std::string fileSafeName(const std::string& text) {
-    std::string out;
-    std::size_t start = 0;
-    while (start < text.size() && text[start] == '|') ++start;
-    for (std::size_t i = start; i < text.size(); ++i) {
-        const unsigned char c = static_cast<unsigned char>(text[i]);
-        out += std::isalnum(c) || c == '_' || c == '.' || c == '-' ? static_cast<char>(c) : '_';
-    }
-    while (!out.empty() && out.back() == '.') out.pop_back();
-    return out.empty() ? std::string("groom") : out;
-}
-
 std::string assetName(const MDagPath& groom) {
     MDagPath transform = groom;
     if (transform.node().hasFn(MFn::kShape)) transform.pop();
@@ -139,6 +129,9 @@ std::string forkTextureFile(const MDagPath& groom, const std::string& mapName, c
         noteFileWritten();
         fs::copy_file(fs::u8path(full), fs::u8path(target), ec);
         if (ec) throw std::runtime_error("could not copy " + full + " to " + target + ": " + ec.message());
+    } else if (fileStamp(full) != 0) {  // a tile set (udim.h): every tile
+        noteFileWritten();
+        if (copyMapImage(full, target).empty()) throw std::runtime_error("could not copy " + full + " to " + target);
     }
     MGlobal::displayInfo(MString("GroomLab: ") + mapName.c_str() + "'s file is shared with another groom; this groom " +
                          "now paints its own copy, " + target.c_str());
@@ -168,6 +161,11 @@ void noteFileWritten() { ++writes; }
 
 void putFileBytes(const std::string& path, const std::vector<std::uint8_t>& bytes, const char* who) {
     std::error_code ec;
+    if (bytes.empty()) {  // no file (a map's one image a tile set replaced)
+        noteFileWritten();
+        fs::remove(fs::u8path(path), ec);
+        return;
+    }
     const fs::path folder = fs::u8path(path).parent_path();
     if (!folder.empty()) fs::create_directories(folder, ec);
     noteFileWritten();

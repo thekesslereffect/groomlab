@@ -33,7 +33,7 @@
 #include "groomlab/flow.h"
 #include "groomlab/frame_time.h"
 #include "groomlab/graph_edit.h"
-#include "groomlab/graph_edit.h"
+#include "groomlab/graph_inserts.h"
 #include "groomlab/guide_selection.h"
 #include "groomlab/parts.h"
 #include "groomlab/paths.h"
@@ -94,11 +94,7 @@ struct PaintTarget {
 
 // A file an edit wrote, moved or removed (a texture map's image): its bytes before and after (not
 // `before` / not `after`: no file then), so undo and redo put it back as the edit found and left it.
-struct FileEdit {
-    std::string path;
-    bool before = false, after = false;
-    std::string beforeBytes, afterBytes;
-};
+using FileEdit = FileState;  // a file as an edit found and left it (asset_files.h: every host's)
 
 // What an undo step did beside the stored texts the host's stack keeps: files, and the guide
 // groups' own colors (display only, kept with the tools' state as Maya keeps guideGroupColors on
@@ -772,28 +768,6 @@ std::vector<GuideId> idsOf(const json& v) {
 
 // ---- Side edits: files and group colors ---------------------------------------------------------
 
-bool readBytes(const std::string& path, std::string& out) {
-    out.clear();
-    std::error_code ec;
-    if (path.empty() || !fs::is_regular_file(fs::u8path(path), ec)) return false;
-    std::ifstream f(fs::u8path(path), std::ios::binary);
-    if (!f) return false;
-    out.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
-    return true;
-}
-
-// A file put as an edit found or left it: its bytes, or no file.
-void putFile(const std::string& path, bool present, const std::string& bytes) {
-    std::error_code ec;
-    const fs::path p = fs::u8path(path);
-    if (!present) {
-        fs::remove(p, ec);
-        return;
-    }
-    if (p.has_parent_path()) fs::create_directories(p.parent_path(), ec);
-    std::ofstream f(p, std::ios::binary | std::ios::trunc);
-    f.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
-}
 
 // The texture maps' paints kept open between strokes let go: a file an edit wrote (or undo put
 // back) is read again by the next stroke, fill or undo of a stroke.
@@ -803,25 +777,28 @@ void dropPaints(ToolState& t) {
 }
 
 // `path` as it is now, before the edit that is about to change it (FileEdit::before)...
-FileEdit fileBefore(const std::string& path) {
-    FileEdit e;
-    e.path = path;
-    e.before = readBytes(path, e.beforeBytes);
-    return e;
-}
+FileEdit fileBefore(const std::string& path) { return FileEdit{path, readFileState(path), std::nullopt}; }
 
 // ... and after it: kept for the next commit's undo step.
 void fileAfter(ToolState& t, FileEdit e) {
-    e.after = readBytes(e.path, e.afterBytes);
+    e.after = readFileState(e.path);
     t.pending.files.push_back(std::move(e));
 }
 
+// The same for every file a map's image is (udim.h mapImageFiles: each tile of a tile set,
+// `tiles` among them).
+std::vector<FileEdit> filesBefore(const std::string& path, const std::vector<int>& tiles = {}) {
+    std::vector<FileEdit> out;
+    for (const std::string& file : mapImageFiles(path, tiles)) out.push_back(fileBefore(file));
+    return out;
+}
+
+void filesAfter(ToolState& t, std::vector<FileEdit> edits) {
+    for (FileEdit& e : edits) fileAfter(t, std::move(e));
+}
+
 void applySide(ToolState& t, const SideEdit& side, bool after) {
-    if (after) {
-        for (const FileEdit& f : side.files) putFile(f.path, f.after, f.afterBytes);
-    } else {
-        for (auto f = side.files.rbegin(); f != side.files.rend(); ++f) putFile(f->path, f->before, f->beforeBytes);
-    }
+    restoreFileStates(side.files, after);
     if (!side.files.empty()) dropPaints(t);
     if (side.colors) t.groupColors = after ? side.colorsAfter : side.colorsBefore;
     if (after) {
@@ -839,11 +816,23 @@ void dropPending(ToolState& t) {
 
 // The guide groups' colors as the display reads them (DisplaySettings::guideGroupColors):
 // "name:#rrggbb name:#rrggbb".
-std::string groupColorsText(const ToolState& t) {
-    std::string out;
-    for (const auto& [group, color] : t.groupColors) out += (out.empty() ? "" : " ") + group + ":" + color;
-    return out;
+std::string groupColorsText(const ToolState& t) { return guideGroupColorsText(t.groupColors); }  // (display.h)
+
+}  // namespace
+
+void writeGroupDisplay(const Session& s, GroomFile& file) {
+    if (!s.tools) return;  // (no tools yet: as the file had them)
+    file.guideGroupColors = groupColorsText(*s.tools);
+    file.hiddenGuideGroups = hiddenGuideGroupsText(s.tools->hidden);
 }
+
+void adoptGroupDisplay(Session& s, const GroomFile& file) {
+    ToolState& t = toolsOf(s);
+    t.groupColors = guideGroupColorWords(file.guideGroupColors);
+    t.hidden = parseHiddenGuideGroups(file.hiddenGuideGroups);
+}
+
+namespace {
 
 // ---- Undo ---------------------------------------------------------------------------------------
 
@@ -1060,12 +1049,7 @@ void rebuildOverlay(ToolState& t, float x, float y, bool withLines) {
             const std::uint64_t key = hashCombine(hashCombine(scalp->contentHash(), static_cast<std::uint64_t>(sym.axis + 1)),
                                                   hashCombine(hashFloat(hash64(0x5EA4), sym.center), sym.topology() ? 1u : 0u));
             if (key != t.seamKey) {
-                Vec3f lo = scalp->points().front(), hi = lo;
-                for (const Vec3f& p : scalp->points()) {
-                    lo = Vec3f(std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z));
-                    hi = Vec3f(std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z));
-                }
-                t.seam = symmetrySeam(*scalp, sym, 0.002f * (hi - lo).length());
+                t.seam = symmetrySeam(*scalp, sym);
                 t.seamKey = key;
             }
             for (std::size_t k = 0; k + 1 < t.seam.size(); k += 2) appendColoredLine(t.overlay, {t.seam[k], t.seam[k + 1]}, {1.0f, 0.15f, 0.15f});
@@ -1261,13 +1245,7 @@ void requireScalp(Session& s) {
 
 // ---- Guides ---------------------------------------------------------------------------------------
 
-std::string uniqueGroupName(const GuideHierarchy& h, const std::string& base) {
-    if (h.findGroup(base) == kNoGroup) return base;
-    for (int k = 2;; ++k) {
-        const std::string name = base + std::to_string(k);
-        if (h.findGroup(name) == kNoGroup) return name;
-    }
-}
+std::string uniqueGroupName(const GuideHierarchy& h, const std::string& base) { return h.freeGroupName(base); }
 
 GroupId groupNamed(const GuideHierarchy& h, const json& args, const char* key) {
     const std::string name = needString(args, key);
@@ -1426,8 +1404,14 @@ json guidesEdit(ToolState& t, const json& args) {
         StrokeEdit stroke;
         stroke.mode = "rename group";
         stroke.set(StrokeField::Guides, h.toJson());
+        // The Guides nodes reading or leaving out the group follow it (every host's: graph_inserts.h),
+        // in the same undo step.
+        bool retargeted = false;
+        const std::string graph = renameGroupReaders(t.session.groom->data().graphJson, from, to, &retargeted);
+        if (retargeted) stroke.set(StrokeField::Graph, graph);
         commitEdit(t, std::move(stroke));
         if (t.hidden.erase(from)) t.hidden.insert(to);
+        r["graphChanged"] = retargeted;
     } else if (op == "generate_children") {
         std::string made;
         std::size_t count = 0;
@@ -1440,7 +1424,7 @@ json guidesEdit(ToolState& t, const json& args) {
             }
             if (id == kNoGroup) fail("state", "the groom has no guides yet");
             ChildGenerationParams p;
-            p.count = static_cast<std::size_t>(std::max(1.0, optNumber(args, "count", 5.0)));
+            p.count = static_cast<std::size_t>(std::clamp(optNumber(args, "count", 5.0), 1.0, static_cast<double>(kMaxChildrenPerGuide)));
             p.rootSpread = static_cast<float>(optNumber(args, "rootSpread", p.rootSpread));
             p.tipSpread = static_cast<float>(optNumber(args, "tipSpread", p.tipSpread));
             p.twist = static_cast<float>(optNumber(args, "twist", p.twist));
@@ -1460,15 +1444,7 @@ json guidesEdit(ToolState& t, const json& args) {
                 fail("state", "the group has no guides to be parents");
             }
             made = optString(args, "childGroup", "");
-            if (made.empty()) {
-                for (const GuideGroup& g : h.groups()) {
-                    if (g.parent == id) {
-                        made = g.name;
-                        break;
-                    }
-                }
-            }
-            if (made.empty()) made = uniqueGroupName(h, h.group(id)->name + "_children");
+            if (made.empty()) made = h.childGroupFor(id);  // every host's (guide_hierarchy.h)
             const std::size_t before = h.guides().size();
             h.generateChildren(id, made, p, selected ? &parents : nullptr);
             count = h.guides().size() >= before ? h.guides().size() - before : 0;
@@ -1479,7 +1455,7 @@ json guidesEdit(ToolState& t, const json& args) {
         std::vector<GuideId> ids;
         editGuides(t, "delete guides", [&](GuideHierarchy& h) {
             ids = targets(h);
-            h.removeGuides(ids);
+            h.removeGuides(ids, true);  // (a child group left empty goes too: every host's delete)
         });
         r["removed"] = ids.size();
     } else if (op == "lock" || op == "unlock") {
@@ -1576,20 +1552,15 @@ json guidesEdit(ToolState& t, const json& args) {
         // curve through its points (as the viewport draws it), its shape kept; frozen guides kept.
         // A whole group, a level or every guide: their groups' new guides get these segments too.
         const int segments = settingInt(need(args, "segments"), "segments");
-        if (segments < 1 || segments > 256) fail("bad_request", "segments: 1 to 256");
+        if (segments < 1 || segments > kMaxGuideSegments) fail("bad_request", "segments: 1 to 256");
         std::size_t count = 0;
         t.session.groom->setPreviewHierarchy(nullptr);  // a live preview (guides_preview) ends with its commit
         editGuides(t, "resample guides", [&](GuideHierarchy& h) {
             const std::vector<GuideId> ids = targetGuides(t, h, args, true, "resample");
             const bool groupWide = resampleGroupWide(t, args);
-            if (groupWide) {
-                const GroupId only = given(args, "group") ? h.findGroup(needString(args, "group")) : kNoGroup;
-                const int level = given(args, "level") ? settingInt(args["level"], "level") : -1;
-                for (const GuideGroup& g : h.groups()) {
-                    if (only != kNoGroup ? g.id == only : (level < 0 || h.groupDepth(g.id) == level)) h.setGroupSegments(g.id, segments);
-                }
-            }
-            count = h.resample(ids, segments, groupWide);
+            const GroupId only = given(args, "group") ? h.findGroup(needString(args, "group")) : kNoGroup;
+            const int level = given(args, "level") ? settingInt(args["level"], "level") : -1;
+            count = h.resampleGuides(ids, segments, groupWide, only, level);  // every host's (guide_hierarchy.h)
         });
         r["resampled"] = count;
     } else if (op == "mirror_selection") {
@@ -1738,13 +1709,14 @@ json tubeScale(ToolState& t, const json& args) {
 }
 
 json tubeSmooth(ToolState& t, const json& args) {
-    // The Shape brush's channel names, and what the tube calls each list (Maya's smooth_tube).
-    static const std::map<std::string, std::string> lists = {
-        {"width", "width"}, {"flatness", "aspect"}, {"aspect", "aspect"}, {"twist", "twist"}, {"all", "all"}};
-    const auto list = lists.find(optString(args, "channel", "all"));
-    if (list == lists.end()) fail("bad_request", "channel is width, flatness, twist or all");
-    const int passes = std::clamp(static_cast<int>(optNumber(args, "passes", 3.0)), 1, 100);
-    return tubeEdit(t, args, "smooth tube", json{{"smooth", list->second}, {"passes", passes}});
+    // The Shape brush's channel names (tubeSmoothEdit: every host's).
+    std::string edit;
+    try {
+        edit = tubeSmoothEdit(optString(args, "channel", "all"), static_cast<int>(optNumber(args, "passes", 3.0)));
+    } catch (const std::invalid_argument& e) {
+        fail("bad_request", e.what());
+    }
+    return tubeEdit(t, args, "smooth tube", json::parse(edit));
 }
 
 json tubeGet(ToolState& t, const json& args) {
@@ -1754,6 +1726,12 @@ json tubeGet(ToolState& t, const json& args) {
     const HierarchyGuide* g = h ? h->guide(id.get<GuideId>()) : nullptr;
     if (!g) fail("not_found", "no guide " + std::to_string(id.get<GuideId>()));
     return {{"tube", tubeToHost(t.session.space, tubeToJson(g->tube, h->scale()))}};
+}
+
+// The Tube card's Width (host units), Flatness and Twist for a tube (tubeCardValues, every host's).
+json tubeCardJson(const HostSpace& space, const TubeProfile& tube, float scale) {
+    const TubeCardValues v = tubeCardValues(tube.width, tube.aspect, tube.twist);
+    return {{"width", toHostLength(space, v.width * scale)}, {"flatness", v.flatness}, {"twist", v.twist}};
 }
 
 // The guides the Tubes section edits and their profiles (every host's: tubeTargetsOf).
@@ -1773,7 +1751,8 @@ json tubeTargets(ToolState& t) {
             {"tipShapes", targets.tipShapes},
             {"inUse", inUse},
             {"tube", targets.guides.empty() ? json(nullptr)
-                                            : tubeToHost(t.session.space, tubeToJson(h->guide(targets.guides.front())->tube, h->scale()))}};
+                                            : tubeToHost(t.session.space, tubeToJson(h->guide(targets.guides.front())->tube, h->scale()))},
+            {"card", targets.guides.empty() ? json(nullptr) : tubeCardJson(t.session.space, h->guide(targets.guides.front())->tube, h->scale())}};
 }
 
 json sectionPointsJson(const std::vector<SectionPoint>& points) {
@@ -1913,9 +1892,7 @@ json partAdd(ToolState& t, const json& args, BlockReader& blocks) {
 json partRemove(ToolState& t, const json& args) {
     const std::string name = needString(args, "name");
     PartSet set = storedParts(t.session);
-    const std::size_t before = set.parts.size();
-    set.parts.erase(std::remove_if(set.parts.begin(), set.parts.end(), [&](const Part& p) { return p.name == name; }), set.parts.end());
-    if (set.parts.size() == before) fail("not_found", "no part named '" + name + "'");
+    if (!set.remove(name)) fail("not_found", "no part named '" + name + "'");
     commitParts(t, "remove part", set);
     return {{"removed", name}, {"undo", undoJson(t)}};
 }
@@ -1945,9 +1922,14 @@ json flowClear(ToolState& t) {
 
 // ---- Maps ---------------------------------------------------------------------------------------
 
-json mapsList(ToolState& t) {
+json mapsList(ToolState& t, json* densityMap = nullptr) {
     Session& s = t.session;
     json maps = json::array();
+    if (densityMap) {  // the Tube tool's density map among them (subdivisionDensityMapIn, every host's; "" none)
+        std::vector<std::string> names;
+        for (const auto& [name, entry] : s.groom->scalpMaps().maps) names.push_back(name);
+        *densityMap = subdivisionDensityMapIn(names);
+    }
     for (const auto& [name, entry] : s.groom->scalpMaps().maps) {
         json m = {{"name", name}, {"kind", entry.kind}, {"channels", entry.channels}};
         if (entry.kind == "texture") {
@@ -1955,7 +1937,7 @@ json mapsList(ToolState& t) {
             const std::string file = resolveMapFile(s, entry.texture);
             std::error_code ec;
             m["file"] = file;
-            m["missing"] = file.empty() || !fs::is_regular_file(fs::u8path(file), ec);  // the Paint tab's missing-file marker
+            m["missing"] = file.empty() || fileStamp(file) == 0;  // the Paint tab's missing-file marker (a tile set: no tile)
         }
         maps.push_back(m);
     }
@@ -2001,11 +1983,6 @@ std::vector<std::int32_t> facesArg(const json& args) {
     return faces;
 }
 
-// Whether guide `g`'s root lies on the flagged triangles (polygonTriangles of the faces).
-bool rootedOn(const HierarchyGuide& g, const std::vector<std::uint8_t>& triangles) {
-    return g.root.face >= 0 && static_cast<std::size_t>(g.root.face) < triangles.size() && triangles[static_cast<std::size_t>(g.root.face)] != 0;
-}
-
 json mapCreate(ToolState& t, const json& args) {
     Session& s = t.session;
     const std::string name = needString(args, "name");
@@ -2028,16 +2005,9 @@ json mapCreate(ToolState& t, const json& args) {
     const std::vector<std::int32_t> faces = facesArg(args);
     if (kind == "guides") {
         if (color) fail("bad_request", "a guide layer is gray: make a color map on the scalp's vertices or as a texture");
-        // On faces: the value on the guides rooted on them, 0 on the rest.
-        const std::vector<std::uint8_t> triangles = faces.empty() ? std::vector<std::uint8_t>{} : polygonTriangles(*scalp, faces);
+        // On faces: the value on the guides rooted on them, 0 on the rest (every host's: addGuideLayer).
         editGuides(t, "create map " + name, [&](GuideHierarchy& h) {
-            bool any = false;
-            for (const HierarchyGuide& g : h.guides()) {
-                if (g.parent != kNoGuide) continue;  // children inherit their primary's
-                h.setAttribute(g.id, name, faces.empty() || rootedOn(g, triangles) ? value : 0.0f);
-                any = true;
-            }
-            if (!any) fail("state", "no primary guides to carry the layer: place some first");
+            if (!addGuideLayer(h, name, value, scalp.get(), faces)) fail("state", "no primary guides to carry the layer: place some first");
         });
         return {{"name", name}, {"kind", kind}, {"undo", undoJson(t)}};
     }
@@ -2054,32 +2024,18 @@ ScalpMapEntry newScalpMapEntry(Session& s, const ScalpMesh& scalpMesh, const std
     const ScalpMesh* scalp = &scalpMesh;
     ScalpMapEntry entry;
     entry.channels = color ? kColorMap : kGrayMap;
-    // On faces: 0 (a color map black, alpha 1) with the value or fill on them.
-    const PaintColor onFaces = color ? fill : PaintColor{value, value, value, value};
-    const PaintColor everywhere = faces.empty() ? onFaces : PaintColor{0.0f, 0.0f, 0.0f, color ? 1.0f : 0.0f};
+    // (Every host's New Map: scalp_paint.h newVertexMapValues, newTextureMapPaint.)
+    const PaintColor filled = color ? fill : PaintColor{value, value, value, 1.0f};
     if (kind == "vertices") {
         entry.kind = "vertices";
-        const std::size_t n = scalp->pointCount();
-        entry.values.resize(n * static_cast<std::size_t>(entry.channels));
-        for (std::size_t v = 0; v < n; ++v) {
-            if (color) {
-                for (std::size_t c = 0; c < 4; ++c) entry.values[v * 4 + c] = everywhere[c];
-            } else {
-                entry.values[v] = everywhere[0];
-            }
-        }
-        if (!faces.empty()) fillVertexMapFaces(entry.values, entry.channels, kAllChannels, onFaces, PaintMode::Replace, *scalp, faces);
+        entry.values = newVertexMapValues(*scalp, entry.channels, filled, faces);
     } else if (kind == "texture") {
         if (!scalp->hasUVs()) fail("state", "the scalp has no UVs to paint a texture map on");
         const fs::path folder = fs::u8path(mapsFolder(s));
-        fs::path file = folder / (name + ".png");
-        for (int k = 2; fs::exists(file); ++k) file = folder / (name + "_" + std::to_string(k) + ".png");
+        const fs::path file = fs::u8path(freeFilePath((folder / (name + ".png")).generic_u8string()));  // (a file or a tile set: taken)
         try {
             fs::create_directories(file.parent_path());
-            const int size = std::clamp(resolution, BrushToolSettings::kMinPaintResolution, BrushToolSettings::kMaxPaintResolution);
-            TexturePaint paint = color ? TexturePaint(*scalp, size, size, everywhere) : TexturePaint(*scalp, size, size, everywhere[0]);
-            if (!faces.empty()) paint.fillTriangles(polygonTriangles(*scalp, faces), onFaces, kAllChannels);
-            paint.save(file.generic_u8string());
+            newTextureMapPaint(*scalp, entry.channels, filled, resolution, faces).save(file.generic_u8string());
         } catch (const std::exception& e) {
             fail("io", std::string("cannot write the map's image: ") + e.what());
         }
@@ -2112,7 +2068,6 @@ json mapForParam(ToolState& t, const json& args) {
     std::string map = found.map, mapKind = found.kind;
     // A map made here with `faces` is white on them, black elsewhere (one the param reads already stays).
     const std::vector<std::int32_t> faces = facesArg(args);
-    const std::vector<std::uint8_t> faceTriangles = faces.empty() ? std::vector<std::uint8_t>{} : polygonTriangles(*scalp, faces);
     // The param's own map (paramMapName) there already, its link gone: linked again, whatever its
     // kind, its painting back (every host does).
     bool reused = false;
@@ -2148,13 +2103,10 @@ json mapForParam(ToolState& t, const json& args) {
         // the look stays), children inherit it, strands blend it; the layer and its link one step.
         map = paramMapName(node, param);  // (free: one of that name was linked above)
         GuideHierarchy h = editedGuides(t, [&](GuideHierarchy& hh) {
-            bool any = false;
-            for (const HierarchyGuide& g : hh.guides()) {
-                if (g.parent != kNoGuide) continue;  // children inherit their primary's
-                hh.setAttribute(g.id, map, faces.empty() || rootedOn(g, faceTriangles) ? 1.0f : 0.0f);
-                any = true;
+            // (on faces: 1 on the guides rooted on them, 0 on the rest: addGuideLayer, every host's)
+            if (!addGuideLayer(hh, map, 1.0f, scalp.get(), faces)) {
+                fail("state", "the groom has no guides to paint on: add guides, or paint on the scalp's vertices");
             }
-            if (!any) fail("state", "the groom has no guides to paint on: add guides, or paint on the scalp's vertices");
         });
         std::string graph;
         try {
@@ -2203,25 +2155,17 @@ json mapForParam(ToolState& t, const json& args) {
 
 // ---- Map management (Maya's painting.py over groomLabScalpMaps) ---------------------------------------
 
-bool hasLayer(Session& s, const std::string& name) {
-    const auto h = s.groom->storedHierarchy();
-    if (!h) return false;
-    const std::vector<std::string> layers = h->attributeNames();
-    return std::find(layers.begin(), layers.end(), name) != layers.end();
-}
-
 // "vertices", "texture", "guides", or "" for no map of that name.
 std::string mapKindOf(Session& s, const std::string& name) {
-    const auto it = s.groom->scalpMaps().maps.find(name);
-    if (it != s.groom->scalpMaps().maps.end()) return it->second.kind;
-    return hasLayer(s, name) ? "guides" : "";
+    const auto h = s.groom->storedHierarchy();  // (the layers as stored)
+    return groomlab::mapKindOf(s.groom->scalpMaps(), h.get(), name);  // every host's (scalp_maps.h)
 }
 
-// 1 (gray) or 4 (color); guide layers are gray.
+// 1 (gray) or 4 (color); guide layers are gray (an unknown name: gray, as a new map starts).
 int mapChannelsOf(Session& s, const std::string& name) {
-    const auto it = s.groom->scalpMaps().maps.find(name);
-    if (it != s.groom->scalpMaps().maps.end()) return it->second.channels == kColorMap ? kColorMap : kGrayMap;
-    return kGrayMap;
+    const auto h = s.groom->storedHierarchy();
+    const int channels = groomlab::mapChannelsOf(s.groom->scalpMaps(), h.get(), name);
+    return channels == 0 ? kGrayMap : channels;
 }
 
 std::string needMap(Session& s, const json& args, const char* key = "name") {
@@ -2241,15 +2185,15 @@ std::string defaultMapFile(Session& s, const std::string& name) { return freeFil
 
 // A texture paint written to `file` (made or rewritten) as part of the next commit's undo step.
 void writePaint(ToolState& t, const TexturePaint& paint, const std::string& file) {
-    FileEdit e = fileBefore(file);
+    std::vector<FileEdit> e = filesBefore(file, paint.udim() ? paint.udimLayout()->tiles : std::vector<int>{});
     try {
         std::error_code ec;
         fs::create_directories(fs::u8path(file).parent_path(), ec);
-        paint.save(file);
+        paint.save(file);  // (a tile set: each tile, udimPathFor(file))
     } catch (const std::exception& ex) {
         fail("io", std::string("cannot write the map's image: ") + ex.what());
     }
-    fileAfter(t, std::move(e));
+    filesAfter(t, std::move(e));
 }
 
 // A texture map's paint as every host opens it (scalp_paint.h), to fill or convert.
@@ -2270,89 +2214,29 @@ int resolutionOf(const json& args) {
                       BrushToolSettings::kMaxPaintResolution);
 }
 
-// The Map nodes reading map `name` and the (node, param) pairs it feeds through them and map
-// params naming it (Maya's map_nodes, map_users).
-void mapReaders(const json& graph, const std::string& name, json& nodes, json& users) {
-    nodes = json::array();
-    users = json::array();
-    if (!graph.is_object() || !graph.contains("nodes") || !graph["nodes"].is_array()) return;
-    std::set<std::string> readers;
-    for (const json& n : graph["nodes"]) {
-        if (!n.is_object() || n.value("type", std::string()) != "Map") continue;
-        const json params = n.contains("params") && n["params"].is_object() ? n["params"] : json::object();
-        if (params.value("name", std::string("mask")) == name) {
-            readers.insert(n.value("name", std::string()));
-            nodes.push_back(n.value("name", std::string()));
-        }
-    }
-    if (graph.contains("connections") && graph["connections"].is_array()) {
-        for (const json& c : graph["connections"]) {
-            if (c.is_object() && readers.count(c.value("from", std::string()))) {
-                users.push_back({c.value("to", std::string()), c.value("input", std::string())});
-            }
-        }
-    }
-    for (const json& n : graph["nodes"]) {
-        if (!n.is_object() || !n.contains("params") || !n["params"].is_object()) continue;
-        for (const auto& [param, v] : n["params"].items()) {
-            if (v.is_object() && (v.value("guide", std::string()) == name || v.value("colorSet", std::string()) == name)) {
-                users.push_back({n.value("name", std::string()), param});
-            }
-        }
-    }
-}
-
+// The Map nodes reading map `name` and the (node, param) pairs it feeds through them and the
+// params naming it (Maya's map_nodes, map_users): the core's (scalp_maps.h mapReaders).
 json mapUsers(ToolState& t, const json& args) {
     const std::string name = needMap(t.session, args);
-    json nodes, users;
-    const std::string& text = t.session.groom->data().graphJson;
-    mapReaders(text.empty() ? json::object() : json::parse(text, nullptr, false), name, nodes, users);
-    return {{"name", name}, {"nodes", nodes}, {"users", users}};
+    const MapReaders readers = mapReaders(t.session.groom->data().graphJson, name);
+    json users = json::array();
+    for (const auto& [node, param] : readers.users) users.push_back({node, param});
+    return {{"name", name}, {"nodes", readers.nodes}, {"users", users}};
 }
 
 // What reads map `name` lets go of it (Maya's _unlink_map): its Map nodes removed, the params they
-// fed reading their own values again (an exposed param's port removed with them), map params
-// naming it back to the node's default. Returns the graph ("" unchanged); `changed` the pairs.
+// fed reading their own values again (an exposed param's port removed with them), the params
+// naming it back to the node's default: the core's (scalp_maps.h unlinkMapReaders). Returns the
+// graph ("" unchanged); `changed` the pairs.
 std::string unlinkMapReaders(const std::string& graphText, const std::string& name, json& changed) {
     changed = json::array();
     if (graphText.empty()) return {};
-    json graph = json::parse(graphText, nullptr, false);
-    if (!graph.is_object()) return {};
-    json readers, fed;
-    mapReaders(graph, name, readers, fed);
-    if (readers.empty() && fed.empty()) return {};
-    std::set<std::string> gone;
-    for (const json& r : readers) gone.insert(r.get<std::string>());
-    for (json& n : graph["nodes"]) {
-        if (!n.is_object()) continue;
-        const std::string node = n.value("name", std::string());
-        // Ports of exposed params a reader fed: removed (the param keeps its value).
-        if (graph.contains("connections") && graph["connections"].is_array() && n.contains("paramInputs") && n["paramInputs"].is_array()) {
-            for (const json& c : graph["connections"]) {
-                if (!c.is_object() || !gone.count(c.value("from", std::string())) || c.value("to", std::string()) != node) continue;
-                json& ports = n["paramInputs"];
-                const std::string input = c.value("input", std::string());
-                for (auto p = ports.begin(); p != ports.end(); ++p) {
-                    if (*p == input) {
-                        ports.erase(p);
-                        break;
-                    }
-                }
-            }
-            if (n["paramInputs"].empty()) n.erase("paramInputs");
-        }
-        if (!n.contains("params") || !n["params"].is_object()) continue;
-        std::vector<std::string> drop;
-        for (const auto& [param, v] : n["params"].items()) {
-            if (v.is_object() && (v.value("guide", std::string()) == name || v.value("colorSet", std::string()) == name)) drop.push_back(param);
-        }
-        for (const std::string& param : drop) n["params"].erase(param);  // the operator's default
-    }
-    for (const json& f : fed) changed.push_back(f);
     try {
-        GraphEdit edit(graph.dump());
-        for (const std::string& node : gone) edit.removeNode(node);  // with every connection to or from it
-        return edit.toJson();
+        bool touched = false;
+        std::vector<std::pair<std::string, std::string>> unlinked;
+        std::string graph = groomlab::unlinkMapReaders(graphText, name, &touched, &unlinked);
+        for (const auto& [node, param] : unlinked) changed.push_back({node, param});
+        return touched ? graph : std::string();
     } catch (const std::exception& e) {
         fail("graph", std::string("cannot unlink the map's readers: ") + e.what());
     }
@@ -2382,11 +2266,13 @@ json mapRemove(ToolState& t, const json& args) {
             return m.second.kind == "texture" && sameFile(resolveMapFile(s, m.second.texture), file);
         });
         std::error_code ec;
-        if (optBool(args, "deleteFile", false) && !file.empty() && !shared && insideFolder(file, mapsFolder(s)) &&
-            fs::is_regular_file(fs::u8path(file), ec)) {
-            FileEdit e = fileBefore(file);
-            fs::remove(fs::u8path(file), ec);
-            fileAfter(t, std::move(e));
+        if (optBool(args, "deleteFile", false) && mapImageDeletable(file, mapsFolder(s), shared)) {  // every host's rule (asset_files.h)
+            // (A tile set: every tile's file.)
+            std::vector<FileEdit> edits = filesBefore(file);
+            for (const FileEdit& e : edits) {
+                if (e.before) fs::remove(fs::u8path(e.path), ec);
+            }
+            filesAfter(t, std::move(edits));
             deleted = true;
         }
         dropPaints(t);
@@ -2421,15 +2307,24 @@ json mapRename(ToolState& t, const json& args) {
         ScalpMapEntry& entry = node.mapped();
         if (entry.kind == "texture" && !entry.texture.empty()) {
             const std::string full = resolveMapFile(s, entry.texture);
-            const std::string renamed = renamedMapTexture(full, from, to);
+            const std::string target = renamedMapImage(full, from, to, mapsFolder(s));  // every host's rule (asset_files.h)
             std::error_code ec;
-            if (!renamed.empty() && insideFolder(full, mapsFolder(s)) && fs::is_regular_file(fs::u8path(full), ec)) {
-                const std::string target = freeFilePath(renamed);
-                FileEdit source = fileBefore(full), made = fileBefore(target);
-                fs::rename(fs::u8path(full), fs::u8path(target), ec);
-                if (!ec) {
-                    fileAfter(t, std::move(source));
-                    fileAfter(t, std::move(made));
+            if (!target.empty()) {
+                // The image renamed (a tile set: each tile, its naming kept: udim.h mapImageMoves,
+                // every host's), each file's before and after kept for undo.
+                const auto moves = mapImageMoves(full, target);
+                std::vector<FileEdit> edits;
+                for (const auto& [a, b] : moves) {
+                    edits.push_back(fileBefore(a));
+                    edits.push_back(fileBefore(b));
+                }
+                bool moved = true;
+                for (const auto& [a, b] : moves) {
+                    fs::rename(fs::u8path(a), fs::u8path(b), ec);
+                    moved = moved && !ec;
+                }
+                filesAfter(t, std::move(edits));
+                if (moved) {
                     entry.texture = target;
                     movedFrom = full;
                 }
@@ -2474,51 +2369,45 @@ json mapConvert(ToolState& t, const json& args) {
     const int channels = mapChannelsOf(s, name);
     ScalpMaps maps = s.groom->scalpMaps();
     json warnings = json::array();
-    // The source as a function on the scalp: per vertex, an image, or the guides.
-    std::vector<float> vertices;
-    TexturePtr image;
+    // The source as its kind holds it, converted (every host's: scalp_paint.h convertMap; a guide
+    // layer read at the guides' roots on the cage).
+    MapSource source;
+    source.kind = from;
+    source.channels = channels;
     const HierarchyPtr authored = s.groom->authoredHierarchy();
-    GuideSet flat;
     if (from == "guides") {
         if (!authored) fail("state", "the groom has no guides");
-        flat = authored->flatten();
     } else if (from == "vertices") {
-        vertices = maps.maps[name].values;
-        if (vertices.size() != scalp->pointCount() * static_cast<std::size_t>(channels)) fail("state", "map " + name + " does not fit this scalp");
+        source.vertices = maps.maps[name].values;
     } else {
         const std::string full = resolveMapFile(s, maps.maps[name].texture);
         try {
-            image = loadTexture(full);
+            source.image = loadTexture(full);
         } catch (const std::exception& e) {
             fail("io", "map " + name + "'s image does not read: " + e.what());
         }
-        if (!image || image->isUdim()) fail("bad_request", "a map's image is one file over UVs 0-1, not a UDIM tile set");
+        if (!source.image) fail("io", "map " + name + "'s image does not read");
     }
     StrokeEdit edit;
     edit.mode = "convert map " + name;
     std::string file;
+    GuideHierarchy converted = authored ? *authored : GuideHierarchy{};
     try {
+        MapConverted out = convertMap(name, source, to, *scalp, converted, resolution);
+        if (out.colorLost) warnings.push_back(name + " is a color map; on the guides it keeps its luminance (a guide layer is gray)");
         if (to == "vertices") {
-            std::vector<float> values = from == "guides" ? vertexMapFromGuides(flat, name, *scalp) : vertexMapFromTexture(*image, *scalp, channels);
-            ScalpMapEntry entry{"vertices", std::move(values), ""};
+            ScalpMapEntry entry{"vertices", std::move(out.vertices), ""};
             entry.channels = channels;
             maps.maps[name] = std::move(entry);
         } else if (to == "texture") {
-            if (!scalp->hasUVs()) fail("state", "the scalp has no UVs for a texture map");
             const std::string wanted = optString(args, "texture", "");
             if (!wanted.empty() && !isPngPath(wanted)) fail("bad_request", "a texture map's file is a PNG (painting writes PNG)");
             file = wanted.empty() ? defaultMapFile(s, name) : freeFilePath(wanted);
-            const TexturePaint paint = from == "guides" ? textureFromGuides(flat, name, *scalp, resolution, resolution)
-                                                        : textureFromVertexMap(vertices, channels, *scalp, resolution, resolution);
-            writePaint(t, paint, file);
+            writePaint(t, *out.texture, file);
             ScalpMapEntry entry{"texture", {}, file};
             entry.channels = channels;
             maps.maps[name] = std::move(entry);
         } else {
-            if (channels == kColorMap) {
-                warnings.push_back(name + " is a color map; on the guides it keeps its luminance (a guide layer is gray)");
-                if (from == "vertices") vertices = convertMapChannels(vertices, kColorMap, kGrayMap);
-            }
             maps.maps.erase(name);
         }
     } catch (const RequestError&) {
@@ -2528,17 +2417,13 @@ json mapConvert(ToolState& t, const json& args) {
     }
     if (to == "guides" || from == "guides") {
         GuideHierarchy h = editedGuides(t, [&](GuideHierarchy& hh) {
+            // The layer as convertMap left it (the guides' other edits kept as they are).
             if (from == "guides") hh.removeAttribute(name);
             if (to != "guides") return;
-            // Each guide's root as it lies on the cage (where vertex maps are painted).
-            GuideHierarchy onCage = hh;
-            onCage.evaluate(scalp.get());
-            std::vector<StrandRoot> roots;
-            for (const HierarchyGuide& g : onCage.guides()) roots.push_back(g.root);
-            const std::vector<float> values = from == "vertices" ? rootValuesFromVertexMap(vertices, *scalp, roots)
-                                                                 : rootValuesFromTexture(*image, *scalp, roots);
-            std::size_t i = 0;
-            for (const HierarchyGuide& g : onCage.guides()) hh.setAttribute(g.id, name, values[i++]);
+            for (const HierarchyGuide& g : converted.guides()) {
+                const auto value = g.attributes.find(name);
+                if (value != g.attributes.end() && hh.guide(g.id)) hh.setAttribute(g.id, name, value->second);
+            }
         });
         edit.set(StrokeField::Guides, h.toJson());
     }
@@ -2622,50 +2507,18 @@ json mapFill(ToolState& t, const json& args) {
     const std::vector<std::int32_t> faces = facesArg(args);
     if (!faces.empty() && selected) fail("bad_request", "fill the selected guides or the selected faces, not both");
     const MeshPtr faceScalp = faces.empty() ? MeshPtr() : mapScalp(s);
-    const std::vector<std::uint8_t> faceTriangles = faces.empty() ? std::vector<std::uint8_t>{} : polygonTriangles(*faceScalp, faces);
     const std::string label = "fill map " + name;
+    // (Every host's Fill: scalp_paint.h fillGuideLayer, fillVertexMap, fillTexturePaint.)
+    const PaintColor fill = byColor ? color : PaintColor{value, value, value, 1.0f};
     if (kind == "guides") {
         editGuides(t, label, [&](GuideHierarchy& h) {
-            if (!faces.empty()) {
-                for (const HierarchyGuide& g : h.guides()) {
-                    if (!rootedOn(g, faceTriangles)) continue;
-                    float current = 0.0f;
-                    h.effectiveAttribute(g, name, &current);
-                    h.setAttribute(g.id, name, compositePaintValue(current, value, paintMode));
-                }
-            } else if (selected) {
-                for (const GuideId id : targetGuides(t, h, args, false, "fill selected")) {
-                    if (const HierarchyGuide* g = h.guide(id)) {
-                        float current = 0.0f;
-                        h.effectiveAttribute(*g, name, &current);
-                        h.setAttribute(id, name, compositePaintValue(current, value, paintMode));
-                    }
-                }
-            } else {
-                for (const HierarchyGuide& g : h.guides()) {
-                    float current = 0.0f;
-                    h.effectiveAttribute(g, name, &current);
-                    h.setAttribute(g.id, name, compositePaintValue(current, value, paintMode));
-                }
-            }
+            const std::vector<GuideId> picked = selected ? targetGuides(t, h, args, false, "fill selected") : std::vector<GuideId>{};
+            fillGuideLayer(h, name, value, paintMode, picked, faceScalp.get(), faces);
         });
     } else if (kind == "vertices") {
         const MeshPtr scalp = mapScalp(s);
         ScalpMaps maps = s.groom->scalpMaps();
-        ScalpMapEntry& entry = maps.maps[name];
-        const auto per = static_cast<std::size_t>(channels);
-        if (entry.values.size() != scalp->pointCount() * per) {  // refitted to this scalp
-            entry.values.assign(scalp->pointCount() * per, 0.0f);
-            if (per == 4) {
-                for (std::size_t i = 3; i < entry.values.size(); i += 4) entry.values[i] = 1.0f;
-            }
-        }
-        const PaintColor target = per == 1 ? PaintColor{value, value, value, value} : color;
-        if (!faces.empty()) {
-            fillVertexMapFaces(entry.values, channels, mask, target, paintMode, *scalp, faces);
-        } else {
-            fillMapValues(entry.values, channels, mask, target, paintMode);
-        }
+        fillVertexMap(maps.maps[name].values, channels, mask, fill, paintMode, *scalp, faces);
         StrokeEdit edit;
         edit.mode = label;
         edit.set(StrokeField::ScalpMaps, maps.toJson());
@@ -2674,13 +2527,7 @@ json mapFill(ToolState& t, const json& args) {
         // The file rewritten: its bytes before and after are the undo step.
         const ScalpMapEntry entry = s.groom->scalpMaps().maps.at(name);
         const std::shared_ptr<TexturePaint> paint = openPaint(s, entry, resolutionOf(args));
-        if (!faces.empty()) {
-            paint->fillTriangles(faceTriangles, channels == kColorMap ? color : PaintColor{value, value, value, value}, mask, paintMode);
-        } else if (channels == kColorMap) {
-            paint->fill(color, mask, paintMode);
-        } else {
-            paint->fill(value, paintMode);
-        }
+        fillTexturePaint(*paint, mask, fill, paintMode, *mapScalp(s), faces);
         writePaint(t, *paint, resolveMapFile(s, entry.texture));
         dropPaints(t);
         StrokeEdit edit;
@@ -2699,31 +2546,39 @@ std::string mapImageFile(ToolState& t, const std::string& name, const std::strin
     std::string full = resolveMapFile(s, path);
     if (full.empty()) full = path;
     std::error_code ec;
-    if (!fs::is_regular_file(fs::u8path(full), ec)) fail("not_found", "no image at " + full);
+    if (fileStamp(full) == 0) fail("not_found", "no image at " + full);  // (a tile set: any tile)
     try {
         image = loadTexture(full);
     } catch (const std::exception& e) {
         fail("bad_request", full + " does not read as an image: " + e.what());
     }
-    if (!image || image->isUdim() || !image->image()) fail("bad_request", "a map's image is one file over UVs 0-1, not a UDIM tile set");
+    if (!image || (!image->isUdim() && !image->image())) fail("bad_request", full + " does not read as an image");
     const bool png = isPngPath(full);
     const bool copy = given(args, "copy") ? settingBool(args["copy"], "copy") : !png;
     if (!copy && !png) fail("bad_request", full + " is not a PNG: painting writes PNG, so another format is copied as one (copy true)");
     if (!copy) return fs::u8path(full).generic_u8string();
     const std::string target = defaultMapFile(s, name);
-    FileEdit e = fileBefore(target);
+    const std::vector<int> tiles = image->isUdim() ? image->udimTiles() : std::vector<int>{};
+    std::vector<FileEdit> e = filesBefore(target, tiles);
     fs::create_directories(fs::u8path(target).parent_path(), ec);
-    if (png) {
+    if (png && !image->isUdim()) {
         fs::copy_file(fs::u8path(full), fs::u8path(target), ec);
         if (ec) fail("io", "could not copy " + full + ": " + ec.message());
+    } else if (png) {
+        // A tile set of PNGs: each tile copied, into the set udimPathFor(target) names.
+        const std::string fromSet = udimPathFor(full), toSet = udimPathFor(target);
+        for (const int tile : tiles) {
+            fs::copy_file(fs::u8path(udimTilePath(fromSet, tile)), fs::u8path(udimTilePath(toSet, tile)), fs::copy_options::overwrite_existing, ec);
+            if (ec) fail("io", "could not copy " + udimTilePath(fromSet, tile) + ": " + ec.message());
+        }
     } else {
         try {
-            writeImagePng(*image, target);
+            writeImagePng(*image, target);  // (a tile set: each tile)
         } catch (const std::exception& ex) {
             fail("io", std::string("could not write ") + target + ": " + ex.what());
         }
     }
-    fileAfter(t, std::move(e));
+    filesAfter(t, std::move(e));
     return target;
 }
 
@@ -2734,15 +2589,7 @@ json mapImport(ToolState& t, const json& args) {
     Session& s = t.session;
     const std::string path = needString(args, "path");
     std::string name = optString(args, "name", "");
-    if (name.empty()) {
-        std::string stem;
-        for (const char c : fs::u8path(path).stem().u8string()) stem += std::isalnum(static_cast<unsigned char>(c)) || c == '_' ? c : '_';
-        const auto first = stem.find_first_not_of('_'), last = stem.find_last_not_of('_');
-        stem = first == std::string::npos ? std::string("map") : stem.substr(first, last - first + 1);
-        if (std::isdigit(static_cast<unsigned char>(stem[0]))) stem = "map_" + stem;
-        name = stem;
-        for (int n = 2; !mapKindOf(s, name).empty(); ++n) name = stem + "_" + std::to_string(n);
-    }
+    if (name.empty()) name = mapNameFromFile(path, [&](const std::string& n) { return !mapKindOf(s, n).empty(); });  // (every host's rule)
     if (!validMapName(name)) fail("bad_request", mapNameError(name));
     if (!mapKindOf(s, name).empty()) fail("bad_request", "the groom already has a map named '" + name + "'");
     TexturePtr image;
@@ -2804,12 +2651,6 @@ json mapReload(ToolState& t, const json& args) {
     return {{"files", files}};
 }
 
-// A file's bytes ("" when it cannot be read).
-std::string readFile(const std::string& path) {
-    std::ifstream in(fs::u8path(path), std::ios::binary);
-    return in ? std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()) : std::string();
-}
-
 // Whether `path` is in a maps folder a session made in the temp folder while its .blend was
 // untitled: <temp>/groomlab_<pid>_s<n>maps_<k>/, gl_ on macOS (blockName: this session's or an
 // earlier helper's).
@@ -2844,18 +2685,16 @@ json mapsMoveTo(ToolState& t, const json& args) {
     for (auto& [name, entry] : maps.maps) {
         if (entry.kind != "texture" || entry.texture.empty()) continue;
         const std::string file = resolveMapFile(s, entry.texture);
-        if (insideFolder(file, now) || !(insideFolder(file, old) || inTempMapsFolder(file)) || !fs::is_regular_file(fs::u8path(file), ec)) continue;
+        // (A tile set: any tile there, udim.h.)
+        if (insideFolder(file, now) || !(insideFolder(file, old) || inTempMapsFolder(file)) || fileStamp(file) == 0) continue;
         fs::create_directories(fs::u8path(now), ec);
-        // Under its name, or the same image already there (copied before); else a free name.
+        // Under its name, or the same image already there (copied before); else a free name. A
+        // tile set: every tile.
         const fs::path wanted = fs::u8path(now) / fs::u8path(file).filename();
         std::string target = wanted.generic_u8string();
-        if (!fs::exists(wanted, ec) || readFile(target) != readFile(file)) {
+        if (!sameMapImage(file, target)) {
             target = freeFilePath(target);
-            fs::copy_file(fs::u8path(file), fs::u8path(target), fs::copy_options::none, ec);
-            if (ec) {
-                ec.clear();
-                continue;
-            }
+            if (copyMapImage(file, target).empty()) continue;
         }
         moved.push_back({{"name", name}, {"from", file}, {"to", target}});
         entry.texture = target;
@@ -2889,22 +2728,10 @@ json filesCollect(ToolState& t, const json& args) {
     Session& s = t.session;
     const std::string dir = needString(args, "dir"), masks = needString(args, "masks"), cards = needString(args, "cards"),
                       caches = needString(args, "caches");
-    json copied = json::array(), missing = json::array();
-    int inside = 0;
+    // The bookkeeping every host's Collect Files keeps (asset_files.h FileCollector).
+    FileCollector files(dir);
     auto collect = [&](const std::string& what, const std::string& stored, const std::string& full, const std::string& folder) {
-        if (stored.empty()) return stored;
-        if (insideFolder(full, dir)) {
-            ++inside;
-            return stored;
-        }
-        std::vector<std::string> written;
-        const std::string copy = collectFile(full, folder, &written);
-        if (copy.empty()) {
-            missing.push_back({what, stored});
-            return stored;
-        }
-        copied.push_back({what, copy});
-        return copy;
+        return files.collect(what, stored, full, folder);
     };
     for (const auto& kept : t.host.kept) writeTexture(t, kept.first);
     ScalpMaps maps = s.groom->scalpMaps();
@@ -2930,18 +2757,11 @@ json filesCollect(ToolState& t, const json& args) {
         &graphChanged);
     if (graphChanged) s.groom->setGraphJson(graph);
     for (auto& [node, ref] : s.file.simCaches) ref.file = collect("simulation " + node, ref.file, ref.file, caches);
-    if (!s.file.cardBake.prefix.empty() && !insideFolder(s.file.cardBake.prefix + "x", dir)) {
-        const std::string prefix = s.file.cardBake.prefix;
-        FileFollower f(dir, "", dir, cards, {{fs::u8path(prefix).parent_path().generic_u8string(), cards}});
-        std::vector<std::string> suffixes = cardBakeSuffixes();
-        suffixes.push_back("Preview.png");
-        const std::string now = f.followPrefix(prefix, suffixes);
-        if (now != prefix) {
-            s.file.cardBake.prefix = now;
-            copied.push_back({"card bake", now});
-        }
-    }
-    return {{"copied", copied}, {"missing", missing}, {"inside", inside}, {"mapsChanged", mapsChanged}, {"graphChanged", graphChanged}};
+    s.file.cardBake.prefix = files.collectCardBake(s.file.cardBake.prefix, cards);
+    json copied = json::array(), missing = json::array();
+    for (const auto& [what, path] : files.copied()) copied.push_back({what, path});
+    for (const auto& [what, path] : files.missing()) missing.push_back({what, path});
+    return {{"copied", copied}, {"missing", missing}, {"inside", files.inside()}, {"mapsChanged", mapsChanged}, {"graphChanged", graphChanged}};
 }
 
 // The map shown on the scalp: the session's view of a vertex map or guide layer; a texture map
@@ -3066,6 +2886,16 @@ DisplaySettings displaySettingsOf(ToolState& t, const json& v) {
                 s.hiddenGuideGroups = settingString(x, k);
             }
         } else if (key == "guideGroupColors") s.guideGroupColors = settingString(x, k);
+        else if (key == "braidTubes") {
+            // Show Tubes: the Braid nodes whose section tubes draw (names, one a line, or a list).
+            if (x.is_array()) {
+                std::vector<std::string> names;
+                for (const json& n : x) names.push_back(settingString(n, k));
+                s.braidTubes = braidTubesText(names);
+            } else {
+                s.braidTubes = settingString(x, k);
+            }
+        }
         else if (key == "theme") {
             if (!x.is_object()) fail("bad_request", "theme is an object");
             DisplayTheme& th = s.theme;
@@ -3098,10 +2928,11 @@ const char* layerName(DisplayLayer layer) {
     }
 }
 
-constexpr std::array<DisplayItemId, 11> kShownItems{DisplayItemId::Guides,       DisplayItemId::Tubes,     DisplayItemId::Selected,
+constexpr std::array<DisplayItemId, 12> kShownItems{DisplayItemId::Guides,       DisplayItemId::Tubes,     DisplayItemId::Selected,
                                                     DisplayItemId::SoftSelected, DisplayItemId::Parts,     DisplayItemId::Flow,
                                                     DisplayItemId::FlowField,    DisplayItemId::ScalpMap,  DisplayItemId::TubeSurfaces,
-                                                    DisplayItemId::TubeWires,    DisplayItemId::SelectedTubeWires};
+                                                    DisplayItemId::TubeWires,    DisplayItemId::SelectedTubeWires,
+                                                    DisplayItemId::BraidTubes};  // Show Tubes: the Braid nodes' section tubes
 
 std::uint64_t haveVersion(const json& have, const std::string& name) {
     if (!have.is_object()) return 0;
@@ -3172,6 +3003,8 @@ json display(ToolState& t, const json& args) {
         in.scalpMapTexture = !image.key.empty();
         in.scalpMapTextureGeneration = image.texture;
     }
+    // Show Tubes: the shown Braid nodes' section tubes (the session's mesh, kept while they stay).
+    fillBraidTubes(settings, in, [&session]() -> const GroomSession& { return session; });
     const DisplayFrame& frame = t.builder.update(in, settings);
 
     // What changed against what the host holds: those items' arrays, in one block.
@@ -3284,9 +3117,16 @@ json display(ToolState& t, const json& args) {
             }
             const std::vector<std::array<float, 3>> per =
                 strandColors(*strands, last.scalp ? last.scalp.get() : in.scalp.get(), mode, source, lo, hi, nodeValues.get());
+            // A point channel (Color by Channel's braidTail, say): a color a point, whatever was asked.
+            const std::vector<std::array<float, 3>> points = attributePointColors(*strands, mode, source, lo, hi, nodeValues.get());
             std::vector<float> flat;
             std::size_t count = 0;
-            if (perPoint) {
+            if (!points.empty()) {
+                count = points.size();
+                flat.reserve(count * 3);
+                for (const auto& c3 : points) flat.insert(flat.end(), c3.begin(), c3.end());
+                colors["perPoint"] = true;
+            } else if (perPoint) {
                 count = strands->pointCount();
                 flat.reserve(count * 3);
                 for (std::size_t i = 0; i < strands->strandCount(); ++i) {
@@ -3306,7 +3146,10 @@ json display(ToolState& t, const json& args) {
             const ScalpMesh* scalp = last.scalp ? last.scalp.get() : in.scalp.get();
             colors["colorSets"] = scalp ? scalp->colorSetNames() : std::vector<std::string>{};
             float low = 0.0f, high = 0.0f;
-            if (strandChannelRange(*strands, source, low, high)) colors["range"] = {low, high};
+            // (a node's values: theirs, a channel only that node has too)
+            if (nodeValues ? channelRange(*nodeValues, &low, &high) : strandChannelRange(*strands, source, low, high)) {
+                colors["range"] = {low, high};
+            }
         } else {
             colors["changed"] = false;
         }
@@ -3384,34 +3227,8 @@ void adoptMaps(Session& s, const GroomData& data) {
 
 void writeMaps(const Session& s, GroomFile& file) {
     if (!s.mapsOwned) return;
-    const ScalpMaps& maps = s.groom->scalpMaps();
-    MapCatalog catalog;
-    for (const auto& [name, info] : s.fileCatalog) {
-        if (info.kind == "guides") catalog[name] = info;
-    }
-    for (const auto& [name, info] : maps.catalog()) catalog[name] = info;
-    file.data.maps = catalog;
-    if (!file.data.scalp) return;
-    const ScalpMesh& was = *file.data.scalp;
-    auto scalp = std::make_shared<ScalpMesh>(was.points(), was.triangles());
-    if (was.hasUVs()) scalp->setCornerUVs(was.cornerUVs());
-    if (was.hasRest()) scalp->setRestPoints(was.restPoints());
-    scalp->setPolygons(was.polygons());
-    scalp->setRenderSubdivision(was.renderSubdivision(), was.renderSubdivisionFrom());
-    for (const std::string& set : was.colorSetNames()) {
-        const auto it = s.fileCatalog.find(set);
-        const bool wasMap = it != s.fileCatalog.end() && it->second.kind == "vertices";
-        if (wasMap && !maps.maps.count(set)) continue;
-        if (maps.maps.count(set)) continue;  // written from the map below
-        if (const auto* colors = was.cornerColors(set)) scalp->setCornerColors(set, *colors);
-    }
-    for (const auto& [name, entry] : maps.maps) {
-        if (entry.kind != "vertices") continue;
-        const std::size_t per = entry.channels == kColorMap ? 4 : 1;
-        if (entry.values.size() != was.pointCount() * per) continue;
-        scalp->setCornerColors(name, cornerColorsFromVertexMap(entry.values, was, static_cast<int>(per)));
-    }
-    file.data.scalp = scalp;
+    // Every host's save (groom_file.h storeScalpMaps): with other scalps each keeps its own share.
+    storeScalpMaps(file.data, s.groom->scalpMaps(), s.fileCatalog);
 }
 
 // ---- Commands ---------------------------------------------------------------------------------------
@@ -3433,7 +3250,17 @@ json toolCatalogJson() {
     json categories = json::array();
     for (const BrushCategory c : brushCategories()) categories.push_back(brushCategoryName(c));
     json settings = json::array();
-    for (const BrushSettingSpec& s : brushSettingSpecs()) settings.push_back({{"id", s.id}, {"label", s.label}, {"hint", s.hint}});
+    for (const BrushSettingSpec& s : brushSettingSpecs()) {
+        json j = {{"id", s.id}, {"label", s.label}, {"hint", s.hint}, {"kind", brushSettingKindName(s.kind)}};
+        // A value's facts as the core writes them (a length in the groom's units, not the host's).
+        if (s.kind == BrushSettingKind::Bool) {
+            j["default"] = s.defaultValue != 0.0;
+        } else if (s.isValue()) {
+            j.update({{"default", s.defaultValue}, {"softMin", s.softMin}, {"softMax", s.softMax}, {"min", s.min}, {"max", s.max},
+                      {"decimals", s.decimals}, {"unit", s.unit}});
+        }
+        settings.push_back(std::move(j));
+    }
     // What New Map > For offers first (stroke.h paintableSettings): the node type and its param.
     json paintable = json::array();
     for (const PaintableSetting& p : paintableSettings()) {
@@ -3481,11 +3308,13 @@ void commitStep(Session& s, const std::string& label, const std::vector<std::pai
     pruneTargets(t);
 }
 
-void sideFileBefore(Session& s, const std::string& path) { toolsOf(s).pendingFiles.push_back(fileBefore(path)); }
+void sideFileBefore(Session& s, const std::string& path) {
+    for (FileEdit& e : filesBefore(path)) toolsOf(s).pendingFiles.push_back(std::move(e));  // (a tile set: each tile)
+}
 
 void dropSideFiles(Session& s) {
     ToolState& t = toolsOf(s);
-    for (auto f = t.pendingFiles.rbegin(); f != t.pendingFiles.rend(); ++f) putFile(f->path, f->before, f->beforeBytes);
+    for (auto f = t.pendingFiles.rbegin(); f != t.pendingFiles.rend(); ++f) putFileState(f->path, f->before);
     if (!t.pendingFiles.empty()) dropPaints(t);
     t.pendingFiles.clear();
 }
@@ -3515,7 +3344,7 @@ bool isToolCommand(const std::string& cmd) {
         "length_state", "length_edit",
         // The Tube tool's root-first mode and the tube hierarchy (the Tube card's Tube roots and
         // Tube hierarchy blocks).
-        "root_state", "root_edit", "root_subdivide", "tube_levels", "tube_level_add", "tube_level_remove", "tube_level_show"};
+        "root_state", "root_edit", "root_subdivide", "density_map", "tube_levels", "tube_level_add", "tube_level_remove", "tube_level_show"};
     return kCommands.count(cmd) > 0;
 }
 
@@ -3902,7 +3731,17 @@ bool runToolCommandIn(Session& s, ToolState& t, const std::string& cmd, const js
         return true;
     }
     if (cmd == "maps_list") {
-        result = mapsList(t);
+        json density;
+        result = mapsList(t, &density);
+        result["densityMap"] = density;
+        return true;
+    }
+    if (cmd == "density_map") {
+        // The Tube tool's density map (subdivisionDensityMapIn: the one map, else an older numbered
+        // one; "" none yet), the name Subdivide makes it under and its value then.
+        std::vector<std::string> names;
+        for (const auto& [name, entry] : s.groom->scalpMaps().maps) names.push_back(name);
+        result = {{"map", subdivisionDensityMapIn(names)}, {"name", kSubdivisionDensityMap}, {"start", kDefaultSubdivisionDensity}};
         return true;
     }
     if (cmd == "map_create") {
@@ -4067,7 +3906,14 @@ bool runToolCommandIn(Session& s, ToolState& t, const std::string& cmd, const js
         // The density map ("map", default the one map) and the multiplier; Apply ("apply") cuts every
         // cut by them again all over ("force", default true: the card's Apply).
         RootSubdivisionOptions options;
-        options.map = optString(args, "map", kSubdivisionDensityMap);
+        // ("map" unset: the groom's density map, an older numbered one too: subdivisionDensityMapIn)
+        options.map = optString(args, "map", "");
+        if (options.map.empty()) {
+            std::vector<std::string> names;
+            for (const auto& [name, entry] : s.groom->scalpMaps().maps) names.push_back(name);
+            options.map = subdivisionDensityMapIn(names);
+            if (options.map.empty()) options.map = kSubdivisionDensityMap;
+        }
         options.multiplier = static_cast<float>(optNumber(args, "multiplier", 1.0));
         options.force = apply && optBool(args, "force", true);
         const std::size_t before = t.host.edits().size();
@@ -4077,12 +3923,7 @@ bool runToolCommandIn(Session& s, ToolState& t, const std::string& cmd, const js
             done = apply ? applySubdivisionDensity(g, *scalp, {}, options) : subdivideRootTubes(g, *scalp, guides, options);
         });
         result = {{"cells", done.cells}, {"removed", done.removed}, {"kept", done.kept}};
-        // (The level the cells are in: the card shows it.)
-        if (!done.cells.empty()) {
-            const std::shared_ptr<const GuideHierarchy> after = s.groom->authoredHierarchy();
-            const HierarchyGuide* cell = after ? after->guide(done.cells.front()) : nullptr;
-            if (cell) result["cellLevel"] = after->groupDepth(cell->group) + 1;
-        }
+        if (done.cellLevel > 0) result["cellLevel"] = done.cellLevel;  // (the level the cells are in: the card shows it)
         result["committed"] = t.host.edits().size() != before;
         if (result["committed"].get<bool>()) {
             t.redoLabels.clear();

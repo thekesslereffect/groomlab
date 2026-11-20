@@ -186,22 +186,20 @@ def script_definition(groom, node):
 
 def set_script(groom, node, definition):
     """Give script node `node` an edited file (a dict); ValueError listing what is wrong when it does
-    not check. Params the header no longer has go. One undo step."""
+    not check. Params the header no longer has go (their links too); one at its old default takes
+    the new one. One undo step."""
     errors = script_errors(definition)
     if errors:
         raise ValueError("; ".join(("line %d, column %d: " % (e["line"], e["column"]) if e["line"] else "") + e["message"]
                                    for e in errors))
     graph = get_graph(groom, expand_default=True)
-    found = next((n for n in graph.get("nodes", []) if n.get("name") == node), None)
-    if found is None or found.get("type") != "Script":
-        raise ValueError("%s is not a script node" % node)
-    params = found.setdefault("params", {})
-    old = set(p.get("name") for p in (params.get("definition") or {}).get("params", []))
-    new = set(p.get("name") for p in definition.get("params", []))
-    for gone in old - new:
-        params.pop(gone, None)
-    params["definition"] = definition
-    edit = groomlab_core.GraphEdit(json.dumps(graph))
+    # Every host's (node_library.h withScriptDefinition): params the header no longer has go with
+    # their ports and links; a param at its old default takes the new one.
+    try:
+        text = groomlab_core.with_script_definition(json.dumps(graph), node, json.dumps(definition))
+    except ValueError as e:
+        raise ValueError(str(e).replace("\n", "; "))
+    edit = groomlab_core.GraphEdit(text)
     edit.complete_params()  # the new params at their defaults
     set_graph(groom, json.loads(edit.to_json()))
 

@@ -205,6 +205,9 @@ public:
     static MObject aMixedView;         // Mixed view (Tube hierarchy): "<base group>:<level>" ("": off; display.h MixedView)     // Lock view (Tube hierarchy): the guide group whose tubes alone draw ("": as their guides)
     static MObject aHiddenGuideGroups; // guide groups hidden in the viewport (names): not drawn, brushed or selected
     static MObject aGuideGroupColors;  // guide groups' own viewport colors (name:#rrggbb)
+    // Show Tubes (the Graph Editor's button on a Braid node): the Braid nodes whose section tubes the
+    // viewport draws, their names one a line (the core's braid_tubes.h). Display only.
+    static MObject aBraidTubes;
     static MObject aDisplayLighting;
     static MObject aDisplayShadows;  // 0 off, 1 cast (on the scalp, body, floor), 2 cast and receive (self-shadowing)
     // How the lit strands and ribbons shade (hair_shading.h): 1 GroomLab's hair (the default:

@@ -18,19 +18,7 @@ namespace {
 // cache's poses, the driver cache's curves (evaluate and view share it, so a view sees what a render sees; a simulation
 // steps over other frames with the same).
 GuidesPtr curvesAt(const AlembicCurvesReader& cache, double seconds, const char* layer = nullptr) {
-    const StrandSet curves = cache.at(seconds);
-    auto out = std::make_shared<GuideSet>();
-    const std::vector<float>* channel = layer ? curves.pointChannel(layer) : nullptr;
-    for (std::size_t s = 0; s < curves.strandCount(); ++s) {
-        const Vec3f* p = curves.strandPoints(s);
-        Guide& g = out->add(curves.ids()[s], std::vector<Vec3f>(p, p + curves.strandPointCount(s)));
-        if (channel) {
-            const auto begin = channel->begin() + static_cast<std::ptrdiff_t>(curves.strandBegin(s));
-            std::vector<float> values(begin, begin + static_cast<std::ptrdiff_t>(curves.strandPointCount(s)));
-            if (std::any_of(values.begin(), values.end(), [](float v) { return v != 0.0f; })) g.pointAttributes[layer] = std::move(values);
-        }
-    }
-    return out;
+    return std::make_shared<GuideSet>(guidesOfCurves(cache.at(seconds), layer));  // (every host's: groom.h)
 }
 
 void feedTime(GroomSession& session, GroomScene& scene, const AlembicCurvesReader* guideCache,
@@ -78,10 +66,7 @@ GroomScene::GroomScene(GroomFile file) : file_(std::move(file)) {
     }
     session_ = std::make_unique<GroomSession>(file_.data);
     // Relative paths in the graph: the groom file's folder, then its search paths.
-    std::vector<std::string> dirs;
-    if (!file_.directory.empty()) dirs.push_back(file_.directory);
-    dirs.insert(dirs.end(), file_.searchPaths.begin(), file_.searchPaths.end());
-    session_->setPathResolver(searchPathResolver(std::move(dirs)));
+    session_->setPathResolver(searchPathResolver(groomFileFolders(file_)));
     // Simulate nodes: frames at the file's rate, the frames on the way to a time fed as a view
     // feeds its own, the bakes the file names.
     session_->setFramesPerSecond(file_.framesPerSecond);

@@ -2,6 +2,37 @@
   "$schema": "./ui.schema.json",
   "version": 1,
   "choices": {
+    "transferMethod": {
+      "label": "Method",
+      "default": "closest",
+      "items": [
+        {
+          "value": "closest",
+          "label": "Closest point",
+          "tip": "Where the new scalp is nearest (the same place and size)"
+        },
+        {
+          "value": "bounds",
+          "label": "Fit bounding boxes",
+          "tip": "The old scalp's bounds moved and scaled onto the new one's first"
+        },
+        {
+          "value": "markersAlign",
+          "label": "Markers: align (move, turn, scale)",
+          "tip": "3+ marker pairs (the groom's stored ones) give the best move, turn and scale"
+        },
+        {
+          "value": "markersWarp",
+          "label": "Markers: warp (follows proportions)",
+          "tip": "4+ marker pairs (the groom's stored ones) spread over the head bend space onto the new one"
+        },
+        {
+          "value": "uv",
+          "label": "Matching UVs",
+          "tip": "Both meshes laid out alike in UV; each root at its UV"
+        }
+      ]
+    },
     "symmetry": {
       "label": "Across",
       "default": "x",
@@ -150,7 +181,7 @@
       "items": [
         {"value": "solid", "label": "Solid", "tip": "The hair's own color"},
         {"value": "colorSet", "label": "Color set", "tip": "A color set (map) of the scalp, at each root"},
-        {"value": "attribute", "label": "Attribute", "tip": "A strand channel of the graph, black to white over Min to Max"},
+        {"value": "attribute", "label": "Attribute", "tip": "A channel of the graph, per strand or along each strand for a point channel, over Min to Max (equal: its own range)"},
         {"value": "random", "label": "Random", "tip": "A color per strand"},
         {"value": "clump", "label": "Clump", "tip": "A color per clump"},
         {"value": "density", "label": "Density", "tip": "Strands per area: a heatmap"}

@@ -22,6 +22,7 @@
 #include "groomlab/graph_io.h"
 #include "groomlab/noise.h"
 #include "groomlab/parallel.h"
+#include "groomlab/profile.h"
 #include "groomlab/random.h"
 #include "operators/internal.h"
 
@@ -79,16 +80,6 @@ Quat fromAxes(const Vec3f& c0, const Vec3f& c1, const Vec3f& c2) {
         q = {(m10 - m01) / s, (m02 + m20) / s, (m12 + m21) / s, 0.25f * s};
     }
     return normalized(q);
-}
-// For a unit quaternion's vector part of length s (the sine of half its angle) and real part
-// c >= 0: half its angle over s, so that times the vector part is the half-angle rotation vector
-// (a series for small turns: no atan2 for the many nearly at rest).
-float halfAngleOver(float s, float c) {
-    if (s < 0.05f * c) {
-        const float t = s / c, t2 = t * t;  // atan(t) / s = (t - t^3/3 + t^5/5) / s
-        return (1.0f - t2 * (1.0f / 3.0f) + t2 * t2 * 0.2f) / c;
-    }
-    return pm::atan2(s, c) / s;
 }
 // The unit quaternion turning by the half-angle rotation vector r (twice its length, about it).
 Quat turnOfHalfAngle(const Vec3f& r) {
@@ -347,7 +338,6 @@ inline F4 maxOf(const F4& a, const F4& b) { return select(a < b, b, a); }
 struct V3 {
     F4 x, y, z;
 };
-inline V3 v3(const Vec3f& a) { return {all(a.x), all(a.y), all(a.z)}; }
 inline V3 operator+(const V3& a, const V3& b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
 inline V3 operator-(const V3& a, const V3& b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
 inline V3 operator*(const V3& a, const F4& s) { return {a.x * s, a.y * s, a.z * s}; }
@@ -384,7 +374,10 @@ inline V3 rotate(const Q4& q, const V3& v) {
     return v + t * q.w + cross(u, t);
 }
 
-// halfAngleOver, lane by lane (`lanes`: the lanes wanted; the others' answer is never read).
+// For a unit quaternion's vector part of length s (the sine of half its angle) and real part
+// c >= 0: half its angle over s, so that times the vector part is the half-angle rotation vector
+// (a series for small turns, atan(t) / s = (t - t^3/3 + t^5/5) / s: no atan2 for the many nearly
+// at rest), lane by lane (`lanes`: the lanes wanted; the others' answer is never read).
 F4 halfAngleOver4(const F4& s, const F4& c, int lanes) {
     const F4 t = s / c, t2 = t * t;
     const F4 series = (all(1.0f) - t2 * all(1.0f / 3.0f) + t2 * t2 * all(0.2f)) / c;
@@ -915,6 +908,10 @@ std::uint64_t SimSettings::hash() const {
     // Only when on (else the hash made before it).
     if (groomedUnderGravity) h = hashCombine(h, 0x6A7E);
     if (groomedUnderGravity && preload) h = hashCombine(h, 0x9E10);
+    // The preload takes drag over the mass as the substep does (it took the drag alone before): a
+    // node with a mass of its own simulates otherwise, so its bakes made before read as out of date.
+    // Mass 1: the same frames, the hash made before.
+    if (groomedUnderGravity && preload && mass != 1.0f) h = hashCombine(h, 0xD4A6);
     // Dry: the hash made before water (the stamps of bakes made then still match).
     if (!wetting()) return h;
     h = hashCombine(h, water ? 0x3A7E : 0x3A7F);
@@ -952,25 +949,27 @@ std::uint64_t parseSimulationStamp(const std::string& text) {
 
 const std::vector<std::string>& simulationMapParams() {
     static const std::vector<std::string> kNames{"stretchStiffness", "bend", "twist", "damping",
-                                                 "drag", "rootStiffness", "mass", "strength"};
+                                                 "drag", "rootStiffness", "mass", "strength", "collisionOffset"};
     return kNames;
 }
 
 std::uint64_t SimMaps::hash() const {
     std::uint64_t h = hash64(0x3A97);
-    for (const std::vector<float>* values : {&stiffness, &bend, &twist, &damping, &drag, &rootStiffness, &mass, &strength}) {
-        h = hashCombine(h, values->size());
+    const auto add = [&h](const std::vector<float>& values) {
+        h = hashCombine(h, values.size());
         // FNV-1a over the values' bits, two at a time (a hashCombine per value costs more than the maps).
         std::uint64_t f = 1469598103934665603ull;
-        const std::size_t n = values->size();
+        const std::size_t n = values.size();
         for (std::size_t i = 0; i + 1 < n; i += 2) {
             std::uint64_t word = 0;
-            std::memcpy(&word, values->data() + i, sizeof word);
+            std::memcpy(&word, values.data() + i, sizeof word);
             f = (f ^ word) * 1099511628211ull;
         }
-        if (n % 2 == 1) f = hashFloat(f, values->back());
+        if (n % 2 == 1) f = hashFloat(f, values.back());
         h = hashCombine(h, f);
-    }
+    };
+    for (const std::vector<float>* values : {&stiffness, &bend, &twist, &damping, &drag, &rootStiffness, &mass, &strength}) add(*values);
+    if (!collisionOffset.empty()) add(collisionOffset);  // (maps without it hash as they did)
     return h;
 }
 
@@ -983,7 +982,7 @@ SimMapsPtr simulationMaps(const ParamSet& params, const GuideSet& guides, const 
     const StrandsPtr strands = guidesAsStrands(guides);
     auto maps = std::make_shared<SimMaps>();
     std::vector<float>* out[] = {&maps->stiffness, &maps->bend, &maps->twist, &maps->damping,
-                                 &maps->drag, &maps->rootStiffness, &maps->mass, &maps->strength};
+                                 &maps->drag, &maps->rootStiffness, &maps->mass, &maps->strength, &maps->collisionOffset};
     for (std::size_t k = 0; k < names.size(); ++k) {
         if (!mapped(names[k])) continue;
         // On the guides as strands: their layers are its channels (no guide set to blend from).
@@ -1042,6 +1041,7 @@ struct GuideSolver::Impl {
         std::vector<float> invMass;          // 1 / mass; 0: held to the input shape (strength 0)
         std::vector<float> perMass;          // 1 / mass (held or not)
         std::vector<float> weight;           // strength, 0-1
+        std::vector<float> offset;           // collisionOffset mapped (empty: the setting's for every point)
         bool blends = false;                 // some weight between 0 and 1: the frames blend
     };
     PointSettings ps;
@@ -1146,7 +1146,8 @@ struct GuideSolver::Impl {
         const SimSettings& s = settings;
         const float h = static_cast<float>(1.0 / (fps * s.substeps));
         const Vec3f gravity = s.gravityDirection.length() > 1e-8f ? s.gravityDirection.normalized() * s.gravity : Vec3f{};
-        const Vec3f g = gravity * (pm::exp(-10.0f * s.drag * h) * pm::exp(-20.0f * s.damping * h));
+        // (The drag as the substep takes it: over the mass, floored as there. Mass 1: as it is.)
+        const Vec3f g = gravity * (pm::exp(-10.0f * s.drag * h / std::max(1e-3f, s.mass)) * pm::exp(-20.0f * s.damping * h));
         const float bendC = s.bend > 0.0f ? complianceOf(s.bend) * kReferenceStep * kReferenceStep : -1.0f;
         const float twistC = s.twist > 0.0f ? complianceOf(s.twist) * kReferenceStep * kReferenceStep : -1.0f;
         const float mass = std::max(s.mass, 1e-6f);
@@ -1335,10 +1336,12 @@ void GuideSolver::Impl::solve(const SimInputs& in, int frames, const std::functi
         }
         return;
     }
+    ProfilePhases phase("simulate.targets");
     targetsOf(in, next);
     preloaded(next);
     if (in.scalp && in.scalp->hasRest() && in.scalp->restPoseHash() != restKey) rootRestFrames(in.scalp);
 
+    phase.next("simulate.settings");
     const SimSettings& s = settings;
     const int substeps = s.substeps * frames;
     const float h = static_cast<float>(1.0 / (fps * s.substeps));
@@ -1389,6 +1392,10 @@ void GuideSolver::Impl::solve(const SimInputs& in, int frames, const std::functi
         const float* mRoot = maps ? mapOf(maps->rootStiffness) : nullptr;
         const float* mMass = maps ? mapOf(maps->mass) : nullptr;
         const float* mStrength = maps ? mapOf(maps->strength) : nullptr;
+        if (const float* mOffset = maps ? mapOf(maps->collisionOffset) : nullptr) {
+            ps.offset.resize(points);
+            for (std::size_t i = 0; i < points; ++i) ps.offset[i] = std::max(0.0f, mOffset[i]);
+        }
         for (std::vector<float>* values : {&ps.stretch, &ps.stretchCompliance, &ps.bend, &ps.bendCompliance, &ps.twistCompliance,
                                            &ps.damp, &ps.drag, &ps.attract, &ps.invMass, &ps.perMass, &ps.weight}) {
             values->resize(points);
@@ -1436,9 +1443,13 @@ void GuideSolver::Impl::solve(const SimInputs& in, int frames, const std::functi
     // guide's points are pushed out from as deep as half its length (searched for that far); the
     // fields are made for the longest guide's (their reach that search rounded up to a power of
     // two: the same fields while guides elsewhere change, unless the longest crosses one).
+    phase.next("simulate.collisionFields");
+    // (A mapped collisionOffset: each point keeps its own; the fields reach for the largest.)
     const float offset = s.collisionOffset;
-    const float fieldDepth = std::max(offset * 2.0f, 0.5f * longest);
-    const float fieldSearch = std::max(offset, fieldDepth) * 1.001f + 1e-6f;
+    float largestOffset = offset;
+    for (const float o : ps.offset) largestOffset = std::max(largestOffset, o);
+    const float fieldDepth = std::max(largestOffset * 2.0f, 0.5f * longest);
+    const float fieldSearch = std::max(largestOffset, fieldDepth) * 1.001f + 1e-6f;
     CollisionSurface scalpRest, scalpNow;
     if (s.collideScalp && in.scalp && in.scalp->triangleCount() > 0) {
         if (restScalp) scalpRest = CollisionSurface::of(restScalp, offset, fieldDepth, fieldSearch);
@@ -1493,6 +1504,7 @@ void GuideSolver::Impl::solve(const SimInputs& in, int frames, const std::functi
         }
     };
 
+    phase.next("simulate.setup");
     // A guide's substep under way: what its first part (substepBegin) leaves for the rod solve and
     // the part after it (substepEnd).
     struct GuideStep {
@@ -1643,8 +1655,9 @@ void GuideSolver::Impl::solve(const SimInputs& in, int frames, const std::functi
     // The rest of guide st.g's substep, after its rod's solve: lengths kept, collisions, velocities.
     auto substepEnd = [&](GuideStep& st, bool frameEnd) {
         const std::size_t g = st.g, b = st.b, n = st.n;
-        const float pushDepth = std::max(offset * 2.0f, 0.5f * length[g]);  // (collisions)
-        const float pushSearch = std::max(offset, pushDepth) * 1.001f + 1e-6f;
+        const float pushDepth = std::max(largestOffset * 2.0f, 0.5f * length[g]);  // (collisions)
+        const float pushSearch = std::max(largestOffset, pushDepth) * 1.001f + 1e-6f;
+        const auto offsetOf = [&](std::size_t i) { return ps.offset.empty() ? offset : ps.offset[i]; };
         const RootPose& r1 = st.r1;
         std::vector<Vec3f>& p = st.p;
         const std::vector<Vec3f>& tgt = st.tgt;
@@ -1687,16 +1700,16 @@ void GuideSolver::Impl::solve(const SimInputs& in, int frames, const std::functi
                 bool againstScalp = false;
                 if (viaRest) {
                     Vec3f at = rest.toWorld(r1.toLocal(p[j]));
-                    if (scalpRest.pushOut(at, offset, pushDepth, pushSearch, unused)) {
+                    if (scalpRest.pushOut(at, offsetOf(i), pushDepth, pushSearch, unused)) {
                         p[j] = r1.toWorld(rest.toLocal(at));
                         mu = frictionMu;
                         againstScalp = true;
                     }
                 } else if (scalpNow.mesh) {
-                    if (scalpNow.pushOut(p[j], offset, pushDepth, pushSearch, scalpCursor)) mu = frictionMu;
+                    if (scalpNow.pushOut(p[j], offsetOf(i), pushDepth, pushSearch, scalpCursor)) mu = frictionMu;
                 }
                 for (std::size_t c = 0; c < colliders.size(); ++c) {
-                    if (colliders[c].pushOut(p[j], offset, pushDepth, pushSearch, colliderCursors[c])) mu = std::max(mu, colliderFriction[c]);
+                    if (colliders[c].pushOut(p[j], offsetOf(i), pushDepth, pushSearch, colliderCursors[c])) mu = std::max(mu, colliderFriction[c]);
                 }
                 if (p[j] == before) continue;
                 const Vec3f push = p[j] - before;
@@ -1735,11 +1748,11 @@ void GuideSolver::Impl::solve(const SimInputs& in, int frames, const std::functi
                     if (held(i)) continue;
                     if (viaRest) {
                         Vec3f at = rest.toWorld(r1.toLocal(p[j]));
-                        if (scalpRest.pushOut(at, offset, pushDepth, pushSearch, unused)) p[j] = r1.toWorld(rest.toLocal(at));
+                        if (scalpRest.pushOut(at, offsetOf(i), pushDepth, pushSearch, unused)) p[j] = r1.toWorld(rest.toLocal(at));
                     } else if (scalpNow.mesh) {
-                        scalpNow.pushOut(p[j], offset, pushDepth, pushSearch, scalpCursor);
+                        scalpNow.pushOut(p[j], offsetOf(i), pushDepth, pushSearch, scalpCursor);
                     }
-                    for (std::size_t c = 0; c < colliders.size(); ++c) colliders[c].pushOut(p[j], offset, pushDepth, pushSearch, colliderCursors[c]);
+                    for (std::size_t c = 0; c < colliders.size(); ++c) colliders[c].pushOut(p[j], offsetOf(i), pushDepth, pushSearch, colliderCursors[c]);
                 }
             }
         }
@@ -1759,6 +1772,11 @@ void GuideSolver::Impl::solve(const SimInputs& in, int frames, const std::functi
     // Guide-guide repulsion: points of other guides closer than the radius pushed apart, every
     // push read from the points before the pass (in a fixed order: the same sums on any thread).
     std::vector<Vec3f> push;
+    // The points by cell, kept from substep to substep (no allocation a cell): each (cell key,
+    // point) sorted, a cell's points together in point order; each cell's first, and a table from
+    // a key to its cell (open addressing, twice the cells or more).
+    std::vector<std::pair<std::uint64_t, std::uint32_t>> cellPoints;
+    std::vector<std::uint32_t> cellFirst, cellTable;
     auto repel = [&] {
         const float radius = s.repulsionRadius;
         if (!(repulsionShare > 0.0f) || !(radius > 0.0f)) return;
@@ -1779,14 +1797,35 @@ void GuideSolver::Impl::solve(const SimInputs& in, int frames, const std::functi
             return hashCombine(hashCombine(hash64(static_cast<std::uint64_t>(cx)), static_cast<std::uint64_t>(cy)),
                                static_cast<std::uint64_t>(cz));
         };
-        std::unordered_map<std::uint64_t, std::vector<std::uint32_t>> grid;
-        grid.reserve(x.size());
+        cellPoints.clear();
         for (std::size_t i = 0; i < x.size(); ++i) {
             if (i == begin[guideOf[i]]) continue;  // roots stay
             std::int64_t c[3];
             cellOf(x[i], c);
-            grid[key(c[0], c[1], c[2])].push_back(static_cast<std::uint32_t>(i));
+            cellPoints.emplace_back(key(c[0], c[1], c[2]), static_cast<std::uint32_t>(i));
         }
+        std::sort(cellPoints.begin(), cellPoints.end());
+        constexpr std::uint32_t kNoCell = 0xFFFFFFFFu;
+        std::size_t slots = 16;
+        while (slots < 2 * cellPoints.size()) slots *= 2;
+        const std::size_t mask = slots - 1;
+        cellTable.assign(slots, kNoCell);
+        cellFirst.clear();
+        for (std::size_t k = 0; k < cellPoints.size(); ++k) {
+            if (k > 0 && cellPoints[k].first == cellPoints[k - 1].first) continue;
+            std::size_t slot = static_cast<std::size_t>(cellPoints[k].first) & mask;
+            while (cellTable[slot] != kNoCell) slot = (slot + 1) & mask;
+            cellTable[slot] = static_cast<std::uint32_t>(cellFirst.size());
+            cellFirst.push_back(static_cast<std::uint32_t>(k));
+        }
+        cellFirst.push_back(static_cast<std::uint32_t>(cellPoints.size()));
+        // The cell of a key (kNoCell: no point there).
+        auto cellAt = [&](std::uint64_t k) {
+            for (std::size_t slot = static_cast<std::size_t>(k) & mask;; slot = (slot + 1) & mask) {
+                const std::uint32_t c = cellTable[slot];
+                if (c == kNoCell || cellPoints[cellFirst[c]].first == k) return c;
+            }
+        };
         push.assign(x.size(), Vec3f{});
         parallelFor(0, x.size(), [&](std::size_t i) {
             if (i == begin[guideOf[i]]) return;
@@ -1796,9 +1835,10 @@ void GuideSolver::Impl::solve(const SimInputs& in, int frames, const std::functi
             for (int dx = -1; dx <= 1; ++dx) {
                 for (int dy = -1; dy <= 1; ++dy) {
                     for (int dz = -1; dz <= 1; ++dz) {
-                        const auto it = grid.find(key(c[0] + dx, c[1] + dy, c[2] + dz));
-                        if (it == grid.end()) continue;
-                        for (const std::uint32_t o : it->second) {
+                        const std::uint32_t cell = cellAt(key(c[0] + dx, c[1] + dy, c[2] + dz));
+                        if (cell == kNoCell) continue;
+                        for (std::uint32_t at = cellFirst[cell]; at < cellFirst[cell + 1]; ++at) {
+                            const std::uint32_t o = cellPoints[at].second;
                             if (guideOf[o] == guideOf[i]) continue;
                             const Vec3f d = x[i] - x[o];
                             const float dist = d.length();
@@ -1928,10 +1968,15 @@ void GuideSolver::Impl::solve(const SimInputs& in, int frames, const std::functi
         const float a1 = static_cast<float>(k) / static_cast<float>(substeps);
         const double seconds = frameToSeconds(base + static_cast<double>(k) / s.substeps, fps);
         const bool frameEnd = k % s.substeps == 0;
+        phase.next("simulate.substep.sweep");
         if (!sweeps.empty()) sweepTo(k == substeps ? 1.0f : a1);
+        phase.next("simulate.substep.guides");
         parallelFor(0, batches.size(), [&](std::size_t batch) { substep(batch, a0, a1, seconds, frameEnd); }, 4);
+        phase.next("simulate.substep.repel");
         repel();
+        phase.next("simulate.substep.volume");
         volumize();
+        phase.next("simulate.substep.frameEnd");
         if (frameEnd && ps.blends) {
             // As shown: each point that share of its simulated offset from the input shape.
             parallelFor(0, x.size(), [&](std::size_t i) {
@@ -1944,6 +1989,7 @@ void GuideSolver::Impl::solve(const SimInputs& in, int frames, const std::functi
             if (frameDone) frameDone(k / s.substeps);
         }
     }
+    phase.next("simulate.finish");
     prev = std::move(next);
     next = Targets{};
     lastColliders = in.colliders;
@@ -2025,6 +2071,7 @@ void SimCache::keep(std::uint64_t inputHash) {
 
 void SimCache::start(const SimInputs& inputs, std::uint64_t inputHash) {
     const auto started = std::chrono::steady_clock::now();
+    const ProfileScope scope("simulate.cache.start");
     frames_.clear();
     solver_.start(settings_, fps_, settings_.startFrame, inputs);
     keep(inputHash);
@@ -2035,6 +2082,7 @@ void SimCache::start(const SimInputs& rest, const SimInputs& inputs, std::uint64
     const int preroll = settings_.preroll;
     if (preroll <= 0 || !rest.guides || !inputs.guides) return start(inputs, inputHash);
     const auto started = std::chrono::steady_clock::now();
+    const ProfileScope scope("simulate.cache.preroll");
     frames_.clear();
     solver_.start(settings_, fps_, settings_.startFrame - preroll, rest);
     if (!solver_.sameLayout(*inputs.guides)) return start(inputs, inputHash);
@@ -2051,6 +2099,7 @@ bool SimCache::step(const SimInputs& inputs, std::uint64_t inputHash, int frames
         return false;
     }
     const auto started = std::chrono::steady_clock::now();
+    const ProfileScope scope("simulate.cache.step");
     frames = std::max(1, frames);
     // Frames between the last and these inputs were stepped toward a blend of the two: what they
     // were stepped toward is not known (0: never checked against a host's inputs).

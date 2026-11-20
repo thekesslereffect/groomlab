@@ -32,14 +32,36 @@ std::string controlsJson(const std::string& graphJson);
 
 // Why node.param cannot be keyed in place ("" when it can): a Control node's own params, a param
 // that is not animatable (it sets how many strands there are, or where), one that is not a number,
-// switch or vector, or one reading a map. GraphError for no such node or param.
+// switch or vector, one reading a map, or one an input drives (its port connected): every host's
+// rule. GraphError for no such node or param.
 std::string notKeyable(const GraphEdit& edit, const std::string& node, const std::string& param);
 
 // node.param as an input port of the node (a mappable number or color a Field port, a ramp a Curve
-// port, any other a Value port), its ports kept in the spec's order: Maya's expose_param. Nothing
+// port, any other a Value port), its ports kept in the spec's order: every host's expose. Nothing
 // when it is one already. GraphError for a param that cannot be one, or one named as a port the
 // node has.
 void exposeParam(GraphEdit& edit, const std::string& node, const std::string& param);
+
+// What a Compound's Show Inner Param offers (every host's node menu): per inner node but its Input
+// nodes, in order, its params a compound can show (numbers, switches, vectors and words; not a param
+// naming a channel, nor a definition), as [{"node", "params": [param spec, ...]}]; `definitionJson`
+// the Compound's definition ({"graph", "expose"}). Nodes this build has no operator for are left out.
+std::string compoundInnerParamsJson(const std::string& definitionJson);
+
+// node.param's input port gone with what fed it; the param keeps its own value: every host's
+// unexpose. False when it was no port (nothing changed). GraphError for no such node.
+bool unexposeParam(GraphEdit& edit, const std::string& node, const std::string& param);
+
+// A compound's inner param `target` ("node.param" inside it) shown on the compound as its param
+// `name` (every host's Show Inner Param; a param of that name shows `target` instead). No name: the
+// param's own, or node + Param when the compound has a param of that name already ("clump.length"
+// -> "clumpLength"). Returns the name. GraphError for a node that is not a Compound, or a target
+// that is no param of a node inside (a compound inside: its own exposed params).
+std::string compoundExpose(GraphEdit& edit, const std::string& compound, const std::string& name, const std::string& target);
+// The compound stops showing `target` (under every name it had): the value the compound set for it
+// goes back inside, the inner node keeping what the compound set last. False when it was not shown.
+// GraphError for a node that is not a Compound.
+bool compoundUnexpose(GraphEdit& edit, const std::string& compound, const std::string& target);
 
 // A Control node driving node.param (exposed first): Maya's add_control, the app's and Blender's
 // "Drive with a slider". Its control is controlName(`name`) (GraphError when the graph has a

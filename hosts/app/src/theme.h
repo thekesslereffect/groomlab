@@ -197,9 +197,11 @@ QString brushTitle(const std::string& name);       // the catalog's label ("comb
 
 // ---- The node graph ------------------------------------------------------------------------------
 // A node header's color by the operator's category ("source", "grow", "shape", "look",
-// "field", "utility", "color", "motion", "feathers"; "" utility), as playful.json's graph section.
+// "field", "utility", "color", "motion", "feathers", "output", "compound"...; "" utility): the
+// theme's graph.categories, else every host's (engine/ui/graph_ui.json's graph.categoryColors).
 QColor nodeCategoryColor(const std::string& category);
-// A port's color by its type name ("strands", "guides", "mesh", "field", "curve", "curves").
+// A port's color by its type name ("strands", "guides", "mesh", "field", "curve", "curves",
+// "value"): the theme's graph.ports, else every host's (graph_ui.json's graph.portColors).
 QColor portColor(const std::string& type);
 QColor nodeBody();
 bool isPortType(const std::string& portType);  // one of graph.ports' types (Strands, Guides, ...; either case)  // #2A2C31 (opaque)

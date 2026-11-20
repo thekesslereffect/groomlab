@@ -12,6 +12,7 @@
 #include <stdexcept>
 
 #include "groomlab/brush.h"
+#include "groomlab/curve.h"
 #include "groomlab/display.h"
 #include "groomlab/graph.h"
 #include "groomlab/guide_hierarchy.h"
@@ -523,6 +524,81 @@ struct TubeGraph {
         return sectionCoords(tube.sectionAt(t), p.x - 0.5f, -(p.z - 0.5f));
     }
 };
+
+TEST(FillTubes, ACurlOnTheGuidesCoilsTheirTubes) {
+    // Tonic's ringlets: a Curl on the guides (between the Guides node and the Interpolate) curls
+    // each guide's spine, and the guides keep their tubes (and the other levels' tubes take the same
+    // Curl), so fillTubes fills the coiled tubes: every strand in a thin tube coils with its guide.
+    TubeGraph f(3000.0);
+    TubeProfile thin;
+    thin.width = {0.03f};
+    auto set = std::make_shared<GuideSet>();
+    Guide& parent = set->add(1, straightGuide({0.5f, 0, 0.5f}, 1.0f));
+    parent.hasTube = true;
+    parent.tube = thin;
+    parent.tube.width = {0.12f};
+    set->add(2, straightGuide({0.12f, 0, 0.12f}, 0.6f));
+    std::vector<Guide> levels(1);  // a tube of the level below, inside the parent's
+    levels[0].id = 3;
+    levels[0].points = straightGuide({0.5f, 0, 0.5f}, 1.0f);
+    levels[0].hasTube = true;
+    levels[0].tube = thin;
+    levels[0].depth = 1;
+    levels[0].baseId = 1;
+    set->setLevelTubes(std::make_shared<const std::vector<Guide>>(levels));
+    f.ext.set("guides", GuidesPtr(set), 11);
+    NodeId guides = 0;
+    ASSERT_TRUE(f.g.inputSource(f.interp, 1, &guides));
+    const NodeId curl = f.g.addNode(op::kCurl);
+    f.g.node(curl).params().set("frequency", 2.0);
+    f.g.node(curl).params().set("radius", 0.15);
+    f.g.node(curl).params().set("profile", Ramp::constant(1.0f));
+    f.g.connect(guides, curl, 0);
+    f.g.connect(curl, f.interp, 1);
+
+    EvalContext ctx;
+    ctx.externals = &f.ext;
+    const GuidesPtr curled = valueAs<GuidesPtr>(f.g.evaluate(curl, ctx));
+    ASSERT_TRUE(curled);
+    ASSERT_EQ(curled->size(), 2u);
+    EXPECT_TRUE(curled->guides()[0].hasTube) << "the guide keeps its tube";
+    EXPECT_TRUE(curled->guides()[0].tube == set->guides()[0].tube);
+    EXPECT_FALSE(curled->guides()[1].hasTube);
+    ASSERT_TRUE(curled->levelTubes());
+    ASSERT_EQ(curled->levelTubes()->size(), 1u) << "the levels' tubes stay the levels'";
+    const Guide& child = curled->levelTubes()->front();
+    EXPECT_TRUE(child.hasTube);
+    EXPECT_EQ(child.depth, 1);
+    EXPECT_EQ(child.baseId, 1u);
+    float offAxis = 0.0f;
+    for (const Vec3f& p : child.points) offAxis = std::max(offAxis, std::hypot(p.x - 0.5f, p.z - 0.5f));
+    EXPECT_GT(offAxis, 0.1f) << "the levels' tubes curled too";
+
+    // Every strand of the child's tube rides it, coiled: at each point within the tube's width of
+    // the curled guide at the same share of its length (the root's join left out).
+    const StrandsPtr out = f.eval(f.interp);
+    const std::vector<float>* ids = out->strandChannel("tubeId");
+    ASSERT_TRUE(ids);
+    const std::vector<Vec3f> spine = resampleByArcLength(child.points.data(), child.points.size(), 201);
+    std::size_t inChild = 0;
+    float farthest = 0.0f, widest = 0.0f;
+    for (std::size_t s = 0; s < out->strandCount(); ++s) {
+        if ((*ids)[s] < 0.0f) continue;
+        const Vec3f* p = out->strandPoints(s);
+        const std::size_t n = out->strandPointCount(s);
+        if (std::hypot(p[0].x - 0.5f, p[0].z - 0.5f) > 0.025f) continue;  // (rooted well inside the child's tube)
+        ++inChild;
+        for (std::size_t j = 0; j < n; ++j) {
+            const float t = static_cast<float>(j) / static_cast<float>(n - 1);
+            widest = std::max(widest, std::hypot(p[j].x - 0.5f, p[j].z - 0.5f));
+            if (t < 0.25f) continue;
+            farthest = std::max(farthest, (p[j] - pointAlong(spine.data(), spine.size(), t)).length());
+        }
+    }
+    EXPECT_GT(inChild, 3u);
+    EXPECT_LT(farthest, 0.03f + 0.015f) << "inside the coiled tube";
+    EXPECT_GT(widest, 0.1f) << "coiled with it, not straight up";
+}
 
 TEST(FillTubes, StrandsRideTheirTubeToTheTip) {
     TubeGraph f;

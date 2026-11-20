@@ -50,6 +50,7 @@ the technique presets).
 | `braids` | Box braids without drawn paths: the Braid node places one braid per 2.6 cm of scalp (`braidSpacing`). |
 | `braids_beaded` | Box braids sealed at the ends with beads and cuffs near the tips: the braid's ties and an Instance node on them (`beadsPerBraid`, `beadSpacing`, `cinch`). |
 | `braids_curly_ends` | Box braids tied off near the end, the ends below the tie curling: a Curl mapped by the Braid's `braidTail` channel (`curlyLength`, `curlFrequency`). |
+| `braids_free_ends` | Box braids that come undone below a hair tie: the Braid's `end` is free, so the hair runs on as one plain bundle that a Clump and a Curl mapped by `braidTail` gather and curl (`freeLength`, `release`, `clumpSize`, `curlFrequency`). |
 | `braids_twists` | Two-strand twists all over the head: the Braid's rope style (`plies` 3 for three-strand twists). |
 | `braids_cornrows` | Cornrows along rows you draw: each row picks up the hair on its sides into every crossing, hanging as braids past `onTheHeadUntil`, a bead at each end. |
 | `braids_french` | A French braid along one path you draw down the back, fed from both sides, tied off at the end (`dutch` for a Dutch braid). |

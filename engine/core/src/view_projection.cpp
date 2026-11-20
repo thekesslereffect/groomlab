@@ -121,8 +121,8 @@ float scalpCell(const ScalpMesh& scalp) {
     const float big = std::numeric_limits<float>::max();
     Vec3f lo(big, big, big), hi(-big, -big, -big);
     for (const Vec3f& p : scalp.points()) {
-        lo = Vec3f(std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z));
-        hi = Vec3f(std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z));
+        lo = minPerAxis(lo, p);
+        hi = maxPerAxis(hi, p);
     }
     const float size = scalp.points().empty() ? 1.0f : (hi - lo).length();
     return std::max(size / 150.0f, 1e-6f);
@@ -190,15 +190,6 @@ bool ScalpVisibility::hidden(const Vec3f& p) const {
     const std::lock_guard<std::mutex> lock(shard.mutex);
     shard.cells.emplace(key, result);
     return result;
-}
-
-std::size_t ScalpVisibility::cellsCast() const {
-    std::size_t count = 0;
-    for (Shard& shard : shards_) {
-        const std::lock_guard<std::mutex> lock(shard.mutex);
-        count += shard.cells.size();
-    }
-    return count;
 }
 
 // ---- The screen brush ------------------------------------------------------------------

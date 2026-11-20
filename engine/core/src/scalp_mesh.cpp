@@ -250,7 +250,7 @@ ScalpMesh::UV ScalpMesh::uvAt(const StrandRoot& root) const {
 
 const std::vector<ScalpMesh::Color>* ScalpMesh::cornerColors(const std::string& name) const {
     auto it = colorSets_.find(name);
-    return it == colorSets_.end() ? nullptr : &it->second;
+    return it == colorSets_.end() ? nullptr : it->second.get();
 }
 
 // ---------------------------------------------------------------------------
@@ -261,21 +261,23 @@ void ScalpMesh::setRestPoints(std::vector<Vec3f> points) {
         throw std::invalid_argument("ScalpMesh: rest points must match the mesh's point count");
     }
     restPoints_ = std::move(points);
-    restAreas_.clear();
+    restAreas_ = {};
     restTotalArea_ = 0.0f;
     restHash_ = 0;
+    atRest_ = restPoints_.empty() || restPoints_.get() == points_;
     if (restPoints_.empty()) {
         updateHash();
         return;
     }
-    restAreas_.resize(triangles_.size());
+    std::vector<float> areas(triangles_.size());
     for (std::size_t t = 0; t < triangles_.size(); ++t) {
         const Triangle& tri = triangles_[t];
         const Vec3f& a = restPoints_[tri[0]];
         const float area = 0.5f * (restPoints_[tri[1]] - a).cross(restPoints_[tri[2]] - a).length();
-        restAreas_[t] = std::isfinite(area) ? area : 0.0f;
-        restTotalArea_ += restAreas_[t];
+        areas[t] = std::isfinite(area) ? area : 0.0f;
+        restTotalArea_ += areas[t];
     }
+    restAreas_ = std::move(areas);
     restHash_ = hash64(0x2E57);
     for (const Vec3f& p : restPoints_) {
         const float xyz[3] = {p.x, p.y, p.z};
@@ -313,7 +315,7 @@ void ScalpMesh::setCornerColors(const std::string& name, std::vector<Color> colo
     std::uint64_t h = hashString(0, name);
     for (const Color& c : colors) h = hashFloats(h, c.data(), 4);
     colorHashes_[name] = h;
-    colorSets_[name] = std::move(colors);
+    colorSets_[name] = std::make_shared<const std::vector<Color>>(std::move(colors));
     updateHash();
 }
 
@@ -326,7 +328,7 @@ void ScalpMesh::removeColorSet(const std::string& name) {
 ScalpMesh::Color ScalpMesh::colorAt(const std::string& name, const StrandRoot& root) const {
     auto it = colorSets_.find(name);
     if (it == colorSets_.end() || !contains(root)) return {0.0f, 0.0f, 0.0f, 0.0f};
-    const auto& colors = it->second;
+    const auto& colors = *it->second;
     if (static_cast<std::size_t>(root.face) * 3 + 2 >= colors.size()) return {0.0f, 0.0f, 0.0f, 0.0f};
     const std::size_t c = static_cast<std::size_t>(root.face) * 3;
     const float w = 1.0f - root.u - root.v;
@@ -346,42 +348,30 @@ std::vector<std::string> ScalpMesh::colorSetNames() const {
 
 namespace {
 
-struct Aabb {
-    Vec3f lo{std::numeric_limits<float>::max(), std::numeric_limits<float>::max(), std::numeric_limits<float>::max()};
-    Vec3f hi{-std::numeric_limits<float>::max(), -std::numeric_limits<float>::max(),
-             -std::numeric_limits<float>::max()};
-
-    void expand(const Vec3f& p) {
-        lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
-        hi = {std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
-    }
-    void expand(const Aabb& b) {
-        expand(b.lo);
-        expand(b.hi);
-    }
-    // Squared distance from p to the box (0 inside). The gap along each axis is the larger
-    // of the distances past either face and 0, taken with the SSE instructions rather than
-    // branches: a query tests dozens of boxes, and a mispredicted branch costs more than
-    // all three axes' arithmetic.
-    float distance2(const Vec3f& p) const {
+// Squared distance from p to the box (math.h Aabb; 0 inside). The gap along each axis is the
+// larger of the distances past either face and 0, taken with the SSE instructions rather than
+// branches: a query tests dozens of boxes, and a mispredicted branch costs more than all three
+// axes' arithmetic.
+inline float distance2(const Aabb& box, const Vec3f& p) {
+    const Vec3f& lo = box.lo;
+    const Vec3f& hi = box.hi;
 #if GROOMLAB_SCALP_SSE
-        const __m128 gap = _mm_max_ps(_mm_max_ps(_mm_sub_ps(_mm_setr_ps(lo.x, lo.y, lo.z, 0.0f), _mm_setr_ps(p.x, p.y, p.z, 0.0f)),
-                                                 _mm_sub_ps(_mm_setr_ps(p.x, p.y, p.z, 0.0f), _mm_setr_ps(hi.x, hi.y, hi.z, 0.0f))),
-                                      _mm_setzero_ps());
-        alignas(16) float g[4];
-        _mm_store_ps(g, _mm_mul_ps(gap, gap));
-        return g[0] + g[1] + g[2];
+    const __m128 gap = _mm_max_ps(_mm_max_ps(_mm_sub_ps(_mm_setr_ps(lo.x, lo.y, lo.z, 0.0f), _mm_setr_ps(p.x, p.y, p.z, 0.0f)),
+                                             _mm_sub_ps(_mm_setr_ps(p.x, p.y, p.z, 0.0f), _mm_setr_ps(hi.x, hi.y, hi.z, 0.0f))),
+                                  _mm_setzero_ps());
+    alignas(16) float g[4];
+    _mm_store_ps(g, _mm_mul_ps(gap, gap));
+    return g[0] + g[1] + g[2];
 #else
-        // The same per axis: maxps(maxps(lo - p, p - hi), 0), each operation rounded alike.
-        auto gap = [](float below, float above) {
-            const float m = below > above ? below : above;
-            return m > 0.0f ? m : 0.0f;
-        };
-        const float gx = gap(lo.x - p.x, p.x - hi.x), gy = gap(lo.y - p.y, p.y - hi.y), gz = gap(lo.z - p.z, p.z - hi.z);
-        return gx * gx + gy * gy + gz * gz;
+    // The same per axis: maxps(maxps(lo - p, p - hi), 0), each operation rounded alike.
+    auto gap = [](float below, float above) {
+        const float m = below > above ? below : above;
+        return m > 0.0f ? m : 0.0f;
+    };
+    const float gx = gap(lo.x - p.x, p.x - hi.x), gy = gap(lo.y - p.y, p.y - hi.y), gz = gap(lo.z - p.z, p.z - hi.z);
+    return gx * gx + gy * gy + gz * gz;
 #endif
-    }
-};
+}
 
 constexpr std::uint32_t kLeafSize = 4;
 constexpr int kMaxStack = 64;
@@ -551,7 +541,7 @@ ScalpMesh ScalpMesh::withPoints(std::vector<Vec3f> points) const {
         throw std::invalid_argument("ScalpMesh: new points must match the mesh's point count");
     }
     // What a mesh built from these points with the same UVs, color sets and rest pose would
-    // hold; only what depends on the points is worked out again.
+    // hold; only what depends on the points is worked out again (the rest shared, not copied).
     ScalpMesh out;
     out.points_ = std::move(points);
     out.triangles_ = triangles_;
@@ -564,6 +554,7 @@ ScalpMesh ScalpMesh::withPoints(std::vector<Vec3f> points) const {
     out.restPoints_ = restPoints_;
     out.restAreas_ = restAreas_;
     out.restTotalArea_ = restTotalArea_;
+    out.atRest_ = restPoints_.empty() || restPoints_.get() == out.points_;
     out.restHash_ = restHash_;
     out.polygons_ = polygons_;
     out.polygonHash_ = polygonHash_;
@@ -618,7 +609,7 @@ SurfacePoint ScalpMesh::closestOnTree(const Bvh& b, const Vec3f& p, float maxDis
     };
     Entry stack[kMaxStack];
     int top = 0;
-    stack[top++] = {0, b.boxes[0].distance2(p)};
+    stack[top++] = {0, distance2(b.boxes[0], p)};
     while (top > 0) {
         const Entry e = stack[--top];
         const std::uint32_t at = e.node;
@@ -649,7 +640,7 @@ SurfacePoint ScalpMesh::closestOnTree(const Bvh& b, const Vec3f& p, float maxDis
         }
         // Visit the nearer child first: push it last.
         const std::uint32_t l = node.first, r = node.first + 1;
-        const float dl = b.boxes[l].distance2(p), dr = b.boxes[r].distance2(p);
+        const float dl = distance2(b.boxes[l], p), dr = distance2(b.boxes[r], p);
         const bool leftNearer = dl <= dr;
         stack[top++] = leftNearer ? Entry{r, dr} : Entry{l, dl};
         stack[top++] = leftNearer ? Entry{l, dl} : Entry{r, dr};
@@ -697,7 +688,7 @@ SurfacePoint ScalpMesh::closestPointBounded(const Vec3f& p, float maxDistance, f
     while (top > 0) {
         const std::uint32_t at = stack[--top];
         const BvhTree::Node& node = tree.nodes[at];
-        const float boxDist = b.boxes[at].distance2(p);
+        const float boxDist = distance2(b.boxes[at], p);
         if (boxDist > open) {
             other = std::min(other, boxDist);
             continue;
@@ -733,7 +724,7 @@ SurfacePoint ScalpMesh::closestPointBounded(const Vec3f& p, float maxDistance, f
             continue;
         }
         const std::uint32_t l = node.first, r = node.first + 1;
-        const bool leftNearer = b.boxes[l].distance2(p) <= b.boxes[r].distance2(p);
+        const bool leftNearer = distance2(b.boxes[l], p) <= distance2(b.boxes[r], p);
         stack[top++] = leftNearer ? r : l;
         stack[top++] = leftNearer ? l : r;
     }

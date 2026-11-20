@@ -23,7 +23,6 @@ namespace {
 constexpr double kDensityChanged = 0.02;  // a sample's density moved more than this: the map changed there
 constexpr std::size_t kMaxCells = 400;    // a root cut into at most this many cells (the sizes grown to fit)
 constexpr std::size_t kMaxGrid = 40000;   // the candidate grid's and the density grid's points, at most
-constexpr int kBlendNearest = 3;          // a new guide's shape blended from this many old guides near it
 constexpr double kMergeCorners = 0.2;     // cell corners nearer than this share of the smallest cell size made one
 
 using P = CutPoint;
@@ -1162,6 +1161,16 @@ void dropEmptyCuts(GuideHierarchy& h) {
 }
 }  // namespace
 
+namespace {
+
+// The level the cells are in (the card shows it): their group's depth, one under the root tubes'.
+int cellLevelOf(const GuideHierarchy& h, const SubdivisionResult& result) {
+    const HierarchyGuide* cell = result.cells.empty() ? nullptr : h.guide(result.cells.front());
+    return cell ? h.groupDepth(cell->group) + 1 : 0;
+}
+
+}  // namespace
+
 SubdivisionResult subdivideRootTubes(GuideHierarchy& h, const ScalpMesh& scalp, const std::vector<GuideId>& guides,
                                      const RootSubdivisionOptions& options) {
     dropEmptyCuts(h);
@@ -1172,6 +1181,7 @@ SubdivisionResult subdivideRootTubes(GuideHierarchy& h, const ScalpMesh& scalp, 
     SubdivisionResult result;
     for (const GuideId g : roots) cutRoot(h, scalp, g, options, result);
     h.evaluate(&scalp);
+    result.cellLevel = cellLevelOf(h, result);
     return result;
 }
 
@@ -1199,6 +1209,7 @@ SubdivisionResult applySubdivisionDensity(GuideHierarchy& h, const ScalpMesh& sc
     if (fresh0.map.empty()) fresh0.map = subdivisionDensityMapName(1);
     for (const GuideId g : fresh) cutRoot(h, scalp, g, fresh0, result);
     h.evaluate(&scalp);
+    result.cellLevel = cellLevelOf(h, result);
     return result;
 }
 
@@ -1206,6 +1217,20 @@ std::string subdivisionDensityMapName(int n) {
     char digits[16];
     std::snprintf(digits, sizeof digits, "%02d", std::max(n, 1));
     return std::string(kSubdivisionDensityMap) + digits;
+}
+
+std::string subdivisionDensityMapIn(const std::vector<std::string>& maps) {
+    if (std::find(maps.begin(), maps.end(), kSubdivisionDensityMap) != maps.end()) return kSubdivisionDensityMap;
+    const std::string base = kSubdivisionDensityMap;
+    std::string older;
+    for (const std::string& m : maps) {
+        if (m.size() > base.size() && m.compare(0, base.size(), base) == 0 &&
+            std::all_of(m.begin() + static_cast<std::ptrdiff_t>(base.size()), m.end(), [](char c) { return c >= '0' && c <= '9'; }) &&
+            (older.empty() || m < older)) {
+            older = m;
+        }
+    }
+    return older;
 }
 
 std::string subdivisionDensityMapFor(const GuideHierarchy& h, const std::vector<GuideId>& guides,

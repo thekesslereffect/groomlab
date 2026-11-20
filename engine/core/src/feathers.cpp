@@ -188,4 +188,19 @@ std::map<int, std::string> featherGroupNames(const std::vector<FeatherLayerPtr>&
     return names;
 }
 
+bool hasShafts(const StrandSet& strands) {
+    const std::vector<float>* shafts = strands.strandChannel("isShaft");
+    if (!shafts || shafts->size() != strands.strandCount()) return false;
+    return std::any_of(shafts->begin(), shafts->end(), [](float v) { return v > 0.5f; });
+}
+
+void holdShafts(const StrandSet& in, StrandSet& out) {
+    const std::vector<float>* shafts = in.strandChannel("isShaft");
+    if (!shafts || shafts->size() != in.strandCount() || out.strandCount() != in.strandCount()) return;
+    for (std::size_t s = 0; s < in.strandCount(); ++s) {
+        if ((*shafts)[s] <= 0.5f || out.strandPointCount(s) != in.strandPointCount(s)) continue;
+        std::copy_n(in.strandPoints(s), in.strandPointCount(s), out.strandPoints(s));
+    }
+}
+
 }  // namespace groomlab

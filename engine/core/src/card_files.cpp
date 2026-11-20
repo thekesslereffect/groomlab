@@ -84,6 +84,28 @@ bool CardBakePaths::exists() const {
     return !prefix.empty() && fs::exists(fs::u8path(atlas()), ec) && fs::exists(fs::u8path(map("Color")), ec);
 }
 
+std::string freeCardBakeName(const std::string& directory, const std::string& name, const std::string& own,
+                             const std::function<bool(const std::string&)>& takenElsewhere, const std::vector<std::string>& suffixes) {
+    const std::string safe = fileSafeName(name);
+    std::string candidate = safe;
+    for (int k = 2;; ++k) {
+        const CardBakePaths at = CardBakePaths::in(directory, candidate);
+        bool taken = false;
+        if (own.empty() || !samePathText(at.prefix, own)) {
+            std::error_code ec;
+            if (suffixes.empty()) {
+                for (const std::string& suffix : cardBakeSuffixes()) taken = taken || fs::exists(fs::u8path(at.prefix + suffix), ec);
+                taken = taken || fs::exists(fs::u8path(at.preview()), ec);
+            } else {
+                for (const std::string& suffix : suffixes) taken = taken || fs::exists(fs::u8path(at.prefix + suffix), ec);
+            }
+        }
+        taken = taken || (takenElsewhere && takenElsewhere(at.prefix));  // (own or not: another groom reads it)
+        if (!taken) return candidate;
+        candidate = safe + "_" + std::to_string(k);
+    }
+}
+
 std::string groomFileCardBakePrefix(const std::string& stem) {
     return "groomlab/" + fileSafeName(stem) + "/cards/" + fileSafeName(stem) + "/" + stem + "_";
 }

@@ -17,7 +17,7 @@ import bpy
 from bpy.props import BoolProperty, EnumProperty, FloatProperty, StringProperty
 
 from . import definitions as defs
-from . import graph, graph_tree, graph_ui, groom, process, props
+from . import graph, graph_tree, groom, process, props
 from .graph_tree import ours
 from .graph_ui import ActionTip, action_prop, bind
 from .helper_client import cancelled, HelperError
@@ -141,17 +141,8 @@ class GROOMLAB_OT_graph_ungroup(_NodeOp):
 def inner_params(node):
     """[(inner node, [param spec])] a Compound's inner nodes offer to show on it (Maya's innerParams)."""
     definition = graph_tree.values(node).get("definition") or {}
-    specs = graph.operator_specs()
-    out = []
-    for inner in (definition.get("graph") or {}).get("nodes", []):
-        if inner.get("type") == "Input":
-            continue
-        params = [p for p in (specs.get(inner.get("type")) or {}).get("params", [])
-                  if p.get("kind") in ("float", "int", "bool", "vec3", "string") and p["name"] != "definition"
-                  and not p.get("channel")]
-        if params:
-            out.append((inner["name"], params))
-    return out
+    # The core's list, every host's (graph_controls.h compoundInnerParamsJson, through the helper).
+    return [(n["node"], n["params"]) for n in process.call("compound_inner_params", definition=definition)["inner"]]
 
 
 def shown_inner(node):
@@ -176,10 +167,8 @@ class GROOMLAB_OT_graph_show_inner(_NodeOp):
             if self.target_param in shown_inner(node):
                 graph.compound_unexpose(scalp, node.gl_name, self.target_param)
             else:
-                inner, _, param = self.target_param.partition(".")
-                taken = {p["name"] for p in graph_tree.node_param_specs(node)}
-                name = param if param not in taken else inner + param[:1].upper() + param[1:]
-                graph.compound_expose(scalp, node.gl_name, name, self.target_param)
+                # Named after the param, or node + Param when taken: the core's (graph_controls.h).
+                graph.compound_expose(scalp, node.gl_name, "", self.target_param)
         except HelperError as e:
             return _fail(self, e)
         _settle(scalp)
@@ -337,19 +326,16 @@ def key_state(scalp, node, param):
     return "animated"
 
 
-def keyable_why(node, param, spec):
-    """Why a param cannot be keyed ("" when it can), as Maya's GraphModel.keyable says it."""
-    if spec is None or spec.get("kind") not in KEYABLE_KINDS:
-        return "only numbers, switches and vectors are keyed"
-    if spec.get("animatable") is False:
-        return "a count or a seed changes the strands themselves"
-    if node.gl_type == "Control":
-        return "a Control node is its slider"
-    if param in json.loads(node.gl_mapped or "{}"):
-        return "it reads a map"
-    if param in json.loads(node.gl_drivers or "{}"):
-        return "an input drives it"
-    return ""
+def keyable_why(scalp, node, param):
+    """Why a param cannot be keyed ("" when it can): the core's rule, every host's (graph_controls.h
+    notKeyable, through the helper). Without a groom, nothing to ask: ""."""
+    if scalp is None:
+        return ""
+    try:
+        from . import pipeline
+        return pipeline.call(scalp, "not_keyable", node=node.gl_name, param=param)["why"]
+    except HelperError as e:
+        return str(e)
 
 
 def ensure_control_props(scalp, names, values, spec=None):
@@ -404,8 +390,7 @@ class GROOMLAB_OT_graph_set_key(_ParamOp):
         node = _node(context, self.node)
         if node is None:
             return {"CANCELLED"}
-        why = keyable_why(node, self.param, (node.gl_param_specs or {}).get(self.param) if not node.gl_spec_json else
-                          next((s for s in graph_tree.node_param_specs(node) if s["name"] == self.param), None))
+        why = keyable_why(scalp, node, self.param)
         if why and not control_names(node, self.param):
             self.report({"WARNING"}, "Cannot be keyed: %s" % why)
             return {"CANCELLED"}
@@ -1085,73 +1070,44 @@ class GROOMLAB_OT_graph_save_preset(_Op):
 
 # ---- Copy Graph / Paste Graph --------------------------------------------------------------------
 
-def scalp_size(scalp):
-    """The scalp's size as presets record it (its largest extent in centimeters, groom space)."""
-    rt = groom.ensure(scalp)
-    got = process.call("get_scalp", session=rt.session, space="groom")
-    if not got.get("scalp"):
-        return None
-    pts = process.client().array(got["arrays"]["points"])
-    if not len(pts):
-        return None
-    size = float((pts.max(axis=0) - pts.min(axis=0)).max())
-    return size if size > 0.0 else None
-
-
 def copy_text(scalp):
     """The groom's look as text (Maya's copy_graph_text): the preset Save as Preset writes (the
     graph, the scalp's size, the layout, the backdrops), titled after the groom, with its control
     values. Pasted in Maya, the app or Blender, or saved as a .json preset."""
     graph_tree.push_positions(scalp)
     rt = groom.ensure(scalp)
-    g = dict(process.call("get_graph", session=rt.session)["graph"])
-    data = {"version": g.pop("version")} if "version" in g else {}
-    size = scalp_size(scalp)
-    if size:
-        data["size"] = size
-    data["about"] = {"title": scalp.name, "category": SHARED_CATEGORY,
-                     "description": "Copied from %s (GroomLab for Blender)" % scalp.name}
-    backdrops = g.pop("backdrops", [])
-    data.update(g)
-    if backdrops:
-        data["backdrops"] = backdrops
+    g = process.call("get_graph", session=rt.session)["graph"]
     values = {c["name"]: c["value"] for c in graph.controls(scalp) if c.get("set") and isinstance(c.get("value"), (int, float))}
-    if values:
-        data["controls"] = values
-    return json.dumps(data, indent=2)
+    # The preset's fields in their order: the core's, every host's (presets.h makePresetJson).
+    # (The size at the groom's 1x, as every host records it: the helper's paramScalpSize.)
+    return process.call("make_preset", graph=g, session=rt.session, title=scalp.name, category=SHARED_CATEGORY,
+                        description="Copied from %s (GroomLab for Blender)" % scalp.name, controls=values)["text"]
 
 
-def _unfenced(text):
-    text = text.strip()
-    if text.startswith("```"):
-        first, _, rest = text.partition("\n")
-        if rest.rstrip().endswith("```") and len(first.strip("`").strip()) <= 10:
-            return rest.rstrip()[:-3].strip()
-    return text
-
-
-def parse_text(text):
-    """The preset a pasted text holds (JSON only, never run): ValueError saying why otherwise."""
+def parse_text(text, removed=None):
+    """The preset a pasted text holds (JSON only, never run): the core's checks, every host's
+    (presets.h pastedGraphFromText through the helper: a ``` block, a .groom's graph, the limits,
+    the shape, the node types, the params against their specs, the graph whole), params naming
+    files on other machines taken out (`removed`, a dict: "node.param" -> path of those). ValueError
+    saying why otherwise."""
     if not isinstance(text, str) or not text.strip():
         raise ValueError("cannot paste a graph: the clipboard is empty")
-    if len(text) > 4 * 1024 * 1024:  # the core's limit (presets.h kMaxPresetText; the helper checks the rest)
-        raise ValueError("cannot paste a graph: the text is more than any groom's graph (at most 4 MB)")
     try:
-        data = json.loads(_unfenced(text))
-    except ValueError as e:
-        raise ValueError("cannot paste a graph: the text is not a GroomLab graph (%s)" % e)
-    if isinstance(data, dict) and isinstance(data.get("graph"), dict) and "nodes" not in data:
-        data = data["graph"]  # a .groom's graph
-    if not isinstance(data, dict) or not isinstance(data.get("nodes"), list):
-        raise ValueError("cannot paste a graph: the text is not a GroomLab graph (no nodes)")
-    return data
+        r = process.call("preset_from_text", text=text, paste=True)
+    except HelperError as e:
+        raise ValueError("cannot paste a graph: %s" % e.message)
+    if removed is not None:
+        removed.update(r.get("removed") or {})
+    return r["preset"]
 
 
 def paste_text(scalp, text):
     """Replace the groom's graph with a look copied as text (copy_text, or a preset's JSON): fitted
     to this scalp (from its "size"), its layout, backdrops and control values: the helper applies it
-    as a preset. Returns the helper's answer (nodes, fitFactor, missingMaps)."""
-    data = parse_text(text)
+    as a preset. Returns the helper's answer (nodes, fitFactor, missingMaps) and "removed" ("node.param":
+    path of the params naming files on other machines, taken out)."""
+    removed = {}
+    data = parse_text(text, removed)
     rt = groom.ensure(scalp)
     fd, path = tempfile.mkstemp(prefix="groomlab_paste_", suffix=".json")
     try:
@@ -1172,6 +1128,7 @@ def paste_text(scalp, text):
         graph.set_backdrops(scalp, data["backdrops"])
         graph_tree.rebuild(scalp, replaced=True)
     groom.mark(scalp, "eval")
+    r["removed"] = removed
     return r
 
 
@@ -1215,6 +1172,8 @@ class GROOMLAB_OT_graph_paste(_Op):
             return _fail(self, e)
         missing = [m["name"] for m in r.get("missingMaps", [])]
         note = " It reads maps this groom has not painted: %s." % ", ".join(missing) if missing else ""
+        if r.get("removed"):
+            note += " Left out files on another machine: %s." % ", ".join(sorted(r["removed"]))
         self.report({"INFO"}, "Pasted a graph of %d nodes (Ctrl+Z undoes it).%s" % (r.get("nodes", 0), note))
         if _ge().editor_tree(context) is not None:
             bpy.ops.node.view_all()

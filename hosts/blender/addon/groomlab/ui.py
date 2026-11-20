@@ -3,7 +3,6 @@
 exports. Presets and the graph's nodes live in the Graph Editor (its Presets menu and sidebar), as in
 Maya, not in the 3D view."""
 
-import re
 
 import bpy
 
@@ -12,7 +11,9 @@ from .ops import active_groom
 
 
 def _words(name):
-    return re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", name).replace("_", " ").capitalize()
+    """A param's label as every host writes it (graph_tree.pretty: the core's paramLabel rule)."""
+    from .graph_tree import pretty
+    return pretty(name)
 
 
 def _wrap(layout, text, icon="NONE", width=48):

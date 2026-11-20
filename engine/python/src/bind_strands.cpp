@@ -13,7 +13,10 @@
 #include "groomlab/scale_maps.h"
 #include "groomlab/scales.h"
 #include "groomlab/subdivision.h"
+#include "groomlab/curve.h"
 #include "groomlab/texture.h"
+#include "groomlab/asset_files.h"
+#include "groomlab/udim.h"
 
 namespace groomlab::py_bind {
 
@@ -471,6 +474,82 @@ void bindStrands(py::module_& m) {
           [](const std::string& path) { return std::const_pointer_cast<Texture>(loadTexture(path)); },
           py::arg("path"), "Loads an image through the process-wide cache. Raises TextureError.");
     m.def("file_stamp", &fileStamp, py::arg("path"), "Hash of a file's path, size and modification time (0 if missing).");
+    m.def("resample_by_arc_length",
+          [](const std::vector<Vec3f>& points, std::size_t count) { return resampleByArcLength(points.data(), points.size(), count); },
+          py::arg("points"), py::arg("count"), "A polyline as `count` points evenly spaced along its length (curve.h, every host's).");
+    m.def("is_gray_image", [](const std::string& path) { return isGrayImage(*loadTexture(path)); }, py::arg("path"),
+          "Whether an image (a UDIM tile set: every tile) holds no color, r = g = b everywhere. Raises TextureError.");
+    m.def("same_map_image", &sameMapImage, py::arg("source"), py::arg("target"),
+          "Whether a texture map's image at target is the one at source (a UDIM tile set: every tile).");
+    m.def("copy_map_image", &copyMapImage, py::arg("source"), py::arg("target"),
+          "A texture map's image copied (a UDIM tile set: every tile), nothing overwritten; the files written.");
+    m.def("map_image_moves", &mapImageMoves, py::arg("source"), py::arg("target"),
+          "The (from, to) files a texture map's image copied or moved from source to target is (a tile set: each tile).");
+    m.def("graph_file_params", &graphFileParams, py::arg("graph_json"),
+          "[(label, path)]: every graph param naming a file (node.param; compound/inner.param), every host's list.");
+    m.def("with_graph_file_params",
+          [](const std::string& graphJson, const std::map<std::string, std::string>& paths) { return withGraphFileParams(graphJson, paths); },
+          py::arg("graph_json"), py::arg("paths"), "The graph with the file params `paths` labels naming their new paths.");
+    m.def(
+        "follow_scene_groom_file",
+        [](const std::string& file, const std::string& oldScene, const std::string& newScene) {
+            const FollowedGroomFile f = followSceneGroomFile(file, oldScene, newScene);
+            py::dict out;
+            out["path"] = f.path;
+            out["copied"] = f.copied;
+            out["renamed"] = f.renamed;
+            return out;
+        },
+        py::arg("file"), py::arg("old_scene"), py::arg("new_scene"),
+        "Save As: the scene's own groom file copied beside the new scene (asset_files.h): {path ('' not the scene's), copied, renamed}.");
+    m.def("free_file_path", &freeFilePath, py::arg("path"),
+          "`path` when nothing is there (a file, or a tile set it names), else the first free <stem>_2<ext>... beside it.");
+    m.def("is_network_path", &isNetworkPath, py::arg("path"), "Whether a path is on another machine (//host/share).");
+    m.def("file_there", &fileThere, py::arg("path"),
+          "Whether a file a groom names is there: a file, or a UDIM tile set when any tile is (every host's check).");
+    py::class_<FileIndex>(m, "FileIndex", "A folder's files by name for Find Missing Files (index_folder).");
+    m.def("index_folder", &indexFolder, py::arg("folder"), py::arg("recursive") = true,
+          "A folder's files (and UDIM tile sets) by name, as every host's Find Missing Files looks them up.");
+    m.def("match_missing_file",
+          [](const FileIndex& index, const std::string& stored) {
+              std::vector<std::string> candidates;
+              const std::string found = matchMissingFile(index, stored, &candidates);
+              return py::make_tuple(found, candidates);
+          },
+          py::arg("index"), py::arg("stored"),
+          "(path, []) for the file of `index` a stored path names, else ('', candidates): several of its name, none telling apart.");
+    // Save As (every host's FileFollower): a file a scene names copied into the new scene's folder.
+    py::class_<FileFollower>(m, "FileFollower",
+                             "Save As: the files a scene names copied from its old folder into the new one's (asset_files.h).")
+        .def(py::init<std::string, std::string, std::string, std::string, std::vector<std::pair<std::string, std::string>>>(),
+             py::arg("old_base"), py::arg("old_root"), py::arg("new_base"), py::arg("new_root"),
+             py::arg("extra_roots") = std::vector<std::pair<std::string, std::string>>{})
+        .def("follow", &FileFollower::follow, py::arg("stored"),
+             "The stored path's new value (the file, a UDIM set's every tile, copied), or the path itself when it stays.")
+        .def("follow_prefix", &FileFollower::followPrefix, py::arg("prefix"), py::arg("suffixes"),
+             "A set of files sharing a prefix (a card bake) followed together: the new prefix.")
+        .def("copied", &FileFollower::copied, "The files written (absolute).")
+        .def("warnings", &FileFollower::warnings, "The copies made under another name.");
+    m.def("retarget_file_readers",
+          [](const std::string& graphJson, const std::string& from, const std::string& to,
+             const std::function<std::string(const std::string&)>& resolve) {
+              bool changed = false;
+              const std::string out = retargetFileReaders(graphJson, from, to, resolve, &changed);
+              return py::make_tuple(out, changed);
+          },
+          py::arg("graph_json"), py::arg("from_path"), py::arg("to"), py::arg("resolve"),
+          "(graph, changed): the file params naming `from_path` (each read through resolve) name `to` instead.");
+    m.def("follow_graph_files",
+          [](const std::string& graphJson, const std::function<std::string(const std::string&)>& follow) {
+              bool changed = false;
+              const std::string out = followGraphFiles(graphJson, follow, &changed);
+              return py::make_tuple(out, changed);
+          },
+          py::arg("graph_json"), py::arg("follow"),
+          "(graph, changed): every file param's value given to follow(stored) and replaced by what it returns.");
+    m.def("collect_file", [](const std::string& path, const std::string& folder) { return collectFile(path, folder); },
+          py::arg("path"), py::arg("folder"),
+          "Collect Files: a file copied into folder under its own name (a UDIM set: every tile); the copy's path, '' when none is there.");
     m.def("is_image_path", &isImagePath, py::arg("name"),
           "Whether a map name is an image file the core reads (its extension, or a <UDIM> pattern): every host's rule.");
 

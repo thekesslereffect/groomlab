@@ -165,7 +165,6 @@ public:
     // ... of which (cumulative ms): the per-strand numbers, then the mapped values, then the stages' inputs.
     const double* prepareParts() const { return prepareParts_; }
     double fieldMegabytes() const { return fieldMegabytes_; }
-    std::uint64_t fieldsSerial() const { return fieldSerial_; }
     // Interpolate keeping clearance, the last run: whether it walked only the strands bound to the
     // guides it changed (the rest kept from the run before), and how many guides of how many changed.
     struct WalkStats {
@@ -356,6 +355,7 @@ private:
         const void* b = nullptr;  // Interpolate: rows; Clump: curves (fixed) or chosen; Curl: members; Collide: the collider's
         const void* c = nullptr;  // Clump: its variation; Curl: its clumps' numbers
         const void* d = nullptr;  // Clump: its neighbors
+        std::size_t samples = 0;  // Clump: its centers' samples the buffers are laid for (made from `chosen`)
         std::uint32_t aux[4] = {};
         std::shared_ptr<const void> alive[4];  // what a, b, c and d are of where nothing else keeps it (compared by address)
         bool framesMade = false;
@@ -407,7 +407,7 @@ private:
     // widths, its widths (aux 1) borrowed for the stage, which lays them out (aux 2: GatherInputs).
     void runGathered(std::size_t k, const LookCentersRun& run, const GatherInputs& layout);
     int allPoints_ = -1;
-    std::vector<float> ramps_;
+    std::vector<float> ramps_;  // the profiles kRamps holds (a run of the same writes none)
     // The last run, for timings and read-backs.
     struct Stamped {
         int kind;  // StageKind, or -1 lines, -2 copy, -4 the point texture

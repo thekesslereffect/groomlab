@@ -4,6 +4,7 @@
 #include "groomlab/stroke.h"
 
 #include <algorithm>
+#include <map>
 #include <cctype>
 #include <cmath>
 #include <stdexcept>
@@ -216,6 +217,28 @@ std::string BrushToolSettings::symmetryName() const { return brush.mirrorTopolog
 
 const char* symmetryAxisName(int axis) { return axis == 0 ? "x" : axis == 1 ? "y" : axis == 2 ? "z" : "none"; }
 
+std::optional<double> brushSettingValue(const BrushToolSettings& s, const std::string& id) {
+    if (id == "radius") return s.screenRadius;
+    if (id == "strength") return s.brush.strength;
+    if (id == "falloff") return 1.0 - s.brush.hardness;
+    if (id == "smoothStrength") return s.smoothStrength;
+    if (id == "selectedOnly") return s.selectedOnly ? 1.0 : 0.0;
+    if (id == "pressure") return s.pressure ? 1.0 : 0.0;
+    if (id == "collide") return s.brush.collide ? 1.0 : 0.0;
+    if (id == "frontFacingOnly") return s.maskByScalp ? 1.0 : 0.0;
+    if (id == "stretch") return s.brush.stretch ? 1.0 : 0.0;
+    if (id == "straighten") return s.brush.straighten ? 1.0 : 0.0;
+    if (id == "length") return s.place.length;
+    if (id == "segments") return s.place.segments;
+    if (id == "matchNeighbors") return s.place.matchNeighbors ? 1.0 : 0.0;
+    if (id == "spacing") return s.place.spacing;
+    if (id == "soloNewGuides") return s.place.soloNewGuides ? 1.0 : 0.0;
+    if (id == "alphaAngle") return s.alphaAngle;
+    if (id == "alphaSpacing") return s.alphaSpacing;
+    if (id == "alphaInvert") return s.alphaInvert ? 1.0 : 0.0;
+    return std::nullopt;
+}
+
 // ---- Place, Draw, Part, Flow ------------------------------------------------------------------
 
 std::string placeGroup(GuideHierarchy& h, const BrushSettings& b) {
@@ -406,6 +429,40 @@ const char* const kRemovedParamBrushes =
 
 float grayCtrlTarget(float value) { return value > 0.0f ? 0.0f : 1.0f; }
 
+std::string settingTargetsJson(const std::string& graphJson) {
+    const nlohmann::json graph = nlohmann::json::parse(graphJson.empty() ? std::string("{}") : graphJson, nullptr, false);
+    const nlohmann::json nodes = graph.is_object() ? graph.value("nodes", nlohmann::json::array()) : nlohmann::json::array();
+    nlohmann::json settings = nlohmann::json::array();
+    for (const PaintableSetting& s : paintableSettings()) {
+        std::string node;
+        for (const nlohmann::json& n : nodes) {
+            if (n.is_object() && n.value("type", std::string()) == s.type) {
+                node = n.value("name", std::string());
+                break;
+            }
+        }
+        settings.push_back({{"id", s.id}, {"label", s.label}, {"node", node}, {"param", s.param}, {"type", s.type},
+                            {"hint", node.empty() ? std::string("Add a ") + s.type + " node first (Graph Editor)" : std::string(s.hint)},
+                            {"kind", s.kind}});
+    }
+    std::map<std::string, nlohmann::json> specs;
+    for (const nlohmann::json& op : nlohmann::json::parse(operatorSpecsJson())) specs[op.value("type", std::string())] = op.value("params", nlohmann::json::array());
+    nlohmann::json others = nlohmann::json::array();
+    for (const nlohmann::json& n : nodes) {
+        if (!n.is_object()) continue;
+        const std::string name = n.value("name", std::string()), type = n.value("type", std::string());
+        const auto it = specs.find(type);
+        if (it == specs.end()) continue;
+        for (const nlohmann::json& p : it->second) {
+            if (!p.value("mappable", false)) continue;
+            const std::string key = name + "." + p.value("name", std::string());
+            others.push_back({{"id", key}, {"label", key}, {"node", name}, {"param", p.value("name", std::string())}, {"type", type},
+                              {"hint", p.value("description", std::string())}});
+        }
+    }
+    return nlohmann::json{{"settings", settings}, {"others", others}}.dump();
+}
+
 const std::vector<PaintableSetting>& paintableSettings() {
     static const std::vector<PaintableSetting> settings = {
         {"density", "Density", "Scatter", "density", "Where hair grows: white the node's density, black no hair (Ctrl removes hair)"},
@@ -435,8 +492,7 @@ const PaintableSetting* paintableSetting(const std::string& id) {
 namespace {
 
 nlohmann::json graphOf(const std::string& graphJson) {
-    const bool none = graphJson.empty() || graphJson == "{}";
-    nlohmann::json g = nlohmann::json::parse(none ? defaultGraphJson() : graphJson, nullptr, false);
+    nlohmann::json g = nlohmann::json::parse(graphOrDefault(graphJson), nullptr, false);
     if (g.is_discarded() || !g.is_object()) throw std::runtime_error("the graph is not valid JSON");
     return g;
 }

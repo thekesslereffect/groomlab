@@ -131,16 +131,73 @@ const char* kFileImageFlag[] = {"-fim", "-fileImage"};
 const char* kDebugStrokeTimesFlag[] = {"-dst", "-debugStrokeTimes"};
 const char* kDebugStrokeDrawsFlag[] = {"-dsd", "-debugStrokeDraws"};
 
-// A file's bytes (none when it is not there), read at once.
-FileBytes readFileBytes(const std::string& path) { return std::make_shared<const std::vector<std::uint8_t>>(fileBytes(path)); }
+// A texture map's tile set (udim.h) kept by the undo queue as one buffer: a header, then each
+// tile file's path and bytes (none: no file). One image's file is its bytes as they are.
+constexpr char kTileSetHeader[] = "GROOMLAB-UDIM-SET 1\n";
+using TileFiles = std::vector<std::pair<std::string, std::vector<std::uint8_t>>>;
+
+std::vector<std::uint8_t> packTileSet(const TileFiles& files) {
+    std::vector<std::uint8_t> out(kTileSetHeader, kTileSetHeader + sizeof(kTileSetHeader) - 1);
+    auto put64 = [&](std::uint64_t v) {
+        for (int k = 0; k < 8; ++k) out.push_back(static_cast<std::uint8_t>(v >> (8 * k)));
+    };
+    put64(files.size());
+    for (const auto& [path, bytes] : files) {
+        put64(path.size());
+        out.insert(out.end(), path.begin(), path.end());
+        put64(bytes.size());
+        out.insert(out.end(), bytes.begin(), bytes.end());
+    }
+    return out;
+}
+
+bool unpackTileSet(const std::vector<std::uint8_t>& blob, TileFiles* files) {
+    const std::size_t header = sizeof(kTileSetHeader) - 1;
+    if (blob.size() < header + 8 || !std::equal(kTileSetHeader, kTileSetHeader + header, blob.begin())) return false;
+    std::size_t at = header;
+    auto get64 = [&](std::uint64_t* v) {
+        if (at + 8 > blob.size()) return false;
+        *v = 0;
+        for (int k = 0; k < 8; ++k) *v |= static_cast<std::uint64_t>(blob[at + static_cast<std::size_t>(k)]) << (8 * k);
+        at += 8;
+        return true;
+    };
+    std::uint64_t count = 0;
+    if (!get64(&count)) return false;
+    for (std::uint64_t i = 0; i < count; ++i) {
+        std::uint64_t n = 0;
+        if (!get64(&n) || at + n > blob.size()) return false;
+        std::string path(blob.begin() + static_cast<std::ptrdiff_t>(at), blob.begin() + static_cast<std::ptrdiff_t>(at + n));
+        at += n;
+        if (!get64(&n) || at + n > blob.size()) return false;
+        files->emplace_back(std::move(path), std::vector<std::uint8_t>(blob.begin() + static_cast<std::ptrdiff_t>(at),
+                                                                       blob.begin() + static_cast<std::ptrdiff_t>(at + n)));
+        at += n;
+    }
+    return true;
+}
+
+// A file's bytes (none when it is not there), read at once: a tile set's every tile file, packed.
+FileBytes readFileBytes(const std::string& path) {
+    if (!isUdimPath(path)) return std::make_shared<const std::vector<std::uint8_t>>(fileBytes(path));
+    TileFiles files;
+    for (const std::string& file : mapImageFiles(path)) files.emplace_back(file, fileBytes(file));
+    return std::make_shared<const std::vector<std::uint8_t>>(packTileSet(files));
+}
 
 // The bytes the texture strokes in the undo queue keep.
 std::atomic<std::size_t> gHeldTextureBytes{0};
 
-// Writes the bytes (a texture map's file), or removes the file for none.
+// Writes the bytes (a texture map's file; a packed tile set: each of its files), or removes the
+// file for none.
 void writeFileBytes(const std::string& path, const std::vector<std::uint8_t>& bytes) {
     noteFileWritten();
     std::error_code ec;
+    TileFiles tiles;
+    if (unpackTileSet(bytes, &tiles)) {
+        for (const auto& [file, data] : tiles) writeFileBytes(file, data);
+        return;
+    }
     if (bytes.empty()) {
         std::filesystem::remove(std::filesystem::u8path(path), ec);
         return;
@@ -149,6 +206,24 @@ void writeFileBytes(const std::string& path, const std::vector<std::uint8_t>& by
     std::ofstream out(std::filesystem::u8path(path), std::ios::binary | std::ios::trunc);
     if (!out) throw std::runtime_error("can't write " + path);
     out.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+}
+
+// The bytes a paint's file is when written to `path`: its PNG (and `*pixels` the PNG's texels, for
+// the texture cache), or for a tile set (udim.h) each tile's PNG at udimPathFor(path), packed
+// (`*pixels` empty: the cache takes no tile set).
+std::vector<std::uint8_t> paintFileBytes(const TexturePaint& paint, const std::string& path, std::vector<std::uint8_t>* pixels) {
+    *pixels = paint.toBytes();
+    if (!paint.udim() && !isUdimPath(path)) return storedPngBytes(paint.width(), paint.height(), paint.channels(), *pixels);
+    const std::string pattern = udimPathFor(path);
+    TileFiles files;
+    // (The one image the set replaces: removed, TexturePaint::save.)
+    if (isPlainImagePath(path) && pattern != path) files.emplace_back(path, std::vector<std::uint8_t>{});
+    for (const int tile : paint.udim() ? paint.udimLayout()->tiles : std::vector<int>{kFirstUdimTile}) {
+        files.emplace_back(udimTilePath(pattern, tile),
+                           storedPngBytes(paint.tileWidth(), paint.tileHeight(), paint.channels(), paint.tileBytes(*pixels, tile)));
+    }
+    pixels->clear();
+    return packTileSet(files);
 }
 }  // namespace
 
@@ -195,14 +270,14 @@ void forgetWriter(const std::string& path) { paintedFiles().erase(path); }
 // (and the viewport) do not read the file back.
 void writePaintedFile(const std::shared_ptr<PaintedTexture>& painted, bool continuable) {
     const TexturePaint& paint = *painted->paint;
-    const std::vector<std::uint8_t> pixels = paint.toBytes();
-    writeFileBytes(painted->path, storedPngBytes(paint.width(), paint.height(), paint.channels(), pixels));
+    std::vector<std::uint8_t> pixels;
+    writeFileBytes(painted->path, paintFileBytes(paint, painted->path, &pixels));
     painted->written();
     painted->writtenWrites = fileWrites();
     painted->wrote = true;
     painted->continuable = continuable;
     paintedFiles()[painted->path] = painted;
-    primeTextureCache(painted->path, painted->stamp, textureFromPixels(paint.width(), paint.height(), paint.channels(), pixels));
+    if (!pixels.empty()) primeTextureCache(painted->path, painted->stamp, textureFromPixels(paint.width(), paint.height(), paint.channels(), pixels));
 }
 
 // The file of the groom's texture map `name` (resolved for the groom), "" when the groom has no
@@ -464,12 +539,13 @@ public:
             const FileBytes before = readFileBytes(full);
             // The PNG made once: written, kept as the file's bytes after the stroke, and what
             // reading it gives put in the texture cache (the groom does not read it back).
-            const std::vector<std::uint8_t> pixels = paint_->toBytes();
-            const FileBytes after = std::make_shared<const std::vector<std::uint8_t>>(
-                storedPngBytes(paint_->width(), paint_->height(), paint_->channels(), pixels));
+            std::vector<std::uint8_t> pixels;
+            const FileBytes after = std::make_shared<const std::vector<std::uint8_t>>(paintFileBytes(*paint_, full, &pixels));
             writeFileBytes(full, *after);
             forgetWriter(full);
-            primeTextureCache(full, fileStamp(full), textureFromPixels(paint_->width(), paint_->height(), paint_->channels(), pixels));
+            if (!pixels.empty()) {
+                primeTextureCache(full, fileStamp(full), textureFromPixels(paint_->width(), paint_->height(), paint_->channels(), pixels));
+            }
             cmd_.setTextureBytes(cmd_.groom_, full, before, after, mapsJson);
         }
         cmd_.addTexts(edit);
@@ -1369,13 +1445,7 @@ void BrushContext::showSymmetry() {
         seam_.center = b.mirrorCenter;
         seam_.topology = topology;
         seam_.points.clear();
-        // Lifted off the surface by a little of the scalp's size, so the line is not hidden in it.
-        Vec3f lo = scalp->points().front(), hi = lo;
-        for (const Vec3f& p : scalp->points()) {
-            lo = Vec3f(std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z));
-            hi = Vec3f(std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z));
-        }
-        seam_.points = symmetrySeam(*scalp, StrokeSymmetry::of(b, scalp.get()), 0.002f * (hi - lo).length());
+        seam_.points = symmetrySeam(*scalp, StrokeSymmetry::of(b, scalp.get()));  // (lifted off the surface a little)
     }
     shape_->setSymmetrySeam(seam_.points);  // (nothing when it is the line the groom has)
 }

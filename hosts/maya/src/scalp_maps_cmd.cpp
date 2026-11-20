@@ -30,6 +30,8 @@
 #include "guarded.h"
 #include "maya_inputs.h"
 #include "groomlab/scalp_maps.h"
+#include "groomlab/udim.h"
+#include "groomlab/stroke.h"
 
 namespace groomlab::maya {
 
@@ -61,38 +63,11 @@ const char* kDeleteFile[] = {"-df", "-deleteFile"};
 // rooted on them.
 const char* kFaces[] = {"-fcs", "-faces"};
 
-
-bool hasLayer(const GuideHierarchy& h, const std::string& name) {
-    const std::vector<std::string> names = h.attributeNames();
-    return std::find(names.begin(), names.end(), name) != names.end();
-}
-
-std::string kindOf(const ScalpMaps& maps, const GuideHierarchy& h, const std::string& name) {
-    const auto it = maps.maps.find(name);
-    if (it != maps.maps.end()) return it->second.kind;
-    return hasLayer(h, name) ? "guides" : "";
-}
+// (Every host's: scalp_maps.h mapKindOf / mapChannelsOf.)
+std::string kindOf(const ScalpMaps& maps, const GuideHierarchy& h, const std::string& name) { return mapKindOf(maps, &h, name); }
 
 // 1 (gray) or 4 (color); guide layers are gray; 0 for no map.
-int channelsOf(const ScalpMaps& maps, const GuideHierarchy& h, const std::string& name) {
-    const auto it = maps.maps.find(name);
-    if (it != maps.maps.end()) return it->second.channels == kColorMap ? kColorMap : kGrayMap;
-    return hasLayer(h, name) ? kGrayMap : 0;
-}
-
-// `count` vertices of a map with `channels`, every one `color` (a gray map: its r).
-std::vector<float> filledVertexMap(std::size_t count, int channels, const PaintColor& color) {
-    std::vector<float> out;
-    out.reserve(count * static_cast<std::size_t>(channels));
-    for (std::size_t i = 0; i < count; ++i) {
-        if (channels == kColorMap) {
-            out.insert(out.end(), color.begin(), color.end());
-        } else {
-            out.push_back(color[0]);
-        }
-    }
-    return out;
-}
+int channelsOf(const ScalpMaps& maps, const GuideHierarchy& h, const std::string& name) { return mapChannelsOf(maps, &h, name); }
 
 }  // namespace
 
@@ -206,7 +181,7 @@ MStatus ScalpMapsCmd::doIt(const MArgList& args) {
         const float value = static_cast<float>(std::clamp(db.isFlagSet(kValue[0]) ? [&] { double d = 0; db.getFlagArgument(kValue[0], 0, d); return d; }() : 0.0, 0.0, 1.0));
         int resolution = 1024;
         if (db.isFlagSet(kResolution[0])) db.getFlagArgument(kResolution[0], 0, resolution);
-        resolution = std::clamp(resolution, 4, 16384);
+        resolution = std::clamp(resolution, BrushToolSettings::kMinPaintResolution, BrushToolSettings::kMaxPaintResolution);
         const std::string texturePath = flagString(db, kTexture[0]).asChar();
         // A color: -fillColor, else the value as gray (alpha 1).
         PaintColor color{value, value, value, 1.0f};
@@ -257,9 +232,11 @@ MStatus ScalpMapsCmd::doIt(const MArgList& args) {
             std::error_code ec;
             const std::filesystem::path folder = std::filesystem::u8path(full).parent_path();
             if (!folder.empty()) std::filesystem::create_directories(folder, ec);
-            std::vector<std::uint8_t> before = fileStamp(full) != 0 ? fileBytes(full) : std::vector<std::uint8_t>{};
+            // (A tile set: each tile's file, udim.h.)
+            std::vector<FileState> states = mapImageStates(full, paint.udim() ? paint.udimLayout()->tiles : std::vector<int>{});
             paint.save(full);
-            if (!before.empty()) rewritten_.push_back({full, std::move(before), fileBytes(full)});
+            finishFileStates(states);
+            files_.insert(files_.end(), states.begin(), states.end());
         };
         // Before rewriting a texture map's file another groom reads too: this groom's own copy.
         auto ownFile = [&](const std::string& name) {
@@ -281,12 +258,6 @@ MStatus ScalpMapsCmd::doIt(const MArgList& args) {
             if (faces.empty()) return fail(kName, "-faces names no face");
             if (!scalp) return fail(kName, "the groom has no scalp mesh");
         }
-        // A guide layer on faces: the guides rooted on them (their root's triangle in one).
-        const std::vector<std::uint8_t> faceTriangles = onFaces ? polygonTriangles(*scalp, faces) : std::vector<std::uint8_t>{};
-        auto rootedOnFaces = [&](const HierarchyGuide& g) {
-            return g.root.face >= 0 && static_cast<std::size_t>(g.root.face) < faceTriangles.size() &&
-                   faceTriangles[static_cast<std::size_t>(g.root.face)] != 0;
-        };
 
         try {
             if (db.isFlagSet(kAdd[0])) {
@@ -297,28 +268,22 @@ MStatus ScalpMapsCmd::doIt(const MArgList& args) {
                 if (makeColor && kind == "guides") {
                     return fail(kName, "a guide layer is gray: make a color map on the scalp's vertices or as a texture");
                 }
-                // On faces: 0 (a color map: black, alpha 1) with the value or color on those faces.
-                const PaintColor base{0.0f, 0.0f, 0.0f, 1.0f};
+                // (Every host's New Map: scalp_paint.h newVertexMapValues, newTextureMapPaint, addGuideLayer.)
+                const int channels = makeColor ? kColorMap : kGrayMap;
+                const PaintColor fill = makeColor ? color : PaintColor{value, value, value, 1.0f};
                 if (kind == "guides") {
-                    for (const HierarchyGuide& g : h->guides()) {
-                        if (h->groupDepth(g.group) != 0) continue;  // children inherit
-                        h->setAttribute(g.id, name, !onFaces || rootedOnFaces(g) ? value : 0.0f);
-                    }
+                    addGuideLayer(*h, name, value, scalp.get(), onFaces ? faces : std::vector<std::int32_t>{});
                     guidesChanged = true;
                 } else if (kind == "vertices") {
                     if (!scalp) return fail(kName, "the groom has no scalp mesh");
-                    const int channels = makeColor ? kColorMap : kGrayMap;
-                    ScalpMapEntry entry{"vertices", filledVertexMap(scalp->pointCount(), channels, onFaces ? base : color), ""};
-                    if (onFaces) fillVertexMapFaces(entry.values, channels, kAllChannels, color, PaintMode::Replace, *scalp, faces);
+                    ScalpMapEntry entry{"vertices", newVertexMapValues(*scalp, channels, fill, onFaces ? faces : std::vector<std::int32_t>{}), ""};
                     entry.channels = channels;
                     maps.maps[name] = std::move(entry);
                     mapsChanged = true;
                 } else if (kind == "texture") {
                     if (texturePath.empty()) return fail(kName, "a texture map needs -texture <file>");
                     if (!scalp) return fail(kName, "the groom has no scalp mesh");
-                    TexturePaint paint = makeColor ? TexturePaint(*scalp, resolution, resolution, onFaces ? base : color)
-                                                   : TexturePaint(*scalp, resolution, resolution, onFaces ? 0.0f : value);
-                    if (onFaces) paint.fillTriangles(faceTriangles, color, kAllChannels);
+                    TexturePaint paint = newTextureMapPaint(*scalp, channels, fill, resolution, onFaces ? faces : std::vector<std::int32_t>{});
                     const std::string stored = freshTexture(texturePath);
                     writeTexture(paint, stored);
                     ScalpMapEntry entry{"texture", {}, stored};
@@ -336,8 +301,10 @@ MStatus ScalpMapsCmd::doIt(const MArgList& args) {
                     h->removeAttribute(name);
                     guidesChanged = true;
                 } else {
-                    // A texture map's file stays on disk, unless -deleteFile and nothing else
-                    // reads it (another map of this groom, another groom): its bytes kept for undo.
+                    // A texture map's file stays on disk, unless -deleteFile, it is in the groom's
+                    // masks folder (one GroomLab made: every host's rule) and nothing else reads it
+                    // (another map of this groom, another groom): its bytes kept for undo; a tile
+                    // set's every tile (udim.h).
                     const std::string file = kind == "texture" ? resolve(maps.maps[name].texture) : "";
                     maps.maps.erase(name);
                     mapsChanged = true;
@@ -345,8 +312,10 @@ MStatus ScalpMapsCmd::doIt(const MArgList& args) {
                         std::any_of(maps.maps.begin(), maps.maps.end(), [&](const auto& m) {
                             return m.second.kind == "texture" && sameFile(resolve(m.second.texture), file);
                         }));
-                    if (db.isFlagSet(kDeleteFile[0]) && !file.empty() && !shared && fileStamp(file) != 0) {
-                        deleted_ = {file, fileBytes(file), {}};
+                    if (db.isFlagSet(kDeleteFile[0]) && mapImageDeletable(file, assetFolder("masks") + "/" + assetName(groomPath), shared)) {
+                        for (FileState& tile : mapImageStates(file)) {
+                            if (tile.before) deleted_.push_back(std::move(tile));  // (after: none)
+                        }
                     }
                 }
             } else if (db.isFlagSet(kRename[0])) {
@@ -374,12 +343,15 @@ MStatus ScalpMapsCmd::doIt(const MArgList& args) {
                             copied_ = fileUsedByOtherGroom(groomNode, source);
                             std::error_code ec;
                             std::filesystem::create_directories(std::filesystem::u8path(target).parent_path(), ec);
-                            if (copied_) {
-                                std::filesystem::copy_file(std::filesystem::u8path(source), std::filesystem::u8path(target), ec);
-                            } else {
-                                std::filesystem::rename(std::filesystem::u8path(source), std::filesystem::u8path(target), ec);
+                            // (A tile set: each tile, its set's naming kept: udim.h.)
+                            for (const auto& [from, to] : mapImageMoves(source, target)) {
+                                if (copied_) {
+                                    std::filesystem::copy_file(std::filesystem::u8path(from), std::filesystem::u8path(to), ec);
+                                } else {
+                                    std::filesystem::rename(std::filesystem::u8path(from), std::filesystem::u8path(to), ec);
+                                }
+                                if (ec) return fail(kName, ("could not rename " + from + ": " + ec.message()).c_str());
                             }
-                            if (ec) return fail(kName, ("could not rename " + source + ": " + ec.message()).c_str());
                             moved_ = {source, target};
                         }
                         node.mapped().texture = texturePath;
@@ -399,35 +371,21 @@ MStatus ScalpMapsCmd::doIt(const MArgList& args) {
                 }
                 // A color map: the color in the channels asked for, or a value in r g b (the alpha kept).
                 const unsigned mask = byColor ? fillMask : (fillMask & 0x7u);
+                // (Every host's Fill: scalp_paint.h fillGuideLayer, fillVertexMap, fillTexturePaint.)
+                const PaintColor fill = byColor ? color : PaintColor{value, value, value, 1.0f};
+                const std::vector<std::int32_t> onThese = onFaces ? faces : std::vector<std::int32_t>{};
                 if (kind == "guides") {
-                    for (const HierarchyGuide& g : h->guides()) {
-                        if (onFaces && !rootedOnFaces(g)) continue;
-                        float current = 0.0f;
-                        h->effectiveAttribute(g, name, &current);
-                        h->setAttribute(g.id, name, compositePaintValue(current, value, paintMode));
-                    }
+                    fillGuideLayer(*h, name, value, paintMode, {}, scalp.get(), onThese);
                     guidesChanged = true;
                 } else if (kind == "vertices") {
-                    ScalpMapEntry& entry = maps.maps[name];
-                    const std::size_t per = static_cast<std::size_t>(channels);
-                    if (scalp && entry.values.size() != scalp->pointCount() * per) {
-                        // Refitted to this scalp.
-                        entry.values = filledVertexMap(scalp->pointCount(), channels, PaintColor{0.0f, 0.0f, 0.0f, 1.0f});
-                    }
-                    const PaintColor target = per == 1 ? PaintColor{value, value, value, value} : color;
-                    if (onFaces) {
-                        fillVertexMapFaces(entry.values, channels, mask, target, paintMode, *scalp, faces);
-                    } else {
-                        fillMapValues(entry.values, channels, mask, target, paintMode);
-                    }
+                    if (!scalp) return fail(kName, "the groom has no scalp mesh");
+                    fillVertexMap(maps.maps[name].values, channels, mask, fill, paintMode, *scalp, onThese);
                     mapsChanged = true;
                 } else {
                     // A file another groom reads too: this groom gets its own copy first.
                     mapsChanged = ownFile(name) || mapsChanged;
                     TexturePaint paint = texturePaint(maps.maps[name].texture, channels);
-                    if (onFaces) paint.fillTriangles(faceTriangles, channels == kColorMap ? color : PaintColor{value, value, value, value}, mask, paintMode);
-                    else if (channels == kColorMap) paint.fill(color, mask, paintMode);
-                    else paint.fill(value, paintMode);
+                    fillTexturePaint(paint, mask, fill, paintMode, *scalp, onThese);
                     writeTexture(paint, maps.maps[name].texture);
                 }
             } else if (db.isFlagSet(kConvert[0])) {
@@ -441,57 +399,47 @@ MStatus ScalpMapsCmd::doIt(const MArgList& args) {
                     setResult(MString(to.c_str()));
                     return MS::kSuccess;
                 }
-                // The source as a function on the scalp: per vertex, or an image; gray or color.
-                std::vector<float> vertices;
-                TexturePtr image;
-                const GuideSet flat = from == "guides" ? h->flatten() : GuideSet{};
-                const int channels = channelsOf(maps, *h, name);
+                // The source as its kind holds it, converted (every host's: scalp_paint.h convertMap;
+                // a guide layer read at the guides' roots on the scalp).
+                MapSource source;
+                source.kind = from;
+                source.channels = channelsOf(maps, *h, name);
                 if (from == "vertices") {
-                    vertices = maps.maps[name].values;
-                    if (vertices.size() != scalp->pointCount() * static_cast<std::size_t>(channels)) {
-                        return fail(kName, ("map " + name + " does not fit this scalp").c_str());
-                    }
+                    source.vertices = maps.maps[name].values;
                 } else if (from == "texture") {
                     const std::string full = resolve(maps.maps[name].texture);
                     if (fileStamp(full) == 0) return fail(kName, ("map " + name + "'s image is missing: " + full).c_str());
-                    image = loadTexture(full);
+                    source.image = loadTexture(full);
                 }
-                // Into the target.
-                if (to == "vertices") {
-                    std::vector<float> values = from == "guides" ? vertexMapFromGuides(flat, name, *scalp)
-                                                                 : vertexMapFromTexture(*image, *scalp, channels);
-                    ScalpMapEntry entry{"vertices", std::move(values), ""};
-                    entry.channels = channels;
-                    maps.maps[name] = std::move(entry);
-                } else if (to == "texture") {
+                std::string stored;
+                if (to == "texture") {
                     const std::string wanted = !texturePath.empty() ? texturePath : maps.maps.count(name) ? maps.maps[name].texture : std::string();
                     if (wanted.empty()) return fail(kName, "a texture map needs -texture <file>");
-                    const std::string stored = freshTexture(wanted);
-                    TexturePaint paint = from == "guides" ? textureFromGuides(flat, name, *scalp, resolution, resolution)
-                                                          : textureFromVertexMap(vertices, channels, *scalp, resolution, resolution);
-                    writeTexture(paint, stored);
-                    ScalpMapEntry entry{"texture", {}, stored};
-                    entry.channels = channels;
+                    stored = freshTexture(wanted);
+                }
+                MapConverted converted;
+                try {
+                    converted = convertMap(name, source, to, *scalp, *h, resolution);
+                } catch (const std::invalid_argument& e) {
+                    return fail(kName, e.what());
+                }
+                if (converted.colorLost) {
+                    MGlobal::displayWarning(MString(kName) + ": " + name.c_str() +
+                                            " is a color map; on the guides it keeps its luminance (a guide layer is gray)");
+                }
+                if (to == "vertices") {
+                    ScalpMapEntry entry{"vertices", std::move(converted.vertices), ""};
+                    entry.channels = source.channels;
                     maps.maps[name] = std::move(entry);
-                } else {  // guides: gray, a color map's luminance
-                    if (channels == kColorMap) {
-                        MGlobal::displayWarning(MString(kName) + ": " + name.c_str() +
-                                                " is a color map; on the guides it keeps its luminance (a guide layer is gray)");
-                        if (from == "vertices") vertices = convertMapChannels(vertices, kColorMap, kGrayMap);
-                    }
-                    std::vector<StrandRoot> roots;
-                    for (const HierarchyGuide& g : h->guides()) roots.push_back(g.root);
-                    const std::vector<float> values = from == "vertices" ? rootValuesFromVertexMap(vertices, *scalp, roots)
-                                                                          : rootValuesFromTexture(*image, *scalp, roots);
-                    std::size_t i = 0;
-                    for (const HierarchyGuide& g : h->guides()) h->setAttribute(g.id, name, values[i++]);
-                    guidesChanged = true;
+                } else if (to == "texture") {
+                    writeTexture(*converted.texture, stored);
+                    ScalpMapEntry entry{"texture", {}, stored};
+                    entry.channels = source.channels;
+                    maps.maps[name] = std::move(entry);
+                } else {
                     maps.maps.erase(name);
                 }
-                if (from == "guides") {
-                    h->removeAttribute(name);
-                    guidesChanged = true;
-                }
+                if (to == "guides" || from == "guides") guidesChanged = true;
                 mapsChanged = true;
                 setResult(MString(to.c_str()));
             } else if (db.isFlagSet(kRelink[0])) {
@@ -510,25 +458,23 @@ MStatus ScalpMapsCmd::doIt(const MArgList& args) {
                     const std::string source = resolve(flagString(db, kCopyFrom[0]).asChar());
                     if (fileStamp(source) == 0) return fail(kName, ("no image at " + source).c_str());
                     const TexturePtr image = loadTexture(source);  // throws when it is not an image
-                    if (image->isUdim()) return fail(kName, "a map's image is one file over UVs 0-1, not a UDIM tile set");
                     stored = freshTexture(texturePath);
                     const std::string full = resolve(stored);
                     std::error_code ec;
                     const std::filesystem::path folder = std::filesystem::u8path(full).parent_path();
                     if (!folder.empty()) std::filesystem::create_directories(folder, ec);
-                    if (isPngPath(source)) {
+                    if (isPngPath(source) && !image->isUdim()) {
                         std::filesystem::copy_file(std::filesystem::u8path(source), std::filesystem::u8path(full), ec);
                         if (ec) return fail(kName, ("could not copy " + source + ": " + ec.message()).c_str());
                     } else {
-                        writeImagePng(*image, full);
+                        writeImagePng(*image, full);  // (a tile set: each tile, at udimPathFor(full))
                     }
-                    created_ = {full, {}, fileBytes(full)};
+                    for (const std::string& file : mapImageFiles(full, image->isUdim() ? image->udimTiles() : std::vector<int>{})) {
+                        files_.push_back(FileState{file, std::nullopt, readFileState(file)});  // (made here: none before)
+                    }
                 } else {
                     const std::string full = resolve(stored);
-                    if (fileStamp(full) == 0) return fail(kName, ("no image at " + full).c_str());
-                    if (loadTexture(full)->isUdim()) {
-                        return fail(kName, "a map's image is one file over UVs 0-1, not a UDIM tile set");
-                    }
+                    if (fileStamp(full) == 0) return fail(kName, ("no image at " + full).c_str());  // (a tile set: any tile)
                 }
                 if (kind == "guides") {
                     h->removeAttribute(name);
@@ -585,7 +531,7 @@ MStatus ScalpMapsCmd::doIt(const MArgList& args) {
         }
         undoable_ = true;
         MStatus done = modifier_.doIt();
-        removeDeleted();
+        restoreFileStates(deleted_, true);
         return done;
     });
 }
@@ -596,9 +542,11 @@ namespace {
 // the map then names a file that is not there, and the Map node reports it).
 void moveFile(const std::string& from, const std::string& to) {
     if (from.empty() || to.empty()) return;
-    std::error_code ec;
-    std::filesystem::rename(std::filesystem::u8path(from), std::filesystem::u8path(to), ec);
-    if (ec) MGlobal::displayWarning(MString(ScalpMapsCmd::kName) + ": could not move " + from.c_str() + " to " + to.c_str());
+    for (const auto& [a, b] : mapImageMoves(from, to)) {  // (a tile set: each tile)
+        std::error_code ec;
+        std::filesystem::rename(std::filesystem::u8path(a), std::filesystem::u8path(b), ec);
+        if (ec) MGlobal::displayWarning(MString(ScalpMapsCmd::kName) + ": could not move " + a.c_str() + " to " + b.c_str());
+    }
 }
 
 // A renamed map's shared file, copied from -> to (redo), or the copy removed (undo: to only).
@@ -606,35 +554,28 @@ void copyFile(const std::string& from, const std::string& to) {
     if (to.empty()) return;
     std::error_code ec;
     if (from.empty()) {
-        std::filesystem::remove(std::filesystem::u8path(to), ec);
+        for (const std::string& file : mapImageFiles(to)) std::filesystem::remove(std::filesystem::u8path(file), ec);  // (a tile set: each tile)
         return;
     }
-    std::filesystem::copy_file(std::filesystem::u8path(from), std::filesystem::u8path(to),
-                               std::filesystem::copy_options::overwrite_existing, ec);
-    if (ec) MGlobal::displayWarning(MString(ScalpMapsCmd::kName) + ": could not copy " + from.c_str() + " to " + to.c_str());
+    for (const auto& [a, b] : mapImageMoves(from, to)) {
+        std::filesystem::copy_file(std::filesystem::u8path(a), std::filesystem::u8path(b), std::filesystem::copy_options::overwrite_existing, ec);
+        if (ec) MGlobal::displayWarning(MString(ScalpMapsCmd::kName) + ": could not copy " + a.c_str() + " to " + b.c_str());
+    }
 }
 
 }  // namespace
 
-void ScalpMapsCmd::removeDeleted() {
-    if (deleted_.path.empty()) return;
-    std::error_code ec;
-    std::filesystem::remove(std::filesystem::u8path(deleted_.path), ec);
-    if (ec) MGlobal::displayWarning(MString(kName) + ": could not delete " + deleted_.path.c_str());
-}
-
 MStatus ScalpMapsCmd::redoIt() {
     return groomlab::maya::guarded("ScalpMapsCmd::redoIt", [&]() -> MStatus {
         noteFileWritten();  // texture files may change: what kept their bytes reads them again
-        for (const FileEdit& edit : rewritten_) putFileBytes(edit.path, edit.after, kName);
-        if (!created_.path.empty()) putFileBytes(created_.path, created_.after, kName);
+        restoreFileStates(files_, true);
         if (copied_) {
             copyFile(moved_.first, moved_.second);
         } else {
             moveFile(moved_.first, moved_.second);
         }
         MStatus done = modifier_.doIt();
-        removeDeleted();
+        restoreFileStates(deleted_, true);
         return done;
     });
 }
@@ -642,13 +583,9 @@ MStatus ScalpMapsCmd::redoIt() {
 MStatus ScalpMapsCmd::undoIt() {
     return groomlab::maya::guarded("ScalpMapsCmd::undoIt", [&]() -> MStatus {
         noteFileWritten();  // texture files may change: what kept their bytes reads them again
-        if (!deleted_.path.empty()) putFileBytes(deleted_.path, deleted_.before, kName);  // before the map names it again
-        for (auto edit = rewritten_.rbegin(); edit != rewritten_.rend(); ++edit) putFileBytes(edit->path, edit->before, kName);
+        restoreFileStates(deleted_, false);  // before the map names it again
+        restoreFileStates(files_, false);
         MStatus status = modifier_.undoIt();
-        if (!created_.path.empty()) {
-            std::error_code ec;
-            std::filesystem::remove(std::filesystem::u8path(created_.path), ec);
-        }
         if (copied_) {
             copyFile("", moved_.second);
         } else {

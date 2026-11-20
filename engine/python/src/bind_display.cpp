@@ -14,7 +14,7 @@ namespace groomlab::py_bind {
 
 namespace {
 
-const char* const kParts[] = {"strands", "instances", "guides", "selection", "parts", "flow", "cards", "scalpMap", "strandMesh", "brushTubes"};
+const char* const kParts[] = {"strands", "instances", "guides", "selection", "parts", "flow", "cards", "scalpMap", "strandMesh", "braidTubes", "brushTubes"};
 static_assert(sizeof(kParts) / sizeof(kParts[0]) == kDisplayPartCount, "a name for every display part");
 const char* const kLayers[] = {"dormantWire", "dormantFilled", "activeWire", "selection"};
 
@@ -22,7 +22,7 @@ DisplayPart partNamed(const std::string& name) {
     for (std::size_t i = 0; i < kDisplayPartCount; ++i) {
         if (name == kParts[i]) return static_cast<DisplayPart>(i);
     }
-    throw py::value_error("no display part '" + name + "' (strands, instances, guides, selection, parts, flow, cards, scalpMap, strandMesh, brushTubes)");
+    throw py::value_error("no display part '" + name + "' (strands, instances, guides, selection, parts, flow, cards, scalpMap, strandMesh, braidTubes, brushTubes)");
 }
 
 // A geometry's stream as a read-only view with `width` floats (or indices) per row.
@@ -110,6 +110,8 @@ void bindDisplay(py::module_& m) {
         .def_readwrite("flow", &DisplaySettings::flow)
         .def_readwrite("draw_cards", &DisplaySettings::drawCards)
         .def_readwrite("card_textures", &DisplaySettings::cardTextures)
+        .def_readwrite("braid_tubes", &DisplaySettings::braidTubes,
+                       "Show Tubes: the Braid nodes whose section tubes draw, their names one a line (braid_tube_names).")
         .def_readwrite("theme", &DisplaySettings::theme);
 
     py::class_<DisplayGeometry, std::shared_ptr<DisplayGeometry>>(
@@ -185,8 +187,10 @@ void bindDisplay(py::module_& m) {
             "update",
             [](DisplayBuilder& b, const PyView& view, const DisplaySettings& settings, bool stroke, py::object selection,
                std::uint64_t selectionHash, py::object prototypes, py::object scalpMap, bool scalpMapTexture,
-               std::uint64_t scalpMapTextureGeneration) {
+               std::uint64_t scalpMapTextureGeneration, const GroomSession* session) {
                 DisplayInputs in = DisplayInputs::fromView(view.result, stroke);
+                // Show Tubes (DisplaySettings::braidTubes): the session's mesh of the nodes shown.
+                if (session) fillBraidTubes(settings, in, [session]() -> const GroomSession& { return *session; });
                 std::map<GuideId, float> weights;
                 if (!selection.is_none()) weights = selection.cast<std::map<GuideId, float>>();
                 in.selection = [weights] { return weights; };
@@ -222,11 +226,13 @@ void bindDisplay(py::module_& m) {
             py::arg("view"), py::arg("settings"), py::arg("stroke") = false, py::arg("selection") = py::none(),
             py::arg("selection_hash") = 0, py::arg("prototypes") = py::none(), py::arg("scalp_map") = py::none(),
             py::arg("scalp_map_texture") = false, py::arg("scalp_map_texture_generation") = 0,
+            py::arg("session") = static_cast<const GroomSession*>(nullptr),
             "The items for a GroomSession.view() result. stroke: a brush stroke is live (sculpt_display). selection: "
             "{guide id: weight} (1 selected, below soft), with a selection_hash that changes with it. prototypes: "
             "{name: (points, normals, triangles)} for the Instance nodes' meshes (per face-vertex). scalp_map: a "
             "ScalpMapView (GroomSession.scalp_map_view) shown on the scalp; scalp_map_texture: the host holds its "
-            "image as a texture (and scalp_map_texture_generation counts the textures it made).")
+            "image as a texture (and scalp_map_texture_generation counts the textures it made). session: the "
+            "GroomSession the view is of, for Show Tubes (settings.braid_tubes: the 'braidTubes' item).")
         .def("items", [](const DisplayBuilder& b) { return frameDict(b.frame()); }, "The items of the last update.")
         .def_property_readonly("rebuilt_parts",
                                [](const DisplayBuilder& b) {
@@ -267,6 +273,49 @@ void bindDisplay(py::module_& m) {
     auto session = py::reinterpret_borrow<py::class_<GroomSession>>(py::type::of<GroomSession>());
     session.def("scalp_map_view", &GroomSession::scalpMapView, py::arg("name"), py::arg("channel") = std::string("rgb"),
                 "A painted map (or guide layer) as the scalp shows it, for DisplayBuilder.update(scalp_map=...).");
+
+    py::class_<BraidTubeMesh, std::shared_ptr<BraidTubeMesh>>(
+        m, "BraidTubeMesh",
+        "Show Tubes' mesh (GroomSession.braid_tube_mesh): the shown Braid nodes' section tubes as one quad mesh, "
+        "read-only views: points, normals (n, 3), colors (n, 3: each point's section color), uvs (n, 2: along its "
+        "tube, round its ring), quads (m, 4) uint32, facing out.")
+        .def_property_readonly("points", [](py::object self) { return pointsView(self, self.cast<const BraidTubeMesh&>().points, true); })
+        .def_property_readonly("normals", [](py::object self) { return pointsView(self, self.cast<const BraidTubeMesh&>().normals, true); })
+        .def_property_readonly("colors",
+                               [](py::object self) {
+                                   const BraidTubeMesh& m = self.cast<const BraidTubeMesh&>();
+                                   return makeView(self, reinterpret_cast<const float*>(m.colors.data()),
+                                                   {static_cast<py::ssize_t>(m.colors.size()), 3}, true);
+                               })
+        .def_property_readonly("uvs",
+                               [](py::object self) {
+                                   const BraidTubeMesh& m = self.cast<const BraidTubeMesh&>();
+                                   return makeView(self, reinterpret_cast<const float*>(m.uvs.data()),
+                                                   {static_cast<py::ssize_t>(m.uvs.size()), 2}, true);
+                               })
+        .def_property_readonly("quads",
+                               [](py::object self) {
+                                   const BraidTubeMesh& m = self.cast<const BraidTubeMesh&>();
+                                   return makeView(self, reinterpret_cast<const std::uint32_t*>(m.quads.data()),
+                                                   {static_cast<py::ssize_t>(m.quads.size()), 4}, true);
+                               })
+        .def("triangles", &BraidTubeMesh::triangles, "The quads as triangles (two a quad), three indices each: for a draw call.")
+        .def_readonly("tubes", &BraidTubeMesh::tubes, "How many tubes (a path's section each).")
+        .def_readonly("key", &BraidTubeMesh::key, "A hash of what it was built from: equal keys, equal meshes.");
+    session.def(
+        "braid_tube_mesh",
+        [](const GroomSession& s, const std::string& shown, int around) -> py::object {
+            const std::shared_ptr<const BraidTubeMesh> mesh = s.braidTubeMesh(shown, around);
+            if (!mesh) return py::none();
+            return py::cast(std::const_pointer_cast<BraidTubeMesh>(mesh));
+        },
+        py::arg("shown"), py::arg("around") = 0,
+        "Show Tubes: the section tubes of the Braid nodes `shown` names (one a line: DisplaySettings.braid_tubes) as "
+        "the last view left them, a BraidTubeMesh where the strands are drawn; None when nothing is shown. The same "
+        "object until a node's params, its inputs or the scalp change. around: the points round a ring (0: 12, or 24 "
+        "for a version 2 node's pressed sections).");
+    session.def_property_readonly("braid_tube_builds", &GroomSession::braidTubeBuilds,
+                                  "How many times braid_tube_mesh built a mesh (a cache hit leaves it).");
 
     m.def(
         "buffer_digest",

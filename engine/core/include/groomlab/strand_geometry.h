@@ -7,6 +7,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -63,6 +64,19 @@ struct StrandMesh {
 };
 // What `options.make` makes of these strands (Auto resolved; never Auto).
 StrandMeshOptions::Make resolveMeshMake(const StrandSet& strands, const StrandMeshOptions& options);
+
+// To Mesh as every host asks for it (Maya's groomLabConvert -strandMesh, the Blender helper's
+// strand_mesh, the app's Strands to Mesh): `make` auto, strands, scales, feathers, cards or
+// instances; `style` tube or ribbon; a tube's `sides` 3 to kMaxMeshSides; `widthScale` above 0;
+// `minWidth` 0 or more. Throws std::invalid_argument saying which is wrong.
+constexpr int kMaxMeshSides = 64;
+constexpr std::size_t kDefaultMeshStrands = 20000;  // a To Mesh's strands at most, by default
+StrandMeshOptions strandMeshOptionsFrom(const std::string& make, const std::string& style = "tube", int sides = 4,
+                                        double widthScale = 1.0, double minWidth = 0.0, bool strandUVs = false);
+// The strands a To Mesh builds its mesh of, every host's: scales, feathers, cards and instances
+// whole (their plates and rachis are the strand set's), strands as tubes or ribbons thinned to
+// `maxStrands` by ID (thinStrandsById) with their channels. None: every strand of `all` as it is.
+std::optional<StrandSet> strandsForMesh(const StrandSet& all, const StrandMeshOptions& options, std::size_t maxStrands);
 // The mesh `options.make` asks for. Scales and instances: their prototypes' meshes (the built-in
 // ones, else `prototypes`, the host's scene meshes; a scale without one is a quad, an instance
 // without one is left out), quads where a prototype's triangles pair into them (the built-in

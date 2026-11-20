@@ -24,6 +24,7 @@ none, and binds the drivers at the bind frame (the attachments are kept when bin
 
 import json
 
+import groomlab_core
 from maya import cmds
 
 from groomlab.base import undoable, _shape_of
@@ -134,38 +135,19 @@ def _attach(groom, guides_by_driver, frame):
     """Connect the drivers ({driver curve: guide IDs}), record the attachments and bind once."""
     add_drivers(groom, list(guides_by_driver))
     index_of = dict((d["curve"], d["index"]) for d in driver_curves(groom))
+    text = cmds.getAttr(groom + ".driverBind") or ""
+    for driver, ids in guides_by_driver.items():  # every host's (drive_guides.h attachGuides)
+        text = groomlab_core.driver_bind_attach(text, [int(g) for g in ids], int(index_of[_long(_shape_of(driver, "nurbsCurve"))]))
+    cmds.setAttr(groom + ".driverBind", text, type="string")
     bind = _bind(groom)
-    attached = bind.setdefault("attached", {})
-    for driver, ids in guides_by_driver.items():
-        index = index_of[_long(_shape_of(driver, "nurbsCurve"))]
-        for g in ids:
-            drivers = attached.setdefault(str(g), [])
-            if index not in drivers:
-                drivers.append(index)
-    _store(groom, bind)
     bind_drivers(groom, frame=bind.get("frame", 0) if frame is None else frame)
 
 
 def _resampled(points, count):
-    """`points` (a polyline) as `count` points evenly spaced along its length."""
-    if len(points) < 2 or count < 2:
-        return [tuple(points[0])] * max(count, 1)
-    lengths = [0.0]
-    for a, b in zip(points, points[1:]):
-        lengths.append(lengths[-1] + sum((b[i] - a[i]) ** 2 for i in range(3)) ** 0.5)
-    total = lengths[-1] or 1.0
-    out, seg = [], 0
-    for k in range(count):
-        s = total * k / (count - 1)
-        while seg < len(points) - 2 and lengths[seg + 1] < s:
-            seg += 1
-        span = lengths[seg + 1] - lengths[seg]
-        t = (s - lengths[seg]) / span if span > 0 else 0.0
-        t = min(max(t, 0.0), 1.0)
-        a, b = points[seg], points[seg + 1]
-        out.append(tuple(a[i] + (b[i] - a[i]) * t for i in range(3)))
-    return out
-
+    """`points` (a polyline) as `count` points evenly spaced along its length (the core's,
+    curve.h resampleByArcLength)."""
+    import groomlab_core
+    return [tuple(p) for p in groomlab_core.resample_by_arc_length([tuple(p) for p in points], count)]
 
 def _guide_points(groom, guide_id):
     """A guide's points as groomed (not posed), on the scalp as it is now, in world space."""
@@ -239,29 +221,18 @@ def detach_guides(groom, guides=None, group=None, driver=None):
     """Detach guides (`guides`, else `group`'s, else the selected ones) from `driver`, or from every
     driver: they stay as groomed again. Returns how many guides were detached."""
     ids = _guide_targets(groom, guides, group)
-    bind = _bind(groom)
-    attached = bind.get("attached", {})
     index = None
     if driver is not None:
         shape = _long(_shape_of(driver, "nurbsCurve"))
         index = next((d["index"] for d in driver_curves(groom) if d["curve"] == shape), None)
-    count = 0
-    for g in ids:
-        drivers = attached.get(str(g))
-        if not drivers:
-            continue
         if index is None:
-            del attached[str(g)]
-        elif index in drivers:
-            drivers.remove(index)
-            if not drivers:
-                del attached[str(g)]
-        else:
-            continue
-        count += 1
-    if not attached:
-        bind.pop("attached", None)
-    _store(groom, bind)
+            return 0  # not one of the groom's drivers: nothing is attached to it
+    text = cmds.getAttr(groom + ".driverBind") or ""
+    if not text:
+        return 0
+    # Every host's (drive_guides.h detachGuides).
+    text, count = groomlab_core.driver_bind_detach(text, [int(g) for g in ids], None if index is None else int(index))
+    cmds.setAttr(groom + ".driverBind", text, type="string")
     return count
 
 
@@ -295,12 +266,9 @@ def bind_drivers(groom, frame=0):
     their place round their drivers as they were there. The attachments are kept. Stored in the
     groom's driverBind (saved with the scene and in .groom files). Returns how many drivers were
     bound."""
+    # (the attached guides kept by the command: the core's reboundDriversJson, every host's)
     text = cmds.groomLabDrivers(groom, bind=True, frame=float(frame)) or ""
     bind = json.loads(text) if text else {}
-    attached = _bind(groom).get("attached")
-    if attached:
-        bind["attached"] = attached
-        bind.setdefault("frame", int(round(frame)))
     _store(groom, bind)
     return len(bind.get("drivers", []))
 

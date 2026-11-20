@@ -123,18 +123,11 @@ public:
         std::size_t drawnStrands = 0, totalStrands = 0, impostors = 0, blendSegments = 0, rebuilds = 0, draws = 0;
     };
     const LodStats& lodStats() const { return lodStats_; }
-    // The key light's direction (toward the light, world space) and the ambient floor (the
-    // line path's).
-    void setLight(const QVector3D& toward, float ambient) {
-        lightDirection_ = toward.normalized();
-        ambient_ = ambient;
-    }
 
     // ---- Partial uploads and the GPU preview ------------------------------------------------------
     // Partial writes of the strand buffers and textures (default on; GROOMLAB_APP_PARTIAL_UPLOADS=0
     // turns them off): off, a changed item is written whole (the tests compare both).
     void setPartialUploads(bool on);
-    bool partialUploads() const { return partialUploads_; }
     // The lookdev hair's whole writes built ahead, off this thread (LookdevRenderer::setBuildAhead).
     void setBuildAhead(bool on) { lookdev_.setBuildAhead(on); }
     // The last write of the strand lines' buffers: whether it wrote only the changed strands,
@@ -216,7 +209,7 @@ private:
     // LinesColored: other lines.
     enum class Kind {
         LinesLit, Lines, LinesColored, StrandLines, StrandLinesColored, Overlay, OverlayColored, Triangles, TrianglesColored,
-        Surface, Dots, DotsTested, MapTextured, Count
+        Surface, SurfaceColored, Dots, DotsTested, MapTextured, Count
     };
     struct GpuItem;
     struct Pipeline;

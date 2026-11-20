@@ -128,10 +128,6 @@ class LengthKeysBox(QtWidgets.QWidget):
         column.addWidget(self.status)
         self._state = None
 
-    def change_name(self):
-        """How guides take a new length: "scale" or "trim"."""
-        return next((v for v, b in self.change_buttons.items() if b.isChecked()), "scale")
-
     def edit(self, words):
         if getattr(self, "_filling", False):
             return

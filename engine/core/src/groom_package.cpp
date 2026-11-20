@@ -8,6 +8,7 @@
 #include <map>
 #include <set>
 #include <sstream>
+#include <stdexcept>
 
 #include <nlohmann/json.hpp>
 
@@ -15,6 +16,8 @@
 #include "groomlab/card_files.h"
 #include "groomlab/display.h"
 #include "groomlab/paths.h"
+#include "groomlab/texture.h"
+#include "groomlab/udim.h"
 
 namespace groomlab {
 
@@ -55,7 +58,12 @@ public:
             target = fs::u8path(folder_) / (name.stem().u8string() + "_" + std::to_string(k) + name.extension().u8string());
         }
         taken_[key(target)] = key(fs::u8path(source));
-        copy(source, target.generic_u8string());
+        if (!isFile(source) && isUdimPath(source)) {
+            // A texture map's tile set (udim.h): each tile, into the set the copy's path names.
+            for (const auto& [from, to] : mapImageMoves(source, target.generic_u8string())) copy(from, to);
+        } else {
+            copy(source, target.generic_u8string());
+        }
         return target.generic_u8string();
     }
 
@@ -115,6 +123,32 @@ std::string groomFileFolder(const std::string& groomFilePath, const std::string&
     return folder + "/" + fileSafeName(groomName.empty() ? stem : groomName);
 }
 
+GroomFile readGroomForHost(const std::string& path, int index, const std::string& upAxis, std::vector<std::string>* names,
+                           std::string* fileUpAxis) {
+    std::vector<GroomFile> grooms = readGroomFiles(path);
+    if (index < 0 || index >= static_cast<int>(grooms.size())) {
+        throw std::invalid_argument(path + " holds " + std::to_string(grooms.size()) + " groom" + (grooms.size() == 1 ? "" : "s") +
+                                    ", no groom " + std::to_string(index));
+    }
+    if (names) {
+        names->clear();
+        for (const GroomFile& g : grooms) names->push_back(g.name);
+    }
+    GroomFile file = std::move(grooms[static_cast<std::size_t>(index)]);
+    if (file.units != "cm") {
+        throw GroomFileError(path + ": its units are " + file.units + "; GroomLab reads grooms in centimeters (Maya's own unit)");
+    }
+    if (fileUpAxis) *fileUpAxis = file.upAxis.empty() ? std::string("Y") : file.upAxis;
+    convertUpAxis(file, upAxis);
+    if (file.cardBake.empty()) {
+        // A bake the app wrote beside the groom after saving it (or earlier versions' places), as
+        // the app adopts one: its stamp unknown (every Cards node reads as stale until a bake).
+        const CardBakePaths beside = CardBakePaths::foundBesideGroomFile(path);
+        if (beside.exists()) file.cardBake.prefix = beside.prefix;
+    }
+    return file;
+}
+
 int groomIndex(const std::vector<GroomFile>& grooms, const std::string& name) {
     for (std::size_t i = 0; i < grooms.size(); ++i) {
         if (!name.empty() && grooms[i].name == name) return static_cast<int>(i);
@@ -169,7 +203,7 @@ GroomWriteReport writeGroomsToFile(const std::string& path, std::vector<GroomFil
             if (info.kind != "texture" || info.texture.empty()) continue;
             const std::string source = resolved(info.texture);
             std::string at = source;
-            if (!isFile(source)) {
+            if (fileStamp(source) == 0) {  // (a tile set: any tile, udim.h)
                 report.warnings.push_back("map " + name + "'s image " + source + " is not there; the file names it as it is");
             } else if (options.copyFiles) {
                 at = masks.place(source);

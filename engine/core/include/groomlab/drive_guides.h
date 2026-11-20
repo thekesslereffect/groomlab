@@ -21,6 +21,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -60,6 +61,10 @@ struct DriverBind {
     std::map<std::uint64_t, std::vector<std::uint64_t>> attached;
 
     bool empty() const { return drivers.empty(); }
+    // Attach / Detach Guides, every host's: `guides` follow driver `driver` too; or they let go of
+    // `driver` (none: of every driver), returning how many did.
+    void attachGuides(const std::vector<std::uint64_t>& guides, std::uint64_t driver);
+    std::size_t detachGuides(const std::vector<std::uint64_t>& guides, std::optional<std::uint64_t> driver = std::nullopt);
     std::string toJson() const;
     // Throws std::invalid_argument ("driverBind: <why>") on malformed text; empty text: no bind.
     static DriverBind fromJson(const std::string& text);
@@ -78,6 +83,10 @@ DriverAttachments attachmentsOf(const DriverBind& bind, const GuideHierarchy* hi
 // pose (the scalp itself when it has none). Drivers of fewer than 2 points are left out. Without
 // a scalp (null or empty), the drivers as they are, anchored nowhere.
 DriverBind bindDrivers(const GuideSet& drivers, const ScalpMesh* scalp, int frame);
+// Bind Drivers (every host's): the drivers bound again (bindDrivers), the guides attached in
+// `before` (the groom's bind until now) staying attached. Its JSON ("" when nothing is bound or
+// attached), what the groom stores as its driverBind.
+std::string reboundDriversJson(const GuideSet& drivers, const ScalpMesh* scalp, int frame, const DriverBind& before);
 
 // The drivers as bound and as they are now, both in the space the graph evaluates in: `graph` is
 // the scalp the graph evaluates on (the rest pose while following the scalp, else the scalp now),

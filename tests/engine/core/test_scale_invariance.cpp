@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -108,15 +109,23 @@ Made make(const GroomData& groom, const std::string& preset, std::optional<doubl
     return made;
 }
 
+constexpr double kTolerance = 1e-3;  // of the groom's size (0.2 mm on a head): a field's cells, never a hidden length
+
 // How far `b` is from `a` scaled by k: the strands' count and IDs must match (else a message), the
 // largest point and width difference as a share of `extent` x k (the groom's size there).
+// A thousandth of the strands may lie farther than `tolerance` (`strays` of them, `farthest` the
+// worst; `points` is then the largest of the rest): a strand on the border between two clumps
+// joins the one its rounding at that scale puts nearer, as its clump channel below may differ.
+// (Clump version 1 does it too, more rarely: agouti_fur at full density, 781,369 strands, one at x10.)
 struct Difference {
     std::string mismatch;
     double points = 0.0, widths = 0.0;
+    std::size_t strays = 0;
+    double farthest = 0.0;
     std::string channel;  // a channel that is neither the same nor k times
 };
 
-Difference compare(const StrandSet& a, const StrandSet& b, float k, double extent) {
+Difference compare(const StrandSet& a, const StrandSet& b, float k, double extent, double tolerance = kTolerance) {
     Difference d;
     if (a.strandCount() != b.strandCount()) {
         std::set<StrandId> ia(a.ids().begin(), a.ids().end()), ib(b.ids().begin(), b.ids().end());
@@ -139,11 +148,17 @@ Difference compare(const StrandSet& a, const StrandSet& b, float k, double exten
         }
     }
     const double scale = k * extent;
+    double within = 0.0;  // the largest among the strands within the tolerance
     for (std::size_t i = 0; i < a.strandCount(); ++i) {
         const Vec3f* p = a.strandPoints(i);
         const Vec3f* q = b.strandPoints(i);
-        for (std::size_t j = 0; j < a.strandPointCount(i); ++j) d.points = std::max(d.points, (q[j] - p[j] * k).length() / scale);
+        double off = 0.0;
+        for (std::size_t j = 0; j < a.strandPointCount(i); ++j) off = std::max(off, (q[j] - p[j] * k).length() / scale);
+        d.farthest = std::max(d.farthest, off);
+        if (off < tolerance) within = std::max(within, off);
+        else ++d.strays;
     }
+    d.points = d.strays * 1000 > a.strandCount() ? d.farthest : within;
     // Widths of 1 everywhere are unset (no Width node: StrandSet's default, which hosts replace).
     const auto unset = [](const StrandSet& s) {
         return std::all_of(s.widths().begin(), s.widths().end(), [](float w) { return w == 1.0f; });
@@ -193,7 +208,6 @@ TEST(ScaleInvariance, EveryShippedPresetLooksTheSameAtEveryScale) {
     const GroomFile reference = readGroomFile(std::string(GROOMLAB_TEST_DATA) + "/strokes/strokes.groom");
     ASSERT_TRUE(reference.data.scalp);
     const double size = *presetScalpSize(*reference.data.scalp);
-    constexpr double kTolerance = 1e-3;  // of the groom's size (0.2 mm on a head): a field's cells, never a hidden length
     int checked = 0;
     for (const PresetInfo& p : listPresets({kShipped})) {
         const std::string text = readText(p.path);
@@ -227,10 +241,62 @@ TEST(ScaleInvariance, EveryShippedPresetLooksTheSameAtEveryScale) {
             EXPECT_LT(d.points, kTolerance) << what << ": points off by " << d.points << " of the groom's size" << where;
             EXPECT_LT(d.widths, kTolerance) << what << ": widths off by " << d.widths << " of the groom's size" << where;
             EXPECT_TRUE(d.channel.empty()) << what << ": channel " << d.channel << " is neither the same nor k times" << where;
+            if (d.strays > 0) {
+                std::printf("[ ties     ] %s: %zu of %zu strands off by more than the tolerance (the farthest %.5f)\n", what.c_str(),
+                            d.strays, base.strands->strandCount(), d.farthest);
+            }
             ++checked;
         }
     }
     EXPECT_GT(checked, 100);
+}
+
+// A Clump (version 2) picking its own centers places them on the scalp and relaxes them apart: the
+// same scalp in other units gives the same clumps. Strands that differ from their neighbours
+// (Length, Flow), so a clump whose center moved or took another axis shows. Every strand but a
+// thousandth lies where it lay to a ten-thousandth of the groom's size, a tenth of what a preset
+// is held to. (One center in fifty lands a step of Scatter's lattice, 1/1024 of a spacing, apart:
+// the rounding of the relaxing's single-precision steps tips it; its strands lie a few
+// hundred-thousandths off, about one strand in a hundred. A strand on the border of two clumps
+// joins the other, a thousandth at most.)
+TEST(ScaleInvariance, AClumpPickingItsOwnCentersGivesTheSameClumpsAtEveryScale) {
+    const GroomFile reference = readGroomFile(std::string(GROOMLAB_TEST_DATA) + "/strokes/strokes.groom");
+    ASSERT_TRUE(reference.data.scalp);
+    const double size = *presetScalpSize(*reference.data.scalp);
+    const std::string preset = R"({"version": 1, "size": 20.0, "nodes": [
+        {"name": "scalp", "type": "Scalp"},
+        {"name": "scatter", "type": "Scatter", "params": {"density": 80.0, "length": 8.0}},
+        {"name": "length", "type": "Length", "params": {"fraction": 1.0, "randomness": 0.35}},
+        {"name": "flow", "type": "Flow", "params": {"lift": 14.0, "bend": 0.55, "rollRandom": 8.0}},
+        {"name": "clump", "type": "Clump", "params": {"clumpBy": "size", "size": 0.7, "strength": 0.8}},
+        {"name": "output", "type": "Output"}],
+      "connections": [{"from": "scalp", "to": "scatter", "input": "scalp"}, {"from": "scatter", "to": "length", "input": "strands"},
+        {"from": "length", "to": "flow", "input": "strands"}, {"from": "flow", "to": "clump", "input": "strands"},
+        {"from": "clump", "to": "output", "input": "strands"}], "output": "output"})";
+    const Made base = make(reference.data, preset, size, reference.directory);
+    ASSERT_TRUE(base.strands) << base.error;
+    const std::size_t strands = base.strands->strandCount();
+    ASSERT_GT(strands, 4000u);
+    const std::vector<float>* clumps = base.strands->strandChannel("clumpId");
+    ASSERT_TRUE(clumps);
+    ASSERT_GT(std::set<float>(clumps->begin(), clumps->end()).size(), 1000u);
+    for (const float k : {0.01f, 0.1f, 10.0f}) {
+        const Made big = make(scaledGroom(reference.data, k), preset, size * k, reference.directory);
+        ASSERT_TRUE(big.strands) << big.error;
+        const std::string what = "at x" + std::to_string(k);
+        const Difference d = compare(*base.strands, *big.strands, k, size);
+        EXPECT_TRUE(d.mismatch.empty()) << what << ": " << d.mismatch;
+        EXPECT_LT(d.points, kTolerance) << what << ": " << d.strays << " strands lie elsewhere, the farthest " << d.farthest;
+        EXPECT_TRUE(d.channel.empty()) << what << ": " << d.channel;
+        const Difference near = compare(*base.strands, *big.strands, k, size, 1e-4);
+        EXPECT_LT(near.points, 1e-4) << what << ": " << near.strays << " of " << strands
+                                     << " strands are more than a ten-thousandth of the groom's size off";
+        const Difference fine = compare(*base.strands, *big.strands, k, size, 1e-5);
+        EXPECT_LE(fine.strays * 20, strands) << what << ": " << fine.strays << " of " << strands
+                                              << " strands are more than a hundred-thousandth of the groom's size off";
+        std::printf("[ clumps   ] %s: %zu of %zu strands more than 1e-5 off, %zu more than 1e-3 (the farthest %.5f)\n", what.c_str(),
+                    fine.strays, strands, d.strays, d.farthest);
+    }
 }
 
 }  // namespace groomlab

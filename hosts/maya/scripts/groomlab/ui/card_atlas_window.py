@@ -483,7 +483,8 @@ class CardAtlasPanel(QtWidgets.QWidget):
 
     def add_block(self):
         atlas = self._require_atlas()
-        name = "block%d" % (len(_atlas_api().blocks(atlas)) + 1)
+        import groomlab_core
+        name = groomlab_core.card_block_new_name(_atlas_api().atlas_json(atlas))  # (block<N> no block has, every host's)
         self.groom = _atlas_api().add_block(atlas, name)
         self.refresh()
         self.status.setText("Added %s" % name)

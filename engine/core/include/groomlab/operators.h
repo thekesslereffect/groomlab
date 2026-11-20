@@ -19,11 +19,6 @@ namespace op {
 // The most earlier frames a Jiggle node reads (its `history` is clamped to 1..this).
 constexpr int kMaxScalpHistory = 48;
 
-// What a node type does, in a line (empty for a type it does not know): every host's param panel
-// and add-node search show it (operatorSpecsJson's "description"). The registry's NodeInfo
-// (node_catalog.h), given where the type registers.
-std::string operatorDescription(const std::string& type);
-
 // Registers every built-in operator (builtin_operators.inc, in its order).
 // OperatorRegistry::instance() calls this on first use.
 void registerBuiltinOperators(OperatorRegistry& registry);

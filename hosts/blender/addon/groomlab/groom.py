@@ -11,7 +11,6 @@ transform carries the whole groom. The helper turns that into groom space (Y up,
 import hashlib
 import json
 import os
-import re
 import tempfile
 import threading
 import time
@@ -239,8 +238,15 @@ def _build(scalp, rt, scene):
     send_maps_dir(scalp, rt)  # a map still in a temp folder (made while untitled) copied beside the file
 
 
+_FILE_SAFE = {}
+
+
 def _file_safe(name):
-    return re.sub(r"[^A-Za-z0-9_.-]", "_", name) or "_"
+    """Text safe in a file name: the core's rule, every host's (asset_files.h fileSafeName, through
+    the helper; each name asked once)."""
+    if name not in _FILE_SAFE:
+        _FILE_SAFE[name] = process.call("file_safe_name", text=name)["name"]
+    return _FILE_SAFE[name]
 
 
 def asset_folder(kind="", blend_path=None):
@@ -291,23 +297,16 @@ def _follow_scalp_bake(scalp, old_root, new_root):
 def copy_into(kind, path):
     """A file copied into the .blend's `kind` folder (asset_folder: Maya's references for photos):
     the same file there used as it is, else a free name (name_2...). Returns the copy's path, or
-    `path` itself while the .blend is untitled or when it cannot be copied."""
-    import filecmp
-    import shutil
+    `path` itself while the .blend is untitled or when it cannot be copied: the core's (asset_files.h
+    collectFile), every host's."""
     folder = asset_folder(kind)
     if not folder or not os.path.isfile(path):
         return path
-    os.makedirs(folder, exist_ok=True)
-    stem, ext = os.path.splitext(os.path.basename(path))
-    target, n = os.path.join(folder, stem + ext), 2
-    while os.path.exists(target) and not (os.path.samefile(target, path) or filecmp.cmp(target, path, shallow=False)):
-        target, n = os.path.join(folder, "%s_%d%s" % (stem, n, ext)), n + 1
-    if not os.path.exists(target):
-        try:
-            shutil.copy2(path, target)
-        except OSError:
-            return path
-    return target.replace("\\", "/")
+    process.client()
+    try:
+        return _call("collect_file", path=path, folder=folder).get("path") or path
+    except HelperError:
+        return path
 
 
 def follow_files(scalp, rt, blend_path):
@@ -354,31 +353,21 @@ def groom_file_name(scalp=None, blend_path=None):
 def _follow_groom_file(scalp, old, new):
     """Save As: the groom file the groom is linked to, when it is the old .blend's (<old name>.groom
     beside it), copied beside the new one as <new name>.groom and linked there, so the two files
-    never write one groom file (Maya's follow_scene_files)."""
-    import filecmp
-    import shutil
+    never write one groom file (Maya's follow_scene_files): the core's rule (asset_files.h
+    followSceneGroomFile), a free name when another one is there (said in the status)."""
     linked = scalp.groomlab.groom_file
     if not linked or not old:
         return []
     full = os.path.abspath(bpy.path.abspath(linked))
-    if not os.path.isfile(full) or os.path.normcase(os.path.dirname(full)) != os.path.normcase(os.path.dirname(old)):
-        return []
-    old_stem = _file_safe(os.path.splitext(os.path.basename(old))[0])
-    new_stem = _file_safe(os.path.splitext(os.path.basename(new))[0])
-    base, ext = os.path.splitext(os.path.basename(full))
-    if base != old_stem:
-        return []  # a groom file of its own name: as it is
-    target, n = os.path.join(os.path.dirname(new), new_stem + ext), 2
-    while os.path.exists(target) and not filecmp.cmp(target, full, shallow=False):
-        target, n = os.path.join(os.path.dirname(new), "%s_%d%s" % (new_stem, n, ext)), n + 1
-    if os.path.normcase(target) == os.path.normcase(full):
-        return []
-    copied = []
-    if not os.path.exists(target):
-        shutil.copy2(full, target)
-        copied.append(target.replace("\\", "/"))
-    scalp.groomlab.groom_file = target.replace("\\", "/")
-    return copied
+    process.client()
+    r = _call("follow_groom_file", file=full, old=old, new=new)
+    if not r.get("path"):
+        return []  # a groom file of its own name, or elsewhere: as it is
+    scalp.groomlab.groom_file = r["path"]
+    if r.get("renamed"):
+        print("GroomLab: a groom file of that name is beside the saved .blend with other content; %s now uses %s"
+              % (scalp.name, os.path.basename(r["path"])))
+    return [r["path"]] if r.get("copied") else []
 
 
 def maps_dir(scalp, blend_path=None):
@@ -805,7 +794,6 @@ def write_hair(scalp, r):
             radius = client.view(a["widths"]) * np.float32(0.5)
             _attribute(curves, "radius", "FLOAT", "POINT").data.foreach_set("value", radius)
     present = set()
-    base = None  # the strands' base colors (the look's RGB, or its pigment's): the viewport color
     if s:
         ids = np.ascontiguousarray(client.view(a["ids"])).view(np.int32)
         _attribute(curves, STRAND_ID, "INT32_2D", "CURVE").data.foreach_set("value", ids)
@@ -822,8 +810,6 @@ def write_hair(scalp, r):
                 rgba = np.ones((n, 4), np.float32)
                 rgba[:, :3] = values[:, :3]
                 attr.data.foreach_set("color", rgba.ravel())
-                if target == COLOR:
-                    base = values[:, :3]
             elif kind == "FLOAT":
                 attr.data.foreach_set("value", values.ravel())
             else:
@@ -839,7 +825,7 @@ def write_hair(scalp, r):
             pass
     curves.update_tag()
     mat = shading.ensure_material(scalp, hair, present, r.get("look") or {})
-    shading.set_viewport_color(mat, base)  # Solid shading: the hair's look, not the default gray
+    shading.set_viewport_color(mat, r.get("appearance"))  # Solid shading: the hair's look, not the default gray
 
 
 # ---- Objects ----------------------------------------------------------------------------------
@@ -933,6 +919,9 @@ def evaluate(scalp, rt, mode="preview", **extra):
         args.update(preview_args(scalp))
         if scalp.groomlab.view_node:  # the Graph Editor's View: this node's strands (renders keep the output)
             args["viewNode"] = scalp.groomlab.view_node
+        shown = getattr(scalp.groomlab_tools, "braid_tubes", "")
+        if shown:  # Show Tubes: those Braid nodes are evaluated to, whatever is viewed or hidden
+            args["braidTubes"] = shown
     r = _call("evaluate", **args)
     rt.notes = dict(r.get("notes") or {})
     rt.errors = list(r.get("errors") or [])
@@ -1264,6 +1253,9 @@ def load_groom(context, path, scalp=None, index=0):
     rt = ensure(scalp, scene)
     info = _call("load_groom", session=rt.session, path=path, index=int(index))
     g.groom_name = info.get("name") or ""  # its name in groom files, kept
+    from . import props
+    with props.quiet():
+        scalp.groomlab_tools.braid_tubes = info.get("braidTubes") or ""  # Show Tubes' nodes, as saved
     # A groom of flat guides (Maya's guide curves) keeps them as a Blender Curves object (B2); every
     # other groom's guides live in the helper's hierarchy, edited with GroomLab's own tools.
     hierarchy = info.get("flatGuides", 0) == 0
@@ -1382,7 +1374,8 @@ def save_groom(scalp, path, up_axis="Y", merge=True):
     sync(scalp, evaluate_now=False)
     for fn in before_save:
         fn()
-    r = _call("save_groom", session=rt.session, path=path, upAxis=up_axis, name=groom_entry_name(scalp), merge=bool(merge))
+    r = _call("save_groom", session=rt.session, path=path, upAxis=up_axis, name=groom_entry_name(scalp), merge=bool(merge),
+              braidTubes=scalp.groomlab_tools.braid_tubes or "")  # (Show Tubes' nodes: every host's .groom)
     for w in r.get("warnings") or []:
         print("GroomLab: %s" % w)
     remember_graph(scalp, rt)
@@ -1398,12 +1391,9 @@ def groom_entry_name(scalp):
 
 def groom_entry(scalp, path):
     """The index of the groom's own entry in the groom file at `path` (by its name; a file of one
-    groom: that one), or -1."""
-    names = groom_file_names(path)
-    name = groom_entry_name(scalp)
-    if name in names:
-        return names.index(name)
-    return 0 if len(names) == 1 else -1
+    groom: that one), or -1: the core's (groom_package.h groomIndex), every host's."""
+    process.client()
+    return int(_call("groom_file_names", path=path, name=groom_entry_name(scalp)).get("index", -1))
 
 
 _card_presets = []
@@ -1437,6 +1427,7 @@ def export(scalp, scene, fmt, path, first, last, step=1, density=1.0, **options)
     """The groom's strands over frames: Alembic, USD, scalesUsd, vrscene, unrealGroom or unityStrands, with the
     format's options (scales, groups, lod, pointsPerStrand...: docs/BLENDER.md "Pipeline")."""
     global _exporting
+    options.setdefault("name", scalp.name)  # the root named after the groom (Maya: its transform)
     rt = ensure(scalp, scene)
     sync(scalp, scene=scene, evaluate_now=False)
     if not deforms(scalp):

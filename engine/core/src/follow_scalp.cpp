@@ -107,14 +107,17 @@ std::shared_ptr<const StrandIndex> strandsById(const StrandsPtr& strands) {
     return index;
 }
 
-// Each strand's root motion; false when every one is still.
-bool strandMotions(const StrandSet& strands, const ScalpMesh& from, const ScalpMesh& to, std::vector<RootMotion>& out) {
+// Each strand's root motion; false when every one is still. With the strands' boxes (made from
+// them on `from`), each root's frame and edge on `from` read from them: rootMotion's own.
+bool strandMotions(const StrandSet& strands, const ScalpMesh& from, const ScalpMesh& to, const StrandBoxes* boxes,
+                   std::vector<RootMotion>& out) {
     const std::size_t n = strands.strandCount();
     out.resize(n);
     std::vector<char> moved(n, 0);
     const std::vector<StrandRoot>& roots = strands.roots();
+    if (boxes && (boxes->frames.size() != n || boxes->edges.size() != n)) boxes = nullptr;  // (other strands' boxes)
     parallelFor(0, n, [&](std::size_t s) {
-        out[s] = rootMotion(from, to, roots[s]);
+        out[s] = boxes ? RootMotion{boxes->frames[s], rootFrameOn(to, roots[s], boxes->edges[s])} : rootMotion(from, to, roots[s]);
         moved[s] = out[s].still() ? 0 : 1;
     }, 1024);
     for (const char m : moved) {
@@ -136,10 +139,10 @@ CardMesh::Card carryCard(const CardMesh::Card& card, const RootMotion& m) {
 
 }  // namespace
 
-StrandsPtr carryStrands(const StrandsPtr& strands, const ScalpMesh& from, const ScalpMesh& to) {
+StrandsPtr carryStrands(const StrandsPtr& strands, const ScalpMesh& from, const ScalpMesh& to, const StrandBoxes* boxes) {
     if (!strands) return strands;
     std::vector<RootMotion> motions;
-    const bool strandsMove = strandMotions(*strands, from, to, motions);
+    const bool strandsMove = strandMotions(*strands, from, to, boxes, motions);
 
     // Card layers: each card by its first strand's root (its source's, for baking, carried too).
     std::map<const StrandSet*, StrandsPtr> carriedSources;
@@ -237,16 +240,6 @@ StrandsPtr carryStrands(const StrandsPtr& strands, const ScalpMesh& from, const 
     return out;
 }
 
-bool carriesPointsAlone(const StrandSet& strands) {
-    for (const auto& layer : strands.cardLayers()) {
-        if (layer && !layer->cards.empty()) return false;
-    }
-    for (const auto& layer : strands.featherLayers()) {
-        if (layer && !layer->rings.empty()) return false;
-    }
-    return !strands.instances() || strands.instances()->empty();
-}
-
 bool carriesPointsAndInstances(const StrandSet& strands) {
     for (const auto& layer : strands.cardLayers()) {
         if (layer && !layer->cards.empty()) return false;
@@ -255,45 +248,6 @@ bool carriesPointsAndInstances(const StrandSet& strands) {
         if (layer && !layer->rings.empty()) return false;
     }
     return !strands.instances() || !strands.instances()->hasMeshes();
-}
-
-StrandSet::Extent carriedExtent(const StrandSet& strands, const ScalpMesh& from, const ScalpMesh& to) {
-    constexpr float kBig = std::numeric_limits<float>::max();
-    StrandSet::Extent out;
-    out.lo = Vec3f(kBig, kBig, kBig);
-    out.hi = Vec3f(-kBig, -kBig, -kBig);
-    out.longestStrand = strands.extent().longestStrand;  // a rigid motion keeps every length
-    const std::size_t n = strands.strandCount();
-    constexpr std::size_t kBlock = 4096;
-    const std::size_t blocks = (n + kBlock - 1) / kBlock;
-    std::vector<StrandSet::Extent> parts(blocks);
-    const std::vector<StrandRoot>& roots = strands.roots();
-    parallelFor(0, blocks, [&](std::size_t b) {
-        StrandSet::Extent e;
-        e.lo = Vec3f(kBig, kBig, kBig);
-        e.hi = Vec3f(-kBig, -kBig, -kBig);
-        for (std::size_t s = b * kBlock; s < std::min(n, (b + 1) * kBlock); ++s) {
-            const RootMotion m = rootMotion(from, to, roots[s]);
-            const Vec3f* pts = strands.strandPoints(s);
-            for (std::size_t k = 0, count = strands.strandPointCount(s); k < count; ++k) {
-                const Vec3f p = m.point(pts[k]);
-                if (!finite(p)) {
-                    e.finite = false;
-                    continue;
-                }
-                e.lo = Vec3f(std::min(e.lo.x, p.x), std::min(e.lo.y, p.y), std::min(e.lo.z, p.z));
-                e.hi = Vec3f(std::max(e.hi.x, p.x), std::max(e.hi.y, p.y), std::max(e.hi.z, p.z));
-            }
-        }
-        parts[b] = e;
-    }, 1);
-    for (const StrandSet::Extent& e : parts) {
-        out.finite = out.finite && e.finite;
-        if (e.empty()) continue;
-        out.lo = Vec3f(std::min(out.lo.x, e.lo.x), std::min(out.lo.y, e.lo.y), std::min(out.lo.z, e.lo.z));
-        out.hi = Vec3f(std::max(out.hi.x, e.hi.x), std::max(out.hi.y, e.hi.y), std::max(out.hi.z, e.hi.z));
-    }
-    return out;
 }
 
 std::shared_ptr<const StrandBoxes> strandBoxes(const StrandSet& strands, const ScalpMesh& from) {
@@ -317,8 +271,8 @@ std::shared_ptr<const StrandBoxes> strandBoxes(const StrandSet& strands, const S
                 pointsFinite[s] = 0;
                 continue;
             }
-            lo = Vec3f(std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z));
-            hi = Vec3f(std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z));
+            lo = minPerAxis(lo, p);
+            hi = maxPerAxis(hi, p);
         }
         if (lo.x > hi.x) {
             out->centers[s] = Vec3f();
@@ -380,8 +334,8 @@ StrandSet::Extent carriedBounds(const StrandSet& strands, const StrandBoxes& box
     }, 1);
     for (const StrandSet::Extent& e : parts) {
         if (e.empty()) continue;
-        out.lo = Vec3f(std::min(out.lo.x, e.lo.x), std::min(out.lo.y, e.lo.y), std::min(out.lo.z, e.lo.z));
-        out.hi = Vec3f(std::max(out.hi.x, e.hi.x), std::max(out.hi.y, e.hi.y), std::max(out.hi.z, e.hi.z));
+        out.lo = minPerAxis(out.lo, e.lo);
+        out.hi = maxPerAxis(out.hi, e.hi);
     }
     return out;
 }

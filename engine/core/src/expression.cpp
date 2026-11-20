@@ -323,7 +323,6 @@ Op makeOp(Op::Kind kind, std::uint8_t code = 0, float value = 0.0f) {
 // What an evaluation reads: the variables, the strand, its channels and root.
 struct EnvData {
     std::array<float, kVarCount> vars{};
-    const StrandSet* strands = nullptr;
     std::size_t strand = 0;
     std::size_t point = 0;  // index into the point arrays (the strand's first point unless per point)
     const std::vector<const std::vector<float>*>* channels = nullptr;
@@ -2649,7 +2648,6 @@ void Expression::strandVariables(Env& env, const StrandSet& strands, std::size_t
     }
     env.channels = &bound.channels;
     env.pointChannels = &bound.pointChannels;
-    env.strands = &strands;
     env.strand = s;
     env.point = strands.strandBegin(s);
     if (readsShape_ && n > 0) {
@@ -2944,7 +2942,6 @@ Program compile(const std::string& text, const std::vector<ParamInfo>& params, c
 bool run(const std::vector<Op>& ops, const Program& program, Frame& frame, std::size_t budget) {
     EnvData env;
     std::copy(frame.vars, frame.vars + kVarCount, env.vars.begin());
-    env.strands = frame.strands;
     env.strand = frame.strand;
     env.point = frame.point;
     env.channels = frame.channels;

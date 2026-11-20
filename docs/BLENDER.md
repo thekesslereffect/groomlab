@@ -147,9 +147,9 @@ All but the process ones take `"session": <id>`.
 | `new_session` | `space`, `fps` | `{"session", "space"}` |
 | `close_session` / `set_space` | `upAxis`, `metersPerUnit` | |
 | `set_options` | `followScalp`, `mapsDir` | `{"followScalp", "mapsDir"}` (followScalp: the groom's option, saved in its file; mapsDir: where new texture maps' images go, default a folder of the session's in the temp folder) |
-| `load_groom` | `path`, `index` (0: the file's groom of that number, a file of several grooms) | groom info: `fileUpAxis`, `fps`, `scalp` counts and topology, `flatGuides`, `hierarchyGuides`, `nodes`, `output`, `followScalp`, `scalpCache`/`guideCache` refs, `notes`, `inputErrors`, `name`, `grooms` (every groom's name) |
+| `load_groom` | `path`, `index` (0: the file's groom of that number, a file of several grooms) | groom info: `fileUpAxis`, `fps`, `scalp` counts and topology, `flatGuides`, `hierarchyGuides`, `nodes`, `output`, `followScalp`, `scalpCache`/`guideCache` refs, `notes`, `inputErrors`, `name`, `grooms` (every groom's name), `braidTubes` (Show Tubes' nodes, as saved: the add-on's `braid_tubes`); the file's guide group colors and hidden groups go to the tools |
 | `groom_file_names` | `path` | `{"grooms": [name, ...]}`: a file's grooms in order (the app saves a document of several in one file; Open Groom File opens each on its own scalp, not linked to the file) |
-| `save_groom` | `path`, `upAxis` ("Y") | `{"path", "upAxis", "units"}` |
+| `save_groom` | `path`, `upAxis` ("Y"), `braidTubes`? (Show Tubes' nodes, the add-on's) | `{"path", "upAxis", "units"}`; the file holds the tools' guide group colors and hidden groups too (every host's .groom) |
 | `groom_info` | | as `load_groom` |
 | `set_scalp` | `points` (n,3), `faceCounts`, `faceIndices`, `uvs` (per face corner, 2), `restPoints`, `colorSets` `{name: (corners,4)}` | `{"points", "triangles", "topology", "matchesGroom", "guidesRerooted"}` |
 | `update_scalp` | `points`, `restPoints` | the scalp's points at this frame on its topology (a deforming scalp) |
@@ -158,14 +158,17 @@ All but the process ones take `"session": <id>`.
 | `set_guides` | `points`, `counts`, `ids` (0: new), `target` ("auto", "flat", "hierarchy"), `keepMissing`, `pose` ("now", "rest"), `group` (hierarchy: the group new guides join, "Pipeline") | `{"pose", "target", "guides", "changed", "added": [{"index", "id"}], "removed", "updated"}` |
 | `set_time` | `frame` or `seconds`, `fps` | `{"seconds", "frame", "fps"}` (frame_time.h's rule) |
 | `evaluate` | `mode` ("preview": the viewport's, renderOnly nodes off; "render": viewportOnly nodes off), `density`, `pointBudget`, `viewNode`, `sculptDensity` (1; while a stroke is live the strands step back to this fraction, the app's 0.35), `attributes` (names or "all"), `space`, `bounds` | strand arrays (below), `errors`, `messages`, `notes` {node: note}, incremental hints, `milliseconds`, `following`, `look` (below) |
-| `stats` / `node_status` | | GroomStats JSON / notes, times, errors, inputErrors, graphError |
+| `stats` / `node_status` | | GroomStats JSON / notes, times, errors, inputErrors, graphError, and `colorChannels` (GroomStats::colorChannels: each node's last result's channels, `[name, "strand" or "point"]`) |
 | `operator_specs` / `default_graph` | | every operator's spec (params with groups, advanced, units, showWhen...) / the default graph |
 | `get_graph` / `set_graph` | `graph` (object or text) | the graph JSON |
 | `graph_channels` | | `channels`: the attributes per node (graphChannelsJson, attributes.h): `incoming` (reaching it, each with its writer), `writes`, `overwrites`, `reads` (`reaches`, `optional`) |
+| `graph_problems` | | `problems`: what would stop the groom from evaluating (`GraphEdit::problems`: the graph's own and those of the nodes the output is made from), `unused`: those of the other nodes (warnings), `feeding`: the nodes the output is made from. Maya's `GraphModel.validate` and `unused_problems`; the add-on has `graph_tree.graph_problems` and shows them nowhere yet |
+| `graph_layout` | `graph` (object); no session | `positions`: {node: [x, y]}, the auto layout every host uses for a graph without positions and for Tidy Layout (graph_inserts.h `layoutPositions`: columns by depth from the sources, rows in the graph's order). The add-on's `graph_tree.auto_layout` |
+| `prune_pins` | `connections`, `pins` ({points, routes}), `oneFeed` (true); no session | `pins`: those that hold for these links, in order (graph_pins.h `prunePins`; null none); `oneFeed`: only the routes a reroute (one input) can draw. `edit_graph` keeps the stored pins by the same rules: pruned after every op, a rename followed |
 | `list_nodes` | | `[{name, type, version, output}]` |
 | `node_spec` | `node` | GraphEdit::nodeSpecJson: ports, params with their ParamSpec metadata (group, advanced, unit, showWhen, min/max...), `outdated` |
 | `get_param` / `set_param` | `node`, `param`, `value` | the value (`set`: false for a spec default); set checks the kind as the editors do, and a map value's source, keys and expression ("Authoring" below) |
-| `edit_graph` | `op`: add_node (`type`, `name`, `params`, `x`, `y`: defaults fitted to the scalp), remove_node, rename_node, connect (`from`, `to`, `input`, `output`: the user's link, `GraphEdit::connectByHand`: a Clump picking its centers fed centers takes them, `centersFrom` `inputPoints`), disconnect, set_output, upgrade_node, set_positions (`positions` {node: [x, y]}: each node's `"ui"`; `backdrops`; `pins`), set_bypass (`name`, `bypass`), set_evaluation (`name`, `mode`: always, viewportOnly or renderOnly), insert_simulate (`params`), insert_guide_cache (`path`, `object`), insert_collider (`mesh`, `wire` (true)), insert_braid (`group` (braids), `params`, `after`), insert_feathers (`designs`: names of presets feathers_<name>, `weights`, `source` (scatter, guides, node or node.output), `group` (feathers), `keepHair` (true), `density`: `{"shafts", "split", "designs", "merges", "merge"}`): Add > Simulate, Load Guide Cache, Add > Collider, Add > Braid and Add > Feathers as every host makes them (graph_inserts.h; `{"name"}`; the add-on makes the guide groups); the undoable authoring ops (group, ungroup, expose_param, unexpose_param, compound_expose, compound_unexpose, insert_on_link, add_control, link_control, unlink_control: "Authoring" below) | `graphError` ("" when the graph loads); a graph that does not load yet takes every op (set_graph refuses it) |
+| `edit_graph` | `op`: add_node (`type`, `name`, `params`, `x`, `y`: defaults fitted to the scalp), remove_node, rename_node, connect (`from`, `to`, `input`, `output`: the user's link, `GraphEdit::connectByHand`: a Clump picking its centers fed centers takes them, `centersFrom` `inputPoints`), disconnect, set_output, upgrade_node, set_positions (`positions` {node: [x, y]}: each node's `"ui"`; `backdrops`; `pins`), set_bypass (`name`, `bypass`), set_evaluation (`name`, `mode`: always, viewportOnly or renderOnly), insert_between (`from`, `to`, `node`, `nodeInput` (strands)), insert_before (`anchor`, `node`, `input` (strands), `nodeInput` (strands)), insert_after (`anchor`, `node`, `nodeInput` (the node's first input)): a node put into the flow as every host does it (graph_inserts.h); insert_simulate (`params`), insert_guide_cache (`path`, `object`), insert_collider (`mesh`, `wire` (true)), insert_scalp (`mesh`: `{"name", "scatter", "interpolate", "merge"}`, the last three null when a Scalp node read it already), insert_braid (`group` (braids), `params`, `after`), insert_feathers (`designs`: names of presets feathers_<name>, `weights`, `source` (scatter, guides, node or node.output), `group` (feathers), `keepHair` (true), `density`: `{"shafts", "split", "designs", "merges", "merge"}`): Add > Simulate, Load Guide Cache, Add > Collider, Add > Scalp, Add > Braid and Add > Feathers as every host makes them (graph_inserts.h; `{"name"}`; the add-on makes the guide groups); the undoable authoring ops (group, ungroup, expose_param, unexpose_param, compound_expose, compound_unexpose, insert_on_link, add_control, link_control, unlink_control: "Authoring" below) | `graphError` ("" when the graph loads); a graph that does not load yet takes every op (set_graph refuses it) |
 | `list_presets` | | presets with title, description, category; the folders searched |
 | `apply_preset` | `name` or `path` | the graph replaced, fitted to the scalp (`fitFactor`), controls applied; `missingMaps` the preset reads that the groom lacks (`name`, `kind`, `value`, `color`), which the add-on then makes with `map_create` (graph.make_required_maps, as Maya and the app make them); `groups` [{`name`, `draw`}] the guide groups it reads (presetRequiredGroups), which the add-on makes empty when missing (graph.make_required_groups) and, for `draw`, picks the Draw tool drawing into (graph.draw_into) |
 | `insert_preset` | `name` or `path`, `after`, `nodeName` | the preset's look as a Compound after `after`; `node` |
@@ -310,7 +313,7 @@ the symmetry in the **host's axes**; strengths, values and pixels are as in Maya
 
 | Command | Arguments | Result |
 |---|---|---|
-| `tool_catalog` | (no session) | `{"tools": [{id, label, category, order, icon, defaultStrength, signed, hint, settings}], "categories", "settings": [{id, label, hint}], "paintable": [{id, label, type, param, hint}]}` (brush_catalog.h: every host's palette; paintable: what New Map > For offers first, stroke.h paintableSettings) |
+| `tool_catalog` | (no session) | `{"tools": [{id, label, category, order, icon, defaultStrength, signed, hint, settings}], "categories", "settings": [{id, label, hint, kind, and for a value (kind bool, int, float): default, softMin, softMax, min, max, decimals, unit; a length in the groom's units}], "paintable": [{id, label, type, param, hint}]}` (brush_catalog.h: every host's palette; paintable: what New Map > For offers first, stroke.h paintableSettings) |
 | `tool_set` | `tool` (a catalog id: place, draw, part, flow, comb, slide, smooth, lift, twist, attract, shape, cut, length, erase, paint, select, freeze; or clump; `straighten` as a script mode), `settings` {...} | `tool_get`'s answer |
 | `tool_get` | | `{"tool", "mode", "settings" (all, host units), "shows" (the catalog's settings for the card), "ringColor", "pathColor", "hoverColor"}` |
 | `stroke_begin` | `view`, `x`, `y`, `pressure` (1), `ctrl`, `shift`, `overlay` (true) | `{"stroking", "mode", "ring", "overlay", "view", "warnings"}` (BrushTool::press: Ctrl the opposite action, Shift a click picks the level or a drag smooths) |
@@ -328,7 +331,7 @@ the symmetry in the **host's axes**; strengths, values and pixels are as in Maya
 | `guide_segments` | `ids`, `group` or `level` (else the selection, else every guide) | `{"ids", "segments"}`: each guide's points - 1 (the Segments slider) |
 | `guides_preview` | `segments`, targets as resample | `{"previewed"}`: the guides shown resampled (`setPreviewHierarchy`, from the stored guides each time), no change, no undo step; `guides_edit resample` commits |
 | `guides_preview_end` | | `{"ended"}`: the stored guides shown again (after `guides_preview` or `tube_shape_preview`) |
-| `tube_targets` | | `{"source" (selection, solo, none), "guides", "shapes", "tube" (the first's, or null)}`: what the Shape and Select cards' Profile and Selected guides edit (Maya's `-tubeTargets`: the selection, else the soloed guides) |
+| `tube_targets` | | `{"source" (selection, solo, none), "guides", "shapes", "tube" (the first's, or null), "card" ({width, flatness, twist}: the Tube card's values for it, the core's tubeCardValues, or null)}`: what the Shape and Select cards' Profile and Selected guides edit (Maya's `-tubeTargets`: the selection, else the soloed guides) |
 | `tube_get` | `guide` (an ID) | `{"tube": {"shape", "width" (host units), "aspect", "twist" (radians)}}`, lists evenly spaced root to tip |
 | `tube_set` | `shape`, `width` (host units), `aspect`, `twist` (each a number or a list root to tip), `samples`; targets `ids`, `group` or `level`, else the selection | `{"changed", "undo"}` (Maya's `-setTube`, `editedTube`) |
 | `tube_scale` | `factor` (0 or more), targets | `{"changed", "undo"}`: every width times it, the taper kept |
@@ -342,7 +345,8 @@ the symmetry in the **host's axes**; strengths, values and pixels are as in Maya
 | `part_add` | `points` (host space, a list or a shared memory array of (n, 3)), `name` ("part") | `{"name", "undo"}`: a part through them bound to the cage, resampled to 64 points, named name, name1... (Maya's `groomLabParts -fromCurves`) |
 | `part_remove` | `name` | `{"removed", "undo"}` |
 | `parts_clear` / `flow_clear` | | `{"cleared", "undo"}` (nothing to clear: no undo step) |
-| `maps_list` | | `{"maps": [{name, kind (vertices, texture, guides), channels, texture?, file?, missing? (its file is not there), freezeMask?}], "folder"}` |
+| `maps_list` | | `{"maps": [{name, kind (vertices, texture, guides), channels, texture?, file?, missing? (its file is not there), freezeMask?}], "folder", "densityMap" (the Tube tool's density map: the one map, else an older numbered one, "" none: subdivisionDensityMapIn)}` |
+| `density_map` | | `{"map" (as maps_list's densityMap), "name" (what Subdivide makes it as), "start" (its value then)}` |
 | `map_create` | `name`, `kind` (vertices, texture, guides), `color`, `value`, `fill` [r,g,b(,a)], `resolution` (1024), `faces` (scalp polygon indices: the value or fill on them only, 0 elsewhere; a guide layer on the guides rooted there) | `{"name", "kind", "file"?, "undo"}` (a texture map's PNG written in the maps folder) |
 | `map_remove` | `name`, `deleteFile` (false) | `{"removed", "unlinked" [[node, param]...], "graphChanged", "fileDeleted", "undo"}`: Maya's `remove_map`. What reads the map lets go of it (its Map nodes removed, the params they fed read their own values again, map params naming it back to their defaults); a texture's file stays unless `deleteFile`, it is in the maps folder (GroomLab made it) and no other map reads it (undo writes it back) |
 | `map_rename` | `name`, `to` | `{"name", "renamed", "graphChanged", "file"?, "undo"}`: Maya's `rename_map`; the readers follow (`retargetMapReaders`), a texture's file too when it is named after the map and in the maps folder (`renamedMapTexture`, a free name) |
@@ -403,7 +407,7 @@ temp folder).
 **Display buffers.** `display` runs a `DisplayBuilder` (one per session) on the guides as they
 are now (`GroomSession::hierarchy()`: a live stroke's preview included), the last evaluation's
 parts and flow, the session's scalp, the selection and the map shown, with Maya's display settings
-(`settings`: `guides`, `tubes`, `tubeWires`, `flow`, `guideWidth`,
+(`settings`: `guides`, `tubes`, `tubeWires`, `braidTubes`, `flow`, `guideWidth`,
 `guideColorMode` (group, layer), `guideColorLayer`, `guideColorSeed` (the groom's name: the
 automatic colors' hue), `isolateGroup`, `guidePoints` (off,
 ends, all), `guideSmoothing` (4), `hiddenGuideGroups` (default: the
@@ -415,7 +419,7 @@ the next `display`):
 {"generation": "groomlab_<pid>_s1display_1",
  "items": {
    "guides" | "tubes" | "selectedGuides" | "softSelectedGuides" | "parts" | "flowArrows" | "flowField" | "scalpMap"
-   | "tubeWires" | "selectedTubeWires": {
+   | "tubeWires" | "selectedTubeWires" | "braidTubes": {
      "version", "changed", "shown", "vertexCount", "primitive": "lines"|"triangles",
      "perVertexColors", "surface", "color": [r,g,b,a], "lineWidth", "layer",
      "arrays"?: {"positions" <f4 (n,3) host space, "indices" <u4 (m,2) lines | (m,3) triangles,
@@ -445,6 +449,21 @@ the next `display`):
   `activeTubeGuides`) as wire lines (`appendTubeWire`), the selected guides' apart (warm, opaque,
   `lineWidth` 2; the rest a light blue at 0.6 alpha), as Maya's draw override builds them. Empty
   (not `shown`) with `tubeWires` off.
+- `braidTubes`: Show Tubes (a Braid node's header button; an evaluation names the shown nodes,
+  `evaluate`'s `braidTubes`, so their inputs are evaluated and the tubes follow an edit also while
+  the hair is hidden or an earlier node is viewed; the groom's `braid_tubes` property, the
+  setting `braidTubes`: the Braid nodes' names, one a line or a list): the shown nodes' section
+  tubes as one surface (triangles, `normals`, `colors`: each section its own), from the session's
+  mesh of them (`GroomSession::braidTubeMesh`: built from the last evaluation's results, kept while
+  the nodes' params and inputs stay). The add-on shades the colors by the normals and draws it
+  with the scene's depth, writing its own (`display.SOLID`). The rules (which nodes have the
+  button, the toggle, a rename, a delete) are the core's, asked through the command `braid_tubes`
+  {`shown`, `toggle`?, `old`?, `new`?, `keep`?} -> {`shown`, `lit`, `offered`: the nodes with the
+  button (Braids, and nodes giving guides: the tubes those guides carry)}. The graph editor asks
+  `graph_nodes` once per graph: {`nodes`: {name: {`outputs` (their types as connected),
+  `viewable` (View Up to Here), `bakeable` (Bake Node to Guides), `tubes` (Show Tubes)}}}, and
+  `port_types` once: {`matches`: {output type: [input types it feeds]}} (the core's
+  portTypesMatch), the canvas's wire checks.
 - `brush`: the overlay `hover` and the strokes build: the ring (`brushRingColor`: yellow, red for
   Part and Erase, orange for Flow, green for Place and Draw, which show a 6-pixel dot), the guides
   the brush would touch (`brushHoverColor`, while hovering) and a Part or Flow stroke's path,
@@ -482,7 +501,7 @@ it is kept as `edit_graph` keeps it, without a step (`"undoable": false`).
 | `edit_graph` `op=ungroup` | `name` (a Compound) | `{"names", "moved"}`: `GraphEdit::expand` |
 | `edit_graph` `op=expose_param` / `unexpose_param` | `name`, `param` | the param's input port (`paramInputs`: a Field port for a mappable number or a color field, Curve for a ramp, Value for the rest; refused for a param that sets the node's ports); unexposed, what fed it goes and the param keeps its value |
 | `edit_graph` `op=compound_expose` / `compound_unexpose` | `name` (a Compound), `param` (the name it shows), `target` ("node.param" inside) | the compound's panel (`definition.expose`); unexposed, the inner param keeps the value the compound set last |
-| `edit_graph` `op=insert_on_link` | `from`, `to`, `input`, `node`, `output` | the one link routed through `node`: its first input that takes from's output, `node` feeding `to.input` (Maya's `insert_on_link`, a node dropped on a wire) |
+| `edit_graph` `op=insert_on_link` | `from`, `to`, `input`, `node`, `output` | the one link routed through `node`: its first input that takes from's output, `node` feeding `to.input` (every host's node dropped on a wire: graph_inserts.h `insertOnLink`) |
 | `edit_graph` `op=add_control` | `node`, `param`, `name` (the param's), `default` (the param's value), `min` (0), `max` (1) | `{"node", "control"}`: a Control node (the slider) wired to the param, exposed first (params.py's `add_control`) |
 | `edit_graph` `op=link_control` / `unlink_control` | `node`, `param`, `control` (`<node>_<param>`) | a keyed param (`paramControls`): the param reads control `<node>_<param>` (three, X Y Z or R G B, for a vector), which the host keys and gives with `set_controls`; refused for counts and seeds (`animatable` false), maps, Control nodes. Unlinked, the control's value now goes back into the param (`value`) |
 | `edit_graph` `op=set_positions` | `positions` {node: [x, y]}, `backdrops` [{`title`, `x`, `y`, `w`, `h`, `color` [r, g, b] 0-255}] (all of them; [] none), `pins` {`points` [{`id`, `x`, `y`}], `routes` [{`from`, `output`?, `to`, `input`, `via` [pin ids]}]} (all of them; no routes: none) | the layout: node positions, the graph's `backdrops` and its `pins` (Maya's `save_layout`), kept as given; not an undo step |
@@ -571,7 +590,8 @@ FBX exporter writes its scene meshes); the manifests are Maya's, word for word, 
 one's units line. unrealGroom does not write the scales' FBX beside the .abc by itself (Maya's
 `scales="auto"`): the add-on writes scalesFbx. A transfer leaves the session on the new mesh; the
 add-on's Transfer Groom to Scalp then makes the target object own the groom (below). Other scalps
-are only the meshes: the Scalp/Scatter/Merge wiring Maya's add_scalp does is a Graph Editor edit,
+are only the meshes: the Scalp/Scatter/Merge wiring Maya's add_scalp does is `edit_graph`'s
+insert_scalp (every host's, graph_inserts.h),
 and set_scalps does not resize painted vertex maps for the added vertices (Maya's
 _resize_vertex_maps). Bakes go to `directory` (the add-on: the .blend's groomlab/caches), not Maya's
 scene caches folder.
@@ -974,7 +994,7 @@ their caches and redraws. New Theme from Current, Reload Theme and Open Themes F
 drawn over in full in the app's look (uikit.py, the theme file's `graph` section): the canvas and
 its dot grid, backdrops, the app's wires, and each node as `node_graph.cpp`'s `drawNode` draws it (176
 wide, a 28 header washed with the category's color, the name, the cook time, warning and View
-badges, the header toggles Clump Colors, Expand Inputs, View and Bypass, ports down the sides, the
+badges, the header toggles Clump Colors (a Braid's: Show Tubes), Expand Inputs, View and Bypass, ports down the sides, the
 type under one-port nodes), with the selected node's params docked on the right (the sidebar's
 GroomLab Node panel run through `drawn.py`; a ramp's curve drawn, a press opens Blender's curve
 editor). The tree stays the data: the canvas draws its nodes at their locations through Blender's

@@ -4,6 +4,7 @@
 
 #include "prman_render.h"
 #include "graph_presets.h"  // appResourceDir
+#include "groomlab/renderman_look.h"
 
 #include <algorithm>
 #include <cmath>
@@ -64,43 +65,9 @@ std::string worldToCamera(const V3& eye, const V3& target) {
                   {-dot(a.right, eye), -dot(a.up, eye), -dot(back, eye)});
 }
 
-// The procedural's hair network (hosts/renderman/examples/groom.rib), PxrMarschnerHair's
-// specularOffset minus the tilt.
-std::string hairNetwork(float tilt) {
-    std::ostringstream s;
-    const auto primvar = [&s](const char* name, const char* var, const char* type, const char* extra = "") {
-        s << "  Pattern \"PxrPrimvar\" \"" << name << "\" \"string varname\" [\"" << var << "\"] \"string type\" [\"" << type
-          << "\"]" << extra << "\n";
-    };
-    primvar("pv_melanin", "rman_melanin", "float");
-    primvar("pv_redness", "rman_redness", "float");
-    primvar("pv_dye", "rman_dye", "color", " \"color defaultColor\" [1 1 1]");
-    primvar("pv_color", "rman_color", "color");
-    primvar("pv_share", "rman_rgbShare", "float");
-    primvar("pv_gainR", "rman_specularGainR", "float", " \"float defaultFloat\" [1.75]");
-    primvar("pv_coneR", "rman_coneAngleR", "float", " \"float defaultFloat\" [8]");
-    primvar("pv_coneTT", "rman_coneAngleTT", "float", " \"float defaultFloat\" [4]");
-    primvar("pv_coneTRT", "rman_coneAngleTRT", "float", " \"float defaultFloat\" [16]");
-    primvar("pv_opacity", "opacity", "float", " \"float defaultFloat\" [1]");
-    s << "  Pattern \"PxrHairColor\" \"pigment\" \"int mode\" [0] \"reference float melanin\" [\"pv_melanin:resultF\"]"
-         " \"reference float redness\" [\"pv_redness:resultF\"] \"reference color dye\" [\"pv_dye:resultRGB\"]"
-         " \"float randomMelanin\" [0] \"float strayDensity\" [0] \"string hairIndexPrimvar\" [\"hair_index\"]\n";
-    s << "  Pattern \"PxrHairColor\" \"rgb\" \"int mode\" [1] \"reference color Color\" [\"pv_color:resultRGB\"]"
-         " \"color randomColor\" [0 0 0] \"float strayDensity\" [0]\n";
-    for (const char* lobe : {"Diff", "TT", "TRT"}) {
-        std::string lower(lobe);
-        std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-        s << "  Pattern \"PxrMix\" \"mix_" << lower << "\" \"reference color color1\" [\"pigment:result" << lobe
-          << "\"] \"reference color color2\" [\"rgb:result" << lobe << "\"] \"reference float mixer\" [\"pv_share:resultF\"]\n";
-    }
-    s << "  Bxdf \"PxrMarschnerHair\" \"hair\" \"reference color diffuseColor\" [\"mix_diff:resultRGB\"]"
-         " \"reference color specularColorTT\" [\"mix_tt:resultRGB\"] \"reference color specularColorTRT\" [\"mix_trt:resultRGB\"]"
-         " \"reference float specularGainR\" [\"pv_gainR:resultF\"] \"float specularGainTT\" [2] \"float specularGainTRT\" [1.2]"
-         " \"reference float specularConeAngleR\" [\"pv_coneR:resultF\"] \"reference float specularConeAngleTT\" [\"pv_coneTT:resultF\"]"
-         " \"reference float specularConeAngleTRT\" [\"pv_coneTRT:resultF\"] \"float specularOffset\" ["
-      << num(-tilt) << "] \"float specularIor\" [1.55] \"reference float presence\" [\"pv_opacity:resultF\"]\n";
-    return s.str();
-}
+// The procedural's hair network (hosts/renderman/examples/groom.rib): every host's
+// (renderman_look.h hairNetworkRib), PxrMarschnerHair's specularOffset minus the tilt.
+std::string hairNetwork(float tilt) { return renderman::hairNetworkRib({}, tilt, "  "); }
 
 }  // namespace
 

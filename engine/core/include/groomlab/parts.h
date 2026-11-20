@@ -49,6 +49,8 @@ public:
     // std::invalid_argument when the stroke is too short.
     std::string add(const std::string& base, const std::vector<Vec3f>& points, const ScalpMesh& scalp,
                     std::size_t samples = 64);
+    // The part named `name` taken out; false when there is none (every host's Remove Part).
+    bool remove(const std::string& name);
     // The same parts bound to another scalp: each point to the closest point of `to` (GH-8).
     PartSet transferred(const ScalpMesh& from, const ScalpMesh& to, const ScalpFit& fit = {}) const;
     // The same by any mapping (transfer.h): each point where the mapping takes it.

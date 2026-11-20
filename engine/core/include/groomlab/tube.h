@@ -61,6 +61,9 @@ const char* tubeShapeName(TubeShape shape);
 // False (shape untouched) for an unknown name.
 bool parseTubeShape(const std::string& name, TubeShape* shape);
 const std::vector<std::string>& tubeShapeNames();
+// A new library shape's name, every host's: "<base> 1", "<base> 2"... the first no built-in shape
+// (tubeShapeNames) nor one of `library` has.
+std::string freeTubeShapeName(const std::string& base, const std::vector<std::string>& library);
 
 constexpr float kMinTubeAspect = 0.01f;
 constexpr float kMaxTubeAspect = 100.0f;
@@ -69,6 +72,16 @@ constexpr float kMaxTubeAspect = 100.0f;
 struct SectionPoint {
     float u = 0.0f, v = 0.0f;
 };
+
+// A cross-section editor's Mirror, every host's (Maya's, the app's, the Blender add-on's tube shape
+// editor): points within kMirrorAxis of the v axis are on it.
+constexpr float kMirrorAxis = 0.02f;
+// The points made symmetric about the v axis from their right side (u > 0): the right chain in
+// order, the points on the axis at its ends set on it, its mirror image closing the outline. Points
+// with nothing right of the axis come back mirrored from the left. Fewer than 3 after: as they were.
+std::vector<SectionPoint> mirroredSectionPoints(const std::vector<SectionPoint>& points);
+// Each point's mirror image among the points (its own index on the axis; -1 when it has none).
+std::vector<int> mirrorPartners(const std::vector<SectionPoint>& points);
 
 // A shape's outline and what is measured on it once: a closed polygon, counter-clockwise, in the
 // unit domain (its bounding box -1 to 1 on both axes); its corners and edge points (indices into
@@ -427,9 +440,23 @@ private:
 // (smoothedTube, at `points` samples or the lists' own count where that is more) "passes" times
 // (default 3). Widths are divided by scale (a host's shown size to the stored).
 // Throws std::invalid_argument on a bad shape, a negative width or an empty list.
+//
+// tubeSmoothEdit: the Tube card's Smooth (every host's) as that edit's JSON text: `channel` the
+// Shape brush's name ("width", "flatness", "twist", "all"; "aspect", flatness' list, too) smoothed
+// `passes` times (kept to 1 to 100). std::invalid_argument for another channel.
 std::string tubeToJson(const TubeProfile& tube, float scale = 1.0f);
 TubeProfile editedTube(const TubeProfile& base, const std::string& editJson, float scale = 1.0f, std::size_t points = 0,
                        const TubeShapeLibrary* library = nullptr);
+std::string tubeSmoothEdit(const std::string& channel, int passes = 3);
+
+// The Tube card's Width, Flatness and Twist (every host's) for a tube's lists: its widest width
+// (0.1 for none: what Width scales from), 1 - its mean aspect (0 to 0.99) and its mean twist
+// (radians, -pi to pi). tubeAspectOfFlatness: the aspect Flatness sets (1 - it, at least 0.01).
+struct TubeCardValues {
+    float width = 0.1f, flatness = 0.0f, twist = 0.0f;
+};
+TubeCardValues tubeCardValues(const std::vector<float>& width, const std::vector<float>& aspect, const std::vector<float>& twist);
+float tubeAspectOfFlatness(float flatness);
 
 // The lists a tube holds, as a mask (smoothedTube).
 enum TubeLists : unsigned { kTubeWidthList = 1u, kTubeAspectList = 2u, kTubeTwistList = 4u, kTubeAllLists = 7u };

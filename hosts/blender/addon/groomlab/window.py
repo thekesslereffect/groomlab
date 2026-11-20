@@ -19,7 +19,7 @@ import time
 
 import bpy
 
-from . import drawn, groom, palette, uikit
+from . import drawn, groom, palette, process, uikit
 
 TITLE = "GroomLab"
 state = uikit.WindowState()
@@ -139,6 +139,19 @@ def _tube_preview(t, shape, points):
         except Exception as e:  # noqa: BLE001 - a shape the core refuses mid-drag (crossing): no preview
             if DEBUG:
                 print("tube preview:", e)
+
+
+def make_tube_shape_symmetric(t):
+    """The picked custom shape made symmetric (Mirror turned on); a built-in one is left alone."""
+    shape = _tube_shape(t)
+    if not shape or shape.get("builtin"):
+        return False
+    points = [list(p) for p in shape.get("points") or []]
+    made = process.call("tube_shape_symmetric", points=points)["points"]
+    if [list(p) for p in made] == points:
+        return False
+    _tube_commit(t, shape, made)
+    return True
 
 
 def _tube_commit(t, shape, points):

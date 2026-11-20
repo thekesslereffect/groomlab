@@ -52,6 +52,7 @@
 #include "groomlab/feathers.h"
 #include "groomlab/groom_file.h"
 #include "groomlab/guide_selection.h"
+#include "groomlab/engine_cards.h"
 #include "groomlab/parallel.h"
 #include "groomlab/png.h"
 #include "groomlab/random.h"
@@ -235,6 +236,7 @@ MObject GroomShape::aHiddenGuideGroups;
 MObject GroomShape::aTubeViewGroup;
 MObject GroomShape::aMixedView;
 MObject GroomShape::aGuideGroupColors;
+MObject GroomShape::aBraidTubes;
 MObject GroomShape::aGuideSelection;
 MObject GroomShape::aSoftSelectRadius;
 MObject GroomShape::aGroomFile;
@@ -997,6 +999,12 @@ MStatus GroomShape::initialize() {
     aHiddenGuideGroups = tAttr.create("hiddenGuideGroups", "glhgg", MFnData::kString, stringData.create(""), &status);
     CHECK_MSTATUS_AND_RETURN_IT(status);
     tAttr.setStorable(true);
+    // Show Tubes: the Braid nodes whose section tubes the viewport draws (their names, one a line),
+    // set by the Graph Editor's button on a Braid node. It affects nothing the groom evaluates.
+    aBraidTubes = tAttr.create("braidTubes", "glbtb", MFnData::kString, stringData.create(""), &status);
+    CHECK_MSTATUS_AND_RETURN_IT(status);
+    tAttr.setStorable(true);
+    tAttr.setHidden(true);
     // The Tube hierarchy's Lock view: a guide group whose tubes alone draw, whichever guides show
     // ("": the tubes as their guides; display.h TubeDisplayOptions::tubeViewGroup).
     aTubeViewGroup = tAttr.create("tubeViewGroup", "gltvg", MFnData::kString, stringData.create(""), &status);
@@ -1181,7 +1189,7 @@ MStatus GroomShape::initialize() {
     tAttr.setHidden(true);
 
     for (MObject* attr : {&aInMesh, &aRestMesh, &aFollowScalp, &aScalpTopology, &aScalpSplit, &aScaleSource, &aScaleReference, &aScaleTransformReference, &aGroomScale, &aScaleArea, &aScaleTransform, &aColliderMeshes, &aExtraScalps, &aRenderDensity, &aRenderWidthScale, &aRenderLengthScale, &aRenderView, &aSimGuides, &aGuideCache, &aGuideCacheObject, &aSimCaches, &aTransferMarkers, &aGuideCurves, &aDriverCurves, &aDriverTwist, &aDriverBind, &aTime, &aGraph, &aGuideData, &aPartData, &aGraphUi, &aViewNode, &aLocked, &aDisplayInstances, &aGuideSelection, &aSoftSelectRadius, &aStrandColorMode, &aStrandColorSource, &aStrandColorMin, &aStrandColorMax, &aDisplayRibbons, &aRibbonWidthScale, &aDisplayWidthCoverage, &aDisplayCoverageDensity, &aDisplayClumpLod, &aClumpLodError, &aDisplayLighting, &aDisplayShadows, &aDisplayHairShading, &aDisplaySelfShadowing, &aDisplayStrandVariation, &aGuideWidth, &aCorrectiveData, &aCorrectiveWeight, &aSculptData, &aSculptNode, &aFlowData, &aDisplayFlow, &aShotSculpt, &aShotLayer, &aLodDistance, &aLodNear, &aLodFar, &aLodMinDensity,
-                          &aLodWidthCompensation, &aCameraCull, &aCullMargin, &aBackfaceCull, &aBackfaceAngle, &aDisplayColor, &aUseMaterialColor, &aSculptDisplay, &aSculptDensity, &aIsolateGroup, &aGuideColorMode, &aGuideColorLayer, &aGuidePoints, &aGuideSmoothing, &aHiddenGuideGroups, &aTubeViewGroup, &aMixedView, &aGuideGroupColors, &aCardBlock, &aRenderMode, &aGroomFile, &aPreviewDensity, &aPreviewPointBudget, &aDisplayGuides, &aDisplayHair,
+                          &aLodWidthCompensation, &aCameraCull, &aCullMargin, &aBackfaceCull, &aBackfaceAngle, &aDisplayColor, &aUseMaterialColor, &aSculptDisplay, &aSculptDensity, &aIsolateGroup, &aGuideColorMode, &aGuideColorLayer, &aGuidePoints, &aGuideSmoothing, &aHiddenGuideGroups, &aTubeViewGroup, &aMixedView, &aGuideGroupColors, &aBraidTubes, &aCardBlock, &aRenderMode, &aGroomFile, &aPreviewDensity, &aPreviewPointBudget, &aDisplayGuides, &aDisplayHair,
                           &aDisplayTubes, &aBrushTick, &aCardDensity, &aOutCards, &aOutRachis, &aOutMesh, &aDisplayCards, &aDisplayMesh, &aDisplayCardTextures, &aDisplayOverlaysOnTop, &aCardMaps, &aScalpMaps, &aScalpMapDisplay, &aScalpMapChannel, &aOutStrandCount, &aLastError, &aOutVrayPluginData, &aOutFrame}) {
         CHECK_MSTATUS_AND_RETURN_IT(addAttribute(*attr));
     }
@@ -1198,7 +1206,7 @@ MStatus GroomShape::initialize() {
         CHECK_MSTATUS_AND_RETURN_IT(attributeAffects(*input, aOutVrayPluginData));
     }
     for (MObject* input : {&aInMesh, &aRestMesh, &aFollowScalp, &aScalpTopology, &aScaleSource, &aScaleReference, &aScaleTransformReference, &aColliderMeshes, &aColliderMesh, &aColliderName, &aColliderRestMesh,
-                           &aExtraScalps, &aExtraScalpMesh, &aExtraScalpName, &aExtraScalpRestMesh, &aSimGuides, &aSimCurve, &aSimGuideId, &aGuideCache, &aGuideCacheObject, &aSimCaches, &aGuideCurves, &aDriverCurves, &aDriverTwist, &aDriverBind, &aTime, &aGraph, &aGuideData, &aCorrectiveData, &aCorrectiveWeight, &aSculptData, &aSculptNode, &aFlowData, &aPartData, &aPreviewDensity, &aPreviewPointBudget, &aRenderView, &aSculptDensity, &aViewNode, &aBrushTick, &aCardDensity, &aDisplayCards, &aDisplayMesh, &aCardMaps, &aScalpMaps}) {
+                           &aBraidTubes, &aExtraScalps, &aExtraScalpMesh, &aExtraScalpName, &aExtraScalpRestMesh, &aSimGuides, &aSimCurve, &aSimGuideId, &aGuideCache, &aGuideCacheObject, &aSimCaches, &aGuideCurves, &aDriverCurves, &aDriverTwist, &aDriverBind, &aTime, &aGraph, &aGuideData, &aCorrectiveData, &aCorrectiveWeight, &aSculptData, &aSculptNode, &aFlowData, &aPartData, &aPreviewDensity, &aPreviewPointBudget, &aRenderView, &aSculptDensity, &aViewNode, &aBrushTick, &aCardDensity, &aDisplayCards, &aDisplayMesh, &aCardMaps, &aScalpMaps}) {
         CHECK_MSTATUS_AND_RETURN_IT(attributeAffects(*input, aOutStrandCount));
         CHECK_MSTATUS_AND_RETURN_IT(attributeAffects(*input, aLastError));
         CHECK_MSTATUS_AND_RETURN_IT(attributeAffects(*input, aOutCards));
@@ -1876,6 +1884,10 @@ MStatus GroomShape::evaluate(MDataBlock& data, Lane& lane) {
     request.cardDensity = data.inputValue(aCardDensity).asFloat();
     // The ToMesh nodes' meshes the viewport draws (displayMesh).
     request.wantStrandMeshes = session.hasStrandMeshNode() && data.inputValue(aDisplayMesh).asBool();
+    // Show Tubes: the Braid nodes whose tubes draw. Their inputs are evaluated though the hair is
+    // hidden or a node before them is viewed, and the frame's version moves when the tubes would
+    // be another mesh (ViewRequest::braidTubes), so the viewport draws them again.
+    request.braidTubes = data.inputValue(aBraidTubes).asString().asChar();
     // The hair hidden (displayHair, the eye) or the groom itself hidden (Maya's Evaluation Manager
     // computes the groom whenever the scalp moves, drawn or not): no strands evaluated, only the
     // scalp and the guides (what still draws), while nothing else reads the strands here (a card
@@ -2193,7 +2205,7 @@ MStatus GroomShape::setDependentsDirty(const MPlug& plug, MPlugArray& affected) 
         plug == aStrandColorSource || plug == aStrandColorMin || plug == aStrandColorMax || plug == aDisplayRibbons ||
         plug == aRibbonWidthScale || plug == aDisplayWidthCoverage || plug == aDisplayCoverageDensity || plug == aDisplayClumpLod || plug == aClumpLodError || plug == aSculptDisplay || plug == aIsolateGroup || plug == aGuideColorMode ||
         plug == aGuideColorLayer || plug == aDisplayInstances || plug == aDisplayLighting || plug == aDisplayShadows || plug == aDisplayHairShading || plug == aDisplaySelfShadowing || plug == aDisplayStrandVariation ||
-        plug == aGuideWidth || plug == aGuidePoints || plug == aGuideSmoothing || plug == aHiddenGuideGroups || plug == aTubeViewGroup || plug == aMixedView || plug == aGuideGroupColors ||
+        plug == aGuideWidth || plug == aGuidePoints || plug == aGuideSmoothing || plug == aHiddenGuideGroups || plug == aTubeViewGroup || plug == aMixedView || plug == aGuideGroupColors || plug == aBraidTubes ||
         plug == aDisplayFlow || plug == aDisplayColor ||
         plug == aUseMaterialColor || plug == aDisplayGuides || plug == aDisplayHair || plug == aDisplayTubes || plug == aDisplayCards || plug == aDisplayMesh ||
         plug == aDisplayCardTextures || plug == aDisplayOverlaysOnTop || plug == aCardMaps || plug == aScalpMapDisplay || plug == aScalpMapChannel;
@@ -2397,16 +2409,11 @@ MStatus GroomShape::computeCards(MDataBlock& data, Lane& lane) {
                 mesh.assignUVs(counts, connects);  // UV ids follow the vertex ids
                 // A second, unique atlas for AO_world: every card owns a non-overlapping shell,
                 // even when map1 deliberately shares a small set of texture variations.
-                CardMesh unique;
-                const std::vector<float>* worldU = &cards->worldU;
-                const std::vector<float>* worldV = &cards->worldV;
-                if (worldU->size() != cards->positions.size() || worldV->size() != cards->positions.size()) {
-                    unique = *cards;
-                    layoutCardsUnique(unique, unique.padding);
-                    worldU = &unique.u;
-                    worldV = &unique.v;
-                }
-                if (worldU->size() == cards->positions.size() && worldV->size() == cards->positions.size()) {
+                // (Every host's: cards.h cardsUniqueUVs, laid out again only when every card has its stations.)
+                std::vector<float> uniqueU, uniqueV;
+                const std::vector<float>* worldU = &uniqueU;
+                const std::vector<float>* worldV = &uniqueV;
+                if (cardsUniqueUVs(*cards, uniqueU, uniqueV)) {
                     MString worldSet("aoWorld");
                     worldSet = mesh.createUVSetDataMesh(worldSet);
                     MFloatArray worldUs, worldVs;
@@ -2543,10 +2550,10 @@ namespace {
 // The file name base of a bake into `directory`: `base` made file safe, with _2, _3... when
 // another groom's card bake has that prefix there (its viewport reads those files).
 std::string freeBakeBase(const MObject& groom, const std::string& directory, const std::string& base) {
-    const std::string safe = fileSafeName(base);
-    std::string name = safe;
-    for (int n = 2; bakePrefixUsedByOtherGroom(groom, directory + "/" + name + "_"); ++n) name = safe + "_" + std::to_string(n);
-    return name;
+    // Every host's rule (card_files.h freeCardBakeName): the name asked for is this groom's to
+    // rewrite unless another groom reads it; a further name also never lands on files there.
+    return freeCardBakeName(directory, base, CardBakePaths::in(directory, fileSafeName(base)).prefix,
+                            [&](const std::string& prefix) { return bakePrefixUsedByOtherGroom(groom, prefix); });
 }
 
 }  // namespace
@@ -2587,38 +2594,8 @@ std::vector<std::string> GroomShape::bakeCards(const std::string& directory, con
     const CardTextures& t = bake.textures;
     const std::string base = freeBakeBase(thisMObject(), directory, requestedBase);
     std::vector<std::string> paths;
-    if (layout == "unity") {  // an export: PNGs laid out for Unity's materials, never shown by the groom
-        const std::size_t n = static_cast<std::size_t>(t.size) * static_cast<std::size_t>(t.size);
-        const auto smoothness = static_cast<std::uint8_t>(std::lround(255.0f * (1.0f - hairLook().roughness)));
-        std::vector<std::uint8_t> baseColor(4 * n), mask(4 * n);
-        for (std::size_t i = 0; i < n; ++i) {
-            baseColor[4 * i] = t.color[3 * i];
-            baseColor[4 * i + 1] = t.color[3 * i + 1];
-            baseColor[4 * i + 2] = t.color[3 * i + 2];
-            baseColor[4 * i + 3] = t.coverage[i];
-            mask[4 * i] = t.iridescence.size() == n ? t.iridescence[i] : 0;  // metallic: none; the iridescence, if any
-            mask[4 * i + 1] = t.occlusion[i];          // ambient occlusion
-            mask[4 * i + 2] = t.attribute[4 * i + 3];  // root (0) to tip (1), in the detail mask's slot
-            mask[4 * i + 3] = smoothness;              // 1 - the hair look's roughness
-        }
-        const std::vector<std::uint8_t> normal = cardNormalOpenGl(t);  // Unity's green: OpenGL's
-        // Encoded side by side (writeCompressedPngs: the bytes of one at a time).
-        std::vector<PngImage> images;
-        auto png = [&](const char* map, int channels, const std::vector<std::uint8_t>& pixels) {
-            paths.push_back(directory + "/" + base + "_" + map + ".png");
-            images.push_back({t.size, t.size, channels, &pixels});
-        };
-        png("BaseColor", 4, baseColor);
-        png("Mask", 4, mask);
-        png("AO", 1, t.occlusion);
-        png("AO_world", 1, t.worldOcclusion);
-        png("Tangent", 3, t.tangent);
-        png("Depth", 1, t.depth);
-        png("Attribute", 4, t.attribute);
-        png("Normal", 3, normal);
-        writeCompressedPngs(paths, images);
-        return paths;
-    }
+    // An export: PNGs laid out for Unity's materials (every host's engine_cards.h), never shown by the groom.
+    if (layout == "unity") return writeUnityCardMaps(t, hairLook().roughness, directory, base);
     // Unreal's hair card maps and the atlas, as every host writes them (card_files.h); the app's
     // preview is made when the groom is exported for it.
     const CardBakePaths at = CardBakePaths::in(directory, base);
@@ -2665,23 +2642,7 @@ std::vector<std::string> GroomShape::bakeScalp(const std::string& directory, con
     if (layout != "unreal" && layout != "unity") throw std::runtime_error("the layout is unreal or unity, not " + layout);
     ScalpTextures t = bakeScalpInMemory(resolution, reach, density, nullptr);
     const std::string base = freeBakeBase(thisMObject(), directory, requestedBase);
-    if (layout == "unity") {
-        const std::size_t n = static_cast<std::size_t>(t.size) * static_cast<std::size_t>(t.size);
-        std::vector<std::uint8_t> baseColor(4 * n);
-        for (std::size_t i = 0; i < n; ++i) {
-            baseColor[4 * i] = t.color[3 * i];
-            baseColor[4 * i + 1] = t.color[3 * i + 1];
-            baseColor[4 * i + 2] = t.color[3 * i + 2];
-            baseColor[4 * i + 3] = t.coverage[i];
-        }
-        const std::string path = directory + "/" + base + "_ScalpBaseColor.png";
-        writeCompressedPng(path, t.size, t.size, 4, baseColor);
-        return {path};
-    }
-    std::vector<std::string> paths{directory + "/" + base + "_ScalpColor.tga", directory + "/" + base + "_ScalpCoverage.tga"};
-    parallelInvoke([&] { writeTga(paths[0], t.size, t.size, 3, t.color); },
-                   [&] { writeTga(paths[1], t.size, t.size, 1, t.coverage); });
-    return paths;
+    return writeScalpCapMaps(t, layout == "unity", directory, base);  // every host's (engine_cards.h)
 }
 
 std::string GroomShape::graphStatsJson() {

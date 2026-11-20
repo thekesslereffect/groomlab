@@ -215,7 +215,6 @@ public:
 
     const SurfaceGraph& graph() const { return *graph_; }
     const std::shared_ptr<const SurfaceGraph>& graphPointer() const { return graph_; }
-    std::size_t sourceCount() const { return fronts_.size(); }
     const SurfaceFront* front(std::size_t source) const { return fronts_[source].get(); }
     std::size_t made() const { return made_; }  // fronts made (not shared from `previous`)
 

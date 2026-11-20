@@ -208,12 +208,10 @@ ui::Bindings AppActions::bindings(MainWindow& w) {
     b["sim.bake"] = {run([m] { m->bakeSimulation(); }), {}, groomOpen};
     b["sim.clear"] = {run([m] { m->invalidateSimulation(); }), {}, groomOpen};
     for (const char* lod : {"hero", "mid", "low"}) {
-        // A Cards node before the output at that level of detail (the Cards card's Add Cards + LOD).
+        // Every Cards node at that level of detail, one made before the output when there is none.
         b[std::string("add.cards.") + lod] = {run([m, lod = std::string(lod)] {
                                                   if (!m->document_) return;
-                                                  std::string made;
-                                                  std::string error = m->document_->addCardsNode(&made);
-                                                  if (error.empty()) error = m->document_->applyCardPreset(made, lod);
+                                                  const std::string error = m->document_->addCards(lod);
                                                   if (!error.empty()) m->report(QObject::tr("Cannot add a Cards node: %1").arg(QString::fromStdString(error)));
                                                   m->shell_->cardsPanel()->setShowCards(true);
                                                   m->graphEdited();

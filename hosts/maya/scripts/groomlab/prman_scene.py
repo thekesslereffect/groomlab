@@ -287,7 +287,9 @@ def hair_network(prefix, tilt=3.0):
     """hosts/renderman/examples/groom.rib's shading network (renderman.PRIMVARS, as RenderMan for
     Maya's create_hair_network makes it), its handles prefixed: PxrPrimvar readers of the
     procedural's rman_* primvars, PxrHairColor's pigment (Physical) and RGB look (Artistic) mixed
-    by rman_rgbShare into PxrMarschnerHair; specularOffset minus HairColor's `tilt`."""
+    by rman_rgbShare into PxrMarschnerHair; specularOffset minus HairColor's `tilt`. The same text as
+    the core's renderman_look.h hairNetworkRib (the app's): this module runs without groomlab_core
+    (a render farm's Python), so it keeps its own copy."""
     from groomlab.renderman import PRIMVARS
     p = prefix + "_"
     lines = []

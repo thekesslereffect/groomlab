@@ -142,10 +142,13 @@ def _controls_in(graph):
         if node.get("type") == "Control":
             out[params.get("name", "control")] = params
         elif node.get("type") == "Expression":
-            try:
-                variables = json.loads(params.get("variables") or "{}")
-            except ValueError:
-                variables = {}
+            # The variables as an object or as its text (graph_controls.h controlsJson reads both).
+            variables = params.get("variables") or {}
+            if isinstance(variables, str):
+                try:
+                    variables = json.loads(variables or "{}")
+                except ValueError:
+                    variables = {}
             for value in variables.values() if isinstance(variables, dict) else ():
                 if isinstance(value, dict) and value.get("control"):
                     out[value["control"]] = {"default": float(value.get("value", 0.0)),

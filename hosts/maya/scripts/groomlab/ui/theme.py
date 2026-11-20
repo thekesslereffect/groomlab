@@ -49,7 +49,6 @@ FONT_DIRS = (os.path.normpath(os.path.join(SHIPPED_DIR, os.pardir, "fonts")),
 
 _current = None
 _listeners = []  # (weakref to object, method name)
-_slider_count = [0]
 _font_families = []  # the families the shipped fonts gave (loaded once, with a QApplication)
 _fonts_loaded = [False]
 
@@ -496,13 +495,6 @@ def font(pixels, bold=False, tabular=False, base=None):
     f.setPixelSize(max(1, int(round(pixels))))
     f.setBold(bold)
     return tabular_digits(f) if tabular else f
-
-
-def slider_accent():
-    """The next slider's color name: sliders cycle through the theme's list."""
-    names = current().get("ui.sliders", ["accent"]) or ["accent"]
-    _slider_count[0] += 1
-    return names[_slider_count[0] % len(names)]
 
 
 def style(widget, surface=None):

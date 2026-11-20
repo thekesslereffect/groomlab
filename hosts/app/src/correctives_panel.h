@@ -76,7 +76,6 @@ public:
     bool clearNodeEdits(const std::string& node = {});  // a Sculpt node's edits dropped (the targeted one's by default; one undo step)
     // The picked row: a corrective's name ("" the base groom, a node or nothing); a node's name.
     std::string currentLayer() const;
-    std::string currentNode() const;
     // The right-click menu for the row at `pos` (the tree's viewport coordinates; that row picked
     // first): a corrective's (lists.correctives.context), a Sculpt node's (nodeContext); null on
     // the base groom or nothing. Not shown: the caller pops it up (it deletes itself when closed).

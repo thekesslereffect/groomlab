@@ -28,6 +28,7 @@
 #include "groomlab/export_view.h"
 #include "groomlab/hair_color.h"
 #include "groomlab/parallel.h"
+#include "groomlab/profile.h"
 #include "groomlab/random.h"
 
 namespace groomlab::app {
@@ -111,7 +112,7 @@ namespace {
 struct HairChannels {
     const StrandSet& s;
     const ScalpMesh* scalp;
-    const std::vector<float>& widths;
+    const float* widths;  // (displayWidths: null when none are set)
     const std::vector<float>* melanin;
     const std::vector<float>* redness;
     const std::vector<float>* colors[3];
@@ -127,7 +128,7 @@ struct HairChannels {
     HairChannels(const StrandSet& set, const ScalpMesh* mesh)
         : s(set),
           scalp(mesh),
-          widths(set.widths()),
+          widths(displayWidths(set)),
           melanin(set.strandChannel(kMelaninChannel)),
           redness(set.strandChannel(kMelaninRednessChannel)),
           colors{set.strandChannel(kColorChannels[0]), set.strandChannel(kColorChannels[1]), set.strandChannel(kColorChannels[2])},
@@ -172,7 +173,7 @@ struct HairChannels {
             out[0] = p[k].x;
             out[1] = p[k].y;
             out[2] = p[k].z;
-            out[3] = begin + k < widths.size() ? widths[begin + k] : 0.01f;
+            out[3] = widths ? widths[begin + k] : kRibbonDefaultWidth;
         }
         writeStrand(i, sd);
     }
@@ -188,13 +189,7 @@ struct HairChannels {
         for (int c = 0; c < 3; ++c) sd[4 + c] = colors[c] ? (*colors[c])[i] : brown[c];
         sd[7] = static_cast<float>(n);
         // The root's normal: a feather's vane's, the scalp's there, else the way the strand sets out.
-        Vec3f normal{0.0f, 1.0f, 0.0f};
-        if (vanes.at(i, &normal)) {
-        } else if (scalp && i < roots.size() && scalp->contains(roots[i])) {
-            normal = scalp->normal(roots[i]);
-        } else if (n >= 2) {
-            normal = (p[1] - p[0]).normalized();
-        }
+        const Vec3f normal = iridescenceRootNormal(s, i, scalp, vanes);  // every host's (color_patterns.h)
         sd[8] = normal.x;
         sd[9] = normal.y;
         sd[10] = normal.z;
@@ -1415,6 +1410,7 @@ void LookdevRenderer::uploadHair(QRhi* rhi, QRhiResourceUpdateBatch* batch) {
     }
     build_.reset();
     if (!pending_) {
+        const ProfileScope scope("app.lookdev.hairBuffers");
         QElapsedTimer timer;
         timer.start();
         pending_ = std::make_shared<HairBuffers>(strands_ ? buildHairBuffers(*strands_, scalp_.get(), indicesNeeded()) : HairBuffers());
@@ -1462,7 +1458,9 @@ void LookdevRenderer::uploadHair(QRhi* rhi, QRhiResourceUpdateBatch* batch) {
     g.indexKindKnown = true;
     // The indices only for a new layout, of the kind drawn (built here if the build left them
     // out: the layout changed since it was asked for).
+    ProfilePhases phase("app.lookdev.hairIndices");
     if (!sameLayout && strands_) buildHairIndices(*strands_, g.useStrip ? HairIndices::Strip : HairIndices::List, b);
+    phase.next("app.lookdev.hairTextures");
     if (b.pointCount > 0 && (sameLayout || !(g.useStrip ? b.strip : b.list).empty())) {
         auto uploadIndices = [&](std::unique_ptr<QRhiBuffer>& buffer, const std::vector<std::uint32_t>& data) {
             buffer.reset(rhi->newBuffer(QRhiBuffer::Immutable, QRhiBuffer::IndexBuffer, static_cast<quint32>(data.size() * sizeof(std::uint32_t))));
@@ -1557,9 +1555,11 @@ void LookdevRenderer::uploadHair(QRhi* rhi, QRhiResourceUpdateBatch* batch) {
             g.pointStrands.reset();
         }
     }
+    phase.next("app.lookdev.bounds");
     hairBounds_ = b.bounds;
     updateBounds();
     uploadedVersion_ = hairVersion_;
+    phase.next("app.lookdev.hairBuffersFreed");
     pending_.reset();
 }
 
@@ -1984,15 +1984,20 @@ void LookdevRenderer::fillFrame(FrameUniforms& u, const OrbitCamera& camera, int
 bool LookdevRenderer::prepare(QRhi* rhi, QRhiCommandBuffer* cb, QRhiRenderTarget* target) {
     hairDraws_ = 0;
     if (!supported(rhi)) return false;
+    ProfilePhases phase("app.lookdev.resources");
     if (!ensureResources(rhi, target)) return false;
     QRhiResourceUpdateBatch* batch = rhi->nextResourceUpdateBatch();
+    phase.next("app.lookdev.uploadHair");
     uploadHair(rhi, batch);
+    phase.next("app.lookdev.uploadSurfaces");
     uploadEnvironment(rhi, batch);
     uploadSurfaces(rhi, batch);
     cb->resourceUpdate(batch);
     // The visibility path's objects first: the surfaces' bindings name its volumes.
+    phase.next("app.lookdev.vis");
     if (hairPath_ == HairPath::Visibility) ensureVis(rhi);
     else gpu_->vis.ready = false;
+    phase.next("app.lookdev.pipelines");
     return ensurePipelines(rhi, target);
 }
 
@@ -2123,7 +2128,10 @@ bool LookdevRenderer::render(QRhi* rhi, QRhiCommandBuffer* cb, QRhiRenderTarget*
         put4(fu.voxelScale, 1.0f / (static_cast<float>(gridDims_[0]) * vs), 1.0f / (static_cast<float>(gridDims_[1]) * vs),
              1.0f / (static_cast<float>(gridDims_[2]) * vs), offset * vs);
         put4(fu.voxelParams, kVoxelCountScale, skyDirection[0], skyDirection[1], skyDirection[2]);
-        selectLod(rhi, batch, camera, size);
+        {
+            const ProfileScope scope("app.lookdev.selectLod");
+            selectLod(rhi, batch, camera, size);
+        }
         // A thread a point (its segment), in rows of kGroupsPerRow groups.
         const std::uint32_t groups = static_cast<std::uint32_t>((pointCount_ + 255) / 256);
         pointGroupsX = std::max<std::uint32_t>(std::min(groups, kGroupsPerRow), 1);

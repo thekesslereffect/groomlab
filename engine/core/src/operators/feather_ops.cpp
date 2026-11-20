@@ -106,17 +106,14 @@ void barbTurn(const Barb& b, float t, float lift, float droop, float kinkIn, flo
     *rise = (b.side == 0 ? 0.0f : lift - droop * t) + kinkOut;
 }
 
-// A down barb's frizz at segment j: the kinks in and out of the vane summed from its root, drawn
-// from its ID (the same in both of Propagate's passes).
-void downKinks(const Barb& b, std::uint64_t seed, float frizz, std::size_t j, float* in, float* out) {
-    *in = 0.0f;
-    *out = 0.0f;
+// A down barb's frizz: adds segment j's kink in and out of the vane to the sums from its root (the
+// caller's, 0 before segment 1 and walked j = 1, 2, ...), drawn from its ID (the same in both of
+// Propagate's passes).
+void addDownKink(const Barb& b, std::uint64_t seed, float frizz, std::size_t j, float* in, float* out) {
     if (!b.down || frizz <= 0.0f) return;
-    for (std::size_t k = 1; k <= j; ++k) {
-        const std::uint64_t h = hashCombine(hashCombine(b.id, seed ^ 0xD0F2), k);
-        *in += frizz * (2.0f * unitFloat(h) - 1.0f);
-        *out += frizz * (2.0f * unitFloat(hashCombine(h, 1)) - 1.0f);
-    }
+    const std::uint64_t h = hashCombine(hashCombine(b.id, seed ^ 0xD0F2), j);
+    *in += frizz * (2.0f * unitFloat(h) - 1.0f);
+    *out += frizz * (2.0f * unitFloat(hashCombine(h, 1)) - 1.0f);
 }
 
 // The frame along a shaft at arc position u (0-1): point, tangent, vane normal and side.
@@ -470,9 +467,10 @@ public:
             for (Barb& b : plan.barbs) {
                 const float step = 1.0f / static_cast<float>(b.points - 1);
                 float along = 0.0f, across = 0.0f;
+                float kinkIn = 0.0f, kinkOut = 0.0f;  // the frizz, summed from the root
                 for (std::size_t j = 1; j < b.points; ++j) {
-                    float kinkIn = 0.0f, kinkOut = 0.0f, theta = 0.0f, rise = 0.0f;
-                    downKinks(b, seed, downFrizz, j, &kinkIn, &kinkOut);
+                    float theta = 0.0f, rise = 0.0f;
+                    addDownKink(b, seed, downFrizz, j, &kinkIn, &kinkOut);
                     barbTurn(b, (static_cast<float>(j) - 0.5f) * step, lift, droop, kinkIn, kinkOut, &theta, &rise);
                     const float flat = pm::cos(rise) * b.length * step;
                     along += pm::cos(theta) * flat;
@@ -699,10 +697,11 @@ public:
                     const float barbStep = b.down ? 1.0f / static_cast<float>(b.points - 1) : step;
                     Vec3f* q = vanePoints.data() + (k - b0) * stride;
                     q[0] = f.point;
+                    float kinkIn = 0.0f, kinkOut = 0.0f;  // the frizz, summed from the root
                     for (std::size_t j = 1; j < b.points; ++j) {
                         const float t = (static_cast<float>(j) - 0.5f) * barbStep;  // the segment's middle
-                        float kinkIn = 0.0f, kinkOut = 0.0f, theta = 0.0f, rise = 0.0f;
-                        downKinks(b, seed, downFrizz, j, &kinkIn, &kinkOut);
+                        float theta = 0.0f, rise = 0.0f;
+                        addDownKink(b, seed, downFrizz, j, &kinkIn, &kinkOut);
                         barbTurn(b, t, lift, droop, kinkIn, kinkOut, &theta, &rise);
                         const Vec3f inPlane = f.tangent * pm::cos(theta) + across * pm::sin(theta);
                         const Vec3f dir = inPlane * pm::cos(rise) + f.normal * pm::sin(rise);
@@ -732,7 +731,6 @@ public:
                 // Splits: each barb's tip gathers toward the middle barb of its split.
                 const int splitGroups = plan.groups[v] - (b1 > b0 && plan.barbs[b0].down ? 1 : 0);
                 if (splitAmount > 0.0f && splitGroups > 1) {
-                    centers = vanePoints;
                     std::size_t g0 = b0;
                     while (g0 < b1) {
                         std::size_t g1 = g0;
@@ -741,7 +739,10 @@ public:
                             g0 = g1;
                             continue;
                         }
-                        const Vec3f* c = centers.data() + ((g0 + g1) / 2 - b0) * stride;
+                        // (The middle barb as it was: a copy of it alone, it gathers too.)
+                        const Vec3f* middle = vanePoints.data() + ((g0 + g1) / 2 - b0) * stride;
+                        centers.assign(middle, middle + stride);
+                        const Vec3f* c = centers.data();
                         for (std::size_t k = g0; k < g1; ++k) {
                             Vec3f* q = vanePoints.data() + (k - b0) * stride;
                             for (std::size_t j = 1; j < plan.barbs[k].points; ++j) {

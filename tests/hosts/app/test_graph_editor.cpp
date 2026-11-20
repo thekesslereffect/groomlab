@@ -6,6 +6,10 @@
 // real units.
 
 #include <algorithm>
+#include <array>
+#include <cstdlib>
+#include <fstream>
+#include <filesystem>
 #include <cstdio>
 #include <cmath>
 #include <string>
@@ -25,6 +29,8 @@
 #include <nlohmann/json.hpp>
 
 #include "app_actions.h"
+#include "groomlab/braid_tubes.h"
+#include "groomlab/display.h"
 #include "app_shell.h"
 #include "groom_document.h"
 #include "main_window.h"
@@ -32,6 +38,7 @@
 #include "overlay.h"
 #include "param_panel.h"
 #include "theme.h"
+#include "viewport.h"
 
 namespace groomlab::app {
 namespace {
@@ -358,6 +365,204 @@ TEST(AppGraphEditor, ChainedClumpsOnOneChannelEachShowTheirOwnClumps) {
     ASSERT_TRUE(w.window.setDisplayText(QStringLiteral("colorSource=clumpId")));
     EXPECT_TRUE(graph->clumpColored(second));
     EXPECT_FALSE(graph->clumpColored(first));
+}
+
+// A Braid node after the groom's Interpolate (its own paths, a braid's width and reach that fit the
+// sample), the graph shown again; "" when it could not be made.
+std::string addBraid(GroomDocument* doc, NodeGraphView* graph) {
+    GroomDocument::AddOptions after;
+    after.after = nodeOf(*doc, "Interpolate");
+    std::string braid;
+    if (after.after.empty() || !doc->addNode("Braid", 0.0f, 0.0f, &braid, after).empty()) return {};
+    const Bounds bounds = doc->lastView().bounds;
+    const float size = bounds.valid ? (bounds.hi - bounds.lo).length() : 10.0f;
+    if (!doc->setParam(braid, "region", json(0.25 * size)).empty() || !doc->setParam(braid, "width", json(0.08 * size)).empty()) return {};
+    graph->refresh();
+    QCoreApplication::processEvents();
+    return braid;
+}
+
+// How many pixels of two frames of one size differ by more than a little.
+int differing(const QImage& a, const QImage& b) {
+    if (a.size() != b.size()) return -1;
+    int count = 0;
+    for (int y = 0; y < a.height(); ++y) {
+        for (int x = 0; x < a.width(); ++x) {
+            const QRgb p = a.pixel(x, y), q = b.pixel(x, y);
+            if (std::abs(qRed(p) - qRed(q)) > 12 || std::abs(qGreen(p) - qGreen(q)) > 12 || std::abs(qBlue(p) - qBlue(q)) > 12) ++count;
+        }
+    }
+    return count;
+}
+
+TEST(AppGraphEditor, ABraidsShowTubesButtonShowsItsTubes) {
+    // A Braid's header: Show Tubes, Expand Inputs, View, Bypass (where a Clump has Clump Colors).
+    // Show Tubes draws the node's section tubes in the viewport; the nodes shown are the document's,
+    // saved with the groom, following a rename and going with the node (in the edit's undo step).
+    const std::string path = (std::filesystem::temp_directory_path() / "groomlab_app_show_tubes.groom").string();
+    std::string braid;
+    {
+        Window w;
+        NodeGraphView* graph = w.graph();
+        GroomDocument* doc = w.doc();
+        braid = addBraid(doc, graph);
+        ASSERT_FALSE(braid.empty());
+        emit graph->edited();
+        EXPECT_FALSE(graph->braidTubesShown(braid));
+        EXPECT_TRUE(w.window.displaySettings().braidTubes.empty());
+        const QRectF card = graph->nodeRect(braid);
+        const qreal scale = graph->viewScale();
+        const QPointF button(card.right() - 86.0 * scale, card.top() + 14.0 * scale);
+        mouse(graph, QEvent::MouseButtonPress, button, Qt::LeftButton);
+        EXPECT_TRUE(graph->braidTubesShown(braid));
+        EXPECT_EQ(w.window.displaySettings().braidTubes, braid);
+        EXPECT_EQ(doc->braidTubes(), braid);
+        EXPECT_TRUE(doc->dirty()) << "saved with the groom";
+        EXPECT_EQ(graph->viewedNode(), "") << "the view left as it was";
+        // The display draws them: the item of the frame the viewport takes.
+        const DisplayFrame& frame = doc->updateDisplay(w.window.displaySettings());
+        EXPECT_TRUE(frame.item(DisplayItemId::BraidTubes).shown);
+        EXPECT_GT(frame.item(DisplayItemId::BraidTubes).vertexCount, 0u);
+        mouse(graph, QEvent::MouseButtonPress, button, Qt::LeftButton);
+        EXPECT_FALSE(graph->braidTubesShown(braid));
+        EXPECT_TRUE(w.window.displaySettings().braidTubes.empty());
+        EXPECT_FALSE(doc->updateDisplay(w.window.displaySettings()).item(DisplayItemId::BraidTubes).shown);
+        // Another node has no such button.
+        emit graph->braidTubesToggled(nodeOf(*doc, "Scatter"));
+        EXPECT_TRUE(w.window.displaySettings().braidTubes.empty());
+        // On again; renamed, the name follows; removed, it goes; each undone with its step.
+        emit graph->braidTubesToggled(braid);
+        ASSERT_EQ(w.window.displaySettings().braidTubes, braid);
+        ASSERT_EQ(doc->renameNode(braid, "plait"), "");
+        emit graph->edited();
+        graph->refresh();
+        EXPECT_EQ(w.window.displaySettings().braidTubes, "plait");
+        EXPECT_TRUE(graph->braidTubesShown("plait"));
+        EXPECT_TRUE(doc->updateDisplay(w.window.displaySettings()).item(DisplayItemId::BraidTubes).shown);
+        ASSERT_EQ(doc->removeNode("plait"), "");
+        emit graph->edited();
+        EXPECT_TRUE(w.window.displaySettings().braidTubes.empty()) << "gone with its node";
+        EXPECT_FALSE(doc->updateDisplay(w.window.displaySettings()).item(DisplayItemId::BraidTubes).shown);
+        ASSERT_EQ(doc->undo(), "");
+        emit graph->edited();
+        graph->refresh();
+        EXPECT_EQ(w.window.displaySettings().braidTubes, "plait") << "the removal undone: shown again";
+        EXPECT_TRUE(graph->braidTubesShown("plait"));
+        ASSERT_EQ(doc->undo(), "");
+        emit graph->edited();
+        graph->refresh();
+        EXPECT_EQ(w.window.displaySettings().braidTubes, braid) << "the rename undone";
+        EXPECT_TRUE(graph->braidTubesShown(braid));
+        // A param of the Braid edited: the tubes are built again; an edit elsewhere keeps them.
+        const std::uint64_t built = doc->updateDisplay(w.window.displaySettings()).item(DisplayItemId::BraidTubes).geometryVersion;
+        ASSERT_EQ(doc->setParam(nodeOf(*doc, "Scatter"), "seed", json(7)), "");
+        emit graph->edited();
+        // (The Scatter feeds the Braid: its strands changed, so the tubes are made again.)
+        const std::uint64_t afterScatter = doc->updateDisplay(w.window.displaySettings()).item(DisplayItemId::BraidTubes).geometryVersion;
+        EXPECT_NE(afterScatter, built);
+        ASSERT_EQ(doc->setParam(braid, "inflate", json(1.0)), "");
+        emit graph->edited();
+        const std::uint64_t apart = doc->updateDisplay(w.window.displaySettings()).item(DisplayItemId::BraidTubes).geometryVersion;
+        EXPECT_NE(apart, afterScatter);
+        EXPECT_EQ(doc->updateDisplay(w.window.displaySettings()).item(DisplayItemId::BraidTubes).geometryVersion, apart)
+            << "nothing changed: not built again";
+        ASSERT_TRUE(w.window.saveTo(QString::fromStdString(path)));
+    }
+    // Saved with the groom, and shown again when it opens.
+    {
+        std::ifstream in(std::filesystem::u8path(path));
+        const json file = json::parse(in, nullptr, false);
+        ASSERT_TRUE(file.is_object());
+        EXPECT_EQ(file.value("braidTubes", json()), json::array({braid}));
+    }
+    MainWindow window;
+    ASSERT_TRUE(window.openGroom(QString::fromStdString(path)));
+    EXPECT_EQ(window.displaySettings().braidTubes, braid);
+    window.setGraphShown(true);
+    QCoreApplication::processEvents();
+    EXPECT_TRUE(window.shell()->graph()->braidTubesShown(braid));
+    EXPECT_TRUE(window.document()->updateDisplay(window.displaySettings()).item(DisplayItemId::BraidTubes).shown);
+    // The display option a scripted run sets (--display braidTubes=...): a node's name, * every one
+    // with the button (the Braid, and the Guides node: the tubes its guides carry).
+    EXPECT_TRUE(window.setDisplayText(QStringLiteral("braidTubes=")));
+    EXPECT_TRUE(window.displaySettings().braidTubes.empty());
+    EXPECT_FALSE(window.setDisplayText(QStringLiteral("braidTubes=nope")));
+    EXPECT_TRUE(window.setDisplayText(QStringLiteral("braidTubes=*")));
+    EXPECT_EQ(braidTubeNames(window.displaySettings().braidTubes), (std::vector<std::string>{braid, "guides"}));
+    std::error_code ec;
+    std::filesystem::remove(std::filesystem::u8path(path), ec);
+}
+
+TEST(AppGraphEditor, ShowTubesDrawsInTheViewportAndGoesAgain) {
+    // The viewport's pixels: with a Braid's Show Tubes on the frame changes where its tubes are
+    // (solid, lit, in the sections' colors), and off again it is the frame it was.
+    Window w;
+    NodeGraphView* graph = w.graph();
+    GroomDocument* doc = w.doc();
+    const std::string braid = addBraid(doc, graph);
+    ASSERT_FALSE(braid.empty());
+    emit graph->edited();
+    w.window.setGraphShown(false);
+    QCoreApplication::processEvents();
+    const QSize size(960, 720);
+    QImage before = w.window.renderOffscreen(size, 1);
+    if (before.isNull()) GTEST_SKIP() << "no device gives pixels here";
+    // The tubes are the line path's to draw (its lines and surfaces share one depth): the lookdev
+    // path steps aside while a Braid shows them and comes back after. The frames compared here are
+    // the line path's, before and after.
+    Viewport* view = w.window.findChild<Viewport*>();
+    ASSERT_NE(view, nullptr);
+    ASSERT_TRUE(w.window.setDisplayText(QStringLiteral("lookdev=on")));
+    EXPECT_TRUE(view->renderer().lookdev());
+    emit graph->braidTubesToggled(braid);
+    EXPECT_FALSE(view->renderer().lookdev()) << "stepping aside for the tubes";
+    emit graph->braidTubesToggled(braid);
+    EXPECT_TRUE(view->renderer().lookdev()) << "and back";
+    ASSERT_TRUE(w.window.setDisplayText(QStringLiteral("lookdev=off")));
+    before = w.window.renderOffscreen(size, 1);
+    const QImage same = w.window.renderOffscreen(size, 1);
+    const int noise = differing(before, same);
+    ASSERT_GE(noise, 0);
+    emit graph->braidTubesToggled(braid);
+    ASSERT_EQ(w.window.displaySettings().braidTubes, braid);
+    const QImage tubes = w.window.renderOffscreen(size, 1);
+    const int drawn = differing(before, tubes);
+    EXPECT_GT(drawn, 400 + 4 * noise) << "of " << size.width() * size.height() << " pixels (" << noise << " differ between two frames of one view)";
+    // The sections' colors show: pixels near each of two sections' hues that the frame before did not have.
+    auto near = [](QRgb p, const std::array<float, 3>& linear) {
+        // (Lit and encoded: the hue is what stays; compare the channels' order.)
+        const int c[3] = {qRed(p), qGreen(p), qBlue(p)};
+        int hi = 0, lo = 0, wantHi = 0, wantLo = 0;
+        for (int k = 1; k < 3; ++k) {
+            if (c[k] > c[hi]) hi = k;
+            if (c[k] < c[lo]) lo = k;
+            if (linear[static_cast<std::size_t>(k)] > linear[static_cast<std::size_t>(wantHi)]) wantHi = k;
+            if (linear[static_cast<std::size_t>(k)] < linear[static_cast<std::size_t>(wantLo)]) wantLo = k;
+        }
+        return hi == wantHi && lo == wantLo && c[hi] - c[lo] > 60;
+    };
+    int sections = 0;
+    for (int section = 0; section < 3; ++section) {
+        const std::array<float, 3> color = braidSectionColor(section);
+        int had = 0, has = 0;
+        for (int y = 0; y < tubes.height(); ++y) {
+            for (int x = 0; x < tubes.width(); ++x) {
+                had += near(before.pixel(x, y), color);
+                has += near(tubes.pixel(x, y), color);
+            }
+        }
+        if (has > had + 50) ++sections;
+    }
+    EXPECT_GE(sections, 2) << "sections drawn in their own colors";
+    emit graph->braidTubesToggled(braid);
+    ASSERT_TRUE(w.window.displaySettings().braidTubes.empty());
+    const QImage after = w.window.renderOffscreen(size, 1);
+    EXPECT_LE(differing(before, after), noise + 4) << "off: the frame it was (no tubes left behind)";
+    if (const char* grab = std::getenv("GROOMLAB_APP_GRAB")) {
+        before.save(QString::fromUtf8(grab) + QStringLiteral("/show_tubes_off.png"));
+        tubes.save(QString::fromUtf8(grab) + QStringLiteral("/show_tubes_on.png"));
+        after.save(QString::fromUtf8(grab) + QStringLiteral("/show_tubes_off_again.png"));
+    }
 }
 
 TEST(AppGraphEditor, ShowInnerParamPutsAnInnerParamOnTheCompound) {

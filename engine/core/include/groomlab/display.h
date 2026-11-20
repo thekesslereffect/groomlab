@@ -25,6 +25,7 @@
 #include <string_view>
 #include <vector>
 
+#include "groomlab/braid_tubes.h"
 #include "groomlab/cards.h"
 #include "groomlab/flow.h"
 #include "groomlab/graph.h"
@@ -157,25 +158,44 @@ void densityColors(const StrandSet& strands, std::vector<std::array<float, 3>>& 
 
 // Strand color modes (Maya's strandColorMode).
 enum StrandColorMode { kSolidColors = 0, kColorSetColors, kAttributeColors, kRandomColors, kClumpColors, kDensityColors };
+// Clump Colors' color of a clump number (linear RGB): a hue of its own from the number's hash.
+std::array<float, 3> clumpColor(std::int64_t group);
 // One color per strand for a color mode: the color set `source` at the root, the strand channel
 // `source` from lo to hi on the ramp, a random hue per strand, a hue per clump (channel
 // `source`), the density heatmap; kDefaultStrandColor where there is nothing to read.
 // A strand channel source may name the node it is read from, "<channel>@<node>" (a Clump's Clump
-// Colors: its clumpChannel as that node wrote it, though a later Clump writes the same channel):
-// the host hands that node's values in `channel` (GroomSession::nodeStrandChannel); without them
-// the strands' own `<channel>` is read.
+// Colors: its clumpChannel as that node wrote it, though a later Clump writes the same channel;
+// Color by Channel): the host hands that node's values in `channel`
+// (GroomSession::nodeStrandChannel); without them the strands' own `<channel>` is read. Equal lo
+// and hi: the channel's own range (its least and most finite values; channelRange).
 std::vector<std::array<float, 3>> strandColors(const StrandSet& strands, const ScalpMesh* scalp, int mode,
                                                const std::string& source, float lo, float hi,
                                                const std::vector<float>* channel = nullptr);
+// kAttributeColors of a point channel (the strands' own `source`, or the node's values the host
+// hands in `channel`, one a point): a color per point from lo to hi on the ramp (equal: the
+// channel's own range), kDefaultStrandColor where a value is not finite. Empty when the channel
+// is not one a point (strandColors colors it per strand) or the mode is another. A point channel
+// is read over a strand channel of the same name (HairColor's colorR, both: the tip shows).
+std::vector<std::array<float, 3>> attributePointColors(const StrandSet& strands, int mode, const std::string& source, float lo,
+                                                       float hi, const std::vector<float>* channel = nullptr);
+// The least and most finite values (false: none), for a color range fitted to a channel.
+bool channelRange(const std::vector<float>& values, float* lo, float* hi);
 // Splits "<channel>@<node>" (see strandColors): true with both set when it names a node; else
 // false, *channel the source as it is and *node empty.
 bool splitNodeColorSource(const std::string& source, std::string* channel, std::string* node);
+// The color source reading `channel` as node `node` leaves it: "<channel>@<node>" (every host's
+// Color by Channel).
+std::string nodeColorSource(const std::string& channel, const std::string& node);
+// The channel color source `source` reads of node `node` ("" when it names another node or none):
+// what Color by Channel shows ticked.
+std::string channelColoredAt(const std::string& source, const std::string& node);
 // A color source naming node `from` ("<channel>@<from>") once the node is renamed `to`: the same
 // channel at `to`. Any other source as it is (every host's Rename keeps Clump Colors on).
 std::string renamedColorSource(const std::string& source, const std::string& from, const std::string& to);
-// The lowest and highest value of the strand channel `channel` (the attribute colors' Auto Range:
-// the ramp from blue to red over every strand; "<channel>@<node>": the channel); non-finite values
-// skipped. False: no such channel or nothing finite in it (lo and hi left as they are).
+// The lowest and highest value of the channel `channel` (the attribute colors' Auto Range: the
+// ramp from blue to red over every strand; "<channel>@<node>": the channel; a point channel over
+// a strand channel of the name); non-finite values skipped. False: no such channel or nothing
+// finite in it (lo and hi left as they are).
 bool strandChannelRange(const StrandSet& strands, const std::string& channel, float& lo, float& hi);
 // Per point RGBA (alpha 1) from one color per strand.
 std::vector<float> strandPointColors(const StrandSet& strands, const std::vector<std::array<float, 3>>& colors);
@@ -229,17 +249,18 @@ std::vector<std::uint8_t> rootToTipRamp(unsigned width = 32);
 std::map<std::string, std::array<float, 3>> parseGuideGroupColors(const std::string& text);
 // A linear color as "#rrggbb" (sRGB, lower case): parseGuideGroupColors' reverse (hosts' swatches).
 std::string guideColorHex(const std::array<float, 3>& linear);
+// The same text as each group's "#rrggbb" (lower case; a word that is no name:#rrggbb left out),
+// and back ("name:#rrggbb name:#rrggbb", by name): every host's group colors as stored.
+std::map<std::string, std::string> guideGroupColorWords(const std::string& text);
+std::string guideGroupColorsText(const std::map<std::string, std::string>& colors);
 // Hidden guide groups: names separated by spaces or commas.
 std::set<std::string> parseHiddenGuideGroups(const std::string& text);
+// parseHiddenGuideGroups' text of `groups` ("name name": a .groom's hiddenGuideGroups, Maya's attribute).
+std::string hiddenGuideGroupsText(const std::set<std::string>& groups);
 
 // ---- Strands ----------------------------------------------------------------------------------
 
 void appendPolyline(DisplayGeometry& geometry, const Vec3f* points, std::size_t count);
-// Every strand as line segments.
-void appendStrandLines(DisplayGeometry& geometry, const StrandSet& strands);
-// Shading frames per strand point (lit lines): normals leaning out of the scalp, tangents along
-// the strand, u root to tip (uvFloats 1).
-void addLineFrames(DisplayGeometry& geometry, const StrandSet& strands, const ScalpMesh* scalp);
 // Ribbons facing away from the scalp at each root, as wide as the strand x widthScale. Lit:
 // shading frames (the uvs u plus twice the strand's number, lineIdOf, as the lines'), and
 // `litColors` per vertex when given (the strands' own colors); else `colors` (per strand) with a
@@ -252,10 +273,13 @@ Vec3f ribbonKeyLight();
 // The width ribbons take where the strands carry none (a host reading the lines' uvs: where they
 // say kNoLineWidth).
 constexpr float kRibbonDefaultWidth = 0.01f;
-// Roots as small hexagonal dots on the scalp (a Scatter shown alone).
-void appendRootDots(DisplayGeometry& geometry, const StrandSet& strands, const ScalpMesh* scalp);
-// How far overlays are pulled toward the camera: the longest strand (x 1.05).
-float overlayPullDistance(const StrandSet* strands);
+// The widths a display draws the strands with, one a point; null when they carry none: not one a
+// point, or none set (StrandSet::widthsSet: every one the 1 a Scatter leaves, no Width node after
+// it; a scene unit wide they would draw as slabs, and cost a rasteriser that much). Strands
+// without draw kRibbonDefaultWidth wide (their lines opaque: kNoLineWidth) and are not thinned
+// (StrandLod), in every host: the lines, the ribbons and the look-dev view read their widths
+// here. The strands themselves, and what is exported of them, keep the widths they carry.
+const float* displayWidths(const StrandSet& strands);
 
 // ---- Guides -----------------------------------------------------------------------------------
 
@@ -483,7 +507,8 @@ struct DisplaySettings {
     int guideColorMode = 0;
     // Each guide drawn in its root tube's color (rootTubeColor: the root-first tube its hierarchy
     // starts from, so a tube's split tubes and children take its color); a guide of no root tube as
-    // the mode says.
+    // the mode says. On by itself while the Tube brush's tubes show (tubeWires, tubeShaded: every
+    // host's Tube tool).
     bool guideRootColors = false;
     // The groom's name: the automatic guide colors start from its hue (guideHueSeed).
     std::string guideColorSeed;
@@ -501,6 +526,11 @@ struct DisplaySettings {
     // The StrandMesh nodes' meshes show instead of the strands (when there are any).
     bool strandMeshView = false;
     bool drawStrandMesh = false;  // ... and draw here (no mesh of the host's shows them)
+    // Show Tubes: the Braid nodes whose section tubes draw (braid_tubes.h braidTubeNames: their names,
+    // one a line; every host's button on a Braid node, saved with the groom). The host hands their
+    // mesh in its DisplayInputs (fillBraidTubes); a name that is no Braid node of the graph draws
+    // nothing. A viewport toggle: evaluations, renders and exports never read it.
+    std::string braidTubes;
     DisplayTheme theme;
 };
 
@@ -520,6 +550,12 @@ private:
     std::shared_ptr<const std::vector<float>> channel_;
     std::uint64_t key_ = 0, version_ = 0;
 };
+
+// The tubes Show Tubes draws (DisplaySettings::braidTubes), handed on in a host's DisplayInputs
+// (braidTubes) before building: the session's mesh of the nodes shown (GroomSession::braidTubeMesh,
+// kept there while the nodes' params and inputs stay), none while no node is shown. `session` is
+// asked for only while one is (Maya waits for a pending commit there).
+void fillBraidTubes(const DisplaySettings& settings, DisplayInputs& in, const std::function<const GroomSession&()>& session);
 
 struct DisplayInputs {
     StrandsPtr strands;
@@ -567,15 +603,20 @@ struct DisplayInputs {
     std::uint64_t colorChannelVersion = 0;
     // The colored strand lines may take new colors alone (the host still has them as built).
     bool recolorable = true;
+    // Show Tubes' mesh (fillBraidTubes); null: none shown.
+    std::shared_ptr<const BraidTubeMesh> braidTubes;
 
     static DisplayInputs fromView(const ViewResult& view, bool stroke = false);
 };
 
-enum class DisplayPart { Strands, Instances, Guides, Selection, Parts, Flow, Cards, ScalpMap, StrandMesh, BrushTubes, Count };
+enum class DisplayPart { Strands, Instances, Guides, Selection, Parts, Flow, Cards, ScalpMap, StrandMesh, BraidTubes, BrushTubes, Count };
 // In drawing (upload) order.
 enum class DisplayItemId {
     DimStrands, Strands, ColoredStrands, Ribbons, InstanceMarkers, InstanceMeshes, Scales, Guides, Tubes, Selected,
     SoftSelected, Parts, Flow, FlowField, Cards, ScalpMap, StrandMesh,
+    // Show Tubes (DisplaySettings::braidTubes): the Braid nodes' section tubes, a lit surface in each
+    // section's color (drawn as the scales are: scaleSurface).
+    BraidTubes,
     // The Tube brush's tubes (DisplaySettings::tubeWires, tubeShaded): shaded surfaces, wires, the
     // selected guides' wires.
     TubeSurfaces, TubeWires, SelectedTubeWires, Count
@@ -610,6 +651,8 @@ enum class DisplayLayer { DormantWire, DormantFilled, ActiveWire, Selection };
 struct StrandColors {
     StrandsPtr strands;
     std::vector<std::array<float, 3>> colors;  // per strand (without channels)
+    // Per point, when a color mode's channel is (attributePointColors): read before `colors`.
+    std::vector<std::array<float, 3>> pointColors;
     std::array<const std::vector<float>*, 3> channels{};
     bool perPoint = false;
     const std::vector<float>* iridescence = nullptr;  // per point (strandLookColors), held by `strands`
@@ -651,9 +694,9 @@ struct StrandLines {
     // A hash of the strands' point counts: the indices and the uvs of one float a point depend on
     // nothing else, so a host keeps them while it stays the same (a tweak, a frame of playback).
     std::uint64_t layoutKey() const { return layoutKey_; }
-    // A hash of the strands' widths and IDs (0: they carry no widths, StrandSet::widths not one a
-    // point): the uvs of two floats a point (u with the strand's number, width) hold while it and
-    // the layout stay.
+    // A hash of the strands' widths and IDs (0: they carry no widths, displayWidths: not one a
+    // point, or none set): the uvs of two floats a point (u with the strand's number, width) hold
+    // while it and the layout stay.
     std::uint64_t widthsKey() const { return widthsKey_; }
     // A hash of the strands' point counts and IDs (never 0): the uvs' first float a point (u with
     // the strand's number) holds while it stays, whatever the widths (a host writing the widths
@@ -868,6 +911,7 @@ private:
     void buildGuides(const DisplayInputs& in, const DisplaySettings& s);
     void buildSelection(const DisplayInputs& in, const DisplaySettings& s);
     void buildBrushTubes(const DisplayInputs& in, const DisplaySettings& s);
+    void buildBraidTubes(const DisplayInputs& in);
     void buildOverlays(const DisplayInputs& in, const DisplaySettings& s);
     void buildCards(const DisplayInputs& in, const DisplaySettings& s);
     void buildStrandMesh(const DisplayInputs& in, const DisplaySettings& s);

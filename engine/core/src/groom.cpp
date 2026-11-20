@@ -140,6 +140,33 @@ bool graphReadsTime(const Graph& graph, NodeId output) {
     return false;
 }
 
+StrandSet guideCurves(const GuideSet& guides) {
+    StrandSet out;
+    for (const Guide& g : guides.guides()) {
+        if (g.points.size() >= 2) out.addStrand(g.id, g.points, {}, g.root);
+    }
+    return out;
+}
+
+GuideSet guidesOfCurves(const StrandSet& curves, const char* pointLayer) {
+    GuideSet out;
+    const std::vector<float>* channel = pointLayer ? curves.pointChannel(pointLayer) : nullptr;
+    for (std::size_t s = 0; s < curves.strandCount(); ++s) {
+        const Vec3f* p = curves.strandPoints(s);
+        Guide& g = out.add(curves.ids()[s], std::vector<Vec3f>(p, p + curves.strandPointCount(s)));
+        if (channel) {
+            const auto begin = channel->begin() + static_cast<std::ptrdiff_t>(curves.strandBegin(s));
+            std::vector<float> values(begin, begin + static_cast<std::ptrdiff_t>(curves.strandPointCount(s)));
+            if (std::any_of(values.begin(), values.end(), [](float v) { return v != 0.0f; })) g.pointAttributes[pointLayer] = std::move(values);
+        }
+    }
+    return out;
+}
+
+StrandSet primaryGuideCurves(const HierarchyPtr& hierarchy) {
+    return hierarchy ? guideCurves(hierarchy->flatten(0)) : StrandSet{};
+}
+
 GuideSet guidesToSimulate(const HierarchyPtr& hierarchy, const GuidesPtr& flat, const std::string& group) {
     if (group != "*") {
         const GroupId gid = hierarchy ? hierarchy->findGroup(group) : kNoGroup;
@@ -213,7 +240,8 @@ void RestPose::setCacheIntermediates(bool enabled) {
     doc_->graph.setCacheIntermediates(enabled);
 }
 
-StrandsPtr RestPose::pin(const StrandsPtr& strands, const std::string& node, const RestInputs& in, const EvalContext& ctx) {
+StrandsPtr RestPose::pin(const StrandsPtr& strands, const std::string& node, const RestInputs& in, const EvalContext& ctx,
+                         const Graph* evaluated) {
     if (!strands || !strands->instances() || !strands->instances()->needsRestPose()) return strands;
     NodeId id = doc_->output;
     if (!node.empty()) {
@@ -282,6 +310,11 @@ StrandsPtr RestPose::pin(const StrandsPtr& strands, const std::string& node, con
     if (!cacheIntermediates_ && rest_ && key == restKey_) {
         rest = rest_;  // nothing cached in the graph: the same inputs, the same rest pose
     } else {
+        // The graph the strands were made on, where it was at rest itself: its results by their
+        // keys (unless this one already holds that graph's very result: nothing new to take).
+        if (evaluated && cacheIntermediates_ && evaluated->hasNode(id) && evaluated->resultSerial(id) != doc_->graph.resultSerial(id)) {
+            doc_->graph.offerResults(*evaluated);
+        }
         const std::size_t before = doc_->graph.evaluationCount();
         rest = doc_->graph.evaluateStrands(id, restCtx);
         if (doc_->graph.evaluationCount() != before) ++evaluations_;

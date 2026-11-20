@@ -1,31 +1,32 @@
 # SPDX-License-Identifier: Apache-2.0
 """Motion without a cache: Wind and Jiggle nodes."""
 
+import json
+
 from groomlab.base import undoable
 
 
 def motion_anchor(model):
     """Where a motion node (Wind, Jiggle) goes in a graph model: just before the output, but before
     the Collide and Cards nodes that end its chain, so the strands collide where they moved to and
-    the cards (and every export and render) take the motion. Returns the node to insert before."""
-    anchor = model.output
-    if anchor is None:
+    the cards (and every export and render) take the motion: the core's (graph_inserts.h
+    motionAnchor), every host's. Returns the node to insert before."""
+    anchor = model._edit().motion_anchor()
+    if not anchor:
         raise ValueError("the graph has no output")
-    seen = set()
-    while anchor not in seen:
-        seen.add(anchor)
-        src = model.source_of(anchor, "strands")
-        if src is None or model.node_type(src) not in ("Collide", "Cards"):
-            break
-        anchor = src
     return anchor
 
 
 def _add_motion_node(groom, op_type, params):
+    """The node added as every host adds it (graph_inserts.h insertMotion), its params over the
+    spec's defaults fitted to the scalp."""
     from groomlab import graph as gm
     model = gm.GraphModel.from_groom(groom)
-    node = model.add_node(op_type, params={k: v for k, v in params.items() if v is not None})
-    model.insert_before(motion_anchor(model), node)
+    given = {k: v for k, v in params.items() if v is not None}
+    edit = model._edit()
+    with gm._core_errors():
+        node = edit.insert_motion(op_type, json.dumps(given), model.groom_size)
+    model._take(edit)
     model.save(groom)
     return node
 

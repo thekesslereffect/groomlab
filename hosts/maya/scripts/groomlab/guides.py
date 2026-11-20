@@ -111,18 +111,9 @@ def _group_list(text):
 
 
 def group_users(groom, group):
-    """[(node, param)] of the graph params naming a guide group: Guides nodes
-    reading it (group) or leaving it out (exclude)."""
-    users = []
-    for node in get_graph(groom, expand_default=True).get("nodes", []):
-        params = node.get("params", {})
-        if node.get("type") != "Guides":
-            continue
-        if params.get("group") == group:
-            users.append((node["name"], "group"))
-        if group in _group_list(params.get("exclude")):
-            users.append((node["name"], "exclude"))
-    return users
+    """[(node, param)] of the graph params naming a guide group: Guides nodes reading it (group) or
+    leaving it out (exclude): the core's (graph_inserts.h groupReaders), every host's "Read by"."""
+    return [tuple(u) for u in groomlab_core.group_readers(json.dumps(get_graph(groom, expand_default=True)), group)]
 
 
 def add_guide_group(groom, name, parent=None):
@@ -140,21 +131,10 @@ def rename_guide_group(groom, old, new):
     new = groomlab_core.guide_group_name(new)
     with undo_chunk("rename guide group"):
         cmds.groomLabGuides(groom, renameGroup=(old, new))
-        graph = get_graph(groom)
-        touched = False
-        for node in graph.get("nodes", []):
-            params = node.get("params", {})
-            if node.get("type") != "Guides":
-                continue
-            if params.get("group") == old:
-                params["group"] = new
-                touched = True
-            excluded = _group_list(params.get("exclude"))
-            if old in excluded:
-                params["exclude"] = " ".join(new if g == old else g for g in excluded)
-                touched = True
+        # The Guides nodes reading or leaving it out follow, compounds' too (the core's, every host's).
+        text, touched = groomlab_core.rename_group_readers(json.dumps(get_graph(groom)), old, new)
         if touched:
-            set_graph(groom, graph)
+            set_graph(groom, json.loads(text))
         colors = guide_group_colors(groom)
         if old in colors:  # and keeps its color
             set_guide_group_color(groom, old, None)
@@ -393,7 +373,7 @@ def set_guide_attribute(groom, name, value, guides=None, group=None, level=None)
     return cmds.groomLabGuides(groom, setAttribute=name, value=value, **_targets(guides, group, level))
 
 
-TUBE_SHAPES = ("round", "ribbon", "teardrop", "blade")
+TUBE_SHAPES = tuple(groomlab_core.tube_shapes())  # the built-in shapes: the core's (tube.h tubeShapeNames)
 
 
 def set_tube(groom, guides=None, group=None, level=None, width=None, aspect=None, twist=None, shape=None, samples=None,
@@ -545,21 +525,16 @@ def scale_tube(groom, factor, guides=None, group=None, level=None):
     return cmds.groomLabGuides(groom, setTube=json.dumps({"scaleWidth": float(factor)}), **_targets(guides, group, level))
 
 
-# smooth_tube's channels: the Shape brush's names, and what the tube calls each list.
-_TUBE_LISTS = {"width": "width", "flatness": "aspect", "twist": "twist", "all": "all"}
-
-
 def smooth_tube(groom, guides=None, channel=None, passes=3, group=None, level=None):
     """Smooth guides' tubes along each guide (what the Shape brush painted, evened out): each
     section moved toward its neighbours' mean, one value per guide point, `passes` times, the
     root's and the tip's kept. `channel`: "width", "flatness", "twist", or "all" (None: all).
     Targets as in set_tube (else the selected guides). One undo step. Returns how many guides
     changed."""
-    name = "all" if channel is None else channel
-    if name not in _TUBE_LISTS:
-        raise ValueError("channel must be one of width, flatness, twist or all")
-    edit = {"smooth": _TUBE_LISTS[name], "passes": max(1, min(int(passes), 100))}
-    return cmds.groomLabGuides(groom, setTube=json.dumps(edit), **_targets(guides, group, level))
+    import groomlab_core
+    # The Shape brush's channel names (tube_smooth_edit, every host's; ValueError for another).
+    edit = groomlab_core.tube_smooth_edit("all" if channel is None else channel, int(passes))
+    return cmds.groomLabGuides(groom, setTube=edit, **_targets(guides, group, level))
 
 
 def _interpolate_nodes(graph):
@@ -611,17 +586,7 @@ def import_guides_from_alembic(groom, path, object_name=None, samples=24):
     `path` (all curves, or those under `object_name`) and roots them on the
     groom's scalp. Animated files are read at the scene time.
     """
+    # Every host's graph rewrite (graph_inserts.h withImportedCurves): drawn where the Guides node was.
     graph = get_graph(groom, expand_default=True)
-    params = {"path": portable_path(path), "samples": samples}
-    if object_name:
-        params["object"] = object_name
-
-    nodes = [n for n in graph["nodes"] if n["name"] != "guides"]
-    nodes.append({"name": "guides", "type": "ImportCurves", "params": params})
-    graph["nodes"] = nodes
-
-    connections = [c for c in graph.get("connections", []) if c["to"] != "guides"]
-    if any(n["name"] == "scalp" for n in nodes):
-        connections.append({"from": "scalp", "to": "guides", "input": "scalp"})
-    graph["connections"] = connections
-    set_graph(groom, graph)
+    set_graph(groom, json.loads(groomlab_core.with_imported_curves(json.dumps(graph), portable_path(path), object_name or "",
+                                                                  int(samples))))

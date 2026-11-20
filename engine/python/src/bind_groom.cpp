@@ -7,7 +7,11 @@
 #include <set>
 #include <sstream>
 
+#include "groomlab/asset_files.h"
+#include "groomlab/color_patterns.h"
+#include "groomlab/display.h"
 #include "groomlab/card_files.h"
+#include "groomlab/engine_cards.h"
 #include "groomlab/card_maps.h"
 #include "groomlab/card_presets.h"
 #include "groomlab/cards.h"
@@ -16,6 +20,7 @@
 #include "groomlab/groom.h"
 #include "groomlab/groom_file.h"
 #include "groomlab/groom_package.h"
+#include "groomlab/instances.h"
 #include "groomlab/lod.h"
 #include "groomlab/parts.h"
 #include "groomlab/paths.h"
@@ -565,8 +570,36 @@ void bindGroom(py::module_& m) {
     m.def("valid_map_name", &validMapName, py::arg("name"), "Letters, digits and _, not starting with a digit.");
     m.def("map_name_error", &mapNameError, py::arg("name"), "Why a name cannot name a map (\"\" when it can).");
     m.def("sanitize_map_name", &sanitizeMapName, py::arg("name"), "A valid map name made from any text.");
+    m.def("iridescent_tint", &iridescentTint, py::arg("color"), py::arg("shift"), py::arg("grazing"),
+          "The structural color at `grazing` (0 facing .. 1 edge-on): color_patterns.h, every host's.");
+    m.def("graph_map_names", &graphMapNames, py::arg("graph_json"),
+          "[(name, how)]: the painted maps a graph reads (Map nodes, image-less map params, guide layers, color sets), every host's list.");
+    m.def("map_name_from_file",
+          [](const std::string& path, const std::vector<std::string>& taken) {
+              const std::set<std::string> used(taken.begin(), taken.end());
+              return mapNameFromFile(path, [&](const std::string& n) { return used.count(n) > 0; });
+          },
+          py::arg("path"), py::arg("taken") = std::vector<std::string>{},
+          "A map's name made from an image file's (every host's Import Map), free among `taken`.");
+    // An Instance node's Object(s) (instances.h) and Color by Channel's source (display.h), every host's.
+    m.def("instance_prototype_text", &instancePrototypeText, py::arg("names"),
+          "An Instance node's Object(s) text for `names`: each once, in order, separated by \", \".");
+    m.def("node_color_source", &nodeColorSource, py::arg("channel"), py::arg("node"),
+          "The color source reading `channel` as node `node` leaves it (Color by Channel).");
+    m.def("channel_colored_at", &channelColoredAt, py::arg("source"), py::arg("node"),
+          "The channel a color source reads of node `node` (\"\" when none of its).");
     m.def("param_map_name", &paramMapName, py::arg("node"), py::arg("param"),
           "The map a param's own map is named (<node>_<param>, sanitized); one of that name already is linked again.");
+    m.def(
+        "refit_vertex_maps",
+        [](const std::string& mapsJson, const ScalpCounts& before, const ScalpCounts& after) {
+            ScalpMaps maps = ScalpMaps::fromJson(mapsJson);
+            const bool changed = refitVertexMaps(maps, before, after);
+            return py::make_tuple(changed ? maps.toJson() : mapsJson, changed);
+        },
+        py::arg("maps_json"), py::arg("before"), py::arg("after"),
+        "(maps_json, changed): the painted vertex maps refitted when scalps join or leave (scalp_maps.h); "
+        "`before`/`after`: [(scalp name, vertex count)] in join order, the groom's own (\"scalp\") first.");
     m.def("retarget_map_readers",
           [](const std::string& graphJson, const std::string& from, const std::string& to) {
               bool changed = false;
@@ -575,6 +608,30 @@ void bindGroom(py::module_& m) {
           },
           py::arg("graph_json"), py::arg("old"), py::arg("new"),
           "(graph_json, changed): every reader of map `old` (Map nodes, map params, inside compounds) reading `new`.");
+    m.def("map_readers",
+          [](const std::string& graphJson, const std::string& name) {
+              const MapReaders readers = mapReaders(graphJson, name);
+              py::dict out;
+              out["nodes"] = readers.nodes;
+              out["users"] = readers.users;
+              return out;
+          },
+          py::arg("graph_json"), py::arg("name"),
+          "What reads map `name` in the graph (scalp_maps.h mapReaders): {\"nodes\": its Map nodes, \"users\": [(node, param)] "
+          "it feeds through them and the params naming it}.");
+    m.def("unlink_map_readers",
+          [](const std::string& graphJson, const std::string& name) {
+              bool changed = false;
+              std::vector<std::pair<std::string, std::string>> unlinked;
+              std::string text = unlinkMapReaders(graphJson, name, &changed, &unlinked);
+              return py::make_tuple(text, changed, unlinked);
+          },
+          py::arg("graph_json"), py::arg("name"),
+          "(graph_json, changed, [(node, param)]): every reader of map `name` letting go of it, as when the map is removed "
+          "(scalp_maps.h unlinkMapReaders).");
+    m.def("renamed_map_image", &renamedMapImage, py::arg("full"), py::arg("old"), py::arg("new"), py::arg("folder"),
+          "Where a texture map's image goes on a rename (asset_files.h, every host's rule): named after the map, inside the "
+          "groom's maps folder `folder`, to a free name; \"\" when it stays.");
     m.def("renamed_map_texture", &renamedMapTexture, py::arg("stored"), py::arg("old"), py::arg("new"),
           "A texture map's file renamed with its map (\"\" when the file is not named after it).");
     // Ptex files (ptex.h): XGen's paint maps read into maps at a scalp's UVs or vertices.
@@ -674,6 +731,31 @@ void bindGroom(py::module_& m) {
     m.def("format_card_maps", &formatCardMaps, py::arg("prefix"), py::arg("stamp") = std::string(), py::arg("bake") = 0,
           "The cardMaps text of a bake at a stored prefix, its stamp and bake number.");
     m.def("parse_card_maps", &parseCardMaps, py::arg("text"), "A cardMaps text as {key: value}.");
+    m.def(
+        "engine_cards_manifest_json",
+        [](bool unity, const py::dict& given) {
+            EngineCardsInfo info;
+            auto text = [&](const char* key) { return given.contains(key) && !given[key].is_none() ? py::str(given[key]).cast<std::string>() : std::string(); };
+            auto count = [&](const char* key) { return given.contains(key) ? given[key].cast<std::size_t>() : std::size_t{0}; };
+            info.mesh = text("mesh");
+            info.scalpCap = text("scalpCap");
+            info.cards = count("cards");
+            info.triangles = count("triangles");
+            info.textures = count("textures");
+            info.feathers = count("feathers");
+            if (given.contains("maps")) info.maps = given["maps"].cast<std::map<std::string, std::string>>();
+            if (given.contains("roughness")) info.roughness = given["roughness"].cast<double>();
+            return engineCardsManifestJson(unity, info);
+        },
+        py::arg("unity"), py::arg("info"),
+        "The engine cards' manifest as JSON text (engine_cards.h: every host's): Unreal's, or Unity's with `unity`. "
+        "`info`: mesh, scalpCap, cards, triangles, textures, feathers, maps {map: file}, roughness.");
+    m.def("unity_feathers_manifest_json",
+          [](const std::string& objectsJson, const std::string& abc, const std::string& fbx, const std::string& lod, double barbDensity) {
+              return unityFeathersManifestJson(objectsJson, abc, fbx, lod, barbDensity);
+          },
+          py::arg("objects_json"), py::arg("abc"), py::arg("fbx"), py::arg("lod"), py::arg("barb_density"),
+          "Unity Feathers' manifest as JSON text (engine_cards.h: every host's).");
     m.def("card_maps_prefix", &cardMapsPrefix, py::arg("text"), "The prefix a cardMaps text names (\"\": none).");
     m.def("with_card_maps_prefix", &withCardMapsPrefix, py::arg("text"), py::arg("prefix"),
           "The cardMaps text with its bake's paths moved to another prefix.");

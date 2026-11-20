@@ -81,8 +81,8 @@ FollicleMap bakeFollicleMap(const ScalpMesh& skin, const StrandSet& strands, con
     if (!(radius > 0.0f)) {  // one root: a dot a thousandth of the scalp's size
         Vec3f lo = skin.points().empty() ? Vec3f{} : skin.points().front(), hi = lo;
         for (const Vec3f& p : skin.points()) {
-            lo = Vec3f{std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
-            hi = Vec3f{std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
+            lo = minPerAxis(lo, p);
+            hi = maxPerAxis(hi, p);
         }
         radius = 1e-3f * (hi - lo).length();
     }

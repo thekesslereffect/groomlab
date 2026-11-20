@@ -169,7 +169,6 @@ public:
     // With them, the viewport's hair buffers for a landing commit are built off the UI thread too
     // (LookdevRenderer::setBuildAhead).
     void setAsyncCommits(bool on);
-    bool asyncCommits() const { return asyncCommits_; }
     // A CPU brush stroke's dabs evaluated off the UI thread (GroomSession::detachStroke): the
     // window someone sits at (main.cpp); off (the default: tests, scripted runs), each dab is
     // evaluated and shown before the mouse event that made it returns.
@@ -177,7 +176,6 @@ public:
         if (!on) landDab(true);
         asyncDabs_ = on;
     }
-    bool asyncDabs() const { return asyncDabs_; }
     // A window someone sits at (main.cpp): unsaved edits are not discarded without asking (closing,
     // Quit, Open, New, a dropped or recent file, Reload: confirmDiscard's prompt), and info messages
     // (saved, opened, a preset applied, hints) show as toasts. Off (the default: tests, scripted
@@ -395,7 +393,8 @@ public:
     bool setUiSearch(const QString& text);
     // The display options as "name=value" (colorMode solid|colorSet|attribute|random|clump|density,
     // colorSource, colorMin, colorMax, guides, guidePoints, scalpMap, scalpMapChannel, cardsView,
-    // lookdev, scalp); false (and a message) when refused.
+    // lookdev, scalp, braidTubes: Show Tubes' Braid nodes, a|b, * every one); false (and a message)
+    // when refused.
     bool setDisplayText(const QString& text);
     MapsPanel* mapsPanel() { return maps_; }
     // What stays over the viewport (the central widget), and the docked shell around it.
@@ -403,7 +402,6 @@ public:
     // The menu bar's corner (the design's, in place of a tool bar): the groom's file name, muted,
     // then Render ▾ (a ghost button) and Export ▾ (the accent), with menus.json's output.render and
     // output.export menus.
-    QWidget* menuCorner() const { return menuCorner_; }
     Segmented* modeSwitch() const { return modeSwitch_; }
     QToolButton* cornerRender() const { return cornerRender_; }
     QToolButton* cornerExport() const { return cornerExport_; }
@@ -683,7 +681,9 @@ private:
     // The look card's groom color: the last HairColor node's melanin, redness and roughness (the
     // last node of `type`, nearest the output in flow order).
     std::string lastNodeOfType(const char* type) const;
-    std::string hairColorNode() const { return lastNodeOfType("HairColor"); }
+    // The HairColor node the look comes from (the core's GroomStats::hairColor: the one making the
+    // output, as Maya and Blender edit it); "" without one or for one inside a compound (edited there).
+    std::string hairColorNode() const;
     void refreshGroomColor();
     void refreshGroups();  // the brush panel's group list and the guides panel
     void refreshUndoActions();
@@ -720,7 +720,23 @@ private:
     // clumpChannel), the view left as it is; on a lit one, the color mode before.
     void toggleClumpColors(const std::string& node);
     void refreshClumpColored();  // which Clumps' buttons are lit, from the display
+    // A node menu's Color by Channel: the hair colored by `channel` as `node` leaves it, point by
+    // point (the Attribute colors from "<channel>@<node>", min and max equal: the values' own
+    // range); off, the color mode before. channelColored: the channel shown of `node` ("": none).
+    void colorByChannel(const std::string& node, const std::string& channel, bool on);
+    std::string channelColored(const std::string& node) const;
+    int colorModeBeforeChannel_ = 0;  // kSolidColors
     void followRenamedNode(const std::string& from, const std::string& to);  // the color source naming it
+    // A Braid header's Show Tubes button: that node's section tubes drawn in the viewport, or (lit)
+    // no more. The nodes shown are the document's (saved with the groom).
+    void toggleBraidTubes(const std::string& node);
+    // The display's Show Tubes nodes from the document's, and which Braids' buttons are lit. True
+    // when the display's changed (draw again).
+    bool refreshBraidTubes();
+    // The lookdev path on or stepping aside: wanted, the strands in their solid color and no Braid's
+    // tubes shown (the color modes and Show Tubes are the line path's: its lines and surfaces share
+    // one depth, where the lookdev's hair is drawn over the builder's surfaces).
+    void applyLookdev();
     std::string clumpChannelOf(const std::string& node, bool* isClump = nullptr) const;
     int colorModeBeforeClump_ = 0;  // kSolidColors
     // While the Paint brush is on a map (Maya's show_while_painting): the strands colored by it
@@ -946,8 +962,6 @@ private:
     QAction* export_ = nullptr;
     QWidget* menuCorner_ = nullptr;
     Segmented* modeSwitch_ = nullptr;
-    const GroomDocument* starterDocument_ = nullptr;  // the groom the first-groom steps count for
-    std::set<std::string> starterBase_;              // ... a new groom's own nodes (not a look given)
     QToolButton* cornerRender_ = nullptr;
     QToolButton* cornerExport_ = nullptr;
     QAction* saveImage_ = nullptr;

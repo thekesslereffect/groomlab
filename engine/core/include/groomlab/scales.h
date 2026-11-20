@@ -57,9 +57,9 @@ InstancePrototype scalePlate(const ScalePlateShape& shape);
 // the host's scene).
 const InstancePrototype* builtinPrototype(const std::string& name);
 std::vector<std::string> builtinPrototypeNames();
-// The built-in braid accessories (beads, cuffs, hair ties): rings round a bore of radius 0.5 from
-// +Y 0 to 1, for Instance nodes on a Braid node's ties (sizeMode fitStrand, fitWidth).
-std::vector<std::string> builtinAccessoryNames();
+// builtinPrototype also knows the built-in braid accessories ("groomlab:bead", "groomlab:cuff",
+// "groomlab:hairTie"): rings round a bore of radius 0.5 from +Y 0 to 1, for Instance nodes on a
+// Braid node's ties (sizeMode fitStrand, fitWidth).
 
 // The prototypes a graph's Instance nodes name (its JSON, compounds' inner graphs too) that are
 // not built-in plates: the scene meshes a groom file stores (GroomFile::prototypes). Sorted, once
@@ -100,6 +100,9 @@ struct ScaleMesh {
     std::vector<Scale> scales;
     std::size_t vertexCount() const { return points.size(); }
     std::size_t triangleCount() const { return triangles.size() / 3; }
+    // Each triangle's scale (its index in `scales`; 0 for a triangle no scale owns): every host's
+    // per-face scale data (scaleUV, scaleData, scaleRootColor) reads it.
+    std::vector<std::uint32_t> triangleOwners() const;
 };
 
 struct ScaleMeshOptions {

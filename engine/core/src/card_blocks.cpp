@@ -413,6 +413,38 @@ std::string cardBlockGuidesJson(const CardBlock& block, int count) {
     return h.toJson();
 }
 
+namespace {
+
+bool blockNamed(const CardBlockAtlas& atlas, const std::string& name) {
+    for (const CardBlock& b : atlas.blocks) {
+        if (b.name == name) return true;
+    }
+    return false;
+}
+
+}  // namespace
+
+std::string newCardBlockName(const CardBlockAtlas& atlas) {
+    for (std::size_t n = atlas.blocks.size() + 1;; ++n) {
+        const std::string name = "block" + std::to_string(n);
+        if (!blockNamed(atlas, name)) return name;
+    }
+}
+
+std::string cardBlockCopyName(const CardBlockAtlas& atlas, const std::string& name) {
+    const std::string base = name + "_copy";
+    if (!blockNamed(atlas, base)) return base;
+    for (int n = 2;; ++n) {
+        const std::string next = base + std::to_string(n);
+        if (!blockNamed(atlas, next)) return next;
+    }
+}
+
+bool cardBlockBandChanged(const CardBlock& from, const CardBlock& to) {
+    return from.width != to.width || from.thickness != to.thickness || from.rootRotation.x != to.rootRotation.x ||
+           from.rootRotation.y != to.rootRotation.y || from.rootRotation.z != to.rootRotation.z;
+}
+
 std::string moveCardBlockGuides(const std::string& hierarchyJson, const CardBlock& from, const CardBlock& to) {
     if (hierarchyJson.find_first_not_of(" \t\r\n") == std::string::npos) return hierarchyJson;
     GuideHierarchy h = GuideHierarchy::fromJson(hierarchyJson);
@@ -550,11 +582,11 @@ std::vector<FbxMesh> cardBlockShapes(const CardBlockAtlas& atlas, const CardShap
             const float a = bend * f;
             if (std::abs(bend) > 1e-6f) {
                 const float r = length / bend;
-                center[static_cast<std::size_t>(k)] = {0.0f, -r * std::sin(a), r * (1.0f - std::cos(a))};
+                center[static_cast<std::size_t>(k)] = {0.0f, -r * pm::sin(a), r * (1.0f - pm::cos(a))};
             } else {
                 center[static_cast<std::size_t>(k)] = {0.0f, -length * f, 0.0f};
             }
-            normal[static_cast<std::size_t>(k)] = {0.0f, std::sin(a), std::cos(a)};
+            normal[static_cast<std::size_t>(k)] = {0.0f, pm::sin(a), pm::cos(a)};
         }
         std::vector<Vec3f> normals;
         for (int k = 0; k <= along; ++k) {

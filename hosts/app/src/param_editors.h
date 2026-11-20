@@ -146,7 +146,6 @@ public:
     // this gives the last number seen) or the map object.
     nlohmann::json value() const;
     Source source() const { return source_; }
-    QWidget* constantEditor() const { return constant_; }
     // Picks a source as the combo does (the signals follow): tests and scripted runs.
     void chooseSource(Source source);
 

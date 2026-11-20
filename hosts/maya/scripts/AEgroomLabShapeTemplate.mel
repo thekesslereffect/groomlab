@@ -156,7 +156,7 @@ global proc AEgroomLabShapeTemplate(string $nodeName)
                             // set by the Groom Tools (the groups' eyes, the color by layer, the shot's
                             // sculpt): not settings to type; the strand colors' source and range in
                             // their own rows (under Strand Color Mode)
-                            "hiddenGuideGroups", "guideColorLayer", "shotSculpt", "shotLayer",
+                            "hiddenGuideGroups", "guideColorLayer", "shotSculpt", "shotLayer", "braidTubes",
                             "strandColorSource", "strandColorMin", "strandColorMax"};
         for ($attr in $hidden) editorTemplate -suppress $attr;
         // Controls show in their own section, not under Extra Attributes.

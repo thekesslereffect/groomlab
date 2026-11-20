@@ -9,6 +9,7 @@
 #include <map>
 #include <mutex>
 
+#include "groomlab/color.h"
 #include "groomlab/frame_time.h"
 #include "groomlab/guide_hierarchy.h"
 #include "groomlab/point_index.h"
@@ -149,7 +150,7 @@ float ScalarField::remap(const ScalpMesh::Color& c) const {
         case MapRef::Component::G: v = c[1]; break;
         case MapRef::Component::B: v = c[2]; break;
         case MapRef::Component::A: v = c[3]; break;
-        case MapRef::Component::Luminance: v = 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2]; break;
+        case MapRef::Component::Luminance: v = rec709Luminance(c[0], c[1], c[2]); break;
     }
     return map_.min + (map_.max - map_.min) * v;
 }

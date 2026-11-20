@@ -24,6 +24,7 @@
 #include "groomlab/operators.h"
 #include "groomlab/parallel.h"
 #include "groomlab/portable_math.h"
+#include "groomlab/profile.h"
 #include "incremental.h"
 #include "internal.h"
 
@@ -94,16 +95,6 @@ struct Curve {
     }
     // Segment j at u (0 < u < 1).
     Vec3f at(std::size_t j, float u) const { return hermiteAt(p[j], p[j + 1], d[j], d[j + 1], h[j], u); }
-    // The point at share t of the points (by index: as each node places a strand's points at
-    // every resolution: look.slang curvePointAt).
-    Vec3f pointAt(float t) const {
-        if (n == 0) return {};
-        if (n == 1) return p[0];
-        const float x = t * static_cast<float>(n - 1);
-        const std::size_t i = x <= 0.0f ? 0 : std::min(static_cast<std::size_t>(x), n - 2);
-        const float u = x - static_cast<float>(i);
-        return u == 0.0f ? p[i] : at(i, u);
-    }
 };
 
 }  // namespace
@@ -208,9 +199,11 @@ public:
         run(ctx, inputs, nullptr, &out, nullptr);
         return out;
     }
-    // Each strand curls alone: only the strands the input changed in curl again (while Curl adds
-    // no points to them). Coherent by clump, a strand's curl follows its clump's middle, which any
-    // member moves: in full.
+    // Each strand curls alone: only the strands the input changed in curl again. Coherent by clump,
+    // a strand's curl follows its clump's middle, which any member moves: every strand of the
+    // clumps a changed strand is in (or was in) curls again, the other clumps stay. Where Curl
+    // gives a changed strand another number of points than it had (its longest segment another
+    // length), the last result is laid out anew around it (StrandChanges::recounted).
     bool evaluateIncremental(const EvalContext& ctx, const std::vector<Value>& inputs, const IncrementalInputs& incremental,
                              Value* out, StrandChanges* changed) const override {
         return run(ctx, inputs, &incremental, out, changed);
@@ -224,9 +217,19 @@ private:
              StrandChanges* changed) const;
     bool runOwn(const EvalContext& ctx, const std::vector<Value>& inputs, const IncrementalInputs* incremental, Value* result,
                 StrandChanges* changed) const;
+    // What pointsFor reads of the params, once a run: the tolerance, the most segments a strand may
+    // have and, with a tolerance, the points a turn takes and the most the curl turns per unit of
+    // length.
+    struct PointsPlan {
+        float tolerance = 0.0f;
+        std::size_t most = 1;
+        int perTurn = 0;
+        float turns = 0.0f;
+    };
+    PointsPlan pointsPlan() const;
     // The points a strand of `n` points `p` is curled at: its own, or with the tolerance, each
     // segment cut into as many as its longest needs at the most the curl turns (at most maxSegments).
-    std::size_t pointsFor(const Vec3f* p, std::size_t n) const;
+    static std::size_t pointsFor(const PointsPlan& plan, const Vec3f* p, std::size_t n);
 
     mutable std::atomic<bool> unitWidths_{false};
     mutable std::atomic<std::size_t> added_{0};  // strands the last evaluation added points to
@@ -310,10 +313,12 @@ StrandsPtr curlDensified(const StrandSet& in, const std::vector<std::size_t>& co
     return out;
 }
 
-std::size_t CurlOp::pointsFor(const Vec3f* p, std::size_t n) const {
+CurlOp::PointsPlan CurlOp::pointsPlan() const {
+    PointsPlan plan;
     const float tolerance = std::clamp(static_cast<float>(params().getDouble("tolerance")), 0.0f, 1.0f);
-    const auto most = static_cast<std::size_t>(std::max<std::int64_t>(1, params().getInt("maxSegments")));
-    if (!(tolerance > 0.0f) || n < 2 || most <= n - 1) return n;
+    plan.tolerance = tolerance;
+    plan.most = static_cast<std::size_t>(std::max<std::int64_t>(1, params().getInt("maxSegments")));
+    if (!(tolerance > 0.0f)) return plan;  // (no strand takes points: pointsFor reads no more)
     // A chord strays r (1 - cos(pi / m)) from a turn of m points: within tolerance r at
     // m = pi / acos(1 - tolerance) a turn. A zigzag's kinks: the point nearest one at most half a
     // spacing off loses about 2 / m of its peak, so more than 2 / tolerance a turn.
@@ -327,11 +332,18 @@ std::size_t CurlOp::pointsFor(const Vec3f* p, std::size_t n) const {
     const float spacing = std::clamp(static_cast<float>(params().getDouble("spacingRandom")), 0.0f, 1.0f);
     const float turns = std::fabs(static_cast<float>(params().getDouble("frequency"))) * (1.0f + 0.5f * std::fabs(randomness)) * profileMost *
                         (1.0f + spacing);
+    plan.perTurn = perTurn;
+    plan.turns = turns;
+    return plan;
+}
+
+std::size_t CurlOp::pointsFor(const PointsPlan& plan, const Vec3f* p, std::size_t n) {
+    if (!(plan.tolerance > 0.0f) || n < 2 || plan.most <= n - 1) return n;
     float longest = 0.0f;
     for (std::size_t j = 1; j < n; ++j) longest = std::max(longest, (p[j] - p[j - 1]).length());
-    const float wanted = std::ceil(longest * turns * static_cast<float>(perTurn) - 1e-3f);
+    const float wanted = std::ceil(longest * plan.turns * static_cast<float>(plan.perTurn) - 1e-3f);
     if (!(wanted > 1.0f)) return n;
-    const std::size_t q = std::min(static_cast<std::size_t>(std::min(wanted, 1e6f)), most / (n - 1));
+    const std::size_t q = std::min(static_cast<std::size_t>(std::min(wanted, 1e6f)), plan.most / (n - 1));
     return q <= 1 ? n : n + (n - 1) * (q - 1);
 }
 
@@ -345,46 +357,121 @@ bool CurlOp::run(const EvalContext& ctx, const std::vector<Value>& inputs, const
         return again;
     };
     if (incremental) {
-        const StrandChanges* changes = someStrandsChanged(*incremental, 0);
+        const StrandChanges* changes = someStrandsChangedOrRecounted(*incremental, 0);
         const StrandsPtr last = changes ? valueAs<StrandsPtr>(incremental->previous) : nullptr;
-        if (!last || last->strandCount() != strands) return false;
+        if (!last || last->strandCount() != strands || last->positions().size() != last->offsets().back()) return false;
+        const bool byClump = params().getString("coherence") == "clump";
+        // The strands to curl again: those the input changed in; by clump, every strand of a clump
+        // one of them is in now or was in before (the last result carries the input's channels).
+        ProfilePhases phase("curl.changed");
+        std::vector<std::uint32_t> clumped;
+        if (byClump && !changes->strands.empty()) {
+            const std::string channel = params().getString("clumpChannel");
+            const std::vector<float>* now = in->strandChannel(channel);
+            const std::vector<float>* before = last->strandChannel(channel);
+            if (!now || !before) return false;
+            // The clumps touched (their keys, sorted), then their strands, found in parallel blocks.
+            std::vector<long long> touched;
+            std::vector<char> listed(strands, 0);
+            for (const std::uint32_t s : changes->strands) {
+                listed[s] = 1;
+                for (const float key : {(*now)[s], (*before)[s]}) {
+                    if (std::llround(key) >= 0) touched.push_back(std::llround(key));
+                }
+            }
+            std::sort(touched.begin(), touched.end());
+            touched.erase(std::unique(touched.begin(), touched.end()), touched.end());
+            constexpr std::size_t kBlock = 4096;
+            std::vector<std::vector<std::uint32_t>> found((strands + kBlock - 1) / kBlock);
+            parallelFor(0, found.size(), [&](std::size_t b) {
+                for (std::size_t s = b * kBlock, end = std::min(strands, s + kBlock); s < end; ++s) {
+                    if (listed[s] || std::binary_search(touched.begin(), touched.end(), std::llround((*now)[s]))) {
+                        found[b].push_back(static_cast<std::uint32_t>(s));
+                    }
+                }
+            }, 1);
+            for (const auto& list : found) clumped.insert(clumped.end(), list.begin(), list.end());
+        }
+        const std::vector<std::uint32_t>& again = byClump ? clumped : changes->strands;
         std::atomic<bool> other{false};
-        std::vector<std::size_t> counts(changes->strands.size());
+        std::vector<std::size_t> counts(again.size());
+        const PointsPlan plan = pointsPlan();
         parallelFor(0, counts.size(), [&](std::size_t k) {
-            const std::size_t s = changes->strands[k];
-            counts[k] = pointsFor(in->strandPoints(s), in->strandPointCount(s));
-            if (counts[k] != last->strandPointCount(s)) other = true;  // (another layout: in full)
+            const std::size_t s = again[k];
+            counts[k] = pointsFor(plan, in->strandPoints(s), in->strandPointCount(s));
+            if (counts[k] != last->strandPointCount(s)) other = true;  // (another layout: the last result's laid out anew)
         }, 256);
-        if (other) return false;
-        if (last->pointCount() == in->pointCount()) return runOwn(ctx, inputs, incremental, result, changed);  // (none added)
-        // With the points it added: the changed strands made apart (as in full), written over the
-        // last result's, while each strand's curl reads it alone (alone, its radius read alike on
-        // a set of some strands).
-        if (params().getString("coherence") == "clump" || !readsStrandAlone(ScalarField(params(), "radius", scalpOf(ctx)))) return false;
-        if (changes->none()) {
+        const bool recount = other;
+        phase.stop();
+        if (!byClump && !recount && !changes->recounted && last->pointCount() == in->pointCount()) {
+            return runOwn(ctx, inputs, incremental, result, changed);  // (none added)
+        }
+        // With the points it added, or by clump: those strands made apart (as in full), written
+        // over the last result's, while each strand's curl reads it alone (or its clump: alone,
+        // its radius read alike on a set of some strands).
+        if (!readsStrandAlone(ScalarField(params(), "radius", scalpOf(ctx)))) return false;
+        if (again.empty()) {  // the same strands in: the same result
             *result = last;
-            *changed = *changes;
+            *changed = StrandChanges::listed({});
             return true;
         }
-        Value made;
-        if (!runOwn(ctx, withStrands(curlDensified(*in, counts, &changes->strands)), nullptr, &made, nullptr)) return false;
-        auto out = copyOfLast(last, *incremental);
-        writeStrands(*out, *valueAs<StrandsPtr>(made), changes->strands);
+        Value curled;
+        phase.next("curl.addPoints");
+        const StrandsPtr densified = curlDensified(*in, counts, &again);
+        phase.stop();
+        if (!runOwn(ctx, withStrands(densified), nullptr, &curled, nullptr)) return false;
+        phase.next("curl.lastArrays");
+        const StrandsPtr made = valueAs<StrandsPtr>(curled);
+        if (!made || made->strandCount() != again.size() || made->pointChannelNames() != last->pointChannelNames()) return false;
+        if (!changes->recounted) {
+            // (The note's count: the strands it adds points to now, against those it added them to.)
+            std::size_t now = 0, before = 0;
+            for (std::size_t k = 0; k < again.size(); ++k) {
+                now += counts[k] != in->strandPointCount(again[k]) ? 1 : 0;
+                before += last->strandPointCount(again[k]) != in->strandPointCount(again[k]) ? 1 : 0;
+            }
+            const std::size_t added = added_.load(std::memory_order_relaxed);
+            added_.store(added + now >= before ? added + now - before : 0, std::memory_order_relaxed);
+        }
+        std::shared_ptr<StrandSet> out;
+        if (recount) {
+            // Laid out anew: each strand left alone copied to its new place.
+            std::vector<std::size_t> points(strands);
+            for (std::size_t s = 0; s < strands; ++s) points[s] = last->strandPointCount(s);
+            for (std::size_t k = 0; k < again.size(); ++k) points[again[k]] = counts[k];
+            if (last->widths().size() != last->pointCount()) return false;
+            out = std::make_shared<StrandSet>(*last);
+            out->relayout(points);
+            relayUnlisted(out->overwritePositions().data(), *out, last->positions().data(), *last, again);
+            relayUnlisted(out->overwriteWidths().data(), *out, last->widths().data(), *last, again);
+            for (const std::string& name : last->pointChannelNames()) {
+                relayUnlisted(out->mutablePointChannel(name)->data(), *out, last->pointChannel(name)->data(), *last, again);
+            }
+        } else {
+            out = copyOfLast(last, *incremental);
+        }
+        writeStrands(*out, *made, again);
         *result = StrandsPtr(out);
-        *changed = *changes;
+        *changed = recount ? StrandChanges::recountedIn(again) : StrandChanges::listed(again);
         return true;
     }
+    ProfilePhases phase("curl.countPoints");
     std::vector<std::size_t> counts(strands);
     std::atomic<std::size_t> added{0};
+    const PointsPlan plan = pointsPlan();
     parallelFor(0, strands, [&](std::size_t s) {
-        counts[s] = pointsFor(in->strandPoints(s), in->strandPointCount(s));
+        counts[s] = pointsFor(plan, in->strandPoints(s), in->strandPointCount(s));
         if (counts[s] != in->strandPointCount(s)) added.fetch_add(1, std::memory_order_relaxed);
     }, 256);
     if (added == 0) {
+        phase.stop();
         added_.store(0, std::memory_order_relaxed);
         return runOwn(ctx, inputs, nullptr, result, nullptr);
     }
-    if (!runOwn(ctx, withStrands(curlDensified(*in, counts, nullptr)), nullptr, result, nullptr)) return false;
+    phase.next("curl.addPoints");
+    const StrandsPtr densified = curlDensified(*in, counts, nullptr);
+    phase.stop();
+    if (!runOwn(ctx, withStrands(densified), nullptr, result, nullptr)) return false;
     added_.store(added, std::memory_order_relaxed);
     return true;
 }
@@ -392,6 +479,7 @@ bool CurlOp::run(const EvalContext& ctx, const std::vector<Value>& inputs, const
 bool CurlOp::runOwn(const EvalContext& ctx, const std::vector<Value>& inputs, const IncrementalInputs* incremental, Value* result,
                     StrandChanges* changed) const {
     const StrandsPtr in = requireStrands(inputs, 0, op::kCurl);
+    ProfilePhases phase("curl.setup");
     const ScalpMesh* scalp = scalpOf(ctx);
     const ScalarField radiusField(params(), "radius", scalp);
     radiusField.validate(*in);
@@ -424,11 +512,13 @@ bool CurlOp::runOwn(const EvalContext& ctx, const std::vector<Value>& inputs, co
     // result's copy (laid out as the input).
     if (!last) {
         gpu::StageInputs inputs;
+        phase.next("curl.clumpInputs");
         if (byClump) {
             const std::string channel = params().getString("clumpChannel");
             inputs.curl = gpu::curlInputs(*in, scalp, channel, static_cast<std::uint64_t>(params().getInt("seed")));
             if (!inputs.curl) throw GraphError("Curl: coherence clump needs a Clump before it (no '" + channel + "' channel to find the clumps)");
         }
+        phase.next("curl.run");
         *result = gpu::runStage(gpu::StageKind::Curl, params(), in, scalp, std::move(inputs));
         return true;
     }

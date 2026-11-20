@@ -625,7 +625,8 @@ def card_display(groom, textures=None):
         cmds.setAttr(groom + ".displayCardTextures", bool(textures))
     stats = card_stats(groom)
     return {"textures": bool(cmds.getAttr(groom + ".displayCardTextures")),
-            "baked": "Coverage=" in (cmds.getAttr(groom + ".cardMaps") or ""), "stale": stats["stale"]}
+            "baked": "Coverage" in groomlab_core.parse_card_maps(cmds.getAttr(groom + ".cardMaps") or ""),
+            "stale": stats["stale"]}
 
 
 def _existing_scalp_cap(groom):

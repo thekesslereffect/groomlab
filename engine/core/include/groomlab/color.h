@@ -11,6 +11,16 @@
 
 namespace groomlab {
 
+// A linear color's luminance (Rec. 709's weights).
+inline float rec709Luminance(float r, float g, float b) { return 0.2126f * r + 0.7152f * g + 0.0722f * b; }
+
+// sRGB's transfer curve, a channel: encoded to linear and back (past 0..1 the curve carries on),
+// and the same of a channel held to 0..1 first (what an 8-bit texel holds).
+inline float srgbToLinear(float v) { return v <= 0.04045f ? v / 12.92f : pm::pow((v + 0.055f) / 1.055f, 2.4f); }
+inline float linearToSrgb(float v) { return v <= 0.0031308f ? 12.92f * v : 1.055f * pm::pow(v, 1.0f / 2.4f) - 0.055f; }
+inline float srgbToLinear01(float v) { return srgbToLinear(std::clamp(v, 0.0f, 1.0f)); }
+inline float linearToSrgb01(float v) { return linearToSrgb(std::clamp(v, 0.0f, 1.0f)); }
+
 // Hue, saturation, lightness as SeExpr makes them (hue 0 to 1). Out-of-range colors keep
 // SeExpr's answers (a negative channel or one over 1 gives a saturation past 1).
 inline Vec3f rgbToHsl(const Vec3f& c) {

@@ -29,6 +29,7 @@
 #include "glass.h"
 #include "main_window.h"
 #include "theme.h"
+#include "groomlab/color.h"
 
 namespace groomlab::app {
 
@@ -40,8 +41,7 @@ constexpr int kSizes[] = {512, 1024, 2048, 4096, 8192};
 std::uint8_t byte(float v) { return static_cast<std::uint8_t>(std::lround(255.0f * std::clamp(v, 0.0f, 1.0f))); }
 
 float srgb(float linear) {
-    linear = std::max(linear, 0.0f);
-    return linear <= 0.0031308f ? 12.92f * linear : 1.055f * std::pow(linear, 1.0f / 2.4f) - 0.055f;
+    return groomlab::linearToSrgb(std::max(linear, 0.0f));  // (color.h)
 }
 
 // One map of a bake as an image to look at.
@@ -573,7 +573,7 @@ bool CardAtlasWindow::addBlock() {
     if (blockGrooms().empty()) return newAtlas();
     CardBlockAtlas a = atlas();
     groomlab::CardBlock block;
-    block.name = "block" + std::to_string(a.blocks.size() + 1);
+    block.name = newCardBlockName(a);  // (every host's)
     block.origin = nextCardBlockOrigin(a, block.width);
     if (!main_->addCardBlock(block, a.settings)) return false;
     CardBlockAtlas laid = atlas();
@@ -590,7 +590,7 @@ bool CardAtlasWindow::duplicateBlock() {
     const std::vector<int> grooms = blockGrooms();
     if (selected_ < 0 || selected_ >= static_cast<int>(a.blocks.size())) return false;
     groomlab::CardBlock block = a.blocks[static_cast<std::size_t>(selected_)];
-    block.name += "_copy";
+    block.name = cardBlockCopyName(a, block.name);  // (every host's)
     block.placed = false;
     block.origin = nextCardBlockOrigin(a, block.width);
     const std::string graph = main_->groomAt(grooms[static_cast<std::size_t>(selected_)])->graphJson();
@@ -647,13 +647,12 @@ bool CardAtlasWindow::editBlock(int block, float width, float length, float thic
     const std::vector<int> grooms = blockGrooms();
     if (block < 0 || block >= static_cast<int>(a.blocks.size())) return false;
     groomlab::CardBlock& b = a.blocks[static_cast<std::size_t>(block)];
-    const bool band = b.width != width || b.thickness != thickness || b.rootRotation.x != rootRotation.x ||
-                      b.rootRotation.y != rootRotation.y || b.rootRotation.z != rootRotation.z;
+    const groomlab::CardBlock before = b;
     b.width = width;
     b.length = length;
     b.thickness = thickness;
     b.rootRotation = rootRotation;
-    if (band) {
+    if (cardBlockBandChanged(before, b)) {  // (every host's)
         // The groom onto its new band (the active groom's transfer), its guides moved, not turned:
         // each keeps its place on the band and hangs as it was shaped (card_blocks.h moveCardBlockGuides).
         if (main_->activeGroom() != grooms[static_cast<std::size_t>(block)]) main_->activateGroom(grooms[static_cast<std::size_t>(block)]);
@@ -740,9 +739,11 @@ std::vector<std::string> CardAtlasWindow::exportMaps(const QString& folder, int 
         say(tr("Pick a folder for the maps first"));
         return {};
     }
-    const auto preset = findCardMapPreset(a.settings.preset);
-    if (!preset) {
-        say(tr("No card map preset named %1").arg(QString::fromStdString(a.settings.preset)));
+    std::optional<CardMapPreset> preset;
+    try {
+        preset = cardMapPresetFromText(a.settings.preset);  // its JSON or its name, every host's (card_maps.h)
+    } catch (const std::exception& e) {
+        say(QString::fromStdString(e.what()));
         return {};
     }
     std::vector<StrandsPtr> strands;

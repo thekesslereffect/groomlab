@@ -928,6 +928,23 @@ TEST(CardPresets, OneTableForEveryHost) {
     EXPECT_THROW(cardPresetParams("ultra", "hair"), std::invalid_argument);
     EXPECT_THROW(cardPresetParams("mid", "fur"), std::invalid_argument);
 
+    // On a graph (every host's Cards preset): each Cards node by what it cards, all or the ones
+    // named, the triangle budget overridden; no Cards node or an unknown one refused.
+    {
+        const std::string text = saveGraphJson(hairAndFeathers());
+        const std::vector<std::string> nodes = cardsNodeNames(text);
+        if (!nodes.empty()) {
+            std::vector<std::pair<std::string, ParamValue>> set;
+            const nlohmann::json g = nlohmann::json::parse(withCardPreset(text, "low", {nodes.front()}, 1000, &set));
+            EXPECT_FALSE(set.empty());
+            for (const nlohmann::json& n : g["nodes"]) {
+                if (n.value("name", std::string()) == nodes.front()) EXPECT_TRUE(n["params"].contains("maxCards"));
+            }
+        }
+        EXPECT_THROW(withCardPreset(text, "low", {"nowhere"}), std::invalid_argument);
+        EXPECT_THROW(withCardPreset(R"({"version": 1, "nodes": [], "connections": []})", "low"), std::invalid_argument);
+    }
+
     // The kind: the featherMode, else what reaches the node.
     const std::string graph = saveGraphJson(hairAndFeathers());
     EXPECT_EQ(cardNodeKind(graph, "featherCards"), "feathers");

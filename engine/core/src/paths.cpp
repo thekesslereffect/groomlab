@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "groomlab/paths.h"
+#include "groomlab/texture.h"
 
 #include <cctype>
 #include <cstdlib>
@@ -88,9 +89,10 @@ bool isAbsolutePath(const std::string& path) {
 
 namespace {
 
+// (An image's plain path standing for a UDIM tile set, udim.h: there when any tile is.)
 bool existsOnDisk(const std::string& path) {
     std::error_code ec;
-    return !path.empty() && fs::exists(fs::u8path(path), ec);
+    return !path.empty() && (fs::exists(fs::u8path(path), ec) || (isImagePath(path) && fileStamp(path) != 0));
 }
 
 // Whether `path`'s folder is on this machine: a file missing from a folder that is here is
@@ -152,8 +154,7 @@ PathResolver searchPathResolver(std::vector<std::string> directories) {
         for (const std::string& dir : dirs) {
             if (dir.empty()) continue;
             const fs::path candidate = (fs::u8path(expandEnvironment(dir)) / fs::u8path(relative)).lexically_normal();
-            std::error_code ec;
-            if (fs::exists(candidate, ec)) return candidate.u8string();
+            if (existsOnDisk(candidate.u8string())) return candidate.u8string();
             if (first.empty()) first = candidate.u8string();
         }
         return first;

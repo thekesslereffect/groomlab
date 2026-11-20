@@ -28,7 +28,9 @@ struct Guide {
     std::map<std::string, std::vector<float>> pointAttributes;
     // Its tube (tube.h), when it comes from a guide hierarchy (hasTube; widths at the size the
     // hierarchy shows), and the reference its first frame normal starts from: what
-    // Interpolate's fillTubes fills. Guides from curves, ToGuides and the like have none.
+    // Interpolate's fillTubes fills. Guides from curves, ToGuides and the like have none; a Curves
+    // node run on guides (a Curl on a Guides node's output) keeps each guide's, so it shapes the
+    // tubes themselves (and the levelTubes alike).
     bool hasTube = false;
     TubeProfile tube;
     Vec3f frameUp{1, 0, 0};

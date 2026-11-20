@@ -22,6 +22,16 @@
 
 namespace groomlab {
 
+std::vector<std::uint32_t> ScaleMesh::triangleOwners() const {
+    const std::size_t faces = triangleCount();
+    std::vector<std::uint32_t> owner(faces, 0);
+    for (std::size_t k = 0; k < scales.size(); ++k) {
+        const Scale& sc = scales[k];
+        for (std::uint32_t f = sc.firstTriangle; f < sc.firstTriangle + sc.triangleCount && f < faces; ++f) owner[f] = static_cast<std::uint32_t>(k);
+    }
+    return owner;
+}
+
 namespace {
 
 constexpr float kPi = 3.14159265f;
@@ -318,8 +328,6 @@ const InstancePrototype* builtinPrototype(const std::string& name) {
 
 std::vector<std::string> builtinPrototypeNames() { return {"groomlab:scale", "groomlab:scaleRound", "groomlab:scaleShield"}; }
 
-std::vector<std::string> builtinAccessoryNames() { return {"groomlab:bead", "groomlab:cuff", "groomlab:hairTie"}; }
-
 std::vector<std::string> graphMeshPrototypes(const std::string& graphJson) {
     std::set<std::string> names;
     nlohmann::json root;
@@ -419,7 +427,10 @@ Proto protoOf(const InstancePrototype* mesh) {
 Vec3f rotateOnto(const Vec3f& a, const Vec3f& b, const Vec3f& v) {
     const float c = a.dot(b);
     if (c > 1.0f - 1e-7f) return v;
-    if (c < -1.0f + 1e-6f) return v * -1.0f;  // (opposite: never on a skin a scale lies on)
+    if (c < -1.0f + 1e-6f) {  // opposite (never on a skin a scale lies on): half a turn about an axis across a
+        const Vec3f k = anyPerpendicular(a).normalized();
+        return k * (2.0f * k.dot(v)) - v;
+    }
     const Vec3f k = a.cross(b);
     return v * c + k.cross(v) + k * (k.dot(v) / (1.0f + c));
 }

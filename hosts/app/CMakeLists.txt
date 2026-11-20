@@ -36,6 +36,8 @@ set(GROOMLAB_APP_SHADERS
     shaders/dots.vert
     shaders/surface.vert
     shaders/surface.frag
+    shaders/surface_colored.vert
+    shaders/surface_colored.frag
     shaders/photo.vert
     shaders/photo.frag
     shaders/map.vert

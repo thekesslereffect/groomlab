@@ -21,8 +21,6 @@ from maya import cmds
 
 import groomlab
 
-MODES = ("place", "draw", "edit", "select", "duplicate")
-
 
 class _NoUndo(object):
     """Display edits kept out of the undo queue (the guides hidden while editing roots)."""

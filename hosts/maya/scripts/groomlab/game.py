@@ -5,12 +5,14 @@ glTF cards."""
 import json
 import os
 
+import groomlab_core
+
 from maya import cmds, mel
 
 from groomlab.paths import asset_folder, asset_name
 from groomlab.shading import hair_look
 from groomlab.cards import (
-    CARD_MAPS, CARD_NORMALS_NOTE, CARD_TINT_NOTE, FEATHER_CARD_NOTE, SCALP_MAPS, bake_cards, bake_scalp, card_material,
+    CARD_MAPS, SCALP_MAPS, bake_cards, bake_scalp, card_material,
     card_stats, cards_preset, scalp_cap, _card_maps, _cards_nodes, _existing_scalp_cap,
     _file_texture, _pointed_textures)
 from groomlab.exports import export_scales, has_scales
@@ -147,31 +149,11 @@ def export_cards_unreal(groom, directory=None, name=None, resolution=None, occlu
     stats = card_stats(groom)
     maps = {m: os.path.basename(p) for m in CARD_MAPS + (AO_WORLD,) + SCALP_MAPS
             for p in paths if p.endswith("_%s.tga" % m)}
-    manifest = {
-        "mesh": os.path.basename(fbx),
+    # Every host's manifest (engine_cards.h engineCardsManifestJson).
+    manifest = json.loads(groomlab_core.engine_cards_manifest_json(False, {
+        "mesh": os.path.basename(fbx), "scalpCap": os.path.basename(cap_fbx) if cap_fbx else "",
         "cards": stats["cards"], "triangles": stats["triangles"], "textures": stats["textures"],
-        "feathers": stats["feathers"],
-        "maps": maps,
-        "channels": {
-            "Depth": "R: distance off the card plane (0.5 on it, higher in front)",
-            "Coverage": "R: opacity",
-            "Tangent": "RGB: strand direction in card space (x across U, y root to tip along V, z out), 0.5 + 0.5 * t",
-            "Attribute": "R: root U, G: root V (scalp UVs), B: seed (random per strand), A: coordU (0 root, 1 tip "
-                         "along each strand; on a feather's card along each barb, from the shaft out)",
-            "Color": "RGB: base color, sRGB",
-            "AO": "R: ambient occlusion (1 open)",
-            "AO_world": AO_WORLD_NOTE,
-            "Normal": "RGB: the strands' normal as round fibers in tangent space (x across U, y along V, z out), "
-                      "DirectX's green (Unreal's), linear",
-            "ScalpColor": "RGB: the hair's color on the scalp (sRGB), in the scalp's UVs, for the hair cap",
-            "ScalpCoverage": "R: how much hair covers the skin, in the scalp's UVs",
-        },
-        "scalpCap": os.path.basename(cap_fbx) if cap_fbx else None,
-        "uv": "UV0/map1: the shared texture atlas; UV1/aoWorld: a unique non-overlapping island per card for AO_world",
-        "vertexColor": CARD_TINT_NOTE,
-        "normals": CARD_NORMALS_NOTE,
-        "featherCards": FEATHER_CARD_NOTE,
-    }
+        "feathers": stats["feathers"], "maps": maps}))
     path = os.path.join(directory, name + "_cards.json")
     with open(path, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2)
@@ -404,64 +386,12 @@ def export_cards_unity(groom, directory=None, name=None, resolution=None, occlus
         made = [n for n in cmds.ls(long=True) if n not in before]  # what the export made for itself
         cmds.delete([n for n in made if cmds.objExists(n)])
     stats = card_stats(groom)
-    smoothness = round(1.0 - hair_look(groom)["roughness"], 3)
     maps = {m: os.path.basename(p) for m, p in by_map.items() if p}
-    manifest = {
-        "engine": "Unity",
-        "mesh": os.path.basename(fbx),
-        "scalpCap": os.path.basename(cap_fbx) if cap_fbx else None,
-        "units": "meters, Y up (the FBX is converted from Maya's centimeters)",
+    # Every host's manifest (engine_cards.h engineCardsManifestJson).
+    manifest = json.loads(groomlab_core.engine_cards_manifest_json(True, {
+        "mesh": os.path.basename(fbx), "scalpCap": os.path.basename(cap_fbx) if cap_fbx else "",
         "cards": stats["cards"], "triangles": stats["triangles"], "textures": stats["textures"],
-        "feathers": stats["feathers"],
-        "maps": maps,
-        "channels": {
-            "BaseColor": "RGB: base color (sRGB); A: coverage (opacity: alpha clip at 0.5)",
-            "Mask": "HDRP mask map layout. R: metallic (0); G: ambient occlusion (1 open); "
-                    "B: root (0) to tip (1) along the strands; A: smoothness (1 - the hair look's roughness)",
-            "AO": "R (gray): ambient occlusion (1 open)",
-            "AO_world": AO_WORLD_NOTE,
-            "Tangent": "RGB: strand direction in tangent space (R along +U, G along +V root to tip, B out), "
-                       "0.5 + 0.5 * t, linear (import without sRGB)",
-            "Depth": "R (gray): distance off the card plane (0.5 on it, higher in front), linear",
-            "Attribute": "R, G: root UV on the scalp; B: seed per strand; A: root (0) to tip (1) along each strand "
-                         "(a feather's barbs: from the shaft out), linear",
-            "Normal": "RGB: the strands' normal as round fibers in tangent space (R along +U, G along +V, B out), "
-                      "OpenGL's green, linear (import as a Normal map)",
-            "ScalpBaseColor": "RGB: the hair's color on the scalp (sRGB); A: how much hair covers the skin",
-        },
-        "import": {
-            "textures": "BaseColor and ScalpBaseColor sRGB with Alpha Is Transparency; Mask, AO, AO_world, "
-                        "Tangent, Depth and Attribute linear (sRGB off); Normal as Texture Type Normal map",
-            "model": "Convert Units on (the FBX is in meters, so its scale stays 1)",
-        },
-        "materials": {
-            "HDRP": {
-                "shader": "a Shader Graph with the HDRP Hair material (or HDRP/Lit)",
-                "Base Color Map": maps.get("BaseColor"),
-                "Alpha Clipping": True, "Alpha Clip Threshold": 0.5, "Double-Sided": True,
-                "Mask Map": maps.get("Mask"),
-                "Normal Map": maps.get("Normal"),
-                "Hair Strand Direction": "Tangent map * 2 - 1 (strands run +V, root to tip)",
-                "Ambient Occlusion": "AO_world sampled with UV1 (in the Shader Graph), times the Mask map's G",
-                "Smoothness": smoothness,
-            },
-            "URP": {
-                "shader": "Universal Render Pipeline/Lit",
-                "Base Map": maps.get("BaseColor"),
-                "Alpha Clipping": True, "Threshold": 0.5, "Render Face": "Both",
-                "Occlusion Map": maps.get("AO"),
-                "Occlusion (whole groom)": "URP/Lit reads occlusion on UV0 only: AO_world needs a Shader Graph "
-                                           "sampling it with UV1",
-                "Normal Map": maps.get("Normal"),
-                "Smoothness": smoothness,
-            },
-            "scalpCap": "Transparent (alpha blend) with ScalpBaseColor, drawn under the cards",
-        },
-        "uv": "UV0/map1: the shared texture atlas; UV1/aoWorld: a unique non-overlapping island per card for AO_world",
-        "vertexColor": CARD_TINT_NOTE,
-        "normals": CARD_NORMALS_NOTE,
-        "featherCards": FEATHER_CARD_NOTE,
-    }
+        "feathers": stats["feathers"], "maps": maps, "roughness": float(hair_look(groom)["roughness"])}))
     path = os.path.join(directory, name + "_unity.json")
     with open(path, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2)
@@ -558,59 +488,11 @@ def export_unity_feathers(groom, folder=None, lod=None, name=None, points=16, ba
     elif any(o["feathers"] for o in written["objects"]):
         cmds.warning("GroomLab: %s's feathers have no rachis (set_rachis_width): their shafts go as strands, and "
                      "there is no mesh for the barbs to ride" % groom)
-    uniform = all(o["minPoints"] == o["maxPoints"] for o in written["objects"])
-    groups = []
-    for index, o in enumerate(written["objects"]):
-        if o["feathers"]:
-            instance = {
-                "Skinning": {"Roots Attach": True,
-                             "Roots Attach Target": "the rachis's SkinAttachmentTarget (%s)" % (
-                                 os.path.basename(fbx) if fbx else "no rachis written")},
-                "Physics": {"Global Position": True, "Global Position Influence": 1.0,
-                            "Global Position Interval": "Per 1ms", "Global Rotation": True,
-                            "Global Rotation Influence": 1.0, "Gravity": 0.0,
-                            "why": "barbs ride the skinned rachis: held to their groomed shape, not simulated"},
-                "Rendering": {"Material": "a hair material of its own (the feather design's look)"},
-            }
-        else:
-            instance = {
-                "Skinning": {"Roots Attach": True,
-                             "Roots Attach Target": "the body's SkinAttachmentTarget (the scalp's skinned mesh)"},
-                "Physics": "the package's defaults (simulated)",
-                "Rendering": {"Material": "the hair material"},
-            }
-        groups.append({"index": index, "object": o["object"], "group": o["group"], "groupId": o["groupId"],
-                       "feathers": o["feathers"], "strands": o["strands"],
-                       "pointsPerStrand": o["pointsPerStrand"] or o["maxPoints"], "hairInstance": instance})
-    manifest = {
-        "engine": "Unity",
-        "packages": UNITY_HAIR_PACKAGES,
-        "strands": os.path.basename(abc),
-        "rachis": os.path.basename(fbx) if fbx else None,
-        "lod": lod,
-        "barbDensity": barb_density or 1.0,
-        "units": "the .abc in centimeters (the Alembic importer's Scale Factor 0.01 makes meters), widths in "
-                 "centimeters; the rachis FBX in meters, Y up: both land in the same place",
-        "import": {
-            "strands": {"Scale Factor": 0.01, "Swap Handedness": True, "Import Curves": True},
-            "rachis": {"Convert Units": True, "then": "skin it to the character's skeleton (or combine it with the "
-                       "body before skinning) and give its SkinnedMeshRenderer a SkinAttachmentTarget"},
-        },
-        "hairAsset": {
-            "Type": "Alembic", "Alembic Asset": os.path.basename(abc),
-            "Alembic Asset Groups": "Preserve",
-            "Alembic Scale Positions": "Data In Meters", "Alembic Scale Diameters": "Data In Centimeters",
-            "Resample Curves": not uniform,
-            "Root UV": "Resolve From Curves", "Strand Diameter": "Resolve From Curves",
-            "Tip Scale": "Resolve From Curves",
-            "why": "Preserve keeps every curves object its own strand group (Combine merges neighbours of the same "
-                   "point count); Resample Curves on would give every group one Resample Resolution",
-        },
-        "groups": groups,
-        "roots": "Unity attaches a strand group's roots (SkinAttachment, attachment type Mesh) to the nearest vertex "
-                 "of the target mesh and the triangles round it: every barb root lies on its own rachis's surface "
-                 "(rootOnShaft), so attach the feather groups to the rachis mesh, the hair to the body",
-    }
+    # Every host's manifest (engine_cards.h unityFeathersManifestJson).
+    manifest = json.loads(groomlab_core.unity_feathers_manifest_json(
+        json.dumps(written["objects"]), os.path.basename(abc), os.path.basename(fbx) if fbx else "", lod or "",
+        float(barb_density or 1.0)))
+    groups = manifest["groups"]
     path = "%s/%s_unity_feathers.json" % (folder, name)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2)

@@ -13,7 +13,7 @@ import groomlab_core
 
 from groomlab.base import no_undo, undo_chunk, undoable
 from groomlab.params import get_graph, set_graph, set_param
-from groomlab.paths import asset_folder, asset_name, portable_path, resolve_path, _bump, _unique_path
+from groomlab.paths import asset_folder, asset_name, portable_path, resolve_path, _bump
 from groomlab.guides import list_guide_groups, selected_guides, _targets
 from groomlab.brushes import brush_tool, _rgba
 
@@ -266,28 +266,16 @@ def _in_folder(path, folder):
 def _unlink_map(groom, name):
     """What reads map `name` lets go of it: its Map nodes are removed and the params they fed
     read their own values again (their input ports removed), and map params naming it go back
-    to the node's default. Returns the (node, param) pairs that changed (map_users')."""
+    to the node's default (HairColor's map and Interpolate's regionMap naming it too). Returns the
+    (node, param) pairs that changed (map_users'). The core's (scalp_maps.h unlinkMapReaders), as
+    the app and Blender let go of a map."""
     from groomlab import graph as gm
     model = gm.GraphModel.from_groom(groom)
-    readers = [n for n in model.order if model.node_type(n) == "Map" and model.param(n, "name") == name]
-    changed = []
-    for c in [c for c in model.connections if c["from"] in readers]:
-        changed.append((c["to"], c["input"]))
-        if c["input"] in model.nodes[c["to"]].get("paramInputs", []):
-            model.unexpose_param(c["to"], c["input"])  # the slider again, at the value it kept
-        else:
-            model.disconnect(c["to"], c["input"])
-    for node in readers:
-        model.remove_node(node)
-    for node in model.order:
-        params = model.nodes[node]["params"]
-        for param, value in list(params.items()):
-            if isinstance(value, dict) and (value.get("guide") == name or value.get("colorSet") == name):
-                del params[param]  # the operator's default
-                changed.append((node, param))
-    if readers or changed:
+    text, touched, changed = groomlab_core.unlink_map_readers(model.to_json(), name)
+    if touched:
+        model.load_dict(json.loads(text))
         model.save(groom)
-    return changed
+    return [tuple(pair) for pair in changed]
 
 
 def remove_map(groom, name, delete_file=False):
@@ -318,16 +306,14 @@ def _follow_file_readers(groom, graph, old_file, new_stored):
     """The graph's file params reading `old_file` (absolute; a texture param a groom painted in
     the app or Blender reads its map by the file) read `new_stored` instead; True when any did.
     `graph` changes in place."""
-    from groomlab import presets
     if not old_file or not new_stored:
         return False
-    key = os.path.normcase(os.path.normpath(old_file))
-    changed = False
-    for _label, params, param, stored in list(presets._file_params(graph)):
-        full = resolve_path(stored, groom) or stored
-        if os.path.normcase(os.path.normpath(full)) == key:
-            presets.set_file_param(params, param, new_stored)
-            changed = True
+    # The core's rule, every host's (asset_files.h retargetFileReaders).
+    text, changed = groomlab_core.retarget_file_readers(json.dumps(graph), old_file, new_stored,
+                                                        lambda stored: resolve_path(stored, groom) or stored)
+    if changed:
+        graph.clear()
+        graph.update(json.loads(text))
     return changed
 
 
@@ -350,12 +336,11 @@ def rename_map(groom, old, new):
     kwargs = {"rename": (old, new)}
     stored = next((m.get("texture") or "" for m in maps(groom) if m["name"] == old and m["kind"] == "texture"), "")
     old_file = map_texture(groom, old) if stored else ""
-    target = groomlab_core.renamed_map_texture(stored, old, new) if stored else ""
-    if target:  # the file is named after the map (scalp_maps.h's rule, the app's too)
-        full = resolve_path(target, groom)
-        if full and os.path.exists(full):
-            target = portable_path(_unique_path(full))
-        kwargs["texture"] = target
+    # Named after the map and in the scene's masks folder (GroomLab's files, a duplicate's shared one
+    # too): to that name, a free one when taken (asset_files.h renamedMapImage, every host's rule).
+    target = groomlab_core.renamed_map_image(old_file, old, new, asset_folder("masks", create=False)) if old_file else ""
+    if target:
+        kwargs["texture"] = portable_path(target)
     with undo_chunk("rename map"):
         cmds.groomLabScalpMaps(groom, **kwargs)
         graph = get_graph(groom)
@@ -389,20 +374,15 @@ def convert_map(groom, name, kind, resolution=1024, texture=None):
 
 def map_nodes(groom, name):
     """The Map nodes reading map `name`."""
-    graph = get_graph(groom, expand_default=True)
-    return [n["name"] for n in graph["nodes"] if n.get("type") == "Map" and n.get("params", {}).get("name", "mask") == name]
+    return list(groomlab_core.map_readers(json.dumps(get_graph(groom, expand_default=True)), name)["nodes"])
 
 
 def map_users(groom, name):
-    """(node, param) pairs the map `name` feeds: through its Map nodes, and map params naming it."""
-    graph = get_graph(groom, expand_default=True)
-    readers = set(map_nodes(groom, name))
-    users = [(c["to"], c["input"]) for c in graph.get("connections", []) if c["from"] in readers]
-    for n in graph["nodes"]:
-        for p, v in n.get("params", {}).items():
-            if isinstance(v, dict) and (v.get("guide") == name or v.get("colorSet") == name):
-                users.append((n["name"], p))
-    return users
+    """(node, param) pairs the map `name` feeds: through its Map nodes, and the params naming it (a
+    map param's source, HairColor's map, Interpolate's regionMap). The core's (scalp_maps.h
+    mapReaders), every host's "Read by"."""
+    readers = groomlab_core.map_readers(json.dumps(get_graph(groom, expand_default=True)), name)
+    return [tuple(pair) for pair in readers["users"]]
 
 
 def paint_map(groom, name, value=1.0, strength=0.5, color=None, channels="rgba", **brush_options):
@@ -515,11 +495,14 @@ def export_map(groom, name, path, resolution=1024):
     if folder and not os.path.isdir(folder):
         os.makedirs(folder)
     if kind == "texture":
+        from groomlab import presets
         source = map_texture(groom, name)
-        if not source or not os.path.exists(source):
+        if not source or not presets.file_exists(source):
             raise ValueError("map %s's image is missing: %s" % (name, source))
         if os.path.normcase(os.path.abspath(source)) != os.path.normcase(path):
-            shutil.copyfile(source, path)
+            # (A tile set, udim.h: each tile, into the set `path` names: <path stem>.1001.png...)
+            for src, dst in groomlab_core.map_image_moves(source, path):
+                shutil.copyfile(src, dst)
         return path
     # Rasterized through a conversion to a texture at `path`, then the map put back as it was.
     before = cmds.getAttr(groom + ".scalpMaps")
@@ -561,7 +544,7 @@ def set_map_texture(groom, name, path, copy=None):
     if not path:
         raise ValueError("give the image's path")
     full = (resolve_path(path, groom) or path).replace("\\", "/")
-    if not os.path.isfile(full):
+    if not groomlab_core.file_stamp(full):  # (a UDIM tile set: any of its tiles)
         raise ValueError("no image at %s" % full)
     png = full.lower().endswith(".png")
     if copy is None:
@@ -588,16 +571,10 @@ def import_map(groom, path, name=None, color=None, copy=None):
     PNG is used in place and any other format copied into the masks folder as a PNG, as
     set_map_texture does (`copy`). One undo step. Returns the map's name."""
     full = (resolve_path(path, groom) or path).replace("\\", "/") if path else ""
-    if not full or not os.path.isfile(full):
+    if not full or not groomlab_core.file_stamp(full):  # (a UDIM tile set: any of its tiles)
         raise ValueError("no image at %s" % (full or path))
-    if name is None:
-        stem = re.sub(r"[^A-Za-z0-9_]", "_", os.path.splitext(os.path.basename(full))[0]).strip("_") or "map"
-        if stem[0].isdigit():
-            stem = "map_" + stem
-        taken = set(list_maps(groom))
-        name, n = stem, 2
-        while name in taken:
-            name, n = "%s_%d" % (stem, n), n + 1
+    if name is None:  # the core's rule, every host's (scalp_maps.h mapNameFromFile)
+        name = groomlab_core.map_name_from_file(full, list(list_maps(groom)))
     if color is None:
         color = not _image_is_gray(full)
     with undo_chunk("import map"):
@@ -608,14 +585,12 @@ def import_map(groom, path, name=None, color=None, copy=None):
 
 
 def _image_is_gray(path):
-    """Whether the image holds no color (every pixel r = g = b); unreadable here: False."""
+    """Whether the image holds no color (every pixel r = g = b; a UDIM tile set: every tile, the
+    core's isGrayImage, as the app and Blender ask); unreadable: False."""
     try:
-        from groomlab.ui.qt import QtGui
-        image = QtGui.QImage(path)
-        return not image.isNull() and image.allGray()
-    except Exception:  # (no Qt: mayapy without its GUI libraries)
+        return groomlab_core.is_gray_image(path)
+    except (RuntimeError, ValueError, groomlab_core.TextureError):
         return False
-
 
 def reload_map(groom, name=None):
     """Read texture map `name`'s image again (None: every texture map's) after it changed outside
@@ -657,51 +632,6 @@ def missing_files(groom):
     return out
 
 
-def _files_by_name(folder, recursive=True):
-    """{file name as the file system compares it (case-insensitive on Windows): [paths]} under `folder`."""
-    index = {}
-    for root, dirs, files in os.walk(folder):
-        for f in files:
-            index.setdefault(os.path.normcase(f), []).append(os.path.join(root, f).replace("\\", "/"))
-        if not recursive:
-            break
-        dirs.sort()
-    return index
-
-
-def _match_file(index, stored):
-    """The file of `index` that `stored` names: (path, []) when one fits, else (None, candidates).
-    Matched by file name; when several share it, the one whose folders end like the stored path's
-    does (groomlab/shot/masks/hair/density.png over another density.png), if only one does. A
-    UDIM set (<UDIM> in the name) matches its tile 1001 and keeps the token."""
-    from groomlab import presets
-    parts = [p for p in stored.replace("\\", "/").split("/") if p and p != "."]
-    if not parts:
-        return None, []
-    base = parts[-1]
-    token = next((t for t in presets.UDIM_TOKENS if t in base), None)
-    candidates = index.get(os.path.normcase(base.replace(token, "1001") if token else base), [])
-    if token:
-        candidates = [os.path.dirname(c) + "/" + base for c in candidates]
-    if len(candidates) == 1:
-        return candidates[0], []
-    if not candidates:
-        return None, []
-
-    def tail(path):
-        mine = [os.path.normcase(p) for p in reversed(parts)]
-        theirs = [os.path.normcase(p) for p in reversed(path.split("/"))]
-        n = 0
-        while n < min(len(mine), len(theirs)) and mine[n] == theirs[n]:
-            n += 1
-        return n
-
-    scores = sorted(((tail(c), c) for c in candidates), reverse=True)
-    if scores[0][0] > 1 and scores[0][0] > scores[1][0]:
-        return scores[0][1], []
-    return None, sorted(candidates)
-
-
 def find_missing_files(grooms, folder, recursive=True):
     """Relink the files grooms name that are missing (missing_files: texture maps, graph params,
     the guide cache and groom file) to files of the same name in `folder` (and its subfolders
@@ -717,7 +647,7 @@ def find_missing_files(grooms, folder, recursive=True):
         grooms = [grooms]
     if not folder or not os.path.isdir(folder):
         raise ValueError("no folder %s" % folder)
-    index = _files_by_name(os.path.abspath(folder), recursive)
+    index = groomlab_core.index_folder(os.path.abspath(folder), recursive)  # (every host's matching: asset_files.h)
     report = {"relinked": {}, "still_missing": {}, "ambiguous": {}}
 
     def note(section, groom, kind, key, value):
@@ -728,7 +658,7 @@ def find_missing_files(grooms, folder, recursive=True):
             missing = missing_files(groom)
 
             def look(kind, key, stored):
-                found, candidates = _match_file(index, stored)
+                found, candidates = groomlab_core.match_missing_file(index, stored)
                 if found:
                     return found
                 if candidates:
@@ -743,17 +673,16 @@ def find_missing_files(grooms, folder, recursive=True):
                     note("relinked", groom, "maps", name, set_map_texture(groom, name, found))
             if missing["params"]:
                 graph = get_graph(groom)
-                changed = False
-                for label, params, param, stored in presets._file_params(graph):
+                relinked = {}
+                for label, stored in presets.graph_files(graph):
                     if missing["params"].get(label) != stored:
                         continue
                     found = look("params", label, stored)
                     if found:
-                        presets.set_file_param(params, param, portable_path(found))
+                        relinked[label] = portable_path(found)
                         note("relinked", groom, "params", label, portable_path(found))
-                        changed = True
-                if changed:
-                    set_graph(groom, graph)
+                if relinked:
+                    set_graph(groom, presets.with_graph_files(graph, relinked))
             for attr, stored in sorted(missing["attributes"].items()):
                 found = look("attributes", attr, stored)
                 if found:
@@ -881,6 +810,13 @@ def paint_param(groom, node, param, kind="guides", name=None, resolution=1024, p
     that channel only. A map made here with `faces` (scalp polygon indices: selected_scalp_faces)
     is white on those faces only, black elsewhere (a map the param already reads is left as it
     is). The map, its link and what painting shows are one undo step. Returns the map's name."""
+    # What drives the param must be a painted map, or nothing: an expression, a channel or an image
+    # no map of the groom holds is refused (every host's: stroke.h paramMapOf).
+    try:
+        groomlab_core.param_map(json.dumps(get_graph(groom, expand_default=True)), cmds.getAttr(groom + ".scalpMaps") or "",
+                                node, param)
+    except RuntimeError as e:
+        raise ValueError(str(e))
     with undo_chunk("paint %s.%s" % (node, param)):
         found = param_map(groom, node, param)
         if found and not name:
@@ -922,23 +858,9 @@ def setting_targets(groom):
     its type (kind: where its new map lives unless picked otherwise, "guides" for the regions); then
     every mappable param of the graph (Other) as {"id": "node.param", ...}. Returns
     (settings, others)."""
-    graph = get_graph(groom, expand_default=True)
-    specs = dict((s["type"], s) for s in groomlab_core.operator_specs())
-    settings = []
-    for s in groomlab_core.paintable_settings():
-        node = next((n["name"] for n in graph["nodes"] if n.get("type") == s["type"]), "")
-        settings.append({"id": s["id"], "label": s["label"], "node": node, "param": s["param"], "type": s["type"],
-                         "hint": s["hint"] if node else "Add a %s node first (Graph Editor)" % s["type"],
-                         "kind": s.get("kind", "vertices")})
-    others = []
-    for n in graph["nodes"]:
-        spec = specs.get(n.get("type"))
-        for p in (spec or {}).get("params", []):
-            if p.get("mappable"):
-                others.append({"id": "%s.%s" % (n["name"], p["name"]), "label": "%s.%s" % (n["name"], p["name"]),
-                               "node": n["name"], "param": p["name"], "type": n["type"],
-                               "hint": p.get("description", "")})
-    return settings, others
+    # The core's list, every host's (stroke.h settingTargetsJson).
+    targets = json.loads(groomlab_core.setting_targets_json(json.dumps(get_graph(groom, expand_default=True))))
+    return targets["settings"], targets["others"]
 
 
 # ---------------------------------------------------------------------------

@@ -323,6 +323,14 @@ class GraphApiTest(unittest.TestCase):
         self.assertEqual(groomlab.errors(self.groom), [])
         self.assertEqual(sorted(groomlab.map_users(self.groom, "packed")),
                          [("length", "keep"), ("scatter", "density"), ("width", "width")])
+        # A param naming the map as text reads it too (the core's mapReaders, every host's).
+        tint = model.add_node("HairColor", params={"map": "packed"})
+        model.save(self.groom)
+        self.assertIn((tint, "map"), groomlab.map_users(self.groom, "packed"))
+        self.assertIn((tint, "map"), groomlab.remove_map(self.groom, "packed"))
+        color = next(n for n in groomlab.get_graph(self.groom)["nodes"] if n["name"] == tint)
+        self.assertNotEqual(color["params"].get("map"), "packed")
+        self.assertEqual(groomlab.map_users(self.groom, "packed"), [])
 
     def test_layout_changes_touch_only_the_layout(self):
         # A move writes the node's "ui" into the stored graph, nothing else of it (an edit not
@@ -811,6 +819,14 @@ class GraphApiTest(unittest.TestCase):
         self.assertEqual(model.source_of(pasted[1], "strands"), pasted[0])  # the link between them came along
         with self.assertRaises(gm.GraphError):
             model.paste_nodes("{}")
+        # The core's rules (GraphEdit.copy_nodes / paste_nodes, the app's too): the output node is one of a kind.
+        self.assertEqual(model.copy_nodes([model.output]), "")
+        self.assertEqual([n["name"] for n in json.loads(model.copy_nodes(["width", model.output, "length"]))["nodes"]],
+                         ["length", "width"])
+        before = model.to_json()
+        with self.assertRaises(gm.GraphError):
+            model.paste_nodes("")
+        self.assertEqual(model.to_json(), before)
 
     def test_expression_maps(self):
         groomlab.set_param(self.groom, "length", "keep", groomlab.expression_map("y > 0 ? 1 : 0.3", max=1.0))

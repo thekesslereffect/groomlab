@@ -81,7 +81,7 @@ struct RootTubeOptions {
     int segments = 12;     // ... and spans
     float taper = 0.5f;    // the tip's width, a share of the root's
     float density = 1.0f;  // a drawn guide's points, times this
-    std::string group;     // the root group it goes into ("": kRootTubeGroup), made when missing
+    std::string group;     // the top group it goes into, made when missing ("" or a child group's name: kRootTubeGroup)
 };
 
 // A root tube grown from its root's `outline` (world points on or near the scalp, 3 to

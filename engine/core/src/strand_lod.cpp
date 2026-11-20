@@ -186,7 +186,7 @@ void StrandLod::setStrands(StrandsPtr strands, const std::string& clumpChannel) 
     }
     const StrandSet& s = *strands_;
     const std::size_t n = s.strandCount();
-    hasWidths_ = s.widths().size() == s.pointCount() && s.pointCount() > 0;
+    hasWidths_ = displayWidths(s) != nullptr;
     const std::vector<float>* channel = clumpChannel.empty() ? nullptr : s.strandChannel(clumpChannel);
     if (channel && channel->size() != n) channel = nullptr;
     // What the groups depend on: the IDs (ranks), the point counts, the clump channel.
@@ -214,8 +214,8 @@ void StrandLod::setStrands(StrandsPtr strands, const std::string& clumpChannel) 
             for (std::size_t i = 0; i < n; ++i) {
                 if (s.strandPointCount(i) == 0) continue;
                 const Vec3f& p = s.strandPoints(i)[0];
-                lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
-                hi = {std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
+                lo = minPerAxis(lo, p);
+                hi = maxPerAxis(hi, p);
             }
             const float diagonal = lo.x <= hi.x ? (hi - lo).length() : 1.0f;
             const float cell = std::max(diagonal * static_cast<float>(std::sqrt(kCellMembers / 4.0 / static_cast<double>(n)) * 2.0), 1e-6f);

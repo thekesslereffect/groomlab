@@ -356,17 +356,17 @@ def _after_groom_file(groom, info, keep_keys):
     graph = get_graph(groom)
     dirs = [info.get("directory") or ""] + [os.path.expandvars(p) for p in info.get("searchPaths") or []]
     from groomlab import presets
-    relinked = False
-    for _label, params, param, stored in list(presets._file_params(graph)):
+    relinked = {}
+    for label, stored in presets.graph_files(graph):
         if os.path.isabs(os.path.expandvars(stored)) or presets.file_exists(resolve_path(stored, groom)):
             continue
         for folder in dirs:
             candidate = os.path.join(folder, stored) if folder else None
             if candidate and presets.file_exists(candidate):
-                presets.set_file_param(params, param, portable_path(os.path.normpath(candidate).replace("\\", "/")))
-                relinked = True
+                relinked[label] = portable_path(os.path.normpath(candidate).replace("\\", "/"))
                 break
     if relinked:
+        graph = presets.with_graph_files(graph, relinked)
         set_graph(groom, graph)  # and the controls' attributes
     else:
         sync_controls(groom, graph)
@@ -396,7 +396,7 @@ def _corrective_weight(groom, layer, fps, keep_keys):
     name, slot, curve = layer["name"], int(layer["slot"]), layer.get("weightCurve") or []
     source = shots._source(groom, name)
     if keep_keys and curve and cmds.objExists(source) and \
-            all(abs(cmds.getAttr(source, time=t * fps) - w) < 1e-3 for t, w in curve):
+            all(abs(cmds.getAttr(source, time=groomlab_core.seconds_to_frame(t, fps)) - w) < 1e-3 for t, w in curve):
         target = shots._shape_plug(groom, slot)
         if not cmds.isConnected(source, target):
             cmds.connectAttr(source, target, force=True)
@@ -407,7 +407,8 @@ def _corrective_weight(groom, layer, fps, keep_keys):
         cmds.warning("GroomLab: corrective %s keeps its weight unkeyed (%s)" % (name, e))
         return
     for t, w in curve:
-        cmds.setKeyframe(source, time=t * fps, value=w, inTangentType="linear", outTangentType="linear")
+        cmds.setKeyframe(source, time=groomlab_core.seconds_to_frame(t, fps), value=w, inTangentType="linear",
+                         outTangentType="linear")
 
 
 def _import_scalp_cache(cache, obj, name, count):

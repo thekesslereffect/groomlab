@@ -64,7 +64,6 @@ public:
     // ---- Tools -------------------------------------------------------------------------------
     // The brush session the mouse drives in brush and select modes (null: the camera alone).
     void setBrushSession(BrushSession* session);
-    BrushSession* brushSession() const { return session_; }
     void setToolMode(ToolMode mode);
     ToolMode toolMode() const { return mode_; }
     // The session's view is the camera over this widget (called before every event; a host

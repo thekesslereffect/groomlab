@@ -89,7 +89,6 @@ constexpr GLenum kMinorVersion = 0x821C;
 constexpr GLenum kSyncGpuCommandsComplete = 0x9117;
 constexpr GLbitfield kSyncFlushCommands = 0x00000001;
 constexpr GLenum kTimeoutExpired = 0x911B;
-constexpr GLenum kWaitFailed = 0x911D;
 // Buffer storage (ARB_buffer_storage, core in 4.4).
 constexpr GLbitfield kMapWrite = 0x0002;
 constexpr GLbitfield kMapPersistent = 0x0040;

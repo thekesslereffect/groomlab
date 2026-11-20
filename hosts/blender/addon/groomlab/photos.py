@@ -810,19 +810,6 @@ def pair_position(context, scalp, pair):
     return Vector(pair.mesh)
 
 
-def mesh_point(context, region, rv3d, scalp, x, y):
-    """The point on the scalp under region pixel (x, y), in the scalp object's space, or None."""
-    from bpy_extras import view3d_utils
-    origin = view3d_utils.region_2d_to_origin_3d(region, rv3d, (x, y))
-    direction = view3d_utils.region_2d_to_vector_3d(region, rv3d, (x, y))
-    inv = scalp.matrix_world.inverted()
-    o = inv @ origin
-    d = (inv.to_3x3() @ direction).normalized()
-    ev = scalp.evaluated_get(context.evaluated_depsgraph_get())
-    hit, location, _normal, _index = ev.ray_cast(o, d)
-    return tuple(location) if hit else None
-
-
 def _draw_pairs():
     """The picked photo's pairs, numbered: photo points in its camera view, mesh points in any view."""
     import blf

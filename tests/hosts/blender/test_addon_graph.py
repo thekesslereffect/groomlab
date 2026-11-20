@@ -512,8 +512,16 @@ class GraphEditorTest(unittest.TestCase):
         src = "interpolate"
         other = next(to for (to, inp), (frm, _) in gt.connections_of(helper_graph(head)).items() if frm == src and inp == "strands")
         g1, g2 = (call("edit_graph", op="add_node", type="Gravity", x=600.0 + 200.0 * i, y=900.0)["name"] for i in range(2))
+        # Off to the side and unfed: the core's warnings (GraphEdit::problems, Maya's unused_problems),
+        # nothing that stops the groom.
+        answer = gt.graph_problems(head)
+        self.assertEqual(answer["problems"], [])
+        self.assertEqual(answer["unused"], ["%s.strands is not connected" % g for g in (g1, g2)])
+        self.assertNotIn(g1, answer["feeding"])
+        self.assertIn(src, answer["feeding"])
         for g in (g1, g2):
             call("edit_graph", op="connect", **{"from": src, "to": g, "input": "strands"})
+        self.assertEqual(gt.graph_problems(head)["unused"], [])
         # The graph's pins (Maya's) as reroutes: the link into g1 through pin1 and pin2, into g2
         # through pin1 (a bundle: one reroute, two links out); a route whose link is not there is
         # left out, and the pin only it passes.
@@ -523,6 +531,17 @@ class GraphEditorTest(unittest.TestCase):
             "routes": [{"from": src, "to": g1, "input": "strands", "via": ["pin1", "pin2"]},
                        {"from": src, "to": g2, "input": "strands", "via": ["pin1"]},
                        {"from": "scalp", "to": other, "input": "strands", "via": ["pin7"]}]})
+        # Kept by the core's rules (graph_pins.h), every host's: pruned and in order as stored, the
+        # routes following a rename; as a reroute (one input) draws them, a route reaching a pin
+        # from elsewhere than the one before is left out.
+        self.assertEqual([p["id"] for p in pins()["points"]], ["pin1", "pin2"])
+        self.assertEqual([(r["to"], r["via"]) for r in pins()["routes"]], sorted([(g1, ["pin1", "pin2"]), (g2, ["pin1"])]))
+        call("edit_graph", op="rename_node", name=g2, newName="renamedGravity")
+        self.assertIn({"from": src, "to": "renamedGravity", "input": "strands", "via": ["pin1"]}, pins()["routes"])
+        call("edit_graph", op="rename_node", name="renamedGravity", newName=g2)
+        crossed = dict(pins(), routes=[dict(r, via=["pin2"]) if r["to"] == g2 else r for r in pins()["routes"]])
+        points, routes = gt.prune_pins(crossed, gt.connections_of(helper_graph(head)))
+        self.assertEqual((sorted(points), sorted(routes)), (["pin1", "pin2"], [(g1, "strands")]))
         gt.rebuild(head)
         settle(head)
         tree = self.tree()
@@ -706,6 +725,17 @@ class GraphEditorTest(unittest.TestCase):
         self.assertTrue(gt.clump_colored(head, node_of(self.tree(), made)))
         self.assertEqual(bpy.ops.groomlab.graph_clump_colors(node=made), {"FINISHED"})
         self.assertEqual((d.strand_color, head.groomlab.view_node), ("random", ""))
+        # Color by Channel: a channel as the node leaves it, from the node's last result (the
+        # core's list and source, "<channel>@<node>"); again: the colors as they were.
+        ge.result_channels(head, made)
+        ge._run_deferred()  # the helper's node_status, fetched outside drawing
+        self.assertIn(("bigClumpId", "strand"), ge.result_channels(head, made))
+        self.assertEqual(bpy.ops.groomlab.graph_color_by_channel(node=made, channel="bigClumpId"), {"FINISHED"})
+        self.assertEqual((d.strand_color, d.strand_color_source), ("attribute", "bigClumpId@" + made))
+        self.assertEqual(ge.channel_colored(head, made), "bigClumpId")
+        self.assertEqual(ge.channel_colored(head, "interpolate"), "")
+        self.assertEqual(bpy.ops.groomlab.graph_color_by_channel(node=made, channel="bigClumpId"), {"FINISHED"})
+        self.assertEqual(d.strand_color, "random")
         # Issue #77: a second Clump after it on the same channel; each one's button lights alone,
         # and a bare channel (grooms from before) lights the last one writing it.
         later, error = graph.add_node(head, "Clump", after=made)
@@ -730,6 +760,85 @@ class GraphEditorTest(unittest.TestCase):
         d.strand_color = "solid"
         graph.remove_node(head, later)
         graph.remove_node(head, made)
+        settle(head)
+        # A Braid's Show Tubes (where a Clump has Clump Colors): its section tubes drawn in the viewport
+        # (the display's braidTubes item: a solid surface, each section its own color), the view and
+        # the graph left as they are; again: off. A rename takes the name along, a delete drops it.
+        display = importlib.import_module(bu.MODULE + ".display")
+        braid, error = graph.add_node(head, "Braid", after="interpolate")
+        self.assertFalse(error)
+        size = max(head.dimensions) * 100.0  # (the groom's centimeters)
+        graph.set_param(head, braid, "region", 0.3 * size)
+        graph.set_param(head, braid, "width", 0.08 * size)
+        settle(head)
+        groom.evaluate(head, rt)
+        self.assertEqual(d.braid_tubes, "")
+        self.assertFalse(gt.braid_tubes_shown(head, node_of(self.tree(), braid)))
+        self.assertEqual(bpy.ops.groomlab.graph_braid_tubes(node="interpolate"), {"CANCELLED"})  # no such button there
+        self.assertEqual(d.braid_tubes, "")
+
+        def shown_tubes():
+            r = process.call("display", session=rt.session, settings=display.settings_for(head, bpy.context.scene), have={})
+            return r, r["items"]["braidTubes"]
+
+        self.assertFalse(shown_tubes()[1]["shown"])
+        before = helper_graph(head)
+        strands = rt.last["strandCount"]
+        self.assertEqual(bpy.ops.groomlab.graph_braid_tubes(node=braid), {"FINISHED"})
+        self.assertEqual((d.braid_tubes, head.groomlab.view_node), (braid, ""))
+        self.assertTrue(gt.braid_tubes_shown(head, node_of(self.tree(), braid)))
+        self.assertFalse(gt.braid_tubes_shown(head, node_of(self.tree(), "interpolate")))
+        self.assertEqual(helper_graph(head), before)  # display only: the graph as it was
+        self.assertEqual(display.settings_for(head, bpy.context.scene).get("braidTubes"), braid)
+        r, tubes = shown_tubes()
+        self.assertTrue(tubes["shown"])
+        self.assertEqual(tubes["primitive"], "triangles")
+        self.assertTrue(tubes["perVertexColors"])
+        self.assertGreater(tubes["vertexCount"], 0)
+        # What the viewport draws of it: lit, in the sections' colors, with the scene's depth.
+        display.take_display(head, r)
+        entry = next(e for e in display.draw_list(head) if e[0] == "braidTubes")
+        self.assertEqual(entry[1], "triangles")
+        self.assertEqual(entry[4].shape, (tubes["vertexCount"], 4))
+        self.assertGreaterEqual(len({tuple(c) for c in display.state(head).items["braidTubes"].colors[:, :3].round(3).tolist()}), 3)
+        self.assertEqual((entry[7], entry[8]), (False, True))  # not pulled over the hair; depth tested
+        self.assertIn("braidTubes", display.SOLID)
+        self.assertEqual(rt.last["strandCount"], strands)
+        # The Braid's own params edited while its tubes show (inflate, separate): the viewport asks
+        # for the display again (draw()'s test: the evaluation's serial moved on) and the tubes it
+        # then holds are other ones, as many points.
+        gd = display.state(head)
+        for param, value in (("inflate", 1.0), ("separate", 0.0)):
+            display.refresh(head)
+            self.assertFalse(gd.dirty or gd.serial != rt.serial)
+            held = gd.items["braidTubes"].positions.copy()
+            graph.set_param(head, braid, param, value)
+            settle(head)
+            self.assertTrue(gd.dirty or gd.serial != rt.serial, param)  # the viewport's next draw refreshes
+            display.refresh(head)
+            now = gd.items["braidTubes"].positions
+            self.assertEqual(now.shape, held.shape, param)
+            self.assertGreater(float(abs(now - held).max()), 1e-4 * size / 100.0, param)
+        graph.set_param(head, braid, "inflate", 0.5)
+        graph.set_param(head, braid, "separate", 1.0)
+        settle(head)
+        self.assertEqual(bpy.ops.groomlab.graph_braid_tubes(node=braid), {"FINISHED"})  # again: off
+        self.assertEqual(d.braid_tubes, "")
+        self.assertFalse(gt.braid_tubes_shown(head, node_of(self.tree(), braid)))
+        self.assertFalse(shown_tubes()[1]["shown"])
+        # Renamed (the helper's graph first, as the tree's sync does), the name follows; a name that
+        # is no Braid node shows nothing; deleted, its name goes.
+        self.assertEqual(bpy.ops.groomlab.graph_braid_tubes(node=braid), {"FINISHED"})
+        process.call("edit_graph", session=rt.session, op="rename_node", name=braid, newName="plait")
+        gt.follow_braid_tubes(head, old=braid, new="plait")
+        self.assertEqual(d.braid_tubes, "plait")
+        graph.refresh(head, rt)
+        settle(head)
+        self.assertTrue(gt.braid_tubes_shown(head, node_of(self.tree(), "plait")))
+        d.braid_tubes = "plait\ninterpolate"
+        self.assertFalse(gt.braid_tubes_shown(head, node_of(self.tree(), "interpolate")))
+        graph.remove_node(head, "plait")
+        self.assertEqual(d.braid_tubes, "")
         settle(head)
         # Set as Output.
         output = helper_graph(head)["output"]
@@ -949,7 +1058,9 @@ class GraphEditorTest(unittest.TestCase):
             gx, gy = gt.get_location(node)
             self.assertAlmostEqual(x, ox + gx * g.k, 3)
             self.assertAlmostEqual(y + h, oy + gy * g.k, 3)  # (the location is the card's top left)
-            self.assertAlmostEqual(w, (canvas.NODE_W + (canvas.CLUMP_W if node.gl_type == "Clump" else 0.0)) * g.k, 3)
+            # (A button wider: a Clump's Clump Colors, a Braid's or a guide node's Show Tubes, as the app's.)
+            own = node.gl_type == "Clump" or gt.shows_tubes(node)
+            self.assertAlmostEqual(w, (canvas.NODE_W + (canvas.CLUMP_W if own else 0.0)) * g.k, 3)
             rows = max(len(box.inputs), len(box.outputs), 1) + (1 if box.type_row else 0)
             self.assertAlmostEqual(h, (canvas.HEADER + 2 * canvas.PAD + rows * canvas.ROW) * g.k, 3)
             for i, (_s, (px, py)) in enumerate(box.inputs):
@@ -995,6 +1106,9 @@ class GraphEditorTest(unittest.TestCase):
         self.assertTrue(canvas.compatible("Curves", "Guides"))
         self.assertFalse(canvas.compatible("Strands", "Guides"))
         self.assertFalse(canvas.compatible("Mesh", "Strands"))
+        self.assertTrue(canvas.compatible("Value", "Field"), "a number on every strand (the core's portTypesMatch)")
+        self.assertFalse(canvas.compatible("Field", "Value"))
+        self.assertTrue(canvas.compatible("Field", "Value", out=False), "dragged from a Field input")
         link = next(l for l in tree.links if canvas._port_type(l.from_socket) == "Strands"
                     and l.to_node.bl_idname != "NodeReroute")
         source, target, into = link.from_node.name, link.to_node.name, link.to_socket.identifier

@@ -10,6 +10,8 @@
 #include <maya/MPxCommand.h>
 #include <maya/MSyntax.h>
 
+#include "groomlab/asset_files.h"
+
 namespace groomlab::maya {
 
 // groomLabScalpMaps: the maps painted on a groom's scalp (Groom Tools > Paint), of three kinds:
@@ -70,15 +72,11 @@ private:
     bool undoable_ = false;
     std::pair<std::string, std::string> moved_;  // a renamed texture map's file: from, to (absolute)
     bool copied_ = false;  // the renamed map's file was copied, not moved (another groom reads it)
-    // Texture files the command rewrote over existing ones: their bytes before and after.
-    struct FileEdit {
-        std::string path;
-        std::vector<std::uint8_t> before, after;
-    };
-    std::vector<FileEdit> rewritten_;
-    FileEdit created_;  // a new file -relink wrote (its bytes in `after`): removed on undo, written on redo
-    FileEdit deleted_;  // the file -remove -deleteFile deleted (its bytes in `before`): put back on undo
-    void removeDeleted();  // deletes deleted_'s file (doIt, redoIt)
+    // The texture files the command wrote (a map's image rewritten, -relink's copy; a tile set's
+    // every tile), as they were and are (asset_files.h FileState): put back on undo, again on redo.
+    std::vector<FileState> files_;
+    // The files -remove -deleteFile deletes after the map goes (a tile set's every tile).
+    std::vector<FileState> deleted_;
 };
 
 }  // namespace groomlab::maya

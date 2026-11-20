@@ -46,6 +46,8 @@ add_executable(groomlab_tests
     engine/core/test_tubes.cpp
     engine/core/test_root_tubes.cpp
     engine/core/test_root_tube_tool.cpp
+    engine/core/test_tube_mesh.cpp
+    engine/core/test_udim.cpp
     engine/core/test_root_subdivision.cpp
     engine/core/test_incremental.cpp
     engine/core/test_keyed_params.cpp
@@ -54,6 +56,7 @@ add_executable(groomlab_tests
     engine/core/test_card_separation.cpp
     engine/core/test_card_maps.cpp
     engine/core/test_card_blocks.cpp
+    engine/core/test_host_rules.cpp
     engine/core/test_fields.cpp
     engine/core/test_game_exports.cpp
     engine/core/test_cinematic.cpp
@@ -99,6 +102,7 @@ add_executable(groomlab_tests
     engine/core/test_scales.cpp
     engine/core/test_scalp_paint.cpp
     engine/core/test_semver.cpp
+    engine/core/test_profile.cpp
     engine/core/test_strand_geometry.cpp
     engine/core/test_strand_set.cpp
     engine/core/test_stroke.cpp

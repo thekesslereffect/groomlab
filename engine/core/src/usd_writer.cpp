@@ -134,8 +134,8 @@ std::string prototypeMeshBody(const InstancePrototype& mesh, const std::string& 
     for (std::size_t i = 0; i < mesh.points.size(); ++i) {
         if (i) b.raw(", ");
         b.vec3(mesh.points[i]);
-        lo = {std::min(lo.x, mesh.points[i].x), std::min(lo.y, mesh.points[i].y), std::min(lo.z, mesh.points[i].z)};
-        hi = {std::max(hi.x, mesh.points[i].x), std::max(hi.y, mesh.points[i].y), std::max(hi.z, mesh.points[i].z)};
+        lo = minPerAxis(lo, mesh.points[i]);
+        hi = maxPerAxis(hi, mesh.points[i]);
     }
     b.raw("]\n" + indent + "float3[] extent = [");
     b.vec3(lo);
@@ -573,8 +573,8 @@ void UsdCurvesWriter::writeFrame(double frame, const StrandSet& strands, const S
             if (vertices == 0) return;
             Vec3f lo = sm.points[0], hi = lo;
             for (const Vec3f& p : sm.points) {
-                lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
-                hi = {std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
+                lo = minPerAxis(lo, p);
+                hi = maxPerAxis(hi, p);
             }
             b.vec3(lo);
             b.raw(", ");

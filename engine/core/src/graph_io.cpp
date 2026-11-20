@@ -263,14 +263,12 @@ std::string GraphDocument::nameOf(NodeId id) const {
 }
 
 GraphDocument loadGraphJson(const std::string& text) {
-    const bool blank = text.find_first_not_of(" \t\r\n") == std::string::npos;
     json root;
     try {
-        root = json::parse(blank ? defaultGraphJson() : text);
+        root = json::parse(graphOrDefault(text));
     } catch (const json::exception& e) {
         throw GraphError(std::string("invalid graph JSON: ") + e.what());
     }
-    if (root.is_object() && root.empty()) root = json::parse(defaultGraphJson());
 
     try {
         return parse(root);
@@ -443,6 +441,8 @@ std::string paramSpecJson(const ParamSpec& p) {
     if (!p.unitWhen.param.empty()) param["unitWhen"] = {{"param", p.unitWhen.param}, {"in", p.unitWhen.in}};
     // A changed default: nodes saved before version `since` take `before` (ParamSpec::since).
     if (p.since > 0) param["formerDefault"] = {{"since", p.since}, {"value", paramToJson(p.before)}};
+    // Added by a later version of the operator (ParamSpec::added): a node older than it does not show it.
+    if (p.added > 0) param["addedIn"] = p.added;
     // The input port it takes when exposed (none: it cannot be an input).
     PortSpec port;
     if (paramPortSpec(p, &port)) {
@@ -549,6 +549,15 @@ std::map<std::string, std::string> compoundExposed(const std::string& definition
     }
     return out;
 }
+
+bool blankGraph(const std::string& text) {
+    const auto first = text.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos) return true;
+    const auto last = text.find_last_not_of(" \t\r\n");
+    return text[first] == '{' && text[last] == '}' && text.find_first_not_of(" \t\r\n", first + 1) == last;
+}
+
+std::string graphOrDefault(const std::string& text) { return blankGraph(text) ? defaultGraphJson() : text; }
 
 const std::string& defaultGraphJson() {
     static const std::string text = R"({

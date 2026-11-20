@@ -219,8 +219,9 @@ def duplicate_block(groom, name=None):
     groom = _groom_shape(groom)
     atlas = atlas_of(groom)
     b = block(groom)
-    return add_block(atlas, name or _short(_transform(groom)) + "_copy", b["width"], b["length"], b["thickness"],
-                     b.get("rootRotation", (0, 0, 0)), like=groom)
+    # (Duplicate's name: <block>_copy no block has, every host's card_block_copy_name)
+    name = name or _core().card_block_copy_name(atlas_json(atlas), _short(_transform(groom)))
+    return add_block(atlas, name, b["width"], b["length"], b["thickness"], b.get("rootRotation", (0, 0, 0)), like=groom)
 
 
 def remove_block(groom):
@@ -261,7 +262,6 @@ def set_block(groom, width=None, length=None, thickness=None, root_rotation=None
     with undo_chunk("edit card block"):
         data = json.loads(atlas_json(atlas))
         entry = next(b for b in data["blocks"] if b["name"] == name)
-        before = dict(entry)
         for key, value in (("width", width), ("length", length), ("thickness", thickness)):
             if value is not None:
                 entry[key] = float(value)
@@ -274,7 +274,7 @@ def set_block(groom, width=None, length=None, thickness=None, root_rotation=None
         old_json = cmds.getAttr(groom + ".cardBlock")
         block_json = _core().card_block_json(text, name)
         cmds.setAttr(groom + ".cardBlock", block_json, type="string")
-        band_changed = any(entry.get(k) != before.get(k) for k in ("width", "thickness", "rootRotation"))
+        band_changed = _core().card_block_band_changed(old_json, block_json)  # (every host's rule)
         if band_changed:
             # The guides moved with the band, not turned with it (set once the band has moved).
             moved = _core().move_card_block_guides(cmds.getAttr(groom + ".guideData") or "", old_json, block_json)

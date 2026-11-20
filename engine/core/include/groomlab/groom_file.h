@@ -84,6 +84,8 @@
 // holds them ("name:#rrggbb name:#rrggbb", sRGB; display.h parseGuideGroupColors), and
 // "hiddenGuideGroups": the groups hidden in the viewport ("name name", Maya's attribute). Display
 // only, read by no evaluation; absent when empty.
+// "braidTubes": the Braid nodes whose section tubes the viewport shows (Show Tubes, braid_tubes.h):
+// their names (["braid", ...]). Display only, read by no evaluation; absent when none is shown.
 
 #include <cstdint>
 #include <map>
@@ -150,6 +152,9 @@ struct GroomFile {
     // Maya's attributes' text; "" none).
     std::string guideGroupColors;
     std::string hiddenGuideGroups;
+    // The Braid nodes whose tubes show ("braidTubes"; DisplaySettings::braidTubes' form: names, one a
+    // line). Display only.
+    std::string braidTubes;
     // A Card Atlas block's card and the atlas' settings ("cardBlock", card_blocks.h
     // cardBlockToJson; "" not a block): a file whose grooms are blocks is a Card Atlas.
     std::string cardBlock;
@@ -165,6 +170,17 @@ std::string groomFileToJson(const GroomFile& file);
 // (`directory`, or the file's own: GroomFile::directory) and then its search paths, the first
 // that exists (else the folder's join; with neither, as stored).
 std::string resolveGroomPath(const GroomFile& file, const std::string& stored, const std::string& directory = {});
+// The folders a groom file's relative paths resolve from, every host's resolver for it: `first`
+// when given (where the groom was saved to since), the folder the file was read from, then its
+// search paths; empty ones and repeats left out.
+std::vector<std::string> groomFileFolders(const GroomFile& file, const std::string& first = {});
+// The painted maps into the data a groom file saves, every host's save (the app's, the Blender
+// helper's): the catalog (the guide layers' entries of `fileCatalog`, the maps as read, then the
+// scalp maps as they are now) and the vertex maps as the scalps' color sets, a removed map's color
+// set gone with it (a color set that was never a map stays: the graph may read it). With other
+// scalps (data.scalps, scalp_pieces.h) the maps are per vertex of the scalps joined: each scalp
+// keeps its own share.
+void storeScalpMaps(GroomData& data, const ScalpMaps& maps, const MapCatalog& fileCatalog);
 // The "simCaches" object alone as text, and back (Maya keeps it in a groom's simCaches attribute,
 // paths relative to the scene): relative paths join `baseDir` (empty: kept as they are). Blank
 // text is no bakes; throws GroomFileError for text that is not such an object.

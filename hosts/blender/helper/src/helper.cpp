@@ -20,6 +20,8 @@
 #include <utility>
 #include <vector>
 
+#include "groomlab/stroke.h"
+#include "groomlab/graph_controls.h"
 #include "groomlab/asset_files.h"
 #include "groomlab/brush_alpha.h"
 #include "groomlab/attributes.h"
@@ -29,6 +31,7 @@
 #include "groomlab/color_patterns.h"
 #include "groomlab/display.h"
 #include "groomlab/export_view.h"
+#include "groomlab/tube.h"
 #include "groomlab/expression.h"
 #include "groomlab/follow_scalp.h"
 #include "groomlab/frame_time.h"
@@ -36,12 +39,14 @@
 #include "groomlab/graph_inserts.h"
 #include "groomlab/graph_edit.h"
 #include "groomlab/graph_io.h"
+#include "groomlab/graph_pins.h"
 #include "groomlab/groom_file.h"
 #include "groomlab/groom_package.h"
 #include "groomlab/retriangulate.h"
 #include "groomlab/groom_session.h"
 #include "groomlab/guide_hierarchy.h"
 #include "groomlab/hair_color.h"
+#include "groomlab/instances.h"
 #include "groomlab/node_library.h"
 #include "groomlab/paths.h"
 #include "groomlab/presets.h"
@@ -50,6 +55,7 @@
 #include "groomlab/schema.h"
 #include "groomlab/subdivision.h"
 #include "groomlab/usd_writer.h"
+#include "groomlab/udim.h"
 #include "groomlab/version.h"
 
 #if GROOMLAB_HAS_ALEMBIC
@@ -75,16 +81,8 @@ namespace {
 
 // ---- Graph text ---------------------------------------------------------------------------------
 
-bool blankGraph(const std::string& text) {
-    const auto first = text.find_first_not_of(" \t\r\n");
-    if (first == std::string::npos) return true;
-    const auto last = text.find_last_not_of(" \t\r\n");
-    return text[first] == '{' && text[last] == '}' && text.find_first_not_of(" \t\r\n", first + 1) == last;
-}
-
 std::string graphText(const GroomSession& session) {
-    const std::string& text = session.data().graphJson;
-    return blankGraph(text) ? defaultGraphJson() : text;
+    return graphOrDefault(session.data().graphJson);
 }
 
 json parseGraph(const GroomSession& session) {
@@ -217,9 +215,7 @@ std::string platformName() {
 
 
 void applySearchPaths(Session& s) {
-    std::vector<std::string> dirs;
-    if (!s.file.directory.empty()) dirs.push_back(s.file.directory);
-    dirs.insert(dirs.end(), s.file.searchPaths.begin(), s.file.searchPaths.end());
+    std::vector<std::string> dirs = groomFileFolders(s.file);  // every host's (groom_file.h)
     s.groom->setPathResolver(dirs.empty() ? PathResolver{} : searchPathResolver(std::move(dirs)));
 }
 
@@ -255,6 +251,7 @@ void adopt(Session& s, GroomFile file) {
     s.groom = std::move(session);
     adoptMaps(s, data);  // painted maps outlive the host's scalp (no color sets)
     resetTools(s);       // the stroke host was the old groom's
+    adoptGroupDisplay(s, file);  // the file's guide group colors and hidden groups
     s.restGuides = nullptr;
     s.restMesh = nullptr;
     s.file = std::move(file);
@@ -275,6 +272,7 @@ GroomFile currentFile(const Session& s) {
     file.data.scaleReference = s.groom->scaleReference();  // in use: the first area measured when none was set
     file.framesPerSecond = s.groom->framesPerSecond();
     writeMaps(s, file);
+    writeGroupDisplay(s, file);  // the guide groups' colors, the hidden ones (every host's .groom)
     return file;
 }
 
@@ -282,13 +280,7 @@ GroomFile currentFile(const Session& s) {
 void feedTime(Session& s) {
 #if GROOMLAB_HAS_ALEMBIC
     if (s.guideCache) {
-        const StrandSet curves = s.guideCache->at(s.seconds);
-        auto poses = std::make_shared<GuideSet>();
-        for (std::size_t i = 0; i < curves.strandCount(); ++i) {
-            const Vec3f* p = curves.strandPoints(i);
-            poses->add(curves.ids()[i], std::vector<Vec3f>(p, p + curves.strandPointCount(i)));
-        }
-        s.groom->setGuidePoses(poses);
+        s.groom->setGuidePoses(std::make_shared<GuideSet>(guidesOfCurves(s.guideCache->at(s.seconds))));  // (groom.h)
     }
 #else
     (void)s;
@@ -297,10 +289,7 @@ void feedTime(Session& s) {
 
 std::optional<double> scalpSize(const Session& s) {
     // At the size the params are at: the groom's 1x when it is scaled with its scalp.
-    const MeshPtr& scalp = s.groom->rawScalp();
-    std::optional<double> size = scalp ? presetScalpSize(*scalp) : std::nullopt;
-    if (size) *size /= s.groom->groomScale();
-    return size;
+    return paramScalpSize(s.groom->rawScalp().get(), s.groom->groomScale());
 }
 
 // The scalp's rest pose as a mesh (the scalp itself without one), kept while it stays the same.
@@ -612,6 +601,7 @@ json setHierarchyGuides(Session& s, GuideCurves curves, bool keepMissing, const 
         // braid's paths or feathers' shafts (Maya's guides_from_curves group=).
         group = h.findGroup(groupName);
         if (group == kNoGroup) group = h.addGroup(groupName);
+        else if (h.groupDepth(group) != 0) fail("bad_request", "'" + groupName + "' is a child group: add guides to a root group");
     }
     for (const GuideGroup& g : h.groups()) {
         if (group != kNoGroup) break;
@@ -627,7 +617,10 @@ json setHierarchyGuides(Session& s, GuideCurves curves, bool keepMissing, const 
         const std::uint64_t id = curves.ids[i];
         if (id == 0 || !h.guide(id)) {
             if (group == kNoGroup) group = h.addGroup("guides");
-            const GuideId made = h.addGuide(group, curves.points[i], TubeProfile{}, id);
+            // A named group's guides take its own segments, as every host's Curves to Guides
+            // (Maya's -fromCurves, guide_hierarchy.h addBakedGuides).
+            const GuideId made = h.addGuide(group, groupName.empty() ? curves.points[i] : h.withGroupSegments(group, curves.points[i]),
+                                            TubeProfile{}, id);
             added.push_back({{"index", i}, {"id", made}});
             given.insert(made);
             continue;
@@ -704,7 +697,13 @@ json writeStrands(Session& s, const ViewResult& view, const json& args, bool gro
     }
     if (derived) {
         if (ev.rootUVs.size() == S && S) offer("rootUV", 0, 2, ev.rootUVs.front().data());
-        if (ev.colors.size() == S && S) offer("color", 0, 3, ev.colors.front().data());
+        if (ev.colors.size() == S && S) {
+            offer("color", 0, 3, ev.colors.front().data());
+            // How the hair looks as one color (hair_color.h meanHairAppearance, every host's): the
+            // add-on's material viewport color (Solid shading).
+            const std::array<float, 3> look = meanHairAppearance(ev.colors.front().data(), S);
+            result["appearance"] = {look[0], look[1], look[2]};
+        }
         if (ev.pointColors.size() == P && P) offer("pointColor", 1, 3, ev.pointColors.front().data());
     } else {
         if (view.scalp && view.scalp->hasUVs()) offer("rootUV", 0, 2, nullptr);
@@ -721,13 +720,7 @@ json writeStrands(Session& s, const ViewResult& view, const json& args, bool gro
             const VaneNormals vanes(st);
             const ScalpMesh* scalp = view.scalp.get();
             for (std::size_t i = 0; i < S; ++i) {
-                Vec3f up{0.0f, 1.0f, 0.0f};
-                if (vanes.at(i, &up)) {
-                } else if (scalp && i < st.roots().size() && scalp->contains(st.roots()[i])) {
-                    up = scalp->normal(st.roots()[i]);
-                } else if (st.strandPointCount(i) >= 2) {
-                    up = (st.strandPoints(i)[1] - st.strandPoints(i)[0]).normalized();
-                }
+                const Vec3f up = iridescenceRootNormal(st, i, scalp, vanes);  // every host's (color_patterns.h)
                 if (groomSpace) {
                     rootNormals[i * 3] = up.x;
                     rootNormals[i * 3 + 1] = up.y;
@@ -805,13 +798,10 @@ PrototypeLookup storedPrototypes(const Session& s) {
     };
 }
 
-// Unity's hair package resamples strands to 3..128 particles (HairSim.MIN/MAX_STRAND_PARTICLE_COUNT),
-// as Maya's groomlab.game checks a count it is given.
+// A Unity point count: a whole number (its range, Unity's 3 to 128 or 0, EngineExportOptions::problem).
 std::size_t unityPoints(const json& args, const char* key) {
     const double v = optNumber(args, key, 0.0);
-    if (v != 0.0 && (v < 3.0 || v > 128.0 || v != std::floor(v))) {
-        fail("bad_request", std::string(key) + " must be 3 to 128 (Unity's strand particle counts), or 0: as they are");
-    }
+    if (v < 0.0 || v != std::floor(v)) fail("bad_request", std::string(key) + " must be a whole number, 0 or more");
     return static_cast<std::size_t>(v);
 }
 
@@ -878,7 +868,7 @@ std::unique_ptr<ExportJob> openExport(Session& s, const json& args) {
     job->format = format;
     job->path = needString(args, "path");
     job->fps = s.groom->framesPerSecond();
-    const std::string name = optString(args, "name", "groom");
+    const std::string name = exportObjectName(optString(args, "name", "groom"));  // every host's (export_view.h)
     const double start = optNumber(args, "startFrame", 1.0);
     const double step = optNumber(args, "step", 1.0);
     if (!(step > 0.0)) fail("bad_request", "step must be above 0");
@@ -965,16 +955,6 @@ std::unique_ptr<ExportJob> openExport(Session& s, const json& args) {
     return job;
 }
 
-// The primary guides as curves (what Unreal simulates): the hierarchy's level 0.
-StrandSet primaryCurves(const HierarchyPtr& hierarchy) {
-    StrandSet out;
-    if (!hierarchy) return out;
-    for (const Guide& g : hierarchy->flatten(0).guides()) {
-        if (g.points.size() >= 2) out.addStrand(g.id, g.points, {}, g.root);
-    }
-    return out;
-}
-
 std::size_t exportFrame(Session& s, ExportJob& job, double frame, float density) {
     if (frame <= job.lastFrame) fail("bad_request", "export frames must increase");
     s.seconds = frameToSeconds(frame, s.groom->framesPerSecond());
@@ -984,13 +964,11 @@ std::size_t exportFrame(Session& s, ExportJob& job, double frame, float density)
         ViewRequest at;  // (the groom evaluated at the frame: its hierarchy posed on that scalp)
         at.time = s.seconds;
         at.wantBounds = false;
-        const ViewResult& view = s.groom->evaluate(at);
+        s.groom->evaluate(at);
         StrandSet curves;
         try {
-            const GuideSet guides = guidesToSimulate(view.hierarchy, s.groom->data().guides, job.guideGroup);
-            for (const Guide& g : guides.guides()) {
-                if (g.points.size() >= 2) curves.addStrand(g.id, g.points, {}, g.root);
-            }
+            // (posed, no shot sculpts: they apply on top of the simulated guides, GroomSession::simulationGuides)
+            curves = groomlab::guideCurves(s.groom->simulationGuides(job.guideGroup));
             job.abc->writeFrame(curves);
         } catch (const std::exception& e) {
             fail("io", e.what());
@@ -1027,7 +1005,7 @@ std::size_t exportFrame(Session& s, ExportJob& job, double frame, float density)
 #if GROOMLAB_HAS_ALEMBIC
         if (job.abc) job.abc->writeFrame(st, scalp.get(), scaleMesh.get());
         if (job.engine) {
-            const StrandSet primaries = job.unreal ? primaryCurves(view.hierarchy) : StrandSet{};
+            const StrandSet primaries = job.unreal ? primaryGuideCurves(view.hierarchy) : StrandSet{};
             job.engine->writeFrame(st, job.unreal ? &primaries : nullptr, scalp.get());
         }
 #endif
@@ -1243,7 +1221,18 @@ json getState(Session& s, const json& args) {
             if (info.kind != "texture" || info.texture.empty()) continue;
             const std::string full = resolveMapFile(s, info.texture);
             std::error_code ec;
-            if (full.empty() || !fs::is_regular_file(fs::u8path(full), ec)) continue;
+            if (full.empty()) continue;
+            if (!fs::is_regular_file(fs::u8path(full), ec)) {
+                // A tile set (udim.h): each tile's PNG, by its number.
+                if (!isUdimPath(full)) continue;
+                const std::string pattern = udimPathFor(full);
+                json tiles = json::array();
+                for (const int tile : Texture(pattern).udimTiles()) {
+                    tiles.push_back({{"tile", tile}, {"png", base64Encode(readText(udimTilePath(pattern, tile)))}});
+                }
+                if (!tiles.empty()) textures.push_back({{"name", name}, {"stored", info.texture}, {"tiles", tiles}});
+                continue;
+            }
             textures.push_back({{"name", name}, {"stored", info.texture}, {"png", base64Encode(readText(full))}});
         }
     }
@@ -1285,7 +1274,19 @@ json setState(Session& s, const json& args) {
             if (it == file.data.maps.end()) continue;
             std::error_code ec;
             const std::string stored = it->second.texture;
-            if (!stored.empty() && fs::u8path(stored).is_absolute() && fs::is_regular_file(fs::u8path(stored), ec)) continue;
+            if (!stored.empty() && fs::u8path(stored).is_absolute() && fileStamp(stored) != 0) continue;  // (a tile set: any tile)
+            if (t.contains("tiles") && t["tiles"].is_array()) {
+                // A tile set: its tiles written as <name>.<tile>.png in a free name's set, the map's
+                // path the plain name (texture.h finds the set from it).
+                fs::create_directories(folder, ec);
+                const fs::path target = fs::u8path(freeFilePath((folder / (name + ".png")).generic_u8string()));  // (a file or a tile set: taken)
+                const std::string pattern = udimPathFor(target.generic_u8string());
+                for (const json& tile : t["tiles"]) {
+                    writeAtomically(udimTilePath(pattern, tile.value("tile", kFirstUdimTile)), base64Decode(needString(tile, "png")));
+                }
+                it->second.texture = target.generic_u8string();
+                continue;
+            }
             const std::string bytes = base64Decode(needString(t, "png"));
             fs::create_directories(folder, ec);
             fs::path target = folder / (name + ".png");
@@ -1328,10 +1329,6 @@ std::string shippedMeshesDir() {
 // ---- Shared with pipeline.cpp ---------------------------------------------------------------------
 
 MeshPtr hostMesh(const json& args, const HostSpace& space, BlockReader& blocks) { return scalpFrom(args, space, blocks); }
-void hostMeshFaces(const ScalpMesh& mesh, std::vector<std::int32_t>& counts, std::vector<std::int32_t>& indices,
-                   std::vector<float>& uvs, bool& exact) {
-    scalpFaces(mesh, counts, indices, uvs, exact);
-}
 void feedSessionTime(Session& s) { feedTime(s); }
 PrototypeLookup sessionPrototypes(const Session& s) { return storedPrototypes(s); }
 void handSessionRestGuides(Session& s) { handRestGuides(s); }
@@ -1456,6 +1453,112 @@ json Helper::run(const std::string& cmd, const json& args) {
         if (args.contains("mapsDir") && !args["mapsDir"].is_null()) s.mapsDir = optString(args, "mapsDir", "");
         return {{"followScalp", s.groom->followScalp()}, {"mapsDir", mapsFolderOf(s)}};
     }
+    // Find Missing Files and the File Path Editor's checks, every host's (asset_files.h): the
+    // graph's file params by label, a graph with some pointed elsewhere, which files are there, and
+    // the files of a folder that stored paths name.
+    auto graphArg = [](const json& a) {
+        const json& g = need(a, "graph");
+        return g.is_string() ? g.get<std::string>() : g.dump();
+    };
+    // Why a param cannot be keyed ("" when it can): the core's rule, every host's (graph_controls.h).
+    if (cmd == "not_keyable") {
+        Session& s = session(args);
+        try {
+            return {{"why", notKeyable(GraphEdit(graphText(*s.groom)), needString(args, "node"), needString(args, "param"))}};
+        } catch (const GraphError& e) {
+            fail("not_found", e.what());
+        }
+    }
+    if (cmd == "tube_shape_symmetric") {  // a cross-section editor's Mirror turned on, every host's (tube.h)
+        std::vector<SectionPoint> points;
+        for (const json& p : need(args, "points")) {
+            if (p.is_array() && p.size() >= 2) points.push_back({p[0].get<float>(), p[1].get<float>()});
+        }
+        json out = json::array();
+        for (const SectionPoint& p : mirroredSectionPoints(points)) out.push_back({p.u, p.v});
+        return {{"points", out}};
+    }
+    if (cmd == "preset_from_text") {
+        try {
+            // `paste`: a groom's whole graph pasted (every host's Paste Graph: the graph whole,
+            // network paths taken out, "removed" saying which).
+            if (optBool(args, "paste", false)) {
+                const PastedGraph pasted = pastedGraphFromText(needString(args, "text"));
+                return {{"preset", json::parse(pasted.presetJson)}, {"removed", pasted.removed}};
+            }
+            return {{"preset", json::parse(presetFromText(needString(args, "text")))}};
+        } catch (const std::invalid_argument& e) {
+            fail("bad_request", e.what());
+        }
+    }
+    if (cmd == "make_preset") {
+        // The size presets record: a session's (paramScalpSize: the groom's 1x, every host's), else "size".
+        const double size = args.contains("session") ? scalpSize(session(args)).value_or(0.0) : optNumber(args, "size", 0.0);
+        const json controls = args.value("controls", json::object());
+        return {{"text", makePresetJson(graphArg(args), size > 0.0 ? std::optional<double>(size) : std::nullopt, optString(args, "title", ""),
+                                        optString(args, "description", ""), optString(args, "category", ""),
+                                        controls.is_object() && !controls.empty() ? controls.dump() : std::string())}};
+    }
+    if (cmd == "compound_inner_params") {
+        const json definition = args.value("definition", json::object());
+        return {{"inner", json::parse(compoundInnerParamsJson(definition.is_string() ? definition.get<std::string>() : definition.dump()))}};
+    }
+    if (cmd == "setting_targets") {
+        Session& s = session(args);
+        return json::parse(settingTargetsJson(graphText(*s.groom)));
+    }
+    if (cmd == "graph_map_names") {
+        json out = json::array();
+        for (const auto& [name, how] : graphMapNames(graphArg(args))) out.push_back({{"name", name}, {"how", how}});
+        return {{"maps", out}};
+    }
+    if (cmd == "file_safe_name") return {{"name", fileSafeName(optString(args, "text", ""))}};
+    // An Instance node's Object(s) text (instances.h) and Color by Channel's source (display.h).
+    if (cmd == "prototype_text") {
+        return {{"text", instancePrototypeText(args.value("names", std::vector<std::string>{}))}};
+    }
+    if (cmd == "node_color_source") {
+        return {{"source", nodeColorSource(optString(args, "channel", ""), optString(args, "node", ""))}};
+    }
+    if (cmd == "graph_file_params") {
+        json out = json::array();
+        for (const auto& [label, path] : graphFileParams(graphArg(args))) out.push_back({{"label", label}, {"path", path}});
+        return {{"params", out}};
+    }
+    if (cmd == "with_graph_file_params") {
+        const std::map<std::string, std::string> paths = args.value("paths", json::object()).get<std::map<std::string, std::string>>();
+        return {{"graph", json::parse(withGraphFileParams(graphArg(args), paths))}};
+    }
+    if (cmd == "starter_look") {  // the first-groom card's look step, every host's (presets.h)
+        Session& s = session(args);
+        std::vector<std::string> types;
+        for (const json& t : args.value("lookTypes", json::array())) {
+            if (t.is_string()) types.push_back(t.get<std::string>());
+        }
+        return {{"look", starterLookGiven(graphText(*s.groom), types)}};
+    }
+    if (cmd == "follow_groom_file") {  // Save As: the scene's own groom file, every host's (asset_files.h)
+        const FollowedGroomFile f = followSceneGroomFile(needString(args, "file"), needString(args, "old"), needString(args, "new"));
+        return {{"path", f.path}, {"copied", f.copied}, {"renamed", f.renamed}};
+    }
+    if (cmd == "collect_file") {  // a file copied into a folder, every host's (asset_files.h collectFile)
+        return {{"path", collectFile(needString(args, "path"), needString(args, "folder"))}};
+    }
+    if (cmd == "files_there") {
+        json out = json::array();
+        for (const json& p : args.value("paths", json::array())) out.push_back(p.is_string() && fileThere(p.get<std::string>()));
+        return {{"there", out}};
+    }
+    if (cmd == "files_match") {
+        const FileIndex index = indexFolder(needString(args, "folder"), optBool(args, "recursive", true));
+        json out = json::array();
+        for (const json& p : args.value("stored", json::array())) {
+            std::vector<std::string> candidates;
+            const std::string found = p.is_string() ? matchMissingFile(index, p.get<std::string>(), &candidates) : std::string();
+            out.push_back({{"found", found}, {"candidates", candidates}});
+        }
+        return {{"matches", out}};
+    }
     if (cmd == "files_follow") {
         // Save As (Maya's follow_scene_files): the files the groom names come along into the new
         // file's folders. `oldBase`/`newBase` the folders relative paths resolve against,
@@ -1480,6 +1583,7 @@ json Helper::run(const std::string& cmd, const json& args) {
         GroomFile& file = s.file;
         for (auto& [node, ref] : file.simCaches) ref.file = f.follow(ref.file);
         file.guideCache.file = f.follow(file.guideCache.file);
+        file.driverCache.file = f.follow(file.driverCache.file);  // (a driver cache a file names goes along too)
         file.scalpCache.file = f.follow(file.scalpCache.file);
         if (!file.cardBake.prefix.empty()) {
             std::vector<std::string> suffixes = cardBakeSuffixes();
@@ -1500,29 +1604,33 @@ json Helper::run(const std::string& cmd, const json& args) {
         std::error_code ec;
         const std::string path = fs::absolute(fs::u8path(needString(args, "path")), ec).u8string();
         if (!fs::is_regular_file(fs::u8path(path), ec)) fail("io", "no groom file '" + path + "'");
+        const std::vector<GroomFile> grooms = readGroomFiles(path);
         json names = json::array();
-        for (const GroomFile& g : readGroomFiles(path)) names.push_back(g.name);
-        return {{"grooms", names}};
+        for (const GroomFile& g : grooms) names.push_back(g.name);
+        json out = {{"grooms", names}};
+        // `name`: that groom's index, every host's (groom_package.h groomIndex; -1 none).
+        if (args.contains("name") && args["name"].is_string()) out["index"] = groomIndex(grooms, args["name"].get<std::string>());
+        return out;
     }
     if (cmd == "load_groom") {
         Session& s = session(args);
         std::error_code ec;
         const std::string path = fs::absolute(fs::u8path(needString(args, "path")), ec).u8string();
         if (!fs::is_regular_file(fs::u8path(path), ec)) fail("io", "no groom file '" + path + "'");
-        std::vector<GroomFile> grooms = readGroomFiles(path);
-        const int index = static_cast<int>(optNumber(args, "index", 0.0));
-        if (index < 0 || index >= static_cast<int>(grooms.size())) {
-            fail("bad_request", path + " holds " + std::to_string(grooms.size()) + " groom(s), no groom " + std::to_string(index));
+        // Every host's reader (groom_package.h readGroomForHost): checked, in groom space (Y up: the
+        // host's axis is turned at the boundary), a card bake beside the file taken.
+        std::vector<std::string> grooms;
+        std::string fileAxis;
+        // (A file that does not read, another unit: GroomFileError, "parse"; an index past its grooms: a bad request.)
+        GroomFile file;
+        try {
+            file = readGroomForHost(path, static_cast<int>(optNumber(args, "index", 0.0)), "Y", &grooms, &fileAxis);
+        } catch (const std::invalid_argument& e) {
+            fail("bad_request", e.what());
         }
-        json names = json::array();
-        for (const GroomFile& g : grooms) names.push_back(g.name);
-        GroomFile file = std::move(grooms[static_cast<std::size_t>(index)]);
+        const json names = grooms;
         const std::string name = file.name;
-        if (file.units != "cm") {
-            fail("unsupported", path + ": its units are " + file.units + "; GroomLab reads grooms in centimeters (Maya's own unit)");
-        }
-        const std::string fileAxis = file.upAxis.empty() ? "Y" : file.upAxis;
-        convertUpAxis(file, "Y");  // groom space; the host's axis is turned at the boundary
+        const std::string braidTubes = file.braidTubes;
         adopt(s, std::move(file));
         s.seconds = 0.0;
         json info = groomInfo(s);
@@ -1530,6 +1638,7 @@ json Helper::run(const std::string& cmd, const json& args) {
         info["space"] = spaceJson(s.space);
         info["name"] = name;
         info["grooms"] = names;  // every groom's name, in the file's order
+        info["braidTubes"] = braidTubes;  // Show Tubes' nodes, as saved (the add-on keeps them)
         return info;
     }
     if (cmd == "save_groom") {
@@ -1548,6 +1657,7 @@ json Helper::run(const std::string& cmd, const json& args) {
         GroomFile file = currentFile(s);  // (its paths as the session reads them: from oldDir)
         file.directory = oldDir;
         file.name = optString(args, "name", "");
+        if (args.contains("braidTubes")) file.braidTubes = optString(args, "braidTubes", "");  // Show Tubes' nodes (the add-on's)
         if (file.source.empty()) file.source = "Blender";
         if (axis == "Z") convertUpAxis(file, "Z");
         GroomWriteOptions options;
@@ -1562,6 +1672,7 @@ json Helper::run(const std::string& cmd, const json& args) {
         GroomFile& f = s.file;
         f.scalpCache.file = rebase(f.scalpCache.file, oldDir, newDir);
         f.guideCache.file = rebase(f.guideCache.file, oldDir, newDir);
+        f.driverCache.file = rebase(f.driverCache.file, oldDir, newDir);
         f.cardBake.prefix = rebase(f.cardBake.prefix, oldDir, newDir);
         for (auto& [node, ref] : f.simCaches) ref.file = rebase(ref.file, oldDir, newDir);
         // The graph's relative paths (texture maps, ImportCurves) still resolve where they did: the
@@ -1763,6 +1874,7 @@ json Helper::run(const std::string& cmd, const json& args) {
             request.density = static_cast<float>(optNumber(args, "density", 1.0));
             request.pointBudget = optNumber(args, "pointBudget", 0.0);
             request.viewNode = optString(args, "viewNode", "");
+            request.braidTubes = optString(args, "braidTubes", "");  // Show Tubes' nodes (ViewRequest::braidTubes)
             // While a stroke is live the strands step back to this fraction (the app's 0.35), so
             // each dab evaluates fast; the evaluation after the stroke has every strand again.
             request.sculptDensity = static_cast<float>(optNumber(args, "sculptDensity", 1.0));
@@ -1823,8 +1935,13 @@ json Helper::run(const std::string& cmd, const json& args) {
         for (const auto& [node, note] : s.groom->nodeNotes()) notes[node] = note;
         json times = json::object();
         for (const auto& [node, ms] : s.groom->nodeTimes()) times[node] = ms;
+        // Each node's channels in its last result, per strand and per point (Color by Channel).
+        const GroomStats stats = s.groom->stats();
+        json channels = json::object();
+        for (const auto& [node, names] : stats.channels) channels[node] = stats.colorChannels(node);
+        for (const auto& [node, names] : stats.pointChannels) channels[node] = stats.colorChannels(node);
         return {{"notes", notes}, {"times", times}, {"errors", s.groom->last().errors}, {"inputErrors", s.groom->inputErrors()},
-                {"graphError", s.groom->graphError()}};
+                {"graphError", s.groom->graphError()}, {"colorChannels", channels}};
     }
 
     // ---- The graph ----
@@ -1841,6 +1958,32 @@ json Helper::run(const std::string& cmd, const json& args) {
     if (cmd == "get_graph") {
         Session& s = session(args);
         return {{"graph", parseGraph(*s.groom)}};
+    }
+    if (cmd == "graph_problems") {
+        // What would stop the groom from evaluating, as every host's editor says it (graph_edit.h
+        // GraphEdit::problems; Maya's GraphModel.validate and unused_problems): "problems" of the nodes
+        // the output is made from and the graph's own, "unused" of the other nodes (warnings).
+        Session& s = session(args);
+        const GraphEdit edit(graphText(*s.groom));
+        return {{"problems", edit.problems(true)}, {"unused", edit.problems(false)}, {"feeding", edit.feedingOutput()}};
+    }
+    if (cmd == "graph_layout") {
+        // The auto layout every host uses for a graph without positions and for Tidy Layout
+        // (graph_inserts.h layoutPositions; Maya's GraphModel.auto_layout): "positions" {node: [x, y]}
+        // of the graph given here ("graph": the add-on asks for the one it is about to draw), no session.
+        if (!args.contains("graph") || !args["graph"].is_object()) fail("bad_request", "graph is the graph's JSON object");
+        json positions = json::object();
+        for (const auto& [node, at] : layoutPositions(GraphEdit(args["graph"].dump()))) positions[node] = {at.first, at.second};
+        return {{"positions", positions}};
+    }
+    if (cmd == "prune_pins") {
+        // The pins of a graph given here ("connections", "pins": {points, routes}) that hold, in order
+        // (graph_pins.h prunePins: every host's rules); oneFeed (true): only the routes a reroute, a
+        // pin with one input, can draw. No session: the add-on asks for the links its tree shows.
+        json g = {{"connections", args.contains("connections") ? args["connections"] : json::array()}};
+        if (args.contains("pins") && args["pins"].is_object()) g["pins"] = args["pins"];
+        prunePins(g, optBool(args, "oneFeed", true));
+        return {{"pins", g.contains("pins") ? g["pins"] : json()}};
     }
     if (cmd == "feather_groups") {
         // The feather designs' groom groups ({name: id}) and the guide groups growing one feather
@@ -1877,6 +2020,61 @@ json Helper::run(const std::string& cmd, const json& args) {
             if (edit.clumpColored(name, source)) lit.push_back(name);
         }
         return {{"sources", sources}, {"lit", lit}};
+    }
+    if (cmd == "braid_tubes") {
+        // Show Tubes (the core's rules, graph_edit.h): the Braid nodes showing their section tubes
+        // (`shown`: names, one a line) after a rename (`old`, `new`: renamedBraidTubes), a click on a
+        // node's button (`toggle`: GraphEdit::braidTubesToggled) and, with `keep`, without the names
+        // that have no button now (braidTubesKept); the nodes lit, and those with the button
+        // (`offered`: Braids, and nodes giving guides: braidTubesOffered).
+        Session& s = session(args);
+        const GraphEdit edit(graphText(*s.groom));
+        std::string shown = optString(args, "shown", "");
+        if (args.contains("old") && args.contains("new")) shown = renamedBraidTubes(shown, needString(args, "old"), needString(args, "new"));
+        if (args.contains("toggle")) shown = edit.braidTubesToggled(needString(args, "toggle"), shown);
+        if (optBool(args, "keep", false)) shown = edit.braidTubesKept(shown);
+        json lit = json::array();
+        for (const std::string& name : braidTubeNames(shown)) {
+            if (edit.braidTubesShown(name, shown)) lit.push_back(name);
+        }
+        json offered = json::array();
+        for (const std::string& name : edit.nodeNames()) {
+            if (edit.braidTubesOffered(name)) offered.push_back(name);
+        }
+        return {{"shown", shown}, {"lit", lit}, {"offered", offered}};
+    }
+    if (cmd == "graph_nodes") {
+        // What each node of the groom's graph is to the editors (the core's rules, graph_edit.h): its
+        // outputs' types as connected (outputTypes), View Up to Here (viewable), Bake Node to Guides
+        // (bakeable), Show Tubes (braidTubesOffered).
+        Session& s = session(args);
+        const GraphEdit edit(graphText(*s.groom));
+        json nodes = json::object();
+        for (const std::string& name : edit.nodeNames()) {
+            json outputs = json::array();
+            try {
+                for (const std::string& type : edit.outputTypes(name)) outputs.push_back(type);
+            } catch (const std::exception&) {
+                // (a node no operator makes: no outputs said)
+            }
+            nodes[name] = {{"outputs", outputs}, {"viewable", edit.viewable(name)}, {"bakeable", edit.bakeable(name)},
+                           {"tubes", edit.braidTubesOffered(name)}};
+        }
+        return {{"nodes", nodes}};
+    }
+    if (cmd == "port_types") {
+        // Which port types a link joins (the core's portTypesMatch, output type first): {out: [ins]}.
+        static const PortType kTypes[] = {PortType::Strands, PortType::Guides, PortType::Mesh, PortType::Field,
+                                          PortType::Curve,   PortType::Curves, PortType::Value};
+        json table = json::object();
+        for (PortType out : kTypes) {
+            json ins = json::array();
+            for (PortType in : kTypes) {
+                if (portTypesMatch(out, in)) ins.push_back(portTypeName(in));
+            }
+            table[portTypeName(out)] = ins;
+        }
+        return {{"matches", table}};
     }
     if (cmd == "renamed_color_source") {
         // A color source naming a renamed node follows it (renamedColorSource).
@@ -1962,6 +2160,11 @@ json Helper::run(const std::string& cmd, const json& args) {
             }
         } else if (op == "rename_node") {
             edit.renameNode(needString(args, "name"), needString(args, "newName"));
+            json g = json::parse(edit.toJson());  // the pins on its links follow (graph_pins.h), as in Maya and the app
+            if (g.contains("pins")) {
+                renamePinNode(g, needString(args, "name"), needString(args, "newName"));
+                edit = GraphEdit(g.dump());
+            }
         } else if (op == "connect") {
             // The add-on's links are the user's (its node tree, its chain edits): a Clump fed centers
             // takes them (GraphEdit::connectByHand).
@@ -1974,9 +2177,41 @@ json Helper::run(const std::string& cmd, const json& args) {
             r["upgraded"] = edit.upgradeNode(needString(args, "name"));
         } else if (op == "update_library_node") {  // a node from the library takes its newer copy
             r["updated"] = edit.updateLibraryNode(needString(args, "name"), scalpSize(s));
+        } else if (op == "insert_between") {  // a node into the flow, every host's (graph_inserts.h)
+            insertBetween(edit, needString(args, "from"), needString(args, "to"), needString(args, "node"),
+                          optString(args, "nodeInput", "strands"));
+        } else if (op == "insert_before") {
+            insertBefore(edit, needString(args, "anchor"), needString(args, "node"), optString(args, "input", "strands"),
+                         optString(args, "nodeInput", "strands"));
+        } else if (op == "insert_after") {
+            insertAfter(edit, needString(args, "anchor"), needString(args, "node"), optString(args, "nodeInput", ""));
+        } else if (op == "insert_scalp") {  // Add > Scalp's graph, every host's
+            const ScalpNodes made = insertScalp(edit, needString(args, "mesh"), scalpSize(s));
+            auto orNull = [](const std::string& name) { return name.empty() ? json() : json(name); };
+            r["name"] = made.scalp;
+            r["scatter"] = orNull(made.scatter);
+            r["interpolate"] = orNull(made.interpolate);
+            r["merge"] = orNull(made.merge);
         } else if (op == "insert_simulate") {  // Add > Simulate, every host's (graph_inserts.h)
             const json& params = args.contains("params") && args["params"].is_object() ? args["params"] : json::object();
             r["name"] = insertSimulate(edit, params.dump(), scalpSize(s));
+        } else if (op == "remove_scalp_nodes") {  // Remove > Scalp's graph, every host's (graph_inserts.h)
+            r["changed"] = removeScalpNodes(edit, needString(args, "mesh"));
+        } else if (op == "remove_collider_nodes") {  // Remove > Collider's graph, every host's (graph_inserts.h)
+            r["changed"] = removeColliderNodes(edit, needString(args, "mesh"));
+        } else if (op == "insert_part") {  // drawn parts open the hair, every host's (graph_inserts.h)
+            const json& params = args.contains("params") && args["params"].is_object() ? args["params"] : json::object();
+            bool made = false;
+            r["name"] = insertPart(edit, params.dump(), optString(args, "after", ""), scalpSize(s), &made);
+            r["made"] = made;
+        } else if (op == "insert_cards") {  // Add > Cards, every host's (graph_inserts.h): one only when there is none
+            const json& params = args.contains("params") && args["params"].is_object() ? args["params"] : json::object();
+            bool made = false;
+            r["name"] = insertCards(edit, params.dump(), scalpSize(s), &made);
+            r["made"] = made;
+        } else if (op == "insert_motion") {  // Add > Wind / Jiggle, every host's (graph_inserts.h)
+            const json& params = args.contains("params") && args["params"].is_object() ? args["params"] : json::object();
+            r["name"] = insertMotion(edit, needString(args, "type"), params.dump(), scalpSize(s));
         } else if (op == "insert_drive_guides") {  // Simulate > Drivers, every host's (graph_inserts.h)
             r["name"] = insertDriveGuides(edit, scalpSize(s));
         } else if (op == "insert_guide_cache") {  // Load Guide Cache, every host's
@@ -2102,6 +2337,7 @@ json Helper::run(const std::string& cmd, const json& args) {
                     } else {
                         g["pins"] = {{"points", std::move(points)}, {"routes", std::move(routes)}};
                     }
+                    prunePins(g);  // kept as every host keeps them (graph_pins.h): those that hold, in order
                 }
                 const json positions = args.contains("positions") && !args["positions"].is_null() ? args["positions"] : json::object();
                 if (!args.contains("positions") && !args.contains("backdrops") && !args.contains("pins")) need(args, "positions");
@@ -2154,8 +2390,13 @@ json Helper::run(const std::string& cmd, const json& args) {
                  "op is add_node, remove_node, rename_node, connect, disconnect, set_output, upgrade_node, set_positions, "
                  "set_bypass or set_evaluation");
         }
-        // A graph that does not load yet (an input left open) is kept: the session says why.
-        const std::string text = edit.toJson();
+        // A graph that does not load yet (an input left open) is kept: the session says why. The pins
+        // of links gone, or fed from elsewhere now, go with them (graph_pins.h, as in Maya and the app).
+        std::string text = edit.toJson();
+        if (json g = json::parse(text); g.contains("pins")) {
+            prunePins(g);
+            text = g.dump();
+        }
         try {
             s.groom->setGraphJson(text);
             r["graphError"] = "";
@@ -2260,16 +2501,10 @@ json Helper::run(const std::string& cmd, const json& args) {
         Session& s = session(args);
         CardMapPreset preset;
         const json& given = args.contains("preset") ? args["preset"] : json(builtinCardMapPresets().front().name);
-        if (given.is_object()) {
-            try {
-                preset = cardMapPresetFromJson(given.dump());
-            } catch (const std::runtime_error& e) {
-                fail("bad_request", e.what());
-            }
-        } else if (const auto found = findCardMapPreset(given.is_string() ? given.get<std::string>() : std::string())) {
-            preset = *found;
-        } else {
-            fail("not_found", "no card map preset named " + given.dump());
+        try {  // every host's (card_maps.h): its JSON or its name
+            preset = cardMapPresetFromText(given.is_object() ? given.dump() : given.is_string() ? given.get<std::string>() : std::string());
+        } catch (const std::runtime_error& e) {
+            fail(given.is_object() ? "bad_request" : "not_found", e.what());
         }
         CardMapExport settings;
         settings.resolution = static_cast<int>(optNumber(args, "resolution", 0.0));
@@ -2279,7 +2514,7 @@ json Helper::run(const std::string& cmd, const json& args) {
         settings.supersample = static_cast<int>(optNumber(args, "supersample", 1.0));
         settings.nameTemplate = optString(args, "nameTemplate", "{name}_{map}");
         const std::string directory = needString(args, "directory");
-        const std::string name = optString(args, "name", "groom");
+        const std::string name = exportObjectName(optString(args, "name", "groom"));  // every host's (export_view.h)
         // The Cards nodes building their cards at full density, at the session's time.
         ViewRequest request;
         request.density = 1.0f;

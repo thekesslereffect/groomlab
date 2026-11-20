@@ -76,9 +76,9 @@ labels, search words and number decimals come from the core (`node_catalog.h`, t
 | Rename a node | context menu Rename... | present *new*: double-click the header or the menu (core: `GraphEdit::renameNode`) |
 | Duplicate a node | Ctrl+D | present *new* (core: `GraphEdit::addNode` with the params) |
 | Set as output | context menu | present *new* (core: `GraphEdit::setOutputNode`) |
-| Copy / paste nodes with their links | Ctrl+C / Ctrl+V | missing (Copy Graph / Paste Graph move whole graphs) |
-| Rubber-band multi-selection | drag on empty canvas | missing (one node at a time; a drag pans) |
-| Group into / ungroup a Compound | Ctrl+G, Ctrl+Shift+G | missing (the collapse logic is Maya's Python GraphModel; a core port is the way) |
+| Copy / paste nodes with their links | Ctrl+C / Ctrl+V | present (Copy Graph / Paste Graph move whole graphs) |
+| Rubber-band multi-selection | drag on empty canvas | present (Ctrl or Shift adds to the selection) |
+| Group into / ungroup a Compound | Ctrl+G, Ctrl+Shift+G | present (double-click opens a Compound) |
 | Tidy layout | More > Tidy Layout | present *new*: Ctrl+L or the canvas menu (core: `GraphEdit::clearPositions`) |
 | Node positions kept with the groom | `commit_layout` | present (the graph's `"ui"`, shared with Maya) |
 | Backdrops (drawn, moved, resized, renamed, colored) | Add Backdrop Around Selection | partial *new*: drawn with their title and color (a preset's, Maya's); not made or moved here |
@@ -275,19 +275,17 @@ labels, search words and number decimals come from the core (`node_catalog.h`, t
 
 ## Still missing, in order of artist value
 
-1. Node graph: rubber-band multi-select, copy and paste of nodes, group into a Compound (the
-   collapse logic to move from Maya's Python into the core first).
-2. Maps: convert between kinds, make color or gray, fill, relink or reload a texture's image,
+1. Maps: convert between kinds, make color or gray, fill, relink or reload a texture's image,
    "read by".
-3. Expression editor: completion, hover help and the library (the core's `expression.h` has the
+2. Expression editor: completion, hover help and the library (the core's `expression.h` has the
    check; the shipped examples are files).
-4. Param conveniences: Drive with a slider (a Control node), slider range menu, display units.
-5. Guides: group colors and hue by group, lock and unlock children, reparent and demote, isolate
+3. Param conveniences: Drive with a slider (a Control node), slider range menu, display units.
+4. Guides: group colors and hue by group, lock and unlock children, reparent and demote, isolate
    a level, the Freeze tool and the soft selection radius.
-6. Correctives: solo and reorder.
-7. Backdrops made, moved and resized in the app (drawn today).
-8. Focus (view up to a node), per-node error badges, the param summary on the cards, seed
+5. Correctives: solo and reorder.
+6. Backdrops made, moved and resized in the app (drawn today).
+7. Focus (view up to a node), per-node error badges, the param summary on the cards, seed
    warnings shown.
-9. Bake a node to guides; Find missing files; a map exported as PNG; a scalp cache written with
+8. Bake a node to guides; Find missing files; a map exported as PNG; a scalp cache written with
    the groom file; another guide cache picked.
-10. Units, custom themes (the app reads the shipped ones), a lasso selection.
+9. Units, custom themes (the app reads the shipped ones), a lasso selection.

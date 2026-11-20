@@ -122,18 +122,12 @@ class DrawnLayout(object):
     def grid_flow(self, row_major=False, columns=0, even_columns=False, even_rows=False, align=False):
         return self._child("grid", align=align, columns=columns)
 
-    def column_flow(self, columns=0, align=False):
-        return self._child("grid", align=align, columns=columns)
-
     def panel(self, idname, default_closed=False):
         head = self._child("panel")
         head.panel_id, head.default_closed = idname, default_closed
         body = DrawnLayout("column")
         head.body = body
         return head, (body if _fold_open(idname, default_closed) else None)
-
-    def panel_prop(self, data, property):
-        return self.panel("prop:" + property)
 
     # Leaves
     def label(self, text="", text_ctxt="", translate=True, icon="NONE", icon_value=0):
@@ -143,18 +137,12 @@ class DrawnLayout(object):
     def separator(self, factor=1.0, type="AUTO"):
         self._item("separator", factor=factor, line=type == "LINE")
 
-    def separator_spacer(self):
-        self._item("separator", factor=1.0, line=False)
-
     def prop(self, data, property, text=None, text_ctxt="", translate=True, icon="NONE", placeholder="",
              expand=False, slider=False, toggle=-1, icon_only=False, event=False, full_event=False, emboss=True,
              index=-1, icon_value=0, invert_checkbox=False):
         self._item("prop", data=data, prop=property, text=text, icon=icon_name(icon, icon_value),
                    has_icon=icon not in ("NONE", None) or bool(icon_value), expand=expand, toggle=toggle,
                    icon_only=icon_only, emboss=emboss, placeholder=placeholder)
-
-    def prop_enum(self, data, property, value, text=None, icon="NONE", icon_value=0):
-        self._item("enum_choice", data=data, prop=property, value=value, text=text, icon=icon_name(icon, icon_value))
 
     def operator(self, operator, text=None, text_ctxt="", translate=True, icon="NONE", emboss=True, depress=False,
                  icon_value=0, search_weight=0.0):
@@ -163,10 +151,6 @@ class DrawnLayout(object):
                    has_icon=icon not in ("NONE", None) or bool(icon_value), emboss=emboss, depress=depress,
                    props=props, context=self.operator_context)
         return props
-
-    def operator_menu_enum(self, operator, property, text="", text_ctxt="", translate=True, icon="NONE"):
-        self._item("menu", menu="", text=text or property, icon=icon_name(icon), call=None)
-        return OperatorProperties()
 
     def menu(self, menu, text=None, text_ctxt="", translate=True, icon="NONE", icon_value=0):
         cls = getattr(bpy.types, menu, None)

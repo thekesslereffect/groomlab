@@ -13,6 +13,7 @@
 #include <unordered_map>
 
 #include "groomlab/brush.h"
+#include "groomlab/color.h"
 #include "groomlab/curve.h"
 #include "groomlab/hair_color.h"
 #include "groomlab/parallel.h"
@@ -165,11 +166,6 @@ constexpr float kCurlShare = 0.22f, kCurlAmplitude = 7.5f;
 // Wavy: a smaller share swinging, as widely. Not curly enough for a Curl node, but guides along each
 // wave wander inside the hair and never reach its ends: they follow the coarse flow too.
 constexpr float kWavyShare = 0.12f, kWavyAmplitude = 15.0f;
-
-float srgbToLinear(float c) {
-    c = std::clamp(c, 0.0f, 1.0f);
-    return c <= 0.04045f ? c / 12.92f : pm::pow((c + 0.055f) / 1.055f, 2.4f);
-}
 
 float median(std::vector<float> values) {
     if (values.empty()) return 0.0f;
@@ -1056,7 +1052,6 @@ void applyHints(PreparedView& pv, const std::vector<HintSample>& samples, float 
     const std::size_t pixels = static_cast<std::size_t>(w) * static_cast<std::size_t>(h);
     std::vector<float> line(pixels * 2, 0.0f), weight(pixels, 0.0f), way(pixels * 2, 0.0f), wayWeight(pixels, 0.0f);
     std::vector<float> length(pixels, 0.0f), lengthWeight(pixels, 0.0f);
-    const float lengthSigma = sigma;
     const int reach = static_cast<int>(std::ceil(2.5f * sigma));
     for (const HintSample& s : samples) {
         const int cx = static_cast<int>(s.u), cy = static_cast<int>(s.v);
@@ -1077,9 +1072,8 @@ void applyHints(PreparedView& pv, const std::vector<HintSample>& samples, float 
                     wayWeight[at] += k;
                 }
                 if (s.remain >= 0.0f && worldPerPixel > 0.0f) {
-                    const float kn = pm::exp(-0.5f * (dx * dx + dy * dy) / (lengthSigma * lengthSigma));
-                    length[at] += kn * s.remain;
-                    lengthWeight[at] += kn;
+                    length[at] += k * s.remain;
+                    lengthWeight[at] += k;
                 }
             }
     }
@@ -1110,7 +1104,7 @@ void applyHints(PreparedView& pv, const std::vector<HintSample>& samples, float 
         for (std::size_t i = 0; i < pixels; ++i) {
             if (lengthWeight[i] <= 1e-3f) continue;
             pv.hintLength[2 * i] = length[i] / lengthWeight[i] * worldPerPixel;
-            pv.hintLength[2 * i + 1] = std::min(1.0f, lengthWeight[i] / std::max(1.0f, lengthSigma));
+            pv.hintLength[2 * i + 1] = std::min(1.0f, lengthWeight[i] / std::max(1.0f, sigma));
         }
     }
 }
@@ -1275,8 +1269,8 @@ struct ReferenceShellBuilder {
         const ScalpMesh& scalp = ctx.scalp;
         Vec3f lo(kInf, kInf, kInf), hi(-kInf, -kInf, -kInf);
         for (const Vec3f& p : scalp.points()) {
-            lo = Vec3f(std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z));
-            hi = Vec3f(std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z));
+            lo = minPerAxis(lo, p);
+            hi = maxPerAxis(hi, p);
         }
         const Vec3f pad(ctx.maxLength, ctx.maxLength, ctx.maxLength);
         lo = lo - pad;
@@ -1374,8 +1368,8 @@ bool scalpLooksSymmetric(const ScalpMesh& scalp) {
     const std::vector<Vec3f>& pts = rest.points();
     Vec3f lo = pts.front(), hi = pts.front();
     for (const Vec3f& p : pts) {
-        lo = Vec3f(std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z));
-        hi = Vec3f(std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z));
+        lo = minPerAxis(lo, p);
+        hi = maxPerAxis(hi, p);
     }
     const float middle = 0.5f * (lo.x + hi.x), near = 0.01f * (hi - lo).length();
     const std::size_t every = std::max<std::size_t>(1, pts.size() / 2000);
@@ -1392,8 +1386,8 @@ namespace {
 float scalpDiagonal(const ScalpMesh& scalp) {
     Vec3f lo(kInf, kInf, kInf), hi(-kInf, -kInf, -kInf);
     for (const Vec3f& p : scalp.points()) {
-        lo = Vec3f(std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z));
-        hi = Vec3f(std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z));
+        lo = minPerAxis(lo, p);
+        hi = maxPerAxis(hi, p);
     }
     return (hi - lo).length();
 }
@@ -1483,8 +1477,16 @@ struct Grown {
     Vec3f tangent;  // the first stretch's direction
 };
 
-Vec3f limitTurn(const Vec3f& from, const Vec3f& to, float maxAngle) {
+// The cosine of an angle a thousandth of a radian inside `maxAngle` (far more than the arccosine
+// and the cosine are off by): a turn whose cosine reaches it is within `maxAngle` whatever the
+// arccosine's last bits say, so limitTurn answers the same without it.
+float sureTurnCos(float maxAngle) { return maxAngle > 2e-3f ? pm::cos(maxAngle - 1e-3f) : 2.0f; }
+
+// `to`, turned no more than `maxAngle` from `from`. `sureCos`: sureTurnCos(maxAngle), the cosine
+// from which the turn is surely within the angle (no arccosine needed).
+Vec3f limitTurn(const Vec3f& from, const Vec3f& to, float maxAngle, float sureCos) {
     const float c = std::clamp(from.dot(to), -1.0f, 1.0f);
+    if (c >= sureCos) return to;
     const float angle = pm::acos(c);
     if (angle <= maxAngle) return to;
     Vec3f axis = from.cross(to);
@@ -1511,13 +1513,23 @@ Grown grow(const Context& ctx, const SurfacePoint& root, float sign, float maxLe
     const int reach = 5;
     double bestScore = -1e30;
     std::vector<Evidence> bestLine;
+    // Every axis's line passes through the root's point: its evidence found once (kept by the
+    // very point asked, a zero's sign and all, so each line reads what it would have found).
+    Vec3f middle;
+    Evidence middleEvidence;
+    bool middleKnown = false;
+    auto sameValue = [](float a, float b) { return a == b && std::signbit(a) == std::signbit(b); };
     for (int a = 0; a < 12; ++a) {
         const float angle = kPi * static_cast<float>(a) / 12.0f;
         const Vec3f axis = downSurface * pm::cos(angle) + side * pm::sin(angle);
         std::vector<Evidence> line;
         double score = 0.0;
         for (int k = -reach; k <= reach; ++k) {
-            const Evidence e = ctx.evidence(at + axis * (static_cast<float>(k) * ctx.step));
+            const Vec3f point = at + axis * (static_cast<float>(k) * ctx.step);
+            const bool known = k == 0 && middleKnown && sameValue(point.x, middle.x) && sameValue(point.y, middle.y) &&
+                               sameValue(point.z, middle.z);
+            const Evidence e = known ? middleEvidence : ctx.evidence(point);
+            if (k == 0 && !known) middle = point, middleEvidence = e, middleKnown = true;
             const double a3[3] = {axis.x, axis.y, axis.z};
             double quad = 0.0;
             for (int i = 0; i < 3; ++i)
@@ -1555,6 +1567,7 @@ Grown grow(const Context& ctx, const SurfacePoint& root, float sign, float maxLe
     const int maxSteps = static_cast<int>(std::ceil(maxLength / ctx.step)) + 2;
     const int maxBlind = std::max(3, maxSteps / 4);
     const float maxTurn = 30.0f * kPi / 180.0f;
+    const float maxTurnCos = sureTurnCos(maxTurn);
     g.stop = "length";
     for (int k = 0; k < maxSteps; ++k) {
         const Evidence e = ctx.evidence(p);
@@ -1595,7 +1608,7 @@ Grown grow(const Context& ctx, const SurfacePoint& root, float sign, float maxLe
             next = smallestEigenvector(system);
             if (next.dot(d) < 0.0f) next = -next;
         }
-        next = limitTurn(d, next, maxTurn);
+        next = limitTurn(d, next, maxTurn, maxTurnCos);
         Vec3f q = p + next * ctx.step;
         // Above the scalp.
         const SurfacePoint near = ctx.scalp.closestPoint(q, 4.0f * ctx.offset + ctx.step);
@@ -1713,7 +1726,7 @@ ReferenceLookFit fitLook(const std::vector<PreparedView>& views, const std::vect
     std::vector<float> ch[3], luminance;
     for (const PreparedView& v : views) {
         if (v.rgb.empty() || v.rgb.channels < 3) continue;
-        const RefImage core = v.mask;  // eroded by a pixel: no backdrop blended in
+        const RefImage& core = v.mask;  // eroded by a pixel: no backdrop blended in
         const std::size_t total = static_cast<std::size_t>(v.width) * static_cast<std::size_t>(v.height);
         const std::size_t stride = std::max<std::size_t>(1, total / 200000);
         for (std::size_t i = 0; i < total; i += stride) {
@@ -1724,10 +1737,10 @@ ReferenceLookFit fitLook(const std::vector<PreparedView>& views, const std::vect
                 continue;
             float rgb[3];
             for (int c = 0; c < 3; ++c) {
-                rgb[c] = srgbToLinear(v.rgb.at(x, y, c));
+                rgb[c] = srgbToLinear01(v.rgb.at(x, y, c));
                 ch[c].push_back(rgb[c]);
             }
-            luminance.push_back(0.2126f * rgb[0] + 0.7152f * rgb[1] + 0.0722f * rgb[2]);
+            luminance.push_back(rec709Luminance(rgb[0], rgb[1], rgb[2]));
         }
     }
     fit.samples = static_cast<int>(luminance.size());
@@ -1770,7 +1783,7 @@ ReferenceLookFit fitLook(const std::vector<PreparedView>& views, const std::vect
                 float rgb[3];
                 float lo = 1.0f, hi = 0.0f;
                 for (int c = 0; c < 3; ++c) {
-                    rgb[c] = srgbToLinear(v.rgb.pixels[i * 3 + static_cast<std::size_t>(c)]);
+                    rgb[c] = srgbToLinear01(v.rgb.pixels[i * 3 + static_cast<std::size_t>(c)]);
                     lo = std::min(lo, rgb[c]);
                     hi = std::max(hi, rgb[c]);
                 }
@@ -1796,7 +1809,7 @@ ReferenceLookFit fitLook(const std::vector<PreparedView>& views, const std::vect
                 float l = 0.0f;
                 const float k[3] = {0.2126f, 0.7152f, 0.0722f};
                 for (int c = 0; c < 3; ++c)
-                    l += k[c] * srgbToLinear(v.rgb.pixels[i * 3 + static_cast<std::size_t>(c)]) * fit.whiteBalance[static_cast<std::size_t>(c)];
+                    l += k[c] * srgbToLinear01(v.rgb.pixels[i * 3 + static_cast<std::size_t>(c)]) * fit.whiteBalance[static_cast<std::size_t>(c)];
                 lum.push_back(l);
             }
         }
@@ -1846,7 +1859,7 @@ ReferenceLookFit fitLook(const std::vector<PreparedView>& views, const std::vect
                 if (v.rgb.empty() || v.rgb.channels < 3) continue;
                 float u = 0, vv = 0, z = 0;
                 if (!v.camera.project(g.points[i], u, vv, &z) || !v.inFrame(u, vv) || v.hidden(u, vv, z) || v.mask.sample(u, vv) < 0.5f) continue;
-                for (int c = 0; c < 3; ++c) (s <= 1.0f / 3.0f ? root : tip)[c].push_back(srgbToLinear(v.rgb.sample(u, vv, c)));
+                for (int c = 0; c < 3; ++c) (s <= 1.0f / 3.0f ? root : tip)[c].push_back(srgbToLinear01(v.rgb.sample(u, vv, c)));
             }
         }
     }
@@ -1860,7 +1873,7 @@ ReferenceLookFit fitLook(const std::vector<PreparedView>& views, const std::vect
     // color T = B + (P - B) * 6 / 5 (R, P the thirds' colors), at full strength; the melanin is
     // then the roots' color's.
     if (!root[0].empty() && !tip[0].empty()) {
-        auto lum = [](const std::array<float, 3>& c) { return 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2]; };
+        auto lum = [](const std::array<float, 3>& c) { return rec709Luminance(c[0], c[1], c[2]); };
         const float lr = lum(fit.rootAppearance), lt = lum(fit.tipAppearance);
         if (lr > 1e-4f && lt > 1e-4f && std::abs(pm::log(lt / lr)) > kTipThreshold) {
             // (In base colors: what HairColor blends.)
@@ -1895,8 +1908,8 @@ void measureLook(const std::vector<PreparedView>& views, float maxLength, bool s
         luminance.channels = 1;
         luminance.pixels.resize(static_cast<std::size_t>(v.rgb.width) * static_cast<std::size_t>(v.rgb.height));
         for (std::size_t i = 0; i < luminance.pixels.size(); ++i)
-            luminance.pixels[i] = 0.2126f * srgbToLinear(v.rgb.pixels[3 * i]) + 0.7152f * srgbToLinear(v.rgb.pixels[3 * i + 1]) +
-                                  0.0722f * srgbToLinear(v.rgb.pixels[3 * i + 2]);
+            luminance.pixels[i] = rec709Luminance(srgbToLinear01(v.rgb.pixels[3 * i]), srgbToLinear01(v.rgb.pixels[3 * i + 1]),
+                                                  srgbToLinear01(v.rgb.pixels[3 * i + 2]));
         const ClumpEstimate c = measureClumps(luminance, *v.coarse, v.mask);
         if (c.profiles >= 10) {
             periodic.push_back(c.periodicShare);

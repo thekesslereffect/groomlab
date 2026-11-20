@@ -11,10 +11,12 @@
 
 #include <nlohmann/json.hpp>
 
+#include "groomlab/braid_tubes.h"
 #include "groomlab/cards.h"
 #include "groomlab/correctives.h"
 #include "groomlab/display.h"
 #include "groomlab/export_view.h"
+#include "groomlab/graph_edit.h"
 #include "groomlab/groom_session.h"
 #include "groomlab/hair_color.h"
 #include "groomlab/guide_hierarchy.h"
@@ -370,7 +372,7 @@ TEST(Session, AStrokeAHostRunsPastANodeEvaluatesWhatFeedsItAlone) {
     ClumpState clumped;
     ASSERT_TRUE(clumpState(doc.graph.node(clump), valueAs<StrandsPtr>(doc.graph.cachedValue(clump)), &clumped));
     EXPECT_EQ(clumped.assigned->size(), blended->strandCount());
-    EXPECT_EQ(clumped.curves.size(), clumped.centerGuides.size() * kClumpCenterSamples);
+    EXPECT_EQ(clumped.curves.size(), clumped.centerGuides.size() * clumped.samples);
     EXPECT_FALSE(clumped.chosen.empty());  // its own centers, chosen by root
 
     // A dab: every guide bent; evaluated up to Interpolate's inputs alone.
@@ -518,6 +520,74 @@ TEST(Session, ViewsANodeAndCountsWhatItShows) {
     }
 }
 
+// Color by Channel: a point channel as a node wrote it ("colorR@color", a tipped HairColor's), read
+// onto the shown strands though a later Resample gives them other points: each point at the same
+// share along its strand; colored per point (attributePointColors), over the range the values
+// span when the range is left equal; the node's point channels listed in the stats.
+TEST(Session, ColorByChannelReadsANodesPointChannelOntoTheShownPoints) {
+    const std::string graph = withNodes(
+        R"({"name": "color", "type": "HairColor", "params": {"mode": "color", "color": [0.0, 0.0, 1.0], "tipColor": [1.0, 0.0, 0.0], "tipStrength": 1.0}})",
+        "color", R"({"name": "resample", "type": "Resample", "params": {"mode": "even", "segments": 5}})", "resample");
+    GroomSession session(groomData(graph));
+    ViewRequest request;
+    const ViewResult& view = session.evaluate(request);
+    ASSERT_TRUE(view.strands);
+    const StrandSet& shown = *view.strands;
+    ASSERT_EQ(shown.strandPointCount(0), 6u);  // Resample's: other points than HairColor saw
+    const auto red = session.nodeStrandChannel("color", "colorR", shown);
+    ASSERT_TRUE(red);
+    ASSERT_EQ(red->size(), shown.pointCount());  // per point, though HairColor writes colorR per strand too
+    std::size_t rising = 0;
+    for (std::size_t s = 0; s < shown.strandCount(); ++s) {
+        const float* v = red->data() + shown.strandBegin(s);
+        const std::size_t n = shown.strandPointCount(s);
+        EXPECT_LT(v[0], 0.2f) << s;      // the root: the color, blue
+        EXPECT_GT(v[n - 1], 0.8f) << s;  // the tip: red
+        bool up = true;
+        for (std::size_t i = 1; i < n; ++i) up = up && v[i] >= v[i - 1] - 1e-5f;
+        rising += up ? 1 : 0;
+    }
+    EXPECT_EQ(rising, shown.strandCount());
+
+    // Colored per point; equal min and max: the values' own range.
+    float lo = 0.0f, hi = 0.0f;
+    ASSERT_TRUE(channelRange(*red, &lo, &hi));
+    EXPECT_LT(lo, 0.2f);
+    EXPECT_GT(hi, 0.8f);
+    const auto fitted = attributePointColors(shown, kAttributeColors, "colorR@color", 0.0f, 0.0f, red.get());
+    const auto given = attributePointColors(shown, kAttributeColors, "colorR@color", lo, hi, red.get());
+    ASSERT_EQ(fitted.size(), shown.pointCount());
+    EXPECT_EQ(fitted, given);
+    EXPECT_NE(fitted[shown.strandBegin(0)], fitted[shown.strandBegin(0) + 5]);  // root and tip apart
+    EXPECT_TRUE(attributePointColors(shown, kClumpColors, "colorR@color", lo, hi, red.get()).empty());  // another mode
+    const auto perStrand = session.nodeStrandChannel("clump", "clumpId", shown);
+    ASSERT_TRUE(perStrand);
+    EXPECT_TRUE(attributePointColors(shown, kAttributeColors, "clumpId@clump", 0.0f, 0.0f, perStrand.get()).empty());  // strandColors'
+
+    // The display: the colored lines' colors per point.
+    DisplaySettings settings;
+    settings.colorMode = kAttributeColors;
+    settings.colorSource = "colorR@color";
+    settings.colorMin = settings.colorMax = 0.0f;
+    DisplayInputs in = DisplayInputs::fromView(view, false);
+    NodeColorChannel channel;
+    channel.fill(settings, in, [&]() -> const GroomSession& { return session; });
+    ASSERT_TRUE(in.colorChannel);
+    DisplayBuilder builder;
+    const DisplayItem& colored = builder.update(in, settings).item(DisplayItemId::ColoredStrands);
+    ASSERT_TRUE(colored.geometry);
+    const DisplayGeometry lines = colored.geometry->materialized();
+    ASSERT_EQ(lines.colors.size(), shown.pointCount() * 4);
+    const std::size_t tip = shown.strandBegin(0) + 5;
+    EXPECT_NE(lines.colors[0], lines.colors[tip * 4]);
+
+    // The stats list each node's point channels too.
+    const nlohmann::json stats = nlohmann::json::parse(session.stats().toJson());
+    ASSERT_TRUE(stats.contains("pointChannels"));
+    const auto& points = stats["pointChannels"]["color"];
+    EXPECT_NE(std::find(points.begin(), points.end(), "colorR"), points.end());
+}
+
 // Chained Clumps writing the same channel (clumpId): a Clump's Clump Colors read that channel as
 // that node wrote it ("clumpId@clump", issue #77), not as the later Clump overwrote it.
 TEST(Session, ANodesStrandChannelIsItsOwnThoughALaterNodeWritesTheSameChannel) {
@@ -548,6 +618,11 @@ TEST(Session, ANodesStrandChannelIsItsOwnThoughALaterNodeWritesTheSameChannel) {
     EXPECT_FALSE(splitNodeColorSource("clumpId", &channel, &node));
     EXPECT_EQ(channel, "clumpId");
     EXPECT_TRUE(node.empty());
+    // Color by Channel's source, made and read back (every host's).
+    EXPECT_EQ(nodeColorSource("braidPress", "braid1"), "braidPress@braid1");
+    EXPECT_EQ(channelColoredAt(nodeColorSource("braidPress", "braid1"), "braid1"), "braidPress");
+    EXPECT_EQ(channelColoredAt("braidPress@braid1", "braid2"), "");
+    EXPECT_EQ(channelColoredAt("braidPress", "braid1"), "");
     const auto own = strandColors(shown, nullptr, kClumpColors, "clumpId@clump", 0.0f, 1.0f, first.get());
     const auto plain = strandColors(shown, nullptr, kClumpColors, "clumpId", 0.0f, 1.0f);
     const auto fallback = strandColors(shown, nullptr, kClumpColors, "clumpId@clump", 0.0f, 1.0f);
@@ -586,6 +661,282 @@ TEST(Session, ANodesStrandChannelIsItsOwnThoughALaterNodeWritesTheSameChannel) {
     EXPECT_TRUE(strandChannelRange(shown, "clumpId", plainLo, plainHi));
     EXPECT_EQ(lo, plainLo);
     EXPECT_EQ(hi, plainHi);
+}
+
+TEST(Session, ShowTubesOnANodeGivingGuidesDrawsTheTubesItGives) {
+    // Show Tubes on a node giving guides (a Guides node, a Curl on its guides): the tubes those
+    // guides carry, as the node shaped them (a Curl coils them), a tube a guide in its guide's own
+    // color; evaluated to with the hair hidden. Offered on such nodes and on Braids, not on nodes
+    // giving strands nor on a Clump (its header's button is Clump Colors).
+    std::string graph = kGraph;
+    const std::string guidesLink = R"({"from": "guides", "to": "interpolate", "input": "guides"})";
+    graph.replace(graph.find(guidesLink), guidesLink.size(),
+                  R"({"from": "guides", "to": "curl", "input": "strands"}, {"from": "curl", "to": "interpolate", "input": "guides"})");
+    const std::string output = R"({"name": "output", "type": "Output"})";
+    graph.replace(graph.find(output), output.size(),
+                  R"({"name": "curl", "type": "Curl", "params": {"frequency": 6.0, "radius": 0.08, "profile": [[0.0, 1.0]]}}, )" + output);
+    const GraphEdit edit(graph);
+    EXPECT_TRUE(edit.braidTubesOffered("guides"));
+    EXPECT_TRUE(edit.braidTubesOffered("curl")) << "fed guides: gives guides";
+    EXPECT_FALSE(edit.braidTubesOffered("interpolate"));
+    EXPECT_FALSE(edit.braidTubesOffered("width")) << "a Curves node fed strands";
+    EXPECT_FALSE(edit.braidTubesOffered("clump"));
+
+    GroomSession session(groomData(graph));
+    ViewRequest request;
+    request.density = 0.5f;
+    request.viewport = true;
+    request.wantStrands = false;  // the hair hidden
+    request.braidTubes = "guides\ncurl";
+    const ViewResult first = session.evaluate(request);
+    ASSERT_TRUE(first.errors.empty());
+    EXPECT_GT(first.versions.braidTubes, 0u);
+    const std::shared_ptr<const BraidTubeMesh> straight = session.braidTubeMesh("guides");
+    const std::shared_ptr<const BraidTubeMesh> coiled = session.braidTubeMesh("curl");
+    ASSERT_TRUE(straight);
+    ASSERT_TRUE(coiled);
+    EXPECT_EQ(straight->tubes, 8u) << "a tube a guide";
+    EXPECT_EQ(coiled->tubes, 8u);
+    EXPECT_GT(coiled->points.size(), straight->points.size()) << "more rings where the tubes coil";
+    EXPECT_EQ(coiled->triangles().size(), coiled->quads.size() * 6);
+    for (const std::array<std::uint32_t, 4>& q : coiled->quads) {
+        for (const std::uint32_t i : q) ASSERT_LT(i, coiled->points.size());
+    }
+    // The coiled tubes stray from where the straight ones lie, by about the curl's radius.
+    float strayed = 0.0f;
+    for (std::size_t i = 0; i < coiled->points.size(); ++i) {
+        float nearest = 1e30f;
+        for (const Vec3f& p : straight->points) nearest = std::min(nearest, (coiled->points[i] - p).length());
+        strayed = std::max(strayed, nearest);
+    }
+    EXPECT_GT(strayed, 0.05f);
+    // Each tube its guide's color, several apart.
+    std::set<std::array<float, 3>> colors(coiled->colors.begin(), coiled->colors.end());
+    EXPECT_EQ(colors.size(), 8u);
+    EXPECT_EQ(session.braidTubeMesh("guides\ncurl")->tubes, 16u) << "both nodes' tubes";
+}
+
+TEST(Session, ShownTubesAreEvaluatedToThoughTheHairIsHiddenOrANodeBeforeThemIsViewed) {
+    // ViewRequest::braidTubes names the Braid nodes whose tubes the host draws: their inputs are
+    // evaluated whatever else is asked (no strands wanted: a host's hair hidden; a node before the
+    // Braid viewed), and ViewVersions::braidTubes (and evaluation, which every host redraws by)
+    // moves when braidTubeMesh would build another mesh: after an edit of the Braid, or of a node
+    // before it. Without it a host drew the old tubes until something else made it draw again.
+    const std::string graph = withNodes(R"({"name": "braid", "type": "Braid", "params": {"region": 0.5, "width": 0.12}})",
+                                        "braid", R"({"name": "after", "type": "Width", "params": {"width": 0.01}})", "after");
+    const auto with = [](std::string text, const std::string& from, const std::string& to) {
+        const std::size_t at = text.find(from);
+        EXPECT_NE(at, std::string::npos) << from;
+        if (at != std::string::npos) text.replace(at, from.size(), to);
+        return text;
+    };
+    const std::string fatter = with(graph, R"("width": 0.12)", R"("width": 0.12, "inflate": 0.9)");
+    const std::string looser = with(fatter, R"("strength": 0.6)", R"("strength": 0.2)");
+    for (const bool hidden : {true, false}) {
+        GroomSession session(groomData(graph));
+        ViewRequest request;
+        request.density = 0.5f;
+        request.viewport = true;
+        request.braidTubes = "braid";
+        if (hidden) request.wantStrands = false;  // the hair hidden
+        else request.viewNode = "clump";          // a node before the Braid viewed
+        const ViewResult first = session.evaluate(request);
+        ASSERT_TRUE(first.errors.empty());
+        EXPECT_GT(first.versions.braidTubes, 0u);
+        const std::shared_ptr<const BraidTubeMesh> mesh = session.braidTubeMesh("braid");
+        ASSERT_TRUE(mesh) << (hidden ? "hidden" : "viewed before") << ": the Braid's inputs were evaluated";
+        const ViewResult again = session.evaluate(request);
+        EXPECT_EQ(again.versions.braidTubes, first.versions.braidTubes) << "nothing changed: nothing to draw again";
+        EXPECT_EQ(again.versions.evaluation, first.versions.evaluation);
+        EXPECT_EQ(session.braidTubeMesh("braid"), mesh);
+
+        session.setGraphJson(fatter);  // the Braid's own param
+        const ViewResult edited = session.evaluate(request);
+        EXPECT_GT(edited.versions.braidTubes, first.versions.braidTubes);
+        EXPECT_GT(edited.versions.evaluation, first.versions.evaluation);
+        const std::shared_ptr<const BraidTubeMesh> fat = session.braidTubeMesh("braid");
+        ASSERT_TRUE(fat);
+        EXPECT_NE(fat->key, mesh->key);
+        ASSERT_EQ(fat->points.size(), mesh->points.size());
+        float moved = 0.0f;
+        for (std::size_t i = 0; i < fat->points.size(); ++i) moved = std::max(moved, (fat->points[i] - mesh->points[i]).length());
+        EXPECT_GT(moved, 0.002f) << "inflate makes the tubes fatter";
+
+        session.setGraphJson(looser);  // a node before the Braid
+        const ViewResult upstream = session.evaluate(request);
+        EXPECT_GT(upstream.versions.braidTubes, edited.versions.braidTubes);
+        EXPECT_GT(upstream.versions.evaluation, edited.versions.evaluation);
+        const std::shared_ptr<const BraidTubeMesh> after = session.braidTubeMesh("braid");
+        ASSERT_TRUE(after);
+        EXPECT_NE(after->key, fat->key);
+    }
+    // No tubes shown: nothing more is evaluated (the hair hidden: nothing of the graph at all).
+    GroomSession session(groomData(graph));
+    ViewRequest request;
+    request.density = 0.5f;
+    request.viewport = true;
+    request.wantStrands = false;
+    const ViewResult none = session.evaluate(request);
+    EXPECT_EQ(none.versions.braidTubes, 0u);
+    EXPECT_FALSE(session.braidTubeMesh("braid")) << "the Braid's inputs were not evaluated";
+    request.braidTubes = "braid";
+    const ViewResult shown = session.evaluate(request);
+    EXPECT_GT(shown.versions.braidTubes, 0u) << "turned on with the hair hidden: evaluated to at once";
+    EXPECT_GT(shown.versions.evaluation, none.versions.evaluation);
+    EXPECT_TRUE(session.braidTubeMesh("braid"));
+    request.braidTubes.clear();
+    EXPECT_GT(session.evaluate(request).versions.braidTubes, shown.versions.braidTubes) << "turned off: the tubes go";
+}
+
+TEST(Session, ShowTubesDrawsTheBraidsSectionsAndKeepsThemWhileTheyStay) {
+    // Show Tubes (braid_tubes.h): the session's mesh of the Braid nodes shown, from what the last
+    // view left (no evaluation), kept while the node's params and inputs stay, and every host's
+    // display item of it. The view itself never changes for it.
+    const std::string graph = withNodes(R"({"name": "braid", "type": "Braid", "params": {"region": 0.5, "width": 0.12}})",
+                                        "braid", R"({"name": "after", "type": "Width", "params": {"width": 0.01}})", "after");
+    GroomSession session(groomData(graph));
+    ViewRequest request;
+    request.density = 0.5f;
+    request.viewport = true;
+    const ViewResult view = session.evaluate(request);
+    ASSERT_TRUE(view.strands);
+    const std::size_t evaluations = session.evaluationCount();
+    const std::uint64_t strandsVersion = view.versions.strands;
+
+    EXPECT_FALSE(session.braidTubeMesh("")) << "nothing shown";
+    EXPECT_FALSE(session.braidTubeMesh("clump")) << "not a Braid node";
+    EXPECT_FALSE(session.braidTubeMesh("gone"));
+    EXPECT_EQ(session.braidTubeBuilds(), 0u);
+    const std::shared_ptr<const BraidTubeMesh> mesh = session.braidTubeMesh("braid");
+    ASSERT_TRUE(mesh);
+    EXPECT_EQ(session.braidTubeBuilds(), 1u);
+    EXPECT_EQ(session.evaluationCount(), evaluations) << "read off the last view's results: nothing evaluated";
+    EXPECT_NE(mesh->key, 0u);
+    // Three sections a path, a ring of quads between two rings; 24 points a ring (a version 2
+    // node's sections are pressed: braidTubesAround).
+    const std::size_t around = static_cast<std::size_t>(BraidTubeDetail::kPressedAround);
+    ASSERT_GT(mesh->tubes, 0u);
+    EXPECT_EQ(mesh->tubes % 3, 0u);
+    ASSERT_EQ(mesh->points.size() % around, 0u);
+    EXPECT_EQ(mesh->normals.size(), mesh->points.size());
+    EXPECT_EQ(mesh->colors.size(), mesh->points.size());
+    EXPECT_EQ(mesh->uvs.size(), mesh->points.size());
+    EXPECT_EQ(mesh->quads.size(), mesh->points.size() - mesh->tubes * around);
+    EXPECT_EQ(mesh->triangles().size(), mesh->quads.size() * 6);
+    // Each section in its own color; the normals unit, out of the tube.
+    std::set<std::array<float, 3>> colors(mesh->colors.begin(), mesh->colors.end());
+    EXPECT_EQ(colors, (std::set<std::array<float, 3>>{braidSectionColor(0), braidSectionColor(1), braidSectionColor(2)}));
+    std::size_t outward = 0;
+    for (std::size_t ring = 0; ring * around < mesh->points.size(); ++ring) {
+        Vec3f center;
+        for (std::size_t k = 0; k < around; ++k) center = center + mesh->points[ring * around + k] * (1.0f / static_cast<float>(around));
+        for (std::size_t k = 0; k < around; ++k) {
+            const Vec3f& n = mesh->normals[ring * around + k];
+            EXPECT_NEAR(n.length(), 1.0f, 1e-3f);
+            outward += n.dot(mesh->points[ring * around + k] - center) > 0.0f;
+        }
+    }
+    EXPECT_GT(outward, mesh->points.size() * 99 / 100) << "of " << mesh->points.size();
+    // The tubes lie where the braided hair is: within the strands' bounds.
+    const StrandSet::Extent extent = view.strands->extent();
+    for (const Vec3f& p : mesh->points) {
+        ASSERT_TRUE(p.x > extent.lo.x - 0.2f && p.x < extent.hi.x + 0.2f && p.y > extent.lo.y - 0.2f && p.y < extent.hi.y + 0.2f &&
+                    p.z > extent.lo.z - 0.2f && p.z < extent.hi.z + 0.2f);
+    }
+
+    // Asked again, and after a view that changed nothing: the same mesh, nothing built.
+    EXPECT_EQ(session.braidTubeMesh("braid"), mesh);
+    session.evaluate(request);
+    EXPECT_EQ(session.braidTubeMesh("braid"), mesh);
+    EXPECT_EQ(session.braidTubeBuilds(), 1u);
+    EXPECT_EQ(session.braidTubeMesh("gone\nbraid\nclump"), mesh) << "names that are no Braid node: ignored";
+    // An edit elsewhere (the node after the Braid): the strands change, the tubes do not.
+    auto withParam = [&](const std::string& node, const std::string& param, double value) {
+        nlohmann::json g = nlohmann::json::parse(graph);
+        for (nlohmann::json& n : g["nodes"]) {
+            if (n["name"] == node) n["params"][param] = value;
+        }
+        return g.dump();
+    };
+    session.setGraphJson(withParam("after", "width", 0.02));
+    const ViewResult wider = session.evaluate(request);
+    EXPECT_NE(wider.versions.strands, strandsVersion);
+    EXPECT_EQ(session.braidTubeMesh("braid"), mesh) << "an unrelated edit: the mesh kept";
+    EXPECT_EQ(session.braidTubeBuilds(), 1u);
+    // The Braid's own param: built again, another mesh (its sections fatter).
+    session.setGraphJson(withParam("braid", "inflate", 1.0));
+    session.evaluate(request);
+    const std::shared_ptr<const BraidTubeMesh> apart = session.braidTubeMesh("braid");
+    ASSERT_TRUE(apart);
+    EXPECT_EQ(session.braidTubeBuilds(), 2u);
+    EXPECT_NE(apart->key, mesh->key);
+    ASSERT_EQ(apart->points.size(), mesh->points.size());
+    EXPECT_NE(apart->points, mesh->points);
+    // What feeds it (a Clump before it): built again too.
+    session.setGraphJson(withParam("clump", "strength", 0.3));
+    session.evaluate(request);
+    const std::shared_ptr<const BraidTubeMesh> fed = session.braidTubeMesh("braid");
+    ASSERT_TRUE(fed);
+    EXPECT_EQ(session.braidTubeBuilds(), 3u);
+    EXPECT_NE(fed->key, apart->key);
+
+    // Every host's display: the mesh handed on while a node is shown (fillBraidTubes), drawn as a lit
+    // surface in the sections' colors, triangulated here; built again only for another mesh.
+    DisplaySettings settings;
+    DisplayBuilder builder;
+    int asked = 0;
+    auto sessionOf = [&]() -> const GroomSession& { ++asked; return session; };
+    const ViewResult& now = session.last();
+    DisplayInputs off = DisplayInputs::fromView(now, false);
+    fillBraidTubes(settings, off, sessionOf);
+    EXPECT_EQ(asked, 0) << "nothing shown: the session is not asked";
+    EXPECT_FALSE(off.braidTubes);
+    const std::uint64_t strandsDigest = builder.update(off, settings).item(DisplayItemId::Strands).geometry->digest();
+    EXPECT_FALSE(builder.frame().item(DisplayItemId::BraidTubes).shown);
+    settings.braidTubes = "braid";
+    DisplayInputs on = DisplayInputs::fromView(now, false);
+    fillBraidTubes(settings, on, sessionOf);
+    EXPECT_EQ(asked, 1);
+    EXPECT_EQ(on.braidTubes, fed);
+    const DisplayFrame& frame = builder.update(on, settings);
+    const DisplayItem& tubes = frame.item(DisplayItemId::BraidTubes);
+    EXPECT_STREQ(tubes.name, "braidTubes");
+    EXPECT_TRUE(tubes.rebuilt);
+    ASSERT_TRUE(tubes.shown);
+    const DisplayGeometry& g = *tubes.geometry;
+    EXPECT_TRUE(g.triangles);
+    EXPECT_TRUE(g.scaleSurface);
+    EXPECT_EQ(g.vertexCount(), fed->points.size());
+    EXPECT_EQ(g.indices.size(), fed->quads.size() * 6);
+    EXPECT_EQ(g.normals.size(), g.positions.size());
+    EXPECT_EQ(g.bitangents, g.normals);
+    EXPECT_EQ(g.tangents.size(), g.positions.size());
+    EXPECT_EQ(g.colors.size(), fed->points.size() * 4);
+    EXPECT_EQ(g.uvs.size(), fed->points.size() * 2);
+    EXPECT_FLOAT_EQ(g.colors[0], fed->colors[0][0]);
+    EXPECT_FLOAT_EQ(g.colors[3], 1.0f);
+    EXPECT_FALSE(frame.rebuilt[static_cast<std::size_t>(DisplayPart::Strands)]) << "the strands are not built again for the tubes";
+    EXPECT_EQ(frame.item(DisplayItemId::Strands).geometry->digest(), strandsDigest);
+    // The same mesh again: not rebuilt. Off: the item goes, the strands as they are.
+    DisplayInputs again = DisplayInputs::fromView(now, false);
+    fillBraidTubes(settings, again, sessionOf);
+    EXPECT_FALSE(builder.update(again, settings).item(DisplayItemId::BraidTubes).rebuilt);
+    settings.braidTubes.clear();
+    DisplayInputs gone = DisplayInputs::fromView(now, false);
+    fillBraidTubes(settings, gone, sessionOf);
+    const DisplayFrame& without = builder.update(gone, settings);
+    EXPECT_TRUE(without.item(DisplayItemId::BraidTubes).rebuilt);
+    EXPECT_FALSE(without.item(DisplayItemId::BraidTubes).shown);
+    EXPECT_EQ(without.item(DisplayItemId::Strands).geometry->digest(), strandsDigest);
+
+    // A bypassed Braid braids nothing: no tubes.
+    nlohmann::json bypassed = nlohmann::json::parse(graph);
+    for (nlohmann::json& n : bypassed["nodes"]) {
+        if (n["name"] == "braid") n["bypass"] = true;
+    }
+    session.setGraphJson(bypassed.dump());
+    session.evaluate(request);
+    EXPECT_FALSE(session.braidTubeMesh("braid"));
 }
 
 TEST(Session, CardsAtTheirDensityKeepABakedAtlas) {

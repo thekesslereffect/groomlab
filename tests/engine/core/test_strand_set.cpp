@@ -7,6 +7,7 @@
 #include <stdexcept>
 
 #include "groomlab/parallel.h"
+#include "groomlab/process_caches.h"
 #include "groomlab/strand_set.h"
 
 namespace groomlab {
@@ -328,6 +329,58 @@ StrandSet::Extent serialExtent(const StrandSet& s) {
     return e;
 }
 
+TEST(StrandSet, WidthsSetIsKnownUntilTheWidthsAreWritten) {
+    // 1 on every point is no width set (a Scatter's strands before any Width node): known as a
+    // set is sized, worked out once otherwise, and asked again after every way of writing them.
+    StrandSet s;
+    EXPECT_FALSE(s.widthsSet());  // no points
+    s.resizeUniform(5000, 6);
+    EXPECT_FALSE(s.widthsSet());
+    StrandSet copy(s);  // (shares the widths)
+    EXPECT_FALSE(copy.widthsSet());
+    copy.mutableWidths()[4321] = 0.02f;
+    EXPECT_TRUE(copy.widthsSet());
+    EXPECT_FALSE(s.widthsSet());  // its own stay
+    const StrandSet kept(copy);
+    EXPECT_TRUE(kept.widthsSet());  // a copy carries what its source knew
+    copy.mutableWidths()[4321] = 1.0f;
+    EXPECT_FALSE(copy.widthsSet());
+    for (float& w : copy.overwriteWidths()) w = 0.5f;
+    EXPECT_TRUE(copy.widthsSet());
+    // Copied or taken from another set, then some written.
+    StrandSet from(s), into(s);
+    into.copyWidthsFrom(kept);
+    EXPECT_TRUE(into.widthsSet());
+    into.copyWidthsFrom(s)[17] = 3.0f;
+    EXPECT_TRUE(into.widthsSet());
+    StrandSet taken(s);
+    EXPECT_FALSE(taken.widthsSet());
+    from.mutableWidths()[9] = 2.0f;
+    taken.takeWidthsFrom(from);
+    EXPECT_TRUE(taken.widthsSet());
+    // A strand added with widths, one appended, a set sized again and cleared.
+    StrandSet grown(s);
+    EXPECT_FALSE(grown.widthsSet());
+    const std::vector<Vec3f> two{Vec3f(0.0f, 0.0f, 0.0f), Vec3f(0.0f, 1.0f, 0.0f)};
+    grown.addStrand(1, two);
+    EXPECT_FALSE(grown.widthsSet());
+    grown.addStrand(2, two, {0.1f, 0.05f});
+    EXPECT_TRUE(grown.widthsSet());
+    StrandSet joined(s);
+    EXPECT_FALSE(joined.widthsSet());
+    joined.append(grown);
+    EXPECT_TRUE(joined.widthsSet());
+    joined.resizeUniform(10, 3);
+    EXPECT_FALSE(joined.widthsSet());
+    joined.resizeUniform(10, 3, StrandSet::kLeaveWidths);  // (left for the caller to write)
+    for (float& w : joined.mutableWidths()) w = 0.25f;
+    EXPECT_TRUE(joined.widthsSet());
+    joined.clear();
+    EXPECT_FALSE(joined.widthsSet());
+    const StrandSet moved(std::move(taken));
+    EXPECT_TRUE(moved.widthsSet());
+}
+
 TEST(StrandSet, ExtentIsTheSerialWalksAndFollowsWrites) {
     StrandSet s;
     EXPECT_TRUE(s.extent().empty());
@@ -377,6 +430,58 @@ TEST(StrandSet, ExtentIsTheSerialWalksAndFollowsWrites) {
     // Moved: the extent goes along.
     StrandSet moved = std::move(s);
     EXPECT_EQ(moved.extent().hi, want.hi);
+}
+
+TEST(StrandSet, LaidOutAnewItKeepsItsStrandsAndReusesTheArraysOfTheLayoutBefore) {
+    // relayout: the same strands at other point counts, the per-point arrays its own at the new
+    // size, the rest shared as it was. The arrays come with room to spare and go back to the pool
+    // when let go, so a set laid out a few points more or less takes them again (a comb dab's
+    // incremental Resample by curvature) instead of allocating.
+    releaseArrayPools();  // (what other tests left: the pool holds this test's arrays alone)
+    const std::size_t count = 4000;
+    StrandSet base;
+    base.addStrandChannel("mask", 0.5f);
+    base.addPointChannel("along", 0.25f);
+    base.resizeUniform(count, 12);
+    for (std::size_t s = 0; s < count; ++s) base.mutableIds()[s] = 100 + s;
+    std::vector<std::size_t> points(count, 12);
+    points[7] = 3;
+    points[900] = 30;
+    auto pooled = [] { return detail::ArrayPool<Vec3f>::instance().bytes(); };
+    const Vec3f* held = nullptr;
+    {
+        StrandSet relaid = base;
+        relaid.relayout(points);
+        EXPECT_TRUE(relaid.validate());
+        EXPECT_EQ(relaid.strandCount(), count);
+        EXPECT_EQ(relaid.pointCount(), count * 12 - 9 + 18);
+        EXPECT_EQ(relaid.strandPointCount(7), 3u);
+        EXPECT_EQ(relaid.strandBegin(901), 900u * 12 - 9 + 30);
+        EXPECT_EQ(relaid.pointChannel("along")->size(), relaid.pointCount());
+        EXPECT_EQ(relaid.widths().size(), relaid.pointCount());
+        EXPECT_EQ(relaid.ids().data(), base.ids().data());  // shared still
+        EXPECT_EQ(relaid.strandChannel("mask")->data(), base.strandChannel("mask")->data());
+        EXPECT_EQ(base.pointCount(), count * 12);  // the set it was copied from stands
+        held = relaid.positions().data();
+    }
+    // Let go: its points (576 KB, with room) are kept; a layout a few points smaller or larger
+    // takes that very array, one far larger does not.
+    const std::size_t kept = pooled();
+    EXPECT_GE(kept, (count * 12 + 9) * sizeof(Vec3f));
+    for (const std::size_t other : {std::size_t{2}, std::size_t{40}}) {
+        points[900] = other;
+        StrandSet again = base;
+        again.relayout(points);
+        EXPECT_EQ(again.positions().data(), held) << other;
+        EXPECT_LT(pooled(), kept);
+        EXPECT_EQ(again.pointCount(), count * 12 - 9 - 12 + other);
+    }
+    EXPECT_EQ(pooled(), kept);
+    std::vector<std::size_t> twice(count, 24);
+    StrandSet larger = base;
+    larger.relayout(twice);
+    EXPECT_NE(larger.positions().data(), held);
+    EXPECT_EQ(pooled(), kept);
 }
 
 }  // namespace

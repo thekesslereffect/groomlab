@@ -29,6 +29,7 @@
 #include "groomlab/texture.h"
 #include "maya_inputs.h"
 #include "groomlab/scalp_maps.h"
+#include "groomlab/groom_transfer.h"
 
 namespace groomlab::maya {
 
@@ -87,8 +88,10 @@ std::vector<std::string> TransferCmd::projectMaps(ScalpMaps& maps, const std::se
         std::error_code ec;
         std::filesystem::create_directories(std::filesystem::u8path(folder), ec);
         const std::string target = freeFilePath(folder + "/" + name + ".png");
-        paint.save(target);
-        written_.push_back({target, fileBytes(target)});
+        paint.save(target);  // (a tile set: each tile, udim.h)
+        for (const std::string& file : mapImageFiles(target, paint.udim() ? paint.udimLayout()->tiles : std::vector<int>{})) {
+            written_.push_back({file, fileBytes(file)});
+        }
         return portableMayaPath(target);
     };
     std::vector<std::string> warnings;
@@ -201,12 +204,15 @@ MStatus TransferCmd::doIt(const MArgList& args) {
             } else if (usesMarkers(options.method)) {
                 options.markers = transferMarkersFromJson(markersPlug.asString().asChar());
             }
+            if (db.isFlagSet(kSnapMarkers[0])) {
+                setResult(MString(markersJson.c_str()));
+                return MS::kSuccess;  // nothing changed: not undoable
+            }
+            // (Every host's: groom_transfer.h; the markers snapped, the method's markers checked.
+            // Fitting the size is groomlab.transfer_groom's -keepLengths.)
+            options = preparedTransferOptions(options, false, false, *from, *to);
         } catch (const std::exception& e) {
             return fail(kName, e.what());
-        }
-        if (db.isFlagSet(kSnapMarkers[0])) {
-            setResult(MString(markersJson.c_str()));
-            return MS::kSuccess;  // nothing changed: not undoable
         }
         std::vector<std::string> mappingWarnings;
         std::unique_ptr<ScalpMapping> mapping;
@@ -221,40 +227,33 @@ MStatus TransferCmd::doIt(const MArgList& args) {
         MPlug flowPlug = fn.findPlug("flowData", true);
         MPlug mapsPlug = fn.findPlug("scalpMaps", true);
         std::string guideJson, partJson, flowJson, mapsJson;
+        bool setMaps = false;
         std::size_t moved = 0;
         try {
-            const std::string stored = guidePlug.asString().asChar();
-            if (!stored.empty()) {
-                GuideHierarchy h = GuideHierarchy::fromJson(stored);
-                h.setScale(groomScaleOf(groom.node()));  // moved as shown (the groom keeps its scale: transfer_groom)
-                h.transfer(*mapping);
-                moved = h.guides().size();
-                guideJson = h.toJson();
-            }
-            const PartSet parts = PartSet::fromJson(partPlug.asString().asChar());
-            if (!parts.empty()) {
-                const PartSet out = parts.transferred(*mapping);
-                if (out.parts.size() < parts.parts.size()) {
-                    MGlobal::displayWarning(MString(kName) + ": some parts fell apart on the new scalp and were dropped");
-                }
-                partJson = out.empty() ? std::string() : out.toJson();
-            }
-            const FlowSet flow = FlowSet::fromJson(flowPlug.asString().asChar());
-            if (!flow.empty()) {
-                const FlowSet out = flow.transferred(*mapping);
-                if (out.pins.size() < flow.pins.size() || out.sinks.size() < flow.sinks.size()) {
-                    MGlobal::displayWarning(MString(kName) + ": some flow arrows did not fit the new scalp and were dropped");
-                }
-                flowJson = out.empty() ? std::string() : out.toJson();
-            }
-            if (mapping->uvMisses() > 0) {
-                MGlobal::displayWarning(MString(kName) + ": " + std::to_string(mapping->uvMisses()).c_str() +
-                                        " roots found no matching UV on the new scalp and went to the closest point");
-            }
+            // The guides (moved as shown: the groom keeps its scale, transfer_groom), parts and flow
+            // (every host's: groom_transfer.h).
+            const std::string partText = PartSet::fromJson(partPlug.asString().asChar()).empty() ? std::string() : partPlug.asString().asChar();
+            const std::string flowText = FlowSet::fromJson(flowPlug.asString().asChar()).empty() ? std::string() : flowPlug.asString().asChar();
+            std::vector<std::string> transferWarnings;
+            const GroomTransferTexts out = transferGroomTexts(guidePlug.asString().asChar(), partText, flowText, *mapping,
+                                                              groomScaleOf(groom.node()), &transferWarnings);
+            moved = out.guidesMoved;
+            guideJson = out.hierarchyJson;
+            partJson = out.partsJson;
+            flowJson = out.flowJson;
+            for (const std::string& warning : transferWarnings) MGlobal::displayWarning(MString(kName) + ": " + warning.c_str());
+            ScalpMaps maps = ScalpMaps::fromJson(mapsPlug.asString().asChar());
             if (db.isFlagSet(kMaps[0])) {
-                ScalpMaps maps = ScalpMaps::fromJson(mapsPlug.asString().asChar());
-                if (!projectMaps(maps, {}, *mapping, groom.node(), groom).empty()) mapsJson = maps.toJson();
+                if (!projectMaps(maps, {}, *mapping, groom.node(), groom).empty()) setMaps = true;
+            } else {
+                // Not projected: the vertex maps cannot fit another scalp, so they go; textures stay
+                // (every host's: groom_transfer.h).
+                for (const std::string& name : dropVertexMaps(maps)) {
+                    MGlobal::displayWarning(MString(kName) + ": the vertex map " + name.c_str() + " was dropped (not projected)");
+                    setMaps = true;
+                }
             }
+            if (setMaps) mapsJson = maps.toJson();
         } catch (const std::exception& e) {
             return fail(kName, e.what());
         }
@@ -277,7 +276,13 @@ MStatus TransferCmd::doIt(const MArgList& args) {
         if (!guideJson.empty()) modifier_.newPlugValueString(guidePlug, guideJson.c_str());
         if (partPlug.asString().length() > 0) modifier_.newPlugValueString(partPlug, partJson.c_str());
         if (flowPlug.asString().length() > 0) modifier_.newPlugValueString(flowPlug, flowJson.c_str());
-        if (!mapsJson.empty()) modifier_.newPlugValueString(mapsPlug, mapsJson.c_str());
+        if (setMaps) modifier_.newPlugValueString(mapsPlug, mapsJson.c_str());
+        // What was made on the old scalp goes, as every host's transfer drops it (the app's, the
+        // Blender helper's): the guide cache and the simulation's bakes.
+        for (const char* stale : {"guideCache", "guideCacheObject", "simCaches"}) {
+            MPlug plug = fn.findPlug(stale, true);
+            if (!plug.isNull() && plug.asString().length() > 0) modifier_.newPlugValueString(plug, "");
+        }
         if (!markersJson.empty()) modifier_.newPlugValueString(markersPlug, markersJson.c_str());
         undoable_ = true;
         setResult(static_cast<int>(moved));

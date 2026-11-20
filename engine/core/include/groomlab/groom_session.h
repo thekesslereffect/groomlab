@@ -28,6 +28,7 @@
 #include <utility>
 #include <vector>
 
+#include "groomlab/braid_tubes.h"
 #include "groomlab/cards.h"
 #include "groomlab/correctives.h"
 #include "groomlab/drive_guides.h"
@@ -90,6 +91,11 @@ struct ViewRequest {
     // draws), and the view keeps the strands it had (ViewResult::strandsKept). A host animating a
     // character with its groom hidden pays for the guides alone.
     bool wantStrands = true;
+    // Show Tubes: the Braid nodes whose section tubes the host draws (DisplaySettings::braidTubes's
+    // text, braid_tubes.h braidTubeNames). Their inputs are evaluated whatever else is asked (no
+    // strands wanted, a node before them viewed), and ViewVersions::braidTubes moves when
+    // braidTubeMesh would build another mesh. Empty: none (nothing more is evaluated).
+    std::string braidTubes;
 };
 
 // Counters that move only when what they name changed (a cache hit leaves them).
@@ -99,6 +105,7 @@ struct ViewVersions {
     std::uint64_t hierarchy = 0;   // the active hierarchy (every evaluation while a guide preview is set)
     std::uint64_t cards = 0;       // the cards
     std::uint64_t strandMeshes = 0;  // the StrandMesh nodes' strands
+    std::uint64_t braidTubes = 0;    // Show Tubes' mesh (ViewRequest::braidTubes: what braidTubeMesh builds from)
 };
 
 struct Bounds {
@@ -243,6 +250,7 @@ struct GroomStats {
     std::map<std::string, double> times;        // ms per node in its last run
     std::map<std::string, std::string> runs;    // how each node ran in the last evaluation (Graph::lastRunKinds; "cached")
     std::map<std::string, std::vector<std::string>> channels;  // each node's strand channels (cached)
+    std::map<std::string, std::vector<std::string>> pointChannels;  // ... and its point channels
     std::map<std::string, std::string> notes;
     int scalpHistoryFrames = 0;
     std::size_t scalpHistoryReads = 0;  // the host's reads of earlier frames (Maya: inMesh at other times)
@@ -255,6 +263,13 @@ struct GroomStats {
     std::size_t cacheBytes = 0, cacheEvictions = 0;
     bool strokeDocument = false;  // a stroke document is kept (a stroke made one, or warmStroke)
     std::vector<SimStatus> simulations;  // the Simulate nodes' caches (GroomSession::simulationStatus)
+
+    // Color by Channel's list of node `node`'s channels (channels and pointChannels): each name
+    // once, by name ignoring case, those starting with "_" (internal) left out, each with "point"
+    // where it has a point channel of the name (the display reads that over a strand channel of
+    // the name: attributePointColors), else "strand". In the JSON as "colorChannels": {node:
+    // [[name, kind], ...]}, every host's node menu.
+    std::vector<std::pair<std::string, std::string>> colorChannels(const std::string& node) const;
 
     std::string toJson() const;
 };
@@ -426,9 +441,6 @@ public:
     // The maps as stored: the text set (setScalpMapsJson), else the maps' JSON.
     std::string scalpMapsJson() const { return scalpMapsFromText_ ? scalpMapsText_ : scalpMaps_.toJson(); }
     const std::string& scalpMapsError() const { return scalpMapsError_; }
-    // The catalog when the scalp already carries its vertex maps (groom files): used while no
-    // scalpMaps are set.
-    void setMapCatalog(MapCatalog maps);
 
     // ---- Moving inputs -----------------------------------------------------------------------
     void setGuides(GuidesPtr guides);      // flat guides (e.g. Maya curves), world space, rooted
@@ -568,7 +580,6 @@ public:
     // A bake of a node (engine/io sim_cache.h reads one from its file); null removes it. While its
     // stamp is the node's settings' (simulationStamp) the frames within its span come from it.
     void setBakedSimulation(const std::string& node, BakedSimulationPtr baked);
-    BakedSimulationPtr bakedSimulation(const std::string& node) const;
     // What a bake of the node made now records (SimSettings::hash of its params); 0 without the node.
     std::uint64_t simulationStamp(const std::string& node) const;
 
@@ -709,6 +720,11 @@ public:
     HierarchyPtr hierarchy();
     // The active hierarchy with poses but no correctives: what shot sculpts are recorded against.
     HierarchyPtr posedHierarchy();
+    // Export Guides for Simulation (every host's): guidesToSimulate of the posed hierarchy (no
+    // correctives: shot sculpts apply on top of the simulated guides, so the sim never starts from
+    // them) at the session's time and scalp. `group` "*" every guide, else one guide group's
+    // (std::runtime_error for no such group). Empty without guides. No graph run.
+    GuideSet simulationGuides(const std::string& group = "*");
     // The guides as stored, rooted on the scalp as given: no poses, correctives or preview (what
     // brush strokes edit and write back). Null without guides. No graph run.
     HierarchyPtr authoredHierarchy() { return rootedHierarchy(); }
@@ -762,13 +778,32 @@ public:
     // The strand channel `channel` as node `node` of the view's graph left it in the last
     // evaluation, one value per strand of `shown` (matched by strand ID; NaN for a strand the node
     // did not have): a Clump's own clump numbers though a later Clump writes the same channel
-    // (Clump Colors, "<channel>@<node>": strandColors). Null when the node is not in the graph, has
-    // no cached strands (caching off) or no such channel.
+    // (Clump Colors, "<channel>@<node>": strandColors). A point channel (read over a strand channel
+    // of the same name): one value per point of `shown`, each point's read along the node's strand at the same
+    // distance from the root (a Length after it trims the strand, a Resample gives it other
+    // points; NaN for a strand the node did not have): Color by Channel. Null when the node is not in the graph, has no
+    // cached strands (caching off) or no such channel.
     std::shared_ptr<const std::vector<float>> nodeStrandChannel(const std::string& node, const std::string& channel,
                                                                 const StrandSet& shown) const;
 
+    // Show Tubes (braid_tubes.h): the section tubes of the Braid nodes `shown` names
+    // (DisplaySettings::braidTubes) as one mesh a host draws, `around` points round a ring, where the
+    // view's strands are drawn (carried to the scalp now while following it). Made from what the last
+    // evaluation left: each node's params and the results feeding it (the strands, the braids), read,
+    // never evaluated, and no hair braided; so a node the last view did not reach shows the tubes of
+    // the inputs it last had, and one whose inputs hold no result none. Kept until a node's params,
+    // an input's result or the scalp is another (BraidTubeMesh::key): a camera move or an edit
+    // elsewhere in the graph hands the same mesh back. Names that are no Braid node of the graph, and
+    // bypassed nodes, show nothing; null when nothing is shown. A mesh for drawing: within
+    // kBraidTubePoints points where it can be (BraidTubeDetail::maxPoints, shared by the nodes shown:
+    // hundreds of braids get coarser tubes).
+    static constexpr std::size_t kBraidTubePoints = 400000;
+    // `around`: the points round a ring (0: each node's own, braidTubesAround).
+    std::shared_ptr<const BraidTubeMesh> braidTubeMesh(const std::string& shown, int around = 0) const;
+    // How many times braidTubeMesh built a mesh (tests and profiles: a cache hit leaves it).
+    std::size_t braidTubeBuilds() const { return braidTubeBuilds_; }
+
 private:
-    void parseAll();  // GroomData's texts
     // The document the last view evaluated (its times, notes and channels are the stats').
     const GraphDocument* viewDoc() const { return viewSculpt_ && sculptDoc_ ? sculptDoc_.get() : doc_.get(); }
     void bindScalp(std::vector<std::string>& errors);
@@ -920,6 +955,8 @@ private:
     // The graph parsed from data_.graphJson scaled by k (scaleGraphJson), its compounds as their
     // nodes inline (`flat`: where they went); throws as loadGraphJson.
     std::unique_ptr<GraphDocument> parseScaled(const std::string& graphJson, GraphEdit::FlatCompounds* flat) const;
+    // A stroke over: the graphs' spares let go (Graph::releaseSpares).
+    void releaseSpares();
     // Swaps in a parsed graph: every document adopts its old one's cache.
     void installGraph(std::unique_ptr<GraphDocument> parsed);
     // Measures the scalp and, when k changes, parses the graph again and scales the guides.
@@ -1047,6 +1084,11 @@ private:
     std::uint64_t previewMapVersion_ = 0;
     std::uint64_t mapViewKey_ = 0;
     std::shared_ptr<const std::vector<float>> mapViewValues_;
+    // A texture map's tile set shown (scalpMapView): its mosaic as the preview, kept per files,
+    // scalp and display.
+    std::shared_ptr<const TexturePreview> udimViewPreview(const ScalpMapView& view);
+    std::uint64_t udimViewKey_ = 0;
+    std::shared_ptr<const TexturePreview> udimViewPreview_;
 
     bool liveStroke_ = false;
     bool strokeDensityUsed_ = false;
@@ -1070,6 +1112,8 @@ private:
     HierarchyPtr followRooted_;               // the stored guides rooted on it
     std::uint64_t followRootedKey_ = 0;
     HierarchyPtr followActive_;               // + preview, poses, correctives, at rest
+    HierarchyPtr followPreview_;              // the preview taken to rest by the last prepareFollow (null: none)
+    MeshPtr followPreviewOn_;                 // the scalp it was taken back from
     std::uint64_t followActiveKey_ = 0;
     PartsPtr followParts_;
     std::uint64_t followPartsKey_ = 0;
@@ -1100,6 +1144,18 @@ private:
 
     ViewResult view_;
     EvalContext lastViewContext_;  // the last view's density, budget, time and viewport (no externals)
+    // Show Tubes' mesh as last built (braidTubeMesh) and what it was built from.
+    mutable std::shared_ptr<const BraidTubeMesh> braidTubes_;
+    mutable std::uint64_t braidTubesKey_ = 0;
+    // What the tubes of the Braid nodes `shown` names are built from, as one number (their names,
+    // params and node versions, their inputs as last evaluated, the scalp; 0: no such node with
+    // strands): braidTubeMesh's key and what evaluate moves ViewVersions::braidTubes by. `nodes`:
+    // each node and its inputs.
+    // (`guides`: the nodes shown that give guides, their last results: their tubes, guideTubes.)
+    std::uint64_t braidTubesSource(const std::string& shown, std::vector<std::pair<const Operator*, std::vector<Value>>>* nodes,
+                                   std::vector<GuidesPtr>* guides = nullptr) const;
+    std::uint64_t braidTubesShown_ = 0;  // braidTubesSource at the last evaluation
+    mutable std::size_t braidTubeBuilds_ = 0;
     bool boundsStale_ = false;  // the strands or guides changed while no view wanted bounds
     // The strands each document (the view's, a live stroke's) last gave a view: its node, the
     // graph's serial of them, the view's serial of them, and the set (not kept alive).

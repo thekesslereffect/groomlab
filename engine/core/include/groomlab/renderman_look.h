@@ -147,5 +147,11 @@ struct ConstantLook {
 };
 ConstantLook constantLook(const std::vector<Primvar>& primvars);
 
+// The shading network above as RIB (hosts/renderman/examples/groom.rib), every host's: PxrPrimvar
+// readers of the primvars, PxrHairColor's pigment and RGB look mixed by rman_rgbShare into
+// PxrMarschnerHair, specularOffset minus HairColor's `tilt`. Each handle starts with `prefix`
+// (Maya's "<groom>_"), each line with `indent`; lines end in a newline.
+std::string hairNetworkRib(const std::string& prefix, float tilt, const std::string& indent = {});
+
 }  // namespace renderman
 }  // namespace groomlab

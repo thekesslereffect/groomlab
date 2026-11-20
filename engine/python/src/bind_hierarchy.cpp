@@ -9,8 +9,11 @@
 
 #include "groomlab/brush.h"
 #include "groomlab/correctives.h"
+#include "groomlab/drive_guides.h"
+#include "groomlab/groom_transfer.h"
 #include "groomlab/guide_hierarchy.h"
 #include "groomlab/guide_selection.h"
+#include "groomlab/root_subdivision.h"
 #include "groomlab/root_tubes.h"
 #include "groomlab/transfer.h"
 #include "groomlab/transfer_markers_edit.h"
@@ -223,6 +226,63 @@ void bindHierarchy(py::module_& m) {
         "The closed curve through a custom shape's control points, as sampled (not checked or fitted): what an "
         "editor draws while points move.");
     m.def(
+        "mirrored_section_points",
+        [](const std::vector<std::pair<float, float>>& points) { return pairsOf(mirroredSectionPoints(sectionPoints(points))); },
+        py::arg("points"), "The points made symmetric about the v axis from their right side (tube.h: every host's Mirror).");
+    m.def(
+        "mirror_partners",
+        [](const std::vector<std::pair<float, float>>& points) {
+            py::list out;
+            for (const int m : mirrorPartners(sectionPoints(points))) out.append(m < 0 ? py::object(py::none()) : py::object(py::int_(m)));
+            return out;
+        },
+        py::arg("points"), "Each point's mirror image's index (its own on the axis; None when it has none), tube.h.");
+    m.attr("MIRROR_AXIS") = kMirrorAxis;
+    m.def(
+        "driver_bind_attach",
+        [](const std::string& text, const std::vector<std::uint64_t>& guides, std::uint64_t driver) {
+            DriverBind bind = DriverBind::fromJson(text);
+            bind.attachGuides(guides, driver);
+            return bind.toJson();
+        },
+        py::arg("bind_json"), py::arg("guides"), py::arg("driver"),
+        "The bind (its JSON) with `guides` attached to driver `driver` too (drive_guides.h: every host's).");
+    m.def(
+        "driver_bind_detach",
+        [](const std::string& text, const std::vector<std::uint64_t>& guides, std::optional<std::uint64_t> driver) {
+            DriverBind bind = DriverBind::fromJson(text);
+            const std::size_t count = bind.detachGuides(guides, driver);
+            return py::make_tuple(bind.toJson(), count);
+        },
+        py::arg("bind_json"), py::arg("guides"), py::arg("driver") = py::none(),
+        "(bind_json, count): `guides` detached from `driver` (None: every driver), drive_guides.h.");
+    m.def("subdivision_density_map_in", &subdivisionDensityMapIn, py::arg("maps"),
+          "The Tube tool's density map among the groom's maps: the one map, else an older numbered one, "
+          "else '' (root_subdivision.h, every host's).");
+    m.attr("SUBDIVISION_DENSITY_MAP") = kSubdivisionDensityMap;
+    m.attr("DEFAULT_SUBDIVISION_DENSITY") = kDefaultSubdivisionDensity;
+    m.attr("MAX_TUBE_LEVELS") = kMaxTubeLevels;
+    m.def("root_tube_color", [](std::size_t k) { const auto c = rootTubeColor(k); return py::make_tuple(c[0], c[1], c[2]); },
+          py::arg("k"), "Root tube k's color, as every host draws it (guide_hierarchy.h rootTubeColor).");
+    m.def(
+        "tube_card_values",
+        [](const std::vector<float>& width, const std::vector<float>& aspect, const std::vector<float>& twist) {
+            const TubeCardValues v = tubeCardValues(width, aspect, twist);
+            py::dict out;
+            out["width"] = v.width;
+            out["flatness"] = v.flatness;
+            out["twist"] = v.twist;
+            return out;
+        },
+        py::arg("width"), py::arg("aspect"), py::arg("twist"),
+        "The Tube card's {width, flatness, twist} for a tube's lists (tube.h tubeCardValues, every host's).");
+    m.def("tube_aspect_of_flatness", &tubeAspectOfFlatness, py::arg("flatness"),
+          "The aspect the Tube card's Flatness sets (tube.h).");
+    m.def("tube_smooth_edit", &tubeSmoothEdit, py::arg("channel"), py::arg("passes") = 3,
+          "The Tube card's Smooth as a tube edit's JSON (tube.h tubeSmoothEdit); ValueError for no such channel.");
+    m.def("free_tube_shape_name", &freeTubeShapeName, py::arg("base"), py::arg("library"),
+          "A new library shape's name: \"<base> 1\", \"<base> 2\"... no built-in or `library` shape has (tube.h).");
+    m.def(
         "make_tube_shape",
         [](const std::string& name, const std::vector<std::pair<float, float>>& points, bool smooth) {
             try {
@@ -337,6 +397,15 @@ void bindHierarchy(py::module_& m) {
     m.def("transfer_methods", [] {
         return std::vector<std::string>{"closest", "bounds", "markersAlign", "markersWarp", "uv"};
     });
+    m.def(
+        "transferred_scale",
+        [](bool scaling, double groomScale, double oldArea, double newArea, bool fitSize) -> py::object {
+            const auto s = transferredScale(scaling, groomScale, oldArea, newArea, fitSize);
+            if (!s) return py::none();
+            return py::make_tuple(s->scale, s->reference);
+        },
+        py::arg("scaling"), py::arg("groom_scale"), py::arg("old_area"), py::arg("new_area"), py::arg("fit_size"),
+        "(scale, reference) of a groom after a transfer (groom_transfer.h transferredScale), or None: the reference stays.");
 
     py::class_<Similarity>(m, "Similarity", "p -> scale * rotation * p + translation")
         .def_property_readonly("rotation", [](const Similarity& s) {
@@ -927,6 +996,9 @@ void bindHierarchy(py::module_& m) {
                  return false;
              },
              py::arg("name"))
+        .def("free_layer_name", &Correctives::freeLayerName, py::arg("wanted"), py::arg("current") = std::string(),
+             py::arg("taken") = std::vector<std::string>{},
+             "A layer's name as every host makes it from `wanted` (letters, digits, _; free among the layers and `taken`).")
         .def("to_json", &Correctives::toJson)
         .def_static("from_json", &Correctives::fromJson, py::arg("text"))
         .def("apply",

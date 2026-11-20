@@ -9,7 +9,10 @@ User guide: [Node graph](https://www.getgroomlab.com/docs/node-graph), [Color pa
 **Strands or guides.** The shaping nodes (Noise, Curl, Smooth, Twist, Bend,
 Length, Collide, Gravity, Displace, Mirror, Flow, Cull) take either: fed strands they give strands, fed guides they give
 guides, each keeping its ID, root and painted maps. So guides can be shaped in the graph with no
-conversion, e.g. `ToGuides -> Noise -> Clump.centers` for wavy clumps. Their ports show the
+conversion, e.g. `ToGuides -> Noise -> Clump.centers` for wavy clumps. Guides with tubes keep
+their tubes (and their hierarchy's other levels' tubes take the same node), so `Guides -> Curl ->
+Interpolate.guides` with `fillTubes` coils the tubes themselves, every hair in a tube coiling with
+it (ringlets as in Disney's Tonic; tubes thin against the curl's radius read best). Their ports show the
 kind they carry (strands, guides, or grey while unconnected), links are checked against it, and a
 link that stops fitting after a change upstream is reported. Nodes that are about strands
 (Scatter, Interpolate, Width, HairColor, Braid, Instance, Cards) keep fixed types; ToGuides and
@@ -420,7 +423,9 @@ hiding the rest, and the pattern stays put on the strands (the same frame draws 
 the camera moving carries it along). With the viewport's multisample anti-aliasing on, each strand
 covers its share of a pixel's samples instead, which reads smooth; without it, strands thinner than
 a tenth of a pixel stipple, and those covering much of a pixel (seen close) blend smooth. Strands
-without widths (no Width node) draw opaque. Flat, colored and lit lines alike, on DirectX 11 and
+without widths (no Width node: every width still the 1 a Scatter leaves) draw opaque, and as
+ribbons or in the app's look-dev view at a hair's default width, not a scene unit wide. Flat,
+colored and lit lines alike, on DirectX 11 and
 OpenGL. `displayCoverageDensity` (on by default) takes a thinned preview to the render's density:
 each strand a preview at `previewDensity` 0.1 shows stands for ten, and covers what ten would
 together (never more than its pixel), so the preview reads as dense as the render (the whole groom

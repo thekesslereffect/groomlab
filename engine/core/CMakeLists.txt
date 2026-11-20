@@ -26,6 +26,7 @@ add_library(groomlab_core_objects OBJECT
     src/retriangulate.cpp
     src/root_tubes.cpp
     src/root_tube_tool.cpp
+    src/tube_mesh.cpp
     src/root_subdivision.cpp
     src/groom_package.cpp
     src/control_keys.cpp
@@ -39,6 +40,7 @@ add_library(groomlab_core_objects OBJECT
     src/renderman_look.cpp
     src/curve.cpp
     src/distance_field.cpp
+    src/braid_tubes.cpp
     src/display.cpp
     src/drive_guides.cpp
     src/display_overlays.cpp
@@ -82,9 +84,11 @@ add_library(groomlab_core_objects OBJECT
     src/parts.cpp
     src/transfer.cpp
     src/transfer_markers_edit.cpp
+    src/groom_transfer.cpp
     src/param_conditions.cpp
     src/paths.cpp
     src/presets.cpp
+    src/profile.cpp
     src/shortcuts.cpp
     src/png.cpp
     src/ptex.cpp
@@ -101,6 +105,7 @@ add_library(groomlab_core_objects OBJECT
     src/subdivision.cpp
     src/scalp_maps.cpp
     src/scalp_paint.cpp
+    src/udim.cpp
     src/follicle_map.cpp
     src/scale_maps.cpp
     src/scales.cpp
@@ -162,6 +167,7 @@ add_library(groomlab_core_objects OBJECT
     src/operators/subdivide_op.cpp
     src/operators/spectrum_op.cpp
     src/operators/drive_guides_op.cpp
+    src/operators/smooth_channel_op.cpp
 )
 # What every user of the core's objects needs: its headers.
 add_library(groomlab_core_headers INTERFACE)

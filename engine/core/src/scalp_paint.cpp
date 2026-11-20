@@ -2,6 +2,9 @@
 #include "groomlab/portable_math.h"
 #include "groomlab/scalp_paint.h"
 
+#include "groomlab/guide_hierarchy.h"
+#include "groomlab/stroke.h"
+
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -13,12 +16,14 @@
 #include <iterator>
 #include <limits>
 #include <map>
+#include <set>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
 #include <tuple>
 #include <unordered_map>
 
+#include "groomlab/color.h"
 #include "groomlab/parallel.h"
 #include "groomlab/png.h"
 #include "groomlab/point_index.h"
@@ -49,28 +54,36 @@ void fillMapValues(std::vector<float>& values, int channels, unsigned mask, cons
 
 namespace {
 
-// Scalp maps are one image over the UV square: a UDIM tile set is refused.
-void requireOneImage(const Texture& image) {
-    if (image.isUdim()) {
-        throw std::invalid_argument("a scalp map is one image over UVs 0-1: UDIM tile sets can't be used as scalp maps");
-    }
+float luminance(const std::array<float, 4>& c) { return rec709Luminance(c[0], c[1], c[2]); }
+
+// The image a tile of a map reads: a tile set's tile (null: missing), or the one image (every
+// tile shows it, as UVs repeat over it).
+const Texture::Image* tileImageOf(const Texture& image, int tile) {
+    return image.isUdim() ? image.udimTile(tile) : image.image();
 }
 
-float luminance(const std::array<float, 4>& c) { return 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2]; }
-
-// The image's luminance at a UV, clamped to the texel centers at the border so an edge of
-// the scalp on the UV border does not blend with the opposite edge (Texture wraps).
-float luminanceAt(const Texture& image, float u, float v) {
-    const float hu = 0.5f / static_cast<float>(std::max(image.width(), 1));
-    const float hv = 0.5f / static_cast<float>(std::max(image.height(), 1));
-    return luminance(image.sample(std::clamp(u, hu, 1.0f - hu), std::clamp(v, hv, 1.0f - hv)));
+// The image's color at a UV on `tile` (the triangle's: udim.h), clamped to that tile's texel
+// centers at its border so an edge of the scalp on a tile's border does not blend with the
+// tile's opposite edge (Texture wraps) or the next tile. Tile 1001 of one image: as it always was.
+PaintColor imageColorAt(const Texture& image, float u, float v, int tile = kFirstUdimTile) {
+    const Texture::Image* t = tileImageOf(image, tile);
+    const int w = t ? t->width : image.width(), h = t ? t->height : image.height();
+    const float hu = 0.5f / static_cast<float>(std::max(w, 1));
+    const float hv = 0.5f / static_cast<float>(std::max(h, 1));
+    const std::array<int, 2> o = udimTileOrigin(tile);
+    const float ou = static_cast<float>(o[0]), ov = static_cast<float>(o[1]);
+    return image.sample(std::clamp(u, ou + hu, ou + 1.0f - hu), std::clamp(v, ov + hv, ov + 1.0f - hv));
 }
 
-// The image's color at a UV, clamped to the texel centers as luminanceAt.
-PaintColor imageColorAt(const Texture& image, float u, float v) {
-    const float hu = 0.5f / static_cast<float>(std::max(image.width(), 1));
-    const float hv = 0.5f / static_cast<float>(std::max(image.height(), 1));
-    return image.sample(std::clamp(u, hu, 1.0f - hu), std::clamp(v, hv, 1.0f - hv));
+// Its luminance, as imageColorAt.
+float luminanceAt(const Texture& image, float u, float v, int tile = kFirstUdimTile) {
+    return luminance(imageColorAt(image, u, v, tile));
+}
+
+// The tile of the scalp's triangle `face` (udim.h: its UV centroid's).
+int faceTile(const UdimLayout& layout, std::int32_t face) {
+    return face >= 0 && static_cast<std::size_t>(face) < layout.triangleTile.size() ? layout.triangleTile[static_cast<std::size_t>(face)]
+                                                                                    : kFirstUdimTile;
 }
 
 void requireChannels(int channels, const char* where) {
@@ -822,8 +835,8 @@ void buildTexelGrid(TexelTable& t) {
             lo = hi = p;
             first = false;
         } else {
-            lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
-            hi = {std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
+            lo = minPerAxis(lo, p);
+            hi = maxPerAxis(hi, p);
         }
     }
     // Cells about as many as the covered texels' cube root squared: a few dozen texels each.
@@ -1161,28 +1174,85 @@ std::shared_ptr<const TexelTable> texelTable(const ScalpMesh& scalp, int width, 
     return shared;
 }
 
-TexturePaint::TexturePaint(const ScalpMesh& scalp, int width, int height, float value) : width_(width), height_(height) {
+void TexturePaint::layOut(const ScalpMesh& scalp, int width, int height) {
     if (width <= 0 || height <= 0) throw std::invalid_argument("TexturePaint: the image needs a positive size");
-    values_.assign(static_cast<std::size_t>(width) * static_cast<std::size_t>(height), std::clamp(value, 0.0f, 1.0f));
-    table_ = texelTable(scalp, width_, height_);
+    if (!scalp.hasUVs()) throw std::invalid_argument("the scalp has no UVs to paint a texture map on");
+    auto layout = std::make_shared<UdimLayout>(udimLayoutOf(scalp));
+    tileWidth_ = width;
+    tileHeight_ = height;
+    const std::array<int, 2> size = layout->mosaicSize(width, height);
+    width_ = size[0];
+    height_ = size[1];
+    // (One image: the scalp's own table. A tile set: the mosaic scalp's.)
+    table_ = layout->udim() ? texelTable(*mosaicScalp(scalp, *layout, width, height), width_, height_) : texelTable(scalp, width_, height_);
+    layout_ = std::move(layout);
     dirty_ = TexelRect::all(width_, height_);
 }
 
-TexturePaint::TexturePaint(const ScalpMesh& scalp, int width, int height, const PaintColor& color)
-    : width_(width), height_(height), channels_(kColorMap) {
-    if (width <= 0 || height <= 0) throw std::invalid_argument("TexturePaint: the image needs a positive size");
+TexturePaint::TexturePaint(const ScalpMesh& scalp, int width, int height, float value) {
+    layOut(scalp, width, height);
+    values_.assign(texelCount(), std::clamp(value, 0.0f, 1.0f));
+}
+
+TexturePaint::TexturePaint(const ScalpMesh& scalp, int width, int height, const PaintColor& color) : channels_(kColorMap) {
+    layOut(scalp, width, height);
     values_.resize(texelCount() * 4);
     for (std::size_t i = 0; i < texelCount(); ++i) {
         for (std::size_t c = 0; c < 4; ++c) values_[i * 4 + c] = std::clamp(color[c], 0.0f, 1.0f);
     }
-    table_ = texelTable(scalp, width_, height_);
-    dirty_ = TexelRect::all(width_, height_);
 }
 
 TexturePaint::TexturePaint(const ScalpMesh& scalp, const Texture& image, int channels)
     : width_(image.width()), height_(image.height()), channels_(channels) {
-    requireOneImage(image);
     requireChannels(channels, "TexturePaint");
+    if (!scalp.hasUVs()) throw std::invalid_argument("the scalp has no UVs to paint a texture map on");
+    if (image.isUdim() || udimLayoutOf(scalp).udim()) {
+        // A tile set's mosaic: each of the scalp's tiles from the set's tile (texel for texel at
+        // the tiles' size, else sampled), or the one image in each.
+        const UdimLayout layout = udimLayoutOf(scalp);
+        const Texture::Image* first = nullptr;
+        for (const int tile : layout.tiles) {
+            if ((first = tileImageOf(image, tile))) break;
+        }
+        if (!first || first->width <= 0 || first->height <= 0) {
+            throw std::invalid_argument("the tile set has none of the scalp's tiles (" + std::to_string(layout.tiles.front()) + "...)");
+        }
+        layOut(scalp, first->width, first->height);
+        const auto n = static_cast<std::size_t>(channels_);
+        values_.assign(texelCount() * n, 0.0f);
+        if (n == 4) {
+            for (std::size_t i = 0; i < texelCount(); ++i) values_[i * 4 + 3] = 1.0f;  // (blank: black, opaque)
+        }
+        const int w = tileWidth_, h = tileHeight_;
+        for (const int tile : layout_->tiles) {
+            const Texture::Image* src = tileImageOf(image, tile);
+            if (!src || src->width <= 0 || src->height <= 0) continue;
+            const std::array<int, 2> origin = layout_->tileOrigin(tile, w, h);
+            const bool exact = src->width == w && src->height == h;
+            const float hu = 0.5f / static_cast<float>(src->width), hv = 0.5f / static_cast<float>(src->height);
+            parallelFor(0, static_cast<std::size_t>(h), [&](std::size_t row) {
+                const int y = static_cast<int>(row);
+                for (int x = 0; x < w; ++x) {
+                    std::array<float, 4> c;
+                    if (exact) {
+                        const float* t = src->rgba.data() + (static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x)) * 4;
+                        c = {t[0], t[1], t[2], t[3]};
+                    } else {
+                        const float u = std::clamp((static_cast<float>(x) + 0.5f) / static_cast<float>(w), hu, 1.0f - hu);
+                        const float v = std::clamp(1.0f - (static_cast<float>(y) + 0.5f) / static_cast<float>(h), hv, 1.0f - hv);
+                        c = src->sample(u, v);
+                    }
+                    const std::size_t i = index(origin[0] + x, origin[1] + y);
+                    if (n == 1) {
+                        values_[i] = std::clamp(luminance(c), 0.0f, 1.0f);
+                    } else {
+                        for (std::size_t k = 0; k < 4; ++k) values_[i * 4 + k] = std::clamp(c[k], 0.0f, 1.0f);
+                    }
+                }
+            }, 4);
+        }
+        return;
+    }
     if (width_ <= 0 || height_ <= 0) throw std::invalid_argument("TexturePaint: the image has no size");
     if (!scalp.hasUVs()) throw std::invalid_argument("the scalp has no UVs to paint a texture map on");
     const auto n = static_cast<std::size_t>(channels_);
@@ -1236,6 +1306,9 @@ TexturePaint::TexturePaint(const ScalpMesh& scalp, const Texture& image, int cha
         }
     }, 4);
     table_ = texelTable(scalp, width_, height_);
+    layout_ = std::make_shared<UdimLayout>(udimLayoutOf(scalp));
+    tileWidth_ = width_;
+    tileHeight_ = height_;
     dirty_ = TexelRect::all(width_, height_);
 }
 
@@ -1706,9 +1779,38 @@ std::vector<std::uint8_t> TexturePaint::toBytes(int padding) const {
     return bytes;
 }
 
-void TexturePaint::save(const std::string& path, int padding) const { writePng(path, width_, height_, channels_, toBytes(padding)); }
+std::vector<std::uint8_t> TexturePaint::tileBytes(const std::vector<std::uint8_t>& mosaic, int tile) const {
+    const auto n = static_cast<std::size_t>(channels_);
+    const std::array<int, 2> origin = layout_ ? layout_->tileOrigin(tile, tileWidth_, tileHeight_) : std::array<int, 2>{0, 0};
+    std::vector<std::uint8_t> out(static_cast<std::size_t>(tileWidth_) * static_cast<std::size_t>(tileHeight_) * n);
+    for (int y = 0; y < tileHeight_; ++y) {
+        const std::uint8_t* from = mosaic.data() + index(origin[0], origin[1] + y) * n;
+        std::copy(from, from + static_cast<std::size_t>(tileWidth_) * n, out.data() + static_cast<std::size_t>(y) * static_cast<std::size_t>(tileWidth_) * n);
+    }
+    return out;
+}
+
+std::string TexturePaint::save(const std::string& path, int padding) const {
+    if (!udim() && !isUdimPath(path)) {
+        writePng(path, width_, height_, channels_, toBytes(padding));
+        return path;
+    }
+    const std::string pattern = udimPathFor(path);
+    const std::vector<std::uint8_t> mosaic = toBytes(padding);
+    for (const int tile : layout_ ? layout_->tiles : std::vector<int>{kFirstUdimTile}) {
+        writePng(udimTilePath(pattern, tile), tileWidth_, tileHeight_, channels_, tileBytes(mosaic, tile));
+    }
+    // A map that was one image (its scalp's UVs reached another tile since): the image goes, or
+    // readers would keep reading it before the tiles (texture.h).
+    if (isPlainImagePath(path) && pattern != path) {
+        std::error_code ec;
+        std::filesystem::remove(std::filesystem::u8path(path), ec);
+    }
+    return pattern;
+}
 
 std::vector<std::uint8_t> TexturePaint::pngBytes(int padding) const {
+    if (udim()) throw std::logic_error("TexturePaint::pngBytes: a tile set is written tile by tile (save)");
     return storedPngBytes(width_, height_, channels_, toBytes(padding));
 }
 
@@ -1797,6 +1899,9 @@ std::vector<std::uint8_t> TexturePaint::toPreviewBytes() const {
 
 TexelRect TexturePreview::update(TexturePaint& paint, const MapDisplay& display) {
     TexelRect rect = paint.dirty();
+    udim_ = paint.udim() ? paint.udimLayout() : nullptr;
+    tileWidth_ = paint.tileWidth();
+    tileHeight_ = paint.tileHeight();
     if (paint.width() != width_ || paint.height() != height_ || display != display_ || rgba_.empty()) {
         width_ = paint.width();
         height_ = paint.height();
@@ -1988,7 +2093,18 @@ void writePng(const std::string& path, int width, int height, int channels, cons
 }
 
 void writeImagePng(const Texture& image, const std::string& path) {
-    requireOneImage(image);
+    if (image.isUdim()) {
+        // A tile set: each tile there, as its own PNG of the set udimPathFor(path) names.
+        const std::string pattern = udimPathFor(path);
+        const std::vector<int> tiles = image.udimTiles();
+        if (tiles.empty()) throw std::invalid_argument("writeImagePng: the tile set has no tiles");
+        for (const int tile : tiles) {
+            const Texture::Image* t = image.udimTile(tile);
+            if (!t) continue;
+            writeImagePng(Texture(t->width, t->height, t->rgba, t->bits), udimTilePath(pattern, tile));
+        }
+        return;
+    }
     const int w = image.width(), h = image.height();
     if (w <= 0 || h <= 0) throw std::invalid_argument("writeImagePng: the image has no size");
     const std::size_t count = static_cast<std::size_t>(w) * static_cast<std::size_t>(h);
@@ -2058,16 +2174,17 @@ std::vector<float> sampleRootValues(const std::vector<Vec3f>& roots, const std::
 std::vector<Vec3f> vertexSamplePoints(const ScalpMesh& scalp) { return scalp.hasRest() ? scalp.restPoints() : scalp.points(); }
 
 std::vector<float> vertexMapFromTexture(const Texture& image, const ScalpMesh& scalp) {
-    requireOneImage(image);
     if (!scalp.hasUVs()) throw std::invalid_argument("the scalp has no UVs to read a texture map at");
+    const UdimLayout layout = udimLayoutOf(scalp);
     std::vector<float> sum(scalp.pointCount(), 0.0f);
     std::vector<int> count(scalp.pointCount(), 0);
     const auto& uvs = scalp.cornerUVs();
     for (std::size_t tri = 0; tri < scalp.triangleCount(); ++tri) {
+        const int tile = layout.triangleTile[tri];
         for (std::size_t k = 0; k < 3; ++k) {
             const auto v = static_cast<std::size_t>(scalp.triangles()[tri][k]);
             const ScalpMesh::UV& uv = uvs[tri * 3 + k];
-            sum[v] += luminanceAt(image, uv[0], uv[1]);
+            sum[v] += luminanceAt(image, uv[0], uv[1], tile);
             ++count[v];
         }
     }
@@ -2078,16 +2195,17 @@ std::vector<float> vertexMapFromTexture(const Texture& image, const ScalpMesh& s
 std::vector<float> vertexMapFromTexture(const Texture& image, const ScalpMesh& scalp, int channels) {
     requireChannels(channels, "vertexMapFromTexture");
     if (channels == kGrayMap) return vertexMapFromTexture(image, scalp);
-    requireOneImage(image);
     if (!scalp.hasUVs()) throw std::invalid_argument("the scalp has no UVs to read a texture map at");
+    const UdimLayout layout = udimLayoutOf(scalp);
     std::vector<float> sum(scalp.pointCount() * 4, 0.0f);
     std::vector<int> count(scalp.pointCount(), 0);
     const auto& uvs = scalp.cornerUVs();
     for (std::size_t tri = 0; tri < scalp.triangleCount(); ++tri) {
+        const int tile = layout.triangleTile[tri];
         for (std::size_t k = 0; k < 3; ++k) {
             const auto v = static_cast<std::size_t>(scalp.triangles()[tri][k]);
             const ScalpMesh::UV& uv = uvs[tri * 3 + k];
-            const PaintColor c = imageColorAt(image, uv[0], uv[1]);
+            const PaintColor c = imageColorAt(image, uv[0], uv[1], tile);
             for (std::size_t ch = 0; ch < 4; ++ch) sum[v * 4 + ch] += c[ch];
             ++count[v];
         }
@@ -2125,12 +2243,13 @@ TexturePaint textureFromGuides(const GuideSet& guides, const std::string& name, 
     TexturePaint t(scalp, width, height, 0.0f);
     std::vector<Vec3f> points;
     std::vector<std::size_t> texels;
-    for (int y = 0; y < height; ++y) {
-        for (int x = 0; x < width; ++x) {
+    // (The paint's size: a tile set's mosaic is larger than one tile.)
+    for (int y = 0; y < t.height(); ++y) {
+        for (int x = 0; x < t.width(); ++x) {
             if (!t.covered(x, y)) continue;
             const StrandRoot& root = t.root(x, y);
             points.push_back(scalp.restPositionOr(root, t.position(x, y)));
-            texels.push_back(static_cast<std::size_t>(y) * static_cast<std::size_t>(width) + static_cast<std::size_t>(x));
+            texels.push_back(static_cast<std::size_t>(y) * static_cast<std::size_t>(t.width()) + static_cast<std::size_t>(x));
         }
     }
     const std::vector<float> sampled = sampleGuideLayer(guides, name, &scalp, points);
@@ -2146,13 +2265,13 @@ std::vector<float> rootValuesFromVertexMap(const std::vector<float>& values, con
 }
 
 std::vector<float> rootValuesFromTexture(const Texture& image, const ScalpMesh& scalp, const std::vector<StrandRoot>& roots) {
-    requireOneImage(image);
     if (!scalp.hasUVs()) throw std::invalid_argument("the scalp has no UVs to read a texture map at");
+    const UdimLayout layout = udimLayoutOf(scalp);
     std::vector<float> out(roots.size(), 0.0f);
     for (std::size_t i = 0; i < roots.size(); ++i) {
         if (!scalp.contains(roots[i])) continue;
         const ScalpMesh::UV uv = scalp.uvAt(roots[i]);
-        out[i] = std::clamp(luminanceAt(image, uv[0], uv[1]), 0.0f, 1.0f);
+        out[i] = std::clamp(luminanceAt(image, uv[0], uv[1], faceTile(layout, roots[i].face)), 0.0f, 1.0f);
     }
     return out;
 }
@@ -2237,31 +2356,48 @@ TexturePaint projectTexture(const Texture& image, int channels, const ScalpMesh&
 TexturePaint projectTexture(const Texture& image, int channels, const ScalpMapping& given, int width, int height) {
     const ScalpMesh& from = given.from();
     const ScalpMesh& to = given.to();
-    requireOneImage(image);
     requireChannels(channels, "projectTexture");
     if (!from.hasUVs()) throw std::invalid_argument("the old scalp has no UVs to read the texture map at");
     if (!to.hasUVs()) throw std::invalid_argument("the new scalp has no UVs to paint a texture map on");
-    if (width <= 0) width = image.width();
-    if (height <= 0) height = image.height();
+    // One image or a tile set onto one image or a tile set (udim.h): each texel of `to`'s map
+    // (its mosaic's when `to` leaves tile 1001) reads the image on the old triangle's own tile.
+    // The size: a tile's of the image (the first of the old scalp's tiles a tile set has).
+    const UdimLayout fromLayout = udimLayoutOf(from);
+    if (width <= 0 || height <= 0) {
+        const Texture::Image* first = nullptr;
+        for (const int tile : fromLayout.tiles) {
+            if ((first = tileImageOf(image, tile))) break;
+        }
+        if (!first && image.isUdim()) {
+            for (const int tile : image.udimTiles()) {
+                if ((first = image.udimTile(tile))) break;
+            }
+        }
+        if (!first) throw std::invalid_argument("projectTexture: the image has no tile to read");
+        if (width <= 0) width = first->width;
+        if (height <= 0) height = first->height;
+    }
     TexturePaint out = channels == kColorMap ? TexturePaint(to, width, height, PaintColor{0.0f, 0.0f, 0.0f, 1.0f})
                                              : TexturePaint(to, width, height, 0.0f);
     const ProjectionPose pose(given);
     const ScalpMapping& mapping = pose.mapping(given);
     const auto n = static_cast<std::size_t>(channels);
+    const int mw = out.width(), mh = out.height();
     std::vector<float>& values = out.values();
-    parallelFor(0, static_cast<std::size_t>(height), [&](std::size_t row) {
+    parallelFor(0, static_cast<std::size_t>(mh), [&](std::size_t row) {
         const int y = static_cast<int>(row);
-        for (int x = 0; x < width; ++x) {
+        for (int x = 0; x < mw; ++x) {
             if (!out.covered(x, y)) continue;
             const Vec3f p = pose.rest ? to.restPositionOr(out.root(x, y), out.position(x, y)) : out.position(x, y);
             const SurfacePoint sp = mapping.back(p, out.root(x, y));
             if (sp.root.face < 0) continue;
             const ScalpMesh::UV uv = from.uvAt(sp.root);
-            const std::size_t i = row * static_cast<std::size_t>(width) + static_cast<std::size_t>(x);
+            const int tile = faceTile(fromLayout, sp.root.face);
+            const std::size_t i = row * static_cast<std::size_t>(mw) + static_cast<std::size_t>(x);
             if (n == 1) {
-                values[i] = std::clamp(luminanceAt(image, uv[0], uv[1]), 0.0f, 1.0f);
+                values[i] = std::clamp(luminanceAt(image, uv[0], uv[1], tile), 0.0f, 1.0f);
             } else {
-                const PaintColor c = imageColorAt(image, uv[0], uv[1]);
+                const PaintColor c = imageColorAt(image, uv[0], uv[1], tile);
                 for (std::size_t k = 0; k < 4; ++k) values[i * 4 + k] = std::clamp(c[k], 0.0f, 1.0f);
             }
         }
@@ -2344,6 +2480,128 @@ std::vector<std::string> projectScalpMaps(ScalpMaps& maps, const std::set<std::s
         }
     }
     return projected;
+}
+
+// ---- New maps ----------------------------------------------------------------------------------
+
+std::vector<float> newVertexMapValues(const ScalpMesh& scalp, int channels, const PaintColor& fill,
+                                      const std::vector<std::int32_t>& faces) {
+    requireChannels(channels, "newVertexMapValues");
+    const PaintColor everywhere = faces.empty() ? fill : PaintColor{0.0f, 0.0f, 0.0f, 1.0f};
+    std::vector<float> values;
+    values.reserve(scalp.pointCount() * static_cast<std::size_t>(channels));
+    for (std::size_t v = 0; v < scalp.pointCount(); ++v) {
+        if (channels == kColorMap) {
+            values.insert(values.end(), everywhere.begin(), everywhere.end());
+        } else {
+            values.push_back(everywhere[0]);
+        }
+    }
+    if (!faces.empty()) fillVertexMapFaces(values, channels, kAllChannels, fill, PaintMode::Replace, scalp, faces);
+    return values;
+}
+
+TexturePaint newTextureMapPaint(const ScalpMesh& scalp, int channels, const PaintColor& fill, int resolution,
+                                const std::vector<std::int32_t>& faces) {
+    requireChannels(channels, "newTextureMapPaint");
+    if (!scalp.hasUVs()) throw std::invalid_argument("the scalp has no UVs to paint a texture map on");
+    const int size = std::clamp(resolution, BrushToolSettings::kMinPaintResolution, BrushToolSettings::kMaxPaintResolution);
+    const PaintColor everywhere = faces.empty() ? fill : PaintColor{0.0f, 0.0f, 0.0f, 1.0f};
+    TexturePaint paint = channels == kColorMap ? TexturePaint(scalp, size, size, everywhere) : TexturePaint(scalp, size, size, everywhere[0]);
+    if (!faces.empty()) paint.fillTriangles(polygonTriangles(scalp, faces), fill, kAllChannels);
+    return paint;
+}
+
+bool addGuideLayer(GuideHierarchy& h, const std::string& name, float value, const ScalpMesh* scalp,
+                   const std::vector<std::int32_t>& faces) {
+    const std::vector<std::uint8_t> triangles = scalp && !faces.empty() ? polygonTriangles(*scalp, faces) : std::vector<std::uint8_t>{};
+    auto rootedOn = [&](const HierarchyGuide& g) {
+        return g.root.face >= 0 && static_cast<std::size_t>(g.root.face) < triangles.size() && triangles[static_cast<std::size_t>(g.root.face)] != 0;
+    };
+    bool any = false;
+    for (const HierarchyGuide& g : h.guides()) {
+        if (g.parent != kNoGuide) continue;  // children inherit their primary's
+        h.setAttribute(g.id, name, faces.empty() || rootedOn(g) ? value : 0.0f);
+        any = true;
+    }
+    return any;
+}
+
+MapConverted convertMap(const std::string& name, const MapSource& from, const std::string& to, const ScalpMesh& cage,
+                        GuideHierarchy& guides, int resolution) {
+    if (to != "guides" && to != "vertices" && to != "texture") throw std::invalid_argument("a map's kind is guides, vertices or texture");
+    if (from.kind != "guides" && from.kind != "vertices" && from.kind != "texture") throw std::invalid_argument("no map " + name + " to convert");
+    MapConverted out;
+    if (from.kind == to) return out;
+    const int channels = from.channels;
+    if (from.kind == "vertices" && from.vertices.size() != cage.pointCount() * static_cast<std::size_t>(channels)) {
+        throw std::invalid_argument("map " + name + " does not fit this scalp");
+    }
+    if (from.kind == "texture" && !from.image) throw std::invalid_argument("map " + name + "'s image does not read");
+    const GuideSet flat = from.kind == "guides" ? guides.flatten() : GuideSet{};
+    if (to == "vertices") {
+        out.vertices = from.kind == "guides" ? vertexMapFromGuides(flat, name, cage) : vertexMapFromTexture(*from.image, cage, channels);
+    } else if (to == "texture") {
+        if (!cage.hasUVs()) throw std::invalid_argument("the scalp has no UVs for a texture map");
+        const int size = std::clamp(resolution, BrushToolSettings::kMinPaintResolution, BrushToolSettings::kMaxPaintResolution);
+        out.texture = std::make_shared<TexturePaint>(from.kind == "guides" ? textureFromGuides(flat, name, cage, size, size)
+                                                                           : textureFromVertexMap(from.vertices, channels, cage, size, size));
+    }
+    if (from.kind == "guides") guides.removeAttribute(name);
+    if (to == "guides") {
+        out.colorLost = channels == kColorMap;
+        const std::vector<float> gray = from.kind == "vertices" && channels == kColorMap ? convertMapChannels(from.vertices, kColorMap, kGrayMap)
+                                                                                         : from.vertices;
+        // Each guide's root as it lies on the cage (where vertex maps are painted).
+        GuideHierarchy onCage = guides;
+        onCage.evaluate(&cage);
+        std::vector<StrandRoot> roots;
+        for (const HierarchyGuide& g : onCage.guides()) roots.push_back(g.root);
+        const std::vector<float> values = from.kind == "vertices" ? rootValuesFromVertexMap(gray, cage, roots) : rootValuesFromTexture(*from.image, cage, roots);
+        std::size_t k = 0;
+        for (const HierarchyGuide& g : onCage.guides()) guides.setAttribute(g.id, name, values[k++]);
+    }
+    return out;
+}
+
+void fillGuideLayer(GuideHierarchy& h, const std::string& name, float value, PaintMode mode, const std::vector<GuideId>& only,
+                    const ScalpMesh* scalp, const std::vector<std::int32_t>& faces) {
+    const std::vector<std::uint8_t> triangles = scalp && !faces.empty() ? polygonTriangles(*scalp, faces) : std::vector<std::uint8_t>{};
+    const std::set<GuideId> picked(only.begin(), only.end());
+    for (const HierarchyGuide& g : h.guides()) {
+        if (!picked.empty() && !picked.count(g.id)) continue;
+        if (!faces.empty() && !(g.root.face >= 0 && static_cast<std::size_t>(g.root.face) < triangles.size() &&
+                                triangles[static_cast<std::size_t>(g.root.face)] != 0)) {
+            continue;
+        }
+        float current = 0.0f;
+        h.effectiveAttribute(g, name, &current);
+        h.setAttribute(g.id, name, compositePaintValue(current, value, mode));
+    }
+}
+
+void fillVertexMap(std::vector<float>& values, int channels, unsigned mask, const PaintColor& fill, PaintMode mode, const ScalpMesh& scalp,
+                   const std::vector<std::int32_t>& faces) {
+    const auto per = static_cast<std::size_t>(channels);
+    if (values.size() != scalp.pointCount() * per) values = newVertexMapValues(scalp, channels, PaintColor{0.0f, 0.0f, 0.0f, 1.0f});
+    const PaintColor target = per == 1 ? PaintColor{fill[0], fill[0], fill[0], fill[0]} : fill;
+    if (!faces.empty()) {
+        fillVertexMapFaces(values, channels, mask, target, mode, scalp, faces);
+    } else {
+        fillMapValues(values, channels, mask, target, mode);
+    }
+}
+
+void fillTexturePaint(TexturePaint& paint, unsigned mask, const PaintColor& fill, PaintMode mode, const ScalpMesh& scalp,
+                      const std::vector<std::int32_t>& faces) {
+    const PaintColor target = paint.channels() == kColorMap ? fill : PaintColor{fill[0], fill[0], fill[0], fill[0]};
+    if (!faces.empty()) {
+        paint.fillTriangles(polygonTriangles(scalp, faces), target, mask, mode);
+    } else if (paint.channels() == kColorMap) {
+        paint.fill(fill, mask, mode);
+    } else {
+        paint.fill(fill[0], mode);
+    }
 }
 
 }  // namespace groomlab

@@ -384,7 +384,9 @@ TEST(ParamUse, EveryDeclaredParamIsReadWhereItShows) {
                     const ParamSet& params = *paramsPtr;
                     const std::unique_ptr<Operator> op = registry.create(type);
                     op->params() = params;
-                    op->setNodeVersion(inst.version);
+                    // (At the operator's newest version, whatever the preset's node was saved with:
+                    // a param shows for what the newest does; an older node offers Upgrade. A Braid
+                    // of version 1 reads neither separate nor inflate.)
                     op->setNodePath(inst.path);
                     auto log = std::make_shared<ParamReadLog>();
                     op->params().setReadLog(log);

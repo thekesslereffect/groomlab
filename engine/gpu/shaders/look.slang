@@ -44,7 +44,7 @@
 
 #define GROUP_SIZE 64
 #define POINT_GROUP_SIZE 256
-#define CENTER_SAMPLES 32  // Clump's centers (operator_state.h kClumpCenterSamples)
+#define CURL_SAMPLES 32  // a Curl's axes (a clump's: look_engine.cpp kCurlAxisSamples); Clump's centers: clumpSamples()
 #define MAX_SAMPLES 64     // Interpolate's guide samples at most (more: the CPU's)
 #define CPU_MAX_SAMPLES 512  // held whole on the CPU engine (more: streamed, interpolateStreamed)
 
@@ -149,7 +149,7 @@ float3 anyPerpendicular(float3 v) {
     return normalized(cross(v, axis));
 }
 
-// look_ops.cpp frameSeed: the normal a curve's frames start from: the root's normal (zero: none)
+// The normal a curve's frames start from: the root's normal (zero: none)
 // square to the first segment, else anyPerpendicular of the segment.
 float3 frameSeed(float3 normal, float3 first, float3 second) {
     const float3 t = second - first;
@@ -166,7 +166,7 @@ struct Frame {
     float3 t, n, b;
 };
 
-// look_ops.cpp frameBetween: the frame between sample frames a and b at f, made orthonormal again.
+// The frame between sample frames a and b at f, made orthonormal again.
 Frame frameBetween(Frame a, Frame b, float f) {
     if (f <= 0.0f) return a;
     if (f >= 1.0f) return b;
@@ -2325,9 +2325,14 @@ void LengthCS(uint3 id : SV_DispatchThreadID) {
 //
 // Center c is strand gAux0[4c] of the points in, moved by gAux0[4c + 1..3] (a Clump's centers on
 // the scalp: its axis from that strand's root to its spot; zero otherwise), resampled by arc length
-// to CENTER_SAMPLES points into gOut at c * CENTER_SAMPLES; with gFlag.y, its rotation-minimizing frames (tangent, normal,
-// binormal per sample) at word gAux.y. gFlag.x: the centers; gFlag.z: the curves are in gOut
-// already (the CPU's, or ShareCS's), only their frames are made.
+// to clumpSamples() points into gOut at c * clumpSamples(); with gFlag.y, its rotation-minimizing
+// frames (tangent, normal, binormal per sample) at word gAux.y. gFlag.x: the centers; gFlag.z: the
+// curves are in gOut already (the CPU's, or ShareCS's), only their frames are made.
+
+// A Clump's centers' samples each (ClumpInputs::samples: kClumpCenterSamples, more for centers that
+// curl), the same for every center of the node.
+uint clumpSamples() { return gDispatch.y; }
+float3 outPoint(uint p) { return asfloat(gOut.Load3(p * 12)); }
 
 void storeFrame(uint at, float3 t, float3 nrm, float3 b) {
     gOut.Store3(at * 4, asuint(t));
@@ -2335,19 +2340,20 @@ void storeFrame(uint at, float3 t, float3 nrm, float3 b) {
     gOut.Store3((at + 6) * 4, asuint(b));
 }
 
-// frames.cpp rotationMinimizingFramesInto(pts, CENTER_SAMPLES, frameSeed(normal, pts[0], pts[1])):
-// the frames into gOut from word `at`, 9 a sample.
-void minimizingFrames(float3 pts[CENTER_SAMPLES], float3 normal, uint at) {
-    float3 T = normalized(pts[1] - pts[0]);
-    const float3 init = frameSeed(normal, pts[0], pts[1]);
+// frames.cpp rotationMinimizingFramesInto(pts, samples, frameSeed(normal, pts[0], pts[1])), the
+// points those in gOut from point `base`: the frames into gOut from word `at`, 9 a sample.
+void minimizingFrames(uint base, uint samples, float3 normal, uint at) {
+    float3 T = normalized(outPoint(base + 1) - outPoint(base));
+    const float3 init = frameSeed(normal, outPoint(base), outPoint(base + 1));
     const float3 n0 = init - T * dot(init, T);
     float3 N = len3(n0) > 1e-6f ? normalized(n0) : anyPerpendicular(T);
     float3 B = cross(T, N);
     storeFrame(at, T, N, B);
-    for (uint i = 0; i + 1 < CENTER_SAMPLES; ++i) {
+    for (uint i = 0; i + 1 < samples; ++i) {
         const uint k = i + 1;
-        const float3 bt = normalized(k + 1 == CENTER_SAMPLES ? pts[k] - pts[k - 1] : pts[k + 1] - pts[k - 1]);
-        const float3 v1 = pts[k] - pts[i];
+        const float3 bt = normalized(k + 1 == samples ? outPoint(base + k) - outPoint(base + k - 1)
+                                                      : outPoint(base + k + 1) - outPoint(base + k - 1));
+        const float3 v1 = outPoint(base + k) - outPoint(base + i);
         const float c1 = dot(v1, v1);
         if (!(c1 < 1e-12f)) {  // a repeated point carries the frame over
             const float3 rL = N - v1 * (2.0f / c1 * dot(v1, N));
@@ -2369,37 +2375,37 @@ void minimizingFrames(float3 pts[CENTER_SAMPLES], float3 normal, uint at) {
 void CentersCS(uint3 id : SV_DispatchThreadID) {
     const uint c = threadIndex(id, GROUP_SIZE);
     if (c >= gFlag.x) return;
-    const uint base = c * CENTER_SAMPLES;
-    float3 pts[CENTER_SAMPLES];
-    if (gFlag.z != 0) {
-        for (uint i = 0; i < CENTER_SAMPLES; ++i) pts[i] = asfloat(gOut.Load3((base + i) * 12));
-    } else {
+    const uint samples = clumpSamples(), base = c * samples;
+    // The curve into gOut (made here, else there already), read back from there.
+    if (gFlag.z == 0) {
         const uint s = gAux0.Load(c * 16);
         const float3 moved = asfloat(gAux0.Load3(c * 16 + 4));
         const uint begin = strandBegin(s), count = strandCountOf(s);
         if (count < 2) {
             const float3 p = count == 1 ? loadPoint(begin) + moved : float3(0, 0, 0);
-            for (uint i = 0; i < CENTER_SAMPLES; ++i) pts[i] = p;
+            for (uint i = 0; i < samples; ++i) storePoint(gOut, base + i, p);
         } else {
-            const float step = strandLength(begin, count) / float(CENTER_SAMPLES - 1);
+            const float step = strandLength(begin, count) / float(samples - 1);
             ArcWalk w = arcWalkStart(begin);
-            for (uint i = 0; i < CENTER_SAMPLES; ++i) pts[i] = arcWalkAt(w, begin, count, step * float(i)) + moved;
+            for (uint i = 0; i < samples; ++i) storePoint(gOut, base + i, arcWalkAt(w, begin, count, step * float(i)) + moved);
         }
-        for (uint i = 0; i < CENTER_SAMPLES; ++i) storePoint(gOut, base + i, pts[i]);
     }
     if (gFlag.w != 0) {
         // Its cumulative arc lengths at its samples, at word gAux.w.
         float arc = 0.0f;
         gOut.Store((gAux.w + base) * 4, asuint(arc));
-        for (uint i = 1; i < CENTER_SAMPLES; ++i) {
-            arc = arc + len3(pts[i] - pts[i - 1]);
+        float3 previous = outPoint(base);
+        for (uint i = 1; i < samples; ++i) {
+            const float3 p = outPoint(base + i);
+            arc = arc + len3(p - previous);
             gOut.Store((gAux.w + base + i) * 4, asuint(arc));
+            previous = p;
         }
     }
     if (gFlag.y == 0) return;
     // The normals follow the frames in the buffer, a float4 a center.
-    const float3 rootNormal = asfloat(gOut.Load3((gAux.y + gFlag.x * CENTER_SAMPLES * 9 + c * 4) * 4));
-    minimizingFrames(pts, rootNormal, gAux.y + base * 9);
+    const float3 rootNormal = asfloat(gOut.Load3((gAux.y + gFlag.x * samples * 9 + c * 4) * 4));
+    minimizingFrames(base, samples, rootNormal, gAux.y + base * 9);
 }
 
 // ---- Clump's copy (ClumpOp::shareCenters), on the centers it made --------------------------------
@@ -2414,11 +2420,11 @@ void CentersCS(uint3 id : SV_DispatchThreadID) {
 void ShareCS(uint3 id : SV_DispatchThreadID) {
     const uint c = threadIndex(id, GROUP_SIZE);
     if (c >= gFlag.x) return;
-    const uint base = c * CENTER_SAMPLES;
+    const uint samples = clumpSamples(), base = c * samples;
     const uint taken = gAux0.Load(c * 36);
     const float3 mine0 = loadPoint(base);
     storePoint(gOut, base, mine0);
-    for (uint i = 1; i < CENTER_SAMPLES; ++i) {
+    for (uint i = 1; i < samples; ++i) {
         const float3 mine = loadPoint(base + i);
         if (taken == 0) {
             storePoint(gOut, base + i, mine);
@@ -2426,7 +2432,7 @@ void ShareCS(uint3 id : SV_DispatchThreadID) {
         }
         float3 shape = float3(0.0f, 0.0f, 0.0f);
         for (uint j = 0; j < taken; ++j) {
-            const uint other = gAux0.Load(c * 36 + (1 + j) * 4) * CENTER_SAMPLES;
+            const uint other = gAux0.Load(c * 36 + (1 + j) * 4) * samples;
             const float w = asfloat(gAux0.Load(c * 36 + (5 + j) * 4));
             PRECISE float3 part = (loadPoint(other + i) - loadPoint(other)) * w;
             shape = shape + part;
@@ -2439,7 +2445,7 @@ void ShareCS(uint3 id : SV_DispatchThreadID) {
 // ---- Clump: each strand toward its center --------------------------------------------------------
 //
 // gAux0: each strand's center (0xffffffff: not clumped); gAux1: the centers' curves
-// (CENTER_SAMPLES points each), their frames at word gAux.y (9 a sample; made with a volume or a
+// (clumpSamples() points each), their frames at word gAux.y (9 a sample; made with a volume or a
 // flatness), their root normals after them (a float4 a center), and their variation at word
 // gAux.z (a float4 a center: its strength's draw, its volume's, its random flatten's turn).
 // gValue: strength (mapped: field 0), volumize (mapped: field 1, per strand: the lock's radius),
@@ -2452,28 +2458,34 @@ void ShareCS(uint3 id : SV_DispatchThreadID) {
 // negative strength repels (look_ops.cpp repelled), off the skin where the root normals' block
 // says the root is on it (w 1).
 
-float3 centerPoint(uint c, uint k) { return asfloat(gAux1.Load3((c * CENTER_SAMPLES + k) * 12)); }
+float3 centerPoint(uint c, uint k) { return asfloat(gAux1.Load3((c * clumpSamples() + k) * 12)); }
 
 // curve.h pointAlong over center c: t by point index.
 float3 centerAlong(uint c, float t) {
+    const uint samples = clumpSamples();
     t = clamp(t, 0.0f, 1.0f);
-    const float x = t * float(CENTER_SAMPLES - 1);
-    const uint i = x <= 0.0f ? 0 : min(uint(x), CENTER_SAMPLES - 2);
+    const float x = t * float(samples - 1);
+    const uint i = x <= 0.0f ? 0 : min(uint(x), samples - 2);
     const float f = x - float(i);
     return centerPoint(c, i) * (1.0f - f) + centerPoint(c, i + 1) * f;
 }
 
-// Where arc length `arc` lies on center c, its cumulative arc lengths
-// `arcs`: the sample k at or before it (walked on from the last) and the share f to the next.
-void centerSampleAt(float arcs[CENTER_SAMPLES], float arc, inout uint k, out float f) {
-    while (k + 2 < CENTER_SAMPLES && arcs[k + 1] < arc) ++k;
-    const float span = arcs[k + 1] - arcs[k];
-    f = span > 0.0f ? clamp((arc - arcs[k]) / span, 0.0f, 1.0f) : 0.0f;
+// Center c's cumulative arc length at sample k (CentersCS made them, at word gAux.w).
+float centerArc(uint c, uint k) { return asfloat(gAux1.Load((gAux.w + c * clumpSamples() + k) * 4)); }
+
+// Where arc length `arc` lies on center c: the sample k at or before it (walked on from the last)
+// and the share f to the next.
+void centerSampleAt(uint c, float arc, inout uint k, out float f) {
+    const uint samples = clumpSamples();
+    while (k + 2 < samples && centerArc(c, k + 1) < arc) ++k;
+    const float below = centerArc(c, k), above = centerArc(c, k + 1);
+    const float span = above - below;
+    f = span > 0.0f ? clamp((arc - below) / span, 0.0f, 1.0f) : 0.0f;
 }
 
-// Center c's frame at sample k (CentersCS wrote it at word gAux.y + (c * CENTER_SAMPLES + k) * 9).
+// Center c's frame at sample k (CentersCS wrote it at word gAux.y + (c * clumpSamples() + k) * 9).
 Frame centerFrame(uint c, uint k) {
-    const uint at = gAux.y + (c * CENTER_SAMPLES + k) * 9;
+    const uint at = gAux.y + (c * clumpSamples() + k) * 9;
     Frame fr;
     fr.t = asfloat(gAux1.Load3(at * 4));
     fr.n = asfloat(gAux1.Load3((at + 3) * 4));
@@ -2496,8 +2508,9 @@ float3 repelled(float3 p, uint c, float centerLength, float arc, float amount, f
                 float3 skin, float t) {
     const float along = centerLength > 0.0f ? min(arc / centerLength, 1.0f) : 0.0f;
     const float3 center = centerAlong(c, along);
-    const uint k = uint(floor(along * float(CENTER_SAMPLES - 1) + 0.5f));
-    const float3 tangent = normalized(centerPoint(c, min(k + 1, CENTER_SAMPLES - 1)) - centerPoint(c, k > 0 ? k - 1 : 0));
+    const uint samples = clumpSamples();
+    const uint k = uint(floor(along * float(samples - 1) + 0.5f));
+    const float3 tangent = normalized(centerPoint(c, min(k + 1, samples - 1)) - centerPoint(c, k > 0 ? k - 1 : 0));
     const float3 d = p - center;
     const float3 across = d - tangent * dot(d, tangent);
     const float past = max(arc - centerLength, 0.0f);
@@ -2561,7 +2574,7 @@ void ClumpCS(uint3 id : SV_DispatchThreadID) {
         } else if (gFlag.z == 2u) {
             thinWay = cross(first.t, asfloat(gFlag2.xyz));
         } else {
-            const float3 centerNormal = asfloat(gAux1.Load3((gAux.y + gFlag.w * CENTER_SAMPLES * 9 + c * 4) * 4));
+            const float3 centerNormal = asfloat(gAux1.Load3((gAux.y + gFlag.w * clumpSamples() * 9 + c * 4) * 4));
             if (dot(centerNormal, centerNormal) > 0.0f) thinWay = centerNormal;
         }
         // In the root frame (along the axis there: its normal).
@@ -2589,10 +2602,9 @@ void ClumpCS(uint3 id : SV_DispatchThreadID) {
     // the point is of its strand's (root to root, tip to tip: the strand takes the center's length
     // as much as it clumps); extend, toward the center's point as far from the root as the point is
     // along its strand, and past the center's tip on along its last way (the strand keeps its own).
-    // (CentersCS made them, at word gAux.w.)
-    float arcs[CENTER_SAMPLES];
-    for (uint a = 0; a < CENTER_SAMPLES; ++a) arcs[a] = asfloat(gAux1.Load((gAux.w + c * CENTER_SAMPLES + a) * 4));
-    const float centerLength = arcs[CENTER_SAMPLES - 1];
+    // (CentersCS made them, at word gAux.w: centerArc.)
+    const uint samples = clumpSamples();
+    const float centerLength = centerArc(c, samples - 1);
     const bool extend = gFlag.y != 0;
     float strandLength = 0.0f;  // (fit: the strand's length as it came)
     if (!extend) {
@@ -2624,7 +2636,7 @@ void ClumpCS(uint3 id : SV_DispatchThreadID) {
         }
     }
     // pastTip extend: past the center's tip, on along its last segment's way.
-    const float3 tipWay = normalized(centerPoint(c, CENTER_SAMPLES - 1) - centerPoint(c, CENTER_SAMPLES - 2));
+    const float3 tipWay = normalized(centerPoint(c, samples - 1) - centerPoint(c, samples - 2));
     float arc = 0.0f;  // the strand's length up to point i, as it came
     uint k = 0;        // the center's sample at or before it
     float3 previous = loadPoint(begin);
@@ -2641,7 +2653,7 @@ void ClumpCS(uint3 id : SV_DispatchThreadID) {
             const float w = clamp(raw, 0.0f, 1.0f);
             float f = 0.0f;
             const float along = extend ? arc : min(arc * fitScale, centerLength);  // (fit: by share)
-            centerSampleAt(arcs, along, k, f);
+            centerSampleAt(c, along, k, f);
             float3 at = centerPoint(c, k) * (1.0f - f) + centerPoint(c, k + 1) * f;
             if (extend && arc > centerLength) at = at + tipWay * (arc - centerLength);  // pastTip extend
             if (radius > 0.0f) {
@@ -2720,6 +2732,28 @@ float3 kinkAt(float3 base, float u) {
     const float3 below = kinkKnot(base, k), above = kinkKnot(base, k + 1.0f);
     return below + (above - below) * (u - k);
 }
+// kinkAt along a strand: the knots around the last point kept (points between the same two knots
+// read them again; a point past the upper one keeps it as its lower), so a strand draws each knot
+// once, not twice a point. kinkAt's value, bit for bit.
+struct KinkKnots {
+    float k;
+    float3 below, above;
+    bool held;
+}
+float3 kinkAlong(inout KinkKnots knots, float3 base, float u) {
+    const float k = floor(u);
+    if (!knots.held || k != knots.k) {
+        if (knots.held && k == knots.k + 1.0f) {
+            knots.below = knots.above;
+        } else {
+            knots.below = kinkKnot(base, k);
+        }
+        knots.above = kinkKnot(base, k + 1.0f);
+        knots.k = k;
+        knots.held = true;
+    }
+    return knots.below + (knots.above - knots.below) * (u - k);
+}
 
 // The noise's amplitude at point i of n of strand s (the set's point p); 0 where it has none.
 float noiseAmplitude(uint s, uint i, uint n, uint p) {
@@ -2747,17 +2781,54 @@ float3 noiseAt(uint s, uint i, uint n, uint p, float3 v) {
     return v + vectorNoise(q, spacing) * a;
 }
 
+// A strand's points past its root moved by the noise: noiseAt's values, bit for bit, with what is
+// the strand's taken once (its length in world space, not summed again at every point; kinky, its
+// knots: kinkAlong).
+void noiseStrand(uint s, uint begin, uint n) {
+    const float length = gFlag.z == 0u && gFlag.y != 0u ? strandLength(begin, n) : 0.0f;
+    const float3 base = strandData(s).xyz;
+    KinkKnots knots;
+    knots.k = 0.0f;
+    knots.below = float3(0.0f, 0.0f, 0.0f);
+    knots.above = float3(0.0f, 0.0f, 0.0f);
+    knots.held = false;
+    for (uint i = 1; i < n; ++i) {
+        const float3 v = loadPoint(begin + i);
+        const float a = noiseAmplitude(s, i, n, begin + i);
+        float3 moved = v;
+        if (a != 0.0f) {
+            const float t = paramAt(i, n);
+            if (gFlag.z != 0u) {
+                moved = v + kinkAlong(knots, base, t * gValue.y) * a;
+            } else {
+                const float3 q = gFlag.y != 0 ? v * gValue.y : base + float3(0, 0, t * gValue.y);
+                const float segments = float(n - 1);
+                const float spacing = gFlag.y != 0 ? length * gValue.y / segments : gValue.y / segments;
+                moved = v + vectorNoise(q, spacing) * a;
+            }
+        }
+        storePoint(gOut, begin + i, moved);
+    }
+}
+
 // Kinky in world space: knots from the noise at the root, by the arc length (as it came).
 void noiseKinkyWorld(uint s, uint begin, uint n) {
     float3 previous = loadPoint(begin);
     const float3 base = previous * gValue.y;
     float arc = 0.0f;
+    KinkKnots knots;
+    knots.k = 0.0f;
+    knots.below = float3(0.0f, 0.0f, 0.0f);
+    knots.above = float3(0.0f, 0.0f, 0.0f);
+    knots.held = false;
     for (uint i = 1; i < n; ++i) {
         const float3 v = loadPoint(begin + i);
         arc += len3(v - previous);
         previous = v;
         const float a = noiseAmplitude(s, i, n, begin + i);
-        storePoint(gOut, begin + i, a == 0.0f ? v : v + kinkAt(base, arc * gValue.y) * a);
+        float3 moved = v;
+        if (a != 0.0f) moved = v + kinkAlong(knots, base, arc * gValue.y) * a;
+        storePoint(gOut, begin + i, moved);
     }
 }
 
@@ -2779,7 +2850,7 @@ float3 cachedNoise(inout NoiseCache c, float3 p) {
 // The CPU's NoiseCS: smooth noise in strand space through the strand's cache.
 void noiseStrandAlone(uint s, uint begin, uint n) {
     if (gFlag.z != 0u || gFlag.y != 0u || n < 2) {  // kinky or world space: as the GPU's
-        for (uint i = 1; i < n; ++i) storePoint(gOut, begin + i, noiseAt(s, i, n, begin + i, loadPoint(begin + i)));
+        noiseStrand(s, begin, n);
         return;
     }
     // Each octave's seed and its weight at the strand's spacing (vectorNoise's: octaveWeights).
@@ -2823,7 +2894,7 @@ void NoiseCS(uint3 id : SV_DispatchThreadID) {
     case cpp:
         noiseStrandAlone(s, begin, n);
     default:
-        for (uint i = 1; i < n; ++i) storePoint(gOut, begin + i, noiseAt(s, i, n, begin + i, loadPoint(begin + i)));
+        noiseStrand(s, begin, n);
     }
 }
 
@@ -2896,7 +2967,7 @@ void NoisePointsCS(uint3 id : SV_DispatchThreadID) {
 // strand's numbers: its Rng's four draws (phase, radius and frequency variation, the plane of a
 // wave or zigzag; their bits the spacing noise's key). By clump: gAux0 each strand's clump (0xffffffff: alone), gAux1 the clumps'
 // axes as CurlAxesCS made them, gAux2 the clumps' numbers (8 floats: the normal, then the draw's
-// four). Each strand curls about an axis: its clump's, or its own points (at most CENTER_SAMPLES,
+// four). Each strand curls about an axis: its clump's, or its own points (at most CURL_SAMPLES,
 // else that many on the curve through them), walked along with its points (CurlCS); weighted, its
 // own axis is walked once before to its tip for the stretch. The GPU runs a Curl that adds no
 // points (look_chain.cpp).
@@ -3029,7 +3100,7 @@ float3 strandSlopeExact(uint begin, uint n, uint i) {
     const uint which = i == 0u ? 0u : i + 1u == n ? 2u : 1u;
     return slopeOf3Exact(loadPoint(begin + a), loadPoint(begin + a + 1), loadPoint(begin + a + 2), which);
 }
-// curl_op.cpp Curve::pointAt, exactly.
+// curvePointAt (below), exactly.
 float3 curvePointAtExact(uint begin, uint n, float t) {
     if (n == 1u) return loadPoint(begin);
     PRECISE float x = t * float(n - 1);
@@ -3100,7 +3171,7 @@ float curlStretchedShare(float r, float q, float f) {
 // The stretch at each of an axis's `samples` samples, into `hang` (each
 // sample's max(0, tangent . weightDirection) on the way in), from `turns` (its unweighted turns
 // from the root): the hang smoothed by two passes of 1-2-1, times the turns below.
-void curlStretchOf(inout float hang[CENTER_SAMPLES], float turns[CENTER_SAMPLES], uint samples) {
+void curlStretchOf(inout float hang[CURL_SAMPLES], float turns[CURL_SAMPLES], uint samples) {
     const uint last = samples - 1u;
     for (uint pass = 0; pass < 2u; ++pass) {
         float before = hang[0];  // sample k - 1's, as the pass found it
@@ -3156,7 +3227,7 @@ float3 strandSlope(uint begin, uint n, uint i) {
     const uint which = i == 0u ? 0u : i + 1u == n ? 2u : 1u;
     return slopeOf3(loadPoint(begin + a), loadPoint(begin + a + 1), loadPoint(begin + a + 2), which);
 }
-// curl_op.cpp Curve::pointAt: the point at share t of the strand's points, on its curve.
+// The point at share t of the strand's points, on its curve.
 float3 curvePointAt(uint begin, uint n, float t) {
     if (n == 1u) return loadPoint(begin);
     const float x = t * float(n - 1);
@@ -3177,7 +3248,7 @@ struct AxisWalk {
     Frame f;
     float arc, parc;
 };
-// Sample k of the strand's own axis: its own points, or CENTER_SAMPLES on its curve.
+// Sample k of the strand's own axis: its own points, or CURL_SAMPLES on its curve.
 float3 ownAxisSample(uint begin, uint n, uint samples, uint k) {
     return samples == n ? loadPoint(begin + k) : curvePointAt(begin, n, float(k) / float(samples - 1u));
 }
@@ -3199,7 +3270,7 @@ float3 ownAxisSampleExact(uint begin, uint n, uint samples, uint k) {
 }
 AxisWalk ownAxisStart(uint begin, uint n, float3 normal) {
     AxisWalk w;
-    w.samples = min(n, uint(CENTER_SAMPLES));
+    w.samples = min(n, uint(CURL_SAMPLES));
     w.k = 0u;
     w.x0 = ownAxisSampleExact(begin, n, w.samples, 0u);
     w.x1 = ownAxisSampleExact(begin, n, w.samples, 1u);
@@ -3214,7 +3285,7 @@ AxisWalk ownAxisStart(uint begin, uint n, float3 normal) {
     w.d1 = walkSlope(w, 1u);
     // The way it leaves: to its point a 31st along.
     const float3 t0 = tangentOfExact(w.d0, float3(0.0f, 0.0f, 1.0f));
-    const float3 leaveTo = curvePointAtExact(begin, n, divExact(1.0f, float(CENTER_SAMPLES - 1)));
+    const float3 leaveTo = curvePointAtExact(begin, n, divExact(1.0f, float(CURL_SAMPLES - 1)));
     w.f = curlFirstFrame(normal, t0, tangentOfExact(sub3Exact(leaveTo, w.x0), t0));
     w.arc = 0.0f;
     w.parc = 0.0f;
@@ -3261,16 +3332,16 @@ float axisWalkAt(AxisWalk w, float u, out Frame frame, out float parc, float2 st
 
 // A clump's axis: samples, slopes, frames (9 a sample), arc lengths, profiled arcs, stretches
 // (weighted curls).
-#define CLUMP_AXIS_FLOATS (CENTER_SAMPLES * 18)
+#define CLUMP_AXIS_FLOATS (CURL_SAMPLES * 18)
 
 // A clump's axis: the mean of its core strands (gAux0:
-// gFlag.x + 1 offsets, then the strands) at CENTER_SAMPLES shares of their points, on their
+// gFlag.x + 1 offsets, then the strands) at CURL_SAMPLES shares of their points, on their
 // curves, summed in strand order; its slopes; its rotation-minimizing frames from its members'
 // root normals (gAux1 at 8c, summed and normalized on the CPU); its arc lengths; weighted, the
 // stretch at its samples (by the clump's draw, gAux1 at 8c + 4) and the profiled arcs by it. Into
 // gOut at c * CLUMP_AXIS_FLOATS. Two clumps a group, a thread a sample (its sum over the members,
 // its slope), then a thread a clump the frames and arc lengths along its samples.
-#define AXES_CLUMPS (GROUP_SIZE / CENTER_SAMPLES)
+#define AXES_CLUMPS (GROUP_SIZE / CURL_SAMPLES)
 groupshared float3 sAxis[GROUP_SIZE];
 groupshared float3 sAxisSlope[GROUP_SIZE];
 
@@ -3286,8 +3357,8 @@ struct SharedAxis : IAxisSamples {
     float3 slope(uint j) { return sAxisSlope[base + j]; }
 }
 struct OwnAxis : IAxisSamples {
-    float3 p[CENTER_SAMPLES];
-    float3 d[CENTER_SAMPLES];
+    float3 p[CURL_SAMPLES];
+    float3 d[CURL_SAMPLES];
     float3 at(uint j) { return p[j]; }
     float3 slope(uint j) { return d[j]; }
 }
@@ -3296,7 +3367,7 @@ struct OwnAxis : IAxisSamples {
 float3 curlAxisSample(uint c, uint k) {
     float3 sum = float3(0.0f, 0.0f, 0.0f);
     const uint first = gAux0.Load(c * 4), last = gAux0.Load(c * 4 + 4);
-    const float t = divExact(float(k), float(CENTER_SAMPLES - 1));
+    const float t = divExact(float(k), float(CURL_SAMPLES - 1));
     for (uint m = first; m < last; ++m) {
         const uint s = gAux0.Load((gFlag.x + 1 + m) * 4);
         const uint begin = strandBegin(s), n = strandCountOf(s);
@@ -3306,14 +3377,14 @@ float3 curlAxisSample(uint c, uint k) {
 }
 // Its slope at sample k, from the samples around it.
 float3 curlAxisSlope<A : IAxisSamples>(A axis, uint k) {
-    const uint a = k == 0u ? 0u : k + 1u == CENTER_SAMPLES ? CENTER_SAMPLES - 3u : k - 1u;
-    const uint which = k == 0u ? 0u : k + 1u == CENTER_SAMPLES ? 2u : 1u;
+    const uint a = k == 0u ? 0u : k + 1u == CURL_SAMPLES ? CURL_SAMPLES - 3u : k - 1u;
+    const uint which = k == 0u ? 0u : k + 1u == CURL_SAMPLES ? 2u : 1u;
     return slopeOf3Exact(axis.at(a), axis.at(a + 1), axis.at(a + 2), which);
 }
 // Its frames, arc lengths, profiled arcs and (weighted) stretches along its samples, into gOut.
 void curlAxisAlong<A : IAxisSamples>(uint c, A axis) {
-    const uint base = c * CLUMP_AXIS_FLOATS, frames = base + CENTER_SAMPLES * 6, arcs = base + CENTER_SAMPLES * 15,
-               parcs = base + CENTER_SAMPLES * 16, stretches = base + CENTER_SAMPLES * 17;
+    const uint base = c * CLUMP_AXIS_FLOATS, frames = base + CURL_SAMPLES * 6, arcs = base + CURL_SAMPLES * 15,
+               parcs = base + CURL_SAMPLES * 16, stretches = base + CURL_SAMPLES * 17;
     const float3 t0 = tangentOfExact(axis.slope(0), float3(0.0f, 0.0f, 1.0f));
     Frame f = curlFirstFrame(asfloat(gAux1.Load3(c * 32)), t0, tangentOfExact(sub3Exact(axis.at(1), axis.at(0)), t0));
     // Weighted: the clump's draw (CurlCS's), its hang and unweighted turns at each sample.
@@ -3322,16 +3393,16 @@ void curlAxisAlong<A : IAxisSamples>(uint c, A axis) {
     const float frequency = gValue.y * (1.0f + 0.5f * gValue.z * (-1.0f + 2.0f * draw.z));
     const uint key = curlSpacingKey(draw);
     const float3 down = asfloat(gFlag2.yzw);
-    float stretch[CENTER_SAMPLES] = {};
-    float turns[CENTER_SAMPLES] = {};
+    float stretch[CURL_SAMPLES] = {};
+    float turns[CURL_SAMPLES] = {};
     float arc = 0.0f, parc = 0.0f;
-    for (uint j = 0; j < CENTER_SAMPLES; ++j) {
+    for (uint j = 0; j < CURL_SAMPLES; ++j) {
         if (j > 0u) {
             const float3 x0 = axis.at(j - 1), x1 = axis.at(j);
             float h;
             secantOf(x0, x1, h);
             arc = arc + segmentArc(x0, x1, axis.slope(j - 1), axis.slope(j), h, 1.0f);
-            if (curlProfiled()) parc = parc + profiledSegmentArc(x0, x1, axis.slope(j - 1), axis.slope(j), h, 1.0f, j - 1u, CENTER_SAMPLES, kNoStretch);
+            if (curlProfiled()) parc = parc + profiledSegmentArc(x0, x1, axis.slope(j - 1), axis.slope(j), h, 1.0f, j - 1u, CURL_SAMPLES, kNoStretch);
             f = reflectFrame(x0, f, x1, tangentOf(axis.slope(j), f.t));
         }
         gOut.Store3((frames + j * 9) * 4, asuint(f.t));
@@ -3346,15 +3417,15 @@ void curlAxisAlong<A : IAxisSamples>(uint c, A axis) {
     }
     if (!weighed) return;
     // The profiled arcs weighted by the stretch (Axis::weigh).
-    curlStretchOf(stretch, turns, CENTER_SAMPLES);
+    curlStretchOf(stretch, turns, CURL_SAMPLES);
     parc = 0.0f;
     gOut.Store(parcs * 4, asuint(parc));
     gOut.Store(stretches * 4, asuint(stretch[0]));
-    for (uint j = 1; j < CENTER_SAMPLES; ++j) {
+    for (uint j = 1; j < CURL_SAMPLES; ++j) {
         const float3 x0 = axis.at(j - 1), x1 = axis.at(j);
         float h;
         secantOf(x0, x1, h);
-        parc = parc + profiledSegmentArc(x0, x1, axis.slope(j - 1), axis.slope(j), h, 1.0f, j - 1u, CENTER_SAMPLES,
+        parc = parc + profiledSegmentArc(x0, x1, axis.slope(j - 1), axis.slope(j), h, 1.0f, j - 1u, CURL_SAMPLES,
                                          float2(stretch[j - 1], stretch[j]));
         gOut.Store((parcs + j) * 4, asuint(parc));
         gOut.Store((stretches + j) * 4, asuint(stretch[j]));
@@ -3364,11 +3435,11 @@ void curlAxisAlong<A : IAxisSamples>(uint c, A axis) {
 // The group's CurlAxesCS: two clumps a group, a thread a sample (its sum over the members, its
 // slope), then a thread a clump the frames and arc lengths along its samples.
 void curlAxesGroup(uint3 id, uint3 local) {
-    const uint k = local.x % CENTER_SAMPLES, slot = local.x / CENTER_SAMPLES;
+    const uint k = local.x % CURL_SAMPLES, slot = local.x / CURL_SAMPLES;
     const uint c = threadIndex(id, GROUP_SIZE) / GROUP_SIZE * AXES_CLUMPS + slot;
     const bool live = c < gFlag.x;
     SharedAxis axis;
-    axis.base = slot * CENTER_SAMPLES;  // the clump's samples in sAxis
+    axis.base = slot * CURL_SAMPLES;  // the clump's samples in sAxis
     const float3 sum = live ? curlAxisSample(c, k) : float3(0.0f, 0.0f, 0.0f);
     sAxis[local.x] = sum;
     groupSync();
@@ -3376,7 +3447,7 @@ void curlAxesGroup(uint3 id, uint3 local) {
     sAxisSlope[local.x] = d;
     groupSync();
     if (!live) return;
-    const uint base = c * CLUMP_AXIS_FLOATS, slopes = base + CENTER_SAMPLES * 3;
+    const uint base = c * CLUMP_AXIS_FLOATS, slopes = base + CURL_SAMPLES * 3;
     gOut.Store3((base + k * 3) * 4, asuint(sum));
     gOut.Store3((slopes + k * 3) * 4, asuint(d));
     if (k == 0u) curlAxisAlong(c, axis);
@@ -3384,14 +3455,14 @@ void curlAxesGroup(uint3 id, uint3 local) {
 
 // The CPU's: a clump whole on the thread of its first sample.
 void curlAxesAlone(uint3 id, uint3 local) {
-    const uint k = local.x % CENTER_SAMPLES, slot = local.x / CENTER_SAMPLES;
+    const uint k = local.x % CURL_SAMPLES, slot = local.x / CURL_SAMPLES;
     const uint c = threadIndex(id, GROUP_SIZE) / GROUP_SIZE * AXES_CLUMPS + slot;
     if (k != 0u || c >= gFlag.x) return;
     OwnAxis axis;
-    for (uint j = 0; j < CENTER_SAMPLES; ++j) axis.p[j] = curlAxisSample(c, j);
-    for (uint j = 0; j < CENTER_SAMPLES; ++j) axis.d[j] = curlAxisSlope(axis, j);
-    const uint base = c * CLUMP_AXIS_FLOATS, slopes = base + CENTER_SAMPLES * 3;
-    for (uint j = 0; j < CENTER_SAMPLES; ++j) {
+    for (uint j = 0; j < CURL_SAMPLES; ++j) axis.p[j] = curlAxisSample(c, j);
+    for (uint j = 0; j < CURL_SAMPLES; ++j) axis.d[j] = curlAxisSlope(axis, j);
+    const uint base = c * CLUMP_AXIS_FLOATS, slopes = base + CURL_SAMPLES * 3;
+    for (uint j = 0; j < CURL_SAMPLES; ++j) {
         gOut.Store3((base + j * 3) * 4, asuint(axis.p[j]));
         gOut.Store3((slopes + j * 3) * 4, asuint(axis.d[j]));
     }
@@ -3412,10 +3483,10 @@ void CurlAxesCS(uint3 id : SV_DispatchThreadID, uint3 local : SV_GroupThreadID) 
 // Clump c's axis at share t: its frame there, its arc length and its profiled arc; weighted, its
 // stretch there (else 0).
 float clumpAxisAt(uint c, float t, out Frame frame, out float parc, out float stretch) {
-    const uint base = c * CLUMP_AXIS_FLOATS, slopes = base + CENTER_SAMPLES * 3, frames = base + CENTER_SAMPLES * 6,
-               arcs = base + CENTER_SAMPLES * 15, parcs = base + CENTER_SAMPLES * 16, stretches = base + CENTER_SAMPLES * 17;
-    const float xs = t * float(CENTER_SAMPLES - 1);
-    const uint k = min(uint(max(xs, 0.0f)), CENTER_SAMPLES - 2u);
+    const uint base = c * CLUMP_AXIS_FLOATS, slopes = base + CURL_SAMPLES * 3, frames = base + CURL_SAMPLES * 6,
+               arcs = base + CURL_SAMPLES * 15, parcs = base + CURL_SAMPLES * 16, stretches = base + CURL_SAMPLES * 17;
+    const float xs = t * float(CURL_SAMPLES - 1);
+    const uint k = min(uint(max(xs, 0.0f)), CURL_SAMPLES - 2u);
     const float u = xs - float(k);
     const uint at = frames + k * 9;
     frame.t = asfloat(gAux1.Load3(at * 4));
@@ -3436,7 +3507,7 @@ float clumpAxisAt(uint c, float t, out Frame frame, out float parc, out float st
     secantOf(x0, x1, h);
     frame = reflectFrameBy(frame, hermiteStep(x0, x1, d0, d1, h, u), tangentOf(hermiteDerivative(x0, x1, d0, d1, h, u), frame.t));
     const float arc = a + segmentArc(x0, x1, d0, d1, h, u);
-    parc = curlSpacedBy(st) ? parc + profiledSegmentArc(x0, x1, d0, d1, h, u, k, CENTER_SAMPLES, st) : arc;
+    parc = curlSpacedBy(st) ? parc + profiledSegmentArc(x0, x1, d0, d1, h, u, k, CURL_SAMPLES, st) : arc;
     return arc;
 }
 
@@ -3503,10 +3574,10 @@ void curlStrand(uint s) {
     // Weighted: the axis walked to its tip first, for the stretch at each sample (Axis::weigh:
     // its hang along weightDirection and its unweighted turns there).
     const bool weighed = curlWeighed();
-    float stretch[CENTER_SAMPLES] = {};
+    float stretch[CURL_SAMPLES] = {};
     if (weighed) {
         const float3 down = asfloat(gFlag2.yzw);
-        float turns[CENTER_SAMPLES] = {};
+        float turns[CURL_SAMPLES] = {};
         AxisWalk v = w;
         for (uint k = 0; k < v.samples; ++k) {
             if (k > 0u) v = ownAxisStep(v, begin, n, kNoStretch);
@@ -3550,7 +3621,7 @@ void curlStrand(uint s) {
 
 // ---- Curl on the CPU: four strands a thread, side by side ----------------------------------------
 //
-// Four strands of as many points (3 to CENTER_SAMPLES), each curling alone about its own points
+// Four strands of as many points (3 to CURL_SAMPLES), each curling alone about its own points
 // (no clumps, no frequencyProfile, unweighted), have their axes' slopes, arc lengths and frames
 // made side by side in float4 lanes, a strand a lane (each lane the scalar arithmetic in its order, so each strand's floats are curlStrand's), then each point curled as
 // curlStrand curls it. Any other four, one by one.
@@ -3697,7 +3768,7 @@ FrameLanes reflectLanes(FrameLanes f, Lanes3 v1, Lanes3 t1) {
 bool curlFour(uint first) {
     if (first + 4u > gStrandCount || gFlag.z != 0u || curlSpaced()) return false;
     const uint n = strandCountOf(first);
-    if (n < 3u || n > uint(CENTER_SAMPLES)) return false;
+    if (n < 3u || n > uint(CURL_SAMPLES)) return false;
     uint begin[4];
     for (uint l = 0; l < 4u; ++l) {
         if (strandCountOf(first + l) != n) return false;
@@ -3725,8 +3796,8 @@ bool curlFour(uint first) {
     }
     // The axes (the strands' own points): their secants and slopes (walkSlope's), then the arcs and
     // frames along them (ownAxisStep's).
-    Lanes3 p[CENTER_SAMPLES], s[CENTER_SAMPLES], d[CENTER_SAMPLES];
-    float4 h[CENTER_SAMPLES];
+    Lanes3 p[CURL_SAMPLES], s[CURL_SAMPLES], d[CURL_SAMPLES];
+    float4 h[CURL_SAMPLES];
     for (uint k = 0; k < n; ++k) p[k] = lanes3(loadPoint(begin[0] + k), loadPoint(begin[1] + k), loadPoint(begin[2] + k), loadPoint(begin[3] + k));
     const Lanes3 none = lanes3(float3(0.0f), float3(0.0f), float3(0.0f), float3(0.0f));
     for (uint j = 0; j + 1u < n; ++j) {
@@ -3743,8 +3814,8 @@ bool curlFour(uint first) {
     f.t = lanes3(t0);
     f.n = lanes3(n0);
     f.b = lanes3(b0);
-    FrameLanes frames[CENTER_SAMPLES];
-    float4 arcs[CENTER_SAMPLES];
+    FrameLanes frames[CURL_SAMPLES];
+    float4 arcs[CURL_SAMPLES];
     float4 arc = float4(0.0f);
     for (uint k = 1; k < n; ++k) {
         arc = arc + wholeArcLanes(p[k - 1u], p[k], d[k - 1u], d[k], h[k - 1u]);

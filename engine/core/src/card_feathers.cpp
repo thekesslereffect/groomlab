@@ -26,6 +26,8 @@ namespace groomlab {
 using detail::kRefStations;
 using detail::kFeatherSideChannel;
 using detail::kShaftUChannel;
+using detail::liftClearOfScalp;
+using detail::notchesFilled;
 using detail::sampleStations;
 using detail::seatCard;
 using detail::cardFrames;
@@ -94,7 +96,7 @@ FeatherShape measureFeather(const StrandSet& s, const Feather& feather, const Sc
     f.root = shaft.front();
     const std::vector<Vec3f> even = resampleByArcLength(shaft.data(), shaft.size(), 16);
 
-    // Samples along every barb, then along the rachis.
+    // Samples along every barb (kBarbSamples each, in the barbs' order), then along the rachis.
     constexpr std::size_t kBarbSamples = 8;
     std::vector<Vec3f> samples;
     samples.reserve(barbs.size() * kBarbSamples + even.size());
@@ -122,7 +124,7 @@ FeatherShape measureFeather(const StrandSet& s, const Feather& feather, const Sc
     if (!(f.length > 0.0f)) return f;
     constexpr std::size_t K = kRefStations;
     f.tangent.resize(K);
-    for (std::size_t k = 0; k < K; ++k) f.tangent[k] = (f.center[std::min(k + 1, K - 1)] - f.center[k > 0 ? k - 1 : 0]).normalized();
+    for (std::size_t k = 0; k < K; ++k) f.tangent[k] = centralTangent(f.center.data(), K, k);
     auto stationOf = [&](const Vec3f& p) {
         std::size_t best = 0;
         float bestD = std::numeric_limits<float>::max();
@@ -217,8 +219,10 @@ FeatherShape measureFeather(const StrandSet& s, const Feather& feather, const Sc
     // barbs' distance from the shaft, whichever way its crossed cards turn.
     f.right.assign(K, 0.0f);
     f.left.assign(K, 0.0f);
-    for (const Vec3f& q : samples) {
-        const std::size_t k = stationOf(q);
+    std::vector<std::size_t> sampleStation(samples.size());  // each sample's station (the folds below read it again)
+    for (std::size_t qi = 0; qi < samples.size(); ++qi) {
+        const Vec3f& q = samples[qi];
+        const std::size_t k = sampleStation[qi] = stationOf(q);
         const Vec3f d = q - f.center[k];
         float r = d.dot(f.side[k]), l = -r;
         if (f.down) r = l = (d - f.tangent[k] * d.dot(f.tangent[k])).length();
@@ -229,16 +233,8 @@ FeatherShape measureFeather(const StrandSet& s, const Feather& feather, const Sc
     }
     // No notches between wider stations (a dip narrower than a fifth of the card fills to the
     // lower of its flanks), as a hair card's width.
-    for (std::vector<float>* reach : {&f.right, &f.left}) {
-        const std::vector<float> w = *reach;
-        constexpr std::size_t kReach = 3;
-        for (std::size_t k = 0; k < K; ++k) {
-            float before = 0.0f, after = 0.0f;
-            for (std::size_t j = k > kReach ? k - kReach : 0; j <= k; ++j) before = std::max(before, w[j]);
-            for (std::size_t j = k; j <= std::min(k + kReach, K - 1); ++j) after = std::max(after, w[j]);
-            (*reach)[k] = std::max(w[k], std::min(before, after));
-        }
-    }
+    f.right = notchesFilled(f.right);
+    f.left = notchesFilled(f.left);
 
     // How each vane leaves the vane plane (lift, droop, a cupped vane, one vane up and the other
     // down): at each station, the direction its barbs' samples there take across the shaft (x out
@@ -251,14 +247,15 @@ FeatherShape measureFeather(const StrandSet& s, const Feather& feather, const Sc
     if (!f.down && sides) {
         std::vector<float> sx[2] = {std::vector<float>(K, 0.0f), std::vector<float>(K, 0.0f)};
         std::vector<float> sy[2] = {std::vector<float>(K, 0.0f), std::vector<float>(K, 0.0f)};
-        for (const std::size_t b : barbs) {
-            const float side = (*sides)[b];
+        for (std::size_t bi = 0; bi < barbs.size(); ++bi) {
+            const float side = (*sides)[barbs[bi]];
             if (std::abs(side) < 0.5f) continue;
             const int h = side > 0.0f ? 0 : 1;  // 0 right, 1 left
-            resampleByArcLengthInto(s.strandPoints(b), s.strandPointCount(b), pts.data(), kBarbSamples);
             for (std::size_t j = 1; j < kBarbSamples; ++j) {
-                const std::size_t k = stationOf(pts[j]);
-                Vec3f d = pts[j] - f.center[k];
+                // (The barb's samples, and their stations, as gathered above.)
+                const Vec3f& point = samples[bi * kBarbSamples + j];
+                const std::size_t k = sampleStation[bi * kBarbSamples + j];
+                Vec3f d = point - f.center[k];
                 d = d - f.tangent[k] * d.dot(f.tangent[k]);
                 const float x = d.dot(f.side[k]) * (h == 0 ? 1.0f : -1.0f), y = d.dot(f.normal[k]);
                 const float wgt = x * x + y * y;
@@ -456,26 +453,7 @@ CardMesh::Card makeFeatherCard(const FeatherShape& f, const std::vector<std::siz
         card.refFeatherBarbShiftLeft[k] = std::clamp(f.barbSlopeLeft[k] * leftReach / f.length * followBarbs, -0.75f, 0.75f);
     }
     // Clear of the scalp, as a hair card: a feather lying on the body sits a hair above it.
-    if (scalp) {
-        const float clearance = 0.01f * std::max(arcLength(card.refCenter), 1e-6f);
-        std::vector<float> push(kRefStations, 0.0f);
-        std::vector<Vec3f> skin(kRefStations, Vec3f{0, 1, 0});
-        for (std::size_t k = 0; k < kRefStations; ++k) {
-            const SurfacePoint near = scalp->closestPoint(card.refCenter[k], 4.0f * clearance);
-            if (near.root.face < 0) continue;
-            skin[k] = near.normal.normalized();
-            const float h = (card.refCenter[k] - near.position).dot(skin[k]);
-            if (h < clearance) push[k] = clearance - h;
-        }
-        for (int pass = 0; pass < 2; ++pass) {
-            std::vector<float> smooth = push;
-            for (std::size_t k = 1; k + 1 < kRefStations; ++k) smooth[k] = 0.25f * push[k - 1] + 0.5f * push[k] + 0.25f * push[k + 1];
-            push = smooth;
-        }
-        for (std::size_t k = 0; k < kRefStations; ++k) {
-            if (push[k] > 0.0f) card.refCenter[k] += skin[k] * push[k];
-        }
-    }
+    if (scalp) liftClearOfScalp(card, *scalp);
     // Place the requested rows after Follow Barbs has shaped the dense reference card. Sample
     // by both outer silhouettes' physical travel (with a modest root bias), rather than at equal
     // shaft fractions: outline corners and width changes keep density, while long straight and
@@ -693,26 +671,7 @@ std::vector<CardMesh::Card> makeFeatherCards(const StrandSet& s, const ScalpMesh
                 features[g] = describeFeather(shapes[i], flipped[i] != 0, color);
             }
             const std::vector<int> labels = kMeans(features, k, 30);
-            const std::size_t groups = static_cast<std::size_t>(*std::max_element(labels.begin(), labels.end())) + 1;
-            const std::size_t dims = features[0].size();
-            std::vector<std::vector<float>> centers(groups, std::vector<float>(dims, 0.0f));
-            std::vector<float> counts(groups, 0.0f);
-            for (std::size_t g = 0; g < group.size(); ++g) {
-                const auto l = static_cast<std::size_t>(labels[g]);
-                for (std::size_t d = 0; d < dims; ++d) centers[l][d] += features[g][d];
-                counts[l] += 1.0f;
-            }
-            for (std::size_t l = 0; l < groups; ++l) {
-                for (float& x : centers[l]) x /= counts[l];
-            }
-            std::vector<long long> representative(groups, -1);
-            for (std::size_t g = 0; g < group.size(); ++g) {
-                const auto l = static_cast<std::size_t>(labels[g]);
-                long long& r = representative[l];
-                if (r < 0 || distance2(features[g], centers[l]) < distance2(features[static_cast<std::size_t>(r)], centers[l])) {
-                    r = static_cast<long long>(g);
-                }
-            }
+            const std::vector<int> representative = detail::mostTypical(features, labels);
             for (std::size_t g = 0; g < group.size(); ++g) {
                 const auto rep = static_cast<std::size_t>(representative[static_cast<std::size_t>(labels[g])]);
                 if (rep != g) repOf[group[g]] = static_cast<long long>(group[rep]);

@@ -28,4 +28,5 @@ PYBIND11_MODULE(groomlab_core, m) {
     groomlab::py_bind::bindAlembic(m);
     groomlab::py_bind::bindReference(m);
     groomlab::py_bind::bindCardBlocks(m);
+    groomlab::py_bind::bindTubeMesh(m);
 }

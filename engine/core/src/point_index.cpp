@@ -2,6 +2,7 @@
 #include "groomlab/point_index.h"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 
 #include "groomlab/parallel.h"
@@ -14,7 +15,7 @@ float coord(const Vec3f& p, int axis) { return axis == 0 ? p.x : axis == 1 ? p.y
 
 constexpr int kMaxDepth = 64;
 // Subtrees of at least this many points build side by side (each is the same as built alone).
-constexpr std::size_t kParallelBuild = 16384;
+constexpr std::size_t kParallelBuild = 2048;
 
 }  // namespace
 
@@ -47,6 +48,7 @@ void PointIndex::build(Item* items, std::size_t begin, std::size_t end) {
     Vec3f lo = items[begin].p, hi = lo;
     for (std::size_t i = begin + 1; i < end; ++i) {
         const Vec3f& p = items[i].p;
+        // (Spelled out: through minPerAxis/maxPerAxis MSVC builds a 1M-point index ~12% slower.)
         lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
         hi = {std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
     }
@@ -86,6 +88,51 @@ std::size_t PointIndex::nearest(const Vec3f& p, float* distance2) const {
     float d2 = std::numeric_limits<float>::max();
     if (kNearest(p, 1, &index, &d2) == 0) return SIZE_MAX;
     if (distance2) *distance2 = d2;
+    return index;
+}
+
+std::size_t PointIndex::nearestWithin(const Vec3f& p, float within2, float* distance2) const {
+    // A reach that bounds nothing (or is no number): the plain search, then the test.
+    if (!(within2 < std::numeric_limits<float>::max())) {
+        float d2 = 0.0f;
+        const std::size_t index = nearest(p, &d2);
+        if (index == SIZE_MAX || !(d2 <= within2)) return SIZE_MAX;
+        if (distance2) *distance2 = d2;
+        return index;
+    }
+    if (points_.empty() || within2 < 0.0f) return SIZE_MAX;
+    // nearest()'s search, started with the reach in place of the best found so far (just past it:
+    // a point at the reach counts). A subtree it skips holds no point nearer than its plane, so
+    // none nearer than the bound: the point found is the one nearest() meets first.
+    float best = std::nextafter(within2, std::numeric_limits<float>::max());
+    std::size_t index = SIZE_MAX;
+    struct Entry {
+        std::uint32_t begin, end;
+        float planeDistance2;
+    };
+    Entry stack[2 * kMaxDepth + 2];
+    int top = 0;
+    stack[top++] = {0, static_cast<std::uint32_t>(points_.size()), 0.0f};
+    while (top > 0) {
+        const Entry e = stack[--top];
+        if (e.planeDistance2 >= best) continue;
+        const std::uint32_t mid = e.begin + (e.end - e.begin) / 2;
+        const Vec3f d = points_[mid] - p;
+        const float d2 = d.dot(d);
+        if (d2 < best) {
+            best = d2;
+            index = ids_[mid];
+        }
+        const int axis = axes_[mid];
+        const float diff = coord(p, axis) - coord(points_[mid], axis);
+        const Entry left{e.begin, mid, 0.0f}, right{mid + 1, e.end, 0.0f};
+        Entry nearChild = diff < 0 ? left : right;
+        Entry farChild = diff < 0 ? right : left;
+        farChild.planeDistance2 = diff * diff;
+        if (farChild.begin < farChild.end && top < 2 * kMaxDepth + 1) stack[top++] = farChild;
+        if (nearChild.begin < nearChild.end && top < 2 * kMaxDepth + 1) stack[top++] = nearChild;
+    }
+    if (index != SIZE_MAX && distance2) *distance2 = best;
     return index;
 }
 

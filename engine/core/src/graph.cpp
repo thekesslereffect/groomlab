@@ -18,11 +18,25 @@
 #include "groomlab/operators.h"
 #include "groomlab/parallel.h"
 #include "groomlab/preview_core.h"
+#include "groomlab/profile.h"
 #include "groomlab/random.h"
 #include "groomlab/texture.h"
 #include "operators/internal.h"
 
 namespace groomlab {
+
+std::optional<GuideSet> guidesOfValue(const Value& value) {
+    if (const GuidesPtr* guides = std::get_if<GuidesPtr>(&value); guides && *guides) return **guides;
+    if (const StrandsPtr* strands = std::get_if<StrandsPtr>(&value); strands && *strands) {
+        GuideSet out;
+        for (std::size_t i = 0; i < (*strands)->strandCount(); ++i) {
+            const Vec3f* p = (*strands)->strandPoints(i);
+            out.add((*strands)->ids()[i], std::vector<Vec3f>(p, p + (*strands)->strandPointCount(i)));
+        }
+        return out;
+    }
+    return std::nullopt;
+}
 
 namespace {
 
@@ -508,7 +522,9 @@ StrandsPtr guidesAsStrands(const GuideSet& guides) {
     return out;
 }
 
-GuidesPtr strandsAsGuides(const StrandSet& strands) {
+namespace {
+
+std::shared_ptr<GuideSet> guidesOfStrands(const StrandSet& strands) {
     auto out = std::make_shared<GuideSet>();
     std::vector<std::string> names = strands.strandChannelNames();
     names.erase(std::remove(names.begin(), names.end(), std::string(kPreviewChannel)), names.end());
@@ -530,6 +546,64 @@ GuidesPtr strandsAsGuides(const StrandSet& strands) {
         }
     }, 64);
     return out;
+}
+
+// What a guide holds besides its curve and maps (its tube and where it lies: guide_set.h), from
+// the guide `from` it was shaped from.
+void takeTube(Guide& g, const Guide& from) {
+    g.hasTube = from.hasTube;
+    g.tube = from.tube;
+    g.frameUp = from.frameUp;
+    g.rootAcross = from.rootAcross;
+    g.rootRing = from.rootRing;
+    g.rootFoot = from.rootFoot;
+    g.rootFootSet = from.rootFootSet;
+    g.depth = from.depth;
+    g.baseRoot = from.baseRoot;
+    g.baseId = from.baseId;
+}
+
+}  // namespace
+
+StrandsPtr levelTubesAsStrands(const GuideSet& guides) {
+    if (!guides.levelTubes() || guides.levelTubes()->empty()) return nullptr;
+    GuideSet levels;
+    levels.guides() = *guides.levelTubes();
+    return guidesAsStrands(levels);
+}
+
+GuidesPtr shapedGuides(const StrandSet& shaped, const StrandSet* levelsShaped, const GuideSet& source) {
+    std::shared_ptr<GuideSet> made = guidesOfStrands(shaped);
+    if (source.hasDisplayColor()) made->setDisplayColor(source.displayColor());
+    // Each guide its own guide's tube (by ID; one the node made, a Mirror's copy, has none).
+    std::unordered_map<std::uint64_t, const Guide*> own;
+    for (const Guide& g : source.guides()) own.emplace(g.id, &g);
+    for (Guide& g : made->guides()) {
+        const auto mine = own.find(g.id);
+        if (mine != own.end()) takeTube(g, *mine->second);
+    }
+    // The levels' tubes as the node shaped them, each its own tube (with no maps, as they came);
+    // one without a tube of its own (made by the node) left out.
+    if (source.levelTubes()) {
+        std::unordered_map<std::uint64_t, const Guide*> levels;
+        for (const Guide& g : *source.levelTubes()) levels.emplace(g.id, &g);
+        std::vector<Guide> levelTubes;
+        if (!levelsShaped) {
+            levelTubes = *source.levelTubes();
+        } else {
+            std::shared_ptr<GuideSet> shapedLevels = guidesOfStrands(*levelsShaped);
+            for (Guide& g : shapedLevels->guides()) {
+                const auto level = levels.find(g.id);
+                if (level == levels.end()) continue;
+                takeTube(g, *level->second);
+                g.attributes.clear();
+                g.pointAttributes.clear();
+                levelTubes.push_back(std::move(g));
+            }
+        }
+        made->setLevelTubes(std::make_shared<const std::vector<Guide>>(std::move(levelTubes)));
+    }
+    return made;
 }
 
 namespace {
@@ -949,7 +1023,13 @@ std::string Graph::strandResolutionNote(NodeId id, bool viewport) const {
         const Node& r = nodeRecord(n);
         return r.inputs.empty() || r.inputs[0] == kNoNode;
     };
+    // A Scatter with segments of its own: no Resample sets its resolution.
+    auto ownSegments = [&](NodeId n) { return nodeRecord(n).op->params().getInt("segments") > 0; };
     if (type == op::kScatter) {
+        if (const std::int64_t own = node.op->params().getInt("segments"); own > 0) {
+            return "Its strands grow with " + points(static_cast<int>(std::min<std::int64_t>(own, 256))) +
+                   ": its own segments (a Resample after it does not change them)";
+        }
         const Resolution& r = all.at(id);
         if (r.from == kNoNode || r.segments <= 0) {
             return "Its strands grow with " + points(8) + ": no Resample after this Scatter sets their resolution (add one to its "
@@ -974,7 +1054,7 @@ std::string Graph::strandResolutionNote(NodeId id, bool viewport) const {
     if (fedNothing(id)) {
         std::string list;
         for (const auto& [n, r] : all) {
-            if (r.from == id && nodeRecord(n).op->typeName() == op::kScatter && !off(nodeRecord(n), viewport)) {
+            if (r.from == id && nodeRecord(n).op->typeName() == op::kScatter && !off(nodeRecord(n), viewport) && !ownSegments(n)) {
                 list += (list.empty() ? "" : ", ") + name(n);
             }
         }
@@ -998,7 +1078,7 @@ std::string Graph::strandResolutionNote(NodeId id, bool viewport) const {
         const Node& up = nodeRecord(n);
         if (up.op->typeName() == op::kScatter && !off(up, viewport)) {
             scatters.push_back(n);
-            if (all.at(n).from == id) sets.push_back(n);
+            if (all.at(n).from == id && !ownSegments(n)) sets.push_back(n);
         }
         stack.insert(stack.end(), up.inputs.begin(), up.inputs.end());
     }
@@ -1110,10 +1190,12 @@ std::string incrementalMismatch(const Value& incremental, const Value& full, con
     }
     if (a->contentHash() != b->contentHash()) return "its strands differ from a full evaluation's";
     const StrandsPtr p = valueAs<StrandsPtr>(previous);
-    if (changed.all || !p) return {};
-    if (p->strandCount() != a->strandCount() || p->pointCount() != a->pointCount() || p->ids() != a->ids() ||
-        p->offsets() != a->offsets() || p->strandChannelNames() != a->strandChannelNames() ||
-        p->pointChannelNames() != a->pointChannelNames()) {
+    if ((changed.all && !changed.recounted) || !p) return {};
+    // (Recounted: the strands listed may hold another number of points, the rest theirs at new places.)
+    const bool relaid = changed.recounted;
+    if (p->strandCount() != a->strandCount() || p->ids() != a->ids() || p->strandChannelNames() != a->strandChannelNames() ||
+        p->pointChannelNames() != a->pointChannelNames() ||
+        (!relaid && (p->pointCount() != a->pointCount() || p->offsets() != a->offsets()))) {
         return "it says only some strands changed, but the set's layout did";
     }
     std::vector<char> listed(a->strandCount(), 0);
@@ -1124,10 +1206,13 @@ std::string incrementalMismatch(const Value& incremental, const Value& full, con
     auto samePoints = [&](const void* x, const void* y, std::size_t bytesPerPoint, std::size_t s) {
         const std::size_t begin = a->strandBegin(s), n = a->strandPointCount(s);
         return std::memcmp(static_cast<const char*>(x) + begin * bytesPerPoint,
-                           static_cast<const char*>(y) + begin * bytesPerPoint, n * bytesPerPoint) == 0;
+                           static_cast<const char*>(y) + p->strandBegin(s) * bytesPerPoint, n * bytesPerPoint) == 0;
     };
     for (std::size_t s = 0; s < listed.size(); ++s) {
         if (listed[s]) continue;
+        if (p->strandPointCount(s) != a->strandPointCount(s)) {
+            return "strand " + std::to_string(s) + " holds another number of points but is not listed as changed";
+        }
         bool same = std::memcmp(&a->roots()[s], &p->roots()[s], sizeof(StrandRoot)) == 0 &&
                     samePoints(a->positions().data(), p->positions().data(), sizeof(Vec3f), s) &&
                     samePoints(a->widths().data(), p->widths().data(), sizeof(float), s);
@@ -1148,10 +1233,7 @@ ChangesPtr strandChangesBetween(const StrandsPtr& p, const StrandsPtr& n) {
     if (!p || !n) return nullptr;
     if (p == n) return noChanges();
     const std::size_t count = n->strandCount();
-    if (p->strandCount() != count || p->pointCount() != n->pointCount() || p->cardLayers() != n->cardLayers() ||
-        p->featherLayers() != n->featherLayers()) {
-        return nullptr;
-    }
+    if (p->strandCount() != count || p->cardLayers() != n->cardLayers() || p->featherLayers() != n->featherLayers()) return nullptr;
     const bool instancesChanged = p->instances() != n->instances();
     const std::vector<std::string> strandNames = n->strandChannelNames(), pointNames = n->pointChannelNames();
     if (p->strandChannelNames() != strandNames || p->pointChannelNames() != pointNames) return nullptr;
@@ -1165,7 +1247,10 @@ ChangesPtr strandChangesBetween(const StrandsPtr& p, const StrandsPtr& n) {
     auto same = [](const auto& x, const auto& y) {
         return &x == &y || (x.size() == y.size() && (x.empty() || std::memcmp(x.data(), y.data(), x.size() * sizeof(x[0])) == 0));
     };
-    if (!same(p->offsets(), n->offsets()) || !same(p->ids(), n->ids()) || !same(p->roots(), n->roots())) return nullptr;
+    if (!same(p->ids(), n->ids()) || !same(p->roots(), n->roots())) return nullptr;
+    // Some strands at other point counts (StrandChanges::recounted): each strand's points are then
+    // compared where each set holds them.
+    const bool relaid = !same(p->offsets(), n->offsets());
     struct Arrays {
         const void* a;
         const void* b;
@@ -1174,44 +1259,43 @@ ChangesPtr strandChangesBetween(const StrandsPtr& p, const StrandsPtr& n) {
     };
     std::vector<Arrays> arrays;
     auto add = [&](const auto& x, const auto& y, bool perPoint) {
-        if (&x != &y && !x.empty()) arrays.push_back({x.data(), y.data(), sizeof(x[0]), perPoint});
+        if ((&x != &y || (relaid && perPoint)) && !x.empty()) arrays.push_back({x.data(), y.data(), sizeof(x[0]), perPoint});
     };
     add(p->positions(), n->positions(), true);
-    if (p->widths().size() != n->widths().size()) return nullptr;
-    if (p->widths().size() == n->pointCount()) add(p->widths(), n->widths(), true);
+    const bool widths = n->widths().size() == n->pointCount();
+    if ((p->widths().size() == p->pointCount()) != widths || (!widths && p->widths().size() != n->widths().size())) return nullptr;
+    if (widths) add(p->widths(), n->widths(), true);
     for (const std::string& name : strandNames) add(*p->strandChannel(name), *n->strandChannel(name), false);
     for (const std::string& name : pointNames) add(*p->pointChannel(name), *n->pointChannel(name), true);
     constexpr std::size_t kBlock = 4096;
     const std::size_t blocks = (count + kBlock - 1) / kBlock;
     std::vector<std::vector<std::uint32_t>> found(blocks);
     const std::vector<std::size_t>& offsets = n->offsets();
+    const std::vector<std::size_t>& was = p->offsets();  // (the same numbers unless relaid)
+    // Strands [first, end) of an array, the same bytes in both sets (each where it holds them).
+    auto sameIn = [&](const Arrays& x, std::size_t first, std::size_t end) {
+        const std::size_t from = x.perPoint ? was[first] : first, to = x.perPoint ? offsets[first] : first;
+        const std::size_t size = x.perPoint ? offsets[end] - offsets[first] : end - first;
+        const char* a = static_cast<const char*>(x.a) + from * x.bytes;
+        return std::memcmp(a, static_cast<const char*>(x.b) + to * x.bytes, size * x.bytes) == 0;
+    };
     parallelFor(0, blocks, [&](std::size_t b) {
         const std::size_t first = b * kBlock, end = std::min(count, first + kBlock);
-        // A block whose arrays are the same as a whole holds no changed strand.
+        // A block whose arrays are the same as a whole (every strand at the count it had) holds no
+        // changed strand.
         bool any = false;
-        for (const Arrays& x : arrays) {
-            const std::size_t from = x.perPoint ? offsets[first] : first, to = x.perPoint ? offsets[end] : end;
-            if (std::memcmp(static_cast<const char*>(x.a) + from * x.bytes, static_cast<const char*>(x.b) + from * x.bytes,
-                            (to - from) * x.bytes) != 0) {
-                any = true;
-                break;
-            }
-        }
+        for (std::size_t s = first; relaid && s < end && !any; ++s) any = was[s + 1] - was[s] != offsets[s + 1] - offsets[s];
+        for (std::size_t k = 0; k < arrays.size() && !any; ++k) any = !sameIn(arrays[k], first, end);
         if (!any) return;
         for (std::size_t s = first; s < end; ++s) {
-            for (const Arrays& x : arrays) {
-                const std::size_t from = x.perPoint ? offsets[s] : s, to = x.perPoint ? offsets[s + 1] : s + 1;
-                if (std::memcmp(static_cast<const char*>(x.a) + from * x.bytes, static_cast<const char*>(x.b) + from * x.bytes,
-                                (to - from) * x.bytes) != 0) {
-                    found[b].push_back(static_cast<std::uint32_t>(s));
-                    break;
-                }
-            }
+            bool differs = was[s + 1] - was[s] != offsets[s + 1] - offsets[s];
+            for (std::size_t k = 0; k < arrays.size() && !differs; ++k) differs = !sameIn(arrays[k], s, s + 1);
+            if (differs) found[b].push_back(static_cast<std::uint32_t>(s));
         }
     }, 1);
     std::vector<std::uint32_t> changed;
     for (const auto& list : found) changed.insert(changed.end(), list.begin(), list.end());
-    StrandChanges made = StrandChanges::listed(std::move(changed));
+    StrandChanges made = relaid ? StrandChanges::recountedIn(std::move(changed)) : StrandChanges::listed(std::move(changed));
     made.instancesChanged = instancesChanged;
     return std::make_shared<const StrandChanges>(std::move(made));
 }
@@ -1261,7 +1345,6 @@ bool samePointsAs(const StrandsPtr& previous, const StrandsPtr& next) {
 }  // namespace
 
 void Graph::setIncrementalEvaluation(bool on) { incrementalOn = on; }
-bool Graph::incrementalEvaluation() { return incrementalOn.load(); }
 void Graph::setVerifyIncremental(bool on) { verifyIncrementalOn = on; }
 void Graph::setDiffFullResults(bool on) { diffResultsOn = on; }
 
@@ -1292,14 +1375,14 @@ ChangesPtr Graph::changesSince(NodeId id, std::uint64_t since, bool asMade) cons
     if (node.hiddenSerial[0] != node.serial || node.hiddenSerial[1] != since || node.hiddenHash[0] != node.hiddenHash[1]) {
         return nullptr;
     }
-    if (node.hiddenHash[0] == 0 || changes->all) return changes;
+    if (node.hiddenHash[0] == 0 || (changes->all && !changes->recounted)) return changes;
     if (!node.shownAt) return nullptr;
     std::vector<std::uint32_t> shown;
     shown.reserve(changes->strands.size());
     for (const std::uint32_t s : changes->strands) {
         if (s < node.shownAt->size() && (*node.shownAt)[s] != UINT32_MAX) shown.push_back((*node.shownAt)[s]);
     }
-    StrandChanges made = StrandChanges::listed(std::move(shown));
+    StrandChanges made = changes->recounted ? StrandChanges::recountedIn(std::move(shown)) : StrandChanges::listed(std::move(shown));
     made.instancesChanged = changes->instancesChanged;
     return std::make_shared<const StrandChanges>(std::move(made));
 }
@@ -1333,7 +1416,9 @@ std::vector<Value> Graph::evaluateWithKeys(NodeId id, const EvalContext& graphCt
         // the same key, the external as it is now.
         auto fresh = [&]() -> const std::vector<Value>& {
             if (node.op->refreshesOnCacheHit()) node.cachedValues = node.op->evaluateOutputs(ctx, {});
-            if (auto t = lastTimes_.find(id); t != lastTimes_.end()) t->second = 0.0;  // served from the cache
+            // Served from the cache: no time, unless it ran earlier in this very evaluation (another
+            // output of it read, or the same one by a second node).
+            if (auto t = lastTimes_.find(id); t != lastTimes_.end() && !keys.ran.count(id)) t->second = 0.0;
             return node.cachedValues;
         };
         if (node.hasCache && node.cachedKey == key) return fresh();
@@ -1347,6 +1432,12 @@ std::vector<Value> Graph::evaluateWithKeys(NodeId id, const EvalContext& graphCt
     std::vector<Value> result;
     std::vector<ChangesPtr> changes;  // per output, against the node's last result (null or missing: unknown)
     bool passedOn = false;
+    // The points of the result before the last (Node::spare): what the operator left of them, kept
+    // on if the result stays; and whether this result's points are the node's own, with the last
+    // result's to keep as the next spare.
+    std::shared_ptr<StrandSet> spareLeft, spareNext;
+    ChangesPtr spareLeftChanges;
+    bool spareTaken = false, ownPoints = false;
     std::vector<std::uint64_t> consumed(node.inputs.size(), 0);
     {
         std::vector<Value> inputValues;
@@ -1419,7 +1510,8 @@ std::vector<Value> Graph::evaluateWithKeys(NodeId id, const EvalContext& graphCt
         const bool onGuides = node.op->output().type == PortType::Curves && !ownSpecs.empty() &&
                               ownSpecs[0].type == PortType::Curves && valueAs<GuidesPtr>(inputValues[0]) != nullptr;
         const Value original = inputValues.empty() ? Value{} : inputValues[0];
-        if (onGuides && !passThrough) inputValues[0] = guidesAsStrands(*valueAs<GuidesPtr>(inputValues[0]));
+        const GuidesPtr guidesIn = onGuides ? valueAs<GuidesPtr>(inputValues[0]) : nullptr;
+        if (onGuides && !passThrough) inputValues[0] = guidesAsStrands(*guidesIn);
         // Its own key is its last result's (the same params, salts, externals and context), so only
         // its inputs changed: the operator may make again only what their changes reach.
         const bool incremental = !transient && incrementalOn.load(std::memory_order_relaxed) && node.hasCache &&
@@ -1459,12 +1551,19 @@ std::vector<Value> Graph::evaluateWithKeys(NodeId id, const EvalContext& graphCt
                     }
                     in.sole = true;
                     letGo = true;
+                    in.spare = std::move(node.spare);
+                    in.spareChanges = std::move(node.spareChanges);
+                    spareTaken = true;
+                    node.spare.reset();
+                    node.spareChanges.reset();
                     auto putBack = [&] {
                         if (multi) {
                             node.cachedValues = std::move(in.previousOutputs);
                         } else {
                             node.cachedValues[0] = std::move(in.previous);
                         }
+                        spareLeft = std::move(in.spare);
+                        spareLeftChanges = std::move(in.spareChanges);
                     };
                     const bool verify = verifyIncrementalOn.load(std::memory_order_relaxed);
                     std::vector<Value> before;
@@ -1514,6 +1613,20 @@ std::vector<Value> Graph::evaluateWithKeys(NodeId id, const EvalContext& graphCt
                         }
                         result = std::move(values);
                         for (StrandChanges& c : made) changes.push_back(std::make_shared<const StrandChanges>(std::move(c)));
+                        // The last result's points left with it (shared with the nodes after it, so
+                        // copied, or the spare taken in their place), its own, and only some strands
+                        // changed at the counts they had: kept as the next evaluation's spare. Not
+                        // when the new result shares those points (a widths-only change): the spare
+                        // would hold them too, and the next dab could neither take them nor it.
+                        const StrandsPtr last = multi ? nullptr : valueAs<StrandsPtr>(node.cachedValues[0]);
+                        const StrandsPtr made = multi ? nullptr : valueAs<StrandsPtr>(result[0]);
+                        if (last && node.ownPoints && cacheIntermediates_ && !changes[0]->all &&
+                            !sameValue(result[0], node.cachedValues[0]) && last->pointCount() > 0 &&
+                            last->positions().size() == last->offsets().back() &&
+                            !(made && made->positions().data() == last->positions().data())) {
+                            spareNext = std::make_shared<StrandSet>();
+                            spareNext->sharePositionsOf(*last);
+                        }
                     }
                 }
                 if (!done) {
@@ -1546,7 +1659,9 @@ std::vector<Value> Graph::evaluateWithKeys(NodeId id, const EvalContext& graphCt
                     // one, strand by strand, so the nodes after it go on incrementally.
                     if (incremental && !passedOn && diffResultsOn.load(std::memory_order_relaxed)) {
                         bool some = true;
-                        for (std::size_t slot = 0; slot < own && some; ++slot) some = changed[slot] && !changed[slot]->all;
+                        for (std::size_t slot = 0; slot < own && some; ++slot) {
+                            some = changed[slot] && (!changed[slot]->all || changed[slot]->recounted);
+                        }
                         for (std::size_t o = 0; some && o < result.size(); ++o) {
                             changes.push_back(strandChangesBetween(valueAs<StrandsPtr>(node.cachedValues[o]),
                                                                    valueAs<StrandsPtr>(result[o])));
@@ -1560,9 +1675,35 @@ std::vector<Value> Graph::evaluateWithKeys(NodeId id, const EvalContext& graphCt
                 changes[0] = changed.empty() ? nullptr : changed[0];
             }
             if (onGuides && !passThrough) {
+                // The other levels' tubes (GuideSet::levelTubes) shaped as the guides were, by a twin
+                // of the operator (its params and fields), so what it keeps between evaluations
+                // is the guides' result's.
+                std::vector<Value> levelResult;
+                if (const StrandsPtr levels = levelTubesAsStrands(*guidesIn)) {
+                    std::unique_ptr<Operator> twin;
+                    if (OperatorRegistry::instance().contains(node.op->typeName())) {
+                        twin = OperatorRegistry::instance().create(node.op->typeName());
+                        twin->params() = node.op->params();
+                        twin->setNodeVersion(node.op->nodeVersion());
+                        twin->setNodePath(node.op->nodePath());
+                    }
+                    if (twin) {
+                        std::vector<Value> levelInputs = inputValues;
+                        levelInputs[0] = levels;
+                        try {
+                            levelResult = twin->evaluateOutputs(ctx, levelInputs);
+                        } catch (const std::exception& e) {  // (a field made for the guides alone, say)
+                            levelResult.clear();
+                            ctx.note(std::string("the guides' other levels' tubes are left as they came: ") + e.what());
+                        }
+                    }
+                }
                 for (std::size_t o = 0; o < result.size(); ++o) {
                     if (outSpecs[o].type != PortType::Curves) continue;
-                    if (const StrandsPtr shaped = valueAs<StrandsPtr>(result[o])) result[o] = strandsAsGuides(*shaped);
+                    const StrandsPtr levelsShaped = o < levelResult.size() ? valueAs<StrandsPtr>(levelResult[o]) : nullptr;
+                    if (const StrandsPtr shaped = valueAs<StrandsPtr>(result[o])) {
+                        result[o] = shapedGuides(*shaped, levelsShaped.get(), *guidesIn);
+                    }
                 }
             }
         } catch (const GraphError& e) {
@@ -1580,9 +1721,26 @@ std::vector<Value> Graph::evaluateWithKeys(NodeId id, const EvalContext& graphCt
         params.clearFields();
         lastTimes_[id] = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
         lastRunTimes_[id] = lastTimes_[id];
+        keys.ran.insert(id);
+        // Its points an array of its own (none of its inputs': a HairColor's are its input's).
+        if (const StrandsPtr made = result.size() == 1 ? valueAs<StrandsPtr>(result[0]) : nullptr; made && made->pointCount() > 0) {
+            ownPoints = true;
+            for (const Value& v : inputValues) {
+                const StrandsPtr given = valueAs<StrandsPtr>(v);
+                ownPoints = ownPoints && !(given && given->positions().data() == made->positions().data());
+            }
+        }
+        // The profiler's rows a node type (profile.h), in full and incrementally apart: every evaluation
+        // of one, its own time (its inputs' aside).
+        if (profileEnabled()) {
+            const char* how = passThrough ? ".bypass" : madeIncrementally ? ".incremental" : ".full";
+            profileAdd(("node." + node.op->typeName() + how).c_str(), lastTimes_[id]);
+        }
         {
             const ChangesPtr first = changes.empty() ? nullptr : changes[0];
-            const std::string count = first && !first->all ? std::to_string(first->strands.size()) : std::string("all");
+            // (Recounted strands, StrandChanges::recounted: as many as are listed.)
+            const bool some = first && (!first->all || first->recounted);
+            const std::string count = some ? std::to_string(first->strands.size()) : std::string("all");
             lastRunKinds_[id] = passThrough      ? std::string("bypass")
                                 : madeIncrementally ? "incremental " + count
                                 : first             ? "full " + count
@@ -1644,6 +1802,14 @@ std::vector<Value> Graph::evaluateWithKeys(NodeId id, const EvalContext& graphCt
         node.changesBase = node.hasCache ? node.serial : 0;
         node.changes = node.hasCache ? std::move(changes) : std::vector<ChangesPtr>{};
         node.serial = newResultSerial();
+        // (The spare: the last result's points and how this one differs from them.)
+        node.spare = std::move(spareNext);
+        node.spareChanges = node.spare && !node.changes.empty() ? node.changes[0] : nullptr;
+        if (!node.spareChanges) node.spare.reset();
+        node.ownPoints = ownPoints;
+    } else if (spareTaken) {
+        node.spare = std::move(spareLeft);  // the same result: what was kept for it stands
+        node.spareChanges = std::move(spareLeftChanges);
     }
     node.cachedKey = key;
     node.cachedValues = result;
@@ -1654,13 +1820,14 @@ std::vector<Value> Graph::evaluateWithKeys(NodeId id, const EvalContext& graphCt
     return result;
 }
 
-bool Graph::cachedChannels(NodeId id, std::vector<std::string>* names) const {
+bool Graph::cachedChannels(NodeId id, std::vector<std::string>* names, std::vector<std::string>* pointNames) const {
     auto it = nodes_.find(id);
     if (it == nodes_.end() || !it->second.hasCache || it->second.cachedValues.empty()) return false;
     const StrandsPtr strands = valueAs<StrandsPtr>(it->second.cachedValues[0]);
     if (!strands) return false;
     *names = strands->strandChannelNames();
     names->erase(std::remove(names->begin(), names->end(), std::string(kPreviewChannel)), names->end());
+    if (pointNames) *pointNames = strands->pointChannelNames();
     return true;
 }
 
@@ -1714,6 +1881,23 @@ void Graph::adoptCache(const Graph& previous) {
         node.changes.clear();
         node.changesBase = 0;
         node.passedOn = was.passedOn;
+        node.ownPoints = false;
+        node.spare.reset();
+        node.spareChanges.reset();
+    }
+}
+
+void Graph::releaseSpares() {
+    for (auto& [id, node] : nodes_) {
+        node.spare.reset();
+        node.spareChanges.reset();
+    }
+}
+
+void Graph::offerResults(const Graph& evaluated) {
+    if (&evaluated == this) return;
+    for (const auto& [id, node] : evaluated.nodes_) {
+        if (node.hasCache) adopted_[node.cachedKey] = Adopted{node.cachedValues, node.serial, node.consumed, node.passedOn};
     }
 }
 
@@ -1730,6 +1914,9 @@ void Graph::adopt(Node& node, const Adopted& adopted, std::uint64_t key, std::ui
     node.changes.clear();
     node.changesBase = 0;
     node.passedOn = adopted.passedOn;
+    node.ownPoints = false;
+    node.spare.reset();
+    node.spareChanges.reset();
 }
 
 Graph Graph::clone() const {
@@ -1933,6 +2120,9 @@ void Graph::dropCache(Node& node) {
     node.shown.clear();
     node.shownFrom.clear();
     node.shownAt.reset();
+    node.ownPoints = false;
+    node.spare.reset();
+    node.spareChanges.reset();
 }
 
 void Graph::clearCache() {
@@ -1970,6 +2160,7 @@ std::size_t Graph::cachedBytes() const {
     std::unordered_map<const void*, std::size_t> arrays;
     for (const auto& [id, node] : nodes_) {
         if (node.hasCache) nodeArrays(node.cachedValues, node.shown, &arrays);
+        if (node.spare) node.spare->forEachArray([&](const void* data, std::size_t bytes) { arrays[data] = bytes; });
     }
     std::size_t total = 0;
     for (const auto& [data, bytes] : arrays) total += bytes;
@@ -1977,6 +2168,12 @@ std::size_t Graph::cachedBytes() const {
 }
 
 void Graph::trimCache(NodeId keep) {
+    // Over the limit: the spares go first (Node::spare: the next dab copies its node's points once).
+    if (cachedBytes() <= cacheLimit_) return;
+    for (auto& [id, node] : nodes_) {
+        node.spare.reset();
+        node.spareChanges.reset();
+    }
     // Each node's arrays, and how many nodes hold each.
     struct Held {
         NodeId id;

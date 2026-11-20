@@ -240,10 +240,11 @@ std::vector<Case> cases() {
          R"({"name": "op", "type": "Instance", "version": 2, "params": {"probability": 0.2, "seed": 5, "tMin": 0.1, "tMax": 0.3,
              "sizeMode": "fitStrand", "fitScale": 0.5, "aspect": 0.3, "spinRandom": 0.0, "deform": "alongStrand"}})",
          link("interp", "op", "strands")},
-        {"Braid", "op", R"({"name": "op", "type": "Braid", "params": {"region": 0.6, "width": 0.3, "seed": 1}})",
+        // (version 1: the braid as recorded. Version 2 presses the sections; test_look.cpp's Braid.Pressed*.)
+        {"Braid", "op", R"({"name": "op", "type": "Braid", "version": 1, "params": {"region": 0.6, "width": 0.3, "seed": 1}})",
          link("interp", "op", "strands") + "," + link("guides", "op", "braids")},
         {"BraidFed", "op",
-         R"({"name": "op", "type": "Braid", "params": {"style": "cornrow", "feed": true, "region": 0.4, "width": 0.2, "seed": 1}})",
+         R"({"name": "op", "type": "Braid", "version": 1, "params": {"style": "cornrow", "feed": true, "region": 0.4, "width": 0.2, "seed": 1}})",
          link("interp", "op", "strands") + "," + link("guides", "op", "braids")},
         {"InterpolateRadius", "op",
          R"({"name": "comb", "type": "Bend", "params": {"angle": 90.0, "along": "direction", "direction": [1, 0, 0]}},
@@ -601,6 +602,12 @@ std::vector<Case> cases() {
         {"Subdivide", "op", R"({"name": "op", "type": "Subdivide", "params": {"levels": 1}})", link("interp", "op", "strands")},
         // Spectrum: the sweep relaxed, the middle band deepened, the high band (any frizz) taken out.
         {"Spectrum", "op", R"({"name": "op", "type": "Spectrum", "params": {"lowGain": 0.7, "midGain": 1.6, "highGain": 0.0, "lowWavelength": 4.0, "highWavelength": 0.6}})", link("interp", "op", "strands")},
+        // SmoothChannel: a HairColor's tip, a step halfway along each strand (per point colorR), smoothed
+        // along the strand: the step a ramp about the length wide.
+        {"SmoothChannel", "op",
+         R"({"name": "tip", "type": "HairColor", "params": {"mode": "color", "color": [0.0, 0.0, 1.0], "tipColor": [1.0, 0.0, 0.0], "tipStrength": 1.0, "tipProfile": [[0.0, 0.0], [0.5, 0.0], [0.52, 1.0], [1.0, 1.0]]}},
+            {"name": "op", "type": "SmoothChannel", "params": {"channel": "colorR", "length": 0.3, "strength": 0.8}})",
+         link("interp", "tip", "strands") + "," + link("tip", "op", "strands")},
     };
 }
 

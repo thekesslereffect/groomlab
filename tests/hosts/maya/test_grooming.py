@@ -3210,6 +3210,127 @@ class GroomingTest(unittest.TestCase):
         self.assertEqual(cmds.getAttr(self.groom + ".scalpMapDisplay"), "crown")
         groomlab.show_map_on_scalp(self.groom, None)
 
+    def test_udim_texture_maps_paint_across_tiles(self):
+        # Issue #87: a scalp over two UDIM tiles (its UVs stretched to u 0-2: the right half on
+        # tile 1002). A texture map is a tile set (its file dens.png stands for dens.1001.png and
+        # dens.1002.png); a stroke on the tiles' border paints both; undo puts both back; the map
+        # converts to vertices reading each vertex's own tile.
+        folder = tempfile.mkdtemp(prefix="groomlab_udim_")
+        cmds.workspace(folder, openWorkspace=True)
+        plane = cmds.polyPlane(width=2, height=1, subdivisionsX=8, subdivisionsY=4)[0]
+        cmds.polyEditUV(plane + ".map[*]", scaleU=2.0, pivotU=0.0, pivotV=0.0)
+        groom = groomlab.create_groom(plane)
+        groomlab.add_map(groom, "dens", 0.0, kind="texture", resolution=32)
+        path = groomlab.map_texture(groom, "dens")
+        stem = path[:-len(".png")]
+        self.assertFalse(os.path.exists(path))
+        tiles = [stem + ".1001.png", stem + ".1002.png"]
+        for tile in tiles:
+            self.assertTrue(os.path.exists(tile), tile)
+        def read(files):
+            out = []
+            for name in files:
+                with open(name, "rb") as f:
+                    out.append(f.read())
+            return out
+        before = read(tiles)
+        groomlab.brush_stroke(groom, "paint", [(0.0, 0.0, 0.0)], radius=0.3, strength=1.0, attribute="dens",
+                              value=1.0, paint_kind="texture", paint_texture=path)
+        painted = read(tiles)
+        self.assertNotEqual(painted[0], before[0])  # both sides of the border
+        self.assertNotEqual(painted[1], before[1])
+        self.assertEqual(groomlab.errors(groom), [])
+        cmds.undo()
+        self.assertEqual(read(tiles), before)
+        cmds.redo()
+        self.assertEqual(read(tiles), painted)
+        self.assertEqual(groomlab.convert_map(groom, "dens", "vertices"), "vertices")
+        values = cmds.groomLabScalpMaps(groom, values="dens")
+        at = [cmds.pointPosition("%s.vtx[%d]" % (plane, i), world=True) for i in range(len(values))]
+        near = [v for v, p in zip(values, at) if abs(p[0]) < 0.05 and abs(p[2]) < 0.1]  # under the brush, on the border
+        far = [v for v, p in zip(values, at) if abs(p[0]) > 0.6]
+        self.assertGreater(min(near), 0.5)  # the border, painted on both tiles
+        self.assertLess(max(far), 0.05)
+
+    def test_a_map_painted_after_uvs_reach_another_tile(self):
+        # Issue #87 (as reported): a texture map made on tile 1001, the scalp's UVs then edited to
+        # reach 1002. A stroke there writes the tiles and removes the one image (read before
+        # them, it hid the new paint); undo brings the image back, redo the tiles.
+        folder = tempfile.mkdtemp(prefix="groomlab_udim_grow_")
+        cmds.workspace(folder, openWorkspace=True)
+        plane = cmds.polyPlane(width=2, height=1, subdivisionsX=8, subdivisionsY=4)[0]
+        groom = groomlab.create_groom(plane)
+        groomlab.add_map(groom, "dens", 0.0, kind="texture", resolution=32)
+        path = groomlab.map_texture(groom, "dens")
+        self.assertTrue(os.path.isfile(path))
+        cmds.polyEditUV(plane + ".map[*]", scaleU=2.0, pivotU=0.0, pivotV=0.0)  # the right half on 1002
+        groomlab.brush_stroke(groom, "paint", [(0.5, 0.0, 0.0)], radius=0.2, strength=1.0, attribute="dens",
+                              value=1.0, paint_kind="texture", paint_texture=path)
+        stem = path[:-len(".png")]
+        self.assertFalse(os.path.exists(path))
+        for tile in ("1001", "1002"):
+            self.assertTrue(os.path.isfile("%s.%s.png" % (stem, tile)), tile)
+        self.assertEqual(groomlab.errors(groom), [])
+        self.assertEqual(groomlab.missing_files(groom)["maps"], {})
+
+        def right_half():
+            cmds.undoInfo(openChunk=True)
+            groomlab.convert_map(groom, "dens", "vertices")
+            values = cmds.groomLabScalpMaps(groom, values="dens")
+            cmds.undoInfo(closeChunk=True)
+            cmds.undo()
+            at = [cmds.pointPosition("%s.vtx[%d]" % (plane, i), world=True) for i in range(len(values))]
+            return max(v for v, p in zip(values, at) if abs(p[0] - 0.5) < 0.13 and abs(p[2]) < 0.13)
+
+        cmds.undo()  # the stroke (undo and redo before right_half's own undo chunk)
+        self.assertTrue(os.path.isfile(path))
+        cmds.redo()
+        self.assertFalse(os.path.exists(path))
+        self.assertGreater(right_half(), 0.5)  # the stroke, as nodes read the map
+        cmds.undo()
+        self.assertTrue(os.path.isfile(path))
+        self.assertLess(right_half(), 0.05)
+
+    def test_udim_maps_made_untitled_follow_the_first_save(self):
+        # Issue #87 (as reported): a tile set painted while the scene is untitled (under the
+        # project's groomlab/untitled) is copied beside the scene by its first save, every tile,
+        # and the map names the copy: nothing reads a missing file after the save.
+        home = tempfile.mkdtemp(prefix="groomlab_udim_save_").replace("\\", "/")
+        cmds.workspace(home, openWorkspace=True)
+        cmds.file(new=True, force=True)  # untitled under this project
+        plane = cmds.polyPlane(width=2, height=1, subdivisionsX=8, subdivisionsY=4)[0]
+        cmds.polyEditUV(plane + ".map[*]", scaleU=2.0, pivotU=0.0, pivotV=0.0)
+        groom = groomlab.create_groom(plane)
+        groomlab.add_map(groom, "dens", 0.0, kind="texture", resolution=16)
+        path = groomlab.map_texture(groom, "dens")
+        self.assertIn("groomlab/untitled/", path)
+        groomlab.brush_stroke(groom, "paint", [(0.0, 0.0, 0.0)], radius=0.3, strength=1.0, attribute="dens",
+                              value=1.0, paint_kind="texture", paint_texture=path)
+        os.makedirs(home + "/shot")
+        cmds.file(rename=home + "/shot/udims.ma")
+        cmds.file(save=True, type="mayaAscii", force=True)  # the plugin's save callbacks copy the files
+        stored = next(m["texture"] for m in groomlab.maps(groom))
+        self.assertEqual(stored, "groomlab/udims/masks/groomLab1/dens.png")
+        for tile in ("1001", "1002"):
+            self.assertTrue(os.path.isfile(home + "/shot/groomlab/udims/masks/groomLab1/dens.%s.png" % tile), tile)
+        self.assertEqual(groomlab.errors(groom), [])
+        self.assertEqual(groomlab.follow_scene_files(), [])  # once
+        # Everything else a map touches sees the tile set by its plain path: not missing (the maps
+        # list, the File Path Editor), Export Map writes its tiles, a missing set is found again.
+        self.assertEqual(groomlab.missing_files(groom)["maps"], {})
+        deps = {(f["kind"], f["key"]): f for f in groomlab.file_dependencies(groom)}
+        self.assertTrue(deps[("map", "dens")]["exists"])
+        exported = groomlab.export_map(groom, "dens", home + "/out/dens_export.png")
+        for tile in ("1001", "1002"):
+            self.assertTrue(os.path.isfile(home + "/out/dens_export.%s.png" % tile), tile)
+        self.assertEqual(exported, home + "/out/dens_export.png")
+        moved = home + "/found"
+        shutil.move(home + "/shot/groomlab/udims/masks/groomLab1", moved)
+        self.assertIn("dens", groomlab.missing_files(groom)["maps"])
+        report = groomlab.find_missing_files([groom], moved)
+        self.assertEqual(groomlab.missing_files(groom)["maps"], {}, report)
+        self.assertEqual(groomlab.map_texture(groom, "dens").replace("\\", "/"), moved + "/dens.png")
+
     def test_color_maps_paint_fill_convert_and_pack_channels(self):
         # A color vertex map: r g b a per vertex, filled with a color; the stored entry says so.
         cmds.setAttr(self.groom + ".previewDensity", 1.0)
@@ -4071,12 +4192,49 @@ class GroomingTest(unittest.TestCase):
         draw("flow and parts depth-tested")
         self.assertGreater(cmds.getAttr(self.groom + ".outStrandCount"), 0)
 
+    def test_show_tubes_names_save_with_the_scene(self):
+        # Show Tubes (the Graph Editor's button on a Braid node): the groom's braidTubes names the
+        # Braid nodes whose section tubes the viewport draws, one a line. Display only (setting it
+        # evaluates nothing again and leaves the graph and the strands as they are), saved with the
+        # scene; the rules are the core's (which nodes, the toggle, a rename, a delete).
+        import groomlab_core
+        from groomlab import graph as gm
+        self.assertEqual(cmds.getAttr(self.groom + ".braidTubes") or "", "")
+        path = cmds.curve(degree=3, point=[(0, 1.0, 0), (0, 1.5, 0.1), (0.1, 2.0, 0.3), (0.1, 2.4, 0.7), (0, 2.6, 1.2)])
+        plait = groomlab.add_braid(self.groom, [path], style="three", region=0.6, width=0.2)
+        strands = cmds.getAttr(self.groom + ".outStrandCount")
+        graph = cmds.getAttr(self.groom + ".graph")
+        runs = cmds.groomLabGraphStats(self.groom, evaluations=True)
+        model = gm.GraphModel.from_groom(self.groom)
+        self.assertFalse(model.braid_tubes_shown(plait, ""))
+        shown = model.braid_tubes_toggled(plait, "")
+        self.assertEqual(shown, plait)
+        self.assertEqual(model.braid_tubes_toggled("interpolate", shown), shown)  # not a Braid: no button
+        cmds.setAttr(self.groom + ".braidTubes", shown, type="string")
+        self.assertTrue(model.braid_tubes_shown(plait, cmds.getAttr(self.groom + ".braidTubes")))
+        self.assertEqual(cmds.getAttr(self.groom + ".outStrandCount"), strands)
+        self.assertEqual(cmds.getAttr(self.groom + ".graph"), graph)
+        # (The shown nodes are named to the evaluation, ViewRequest::braidTubes, so their inputs are
+        # there whatever is hidden or viewed: turning the tubes on asks once, from the caches.)
+        self.assertLessEqual(cmds.groomLabGraphStats(self.groom, evaluations=True), runs + 1)
+        self.assertEqual(groomlab.errors(self.groom), [])
+        # A name that is no Braid node is kept out by the core's rule; a rename follows.
+        self.assertEqual(model.braid_tubes_kept(plait + "\ninterpolate\ngone"), plait)
+        self.assertEqual(groomlab_core.renamed_braid_tubes(plait, plait, "crown"), "crown")
+        scene = os.path.join(tempfile.mkdtemp(), "show_tubes.ma")
+        cmds.file(rename=scene)
+        cmds.file(save=True, type="mayaAscii", force=True)
+        cmds.file(scene, open=True, force=True)
+        self.assertEqual(cmds.getAttr(self.groom + ".braidTubes"), plait)
+        self.assertEqual(cmds.getAttr(self.groom + ".outStrandCount"), strands)
+        cmds.setAttr(self.groom + ".braidTubes", "", type="string")
+        self.assertEqual(cmds.getAttr(self.groom + ".outStrandCount"), strands)
+
 
 def strand_length_stats(groom):
     """(count, points) of the groom as evaluated."""
     stats = json.loads(cmds.groomLabGraphStats(groom))
     return stats.get("strands", 0), stats.get("points", 0)
-
 
 
 class ControlsAndExamplesTest(unittest.TestCase):
@@ -6291,7 +6449,9 @@ class MotionTest(unittest.TestCase):
         self.viewport_axes(5)
         self.viewport_axes(7)
         stats = json.loads(cmds.groomLabGraphStats(self.groom))
-        self.assertEqual(stats["restEvaluations"], 1)  # fitStrand alone: the rest pose once, not per frame
+        # fitStrand alone asks for the rest pose: frame 1's own evaluation (the guides at rest there),
+        # so no node ran a second time for it, then or on the frames after.
+        self.assertEqual(stats["restEvaluations"], 0)
 
         # The USD export writes the per-axis scales the viewport shows.
         path = os.path.join(tempfile.mkdtemp(prefix="groomlab_fit_"), "fitted.usda")
@@ -7066,14 +7226,14 @@ class UtilitiesTest(unittest.TestCase):
             self.assertTrue(os.path.exists(new[n]))
             self.assertEqual(groomlab.map_texture(self.groom, n), new[n])
         cmds.undo()
-        # Without projection: the maps stay as they were, and the vertex map the graph reads
-        # (another count of values than the new scalp's vertices) is reported.
+        # Without projection: the vertex maps cannot fit the new scalp, so they go (every host's
+        # rule) and are reported; the texture maps keep their images.
         groomlab.use_map(self.groom, "scatter", "density", "grad")
-        stored = cmds.getAttr(self.groom + ".scalpMaps")
         report = {}
-        self.assertEqual(groomlab.transfer_groom(self.groom, head, fit=True, maps=False, report=report), ["grad"])
+        self.assertEqual(groomlab.transfer_groom(self.groom, head, fit=True, maps=False, report=report), ["grad", "tint"])
         self.assertEqual(report["projected"], [])
-        self.assertEqual(cmds.getAttr(self.groom + ".scalpMaps"), stored)
+        kinds = {n: e.get("kind") for n, e in json.loads(cmds.getAttr(self.groom + ".scalpMaps")).items()}
+        self.assertNotIn("vertices", kinds.values())
         self.assertEqual(groomlab.map_texture(self.groom, "gradTex"), old["gradTex"])
 
     def test_transfer_reports_maps_it_cannot_carry(self):

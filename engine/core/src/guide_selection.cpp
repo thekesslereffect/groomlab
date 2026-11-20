@@ -124,8 +124,8 @@ std::vector<GuideId> pickGuides(const GuideHierarchy& h, const std::vector<Guide
             if (!g || g->points.empty()) continue;
             Vec3f lo = g->points.front(), hi = lo;
             for (const Vec3f& p : g->points) {
-                lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
-                hi = {std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
+                lo = minPerAxis(lo, p);
+                hi = maxPerAxis(hi, p);
             }
             float x0 = 0.0f, y0 = 0.0f, x1 = 0.0f, y1 = 0.0f;
             if (bounds->projectBox(lo, hi, x0, y0, x1, y1) &&

@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <numeric>
+#include "groomlab/color.h"
 
 namespace groomlab::app {
 
@@ -33,15 +34,9 @@ DirectionalLight makeLight(const char* name, float azimuth, float elevation, RGB
 
 // ---- Material ---------------------------------------------------------------------------------
 
-float srgbToLinear(float value) {
-    const float v = std::clamp(value, 0.0f, 1.0f);
-    return v <= 0.04045f ? v / 12.92f : std::pow((v + 0.055f) / 1.055f, 2.4f);
-}
+float srgbToLinear(float value) { return groomlab::srgbToLinear01(value); }  // (color.h: every host's)
 
-float linearToSrgb(float value) {
-    const float v = std::clamp(value, 0.0f, 1.0f);
-    return v <= 0.0031308f ? v * 12.92f : 1.055f * std::pow(v, 1.0f / 2.4f) - 0.055f;
-}
+float linearToSrgb(float value) { return groomlab::linearToSrgb01(value); }
 
 RGB srgbToLinear(const RGB& c) { return {srgbToLinear(c[0]), srgbToLinear(c[1]), srgbToLinear(c[2])}; }
 

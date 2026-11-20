@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "groomlab/groom_file.h"
 
+#include <algorithm>
 #include <array>
 #include <charconv>
 #include <cmath>
@@ -15,6 +16,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "groomlab/braid_tubes.h"
 #include "groomlab/drive_guides.h"
 #include "groomlab/export_view.h"
 #include "groomlab/graph_edit.h"
@@ -23,6 +25,8 @@
 #include "groomlab/paths.h"
 #include "groomlab/random.h"
 #include "groomlab/scalp_maps.h"
+#include "groomlab/scalp_pieces.h"
+#include "groomlab/scalp_paint.h"
 #include "groomlab/simulation.h"
 #include "schema_internal.h"
 
@@ -405,6 +409,62 @@ std::string resolveGroomPath(const GroomFile& file, const std::string& stored, c
     return resolvePathIn(stored, std::move(folders));
 }
 
+void storeScalpMaps(GroomData& data, const ScalpMaps& maps, const MapCatalog& fileCatalog) {
+    MapCatalog catalog;
+    for (const auto& [name, info] : fileCatalog) {
+        if (info.kind == "guides") catalog[name] = info;
+    }
+    for (const auto& [name, info] : maps.catalog()) catalog[name] = info;
+    data.maps = catalog;
+    if (!data.scalp) return;
+    const ScalpMesh& was = *data.scalp;
+    auto scalp = std::make_shared<ScalpMesh>(was.points(), was.triangles());
+    if (was.hasUVs()) scalp->setCornerUVs(was.cornerUVs());
+    if (was.hasRest()) scalp->setRestPoints(was.restPoints());
+    scalp->setPolygons(was.polygons());  // what Catmull-Clark refines, and the render's level
+    scalp->setRenderSubdivision(was.renderSubdivision(), was.renderSubdivisionFrom());
+    for (const std::string& set : was.colorSetNames()) {
+        const auto it = fileCatalog.find(set);
+        const bool wasMap = it != fileCatalog.end() && it->second.kind == "vertices";
+        if (wasMap && !maps.maps.count(set)) continue;
+        if (const auto* colors = was.cornerColors(set)) scalp->setCornerColors(set, *colors);
+    }
+    // Laid on the scalps joined, each scalp then keeps its own share as its color sets.
+    const MeshPtr joined = combineScalps(scalp, data.scalps);
+    std::shared_ptr<ScalpMesh> mapped = joined == scalp ? scalp : std::make_shared<ScalpMesh>(*joined);
+    for (const auto& [name, entry] : maps.maps) {
+        if (entry.kind != "vertices") continue;
+        const std::size_t per = entry.channels == kColorMap ? 4 : 1;
+        if (entry.values.size() != mapped->pointCount() * per) continue;
+        mapped->setCornerColors(name, cornerColorsFromVertexMap(entry.values, *mapped, static_cast<int>(per)));
+    }
+    if (mapped == scalp) {
+        data.scalp = scalp;
+        return;
+    }
+    const auto pieces = scalpPieces(mapped);
+    auto own = [&](const std::string& name, const MeshPtr& as) -> MeshPtr {
+        const auto it = pieces.find(name);
+        if (it == pieces.end()) return as;
+        auto mesh = std::make_shared<ScalpMesh>(*as);
+        for (const std::string& set : it->second->colorSetNames()) mesh->setCornerColors(set, *it->second->cornerColors(set));
+        return mesh;
+    };
+    data.scalp = own(kMainScalpName, scalp);
+    for (auto& [name, mesh] : data.scalps) mesh = own(name, mesh);
+}
+
+std::vector<std::string> groomFileFolders(const GroomFile& file, const std::string& first) {
+    std::vector<std::string> out;
+    auto add = [&](const std::string& folder) {
+        if (!folder.empty() && std::find(out.begin(), out.end(), folder) == out.end()) out.push_back(folder);
+    };
+    add(first);
+    add(file.directory);
+    for (const std::string& s : file.searchPaths) add(s);
+    return out;
+}
+
 namespace {
 
 // One groom's object: everything a groom file holds for it but the format and version.
@@ -523,6 +583,7 @@ json groomObject(FloatArrays& arrays, const GroomFile& file) {
     }
     if (!file.guideGroupColors.empty()) root["guideGroupColors"] = file.guideGroupColors;
     if (!file.hiddenGuideGroups.empty()) root["hiddenGuideGroups"] = file.hiddenGuideGroups;
+    if (const std::vector<std::string> tubes = braidTubeNames(file.braidTubes); !tubes.empty()) root["braidTubes"] = tubes;
     if (!file.cardBlock.empty()) {
         json block = json::parse(file.cardBlock, nullptr, false);
         if (block.is_object()) root["cardBlock"] = std::move(block);
@@ -660,6 +721,13 @@ GroomFile groomFromObject(const json& root, const std::string& baseDir) {
         }
         if (root.contains("hiddenGuideGroups") && root.at("hiddenGuideGroups").is_string()) {
             file.hiddenGuideGroups = root.at("hiddenGuideGroups").get<std::string>();
+        }
+        if (root.contains("braidTubes") && root.at("braidTubes").is_array()) {
+            std::vector<std::string> tubes;
+            for (const json& name : root.at("braidTubes")) {
+                if (name.is_string()) tubes.push_back(name.get<std::string>());
+            }
+            file.braidTubes = braidTubesText(tubes);
         }
         if (root.contains("cardBlock") && root.at("cardBlock").is_object()) file.cardBlock = root.at("cardBlock").dump();
         if (root.contains("scalps") && root.at("scalps").is_array()) {

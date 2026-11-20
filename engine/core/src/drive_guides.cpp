@@ -133,6 +133,32 @@ std::vector<float> driverTwistLayer(const std::vector<Vec3f>& points, double deg
     return out;
 }
 
+void DriverBind::attachGuides(const std::vector<std::uint64_t>& guides, std::uint64_t driver) {
+    for (const std::uint64_t g : guides) {
+        std::vector<std::uint64_t>& ids = attached[g];
+        if (std::find(ids.begin(), ids.end(), driver) == ids.end()) ids.push_back(driver);
+    }
+}
+
+std::size_t DriverBind::detachGuides(const std::vector<std::uint64_t>& guides, std::optional<std::uint64_t> driver) {
+    std::size_t count = 0;
+    for (const std::uint64_t g : guides) {
+        const auto it = attached.find(g);
+        if (it == attached.end()) continue;
+        if (driver) {
+            auto& ids = it->second;
+            const auto at = std::find(ids.begin(), ids.end(), *driver);
+            if (at == ids.end()) continue;
+            ids.erase(at);
+            if (ids.empty()) attached.erase(it);
+        } else {
+            attached.erase(it);
+        }
+        ++count;
+    }
+    return count;
+}
+
 std::string DriverBind::toJson() const {
     json list = json::array();
     for (const Guide& d : drivers.guides()) {
@@ -216,6 +242,12 @@ DriverAttachments attachmentsOf(const DriverBind& bind, const GuideHierarchy* hi
     }
     out.hash = h;
     return out;
+}
+
+std::string reboundDriversJson(const GuideSet& drivers, const ScalpMesh* scalp, int frame, const DriverBind& before) {
+    DriverBind bind = bindDrivers(drivers, scalp, frame);
+    bind.attached = before.attached;  // the guides attached stay attached
+    return bind.empty() && bind.attached.empty() ? std::string() : bind.toJson();
 }
 
 DriverBind bindDrivers(const GuideSet& drivers, const ScalpMesh* scalp, int frame) {

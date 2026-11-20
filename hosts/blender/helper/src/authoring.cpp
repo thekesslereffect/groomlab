@@ -25,9 +25,11 @@
 #include "groomlab/correctives.h"
 #include "groomlab/expression.h"
 #include "groomlab/frame_time.h"
+#include "groomlab/node_library.h"
 #include "groomlab/graph.h"
 #include "groomlab/graph_controls.h"
 #include "groomlab/graph_edit.h"
+#include "groomlab/graph_inserts.h"
 #include "groomlab/graph_io.h"
 #include "groomlab/groom_session.h"
 #include "groomlab/node_library.h"
@@ -48,20 +50,12 @@ namespace {
 // ---- The graph ----------------------------------------------------------------------------------
 
 std::string graphTextOf(const GroomSession& g) {
-    const std::string& text = g.data().graphJson;
-    const auto first = text.find_first_not_of(" \t\r\n");
-    if (first == std::string::npos) return defaultGraphJson();
-    const auto last = text.find_last_not_of(" \t\r\n");
-    if (text[first] == '{' && text[last] == '}' && text.find_first_not_of(" \t\r\n", first + 1) == last) return defaultGraphJson();
-    return text;
+    return graphOrDefault(g.data().graphJson);
 }
 
 // The groom's scalp size at the size its params are at (helper.cpp's scalpSize).
 std::optional<double> groomSizeOf(const Session& s) {
-    const MeshPtr& scalp = s.groom->rawScalp();
-    std::optional<double> size = scalp ? presetScalpSize(*scalp) : std::nullopt;
-    if (size) *size /= s.groom->groomScale();
-    return size;
+    return paramScalpSize(s.groom->rawScalp().get(), s.groom->groomScale());
 }
 
 json graphJsonOf(const GraphEdit& edit) {
@@ -156,116 +150,30 @@ void exposeParamRequest(GraphEdit& edit, const std::string& node, const std::str
     }
 }
 
-// GraphModel.unexpose_param: the port goes with what fed it; the param keeps its own value.
-void unexposeParam(GraphEdit& edit, const std::string& node, const std::string& param) {
+// GraphModel.unexpose_param: the port goes with what fed it; the param keeps its own value (the
+// core's, graph_controls.h).
+void unexposeParamRequest(GraphEdit& edit, const std::string& node, const std::string& param) {
     paramSpecOf(edit, node, param);
-    {
-        json g = graphJsonOf(edit);
-        const json& n = nodeIn(g, node);
-        if (!n.contains("paramInputs") || !n["paramInputs"].is_array()) return;
-        if (std::find(n["paramInputs"].begin(), n["paramInputs"].end(), json(param)) == n["paramInputs"].end()) return;
-    }
-    edit.disconnect(node, param);
-    json g = graphJsonOf(edit);
-    json& n = nodeIn(g, node);
-    json& exposed = n["paramInputs"];
-    exposed.erase(std::find(exposed.begin(), exposed.end(), json(param)));
-    if (exposed.empty()) n.erase("paramInputs");
-    edit = GraphEdit(g.dump());
+    groomlab::unexposeParam(edit, node, param);
 }
 
-// GraphModel.expose (a Compound's panel): inner param `target` ("node.param") shown as `name`.
-void compoundExpose(GraphEdit& edit, const std::string& compound, const std::string& name, const std::string& target) {
-    if (edit.nodeType(compound) != "Compound") fail("bad_request", compound + " is not a Compound");
-    if (name.empty()) fail("bad_request", "an exposed param needs a name");
-    const auto dot = target.find('.');
-    if (dot == std::string::npos) fail("bad_request", "target is \"node.param\" inside the compound");
-    const std::string innerName = target.substr(0, dot), param = target.substr(dot + 1);
-    json g = graphJsonOf(edit);
-    json& n = nodeIn(g, compound);
-    json& definition = n["params"]["definition"];
-    if (!definition.is_object()) definition = json::object();
-    const json* inner = nullptr;
-    if (definition.contains("graph") && definition["graph"].is_object() && definition["graph"].contains("nodes") &&
-        definition["graph"]["nodes"].is_array()) {
-        for (const json& x : definition["graph"]["nodes"]) {
-            if (x.is_object() && x.value("name", std::string()) == innerName) inner = &x;
-        }
+// GraphModel.expose (a Compound's panel): inner param `target` ("node.param") shown as `name`; and
+// GraphModel.unexpose: the compound stops showing `target`, its value inside what it set last. The
+// core's (graph_controls.h compoundExpose, compoundUnexpose), its GraphError a bad request.
+void compoundExposeRequest(GraphEdit& edit, const std::string& compound, const std::string& name, const std::string& target) {
+    try {
+        groomlab::compoundExpose(edit, compound, name, target);
+    } catch (const GraphError& e) {
+        fail("bad_request", e.what());
     }
-    bool known = false;
-    if (inner) {
-        try {
-            const json spec = json::parse(nodeSpecJson(inner->dump()));
-            for (const json& p : spec.value("params", json::array())) known = known || p.value("name", std::string()) == param;
-        } catch (const std::exception&) {
-        }
-    }
-    if (!known) fail("not_found", "the compound has no param '" + target + "'");
-    json& expose = definition["expose"];
-    if (!expose.is_object()) expose = json::object();
-    expose[name] = target;
-    edit = GraphEdit(g.dump());
 }
 
-// GraphModel.unexpose: the compound stops showing `target`; its value inside stays what it set last.
-void compoundUnexpose(GraphEdit& edit, const std::string& compound, const std::string& target) {
-    if (edit.nodeType(compound) != "Compound") fail("bad_request", compound + " is not a Compound");
-    json g = graphJsonOf(edit);
-    json& n = nodeIn(g, compound);
-    if (!n.contains("params") || !n["params"].is_object()) return;
-    json& params = n["params"];
-    if (!params.contains("definition") || !params["definition"].is_object()) return;
-    json& definition = params["definition"];
-    if (!definition.contains("expose") || !definition["expose"].is_object()) return;
-    json& expose = definition["expose"];
-    std::vector<std::string> names;
-    for (const auto& [name, t] : expose.items()) {
-        if (t.is_string() && t.get<std::string>() == target) names.push_back(name);
+void compoundUnexposeRequest(GraphEdit& edit, const std::string& compound, const std::string& target) {
+    try {
+        groomlab::compoundUnexpose(edit, compound, target);
+    } catch (const GraphError& e) {
+        fail("bad_request", e.what());
     }
-    const auto dot = target.find('.');
-    const std::string innerName = dot == std::string::npos ? target : target.substr(0, dot);
-    const std::string param = dot == std::string::npos ? std::string() : target.substr(dot + 1);
-    for (const std::string& name : names) {
-        if (params.contains(name) && definition.contains("graph") && definition["graph"].is_object()) {
-            for (json& inner : definition["graph"]["nodes"]) {
-                if (inner.is_object() && inner.value("name", std::string()) == innerName) inner["params"][param] = params[name];
-            }
-            params.erase(name);
-        }
-        expose.erase(name);
-    }
-    edit = GraphEdit(g.dump());
-}
-
-// GraphModel.insert_on_link: the one link from (its output) -> to.input routed through `node`:
-// node reads from on its first input that takes from's output, to reads node.
-void insertOnLink(GraphEdit& edit, const std::string& from, const std::string& to, const std::string& input,
-                  const std::string& node, const std::string& output) {
-    if (!edit.hasNode(node)) fail("not_found", "no node '" + node + "'");
-    const json g = graphJsonOf(edit);
-    bool linked = false;
-    for (const json& c : g.value("connections", json::array())) {
-        if (c.value("from", std::string()) == from && c.value("to", std::string()) == to && c.value("input", std::string()) == input &&
-            c.value("output", std::string()) == output) {
-            linked = true;
-        }
-    }
-    if (!linked) fail("not_found", from + (output.empty() ? "" : "." + output) + " is not connected to " + to + "." + input);
-    std::string why;
-    for (const json& p : specOf(edit, node).value("inputs", json::array())) {
-        GraphEdit trial = edit;
-        try {
-            trial.connect(from, node, p.value("name", std::string()), output);
-            trial.connect(node, to, input);
-        } catch (const GraphError& e) {
-            if (why.empty()) why = e.what();
-            continue;
-        }
-        edit = std::move(trial);
-        return;
-    }
-    throw GraphError(node + " has no input that takes " + from + "'s " + edit.outputType(from, output) + " and feeds " + to + "." +
-                     input + (why.empty() ? "" : " (" + why + ")"));
 }
 
 // ---- Controls (params.py): Control nodes' sliders, Expression variables, keyed params ----------
@@ -408,21 +316,14 @@ void setScript(GraphEdit& edit, const std::string& node, const json& definition)
     const json errors = scriptErrors(definition);
     if (!errors.empty()) fail("script", errorsText(errors));
     if (!edit.hasNode(node) || edit.nodeType(node) != "Script") fail("bad_request", node + " is not a script node");
-    json g = graphJsonOf(edit);
-    json& n = nodeIn(g, node);
-    json& params = n["params"];
-    if (!params.is_object()) params = json::object();
-    std::set<std::string> kept;
-    for (const json& p : definition.value("params", json::array())) kept.insert(p.value("name", std::string()));
-    if (params.contains("definition") && params["definition"].is_object()) {
-        for (const json& p : params["definition"].value("params", json::array())) {
-            const std::string name = p.value("name", std::string());
-            if (!kept.count(name)) params.erase(name);
-        }
+    // Every host's (node_library.h withScriptDefinition): gone params lose their ports and links,
+    // params at their old default take the new one.
+    try {
+        edit = GraphEdit(withScriptDefinition(edit.toJson(), node, definition.dump()));
+    } catch (const std::invalid_argument& e) {
+        fail("script", e.what());
     }
-    params["definition"] = definition;
-    edit = GraphEdit(g.dump());
-    edit.completeParams();  // the new params at their defaults
+    edit.completeParams();
 }
 
 json scriptDefinition(const GraphEdit& edit, const std::string& node) {
@@ -482,6 +383,8 @@ double secondsOf(const Session& s, double frame) { return frameToSeconds(frame, 
 json layerJson(const Session& s, const CorrectiveLayer& l) {
     json keys = json::array();
     for (const auto& [seconds, w] : l.weightCurve) keys.push_back({frameOf(s, seconds), w});
+    json fadeKeys = json::array();  // a fix's fades as keys, as the core keys them first (correctives.h)
+    for (const auto& [seconds, w] : l.fadeKeys()) fadeKeys.push_back({frameOf(s, seconds), w});
     json frame = nullptr;
     if (!l.weightCurve.empty()) {
         const auto peak = std::max_element(l.weightCurve.begin(), l.weightCurve.end(), [](const auto& a, const auto& b) { return a.second < b.second; });
@@ -496,6 +399,7 @@ json layerJson(const Session& s, const CorrectiveLayer& l) {
               {"weightNow", l.enabled ? l.weightAt(s.seconds) : 0.0f},
               {"keyed", !l.weightCurve.empty()},
               {"keys", keys},
+              {"fadeKeys", fadeKeys},
               {"allFrames", l.allFrames()},
               {"frame", frame},
               {"fadeIn", l.fadeIn * fpsOf(s)},
@@ -561,22 +465,10 @@ json correctiveNew(Session& s, const json& args) {
     bool fades = optBool(args, "fix", false);  // the app's Fix Frame: fades of 6 frames
     for (const char* key : {"fade", "fadeIn", "fadeOut"}) fades = fades || (args.contains(key) && !args[key].is_null());
     const bool all = optBool(args, "allFrames", !fades);
-    CorrectiveLayer layer;
-    // Every host's names (correctives.h): sculpt<N> or shot<F>, made free.
-    layer.name = c.freeLayerName(optString(args, "name", c.newLayerName(all, frame)));
-    layer.time = secondsOf(s, frame);
-    layer.holdBefore = layer.holdAfter = all;
-    if (all) {
-        layer.fadeIn = layer.fadeOut = 0.5;
-    } else {
-        double in = 6.0, out = 6.0;
-        fadesOf(args, in, out, 6.0, 6.0);
-        layer.fadeIn = in / fpsOf(s);
-        layer.fadeOut = out / fpsOf(s);
-    }
-    layer.weight = 1.0f;
-    const std::string name = layer.name;
-    c.layers.push_back(std::move(layer));
+    double in = 6.0, out = 6.0;
+    if (!all) fadesOf(args, in, out, 6.0, 6.0);
+    // Every host's (correctives.h addLayer): sculpt<N> or shot<F>, made free.
+    const std::string name = c.addLayer(all, secondsOf(s, frame), frame, in / fpsOf(s), out / fpsOf(s), optString(args, "name", ""));
     commitTexts(s, "add corrective", {{StrokeField::Correctives, c.toJson()}});
     // What the next strokes sculpt into (shots.py's set_target): no Sculpt node then.
     s.groom->setSculptTarget({});
@@ -634,12 +526,7 @@ json correctiveSet(Session& s, const json& args) {
         l.holdBefore = l.holdAfter = false;
         l.weight = weighted ? weightArg(args) : peak;
     } else if (weighted) {
-        const float w = weightArg(args);
-        if (!l.weightCurve.empty()) {
-            l.keyAt(s.seconds, w);
-        } else {
-            l.weight = w;
-        }
+        c.setLayerWeight(l.name, weightArg(args), s.seconds);  // (correctives.h)
     }
     const std::string name = l.name;
     return commitLayers(s, "edit corrective", c, {{"name", name}});
@@ -648,13 +535,13 @@ json correctiveSet(Session& s, const json& args) {
 json correctiveRename(Session& s, const json& args) {
     Correctives c = correctivesOf(s);
     const std::string name = needString(args, "name"), to = needString(args, "to");
-    CorrectiveLayer& l = layerOf(c, name);
+    layerOf(c, name);
     if (to == name) return commitLayers(s, "rename corrective", c, {{"name", name}});
-    const std::string clean = c.freeLayerName(to, name);
-    if (clean != to) {
-        fail("bad_request", "'" + to + "' cannot name a corrective (taken, or not letters, digits and _): try '" + clean + "'");
+    try {
+        c.renameLayer(name, to);  // (correctives.h: a taken or invalid name refused, one to try given)
+    } catch (const std::invalid_argument& e) {
+        fail("bad_request", e.what());
     }
-    l.name = to;
     const bool target = shotLayer(s) == name;
     json r = commitLayers(s, "rename corrective", c, {{"name", to}, {"renamed", name}});
     if (target) {
@@ -670,13 +557,7 @@ json correctiveMove(Session& s, const json& args) {
     layerOf(c, name);
     const double stepArg = optNumber(args, "step", 1.0);
     if (!std::isfinite(stepArg)) fail("bad_request", "step is a whole number (+1 up the stack, -1 down)");
-    const long step = std::lround(stepArg);
-    auto it = std::find_if(c.layers.begin(), c.layers.end(), [&](const CorrectiveLayer& l) { return l.name == name; });
-    const long i = static_cast<long>(it - c.layers.begin());
-    const long j = std::clamp(i + step, 0L, static_cast<long>(c.layers.size()) - 1);
-    CorrectiveLayer moved = std::move(*it);
-    c.layers.erase(it);
-    c.layers.insert(c.layers.begin() + j, std::move(moved));
+    const std::size_t j = c.moveLayer(name, std::lround(stepArg));  // (correctives.h)
     return commitLayers(s, "move corrective", c, {{"name", name}, {"index", j}});
 }
 
@@ -685,29 +566,23 @@ json correctiveSolo(Session& s, const json& args) {
     Correctives c = correctivesOf(s);
     const std::string name = needString(args, "name");
     layerOf(c, name);
-    const bool alone = std::all_of(c.layers.begin(), c.layers.end(), [&](const CorrectiveLayer& l) { return l.enabled == (l.name == name); });
-    for (CorrectiveLayer& l : c.layers) l.enabled = alone || l.name == name;
-    return commitLayers(s, "solo corrective", c, {{"name", name}, {"soloed", !alone}});
+    const bool soloed = c.soloLayer(name);  // (correctives.h)
+    return commitLayers(s, "solo corrective", c, {{"name", name}, {"soloed", soloed}});
 }
 
 json correctiveDelete(Session& s, const json& args) {
     Correctives c = correctivesOf(s);
     const std::string name = needString(args, "name");
     layerOf(c, name);
-    c.layers.erase(std::remove_if(c.layers.begin(), c.layers.end(), [&](const CorrectiveLayer& l) { return l.name == name; }), c.layers.end());
+    c.removeLayer(name);  // (correctives.h)
     return commitLayers(s, "remove corrective", c, {{"removed", name}});  // the target goes with it (tools.cpp pruneTargets)
 }
 
 // shots.py's clear_keys: the keys (or a fix's fades) dropped, the layer on every frame at its weight now.
 json correctiveClearKeys(Session& s, const json& args) {
     Correctives c = correctivesOf(s);
-    CorrectiveLayer& l = layerOf(c, needString(args, "name"));
-    if (!l.allFrames()) {
-        l.weight = l.weightAt(s.seconds);
-        l.weightCurve.clear();
-        l.holdBefore = l.holdAfter = true;
-    }
-    const std::string name = l.name;
+    const std::string name = layerOf(c, needString(args, "name")).name;
+    c.clearLayerKeys(name, s.seconds);  // (correctives.h)
     return commitLayers(s, "clear corrective keys", c, {{"name", name}});
 }
 
@@ -845,23 +720,27 @@ bool runGraphAuthoring(Session& s, const std::string& op, const json& args, json
         exposeParamRequest(edit, needString(args, "name"), needString(args, "param"));
         label = "expose param";
     } else if (op == "unexpose_param") {
-        unexposeParam(edit, needString(args, "name"), needString(args, "param"));
+        unexposeParamRequest(edit, needString(args, "name"), needString(args, "param"));
         label = "unexpose param";
     } else if (op == "compound_expose") {
         const std::string name = needString(args, "name");
         if (!edit.hasNode(name)) fail("not_found", "no node '" + name + "'");
-        compoundExpose(edit, name, needString(args, "param"), needString(args, "target"));
+        // (No "param": named after the inner param, or node + Param when taken: the core's.)
+        compoundExposeRequest(edit, name, optString(args, "param", ""), needString(args, "target"));
         label = "expose compound param";
     } else if (op == "compound_unexpose") {
         const std::string name = needString(args, "name");
         if (!edit.hasNode(name)) fail("not_found", "no node '" + name + "'");
-        compoundUnexpose(edit, name, needString(args, "target"));
+        compoundUnexposeRequest(edit, name, needString(args, "target"));
         label = "unexpose compound param";
     } else if (op == "insert_on_link") {
         const std::string from = needString(args, "from"), to = needString(args, "to");
         if (!edit.hasNode(from)) fail("not_found", "no node '" + from + "'");
         if (!edit.hasNode(to)) fail("not_found", "no node '" + to + "'");
-        insertOnLink(edit, from, to, needString(args, "input"), needString(args, "node"), optString(args, "output", ""));
+        const std::string node = needString(args, "node");
+        if (!edit.hasNode(node)) fail("not_found", "no node '" + node + "'");
+        // Every host's node dropped on a wire (graph_inserts.h insertOnLink): its first input that takes it.
+        insertOnLink(edit, from, to, needString(args, "input"), node, optString(args, "output", ""));
         label = "insert node";
     } else if (op == "detach") {
         // Detach (every host's node menu): each node out of the flow, kept (graph_edit.h detach).

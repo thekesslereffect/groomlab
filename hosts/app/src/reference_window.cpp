@@ -1176,12 +1176,10 @@ void ReferenceWindow::setHover(MarkerHover hover) {
     meshView_->update();
 }
 
-void ReferenceWindow::setOverlay(Overlay overlay) { overlayBox_->setCurrentIndex(static_cast<int>(overlay)); }
 ReferenceWindow::Overlay ReferenceWindow::overlay() const { return static_cast<Overlay>(overlayBox_->currentIndex()); }
 double ReferenceWindow::overlayOpacity() const { return opacity_->value(); }
 void ReferenceWindow::setMaskTint(bool on) { maskTint_->setChecked(on); }
 void ReferenceWindow::setFieldLines(bool on) { fieldLines_->setChecked(on); }
-void ReferenceWindow::setGuidesShown(bool on) { guidesShown_->setChecked(on); }
 bool ReferenceWindow::guidesShown() const { return guidesShown_->isChecked(); }
 
 const std::vector<std::vector<std::array<float, 2>>>& ReferenceWindow::guideLinesShown() {

@@ -21,6 +21,7 @@
 #include "groomlab/flow.h"
 #include "groomlab/graph_controls.h"
 #include "groomlab/graph_edit.h"
+#include "groomlab/graph_inserts.h"
 #include "groomlab/graph_pins.h"
 #include "groomlab/graph_io.h"
 #include "groomlab/node_library.h"
@@ -34,6 +35,8 @@
 #include "groomlab/subdivision.h"
 #include "groomlab/texture.h"
 #include "groomlab/transfer.h"
+#include "groomlab/stroke.h"
+#include "groomlab/groom_transfer.h"
 #include "graph_presets.h"
 
 namespace groomlab::app {
@@ -149,17 +152,9 @@ GroomDocument::GroomDocument(GroomFile file, std::string path) : path_(std::move
     loadMaps();
     controlKeys_ = scene_->file().controlKeys;
     // The groups' own colors and the hidden groups as the file keeps them (Maya's attributes' text).
-    {
-        std::istringstream words(scene_->file().guideGroupColors);
-        for (std::string word; words >> word;) {
-            const std::size_t colon = word.rfind(':');
-            if (colon == std::string::npos || colon == 0 || word.size() != colon + 8 || word[colon + 1] != '#') continue;
-            std::string color = word.substr(colon + 1);
-            std::transform(color.begin(), color.end(), color.begin(), [](char c) { return static_cast<char>(std::tolower(static_cast<unsigned char>(c))); });
-            groupColors_[word.substr(0, colon)] = color;
-        }
-    }
+    for (const auto& [group, color] : guideGroupColorWords(scene_->file().guideGroupColors)) groupColors_[group] = color;  // (display.h)
     hiddenGroups_ = parseHiddenGuideGroups(scene_->file().hiddenGuideGroups);
+    braidTubes_ = scene_->file().braidTubes;  // Show Tubes' nodes
     // The caches' first frame is where an animated groom opens (Maya opens at the range's start).
     double first = 0.0;
     if (scene_->timeRange(&first, nullptr)) time_ = first;
@@ -238,11 +233,16 @@ std::string GroomDocument::assetFolder(const std::string& kind) const {
     return groomlab::assetFolder(forwardSlashes(groom.parent_path().u8string()), groom.stem().u8string(), kind);
 }
 
+std::string GroomDocument::groomFolder(const std::string& kind) const {
+    // (Saved: groom_package.h groomFileFolder, every host's; untitled: in its temp folder.)
+    return path_.empty() ? assetFolder(kind) + "/" + fileSafeName(displayName()) : groomFileFolder(path_, name_, kind);
+}
+
 std::string GroomDocument::mapsDirectory() const {
     if (path_.empty()) return {};
     // The groom's own folder in masks, as Maya keeps a groom's (masks/<groom>) and Blender a
     // scalp's (masks/<scalp>): groomlab/<name>/masks/<name>.
-    return assetFolder("masks") + "/" + fileSafeName(displayName());
+    return groomFolder("masks");
 }
 
 std::string GroomDocument::textureMapFile(const std::string& name) const {
@@ -270,43 +270,29 @@ std::string GroomDocument::createMap(const std::string& name, const std::string&
     if (!scalp) return "no scalp to paint on";
     if (kind == "guides") {
         if (color) return "a guide layer is gray: make a color map on the scalp's vertices or as a texture";
-        return editGuides("create map " + name, [&](GuideHierarchy& h) {
-            bool any = false;
-            for (const HierarchyGuide& g : h.guides()) {
-                if (g.parent != kNoGuide) continue;  // children inherit their primary's
-                h.setAttribute(g.id, name, value);
-                any = true;
-            }
-            if (!any) throw std::invalid_argument("no primary guides to carry the layer: place some first");
+        return editGuides("create map " + name, [&](GuideHierarchy& h) {  // (every host's: addGuideLayer)
+            if (!addGuideLayer(h, name, value)) throw std::invalid_argument("no primary guides to carry the layer: place some first");
         });
     }
     ScalpMaps maps = session().scalpMaps();
     ScalpMapEntry entry;
     entry.channels = color ? kColorMap : kGrayMap;
+    // (Every host's New Map: scalp_paint.h newVertexMapValues, newTextureMapPaint.)
+    const PaintColor filled = color ? fill : PaintColor{value, value, value, 1.0f};
     if (kind == "vertices") {
         entry.kind = "vertices";
-        const std::size_t n = scalp->pointCount();
-        entry.values.resize(n * static_cast<std::size_t>(entry.channels));
-        for (std::size_t v = 0; v < n; ++v) {
-            if (color) {
-                for (std::size_t c = 0; c < 4; ++c) entry.values[v * 4 + c] = fill[c];
-            } else {
-                entry.values[v] = value;
-            }
-        }
+        entry.values = newVertexMapValues(*scalp, entry.channels, filled);
     } else if (kind == "texture") {
         if (!scalp->hasUVs()) return "the scalp has no UVs to paint a texture map on";
         const std::string folder = mapsDirectory();
         if (folder.empty()) return "save the groom first: a texture map's image goes in the groomlab folder beside it";
         // groomlab/<groom>/masks/<name>.png beside the groom file, a free <name>_2.png when that is taken
         // (as the Maya host names them), the file written now so the map reads from the start.
-        std::filesystem::path file = std::filesystem::u8path(folder) / (name + ".png");
-        for (int k = 2; std::filesystem::exists(file); ++k) file = std::filesystem::u8path(folder) / (name + "_" + std::to_string(k) + ".png");
+        // (asset_files.h freeFilePath: a file or a tile set of that name is taken.)
+        const std::filesystem::path file = std::filesystem::u8path(freeFilePath(folder + "/" + name + ".png"));
         try {
             std::filesystem::create_directories(file.parent_path());
-            const int size = std::clamp(resolution, 4, 16384);
-            const TexturePaint paint = color ? TexturePaint(*scalp, size, size, fill) : TexturePaint(*scalp, size, size, value);
-            paint.save(forwardSlashes(file.u8string()));
+            newTextureMapPaint(*scalp, entry.channels, filled, resolution).save(forwardSlashes(file.u8string()));
         } catch (const std::exception& e) {
             return std::string("cannot write the map's image: ") + e.what();
         }
@@ -344,15 +330,14 @@ std::string GroomDocument::renameMap(const std::string& from, const std::string&
             // The file follows when it is named after the map (scalp_maps.h's renamedMapTexture,
             // Maya's rule), to a free name beside it; a file in the way, or one that cannot move, stays.
             const std::filesystem::path full = std::filesystem::u8path(resolveMapPath(entry.texture));
-            const std::string renamed = renamedMapTexture(full.generic_u8string(), from, to);
+            // (Named after the map, in the groom's maps folder: every host's rule, asset_files.h.)
+            const std::string renamed = renamedMapImage(full.generic_u8string(), from, to, mapsDirectory());
             if (!renamed.empty()) {
-                std::filesystem::path target = std::filesystem::u8path(renamed);
-                const std::string stem = target.stem().u8string();
-                for (int k = 2; std::filesystem::exists(target); ++k) {
-                    target = full.parent_path() / (stem + "_" + std::to_string(k) + full.extension().u8string());
-                }
+                const std::filesystem::path target = std::filesystem::u8path(renamed);  // (a free name: a file or a tile set taken)
                 std::error_code ec;
-                std::filesystem::rename(full, target, ec);
+                for (const auto& [a, b] : mapImageMoves(full.generic_u8string(), target.generic_u8string())) {  // (a tile set: each tile)
+                    if (!ec) std::filesystem::rename(std::filesystem::u8path(a), std::filesystem::u8path(b), ec);
+                }
                 if (!ec) {
                     entry.texture = pathFromGroomFolder(target.u8string(), std::filesystem::u8path(path_).parent_path().u8string());
                     paints_.erase(from);
@@ -648,6 +633,19 @@ std::string GroomDocument::editGraph(const std::string& label, const std::functi
         entry.stroke = std::make_shared<const StrokeEdit>(std::move(stroke));
     }
     if (target != session().sculptTarget()) session().setSculptTarget(target);
+    if (!braidTubes_.empty()) {
+        // Show Tubes follows the edit: a renamed node's name, a removed node's gone (the core's rules).
+        std::string shown = braidTubes_;
+        for (const auto& [from, to] : moved) shown = renamedBraidTubes(shown, from, to);
+        try {
+            shown = GraphEdit(graph_.dump()).braidTubesKept(shown);
+        } catch (const std::exception&) {
+        }
+        if (shown != braidTubes_) {
+            entry.braidTubes = std::make_pair(braidTubes_, shown);
+            braidTubes_ = shown;
+        }
+    }
     record(std::move(entry));
     dirty_ = true;
     return {};
@@ -744,36 +742,10 @@ std::string GroomDocument::addNode(const std::string& type, float x, float y, st
 
 namespace {
 
-// GraphModel.insert_on_link (Maya's graph.py, the Blender helper's too): the one link from (its
-// output) -> to.input routed through `node`: node reads from on its first input that takes from's
-// output, to reads node. Throws GraphError (the edit as it was) when the link is not there or no
-// input of node fits.
+// A node into a link, every host's (graph_inserts.h insertOnLink): Maya's GraphModel.insert_on_link
+// and the Blender helper's edit_graph op make the same edit.
 void insertOnLinkIn(GraphEdit& edit, const GroomDocument::NodeLink& link, const std::string& node) {
-    if (!edit.hasNode(node)) throw GraphError("no node '" + node + "'");
-    if (node == link.from || node == link.to) throw GraphError(node + " is an end of that link");
-    const json g = json::parse(edit.toJson());
-    bool linked = false;
-    for (const json& c : g.value("connections", json::array())) {
-        linked = linked || (c.value("from", std::string()) == link.from && c.value("to", std::string()) == link.to &&
-                            c.value("input", std::string()) == link.input && c.value("output", std::string()) == link.output);
-    }
-    if (!linked) throw GraphError(link.from + " is not connected to " + link.to + "." + link.input);
-    std::string why;
-    const json spec = json::parse(edit.nodeSpecJson(node));
-    for (const json& p : spec.value("inputs", json::array())) {
-        GraphEdit trial = edit;
-        try {
-            trial.connect(link.from, node, p.value("name", std::string()), link.output);
-            trial.connect(node, link.to, link.input);
-        } catch (const GraphError& e) {
-            if (why.empty()) why = e.what();
-            continue;
-        }
-        edit = std::move(trial);
-        return;
-    }
-    throw GraphError(node + " has no input that takes " + link.from + "'s " + edit.outputType(link.from, link.output) + " and feeds " +
-                     link.to + "." + link.input + (why.empty() ? "" : " (" + why + ")"));
+    insertOnLink(edit, link.from, link.to, link.input, node, link.output);
 }
 
 }  // namespace
@@ -798,8 +770,7 @@ std::string GroomDocument::addNode(const std::string& type, float x, float y, st
     // Its defaults that measure something fitted to the scalp, as a preset's are.
     const MeshPtr& scalp = file().data.scalp;
     // (At the size the params are at: the groom's 1x when it is scaled with its scalp.)
-    std::optional<double> size = scalp ? presetScalpSize(*scalp) : std::nullopt;
-    if (size) *size /= session().groomScale();
+    const std::optional<double> size = paramScalpSize(scalp.get(), session().groomScale());
     std::string after, refused;
     const std::string error = editGraph("add " + chosen, [&](json& g) {
         GraphEdit edit(g.dump());
@@ -898,57 +869,15 @@ std::string GroomDocument::showInnerParam(const std::string& compound, const std
     if (n->value("type", std::string()) != "Compound") return compound + " is not a Compound";
     const auto dot = target.find('.');
     if (dot == std::string::npos) return "an inner param is \"node.param\" inside the compound";
-    const std::string inner = target.substr(0, dot), param = target.substr(dot + 1);
     const std::vector<std::string> now = shownInnerParams(compound);
     if ((std::find(now.begin(), now.end(), target) != now.end()) == shown) return {};
-    // Named after the param, or node + Param when the compound has a param of that name (Maya's).
-    std::string name = param;
-    if (shown) {
-        if (const json* s = nodeSpec(compound)) {
-            for (const json& p : s->value("params", json::array())) {
-                if (p.value("name", std::string()) == param) name = inner + static_cast<char>(std::toupper(static_cast<unsigned char>(param[0]))) + param.substr(1);
-            }
-        }
-    }
+    // The core's (graph_controls.h compoundExpose, compoundUnexpose), as Maya and Blender show and
+    // hide an inner param: hidden, its value goes back inside.
     return editGraph((shown ? "show " : "hide ") + target + " on " + compound, [&](json& g) {
-        for (json& c : g["nodes"]) {
-            if (c.value("name", std::string()) != compound) continue;
-            json& params = c["params"];
-            if (!params.is_object()) params = json::object();
-            json& definition = params["definition"];
-            if (!definition.is_object()) definition = json::object();
-            json& expose = definition["expose"];
-            if (!expose.is_object()) expose = json::object();
-            json* innerNode = nullptr;
-            if (definition.contains("graph") && definition["graph"].is_object() && definition["graph"].contains("nodes")) {
-                for (json& x : definition["graph"]["nodes"]) {
-                    if (x.is_object() && x.value("name", std::string()) == inner) innerNode = &x;
-                }
-            }
-            if (shown) {
-                bool known = false;
-                if (innerNode) {
-                    if (const json* s = spec(innerNode->value("type", std::string()))) {
-                        for (const json& p : s->value("params", json::array())) known = known || p.value("name", std::string()) == param;
-                    }
-                }
-                if (!known) throw std::invalid_argument("the compound has no param '" + target + "'");
-                expose[name] = target;
-            } else {
-                // Its value goes back inside: the inner node keeps what the compound set last.
-                std::vector<std::string> names;
-                for (const auto& [key, t] : expose.items()) {
-                    if (t.is_string() && t.get<std::string>() == target) names.push_back(key);
-                }
-                for (const std::string& key : names) {
-                    if (params.contains(key)) {
-                        if (innerNode) (*innerNode)["params"][param] = params[key];
-                        params.erase(key);
-                    }
-                    expose.erase(key);
-                }
-            }
-        }
+        GraphEdit edit(g.dump());
+        if (shown) compoundExpose(edit, compound, {}, target);  // (named after the param, or node + Param when taken)
+        else compoundUnexpose(edit, compound, target);
+        g = json::parse(edit.toJson());
     });
 }
 
@@ -969,24 +898,29 @@ std::string GroomDocument::addControl(const std::string& node, const std::string
 }
 
 std::vector<GroomDocument::ControlSlider> GroomDocument::controlSliders() const {
+    // Every slider the graph reads, compounds' too (the core's controlsJson, as Maya's ctl_
+    // attributes and Blender's controls list them): Control nodes and Expression variables; keyed
+    // params have their keys instead.
     std::vector<ControlSlider> out;
     const std::map<std::string, float>& values = session().data().controls;
-    for (const json& n : graph_.value("nodes", json::array())) {
-        if (n.value("type", std::string()) != "Control") continue;
-        const json params = n.value("params", json::object());
-        ControlSlider c;
-        c.node = n.value("name", std::string());
-        c.name = params.value("name", std::string("control"));
+    const json controls = json::parse(controlsJson(graph_.dump()), nullptr, false);
+    if (!controls.is_object()) return out;
+    for (const auto& [name, c] : controls.items()) {
+        const std::string kind = c.value("kind", std::string());
+        if (kind != "control" && kind != "variable") continue;
         const auto number = [&](const char* key, double fallback) {
-            const auto it = params.find(key);
-            return it != params.end() && it->is_number() ? it->get<double>() : fallback;
+            const auto it = c.find(key);
+            return it != c.end() && it->is_number() ? it->get<double>() : fallback;
         };
-        c.min = number("min", 0.0);
-        c.max = number("max", 1.0);
-        if (!(c.max > c.min)) c.max = c.min + 1.0;
-        const auto set = values.find(c.name);
-        c.value = set != values.end() ? static_cast<double>(set->second) : number("default", 0.0);
-        if (std::none_of(out.begin(), out.end(), [&](const ControlSlider& o) { return o.name == c.name; })) out.push_back(c);
+        ControlSlider slider;
+        slider.node = c.value("node", std::string());
+        slider.name = name;
+        slider.min = number("min", 0.0);
+        slider.max = number("max", 1.0);
+        if (!(slider.max > slider.min)) slider.max = slider.min + 1.0;
+        const auto set = values.find(name);
+        slider.value = set != values.end() ? static_cast<double>(set->second) : number("default", 0.0);
+        out.push_back(slider);
     }
     return out;
 }
@@ -1159,32 +1093,16 @@ std::string GroomDocument::bakeNodeToGuides(const std::string& node, const std::
     if (!(density > 0.0f && density <= 1.0f)) return "the density is above 0, at most 1";
     if (!session().scalp()) return "the groom has no scalp";
     // The node as it is now (the last evaluation's inputs), one guide per strand.
-    GuideSet baked;
+    std::optional<GuideSet> baked;
     try {
-        const Value value = session().evaluateNode(node, density, time_);
-        if (const GuidesPtr* guides = std::get_if<GuidesPtr>(&value); guides && *guides) {
-            baked = **guides;
-        } else if (const StrandsPtr* strands = std::get_if<StrandsPtr>(&value); strands && *strands) {
-            for (std::size_t i = 0; i < (*strands)->strandCount(); ++i) {
-                const Vec3f* p = (*strands)->strandPoints(i);
-                baked.add((*strands)->ids()[i], std::vector<Vec3f>(p, p + (*strands)->strandPointCount(i)));
-            }
-        } else {
-            return node + " gives no guides or strands (nothing to bake)";
-        }
+        baked = guidesOfValue(session().evaluateNode(node, density, time_));  // every host's (graph.h)
     } catch (const std::exception& e) {
         return e.what();
     }
-    if (baked.empty()) return node + " made no guides";
+    if (!baked) return node + " gives no guides or strands (nothing to bake)";
+    if (baked->empty()) return node + " made no guides";
     std::size_t added = 0;
-    const std::string error = editGuides("bake " + node, [&](GuideHierarchy& h) {
-        GroupId gid = h.findGroup(group);
-        if (gid == kNoGroup) gid = h.addGroup(group);
-        else if (h.groupDepth(gid) != 0) throw std::invalid_argument("'" + group + "' is a child group: bake into a root group");
-        const std::vector<GuideId> ids = h.addGuides(gid, baked);
-        for (const GuideId id : ids) h.setPoints(id, h.withGroupSegments(gid, h.guide(id)->points));  // the group's segments, if it has its own
-        added = ids.size();
-    });
+    const std::string error = editGuides("bake " + node, [&](GuideHierarchy& h) { added = h.addBakedGuides(group, *baked).size(); });
     if (error.empty() && count) *count = added;
     return error;
 }
@@ -1213,61 +1131,27 @@ std::string GroomDocument::removeNodes(const std::vector<std::string>& nodes) {
     });
 }
 
-namespace {
-
-constexpr const char* kClipboardKey = "groomlabNodes";  // Maya's graph.py CLIPBOARD_KEY
-
-}  // namespace
-
 std::string GroomDocument::copyNodes(const std::vector<std::string>& nodes) const {
-    json data = {{kClipboardKey, 1}, {"nodes", json::array()}, {"connections", json::array()}};
-    std::set<std::string> copied;
-    // In the graph's order, as Maya's copy_nodes.
-    for (const json& n : graph_.value("nodes", json::array())) {
-        const std::string name = n.value("name", std::string());
-        if (n.value("type", std::string()) == "Output") continue;
-        if (std::find(nodes.begin(), nodes.end(), name) == nodes.end()) continue;
-        data["nodes"].push_back(n);
-        copied.insert(name);
+    // The core's (graph_edit.h copyNodes, Maya's copy_nodes too): in the graph's order, never the Output node.
+    try {
+        return GraphEdit(graph_.dump()).copyNodes(nodes);
+    } catch (const std::exception&) {
+        return {};
     }
-    if (copied.empty()) return {};
-    for (const json& c : graph_.value("connections", json::array())) {
-        if (copied.count(c.value("from", std::string())) && copied.count(c.value("to", std::string()))) data["connections"].push_back(c);
-    }
-    return data.dump();
 }
 
 std::string GroomDocument::pasteNodes(const std::string& text, float dx, float dy, std::vector<std::string>* made) {
+    // The core's (graph_edit.h pasteNodes, Maya's paste_nodes too): new names, the links among them.
     const json data = json::parse(text, nullptr, false);
-    if (!data.is_object() || !data.contains(kClipboardKey) || !data.value("nodes", json()).is_array() || data["nodes"].empty()) {
-        return "the clipboard holds no GroomLab nodes";
-    }
-    for (const json& n : data["nodes"]) {
-        if (!n.is_object() || !spec(n.value("type", std::string()))) return "the clipboard names an unknown node type";
-    }
-    std::map<std::string, std::string> renamed;  // copied name -> pasted name
+    const std::size_t count = data.is_object() && data.value("nodes", json()).is_array() ? data["nodes"].size() : 0;
     std::map<std::string, std::string> copiedSculpts;
     std::vector<std::string> names;
-    const std::string error = editGraph("paste " + std::to_string(data["nodes"].size()) + " nodes", [&](json& g) {
-        if (!g.contains("nodes") || !g["nodes"].is_array()) g["nodes"] = json::array();
-        for (const json& n : data["nodes"]) {
-            const std::string from = n.value("name", std::string());
-            const std::string name = GraphEdit(g.dump()).uniqueName(from.empty() ? n.value("type", std::string()) : from);
-            json node = n;
-            node["name"] = name;
-            const json ui = n.value("ui", json::object());
-            node["ui"] = {{"x", (ui.is_object() ? ui.value("x", 0.0) : 0.0) + dx}, {"y", (ui.is_object() ? ui.value("y", 0.0) : 0.0) + dy}};
-            g["nodes"].push_back(node);
-            renamed[from] = name;
-            names.push_back(name);
-            const std::string type = node.value("type", std::string());
-            if ((type == op::kSculpt || type == "Compound") && nodeJson(from)) copiedSculpts[name] = from;
-        }
+    const std::string error = editGraph("paste " + std::to_string(count) + " nodes", [&](json& g) {
         GraphEdit edit(g.dump());
-        for (const json& c : data.value("connections", json::array())) {
-            const auto a = renamed.find(c.value("from", std::string())), b = renamed.find(c.value("to", std::string()));
-            if (a == renamed.end() || b == renamed.end()) continue;
-            edit.connect(a->second, b->second, c.value("input", std::string()), c.value("output", std::string()));
+        for (const auto& [name, from] : edit.pasteNodes(text, dx, dy)) {
+            names.push_back(name);
+            const std::string type = edit.nodeType(name);
+            if ((type == op::kSculpt || type == "Compound") && nodeJson(from)) copiedSculpts[name] = from;
         }
         g = json::parse(edit.toJson());
     }, {}, copiedSculpts);
@@ -1409,8 +1293,7 @@ json GroomDocument::libraryInfo(const std::string& node) const {
 std::string GroomDocument::updateLibraryNode(const std::string& node, const std::string& id) {
     if (!nodeJson(node)) return "no node '" + node + "'";
     const MeshPtr& scalp = file().data.scalp;
-    std::optional<double> size = scalp ? presetScalpSize(*scalp) : std::nullopt;
-    if (size) *size /= session().groomScale();
+    const std::optional<double> size = paramScalpSize(scalp.get(), session().groomScale());
     bool changed = false;
     const std::string error = editGraph("update " + node, [&](json& g) {
         GraphEdit edit(g.dump());
@@ -1424,8 +1307,7 @@ std::string GroomDocument::updateLibraryNode(const std::string& node, const std:
 std::string GroomDocument::saveAsNode(const std::string& node, const json& header, std::string* path) {
     if (!nodeJson(node)) return "no node '" + node + "'";
     const MeshPtr& scalp = file().data.scalp;
-    std::optional<double> size = scalp ? presetScalpSize(*scalp) : std::nullopt;
-    if (size) *size /= session().groomScale();
+    const std::optional<double> size = paramScalpSize(scalp.get(), session().groomScale());
     std::string id;
     try {
         const std::string text = nodeFileFromCompound(graph_.dump(), node, header.dump(), size);
@@ -1463,8 +1345,7 @@ std::string GroomDocument::addScriptNode(float x, float y, std::string* made) {
     }
     if (made) *made = chosen;
     const MeshPtr& scalp = file().data.scalp;
-    std::optional<double> size = scalp ? presetScalpSize(*scalp) : std::nullopt;
-    if (size) *size /= session().groomScale();
+    const std::optional<double> size = paramScalpSize(scalp.get(), session().groomScale());
     return editGraph("add " + chosen, [&](json& g) {
         GraphEdit edit(g.dump());
         edit.addNode(op::kScript, chosen, json{{"definition", definition}}.dump(), x, y, size);
@@ -1475,58 +1356,13 @@ std::string GroomDocument::addScriptNode(float x, float y, std::string* made) {
 std::string GroomDocument::setScriptDefinition(const std::string& node, const json& definition) {
     const json* n = nodeJson(node);
     if (!n || n->value("type", std::string()) != "Script") return node + " is not a script node";
-    // Checked first: its errors, a line each.
-    std::string errors;
-    const json checked = json::parse(scriptNodeErrorsJson(definition.dump()));
-    for (const json& e : checked["errors"]) {
-        if (!errors.empty()) errors += "\n";
-        if (e.value("line", 0) > 0) errors += "line " + std::to_string(e["line"].get<int>()) + ", column " + std::to_string(e["column"].get<int>()) + ": ";
-        errors += e.value("message", std::string());
+    std::string graph;
+    try {
+        graph = withScriptDefinition(graph_.dump(), node, definition.dump());  // every host's (node_library.h)
+    } catch (const std::exception& e) {
+        return e.what();
     }
-    if (!errors.empty()) return errors;
-    auto defaults = [](const json& node) {
-        std::map<std::string, json> out;
-        for (const json& p : json::parse(nodeSpecJson(node.dump())).value("params", json::array())) out[p.value("name", std::string())] = p.value("default", json());
-        return out;
-    };
-    auto names = [](const json& d) {
-        std::set<std::string> out;
-        for (const json& p : d.value("params", json::array())) {
-            if (p.is_object() && p.value("name", json()).is_string()) out.insert(p["name"].get<std::string>());
-        }
-        return out;
-    };
-    return editGraph("edit " + node, [&](json& g) {
-        for (json& item : g["nodes"]) {
-            if (item.value("name", std::string()) != node) continue;
-            const std::map<std::string, json> before = defaults(item);
-            json& params = item["params"];
-            const std::set<std::string> oldNames = names(params.value("definition", json::object())), newNames = names(definition);
-            params["definition"] = definition;
-            for (const std::string& gone : oldNames) {
-                if (newNames.count(gone)) continue;
-                params.erase(gone);
-                if (item.contains("paramInputs") && item["paramInputs"].is_array()) {
-                    json kept = json::array();
-                    for (const json& p : item["paramInputs"]) {
-                        if (p != gone) kept.push_back(p);
-                    }
-                    item["paramInputs"] = kept;
-                }
-                json links = json::array();
-                for (const json& c : g.value("connections", json::array())) {
-                    if (c.value("to", std::string()) != node || c.value("input", std::string()) != gone) links.push_back(c);
-                }
-                g["connections"] = links;
-            }
-            // A param still at its old default takes the new one.
-            for (const auto& [name, value] : defaults(item)) {
-                if (!newNames.count(name)) continue;
-                const auto old = before.find(name);
-                if (!params.contains(name) || (old != before.end() && params[name] == old->second)) params[name] = value;
-            }
-        }
-    });
+    return editGraph("edit " + node, [&](json& g) { g = json::parse(graph); });
 }
 
 std::string GroomDocument::saveScriptNode(const std::string& node, bool asNew, std::string* path) {
@@ -1749,12 +1585,11 @@ std::string GroomDocument::transferToScalp(MeshPtr scalp, const TransferOptions&
     const MeshPtr from = scene_->file().data.scalp;
     if (!from || from->triangleCount() == 0) return "the groom has no scalp to move from";
     TransferOptions options = given;
-    // Fitting the size: the groom's scale grows the guides about their roots; the mapping only turns them.
-    if (options.fitSize && session().scaleWithScalp()) options.keepLengths = true;
     if (usesMarkers(options.method) && options.markers.empty()) options.markers = transferMarkers();
     std::unique_ptr<ScalpMapping> mapping;
     try {
-        if (!options.markers.empty()) options.markers = snapTransferMarkers(options.markers, *from, *scalp);
+        // (Every host's: groom_transfer.h; the size fitted keeps the lengths, the markers snapped.)
+        options = preparedTransferOptions(options, options.fitSize, session().scaleWithScalp(), *from, *scalp);
         mapping = std::make_unique<ScalpMapping>(*from, *scalp, options, warnings);
     } catch (const std::exception& e) {
         return e.what();
@@ -1764,31 +1599,12 @@ std::string GroomDocument::transferToScalp(MeshPtr scalp, const TransferOptions&
     if (!options.markers.empty()) file.transferMarkers = options.markers;
     ScalpMaps projected = session().scalpMaps();
     try {
-        // The guides, parts and flow re-rooted (the core's transfer, Maya's groomLabTransfer's).
-        if (!file.data.hierarchyJson.empty()) {
-            GuideHierarchy h = GuideHierarchy::fromJson(file.data.hierarchyJson);
-            h.setScale(static_cast<float>(session().groomScale()));  // moved as shown: the groom keeps its scale
-            h.transfer(*mapping);
-            file.data.hierarchyJson = h.toJson();
-        }
-        if (!file.data.partsJson.empty()) {
-            const PartSet parts = PartSet::fromJson(file.data.partsJson);
-            const PartSet out = parts.transferred(*mapping);
-            if (out.parts.size() < parts.parts.size() && warnings) warnings->push_back("some parts fell apart on the new scalp and were dropped");
-            file.data.partsJson = out.empty() ? std::string() : out.toJson();
-        }
-        if (!file.data.flowJson.empty()) {
-            const FlowSet flow = FlowSet::fromJson(file.data.flowJson);
-            const FlowSet out = flow.transferred(*mapping);
-            if ((out.pins.size() < flow.pins.size() || out.sinks.size() < flow.sinks.size()) && warnings) {
-                warnings->push_back("some flow arrows did not fit the new scalp and were dropped");
-            }
-            file.data.flowJson = out.empty() ? std::string() : out.toJson();
-        }
-        if (mapping->uvMisses() > 0 && warnings) {
-            warnings->push_back(std::to_string(mapping->uvMisses()) +
-                                " roots found no matching UV on the new scalp and went to the closest point");
-        }
+        // The guides, parts and flow re-rooted (every host's: groom_transfer.h).
+        const GroomTransferTexts moved = transferGroomTexts(file.data.hierarchyJson, file.data.partsJson, file.data.flowJson, *mapping,
+                                                            session().groomScale(), warnings);
+        file.data.hierarchyJson = moved.hierarchyJson;
+        file.data.partsJson = moved.partsJson;
+        file.data.flowJson = moved.flowJson;
         // The maps through the same mapping: a texture map's new image beside the groom (the groom saved).
         if (maps) {
             MapProjectionFiles files;
@@ -1798,24 +1614,16 @@ std::string GroomDocument::transferToScalp(MeshPtr scalp, const TransferOptions&
                 files.write = [this, folder](const std::string& name, const TexturePaint& paint) {
                     std::error_code ec;
                     std::filesystem::create_directories(std::filesystem::u8path(folder), ec);
-                    std::string target = folder + "/" + name + ".png";
-                    for (int k = 2; std::filesystem::exists(std::filesystem::u8path(target), ec); ++k) {
-                        target = folder + "/" + name + "_" + std::to_string(k) + ".png";
-                    }
+                    const std::string target = freeFilePath(folder + "/" + name + ".png");  // (a file or a tile set: taken)
                     paint.save(target);
                     return pathFromGroomFolder(target, std::filesystem::u8path(path_).parent_path().u8string());
                 };
             }
             projectScalpMaps(projected, {}, *mapping, files, warnings);
         } else {
-            // Not projected: the vertex maps cannot fit another scalp, so they go; textures stay.
-            for (auto it = projected.maps.begin(); it != projected.maps.end();) {
-                if (it->second.kind == "vertices") {
-                    if (warnings) warnings->push_back("the vertex map " + it->first + " was dropped (not projected)");
-                    it = projected.maps.erase(it);
-                } else {
-                    ++it;
-                }
+            // Not projected: the vertex maps cannot fit another scalp, so they go; textures stay (every host's).
+            for (const std::string& name : dropVertexMaps(projected)) {
+                if (warnings) warnings->push_back("the vertex map " + name + " was dropped (not projected)");
             }
         }
     } catch (const std::exception& e) {
@@ -1849,13 +1657,12 @@ std::string GroomDocument::transferToScalp(MeshPtr scalp, const TransferOptions&
     file.simCaches.clear();  // nor the simulation's bakes (made on the other scalp)
     file.data.followScalp = false;
     // The groom keeps the scale it had (the guides moved as shown): the new scalp is k times its 1x.
-    // Fitting the size: k grows with the area (the new scalp the old one resized).
-    double target = session().groomScale();
-    if (options.fitSize && session().scaleWithScalp()) {
-        const double before = restSurfaceArea(*from), after = restSurfaceArea(*mesh);
-        if (before > 0.0 && after > 0.0) target *= std::sqrt(after / before);
+    // Fitting the size: k grows with the area (the new scalp the old one resized). Not scaled with
+    // its scalp: its reference stays (every host's: groom_transfer.h).
+    if (const auto scale = transferredScale(session().scaleWithScalp(), session().groomScale(), restSurfaceArea(*from),
+                                            restSurfaceArea(*mesh), options.fitSize)) {
+        file.data.scaleReference = scale->reference;
     }
-    file.data.scaleReference = restSurfaceArea(*mesh) / (target * target);
     file.data.scalpFingerprint = mesh->topologyFingerprint();  // the groom is on this scalp now
     try {
         scene_ = std::make_unique<GroomScene>(std::move(file));
@@ -2018,37 +1825,15 @@ std::string GroomDocument::exposeParam(const std::string& node, const std::strin
 std::string GroomDocument::exposeParams(const std::string& node, const std::vector<std::string>& names, bool exposed) {
     if (!nodeJson(node)) return "no node '" + node + "'";
     if (names.empty()) return {};
-    const std::set<std::string> changed(names.begin(), names.end());
-    std::map<std::string, std::size_t> rank;
-    if (const json* spec = nodeSpec(node)) {
-        std::size_t i = 0;
-        for (const json& p : spec->value("params", json::array())) rank[p.value("name", std::string())] = i++;
-    }
+    // The core's (graph_controls.h exposeParam, unexposeParam), as Maya and Blender: a param that
+    // cannot be an input is refused; a port taken away goes with what fed it.
     return editGraph((exposed ? "expose inputs on " : "collapse inputs on ") + node, [&](json& g) {
-        for (json& n : g["nodes"]) {
-            if (n.value("name", std::string()) != node) continue;
-            json inputs = json::array();
-            for (const json& p : n.value("paramInputs", json::array())) {
-                if (!(p.is_string() && changed.count(p.get<std::string>()))) inputs.push_back(p);
-            }
-            if (exposed) {
-                for (const std::string& name : names) inputs.push_back(name);
-                std::stable_sort(inputs.begin(), inputs.end(), [&](const json& a, const json& b) {
-                    const auto ai = rank.find(a.get<std::string>()), bi = rank.find(b.get<std::string>());
-                    return (ai == rank.end() ? rank.size() : ai->second) < (bi == rank.end() ? rank.size() : bi->second);
-                });
-            }
-            if (inputs.empty()) n.erase("paramInputs");
-            else n["paramInputs"] = inputs;
+        GraphEdit edit(g.dump());
+        for (const std::string& name : names) {
+            if (exposed) groomlab::exposeParam(edit, node, name);
+            else unexposeParam(edit, node, name);
         }
-        if (!exposed) {
-            // The port goes with what fed it.
-            json connections = json::array();
-            for (const json& c : g.value("connections", json::array())) {
-                if (!(c.value("to", std::string()) == node && changed.count(c.value("input", std::string())))) connections.push_back(c);
-            }
-            g["connections"] = connections;
-        }
+        g = json::parse(edit.toJson());
     });
 }
 
@@ -2276,6 +2061,19 @@ void GroomDocument::setGroupHidden(const std::string& name, bool hidden) {
     if (changed) dirty_ = true;
 }
 
+void GroomDocument::setBraidTubes(const std::string& shown) {
+    if (shown == braidTubes_) return;
+    braidTubes_ = shown;
+    dirty_ = true;  // saved with the groom ("braidTubes")
+}
+
+void GroomDocument::toggleBraidTubes(const std::string& node) {
+    try {
+        setBraidTubes(GraphEdit(graph_.dump()).braidTubesToggled(node, braidTubes_));
+    } catch (const std::exception&) {
+    }
+}
+
 std::string GroomDocument::hiddenGroupsText() const {
     std::string text;
     for (const std::string& name : hiddenGroups_) text += (text.empty() ? "" : ",") + name;
@@ -2362,6 +2160,7 @@ std::string GroomDocument::undo() {
         error = applyGraph();
     }
     applySide(edit, false);  // its files and group colors
+    if (edit.braidTubes) braidTubes_ = edit.braidTubes->first;
     --undoIndex_;
     dirty_ = true;
     return error;
@@ -2390,6 +2189,7 @@ std::string GroomDocument::redo() {
         error = applyGraph();
     }
     applySide(edit, true);
+    if (edit.braidTubes) braidTubes_ = edit.braidTubes->second;
     ++undoIndex_;
     dirty_ = true;
     return error;
@@ -2439,6 +2239,8 @@ const DisplayFrame& GroomDocument::updateDisplay(const DisplaySettings& settings
     // Clump Colors of one Clump among chained ones writing the same channel ("<channel>@<node>",
     // issue #77): the channel as that node wrote it.
     colorChannel_.fill(settings, inputs, [this]() -> const GroomSession& { return session(); });
+    // Show Tubes: the shown Braid nodes' section tubes (the session's mesh, kept while they stay).
+    fillBraidTubes(settings, inputs, [this]() -> const GroomSession& { return session(); });
     const bool ownColors = !groupColors_.empty() && settings.guideGroupColors.empty();
     const std::string seed = settings.guideColorSeed.empty() ? guideColorSeed() : std::string();
     if (ownColors || !seed.empty()) {
@@ -2483,6 +2285,7 @@ GroomFile GroomDocument::currentFile() const {
     file.guideGroupColors = groupColorsText();
     file.hiddenGuideGroups.clear();
     for (const std::string& name : hiddenGroups_) file.hiddenGuideGroups += (file.hiddenGuideGroups.empty() ? "" : " ") + name;
+    file.braidTubes = braidTubes_;
     file.data.graphJson = graph_.dump();
     // The guides and overlays as the session holds them now: the strokes' and edits' results.
     const GroomData& data = session().data();
@@ -2495,51 +2298,7 @@ GroomFile GroomDocument::currentFile() const {
     // The painted maps as the file keeps them: the catalog (the guide layers' entries as read,
     // the scalp maps as they are now) and the vertex maps as color sets of the scalp, a removed
     // map's color set gone with it (a color set that was never a map stays: the graph may read it).
-    const ScalpMaps& maps = session().scalpMaps();
-    MapCatalog catalog;
-    for (const auto& [name, info] : fileCatalog_) {
-        if (info.kind == "guides") catalog[name] = info;
-    }
-    for (const auto& [name, info] : maps.catalog()) catalog[name] = info;
-    file.data.maps = catalog;
-    if (file.data.scalp) {
-        const ScalpMesh& was = *file.data.scalp;
-        auto scalp = std::make_shared<ScalpMesh>(was.points(), was.triangles());
-        if (was.hasUVs()) scalp->setCornerUVs(was.cornerUVs());
-        if (was.hasRest()) scalp->setRestPoints(was.restPoints());
-        scalp->setPolygons(was.polygons());  // what Catmull-Clark refines, and the render's level
-        scalp->setRenderSubdivision(was.renderSubdivision(), was.renderSubdivisionFrom());
-        for (const std::string& set : was.colorSetNames()) {
-            const auto it = fileCatalog_.find(set);
-            const bool wasMap = it != fileCatalog_.end() && it->second.kind == "vertices";
-            if (wasMap && !maps.maps.count(set)) continue;
-            if (const auto* colors = was.cornerColors(set)) scalp->setCornerColors(set, *colors);
-        }
-        // With other scalps (scalp_pieces.h) the vertex maps are per vertex of the scalps joined:
-        // laid on the joined mesh, each scalp keeps its own share as its color sets.
-        const MeshPtr joined = combineScalps(scalp, file.data.scalps);
-        std::shared_ptr<ScalpMesh> mapped = joined == scalp ? scalp : std::make_shared<ScalpMesh>(*joined);
-        for (const auto& [name, entry] : maps.maps) {
-            if (entry.kind != "vertices") continue;
-            const std::size_t per = entry.channels == kColorMap ? 4 : 1;
-            if (entry.values.size() != mapped->pointCount() * per) continue;
-            mapped->setCornerColors(name, cornerColorsFromVertexMap(entry.values, *mapped, static_cast<int>(per)));
-        }
-        if (mapped != scalp) {
-            const auto pieces = scalpPieces(mapped);
-            auto own = [&](const std::string& name, const MeshPtr& as) -> MeshPtr {
-                const auto it = pieces.find(name);
-                if (it == pieces.end()) return as;
-                auto mesh = std::make_shared<ScalpMesh>(*as);
-                for (const std::string& set : it->second->colorSetNames()) mesh->setCornerColors(set, *it->second->cornerColors(set));
-                return mesh;
-            };
-            file.data.scalp = own(kMainScalpName, scalp);
-            for (auto& [name, mesh] : file.data.scalps) mesh = own(name, mesh);
-        } else {
-            file.data.scalp = scalp;
-        }
-    }
+    storeScalpMaps(file.data, session().scalpMaps(), fileCatalog_);  // every host's save (groom_file.h)
     file.data.followScalp = data.followScalp;
     // Scaling with the scalp: the reference in use (the first area measured when the file had none).
     file.data.scaleSource = data.scaleSource;
@@ -2603,10 +2362,7 @@ void GroomDocument::savedAs(const std::string& path, const GroomFile& written) {
     if (moved) {
         // Relative paths (texture maps) resolve against the new folder first, then where the
         // groom came from and its search paths.
-        std::vector<std::string> dirs{std::filesystem::u8path(path_).parent_path().u8string()};
-        if (!scene_->file().directory.empty()) dirs.push_back(scene_->file().directory);
-        dirs.insert(dirs.end(), scene_->file().searchPaths.begin(), scene_->file().searchPaths.end());
-        session().setPathResolver(searchPathResolver(std::move(dirs)));
+        session().setPathResolver(searchPathResolver(groomFileFolders(scene_->file(), std::filesystem::u8path(path_).parent_path().u8string())));
         paints_.clear();
     }
 }

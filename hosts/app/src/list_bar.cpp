@@ -28,14 +28,6 @@ QIcon glyphIcon(const std::string& glyph, qreal dpr, int size) {
     return icon;
 }
 
-QLabel* aboutLabel(const std::string& html, QWidget* parent) {
-    auto* label = new QLabel(qs(html), parent);
-    label->setProperty("role", "about");
-    label->setTextFormat(Qt::RichText);
-    label->setWordWrap(true);
-    return label;
-}
-
 ListBar::ListBar(QWidget* parent) : QWidget(parent) { setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed); }
 
 namespace {

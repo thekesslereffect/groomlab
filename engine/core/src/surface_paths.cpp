@@ -101,8 +101,8 @@ SurfaceGraph::SurfaceGraph(const ScalpMesh& scalp)
     Vec3f lo(kInf, kInf, kInf), hi(-kInf, -kInf, -kInf);
     for (const Vec3f& p : points) {
         if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z)) continue;
-        lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
-        hi = {std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
+        lo = minPerAxis(lo, p);
+        hi = maxPerAxis(hi, p);
     }
     const double diagonal = lo.x <= hi.x ? (hi - lo).length() : 0.0;
     const double tolerance = std::max(diagonal * 1e-6, 1e-12);
@@ -234,7 +234,6 @@ SurfaceGraph::SurfaceGraph(const ScalpMesh& scalp)
         if (std::isfinite(e)) maxEdge_ = std::max(maxEdge_, e);
     }
     // The triangles around each vertex.
-    const std::size_t triangleCount = triangles_.size();
     trianglesBegin_.assign(vertices + 1, 0);
     for (std::size_t c = 0; c < corners_.size(); ++c) ++trianglesBegin_[corners_[c] + 1];
     for (std::size_t v = 0; v < vertices; ++v) trianglesBegin_[v + 1] += trianglesBegin_[v];
@@ -243,15 +242,14 @@ SurfaceGraph::SurfaceGraph(const ScalpMesh& scalp)
         std::vector<std::uint32_t> at(trianglesBegin_.begin(), trianglesBegin_.end() - 1);
         for (std::size_t c = 0; c < corners_.size(); ++c) trianglesAround_[at[corners_[c]]++] = static_cast<std::uint32_t>(c / 3);
     }
-    (void)triangleCount;
 
     // The grid: each vertex in its cell, cells about two mean edges wide (fewer than 2^21 of them
     // over the box).
     Vec3f gridLo(kInf, kInf, kInf), gridHi(-kInf, -kInf, -kInf);
     for (const Vec3f& p : positions_) {
         if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z)) continue;
-        gridLo = {std::min(gridLo.x, p.x), std::min(gridLo.y, p.y), std::min(gridLo.z, p.z)};
-        gridHi = {std::max(gridHi.x, p.x), std::max(gridHi.y, p.y), std::max(gridHi.z, p.z)};
+        gridLo = minPerAxis(gridLo, p);
+        gridHi = maxPerAxis(gridHi, p);
     }
     if (gridLo.x > gridHi.x) return;  // no vertex
     origin_ = gridLo;

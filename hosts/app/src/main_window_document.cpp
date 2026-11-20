@@ -3,6 +3,7 @@
 
 #include "reference_window.h"
 #include "card_atlas_window.h"
+#include "groomlab/presets.h"
 #include "groomlab/asset_files.h"
 #include "transfer_window.h"
 #include "main_window_internal.h"
@@ -481,6 +482,7 @@ void MainWindow::attachDocument() {
     framed_ = false;
     lastDabMs_ = 0.0;
     settings_.hiddenGuideGroups = document_ ? document_->hiddenGroupsText() : std::string();  // (saved with the groom)
+    refreshBraidTubes();  // Show Tubes' nodes (saved with the groom too)
     // The old groom's photo camera goes with it.
     if (!lookPhoto_.isEmpty()) {
         viewport_->camera().leaveLookThrough();
@@ -573,6 +575,7 @@ void MainWindow::attachDocument() {
 ViewRequest MainWindow::viewRequest() const {
     ViewRequest request;
     request.viewport = true;  // renderOnly nodes off, viewportOnly ones on (exports: the other way)
+    if (document_) request.braidTubes = document_->braidTubes();  // Show Tubes' nodes: evaluated to, whatever node is viewed
     request.density = static_cast<float>(density_->value());
     request.pointBudget = budget_->value() * 1000.0;
     request.sculptDensity = brush_.sculptDensity;
@@ -889,6 +892,12 @@ std::string MainWindow::lastNodeOfType(const char* type) const {
     return found;
 }
 
+std::string MainWindow::hairColorNode() const {
+    if (!document_) return {};
+    const std::string node = document_->session().stats().hairColor;
+    return node.find('/') == std::string::npos ? node : std::string();
+}
+
 void MainWindow::refreshGroomColor() {
     LookCard::GroomColor color;
     color.node = hairColorNode();
@@ -917,6 +926,7 @@ void MainWindow::refreshGroomColor() {
 
 void MainWindow::graphEdited() {
     refreshClumpColored();  // (a Clump's clumpChannel edited, a Clump added or removed)
+    refreshBraidTubes();    // (a Braid renamed or removed, an undo: the document's names; drawn by the evaluation below)
     reevaluate();
     refreshTimeline();  // a node reading the time (Wind, Simulate) shows it
     refreshUndoActions();
@@ -946,20 +956,12 @@ void MainWindow::refreshStarter() {
         // past its first steps: the card is for one started on a mesh here (untitled).
         const ViewResult& view = document_->lastView();
         if (!guides && !document_->path().empty() && view.strands && view.strands->strandCount() > 0) guides = true;
-        const ui::json& types = ui::Definitions::shipped().get("palette/starter/lookTypes");
-        // A new groom's own graph has look nodes already: only one added since counts (a groom
-        // from a file counts what it has).
-        if (starterDocument_ != document_.get()) {
-            starterDocument_ = document_.get();
-            starterBase_.clear();
-            if (document_->path().empty()) {
-                for (const GroomDocument::NodeInfo& n : document_->nodes()) starterBase_.insert(n.name);
-            }
+        // A look node of the groom's own: one beyond the default graph's (every host's: presets.h).
+        std::vector<std::string> types;
+        for (const ui::json& t : ui::Definitions::shipped().get("palette/starter/lookTypes")) {
+            if (t.is_string()) types.push_back(t.get<std::string>());
         }
-        for (const GroomDocument::NodeInfo& n : document_->nodes()) {
-            if (starterBase_.count(n.name)) continue;
-            if (std::find(types.begin(), types.end(), n.type) != types.end()) look = true;
-        }
+        look = starterLookGiven(document_->graphJson(), types);
     }
     host_->setStarterProgress(guides, look);
 }

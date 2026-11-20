@@ -557,7 +557,6 @@ def main_mac(args):
     shutil.rmtree(app)
     os.rename(thin, app)
     problems = _check_links(app)
-    contents = os.path.join("GroomLab.app", "Contents")
     qt_files = [os.path.relpath(p, folder) for p in _macho_files(app)
                 if "/Frameworks/Qt" in p or (os.sep + "PlugIns" + os.sep) in p]
     notices, qt_problems = qt_third_party(folder, qt_dir, qt_files=qt_files, compare=False, beside="GroomLab.app")

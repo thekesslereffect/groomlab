@@ -121,6 +121,23 @@ std::shared_ptr<const GuideSet> applySculpts(const std::shared_ptr<const GuideSe
 std::vector<GuideId> recordSculptStroke(SculptEdits& edits, const GuideSet& input, const GuideHierarchy& sculpted,
                                         float strength, const ScalpMesh* scalp);
 
+// The same record kept through a live stroke, dab after dab: `edits` left as recordSculptStroke
+// leaves a copy of `stored` (the node's edits when the stroke began), at the cost of the guides
+// whose sculpted points changed since the dab before (the first dab records them all). `stored`,
+// `input`, `strength` and `scalp` are the stroke's: the same at every dab; `edits` is the record's
+// own between dabs (clear() before another stroke, or after changing it).
+class SculptStrokeRecord {
+public:
+    void clear();
+    // Throws as recordSculptStroke (the record is then cleared).
+    void record(SculptEdits& edits, const SculptEdits& stored, const GuideSet& input, const GuideHierarchy& sculpted,
+                float strength, const ScalpMesh* scalp);
+
+private:
+    std::vector<std::vector<Vec3f>> seen_;  // per guide of the input, the sculpted points last recorded (none: not there)
+    bool started_ = false;
+};
+
 // What a stroke on a Sculpt node reads (GroomSession::sculptInput): the guides it is fed, the
 // scalp it takes (null: none connected), its strength and its stored edits.
 struct SculptInput {

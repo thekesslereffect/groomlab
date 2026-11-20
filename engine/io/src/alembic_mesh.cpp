@@ -228,7 +228,6 @@ struct AlembicMeshWriter::Impl {
     std::size_t frames = 0;
     std::size_t pointCount = 0;
     std::string path;
-    bool committed = false;
 };
 
 AlembicMeshWriter::AlembicMeshWriter(const std::string& path, const std::string& name, double startSeconds,

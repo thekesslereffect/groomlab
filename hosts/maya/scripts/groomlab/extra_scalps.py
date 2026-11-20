@@ -3,9 +3,9 @@
 eyebrow patches), joined after the groom's own scalp (inMesh). A Scalp node whose `input` names one
 grows on it alone (scalp_pieces.h)."""
 
-import json
 import re
 
+import groomlab_core
 from maya import cmds
 
 from groomlab.base import undoable, _original_shape, _shape_of
@@ -41,35 +41,28 @@ def valid_name(name):
     return bool(name) and name != "scalp" and bool(NAME.match(name))
 
 
-def _point_counts(groom):
-    """The vertex counts of the groom's scalps in the order they join: its own, then the others."""
+def _scalp_counts(groom):
+    """[(name, vertex count)] of the groom's scalps in the order they join: its own ("scalp"), then
+    the others."""
     from groomlab.groom import scalp_mesh
     own = scalp_mesh(groom)
-    counts = [cmds.polyEvaluate(own, vertex=True) if own else 0]
-    counts += [cmds.polyEvaluate(s["mesh"], vertex=True) for s in scalps(groom)]
+    counts = [("scalp", cmds.polyEvaluate(own, vertex=True) if own else 0)]
+    counts += [(s["name"], cmds.polyEvaluate(s["mesh"], vertex=True)) for s in scalps(groom)]
     return counts
 
 
-def _resize_vertex_maps(groom, edit):
-    """The painted vertex maps (scalpMaps) refitted when a scalp joins or leaves: `edit(values,
-    channels)` returns each map's new values."""
+def _refit_vertex_maps(groom, before, after):
+    """The painted vertex maps (scalpMaps) refitted when a scalp joins or leaves: every host's
+    (scalp_maps.h refitVertexMaps: a kept scalp keeps its values, a new one unpainted)."""
     text = cmds.getAttr(groom + ".scalpMaps") or ""
     if not text.strip():
         return
     try:
-        maps = json.loads(text)
+        refit, changed = groomlab_core.refit_vertex_maps(text, before, after)
     except ValueError:
-        return
-    changed = False
-    for entry in maps.values() if isinstance(maps, dict) else []:
-        if not isinstance(entry, dict) or entry.get("kind") != "vertices" or not isinstance(entry.get("values"), list):
-            continue
-        values = edit(entry["values"], 4 if entry.get("channels") == 4 else 1)
-        if values is not None:
-            entry["values"] = values
-            changed = True
+        return  # bad scalpMaps text: the shape reports it
     if changed:
-        cmds.setAttr(groom + ".scalpMaps", json.dumps(maps, separators=(",", ":")), type="string")
+        cmds.setAttr(groom + ".scalpMaps", refit, type="string")
 
 
 @undoable("add scalp")
@@ -106,52 +99,24 @@ def add_scalp(groom, mesh, name=None, rest=True, wire=True):
     else:
         used = set(cmds.getAttr(groom + ".extraScalps", multiIndices=True) or [])
         index = max(used) + 1 if used else 0  # after every other: the order they join in
-        # Painted vertex maps: the new scalp's vertices unpainted (0), after the others'.
-        added = cmds.polyEvaluate(shape, vertex=True)
-        _resize_vertex_maps(groom, lambda values, per: values + ([0.0, 0.0, 0.0, 1.0] * added if per == 4 else [0.0] * added)
-                            if len(values) == sum(_point_counts(groom)) * per else None)
+        # Painted vertex maps: the new scalp's vertices unpainted, after the others'.
+        before = _scalp_counts(groom)
+        _refit_vertex_maps(groom, before, before + [(name, cmds.polyEvaluate(shape, vertex=True))])
     element = "%s.extraScalps[%d]" % (groom, index)
     cmds.connectAttr(shape + ".worldMesh[0]", element + ".extraScalpMesh", force=True)
     _connect_rest(element, shape, rest)
     cmds.setAttr(element + ".extraScalpName", name, type="string")
     if existing or not wire:
         return name
+    # Every host's graph (graph_inserts.h insertScalp): a Scalp node reading it, a Scatter and an
+    # Interpolate as the groom's own, merged with the hair.
     model = gm.GraphModel.from_groom(groom)
-    if any(model.node_type(n) == "Scalp" and model.param(n, "input") == name for n in model.order):
+    edit = model._edit()
+    with gm._core_errors():
+        made = edit.insert_scalp(name, model.groom_size)
+    if made["merge"] is None:
         return name  # a Scalp node reads it already: the graph stays
-    own_scalp = next((n for n in model.order if model.node_type(n) == "Scalp" and model.param(n, "input") == "scalp"), None)
-    own_scatter = next((c for c, port in model.downstream_of(own_scalp) if model.node_type(c) == "Scatter"), None) \
-        if own_scalp else None
-    own_interp = next((c for c, port in model.downstream_of(own_scatter) if model.node_type(c) == "Interpolate"), None) \
-        if own_scatter else None
-    # The guides the hair reads (its Interpolate's): never the first Guides node there is (a braid's).
-    guides = model.source_of(own_interp, "guides") if own_interp else None
-    scalp_node = model.add_node("Scalp", name=model.unique_name("scalp_" + name), params={
-        "input": name, "subdivision": model.param(own_scalp, "subdivision") if own_scalp else "matchRender"})
-    scatter_params = dict(model.nodes[own_scatter]["params"]) if own_scatter else {}
-    scatter_params.pop("seed", None)  # a seed of its own (add_node picks one)
-    scatter = model.add_node("Scatter", name=model.unique_name("scatter_" + name), params=scatter_params)
-    model.connect(scalp_node, scatter, "scalp")
-    last = scatter
-    if own_interp:
-        interp = model.add_node("Interpolate", name=model.unique_name("interpolate_" + name),
-                                params=dict(model.nodes[own_interp]["params"]))
-        model.connect(scatter, interp, "strands")
-        if guides:
-            model.connect(guides, interp, "guides")
-        model.connect(scalp_node, interp, "scalp")
-        last = interp
-    merge = model.add_node("Merge", name=model.unique_name("merge_" + name))
-    anchor = own_interp or own_scatter
-    if anchor and model.downstream_of(anchor):
-        model.insert_after(anchor, merge)  # anchor -> merge.a -> what anchor fed
-    elif model.output and model.source_of(model.output, "strands"):
-        model.insert_before(model.output, merge)
-    model.connect(last, merge, "b")
-    x, y = model.position(merge)
-    for i, node in enumerate((scalp_node, scatter, last if last != scatter else None)):
-        if node:
-            model.set_position(node, x - 660.0 + 220.0 * i, y + 160.0)
+    model._take(edit)
     model.save(groom)
     return name
 
@@ -181,63 +146,22 @@ def remove_scalp(groom, name):
     if not found:
         return False
     # Painted vertex maps: the scalp's vertices taken out (before the connection goes).
-    counts = _point_counts(groom)
-    order = [s["name"] for s in current]
-    for s in found:
-        at = order.index(s["name"]) + 1  # after the groom's own
-
-        def cut(values, per, at=at, counts=list(counts)):
-            if len(values) != sum(counts) * per:
-                return None
-            start = sum(counts[:at]) * per
-            return values[:start] + values[start + counts[at] * per:]
-        _resize_vertex_maps(groom, cut)
-        del counts[at]
-        order.remove(s["name"])
+    before = _scalp_counts(groom)
+    gone = {s["name"] for s in found}
+    _refit_vertex_maps(groom, before, [c for c in before if c[0] not in gone])
     for s in found:
         element = "%s.extraScalps[%d]" % (groom, s["index"])
         for plug in (".extraScalpMesh", ".extraScalpRestMesh"):
             for source in cmds.listConnections(element + plug, source=True, destination=False, plugs=True) or []:
                 cmds.disconnectAttr(source, element + plug)
         cmds.removeMultiInstance(element, b=True)
+    # The graph: its Scalp nodes and what they alone feed, a Merge left alone passing through (every
+    # host's: graph_inserts.h removeScalpNodes).
     model = gm.GraphModel.from_groom(groom)
-    names = {s["name"] for s in found}
-    readers = [n for n in model.order if model.node_type(n) == "Scalp" and model.param(n, "input") in names]
-    if not readers:
-        return True
-    doomed = set(readers)
-    # What the readers alone feed (a Scatter, its Interpolate): every input of theirs from doomed nodes or none.
-    grew = True
-    while grew:
-        grew = False
-        for n in model.order:
-            if n in doomed or model.node_type(n) in ("Merge", "Output", "Guides"):
-                continue
-            feeders = {c["from"] for c in model.connections if c["to"] == n}
-            if feeders and feeders <= doomed | {g for g in model.order if model.node_type(g) == "Guides"} \
-                    and feeders & doomed:
-                doomed.add(n)
-                grew = True
-    merges = set()
-    for n in list(doomed):
-        for consumer, port in list(model.downstream_of(n)):
-            if consumer in doomed:
-                continue
-            model.disconnect(consumer, port)
-            if model.node_type(consumer) == "Merge" and port == "b":
-                merges.add(consumer)
-    for n in doomed:
-        model.remove_node(n)
-    # A Merge left with its a alone (the one add_scalp made): taken out, a feeding what it fed.
-    for merge in merges:
-        if model.source_of(merge, "b") is not None:
-            continue
-        upstream = model.source_of(merge, "a")
-        for to, port in list(model.downstream_of(merge)):
-            if upstream:
-                model.connect(upstream, to, port)
-        if model.output == merge and upstream:
-            model.set_output(upstream)
-        model.remove_node(merge)
-    model.save(groom)
+    edit = model._edit()
+    with gm._core_errors():
+        changed = [edit.remove_scalp_nodes(s["name"]) for s in found]
+    if any(changed):
+        model._take(edit)
+        model.save(groom)
     return True

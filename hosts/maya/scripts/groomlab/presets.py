@@ -58,28 +58,27 @@ def user_dir():
 
 
 def search_dirs():
-    import groomlab
-    return groomlab.library_dirs("GROOMLAB_PRESET_PATH", user_dir, SHIPPED_DIR)
+    """$GROOMLAB_PRESET_PATH's folders, the user's (Maya's user folder), the shipped: the core's
+    order (presets.h presetSearchDirs), every host's."""
+    try:
+        user = user_dir()
+    except (ImportError, RuntimeError, AttributeError):  # maya.cmds before initialize()
+        user = ""
+    return list(groomlab_core.preset_search_dirs(user, SHIPPED_DIR))
 
 
 def list_presets(details=False):
     """Names of every available preset, sorted. With `details`, a dict per preset instead:
-    {"name", "title", "description", "category", "path"} (preset_info)."""
-    names = set()
-    for d in search_dirs():
-        if os.path.isdir(d):
-            names.update(f[:-5] for f in os.listdir(d) if f.endswith(".json"))
-    if not details:
-        return sorted(names)
-    return [preset_info(name) for name in sorted(names)]
+    {"name", "title", "description", "category", "path"} (preset_info): the core's (presets.h)."""
+    found = groomlab_core.list_presets(search_dirs())
+    return [dict(p) for p in found] if details else [p["name"] for p in found]
 
 
 def preset_path(name):
-    for d in search_dirs():
-        path = os.path.join(d, name + ".json")
-        if os.path.isfile(path):
-            return path
-    raise ValueError("no preset named %r (looked in %s)" % (name, ", ".join(search_dirs())))
+    path = groomlab_core.preset_path(name, search_dirs())
+    if not path:
+        raise ValueError("no preset named %r (looked in %s)" % (name, ", ".join(search_dirs())))
+    return path
 
 
 def read_preset(name):
@@ -94,27 +93,21 @@ def title_of(name):
 
 def preset_info(name):
     """What the Presets menu shows of a preset: {"name", "title", "description", "category",
-    "path"}. A preset that cannot be read says why in its description (category "")."""
-    info = {"name": name, "title": title_of(name), "description": "", "category": "", "path": ""}
+    "path"}. A preset that cannot be read says why in its description (category ""): the core's."""
     try:
-        info["path"] = preset_path(name)
-        about = read_preset(name).get("about") or {}
-    except (ValueError, IOError, OSError) as e:
-        info["description"] = "Cannot be read: %s" % e
-        return info
-    if isinstance(about, dict):
-        for key in ("title", "description", "category"):
-            if isinstance(about.get(key), str) and about[key].strip():
-                info[key] = about[key].strip()
-    return info
+        path = preset_path(name)
+    except ValueError as e:
+        return {"name": name, "title": title_of(name), "description": "Cannot be read: %s" % e, "category": "", "path": ""}
+    return dict(groomlab_core.preset_info(name, path))
 
 
 def save_preset(groom, name, overwrite=False, about=None):
     """Save the groom's graph (the default graph if it has none) as a user preset, with its node
     layout and backdrops as the Graph Editor shows them. `about`: {"title", "description",
     "category"} for the Presets menu."""
-    if not name or any(c in name for c in '\\/:*?"<>|'):
-        raise ValueError("invalid preset name %r" % name)
+    why = groomlab_core.preset_name_error(name or "")  # every host's (presets.h presetNameError)
+    if why:
+        raise ValueError(why)
     graph = preset_data(groom, about=about)
     path = os.path.join(user_dir(), name + ".json")
     if os.path.exists(path) and not overwrite:
@@ -141,16 +134,12 @@ def preset_data(groom, about=None):
             if node.get("name") in layout:
                 x, y = layout[node["name"]]
                 node["ui"] = {"x": float(x), "y": float(y)}
-    data = {"version": graph.pop("version")} if "version" in graph else {}
-    size = scalp_size(groom)
-    if size:
-        data["size"] = size  # applied elsewhere, it is fitted from this
-    if about:
-        data["about"] = {k: v for k, v in about.items() if k in ("title", "description", "category") and v}
-    data.update(graph)
     if backdrops:
-        data["backdrops"] = backdrops
-    return data
+        graph["backdrops"] = backdrops
+    about = about or {}
+    # The preset's fields in their order: the core's, every host's (presets.h makePresetJson).
+    return json.loads(groomlab_core.make_preset_json(json.dumps(graph), scalp_size(groom) or None, about.get("title") or "",
+                                                     about.get("description") or "", about.get("category") or ""))
 
 
 def apply_preset(groom, name, fit=True):
@@ -220,9 +209,8 @@ def required_maps(name):
 
 
 def required_maps_of(data):
-    requires = data.get("requires") or {}
-    maps = requires.get("maps") if isinstance(requires, dict) else None
-    return [dict(m) for m in maps or [] if isinstance(m, dict) and isinstance(m.get("name"), str) and m["name"]]
+    """[{name, kind, value, color}] the preset's graph reads: the core's (presets.h presetRequiredMaps)."""
+    return [dict(m) for m in groomlab_core.preset_required_maps(json.dumps(data))]
 
 
 def required_groups(name):
@@ -231,14 +219,8 @@ def required_groups(name):
 
 
 def required_groups_of(data):
-    requires = data.get("requires") or {}
-    groups = requires.get("groups") if isinstance(requires, dict) else None
-    out = []
-    for g in groups or []:
-        if isinstance(g, dict) and isinstance(g.get("name"), str) and g["name"] and \
-                g["name"] not in [o["name"] for o in out]:
-            out.append({"name": g["name"], "draw": g.get("draw") is True})
-    return out
+    """[{name, draw}] the preset's graph reads, each once: the core's (presets.h presetRequiredGroups)."""
+    return [dict(g) for g in groomlab_core.preset_required_groups(json.dumps(data))]
 
 
 def draw_group(name):
@@ -379,7 +361,8 @@ def check(preset, catalog=None, warnings=True):
     from groomlab import graph as gm
     if catalog is None:
         catalog = gm.OperatorCatalog.from_maya()
-    problems = []
+    # The params against their specs: the core's check, every host's (presets.h presetParamProblems).
+    problems = list(groomlab_core.preset_param_problems(json.dumps(preset)))
     _check_graph(preset, catalog, "", problems, warnings)
     about = preset.get("about")
     if about is not None:
@@ -404,7 +387,6 @@ def _check_graph(graph, catalog, where, problems, warnings=True):
         if op_type not in catalog.types():
             problems.append("%s: unknown node type %r" % (label, op_type))
             continue
-        _check_params(node, catalog, label, problems)
         if op_type == "Compound":
             definition = node.get("params", {}).get("definition")
             if isinstance(definition, dict):
@@ -421,90 +403,8 @@ def _check_graph(graph, catalog, where, problems, warnings=True):
         problems.append(where + warning)
 
 
-def _check_params(node, catalog, label, problems):
-    op_type = node["type"]
-    params = node.get("params", {})
-    specs = {p["name"]: p for p in catalog.spec(op_type)["params"]}
-    exposed = {}
-    if op_type == "Compound":
-        definition = params.get("definition")
-        if not isinstance(definition, dict):
-            problems.append("%s: the Compound has no definition" % label)
-            definition = {}
-        inner = {n.get("name"): n for n in definition.get("graph", {}).get("nodes", [])}
-        for name, target in (definition.get("expose") or {}).items():
-            inner_name, _, param = str(target).partition(".")
-            spec = None
-            if inner_name in inner and inner[inner_name].get("type") in catalog.types():
-                spec = catalog.param_spec(inner[inner_name]["type"], param)
-            if spec is None:
-                problems.append("%s: exposed %r names %r, which is no param" % (label, name, target))
-            exposed[name] = spec
-    for name, value in params.items():
-        if op_type == "Compound" and name == "definition":
-            continue
-        spec = exposed.get(name) if name in exposed else specs.get(name)
-        if spec is None:
-            if name not in exposed:
-                problems.append("%s: %s has no param %r" % (label, op_type, name))
-            continue
-        problem = _value_problem(value, spec)
-        if problem:
-            problems.append("%s.%s: %s" % (label, name, problem))
-    for name in node.get("paramInputs") or []:
-        spec = exposed.get(name) if name in exposed else specs.get(name)
-        if spec is None or not spec.get("port"):  # every param takes a port but a few (graph.linkable)
-            problems.append("%s: %r is exposed as an input but cannot be one" % (label, name))
-    for name, control in (node.get("paramControls") or {}).items():
-        spec = exposed.get(name) if name in exposed else specs.get(name)
-        if spec is None or spec.get("animatable") is False or spec.get("kind") not in ("float", "int", "bool", "vec3"):
-            problems.append("%s: %r is keyed but cannot be" % (label, name))
-        elif (spec["kind"] == "vec3") != isinstance(control, list):
-            problems.append("%s: %r is keyed by %r, which does not fit a %s" % (label, name, control, spec["kind"]))
-    if op_type == "Expression" and isinstance(params.get("variables"), str):
-        try:
-            json.loads(params["variables"])
-        except ValueError as e:
-            problems.append("%s.variables: not JSON (%s)" % (label, e))
-
-
 def _is_number(v):
     return isinstance(v, (int, float)) and not isinstance(v, bool)
-
-
-def _value_problem(value, spec):
-    """Why `value` does not fit a param of `spec`, or None."""
-    from groomlab import graph as gm
-    kind = spec.get("kind")
-    if isinstance(value, dict) and gm.map_source(value) is not None:
-        if not spec.get("mappable"):
-            return "a map on a param that takes none"
-        return None
-    if kind == "bool":
-        return None if isinstance(value, bool) else "wants true or false, has %r" % (value,)
-    if kind == "int":
-        if _is_number(value) and float(value).is_integer():
-            return None
-        return "wants a whole number, has %r" % (value,)
-    if kind == "float":
-        return None if _is_number(value) else "wants a number, has %r" % (value,)
-    if kind == "string":
-        if not isinstance(value, str):
-            return "wants text, has %r" % (value,)
-        if spec.get("choices") and value not in spec["choices"]:
-            return "%r is not one of %s" % (value, ", ".join(spec["choices"]))
-        return None
-    if kind == "vec3":
-        ok = isinstance(value, list) and len(value) == 3 and all(_is_number(v) for v in value)
-        return None if ok else "wants [x, y, z], has %r" % (value,)
-    if kind == "ramp":
-        keys = value.get("keys") if isinstance(value, dict) else value
-        if _is_number(keys):
-            return None
-        ok = isinstance(keys, list) and keys and all(
-            isinstance(k, list) and len(k) == 2 and all(_is_number(v) for v in k) for k in keys)
-        return None if ok else "wants a ramp [[position, value], ...], has %r" % (value,)
-    return None
 
 
 # ---------------------------------------------------------------------------
@@ -537,90 +437,36 @@ def _clip(message, limit=200):
     return message if len(message) <= limit else message[:limit] + "..."
 
 
-def parse_text(text):
-    """The preset (a dict) a text holds, checked against the operators: JSON only, never run as
+def parse_text(text, removed=None):
+    """The preset (a dict) a text pasted as a groom's whole graph holds: JSON only, never run as
     code. ValueError, saying why, for anything else: the core's checks every host makes (presets.h
-    presetFromText: not JSON, not a GroomLab graph, too big, too deep, from a newer GroomLab, unknown
-    node types, fields of the wrong kind), then the params against their specs (check)."""
-    from groomlab import graph as gm
+    pastedGraphFromText: not JSON, not a GroomLab graph, too big, too deep, from a newer GroomLab,
+    unknown node types, fields of the wrong kind, params against their specs, the graph whole), its
+    backdrops as the Graph Editor draws them, params naming files on other machines taken out
+    (`removed`, a dict: "node.param" -> path of those)."""
     if not isinstance(text, str):
         raise ValueError("cannot paste a graph: the clipboard is empty")
     try:
-        data = json.loads(groomlab_core.preset_from_text(text))
+        body, taken = groomlab_core.pasted_graph_from_text(text)
     except ValueError as e:
         raise ValueError("cannot paste a graph: %s" % _clip(str(e), 800))
-    try:
-        problems = check(data, gm.OperatorCatalog.from_maya(), warnings=False)
-    except RecursionError:
-        raise ValueError("cannot paste a graph: the text is nested too deeply")
-    if problems:
-        more = " (and %d more)" % (len(problems) - 3) if len(problems) > 3 else ""
-        raise ValueError("cannot paste the graph: " + "; ".join(_clip(p) for p in problems[:3]) + more)
-    return data
-
-def _finite(value):
-    if isinstance(value, float):
-        return math.isfinite(value)
-    if isinstance(value, dict):
-        return all(_finite(v) for v in value.values())
-    if isinstance(value, list):
-        return all(_finite(v) for v in value)
-    return True
+    if removed is not None:
+        removed.update(taken)
+    return json.loads(body)
 
 
-def _backdrops_of(data):
-    """The text's backdrops with only what the Graph Editor draws (a title, a rectangle, a color)."""
-    out = []
-    for b in data.get("backdrops") or []:
-        if not isinstance(b, dict) or not all(_is_number(b.get(k)) for k in ("x", "y", "w", "h")):
-            continue
-        drop = {k: float(b[k]) for k in ("x", "y", "w", "h")}
-        drop["title"] = b["title"][:200] if isinstance(b.get("title"), str) else "Backdrop"
-        color = b.get("color")
-        if isinstance(color, list) and len(color) == 3 and all(_is_number(c) for c in color):
-            drop["color"] = [int(min(255, max(0, c))) for c in color]
-        out.append(drop)
-    return out
+def graph_files(graph):
+    """[(label, path)] of every param of `graph` (a dict) naming a file: texture maps, ImportCurves'
+    and GuideCache's path, FeatherColor's images, HairColor's map and Interpolate's regionMap when
+    an image's path, inside compounds too (compound/inner.param): the core's (asset_files.h
+    graphFileParams), every host's."""
+    return [tuple(p) for p in groomlab_core.graph_file_params(json.dumps(graph))]
 
 
-def _is_network(path):
-    """A path on another machine (\\\\host\\share, //host/share): never looked up, so pasting a
-    stranger's graph cannot make Maya reach out to their server."""
-    return path.replace("\\", "/").startswith("//")
-
-
-def _file_params(graph, where=""):
-    """(label, params, param, path) of every param naming a file: texture maps, and the text params
-    of FILE_PARAM_NAMES (ImportCurves' Alembic file, FeatherColor's images) and HairColor's map and
-    Interpolate's regionMap when they are an image file's path, inside compounds too
-    (labelled compound/inner.param). A texture map's `params[param]` is a dict holding the path
-    under "texture"; the others hold the path itself."""
-    for node in graph.get("nodes", []) if isinstance(graph, dict) else []:
-        params = node.get("params") or {}
-        for name, value in list(params.items()):
-            named = name in FILE_PARAM_NAMES or (
-                (name, node.get("type")) in (("map", "HairColor"), ("regionMap", "Interpolate")) and is_image_path(value))
-            path = value.get("texture") if isinstance(value, dict) else (value if named else None)
-            if isinstance(path, str) and path.strip():
-                yield "%s%s.%s" % (where, node.get("name"), name), params, name, path
-        definition = params.get("definition") if node.get("type") == "Compound" else None
-        if isinstance(definition, dict):
-            for found in _file_params(definition.get("graph", {}), "%s%s/" % (where, node.get("name"))):
-                yield found
-
-
-def set_file_param(params, name, path):
-    """Point a param _file_params found at another file (a texture map keeps its other fields)."""
-    if isinstance(params.get(name), dict):
-        params[name]["texture"] = path
-    else:
-        params[name] = path
-
-
-UDIM_TOKENS = ("<UDIM>", "<udim>", "%(UDIM)d")
-# Text params naming a file: ImportCurves' Alembic file, FeatherColor's feather images (HairColor's
-# map names one when it is an image's path: is_image_path).
-FILE_PARAM_NAMES = ("path", "texture", "textureRight")
+def with_graph_files(graph, paths):
+    """`graph` (a dict) with the file params `paths` ({label: path}, graph_files' labels) naming their
+    new paths (a texture map keeps its other fields): the core's (withGraphFileParams). A new dict."""
+    return json.loads(groomlab_core.with_graph_file_params(json.dumps(graph), dict(paths)))
 
 
 def is_image_path(name):
@@ -630,16 +476,9 @@ def is_image_path(name):
 
 
 def file_exists(path):
-    """Whether a file is there; a UDIM tile set (<UDIM>, <udim> or %(UDIM)d in its name) when any tile is."""
-    if not path:
-        return False
-    for token in UDIM_TOKENS:
-        if token in path:
-            import glob
-            folder, base = os.path.split(path)
-            pattern = glob.escape(base).replace(glob.escape(token), "[1-9][0-9][0-9][0-9]")
-            return bool(glob.glob(os.path.join(glob.escape(folder), pattern) if folder else pattern))
-    return os.path.isfile(path)
+    """Whether a file is there; a UDIM tile set (any token, or a texture map's plain path standing
+    for one) when any tile is: the core's check, every host's (asset_files.h fileThere)."""
+    return bool(path) and groomlab_core.file_there(path)
 
 
 def missing_files(groom, graph, network=False):
@@ -649,22 +488,11 @@ def missing_files(groom, graph, network=False):
     server, but a groom's own graph may name the studio's shares."""
     import groomlab
     out = {}
-    for label, _params, _name, path in _file_params(graph):
-        resolved = None if _is_network(path) and not network else groomlab.resolve_path(path, groom)
+    for label, path in graph_files(graph):
+        resolved = None if groomlab_core.is_network_path(path) and not network else groomlab.resolve_path(path, groom)
         if not resolved or not file_exists(resolved):
             out[label] = path
     return out
-
-
-def without_network_paths(graph):
-    """Takes params naming files on other machines out of `graph` (in place; their nodes use their
-    defaults). Returns {"node.param": path} of those taken out."""
-    removed = {}
-    for label, params, name, path in list(_file_params(graph)):
-        if _is_network(path):
-            params.pop(name, None)
-            removed[label] = path
-    return removed
 
 
 def missing_inputs(groom, graph):
@@ -742,15 +570,15 @@ def paste_text(groom, text, fit=True):
     import groomlab
     from groomlab import graph as gm
     groom = groomlab._shape_of(groom, groomlab.GROOM_TYPE)
-    data = parse_text(text)
-    data["backdrops"] = _backdrops_of(data)
-    removed = without_network_paths(data)
+    removed = {}
+    data = parse_text(text, removed)
     catalog = gm.OperatorCatalog.from_maya()
     size = scalp_size(groom) if fit else None
     recorded = data.get("size")
-    stored = fitted(data, size, catalog)
-    if not _finite(stored):
-        raise ValueError("cannot paste the graph: fitted to this scalp its sizes are too big to use")
+    try:
+        stored = fitted(data, size, catalog)  # (the core refuses sizes fitted past a number)
+    except RuntimeError as e:
+        raise ValueError("cannot paste the graph: %s" % _clip(str(e)))
     try:
         gm.GraphModel(catalog, stored)  # as it will be stored: it loads in the Graph Editor
     except (gm.GraphError, KeyError, TypeError) as e:

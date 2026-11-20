@@ -137,11 +137,8 @@ bool MainWindow::addMotionNode(const QString& type) {
         report(tr("No groom open to add a %1 node to").arg(type));
         return false;
     }
-    // Maya's add_wind and add_jiggle defaults.
-    const nlohmann::json params = type == QStringLiteral("Wind") ? nlohmann::json{{"direction", {1.0, 0.0, 0.0}}, {"strength", 0.3}}
-                                                                   : nlohmann::json{{"strength", 1.0}};
-    std::string made;
-    const std::string error = document_->addMotionNode(type.toStdString(), params, &made);
+    std::string made;  // (the node's spec defaults: every host's)
+    const std::string error = document_->addMotionNode(type.toStdString(), nlohmann::json::object(), &made);
     if (!error.empty()) {
         report(tr("Cannot add a %1 node: %2").arg(type, QString::fromStdString(error)));
         return false;
@@ -178,7 +175,7 @@ bool MainWindow::exportGuidesForSimulation(const QString& given) {
     if (path.isEmpty()) {
         // In the groom's own caches folder (Maya's), named after the groom.
         const QString groom = QString::fromStdString(fileSafeName(document_->displayName()));
-        const QString caches = QString::fromStdString(document_->assetFolder("caches")) + QStringLiteral("/") + groom;
+        const QString caches = QString::fromStdString(document_->groomFolder("caches"));
         QDir().mkpath(caches);
         const QString start = caches + QStringLiteral("/") + groom + QStringLiteral("_guides.abc");
         path = QFileDialog::getSaveFileName(this, tr("Export Guides for Simulation"), start, tr("Alembic (*.abc)"));

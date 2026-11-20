@@ -12,9 +12,11 @@
 //    "detail": {"kind": "texture", "texture": "groomlab/shot/masks/hair/detail.png"},
 //    "packed": {"kind": "texture", "channels": 4, "texture": "groomlab/shot/masks/hair/packed.png"}}
 
+#include <functional>
 #include <cstdint>
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "groomlab/graph.h"
@@ -67,6 +69,15 @@ bool validMapName(const std::string& name);
 std::string mapNameError(const std::string& name);
 // A valid name made from `name`: every other character _, a leading digit after a _ ("map" for "").
 std::string sanitizeMapName(const std::string& name);
+// A map's name made from an image file's (every host's Import Map): the file name's stem, its
+// letters, digits and _ (any other character _), the _ trimmed from both ends ("map" when none is
+// left), "map_" before a leading digit, then _2, _3... while `taken` says the name is in use.
+std::string mapNameFromFile(const std::string& path, const std::function<bool(const std::string&)>& taken = {});
+// The painted maps a graph reads by name, each with how (every host's Copy Graph and Transfer
+// checks): Map nodes' maps ("map"), HairColor's map and Interpolate's regionMap when not an image
+// file's path ("map"), guide layers ({"guide": name}: "guides") and color sets ({"colorSet":
+// name}: "colorSet"), inside compounds too; each name once, as first found, in the graph's order.
+std::vector<std::pair<std::string, std::string>> graphMapNames(const std::string& graphJson);
 // The map a param's own map is named (Paint on a setting, New Map > for a setting): "<node>_<param>",
 // sanitized. When the groom has a map of that name already (made for the param before, its link
 // since gone), every host links that map again, whatever its kind, its painting back, rather than
@@ -81,6 +92,24 @@ inline std::string paramMapName(const std::string& node, const std::string& para
 // whether any reader moved (the same text when none did).
 std::string retargetMapReaders(const std::string& graphJson, const std::string& from, const std::string& to,
                                bool* changed = nullptr);
+// What reads map `name` in the graph (its JSON), every host's "Read by": the Map nodes of that
+// name (a Map node without one reads "mask"), and the (node, param) pairs it feeds: each input a
+// Map node of it is linked to, then per node the map params whose guide or colorSet source names
+// it and HairColor's map and Interpolate's regionMap naming it. The graph's own nodes: those inside
+// compounds are not listed (retargetMapReaders does follow a rename into them).
+struct MapReaders {
+    std::vector<std::string> nodes;
+    std::vector<std::pair<std::string, std::string>> users;
+};
+MapReaders mapReaders(const std::string& graphJson, const std::string& name);
+// The graph with every reader of map `name` (mapReaders) letting go of it, as when the map is
+// removed: its Map nodes go with their links (the graph's output cleared when it was one), an
+// exposed param they fed loses its port and reads its own value again, and the params naming the
+// map go back to their spec's default, inside compounds too (a param naming it there, as a rename
+// follows it there; a compound's own Map nodes stay). `unlinked`: the pairs that read it (mapReaders' users);
+// `changed`: whether anything read it (the same text when nothing did).
+std::string unlinkMapReaders(const std::string& graphJson, const std::string& name, bool* changed = nullptr,
+                             std::vector<std::pair<std::string, std::string>>* unlinked = nullptr);
 // A texture map's file renamed with its map: the stored path with the map's name in the file's
 // stem replaced (<map>.png, a numbered <map>_2.png, an older <groom>_<map>.png), "" when the file
 // is not named after the map. Where the new name is taken is the host's to resolve (a free name).
@@ -97,5 +126,20 @@ std::map<std::string, std::string> sanitizeMapNames(GroomData& data);
 // when the catalog or the values say so; a texture map with its file as stored. A vertex map
 // without a color set of every corner is left out; guide layers are the hierarchy's.
 ScalpMaps scalpMapsFromGroomData(const GroomData& data);
+
+// The painted vertex maps refitted when the groom's scalps change (every host's Add / Remove
+// Scalp): a vertex map's values are per vertex of the scalps joined in order (the groom's own
+// first, scalp_pieces.h); a scalp kept keeps its values, a new one's vertices take 0 (a color map black, opaque), a removed
+// one's go. `before` / `after`: (name, vertex count) in that order. A map whose values fit
+// `before` in neither its channel count is left alone. Whether any map changed.
+using ScalpCounts = std::vector<std::pair<std::string, std::size_t>>;
+bool refitVertexMaps(ScalpMaps& maps, const ScalpCounts& before, const ScalpCounts& after);
+
+// Which map a name means, every host's: a scalp map of `maps` first (its kind: "vertices" or
+// "texture"), else a layer of the guides `guides` ("guides"), else none (""). Its channels: 1 (gray:
+// guide layers too) or 4 (color), 0 for no map.
+class GuideHierarchy;
+std::string mapKindOf(const ScalpMaps& maps, const GuideHierarchy* guides, const std::string& name);
+int mapChannelsOf(const ScalpMaps& maps, const GuideHierarchy* guides, const std::string& name);
 
 }  // namespace groomlab

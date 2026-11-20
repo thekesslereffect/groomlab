@@ -34,32 +34,6 @@ using nlohmann::json;
 
 namespace {
 
-// A new node's place beside another (the core's column and row, Maya's LAYOUT_DX / LAYOUT_DY).
-constexpr double kDX = 240.0, kDY = 140.0;
-
-struct Feed {
-    std::string from, output;  // "" nothing feeds it
-};
-
-// What feeds `to`'s `input`.
-Feed feedOf(const json& g, const std::string& to, const std::string& input) {
-    for (const json& c : g.value("connections", json::array())) {
-        if (c.value("to", std::string()) == to && c.value("input", std::string()) == input) {
-            return {c.value("from", std::string()), c.value("output", std::string())};
-        }
-    }
-    return {};
-}
-
-// Every (node, input) `from` feeds.
-std::vector<std::pair<std::string, std::string>> fedBy(const json& g, const std::string& from) {
-    std::vector<std::pair<std::string, std::string>> out;
-    for (const json& c : g.value("connections", json::array())) {
-        if (c.value("from", std::string()) == from) out.emplace_back(c.value("to", std::string()), c.value("input", std::string()));
-    }
-    return out;
-}
-
 const json* nodeIn(const json& g, const std::string& name) {
     const auto nodes = g.find("nodes");  // (a pointer into g itself, not into a copy)
     if (nodes == g.end() || !nodes->is_array()) return nullptr;
@@ -67,11 +41,6 @@ const json* nodeIn(const json& g, const std::string& name) {
         if (n.is_object() && n.value("name", std::string()) == name) return &n;
     }
     return nullptr;
-}
-
-std::string typeOf(const json& g, const std::string& name) {
-    const json* n = nodeIn(g, name);
-    return n ? n->value("type", std::string()) : std::string();
 }
 
 json paramOf(const json& g, const std::string& node, const std::string& param) {
@@ -89,15 +58,6 @@ std::vector<std::string> ofType(const json& g, const std::string& type) {
     return out;
 }
 
-// Where a node is drawn (nullopt: the view lays it out).
-std::optional<std::pair<double, double>> positionOf(const json& g, const std::string& name) {
-    const json* n = nodeIn(g, name);
-    if (!n || !n->contains("ui") || !(*n)["ui"].is_object()) return std::nullopt;
-    const json& ui = (*n)["ui"];
-    if (!ui.contains("x") || !ui.contains("y") || !ui["x"].is_number() || !ui["y"].is_number()) return std::nullopt;
-    return std::make_pair(ui["x"].get<double>(), ui["y"].get<double>());
-}
-
 // The graph edited as GraphEdit sees it, its JSON read back for the lookups between the edits.
 struct GraphEdits {
     GraphEdit e;
@@ -110,196 +70,16 @@ struct GraphEdits {
         return e.addNode(type, name, params.is_null() ? std::string() : params.dump(), at ? std::optional<double>(at->first) : std::nullopt,
                          at ? std::optional<double>(at->second) : std::nullopt, size);
     }
-    // src -> node -> dst in place of every src -> dst link (Blender's insert_between).
-    void insertBetween(const std::string& src, const std::string& dst, const std::string& node, const std::string& nodeInput) {
-        const json g = now();
-        std::vector<std::pair<std::string, std::string>> links;  // (input, output)
-        for (const json& c : g.value("connections", json::array())) {
-            if (c.value("from", std::string()) == src && c.value("to", std::string()) == dst) {
-                links.emplace_back(c.value("input", std::string()), c.value("output", std::string()));
-            }
-        }
-        if (links.empty()) throw std::runtime_error(src + " is not connected to " + dst);
-        e.connect(src, node, nodeInput, links.front().second);
-        for (const auto& [input, output] : links) e.connect(node, dst, input);
-    }
-    // `node` on what feeds `anchor`'s `input`, drawn a row under the anchor.
-    void insertBefore(const std::string& anchor, const std::string& node, const std::string& input = "strands",
-                      const std::string& nodeInput = "strands") {
-        const json g = now();
-        const Feed feed = feedOf(g, anchor, input);
-        if (feed.from.empty()) throw std::runtime_error(anchor + " has no " + input + " input to insert before");
-        insertBetween(feed.from, anchor, node, nodeInput);
-        place(node, anchor, 0.0, kDY);
-    }
-    void place(const std::string& node, const std::string& beside, double dx, double dy) {
-        if (const auto at = positionOf(now(), beside)) {
-            json positions = json::object();
-            positions[node] = {at->first + dx, at->second + dy};
-            setPositions(positions);
-        }
-    }
-    void setPositions(const json& positions) {
-        json g = now();
-        for (json& n : g["nodes"]) {
-            const std::string name = n.value("name", std::string());
-            if (positions.contains(name)) n["ui"] = {{"x", positions[name][0]}, {"y", positions[name][1]}};
-        }
-        e = GraphEdit(g.dump());
-    }
+    // `node` on what feeds `anchor`'s strands, drawn a row under the anchor: every host's (graph_inserts.h).
+    void insertBefore(const std::string& anchor, const std::string& node) { groomlab::insertBefore(e, anchor, node); }
 };
 
-// Where a motion node goes (Maya's motion_anchor): just before the output, but before the Collide
-// and Cards nodes ending its chain, so the strands collide where they moved to and the cards take
-// the motion.
-std::string motionAnchor(const json& g, const std::string& output) {
-    std::string anchor = output;
-    std::set<std::string> seen;
-    while (seen.insert(anchor).second) {
-        const Feed feed = feedOf(g, anchor, "strands");
-        const std::string type = feed.from.empty() ? std::string() : typeOf(g, feed.from);
-        if (type != "Collide" && type != "Cards") break;
-        anchor = feed.from;
-    }
-    return anchor;
-}
-
 // ---- Files ----------------------------------------------------------------------------------------
-
-const char* const kUdimTokens[] = {"<UDIM>", "<udim>", "%(UDIM)d"};
-
-const char* udimToken(const std::string& path) {
-    for (const char* t : kUdimTokens) {
-        if (path.find(t) != std::string::npos) return t;
-    }
-    return nullptr;
-}
-
-std::string lower(std::string s) {
-    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return s;
-}
-
-// Whether a file is there; a UDIM tile set when any tile is.
-bool fileThere(const std::string& path) {
-    std::error_code ec;
-    if (path.empty()) return false;
-    if (const char* token = udimToken(path)) {
-        const fs::path p = fs::u8path(path);
-        const std::string base = p.filename().u8string();
-        const std::size_t at = base.find(token);
-        const std::string head = base.substr(0, at), tail = base.substr(at + std::string(token).size());
-        const fs::path folder = p.parent_path().empty() ? fs::path(".") : p.parent_path();
-        for (fs::directory_iterator it(folder, ec), end; !ec && it != end; it.increment(ec)) {
-            const std::string name = it->path().filename().u8string();
-            if (name.size() == head.size() + 4 + tail.size() && name.compare(0, head.size(), head) == 0 &&
-                name.compare(name.size() - tail.size(), tail.size(), tail) == 0 &&
-                std::all_of(name.begin() + static_cast<std::ptrdiff_t>(head.size()), name.begin() + static_cast<std::ptrdiff_t>(head.size() + 4),
-                            [](unsigned char c) { return std::isdigit(c); })) {
-                return true;
-            }
-        }
-        return false;
-    }
-    return fs::is_regular_file(fs::u8path(path), ec);
-}
-
-bool isImagePath(const std::string& s) {
-    static const char* const kExtensions[] = {".png", ".jpg", ".jpeg", ".tga", ".bmp", ".psd", ".gif", ".hdr", ".pic",
-                                             ".pnm", ".ppm", ".pgm", ".exr", ".tif", ".tiff"};
-    const std::string l = lower(s);
-    if (s.find("<UDIM>") != std::string::npos) return true;
-    for (const char* e : kExtensions) {
-        const std::string ext = e;
-        if (l.size() >= ext.size() && l.compare(l.size() - ext.size(), ext.size(), ext) == 0) return true;
-    }
-    return false;
-}
-
-// Every graph param naming a file (Maya's presets._file_params): ImportCurves' path, FeatherColor's
-// textures, a {"texture": ...} value, HairColor's map and Interpolate's regionMap when an image's
-// path; inside compounds too (compound/inner.param). `visit(label, the param's value)`.
-void fileParams(json& graph, const std::string& where, const std::function<void(const std::string&, json&)>& visit) {
-    if (!graph.is_object() || !graph.contains("nodes")) return;
-    for (json& node : graph["nodes"]) {
-        if (!node.contains("params") || !node["params"].is_object()) continue;
-        const std::string name = node.value("name", std::string()), type = node.value("type", std::string());
-        for (auto it = node["params"].begin(); it != node["params"].end(); ++it) {
-            const std::string param = it.key();
-            json& value = it.value();
-            const bool named = param == "path" || param == "texture" || param == "textureRight";
-            const bool image = ((param == "map" && type == "HairColor") || (param == "regionMap" && type == "Interpolate")) &&
-                               value.is_string() && isImagePath(value.get<std::string>());
-            if (value.is_object() && value.contains("texture") && value["texture"].is_string()) {
-                visit(where + name + "." + param, value["texture"]);
-            } else if ((named || image) && value.is_string()) {
-                visit(where + name + "." + param, value);
-            }
-        }
-        if (type == "Compound" && node["params"].contains("definition") && node["params"]["definition"].is_object()) {
-            json& definition = node["params"]["definition"];
-            if (definition.contains("graph")) fileParams(definition["graph"], where + name + "/", visit);
-        }
-    }
-}
 
 std::string trimmed(const std::string& s) {
     const auto a = s.find_first_not_of(" \t\r\n");
     if (a == std::string::npos) return {};
     return s.substr(a, s.find_last_not_of(" \t\r\n") - a + 1);
-}
-
-// The file of `index` (lower-cased name -> paths) that `stored` names (Maya's painting._match_file):
-// one fits (the path), none, or several (the candidates), several of a name told apart by the ends of
-// their folders.
-std::string matchFile(const std::map<std::string, std::vector<std::string>>& index, const std::string& stored,
-                      std::vector<std::string>* candidatesOut) {
-    std::vector<std::string> parts;
-    {
-        std::string part;
-        for (const char c : stored + "/") {
-            if (c == '/' || c == '\\') {
-                if (!part.empty() && part != ".") parts.push_back(part);
-                part.clear();
-            } else {
-                part += c;
-            }
-        }
-    }
-    if (parts.empty()) return {};
-    std::string base = parts.back();
-    const char* token = udimToken(base);
-    std::string key = base;
-    if (token) key.replace(key.find(token), std::string(token).size(), "1001");
-    const auto it = index.find(lower(key));
-    if (it == index.end()) return {};
-    std::vector<std::string> candidates = it->second;
-    if (token) {
-        for (std::string& c : candidates) c = fs::u8path(c).parent_path().generic_u8string() + "/" + base;
-    }
-    if (candidates.size() == 1) return candidates.front();
-    auto tail = [&](const std::string& path) {
-        std::vector<std::string> theirs;
-        std::string part;
-        for (const char c : path + "/") {
-            if (c == '/') {
-                if (!part.empty()) theirs.push_back(part);
-                part.clear();
-            } else {
-                part += c;
-            }
-        }
-        std::size_t n = 0;
-        while (n < parts.size() && n < theirs.size() && lower(parts[parts.size() - 1 - n]) == lower(theirs[theirs.size() - 1 - n])) ++n;
-        return n;
-    };
-    std::vector<std::pair<std::size_t, std::string>> scores;
-    for (const std::string& c : candidates) scores.emplace_back(tail(c), c);
-    std::sort(scores.begin(), scores.end(), [](const auto& a, const auto& b) { return a.first > b.first || (a.first == b.first && a.second < b.second); });
-    if (scores[0].first > 1 && scores[0].first > scores[1].first) return scores[0].second;
-    std::sort(candidates.begin(), candidates.end());
-    if (candidatesOut) *candidatesOut = candidates;
-    return {};
 }
 
 }  // namespace
@@ -310,11 +90,8 @@ std::string GroomDocument::addMotionNode(const std::string& type, const json& pa
     std::string name;
     const MeshPtr& scalp = file().data.scalp;
     const std::string error = editGraph("add " + type, [&](json& g) {
-        GraphEdits edit(g, scalp ? presetScalpSize(*scalp) : std::nullopt);
-        const std::string output = edit.e.outputNode();
-        if (output.empty()) throw std::runtime_error("the graph has no output");
-        name = edit.add(type, type, params);
-        edit.insertBefore(motionAnchor(edit.now(), output), name);
+        GraphEdits edit(g, paramScalpSize(scalp.get(), session().groomScale()));
+        name = insertMotion(edit.e, type, params.is_object() ? params.dump() : std::string(), edit.size);  // every host's (graph_inserts.h)
         g = edit.now();
     });
     if (error.empty() && made) *made = name;
@@ -327,7 +104,7 @@ std::string GroomDocument::addSimulateNode(std::string* made) {
     const std::string error = editGraph("add Simulate", [&](json& g) {
         // Every host's (graph_inserts.h): between the guides and the Interpolates they feed.
         GraphEdit edit(g.dump());
-        name = insertSimulate(edit, {}, scalp ? presetScalpSize(*scalp) : std::nullopt);
+        name = insertSimulate(edit, {}, paramScalpSize(scalp.get(), session().groomScale()));
         g = json::parse(edit.toJson());
     });
     if (error.empty() && made) *made = name;
@@ -340,7 +117,7 @@ std::string GroomDocument::addGuideCacheNode(const std::string& path, std::strin
     const std::string error = editGraph("load guide cache", [&](json& g) {
         // Every host's (graph_inserts.h): right after the Guides node, or the GuideCache there.
         GraphEdit edit(g.dump());
-        name = insertGuideCache(edit, path, {}, scalp ? presetScalpSize(*scalp) : std::nullopt);
+        name = insertGuideCache(edit, path, {}, paramScalpSize(scalp.get(), session().groomScale()));
         g = json::parse(edit.toJson());
     });
     if (error.empty() && made) *made = name;
@@ -348,7 +125,7 @@ std::string GroomDocument::addGuideCacheNode(const std::string& path, std::strin
 }
 
 std::string GroomDocument::addCollider(const std::string& meshName, std::string* made) {
-    if (meshName.empty() || meshName == "scalp") return "pick another collider name than '" + meshName + "'";
+    // (The name's rules: insertCollider's. A mesh that collides already: no undo step for nothing.)
     for (const std::string& n : ofType(graph_, "ColliderMesh")) {
         const json own = paramOf(graph_, n, "name");
         if (own.is_string() && own.get<std::string>() == meshName) {
@@ -361,7 +138,7 @@ std::string GroomDocument::addCollider(const std::string& meshName, std::string*
     const std::string error = editGraph("add collider " + meshName, [&](json& g) {
         // Every host's graph (graph_inserts.h): a ColliderMesh, a Collide before the output.
         GraphEdit edit(g.dump());
-        name = insertCollider(edit, meshName, true, std::nullopt, std::nullopt, scalp ? presetScalpSize(*scalp) : std::nullopt);
+        name = insertCollider(edit, meshName, true, std::nullopt, std::nullopt, paramScalpSize(scalp.get(), session().groomScale()));
         g = json::parse(edit.toJson());
     });
     if (error.empty() && made) *made = name;
@@ -388,7 +165,7 @@ std::vector<std::string> GroomDocument::featherGuideGroups() {
 std::string GroomDocument::addFeathers(const std::vector<std::pair<std::string, std::string>>& designs, const std::vector<double>& weights,
                                        const std::string& source, const std::string& group, std::string* made) {
     const MeshPtr& scalp = file().data.scalp;
-    const std::optional<double> size = scalp ? presetScalpSize(*scalp) : std::nullopt;
+    const std::optional<double> size = paramScalpSize(scalp.get(), session().groomScale());
     // Each design's preset fitted to this scalp.
     std::vector<FeatherDesign> fitted;
     for (const auto& [design, text] : designs) {
@@ -436,7 +213,7 @@ std::vector<std::string> GroomDocument::braidStyles() const {
 
 std::string GroomDocument::addBraid(const std::string& style, const std::string& group, std::string* made) {
     const MeshPtr& scalp = file().data.scalp;
-    const std::optional<double> size = scalp ? presetScalpSize(*scalp) : std::nullopt;
+    const std::optional<double> size = paramScalpSize(scalp.get(), session().groomScale());
     // Every host's graph edit (graph_inserts.h insertBraid: the style one of the Braid's, after the
     // Interpolate), tried first: the group is not made for a graph that cannot take a braid.
     auto insert = [&](json& g) {
@@ -472,30 +249,7 @@ std::string GroomDocument::importAlembicCurves(const std::string& path, const st
     }
     if (count == 0) return object.empty() ? "the file has no curves" : "the file has no curves under " + object;
     const std::string error = editGraph("import Alembic curves", [&](json& g) {
-        json nodes = json::array();
-        bool hasScalp = false;
-        json drawn;
-        for (const json& n : g.value("nodes", json::array())) {
-            const std::string name = n.value("name", std::string());
-            if (name == "guides") {
-                if (n.contains("ui")) drawn = n["ui"];  // where the Guides node was drawn
-                continue;
-            }
-            hasScalp = hasScalp || name == "scalp";
-            nodes.push_back(n);
-        }
-        json params = {{"path", path}, {"samples", samples}};
-        if (!object.empty()) params["object"] = object;
-        json made = {{"name", "guides"}, {"type", "ImportCurves"}, {"params", params}};
-        if (!drawn.is_null()) made["ui"] = drawn;
-        nodes.push_back(made);
-        g["nodes"] = nodes;
-        json connections = json::array();
-        for (const json& c : g.value("connections", json::array())) {
-            if (c.value("to", std::string()) != "guides") connections.push_back(c);
-        }
-        if (hasScalp) connections.push_back({{"from", "scalp"}, {"to", "guides"}, {"input", "scalp"}});
-        g["connections"] = connections;
+        g = json::parse(withImportedCurves(g.dump(), path, object, samples));  // every host's (graph_inserts.h)
         GraphEdit check(g.dump());  // (the links checked: an Interpolate takes curves on its guides input)
         check.checkConnections();
     });
@@ -505,30 +259,15 @@ std::string GroomDocument::importAlembicCurves(const std::string& path, const st
 
 std::string GroomDocument::writeStrandMesh(const std::string& objPath, const StrandMeshOptions& options, std::size_t maxStrands,
                                            std::size_t* strandsWritten) {
-    if (options.sides < 3) return "a tube has 3 sides or more";
+    if (options.sides < 3 || options.sides > kMaxMeshSides) return "a tube has 3 to " + std::to_string(kMaxMeshSides) + " sides";
     if (maxStrands < 1) return "at most 1 strand or more";
     try {
         MeshPtr scalp;
         const bool cards = options.make == StrandMeshOptions::Make::Auto || options.make == StrandMeshOptions::Make::Cards;
         const StrandsPtr all = exportFrame(time_, 1.0f, &scalp, cards, true);
-        // Scales, feathers, cards and instances whole (their plates and rachis are the strand set's); tubes thinned.
-        const bool whole = resolveMeshMake(*all, options) != StrandMeshOptions::Make::Strands;
-        const std::vector<std::size_t> keep = thinStrandsById(*all, whole ? all->strandCount() : maxStrands);
-        StrandSet kept;
-        const StrandSet* strands = all.get();
-        if (keep.size() < all->strandCount()) {
-            for (const std::size_t i : keep) {
-                const Vec3f* p = all->strandPoints(i);
-                const std::size_t n = all->strandPointCount(i);
-                std::vector<float> w;
-                if (all->widths().size() == all->pointCount()) {
-                    w.assign(all->widths().begin() + static_cast<std::ptrdiff_t>(all->strandBegin(i)),
-                             all->widths().begin() + static_cast<std::ptrdiff_t>(all->strandBegin(i) + n));
-                }
-                kept.addStrand(all->ids()[i], std::vector<Vec3f>(p, p + n), w, i < all->roots().size() ? all->roots()[i] : StrandRoot{});
-            }
-            strands = &kept;
-        }
+        // Scales, feathers, cards and instances whole; tubes thinned (every host's: strand_geometry.h).
+        const std::optional<StrandSet> thinned = strandsForMesh(*all, options, maxStrands);
+        const StrandSet* strands = thinned ? &*thinned : all.get();
         const GroomFile& groomFile = file();
         const PrototypeLookup prototypes = [&groomFile](const std::string& n) -> const InstancePrototype* {
             const auto it = groomFile.prototypes.find(n);
@@ -639,34 +378,24 @@ std::vector<GroomDocument::MissingFile> GroomDocument::missingFiles() const {
         if (m.texture.empty()) continue;
         if (!missingMapFile(m.name).empty()) out.push_back({"maps", m.name, m.texture});
     }
-    json graph = graph_;
-    fileParams(graph, "", [&](const std::string& label, json& value) {
-        const std::string stored = trimmed(value.get<std::string>());
-        if (stored.empty()) return;
-        if (!fileThere(resolveMapPath(stored))) out.push_back({"params", label, stored});
-    });
+    // (Every host's rules: asset_files.h graphFileParams, fileThere.)
+    for (const auto& [label, value] : graphFileParams(graph_.dump())) {
+        const std::string stored = trimmed(value);
+        if (!stored.empty() && !fileThere(resolveMapPath(stored))) out.push_back({"params", label, stored});
+    }
     return out;
 }
 
 std::string GroomDocument::findMissingFiles(const std::string& folder, bool recursive, RelinkReport* report) {
     std::error_code ec;
     if (folder.empty() || !fs::is_directory(fs::u8path(folder), ec)) return "no folder " + folder;
-    std::map<std::string, std::vector<std::string>> index;  // lower-cased file name -> paths
-    const fs::path root = fs::absolute(fs::u8path(folder), ec);
-    auto note = [&](const fs::directory_entry& e) {
-        if (e.is_regular_file(ec)) index[lower(e.path().filename().u8string())].push_back(e.path().generic_u8string());
-    };
-    if (recursive) {
-        for (fs::recursive_directory_iterator it(root, fs::directory_options::skip_permission_denied, ec), end; !ec && it != end; it.increment(ec)) note(*it);
-    } else {
-        for (fs::directory_iterator it(root, ec), end; !ec && it != end; it.increment(ec)) note(*it);
-    }
+    const FileIndex index = indexFolder(folder, recursive);  // (every host's: asset_files.h)
     RelinkReport r;
     const std::vector<MissingFile> missing = missingFiles();
     std::map<std::string, std::string> params;  // label -> file found
     for (const MissingFile& m : missing) {
         std::vector<std::string> candidates;
-        const std::string found = matchFile(index, m.stored, &candidates);
+        const std::string found = matchMissingFile(index, m.stored, &candidates);
         if (found.empty()) {
             if (candidates.empty()) r.stillMissing.push_back(m);
             else r.ambiguous.emplace_back(m, candidates);
@@ -684,12 +413,7 @@ std::string GroomDocument::findMissingFiles(const std::string& folder, bool recu
         r.relinked.emplace_back(m, found);
     }
     if (!params.empty()) {
-        const std::string error = editGraph("relink missing files", [&](json& g) {
-            fileParams(g, "", [&](const std::string& label, json& value) {
-                const auto it = params.find(label);
-                if (it != params.end()) value = it->second;
-            });
-        });
+        const std::string error = editGraph("relink missing files", [&](json& g) { g = json::parse(withGraphFileParams(g.dump(), params)); });
         if (!error.empty()) return error;
     }
     if (report) *report = std::move(r);
@@ -746,14 +470,8 @@ void GroomDocument::followFiles(const std::string& newPath) {
     }
     // The files the graph reads (images, Alembic files, guide caches; inside compounds too).
     bool graphMoved = false;
-    fileParams(graph_, "", [&](const std::string&, json& value) {
-        const std::string stored = trimmed(value.get<std::string>());
-        const std::string followed = f.follow(stored);
-        if (followed != stored) {
-            value = followed;
-            graphMoved = true;
-        }
-    });
+    const std::string followed = followGraphFiles(graph_.dump(), [&](const std::string& stored) { return f.follow(trimmed(stored)); }, &graphMoved);
+    if (graphMoved) graph_ = json::parse(followed);
     if (graphMoved) applyGraph();
     // The card bake: every file of its prefix together.
     if (bake_ && !bake_->prefix.empty()) {
@@ -809,28 +527,17 @@ std::string GroomDocument::collectFiles(CollectReport* out) {
         const std::string found = resolveMapPath(stored);
         return found.empty() ? (fs::u8path(dir) / fs::u8path(stored)).generic_u8string() : fs::u8path(found).generic_u8string();
     };
+    // The bookkeeping every host's Collect Files keeps (asset_files.h FileCollector).
+    FileCollector files(dir);
     // `stored` from outside the folder into `kind`: the path to store now, or `stored` itself.
     auto collect = [&](const std::string& what, const std::string& stored, const std::string& kind) -> std::string {
-        if (stored.empty()) return stored;
-        const std::string full = resolve(stored);
-        if (insideFolder(full, dir)) {
-            ++r.inside;
-            return stored;
-        }
-        std::vector<std::string> copied;
         // A map or an image into the groom's maps folder (Maya's masks/<groom>), else the kind's.
         // ("groomCaches": the groom's own folder in caches, as its Simulate bakes are written.)
-        const std::string copy = collectFile(full,
-                                             kind == "masks"         ? mapsDirectory()
-                                             : kind == "groomCaches" ? assetFolder("caches") + "/" + fileSafeName(displayName())
-                                                                     : assetFolder(kind),
-                                             &copied);
-        if (copy.empty()) {
-            r.missing.emplace_back(what, stored);
-            return stored;
-        }
-        r.copied.emplace_back(what, copy);
-        return pathFromGroomFolder(copy, dir);
+        const std::string folder = kind == "masks"         ? mapsDirectory()
+                                   : kind == "groomCaches" ? groomFolder("caches")
+                                                           : assetFolder(kind);
+        const std::string now = files.collect(what, stored, resolve(stored), folder);
+        return now == stored ? stored : pathFromGroomFolder(now, dir);
     };
     ScalpMaps maps = session().scalpMaps();
     bool mapsChanged = false;
@@ -844,21 +551,18 @@ std::string GroomDocument::collectFiles(CollectReport* out) {
         paints_.clear();
     }
     bool graphChanged = false;
-    fileParams(graph_, "", [&](const std::string& label, json& value) {
-        const std::string stored = trimmed(value.get<std::string>());
+    std::map<std::string, std::string> collected;
+    for (const auto& [label, value] : graphFileParams(graph_.dump())) {
+        const std::string stored = trimmed(value);
         const std::string now = collect(label, stored, "masks");
-        if (now != stored) value = now, graphChanged = true;
-    });
+        if (now != stored) collected[label] = now;
+    }
+    if (!collected.empty()) graph_ = json::parse(withGraphFileParams(graph_.dump(), collected, &graphChanged));
     if (graphChanged) applyGraph();
-    if (bake_ && !bake_->prefix.empty() && !insideFolder(bake_->prefix + "x", dir)) {
+    if (bake_ && !bake_->prefix.empty()) {
         // The card bake as a whole: every file of its prefix into cards.
-        FileFollower f(dir, "", dir, assetFolder(""), {{fs::u8path(bake_->prefix).parent_path().generic_u8string(), defaultBakeDirectory()}});
-        std::vector<std::string> suffixes;
-        for (const std::string& file : CardBakePaths(bake_->prefix).files()) suffixes.push_back(file.substr(bake_->prefix.size()));
-        suffixes.push_back("Preview.png");
-        const std::string prefix = bake_->prefix, followed = f.followPrefix(prefix, suffixes);
-        if (followed != prefix) {
-            const std::string full = isAbsolutePath(followed) ? followed : (fs::u8path(dir) / fs::u8path(followed)).generic_u8string();
+        const std::string prefix = bake_->prefix, full = files.collectCardBake(prefix, defaultBakeDirectory());
+        if (full != prefix) {
             auto moved = [&](std::string& p) {
                 if (p.compare(0, prefix.size(), prefix) == 0) p = full + p.substr(prefix.size());
             };
@@ -867,7 +571,6 @@ std::string GroomDocument::collectFiles(CollectReport* out) {
             moved(bake_->preview);
             moved(bake_->atlas);
             session().setCardMaps(formatCardMaps(full, bake_->stamp, 0));
-            r.copied.emplace_back("card bake", full);
         }
     }
     for (auto& [node, ref] : simBakes_) ref.file = collect("simulation " + node, ref.file, "groomCaches");
@@ -885,6 +588,9 @@ std::string GroomDocument::collectFiles(CollectReport* out) {
         }
         if (photosChanged) referencePhotos_ = photos.dump();
     }
+    r.copied = files.copied();
+    r.missing = files.missing();
+    r.inside = files.inside();
     if (!r.copied.empty()) dirty_ = true;
     if (out) *out = std::move(r);
     return {};
@@ -893,25 +599,10 @@ std::string GroomDocument::collectFiles(CollectReport* out) {
 std::string GroomDocument::importReferenceImage(const std::string& path) {
     std::error_code ec;
     if (!fs::is_regular_file(fs::u8path(path), ec)) return {};
-    const fs::path folder = fs::u8path(assetFolder("references"));
-    fs::create_directories(folder, ec);
-    const fs::path source = fs::absolute(fs::u8path(path), ec);
-    fs::path target = folder / source.filename();
-    auto same = [&](const fs::path& a, const fs::path& b) {
-        std::error_code e;
-        if (fs::equivalent(a, b, e)) return true;
-        if (fs::file_size(a, e) != fs::file_size(b, e) || e) return false;
-        std::ifstream x(a, std::ios::binary), y(b, std::ios::binary);
-        return std::equal(std::istreambuf_iterator<char>(x), std::istreambuf_iterator<char>(), std::istreambuf_iterator<char>(y));
-    };
-    for (int k = 2; fs::exists(target, ec) && !same(source, target); ++k) {
-        target = folder / (source.stem().u8string() + "_" + std::to_string(k) + source.extension().u8string());
-    }
-    if (!fs::exists(target, ec)) {
-        fs::copy_file(source, target, fs::copy_options::none, ec);
-        if (ec) return {};
-    }
-    const std::string full = target.generic_u8string();
+    // Into the references folder: the same file there as it is, other content a free name (every
+    // host's: asset_files.h collectFile).
+    const std::string full = collectFile(fs::absolute(fs::u8path(path), ec).generic_u8string(), assetFolder("references"));
+    if (full.empty()) return {};
     return path_.empty() ? full : pathFromGroomFolder(full, fs::u8path(path_).parent_path().generic_u8string());
 }
 
@@ -931,10 +622,7 @@ void GroomDocument::recoveredAs(const std::string& path) {
     if (moved && !path_.empty()) {
         // Relative paths (texture maps) resolve against the file's folder first, then the copy's
         // and its search paths (the autosave's: the file's folder among them).
-        std::vector<std::string> dirs{fs::u8path(path_).parent_path().u8string()};
-        if (!scene_->file().directory.empty()) dirs.push_back(scene_->file().directory);
-        dirs.insert(dirs.end(), scene_->file().searchPaths.begin(), scene_->file().searchPaths.end());
-        session().setPathResolver(searchPathResolver(std::move(dirs)));
+        session().setPathResolver(searchPathResolver(groomFileFolders(scene_->file(), fs::u8path(path_).parent_path().u8string())));
         paints_.clear();
     }
 }

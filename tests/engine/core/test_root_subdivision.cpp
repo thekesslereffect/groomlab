@@ -202,13 +202,25 @@ TEST(RootSubdivision, TheHierarchyUnderTheRootIsMadeAgainInEachCell) {
     }
 }
 
+TEST(RootSubdivision, EveryHostFindsTheDensityMapAnOlderGroomPainted) {
+    // Subdivide, Paint and Apply in every host: the one map, else an older numbered one (its
+    // painting read as it is: nothing renamed), else none yet.
+    EXPECT_EQ(subdivisionDensityMapIn({"length", kSubdivisionDensityMap, "tubeSubdivisionDensity01"}), kSubdivisionDensityMap);
+    EXPECT_EQ(subdivisionDensityMapIn({"tubeSubdivisionDensity02", "length", "tubeSubdivisionDensity01"}), "tubeSubdivisionDensity01");
+    EXPECT_EQ(subdivisionDensityMapIn({"length", "tubeSubdivisionDensityOld"}), "") << "a map only named like it";
+    EXPECT_EQ(subdivisionDensityMapIn({}), "");
+}
+
 TEST(RootSubdivision, PaintingAgainCutsOnlyWhereTheDensityChanged) {
     const ScalpMesh before = painted([](const Vec3f&) { return 0.3f; });
     GuideHierarchy h;
-    const auto first = subdivideRootTubes(h, before, {bigRoot(h, before)}).cells;
+    const SubdivisionResult cut = subdivideRootTubes(h, before, {bigRoot(h, before)});
+    const auto first = cut.cells;
+    EXPECT_EQ(cut.cellLevel, 2) << "the cells are in the level below the root tubes' (1; the card shows it)";
     // Nothing changed: nothing cut.
     const auto none = applySubdivisionDensity(h, before);
     EXPECT_TRUE(none.cells.empty());
+    EXPECT_EQ(none.cellLevel, 0);
     EXPECT_EQ(none.removed, 0u);
 
     // Denser at the +x edge only.

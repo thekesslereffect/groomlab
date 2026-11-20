@@ -57,8 +57,8 @@ float scalpSize(const ScalpMesh* scalp, double scale) {
     if (points.empty()) return 0.0f;
     Vec3f lo = points.front(), hi = lo;
     for (const Vec3f& p : points) {
-        lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
-        hi = {std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
+        lo = minPerAxis(lo, p);
+        hi = maxPerAxis(hi, p);
     }
     const float d = (hi - lo).length();
     return d > 0.0f && std::isfinite(d) ? roundToPercentStep(d, scale) : 0.0f;
@@ -117,8 +117,8 @@ bool layoutOf(const StrandSet& in, const ScalpMesh* scalp, std::size_t most, std
         for (const std::size_t s : l.strands) {
             const Vec3f* p = in.strandPoints(s);
             for (std::size_t i = 0; i < in.strandPointCount(s); ++i) {
-                lo = {std::min(lo.x, p[i].x), std::min(lo.y, p[i].y), std::min(lo.z, p[i].z)};
-                hi = {std::max(hi.x, p[i].x), std::max(hi.y, p[i].y), std::max(hi.z, p[i].z)};
+                lo = minPerAxis(lo, p[i]);
+                hi = maxPerAxis(hi, p[i]);
             }
         }
         const float d = (hi - lo).length();
@@ -150,15 +150,15 @@ bool layGrid(const std::vector<Sample>& samples, std::int64_t margin, int dilate
             Vec3f a = samples[k * kPiece].p, b = a;
             for (std::size_t i = k * kPiece; i < std::min(samples.size(), (k + 1) * kPiece); ++i) {
                 const Vec3f& q = samples[i].p;
-                a = {std::min(a.x, q.x), std::min(a.y, q.y), std::min(a.z, q.z)};
-                b = {std::max(b.x, q.x), std::max(b.y, q.y), std::max(b.z, q.z)};
+                a = minPerAxis(a, q);
+                b = maxPerAxis(b, q);
             }
             bounds[k] = {a, b};
         }, 1);
         Vec3f lo = bounds[0][0], hi = bounds[0][1];
         for (const auto& b : bounds) {
-            lo = {std::min(lo.x, b[0].x), std::min(lo.y, b[0].y), std::min(lo.z, b[0].z)};
-            hi = {std::max(hi.x, b[1].x), std::max(hi.y, b[1].y), std::max(hi.z, b[1].z)};
+            lo = minPerAxis(lo, b[0]);
+            hi = maxPerAxis(hi, b[1]);
         }
         if (!std::isfinite(lo.x + lo.y + lo.z + hi.x + hi.y + hi.z)) return false;
         for (;;) {
@@ -248,8 +248,8 @@ StrandsPtr onEngine(gpu::StageKind kind, const std::string& type, const ParamSet
                 const std::size_t n = in->strandPointCount(s);
                 if (!finitePoints(pts, n)) continue;
                 for (std::size_t i = 0; i < n; ++i) {
-                    box[0] = {std::min(box[0].x, pts[i].x), std::min(box[0].y, pts[i].y), std::min(box[0].z, pts[i].z)};
-                    box[1] = {std::max(box[1].x, pts[i].x), std::max(box[1].y, pts[i].y), std::max(box[1].z, pts[i].z)};
+                    box[0] = minPerAxis(box[0], pts[i]);
+                    box[1] = maxPerAxis(box[1], pts[i]);
                 }
                 longest = std::max(longest, arcLength(pts, n));
             }
@@ -310,11 +310,8 @@ bool hairGridLayout(const std::string& type, const StrandSet& in, const std::sha
             l.segments.push_back(static_cast<std::uint32_t>(s));
         }
     }
-    // The grid the node lays on these strands (their samples as it takes them: the amounts do not
-    // lay it).
-    const std::vector<Sample> samples =
-        sampleStrands(in, in.positions(), layout.strands, 0.5 * layout.h,
-                      [](std::size_t, std::size_t, float, float, std::size_t) { return std::pair<float, float>(0.0f, 0.0f); });
+    // The grid the node lays on these strands (their samples as it takes them).
+    const std::vector<Sample> samples = sampleStrands(in, in.positions(), layout.strands, 0.5 * layout.h);
     Grid g;
     g.h = layout.h;
     if (!layGrid(samples, spec.margin, spec.dilate, &g)) {
@@ -365,8 +362,8 @@ std::shared_ptr<const std::vector<std::uint32_t>> hairGridWalls(const ScalpMesh&
     // Every node within reach of a triangle: the scalp's box grown by the reach, a node more.
     Vec3f lo = scalp.points().front(), hi = lo;
     for (const Vec3f& p : scalp.points()) {
-        lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
-        hi = {std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
+        lo = minPerAxis(lo, p);
+        hi = maxPerAxis(hi, p);
     }
     if (!std::isfinite(lo.x + lo.y + lo.z + hi.x + hi.y + hi.z)) return nullptr;
     const double r = static_cast<double>(reach);
@@ -394,8 +391,8 @@ std::shared_ptr<const std::vector<std::uint32_t>> hairGridWalls(const ScalpMesh&
         Vec3f a = scalp.points()[static_cast<std::size_t>(tri[0])], b = a;
         for (int c = 1; c < 3; ++c) {
             const Vec3f& p = scalp.points()[static_cast<std::size_t>(tri[c])];
-            a = {std::min(a.x, p.x), std::min(a.y, p.y), std::min(a.z, p.z)};
-            b = {std::max(b.x, p.x), std::max(b.y, p.y), std::max(b.z, p.z)};
+            a = minPerAxis(a, p);
+            b = maxPerAxis(b, p);
         }
         const double ta[3] = {a.x, a.y, a.z}, tb[3] = {b.x, b.y, b.z};
         std::int64_t from[3], to[3];

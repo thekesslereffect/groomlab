@@ -200,4 +200,44 @@ std::vector<std::pair<std::string, ParamValue>> cardPresetParams(const std::stri
     return params;
 }
 
+std::vector<std::string> cardsNodeNames(const std::string& graphJson) {
+    std::vector<std::string> names;
+    const nlohmann::json graph = nlohmann::json::parse(graphJson, nullptr, false);
+    if (!graph.is_object() || !graph.contains("nodes") || !graph["nodes"].is_array()) return names;
+    for (const nlohmann::json& n : graph["nodes"]) {
+        if (n.is_object() && n.value("type", std::string()) == "Cards") names.push_back(n.value("name", std::string()));
+    }
+    return names;
+}
+
+std::string withCardPreset(const std::string& graphJson, const std::string& lod, std::vector<std::string> nodes,
+                           std::optional<int> triangles, std::vector<std::pair<std::string, ParamValue>>* set) {
+    nlohmann::json graph = nlohmann::json::parse(graphJson, nullptr, false);
+    if (graph.is_discarded() || !graph.is_object()) throw std::invalid_argument("not a graph");
+    const std::vector<std::string> cards = cardsNodeNames(graphJson);
+    if (nodes.empty()) nodes = cards;
+    if (nodes.empty()) throw std::invalid_argument("the graph has no Cards node: add one first");
+    for (const std::string& node : nodes) {
+        if (std::find(cards.begin(), cards.end(), node) == cards.end()) throw std::invalid_argument("no Cards node '" + node + "'");
+        const std::vector<std::pair<std::string, ParamValue>> params = cardPresetParams(lod, cardNodeKind(graphJson, node), triangles);
+        for (nlohmann::json& n : graph["nodes"]) {
+            if (n.value("name", std::string()) != node) continue;
+            if (!n.contains("params") || !n["params"].is_object()) n["params"] = nlohmann::json::object();
+            for (const auto& [name, value] : params) {
+                std::visit(
+                    [&](const auto& v) {
+                        using T = std::decay_t<decltype(v)>;
+                        if constexpr (std::is_same_v<T, bool> || std::is_same_v<T, std::int64_t> || std::is_same_v<T, double> ||
+                                      std::is_same_v<T, std::string>) {
+                            n["params"][name] = v;
+                        }
+                    },
+                    value);
+            }
+        }
+        if (set) *set = params;
+    }
+    return graph.dump();
+}
+
 }  // namespace groomlab

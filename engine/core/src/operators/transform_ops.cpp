@@ -12,7 +12,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <functional>
 #include <memory>
 
 #include "groomlab/field.h"
@@ -29,59 +28,6 @@
 namespace groomlab {
 
 namespace {
-
-// The operator's own stage on the CPU engine (look_cpu.h; look.slang's, the GPU preview's own).
-struct EngineStage {
-    gpu::StageKind kind;
-    const ParamSet& params;
-    const ScalpMesh* scalp;
-    // Each strand's direction (StageInputs::directions) of strand s, where the node takes one per
-    // strand (Bend's vector field; Direction's three mapped params); null: the params'.
-    std::function<Vec3f(std::size_t)> direction = nullptr;
-    // Its stage for the strands `which` of `in`, into `out` (all of them: null, the result made).
-    StrandsPtr run(const StrandsPtr& in, const std::vector<std::uint32_t>* which, StrandSet* out) const {
-        gpu::StageParamReader reader(params, "");
-        gpu::StageInputs inputs;
-        if (direction) {
-            reader.directions = true;
-            auto ways = std::make_shared<std::vector<Vec3f>>(which ? which->size() : in->strandCount());
-            parallelFor(0, ways->size(), [&](std::size_t k) { (*ways)[k] = direction(which ? (*which)[k] : k); }, 4096);
-            inputs.directions = std::move(ways);
-        }
-        if (!which) return gpu::runStage(kind, reader, in, scalp, std::move(inputs));
-        gpu::runStageOnStrands(kind, reader, in, *which, scalp, *out, std::move(inputs));
-        return nullptr;
-    }
-};
-// The run every shaper here shares: in full, or (with `incremental`) only the strands the input
-// changed in, into the last result's copy; false when that cannot be done. `identity`: the strands
-// pass through as they came (nothing to do). `local`: every mapped value reads each strand alone.
-bool reshapeEach(const StrandsPtr& in, bool identity, bool local, const IncrementalInputs* incremental, bool otherInputsSame,
-                 Value* result, StrandChanges* changed, const EngineStage& engine) {
-    if (identity || in->empty()) {
-        if (incremental) return false;  // the input handed on: the graph passes its changes on
-        *result = in;
-        return true;
-    }
-    if (!incremental) {
-        *result = engine.run(in, nullptr, nullptr);
-        return true;
-    }
-    const StrandChanges* changes = someStrandsChanged(*incremental, 0);
-    const StrandsPtr last = changes ? previousStrandsFor(*incremental, *in) : nullptr;
-    if (!last || !local || !otherInputsSame) return false;
-    if (changes->none()) {  // the same strands in: the same result
-        *result = last;
-        *changed = *changes;
-        return true;
-    }
-    auto out = std::make_shared<StrandSet>(*in);
-    positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made
-    engine.run(in, &changes->strands, out.get());
-    *changed = *changes;
-    *result = StrandsPtr(out);
-    return true;
-}
 
 // Transform: each strand moved, turned and scaled about its root, in its root's frame (x along
 // the scalp's U direction, y its normal, z across them), with random amounts per strand; or the

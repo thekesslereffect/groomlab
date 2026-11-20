@@ -36,7 +36,6 @@ and more numerous where the vertex map tubeSubdivisionDensity is high (1) than w
     root_tubes.apply_density(groom, [cell], name)             # cut again where its map changed
 """
 
-import colorsys
 import json
 
 from maya import cmds
@@ -47,15 +46,14 @@ from groomlab import tube_mesh as tm
 
 ROOT_GROUP = "rootTubes"   # the root group new root tubes go into (when no group is picked)
 SHAPE_PREFIX = "rootTube_"  # each root tube's library shape: its root outline
-MAX_LEVELS = 9              # the tube hierarchy's deepest level (1: the base)
-LEVEL_SUFFIX = "_L"         # level n's group: <base>_L<n>
+MAX_LEVELS = gl.MAX_TUBE_LEVELS  # the tube hierarchy's deepest level (1: the base; root_tubes.h)
 SNAP_PIXELS = 12            # how near (in view pixels) a CV snaps to a neighbouring root's CV or edge
 ROOT_OVERLAP = 0.015        # a root tube's footprint this share larger than its outline (tube.h kRootTubeOverlap)
 CLEARANCE = 0.35            # a drawn guide popped this many root sizes out where it dips into the scalp ...
 _CLEAR_RAMP = 2.0           # ... reached this many root sizes along it from the root (root_tubes.cpp)
 MAX_LEAN = 0.8726646259971648  # (50 degrees) a root tube's guide leaves the scalp leaning at most this far off its normal
-DENSITY_MAP = "tubeSubdivisionDensity"  # the one subdivision density vertex map (1: the most, smallest roots)
-DENSITY_START = 0.5                     # its value where nothing is painted
+DENSITY_MAP = gl.SUBDIVISION_DENSITY_MAP      # the one subdivision density vertex map (1: the most, smallest roots)
+DENSITY_START = gl.DEFAULT_SUBDIVISION_DENSITY  # its value where nothing is painted (root_subdivision.h)
 
 
 # ---------------------------------------------------------------------------
@@ -127,27 +125,6 @@ def _lists(points):
 # Small helpers (the Tube tool and the tests use some)
 
 
-def _hierarchy(groom):
-    return groomlab.get_hierarchy(groom) or {}
-
-
-def _guides_by_id(data):
-    return {int(g["id"]): g for g in data.get("guides", [])}
-
-
-def _shape_of(tube):
-    return (tube or {}).get("shape", "")
-
-
-def _scalp_surface(groom):
-    """surface(point) -> (the nearest point on the scalp, the normal there), Maya's meshes'."""
-    from groomlab import utils
-    surface = utils._scalp_surface(groom)
-    if surface is None:
-        raise ValueError("the groom has no scalp to root a tube on")
-    return surface
-
-
 def _centroid(points):
     """The area centroid of a closed outline (in its best plane; the mean where it has no area)."""
     return _tuple(gl.outline_centroid(_tuples(points)))
@@ -158,10 +135,6 @@ def _resample(points, count):
     return _tuples(gl.resample_polyline(_tuples(points), int(count)))
 
 
-def _length(points):
-    return sum(tm._dist(a, b) for a, b in zip(points, points[1:]))
-
-
 def _turning(pts):
     """How far (radians) a polyline turns, all told."""
     return float(gl.polyline_turning(_tuples(pts)))
@@ -170,12 +143,6 @@ def _turning(pts):
 def _lean(direction, normal):
     """How far (radians) `direction` leans off the scalp's `normal`."""
     return float(gl.lean_off(_tuple(direction), _tuple(normal)))
-
-
-def path_spans(points, size, density=1.0):
-    """How many spans a drawn guide gets (about one per root size along it, enough that none turns
-    more than 15 degrees, both times `density`, 3 to 200)."""
-    return int(gl.root_path_spans(_tuples(points), float(size), float(density)))
 
 
 def _guide_path(root, normal, path, length, segments, size=None, density=1.0, surface=None):
@@ -222,12 +189,6 @@ def make_root_tube(groom, outline, path=None, length=1.0, segments=12, taper=0.5
                         taper=float(taper), density=float(density), group=group or ""))
 
 
-def is_root_tube(guide_data):
-    """Whether a guide (the stored hierarchy's dict) is a root-first tube: a primary whose tube
-    takes a rootTube_ shape."""
-    return not guide_data.get("parent") and _shape_of(guide_data.get("tube")).startswith(SHAPE_PREFIX)
-
-
 def root_tubes(groom, guides=None):
     """The root-first tubes' guide IDs (of `guides` when given: those among them, or the root
     tubes their tubes descend from), in ID order."""
@@ -265,23 +226,6 @@ def root_center(groom, guide):
     return tuple(point), tuple(normal)
 
 
-def carried(groom, outline, start, to, held=()):
-    """`outline` (a root's CVs on the scalp) carried over the scalp from its middle at `start` to
-    `to`: each CV turned with the scalp's normal from there to here, set down at `to` and taken
-    onto the scalp. CVs whose index is in `held` stay where they are (sealed onto a neighbour)."""
-    return _tuples(_request(groom, "carry", outline=_lists(outline), start=list(_tuple(start)), to=list(_tuple(to)),
-                            held=sorted(int(i) for i in held)))
-
-
-def sealed(groom, guide, outline=None, others=None, tolerance=None):
-    """The indices of `guide`'s root CVs (`outline`: as root_outline gives them) lying on another
-    root tube's outline (one of its CVs, or on one of its edges): sealed onto a neighbour."""
-    outline = outline if outline is not None else root_outline(groom, guide)
-    others = others if others is not None else snap_targets(groom, skip=[guide])
-    return [int(i) for i in _request(groom, "sealed", outline=_lists(outline), others=[_lists(cvs) for _g, cvs in others],
-                                     tolerance=-1.0 if tolerance is None else float(tolerance))]
-
-
 def duplicate_root_tube(groom, guide, to, regions=True, start=None):
     """A copy of root tube `guide` with its root set down at `to` (with `start`, that point carried
     to `to` instead of its root's middle: several roots copied as one group): its outline and guide
@@ -300,28 +244,6 @@ def delete_root_tubes(groom, guides, regions=True):
     if not guides:
         return 0
     return int(_request(groom, "delete", guides=guides))
-
-
-# ---------------------------------------------------------------------------
-# Each root tube's color
-
-
-def region_colors(count):
-    """`count` colors far apart (hues a golden step apart, three brightnesses), none black (the
-    engine's rootTubeColor)."""
-    out = []
-    for k in range(count):
-        hue = (k * 0.618033988749895) % 1.0
-        value = (0.95, 0.7, 0.5)[(k // 7) % 3]
-        out.append(colorsys.hsv_to_rgb(hue, 0.8, value))
-    return out
-
-
-def root_colors(groom, tubes=None):
-    """{guide: (r, g, b)}: each root tube's color, as the engine draws its tubes and guides.
-    `tubes`: root_tubes(groom) when not given."""
-    tubes = root_tubes(groom) if tubes is None else tubes
-    return dict(zip(tubes, region_colors(len(tubes))))
 
 
 def footprint_error(groom, guide):
@@ -361,21 +283,10 @@ def snap_point(p, outlines, to_screen, pixels=SNAP_PIXELS):
 # The tube hierarchy
 
 
-def level_group(base, level):
-    """The group of `level` (1: the base) in base group `base`'s hierarchy."""
-    return gl.tube_level_group(base, int(level))
-
-
 def tube_levels(groom, guides=None, picked=None):
     """The hierarchy's levels: {"base": the base group, "levels": [the group of each level, the
     base first]}: each level's group a child group of the one above, named <base>_L<n>."""
     return _request(groom, "levels", guides=[int(g) for g in (guides or [])], picked=picked or "")
-
-
-def base_group(groom, guides=None, picked=None, groups=None):
-    """The base group (level 1) the hierarchy works on: the top group of the first of `guides`,
-    else of the group `picked`, else the first top group holding guides."""
-    return tube_levels(groom, guides, picked)["base"]
 
 
 def add_tube_level(groom, guides=None, picked=None):
@@ -467,7 +378,7 @@ def ensure_density_map(groom, name):
 
 def _cut(answer):
     return {"cells": [int(g) for g in answer.get("cells", [])], "removed": int(answer.get("removed", 0)),
-            "kept": int(answer.get("kept", 0))}
+            "kept": int(answer.get("kept", 0)), "cellLevel": int(answer.get("cellLevel", 0))}
 
 
 def subdivide(groom, guides, map=None, multiplier=1.0):

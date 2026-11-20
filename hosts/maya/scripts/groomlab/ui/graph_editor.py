@@ -120,12 +120,6 @@ CATEGORY_COLORS = dict((name, QtGui.QColor(color)) for name, color in definition
 # plumbing for scripts and compounds, hidden from the panel unless changed.
 PLUMBING = set(tuple(pair) for pair in definitions.get("graph/plumbing"))
 
-# Reads whose "no node upstream writes it" note waits until the user sets them, or the param that
-# uses them, off its default (as the core's own note on HairColor does): a fresh groom's HairColor
-# shares its randomness per clump (clumpShare) with no Clump before it, and nothing needs fixing
-# until one is added or the share is changed. (node type, reading param) -> the param using it.
-QUIET_READS = {("HairColor", "clumpChannel"): "clumpShare"}
-
 SCATTER_LENGTH_TIP = ("An Interpolate after this Scatter gives its strands the guides' shapes and lengths, so this "
                       "length only shows where no guide reaches (and before any guide is placed). To make the hair "
                       "longer or shorter, brush the guides (Length, Cut) or trim with the Length node.")
@@ -362,22 +356,9 @@ def search_rank(text, op_type, words):
     """Where node type `op_type` ranks for the search `text` (lower first), None when it doesn't
     match: its name or label starting with it, containing it, a search keyword or its category title, a param's name, its
     description, then a param's description. `words`: NodeSearch's entry (lowercase texts)."""
-    if not text:
-        return 5
-    name = op_type.lower()
-    label = words.get("label", name)
-    parts = text.split()
-    if name.startswith(text) or label.startswith(text):
-        return 0
-    if text in name or text in label or text.replace(" ", "") in name:
-        return 1
-    for rank, key in ((2, "keywords"), (3, "params"), (4, "about")):
-        if all(part in words.get(key, "") or part in name for part in parts):
-            return rank
-    everything = " ".join([name] + [words.get(k, "") for k in ("keywords", "params", "about", "details")])
-    if all(part in everything for part in parts):
-        return 5
-    return None
+    import groomlab_core
+    # (the core's nodeSearchRank, every host's search)
+    return groomlab_core.node_search_rank(text, dict(words, name=op_type.lower(), label=words.get("label", op_type.lower())))
 
 
 ADVANCED = "Advanced"  # the section the advanced params fold away in, last (and a group of that name)
@@ -386,21 +367,12 @@ ADVANCED = "Advanced"  # the section the advanced params fold away in, last (and
 def param_sections(specs):
     """[(section, [spec, ...])] in the panel's order: the main params ("" : no header), each group in
     the order the spec lists them, then Advanced (every advanced param, whatever its group). With
-    fewer than two groups there are no group headers: the params read as one list, as before."""
-    groups = []
-    for spec in specs:
-        group = spec.get("group") or ""
-        if group and group != ADVANCED and not spec.get("advanced") and group not in groups:
-            groups.append(group)
-    headed = len(groups) >= 2
-
-    def section_of(spec):
-        group = spec.get("group") or ""
-        if spec.get("advanced") or group == ADVANCED:
-            return ADVANCED
-        return group if headed else ""
-
-    sections = [(key, [s for s in specs if section_of(s) == key]) for key in [""] + groups + [ADVANCED]]
+    fewer than two groups there are no group headers: the params read as one list, as before (the
+    core's param_sections, every host's)."""
+    import groomlab_core
+    of = groomlab_core.param_sections(json.dumps(list(specs)))
+    order = [""] + [s for s in dict.fromkeys(of) if s not in ("", ADVANCED)] + [ADVANCED]
+    sections = [(key, [s for s, section in zip(specs, of) if section == key]) for key in order]
     return [(key, members) for key, members in sections if members]
 
 
@@ -415,15 +387,8 @@ def shown_when(spec, value_of, spec_of=None):
         param = condition.get("param")
         if not param:
             return True
-        value = value_of(param)
-        if isinstance(value, bool):
-            text = "true" if value else "false"
-        elif isinstance(value, str):
-            text = value
-        elif isinstance(value, float) and value.is_integer():
-            text = str(int(value))  # 3.0 stored for an int param reads as the core's "3"
-        else:
-            text = json.dumps(value)
+        import groomlab_core
+        text = groomlab_core.condition_text(json.dumps(value_of(param)))  # (the core's rule, every host's)
         if text not in (condition.get("in") or []):
             return False
         seen.add(spec.get("name"))
@@ -635,6 +600,9 @@ class NodeItem(QtWidgets.QGraphicsItem):
         if self.library:
             self.category = library_category(self.library)
         spec = model.node_spec(name)
+        # Show Tubes on its header: a Braid's section tubes, a node giving guides the tubes they carry.
+        self.tubes = model.braid_tubes_offered(name)
+        self.can_view = model.viewable(name)  # View Up to Here (the core's rule, every host's)
         self.inputs = {}
         y = HEADER_H + ROW_H / 2 + 4
         for port in spec["inputs"]:
@@ -877,8 +845,8 @@ class NodeItem(QtWidgets.QGraphicsItem):
     # -- Header toggles: exposed inputs, Focus (view up to here) and Bypass, as in Yeti --
 
     def viewable(self):
-        """Focus shows a node giving strands (a Clump's centers as dots)."""
-        return self.output.port_type == "Strands"
+        """Focus shows a node giving strands as connected (GraphEdit.viewable)."""
+        return self.can_view
 
     def toggle_rects(self):
         """Header button rectangles; only nodes with linkable params get Expand Inputs."""
@@ -893,6 +861,8 @@ class NodeItem(QtWidgets.QGraphicsItem):
             left -= size + 4
         if self.op_type == "Clump":  # Clump Colors: the strands colored by its clumps
             rects["clumpColors"] = QtCore.QRectF(left, 8, size, size)
+        elif self.tubes:  # Show Tubes: its section tubes (a Braid's) or its guides' tubes drawn in the viewport
+            rects["braidTubes"] = QtCore.QRectF(left, 8, size, size)
         return rects
 
     def paint_toggles(self, painter, viewed, bypassed):
@@ -903,12 +873,13 @@ class NodeItem(QtWidgets.QGraphicsItem):
             available = self.mappable() if kind == "inputs" else []
             on = (viewed if kind == "focus" else
                   self.editor.clump_colored(self.name) if kind == "clumpColors" else
+                  self.editor.braid_tubes_shown(self.name) if kind == "braidTubes" else
                   (all(p in self.editor.model.param_inputs(self.name) for p in available) if kind == "inputs" else bypassed))
             ink = getattr(self, "header_ink", None)  # on a filled header: its readable color
             idle = QtGui.QColor(ink) if ink is not None else QtGui.QColor(MUTED)
             if ink is not None:
                 idle.setAlpha(150)
-            active = FOCUS if kind in ("focus", "inputs", "clumpColors") else WARNING
+            active = FOCUS if kind in ("focus", "inputs", "clumpColors", "braidTubes") else WARNING
             color = (ink if ink is not None else active) if on else idle
             if on:  # lit: a tile of its color under a bolder glyph (View in the blue: plainly on)
                 fill = QtGui.QColor(color)
@@ -936,6 +907,17 @@ class NodeItem(QtWidgets.QGraphicsItem):
                         painter.setPen(QtGui.QPen(color, 1.3))
                         painter.setBrush(QtCore.Qt.NoBrush)
                     painter.drawEllipse(c + at, 2.6, 2.6)
+            elif kind == "braidTubes":  # a short tube: its far end's half, its two sides, its open near end
+                far = QtCore.QRectF(c.x() - 6.6, c.y() - 4.0, 4.4, 8.0)
+                near = QtCore.QRectF(c.x() + 2.2, c.y() - 4.0, 4.4, 8.0)
+                painter.setPen(QtGui.QPen(color, 1.4))
+                painter.drawArc(far, 90 * 16, 180 * 16)
+                painter.drawLine(QtCore.QPointF(far.center().x(), far.top()), QtCore.QPointF(near.center().x(), near.top()))
+                painter.drawLine(QtCore.QPointF(far.center().x(), far.bottom()),
+                                 QtCore.QPointF(near.center().x(), near.bottom()))
+                if on:
+                    painter.setBrush(color)
+                painter.drawEllipse(near)
             elif kind == "inputs":  # Maya Hypershade's three-line expand-inputs glyph
                 for dy in (-4, 0, 4):
                     painter.drawLine(c + QtCore.QPointF(-5, dy), c + QtCore.QPointF(5, dy))
@@ -957,6 +939,8 @@ class NodeItem(QtWidgets.QGraphicsItem):
                         later(lambda: editor.toggle_param_inputs(name))
                     elif kind == "clumpColors":
                         later(lambda: editor.toggle_clump_colors(name))
+                    elif kind == "braidTubes":
+                        later(lambda: editor.toggle_braid_tubes(name))
                     else:
                         later(lambda: editor.set_bypass([name], not editor.model.bypassed(name)))
                     return
@@ -967,6 +951,8 @@ class NodeItem(QtWidgets.QGraphicsItem):
                          "dots" % shortcut_keys("graph.view"),
                 "inputs": "Expand Inputs: show or hide all connectable parameter ports",
                 "clumpColors": "Clump Colors: color the strands by this node's clumps (its clumpChannel); again: as they were",
+                "braidTubes": ("Show Tubes: draws the braid's section tubes in the viewport" if self.op_type == "Braid" else
+                               "Show Tubes: draws the tubes of the guides this node gives in the viewport"),
                 "disable": "Bypass: pass the input straight through (%s)" % shortcut_keys("graph.bypass")}
         over = next((k for k, r in self.toggle_rects().items() if r.contains(event.pos())), None)
         self.setToolTip(tips[over] if over else (self.editor.node_errors.get(self.name)
@@ -996,6 +982,7 @@ class NodeItem(QtWidgets.QGraphicsItem):
     ACTIONS = {
         "node.setOutput": lambda self: later(lambda: self.editor.set_output(self.name)),
         "node.view": lambda self, on: later(lambda: self.editor.view_node(self.name if on else None)),
+        "node.colorByChannel": lambda self, channel, on: later(lambda: self.editor.color_by_channel(self.name, channel, on)),
         "node.bypass": lambda self, on: later(lambda: self.editor.set_bypass([self.name], on)),
         # Out of the flow: what fed it feeds what it fed, the node kept below the new link (#80).
         "node.detach": lambda self: later(lambda: self.editor.detach_nodes(self.editor.menu_targets(self.name))),
@@ -1029,7 +1016,7 @@ class NodeItem(QtWidgets.QGraphicsItem):
             state.add("node.viewable")
         if self.op_type == "Sculpt":
             state.add("node.sculpt")
-        if self.output.port_type in ("Strands", "Guides") and self.op_type != "Output":
+        if self.editor.model.bakeable(self.name):  # (the core's rule, every host's)
             state.add("node.bakeable")
         if self.mappable():
             state.add("node.mappable")
@@ -1051,22 +1038,18 @@ class NodeItem(QtWidgets.QGraphicsItem):
             return [{"id": entry["action"], "value": param, "label": param, "tip": ""} for param in self.mappable()]
 
         def inner(entry):
+            import groomlab_core
             definition = (self.editor.model.nodes[self.name].get("params") or {}).get("definition") or {}
-            subs = []
-            for node in definition.get("graph", {}).get("nodes", []):
-                try:
-                    specs = self.editor.catalog.spec(node.get("type", ""))["params"]
-                except gm.GraphError:
-                    continue
-                specs = [p for p in specs if p.get("kind") in ("float", "int", "bool", "vec3", "string")
-                         and p["name"] not in ("definition",) and not p.get("channel")]
-                if not specs or node.get("type") == "Input":
-                    continue
-                subs.append({"submenu": node["name"], "items": [
-                    {"id": entry["action"], "value": "%s.%s" % (node["name"], p["name"]), "label": pretty(p["name"]),
-                     "tip": p.get("description", "")} for p in specs]})
-            return subs
-        return {"exposeParams": expose, "innerParams": inner}
+            # The core's list, every host's (graph_controls.h compoundInnerParamsJson).
+            inner_params = json.loads(groomlab_core.compound_inner_params_json(json.dumps(definition)))
+            return [{"submenu": n["node"], "items": [
+                {"id": entry["action"], "value": "%s.%s" % (n["node"], p["name"]), "label": pretty(p["name"]),
+                 "tip": p.get("description", "")} for p in n["params"]]} for n in inner_params]
+        def channels(entry):
+            # The channels its last result carries (the stats'), per strand and per point.
+            return [{"id": entry["action"], "value": channel, "label": channel, "tip": "per " + kind}
+                    for channel, kind in self.editor.channels_of(self.name)]
+        return {"exposeParams": expose, "innerParams": inner, "nodeChannels": channels}
 
     def contextMenuEvent(self, event):
         editor, name = self.editor, self.name
@@ -1074,7 +1057,9 @@ class NodeItem(QtWidgets.QGraphicsItem):
         exposed = editor.model.param_inputs(name)
         definition = (editor.model.nodes[name].get("params") or {}).get("definition") or {}
         shown = set((definition.get("expose") or {}).values())
+        colored = editor.channel_colored(name)
         checked = {"node.view": lambda item: editor.viewed == name,
+                   "node.colorByChannel": lambda item: item["value"] == colored,
                    "node.bypass": lambda item: editor.model.bypassed(name),
                    "node.evaluate": lambda item: item["value"] == current,
                    "node.brushSculpt": lambda item: editor.sculpt_target() == name,
@@ -1427,19 +1412,16 @@ class NodeSearch(QtWidgets.QFrame):
         layout.addWidget(self.about)
         self.entries = []
         self.labels = {}
+        import groomlab_core
         catalog = editor.catalog
         refresh_library(catalog)
         for category, types in categories(catalog):
             for op_type in types:
                 spec = catalog.spec(op_type) if catalog is not None else {}
-                params = spec.get("params", [])
                 self.labels[op_type] = (spec.get("label") or op_type, spec.get("description", ""))
-                self.entries.append((op_type, category, {
-                    "label": (spec.get("label") or pretty(op_type)).lower(),
-                    "keywords": " ".join([spec.get("keywords") or "", category]).lower(),
-                    "params": " ".join([p["name"] for p in params] + [pretty(p["name"]) for p in params]).lower(),
-                    "about": " ".join([category, spec.get("description", "")]).lower(),
-                    "details": " ".join(p.get("description", "") for p in params).lower()}))
+                # What it is found by: the core's (node_search_words, every host's search).
+                self.entries.append((op_type, category, groomlab_core.node_search_words(
+                    json.dumps(dict(spec, type=op_type, categoryTitle=category)))))
         # The groom's painted maps: each a Map node reading it, found by its name (or map, mask, paint).
         for m in editor.painted_maps():
             key = MAP_ENTRY + m["name"]
@@ -2378,7 +2360,10 @@ class ParamPanel(QtWidgets.QScrollArea):
             if scene:
                 form.addRow(scene)
             rows = []  # (spec, label, widget), laid out by section below
+            saved_version = model.node_version(name)[0]
             for spec in model.node_spec(name)["params"]:
+                if spec.get("addedIn", 0) > saved_version:
+                    continue  # added by a later version of the operator: nothing here until Upgrade (the core's paramInVersion)
                 if op_type in ("Compound", "Script") and spec["name"] == "definition":
                     continue  # edited by grouping and expose() (a script node: Edit Node...), not as text
                 if op_type == "Expression" and spec["name"] in ("expression", "variables"):
@@ -4081,7 +4066,7 @@ class ParamPanel(QtWidgets.QScrollArea):
                                 "Clumps: lockId, then clumpId) unless replacing it is what you want.")
         else:
             read = next((r for r in info.get("reads", []) if r["param"] == spec["name"]), None)
-            if read is not None and not read["reaches"] and not editor.quiet_read(node, spec["name"]):
+            if read is not None and not read["reaches"] and not read.get("quiet"):  # (the core's: its user at its default too)
                 why = ("none applies" if read.get("optional")
                        else "this node ignores it")
                 line = QtWidgets.QLabel(u"\u24d8 no node upstream writes %s: %s" % (read["name"], why))
@@ -4480,6 +4465,7 @@ class GraphEditor(QtWidgets.QWidget):
         self.node_notes = {}       # node -> a note: it does nothing as set (a Clump with no centers)
         self.node_times = {}       # node -> ms of the last evaluation
         self.node_channels = {}    # node -> strand channels in its last result
+        self.node_color_channels = {}  # node -> [[channel, kind]] Color by Channel lists (the stats')
 
         self.scene = GraphScene(self)
         self.scene.selectionChanged.connect(self.selection_changed)
@@ -4860,6 +4846,7 @@ class GraphEditor(QtWidgets.QWidget):
         self.groom = self._groom_uuid = self.model = self.viewed = None
         self._preview_base = self._key_preview = None
         self.node_errors, self.node_warnings, self.node_notes, self.node_times, self.node_channels = {}, {}, {}, {}, {}
+        self.node_color_channels = {}
         self.scene.blockSignals(True)
         try:
             self.scene.clear()
@@ -5222,6 +5209,53 @@ class GraphEditor(QtWidgets.QWidget):
         except Exception:  # noqa: BLE001 - a node gone
             return False
 
+    def channels_of(self, name):
+        """[(channel, "strand" or "point")] its last result carries (the stats' colorChannels, the
+        core's list: none before an evaluation reached it)."""
+        return [tuple(c) for c in self.node_color_channels.get(name, [])]
+
+    def channel_colored(self, name):
+        """The channel Color by Channel shows of this node ("" for none): the Attribute colors read
+        from it ("<channel>@<node>")."""
+        if not self.groom:
+            return ""
+        import groomlab_core
+        from maya import cmds
+        from groomlab import review
+        try:
+            if cmds.getAttr(self.groom + ".strandColorMode") != review.ATTRIBUTE_MODE:
+                return ""
+            source = cmds.getAttr(self.groom + ".strandColorSource") or ""
+        except (RuntimeError, ValueError):
+            return ""
+        return groomlab_core.channel_colored_at(source, name)
+
+    def color_by_channel(self, name, channel, on):
+        """Color by Channel: the hair colored by `channel` as node `name` leaves it, point by point
+        (the Attribute colors from "<channel>@<node>", min and max equal: the values' own range);
+        off, the color mode from before."""
+        if not self.groom:
+            return
+        import groomlab_core
+        from maya import cmds
+        from groomlab import review
+        groom = self.groom
+        if not on:
+            before = getattr(self, "_color_mode_before_channel", 0)
+            self.silently(lambda: cmds.setAttr(groom + ".strandColorMode", 0 if before == review.ATTRIBUTE_MODE else before))
+            return
+        mode = cmds.getAttr(groom + ".strandColorMode")
+        if mode != review.ATTRIBUTE_MODE:
+            self._color_mode_before_channel = mode
+
+        def colored():
+            cmds.setAttr(groom + ".strandColorSource", groomlab_core.node_color_source(channel, name), type="string")
+            cmds.setAttr(groom + ".strandColorMin", 0.0)
+            cmds.setAttr(groom + ".strandColorMax", 0.0)
+            cmds.setAttr(groom + ".strandColorMode", review.ATTRIBUTE_MODE)
+        self.silently(colored)
+        self.report("strands colored by %s at %s, blue to red over its range" % (channel, name))
+
     def toggle_clump_colors(self, name):
         """A Clump's Clump Colors: the strands colored by its clumps (its clumpChannel), the focus left
         as it is; on a lit one, the color mode from before."""
@@ -5254,6 +5288,65 @@ class GraphEditor(QtWidgets.QWidget):
         for item in self.items.values():
             item.update()
 
+    # -- Show Tubes: a Braid header's button (the groom's braidTubes: the nodes whose tubes draw) --
+
+    def braid_tubes(self):
+        """The Braid nodes showing their section tubes, as the groom keeps them (names, one a line)."""
+        if not self.groom:
+            return ""
+        from maya import cmds
+        try:
+            return cmds.getAttr(self.groom + ".braidTubes") or ""
+        except (RuntimeError, ValueError):
+            return ""
+
+    def _set_braid_tubes(self, shown):
+        if not self.groom or shown == self.braid_tubes():
+            return
+        from maya import cmds
+        groom = self.groom
+        self.silently(lambda: cmds.setAttr(groom + ".braidTubes", shown, type="string"))
+        self._repaint_toggles()
+
+    def braid_tubes_shown(self, name):
+        """Whether the viewport draws this Braid's section tubes (its Show Tubes lit: the core's
+        GraphEdit.braid_tubes_shown)."""
+        shown = self.braid_tubes()
+        if not shown:
+            return False
+        try:
+            return self.model.braid_tubes_shown(name, shown)
+        except Exception:  # noqa: BLE001 - a node gone
+            return False
+
+    def toggle_braid_tubes(self, name):
+        """A Braid's Show Tubes: its section tubes drawn in the viewport (the hair as it is); on a lit
+        one, no more. Display only: nothing evaluates again."""
+        if not self.groom:
+            return
+        try:
+            shown = self.model.braid_tubes_toggled(name, self.braid_tubes())
+        except Exception as e:  # noqa: BLE001 - a node gone
+            self.report(str(e))
+            return
+        self._set_braid_tubes(shown)
+        self.report("%s's tubes %s" % (name, "shown" if self.braid_tubes_shown(name) else "hidden"))
+
+    def _follow_braid_tubes(self, old=None, new=None):
+        """Show Tubes after an edit: a renamed node's name follows it, a deleted node's goes (the
+        core's renamed_braid_tubes and GraphEdit.braid_tubes_kept)."""
+        shown = self.braid_tubes()
+        if not shown:
+            return
+        import groomlab_core
+        try:
+            if old and new:
+                shown = groomlab_core.renamed_braid_tubes(shown, old, new)
+            shown = self.model.braid_tubes_kept(shown)
+        except Exception:  # noqa: BLE001 - a graph the core cannot read: left as it is
+            return
+        self._set_braid_tubes(shown)
+
     def set_bypass(self, names, on):
         for name in names:
             self.model.set_bypass(name, on)
@@ -5284,9 +5377,13 @@ class GraphEditor(QtWidgets.QWidget):
 
     def copy_selected(self):
         names = [i.name for i in self.scene.selectedItems() if isinstance(i, NodeItem)]
-        if names:
-            QtWidgets.QApplication.clipboard().setText(self.model.copy_nodes(names))
-            self.report("copied %d node%s" % (len(names), "s" if len(names) > 1 else ""))
+        text = self.model.copy_nodes(names) if names else ""
+        if text:
+            count = len(json.loads(text)["nodes"])
+            QtWidgets.QApplication.clipboard().setText(text)
+            self.report("copied %d node%s" % (count, "s" if count > 1 else ""))
+        elif names:
+            self.report("the output node is one of a kind")
 
     def paste(self, offset=(40.0, 40.0)):
         try:
@@ -5304,7 +5401,11 @@ class GraphEditor(QtWidgets.QWidget):
     def duplicate(self, names):
         if not names:
             return []
-        QtWidgets.QApplication.clipboard().setText(self.model.copy_nodes(names))
+        text = self.model.copy_nodes(names)
+        if not text:
+            self.report("the output node is one of a kind")
+            return []
+        QtWidgets.QApplication.clipboard().setText(text)
         return self.paste()
 
     def add_backdrop(self, title="Backdrop"):
@@ -5355,6 +5456,7 @@ class GraphEditor(QtWidgets.QWidget):
             stats = json.loads(cmds.groomLabGraphStats(self.groom))
             self.node_times = stats.get("times", {})
             self.node_channels = stats.get("channels", {})
+            self.node_color_channels = stats.get("colorChannels", {})
             self.viewed = stats.get("view") or None
             for path, info in (stats.get("cardNodes") or {}).items():
                 top = path.split("/")[0]
@@ -5585,10 +5687,7 @@ class GraphEditor(QtWidgets.QWidget):
         node + Param when taken), or stop showing it. One undo step when Live."""
         try:
             if on:
-                inner, _, param = target.partition(".")
-                taken = set(p["name"] for p in self.model.node_spec(compound)["params"])
-                exposed = param if param not in taken else inner + param[:1].upper() + param[1:]
-                self.model.expose(compound, exposed, target)
+                self.model.expose(compound, "", target)  # (named as every host names it: the core's)
             else:
                 self.model.unexpose(compound, target)
         except gm.GraphError as e:
@@ -5845,8 +5944,7 @@ class GraphEditor(QtWidgets.QWidget):
         """A grey note (the node's "i") on each node reading an attribute no node upstream writes."""
         notes = {}
         for name, info in self.channels().items():
-            missing = [r for r in info.get("reads", []) if not r["reaches"] and not r.get("optional")
-                       and not self.quiet_read(name, r["param"])]
+            missing = [r for r in info.get("reads", []) if not r["reaches"] and not r.get("optional")]
             if missing:
                 notes[name] = "; ".join("reads the attribute %s (%s), which no node upstream writes: it is ignored"
                                         % (r["name"], r["param"]) for r in missing)
@@ -5855,20 +5953,6 @@ class GraphEditor(QtWidgets.QWidget):
         if changed:
             for item in self.items.values():
                 item.update()
-
-    def quiet_read(self, name, param):
-        """Whether node `name`'s attribute-reading `param` keeps its "nothing upstream writes it"
-        note to itself (QUIET_READS): both it and the param using it at their defaults."""
-        if self.model is None or name not in self.model.nodes:
-            return False
-        uses = QUIET_READS.get((self.model.node_type(name), param))
-        if uses is None:
-            return False
-        defaults = {s["name"]: s.get("default") for s in self.model.node_spec(name)["params"]}
-        try:
-            return all(self.model.param(name, p) == defaults.get(p) for p in (param, uses))
-        except gm.GraphError:
-            return False
 
     def note_of(self, name):
         """The node's grey note: what its last evaluation said, and an attribute it reads that does not reach it."""
@@ -5924,9 +6008,7 @@ class GraphEditor(QtWidgets.QWidget):
         try:
             if detach and detach != (dst, input_name):
                 self.model.disconnect(*detach)
-            kind = self.value_kind_for_input(src, dst, input_name)
-            if kind is not None:
-                self.model.set_param(src, "kind", kind)
+            # (by hand: a Value node no link leaves takes the param's kind, GraphEdit.connect_by_hand)
             self.model.connect(src, dst, input_name, output=output, by_hand=True)
         except gm.GraphError as e:
             self.report(str(e))
@@ -5936,24 +6018,8 @@ class GraphEditor(QtWidgets.QWidget):
         self.changed()
 
     def value_kind_for_input(self, src, dst, input_name):
-        """A kind an unconnected Value node can adopt for a parameter input, else None."""
-        if self.model.node_type(src) != "Value" or self.model.downstream_of(src):
-            return None
-        spec = self.model.param_spec(dst, input_name)
-        if spec is None:
-            return None
-        kind = spec.get("kind")
-        if kind == "float":
-            return "number"
-        if kind == "int":
-            return "integer"
-        if kind == "bool":
-            return "bool"
-        if kind == "vec3":
-            return "color" if spec.get("unit") == "color" else "vector"
-        if kind == "string":
-            return "text"
-        return None
+        """A kind an unconnected Value node adopts for a parameter input, else None (the core's)."""
+        return self.model.value_kind_for_input(src, dst, input_name)
 
     def set_param_exposed(self, name, param, exposed):
         """Give a param an input port (a field node can then drive it), or take it away."""
@@ -6014,6 +6080,7 @@ class GraphEditor(QtWidgets.QWidget):
     def delete_nodes(self, names):
         for name in names:
             self.model.remove_node(name, keep_flow=True)  # the flow passes through (issue #80)
+        self._follow_braid_tubes()  # a deleted Braid's Show Tubes goes with it
         self.rebuild()
         self.changed()
 
@@ -6024,6 +6091,7 @@ class GraphEditor(QtWidgets.QWidget):
         except gm.GraphError as e:
             self.report(str(e))
             return None
+        self._follow_braid_tubes()  # (a grouped node's Show Tubes goes: only the graph's own nodes show)
         self.rebuild()
         self.items[name].setSelected(True)
         self.changed()
@@ -6089,6 +6157,7 @@ class GraphEditor(QtWidgets.QWidget):
             except (gm.GraphError, ValueError) as e:
                 self.report("%s: %s" % (name, e))
         if done:
+            self._follow_braid_tubes()
             self.rebuild()
             self.changed()
 
@@ -6109,6 +6178,8 @@ class GraphEditor(QtWidgets.QWidget):
             self.model.disconnect(e.dst_item.name, e.input_name)
         for name in nodes:
             self.model.remove_node(name, keep_flow=True)  # the flow passes through (issue #80)
+        if nodes:
+            self._follow_braid_tubes()  # a deleted Braid's Show Tubes goes with it
         for data in backdrops:
             self.model.backdrops.remove(data)
             self._layout_dirty = True
@@ -6159,6 +6230,7 @@ class GraphEditor(QtWidgets.QWidget):
                 self.report(str(e))
                 return
             self._rename_color_source(name, new)
+            self._follow_braid_tubes(name, new)
             self.rebuild()
             self.changed()
 

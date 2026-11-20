@@ -32,7 +32,6 @@ NO_TOOL = "Pick a tool, then drag over the groom in the viewport."
 GESTURES = ("B + drag: radius · M + drag: strength · Ctrl: the opposite (Length shortens, Lift lays down, Shape shrinks; "
             "painting, toward 0) · Shift+drag: smooth (the guides, a painted map, the Tube brush's channel) · select "
             "guides with the Select tool")
-FLOW_HINTS = {"": defs.text("flowArrows"), "*": defs.text("flowSinks")}
 TABS = {"TOOLS": "tools", "PAINT": "paint", "CORRECTIVES": "correctives", "PHOTOS": "photos"}  # palette.json's ids
 STARTER = tuple((s["id"], s["label"], s["tip"]) for s in defs.get("palette/starter/steps"))
 _lists_for = [None]
@@ -307,6 +306,24 @@ def header_buttons(row, context):
     row.menu("GROOMLAB_MT_tools_more", text="", icon="DOWNARROW_HLT")
 
 
+
+_starter = {"key": None, "look": False}
+
+
+def _starter_look(scalp):
+    """The first-groom card's look step (the helper's starter_look: every host's rule), asked again
+    only when the graph changed (the graph kept on the scalp object) so a redraw stays cheap."""
+    key = (scalp.name, hash(scalp.groomlab.graph_json))
+    if _starter["key"] != key:
+        try:
+            rt = groom.ensure(scalp)
+            types = list(defs.get("palette/starter/lookTypes") or [])
+            _starter["look"] = bool(process.call("starter_look", session=rt.session, lookTypes=types).get("look"))
+        except Exception:  # noqa: BLE001 - no helper yet: not done
+            _starter["look"] = False
+        _starter["key"] = key
+    return _starter["look"]
+
 class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
@@ -352,8 +369,8 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
                 layout.operator("groomlab.update", text="Start GroomLab", icon="FILE_REFRESH")
                 return
         _lists_current(context, scalp)
-        if t.guide_count == 0 and not t.starter_dismissed:
-            self.draw_starter(layout, context)
+        if not t.starter_dismissed and not (t.guide_count > 0 and _starter_look(scalp)):
+            self.draw_starter(layout, context, scalp)
         if t.status:
             _wrap(layout, t.status, icon="INFO", width=_chars(context))
         # The tabs, then the tool grid (the Tools and Correctives tabs; on Paint, one full-width
@@ -369,13 +386,11 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
                 tray = look(layout, "card")  # (the window: a tray, its title inside)
                 look(tray, "tray").label(text=category)
                 grid = tool_grid(tray, ids, t.tool)
-                if "freeze" in ids:  # beside Freeze, a tile: every guide brushable again (its tooltip says so)
-                    sub = grid.row(align=True)
-                    sub.scale_y = TILE_SCALE
-                    sub.operator("groomlab.guides_edit", text="Invert" if in_window(layout) else "Invert Frozen",
-                                 icon_value=icons.icon("invert")).action = "INVERT_FROZEN"
-                    sub.operator("groomlab.guides_edit", text="Unfreeze" if in_window(layout) else "Unfreeze All",
-                                 icon_value=icons.icon("unfreeze")).action = "UNFREEZE_ALL"
+                if "freeze" in ids:  # beside Freeze, two tiles of the grid's own size (their tooltips say what they do)
+                    grid.operator("groomlab.guides_edit", text="Invert" if in_window(layout) else "Invert Frozen",
+                                  icon_value=icons.icon("invert")).action = "INVERT_FROZEN"
+                    grid.operator("groomlab.guides_edit", text="Unfreeze" if in_window(layout) else "Unfreeze All",
+                                  icon_value=icons.icon("unfreeze")).action = "UNFREEZE_ALL"
         elif t.tab == "PAINT":  # Paint: one full-width button over the maps
             row = look(layout, "card").row()
             row.scale_y = TILE_SCALE
@@ -413,20 +428,21 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
             elif item["kind"] == "submenu":
                 box.menu(menu.submenu_idname("empty", item["id"]), text=item["label"], icon="IMPORT")
 
-    def draw_starter(self, layout, context):
+    def draw_starter(self, layout, context, scalp=None):
         box = layout.box()
         row = box.row()
         look(row, "title").label(text=defs.get("palette/starter/title"))
         row.prop(context.scene.groomlab_tools, "starter_dismissed", text="", icon="X", emboss=False)
-        first = True
+        t = context.scene.groomlab_tools
+        done = {"guides": t.guide_count > 0, "look": bool(scalp is not None and _starter_look(scalp))}
+        current = next((key for key, _text, _tip in STARTER if not done.get(key)), None)
         for key, text, tip in STARTER:
-            op = box.operator("groomlab.tool" if key == "guides" else "groomlab.graph_open",
-                              text=("▶  " if first else "○  ") + text, emboss=False)
+            mark = "✓  " if done.get(key) else "▶  " if key == current else "○  "
+            op = box.operator("groomlab.tool" if key == "guides" else "groomlab.graph_open", text=mark + text, emboss=False)
             if key == "guides":
                 op.tool = "place"
-            if first:
+            if key == current:
                 _wrap(box, tip, width=_chars(context))
-            first = False
 
     def draw_groups(self, layout, context, t):
         """The Tools tab's list (palette.json's one section, Guide groups): the groups (a click picks
@@ -735,7 +751,7 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
         sub.operator("groomlab.root_tube", text="Delete").action = "DELETE"
         sub.operator("groomlab.root_tube", text="Duplicate", depress=mode == "duplicate").action = "DUPLICATE"
         # Subdivide | the paint brush (the density map) | Multiplier | Apply (Maya's row).
-        has_map = any(m.name == "tubeSubdivisionDensity" for m in t.maps)
+        has_map = bool(t.root_density_map)  # (the one map, or an older numbered one)
         row = col.row(align=True)
         sub = row.row(align=True)
         sub.enabled = mode in ("select", "duplicate") and t.root_selected > 0

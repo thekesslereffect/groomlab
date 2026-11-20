@@ -193,7 +193,8 @@ groomlab.add_instances(groom, flake, probability=0.08, scale=0.03, orient="rando
   every key.
 - **USD:** a `PointInstancer` beside the curves, with placeholder prototype prims to reference
   geometry into; `scales` is per axis (a fitted instance's X, Y, Z sizes).
-- **Variants:** several prototype names separated by spaces (`"rock pebble shell"`) give each
+- **Variants:** several prototype names separated by commas or spaces (`rock, pebble, shell`; a
+  name holding a space goes in double quotes: `"My Mesh", pebble`) give each
   instance one of them, by its ID and the `seed` (`variantBy` `random`), or by the `variant` param
   (`map`: 0-1 over the list, mappable: a painted map, a channel, an expression).
 - **Bent along the strand (`deform` `alongStrand`, Yeti's instance deform):** each copy bends

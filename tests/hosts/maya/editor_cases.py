@@ -1288,6 +1288,38 @@ class GraphEditorTest(unittest.TestCase):
         from groomlab.ui import widgets
         return [s.suffix() for s in root.findChildren(widgets.SoftSlider)]
 
+    def test_a_param_a_later_version_added_shows_after_upgrade(self):
+        """Braid's separate and inflate came with its version 2: a version 1 Braid's panel lists neither
+        (they do nothing there) until Upgrade."""
+        from groomlab.ui.qt import QtWidgets
+        panel = self.editor.params
+        self.editor.resize(1200, 700)
+        self.editor.show()
+        wait(30)
+        name = self.editor.add_node("Braid")
+
+        def listed():
+            return set(spec["name"] for _section, _header, entries in panel.sections for spec, _row in entries)
+
+        self.editor.scene.clearSelection()
+        self.editor.items[name].setSelected(True)
+        self.assertTrue({"separate", "inflate", "pancake"} <= listed())
+        self.editor.model.nodes[name]["version"] = 1
+        self.editor.scene.clearSelection()
+        self.editor.items[name].setSelected(True)
+        self.assertEqual(self.editor.model.node_version(name)[0], 1)
+        self.assertFalse({"separate", "inflate"} & listed())
+        self.assertIn("pancake", listed())
+        # (A Braid has actions: its title, and Upgrade with it, is pinned over the params, outside the
+        # scrolled body.)
+        upgrade = self.editor.findChild(QtWidgets.QToolButton, "upgradeNode")
+        self.assertIsNotNone(upgrade)
+        upgrade.click()
+        self.editor.scene.clearSelection()
+        self.editor.items[name].setSelected(True)
+        self.assertEqual(self.editor.model.node_version(name)[0], self.editor.model.node_version(name)[1])
+        self.assertTrue({"separate", "inflate"} <= listed())
+
     def test_param_sections_show_when_units_and_upgrade(self):
         from groomlab.ui.qt import QtWidgets
         from groomlab.ui import widgets
@@ -1468,6 +1500,63 @@ class GraphEditorTest(unittest.TestCase):
         self.assertEqual(cmds.getAttr(self.groom + ".viewNode"), "")
         self.assertFalse(self.editor.clump_colored(name))
         self.editor.delete_nodes([name])
+        self.editor.scene.clearSelection()
+        QtWidgets.QApplication.processEvents()
+        QtWidgets.QApplication.sendPostedEvents(None, QtCore.QEvent.DeferredDelete)
+        self.editor.hide()
+
+    def test_show_tubes_button(self):
+        # A Braid's header: Show Tubes (where a Clump has Clump Colors) draws the node's section tubes
+        # in the viewport: the groom's braidTubes names it, the focus and the graph left as they are;
+        # again: off. A rename takes the name along, a delete drops it.
+        from groomlab.ui.qt import QtCore, QtWidgets
+        from groomlab.ui.qt import QtTest as qt_test_module
+        QtTest = qt_test_module()
+        self.editor.resize(1200, 600)
+        self.editor.show()
+        QtWidgets.QApplication.processEvents()
+        name = self.editor.add_node("Braid")
+        self.assertNotIn("braidTubes", self.editor.items["length"].toggle_rects())
+        self.assertIn("braidTubes", self.editor.items[name].toggle_rects())
+        self.assertNotIn("clumpColors", self.editor.items[name].toggle_rects())
+        self.assertEqual(cmds.getAttr(self.groom + ".braidTubes") or "", "")
+        graph = cmds.getAttr(self.groom + ".graph")
+        view = self.editor.view
+
+        def click(node):
+            item = self.editor.items[node]
+            point = view.mapFromScene(item.mapToScene(item.toggle_rects()["braidTubes"].center()))
+            QtTest.QTest.mouseClick(view.viewport(), QtCore.Qt.LeftButton, QtCore.Qt.NoModifier, point)
+            wait(20)
+
+        click(name)
+        self.assertEqual(cmds.getAttr(self.groom + ".braidTubes"), name)
+        self.assertTrue(self.editor.braid_tubes_shown(name))
+        self.assertFalse(self.editor.braid_tubes_shown("length"))
+        self.assertEqual(cmds.getAttr(self.groom + ".viewNode") or "", "")
+        self.assertEqual(cmds.getAttr(self.groom + ".graph"), graph)  # display only: the graph as it was
+        click(name)
+        self.assertEqual(cmds.getAttr(self.groom + ".braidTubes") or "", "")
+        self.assertFalse(self.editor.braid_tubes_shown(name))
+        # A second Braid shows its own beside the first's.
+        other = self.editor.add_node("Braid")
+        click(name)
+        click(other)
+        self.assertEqual((cmds.getAttr(self.groom + ".braidTubes") or "").split("\n"), [name, other])
+        self.assertTrue(self.editor.braid_tubes_shown(name) and self.editor.braid_tubes_shown(other))
+        # Renamed (the Rename dialog's steps, without the dialog): the name follows.
+        self.editor.model.rename_node(name, "plait")
+        self.editor._follow_braid_tubes(name, "plait")
+        self.editor.rebuild()
+        self.editor.changed()
+        self.assertEqual((cmds.getAttr(self.groom + ".braidTubes") or "").split("\n"), ["plait", other])
+        self.assertTrue(self.editor.braid_tubes_shown("plait"))
+        # Deleted: its name goes, the other's stays.
+        self.editor.delete_nodes(["plait"])
+        self.assertEqual(cmds.getAttr(self.groom + ".braidTubes"), other)
+        self.assertTrue(self.editor.braid_tubes_shown(other))
+        self.editor.delete_nodes([other])
+        self.assertEqual(cmds.getAttr(self.groom + ".braidTubes") or "", "")
         self.editor.scene.clearSelection()
         QtWidgets.QApplication.processEvents()
         QtWidgets.QApplication.sendPostedEvents(None, QtCore.QEvent.DeferredDelete)
