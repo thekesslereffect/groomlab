@@ -1602,8 +1602,8 @@ struct Braider {
     Ramp taper;
     std::vector<float> taperTangents;  // the taper's (Ramp::tangents), for widthAt at every point
     float region2 = 0.0f, gather = 0.0f, tail = 0.0f;
-    // How gradually the weave starts after the gather and ends before the tail (0-1: over up to
-    // kFadeSteps weave steps, from and into one round bundle: bundledAt).
+    // How gradually the weave starts after the gather and ends before the tail (0-1: from and into
+    // one round bundle over up to kFadeSteps weave steps: bundledAt, fadePeak, fadeSteps).
     float gatherSmoothness = 0.0f, tailSmoothness = 0.0f;
     static constexpr float kFadeSteps = 4.0f;
     bool feeds = false;  // feed: the braid starts at the path's root (no gather)
@@ -1711,23 +1711,33 @@ struct Braider {
         path.weaveFrom = feeds ? 0.0f : std::min(gather * path.length, weaveEnd(path));
         const float end0 = weaveEnd(path), steps0 = path.weaveAt(path.weaveFrom), steps1 = path.weaveAt(end0);
         const float room = std::max(steps1 - steps0, 0.0f);
-        const float inSteps = std::min(gatherSmoothness * kFadeSteps, 0.5f * room);
-        const float outSteps = std::min(tailSmoothness * kFadeSteps, 0.5f * room);
+        const float inSteps = std::min(fadeSteps(gatherSmoothness), 0.5f * room);
+        const float outSteps = std::min(fadeSteps(tailSmoothness), 0.5f * room);
         path.fadedIn = gatherSmoothness > 0.0f ? path.distanceAt(steps0 + inSteps) : path.weaveFrom;
         path.fadeOut = tailSmoothness > 0.0f ? path.distanceAt(steps1 - outSteps) : end0;
         if (gatherSmoothness > 0.0f) bundleTurnAt(steps0, &path.startTurn, &path.startSign);
     }
-    // How much the sections lie as one round bundle at `at` along the path (0: woven): 1 where the
-    // weave starts, fading to 0 by where it has faded in (gatherSmoothness), and back up to 1 where
-    // the weave ends (tailSmoothness), smoothly.
+    // How much the sections lie as one round bundle at `at` along the path (0: woven): fadePeak
+    // where the weave starts, fading to 0 by where it has faded in (gatherSmoothness), and back up
+    // where the weave ends (tailSmoothness), smoothly.
     float bundledAt(const BraidPath& path, float at) const {
         float bundled = 0.0f;
-        if (gatherSmoothness > 0.0f && path.fadedIn > path.weaveFrom) bundled = 1.0f - smoothstep(path.weaveFrom, path.fadedIn, at);
+        if (gatherSmoothness > 0.0f && path.fadedIn > path.weaveFrom) {
+            bundled = fadePeak(gatherSmoothness) * (1.0f - smoothstep(path.weaveFrom, path.fadedIn, at));
+        }
         const float end0 = weaveEnd(path);
-        if (tailSmoothness > 0.0f && end0 > path.fadeOut) bundled = std::max(bundled, smoothstep(path.fadeOut, end0, at));
-        if (tailSmoothness > 0.0f && at >= end0) bundled = 1.0f;
+        if (tailSmoothness > 0.0f) {
+            const float out = at >= end0 || !(end0 > path.fadeOut) ? 1.0f : smoothstep(path.fadeOut, end0, at);
+            bundled = std::max(bundled, fadePeak(tailSmoothness) * out);
+        }
         return bundled;
     }
+    // A smoothness's fade (bundledAt): how much the sections lie as one bundle where the weave
+    // starts or ends (rising smoothly from none at 0, all of it from 0.4 on), over how many weave
+    // steps (one at least, kFadeSteps at 1). The braid changes gradually as the slider moves off
+    // 0, never at once.
+    static float fadePeak(float smoothness) { return smoothstep(0.0f, 0.4f, smoothness); }
+    static float fadeSteps(float smoothness) { return 1.0f + (kFadeSteps - 1.0f) * smoothness; }
     // The turn of the one bundle best matching the sections' places `steps` along the weave:
     // section k's sector at *turnOut + *signOut x k of a turn's n-th, each as near where its section lies.
     void bundleTurnAt(float steps, float* turnOut, float* signOut) const {

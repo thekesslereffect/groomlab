@@ -2680,6 +2680,34 @@ TEST(Braid, SmoothnessFadesTheWeaveInAfterTheGatherAndOutBeforeTheTail) {
         EXPECT_EQ((*ids)[s] >= 0.0f, (*sharp->strandChannel("braidId"))[s] >= 0.0f) << s;
         EXPECT_EQ(soft->strandPoints(s)[0], sharp->strandPoints(s)[0]) << s;
     }
+    // Off 0 the braid changes a little, not at once (no pop as the slider leaves 0): at 0.03 the
+    // hair moves a small share of what it moves at 0.5, the farthest point too.
+    const auto moved = [&](double smoothness, double* most) {
+        BraidScene scene("three");
+        scene.setParam("widthProfile", Ramp::constant(1.0f));
+        scene.setParam("gatherSmoothness", smoothness);
+        scene.setParam("tailSmoothness", smoothness);
+        const StrandsPtr out = scene.lg.eval(scene.braid);
+        double sum = 0.0;
+        std::size_t count = 0;
+        *most = 0.0;
+        for (std::size_t s = 0; s < out->strandCount(); ++s) {
+            if (out->strandPointCount(s) != sharp->strandPointCount(s)) continue;
+            for (std::size_t i = 0; i < out->strandPointCount(s); ++i) {
+                const double d = (out->strandPoints(s)[i] - sharp->strandPoints(s)[i]).length();
+                sum += d;
+                *most = std::max(*most, d);
+                ++count;
+            }
+        }
+        return count ? sum / static_cast<double>(count) : 0.0;
+    };
+    double mostSmall = 0.0, mostHalf = 0.0;
+    const double small = moved(0.03, &mostSmall), half = moved(0.5, &mostHalf);
+    std::printf("  moved from 0: at 0.03 %.5f (most %.4f), at 0.5 %.5f (most %.4f)\n", small, mostSmall, half, mostHalf);
+    ASSERT_GT(half, 0.0);
+    EXPECT_LT(small, 0.05 * half);
+    EXPECT_LT(mostSmall, 0.1 * mostHalf);
 }
 
 // The braid's spread across (x, z) about its axis at height y (+-0.02), over the braided strands.
