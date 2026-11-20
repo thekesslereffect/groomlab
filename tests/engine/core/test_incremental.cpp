@@ -406,7 +406,7 @@ std::unique_ptr<Chain> makeDeformChain(const ChainEdit& edit = {}) {
     chain->node(op::kWind).params().set("turbulence", 0.5);
     chain->node(op::kInstance).params().set("count", std::int64_t{2});
     chain->node(op::kInstance).params().set("exposure", std::string("both"));
-    chain->node(op::kInstance).setNodeVersion(2);  // (about +Y only)
+    chain->node(op::kInstance).params().set("spinRandom", 0.0);
     chain->node(op::kInstance).params().set("probability", 0.4);
     const char* order[] = {"held", "diff", op::kCollide, op::kSmooth, op::kGravity, op::kDisplace, op::kFlow, op::kFlyaway,
                            "mask", "random", op::kTwist, op::kWind, op::kRestoreLength, op::kInstance, op::kOutput};

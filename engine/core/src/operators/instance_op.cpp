@@ -287,8 +287,7 @@ public:
     explicit InstanceOp(bool scales) : scales_(scales) {}
     std::string typeName() const override { return scales_ ? op::kScales : op::kInstance; }
     std::string category() const override { return "look"; }
-    // Instance 2: pinToRest on by default; 3: exposure external by default, spinRandom on all three
-    // axes (nodes saved before: about +Y only, nodeVersion).
+    // Instance 2: pinToRest on by default; 3: exposure external by default.
     int version() const override { return scales_ ? 1 : 3; }
     std::vector<std::string> externalInputs() const override { return {"scalp"}; }
     std::vector<PortSpec> inputs() const override {
@@ -649,7 +648,7 @@ private:
         };
         // Instance's own.
         InstanceOrient orient = InstanceOrient::Strand;
-        bool scaleByWidth = false, pinToRest = false, deformed = false, fitWidth = false, spinAll = false;
+        bool scaleByWidth = false, pinToRest = false, deformed = false, fitWidth = false;
         std::uint8_t axisCode = 1;
         // Scales' own.
         std::uint8_t previewCode = 0;
@@ -678,7 +677,6 @@ private:
             orient = orientFrom(params().getString("orient"));
             scaleByWidth = params().getBool("scaleByWidth");
             pinToRest = params().getBool("pinToRest");
-            spinAll = nodeVersion() >= 3;
             const std::string deform = params().getString("deform");
             if (deform != "none" && deform != "alongStrand") throw GraphError("Instance: deform must be none or alongStrand");
             const std::string deformAxis = params().getString("deformAxis");
@@ -786,9 +784,9 @@ private:
                     const float r = std::sqrt(std::max(0.0f, 1.0f - z * z));
                     inst.direction = {r * pm::cos(a), r * pm::sin(a), z};
                 }
-                if (spinAll && !deformed && !fitWidth && spinRandom > 0.0f) {
+                if (!deformed && !fitWidth && spinRandom > 0.0f) {
                     // About its other two axes as far as about its own (drawn last: the draws above
-                    // stay as they were without).
+                    // stay as they were). Not round its strand (fitWidth) or bent along it (deform).
                     inst.tiltX = 0.5f * kTwoPi * spinRandom * (2.0f * rng.nextFloat() - 1.0f);
                     inst.tiltZ = 0.5f * kTwoPi * spinRandom * (2.0f * rng.nextFloat() - 1.0f);
                 }

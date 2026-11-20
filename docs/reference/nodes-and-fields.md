@@ -141,7 +141,7 @@ groomlab.add_instances(groom, flake, probability=0.08, scale=0.03, orient="rando
   **+Y** follows, so model a prototype with its long axis up +Y. `scale` is also mappable, and
   `scaleRandom`, `spinRandom` and `offset` add variation. `spinRandom` turns each instance about
   all three of its axes, except instances fitted round their strand (`fitWidth`) or bent along it
-  (`deform`), which turn about their long axis only (as do nodes saved before).
+  (`deform`), which turn about their long axis only.
 - **Size along the strand:** with `scaleByWidth` (on by default) each instance's size is
   multiplied by the strand's width where it sits over the strand's root width, so it follows the
   Width node's profile: smaller toward thin tips, and following width changes over time. A
