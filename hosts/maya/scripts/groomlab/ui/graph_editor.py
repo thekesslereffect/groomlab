@@ -5219,15 +5219,16 @@ class GraphEditor(QtWidgets.QWidget):
         from it ("<channel>@<node>")."""
         if not self.groom:
             return ""
+        import groomlab_core
         from maya import cmds
         from groomlab import review
         try:
             if cmds.getAttr(self.groom + ".strandColorMode") != review.ATTRIBUTE_MODE:
                 return ""
-            channel, _, node = (cmds.getAttr(self.groom + ".strandColorSource") or "").rpartition("@")
+            source = cmds.getAttr(self.groom + ".strandColorSource") or ""
         except (RuntimeError, ValueError):
             return ""
-        return channel if node == name else ""
+        return groomlab_core.channel_colored_at(source, name)
 
     def color_by_channel(self, name, channel, on):
         """Color by Channel: the hair colored by `channel` as node `name` leaves it, point by point
@@ -5235,6 +5236,7 @@ class GraphEditor(QtWidgets.QWidget):
         off, the color mode from before."""
         if not self.groom:
             return
+        import groomlab_core
         from maya import cmds
         from groomlab import review
         groom = self.groom
@@ -5247,7 +5249,7 @@ class GraphEditor(QtWidgets.QWidget):
             self._color_mode_before_channel = mode
 
         def colored():
-            cmds.setAttr(groom + ".strandColorSource", "%s@%s" % (channel, name), type="string")
+            cmds.setAttr(groom + ".strandColorSource", groomlab_core.node_color_source(channel, name), type="string")
             cmds.setAttr(groom + ".strandColorMin", 0.0)
             cmds.setAttr(groom + ".strandColorMax", 0.0)
             cmds.setAttr(groom + ".strandColorMode", review.ATTRIBUTE_MODE)

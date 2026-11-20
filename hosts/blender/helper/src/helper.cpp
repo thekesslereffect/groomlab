@@ -46,6 +46,7 @@
 #include "groomlab/groom_session.h"
 #include "groomlab/guide_hierarchy.h"
 #include "groomlab/hair_color.h"
+#include "groomlab/instances.h"
 #include "groomlab/node_library.h"
 #include "groomlab/paths.h"
 #include "groomlab/presets.h"
@@ -1512,6 +1513,13 @@ json Helper::run(const std::string& cmd, const json& args) {
         return {{"maps", out}};
     }
     if (cmd == "file_safe_name") return {{"name", fileSafeName(optString(args, "text", ""))}};
+    // An Instance node's Object(s) text (instances.h) and Color by Channel's source (display.h).
+    if (cmd == "prototype_text") {
+        return {{"text", instancePrototypeText(args.value("names", std::vector<std::string>{}))}};
+    }
+    if (cmd == "node_color_source") {
+        return {{"source", nodeColorSource(optString(args, "channel", ""), optString(args, "node", ""))}};
+    }
     if (cmd == "graph_file_params") {
         json out = json::array();
         for (const auto& [label, path] : graphFileParams(graphArg(args))) out.push_back({{"label", label}, {"path", path}});

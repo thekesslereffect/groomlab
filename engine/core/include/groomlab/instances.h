@@ -170,6 +170,14 @@ private:
 };
 
 // An Instance node's prototype param as names: one, or several separated by spaces or commas
-// (variants).
+// (variants). A name in double quotes is one as it is, spaces and commas too (Blender's
+// "My Mesh").
 std::vector<std::string> instancePrototypeNames(const std::string& text);
+// The prototype param naming `names` (every host's Object(s) from Selection): each once, in order,
+// separated by ", ", a name holding a space or comma in double quotes, so that
+// instancePrototypeNames reads them back (empty names left out).
+std::string instancePrototypeText(const std::vector<std::string>& names);
+// The prototype param `text` with mesh `name` added at its end (`on`) or taken out: a list of
+// meshes ticked one by one.
+std::string instancePrototypeToggled(const std::string& text, const std::string& name, bool on);
 }  // namespace groomlab

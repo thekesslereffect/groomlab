@@ -9,6 +9,7 @@
 
 #include "groomlab/asset_files.h"
 #include "groomlab/color_patterns.h"
+#include "groomlab/display.h"
 #include "groomlab/card_files.h"
 #include "groomlab/engine_cards.h"
 #include "groomlab/card_maps.h"
@@ -19,6 +20,7 @@
 #include "groomlab/groom.h"
 #include "groomlab/groom_file.h"
 #include "groomlab/groom_package.h"
+#include "groomlab/instances.h"
 #include "groomlab/lod.h"
 #include "groomlab/parts.h"
 #include "groomlab/paths.h"
@@ -579,6 +581,13 @@ void bindGroom(py::module_& m) {
           },
           py::arg("path"), py::arg("taken") = std::vector<std::string>{},
           "A map's name made from an image file's (every host's Import Map), free among `taken`.");
+    // An Instance node's Object(s) (instances.h) and Color by Channel's source (display.h), every host's.
+    m.def("instance_prototype_text", &instancePrototypeText, py::arg("names"),
+          "An Instance node's Object(s) text for `names`: each once, in order, separated by \", \".");
+    m.def("node_color_source", &nodeColorSource, py::arg("channel"), py::arg("node"),
+          "The color source reading `channel` as node `node` leaves it (Color by Channel).");
+    m.def("channel_colored_at", &channelColoredAt, py::arg("source"), py::arg("node"),
+          "The channel a color source reads of node `node` (\"\" when none of its).");
     m.def("param_map_name", &paramMapName, py::arg("node"), py::arg("param"),
           "The map a param's own map is named (<node>_<param>, sanitized); one of that name already is linked again.");
     m.def(

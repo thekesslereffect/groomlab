@@ -60,20 +60,48 @@ private:
 }  // namespace
 
 std::vector<std::string> instancePrototypeNames(const std::string& text) {
-    std::string spaced = text;
-    std::replace(spaced.begin(), spaced.end(), ',', ' ');
     std::vector<std::string> names;
+    const char* const separators = " \t\r\n,";
     std::size_t at = 0;
     while (true) {
-        at = spaced.find_first_not_of(" \t\r\n", at);
+        at = text.find_first_not_of(separators, at);
         if (at == std::string::npos) break;
-        const std::size_t end = spaced.find_first_of(" \t\r\n", at);
-        names.push_back(spaced.substr(at, end == std::string::npos ? std::string::npos : end - at));
+        if (text[at] == '"') {
+            // Quoted: up to the closing quote (none: to the end), as it is.
+            const std::size_t close = text.find('"', at + 1);
+            names.push_back(text.substr(at + 1, close == std::string::npos ? std::string::npos : close - at - 1));
+            if (close == std::string::npos) break;
+            at = close + 1;
+            continue;
+        }
+        const std::size_t end = text.find_first_of(separators, at);
+        names.push_back(text.substr(at, end == std::string::npos ? std::string::npos : end - at));
         if (end == std::string::npos) break;
         at = end;
     }
     if (names.empty()) names.push_back(text);  // (an empty name stays one, as before)
     return names;
+}
+
+std::string instancePrototypeText(const std::vector<std::string>& names) {
+    std::vector<std::string> kept;
+    for (const std::string& n : names) {
+        if (!n.empty() && std::find(kept.begin(), kept.end(), n) == kept.end()) kept.push_back(n);
+    }
+    std::string text;
+    for (const std::string& n : kept) {
+        // A name holding a separator or starting with a quote: in quotes, read back as one.
+        const bool quoted = n.find_first_of(" \t\r\n,") != std::string::npos || n.front() == '"';
+        text += (text.empty() ? "" : ", ") + (quoted ? "\"" + n + "\"" : n);
+    }
+    return text;
+}
+
+std::string instancePrototypeToggled(const std::string& text, const std::string& name, bool on) {
+    std::vector<std::string> names = instancePrototypeNames(text);
+    names.erase(std::remove(names.begin(), names.end(), name), names.end());
+    if (on) names.push_back(name);
+    return instancePrototypeText(names);
 }
 
 std::uint32_t InstanceSet::prototypeIndex(const std::string& name) {

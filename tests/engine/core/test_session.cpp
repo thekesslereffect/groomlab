@@ -618,6 +618,11 @@ TEST(Session, ANodesStrandChannelIsItsOwnThoughALaterNodeWritesTheSameChannel) {
     EXPECT_FALSE(splitNodeColorSource("clumpId", &channel, &node));
     EXPECT_EQ(channel, "clumpId");
     EXPECT_TRUE(node.empty());
+    // Color by Channel's source, made and read back (every host's).
+    EXPECT_EQ(nodeColorSource("braidPress", "braid1"), "braidPress@braid1");
+    EXPECT_EQ(channelColoredAt(nodeColorSource("braidPress", "braid1"), "braid1"), "braidPress");
+    EXPECT_EQ(channelColoredAt("braidPress@braid1", "braid2"), "");
+    EXPECT_EQ(channelColoredAt("braidPress", "braid1"), "");
     const auto own = strandColors(shown, nullptr, kClumpColors, "clumpId@clump", 0.0f, 1.0f, first.get());
     const auto plain = strandColors(shown, nullptr, kClumpColors, "clumpId", 0.0f, 1.0f);
     const auto fallback = strandColors(shown, nullptr, kClumpColors, "clumpId@clump", 0.0f, 1.0f);

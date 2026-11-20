@@ -58,17 +58,17 @@ def braid_paths_from_curves(groom, braid, curves, model=None):
 
 def instance_object_names(meshes):
     """What an Instance node's Object(s) param holds for `meshes` (transforms or mesh shapes): each
-    mesh's transform, its short name, once each, in order, separated by commas."""
+    mesh's transform, its short name, once each, in order, separated by commas (the core's
+    instance_prototype_text)."""
+    import groomlab_core
     names = []
     for mesh in meshes:
         shapes = [mesh] if cmds.nodeType(mesh) == "mesh" else cmds.listRelatives(mesh, shapes=True, type="mesh") or []
         if not shapes:
             raise ValueError("%s is not a mesh" % mesh)
         name = cmds.listRelatives(shapes[0], parent=True)[0] if cmds.nodeType(mesh) == "mesh" else mesh
-        name = name.split("|")[-1]
-        if name not in names:
-            names.append(name)
-    return ", ".join(names)
+        names.append(name.split("|")[-1])
+    return groomlab_core.instance_prototype_text(names)
 
 
 def set_instance_prototype(groom, node, mesh, model=None):

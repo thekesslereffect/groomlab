@@ -819,11 +819,7 @@ def prototype_from_selection(scalp, node, obj):
     if g.node_type(node) not in ("Instance", "Scales"):
         raise HelperError("bad_request", "%s is not an Instance or Scales node" % node)
     set_prototypes(scalp, objs, replace=False)
-    names = []
-    for o in objs:
-        if o.name not in names:
-            names.append(o.name)
-    text = ", ".join(names)
+    text = process.call("prototype_text", names=[o.name for o in objs])["text"]  # (the core's rule)
     g.set_param(node, "prototype", text)
     g.finish()
     for o in objs:

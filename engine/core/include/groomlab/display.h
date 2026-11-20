@@ -183,6 +183,12 @@ bool channelRange(const std::vector<float>& values, float* lo, float* hi);
 // Splits "<channel>@<node>" (see strandColors): true with both set when it names a node; else
 // false, *channel the source as it is and *node empty.
 bool splitNodeColorSource(const std::string& source, std::string* channel, std::string* node);
+// The color source reading `channel` as node `node` leaves it: "<channel>@<node>" (every host's
+// Color by Channel).
+std::string nodeColorSource(const std::string& channel, const std::string& node);
+// The channel color source `source` reads of node `node` ("" when it names another node or none):
+// what Color by Channel shows ticked.
+std::string channelColoredAt(const std::string& source, const std::string& node);
 // A color source naming node `from` ("<channel>@<from>") once the node is renamed `to`: the same
 // channel at `to`. Any other source as it is (every host's Rename keeps Clump Colors on).
 std::string renamedColorSource(const std::string& source, const std::string& from, const std::string& to);

@@ -212,8 +212,7 @@ void MainWindow::toggleClumpColors(const std::string& node) {
 
 std::string MainWindow::channelColored(const std::string& node) const {
     if (settings_.colorMode != kAttributeColors) return {};
-    std::string channel, of;
-    return splitNodeColorSource(settings_.colorSource, &channel, &of) && of == node ? channel : std::string();
+    return channelColoredAt(settings_.colorSource, node);
 }
 
 void MainWindow::colorByChannel(const std::string& node, const std::string& channel, bool on) {
@@ -227,7 +226,7 @@ void MainWindow::colorByChannel(const std::string& node, const std::string& chan
     if (mode != kAttributeColors) colorModeBeforeChannel_ = mode;
     {
         const QSignalBlocker a(colorSource_), b(colorMin_), c(colorMax_);
-        colorSource_->setEditText(QString::fromStdString(channel + "@" + node));
+        colorSource_->setEditText(QString::fromStdString(nodeColorSource(channel, node)));
         colorMin_->setValue(0.0);
         colorMax_->setValue(0.0);  // equal: the values' own range
     }

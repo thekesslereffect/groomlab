@@ -311,6 +311,13 @@ bool splitNodeColorSource(const std::string& source, std::string* channel, std::
     return true;
 }
 
+std::string nodeColorSource(const std::string& channel, const std::string& node) { return channel + "@" + node; }
+
+std::string channelColoredAt(const std::string& source, const std::string& node) {
+    std::string channel, of;
+    return splitNodeColorSource(source, &channel, &of) && of == node ? channel : std::string();
+}
+
 bool channelRange(const std::vector<float>& values, float* lo, float* hi) {
     float least = std::numeric_limits<float>::infinity(), most = -std::numeric_limits<float>::infinity();
     for (const float v : values) {

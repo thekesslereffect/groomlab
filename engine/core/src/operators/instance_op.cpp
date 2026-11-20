@@ -7,7 +7,7 @@
 // instances.h); hosts place them on the final strands. sizeMode fitStrand sizes
 // each to its strand instead (leaves, feathers spanning it): a fraction of the
 // strand's rest length along the prototype's +Y, `aspect` of that across.
-// Several prototypes (names separated by spaces) are variants, one per
+// Several prototypes (names separated by commas or spaces: instancePrototypeNames) are variants, one per
 // instance, picked by its ID or by a map. With strands on its `along` input
 // (a Braid node's ties) the instances go on those instead, which are carried
 // with the instances (InstanceSet::anchors) and never drawn as hair: beads,
@@ -299,7 +299,7 @@ public:
         if (scales_) {
             specs = {
                 {"prototype", std::string("groomlab:scale"),
-                 "The plate (a mesh's name in the scene); several separated by spaces are variants, one per scale "
+                 "The plate (a mesh's name in the scene); several separated by spaces or commas are variants, one per scale "
                  "(variantBy). Built in: groomlab:scale, groomlab:scaleRound, groomlab:scaleShield"},
                 ParamSpec{"variantBy", std::string("random"),
                           "With several prototypes: random (by each scale's ID and the seed) or map (the variant param, "
@@ -360,7 +360,7 @@ public:
             specs = {
                 ParamSpec{"prototype", std::string("instance"),
                           "The mesh to instance (its name in the scene); several separated by commas are variants, one "
-                          "per instance (variantBy)"}
+                          "per instance (variantBy). A name holding a space in quotes (\"My Mesh\")"}
                     .named("Object(s)"),
                 ParamSpec{"variantBy", std::string("random"),
                           "With several prototypes: random (by each instance's ID and the seed) or map (the variant "

@@ -1037,6 +1037,12 @@ class ToolsTest(unittest.TestCase):
         self.assertEqual(pipeline.prototype_from_selection(head, node, bead), "Bead")
         self.assertEqual(next(n for n in hcall(head, "get_graph")["graph"]["nodes"] if n["name"] == node)["params"]["prototype"], "Bead")
         self.assertTrue(bead.hide_get())
+        # Several: variants, each once, separated by commas (the core's instancePrototypeText).
+        bpy.ops.mesh.primitive_cube_add(size=0.05)
+        drop = bpy.context.active_object
+        drop.name = "Drop"
+        self.assertEqual(pipeline.prototype_from_selection(head, node, [bead, drop, bead]), "Bead, Drop")
+        bpy.data.objects.remove(drop)
         for obj in (plane, bead):
             bpy.data.objects.remove(obj)
 

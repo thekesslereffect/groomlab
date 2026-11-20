@@ -399,7 +399,8 @@ _COLOR_BEFORE_CHANNEL = {}  # groom uid -> its strand color mode before a Color 
 
 def channel_colored(scalp, node_name):
     """The channel Color by Channel shows of node `node_name` ("" for none): the Attribute colors
-    read from it ("<channel>@<node>")."""
+    read from it ("<channel>@<node>"; the core's splitNodeColorSource rule, read here as menus
+    draw)."""
     if scalp is None or scalp.groomlab_tools.strand_color != "attribute":
         return ""
     channel, _, node = (scalp.groomlab_tools.strand_color_source or "").rpartition("@")
@@ -426,7 +427,7 @@ class GROOMLAB_OT_graph_color_by_channel(_GraphOperator):
             return {"FINISHED"}
         if d.strand_color != "attribute":
             _COLOR_BEFORE_CHANNEL[uid] = d.strand_color
-        d.strand_color_source = "%s@%s" % (self.channel, self.node)
+        d.strand_color_source = process.call("node_color_source", channel=self.channel, node=self.node)["source"]
         d.strand_color_min = d.strand_color_max = 0.0  # equal: the values' own range
         d.strand_color = "attribute"
         self.report({"INFO"}, "Strands colored by %s at %s, blue to red over its range" % (self.channel, self.node))

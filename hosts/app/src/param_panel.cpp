@@ -33,6 +33,7 @@
 #include "theme.h"
 #include "groomlab/graph_io.h"
 #include "groomlab/param_conditions.h"
+#include "groomlab/instances.h"
 #include "groomlab/scales.h"
 #include "groomlab/node_catalog.h"
 #include "groomlab/simulation.h"
@@ -704,7 +705,6 @@ void ParamPanel::build() {
                 for (const std::string& b : builtinPrototypeNames()) {
                     if (std::find(meshes.begin(), meshes.end(), b) == meshes.end()) meshes.push_back(b);
                 }
-                const QRegularExpression separators(QStringLiteral("[,\\s]+"));
                 auto* host = new QWidget(formHost_);
                 auto* h = new QHBoxLayout(host);
                 h->setContentsMargins(0, 0, 0, 0);
@@ -714,8 +714,12 @@ void ParamPanel::build() {
                 combo->setInsertPolicy(QComboBox::NoInsert);
                 for (const std::string& m : meshes) combo->addItem(QString::fromStdString(m));
                 combo->setCurrentText(QString::fromStdString(value.is_string() ? value.get<std::string>() : std::string()));
-                connect(combo, QOverload<int>::of(&QComboBox::activated), this,
-                        [this, name, combo](int i) { edit(name, combo->itemText(i).toStdString(), true); });
+                connect(combo, QOverload<int>::of(&QComboBox::activated), this, [this, name, combo](int i) {
+                    // (one mesh: the core's text for it, quoted where its name holds a space)
+                    const std::string text = instancePrototypeText({combo->itemText(i).toStdString()});
+                    combo->setCurrentText(QString::fromStdString(text));
+                    edit(name, text, true);
+                });
                 connect(combo->lineEdit(), &QLineEdit::editingFinished, this,
                         [this, name, combo] { edit(name, combo->currentText().trimmed().toStdString(), true); });
                 h->addWidget(combo, 1);
@@ -727,18 +731,16 @@ void ParamPanel::build() {
                 pick->setStyleSheet(QStringLiteral("QToolButton { border: 1px solid %1; border-radius: 4px; padding: 1px 8px; }")
                                         .arg(theme::textDim().name()));
                 auto* menu = new QMenu(pick);
-                const QStringList current = combo->currentText().split(separators, Qt::SkipEmptyParts);
+                const std::vector<std::string> current = instancePrototypeNames(combo->currentText().toStdString());
                 for (const std::string& m : meshes) {
                     QAction* a = menu->addAction(QString::fromStdString(m));
                     a->setCheckable(true);
-                    a->setChecked(current.contains(QString::fromStdString(m)));
-                    connect(a, &QAction::toggled, this, [this, name, combo, m, separators](bool on) {
-                        QStringList names = combo->currentText().split(separators, Qt::SkipEmptyParts);
-                        names.removeAll(QString::fromStdString(m));
-                        if (on) names.push_back(QString::fromStdString(m));
-                        const QString text = names.join(QStringLiteral(", "));
-                        combo->setCurrentText(text);
-                        edit(name, text.toStdString(), true);
+                    a->setChecked(std::find(current.begin(), current.end(), m) != current.end());
+                    connect(a, &QAction::toggled, this, [this, name, combo, m](bool on) {
+                        // (the core's list rule: instances.h)
+                        const std::string text = instancePrototypeToggled(combo->currentText().toStdString(), m, on);
+                        combo->setCurrentText(QString::fromStdString(text));
+                        edit(name, text, true);
                     });
                 }
                 if (meshes.empty()) menu->addAction(tr("(no meshes in the groom yet)"))->setEnabled(false);

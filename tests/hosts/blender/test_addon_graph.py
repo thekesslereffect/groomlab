@@ -725,6 +725,17 @@ class GraphEditorTest(unittest.TestCase):
         self.assertTrue(gt.clump_colored(head, node_of(self.tree(), made)))
         self.assertEqual(bpy.ops.groomlab.graph_clump_colors(node=made), {"FINISHED"})
         self.assertEqual((d.strand_color, head.groomlab.view_node), ("random", ""))
+        # Color by Channel: a channel as the node leaves it, from the node's last result (the
+        # core's list and source, "<channel>@<node>"); again: the colors as they were.
+        ge.result_channels(head, made)
+        ge._run_deferred()  # the helper's node_status, fetched outside drawing
+        self.assertIn(("bigClumpId", "strand"), ge.result_channels(head, made))
+        self.assertEqual(bpy.ops.groomlab.graph_color_by_channel(node=made, channel="bigClumpId"), {"FINISHED"})
+        self.assertEqual((d.strand_color, d.strand_color_source), ("attribute", "bigClumpId@" + made))
+        self.assertEqual(ge.channel_colored(head, made), "bigClumpId")
+        self.assertEqual(ge.channel_colored(head, "interpolate"), "")
+        self.assertEqual(bpy.ops.groomlab.graph_color_by_channel(node=made, channel="bigClumpId"), {"FINISHED"})
+        self.assertEqual(d.strand_color, "random")
         # Issue #77: a second Clump after it on the same channel; each one's button lights alone,
         # and a bare channel (grooms from before) lights the last one writing it.
         later, error = graph.add_node(head, "Clump", after=made)

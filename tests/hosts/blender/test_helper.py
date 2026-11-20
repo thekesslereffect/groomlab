@@ -829,6 +829,9 @@ class CoreRulesTest(HelperTestCase):
         self.assertEqual([n["node"] for n in inner], ["w"])
         # Files: names, missing files and their matches (asset_files.h).
         self.assertEqual(self.h.call("file_safe_name", text="|my groom.")["name"], "my_groom")
+        # Object(s) from Selection and Color by Channel (instances.h, display.h).
+        self.assertEqual(self.h.call("prototype_text", names=["leaf", "bead", "leaf"])["text"], "leaf, bead")
+        self.assertEqual(self.h.call("node_color_source", channel="braidPress", node="braid1")["source"], "braidPress@braid1")
         folder = os.path.join(self.tmp, "found", "maps")
         os.makedirs(folder)
         for tile in (1001, 1002):

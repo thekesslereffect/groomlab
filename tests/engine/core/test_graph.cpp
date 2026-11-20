@@ -23,6 +23,7 @@
 #include "groomlab/graph_inserts.h"
 #include "groomlab/graph_io.h"
 #include "groomlab/groom.h"
+#include "groomlab/instances.h"
 #include "groomlab/node_catalog.h"
 #include "groomlab/param_conditions.h"
 #include "groomlab/random.h"
@@ -2203,6 +2204,25 @@ TEST(ParamSpecs, EveryOperatorsRangesAreSound) {
             EXPECT_TRUE(units.count(p["unit"].get<std::string>())) << what << ": unit " << p["unit"];
         }
     }
+}
+
+// An Instance node's Object(s): every host's text for meshes picked, read back as the node reads it.
+TEST(Instance, ObjectsTextListsEachMeshOnceSeparatedByCommas) {
+    EXPECT_EQ(instancePrototypeText({"leaf", "bead", "leaf", ""}), "leaf, bead");
+    EXPECT_EQ(instancePrototypeNames(instancePrototypeText({"leaf", "bead"})), (std::vector<std::string>{"leaf", "bead"}));
+    EXPECT_EQ(instancePrototypeText({}), "");
+    EXPECT_EQ(instancePrototypeToggled("leaf, bead", "flower", true), "leaf, bead, flower");
+    EXPECT_EQ(instancePrototypeToggled("leaf bead", "leaf", false), "bead");
+    EXPECT_EQ(instancePrototypeToggled("leaf", "leaf", true), "leaf");
+    EXPECT_EQ(instancePrototypeToggled("", "leaf", true), "leaf");
+    // Names with spaces (Blender's): in quotes, read back as one.
+    EXPECT_EQ(instancePrototypeText({"My Mesh", "bead"}), "\"My Mesh\", bead");
+    EXPECT_EQ(instancePrototypeNames("\"My Mesh\", bead"), (std::vector<std::string>{"My Mesh", "bead"}));
+    EXPECT_EQ(instancePrototypeNames(instancePrototypeText({"a, b"})), (std::vector<std::string>{"a, b"}));
+    EXPECT_EQ(instancePrototypeToggled("\"My Mesh\", bead", "bead", false), "\"My Mesh\"");
+    // Spaces and commas separate the others, as grooms always wrote them.
+    EXPECT_EQ(instancePrototypeNames("leaf bead, cuff"), (std::vector<std::string>{"leaf", "bead", "cuff"}));
+    EXPECT_EQ(instancePrototypeNames(""), (std::vector<std::string>{""}));
 }
 
 }  // namespace
