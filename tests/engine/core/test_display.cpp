@@ -481,6 +481,13 @@ TEST(Display, TubeSurfacesAreOpenAtTheTip) {
         const float x = surface.positions[i * 3], z = surface.positions[i * 3 + 2];
         EXPECT_GT(x * x + z * z, 1e-8f) << "a point on the tube's axis (a cap) at " << i;
     }
+    // A guide of more points than that (one Stretch gave points): a ring on each point, as its
+    // wire has, the surface through every point it bends at.
+    HierarchyGuide many;
+    for (int i = 0; i < 40; ++i) many.points.push_back({0.1f * std::sin(0.5f * static_cast<float>(i)), 0.05f * static_cast<float>(i), 0.0f});
+    many.frameUp = {0.0f, 0.0f, 1.0f};
+    DisplayGeometry fine;
+    EXPECT_EQ(appendTubeSurface(fine, many), 40u);
 }
 
 TEST(Display, BuffersAsRecorded) {

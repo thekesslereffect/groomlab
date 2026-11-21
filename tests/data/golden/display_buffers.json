@@ -1,5 +1,10 @@
 {
  "attribute": {
+  "braidTubes": [
+   0,
+   0,
+   "c2a4f367bb1fc07d"
+  ],
   "cards": [
    0,
    0,
@@ -107,6 +112,11 @@
   ]
  },
  "cards": {
+  "braidTubes": [
+   0,
+   0,
+   "c2a4f367bb1fc07d"
+  ],
   "cards": [
    417,
    1308,
@@ -214,6 +224,11 @@
   ]
  },
  "cardsTextured": {
+  "braidTubes": [
+   0,
+   0,
+   "c2a4f367bb1fc07d"
+  ],
   "cards": [
    417,
    1308,
@@ -321,6 +336,11 @@
   ]
  },
  "clump": {
+  "braidTubes": [
+   0,
+   0,
+   "c2a4f367bb1fc07d"
+  ],
   "cards": [
    0,
    0,
@@ -428,6 +448,11 @@
   ]
  },
  "colorSet": {
+  "braidTubes": [
+   0,
+   0,
+   "c2a4f367bb1fc07d"
+  ],
   "cards": [
    0,
    0,
@@ -535,6 +560,11 @@
   ]
  },
  "density": {
+  "braidTubes": [
+   0,
+   0,
+   "c2a4f367bb1fc07d"
+  ],
   "cards": [
    0,
    0,
@@ -642,6 +672,11 @@
   ]
  },
  "flat": {
+  "braidTubes": [
+   0,
+   0,
+   "c2a4f367bb1fc07d"
+  ],
   "cards": [
    0,
    0,
@@ -749,6 +784,11 @@
   ]
  },
  "guideGroups": {
+  "braidTubes": [
+   0,
+   0,
+   "c2a4f367bb1fc07d"
+  ],
   "cards": [
    0,
    0,
@@ -856,6 +896,11 @@
   ]
  },
  "guideLayer": {
+  "braidTubes": [
+   0,
+   0,
+   "c2a4f367bb1fc07d"
+  ],
   "cards": [
    0,
    0,
@@ -963,6 +1008,11 @@
   ]
  },
  "guideLevels": {
+  "braidTubes": [
+   0,
+   0,
+   "c2a4f367bb1fc07d"
+  ],
   "cards": [
    0,
    0,
@@ -1066,7 +1116,7 @@
   "tubes": [
    12800,
    73728,
-   "6c1794e132a84365"
+   "b0e5cf0d1533fe7f"
   ]
  },
  "images": {
@@ -1172,6 +1222,11 @@
   ]
  },
  "instanceMarkers": {
+  "braidTubes": [
+   0,
+   0,
+   "c2a4f367bb1fc07d"
+  ],
   "cards": [
    0,
    0,
@@ -1279,6 +1334,11 @@
   ]
  },
  "lit": {
+  "braidTubes": [
+   0,
+   0,
+   "c2a4f367bb1fc07d"
+  ],
   "cards": [
    0,
    0,
@@ -1386,6 +1446,11 @@
   ]
  },
  "litRibbons": {
+  "braidTubes": [
+   0,
+   0,
+   "c2a4f367bb1fc07d"
+  ],
   "cards": [
    0,
    0,
@@ -1493,6 +1558,11 @@
   ]
  },
  "mapColor": {
+  "braidTubes": [
+   0,
+   0,
+   "c2a4f367bb1fc07d"
+  ],
   "cards": [
    0,
    0,
@@ -1600,6 +1670,11 @@
   ]
  },
  "mapColorG": {
+  "braidTubes": [
+   0,
+   0,
+   "c2a4f367bb1fc07d"
+  ],
   "cards": [
    0,
    0,
@@ -1707,6 +1782,11 @@
   ]
  },
  "mapGray": {
+  "braidTubes": [
+   0,
+   0,
+   "c2a4f367bb1fc07d"
+  ],
   "cards": [
    0,
    0,
@@ -1814,6 +1894,11 @@
   ]
  },
  "mapTexture": {
+  "braidTubes": [
+   0,
+   0,
+   "c2a4f367bb1fc07d"
+  ],
   "cards": [
    0,
    0,
@@ -1921,6 +2006,11 @@
   ]
  },
  "noOverlays": {
+  "braidTubes": [
+   0,
+   0,
+   "c2a4f367bb1fc07d"
+  ],
   "cards": [
    0,
    0,
@@ -2028,6 +2118,11 @@
   ]
  },
  "random": {
+  "braidTubes": [
+   0,
+   0,
+   "c2a4f367bb1fc07d"
+  ],
   "cards": [
    0,
    0,
@@ -2135,6 +2230,11 @@
   ]
  },
  "ribbons": {
+  "braidTubes": [
+   0,
+   0,
+   "c2a4f367bb1fc07d"
+  ],
   "cards": [
    0,
    0,
@@ -2242,6 +2342,11 @@
   ]
  },
  "roots": {
+  "braidTubes": [
+   0,
+   0,
+   "c2a4f367bb1fc07d"
+  ],
   "cards": [
    0,
    0,
@@ -2349,6 +2454,11 @@
   ]
  },
  "strokeDim": {
+  "braidTubes": [
+   0,
+   0,
+   "c2a4f367bb1fc07d"
+  ],
   "cards": [
    0,
    0,
@@ -2456,6 +2566,11 @@
   ]
  },
  "strokeDimColored": {
+  "braidTubes": [
+   0,
+   0,
+   "c2a4f367bb1fc07d"
+  ],
   "cards": [
    0,
    0,
@@ -2563,6 +2678,11 @@
   ]
  },
  "strokeHidden": {
+  "braidTubes": [
+   0,
+   0,
+   "c2a4f367bb1fc07d"
+  ],
   "cards": [
    0,
    0,
@@ -2666,7 +2786,7 @@
   "tubes": [
    12800,
    73728,
-   "6c1794e132a84365"
+   "b0e5cf0d1533fe7f"
   ]
  }
 }
