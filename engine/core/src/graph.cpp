@@ -74,7 +74,8 @@ std::uint64_t hashParam(std::uint64_t seed, const ParamValue& value) {
                 if (v.hasHandles()) {
                     for (std::size_t k = 0; k < v.keys.size(); ++k) {
                         const RampHandle hk = v.handle(k);
-                        const float s[3] = {hk.set ? 1.0f : 0.0f, hk.set ? hk.in : 0.0f, hk.set ? hk.out : 0.0f};
+                        const float s[5] = {hk.set ? 1.0f : 0.0f, hk.set ? hk.in : 0.0f, hk.set ? hk.out : 0.0f,
+                                            hk.set ? hk.inLength : 0.0f, hk.set ? hk.outLength : 0.0f};
                         h = hashBytes(h, s, sizeof s);
                     }
                 }

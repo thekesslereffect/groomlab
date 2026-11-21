@@ -76,9 +76,10 @@ ParamValue paramFromJson(const json& j, const ParamValue* declared, const std::s
         return Vec3f(j[0].get<float>(), j[1].get<float>(), j[2].get<float>());
     }
     // Ramp: [[position, value], ...]; a key with its handles set [position, value, slope] (the
-    // same slope both sides) or [position, value, in, out] (a corner).
+    // same slope both sides), [position, value, in, out] (a corner), or [position, value, in, out,
+    // inLength, outLength] (handles of other lengths than a third of their spans).
     if (j.is_array() && !j.empty() && std::all_of(j.begin(), j.end(), [](const json& k) {
-            return k.is_array() && k.size() >= 2 && k.size() <= 4 &&
+            return k.is_array() && k.size() >= 2 && k.size() <= 6 && k.size() != 5 &&
                    std::all_of(k.begin(), k.end(), [](const json& x) { return x.is_number(); });
         })) {
         Ramp ramp;
@@ -86,8 +87,17 @@ ParamValue paramFromJson(const json& j, const ParamValue* declared, const std::s
             const json& k = j[i];
             ramp.keys.emplace_back(k[0].get<float>(), k[1].get<float>());
             if (k.size() > 2) {
-                const float in = k[2].get<float>(), out = k.size() > 3 ? k[3].get<float>() : in;
-                if (std::isfinite(in) && std::isfinite(out)) ramp.setHandle(i, RampHandle{true, in, out});
+                RampHandle h{true, k[2].get<float>(), k.size() > 3 ? k[3].get<float>() : k[2].get<float>()};
+                if (k.size() > 5) {
+                    h.inLength = k[4].get<float>();
+                    h.outLength = k[5].get<float>();
+                }
+                const bool finite = std::isfinite(h.in) && std::isfinite(h.out) && std::isfinite(h.inLength) && std::isfinite(h.outLength);
+                if (finite) {
+                    h.inLength = std::clamp(h.inLength, 0.0f, 1.0f);
+                    h.outLength = std::clamp(h.outLength, 0.0f, 1.0f);
+                    ramp.setHandle(i, h);
+                }
             }
         }
         ramp.sort();
@@ -114,6 +124,8 @@ json paramToJson(const ParamValue& value) {
                     const RampHandle h = v.handle(k);
                     if (!h.set) {
                         keys.push_back(json::array({t, value}));
+                    } else if (!h.defaultLengths()) {
+                        keys.push_back(json::array({t, value, h.in, h.out, h.inLength, h.outLength}));
                     } else if (h.in == h.out) {
                         keys.push_back(json::array({t, value, h.in}));
                     } else {

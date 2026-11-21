@@ -634,22 +634,25 @@ void bindBasic(py::module_& m) {
                 for (std::size_t k = 0; k < r.keys.size(); ++k) {
                     const RampHandle h = r.handle(k);
                     if (h.set) {
-                        out.append(py::make_tuple(h.in, h.out));
+                        out.append(py::make_tuple(h.in, h.out, h.inLength, h.outLength));
                     } else {
                         out.append(py::none());
                     }
                 }
                 return out;
             },
-            "Each key's handles: (slope in, slope out), or None where automatic (issue #102).")
+            "Each key's handles: (slope in, slope out, length in, length out), or None where automatic "
+            "(issue #102; a length is a share of the span to the key on that side, a third by default).")
         .def(
             "set_handle",
-            [](Ramp& r, std::size_t k, float in, py::object out) {
+            [](Ramp& r, std::size_t k, float in, py::object out, float inLength, float outLength) {
                 if (k >= r.keys.size()) throw py::index_error("no such key");
-                r.setHandle(k, RampHandle{true, in, out.is_none() ? in : out.cast<float>()});
+                r.setHandle(k, RampHandle{true, in, out.is_none() ? in : out.cast<float>(), inLength, outLength});
             },
-            py::arg("key"), py::arg("slope_in"), py::arg("slope_out") = py::none(),
-            "Key `key`'s handles: its slope into it and out of it (the same both sides without slope_out).")
+            py::arg("key"), py::arg("slope_in"), py::arg("slope_out") = py::none(), py::arg("length_in") = 1.0f / 3.0f,
+            py::arg("length_out") = 1.0f / 3.0f,
+            "Key `key`'s handles: its slope into it and out of it (the same both sides without slope_out), and "
+            "their lengths (shares of their spans).")
         .def(
             "clear_handle",
             [](Ramp& r, std::size_t k) {

@@ -1595,8 +1595,8 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
     }
     const int finalOut = gather ? static_cast<int>(kFull0) : static_cast<int>(kOut0);
 
-    // The profiles: each stage's keys (position, value, and the slopes into and out of it each:
-    // Ramp's tangentIn and tangentOut, its handles' where set) and,
+    // The profiles: each stage's keys (position, value, the slopes into and out of it and its
+    // handles' lengths each: Ramp's tangentIn, tangentOut, lengthIn and lengthOut) and,
     // where it reads them by point index and every strand has the same count, the CPU's RampAlong
     // table.
     std::vector<float> ramps;
@@ -1614,6 +1614,8 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
             ramps.push_back(ramp.keys[i].second);
             ramps.push_back(ramp.tangentIn(i));
             ramps.push_back(ramp.tangentOut(i));
+            ramps.push_back(ramp.lengthIn(i));
+            ramps.push_back(ramp.lengthOut(i));
         }
         if (tabled && uniformCount_ > 0) {
             at.tableCount = static_cast<std::uint32_t>(uniformCount_);

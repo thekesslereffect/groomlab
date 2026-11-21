@@ -39,6 +39,7 @@ constexpr int kRampButtons = 30;  // the row of buttons under the plot
 constexpr qreal kKeyRadius = 5.0;
 constexpr qreal kHandleLength = 30.0;  // a key's handle on screen
 constexpr float kMaxSlope = 50.0f;     // a handle's slope at most this steep either way
+constexpr float kMinLength = 0.02f, kMaxLength = 1.0f;  // a handle's length: a share of its span
 
 RoundButton* chipButton(const QString& text, QWidget* parent) {
     auto* b = new RoundButton(parent);
@@ -147,7 +148,7 @@ json RampEditor::flipped(const json& value) {
     for (std::size_t k = 0; k < n; ++k) out.keys.emplace_back(1.0f - ramp.keys[n - 1 - k].first, ramp.keys[n - 1 - k].second);
     for (std::size_t k = 0; k < n; ++k) {
         const RampHandle h = ramp.handle(n - 1 - k);
-        if (h.set) out.setHandle(k, RampHandle{true, -h.out, -h.in});
+        if (h.set) out.setHandle(k, RampHandle{true, -h.out, -h.in, h.outLength, h.inLength});
     }
     return json::parse(rampToJson(out));
 }
@@ -192,19 +193,28 @@ void RampEditor::corner(std::size_t key) {
     const bool next = key + 1 < keys.size();
     const float in = key > 0 ? secant(key - 1, key) : (next ? secant(key, key + 1) : 0.0f);
     const float out = next ? secant(key, key + 1) : in;
-    setHandle(key, RampHandle{true, in, out});
+    setHandle(key, RampHandle{true, in, out, ramp_.lengthIn(key), ramp_.lengthOut(key)});
+}
+
+float RampEditor::spanBeside(std::size_t key, int side) const {
+    const std::size_t n = ramp_.keys.size();
+    if (side == 0 ? key == 0 : key + 1 >= n) return 0.0f;  // (past the curve's end)
+    const std::size_t other = side == 0 ? key - 1 : key + 1;
+    return std::abs(ramp_.keys[other].first - ramp_.keys[key].first);
 }
 
 std::pair<QPointF, QPointF> RampEditor::handlePoints(std::size_t key) const {
+    // At the curve's control points: a handle's length (a share of the span on its side) along
+    // its slope; past the curve's ends (no span) a fixed length on screen.
     const QRectF r = plotRect().adjusted(kKeyRadius + 2, kKeyRadius + 2, -kKeyRadius - 2, -kKeyRadius - 2);
     const float span = std::max(hi_ - lo_, 1e-6f);
     const QPointF at = toScreen(ramp_.keys[key].first, ramp_.keys[key].second);
     const QRectF box = QRectF(rect()).adjusted(4, 4, -4, -4);  // (kept where a click reaches it)
-    auto along = [&](float slope, qreal sign) {  // a handle's length along `slope`, on screen
-        const qreal dx = r.width(), dy = -slope * r.height() / span;
+    auto along = [&](float slope, float share, float beside, qreal sign) {
+        const qreal dx = r.width(), dy = -slope * r.height() / span;  // one unit of position along the slope
         const qreal norm = std::max(std::hypot(dx, dy), 1e-6);
         const qreal ux = sign * dx / norm, uy = sign * dy / norm;
-        qreal reach = kHandleLength;
+        qreal reach = beside > 0.0f ? share * beside * norm : kHandleLength;
         if (ux > 1e-6) reach = std::min(reach, (box.right() - at.x()) / ux);
         if (ux < -1e-6) reach = std::min(reach, (box.left() - at.x()) / ux);
         if (uy > 1e-6) reach = std::min(reach, (box.bottom() - at.y()) / uy);
@@ -212,7 +222,8 @@ std::pair<QPointF, QPointF> RampEditor::handlePoints(std::size_t key) const {
         reach = std::max(reach, 8.0);
         return QPointF(at.x() + ux * reach, at.y() + uy * reach);
     };
-    return {along(ramp_.tangentIn(key), -1.0), along(ramp_.tangentOut(key), 1.0)};
+    return {along(ramp_.tangentIn(key), ramp_.lengthIn(key), spanBeside(key, 0), -1.0),
+            along(ramp_.tangentOut(key), ramp_.lengthOut(key), spanBeside(key, 1), 1.0)};
 }
 
 int RampEditor::handleAt(const QPointF& p) const {
@@ -223,7 +234,7 @@ int RampEditor::handleAt(const QPointF& p) const {
     return -1;
 }
 
-float RampEditor::slopeToward(std::size_t key, int side, const QPointF& p) const {
+std::pair<float, float> RampEditor::slopeToward(std::size_t key, int side, const QPointF& p) const {
     const QRectF r = plotRect().adjusted(kKeyRadius + 2, kKeyRadius + 2, -kKeyRadius - 2, -kKeyRadius - 2);
     const QPointF at = toScreen(ramp_.keys[key].first, ramp_.keys[key].second);
     float dp = static_cast<float>((p.x() - at.x()) / std::max(r.width(), 1.0));
@@ -232,7 +243,10 @@ float RampEditor::slopeToward(std::size_t key, int side, const QPointF& p) const
         dp = -dp;
         dv = -dv;
     }
-    return std::clamp(dv / std::max(dp, 1e-4f), -kMaxSlope, kMaxSlope);
+    dp = std::max(dp, 1e-4f);
+    const float beside = spanBeside(key, side);
+    const float length = beside > 0.0f ? std::clamp(dp / beside, kMinLength, kMaxLength) : -1.0f;
+    return {std::clamp(dv / dp, -kMaxSlope, kMaxSlope), length};
 }
 
 void RampEditor::fitRange() {
@@ -349,8 +363,9 @@ void RampEditor::paintEvent(QPaintEvent* /*event*/) {
         painter.setFont(theme::numberFont(11));
         painter.setPen(theme::textSoft());
         const QString text = handleDrag_ >= 0
-                                 ? (handleDrag_ == 0 ? tr("slope in %1") : tr("slope out %1"))
+                                 ? (handleDrag_ == 0 ? tr("in: slope %1, length %2") : tr("out: slope %1, length %2"))
                                        .arg(handleDrag_ == 0 ? ramp_.tangentIn(k) : ramp_.tangentOut(k), 0, 'f', 3)
+                                       .arg(handleDrag_ == 0 ? ramp_.lengthIn(k) : ramp_.lengthOut(k), 0, 'f', 2)
                                  : QStringLiteral("%1, %2").arg(ramp_.keys[k].first, 0, 'f', 2).arg(ramp_.keys[k].second, 0, 'f', 2);
         painter.drawText(plot.adjusted(8, 4, -8, -4), Qt::AlignTop | Qt::AlignRight, text);
     }
@@ -392,16 +407,18 @@ void eraseKey(Ramp& ramp, std::size_t k) {
 void RampEditor::mouseMoveEvent(QMouseEvent* event) {
     if (handleDrag_ >= 0 && selected_ >= 0) {
         const auto k = static_cast<std::size_t>(selected_);
-        const float slope = slopeToward(k, handleDrag_, event->position());
+        const auto [slope, length] = slopeToward(k, handleDrag_, event->position());
         const RampHandle had = ramp_.handle(k);
-        // Alt (or a corner already): that side alone; else both sides one slope.
+        RampHandle h{true, ramp_.tangentIn(k), ramp_.tangentOut(k), ramp_.lengthIn(k), ramp_.lengthOut(k)};
+        // Alt (or a corner already): that side's slope alone; else both sides one slope. The
+        // handle's length is its own side's alone.
         if ((event->modifiers() & Qt::AltModifier) || (had.set && had.in != had.out)) {
-            RampHandle h{true, ramp_.tangentIn(k), ramp_.tangentOut(k)};
             (handleDrag_ == 0 ? h.in : h.out) = slope;
-            ramp_.setHandle(k, h);
         } else {
-            ramp_.setHandle(k, RampHandle{true, slope, slope});
+            h.in = h.out = slope;
         }
+        if (length >= 0.0f) (handleDrag_ == 0 ? h.inLength : h.outLength) = length;
+        ramp_.setHandle(k, h);
         update();
         emit edited(true);
         return;

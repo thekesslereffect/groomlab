@@ -2326,14 +2326,24 @@ def _unit(x):
     return min(max(float(x), 0.0), 1.0)
 
 
-# A handle's slope at most this steep either way (a vertical handle has no slope).
+# A handle's slope at most this steep either way (a vertical handle has no slope), and its length
+# (a share of the span to the key on its side) between these; a third: the default (the core's
+# kRampHandleLength, the cubic Hermite's).
 _MAX_SLOPE = 50.0
+_THIRD = 1.0 / 3.0
+_MIN_LENGTH, _MAX_LENGTH = 0.02, 1.0
+
+
+def _default_length(x):
+    return abs(x - _THIRD) < 1e-6
 
 
 def ramp_entries(value):
-    """(keys [[position, value], ...], handles [None or [slope in, slope out], ...], linear) of a
-    ramp param's value: [[position, value], ...] or {"keys": [...], "linear": true}, a key with its
-    handles set [position, value, slope] (both sides) or [position, value, in, out] (a corner)."""
+    """(keys [[position, value], ...], handles [None or [slope in, slope out, length in, length out],
+    ...], linear) of a ramp param's value: [[position, value], ...] or {"keys": [...], "linear":
+    true}, a key with its handles set [position, value, slope] (both sides), [position, value, in,
+    out] (a corner), or [position, value, in, out, length in, length out] (handles of other lengths
+    than a third of their spans)."""
     linear = isinstance(value, dict) and bool(value.get("linear"))
     entries = value.get("keys") if isinstance(value, dict) else value
     keys, handles = [], []
@@ -2341,7 +2351,12 @@ def ramp_entries(value):
         if not isinstance(k, (list, tuple)) or len(k) < 2:
             continue
         keys.append([_unit(k[0]), _unit(k[1])])
-        handles.append([float(k[2]), float(k[3] if len(k) > 3 else k[2])] if len(k) > 2 else None)
+        if len(k) > 2:
+            slope_in, slope_out = float(k[2]), float(k[3] if len(k) > 3 else k[2])
+            lengths = [float(k[4]), float(k[5])] if len(k) > 5 else [_THIRD, _THIRD]
+            handles.append([slope_in, slope_out] + lengths)
+        else:
+            handles.append(None)
     return keys, handles, linear
 
 
@@ -2351,6 +2366,8 @@ def ramp_value(keys, handles, linear):
     for (p, v), h in zip(keys, handles):
         if h is None:
             out.append([p, v])
+        elif not (_default_length(h[2]) and _default_length(h[3])):
+            out.append([p, v, h[0], h[1], h[2], h[3]])
         elif h[0] == h[1]:
             out.append([p, v, h[0]])
         else:
@@ -2362,8 +2379,28 @@ def flipped_ramp(value):
     """A ramp value mirrored end to end (each key at 1 - its position; its handles mirrored)."""
     keys, handles, linear = ramp_entries(value)
     keys = [[1.0 - p, v] for p, v in reversed(keys)]
-    handles = [None if h is None else [-h[1], -h[0]] for h in reversed(handles)]
+    handles = [None if h is None else [-h[1], -h[0], h[3], h[2]] for h in reversed(handles)]
     return ramp_value(keys, handles, linear)
+
+
+def _ramp_weighted(f, v0, m0, w0, v1, m1, w1):
+    """shared/groom_math.h rampWeighted: the span's Bezier for handles of other lengths."""
+    a, b = min(max(w0, 0.0), 1.0), min(max(w1, 0.0), 1.0)
+    if a + b > 1.0:
+        a, b = a / (a + b), b / (a + b)
+    x1, x2 = a, 1.0 - b
+    lo, hi = 0.0, 1.0
+    for _ in range(24):
+        u = 0.5 * (lo + hi)
+        s = 1.0 - u
+        if 3.0 * s * s * u * x1 + 3.0 * s * u * u * x2 + u * u * u < f:
+            lo = u
+        else:
+            hi = u
+    u = 0.5 * (lo + hi)
+    s = 1.0 - u
+    y1, y2 = v0 + a * m0, v1 - b * m1
+    return s * s * s * v0 + 3.0 * s * s * u * y1 + 3.0 * s * u * u * y2 + u * u * u * v1
 
 
 def ramp_auto_slope(keys, k):
@@ -2404,7 +2441,11 @@ def ramp_at(keys, handles, linear, t):
         return y0 + (y1 - y0) * f
     out0 = handles[i][1] if handles[i] is not None else ramp_auto_slope(keys, i)
     in1 = handles[i + 1][0] if handles[i + 1] is not None else ramp_auto_slope(keys, i + 1)
+    w0 = handles[i][3] if handles[i] is not None else _THIRD
+    w1 = handles[i + 1][2] if handles[i + 1] is not None else _THIRD
     m0, m1 = out0 * h, in1 * h
+    if not (_default_length(w0) and _default_length(w1)):
+        return _ramp_weighted(f, y0, m0, w0, y1, m1, w1)
     f2, f3 = f * f, f * f * f
     return (2 * f3 - 3 * f2 + 1) * y0 + (f3 - 2 * f2 + f) * m0 + (-2 * f3 + 3 * f2) * y1 + (f3 - f2) * m1
 
@@ -2414,8 +2455,9 @@ class RampEditor(QtWidgets.QWidget):
     (as the core evaluates them), or {"keys": [...], "linear": true} for straight segments.
 
     Drag a key to move it; click empty space to add one. The key last picked shows its handles
-    (issue #102): drag one to set the key's slope (both sides), Alt+drag to set that side alone (a
-    corner); double-click a handle for the automatic slope again. Right-click a key for Remove,
+    (issue #102): drag one to set the key's slope (both sides) and that handle's length (farther out
+    holds the slope longer), Alt+drag to set that side's slope alone (a corner); double-click a
+    handle for the automatic slope and length again. Right-click a key for Remove,
     Corner and Auto Handles, or elsewhere for presets. Signals: dragged(value) while moving,
     committed(value) when settled. `ends` names the left and right ends under the plot (a brush's
     falloff runs from its center to its edge).
@@ -2493,21 +2535,34 @@ class RampEditor(QtWidgets.QWidget):
         s = ramp_auto_slope(self.keys, k)
         return s, s
 
+    def lengths(self, k):
+        """Key k's handles' lengths, in and out (shares of the spans either side; a third: the default)."""
+        h = self.handles[k]
+        return (h[2], h[3]) if h is not None else (_THIRD, _THIRD)
+
+    def span(self, k, side):
+        """The span on that side of key k (0 left, 1 right), or None at the end of the curve."""
+        other = k - 1 if side == 0 else k + 1
+        if other < 0 or other >= len(self.keys):
+            return None
+        return abs(self.keys[other][0] - self.keys[k][0]) or None
+
     def handle_points(self, k):
-        """Where key k's handles are drawn (in, out): a handle's length along its slope, on screen."""
+        """Where key k's handles are drawn (in, out): at the curve's control points (its length along
+        its slope, a share of its span), else a fixed length on screen past the curve's ends."""
         from groomlab.ui import theme
         r = self.plot()
         lo, hi = self.value_range()
         at = self.to_screen(*self.keys[k])
-        length = theme.px(self.HANDLE)
         out = []
         box = QtCore.QRectF(self.rect()).adjusted(4, 4, -4, -4)  # (kept where a click reaches it)
-        for side, slope in enumerate(self.slopes(k)):
+        for side, (slope, share) in enumerate(zip(self.slopes(k), self.lengths(k))):
             dx, dy = r.width(), -slope * r.height() / (hi - lo)  # one unit of position along the slope
             norm = (dx * dx + dy * dy) ** 0.5 or 1.0
             sign = -1.0 if side == 0 else 1.0
             ux, uy = sign * dx / norm, sign * dy / norm
-            reach = length
+            span = self.span(k, side)
+            reach = share * span * norm if span else theme.px(self.HANDLE)
             if ux > 1e-6:
                 reach = min(reach, (box.right() - at.x()) / ux)
             elif ux < -1e-6:
@@ -2531,7 +2586,8 @@ class RampEditor(QtWidgets.QWidget):
         return None
 
     def slope_toward(self, k, side, point):
-        """The slope a handle of key k dragged to `point` gives (kept within _MAX_SLOPE)."""
+        """(slope, length) a handle of key k dragged to `point` gives: the slope kept within
+        _MAX_SLOPE, the length a share of the span on that side (None past the curve's ends)."""
         r = self.plot()
         lo, hi = self.value_range()
         at = self.to_screen(*self.keys[k])
@@ -2540,7 +2596,9 @@ class RampEditor(QtWidgets.QWidget):
         if side == 0:
             dp, dv = -dp, -dv  # the in handle points back along the curve
         dp = max(dp, 1e-4)
-        return max(-_MAX_SLOPE, min(_MAX_SLOPE, dv / dp))
+        span = self.span(k, side)
+        length = min(max(dp / span, _MIN_LENGTH), _MAX_LENGTH) if span else None
+        return max(-_MAX_SLOPE, min(_MAX_SLOPE, dv / dp)), length
 
     # -- Drawing -------------------------------------------------------------------
 
@@ -2598,7 +2656,7 @@ class RampEditor(QtWidgets.QWidget):
         shown = self._drag if self._drag is not None else self._hover
         if self._handle is not None:
             k, side = self._handle
-            label = "slope %s: %.3f" % ("in" if side == 0 else "out", self.slopes(k)[side])
+            label = "%s: slope %.3f, length %.2f" % ("in" if side == 0 else "out", self.slopes(k)[side], self.lengths(k)[side])
         elif shown is not None:
             label = "%.2f : %.3f" % tuple(self.keys[shown])
         painter.drawText(QtCore.QRectF(r.left(), r.bottom() + 1, r.width(), 14),
@@ -2619,10 +2677,14 @@ class RampEditor(QtWidgets.QWidget):
             self._picked = None
         self.update()
 
-    def set_handle(self, k, slope_in, slope_out=None):
-        """Key k's handles: its slope into it and out of it (the same both sides without slope_out);
-        None: automatic."""
-        self.handles[k] = None if slope_in is None else [float(slope_in), float(slope_in if slope_out is None else slope_out)]
+    def set_handle(self, k, slope_in, slope_out=None, length_in=_THIRD, length_out=_THIRD):
+        """Key k's handles: its slope into it and out of it (the same both sides without slope_out)
+        and their lengths (shares of their spans); None: automatic."""
+        if slope_in is None:
+            self.handles[k] = None
+        else:
+            slope_out = slope_in if slope_out is None else slope_out
+            self.handles[k] = [float(slope_in), float(slope_out), float(length_in), float(length_out)]
         self.update()
 
     def corner(self, k):
@@ -2635,7 +2697,7 @@ class RampEditor(QtWidgets.QWidget):
 
         slope_in = secant(k - 1, k) if k > 0 else (secant(k, k + 1) if k + 1 < len(keys) else 0.0)
         slope_out = secant(k, k + 1) if k + 1 < len(keys) else slope_in
-        self.set_handle(k, slope_in, slope_out)
+        self.set_handle(k, slope_in, slope_out, *self.lengths(k))
 
     def mousePressEvent(self, event):
         pos = qt.event_pos(event)
@@ -2667,15 +2729,17 @@ class RampEditor(QtWidgets.QWidget):
         pos = qt.event_pos(event)
         if self._handle is not None:
             k, side = self._handle
-            slope = self.slope_toward(k, side, pos)
+            slope, length = self.slope_toward(k, side, pos)
             h = self.handles[k]
             alone = bool(event.modifiers() & QtCore.Qt.AltModifier) or (h is not None and h[0] != h[1])
+            slopes, lengths = list(self.slopes(k)), list(self.lengths(k))
             if alone:
-                slopes = list(self.slopes(k))
                 slopes[side] = slope
-                self.handles[k] = slopes
             else:
-                self.handles[k] = [slope, slope]
+                slopes = [slope, slope]
+            if length is not None:  # (this handle's length alone: each side its own)
+                lengths[side] = length
+            self.handles[k] = slopes + lengths
             self.update()
             self.dragged.emit(self.value())
             return

@@ -183,7 +183,7 @@ TEST(Ramp, HandlesSetAKeysSlopesAndMakeCorners) {
     EXPECT_FLOAT_EQ(r(0.75f), 1.0f);
     // at() from tangents(): the same curve.
     const std::vector<float> slopes = r.tangents();
-    ASSERT_EQ(slopes.size(), 6u);
+    ASSERT_EQ(slopes.size(), 12u);  // (slopes and lengths, in and out, per key)
     for (float t = 0.0f; t <= 1.0f; t += 0.05f) EXPECT_FLOAT_EQ(r.at(t, slopes.data()), r(t));
     // Sorting keeps a key's handles with it.
     Ramp unsorted;
@@ -220,6 +220,42 @@ TEST(Ramp, HandlesSetAKeysSlopesAndMakeCorners) {
                   {"name": "o", "type": "Output"}],
         "connections": [{"from": "c", "to": "o", "input": "strands"}], "output": "o"})");
     EXPECT_NE(doc.graph.node(doc.node("c")).params().hash(), without.graph.node(without.node("c")).params().hash());
+}
+
+TEST(Ramp, AHandlesLengthHoldsItsSlopeFurtherOrTurnsSooner) {
+    // Issue #102: a handle's length (a share of its span; a third by default, the cubic Hermite's).
+    Ramp base{{0.0f, 0.0f}, {1.0f, 1.0f}};
+    base.setHandle(0, RampHandle{true, 0.0f, 0.0f});  // flat out of the first key
+    Ramp longer = base, shorter = base;
+    longer.setHandle(0, RampHandle{true, 0.0f, 0.0f, 1.0f / 3.0f, 0.9f});
+    shorter.setHandle(0, RampHandle{true, 0.0f, 0.0f, 1.0f / 3.0f, 0.05f});
+    EXPECT_FLOAT_EQ(base.lengthOut(0), 1.0f / 3.0f);
+    EXPECT_FLOAT_EQ(longer.lengthOut(0), 0.9f);
+    // Longer: flat further along (lower early on); shorter: turns up sooner (higher).
+    for (const float t : {0.2f, 0.35f, 0.5f}) {
+        EXPECT_LT(longer(t), base(t)) << t;
+        EXPECT_GT(shorter(t), base(t)) << t;
+    }
+    // The ends stay put, and the curve keeps rising (no loops back).
+    EXPECT_FLOAT_EQ(longer(0.0f), 0.0f);
+    EXPECT_FLOAT_EQ(longer(1.0f), 1.0f);
+    float last = -1.0f;
+    for (float t = 0.0f; t <= 1.0f; t += 0.02f) {
+        EXPECT_GE(longer(t), last - 1e-6f) << t;
+        last = longer(t);
+    }
+    // The default length is the Hermite exactly; set to it, nothing changes.
+    Ramp same = base;
+    same.setHandle(0, RampHandle{true, 0.0f, 0.0f, 1.0f / 3.0f, 1.0f / 3.0f});
+    for (float t = 0.0f; t <= 1.0f; t += 0.05f) EXPECT_EQ(same(t), base(t));
+    // at() from tangents() gives the same curve.
+    const std::vector<float> slopes = longer.tangents();
+    for (float t = 0.0f; t <= 1.0f; t += 0.05f) EXPECT_FLOAT_EQ(longer.at(t, slopes.data()), longer(t));
+    // JSON: [position, value, in, out, inLength, outLength], read back the same.
+    const std::string text = rampToJson(longer);
+    EXPECT_NE(text.find(",0.3333"), std::string::npos) << text;  // (both lengths written: the six-number form)
+    EXPECT_EQ(rampFromJson(text), longer);
+    EXPECT_EQ(rampToJson(same), "[[0.0,0.0,0.0],[1.0,1.0]]");  // (default lengths: the short form)
 }
 
 TEST(PointIndex, MatchesBruteForce) {

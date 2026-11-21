@@ -1022,7 +1022,10 @@ public:
             const std::size_t n = in.keys.size();
             for (std::size_t k = 0; k < n && in.hasHandles(); ++k) {
                 const RampHandle h = in.handle(flip ? n - 1 - k : k);
-                if (h.set) out.setHandle(k, flip ? RampHandle{true, -h.out * scale, -h.in * scale} : RampHandle{true, h.in * scale, h.out * scale});
+                if (h.set) {
+                    out.setHandle(k, flip ? RampHandle{true, -h.out * scale, -h.in * scale, h.outLength, h.inLength}
+                                          : RampHandle{true, h.in * scale, h.out * scale, h.inLength, h.outLength});
+                }
             }
             out.straight = linear;
         } else {  // smooth eases every span, in place of straight lines

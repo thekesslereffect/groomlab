@@ -104,6 +104,7 @@ def main():
     # drawn is the core's, handles and all.
     def ramp_handles():
         from groomlab.ui.qt import QtCore, QtGui, QtWidgets
+        _third = 1.0 / 3.0
         QTest = qt.QtTest().QTest
 
         def move(widget, point, modifiers):  # (offscreen, QTest.mouseMove sends no event)
@@ -124,22 +125,41 @@ def main():
         move(ramp, target, QtCore.Qt.NoModifier)
         QTest.mouseRelease(ramp, QtCore.Qt.LeftButton, QtCore.Qt.NoModifier, target)
         tied = ramp.value()[1]
-        _expect(len(tied) == 3 and tied[2] > 0.5, "a handle dragged: the key's slope, both sides: %r" % tied)
+        _expect(len(tied) in (3, 6) and tied[2] > 0.5 and (len(tied) == 3 or tied[2] == tied[3]),
+                "a handle dragged: the key's slope, both sides: %r" % tied)
         _in, out = ramp.handle_points(1)
         target = QtCore.QPoint(int(out.x()), int(out.y()) + 40)  # down: the out side alone, with Alt
         QTest.mousePress(ramp, QtCore.Qt.LeftButton, QtCore.Qt.AltModifier, out.toPoint())
         move(ramp, target, QtCore.Qt.AltModifier)
         QTest.mouseRelease(ramp, QtCore.Qt.LeftButton, QtCore.Qt.AltModifier, target)
         corner = ramp.value()[1]
-        _expect(len(corner) == 4 and corner[2] == tied[2] and corner[3] < corner[2], "Alt+drag: one side, a corner: %r" % corner)
+        _expect(len(corner) in (4, 6) and corner[2] == tied[2] and corner[3] < corner[2], "Alt+drag: one side, a corner: %r" % corner)
+        # Farther out: a longer handle (its length a share of its span), the other side's kept.
+        before = ramp.lengths(1)
+        _in, out = ramp.handle_points(1)
+        target = QtCore.QPoint(int(out.x()) + 40, int(out.y()))
+        QTest.mousePress(ramp, QtCore.Qt.LeftButton, QtCore.Qt.AltModifier, out.toPoint())
+        move(ramp, target, QtCore.Qt.AltModifier)
+        QTest.mouseRelease(ramp, QtCore.Qt.LeftButton, QtCore.Qt.AltModifier, target)
+        after = ramp.lengths(1)
+        _expect(after[1] > before[1] + 0.1 and abs(after[0] - before[0]) < 1e-9 and len(ramp.value()[1]) == 6,
+                "a handle dragged farther: longer (%r to %r): %r" % (before, after, ramp.value()[1]))
         core = groomlab_core.Ramp.from_json(json.dumps(ramp.value()))
         _expect(all(abs(core(u / 20.0) - ramp.evaluate(u / 20.0)) < 1e-5 for u in range(21)), "drawn as the core evaluates it")
+        ramp.set_handle(1, None)
         ramp.corner(1)
         _expect(ramp.value()[1] == [0.5, 1.0, 2.0, 0.0], "Corner: straight toward each neighbor: %r" % ramp.value()[1])
         QTest.mouseDClick(ramp, QtCore.Qt.LeftButton, QtCore.Qt.NoModifier, ramp.handle_points(1)[1].toPoint())
         _expect(ramp.value()[1] == [0.5, 1.0], "a double click on a handle: automatic again: %r" % ramp.value()[1])
         _expect(widgets.flipped_ramp([[0.0, 0.0], [0.5, 1.0, 2.0, 0.0], [1.0, 1.0]])
                 == [[0.0, 1.0], [0.5, 1.0, -0.0, -2.0], [1.0, 0.0]], "Flip mirrors the handles")
+        _expect(widgets.flipped_ramp([[0.0, 0.0], [0.5, 1.0, 2.0, 0.0, 0.2, 0.7], [1.0, 1.0]])[1]
+                == [0.5, 1.0, -0.0, -2.0, 0.7, 0.2], "... and their lengths")
+        long_value = [[0.0, 0.0, 0.0, 0.0, _third, 0.9], [1.0, 1.0]]
+        core = groomlab_core.Ramp.from_json(json.dumps(long_value))
+        ramp.setValue(long_value)
+        _expect(all(abs(core(u / 20.0) - ramp.evaluate(u / 20.0)) < 1e-5 for u in range(21)),
+                "long handles drawn as the core evaluates them")
         ramp.close()
         widgets.dispose(ramp)
     check.run("a ramp's handles set its keys' slopes", ramp_handles)

@@ -20,11 +20,19 @@ namespace groomlab {
 // segments (the handles unused).
 //
 // A key's handles: its slopes (value per unit of position) into it from the left
-// (`in`) and out of it to the right (`out`); `set` false: automatic.
+// (`in`) and out of it to the right (`out`), and how long each handle is, a share of
+// the span to the key on that side (`inLength`, `outLength`: a third of it, the
+// default, gives the cubic Hermite; longer holds the slope further, shorter turns
+// sooner); `set` false: automatic (slopes and lengths).
 struct RampHandle {
     bool set = false;
     float in = 0.0f, out = 0.0f;
-    bool operator==(const RampHandle& o) const { return set == o.set && (!set || (in == o.in && out == o.out)); }
+    float inLength = 1.0f / 3.0f, outLength = 1.0f / 3.0f;
+    // Both handles the default length (a third of their spans).
+    bool defaultLengths() const { return inLength == 1.0f / 3.0f && outLength == 1.0f / 3.0f; }
+    bool operator==(const RampHandle& o) const {
+        return set == o.set && (!set || (in == o.in && out == o.out && inLength == o.inLength && outLength == o.outLength));
+    }
     bool operator!=(const RampHandle& o) const { return !(*this == o); }
 };
 
@@ -54,9 +62,12 @@ struct Ramp {
     // handles' when set, else its automatic tangent. The GPU preview takes them with the keys.
     float tangentIn(std::size_t k) const;
     float tangentOut(std::size_t k) const;
-    // Every key's slopes, in and out (2 per key, as tangentIn and tangentOut give them), and the
-    // ramp at t from them: the same value as operator(), for a ramp taken at many places without
-    // working them out each time.
+    // Key k's handles' lengths into it and out of it (shares of their spans; a third: the default).
+    float lengthIn(std::size_t k) const;
+    float lengthOut(std::size_t k) const;
+    // Every key's slopes and handle lengths (4 per key: tangentIn, tangentOut, lengthIn,
+    // lengthOut), and the ramp at t from them: the same value as operator(), for a ramp taken at
+    // many places without working them out each time.
     std::vector<float> tangents() const;
     float at(float t, const float* tangents) const;
 

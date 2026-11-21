@@ -222,7 +222,9 @@ def flipped_ramp(value):
     out = []
     for k in reversed(keys):
         key = [1.0 - float(k[0]), k[1]]
-        if len(k) > 3:
+        if len(k) > 5:  # (handles of their own lengths: mirrored too)
+            key += [-float(k[3]), -float(k[2]), float(k[5]), float(k[4])]
+        elif len(k) > 3:
             slope_in, slope_out = -float(k[3]), -float(k[2])
             key += [slope_in] if slope_in == slope_out else [slope_in, slope_out]
         out.append(key)

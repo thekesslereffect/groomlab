@@ -835,8 +835,8 @@ def ramp_node(node, param, create=False):
 
 def ramp_keys(value):
     """(keys, linear) of a ramp param's value: [[pos, value]...] or {"keys", "linear"}. Each key
-    (pos, value), or (pos, value, slope in, slope out) where its handles are set (issue #102: a
-    key's [pos, value, slope] has the one slope both sides)."""
+    (pos, value), or (pos, value, slope in, slope out[, length in, length out]) where its handles
+    are set (issue #102: a key's [pos, value, slope] has the one slope both sides)."""
     entries, linear = [], False
     if isinstance(value, dict):
         entries, linear = value.get("keys", []), bool(value.get("linear"))
@@ -844,7 +844,7 @@ def ramp_keys(value):
         entries = value
     keys = []
     for k in entries:
-        if not isinstance(k, (list, tuple)) or not 2 <= len(k) <= 4:
+        if not isinstance(k, (list, tuple)) or not 2 <= len(k) <= 6 or len(k) == 5:
             continue
         keys.append(tuple(k) if len(k) != 3 else (k[0], k[1], k[2], k[2]))
     return keys, linear

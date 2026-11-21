@@ -296,15 +296,26 @@ TEST(AppPanels, ParamEditorsRoundTripEveryKindWithoutLosingMaps) {
     QPointF out = ramp->handlePoints(1).second;
     drag(out, out - QPointF(0, 20), Qt::NoModifier);  // up: steeper out of the key
     const json tied = ramp->value()[1];
-    ASSERT_EQ(tied.size(), 3u) << tied.dump();
+    ASSERT_GE(tied.size(), 3u) << tied.dump();  // (6 numbers once the handle's length moved too)
     EXPECT_GT(tied[2].get<double>(), 0.3);
+    if (tied.size() == 6) EXPECT_EQ(tied[2], tied[3]);
     out = ramp->handlePoints(1).second;
     drag(out, out + QPointF(0, 35), Qt::AltModifier);  // down, the out side alone
     const json cornered = ramp->value()[1];
-    ASSERT_EQ(cornered.size(), 4u) << cornered.dump();
+    ASSERT_GE(cornered.size(), 4u) << cornered.dump();
     EXPECT_EQ(cornered[2], tied[2]);
     EXPECT_LT(cornered[3].get<double>(), cornered[2].get<double>());
     EXPECT_EQ(ramp->selected(), 1);
+    // Farther out: the handle longer (its length a share of its span), the other side's kept.
+    ramp->setHandle(1, RampHandle{true, 0.0f, 0.0f});  // (flat: the handle's dot at its control point)
+    out = ramp->handlePoints(1).second;
+    drag(out, out + QPointF(40, 0), Qt::AltModifier);
+    const json longer = ramp->value()[1];
+    ASSERT_EQ(longer.size(), 6u) << longer.dump();
+    EXPECT_GT(longer[5].get<double>(), 0.45) << longer.dump();
+    EXPECT_NEAR(longer[4].get<double>(), 1.0 / 3.0, 1e-6) << longer.dump();
+    EXPECT_EQ(RampEditor::flipped(json::parse("[[0, 0], [0.5, 1, 2, 0, 0.25, 0.75], [1, 1]]")),
+              json::parse("[[0, 1], [0.5, 1, 0, -2, 0.75, 0.25], [1, 0]]"));
 
     // A mappable param holding a map: shown as its source, never replaced by the number editor.
     const std::string scatter = nodeOfType(*doc, "Scatter");

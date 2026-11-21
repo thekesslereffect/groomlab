@@ -45,8 +45,9 @@ public:
 // over t in 0..1 and a vertical range that fits the keys (at least 0..1). A drag moves a key (a
 // live edit each move, one recorded edit on release), a double click on the curve adds one,
 // Delete or a double click on a key removes it (one key stays), the buttons switch smooth
-// and straight and pick a preset. The key picked shows its handles (issue #102): a drag sets its
-// slope both sides, Alt+drag that side alone (a corner), a double click on a handle makes it
+// and straight and pick a preset. The key picked shows its handles (issue #102) at the curve's
+// control points: a drag sets its slope both sides and that handle's length (farther out holds the
+// slope longer), Alt+drag that side's slope alone (a corner), a double click on a handle makes it
 // automatic again; a right-click on a key offers Corner, Auto Handles and Remove Key.
 class RampEditor : public QWidget {
     Q_OBJECT
@@ -93,7 +94,9 @@ private:
     std::pair<float, float> fromScreen(const QPointF& p) const;
     int keyAt(const QPointF& p) const;  // -1 none within reach
     int handleAt(const QPointF& p) const;  // the picked key's handle there: 0 in, 1 out, -1 none
-    float slopeToward(std::size_t key, int side, const QPointF& p) const;
+    // (slope, length) a handle of `key` dragged to p gives; the length -1 past the curve's ends.
+    std::pair<float, float> slopeToward(std::size_t key, int side, const QPointF& p) const;
+    float spanBeside(std::size_t key, int side) const;  // the span on that side (0 past the end)
     void fitRange();
     Ramp ramp_;  // the keys, their handles, straight or smooth
     float lo_ = 0.0f, hi_ = 1.0f;  // the vertical range shown

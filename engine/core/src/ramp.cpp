@@ -51,9 +51,10 @@ bool Ramp::operator==(const Ramp& o) const {
 
 namespace {
 
-// The ramp at t, `in(k)` and `out(k)` key k's slopes into it and out of it (operator(), at).
-template <class In, class Out>
-float rampAt(const Ramp& ramp, float t, const In& in, const Out& out) {
+// The ramp at t, `in(k)` and `out(k)` key k's slopes into it and out of it, `inLength(k)` and
+// `outLength(k)` its handles' lengths (operator(), at).
+template <class In, class Out, class InLength, class OutLength>
+float rampAt(const Ramp& ramp, float t, const In& in, const Out& out, const InLength& inLength, const OutLength& outLength) {
     const auto& keys = ramp.keys;
     if (keys.empty()) return 1.0f;
     if (!(t > keys.front().first)) return keys.front().second;  // also NaN
@@ -65,29 +66,48 @@ float rampAt(const Ramp& ramp, float t, const In& in, const Out& out) {
     const float f = (t - lo->first) / span;
     if (ramp.straight) return lo->second + (hi->second - lo->second) * f;
 
-    // Cubic Hermite: out of the lower key, into the upper one.
+    // Cubic Hermite: out of the lower key, into the upper one; a Bezier where a handle there has
+    // another length.
     const std::size_t i = static_cast<std::size_t>(lo - keys.begin());
     const float m0 = out(i) * span, m1 = in(i + 1) * span;
-    return shared::rampHermite(f, lo->second, m0, hi->second, m1);
+    const float w0 = outLength(i), w1 = inLength(i + 1);
+    if (w0 == shared::kRampHandleLength && w1 == shared::kRampHandleLength) return shared::rampHermite(f, lo->second, m0, hi->second, m1);
+    return shared::rampWeighted(f, lo->second, m0, w0, hi->second, m1, w1);
 }
 
 }  // namespace
 
 float Ramp::operator()(float t) const {
-    return rampAt(*this, t, [&](std::size_t k) { return tangentIn(k); }, [&](std::size_t k) { return tangentOut(k); });
+    return rampAt(
+        *this, t, [&](std::size_t k) { return tangentIn(k); }, [&](std::size_t k) { return tangentOut(k); },
+        [&](std::size_t k) { return lengthIn(k); }, [&](std::size_t k) { return lengthOut(k); });
 }
 
 std::vector<float> Ramp::tangents() const {
-    std::vector<float> out(keys.size() * 2);
+    std::vector<float> out(keys.size() * 4);
     for (std::size_t k = 0; k < keys.size(); ++k) {
-        out[2 * k] = tangentIn(k);
-        out[2 * k + 1] = tangentOut(k);
+        out[4 * k] = tangentIn(k);
+        out[4 * k + 1] = tangentOut(k);
+        out[4 * k + 2] = lengthIn(k);
+        out[4 * k + 3] = lengthOut(k);
     }
     return out;
 }
 
 float Ramp::at(float t, const float* tangents) const {
-    return rampAt(*this, t, [&](std::size_t k) { return tangents[2 * k]; }, [&](std::size_t k) { return tangents[2 * k + 1]; });
+    return rampAt(
+        *this, t, [&](std::size_t k) { return tangents[4 * k]; }, [&](std::size_t k) { return tangents[4 * k + 1]; },
+        [&](std::size_t k) { return tangents[4 * k + 2]; }, [&](std::size_t k) { return tangents[4 * k + 3]; });
+}
+
+float Ramp::lengthIn(std::size_t k) const {
+    const RampHandle h = handle(k);
+    return h.set ? h.inLength : shared::kRampHandleLength;
+}
+
+float Ramp::lengthOut(std::size_t k) const {
+    const RampHandle h = handle(k);
+    return h.set ? h.outLength : shared::kRampHandleLength;
 }
 
 float Ramp::tangentIn(std::size_t k) const {

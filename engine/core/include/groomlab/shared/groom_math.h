@@ -222,6 +222,39 @@ inline float rampHermite(float f, float v0, float m0, float v1, float m1) {
     const float f2 = f * f, f3 = f2 * f;
     return (2.0f * f3 - 3.0f * f2 + 1.0f) * v0 + (f3 - 2.0f * f2 + f) * m0 + (-2.0f * f3 + 3.0f * f2) * v1 + (f3 - f2) * m1;
 }
+// A handle's length as a share of its span when it is not set otherwise: the cubic Hermite's.
+SHARED_CONST float kRampHandleLength = 1.0f / 3.0f;
+// A span between keys with handles of other lengths (issue #102): the cubic Bezier from (0, v0)
+// to (1, v1) whose inner points sit w0 along the first key's out handle and w1 back along the
+// second key's in handle (each a share of the span; m0 and m1 the slopes times the span), at
+// share f of the span. With w0 and w1 both kRampHandleLength it is rampHermite. Handles longer
+// together than the span are shortened to it (the curve keeps moving forward); the Bezier's
+// parameter at f found by halving, a fixed count of steps (the same answer on every engine).
+inline float rampWeighted(float f, float v0, float m0, float w0, float v1, float m1, float w1) {
+    float a = clamp(w0, 0.0f, 1.0f);
+    float b = clamp(w1, 0.0f, 1.0f);
+    const float both = a + b;
+    if (both > 1.0f) {
+        a = a / both;
+        b = b / both;
+    }
+    const float x1 = a, x2 = 1.0f - b;
+    float lo = 0.0f, hi = 1.0f;
+    SHARED_UNROLL for (uint i = 0u; i < 24u; ++i) {
+        const float u = 0.5f * (lo + hi);
+        const float s = 1.0f - u;
+        const float x = 3.0f * s * s * u * x1 + 3.0f * s * u * u * x2 + u * u * u;
+        if (x < f) {
+            lo = u;
+        } else {
+            hi = u;
+        }
+    }
+    const float u = 0.5f * (lo + hi);
+    const float s = 1.0f - u;
+    const float y1 = v0 + a * m0, y2 = v1 - b * m1;
+    return s * s * s * v0 + 3.0f * s * s * u * y1 + 3.0f * s * u * u * y2 + u * u * u * v1;
+}
 
 // ---- Gradient noise (noise.h: gradientNoise, fractalNoise, vectorNoise and their 4D forms) -------
 

@@ -329,6 +329,7 @@ class GraphEditorTest(unittest.TestCase):
         self.assertEqual([p.handle_type for p in curve.mapping.curves[0].points], ["AUTO_CLAMPED", "VECTOR", "AUTO_CLAMPED"])
         self.assertEqual(gt.ramp_value(curve), handled)
         self.assertEqual(ga.flipped_ramp(handled), [[0.0, 1.0, -0.5], [0.5, 1.0, 0.0, -2.0], [1.0, 0.0]])
+        self.assertEqual(ga.flipped_ramp([[0.0, 0.0], [0.5, 1.0, 2.0, 0.0, 0.25, 0.75]])[0], [0.5, 1.0, -0.0, -2.0, 0.75, 0.25])
         curve.mapping.curves[0].points[2].location = (1.0, 0.8)
         curve.mapping.update()
         self.assertTrue(gt.ramp_changed(curve))
