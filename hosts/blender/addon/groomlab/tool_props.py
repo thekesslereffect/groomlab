@@ -482,7 +482,7 @@ class GroomLabTools(bpy.types.PropertyGroup):
     front_facing: BoolProperty(name="Front facing only", default=True, update=_push(),
                                description="What the scalp hides from the camera gets no weight: a stroke never reaches "
                                            "guides, parts, flow arrows or paint on the far side of the head")
-    stretch: BoolProperty(name="Stretch", default=False, update=_push(),
+    stretch: BoolProperty(name="Stretch", default=True, update=_push(),
                           description="On: guides get longer (or shorter) as you pull them. Off: they keep their length")
     straighten: BoolProperty(name="Straighten", default=False, update=_push(),
                              description="On: guides relax toward the straight line along their root direction. "

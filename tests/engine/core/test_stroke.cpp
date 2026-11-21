@@ -305,6 +305,7 @@ TEST(Stroke, CtrlIsTheOppositeShiftSmooths) {
         BrushTool tool;
         tool.settings.setMode(shift ? "comb" : "smooth");
         tool.settings.screenRadius = 150.0f;
+        tool.settings.brush.stretch = false;  // (with Stretch, Shift relaxes and drops points: below)
         ASSERT_TRUE(tool.stroke(*g.host, view, path, 1.0f, shift ? kStrokeShift : 0u));
         EXPECT_EQ(tool.settings.modeName(), shift ? "comb" : "smooth");  // (Comb again after it)
         (shift ? shiftCombed : smoothed) = g.guides();

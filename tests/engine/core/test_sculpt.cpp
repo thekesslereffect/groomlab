@@ -39,6 +39,7 @@ BrushSettings settings(BrushMode mode, float radius = 0.3f, float strength = 1.0
     s.mode = mode;
     s.radius = radius;
     s.strength = strength;
+    s.stretch = false;  // (Comb keeps the guides' lengths here)
     return s;
 }
 

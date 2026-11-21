@@ -563,6 +563,7 @@ class BrushTest(SceneMixin, unittest.TestCase):
         before = h.guide_points(pid)
         tip = before[-1]
         settings = gl.BrushSettings(gl.BrushMode.Comb, radius=0.5, strength=1.0)
+        settings.stretch = False  # (lengths kept; Stretch, on by default, pulls them longer)
         path = [tip, tip + gl.Vec3(0.3, 0, 0), tip + gl.Vec3(0.6, 0, 0)]
         changed = gl.apply_brush_stroke(h, self.scalp, settings, path)
         self.assertGreaterEqual(changed, 1)

@@ -680,7 +680,7 @@ class GroomingTest(unittest.TestCase):
 
         # Scripted strokes shape the node's guides: one undo step each, the stored guides untouched.
         guide_data = cmds.getAttr(self.groom + ".guideData")
-        groomlab.brush_stroke(self.groom, "comb", [(-0.4, 1.3, 0.0), (0.0, 1.35, 0.2), (0.4, 1.3, 0.4)], radius=0.6)
+        groomlab.brush_stroke(self.groom, "comb", [(-0.4, 1.3, 0.0), (0.0, 1.35, 0.2), (0.4, 1.3, 0.4)], radius=0.6, stretch=False)
         first = cmds.getAttr(self.groom + ".sculptData")
         self.assertTrue(first)
         self.assertGreater(sculpts.edited_guides(self.groom, "sculpt1"), 0)
@@ -735,7 +735,7 @@ class GroomingTest(unittest.TestCase):
         # sculpted one keeps its relative form instead of snapping back.
         shots.set_target(self.groom, None)
         self.assertIsNone(sculpts.target(self.groom))
-        groomlab.brush_stroke(self.groom, "comb", [(-1.0, 1.4, 0.2), (1.0, 1.4, 0.2)], radius=3.0, level=-1)
+        groomlab.brush_stroke(self.groom, "comb", [(-1.0, 1.4, 0.2), (1.0, 1.4, 0.2)], radius=3.0, level=-1, stretch=False)
         fed2, out2 = evaluated(os.path.join(folder, "after.groom"))
         self.assertGreater(max(_dist(p, q) for p, q in zip(fed2[edited], fed[edited])), 0.05)
         for (turn, ratio), (turn2, ratio2) in zip(before, form(fed2[edited], out2[edited])):

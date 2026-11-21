@@ -38,7 +38,7 @@ def _check_mode(mode):
 
 def brush_stroke(groom, mode, points, radius=0.25, strength=1.0, level=0, group=None, propagate=False,
                  length=0.5, segments=12, tube_radius=0.1, selected_only=False, symmetry=None, symmetry_center=0.0,
-                 attribute=None, value=1.0, match_neighbors=True, collide=True, part_name="part", stretch=False,
+                 attribute=None, value=1.0, match_neighbors=True, collide=True, part_name="part", stretch=True,
                  targets="guides", paint_kind="guides", paint_texture="", paint_resolution=1024, hardness=0.0,
                  smooth_strength=1.0, paint_color=None, paint_channels="rgba", strength_profile=None,
                  falloff_profile=None, solo_new_guides=False, tube_channel="width", tube=None,
@@ -180,7 +180,7 @@ def brush_tool(mode="comb", radius=60, strength=1.0, level=0, group="", propagat
                paint_kind="guides", paint_texture="", paint_resolution=1024, hardness=0.0, smooth_strength=1.0,
                segments=12, tube_radius=0.1, selected_only=False, symmetry=None, symmetry_center=0.0,
                attribute=None, value=1.0, match_neighbors=True, spacing=0.1, collide=True, pressure=True,
-               part_name="part", erase_guides=True, erase_parts=True, erase_flow=True, stretch=False, straighten=False,
+               part_name="part", erase_guides=True, erase_parts=True, erase_flow=True, stretch=True, straighten=False,
                flow_sink="",
                targets="guides", paint_color=None, paint_channels="rgba", mask_by_scalp=True, strength_profile=None,
                falloff_profile=None, solo_new_guides=False, tube_channel="width", tube=None, activate=True,

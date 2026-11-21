@@ -30,7 +30,7 @@ import groomlab  # noqa: E402
 
 # (mode, points, keyword arguments, the attribute it writes)
 STROKES = [
-    ("comb", [(-0.3, 0.95, 0.4), (0.0, 1.0, 0.45), (0.3, 0.95, 0.4)], {"radius": 0.4, "strength": 0.8}, "guideData"),
+    ("comb", [(-0.3, 0.95, 0.4), (0.0, 1.0, 0.45), (0.3, 0.95, 0.4)], {"radius": 0.4, "strength": 0.8, "stretch": False}, "guideData"),
     ("smooth", [(0.2, 0.9, 0.3), (0.4, 0.8, 0.4)], {"radius": 0.5, "strength": 0.6, "symmetry": "x"}, "guideData"),
     ("lift", [(0.3, 0.9, 0.2)], {"radius": 0.6, "strength": 0.5, "level": -1}, "guideData"),
     ("twist", [(0.3, 0.9, 0.2), (0.5, 0.7, 0.3)], {"radius": 0.5, "strength": 0.4, "group": "children"}, "guideData"),
@@ -39,7 +39,7 @@ STROKES = [
     ("draw", [(0.0, 0.7, 0.72), (0.0, 0.9, 1.0), (0.0, 1.1, 1.2)], {"segments": 8}, "guideData"),
     ("part", [(-0.3, 0.95, 0.3), (0.0, 0.97, 0.25), (0.3, 0.95, 0.3)], {"part_name": "crown", "symmetry": "x"}, "partData"),
     ("flow", [(-0.4, 0.9, 0.2), (-0.1, 0.95, 0.3), (0.2, 0.9, 0.35)], {"radius": 0.3}, "flowData"),
-    ("comb", [(-0.3, 0.95, 0.3), (0.3, 0.95, 0.3)], {"radius": 0.3, "targets": "guides,parts,flow"}, "guideData,partData,flowData"),
+    ("comb", [(-0.3, 0.95, 0.3), (0.3, 0.95, 0.3)], {"radius": 0.3, "stretch": False, "targets": "guides,parts,flow"}, "guideData,partData,flowData"),
     ("erase", [(0.0, 0.6, 0.8)], {"radius": 0.3}, "guideData"),
 ]
 

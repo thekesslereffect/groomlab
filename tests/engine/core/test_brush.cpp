@@ -117,6 +117,7 @@ TEST(Brush, CombPullsTipsAndKeepsLengthAndRoot) {
 
     BrushSettings b;
     b.radius = 0.6f;
+    b.stretch = false;  // (Stretch on: longer with the pull, Snake Hook)
     const std::size_t changed = applyBrushStroke(s.h, s.scalp.get(), b, {{0.5f, 0.8f, 0.5f}, {0.9f, 0.8f, 0.5f}});
     EXPECT_EQ(changed, 1u);
     EXPECT_GT(s.pts(id).back().x, 0.7f);  // combed toward +X
@@ -965,6 +966,7 @@ TEST(Brush, CullingAndStrokeCachesChangeTheSameGuidesTheSame) {
             b.propagate = variant % 4 == 0;
             b.pointwise = mode == BrushMode::Attribute && variant % 2 == 0;
             b.attribute = "clump";
+            b.stretch = false;  // (Stretch weighs where the brush was: not the reference's sphere)
             b.mirrorAxis = variant % 5 == 0 ? -1 : 0;
             b.mask = variant % 7 == 0 ? &mask : nullptr;
             GuideHierarchy plain = start, culled = start;
@@ -999,6 +1001,7 @@ TEST(Brush, CullingAndStrokeCachesChangeTheSameGuidesTheSame) {
     // A scripted stroke (its stamps share a cache) gives what one stamp after another gives.
     BrushSettings comb;
     comb.radius = 0.3f;
+    comb.stretch = false;  // (Stretch keeps the spacing a stroke's cache holds: stamps alone have none)
     GuideHierarchy stroked = start, stamped = start;
     applyBrushStroke(stroked, sphere.get(), comb, {{0.0f, 1.05f, 0.2f}, {0.5f, 0.9f, 0.3f}});
     const Vec3f from{0.0f, 1.05f, 0.2f}, to{0.5f, 0.9f, 0.3f};
@@ -1060,6 +1063,7 @@ TEST(BrushSymmetry, ABrushReachingOverTheSeamKeepsTheSidesMirrorImages) {
     b.mode = BrushMode::Comb;
     b.radius = 0.25f;
     b.strength = 1.0f;
+    b.stretch = false;  // (the tips combed along, not a Snake Hook pulled from the middle)
     b.mirrorAxis = 0;
     b.mirrorCenter = 0.5f;
     applyBrushStroke(s.h, s.scalp.get(), b, {{0.45f, 0.6f, 0.5f}, {0.45f, 0.6f, 0.2f}});
@@ -1083,6 +1087,7 @@ TEST(BrushSymmetry, SelectedOnlyBrushesTheSelectionsMirrorGuidesToo) {
     t.brush.mirrorCenter = 0.5f;
     t.brush.radius = 0.3f;
     t.brush.strength = 1.0f;
+    t.brush.stretch = false;  // (the tips combed along, not a Snake Hook pulled from the middle)
     t.prepareMask(s.h, {}, {left}, 0.0f, s.scalp.get());
     ASSERT_TRUE(t.brush.mask);
     EXPECT_EQ(t.brush.mask->count(right), 1u) << "the mirror guide is masked in";

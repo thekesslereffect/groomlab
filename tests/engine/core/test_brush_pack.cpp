@@ -138,6 +138,7 @@ TEST(BrushPack, CombAndTwistReachTipsMoreThanRoots) {
         s.radius = 3.0f;
         s.hardness = 1.0f;
         s.strength = mode == BrushMode::Twist ? 1.0f : 0.5f;
+        s.stretch = false;  // (lengths kept)
         s.strengthProfile = std::move(profile);
         for (int k = 0; k < (mode == BrushMode::Twist ? 1 : 3); ++k) {
             applyBrushStamp(f.h, f.scalp.get(), s, {0.5f, 0.5f, 0.5f}, {0.3f, 0.0f, 0.0f});

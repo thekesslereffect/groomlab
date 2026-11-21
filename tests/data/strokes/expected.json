@@ -5,7 +5,8 @@
   },
   "kwargs": {
    "radius": 0.4,
-   "strength": 0.8
+   "strength": 0.8,
+   "stretch": false
   },
   "mode": "comb",
   "points": [
@@ -216,6 +217,7 @@
   },
   "kwargs": {
    "radius": 0.3,
+   "stretch": false,
    "targets": "guides,parts,flow"
   },
   "mode": "comb",
