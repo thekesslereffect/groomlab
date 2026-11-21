@@ -1499,7 +1499,8 @@ void GroomRenderer::render(QRhi* rhi, QRhiCommandBuffer* cb, QRhiRenderTarget* t
     auto fromSrgb = [](float c) { return groomlab::srgbToLinear(c); };  // (color.h)
     for (auto& item : otherItems_) {
         item->fresh = false;
-        if (!item->shown || !hair) continue;
+        // (Hide Hair is the active groom's: the others keep theirs, hidden from the outliner.)
+        if (!item->shown) continue;
         upload(rhi, batch, *item);
         writeUniforms(batch, *item, mvp, eye, size, false, pixelScale);
         if (lookdev) {

@@ -175,10 +175,18 @@ MainWindow::MainWindow() {
         redisplay();
         guidesPanel_->invalidate();
         groomTools_->refreshTubes();  // the Tubes section's targets
+        if (quickSelectBack_ >= 0 && viewport_->toolMode() == Viewport::ToolMode::Select) {
+            // Quick Select (the radial menu's Masking): one pick, then back to the brush (or the camera).
+            const auto back = static_cast<Viewport::ToolMode>(quickSelectBack_);
+            quickSelectBack_ = -1;
+            viewport_->setToolMode(back);
+        }
     });
     connect(viewport_, &Viewport::deleteRequested, this, [this] { guidesPanel_->deleteSelected(); });
     connect(viewport_, &Viewport::message, this, [this](const QString& text) { report(text); });
     connect(viewport_, &Viewport::toolModeChanged, this, [this](Viewport::ToolMode mode) {
+        if (mode != Viewport::ToolMode::Select) brush_.selectHides = false;  // (the radial menu's Visibility > Select)
+        if (mode != Viewport::ToolMode::Select) quickSelectBack_ = -1;
         if (mode == Viewport::ToolMode::Brush && locked_ && locked_->isChecked()) {
             // A locked groom ignores brushes (Maya's locked attribute): the camera again.
             report(tr("The groom is locked: unlock it (Properties > Groom > Locked) to brush it"));
@@ -196,7 +204,7 @@ MainWindow::MainWindow() {
         if (mode == Viewport::ToolMode::Brush) {
             notify(tr("Brush: drag to stroke, Ctrl is the opposite, Shift+drag smooths, Ctrl+Shift+drag paints guides into "
                       "the selection (the rest freeze; over no guide, all unfreeze); B+drag (or middle-drag) sets the radius, "
-                      "M+drag the strength; Alt+Shift+X symmetry; Y+click the marking menu; Alt orbits; Esc leaves"));
+                      "M+drag the strength; Alt+Shift+X symmetry; Alt+S the radial menu; Alt orbits; Esc leaves"));
             if (document_) reevaluate();  // warms the stroke document
         } else if (mode == Viewport::ToolMode::Select) {
             notify(tr("Select: click or box guides (the rest freeze; nothing picked unfreezes all); Shift toggles, Ctrl "

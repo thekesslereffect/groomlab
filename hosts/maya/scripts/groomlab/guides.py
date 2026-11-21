@@ -235,16 +235,18 @@ def set_soft_selection(groom, radius):
     cmds.setAttr(groom + ".softSelectRadius", radius)
 
 
-def select_tool(level=0, group="", roots_only=False, solo=True, symmetry=None, activate=True):
+def select_tool(level=0, group="", roots_only=False, solo=True, symmetry=None, activate=True, hide=False):
     """The lasso tool for guides of the selected groom (Shift: toggle, Ctrl: deselect, Ctrl+Shift: add).
     With `solo` every pick also freezes the guides not selected, in the same undo step, so the
-    brushes work on the selection; a pick of nothing unfreezes every guide. `symmetry` ("x" or
-    "topology", as the brushes take it) picks each guide's mirror guide too."""
+    brushes work on the selection; a pick of nothing unfreezes every guide. With `hide` it hides
+    them instead (the "hidden" layer: the radial menu's Visibility > Select; a pick of nothing shows
+    all). `symmetry` ("x" or "topology", as the brushes take it) picks each guide's mirror guide too."""
     ensure_plugin()
     if not cmds.contextInfo(SELECT_CONTEXT, exists=True):
         cmds.groomLabSelectCtx(SELECT_CONTEXT)
     cmds.groomLabSelectCtx(SELECT_CONTEXT, edit=True, level=level, group=group, rootsOnly=roots_only,
-                           soloSelection=bool(solo), symmetry=symmetry or "none")
+                           soloSelection=bool(solo), hideOthers=bool(hide),
+                           symmetry=symmetry or "none")
     if activate:
         cmds.setToolTo(SELECT_CONTEXT)
     return SELECT_CONTEXT

@@ -14,5 +14,65 @@
     ],
     "overflow": {"generator": "brushCatalog", "exclude": ["select", "freeze"]},
     "tail": [{"tool": "select"}, {"tool": "freeze"}, "tools.open"]
+  },
+  "radialMenu": {
+    "about": "The app's radial menu (Alt+S over the viewport; Maya: Alt+S with the GroomLab hotkey set), as GroomBear's for Houdini and RadialZ for ZBrush: rings of items around the cursor, a ring's submenu opening around its own pill. Blender reads markingMenu until it takes it up (docs/APP_PARITY.md). An action with offLabel shows label while it is on, offLabel while it is off. The guideGroups generator lists the current groom's guide groups, each picked to hide or show it (past eight, the eighth is a More ring). Every item works on the current groom only (Maya: the groom node picked; its node's name shows over the middle).",
+    "items": [
+      {"position": "S", "label": "Masking", "icon": "freeze", "tip": "Which guides the brushes work on: the rest are locked (frozen, drawn blue)", "items": [
+        {"position": "W", "action": "mask.full", "label": "Full"},
+        {"position": "E", "action": "mask.empty", "label": "Empty"},
+        {"position": "SW", "tool": "select", "label": "Select"},
+        {"position": "SE", "tool": "freeze", "label": "Mask Brush"},
+        {"position": "S", "action": "mask.quickSelect", "label": "Quick Select"}
+      ]},
+      {"position": "W", "label": "Visibility", "icon": "ui_eye", "tip": "Which guides show: a hidden guide is locked too; the hair still grows from it", "items": [
+        {"position": "W", "action": "visibility.select", "label": "Select"},
+        {"position": "NW", "action": "visibility.showAll", "label": "Show All"},
+        {"position": "SW", "action": "visibility.invert", "label": "Invert"},
+        {"position": "N", "action": "display.toggleHair", "label": "Hide Hair", "offLabel": "Show Hair"},
+        {"position": "S", "action": "display.toggleGuides", "label": "Hide Guides", "offLabel": "Show Guides"},
+        {"position": "NE", "label": "Groups", "icon": "ui_groups", "tip": "The groom's guide groups: pick one to hide or show it", "generator": "guideGroups"}
+      ]},
+      {"position": "NW", "label": "Brushes A", "icon": "comb", "tip": "Draw, Comb, Slide, Smooth, Tube, Flow, Place", "items": [
+        {"position": "W", "tool": "draw"},
+        {"position": "NW", "tool": "comb"},
+        {"position": "N", "tool": "slide"},
+        {"position": "NE", "tool": "smooth"},
+        {"position": "E", "tool": "shape"},
+        {"position": "SW", "tool": "flow"},
+        {"position": "S", "tool": "place"}
+      ]},
+      {"position": "NE", "label": "Brushes B", "icon": "lift", "tip": "Lift, Swing, Attract, Part, Cut, Erase", "items": [
+        {"position": "NW", "tool": "lift"},
+        {"position": "N", "tool": "twist"},
+        {"position": "NE", "tool": "attract"},
+        {"position": "E", "tool": "part"},
+        {"position": "SE", "tool": "cut"},
+        {"position": "S", "tool": "erase"}
+      ]},
+      {"position": "E", "label": "Brush Options", "icon": "ui_sliders", "tip": "The picked brush's options (brushOptions)", "generator": "brushOptions"}
+    ],
+    "brushOptions": {
+      "positions": ["N", "NE", "E", "SE", "S", "NW", "SW", "W"],
+      "tools": {
+        "comb": [
+          {"setting": "stretch"}
+        ],
+        "smooth": [
+          {"setting": "smoothMode", "value": "all"},
+          {"setting": "smoothMode", "value": "length"},
+          {"setting": "smoothMode", "value": "shape"},
+          {"setting": "smoothMode", "value": "curve"}
+        ],
+        "shape": [
+          {"action": "tube.drawRoot", "label": "Draw Root"},
+          {"action": "tube.editRoot", "label": "Edit Roots"},
+          {"setting": "tubeChannel", "value": "width"},
+          {"setting": "tubeChannel", "value": "flatness"},
+          {"setting": "tubeChannel", "value": "twist"},
+          {"action": "display.tubesAlways", "label": "Always Visible"}
+        ]
+      }
+    }
   }
 }

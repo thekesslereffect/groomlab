@@ -1253,6 +1253,7 @@ std::vector<std::vector<Vec3f>> BrushTool::affectedLines(StrokeHost& host, const
     const int smoothing = host.guideSmoothing();
     const std::set<std::string> hidden = sculpting ? std::set<std::string>{} : host.hiddenGroups();
     auto brushable = [&](const HierarchyGuide& g) {
+        if (guideHidden(*h, g)) return false;
         if (!hidden.empty()) {
             const GuideGroup* grp = h->group(g.group);
             if (grp && hidden.count(grp->name)) return false;

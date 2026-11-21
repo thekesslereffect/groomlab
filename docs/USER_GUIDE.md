@@ -108,8 +108,10 @@ The tools are the same in Maya, the standalone app and Blender, in the same orde
 | Guides | Select, Freeze (and **Unfreeze All** beside it) |
 
 - **Comb** drags guides along the stroke (**Stretch** lets them lengthen or shorten). **Slide**
-  moves roots and keeps the shape. **Smooth** takes kinks out (**Straighten** relaxes guides toward
-  the straight line along their root direction instead). **Lift** stands guides up, **Swing** turns
+  moves roots and keeps the shape. **Smooth** evens guides out; its **Evens out** row picks what:
+  **Curve** takes kinks out (the default), **Length** brings the lengths of the guides under the brush
+  toward their average, **Shape** brings their shapes toward their average shape, **All** does the
+  three (**Straighten** relaxes guides toward the straight line along their root direction instead). **Lift** stands guides up, **Swing** turns
   them around their roots and **Attract** pulls tips together; a negative strength reverses the ones
   that work both ways. **Tube** paints guides' tubes near the brush: their width, their flatness or
   their twist (negative: the opposite).
@@ -158,6 +160,36 @@ Frozen guides draw blue and brushes leave them alone.
   or click **Unfreeze All** beside the Freeze tool.
 - **Freeze** paints frozen guides by hand (Ctrl unfreezes).
 - Each of these is one undo step. With **Symmetry** on, the mirror guides stay live too.
+
+### The radial menu (standalone app and Maya)
+
+Press **Alt+S** over the viewport (in Maya, with the GroomLab hotkey set: GroomLab > Help >
+Install GroomLab Hotkeys): a ring of choices opens around the cursor at once, as GroomBear's
+radial menu in Houdini or RadialZ in ZBrush. Keep **S** held, move toward a choice and let go of
+S to pick it; move onto a submenu and its own ring opens around the cursor, so you keep going in
+the next direction. Let go without moving and the menu stays open for clicks: **Esc**, a
+right-click or a click in the middle goes back a ring; a click away (or Alt+S again) closes it.
+
+**Your shortcut and size:** GroomLab > **Radial Menu Settings...** sets another shortcut (any key
+with its modifiers; in Maya it goes into the GroomLab hotkey set, and the old key gets back what
+Maya's own set gave it) and the menu's size, 75% to 250%. Rolling the mouse wheel over the open menu
+resizes it too. Both are remembered.
+
+| Direction | Ring | What it holds |
+| --- | --- | --- |
+| Down | **Masking** | **Full** (every guide unfrozen), **Empty** (every guide frozen), **Select** (the Select tool: lasso the guides to work on, the rest freeze; it stays on to refine), **Quick Select** (the same for one pick, then back to the brush you had), **Mask Brush** (the Freeze brush) |
+| Left | **Visibility** | **Select** (lasso the guides to keep shown: the rest hide), **Show All**, **Invert** (hidden and shown swap), **Hide Hair** / **Show Hair**, **Hide Guides** / **Show Guides** (each says what it will do), **Groups** (the groom's guide groups in their colors: pick one to hide or show it; past eight, **More** holds the rest) |
+| Up-left | **Brushes A** | Draw, Comb, Slide, Smooth, Tube, Flow, Place |
+| Up-right | **Brushes B** | Lift, Swing, Attract, Part, Cut, Erase |
+| Right | **Brush Options** | The picked brush's options: Comb's **Stretch**; Smooth's **All**, **Length**, **Shape**, **Curve**; Tube's **Draw Root** (the Tube card's Draw root: click a root tube's outline on the scalp), **Edit Roots** (the root tubes' outlines to edit; again: Finish edit), **Width**, **Flatness**, **Twist**, **Always Visible** (the tubes shaded whatever the brush) |
+
+A **hidden** guide is not drawn, can't be selected and no brush touches it, but the hair it guides
+still grows. Hiding is saved with the groom and is one undo step, as freezing is. Blender keeps its
+own pie for now.
+
+**It works on one groom:** the current one (in Maya the groom node you picked or selected; in the
+app the active groom), its name shown faintly over the middle. **Hide Hair** hides that groom's hair
+and **Hide Guides** its guides; the other grooms stay as they are.
 
 ### Selection
 

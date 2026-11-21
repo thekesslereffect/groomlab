@@ -220,12 +220,6 @@ void Viewport::mousePressEvent(QMouseEvent* event) {
     const bool alt = event->modifiers().testFlag(Qt::AltModifier);
     syncView();
     event->accept();
-    if (yHeld_ && event->button() == Qt::LeftButton && !alt) {
-        // Y + click: the marking menu (Maya's GroomLab hotkey set), in any tool.
-        drag_ = Drag::Menu;
-        emit markingMenuPressed(event->position());
-        return;
-    }
     if (alt || mode_ == ToolMode::Camera || !session_) {
         cameraPress(event, alt);
         return;
@@ -276,11 +270,6 @@ void Viewport::mouseMoveEvent(QMouseEvent* event) {
     const QPoint now = event->position().toPoint();
     const QPoint delta = now - last_;
     last_ = now;
-    if (drag_ == Drag::Menu) {
-        event->accept();
-        emit markingMenuDragged(event->position());
-        return;
-    }
     if (drag_ == Drag::None) {
         // Hovering in brush mode: the ring and the guides under the brush follow the cursor.
         if (mode_ == ToolMode::Brush && session_ && !(event->buttons() & Qt::AllButtons)) {
@@ -356,7 +345,6 @@ void Viewport::mouseMoveEvent(QMouseEvent* event) {
             refreshOverlay();
             break;
         case Drag::None:
-        case Drag::Menu:
             break;
     }
 }
@@ -365,10 +353,6 @@ void Viewport::mouseReleaseEvent(QMouseEvent* event) {
     const Drag drag = drag_;
     drag_ = Drag::None;
     event->accept();
-    if (drag == Drag::Menu) {
-        emit markingMenuReleased(event->position());
-        return;
-    }
     // A camera drag's end: the full picture (a stroke's comes with its commit, redrawn by the
     // host; the brush's hover after it draws it too).
     if (drag != Drag::None) setInteracting(false);
@@ -472,12 +456,8 @@ void Viewport::keyPressEvent(QKeyEvent* event) {
             if (mode_ != ToolMode::Brush) setToolMode(ToolMode::Brush);
             event->accept();
             return;
-        case Qt::Key_Y:
-            // Y held: the next left press opens the marking menu.
-            yHeld_ = true;
-            event->accept();
-            return;
         case Qt::Key_S:
+            if (event->modifiers().testFlag(Qt::AltModifier)) break;  // (Alt+S: the radial menu, a window shortcut)
             setToolMode(mode_ == ToolMode::Select ? ToolMode::Camera : ToolMode::Select);
             event->accept();
             return;
@@ -549,11 +529,6 @@ void Viewport::keyReleaseEvent(QKeyEvent* event) {
     }
     if (event->key() == Qt::Key_M && !event->isAutoRepeat()) {
         mHeld_ = false;
-        event->accept();
-        return;
-    }
-    if (event->key() == Qt::Key_Y && !event->isAutoRepeat()) {
-        yHeld_ = false;
         event->accept();
         return;
     }

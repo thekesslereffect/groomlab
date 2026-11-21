@@ -3046,4 +3046,18 @@ std::vector<GuideId> GuideHierarchy::duplicateGuidesToGroup(const std::vector<Gu
     return pasteGuidesJson(copyGuidesJson(ids), target);
 }
 
+bool guideHidden(const GuideHierarchy& h, const HierarchyGuide& g) {
+    if (!h.hasAttributes()) return false;
+    float v = 0.0f;
+    return h.effectiveAttribute(g, kHiddenLayer, &v) && v >= 0.5f;
+}
+
+bool anyGuideHidden(const GuideHierarchy& h) {
+    if (!h.hasAttributes()) return false;
+    for (const HierarchyGuide& g : h.guides()) {
+        if (guideHidden(h, g)) return true;
+    }
+    return false;
+}
+
 }  // namespace groomlab

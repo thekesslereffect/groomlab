@@ -118,6 +118,7 @@ void applySettings(BrushToolSettings& s, const py::dict& kwargs) {
         else if (key == "collide") s.brush.collide = v.cast<bool>();
         else if (key == "stretch") s.brush.stretch = v.cast<bool>();
         else if (key == "straighten") s.brush.straighten = v.cast<bool>();
+        else if (key == "smooth_mode") s.brush.smoothMode = smoothModeFromString(v.cast<std::string>());
         else if (key == "tube_channel") s.brush.tubeChannel = tubeChannelFromString(v.cast<std::string>());
         else if (key == "hardness") s.brush.hardness = std::clamp(v.cast<float>(), 0.0f, 1.0f);
         else if (key == "falloff_profile") s.setFalloffProfile(rampText(v));
@@ -545,6 +546,7 @@ void bindStroke(py::module_& m) {
             all["part_name"] = "part";
             all["stretch"] = false;
             all["straighten"] = false;
+            all["smooth_mode"] = "curve";
             all["targets"] = "guides";
             all["hardness"] = 0.0f;
             all["smooth_strength"] = 1.0f;

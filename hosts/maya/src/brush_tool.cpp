@@ -87,6 +87,7 @@ const char* kMaskScalpFlag[] = {"-msk", "-maskByScalp"};
 const char* kStretchFlag[] = {"-sr", "-stretch"};
 const char* kStraightenFlag[] = {"-stn", "-straighten"};
 const char* kTubeChannelFlag[] = {"-tch", "-tubeChannel"};
+const char* kSmoothModeFlag[] = {"-smm", "-smoothMode"};  // Smooth: curve, length, shape or all
 const char* kPressureFlag[] = {"-prs", "-pressure"};
 const char* kPartNameFlag[] = {"-pn", "-partName"};
 const char* kFlowSinkFlag[] = {"-fsk", "-flowSink"};
@@ -337,6 +338,7 @@ void addBrushFlags(MSyntax& s) {
     s.addFlag(kStretchFlag[0], kStretchFlag[1], MSyntax::kBoolean);
     s.addFlag(kStraightenFlag[0], kStraightenFlag[1], MSyntax::kBoolean);
     s.addFlag(kTubeChannelFlag[0], kTubeChannelFlag[1], MSyntax::kString);
+    s.addFlag(kSmoothModeFlag[0], kSmoothModeFlag[1], MSyntax::kString);
     s.addFlag(kPartNameFlag[0], kPartNameFlag[1], MSyntax::kString);
     s.addFlag(kFlowSinkFlag[0], kFlowSinkFlag[1], MSyntax::kString);
     s.addFlag(kTargetsFlag[0], kTargetsFlag[1], MSyntax::kString);
@@ -373,6 +375,9 @@ MStatus applyBrushFlags(const Args& args, BrushToolSettings& s, const char* comm
         if (args.isFlagSet(kTargetsFlag[0]) && args.getFlagArgument(kTargetsFlag[0], 0, text)) s.setTargets(text.asChar());
         if (args.isFlagSet(kTubeChannelFlag[0]) && args.getFlagArgument(kTubeChannelFlag[0], 0, text)) {
             s.brush.tubeChannel = tubeChannelFromString(text.asChar());
+        }
+        if (args.isFlagSet(kSmoothModeFlag[0]) && args.getFlagArgument(kSmoothModeFlag[0], 0, text)) {
+            s.brush.smoothMode = smoothModeFromString(text.asChar());
         }
         // The curves as ramps' JSON ("" clears one).
         if (args.isFlagSet(kFalloffProfileFlag[0]) && args.getFlagArgument(kFalloffProfileFlag[0], 0, text)) {
@@ -1771,6 +1776,7 @@ MStatus BrushContextCmd::doQueryFlags() {
         else if (args.isFlagSet(kStretchFlag[0])) setResult(s.brush.stretch);
         else if (args.isFlagSet(kStraightenFlag[0])) setResult(s.brush.straighten);
         else if (args.isFlagSet(kTubeChannelFlag[0])) setResult(MString(tubeChannelName(s.brush.tubeChannel)));
+        else if (args.isFlagSet(kSmoothModeFlag[0])) setResult(MString(smoothModeName(s.brush.smoothMode)));
         else if (args.isFlagSet(kPressureFlag[0])) setResult(s.pressure);
         else if (args.isFlagSet(kPartNameFlag[0])) setResult(MString(s.partName.c_str()));
         else if (args.isFlagSet(kFlowSinkFlag[0])) setResult(MString(s.flowSink.c_str()));

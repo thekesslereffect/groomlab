@@ -336,6 +336,40 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
     }
     card_->addWidget(paints_);
 
+    // ---- Evens out (Smooth): curve, length, shape or all (choices.smoothMode), one at a time.
+    evens_ = new CardBlock(settingLabel("smoothMode"), this);
+    evens_->setObjectName(QStringLiteral("smoothModeBox"));
+    evens_->setToolTip(settingHint("smoothMode"));
+    {
+        FlowLayout* chips = nullptr;
+        evens_->rows()->addWidget(segmentRow(evens_, &chips));
+        auto* group = new QButtonGroup(evens_);
+        group->setExclusive(true);
+        for (const ui::json& item : defs().choices("smoothMode")) {
+            const std::string value = item.value("value", std::string());
+            QToolButton* c = makeChip(qs(item.value("label", std::string())), qs(item.value("tip", std::string())), evens_);
+            c->setProperty("smoothMode", qs(value));
+            c->setObjectName(QStringLiteral("smoothMode_") + qs(value));
+            group->addButton(c);
+            smoothModes_.push_back(c);
+            chips->addWidget(c);
+            connect(c, &QToolButton::clicked, this, [this, value] {
+                if (updating_ || !session_) return;
+                try {
+                    session_->settings().brush.smoothMode = smoothModeFromString(value);
+                } catch (const std::invalid_argument&) {
+                    return;
+                }
+                edited();
+            });
+        }
+        refreshers_.push_back([this] {
+            const QString current = QString::fromLatin1(smoothModeName(session_->settings().brush.smoothMode));
+            for (QToolButton* c : smoothModes_) c->setChecked(c->property("smoothMode").toString() == current);
+        });
+    }
+    card_->addWidget(evens_);
+
     // ---- Erases: what Erase removes, and a short note (the whole of it in the tip).
     erases_ = new CardBlock(settingLabel("erases"), this);
     erases_->setObjectName(QStringLiteral("eraseBox"));
@@ -807,6 +841,7 @@ void BrushPanel::setTool(const std::string& id) {
     setRowVisible(stretch_, uses("stretch"));
     setRowVisible(straighten_, uses("straighten"));
     paints_->setVisible(uses("tubeChannel"));
+    evens_->setVisible(uses("smoothMode"));
     erases_->setVisible(uses("erases"));
     keys_->setVisible(uses("lengthKeys"));
     flow_->setVisible(uses("flow"));

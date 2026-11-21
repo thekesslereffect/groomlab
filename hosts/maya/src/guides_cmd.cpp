@@ -130,6 +130,8 @@ const char* kSetGroupSegments[] = {"-sgs", "-setGroupSegments"};
 const char* kResetGroupSegments[] = {"-rgs", "-resetGroupSegments"};
 const char* kOnlySelected[] = {"-osl", "-onlySelected"};
 const char* kFreezeOthers[] = {"-fzo", "-freezeOthers"};
+// As -freezeOthers, the rest hidden instead (kHiddenLayer: the radial menu's Visibility > Select).
+const char* kHideOthers[] = {"-hdo", "-hideOthers"};
 const char* kReshape[] = {"-rsh", "-reshape"};  // <guide id> <curve>, multi-use
 // Guides given new points straight from JSON, as -reshape does from curves: {"<guide id>": [[x, y, z], ...]}
 // (world space). Tubes to Curves' live link reshapes its guides with it as the modeled tubes change.
@@ -364,6 +366,7 @@ MSyntax GuidesCmd::newSyntax() {
     s.addFlag(kPointCounts[0], kPointCounts[1]);
     s.addFlag(kOnlySelected[0], kOnlySelected[1]);
     s.addFlag(kFreezeOthers[0], kFreezeOthers[1]);
+    s.addFlag(kHideOthers[0], kHideOthers[1]);
     s.addFlag(kSetTube[0], kSetTube[1], MSyntax::kString);
     s.addFlag(kTube[0], kTube[1], MSyntax::kString);
     s.addFlag(kTubeShapes[0], kTubeShapes[1]);
@@ -587,7 +590,8 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
             modifier_.newPlugValue(groomFn.findPlug("guideSelection", true), data);
             // The Select tool's solo: every guide not selected frozen (none selected: all unfrozen),
             // in the same undo step as the selection.
-            if (db.isFlagSet(kFreezeOthers[0]) && freezeToSelection(*h, result)) {
+            const bool hide = db.isFlagSet(kHideOthers[0]);
+            if ((hide || db.isFlagSet(kFreezeOthers[0])) && freezeToSelection(*h, result, hide ? kHiddenLayer : "freeze")) {
                 h->evaluate(scalp.get());
                 modifier_.newPlugValueString(dataPlug, MString(h->toJson().c_str()));
             }
@@ -1109,7 +1113,9 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                 }
                 h->removeAttribute(name.asChar());
             } else if (db.isFlagSet(kInvertAttribute[0])) {
-                if (!invertFrozen(*h, flagString(db, kInvertAttribute[0], "freeze").asChar())) {
+                // (The hidden layer: what shows hidden, what is hidden, inherited too, shown: invertHidden.)
+                const std::string layer = flagString(db, kInvertAttribute[0], "freeze").asChar();
+                if (!(layer == kHiddenLayer ? invertHidden(*h) : invertFrozen(*h, layer))) {
                     return fail(kName, "the groom has no guides");
                 }
             } else if (db.isFlagSet(kResample[0])) {

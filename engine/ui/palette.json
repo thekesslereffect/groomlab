@@ -54,7 +54,7 @@
       "eraseNote": "Erase removes guides (with their children), parts and flow arrows, not the scattered hair. To take hair away, paint the density map holding Ctrl (Paint tab > + New Map > for a setting > Density).",
       "flowArrows": "Drag to lay arrows; drag over arrows to comb them; Ctrl erases.",
       "flowSinks": "Click to place, the size of the brush; Ctrl-click removes sinks.",
-      "labels": {"app": {"gestures": "B / M + drag (or middle-drag / Shift+middle-drag): radius / strength · Ctrl: the opposite (Length shortens, Lift lays down, Shape shrinks; painting, toward 0) · Shift+drag: smooth (the guides, a painted map, the Tube brush's channel) · Ctrl+Shift+drag (Shape and Trim brushes): paint guides into the selection, the rest freeze (over no guide: unfreeze all) · Page Up / Down: the level · Alt+Shift+X: symmetry · Y + click: the marking menu"}}
+      "labels": {"app": {"gestures": "B / M + drag (or middle-drag / Shift+middle-drag): radius / strength · Ctrl: the opposite (Length shortens, Lift lays down, Shape shrinks; painting, toward 0) · Shift+drag: smooth (the guides, a painted map, the Tube brush's channel) · Ctrl+Shift+drag (Shape and Trim brushes): paint guides into the selection, the rest freeze (over no guide: unfreeze all) · Page Up / Down: the level · Alt+Shift+X: symmetry · Alt+S: the radial menu"}}
     }
   }
 }

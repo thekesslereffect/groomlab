@@ -22,6 +22,7 @@
 
 #include <QElapsedTimer>
 #include <QImage>
+#include <QKeySequence>
 #include <QPixmap>
 #include <QMainWindow>
 #include <QPointF>
@@ -54,6 +55,7 @@ class QListWidget;
 class QMenu;
 class QProcessEnvironment;
 class QShowEvent;
+class QShortcut;
 class QToolButton;
 class QLineEdit;
 class QSpinBox;
@@ -406,10 +408,15 @@ public:
     QToolButton* cornerRender() const { return cornerRender_; }
     QToolButton* cornerExport() const { return cornerExport_; }
     AppShell* shell() { return shell_; }
-    // The marking menu (marking_menu.h; Y + click over the viewport): opened at `at` (the overlay
+    // The radial menu (marking_menu.h; Alt+S over the viewport): opened at `at` (the overlay
     // host's coordinates) with its items as the definitions and bindings give them now, `held`
     // while a button is down (a drag and its release pick); false (and a message) with no groom open.
-    bool showMarkingMenu(QPointF at, bool held);
+    bool showMarkingMenu(QPointF at, bool held, int key = 0);  // key: a held hotkey (Alt+S: Qt::Key_S)
+    // The radial menu's shortcut (one key with its modifiers; empty: Alt+S) and size (MarkingMenu::setScale),
+    // kept in the settings (Radial Menu Settings..., the wheel over the menu).
+    QKeySequence radialMenuShortcut() const;
+    void setRadialMenuShortcut(const QKeySequence& keys);
+    void setRadialMenuScale(qreal scale);
     MarkingMenu* markingMenu() const { return markingMenu_; }
     // The docks' layout (and the window's geometry) saved in the user's settings when a window
     // someone sits at closes, and put back at its next start (main.cpp); false when none was
@@ -846,6 +853,8 @@ private:
     Viewport* viewport_ = nullptr;
     OverlayHost* host_ = nullptr;
     MarkingMenu* markingMenu_ = nullptr;
+    int quickSelectBack_ = -1;  // Quick Select: the Viewport::ToolMode to go back to after one pick (-1 none)
+    QShortcut* radialShortcut_ = nullptr;  // the radial menu (Alt+S to start with)
     AppShell* shell_ = nullptr;
     bool layoutShown_ = false;     // the first showing set the docks' sizes (or a saved layout did)
     NodeGraphView* graph_ = nullptr;

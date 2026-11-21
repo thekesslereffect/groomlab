@@ -626,4 +626,15 @@ std::array<float, 3> rootTubeColor(std::size_t k);
 // loop on its root's drawn loop: GuideHierarchy::layRootRing.)
 Vec3f cageMap(const std::vector<SectionPoint>& cage, const std::vector<Vec3f>& to, const SectionPoint& q);
 
+// Guides hidden one by one (the app's radial menu > Visibility): a guide layer, 1 hidden, inherited
+// as the freeze mask is. A hidden guide is not drawn, cannot be picked and no brush touches it (it is
+// locked as well as hidden); the hair it guides still grows. The freeze helpers set it (brush.h:
+// soloGuides(h, keep, kHiddenLayer) hides the rest, unfreezeAll(h, kHiddenLayer) shows every guide,
+// invertHidden(h) swaps the shown and the hidden).
+inline constexpr const char* kHiddenLayer = "hidden";
+// Whether a guide is hidden: its hidden layer (its own, else inherited) 0.5 or more.
+bool guideHidden(const GuideHierarchy& hierarchy, const HierarchyGuide& guide);
+// Whether any guide is hidden.
+bool anyGuideHidden(const GuideHierarchy& hierarchy);
+
 }  // namespace groomlab

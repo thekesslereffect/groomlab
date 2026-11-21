@@ -20,7 +20,8 @@ namespace groomlab {
 
 // Guides of a hierarchy level (-1: every level) or, when `group` is set, of that group.
 std::vector<GuideId> guidesAt(const GuideHierarchy& h, int level, const std::string& group = {});
-// The same, less the guides of hidden groups (they cannot be picked).
+// The same, less the guides of hidden groups and the guides hidden one by one (guideHidden): they
+// cannot be picked.
 std::vector<GuideId> guidesAt(const GuideHierarchy& h, int level, const std::string& group,
                               const std::set<std::string>& hiddenGroups);
 

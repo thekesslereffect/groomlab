@@ -204,7 +204,10 @@ float guideWeight(const std::vector<Vec3f>& pts, const Weigh& weigh) {
     return w;
 }
 
+// Hidden from the brush: in a group hidden in the viewport, or hidden itself (guideHidden: hidden
+// guides are locked too).
 bool inHiddenGroup(const GuideHierarchy& h, const HierarchyGuide& g, const BrushSettings& s) {
+    if (guideHidden(h, g)) return true;
     if (s.hiddenGroups.empty()) return false;
     const GuideGroup* grp = h.group(g.group);
     return grp && s.hiddenGroups.count(grp->name) > 0;
@@ -583,6 +586,117 @@ BrushWeightFn mirroredWeight(const BrushWeightFn& weight, int axis, float center
     return [weight, axis, center](const Vec3f& p) { return weight(mirrorPoint(p, axis, center)); };
 }
 
+// ---- Smooth's Length and Shape: toward the guides under the brush ----------------------------
+
+constexpr int kShapeSamples = 16;  // the mean shape: a direction at each sixteenth of the length
+
+// The guides under one stamp as one: their mean length and mean shape, each guide by its weight.
+struct SmoothNeighborhood {
+    bool valid = false;  // two guides or more under the brush
+    float length = 0.0f;
+    std::array<Vec3f, kShapeSamples> directions{};
+};
+
+float polylineLength(const std::vector<Vec3f>& pts) {
+    float total = 0.0f;
+    for (std::size_t i = 1; i < pts.size(); ++i) total += (pts[i] - pts[i - 1]).length();
+    return total;
+}
+
+// The direction of the segment at fraction t (0 root, 1 tip) of a guide's length.
+Vec3f directionAt(const std::vector<Vec3f>& pts, float total, float t) {
+    const float at = std::clamp(t, 0.0f, 1.0f) * total;
+    float along = 0.0f;
+    for (std::size_t i = 1; i < pts.size(); ++i) {
+        const Vec3f d = pts[i] - pts[i - 1];
+        along += d.length();
+        if (along >= at || i + 1 == pts.size()) return d.normalized();
+    }
+    return {};
+}
+
+void addToNeighborhood(SmoothNeighborhood& hood, const std::vector<Vec3f>& pts, float weight, int& count, float& weights) {
+    if (pts.size() < 2 || weight <= 0.0f) return;
+    const float total = polylineLength(pts);
+    if (total <= 0.0f) return;
+    hood.length += total * weight;
+    for (int k = 0; k < kShapeSamples; ++k) {
+        hood.directions[k] = hood.directions[k] + directionAt(pts, total, (k + 0.5f) / kShapeSamples) * weight;
+    }
+    weights += weight;
+    ++count;
+}
+
+void finishNeighborhood(SmoothNeighborhood& hood, int count, float weights) {
+    hood.valid = count >= 2 && weights > 0.0f;
+    if (!hood.valid) return;
+    hood.length /= weights;
+    for (Vec3f& d : hood.directions) d = d.normalized();
+}
+
+// Smooth's Length, Shape or All on one guide: Curve's step first (All), then each segment turned
+// toward the mean shape's direction at its place along the guide (Shape, All), then the guide
+// scaled about its root toward the mean length (Length, All).
+template <class Weigh>
+Edit smoothTowardNeighbors(const HierarchyGuide& g, const ScalpMesh* scalp, const BrushSettings& s, const Weigh& weigh,
+                           const Vec3f& center, const Vec3f& drag, const SmoothNeighborhood& hood) {
+    Edit e;
+    if (g.points.size() < 2 || !hood.valid) return e;
+    std::vector<Vec3f> pts = g.points;
+    bool changed = false;
+    const float k = 0.5f * std::clamp(s.strength, 0.0f, 1.0f);
+    if (s.smoothMode == SmoothMode::All) {
+        Edit curve = brushGuide(g, scalp, s, weigh, center, drag);  // Smooth itself: Curve
+        if (!curve.points.empty()) {
+            pts = std::move(curve.points);
+            changed = true;
+        }
+    }
+    const std::size_t n = pts.size();
+    if (s.smoothMode == SmoothMode::Shape || s.smoothMode == SmoothMode::All) {
+        const std::vector<float> lengths = segmentLengths(pts);
+        const std::vector<float> rootToTip = profileAlong(pts, s);
+        const float total = polylineLength(pts);
+        if (total > 0.0f) {
+            std::vector<Vec3f> moved(n);
+            moved[0] = pts[0];
+            float along = 0.0f;
+            for (std::size_t i = 1; i < n; ++i) {
+                const float mid = (along + lengths[i] * 0.5f) / total;
+                along += lengths[i];
+                const Vec3f dir = (pts[i] - pts[i - 1]).normalized();
+                const float sample = std::clamp(mid * kShapeSamples - 0.5f, 0.0f, kShapeSamples - 1.0f);
+                const int a = static_cast<int>(sample), b = std::min(a + 1, kShapeSamples - 1);
+                const float f = sample - static_cast<float>(a);
+                Vec3f target = (hood.directions[a] * (1.0f - f) + hood.directions[b] * f).normalized();
+                float w = k * weigh(pts[i]);
+                if (!rootToTip.empty()) w *= std::clamp(rootToTip[i], 0.0f, 1.0f);
+                Vec3f turned = dir;
+                if (target.length() > 0.0f && w > 0.0f) {
+                    turned = (dir * (1.0f - w) + target * w).normalized();
+                    if (turned.length() == 0.0f) turned = dir;
+                } else {
+                    w = 0.0f;
+                }
+                moved[i] = moved[i - 1] + turned * lengths[i];
+                changed = changed || w > 0.0f;
+            }
+            pts = std::move(moved);
+        }
+    }
+    if (s.smoothMode == SmoothMode::Length || s.smoothMode == SmoothMode::All) {
+        const float total = polylineLength(pts);
+        const float w = k * guideWeight(pts, weigh);
+        if (total > 0.0f && w > 0.0f) {
+            const float scale = 1.0f + (hood.length / total - 1.0f) * w;
+            for (std::size_t i = 1; i < n; ++i) pts[i] = pts[0] + (pts[i] - pts[0]) * scale;
+            changed = true;
+        }
+    }
+    if (changed) e.points = std::move(pts);
+    return e;
+}
+
 // Scales a weigher's result by a guide's mask weight.
 struct MaskedWeigher {
     const Weigher& base;
@@ -896,12 +1010,26 @@ std::size_t stamp(GuideHierarchy& h, const ScalpMesh* scalp, const BrushSettings
     // for all of them first (in parallel when the weight may be called from several threads),
     // then applied in the targets' order, as one guide after another gives them.
     const bool collides = s.collide && scalp && scalp->triangleCount() > 0;
+    // Smooth's Length, Shape and All: the guides in reach as one first (their mean length and shape).
+    SmoothNeighborhood hood;
+    const bool neighbors = strokeMode(s) == BrushMode::Smooth && s.smoothMode != SmoothMode::Curve;
+    if (neighbors) {
+        int count = 0;
+        float weights = 0.0f;
+        for (const std::size_t k : reached) {
+            const HierarchyGuide& g = *h.guide(targets[k].first);
+            const MaskedWeigher masked{weigh, targets[k].second};
+            addToNeighborhood(hood, g.points, guideWeight(g.points, masked), count, weights);
+        }
+        finishNeighborhood(hood, count, weights);
+    }
     std::vector<Edit> edits(reached.size());
     auto make = [&](std::size_t r) {
         const std::size_t k = reached[r];
         const HierarchyGuide& g = *h.guide(targets[k].first);
         const MaskedWeigher masked{weigh, targets[k].second};
-        Edit e = brushGuide(g, scalp, s, masked, center, drag, cache ? cache->spacing[k] : 0.0f);
+        Edit e = neighbors ? smoothTowardNeighbors(g, scalp, s, masked, center, drag, hood)
+                           : brushGuide(g, scalp, s, masked, center, drag, cache ? cache->spacing[k] : 0.0f);
         if (!e.erase && !e.tubeEdited && std::isnan(e.attribute) && e.pointWeights.empty() && !e.points.empty() && collides) {
             e.points = keepOffScalp(e.points, *scalp, s.collideOffset);
         }
@@ -1287,6 +1415,24 @@ const char* tubeChannelName(TubeChannel channel) {
     return "width";
 }
 
+const char* smoothModeName(SmoothMode mode) {
+    switch (mode) {
+        case SmoothMode::Curve: return "curve";
+        case SmoothMode::Length: return "length";
+        case SmoothMode::Shape: return "shape";
+        case SmoothMode::All: return "all";
+    }
+    return "curve";
+}
+
+SmoothMode smoothModeFromString(const std::string& name) {
+    if (name == "curve") return SmoothMode::Curve;
+    if (name == "length") return SmoothMode::Length;
+    if (name == "shape") return SmoothMode::Shape;
+    if (name == "all") return SmoothMode::All;
+    throw std::invalid_argument("Smooth evens out curve, length, shape or all, not '" + name + "'");
+}
+
 TubeChannel tubeChannelFromString(const std::string& name) {
     if (name == "width") return TubeChannel::Width;
     if (name == "flatness") return TubeChannel::Flatness;
@@ -1481,6 +1627,14 @@ bool invertFrozen(GuideHierarchy& h, const std::string& freeze) {
         values.emplace_back(g.id, 1.0f - std::clamp(it == g.attributes.end() ? 0.0f : it->second, 0.0f, 1.0f));
     }
     for (const auto& [id, v] : values) h.setAttribute(id, freeze, v);
+    return true;
+}
+
+bool invertHidden(GuideHierarchy& h) {
+    if (h.guides().empty()) return false;
+    std::vector<std::pair<GuideId, float>> values;
+    for (const HierarchyGuide& g : h.guides()) values.emplace_back(g.id, guideHidden(h, g) ? 0.0f : 1.0f);
+    for (const auto& [id, v] : values) h.setAttribute(id, kHiddenLayer, v);
     return true;
 }
 
