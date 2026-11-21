@@ -120,6 +120,10 @@ struct BrushSettings {
     // parts before the first point moved and after the last stay as they
     // were, point for point: pulled from its middle, its ends keep their shape).
     bool stretch = false;
+    // Smooth as Comb's Shift smoothing with Stretch on (useShiftSmoothing): the guides relax
+    // without keeping their segments' lengths (shorter where they straighten), points going where
+    // the segments shrink, as Stretch gains them where they grow.
+    bool stretchSmoothing = false;
     // Smooth: relax guides toward the straight line along their root direction
     // (Straighten) instead of only taking kinks out.
     bool straighten = false;

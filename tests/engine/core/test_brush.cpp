@@ -178,6 +178,47 @@ TEST(Brush, CombWithStretchChangesLength) {
         for (std::size_t i = 1; i < pulled.size(); ++i) EXPECT_LT((pulled[i] - pulled[i - 1]).length(), 0.15f) << i;
     }
 
+    // Comb's Shift smoothing with Stretch on, over a kinked, unevenly spaced guide (a Snake Hook's):
+    // the kink relaxes and the guide shortens, points going (never a kink put back by its old
+    // lengths); without Stretch the lengths are kept.
+    {
+        std::vector<Vec3f> zig;
+        for (int i = 0; i <= 30; ++i) {
+            const float y = 0.05f * static_cast<float>(i);
+            zig.push_back({i % 2 ? 0.1f : 0.0f, y, 0.0f});  // a deep zigzag in a straight guide
+        }
+        for (const bool stretch : {true, false}) {
+            GuideHierarchy z;
+            const GroupId zg = z.addGroup("primary");
+            const GuideId zid = z.addGuide(zg, zig);
+            z.evaluate(nullptr);
+            BrushSettings zs;
+            zs.mode = BrushMode::Comb;
+            zs.stretch = stretch;
+            zs.radius = 2.0f;
+            zs.strength = 1.0f;
+            useShiftSmoothing(zs);
+            EXPECT_EQ(zs.mode, BrushMode::Smooth);
+            EXPECT_EQ(zs.stretchSmoothing, stretch);
+            for (int k = 0; k < 6; ++k) applyBrushStroke(z, nullptr, zs, {{0, 0.75f, 0}, {0, 0.76f, 0}});
+            const auto& smoothed = z.guide(zid)->points;
+            float wiggle = 0.0f;  // how far a point is off its neighbours' middle
+            for (std::size_t i = 1; i + 1 < smoothed.size(); ++i) {
+                wiggle = std::max(wiggle, (smoothed[i] - (smoothed[i - 1] + smoothed[i + 1]) * 0.5f).length());
+            }
+            if (stretch) {
+                EXPECT_LT(smoothed.size(), zig.size()) << "points go as it shortens";
+                EXPECT_LT(arcLength(smoothed.data(), smoothed.size()), arcLength(zig.data(), zig.size()));
+                EXPECT_LT(wiggle, 0.02f) << "the zigzag smoothed out (it was 0.1)";
+            } else {
+                EXPECT_EQ(smoothed.size(), zig.size());
+                EXPECT_NEAR(arcLength(smoothed.data(), smoothed.size()), arcLength(zig.data(), zig.size()), 1e-3f);
+            }
+            endShiftSmoothing(zs, BrushMode::Comb);
+            EXPECT_FALSE(zs.stretchSmoothing);
+        }
+    }
+
     // Pushed back toward the root: shorter, and points go with the length.
     s.stretch = true;
     const std::size_t grown = h.guide(id)->points.size();

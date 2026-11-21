@@ -325,6 +325,7 @@ Edit brushGuide(const HierarchyGuide& g, const ScalpMesh* scalp, const BrushSett
         }
         case BrushMode::Smooth: {
             std::vector<Vec3f> moved;  // the points, copied once one moves
+            std::size_t first = 0, last = 0;  // the first and the last point moved
             for (std::size_t i = 1; i < n; ++i) {
                 // Laplacian step capped at 0.5: larger steps overshoot alternating kinks.
                 float w = 0.5f * std::clamp(s.strength, 0.0f, 1.0f) * weigh(pts[i]);
@@ -332,10 +333,18 @@ Edit brushGuide(const HierarchyGuide& g, const ScalpMesh* scalp, const BrushSett
                 if (w <= 0.0f) continue;
                 const Vec3f target = i + 1 < n ? (pts[i - 1] + pts[i + 1]) * 0.5f
                                                : (n >= 3 ? pts[i - 1] * 2.0f - pts[i - 2] : pts[i]);
-                if (moved.empty()) moved = pts;
+                if (moved.empty()) {
+                    moved = pts;
+                    first = i;
+                }
+                last = i;
                 moved[i] = pts[i] + (target - pts[i]) * w;
             }
-            if (!moved.empty()) e.points = keepLengths(moved, segmentLengths(pts));
+            if (moved.empty()) return e;
+            // Comb's Shift smoothing with Stretch on: the shape relaxes and shortens where it
+            // straightens (its lengths forced back, short segments a Snake Hook left would kink),
+            // points going where segments shrink (stretched); else each segment keeps its length.
+            e.points = s.stretchSmoothing ? stretched(moved, first, last, spacing) : keepLengths(moved, segmentLengths(pts));
             return e;
         }
         case BrushMode::Lift: {
@@ -1235,6 +1244,7 @@ void useShiftSmoothing(BrushSettings& settings) {
     if (settings.mode == BrushMode::ShapeTube) {
         settings.smoothTube = true;
     } else {
+        settings.stretchSmoothing = settings.mode == BrushMode::Comb && settings.stretch;  // (Comb's Stretch)
         settings.mode = BrushMode::Smooth;
     }
 }
@@ -1242,6 +1252,7 @@ void useShiftSmoothing(BrushSettings& settings) {
 void endShiftSmoothing(BrushSettings& settings, BrushMode mode) {
     settings.mode = mode;
     settings.smoothTube = false;
+    settings.stretchSmoothing = false;
 }
 
 const char* tubeChannelName(TubeChannel channel) {
