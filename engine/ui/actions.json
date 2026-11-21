@@ -195,6 +195,11 @@
     "guides.mirrorToOther": {"label": "Copy Shape to Other Side", "tip": "Give each selected guide's mirror guide its exact mirror image (shape, frame, tube, painted layers), across the brushes' Mirror (X when off); one is made where none is. Groom one side, mirror, then tweak"},
     "guides.mirrorGroup": {"label": "Mirror Group...", "tip": "Copy a root group from one side to the other"},
     "guides.reparent": {"label": "Reparent...", "tip": "Move the selected children under another parent"},
+    "guides.moveToGroup": {"label": "Move to Group", "tip": "Move the selected guides into another group at their level: their children follow, into its child group"},
+    "guides.duplicateToGroup": {"label": "Duplicate to Group", "tip": "Copies of the selected guides (and their children) in a group at their level"},
+    "guides.newGroupFromSelection": {"label": "New Group from Selection", "tip": "A new group beside the selected guides' group, the guides (and their children) moved into it"},
+    "guides.copy": {"label": "Copy Guides", "tip": "Copy the selected guides (and their children) to the clipboard: Paste Guides adds them to a group of this or another groom, in Maya, Blender or the app"},
+    "guides.paste": {"label": "Paste Guides", "tip": "Add the copied guides (and their children) to the picked group, a group at the level they were copied from", "needs": ["group"]},
     "guides.fromCurves": {"label": "From Curves", "tip": "Add the selected Maya curves as primary guides", "tips": {"blender": "Add the selected curve objects (Curve or hair Curves) as primary guides, each curve's first point its root"}, "hosts": ["maya", "blender"]},
     "guides.clearSelection": {"label": "Clear Selection", "tip": "Deselect every guide"},
 

@@ -343,6 +343,35 @@ public:
     // Guides on the plane are left alone. Needs an evaluated hierarchy (the
     // children's world shapes). Returns the new guide IDs.
     std::vector<GuideId> mirrorAll(int axis, float center, bool fromPositive);
+
+    // ---- Regrouping (every host's Move to Group, New Group from Selection, Copy and Paste
+    // Guides, Duplicate to Group) ----
+    // The groups `guides` can move or be duplicated to: those beside their group (the same parent
+    // group, so the same level and the same parent guides), in the hierarchy's order, their own
+    // groups too. Empty when the guides are at different levels (or none).
+    std::vector<GroupId> groupsBeside(const std::vector<GuideId>& guides) const;
+    // Moves `guides` into `target`, a group beside theirs (groupsBeside; std::invalid_argument
+    // otherwise). Each keeps its shape and its parent; its descendants follow into the target's
+    // child groups (the one at their own child group's place among its siblings, made where the
+    // target has none there, named after the target, with the segments of the group they leave).
+    void moveGuidesToGroup(const std::vector<GuideId>& guides, GroupId target);
+    // A new group beside the guides' group (a free name from `base`, "group" when empty; the
+    // segments of the first guide's group), and the guides moved into it (moveGuidesToGroup).
+    // Returns it; std::invalid_argument for guides at different levels or none.
+    GroupId newGroupFromGuides(const std::vector<GuideId>& guides, const std::string& base);
+    // Copy Guides: `guides` (those whose ancestor is among them go with it) and their descendants
+    // as text (JSON, "groomlab.guides"): each one's world shape, tube, frame and painted layers,
+    // the level they came from. Hierarchy-independent: it pastes into another groom too.
+    std::string copyGuidesJson(const std::vector<GuideId>& guides) const;
+    // Paste Guides: copyGuidesJson's guides added to `target`, a group at the level they came from
+    // (std::invalid_argument otherwise, or for text that is not copied guides), their descendants
+    // into the target's child groups as moveGuidesToGroup places them. Copies of child guides
+    // follow the guide they followed where it is in the target's parent group (a duplicate beside
+    // its source), else the guide there whose root is nearest theirs. New IDs; shapes as copied
+    // (primaries root on the scalp at the next evaluate). Returns the new guides, parents first.
+    std::vector<GuideId> pasteGuidesJson(const std::string& text, GroupId target);
+    // Duplicate to Group: pasteGuidesJson(copyGuidesJson(guides), target).
+    std::vector<GuideId> duplicateGuidesToGroup(const std::vector<GuideId>& guides, GroupId target);
     // A symmetry, for mirrorShapes: a point's mirror image, a direction at a point mirrored, and
     // the side a guide's root is on (1 or -1; 0 on the seam).
     struct Mirror {

@@ -1412,6 +1412,55 @@ class GROOMLAB_OT_guides_reparent(GroomToolOperator):
         return {"FINISHED"}
 
 
+REGROUP_ACTIONS = (("MOVE", "Move to Group", "Move the selected guides into another group at their level: their children follow"),
+                   ("DUPLICATE", "Duplicate to Group", "Copies of the selected guides (and their children) in a group at their level"),
+                   ("NEW_GROUP", "New Group from Selection", "A new group beside the selected guides' group, the guides moved into it"),
+                   ("COPY", "Copy Guides", "Copy the selected guides (and their children) to the clipboard"),
+                   ("PASTE", "Paste Guides", "Add the copied guides to the picked group"))
+
+
+class GROOMLAB_OT_guides_regroup(GroomToolOperator):
+    """Move or duplicate the selected guides to another group, make a group of them, or copy and paste guides (their children go with them)"""
+    bl_idname = "groomlab.guides_regroup"
+    bl_label = "Regroup Guides"
+    bl_options = {"REGISTER", "UNDO"}
+
+    action: EnumProperty(items=REGROUP_ACTIONS)
+    group: StringProperty(name="Group", options={"SKIP_SAVE"}, description="The group they go to")
+
+    @classmethod
+    def description(cls, context, properties):
+        return next((tip for k, _l, tip in REGROUP_ACTIONS if k == properties.action), "")
+
+    def execute(self, context):
+        scalp = active(context)
+        a = self.action
+        try:
+            if a == "PASTE":
+                _level, group = tools.group_target(context.scene)
+                if not group:
+                    self.report({"ERROR"}, "Pick a group to paste into")
+                    return {"CANCELLED"}
+                r = tools.guides_edit(scalp, "paste_guides", text=context.window_manager.clipboard, group=group)
+                self.report({"INFO"}, "%d guides pasted into %s" % (len(r.get("made") or []), group))
+                return {"FINISHED"}
+            ids = tools.selected_guides(scalp)
+            if not ids:
+                self.report({"ERROR"}, "No guides selected")
+                return {"CANCELLED"}
+            if a == "COPY":
+                context.window_manager.clipboard = tools.guides_copy(scalp, ids)
+                self.report({"INFO"}, "%d guides copied: Paste Guides adds them to a group" % len(ids))
+            elif a == "NEW_GROUP":
+                r = tools.guides_edit(scalp, "new_group_from", ids=ids, name="group")
+                self.report({"INFO"}, "guides moved into %s" % r.get("group", ""))
+            else:
+                tools.guides_edit(scalp, "duplicate_to_group" if a == "DUPLICATE" else "move_to_group", ids=ids, group=self.group)
+        except HelperError as e:
+            return _fail(self, e)
+        return {"FINISHED"}
+
+
 # ---- Parts and flow (the Part and Flow tools' cards) -------------------------------------------------
 
 class GROOMLAB_OT_guides_from_curves(GroomToolOperator):
@@ -2381,7 +2430,7 @@ classes = (GROOMLAB_OT_tool_modal, GROOMLAB_OT_tool, GROOMLAB_OT_tool_exit, GROO
            GROOMLAB_OT_map_set_channels, GROOMLAB_OT_map_reload, GROOMLAB_OT_map_show_file,
            GROOMLAB_OT_alpha_add, GROOMLAB_OT_alpha_folder, GROOMLAB_OT_alpha_clear,
            GROOMLAB_OT_group_color, GROOMLAB_OT_group_promote_demote, GROOMLAB_OT_guides_mirror_group,
-           GROOMLAB_OT_guides_reparent, GROOMLAB_OT_part_remove, GROOMLAB_OT_parts_clear, GROOMLAB_OT_guides_from_curves, GROOMLAB_OT_parts_from_curves, GROOMLAB_OT_guides_to_curves,
+           GROOMLAB_OT_guides_reparent, GROOMLAB_OT_guides_regroup, GROOMLAB_OT_part_remove, GROOMLAB_OT_parts_clear, GROOMLAB_OT_guides_from_curves, GROOMLAB_OT_parts_from_curves, GROOMLAB_OT_guides_to_curves,
            GROOMLAB_OT_curves_to_guides, GROOMLAB_OT_strands_to_curves, GROOMLAB_OT_flow_clear,
            GROOMLAB_OT_length_edit, GROOMLAB_OT_root_tube, GROOMLAB_OT_tube_level,
            GROOMLAB_OT_tube_apply, GROOMLAB_OT_tube_smooth, GROOMLAB_OT_tube_shape_custom, GROOMLAB_OT_tube_shape_new,

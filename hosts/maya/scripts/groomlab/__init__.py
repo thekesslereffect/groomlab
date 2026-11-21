@@ -61,6 +61,7 @@ from groomlab.guides import (  # noqa: F401
     isolate_group, list_guide_groups, lock_guides, mirror_group, mirror_guide_selection, mirror_to_other_side,
     preview_resample_guides,
     promote_group, remove_guide_group, rename_guide_group, reparent_guides, resample_guides, reset_group_segments,
+    move_guides_to_group, duplicate_guides_to_group, new_group_from_guides, copy_guides, paste_guides, groups_beside,
     select_guides, select_tool,
     selected_guides, set_group_segments, set_guide_attribute, set_guide_group_color, set_sculpt_display, set_soft_selection,
     show_guide_group, symmetry_sync, unlock_guides, set_tube, get_tube, TUBE_SHAPES, _group_list,

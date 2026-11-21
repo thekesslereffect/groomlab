@@ -255,8 +255,9 @@ class DefinitionsTest(unittest.TestCase):
         # The Photos tab's menus: the photo's (its actions need a photo picked) and the pairs'.
         self.assertEqual(texts(drawn(bpy.types.GROOMLAB_MT_photo_context)), ["Import Photo..."])
         edits = drawn(bpy.types.GROOMLAB_MT_guide_edits)
-        self.assertEqual(texts(edits)[:11], ["Children", "Sync +X → -X", "Sync -X → +X", "Select Mirror Guides",
+        self.assertEqual(texts(edits)[:13], ["Children", "Sync +X → -X", "Sync -X → +X", "Select Mirror Guides",
                                              "Copy Shape to Other Side", "Mirror Group...", "Reparent...",
+                                             "New Group from Selection", "Copy Guides",  # (Paste: a group picked)
                                              "Promote / Demote...", "From Curves", "Clear Selection",
                                              "Lock"])  # From Curves: Blender's curve objects
         # Groups' right-click menu without a group: New Group only.
@@ -354,6 +355,27 @@ class ToolsTest(unittest.TestCase):
         depth = tools.groom_tools(head).undo.get("undoDepth")
         self.assertEqual(bpy.ops.groomlab.guides_reparent(parent=ids[3]), {"FINISHED"})
         self.assertEqual(tools.groom_tools(head).undo.get("undoDepth"), depth + 1)
+        # Issue #94: a child into a new group beside its own, back by Move to Group (the menu
+        # lists the groups beside), duplicated, copied and pasted into the picked group.
+        tools.selection_set(head, ids=children[:1], mode="replace")
+        beside = tools.guides_groups_beside(head, children[:1])
+        self.assertIn(child_group, beside)
+        self.assertEqual(bpy.ops.groomlab.guides_regroup(action="NEW_GROUP"), {"FINISHED"})
+        made = [g.name for g in t.groups if g.parent == "primary" and g.name != child_group]
+        self.assertEqual(len(made), 1)
+        self.assertEqual(bpy.ops.groomlab.guides_regroup(action="MOVE", group=child_group), {"FINISHED"})
+        self.assertIn(children[0], [int(i) for i in tools.guide_segments(head, group=child_group)["ids"]])
+        self.assertEqual(bpy.ops.groomlab.guides_regroup(action="DUPLICATE", group=made[0]), {"FINISHED"})
+        self.assertEqual(len(tools.guide_segments(head, group=made[0])["ids"]), 1)
+        self.assertEqual(bpy.ops.groomlab.guides_regroup(action="COPY"), {"FINISHED"})
+        # (A headless Blender keeps no clipboard: the copied text pasted as Paste Guides pastes it.)
+        text = tools.guides_copy(head, children[:1])
+        self.assertIn("groomlab.guides", text)
+        tools.guides_edit(head, "paste_guides", text=text, group=made[0])
+        self.assertEqual(len(tools.guide_segments(head, group=made[0])["ids"]), 2)
+        t.group = tools.ALL_GROUPS
+        for _ in range(4):
+            bpy.ops.groomlab.tool_undo()
         bpy.ops.groomlab.tool_undo()
         bpy.ops.groomlab.tool_undo()  # the children
         # Promote / Demote and Mirror Group (dialogs; run here with their values).

@@ -336,6 +336,11 @@ class GuidesTab(_GroomTab):
             self.owner.symmetry_name() if hasattr(self.owner, "symmetry_name") else "x")),
         "guides.mirrorGroup": lambda self: self.menu_action(menu.mirror_group_dialog),
         "guides.reparent": lambda self: self.menu_action(menu.reparent_dialog),
+        "guides.moveToGroup": "move_to_group",
+        "guides.duplicateToGroup": "duplicate_to_group",
+        "guides.newGroupFromSelection": "new_group_from_selection",
+        "guides.copy": "copy_guides",
+        "guides.paste": "paste_guides",
         "group.promoteDemote": "promote_demote",
         "guides.fromCurves": lambda self: self.menu_action(menu.guides_from_selected_curves),
         "guides.clearSelection": lambda self: self.menu_action(menu.clear_selection),
@@ -420,7 +425,8 @@ class GuidesTab(_GroomTab):
         edits.setToolTip(lists["edits"]["tip"])
         edits.setPopupMode(QtWidgets.QToolButton.InstantPopup)
         self.edits_menu = QtWidgets.QMenu(edits)
-        widgets.fill_menu(self.edits_menu, lists["edits"]["items"], bind)
+        widgets.fill_menu(self.edits_menu, lists["edits"]["items"], bind,
+                          generators={"guideGroups": widgets.menu_filler(lambda menu, item: self.fill_group_menu(menu, item))})
         self.edits_menu.setToolTipsVisible(True)
         edits.setMenu(self.edits_menu)
         row = QtWidgets.QHBoxLayout()
@@ -752,6 +758,72 @@ class GuidesTab(_GroomTab):
         self.run(fn)
         if self.groom:
             self.refresh()
+
+    # ---- Regrouping (core guide_hierarchy.h: every host's) ----
+
+    def fill_group_menu(self, target, item):
+        """Move to Group / Duplicate to Group: the groups beside the selected guides' (filled as the
+        submenu opens)."""
+        import groomlab
+        duplicate = (item.get("entry") or {}).get("action") == "guides.duplicateToGroup"
+
+        def fill():
+            target.clear()
+            names = []
+            if self.groom:
+                try:
+                    names = groomlab.groups_beside(self.groom)
+                except RuntimeError:
+                    names = []
+            if not names:
+                none = target.addAction("(select guides of one level)")
+                none.setEnabled(False)
+                return
+            for name in names:
+                act = target.addAction(name)
+                act.triggered.connect(lambda _=False, n=name: self.regroup(n, duplicate))
+        target.aboutToShow.connect(fill)
+
+    def regroup(self, group, duplicate):
+        import groomlab
+        if not self.need():
+            return
+        fn = groomlab.duplicate_guides_to_group if duplicate else groomlab.move_guides_to_group
+        self.menu_action(lambda: fn(self.groom, group))
+
+    def move_to_group(self, group):
+        self.regroup(group, False)
+
+    def duplicate_to_group(self, group):
+        self.regroup(group, True)
+
+    def new_group_from_selection(self):
+        import groomlab
+        if not self.need():
+            return
+        self.menu_action(lambda: groomlab.new_group_from_guides(self.groom, "group"))
+
+    def copy_guides(self):
+        """Copy Guides: the selected guides' text on the clipboard (Paste Guides in any host)."""
+        import groomlab
+        if not self.need():
+            return
+        text = self.run(lambda: groomlab.copy_guides(self.groom))
+        if text and text is not True:
+            QtWidgets.QApplication.clipboard().setText(text)
+            self.status("guides copied: Paste Guides adds them to a group")
+
+    def paste_guides(self):
+        """Paste Guides: the clipboard's copied guides into the picked group."""
+        import groomlab
+        if not self.need():
+            return
+        group = self.group() or (self.owner.current_group() if hasattr(self.owner, "current_group") else "")
+        if not group:
+            self.status("pick a group to paste into")
+            return
+        text = QtWidgets.QApplication.clipboard().text()
+        self.menu_action(lambda: groomlab.paste_guides(self.groom, text, group))
 
     def generate_children(self):
         """Edit Guides > Children: the inline count of children for the selected guides, else for

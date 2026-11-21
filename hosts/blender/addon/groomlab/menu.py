@@ -86,8 +86,20 @@ def resolve(entries, context, conditions=True):
     as an action bar shows them), the host's generators left out."""
     from . import themes
     return definitions.resolve(entries, state(context) if conditions else None, keep=actions.bound,
-                               generators={"themes": themes.menu_entries, "themeMenu": theme_menu},
+                               generators={"themes": themes.menu_entries, "themeMenu": theme_menu, "guideGroups": guide_groups},
                                drop_generators=True)
+
+
+def guide_groups(entry):
+    """Move to Group / Duplicate to Group: the groups beside the selected guides' (core groupsBeside)."""
+    import bpy
+    from . import tools
+    from .ops import active_groom
+    scalp = active_groom(bpy.context)
+    if scalp is None:
+        return []
+    names = tools.guides_groups_beside(scalp, tools.selected_guides(scalp))
+    return [{"id": entry["action"], "value": name, "label": name} for name in names]
 
 
 # The "themeMenu" generator (the Groom Tools' More menu, the Graph Editor's Edit menu): the GroomLab

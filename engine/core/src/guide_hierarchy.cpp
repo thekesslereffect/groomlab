@@ -2821,4 +2821,229 @@ TubeTargets tubeTargetsOf(const GuideHierarchy& h, const std::vector<GuideId>& s
     return out;
 }
 
+// ---------------------------------------------------------------------------
+// Regrouping
+
+namespace {
+constexpr const char* kGuidesClipboard = "groomlab.guides";
+}  // namespace
+
+std::vector<GroupId> GuideHierarchy::groupsBeside(const std::vector<GuideId>& ids) const {
+    std::vector<GroupId> out;
+    GroupId parent = kNoGroup;
+    bool first = true;
+    for (const GuideId id : ids) {
+        const HierarchyGuide* g = guide(id);
+        const GuideGroup* grp = g ? group(g->group) : nullptr;
+        if (!grp) return {};
+        if (!first && grp->parent != parent) return {};  // (different levels or parents)
+        parent = grp->parent;
+        first = false;
+    }
+    if (first) return {};
+    for (const GuideGroup& grp : groups_) {
+        if (grp.parent == parent) out.push_back(grp.id);
+    }
+    return out;
+}
+
+namespace {
+// The selection's guides whose ancestors are not in it (the others go with them).
+std::vector<GuideId> topGuides(const GuideHierarchy& h, const std::vector<GuideId>& ids) {
+    const std::set<GuideId> chosen(ids.begin(), ids.end());
+    std::vector<GuideId> tops;
+    std::set<GuideId> seen;
+    for (const GuideId id : ids) {
+        if (!seen.insert(id).second) continue;
+        bool under = false;
+        for (const HierarchyGuide* g = h.guide(id); g && g->parent != kNoGuide && !under; g = h.guide(g->parent)) {
+            under = chosen.count(g->parent) > 0;
+        }
+        if (!under) tops.push_back(id);
+    }
+    return tops;
+}
+}  // namespace
+
+// A group's child groups in the hierarchy's order.
+static std::vector<GroupId> childGroupsOf(const std::vector<GuideGroup>& groups, GroupId parent) {
+    std::vector<GroupId> out;
+    for (const GuideGroup& g : groups) {
+        if (g.parent == parent) out.push_back(g.id);
+    }
+    return out;
+}
+
+void GuideHierarchy::moveGuidesToGroup(const std::vector<GuideId>& ids, GroupId target) {
+    const GuideGroup* to = group(target);
+    if (!to) throw std::invalid_argument("Move to Group: no such group");
+    const std::vector<GroupId> beside = groupsBeside(ids);
+    if (ids.empty()) return;
+    if (std::find(beside.begin(), beside.end(), target) == beside.end()) {
+        throw std::invalid_argument("Move to Group: '" + to->name +
+                                    "' is not beside the guides' group (a group at their level, under the same parent group)");
+    }
+    invalidateHash();
+    // A guide into `into`, its children into into's child group at their group's place among
+    // the child groups of the one they leave (made where it has none there).
+    std::function<void(GuideId, GroupId)> place = [&](GuideId id, GroupId into) {
+        HierarchyGuide* g = mutableGuide(id);
+        const GroupId was = g->group;
+        if (was == into) return;
+        g->group = into;
+        const std::vector<GroupId> fromKids = childGroupsOf(groups_, was);
+        for (const GuideId child : childrenOf(id)) {
+            const GroupId childGroup = guide(child)->group;
+            const auto at = static_cast<std::size_t>(std::find(fromKids.begin(), fromKids.end(), childGroup) - fromKids.begin());
+            std::vector<GroupId> toKids = childGroupsOf(groups_, into);
+            while (toKids.size() <= at) {
+                const std::string base = group(into)->name + "_children";
+                const GroupId made = addGroup(freeGroupName(base), into);
+                if (const GuideGroup* left = group(childGroup)) setGroupSegments(made, left->segments);
+                toKids.push_back(made);
+            }
+            place(child, toKids[at]);
+        }
+    };
+    for (const GuideId id : topGuides(*this, ids)) place(id, target);
+}
+
+GroupId GuideHierarchy::newGroupFromGuides(const std::vector<GuideId>& ids, const std::string& base) {
+    const std::vector<GroupId> beside = groupsBeside(ids);
+    if (beside.empty()) throw std::invalid_argument("New Group from Selection: select guides of one level");
+    const GuideGroup* from = group(guide(ids.front())->group);
+    const GroupId parent = from->parent;
+    const int segments = from->segments;
+    const GroupId made = addGroup(freeGroupName(base.empty() ? std::string("group") : base), parent);
+    setGroupSegments(made, segments);
+    moveGuidesToGroup(ids, made);
+    return made;
+}
+
+std::string GuideHierarchy::copyGuidesJson(const std::vector<GuideId>& ids) const {
+    const std::vector<GuideId> tops = topGuides(*this, ids);
+    if (tops.empty()) return {};
+    std::function<json(const HierarchyGuide&)> node = [&](const HierarchyGuide& g) {
+        json j = guideToJson(g);
+        j["world"] = vecsToJson(g.points);
+        const GuideGroup* grp = group(g.group);
+        if (grp && grp->parent != kNoGroup) {
+            // Its group's place among its parent group's child groups (where a paste puts it).
+            const std::vector<GroupId> siblings = childGroupsOf(groups_, grp->parent);
+            j["groupIndex"] = std::find(siblings.begin(), siblings.end(), g.group) - siblings.begin();
+        }
+        json kids = json::array();
+        for (const GuideId child : childrenOf(g.id)) {
+            if (const HierarchyGuide* c = guide(child)) kids.push_back(node(*c));
+        }
+        if (!kids.empty()) j["children"] = std::move(kids);
+        return j;
+    };
+    json guides = json::array();
+    int level = -1;
+    for (const GuideId id : tops) {
+        const HierarchyGuide* g = guide(id);
+        if (!g) continue;
+        const int depth = groupDepth(g->group);
+        if (level >= 0 && depth != level) throw std::invalid_argument("Copy Guides: select guides of one level");
+        level = depth;
+        guides.push_back(node(*g));
+    }
+    return json{{"format", kGuidesClipboard}, {"version", 1}, {"level", level}, {"guides", std::move(guides)}}.dump();
+}
+
+std::vector<GuideId> GuideHierarchy::pasteGuidesJson(const std::string& text, GroupId target) {
+    json doc;
+    try {
+        doc = json::parse(text);
+    } catch (const std::exception&) {
+        throw std::invalid_argument("Paste Guides: the clipboard holds no copied guides");
+    }
+    if (!doc.is_object() || doc.value("format", std::string()) != kGuidesClipboard || !doc.contains("guides")) {
+        throw std::invalid_argument("Paste Guides: the clipboard holds no copied guides");
+    }
+    const GuideGroup* to = group(target);
+    if (!to) throw std::invalid_argument("Paste Guides: no such group");
+    const int level = doc.value("level", 0);
+    if (groupDepth(target) != level) {
+        throw std::invalid_argument("Paste Guides: the guides were copied from level " + std::to_string(level) + "; '" + to->name +
+                                    "' is at level " + std::to_string(groupDepth(target)));
+    }
+    std::vector<GuideId> made;
+    std::function<void(const json&, GroupId, GuideId)> add = [&](const json& j, GroupId into, GuideId parentCopy) {
+        if (!j.contains("world")) return;
+        std::vector<Vec3f> points = vecsFromJson(j.at("world"));
+        if (points.size() < 2) return;
+        HierarchyGuide src;
+        try {
+            json own = j;
+            own["id"] = 0;
+            own["group"] = into;
+            src = guideFromJson(own, tubeShapes_, nullptr);
+        } catch (const std::exception&) {
+            return;  // (not a guide)
+        }
+        const GuideGroup* grp = group(into);
+        GuideId copy = kNoGuide;
+        if (grp->parent == kNoGroup) {
+            copy = addGuide(into, points, src.tube);
+        } else {
+            GuideId parent = parentCopy;
+            if (parent == kNoGuide) {
+                // Its own parent where it is in the target's parent group (a duplicate beside its
+                // source), else the guide there whose root is nearest.
+                const GuideId own = j.value("parent", kNoGuide);
+                const HierarchyGuide* p = guide(own);
+                if (p && p->group == grp->parent) {
+                    parent = own;
+                } else {
+                    float best = std::numeric_limits<float>::max();
+                    for (const HierarchyGuide& g : guides_) {
+                        if (g.group != grp->parent || g.points.empty()) continue;
+                        const Vec3f gap = g.points.front() - points.front();
+                        const float d = gap.dot(gap);
+                        if (d < best) {
+                            best = d;
+                            parent = g.id;
+                        }
+                    }
+                }
+                if (parent == kNoGuide) throw std::invalid_argument("Paste Guides: '" + grp->name + "''s parent group has no guides to follow");
+            }
+            copy = addChildGuide(into, parent, points, src.tube);
+        }
+        HierarchyGuide* c = mutableGuide(copy);
+        c->attributes = src.attributes;
+        c->pointAttributes = src.pointAttributes;
+        c->frameUp = src.frameUp;
+        c->ownSegments = src.ownSegments;
+        fitLayers(*c);
+        if (src.locked) lock(copy);
+        made.push_back(copy);
+        if (j.contains("children") && j.at("children").is_array()) {
+            for (const json& kid : j.at("children")) {
+                const auto at = static_cast<std::size_t>(std::max(0, kid.value("groupIndex", 0)));
+                std::vector<GroupId> toKids = childGroupsOf(groups_, into);
+                while (toKids.size() <= at) {
+                    toKids.push_back(addGroup(freeGroupName(group(into)->name + "_children"), into));
+                }
+                add(kid, toKids[at], copy);
+            }
+        }
+    };
+    invalidateHash();
+    for (const json& j : doc.at("guides")) add(j, target, kNoGuide);
+    return made;
+}
+
+std::vector<GuideId> GuideHierarchy::duplicateGuidesToGroup(const std::vector<GuideId>& ids, GroupId target) {
+    const std::vector<GroupId> beside = groupsBeside(ids);
+    if (std::find(beside.begin(), beside.end(), target) == beside.end()) {
+        const GuideGroup* to = group(target);
+        throw std::invalid_argument("Duplicate to Group: '" + (to ? to->name : std::string("?")) +
+                                    "' is not beside the guides' group (a group at their level, under the same parent group)");
+    }
+    return pasteGuidesJson(copyGuidesJson(ids), target);
+}
+
 }  // namespace groomlab

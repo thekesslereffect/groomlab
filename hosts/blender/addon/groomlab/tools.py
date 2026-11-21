@@ -572,6 +572,21 @@ def undo(scalp, redo=False):
     return r
 
 
+def guides_copy(scalp, ids):
+    """Copy Guides: the guides' text (core copyGuidesJson): Paste Guides in any host."""
+    return call(scalp, "guides_copy", ids=[int(i) for i in ids])["text"]
+
+
+def guides_groups_beside(scalp, ids):
+    """The groups the guides can move or be duplicated to (core groupsBeside)."""
+    if not ids:
+        return []
+    try:
+        return call(scalp, "guides_groups_beside", ids=[int(i) for i in ids])["groups"]
+    except HelperError:
+        return []
+
+
 def guides_edit(scalp, op, **args):
     r = call(scalp, "guides_edit", op=op, **args)
     after_edit(scalp, groom.scene_of(scalp), r.get("undo"), refresh=True)

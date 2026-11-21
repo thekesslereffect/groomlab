@@ -259,6 +259,40 @@ def reparent_guides(groom, parent, guides=None):
     return cmds.groomLabGuides(groom, reparent=str(parent), **_targets(guides))
 
 
+def move_guides_to_group(groom, group, guides=None):
+    """Move guides (default: the selected ones) and their children into `group`, a group beside
+    theirs (guides_beside_groups lists them). Returns how many moved."""
+    return cmds.groomLabGuides(groom, moveToGroup=group, **_targets(guides))
+
+
+def duplicate_guides_to_group(groom, group, guides=None):
+    """Copies of guides (default: the selected ones) and their children in `group`, a group beside
+    theirs. Returns the new guides' IDs."""
+    return [int(i) for i in cmds.groomLabGuides(groom, duplicateToGroup=group, **_targets(guides)) or []]
+
+
+def new_group_from_guides(groom, name="group", guides=None):
+    """A new group beside the guides' (default: the selected ones), the guides moved into it.
+    Returns its name."""
+    return cmds.groomLabGuides(groom, newGroupFrom=name, **_targets(guides))
+
+
+def copy_guides(groom, guides=None):
+    """The guides (default: the selected ones) and their children as text (core copyGuidesJson):
+    Paste Guides adds them to a group of this or another groom."""
+    return cmds.groomLabGuides(groom, copyGuides=True, **_targets(guides))
+
+
+def paste_guides(groom, text, group):
+    """Copied guides (copy_guides' text) added to `group`. Returns the new guides' IDs."""
+    return [int(i) for i in cmds.groomLabGuides(groom, pasteGuides=(text, group)) or []]
+
+
+def groups_beside(groom, guides=None):
+    """The groups the guides (default: the selected ones) can move or be duplicated to."""
+    return cmds.groomLabGuides(groom, groupsBeside=True, **_targets(guides)) or []
+
+
 def promote_group(groom, group):
     """Move a group one level up the hierarchy (a group reaching the top becomes primaries)."""
     cmds.groomLabGuides(groom, promote=group)

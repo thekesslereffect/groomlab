@@ -1537,6 +1537,32 @@ json guidesEdit(ToolState& t, const json& args) {
         r["reshaped"] = done.reshaped.size();
         r["added"] = done.created.size();
         r["removed"] = done.removed.size();
+    } else if (op == "move_to_group" || op == "duplicate_to_group") {
+        // Regrouping (guide_hierarchy.h, every host's): the guides into a group beside theirs.
+        const bool duplicate = op == "duplicate_to_group";
+        json made = json::array();
+        editGuides(t, duplicate ? "duplicate guides" : "move guides", [&](GuideHierarchy& h) {
+            const GroupId target = groupNamed(h, args, "group");
+            const std::vector<GuideId> ids = targets(h);
+            if (duplicate) {
+                for (const GuideId id : h.duplicateGuidesToGroup(ids, target)) made.push_back(id);
+            } else {
+                h.moveGuidesToGroup(ids, target);
+            }
+        });
+        r["made"] = made;
+    } else if (op == "new_group_from") {
+        std::string name;
+        editGuides(t, "new group from selection", [&](GuideHierarchy& h) {
+            name = h.group(h.newGroupFromGuides(targets(h), optString(args, "name", "group")))->name;
+        });
+        r["group"] = name;
+    } else if (op == "paste_guides") {
+        json made = json::array();
+        editGuides(t, "paste guides", [&](GuideHierarchy& h) {
+            for (const GuideId id : h.pasteGuidesJson(needString(args, "text"), groupNamed(h, args, "group"))) made.push_back(id);
+        });
+        r["made"] = made;
     } else if (op == "promote_group") {
         editGuides(t, "promote group", [&](GuideHierarchy& h) { h.promoteGroup(groupNamed(h, args, "group")); });
     } else if (op == "demote_group") {
@@ -1623,6 +1649,7 @@ json guidesEdit(ToolState& t, const json& args) {
         fail("bad_request",
              "op is add_group, remove_group, rename_group, generate_children, delete_guides, lock, unlock, set_attribute, "
              "freeze, unfreeze, unfreeze_all, invert_frozen, remove_layer, mirror_all, mirror_group, promote_group, demote_group, reparent, "
+             "move_to_group, duplicate_to_group, new_group_from, paste_guides, "
              "resample, mirror_selection, set_group_color, set_group_segments or reset_group_segments");
     }
     r["undo"] = undoJson(t);
