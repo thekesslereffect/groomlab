@@ -714,6 +714,7 @@ private:
     bool hitScalp_ = false;  // the stroke has started (on hair or on the scalp)
     bool inverted_ = false;  // Ctrl held at press
     Vec3f planePoint_, planeNormal_, last_;
+    float lastX_ = 0.0f, lastY_ = 0.0f;  // the last dab's screen position (Snake Hook weighs there)
     std::shared_ptr<GuideHierarchy> base_;  // Draw: the guides before the stroke
     std::set<GuideId> placedBefore_;        // Place, Draw: the guides before the stroke (solo new guides)
     std::vector<Vec3f> drawPath_;

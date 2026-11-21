@@ -117,7 +117,8 @@ struct BrushSettings {
     // their length, as ZBrush's Snake Hook: the part the brush moves is respaced
     // along its new path at the segment length the guide had when the stroke
     // began, so a pulled guide gains points and a pushed one loses them (the
-    // root part before the first point moved stays as it was).
+    // parts before the first point moved and after the last stay as they
+    // were, point for point: pulled from its middle, its ends keep their shape).
     bool stretch = false;
     // Smooth: relax guides toward the straight line along their root direction
     // (Straighten) instead of only taking kinks out.

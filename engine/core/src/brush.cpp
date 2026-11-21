@@ -243,24 +243,47 @@ struct Edit {
     bool erase = false;
 };
 
-// The points a stretched guide gets (Comb with Stretch, as ZBrush's Snake Hook): `pts` as they
-// were up to `first` (the first point the drag moved; the root part stays exactly), then `moved`
-// from the point before it respaced along its new path at `spacing` (the guide's mean segment
-// length when the stroke began): a pulled guide gains points, a pushed one loses them, its
-// segments staying about as long as they were. At least 2 points, at most kMaxStretchPoints.
+// The points a stretched guide gets (Comb with Stretch, as ZBrush's Snake Hook): `moved` (the
+// points as the drag moved them, `first` to `last` those it moved), with points added where a
+// segment of the stretched span (the point before the first moved to the point after the last)
+// grew past 1.5 x `spacing` (the guide's mean segment length when the stroke began: points along
+// it, as many as keep its pieces about that long) and points taken out where the span's segments
+// shrank under half of it. The points themselves never move along the curve: what the brush holds
+// stays where the drag put it (respaced, a held point would be cut off its corner every dab), and
+// the parts outside the span are kept point for point. At least 2 points, at most
+// kMaxStretchPoints; without a spacing, the points as they were moved.
 constexpr std::size_t kMaxStretchPoints = 257;  // 256 segments: Scatter's and Resample's most
-std::vector<Vec3f> stretched(const std::vector<Vec3f>& pts, const std::vector<Vec3f>& moved, std::size_t first, float spacing) {
-    const std::size_t n = pts.size();
+std::vector<Vec3f> stretched(const std::vector<Vec3f>& moved, std::size_t first, std::size_t last, float spacing) {
+    const std::size_t n = moved.size();
+    if (!(spacing > 0.0f) || n < 2) return moved;
     const std::size_t from = first - 1;  // (first >= 1: the root never moves)
-    const float length = arcLength(moved.data() + from, n - from);
-    std::size_t segments = n - 1 - from;  // as many as it had, without a spacing
-    if (spacing > 0.0f && std::isfinite(length)) {
-        segments = static_cast<std::size_t>(std::max(std::lround(length / spacing), 1L));
+    const std::size_t to = std::min(last + 1, n - 1);
+    std::vector<Vec3f> out(moved.begin(), moved.begin() + static_cast<std::ptrdiff_t>(from) + 1);
+    // The span's segments: split the long ones, and drop a point (never the span's ends) where its
+    // segment from the last kept one is short.
+    for (std::size_t i = from + 1; i <= to; ++i) {
+        const Vec3f& a = out.back();
+        const Vec3f& b = moved[i];
+        const float length = (b - a).length();
+        if (i < to && length < 0.5f * spacing) continue;  // too close: merged into the next
+        if (length > 1.5f * spacing) {
+            const auto pieces = static_cast<std::size_t>(std::lround(length / spacing));
+            for (std::size_t k = 1; k < pieces; ++k) out.push_back(a + (b - a) * (static_cast<float>(k) / static_cast<float>(pieces)));
+        }
+        out.push_back(b);
     }
-    segments = std::min(segments, kMaxStretchPoints - 1 - from);
-    const std::vector<Vec3f> tail = resampleByArcLength(moved.data() + from, n - from, std::max<std::size_t>(segments, 1) + 1);
-    std::vector<Vec3f> out(pts.begin(), pts.begin() + static_cast<std::ptrdiff_t>(from));
-    out.insert(out.end(), tail.begin(), tail.end());
+    out.insert(out.end(), moved.begin() + static_cast<std::ptrdiff_t>(to) + 1, moved.end());
+    if (out.size() > kMaxStretchPoints) {
+        // Too many for a guide: the span respaced to what is left (rare: a pull of hundreds of segments).
+        const std::size_t kept = n - (to - from + 1);
+        const std::size_t spanOut = std::max<std::size_t>(kMaxStretchPoints > kept ? kMaxStretchPoints - kept : 2, 2);
+        const std::size_t spanIn = out.size() - kept;
+        const std::vector<Vec3f> span = resampleByArcLength(out.data() + from, spanIn, spanOut);
+        std::vector<Vec3f> capped(moved.begin(), moved.begin() + static_cast<std::ptrdiff_t>(from));
+        capped.insert(capped.end(), span.begin(), span.end());
+        capped.insert(capped.end(), moved.begin() + static_cast<std::ptrdiff_t>(to) + 1, moved.end());
+        return capped;
+    }
     return out;
 }
 
@@ -281,7 +304,7 @@ Edit brushGuide(const HierarchyGuide& g, const ScalpMesh* scalp, const BrushSett
         case BrushMode::Comb: {
             if (drag.length() == 0.0f) return e;
             std::vector<Vec3f> moved;  // the points, copied once one moves
-            std::size_t first = 0;     // the first point moved
+            std::size_t first = 0, last = 0;  // the first and the last point moved
             for (std::size_t i = 1; i < n; ++i) {
                 float w = weigh(pts[i]);
                 if (profiled) w *= rootToTip[i];
@@ -290,13 +313,14 @@ Edit brushGuide(const HierarchyGuide& g, const ScalpMesh* scalp, const BrushSett
                     moved = pts;
                     first = i;
                 }
+                last = i;
                 moved[i] += drag * (s.strength * w);
             }
             if (moved.empty()) return e;
             // Stretch (Snake Hook): the guide takes the length the drag gives it, gaining or
             // losing points to keep its segments' length (stretched); else each segment keeps its
             // length.
-            e.points = s.stretch ? stretched(pts, moved, first, spacing) : keepLengths(moved, segmentLengths(pts));
+            e.points = s.stretch ? stretched(moved, first, last, spacing) : keepLengths(moved, segmentLengths(pts));
             return e;
         }
         case BrushMode::Smooth: {
@@ -780,7 +804,11 @@ std::size_t stamp(GuideHierarchy& h, const ScalpMesh* scalp, const BrushSettings
                   const Vec3f& drag, const BrushWeightFn& weight, const BrushReachFn& reach, BrushStrokeCache::State* cache,
                   bool threadSafeWeight, std::set<GuideId>* changedIds, const std::set<GuideId>* skip = nullptr,
                   std::set<GuideId>* touched = nullptr, const GuideSideFn* sideOf = nullptr, int keepSide = 0) {
-    const Weigher weigh{center, s.radius, weight, falloffOf(s)};
+    // Comb with Stretch (Snake Hook): the points are weighed where the brush was before this drag,
+    // so what it holds goes along with it (weighed where it is now, a point the drag leaves
+    // behind lets go: pulled from a guide's middle, the guide would stay behind the cursor).
+    const Vec3f at = strokeMode(s) == BrushMode::Comb && s.stretch ? center - drag : center;
+    const Weigher weigh{at, s.radius, weight, falloffOf(s)};
     // Collect targets first: edits below must not disturb the iteration.
     std::vector<std::pair<GuideId, float>> collected;
     if (cache) {
@@ -795,7 +823,7 @@ std::size_t stamp(GuideHierarchy& h, const ScalpMesh* scalp, const BrushSettings
     const bool sphere = !weight;
     const bool culls = sphere || static_cast<bool>(reach);
     auto reaches = [&](const Vec3f& lo, const Vec3f& hi) {
-        return sphere ? sphereReaches(center, s.radius, lo, hi) : reach(lo, hi);
+        return sphere ? sphereReaches(at, s.radius, lo, hi) : reach(lo, hi);
     };
     std::vector<signed char> clusterReaches;  // per cluster: -1 not tested yet
     if (cache && culls) {

@@ -452,16 +452,22 @@ void BrushTool::stampAt(StrokeHost& host, const ToolView& view, float x, float y
     if (guides) {
         // Guides out of the circle's reach skipped; the guides' edits made in parallel when the
         // weight reads the view's matrix (thread-safe), as brushReach says.
-        const BrushReachFn reach = view.brushReach(x, y, std::max(settings.screenRadius, 1.0f));
         BrushSettings b = pressed();
+        // Comb with Stretch (Snake Hook): weighed where the brush was before this drag, so what it
+        // holds goes along with it (as applyBrushStamp's sphere is).
+        const bool snake = b.mode == BrushMode::Comb && b.stretch && !first;
+        const float wx = snake ? lastX_ : x, wy = snake ? lastY_ : y;
+        const BrushReachFn reach = view.brushReach(wx, wy, std::max(settings.screenRadius, 1.0f));
         if (b.mirrorTopology) b.radius = worldRadiusAt(view, center, x, y);  // the partner stamp's sphere: the ring's
-        if (applyBrushStamp(*working_, scalp_.get(), b, center, drag, screenWeight(view, x, y), reach, &strokeCache_,
+        if (applyBrushStamp(*working_, scalp_.get(), b, center, drag, screenWeight(view, wx, wy), reach, &strokeCache_,
                             static_cast<bool>(reach)) > 0) {
             changed_ = true;
         }
     }
     stampOverlays(view, center, drag, x, y);
     last_ = center;
+    lastX_ = x;
+    lastY_ = y;
 }
 
 void BrushTool::stampOverlays(const ToolView& view, const Vec3f& center, const Vec3f& drag, float x, float y) {

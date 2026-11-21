@@ -150,6 +150,34 @@ TEST(Brush, CombWithStretchChangesLength) {
     applyBrushStroke(h, nullptr, s, {{0.2f, 1.2f, 0}, {0.5f, 1.2f, 0}});
     EXPECT_NEAR(arcLength(h.guide(id)->points.data(), h.guide(id)->points.size()), before, 1e-3f);
 
+    // Issue #96: pulled out from its middle (a small brush there, sideways), the guide follows the brush
+    // and stretches there alone: the root part and the tip part keep their points exactly.
+    {
+        GuideHierarchy m;
+        const GroupId mg = m.addGroup("primary");
+        const GuideId mid = m.addGuide(mg, test::straightCurve({0, 0, 0}, {0, 2, 0}, 20));
+        m.evaluate(nullptr);
+        const std::vector<Vec3f> before = m.guide(mid)->points;
+        BrushSettings ms = s;
+        ms.stretch = true;
+        ms.radius = 0.25f;
+        applyBrushStroke(m, nullptr, ms, {{0, 1.0f, 0}, {0.3f, 1.0f, 0}, {0.6f, 1.0f, 0}, {0.9f, 1.0f, 0}});
+        const auto& pulled = m.guide(mid)->points;
+        EXPECT_GT(pulled.size(), before.size());  // points added in the stretched span
+        // Root side (y < 0.7) and tip side (y > 1.3): the very points they had.
+        std::size_t rootKept = 0, tipKept = 0;
+        for (std::size_t i = 0; i < before.size() && before[i].y < 0.7f; ++i, ++rootKept) EXPECT_EQ(pulled[i], before[i]) << i;
+        for (std::size_t k = 0; k < before.size() && before[before.size() - 1 - k].y > 1.3f; ++k, ++tipKept) {
+            EXPECT_EQ(pulled[pulled.size() - 1 - k], before[before.size() - 1 - k]) << k;
+        }
+        EXPECT_GT(rootKept, 5u);
+        EXPECT_GT(tipKept, 5u);
+        float far = 0.0f;
+        for (const Vec3f& q : pulled) far = std::max(far, q.x);
+        EXPECT_GT(far, 0.75f);  // pulled out sideways, along with the brush (a 0.9 stroke)
+        for (std::size_t i = 1; i < pulled.size(); ++i) EXPECT_LT((pulled[i] - pulled[i - 1]).length(), 0.15f) << i;
+    }
+
     // Pushed back toward the root: shorter, and points go with the length.
     s.stretch = true;
     const std::size_t grown = h.guide(id)->points.size();
