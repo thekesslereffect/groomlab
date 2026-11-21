@@ -612,6 +612,11 @@ void LookEngine::putStrandData(const LookRun& run, bool frames) {
     dataKey_ = std::move(key);
 }
 
+std::uint32_t LookEngine::fieldWord(std::size_t at) const {
+    if (at * 2 + 1 >= fieldLayout_.size()) return 0u;
+    return (fieldLayout_[at * 2] << 30) | fieldLayout_[at * 2 + 1];
+}
+
 void LookEngine::putFields(const LookFields& fields, const std::vector<StageParams>& stages) {
     if (fields.serial && fields.serial == fieldSerial_ && fieldLayout_.size() == fields.stages.size() * kFieldSlots * 2) return;
     std::vector<std::uint32_t> layout(fields.stages.size() * kFieldSlots * 2, 0);
@@ -622,13 +627,14 @@ void LookEngine::putFields(const LookFields& fields, const std::vector<StagePara
     programs_.assign(fields.stages.size() * kFieldSlots, ProgramAt{});
     for (std::size_t k = 0; k < fields.stages.size(); ++k) {
         for (std::size_t i = 0; i < kFieldSlots; ++i) {
-            const FieldValues& f = i < 2 ? fields.stages[k].field[i] : fields.stages[k].affect;  // (the affect: a masked node's)
+            const FieldValues& f = i + 1 < kFieldSlots ? fields.stages[k].field[i] : fields.stages[k].affect;  // (the last: a masked node's affect)
             // (Up a Merge's input a: read on a's strands, the base's first.)
             const std::size_t strands = k < stages.size() ? stageStrands(stages[k]) : strandCount_;
             const std::size_t points = k < stages.size() ? stagePoints(stages[k]) : pointCount_;
             const std::size_t want = f.mode == FieldValues::kPerPoint ? points : f.mode == FieldValues::kPerStrand ? strands : 0;
             if (f.values.size() != want) throw std::runtime_error("GPU preview: mapped values read from other strands than the base");
             layout[(k * kFieldSlots + i) * 2] = static_cast<std::uint32_t>(f.mode);
+            if (values.size() >= kFieldOffsetLimit) throw std::runtime_error("GPU preview: too many mapped values");
             layout[(k * kFieldSlots + i) * 2 + 1] = static_cast<std::uint32_t>(values.size());
             values.insert(values.end(), f.values.begin(), f.values.end());
             if (const FieldProgram* p = f.program.get()) {
@@ -660,6 +666,23 @@ void LookEngine::putFields(const LookFields& fields, const std::vector<StagePara
                     if (p->ops[o] == 1u && p->ops[o + 1] == 4u) at.normal = true;
                 }
             }
+        }
+    }
+    // Each stage's mapped params after the third: a table of their words (fieldWord's) after the
+    // values, its place plus 1 in fieldTables_ (look.slang's gField.w; 0: none).
+    fieldTables_.assign(fields.stages.size(), 0u);
+    for (std::size_t k = 0; k < fields.stages.size(); ++k) {
+        bool any = false;
+        for (std::size_t i = kDirectFields; i < static_cast<std::size_t>(kMappedFields); ++i) any = any || layout[(k * kFieldSlots + i) * 2] != 0;
+        if (!any) continue;
+        if (values.size() + kMappedFields >= kFieldOffsetLimit) throw std::runtime_error("GPU preview: too many mapped values");
+        fieldTables_[k] = static_cast<std::uint32_t>(values.size()) + 1u;
+        for (std::size_t i = kDirectFields; i < static_cast<std::size_t>(kMappedFields); ++i) {
+            const std::size_t at = (k * kFieldSlots + i) * 2;
+            const std::uint32_t word = (layout[at] << 30) | layout[at + 1];
+            float bits = 0.0f;
+            std::memcpy(&bits, &word, 4);
+            values.push_back(bits);
         }
     }
     if (!programs.empty()) {
@@ -1530,6 +1553,7 @@ void LookEngine::prepare(const LookRun& run, bool frames) {
     if (run.fields.stages.empty()) {
         if (fieldLayout_.size() != run.params.stages.size() * kFieldSlots * 2 || fieldSerial_ != 0) {
             fieldLayout_.assign(run.params.stages.size() * kFieldSlots * 2, 0);
+            fieldTables_.assign(run.params.stages.size(), 0u);
             const float none = 0.0f;
             write(kFields, &none, 4, false);
             fieldSerial_ = 0;
@@ -1657,7 +1681,9 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
         for (int i = 0; i < 4; ++i) {
             c.value[i] = p.value[i];
             c.flag[i] = static_cast<std::uint32_t>(p.flag[i]);
-            c.field[i] = k * kFieldSlots * 2 + i < fieldLayout_.size() ? fieldLayout_[k * kFieldSlots * 2 + i] : 0u;
+            // Mapped params 0 to 2, then where the stage's table of the others is (look.slang fieldWord).
+            c.field[i] = i < static_cast<int>(kDirectFields) ? fieldWord(k * kFieldSlots + static_cast<std::size_t>(i))
+                                                            : (k < fieldTables_.size() ? fieldTables_[k] : 0u);
             c.aux[i] = held_[k].aux[i];
         }
         if (p.stage.kind == StageKind::Interpolate) {
@@ -1736,7 +1762,7 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
     };
     // FieldCS (and LongestCS before it) making a field's values from the points the stage takes.
     auto fieldSteps = [&](std::size_t k, int in) {
-        for (std::size_t i = 0; i < kFieldSlots; ++i) {  // (2: a masked node's affect, on what it takes)
+        for (std::size_t i = 0; i < kFieldSlots; ++i) {  // (the last: a masked node's affect, on what it takes)
             const std::size_t at = k * kFieldSlots + i;
             if (at >= programs_.size() || !programs_[at].on) continue;
             const ProgramAt& p = programs_[at];
@@ -2048,9 +2074,7 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
         c.uniformCount = static_cast<std::uint32_t>(uniformCount_);
         c.pointCount = static_cast<std::uint32_t>(stagePoints(p));
         c.value[0] = p.affect;
-        const std::size_t at = (first * kFieldSlots + 2) * 2;
-        c.field[0] = at < fieldLayout_.size() ? fieldLayout_[at] : 0u;
-        c.field[1] = at + 1 < fieldLayout_.size() ? fieldLayout_[at + 1] : 0u;
+        c.field[0] = fieldWord(first * kFieldSlots + kFieldSlots - 1);  // (its affect, read as mapped param 0)
         Binding b;
         b.in = taken(stages[first].stage.from);
         if (width) {

@@ -1315,6 +1315,52 @@ TEST_P(LookEngineTest, MappedParamsPerStrandAndPerPoint) {
     expectClose(runAndCompare(plain, {}, plain, "noise"));
 }
 
+TEST_P(LookEngineTest, MoreMappedParamsPerStrand) {
+    // Each by an expression per strand (reading no positions): the Clump's flatness, strengthRandom
+    // and strandStrengthRandom, Length's randomness, Noise's frequency, Curl's frequency, randomness,
+    // phase, phaseRandom and spacingRandom, Width's randomness; then a weighted Curl's weight and a
+    // Curl coherent by clump (its numbers at each clump's first core strand). From the Clump (the
+    // first stage the GPU changes): the graph's own values.
+    LookGraph g;
+    g.length = true;
+    // (A ribbon turned at random per clump: one lying along the scalp on strands straight out of it is
+    // the CPU's, ClumpVariesItsClumpsAsTheCpuDoes.)
+    g.clump = R"("params": {"strength": 0.8, "flatAlong": "random", "flatness": {"expression": "rand", "min": 0.0, "max": 0.9},
+                            "strengthRandom": {"expression": "rand", "min": 0.0, "max": 0.6},
+                            "strandStrengthRandom": {"expression": "rand", "min": 0.0, "max": 0.5}})";
+    g.lengthNode = R"("params": {"keep": 0.9, "fraction": 0.7, "randomness": {"expression": "rand", "min": 0.1, "max": 0.6}})";
+    g.noise = R"("params": {"amplitude": 0.3, "frequency": {"expression": "rand", "min": 0.5, "max": 2.5}, "octaves": 2})";
+    g.curl = R"("params": {"radius": 0.1, "frequency": {"expression": "rand", "min": 0.4, "max": 1.2},
+                           "randomness": {"expression": "rand", "min": 0.0, "max": 0.8}, "phase": {"expression": "rand", "min": 0.0, "max": 1.0},
+                           "phaseRandom": {"expression": "rand", "min": 0.0, "max": 0.5},
+                           "spacingRandom": {"expression": "rand", "min": 0.0, "max": 0.6}})";
+    g.width = R"("params": {"width": 0.01, "randomness": {"expression": "rand", "min": 0.0, "max": 0.7}})";
+    {
+        GroomSession session(groom(g.json()));
+        ASSERT_TRUE(session.evaluate(ViewRequest{}).strands);
+        ASSERT_TRUE(session.last().errors.empty()) << session.last().errors.front();
+        const Prepared p = prepare(session, {}, "clump");
+        EXPECT_EQ(p.run.fields.stages[0].field[2].mode, gpu::FieldValues::kPerStrand);  // the Clump's flatness
+        expectClose(runAndCompare(session, {}, session, "clump"));
+    }
+    LookGraph w = g;
+    w.curl = R"("params": {"radius": 0.1, "frequency": 0.9, "weight": {"expression": "rand", "min": 0.0, "max": 1.5},
+                           "weightDirection": [0.0, -1.0, 0.0]})";
+    {
+        GroomSession session(groom(w.json()));
+        ASSERT_TRUE(session.evaluate(ViewRequest{}).strands);
+        expectClose(runAndCompare(session, {}, session, "clump"));
+    }
+    LookGraph c = g;
+    c.curl = R"("params": {"radius": 0.1, "coherence": "clump", "frequency": {"expression": "rand", "min": 0.4, "max": 1.2},
+                           "phase": {"expression": "rand", "min": 0.0, "max": 1.0}})";
+    {
+        GroomSession session(groom(c.json()));
+        ASSERT_TRUE(session.evaluate(ViewRequest{}).strands);
+        expectClose(runAndCompare(session, {}, session, "clump"));
+    }
+}
+
 TEST_P(LookEngineTest, ADragKeepsTheMaps) {
     // A number dragged while other params are maps that read no positions: the maps' values as
     // read once, the dragged number's.
@@ -1999,8 +2045,8 @@ TEST(GpuPreview, StageTableNamesRealTypesAndParams) {
         }
     };
     const std::set<std::string> numbers = {"float", "int", "bool"};
-#define GROOMLAB_STAGE(Kind, name, mapped0, mapped1, ramps, vectors, nums) \
-    check(#Kind, mapped0 " " mapped1, "mapped", {});                       \
+#define GROOMLAB_STAGE(Kind, name, mapped, ramps, vectors, nums) \
+    check(#Kind, mapped, "mapped", {});                             \
     check(#Kind, ramps, "ramps", {"ramp"});                                \
     check(#Kind, vectors, "vectors", {"vec3"});                            \
     check(#Kind, nums, "numbers", numbers);
@@ -5085,7 +5131,12 @@ TEST_P(LookEngineTest, DirectionTurnsAsTheCpuDoes) {
         {R"("params": {"inclination": {"expression": "rand", "min": 20.0, "max": 80.0}, "strength": {"expression": "rand", "min": 0.2, "max": 1.0},
                        "roll": 45.0, "along": "direction", "direction": [1.0, 0.0, 0.0]})",
          false},
-        {R"("params": {"inclination": 70.0, "roll": {"expression": "rand", "min": -90.0, "max": 90.0}, "strength": 0.6})", true}};
+        {R"("params": {"inclination": 70.0, "roll": {"expression": "rand", "min": -90.0, "max": 90.0}, "strength": 0.6})", true},
+        // All five mapped (each its own field).
+        {R"("params": {"inclination": {"expression": "rand", "min": 20.0, "max": 80.0}, "roll": {"expression": "rand", "min": -60.0, "max": 60.0},
+                       "strength": {"expression": "rand", "min": 0.3, "max": 1.0}, "inclinationRandom": {"expression": "rand", "min": 0.0, "max": 15.0},
+                       "rollRandom": {"expression": "rand", "min": 0.0, "max": 40.0}, "along": "direction", "seed": 3})",
+         false}};
     for (const auto& [params, uvs] : cases) {
         SCOPED_TRACE(params);
         const std::string graph = shaperGraph("Direction", params);
@@ -5277,8 +5328,8 @@ TEST_P(LookEngineTest, ShapersAtAHundredThousandStrands) {
 
 TEST(GpuPreview, ShapersAreTheGpusAndMirrorStartsARun) {
     // Bend, Direction, Transform, Displace and Twist are stages, their numbers, vectors, seeds and
-    // profiles previewable; a direction per strand (an expression) and a Direction mapping all three
-    // of its params are the CPU's, saying why. Mirror adds and drops strands (new IDs, roots found
+    // profiles previewable; a direction per strand (an expression) is the CPU's, saying why (a
+    // Direction's mapped params are each a field of its own: DirectionTurnsAsTheCpuDoes). Mirror adds and drops strands (new IDs, roots found
     // again on the scalp): a run's first stage, its result the base (the nodes up its input a run of
     // their own: CullSplitAndMirrorRunADragUpTheirInputAsTheCpuDoes).
     std::string why;
@@ -5302,9 +5353,7 @@ TEST(GpuPreview, ShapersAreTheGpusAndMirrorStartsARun) {
     EXPECT_FALSE(gpu::previewableParam("Mirror", "offset"));
     const std::pair<std::string, std::string> refused[] = {
         {"Bend", R"("params": {"along": "direction", "direction": {"expression": "[x, -1, 0]"}})"},
-        {"Displace", R"("params": {"along": "direction", "direction": {"expression": "[0, 1, z]"}})"},
-        {"Direction", R"("params": {"inclination": {"expression": "40 * rand", "min": 0.0, "max": 1.0}, "roll": {"expression": "rand", "min": 0.0, "max": 1.0},
-                                    "strength": {"expression": "rand", "min": 0.0, "max": 1.0}})"}};
+        {"Displace", R"("params": {"along": "direction", "direction": {"expression": "[0, 1, z]"}})"}};
     for (const auto& [type, params] : refused) {
         SCOPED_TRACE(type);
         GroomSession session(groom(shaperGraph(type, params)));

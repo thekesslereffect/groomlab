@@ -67,13 +67,13 @@ public:
         return {
             ParamSpec{"direction", Vec3f{1.0f, 0.0f, 0.0f}, "Where the wind blows to (world space)"}.world(),
             ParamSpec{"strength", 0.3, "How far strands bend with the wind, 0-1 (mappable); 0: no wind"}.soft(0, 1),
-            ParamSpec{"gust", 0.5, "How much the wind varies over space and time, 0-1 (0: steady)"}.range(0, 1),
+            ParamSpec{"gust", 0.5, "How much the wind varies over space and time, 0-1 (mappable; 0: steady)"}.range(0, 1),
             ParamSpec{"frequency", 0.1, "Gust size: noise features per scene unit (smaller: broader gusts)", "perLength"}
                 .atLeast(0)
                 .soft(0, 1),
             ParamSpec{"speed", 20.0, "How fast the gusts travel with the wind, scene units per second", "length"}
                 .soft(0, 100),
-            ParamSpec{"turbulence", 0.2, "A fast small flutter growing toward the tips, 0-1"}.atLeast(0).soft(0, 1),
+            ParamSpec{"turbulence", 0.2, "A fast small flutter growing toward the tips, 0-1 (mappable)"}.atLeast(0).soft(0, 1),
             {"profile", Ramp{{0.0f, 0.0f}, {0.4f, 0.25f}, {1.0f, 1.0f}}, "How much each part bends, root to tip"},
             notAnimatable({"loop", false, "Repeat the wind every loopEnd - loopStart frames, seamlessly: a looping "
                                           "animation (the gusts repeat speed x the loop's length apart along the wind)"}),
@@ -158,7 +158,7 @@ private:
         if (incremental) {
             changes = someStrandsChanged(*incremental, 0);
             last = changes ? previousStrandsFor(*incremental, *in) : nullptr;
-            if (!last || !strength.strandLocal()) return false;
+            if (!last || !strength.strandLocal() || !paramsStrandLocal(params(), {"gust", "turbulence"}, scalp, *in)) return false;
             if (changes->none()) {  // the same strands in: the same result
                 *result = last;
                 *changed = *changes;

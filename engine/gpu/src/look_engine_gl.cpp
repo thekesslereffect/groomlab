@@ -883,6 +883,10 @@ protected:
         GLint available = 0;
         gl_.GetQueryObjectiv(queries_[stampCount_ - 1], kQueryResultAvailable, &available);
         if (!available && !wait) return false;
+        // Waiting: the run's last commands flushed first. A wait on QUERY_RESULT need not flush (as
+        // ClientWaitSync without its flush bit: waitFor), and NVIDIA's does not: a run's last stamp
+        // still in the driver's queue never came, the wait spinning on the CPU with the GPU idle.
+        if (!available) glFlush();
         ticks->assign(stampCount_, 0);
         for (std::size_t i = 0; i < stampCount_; ++i) gl_.GetQueryObjectui64v(queries_[i], kQueryResult, &(*ticks)[i]);
         ticksPending_ = false;

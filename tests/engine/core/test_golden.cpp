@@ -18,6 +18,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <set>
 #include <sstream>
 #include <string>
 
@@ -359,6 +360,9 @@ std::vector<Case> cases() {
          link("interp", "op", "strands")},
         {"Tangle", "op", R"({"name": "op", "type": "Tangle", "params": {"radius": 0.3, "strength": 1.0, "seed": 6}})",
          link("interp", "op", "strands")},
+        // A tighter radius than the roots' spacing: which strands find a partner goes by it.
+        {"TangleRadius", "op", R"({"name": "op", "type": "Tangle", "params": {"radius": 0.12, "strength": 1.0, "seed": 6}})",
+         link("interp", "op", "strands")},
         {"Wet", "op", R"({"name": "op", "type": "Wet", "params": {"wetness": 0.8, "clumpSize": 0.6, "seed": 2}})",
          link("interp", "op", "strands")},
         {"SelfCollide", "op",
@@ -385,6 +389,9 @@ std::vector<Case> cases() {
             {"name": "op", "type": "Clump", "params": {"strength": 0.8, "pastTip": "extend", "copyAmount": 0.3,
              "centersFrom": "inputPoints"}})",
          link("scalp", "spots", "scalp") + "," + link("interp", "op", "strands") + "," + link("spots", "op", "centers")},
+        {"ClumpRepel", "op",  // a negative strength: the strands within twice repelRadius pushed out
+         R"({"name": "op", "type": "Clump", "params": {"count": 30, "strength": -0.8, "repelRadius": 0.15}})",
+         link("interp", "op", "strands")},
         {"ClumpOwnCenters", "op",  // centersFrom pick: centers of its own, by size (darts on the scalp)
          R"({"name": "op", "type": "Clump", "params": {"strength": 0.7, "clumpBy": "size", "size": 0.35}})",
          link("interp", "op", "strands")},
@@ -507,6 +514,7 @@ std::vector<Case> cases() {
          false, 0.0, false, 0, false, true},
         {"Resample", "op", R"({"name": "op", "type": "Resample", "params": {"segments": 7, "mode": "length", "minSegments": 2}})",
          link("interp", "op", "strands")},
+        {"PartWidth", "op", R"({"name": "op", "type": "Part", "params": {"width": 0.3}})", link("interp", "op", "strands"), true},
         {"PartedClump", "part",
          R"({"name": "clump", "type": "Clump", "params": {"count": 30, "strength": 0.7}},
             {"name": "part", "type": "Part", "params": {"width": 0.25}})",
@@ -608,6 +616,22 @@ std::vector<Case> cases() {
          R"({"name": "tip", "type": "HairColor", "params": {"mode": "color", "color": [0.0, 0.0, 1.0], "tipColor": [1.0, 0.0, 0.0], "tipStrength": 1.0, "tipProfile": [[0.0, 0.0], [0.5, 0.0], [0.52, 1.0], [1.0, 1.0]]}},
             {"name": "op", "type": "SmoothChannel", "params": {"channel": "colorR", "length": 0.3, "strength": 0.8}})",
          link("interp", "tip", "strands") + "," + link("tip", "op", "strands")},
+        // Roots halfway between evenly spread and at random, the strands shorter.
+        {"ScatterMixed", "op", R"({"name": "op", "type": "Scatter", "params": {"density": 300.0, "randomness": 0.5, "length": 0.8}})",
+         link("scalp", "op", "scalp")},
+        // Instances near the hair's outer surface only, on its top (Y+).
+        {"InstanceExposure", "op",
+         R"({"name": "op", "type": "Instance", "params": {"probability": 0.5, "count": 2, "seed": 4, "exposure": "external",
+             "exposureFalloff": 0.3, "axisFacing": true, "axisFalloff": 0.5}})",
+         link("interp", "op", "strands")},
+        // Feathers with a down zone at their roots, its barbs soft and curly.
+        {"PropagateDown", "op",
+         R"({"name": "op", "type": "Propagate", "params": {"count": 6, "segments": 4, "down": 0.45, "downCount": 3, "seed": 3}})",
+         link("interp", "op", "shafts")},
+        // A pressed braid (version 2) ending free, with two ties.
+        {"BraidFreeTies", "op",
+         R"({"name": "op", "type": "Braid", "params": {"region": 0.6, "width": 0.3, "end": "free", "release": 0.3, "ties": 2, "seed": 1}})",
+         link("interp", "op", "strands") + "," + link("guides", "op", "braids")},
     };
 }
 
@@ -656,8 +680,9 @@ struct Scene {
         f->evaluate(flap.get());
         setGroomExternals(flapExt, flap, nullptr, f);
     }
-    StrandSet run(const Case& c) {
-        GraphDocument doc = loadGraphJson(graphFor(c));
+    // `graph`: the case's graph as given (its params mapped, say), else graphFor's.
+    StrandSet run(const Case& c, const std::string* graph = nullptr) {
+        GraphDocument doc = loadGraphJson(graph ? *graph : graphFor(c));
         EvalContext ctx;
         ctx.strandSegments = kSegments;
         ctx.externals = c.flap ? &flapExt : &ext;
@@ -909,6 +934,144 @@ TEST_P(Golden, MatchesStoredOutput) {
     EXPECT_EQ(serial.instances() ? serial.instances()->contentHash() : 0, out.instances() ? out.instances()->contentHash() : 0)
         << c.name << ": thread count changes the instances";
 #endif
+}
+
+// Every mappable number param of a case's node "op" (every slider a map or paint can drive):
+// mapped to its own value (an expression of it) it gives the same hair, and mapped to a value
+// varying from strand to strand it gives other hair, so the node reads the param where each strand
+// is. A param a case's settings leave unused (kUnused) changes nothing either way.
+TEST_P(Golden, MappedParamsAreReadPerStrand) {
+    static Scene scene;
+    static const json specs = json::parse(operatorSpecsJson());
+    // Case and param pairs whose param the case's settings leave unused.
+    static const std::set<std::string> kUnused = {
+        // Length's fraction picks the strands its randomness trims: none without randomness.
+        "LengthCutColorSet.fraction", "FieldDrivenLength.fraction", "LayersDrivenLength.fraction", "MapLength.fraction",
+        // The color layers set the colors these would.
+        "ColorLayersDrivenColor.melanin", "ColorLayersDrivenColor.redness", "ColorLayersDrivenColor.greys",
+        // One prototype (no variants); fixed sizes (fitScale and aspect fit strands); fitted sizes (no scale).
+        "Instance.variant", "Instance.fitScale", "Instance.aspect", "Scales.variant", "InstanceFitStrand.variant",
+        "InstanceFitStrand.scale", "InstanceDeform.variant", "InstanceDeform.scale",
+        // Strands within the radius take the guides as they are.
+        "InterpolateRadius.guideWeight",
+        // Its strength fed by a port: the clumps it leaves alone stay alone.
+        "ExpressionClump.volumize", "ExpressionClump.affect",
+        // Noise finer than the strands' 7 segments draw fades out (NoiseOp's note).
+        "NoiseFrizz.amplitude", "NoiseFrizz.fraction", "NoiseFrizz.affect",
+        // Clumps around guides or set centers: no center picked by weight.
+        "ToGuidesClump.centerWeight", "ClumpGuides.centerWeight", "ClumpScatterCenters.centerWeight",
+        // Another mode's (by map; mode map).
+        "Group.value", "Split.select",
+        // A coil's radius is the strands' widths.
+        "CurlCoil.radius",
+        // Points added (a zigzag's corners, a coil's turns, subdivisions): no mix of what came in.
+        "CurlZigzag.affect", "CurlCoil.affect", "Subdivide.affect",
+        // A repel radius with no negative strength (ClumpRepel's has one).
+        "Clump.repelRadius", "ClumpFlat.repelRadius", "ClumpGuides.repelRadius", "ClumpLocks.repelRadius",
+        "ClumpOwnCenters.repelRadius", "ClumpRegions.repelRadius", "ClumpScatterCenters.repelRadius",
+        "ClumpVariation.repelRadius", "CurveProfile.repelRadius", "ExpressionClump.repelRadius", "PropagateClump.repelRadius",
+        "ToGuidesClump.repelRadius", "ValueCount.repelRadius",
+        // A volume's random share with no volume (volumize 0).
+        "Clump.volumizeRandom", "ClumpRepel.volumizeRandom", "ClumpFlat.volumizeRandom", "ClumpGuides.volumizeRandom",
+        "ClumpOwnCenters.volumizeRandom", "ClumpRegions.volumizeRandom", "ClumpScatterCenters.volumizeRandom",
+        "CurveProfile.volumizeRandom", "ExpressionClump.volumizeRandom", "PropagateClump.volumizeRandom",
+        "ToGuidesClump.volumizeRandom", "ValueCount.volumizeRandom",
+        // Its strength fed by a port: the clumps it leaves alone stay alone.
+        "ExpressionClump.strengthRandom", "ExpressionClump.strandStrengthRandom",
+        // A comb's 180 degrees turns every strand onto the direction at any random share of them.
+        "BendComb.randomness",
+        // Repelled points are pushed, not pulled into a lock or a ribbon.
+        "ClumpRepel.volumize", "ClumpRepel.flatness",
+        // Every strand's partner candidates lie within the radius at these roots' spacing
+        // (TangleRadius's is tighter).
+        "Tangle.radius",
+        // HairColor: another mode's randomness (melanin's in mode color, value's in mode melanin), a
+        // clump share with no clumps, a tip offset with no tip color.
+        "ColorLayersDrivenColor.melaninRandom", "HairColorHighlight.valueRandom", "HairColor.valueRandom",
+        "HairColorRgb.valueRandom", "ColorLayersDrivenColor.clumpShare", "HairColorHighlight.clumpShare",
+        "ColorLayersDrivenColor.tipOffsetRandom", "HairColorHighlight.tipOffsetRandom", "HairColor.tipOffsetRandom",
+        // A grid's roots are its cells' (no even spots to mix with).
+        "ScatterGrid.randomness",
+        // A pattern of no pigment (melanin 0): white whatever its redness.
+        "FeatherColor.redness",
+        // Instances anywhere in the hair (exposure both, no axis facing): no depth to fade over
+        // (InstanceExposure's has one).
+        "Instance.exposureFalloff", "Instance.axisFalloff", "InstanceFitStrand.exposureFalloff",
+        "InstanceFitStrand.axisFalloff", "InstanceDeform.exposureFalloff", "InstanceDeform.axisFalloff",
+        // A version 1 braid's sections are not pressed; an end that is not free lets go at once; no
+        // ties to size or cinch (BraidFreeTies has them); a fed braid starts at its root (no gather).
+        "Braid.separate", "Braid.inflate", "Braid.release", "Braid.tieLength", "Braid.cinch", "BraidFed.separate",
+        "BraidFed.inflate", "BraidFed.release", "BraidFed.tieLength", "BraidFed.cinch", "BraidFed.gather",
+        // Feathers with no down zone (down 0; PropagateDown's has one); round a shaft no sides to
+        // weigh; splits under 1 gather no barbs.
+        "Propagate.downLength", "Propagate.downCurl", "Propagate.downFrizz", "PropagateGuidesAround.downLength",
+        "PropagateGuidesAround.downCurl", "PropagateGuidesAround.downFrizz", "SplitMapFeathers.downLength",
+        "SplitMapFeathers.downCurl", "SplitMapFeathers.downFrizz", "PropagateGuidesAround.asymmetry",
+        "PropagateGuidesAround.splits", "PropagateGuidesAround.splitAmount", "SplitMapFeathers.splits",
+        "SplitMapFeathers.splitAmount", "PropagateDown.splits", "PropagateDown.splitAmount",
+        "InstanceExposure.variant", "InstanceExposure.fitScale", "InstanceExposure.aspect"};
+    const Case& c = GetParam();
+    const json graph = json::parse(graphFor(c));
+    const json* op = nullptr;
+    for (const json& n : graph.at("nodes")) {
+        if (n.at("name") == "op") op = &n;
+    }
+    if (!op || c.simulate > 0 || c.sculpt) GTEST_SKIP() << "no op node to map";
+    const std::string type = op->at("type");
+    const json* spec = nullptr;
+    for (const json& s : specs) {
+        if (s.at("type") == type) spec = &s;
+    }
+    ASSERT_TRUE(spec) << type;
+    const StrandSet plain = scene.run(c);
+    const json params = op->value("params", json::object());
+    for (const json& p : spec->at("params")) {
+        if (!p.value("mappable", false) || p.at("kind") != "float") continue;
+        const std::string name = p.at("name");
+        if (params.contains(name) && !params.at(name).is_number()) continue;  // a map already
+        const json inputs = op->value("paramInputs", json::array());
+        if (std::find(inputs.begin(), inputs.end(), name) != inputs.end()) continue;  // fed by a port
+        const double value = params.contains(name) ? params.at(name).get<double>() : p.at("default").get<double>();
+        auto mapped = [&](const std::string& expression) {
+            json g = graph;
+            for (json& n : g.at("nodes")) {
+                if (n.at("name") == "op") n["params"][name] = {{"expression", expression}};
+            }
+            const std::string text = g.dump();
+            return scene.run(c, &text);
+        };
+        std::ostringstream own;
+        own.precision(17);
+        own << value;
+        const StrandSet same = mapped(own.str());
+        // A Scatter's density map thins the roots it lays at the map's most (a grid's too): not the
+        // roots a number lays.
+        if (type == "Scatter" && name == "density") continue;
+        ASSERT_EQ(same.pointCount(), plain.pointCount()) << c.name << " " << type << "." << name;
+        float most = 0.0f;
+        for (std::size_t i = 0; i < plain.pointCount(); ++i) most = std::max(most, (same.positions()[i] - plain.positions()[i]).length());
+        EXPECT_LT(most, 1e-4f) << c.name << " " << type << "." << name << ": mapped to its own value " << own.str();
+        if (kUnused.count(std::string(c.name) + "." + name)) continue;
+        const std::string varying = value != 0.0 ? own.str() + " * (0.4 + 1.2 * rand)" : std::string("0.3 * rand");
+        const StrandSet other = mapped(varying);
+        bool changed = other.pointCount() != plain.pointCount() || other.strandCount() != plain.strandCount();
+        for (std::size_t i = 0; !changed && i < plain.pointCount(); ++i) changed = other.positions()[i] != plain.positions()[i];
+        if (!changed && other.widths().size() == plain.widths().size()) changed = other.widths() != plain.widths();
+        if (!changed) changed = other.instances() && plain.instances() && other.instances()->contentHash() != plain.instances()->contentHash();
+        if (!changed) {
+            for (const std::string& ch : other.strandChannelNames()) {
+                const std::vector<float>* a = other.strandChannel(ch);
+                const std::vector<float>* b = plain.strandChannel(ch);
+                if (!b || *a != *b) changed = true;
+            }
+            for (const std::string& ch : other.pointChannelNames()) {
+                const std::vector<float>* a = other.pointChannel(ch);
+                const std::vector<float>* b = plain.pointChannel(ch);
+                if (!b || *a != *b) changed = true;
+            }
+        }
+        EXPECT_TRUE(changed) << c.name << " " << type << "." << name << ": mapped per strand (" << varying << ") changed nothing";
+    }
 }
 
 INSTANTIATE_TEST_SUITE_P(Operators, Golden, ::testing::ValuesIn(cases()),

@@ -57,7 +57,7 @@ public:
                 .in("Random"),
             ParamSpec{"rotateRandom", Vec3f{0.0f, 0.0f, 0.0f}, "Up to this many degrees more or less turn per strand, per axis"}
                 .in("Random"),
-            ParamSpec{"scaleRandom", 0.0, "Each strand's scale up to this share more or less, at random", "fraction"}
+            ParamSpec{"scaleRandom", 0.0, "Each strand's scale up to this share more or less, at random (mappable)", "fraction"}
                 .range(0, 1)
                 .in("Random"),
             notAnimatable({"seed", std::int64_t{0}, "Random seed"}).in("Random").adv(),
@@ -88,10 +88,12 @@ private:
         const auto scaleRandom = static_cast<float>(params().getDouble("scaleRandom"));
         const Vec3f zero;
         const bool randomMove = translateRandom != zero, randomTurn = rotateRandom != zero;
+        const ScalarField scaleRandomField(params(), "scaleRandom", scalp);
+        scaleRandomField.validate(*in);
         const bool identity = translate == zero && rotate == zero && !randomMove && !randomTurn && scaleRandom <= 0.0f &&
-                              scale.isConstant() && scale.maximum() == 1.0f;
+                              !gpu::mappedParam(params(), "scaleRandom") && scale.isConstant() && scale.maximum() == 1.0f;
         const EngineStage engine{gpu::StageKind::Transform, params(), scalp};
-        return reshapeEach(in, identity, scale.strandLocal(), incremental, true, result, changed, engine);
+        return reshapeEach(in, identity, scale.strandLocal() && scaleRandomField.strandLocal(), incremental, true, result, changed, engine);
     }
 };
 
@@ -119,8 +121,8 @@ public:
                                      "(down onto the scalp); 180 with start and end 0 points them along it",
                       "angle"}
                 .soft(-180, 180),
-            ParamSpec{"start", 0.0, "Where the bend starts along the length, 0 root to 1 tip", "fraction"}.range(0, 1),
-            ParamSpec{"end", 1.0, "Where it ends: the strand turns evenly between start and end and holds its shape past it",
+            ParamSpec{"start", 0.0, "Where the bend starts along the length, 0 root to 1 tip (mappable)", "fraction"}.range(0, 1),
+            ParamSpec{"end", 1.0, "Where it ends (mappable): the strand turns evenly between start and end and holds its shape past it",
                       "fraction"}
                 .range(0, 1),
             {"along", std::string("normal"),
@@ -133,7 +135,7 @@ public:
                 .world()
                 .vectorExpr()
                 .when("along", {"tangent", "direction"}),
-            ParamSpec{"randomness", 0.0, "Each strand's angle scaled down by up to this share, at random", "fraction"}.range(0, 1),
+            ParamSpec{"randomness", 0.0, "Each strand's angle scaled down by up to this share, at random (mappable)", "fraction"}.range(0, 1),
             notAnimatable({"seed", std::int64_t{0}, "Random seed"}).adv(),
         };
     }
@@ -161,7 +163,8 @@ private:
         // (A direction per strand: each strand's.)
         EngineStage engine{gpu::StageKind::Bend, params(), scalp};
         if (!direction.isConstant()) engine.direction = [&](std::size_t s) { return direction.at(*in, s); };
-        return reshapeEach(in, identity, angle.strandLocal() && direction.strandLocal(), incremental, true, result, changed, engine);
+        const bool local = angle.strandLocal() && direction.strandLocal() && paramsStrandLocal(params(), {"start", "end", "randomness"}, scalp, *in);
+        return reshapeEach(in, identity, local, incremental, true, result, changed, engine);
     }
 };
 
@@ -196,11 +199,11 @@ public:
                 .formerDefault(2, std::string("tangent")),
             ParamSpec{"direction", Vec3f{0.0f, -1.0f, 0.0f}, "Where roll 0 points (world space), laid onto the scalp at each root"}
                 .world(),
-            ParamSpec{"inclinationRandom", 0.0, "Up to this many degrees more or less inclination per strand", "angle"}
+            ParamSpec{"inclinationRandom", 0.0, "Up to this many degrees more or less inclination per strand (mappable)", "angle"}
                 .atLeast(0)
                 .soft(0, 45)
                 .in("Random"),
-            ParamSpec{"rollRandom", 0.0, "Up to this many degrees more or less roll per strand", "angle"}
+            ParamSpec{"rollRandom", 0.0, "Up to this many degrees more or less roll per strand (mappable)", "angle"}
                 .atLeast(0)
                 .soft(0, 180)
                 .in("Random"),
@@ -231,13 +234,10 @@ private:
         strength.validate(*in);
         const bool identity = strength.isConstant() && strength.maximum() <= 0.0f;
 
-        // (All three mapped: each strand's three.)
-        EngineStage engine{gpu::StageKind::Direction, params(), scalp};
-        if (gpu::directionMapped(params()).size() > 2) {
-            engine.direction = [&](std::size_t s) { return Vec3f(inclination.at(*in, s), roll.at(*in, s), strength.at(*in, s)); };
-        }
-        return reshapeEach(in, identity, inclination.strandLocal() && roll.strandLocal() && strength.strandLocal(), incremental, true,
-                           result, changed, engine);
+        const EngineStage engine{gpu::StageKind::Direction, params(), scalp};
+        const bool local = inclination.strandLocal() && roll.strandLocal() && strength.strandLocal() &&
+                           paramsStrandLocal(params(), {"inclinationRandom", "rollRandom"}, scalp, *in);
+        return reshapeEach(in, identity, local, incremental, true, result, changed, engine);
     }
 };
 

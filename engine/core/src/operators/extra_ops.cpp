@@ -294,19 +294,21 @@ public:
     bool carriesChannels(std::size_t slot) const override { return slot == 0 && params().getBool("channels"); }
     std::string category() const override { return "grow"; }
     std::vector<PortSpec> inputs() const override { return {{"guides", PortType::Guides}}; }
+    std::vector<std::string> externalInputs() const override { return {"scalp"}; }  // maps on width
     std::vector<ParamSpec> paramSpecs() const override {
         return {
             notAnimatable({"segments", std::int64_t{0}, "Segments per strand (0: each guide's own points)"})
                 .range(0, 256)
                 .soft(0, 32),
-            ParamSpec{"width", 0.005, "Strand width until a Width node sets it", "width"}.atLeast(0).soft(0, 0.02),
+            ParamSpec{"width", 0.005, "Strand width until a Width node sets it (mappable, per point)", "width"}.atLeast(0).soft(0, 0.02),
             {"channels", true, "Carry the guides' painted maps over as strand channels"},
         };
     }
 
-    Value evaluate(const EvalContext&, const std::vector<Value>& inputs) const override {
+    Value evaluate(const EvalContext& ctx, const std::vector<Value>& inputs) const override {
         const GuidesPtr guides = valueAs<GuidesPtr>(inputs.at(0));
         if (!guides) throw GraphError("ToStrands: guides input not connected");
+        const ScalarField widthField(params(), "width", scalpOf(ctx), guides.get());
         const auto segments = static_cast<std::size_t>(params().getInt("segments"));
         const float width = static_cast<float>(params().getDouble("width"));
         const bool channels = params().getBool("channels");
@@ -357,6 +359,14 @@ public:
                     std::fill(to, to + pts.size(), scalar == g.attributes.end() ? 0.0f : scalar->second);
                 }
             }
+        }
+        if (!widthField.isConstant()) {  // a width per strand (per point where the map is), read on the strands made
+            widthField.validate(*out);
+            std::vector<float>& widths = out->mutableWidths();
+            parallelFor(0, out->strandCount(), [&](std::size_t s) {
+                const std::size_t begin = out->strandBegin(s), n = out->strandPointCount(s);
+                for (std::size_t i = 0; i < n; ++i) widths[begin + i] = std::max(widthField.atPoint(*out, s, i), 0.0f);
+            });
         }
         return StrandsPtr(out);
     }

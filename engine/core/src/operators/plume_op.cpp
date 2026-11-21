@@ -130,6 +130,7 @@ struct HeightMap {
     Vec3f origin, x, y, z;
     float x0 = 0.0f, y0 = 0.0f, cellX = 1.0f, cellY = 1.0f;
     float depth = 0.0f;  // how far under its bottom a point is still lifted over it
+    float offset = 0.0f;  // the gap kept over it (its feather's offset)
     int nx = 0, ny = 0;
     std::vector<float> top, bottom;  // per cell; empty cells have top < bottom
     Vec3f boxMin, boxMax;            // its points' bounds, grown by what can reach them
@@ -164,6 +165,9 @@ struct Feather {
     float alongLength = 0.0f; // the farthest along `along`
     float rank = 0.0f;
     float strength = 1.0f;
+    // Its numbers (mappable, read at its rep): the gap kept over it, its own over the body, its
+    // stiffness, the most it turns (radians) and how deep under it a point is lifted (0: by its length).
+    float offset = 0.0f, bodyOffset = 0.0f, stiffness = 1.0f, maxAngle = 0.0f, depth = 0.0f;
     // In the preview core (preview_core.h: its strand speaking for it is): only core feathers lie
     // under others or size the body's fields, so every feather is laid the same at every preview
     // density.
@@ -198,10 +202,15 @@ public:
     PortSpec output() const override { return {"out", PortType::Strands}; }
     std::vector<ParamSpec> paramSpecs() const override {
         return {
-            ParamSpec{"offset", 0.01, "Gap kept between a feather and each lower-ranked feather under it", "length"}
+            ParamSpec{"offset", 0.01,
+                      "Gap kept between a feather and each lower-ranked feather under it (mappable, per feather: its "
+                      "shaft's, the gap kept over it)",
+                      "length"}
                 .atLeast(0)
                 .soft(0, 0.1),
-            ParamSpec{"bodyOffset", 0.005, "Gap kept between the feathers and the body (the scalp, and the collider input)",
+            ParamSpec{"bodyOffset", 0.005,
+                      "Gap kept between the feathers and the body (the scalp, and the collider input; mappable, per "
+                      "feather: its shaft's)",
                       "length"}
                 .atLeast(0)
                 .soft(0, 0.1),
@@ -224,11 +233,16 @@ public:
                 .soft(1, 8)
                 .adv(),
             ParamSpec{"stiffness", 1.0, "1: each feather turns as a rigid whole about its root; 0: it bends, each part only "
-                                        "as much as the contacts up to it need", "fraction"}
+                                        "as much as the contacts up to it need (mappable, per feather: its shaft's)",
+                      "fraction"}
                 .range(0, 1),
-            ParamSpec{"maxAngle", 60.0, "The most a feather turns up off the body, degrees", "angle"}.range(0, 180).soft(0, 90),
+            ParamSpec{"maxAngle", 60.0, "The most a feather turns up off the body, degrees (mappable, per feather: its shaft's)",
+                      "angle"}
+                .range(0, 180)
+                .soft(0, 90),
             ParamSpec{"depth", 0.0, "How far under a lower feather a point is still lifted over it (scene units; 0: a "
-                                    "quarter of that feather's length)", "length"}
+                                    "quarter of that feather's length; mappable, per feather: its shaft's, the lower one's)",
+                      "length"}
                 .atLeast(0)
                 .soft(0, 1)
                 .adv(),
@@ -250,16 +264,17 @@ public:
         const MeshPtr scalpPtr = valueAs<MeshPtr>(ctx.external("scalp"));
         const ScalpMesh* scalp = scalpPtr && scalpPtr->triangleCount() > 0 ? scalpPtr.get() : nullptr;
         const ScalarField strengthField(params(), "strength", scalp);
-        strengthField.validate(*in);
-        const float offset = std::max(0.0f, static_cast<float>(params().getDouble("offset")));
-        const float bodyOffset = std::max(0.0f, static_cast<float>(params().getDouble("bodyOffset")));
+        // Per feather too, at its shaft (mappable): its offsets, stiffness, turn and depth.
+        const ScalarField offsetField(params(), "offset", scalp), bodyOffsetField(params(), "bodyOffset", scalp);
+        const ScalarField stiffnessField(params(), "stiffness", scalp), maxAngleField(params(), "maxAngle", scalp);
+        const ScalarField depthField(params(), "depth", scalp);
+        for (const ScalarField* f : {&strengthField, &offsetField, &bodyOffsetField, &stiffnessField, &maxAngleField, &depthField}) {
+            f->validate(*in);
+        }
         const std::string rankBy = params().getString("rankBy");
         if (rankBy != "rootDistance" && rankBy != "length" && rankBy != "channel" && rankBy != "random") {
             throw GraphError("Plume: rankBy must be rootDistance, length, channel or random");
         }
-        const float stiffness = std::clamp(static_cast<float>(params().getDouble("stiffness")), 0.0f, 1.0f);
-        const float maxAngle = std::max(0.0f, static_cast<float>(params().getDouble("maxAngle")) * kDegrees);
-        const float depthParam = std::max(0.0f, static_cast<float>(params().getDouble("depth")));
         const bool invert = params().getBool("invert");
         const auto seed = static_cast<std::uint64_t>(params().getInt("seed"));
         const std::vector<float>* rankChannel = nullptr;
@@ -299,15 +314,7 @@ public:
                              vaneNormals[static_cast<std::size_t>(k)]->size() == in->strandCount();
         }
 
-        // The swept boxes' turns, 0 .. maxAngle: each one's cosine and sine (every feather's).
-        constexpr int kSweep = 4;
-        const float slice = maxAngle / static_cast<float>(kSweep);
-        std::array<float, kSweep + 1> sweepCos{}, sweepSin{};
-        for (int k = 0; k <= kSweep; ++k) {
-            const float t = slice * static_cast<float>(k);
-            sweepCos[static_cast<std::size_t>(k)] = pm::cos(t);
-            sweepSin[static_cast<std::size_t>(k)] = pm::sin(t);
-        }
+        constexpr int kSweep = 4;  // the swept boxes' turns, 0 .. maxAngle
         // Each feather's frame: its root (the shaft's base), up, the way it points and its reach.
         parallelFor(0, feathers.size(), [&](std::size_t fi) {
             Feather& f = feathers[fi];
@@ -365,6 +372,20 @@ public:
             }
             f.strength = std::clamp(strengthField.at(*in, f.rep), 0.0f, 1.0f);
             if (!std::isfinite(f.strength)) f.strength = 0.0f;
+            auto finite = [](float v) { return std::isfinite(v) ? v : 0.0f; };
+            f.offset = std::max(0.0f, finite(offsetField.at(*in, f.rep)));
+            f.bodyOffset = std::max(0.0f, finite(bodyOffsetField.at(*in, f.rep)));
+            f.stiffness = std::clamp(finite(stiffnessField.at(*in, f.rep)), 0.0f, 1.0f);
+            f.maxAngle = std::max(0.0f, std::min(finite(maxAngleField.at(*in, f.rep)), 180.0f) * kDegrees);
+            f.depth = std::max(0.0f, finite(depthField.at(*in, f.rep)));
+            // Its swept box's turns: each one's cosine and sine.
+            const float slice = f.maxAngle / static_cast<float>(kSweep);
+            std::array<float, kSweep + 1> sweepCos{}, sweepSin{};
+            for (int k = 0; k <= kSweep; ++k) {
+                const float t = slice * static_cast<float>(k);
+                sweepCos[static_cast<std::size_t>(k)] = pm::cos(t);
+                sweepSin[static_cast<std::size_t>(k)] = pm::sin(t);
+            }
             // Its swept box: every point turned through 0 .. maxAngle about the side (sampled, and
             // grown by the most an arc between samples bulges past its chord).
             const float big = std::numeric_limits<float>::max();
@@ -421,7 +442,7 @@ public:
             return d != 0.0f ? d > 0.0f : feathers[a].id < feathers[b].id;
         };
 
-        auto depthOf = [&](const Feather& f) { return depthParam > 0.0f ? depthParam : 0.25f * f.reach; };
+        auto depthOf = [&](const Feather& f) { return f.depth > 0.0f ? f.depth : 0.25f * f.reach; };
 
         // What each feather lies over: the core feathers within reach facing its way (their ups less
         // than ~70 degrees apart: `near`, the same both ways) ranked under it whose boxes meet its.
@@ -431,8 +452,14 @@ public:
         for (const Feather& f : feathers) {
             if (f.core) longest = std::max(longest, f.reach);
         }
+        // (Mapped, the largest gaps any feather keeps, for what can meet; a lower feather's gap over it.)
+        float offset = 0.0f, bodyOffset = 0.0f;
+        for (const Feather& f : feathers) {
+            offset = std::max(offset, f.offset);
+            bodyOffset = std::max(bodyOffset, f.bodyOffset);
+        }
         const float margin = offset + bodyOffset + 1e-6f;
-        const float meet = offset + margin;
+        auto meetOver = [&](const Feather& lower) { return lower.offset + margin; };
         // The feathers' roots in the shared grid (internal.h CellGrid): a cell's in index order, the
         // cells visited as before, so each feather finds its neighbours in the same order.
         std::vector<Vec3f> roots(feathers.size());
@@ -451,7 +478,7 @@ public:
             });
             std::sort(list.begin(), list.end());
             for (const std::uint32_t a : list) {
-                if (lowerOf(a, b) && sweptBoxesMeet(feathers[a], fb, depthOf(feathers[a]), meet)) under[b].push_back(a);
+                if (lowerOf(a, b) && sweptBoxesMeet(feathers[a], fb, depthOf(feathers[a]), meetOver(feathers[a]))) under[b].push_back(a);
             }
         }, 16);
         // Pairs ranked each by their own way can go round in a ring (a under b under c under a,
@@ -477,7 +504,8 @@ public:
                     list.erase(std::remove_if(list.begin(), list.end(), [&](std::uint32_t a) { return part[a] == part[b]; }),
                                list.end());
                     for (const std::uint32_t a : near[b]) {
-                        if (part[a] == part[b] && lowerInRing(a, b) && sweptBoxesMeet(feathers[a], feathers[b], depthOf(feathers[a]), meet)) {
+                        if (part[a] == part[b] && lowerInRing(a, b) &&
+                            sweptBoxesMeet(feathers[a], feathers[b], depthOf(feathers[a]), meetOver(feathers[a]))) {
                             list.push_back(a);
                         }
                     }
@@ -543,8 +571,9 @@ public:
             thread_local std::vector<Sample> samples;
             samples.clear();
             const float zone = kRootZone * f.reach;
-            const float bodyDepth = std::max(0.5f * f.reach, 2.0f * bodyOffset);
-            const float bodySearch = std::max(bodyOffset, bodyDepth) * 1.001f + 1e-6f;
+            const float stiffness = f.stiffness, maxAngle = f.maxAngle;
+            const float bodyDepth = std::max(0.5f * f.reach, 2.0f * f.bodyOffset);
+            const float bodySearch = std::max(f.bodyOffset, bodyDepth) * 1.001f + 1e-6f;
             for (const std::uint32_t s : f.strands) {
                 const Vec3f* pts = in->strandPoints(s);
                 for (std::size_t i = 0; i < in->strandPointCount(s); ++i) {
@@ -599,13 +628,13 @@ public:
                     for (const HeightMap* map : near) {
                         float h = 0.0f, t = 0.0f, bottom = 0.0f;
                         if (!map->at(p, &h, &t, &bottom)) continue;
-                        if (h < t + offset && h > bottom - map->depth) {
-                            lift(t + offset - h, map->z);
+                        if (h < t + map->offset && h > bottom - map->depth) {
+                            lift(t + map->offset - h, map->z);
                         }
                     }
                     for (std::size_t m = 0; m < bodies.size(); ++m) {
                         Vec3f q = p;
-                        if (bodies[m].pushOut(q, bodyOffset, bodyDepth, bodySearch, cursors[m])) {
+                        if (bodies[m].pushOut(q, f.bodyOffset, bodyDepth, bodySearch, cursors[m])) {
                             const Vec3f delta = q - p;
                             const float d = delta.length();
                             if (d > 0.0f) lift(d, delta / d);
@@ -643,7 +672,7 @@ public:
                     }
                 }
             }
-            maps[b] = heightMapOf(f, *out, depthOf(f), offset);
+            maps[b] = heightMapOf(f, *out, depthOf(f), f.offset);
         };
         for (const std::vector<std::size_t>& wavefront : byWave) {
             parallelFor(0, wavefront.size(), [&](std::size_t k) { solve(wavefront[k]); }, 1);
@@ -739,6 +768,7 @@ private:
         map.z = rotateAxisAngle(f.up, f.side, mid);
         map.y = f.side;
         map.depth = depth;
+        map.offset = offset;
         float x0 = std::numeric_limits<float>::max(), x1 = -x0, y0 = x0, y1 = -x0;
         Vec3f lo{x0, x0, x0}, hi{-x0, -x0, -x0};
         for (const std::uint32_t s : f.strands) {

@@ -7,6 +7,7 @@
 #include <array>
 #include <atomic>
 #include <cmath>
+#include <limits>
 #include <mutex>
 #include <vector>
 
@@ -222,7 +223,7 @@ public:
                       "hair it takes splits on the scalp, flowing away to both sides of a line (a parting combed into "
                       "the guides)",
                       "", {"painted", "auto"}},
-            ParamSpec{"width", 1.5, "Distance from the part over which strands lean away (scene units)", "length"}
+            ParamSpec{"width", 1.5, "Distance from the part over which strands lean away (scene units; mappable)", "length"}
                 .atLeast(1e-6)
                 .soft(0.1, 5),
             ParamSpec{"strength", 1.0, "How far strands at the part turn away from it, 0-1 (mappable)", "fraction"}.range(0, 1),
@@ -305,9 +306,12 @@ private:
             remember(*result, flow, nullptr);
             return true;
         }
-        const float width = static_cast<float>(params().getDouble("width"));
         const ScalarField strength(params(), "strength", scalp);
         strength.validate(*in);
+        const ScalarField widthField(params(), "width", scalp);
+        widthField.validate(*in);
+        // The sides found within the width (mapped: every strand's, the kernel's falloff its own).
+        const float width = widthField.isConstant() ? static_cast<float>(params().getDouble("width")) : std::numeric_limits<float>::infinity();
         const std::string only = flow ? std::string() : params().getString("part");
 
         const StrandChanges* changes = nullptr;
@@ -315,7 +319,7 @@ private:
         if (incremental) {
             changes = someStrandsChanged(*incremental, 0);
             last = changes ? previousStrandsFor(*incremental, *in) : nullptr;
-            if (!last || !strength.strandLocal()) return false;
+            if (!last || !strength.strandLocal() || !widthField.strandLocal()) return false;
             if (changes->none()) {  // the same strands in: the same result
                 *result = last;
                 *changed = *changes;
@@ -369,8 +373,8 @@ public:
                                                              "giving a vector per strand: a painted one, vmap(\"name\") * 2 - 1)"}
                 .world()
                 .vectorExpr(),
-            ParamSpec{"stiffness", 1.0, "Bend stiffness: how much strands resist bending, 0-1, times stiffnessProfile (1 "
-                                        "there: not at all)", "fraction"}
+            ParamSpec{"stiffness", 1.0, "Bend stiffness: how much strands resist bending, 0-1 (mappable), times "
+                                        "stiffnessProfile (1 there: not at all)", "fraction"}
                 .range(0, 1),
             {"stiffnessProfile", Ramp{{0.0f, 1.0f}, {0.25f, 0.5f}, {1.0f, 0.5f}},
              "Stiffness along the length, root to tip (1 at the root: strands leave the scalp in their own direction)"},
@@ -411,7 +415,8 @@ private:
                 return down.length() < 1e-6f ? Vec3f{} : down.normalized();
             };
         }
-        return rerunChanged(in, strength.strandLocal() && worldDirection.strandLocal(), incremental, result, changed, engine);
+        const bool local = strength.strandLocal() && worldDirection.strandLocal() && paramsStrandLocal(params(), {"stiffness"}, scalp, *in);
+        return rerunChanged(in, local, incremental, result, changed, engine);
     }
 };
 

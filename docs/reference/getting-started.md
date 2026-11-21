@@ -52,6 +52,7 @@ cmds.setAttr(groom + ".previewDensity", 1.0)
   first (blue noise: roots relaxed apart on the scalp's rest pose until the spacing settles; open
   edges push back, so no row piles up along a hairline), then puts each root that fraction of the
   way back toward its random spot: 0 is fully even, and lowering it evens the groom out smoothly.
+  It is mappable, read per root at its random spot (so is Scatter's `length`).
   Strands keep their IDs. A preview relaxes every root as the render does (once: the relaxed
   roots are kept, for every preview density and the render alike), so it shows the render's
   positions. Both are local: a root moves by its neighbors alone and stops once it and they have

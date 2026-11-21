@@ -3617,11 +3617,13 @@ class ParamPanel(QtWidgets.QScrollArea):
         return paint
 
     def paint_chip(self, name, param):
-        """The yellow Paint chip beside a mappable param (the app's Paint pill): a click offers where
-        to paint its map, as right-click > Paint does."""
+        """The yellow Paint chip beside a mappable param, a paintbrush (the app's Paint button): a click
+        offers where to paint its map, as right-click > Paint does."""
         chip = QtWidgets.QToolButton()
         chip.setObjectName("paintChip")
-        chip.setText("Paint")
+        chip.setIcon(widgets.icon("paint", theme.px(32)))
+        chip.setIconSize(QtCore.QSize(theme.px(16), theme.px(16)))
+        chip.setAccessibleName("Paint")
         chip.setToolTip(self.PAINT_TIP)
         chip.setPopupMode(QtWidgets.QToolButton.InstantPopup)
         chip.setMenu(self.paint_menu(name, param, chip))
@@ -3629,7 +3631,7 @@ class ParamPanel(QtWidgets.QScrollArea):
         yellow = t.qcolor("yellow")
         chip.setStyleSheet(
             "QToolButton#paintChip { color: %s; background: transparent; border: 1px solid %s; border-radius: %dpx;"
-            " padding: 0px %dpx; font-weight: bold; }"
+            " padding: 1px %dpx; font-weight: bold; }"
             " QToolButton#paintChip:hover { background: %s; color: %s; }"
             " QToolButton#paintChip::menu-indicator { image: none; width: 0px; }"
             % (yellow.name(), yellow.name(), theme.px(4), theme.px(6), yellow.name(), readable_on(yellow).name()))

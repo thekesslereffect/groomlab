@@ -20,6 +20,7 @@
 // meshes: tilted like roof tiles, bent onto the skin).
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <memory>
@@ -313,17 +314,17 @@ public:
                                        "(mappable)"}
                     .soft(0, 2),
                 ParamSpec{"aspect", 0.1, "Width over length for strands without widths (mappable)"}.atLeast(0).soft(0, 1),
-                ParamSpec{"lift", 0.0, "Degrees each tip turns up off the skin, along the flow (on top of tile's rise)",
+                ParamSpec{"lift", 0.0, "Degrees each tip turns up off the skin, along the flow (on top of tile's rise; mappable)",
                           "angle"}
                     .soft(-90, 90),
                 ParamSpec{"tile", 1.0,
                           "How far each tip rises over the next scale's base, in plate heights (1: by its own height, as "
                           "roof tiles; 0: flat; lift turns it further). Overlap comes from the density and the strands' "
-                          "length"}
+                          "length (mappable)"}
                     .atLeast(0)
                     .soft(0, 2),
                 ParamSpec{"stack", 0.02, "A random height of their own, a fraction of the plate's: overlapping scales "
-                                         "never share a depth (no z-fighting)", "fraction"}
+                                         "never share a depth (no z-fighting; mappable)", "fraction"}
                     .range(0, 1)
                     .soft(0, 0.2),
                 ParamSpec{"conform", true, "Bend each onto the skin, every vertex at its height above the surface under it"},
@@ -338,7 +339,7 @@ public:
                           "root",
                           "", {"tip", "root"}}
                     .when("follow", {"skin"}),
-                ParamSpec{"offset", 0.0, "Their height above the skin, scene units", "length"}.soft(0, 0.5),
+                ParamSpec{"offset", 0.0, "Their height above the skin, scene units (mappable)", "length"}.soft(0, 0.5),
                 ParamSpec{"showStrands", false, "The strands draw and render too (off: they only lay the scales out)"},
                 ParamSpec{"material", std::string(),
                           "The shading group or shader they render with (empty: the prototype mesh's own; the built-in "
@@ -348,10 +349,10 @@ public:
                           "(fast while grooming); renders always take the meshes",
                           "", {"auto", "meshes", "quads"}}
                     .adv(),
-                ParamSpec{"scaleRandom", 0.1, "Each scale's size up to this share more or less, at random", "fraction"}
+                ParamSpec{"scaleRandom", 0.1, "Each scale's size up to this share more or less, at random (mappable)", "fraction"}
                     .range(0, 1)
                     .in("Random"),
-                ParamSpec{"spinRandom", 0.0, "Random turn about the skin's normal, either way, 0-1 (1: half a turn)",
+                ParamSpec{"spinRandom", 0.0, "Random turn about the skin's normal, either way, 0-1 (1: half a turn; mappable)",
                           "fraction"}
                     .range(0, 1)
                     .in("Random"),
@@ -372,8 +373,8 @@ public:
                     .when("variantBy", {"map"}),
                 notAnimatable({"count", std::int64_t{1}, "Instances tried per strand"}).range(0, 64).soft(0, 8),
                 notAnimatable({"probability", 0.1, "Chance each one is kept, per strand (mappable)", "fraction"}).soft(0, 1),
-                ParamSpec{"tMin", 0.6, "Nearest the root they sit, 0 root to 1 tip"}.range(0, 1),
-                ParamSpec{"tMax", 1.0, "Nearest the tip they sit"}.range(0, 1),
+                ParamSpec{"tMin", 0.6, "Nearest the root they sit, 0 root to 1 tip (mappable)"}.range(0, 1),
+                ParamSpec{"tMax", 1.0, "Nearest the tip they sit (mappable)"}.range(0, 1),
                 ParamSpec{"sizeMode", std::string("fixed"),
                           "fixed (scale: a size in scene units) or fitStrand (each spans its strand: fitScale of the "
                           "strand's rest length along its +Y, aspect of that across; stable while strands stretch)",
@@ -411,7 +412,7 @@ public:
                 ParamSpec{"orient", std::string("strand"), "strand (along it), up (world up), root (the root direction) or "
                                                            "random", "", {"strand", "up", "root", "random"}}
                     .in("Placement"),
-                ParamSpec{"offset", 0.0, "Distance off the strand, scene units", "length"}.soft(0, 0.5).in("Placement"),
+                ParamSpec{"offset", 0.0, "Distance off the strand, scene units (mappable)", "length"}.soft(0, 0.5).in("Placement"),
                 ParamSpec{"pinToRest", true,
                           "Keep each one at a fixed distance from the root, measured on the strand's rest pose, instead "
                           "of a fraction of its length now: strands that stretch (simulated guides) don't slide them"}
@@ -427,7 +428,7 @@ public:
                     .in("Exposure"),
                 ParamSpec{"exposureFalloff", 1.0,
                           "How deep under the hair's outer surface externally reaches (and internally starts), scene "
-                          "units, fading over it", "length"}
+                          "units, fading over it (mappable)", "length"}
                     .atLeast(0)
                     .soft(0, 5)
                     .named("Falloff")
@@ -445,19 +446,19 @@ public:
                     .in("Exposure"),
                 ParamSpec{"axisFalloff", 1.0,
                           "How deep under the hair's surface facing the axis they go, measured along the axis, scene "
-                          "units, fading over it", "length"}
+                          "units, fading over it (mappable)", "length"}
                     .atLeast(0)
                     .soft(0, 5)
                     .named("Falloff")
                     .onRowOf("axis")
                     .when("axisFacing", {"true"})
                     .in("Exposure"),
-                ParamSpec{"scaleRandom", 0.3, "Each one's size up to this share more or less, at random", "fraction"}
+                ParamSpec{"scaleRandom", 0.3, "Each one's size up to this share more or less, at random (mappable)", "fraction"}
                     .range(0, 1)
                     .in("Random"),
                 ParamSpec{"spinRandom", 1.0, "Random turn about each of their three axes, either way, 0-1 (1: up to half a "
                                              "turn either way: any way round). Fitted round their strand (fitWidth) or "
-                                             "bent along it (deform): about their long axis only", "fraction"}
+                                             "bent along it (deform): about their long axis only (mappable)", "fraction"}
                     .range(0, 1)
                     .in("Random"),
             };
@@ -505,6 +506,9 @@ private:
     // A strand's maps and how many instances it gets.
     struct StrandDraw {
         float chance = 0.0f, size = 0.0f, ratio = 1.0f, variant = 0.0f;
+        // Its mapped numbers (each the node's where a number).
+        float tMin = 0.0f, tMax = 0.0f, scaleRandom = 0.0f, spinRandom = 0.0f, offset = 0.0f;
+        float lift = 0.0f, tile = 0.0f, stack = 0.0f;
         std::size_t count = 0;
         std::uint64_t kept = 0;  // which of the node's `count` tries are kept (bit k)
     };
@@ -548,12 +552,31 @@ private:
         scale.validate(*in);
         if (fitted) aspect.validate(*in);
         if (byMap) variant.validate(*in);
+        // Read per strand too: both's offset, scaleRandom and spinRandom; Instance's tMin, tMax,
+        // exposureFalloff and axisFalloff; Scales' lift, tile and stack. (One the type lacks reads
+        // offset again, unused.)
+        const ScalarField offsetField(params(), "offset", scalp), scaleRandomField(params(), "scaleRandom", scalp);
+        const ScalarField spinRandomField(params(), "spinRandom", scalp);
+        const ScalarField tMinField(params(), scales ? "offset" : "tMin", scalp), tMaxField(params(), scales ? "offset" : "tMax", scalp);
+        const ScalarField exposureFalloffField(params(), scales ? "offset" : "exposureFalloff", scalp);
+        const ScalarField axisFalloffField(params(), scales ? "offset" : "axisFalloff", scalp);
+        const ScalarField liftField(params(), scales ? "lift" : "offset", scalp), tileField(params(), scales ? "tile" : "offset", scalp);
+        const ScalarField stackField(params(), scales ? "stack" : "offset", scalp);
+        const std::array<const ScalarField*, 10> extras = {&offsetField, &scaleRandomField,     &spinRandomField,  &tMinField,
+                                                           &tMaxField,   &exposureFalloffField, &axisFalloffField, &liftField,
+                                                           &tileField,   &stackField};
+        bool extrasConstant = true, extrasReadAttributes = false;
+        for (const ScalarField* f : extras) {
+            f->validate(*in);
+            extrasConstant = extrasConstant && f->isConstant() && f->strandLocal();
+            extrasReadAttributes = extrasReadAttributes || f->readsAttributes();
+        }
         if (incremental && !incremental->inputs.empty() && incremental->inputs[0] && incremental->inputs[0]->pointsKept) {
             // Only widths or channels changed (a Width or HairColor edit before it): where its maps
             // read neither (constants, textures, the strands' shape), each instance is where it was.
             const StrandsPtr last = previousStrandsFor(*incremental, *in);
             if (last && !(!scales && probability.readsAttributes()) && !scale.readsAttributes() &&
-                !(fitted && aspect.readsAttributes()) && !(byMap && variant.readsAttributes())) {
+                !(fitted && aspect.readsAttributes()) && !(byMap && variant.readsAttributes()) && !extrasReadAttributes) {
                 auto out = std::make_shared<StrandSet>(*in);
                 out->setInstances(last->instances());
                 carried(last, out);
@@ -595,13 +618,15 @@ private:
             auto constant = [](const ScalarField& f) { return f.isConstant() && f.strandLocal(); };
             if (!last) return false;
             if ((!scales && !constant(probability)) || !constant(scale) || (fitted && !constant(aspect)) ||
-                (byMap && !constant(variant))) {
+                (byMap && !constant(variant)) || !extrasConstant) {
                 {
                     const std::lock_guard<std::mutex> lock(keptMutex_);
                     if (keptOutput_.lock() == last) spliceFirst = keptFirst_;
                 }
                 if (!spliceFirst || spliceFirst->size() != in->strandCount() + 1 || in->instances() || !last->instances() ||
-                    !longest_.local(last, {&probabilityRead, &scale, &aspectRead, &variantRead})) {
+                    !longest_.local(last, {&probabilityRead, &scale, &aspectRead, &variantRead, &offsetField, &scaleRandomField,
+                                           &spinRandomField, &tMinField, &tMaxField, &exposureFalloffField, &axisFalloffField,
+                                           &liftField, &tileField, &stackField})) {
                     return false;
                 }
                 spliceChanges = changes;
@@ -623,23 +648,15 @@ private:
             return true;
         }
         const auto count = scales ? std::size_t{1} : static_cast<std::size_t>(params().getInt("count"));
-        const float tMin = scales ? 0.0f : static_cast<float>(params().getDouble("tMin"));
-        const float tMax = scales ? 0.0f : std::max(static_cast<float>(params().getDouble("tMax")), tMin);  // never before tMin
-        const float scaleRandom = static_cast<float>(params().getDouble("scaleRandom"));
-        const float spinRandom = static_cast<float>(params().getDouble("spinRandom"));
-        const float offset = static_cast<float>(params().getDouble("offset"));
         const auto seed = static_cast<std::uint64_t>(params().getInt("seed"));
         std::unique_ptr<HairVolume> volume;
-        float exposureFalloff = 0.0f, axisFalloff = 0.0f;
-        if (exposed) {
-            volume = std::make_unique<HairVolume>(*hair, exposure != "both", axis, axisSign);
-            exposureFalloff = static_cast<float>(params().getDouble("exposureFalloff"));
-            axisFalloff = static_cast<float>(params().getDouble("axisFalloff"));
-        }
+        if (exposed) volume = std::make_unique<HairVolume>(*hair, exposure != "both", axis, axisSign);
         // How much of its chance an instance at `t` along strand `s` keeps (all of it unless exposed).
         auto exposureAt = [&](std::size_t s, float t) {
             if (!volume || volume->empty()) return 1.0f;
             const Vec3f p = pointAlong(*in, s, t);
+            const float exposureFalloff = std::max(exposureFalloffField.at(*in, s), 0.0f);
+            const float axisFalloff = std::max(axisFalloffField.at(*in, s), 0.0f);
             float w = 1.0f;
             if (exposure == "external") w *= within(volume->depth(p), exposureFalloff);
             if (exposure == "internal") w *= 1.0f - within(volume->depth(p), exposureFalloff);
@@ -652,7 +669,6 @@ private:
         std::uint8_t axisCode = 1;
         // Scales' own.
         std::uint8_t previewCode = 0;
-        float lift = 0.0f, tile = 0.0f, stack = 0.0f;
         bool conform = false, followStrand = false, aimRoot = false, showStrands = false;
         std::string material;
         if (scales) {
@@ -661,9 +677,6 @@ private:
                 throw GraphError("Scales: preview must be auto, meshes or quads");
             }
             previewCode = static_cast<std::uint8_t>(preview == "auto" ? 0 : preview == "meshes" ? 1 : 2);
-            lift = static_cast<float>(params().getDouble("lift")) * kDegrees;
-            tile = static_cast<float>(params().getDouble("tile"));
-            stack = static_cast<float>(params().getDouble("stack"));
             conform = params().getBool("conform");
             const std::string follow = params().getString("follow");
             if (follow != "skin" && follow != "strand") throw GraphError("Scales: follow must be skin or strand");
@@ -709,6 +722,18 @@ private:
             d.size = scale.at(*in, s);
             d.ratio = fitted ? std::max(aspect.at(*in, s), 0.0f) : 1.0f;
             d.variant = byMap ? variant.at(*in, s) : 0.0f;
+            d.offset = offsetField.at(*in, s);
+            d.scaleRandom = std::clamp(scaleRandomField.at(*in, s), 0.0f, 1.0f);
+            d.spinRandom = std::clamp(spinRandomField.at(*in, s), 0.0f, 1.0f);
+            if (scales) {
+                d.lift = liftField.at(*in, s) * kDegrees;
+                d.tile = std::max(tileField.at(*in, s), 0.0f);
+                d.stack = std::clamp(stackField.at(*in, s), 0.0f, 1.0f);
+            } else {
+                d.tMin = std::clamp(tMinField.at(*in, s), 0.0f, 1.0f);
+                d.tMax = std::max(std::clamp(tMaxField.at(*in, s), 0.0f, 1.0f), d.tMin);  // never before tMin
+            }
+            const float tMin = d.tMin, tMax = d.tMax;
             for (std::size_t k = 0; k < count; ++k) {
                 const std::uint64_t id = instanceId(s, k);
                 bool keep = scales || unitFloat(hash64(id)) < d.chance;
@@ -725,6 +750,8 @@ private:
         };
         const std::size_t variantCount = prototypes.size();
         auto write = [&](std::size_t s, const StrandDraw& d, InstanceSet::Instance* at) {
+            const float tMin = d.tMin, tMax = d.tMax, scaleRandom = d.scaleRandom, spinRandom = d.spinRandom, offset = d.offset;
+            const float lift = d.lift, tile = d.tile, stack = d.stack;
             for (std::size_t k = 0; k < count; ++k) {
                 const std::uint64_t id = instanceId(s, k);
                 if (!(d.kept >> k & 1u)) continue;
@@ -921,7 +948,8 @@ private:
             keptFirst_ = std::move(firstMade);
             if (spliceLast && spliceLast->instances() != output->instances()) spareSet_ = spliceLast->instances();
         }
-        longest_.made(output, {&probabilityRead, &scale, &aspectRead, &variantRead});
+        longest_.made(output, {&probabilityRead, &scale, &aspectRead, &variantRead, &offsetField, &scaleRandomField, &spinRandomField,
+                               &tMinField, &tMaxField, &exposureFalloffField, &axisFalloffField, &liftField, &tileField, &stackField});
         *result = output;
         return true;
     }

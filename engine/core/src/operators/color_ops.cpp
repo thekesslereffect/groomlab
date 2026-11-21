@@ -22,6 +22,7 @@
 #include <cmath>
 #include <limits>
 #include <memory>
+#include <unordered_map>
 
 #include "groomlab/color_patterns.h"
 #include "groomlab/curve.h"
@@ -96,7 +97,7 @@ public:
         auto set = [&](const char* name, const char* random, float fallback) {
             const ParamValue& v = params().get(name);
             return std::holds_alternative<MapRef>(v) || static_cast<float>(params().getDouble(name)) != fallback ||
-                   (random && params().getDouble(random) > 0.0);
+                   (random && (paramMapped(params(), random) || params().getDouble(random) > 0.0));
         };
         if (set("specular", "specularRandom", kDefaultHairSpecular)) out.push_back({kSpecularChannel, ""});
         if (set("roughness", "roughnessRandom", kDefaultHairRoughness)) out.push_back({kRoughnessChannel, ""});
@@ -143,26 +144,26 @@ public:
                 .in("Base")
                 .when("mode", {"melanin"}),
             // ---- Randomness, per strand; clumpShare of it per clump.
-            ParamSpec{"melaninRandom", 0.1, "Each strand's melanin up to this much more or less, at random"}
+            ParamSpec{"melaninRandom", 0.1, "Each strand's melanin up to this much more or less, at random (mappable)"}
                 .range(0, 1)
                 .soft(0, 0.5)
                 .in("Random")
                 .when("mode", {"melanin"}),
-            ParamSpec{"valueRandom", 0.0, "Each strand's color up to this share lighter or darker, at random", "fraction"}
+            ParamSpec{"valueRandom", 0.0, "Each strand's color up to this share lighter or darker, at random (mappable)", "fraction"}
                 .range(0, 1)
                 .in("Random")
                 .when("mode", {"color"}),
-            ParamSpec{"hueRandom", 0.0, "Each strand's hue turned at random, up to half a turn either way at 1", "fraction"}
+            ParamSpec{"hueRandom", 0.0, "Each strand's hue turned at random, up to half a turn either way at 1 (mappable)", "fraction"}
                 .range(0, 1)
                 .in("Random"),
             ParamSpec{"saturationRandom", 0.0,
-                      "Each strand's saturation up to this share more or less, at random (grey and white stay neutral)",
+                      "Each strand's saturation up to this share more or less, at random (mappable; grey and white stay neutral)",
                       "fraction"}
                 .range(0, 1)
                 .in("Random"),
             ParamSpec{"clumpShare", 0.5,
                       "How much of the randomness the strands of one clump share: 0 each strand its own, 1 the whole clump "
-                      "alike (needs a Clump before HairColor: its clumpChannel)",
+                      "alike (mappable; needs a Clump before HairColor: its clumpChannel)",
                       "fraction"}
                 .range(0, 1)
                 .in("Random"),
@@ -188,7 +189,7 @@ public:
             ParamSpec{"tipProfile", Ramp::linear(0.0f, 1.0f), "Where along the strand the tip color shows, root to tip, times tipStrength"}
                 .in("Tip"),
             ParamSpec{"tipOffsetRandom", 0.0,
-                      "Each strand's tip color starts up to this share of its length earlier or later, at random",
+                      "Each strand's tip color starts up to this share of its length earlier or later, at random (mappable)",
                       "fraction"}
                 .range(0, 1)
                 .soft(0, 0.5)
@@ -198,18 +199,18 @@ public:
             ParamSpec{"specular", 0.3, "Highlight strength, 0 none to 1 bright (mappable; 0.3 is aiStandardHair's full specular tint)"}
                 .range(0, 1)
                 .in("Highlight"),
-            ParamSpec{"specularRandom", 0.0, "Each strand's specular up to this share more or less, at random", "fraction"}
+            ParamSpec{"specularRandom", 0.0, "Each strand's specular up to this share more or less, at random (mappable)", "fraction"}
                 .range(0, 1)
                 .in("Highlight")
                 .adv(),
             ParamSpec{"roughness", 0.5, "Highlight spread, 0 sharp to 1 broad (mappable)"}.range(0, 1).in("Highlight"),
-            ParamSpec{"roughnessRandom", 0.0, "Each strand's roughness up to this share more or less, at random", "fraction"}
+            ParamSpec{"roughnessRandom", 0.0, "Each strand's roughness up to this share more or less, at random (mappable)", "fraction"}
                 .range(0, 1)
                 .in("Highlight")
                 .adv(),
             ParamSpec{"tilt", 3.0,
                       "Cuticle tilt, degrees: how far the highlight and its colored second highlight move apart along "
-                      "the strand (real hair: 2-4)",
+                      "the strand (real hair: 2-4; mappable)",
                       "angle"}
                 .range(-20, 20)
                 .soft(0, 10)
@@ -321,16 +322,21 @@ private:
             }
         }
         const Ramp tipProfile = params().getRamp("tipProfile");
-        const float tipOffsetRandom = tipped ? static_cast<float>(params().getDouble("tipOffsetRandom")) : 0.0f;
-
-        // The randomness: melanin (mode melanin) or value (mode color), hue and saturation.
-        const float melaninRandom = colorMode ? 0.0f : static_cast<float>(params().getDouble("melaninRandom"));
-        const float valueRandom = colorMode ? static_cast<float>(params().getDouble("valueRandom")) : 0.0f;
-        const float hueRandom = static_cast<float>(params().getDouble("hueRandom"));
-        const float saturationRandom = static_cast<float>(params().getDouble("saturationRandom"));
-        const float clumpShare = std::clamp(static_cast<float>(params().getDouble("clumpShare")), 0.0f, 1.0f);
+        // The randomness: melanin (mode melanin) or value (mode color), hue and saturation, the
+        // clumps' share of it and the tip's offset: each read at the strand (mappable).
+        const ScalarField tipOffsetRandomField(params(), "tipOffsetRandom", scalp);
+        const ScalarField melaninRandomField(params(), "melaninRandom", scalp), valueRandomField(params(), "valueRandom", scalp);
+        const ScalarField hueRandomField(params(), "hueRandom", scalp), saturationRandomField(params(), "saturationRandom", scalp);
+        const ScalarField clumpShareField(params(), "clumpShare", scalp);
+        const std::array<const ScalarField*, 6> randomFields = {&tipOffsetRandomField, &melaninRandomField, &valueRandomField,
+                                                                &hueRandomField, &saturationRandomField, &clumpShareField};
+        for (const ScalarField* f : randomFields) f->validate(*in);
+        // Some strand may take a share above 0 (a map: any).
+        auto some = [](const ScalarField& f) { return !f.isConstant() || f.maximum() > 0.0f; };
+        const bool random = colorMode ? some(valueRandomField) || some(hueRandomField) || some(saturationRandomField)
+                                      : some(melaninRandomField) || some(hueRandomField) || some(saturationRandomField);
+        const float clumpShareNumber = std::clamp(static_cast<float>(params().getDouble("clumpShare")), 0.0f, 1.0f);
         const auto seed = static_cast<std::uint64_t>(params().getInt("seed"));
-        const bool random = melaninRandom > 0.0f || valueRandom > 0.0f || hueRandom > 0.0f || saturationRandom > 0.0f;
 
         // The highlight: its strength and spread (mappable, each a random share more or less per
         // strand) and the cuticle tilt, per strand for the renderers (export_view.h: Arnold's user
@@ -339,15 +345,15 @@ private:
         const ScalarField specularField(params(), "specular", scalp), roughnessField(params(), "roughness", scalp);
         specularField.validate(*in);
         roughnessField.validate(*in);
-        const auto specularRandom = static_cast<float>(params().getDouble("specularRandom"));
-        const auto roughnessRandom = static_cast<float>(params().getDouble("roughnessRandom"));
-        const auto tilt = static_cast<float>(params().getDouble("tilt"));
-        auto highlightSet = [](const ScalarField& f, float spread, float fallback) {
-            return !f.isConstant() || spread > 0.0f || f.maximum() != fallback;
+        const ScalarField specularRandomField(params(), "specularRandom", scalp), roughnessRandomField(params(), "roughnessRandom", scalp);
+        const ScalarField tiltField(params(), "tilt", scalp);
+        for (const ScalarField* f : {&specularRandomField, &roughnessRandomField, &tiltField}) f->validate(*in);
+        auto highlightSet = [&](const ScalarField& f, const ScalarField& spread, float fallback) {
+            return !f.isConstant() || some(spread) || f.maximum() != fallback;
         };
-        const bool specularSet = highlightSet(specularField, specularRandom, kDefaultHairSpecular);
-        const bool roughnessSet = highlightSet(roughnessField, roughnessRandom, kDefaultHairRoughness);
-        const bool tiltSet = tilt != kDefaultHairTilt;
+        const bool specularSet = highlightSet(specularField, specularRandomField, kDefaultHairSpecular);
+        const bool roughnessSet = highlightSet(roughnessField, roughnessRandomField, kDefaultHairRoughness);
+        const bool tiltSet = !tiltField.isConstant() || tiltField.maximum() != kDefaultHairTilt;
 
         const StrandChanges* changes = nullptr;
         StrandsPtr last;  // the last result, to color again only the strands the input changed in
@@ -358,8 +364,12 @@ private:
             last = changes ? previousStrandsFor(*incremental, *in, *changes) : nullptr;
             if (!last || !melaninField.strandLocal() || !rednessField.strandLocal() || !greysField.strandLocal() ||
                 !tipField.strandLocal() || !specularField.strandLocal() || !roughnessField.strandLocal() ||
-                !dyeField.strandLocal() || !pickedField.strandLocal() || !tipColorField.strandLocal()) {
+                !dyeField.strandLocal() || !pickedField.strandLocal() || !tipColorField.strandLocal() ||
+                !specularRandomField.strandLocal() || !roughnessRandomField.strandLocal() || !tiltField.strandLocal()) {
                 return false;
+            }
+            for (const ScalarField* f : randomFields) {
+                if (!f->strandLocal()) return false;
             }
             if (changes->none()) {  // the same strands in: the same result
                 *result = last;
@@ -373,9 +383,10 @@ private:
         if (clumps && clumps->size() != out->strandCount()) clumps = nullptr;
         // (Said when clumpShare is set off its default: a fresh groom's HairColor has no Clump before it.)
         const ParamValue* clumpShareDefault = params().defaultValue("clumpShare");
-        const bool clumpShareSet = !clumpShareDefault || !std::holds_alternative<double>(*clumpShareDefault) ||
+        const bool clumpShareSet = !clumpShareField.isConstant() || !clumpShareDefault ||
+                                   !std::holds_alternative<double>(*clumpShareDefault) ||
                                    std::get<double>(*clumpShareDefault) != params().getDouble("clumpShare");
-        if (!clumps && random && clumpShare > 0.0f && clumpShareSet && !last) {
+        if (!clumps && random && (clumpShareNumber > 0.0f || !clumpShareField.isConstant()) && clumpShareSet && !last) {
             ctx.note("clumpShare: no " + clumpChannel + " channel reaches HairColor (put it after a Clump), so each strand "
                      "varies on its own");
         }
@@ -429,14 +440,22 @@ private:
         auto varied = [&](float base, float amount, std::size_t s, std::uint64_t k) {
             return std::clamp(base * (amount > 0.0f ? 1.0f + amount * spread(s, k) : 1.0f), 0.0f, 1.0f);
         };
-        // Clump and strand shares of the randomness, mixed so the spread stays the same at any
-        // clumpShare (their squares add up to 1).
-        const float clumpWeight = clumps ? std::sqrt(clumpShare) : 0.0f;
-        const float strandWeight = clumps ? std::sqrt(1.0f - clumpShare) : 1.0f;
+        // A random share of strand s, kept to the param's range (a map can hold any value).
+        auto share = [&](const ScalarField& f, std::size_t s) { return std::clamp(f.at(*out, s), 0.0f, 1.0f); };
         auto color = [&](std::size_t s) {
-            if (specularOut) (*specularOut)[s] = varied(specularField.at(*out, s), specularRandom, s, 1);
-            if (roughnessOut) (*roughnessOut)[s] = varied(roughnessField.at(*out, s), roughnessRandom, s, 2);
-            if (tiltOut) (*tiltOut)[s] = tilt;
+            if (specularOut) (*specularOut)[s] = varied(specularField.at(*out, s), share(specularRandomField, s), s, 1);
+            if (roughnessOut) (*roughnessOut)[s] = varied(roughnessField.at(*out, s), share(roughnessRandomField, s), s, 2);
+            if (tiltOut) (*tiltOut)[s] = std::clamp(tiltField.at(*out, s), -20.0f, 20.0f);
+            const float melaninRandom = colorMode ? 0.0f : share(melaninRandomField, s);
+            const float valueRandom = colorMode ? share(valueRandomField, s) : 0.0f;
+            const float hueRandom = share(hueRandomField, s);
+            const float saturationRandom = share(saturationRandomField, s);
+            const float tipOffsetRandom = tipped ? share(tipOffsetRandomField, s) : 0.0f;
+            // Clump and strand shares of the randomness, mixed so the spread stays the same at any
+            // clumpShare (their squares add up to 1).
+            const float clumpShare = share(clumpShareField, s);
+            const float clumpWeight = clumps ? std::sqrt(clumpShare) : 0.0f;
+            const float strandWeight = clumps ? std::sqrt(1.0f - clumpShare) : 1.0f;
             // Draw k in [-1, 1] of this strand: its own, part of it its clump's.
             const std::uint64_t own = hashCombine(out->ids()[s], seed ^ 0xC0105);
             const std::uint64_t clumpKey =
@@ -580,8 +599,8 @@ public:
     std::vector<ParamSpec> paramSpecs() const override {
         return {
             ParamSpec{"strength", 1.0, "How strongly the bands show, 0 (none) to 1 (mappable, per point)", "fraction"}.range(0, 1),
-            ParamSpec{"melanin", 0.08, "The bands' pigment, 0 (pale) to 1 (black)"}.range(0, 1),
-            ParamSpec{"redness", 0.6, "The bands' redness, 0 (brown) to 1 (red): agouti's band is a pale yellow-red"}.range(0, 1),
+            ParamSpec{"melanin", 0.08, "The bands' pigment, 0 (pale) to 1 (black) (mappable)"}.range(0, 1),
+            ParamSpec{"redness", 0.6, "The bands' redness, 0 (brown) to 1 (red) (mappable): agouti's band is a pale yellow-red"}.range(0, 1),
             ParamSpec{"dye", Vec3f(1.0f, 1.0f, 1.0f), "Dye over the bands' pigment, linear RGB (white: none)", "color"}.colorMap(),
             ParamSpec{"profile", Ramp{{0.0f, 0.0f}, {0.5f, 0.0f}, {0.6f, 1.0f}, {0.78f, 1.0f}, {0.88f, 0.0f}, {1.0f, 0.0f}},
                       "Where the band color is along one period of the pattern, root to tip: 0 the hair's own, 1 the band's"},
@@ -590,7 +609,8 @@ public:
                 .soft(1, 10),
             ParamSpec{"guards", 1.0,
                       "Share of the strands that are guard hairs, which take the bands and keep the tip color (1: all); "
-                      "the rest are undercoat in the plain color",
+                      "the rest are undercoat in the plain color (mappable; guardsBy longest: a strand is a guard hair when it "
+                      "is among the longest of its own share)",
                       "fraction"}
                 .range(0, 1)
                 .in("Guard hairs"),
@@ -601,16 +621,16 @@ public:
                       "Tint over the undercoat's color, linear RGB (white: the hair's own)", "color"}
                 .colorMap()
                 .in("Guard hairs"),
-            ParamSpec{"melaninRandom", 0.1, "Random offset of each strand's band pigment (melanin and redness), +/-"}
+            ParamSpec{"melaninRandom", 0.1, "Random offset of each strand's band pigment (melanin and redness), +/- (mappable)"}
                 .soft(0, 0.5)
                 .in("Random"),
             ParamSpec{"offsetRandom", 0.15,
                       "Random shift of each strand's bands along it, as a share of a period, so bands do not line up "
-                      "across the coat",
+                      "across the coat (mappable)",
                       "fraction"}
                 .range(0, 1)
                 .in("Random"),
-            ParamSpec{"widthRandom", 0.1, "Random stretch of each strand's bands, +/- this share", "fraction"}
+            ParamSpec{"widthRandom", 0.1, "Random stretch of each strand's bands, +/- this share (mappable)", "fraction"}
                 .range(0, 0.9)
                 .in("Random"),
             notAnimatable({"seed", std::int64_t{0}, "Random seed (HairColor's, for the same pigment offsets)"}).in("Advanced").adv(),
@@ -636,18 +656,19 @@ private:
         strength.validate(*in);
         const bool banded = !strength.isConstant() || strength.at(*in, 0) > 0.0f;
         const bool perPoint = strength.perPoint();
-        const float bandMelanin = static_cast<float>(params().getDouble("melanin"));
-        const float bandRedness = static_cast<float>(params().getDouble("redness"));
+        // The band's pigment, its randomness and the guard hairs' share: each read at the strand (mappable).
+        const ScalarField bandMelanin(params(), "melanin", scalp), bandRedness(params(), "redness", scalp);
+        const ScalarField randomness(params(), "melaninRandom", scalp), offsetRandom(params(), "offsetRandom", scalp);
+        const ScalarField widthRandom(params(), "widthRandom", scalp), guardsField(params(), "guards", scalp);
+        const std::array<const ScalarField*, 6> fields = {&bandMelanin, &bandRedness, &randomness, &offsetRandom, &widthRandom, &guardsField};
+        for (const ScalarField* f : fields) f->validate(*in);
         const ColorField bandDye(params(), "dye");
         const Ramp profile = params().getRamp("profile");
         const int count = static_cast<int>(params().getInt("count"));
-        const float randomness = static_cast<float>(params().getDouble("melaninRandom"));
-        const float offsetRandom = static_cast<float>(params().getDouble("offsetRandom"));
-        const float widthRandom = static_cast<float>(params().getDouble("widthRandom"));
         const float guards = static_cast<float>(params().getDouble("guards"));
         const std::string guardsBy = params().getString("guardsBy");
         if (guardsBy != "random" && guardsBy != "longest") throw GraphError(where + "guardsBy must be random or longest");
-        const bool undercoat = guards < 1.0f;
+        const bool undercoat = !guardsField.isConstant() || guards < 1.0f;
         const bool byLength = undercoat && guardsBy == "longest";
         const ColorField undercoatDye(params(), "undercoatDye");
         bandDye.validate(*in);
@@ -666,6 +687,9 @@ private:
             }
             last = previousStrandsFor(*incremental, *in);
             if (!last || !strength.strandLocal() || !bandDye.strandLocal() || !undercoatDye.strandLocal() || byLength) return false;  // (by length: a quantile of every strand's)
+            for (const ScalarField* f : fields) {
+                if (!f->strandLocal()) return false;
+            }
             if (changes->none()) {
                 *result = last;
                 *changed = *changes;
@@ -684,27 +708,39 @@ private:
         // Guard hairs by length: the shortest (1 - guards) of the strands are undercoat, the length
         // that parts them measured on the core strands (preview_core.h: the same at every preview
         // density).
+        // (A mapped share: each strand's own share parts the lengths, sorted.)
         float guardLength = 0.0f;
+        std::vector<float> lengths;
         const std::vector<std::size_t> measured = byLength ? coreStrands(*out) : std::vector<std::size_t>{};
+        auto guardLengthAt = [&](float share) {
+            const auto rank = static_cast<std::size_t>(std::floor((1.0f - share) * static_cast<float>(lengths.size())));
+            if (rank >= lengths.size()) return std::numeric_limits<float>::infinity();
+            return roundToPercentStep(lengths[rank], ctx.scale);  // in 1% steps: a few strands changing keeps it
+        };
         if (byLength && !measured.empty()) {
-            std::vector<float> lengths(measured.size());
+            lengths.resize(measured.size());
             parallelFor(0, measured.size(), [&](std::size_t k) {
                 lengths[k] = arcLength(out->strandPoints(measured[k]), out->strandPointCount(measured[k]));
             });
-            const auto rank = static_cast<std::size_t>(std::floor((1.0f - guards) * static_cast<float>(lengths.size())));
-            if (rank >= lengths.size()) {
-                guardLength = std::numeric_limits<float>::infinity();
+            if (guardsField.isConstant()) {
+                const auto rank = static_cast<std::size_t>(std::floor((1.0f - guards) * static_cast<float>(lengths.size())));
+                if (rank < lengths.size()) {
+                    std::nth_element(lengths.begin(), lengths.begin() + static_cast<std::ptrdiff_t>(rank), lengths.end());
+                }
+                guardLength = guardLengthAt(guards);
             } else {
-                std::nth_element(lengths.begin(), lengths.begin() + static_cast<std::ptrdiff_t>(rank), lengths.end());
-                guardLength = roundToPercentStep(lengths[rank], ctx.scale);  // in 1% steps: a few strands changing keeps it
+                std::sort(lengths.begin(), lengths.end());
             }
         }
 
         auto recolor = [&](std::size_t s) {
             const std::size_t n = out->strandPointCount(s), begin = out->strandBegin(s);
             const Rgb own = incoming.strand(s);
-            const bool guard = !undercoat || (byLength ? arcLength(out->strandPoints(s), n) >= guardLength
-                                                       : unitFloat(hashCombine(out->ids()[s], seed ^ 0x6A2D)) < guards);
+            const bool shareMapped = !guardsField.isConstant();
+            const float guardShare = shareMapped ? std::clamp(guardsField.at(*out, s), 0.0f, 1.0f) : guards;
+            const float guardFrom = byLength && shareMapped && !lengths.empty() ? guardLengthAt(guardShare) : guardLength;
+            const bool guard = !undercoat || (byLength ? arcLength(out->strandPoints(s), n) >= guardFrom
+                                                       : unitFloat(hashCombine(out->ids()[s], seed ^ 0x6A2D)) < guardShare);
             if (!guard) {  // the undercoat: its own tint, no bands and no tip color
                 const Rgb tint = undercoatDye.at(*out, s);
                 const Rgb c{own[0] * tint[0], own[1] * tint[1], own[2] * tint[2]};
@@ -719,13 +755,14 @@ private:
             }
             // The band's pigment, offset per strand as HairColor offsets the hair's.
             const std::uint64_t key = hashCombine(out->ids()[s], seed ^ 0xC0105);
-            const float melaninOffset = randomness * (2.0f * unitFloat(hashCombine(key, 1)) - 1.0f);
-            const float rednessOffset = randomness * (2.0f * unitFloat(hashCombine(key, 2)) - 1.0f);
-            const Rgb band = melaninColor(std::clamp(bandMelanin + melaninOffset, 0.0f, 1.0f),
-                                          std::clamp(bandRedness + rednessOffset, 0.0f, 1.0f), bandDye.at(*out, s));
+            const float spread = randomness.at(*out, s);
+            const float melaninOffset = spread * (2.0f * unitFloat(hashCombine(key, 1)) - 1.0f);
+            const float rednessOffset = spread * (2.0f * unitFloat(hashCombine(key, 2)) - 1.0f);
+            const Rgb band = melaninColor(std::clamp(bandMelanin.at(*out, s) + melaninOffset, 0.0f, 1.0f),
+                                          std::clamp(bandRedness.at(*out, s) + rednessOffset, 0.0f, 1.0f), bandDye.at(*out, s));
             const std::uint64_t h = hashCombine(out->ids()[s], seed ^ 0xBA4D5);
-            const float phase = offsetRandom * (2.0f * unitFloat(hashCombine(h, 1)) - 1.0f);
-            const float scale = 1.0f + widthRandom * (2.0f * unitFloat(hashCombine(h, 2)) - 1.0f);
+            const float phase = std::clamp(offsetRandom.at(*out, s), 0.0f, 1.0f) * (2.0f * unitFloat(hashCombine(h, 1)) - 1.0f);
+            const float scale = 1.0f + std::clamp(widthRandom.at(*out, s), 0.0f, 0.9f) * (2.0f * unitFloat(hashCombine(h, 2)) - 1.0f);
             const float strandStrength = perPoint ? 0.0f : strength.at(*out, s);
             for (std::size_t i = 0; i < n; ++i) {
                 Rgb c = incoming.point(s, i, own);
@@ -777,9 +814,9 @@ public:
                       "iridescence)",
                       "", patterns}
                 .in("Pattern"),
-            ParamSpec{"strength", 1.0, "How strongly the pattern shows, 0-1", "fraction"}.range(0, 1).in("Pattern").when("pattern", any),
-            ParamSpec{"melanin", 0.0, "The pattern's pigment, 0 (white) to 1 (black)"}.range(0, 1).in("Pattern").when("pattern", shapes),
-            ParamSpec{"redness", 0.0, "The pattern's redness"}.range(0, 1).in("Pattern").when("pattern", shapes),
+            ParamSpec{"strength", 1.0, "How strongly the pattern shows, 0-1 (mappable)", "fraction"}.range(0, 1).in("Pattern").when("pattern", any),
+            ParamSpec{"melanin", 0.0, "The pattern's pigment, 0 (white) to 1 (black) (mappable)"}.range(0, 1).in("Pattern").when("pattern", shapes),
+            ParamSpec{"redness", 0.0, "The pattern's redness (mappable)"}.range(0, 1).in("Pattern").when("pattern", shapes),
             ParamSpec{"dye", Vec3f(1.0f, 1.0f, 1.0f), "Dye over the pattern's pigment, linear RGB", "color"}
                 .colorMap()
                 .in("Pattern")
@@ -789,24 +826,32 @@ public:
                       {"both", "left", "right"}}
                 .in("Pattern")
                 .when("pattern", any),
-            ParamSpec{"count", 6.0, "Bars, chevrons, rows of spots per feather length"}
+            ParamSpec{"count", 6.0, "Bars, chevrons, rows of spots per feather length (mappable, per feather: its shaft's)"}
                 .atLeast(0.01)
                 .soft(1, 20)
                 .in("Pattern")
                 .when("pattern", {"bars", "chevrons", "spots"}),
             ParamSpec{"width", 0.4,
                       "Bars, chevrons, spots: the share of each period the shape takes; eye: its diameter (a share of the "
-                      "feather's length); fringe: the share of each barb from its tip",
+                      "feather's length); fringe: the share of each barb from its tip (mappable, per feather: its shaft's)",
                       "fraction"}
                 .soft(0, 1)
                 .in("Pattern")
                 .when("pattern", shapes),
-            ParamSpec{"angle", 0.0, "Degrees: bars' tilt from straight across; chevrons' arms (try 30); an eye's tilt", "angle"}
+            ParamSpec{"angle", 0.0,
+                      "Degrees: bars' tilt from straight across; chevrons' arms (try 30); an eye's tilt (mappable, per feather: "
+                      "its shaft's)",
+                      "angle"}
                 .soft(-90, 90)
                 .in("Pattern")
                 .when("pattern", {"bars", "chevrons", "eye"}),
-            ParamSpec{"sharpness", 0.7, "Edges, 0 soft to 1 hard"}.range(0, 1).in("Pattern").when("pattern", shapes),
-            ParamSpec{"offset", 0.7, "Along the feather, 0 root .. 1 tip: shifts bars and spots; the eye spot's center",
+            ParamSpec{"sharpness", 0.7, "Edges, 0 soft to 1 hard (mappable, per feather: its shaft's)"}
+                .range(0, 1)
+                .in("Pattern")
+                .when("pattern", shapes),
+            ParamSpec{"offset", 0.7,
+                      "Along the feather, 0 root .. 1 tip: shifts bars and spots; the eye spot's center (mappable, per "
+                      "feather: its shaft's)",
                       "fraction"}
                 .soft(0, 1)
                 .in("Pattern")
@@ -824,16 +869,20 @@ public:
                       "Optional: the right vane's own image (texture is then the left vane's), the shaft along the left edge"}
                 .in("Pattern")
                 .when("pattern", {"texture"}),
-            ParamSpec{"offsetRandom", 0.2, "Random shift of each feather's pattern, as a share of its spacing (eye: its size)"}
+            ParamSpec{"offsetRandom", 0.2,
+                      "Random shift of each feather's pattern, as a share of its spacing (eye: its size) (mappable, per "
+                      "feather: its shaft's)"}
                 .atLeast(0)
                 .soft(0, 1)
                 .in("Random")
                 .when("pattern", {"bars", "chevrons", "spots", "eye"}),
-            ParamSpec{"scaleRandom", 0.1, "Random size of each feather's pattern, +/- this share", "fraction"}
+            ParamSpec{"scaleRandom", 0.1, "Random size of each feather's pattern, +/- this share (mappable, per feather: its shaft's)",
+                      "fraction"}
                 .range(0, 0.95)
                 .in("Random")
                 .when("pattern", {"bars", "chevrons", "spots", "eye"}),
-            ParamSpec{"angleRandom", 3.0, "Random turn of each feather's pattern, +/- degrees", "angle"}
+            ParamSpec{"angleRandom", 3.0, "Random turn of each feather's pattern, +/- degrees (mappable, per feather: its shaft's)",
+                      "angle"}
                 .soft(0, 45)
                 .in("Random")
                 .when("pattern", {"bars", "chevrons", "eye"}),
@@ -841,7 +890,7 @@ public:
                       "color"}
                 .colorMap()
                 .in("Down"),
-            ParamSpec{"downStrength", 1.0, "How far the down zone's barbs go to downColor, 0-1", "fraction"}
+            ParamSpec{"downStrength", 1.0, "How far the down zone's barbs go to downColor, 0-1 (mappable)", "fraction"}
                 .range(0, 1)
                 .formerDefault(2, 0.0)
                 .in("Down"),
@@ -912,9 +961,24 @@ private:
         if (!parseVaneSides(params().getString("vanes"), &patternVanes)) throw GraphError(where + "vanes must be both, left or right");
         const VaneSpace vanes(*in);
         const bool patterned = pattern.kind != VanePattern::None && vanes.available();
-        const float strength = static_cast<float>(params().getDouble("strength"));
-        const float patternMelanin = static_cast<float>(params().getDouble("melanin"));
-        const float patternRedness = static_cast<float>(params().getDouble("redness"));
+        // The pattern's strength and pigment and the down's strength, read at the strand (mappable).
+        const ScalarField strengthField(params(), "strength", scalp), melaninField(params(), "melanin", scalp);
+        const ScalarField rednessField(params(), "redness", scalp), downStrengthField(params(), "downStrength", scalp);
+        // The pattern's own numbers, read per feather at its shaft (else its first strand), so a
+        // feather's pattern stays whole.
+        const ScalarField countField(params(), "count", scalp), widthField(params(), "width", scalp);
+        const ScalarField angleField(params(), "angle", scalp), sharpnessField(params(), "sharpness", scalp);
+        const ScalarField offsetField(params(), "offset", scalp), offsetRandomField(params(), "offsetRandom", scalp);
+        const ScalarField scaleRandomField(params(), "scaleRandom", scalp), angleRandomField(params(), "angleRandom", scalp);
+        const std::array<const ScalarField*, 4> strandFields = {&strengthField, &melaninField, &rednessField, &downStrengthField};
+        const std::array<const ScalarField*, 8> featherFields = {&countField,  &widthField,        &angleField,       &sharpnessField,
+                                                                 &offsetField, &offsetRandomField, &scaleRandomField, &angleRandomField};
+        bool perFeather = false;
+        for (const ScalarField* f : strandFields) f->validate(*in);
+        for (const ScalarField* f : featherFields) {
+            f->validate(*in);
+            perFeather = perFeather || !f->isConstant();
+        }
         const ColorField patternDye(params(), "dye"), downColorField(params(), "downColor");
         patternDye.validate(*in);
         downColorField.validate(*in);
@@ -936,7 +1000,8 @@ private:
         }
         const float downStrength = static_cast<float>(params().getDouble("downStrength"));
         const std::vector<float>* downChannel = in->strandChannel(kIsDownChannel);
-        const bool downColored = downStrength > 0.0f && downChannel && downChannel->size() == in->strandCount();
+        const bool downColored =
+            (!downStrengthField.isConstant() || downStrength > 0.0f) && downChannel && downChannel->size() == in->strandCount();
 
         // Iridescence: a per-point channel of how much.
         const ScalarField iridescenceField(params(), "iridescence", scalp);
@@ -968,6 +1033,10 @@ private:
             }
             last = previousStrandsFor(*incremental, *in);
             if (!last || !iridescenceField.strandLocal() || !patternDye.strandLocal() || !downColorField.strandLocal()) return false;
+            for (const ScalarField* f : strandFields) {
+                if (!f->strandLocal()) return false;
+            }
+            if (perFeather && patterned) return false;  // (a feather's pattern read at its shaft: all of it again)
             if (changes->none()) {
                 *result = last;
                 *changed = *changes;
@@ -985,6 +1054,37 @@ private:
             colors = std::make_unique<RecolorChannels>(*out, *in, last, false);
             if (!colors->complete(false)) return false;
         }
+        // Each feather's pattern where its numbers are mapped: read at its shaft, else its first strand.
+        std::vector<VanePatternParams> featherPatterns;
+        std::vector<std::uint32_t> patternOf;  // per strand: its feather's (featherPatterns)
+        if (perFeather && patterned) {
+            std::unordered_map<std::uint64_t, std::uint32_t> feathers;
+            std::vector<std::size_t> shafts;  // per feather: the strand its numbers are read at
+            patternOf.assign(out->strandCount(), 0);
+            for (std::size_t s = 0; s < out->strandCount(); ++s) {
+                if (!vanes.inFeather(s)) continue;
+                const auto found = feathers.try_emplace(vanes.featherKey(s), static_cast<std::uint32_t>(shafts.size()));
+                if (found.second) {
+                    shafts.push_back(s);
+                } else if (vanes.isShaft(s) && !vanes.isShaft(shafts[found.first->second])) {
+                    shafts[found.first->second] = s;
+                }
+                patternOf[s] = found.first->second;
+            }
+            featherPatterns.assign(shafts.size(), pattern);
+            parallelFor(0, shafts.size(), [&](std::size_t k) {
+                VanePatternParams& p = featherPatterns[k];
+                const std::size_t s = shafts[k];
+                p.count = std::max(countField.at(*out, s), 0.01f);
+                p.width = widthField.at(*out, s);
+                p.angle = angleField.at(*out, s) * kDegrees;
+                p.sharpness = std::clamp(sharpnessField.at(*out, s), 0.0f, 1.0f);
+                p.offset = offsetField.at(*out, s);
+                p.jitter = std::max(offsetRandomField.at(*out, s), 0.0f);
+                p.scaleJitter = std::clamp(scaleRandomField.at(*out, s), 0.0f, 0.95f);
+                p.rotationJitter = angleRandomField.at(*out, s) * kDegrees;
+            });
+        }
         std::vector<float>* iridescenceOut = nullptr;
         if (iridescent) {
             iridescenceOut = last ? out->copyPointChannelFrom(kIridescenceChannel, *last) : &out->addPointChannel(kIridescenceChannel, 0.0f);
@@ -995,13 +1095,17 @@ private:
             const std::size_t n = out->strandPointCount(s), begin = out->strandBegin(s);
             const Rgb own = incoming.strand(s);
             const bool feather = vanes.available() && vanes.inFeather(s);
+            const VanePatternParams& shape = feather && !patternOf.empty() ? featherPatterns[patternOf[s]] : pattern;
+            const float strength = std::clamp(strengthField.at(*out, s), 0.0f, 1.0f);
             // (Only a drawn pattern on a feather's strand reads it: patternAt.)
             const Rgb patternColor = feather && patterned && pattern.kind != VanePattern::Texture
-                                         ? melaninColor(patternMelanin, patternRedness, patternDye.at(*out, s))
+                                         ? melaninColor(std::clamp(melaninField.at(*out, s), 0.0f, 1.0f),
+                                                        std::clamp(rednessField.at(*out, s), 0.0f, 1.0f), patternDye.at(*out, s))
                                          : Rgb{};
             const Rgb downColor = downColorField.at(*out, s);
+            const float downAmount = std::clamp(downStrengthField.at(*out, s), 0.0f, 1.0f);
             const std::uint64_t key = feather ? vanes.featherKey(s) : 0;
-            const FeatherJitter jitter = feather && patterned ? featherJitter(pattern, key) : FeatherJitter{};
+            const FeatherJitter jitter = feather && patterned ? featherJitter(shape, key) : FeatherJitter{};
             // The pattern's weight and color at point i (0: none).
             auto patternAt = [&](std::size_t i, Rgb* tint) {
                 if (!feather || !patterned) return 0.0f;
@@ -1019,7 +1123,7 @@ private:
                     return strength * std::clamp(t[3], 0.0f, 1.0f);
                 }
                 *tint = patternColor;
-                return strength * vanePatternMask(pattern, vp, jitter, key);
+                return strength * vanePatternMask(shape, vp, jitter, key);
             };
             // The pattern's weight at each point as the colors found it, where the iridescence asks
             // for it too (a pattern recolors: `colors` is there).
@@ -1040,7 +1144,7 @@ private:
                         }
                     }
                     if (down) {
-                        for (int k = 0; k < 3; ++k) c[k] += (downColor[k] - c[k]) * downStrength;
+                        for (int k = 0; k < 3; ++k) c[k] += (downColor[k] - c[k]) * downAmount;
                     }
                     colors->setPoint(begin + i, c);
                 }

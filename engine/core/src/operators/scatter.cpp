@@ -321,6 +321,25 @@ std::vector<StrandRoot> mixRoots(const std::vector<StrandRoot>& even, const std:
     return mixed;
 }
 
+// The same with each root's own randomness (a map's: `randomness[i]` root i's).
+std::vector<StrandRoot> mixRootsEach(const std::vector<StrandRoot>& even, const std::vector<StrandRoot>& random,
+                                     const ScalpMesh& rest, const std::vector<float>& randomness) {
+    const ProfileScope scope("scatter.mixRoots");
+    std::vector<StrandRoot> mixed(even.size());
+    parallelFor(0, even.size(), [&](std::size_t i) {
+        const float r = randomness[i];
+        if (r == 0.0f || r == 1.0f) {
+            mixed[i] = r == 0.0f ? even[i] : random[i];
+            return;
+        }
+        const Vec3f a = rest.position(even[i]), b = rest.position(random[i]);
+        const Vec3f at = a + (b - a) * r;
+        const SurfacePoint hit = rest.closestPoint(at, 2.0f * std::max(r, 1.0f) * (b - a).length() + 1e-6f);
+        mixed[i] = hit.root.face >= 0 ? hit.root : (r < 0.5f ? even[i] : random[i]);
+    });
+    return mixed;
+}
+
 
 // Scatter's guideRadius for guides with a shaped tube: their root footprints (TubeSpine laid on
 // the scalp), each holding the roots on it or within `margin` half-widths of its outline.
@@ -464,11 +483,12 @@ public:
             ParamSpec{"length", 1.0, "Length of the straight strands grown along the scalp's normal. An Interpolate after "
                                      "it gives the strands the guides' shapes and lengths, so with guides this shows only "
                                      "where no guide reaches; to make hair longer or shorter, brush the guides or trim "
-                                     "with the Length node", "length"}
+                                     "with the Length node (mappable, per root)", "length"}
                 .soft(0, 10),
             ParamSpec{"randomness", 1.0, "How random the roots are: 0 evenly spread (blue noise), 1 at random (white "
                                          "noise); in between each root moves smoothly from its even spot to its random "
-                                         "one. The same strands at every value", "fraction"}
+                                         "one. The same strands at every value (mappable, per root: read at its random "
+                                         "spot)", "fraction"}
                 .range(0, kMaxRandomness)
                 .when("layout", {"random"}),
             notAnimatable({"layout", std::string("random"),
@@ -592,11 +612,14 @@ public:
         }
         phase.next("scatter.guideFootprints");
         const auto seed = static_cast<std::uint64_t>(params().getInt("seed"));
-        const float length = static_cast<float>(params().getDouble("length"));
+        // The length and the randomness, read at each root (mappable).
+        const ScalarField lengthField(params(), "length", mesh.get(), guides.get());
         // Strand resolution comes from the Resample node (EvalContext::strandSegments).
         const auto segments = static_cast<std::size_t>(segmentsFor(ctx));
         const std::string layout = params().getString("layout");
         const bool grid = layout == "uvGrid";
+        const ScalarField randomnessField(params(), "randomness", mesh.get(), guides.get());
+        const bool randomMapped = !grid && !randomnessField.isConstant();
         const float randomness = std::clamp(static_cast<float>(params().getDouble("randomness")), 0.0f, kMaxRandomness);
         const auto rows = static_cast<std::size_t>(params().getInt("gridRows"));
         const auto columns = static_cast<std::size_t>(params().getInt("gridColumns"));
@@ -777,7 +800,7 @@ public:
         };
         // The even spots are worked out unless only the random ones show (randomness 1): every root
         // relaxed, whatever the preview holds of them, so its strands sit where the render's do.
-        const bool needEven = !grid && randomness != 1.0f;
+        const bool needEven = !grid && (randomMapped || randomness != 1.0f);
         // On the rest pose: the same spacing every frame.
         std::unique_ptr<ScalpMesh> restMesh;
         auto restOf = [&]() -> const ScalpMesh& {
@@ -901,8 +924,25 @@ public:
         std::vector<StrandId> ids(held.size());
         for (std::size_t k = 0; k < held.size(); ++k) ids[k] = placed->ids[held[k]];
         phase.next("scatter.mix");
+        // A mapped randomness: each root's, read at its random spot (every root's: the follicles mix them all).
+        std::vector<float> randomnessOf;
+        if (randomMapped) {
+            randomnessOf.resize(placed->ids.size());
+            parallelFor(0, randomnessOf.size(), [&](std::size_t i) {
+                const float r = randomnessField.atCageRoot(placed->random[i]);
+                randomnessOf[i] = std::isfinite(r) ? std::clamp(r, 0.0f, kMaxRandomness) : 1.0f;
+            }, 1024);
+        }
+        auto mixEach = [&](bool every) {
+            if (every) return mixRootsEach(placed->even, placed->random, restOf(), randomnessOf);
+            std::vector<float> heldRandomness(held.size());
+            for (std::size_t k = 0; k < held.size(); ++k) heldRandomness[k] = randomnessOf[held[k]];
+            return mixRootsEach(heldOf(placed->even), heldOf(placed->random), restOf(), heldRandomness);
+        };
         std::shared_ptr<const std::vector<StrandRoot>> rootsHeld;
-        if (grid || randomness == 1.0f) {
+        if (randomMapped) {
+            rootsHeld = std::make_shared<const std::vector<StrandRoot>>(mixEach(all));
+        } else if (grid || randomness == 1.0f) {
             rootsHeld = rootsOf(placed->random);
         } else if (randomness == 0.0f) {
             rootsHeld = rootsOf(placed->even);
@@ -930,7 +970,9 @@ public:
         if (!(folliclesField.isConstant() && !(folliclesField.maximum() > 0.0f)) && density > 0.0) {
             const std::size_t units = placed->ids.size();
             std::shared_ptr<const std::vector<StrandRoot>> every;
-            if (grid || randomness == 1.0f) {
+            if (randomMapped) {
+                every = all ? rootsHeld : std::make_shared<const std::vector<StrandRoot>>(mixEach(true));
+            } else if (grid || randomness == 1.0f) {
                 every = std::shared_ptr<const std::vector<StrandRoot>>(placed, &placed->random);
             } else if (randomness == 0.0f) {
                 every = std::shared_ptr<const std::vector<StrandRoot>>(placed, &placed->even);
@@ -1008,11 +1050,12 @@ public:
         std::vector<StrandRoot>& outRoots = out->mutableRoots();
         if (!allCoreShown) out->addStrandChannel(kPreviewChannel, kCoreShown) = std::move(roles);
 
+        const float length = static_cast<float>(params().getDouble("length"));
         parallelFor(0, ids.size(), [&](std::size_t i) {
             const StrandRoot root = binding.toScalp(roots[i]);  // on the cage until here
 
             const Vec3f base = mesh->position(root);
-            const Vec3f dir = mesh->normal(root) * length;
+            const Vec3f dir = mesh->normal(root) * (lengthField.isConstant() ? length : lengthField.atCageRoot(roots[i]));
 
             outIds[i] = ids[i];
             outRoots[i] = toWholeRoot(*mesh, root);

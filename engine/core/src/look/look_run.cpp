@@ -5,7 +5,7 @@ namespace groomlab::gpu {
 
 const char* stageName(StageKind kind) {
     static const char* const names[] = {
-#define GROOMLAB_STAGE(Kind, name, mapped0, mapped1, ramps, vectors, numbers) name,
+#define GROOMLAB_STAGE(Kind, name, mapped, ramps, vectors, numbers) name,
 #include "groomlab/look/look_stages.inc"
 #undef GROOMLAB_STAGE
     };
@@ -42,7 +42,10 @@ StageParams* LookParams::find(StageKind kind) {
 
 bool LookFields::any() const {
     for (const StageFields& s : stages) {
-        if (s.field[0].mode || s.field[1].mode || s.affect.mode) return true;
+        for (const FieldValues& f : s.field) {
+            if (f.mode) return true;
+        }
+        if (s.affect.mode) return true;
     }
     return false;
 }

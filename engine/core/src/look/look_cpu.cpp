@@ -98,7 +98,7 @@ LookRun stageRun(StageKind kind, const StageParamReader& reader, const StrandsPt
     }
     run.fields.stages.resize(1);
     run.inputs.push_back(std::move(inputs));
-    const std::array<std::string, 2> mapped = mappedParams(kind, params);
+    const std::array<std::string, kMappedFields> mapped = mappedParams(kind, params);
     const bool coil = kind == StageKind::Curl && params.getString("shape") == "coil";
     if (coil) {
         // A coil's radius by the strands' widths at each point (times coilWidths), as they carry them
@@ -109,9 +109,8 @@ LookRun stageRun(StageKind kind, const StageParamReader& reader, const StrandsPt
         values.fixed = true;
         values.widths = true;
     }
-    for (int i = 0; i < 2; ++i) {
+    for (int i = 0; i < kMappedFields; ++i) {
         if (mapped[i].empty() || !mappedParam(params, mapped[i]) || (coil && i == 0)) continue;
-        if (kind == StageKind::Direction && reader.directions) continue;  // (its three per strand: StageInputs::directions)
         FieldValues& values = run.fields.stages[0].field[i];
         const ScalarField field(params, mapped[i], scalp);
         if (which) {

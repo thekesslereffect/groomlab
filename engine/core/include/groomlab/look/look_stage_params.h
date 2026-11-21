@@ -51,9 +51,8 @@ public:
     // Interpolate keeping curls (keepCurls): the caller keeps them after it (the CPU engine); else
     // the CPU's.
     bool curls = false;
-    // Gravity, Bend and Displace given their direction per strand (StageInputs::directions; Direction:
-    // its inclination, roll and strength per strand): the caller's; else one varying (Direction's
-    // three mapped) is the CPU's.
+    // Gravity, Bend and Displace given their direction per strand (StageInputs::directions): the
+    // caller's; else one varying is the CPU's. (Direction's mapped params are its fields.)
     bool directions = false;
     // Collide's method exact asked through the host (CollideHost, null rests: the mesh itself): the
     // caller's, on the CPU engine; else the CPU's.
@@ -107,12 +106,17 @@ std::shared_ptr<const std::vector<float>> clumpVariation(const std::vector<Stran
 // A param holding a map of its own, or that or a field plugged in (as its node's evaluation reads it).
 bool ownMap(const ParamSet& params, const std::string& name);
 bool mappedParam(const ParamSet& params, const std::string& name);
-// Direction's mapped params, the first two of inclination, roll and strength (its fields holding
-// their values, in this order).
+// Direction's mapped params of inclination, roll, strength, inclinationRandom and rollRandom (its
+// fields holding their values, in this order); a param of none: kDirectionNumber (look.slang
+// directionParam).
 std::vector<std::string> directionMapped(const ParamSet& params);
+constexpr int kDirectionNumber = 12;
 // The params a stage's two mapped fields are read for (StageFields::field; look_stages.inc, a
 // Direction's the ones it maps), "" none.
-std::array<std::string, 2> mappedParams(StageKind kind, const ParamSet& params);
+std::array<std::string, kMappedFields> mappedParams(StageKind kind, const ParamSet& params);
+// The params stage `kind`'s mapped fields are read for, in order (look_stages.inc's `mapped`;
+// a Direction's: directionMapped).
+std::vector<std::string> stageMappedNames(StageKind kind);
 // Whether field `i`'s values may vary along the strands (read per point where they do).
 bool mappedPerPoint(StageKind kind, int i);
 
