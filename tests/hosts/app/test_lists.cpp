@@ -94,8 +94,8 @@ TEST(AppLists, GuideGroupsBarMenusAndEdits) {
     EXPECT_FALSE(panel->itemBar()->button("group.delete")->icon().isNull()) << "a glyph";
     EXPECT_EQ(shown(panel->editsMenu()),
               (std::vector<std::string>{"Children", "-", "Sync +X → -X", "Sync -X → +X", "Select Mirror Guides", "Copy Shape to Other Side",
-                                        "Mirror Group...", "-", "Reparent...",
-                                        "Promote / Demote...", "Clear Selection"}));
+                                        "Mirror Group...", "-", "Reparent...", "New Group from Selection", "Copy Guides",
+                                        "Paste Guides", "Promote / Demote...", "Clear Selection"}));
 
     // The rows: the color dot and name, the guides it holds, the eye; a group picked, the
     // right-click menu for it.

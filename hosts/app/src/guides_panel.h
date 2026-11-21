@@ -98,6 +98,14 @@ public:
     bool promoteGroup(const std::string& name);
     bool demoteGroup(const std::string& name, const std::string& under);
     bool reparentSelected(GuideId parent);
+    // Regrouping (core guide_hierarchy.h, every host's): the selected guides into a group beside
+    // theirs (moved, or copies), a new group made of them, copied as text and pasted into the
+    // picked group. The groups they can go to (empty: none selected, or of two levels).
+    std::vector<std::string> groupsBesideSelection() const;
+    bool moveSelectedToGroup(const std::string& group, bool duplicate);
+    bool newGroupFromSelection();
+    std::string copySelectedGuides();  // "" with none selected (a message says why)
+    bool pasteGuides(const std::string& text);
     bool resampleGuides(int segments);
     // Every guide of a group back to its segments, those with their own too (frozen ones kept).
     bool resetGroupSegments(const std::string& name);

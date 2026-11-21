@@ -102,6 +102,7 @@ add_library(groomlab_core_objects OBJECT
     src/scalp_history.cpp
     src/scalp_mesh.cpp
     src/scalp_pieces.cpp
+    src/scalp_displacement.cpp
     src/subdivision.cpp
     src/scalp_maps.cpp
     src/scalp_paint.cpp
@@ -128,6 +129,8 @@ add_library(groomlab_core_objects OBJECT
     src/stroke_tools.cpp
     src/scalp_mirror.cpp
     src/texture.cpp
+    src/exr_read.cpp
+    ${PROJECT_SOURCE_DIR}/third_party/miniz/miniz.c
     src/usd_writer.cpp
     src/vrscene_writer.cpp
     src/operators/compound.cpp
@@ -179,6 +182,13 @@ target_compile_definitions(groomlab_core_headers INTERFACE "GROOMLAB_PORTABLE_MA
 target_link_libraries(groomlab_core_objects PUBLIC groomlab_core_headers)
 # stb_image (public domain, vendored): texture maps.
 target_include_directories(groomlab_core_objects SYSTEM PRIVATE "${PROJECT_SOURCE_DIR}/third_party/stb")
+# tinyexr (BSD-3-Clause) and its miniz (MIT), vendored: EXR texture and displacement maps
+# (src/exr_read.cpp). Their own style: warnings off, no precompiled header.
+target_include_directories(groomlab_core_objects SYSTEM PRIVATE "${PROJECT_SOURCE_DIR}/third_party/tinyexr"
+                                                                "${PROJECT_SOURCE_DIR}/third_party/miniz")
+set_source_files_properties(src/exr_read.cpp "${PROJECT_SOURCE_DIR}/third_party/miniz/miniz.c" PROPERTIES
+    SKIP_PRECOMPILE_HEADERS ON
+    COMPILE_OPTIONS "$<IF:$<CXX_COMPILER_ID:MSVC>,/W0,-w>")
 # The look kernels' C++ (slangc's, src/look/generated): Slang's prelude (third_party/slang), its own
 # style (warnings off for it), the support header beside it. MSVC inlines it as far as it goes
 # (/Ob3: its many small helpers, none marked inline, calls under /Ob2 in the kernels' loops; about

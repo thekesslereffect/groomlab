@@ -6,11 +6,13 @@
 // parent, a texture's resolution, deleting a map something reads. A color or a file is picked in
 // Qt's own non-modal color dialog and the file dialog (interactive runs only, as the window's Open).
 
+#include <QClipboard>
 #include <QColorDialog>
 #include <QDesktopServices>
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QGuiApplication>
 #include <QProcess>
 #include <QSettings>
 #include <QUrl>
@@ -255,6 +257,32 @@ void AppActions::addListBindings(ui::Bindings& b, MainWindow& w) {
                             }),
                             {}, groomOpen};
     b["guides.clearSelection"] = {run([m] { m->guidesPanel_->clearSelection(); }), {}, groomOpen};
+    // Regrouping (core guide_hierarchy.h): a group beside the selection's (the generator's value),
+    // a new group of them, the clipboard's text (Copy and Paste Guides in any host).
+    for (const bool duplicate : {false, true}) {
+        b[duplicate ? "guides.duplicateToGroup" : "guides.moveToGroup"] = {
+            [m, duplicate](const json& value, bool) {
+                if (!value.is_string()) return;
+                if (m->guidesPanel_->moveSelectedToGroup(value.get<std::string>(), duplicate)) m->guidesEdited();
+            },
+            {}, groomOpen};
+    }
+    b["guides.newGroupFromSelection"] = {run([m] {
+                                             if (m->guidesPanel_->newGroupFromSelection()) m->guidesEdited();
+                                         }),
+                                         {}, groomOpen};
+    b["guides.copy"] = {run([m] {
+                            const std::string text = m->guidesPanel_->copySelectedGuides();
+                            if (text.empty()) return;
+                            QGuiApplication::clipboard()->setText(QString::fromStdString(text));
+                            m->report(QObject::tr("Guides copied: Paste Guides adds them to a group"));
+                        }),
+                        {}, groomOpen};
+    b["guides.paste"] = {run([m] {
+                             const std::string text = QGuiApplication::clipboard()->text().toStdString();
+                             if (m->guidesPanel_->pasteGuides(text)) m->guidesEdited();
+                         }),
+                         {}, groomOpen};
 
     // ---- Maps (lists.maps) ----------------------------------------------------------------------
     auto mapDone = [m](const std::string& error) {

@@ -1513,6 +1513,18 @@ json Helper::run(const std::string& cmd, const json& args) {
         return {{"maps", out}};
     }
     if (cmd == "file_safe_name") return {{"name", fileSafeName(optString(args, "text", ""))}};
+    // Copy Guides and the groups guides can go to (guide_hierarchy.h, every host's).
+    if (cmd == "guides_copy" || cmd == "guides_groups_beside") {
+        Session& s = session(args);
+        const auto h = s.groom->storedHierarchy();
+        if (!h) return cmd == "guides_copy" ? json{{"text", ""}} : json{{"groups", json::array()}};
+        std::vector<GuideId> ids;
+        for (const json& id : args.value("ids", json::array())) ids.push_back(id.get<GuideId>());
+        if (cmd == "guides_copy") return {{"text", h->copyGuidesJson(ids)}};
+        json groups = json::array();
+        for (const GroupId g : h->groupsBeside(ids)) groups.push_back(h->group(g)->name);
+        return {{"groups", groups}};
+    }
     // An Instance node's Object(s) text (instances.h) and Color by Channel's source (display.h).
     if (cmd == "prototype_text") {
         return {{"text", instancePrototypeText(args.value("names", std::vector<std::string>{}))}};

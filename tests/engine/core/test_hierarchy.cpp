@@ -799,5 +799,80 @@ TEST(Hierarchy, FreeGroupNamesCountFromTwo) {
     EXPECT_EQ(h.freeGroupName("base"), "base3");
 }
 
+// Issue #94: regrouping. Primaries with children in two root groups: moved, a primary takes its
+// children into the target's child group (made when it has none); the shapes stay; a new group
+// from the selection; copied guides paste into another group (and another hierarchy) with their
+// children; a duplicate beside its source follows the source's parent.
+TEST(GuideHierarchy, GuidesMoveCopyAndDuplicateBetweenGroups) {
+    const auto scalp = test::makePlane(8);
+    GuideHierarchy h;
+    const GroupId left = h.addGroup("left");
+    const GroupId right = h.addGroup("right");
+    const GuideId a = h.addGuide(left, test::straightCurve({-0.5f, 0, 0.2f}, {-0.5f, 0.6f, 0.2f}, 6));
+    const GuideId b = h.addGuide(left, test::straightCurve({-0.3f, 0, 0.2f}, {-0.3f, 0.6f, 0.2f}, 6));
+    h.addGuide(right, test::straightCurve({0.5f, 0, 0.2f}, {0.5f, 0.6f, 0.2f}, 6));
+    h.evaluate(scalp.get());
+    ChildGenerationParams params;
+    params.count = 3;
+    const GroupId leftKids = h.generateChildren(left, "left_kids", params);
+    h.evaluate(scalp.get());
+    h.setAttribute(a, "tint", 0.25f);
+    const std::vector<GuideId> aKids = h.childrenOf(a);
+    ASSERT_EQ(aKids.size(), 3u);
+    const std::vector<Vec3f> aShape = h.guide(a)->points;
+
+    // Beside: the root groups for primaries, the child groups under one parent group for children.
+    EXPECT_EQ(h.groupsBeside({a, b}), (std::vector<GroupId>{left, right}));
+    EXPECT_EQ(h.groupsBeside({aKids[0]}), (std::vector<GroupId>{leftKids}));
+    EXPECT_TRUE(h.groupsBeside({a, aKids[0]}).empty());  // two levels
+
+    // Move: a and its children; right had no child group, so one is made under it.
+    h.moveGuidesToGroup({a}, right);
+    h.evaluate(scalp.get());
+    EXPECT_EQ(h.guide(a)->group, right);
+    const GroupId rightKids = h.guide(aKids[0])->group;
+    ASSERT_NE(rightKids, leftKids);
+    EXPECT_EQ(h.group(rightKids)->parent, right);
+    for (const GuideId k : aKids) {
+        EXPECT_EQ(h.guide(k)->group, rightKids);
+        EXPECT_EQ(h.guide(k)->parent, a);
+    }
+    for (std::size_t i = 0; i < aShape.size(); ++i) EXPECT_NEAR((h.guide(a)->points[i] - aShape[i]).length(), 0.0f, 1e-4f);
+    EXPECT_EQ(h.guidesInGroup(leftKids).size(), 3u);  // b's children stay
+    EXPECT_THROW(h.moveGuidesToGroup({aKids[0]}, left), std::invalid_argument);  // not beside
+
+    // New group from the selection: beside, b and its children in it.
+    const GroupId fresh = h.newGroupFromGuides({b}, "crown");
+    EXPECT_EQ(h.group(fresh)->name, "crown");
+    EXPECT_EQ(h.group(fresh)->parent, kNoGroup);
+    EXPECT_EQ(h.guide(b)->group, fresh);
+    EXPECT_TRUE(h.guidesInGroup(leftKids).empty());
+
+    // Copy and paste into another hierarchy: a and its three children, the layer kept.
+    const std::string copied = h.copyGuidesJson({a, aKids[1]});  // (a child of a goes with it)
+    GuideHierarchy other;
+    const GroupId into = other.addGroup("pasted");
+    const std::vector<GuideId> pasted = other.pasteGuidesJson(copied, into);
+    other.evaluate(scalp.get());
+    ASSERT_EQ(pasted.size(), 4u);
+    EXPECT_EQ(other.guide(pasted[0])->group, into);
+    EXPECT_EQ(other.childrenOf(pasted[0]).size(), 3u);
+    float tint = 0.0f;
+    EXPECT_TRUE(other.effectiveAttribute(*other.guide(pasted[0]), "tint", &tint));
+    EXPECT_FLOAT_EQ(tint, 0.25f);
+    for (std::size_t i = 0; i < aShape.size(); ++i) EXPECT_NEAR((other.guide(pasted[0])->points[i] - aShape[i]).length(), 0.0f, 1e-4f);
+    EXPECT_THROW(other.pasteGuidesJson("not guides", into), std::invalid_argument);
+    const GroupId otherKids = other.guide(other.childrenOf(pasted[0])[0])->group;
+    EXPECT_THROW(other.pasteGuidesJson(copied, otherKids), std::invalid_argument);  // another level
+
+    // Duplicate a child beside its group: it follows the same parent.
+    const GroupId sideKids = h.addGroup("right_more", right);
+    const std::vector<GuideId> dup = h.duplicateGuidesToGroup({aKids[2]}, sideKids);
+    ASSERT_EQ(dup.size(), 1u);
+    EXPECT_EQ(h.guide(dup[0])->parent, a);
+    EXPECT_EQ(h.guide(dup[0])->group, sideKids);
+    EXPECT_EQ(h.childrenOf(a).size(), 4u);
+}
+
 }  // namespace
 }  // namespace groomlab

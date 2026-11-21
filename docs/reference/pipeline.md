@@ -228,6 +228,26 @@ groomlab.remove_scalp(groom, "earL")
   **Remove**; the **Scalps** row's **Pick** adds one (its branch wired). Core: `GroomData::scalps`,
   `GroomSession::setScalps`, `scalp_pieces.h`.
 
+## Displacement maps
+
+A creature's skin is often displaced at render time. The Scalp node's **Displacement** section
+displaces the scalp the same way, so the hair roots on the surface the render shows:
+
+- **`displacement`:** the map (EXR, HDR, PNG, TGA, JPEG, PNM; `<UDIM>` in the name for tiles).
+  Find Missing and Collect Files handle it like any other file a graph names.
+- **`displacementHeight`:** how far a value of 1 above the zero value moves the surface, in scene
+  units (the renderer's displacement height or scale).
+- **`displacementZero`:** the value that leaves the surface where it is. 0 (Arnold's default) for a
+  map of signed values (a float EXR whose negative values go down); 0.5 for a grey map whose white
+  is up and black is down.
+
+Each point of the scalp moves along its normal by (value - zero) x height, read at its UVs after
+the scalp is refined to its subdivision (the Scalp node's `subdivision`: match it to the render's,
+as the renderer displaces its tessellated mesh). Everything that roots on or reads the scalp takes
+the displaced surface: Scatter's roots, the guides, Interpolate, Collide and the rest pose. With
+several scalps, each Scalp node's map displaces the scalp it reads. A map that cannot be read is
+reported and leaves the scalp as it is.
+
 ## Linked Groom node (groom libraries)
 
 A **Linked Groom** node (type `Reference` in `.groom` files and the Python API; Graph Editor > Add

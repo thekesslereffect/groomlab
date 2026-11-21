@@ -37,6 +37,7 @@
 #include "groomlab/graph_edit.h"
 #include "groomlab/graph_io.h"
 #include "groomlab/groom.h"
+#include "groomlab/scalp_displacement.h"
 #include "groomlab/scalp_maps.h"
 #include "groomlab/sculpt.h"
 #include "groomlab/simulation.h"
@@ -422,6 +423,9 @@ public:
     // (the most of several), "matchRender" taking the scalp's ScalpMesh::renderSubdivision (what
     // the host says the renderer does; a Scalp node reading another scalp, that scalp's). 0: the
     // scalp as given. With several scalps, the most of scalpSubdivisions().
+    // The Scalp nodes' displacement maps (scalp_displacement.h): the session displaces the refined
+    // scalp with them, so everything rooted on or reading the scalp takes the displaced surface.
+    std::vector<ScalpDisplacement> scalpDisplacements() const;
     int scalpSubdivision() const;
     // Each scalp's own levels by name ("scalp" the groom's own, scalp_pieces.h): the most the Scalp
     // nodes reading it ask for (match render: its own render level; a node naming no other scalp
@@ -1060,7 +1064,12 @@ private:
     // The scalp with its maps (cageScalp_), refined (scalp_: cageScalp_ itself without subdivision).
     MeshPtr scalp_;
     MeshPtr cageScalp_;
-    MeshPtr refinedFrom_;      // the cage scalp_ was refined from
+    MeshPtr refinedFrom_;      // the cage refined_ was refined from
+    MeshPtr refined_;          // the refined scalp before displacement (scalp_ is it displaced, or it)
+    // The Scalp nodes' displacement (scalpDisplacements) on refined_: what it was made from.
+    MeshPtr displaced_, displacedFrom_;
+    std::uint64_t displacedKey_ = 0;
+    std::string displaceError_;
     GuidesPtr guides_;         // data_.guides rooted on the refined scalp (bindRefined)
     GuidesPtr guidesIn_;
     std::uint64_t guidesOn_ = 0;

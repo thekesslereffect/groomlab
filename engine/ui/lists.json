@@ -24,6 +24,11 @@
           "guides.mirrorGroup",
           "-",
           "guides.reparent",
+          {"submenu": "Move to Group", "id": "guides.moveToGroup", "items": [{"generator": "guideGroups", "action": "guides.moveToGroup"}]},
+          {"submenu": "Duplicate to Group", "id": "guides.duplicateToGroup", "items": [{"generator": "guideGroups", "action": "guides.duplicateToGroup"}]},
+          "guides.newGroupFromSelection",
+          "guides.copy",
+          "guides.paste",
           "group.promoteDemote",
           "guides.fromCurves",
           "guides.clearSelection"

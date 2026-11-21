@@ -260,6 +260,15 @@ void GuidesPanel::setActions(const ui::Bindings& bindings, const ui::FillOptions
     editsMenu_->clear();
     ui::FillOptions edits = options_;
     edits.resolve.state.reset();  // every entry; the bindings say what is enabled
+    // Move to Group and Duplicate to Group: the groups beside the selected guides' (filled again as
+    // the menu opens).
+    edits.resolve.generators["guideGroups"] = [this](const ui::json& entry) {
+        ui::json out = ui::json::array();
+        for (const std::string& name : groupsBesideSelection()) {
+            out.push_back({{"id", entry.value("action", std::string())}, {"value", name}, {"label", name}});
+        }
+        return out;
+    };
     ui::fillMenu(editsMenu_, defs().get("lists/groups/edits"), bindings_, edits);
     refreshRows();
 }
@@ -659,6 +668,72 @@ bool GuidesPanel::reparentSelected(GuideId parent) {
         return false;
     }
     return edit("reparent the guides", "reparent guides", [&](GuideHierarchy& h) { h.reparent(ids, parent); });
+}
+
+std::vector<std::string> GuidesPanel::groupsBesideSelection() const {
+    std::vector<std::string> names;
+    const HierarchyPtr h = document_ ? document_->session().authoredHierarchy() : nullptr;
+    if (!h) return names;
+    for (const GroupId g : h->groupsBeside(document_->selection())) names.push_back(h->group(g)->name);
+    return names;
+}
+
+bool GuidesPanel::moveSelectedToGroup(const std::string& group, bool duplicate) {
+    if (!document_) return false;
+    const std::vector<GuideId> ids = document_->selection();
+    if (ids.empty()) {
+        emit message(tr("No guides selected"));
+        return false;
+    }
+    return edit(duplicate ? "duplicate the guides" : "move the guides", duplicate ? "duplicate guides" : "move guides",
+                [&](GuideHierarchy& h) {
+                    const GroupId target = h.findGroup(group);
+                    if (target == kNoGroup) throw std::invalid_argument("no guide group named " + group);
+                    if (duplicate) {
+                        h.duplicateGuidesToGroup(ids, target);
+                    } else {
+                        h.moveGuidesToGroup(ids, target);
+                    }
+                });
+}
+
+bool GuidesPanel::newGroupFromSelection() {
+    if (!document_) return false;
+    const std::vector<GuideId> ids = document_->selection();
+    if (ids.empty()) {
+        emit message(tr("No guides selected"));
+        return false;
+    }
+    return edit("make a group of the guides", "new group from selection", [&](GuideHierarchy& h) { h.newGroupFromGuides(ids, "group"); });
+}
+
+std::string GuidesPanel::copySelectedGuides() {
+    const HierarchyPtr h = document_ ? document_->session().authoredHierarchy() : nullptr;
+    const std::vector<GuideId> ids = document_ ? document_->selection() : std::vector<GuideId>{};
+    if (!h || ids.empty()) {
+        emit message(tr("No guides selected"));
+        return {};
+    }
+    try {
+        return h->copyGuidesJson(ids);
+    } catch (const std::exception& e) {
+        emit message(QString::fromStdString(e.what()));
+        return {};
+    }
+}
+
+bool GuidesPanel::pasteGuides(const std::string& text) {
+    if (!document_) return false;
+    const std::string group = currentGroup();
+    if (group.empty()) {
+        emit message(tr("Pick a group to paste into"));
+        return false;
+    }
+    return edit("paste the guides", "paste guides", [&](GuideHierarchy& h) {
+        const GroupId target = h.findGroup(group);
+        if (target == kNoGroup) throw std::invalid_argument("no guide group named " + group);
+        h.pasteGuidesJson(text, target);
+    });
 }
 
 bool GuidesPanel::resampleGuides(int segments) {

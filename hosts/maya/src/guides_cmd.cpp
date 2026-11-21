@@ -82,6 +82,14 @@ const char* kMirrorSelection[] = {"-msl", "-mirrorSelection"};
 const char* kListSelected[] = {"-lss", "-listSelected"};
 const char* kClearSelection[] = {"-csl", "-clearSelection"};
 const char* kReparent[] = {"-rp", "-reparent"};
+// Regrouping (guide_hierarchy.h): the target guides into a group beside theirs, a new group made
+// from them, copied (the result: the text) and pasted (text and group).
+const char* kMoveToGroup[] = {"-mtg", "-moveToGroup"};
+const char* kDuplicateToGroup[] = {"-dtg", "-duplicateToGroup"};
+const char* kNewGroupFrom[] = {"-ngf", "-newGroupFrom"};
+const char* kCopyGuides[] = {"-cpg", "-copyGuides"};
+const char* kPasteGuides[] = {"-psg", "-pasteGuides"};
+const char* kGroupsBeside[] = {"-gbs", "-groupsBeside"};
 const char* kPromote[] = {"-pro", "-promote"};
 const char* kDemote[] = {"-dem", "-demote"};
 const char* kUnder[] = {"-u", "-under"};
@@ -368,6 +376,12 @@ MSyntax GuidesCmd::newSyntax() {
     s.addFlag(kSetPoints[0], kSetPoints[1], MSyntax::kString);
     s.addFlag(kRemoveGuides[0], kRemoveGuides[1]);
     s.addFlag(kClosestOnScalp[0], kClosestOnScalp[1], MSyntax::kString);
+    s.addFlag(kMoveToGroup[0], kMoveToGroup[1], MSyntax::kString);
+    s.addFlag(kDuplicateToGroup[0], kDuplicateToGroup[1], MSyntax::kString);
+    s.addFlag(kNewGroupFrom[0], kNewGroupFrom[1], MSyntax::kString);
+    s.addFlag(kCopyGuides[0], kCopyGuides[1]);
+    s.addFlag(kPasteGuides[0], kPasteGuides[1], MSyntax::kString, MSyntax::kString);
+    s.addFlag(kGroupsBeside[0], kGroupsBeside[1]);
     s.setObjectType(MSyntax::kSelectionList, 1, 1);
     s.useSelectionAsDefault(true);
     s.enableQuery(false);
@@ -405,7 +419,10 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                             int(db.isFlagSet(kTubeShapes[0])) + int(db.isFlagSet(kEditTubeShape[0])) +
                             int(db.isFlagSet(kPreviewTubeShape[0])) + int(db.isFlagSet(kTubeTargets[0])) +
                             int(db.isFlagSet(kTubeFrames[0])) + int(db.isFlagSet(kSetPoints[0])) +
-                            int(db.isFlagSet(kRemoveGuides[0])) + int(db.isFlagSet(kClosestOnScalp[0]));
+                            int(db.isFlagSet(kRemoveGuides[0])) + int(db.isFlagSet(kClosestOnScalp[0])) +
+                            int(db.isFlagSet(kMoveToGroup[0])) + int(db.isFlagSet(kDuplicateToGroup[0])) +
+                            int(db.isFlagSet(kNewGroupFrom[0])) + int(db.isFlagSet(kCopyGuides[0])) +
+                            int(db.isFlagSet(kPasteGuides[0])) + int(db.isFlagSet(kGroupsBeside[0]));
         if (actions != 1) return fail(kName, "give exactly one action flag");
 
         if (db.isFlagSet(kClosestOnScalp[0])) {
@@ -605,6 +622,22 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
         }
         if (db.isFlagSet(kTubeShapes[0])) {
             setResult(MString(tubeShapesJson(*h).c_str()));
+            return MS::kSuccess;
+        }
+        if (db.isFlagSet(kCopyGuides[0])) {
+            const std::vector<GuideId> ids = targets();
+            if (ids.empty()) return fail(kName, "-copyGuides: give -guide IDs or select guides");
+            try {
+                setResult(MString(h->copyGuidesJson(ids).c_str()));
+            } catch (const std::invalid_argument& e) {
+                return fail(kName, e.what());
+            }
+            return MS::kSuccess;
+        }
+        if (db.isFlagSet(kGroupsBeside[0])) {
+            MStringArray names;
+            for (const GroupId g : h->groupsBeside(targets())) names.append(h->group(g)->name.c_str());
+            setResult(names);
             return MS::kSuccess;
         }
         if (db.isFlagSet(kTubeTargets[0])) {
@@ -828,6 +861,35 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                 setResult(static_cast<int>(doomed.size()));
                 if (doomed.empty()) return MS::kSuccess;
                 h->removeGuides(doomed, true);  // (a child group left empty goes too)
+            } else if (db.isFlagSet(kMoveToGroup[0]) || db.isFlagSet(kDuplicateToGroup[0])) {
+                const bool duplicate = db.isFlagSet(kDuplicateToGroup[0]);
+                const MString name = flagString(db, duplicate ? kDuplicateToGroup[0] : kMoveToGroup[0], "");
+                const GroupId gid = h->findGroup(name.asChar());
+                if (gid == kNoGroup) return fail(kName, "no guide group named " + name);
+                const std::vector<GuideId> ids = targets();
+                if (ids.empty()) return fail(kName, "give -guide IDs or select guides");
+                if (duplicate) {
+                    MStringArray made;
+                    for (const GuideId id : h->duplicateGuidesToGroup(ids, gid)) made.append(std::to_string(id).c_str());
+                    setResult(made);
+                } else {
+                    h->moveGuidesToGroup(ids, gid);
+                    setResult(static_cast<int>(ids.size()));
+                }
+            } else if (db.isFlagSet(kNewGroupFrom[0])) {
+                const std::vector<GuideId> ids = targets();
+                if (ids.empty()) return fail(kName, "-newGroupFrom: give -guide IDs or select guides");
+                const GroupId made = h->newGroupFromGuides(ids, flagString(db, kNewGroupFrom[0], "").asChar());
+                setResult(MString(h->group(made)->name.c_str()));
+            } else if (db.isFlagSet(kPasteGuides[0])) {
+                MString text, name;
+                db.getFlagArgument(kPasteGuides[0], 0, text);
+                db.getFlagArgument(kPasteGuides[0], 1, name);
+                const GroupId gid = h->findGroup(name.asChar());
+                if (gid == kNoGroup) return fail(kName, "no guide group named " + name);
+                MStringArray made;
+                for (const GuideId id : h->pasteGuidesJson(text.asChar(), gid)) made.append(std::to_string(id).c_str());
+                setResult(made);
             } else if (db.isFlagSet(kReparent[0])) {
                 const GuideId parent = guideIdOf(flagString(db, kReparent[0], "0"));
                 const std::vector<GuideId> ids = targets();

@@ -57,7 +57,25 @@ public:
         return {ParamSpec{"input", std::string(kMainScalpName),
                           "Which of the groom's scalps: scalp (its own mesh) or the name of another scalp of the groom "
                           "(Maya: Attribute Editor > Scalps), so a Scatter fed this node grows hair on that mesh alone"},
-                subdivisionSpec("scalp")};
+                subdivisionSpec("scalp"),
+                // Displacement (scalp_displacement.h): read by the session, which displaces the scalp
+                // after refining it (GroomSession::scalpDisplacements), as the renderer displaces the skin.
+                notAnimatable({"displacement", std::string(),
+                               "A displacement map (EXR, HDR, PNG...; <UDIM> for tiles): the scalp displaced as the renderer "
+                               "displaces it, so the hair roots on the surface the render shows. Each point moves along its "
+                               "normal by (the map's value - Zero value) x Height, read at its UVs after the scalp is refined "
+                               "to its subdivision (match it to the render's)"})
+                    .in("Displacement"),
+                notAnimatable({"displacementHeight", 1.0, "How far a map value of 1 above the zero value moves the surface, "
+                                                          "scene units (the renderer's displacement scale or height)",
+                               "length"})
+                    .soft(-1, 1)
+                    .in("Displacement"),
+                notAnimatable({"displacementZero", 0.0, "The map value that leaves the surface where it is (Arnold's zero value: "
+                                                        "0 for a map of signed values, 0.5 for a grey map whose white is up and "
+                                                        "black down)"})
+                    .soft(0, 1)
+                    .in("Displacement")};
     }
     std::vector<std::string> externalInputs() const override {
         const std::string name = params().getString("input");

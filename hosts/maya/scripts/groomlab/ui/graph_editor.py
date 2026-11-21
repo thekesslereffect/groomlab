@@ -110,6 +110,14 @@ BYPASSED_OPACITY = 0.5
 HIDDEN_TYPES = {"Compound", "Input", "Script"}  # made by Group, not from the Add menu (the specs' "hidden")
 # Nodes whose `path` names a file: the file dialog's filter for it.
 FILE_PATH_FILTERS = dict(definitions.get("graph/filePathFilters"))
+
+
+def file_filter(op_type, param):
+    """The file dialog filter of a param naming a file (graph_ui.json's filePathFilters: a node
+    type's "path", or "Type.param"); None for any other param."""
+    if "%s.%s" % (op_type, param) in FILE_PATH_FILTERS:
+        return FILE_PATH_FILTERS["%s.%s" % (op_type, param)]
+    return FILE_PATH_FILTERS.get(op_type) if param == "path" else None
 # When a node runs (its Evaluate menu, choices.json's evaluation): (mode, label, what it does); the
 # tag under a node set so.
 EVALUATION_CHOICES = [(c["value"], c["label"], c["tip"]) for c in definitions.choices("evaluation")]
@@ -3980,8 +3988,8 @@ class ParamPanel(QtWidgets.QScrollArea):
             w = suggest_box(value, options, set_value, placeholder)
             if spec["name"] == "prototype" and self.editor.model.node_type(name) in ("Instance", "Scales"):
                 w = self.objects_field(w, set_value)
-        elif spec["name"] == "path" and self.editor.model.node_type(name) in FILE_PATH_FILTERS:
-            w = self.path_field(value, FILE_PATH_FILTERS[self.editor.model.node_type(name)], set_value)
+        elif file_filter(self.editor.model.node_type(name), spec["name"]) is not None:
+            w = self.path_field(value, file_filter(self.editor.model.node_type(name), spec["name"]), set_value)
         else:  # string
             w = QtWidgets.QLineEdit(str(value))
             w.editingFinished.connect(lambda w=w: set_value(w.text()))

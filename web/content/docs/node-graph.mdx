@@ -445,6 +445,16 @@ set the level. Roots, guides, maps, collisions and simulation all use the subdiv
 the root layout does not change: toggling the smooth preview keeps the same strands in the same
 clumps. **ColliderMesh** has the same parameter.
 
+## Displacement maps
+
+When the render displaces the skin, set the same map on the Scalp node's **Displacement** section
+so the hair roots on the displaced surface. **Displacement** is the map (EXR, HDR, PNG and others,
+with `<UDIM>` for tiles). **Height** is how far a value of 1 moves the surface. **Zero value** is the
+value that stays put: 0, Arnold's default, for a signed float map, or 0.5 for a grey map whose
+white is up and black down. The scalp is displaced after it is subdivided, so set the Scalp node's
+subdivision to match the render's. Scatter, the guides, Interpolate and Collide all use the
+displaced surface.
+
 ## Viewport-only and render-only nodes
 
 Right-click a node > **Evaluate**:

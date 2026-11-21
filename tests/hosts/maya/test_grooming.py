@@ -1028,6 +1028,38 @@ class GroomingTest(unittest.TestCase):
         cmds.undo()
         self.assertEqual(cmds.getAttr(self.groom + ".guideData"), start)
 
+    def test_guides_move_copy_and_paste_between_groups(self):
+        """Issue #94: primaries into a new group (their children follow), back into primary, copied
+        and pasted into another group; each one undo step."""
+        start = cmds.getAttr(self.groom + ".guideData")
+        moved = self.primaries[:2]
+        self.assertIn("primary", groomlab.groups_beside(self.groom, guides=moved))
+        made = groomlab.new_group_from_guides(self.groom, "crown", guides=moved)
+        self.assertEqual(made, "crown")
+        stored = {str(g["id"]): g for g in groomlab.get_hierarchy(self.groom)["guides"]}
+        groups = {g["id"]: g["name"] for g in groomlab.get_hierarchy(self.groom)["groups"]}
+        self.assertEqual(groups[stored[moved[0]]["group"]], "crown")
+        kids = [g for g in stored.values() if str(g.get("parent")) == moved[0]]
+        self.assertTrue(kids)
+        self.assertNotEqual(groups[kids[0]["group"]], "children")  # into crown's child group
+        self.assertIn("crown", groomlab.groups_beside(self.groom, guides=moved))
+        groomlab.move_guides_to_group(self.groom, "primary", guides=moved)
+        stored = {str(g["id"]): g for g in groomlab.get_hierarchy(self.groom)["guides"]}
+        self.assertEqual(groups[stored[moved[0]]["group"]], "primary")
+        with self.assertRaises(RuntimeError):
+            groomlab.move_guides_to_group(self.groom, "children", guides=moved)  # not at their level
+        text = groomlab.copy_guides(self.groom, guides=moved[:1])
+        before = len(groomlab.get_hierarchy(self.groom)["guides"])
+        pasted = groomlab.paste_guides(self.groom, text, "crown")
+        self.assertEqual(len(pasted), 1 + len(kids))  # the guide and its children
+        self.assertGreater(len(groomlab.get_hierarchy(self.groom)["guides"]), before)
+        dup = groomlab.duplicate_guides_to_group(self.groom, "primary", guides=moved[:1])
+        self.assertTrue(dup)
+        self.assertEqual(groomlab.errors(self.groom), [])
+        for _ in range(4):  # new group, move, paste, duplicate
+            cmds.undo()
+        self.assertEqual(cmds.getAttr(self.groom + ".guideData"), start)
+
     def test_export_vrscene(self):
         # A V-Ray scene: the strands in object space (the USD export's count), the shader, and the
         # groom's world matrix on the Node (here its transform moved: unlocked for the test).

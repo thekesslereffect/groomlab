@@ -25,7 +25,8 @@
       {"label": "Gray", "rgb": [90, 92, 98]}
     ],
     "plumbing": [["Scalp", "input"], ["Guides", "input"], ["Guides", "hierarchy"]],
-    "filePathFilters": {"Reference": "Groom files (*.groom)", "ImportCurves": "Alembic (*.abc)", "GuideCache": "Alembic (*.abc)"},
+    "filePathFilters": {"Reference": "Groom files (*.groom)", "ImportCurves": "Alembic (*.abc)", "GuideCache": "Alembic (*.abc)",
+                        "Scalp.displacement": "Images (*.exr *.hdr *.png *.tga *.jpg *.jpeg *.pgm *.ppm)"},
 
     "nodeMenu": [
       "node.setOutput",
