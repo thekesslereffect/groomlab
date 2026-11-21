@@ -13,6 +13,8 @@ package installs beside the binaries.
 | Component | Where | License | Notes |
 | --- | --- | --- | --- |
 | stb_image 2.30 (Sean Barrett) | `third_party/stb/stb_image.h` (commit in `COMMIT`) | MIT or public domain (Unlicense), at your choice | Texture maps. Keep the license block at the end of the header. |
+| tinyexr 1.0.9 (Syoyo Fujita) | `third_party/tinyexr/tinyexr.h` (commit in `COMMIT`) | BSD-3-Clause | EXR texture and displacement maps (`engine/core/src/exr_read.cpp`). Keep the license block at the top of the header; notice in THIRD_PARTY_NOTICES.txt. |
+| miniz (as bundled with tinyexr) | `third_party/miniz/` (`LICENSE`, `COMMIT`) | MIT | The zlib decompression tinyexr reads EXR with; notice in THIRD_PARTY_NOTICES.txt. |
 | Inter (font) | `hosts/app/fonts/Inter[opsz,wght].ttf` | SIL OFL 1.1 (`OFL-Inter.txt`) | The app's UI font (numbers too, with tabular digits), and the font of GroomLab's own windows in Maya: installed with its license in the Maya module's `fonts/`. The OFL text must travel with the font; the font may not be sold on its own. |
 | JetBrains Mono (font) | `hosts/app/fonts/JetBrainsMono[wght].ttf` | SIL OFL 1.1 (`OFL-JetBrainsMono.txt`) | The app's monospace font. Same terms. |
 | License texts | `hosts/app/package/licenses/`, `hosts/app/package/spdx/` | the texts themselves | Copied into the app package for Qt and its third-party code. |

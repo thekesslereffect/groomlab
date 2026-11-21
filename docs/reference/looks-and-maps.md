@@ -154,7 +154,7 @@ groomlab.set_param(groom, "noise", "amplitude", groomlab.attribute_map("frizzy",
 
 | Map | Reads | Needs |
 | --- | --- | --- |
-| `texture_map` | An image at each root's UV. Formats: PNG, JPEG, TGA, BMP, PSD, GIF, HDR, PNM (not EXR/TIFF yet). 8-bit values are used as stored; maps are data, not colors. | Scalp UVs (current UV set) |
+| `texture_map` | An image at each root's UV. Formats: PNG, JPEG, TGA, BMP, PSD, GIF, HDR, PNM, EXR (half or float; not TIFF yet). 8-bit values are used as stored; maps are data, not colors. | Scalp UVs (current UV set) |
 | `color_set_map` | A vertex map (Groom Tools > Paint) or a Maya color set on the scalp, interpolated at the root | The map or color set |
 | `attribute_map` | A per-strand channel written upstream, e.g. by `Attribute` or guide attributes; a **point channel** of the name (a per-point painted map, HairColor's colors) is read per point instead. Before strands exist (Scatter density) it reads the painted map of that name. | The channel, or a painted map with the guides connected (`set_param` and the editor connect them) |
 | `expression_map` | A per-strand expression (see [Expressions](nodes-and-fields.md#expressions): a block with locals, names with or without `$`), e.g. `smoothstep(-1, 1, $y)` or `$clumpId > 10 ? 1 : 0.3`; per point with `t`, `pt`, `px py pz`, `pointIndex` or a point channel, e.g. `1 - t` | The channels it names |

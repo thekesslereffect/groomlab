@@ -1,0 +1,1 @@
+miniz as bundled with syoyo/tinyexr v1.0.9 (deps/miniz): miniz.c, miniz.h, LICENSE (MIT). Used by tinyexr to read compressed EXR.

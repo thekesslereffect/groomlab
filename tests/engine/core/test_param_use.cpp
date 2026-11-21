@@ -58,6 +58,11 @@ const std::map<std::string, std::string>& allowlist() {
         // The solver's friction against this mesh: GroomSession::simInputs reads it when the mesh
         // feeds a Simulate node's collider.
         {"ColliderMesh.friction", "the session's simulation (GroomSession::simInputs)"},
+        // The scalp's displacement: the session displaces the scalp it hands every node with them
+        // (GroomSession::scalpDisplacements; test_session.cpp's displacement test).
+        {"Scalp.displacement", "the session's scalp (GroomSession::scalpDisplacements)"},
+        {"Scalp.displacementHeight", "the session's scalp (GroomSession::scalpDisplacements)"},
+        {"Scalp.displacementZero", "the session's scalp (GroomSession::scalpDisplacements)"},
         // Read in viewport evaluations only (these states evaluate as renders do): test_cards.cpp's
         // Subdivide tests and the GPU preview's (look_chain.cpp).
         {"Subdivide.viewportLevels", "viewport evaluations (EvalContext::viewport)"},

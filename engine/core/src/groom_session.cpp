@@ -974,12 +974,50 @@ void GroomSession::bindScalp(std::vector<std::string>& errors) {
     // Catmull-Clark (subdivision.h): the mapped cage refined, its color sets (the vertex maps)
     // with it. The scalp's next frame moves the last refined mesh's points (the plan is kept).
     if (levels == 0 || !cageScalp_) {
-        scalp_ = cageScalp_;
+        refined_ = cageScalp_;
         refinedFrom_.reset();
-    } else if (cageScalp_ != refinedFrom_ || !scalp_ || scalp_->subdivisionLevel() != levels) {
-        scalp_ = subdivideScalp(cageScalp_, levels, refinedFrom_, scalp_ && scalp_ != cageScalp_ ? scalp_ : nullptr);
+    } else if (cageScalp_ != refinedFrom_ || !refined_ || refined_->subdivisionLevel() != levels) {
+        refined_ = subdivideScalp(cageScalp_, levels, refinedFrom_, refined_ && refined_ != cageScalp_ ? refined_ : nullptr);
         refinedFrom_ = cageScalp_;
     }
+    // Displaced (the Scalp nodes' displacement maps, scalp_displacement.h), as the renderer
+    // displaces the refined skin: what everything reads as the scalp.
+    scalp_ = refined_;
+    const std::vector<ScalpDisplacement> displacements = scalpDisplacements();
+    if (displacements.empty() || !refined_) {
+        displaced_.reset();
+        displacedFrom_.reset();
+        displacedKey_ = 0;
+        displaceError_.clear();
+        return;
+    }
+    const std::uint64_t displaceKey = displacementKey(displacements);
+    if (refined_ != displacedFrom_ || displaceKey != displacedKey_) {
+        displaceError_.clear();
+        displaced_ = displaceScalp(refined_, displacements, &displaceError_);
+        displacedFrom_ = refined_;
+        displacedKey_ = displaceKey;
+    }
+    if (displaced_) scalp_ = displaced_;
+    if (!displaceError_.empty()) errors.push_back(displaceError_);
+}
+
+std::vector<ScalpDisplacement> GroomSession::scalpDisplacements() const {
+    std::vector<ScalpDisplacement> out;
+    if (!parsed_) return out;
+    for (const NodeId id : parsed_->graph.nodeIds()) {
+        const Operator& op = parsed_->graph.node(id);
+        if (op.typeName() != op::kScalp) continue;
+        ScalpDisplacement d;
+        d.path = op.params().getString("displacement");
+        if (d.path.empty()) continue;
+        d.scalp = op.params().getString("input");
+        d.height = static_cast<float>(op.params().getDouble("displacementHeight"));
+        d.zero = static_cast<float>(op.params().getDouble("displacementZero"));
+        // One a scalp (the first Scalp node naming it).
+        if (std::none_of(out.begin(), out.end(), [&](const ScalpDisplacement& o) { return o.scalp == d.scalp; })) out.push_back(d);
+    }
+    return out;
 }
 
 void GroomSession::bindRefined() {

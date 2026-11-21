@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "groomlab/texture.h"
 
+#include "exr_read.h"
+
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -230,7 +232,14 @@ bool isPnm(const std::string& path) {
 std::unique_ptr<Texture::Image> decode(const std::string& path) {
     auto image = std::make_unique<Texture::Image>();
     int w = 0, h = 0, n = 0;
-    if (stbi_is_hdr(path.c_str())) {
+    std::string ext = std::filesystem::u8path(path).extension().u8string();
+    std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (ext == ".exr") {
+        // OpenEXR (half or float: film displacement maps): tinyexr, exr_read.h.
+        std::string why;
+        if (!detail::readExr(path, &image->rgba, &w, &h, &why)) throw TextureError(why);
+        image->bits = 32;
+    } else if (stbi_is_hdr(path.c_str())) {
         float* data = stbi_loadf(path.c_str(), &w, &h, &n, 4);
         if (!data) throw TextureError("cannot read '" + path + "': " + stbi_failure_reason());
         image->rgba.assign(data, data + static_cast<std::size_t>(w) * h * 4);

@@ -56,6 +56,12 @@ CATEGORY_COLORS = graph_ui.category_colors()
 PLUMBING = graph_ui.plumbing({("Scalp", "input"), ("Guides", "input"), ("Guides", "hierarchy")})
 # Nodes whose `path` names a file (graph_ui.json's filePathFilters): Blender's file browser button.
 FILE_PATH_FILTERS = graph_ui.get("graph/filePathFilters", {"Reference": "", "ImportCurves": "", "GuideCache": ""})
+
+
+def names_file(op_type, param):
+    """Whether a param names a file (graph_ui.json's filePathFilters: a node type's "path", or
+    "Type.param"): Blender's file browser button."""
+    return "%s.%s" % (op_type, param) in FILE_PATH_FILTERS or (param == "path" and op_type in FILE_PATH_FILTERS)
 # A backdrop's color when a frame has none of its own (Maya's Add Backdrop: Blue).
 BACKDROP_COLOR = [70, 90, 120]
 ADVANCED = "Advanced"
@@ -506,10 +512,9 @@ def make_node_class(spec):
     op_type = spec["type"]
     annotations = _base_props()
     params = {}
-    files = op_type in FILE_PATH_FILTERS
     for p in spec.get("params", []):
         params[p["name"]] = p
-        prop = param_property(p, _make_update(p["name"]), file_path=files and p["name"] == "path")
+        prop = param_property(p, _make_update(p["name"]), file_path=names_file(op_type, p["name"]))
         if prop is not None:
             annotations[prop_name(p["name"])] = prop
     attrs = {
@@ -629,7 +634,7 @@ def property_value(node, spec, scene):
         return bool(v)
     if kind == "vec3":
         return [units.from_ui(unit, float(x), scene) for x in v]
-    if spec["name"] == "path" and node.gl_type in FILE_PATH_FILTERS and str(v).startswith("//"):
+    if names_file(node.gl_type, spec["name"]) and str(v).startswith("//"):
         return bpy.path.abspath(str(v))  # (Blender's file browser gives paths relative to the .blend)
     return str(v)
 

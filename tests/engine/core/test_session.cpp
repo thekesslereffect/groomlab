@@ -12,6 +12,7 @@
 #include <nlohmann/json.hpp>
 
 #include "groomlab/braid_tubes.h"
+#include "groomlab/card_maps.h"
 #include "groomlab/cards.h"
 #include "groomlab/correctives.h"
 #include "groomlab/display.h"
@@ -1190,6 +1191,74 @@ TEST(Session, TheDefaultLookIsUnchanged) {
     EXPECT_TRUE(oldView.errors.empty()) << (oldView.errors.empty() ? "" : oldView.errors[0]);
     EXPECT_FLOAT_EQ(old.hairLook().specular, 0.3f);
     EXPECT_FLOAT_EQ(old.hairLook().roughness, 0.5f);
+}
+
+// Issue #89: a Scalp node's displacement map displaces the scalp the session hands every node (as
+// the renderer displaces the skin): each point along its normal by (value - zero) x height, so
+// the roots sit on the displaced surface. A grey PNG and a float EXR (signed values).
+TEST(Session, AScalpDisplacementMapRootsTheHairOnTheDisplacedSurface) {
+    namespace fs = std::filesystem;
+    const fs::path dir = fs::temp_directory_path() / "groomlab_displacement_test";
+    fs::create_directories(dir);
+    const std::string png = (dir / "grey.png").generic_string(), exr = (dir / "signed.exr").generic_string();
+    writeImageFile(png, "png", 8, 4, 4, 1, std::vector<float>(16, 0.8f));
+    writeImageFile(exr, "exr", 32, 4, 4, 1, std::vector<float>(16, -0.25f));
+
+    // A plane (normal +Y) with UVs.
+    auto plane = std::make_shared<ScalpMesh>(*test::makePlane(4, 2.0f));
+    std::vector<ScalpMesh::UV> uvs;
+    for (const ScalpMesh::Triangle& t : plane->triangles()) {
+        for (const std::int32_t v : t) {
+            const Vec3f& q = plane->points()[static_cast<std::size_t>(v)];
+            uvs.push_back({q.x * 0.5f + 0.5f, q.z * 0.5f + 0.5f});
+        }
+    }
+    plane->setCornerUVs(std::move(uvs));
+    auto graph = [](const std::string& scalpParams) {
+        return R"({"version": 1, "nodes": [{"name": "scalp", "type": "Scalp", "params": {"subdivision": "off")" + scalpParams +
+               R"(}}, {"name": "scatter", "type": "Scatter", "params": {"density": 20.0, "length": 0.5}},
+               {"name": "output", "type": "Output"}], "connections": [{"from": "scalp", "to": "scatter", "input": "scalp"},
+               {"from": "scatter", "to": "output", "input": "strands"}], "output": "output"})";
+    };
+    auto rootsAt = [&](const std::string& scalpParams, float* lowest, float* highest) {
+        GroomData d;
+        d.graphJson = graph(scalpParams);
+        d.scalp = plane;
+        GroomSession session(d);
+        const StrandsPtr out = session.evaluate(ViewRequest{}).strands;
+        ASSERT_TRUE(out);
+        ASSERT_TRUE(session.last().errors.empty()) << session.last().errors.front();
+        ASSERT_GT(out->strandCount(), 10u);
+        *lowest = 1e9f;
+        *highest = -1e9f;
+        for (std::size_t s = 0; s < out->strandCount(); ++s) {
+            *lowest = std::min(*lowest, out->strandPoints(s)[0].y);
+            *highest = std::max(*highest, out->strandPoints(s)[0].y);
+        }
+        for (const Vec3f& q : session.last().scalp->points()) EXPECT_NEAR(q.y, *lowest, 1e-4f);  // the scalp too
+    };
+    float lo = 0.0f, hi = 0.0f;
+    rootsAt("", &lo, &hi);  // none: on the plane
+    EXPECT_NEAR(lo, 0.0f, 1e-5f);
+    EXPECT_NEAR(hi, 0.0f, 1e-5f);
+    rootsAt(R"(, "displacement": ")" + png + R"(", "displacementHeight": 0.5)", &lo, &hi);  // (0.8 - 0) x 0.5
+    EXPECT_NEAR(lo, 0.4f, 2e-3f);
+    EXPECT_NEAR(hi, 0.4f, 2e-3f);
+    rootsAt(R"(, "displacement": ")" + png + R"(", "displacementHeight": 0.5, "displacementZero": 0.8)", &lo, &hi);
+    EXPECT_NEAR(hi, 0.0f, 2e-3f);  // the zero value: where it was
+    rootsAt(R"(, "displacement": ")" + exr + R"(", "displacementHeight": 2.0)", &lo, &hi);  // EXR: -0.25 x 2, down
+    EXPECT_NEAR(lo, -0.5f, 1e-4f);
+    EXPECT_NEAR(hi, -0.5f, 1e-4f);
+
+    // A map that cannot be read: said, the scalp as it is.
+    GroomData d;
+    d.graphJson = graph(R"(, "displacement": "no_such_map.exr")");
+    d.scalp = plane;
+    GroomSession broken(d);
+    ASSERT_TRUE(broken.evaluate(ViewRequest{}).strands);
+    ASSERT_FALSE(broken.last().errors.empty());
+    EXPECT_NE(broken.last().errors.front().find("displacement"), std::string::npos) << broken.last().errors.front();
+    fs::remove_all(dir);
 }
 
 }  // namespace

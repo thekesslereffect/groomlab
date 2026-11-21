@@ -198,7 +198,8 @@ void visitFileParams(nlohmann::json& graph, const std::function<void(const std::
         for (auto it = node["params"].begin(); it != node["params"].end(); ++it) {
             const std::string& param = it.key();
             nlohmann::json& value = it.value();
-            const bool named = param == "path" || param == "texture" || param == "textureRight";
+            const bool named = param == "path" || param == "texture" || param == "textureRight" ||
+                               (param == "displacement" && type == "Scalp");
             const bool image = ((param == "map" && type == "HairColor") || (param == "regionMap" && type == "Interpolate")) &&
                                value.is_string() && isImagePath(value.get<std::string>());
             if (value.is_object() && value.contains("texture") && value["texture"].is_string()) {
