@@ -43,6 +43,11 @@ struct GuideGroup {
     // The segments the group's new guides get (drawn, placed, from curves, baked, generated
     // children), and what Resample on the whole group sets: 0, the tool's own. Saved.
     int segments = 0;
+    // Segments by length (issue #98): above 0, the length of a segment the group's guides were
+    // resampled to (Resample with byLength on the whole group), so each guide's count follows its
+    // length: a new guide gets its length over it (GuideHierarchy::segmentsFor), Reset Segments
+    // gives every guide that. 0: the same count for every guide (`segments`). Saved.
+    float segmentLength = 0.0f;
 };
 
 struct HierarchyGuide {
@@ -234,8 +239,14 @@ public:
 
     // A group's segments for new guides (GuideGroup::segments, 0 to 256; 0: none of its own).
     void setGroupSegments(GroupId id, int segments);
+    // A group's segment length (GuideGroup::segmentLength: 0 or above; 0 off).
+    void setGroupSegmentLength(GroupId id, float length);
+    // The segments a new guide `length` long gets in group `id`: its length over the group's
+    // segment length when the group goes by length, else the group's segments (0: none of its own:
+    // the tool's).
+    int segmentsFor(GroupId id, float length) const;
     // `points` (a new guide's for group `id`) along the smooth curve through them at the group's
-    // segments; as they are when it has none.
+    // segments (segmentsFor their length); as they are when it has none.
     std::vector<Vec3f> withGroupSegments(GroupId id, std::vector<Vec3f> points) const;
 
     // Removes a group, its descendant groups and all their guides.
@@ -421,10 +432,20 @@ public:
     // again); `groupWide` (a whole group, a level, every guide) leaves guides with their own as
     // they are. Returns how many were rebuilt.
     std::size_t resample(const std::vector<GuideId>& ids, int segments, bool groupWide = false);
+    // Segments by length (issue #98): each guide gets its length over `length` segments (1 to 256),
+    // so the points are as far apart on every guide; otherwise as resample.
+    std::size_t resampleByLength(const std::vector<GuideId>& ids, float length, bool groupWide = false);
+    // The segment length `segments` gives the guides `ids` by length: their mean length (frozen
+    // guides and those of fewer than 2 points left out) over `segments`; 0 when none counts.
+    float segmentLengthFor(const std::vector<GuideId>& ids, int segments) const;
     // Resample as every host's Resample does: `ids` to `segments`; `groupWide` (a whole group, a
     // level or every guide) also gives their groups' new guides the count: `group` alone, else the
-    // groups at `level` (-1: every group). How many guides changed.
-    std::size_t resampleGuides(const std::vector<GuideId>& ids, int segments, bool groupWide, GroupId group = kNoGroup, int level = -1);
+    // groups at `level` (-1: every group). `byLength`: a guide of the guides' mean length gets
+    // `segments`, each other its length's share (resampleByLength), and a whole group keeps the
+    // segment length for its new guides; without it a whole group goes back to one count. How many
+    // guides changed.
+    std::size_t resampleGuides(const std::vector<GuideId>& ids, int segments, bool groupWide, GroupId group = kNoGroup, int level = -1,
+                               bool byLength = false);
     // Every guide of a group back to the group's segments, those with their own too (they follow
     // the group again); frozen guides are left as they are. A group without segments of its own
     // takes its guides' most common count first. Returns the segments (0: the group has no

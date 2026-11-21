@@ -792,6 +792,51 @@ TEST(Brush, NewGuidesTakeTheirGroupsSegments) {
     EXPECT_EQ(s.pts(drawGuide(s.h, *s.scalp, p, {{0.2f, 0, 0.8f}, {0.2f, 0.5f, 0.8f}, {0.2f, 1.0f, 0.8f}})).size(), 4u);
 }
 
+TEST(Brush, SegmentsByLengthGiveLongerGuidesMorePoints) {
+    // Issue #98: Resample by length: a guide of the guides' mean length gets the segments asked, each
+    // other its length's share, so points are as far apart on every guide; a whole group keeps the
+    // segment length for its new guides (drawn, placed) and Reset Segments; a selection gets counts
+    // of its own; resampled without it the group has one count again.
+    Scene s;
+    GuideHierarchy& h = s.h;
+    h.addGroup("primary");
+    s.primary = h.findGroup("primary");
+    const GuideId shortGuide = h.addGuide(s.primary, test::straightCurve({0.3f, 0, 0.5f}, {0, 1, 0}, 8));  // 1 long
+    const GuideId longGuide = h.addGuide(s.primary, test::straightCurve({0.7f, 0, 0.5f}, {0, 2, 0}, 8));   // 2 long
+    h.evaluate(s.scalp.get());
+    const std::vector<GuideId> both{shortGuide, longGuide};
+    EXPECT_NEAR(h.segmentLengthFor(both, 10), 0.15f, 1e-5f);  // mean 1.5 over 10
+    EXPECT_EQ(h.resampleGuides(both, 10, true, s.primary, -1, true), 2u);
+    EXPECT_EQ(s.pts(shortGuide).size(), 8u);   // 1 / 0.15: 7 segments
+    EXPECT_EQ(s.pts(longGuide).size(), 14u);   // 2 / 0.15: 13
+    EXPECT_NEAR(h.group(s.primary)->segmentLength, 0.15f, 1e-5f);
+    EXPECT_EQ(h.group(s.primary)->segments, 10);
+    EXPECT_FALSE(h.guide(shortGuide)->ownSegments);
+    // New guides in the group: their length's share.
+    EXPECT_EQ(h.segmentsFor(s.primary, 3.0f), 20);
+    PlaceSettings p;
+    p.matchNeighbors = false;
+    const GuideId drawn = drawGuide(h, *s.scalp, p, {{0.5f, 0, 0.2f}, {0.5f, 0.75f, 0.2f}, {0.5f, 1.5f, 0.2f}});
+    EXPECT_EQ(s.pts(drawn).size(), 11u);  // 1.5 long: 10 segments
+    // Saved and read back.
+    const GuideHierarchy again = GuideHierarchy::fromJson(h.toJson());
+    EXPECT_NEAR(again.group(again.findGroup("primary"))->segmentLength, 0.15f, 1e-5f);
+    // Reset Segments: every guide by its length again.
+    h.resample({longGuide}, 4);
+    EXPECT_TRUE(h.guide(longGuide)->ownSegments);
+    h.resetGroupSegments(s.primary);
+    EXPECT_EQ(s.pts(longGuide).size(), 14u);
+    // A selection by length: counts of its own; the whole group without it: one count again.
+    h.resampleGuides({shortGuide}, 4, false, kNoGroup, -1, true);
+    EXPECT_EQ(s.pts(shortGuide).size(), 5u);
+    EXPECT_TRUE(h.guide(shortGuide)->ownSegments);
+    h.resetGroupSegments(s.primary);
+    h.resampleGuides(h.guidesInGroup(s.primary), 6, true, s.primary);
+    EXPECT_EQ(h.group(s.primary)->segmentLength, 0.0f);
+    EXPECT_EQ(s.pts(longGuide).size(), 7u);
+    EXPECT_EQ(s.pts(shortGuide).size(), 7u);
+}
+
 TEST(Brush, IncrementalEvaluationMatchesFull) {
     const auto scalp = test::makeSphere(60, 120, 1.0f);
     GuideHierarchy h;

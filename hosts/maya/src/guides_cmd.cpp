@@ -120,6 +120,7 @@ const char* kResample[] = {"-rsm", "-resample"};
 // Live Resample (Groom Tools' slider): the guides resampled shown as the shape's preview, from the
 // stored guides each time (so dragging back and forth never resamples a resample), no undo step.
 const char* kPreviewResample[] = {"-prs", "-previewResample"};
+const char* kByLength[] = {"-bln", "-byLength"};  // -resample / -previewResample: segments by length (issue #98)
 const char* kEndPreview[] = {"-epv", "-endPreview"};
 // Each target guide's segment count (points - 1): the slider's value.
 const char* kPointCounts[] = {"-pcn", "-pointCounts"};
@@ -240,7 +241,7 @@ void describeGroups(const GuideHierarchy& h, const std::string& colorSeed, MStri
         const std::array<float, 3> drawn = g.hasColor ? g.color : shown != automatic.end() ? shown->second : std::array<float, 3>{};
         const MString row = MString(g.name.c_str()) + "|" + (parent ? parent->name.c_str() : "") + "|" +
                             h.groupDepth(g.id) + "|" + static_cast<unsigned>(h.guidesInGroup(g.id).size()) + "|" +
-                            guideColorHex(drawn).c_str() + "|" + g.segments;
+                            guideColorHex(drawn).c_str() + "|" + g.segments + "|" + g.segmentLength;
         out.append(row);
     }
 }
@@ -360,6 +361,7 @@ MSyntax GuidesCmd::newSyntax() {
     s.addFlag(kSetGroupSegments[0], kSetGroupSegments[1], MSyntax::kLong);
     s.addFlag(kResetGroupSegments[0], kResetGroupSegments[1]);
     s.addFlag(kPreviewResample[0], kPreviewResample[1], MSyntax::kLong);
+    s.addFlag(kByLength[0], kByLength[1], MSyntax::kBoolean);
     s.addFlag(kEndPreview[0], kEndPreview[1]);
     s.addFlag(kPointCounts[0], kPointCounts[1]);
     s.addFlag(kOnlySelected[0], kOnlySelected[1]);
@@ -528,7 +530,12 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
             const HierarchyPtr authored = shape->authoredHierarchy();  // as stored, rooted: never a preview
             if (!authored) return fail(kName, "the groom has no guides");
             auto preview = std::make_shared<GuideHierarchy>(*authored);
-            const std::size_t count = preview->resample(resampleTargets(*preview), segments, resampleGroupWide());  // as -resample
+            bool byLength = false;
+            if (db.isFlagSet(kByLength[0])) db.getFlagArgument(kByLength[0], 0, byLength);
+            const std::vector<GuideId> targets = resampleTargets(*preview);
+            const float length = byLength ? preview->segmentLengthFor(targets, segments) : 0.0f;  // as -resample
+            const std::size_t count = length > 0.0f ? preview->resampleByLength(targets, length, resampleGroupWide())
+                                                    : preview->resample(targets, segments, resampleGroupWide());
             shape->setPreviewHierarchy(preview);
             setResult(static_cast<int>(count));
             return MS::kSuccess;
@@ -1123,8 +1130,10 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                 const GroupId only = db.isFlagSet(kGroup[0]) ? h->findGroup(flagString(db, kGroup[0], "").asChar()) : kNoGroup;
                 int level = -1;
                 if (db.isFlagSet(kLevel[0])) db.getFlagArgument(kLevel[0], 0, level);
+                bool byLength = false;
+                if (db.isFlagSet(kByLength[0])) db.getFlagArgument(kByLength[0], 0, byLength);
                 // Every host's (guide_hierarchy.h resampleGuides), frozen guides kept.
-                setResult(static_cast<int>(h->resampleGuides(ids, segments, groupWide, only, level)));
+                setResult(static_cast<int>(h->resampleGuides(ids, segments, groupWide, only, level, byLength)));
             } else if (db.isFlagSet(kSetGroupSegments[0])) {
                 int segments = 0;
                 db.getFlagArgument(kSetGroupSegments[0], 0, segments);

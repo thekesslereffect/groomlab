@@ -56,6 +56,11 @@ and reshapes all its descendants.
   of their own: the group's count changing later leaves them as they are, until you resample them
   to the group's count again, or right-click the group > **Reset Segments** (every guide of the
   group back to its count, frozen ones kept). Give guides more segments before combing tight curls.
+- **Segments by Length:** the switch under Segments. On, the count is for a guide of the guides'
+  average length; each other guide gets as many as its length calls for, so the points are as far
+  apart on every guide and brushes act alike on long and short ones. Resampling a whole group by
+  length also makes the group keep that spacing: its new guides get segments by their length, and
+  **Reset Segments** keeps it. Off, every guide gets the same count again.
 - **Which guides drive the strands:** by default Interpolate uses each group's deepest level.
   Where a group has children, the strands are interpolated from the children, and the primaries
   shape the strands through them; a group without children drives the strands itself ([Interpolate](/docs/node-graph#interpolate-and-guide-influence)).

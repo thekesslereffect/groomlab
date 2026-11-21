@@ -1043,9 +1043,11 @@ GroupId targetGroup(GuideHierarchy& h, const std::string& name) {
 }
 
 // The segments a new guide of `gid` gets: the group's own, else the tool's.
-int newGuideSegments(const GuideHierarchy& h, GroupId gid, int toolSegments) {
-    const GuideGroup* g = h.group(gid);
-    return g && g->segments > 0 ? g->segments : std::max(toolSegments, 1);
+// A new guide's segments in group `gid`, `length` long: the group's (by its segment length when it
+// goes by length, issue #98), else the tool's.
+int newGuideSegments(const GuideHierarchy& h, GroupId gid, int toolSegments, float length) {
+    const int group = h.segmentsFor(gid, length);
+    return group > 0 ? group : std::max(toolSegments, 1);
 }
 
 // For a new guide in a child group: the guide of the parent group whose root is nearest.
@@ -2088,7 +2090,7 @@ void setPlacementTube(PlaceSettings& s, const std::string& json) {
 GuideId placeGuide(GuideHierarchy& hierarchy, const ScalpMesh& scalp, const PlaceSettings& s, const SurfacePoint& at) {
     if (at.root.face < 0) throw std::invalid_argument("placeGuide: not a point on the scalp");
     const GroupId gid = targetGroup(hierarchy, s.group);
-    const int segments = newGuideSegments(hierarchy, gid, s.segments);
+    const int segments = newGuideSegments(hierarchy, gid, s.segments, s.length);
     std::vector<Vec3f> pts;
     NeighborMatch match;
     bool matched = false;
@@ -2154,7 +2156,8 @@ GuideId drawGuide(GuideHierarchy& hierarchy, const ScalpMesh& scalp, const Place
     const GroupId gid = targetGroup(hierarchy, s.group);
     std::vector<Vec3f> pts = path;
     pts.front() = root.position;
-    pts = resampleByArcLength(pts.data(), pts.size(), static_cast<std::size_t>(newGuideSegments(hierarchy, gid, s.segments)) + 1);
+    pts = resampleByArcLength(pts.data(), pts.size(),
+                              static_cast<std::size_t>(newGuideSegments(hierarchy, gid, s.segments, arcLength(pts.data(), pts.size()))) + 1);
     pts = keepOffScalp(pts, scalp);
     // The shape is drawn; painted layers and the tube come from the neighbors, as for Place.
     std::map<std::string, float> layers;

@@ -1669,6 +1669,23 @@ class GroomingTest(unittest.TestCase):
         self.assertEqual(group()["segments"], 0)
         cmds.undo()
         self.assertEqual(group()["segments"], 6)
+        # Segments by length (issue #98): longer guides more points, shorter fewer, the spacing the
+        # same; the group keeps it (its new guides by their length); the preview as the commit.
+        lengths = {g: length(p) for g, p in guide_points(self.groom).items() if g in groomlab.guide_ids(self.groom, "primary")}
+        self.assertEqual(group()["segmentLength"], 0.0)
+        groomlab.preview_resample_guides(self.groom, 8, group="primary", by_length=True)
+        groomlab.end_guide_preview(self.groom)
+        groomlab.resample_guides(self.groom, 8, group="primary", by_length=True)
+        spacing = group()["segmentLength"]
+        self.assertAlmostEqual(spacing, sum(lengths.values()) / len(lengths) / 8, 4)
+        points = guide_points(self.groom)
+        for g, l in lengths.items():
+            self.assertEqual(len(points[g]) - 1, max(1, int(round(l / spacing))), g)
+        made = groomlab.guides_from_curves(self.groom, [cmds.curve(degree=1, point=[(0.3, 0.95, 0), (0.3, 1.6, 0.3), (0.6, 1.9, 0.6)])])
+        self.assertEqual(len(guide_points(self.groom)[made[0]]) - 1, max(1, int(round(length(guide_points(self.groom)[made[0]]) / spacing))))
+        groomlab.resample_guides(self.groom, 6, group="primary")  # without it: one count again
+        self.assertEqual(group()["segmentLength"], 0.0)
+        self.assertEqual(set(groomlab.guide_segments(self.groom, group="primary")), {6})
         self.assertEqual(groomlab.errors(self.groom), [])
 
     def test_scripted_strokes_reach_the_other_scalps(self):

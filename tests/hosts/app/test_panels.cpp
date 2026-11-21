@@ -73,6 +73,7 @@
 #include "transfer_window.h"
 #include "groomlab/brush_catalog.h"
 #include "groomlab/correctives.h"
+#include "groomlab/curve.h"
 #include "groomlab/field.h"
 #include "groomlab/graph_pins.h"
 #include "groomlab/groom_file.h"
@@ -1301,6 +1302,26 @@ TEST(AppPanels, GuidesPanelMirrorsResamplesAndClearsOverlays) {
     EXPECT_TRUE(panel.resampleGuides(6));
     for (const HierarchyGuide& g : doc->session().authoredHierarchy()->guides()) EXPECT_EQ(g.points.size(), 7u);
     EXPECT_EQ(doc->undoText(), "Undo resample guides");
+    // Segments by Length (issue #98): each guide's count its length's share (the spacing the same on
+    // every guide), one undo step; the switch shows it, toggling it off gives one count again.
+    QCheckBox* byLength = panel.findChild<QCheckBox*>(QStringLiteral("segmentsByLength"));
+    ASSERT_TRUE(byLength);
+    EXPECT_TRUE(panel.resampleGuides(6, 1));
+    {
+        const HierarchyPtr h = doc->session().authoredHierarchy();
+        float spacing = 0.0f;
+        for (const GuideGroup& g : h->groups()) spacing = std::max(spacing, g.segmentLength);
+        ASSERT_GT(spacing, 0.0f);
+        std::set<std::size_t> counts;
+        for (const HierarchyGuide& g : h->guides()) {
+            if (g.points.size() < 2 || g.isChild()) continue;
+            const float length = arcLength(g.points.data(), g.points.size());
+            counts.insert(g.points.size());
+            EXPECT_NEAR(length / static_cast<float>(g.points.size() - 1), spacing, spacing * 0.5f) << g.id;
+        }
+    }
+    EXPECT_TRUE(doc->undo().empty());
+    EXPECT_TRUE(panel.resampleGuides(6, 0));
     // Symmetry sync across x: at least as many guides, mirrored in x.
     EXPECT_TRUE(panel.symmetrySync());
     EXPECT_GE(doc->session().authoredHierarchy()->guides().size(), guides);

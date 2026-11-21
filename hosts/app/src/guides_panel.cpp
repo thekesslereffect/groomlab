@@ -7,6 +7,7 @@
 #include <map>
 #include <set>
 
+#include <QCheckBox>
 #include <QGridLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
@@ -192,6 +193,15 @@ GuidesPanel::GuidesPanel(QWidget* parent) : QWidget(parent) {
     segRow->addWidget(resample);
     rows->addLayout(segRow);
     connect(resample, &QPushButton::clicked, this, [this] { resampleGuides(static_cast<int>(std::lround(segments_->value()))); });
+    // Segments by Length (issue #98): toggled, the targets resampled at the slider's count by their
+    // lengths (on) or to it (off), one undo step.
+    byLength_ = new QCheckBox(qs(defs().get("palette/texts/segmentsByLength").get<std::string>()), box_);
+    byLength_->setObjectName(QStringLiteral("segmentsByLength"));
+    byLength_->setToolTip(qs(defs().get("palette/texts/segmentsByLengthTip").get<std::string>()));
+    rows->addWidget(switchRow(box_, byLength_));
+    connect(byLength_, &QCheckBox::toggled, this, [this](bool on) {
+        resampleGuides(static_cast<int>(std::lround(segments_->value())), on ? 1 : 0);
+    });
 
     // Edits on many guides: one menu, the children count beside it.
     auto* row = new QHBoxLayout();
@@ -430,6 +440,13 @@ void GuidesPanel::refreshRows() {
     // (A picked group: the row above names it, the drawer's bar holds its actions alone.)
     itemBar_->setMutedTitle(true);
     itemBar_->setTitle(group.empty() ? tr("All groups") : tr("%1 segments per guide").arg(std::lround(segments_->value())));
+    // Segments by Length: on where the picked group goes by length (a selection keeps the switch).
+    if (byLength_ && document_ && n == 0 && !group.empty()) {
+        const HierarchyPtr authored = document_->session().authoredHierarchy();
+        const GuideGroup* g = authored ? authored->group(authored->findGroup(group)) : nullptr;
+        const QSignalBlocker block(byLength_);
+        byLength_->setChecked(g && g->segmentLength > 0.0f);
+    }
     box_->setVisible(tree_->topLevelItemCount() > 0);
     tree_->setVisible(tree_->topLevelItemCount() > 0);
     // No group of its own: say where the guides shown come from, and how to brush them.
@@ -736,8 +753,9 @@ bool GuidesPanel::pasteGuides(const std::string& text) {
     });
 }
 
-bool GuidesPanel::resampleGuides(int segments) {
+bool GuidesPanel::resampleGuides(int segments, int byLength) {
     if (!document_) return false;
+    const bool lengths = byLength < 0 ? byLength_ && byLength_->isChecked() : byLength > 0;
     const std::vector<GuideId> selected = document_->selection();
     const std::string group = selected.empty() ? currentGroup() : std::string();
     segments = std::clamp(segments, 1, kMaxGuideSegments);
@@ -756,7 +774,7 @@ bool GuidesPanel::resampleGuides(int segments) {
         }
         if (h.guides().empty()) throw std::invalid_argument("the groom has no guides to resample");
         // Every host's (guide_hierarchy.h resampleGuides): a group (none picked) keeps the count.
-        h.resampleGuides(ids, segments, selected.empty(), gid);
+        h.resampleGuides(ids, segments, selected.empty(), gid, -1, lengths);
     });
 }
 

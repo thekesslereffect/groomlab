@@ -239,6 +239,13 @@ def _segments(self, context):
     tools.segments_changed(context, int(self.resample_segments))
 
 
+def _segments_by_length(self, context):
+    if props.is_quiet():
+        return
+    from . import tools
+    tools.segments_changed(context, int(self.resample_segments))
+
+
 def _tube_shape(self, context):
     if props.is_quiet():
         return
@@ -342,6 +349,7 @@ class GroomLabGroupItem(bpy.types.PropertyGroup):
     guides: IntProperty()
     hidden: BoolProperty()
     depth: IntProperty()
+    segment_length: FloatProperty()  # above 0: its guides go by length (issue #98)
     has_color: BoolProperty()   # its own viewport color (else `color` is its automatic one)
     color: FloatVectorProperty(size=3, subtype="COLOR_GAMMA", min=0.0, max=1.0, default=(0.5, 0.5, 0.5))
 
@@ -704,6 +712,9 @@ class GroomLabTools(bpy.types.PropertyGroup):
                                                "count makes them follow it again), else the picked group's (its new guides "
                                                "get as many too). Frozen guides keep theirs. More segments let a guide curl tighter")
     segments_scope: StringProperty()  # "3 selected" / "bangs: 12" / "all 40" (", mixed")
+    # Segments by Length (issue #98): toggled, the targets resampled at the slider's count by length
+    segments_by_length: BoolProperty(name="Segments by Length", default=False, update=_segments_by_length,
+                                     description=defs.text("segmentsByLengthTip"))
     # Selection
     soft_radius: FloatProperty(name="Soft radius", default=0.0, min=0.0, soft_max=0.1, subtype="DISTANCE", unit="LENGTH",
                                update=_soft_radius,

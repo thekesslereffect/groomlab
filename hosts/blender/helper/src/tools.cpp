@@ -1274,7 +1274,8 @@ json guidesInfo(ToolState& t) {
                               {"hidden", t.hidden.count(g.name) > 0},
                               {"color", t.groupColors.count(g.name) ? json(t.groupColors.at(g.name)) : json(nullptr)},
                               {"autoColor", guideColorHex(drawn)},
-                              {"segments", g.segments}});
+                              {"segments", g.segments},
+                              {"segmentLength", g.segmentLength}});
         }
         for (const HierarchyGuide& g : h->guides()) {
             if (!g.isChild()) ++primaries;
@@ -1586,7 +1587,8 @@ json guidesEdit(ToolState& t, const json& args) {
             const bool groupWide = resampleGroupWide(t, args);
             const GroupId only = given(args, "group") ? h.findGroup(needString(args, "group")) : kNoGroup;
             const int level = given(args, "level") ? settingInt(args["level"], "level") : -1;
-            count = h.resampleGuides(ids, segments, groupWide, only, level);  // every host's (guide_hierarchy.h)
+            const bool byLength = given(args, "byLength") && settingBool(args["byLength"], "byLength");  // issue #98
+            count = h.resampleGuides(ids, segments, groupWide, only, level, byLength);  // every host's (guide_hierarchy.h)
         });
         r["resampled"] = count;
     } else if (op == "mirror_selection") {
@@ -1683,8 +1685,12 @@ json guidesPreview(ToolState& t, const json& args) {
     const int segments = settingInt(need(args, "segments"), "segments");
     if (segments < 1 || segments > 256) fail("bad_request", "segments: 1 to 256");
     std::size_t count = 0;
+    const bool byLength = given(args, "byLength") && settingBool(args["byLength"], "byLength");
     previewGuides(t, [&](GuideHierarchy& h) {
-        count = h.resample(targetGuides(t, h, args, true, "preview"), segments, resampleGroupWide(t, args));
+        const std::vector<GuideId> ids = targetGuides(t, h, args, true, "preview");
+        const float length = byLength ? h.segmentLengthFor(ids, segments) : 0.0f;  // (as resample)
+        count = length > 0.0f ? h.resampleByLength(ids, length, resampleGroupWide(t, args))
+                              : h.resample(ids, segments, resampleGroupWide(t, args));
     });
     return {{"previewed", count}};
 }

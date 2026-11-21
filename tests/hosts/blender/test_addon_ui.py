@@ -331,6 +331,14 @@ class ToolsTest(unittest.TestCase):
         self.assertEqual(next(x for x in info if x["name"] == "primary")["segments"], 5)
         self.assertEqual(bpy.ops.groomlab.tool_undo(), {"FINISHED"})
         self.assertEqual(set(tools.guide_segments(head)["segments"]), before)
+        # Segments by Length (issue #98): toggled on, each guide's count its length's share (one
+        # undo step), the group keeping the spacing; the switch follows the picked group.
+        t.segments_by_length = True
+        info = tools.call(head, "guides_info", guideColorSeed=head.name)["groups"]
+        self.assertGreater(next(x for x in info if x["name"] == "primary")["segmentLength"], 0.0)
+        self.assertTrue(t.segments_by_length)
+        self.assertEqual(bpy.ops.groomlab.tool_undo(), {"FINISHED"})
+        self.assertEqual(set(tools.guide_segments(head)["segments"]), before)
         # Select Mirror Guides: the mirror images of the selected guides.
         ids = self.guide_ids()
         tools.selection_set(head, ids=ids[:5], mode="replace")
@@ -781,6 +789,7 @@ class ToolsTest(unittest.TestCase):
         self.assertIn(("menu", "GROOMLAB_MT_group_context", ""), log)
         self.assertNotIn(("prop", "group"), drawn(palette.VIEW3D_PT_groomlab_tools))  # the list picks the group
         self.assertIn(("prop", "resample_segments"), log)
+        self.assertIn(("prop", "segments_by_length"), log)
         self.assertNotIn(("prop", "guide_color_mode"), log)  # every group its own color: Display has the mode
         # The More menu and the empty state.
         self.assertEqual(texts(drawn(bpy.types.GROOMLAB_MT_tools_more))[:1], ["Create Groom from Selection"])

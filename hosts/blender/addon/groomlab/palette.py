@@ -465,6 +465,7 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
         bar_icons(row, "lists/groups/bar", "groupsbar", context, ("group.rename", "group.select", "group.delete"))
         box.prop(t, "resample_segments", text="Segments (%s)" % t.segments_scope if t.segments_scope else "Segments",
                  slider=True)
+        box.prop(t, "segments_by_length", text=defs.text("segmentsByLength"))
         row = box.row(align=True)
         row.menu("GROOMLAB_MT_guide_edits", text=lists["edits"]["label"])
         box.prop(t, "children_count", text="Children per guide")

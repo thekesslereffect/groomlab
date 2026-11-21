@@ -770,9 +770,9 @@ def guide_segments(scalp, guides=None, group=None, level=None):
     return call(scalp, "guide_segments", **_targets(guides, group, level))
 
 
-def resample_guides(scalp, segments, guides=None, group=None, level=None):
+def resample_guides(scalp, segments, guides=None, group=None, level=None, by_length=False):
     """Give guides (default: the selected ones, else every guide) `segments` segments. One undo step."""
-    return guides_edit(scalp, "resample", segments=int(segments), **_targets(guides, group, level))
+    return guides_edit(scalp, "resample", segments=int(segments), byLength=bool(by_length), **_targets(guides, group, level))
 
 
 def _preview_shown(scalp):
@@ -793,10 +793,10 @@ def set_group_segments(scalp, group, segments):
     return guides_edit(scalp, "set_group_segments", group=group, segments=int(segments))
 
 
-def preview_resample(scalp, segments, guides=None, group=None, level=None):
-    """The Segments slider while dragged: the guides shown resampled, no change, no undo step;
-    resample_guides commits, end_preview drops it."""
-    r = call(scalp, "guides_preview", segments=int(segments), **_targets(guides, group, level))
+def preview_resample(scalp, segments, guides=None, group=None, level=None, by_length=False):
+    """The Segments slider while dragged: the guides shown resampled (by length with `by_length`),
+    no change, no undo step; resample_guides commits, end_preview drops it."""
+    r = call(scalp, "guides_preview", segments=int(segments), byLength=bool(by_length), **_targets(guides, group, level))
     _preview_shown(scalp)
     return r
 
@@ -1310,6 +1310,7 @@ def _fill_groups(scene, info, gt):
             item.level = int(g.get("level", 0))
             item.guides = int(g.get("guides", 0))
             item.hidden = bool(g.get("hidden"))
+            item.segment_length = float(g.get("segmentLength") or 0.0)
             item.depth = depth
             color = g.get("color")
             item.has_color = bool(color)
@@ -1411,6 +1412,7 @@ def refresh_segments(scalp, scene=None):
         return  # a drag's commit pending: the slider stays as dragged
     group = segments_group(t)
     counts = [int(c) for c in guide_segments(scalp, group=group).get("segments") or []]
+    picked = next((g for g in t.groups if g.name == group), None) if group else None
     with props.quiet():
         if counts:
             t.resample_segments = max(set(counts), key=counts.count)
@@ -1419,6 +1421,9 @@ def refresh_segments(scalp, scene=None):
             t.segments_scope = scope + (", mixed" if min(counts) != max(counts) else "")
         else:
             t.segments_scope = ""
+        # Segments by Length (issue #98): on where the picked group goes by length.
+        if picked is not None:
+            t.segments_by_length = picked.segment_length > 0.0
 
 
 # ---- Sliders that commit after the drag (Maya's release) ------------------------------------------
@@ -1465,14 +1470,16 @@ def segments_changed(context, segments):
         # Selected guides already at the count: nothing to do. A group (or every guide) commits
         # anyway: its new guides take the count on.
         counts = [int(c) for c in guide_segments(scalp, group=group).get("segments") or []]
-        if counts and (not scene.groomlab_tools.selected_count or any(c != segments for c in counts)):
-            r = resample_guides(scalp, segments, group=group)
-            status(scene, "Resampled %d guides to %d segments." % (int(r.get("resampled") or 0), segments))
+        if counts and (by_length or not scene.groomlab_tools.selected_count or any(c != segments for c in counts)):
+            r = resample_guides(scalp, segments, group=group, by_length=by_length)
+            how = "by length, %d for the average guide" % segments if by_length else "to %d segments" % segments
+            status(scene, "Resampled %d guides %s." % (int(r.get("resampled") or 0), how))
         end_preview(scalp)
         refresh_segments(scalp, scene)
+    by_length = bool(scene.groomlab_tools.segments_by_length)
     try:
         if not bpy.app.background:
-            preview_resample(scalp, segments, group=group)
+            preview_resample(scalp, segments, group=group, by_length=by_length)
         defer("segments", commit)
     except HelperError as e:
         status(scene, e.message)
