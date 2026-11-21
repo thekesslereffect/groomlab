@@ -169,10 +169,10 @@ Frozen guides draw blue and brushes leave them alone.
 
 ### Symmetry
 
-- **Mirror a finished side:** **Edit Guides > Sync +X → -X** (or **-X → +X**), or **Mirror
+- **Mirror a finished side:** **Edit Guides > Mirror > Whole Groom +X → -X** (or **-X → +X**), or **Mirror
   Group...**.
 - **Mirror a few guides exactly:** select them (with the Select tool's symmetry off), then **Edit
-  Guides > Copy Shape to Other Side**: each one's mirror guide takes its exact mirror image
+  Guides > Mirror > Selected to Other Side**: each one's mirror guide takes its exact mirror image
   (shape, tube, painted layers) and keeps its own identity; one is made where there is none. Good
   for eyebrows: groom one side, mirror it, then tweak a side to break the symmetry a little.
 - **Keep it symmetric as you work:** turn on **Mirror** in the tool card's **Applies to** block
@@ -212,7 +212,7 @@ there. **Isolate** (the eye in the header) dims the other groups. Each group is 
 of its own (right-click its row > **Color...** to pick another). In the Graph Editor, a Guides node's `group` and `exclude` pick
 from these names.
 - **Reparent...** makes selected children follow another parent.
-- **Promote / Demote...** moves a whole group up or down a level, keeping every guide's shape.
+- **Promote / Demote...** (a group's right-click menu) moves a whole group up or down a level, keeping every guide's shape.
 - `groomlab.lock_guides` detaches a child from its parent; `unlock_guides` reattaches it.
 
 ### Correctives and photos

@@ -93,9 +93,8 @@ TEST(AppLists, GuideGroupsBarMenusAndEdits) {
     EXPECT_FALSE(panel->bar()->button("group.new")->icon().isNull()) << "a glyph in the header";
     EXPECT_FALSE(panel->itemBar()->button("group.delete")->icon().isNull()) << "a glyph";
     EXPECT_EQ(shown(panel->editsMenu()),
-              (std::vector<std::string>{"Children", "-", "Sync +X → -X", "Sync -X → +X", "Select Mirror Guides", "Copy Shape to Other Side",
-                                        "Mirror Group...", "-", "Reparent...", "New Group from Selection", "Copy Guides",
-                                        "Paste Guides", "Promote / Demote...", "Clear Selection"}));
+              (std::vector<std::string>{"Children", "-", "Mirror", "-", "Reparent...", "Move to Group", "Copy Guides", "Paste Guides",
+                                        "Clear Selection"}));
 
     // The rows: the color dot and name, the guides it holds, the eye; a group picked, the
     // right-click menu for it.
@@ -108,7 +107,7 @@ TEST(AppLists, GuideGroupsBarMenusAndEdits) {
     EXPECT_EQ(panel->menuState(), (std::set<std::string>{"group"}));
     std::unique_ptr<QMenu> menu(panel->contextMenu(rowOf(tree, tree->currentItem())));
     ASSERT_TRUE(menu);
-    EXPECT_EQ(shown(menu.get()), (std::vector<std::string>{"New Group...", "Rename", "Color...", "Select Guides", "Reset Segments", "-", "Delete"}));
+    EXPECT_EQ(shown(menu.get()), (std::vector<std::string>{"New Group...", "Rename", "Color...", "Select Guides", "Reset Segments", "Promote / Demote...", "Paste Guides Here", "-", "Delete"}));
 
     // A color of its own: one undo step; Default Color offered then; the display draws it.
     ASSERT_TRUE(panel->setGroupColor(root, "#FF8800"));
@@ -116,7 +115,7 @@ TEST(AppLists, GuideGroupsBarMenusAndEdits) {
     EXPECT_EQ(doc->undoText(), "Undo color of " + root);
     EXPECT_EQ(panel->menuState(), (std::set<std::string>{"group", "group.color"}));
     menu.reset(panel->contextMenu(rowOf(tree, tree->currentItem())));
-    EXPECT_EQ(shown(menu.get()), (std::vector<std::string>{"New Group...", "Rename", "Color...", "Default Color", "Select Guides", "Reset Segments", "-", "Delete"}));
+    EXPECT_EQ(shown(menu.get()), (std::vector<std::string>{"New Group...", "Rename", "Color...", "Default Color", "Select Guides", "Reset Segments", "Promote / Demote...", "Paste Guides Here", "-", "Delete"}));
     EXPECT_FALSE(panel->setGroupColor(root, "orange")) << "#rrggbb only";
     EXPECT_EQ(doc->undo(), "");
     EXPECT_TRUE(doc->groupColors().empty());

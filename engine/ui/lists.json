@@ -10,26 +10,27 @@
         {"id": "group.select", "glyph": "select"},
         {"id": "group.delete", "glyph": "delete"}
       ],
-      "context": ["group.new", "group.rename", "group.color", "group.defaultColor", "group.select", "group.resetSegments", "-", "group.delete"],
+      "context": ["group.new", "group.rename", "group.color", "group.defaultColor", "group.select", "group.resetSegments", "group.promoteDemote", {"id": "guides.paste", "label": "Paste Guides Here"}, "-", "group.delete"],
       "edits": {
         "label": "Edit Guides",
-        "tip": "Children, resampling, symmetry, mirroring, reparenting, curves, selection",
+        "tip": "Children, mirroring, reparenting, moving between groups, copy and paste, curves, selection",
         "items": [
           "guides.children",
           "-",
-          "guides.syncPos",
-          "guides.syncNeg",
-          "guides.mirrorSelection",
-          "guides.mirrorToOther",
-          "guides.mirrorGroup",
+          {"submenu": "Mirror", "id": "guides.mirror", "tip": "The selected guides, a group or the whole groom mirrored across X", "items": [
+            {"id": "guides.mirrorToOther", "label": "Selected to Other Side"},
+            {"id": "guides.mirrorGroup", "label": "Group..."},
+            "-",
+            {"id": "guides.syncPos", "label": "Whole Groom +X → -X"},
+            {"id": "guides.syncNeg", "label": "Whole Groom -X → +X"},
+            "-",
+            "guides.mirrorSelection"
+          ]},
           "-",
           "guides.reparent",
-          {"submenu": "Move to Group", "id": "guides.moveToGroup", "items": [{"generator": "guideGroups", "action": "guides.moveToGroup"}]},
-          {"submenu": "Duplicate to Group", "id": "guides.duplicateToGroup", "items": [{"generator": "guideGroups", "action": "guides.duplicateToGroup"}]},
-          "guides.newGroupFromSelection",
+          {"submenu": "Move to Group", "id": "guides.moveToGroup", "items": [{"generator": "guideGroups", "action": "guides.moveToGroup"}, "-", {"id": "guides.newGroupFromSelection", "label": "New Group"}]},
           "guides.copy",
           "guides.paste",
-          "group.promoteDemote",
           "guides.fromCurves",
           "guides.clearSelection"
         ]

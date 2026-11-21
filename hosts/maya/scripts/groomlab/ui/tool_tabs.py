@@ -337,7 +337,6 @@ class GuidesTab(_GroomTab):
         "guides.mirrorGroup": lambda self: self.menu_action(menu.mirror_group_dialog),
         "guides.reparent": lambda self: self.menu_action(menu.reparent_dialog),
         "guides.moveToGroup": "move_to_group",
-        "guides.duplicateToGroup": "duplicate_to_group",
         "guides.newGroupFromSelection": "new_group_from_selection",
         "guides.copy": "copy_guides",
         "guides.paste": "paste_guides",
@@ -762,26 +761,30 @@ class GuidesTab(_GroomTab):
     # ---- Regrouping (core guide_hierarchy.h: every host's) ----
 
     def fill_group_menu(self, target, item):
-        """Move to Group / Duplicate to Group: the groups beside the selected guides' (filled as the
-        submenu opens)."""
+        """Move to Group: the groups beside the selected guides' (made again as the submenu opens,
+        above the entries the files put after them: New Group)."""
         import groomlab
-        duplicate = (item.get("entry") or {}).get("action") == "guides.duplicateToGroup"
+        made = []
 
         def fill():
-            target.clear()
+            for action in made:
+                target.removeAction(action)
+            del made[:]
             names = []
             if self.groom:
                 try:
                     names = groomlab.groups_beside(self.groom)
                 except RuntimeError:
                     names = []
-            if not names:
-                none = target.addAction("(select guides of one level)")
-                none.setEnabled(False)
-                return
-            for name in names:
-                act = target.addAction(name)
-                act.triggered.connect(lambda _=False, n=name: self.regroup(n, duplicate))
+            before = target.actions()[0] if target.actions() else None
+            for name in names or [None]:
+                act = QtWidgets.QAction(name or "(select guides of one level)", target)
+                if name:
+                    act.triggered.connect(lambda _=False, n=name: self.regroup(n, False))
+                else:
+                    act.setEnabled(False)
+                target.insertAction(before, act)
+                made.append(act)
         target.aboutToShow.connect(fill)
 
     def regroup(self, group, duplicate):
@@ -793,9 +796,6 @@ class GuidesTab(_GroomTab):
 
     def move_to_group(self, group):
         self.regroup(group, False)
-
-    def duplicate_to_group(self, group):
-        self.regroup(group, True)
 
     def new_group_from_selection(self):
         import groomlab

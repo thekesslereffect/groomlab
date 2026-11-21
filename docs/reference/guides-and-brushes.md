@@ -101,10 +101,10 @@ groomlab.set_guide_attribute(groom, "clump", 0.5, group="primary")
 ```
 
 - **Mirroring:** `mirror_group` mirrors one root group; generate children after it.
-  `symmetry_sync` (**Sync +X → -X** / **Sync -X → +X** in Edit Guides, under the Groom Tools' Guide groups)
+  `symmetry_sync` (**Mirror > Whole Groom +X → -X** / **-X → +X** in Edit Guides, under the Groom Tools' Guide groups)
   mirrors every root group and copies each guide's children, grandchildren and so on with it,
   hand edits, locks and painted attributes included. Guides on the plane are left alone.
-  `mirror_to_other_side` (**Copy Shape to Other Side** in Edit Guides) keeps the other side's
+  `mirror_to_other_side` (**Mirror > Selected to Other Side** in Edit Guides) keeps the other side's
   guides instead of replacing them: each selected guide's mirror guide (the nearest across the
   symmetry, within half the guides' spacing) takes its mirror image (shape, frame, tube, segments,
   painted layers) under its own ID, so what refers to it stays; a guide with none gets a new one.

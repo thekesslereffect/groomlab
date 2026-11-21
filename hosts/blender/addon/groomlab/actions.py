@@ -128,7 +128,6 @@ BINDINGS = {
     "guides.mirrorGroup": ("groomlab.guides_mirror_group", {}),
     "guides.reparent": ("groomlab.guides_reparent", {}),
     "guides.moveToGroup": ("groomlab.guides_regroup", {"action": "MOVE", "$value": "group"}),
-    "guides.duplicateToGroup": ("groomlab.guides_regroup", {"action": "DUPLICATE", "$value": "group"}),
     "guides.newGroupFromSelection": ("groomlab.guides_regroup", {"action": "NEW_GROUP"}),
     "guides.copy": ("groomlab.guides_regroup", {"action": "COPY"}),
     "guides.paste": ("groomlab.guides_regroup", {"action": "PASTE"}),

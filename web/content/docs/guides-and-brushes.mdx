@@ -46,7 +46,7 @@ and reshapes all its descendants.
 - **Place children by hand:** click a child group in the **Guide groups** list and use Place or
   Draw; each new child is parented to the nearest guide of the parent group.
 - **Restructure:** **Reparent...** (move the selected children under another parent) and
-  **Promote / Demote...** (move a group one level up, or under a sibling group) in Edit Guides
+  **Promote / Demote...** (move a group one level up, or under a sibling group) in a group's right-click menu
   change the hierarchy while keeping the guides' shapes.
 - **Segments:** the field in the picked group's box under Guide groups shows the point count of
   the selected guides, else of the picked group's (of every guide with All groups picked). Dragging it resamples them
@@ -443,7 +443,7 @@ guide count and an eye. The section header shows how many there are, **Isolate**
 | Color | The row's dot shows the color the group draws in: filled when it has a color of its own, a ring for its automatic one. Right-click the row > **Color...** to pick a color, **Default Color** to clear it. Every group without its own color, child groups too, gets a hue of its own, well apart from its parent's and its siblings'. To see a painted guide layer instead, set **Guide Color** (Display > Guides) to **Painted Layer**. The automatic colors start from a hue of the groom's own, from its name (the Maya transform, the Blender object, the app's file name), so two grooms side by side differ; the same name gives the same colors in Maya, Blender and the app. |
 | Select its guides | **select**, or right-click > **Select Guides**. |
 | Delete | **delete**: the group, its child groups and their guides. The dialog lists graph nodes that use the group. |
-| Mirror | **Edit Guides > Mirror Group...** copies a top-level group to the other side. |
+| Mirror | **Edit Guides > Mirror > Group...** copies a top-level group to the other side. |
 
 **Isolate**, the eye in the Guide groups header, draws the active group and its child groups at full color and
 dims every other group.
@@ -692,7 +692,7 @@ Selection** and **Clear Selection**.
 - **Symmetric grooming:** turn on **Symmetry** (**Mirror** in the tool card's **Applies to** block, or **Alt+Shift+X**) and
   every stroke is mirrored. While it is on, a red line on the scalp shows the mirror plane (with
   **Topology**, the scalp's middle loop) for as long as a brush is on, the cursor anywhere.
-- **Mirroring one side:** groom one side, then use **Edit Guides > Mirror Group...** or **Sync
+- **Mirroring one side:** groom one side, then use **Edit Guides > Mirror > Group...** or **Mirror > Whole Groom
   +X → -X**. Sync also copies children, hand edits, locks and painted attributes.
 
 ## Parting
