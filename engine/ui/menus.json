@@ -78,6 +78,7 @@
       "export.alembic",
       "export.usd",
       "export.vrscene",
+      "export.xgenInteractive",
       "-",
       "export.unrealGroom",
       "export.unrealCards",

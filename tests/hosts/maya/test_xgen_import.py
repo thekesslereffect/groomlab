@@ -240,6 +240,71 @@ class XGenImport(unittest.TestCase):
         self.assertLess(ours["tip_spread"], 0.8)    # and GroomLab's
 
 
+class ConvertToInteractiveGroom(unittest.TestCase):
+    """groomlab.convert_to_xgen_interactive: a groom's strands as a new Interactive Groom on its
+    scalp, each strand a spline where it is, kept with the scene (not the Maya curves)."""
+
+    def test_strands_become_splines_where_they_are(self):
+        import math
+        cmds.file(new=True, force=True)
+        # (16 sides: XGen roots no spline at a pole of more than 20 edges)
+        scalp = cmds.polySphere(radius=1, subdivisionsX=16, subdivisionsY=16)[0]
+        cmds.move(0, 2, 0, scalp)
+        groom = groomlab.create_groom(scalp)
+        curves = []
+        for angle in (0.35, 0.8, 1.2):
+            n = (math.sin(angle), math.cos(angle) + 2.0, 0.2)
+            curves.append(cmds.curve(degree=1, point=[n, (n[0] * 1.6, n[1] + 0.6, 0.3), (n[0] * 2.1, n[1] + 0.9, 0.4)]))
+        groomlab.guides_from_curves(groom, curves)
+        groomlab.mirror_group(groom, "primary", "x")
+        path = os.path.join(WORK_DIR, "convert", "groom_xgi.abc")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        cmds.select(groom)
+        made = groomlab.convert_to_xgen_interactive(groom, path=path, density=0.05)
+        self.assertTrue(os.path.isfile(made["file"]))
+        self.assertEqual(cmds.nodeType(made["shape"]), "xgmSplineDescription")
+        self.assertEqual(cmds.getAttr(made["curves"] + ".fileName"), path.replace("\\", "/"))
+        self.assertEqual(cmds.ls(selection=True), [groom], "the selection kept")
+        ours = groomlab_core.read_alembic_curves_at(made["file"])
+        self.assertGreater(ours.strand_count, 20)
+        self.assertEqual(made["strands"], ours.strand_count)
+
+        # XGen's splines: every strand, root and tip where GroomLab's are (XGen roots them on the
+        # faceted scalp, GroomLab on the smoothed one: a few thousandths apart).
+        def ends(strands):
+            out = []
+            for i in range(strands.strand_count):
+                pts = strands.strand_points(i)
+                out.append(((pts[0].x, pts[0].y, pts[0].z), (pts[-1].x, pts[-1].y, pts[-1].z)))
+            return out
+
+        def far(a, b):
+            return math.sqrt(sum((a[k] - b[k]) ** 2 for k in range(3)))
+
+        theirs_abc = os.path.join(WORK_DIR, "convert", "xgen_splines.abc")
+        gx.export_splines(made["shape"], theirs_abc)
+        theirs = ends(groomlab_core.read_alembic_curves_at(theirs_abc))
+        self.assertEqual(len(theirs), ours.strand_count)
+        worst = 0.0
+        for root, tip in ends(ours):
+            other = min(theirs, key=lambda e: far(e[0], root))
+            worst = max(worst, far(other[0], root), far(other[1], tip))
+        self.assertLess(worst, 0.03)
+
+        # Nothing links back to the groom: deleted, the Interactive Groom keeps its splines, saved
+        # and opened again too.
+        cmds.delete(groom)
+        self.assertEqual(cmds.xgmSplineQuery(made["shape"], splineCount=True), ours.strand_count)
+        scene = os.path.join(WORK_DIR, "convert", "converted.ma")
+        cmds.file(rename=scene)
+        cmds.file(save=True, type="mayaAscii")
+        cmds.file(new=True, force=True)
+        cmds.file(scene, open=True, force=True)
+        shapes = cmds.ls(type="xgmSplineDescription")
+        self.assertEqual(len(shapes), 1)
+        self.assertEqual(cmds.xgmSplineQuery(shapes[0], splineCount=True), ours.strand_count)
+
+
 if __name__ == "__main__":
     result = unittest.main(exit=False, verbosity=2).result
     maya.standalone.uninitialize()

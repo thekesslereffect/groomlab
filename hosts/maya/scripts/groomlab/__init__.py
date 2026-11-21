@@ -115,6 +115,7 @@ from groomlab.feathers import (  # noqa: F401
 from groomlab.game import (  # noqa: F401
     UNITY_CARD_MAPS, UNITY_HAIR_PACKAGES, UNITY_MAX_STRANDS, UNITY_STRAND_POINTS, UNREAL_LODS, export_cards_gltf,
     export_cards_unity, export_cards_unreal, export_unity_feathers, export_unity_strands, export_unreal_groom)
+from groomlab.xgen_convert import convert_to_xgen_interactive  # noqa: F401
 from groomlab.files import (  # noqa: F401
     export_groom, export_grooms, groom_entry, groom_file, groom_file_info, import_groom, import_grooms, reload_groom,
     render_curves, render_from_groom_file, save_groom)

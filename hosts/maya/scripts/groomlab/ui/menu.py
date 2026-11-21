@@ -246,6 +246,30 @@ def export_curves_dialog(kind):
                        "wrote %s (%d frames)" % (path[0], _frames(start, end)))
 
 
+def convert_to_xgen_action(groom=None):
+    """GroomLab > Export > XGen Interactive Groom: the groom's strands at this frame as a new
+    Interactive Groom description on its scalp (convert_to_xgen_interactive), selected after."""
+    import groomlab
+    groom = groom or _selected_groom()
+    if not groom:
+        return None
+    path = default_file(groom, "exports", "_xgi.abc")
+    try:
+        with messages.busy("Converting %s to an XGen Interactive Groom" % groom):
+            result = groomlab.convert_to_xgen_interactive(groom, path=path)
+    except (RuntimeError, ValueError) as e:
+        if messages.is_cancelled(e):
+            _remove_partial(path)
+            messages.say("Converting to XGen cancelled: nothing was made")
+            return None
+        messages.say(str(e))
+        return None
+    cmds.select(result["description"], replace=True)
+    messages.done("%s: %d splines from %s (it reads %s: keep that file with the scene)" %
+                  (result["description"].split("|")[-1], result["strands"], groom, result["file"]), seconds=6)
+    return result
+
+
 def export_unreal_dialog():
     import groomlab
     groom = _selected_groom()
@@ -2279,6 +2303,7 @@ ACTIONS = {
     "render.hardware2": render_hardware2_dialog,
     "export.alembic": lambda: export_curves_dialog("alembic"),
     "export.usd": lambda: export_curves_dialog("usd"),
+    "export.xgenInteractive": lambda: convert_to_xgen_action(),
     "export.vrscene": lambda: export_curves_dialog("vrscene"),
     "export.unrealGroom": export_unreal_dialog,
     "export.unrealCards": export_unreal_cards_dialog,

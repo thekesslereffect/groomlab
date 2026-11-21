@@ -132,6 +132,7 @@
                   "tips": {"app": "The strands as USD curves over the timeline's range (Export mode)"}},
     "export.vrscene": {"label": "V-Ray Scene...", "tip": "The strands and their V-Ray hair shader as a .vrscene over the playback range: a VRayScene node or V-Ray Standalone renders it",
                       "tips": {"app": "The strands and their V-Ray hair shader as a .vrscene over the timeline's range (Export mode): V-Ray Standalone or a VRayScene node renders it"}},
+    "export.xgenInteractive": {"label": "XGen Interactive Groom", "tip": "The strands at this frame as an XGen Interactive Groom on the scalp: a one-off copy (an Alembic file in the exports folder that XGen reads), groomed on with XGen's tools, not linked back", "hosts": ["maya"]},
     "export.unrealGroom": {"label": "Unreal Groom...", "tip": "Alembic in Unreal's groom format: strands plus primary guides, at the current frame"},
     "export.unrealCards": {"label": "Unreal Cards...", "tip": "The game cards as FBX with TGA maps in Unreal's hair card layout and a manifest, into a folder"},
     "export.unityStrands": {"label": "Unity Strands (.abc)...", "tip": "Alembic curves for Unity's hair package: widths and root UVs per point, at the current frame"},

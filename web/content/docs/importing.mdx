@@ -151,6 +151,22 @@ gathering 0.21 / 0.24 with the Clump only).
 - **Ptex** files on triangle meshes (Ptex's triangle layout) aren't read. UV tiles past the first
   aren't baked.
 
+## Back to XGen: Interactive Groom
+
+**GroomLab > Export > XGen Interactive Groom** turns the selected groom into an XGen Interactive
+Groom description on its scalp, one spline for each strand at the current frame, where the strand
+is. From there you groom it with XGen's own tools (its Sculpt layer and modifiers).
+
+It's a one-off copy. Nothing links it back to the groom, so to carry later GroomLab changes over,
+convert again. The strands go to an Alembic file in the scene's exports folder
+(`<groom>_xgi.abc`), which the description's **Curve To Spline** modifier reads. Keep that file
+with the scene. In a script, `groomlab.convert_to_xgen_interactive(groom, density=1.0)` does the
+same and takes a `path` and a `density` (the share of the strands).
+
+XGen roots each spline on the scalp mesh as modeled, while GroomLab roots strands on its smoothed
+scalp, so roots can land a few thousandths of a unit apart. XGen also skips a strand rooted on a
+pole with more than 20 edges.
+
 ## Yeti
 
 GroomLab reads Yeti grooms from the scene data, without Yeti's plugin or license. Maya keeps the
