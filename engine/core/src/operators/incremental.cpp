@@ -131,6 +131,16 @@ bool rerunChanged(const StrandsPtr& in, bool local, const IncrementalInputs* inc
     return true;
 }
 
+bool paramsStrandLocal(const ParamSet& params, std::initializer_list<const char*> names, const ScalpMesh* scalp, const StrandSet& in) {
+    bool local = true;
+    for (const char* name : names) {
+        const ScalarField field(params, name, scalp);
+        field.validate(in);
+        local = local && field.strandLocal();
+    }
+    return local;
+}
+
 bool reshapeEach(const StrandsPtr& in, bool identity, bool local, const IncrementalInputs* incremental, bool otherInputsSame,
                  Value* result, StrandChanges* changed, const EngineStage& engine) {
     if (identity || in->empty()) {

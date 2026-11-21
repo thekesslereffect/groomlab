@@ -57,10 +57,10 @@ public:
             ParamSpec{"fraction", 0.01, "Fraction of strands that stray (mappable)", "fraction"}.soft(0, 1).formerDefault(2, 0.03),
             ParamSpec{"stray", 0.75, "How far strays wander from the flow at the tip, scene units (mappable)", "length"}
                 .soft(0, 3),
-            ParamSpec{"frequency", 1.5, "Arcs per strand length"}.soft(0, 5),
-            ParamSpec{"start", 0.25, "Where along the length strays leave the flow, 0 root to 1 tip"}.range(0, 0.99),
-            ParamSpec{"standOut", 0.5, "How much strays stand out along their root direction, 0-1", "fraction"}.range(0, 1),
-            ParamSpec{"lengthen", 0.15, "Extra length of strays, a fraction of their length (up to)"}.atLeast(0).soft(0, 1),
+            ParamSpec{"frequency", 1.5, "Arcs per strand length (mappable)"}.soft(0, 5),
+            ParamSpec{"start", 0.25, "Where along the length strays leave the flow, 0 root to 1 tip (mappable)"}.range(0, 0.99),
+            ParamSpec{"standOut", 0.5, "How much strays stand out along their root direction, 0-1 (mappable)", "fraction"}.range(0, 1),
+            ParamSpec{"lengthen", 0.15, "Extra length of strays, a fraction of their length (up to; mappable)"}.atLeast(0).soft(0, 1),
             notAnimatable({"seed", std::int64_t{0}, "Random seed"}).adv(),
         };
     }
@@ -95,7 +95,10 @@ private:
         if (incremental) {
             changes = someStrandsChanged(*incremental, 0);
             last = changes ? previousStrandsFor(*incremental, *in) : nullptr;
-            if (!last || !longest_.local(last, {&fractionField, &strayField})) return false;
+            if (!last || !longest_.local(last, {&fractionField, &strayField}) ||
+                !paramsStrandLocal(params(), {"frequency", "start", "standOut", "lengthen"}, scalp, *in)) {
+                return false;
+            }
             if (changes->none()) {  // the same strands in: the same result
                 *result = last;
                 *changed = *changes;
@@ -163,13 +166,14 @@ public:
     std::vector<ParamSpec> paramSpecs() const override {
         return {
             ParamSpec{"fraction", 0.5, "Fraction of strands that stick to a neighbor (mappable)", "fraction"}.soft(0, 1),
-            ParamSpec{"radius", 0.4, "How far apart the roots of stuck strands can be, scene units", "length"}
+            ParamSpec{"radius", 0.4, "How far apart the roots of stuck strands can be, scene units (mappable: each strand's own)", "length"}
                 .atLeast(1e-6)
                 .soft(0.01, 2),
             ParamSpec{"strength", 0.8, "How close stuck strands come, 0-1 (1: they meet) (mappable)", "fraction"}
                 .range(0, 1),
-            ParamSpec{"start", 0.3, "Where along the length spans can begin, 0 root to 1 tip"}.range(0, 1),
-            ParamSpec{"span", 0.4, "Length of the stuck span, a fraction of the strand", "fraction"}.range(0.01, 1),
+            ParamSpec{"start", 0.3, "Where along the length spans can begin, 0 root to 1 tip (mappable)"}.range(0, 1),
+            ParamSpec{"span", 0.4, "Length of the stuck span, a fraction of the strand (mappable; a pair stuck to each other: "
+                                   "the span of its lower ID's)", "fraction"}.range(0.01, 1),
             ParamSpec{"clumpChannel", std::string("clumpId"),
                       "Strands stick only to strands of their own clump (this channel, which a Clump writes), never "
                       "across the gap to the next clump; empty, or a channel the strands lack: across clumps"}
@@ -179,8 +183,8 @@ public:
                       "only to strands of their own region; empty, or a channel the strands lack: across regions"}
                 .adv()
                 .readsChannel(true),
-            ParamSpec{"reach", 0.25, "How far a strand is pulled to its partner at most, scene units: farther apart "
-                                     "there, they do not stick (0: no limit)", "length"}
+            ParamSpec{"reach", 0.25, "How far a strand is pulled to its partner at most, scene units (mappable): farther "
+                                     "apart there, they do not stick (0: no limit)", "length"}
                 .atLeast(0)
                 .soft(0, 1),
             notAnimatable({"seed", std::int64_t{0}, "Random seed"}).adv(),
@@ -195,7 +199,8 @@ public:
         const ScalarField strengthField(params(), "strength", scalp);
         fractionField.validate(*in);
         strengthField.validate(*in);
-        const float radius = static_cast<float>(params().getDouble("radius"));
+        const ScalarField radiusField(params(), "radius", scalp);
+        radiusField.validate(*in);
         const auto seed = static_cast<std::uint64_t>(params().getInt("seed"));
         const std::string clumpChannel = params().getString("clumpChannel");
         const std::vector<float>* clumps = clumpChannel.empty() ? nullptr : in->strandChannel(clumpChannel);
@@ -237,6 +242,7 @@ public:
         parallelFor(0, count, [&](std::size_t s) {
             const std::uint64_t h = hashCombine(in->ids()[s], seed ^ 0x7A61);
             if (in->strandPointCount(s) < 2 || unitFloat(h) >= fractionField.at(*in, s)) return;
+            const float radius = std::max(radiusField.at(*in, s), 1e-6f);  // (its range: a map's values too)
             std::array<std::size_t, kSearched> near{};
             std::array<float, kSearched> d2{};
             const std::size_t found = index.kNearest(roots[s], searched, near.data(), d2.data());
@@ -324,10 +330,10 @@ public:
     std::vector<ParamSpec> paramSpecs() const override {
         return {
             ParamSpec{"lift", 12.0, "Angle off the skin at the root, degrees (mappable)", "angle"}.soft(0, 90),
-            ParamSpec{"bend", 0.6, "How much the angle falls toward the tip, 0-1 (1: the tip lies on the skin)",
+            ParamSpec{"bend", 0.6, "How much the angle falls toward the tip, 0-1 (mappable; 1: the tip lies on the skin)",
                       "fraction"}.range(0, 1),
             ParamSpec{"rollRandom", 6.0, "Up to this many degrees of random turn of each strand around the scalp's "
-                                         "normal, off the flow", "angle"}
+                                         "normal, off the flow (mappable)", "angle"}
                 .atLeast(0)
                 .soft(0, 45),
             notAnimatable({"seed", std::int64_t{0}, "Random seed"}).adv(),
@@ -361,7 +367,7 @@ private:
         if (incremental) {
             changes = someStrandsChanged(*incremental, 0);
             last = changes ? previousStrandsFor(*incremental, *in) : nullptr;
-            if (!last || !liftField.strandLocal()) return false;
+            if (!last || !liftField.strandLocal() || !paramsStrandLocal(params(), {"bend", "rollRandom"}, scalp, *in)) return false;
             if (changes->none()) {  // the same strands in: the same result
                 *result = last;
                 *changed = *changes;

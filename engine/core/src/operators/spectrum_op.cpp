@@ -73,17 +73,17 @@ public:
                 .range(0, 1),
             {"profile", Ramp::constant(1.0f), "The strength along the length, root to tip"},
             ParamSpec{"lowGain", 1.0, "The low band: the overall sweep and broad waves, swings longer than lowWavelength "
-                                      "(0 straightens the strand toward its end, 1 keeps them, more deepens them)", ""}
+                                      "(0 straightens the strand toward its end, 1 keeps them, more deepens them; mappable)", ""}
                 .range(0, 4)
                 .soft(0, 2)
                 .in("Bands"),
             ParamSpec{"midGain", 1.0, "The middle band: curls and waves, swings between highWavelength and lowWavelength "
-                                      "(0 relaxes them out, 1 keeps them, more tightens them)", ""}
+                                      "(0 relaxes them out, 1 keeps them, more tightens them; mappable)", ""}
                 .range(0, 4)
                 .soft(0, 2)
                 .in("Bands"),
             ParamSpec{"highGain", 0.0, "The high band: frizz and kinks, swings shorter than highWavelength (0 removes them, "
-                                       "1 keeps them, more roughens)", ""}
+                                       "1 keeps them, more roughens; mappable)", ""}
                 .range(0, 4)
                 .soft(0, 2)
                 .in("Bands"),
@@ -106,13 +106,18 @@ public:
         const ScalarField strength(params(), "strength", scalp);
         strength.validate(*in);
         const Ramp profile = params().getRamp("profile");
+        // The gains, read at each strand (mappable); a strand keeping every band is left as it comes.
+        const ScalarField lowGainField(params(), "lowGain", scalp), midGainField(params(), "midGain", scalp);
+        const ScalarField highGainField(params(), "highGain", scalp);
+        for (const ScalarField* f : {&lowGainField, &midGainField, &highGainField}) f->validate(*in);
+        const bool mapped = !lowGainField.isConstant() || !midGainField.isConstant() || !highGainField.isConstant();
         const auto lowGain = static_cast<float>(params().getDouble("lowGain"));
         const auto midGain = static_cast<float>(params().getDouble("midGain"));
         const auto highGain = static_cast<float>(params().getDouble("highGain"));
         // (Lengths: the session scales them with a groom scaled with its scalp.)
         const auto lowWave = static_cast<float>(params().getDouble("lowWavelength"));
         const float highWave = std::min(static_cast<float>(params().getDouble("highWavelength")), lowWave);  // (crossed: no middle)
-        if (lowGain == 1.0f && midGain == 1.0f && highGain == 1.0f) return in;  // every band kept: the strands as they come
+        if (!mapped && lowGain == 1.0f && midGain == 1.0f && highGain == 1.0f) return in;  // every band kept: the strands as they come
 
         auto out = std::make_shared<StrandSet>(*in);
         out->mutablePositions();
@@ -124,6 +129,10 @@ public:
             if (n < 3) return;
             const float amount = std::clamp(strength.at(*in, s), 0.0f, 1.0f);
             if (!(amount > 0.0f)) return;
+            const float lowGain = std::clamp(lowGainField.at(*in, s), 0.0f, 4.0f);
+            const float midGain = std::clamp(midGainField.at(*in, s), 0.0f, 4.0f);
+            const float highGain = std::clamp(highGainField.at(*in, s), 0.0f, 4.0f);
+            if (lowGain == 1.0f && midGain == 1.0f && highGain == 1.0f) return;  // every band kept: as it comes
             Vec3f* p = out->strandPoints(s);
             // Each segment's length and way, and the strand's overall way (its chord, root to tip).
             const std::size_t segs = n - 1;

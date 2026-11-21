@@ -168,8 +168,8 @@ public:
                                    "Transform's scale)", "fraction"}
                 .range(0, 1),
             ParamSpec{"fraction", 1.0, "Share of the strands trimmed at random, 0-1 (mappable)", "fraction"}.soft(0, 1),
-            ParamSpec{"randomness", 0.0, "The most share of its kept length a strand trimmed at random loses, 0-1: each "
-                                         "loses up to this (0: no random trim)", "fraction"}
+            ParamSpec{"randomness", 0.0, "The most share of its kept length a strand trimmed at random loses, 0-1 (mappable): "
+                                         "each loses up to this (0: no random trim)", "fraction"}
                 .range(0, 1),
             notAnimatable({"seed", std::int64_t{0}, "Random seed"}).adv(),
         };
@@ -197,7 +197,9 @@ private:
         fractionField.validate(*in);
         // look.slang's LengthCS, the GPU preview's own (look_cpu.h): in full, or the strands the input
         // changed in, into the last result's copy.
-        return rerunChanged(in, lengthField.strandLocal() && fractionField.strandLocal(), incremental, result, changed,
+        const bool local = lengthField.strandLocal() && fractionField.strandLocal() &&
+                           paramsStrandLocal(params(), {"randomness"}, scalpOf(ctx), *in);
+        return rerunChanged(in, local, incremental, result, changed,
                             EngineStage{gpu::StageKind::Length, params(), scalpOf(ctx)});
     }
 };
@@ -219,7 +221,7 @@ public:
                       "width"}
                 .soft(0, 0.05),
             {"profile", Ramp::linear(1.0f, 0.3f), "Width along the length, root to tip, times width"},
-            ParamSpec{"randomness", 0.0, "Per-strand variation of the width, 0-1: up to that share thinner or thicker",
+            ParamSpec{"randomness", 0.0, "Per-strand variation of the width, 0-1 (mappable): up to that share thinner or thicker",
                       "fraction"}
                 .range(0, 1),
             notAnimatable({"seed", std::int64_t{0}, "Random seed"}).adv(),
@@ -251,7 +253,7 @@ private:
             // (Some strands recounted before it: the last result's widths laid out as the input is now.)
             changes = someStrandsChangedOrRecounted(*incremental, 0);
             last = changes ? previousStrandsFor(*incremental, *in, *changes) : nullptr;
-            if (!last || !widthField.strandLocal()) return false;
+            if (!last || !widthField.strandLocal() || !paramsStrandLocal(params(), {"randomness"}, scalpOf(ctx), *in)) return false;
             if (changes->none()) {  // the same strands in: the same result
                 *result = last;
                 *changed = *changes;

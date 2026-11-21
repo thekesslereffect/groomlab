@@ -88,6 +88,16 @@ struct Barb {
     float tipAlong = 0.0f, tipAcross = 0.0f;  // its tip in the feather laid flat, from its root (scene units)
 };
 
+// A shaft's own numbers: Propagate's params read at the shaft (mappable, per shaft), angles in
+// radians, end never before start, the down zone's end within end.
+struct ShaftNumbers {
+    float start = 0.0f, end = 1.0f, asymmetry = 0.0f, curl = 0.0f, lift = 0.0f, droop = 0.0f;
+    float splits = 0.0f, splitAmount = 0.0f, lengthRandom = 0.0f, angleRandom = 0.0f;
+    float downTo = 0.0f, downLength = 1.0f, downCurl = 0.0f, downFrizz = 0.0f, width = 0.0f, shaftWidth = 0.0f;
+    bool hasDown() const { return downTo > start; }
+    bool rachis() const { return shaftWidth > 0.0f && std::isfinite(shaftWidth); }
+};
+
 // A shaft's barbs, in output order: vane by vane (each the down zone's barbs, then the vane's),
 // root to tip.
 struct ShaftPlan {
@@ -207,8 +217,11 @@ public:
                                  kClumpChannel, kVaneUChannel, kVaneTipUChannel, kVaneTipVChannel}) {
             out.push_back({name, ""});
         }
-        if (params().getDouble("down") > params().getDouble("start")) out.push_back({kIsDownChannel, ""});
-        if (params().getDouble("shaftWidth") > 0.0 && params().getBool("keepShaft")) out.push_back({kRachisChannel, ""});
+        const bool downMapped = paramMapped(params(), "down") || paramMapped(params(), "start");
+        if (downMapped || params().getDouble("down") > params().getDouble("start")) out.push_back({kIsDownChannel, ""});
+        if ((paramMapped(params(), "shaftWidth") || params().getDouble("shaftWidth") > 0.0) && params().getBool("keepShaft")) {
+            out.push_back({kRachisChannel, ""});
+        }
         for (const char* name : kVaneNormalChannels) out.push_back({name, ""});
         if (params().getInt("groupId") > 0) out.push_back({kGroupChannel, ""});
         return out;
@@ -228,74 +241,85 @@ public:
                                                       "spiralling round the shaft)"})
                 .range(0, 100000)
                 .soft(0, 200),
-            ParamSpec{"start", 0.15, "Where barbs begin along the shaft, 0 root .. 1 tip"}.range(0, 1),
-            ParamSpec{"end", 1.0, "Where barbs end along the shaft, 0 root .. 1 tip"}.range(0, 1),
+            ParamSpec{"start", 0.15, "Where barbs begin along the shaft, 0 root .. 1 tip (mappable, per shaft)"}.range(0, 1),
+            ParamSpec{"end", 1.0, "Where barbs end along the shaft, 0 root .. 1 tip (mappable, per shaft)"}.range(0, 1),
             notAnimatable({"segments", std::int64_t{6}, "Segments per barb"}).range(1, 256).soft(1, 20),
             ParamSpec{"length", 0.3, "Barb length at the widest point of the vane (mappable, per shaft)", "length"}
                 .atLeast(0)
                 .soft(0, 1),
             {"lengthProfile", Ramp{{0.0f, 0.45f}, {0.45f, 1.0f}, {1.0f, 0.15f}},
              "Barb length along the shaft, root to tip: the vane's outline"},
-            ParamSpec{"asymmetry", 0.0, "Left vane shorter, right longer (-1..1): flight feathers"}.range(-1, 1)
+            ParamSpec{"asymmetry", 0.0, "Left vane shorter, right longer (-1..1): flight feathers (mappable, per shaft)"}
+                .range(-1, 1)
                 .when("sides", {"both", "left", "right"}),
             ParamSpec{"angle", 50.0, "Degrees from the shaft toward the barb's side (mappable, per shaft); 90: straight "
                                      "out", "angle"}
                 .soft(0, 90),
             {"angleProfile", Ramp::constant(1.0f), "Angle along the shaft, root to tip (times angle)"},
-            ParamSpec{"curl", 20.0, "Degrees each barb bends within the vane over its length (positive: toward the tip)",
+            ParamSpec{"curl", 20.0,
+                      "Degrees each barb bends within the vane over its length (positive: toward the tip; mappable, per "
+                      "shaft)",
                       "angle"}
                 .soft(-90, 90)
                 .in("Shape"),
             ParamSpec{"curlProfile", Ramp::constant(1.0f), "Curl along the shaft, root to tip (times curl)"}.in("Shape").adv(),
-            ParamSpec{"lift", 0.0, "Degrees the barbs rise out of the vane at the shaft (toward the scalp normal)", "angle"}
+            ParamSpec{"lift", 0.0, "Degrees the barbs rise out of the vane at the shaft (toward the scalp normal; mappable, "
+                                   "per shaft)", "angle"}
                 .soft(-90, 90)
                 .in("Shape")
                 .when("sides", {"both", "left", "right"}),
             ParamSpec{"droop", 10.0, "Degrees the barbs bend down out of the vane over their length (a cupped vane; "
-                                     "around: back toward the root)", "angle"}
+                                     "around: back toward the root; mappable, per shaft)", "angle"}
                 .soft(-90, 90)
                 .in("Shape"),
             ParamSpec{"splits", 0.0, "Groups per vane: neighbouring barbs gather into about this many groups, as in a "
-                                     "ruffled feather (0 or 1: none); written to clumpId"}
+                                     "ruffled feather (0 or 1: none); written to clumpId (mappable, per shaft)"}
                 .atLeast(0)
                 .soft(0, 10)
                 .in("Splits"),
-            ParamSpec{"splitAmount", 0.6, "How far the barbs of a split gather toward its middle barb at their tips, 0-1",
+            ParamSpec{"splitAmount", 0.6,
+                      "How far the barbs of a split gather toward its middle barb at their tips, 0-1 (mappable, per shaft)",
                       "fraction"}
                 .range(0, 1)
                 .in("Splits"),
-            ParamSpec{"lengthRandom", 0.1, "Each barb's length up to this share more or less, at random", "fraction"}
+            ParamSpec{"lengthRandom", 0.1, "Each barb's length up to this share more or less, at random (mappable, per shaft)",
+                      "fraction"}
                 .range(0, 1)
                 .in("Random"),
-            ParamSpec{"angleRandom", 3.0, "Up to this many degrees more or less angle per barb, at random", "angle"}
+            ParamSpec{"angleRandom", 3.0, "Up to this many degrees more or less angle per barb, at random (mappable, per shaft)",
+                      "angle"}
                 .soft(0, 20)
                 .in("Random"),
             ParamSpec{"down", 0.0, "The down zone (afterfeather): from start up to this far along the shaft (0 root .. 1 "
                                    "tip) the barbs are soft and curly, the vane's begin past it (0: none); isDown 1 on "
-                                   "them, for FeatherColor's downColor"}
+                                   "them, for FeatherColor's downColor (mappable, per shaft)"}
                 .range(0, 1)
                 .in("Down"),
             notAnimatable({"downCount", std::int64_t{20}, "Down barbs per side in the down zone (around: twice this)"})
                 .range(0, 100000)
                 .soft(0, 100)
                 .in("Down"),
-            ParamSpec{"downLength", 1.0, "Down barbs' length, times the vane's there"}.atLeast(0).soft(0, 2).in("Down"),
-            ParamSpec{"downCurl", 140.0, "Degrees each down barb curls over its length", "angle"}
+            ParamSpec{"downLength", 1.0, "Down barbs' length, times the vane's there (mappable, per shaft)"}
+                .atLeast(0)
+                .soft(0, 2)
+                .in("Down"),
+            ParamSpec{"downCurl", 140.0, "Degrees each down barb curls over its length (mappable, per shaft)", "angle"}
                 .soft(-360, 360)
                 .in("Down"),
-            ParamSpec{"downFrizz", 25.0, "Degrees of random kink at every segment of a down barb, in and out of the vane",
+            ParamSpec{"downFrizz", 25.0,
+                      "Degrees of random kink at every segment of a down barb, in and out of the vane (mappable, per shaft)",
                       "angle"}
                 .atLeast(0)
                 .soft(0, 90)
                 .in("Down"),
             notAnimatable({"downSegments", std::int64_t{12}, "Segments per down barb"}).range(1, 256).soft(1, 32).in("Down"),
-            ParamSpec{"width", 0.0, "Barb width (0: the shaft's width where the barb grows)", "width"}
+            ParamSpec{"width", 0.0, "Barb width (0: the shaft's width where the barb grows; mappable, per shaft)", "width"}
                 .atLeast(0)
                 .soft(0, 0.05),
             notAnimatable({"keepShaft", true, "Keep the shafts in the output (isShaft 1)"}).in("Rachis"),
             ParamSpec{"shaftWidth", 0.0, "The rachis's width at the root (0: none): the shafts become tubes of this "
                                          "width, a mesh to skin into the character (groomLabShape's outRachis) for "
-                                         "engines", "width"}
+                                         "engines (mappable, per shaft)", "width"}
                 .atLeast(0)
                 .soft(0, 0.2)
                 .in("Rachis"),
@@ -343,53 +367,84 @@ public:
         else if (sides == "around") vanes = {0};
         else throw GraphError("Propagate: sides must be both, left, right or around");
         const auto count = static_cast<int>(params().getInt("count"));
-        const float start = static_cast<float>(params().getDouble("start"));
-        const float end = std::max(start, static_cast<float>(params().getDouble("end")));  // not before start
         const auto segments = static_cast<std::size_t>(params().getInt("segments"));
         const Ramp lengthProfile = params().getRamp("lengthProfile");
-        const float asymmetry = static_cast<float>(params().getDouble("asymmetry"));
         const Ramp angleProfile = params().getRamp("angleProfile");
-        const float curl = static_cast<float>(params().getDouble("curl")) * kDegrees;
         const Ramp curlProfile = params().getRamp("curlProfile");
-        const float lift = static_cast<float>(params().getDouble("lift")) * kDegrees;
-        const float droop = static_cast<float>(params().getDouble("droop")) * kDegrees;
-        const float splits = static_cast<float>(params().getDouble("splits"));
-        const float splitAmount = static_cast<float>(params().getDouble("splitAmount"));
-        const float lengthRandom = static_cast<float>(params().getDouble("lengthRandom"));
-        const float angleRandom = static_cast<float>(params().getDouble("angleRandom")) * kDegrees;
-        const float width = static_cast<float>(params().getDouble("width"));
         const bool keepShaft = params().getBool("keepShaft");
-        const float shaftWidth = static_cast<float>(params().getDouble("shaftWidth"));
         const Ramp shaftWidthProfile = params().getRamp("shaftWidthProfile");
         const int shaftSides = static_cast<int>(params().getInt("shaftSides"));
         const int shaftSegments = static_cast<int>(std::clamp<std::int64_t>(params().getInt("shaftSegments"), 0, 256));
-        const bool rachis = shaftWidth > 0.0f && std::isfinite(shaftWidth);
-        const auto rachisRadius = [&](float u) {
-            return std::max(0.5f * shaftWidth * shaftWidthProfile(u), kMinRachisRadius * 0.5f * shaftWidth);
-        };
-        const bool rootOnShaft = rachis && params().getBool("rootOnShaft");
         const auto groupId = static_cast<int>(params().getInt("groupId"));
         const auto seed = static_cast<std::uint64_t>(params().getInt("seed"));
         const bool around = vanes.size() == 1 && vanes[0] == 0;
         const int perVane = around ? 2 * count : count;
         const std::size_t barbPoints = segments + 1;
-        // The down zone: from start to `down` along the shaft; the vane's barbs begin past it.
-        const float downTo = std::min(static_cast<float>(params().getDouble("down")), end);
-        const bool hasDown = downTo > start;
-        const float vaneFrom = hasDown ? downTo : start;
         const auto downCount = static_cast<int>(params().getInt("downCount"));
-        const int perDown = hasDown ? (around ? 2 * downCount : downCount) : 0;
-        const float downLength = static_cast<float>(params().getDouble("downLength"));
-        const float downCurl = static_cast<float>(params().getDouble("downCurl")) * kDegrees;
-        const float downFrizz = static_cast<float>(params().getDouble("downFrizz")) * kDegrees;
         const auto downSegments = static_cast<std::size_t>(params().getInt("downSegments"));
+
+        // Each shaft's numbers, read at it (mappable, per shaft; a number: the same for every shaft).
+        const char* const perShaft[] = {"start", "end", "asymmetry", "curl", "lift", "droop", "splits", "splitAmount",
+                                        "lengthRandom", "angleRandom", "down", "downLength", "downCurl", "downFrizz",
+                                        "width", "shaftWidth"};
+        std::vector<std::unique_ptr<ScalarField>> shaftFields;
+        for (const char* name : perShaft) {
+            shaftFields.push_back(std::make_unique<ScalarField>(params(), name, scalp));
+            shaftFields.back()->validate(*in);
+        }
+        const std::size_t shaftCount = in->strandCount();
+        std::vector<ShaftNumbers> numbers(shaftCount);
+        parallelFor(0, shaftCount, [&](std::size_t s) {
+            auto at = [&](std::size_t k) {
+                const float v = shaftFields[k]->at(*in, s);
+                return std::isfinite(v) ? v : 0.0f;
+            };
+            ShaftNumbers& p = numbers[s];
+            p.start = std::clamp(at(0), 0.0f, 1.0f);
+            p.end = std::max(p.start, std::clamp(at(1), 0.0f, 1.0f));  // not before start
+            p.asymmetry = std::clamp(at(2), -1.0f, 1.0f);
+            p.curl = at(3) * kDegrees;
+            p.lift = at(4) * kDegrees;
+            p.droop = at(5) * kDegrees;
+            p.splits = std::max(at(6), 0.0f);
+            p.splitAmount = std::clamp(at(7), 0.0f, 1.0f);
+            p.lengthRandom = std::clamp(at(8), 0.0f, 1.0f);
+            p.angleRandom = at(9) * kDegrees;
+            // The down zone: from start to `down` along the shaft; the vane's barbs begin past it.
+            p.downTo = std::min(std::clamp(at(10), 0.0f, 1.0f), p.end);
+            p.downLength = std::max(at(11), 0.0f);
+            p.downCurl = at(12) * kDegrees;
+            p.downFrizz = std::max(at(13), 0.0f) * kDegrees;
+            p.width = std::max(at(14), 0.0f);
+            p.shaftWidth = std::max(at(15), 0.0f);
+        }, 64);
+        // What any shaft has: a down zone (its channel), a rachis (its channel and the layer).
+        // (The params' numbers' own, as with none mapped, then any shaft's.)
+        const auto startNumber = static_cast<float>(params().getDouble("start"));
+        const float endNumber = std::max(startNumber, static_cast<float>(params().getDouble("end")));
+        bool hasDown = std::min(static_cast<float>(params().getDouble("down")), endNumber) > startNumber;
+        const auto shaftWidthNumber = static_cast<float>(params().getDouble("shaftWidth"));
+        bool rachis = shaftWidthNumber > 0.0f && std::isfinite(shaftWidthNumber);
+        for (const ShaftNumbers& p : numbers) {
+            hasDown = hasDown || p.hasDown();
+            rachis = rachis || p.rachis();
+        }
+        const bool rootOnShaftSet = params().getBool("rootOnShaft");
 
         // Pass 1: every shaft's barbs (where, how long, which split, where they lie in the feather
         // laid flat), independent of the others.
-        const std::size_t shaftCount = in->strandCount();
         std::vector<ShaftPlan> plans(shaftCount);
         parallelFor(0, shaftCount, [&](std::size_t s) {
             const std::size_t n = in->strandPointCount(s);
+            const ShaftNumbers& numbersHere = numbers[s];
+            const float start = numbersHere.start, end = numbersHere.end, asymmetry = numbersHere.asymmetry;
+            const float curl = numbersHere.curl, lift = numbersHere.lift, droop = numbersHere.droop;
+            const float splits = numbersHere.splits, lengthRandom = numbersHere.lengthRandom;
+            const float angleRandom = numbersHere.angleRandom, downTo = numbersHere.downTo, downLength = numbersHere.downLength;
+            const float downCurl = numbersHere.downCurl, downFrizz = numbersHere.downFrizz;
+            const bool shaftDown = numbersHere.hasDown();
+            const float vaneFrom = shaftDown ? downTo : start;
+            const int perDown = shaftDown ? (around ? 2 * downCount : downCount) : 0;
             if (n < 2 || perVane + perDown == 0) return;
             const float shaftLength = arcLength(in->strandPoints(s), n);
             if (!(shaftLength > 0.0f) || !std::isfinite(shaftLength)) return;
@@ -601,6 +656,14 @@ public:
         std::vector<std::vector<RachisRing>> shaftRings(shaftCount);
         parallelFor(0, shaftCount, [&](std::size_t s) {
             const std::size_t n = in->strandPointCount(s);
+            const ShaftNumbers& numbersHere = numbers[s];
+            const float lift = numbersHere.lift, droop = numbersHere.droop, downFrizz = numbersHere.downFrizz;
+            const float splitAmount = numbersHere.splitAmount, width = numbersHere.width, shaftWidth = numbersHere.shaftWidth;
+            const bool shaftRachis = numbersHere.rachis();
+            const auto rachisRadius = [&](float u) {
+                return std::max(0.5f * shaftWidth * shaftWidthProfile(u), kMinRachisRadius * 0.5f * shaftWidth);
+            };
+            const bool rootOnShaft = shaftRachis && rootOnShaftSet;
             const Vec3f* pts = in->strandPoints(s);
             const std::size_t begin = in->strandBegin(s);
             std::size_t o = firstStrand[s];
@@ -633,15 +696,15 @@ public:
             const ShaftPlan& plan = plans[s];
             const float shaftLength = n >= 2 ? arcLength(pts, n) : 0.0f;
             if (!(shaftLength > 0.0f) || !std::isfinite(shaftLength)) return;
-            if (plan.barbs.empty() && !rachis) return;
+            if (plan.barbs.empty() && !shaftRachis) return;
             const ShaftWalker walker(pts, n, rootUp(scalp, in->roots()[s], pts, n));
             if (keepShaft) setVaneNormal(firstStrand[s], walker.frame(0).normal);
             // The rachis: a ring at every shaft point, in the frames the barbs grow in; with
             // shaftSegments, that many segments evenly along the smooth curve through the shaft's
             // points instead (its frames rotation-minimizing from the shaft's first).
             std::vector<RachisRing>& rings = shaftRings[s];
-            const bool resampled = rachis && shaftSegments > 0;
-            if (rachis) {
+            const bool resampled = shaftRachis && shaftSegments > 0;
+            if (shaftRachis) {
                 if (resampled) {
                     const std::size_t m = static_cast<std::size_t>(shaftSegments) + 1;
                     const std::vector<Vec3f> smooth = resampleSmoothCurve(pts, n, m);
@@ -844,10 +907,12 @@ public:
         return {
             {"mode", std::string("random"), "random: each strand's output picked by its ID; map: by select", "",
              {"random", "map"}},
-            notAnimatable({"weightA", 1.0, "Share of the strands sent to a"}).atLeast(0).soft(0, 1),
-            notAnimatable({"weightB", 1.0, "Share of the strands sent to b"}).atLeast(0).soft(0, 1),
-            notAnimatable({"weightC", 0.0, "Share of the strands sent to c"}).atLeast(0).soft(0, 1),
-            notAnimatable({"weightD", 0.0, "Share of the strands sent to d"}).atLeast(0).soft(0, 1),
+            notAnimatable({"weightA", 1.0, "Share of the strands sent to a (mappable: each strand's shares where it is)"})
+                .atLeast(0)
+                .soft(0, 1),
+            notAnimatable({"weightB", 1.0, "Share of the strands sent to b (mappable)"}).atLeast(0).soft(0, 1),
+            notAnimatable({"weightC", 0.0, "Share of the strands sent to c (mappable)"}).atLeast(0).soft(0, 1),
+            notAnimatable({"weightD", 0.0, "Share of the strands sent to d (mappable)"}).atLeast(0).soft(0, 1),
             notAnimatable({"select", 1.0, "With mode map: a 0-1 value per strand, where it falls among the shares picks the "
                                           "output (mappable: a painted map, a channel)"})
                 .range(0, 1)
@@ -904,6 +969,9 @@ public:
         if (held != in->strandCount()) return false;
         const Picker picker = pickerFor(ctx, *in);
         if (picker.select && !picker.select->strandLocal()) return false;
+        for (const auto& w : picker.weights) {
+            if (w && !w->strandLocal()) return false;
+        }
         // Each changed strand's output before (its place there) and now.
         std::array<std::vector<std::size_t>, kOutputs> pick;
         std::array<std::vector<std::uint32_t>, kOutputs> at, joined, left;
@@ -993,15 +1061,33 @@ private:
         int last = -1;  // the last output with a share: values at the very top go there (none: all to a)
         std::unique_ptr<ScalarField> select;  // map mode only
         std::uint64_t seed = 0;
+        // Mapped weights (every weight's field, any of them a map): each strand's shares where it is.
+        std::array<std::unique_ptr<ScalarField>, kOutputs> weights;
 
         int pick(const StrandSet& in, std::size_t s) const {
-            if (last < 0) return 0;
+            float bound[kOutputs];
+            int lastHere = last;
+            if (weights[0]) {  // the strand's own shares, as pickerFor makes the node's
+                float total = 0.0f;
+                lastHere = -1;
+                for (std::size_t k = 0; k < kOutputs; ++k) {
+                    const float w = std::max(weights[k]->at(in, s), 0.0f);
+                    total += std::isfinite(w) ? w : 0.0f;
+                    bound[k] = total;
+                    if (w > 0.0f) lastHere = static_cast<int>(k);
+                }
+                if (lastHere < 0) return 0;
+                for (float& b : bound) b /= total;
+            } else {
+                if (last < 0) return 0;
+                std::copy(bounds, bounds + kOutputs, bound);
+            }
             const float v = select ? std::clamp(select->at(in, s), 0.0f, 1.0f)
                                    : unitFloat(hashCombine(in.ids()[s], seed ^ 0x5B11));
             for (std::size_t i = 0; i < kOutputs; ++i) {
-                if (v < bounds[i] && bounds[i] > (i > 0 ? bounds[i - 1] : 0.0f)) return static_cast<int>(i);
+                if (v < bound[i] && bound[i] > (i > 0 ? bound[i - 1] : 0.0f)) return static_cast<int>(i);
             }
-            return last;
+            return lastHere;
         }
     };
     Picker pickerFor(const EvalContext& ctx, const StrandSet& in) const {
@@ -1010,15 +1096,24 @@ private:
         const char* names[kOutputs] = {"weightA", "weightB", "weightC", "weightD"};
         const double defaults[kOutputs] = {1.0, 1.0, 0.0, 0.0};
         Picker picker;
-        float total = 0.0f;
-        for (std::size_t k = 0; k < kOutputs; ++k) {
-            const float w = static_cast<float>(params().getDouble(names[k], defaults[k]));
-            total += std::isfinite(w) ? w : 0.0f;
-            picker.bounds[k] = total;
-            if (w > 0.0f) picker.last = static_cast<int>(k);
+        bool mapped = false;
+        for (const char* name : names) mapped = mapped || paramMapped(params(), name);
+        if (mapped) {
+            for (std::size_t k = 0; k < kOutputs; ++k) {
+                picker.weights[k] = std::make_unique<ScalarField>(params(), names[k], scalpOf(ctx));
+                picker.weights[k]->validate(in);
+            }
+        } else {
+            float total = 0.0f;
+            for (std::size_t k = 0; k < kOutputs; ++k) {
+                const float w = static_cast<float>(params().getDouble(names[k], defaults[k]));
+                total += std::isfinite(w) ? w : 0.0f;
+                picker.bounds[k] = total;
+                if (w > 0.0f) picker.last = static_cast<int>(k);
+            }
+            if (picker.last < 0) return picker;  // no shares: everything to a
+            for (float& b : picker.bounds) b /= total;
         }
-        if (picker.last < 0) return picker;  // no shares: everything to a
-        for (float& b : picker.bounds) b /= total;
         if (mode == "map") {  // a map is loaded (and checked) only then
             picker.select = std::make_unique<ScalarField>(params(), "select", scalpOf(ctx));
             picker.select->validate(in);

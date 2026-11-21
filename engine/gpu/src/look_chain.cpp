@@ -153,7 +153,7 @@ const GpuNode* gpuNode(const std::string& type) {
             n.vectors = words(vectors);
             n.numbers = words(numbers);
         };
-#define GROOMLAB_STAGE(Kind, name, mapped0, mapped1, ramps, vectors, numbers) row(#Kind, true, StageKind::Kind, ramps, vectors, numbers);
+#define GROOMLAB_STAGE(Kind, name, mapped, ramps, vectors, numbers) row(#Kind, true, StageKind::Kind, ramps, vectors, numbers);
 #define GROOMLAB_STAGE_NODE(Type, Kind, ramps, vectors, numbers) row(#Type, true, StageKind::Kind, ramps, vectors, numbers);
 #define GROOMLAB_GPU_PARAMS(Type, ramps, vectors, numbers) row(#Type, false, StageKind::Noise, ramps, vectors, numbers);
 #define GROOMLAB_PASS_THROUGH(Type) out[#Type].passThrough = true;
@@ -898,7 +898,8 @@ bool readLookParams(const GraphDocument& doc, const LookChain& chain, const Over
                     }
                     const ParamSet& level = wet->params[static_cast<std::size_t>(stage.level)];
                     auto get = [&](const char* name) { return level.getDouble(name); };
-                    if (ownMap(level, "strength") || ownMap(level, "volumize")) {
+                    // (A mapped wetness plugs each level's pull in as a field: WetOp's WetLevelPull.)
+                    if (ownMap(level, "strength") || ownMap(level, "volumize") || level.field("strength") || level.field("volumize")) {
                         *why = doc.nameOf(id) + "'s levels map their pull (the CPU's)";
                         return false;
                     }
@@ -1451,66 +1452,31 @@ bool readLookFields(const GraphDocument& doc, const LookChain& chain, const Scal
             return false;
         }
         if (stage.level >= 0) continue;  // a Wet's level: its pull a number of its own
-        switch (stage.kind) {
-            case StageKind::Interpolate: ok = read("followBends", false, &v[0]); break;  // (BendsCS)
-            case StageKind::Length: ok = read("keep", false, &v[0]) && read("fraction", false, &v[1]); break;
-            case StageKind::Clump: ok = read("strength", true, &v[0]) && read("volumize", false, &v[1]); break;
-            case StageKind::Noise: ok = read("amplitude", true, &v[0]) && read("fraction", false, &v[1]); break;
-            case StageKind::Curl:
-                if (graph.node(id).params().getString("shape") == "coil") {
-                    // A coil's radius by the strands' widths at each point (times coilWidths), as
-                    // the strands it takes carry them.
-                    if (!in || in->widths().size() != in->pointCount()) {
-                        *why = in ? doc.nameOf(id) + ": the strands carry no widths" : std::string("not evaluated");
-                        return false;
-                    }
-                    v[0].mode = FieldValues::kPerPoint;
-                    v[0].values = in->widths();
-                    v[0].fixed = true;
-                    v[0].widths = true;
-                } else {
-                    ok = read("radius", true, &v[0]);
-                }
-                break;
-            case StageKind::Width: ok = read("width", true, &v[0]); break;
-            case StageKind::Part: ok = read("strength", false, &v[0]); break;
-            case StageKind::Gravity: ok = read("strength", false, &v[0]); break;
-            case StageKind::Wind:
-            case StageKind::Jiggle:
-                // Feathers' shafts hold (feathers.h holdShafts), which the kernels do not do.
-                if (in && hasShafts(*in)) {
-                    *why = doc.nameOf(id) + " holds the feathers' shafts (the CPU's)";
-                    return false;
-                }
-                ok = read("strength", false, &v[0]);
-                break;
-            case StageKind::Blend: ok = read("mix", true, &v[0]); break;
-            case StageKind::Flyaway: ok = read("stray", false, &v[0]) && read("fraction", false, &v[1]); break;
-            case StageKind::Collide: break;
-            case StageKind::SelfCollide:
-            case StageKind::Static: ok = read("strength", false, &v[0]); break;
-            case StageKind::Bend: ok = read("angle", false, &v[0]); break;
-            case StageKind::Direction: {
-                // The first two of its mapped params (readLookParams refuses a third).
-                const std::vector<std::string> mapped = directionMapped(paramsOf());
-                for (std::size_t i = 0; i < mapped.size() && i < 2 && ok; ++i) ok = read(mapped[i].c_str(), false, &v[i]);
-                break;
+        // Its mapped params (look_stages.inc's, in order; per point where mappedPerPoint says).
+        // Wind and Jiggle hold feathers' shafts (feathers.h holdShafts), which the kernels do not do.
+        if ((stage.kind == StageKind::Wind || stage.kind == StageKind::Jiggle) && in && hasShafts(*in)) {
+            *why = doc.nameOf(id) + " holds the feathers' shafts (the CPU's)";
+            return false;
+        }
+        std::vector<std::string> names = stageMappedNames(stage.kind);
+        std::size_t first = 0;
+        if (stage.kind == StageKind::Direction) {
+            names = directionMapped(paramsOf());  // (its mapped params alone, in order)
+        } else if (stage.kind == StageKind::Curl && graph.node(id).params().getString("shape") == "coil") {
+            // A coil's radius by the strands' widths at each point (times coilWidths), as the
+            // strands it takes carry them.
+            if (!in || in->widths().size() != in->pointCount()) {
+                *why = in ? doc.nameOf(id) + ": the strands carry no widths" : std::string("not evaluated");
+                return false;
             }
-            case StageKind::Transform: ok = read("scale", false, &v[0]); break;
-            case StageKind::Displace: ok = read("distance", true, &v[0]); break;
-            case StageKind::Twist: ok = read("turns", false, &v[0]); break;
-            // The shapers reading their neighbours: their strength per strand (their affect, where a
-            // mask, the stage's own: StageFields::affect).
-            case StageKind::Smooth:
-            case StageKind::BlendNeighbors:
-            case StageKind::Tangle: ok = read("strength", false, &v[0]); break;
-            case StageKind::RestoreLength: break;
-            case StageKind::Flow: ok = read("lift", false, &v[0]); break;
-            case StageKind::MeshCut:
-            case StageKind::Merge:
-            case StageKind::Cull:
-            case StageKind::Split:
-            case StageKind::Mirror: break;
+            v[0].mode = FieldValues::kPerPoint;
+            v[0].values = in->widths();
+            v[0].fixed = true;
+            v[0].widths = true;
+            first = 1;
+        }
+        for (std::size_t i = first; i < names.size() && i < static_cast<std::size_t>(kMappedFields) && ok; ++i) {
+            ok = read(names[i].c_str(), mappedPerPoint(stage.kind, static_cast<int>(i)), &v[i]);
         }
         if (!ok) return false;
     }
@@ -1528,23 +1494,21 @@ bool lookFieldsHold(const GraphDocument& doc, const LookChain& chain, const Look
         *why = "the mapped params were read for another chain";
         return false;
     }
-    // Each stage's mapped params (look_stages.inc).
-    static const char* const kNames[kStageKinds][2] = {
-#define GROOMLAB_STAGE(Kind, name, mapped0, mapped1, ramps, vectors, numbers) {mapped0, mapped1},
-#include "groomlab/look/look_stages.inc"
-#undef GROOMLAB_STAGE
-    };
     bool interpolateBefore = false, widthBefore = false, channelsBefore = false;
     for (std::size_t k = 0; k < chain.stages.size(); ++k) {
         const LookStage& stage = chain.stages[k];
         // Its mapped params, then its affect (i 2: read on what it takes, mixing what it made after:
         // no point read after the ones before it moved).
         std::optional<std::vector<std::string>> directions;  // a Direction's mapped params (found once a stage)
-        for (int i = 0; i < 3; ++i) {
-            const FieldValues& v = i < 2 ? fields.stages[k].field[i] : fields.stages[k].affect;
+        for (int i = 0; i <= kMappedFields; ++i) {
+            const FieldValues& v = i < kMappedFields ? fields.stages[k].field[i] : fields.stages[k].affect;
             if (!v.mode) continue;
-            std::string param = i < 2 ? kNames[static_cast<int>(stage.kind)][i] : kAffectParam;
-            if (i < 2 && stage.kind == StageKind::Direction) {
+            std::string param = kAffectParam;
+            if (i < kMappedFields) {
+                const std::vector<std::string> names = stageMappedNames(stage.kind);
+                param = static_cast<std::size_t>(i) < names.size() ? names[static_cast<std::size_t>(i)] : "?";
+            }
+            if (i < kMappedFields && stage.kind == StageKind::Direction) {
                 if (!directions) directions = directionMapped(evaluatedParams(doc.graph, stage.node));
                 const std::vector<std::string>& mapped = *directions;
                 param = static_cast<std::size_t>(i) < mapped.size() ? mapped[static_cast<std::size_t>(i)] : "?";
@@ -2484,7 +2448,7 @@ bool LookInputs::read(const GraphDocument& doc, const LookChain& chain, const Lo
                 if (branch->chain.node(StageKind::Interpolate) && fields) {
                     for (std::size_t j = 0; j < fields->stages.size(); ++j) {
                         const StageFields& f = fields->stages[j];
-                        for (const FieldValues* v : {&f.field[0], &f.field[1], &f.affect}) {
+                        for (const FieldValues* v : allFields(f)) {
                             if (v->binding || (v->program && v->program->influence)) {
                                 *why = doc.nameOf(chain.stages[j].node) + " reads what Interpolate blends before " + name + " (the CPU's)";
                                 return false;
@@ -2501,7 +2465,7 @@ bool LookInputs::read(const GraphDocument& doc, const LookChain& chain, const Lo
     if (rebound && fields) {
         for (std::size_t k = 0; k < fields->stages.size() && k < chain.stages.size(); ++k) {
             const StageFields& f = fields->stages[k];
-            for (const FieldValues* v : {&f.field[0], &f.field[1], &f.affect}) {
+            for (const FieldValues* v : allFields(f)) {
                 if (v->binding) {
                     *why = doc.nameOf(chain.stages[k].node) + " reads what Interpolate blends from guides bound again (the CPU's)";
                     return false;
@@ -3112,7 +3076,7 @@ LookBounds lookBounds(const LookParams& p, const LookFields& fields, const std::
                 // lock's radius, varied per clump up to 1 + volumizeRandom of it, along it by
                 // volumizeProfile.)
                 const FieldValues& f1 = f ? f[1] : kNone;
-                const float lock = largest(s.value[1], f1) * (1.0f + std::abs(s.value2[1])) * (s.hasRamp2 ? peak(s.ramp2) : 1.0f);
+                const float lock = largest(s.value[1], f1) * (1.0f + largest(s.value2[1], f ? f[6] : kNone)) * (s.hasRamp2 ? peak(s.ramp2) : 1.0f);
                 const float r = (lock + (s.flag[1] != 0 && in ? in->reach : 0.0f)) * slack;
                 lo = {std::min(lo.x, clo.x - r), std::min(lo.y, clo.y - r), std::min(lo.z, clo.z - r)};
                 hi = {std::max(hi.x, chi.x + r), std::max(hi.y, chi.y + r), std::max(hi.z, chi.z + r)};
@@ -3124,7 +3088,7 @@ LookBounds lookBounds(const LookParams& p, const LookFields& fields, const std::
                 }
                 float repelRadius = 0.0f;
                 std::memcpy(&repelRadius, &s.flag[0], sizeof(float));
-                if (lowest < 0.0f) grow(repelRadius * slack);
+                if (lowest < 0.0f) grow(largest(repelRadius, f ? f[3] : kNone) * slack);
                 break;
             }
             case StageKind::Noise:
@@ -3138,10 +3102,11 @@ LookBounds lookBounds(const LookParams& p, const LookFields& fields, const std::
                         const StageParams& w = p.stages[j];
                         if (w.stage.kind != StageKind::Width) continue;
                         const FieldValues& wf = j < fields.stages.size() ? fields.stages[j].field[0] : kNone;
-                        radius = std::max(radius, std::abs(s.value[0]) * largest(w.value[0], wf) * (1.0f + std::abs(w.value[1])) * peak(w.ramp));
+                        const FieldValues& wr = j < fields.stages.size() ? fields.stages[j].field[1] : kNone;  // its randomness
+                        radius = std::max(radius, std::abs(s.value[0]) * largest(w.value[0], wf) * (1.0f + largest(w.value[1], wr)) * peak(w.ramp));
                     }
                 }
-                grow(radius * (1.0f + std::abs(s.value[2])) * peak(s.ramp) * slack);
+                grow(radius * (1.0f + largest(s.value[2], f ? f[2] : kNone)) * peak(s.ramp) * slack);  // (its randomness)
                 break;
             }
             case StageKind::Width: break;
@@ -3169,7 +3134,7 @@ LookBounds lookBounds(const LookParams& p, const LookFields& fields, const std::
             case StageKind::Transform: {
                 // Each strand scaled by k at most and turned (lengths times k) about its root, then
                 // moved; or the set about the pivot.
-                const float most = largest(s.value[0], f0) * (1.0f + std::max(s.value[1], 0.0f));
+                const float most = largest(s.value[0], f0) * (1.0f + largest(s.value[1], f ? f[1] : kNone));  // (scaleRandom)
                 const Vec3f translate(s.value2[0], s.value2[1], s.value2[2]), random(s.more[8], s.more[9], s.more[10]);
                 const float move = translate.length() + random.length();
                 if (s.flag[0] != 0) {
@@ -3236,7 +3201,8 @@ LookBounds lookBounds(const LookParams& p, const LookFields& fields, const std::
                 }
                 if (s.stage.kind == StageKind::Flyaway) {
                     const FieldValues& f1 = f ? f[0] : kNone;
-                    reach = reach * (1.0f + std::max(s.value2[1], 0.0f)) + largest(s.value[0], f1) * (1.7320508f * kNoiseReach + 1.0f);
+                    const FieldValues& lengthen = f ? f[5] : kNone;
+                    reach = reach * (1.0f + largest(s.value2[1], lengthen)) + largest(s.value[0], f1) * (1.7320508f * kNoiseReach + 1.0f);
                 }
                 // Flow lays a strand along the skin and lifts it off it: within its length of its
                 // root along the skin and as far off it, sqrt 2 of it at most (twice, rounded up).

@@ -127,19 +127,20 @@ groomlab.add_instances(groom, flake, probability=0.08, scale=0.03, orient="rando
   and **Selected** fills it with the meshes selected in the scene.
 - **Placement:** each strand gets up to `count` instances. Each is kept with `probability`, a
   number or any map, so you can paint where the snow falls. It sits between `tMin` and `tMax`
-  along the strand.
+  along the strand (both mappable, read at its strand).
 - **Where in the hair (`exposure`):** `external` (the default, shown as Instance externally)
   keeps instances near the hair's outer surface, where they are seen, so none render hidden
   inside the hair; `internal` keeps them inside, away from it; `both` anywhere. Its falloff
   (`exposureFalloff`, scene units) is how deep under the surface externally reaches and
-  internally starts, fading over it. Nodes saved before keep `both`.
+  internally starts, fading over it (mappable, read at the instance's strand). Nodes saved before
+  keep `both`.
 - **Facing an axis (`axisFacing`, off by default):** only on the side of the hair facing `axis`
   (X+, X-, Y+ the default, Y-, Z+, Z-): Y+ puts snow or dust on top of the hair. `axisFalloff` is
-  how deep under that side they go, measured along the axis. Both work from the whole hair's
+  how deep under that side they go, measured along the axis (mappable). Both work from the whole hair's
   volume, so a node using them evaluates in full on every edit.
 - **Look:** `orient` is `strand` (along it), `up`, `root` or `random`: what the prototype's
   **+Y** follows, so model a prototype with its long axis up +Y. `scale` is also mappable, and
-  `scaleRandom`, `spinRandom` and `offset` add variation. `spinRandom` turns each instance about
+  `scaleRandom`, `spinRandom` and `offset` (all mappable) add variation. `spinRandom` turns each instance about
   all three of its axes, except instances fitted round their strand (`fitWidth`) or bent along it
   (`deform`), which turn about their long axis only.
 - **Size along the strand:** with `scaleByWidth` (on by default) each instance's size is

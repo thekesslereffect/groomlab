@@ -39,9 +39,10 @@ public:
              "outside: the mesh is an obstacle, strands are cut where they first go into it; inside: the mesh is a hull "
              "(a haircut's shape), strands are cut where they first come out of it. A strand rooted on the side cut away "
              "is cut to nothing (with nothing on the mesh input the strands pass through)", "", {"outside", "inside"}},
-            ParamSpec{"offset", 0.0, "Cut this much shorter than the crossing, along the strand", "length"}.atLeast(0).soft(0, 1),
+            ParamSpec{"offset", 0.0, "Cut this much shorter than the crossing, along the strand (mappable)", "length"}.atLeast(0).soft(0, 1),
         };
     }
+    std::vector<std::string> externalInputs() const override { return {"scalp"}; }  // maps on offset
 
     Value evaluate(const EvalContext& ctx, const std::vector<Value>& inputs) const override {
         Value out;
@@ -72,7 +73,7 @@ private:
         if (incremental) {
             changes = someStrandsChanged(*incremental, 0);
             last = changes ? previousStrandsFor(*incremental, *in) : nullptr;
-            if (!last || !inputUnchanged(*incremental, 1)) return false;
+            if (!last || !inputUnchanged(*incremental, 1) || !paramsStrandLocal(params(), {"offset"}, scalpOf(ctx), *in)) return false;
             if (changes->none()) {  // the same strands in: the same result
                 *result = last;
                 *changed = *changes;
@@ -84,12 +85,12 @@ private:
         gpu::StageInputs tree;
         tree.meshCut = gpu::meshCutInputs(mesh);
         if (!last) {
-            *result = gpu::runStage(gpu::StageKind::MeshCut, params(), in, nullptr, std::move(tree));
+            *result = gpu::runStage(gpu::StageKind::MeshCut, params(), in, scalpOf(ctx), std::move(tree));
             return true;
         }
         auto out = std::make_shared<StrandSet>(*in);
         positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made
-        gpu::runStageOnStrands(gpu::StageKind::MeshCut, params(), in, changes->strands, nullptr, *out, std::move(tree));
+        gpu::runStageOnStrands(gpu::StageKind::MeshCut, params(), in, changes->strands, scalpOf(ctx), *out, std::move(tree));
         *changed = *changes;
         *result = StrandsPtr(out);
         return true;

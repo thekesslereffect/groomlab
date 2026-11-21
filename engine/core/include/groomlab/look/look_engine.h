@@ -335,8 +335,17 @@ private:
     std::vector<std::size_t> dataBlocks_;  // per stage: its block in kStrandData (0: none)
     std::vector<std::size_t> directionBlocks_;  // per stage: its strands' directions' block (StageInputs::directions; 0: none)
     std::uint64_t fieldSerial_ = 0;
-    // Per stage kFieldSlots fields (0 and 1, then its affect), each its mode and offset.
-    static constexpr std::size_t kFieldSlots = 3;
+    // Per stage kFieldSlots fields (its kMappedFields mapped params, then its affect), each its mode
+    // and offset; a dispatch takes one word a field (fieldWord: the mode in the top two bits).
+    static constexpr std::size_t kFieldSlots = kMappedFields + 1;
+    static constexpr std::size_t kFieldOffsetLimit = std::size_t{1} << 30;  // (the word's low 30 bits)
+    static constexpr std::size_t kDirectFields = 3;  // in the dispatch's constants; the rest in its table
+    // Field slot `at`'s word for a dispatch: its offset, its mode in the top two bits (look.slang
+    // fieldWord); 0, the number, for a slot not laid out.
+    std::uint32_t fieldWord(std::size_t at) const;
+    // Per stage, where its table of words for its mapped params after the third is in the fields'
+    // buffer, plus 1 (0: none): look.slang's gField.w.
+    std::vector<std::uint32_t> fieldTables_;
     std::vector<std::uint32_t> fieldLayout_;
     bool fieldsEmpty_ = false;                // kFields holds no values (none mapped)
     // The fields the GPU evaluates (FieldProgram), per stage and field: where kFieldPrograms holds

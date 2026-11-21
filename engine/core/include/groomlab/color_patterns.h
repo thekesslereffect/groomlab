@@ -90,6 +90,8 @@ public:
     // shaft's root on the scalp, else its place in Propagate's input): what per-feather jitter
     // draws from.
     std::uint64_t featherKey(std::size_t s) const;
+    // Whether strand s is a feather's shaft (one Propagate kept).
+    bool isShaft(std::size_t s) const { return shaft_ && (*shaft_)[s] > 0.5f; }
 
 private:
     const StrandSet& strands_;

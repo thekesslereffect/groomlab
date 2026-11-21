@@ -117,14 +117,14 @@ public:
             ParamSpec{"radius", 0.5, "Curl radius, scene units (mappable, per point); a coil's is coilWidths", "length"}
                 .soft(0, 2)
                 .when("shape", {"helix", "wave", "zigzag"}),
-            ParamSpec{"frequency", 0.4, "Turns per unit of length", "perLength"}.soft(0, 2),
+            ParamSpec{"frequency", 0.4, "Turns per unit of length (mappable; coherence clump: its first core strand's)", "perLength"}.soft(0, 2),
             {"frequencyProfile", Ramp::constant(1.0f),
              "Frequency along the length, root to tip, a share of frequency (the tightest): curls loosening or tightening "
              "toward the tip"},
-            ParamSpec{"randomness", 0.3, "Per-strand variation of radius and frequency, 0-1", "fraction"}.range(0, 1),
+            ParamSpec{"randomness", 0.3, "Per-strand variation of radius and frequency, 0-1 (mappable)", "fraction"}.range(0, 1),
             ParamSpec{"spacingRandom", 0.0,
-                      "Smooth random variation of the spacing along each strand (each clump's with coherence clump), 0-1: "
-                      "the frequency varies by up to this share every turn or two",
+                      "Smooth random variation of the spacing along each strand (each clump's with coherence clump), 0-1 "
+                      "(mappable): the frequency varies by up to this share every turn or two",
                       "fraction"}
                 .range(0, 1),
             {"profile", Ramp{{0.0f, 0.0f}, {0.25f, 1.0f}, {1.0f, 1.0f}},
@@ -136,9 +136,9 @@ public:
                                          "a Width node before it)"}
                 .soft(0, 10)
                 .when("shape", {"coil"}),
-            ParamSpec{"phase", 0.0, "Where along a turn every curl starts, in turns (0-1)", "turns"}.soft(0, 1)
+            ParamSpec{"phase", 0.0, "Where along a turn every curl starts, in turns (0-1; mappable)", "turns"}.soft(0, 1)
                 .adv(),
-            ParamSpec{"phaseRandom", 1.0, "How much of a turn each strand's (or clump's) start varies at random, 0-1",
+            ParamSpec{"phaseRandom", 1.0, "How much of a turn each strand's (or clump's) start varies at random, 0-1 (mappable)",
                       "fraction"}
                 .range(0, 1)
                 .adv(),
@@ -155,7 +155,7 @@ public:
                       "apart where more turns hang below them along weightDirection (loose at the root, tight at the tip; "
                       "long ringlets more than short curls, hair lying across it or pointing up barely), each turn keeping "
                       "its length, so the radius narrows (an overstretched curl goes straight). 0: none; 1: 10 turns hanging "
-                      "straight below a point double its spacing"}
+                      "straight below a point double its spacing (mappable)"}
                 .range(0, 10)
                 .soft(0, 2),
             ParamSpec{"weightDirection", Vec3f{0.0f, -1.0f, 0.0f},
@@ -225,11 +225,16 @@ private:
         std::size_t most = 1;
         int perTurn = 0;
         float turns = 0.0f;
+        // With frequency, randomness or spacingRandom mapped: the most each strand's own curl turns
+        // (by its values there; profileMost the frequencyProfile's most).
+        std::shared_ptr<const ScalarField> frequency, randomness, spacing;
+        float profileMost = 0.0f;
+        float turnsAt(const StrandSet& in, std::size_t s) const;
     };
-    PointsPlan pointsPlan() const;
-    // The points a strand of `n` points `p` is curled at: its own, or with the tolerance, each
-    // segment cut into as many as its longest needs at the most the curl turns (at most maxSegments).
-    static std::size_t pointsFor(const PointsPlan& plan, const Vec3f* p, std::size_t n);
+    PointsPlan pointsPlan(const ScalpMesh* scalp, const StrandSet& in) const;
+    // The points strand s of `in` is curled at: its own, or with the tolerance, each segment cut
+    // into as many as its longest needs at the most the curl turns (at most maxSegments).
+    static std::size_t pointsFor(const PointsPlan& plan, const StrandSet& in, std::size_t s);
 
     mutable std::atomic<bool> unitWidths_{false};
     mutable std::atomic<std::size_t> added_{0};  // strands the last evaluation added points to
@@ -313,7 +318,16 @@ StrandsPtr curlDensified(const StrandSet& in, const std::vector<std::size_t>& co
     return out;
 }
 
-CurlOp::PointsPlan CurlOp::pointsPlan() const {
+// The params Curl reads per strand besides its radius (look.slang curlNumbersAt).
+constexpr const char* kCurlMapped[] = {"frequency", "randomness", "phase", "phaseRandom", "spacingRandom", "weight"};
+
+float CurlOp::PointsPlan::turnsAt(const StrandSet& in, std::size_t s) const {
+    if (!frequency) return turns;
+    const float randomnessAt = std::clamp(randomness->at(in, s), 0.0f, 1.0f), spacingAt = std::clamp(spacing->at(in, s), 0.0f, 1.0f);
+    return std::fabs(frequency->at(in, s)) * (1.0f + 0.5f * randomnessAt) * profileMost * (1.0f + spacingAt);
+}
+
+CurlOp::PointsPlan CurlOp::pointsPlan(const ScalpMesh* scalp, const StrandSet& in) const {
     PointsPlan plan;
     const float tolerance = std::clamp(static_cast<float>(params().getDouble("tolerance")), 0.0f, 1.0f);
     plan.tolerance = tolerance;
@@ -334,14 +348,27 @@ CurlOp::PointsPlan CurlOp::pointsPlan() const {
                         (1.0f + spacing);
     plan.perTurn = perTurn;
     plan.turns = turns;
+    if (gpu::mappedParam(params(), "frequency") || gpu::mappedParam(params(), "randomness") || gpu::mappedParam(params(), "spacingRandom")) {
+        auto field = [&](const char* name) {
+            auto made = std::make_shared<const ScalarField>(params(), name, scalp);
+            made->validate(in);
+            return made;
+        };
+        plan.frequency = field("frequency");
+        plan.randomness = field("randomness");
+        plan.spacing = field("spacingRandom");
+        plan.profileMost = profileMost;
+    }
     return plan;
 }
 
-std::size_t CurlOp::pointsFor(const PointsPlan& plan, const Vec3f* p, std::size_t n) {
+std::size_t CurlOp::pointsFor(const PointsPlan& plan, const StrandSet& in, std::size_t s) {
+    const Vec3f* p = in.strandPoints(s);
+    const std::size_t n = in.strandPointCount(s);
     if (!(plan.tolerance > 0.0f) || n < 2 || plan.most <= n - 1) return n;
     float longest = 0.0f;
     for (std::size_t j = 1; j < n; ++j) longest = std::max(longest, (p[j] - p[j - 1]).length());
-    const float wanted = std::ceil(longest * plan.turns * static_cast<float>(plan.perTurn) - 1e-3f);
+    const float wanted = std::ceil(longest * plan.turnsAt(in, s) * static_cast<float>(plan.perTurn) - 1e-3f);
     if (!(wanted > 1.0f)) return n;
     const std::size_t q = std::min(static_cast<std::size_t>(std::min(wanted, 1e6f)), plan.most / (n - 1));
     return q <= 1 ? n : n + (n - 1) * (q - 1);
@@ -395,10 +422,10 @@ bool CurlOp::run(const EvalContext& ctx, const std::vector<Value>& inputs, const
         const std::vector<std::uint32_t>& again = byClump ? clumped : changes->strands;
         std::atomic<bool> other{false};
         std::vector<std::size_t> counts(again.size());
-        const PointsPlan plan = pointsPlan();
+        const PointsPlan plan = pointsPlan(scalpOf(ctx), *in);
         parallelFor(0, counts.size(), [&](std::size_t k) {
             const std::size_t s = again[k];
-            counts[k] = pointsFor(plan, in->strandPoints(s), in->strandPointCount(s));
+            counts[k] = pointsFor(plan, *in, s);
             if (counts[k] != last->strandPointCount(s)) other = true;  // (another layout: the last result's laid out anew)
         }, 256);
         const bool recount = other;
@@ -410,6 +437,9 @@ bool CurlOp::run(const EvalContext& ctx, const std::vector<Value>& inputs, const
         // over the last result's, while each strand's curl reads it alone (or its clump: alone,
         // its radius read alike on a set of some strands).
         if (!readsStrandAlone(ScalarField(params(), "radius", scalpOf(ctx)))) return false;
+        for (const char* name : kCurlMapped) {
+            if (!readsStrandAlone(ScalarField(params(), name, scalpOf(ctx)))) return false;
+        }
         if (again.empty()) {  // the same strands in: the same result
             *result = last;
             *changed = StrandChanges::listed({});
@@ -458,9 +488,9 @@ bool CurlOp::run(const EvalContext& ctx, const std::vector<Value>& inputs, const
     ProfilePhases phase("curl.countPoints");
     std::vector<std::size_t> counts(strands);
     std::atomic<std::size_t> added{0};
-    const PointsPlan plan = pointsPlan();
+    const PointsPlan plan = pointsPlan(scalpOf(ctx), *in);
     parallelFor(0, strands, [&](std::size_t s) {
-        counts[s] = pointsFor(plan, in->strandPoints(s), in->strandPointCount(s));
+        counts[s] = pointsFor(plan, *in, s);
         if (counts[s] != in->strandPointCount(s)) added.fetch_add(1, std::memory_order_relaxed);
     }, 256);
     if (added == 0) {
@@ -500,6 +530,9 @@ bool CurlOp::runOwn(const EvalContext& ctx, const std::vector<Value>& inputs, co
         if (!last || last->strandCount() != in->strandCount() || last->pointCount() < in->pointCount() || byClump ||
             !radiusField.strandLocal()) {
             return false;
+        }
+        for (const char* name : kCurlMapped) {
+            if (!paramsStrandLocal(params(), {name}, scalp, *in)) return false;
         }
         if (changes->none()) {  // the same strands in: the same result
             *result = last;

@@ -6,6 +6,8 @@
 #include <cstring>
 #include <exception>
 #include <map>
+#include <sstream>
+#include <stdexcept>
 #include <unordered_map>
 #include <variant>
 
@@ -45,7 +47,8 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
         case StageKind::Length: {
             if (!mappable("keep", &s->value[0]) || !mappable("fraction", &s->value[1])) return false;
             s->value[2] = 0.0f;  // (the least a trimmed strand loses)
-            s->value[3] = std::clamp(static_cast<float>(number("randomness")), 0.0f, 1.0f);
+            // (randomness, field 2: clamped to 0-1 by the kernel.)
+            if (!mappable("randomness", &s->value[3])) return false;
             return true;
         }
         case StageKind::Interpolate:
@@ -77,18 +80,28 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
             s->ramp = r.ramp("falloff");
             return true;
         case StageKind::Clump: {
-            // Its strength and volumize mapped; the rest numbers and choices (clumpShape).
+            // Its strength and volumize mapped, and (fields 2-6, read at each strand) its flatness,
+            // repelRadius, strengthRandom, strandStrengthRandom and volumizeRandom; the rest numbers
+            // and choices (clumpShape).
             if (!mappable("strength", &s->value[0]) || !mappable("volumize", &s->value[1])) return false;
             clumpShape(params, [&](const char* name) { return number(name); }, s);
+            float repelRadius = 0.0f;
+            if (!mappable("flatness", &s->value[2]) || !mappable("repelRadius", &repelRadius) || !mappable("strengthRandom", &s->value2[0]) ||
+                !mappable("volumizeRandom", &s->value2[1])) {
+                return false;
+            }
+            std::memcpy(&s->flag[0], &repelRadius, sizeof(float));  // the kernel reads its bits as a float
             // Per strand, on top: how far it follows its clump's pull (a Wet's levels: none).
-            s->value2[3] = params.has("strandStrengthRandom") ? static_cast<float>(params.getDouble("strandStrengthRandom")) : 0.0f;
+            s->value2[3] = 0.0f;
+            if (params.has("strandStrengthRandom") && !mappable("strandStrengthRandom", &s->value2[3])) return false;
             s->ramp = r.ramp("profile");
             s->ramp2 = r.ramp("volumizeProfile");
             return true;
         }
         case StageKind::Noise: {
-            if (!mappable("amplitude", &s->value[0]) || !mappable("fraction", &s->value[2])) return false;
-            s->value[1] = static_cast<float>(number("frequency"));
+            if (!mappable("amplitude", &s->value[0]) || !mappable("fraction", &s->value[2]) || !mappable("frequency", &s->value[1])) {
+                return false;
+            }
             s->flag[0] = static_cast<int>(std::floor(number("octaves")));
             s->flag[1] = params.getString("space") == "world" ? 1 : 0;
             s->flag[2] = params.getString("mode") == "kinky" ? 1 : 0;
@@ -97,14 +110,12 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
             return true;
         }
         case StageKind::Width: {
-            if (!mappable("width", &s->value[0])) return false;
-            s->value[1] = static_cast<float>(number("randomness"));
+            if (!mappable("width", &s->value[0]) || !mappable("randomness", &s->value[1])) return false;
             s->ramp = r.ramp("profile");
             return true;
         }
         case StageKind::Part: {
-            if (!mappable("strength", &s->value[0])) return false;
-            s->value[1] = static_cast<float>(number("width"));
+            if (!mappable("strength", &s->value[0]) || !mappable("width", &s->value[1])) return false;
             s->ramp = r.ramp("profile");
             s->tabled = true;
             return true;
@@ -126,8 +137,7 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
                 return false;
             }
             if (r.directions) down = Vec3f{};  // (each strand's: StageInputs::directions)
-            if (!mappable("strength", &s->value[0])) return false;
-            s->value[1] = static_cast<float>(number("stiffness"));
+            if (!mappable("strength", &s->value[0]) || !mappable("stiffness", &s->value[1])) return false;
             if (!(down.length() < 1e-6f)) {
                 const Vec3f unit = down.normalized();
                 s->value2[0] = unit.x;
@@ -139,10 +149,10 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
         }
         case StageKind::Flyaway: {
             if (!mappable("stray", &s->value[0]) || !mappable("fraction", &s->value[1])) return false;
-            s->value[2] = static_cast<float>(number("frequency"));
-            s->value[3] = static_cast<float>(number("start"));
-            s->value2[0] = static_cast<float>(number("standOut"));
-            s->value2[1] = static_cast<float>(number("lengthen"));
+            if (!mappable("frequency", &s->value[2]) || !mappable("start", &s->value[3]) || !mappable("standOut", &s->value2[0]) ||
+                !mappable("lengthen", &s->value2[1])) {
+                return false;
+            }
             s->flag[0] = 1;  // the stray's noise: one octave
             return true;
         }
@@ -167,9 +177,8 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
             if (!mappable("strength", &s->value[0])) return false;
             const auto frequency = static_cast<float>(number("frequency"));
             const double speed = number("speed");
-            s->value[1] = static_cast<float>(number("gust"));
+            if (!mappable("gust", &s->value[1]) || !mappable("turbulence", &s->value[3])) return false;
             s->value[2] = frequency;
-            s->value[3] = static_cast<float>(number("turbulence"));
             const Vec3f direction = params.getVec3("direction");
             const Vec3f dir = direction.length() < 1e-6f ? Vec3f{} : direction.normalized();
             const WindPhase phase = windPhase(dir, frequency, speed, r.time, r.framesPerSecond, params.getBool("loop"),
@@ -217,44 +226,41 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
             // The direction one world vector (as every strand takes it); one per strand (an
             // expression) is the CPU's.
             Vec3f direction;
-            if (r.directions && kind != StageKind::Direction) {
+            if (r.directions && kind == StageKind::Direction) {
+                *why = r.name() + ": its mapped params are its fields, not a direction per strand";
+                return false;
+            }
+            if (r.directions) {
                 direction = Vec3f{};  // (each strand's: StageInputs::directions)
             } else if (!r.constantVector("direction", &direction)) {
                 *why = r.name() + " takes its direction per strand (the CPU's)";
                 return false;
             }
             if (kind == StageKind::Bend) {
-                if (!mappable("angle", &s->value[0])) return false;
-                s->value[1] = static_cast<float>(number("start"));
-                s->value[2] = static_cast<float>(number("end"));
-                s->value[3] = static_cast<float>(number("randomness"));
+                if (!mappable("angle", &s->value[0]) || !mappable("start", &s->value[1]) || !mappable("end", &s->value[2]) ||
+                    !mappable("randomness", &s->value[3])) {
+                    return false;
+                }
                 const std::string along = params.getString("along");
                 s->flag[0] = along == "normal" ? 0 : along == "direction" ? 2 : 1;
                 s->value2[0] = direction.x;
                 s->value2[1] = direction.y;
                 s->value2[2] = direction.z;
             } else if (kind == StageKind::Direction) {
-                // Its mapped params' fields: the first two mapped, a third the CPU's.
+                // Its mapped params' fields, in directionMapped's order: each param's field, or
+                // kDirectionNumber (look.slang directionParam's slots: flag 1-3, flag2 0-1).
                 const std::vector<std::string> fields = directionMapped(params);
-                if (r.directions) {
-                    // Each strand's three (StageInputs::directions): look.slang directionParam's 3.
-                    for (int i = 0; i < 3; ++i) s->flag[1 + i] = 3;
-                } else if (fields.size() > 2) {
-                    *why = r.name() + " maps its inclination, roll and strength all three (the CPU's)";
-                    return false;
-                } else {
-                    const char* const names[3] = {"inclination", "roll", "strength"};
-                    for (int i = 0; i < 3; ++i) {
-                        if (!mappable(names[i], &s->value[i])) return false;
-                        const auto at = std::find(fields.begin(), fields.end(), names[i]);
-                        s->flag[1 + i] = at == fields.end() ? 2 : static_cast<int>(at - fields.begin());
-                    }
+                const char* const names[5] = {"inclination", "roll", "strength", "inclinationRandom", "rollRandom"};
+                float* const values[5] = {&s->value[0], &s->value[1], &s->value[2], &s->value[3], &s->value2[3]};
+                int* const slots[5] = {&s->flag[1], &s->flag[2], &s->flag[3], &s->flag2[0], &s->flag2[1]};
+                for (int i = 0; i < 5; ++i) {
+                    if (!mappable(names[i], values[i])) return false;
+                    const auto at = std::find(fields.begin(), fields.end(), names[i]);
+                    *slots[i] = at == fields.end() ? kDirectionNumber : static_cast<int>(at - fields.begin());
                 }
-                s->value[3] = static_cast<float>(number("inclinationRandom"));
                 s->value2[0] = direction.x;
                 s->value2[1] = direction.y;
                 s->value2[2] = direction.z;
-                s->value2[3] = static_cast<float>(number("rollRandom"));
                 s->flag[0] = params.getString("along") == "tangent" ? 1 : 0;
             } else {
                 if (!mappable("distance", &s->value[0])) return false;
@@ -272,15 +278,15 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
             if (!mappable("scale", &s->value[0])) return false;
             const Vec3f translate = r.vector("translate"), rotate = r.vector("rotate"), pivot = r.vector("pivot");
             const Vec3f translateRandom = r.vector("translateRandom"), rotateRandom = r.vector("rotateRandom");
-            const float scaleRandom = static_cast<float>(number("scaleRandom"));
-            s->value[1] = scaleRandom;
+            if (!mappable("scaleRandom", &s->value[1])) return false;
+            const float scaleRandom = s->value[1];
             const Vec3f zero;
             s->flag[0] = params.getString("space") == "world" ? 1 : 0;
             s->flag[2] = translateRandom != zero ? 1 : 0;
             s->flag[3] = rotateRandom != zero ? 1 : 0;
             // Nothing to do (TransformOp's `identity`: its input handed on as it came).
             s->flag[1] = translate == zero && rotate == zero && !s->flag[2] && !s->flag[3] && scaleRandom <= 0.0f &&
-                                 !mappedParam(params, "scale") && s->value[0] == 1.0f
+                                 !mappedParam(params, "scale") && !mappedParam(params, "scaleRandom") && s->value[0] == 1.0f
                              ? 1
                              : 0;
             const Vec3f* rows[4] = {&rotate, &pivot, &translateRandom, &rotateRandom};
@@ -318,10 +324,10 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
             s->tabled = true;
             return true;
         case StageKind::Tangle:
-            if (!mappable("strength", &s->value[0])) return false;
-            s->value[1] = static_cast<float>(number("start"));
-            s->value[2] = static_cast<float>(number("span"));
-            s->value[3] = static_cast<float>(number("reach"));
+            if (!mappable("strength", &s->value[0]) || !mappable("start", &s->value[1]) || !mappable("span", &s->value[2]) ||
+                !mappable("reach", &s->value[3])) {
+                return false;
+            }
             return true;
         case StageKind::RestoreLength: {
             // Its mode; a reference a stage of the run makes (flag[1]): the preview's to say.
@@ -330,7 +336,7 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
             return true;
         }
         case StageKind::MeshCut:
-            s->value[0] = static_cast<float>(number("offset"));
+            if (!mappable("offset", &s->value[0])) return false;
             s->flag[0] = params.getString("keep") == "inside" ? 1 : 0;
             return true;
         case StageKind::Jiggle: {
@@ -356,17 +362,21 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
             } else if (!mappable("radius", &s->value[0])) {
                 return false;
             }
-            s->value[1] = static_cast<float>(number("frequency"));
-            s->value[2] = static_cast<float>(number("randomness"));
-            s->value[3] = static_cast<float>(number("phase"));
+            // (frequency, randomness, phase, phaseRandom, spacingRandom and weight: fields 1-6, per
+            // strand; by clump, its first core strand's: look.slang curlNumbersAt.)
+            if (!mappable("frequency", &s->value[1]) || !mappable("randomness", &s->value[2]) || !mappable("phase", &s->value[3])) {
+                return false;
+            }
             s->flag[0] = shape == "wave" ? 1 : shape == "zigzag" ? 2 : shape == "coil" ? 3 : 0;
-            const float phaseRandom = static_cast<float>(number("phaseRandom"));
+            float phaseRandom = 0.0f;
+            if (!mappable("phaseRandom", &phaseRandom)) return false;
             std::memcpy(&s->flag[1], &phaseRandom, sizeof(float));  // the kernel reads its bits as a float
             s->ramp = r.ramp("profile");
             s->tabled = true;
             // The spacing: spacingRandom, and a frequencyProfile other than 1 everywhere (the angle
             // by the profiled arc: CurlOp's `profiled`).
-            s->value2[0] = std::clamp(static_cast<float>(number("spacingRandom")), 0.0f, 1.0f);
+            // (spacingRandom clamped to 0-1 by the kernel.)
+            if (!mappable("spacingRandom", &s->value2[0])) return false;
             s->ramp2 = r.ramp("frequencyProfile");
             s->flag2[0] = std::any_of(s->ramp2.keys.begin(), s->ramp2.keys.end(), [](const auto& k) { return k.second != 1.0f; }) ? 1 : 0;
             s->hasRamp2 = s->flag2[0] != 0;
@@ -376,7 +386,9 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
             const Vec3f weightDirection = r.vector("weightDirection");
             if (weightDirection.length() > 0.0f) {
                 const Vec3f down = weightDirection.normalized();
-                s->value2[1] = std::max(0.0f, static_cast<float>(number("weight"))) / 10.0f;  // (curl_op.cpp kWeightTurns)
+                float weight = 0.0f;
+                if (!mappable("weight", &weight)) return false;
+                s->value2[1] = std::max(0.0f, weight) / 10.0f;  // (curl_op.cpp kWeightTurns; mapped: 1 / 10 its values' multiplier)
                 std::memcpy(&s->flag2[1], &down.x, sizeof(float));  // the kernel reads their bits as floats
                 std::memcpy(&s->flag2[2], &down.y, sizeof(float));
                 std::memcpy(&s->flag2[3], &down.z, sizeof(float));
@@ -398,15 +410,16 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
         }
         case StageKind::Static:
             if (!mappable("strength", &s->value[0])) return false;
-            s->value[1] = static_cast<float>(std::clamp(number("randomness"), 0.0, 1.0));
+            // (randomness, field 1: clamped to 0-1 by the kernel.)
+            if (!mappable("randomness", &s->value[1])) return false;
             s->ramp = r.ramp("profile");
             s->tabled = true;
             return true;
         case StageKind::Flow:
-            // FlowOp's numbers: the lift in degrees (its multiplier), its jitter in radians.
-            if (!mappable("lift", &s->value[0])) return false;
-            s->value[1] = static_cast<float>(number("bend"));
-            s->value[2] = static_cast<float>(number("rollRandom")) * 0.0174532925f;
+            // FlowOp's numbers: the lift in degrees (its multiplier), its jitter in radians (its
+            // multiplier: a map's values in degrees).
+            if (!mappable("lift", &s->value[0]) || !mappable("bend", &s->value[1]) || !mappable("rollRandom", &s->value[2])) return false;
+            s->value[2] *= 0.0174532925f;
             return true;
         default: *why = r.name() + ": not a stage read here"; return false;
     }
@@ -449,23 +462,30 @@ bool mappedParam(const ParamSet& params, const std::string& name) { return ownMa
 
 std::vector<std::string> directionMapped(const ParamSet& params) {
     std::vector<std::string> names;
-    for (const char* name : {"inclination", "roll", "strength"}) {
+    for (const char* name : {"inclination", "roll", "strength", "inclinationRandom", "rollRandom"}) {
         if (mappedParam(params, name)) names.push_back(name);
     }
     return names;
 }
 
-std::array<std::string, 2> mappedParams(StageKind kind, const ParamSet& params) {
-    static const char* const kNames[kStageKinds][2] = {
-#define GROOMLAB_STAGE(Kind, name, mapped0, mapped1, ramps, vectors, numbers) {mapped0, mapped1},
+std::vector<std::string> stageMappedNames(StageKind kind) {
+    static const char* const kNames[kStageKinds] = {
+#define GROOMLAB_STAGE(Kind, name, mapped, ramps, vectors, numbers) mapped,
 #include "groomlab/look/look_stages.inc"
 #undef GROOMLAB_STAGE
     };
-    if (kind == StageKind::Direction) {
-        const std::vector<std::string> mapped = directionMapped(params);
-        return {mapped.size() > 0 ? mapped[0] : std::string(), mapped.size() > 1 ? mapped[1] : std::string()};
-    }
-    return {kNames[static_cast<int>(kind)][0], kNames[static_cast<int>(kind)][1]};
+    std::vector<std::string> names;
+    std::istringstream words(kNames[static_cast<int>(kind)]);
+    for (std::string w; words >> w;) names.push_back(w);
+    if (names.size() > static_cast<std::size_t>(kMappedFields)) throw std::logic_error("look_stages.inc: too many mapped params");
+    return names;
+}
+
+std::array<std::string, kMappedFields> mappedParams(StageKind kind, const ParamSet& params) {
+    const std::vector<std::string> mapped = kind == StageKind::Direction ? directionMapped(params) : stageMappedNames(kind);
+    std::array<std::string, kMappedFields> out;
+    for (std::size_t i = 0; i < mapped.size() && i < out.size(); ++i) out[i] = mapped[i];
+    return out;
 }
 
 bool mappedPerPoint(StageKind kind, int i) {
@@ -620,10 +640,12 @@ std::shared_ptr<TangleInputs> tangleInputs(const StrandSet& in, const TangleStat
         // TangleOp: a pair that picked each other meets in the middle over the span of its lower
         // ID; a strand whose partner picked another moves all the way onto it.
         const bool mutual = state.partners[p] == s;
-        const float draw = mutual && in.ids()[p] < in.ids()[s] ? state.draws[p] : state.draws[s];
+        const bool theirs = mutual && in.ids()[p] < in.ids()[s];
+        const float draw = theirs ? state.draws[p] : state.draws[s];
         const float share = mutual ? 0.5f : 1.0f;
         std::memcpy(&w[1], &draw, 4);
         std::memcpy(&w[2], &share, 4);
+        w[3] = static_cast<std::uint32_t>(theirs ? p : s);  // whose start and span (look.slang TangleCS)
     }, 4096);
     auto made = std::make_shared<TangleInputs>();
     made->strands = std::move(words);
@@ -890,6 +912,9 @@ std::shared_ptr<CurlInputs> curlInputs(const StrandSet& in, const ScalpMesh* sca
     auto clumps = std::make_shared<std::vector<float>>(members.size() * 8, 0.0f);
     parallelFor(0, members.size(), [&](std::size_t c) {
         float* to = clumps->data() + c * 8;
+        // Its first core strand (the bits of its index): where its numbers are read (look.slang curlNumbersAt).
+        const std::uint32_t first = members[c].empty() ? 0u : members[c].front();
+        std::memcpy(&to[3], &first, sizeof first);
         Vec3f normal;
         for (const std::uint32_t s : members[c]) {
             const StrandRoot& root = in.roots()[s];

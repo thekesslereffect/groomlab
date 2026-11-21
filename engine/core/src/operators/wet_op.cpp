@@ -39,6 +39,7 @@
 #include <vector>
 
 #include "groomlab/export_view.h"
+#include "groomlab/field.h"
 #include "groomlab/graph.h"
 #include "groomlab/operator_state.h"
 #include "groomlab/operators.h"
@@ -86,6 +87,42 @@ Ramp levelProfile(std::int64_t k, std::int64_t levels, float wetness) {
     return ramp;
 }
 
+// A level's pull per point where the wetness is mapped: strand s's level profile at its own
+// wetness (levelProfile, as the Clump's profile would be at a wetness of the node's), read by the
+// level's Clump as its strength, its profile then 1. The wetness of each strand, read once on the
+// strands Wet takes: every level keeps their order.
+class WetLevelPull : public FieldValue {
+public:
+    WetLevelPull(std::shared_ptr<const std::vector<float>> wetness, std::int64_t k, std::int64_t levels, bool local)
+        : wetness_(std::move(wetness)), k_(k), levels_(levels), local_(local) {}
+    float atRoot(const StrandRoot&) const override { return 0.0f; }
+    float at(const StrandSet& strands, std::size_t s) const override { return atPoint(strands, s, 0); }
+    float atPoint(const StrandSet& strands, std::size_t s, std::size_t point) const override {
+        const float w = s < wetness_->size() ? (*wetness_)[s] : 0.0f;
+        if (!(w > 0.0f)) return 0.0f;
+        // (A strand's points are read one after another: its profile made once for them.)
+        thread_local std::int64_t madeK = -1, madeLevels = -1;
+        thread_local float madeWetness = -1.0f;
+        thread_local Ramp profile;
+        if (madeK != k_ || madeLevels != levels_ || madeWetness != w) {
+            profile = levelProfile(k_, levels_, w);
+            madeK = k_;
+            madeLevels = levels_;
+            madeWetness = w;
+        }
+        return profile(paramAt(point, strands.strandPointCount(s)));
+    }
+    bool perPoint() const override { return true; }
+    float maximum() const override { return 1.0f; }
+    bool readsPositions() const override { return false; }
+    bool strandLocal() const override { return local_; }
+
+private:
+    std::shared_ptr<const std::vector<float>> wetness_;
+    std::int64_t k_, levels_;
+    bool local_;
+};
+
 class WetOp : public Operator {
 public:
     // The Clumps' rest scalp (where roots are for the nearest center) and parts.
@@ -110,7 +147,8 @@ public:
             ParamSpec{"wetness", 0.7,
                       "How wet the hair is, 0-1: small clumps near the root merging into bigger ones toward the tip, "
                       "forming closer to the root and tighter the wetter it is. 0: dry, the strands as they came "
-                      "(animate it from 1 to 0 to dry the hair out)", "fraction"}
+                      "(animate it from 1 to 0 to dry the hair out; mappable: each strand as wet as it is where it grows)",
+                      "fraction"}
                 .range(0, 1),
             notAnimatable({"clumpSize", 1.5,
                            "The biggest clumps' size (at the tips): about how far apart their centers are, as Clump's "
@@ -139,7 +177,18 @@ public:
     Value evaluate(const EvalContext& ctx, const std::vector<Value>& inputs) const override {
         const StrandsPtr in = requireStrands(inputs, op::kWet);
         const auto wetness = static_cast<float>(params().getDouble("wetness"));
-        if (!(wetness > 0.0f) || in->empty()) return in;  // dry: as it came
+        // A mapped wetness: each strand's (0-1), its levels' pull by it (WetLevelPull).
+        const ScalarField wetnessField(params(), "wetness", scalpOf(ctx));
+        wetnessField.validate(*in);
+        std::shared_ptr<std::vector<float>> wetnessOf;
+        if (!wetnessField.isConstant() && !in->empty()) {
+            wetnessOf = std::make_shared<std::vector<float>>(in->strandCount());
+            parallelFor(0, in->strandCount(), [&](std::size_t s) {
+                const float w = wetnessField.at(*in, s);
+                (*wetnessOf)[s] = std::isfinite(w) ? std::clamp(w, 0.0f, 1.0f) : 0.0f;
+            });
+        }
+        if ((!wetnessOf && !(wetness > 0.0f)) || in->empty()) return in;  // dry: as it came
         const std::int64_t levels = wetLevelCount(params());
         const double size = params().getDouble("clumpSize");
         const double randomness = params().getDouble("randomness");
@@ -164,7 +213,13 @@ public:
                 ParamSet& p = clump.params();
                 const std::int64_t k = levels - 1 - j;
                 p.set("strength", 1.0);
-                p.set("profile", levelProfile(k, levels, wetness));
+                if (wetnessOf) {
+                    p.setField("strength", std::make_shared<WetLevelPull>(wetnessOf, k, levels, wetnessField.strandLocal()));
+                    p.set("profile", Ramp::constant(1.0f));
+                } else {
+                    p.setField("strength", nullptr);
+                    p.set("profile", levelProfile(k, levels, wetness));
+                }
                 p.set("centersFrom", std::string("pick"));
                 p.set("clumpBy", std::string("size"));
                 p.set("size", size * pm::pow(2.0, -static_cast<double>(j)));
@@ -185,7 +240,13 @@ public:
         if (named.empty()) {
             for (std::int64_t j = 0; j < levels; ++j) out->removeStrandChannel(channelOf(j));
         }
-        out->addPointChannel(kWetnessChannel, wetness);
+        std::vector<float>& wet = out->addPointChannel(kWetnessChannel, wetness);
+        if (wetnessOf) {
+            parallelFor(0, out->strandCount(), [&](std::size_t s) {
+                const std::size_t begin = out->strandBegin(s), n = out->strandPointCount(s);
+                std::fill(wet.begin() + static_cast<std::ptrdiff_t>(begin), wet.begin() + static_cast<std::ptrdiff_t>(begin + n), (*wetnessOf)[s]);
+            });
+        }
         StrandsPtr result(out);
         {
             const std::lock_guard<std::mutex> lock(keptMutex_);

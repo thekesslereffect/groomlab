@@ -920,14 +920,12 @@ void ParamPanel::build() {
                 top->addWidget(label, 1);
                 auto* paint = new RoundButton(rowHost);
                 paint->setObjectName(QStringLiteral("paintParam_") + QString::fromStdString(name));
-                paint->setText(tr("Paint"));
-                paint->setDiameter(22);
-                paint->setRadius(8.0);
-                paint->setPadding(10);
-                paint->setFontSize(11);
-                paint->setFontWeight(700);
+                // A paintbrush (every host's: Maya's chip, Blender's brush icon).
+                paint->setIcon(QStringLiteral(":/groomlab/icons/groomLab_paint.svg"), 16);
+                paint->setAccessibleName(tr("Paint"));
+                paint->setDiameter(24);
                 paint->setFill(theme::actionFill(theme::yellow()), theme::actionFill(theme::yellow()));
-                paint->setTextColor(theme::actionText(theme::ink()), theme::actionText(theme::ink()));
+                paint->setIconColor(theme::actionText(theme::ink()), theme::actionText(theme::ink()));
                 paint->setToolTip(tr("Paint this param: a vertex map named after the node and param (white = its value now, black = 0) "
                                      "feeds it, and the Paint brush paints it: strokes lower it, Ctrl raises it (one undo step)"));
                 connect(paint, &QAbstractButton::clicked, this, [this, name] {

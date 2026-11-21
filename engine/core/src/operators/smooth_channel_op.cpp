@@ -47,6 +47,7 @@ public:
     std::string category() const override { return "utility"; }
     std::vector<PortSpec> inputs() const override { return {{"strands", PortType::Strands}}; }
     PortSpec output() const override { return {"out", PortType::Strands}; }
+    std::vector<std::string> externalInputs() const override { return {"scalp"}; }  // maps on length and strength
 
     std::vector<ParamSpec> paramSpecs() const override {
         return {
@@ -55,29 +56,36 @@ public:
                       "written one); a strand channel or none of the name: the strands handed on as they are"}
                 .readsChannel(),
             ParamSpec{"length", 1.0, "How far along the strand the values are averaged, about this much either side of each "
-                                     "point, scene units: larger, the softer the changes",
+                                     "point, scene units: larger, the softer the changes (mappable)",
                       "length"}
                 .range(0, 1e9)
                 .soft(0, 5),
-            ParamSpec{"strength", 1.0, "How far toward the smoothed values, 0-1", "fraction"}.range(0, 1),
+            ParamSpec{"strength", 1.0, "How far toward the smoothed values, 0-1 (mappable)", "fraction"}.range(0, 1),
         };
     }
 
-    Value evaluate(const EvalContext&, const std::vector<Value>& inputs) const override {
+    Value evaluate(const EvalContext& ctx, const std::vector<Value>& inputs) const override {
         const StrandsPtr in = requireStrands(inputs, op::kSmoothChannel);
         const std::string name = params().getString("channel");
-        const float length = static_cast<float>(params().getDouble("length"));
-        const float strength = std::clamp(static_cast<float>(params().getDouble("strength")), 0.0f, 1.0f);
+        // The length and strength, read at each strand (mappable).
+        const ScalarField lengthField(params(), "length", scalpOf(ctx)), strengthField(params(), "strength", scalpOf(ctx));
         const std::vector<float>* values = name.empty() ? nullptr : in->pointChannel(name);
-        if (!values || values->size() != in->pointCount() || !(length > 0.0f) || !(strength > 0.0f)) return in;
+        if (!values || values->size() != in->pointCount()) return in;
+        lengthField.validate(*in);
+        strengthField.validate(*in);
+        const bool mapped = !lengthField.isConstant() || !strengthField.isConstant();
+        if (!mapped && (!(lengthField.at(*in, 0) > 0.0f) || !(std::clamp(strengthField.at(*in, 0), 0.0f, 1.0f) > 0.0f))) return in;
 
         auto out = std::make_shared<StrandSet>(*in);  // shares the input's arrays until written
         std::vector<float>& smoothed = *out->mutablePointChannel(name);
-        // (three boxes, each about the length wide in all: a Gaussian of about half the length's deviation)
-        const float half = 0.5f * length;
         parallelFor(0, out->strandCount(), [&](std::size_t s) {
             const std::size_t n = in->strandPointCount(s), begin = in->strandBegin(s);
             if (n < 2) return;
+            const float length = lengthField.at(*in, s);
+            const float strength = std::clamp(strengthField.at(*in, s), 0.0f, 1.0f);
+            if (!(length > 0.0f) || !(strength > 0.0f)) return;
+            // (three boxes, each about the length wide in all: a Gaussian of about half the length's deviation)
+            const float half = 0.5f * length;
             thread_local std::vector<float> at, weight, a, b;
             at.resize(n);
             weight.resize(n);

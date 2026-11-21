@@ -21,7 +21,7 @@ struct alignas(16) StageConstants {
     std::uint32_t octaveSeeds[16];  // 8 x (lo, hi)
     std::uint32_t ramp[4];          // key count, offset, straight, table count
     std::uint32_t table[4];         // table offset, the lines' normals block
-    std::uint32_t field[4];         // field 0 mode, offset; field 1 mode, offset
+    std::uint32_t field[4];         // mapped params 0 to 2 (the mode in the top two bits, the offset: LookEngine::fieldWord), the table of the others' (+1)
     std::uint32_t aux[4];
     std::uint32_t dispatch[4];      // the groups in a row of the dispatch
     float value2[4];                // more numbers (StageParams::value2; a field's program: min, max)

@@ -26,12 +26,12 @@ namespace groomlab::gpu {
 // One a GROOMLAB_STAGE row of look_stages.inc (its node type, name, mapped fields and the params a
 // drag may set), in its order.
 enum class StageKind {
-#define GROOMLAB_STAGE(Kind, name, mapped0, mapped1, ramps, vectors, numbers) Kind,
+#define GROOMLAB_STAGE(Kind, name, mapped, ramps, vectors, numbers) Kind,
 #include "groomlab/look/look_stages.inc"
 #undef GROOMLAB_STAGE
 };
 constexpr int kStageKinds = 0
-#define GROOMLAB_STAGE(Kind, name, mapped0, mapped1, ramps, vectors, numbers) +1
+#define GROOMLAB_STAGE(Kind, name, mapped, ramps, vectors, numbers) +1
 #include "groomlab/look/look_stages.inc"
 #undef GROOMLAB_STAGE
     ;
@@ -247,13 +247,23 @@ struct FieldValues {
     // Evaluated on the GPU per strand (`values` the CPU's, as read): it holds whatever moves.
     std::shared_ptr<const FieldProgram> program;
 };
-// Each stage's mapped params (StageParams says which are mapped: [0] and, Noise's fraction,
-// Clump's volumize and Flyaway's fraction, [1]); a masked node's affect at its first stage
-// (StageParams::masked; mode kNumber where it is a number), read on the strands that stage takes.
+// The most mapped params a stage reads (look_stages.inc's `mapped`; look.slang fieldWord: the first
+// three in the dispatch's constants, the rest in a table of the stage's).
+constexpr int kMappedFields = 12;
+// Each stage's mapped params (look_stages.inc names them, field[0], [1]...); a masked node's
+// affect at its first stage (StageParams::masked; mode kNumber where it is a number), read on the
+// strands that stage takes.
 struct StageFields {
-    FieldValues field[2];
+    FieldValues field[kMappedFields];
     FieldValues affect;
 };
+// Every field of a stage: its mapped params', then its affect.
+inline std::vector<const FieldValues*> allFields(const StageFields& f) {
+    std::vector<const FieldValues*> all;
+    for (const FieldValues& v : f.field) all.push_back(&v);
+    all.push_back(&f.affect);
+    return all;
+}
 struct LookFields {
     std::vector<StageFields> stages;  // as the chain's
     // The strands they were read from (the base and the stages' results, held): the same pointers
@@ -330,7 +340,8 @@ struct CurlInputs {
     // Per clump its core strands (in strand order): `count + 1` offsets, then the strands.
     std::shared_ptr<const std::vector<std::uint32_t>> members;
     // Per clump 8 floats: its members' root normals summed, normalized (what its frames start
-    // from), 0, then its draw's four numbers (CurlOp::drawFor, from its key and the seed).
+    // from), its first core strand (its index's bits: where its mapped params are read), then its
+    // draw's four numbers (CurlOp::drawFor, from its key and the seed).
     std::shared_ptr<const std::vector<float>> clumps;
     std::size_t count = 0;
 };
@@ -436,7 +447,7 @@ struct RestoreInputs {
 // Tangle: per strand 4 words from its partner choice (operator_state.h TangleState): the partner
 // (kNoTanglePartner: none), the float bits of the draw its span's middle is made from (the lower
 // ID's of a pair that picked each other), the float bits of the share it moves (0.5 a pair's, else
-// 1), 0.
+// 1), the strand whose draw it is (its start and span read there).
 struct TangleInputs {
     std::shared_ptr<const std::vector<std::uint32_t>> strands;
 };

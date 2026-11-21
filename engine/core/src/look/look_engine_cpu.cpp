@@ -261,7 +261,10 @@ protected:
     }
     void allocate(int id, std::size_t bytes) override {
         Words& w = buffers_[id];
-        if (!w || w->size() * 4 < bytes) w = ownWords(bytes);
+        // (Never a host's memory shared before: the kernels write what is allocated, and the host's
+        // array is read alone and may go once it is no longer held, as Twist's given axes do when its
+        // clumps' axes are made in their place.)
+        if (!w || w->host || w->size() * 4 < bytes) w = ownWords(bytes);
     }
     // The base's points and widths: the strands' own arrays (the engine holds them; never written).
     void share(int id, const void* data, std::size_t bytes) override { buffers_[id] = hostWords(const_cast<void*>(data), bytes); }

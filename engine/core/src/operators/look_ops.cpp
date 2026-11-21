@@ -988,11 +988,13 @@ public:
                 .when("centersFrom", {"pick"}),
             ParamSpec{"repelRadius", 0.5, "With a negative strength: how far from its center a strand is pushed out to at "
                                           "least (the part's half width): those within twice it move out, the nearest "
-                                          "to it, keeping their order; those farther away stay as they are", "length"}
+                                          "to it, keeping their order; those farther away stay as they are (mappable: "
+                                          "each strand's own)", "length"}
                 .atLeast(0)
                 .soft(0, 2)
                 .adv(),
-            ParamSpec{"flatness", 0.0, "Squashes each clump across into a ribbon, 0-1, as much as it clumps there (wet hair)",
+            ParamSpec{"flatness", 0.0, "Squashes each clump across into a ribbon, 0-1, as much as it clumps there (wet hair; "
+                                       "mappable: read at each strand, so a clump flattens by its strands' own)",
                       "fraction"}
                 .range(0, 1),
             {"flatAlong", std::string("surface"),
@@ -1013,15 +1015,17 @@ public:
                       "The volume along the length, root to tip, times volumize: a lock fuller at the root tapering to "
                       "its tip, or swelling midway"}
                 .in("Shape"),
-            ParamSpec{"strengthRandom", 0.0, "Each clump's strength scaled down by up to this share, at random per clump",
+            ParamSpec{"strengthRandom", 0.0, "Each clump's strength scaled down by up to this share, at random per clump "
+                                             "(mappable: the clump's draw times each strand's own share)",
                       "fraction"}
                 .range(0, 1)
                 .in("Random"),
             ParamSpec{"strandStrengthRandom", 0.0, "Each strand's strength scaled down by up to this share, at random per "
-                                                   "strand: some hug the clump, some hang loose", "fraction"}
+                                                   "strand: some hug the clump, some hang loose (mappable)", "fraction"}
                 .range(0, 1)
                 .in("Random"),
-            ParamSpec{"volumizeRandom", 0.0, "Each clump's volume up to this share bigger or smaller, at random per clump",
+            ParamSpec{"volumizeRandom", 0.0, "Each clump's volume up to this share bigger or smaller, at random per clump "
+                                             "(mappable: the clump's draw times each strand's own share)",
                       "fraction"}
                 .range(0, 1)
                 .in("Random")
@@ -1487,6 +1491,7 @@ private:
             };
             if (!last || made.output.lock() != last || !made.assigned || made.assigned->size() != in->strandCount() ||
                 !sameBits(made.roots, roots) || vanes.active() || !strength.strandLocal() || !volumize.strandLocal() ||
+                !paramsStrandLocal(params(), {"flatness", "repelRadius", "strengthRandom", "strandStrengthRandom", "volumizeRandom"}, scalp, *in) ||
                 made.regionHash != regionHash || made.centerRegions.size() != (strandRegions ? roots.size() : 0)) {
                 return false;
             }
@@ -2039,7 +2044,7 @@ public:
     std::vector<ParamSpec> paramSpecs() const override {
         return {
             ParamSpec{"amplitude", 0.2, "Displacement size, scene units (mappable, per point)", "length"}.soft(0, 1),
-            ParamSpec{"frequency", 3.0, "Features per scene unit (world) or per strand length (strand)", "perLength"}
+            ParamSpec{"frequency", 3.0, "Features per scene unit (world) or per strand length (strand) (mappable)", "perLength"}
                 .unitsWhen("space", {"world"})
                 .soft(0, 20),
             ParamSpec{"octaves", std::int64_t{1}, "Fractal octaves"}.range(1, 8).adv().formerDefault(2, std::int64_t{2}),
@@ -2079,6 +2084,8 @@ private:
         amplitudeField.validate(*in);
         const ScalarField fractionField(params(), "fraction", scalpOf(ctx));
         fractionField.validate(*in);
+        const ScalarField frequencyField(params(), "frequency", scalpOf(ctx));
+        frequencyField.validate(*in);
         const float frequency = static_cast<float>(params().getDouble("frequency"));
         const bool strandSpace = params().getString("space") != "world";
         const bool kinky = params().getString("mode") == "kinky";
@@ -2089,7 +2096,7 @@ private:
             // (Some strands recounted before it: the last result's points laid out as the input is now.)
             changes = someStrandsChangedOrRecounted(*incremental, 0);
             last = changes ? previousStrandsFor(*incremental, *in, *changes) : nullptr;
-            if (!last || !longest_.local(last, {&amplitudeField, &fractionField})) return false;
+            if (!last || !longest_.local(last, {&amplitudeField, &fractionField, &frequencyField})) return false;
             if (changes->none()) {  // the same strands in: the same result
                 *result = last;
                 *changed = *changes;
@@ -2099,7 +2106,7 @@ private:
         // Smooth noise is read at the strand's points: the octaves finer than they draw fade out (in
         // strand space a strand spans `frequency` cells whatever its length). (Kinky noise draws
         // its knots `frequency` apart itself: nothing to fade.)
-        if (!kinky && strandSpace && !last) {
+        if (!kinky && strandSpace && !last && !gpu::mappedParam(params(), "frequency")) {
             const std::size_t uniform = in->uniformPointCount();
             float base = 1.0f;
             if (uniform >= 2) octaveWeights(frequency / static_cast<float>(uniform - 1), 1, &base);
@@ -2120,7 +2127,7 @@ private:
             *changed = *changes;
             out = made;
         }
-        longest_.made(out, {&amplitudeField, &fractionField});
+        longest_.made(out, {&amplitudeField, &fractionField, &frequencyField});
         *result = out;
         return true;
     }

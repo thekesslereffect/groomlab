@@ -146,7 +146,7 @@ groomlab.list_parts(groom); groomlab.remove_part(groom, "crown"); groomlab.clear
   rather than the two sides of a line, paint regions and name them in Interpolate's `regionMap`
   (see Interpolate keeps to painted regions in [Getting started](getting-started.md)).
 - **Opening the gap:** the `Part` node makes strands within `width` of a part lean away from it,
-  on their own side, keeping their lengths. Its `strength` parameter is mappable, `profile` sets
+  on their own side, keeping their lengths. Its `strength` and `width` parameters are mappable, `profile` sets
   the lean root to tip, and `part` limits it to one part.
 - **Auto parts:** set the Part node's `partsFrom` to `auto` and it finds the parts
   itself, where the hair it takes flows away to both sides of a line (a parting combed into the
@@ -439,7 +439,7 @@ alone (no arrows) they make a field too.
 
 The **Flow** node (Shape) lays strands along the field: each leaves its root `lift` degrees off
 the skin, heads the way the field points there and bends toward the skin along its length
-(`bend`), turned at random up to `rollRandom` degrees around the normal; the common `affect` blends from the incoming shape. Without
+(`bend`), turned at random up to `rollRandom` degrees around the normal (`lift`, `bend` and `rollRandom` are mappable); the common `affect` blends from the incoming shape. Without
 arrows, strands lie along their own heading. `Scatter -> Length -> Flow -> Width` grooms fur with
 no guides at all: the `creature_fur` preset is a starting point.
 

@@ -2,10 +2,11 @@
 // What the GPU preview (look_chain.h) knows of each node type, a row each. An X-macro list (no
 // include guard: included once per use; a macro left undefined expands to nothing):
 //
-//   GROOMLAB_STAGE(Kind, name, mapped0, mapped1, ramps, vectors, numbers)
+//   GROOMLAB_STAGE(Kind, name, mapped, ramps, vectors, numbers)
 //     A stage the GPU runs, for the node type of the same name: StageKind::Kind (look_chain.h, in
-//     this order; kStageKinds counts them), stageName's `name`, the params its two mapped fields
-//     are read for (StageFields::field[0], [1]; "" none), and the params a drag may set while it
+//     this order; kStageKinds counts them), stageName's `name`, the params its mapped fields are
+//     read for, in order (StageFields::field[0], [1]...; at most kMappedFields; fieldAt's k in its
+//     kernels), and the params a drag may set while it
 //     previews (previewableParam): `ramps` take a ramp, `vectors` a vector, `numbers` a number (a
 //     seed, a count or a choice's index too). Space-separated names; "affect" where the stage
 //     mixes its result back by its affect (StageParams::masked). A param the kernel does not match
@@ -24,7 +25,7 @@
 // docs/EXTENDING.md.
 
 #ifndef GROOMLAB_STAGE
-#define GROOMLAB_STAGE(Kind, name, mapped0, mapped1, ramps, vectors, numbers)
+#define GROOMLAB_STAGE(Kind, name, mapped, ramps, vectors, numbers)
 #define GROOMLAB_STAGE_DEFAULTED
 #endif
 #ifndef GROOMLAB_STAGE_NODE
@@ -41,56 +42,57 @@
 #endif
 
 // (Interpolate's other params pick each strand's guides and weights: the CPU's binding.)
-GROOMLAB_STAGE(Interpolate, "interpolate", "followBends", "", "falloff", "", "limitDistance followBends")
-GROOMLAB_STAGE(Length, "length", "keep", "fraction", "", "", "affect keep fraction randomness seed")
-GROOMLAB_STAGE(Clump, "clump", "strength", "volumize", "volumizeProfile profile", "",
+GROOMLAB_STAGE(Interpolate, "interpolate", "followBends", "falloff", "", "limitDistance followBends")
+GROOMLAB_STAGE(Length, "length", "keep fraction randomness", "", "", "affect keep fraction randomness seed")
+GROOMLAB_STAGE(Clump, "clump", "strength volumize flatness repelRadius strengthRandom strandStrengthRandom volumizeRandom", "volumizeProfile profile", "",
                "affect strength repelRadius volumize flatness strengthRandom volumizeRandom seed")
-GROOMLAB_STAGE(Noise, "noise", "amplitude", "fraction", "profile", "", "affect amplitude frequency fraction octaves seed")
-GROOMLAB_STAGE(Curl, "curl", "radius", "", "frequencyProfile profile", "weightDirection",
+GROOMLAB_STAGE(Noise, "noise", "amplitude fraction frequency", "profile", "", "affect amplitude frequency fraction octaves seed")
+GROOMLAB_STAGE(Curl, "curl", "radius frequency randomness phase phaseRandom spacingRandom weight", "frequencyProfile profile", "weightDirection",
                "affect radius frequency randomness phase phaseRandom coilWidths spacingRandom weight seed")
-GROOMLAB_STAGE(Width, "width", "width", "", "profile", "", "affect width randomness seed")
+GROOMLAB_STAGE(Width, "width", "width randomness", "profile", "", "affect width randomness seed")
 // (An auto Part's splitAngle and minLength pick which lines it finds: the CPU's.)
-GROOMLAB_STAGE(Part, "part", "strength", "", "profile", "", "affect strength width")
-GROOMLAB_STAGE(Gravity, "gravity", "strength", "", "stiffnessProfile", "", "affect strength stiffness")
+GROOMLAB_STAGE(Part, "part", "strength width", "profile", "", "affect strength width")
+GROOMLAB_STAGE(Gravity, "gravity", "strength stiffness", "stiffnessProfile", "", "affect strength stiffness")
 // (Its strays are drawn on the GPU by ID: a fraction or seed dragged picks others.)
-GROOMLAB_STAGE(Flyaway, "flyaway", "stray", "fraction", "", "", "affect stray fraction frequency start standOut lengthen seed")
+GROOMLAB_STAGE(Flyaway, "flyaway", "stray fraction frequency start standOut lengthen", "", "", "affect stray fraction frequency start standOut lengthen seed")
 // (Its offset a number of the kernel's, its fields' tables made for every offset sharing the CPU's
 // field: LookInputs::read. Its depth and softness make the tables: the CPU's.)
-GROOMLAB_STAGE(Collide, "collide", "", "", "", "", "affect offset")
-GROOMLAB_STAGE(Wind, "wind", "strength", "", "profile", "", "affect strength gust frequency speed turbulence seed")
-GROOMLAB_STAGE(Blend, "blend", "mix", "", "profile", "", "mix")
+GROOMLAB_STAGE(Collide, "collide", "", "", "", "affect offset")
+GROOMLAB_STAGE(Wind, "wind", "strength gust turbulence", "profile", "", "affect strength gust frequency speed turbulence seed")
+GROOMLAB_STAGE(Blend, "blend", "mix", "profile", "", "mix")
 // (The hair grid's layout is the core strands' and the scalp's: none of these change it.)
-GROOMLAB_STAGE(SelfCollide, "selfCollide", "strength", "", "profile", "", "affect strength packing")
-GROOMLAB_STAGE(Static, "static", "strength", "", "profile", "", "affect strength randomness")
+GROOMLAB_STAGE(SelfCollide, "selfCollide", "strength", "profile", "", "affect strength packing")
+GROOMLAB_STAGE(Static, "static", "strength randomness", "profile", "", "affect strength randomness")
 // The shapers working on each strand alone (transform_ops.cpp, deform_ops.cpp DisplaceOp,
 // extra_ops.cpp TwistOp). Direction's mapped fields are the ones it maps (directionMapped).
-GROOMLAB_STAGE(Bend, "bend", "angle", "", "", "direction", "affect angle start end randomness seed")
-GROOMLAB_STAGE(Direction, "direction", "", "", "", "direction", "affect inclination roll strength inclinationRandom rollRandom seed")
-GROOMLAB_STAGE(Transform, "transform", "scale", "", "", "translate rotate pivot translateRandom rotateRandom",
+GROOMLAB_STAGE(Bend, "bend", "angle start end randomness", "", "direction", "affect angle start end randomness seed")
+GROOMLAB_STAGE(Direction, "direction", "", "", "direction", "affect inclination roll strength inclinationRandom rollRandom seed")
+GROOMLAB_STAGE(Transform, "transform", "scale scaleRandom", "", "translate rotate pivot translateRandom rotateRandom",
                "affect scale scaleRandom seed")
-GROOMLAB_STAGE(Displace, "displace", "distance", "", "profile", "direction", "affect distance")
-GROOMLAB_STAGE(Twist, "twist", "turns", "", "profile", "", "affect turns")
+GROOMLAB_STAGE(Displace, "displace", "distance", "profile", "direction", "affect distance")
+GROOMLAB_STAGE(Twist, "twist", "turns", "profile", "", "affect turns")
 // The shapers reading their neighbours or a reference (look_chain.cpp's section of them).
-// (BlendNeighbors' neighbors, Tangle's fraction, radius and seed pick whom a strand reads: the CPU's.)
-GROOMLAB_STAGE(Smooth, "smooth", "strength", "", "profile", "", "affect strength scale")
-GROOMLAB_STAGE(RestoreLength, "restoreLength", "", "", "", "", "affect")
-GROOMLAB_STAGE(BlendNeighbors, "blendNeighbors", "strength", "", "profile", "", "affect strength")
-GROOMLAB_STAGE(Tangle, "tangle", "strength", "", "", "", "affect strength start span reach")
-GROOMLAB_STAGE(Flow, "flow", "lift", "", "", "", "affect lift bend rollRandom seed")
+// (BlendNeighbors' neighbors, Tangle's fraction, radius and seed pick whom a strand reads: the CPU's;
+// a Tangle strand's start and span are those of the strand its span's draw is (TangleInputs).)
+GROOMLAB_STAGE(Smooth, "smooth", "strength", "profile", "", "affect strength scale")
+GROOMLAB_STAGE(RestoreLength, "restoreLength", "", "", "", "affect")
+GROOMLAB_STAGE(BlendNeighbors, "blendNeighbors", "strength", "profile", "", "affect strength")
+GROOMLAB_STAGE(Tangle, "tangle", "strength start span reach", "", "", "affect strength start span reach")
+GROOMLAB_STAGE(Flow, "flow", "lift bend rollRandom", "", "", "affect lift bend rollRandom seed")
 // Jiggle with motion (motion_ops.cpp JiggleOp; its history: the frames the host sampled for it
 // read again, more refused: readLookParams); MeshCut (mesh_cut_op.cpp).
-GROOMLAB_STAGE(Jiggle, "jiggle", "strength", "", "profile", "", "affect strength frequency damping history")
-GROOMLAB_STAGE(MeshCut, "meshCut", "", "", "", "", "affect offset")
+GROOMLAB_STAGE(Jiggle, "jiggle", "strength", "profile", "", "affect strength frequency damping history")
+GROOMLAB_STAGE(MeshCut, "meshCut", "offset", "", "", "affect offset")
 // A Merge without a seam to blend (look_ops.cpp MergeOp): the run goes up its input a; b's
 // strands, as cached, follow a's in the base and are handed on (LookStage::prefix).
-GROOMLAB_STAGE(Merge, "merge", "", "", "", "", "")
+GROOMLAB_STAGE(Merge, "merge", "", "", "", "")
 // The nodes keeping or adding strands (extra_ops.cpp CullOp, feather_ops.cpp SplitOp's outputs,
 // mirror_op.cpp MirrorOp): a run through one starts with it, the nodes before it a run of their own
 // (LookBranch), their strands copied into its result as its last evaluation laid that out (look_chain.cpp
 // gathers). Their own params pick the strands: the CPU's.
-GROOMLAB_STAGE(Cull, "cull", "", "", "", "", "")
-GROOMLAB_STAGE(Split, "split", "", "", "", "", "")
-GROOMLAB_STAGE(Mirror, "mirror", "", "", "", "", "")
+GROOMLAB_STAGE(Cull, "cull", "", "", "", "")
+GROOMLAB_STAGE(Split, "split", "", "", "", "")
+GROOMLAB_STAGE(Mirror, "mirror", "", "", "", "")
 
 // (Wet's other params pick its levels' centers: the CPU's.)
 GROOMLAB_STAGE_NODE(Wet, Clump, "", "", "affect wetness")

@@ -37,6 +37,12 @@ inline float paramAt(std::size_t i, std::size_t n) {
 // The "scalp" external (maps sample textures and color sets on it); null without one.
 inline const ScalpMesh* scalpOf(const EvalContext& ctx) { return valueAs<MeshPtr>(ctx.external("scalp")).get(); }
 
+// Whether param `name` reads a map: its own value one (a MapRef) or a field plugged into it. A
+// number param read with ScalarField then varies per strand.
+inline bool paramMapped(const ParamSet& params, const std::string& name) {
+    return (params.has(name) && std::holds_alternative<MapRef>(params.get(name))) || params.field(name) != nullptr;
+}
+
 // What reading color set `name` of the "scalp" external adds to a node's cache key: the set's
 // hash (whether the scalp has it, and its values). The scalp's own key is its surface alone
 // (ScalpMesh::surfaceHash), so every reader of a color set salts its key with this. 0 for no name.

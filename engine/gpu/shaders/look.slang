@@ -77,7 +77,7 @@
     uint4 gOctaveSeeds[4];  // Noise: octave o's seed (lo, hi): [o / 2].xy for even o, .zw for odd
     uint4 gRamp;         // its profile: key count, offset (floats in gRamps; key k at + 3k), straight, table count
     uint4 gTable;        // x: the table's offset (the profile by point index, strands of gRamp.w points); y: the lines' normals block; z: each strand's direction's (stageDirection; 0: none)
-    uint4 gField;        // mapped params 0 and 1: mode (0 the number, 1 per strand, 2 per point), offset (floats in gFields)
+    uint4 gField;        // mapped params 0 to 2, a word each (the mode in the top two bits: 0 the number, 1 per strand, 2 per point; the offset in gFields below), w: where the stage's table of the others' words is in gFields, plus 1 (0: none)
     uint4 gAux;          // offsets into gAux0 and gAux1 (words), by node
     uint4 gDispatch;     // x: the groups in a row of the dispatch (threadIndex)
     float4 gValue2;      // more numbers (Clump: strengthRandom, volumizeRandom, copyAmount; FieldCS: min, max)
@@ -228,13 +228,23 @@ float rampAlong2(uint i, uint n) {  // the second profile
 
 // Param k at strand s, point p (the set's index): the number, or the field's value there times
 // the multiplier (a plugged field's own number; 1 for a map of the param's own).
-float fieldAt(uint k, float number, uint s, uint p) {
-    const uint mode = k == 0 ? gField.x : gField.z;
-    if (mode == 0) return number;
-    const uint offset = k == 0 ? gField.y : gField.w;
-    return asfloat(gFields.Load((offset + (mode == 1 ? s : p)) * 4)) * number;
+uint fieldWord(uint k) {
+    if (k < 3) return k == 0 ? gField.x : k == 1 ? gField.y : gField.z;
+    // (The load's index in bounds whichever way it goes: a compiler may load before it selects, and
+    // OpenGL's storage buffers promise nothing past their end. gFields holds a word at least.)
+    const uint at = gField.w == 0u ? 0u : gField.w - 1u + k - 3u;
+    const uint word = gFields.Load(at * 4);
+    return gField.w == 0u ? 0u : word;
 }
-bool fieldPerPoint(uint k) { return (k == 0 ? gField.x : gField.z) == 2; }
+float fieldAt(uint k, float number, uint s, uint p) {
+    const uint word = fieldWord(k);
+    const uint mode = word >> 30;
+    // (In bounds whichever way it goes, as fieldWord's: unmapped, the first word, never used.)
+    const uint at = mode == 0u ? 0u : (word & 0x3FFFFFFFu) + (mode == 1u ? s : p);
+    const float value = asfloat(gFields.Load(at * 4));
+    return mode == 0u ? number : value * number;
+}
+bool fieldPerPoint(uint k) { return (fieldWord(k) >> 30) == 2u; }
 
 // ---- curve.cpp resampleByArcLengthInto, from gIn ------------------------------------------------
 
@@ -2294,7 +2304,7 @@ void clearanceGroup(uint3 id, uint3 local, uint3 group) {
 // ---- Length --------------------------------------------------------------------------------------
 //
 // gValue: keep (mapped: field 0, per strand), fraction (field 1, per strand), the least and the
-// most a trimmed strand loses (0, randomness). The strand's numbers: .x its trim's draw, .w its pick's (under the fraction:
+// most a trimmed strand loses (0, randomness: field 2, per strand, clamped to 0-1). The strand's numbers: .x its trim's draw, .w its pick's (under the fraction:
 // trimmed).
 
 [shader("compute")]
@@ -2306,8 +2316,9 @@ void LengthCS(uint3 id : SV_DispatchThreadID) {
     float keep = fieldAt(0, gValue.x, s, 0);
     if (gValue.w > 0.0f) {
         const float fraction = fieldAt(1, gValue.y, s, 0);
+        const float most = clamp(fieldAt(2, gValue.w, s, 0), 0.0f, 1.0f);
         const float4 d = strandData(s);
-        if (fraction >= 1.0f || d.w < fraction) keep *= 1.0f - (gValue.z + (gValue.w - gValue.z) * d.x);
+        if (fraction >= 1.0f || d.w < fraction) keep *= 1.0f - (gValue.z + (most - gValue.z) * d.x);
     }
     keep = max(0.0f, keep);
     if (n < 2) {
@@ -2449,11 +2460,11 @@ void ShareCS(uint3 id : SV_DispatchThreadID) {
 // flatness), their root normals after them (a float4 a center), and their variation at word
 // gAux.z (a float4 a center: its strength's draw, its volume's, its random flatten's turn).
 // gValue: strength (mapped: field 0), volumize (mapped: field 1, per strand: the lock's radius),
-// flatness;
-// gFlag.x: the repel radius' float bits, gFlag.y: pastTip extend (each point by its length from
+// flatness (field 2);
+// gFlag.x: the repel radius' float bits (field 3), gFlag.y: pastTip extend (each point by its length from
 // the root; past the center's tip, on along its last way; 0: fit, each point by its share of the
-// strand's length, laid along the center's whole length), gFlag.z: flatten (0 surface, 1 random, 2 direction); gValue2: strengthRandom,
-// volumizeRandom; gFlag2.xyz: flatDirection's bits; the profile, and volumizeProfile (the lock's
+// strand's length, laid along the center's whole length), gFlag.z: flatten (0 surface, 1 random, 2 direction); gValue2: strengthRandom
+// (field 4), volumizeRandom (6), .w strandStrengthRandom (5) (fields 2-6 per strand, each strand's own); gFlag2.xyz: flatDirection's bits; the profile, and volumizeProfile (the lock's
 // radius along it) the second. The strand's numbers: unused, its spot in the lock (angle and radius as fractions). A
 // negative strength repels (look_ops.cpp repelled), off the skin where the root normals' block
 // says the root is on it (w 1).
@@ -2533,10 +2544,10 @@ float3 repelled(float3 p, uint c, float centerLength, float arc, float amount, f
 // `fr`) squashed across the thin way by the flatness, as much as the point clumps (w). The thin
 // way is `thin` (x: along the frame's normal, y: its binormal), as it was at the root, carried
 // along the center's frames: it turns with the axis and never spins where the axis does.
-float3 flattened(float3 p, float3 center, Frame fr, float2 thin, float w) {
+float3 flattened(float3 p, float3 center, Frame fr, float2 thin, float w, float flatness) {
     float3 offset = p - center;
     const float3 way = fr.n * thin.x + fr.b * thin.y;
-    offset -= way * (dot(offset, way) * gValue.z * w);
+    offset -= way * (dot(offset, way) * flatness * w);
     return center + offset;
 }
 
@@ -2555,15 +2566,20 @@ void ClumpCS(uint3 id : SV_DispatchThreadID) {
     const float4 d = strandData(s);
     // The clump's variation (by its center's ID): its strength scaled down, its volume varied.
     const float4 variation = asfloat(gAux1.Load4((gAux.z + c * 4) * 4));
-    float escape = gValue2.x > 0.0f ? 1.0f - gValue2.x * variation.x : 1.0f;
-    if (gValue2.w > 0.0f) escape *= 1.0f - gValue2.w * d.w;  // strandStrengthRandom (its draw: strand data w)
+    // (Its numbers per strand, each in its param's range: a map's values too.)
+    const float strengthRandom = clamp(fieldAt(4, gValue2.x, s, 0), 0.0f, 1.0f);
+    const float strandStrengthRandom = clamp(fieldAt(5, gValue2.w, s, 0), 0.0f, 1.0f);
+    const float volumizeRandom = clamp(fieldAt(6, gValue2.y, s, 0), 0.0f, 1.0f);
+    const float flatness = clamp(fieldAt(2, gValue.z, s, 0), 0.0f, 1.0f);
+    float escape = strengthRandom > 0.0f ? 1.0f - strengthRandom * variation.x : 1.0f;
+    if (strandStrengthRandom > 0.0f) escape *= 1.0f - strandStrengthRandom * d.w;  // (its draw: strand data w)
     const float strandAmount = fieldAt(0, gValue.x, s, 0) * escape;
     // Its volume (volumize, read on the strand as it came): the radius of the lock it gathers into.
     const float radius = max(fieldAt(1, gValue.y, s, 0), 0.0f);
     const float angle = kTwoPi * d.y;
-    const float r = (gValue2.y > 0.0f ? radius * (1.0f + gValue2.y * (2.0f * variation.y - 1.0f)) : radius) * d.z;
+    const float r = (volumizeRandom > 0.0f ? radius * (1.0f + volumizeRandom * (2.0f * variation.y - 1.0f)) : radius) * d.z;
     // Flatness: the way each clump's ribbon is thin in.
-    const bool shaped = gValue.z > 0.0f;
+    const bool shaped = flatness > 0.0f;
     float2 thin = float2(1.0f, 0.0f);  // (the root frame's normal)
     if (shaped) {
         const Frame first = centerFrame(c, 0);
@@ -2584,7 +2600,7 @@ void ClumpCS(uint3 id : SV_DispatchThreadID) {
     }
     // A negative strength anywhere along the strand: those points repelled, then the strand's
     // segment lengths kept (follow the leader, each point as it is made).
-    const float repelRadius = asfloat(gFlag.x);
+    const float repelRadius = max(fieldAt(3, asfloat(gFlag.x), s, 0), 0.0f);
     bool repelling = false;
     if (repelRadius > 0.0f) {
         for (uint i = 1; i < n; ++i) {
@@ -2663,10 +2679,10 @@ void ClumpCS(uint3 id : SV_DispatchThreadID) {
                 const float ri = r * rampAlong2(i, n);
                 const float3 target = at + ((fr.n * (ri * lockWay.x) + fr.b * (ri * lockWay.y)) + fr.t * 0.0f);
                 moved = p + (target - p) * w;
-                if (shaped) moved = flattened(moved, at, fr, thin, w);
+                if (shaped) moved = flattened(moved, at, fr, thin, w, flatness);
             } else {
                 moved = p + (at - p) * w;
-                if (shaped) moved = flattened(moved, at, frameBetween(centerFrame(c, k), centerFrame(c, k + 1), f), thin, w);
+                if (shaped) moved = flattened(moved, at, frameBetween(centerFrame(c, k), centerFrame(c, k + 1), f), thin, w, flatness);
             }
         }
         if (repelling) {
@@ -2720,7 +2736,7 @@ float3 latticeNoise4(float4 q, uint2 seed, uint channels) { return latticeNoise4
 
 // ---- Noise -------------------------------------------------------------------------------------
 //
-// gValue: amplitude (field 0, per point allowed), frequency, fraction (field 1, at the root);
+// gValue: amplitude (field 0, per point allowed), frequency (field 2, per strand), fraction (field 1, at the root);
 // gFlag: octaves, world space, kinky. The strand's numbers: its noise offset, its fraction draw.
 
 // Kinky: knot k's offset, and the offset at u knots along, straight between
@@ -2763,6 +2779,9 @@ float noiseAmplitude(uint s, uint i, uint n, uint p) {
     return amplitude * rampAlong(i, n);
 }
 
+// The noise's frequency at strand s (mapped: field 2, per strand).
+float noiseFrequency(uint s) { return fieldAt(2, gValue.y, s, 0); }
+
 // Point i of n of strand s (the set's point p, as it came): moved by the noise. Strand space walks
 // a far-apart offset per strand along the length; world space samples the point's own position.
 // Kinky in strand space: between knots by the share of the length (in world space, by the arc
@@ -2774,10 +2793,11 @@ float3 noiseAt(uint s, uint i, uint n, uint p, float3 v) {
     const float a = noiseAmplitude(s, i, n, p);
     if (a == 0.0f) return v;
     const float t = paramAt(i, n);
-    if (gFlag.z != 0u) return v + kinkAt(strandData(s).xyz, t * gValue.y) * a;
-    const float3 q = gFlag.y != 0 ? v * gValue.y : strandData(s).xyz + float3(0, 0, t * gValue.y);
+    const float f = noiseFrequency(s);
+    if (gFlag.z != 0u) return v + kinkAt(strandData(s).xyz, t * f) * a;
+    const float3 q = gFlag.y != 0 ? v * f : strandData(s).xyz + float3(0, 0, t * f);
     const float segments = float(n - 1);
-    const float spacing = gFlag.y != 0 ? strandLength(strandBegin(s), n) * gValue.y / segments : gValue.y / segments;
+    const float spacing = gFlag.y != 0 ? strandLength(strandBegin(s), n) * f / segments : f / segments;
     return v + vectorNoise(q, spacing) * a;
 }
 
@@ -2787,6 +2807,7 @@ float3 noiseAt(uint s, uint i, uint n, uint p, float3 v) {
 void noiseStrand(uint s, uint begin, uint n) {
     const float length = gFlag.z == 0u && gFlag.y != 0u ? strandLength(begin, n) : 0.0f;
     const float3 base = strandData(s).xyz;
+    const float f = noiseFrequency(s);
     KinkKnots knots;
     knots.k = 0.0f;
     knots.below = float3(0.0f, 0.0f, 0.0f);
@@ -2799,11 +2820,11 @@ void noiseStrand(uint s, uint begin, uint n) {
         if (a != 0.0f) {
             const float t = paramAt(i, n);
             if (gFlag.z != 0u) {
-                moved = v + kinkAlong(knots, base, t * gValue.y) * a;
+                moved = v + kinkAlong(knots, base, t * f) * a;
             } else {
-                const float3 q = gFlag.y != 0 ? v * gValue.y : base + float3(0, 0, t * gValue.y);
+                const float3 q = gFlag.y != 0 ? v * f : base + float3(0, 0, t * f);
                 const float segments = float(n - 1);
-                const float spacing = gFlag.y != 0 ? length * gValue.y / segments : gValue.y / segments;
+                const float spacing = gFlag.y != 0 ? length * f / segments : f / segments;
                 moved = v + vectorNoise(q, spacing) * a;
             }
         }
@@ -2814,7 +2835,8 @@ void noiseStrand(uint s, uint begin, uint n) {
 // Kinky in world space: knots from the noise at the root, by the arc length (as it came).
 void noiseKinkyWorld(uint s, uint begin, uint n) {
     float3 previous = loadPoint(begin);
-    const float3 base = previous * gValue.y;
+    const float f = noiseFrequency(s);
+    const float3 base = previous * f;
     float arc = 0.0f;
     KinkKnots knots;
     knots.k = 0.0f;
@@ -2827,7 +2849,7 @@ void noiseKinkyWorld(uint s, uint begin, uint n) {
         previous = v;
         const float a = noiseAmplitude(s, i, n, begin + i);
         float3 moved = v;
-        if (a != 0.0f) moved = v + kinkAlong(knots, base, arc * gValue.y) * a;
+        if (a != 0.0f) moved = v + kinkAlong(knots, base, arc * f) * a;
         storePoint(gOut, begin + i, moved);
     }
 }
@@ -2854,7 +2876,8 @@ void noiseStrandAlone(uint s, uint begin, uint n) {
         return;
     }
     // Each octave's seed and its weight at the strand's spacing (vectorNoise's: octaveWeights).
-    const float spacing = gValue.y / float(n - 1);
+    const float f = noiseFrequency(s);
+    const float spacing = f / float(n - 1);
     uint2 seeds[8];
     float weights[8];
     float cells = spacing;
@@ -2873,7 +2896,7 @@ void noiseStrandAlone(uint s, uint begin, uint n) {
             storePoint(gOut, begin + i, v);
             continue;
         }
-        const float3 q = offset + float3(0, 0, paramAt(i, n) * gValue.y);
+        const float3 q = offset + float3(0, 0, paramAt(i, n) * f);
         storePoint(gOut, begin + i, v + cachedNoise(cache, q) * a);
     }
 }
@@ -2955,7 +2978,8 @@ void NoisePointsCS(uint3 id : SV_DispatchThreadID) {
 // 0). Weight 0 leaves all of it out (the curl as before).
 //
 //
-// gValue: radius (field 0, per point allowed), frequency, randomness, phase (turns); gFlag.x: the
+// gValue: radius (field 0, per point allowed), frequency, randomness, phase (turns) (these, the
+// phase's randomness, spacingRandom and the weight: fields 1-6 per strand, curlNumbersAt); gFlag.x: the
 // shape (0 helix, 1 wave, 2 zigzag, 3 coil: a helix whose radius is coilWidths (gValue.x) strand
 // widths, its field the widths, or with gFlag.w the widths a Width before it made, in gAux0),
 // gFlag.y: the phase's randomness (a float's bits), gFlag.z: coherent by clump; the profile;
@@ -2966,8 +2990,8 @@ void NoisePointsCS(uint3 id : SV_DispatchThreadID) {
 // narrows the radius: curlStretchOf, curlStretchedShare). The
 // strand's numbers: its Rng's four draws (phase, radius and frequency variation, the plane of a
 // wave or zigzag; their bits the spacing noise's key). By clump: gAux0 each strand's clump (0xffffffff: alone), gAux1 the clumps'
-// axes as CurlAxesCS made them, gAux2 the clumps' numbers (8 floats: the normal, then the draw's
-// four). Each strand curls about an axis: its clump's, or its own points (at most CURL_SAMPLES,
+// axes as CurlAxesCS made them, gAux2 the clumps' numbers (8 floats: the normal, the first core
+// strand's index, then the draw's four). Each strand curls about an axis: its clump's, or its own points (at most CURL_SAMPLES,
 // else that many on the curve through them), walked along with its points (CurlCS); weighted, its
 // own axis is walked once before to its tip for the stretch. The GPU runs a Curl that adds no
 // points (look_chain.cpp).
@@ -3139,6 +3163,23 @@ Frame reflectFrameBy(Frame f, float3 v1, float3 t1) {
 }
 // Frame f at x0 carried to x1.
 Frame reflectFrame(float3 x0, Frame f, float3 x1, float3 t1) { return reflectFrameBy(f, x1 - x0, t1); }
+// Curl's numbers at strand s: frequency, randomness, phase, phaseRandom, spacingRandom and the weight
+// over kWeightTurns (fields 1-6, per strand; each in its param's range, a map's values too). By
+// clump, read at the clump's first core strand (look_run.h CurlInputs: its clump's one curl).
+struct CurlNumbers {
+    float frequency, randomness, phase, phaseRandom, spacing, weight;
+}
+CurlNumbers curlNumbersAt(uint s) {
+    CurlNumbers c;
+    c.frequency = fieldAt(1, gValue.y, s, 0);
+    c.randomness = clamp(fieldAt(2, gValue.z, s, 0), 0.0f, 1.0f);
+    c.phase = fieldAt(3, gValue.w, s, 0);
+    c.phaseRandom = clamp(fieldAt(4, asfloat(gFlag.y), s, 0), 0.0f, 1.0f);
+    c.spacing = clamp(fieldAt(5, gValue2.x, s, 0), 0.0f, 1.0f);
+    c.weight = max(fieldAt(6, gValue2.y, s, 0), 0.0f);
+    return c;
+}
+
 // Eased in from the root over the first quarter turn, or the first quarter
 // of the strand where that comes first.
 float curlEase(float arc, float t, float frequency) {
@@ -3152,7 +3193,7 @@ float curlEase(float arc, float t, float frequency) {
 // spacingRandom) of key `key` (from the strand's or clump's four draws).
 uint curlSpacingKey(float4 r) { return curlSpacingKey(r.x, r.y, r.z, r.w); }
 bool curlProfiled() { return gFlag2.x != 0u; }
-// Weighted curls (gValue2.y: the weight over kWeightTurns; 0: none).
+// Weighted curls (gValue2.y: the weight over kWeightTurns, mapped its multiplier; 0: none).
 bool curlWeighed() { return gValue2.y > 0.0f; }
 // Whether the profiled arc is other than the arc.
 bool curlSpaced() { return curlProfiled() || curlWeighed(); }
@@ -3171,7 +3212,7 @@ float curlStretchedShare(float r, float q, float f) {
 // The stretch at each of an axis's `samples` samples, into `hang` (each
 // sample's max(0, tangent . weightDirection) on the way in), from `turns` (its unweighted turns
 // from the root): the hang smoothed by two passes of 1-2-1, times the turns below.
-void curlStretchOf(inout float hang[CURL_SAMPLES], float turns[CURL_SAMPLES], uint samples) {
+void curlStretchOf(inout float hang[CURL_SAMPLES], float turns[CURL_SAMPLES], uint samples, float weight) {
     const uint last = samples - 1u;
     for (uint pass = 0; pass < 2u; ++pass) {
         float before = hang[0];  // sample k - 1's, as the pass found it
@@ -3182,7 +3223,7 @@ void curlStretchOf(inout float hang[CURL_SAMPLES], float turns[CURL_SAMPLES], ui
         }
     }
     const float total = turns[last];
-    for (uint k = 0; k < samples; ++k) hang[k] = 1.0f + gValue2.y * hang[k] * abs(total - turns[k]);
+    for (uint k = 0; k < samples; ++k) hang[k] = 1.0f + weight * hang[k] * abs(total - turns[k]);
 }
 // The segment's speed times frequencyProfile (0 or more; 1
 // without one) from 0 to u, two-point Gauss on each piece between the ramp's keys (segment k of
@@ -3390,7 +3431,8 @@ void curlAxisAlong<A : IAxisSamples>(uint c, A axis) {
     // Weighted: the clump's draw (CurlCS's), its hang and unweighted turns at each sample.
     const bool weighed = curlWeighed();
     const float4 draw = asfloat(gAux1.Load4((c * 8 + 4) * 4));
-    const float frequency = gValue.y * (1.0f + 0.5f * gValue.z * (-1.0f + 2.0f * draw.z));
+    const CurlNumbers cn = curlNumbersAt(gAux1.Load((c * 8 + 3) * 4));  // (at its first core strand)
+    const float frequency = cn.frequency * (1.0f + 0.5f * cn.randomness * (-1.0f + 2.0f * draw.z));
     const uint key = curlSpacingKey(draw);
     const float3 down = asfloat(gFlag2.yzw);
     float stretch[CURL_SAMPLES] = {};
@@ -3412,12 +3454,12 @@ void curlAxisAlong<A : IAxisSamples>(uint c, A axis) {
         gOut.Store((parcs + j) * 4, asuint(curlProfiled() ? parc : arc));
         if (weighed) {
             stretch[j] = max(0.0f, exactDot(f.t, down));
-            turns[j] = curlTurns(frequency, curlProfiled() ? parc : arc, gValue2.x, key);
+            turns[j] = curlTurns(frequency, curlProfiled() ? parc : arc, cn.spacing, key);
         }
     }
     if (!weighed) return;
     // The profiled arcs weighted by the stretch (Axis::weigh).
-    curlStretchOf(stretch, turns, CURL_SAMPLES);
+    curlStretchOf(stretch, turns, CURL_SAMPLES, cn.weight);
     parc = 0.0f;
     gOut.Store(parcs * 4, asuint(parc));
     gOut.Store(stretches * 4, asuint(stretch[0]));
@@ -3515,7 +3557,7 @@ float clumpAxisAt(uint c, float t, out Frame frame, out float parc, out float st
 // without a frequencyProfile or weight), its share t, the draw's numbers and spacing key, and
 // weighted, the axis's stretch there (0: none).
 float3 curlOffset(uint s, uint begin, uint i, uint n, Frame fr, float w, float phase, float vary, float frequency, float plane,
-                  uint key, float strandRadius, float stretch) {
+                  uint key, float strandRadius, float stretch, float spacing) {
     const float t = paramAt(i, n);
     // Per point: the field's value there (as the CPU reads it before the point moves); a coil's:
     // the width there (gAux0 where a Width before it made them in the run) times coilWidths.
@@ -3524,10 +3566,10 @@ float3 curlOffset(uint s, uint begin, uint i, uint n, Frame fr, float w, float p
     float r = base * vary * rampAlong(i, n) * curlEase(w, t, frequency);
     if (stretch > 0.0f) {
         // Weighted: the share of the curl's own radius a turn's wire keeps at the stretched pitch.
-        const float local = curlLocalFrequency(frequency, curlProfiled() ? rampAtOf(gRamp2, t) : 1.0f, w, gValue2.x, key);
+        const float local = curlLocalFrequency(frequency, curlProfiled() ? rampAtOf(gRamp2, t) : 1.0f, w, spacing, key);
         r *= curlStretchedShare(base * vary, stretch, local);
     }
-    const float angle = curlAngle(frequency, w, phase, gValue2.x, key);
+    const float angle = curlAngle(frequency, w, phase, spacing, key);
     if (gFlag.x == 0u || gFlag.x == 3u) return fr.n * (r * cos(angle)) + fr.b * (r * sin(angle));
     // A wave or zigzag in the plane at the strand's angle about it.
     const float3 across = fr.n * cos(plane) + fr.b * sin(plane);
@@ -3541,15 +3583,16 @@ void curlStrand(uint s) {
     if (n == 0) return;
     storePoint(gOut, begin, loadPoint(begin));  // the root stays
     if (n < 2) return;
-    const float randomness = gValue.z;
     const float strandRadius = fieldPerPoint(0) ? 0.0f : fieldAt(0, gValue.x, s, 0);
     const uint clump = gFlag.z != 0u ? gAux0.Load(s * 4) : 0xffffffffu;
     if (clump != 0xffffffffu) {
-        // With its clump: the clump's draw and axis.
+        // With its clump: the clump's draw and axis, its numbers at its first core strand.
         const float4 u = asfloat(gAux2.Load4((clump * 8 + 4) * 4));
-        const float phase = kTwoPi * (gValue.w + asfloat(gFlag.y) * u.x);
+        const CurlNumbers cn = curlNumbersAt(gAux2.Load((clump * 8 + 3) * 4));
+        const float randomness = cn.randomness;
+        const float phase = kTwoPi * (cn.phase + cn.phaseRandom * u.x);
         const float vary = 1.0f + randomness * (-1.0f + 2.0f * u.y);
-        const float frequency = gValue.y * (1.0f + 0.5f * randomness * (-1.0f + 2.0f * u.z));
+        const float frequency = cn.frequency * (1.0f + 0.5f * randomness * (-1.0f + 2.0f * u.z));
         const float plane = kTwoPi * u.w;
         const uint key = curlSpacingKey(u);
         for (uint i = 1; i < n; ++i) {
@@ -3557,14 +3600,17 @@ void curlStrand(uint s) {
             float parc, stretch;
             clumpAxisAt(clump, paramAt(i, n), fr, parc, stretch);
             storePoint(gOut, begin + i,
-                       loadPoint(begin + i) + curlOffset(s, begin, i, n, fr, parc, phase, vary, frequency, plane, key, strandRadius, stretch));
+                       loadPoint(begin + i) +
+                           curlOffset(s, begin, i, n, fr, parc, phase, vary, frequency, plane, key, strandRadius, stretch, cn.spacing));
         }
         return;
     }
     const float4 u = strandData(s);
-    const float phase = kTwoPi * (gValue.w + asfloat(gFlag.y) * u.x);
+    const CurlNumbers cn = curlNumbersAt(s);
+    const float randomness = cn.randomness;
+    const float phase = kTwoPi * (cn.phase + cn.phaseRandom * u.x);
     const float vary = 1.0f + randomness * (-1.0f + 2.0f * u.y);
-    const float frequency = gValue.y * (1.0f + 0.5f * randomness * (-1.0f + 2.0f * u.z));
+    const float frequency = cn.frequency * (1.0f + 0.5f * randomness * (-1.0f + 2.0f * u.z));
     const float plane = kTwoPi * u.w;
     const uint key = curlSpacingKey(u);
     // Its own axis, walked along with its points; its frames from the root's normal on the scalp
@@ -3582,9 +3628,9 @@ void curlStrand(uint s) {
         for (uint k = 0; k < v.samples; ++k) {
             if (k > 0u) v = ownAxisStep(v, begin, n, kNoStretch);
             stretch[k] = max(0.0f, exactDot(v.f.t, down));
-            turns[k] = curlTurns(frequency, curlProfiled() ? v.parc : v.arc, gValue2.x, key);
+            turns[k] = curlTurns(frequency, curlProfiled() ? v.parc : v.arc, cn.spacing, key);
         }
-        curlStretchOf(stretch, turns, v.samples);
+        curlStretchOf(stretch, turns, v.samples, cn.weight);
     }
     for (uint i = 1; i < n; ++i) {
         Frame fr;
@@ -3615,7 +3661,8 @@ void curlStrand(uint s) {
             pointStretch = stretch[k] + (stretch[k + 1u] - stretch[k]) * (xs - float(k));
         }
         storePoint(gOut, begin + i,
-                   loadPoint(begin + i) + curlOffset(s, begin, i, n, fr, parc, phase, vary, frequency, plane, key, strandRadius, pointStretch));
+                   loadPoint(begin + i) +
+                       curlOffset(s, begin, i, n, fr, parc, phase, vary, frequency, plane, key, strandRadius, pointStretch, cn.spacing));
     }
 }
 
@@ -3775,7 +3822,7 @@ bool curlFour(uint first) {
         begin[l] = strandBegin(first + l);
     }
     // Each strand's draw (curlStrand's) and its frame at the root (ownAxisStart's).
-    float phase[4], vary[4], frequency[4], plane[4], strandRadius[4];
+    float phase[4], vary[4], frequency[4], plane[4], strandRadius[4], spacing[4];
     uint key[4];
     float3 t0[4], n0[4], b0[4];
     for (uint l = 0; l < 4u; ++l) {
@@ -3783,9 +3830,11 @@ bool curlFour(uint first) {
         storePoint(gOut, begin[l], loadPoint(begin[l]));  // the root stays
         strandRadius[l] = fieldPerPoint(0) ? 0.0f : fieldAt(0, gValue.x, s, 0);
         const float4 u = strandData(s);
-        phase[l] = kTwoPi * (gValue.w + asfloat(gFlag.y) * u.x);
-        vary[l] = 1.0f + gValue.z * (-1.0f + 2.0f * u.y);
-        frequency[l] = gValue.y * (1.0f + 0.5f * gValue.z * (-1.0f + 2.0f * u.z));
+        const CurlNumbers cn = curlNumbersAt(s);
+        phase[l] = kTwoPi * (cn.phase + cn.phaseRandom * u.x);
+        vary[l] = 1.0f + cn.randomness * (-1.0f + 2.0f * u.y);
+        frequency[l] = cn.frequency * (1.0f + 0.5f * cn.randomness * (-1.0f + 2.0f * u.z));
+        spacing[l] = cn.spacing;
         plane[l] = kTwoPi * u.w;
         key[l] = curlSpacingKey(u);
         const float4 root = asfloat(gStrandData.Load4((gTable.y + s) * 16));
@@ -3832,7 +3881,8 @@ bool curlFour(uint first) {
             fr.b = laneOf(frames[i].b, l);
             storePoint(gOut, begin[l] + i,
                        loadPoint(begin[l] + i) +
-                           curlOffset(first + l, begin[l], i, n, fr, arcs[i][l], phase[l], vary[l], frequency[l], plane[l], key[l], strandRadius[l], 0.0f));
+                           curlOffset(first + l, begin[l], i, n, fr, arcs[i][l], phase[l], vary[l], frequency[l], plane[l], key[l], strandRadius[l], 0.0f,
+                                      spacing[l]));
         }
     }
     return true;
@@ -3856,7 +3906,7 @@ void CurlCS(uint3 id : SV_DispatchThreadID) {
 
 // ---- Width: the profile by arc length ----------------------------------------------------------
 //
-// gValue.x: width (field 0, per point allowed), gValue.y: randomness; the profile by its keys. The
+// gValue.x: width (field 0, per point allowed), gValue.y: randomness (field 1, per strand); the profile by its keys. The
 // strand's number: its Rng's uniform(-1, 1). Writes the widths (gOut), the points stay as they came.
 
 [shader("compute")]
@@ -3867,7 +3917,8 @@ void WidthCS(uint3 id : SV_DispatchThreadID) {
     const uint begin = strandBegin(s), n = strandCountOf(s);
     if (n == 0) return;
     const float total = strandLength(begin, n);
-    const float vary = gValue.y > 0.0f ? 1.0f + gValue.y * strandData(s).x : 1.0f;
+    const float randomness = clamp(fieldAt(1, gValue.y, s, 0), 0.0f, 1.0f);  // (its range: a map's values too)
+    const float vary = randomness > 0.0f ? 1.0f + randomness * strandData(s).x : 1.0f;
     float along = 0.0f;
     for (uint k = 0; k < n; ++k) {
         if (k > 0) along += len3(loadPoint(begin + k) - loadPoint(begin + k - 1));
@@ -3890,7 +3941,8 @@ void WidthPointsCS(uint3 id : SV_DispatchThreadID) {
         total += len3(loadPoint(a.begin + k) - loadPoint(a.begin + k - 1));
         if (k == a.i) along = total;
     }
-    const float vary = gValue.y > 0.0f ? 1.0f + gValue.y * strandData(a.s).x : 1.0f;
+    const float randomness = clamp(fieldAt(1, gValue.y, a.s, 0), 0.0f, 1.0f);
+    const float vary = randomness > 0.0f ? 1.0f + randomness * strandData(a.s).x : 1.0f;
     const float t = total > 1e-12f ? along / total : (a.n > 1 ? float(a.i) / float(a.n - 1) : 0.0f);
     const float w = (fieldPerPoint(0) ? fieldAt(0, gValue.x, a.s, p) : fieldAt(0, gValue.x, a.s, 0)) * vary;
     gOut.Store(p * 4, asuint(w * rampAt(t)));
@@ -3899,7 +3951,8 @@ void WidthPointsCS(uint3 id : SV_DispatchThreadID) {
 // ---- Part: each segment turned away from its part -------------------------------------------------
 //
 // gAux0: each strand's side of the parts, a float4 (the way away from its part, the distance to it;
-// -1: none), from its root (the CPU's). gValue: strength (field 0, per strand), width; the profile.
+// -1: none), from its root (the CPU's). gValue: strength (field 0, per strand), width (field 1, per
+// strand); the profile.
 // Strands within the width of a part turn each segment toward the way away, that share of the angle
 // between them (turnedToward) by the strength times the falloff (1 - d / width)^2 and the profile,
 // keeping the segments' lengths.
@@ -3911,7 +3964,7 @@ void PartCS(uint3 id : SV_DispatchThreadID) {
     if (s >= gStrandCount) return;
     const uint begin = strandBegin(s), n = strandCountOf(s);
     const float4 side = asfloat(gAux0.Load4(s * 16));
-    const float width = gValue.y;
+    const float width = max(fieldAt(1, gValue.y, s, 0), 1e-6f);  // (its range: a map's values too)
     float amount = 0.0f;
     if (n >= 2 && side.w >= 0.0f && side.w < width) {
         const float falloff = (1.0f - side.w / width) * (1.0f - side.w / width);
@@ -4313,6 +4366,7 @@ void GravityCS(uint3 id : SV_DispatchThreadID) {
     storePoint(gOut, begin, previous);
     float4 carried = float4(0.0f, 0.0f, 0.0f, 1.0f);  // the turns of the segments above
     float arc = 0.0f;
+    const float stiffness = fieldAt(1, gValue.y, s, 0);
     for (uint i = 1; i < n; ++i) {
         const float3 seg = loadPoint(begin + i) - loadPoint(begin + i - 1);
         const float len = len3(seg);
@@ -4322,7 +4376,7 @@ void GravityCS(uint3 id : SV_DispatchThreadID) {
         }
         const float3 dir = turnApplied(carried, seg / len);
         const float load = max(0.0f, total - (arc + 0.5f * len)) / total;
-        const float stiff = clamp(gValue.y * rampAt(arc / total), 0.0f, 1.0f);
+        const float stiff = clamp(stiffness * rampAt(arc / total), 0.0f, 1.0f);
         arc += len;
         const float share = 1.0f - exp(-amount * GRAVITY_BEND * (1.0f - stiff) * load * len / total);
         // The turn toward the direction (straight against it: about any way across).
@@ -4340,8 +4394,8 @@ void GravityCS(uint3 id : SV_DispatchThreadID) {
 
 // ---- Flyaway ----------------------------------------------------------------------------------------
 //
-// gValue: stray (field 0, per strand), fraction (field 1, per strand), frequency, start; gValue2.x:
-// standOut, .y: lengthen; gFlag.x: 1 (the noise's octaves), the octave's seed in gOctaveSeeds. The
+// gValue: stray (field 0, per strand), fraction (field 1, per strand), frequency (2), start (3);
+// gValue2.x: standOut (4), .y: lengthen (5), all per strand; gFlag.x: 1 (the noise's octaves), the octave's seed in gOctaveSeeds. The
 // strand's numbers: its noise offset and its draw (a stray where under the fraction), then (the
 // next block) the lengthening's draw. A stray follows its strand by index past its tip (lengthened),
 // leaving it from `start` on in slow arcs of the noise, standing out along its root's way.
@@ -4366,15 +4420,17 @@ void FlyawayCS(uint3 id : SV_DispatchThreadID) {
         return;
     }
     const float amount = fieldAt(0, gValue.x, s, 0);
-    const float extra = gValue2.y * asfloat(gStrandData.Load((gDataBlock + gStrandCount + s) * 16));
-    const float lift = gValue2.x;
+    // (Each in its param's range: a map's values too.)
+    const float extra = max(fieldAt(5, gValue2.y, s, 0), 0.0f) * asfloat(gStrandData.Load((gDataBlock + gStrandCount + s) * 16));
+    const float lift = clamp(fieldAt(4, gValue2.x, s, 0), 0.0f, 1.0f);
+    const float frequency = fieldAt(2, gValue.z, s, 0), start = clamp(fieldAt(3, gValue.w, s, 0), 0.0f, 0.99f);
     const float3 rootDir = normalized(loadPoint(begin + 1) - loadPoint(begin));
     storePoint(gOut, begin, loadPoint(begin));
     for (uint i = 1; i < n; ++i) {
         const float t = paramAt(i, n);
         const float3 p = pointAlongIn(begin, n, t * (1.0f + extra));
-        const float w = smoothstepStd(gValue.w, 1.0f, t);
-        float3 wander = vectorNoise(d.xyz + float3(0.0f, 0.0f, t * gValue.z), 0.0f);
+        const float w = smoothstepStd(start, 1.0f, t);
+        float3 wander = vectorNoise(d.xyz + float3(0.0f, 0.0f, t * frequency), 0.0f);
         wander = wander * (1.0f - lift) + rootDir * (lift * (0.5f + 0.5f * len3(wander)));
         storePoint(gOut, begin + i, p + wander * (amount * w));
     }
@@ -4699,7 +4755,7 @@ void smoothStrand(uint begin, uint n, float softness) {
 
 // ---- Wind -------------------------------------------------------------------------------------------
 //
-// gValue: strength (field 0, per strand), gust, frequency, turbulence; gValue2.xyz: the direction
+// gValue: strength (field 0, per strand), gust (field 1), frequency, turbulence (field 2); gValue2.xyz: the direction
 // (normalized as the CPU normalizes it; zero: none), .w: the flutter's phase at the evaluation's
 // time; gFlag.xyz: the float bits of how far the gusts travelled by then (the CPU's, from the time
 // in double); the profile by point index. The octave seeds: the gusts' two, the sway's, the
@@ -4744,7 +4800,8 @@ void WindCS(uint3 id : SV_DispatchThreadID) {
         copyStrand(begin, n);
         return;
     }
-    const float gust = gValue.y, frequency = gValue.z, turbulence = gValue.w;
+    // (gust and turbulence per strand, in their params' ranges: a map's values too.)
+    const float gust = clamp(fieldAt(1, gValue.y, s, 0), 0.0f, 1.0f), frequency = gValue.z, turbulence = max(fieldAt(2, gValue.w, s, 0), 0.0f);
     const float3 root = loadPoint(begin);
     const bool looped = gFlag.w != 0u;
     const float3 q = looped ? float3(0.0f, 0.0f, 0.0f) : root * frequency - asfloat(gFlag.xyz);
@@ -5428,6 +5485,9 @@ void splatSampleD(GridHead head, GridSegment g, float3 q, float t, bool isStatic
     }
 }
 
+// Static's randomness at strand s (gValue2.w; mapped: field 1, per strand), clamped to 0-1.
+float staticRandomness(uint s) { return clamp(fieldAt(1, gValue2.w, s, 0), 0.0f, 1.0f); }
+
 // A thread a segment: each sample splatted (splatSample); Static's charge: its strand's (1 +
 // randomness (3 u^2 - 1), u its per-strand number), the profile at the segment's ends.
 [shader("compute")]
@@ -5444,7 +5504,7 @@ void GridSplatCS(uint3 id : SV_DispatchThreadID) {
     float charge = 0.0f, q0 = 0.0f, q1 = 0.0f;
     if (isStatic) {
         const float u = strandData(g.s).w;
-        charge = max(0.0f, 1.0f + gValue2.w * (3.0f * u * u - 1.0f));
+        charge = max(0.0f, 1.0f + staticRandomness(g.s) * (3.0f * u * u - 1.0f));
         q0 = max(rampAlong(g.i, g.n), 0.0f);
         q1 = max(rampAlong(g.i + 1, g.n), 0.0f);
     }
@@ -6457,7 +6517,7 @@ void StaticPushCS(uint3 id : SV_DispatchThreadID) {
     if (n == 0) return;
     gOut2.Store(begin * 12, n);  // (none moved, unless below)
     const float4 data = strandData(s);
-    const float charge = max(0.0f, 1.0f + gValue2.w * (3.0f * data.w * data.w - 1.0f));
+    const float charge = max(0.0f, 1.0f + staticRandomness(s) * (3.0f * data.w * data.w - 1.0f));
     const float amount = n >= 2 ? STATIC_GAIN * max(fieldAt(0, gValue.x, s, 0), 0.0f) * charge : 0.0f;
     const GridHead head = gridHead(false);
     bool finite = true;
@@ -6617,12 +6677,11 @@ RootAxes rootAxesOf(uint s, uint begin, uint n, float3 reference, bool byUV) {
     return a;
 }
 
-// Bend. gValue: angle (field 0, per strand), start, end, randomness; gFlag.x:
+// Bend. gValue: angle (field 0, per strand), start (1), end (2), randomness (3), each per strand; gFlag.x:
 // along (0 the normal, 1 the tangent, 2 the direction); gValue2.xyz: the direction; the strand's
 // number .x: its randomness draw. Each segment, from the root out, turned toward the target by the
 // bend reached at its end point, never past it.
-float bendShare(float t) {
-    const float start = gValue.y, end = gValue.z;
+float bendShare(float t, float start, float end) {
     if (end > start) return clamp((t - start) / (end - start), 0.0f, 1.0f);
     return t >= start ? 1.0f : 0.0f;
 }
@@ -6634,7 +6693,10 @@ void BendCS(uint3 id : SV_DispatchThreadID) {
     if (s >= gStrandCount) return;
     const uint begin = strandBegin(s), n = strandCountOf(s);
     float degrees = n >= 2 ? fieldAt(0, gValue.x, s, 0) : 0.0f;
-    if (gValue.w > 0.0f) degrees *= 1.0f - gValue.w * strandData(s).x;
+    // (start, end and randomness in their params' range, 0-1: a map's values too.)
+    const float randomness = clamp(fieldAt(3, gValue.w, s, 0), 0.0f, 1.0f);
+    const float start = clamp(fieldAt(1, gValue.y, s, 0), 0.0f, 1.0f), end = clamp(fieldAt(2, gValue.z, s, 0), 0.0f, 1.0f);
+    if (randomness > 0.0f) degrees *= 1.0f - randomness * strandData(s).x;
     const float3 p0 = n >= 2 ? loadPoint(begin) : float3(0.0f, 0.0f, 0.0f);
     const float3 chord = n >= 2 ? normalized(loadPoint(begin + n - 1) - p0) : float3(0.0f, 0.0f, 0.0f);
     if (degrees == 0.0f || len3(chord) < 0.5f) {
@@ -6678,21 +6740,18 @@ void BendCS(uint3 id : SV_DispatchThreadID) {
         const float3 p = loadPoint(begin + i);
         const float3 segment = p - previous;
         previous = p;
-        const float turn = degrees * SHAPER_RADIANS * bendShare(paramAt(i, n));
+        const float turn = degrees * SHAPER_RADIANS * bendShare(paramAt(i, n), start, end);
         bent = bent + (turn == 0.0f ? segment : twistAbout(axis, segment, turn));
         storePoint(gOut, begin + i, bent);
     }
 }
 
-// Direction. gValue: inclination, roll, strength (each its number, or
-// field gFlag.y, .z, .w: 0 or 1, 2 none, 3 the strand's own: all three mapped, look_run.h
-// StageInputs::directions, component c), inclinationRandom; gValue2.xyz: the direction roll 0 points
-// along, .w: rollRandom; gFlag.x: by the scalp's UVs; the strand's numbers .xy: its draws. Each strand
-// rooted on the scalp turned about its root toward its inclination and roll, by the strength's share.
-float directionParam(uint slot, float number, uint s, uint c) {
-    if (slot == 3u) return asfloat(gStrandData.Load((gTable.z + s) * 16 + c * 4));
-    return slot < 2u ? fieldAt(slot, number, s, 0) : number;
-}
+// Direction. gValue: inclination, roll, strength, inclinationRandom (each its number, or the field
+// gFlag.y, .z, .w, gFlag2.x holds: the field's index, 12 none, look_stage_params.h
+// kDirectionNumber); gValue2.xyz: the direction roll 0 points along, .w: rollRandom (its field
+// gFlag2.y); gFlag.x: by the scalp's UVs; the strand's numbers .xy: its draws. Each strand rooted on
+// the scalp turned about its root toward its inclination and roll, by the strength's share.
+float directionParam(uint slot, float number, uint s) { return slot < 12u ? fieldAt(slot, number, s, 0) : number; }
 
 [shader("compute")]
 [numthreads(GROUP_SIZE, 1, 1)]
@@ -6701,16 +6760,17 @@ void DirectionCS(uint3 id : SV_DispatchThreadID) {
     if (s >= gStrandCount) return;
     const uint begin = strandBegin(s), n = strandCountOf(s);
     const bool rooted = n >= 2 && rootFrameOf(s, 0u).w != 0.0f;
-    const float w = rooted ? min(directionParam(gFlag.w, gValue.z, s, 2u), 1.0f) : 0.0f;
+    const float w = rooted ? min(directionParam(gFlag.w, gValue.z, s), 1.0f) : 0.0f;
     const float3 current = w > 0.0f ? firstDirectionIn(begin, n) : float3(0.0f, 0.0f, 0.0f);
     if (!(w > 0.0f) || len3(current) < 0.5f) {
         copyStrand(begin, n);
         return;
     }
     const float4 d = strandData(s);
-    float incline = directionParam(gFlag.y, gValue.x, s, 0u), roll = directionParam(gFlag.z, gValue.y, s, 1u);
-    if (gValue.w > 0.0f) incline += gValue.w * d.x;
-    if (gValue2.w > 0.0f) roll += gValue2.w * d.y;
+    float incline = directionParam(gFlag.y, gValue.x, s), roll = directionParam(gFlag.z, gValue.y, s);
+    const float inclineRandom = directionParam(gFlag2.x, gValue.w, s), rollRandom = directionParam(gFlag2.y, gValue2.w, s);
+    if (inclineRandom > 0.0f) incline += inclineRandom * d.x;
+    if (rollRandom > 0.0f) roll += rollRandom * d.y;
     const RootAxes a = rootAxesOf(s, begin, n, gValue2.xyz, gFlag.x != 0u);
     const float i = incline * SHAPER_RADIANS, r = roll * SHAPER_RADIANS;
     const float3 target = a.n * cos(i) + (a.t * cos(r) + a.b * sin(r)) * sin(i);
@@ -6730,7 +6790,7 @@ void DirectionCS(uint3 id : SV_DispatchThreadID) {
     for (uint k = 1; k < n; ++k) storePoint(gOut, begin + k, p0 + twistAbout(axis, loadPoint(begin + k) - p0, angle));
 }
 
-// Transform. gValue: scale (field 0, per strand), scaleRandom; gFlag.x:
+// Transform. gValue: scale (field 0, per strand), scaleRandom (field 1, per strand); gFlag.x:
 // world (about the pivot), .y: nothing to do, .z: a random move, .w: a random turn; gValue2.xyz:
 // translate; the octave seeds' rows (look_chain.h StageParams::more): rotate, pivot,
 // translateRandom, rotateRandom; the strand's numbers: its seven draws (two blocks).
@@ -6760,7 +6820,8 @@ void TransformCS(uint3 id : SV_DispatchThreadID) {
     float3 move = gValue2.xyz, turn = moreRow(0u);
     if (gFlag.z != 0u) move += moreRow(2u) * float3(d0.x, d0.y, d0.z);
     if (gFlag.w != 0u) turn += moreRow(3u) * float3(d0.w, d1.x, d1.y);
-    if (gValue.y > 0.0f) k *= max(0.0f, 1.0f + gValue.y * d1.z);
+    const float scaleRandom = clamp(fieldAt(1, gValue.y, s, 0), 0.0f, 1.0f);  // (its range: a map's values too)
+    if (scaleRandom > 0.0f) k *= max(0.0f, 1.0f + scaleRandom * d1.z);
     float3 origin = moreRow(1u), offset = move;
     float3 ax = float3(1.0f, 0.0f, 0.0f), ay = float3(0.0f, 1.0f, 0.0f), az = float3(0.0f, 0.0f, 1.0f);
     if (gFlag.x == 0u) {
@@ -7451,8 +7512,9 @@ void BlendNeighborsCS(uint3 id : SV_DispatchThreadID) {
 
 // ---- Tangle: a thread a strand -------------------------------------------------------------------
 //
-// gValue: strength (field 0, per strand), start, span, reach. gAux0: 4 words a
-// strand (look_chain.h TangleInputs): its partner, its span's draw, the share it moves. Over its
+// gValue: strength (field 0, per strand), start (1), span (2), reach (3), each per strand (start
+// and span those of the strand its span's draw is). gAux0: 4 words a strand (look_chain.h
+// TangleInputs): its partner, its span's draw, the share it moves, the strand whose draw. Over its
 // span (its middle lo + (hi - lo) x the draw) each point pulled onto its partner's point at the same
 // place along it by share x strength x a bump, let go from half the reach to the reach; then each
 // segment back at its length from the root out.
@@ -7469,12 +7531,14 @@ void TangleCS(uint3 id : SV_DispatchThreadID) {
         return;
     }
     const uint pb = strandBegin(w4.x), pn = strandCountOf(w4.x);
-    const float half = 0.5f * gValue.z;
-    const float lo = min(gValue.y + half, 1.0f), hi = max(1.0f - half * 0.5f, lo);
+    // (Each in its param's range: a map's values too.)
+    const float start = clamp(fieldAt(1, gValue.y, w4.w, 0), 0.0f, 1.0f), span = clamp(fieldAt(2, gValue.z, w4.w, 0), 0.01f, 1.0f);
+    const float half = 0.5f * span;
+    const float lo = min(start + half, 1.0f), hi = max(1.0f - half * 0.5f, lo);
     const float center = lo + (hi - lo) * asfloat(w4.y);
     const float share = asfloat(w4.z);
     const float strength = clamp(fieldAt(0, gValue.x, s, 0), 0.0f, 1.0f);
-    const float reach = gValue.w;
+    const float reach = max(fieldAt(3, gValue.w, s, 0), 0.0f);
     bool moved = false;
     for (uint i = 1; i < n; ++i) {
         const float t = paramAt(i, n);
@@ -7511,8 +7575,8 @@ void TangleCS(uint3 id : SV_DispatchThreadID) {
 // cinematic_ops.cpp FlowOp: each strand traced along the flow over the skin from its root, step by
 // step (its heading eased toward the field where the trace is over the skin, risen by the lift, its
 // point snapped to the scalp's closest point and lifted by the height risen so far), its segments'
-// lengths kept. gValue: lift (degrees: field 0 per strand times it), bend, the jitter (rollRandom in
-// radians; the strand's draw, -1 to 1, in its numbers); gFlag: x arrows, y the field's vertices
+// lengths kept. gValue: lift (degrees: field 0 per strand times it), bend (field 1), the jitter
+// (rollRandom in radians: field 2 times it; the strand's draw, -1 to 1, in its numbers); gFlag: x arrows, y the field's vertices
 // baked (0: none), z its pins; gFlag2: x its sinks, y a scalp (its tables in gAux2, the closest
 // points found down its mesh). gAux0: 12 floats a
 // strand (look_chain.h FlowInputs: the root's face's bits, u, v; the normal there; the field there);
@@ -7762,9 +7826,10 @@ void FlowCS(uint3 id : SV_DispatchThreadID) {
     const bool arrows = gFlag.x != 0;
     const float3 p0 = loadPoint(begin);
     float3 normal = onScalp ? w1.xyz : normalized(loadPoint(begin + 1) - p0);
-    const float spin = gValue.z > 0.0f ? gValue.z * strandData(s).x : 0.0f;
+    const float jitter = fieldAt(2, gValue.z, s, 0);
+    const float spin = jitter > 0.0f ? jitter * strandData(s).x : 0.0f;
     const float lift = fieldAt(0, gValue.x, s, 0) * 0.0174532925f;
-    const float bend = gValue.y;
+    const float bend = clamp(fieldAt(1, gValue.y, s, 0), 0.0f, 1.0f);  // (its range: a map's values too)
     const float length = strandLength(begin, n);
     const float3 rootNormal = normal;
     float3 skin = p0;
@@ -7820,7 +7885,7 @@ void FlowCS(uint3 id : SV_DispatchThreadID) {
 //
 // AffectCS (a thread a strand): a masked node's result (gOut its points; gOut2 a Width's widths)
 // mixed back toward what the node took (gIn; gAux1 the widths it took) by its affect: the field
-// its first stage holds (gField.xy, fieldAt's param 0) times its number (gValue.x); per point where
+// its first stage holds (gField.x, fieldAt's param 0) times its number (gValue.x); per point where
 // the field is per point, else the strand's (its root's), clamped to
 // 0-1 (NaN: 0): 1 the result as it is, 0 what it took, between a mix of the two. gFlag.y: the
 // widths mixed; gFlag.z: the points.
@@ -7929,7 +7994,8 @@ void JiggleCS(uint3 id : SV_DispatchThreadID) {
 // MeshCutCS (a thread a strand): each strand cut where it first crosses the mesh (keep outside, an
 // obstacle: where it goes in; inside, a hull: where it comes out), the kept part `offset` (gValue.x)
 // shorter spread over its points again by arc length; a strand rooted on the side cut away cut to
-// nothing (every point at its root, which side by the closest point's normal there). Where it
+// nothing (every point at its root, which side by the closest point's normal there); the offset
+// field 0, per strand. Where it
 // crosses: each segment, root to tip, a ray against the mesh's tree (scalp_mesh.cpp rayOnTree, its
 // Moller-Trumbore test) from gAux0, laid out as ScalpMesh::rayTree lays it (RAY_TREE_*). gFlag.x 1:
 // keep inside; gFlag.y 0: no mesh (the strands as they came).
@@ -8119,7 +8185,7 @@ void MeshCutCS(uint3 id : SV_DispatchThreadID) {
         return;
     }
     // The kept part spread over the strand's points again (resampleByArcLengthInto).
-    const float kept = max(crossing - gValue.x, 0.0f);
+    const float kept = max(crossing - max(fieldAt(0, gValue.x, s, 0), 0.0f), 0.0f);  // (the offset: field 0, per strand, at least 0)
     const float step = total * clamp(min(kept / total, 1.0f), 0.0f, 1.0f) / float(n - 1);
     ArcWalk w = arcWalkStart(begin);
     for (uint i = 0; i < n; ++i) storePoint(gOut, begin + i, arcWalkAt(w, begin, n, step * float(i)));

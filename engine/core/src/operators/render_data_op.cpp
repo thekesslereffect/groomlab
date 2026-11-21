@@ -35,7 +35,9 @@ public:
                 .range(0, 1)
                 .in("Opacity"),
             ParamSpec{"opacityProfile", Ramp::constant(1.0f), "Opacity along the strand, root to tip, times opacity"}.in("Opacity"),
-            ParamSpec{"opacityRandom", 0.0, "Each strand up to this share less opaque, at random", "fraction"}.range(0, 1).in("Opacity"),
+            ParamSpec{"opacityRandom", 0.0, "Each strand up to this share less opaque, at random (mappable)", "fraction"}
+                .range(0, 1)
+                .in("Opacity"),
             notAnimatable({"seed", std::int64_t{0}, "Random seed"}).adv(),
         };
     }
@@ -58,11 +60,12 @@ private:
              StrandChanges* changed) const {
         const StrandsPtr in = requireStrands(inputs, 0, op::kRenderData);
         const ScalpMesh* scalp = scalpOf(ctx);
-        const ScalarField opacity(params(), "opacity", scalp);
+        const ScalarField opacity(params(), "opacity", scalp), opacityRandom(params(), "opacityRandom", scalp);
         opacity.validate(*in);
-        const bool local = opacity.strandLocal(), readsPoints = opacity.readsPositions();
+        opacityRandom.validate(*in);
+        const bool local = opacity.strandLocal() && opacityRandom.strandLocal();
+        const bool readsPoints = opacity.readsPositions() || opacityRandom.readsPositions();
         const Ramp profile = params().getRamp("opacityProfile");
-        const auto opacityRandom = static_cast<float>(params().getDouble("opacityRandom"));
         const auto seed = static_cast<std::uint64_t>(params().getInt("seed"));
 
         const StrandChanges* changes = nullptr;
@@ -90,7 +93,8 @@ private:
         const bool perPoint = opacity.perPoint();  // (a field per point read at each point, as Bands reads it)
         auto write = [&](std::size_t s) {
             float strand = perPoint ? 1.0f : std::clamp(opacity.at(*out, s), 0.0f, 1.0f);
-            if (opacityRandom > 0.0f) strand *= 1.0f - opacityRandom * unitFloat(hashCombine(out->ids()[s], seed ^ 0x0BAC17ull));
+            const float random = std::clamp(opacityRandom.at(*out, s), 0.0f, 1.0f);
+            if (random > 0.0f) strand *= 1.0f - random * unitFloat(hashCombine(out->ids()[s], seed ^ 0x0BAC17ull));
             const std::size_t begin = out->strandBegin(s), n = out->strandPointCount(s);
             for (std::size_t i = 0; i < n; ++i) {
                 const float here = perPoint ? std::clamp(opacity.atPoint(*out, s, i), 0.0f, 1.0f) : 1.0f;

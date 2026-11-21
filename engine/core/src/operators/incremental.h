@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cstring>
 #include <functional>
+#include <initializer_list>
 #include <memory>
 #include <string>
 #include <vector>
@@ -175,6 +176,10 @@ struct EngineStage {
 // done. `local`: every mapped value reads each strand alone.
 bool rerunChanged(const StrandsPtr& in, bool local, const IncrementalInputs* incremental, Value* result, StrandChanges* changed,
                   const EngineStage& engine);
+// Whether the params `names` of `params` (their maps validated on `in`, as the node reads them)
+// each read a strand alone (ScalarField::strandLocal): rerunChanged's `local` for a node's mapped
+// numbers.
+bool paramsStrandLocal(const ParamSet& params, std::initializer_list<const char*> names, const ScalpMesh* scalp, const StrandSet& in);
 // The same of a node that may have nothing to do. `identity`: the strands pass through as they
 // came (so does an empty set); `otherInputsSame`: its inputs besides the strands are as they were.
 bool reshapeEach(const StrandsPtr& in, bool identity, bool local, const IncrementalInputs* incremental, bool otherInputsSame,
