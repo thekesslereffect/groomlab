@@ -217,6 +217,26 @@ TEST(Brush, CombWithStretchChangesLength) {
             endShiftSmoothing(zs, BrushMode::Comb);
             EXPECT_FALSE(zs.stretchSmoothing);
         }
+        // A loop pulled out of a guide's middle (Snake Hook: points added), then smoothed back with
+        // Shift: as it relaxes, most of the points it gained go again.
+        GuideHierarchy l;
+        const GroupId lg = l.addGroup("primary");
+        const GuideId lid = l.addGuide(lg, test::straightCurve({0, 0, 0}, {0, 2, 0}, 20));
+        l.evaluate(nullptr);
+        BrushSettings ls;
+        ls.mode = BrushMode::Comb;
+        ls.stretch = true;
+        ls.radius = 0.25f;
+        ls.strength = 1.0f;
+        applyBrushStroke(l, nullptr, ls, {{0, 1.0f, 0}, {0.3f, 1.0f, 0}, {0.6f, 1.0f, 0}, {0.9f, 1.0f, 0}});
+        const std::size_t pulled = l.guide(lid)->points.size();
+        ASSERT_GT(pulled, 30u);
+        useShiftSmoothing(ls);
+        ls.radius = 1.2f;
+        for (int k = 0; k < 40; ++k) applyBrushStroke(l, nullptr, ls, {{0.2f, 1.0f, 0}, {0.21f, 1.0f, 0}});
+        const std::size_t smoothed = l.guide(lid)->points.size();
+        EXPECT_LT(smoothed, pulled - (pulled - 21) / 2) << pulled << " points pulled, " << smoothed << " after smoothing";
+        EXPECT_GE(smoothed, 2u);
     }
 
     // Pushed back toward the root: shorter, and points go with the length.

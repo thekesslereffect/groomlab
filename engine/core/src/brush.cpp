@@ -287,6 +287,29 @@ std::vector<Vec3f> stretched(const std::vector<Vec3f>& moved, std::size_t first,
     return out;
 }
 
+// Comb's Shift smoothing with Stretch on: the span the brush smoothed (the point before the first
+// moved to the point after the last) respaced to as many segments as its length over `spacing`
+// gives, so points go as it relaxes and shortens (and the span stays evenly spaced); the parts
+// outside it kept point for point. Without a spacing, the points as smoothed.
+std::vector<Vec3f> relaxedSpan(const std::vector<Vec3f>& moved, std::size_t first, std::size_t last, float spacing) {
+    const std::size_t n = moved.size();
+    if (!(spacing > 0.0f) || n < 2) return moved;
+    const std::size_t from = first - 1;
+    const std::size_t to = std::min(last + 1, n - 1);
+    const std::size_t spanPoints = to - from + 1;
+    const float length = arcLength(moved.data() + from, spanPoints);
+    if (!std::isfinite(length)) return moved;
+    // (never more than it had: smoothing only takes points away)
+    const std::size_t segments =
+        std::clamp<std::size_t>(static_cast<std::size_t>(std::max(std::lround(length / spacing), 1L)), 1, spanPoints - 1);
+    if (segments == spanPoints - 1) return moved;
+    const std::vector<Vec3f> span = resampleByArcLength(moved.data() + from, spanPoints, segments + 1);
+    std::vector<Vec3f> out(moved.begin(), moved.begin() + static_cast<std::ptrdiff_t>(from));
+    out.insert(out.end(), span.begin(), span.end());
+    out.insert(out.end(), moved.begin() + static_cast<std::ptrdiff_t>(to) + 1, moved.end());
+    return out;
+}
+
 // `spacing`: the guide's mean segment length when the stroke began (BrushStrokeCache; 0 without
 // one), what Comb's Stretch keeps its segments at.
 template <class Weigh>
@@ -343,8 +366,8 @@ Edit brushGuide(const HierarchyGuide& g, const ScalpMesh* scalp, const BrushSett
             if (moved.empty()) return e;
             // Comb's Shift smoothing with Stretch on: the shape relaxes and shortens where it
             // straightens (its lengths forced back, short segments a Snake Hook left would kink),
-            // points going where segments shrink (stretched); else each segment keeps its length.
-            e.points = s.stretchSmoothing ? stretched(moved, first, last, spacing) : keepLengths(moved, segmentLengths(pts));
+            // points going with the length (relaxedSpan); else each segment keeps its length.
+            e.points = s.stretchSmoothing ? relaxedSpan(moved, first, last, spacing) : keepLengths(moved, segmentLengths(pts));
             return e;
         }
         case BrushMode::Lift: {
