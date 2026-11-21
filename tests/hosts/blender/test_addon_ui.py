@@ -255,13 +255,11 @@ class DefinitionsTest(unittest.TestCase):
         # The Photos tab's menus: the photo's (its actions need a photo picked) and the pairs'.
         self.assertEqual(texts(drawn(bpy.types.GROOMLAB_MT_photo_context)), ["Import Photo..."])
         edits = drawn(bpy.types.GROOMLAB_MT_guide_edits)
-        self.assertEqual(texts(edits)[:13], ["Children", "Sync +X → -X", "Sync -X → +X", "Select Mirror Guides",
-                                             "Copy Shape to Other Side", "Mirror Group...", "Reparent...",
-                                             "New Group from Selection", "Copy Guides",  # (Paste: a group picked)
-                                             "Promote / Demote...", "From Curves", "Clear Selection",
-                                             "Lock"])  # From Curves: Blender's curve objects
-        # Groups' right-click menu without a group: New Group only.
-        self.assertEqual(texts(drawn(bpy.types.GROOMLAB_MT_group_context)), ["New Group..."])
+        # (Mirror and Move to Group are submenus; Paste Guides needs a group picked.)
+        self.assertEqual(texts(edits)[:6], ["Children", "Reparent...", "Copy Guides", "From Curves", "Clear Selection",
+                                            "Lock"])  # From Curves: Blender's curve objects
+        # Groups' right-click menu without a group: New Group and Promote / Demote.
+        self.assertEqual(texts(drawn(bpy.types.GROOMLAB_MT_group_context)), ["New Group...", "Promote / Demote..."])  # (its dialog picks the group)
         # Every operator's tooltip from actions.json.
         self.assertEqual(bpy.types.GROOMLAB_OT_guides_edit.description(bpy.context, types.SimpleNamespace(action="MIRROR_SELECTION")),
                          defs.tip("guides.mirrorSelection"))
@@ -312,7 +310,8 @@ class ToolsTest(unittest.TestCase):
         self.assertAlmostEqual(g.color[0], 1.0, places=2)
         self.assertIn("group.color", menu.state(bpy.context))
         log = drawn(bpy.types.GROOMLAB_MT_group_context)
-        self.assertEqual(texts(log), ["New Group...", "Rename", "Color...", "Default Color", "Select Guides", "Reset Segments", "Delete"])
+        self.assertEqual(texts(log), ["New Group...", "Rename", "Color...", "Default Color", "Select Guides", "Reset Segments",
+                                      "Promote / Demote...", "Paste Guides Here", "Delete"])
         self.assertEqual(bpy.ops.groomlab.group_edit(action="DEFAULT_COLOR", group="primary"), {"FINISHED"})
         g = next(g for g in t.groups if g.name == "primary")
         self.assertFalse(g.has_color)
