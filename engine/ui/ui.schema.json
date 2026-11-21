@@ -90,6 +90,23 @@
           {"type": "object", "additionalProperties": false, "required": ["tool"], "properties": {"tool": {"type": "string"}}}]}}
       }
     },
+    "radialMenu": {
+      "type": "object", "additionalProperties": false, "required": ["items", "brushOptions"],
+      "properties": {
+        "about": {"type": "string"},
+        "items": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/radialItem"}},
+        "brushOptions": {
+          "type": "object", "additionalProperties": false, "required": ["positions", "tools"],
+          "properties": {
+            "positions": {"type": "array", "minItems": 1, "maxItems": 8, "items": {"$ref": "#/$defs/compass"}},
+            "tools": {"type": "object", "additionalProperties": {"type": "array", "maxItems": 8, "items": {
+              "type": "object", "additionalProperties": false,
+              "properties": {"setting": {"type": "string"}, "value": {"type": "string"}, "action": {"$ref": "#/$defs/id"},
+                             "label": {"type": "string", "minLength": 1}}}}}
+          }
+        }
+      }
+    },
     "graph": {
       "type": "object",
       "properties": {
@@ -120,6 +137,17 @@
     }
   },
   "$defs": {
+    "compass": {"enum": ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]},
+    "radialItem": {
+      "type": "object", "additionalProperties": false, "required": ["position"],
+      "properties": {
+        "position": {"$ref": "#/$defs/compass"}, "label": {"type": "string", "minLength": 1}, "tip": {"type": "string"},
+        "icon": {"type": "string"}, "tool": {"type": "string"}, "action": {"$ref": "#/$defs/id"},
+        "offLabel": {"type": "string", "minLength": 1},
+        "generator": {"enum": ["brushOptions", "guideGroups"]},
+        "items": {"type": "array", "minItems": 1, "maxItems": 8, "items": {"$ref": "#/$defs/radialItem"}}
+      }
+    },
     "propertySection": {
       "type": "object", "additionalProperties": false, "required": ["id", "label", "items"],
       "properties": {

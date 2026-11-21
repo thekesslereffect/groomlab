@@ -2,20 +2,32 @@
 #include "app_actions.h"
 
 #include <algorithm>
+#include <cmath>
+#include <functional>
 #include <optional>
+#include <stdexcept>
 
 #include <QApplication>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDesktopServices>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QDir>
 #include <QDockWidget>
 #include <QFile>
 #include <QFileInfo>
+#include <QFormLayout>
+#include <QKeySequenceEdit>
+#include <QLabel>
 #include <QMenu>
 #include <QMenuBar>
+#include <QPushButton>
+#include <QSignalBlocker>
+#include <QSpinBox>
 #include <QStandardPaths>
 #include <QUrl>
+#include <QVBoxLayout>
 
 #include "app_shell.h"
 #include "cards_panel.h"
@@ -30,9 +42,13 @@
 #include "overlay.h"
 #include "reference_window.h"
 #include "theme.h"
+#include "tube_panel.h"
+#include "tube_shape_editor.h"
 #include "viewport.h"
 
+#include "groomlab/brush.h"
 #include "groomlab/brush_catalog.h"
+#include "groomlab/display.h"
 #include "groomlab/presets.h"
 
 namespace groomlab::app {
@@ -168,10 +184,97 @@ ui::Bindings AppActions::bindings(MainWindow& w) {
     b["display.hideAllHair"] = {run([m] { m->setHairVisible(false); }), {}, groomOpen, {}, {}, QStringLiteral("hideAllHair")};
     b["display.showAllGuides"] = {run([m] { m->setGuidesVisible(true); }), {}, groomOpen, {}, {}, QStringLiteral("showAllGuides")};
     b["display.hideAllGuides"] = {run([m] { m->setGuidesVisible(false); }), {}, groomOpen, {}, {}, QStringLiteral("hideAllGuides")};
-    b["display.toggleGuides"] = {run([m] { m->setGuidesVisible(!m->guidesVisible()); }), {}, groomOpen, {}, {}, QStringLiteral("toggleGuides")};
+    b["display.toggleGuides"] = {run([m] { m->setGuidesVisible(!m->guidesVisible()); }), [m](const json&) { return m->guidesVisible(); },
+                                 groomOpen, {}, {}, QStringLiteral("toggleGuides")};
+    b["display.toggleHair"] = {run([m] { m->setHairVisible(!m->hairVisible()); }), [m](const json&) { return m->hairVisible(); },
+                               groomOpen, {}, {}, QStringLiteral("toggleHair")};
+    // The Properties' Display > Tubes: the tubes shaded in Groom mode whatever the brush.
+    b["display.tubesAlways"] = {run([m] { m->tubes_->setChecked(!m->tubes_->isChecked()); }), [m](const json&) { return m->tubes_->isChecked(); },
+                                groomOpen, {}, {}, QStringLiteral("tubesAlways")};
+
+    // ---- The radial menu's Masking and Visibility (marking_menu.json) ----
+    // Masking: the freeze mask (Full every guide unfrozen, Empty every guide frozen); its Select and
+    // Mask Brush are the Select and Freeze tools.
+    b["mask.full"] = {run([m] {
+                          if (!m->document_) return;
+                          m->document_->editGuides("unfreeze all", [](GuideHierarchy& h) { unfreezeAll(h); });
+                          m->guidesEdited();
+                      }),
+                      {}, groomOpen, {}, {}, QStringLiteral("maskFull")};
+    b["mask.empty"] = {run([m] {
+                           if (!m->document_) return;
+                           m->document_->editGuides("freeze all", [](GuideHierarchy& h) { soloGuides(h, {}); });
+                           m->guidesEdited();
+                       }),
+                       {}, groomOpen, {}, {}, QStringLiteral("maskEmpty")};
+    // Quick Select: the Select tool for one pick (the rest frozen), then back to the tool mode it
+    // came from (the brush as it was: MainWindow's selectionChanged).
+    b["mask.quickSelect"] = {run([m] {
+                                 const Viewport::ToolMode from = m->viewport_->toolMode();
+                                 m->setUiMode(QStringLiteral("groom"));
+                                 m->brush_.selectHides = false;
+                                 m->viewport_->setToolMode(Viewport::ToolMode::Select);
+                                 m->quickSelectBack_ =
+                                     static_cast<int>(from == Viewport::ToolMode::Select ? Viewport::ToolMode::Camera : from);
+                                 const BrushEntry* e = brushEntry(m->brush_.toolId());
+                                 m->notify(from == Viewport::ToolMode::Brush && e
+                                               ? QObject::tr("Pick the guides to work on: then back to %1").arg(QString::fromStdString(e->label))
+                                               : QObject::tr("Pick the guides to work on"));
+                             }),
+                             {}, groomOpen, {}, {}, QStringLiteral("maskQuickSelect")};
+    // Visibility: guides hidden one by one (kHiddenLayer: hidden guides are locked too). Select is
+    // the Select tool hiding what the lasso leaves out (BrushSession::selectHides).
+    b["visibility.select"] = {run([m] {
+                                  m->setUiMode(QStringLiteral("groom"));
+                                  m->viewport_->setToolMode(Viewport::ToolMode::Select);
+                                  m->brush_.selectHides = true;
+                                  m->notify(QObject::tr("Lasso the guides to keep: every other guide hides (a pick of nothing shows them all)"));
+                              }),
+                              {}, groomOpen, {}, {}, QStringLiteral("visibilitySelect")};
+    b["visibility.showAll"] = {run([m] {
+                                   if (!m->document_) return;
+                                   const auto h = m->document_->session().authoredHierarchy();
+                                   if (!h || !anyGuideHidden(*h)) {
+                                       m->notify(QObject::tr("No guide is hidden"));
+                                       return;
+                                   }
+                                   m->document_->editGuides("show all guides", [](GuideHierarchy& g) { unfreezeAll(g, kHiddenLayer); });
+                                   m->guidesEdited();
+                               }),
+                               {}, groomOpen, {}, {}, QStringLiteral("visibilityShowAll")};
+    b["visibility.invert"] = {run([m] {
+                                  if (!m->document_) return;
+                                  m->document_->editGuides("invert hidden guides", [](GuideHierarchy& g) { invertHidden(g); });
+                                  m->guidesEdited();
+                              }),
+                              {}, groomOpen, {}, {}, QStringLiteral("visibilityInvert")};
+    // Tube's Draw Root and Edit Root: the Tube card's Draw root and Edit roots (the root mode, a
+    // root tube's outline clicked on the scalp, or the roots' outlines edited); picked again, they
+    // leave it (Edit: Finish edit), as the card's buttons do.
+    auto rootMode = [m](RootTubeTool::Mode a, RootTubeTool::Mode b2) {
+        return m->brush_.rootMode() && (m->brush_.roots().mode() == a || m->brush_.roots().mode() == b2);
+    };
+    auto tubeRoots = [m](bool draw) {
+        m->setUiMode(QStringLiteral("groom"));
+        if (m->brush_.toolId() != "shape" || m->viewport_->toolMode() != Viewport::ToolMode::Brush) m->chooseTool(QStringLiteral("shape"));
+        m->shell_->groomToolsDock()->show();
+        m->shell_->groomToolsDock()->raise();
+        TubePanel* tubes = m->groomTools_->tubePanel();
+        if (!tubes) return;
+        if (draw) tubes->drawRoot();
+        else tubes->editRoots();
+    };
+    b["tube.drawRoot"] = {run([tubeRoots] { tubeRoots(true); }),
+                          [rootMode](const json&) { return rootMode(RootTubeTool::Mode::Place, RootTubeTool::Mode::Draw); }, groomOpen,
+                          {}, {}, QStringLiteral("tubeDrawRoot")};
+    b["tube.editRoot"] = {run([tubeRoots] { tubeRoots(false); }),
+                          [rootMode](const json&) { return rootMode(RootTubeTool::Mode::Edit, RootTubeTool::Mode::Edit); }, groomOpen,
+                          {}, {}, QStringLiteral("tubeEditRoot")};
 
     // ---- The GroomLab menu ----
     // Groom Tools: the dock shown and raised (Groom mode, where it lives).
+    // GroomLab > Radial Menu Settings...: its shortcut and size (showRadialMenuSettings).
+    b["radial.settings"] = {run([m] { AppActions::showRadialMenuSettings(*m); }), {}, {}, {}, {}, QStringLiteral("radialSettings")};
     b["tools.open"] = {run([m] {
                            m->setUiMode(QStringLiteral("groom"));
                            m->shell_->groomToolsDock()->show();
@@ -468,85 +571,344 @@ ui::FillOptions AppActions::fillOptions(MainWindow& w) {
     return options;
 }
 
-// ---- The marking menu (marking_menu.json, as Maya's hotkeys.py) -------------------------------------
+// ---- The radial menu (marking_menu.json's radialMenu, as GroomBear's and RadialZ's) ---------------
 
-std::vector<MarkingMenu::Item> AppActions::markingMenuItems(MainWindow& w) {
+namespace {
+
+QString radialIcon(const std::string& stem) {
+    if (stem.empty()) return {};
+    const QString s = QString::fromStdString(stem);
+    const QString path = s.startsWith(QLatin1String("ui_")) ? QStringLiteral(":/groomlab/icons/%1.svg").arg(s)
+                                                            : QStringLiteral(":/groomlab/icons/groomLab_%1.svg").arg(s);
+    return QFile::exists(path) ? path : QString();
+}
+
+// The brush options the radial menu sets (radialMenu.brushOptions): the switches, and the settings
+// picked among values (choices.json).
+bool* optionSwitch(BrushToolSettings& s, const std::string& setting) {
+    if (setting == "stretch") return &s.brush.stretch;
+    if (setting == "straighten") return &s.brush.straighten;
+    if (setting == "collide") return &s.brush.collide;
+    if (setting == "pressure") return &s.pressure;
+    return nullptr;
+}
+
+std::string optionValue(const BrushToolSettings& s, const std::string& setting) {
+    if (setting == "smoothMode") return smoothModeName(s.brush.smoothMode);
+    if (setting == "tubeChannel") return tubeChannelName(s.brush.tubeChannel);
+    return {};
+}
+
+bool setOptionValue(BrushToolSettings& s, const std::string& setting, const std::string& value) {
+    try {
+        if (setting == "smoothMode") s.brush.smoothMode = smoothModeFromString(value);
+        else if (setting == "tubeChannel") s.brush.tubeChannel = tubeChannelFromString(value);
+        else return false;
+    } catch (const std::invalid_argument&) {
+        return false;
+    }
+    return true;
+}
+
+}  // namespace
+
+std::vector<MarkingMenu::Item> AppActions::radialMenuItems(MainWindow& w) {
     using Item = MarkingMenu::Item;
     const ui::Definitions& d = ui::Definitions::shipped();
-    auto icon = [](const std::string& stem) {
-        const QString path = QStringLiteral(":/groomlab/icons/groomLab_%1.svg").arg(QString::fromStdString(stem));
-        return stem.empty() || !QFile::exists(path) ? QString() : path;
-    };
-    auto tool = [&](const std::string& id, Item::Kind kind) -> std::optional<Item> {
-        const BrushEntry* e = brushEntry(id);
-        if (!e) return std::nullopt;
-        Item item;
-        item.kind = kind;
-        item.id = id;
-        item.label = QString::fromStdString(e->label);
-        item.tip = QString::fromStdString(e->hint);
-        item.icon = icon(e->icon);
-        item.color = theme::categoryColor(e->category);
-        return item;
-    };
-    std::vector<Item> out;
-    // The brushes reached for most around the cursor.
-    std::set<std::string> radial;
-    for (const json& entry : d.get("markingMenu/radial")) {
-        const std::string id = entry.value("tool", std::string());
-        radial.insert(id);
-        if (std::optional<Item> item = tool(id, Item::Kind::Radial)) {
-            item->position = MarkingMenu::positionIndex(entry.value("position", std::string()));
-            out.push_back(*item);
-        }
-    }
-    // The rest of the catalog in its order (but what the overflow excludes: Select and Freeze,
-    // which the tail lists).
-    const json& overflow = d.get("markingMenu/overflow");
-    if (overflow.value("generator", std::string()) == "brushCatalog") {
-        std::set<std::string> exclude;
-        if (const auto it = overflow.find("exclude"); it != overflow.end()) exclude = it->get<std::set<std::string>>();
-        for (const BrushEntry& e : brushCatalog()) {
-            if (radial.count(e.id) || exclude.count(e.id)) continue;
-            if (std::optional<Item> item = tool(e.id, Item::Kind::Overflow)) out.push_back(*item);
-        }
-    }
-    // The tail: tools, and the definitions' actions with a binding here (the unbound hidden).
     const ui::Bindings bound = bindings(w);
     ui::ResolveOptions options;
     options.state = state(w);
     options.keep = [&bound](const std::string& id) { return bound.count(id) > 0; };
-    for (const json& entry : d.get("markingMenu/tail")) {
-        if (entry.is_object() && entry.contains("tool")) {
-            if (std::optional<Item> item = tool(entry.at("tool").get<std::string>(), Item::Kind::Tail)) out.push_back(*item);
-            continue;
-        }
-        for (const ui::Item& resolved : d.resolve(json::array({entry}), options)) {
+    // An action of the definitions, bound here (else none), with its state when it has one.
+    auto action = [&](const std::string& id, const json& entry) -> std::optional<Item> {
+        for (const ui::Item& resolved : d.resolve(json::array({id}), options)) {
             if (resolved.kind != ui::Item::Kind::Action) continue;
             Item item;
-            item.kind = Item::Kind::Tail;
+            item.kind = Item::Kind::Action;
             item.id = resolved.id;
-            item.tool = false;
-            item.label = QString::fromStdString(resolved.label);
+            item.label = QString::fromStdString(entry.value("label", resolved.label));
             item.tip = QString::fromStdString(resolved.tip);
-            item.icon = icon(resolved.icon);
-            out.push_back(item);
+            item.icon = radialIcon(entry.value("icon", resolved.icon));
+            item.enabled = resolved.enabled;
+            const auto b = bound.find(id);
+            if (b != bound.end() && b->second.checked) {
+                item.checked = b->second.checked(json());
+                // With offLabel the label says the state (Hide Hair while the hair shows, Show Hair
+                // while not): no check mark. Else drawn checked or not.
+                if (entry.contains("offLabel")) {
+                    if (!item.checked) item.label = QString::fromStdString(entry.at("offLabel").get<std::string>());
+                    item.checked = false;
+                } else {
+                    item.checkable = true;
+                }
+            }
+            if (b != bound.end() && b->second.enabled) item.enabled = item.enabled && b->second.enabled();
+            return item;
         }
-    }
-    return out;
+        return std::nullopt;
+    };
+    auto tool = [&](const std::string& id, const json& entry) -> std::optional<Item> {
+        const BrushEntry* e = brushEntry(id);
+        if (!e) return std::nullopt;
+        Item item;
+        item.kind = Item::Kind::Tool;
+        item.id = id;
+        item.label = QString::fromStdString(entry.value("label", e->label));
+        item.tip = QString::fromStdString(e->hint);
+        item.icon = radialIcon(e->icon);
+        item.color = theme::categoryColor(e->category);
+        return item;
+    };
+    // The picked brush's options, at the positions in order.
+    const json& brushOptions = d.get("radialMenu/brushOptions");
+    auto brushOptionsOf = [&](Item& submenu) {
+        const std::string current = w.brush_.toolId();
+        const BrushEntry* e = brushEntry(current);
+        const QString name = e ? QString::fromStdString(e->label) : QObject::tr("the brush");
+        const json& tools = brushOptions.at("tools");
+        const auto rows = tools.find(current);
+        const json& positions = brushOptions.at("positions");
+        BrushToolSettings& s = w.brush_.settings();
+        if (rows != tools.end()) {
+            std::size_t k = 0;
+            for (const json& row : *rows) {
+                if (k >= positions.size()) break;
+                std::optional<Item> item;
+                if (row.contains("action")) {
+                    item = action(row.at("action").get<std::string>(), row);
+                } else {
+                    const std::string setting = row.value("setting", std::string());
+                    const std::string value = row.value("value", std::string());
+                    Item option;
+                    option.kind = Item::Kind::Option;
+                    option.id = setting;
+                    option.value = value;
+                    option.checkable = true;
+                    const BrushSettingSpec* spec = brushSettingSpec(setting);
+                    if (value.empty()) {
+                        const bool* on = optionSwitch(s, setting);
+                        if (!on) continue;
+                        option.checked = *on;
+                        option.label = QString::fromStdString(row.value("label", spec ? spec->label : setting));
+                        option.tip = spec ? QString::fromStdString(spec->hint) : QString();
+                    } else {
+                        option.checked = optionValue(s, setting) == value;
+                        option.label = QString::fromStdString(row.value("label", value));
+                        for (const json& c : d.choices(setting)) {
+                            if (c.value("value", std::string()) != value) continue;
+                            option.label = QString::fromStdString(row.value("label", c.value("label", value)));
+                            option.tip = QString::fromStdString(c.value("tip", std::string()));
+                        }
+                    }
+                    item = option;
+                }
+                if (!item) continue;
+                item->position = MarkingMenu::positionIndex(positions[k++].get<std::string>());
+                submenu.items.push_back(*item);
+            }
+        }
+        if (submenu.items.empty()) {
+            submenu.enabled = false;
+            submenu.tip = QObject::tr("%1 has no options here (pick Comb, Smooth or Tube)").arg(name);
+        } else {
+            submenu.tip = QObject::tr("%1's options").arg(name);
+        }
+    };
+    // Visibility > Groups: the groom's guide groups (parents before children), each picked to hide
+    // or show it (the Guides panel's eye), drawn in its color; past eight, the eighth a More ring.
+    auto guideGroupsOf = [&](Item& submenu) {
+        const auto h = w.document_ ? w.document_->session().authoredHierarchy() : nullptr;
+        if (!h || h->groups().empty()) {
+            submenu.tip = QObject::tr("The groom has no guide groups yet");
+            return;
+        }
+        const std::set<std::string>& hidden = w.document_->hiddenGroups();
+        const std::map<std::string, std::string>& colors = w.document_->groupColors();
+        const auto automatic = autoGuideColors(*h, guideHueSeed(w.document_->guideColorSeed()));
+        auto shown = [](const std::array<float, 3>& linear) {
+            auto channel = [](float c) {
+                c = std::clamp(c, 0.0f, 1.0f);
+                return static_cast<int>(std::lround((c <= 0.0031308f ? 12.92f * c : 1.055f * std::pow(c, 1.0f / 2.4f) - 0.055f) * 255.0f));
+            };
+            return QColor(channel(linear[0]), channel(linear[1]), channel(linear[2]));
+        };
+        std::vector<Item> rows;
+        for (const GuideGroup& group : h->groups()) {
+            Item row;
+            row.kind = Item::Kind::Option;
+            row.id = "guideGroup";
+            row.value = group.name;
+            row.label = QString::fromStdString(group.name);
+            row.checkable = true;
+            row.checked = !hidden.count(group.name);
+            row.tip = row.checked ? QObject::tr("Hide %1 (its hair still grows)").arg(row.label) : QObject::tr("Show %1").arg(row.label);
+            const auto own = colors.find(group.name);
+            const auto a = automatic.find(group.id);
+            row.color = own != colors.end() ? QColor(QString::fromStdString(own->second))
+                        : group.hasColor    ? shown(group.color)
+                        : a != automatic.end() ? shown(a->second)
+                                               : QColor();
+            rows.push_back(std::move(row));
+        }
+        // Eight to a ring, clockwise from N; with more, the last place opens the rest.
+        std::function<void(Item&, std::size_t)> fill = [&](Item& into, std::size_t from) {
+            const std::size_t left = rows.size() - from;
+            const std::size_t here = left > 8 ? 7 : left;
+            for (std::size_t k = 0; k < here; ++k) {
+                Item row = rows[from + k];
+                row.position = static_cast<int>(k);
+                into.items.push_back(std::move(row));
+            }
+            if (left > 8) {
+                Item more;
+                more.kind = Item::Kind::Submenu;
+                more.id = "guideGroups.more";
+                more.label = QObject::tr("More");
+                more.tip = QObject::tr("The other %1 groups").arg(left - 7);
+                more.position = 7;
+                fill(more, from + 7);
+                into.items.push_back(std::move(more));
+            }
+        };
+        fill(submenu, 0);
+    };
+    std::function<std::vector<Item>(const json&)> ring = [&](const json& entries) {
+        std::vector<Item> out;
+        for (const json& entry : entries) {
+            std::optional<Item> item;
+            if (entry.contains("tool")) {
+                item = tool(entry.at("tool").get<std::string>(), entry);
+            } else if (entry.contains("action")) {
+                item = action(entry.at("action").get<std::string>(), entry);
+            } else {
+                Item submenu;
+                submenu.kind = Item::Kind::Submenu;
+                submenu.id = entry.value("generator", entry.value("label", std::string()));
+                submenu.label = QString::fromStdString(entry.value("label", std::string()));
+                submenu.tip = QString::fromStdString(entry.value("tip", std::string()));
+                submenu.icon = radialIcon(entry.value("icon", std::string()));
+                if (entry.value("generator", std::string()) == "brushOptions") brushOptionsOf(submenu);
+                else if (entry.value("generator", std::string()) == "guideGroups") guideGroupsOf(submenu);
+                else if (entry.contains("items")) submenu.items = ring(entry.at("items"));
+                if (submenu.items.empty()) submenu.enabled = false;
+                item = submenu;
+            }
+            if (!item) continue;
+            item->position = MarkingMenu::positionIndex(entry.value("position", std::string()));
+            out.push_back(*item);
+        }
+        return out;
+    };
+    return ring(d.get("radialMenu/items"));
 }
 
 void AppActions::runMarkingMenuItem(MainWindow& w, const MarkingMenu::Item& item) {
-    if (!item.tool) {
+    using Kind = MarkingMenu::Item::Kind;
+    if (item.kind == Kind::Action) {
         const ui::Bindings bound = bindings(w);
-        if (const auto it = bound.find(item.id); it != bound.end() && it->second.trigger) it->second.trigger(nullptr, false);
+        if (const auto it = bound.find(item.id); it != bound.end() && it->second.trigger) it->second.trigger(nullptr, !item.checked);
         return;
     }
+    if (item.kind == Kind::Option && item.id == "guideGroup") {
+        // Visibility > Groups: the group hidden or shown, as the Guides panel's eye does.
+        if (!w.document_) return;
+        w.document_->setGroupHidden(item.value, item.checked);
+        w.settings_.hiddenGuideGroups = w.document_->hiddenGroupsText();
+        w.redisplay();
+        w.guidesPanel_->invalidate();
+        w.notify(item.checked ? QObject::tr("%1 hidden").arg(item.label) : QObject::tr("%1 shown").arg(item.label));
+        return;
+    }
+    if (item.kind == Kind::Option) {
+        BrushToolSettings& s = w.brush_.settings();
+        if (bool* on = optionSwitch(s, item.id); on && item.value.empty()) *on = !*on;
+        else if (!setOptionValue(s, item.id, item.value)) return;
+        w.groomTools_->refresh();
+        w.viewport_->refreshOverlay();
+        return;
+    }
+    if (item.kind != Kind::Tool) return;
     // A tool: Groom mode, where the tools work; Select is the Select tool (never its toggle back to
-    // the camera, as its tile does when picked again).
+    // the camera, as its tile does when picked again), selecting guides to work on (Masking).
     w.setUiMode(QStringLiteral("groom"));
-    if (item.id == "select") w.viewport_->setToolMode(Viewport::ToolMode::Select);
-    else w.chooseTool(QString::fromStdString(item.id));
+    if (item.id == "select") {
+        w.brush_.selectHides = false;
+        w.viewport_->setToolMode(Viewport::ToolMode::Select);
+    } else {
+        w.chooseTool(QString::fromStdString(item.id));
+    }
+}
+
+QDialog* AppActions::showRadialMenuSettings(MainWindow& w) {
+    if (auto* open = w.findChild<QDialog*>(QStringLiteral("radialMenuSettings"))) {
+        open->show();
+        open->raise();
+        open->activateWindow();
+        return open;
+    }
+    auto* dialog = new QDialog(&w);
+    dialog->setObjectName(QStringLiteral("radialMenuSettings"));
+    dialog->setWindowTitle(QObject::tr("Radial Menu Settings"));
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    auto* form = new QFormLayout;
+    // The shortcut: one key with its modifiers (hold it, move, let go to pick).
+    auto* keys = new QKeySequenceEdit(w.radialMenuShortcut(), dialog);
+    keys->setObjectName(QStringLiteral("radialShortcut"));
+    keys->setMaximumSequenceLength(1);
+    keys->setClearButtonEnabled(true);
+    keys->setToolTip(QObject::tr("Click and press the keys that open the radial menu (Alt+S to start with). Hold them, move "
+                                 "onto an item and let go of the key to pick it"));
+    auto* clash = new QLabel(dialog);
+    clash->setObjectName(QStringLiteral("radialShortcutClash"));
+    clash->setWordWrap(true);
+    // The size, as a percentage of the designed one.
+    auto* size = new QSpinBox(dialog);
+    size->setObjectName(QStringLiteral("radialScale"));
+    size->setRange(static_cast<int>(MarkingMenu::kMinScale * 100.0), static_cast<int>(MarkingMenu::kMaxScale * 100.0));
+    size->setSingleStep(10);
+    size->setSuffix(QStringLiteral(" %"));
+    size->setValue(static_cast<int>(std::lround(w.markingMenu()->scale() * 100.0)));
+    size->setToolTip(QObject::tr("How big the radial menu draws: its pills, text and reach (the mouse wheel over the open "
+                                 "menu sizes it too)"));
+    form->addRow(QObject::tr("Shortcut"), keys);
+    form->addRow(QString(), clash);
+    form->addRow(QObject::tr("Size"), size);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::RestoreDefaults | QDialogButtonBox::Close, dialog);
+    auto* layout = new QVBoxLayout(dialog);
+    layout->addLayout(form);
+    layout->addWidget(buttons);
+
+    // A clash with a shortcut of the menus: neither would run (Qt drops an ambiguous shortcut).
+    auto check = [&w, clash](const QKeySequence& seq) {
+        QStringList users;
+        for (QAction* a : w.findChildren<QAction*>()) {
+            if (!seq.isEmpty() && a->shortcut() == seq) users << a->text().remove(QLatin1Char('&'));
+        }
+        clash->setText(users.isEmpty() ? QString()
+                                       : QObject::tr("Also the shortcut of %1: pick another").arg(users.join(QStringLiteral(", "))));
+        clash->setVisible(!users.isEmpty());
+    };
+    check(w.radialMenuShortcut());
+    QObject::connect(keys, &QKeySequenceEdit::editingFinished, dialog, [&w, keys, check] {
+        w.setRadialMenuShortcut(keys->keySequence());
+        if (keys->keySequence() != w.radialMenuShortcut()) keys->setKeySequence(w.radialMenuShortcut());  // (empty: Alt+S)
+        check(w.radialMenuShortcut());
+    });
+    QObject::connect(size, &QSpinBox::valueChanged, dialog, [&w](int percent) { w.setRadialMenuScale(percent / 100.0); });
+    // The wheel over the menu: the box follows.
+    QObject::connect(w.markingMenu(), &MarkingMenu::scaleChanged, size, [size](qreal scale) {
+        const QSignalBlocker block(size);
+        size->setValue(static_cast<int>(std::lround(scale * 100.0)));
+    });
+    QObject::connect(buttons->button(QDialogButtonBox::RestoreDefaults), &QPushButton::clicked, dialog, [&w, keys, size, check] {
+        w.setRadialMenuShortcut(QKeySequence(Qt::ALT | Qt::Key_S));
+        keys->setKeySequence(w.radialMenuShortcut());
+        check(w.radialMenuShortcut());
+        size->setValue(100);
+    });
+    QObject::connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::close);
+    dialog->show();
+    return dialog;
 }
 
 std::map<std::string, QAction*> buildDefinitionsMenuBar(QMenuBar* bar, MainWindow& window) {

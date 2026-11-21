@@ -60,6 +60,9 @@ public:
     // The view's density while a stroke is live (ViewRequest::sculptDensity): the strands step
     // back to this fraction so each dab evaluates fast; the release evaluates them all again.
     float sculptDensity = 1.0f;
+    // The Select tool hides what the selection leaves out instead of freezing it (select()); the
+    // window clears it when the tool changes.
+    bool selectHides = false;
     // Shot sculpting (the core's, as Maya's Sculpt tab): with `on`, strokes reshape the groom as
     // shown at `seconds` (frame `frame`) and record the difference into the corrective layer
     // `layer` (made at that time when the groom has none of the name) instead of the guides.
@@ -134,7 +137,9 @@ public:
     // level or group (not hidden) picked, combined with the selection by `mode`, set on the
     // document. Returns how many guides the pick found.
     // `solo` (the Select tool): every guide not selected frozen, an undo step when that changed
-    // anything (a plain pick of nothing unfreezes every guide).
+    // anything (a plain pick of nothing unfreezes every guide). With selectHides (the radial menu's
+    // Visibility > Select), every guide not selected hidden instead (kHiddenLayer: hidden and
+    // locked; a plain pick of nothing shows every guide), the freeze mask left as it is.
     std::size_t select(const std::vector<QPointF>& lasso, SelectMode mode, bool solo = false);
     // The hierarchy guides are picked from (as shown); null without a groom.
     std::shared_ptr<const GuideHierarchy> shownHierarchy() const;

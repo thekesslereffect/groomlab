@@ -199,8 +199,6 @@ def check(doc):
     for where, entries in containers(doc):
         walk(doc, entries, where, used)
     for aid, action in sorted(doc["actions"].items()):
-        if aid not in used:
-            fail("actions.json: %r is listed nowhere" % aid)
         if "{" in action.get("label", "") and not re.search(r"\{\w+\}", action["label"]):
             fail("actions.json: %r has a stray brace in its label" % aid)
     for name, options in doc["choices"].items():
@@ -226,6 +224,70 @@ def check(doc):
     radial = [r["position"] for r in doc["markingMenu"]["radial"]]
     if len(set(radial)) != len(radial):
         fail("marking_menu.json: a radial position twice")
+    check_radial(doc, used)
+    for aid in sorted(doc["actions"]):
+        if aid not in used:
+            fail("actions.json: %r is listed nowhere" % aid)
+
+
+def radial_tools(doc):
+    """Every tool the radial menu names: (where, tool)."""
+    out = []
+
+    def visit(items, where):
+        for i, item in enumerate(items):
+            here = "%s[%d]" % (where, i)
+            if "tool" in item:
+                out.append((here, item["tool"]))
+            visit(item.get("items", []), here)
+    visit(doc["radialMenu"]["items"], "radialMenu/items")
+    for tool in doc["radialMenu"]["brushOptions"]["tools"]:
+        out.append(("radialMenu/brushOptions/tools", tool))
+    return out
+
+
+def check_radial(doc, used):
+    """The radial menu: each ring's positions once; an item is a tool, an action, a submenu (items)
+    or the brush options (generator), one of them; actions defined; option settings with values among
+    their choices; no more option rows than positions."""
+    menu = doc["radialMenu"]
+    actions = doc["actions"]
+
+    def visit(items, where):
+        positions = [item["position"] for item in items]
+        if len(set(positions)) != len(positions):
+            fail("marking_menu.json: %s has a position twice" % where)
+        for i, item in enumerate(items):
+            here = "%s[%d]" % (where, i)
+            kinds = [k for k in ("tool", "action", "items", "generator") if k in item]
+            if len(kinds) != 1:
+                fail("marking_menu.json: %s is not one of a tool, an action, a submenu or a generator" % here)
+            if ("items" in item or "generator" in item) and "label" not in item:
+                fail("marking_menu.json: %s (a submenu) has no label" % here)
+            if "action" in item:
+                used.add(item["action"])
+                if item["action"] not in actions:
+                    fail("marking_menu.json: %s: %r is not in actions.json" % (here, item["action"]))
+            visit(item.get("items", []), here)
+    visit(menu["items"], "radialMenu/items")
+    options = menu["brushOptions"]
+    for tool, rows in options["tools"].items():
+        here = "radialMenu/brushOptions/tools/" + tool
+        if len(rows) > len(options["positions"]):
+            fail("marking_menu.json: %s has more options than positions" % here)
+        for i, row in enumerate(rows):
+            if ("setting" in row) == ("action" in row):
+                fail("marking_menu.json: %s[%d] is a setting or an action, one of them" % (here, i))
+            if "action" in row:
+                used.add(row["action"])
+                if row["action"] not in actions:
+                    fail("marking_menu.json: %s[%d]: %r is not in actions.json" % (here, i, row["action"]))
+            if "value" in row:
+                choice = doc["choices"].get(row["setting"])
+                if choice is None:
+                    fail("marking_menu.json: %s[%d]: no choices %r" % (here, i, row["setting"]))
+                elif row["value"] not in [c["value"] for c in choice["items"]]:
+                    fail("marking_menu.json: %s[%d]: %r is not one of %s's values" % (here, i, row["value"], row["setting"]))
 
 
 def check_core(doc):
@@ -247,6 +309,16 @@ def check_core(doc):
             if keys and action["shortcutPart"] >= len(keys[0].split(" / ")):
                 fail("actions.json: %r's shortcutPart is past %r" % (aid, keys[0]))
     tools = set(t["id"] for t in groomlab_core.brush_catalog())
+    for where, tool in radial_tools(doc):
+        if tool not in tools:
+            fail("marking_menu.json: %s: no tool %r in the brush catalog" % (where, tool))
+    settings = set()
+    for t in groomlab_core.brush_catalog():
+        settings.update(t.get("settings", []) if isinstance(t, dict) else [])
+    for tool, rows in doc["radialMenu"]["brushOptions"]["tools"].items():
+        for row in rows:
+            if settings and "setting" in row and row["setting"] not in settings:
+                fail("marking_menu.json: %s's option %r is not a brush setting" % (tool, row["setting"]))
     menu = doc["markingMenu"]
     for entry in menu["radial"] + [e for e in menu["tail"] if isinstance(e, dict)]:
         if entry["tool"] not in tools:

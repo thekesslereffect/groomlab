@@ -50,6 +50,19 @@ enum class TubeChannel { Width, Flatness, Twist };
 const char* tubeChannelName(TubeChannel channel);
 TubeChannel tubeChannelFromString(const std::string& name);
 
+// What Smooth evens out (BrushSettings::smoothMode):
+//   Curve   the kinks along each guide, lengths kept: what Smooth has always done;
+//   Length  each guide's length toward the mean of the guides under the brush (its shape scaled
+//           about its root);
+//   Shape   each guide's shape toward the mean shape of the guides under the brush (the
+//           direction at each fraction of the length; lengths kept);
+//   All     Curve, then Shape, then Length.
+// Length, Shape and All need two guides or more under the brush (one alone is left as it is).
+enum class SmoothMode { Curve, Length, Shape, All };
+// curve, length, shape, all; smoothModeFromString throws std::invalid_argument.
+const char* smoothModeName(SmoothMode mode);
+SmoothMode smoothModeFromString(const std::string& name);
+
 // Parses a mode name: comb, smooth, lift, length, shape (ShapeTube), paint (attribute, clump),
 // cut, twist, straighten, attract, erase, slide (move). Throws
 // std::invalid_argument.
@@ -128,6 +141,8 @@ struct BrushSettings {
     // Smooth: relax guides toward the straight line along their root direction
     // (Straighten) instead of only taking kinks out.
     bool straighten = false;
+    // Smooth: what it evens out (SmoothMode; Straighten on wins over it).
+    SmoothMode smoothMode = SmoothMode::Curve;
 
     // Shape (ShapeTube): what it paints on the tubes.
     TubeChannel tubeChannel = TubeChannel::Width;
@@ -354,6 +369,9 @@ bool unfreezeAll(GuideHierarchy& hierarchy, const std::string& freeze = "freeze"
 // The frozen guides unfrozen and the rest frozen: each guide's freeze value v becomes 1 - v (a guide
 // without one counts as 0, so with nothing frozen every guide freezes). False without guides.
 bool invertFrozen(GuideHierarchy& hierarchy, const std::string& freeze = "freeze");
+// The hidden guides shown and the shown ones hidden (kHiddenLayer), by what shows: a guide hidden
+// through its parent (inherited) shows after, as its parent does. False without guides.
+bool invertHidden(GuideHierarchy& hierarchy);
 // The Select tool's solo: the selection (and its descendants) the guides brushes work on, every
 // other guide frozen (soloGuides); an empty selection unfreezes every guide. True when the
 // freeze layer changed.

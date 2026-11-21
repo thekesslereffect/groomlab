@@ -171,6 +171,8 @@ private:
     // The others.
     CardBlock* paints_ = nullptr;
     std::vector<QToolButton*> tubeChannels_;
+    CardBlock* evens_ = nullptr;  // Smooth: what it evens out (choices.smoothMode)
+    std::vector<QToolButton*> smoothModes_;
     CardBlock* erases_ = nullptr;
     CardBlock* parts_ = nullptr;
     QLineEdit* partName_ = nullptr;

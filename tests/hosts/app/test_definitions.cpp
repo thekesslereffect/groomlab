@@ -251,7 +251,7 @@ TEST(AppUi, MenuBarFromTheDefinitionsHidesWhatTheAppDoesNotRun) {
     const QMenu* groomlab = bar.actions()[3]->menu();
     EXPECT_EQ(shown(groomlab), (std::vector<std::string>{"Groom Tools", "Graph Editor", "-", "New Groom on Mesh...", "Card Atlas...", "Add Sample Mesh",
                                                          "Guides from Photos (experimental)...", "Groom Files", "Import", "-", "Add", "Simulate",
-                                                         "Display", "Review", "Studio", "Render", "Export", "Utilities", "-", "Theme", "Help"}));
+                                                         "Display", "Review", "Studio", "Render", "Export", "Utilities", "-", "Theme", "Radial Menu Settings...", "Help"}));
     EXPECT_EQ(shown(submenu(groomlab, QStringLiteral("Display"))),
               (std::vector<std::string>{"Show All Hair", "Hide All Hair", "-", "Show All Guides", "Hide All Guides"}));
     EXPECT_EQ(shown(submenu(groomlab, QStringLiteral("Add Sample Mesh"))), (std::vector<std::string>{"Nika (head)", "Manny (head)", "Wolf"}));

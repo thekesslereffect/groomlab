@@ -2196,7 +2196,7 @@ def install_hotkeys():
     listing what it changed: the set switched to and each key it rebound."""
     from groomlab.ui import hotkeys
     name = hotkeys.install()
-    messages.say("hotkey set '%s' is active. Hold Y + left click for the marking menu." % name, warning=False)
+    messages.say("hotkey set '%s' is active. Alt+S opens the radial menu." % name, warning=False)
     if not cmds.about(batch=True):
         _text_window("groomLabHotkeyChanges", "GroomLab: Hotkeys Installed", hotkeys.changes_text())
     return hotkeys.last_changes
@@ -2336,6 +2336,7 @@ ACTIONS = {
     "help.donate": open_donate,
     "help.about": show_about,
 }
+    "radial.settings": lambda: __import__("groomlab.ui.radial_menu", fromlist=["radial_menu"]).show_settings(),
 # Maya's names for the items other code finds (the RenderMan item goes after Render as Curves; the
 # Review check marks follow the groom as the menu opens), and the check items' state.
 ITEM_NAMES = {"render.asCurves": RENDER_AS_CURVES_ITEM, "review.heatmap": HEATMAP_ITEM, "review.hud": HUD_ITEM}

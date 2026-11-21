@@ -19,6 +19,7 @@
 // (Place and Draw: match neighbors, length, segments), "spacing" (Place), "parts", "flow",
 // "map" (Paint: the map, the value, the channels), "alpha" (Paint on a scalp map: the image stamped
 // in the brush, its rotation and spacing; brush_alpha.h), "smoothStrength", "selection", "freezeMask",
+// "smoothMode" (Smooth: what it evens out, curve, length, shape or all),
 // "tubeChannel" (Shape: width, flatness or twist), "tube" (Shape: the selected guides' tubes as a
 // whole, Fill Tubes and Tube Blend).
 // A setting's map (density, width...) is painted with Paint: + New Map > for a setting makes and

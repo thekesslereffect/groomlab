@@ -56,7 +56,7 @@
       "segmentsByLength": "Segments by Length",
       "segmentsByLengthTip": "On: the Segments are those of a guide of the guides' average length, each other guide getting as many as its length calls for, so points are as far apart on every guide (brushes then act alike on long and short ones); a whole group keeps that spacing for its new guides. Off: every guide the same count. Applies to the selected guides, else the picked group",
       "flowSinks": "Click to place, the size of the brush; Ctrl-click removes sinks.",
-      "labels": {"app": {"gestures": "B / M + drag (or middle-drag / Shift+middle-drag): radius / strength · Ctrl: the opposite (Length shortens, Lift lays down, Shape shrinks; painting, toward 0) · Shift+drag: smooth (the guides, a painted map, the Tube brush's channel) · Ctrl+Shift+drag (Shape and Trim brushes): paint guides into the selection, the rest freeze (over no guide: unfreeze all) · Page Up / Down: the level · Alt+Shift+X: symmetry · Y + click: the marking menu"}}
+      "labels": {"app": {"gestures": "B / M + drag (or middle-drag / Shift+middle-drag): radius / strength · Ctrl: the opposite (Length shortens, Lift lays down, Shape shrinks; painting, toward 0) · Shift+drag: smooth (the guides, a painted map, the Tube brush's channel) · Ctrl+Shift+drag (Shape and Trim brushes): paint guides into the selection, the rest freeze (over no guide: unfreeze all) · Page Up / Down: the level · Alt+Shift+X: symmetry · Alt+S: the radial menu"}}
     }
   }
 }

@@ -45,11 +45,13 @@ std::vector<GuideId> guidesAt(const GuideHierarchy& h, int level, const std::str
 std::vector<GuideId> guidesAt(const GuideHierarchy& h, int level, const std::string& group,
                               const std::set<std::string>& hiddenGroups) {
     std::vector<GuideId> ids = guidesAt(h, level, group);
-    if (hiddenGroups.empty()) return ids;
+    const bool layer = h.hasAttributes();  // guides hidden one by one (kHiddenLayer)
+    if (hiddenGroups.empty() && !layer) return ids;
     ids.erase(std::remove_if(ids.begin(), ids.end(),
                              [&](GuideId id) {
                                  const HierarchyGuide* g = h.guide(id);
-                                 const GuideGroup* grp = g ? h.group(g->group) : nullptr;
+                                 if (g && layer && guideHidden(h, *g)) return true;
+                                 const GuideGroup* grp = g && !hiddenGroups.empty() ? h.group(g->group) : nullptr;
                                  return grp && hiddenGroups.count(grp->name);
                              }),
               ids.end());

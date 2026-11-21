@@ -459,8 +459,10 @@ std::size_t BrushSession::select(const std::vector<QPointF>& lasso, SelectMode m
     if (solo && (!picked.empty() || mode == SelectMode::Replace)) {
         const std::shared_ptr<const GuideHierarchy> authored = document_->session().authoredHierarchy();
         GuideHierarchy probe = authored ? *authored : GuideHierarchy{};
-        if (freezeToSelection(probe, selection)) {
-            document_->editGuides("solo selection", [&](GuideHierarchy& g) { freezeToSelection(g, selection); });
+        const std::string layer = selectHides ? std::string(kHiddenLayer) : std::string("freeze");
+        if (freezeToSelection(probe, selection, layer)) {
+            document_->editGuides(selectHides ? "hide unselected guides" : "solo selection",
+                                  [&](GuideHierarchy& g) { freezeToSelection(g, selection, layer); });
         }
     }
     return picked.size();

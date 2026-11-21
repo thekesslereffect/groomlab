@@ -700,6 +700,7 @@ bool MainWindow::setBrushText(const QString& text) {
         else if (name == QStringLiteral("attribute")) s.brush.attribute = value.toStdString();
         else if (name == QStringLiteral("value")) number(&s.brush.value);
         else if (name == QStringLiteral("tubechannel")) s.brush.tubeChannel = tubeChannelFromString(value.toStdString());
+        else if (name == QStringLiteral("smoothmode")) s.brush.smoothMode = smoothModeFromString(value.toStdString());
         else if (name == QStringLiteral("select")) {
             // The guide selection: "all", "none" or guide IDs ("3,4,9"); a scripted run's Tubes targets.
             ok = document_ != nullptr;

@@ -11,6 +11,8 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
+#include <QPolygonF>
+#include <QWheelEvent>
 
 #include "glass.h"
 #include "theme.h"
@@ -22,10 +24,11 @@ namespace {
 constexpr const char* kPositions[] = {"N", "NE", "E", "SE", "S", "SW", "W", "NW"};
 constexpr qreal kPi = 3.14159265358979323846;
 // The pills' anchors from the middle: across (E, W) and up and down (N, S); the diagonals between.
-constexpr qreal kReachX = 92.0, kReachY = 70.0;
-constexpr qreal kPillHeight = 28.0, kRowHeight = 26.0, kIcon = 16.0, kPad = 11.0, kGap = 7.0;
-constexpr qreal kListGap = 34.0;  // the list's top below the S pill
-constexpr qreal kMargin = 8.0;    // from the host's edges
+constexpr qreal kReachX = 100.0, kReachY = 72.0;
+constexpr qreal kPillHeight = 28.0, kIcon = 16.0, kPad = 11.0, kGap = 7.0, kCheck = 7.0;
+constexpr qreal kMargin = 8.0;  // from the host's edges
+// A held drag opens a submenu once it is this far toward its pill (a share of the pill's distance).
+constexpr qreal kOpenShare = 0.8;
 
 // A compass point's direction (y down): N up, then clockwise.
 QPointF direction(int position) {
@@ -36,6 +39,17 @@ QPointF direction(int position) {
 QFont labelFont() { return theme::uiFont(12, QFont::Medium); }
 
 QColor hoverFill(const MarkingMenu::Item& item) { return item.color.isValid() ? item.color : theme::chipChecked(); }
+
+qreal pillWidth(const MarkingMenu::Item& item) {
+    const QFontMetricsF fm(labelFont());
+    qreal w = fm.horizontalAdvance(item.label) + 2.0 * kPad;
+    if (!item.icon.isEmpty()) w += kIcon + kGap;
+    if (item.checkable) w += kCheck * 2.0 + kGap;
+    if (item.kind == MarkingMenu::Item::Kind::Submenu) w += 10.0;  // its chevron
+    return std::ceil(w);
+}
+
+qreal between(QPointF a, QPointF b) { return std::hypot(a.x() - b.x(), a.y() - b.y()); }
 
 }  // namespace
 
@@ -61,108 +75,80 @@ MarkingMenu::MarkingMenu(QWidget* host) : QWidget(host) {
 
 void MarkingMenu::setItems(std::vector<Item> items) {
     items_ = std::move(items);
+    const QPointF at = levels_.empty() ? QPointF() : levels_.front().center;
+    levels_.assign(1, Level{});
+    levels_.front().center = at;
     hovered_ = -1;
-    layoutItems();
+    layoutLevel(levels_.front());
     update();
 }
 
-void MarkingMenu::layoutItems() {
-    rects_.assign(items_.size(), QRectF());
-    listRect_ = QRectF();
-    dividerY_ = -1.0;
-    const QFontMetricsF fm(labelFont());
-    auto pillWidth = [&](const Item& item) {
-        return std::ceil(fm.horizontalAdvance(item.label) + 2.0 * kPad + (item.icon.isEmpty() ? 0.0 : kIcon + kGap));
-    };
-    // The radial pills around the middle: N and S centered over and under it, the east side's
-    // starting at their anchors, the west side's ending at theirs (laid out around 0, 0 first).
-    QRectF radial(QPointF(-kDeadZone, -kDeadZone), QPointF(kDeadZone, kDeadZone));
-    for (std::size_t i = 0; i < items_.size(); ++i) {
-        const Item& item = items_[i];
-        if (item.kind != Item::Kind::Radial || item.position < 0) continue;
+const std::vector<MarkingMenu::Item>& MarkingMenu::itemsOf(const Level& level) const {
+    const std::vector<Item>* items = &items_;
+    for (const int i : level.path) items = &(*items)[static_cast<std::size_t>(i)].items;
+    return *items;
+}
+
+const std::vector<MarkingMenu::Item>& MarkingMenu::ring() const {
+    static const std::vector<Item> none;
+    return levels_.empty() ? none : itemsOf(levels_.back());
+}
+
+QPointF MarkingMenu::center() const { return levels_.empty() ? QPointF() : levels_.back().center; }
+
+void MarkingMenu::layoutLevel(Level& level) {
+    const std::vector<Item>& items = itemsOf(level);
+    level.rects.assign(items.size(), QRectF());
+    // The pills around the middle (0, 0 first): N and S centered over and under it, the east
+    // side's starting near their anchors, the west side's ending near theirs.
+    QRectF bounds(QPointF(-deadZone(), -deadZone()), QPointF(deadZone(), deadZone()));
+    for (std::size_t i = 0; i < items.size(); ++i) {
+        const Item& item = items[i];
+        if (item.position < 0) continue;
         const QPointF d = direction(item.position);
         const QPointF anchor(d.x() * kReachX, d.y() * kReachY);
         const qreal w = pillWidth(item);
         qreal left = anchor.x() - w / 2.0;
-        if (d.x() > 0.3) left = anchor.x() - 10.0;
-        else if (d.x() < -0.3) left = anchor.x() - w + 10.0;
-        rects_[i] = QRectF(left, anchor.y() - kPillHeight / 2.0, w, kPillHeight);
-        radial = radial.united(rects_[i]);
+        if (d.x() > 0.3) left = anchor.x() - 18.0;
+        else if (d.x() < -0.3) left = anchor.x() - w + 18.0;
+        const QRectF r(left, anchor.y() - kPillHeight / 2.0, w, kPillHeight);
+        level.rects[i] = QRectF(r.topLeft() * scale_, r.size() * scale_);  // (the size: setScale)
+        bounds = bounds.united(level.rects[i]);
     }
     // Near the host's edges the middle moves in so every pill shows (as Blender's pie does); the
     // directions are from where it is drawn.
     const QRectF area = QRectF(rect()).adjusted(kMargin, kMargin, -kMargin, -kMargin);
-    if (area.width() > radial.width() && area.height() > radial.height()) {
-        center_.setX(std::clamp(center_.x(), area.left() - radial.left(), area.right() - radial.right()));
-        center_.setY(std::clamp(center_.y(), area.top() - radial.top(), area.bottom() - radial.bottom()));
+    if (area.width() > bounds.width() && area.height() > bounds.height()) {
+        level.center.setX(std::clamp(level.center.x(), area.left() - bounds.left(), area.right() - bounds.right()));
+        level.center.setY(std::clamp(level.center.y(), area.top() - bounds.top(), area.bottom() - bounds.bottom()));
     }
-    for (std::size_t i = 0; i < items_.size(); ++i) {
-        if (rects_[i].isValid()) rects_[i].translate(center_);
-    }
-    const qreal radialBottom = center_.y() + std::max(radial.bottom(), kPillHeight / 2.0);
-    const qreal radialRight = center_.x() + radial.right(), radialLeft = center_.x() + radial.left();
-    // The list: one panel of rows (the overflow, a divider, the tail) under the S pill; to the side
-    // when it does not fit under it.
-    std::vector<std::size_t> rows;
-    qreal listWidth = 0.0;
-    for (std::size_t i = 0; i < items_.size(); ++i) {
-        if (items_[i].kind == Item::Kind::Radial) continue;
-        rows.push_back(i);
-        listWidth = std::max(listWidth, pillWidth(items_[i]) + 8.0);
-    }
-    if (rows.empty()) return;
-    bool tail = false;
-    qreal listHeight = 8.0;
-    for (std::size_t i : rows) {
-        if (items_[i].kind == Item::Kind::Tail && !tail) {
-            tail = true;
-            if (i != rows.front()) listHeight += 9.0;
-        }
-        listHeight += kRowHeight;
-    }
-    listHeight += 8.0 - 4.0;
-    QPointF topLeft(center_.x() - listWidth / 2.0, radialBottom + kListGap - kPillHeight / 2.0);
-    if (topLeft.y() + listHeight > area.bottom() && area.height() > 0.0) {
-        // Beside the radial items instead (the right, else the left), as low as it fits.
-        topLeft.setX(radialRight + 16.0);
-        if (topLeft.x() + listWidth > area.right()) topLeft.setX(radialLeft - 16.0 - listWidth);
-        topLeft.setY(std::max(area.top(), std::min(center_.y() - kReachY - kPillHeight / 2.0, area.bottom() - listHeight)));
-    }
-    if (area.width() > 0.0) topLeft.setX(std::clamp(topLeft.x(), area.left(), std::max(area.left(), area.right() - listWidth)));
-    listRect_ = QRectF(topLeft, QSizeF(listWidth, listHeight));
-    qreal y = listRect_.top() + 4.0;
-    tail = false;
-    for (std::size_t i : rows) {
-        if (items_[i].kind == Item::Kind::Tail && !tail) {
-            tail = true;
-            if (i != rows.front()) {
-                dividerY_ = y + 4.0;
-                y += 9.0;
-            }
-        }
-        rects_[i] = QRectF(listRect_.left() + 4.0, y, listWidth - 8.0, kRowHeight);
-        y += kRowHeight;
+    for (QRectF& r : level.rects) {
+        if (r.isValid()) r.translate(level.center);
     }
 }
 
 QRectF MarkingMenu::itemRect(int index) const {
-    return index >= 0 && static_cast<std::size_t>(index) < rects_.size() ? rects_[static_cast<std::size_t>(index)] : QRectF();
+    if (levels_.empty()) return {};
+    const std::vector<QRectF>& rects = levels_.back().rects;
+    return index >= 0 && static_cast<std::size_t>(index) < rects.size() ? rects[static_cast<std::size_t>(index)] : QRectF();
 }
 
 int MarkingMenu::itemAt(QPointF at) const {
-    for (std::size_t i = 0; i < rects_.size(); ++i) {
-        if (rects_[i].contains(at)) return static_cast<int>(i);
+    if (levels_.empty()) return -1;
+    const Level& level = levels_.back();
+    const std::vector<Item>& items = itemsOf(level);
+    for (std::size_t i = 0; i < level.rects.size(); ++i) {
+        if (level.rects[i].contains(at)) return static_cast<int>(i);
     }
-    if (listRect_.contains(at)) return -1;  // the list's padding or divider
-    const QPointF d = at - center_;
+    const QPointF d = at - level.center;
     const qreal length = std::hypot(d.x(), d.y());
-    if (length < kDeadZone) return -1;
-    // The radial item whose direction is closest (within the eighth around it).
+    if (length < deadZone()) return -1;
+    // The item whose direction is closest (within the eighth around it).
     int best = -1;
     qreal bestDot = std::cos(kPi / 8.0) - 1e-6;
-    for (std::size_t i = 0; i < items_.size(); ++i) {
-        if (items_[i].kind != Item::Kind::Radial || items_[i].position < 0) continue;
-        const QPointF dir = direction(items_[i].position);
+    for (std::size_t i = 0; i < items.size(); ++i) {
+        if (items[i].position < 0) continue;
+        const QPointF dir = direction(items[i].position);
         const qreal dot = (d.x() * dir.x() + d.y() * dir.y()) / length;
         if (dot > bestDot) {
             bestDot = dot;
@@ -172,29 +158,92 @@ int MarkingMenu::itemAt(QPointF at) const {
     return best;
 }
 
+int MarkingMenu::indexOf(const std::string& id) const {
+    const std::vector<Item>& items = ring();
+    for (std::size_t i = 0; i < items.size(); ++i) {
+        const Item& item = items[i];
+        if (item.id == id || (item.kind == Item::Kind::Submenu && item.label.toStdString() == id)) return static_cast<int>(i);
+    }
+    return -1;
+}
+
 void MarkingMenu::popup(QPointF at, bool held) {
     if (parentWidget()) setGeometry(parentWidget()->rect());
-    center_ = cursor_ = pressAt_ = at;
+    cursor_ = pressAt_ = at;
     held_ = held;
+    key_ = 0;
     moved_ = false;
     hovered_ = -1;
-    layoutItems();
+    levels_.assign(1, Level{});
+    levels_.front().center = at;
+    layoutLevel(levels_.front());
     show();
     raise();
     if (!held) setFocus(Qt::PopupFocusReason);
     update();
 }
 
+void MarkingMenu::popupHeldKey(QPointF at, int key) {
+    popup(at, false);
+    key_ = key;
+    hover(at);
+}
+
+void MarkingMenu::open(int index) { open(index, itemRect(index).center()); }
+
+void MarkingMenu::open(int index, QPointF at) {
+    if (levels_.empty()) return;
+    const std::vector<Item>& items = ring();
+    if (index < 0 || static_cast<std::size_t>(index) >= items.size()) return;
+    const Item& item = items[static_cast<std::size_t>(index)];
+    if (item.kind != Item::Kind::Submenu || !item.enabled || item.items.empty()) return;
+    Level& from = levels_.back();
+    from.opened = index;
+    Level next;
+    next.path = from.path;
+    next.path.push_back(index);
+    next.center = at;
+    levels_.push_back(std::move(next));
+    layoutLevel(levels_.back());
+    hovered_ = -1;
+    update();
+}
+
+void MarkingMenu::back() {
+    if (levels_.size() <= 1) {
+        dismiss();
+        return;
+    }
+    levels_.pop_back();
+    levels_.back().opened = -1;
+    hovered_ = -1;
+    update();
+}
+
 void MarkingMenu::hover(QPointF at) {
     cursor_ = at;
-    const int now = itemAt(at);
-    if (now != hovered_) hovered_ = now;
+    // Back into the middle of the ring this one came from: that ring again.
+    if (levels_.size() > 1 && between(at, levels_[levels_.size() - 2].center) < deadZone()) {
+        back();
+        cursor_ = at;
+    }
+    hovered_ = itemAt(at);
+    // A submenu opens once the cursor is over its pill, or (a held drag) most of the way to it.
+    if (hovered_ >= 0) {
+        const Item& item = ring()[static_cast<std::size_t>(hovered_)];
+        const QRectF r = itemRect(hovered_);
+        const bool reached = r.contains(at) || ((held_ || key_ != 0) && between(at, center()) >= kOpenShare * between(r.center(), center()));
+        if (item.kind == Item::Kind::Submenu && item.enabled && !item.items.empty() && reached) {
+            open(hovered_, at);  // around the cursor: the drag goes on from there
+            hovered_ = itemAt(at);
+        }
+    }
     update();
 }
 
 void MarkingMenu::track(QPointF at) {
     if (!isVisible()) return;
-    if (QLineF(at, pressAt_).length() >= kDeadZone) moved_ = true;
+    if (QLineF(at, pressAt_).length() >= deadZone()) moved_ = true;
     hover(at);
 }
 
@@ -202,21 +251,29 @@ void MarkingMenu::release(QPointF at) {
     if (!isVisible() || !held_) return;
     held_ = false;
     const int index = itemAt(at);
-    if (index >= 0 && (moved_ || rects_[static_cast<std::size_t>(index)].contains(at))) {
-        pick(index);
-        return;
+    if (index >= 0 && (moved_ || itemRect(index).contains(at))) {
+        const Item& item = ring()[static_cast<std::size_t>(index)];
+        if (item.kind == Item::Kind::Submenu) {
+            open(index, at);
+            setFocus(Qt::PopupFocusReason);
+            return;
+        }
+        if (item.enabled) {
+            pick(index);
+            return;
+        }
     }
-    if (moved_) {
+    if (moved_ && depth() == 0) {
         dismiss();  // let go over nothing
         return;
     }
-    // A click: the menu stays for the next one.
+    // A click, or a drag into a submenu let go over nothing: the menu stays for clicks.
     setFocus(Qt::PopupFocusReason);
     hover(at);
 }
 
 void MarkingMenu::pick(int index) {
-    const Item item = items_[static_cast<std::size_t>(index)];
+    const Item item = ring()[static_cast<std::size_t>(index)];
     dismiss();
     emit picked(item);
 }
@@ -224,6 +281,7 @@ void MarkingMenu::pick(int index) {
 void MarkingMenu::dismiss() {
     if (!isVisible()) return;
     held_ = false;
+    key_ = 0;
     hovered_ = -1;
     hide();
     if (parentWidget()) parentWidget()->update();
@@ -232,25 +290,68 @@ void MarkingMenu::dismiss() {
 
 void MarkingMenu::mousePressEvent(QMouseEvent* event) {
     event->accept();
+    if (event->button() == Qt::RightButton) {
+        back();
+        return;
+    }
     if (event->button() != Qt::LeftButton) {
         dismiss();
         return;
     }
-    const int index = itemAt(event->position());
-    if (index >= 0) pick(index);
+    const QPointF at = event->position();
+    const int index = itemAt(at);
+    if (index >= 0) {
+        const Item& item = ring()[static_cast<std::size_t>(index)];
+        if (item.kind == Item::Kind::Submenu) open(index, at);
+        else if (item.enabled) pick(index);
+        return;
+    }
+    // The middle (or the submenu's own pill there): back a ring; anywhere else: closed.
+    if (between(at, center()) < deadZone() * 2.0) back();
     else dismiss();
 }
 
 void MarkingMenu::mouseMoveEvent(QMouseEvent* event) {
     event->accept();
+    if (QLineF(event->position(), pressAt_).length() >= deadZone()) moved_ = true;
     if (!held_) hover(event->position());
 }
 
 void MarkingMenu::mouseReleaseEvent(QMouseEvent* event) { event->accept(); }
 
+void MarkingMenu::setScale(qreal scale) {
+    scale_ = std::clamp(scale, kMinScale, kMaxScale);
+    for (Level& level : levels_) layoutLevel(level);
+    update();
+}
+
+void MarkingMenu::wheelEvent(QWheelEvent* event) {
+    // Up: bigger, down: smaller, a tenth a notch (the rings stay where they are).
+    event->accept();
+    const int notches = event->angleDelta().y() / 120;
+    if (notches == 0) return;
+    const qreal before = scale_;
+    setScale(std::round((scale_ + 0.1 * notches) * 10.0) / 10.0);
+    if (scale_ != before) emit scaleChanged(scale_);
+}
+
+void MarkingMenu::keyReleaseEvent(QKeyEvent* event) {
+    if (key_ == 0 || event->key() != key_ || event->isAutoRepeat()) {
+        QWidget::keyReleaseEvent(event);
+        return;
+    }
+    // The hotkey let go: what the cursor moved onto is picked (a submenu stays open), else the menu
+    // stays for clicks.
+    event->accept();
+    key_ = 0;
+    if (!moved_ || hovered_ < 0) return;
+    const Item& item = ring()[static_cast<std::size_t>(hovered_)];
+    if (item.kind != Item::Kind::Submenu && item.enabled) pick(hovered_);
+}
+
 void MarkingMenu::keyPressEvent(QKeyEvent* event) {
-    if (event->key() == Qt::Key_Escape) {
-        dismiss();
+    if (event->key() == Qt::Key_Escape || event->key() == Qt::Key_Backspace) {
+        back();
         event->accept();
         return;
     }
@@ -260,12 +361,15 @@ void MarkingMenu::keyPressEvent(QKeyEvent* event) {
 bool MarkingMenu::eventFilter(QObject* watched, QEvent* event) {
     if (watched == parentWidget() && event->type() == QEvent::Resize) {
         setGeometry(parentWidget()->rect());
-        if (isVisible()) layoutItems();
+        if (isVisible()) {
+            for (Level& level : levels_) layoutLevel(level);
+        }
     }
     return QWidget::eventFilter(watched, event);
 }
 
 void MarkingMenu::paintEvent(QPaintEvent*) {
+    if (levels_.empty()) return;
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing);
     p.setFont(labelFont());
@@ -273,63 +377,103 @@ void MarkingMenu::paintEvent(QPaintEvent*) {
     const QColor panel = theme::glassPanel(), edge = theme::glassEdge().isValid() ? theme::glassEdge() : theme::divider();
     const QColor shadow(0, 0, 0, 90);
     const qreal radius = 7.0;
-
-    // The middle: a small ring, and the line to the cursor while it points somewhere.
     QColor guide = theme::text();
     guide.setAlphaF(0.55f);
-    if (QLineF(cursor_, center_).length() >= kDeadZone) {
-        QColor line = guide;
-        line.setAlphaF(0.35f);
-        p.setPen(QPen(line, 1.5, Qt::SolidLine, Qt::RoundCap));
-        const QPointF d = cursor_ - center_;
-        const qreal len = std::hypot(d.x(), d.y());
-        p.drawLine(center_ + d * (6.0 / len), cursor_);
-    }
-    p.setPen(QPen(guide, 1.5));
-    p.setBrush(Qt::NoBrush);
-    p.drawEllipse(center_, 5.0, 5.0);
 
-    auto drawItem = [&](const Item& item, const QRectF& r, bool hovered, bool pill) {
-        const QColor fill = hovered ? hoverFill(item) : Qt::transparent;
-        const QColor text = hovered ? theme::readableOn(hoverFill(item)) : theme::text();
-        if (pill) {
-            p.setPen(Qt::NoPen);
-            p.setBrush(shadow);
-            p.drawRoundedRect(r.translated(0.0, 2.0), radius, radius);
-            p.setBrush(hovered ? fill : panel);
-            p.setPen(QPen(hovered ? fill : edge, 1.0));
-            p.drawRoundedRect(r.adjusted(0.5, 0.5, -0.5, -0.5), radius, radius);
-        } else if (hovered) {
-            p.setPen(Qt::NoPen);
-            p.setBrush(fill);
-            p.drawRoundedRect(r, 5.0, 5.0);
-        }
+    // A pill in its box `box` (this widget's pixels), drawn at the menu's own size and scaled to it.
+    auto drawPill = [&](const Item& item, const QRectF& box, bool hovered, bool hub) {
+        p.save();
+        p.translate(box.topLeft());
+        p.scale(scale_, scale_);
+        const QRectF r(0.0, 0.0, box.width() / scale_, box.height() / scale_);
+        const bool lit = hovered || hub;
+        const QColor fill = hub ? theme::chipChecked() : hoverFill(item);
+        QColor text = lit ? theme::readableOn(fill) : theme::text();
+        p.setPen(Qt::NoPen);
+        p.setBrush(shadow);
+        p.drawRoundedRect(r.translated(0.0, 2.0), radius, radius);
+        p.setBrush(lit ? fill : panel);
+        p.setPen(QPen(lit ? fill : edge, 1.0));
+        p.drawRoundedRect(r.adjusted(0.5, 0.5, -0.5, -0.5), radius, radius);
+        if (!item.enabled) text.setAlphaF(0.4f);
         qreal x = r.left() + kPad;
+        if (item.checkable) {
+            // The state: a ring, filled when on.
+            const QPointF c(x + kCheck, r.center().y());
+            const QColor mark = lit ? text : theme::chipChecked();
+            p.setPen(QPen(mark, 1.4));
+            p.setBrush(item.checked ? QBrush(mark) : QBrush(Qt::NoBrush));
+            p.drawEllipse(c, kCheck - 2.0, kCheck - 2.0);
+            x += kCheck * 2.0 + kGap;
+        }
         if (!item.icon.isEmpty()) {
-            const QColor tint = hovered ? text : (item.color.isValid() ? item.color.lighter(125) : theme::textDim());
-            const QPixmap icon = tintedIcon(item.icon, tint, static_cast<int>(kIcon), dpr);
+            QColor tint = lit ? text : (item.color.isValid() ? item.color.lighter(125) : theme::textDim());
+            if (!item.enabled) tint.setAlphaF(0.4f);
+            const QPixmap icon = tintedIcon(item.icon, tint, static_cast<int>(kIcon), dpr * scale_);
             p.drawPixmap(QPointF(x, r.center().y() - kIcon / 2.0), icon);
             x += kIcon + kGap;
         }
+        const qreal right = r.right() - kPad + 2.0 - (item.kind == Item::Kind::Submenu && !hub ? 10.0 : 0.0);
         p.setPen(text);
-        p.drawText(QRectF(x, r.top(), r.right() - x - kPad + 2.0, r.height()), Qt::AlignVCenter | Qt::AlignLeft, item.label);
+        p.drawText(QRectF(x, r.top(), right - x, r.height()), Qt::AlignVCenter | Qt::AlignLeft, item.label);
+        if (item.kind == Item::Kind::Submenu && !hub) {
+            // A small chevron: it opens a ring.
+            const qreal cx = r.right() - kPad + 1.0, cy = r.center().y();
+            p.setPen(QPen(text, 1.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+            p.setBrush(Qt::NoBrush);
+            p.drawPolyline(QPolygonF({QPointF(cx - 3.0, cy - 3.5), QPointF(cx + 0.5, cy), QPointF(cx - 3.0, cy + 3.5)}));
+        }
+        p.restore();
     };
 
-    if (listRect_.isValid()) {
-        p.setPen(Qt::NoPen);
-        p.setBrush(shadow);
-        p.drawRoundedRect(listRect_.translated(0.0, 3.0), radius + 1.0, radius + 1.0);
-        p.setBrush(panel);
-        p.setPen(QPen(edge, 1.0));
-        p.drawRoundedRect(listRect_.adjusted(0.5, 0.5, -0.5, -0.5), radius + 1.0, radius + 1.0);
-        if (dividerY_ >= 0.0) {
-            p.setPen(QPen(theme::divider(), 1.0));
-            p.drawLine(QPointF(listRect_.left() + 10.0, dividerY_), QPointF(listRect_.right() - 10.0, dividerY_));
+    // The trail: each ring left behind as a faint dot, a line on to the next ring's middle.
+    for (std::size_t l = 0; l + 1 < levels_.size(); ++l) {
+        QColor trail = guide;
+        trail.setAlphaF(0.3f);
+        p.setPen(QPen(trail, 1.5 * scale_, Qt::DashLine, Qt::RoundCap));
+        p.drawLine(levels_[l].center, levels_[l + 1].center);
+        p.setPen(QPen(trail, 1.5 * scale_));
+        p.setBrush(Qt::NoBrush);
+        p.drawEllipse(levels_[l].center, 4.0 * scale_, 4.0 * scale_);
+    }
+
+    const Level& level = levels_.back();
+    const std::vector<Item>& items = itemsOf(level);
+    // The line from the middle to the cursor while it points somewhere.
+    if (between(cursor_, level.center) >= deadZone()) {
+        QColor line = guide;
+        line.setAlphaF(0.35f);
+        p.setPen(QPen(line, 1.5 * scale_, Qt::SolidLine, Qt::RoundCap));
+        const QPointF d = cursor_ - level.center;
+        const qreal len = std::hypot(d.x(), d.y());
+        p.drawLine(level.center + d * (6.0 * scale_ / len), cursor_);
+    }
+    if (levels_.size() > 1) {
+        // The submenu's own pill as the ring's hub (a click on it goes back).
+        const Level& from = levels_[levels_.size() - 2];
+        const Item& submenu = itemsOf(from)[static_cast<std::size_t>(from.opened)];
+        const qreal w = (pillWidth(submenu) - 10.0) * scale_, h = kPillHeight * scale_;
+        drawPill(submenu, QRectF(level.center.x() - w / 2.0, level.center.y() - h / 2.0, w, h), false, true);
+    } else {
+        p.setPen(QPen(guide, 1.5 * scale_));
+        p.setBrush(Qt::NoBrush);
+        p.drawEllipse(level.center, 5.0 * scale_, 5.0 * scale_);
+        if (!context_.isEmpty()) {
+            // What it works on, over the middle (the root ring keeps N free for it).
+            p.save();
+            p.translate(level.center);
+            p.scale(scale_, scale_);
+            QFont font = labelFont();
+            font.setItalic(true);
+            p.setFont(font);
+            p.setPen(guide);
+            p.drawText(QRectF(-160.0, -kReachY - kPillHeight / 2.0, 320.0, kPillHeight), Qt::AlignCenter, context_);
+            p.restore();
         }
     }
-    for (std::size_t i = 0; i < items_.size(); ++i) {
-        if (!rects_[i].isValid()) continue;
-        drawItem(items_[i], rects_[i], static_cast<int>(i) == hovered_, items_[i].kind == Item::Kind::Radial);
+    for (std::size_t i = 0; i < items.size(); ++i) {
+        if (!level.rects[i].isValid()) continue;
+        drawPill(items[i], level.rects[i], static_cast<int>(i) == hovered_ && items[i].enabled, false);
     }
 }
 

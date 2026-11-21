@@ -358,6 +358,32 @@ std::map<std::string, json> Definitions::containers() const {
         }
     }
     out["markingMenu/tail"] = tail;
+    // The radial menu's actions (its rings' and the brush options'), each once, as plain ids.
+    json radial = json::array();
+    std::set<std::string> seen;
+    auto add = [&](const json& entry) {
+        if (const json* action = member(entry, "action"); action && action->is_string() && seen.insert(action->get<std::string>()).second) {
+            radial.push_back(*action);
+        }
+    };
+    std::function<void(const json&)> visit = [&](const json& items) {
+        if (!items.is_array()) return;
+        for (const json& e : items) {
+            if (!e.is_object()) continue;
+            add(e);
+            if (const json* inner = member(e, "items")) visit(*inner);
+        }
+    };
+    if (const json* items = find("radialMenu/items")) visit(*items);
+    if (const json* tools = find("radialMenu/brushOptions/tools"); tools && tools->is_object()) {
+        for (const auto& [tool, rows] : tools->items()) {
+            if (!rows.is_array()) continue;
+            for (const json& row : rows) {
+                if (row.is_object()) add(row);
+            }
+        }
+    }
+    out["radialMenu"] = radial;
     return out;
 }
 

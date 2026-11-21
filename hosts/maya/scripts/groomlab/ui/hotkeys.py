@@ -1,11 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
-"""GroomLab hotkeys: runtime commands for every tool, a marking menu, level stepping.
+"""GroomLab hotkeys: runtime commands for every tool, the radial menu, level stepping.
 
 Runtime commands (Hotkey Editor > Runtime Command Editor > GroomLab) are created
 when the menu installs, so any of them can be bound by hand. install() also
 makes a "GroomLab" hotkey set (a copy of the current one) with:
 
-    Y (hold) + left click   the GroomLab marking menu: brushes around, the rest below
+    Alt+S (hold)            the GroomLab radial menu around the cursor (groomlab.ui.radial_menu):
+                            move onto an item and let go of S to pick it, or click
     Page Up / Page Down     the brushes' guide level up / down (isolated when isolating)
     B / M (hold) + drag     a GroomLab brush's radius / strength (other tools: Maya's own B / M)
     Alt+Shift+X             the brushes' symmetry on or off (Alt+X is Maya's Walk Tool)
@@ -27,7 +28,7 @@ HOTKEY_SET = "GroomLab"
 # switched from is the first entry when it switched.
 last_changes = []
 # Key names as people read them, for the list of changes.
-_KEY_NAMES = {"y": "Y", "Page_Up": "Page Up", "Page_Down": "Page Down", "b": "B", "m": "M", "X": "Alt+Shift+X",
+_KEY_NAMES = {"y": "Y", "s": "Alt+S", "Page_Up": "Page Up", "Page_Down": "Page Down", "b": "B", "m": "M", "X": "Alt+Shift+X",
               "G": "Alt+Shift+G"}
 
 # The marking menu's layout, every host's (engine/ui/marking_menu.json; Blender's pie reads the
@@ -185,6 +186,10 @@ def create_runtime_commands():
              "GroomLab marking menu (hold, then left click)")
     _runtime("GroomLabMarkingMenuRelease", "import groomlab.ui.hotkeys as h; h.marking_menu_release()",
              "GroomLab marking menu release")
+    _runtime("GroomLabRadialMenuPress", "import groomlab.ui.radial_menu as r; r.show()",
+             "GroomLab radial menu around the cursor (hold, move onto an item, let go)")
+    _runtime("GroomLabRadialMenuRelease", "import groomlab.ui.radial_menu as r; r.key_released()",
+             "GroomLab radial menu release: picks what the cursor is on")
     _runtime("GroomLabLevelUp", "import groomlab.ui.hotkeys as h; h.step_level(-1)", "GroomLab: brush the parents")
     _runtime("GroomLabLevelDown", "import groomlab.ui.hotkeys as h; h.step_level(1)", "GroomLab: brush the children")
     _runtime("GroomLabGroomTools", "import groomlab.ui.palette as p; p.show()", "GroomLab Groom Tools")
@@ -242,7 +247,9 @@ def install(activate=True):
         cmds.hotkeySet(HOTKEY_SET, source=cmds.hotkeySet(query=True, current=True))
     if activate:
         cmds.hotkeySet(HOTKEY_SET, edit=True, current=True)
-    bindings = [("y", "GroomLabMarkingMenuPress", "GroomLabMarkingMenuRelease"),
+    from groomlab.ui import radial_menu
+    radial_key, radial_modifiers = radial_keys(radial_menu.shortcut())
+    bindings = [(radial_key, "GroomLabRadialMenuPress", "GroomLabRadialMenuRelease", radial_modifiers),
                 ("Page_Up", "GroomLabLevelUp", None), ("Page_Down", "GroomLabLevelDown", None),
                 ("b", "GroomLabBrushRadiusPress", "GroomLabBrushRadiusRelease"),
                 ("m", "GroomLabBrushStrengthPress", "GroomLabBrushStrengthRelease"),
@@ -250,11 +257,16 @@ def install(activate=True):
                 ("G", "GroomLabToggleAllGuides", None, {"altModifier": True})]
     current = cmds.hotkeySet(query=True, current=True)
     walk = _maya_binding("x", altModifier=True)
+    last_tool = _maya_binding("y")
     cmds.hotkeySet(HOTKEY_SET, edit=True, current=True)
     try:
         # Symmetry was Alt+X once, which is Maya's Walk Tool: a set made then gets Maya's back.
         if cmds.hotkey("x", altModifier=True, query=True, name=True) == "GroomLabToggleSymmetryNameCommand":
             cmds.hotkey(keyShortcut="x", altModifier=True, name=walk or "")
+        # The marking menu was Y + click once; the radial menu is Alt+S now: Y does Maya's again.
+        if cmds.hotkey("y", query=True, name=True) == "GroomLabMarkingMenuPressNameCommand":
+            cmds.hotkey(keyShortcut="y", name=last_tool or "", releaseName="")
+            changes.append(("Y", "GroomLabMarkingMenuPress", last_tool or "(nothing)"))
         for binding in bindings:
             key, press, release = binding[:3]
             press_name = press + "NameCommand"
@@ -275,6 +287,59 @@ def install(activate=True):
             cmds.hotkeySet(current, edit=True, current=True)
     last_changes = changes
     return HOTKEY_SET
+
+
+# Qt's key names (QKeySequence PortableText) as Maya's hotkey command takes them.
+_MAYA_KEYS = {"PgUp": "Page_Up", "PgDown": "Page_Down", "Del": "Delete", "Ins": "Insert", "Esc": "Escape",
+              "Space": "Space", "Return": "Return", "Enter": "Enter", "Tab": "Tab", "Backspace": "Backspace",
+              "Home": "Home", "End": "End", "Up": "Up", "Down": "Down", "Left": "Left", "Right": "Right"}
+
+
+def radial_keys(text):
+    """A shortcut's text ("Alt+S", "Ctrl+Shift+Q") as Maya's hotkey takes it: (keyShortcut,
+    {"altModifier": ..., "ctrlModifier": ...}); Shift is the letter in upper case (Maya's way), so it
+    goes with letters alone (ValueError otherwise, and for no key)."""
+    parts = [p for p in str(text).replace(" ", "").split("+") if p] if text else []
+    if not parts:
+        raise ValueError("no key in the shortcut %r" % text)
+    key, modifiers = parts[-1], set(p.lower() for p in parts[:-1])
+    out = {}
+    if "alt" in modifiers:
+        out["altModifier"] = True
+    if "ctrl" in modifiers or "control" in modifiers:
+        out["ctrlModifier"] = True
+    if "meta" in modifiers or "cmd" in modifiers:
+        out["commandModifier"] = True
+    if len(key) == 1 and key.isalpha():
+        key = key.upper() if "shift" in modifiers else key.lower()
+    elif "shift" in modifiers:
+        raise ValueError("Maya takes Shift with a letter only: %s" % text)
+    else:
+        key = _MAYA_KEYS.get(key, key)
+    return key, out
+
+
+def bind_radial(text, previous=None):
+    """The radial menu on the shortcut `text` ("Alt+S") in the GroomLab hotkey set (made from the
+    current set if missing, and made current); `previous`, its old shortcut, given back what Maya's
+    own set binds to it."""
+    key, modifiers = radial_keys(text)  # (bad text: refused before anything changes)
+    create_runtime_commands()
+    if not cmds.hotkeySet(HOTKEY_SET, exists=True):
+        cmds.hotkeySet(HOTKEY_SET, source=cmds.hotkeySet(query=True, current=True))
+    cmds.hotkeySet(HOTKEY_SET, edit=True, current=True)
+    if previous and previous != text:
+        try:
+            old, old_modifiers = radial_keys(previous)
+        except ValueError:
+            old = None
+        if old and cmds.hotkey(old, query=True, name=True, **old_modifiers) == "GroomLabRadialMenuPressNameCommand":
+            back = _maya_binding(old, **old_modifiers)
+            cmds.hotkey(keyShortcut=old, name=back or "", releaseName="", **old_modifiers)
+    for name in ("GroomLabRadialMenuPress", "GroomLabRadialMenuRelease"):
+        cmds.nameCommand(name + "NameCommand", annotation=name, command=name, sourceType="mel")
+    cmds.hotkey(keyShortcut=key, name="GroomLabRadialMenuPressNameCommand",
+                releaseName="GroomLabRadialMenuReleaseNameCommand", **modifiers)
 
 
 def changes_text(changes=None):

@@ -270,7 +270,8 @@ labels, search words and number decimals come from the core (`node_catalog.h`, t
 | Copy the graph to other grooms | Utilities > Copy Graph to Other Grooms... | Maya only: several Maya grooms (Copy Graph / Paste Graph carries a look between files) |
 | Bake a node to guides | Utilities > Bake Node to Guides... | missing |
 | Find missing files | Utilities > Find Missing Files... | missing |
-| Install hotkeys, marking menu (Y), B/M drags | GroomLab > Install Hotkeys | partial: B drag, Shift+middle, S, Esc, Tab, F, Page Up/Down are built in; no marking menu or user-bindable commands |
+| Install hotkeys, radial menu (Alt+S), B/M drags | GroomLab > Install Hotkeys | partial: B drag, Shift+middle, S, Esc, Tab, F, Page Up/Down are built in; no user-bindable commands. Alt+S opens the radial menu (marking_menu.json's radialMenu: Masking, Visibility with its Groups, Brushes A/B, Brush Options; every item on the current groom), as in Maya (Alt+S with the GroomLab hotkey set); Blender's pie still reads markingMenu |
+| Hide guides one by one (the hidden layer: not drawn, not picked, locked) and Smooth's Length / Shape / All | the radial menu > Visibility; Smooth's Evens out row | *new*: the core's (kHiddenLayer, SmoothMode); app only so far, Maya and Blender to follow |
 | Theme follow in the viewport | automatic | present by design (the shipped themes are embedded) |
 
 ## Still missing, in order of artist value

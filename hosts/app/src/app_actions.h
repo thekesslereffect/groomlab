@@ -28,6 +28,7 @@
 class QAction;
 class QMenu;
 class QMenuBar;
+class QDialog;
 
 namespace groomlab::app {
 
@@ -48,13 +49,19 @@ struct AppActions {
     // Everything fillMenu needs for the window's menus (the shortcut owners shared by them all).
     static ui::FillOptions fillOptions(MainWindow& window);
 
-    // ---- The marking menu (marking_menu.json: Y + click over the viewport) ------------------------
-    // Its items, as Maya's hotkeys.py builds them: the radial brushes at their compass points, the
-    // rest of the brush catalog (but what the overflow excludes), then the tail's tools and actions
-    // (an action without a binding here hidden). runMarkingMenuItem runs a picked one: a tool in
-    // Groom mode (Select as the Select tool), an action by its binding.
-    static std::vector<MarkingMenu::Item> markingMenuItems(MainWindow& window);
+    // ---- The radial menu (marking_menu.json's radialMenu: Alt+S over the viewport) -----------
+    // Its rings, as GroomBear's and RadialZ's: tools, actions (one without a binding here left out;
+    // a checkable one with its state) and submenus at their compass points, Brush Options made from
+    // radialMenu.brushOptions for the brush picked now (its switches and values with their state;
+    // none: the submenu disabled). runMarkingMenuItem runs a picked one: a tool in Groom mode
+    // (Select as the Select tool, selecting the guides to work on), an action by its binding, an
+    // option set on the brush (a switch flipped, a value picked) and the Groom Tools shown again.
+    static std::vector<MarkingMenu::Item> radialMenuItems(MainWindow& window);
     static void runMarkingMenuItem(MainWindow& window, const MarkingMenu::Item& item);
+    // GroomLab > Radial Menu Settings...: a small window (objectName radialMenuSettings, one at a time)
+    // setting the radial menu's shortcut (a key with its modifiers; a clash with a menu's shortcut said)
+    // and its size, live (MainWindow::setRadialMenuShortcut, setRadialMenuScale).
+    static QDialog* showRadialMenuSettings(MainWindow& window);
 
     // ---- The Graph Editor (app_graph_actions.cpp: graph_ui.json, as Maya's graph_editor.py) ------
     // Its bar's menus (Add Node, Presets, Edit) and the right-click menus of the graph's nodes,

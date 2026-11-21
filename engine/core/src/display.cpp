@@ -1119,7 +1119,7 @@ std::vector<const HierarchyGuide*> activeTubeGuides(const GuideHierarchy& hierar
     const bool layers = hierarchy.hasAttributes();
     std::vector<const HierarchyGuide*> out;
     for (const HierarchyGuide& g : hierarchy.guides()) {
-        if (g.points.size() < 2) continue;
+        if (g.points.size() < 2 || (layers && guideHidden(hierarchy, g))) continue;
         {
             const GuideGroup* grp = hierarchy.group(g.group);
             const std::string name = grp ? grp->name : std::string();
@@ -2374,7 +2374,9 @@ void DisplayBuilder::buildGuides(const DisplayInputs& in, const DisplaySettings&
     const MixedView mixed(hierarchy.get(), s.mixedView);
     // (Mixed view: its hierarchy's guides as it says: the level worked on alone; their tubes, also
     // the levels above it does not continue: hiddenTube.)
+    const bool hiddenLayer = hierarchy && anyGuideHidden(*hierarchy);  // guides hidden one by one
     auto hiddenGuide = [&](const HierarchyGuide& g) {
+        if (hiddenLayer && guideHidden(*hierarchy, g)) return true;
         if (hierarchy && mixed.on()) {
             const int m = mixed.shows(*hierarchy, g);
             if (m >= 0) return m != 1;
@@ -2548,7 +2550,7 @@ void DisplayBuilder::buildGuides(const DisplayInputs& in, const DisplaySettings&
     if (moving) {
         for (const Guide& g : moving->guides()) {
             if (g.points.size() < 2) continue;
-            if (hierarchy && (!hiddenNames.empty() || mixed.on())) {
+            if (hierarchy && (!hiddenNames.empty() || mixed.on() || hiddenLayer)) {
                 const HierarchyGuide* own = hierarchy->guide(g.id);
                 if (own && hiddenGuide(*own)) continue;
             }
@@ -2607,7 +2609,7 @@ void DisplayBuilder::buildSelection(const DisplayInputs& in, const DisplaySettin
         const MixedView mixed(hierarchy.get(), s.mixedView);
         for (const auto& [id, weight] : in.selection()) {
             const HierarchyGuide* g = hierarchy->guide(id);
-            if (!g) continue;
+            if (!g || guideHidden(*hierarchy, *g)) continue;
             const int m = mixed.shows(*hierarchy, *g);
             if (m == 0 || m == 2) continue;
             const GuideGroup* grp = hiddenNames.empty() || m == 1 ? nullptr : hierarchy->group(g->group);
