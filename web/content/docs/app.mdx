@@ -33,7 +33,7 @@ Maya or Blender opens with **File > Open Groom...**, Ctrl+O.)
 
 In **Groom Tools** on the left, pick **Place** (or **Place some guides** on the **Your first
 groom** card over the viewport) and click or drag on the scalp. Shape the guides with **Comb**. Hold
-**B** and drag to size the brush, or hold **Y** and click for the [marking menu](#the-marking-menu).
+**B** and drag to size the brush, or hold **Alt+S** for the [radial menu](#the-radial-menu).
 For more detail, choose **Edit Guides > Children** under **Guide groups**.
 
 </Step>
@@ -198,7 +198,7 @@ Create, Shape, Trim and Paint, then **Select** and **Freeze**. See
 - Hold **B** and drag, or middle-drag, to set the radius. Hold **M** and drag, or
   **Shift+middle-drag**, to set the strength.
 - **Alt+Shift+X** turns symmetry on or off.
-- Hold **Y** and click for the marking menu.
+- Hold **Alt+S** for the radial menu.
 - **Alt** with any mouse button moves the camera, whatever the tool.
 - **Esc** leaves the brush for the camera.
 
@@ -227,17 +227,28 @@ groom's library; **Apply** gives it to the selected or soloed guides) and **Sele
 Graph Editor's **Edit > Units**. The Tube brush paints width, flatness or twist along a guide.
 **Fill Tubes** and **Tube Blend** are the Interpolate node's settings.
 
-### The marking menu
+### The radial menu
 
-Hold **Y** and press the left mouse button over the viewport: the marking menu opens around the
-cursor, as Maya's GroomLab marking menu does. Comb, Slide, Smooth, Cut, Place, Draw, Length and Lift
-sit at the compass points; the rest of the brushes are listed below them, then **Select**,
-**Freeze** and **Groom Tools**.
+Hold **Alt+S** over the viewport: the radial menu opens around the cursor at once, no click needed.
+Maya has the same menu (Alt+S, after **GroomLab > Install GroomLab Hotkeys**). It works on the
+current groom only, whose name shows faintly above the middle.
 
-- Drag toward an item and let go to pick it. A compass item is picked by direction alone, so a
-  short flick is enough.
-- Let go without moving and the menu stays open: click an item. Click in the middle, or press
-  **Esc**, to close it.
+| Direction | Ring | What it holds |
+| --- | --- | --- |
+| Down | **Masking** | **Full** (every guide unfrozen), **Empty** (every guide frozen), **Select** (lasso the guides to work on; the rest freeze), **Quick Select** (the same for one pick, then back to the brush you had), **Mask Brush** |
+| Left | **Visibility** | **Select** (lasso the guides to keep shown: the rest hide), **Show All**, **Invert**, **Hide Hair** / **Show Hair**, **Hide Guides** / **Show Guides**, **Groups** (each guide group, picked to hide or show it) |
+| Up-left | **Brushes A** | Draw, Comb, Slide, Smooth, Tube, Flow, Place |
+| Up-right | **Brushes B** | Lift, Swing, Attract, Part, Cut, Erase |
+| Right | **Brush Options** | The picked brush's options: Comb's Stretch, Smooth's Curve / Length / Shape / All, Tube's Draw Root, Edit Roots, Width, Flatness, Twist and Always Visible |
+
+- Move toward a ring: it opens around the cursor. Move onto an item and let go of **S** to pick it.
+- Let go without moving and the menu stays open for clicks. **Esc**, a right-click or a click in
+  the middle goes back a ring; a click away closes it.
+- **GroomLab > Radial Menu Settings...** sets another shortcut and the menu's size (75% to 250%).
+  The mouse wheel over the open menu resizes it too.
+
+A hidden guide is not drawn, can't be selected and no brush touches it, but the hair it guides
+still grows.
 
 ## The Graph Editor
 
