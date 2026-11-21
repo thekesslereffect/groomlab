@@ -71,6 +71,13 @@ std::uint64_t hashParam(std::uint64_t seed, const ParamValue& value) {
                     const float kv[2] = {t, value};
                     h = hashBytes(h, kv, sizeof kv);
                 }
+                if (v.hasHandles()) {
+                    for (std::size_t k = 0; k < v.keys.size(); ++k) {
+                        const RampHandle hk = v.handle(k);
+                        const float s[3] = {hk.set ? 1.0f : 0.0f, hk.set ? hk.in : 0.0f, hk.set ? hk.out : 0.0f};
+                        h = hashBytes(h, s, sizeof s);
+                    }
+                }
                 return h;
             } else {
                 return hashBytes(seed, &v, sizeof v);
@@ -241,7 +248,7 @@ namespace {
 Ramp unitRamp(Ramp r) {
     auto unit = [](float x) { return x > 0.0f ? (x < 1.0f ? x : 1.0f) : 0.0f; };
     for (auto& key : r.keys) key = {unit(key.first), unit(key.second)};
-    std::stable_sort(r.keys.begin(), r.keys.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+    r.sort();  // (the handles with their keys)
     return r;
 }
 }  // namespace

@@ -1017,6 +1017,13 @@ public:
                 out.keys = in.keys;
             }
             for (auto& k : out.keys) k.second = offset + scale * k.second;
+            // The keys' handles with them: scaled as the values, mirrored (in and out swapped,
+            // each slope turned) with flip.
+            const std::size_t n = in.keys.size();
+            for (std::size_t k = 0; k < n && in.hasHandles(); ++k) {
+                const RampHandle h = in.handle(flip ? n - 1 - k : k);
+                if (h.set) out.setHandle(k, flip ? RampHandle{true, -h.out * scale, -h.in * scale} : RampHandle{true, h.in * scale, h.out * scale});
+            }
             out.straight = linear;
         } else {  // smooth eases every span, in place of straight lines
             for (int i = 0; i <= 64; ++i) {

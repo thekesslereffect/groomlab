@@ -166,6 +166,62 @@ TEST(Ramp, EvaluatesAndRoundTripsThroughJson) {
     EXPECT_EQ(linAgain.graph.node(linAgain.node("c")).params().getRamp("profile"), straight);
 }
 
+TEST(Ramp, HandlesSetAKeysSlopesAndMakeCorners) {
+    // Issue #102: a key's handles set its slopes; one each side makes a corner; the keys without
+    // handles keep their automatic ones.
+    Ramp r{{0.0f, 0.0f}, {0.5f, 1.0f}, {1.0f, 1.0f}};
+    const float autoMid = r(0.25f);
+    EXPECT_FLOAT_EQ(r.tangentIn(1), 0.0f);  // automatic: flat between a rise and a level stretch
+    r.setHandle(1, RampHandle{true, 2.0f, 0.0f});  // straight in (the secant 0 to 0.5), level out
+    EXPECT_TRUE(r.hasHandles());
+    EXPECT_FLOAT_EQ(r.tangentIn(1), 2.0f);
+    EXPECT_FLOAT_EQ(r.tangentOut(1), 0.0f);
+    EXPECT_FLOAT_EQ(r.tangentIn(0), r.tangent(0));  // the other keys as they were
+    // The first span is the secant's straight line now (both its ends at slope 2): a corner at 0.5.
+    EXPECT_NEAR(r(0.25f), 0.5f, 1e-6f);
+    EXPECT_NE(r(0.25f), autoMid);
+    EXPECT_FLOAT_EQ(r(0.75f), 1.0f);
+    // at() from tangents(): the same curve.
+    const std::vector<float> slopes = r.tangents();
+    ASSERT_EQ(slopes.size(), 6u);
+    for (float t = 0.0f; t <= 1.0f; t += 0.05f) EXPECT_FLOAT_EQ(r.at(t, slopes.data()), r(t));
+    // Sorting keeps a key's handles with it.
+    Ramp unsorted;
+    unsorted.keys = {{1.0f, 1.0f}, {0.5f, 1.0f}, {0.0f, 0.0f}};
+    unsorted.setHandle(1, RampHandle{true, 2.0f, 0.0f});
+    unsorted.sort();
+    EXPECT_EQ(unsorted, r);
+    // Cleared, the handles are automatic again (and none are kept).
+    Ramp cleared = r;
+    cleared.setHandle(1, RampHandle{});
+    EXPECT_FALSE(cleared.hasHandles());
+    EXPECT_TRUE(cleared.handles.empty());
+    EXPECT_FLOAT_EQ(cleared(0.25f), autoMid);
+
+    // JSON: [position, value] automatic, [position, value, slope] both sides, [position, value,
+    // in, out] a corner; saved as read.
+    const Ramp read = rampFromJson("[[0, 0], [0.5, 1, 2, 0], [1, 1, 0.5]]");
+    EXPECT_EQ(read.handle(0), RampHandle{});
+    EXPECT_EQ(read.handle(1), (RampHandle{true, 2.0f, 0.0f}));
+    EXPECT_EQ(read.handle(2), (RampHandle{true, 0.5f, 0.5f}));
+    EXPECT_EQ(rampFromJson(rampToJson(read)), read);
+    EXPECT_EQ(rampToJson(read), "[[0.0,0.0],[0.5,1.0,2.0,0.0],[1.0,1.0,0.5]]");
+    // A graph's ramp param keeps them through a save and a load; another handle is another value.
+    GraphDocument doc = loadGraphJson(R"({
+        "nodes": [{"name": "c", "type": "Clump", "params": {"profile": [[0, 0], [0.5, 1, 2, 0], [1, 1]]}},
+                  {"name": "o", "type": "Output"}],
+        "connections": [{"from": "c", "to": "o", "input": "strands"}], "output": "o"})");
+    const Ramp loaded = doc.graph.node(doc.node("c")).params().getRamp("profile");
+    EXPECT_EQ(loaded, r);
+    const GraphDocument again = loadGraphJson(saveGraphJson(doc));
+    EXPECT_EQ(again.graph.node(again.node("c")).params().getRamp("profile"), r);
+    const GraphDocument without = loadGraphJson(R"({
+        "nodes": [{"name": "c", "type": "Clump", "params": {"profile": [[0, 0], [0.5, 1], [1, 1]]}},
+                  {"name": "o", "type": "Output"}],
+        "connections": [{"from": "c", "to": "o", "input": "strands"}], "output": "o"})");
+    EXPECT_NE(doc.graph.node(doc.node("c")).params().hash(), without.graph.node(without.node("c")).params().hash());
+}
+
 TEST(PointIndex, MatchesBruteForce) {
     Rng rng(5);
     std::vector<Vec3f> pts;

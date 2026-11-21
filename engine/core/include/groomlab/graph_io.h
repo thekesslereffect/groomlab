@@ -68,9 +68,11 @@ std::unique_ptr<Operator> operatorFromJson(const std::string& type, const std::s
 std::string paramsJson(const ParamSet& params);
 
 // A ramp param's value as a graph's JSON holds it ([[position, value], ...], or {"keys": [...],
-// "linear": true}), parsed as loadGraphJson parses it (keys sorted). Throws GraphError for
-// anything else.
+// "linear": true}; a key with handles set [position, value, slope] or [position, value, in, out]),
+// parsed as loadGraphJson parses it (keys sorted). Throws GraphError for anything else.
 Ramp rampFromJson(const std::string& text);
+// A ramp as a graph's JSON holds it (what rampFromJson reads).
+std::string rampToJson(const Ramp& ramp);
 
 // Hair out of the box (hair_basics without its clumps): Scalp -> Scatter -> Interpolate (+ Guides,
 // Scalp) -> Length (uneven ends) -> Noise -> HairColor -> Width -> Resample (even) -> Output.

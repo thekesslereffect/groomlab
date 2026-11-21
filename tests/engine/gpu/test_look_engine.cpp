@@ -1908,6 +1908,10 @@ TEST_P(LookEngineTest, ARampDragGivesWhatTheCpuEvaluatesForIt) {
         EXPECT_GPU_MATCHES(g.json(), rampDrag("noise", "profile", bump), c.json());
         c.noise = R"("params": {"amplitude": 0.3, "frequency": 1.0, "octaves": 2, "profile": )" + straight + "}";
         EXPECT_GPU_MATCHES(g.json(), rampDrag("noise", "profile", straight), c.json());
+        // Keys with handles set (issue #102): a corner (a slope each side) and a smooth key's own slope.
+        const std::string handled = R"([[0, 0.2, 3.0], [0.45, 1.0, 1.8, -0.4], [1, 0.35]])";
+        c.noise = R"("params": {"amplitude": 0.3, "frequency": 1.0, "octaves": 2, "profile": )" + handled + "}";
+        EXPECT_GPU_MATCHES(g.json(), rampDrag("noise", "profile", handled), c.json());
     }
     {
         LookGraph g;

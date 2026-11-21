@@ -272,6 +272,39 @@ TEST(AppPanels, ParamEditorsRoundTripEveryKindWithoutLosingMaps) {
     EXPECT_EQ(RampEditor::flipped(json::parse("[[0, 0], [0.25, 0.5], [1, 1]]")), json::parse("[[0.0, 1], [0.75, 0.5], [1.0, 0]]"));
     EXPECT_EQ(RampEditor::flipped(json::parse(R"({"keys": [[0, 1], [1, 0.5]], "linear": true})")),
               json::parse(R"({"keys": [[0.0, 0.5], [1.0, 1]], "linear": true})"));
+    // Handles (issue #102): a key's slopes kept in the JSON as the core reads them, Auto Handles
+    // and Corner; Flip mirrors them; a drag on the picked key's handle sets its slope both sides,
+    // Alt+drag one side.
+    ramp->setValue(json::parse("[[0, 0], [0.5, 1, 2, 0], [1, 1]]"));
+    EXPECT_EQ(ramp->value(), json::parse("[[0, 0], [0.5, 1, 2, 0], [1, 1]]"));
+    ramp->setHandle(1, RampHandle{});
+    EXPECT_EQ(ramp->value(), json::parse("[[0, 0], [0.5, 1], [1, 1]]"));
+    ramp->corner(1);
+    EXPECT_EQ(ramp->value(), json::parse("[[0, 0], [0.5, 1, 2, 0], [1, 1]]"));
+    EXPECT_EQ(RampEditor::flipped(json::parse("[[0, 0], [0.5, 1, 2, 0], [1, 1]]")), json::parse("[[0, 1], [0.5, 1, 0, -2], [1, 0]]"));
+    ramp->setHandle(1, RampHandle{});
+    ramp->resize(300, 170);
+    ramp->select(1);
+    auto drag = [&](const QPointF& from, const QPointF& to, Qt::KeyboardModifiers modifiers) {
+        QMouseEvent press(QEvent::MouseButtonPress, from, ramp->mapToGlobal(from), Qt::LeftButton, Qt::LeftButton, modifiers);
+        QApplication::sendEvent(ramp, &press);
+        QMouseEvent move(QEvent::MouseMove, to, ramp->mapToGlobal(to), Qt::NoButton, Qt::LeftButton, modifiers);
+        QApplication::sendEvent(ramp, &move);
+        QMouseEvent release(QEvent::MouseButtonRelease, to, ramp->mapToGlobal(to), Qt::LeftButton, Qt::NoButton, modifiers);
+        QApplication::sendEvent(ramp, &release);
+    };
+    QPointF out = ramp->handlePoints(1).second;
+    drag(out, out - QPointF(0, 20), Qt::NoModifier);  // up: steeper out of the key
+    const json tied = ramp->value()[1];
+    ASSERT_EQ(tied.size(), 3u) << tied.dump();
+    EXPECT_GT(tied[2].get<double>(), 0.3);
+    out = ramp->handlePoints(1).second;
+    drag(out, out + QPointF(0, 35), Qt::AltModifier);  // down, the out side alone
+    const json cornered = ramp->value()[1];
+    ASSERT_EQ(cornered.size(), 4u) << cornered.dump();
+    EXPECT_EQ(cornered[2], tied[2]);
+    EXPECT_LT(cornered[3].get<double>(), cornered[2].get<double>());
+    EXPECT_EQ(ramp->selected(), 1);
 
     // A mappable param holding a map: shown as its source, never replaced by the number editor.
     const std::string scatter = nodeOfType(*doc, "Scatter");

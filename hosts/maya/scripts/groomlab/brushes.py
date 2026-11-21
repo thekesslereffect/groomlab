@@ -155,7 +155,9 @@ def curve_text(curve):
         return ""
     if isinstance(curve, str):
         return curve
-    return json.dumps([[float(t), float(v)] for t, v in curve])
+    if isinstance(curve, dict):
+        return json.dumps(curve)
+    return json.dumps([[float(x) for x in key] for key in curve])  # (a key with handles: 3 or 4 numbers)
 
 
 def _rgba(color):

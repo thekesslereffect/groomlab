@@ -17,6 +17,7 @@ Exit code 0 when all of it passed (ctest maya.ui_scaling).
 """
 
 import argparse
+import json
 import os
 import sys
 import tempfile
@@ -97,6 +98,51 @@ def main():
     def settle():
         for _ in range(3):
             application.processEvents()
+
+    # A ramp's handles (issue #102): the key picked shows them; a drag sets its slope both sides,
+    # Alt+drag one side (a corner); a double click on a handle makes it automatic again. The curve
+    # drawn is the core's, handles and all.
+    def ramp_handles():
+        from groomlab.ui.qt import QtCore, QtGui, QtWidgets
+        QTest = qt.QtTest().QTest
+
+        def move(widget, point, modifiers):  # (offscreen, QTest.mouseMove sends no event)
+            event = QtGui.QMouseEvent(QtCore.QEvent.MouseMove, QtCore.QPointF(point), QtCore.Qt.NoButton,
+                                      QtCore.Qt.LeftButton, modifiers)
+            QtWidgets.QApplication.sendEvent(widget, event)
+
+        ramp = widgets.RampEditor([[0.0, 0.0], [0.5, 1.0], [1.0, 1.0]])
+        ramp.resize(300, 160)
+        ramp.show()
+        settle()
+        at = ramp.to_screen(0.5, 1.0).toPoint()
+        QTest.mouseClick(ramp, QtCore.Qt.LeftButton, QtCore.Qt.NoModifier, at)
+        _expect(ramp.value() == [[0.0, 0.0], [0.5, 1.0], [1.0, 1.0]], "a click on a key moves nothing: %r" % ramp.value())
+        _in, out = ramp.handle_points(1)
+        target = QtCore.QPoint(int(out.x()), int(out.y()) - 25)  # up: steeper out of the key
+        QTest.mousePress(ramp, QtCore.Qt.LeftButton, QtCore.Qt.NoModifier, out.toPoint())
+        move(ramp, target, QtCore.Qt.NoModifier)
+        QTest.mouseRelease(ramp, QtCore.Qt.LeftButton, QtCore.Qt.NoModifier, target)
+        tied = ramp.value()[1]
+        _expect(len(tied) == 3 and tied[2] > 0.5, "a handle dragged: the key's slope, both sides: %r" % tied)
+        _in, out = ramp.handle_points(1)
+        target = QtCore.QPoint(int(out.x()), int(out.y()) + 40)  # down: the out side alone, with Alt
+        QTest.mousePress(ramp, QtCore.Qt.LeftButton, QtCore.Qt.AltModifier, out.toPoint())
+        move(ramp, target, QtCore.Qt.AltModifier)
+        QTest.mouseRelease(ramp, QtCore.Qt.LeftButton, QtCore.Qt.AltModifier, target)
+        corner = ramp.value()[1]
+        _expect(len(corner) == 4 and corner[2] == tied[2] and corner[3] < corner[2], "Alt+drag: one side, a corner: %r" % corner)
+        core = groomlab_core.Ramp.from_json(json.dumps(ramp.value()))
+        _expect(all(abs(core(u / 20.0) - ramp.evaluate(u / 20.0)) < 1e-5 for u in range(21)), "drawn as the core evaluates it")
+        ramp.corner(1)
+        _expect(ramp.value()[1] == [0.5, 1.0, 2.0, 0.0], "Corner: straight toward each neighbor: %r" % ramp.value()[1])
+        QTest.mouseDClick(ramp, QtCore.Qt.LeftButton, QtCore.Qt.NoModifier, ramp.handle_points(1)[1].toPoint())
+        _expect(ramp.value()[1] == [0.5, 1.0], "a double click on a handle: automatic again: %r" % ramp.value()[1])
+        _expect(widgets.flipped_ramp([[0.0, 0.0], [0.5, 1.0, 2.0, 0.0], [1.0, 1.0]])
+                == [[0.0, 1.0], [0.5, 1.0, -0.0, -2.0], [1.0, 0.0]], "Flip mirrors the handles")
+        ramp.close()
+        widgets.dispose(ramp)
+    check.run("a ramp's handles set its keys' slopes", ramp_handles)
 
     # The themes: GroomLab > Theme and the windows' Theme menus list every one, the active one
     # checked; each restyles the Groom Tools and the Graph Editor.

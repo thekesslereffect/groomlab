@@ -6,6 +6,7 @@
 
 #include <QColorDialog>
 #include <QComboBox>
+#include <QContextMenuEvent>
 #include <QDoubleSpinBox>
 #include <QHBoxLayout>
 #include <QKeyEvent>
@@ -20,6 +21,7 @@
 
 #include "definitions.h"
 #include "glass.h"
+#include "groomlab/graph_io.h"
 #include "groomlab/map_ref.h"
 #include "groomlab/ramp.h"
 #include "look.h"
@@ -35,6 +37,8 @@ namespace {
 
 constexpr int kRampButtons = 30;  // the row of buttons under the plot
 constexpr qreal kKeyRadius = 5.0;
+constexpr qreal kHandleLength = 30.0;  // a key's handle on screen
+constexpr float kMaxSlope = 50.0f;     // a handle's slope at most this steep either way
 
 RoundButton* chipButton(const QString& text, QWidget* parent) {
     auto* b = new RoundButton(parent);
@@ -64,7 +68,7 @@ RampEditor::RampEditor(QWidget* parent) : QWidget(parent) {
     row->setSpacing(6);
     smooth_ = chipButton(tr("Smooth"), this);
     smooth_->setCheckable(true);
-    smooth_->setToolTip(tr("A monotone cubic through the keys: no overshoot, flat at peaks and valleys"));
+    smooth_->setToolTip(tr("A smooth curve through the keys (each key's slope its handles', or automatic: no overshoot, flat at peaks and valleys)"));
     linear_ = chipButton(tr("Straight"), this);
     linear_->setCheckable(true);
     linear_->setToolTip(tr("Straight segments between the keys"));
@@ -76,14 +80,14 @@ RampEditor::RampEditor(QWidget* parent) : QWidget(parent) {
     row->addWidget(presets_);
     layout->addLayout(row);
     auto setStraight = [this](bool straight) {
-        if (straight_ == straight) {
-            smooth_->setChecked(!straight_);
-            linear_->setChecked(straight_);
+        if (ramp_.straight == straight) {
+            smooth_->setChecked(!ramp_.straight);
+            linear_->setChecked(ramp_.straight);
             return;
         }
-        straight_ = straight;
-        smooth_->setChecked(!straight_);
-        linear_->setChecked(straight_);
+        ramp_.straight = straight;
+        smooth_->setChecked(!ramp_.straight);
+        linear_->setChecked(ramp_.straight);
         update();
         emit edited(false);
     };
@@ -93,11 +97,11 @@ RampEditor::RampEditor(QWidget* parent) : QWidget(parent) {
         QMenu menu(this);
         menu.setToolTipsVisible(true);
         auto apply = [this](const json& keys) {
-            const bool straight = straight_;
+            const bool straight = ramp_.straight;
             setValue(keys);
-            straight_ = straight;  // the interpolation is the user's, not the preset's
-            smooth_->setChecked(!straight_);
-            linear_->setChecked(straight_);
+            ramp_.straight = straight;  // the interpolation is the user's, not the preset's
+            smooth_->setChecked(!ramp_.straight);
+            linear_->setChecked(ramp_.straight);
             update();
             emit edited(false);
         };
@@ -130,51 +134,111 @@ json RampEditor::preset(const std::string& name) {
 }
 
 json RampEditor::flipped(const json& value) {
-    const bool straight = value.is_object() && value.value("linear", false);
-    const json& list = value.is_object() ? value.value("keys", json::array()) : value;
-    json keys = json::array();
-    if (list.is_array()) {
-        for (auto it = list.rbegin(); it != list.rend(); ++it) {
-            if (it->is_array() && it->size() == 2 && (*it)[0].is_number()) keys.push_back(json::array({1.0 - (*it)[0].get<double>(), (*it)[1]}));
-        }
+    Ramp ramp;
+    try {
+        ramp = rampFromJson(value.dump());
+    } catch (const std::exception&) {
+        return value;
     }
-    if (straight) return json{{"keys", keys}, {"linear", true}};
-    return keys;
+    // Each key at 1 - its position, its handles mirrored (in and out swapped, each slope turned).
+    Ramp out;
+    out.straight = ramp.straight;
+    const std::size_t n = ramp.keys.size();
+    for (std::size_t k = 0; k < n; ++k) out.keys.emplace_back(1.0f - ramp.keys[n - 1 - k].first, ramp.keys[n - 1 - k].second);
+    for (std::size_t k = 0; k < n; ++k) {
+        const RampHandle h = ramp.handle(n - 1 - k);
+        if (h.set) out.setHandle(k, RampHandle{true, -h.out, -h.in});
+    }
+    return json::parse(rampToJson(out));
 }
 
 void RampEditor::setValue(const json& value) {
-    keys_.clear();
-    straight_ = false;
-    const json* list = &value;
-    if (value.is_object() && value.contains("keys")) {
-        list = &value["keys"];
-        straight_ = value.value("linear", false);
+    try {
+        ramp_ = rampFromJson(value.dump());
+    } catch (const std::exception&) {
+        ramp_ = Ramp{};
     }
-    if (list->is_array()) {
-        for (const json& k : *list) {
-            if (k.is_array() && k.size() == 2 && k[0].is_number() && k[1].is_number()) keys_.emplace_back(k[0].get<float>(), k[1].get<float>());
-        }
-    }
-    if (keys_.empty()) keys_.emplace_back(0.0f, 1.0f);
-    std::stable_sort(keys_.begin(), keys_.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
-    selected_ = -1;
-    smooth_->setChecked(!straight_);
-    linear_->setChecked(straight_);
+    if (ramp_.keys.empty()) ramp_ = Ramp::constant(1.0f);
+    // (The value shown again after an edit of its own: the key picked keeps its handles shown.)
+    if (selected_ >= static_cast<int>(ramp_.keys.size())) selected_ = -1;
+    handleDrag_ = -1;
+    smooth_->setChecked(!ramp_.straight);
+    linear_->setChecked(ramp_.straight);
     fitRange();
     update();
 }
 
-json RampEditor::value() const {
-    json keys = json::array();
-    for (const auto& [t, v] : keys_) keys.push_back(json::array({t, v}));
-    if (straight_) return json{{"keys", keys}, {"linear", true}};
-    return keys;
+json RampEditor::value() const { return json::parse(rampToJson(ramp_)); }
+
+void RampEditor::select(int key) {
+    selected_ = key >= 0 && static_cast<std::size_t>(key) < ramp_.keys.size() ? key : -1;
+    update();
+}
+
+void RampEditor::setHandle(std::size_t key, const RampHandle& handle) {
+    if (key >= ramp_.keys.size()) return;
+    ramp_.setHandle(key, handle);
+    update();
+    emit edited(false);
+}
+
+void RampEditor::corner(std::size_t key) {
+    const auto& keys = ramp_.keys;
+    if (key >= keys.size()) return;
+    auto secant = [&](std::size_t a, std::size_t b) {
+        const float span = keys[b].first - keys[a].first;
+        return span > 0.0f ? (keys[b].second - keys[a].second) / span : 0.0f;
+    };
+    const bool next = key + 1 < keys.size();
+    const float in = key > 0 ? secant(key - 1, key) : (next ? secant(key, key + 1) : 0.0f);
+    const float out = next ? secant(key, key + 1) : in;
+    setHandle(key, RampHandle{true, in, out});
+}
+
+std::pair<QPointF, QPointF> RampEditor::handlePoints(std::size_t key) const {
+    const QRectF r = plotRect().adjusted(kKeyRadius + 2, kKeyRadius + 2, -kKeyRadius - 2, -kKeyRadius - 2);
+    const float span = std::max(hi_ - lo_, 1e-6f);
+    const QPointF at = toScreen(ramp_.keys[key].first, ramp_.keys[key].second);
+    const QRectF box = QRectF(rect()).adjusted(4, 4, -4, -4);  // (kept where a click reaches it)
+    auto along = [&](float slope, qreal sign) {  // a handle's length along `slope`, on screen
+        const qreal dx = r.width(), dy = -slope * r.height() / span;
+        const qreal norm = std::max(std::hypot(dx, dy), 1e-6);
+        const qreal ux = sign * dx / norm, uy = sign * dy / norm;
+        qreal reach = kHandleLength;
+        if (ux > 1e-6) reach = std::min(reach, (box.right() - at.x()) / ux);
+        if (ux < -1e-6) reach = std::min(reach, (box.left() - at.x()) / ux);
+        if (uy > 1e-6) reach = std::min(reach, (box.bottom() - at.y()) / uy);
+        if (uy < -1e-6) reach = std::min(reach, (box.top() - at.y()) / uy);
+        reach = std::max(reach, 8.0);
+        return QPointF(at.x() + ux * reach, at.y() + uy * reach);
+    };
+    return {along(ramp_.tangentIn(key), -1.0), along(ramp_.tangentOut(key), 1.0)};
+}
+
+int RampEditor::handleAt(const QPointF& p) const {
+    if (ramp_.straight || selected_ < 0 || static_cast<std::size_t>(selected_) >= ramp_.keys.size()) return -1;
+    const auto [in, out] = handlePoints(static_cast<std::size_t>(selected_));
+    if (std::hypot(out.x() - p.x(), out.y() - p.y()) < 8.0) return 1;
+    if (std::hypot(in.x() - p.x(), in.y() - p.y()) < 8.0) return 0;
+    return -1;
+}
+
+float RampEditor::slopeToward(std::size_t key, int side, const QPointF& p) const {
+    const QRectF r = plotRect().adjusted(kKeyRadius + 2, kKeyRadius + 2, -kKeyRadius - 2, -kKeyRadius - 2);
+    const QPointF at = toScreen(ramp_.keys[key].first, ramp_.keys[key].second);
+    float dp = static_cast<float>((p.x() - at.x()) / std::max(r.width(), 1.0));
+    float dv = static_cast<float>((at.y() - p.y()) / std::max(r.height(), 1.0)) * (hi_ - lo_);
+    if (side == 0) {  // the in handle points back along the curve
+        dp = -dp;
+        dv = -dv;
+    }
+    return std::clamp(dv / std::max(dp, 1e-4f), -kMaxSlope, kMaxSlope);
 }
 
 void RampEditor::fitRange() {
     // At least 0..1; a ramp above 1 (a width profile times its width) or below 0 widens it.
     float lo = 0.0f, hi = 1.0f;
-    for (const auto& [t, v] : keys_) {
+    for (const auto& [t, v] : ramp_.keys) {
         lo = std::min(lo, v);
         hi = std::max(hi, v);
     }
@@ -205,8 +269,8 @@ std::pair<float, float> RampEditor::fromScreen(const QPointF& p) const {
 int RampEditor::keyAt(const QPointF& p) const {
     int best = -1;
     qreal bestDistance = 12.0;
-    for (std::size_t i = 0; i < keys_.size(); ++i) {
-        const QPointF q = toScreen(keys_[i].first, keys_[i].second);
+    for (std::size_t i = 0; i < ramp_.keys.size(); ++i) {
+        const QPointF q = toScreen(ramp_.keys[i].first, ramp_.keys[i].second);
         const qreal d = std::hypot(q.x() - p.x(), q.y() - p.y());
         if (d < bestDistance) {
             bestDistance = d;
@@ -234,9 +298,7 @@ void RampEditor::paintEvent(QPaintEvent* /*event*/) {
         painter.drawLine(toScreen(0.0f, v), toScreen(1.0f, v));
     }
     // The curve as the core evaluates it, filled under.
-    Ramp ramp;
-    ramp.keys = keys_;
-    ramp.straight = straight_;
+    const Ramp& ramp = ramp_;
     QPainterPath path;
     const int samples = 96;
     for (int i = 0; i <= samples; ++i) {
@@ -258,25 +320,50 @@ void RampEditor::paintEvent(QPaintEvent* /*event*/) {
     painter.setPen(QPen(curve, 2.0));
     painter.setBrush(Qt::NoBrush);
     painter.drawPath(path);
+    // The picked key's handles: a line each side, a dot at its end (hollow while automatic).
+    if (!ramp_.straight && selected_ >= 0 && static_cast<std::size_t>(selected_) < ramp_.keys.size()) {
+        const auto k = static_cast<std::size_t>(selected_);
+        const QPointF at = toScreen(ramp_.keys[k].first, ramp_.keys[k].second);
+        const auto [in, out] = handlePoints(k);
+        const bool set = ramp_.handle(k).set;
+        for (int side = 0; side < 2; ++side) {
+            const QPointF end = side == 0 ? in : out;
+            painter.setPen(QPen(theme::textMuted(), 1.0));
+            painter.drawLine(at, end);
+            painter.setPen(QPen(handleDrag_ == side ? theme::text() : curve, 1.5));
+            painter.setBrush(handleDrag_ == side ? QBrush(theme::text()) : set ? QBrush(curve) : QBrush(Qt::NoBrush));
+            painter.drawEllipse(end, 3.5, 3.5);
+        }
+    }
     // The keys.
-    for (std::size_t i = 0; i < keys_.size(); ++i) {
-        const QPointF p = toScreen(keys_[i].first, keys_[i].second);
+    for (std::size_t i = 0; i < ramp_.keys.size(); ++i) {
+        const QPointF p = toScreen(ramp_.keys[i].first, ramp_.keys[i].second);
         const bool on = static_cast<int>(i) == selected_;
         painter.setPen(QPen(on ? theme::text() : theme::ink(), on ? 2.0 : 1.5));
         painter.setBrush(on ? theme::text() : curve);
         painter.drawEllipse(p, kKeyRadius, kKeyRadius);
     }
-    // The dragged key's numbers.
-    if (dragging_ && selected_ >= 0) {
+    // The dragged key's numbers, or the dragged handle's slope.
+    if (selected_ >= 0 && (dragging_ || handleDrag_ >= 0)) {
+        const auto k = static_cast<std::size_t>(selected_);
         painter.setFont(theme::numberFont(11));
         painter.setPen(theme::textSoft());
-        painter.drawText(plot.adjusted(8, 4, -8, -4), Qt::AlignTop | Qt::AlignRight,
-                         QStringLiteral("%1, %2").arg(keys_[static_cast<std::size_t>(selected_)].first, 0, 'f', 2)
-                             .arg(keys_[static_cast<std::size_t>(selected_)].second, 0, 'f', 2));
+        const QString text = handleDrag_ >= 0
+                                 ? (handleDrag_ == 0 ? tr("slope in %1") : tr("slope out %1"))
+                                       .arg(handleDrag_ == 0 ? ramp_.tangentIn(k) : ramp_.tangentOut(k), 0, 'f', 3)
+                                 : QStringLiteral("%1, %2").arg(ramp_.keys[k].first, 0, 'f', 2).arg(ramp_.keys[k].second, 0, 'f', 2);
+        painter.drawText(plot.adjusted(8, 4, -8, -4), Qt::AlignTop | Qt::AlignRight, text);
     }
 }
 
 void RampEditor::mousePressEvent(QMouseEvent* event) {
+    // A handle of the picked key (it may reach past the plot: a steep one).
+    handleDrag_ = event->button() == Qt::LeftButton ? handleAt(event->position()) : -1;
+    if (handleDrag_ >= 0) {
+        setFocus();
+        update();
+        return;
+    }
     if (event->button() != Qt::LeftButton || !plotRect().contains(event->position())) {
         QWidget::mousePressEvent(event);
         return;
@@ -287,20 +374,58 @@ void RampEditor::mousePressEvent(QMouseEvent* event) {
     update();
 }
 
+namespace {
+
+// Key k of `ramp` and its handles out of it (a key removed: the rest keep theirs).
+void eraseKey(Ramp& ramp, std::size_t k) {
+    std::vector<RampHandle> handles;
+    for (std::size_t i = 0; i < ramp.keys.size(); ++i) {
+        if (i != k) handles.push_back(ramp.handle(i));
+    }
+    ramp.keys.erase(ramp.keys.begin() + static_cast<std::ptrdiff_t>(k));
+    ramp.handles = std::move(handles);
+    if (!ramp.hasHandles()) ramp.handles.clear();
+}
+
+}  // namespace
+
 void RampEditor::mouseMoveEvent(QMouseEvent* event) {
+    if (handleDrag_ >= 0 && selected_ >= 0) {
+        const auto k = static_cast<std::size_t>(selected_);
+        const float slope = slopeToward(k, handleDrag_, event->position());
+        const RampHandle had = ramp_.handle(k);
+        // Alt (or a corner already): that side alone; else both sides one slope.
+        if ((event->modifiers() & Qt::AltModifier) || (had.set && had.in != had.out)) {
+            RampHandle h{true, ramp_.tangentIn(k), ramp_.tangentOut(k)};
+            (handleDrag_ == 0 ? h.in : h.out) = slope;
+            ramp_.setHandle(k, h);
+        } else {
+            ramp_.setHandle(k, RampHandle{true, slope, slope});
+        }
+        update();
+        emit edited(true);
+        return;
+    }
     if (!dragging_ || selected_ < 0) return;
     auto [t, v] = fromScreen(event->position());
     // A key keeps its order: between its neighbors (the first and last keys may still slide).
     const auto i = static_cast<std::size_t>(selected_);
-    if (i > 0) t = std::max(t, keys_[i - 1].first);
-    if (i + 1 < keys_.size()) t = std::min(t, keys_[i + 1].first);
-    keys_[i] = {t, v};
+    if (i > 0) t = std::max(t, ramp_.keys[i - 1].first);
+    if (i + 1 < ramp_.keys.size()) t = std::min(t, ramp_.keys[i + 1].first);
+    ramp_.keys[i] = {t, v};
     update();
     emit edited(true);
 }
 
 void RampEditor::mouseReleaseEvent(QMouseEvent* event) {
-    if (event->button() != Qt::LeftButton || !dragging_) return;
+    if (event->button() != Qt::LeftButton) return;
+    if (handleDrag_ >= 0) {
+        handleDrag_ = -1;
+        update();
+        emit edited(false);
+        return;
+    }
+    if (!dragging_) return;
     dragging_ = false;
     fitRange();
     update();
@@ -308,11 +433,18 @@ void RampEditor::mouseReleaseEvent(QMouseEvent* event) {
 }
 
 void RampEditor::mouseDoubleClickEvent(QMouseEvent* event) {
-    if (event->button() != Qt::LeftButton || !plotRect().contains(event->position())) return;
+    if (event->button() != Qt::LeftButton) return;
+    const int side = handleAt(event->position());
+    if (side >= 0) {  // a handle: the automatic slope again
+        handleDrag_ = -1;
+        setHandle(static_cast<std::size_t>(selected_), RampHandle{});
+        return;
+    }
+    if (!plotRect().contains(event->position())) return;
     const int hit = keyAt(event->position());
     if (hit >= 0) {
-        if (keys_.size() > 1) {
-            keys_.erase(keys_.begin() + hit);
+        if (ramp_.keys.size() > 1) {
+            eraseKey(ramp_, static_cast<std::size_t>(hit));
             selected_ = -1;
             fitRange();
             update();
@@ -321,16 +453,17 @@ void RampEditor::mouseDoubleClickEvent(QMouseEvent* event) {
         return;
     }
     const auto [t, v] = fromScreen(event->position());
-    keys_.emplace_back(t, v);
-    std::stable_sort(keys_.begin(), keys_.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
-    selected_ = static_cast<int>(std::find(keys_.begin(), keys_.end(), std::make_pair(t, v)) - keys_.begin());
+    ramp_.keys.emplace_back(t, v);
+    if (ramp_.hasHandles()) ramp_.handles.resize(ramp_.keys.size());
+    ramp_.sort();
+    selected_ = static_cast<int>(std::find(ramp_.keys.begin(), ramp_.keys.end(), std::make_pair(t, v)) - ramp_.keys.begin());
     update();
     emit edited(false);
 }
 
 void RampEditor::keyPressEvent(QKeyEvent* event) {
-    if ((event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) && selected_ >= 0 && keys_.size() > 1) {
-        keys_.erase(keys_.begin() + selected_);
+    if ((event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) && selected_ >= 0 && ramp_.keys.size() > 1) {
+        eraseKey(ramp_, static_cast<std::size_t>(selected_));
         selected_ = -1;
         fitRange();
         update();
@@ -338,6 +471,34 @@ void RampEditor::keyPressEvent(QKeyEvent* event) {
         return;
     }
     QWidget::keyPressEvent(event);
+}
+
+void RampEditor::contextMenuEvent(QContextMenuEvent* event) {
+    const int hit = keyAt(event->pos());
+    if (hit < 0) {
+        QWidget::contextMenuEvent(event);
+        return;
+    }
+    const auto k = static_cast<std::size_t>(hit);
+    select(hit);
+    QMenu menu(this);
+    menu.setToolTipsVisible(true);
+    QAction* corner = menu.addAction(tr("Corner"), this, [this, k] { this->corner(k); });
+    corner->setToolTip(tr("Straight toward each neighbor: a sharp turn at the key"));
+    corner->setEnabled(!ramp_.straight);
+    QAction* automatic = menu.addAction(tr("Auto Handles"), this, [this, k] { setHandle(k, RampHandle{}); });
+    automatic->setToolTip(tr("The key's slope worked out from its neighbors again"));
+    automatic->setEnabled(ramp_.handle(k).set);
+    menu.addSeparator();
+    QAction* remove = menu.addAction(tr("Remove Key"), this, [this, k] {
+        eraseKey(ramp_, k);
+        selected_ = -1;
+        fitRange();
+        update();
+        emit edited(false);
+    });
+    remove->setEnabled(ramp_.keys.size() > 1);
+    menu.exec(event->globalPos());
 }
 
 // ---- ColorEditor --------------------------------------------------------------------------------

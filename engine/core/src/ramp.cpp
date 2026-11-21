@@ -8,14 +8,52 @@
 namespace groomlab {
 
 void Ramp::sort() {
-    std::stable_sort(keys.begin(), keys.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+    if (!hasHandles()) {
+        handles.clear();
+        std::stable_sort(keys.begin(), keys.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+        return;
+    }
+    // The handles go with their keys.
+    std::vector<std::size_t> order(keys.size());
+    for (std::size_t k = 0; k < order.size(); ++k) order[k] = k;
+    std::stable_sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b) { return keys[a].first < keys[b].first; });
+    std::vector<std::pair<float, float>> sortedKeys(keys.size());
+    std::vector<RampHandle> sortedHandles(keys.size());
+    for (std::size_t k = 0; k < order.size(); ++k) {
+        sortedKeys[k] = keys[order[k]];
+        sortedHandles[k] = handle(order[k]);
+    }
+    keys = std::move(sortedKeys);
+    handles = std::move(sortedHandles);
+}
+
+bool Ramp::hasHandles() const {
+    for (std::size_t k = 0; k < handles.size() && k < keys.size(); ++k) {
+        if (handles[k].set) return true;
+    }
+    return false;
+}
+
+void Ramp::setHandle(std::size_t k, const RampHandle& h) {
+    if (k >= keys.size()) return;
+    if (handles.size() < keys.size()) handles.resize(keys.size());
+    handles[k] = h;
+    if (!hasHandles()) handles.clear();
+}
+
+bool Ramp::operator==(const Ramp& o) const {
+    if (keys != o.keys || straight != o.straight) return false;
+    for (std::size_t k = 0; k < keys.size(); ++k) {
+        if (handle(k) != o.handle(k)) return false;
+    }
+    return true;
 }
 
 namespace {
 
-// The ramp at t, `tangent(k)` key k's tangent (operator(), at).
-template <class Tangent>
-float rampAt(const Ramp& ramp, float t, const Tangent& tangent) {
+// The ramp at t, `in(k)` and `out(k)` key k's slopes into it and out of it (operator(), at).
+template <class In, class Out>
+float rampAt(const Ramp& ramp, float t, const In& in, const Out& out) {
     const auto& keys = ramp.keys;
     if (keys.empty()) return 1.0f;
     if (!(t > keys.front().first)) return keys.front().second;  // also NaN
@@ -27,26 +65,39 @@ float rampAt(const Ramp& ramp, float t, const Tangent& tangent) {
     const float f = (t - lo->first) / span;
     if (ramp.straight) return lo->second + (hi->second - lo->second) * f;
 
-    // Monotone cubic Hermite: tangents from the neighboring secants.
+    // Cubic Hermite: out of the lower key, into the upper one.
     const std::size_t i = static_cast<std::size_t>(lo - keys.begin());
-    const float m0 = tangent(i) * span, m1 = tangent(i + 1) * span;
+    const float m0 = out(i) * span, m1 = in(i + 1) * span;
     return shared::rampHermite(f, lo->second, m0, hi->second, m1);
 }
 
 }  // namespace
 
 float Ramp::operator()(float t) const {
-    return rampAt(*this, t, [&](std::size_t k) { return tangent(k); });
+    return rampAt(*this, t, [&](std::size_t k) { return tangentIn(k); }, [&](std::size_t k) { return tangentOut(k); });
 }
 
 std::vector<float> Ramp::tangents() const {
-    std::vector<float> out(keys.size());
-    for (std::size_t k = 0; k < keys.size(); ++k) out[k] = tangent(k);
+    std::vector<float> out(keys.size() * 2);
+    for (std::size_t k = 0; k < keys.size(); ++k) {
+        out[2 * k] = tangentIn(k);
+        out[2 * k + 1] = tangentOut(k);
+    }
     return out;
 }
 
 float Ramp::at(float t, const float* tangents) const {
-    return rampAt(*this, t, [&](std::size_t k) { return tangents[k]; });
+    return rampAt(*this, t, [&](std::size_t k) { return tangents[2 * k]; }, [&](std::size_t k) { return tangents[2 * k + 1]; });
+}
+
+float Ramp::tangentIn(std::size_t k) const {
+    const RampHandle h = handle(k);
+    return h.set ? h.in : tangent(k);
+}
+
+float Ramp::tangentOut(std::size_t k) const {
+    const RampHandle h = handle(k);
+    return h.set ? h.out : tangent(k);
 }
 
 float Ramp::tangent(std::size_t k) const {

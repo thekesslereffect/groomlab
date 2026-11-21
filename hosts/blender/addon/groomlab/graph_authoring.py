@@ -216,9 +216,16 @@ def ramp_preset_keys(name):
 
 
 def flipped_ramp(value):
-    """A ramp value mirrored end to end (each key at 1 - its position), straight or smooth as it was."""
+    """A ramp value mirrored end to end (each key at 1 - its position, its handles mirrored), straight
+    or smooth as it was."""
     keys, linear = graph_tree.ramp_keys(value)
-    out = [[1.0 - float(p), v] for p, v in reversed(keys)]
+    out = []
+    for k in reversed(keys):
+        key = [1.0 - float(k[0]), k[1]]
+        if len(k) > 3:
+            slope_in, slope_out = -float(k[3]), -float(k[2])
+            key += [slope_in] if slope_in == slope_out else [slope_in, slope_out]
+        out.append(key)
     return {"keys": out, "linear": True} if linear else out
 
 

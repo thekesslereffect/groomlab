@@ -834,22 +834,39 @@ def ramp_node(node, param, create=False):
 
 
 def ramp_keys(value):
-    """(keys [(pos, value)], linear) of a ramp param's value: [[pos, value]...] or {"keys", "linear"}."""
+    """(keys, linear) of a ramp param's value: [[pos, value]...] or {"keys", "linear"}. Each key
+    (pos, value), or (pos, value, slope in, slope out) where its handles are set (issue #102: a
+    key's [pos, value, slope] has the one slope both sides)."""
+    entries, linear = [], False
     if isinstance(value, dict):
-        return [tuple(k) for k in value.get("keys", [])], bool(value.get("linear"))
-    if isinstance(value, list):
-        return [tuple(k) for k in value if isinstance(k, (list, tuple)) and len(k) == 2], False
-    return [], False
-
-
-def _curve_points(curve):
-    c = curve.mapping.curves[0]
-    keys = [(round(float(p.location[0]), 5), round(float(p.location[1]), 5)) for p in c.points]
-    linear = all(p.handle_type == "VECTOR" for p in c.points)
+        entries, linear = value.get("keys", []), bool(value.get("linear"))
+    elif isinstance(value, list):
+        entries = value
+    keys = []
+    for k in entries:
+        if not isinstance(k, (list, tuple)) or not 2 <= len(k) <= 4:
+            continue
+        keys.append(tuple(k) if len(k) != 3 else (k[0], k[1], k[2], k[2]))
     return keys, linear
 
 
+def _is_corner(key):
+    return len(key) > 3 and key[2] != key[3]
+
+
+def _curve_points(curve):
+    """(keys [(pos, value)], linear, corners [whether each point is Blender's Vector: a corner])."""
+    c = curve.mapping.curves[0]
+    keys = [(round(float(p.location[0]), 5), round(float(p.location[1]), 5)) for p in c.points]
+    corners = [p.handle_type == "VECTOR" for p in c.points]
+    linear = all(corners)
+    return keys, linear, corners
+
+
 def write_ramp(node, param, value):
+    """The ramp in its Float Curve node: Blender's curve editor has no handles to drag, so a key the
+    value makes a corner (a slope each side) is a Vector point there, any other key an automatic one
+    (a key's own slope both sides shows as automatic; kept while the curve is not edited in Blender)."""
     curve = ramp_node(node, param, create=True)
     keys, linear = ramp_keys(value)
     if not keys:
@@ -861,24 +878,43 @@ def write_ramp(node, param, value):
         c.points.remove(c.points[len(c.points) - 1])
     while len(c.points) < len(shown):
         c.points.new(0.5, 0.5)
-    for p, (x, y) in zip(c.points, sorted(shown)):
-        p.location = (float(x), float(y))
-        p.handle_type = "VECTOR" if linear else "AUTO_CLAMPED"
+    for p, key in zip(c.points, sorted(shown, key=lambda k: k[0])):
+        p.location = (float(key[0]), float(key[1]))
+        p.handle_type = "VECTOR" if linear or _is_corner(key) else "AUTO_CLAMPED"
     ys = [k[1] for k in shown]
     m.use_clip = True
     m.clip_min_x, m.clip_max_x = 0.0, 1.0
     m.clip_min_y, m.clip_max_y = min(0.0, min(ys)), max(1.0, max(ys))
     m.update()
     curve["gl_written"] = json.dumps(_curve_points(curve))
+    curve["gl_value"] = json.dumps(value)  # (what the curve stands for while it is not edited here)
     curve["gl_single"] = len(keys) == 1
 
 
 def ramp_value(curve):
-    keys, linear = _curve_points(curve)
+    """The ramp param's value the curve stands for: the value written, while the curve is not edited
+    in Blender; else its points, a Vector point a corner (straight toward each neighbor)."""
+    if not ramp_changed(curve) and curve.get("gl_value"):
+        return json.loads(curve["gl_value"])
+    keys, linear, corners = _curve_points(curve)
     if curve.get("gl_single") and len(keys) == 2 and keys[0][1] == keys[1][1]:
-        keys = [(0.0, keys[0][1])]
-    keys = [[k[0], k[1]] for k in keys]
-    return {"keys": keys, "linear": True} if linear else keys
+        keys, corners = [(0.0, keys[0][1])], [False]
+    if linear:
+        return {"keys": [[k[0], k[1]] for k in keys], "linear": True}
+
+    def secant(a, b):
+        span = keys[b][0] - keys[a][0]
+        return (keys[b][1] - keys[a][1]) / span if span > 0 else 0.0
+
+    out = []
+    for i, (p, v) in enumerate(keys):
+        if not corners[i] or len(keys) < 2:
+            out.append([p, v])
+            continue
+        slope_in = secant(i - 1, i) if i > 0 else secant(i, i + 1)
+        slope_out = secant(i, i + 1) if i + 1 < len(keys) else slope_in
+        out.append([p, v, slope_in] if slope_in == slope_out else [p, v, slope_in, slope_out])
+    return out
 
 
 def ramp_changed(curve):

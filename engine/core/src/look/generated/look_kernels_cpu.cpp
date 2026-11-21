@@ -993,7 +993,7 @@ static float paramAt_0(uint32_t i_8, uint32_t n_8)
 static float rampKeyOf_0(Vector<uint32_t, 4>  r_2, uint32_t what_0, uint32_t k_3, KernelContext_0 * kernelContext_10)
 {
 
-    uint32_t _S59 = (kernelContext_10->globalParams_0->gRamps_0).Load<uint32_t >(uint32_t(int32_t((r_2.y + k_3 * 3U + what_0) * 4U)));
+    uint32_t _S59 = (kernelContext_10->globalParams_0->gRamps_0).Load<uint32_t >(uint32_t(int32_t((r_2.y + k_3 * 4U + what_0) * 4U)));
 
     return (U32_asfloat((_S59)));
 }
@@ -1101,7 +1101,7 @@ static float rampAtOf_0(Vector<uint32_t, 4>  r_3, float t_4, KernelContext_0 * k
         return _S70 + (_S71 - _S70) * f_2;
     }
 
-    float _S72 = rampKeyOf_0(r_3, 2U, lo_1, kernelContext_11);
+    float _S72 = rampKeyOf_0(r_3, 3U, lo_1, kernelContext_11);
     float m0_1 = _S72 * span_0;
 
     float _S73 = rampKeyOf_0(r_3, 2U, hi_1, kernelContext_11);

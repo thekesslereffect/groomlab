@@ -1406,7 +1406,8 @@ std::string valueProblem(const json& value, const json& spec) {
         const json keys = value.is_object() ? value.value("keys", json()) : value;
         if (keys.is_number()) return {};
         const bool ok = keys.is_array() && !keys.empty() && std::all_of(keys.begin(), keys.end(), [](const json& k) {
-            return k.is_array() && k.size() == 2 && k[0].is_number() && k[1].is_number();
+            // (a key with its handles set: [position, value, slope] or [position, value, in, out])
+            return k.is_array() && k.size() >= 2 && k.size() <= 4 && std::all_of(k.begin(), k.end(), isNumber);
         });
         return ok ? std::string() : "wants a ramp [[position, value], ...], has " + shown(value);
     }
