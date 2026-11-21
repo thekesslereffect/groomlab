@@ -240,6 +240,11 @@ void GpuLookPreview::endDrag() {
 
 // ---- Strokes -------------------------------------------------------------------------------------
 
+void GpuLookPreview::warmStroke() {
+    if (!enabled_ || !document_ || core_.strokeArmed() || document_->session().hasPreview()) return;
+    core_.warmStroke(document_->session());
+}
+
 bool GpuLookPreview::armStroke(std::string* why) {
     if (core_.strokeArmed()) return true;
     if (!enabled_) {

@@ -853,6 +853,7 @@ void MainWindow::landDab(bool show) {
 
 void MainWindow::warmStroke() {
     if (!document_ || brush_.stroking()) return;
+    gpu_.warmStroke();  // (the GPU's first stroke on this scalp: its one-time making, now)
     ViewRequest request;
     request.viewport = true;
     request.density = static_cast<float>(density_->value());

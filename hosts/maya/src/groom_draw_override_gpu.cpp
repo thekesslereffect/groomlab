@@ -1049,6 +1049,9 @@ void GroomSubSceneOverride::applyGpuPreview(MHWRender::MSubSceneContainer& conta
     if (!dragging && !stroking) {
         gpuShown_ = 0;
         if (shape_->hasPreview() && !gpuPreview_->strokeArmed() && gpuPreviewEnabled()) gpuPreview_->armStroke(*shape_);
+        // The brush tool on this groom between strokes: the next press's one-time making done now
+        // (a drawn guide's press would spend it, its first moves merged into one: issue #101).
+        if (!shape_->hasPreview() && shape_->strokeKept() && !shape_->commitPending()) gpuPreview_->warmStroke(*shape_);
         // The item draws its own buffers again: the preview's can go.
         if (gpuBound_) rebindOwnBuffers(container, gpuItem_);
         if (!gpuBound_) gpuPreview_->releaseDisplay();

@@ -4583,6 +4583,22 @@ TEST_P(LookEngineTest, ASculptStrengthDragRunsDownstreamOnTheGpu) {
     }
 }
 
+TEST(LookPreview, AWarmStrokeMakesTheScalpsClearanceTablesOnce) {
+    // Issue #101: between strokes a host warms what the GPU's first stroke on the scalp would make
+    // at its press (the clearance tables its Interpolate pushes with), once per scalp; a preview
+    // of the same scalp after it finds them made (the field's, shared).
+    GroomSession session(groom(chainGraph({{"Noise", R"("params": {"amplitude": 0.1, "frequency": 2.0})"}})));
+    ASSERT_TRUE(session.evaluate(ViewRequest{}).strands);
+    gpu::LookPreview preview;
+    EXPECT_TRUE(preview.warmStroke(session));
+    EXPECT_FALSE(preview.warmStroke(session)) << "once per scalp";
+    // Without clearance there is nothing to make.
+    GroomSession clear(groom(withoutClearance(chainGraph({{"Noise", R"("params": {"amplitude": 0.1, "frequency": 2.0})"}}))));
+    ASSERT_TRUE(clear.evaluate(ViewRequest{}).strands);
+    gpu::LookPreview other;
+    EXPECT_FALSE(other.warmStroke(clear));
+}
+
 TEST_P(LookEngineTest, ACompoundsNodesRunOnTheGpu) {
     // A Noise grouped into a compound (its amplitude exposed as "amount"): the session holds the
     // compound as its nodes inline, so a drag of the compound's param runs its Noise on the GPU,

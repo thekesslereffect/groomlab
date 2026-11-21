@@ -139,6 +139,9 @@ public:
     // Interpolate: GroomShape::setGpuStroke); end: the stroke is over (or the GPU gave it up).
     bool armStroke(GroomShape& shape);
     void endStroke(GroomShape& shape);
+    // Between strokes, the brush tool on the shape: what the GPU's first stroke on its scalp would
+    // make at its press, made now (gpu::LookPreview::warmStroke, issue #101).
+    void warmStroke(GroomShape& shape);
     bool strokeArmed() const { return core_.strokeArmed(); }
     // The shape's evaluation stopped at the GPU's node for a dab: whether the GPU takes it (the
     // plan is kept for the draw), counted in strokeDabs().

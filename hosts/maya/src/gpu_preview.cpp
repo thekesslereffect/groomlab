@@ -673,6 +673,11 @@ bool GpuLookPreview::armStroke(GroomShape& shape) {
     return true;
 }
 
+void GpuLookPreview::warmStroke(GroomShape& shape) {
+    if (!gpuPreviewEnabled() || core_.strokeArmed() || shape.session().hasPreview()) return;
+    core_.warmStroke(shape.session());
+}
+
 void GpuLookPreview::endStroke(GroomShape& shape) {
     core_.endStroke();
     shape.setGpuStroke(std::string());
