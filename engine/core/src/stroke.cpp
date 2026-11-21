@@ -8,6 +8,7 @@
 #include <cmath>
 #include <limits>
 #include <stdexcept>
+#include <unordered_set>
 
 #include "groomlab/brush_catalog.h"
 #include "groomlab/curve.h"
@@ -1252,17 +1253,23 @@ std::vector<std::vector<Vec3f>> BrushTool::affectedLines(StrokeHost& host, const
     }
     const int smoothing = host.guideSmoothing();
     const std::set<std::string> hidden = sculpting ? std::set<std::string>{} : host.hiddenGroups();
-    auto brushable = [&](const HierarchyGuide& g) {
-        if (guideHidden(*h, g)) return false;
-        if (!hidden.empty()) {
-            const GuideGroup* grp = h->group(g.group);
-            if (grp && hidden.count(grp->name)) return false;
+    // The guides a stroke would edit, by the stroke's own rule (brushTargets): its level or group,
+    // not hidden, not frozen (selecting guides freezes every other one), and only the selection
+    // while selectedOnly. Issue 93: guides the brush leaves alone are not lit under it either.
+    const std::vector<GuideId> selection = settings.selectedOnly ? host.selectedGuides() : std::vector<GuideId>{};
+    const float softRadius = settings.selectedOnly ? host.softSelectRadius() : 0.0f;
+    auto brushableGuides = [&] {
+        BrushToolSettings s = settings;
+        s.brush = b;
+        s.prepareMask(*h, hidden, selection, softRadius, settings.selectedOnly ? host.scalp().get() : nullptr);
+        const std::vector<GuideId> ids = brushTargets(*h, s.brush);
+        const std::unordered_set<GuideId> targets(ids.begin(), ids.end());
+        std::vector<const HierarchyGuide*> guides;
+        guides.reserve(ids.size());
+        for (const HierarchyGuide& g : h->guides()) {
+            if (targets.count(g.id)) guides.push_back(&g);
         }
-        if (!b.group.empty()) {
-            const GuideGroup* grp = h->group(g.group);
-            return grp && grp->name == b.group;
-        }
-        return b.level < 0 || h->groupDepth(g.group) == b.level;
+        return guides;
     };
     auto touched = [&](const HierarchyGuide& g) {
         for (const Vec3f& p : g.points) {
@@ -1272,26 +1279,35 @@ std::vector<std::vector<Vec3f>> BrushTool::affectedLines(StrokeHost& host, const
     };
     if (!view.projection.valid()) {
         hover_.reset();
-        for (const HierarchyGuide& g : h->guides()) {
+        for (const HierarchyGuide* g : brushableGuides()) {
             if (lines.size() > 4000) break;  // a hint, not a full redraw
-            if (!brushable(g) || !touched(g)) continue;
-            lines.push_back(smoothPolyline(g.points.data(), g.points.size(), smoothing));
+            if (!touched(*g)) continue;
+            lines.push_back(smoothPolyline(g->points.data(), g->points.size(), smoothing));
         }
         return lines;
     }
     // The brushable guides and their points on screen, kept while the guides, what is brushable
-    // and the view hold still: a mouse move looks at the guides near the circle only.
+    // and the view hold still: a mouse move looks at the guides near the circle only. Freezing
+    // changes the guides (their version); the rest of what decides the targets is in `filter`.
     std::uint64_t filter = hashString(hashCombine(hash64(0x40E3), static_cast<std::uint64_t>(static_cast<std::int64_t>(b.level))), b.group);
     for (const std::string& name : hidden) filter = hashString(filter, name);
+    filter = hashCombine(filter, (b.propagate ? 1u : 0u) | (settings.selectedOnly ? 2u : 0u) |
+                                     (b.mode == BrushMode::Attribute && b.attribute == b.freeze ? 4u : 0u));
+    filter = hashString(filter, b.freeze);
+    if (settings.selectedOnly) {
+        filter = hashFloat(filter, softRadius);
+        filter = hashCombine(filter, static_cast<std::uint64_t>(static_cast<std::int64_t>(b.mirrorAxis)) * 4 +
+                                         (b.mirrorTopology ? 1u : 0u));
+        filter = hashFloat(filter, b.mirrorCenter);
+        for (const GuideId id : selection) filter = hashCombine(filter, static_cast<std::uint64_t>(id));
+    }
     const std::uint64_t version = host.shownHierarchyVersion();
     if (!hover_ || hover_->hierarchy != h || hover_->hierarchyVersion != version || hover_->filter != filter) {
         hover_ = std::make_shared<HoverCache>();
         hover_->hierarchy = h;
         hover_->hierarchyVersion = version;
         hover_->filter = filter;
-        for (const HierarchyGuide& g : h->guides()) {
-            if (brushable(g)) hover_->guides.push_back(&g);
-        }
+        hover_->guides = brushableGuides();
     }
     HoverCache& hover = *hover_;
     if (!hover.grid || hover.view != view.projection.hash()) {

@@ -567,6 +567,32 @@ TEST(Stroke, PickLevelAndHover) {
     EXPECT_FALSE(tool.affectedLines(*g.host, view, x, y).empty());
     EXPECT_TRUE(tool.affectedLines(*g.host, view, 2, 2).empty());
     EXPECT_EQ(tool.affectedLines(*g.host, view, x, y).size(), tool.affectedLines(*g.host, hostOnly(view), x, y).size());
+
+    // Issue 93: with guides selected (every other guide frozen), hover lights only what the
+    // brush would edit: the selection, never the frozen guides under the circle.
+    const std::size_t all = tool.affectedLines(*g.host, view, x, y).size();
+    ASSERT_GT(all, 1u);
+    GuideId far = kNoGuide;
+    for (const HierarchyGuide& guide : h->guides()) {
+        float gx = 0, gy = 0;
+        if (view.project(guide.points.back(), gx, gy) && std::hypot(gx - x, gy - y) > 200.0f) {
+            far = guide.id;
+            break;
+        }
+    }
+    ASSERT_NE(far, kNoGuide);
+    const GuideId childId = child->id;  // the hierarchy is replaced by the selection's edit
+    g.host->paintSelection({far}, true);
+    EXPECT_TRUE(tool.affectedLines(*g.host, view, x, y).empty());
+    g.host->paintSelection({childId}, true);
+    EXPECT_EQ(tool.affectedLines(*g.host, view, x, y).size(), 1u);
+    EXPECT_EQ(tool.affectedLines(*g.host, hostOnly(view), x, y).size(), 1u);
+    // Selected Only without freezing: the mask decides the same way.
+    g.host->paintSelection({}, true);
+    EXPECT_EQ(tool.affectedLines(*g.host, view, x, y).size(), all);
+    tool.settings.selectedOnly = true;
+    g.host->paintSelection({childId}, false);  // the selection set, nothing frozen
+    EXPECT_EQ(tool.affectedLines(*g.host, view, x, y).size(), 1u);
 }
 
 TEST(Stroke, PlaceDrawPartAndFlowTools) {
