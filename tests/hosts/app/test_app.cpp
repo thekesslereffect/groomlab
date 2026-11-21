@@ -4189,6 +4189,11 @@ TEST(AppRender, PartialUploadsDrawTheSameFrameAsWholeOnes) {
             r->setLookdev(lookdev);
             LightingSetup lighting = lightingPreset("studio");
             lighting.quality = Quality::Interactive;
+            // Every frame at full resolution: the dabs are a stream of changes, which the adaptive
+            // quality draws at a scale each renderer picks from its own frames' wall-clock times,
+            // so on a busy machine one renderer's frame came out smaller than the other's and the
+            // two differed by the scale, not the strands.
+            lighting.interactiveQuality = InteractiveQuality::Full;
             r->setLighting(lighting);
         }
         DisplaySettings settings;
@@ -4209,7 +4214,6 @@ TEST(AppRender, PartialUploadsDrawTheSameFrameAsWholeOnes) {
         const HierarchyGuide& g = f.guide(0);
         const QPointF at = f.widgetPoint(g.points[g.points.size() / 2]);
         f.session.settings().setMode("comb");
-        f.session.settings().brush.stretch = false;  // (lengths kept: the strands keep their extent)
         f.session.settings().screenRadius = 40.0f;
         ViewRequest request;
         request.density = 0.2f;
@@ -4570,7 +4574,6 @@ TEST(AppGpuPreview, SculptStrokeDabsRunOnTheGpu) {
     }
     const QPointF at = f.widgetPoint(g->points[g->points.size() / 2]);
     f.session.settings().setMode("comb");
-    f.session.settings().brush.stretch = false;  // (the tips combed along: Stretch from the middle keeps the ends)
     f.session.settings().screenRadius = 80.0f;
     ASSERT_TRUE(f.session.press(at, 1.0f, 0)) << f.session.lastError();
     EXPECT_TRUE(f.doc->session().hasPreviewSculpt());

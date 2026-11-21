@@ -321,6 +321,12 @@ BrushSettings BrushTool::pressed() const {
         b.level = 0;
         b.group.clear();
     }
+    if (shot_ || sculpt_) {
+        // A corrective or a Sculpt node's edits move the guides' points, each guide keeping its
+        // point count: Comb's Stretch (and its Shift smoothing) combs at the guides' lengths here.
+        b.stretch = false;
+        b.stretchSmoothing = false;
+    }
     if (settings.pressure) b.strength *= pressure_;
     if (inverted_) {
         // Ctrl: the opposite action. The brushes that work both ways flip (Length shortens, Lift
