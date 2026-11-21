@@ -2723,17 +2723,19 @@ void DisplayBuilder::buildOverlays(const DisplayInputs& in, const DisplaySetting
         lines.overlay = true;
         put(DisplayItemId::Parts, std::move(lines));
     }
-    // Flow arrows and the field they make over the scalp: kept while the arrows and the scalp
-    // stay the same.
+    // Flow arrows and the field they make over the scalp, with the guides too (the hosts' guides
+    // eye hides the guides, part lines and flow at once, issue #99): kept while the arrows and the
+    // scalp stay the same.
     item(DisplayItemId::Flow).color = s.theme.flow;
     item(DisplayItemId::Flow).lineWidth = 2.5f;
     item(DisplayItemId::FlowField).color = s.theme.flowField;
     const MeshPtr& scalp = in.scalp;
+    const bool flow = s.flow && s.guides;
     const std::uint64_t flowKey =
-        hashCombine(hashCombine(in.flow ? in.flow->contentHash() : 0, scalp ? scalp->contentHash() : 0), s.flow ? 1u : 0u);
+        hashCombine(hashCombine(in.flow ? in.flow->contentHash() : 0, scalp ? scalp->contentHash() : 0), flow ? 1u : 0u);
     if (rebuild(DisplayPart::Flow, flowKey)) {
         DisplayGeometry arrows, field;
-        if (in.flow && scalp && scalp->pointCount() > 0 && s.flow) buildFlowOverlay(*in.flow, *scalp, arrows, field);
+        if (in.flow && scalp && scalp->pointCount() > 0 && flow) buildFlowOverlay(*in.flow, *scalp, arrows, field);
         arrows.overlay = field.overlay = true;
         put(DisplayItemId::Flow, std::move(arrows));
         put(DisplayItemId::FlowField, std::move(field));

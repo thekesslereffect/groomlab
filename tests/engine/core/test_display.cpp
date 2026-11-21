@@ -954,6 +954,28 @@ TEST(Display, HiddenHairBuildsNoHairItemsAndKeepsTheGuides) {
     }
 }
 
+TEST(Display, TheGuidesEyeHidesThePartsAndTheFlowToo) {
+    // Issue #99: the hosts' guides eye (DisplaySettings::guides) hides the guides, the part lines
+    // and the flow arrows at once; on again, all of them show.
+    Scenario s;
+    for (const Scenario& each : scenarios()) {
+        if (each.name == "lit") s = each;
+    }
+    ASSERT_EQ(s.name, "lit");
+    DisplayInputs in = inputsFor(s);
+    ASSERT_TRUE(in.flow && in.parts);
+    DisplayBuilder builder;
+    const DisplayItemId overlays[] = {DisplayItemId::Guides, DisplayItemId::Parts, DisplayItemId::Flow, DisplayItemId::FlowField};
+    const DisplayFrame& shown = builder.update(in, s.settings);
+    for (const DisplayItemId id : overlays) EXPECT_TRUE(shown.item(id).shown) << shown.item(id).name;
+    s.settings.guides = false;
+    const DisplayFrame& hidden = builder.update(in, s.settings);
+    for (const DisplayItemId id : overlays) EXPECT_FALSE(hidden.item(id).shown) << hidden.item(id).name;
+    s.settings.guides = true;
+    const DisplayFrame& again = builder.update(in, s.settings);
+    for (const DisplayItemId id : overlays) EXPECT_TRUE(again.item(id).shown) << again.item(id).name;
+}
+
 TEST(Display, AColorRangeRecolorsTheLinesAlone) {
     const Fixture& f = fixture();
     Scenario s = scenarios()[3];  // attribute colors

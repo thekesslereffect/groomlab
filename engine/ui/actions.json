@@ -99,9 +99,9 @@
 
     "display.showAllHair": {"label": "Show All Hair", "tip": "Show the hair of every groom in the scene, the strands alone (as Shift+click on the Groom Tools' eye)", "tips": {"app": "Show the hair"}},
     "display.hideAllHair": {"label": "Hide All Hair", "tip": "Hide the hair of every groom in the scene, the strands alone: the guides stay (as Shift+click on the Groom Tools' eye)", "tips": {"app": "Hide the hair"}},
-    "display.showAllGuides": {"label": "Show All Guides", "tip": "Show the guides of every groom in the scene (as Shift+click on the Groom Tools' guides eye)", "tips": {"app": "Show the guides"}},
-    "display.hideAllGuides": {"label": "Hide All Guides", "tip": "Hide the guides of every groom in the scene, every guide group (as Shift+click on the Groom Tools' guides eye)", "tips": {"app": "Hide the guides"}},
-    "display.toggleGuides": {"label": "Guides On/Off", "tip": "Show or hide the guides (Maya's GroomLab hotkey set: every groom's)", "shortcut": "display.guides", "hosts": ["app"]},
+    "display.showAllGuides": {"label": "Show All Guides", "tip": "Show the guides, part lines and flow arrows of every groom in the scene (as Shift+click on the Groom Tools' guides eye)", "tips": {"app": "Show the guides, part lines and flow arrows"}},
+    "display.hideAllGuides": {"label": "Hide All Guides", "tip": "Hide the guides of every groom in the scene, every guide group, with their part lines and flow arrows (as Shift+click on the Groom Tools' guides eye)", "tips": {"app": "Hide the guides, part lines and flow arrows"}},
+    "display.toggleGuides": {"label": "Guides On/Off", "tip": "Show or hide the guides, part lines and flow arrows (Maya's GroomLab hotkey set: every groom's)", "shortcut": "display.guides", "hosts": ["app"]},
 
     "review.heatmap": {"label": "Density Heatmap", "tip": "Color strands by root density: blue sparse, green typical, red bunched", "checkable": true},
     "review.hud": {"label": "Strand Count HUD", "tip": "The active groom's strand, render strand and guide counts in the viewport", "checkable": true},
