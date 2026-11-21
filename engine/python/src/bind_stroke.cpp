@@ -543,7 +543,7 @@ void bindStroke(py::module_& m) {
             all["match_neighbors"] = true;
             all["collide"] = true;
             all["part_name"] = "part";
-            all["stretch"] = true;
+            all["stretch"] = false;
             all["straighten"] = false;
             all["targets"] = "guides";
             all["hardness"] = 0.0f;

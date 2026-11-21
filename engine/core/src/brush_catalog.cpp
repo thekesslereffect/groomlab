@@ -203,7 +203,7 @@ const std::vector<BrushSettingSpec>& brushSettingSpecs() {
                                                       "guides, parts, flow arrows or paint on the far side of the head"},
              true),
         flag({"stretch", "Stretch", "On: guides get longer (or shorter) as you pull them, like ZBrush's Snake Hook: points are added or "
-                   "removed so the segments keep their length. Off: they keep their length"}, true),
+                   "removed so the segments keep their length. Off: they keep their length"}, false),
         flag({"straighten", "Straighten", "On: guides relax toward the straight line along their root direction. Off: only "
                                           "their kinks are taken out"},
              false),
