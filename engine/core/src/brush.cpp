@@ -243,9 +243,32 @@ struct Edit {
     bool erase = false;
 };
 
+// The points a stretched guide gets (Comb with Stretch, as ZBrush's Snake Hook): `pts` as they
+// were up to `first` (the first point the drag moved; the root part stays exactly), then `moved`
+// from the point before it respaced along its new path at `spacing` (the guide's mean segment
+// length when the stroke began): a pulled guide gains points, a pushed one loses them, its
+// segments staying about as long as they were. At least 2 points, at most kMaxStretchPoints.
+constexpr std::size_t kMaxStretchPoints = 257;  // 256 segments: Scatter's and Resample's most
+std::vector<Vec3f> stretched(const std::vector<Vec3f>& pts, const std::vector<Vec3f>& moved, std::size_t first, float spacing) {
+    const std::size_t n = pts.size();
+    const std::size_t from = first - 1;  // (first >= 1: the root never moves)
+    const float length = arcLength(moved.data() + from, n - from);
+    std::size_t segments = n - 1 - from;  // as many as it had, without a spacing
+    if (spacing > 0.0f && std::isfinite(length)) {
+        segments = static_cast<std::size_t>(std::max(std::lround(length / spacing), 1L));
+    }
+    segments = std::min(segments, kMaxStretchPoints - 1 - from);
+    const std::vector<Vec3f> tail = resampleByArcLength(moved.data() + from, n - from, std::max<std::size_t>(segments, 1) + 1);
+    std::vector<Vec3f> out(pts.begin(), pts.begin() + static_cast<std::ptrdiff_t>(from));
+    out.insert(out.end(), tail.begin(), tail.end());
+    return out;
+}
+
+// `spacing`: the guide's mean segment length when the stroke began (BrushStrokeCache; 0 without
+// one), what Comb's Stretch keeps its segments at.
 template <class Weigh>
 Edit brushGuide(const HierarchyGuide& g, const ScalpMesh* scalp, const BrushSettings& s, const Weigh& weigh,
-                const Vec3f& center, const Vec3f& drag) {
+                const Vec3f& center, const Vec3f& drag, float spacing = 0.0f) {
     Edit e;
     const std::vector<Vec3f>& pts = g.points;
     const std::size_t n = pts.size();
@@ -258,17 +281,22 @@ Edit brushGuide(const HierarchyGuide& g, const ScalpMesh* scalp, const BrushSett
         case BrushMode::Comb: {
             if (drag.length() == 0.0f) return e;
             std::vector<Vec3f> moved;  // the points, copied once one moves
+            std::size_t first = 0;     // the first point moved
             for (std::size_t i = 1; i < n; ++i) {
                 float w = weigh(pts[i]);
                 if (profiled) w *= rootToTip[i];
                 if (w <= 0.0f) continue;
-                if (moved.empty()) moved = pts;
+                if (moved.empty()) {
+                    moved = pts;
+                    first = i;
+                }
                 moved[i] += drag * (s.strength * w);
             }
             if (moved.empty()) return e;
-            // Stretch: the guide takes the length the drag gives it (points respaced evenly);
-            // else each segment keeps its length.
-            e.points = s.stretch ? resampleByArcLength(moved.data(), n, n) : keepLengths(moved, segmentLengths(pts));
+            // Stretch (Snake Hook): the guide takes the length the drag gives it, gaining or
+            // losing points to keep its segments' length (stretched); else each segment keeps its
+            // length.
+            e.points = s.stretch ? stretched(pts, moved, first, spacing) : keepLengths(moved, segmentLengths(pts));
             return e;
         }
         case BrushMode::Smooth: {
@@ -585,6 +613,8 @@ struct BrushStrokeCache::State {
     // Attribute modes that offset or clamp a value composite against the value at stroke start.
     // The strongest dab wins, so overlapping dabs never add the amount repeatedly.
     std::vector<float> attributeStart, attributeWeight;
+    // Per target: its mean segment length when the stroke began (Comb's Stretch keeps it).
+    std::vector<float> spacing;
     bool anyStale = true;
     // Targets binned by where their roots were when the cache was filled: a cluster's bounds hold
     // its members', so a stamp skips a whole cluster out of its reach with one test.
@@ -622,6 +652,7 @@ struct BrushStrokeCache::State {
         stale.assign(n, 1);
         attributeStart.assign(n, 0.0f);
         attributeWeight.assign(n, 0.0f);
+        spacing.assign(n, 0.0f);
         anyStale = true;
         slot.clear();
         for (std::size_t i = 0; i < n; ++i) {
@@ -629,6 +660,9 @@ struct BrushStrokeCache::State {
             if (const HierarchyGuide* g = h.guide(targets[i].first)) {
                 const auto it = g->attributes.find(s.attribute);
                 attributeStart[i] = it == g->attributes.end() ? 0.0f : it->second;
+                if (g->points.size() >= 2) {
+                    spacing[i] = arcLength(g->points.data(), g->points.size()) / static_cast<float>(g->points.size() - 1);
+                }
             }
         }
         children.clear();
@@ -807,7 +841,7 @@ std::size_t stamp(GuideHierarchy& h, const ScalpMesh* scalp, const BrushSettings
         const std::size_t k = reached[r];
         const HierarchyGuide& g = *h.guide(targets[k].first);
         const MaskedWeigher masked{weigh, targets[k].second};
-        Edit e = brushGuide(g, scalp, s, masked, center, drag);
+        Edit e = brushGuide(g, scalp, s, masked, center, drag, cache ? cache->spacing[k] : 0.0f);
         if (!e.erase && !e.tubeEdited && std::isnan(e.attribute) && e.pointWeights.empty() && !e.points.empty() && collides) {
             e.points = keepOffScalp(e.points, *scalp, s.collideOffset);
         }

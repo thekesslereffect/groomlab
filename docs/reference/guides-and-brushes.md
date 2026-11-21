@@ -203,7 +203,7 @@ groomlab.brush_tool("place", length=0.6)                        # click the scal
 
 | Mode | Effect |
 | --- | --- |
-| `comb` | Drags guide points along the stroke. Roots stay pinned and segment lengths are kept, unless **Stretch** is on (`stretch=True`): then combing out past the tips makes guides longer (and pushing in, shorter), points respaced evenly. |
+| `comb` | Drags guide points along the stroke. Roots stay pinned and segment lengths are kept, unless **Stretch** is on (`stretch=True`): then combing out past the tips makes guides longer (and pushing in, shorter), like ZBrush's Snake Hook: the pulled part is respaced along its new path at the segment length the guide had when the stroke began, so guides gain points as they grow and lose them as they shrink (the root part the brush never reached stays as it was). |
 | `smooth` | Relaxes kinks, keeping lengths. |
 | `straighten` | Relaxes guides toward the straight line along their root direction (in the palette: Smooth's **Straighten** chip; `brush_tool("smooth", straighten=True)`). |
 | `lift` | Turns guides toward the scalp normal; negative strength lays them down. |

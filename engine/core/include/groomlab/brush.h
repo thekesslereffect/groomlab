@@ -113,8 +113,11 @@ struct BrushSettings {
     bool collide = true;
     float collideOffset = 0.0f;
 
-    // Comb: guides stretch with the drag (longer or shorter, points respaced
-    // evenly) instead of keeping their length.
+    // Comb: guides stretch with the drag (longer or shorter) instead of keeping
+    // their length, as ZBrush's Snake Hook: the part the brush moves is respaced
+    // along its new path at the segment length the guide had when the stroke
+    // began, so a pulled guide gains points and a pushed one loses them (the
+    // root part before the first point moved stays as it was).
     bool stretch = false;
     // Smooth: relax guides toward the straight line along their root direction
     // (Straighten) instead of only taking kinks out.

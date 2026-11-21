@@ -134,16 +134,30 @@ TEST(Brush, CombWithStretchChangesLength) {
     s.radius = 0.3f;
     s.strength = 1.0f;
     s.stretch = true;
+    const std::vector<Vec3f> start = h.guide(id)->points;
     applyBrushStroke(h, nullptr, s, {{0, 1.0f, 0}, {0, 1.2f, 0}, {0, 1.4f, 0}});  // combed out past the tip
     const auto& pts = h.guide(id)->points;
-    EXPECT_GT(arcLength(pts.data(), pts.size()), 1.1f);
-    EXPECT_EQ(pts.size(), 11u);
-    const float seg = (pts[1] - pts[0]).length();
-    for (std::size_t i = 1; i < pts.size(); ++i) EXPECT_NEAR((pts[i] - pts[i - 1]).length(), seg, 1e-3f);
+    const float length = arcLength(pts.data(), pts.size());
+    EXPECT_GT(length, 1.1f);
+    // Snake Hook: points added as it grows, its segments about as long as they were (0.1).
+    EXPECT_GT(pts.size(), 11u);
+    EXPECT_NEAR(length / static_cast<float>(pts.size() - 1), 0.1f, 0.03f);
+    for (std::size_t i = 1; i < pts.size(); ++i) EXPECT_LT((pts[i] - pts[i - 1]).length(), 0.14f) << i;
+    // The root part the brush never reached stays exactly.
+    for (std::size_t i = 0; i < 5; ++i) EXPECT_EQ(pts[i], start[i]) << i;
     s.stretch = false;  // off: the length stays
     const float before = arcLength(pts.data(), pts.size());
     applyBrushStroke(h, nullptr, s, {{0.2f, 1.2f, 0}, {0.5f, 1.2f, 0}});
     EXPECT_NEAR(arcLength(h.guide(id)->points.data(), h.guide(id)->points.size()), before, 1e-3f);
+
+    // Pushed back toward the root: shorter, and points go with the length.
+    s.stretch = true;
+    const std::size_t grown = h.guide(id)->points.size();
+    const Vec3f tip = h.guide(id)->points.back();
+    applyBrushStroke(h, nullptr, s, {tip, tip + (Vec3f{0, 0, 0} - tip) * 0.25f, tip + (Vec3f{0, 0, 0} - tip) * 0.5f});
+    const auto& pushed = h.guide(id)->points;
+    EXPECT_LT(pushed.size(), grown);
+    EXPECT_GE(pushed.size(), 2u);
 }
 
 // The Shape brush (ShapeTube): each tube section moves by the brush's weight at its guide point,
