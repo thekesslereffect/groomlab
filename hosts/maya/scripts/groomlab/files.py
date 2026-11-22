@@ -383,6 +383,16 @@ def _after_groom_file(groom, info, keep_keys):
             cmds.setAttr(plug, int(round(value)))
         else:
             cmds.setAttr(plug, float(value))
+    # Keyed controls (the file's controlKeys, as the app keys them): Maya keys on the control
+    # attributes, auto tangents (no overshoot, as the core's curve through them).
+    for name, keys in sorted((info.get("controlKeys") or {}).items()):
+        plug = "%s.%s%s" % (groom, CONTROL_PREFIX, name)
+        if not keys or not cmds.objExists(plug) or cmds.getAttr(plug, lock=True):
+            continue
+        if cmds.listConnections(plug, source=True, destination=False):
+            continue  # keyed or driven already: its keys stay
+        for frame, value in keys:
+            cmds.setKeyframe(plug, time=float(frame), value=float(value), inTangentType="auto", outTangentType="auto")
     fps = float(mel.eval("currentTimeUnitToFPS"))
     for layer in info.get("correctives") or []:
         _corrective_weight(groom, layer, fps, keep_keys)

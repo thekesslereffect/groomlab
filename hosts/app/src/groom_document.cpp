@@ -151,6 +151,9 @@ GroomDocument::GroomDocument(GroomFile file, std::string path) : path_(std::move
     loadGraph(scene_->file().data.graphJson);
     loadMaps();
     controlKeys_ = scene_->file().controlKeys;
+    // (The document keys its controls itself, applyControlKeys, a drag between keys showing until the
+    // frame changes: the session applies none of its own, as it does for the CLI and Python.)
+    session().setControlKeys({});
     // The groups' own colors and the hidden groups as the file keeps them (Maya's attributes' text).
     for (const auto& [group, color] : guideGroupColorWords(scene_->file().guideGroupColors)) groupColors_[group] = color;  // (display.h)
     hiddenGroups_ = parseHiddenGuideGroups(scene_->file().hiddenGuideGroups);
@@ -1663,6 +1666,9 @@ std::string GroomDocument::transferToScalp(MeshPtr scalp, const TransferOptions&
     loadGraph(scene_->file().data.graphJson);
     loadMaps();
     controlKeys_ = scene_->file().controlKeys;
+    // (The document keys its controls itself, applyControlKeys, a drag between keys showing until the
+    // frame changes: the session applies none of its own, as it does for the CLI and Python.)
+    session().setControlKeys({});
     paints_.clear();
     mapViewValues_.reset();
     mapViewKey_ = 0;

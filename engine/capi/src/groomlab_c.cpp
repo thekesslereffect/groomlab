@@ -146,6 +146,7 @@ void adoptFile(gl_session& s, GroomFile file) {
     auto session = std::make_unique<GroomSession>(file.data);  // throws for a bad graph or guides
     if (!(file.framesPerSecond > 0.0)) file.framesPerSecond = 24.0;
     session->setFramesPerSecond(file.framesPerSecond);
+    session->setControlKeys(file.controlKeys);  // (keyed controls animate here too)
     file.data = GroomData{};  // the session holds it
     s.session = std::move(session);
     s.file = std::move(file);

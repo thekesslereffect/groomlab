@@ -1643,6 +1643,14 @@ json Helper::run(const std::string& cmd, const json& args) {
         const json names = grooms;
         const std::string name = file.name;
         const std::string braidTubes = file.braidTubes;
+        // Keyed controls ({name: [[frame, value], ...]}): the add-on keys its ctl_ properties from
+        // them (Blender's keys then give the values each frame, set_controls).
+        json controlKeys = json::object();
+        for (const auto& [control, keys] : file.controlKeys) {
+            json list = json::array();
+            for (const auto& [frame, value] : keys) list.push_back(json::array({frame, value}));
+            controlKeys[control] = std::move(list);
+        }
         adopt(s, std::move(file));
         s.seconds = 0.0;
         json info = groomInfo(s);
@@ -1651,6 +1659,7 @@ json Helper::run(const std::string& cmd, const json& args) {
         info["name"] = name;
         info["grooms"] = names;  // every groom's name, in the file's order
         info["braidTubes"] = braidTubes;  // Show Tubes' nodes, as saved (the add-on keeps them)
+        info["controlKeys"] = std::move(controlKeys);
         return info;
     }
     if (cmd == "save_groom") {
@@ -1670,6 +1679,22 @@ json Helper::run(const std::string& cmd, const json& args) {
         file.directory = oldDir;
         file.name = optString(args, "name", "");
         if (args.contains("braidTubes")) file.braidTubes = optString(args, "braidTubes", "");  // Show Tubes' nodes (the add-on's)
+        // Keyed controls, as the add-on's ctl_ properties' keys have them ({name: [[frame, value], ...]}).
+        if (args.contains("controlKeys")) {
+            const json& keyed = args["controlKeys"];
+            if (!keyed.is_object()) fail("bad_request", "controlKeys is {name: [[frame, value], ...]}");
+            file.controlKeys.clear();
+            for (const auto& [control, list] : keyed.items()) {
+                ControlKeys keys;
+                for (const json& k : list.is_array() ? list : json::array()) {
+                    if (!k.is_array() || k.size() != 2 || !k[0].is_number() || !k[1].is_number()) {
+                        fail("bad_request", "controlKeys is {name: [[frame, value], ...]}");
+                    }
+                    setControlKey(keys, k[0].get<double>(), k[1].get<double>());
+                }
+                if (!keys.empty()) file.controlKeys[control] = std::move(keys);
+            }
+        }
         if (file.source.empty()) file.source = "Blender";
         if (axis == "Z") convertUpAxis(file, "Z");
         GroomWriteOptions options;

@@ -363,6 +363,7 @@ bool WebGroom::load(const std::string& groomText, const std::string& objText) {
         }
         auto session = std::make_unique<GroomSession>(file->data);
         session->setFramesPerSecond(file->framesPerSecond);
+        session->setControlKeys(file->controlKeys);  // (keyed controls animate here too)
         file_ = std::move(file);
         session_ = std::move(session);
         setDirectory(directory_);

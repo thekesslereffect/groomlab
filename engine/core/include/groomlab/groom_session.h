@@ -28,6 +28,7 @@
 #include <utility>
 #include <vector>
 
+#include "groomlab/control_keys.h"
 #include "groomlab/braid_tubes.h"
 #include "groomlab/cards.h"
 #include "groomlab/correctives.h"
@@ -451,6 +452,12 @@ public:
     void setGuidePoses(GuidesPtr poses);   // hierarchy guides replaced by ID (simulated, cached)
     GuidesPtr guidePoses() const { return data_.guidePoses; }
     void setControls(std::map<std::string, float> controls);  // Control node values by name
+    // Keyed controls (GroomFile::controlKeys: a control's value over the frames, the app's param
+    // keys): each keyed control takes its keys' value at the frame evaluated (controlKeyValue at
+    // the session's time and frame rate) over the value setControls gave it, so a .groom animated
+    // in the app animates wherever it is evaluated (the CLI, Python, the C API, every host).
+    void setControlKeys(std::map<std::string, ControlKeys> keys);
+    const std::map<std::string, ControlKeys>& controlKeys() const { return controlKeys_; }
     // Other meshes for ColliderMesh nodes, by name; a null mesh removes the name.
     void setMeshes(std::map<std::string, MeshPtr> meshes);
     void setMesh(const std::string& name, MeshPtr mesh);
@@ -956,6 +963,7 @@ private:
     std::string scaleNotice_;
     std::uint64_t scaleNoticeSerial_ = 0;
     std::map<std::string, double> controlFactors_;  // controlScaleFactors at k
+    std::map<std::string, ControlKeys> controlKeys_;  // setControlKeys
     // The graph parsed from data_.graphJson scaled by k (scaleGraphJson), its compounds as their
     // nodes inline (`flat`: where they went); throws as loadGraphJson.
     std::unique_ptr<GraphDocument> parseScaled(const std::string& graphJson, GraphEdit::FlatCompounds* flat) const;

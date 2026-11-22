@@ -301,6 +301,43 @@ def control_path(name):
     return '["%s%s"]' % (CONTROL_PREFIX, name)
 
 
+def control_keys(scalp):
+    """The groom's keyed controls as a .groom keeps them ({name: [[frame, value], ...]}): each ctl_
+    property's keys (Blender's curve shapes between keys become the core's smooth curve)."""
+    bag = _channelbag(scalp)
+    out = {}
+    for curve in (bag.fcurves if bag is not None else []):
+        path = curve.data_path
+        if not path.startswith('["' + CONTROL_PREFIX) or not path.endswith('"]'):
+            continue
+        keys = [[float(k.co[0]), float(k.co[1])] for k in curve.keyframe_points]
+        if keys:
+            out[path[2 + len(CONTROL_PREFIX):-2]] = keys
+    return out
+
+
+def key_controls(scalp, keyed):
+    """The groom's ctl_ properties keyed as a .groom's controlKeys say ({name: [[frame, value],
+    ...]}): each control's curve made again from them (auto-clamped: no overshoot, as the core's)."""
+    if not keyed:
+        return
+    for name, keys in sorted(keyed.items()):
+        if not keys:
+            continue
+        ensure_control_props(scalp, [name], [float(keys[0][1])])
+        bag = _channelbag(scalp)
+        curve = bag.fcurves.find(control_path(name)) if bag is not None else None
+        if curve is not None:
+            bag.fcurves.remove(curve)
+        for frame, value in keys:
+            scalp[CONTROL_PREFIX + name] = float(value)
+            scalp.keyframe_insert(control_path(name), frame=float(frame), group="GroomLab")
+        bag = _channelbag(scalp)
+        curve = bag.fcurves.find(control_path(name)) if bag is not None else None
+        for point in (curve.keyframe_points if curve is not None else []):
+            point.handle_left_type = point.handle_right_type = "AUTO_CLAMPED"
+
+
 def _channelbag(scalp):
     ad = scalp.animation_data
     if ad is None or ad.action is None:

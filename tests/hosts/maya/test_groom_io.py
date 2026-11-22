@@ -563,6 +563,39 @@ class GroomFileTest(unittest.TestCase):
         imported = groomlab.import_groom(path)
         self.assertEqual(cmds.listRelatives(imported, parent=True)[0], name)
 
+    def test_keyed_controls_travel_in_the_file(self):
+        """A control keyed in Maya (its ctl_ attribute's animation) goes into the file's controlKeys,
+        so the file animates where it is evaluated (the core's session: Python, the CLI, the app); an
+        import keys the control attribute again from them."""
+        folder = new_scene("keyed_controls")
+        groom = groomlab.create_groom(cmds.polySphere(subdivisionsX=12, subdivisionsY=6)[0])
+        graph = groomlab.get_graph(groom) or groomlab_core.default_graph()  # ({}: the default's)
+        groomlab.set_graph(groom, graph)
+        noise = next(n["name"] for n in graph["nodes"] if n["type"] == "Noise")
+        plug = groomlab.add_control(groom, noise, "amplitude", name="frizzy", default=0.08, max=0.3)
+        cmds.setKeyframe(plug, time=1, value=0.0)
+        cmds.setKeyframe(plug, time=11, value=0.3)
+        path = os.path.join(folder, "keyed.groom")
+        groomlab.export_groom(groom, path)
+        keys = read_json(path).get("controlKeys", {}).get("frizzy")
+        self.assertEqual([(round(f, 3), round(v, 3)) for f, v in keys], [(1.0, 0.0), (11.0, 0.3)])
+        # Evaluated from the file alone: the control's keys move the strands between the frames.
+        session = groomlab_core.GroomSession.from_groom_file(path)
+        self.assertIn("frizzy", session.control_keys)
+        fps = session.frames_per_second
+
+        def first_tip(frame):
+            strands = session.view(density=0.3, time=(frame - 1.0) / fps + 1.0 / fps).strands
+            return tuple(strands.strand_points(0)[-1][k] for k in range(3))
+        self.assertNotEqual(first_tip(1), first_tip(11))
+        # Imported: the control attribute keyed again.
+        new_scene("keyed_controls2")
+        imported = groomlab.import_groom(path)
+        attr = imported + ".ctl_frizzy"
+        self.assertEqual(cmds.keyframe(attr, query=True, timeChange=True), [1.0, 11.0])
+        self.assertAlmostEqual(cmds.keyframe(attr, query=True, valueChange=True)[1], 0.3, places=4)
+        self.assertEqual(groomlab.errors(imported), [])
+
     def test_other_scalps_come_back_as_meshes(self):
         """A groom on another scalp too (Add > Scalp: the file's "scalps") imports with that scalp
         made as a mesh of its own and kept as the groom's other scalp: the same hair."""

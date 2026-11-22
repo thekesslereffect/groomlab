@@ -70,6 +70,7 @@ GroomScene::GroomScene(GroomFile file) : file_(std::move(file)) {
     // Simulate nodes: frames at the file's rate, the frames on the way to a time fed as a view
     // feeds its own, the bakes the file names.
     session_->setFramesPerSecond(file_.framesPerSecond);
+    session_->setControlKeys(file_.controlKeys);  // (keyed controls animate here too)
     session_->setSimulationFeed([this](double seconds) {
         feedTime(*session_, *this, guideCache_.get(), driverCache_.get(), seconds, {});
         return true;

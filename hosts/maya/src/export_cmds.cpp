@@ -9,7 +9,14 @@
 #include <stdexcept>
 #include <string>
 
+#include <cstring>
+
 #include <maya/MAnimControl.h>
+#include <maya/MAnimUtil.h>
+#include <maya/MFnAnimCurve.h>
+#include <maya/MFnAttribute.h>
+#include <maya/MObjectArray.h>
+#include <maya/MPlugArray.h>
 #include <maya/MArgDatabase.h>
 #include <maya/MArgList.h>
 #include <maya/MDGContext.h>
@@ -845,6 +852,29 @@ MStatus ExportGroomCmd::doIt(const MArgList& args) {
             } else {
                 MGlobal::displayWarning(MString(kName) + ": no mesh named " + name.c_str() +
                                         " for the Instance node; the groom file does not hold it");
+            }
+        }
+        // Keyed controls (controlKeys, as the app keys them): each control attribute (ctl_<name>)
+        // an animation curve drives, its keys (frame, value), so the file animates wherever it is
+        // evaluated (GroomSession::setControlKeys); Maya's own curve shapes between keys become the
+        // core's smooth curve through them.
+        {
+            MFnDependencyNode node(path.node());
+            const std::size_t prefix = std::strlen(kControlPrefix);
+            for (unsigned a = 0; a < node.attributeCount(); ++a) {
+                MFnAttribute attr(node.attribute(a));
+                const std::string attrName = attr.name().asChar();
+                if (attrName.compare(0, prefix, kControlPrefix) != 0 || attrName.size() <= prefix) continue;
+                const MPlug plug = node.findPlug(attr.object(), true);
+                if (plug.isNull() || plug.isCompound() || !MAnimUtil::isAnimated(plug)) continue;
+                MObjectArray curves;
+                if (!MAnimUtil::findAnimation(plug, curves) || curves.length() == 0) continue;
+                MFnAnimCurve curve(curves[0]);
+                ControlKeys keys;
+                for (unsigned k = 0; k < curve.numKeys(); ++k) {
+                    keys.emplace_back(curve.time(k).as(MTime::uiUnit()), curve.value(k));
+                }
+                if (!keys.empty()) groom.controlKeys[attrName.substr(prefix)] = std::move(keys);
             }
         }
         // A Card Atlas block's card (the file of blocks is the atlas).

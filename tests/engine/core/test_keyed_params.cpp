@@ -8,6 +8,7 @@
 #include <nlohmann/json.hpp>
 
 #include "groomlab/curve.h"
+#include "groomlab/frame_time.h"
 #include "groomlab/field.h"
 #include "groomlab/graph_io.h"
 #include "groomlab/groom.h"
@@ -183,6 +184,28 @@ TEST(KeyedParams, AGroomKeysAParamFromItsControls) {
     const StrandsPtr twice = groom.evaluate(1.0f, 2.0);
     EXPECT_NEAR(strandLength(*twice, 0), own * 2.0f, 1e-3f);
     EXPECT_EQ(half->strandCount(), twice->strandCount());  // the topology stays
+}
+
+TEST(KeyedParams, AGroomsControlKeysAnimateItWhereverItIsEvaluated) {
+    // A .groom's controlKeys (the app's param keys): the session takes each keyed control's value at
+    // the frame evaluated, over the value set, so the CLI, Python and every host animate it alike.
+    GroomData d;
+    d.scalp = test::makePlane(8);
+    d.graphJson = keyedGraph(R"j(, "paramControls": {"scale": "length_keep"})j");
+    Groom groom(d);
+    const float own = strandLength(*groom.evaluate(1.0f, 0.0), 0);
+    groom.setFramesPerSecond(24.0);
+    groom.setControls({{"length_keep", 3.0f}});  // (a keyed control: its keys win)
+    groom.setControlKeys({{"length_keep", {{1.0, 0.5}, {25.0, 2.0}}}});
+    EXPECT_EQ(groom.controlKeys().size(), 1u);
+    EXPECT_NEAR(strandLength(*groom.evaluate(1.0f, frameToSeconds(1.0, 24.0)), 0), own * 0.5f, 1e-3f);
+    EXPECT_NEAR(strandLength(*groom.evaluate(1.0f, frameToSeconds(25.0, 24.0)), 0), own * 2.0f, 1e-3f);
+    const float between = strandLength(*groom.evaluate(1.0f, frameToSeconds(13.0, 24.0)), 0);
+    EXPECT_GT(between, own * 0.5f);
+    EXPECT_LT(between, own * 2.0f);
+    // No keys: the value set again.
+    groom.setControlKeys({});
+    EXPECT_NEAR(strandLength(*groom.evaluate(1.0f, frameToSeconds(13.0, 24.0)), 0), own * 3.0f, 1e-3f);
 }
 
 TEST(KeyedParams, TheJsonKeepsLinksAndOwnValues) {

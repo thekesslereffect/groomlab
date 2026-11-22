@@ -61,6 +61,7 @@ GroomSession& sessionFromFile(GroomSession& s, const GroomFile& file) {
     // Its frame rate, as GroomScene and the C API set it: frames (a Simulate node's steps, the
     // scalp's history) are the file's, not 24 a second.
     if (file.framesPerSecond > 0.0) s.setFramesPerSecond(file.framesPerSecond);
+    s.setControlKeys(file.controlKeys);  // (keyed controls animate here too)
     return s;
 }
 
@@ -157,6 +158,10 @@ void bindSession(py::module_& m) {
              },
              py::arg("hierarchy"), "Guides as stored (a copy is taken; set it again after editing).")
         .def("set_parts_json", &GroomSession::setPartsJson, py::arg("json"))
+        .def("set_control_keys", &GroomSession::setControlKeys, py::arg("keys"),
+             "Keyed controls {name: [(frame, value), ...]} (a .groom's controlKeys): each takes its keys' value at "
+             "the frame evaluated over set_controls' value.")
+        .def_property_readonly("control_keys", &GroomSession::controlKeys, "The keyed controls set_control_keys gave.")
         .def("set_flow_json", &GroomSession::setFlowJson, py::arg("json"))
         .def("set_correctives_json", &GroomSession::setCorrectivesJson, py::arg("json"))
         .def("set_sculpts_json", &GroomSession::setSculptsJson, py::arg("json"),
