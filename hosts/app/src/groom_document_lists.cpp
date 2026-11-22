@@ -157,47 +157,6 @@ std::string GroomDocument::missingMapFile(const std::string& name) const {
 
 // ---- Maps: files --------------------------------------------------------------------------------
 
-std::string GroomDocument::freeMapFile(const std::string& name) const {
-    return freeFilePath((std::filesystem::u8path(mapsDirectory()) / (name + ".png")).u8string());
-}
-
-std::string GroomDocument::storedMapPath(const std::string& full) const {
-    if (path_.empty()) return forwardSlashes(full);
-    return pathFromGroomFolder(full, std::filesystem::u8path(path_).parent_path().u8string());
-}
-
-std::string GroomDocument::mapImageFile(const std::string& map, const std::string& path, std::vector<FileState>* copied, int* channels) {
-    if (path.empty()) throw std::runtime_error("give the image's path");
-    std::error_code ec;
-    if (fileStamp(path) == 0) throw std::runtime_error("no image at " + path);  // (a tile set: any tile)
-    TexturePtr image;
-    try {
-        image = loadTexture(path);
-    } catch (const std::exception& e) {
-        throw std::runtime_error(path + " does not read as an image: " + e.what());
-    }
-    if (!image || (!image->isUdim() && !image->image())) throw std::runtime_error(path + " does not read as an image");
-    if (channels) *channels = isGrayImage(*image) ? kGrayMap : kColorMap;
-    if (isPngPath(path)) return forwardSlashes(std::filesystem::u8path(path).u8string());  // in place: painting edits it
-    // Another format is copied into the maps folder as a PNG (painting writes PNG).
-    if (mapsDirectory().empty()) throw std::runtime_error("save the groom first: a JPEG, TGA, PSD... is copied as a PNG into the groomlab folder beside it");
-    const std::string target = freeMapFile(map);
-    std::vector<FileState> states = mapImageStates(target, image->isUdim() ? image->udimTiles() : std::vector<int>{});
-    std::filesystem::create_directories(std::filesystem::u8path(target).parent_path(), ec);
-    try {
-        writeImagePng(*image, target);  // (a tile set: each tile, udimPathFor(target))
-    } catch (const std::exception& e) {
-        throw std::runtime_error("could not write " + target + ": " + e.what());
-    }
-    std::vector<FileState> made;
-    finishFileStates(states);
-    made.insert(made.end(), states.begin(), states.end());
-    if (copied) {
-        for (FileState& state : made) copied->push_back(std::move(state));
-    }
-    return target;
-}
-
 // ---- Maps: edits ----------------------------------------------------------------------------------
 
 std::string GroomDocument::removeMap(const std::string& name, bool deleteFile, bool* fileDeleted) {
@@ -244,52 +203,52 @@ std::string GroomDocument::removeMap(const std::string& name, bool deleteFile, b
 }
 
 std::string GroomDocument::importMap(const std::string& path, std::string* made, const std::string& wanted) {
-    std::string name = wanted;
-    auto taken = [&](const std::string& n) { return map(n) != nullptr; };
-    if (name.empty()) name = mapNameFromFile(path, taken);  // (every host's rule, scalp_maps.h)
-    if (!validMapName(name)) return mapNameError(name);
-    if (taken(name)) return "the groom already has a map named '" + name + "'";
     const MeshPtr scalp = session().cageScalp();
     if (!scalp || !scalp->hasUVs()) return "the scalp has no UVs for a texture map";
-    std::vector<FileState> files;
-    int channels = kGrayMap;
-    std::string full;
+    // Every host's Import (the editor's importMap, map_edits.h): a PNG in place, another format
+    // copied as a PNG into the maps folder (its files kept in the step), gray or color as the image.
+    MapImageRequest image;
+    image.path = path;
+    MapFiles files;
+    files.mapsFolder = mapsDirectory();
+    files.groomFolder = path_.empty() ? std::string() : std::filesystem::u8path(path_).parent_path().u8string();
+    files.resolve = [this](const std::string& stored) { return resolveMapPath(stored); };
+    MapLink linked;
     try {
-        full = mapImageFile(name, path, &files, &channels);
+        linked = groomlab::importMap(session().scalpMaps(), session().authoredHierarchy().get(), wanted, image, std::nullopt, files);
     } catch (const std::exception& e) {
         return e.what();
     }
-    ScalpMaps maps = session().scalpMaps();
-    ScalpMapEntry entry;
-    entry.kind = "texture";
-    entry.texture = storedMapPath(full);
-    entry.channels = channels;
-    maps.maps[name] = std::move(entry);
     const std::size_t undoBefore = history_.undoIndex();
-    const std::string label = "import map " + name;
-    commitMaps(label, maps);
-    attachSide(undoBefore, label, std::move(files));
-    if (made) *made = name;
+    const std::string label = "import map " + linked.name;
+    commitMaps(label, linked.maps);
+    attachSide(undoBefore, label, std::move(linked.files));
+    if (made) *made = linked.name;
     return {};
 }
 
 std::string GroomDocument::relinkMap(const std::string& name, const std::string& path) {
-    const PaintedMap* source = map(name);
-    if (!source) return "no map named '" + name + "'";
-    const std::string kind = source->kind;
-    const int channels = source->channels;
-    std::vector<FileState> files;
-    std::string full;
+    // Every host's Relink Image (the editor's relinkMap, map_edits.h): the map reads the image as a
+    // texture map, its channels kept (a guide layer's removed), texture params reading its old image
+    // reading the new one.
+    MapImageRequest image;
+    image.path = path;
+    MapFiles files;
+    files.mapsFolder = mapsDirectory();
+    files.groomFolder = path_.empty() ? std::string() : std::filesystem::u8path(path_).parent_path().u8string();
+    files.resolve = [this](const std::string& stored) { return resolveMapPath(stored); };
+    const HierarchyPtr authored = session().authoredHierarchy();
+    MapLink linked;
     try {
-        full = mapImageFile(name, path, &files, nullptr);
+        linked = groomlab::relinkMap(session().scalpMaps(), authored.get(), graph_.dump(), name, image, files);
     } catch (const std::exception& e) {
         return e.what();
     }
     const std::string label = "relink map " + name;
     StrokeEdit edit;
     edit.mode = label;
-    if (kind == "guides") {
-        GuideHierarchy h = session().authoredHierarchy() ? *session().authoredHierarchy() : GuideHierarchy{};
+    if (linked.removeLayer) {
+        GuideHierarchy h = authored ? *authored : GuideHierarchy{};
         h.removeAttribute(name);
         try {
             h.evaluate(session().scalp().get());
@@ -298,32 +257,23 @@ std::string GroomDocument::relinkMap(const std::string& name, const std::string&
         }
         edit.set(StrokeField::Guides, h.toJson());
     }
-    ScalpMaps maps = session().scalpMaps();
-    ScalpMapEntry entry;
-    entry.kind = "texture";
-    entry.texture = storedMapPath(full);
-    entry.channels = channels;
-    if (kind == "texture") {  // texture params reading the map's old file read the new one
-        bool followed = false;
-        const std::string graph = retargetFileReaders(graph_.dump(), resolveMapPath(maps.maps[name].texture), entry.texture,
-                                                      [this](const std::string& stored) { return resolveMapPath(stored); }, &followed);
-        if (followed) edit.set(StrokeField::Graph, graph);
-    }
-    maps.maps[name] = std::move(entry);
-    edit.set(StrokeField::ScalpMaps, maps.toJson());
+    if (!linked.graph.empty()) edit.set(StrokeField::Graph, linked.graph);
+    edit.set(StrokeField::ScalpMaps, linked.maps.toJson());
     paints_.erase(name);
     mapViewKey_ = 0;
     const std::size_t undoBefore = history_.undoIndex();
     commitStroke(std::move(edit));
     if (history_.undoIndex() > undoBefore) history_.last().label = label;
-    attachSide(undoBefore, label, std::move(files));
+    attachSide(undoBefore, label, std::move(linked.files));
     return {};
 }
 
 std::string GroomDocument::reloadMap(const std::string& name) {
-    const PaintedMap* source = map(name);
-    if (!source) return "no map named '" + name + "'";
-    if (source->kind != "texture") return name + " is not a texture map";
+    try {  // (every host's: the editor's reloadMapFiles, its checks)
+        reloadMapFiles(session().scalpMaps(), session().storedHierarchy().get(), name, MapFiles{});
+    } catch (const std::exception& e) {
+        return e.what();
+    }
     paints_.erase(name);
     mapViewKey_ = 0;
     mapViewValues_.reset();

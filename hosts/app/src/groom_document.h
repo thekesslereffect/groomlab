@@ -998,12 +998,6 @@ private:
     void attachSide(std::size_t undoBefore, const std::string& label, std::vector<FileState> files,
                     const std::map<std::string, std::string>* colorsBefore = nullptr);
     void applySide(const Edit& edit, bool after);
-    // An image for a texture map (Maya's set_map_texture rules): a PNG in place, any other image
-    // copied into the maps folder as <map>.png (*copied the file's states for the step). Returns
-    // the path to store; throws std::runtime_error. *channels the image's.
-    std::string mapImageFile(const std::string& map, const std::string& path, std::vector<FileState>* copied, int* channels);
-    std::string freeMapFile(const std::string& name) const;  // <maps folder>/<name>.png, a free name
-    std::string storedMapPath(const std::string& full) const;  // as every host stores it (relative to the groom)
     // The held preview value applied to the graph (nothing when none is held).
     void commitPreview();
     // setParam's work once a preview is out of the way: the JSON, the session, the history.

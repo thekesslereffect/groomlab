@@ -769,7 +769,6 @@ std::vector<GuideId> idsOf(const json& v) {
 
 // ---- Side edits: files and group colors ---------------------------------------------------------
 
-
 // The texture maps' paints kept open between strokes let go: a file an edit wrote (or undo put
 // back) is read again by the next stroke, fill or undo of a stroke.
 void dropPaints(ToolState& t) {
@@ -2223,9 +2222,6 @@ MeshPtr mapScalp(Session& s) {
     return scalp;
 }
 
-// A texture map's default file: <maps folder>/<map>.png, a free name.
-std::string defaultMapFile(Session& s, const std::string& name) { return freeFilePath((fs::u8path(mapsFolder(s)) / (name + ".png")).generic_u8string()); }
-
 // A texture paint written to `file` (made or rewritten) as part of the next commit's undo step.
 void writePaint(ToolState& t, const TexturePaint& paint, const std::string& file) {
     std::vector<FileEdit> e = filesBefore(file, paint.udim() ? paint.udimLayout()->tiles : std::vector<int>{});
@@ -2498,118 +2494,94 @@ json mapFill(ToolState& t, const json& args) {
     return r;
 }
 
-// An image to read as a texture map (Maya's set_map_texture rules): a PNG in place, any other
-// image (or a PNG with `copy`) copied into the maps folder as <map>.png (a free name; the copy is
-// part of the undo step). Returns the file the map reads; `image` the image read.
-std::string mapImageFile(ToolState& t, const std::string& name, const std::string& path, const json& args, TexturePtr& image) {
-    Session& s = t.session;
+// The image `args` "path" names, as every host links it (the editor's MapImageRequest): resolved
+// against the groom's folders; `copy` (none: another format only) into the maps folder as a PNG.
+MapImageRequest mapImageArg(Session& s, const json& args) {
+    MapImageRequest image;
+    const std::string path = needString(args, "path");
     if (path.empty()) fail("bad_request", "give the image's path");
-    std::string full = resolveMapFile(s, path);
-    if (full.empty()) full = path;
-    std::error_code ec;
-    if (fileStamp(full) == 0) fail("not_found", "no image at " + full);  // (a tile set: any tile)
-    try {
-        image = loadTexture(full);
-    } catch (const std::exception& e) {
-        fail("bad_request", full + " does not read as an image: " + e.what());
-    }
-    if (!image || (!image->isUdim() && !image->image())) fail("bad_request", full + " does not read as an image");
-    const bool png = isPngPath(full);
-    const bool copy = given(args, "copy") ? settingBool(args["copy"], "copy") : !png;
-    if (!copy && !png) fail("bad_request", full + " is not a PNG: painting writes PNG, so another format is copied as one (copy true)");
-    if (!copy) return fs::u8path(full).generic_u8string();
-    const std::string target = defaultMapFile(s, name);
-    const std::vector<int> tiles = image->isUdim() ? image->udimTiles() : std::vector<int>{};
-    std::vector<FileEdit> e = filesBefore(target, tiles);
-    fs::create_directories(fs::u8path(target).parent_path(), ec);
-    if (png && !image->isUdim()) {
-        fs::copy_file(fs::u8path(full), fs::u8path(target), ec);
-        if (ec) fail("io", "could not copy " + full + ": " + ec.message());
-    } else if (png) {
-        // A tile set of PNGs: each tile copied, into the set udimPathFor(target) names.
-        const std::string fromSet = udimPathFor(full), toSet = udimPathFor(target);
-        for (const int tile : tiles) {
-            fs::copy_file(fs::u8path(udimTilePath(fromSet, tile)), fs::u8path(udimTilePath(toSet, tile)), fs::copy_options::overwrite_existing, ec);
-            if (ec) fail("io", "could not copy " + udimTilePath(fromSet, tile) + ": " + ec.message());
-        }
-    } else {
-        try {
-            writeImagePng(*image, target);  // (a tile set: each tile)
-        } catch (const std::exception& ex) {
-            fail("io", std::string("could not write ") + target + ": " + ex.what());
-        }
-    }
-    filesAfter(t, std::move(e));
-    return target;
+    image.path = resolveMapFile(s, path);
+    if (image.path.empty()) image.path = path;
+    if (fileStamp(image.path) == 0) fail("not_found", "no image at " + image.path);  // (a tile set: any tile)
+    if (given(args, "copy")) image.copy = settingBool(args["copy"], "copy");
+    return image;
+}
+
+MapFiles helperMapFiles(Session& s) {
+    MapFiles files;
+    files.mapsFolder = mapsFolder(s);
+    files.resolve = [&s](const std::string& stored) { return resolveMapFile(s, stored); };
+    return files;
 }
 
 // Maya's import_map: a new texture map reading the image `path`, named `name` or after the file
 // (its letters, digits and _; a free name), color when the image has color unless `color` says;
-// the file rules of mapImageFile. One undo step.
+// a PNG in place, another format (or `copy`) copied as a PNG into the maps folder (the editor's
+// importMap, every host's). One undo step.
 json mapImport(ToolState& t, const json& args) {
     Session& s = t.session;
-    const std::string path = needString(args, "path");
-    std::string name = optString(args, "name", "");
-    if (name.empty()) name = mapNameFromFile(path, [&](const std::string& n) { return !mapKindOf(s, n).empty(); });  // (every host's rule)
-    if (!validMapName(name)) fail("bad_request", mapNameError(name));
-    if (!mapKindOf(s, name).empty()) fail("bad_request", "the groom already has a map named '" + name + "'");
-    TexturePtr image;
-    const std::string file = mapImageFile(t, name, path, args, image);
-    const bool color = given(args, "color") ? settingBool(args["color"], "color") : !isGrayImage(*image);
-    ScalpMaps maps = s.groom->scalpMaps();
-    ScalpMapEntry entry{"texture", {}, file};
-    entry.channels = color ? kColorMap : kGrayMap;
-    maps.maps[name] = std::move(entry);
-    commitMaps(t, "import map " + name, maps);
+    const MapImageRequest image = mapImageArg(s, args);
+    std::optional<bool> color;
+    if (given(args, "color")) color = settingBool(args["color"], "color");
+    MapLink linked;
+    try {
+        linked = groomlab::importMap(s.groom->scalpMaps(), s.groom->authoredHierarchy().get(), optString(args, "name", ""), image, color,
+                                     helperMapFiles(s));
+    } catch (const std::invalid_argument& e) {
+        fail("bad_request", e.what());
+    } catch (const std::exception& e) {
+        fail("io", e.what());
+    }
+    for (FileEdit& f : linked.files) t.pending.files.push_back(std::move(f));
+    commitMaps(t, "import map " + linked.name, linked.maps);
     pruneSelection(t);
-    return {{"name", name}, {"kind", "texture"}, {"channels", color ? kColorMap : kGrayMap}, {"file", file}, {"undo", undoJson(t)}};
+    return {{"name", linked.name}, {"kind", "texture"}, {"channels", linked.channels}, {"file", linked.file}, {"undo", undoJson(t)}};
 }
 
 // Maya's set_map_texture: map `name` (any kind) reads the image `path` as a texture map, keeping
-// its channels (a guide layer: gray); the file rules of mapImageFile. One undo step.
+// its channels (a guide layer: gray); the image's rules as map_import's (the editor's relinkMap).
+// One undo step.
 json mapRelink(ToolState& t, const json& args) {
     Session& s = t.session;
     const std::string name = needMap(s, args);
-    const std::string kind = mapKindOf(s, name);
-    const int channels = mapChannelsOf(s, name);
-    TexturePtr image;
-    const std::string file = mapImageFile(t, name, needString(args, "path"), args, image);
+    const MapImageRequest image = mapImageArg(s, args);
+    MapLink linked;
+    try {
+        linked = groomlab::relinkMap(s.groom->scalpMaps(), s.groom->authoredHierarchy().get(), s.groom->data().graphJson, name, image,
+                                     helperMapFiles(s));
+    } catch (const std::invalid_argument& e) {
+        fail("bad_request", e.what());
+    } catch (const std::exception& e) {
+        fail("io", e.what());
+    }
     StrokeEdit edit;
     edit.mode = "relink map " + name;
-    if (kind == "guides") {
+    if (linked.removeLayer) {
         GuideHierarchy h = editedGuides(t, [&](GuideHierarchy& hh) { hh.removeAttribute(name); });
         edit.set(StrokeField::Guides, h.toJson());
     }
-    ScalpMaps maps = s.groom->scalpMaps();
-    ScalpMapEntry entry{"texture", {}, file};
-    entry.channels = channels;
-    if (kind == "texture") {  // texture params reading the map's old file read the new one
-        bool followed = false;
-        const std::string graph = retargetFileReaders(s.groom->data().graphJson, resolveMapFile(s, maps.maps[name].texture), file,
-                                                      [&s](const std::string& stored) { return resolveMapFile(s, stored); }, &followed);
-        if (followed) edit.set(StrokeField::Graph, graph);
-    }
-    maps.maps[name] = std::move(entry);
+    if (!linked.graph.empty()) edit.set(StrokeField::Graph, linked.graph);
     dropPaints(t);
-    edit.set(StrokeField::ScalpMaps, maps.toJson());
+    edit.set(StrokeField::ScalpMaps, linked.maps.toJson());
+    for (FileEdit& f : linked.files) t.pending.files.push_back(std::move(f));
     commitEdit(t, std::move(edit));
     BrushToolSettings& st = t.tool.settings;
-    if (st.brush.attribute == name && st.paintKind == "texture") st.paintTexture = file;
-    return {{"name", name}, {"file", file}, {"undo", undoJson(t)}};
+    if (st.brush.attribute == name && st.paintKind == "texture") st.paintTexture = linked.file;
+    return {{"name", name}, {"file", linked.file}, {"undo", undoJson(t)}};
 }
 
 // Maya's reload_map: texture map `name`'s image (every texture map's without a name) read again
 // after it changed outside (the next evaluation reads files whose stamp changed). Not an undo step.
 json mapReload(ToolState& t, const json& args) {
     Session& s = t.session;
-    const std::string only = optString(args, "name", "");
-    if (!only.empty() && mapKindOf(s, only) != "texture") fail("bad_request", only + " is not a texture map");
-    json files = json::array();
-    for (const auto& [name, entry] : s.groom->scalpMaps().maps) {
-        if (entry.kind == "texture" && (only.empty() || name == only)) files.push_back(resolveMapFile(s, entry.texture));
+    std::vector<std::string> images;
+    try {
+        images = reloadMapFiles(s.groom->scalpMaps(), s.groom->authoredHierarchy().get(), optString(args, "name", ""), helperMapFiles(s));
+    } catch (const std::invalid_argument& e) {
+        fail("bad_request", e.what());
     }
     dropPaints(t);
-    return {{"files", files}};
+    return {{"files", images}};
 }
 
 // Whether `path` is in a maps folder a session made in the temp folder while its .blend was

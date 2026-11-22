@@ -191,4 +191,40 @@ MapCreate createMap(const ScalpMaps& maps, const GuideHierarchy* guides, const S
 // The made layer onto a hierarchy (the host's, its other edits kept as they are).
 void applyCreatedLayer(GuideHierarchy& h, const std::string& name, const MapCreate& created);
 
+// An image for a texture map to read (Import, Relink Image).
+struct MapImageRequest {
+    std::string path;                  // the image, a full path (a tile set: its pattern or a tile)
+    std::optional<bool> copy;          // copied into the maps folder as a PNG; none: only another format (painting writes PNG)
+    std::string copyTo;                // the copy's file (a PNG; a free name beside it when taken); "": newMapImageFile
+};
+
+// A map linked to an image.
+struct MapLink {
+    std::string name;                  // the map (an import's: as given, else after the file)
+    ScalpMaps maps;                    // the scalp maps after
+    bool removeLayer = false;          // a guide layer reads the image now: the host removes its hierarchy's attribute
+    std::string graph;                 // the graph after, texture params reading the old image reading the new; "" unchanged
+    int channels = 1;                  // the map's channels
+    std::vector<FileState> files;      // the copy's files, as found and as left (the step's undo)
+    std::string file;                  // the image as stored
+};
+
+// A new texture map reading the image, every host's Import: named `name`, else after the file
+// (mapNameFromFile: a free name), color when the image has color unless `color` says; the image
+// in place (a PNG) or copied as a PNG (`image.copy`; a free name). Throws std::invalid_argument for
+// no image or one that does not read, a name that cannot name a map or is taken, another format not
+// to be copied, no maps folder for a copy; std::runtime_error for a copy that cannot be written.
+MapLink importMap(const ScalpMaps& maps, const GuideHierarchy* guides, const std::string& name, const MapImageRequest& image,
+                  std::optional<bool> color, const MapFiles& files);
+// Map `name` (any kind) reading the image as a texture map, its channels kept (a guide layer: gray,
+// its layer removed), every host's Relink Image: the image's rules as importMap's; texture params
+// reading the map's old image read the new one (retargetFileReaders). Throws as importMap, and for
+// no map `name`.
+MapLink relinkMap(const ScalpMaps& maps, const GuideHierarchy* guides, const std::string& graph, const std::string& name,
+                  const MapImageRequest& image, const MapFiles& files);
+// The images Reload reads again: texture map `name`'s (every texture map's for ""), as full paths.
+// Throws std::invalid_argument for no map `name` or one that is not a texture map.
+std::vector<std::string> reloadMapFiles(const ScalpMaps& maps, const GuideHierarchy* guides, const std::string& name,
+                                        const MapFiles& files);
+
 }  // namespace groomlab

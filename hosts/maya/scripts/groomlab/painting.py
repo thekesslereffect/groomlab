@@ -257,21 +257,6 @@ def remove_map(groom, name, delete_file=False):
     return changed
 
 
-def _follow_file_readers(groom, graph, old_file, new_stored):
-    """The graph's file params reading `old_file` (absolute; a texture param a groom painted in
-    the app or Blender reads its map by the file) read `new_stored` instead; True when any did.
-    `graph` changes in place."""
-    if not old_file or not new_stored:
-        return False
-    # The core's rule, every host's (asset_files.h retargetFileReaders).
-    text, changed = groomlab_core.retarget_file_readers(json.dumps(graph), old_file, new_stored,
-                                                        lambda stored: resolve_path(stored, groom) or stored)
-    if changed:
-        graph.clear()
-        graph.update(json.loads(text))
-    return changed
-
-
 def rename_map(groom, old, new):
     """Rename a map; the Map nodes, map params and views reading it follow. A texture map's
     file follows too when its name is the map's (as GroomLab names them: <masks>/<asset>/<map>.png,
@@ -485,17 +470,12 @@ def set_map_texture(groom, name, path, copy=None):
         copy = not png
     if not copy and not png:
         raise ValueError("%s is not a PNG: painting writes PNG, so another format is copied as one (copy=True)" % full)
-    old_file = map_texture(groom, name) if kind == "texture" else ""
-    with undo_chunk("relink map"):
-        if copy:
-            asset_folder("masks")  # made, and the untitled scene's warning given
-            stored = cmds.groomLabScalpMaps(groom, relink=name, texture=_map_texture_default(groom, name), copyFrom=full)
-        else:
-            stored = cmds.groomLabScalpMaps(groom, relink=name, texture=portable_path(full))
-        graph = get_graph(groom)  # texture params reading the old image read the new one
-        if old_file and _follow_file_readers(groom, graph, old_file, stored):
-            set_graph(groom, graph)
-        return stored
+    # Every host's Relink Image (the editor's relinkMap, in groomLabScalpMaps): texture params
+    # reading the old image read the new one in the same step.
+    if copy:
+        asset_folder("masks")  # made, and the untitled scene's warning given
+        return cmds.groomLabScalpMaps(groom, relink=name, texture=_map_texture_default(groom, name), copyFrom=full)
+    return cmds.groomLabScalpMaps(groom, relink=name, texture=portable_path(full))
 
 
 def import_map(groom, path, name=None, color=None, copy=None):

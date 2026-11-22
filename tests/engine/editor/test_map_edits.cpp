@@ -365,3 +365,67 @@ TEST(MapEdits, CreateMakesEachKindAndRefusesWhatAMapCannotBe) {
     layer.color = false;
     EXPECT_THROW(createMap(maps, nullptr, scalp.get(), "x", layer, files), std::invalid_argument) << "no guides to carry it";
 }
+
+TEST(MapEdits, ImportAndRelinkReadAnImageInPlaceOrAsACopy) {
+    const fs::path dir = freshFolder("link");
+    auto plane = std::make_shared<ScalpMesh>(*test::makePlane(4));
+    std::vector<ScalpMesh::UV> uvs;
+    for (std::size_t t = 0; t < plane->triangleCount(); ++t) {
+        for (const int v : plane->triangles()[t]) uvs.push_back({plane->points()[v].x, plane->points()[v].z});
+    }
+    plane->setCornerUVs(std::move(uvs));
+    const std::string gray = (dir / "photos" / "gray.png").generic_u8string();
+    const std::string tinted = (dir / "photos" / "Tint Map.png").generic_u8string();
+    writeMapImage(newTextureMapPaint(*plane, kGrayMap, PaintColor{0.5f, 0.5f, 0.5f, 1.0f}, 8), gray);
+    writeMapImage(newTextureMapPaint(*plane, kColorMap, PaintColor{1.0f, 0.0f, 0.0f, 1.0f}, 8), tinted);
+    GuideHierarchy h;
+    const GroupId group = h.addGroup("g");
+    const GuideId guide = h.addGuide(group, {plane->points()[0], plane->points()[0] + Vec3f{0.0f, 0.5f, 0.0f}});
+    h.setAttribute(guide, "lay", 0.5f);
+    ScalpMaps maps;
+    MapFiles files;
+    files.mapsFolder = (dir / "masks").generic_u8string();
+    files.groomFolder = dir.generic_u8string();
+    files.resolve = [&](const std::string& stored) { return (dir / fs::u8path(stored)).generic_u8string(); };
+    // Import: a PNG in place, named after the file, color as the image.
+    MapImageRequest image;
+    image.path = tinted;
+    const MapLink in = importMap(maps, &h, "", image, std::nullopt, files);
+    EXPECT_EQ(in.name, "Tint_Map");
+    EXPECT_EQ(in.channels, kColorMap);
+    EXPECT_EQ(in.file, "photos/Tint Map.png");
+    EXPECT_TRUE(in.files.empty());
+    // Copied: into the maps folder under the map's name, undone.
+    image.path = gray;
+    image.copy = true;
+    const MapLink copied = importMap(in.maps, &h, "dens", image, std::nullopt, files);
+    EXPECT_EQ(copied.channels, kGrayMap);
+    EXPECT_EQ(copied.file, "masks/dens.png");
+    EXPECT_TRUE(fs::exists(dir / "masks" / "dens.png"));
+    restoreFileStates(copied.files, false);
+    EXPECT_FALSE(fs::exists(dir / "masks" / "dens.png"));
+    EXPECT_THROW(importMap(in.maps, &h, "Tint_Map", image, std::nullopt, files), std::invalid_argument) << "taken";
+    image.path = (dir / "photos" / "none.png").generic_u8string();
+    EXPECT_THROW(importMap(in.maps, &h, "x", image, std::nullopt, files), std::invalid_argument) << "no image";
+    // Relink a texture map: a texture param reading its old image reads the new one.
+    const std::string graph = wireParamMap("", in.maps, "length", "keep", "Tint_Map", "texture");
+    ASSERT_NE(graph.find("Tint Map.png"), std::string::npos);
+    image.path = gray;
+    image.copy = std::nullopt;
+    const MapLink re = relinkMap(in.maps, &h, graph, "Tint_Map", image, files);
+    EXPECT_EQ(re.file, "photos/gray.png");
+    EXPECT_EQ(re.channels, kColorMap) << "its channels kept";
+    EXPECT_FALSE(re.removeLayer);
+    ASSERT_FALSE(re.graph.empty());
+    EXPECT_EQ(re.graph.find("Tint Map.png"), std::string::npos);
+    // Relink a guide layer: it becomes a gray texture map, its layer removed.
+    const MapLink layer = relinkMap(in.maps, &h, "", "lay", image, files);
+    EXPECT_TRUE(layer.removeLayer);
+    EXPECT_EQ(layer.maps.maps.at("lay").kind, "texture");
+    EXPECT_EQ(layer.channels, kGrayMap);
+    EXPECT_THROW(relinkMap(in.maps, &h, "", "nope", image, files), std::invalid_argument);
+    // Reload: the texture maps' images; a map of another kind refused.
+    EXPECT_EQ(reloadMapFiles(in.maps, &h, "", files), (std::vector<std::string>{tinted}));
+    EXPECT_THROW(reloadMapFiles(in.maps, &h, "lay", files), std::invalid_argument);
+    EXPECT_THROW(reloadMapFiles(in.maps, &h, "nope", files), std::invalid_argument);
+}

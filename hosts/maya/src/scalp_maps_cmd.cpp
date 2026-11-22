@@ -386,48 +386,36 @@ MStatus ScalpMapsCmd::doIt(const MArgList& args) {
                 mapsChanged = true;
                 setResult(MString(to.c_str()));
             } else if (db.isFlagSet(kRelink[0])) {
-                // The map reads another image: a PNG in place, or a PNG copy of any image.
+                // The map reads another image (the editor's relinkMap, map_edits.h, every host's): a
+                // PNG in place, or -copyFrom any image copied as a PNG to -texture (a free name), its
+                // files' states kept for Maya's undo; texture params reading the old image follow.
                 const std::string name = flagString(db, kRelink[0]).asChar();
-                const std::string kind = kindOf(maps, *h, name);
-                if (kind.empty()) return fail(kName, ("no map named " + name).c_str());
                 if (texturePath.empty()) return fail(kName, "-relink needs -texture <file>");
-                if (!isPngPath(texturePath)) {
-                    return fail(kName, "a texture map's file is a PNG (painting writes PNG): give another image as "
-                                       "-copyFrom and a .png path to copy it to");
-                }
-                const int channels = channelsOf(maps, *h, name);  // a guide layer's: gray
-                std::string stored = texturePath;
+                MapImageRequest image;
                 if (db.isFlagSet(kCopyFrom[0])) {
-                    const std::string source = resolve(flagString(db, kCopyFrom[0]).asChar());
-                    if (fileStamp(source) == 0) return fail(kName, ("no image at " + source).c_str());
-                    const TexturePtr image = loadTexture(source);  // throws when it is not an image
-                    stored = freshTexture(texturePath);
-                    const std::string full = resolve(stored);
-                    std::error_code ec;
-                    const std::filesystem::path folder = std::filesystem::u8path(full).parent_path();
-                    if (!folder.empty()) std::filesystem::create_directories(folder, ec);
-                    if (isPngPath(source) && !image->isUdim()) {
-                        std::filesystem::copy_file(std::filesystem::u8path(source), std::filesystem::u8path(full), ec);
-                        if (ec) return fail(kName, ("could not copy " + source + ": " + ec.message()).c_str());
-                    } else {
-                        writeImagePng(*image, full);  // (a tile set: each tile, at udimPathFor(full))
-                    }
-                    for (const std::string& file : mapImageFiles(full, image->isUdim() ? image->udimTiles() : std::vector<int>{})) {
-                        files_.push_back(FileState{file, std::nullopt, readFileState(file)});  // (made here: none before)
-                    }
+                    image.path = resolve(flagString(db, kCopyFrom[0]).asChar());
+                    image.copy = true;
+                    image.copyTo = resolve(texturePath);
                 } else {
-                    const std::string full = resolve(stored);
-                    if (fileStamp(full) == 0) return fail(kName, ("no image at " + full).c_str());  // (a tile set: any tile)
+                    image.path = resolve(texturePath);
+                    image.copy = false;
                 }
-                if (kind == "guides") {
+                MapFiles files;
+                files.mapsFolder = assetFolder("masks") + "/" + assetName(groomPath);
+                files.resolve = resolve;
+                const std::string given = resolve(texturePath);
+                files.store = [&](const std::string& full) { return samePathText(full, given) ? texturePath : portableMayaPath(full); };
+                MPlug graphPlug = groomFn.findPlug("graph", true);
+                MapLink linked = relinkMap(maps, h.get(), graphPlug.asString().asChar(), name, image, files);
+                if (linked.removeLayer) {
                     h->removeAttribute(name);
                     guidesChanged = true;
                 }
-                ScalpMapEntry entry{"texture", {}, stored};
-                entry.channels = channels;
-                maps.maps[name] = std::move(entry);
+                maps = std::move(linked.maps);
                 mapsChanged = relinked = true;
-                setResult(MString(stored.c_str()));
+                for (FileState& f : linked.files) files_.push_back(std::move(f));
+                if (!linked.graph.empty()) modifier_.newPlugValueString(graphPlug, linked.graph.c_str());
+                setResult(MString(linked.file.c_str()));
             } else if (db.isFlagSet(kSetChannels[0])) {
                 MString nameArg;
                 int wanted = 0;

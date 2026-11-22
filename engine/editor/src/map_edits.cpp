@@ -68,6 +68,47 @@ bool writeOwnImage(const TexturePaint& paint, const ScalpMaps& maps, const std::
     return true;
 }
 
+// The image a texture map is to read (importMap, relinkMap): `request.path` in place (a PNG), or
+// copied as a PNG into a free file (its files' states in `*states`). The image read in `*image`.
+std::string linkedImage(const std::string& name, const MapImageRequest& request, const MapFiles& files, TexturePtr* image,
+                        std::vector<FileState>* states) {
+    const std::string& path = request.path;
+    if (path.empty()) throw std::invalid_argument("give the image's path");
+    if (fileStamp(path) == 0) throw std::invalid_argument("no image at " + path);  // (a tile set: any tile)
+    try {
+        *image = loadTexture(path);
+    } catch (const std::exception& e) {
+        throw std::invalid_argument(path + " does not read as an image: " + e.what());
+    }
+    if (!*image || (!(*image)->isUdim() && !(*image)->image())) throw std::invalid_argument(path + " does not read as an image");
+    const bool png = isPngPath(path);
+    const bool copy = request.copy.value_or(!png);
+    if (!copy && !png) throw std::invalid_argument(path + " is not a PNG: painting writes PNG, so another format is copied as one (copy true)");
+    if (!copy) return fs::u8path(path).generic_u8string();  // in place: painting edits it
+    if (request.copyTo.empty() && files.mapsFolder.empty()) {
+        throw std::invalid_argument("save the groom first: a JPEG, TGA, PSD... is copied as a PNG into the groomlab folder beside it");
+    }
+    if (!request.copyTo.empty() && !isPngPath(request.copyTo)) {
+        throw std::invalid_argument("a texture map's file is a PNG (painting writes PNG): copy the image to a .png file");
+    }
+    const std::string target = request.copyTo.empty() ? newMapImageFile(name, files) : freeFilePath(request.copyTo);
+    *states = mapImageStates(target, (*image)->isUdim() ? (*image)->udimTiles() : std::vector<int>{});
+    std::error_code ec;
+    fs::create_directories(fs::u8path(target).parent_path(), ec);
+    if (png) {
+        if (copyMapImage(path, target).empty()) throw std::runtime_error("could not copy " + path + " to " + target);
+    } else {
+        try {
+            writeImagePng(**image, target);  // (a tile set: each tile, udimPathFor(target))
+        } catch (const std::exception& e) {
+            throw std::runtime_error("could not write " + target + ": " + e.what());
+        }
+    }
+    finishFileStates(*states);
+    states->erase(std::remove_if(states->begin(), states->end(), [](const FileState& f) { return f.before == f.after; }), states->end());
+    return target;
+}
+
 }  // namespace
 
 MapRename renameMap(const ScalpMaps& maps, const GuideHierarchy* guides, const std::string& graph,
@@ -409,6 +450,64 @@ void applyCreatedLayer(GuideHierarchy& h, const std::string& name, const MapCrea
     for (const auto& [id, value] : created.layer) {
         if (h.guide(id)) h.setAttribute(id, name, value);
     }
+}
+
+MapLink importMap(const ScalpMaps& maps, const GuideHierarchy* guides, const std::string& name, const MapImageRequest& image,
+                  std::optional<bool> color, const MapFiles& files) {
+    MapLink out;
+    out.maps = maps;
+    auto taken = [&](const std::string& n) { return !mapKindOf(maps, guides, n).empty(); };
+    out.name = name.empty() ? mapNameFromFile(image.path, taken) : name;  // (every host's rule, scalp_maps.h)
+    if (!validMapName(out.name)) throw std::invalid_argument(mapNameError(out.name));
+    if (taken(out.name)) throw std::invalid_argument("the groom already has a map named '" + out.name + "'");
+    TexturePtr read;
+    const std::string full = linkedImage(out.name, image, files, &read, &out.files);
+    out.channels = color.value_or(!isGrayImage(*read)) ? kColorMap : kGrayMap;
+    ScalpMapEntry entry{"texture", {}, storedMapPath(full, files)};
+    entry.channels = out.channels;
+    out.file = entry.texture;
+    out.maps.maps[out.name] = std::move(entry);
+    return out;
+}
+
+MapLink relinkMap(const ScalpMaps& maps, const GuideHierarchy* guides, const std::string& graph, const std::string& name,
+                  const MapImageRequest& image, const MapFiles& files) {
+    const std::string kind = mapKindOf(maps, guides, name);
+    if (kind.empty()) throw std::invalid_argument("no map named '" + name + "'");
+    MapLink out;
+    out.name = name;
+    out.maps = maps;
+    out.channels = mapChannelsOf(maps, guides, name) == kColorMap ? kColorMap : kGrayMap;  // (a guide layer's: gray)
+    TexturePtr read;
+    const std::string full = linkedImage(name, image, files, &read, &out.files);
+    ScalpMapEntry entry{"texture", {}, storedMapPath(full, files)};
+    entry.channels = out.channels;
+    out.file = entry.texture;
+    out.removeLayer = kind == "guides";
+    if (kind == "texture" && !graph.empty()) {  // texture params reading the map's old image read the new one
+        const std::function<std::string(const std::string&)> resolve =
+            files.resolve ? files.resolve : std::function<std::string(const std::string&)>([](const std::string& p) { return p; });
+        bool followed = false;
+        std::string g = retargetFileReaders(graph, resolve(maps.maps.at(name).texture), out.file, resolve, &followed);
+        if (followed) out.graph = std::move(g);
+    }
+    out.maps.maps[name] = std::move(entry);
+    return out;
+}
+
+std::vector<std::string> reloadMapFiles(const ScalpMaps& maps, const GuideHierarchy* guides, const std::string& name,
+                                        const MapFiles& files) {
+    if (!name.empty()) {
+        const std::string kind = mapKindOf(maps, guides, name);
+        if (kind.empty()) throw std::invalid_argument("no map named '" + name + "'");
+        if (kind != "texture") throw std::invalid_argument(name + " is not a texture map");
+    }
+    std::vector<std::string> out;
+    for (const auto& [map, entry] : maps.maps) {
+        if (entry.kind != "texture" || entry.texture.empty() || (!name.empty() && map != name)) continue;
+        out.push_back(files.resolve ? files.resolve(entry.texture) : entry.texture);
+    }
+    return out;
 }
 
 }  // namespace groomlab
