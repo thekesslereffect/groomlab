@@ -482,6 +482,16 @@ void bindStroke(py::module_& m) {
         "The map node.param reads: {map, kind}, map \"\" when it reads none. Raises RuntimeError for no such node, or "
         "a param read from what no brush paints (an expression, a channel, an image that is no map of the groom).");
     m.def(
+        "wire_param_map",
+        [](const std::string& graphJson, const std::string& scalpMapsJson, const std::string& node, const std::string& param,
+           const std::string& map, const std::string& kind) {
+            return wireParamMap(graphJson, ScalpMaps::fromJson(scalpMapsJson), node, param, map, kind);
+        },
+        py::arg("graph_json"), py::arg("scalp_maps_json"), py::arg("node"), py::arg("param"), py::arg("map"), py::arg("kind"),
+        "The graph (JSON text) with node.param reading map `map` of kind `kind` (guides, vertices or texture) as every "
+        "host's Paint on a setting links it: white the param's value now; a Map node wired to the param goes. Raises "
+        "RuntimeError for no such node, or a texture map the groom does not have.");
+    m.def(
         "paint_param_map",
         [](SessionStrokeHost& host, BrushToolSettings& settings, const std::string& node, const std::string& param) {
             const ParamMapBinding b = paintParamMap(host, settings, node, param);

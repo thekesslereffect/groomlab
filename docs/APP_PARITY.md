@@ -123,7 +123,7 @@ labels, search words and number decimals come from the core (`node_catalog.h`, t
 | Color params | color fields | present (a swatch and picker, sRGB shown, linear stored) |
 | Mappable params: value / texture / color set / attribute / expression / painted map, component and range | `MappableEditor` | present (a strand attribute source: partial, through an expression) |
 | Field-driven params ("x driver") | the panel | present (the port says what feeds it) |
-| Paint a param (make a map named after the node and param, wire it, open Paint) | param menu > Paint (a Map node) | present *new*: the Paint pill on a mappable param's row (a vertex map as the param's map source, the Paint brush on it, one undo step; core: the map and painting APIs) |
+| Paint a param (make a map named after the node and param, wire it, open Paint) | param menu > Paint (the param's map source, as the app's) | present *new*: the Paint pill on a mappable param's row (a vertex map as the param's map source, the Paint brush on it, one undo step; core: the map and painting APIs) |
 | Drive with a slider (a Control node) | param menu | missing (add a Control node and wire it by hand) |
 | Keys on params (set key, auto key, key colors, S) | param menu, Channel Box | Maya only: animCurves |
 | The Controls section (ctl_ attributes) | AE Controls | Maya only: Maya attributes (a preset's control values are applied to the nodes themselves) |

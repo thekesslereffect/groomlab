@@ -1136,17 +1136,16 @@ class GraphEditorTest(unittest.TestCase):
         groomlab.guides_from_curves(self.groom, [cmds.curve(degree=1, point=[(0, 1, 0), (0, 2, 0)])])
         self.editor.reload()
         self.editor.params.paint_param("scatter", "density", "guides")
-        # The param keeps its value; a Map node reading the (white) map feeds its exposed input.
-        self.assertEqual(self.editor.model.param("scatter", "density"), before)
-        self.assertIn("density", self.editor.model.param_inputs("scatter"))
-        self.assertEqual(self.editor.model.node_type("scatter_density"), "Map")
+        # The param reads the (white) guide layer, its value the white, as every host links it.
+        self.assertEqual(self.editor.model.param("scatter", "density"), {"guide": "scatter_density", "min": 0.0, "max": before})
+        self.assertNotIn("scatter_density", self.editor.model.order)
         self.assertEqual(groomlab.map_kind(self.groom, "scatter_density"), "guides")
         self.assertIn("scatter_density", groomlab.list_maps(self.groom), self.editor.status.text())
         self.assertEqual(groomlab.errors(self.groom), [])
-        # On the scalp's vertices for another param: a second map and Map node.
+        # On the scalp's vertices for another param: a second map, read through its color set.
         self.editor.params.paint_param("length", "keep", "vertices")
         self.assertEqual(groomlab.map_kind(self.groom, "length_keep"), "vertices")
-        self.assertEqual(self.editor.model.node_type("length_keep"), "Map")
+        self.assertEqual(self.editor.model.param("length", "keep")["colorSet"], "length_keep")
         self.assertEqual(groomlab.errors(self.groom), [])
         self.assertNotIn("Paint", [a.text() for a in self.editor.params.build_param_menu("output", "strands").actions()]
                          if self.editor.model.param_spec("output", "strands") else ["x"])

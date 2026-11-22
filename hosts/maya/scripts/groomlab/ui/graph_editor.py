@@ -3761,7 +3761,7 @@ class ParamPanel(QtWidgets.QScrollArea):
             paint_key_state(field, key_state(groom, node, param, model))
 
     def paint_param(self, node, param, kind):
-        """A map (guides, vertices or texture) feeding the param through a Map node, painted in
+        """A map (guides, vertices or texture) the param reads (as every host links it), painted in
         Groom Tools > Paint (the map it reads already, when it reads one): Ctrl lowers the param
         toward 0, strokes paint it back to its value."""
         import groomlab

@@ -1323,12 +1323,13 @@ class GroomingTest(unittest.TestCase):
         name = groomlab.paint_param(self.groom, "scatter", "density", kind="vertices", paint=False)
         self.assertEqual(name, "scatter_density")
         self.assertEqual(groomlab.map_kind(self.groom, name), "vertices")
+        # Linked as every host links it (the core's wireParamMap): the param reads the color set,
+        # white its value; no Map node.
         graph = groomlab.get_graph(self.groom)
         nodes = {n["name"]: n for n in graph["nodes"]}
-        self.assertEqual(nodes["scatter_density"]["type"], "Map")
-        self.assertEqual(nodes["scatter_density"]["params"], {"name": "scatter_density", "min": 0.0, "max": 1.0})
-        self.assertIn("density", nodes["scatter"].get("paramInputs", []))
-        self.assertIn({"from": "scatter_density", "to": "scatter", "input": "density"}, graph["connections"])
+        self.assertNotIn("scatter_density", nodes)
+        self.assertEqual(nodes["scatter"]["params"]["density"],
+                         {"colorSet": "scatter_density", "component": "r", "min": 0.0, "max": 200.0})
         self.assertEqual(groomlab.errors(self.groom), [])
         # Made white: the look stays (the param's own 200 multiplies it); painted black on top, nothing grows there.
         self.assertAlmostEqual(cmds.getAttr(self.groom + ".outStrandCount") / float(everywhere), 1.0, delta=0.05)

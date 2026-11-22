@@ -802,12 +802,13 @@ def paint_param(groom, node, param, kind="guides", name=None, resolution=1024, p
                 faces=None):
     """Paint a mappable param (+ New Map > for a setting in the Paint tab, and the Graph Editor's
     right-click a param > Paint): the map it reads already when it reads one, else the map `name`
-    (default "<node>_<param>"; made white, so the look stays as it is) fed to it through a Map
-    node, on the guides, the scalp's vertices or a texture (`kind`). With `paint` the Paint brush
-    starts on it toward 1 (the param's own value); Ctrl paints toward 0 (on a density map: no
-    hair). With `channel` ("r", "g", "b" or "a") the param reads that output of the map's Map
-    node, a channel of a color map `name` (made if missing: packed masks), and the brush paints
-    that channel only. A map made here with `faces` (scalp polygon indices: selected_scalp_faces)
+    (default "<node>_<param>"; made white, so the look stays as it is) on the guides, the scalp's
+    vertices or a texture (`kind`), read by the param as every host links it (the core's
+    wireParamMap: the param's value its white; a Map node wired to it goes). With `paint` the
+    Paint brush starts on it toward 1 (the param's own value); Ctrl paints toward 0 (on a density
+    map: no hair). With `channel` ("r", "g", "b" or "a") the param reads that output of the map's
+    Map node (one Map node feeds several params), a channel of a color map `name` (made if
+    missing: packed masks), and the brush paints that channel only. A map made here with `faces` (scalp polygon indices: selected_scalp_faces)
     is white on those faces only, black elsewhere (a map the param already reads is left as it
     is). The map, its link and what painting shows are one undo step. Returns the map's name."""
     # What drives the param must be a painted map, or nothing: an expression, a channel or an image
@@ -840,8 +841,22 @@ def paint_param(groom, node, param, kind="guides", name=None, resolution=1024, p
                 model = gm.GraphModel.from_groom(groom)
                 model.set_param(node, param, name)
                 model.save(groom)
-            else:
+            elif channel != "luminance":
+                # One channel of a color map (packed masks): read through its Map node's output.
                 use_map(groom, node, param, name, kind=kind, resolution=resolution, channel=channel, faces=faces)
+            else:
+                # The map param every host's Paint on a setting writes (stroke.h wireParamMap: a guide
+                # layer, a color set or a texture by its file, white the param's value), so the
+                # graph is the same whichever host painted it.
+                if name not in list_maps(groom):
+                    add_map(groom, name, 1.0, kind=kind, resolution=resolution, faces=faces)
+                try:
+                    wired = groomlab_core.wire_param_map(json.dumps(get_graph(groom, expand_default=True)),
+                                                         cmds.getAttr(groom + ".scalpMaps") or "", node, param, name,
+                                                         map_kind(groom, name))
+                except RuntimeError as e:
+                    raise ValueError(str(e))
+                set_graph(groom, json.loads(wired))
         if paint:
             if channel in ("r", "g", "b", "a"):
                 paint_map(groom, name, value=1.0, color=(1.0, 1.0, 1.0, 1.0), channels=channel)
