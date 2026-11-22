@@ -2924,7 +2924,7 @@ std::string shotLayer(Session& s) { return s.tools ? s.tools->shotLayer : std::s
 
 bool isToolCommand(const std::string& cmd) {
     static const std::set<std::string> kCommands = {
-        "tool_set",  "tool_get",      "stroke_begin", "stroke_drag",   "stroke_end",  "stroke_cancel", "hover",    "hover_clear",
+        "tool_set",  "tool_get",      "tool_drag",    "stroke_begin", "stroke_drag",   "stroke_end",  "stroke_cancel", "hover",    "hover_clear",
         "select",    "selection_get", "selection_set", "pick_level",   "set_hidden_groups", "guides_info", "guides_edit", "maps_list",
         "map_create", "map_remove",   "map_for_param", "undo",        "redo",          "undo_state",  "display",
         // Groom Tools' Tubes section, Segments slider, parts and flow, map management.
@@ -3099,6 +3099,20 @@ bool runToolCommandIn(Session& s, ToolState& t, const std::string& cmd, const js
     }
     if (cmd == "tool_get") {
         result = toolJson(t);
+        return true;
+    }
+    if (cmd == "tool_drag") {
+        // The radius or the strength dragged (B / M + drag), every host's rule (the editor's
+        // dragToolSetting): from `start` by `dx` pixels.
+        float value = 0.0f;
+        try {
+            value = dragToolSetting(t.tool.settings, needString(args, "setting"), settingNumber(need(args, "start"), "start"),
+                                    settingNumber(need(args, "dx"), "dx"));
+        } catch (const std::invalid_argument& e) {
+            fail("bad_request", e.what());
+        }
+        result = toolJson(t);
+        result["value"] = value;
         return true;
     }
 

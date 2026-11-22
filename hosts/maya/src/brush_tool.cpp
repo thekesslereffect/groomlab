@@ -1262,10 +1262,10 @@ MStatus BrushContext::drag(MEvent& event, MHWRender::MUIDrawManager& draw) {
         const float dx = float(x - adjustX_);
         MString label;
         if (adjustStrength_) {
-            s.brush.strength = std::clamp(adjustValue_ + dx * 0.01f, -10.0f, 10.0f);
+            dragToolSetting(s, "strength", adjustValue_, dx);  // (every host's rule: tool_settings.h)
             label = MString("strength ") + s.brush.strength;
         } else {
-            s.screenRadius = std::clamp(adjustRadius_ + dx, 5.0f * pixelScale_, 2000.0f * pixelScale_);
+            dragToolSetting(s, "radius", adjustRadius_, dx, pixelScale_);
             label = MString("radius ") + static_cast<int>(s.screenRadius / pixelScale_);
         }
         drawCircle(draw, adjustX_, adjustY_);

@@ -60,3 +60,14 @@ TEST(ToolSettings, AHostsUnitsAndAxes) {
     EXPECT_DOUBLE_EQ(back["length"].get<double>(), 50.0);
     EXPECT_EQ(back["symmetry"], "y");
 }
+
+TEST(ToolSettings, ADragSetsTheRadiusOrTheStrengthAsEveryHostDoes) {
+    BrushToolSettings s;
+    EXPECT_FLOAT_EQ(dragToolSetting(s, "radius", 40.0f, 25.0f), 65.0f);
+    EXPECT_FLOAT_EQ(dragToolSetting(s, "radius", 40.0f, -100.0f), 5.0f);
+    EXPECT_FLOAT_EQ(dragToolSetting(s, "radius", 40.0f, -100.0f, 2.0f), 10.0f) << "5 points at 2 pixels a point";
+    EXPECT_FLOAT_EQ(dragToolSetting(s, "strength", 0.5f, 20.0f), 0.7f);
+    EXPECT_FLOAT_EQ(s.brush.strength, 0.7f);
+    EXPECT_FLOAT_EQ(dragToolSetting(s, "strength", 0.5f, -5000.0f), -10.0f);
+    EXPECT_THROW(dragToolSetting(s, "length", 1.0f, 1.0f), std::invalid_argument);
+}

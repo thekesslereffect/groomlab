@@ -46,4 +46,10 @@ void setToolSetting(BrushToolSettings& s, const std::string& id, const nlohmann:
 // symmetry and lengths in the host's space).
 nlohmann::json toolSettingsJson(const BrushToolSettings& s, const ToolSpace& space = {});
 
+// The ring's radius or the strength dragged (a held key or the slider button and a drag, every
+// host's): from `start` by `dx` pixels to the right, the radius a pixel a pixel (5 to 2000 points,
+// `pixelScale` the view's pixels a point), the strength 0.01 a pixel (-10 to 10). Set in `s`;
+// returns the value. Throws std::invalid_argument for a setting other than radius or strength.
+float dragToolSetting(BrushToolSettings& s, const std::string& setting, float start, float dx, float pixelScale = 1.0f);
+
 }  // namespace groomlab

@@ -373,18 +373,21 @@ class ToolSession(object):
         return {"PASS_THROUGH"}
 
     def drag_slider(self, context, scalp, event):
-        """B / M held + drag: the radius (a pixel a pixel) or the strength (200 px for 1), the ring
-        redrawn where the drag started, the value in the status line."""
+        """B / M held + drag: the radius (a pixel a pixel) or the strength (0.01 a pixel), every host's
+        rule (the helper's tool_drag: the editor's dragToolSetting), the ring redrawn where the drag
+        started, the value in the status line."""
         setting, x0, v0, (view, rx, ry) = self.slider
         t = context.scene.groomlab_tools
         dx = float(event.mouse_x) - x0
+        try:
+            value = tools.call(scalp, "tool_drag", setting=setting, start=float(v0), dx=dx)["value"]
+        except HelperError:
+            value = v0
         if setting == "radius":
-            t.radius = max(1, int(round(v0 + dx)))
+            t.radius = int(round(value))
             tools.status(context.scene, "Radius %d px" % t.radius)
         else:
-            info = tools.tool_info(t.tool)
-            lo = -1.0 if info and info.get("signed") else 0.0
-            t.strength = min(1.0, max(lo, v0 + dx / 200.0))
+            t.strength = float(value)
             tools.status(context.scene, "Strength %.2f" % t.strength)
         if t.tool != "select":
             try:

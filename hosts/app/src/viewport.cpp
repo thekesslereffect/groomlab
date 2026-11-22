@@ -15,6 +15,7 @@
 #include <QWheelEvent>
 
 #include "brush_session.h"
+#include "groomlab/editor/tool_settings.h"
 
 namespace groomlab::app {
 
@@ -328,8 +329,7 @@ void Viewport::mouseMoveEvent(QMouseEvent* event) {
             if (!session_) break;
             const float dx = static_cast<float>(event->position().x() - pressAt_.x());
             BrushToolSettings& s = session_->settings();
-            if (drag_ == Drag::Radius) s.screenRadius = std::clamp(dragStart_ + dx, 5.0f, 2000.0f);
-            else s.brush.strength = std::clamp(dragStart_ + dx * 0.01f, -10.0f, 10.0f);
+            dragToolSetting(s, drag_ == Drag::Radius ? "radius" : "strength", dragStart_, dx);  // (every host's rule)
             // The ring where the drag started, at its new size, and its value beside it.
             session_->hover(pressAt_);
             refreshOverlay();

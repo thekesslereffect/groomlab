@@ -231,4 +231,17 @@ json toolSettingsJson(const BrushToolSettings& s, const ToolSpace& space) {
     return j;
 }
 
+float dragToolSetting(BrushToolSettings& s, const std::string& setting, float start, float dx, float pixelScale) {
+    if (setting == "radius") {
+        const float scale = pixelScale > 0.0f ? pixelScale : 1.0f;
+        s.setScreenRadius(std::clamp(start + dx, 5.0f * scale, 2000.0f * scale));
+        return s.screenRadius;
+    }
+    if (setting == "strength") {
+        s.brush.strength = std::clamp(start + dx * 0.01f, -10.0f, 10.0f);
+        return s.brush.strength;
+    }
+    throw std::invalid_argument("a drag sets the radius or the strength, not '" + setting + "'");
+}
+
 }  // namespace groomlab

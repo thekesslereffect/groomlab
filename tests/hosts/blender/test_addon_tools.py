@@ -516,7 +516,7 @@ class ToolsTest(unittest.TestCase):
         self.assertEqual(hcall(head, "undo_state")["undoDepth"], depth)  # no stroke
         self.send(ts, Event("M", "PRESS"), Event("LEFTMOUSE", "PRESS", 100.0, 100.0),
                   Event("MOUSEMOVE", x=60.0, y=100.0), Event("LEFTMOUSE", "RELEASE", 60.0, 100.0), Event("M", "RELEASE"))
-        self.assertAlmostEqual(t.strength, 0.8, places=5)
+        self.assertAlmostEqual(t.strength, 0.6, places=5)  # 0.01 a pixel, every host's (dragToolSetting)
         t.radius = r0
         t.strength = 1.0
 
