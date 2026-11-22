@@ -826,9 +826,7 @@ bool GuidesPanel::removePart(const std::string& name) {
     if (!document_ || name.empty()) return false;
     const std::string error = document_->editStoredText("remove part", StrokeField::Parts, [&](std::string& text) {
         PartSet parts = PartSet::fromJson(text);
-        const auto it = std::find_if(parts.parts.begin(), parts.parts.end(), [&](const Part& p) { return p.name == name; });
-        if (it == parts.parts.end()) throw std::invalid_argument("no part named " + name);
-        parts.parts.erase(it);
+        if (!parts.remove(name)) throw std::invalid_argument("no part named " + name);  // (every host's: parts.h)
         text = parts.empty() ? std::string() : parts.toJson();
     });
     if (!error.empty()) {
