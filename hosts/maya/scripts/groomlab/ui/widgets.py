@@ -476,6 +476,30 @@ def icon(name, size=64):
 
 # Small line glyphs for header buttons, drawn in the theme's text color (24x24 viewBox).
 GLYPHS = {
+    # The Graph Editor's bar: the wire styles and the Align buttons (the app's ui_wire_*, ui_align_*).
+    "wire_smooth": '<circle cx="4" cy="6" r="2" fill="{c}"/><circle cx="20" cy="18" r="2" fill="{c}"/>'
+                   '<path d="M6 6 C13 6 11 18 18 18" fill="none" stroke="{c}" stroke-width="2" stroke-linecap="round"/>',
+    "wire_square": '<circle cx="4" cy="6" r="2" fill="{c}"/><circle cx="20" cy="18" r="2" fill="{c}"/>'
+                   '<path d="M6 6 H12 V18 H18" fill="none" stroke="{c}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
+    "wire_rounded": '<circle cx="4" cy="6" r="2" fill="{c}"/><circle cx="20" cy="18" r="2" fill="{c}"/>'
+                    '<path d="M6 6 H8.5 A3.5 3.5 0 0 1 12 9.5 V14.5 A3.5 3.5 0 0 0 15.5 18 H18" fill="none" stroke="{c}" '
+                    'stroke-width="2" stroke-linecap="round"/>',
+    "align_left": '<path d="M4 3 V21" stroke="{c}" stroke-width="2" stroke-linecap="round"/>'
+                  '<rect x="7" y="6" width="9" height="4" rx="1" fill="{c}"/><rect x="7" y="14" width="13" height="4" rx="1" fill="{c}"/>',
+    "align_centerX": '<path d="M12 3 V21" stroke="{c}" stroke-width="2" stroke-linecap="round"/>'
+                     '<rect x="7" y="6" width="10" height="4" rx="1" fill="{c}"/><rect x="4.5" y="14" width="15" height="4" rx="1" fill="{c}"/>',
+    "align_right": '<path d="M20 3 V21" stroke="{c}" stroke-width="2" stroke-linecap="round"/>'
+                   '<rect x="8" y="6" width="9" height="4" rx="1" fill="{c}"/><rect x="4" y="14" width="13" height="4" rx="1" fill="{c}"/>',
+    "align_top": '<path d="M3 4 H21" stroke="{c}" stroke-width="2" stroke-linecap="round"/>'
+                 '<rect x="6" y="7" width="4" height="9" rx="1" fill="{c}"/><rect x="14" y="7" width="4" height="13" rx="1" fill="{c}"/>',
+    "align_centerY": '<path d="M3 12 H21" stroke="{c}" stroke-width="2" stroke-linecap="round"/>'
+                     '<rect x="6" y="7" width="4" height="10" rx="1" fill="{c}"/><rect x="14" y="4.5" width="4" height="15" rx="1" fill="{c}"/>',
+    "align_bottom": '<path d="M3 20 H21" stroke="{c}" stroke-width="2" stroke-linecap="round"/>'
+                    '<rect x="6" y="8" width="4" height="9" rx="1" fill="{c}"/><rect x="14" y="4" width="4" height="13" rx="1" fill="{c}"/>',
+    "align_distributeY": '<path d="M4 4 H20 M4 20 H20" stroke="{c}" stroke-width="2" stroke-linecap="round"/>'
+                         '<rect x="6" y="10" width="12" height="4" rx="1" fill="{c}"/>',
+    "align_distributeX": '<path d="M4 4 V20 M20 4 V20" stroke="{c}" stroke-width="2" stroke-linecap="round"/>'
+                         '<rect x="10" y="6" width="4" height="12" rx="1" fill="{c}"/>',
     "eye": '<path d="M2.5 12 C5 6.8 8.3 5 12 5 C15.7 5 19 6.8 21.5 12 C19 17.2 15.7 19 12 19 C8.3 19 5 17.2 2.5 12 Z" '
            'fill="none" stroke="{c}" stroke-width="1.8" stroke-linejoin="round"/>'
            '<circle cx="12" cy="12" r="3.2" fill="{c}"/>',

@@ -79,22 +79,35 @@ The same in Maya's Graph Editor and the standalone app:
   each copy reading the same inputs as its original.
 - **Shift+drag a node** to move it together with everything upstream of it. Shift+click without
   dragging adds the node to the selection.
-- **Shake a node** while dragging it (left and right, quickly) to pull it out of its links. What
-  fed it then feeds what it fed, as with **Detach**.
+- **Shake a node** while dragging it (left and right, quickly) to pull it out of its links at once,
+  without letting go. What fed it then feeds what it fed, as with **Detach**. Shake several selected
+  nodes and they leave the flow together, keeping the links between them.
+- **Alt+drag a node** to duplicate it (or the selection) and drag the copy. Pan with the middle
+  mouse button.
 - **Shift+drag from an output** picks up all of its links at once. Drop them on another node's
   output and they read from that output instead, wherever the types fit.
-- **Drop a node on a link** to insert it there. To add a node into a link, select the link and
+- **Drop a node on a link** to insert it there; a selected chain with no other links goes in as one. To add a node into a link, select the link and
   press Tab, or press Tab with the cursor over the link.
-- **Pins:** besides double-clicking a link, **Alt+click** it to put a pin there.
-- **Wire Style** (**...** menu): **Smooth** curves, **Square** runs with right angles, or
-  **Rounded** corners. Your choice is remembered between sessions.
-- **Align** (a node's right-click menu, and the **...** menu): line the selected nodes up in a row
+- **Pins:** besides double-clicking a link, **Alt+click** it, or select it and press **.** (period),
+  to put a pin there.
+- **Drop a link on the canvas** to open the search there: the node (or Dot) you pick is connected to
+  that output.
+- **Wire Style** (the button after **Presets**, or the **...** menu): **Smooth** curves, **Square**
+  runs with right angles, or **Rounded** corners. Your choice is remembered between sessions.
+- **Align** (the buttons after the wire style, as in Photoshop; a node's right-click menu; the
+  **...** menu): line the selected nodes up in a row
   or a column, by their edges or centers, or space them evenly. **Tidy Selection** lays out just
   the selected nodes by their links, where they are.
-- **Backdrops** grow as you push their nodes toward an edge. Drag on a backdrop's body to
+- **Backdrops:** Shift+O, or **Backdrop** in the Tab search, frames the selected nodes. Select one
+  to edit its title, a description shown on it, and its title size. A backdrop grows while you drag
+  a node slowly past its edge; drag the node out fast and it leaves the backdrop. Drag on a backdrop's body to
   rubber-band select the nodes on it; drag its title bar to move it. The chevron in its title bar
   (or **Fold** in its menu) folds it down to the title bar, hiding its nodes. Links into and out of
   a folded backdrop meet its edges.
+- **Dots:** pick **Dot** in the Tab search for an empty dot, then drop a link from an output on it to
+  feed it, and drag from its right side to inputs to route links through it. Select a dot to edit
+  its **Name** and its **Input Portal**: set it to another dot and it carries that dot's signal, so
+  you can wire far away without a long link (a portal).
 - **Portals** teleport a link so it isn't drawn across the whole graph. Right-click a link >
   **Teleport Link** puts a named dot by its output and another by its input. Drag from an exit's
   right side to an input for another link of the same signal, or press Tab and pick **Portal:

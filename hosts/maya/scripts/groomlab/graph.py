@@ -943,6 +943,77 @@ class GraphModel(object):
             raise GraphError("no portal %r" % portal)
         return made
 
+    # -- Dots (graph_portals.h: every portal is a dot; free ones from the add-node search) ----------
+
+    def add_dot(self, x, y, src=None, output=None):
+        """A free dot at (x, y) (fed from src's `output` when given: an exit of that output's dot
+        when it has one). Returns its portal's name."""
+        name = self._portal_change(lambda p: p.add_dot(float(x), float(y), ""))
+        if src:
+            portals = self._portal_edit()
+            if not portals.set_source(name, src, output or ""):
+                into = portals.portal_of(src, output or "")
+                if portals.join(name, into) < 0:
+                    raise GraphError("%s's output has a dot already" % src)
+                name = into
+            self._take_portals(portals)
+        return name
+
+    def portal_fed(self, portal):
+        return bool(self._portal_edit().fed(portal)) if self._portals else False
+
+    def _relink(self, links, src, output):
+        """The links (to, input) read src's `output` (the core's checks; nothing changes on a refusal)."""
+        edit = self._edit()
+        with _core_errors():
+            for to, input_name in links:
+                edit.connect_by_hand(src, to, input_name, output or "")
+        self._take(edit)
+
+    def feed_dot(self, portal, src, output=None):
+        """A dot fed from src's `output`: its links (its entry's and exits') read it now."""
+        portals = self._portal_edit()
+        links = [tuple(l) for l in portals.links(portal)]
+        self._relink(links, src, output)
+        portals = self._portal_edit()
+        if not portals.set_source(portal, src, output or ""):
+            raise GraphError("%s's output has a dot already" % src)
+        self._take_portals(portals)
+
+    def set_dot_input(self, portal, exit_index, into):
+        """A dot's Input Portal: `into` (another dot's name) or None (a free dot). exit_index None:
+        the dot's entry. Its links read `into`'s source first."""
+        dot = portal
+        if exit_index is not None:
+            dot = self._portal_change(lambda p: p.leave(portal, int(exit_index)))
+            if not dot:
+                raise GraphError("no such dot")
+        if not into:
+            return
+        source = next((p for p in self.portals if p["name"] == into), None)
+        if source is None or not source.get("from"):
+            raise GraphError("%s has nothing coming into it yet" % into)
+        self._relink([tuple(l) for l in self._portal_edit().links(dot)], source["from"], source.get("output"))
+        if self._portal_change(lambda p: p.join(dot, into)) < 0:
+            raise GraphError("cannot take %s's signal" % into)
+
+    def detach_group(self, names):
+        """Several nodes out of the flow together (a shake): the links among them kept (the core's)."""
+        edit = self._edit()
+        with _core_errors():
+            done = edit.detach_group(list(names))
+        if done["changed"]:
+            self._take(edit)
+            self.prune_pins()
+        return done
+
+    def insert_nodes_on_link(self, src, dst, input_name, nodes, output=None):
+        """A chain dropped on a wire as one: src feeds its entry, dst reads its exit (the core's)."""
+        edit = self._edit()
+        with _core_errors():
+            edit.insert_nodes_on_link(src, dst, input_name, list(nodes), output or "")
+        self._take(edit)
+
     # -- Duplicate, output links, pass-through (the core's, every host's) ----------
 
     def duplicate_nodes(self, names, offset=(40.0, 60.0)):

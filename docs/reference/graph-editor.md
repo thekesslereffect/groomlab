@@ -283,6 +283,16 @@ The **Graph Editor** is a dockable node editor for the selected groom:
   (GraphEdit::duplicateNodes). **Align** (node menu, **...** menu): rows, columns, edges, centers,
   even spacing, Tidy Selection. **Wire Style** (**...** menu, optionVar `groomLabGraphWireStyle`):
   Smooth, Square or Rounded. The node in Focus glows.
+- **Round 2** (both hosts): a shake takes nodes out of their links mid-drag (several: detachGroup,
+  their own links kept); Alt+drag duplicates (pan is the middle button); a chain drops on a wire as
+  one (insertNodesOnLink); **.** pins the selected link; Shift+O and the Tab search's Backdrop add
+  a backdrop, whose card edits its title, "description" and "fontSize"; a backdrop grows live while
+  a node is dragged slowly past its edge and lets it go when dragged out fast (backdropKeeps); the
+  bar after Presets has the wire style and Align buttons; a link dropped on the canvas opens the
+  search, its node fed from that output.
+- **Dots** (graph_portals.h addDot): the Tab search's Dot is a free dot; a link from an output
+  dropped on it feeds it (feedDot); links drag out of a fed dot's nub (its entry's "links"); its
+  card's Input Portal makes it an exit of another dot (joinPortal) or frees it (leavePortal).
 - **Portals** (graph_portals.h, the graph's "portals", layout only): a link's menu > Teleport Link
   draws it through a named portal, an entry dot by its output and an exit dot by its input; drag
   from an exit's nub for another link of the signal; double-click renames; Delete removes an exit or

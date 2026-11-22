@@ -995,11 +995,21 @@ class NodeItem(QtWidgets.QGraphicsItem):
 
     def mouseMoveEvent(self, event):
         super(NodeItem, self).mouseMoveEvent(event)
+        editor = self.editor
+        moving = editor.selected_names() or [self.name]
+        if getattr(self, "_carry", None):
+            moving = moving + [item.name for item, _start in self._carry]
+        if not getattr(self, "_growing", False):
+            self._growing = True
+            editor.begin_grow(moving)
+        editor.grow_live(moving, event.screenPos())
         shake = getattr(self, "_shake", None)
         if shake is not None and not self._shaken and shake.add(self._clock.elapsed() / 1000.0, event.screenPos().x(), event.screenPos().y()):
+            # Shaken: out of their links at once, the drag going on (Houdini's); several keep theirs.
             self._shaken = True
-            self.editor.report("shaken loose: let go to take %s out of %s links" % (
-                self.name, "its" if len(self.editor.selected_names()) < 2 else "their"))
+            names = [n for n in moving if n in editor.items]
+            at = editor.view.mapToScene(editor.view.mapFromGlobal(QtGui.QCursor.pos()))
+            later(lambda: editor.shake_loose(names, at))
 
     def mouseReleaseEvent(self, event):
         press = getattr(self, "_press", None)
@@ -1010,14 +1020,9 @@ class NodeItem(QtWidgets.QGraphicsItem):
             for item in self._before:
                 item.setSelected(True)
             self.setSelected(True)
-        if getattr(self, "_shaken", False):
-            editor = self.editor
-            names = editor.selected_names() or [self.name]
-            if self.name not in names:
-                names.append(self.name)
-            at = dict((n, editor.items[n].pos()) for n in names if n in editor.items)
-            later(lambda: editor.detach_shaken(names, at))
-        self._press, self._carry, self._shake, self._shaken = None, [], None, False
+        if getattr(self, "_growing", False):
+            self.editor.end_grow()
+        self._press, self._carry, self._shake, self._shaken, self._growing = None, [], None, False, False
 
     def mouseDoubleClickEvent(self, event):
         editor, name = self.editor, self.name
@@ -1588,7 +1593,8 @@ class PortalItem(QtWidgets.QGraphicsItem):
         super(PortalItem, self).__init__()
         self.editor, self.portal, self.exit = editor, portal, exit_index
         self.src_item, self.src_port = src_item, src_port
-        self.color = TYPE_COLORS.get(src_port.port_type, QtGui.QColor(200, 200, 200))
+        # A free dot (nothing feeds it yet): grey.
+        self.color = MUTED if src_port is None else TYPE_COLORS.get(src_port.port_type, QtGui.QColor(200, 200, 200))
         self.edges = []
         self.setZValue(-0.5)
         self.setAcceptHoverEvents(True)
@@ -1601,9 +1607,7 @@ class PortalItem(QtWidgets.QGraphicsItem):
 
     def label_rect(self):
         width = QtGui.QFontMetricsF(theme.font(11, bold=True)).horizontalAdvance(self.portal) + 4
-        if self.exit is None:
-            return QtCore.QRectF(self.RADIUS + 5, -9, width, 18)
-        return QtCore.QRectF(-self.RADIUS - 7 - width, -9, width, 18)
+        return QtCore.QRectF(-width / 2.0, -self.RADIUS - 21, width, 18)  # its name over it
 
     def boundingRect(self):
         r = self.RADIUS + 3.0
@@ -1613,13 +1617,13 @@ class PortalItem(QtWidgets.QGraphicsItem):
         path = QtGui.QPainterPath()
         r = self.RADIUS + 3.0
         path.addEllipse(QtCore.QRectF(-r, -r, 2 * r, 2 * r))
-        if self.exit is not None:
+        if self.src_item is not None:
             path.addEllipse(QtCore.QPointF(self.NUB, 0), 5.0, 5.0)
         return path
 
     def nub_at(self, scene_pos):
         local = self.mapFromScene(scene_pos)
-        return self.exit is not None and local.x() > self.RADIUS * 0.5 and abs(local.y()) < self.RADIUS + 3.0
+        return self.src_item is not None and local.x() > self.RADIUS * 0.5 and abs(local.y()) < self.RADIUS + 3.0
 
     def nub_pos(self):
         return self.scenePos() + QtCore.QPointF(self.NUB, 0)
@@ -1629,7 +1633,7 @@ class PortalItem(QtWidgets.QGraphicsItem):
         painter.setPen(QtGui.QPen(SELECTED if self.isSelected() else self.color, 2.5))
         painter.setBrush(self.color.darker(180) if self.exit is None else self.color)
         painter.drawEllipse(QtCore.QPointF(0, 0), self.RADIUS, self.RADIUS)
-        if self.exit is not None:
+        if self.src_item is not None:  # its nub: links drag out of it (an entry's too: a dot organizing the graph)
             painter.setPen(QtCore.Qt.NoPen)
             painter.setBrush(self.color)
             painter.drawPolygon(QtGui.QPolygonF([QtCore.QPointF(self.NUB - 3.0, -4.0), QtCore.QPointF(self.NUB + 3.0, 0.0),
@@ -1668,15 +1672,18 @@ class PortalItem(QtWidgets.QGraphicsItem):
 # Tab search's entries for the groom's painted maps: MAP_ENTRY + the map's name, in this section.
 MAP_ENTRY = "map:"
 PORTAL_ENTRY = "portal:"  # Tab search's entries for the graph's portals (an exit placed)
+DOT_ENTRY, BACKDROP_ENTRY = "dot:", "backdrop:"  # Tab search's Dot and Backdrop
 PAINTED_MAPS = "Painted maps"
 
 
 class NodeSearch(QtWidgets.QFrame):
     """Type to find a node type (name, category or description); Enter or click adds it."""
 
-    def __init__(self, editor, at, on_link=None):
+    def __init__(self, editor, at, on_link=None, source=None):
         super(NodeSearch, self).__init__(editor, QtCore.Qt.Popup)
         self.editor, self.at, self.on_link = editor, at, on_link
+        self.source = source  # (node, output) of a link dropped on the canvas: what the node added reads
+        self.dot_at = at
         self.setFrameShape(QtWidgets.QFrame.StyledPanel)
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
@@ -1716,6 +1723,13 @@ class NodeSearch(QtWidgets.QFrame):
                 "label": ("map %s %s" % (m["name"], pretty(m["name"]))).lower(),
                 "keywords": "painted map mask paint texture %s" % PAINTED_MAPS.lower(),
                 "params": "", "about": kind, "details": ""}))
+        # A Dot (route links through it, name it, or set its Input Portal) and a Backdrop (Shift+O).
+        for key, label, about in ((DOT_ENTRY, "Dot", "A dot: route links through it, name it, or set its Input Portal "
+                                   "to teleport another dot's signal"),
+                                  (BACKDROP_ENTRY, "Backdrop", "A frame round the selected nodes (Shift+O)")):
+            self.labels[key] = (label, about)
+            self.entries.append((key, "Layout", {"label": label.lower(), "params": "", "about": "", "details": "",
+                                                 "keywords": "dot pin portal reroute teleport backdrop frame network box"}))
         # The graph's portals: an exit of one placed here (then linked from its nub).
         for p in editor.model.portals if editor.model is not None else []:
             key = PORTAL_ENTRY + p["name"]
@@ -1772,6 +1786,12 @@ class NodeSearch(QtWidgets.QFrame):
     def choose(self, op_type):
         self.close()
         params = name = None
+        if op_type == DOT_ENTRY:
+            self.editor.add_dot(self.dot_at, self.source)
+            return
+        if op_type == BACKDROP_ENTRY:
+            self.editor.add_backdrop()
+            return
         if op_type.startswith(PORTAL_ENTRY):  # an exit of a portal, where Tab was pressed
             self.editor.add_portal_exit(op_type[len(PORTAL_ENTRY):], self.at)
             return
@@ -1780,6 +1800,12 @@ class NodeSearch(QtWidgets.QFrame):
             op_type, name = "Map", self.editor.model.unique_name(params["name"])
         # Where Tab was pressed: on a wire, inserted into it; else wired after the selected node
         # as Add Node wires it.
+        if self.source:
+            # From a link dropped on the canvas: the node there, fed from that output.
+            made = self.editor.add_node(op_type, at=self.at, wire=False, params=params, name=name)
+            if made:
+                self.editor.link_first_input(self.source, made)
+            return
         self.editor.add_node(op_type, at=self.at, wire=True, on_link=self.on_link, params=params, name=name)
 
 
@@ -1801,6 +1827,11 @@ class BackdropItem(QtWidgets.QGraphicsItem):
     def folded(self):
         return bool(self.data.get("collapsed"))
 
+    def header(self):
+        """Its title bar's height: taller for a bigger title ("fontSize", points)."""
+        size = self.data.get("fontSize") or 0
+        return max(28.0, size * 1.9) if size else 28.0
+
     def full_rect(self):
         """Its whole frame in the scene (what holds its nodes, folded or not)."""
         return QtCore.QRectF(self.data["x"], self.data["y"], self.data["w"], self.data["h"])
@@ -1808,13 +1839,13 @@ class BackdropItem(QtWidgets.QGraphicsItem):
     def rect(self):
         if self.folded():  # its title bar and a strip (the core's foldedBackdrop)
             import groomlab_core
-            _x, _y, w, h = groomlab_core.folded_backdrop((0.0, 0.0, self.data["w"], self.data["h"]), 28.0)
+            _x, _y, w, h = groomlab_core.folded_backdrop((0.0, 0.0, self.data["w"], self.data["h"]), self.header())
             return QtCore.QRectF(0, 0, w, h)
         return QtCore.QRectF(0, 0, self.data["w"], self.data["h"])
 
     def fold_rect(self):
         """The fold chevron at its title bar's right."""
-        return QtCore.QRectF(self.rect().right() - 26, 5, 18, 18)
+        return QtCore.QRectF(self.rect().right() - 26, (self.header() - 18) / 2.0, 18, 18)
 
     def boundingRect(self):
         return self.rect().adjusted(-2, -2, 2, 2)
@@ -1833,11 +1864,11 @@ class BackdropItem(QtWidgets.QGraphicsItem):
         clip.addRoundedRect(self.rect(), 10, 10)
         painter.save()
         painter.setClipPath(clip)
-        painter.fillRect(QtCore.QRectF(0, 0, self.rect().width(), 28), header)
+        painter.fillRect(QtCore.QRectF(0, 0, self.rect().width(), self.header()), header)
         painter.restore()
-        painter.setFont(theme.font(14, bold=True, base=painter.font()))
+        painter.setFont(theme.font(self.data.get("fontSize") or 14, bold=True, base=painter.font()))
         painter.setPen(TEXT)
-        painter.drawText(QtCore.QRectF(12, 0, self.rect().width() - 44, 28), QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft,
+        painter.drawText(QtCore.QRectF(12, 0, self.rect().width() - 44, self.header()), QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft,
                          self.data.get("title", "Backdrop"))
         # The fold chevron: down while open, right while folded.
         pen = QtGui.QPen(TEXT, 1.8)
@@ -1857,6 +1888,13 @@ class BackdropItem(QtWidgets.QGraphicsItem):
             painter.drawText(QtCore.QRectF(12, 24, self.rect().width() - 24, self.rect().height() - 24),
                              QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft, "%d node%s inside" % (held, "" if held == 1 else "s"))
             return
+        if self.data.get("description"):
+            # Its description on the body, under the title bar.
+            painter.setFont(theme.font(12, base=painter.font()))
+            painter.setPen(MUTED)
+            top = self.header() + 6
+            painter.drawText(QtCore.QRectF(12, top, self.rect().width() - 24, max(0.0, self.rect().height() - top - 8)),
+                             QtCore.Qt.AlignTop | QtCore.Qt.AlignLeft | QtCore.Qt.TextWordWrap, self.data["description"])
         painter.setPen(QtGui.QPen(color.lighter(130), 1.5))
         r = self.rect()
         for k in (4, 8, 12):
@@ -1876,7 +1914,7 @@ class BackdropItem(QtWidgets.QGraphicsItem):
             self._resizing = (event.scenePos(), self.data["w"], self.data["h"])
             event.accept()
             return
-        if event.pos().y() > 28:
+        if event.pos().y() > self.header():
             event.ignore()  # its body: a rubber band selects the nodes on it (the view's drag)
             return
         # Nodes inside move with it (a folded one's hidden nodes too).
@@ -1911,7 +1949,7 @@ class BackdropItem(QtWidgets.QGraphicsItem):
         return super(BackdropItem, self).itemChange(change, value)
 
     def mouseDoubleClickEvent(self, event):
-        if event is not None and event.pos().y() > 28:
+        if event is not None and event.pos().y() > self.header():
             event.ignore()  # (its body: the nodes on it, the canvas)
             return
         title, ok = QtWidgets.QInputDialog.getText(None, "Backdrop", "Title:", text=self.data.get("title", ""))
@@ -1942,6 +1980,120 @@ class BackdropItem(QtWidgets.QGraphicsItem):
         self.update()
 
 
+class ItemProps(QtWidgets.QFrame):
+    """The selected backdrop's or dot's properties, over the param panel: a backdrop's title,
+    description and title size; a dot's name and Input Portal (the dot whose signal it takes)."""
+
+    def __init__(self, editor):
+        super(ItemProps, self).__init__()
+        self.editor, self.target = editor, None
+        self.setObjectName("graphItemProps")
+        form = QtWidgets.QFormLayout(self)
+        form.setContentsMargins(8, 8, 8, 8)
+        self.heading = QtWidgets.QLabel()
+        self.heading.setStyleSheet("font-weight: bold;")
+        form.addRow(self.heading)
+        self.name = QtWidgets.QLineEdit()
+        form.addRow("Name", self.name)
+        self.description = QtWidgets.QPlainTextEdit()
+        self.description.setFixedHeight(theme.px(64))
+        form.addRow("Description", self.description)
+        self.font_size = QtWidgets.QSpinBox()
+        self.font_size.setRange(0, 96)
+        self.font_size.setSpecialValueText("Default")
+        self.font_size.setSuffix(" pt")
+        form.addRow("Title size", self.font_size)
+        self.input = QtWidgets.QComboBox()
+        form.addRow("Input Portal", self.input)
+        self.rows = form
+        self._pause = QtCore.QTimer(self)
+        self._pause.setSingleShot(True)
+        self._pause.setInterval(600)
+        self._pause.timeout.connect(self._description_done)
+        self.name.editingFinished.connect(self._name_done)
+        self.description.textChanged.connect(self._pause.start)
+        self.font_size.valueChanged.connect(self._size_done)
+        self.input.activated.connect(self._input_done)
+        self.hide()
+
+    def _show_rows(self, backdrop):
+        for widget in (self.description, self.font_size):
+            widget.setVisible(backdrop)
+            self.rows.labelForField(widget).setVisible(backdrop)
+        self.input.setVisible(not backdrop)
+        self.rows.labelForField(self.input).setVisible(not backdrop)
+
+    def show_item(self, item):
+        """A BackdropItem, a PortalItem, or None (hidden)."""
+        self.target = item
+        if item is None:
+            self.hide()
+            return
+        for widget in (self.name, self.description, self.font_size, self.input):
+            widget.blockSignals(True)
+        try:
+            if isinstance(item, BackdropItem):
+                self._show_rows(True)
+                self.heading.setText("Backdrop")
+                self.name.setText(item.data.get("title", "Backdrop"))
+                self.description.setPlainText(item.data.get("description", ""))
+                self.font_size.setValue(int(item.data.get("fontSize") or 0))
+            else:
+                self._show_rows(False)
+                self.heading.setText("Dot" if item.exit is None else "Dot (an exit of %s)" % item.portal)
+                self.name.setText(item.portal)
+                self.input.clear()
+                self.input.addItem("Not connected to a dot", "")
+                for p in self.editor.model.portals:
+                    if p.get("from") and not (p["name"] == item.portal and item.exit is None):
+                        self.input.addItem(p["name"], p["name"])
+                self.input.setCurrentIndex(max(0, self.input.findData(item.portal)) if item.exit is not None else 0)
+        finally:
+            for widget in (self.name, self.description, self.font_size, self.input):
+                widget.blockSignals(False)
+        self.show()
+
+    def _name_done(self):
+        text = self.name.text().strip()
+        item = self.target
+        if not text or item is None:
+            return
+        if isinstance(item, BackdropItem):
+            if text != item.data.get("title"):
+                later(lambda: self.editor.set_backdrop_field(item.data, "title", text))
+        elif text != item.portal:
+            editor, portal = self.editor, item.portal
+
+            def rename():
+                try:
+                    editor.model.rename_portal(portal, text)
+                except gm.GraphError as e:
+                    editor.report(str(e))
+                    return
+                editor._layout_dirty = True
+                editor.commit_layout("rename dot")
+                editor.rebuild()
+            later(rename)
+
+    def _description_done(self):
+        item = self.target
+        if isinstance(item, BackdropItem) and self.description.toPlainText() != item.data.get("description", ""):
+            text = self.description.toPlainText()
+            later(lambda: self.editor.set_backdrop_field(item.data, "description", text))
+
+    def _size_done(self, value):
+        item = self.target
+        if isinstance(item, BackdropItem) and value != int(item.data.get("fontSize") or 0):
+            later(lambda: self.editor.set_backdrop_field(item.data, "fontSize", value))
+
+    def _input_done(self, row):
+        item = self.target
+        if isinstance(item, PortalItem):
+            into = self.input.itemData(row) or None
+            editor, portal, exit_index = self.editor, item.portal, item.exit
+            later(lambda: editor.set_dot_input(portal, exit_index, into))
+
+
 class GraphScene(QtWidgets.QGraphicsScene):
     """Link dragging (with snapping and highlighted targets), cutting links (Alt+Shift drag),
     deletion, a dot grid."""
@@ -1959,6 +2111,7 @@ class GraphScene(QtWidgets.QGraphicsScene):
         self._cut_start = None
         self._cut_edges = set()
         self._grid = {}            # (zoom, dot color) -> QBrush: the dot tile at that zoom
+        self._carry = None         # nodes dragged on after their items were made again (a shake, Alt+drag copies)
 
     GRID_STEP = GRID
 
@@ -2185,7 +2338,26 @@ class GraphScene(QtWidgets.QGraphicsScene):
                 QtWidgets.QToolTip.hideText()
         return reason
 
+    def carry(self, names, scene_pos):
+        """Go on dragging these nodes until the button is released: their items were made again
+        under the drag (a shake pulled them loose; Alt+drag made them)."""
+        self._carry = (list(names), scene_pos)
+
+    def _carry_to(self, pos):
+        names, last = self._carry
+        delta = pos - last
+        for name in names:
+            item = self.editor.items.get(name)
+            if item is not None:
+                item.setPos(item.pos() + delta)
+        self._carry = (names, pos)
+        self.editor.grow_live(names)
+
     def mouseMoveEvent(self, event):
+        if self._carry is not None:
+            self._carry_to(event.scenePos())
+            event.accept()
+            return
         if self._cut_line is not None:
             self._move_cut(event.scenePos())
             event.accept()
@@ -2209,6 +2381,10 @@ class GraphScene(QtWidgets.QGraphicsScene):
             return
         super(GraphScene, self).mouseMoveEvent(event)
         self._hover_drop_wire(event.scenePos())
+
+    def portal_entry_at(self, pos):
+        """A dot's entry (or a free dot) at a scene point, or None."""
+        return next((i for i in self.items(pos) if isinstance(i, PortalItem) and i.exit is None), None)
 
     def pin_at(self, pos):
         """The pin at a scene point, or None."""
@@ -2241,10 +2417,29 @@ class GraphScene(QtWidgets.QGraphicsScene):
             return min(QtCore.QLineF(middle, path.pointAtPercent(k / 32.0)).length() for k in range(33))
         return min(wires, key=distance)
 
+    def dragged_group(self):
+        """Several selected nodes dragged with no links to the rest of the graph (a chain dropped on a
+        wire goes in as one): (the grabbed node, the names), or None."""
+        grabbed = self.mouseGrabberItem()
+        selected = [i for i in self.selectedItems() if isinstance(i, NodeItem)]
+        if not isinstance(grabbed, NodeItem) or grabbed not in selected or len(selected) < 2:
+            return None
+        for item in selected:
+            for edge in item.edges:
+                if isinstance(edge, EdgeItem) and (edge.src_item not in selected or edge.dst_item not in selected):
+                    return None
+        return grabbed, [i.name for i in selected]
+
     def _hover_drop_wire(self, pos):
-        """While an unwired node is dragged: the wire it lies over lights up (dropped: inserted)."""
+        """While an unwired node (or chain) is dragged: the wire it lies over lights up (dropped: inserted)."""
         node = self.dragged_node()
         wire = self.edge_under_node(node) if node is not None else None
+        group = self.dragged_group() if node is None else None
+        if group is not None:
+            grabbed, names = group
+            wire = self.edge_under_node(grabbed)
+            if wire is not None and (wire.src_item.name in names or wire.dst_item.name in names):
+                wire = None
         if wire is not self._drop_wire:
             for edge in (self._drop_wire, wire):
                 if edge is not None:
@@ -2253,6 +2448,13 @@ class GraphScene(QtWidgets.QGraphicsScene):
             self._drop_wire = wire
 
     def mouseReleaseEvent(self, event):
+        if self._carry is not None:
+            self._carry_to(event.scenePos())
+            self._carry = None
+            event.accept()
+            self.editor.commit_layout()
+            self.editor.end_grow()
+            return
         if getattr(self, "_bundle", None) is not None:
             start, self._bundle = self._bundle, None
             try:
@@ -2304,12 +2506,22 @@ class GraphScene(QtWidgets.QGraphicsScene):
                     self.editor.feed_pin(pin, start.node_item.name, start.name)
                 else:
                     self.editor.link_from_pin(pin, start.node_item.name, start.name)
+            elif (start.is_output and not detach and not isinstance(start, (PinPort, PortalPort))
+                  and self.portal_entry_at(event.scenePos()) is not None):
+                # An output's link dropped on a dot's entry: the dot (and its links) fed from there.
+                self.editor.feed_dot(self.portal_entry_at(event.scenePos()).portal, start.node_item.name, start.name)
+            elif (start.is_output and not detach and not isinstance(start, (PinPort, PortalPort))
+                  and not any(isinstance(i, (NodeItem, PortItem)) for i in self.items(event.scenePos()))):
+                # Dropped on the canvas: the add-node search there, what it adds fed from that output.
+                editor, at, screen = self.editor, event.scenePos(), event.screenPos()
+                source = (start.node_item.name, start.name)
+                later(lambda: editor.show_search(at, screen, source=source))
             elif detach:
                 self.editor.unlink(*detach)  # a picked-up link dropped on nothing: removed
             elif not start.is_output:
                 self.editor.unlink(start.node_item.name, start.name)
             return
-        node, wire = self.dragged_node(), self._drop_wire
+        node, wire, group = self.dragged_node(), self._drop_wire, self.dragged_group()
         self._drop_wire = None
         if wire is not None:
             wire.hovered = False
@@ -2319,12 +2531,24 @@ class GraphScene(QtWidgets.QGraphicsScene):
         if node is not None and wire is not None:
             editor, name, link = self.editor, node.name, wire.link()
             later(lambda: editor.insert_on_wire(name, link))  # it rebuilds the scene: after this event
+        elif group is not None and wire is not None:
+            editor, names, link = self.editor, group[1], wire.link()
+            later(lambda: editor.insert_group_on_wire(names, link))
 
     def keyPressEvent(self, event):
         ctrl = bool(event.modifiers() & QtCore.Qt.ControlModifier)
         key = event.key()
         selected = [i.name for i in self.selectedItems() if isinstance(i, NodeItem)]
-        if key == QtCore.Qt.Key_U and not event.modifiers() and self.editor.scope:
+        edges = [i for i in self.selectedItems() if isinstance(i, EdgeItem)]
+        if key == QtCore.Qt.Key_Period and not event.modifiers() and edges:
+            # . : a pin in the middle of the selected link.
+            edge = edges[0]
+            at = edge.path().pointAtPercent(0.5)
+            editor, link, index = self.editor, edge.link(), edge.piece_at(at)
+            later(lambda: editor.add_pin(link, at, index))
+        elif key == QtCore.Qt.Key_O and event.modifiers() == QtCore.Qt.ShiftModifier:
+            later(self.editor.add_backdrop)  # Shift+O: a backdrop round the selection (Houdini's key)
+        elif key == QtCore.Qt.Key_U and not event.modifiers() and self.editor.scope:
             self.editor.leave_compound()  # up out of the compound (Houdini's U)
         elif key == QtCore.Qt.Key_I and not event.modifiers() and len(selected) == 1 and self.editor.model.node_type(selected[0]) == "Compound":
             self.editor.open_compound(selected[0])  # into it (Houdini's I)
@@ -2610,12 +2834,23 @@ class GraphView(QtWidgets.QGraphicsView):
             event.accept()
             return
         self._zoomed = False
-        if event.button() == QtCore.Qt.MiddleButton or (
-                event.button() == QtCore.Qt.LeftButton and event.modifiers() & QtCore.Qt.AltModifier
+        if (event.button() == QtCore.Qt.LeftButton and event.modifiers() & QtCore.Qt.AltModifier
                 and not event.modifiers() & QtCore.Qt.ShiftModifier):  # (Alt+Shift: the scene cuts links)
-            self._pan = qt.event_pos(event)
+            pos = qt.event_pos(event)
+            at = self.mapToScene(pos)
+            under = self.scene().items(at)
+            node = next((i for i in under if isinstance(i, NodeItem)), None)
+            event.accept()
+            if node is not None and not any(isinstance(i, PortItem) for i in under):
+                # Alt+drag on a node: a copy of it (of the selection), dragged on.
+                self.scene().editor.duplicate_drag(node.name, at)
+                return
             # Alt+click (no drag) on a link puts a pin there: decided on the release.
-            self._alt_click = qt.event_pos(event) if event.button() == QtCore.Qt.LeftButton else None
+            self._alt_click = pos
+            return
+        if event.button() == QtCore.Qt.MiddleButton:  # pan: the middle button
+            self._pan = qt.event_pos(event)
+            self._alt_click = None
             self.setCursor(QtCore.Qt.ClosedHandCursor)
             return
         super(GraphView, self).mousePressEvent(event)
@@ -2635,6 +2870,19 @@ class GraphView(QtWidgets.QGraphicsView):
         super(GraphView, self).mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
+        click = getattr(self, "_alt_click", None)
+        if click is not None and event.button() == QtCore.Qt.LeftButton:
+            # Alt+click on a link (no drag): a pin there.
+            self._alt_click = None
+            pos = qt.event_pos(event)
+            if (pos - click).manhattanLength() <= 4:
+                at = self.mapToScene(pos)
+                edge = self.scene().edge_at(at)
+                if edge is not None and not any(isinstance(i, (NodeItem, PinItem)) for i in self.scene().items(at)):
+                    editor, link, index = self.scene().editor, edge.link(), edge.piece_at(at)
+                    later(lambda: editor.add_pin(link, at, index))
+            event.accept()
+            return
         if self._zoom is not None and event.button() == QtCore.Qt.RightButton:
             self._zoom = None
             self._snapshot = None
@@ -4923,6 +5171,27 @@ class GraphEditor(QtWidgets.QWidget):
         popup("Presets  ▾", self.preset_menu,
               "Start from a look (hair, fur, feathers), a technique to learn from (blending, layers, maps, "
               "motion...), save this graph as a preset, or copy and paste the whole graph as text to share it")
+        # The wire style (its menu, its icon the style's) and the Align buttons, as the app's bar.
+        toolbar.addSeparator()
+        self.wire_menu = QtWidgets.QMenu(self)
+        for choice in definitions.choices("wireStyles"):
+            action = self.wire_menu.addAction(widgets.glyph("wire_" + choice["value"]), choice["label"])
+            action.setToolTip(choice.get("tip", ""))
+            action.triggered.connect(lambda _=False, v=choice["value"]: self.set_wire_style(v))
+        self.wire_button = widgets.glyph_button("wire_" + WIRE_STYLE[0], "Wire style: Smooth, Square or Rounded", menu=self.wire_menu)
+        toolbar.addWidget(self.wire_button)
+        toolbar.addSeparator()
+        self.align_buttons = {}
+        for mode, tip in (("left", "Align left edges"), ("centerX", "Align centers (a vertical line)"),
+                          ("right", "Align right edges"), ("distributeY", "Space evenly down"), (None, None),
+                          ("top", "Align top edges"), ("centerY", "Align middles (a horizontal line)"),
+                          ("bottom", "Align bottom edges"), (None, None), ("distributeX", "Space evenly across")):
+            if mode is None:
+                toolbar.addSeparator()
+                continue
+            button = widgets.glyph_button("align_" + mode, tip, slot=lambda m=mode: self.align_selected(m))
+            self.align_buttons[mode] = button
+            toolbar.addWidget(button)
         spacer = QtWidgets.QWidget()
         spacer.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
         spacer.setStyleSheet("background: transparent;")
@@ -4959,6 +5228,8 @@ class GraphEditor(QtWidgets.QWidget):
             from maya import cmds
             if cmds.optionVar(exists=WIRE_STYLE_VAR):
                 WIRE_STYLE[0] = cmds.optionVar(query=WIRE_STYLE_VAR) or "smooth"
+                self.wire_button.glyph = "wire_" + WIRE_STYLE[0]
+                self.wire_button.setIcon(widgets.glyph(self.wire_button.glyph))
         except (ImportError, RuntimeError):
             pass
         self.edit_menu.aboutToShow.connect(self.sync_wire_style_menu)
@@ -5006,7 +5277,15 @@ class GraphEditor(QtWidgets.QWidget):
         side.addWidget(self.scope_bar)
         side.addWidget(self.view, 1)
         splitter.addWidget(graph_side)
-        splitter.addWidget(self.params)
+        # The selected backdrop's or dot's card over the param panel.
+        self.item_props = ItemProps(self)
+        param_side = QtWidgets.QWidget()
+        param_column = QtWidgets.QVBoxLayout(param_side)
+        param_column.setContentsMargins(0, 0, 0, 0)
+        param_column.setSpacing(0)
+        param_column.addWidget(self.item_props)
+        param_column.addWidget(self.params, 1)
+        splitter.addWidget(param_side)
         splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 1)
         # The param panel's share: about 372 px of the default 1200 (sliders, units and notes fit, in Inter too).
@@ -5576,6 +5855,11 @@ class GraphEditor(QtWidgets.QWidget):
             # the teleported links come out.
             self.portal_items = []
             for p in self.model.portals:
+                if not p.get("from"):  # a free dot: nothing feeds it yet
+                    free = PortalItem(self, p["name"], None, (p["x"], p["y"]), None, None)
+                    self.scene.addItem(free)
+                    self.portal_items.append(free)
+                    continue
                 src = self.items.get(p["from"])
                 if src is None:
                     continue
@@ -5597,6 +5881,12 @@ class GraphEditor(QtWidgets.QWidget):
                             edge.portal_item = exit_item
                             exit_item.edges.append(edge)
                             edge.update_path()
+                for link in p.get("links") or []:  # links drawn straight out of the entry dot
+                    edge = self._edges.get((link["to"], link["input"]))
+                    if edge is not None:
+                        edge.portal_item = entry
+                        entry.edges.append(edge)
+                        edge.update_path()
             # Folded backdrops hide their nodes (their links meet the backdrop's edges instead).
             for backdrop in self._backdrop_items:
                 if not backdrop.folded():
@@ -5630,7 +5920,7 @@ class GraphEditor(QtWidgets.QWidget):
 
     # -- Search, view, bypass, copy and paste, backdrops ------------------------
 
-    def show_search(self, scene_pos, screen_pos):
+    def show_search(self, scene_pos, screen_pos, source=None):
         """Type to find a node type; Enter adds it where you clicked (Tab or right-click the canvas)."""
         if not self.model:
             text = "Select a groom first: its graph opens here, then Tab adds a node"
@@ -5642,7 +5932,8 @@ class GraphEditor(QtWidgets.QWidget):
         if wire is None:  # a link selected first: the node goes into it
             wire = next((i for i in self.scene.selectedItems() if isinstance(i, EdgeItem)), None)
         popup = NodeSearch(self, (scene_pos.x() - NODE_W / 2, scene_pos.y() - HEADER_H / 2),
-                           on_link=wire.link() if wire is not None else None)
+                           on_link=wire.link() if wire is not None and source is None else None, source=source)
+        popup.dot_at = (scene_pos.x(), scene_pos.y())
         popup.setAttribute(QtCore.Qt.WA_DeleteOnClose)
         popup.move(screen_pos)
         popup.show()
@@ -5993,6 +6284,9 @@ class GraphEditor(QtWidgets.QWidget):
 
     def selection_changed(self):
         nodes = [i.name for i in self.scene.selectedItems() if isinstance(i, NodeItem)]
+        items = [i for i in self.scene.selectedItems() if isinstance(i, (BackdropItem, PortalItem))]
+        if getattr(self, "item_props", None) is not None:
+            self.item_props.show_item(items[0] if len(items) == 1 and not nodes else None)
         # A Sculpt node selected: brushes shape its guides (before its panel shows, which says so).
         if len(nodes) == 1 and self.model.node_type(nodes[0]) == "Sculpt":
             self.target_sculpt(nodes[0])
@@ -6180,6 +6474,182 @@ class GraphEditor(QtWidgets.QWidget):
             self.commit_layout()
             self.rebuild()
 
+    def link_first_input(self, source, node):
+        """`node` fed from source (node, output) on its first input that takes it (one undo step)."""
+        src, output = source
+        primary = self.model.output_names(src)[0]
+        for port in self.model.node_spec(node)["inputs"]:
+            try:
+                self.model.connect(src, node, port["name"], output=None if output == primary else output, by_hand=True)
+            except (gm.GraphError, ValueError):
+                continue
+            self.rebuild()
+            self.changed()
+            return True
+        self.report("%s has no input that takes %s's output" % (node, src))
+        return False
+
+    def shake_loose(self, names, at):
+        """A shake while dragging: the nodes out of their links at once (one: what fed it feeds what
+        it fed; several: the links among them kept), left under the cursor, the drag going on."""
+        positions = dict((n, self.items[n].pos()) for n in names if n in self.items)
+        try:
+            done = self.model.detach(names[0]) if len(names) == 1 else self.model.detach_group(names)
+        except (gm.GraphError, ValueError) as e:
+            self.report(str(e))
+            return
+        if not done["changed"]:
+            return
+        for name, pos in positions.items():
+            self.model.set_position(name, pos.x(), pos.y())
+        self.end_grow()
+        self.rebuild()
+        for name in names:
+            if name in self.items:
+                self.items[name].setSelected(True)
+        self.changed()
+        self.report("shaken loose: %s out of %s links (Ctrl+Z puts them back)" % (
+            ", ".join(names), "its" if len(names) == 1 else "their"))
+        if QtWidgets.QApplication.mouseButtons() & QtCore.Qt.LeftButton:
+            self.scene.carry(names, at)
+
+    def duplicate_drag(self, name, at):
+        """Alt+drag on a node: it (the selection, when it is one of it) duplicated where it is, the
+        copies (reading what the nodes read) dragged on."""
+        selected = self.selected_names()
+        names = selected if name in selected else [name]
+        try:
+            made = self.model.duplicate_nodes(names, (0.0, 0.0))
+        except (gm.GraphError, ValueError) as e:
+            self.report(str(e))
+            return
+        self.rebuild()
+        self.scene.clearSelection()
+        for copy in made:
+            self.items[copy].setSelected(True)
+        self.changed()
+        self.scene.carry(made, at)
+        self.report("duplicated %d node%s: drag them where they go" % (len(made), "" if len(made) == 1 else "s"))
+
+    def begin_grow(self, names):
+        """A drag of these nodes begins: the open backdrops holding them, to grow with them."""
+        import time
+        self._grow = []
+        for item in getattr(self, "_backdrop_items", []):
+            if item.folded():
+                continue
+            area = item.full_rect()
+            held = [n for n in names if n in self.items and
+                    area.contains(QtCore.QRectF(self.items[n].pos(), QtCore.QSizeF(NODE_W, self.items[n].height)).center())]
+            if held:
+                self._grow.append({"item": item, "start": QtCore.QRectF(area), "nodes": held, "left": set()})
+        self._grow_speed = [time.perf_counter(), QtGui.QCursor.pos(), 0.0]
+
+    def grow_live(self, names, screen_pos=None):
+        """While nodes are dragged: each backdrop holding them grows round them (graph_arrange.h): a
+        node pushed past an edge slowly pushes it out; one dragged off fast leaves it."""
+        import time
+        import groomlab_core
+        if getattr(self, "_grow", None) is None:
+            self.begin_grow(names)
+        now, cursor = time.perf_counter(), QtGui.QCursor.pos()
+        last_time, last_pos, speed = self._grow_speed
+        dt = max(now - last_time, 1e-3)
+        moved = (cursor - last_pos).manhattanLength()
+        speed = 0.6 * speed + 0.4 * (moved / dt)
+        self._grow_speed = [now, cursor, speed]
+        for g in self._grow:
+            item, start = g["item"], g["start"]
+            held = []
+            for name in g["nodes"]:
+                node = self.items.get(name)
+                if node is None:
+                    continue
+                card = QtCore.QRectF(node.pos(), QtCore.QSizeF(NODE_W, node.height))
+                over = item.full_rect().contains(card.center())
+                if not groomlab_core.backdrop_keeps(over, speed, name in g["left"]):
+                    g["left"].add(name)
+                    continue
+                held.append((name, card.x(), card.y(), float(NODE_W), float(node.height)))
+            x, y, w, h = groomlab_core.grown_backdrop((start.x(), start.y(), start.width(), start.height()), held, 24.0,
+                                                       item.header())
+            data = item.data
+            if (x, y, w, h) != (data["x"], data["y"], data["w"], data["h"]):
+                item.prepareGeometryChange()
+                data["w"], data["h"] = w, h
+                item._carried = []
+                item.setPos(x, y)
+                item.update()
+                self._layout_dirty = True
+
+    def end_grow(self):
+        self._grow = None
+
+    def insert_group_on_wire(self, names, link):
+        """A chain dropped on a wire as one: in it, between the link's ends (one undo step)."""
+        src, output, dst, input_name = link
+        try:
+            self.model.insert_nodes_on_link(src, dst, input_name, names, output)
+        except (gm.GraphError, ValueError) as e:
+            self.report("Not inserted: %s" % e)
+            return
+        self.rebuild()
+        self.changed()
+        self.report("inserted %s between %s and %s" % (", ".join(names), src, dst))
+
+    def add_dot(self, at, source=None):
+        """A Dot where the search was opened (fed from `source`, (node, output), when a link was
+        dropped there): name it, feed it, or pick its Input Portal."""
+        try:
+            name = self.model.add_dot(at[0], at[1], *(source or (None, None)))
+        except (gm.GraphError, ValueError) as e:
+            self.report(str(e))
+            return None
+        self._layout_dirty = True
+        if source:
+            self.rebuild()
+            self.changed()
+        else:
+            self.commit_layout("add dot")
+            self.rebuild()
+        self.report("%s: double-click to name it; its Input Portal (its card) takes another dot's signal" % name)
+        return name
+
+    def feed_dot(self, portal, src, output):
+        """A dot fed from an output (a link dropped on it): its links read it."""
+        try:
+            self.model.feed_dot(portal, src, output)
+        except (gm.GraphError, ValueError) as e:
+            self.report(str(e))
+            return
+        self.rebuild()
+        self.changed()
+        self.report("%s fed from %s" % (portal, src))
+
+    def set_dot_input(self, portal, exit_index, into):
+        """A dot's Input Portal: the dot whose signal it takes (None: a free dot)."""
+        try:
+            self.model.set_dot_input(portal, exit_index, into or None)
+        except (gm.GraphError, ValueError) as e:
+            self.report(str(e))
+            return
+        self.rebuild()
+        self.changed()
+
+    def set_backdrop_field(self, data, key, value):
+        """A backdrop's title, description or title size (0: the default): one undo step."""
+        if data not in self.model.backdrops:
+            return
+        if value in ("", 0, None):
+            data.pop(key, None)
+            if key == "title":
+                data["title"] = "Backdrop"
+        else:
+            data[key] = value
+        self._layout_dirty = True
+        self.commit_layout("backdrop " + key)
+        self.rebuild()
+
     def align_selected(self, mode):
         """Align the selected nodes (the core's align_boxes: left, centerX, right, top, centerY,
         bottom, row, column, distributeX, distributeY), one undo step."""
@@ -6214,6 +6684,10 @@ class GraphEditor(QtWidgets.QWidget):
         """How links are drawn: smooth, square or rounded (remembered between sessions)."""
         import groomlab_core
         WIRE_STYLE[0] = style if style in groomlab_core.wire_styles() else "smooth"
+        button = getattr(self, "wire_button", None)
+        if button is not None:
+            button.glyph = "wire_" + WIRE_STYLE[0]
+            button.setIcon(widgets.glyph(button.glyph))
         try:
             from maya import cmds
             cmds.optionVar(stringValue=(WIRE_STYLE_VAR, WIRE_STYLE[0]))
@@ -6291,7 +6765,7 @@ class GraphEditor(QtWidgets.QWidget):
             return
         self.link(source["from"], dst, input_name, output=source.get("output"))
         if self.model.source_of(dst, input_name) == source["from"]:
-            self.model.add_portal_link(portal, exit_index, dst, input_name)
+            self.model.add_portal_link(portal, -1 if exit_index is None else exit_index, dst, input_name)
             self._layout_dirty = True
             self.commit_layout()
             self.rebuild()

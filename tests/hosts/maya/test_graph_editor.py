@@ -444,6 +444,35 @@ class GraphApiTest(unittest.TestCase):
         self.assertGreater(cmds.getAttr(self.groom + ".outStrandCount"), 0)
         self.assertEqual(gm.GraphModel.from_groom(self.groom, self.catalog).output_of("resample", "strands"), "thru_strands")
 
+    def test_dots_groups_shaken_and_dropped_on_a_wire(self):
+        model = gm.GraphModel.from_groom(self.groom, self.catalog)
+        # A free dot, fed from length; another taking its signal; a link out of that exit.
+        dot = model.add_dot(0, 0)
+        self.assertEqual(dot, "Dot")
+        self.assertFalse(model.portal_fed(dot))
+        model.feed_dot(dot, "length")
+        self.assertTrue(model.portal_fed(dot))
+        other = model.add_dot(300, 0)
+        model.set_dot_input(other, None, dot)
+        self.assertEqual(len(model.portals[0]["exits"]), 1)
+        model.connect("length", "resample", "strands")
+        self.assertTrue(model.add_portal_link(dot, 0, "resample", "strands"))
+        self.assertEqual(model.portal_of_link("resample", "strands"), (dot, 0))
+        model.set_dot_input(dot, 0, None)  # the exit freed: a dot of its own, the link a wire again
+        self.assertIsNone(model.portal_of_link("resample", "strands"))
+        # Shaken together: the link between them kept.
+        model = gm.GraphModel.from_groom(self.groom, self.catalog)
+        self.assertTrue(model.detach_group(["length", "width"])["changed"])
+        self.assertEqual(model.source_of("width", "strands"), "length")
+        self.assertIsNone(model.source_of("length", "strands"))
+        self.assertEqual(model.source_of("resample", "strands"), "interpolate")
+        # Dropped back on that wire as one.
+        model.insert_nodes_on_link("interpolate", "resample", "strands", ["width", "length"])
+        self.assertEqual(model.source_of("length", "strands"), "interpolate")
+        self.assertEqual(model.source_of("resample", "strands"), "width")
+        model.save(self.groom)
+        self.assertEqual(groomlab.errors(self.groom), [])
+
     def test_editing_inside_a_compound_writes_it_back(self):
         model = gm.GraphModel.from_groom(self.groom, self.catalog)
         compound = model.collapse(["length", "width"])
