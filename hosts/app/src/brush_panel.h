@@ -104,6 +104,9 @@ signals:
     void lengthsPreviewed();    // the Keys block changed the Length Keys preview: evaluate and redraw
 
 private:
+    // A widget's writer of setting `id` (the editor's setToolSetting; `whole`: a whole number).
+    std::function<void(double)> numberSetter(const char* id, bool whole = false);
+    std::function<void(bool)> switchSetter(const char* id);
     QLabel* toolIcon_ = nullptr;   // the card's header: the tool's icon and name
     QLabel* toolTitle_ = nullptr;
     QLabel* toolHint_ = nullptr;   // under the title: what the tool does (setSubtitle)

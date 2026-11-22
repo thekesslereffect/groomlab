@@ -25,6 +25,7 @@
 
 #include "groomlab/editor/guide_edits.h"
 #include "groomlab/editor/map_edits.h"
+#include "groomlab/editor/tool_settings.h"
 #include "groomlab/asset_files.h"
 #include "groomlab/brush.h"
 #include "groomlab/brush_catalog.h"
@@ -504,178 +505,44 @@ std::string settingString(const json& v, const char* key) {
     return v.get<std::string>();
 }
 
+// The host's lengths, axes and tube widths as the groom's (the editor's ToolSpace).
+ToolSpace toolSpace(const HostSpace& space) {
+    ToolSpace out;
+    out.lengthIn = [&space](double v) { return toGroomLength(space, v); };
+    out.lengthOut = [&space](float v) { return toHostLength(space, v); };
+    out.symmetryIn = [&space](const std::string& axis, double center, int& groomAxis, float& groomCenter) {
+        symmetryToGroom(space, axis, center, groomAxis, groomCenter);
+    };
+    out.symmetryOut = [&space](int groomAxis, float groomCenter, std::string& axis, double& center) {
+        symmetryToHost(space, groomAxis, groomCenter, axis, center);
+    };
+    out.tubeIn = [&space](const json& tube) { return tubeEditToGroom(space, tube); };
+    out.tubeOut = [&space](const std::string& tube) { return tubeToHost(space, tube); };
+    return out;
+}
+
 // The settings the palette sends (Maya's groomLabBrushCtx flags by their long names, and the
-// catalog's setting ids): lengths in host units, the symmetry in the host's axes.
+// catalog's setting ids): lengths in host units, the symmetry in the host's axes. Every host's
+// parser (the editor's applyToolSettings, tool_settings.h); softSelectRadius is the helper's own.
 void applySettings(ToolState& t, const json& settings) {
     if (!settings.is_object()) fail("bad_request", "settings is an object");
-    BrushToolSettings s = t.tool.settings;
+    json rest = settings;
     float softRadius = t.softRadius;
-    const HostSpace& space = t.session.space;
-    std::string symmetry;
-    bool symmetrySet = false;
-    double symmetryCenter = 0.0;
-    {
-        std::string axis;
-        symmetryToHost(space, s.brush.mirrorAxis, s.brush.mirrorCenter, axis, symmetryCenter);
-        symmetry = axis;
+    if (rest.contains("softSelectRadius")) {
+        softRadius = std::max(0.0f, toGroomLength(t.session.space, settingNumber(rest["softSelectRadius"], "softSelectRadius")));
+        rest.erase("softSelectRadius");
     }
     try {
-        for (const auto& [key, v] : settings.items()) {
-            const char* k = key.c_str();
-            if (key == "radius") s.setScreenRadius(settingNumber(v, k));
-            else if (key == "strength") s.brush.strength = settingNumber(v, k);
-            else if (key == "falloff") s.setHardness(1.0f - settingNumber(v, k));
-            else if (key == "hardness") s.setHardness(settingNumber(v, k));
-            // The curves: a ramp ([[position, value], ...], or its JSON text), null or "" for none.
-            else if (key == "falloffProfile") s.setFalloffProfile(v.is_string() ? v.get<std::string>() : v.is_null() ? std::string() : v.dump());
-            else if (key == "strengthProfile") s.setStrengthProfile(v.is_string() ? v.get<std::string>() : v.is_null() ? std::string() : v.dump());
-            else if (key == "level") s.brush.level = settingInt(v, k);
-            else if (key == "group") s.brush.group = settingString(v, k);
-            else if (key == "propagate") s.brush.propagate = settingBool(v, k);
-            else if (key == "length") s.place.length = toGroomLength(space, settingNumber(v, k));
-            else if (key == "segments") s.setSegments(settingInt(v, k));
-            else if (key == "tubeRadius") {
-                const float r = toGroomLength(space, settingNumber(v, k));
-                s.place.tube.width = {r, r};
-            } else if (key == "tube") {
-                // The new guides' tube (Maya's placeTube): shape, width (host units), aspect, twist.
-                if (!v.is_object()) fail("bad_request", "setting tube is an object: shape, width, aspect, twist");
-                setPlacementTube(s.place, tubeEditToGroom(space, v));
-            } else if (key == "tubeChannel") s.brush.tubeChannel = tubeChannelFromString(settingString(v, k));
-            else if (key == "spacing") s.place.spacing = toGroomLength(space, settingNumber(v, k));
-            else if (key == "matchNeighbors") s.place.matchNeighbors = settingBool(v, k);
-            else if (key == "soloNewGuides") s.place.soloNewGuides = settingBool(v, k);
-            else if (key == "selectedOnly") s.selectedOnly = settingBool(v, k);
-            else if (key == "softSelectRadius") softRadius = std::max(0.0f, toGroomLength(space, settingNumber(v, k)));
-            else if (key == "symmetry") {
-                symmetry = settingString(v, k);
-                if (symmetry.empty()) symmetry = "none";
-                symmetrySet = true;
-            } else if (key == "symmetryCenter") {
-                symmetryCenter = settingNumber(v, k);
-                symmetrySet = true;
-            } else if (key == "attribute") s.brush.attribute = settingString(v, k);
-            else if (key == "value") s.brush.value = settingNumber(v, k);
-            else if (key == "pointwise") s.brush.pointwise = settingBool(v, k);
-            else if (key == "collide") s.brush.collide = settingBool(v, k);
-            else if (key == "frontFacingOnly" || key == "maskByScalp") s.maskByScalp = settingBool(v, k);
-            else if (key == "stretch") s.brush.stretch = settingBool(v, k);
-            else if (key == "straighten") s.brush.straighten = settingBool(v, k);
-            else if (key == "pressure") s.pressure = settingBool(v, k);
-            else if (key == "partName") s.partName = settingString(v, k).empty() ? std::string("part") : settingString(v, k);
-            else if (key == "flowSink") {
-                const std::string sink = settingString(v, k);
-                if (!sink.empty()) flowSinkAngle(sink);  // throws for an unknown kind
-                s.flowSink = sink;
-            } else if (key == "targets") {
-                if (v.is_array()) {
-                    std::string names;
-                    for (const json& n : v) names += (names.empty() ? "" : ",") + settingString(n, k);
-                    s.setTargets(names.empty() ? std::string("none") : names);
-                } else {
-                    s.setTargets(settingString(v, k));
-                }
-            } else if (key == "eraseGuides") s.eraseGuides = settingBool(v, k);
-            else if (key == "eraseParts") s.eraseParts = settingBool(v, k);
-            else if (key == "eraseFlow") s.eraseFlow = settingBool(v, k);
-            else if (key == "paintKind") {
-                const std::string kind = settingString(v, k);
-                if (kind != "guides" && kind != "vertices" && kind != "texture") fail("bad_request", "paintKind is guides, vertices or texture");
-                s.paintKind = kind;
-            } else if (key == "paintTexture") s.paintTexture = settingString(v, k);
-            else if (key == "paintResolution") s.setPaintResolution(settingInt(v, k));
-            else if (key == "paintColor") {
-                if (!v.is_array() || (v.size() != 3 && v.size() != 4)) fail("bad_request", "paintColor is [r, g, b] or [r, g, b, a]");
-                PaintColor c{0.0f, 0.0f, 0.0f, 1.0f};
-                for (std::size_t i = 0; i < v.size(); ++i) c[i] = settingNumber(v[i], k);
-                s.setPaintColor(c);
-            } else if (key == "paintChannels") s.paintChannels = channelMask(settingString(v, k).empty() ? std::string("rgba") : settingString(v, k));
-            else if (key == "paintMode") s.brush.paintMode = paintModeFromString(settingString(v, k));
-            else if (key == "paintWholeFaces") s.paintWholeFaces = settingBool(v, k);
-            else if (key == "smoothStrength") s.setSmoothStrength(settingNumber(v, k));
-            else if (key == "alpha") {
-                try {
-                    s.setAlpha(v.is_null() ? std::string() : settingString(v, k));
-                } catch (const std::invalid_argument&) {
-                    throw;
-                } catch (const std::exception& e) {
-                    fail("bad_request", std::string("alpha: ") + e.what());
-                }
-            } else if (key == "alphaRotation") s.setAlphaRotation(settingString(v, k));
-            else if (key == "alphaAngle") s.alphaAngle = settingNumber(v, k);
-            else if (key == "alphaSpacing") s.setAlphaSpacing(settingNumber(v, k));
-            else if (key == "alphaInvert") s.alphaInvert = settingBool(v, k);
-            else fail("bad_request", "no tool setting '" + key + "'");
-        }
-        if (symmetrySet && symmetry == "topology") {
-            s.setSymmetry("topology");  // across the scalp's own surface: no axis to turn into the groom's
-        } else if (symmetrySet) {
-            symmetryToGroom(space, symmetry, symmetryCenter, s.brush.mirrorAxis, s.brush.mirrorCenter);
-            s.brush.mirrorTopology = false;
-        }
+        applyToolSettings(t.tool.settings, rest, toolSpace(t.session.space));
     } catch (const std::invalid_argument& e) {
         fail("bad_request", e.what());
     }
-    t.tool.settings = s;
     t.softRadius = softRadius;
 }
 
 json settingsJson(const ToolState& t) {
-    const BrushToolSettings& s = t.tool.settings;
-    const HostSpace& space = t.session.space;
-    std::string axis;
-    double center = 0.0;
-    symmetryToHost(space, s.brush.mirrorAxis, s.brush.mirrorCenter, axis, center);
-    json j;
-    j["radius"] = s.screenRadius;
-    j["strength"] = s.brush.strength;
-    j["falloff"] = 1.0f - s.brush.hardness;
-    j["hardness"] = s.brush.hardness;
-    // The curves as ramps (null: none).
-    j["falloffProfile"] = s.brush.falloffProfile ? json::parse(s.falloffProfileJson()) : json();
-    j["strengthProfile"] = s.brush.strengthProfile ? json::parse(s.strengthProfileJson()) : json();
-    j["level"] = s.brush.level;
-    j["group"] = s.brush.group;
-    j["propagate"] = s.brush.propagate;
-    j["length"] = toHostLength(space, s.place.length);
-    j["segments"] = s.place.segments;
-    j["tubeRadius"] = toHostLength(space, s.place.tube.width.empty() ? 0.0f : s.place.tube.width.front());
-    j["tube"] = tubeToHost(space, placementTubeJson(s.place));
-    j["tubeChannel"] = tubeChannelName(s.brush.tubeChannel);
-    j["spacing"] = toHostLength(space, s.place.spacing);
-    j["matchNeighbors"] = s.place.matchNeighbors;
-    j["soloNewGuides"] = s.place.soloNewGuides;
-    j["selectedOnly"] = s.selectedOnly;
-    j["softSelectRadius"] = toHostLength(space, t.softRadius);
-    j["symmetry"] = s.brush.mirrorTopology ? std::string("topology") : axis;
-    j["symmetryCenter"] = center;
-    j["attribute"] = s.brush.attribute;
-    j["value"] = s.brush.value;
-    j["pointwise"] = s.brush.pointwise;
-    j["collide"] = s.brush.collide;
-    j["frontFacingOnly"] = s.maskByScalp;
-    j["stretch"] = s.brush.stretch;
-    j["straighten"] = s.brush.straighten;
-    j["pressure"] = s.pressure;
-    j["partName"] = s.partName;
-    j["flowSink"] = s.flowSink;
-    j["targets"] = s.targetsName();
-    j["eraseGuides"] = s.eraseGuides;
-    j["eraseParts"] = s.eraseParts;
-    j["eraseFlow"] = s.eraseFlow;
-    j["paintKind"] = s.paintKind;
-    j["paintTexture"] = s.paintTexture;
-    j["paintResolution"] = s.paintResolution;
-    j["paintColor"] = s.paintColor;
-    j["paintChannels"] = channelLetters(s.paintChannels);
-    j["paintMode"] = paintModeName(s.brush.paintMode);
-    j["paintWholeFaces"] = s.paintWholeFaces;
-    j["smoothStrength"] = s.smoothStrength;
-    j["alpha"] = s.alphaPath;
-    j["alphaRotation"] = s.alphaRotationName();
-    j["alphaAngle"] = s.alphaAngle;
-    j["alphaSpacing"] = s.alphaSpacing;
-    j["alphaInvert"] = s.alphaInvert;
+    json j = toolSettingsJson(t.tool.settings, toolSpace(t.session.space));
+    j["softSelectRadius"] = toHostLength(t.session.space, t.softRadius);
     return j;
 }
 

@@ -41,6 +41,7 @@
 #include "active_groom.h"
 #include "asset_files.h"
 #include "groom_shape.h"
+#include "groomlab/editor/tool_settings.h"
 #include "groomlab/flow.h"
 #include "groomlab/texture.h"
 #include "groom_draw_override.h"
@@ -363,102 +364,60 @@ void addBrushFlags(MSyntax& s) {
 // Applies the shared flags that are set (not -radius) to `s`, from an
 // MArgDatabase (a stroke) or an MArgParser (the tool's edit flags), kept in range as every host
 // keeps them (BrushToolSettings' setters). Reports and fails on a bad value.
+// The flags that are tool settings, by the setting's id (the editor's applyToolSettings: every
+// host's parser) and the flag's kind: a string, a double, a long or a boolean.
+struct SettingFlag {
+    const char* const* flag;
+    const char* id;
+    char kind;
+};
+const SettingFlag kSettingFlags[] = {
+    {kModeFlag, "mode", 's'}, {kSymmetryFlag, "symmetry", 's'}, {kTargetsFlag, "targets", 's'},
+    {kTubeChannelFlag, "tubeChannel", 's'}, {kSmoothModeFlag, "smoothMode", 's'}, {kFalloffProfileFlag, "falloffProfile", 's'},
+    {kStrengthProfileFlag, "strengthProfile", 's'}, {kPlaceTubeFlag, "tube", 's'}, {kFlowSinkFlag, "flowSink", 's'},
+    {kAlphaRotationFlag, "alphaRotation", 's'}, {kAlphaFlag, "alpha", 's'}, {kAlphaAngleFlag, "alphaAngle", 'd'},
+    {kAlphaSpacingFlag, "alphaSpacing", 'd'}, {kAlphaInvertFlag, "alphaInvert", 'b'}, {kPaintKindFlag, "paintKind", 's'},
+    {kStrengthFlag, "strength", 'd'}, {kLevelFlag, "level", 'i'}, {kGroupFlag, "group", 's'}, {kPropagateFlag, "propagate", 'b'},
+    {kLengthFlag, "length", 'd'}, {kSegmentsFlag, "segments", 'i'}, {kTubeRadiusFlag, "tubeRadius", 'd'},
+    {kSpacingFlag, "spacing", 'd'}, {kMatchFlag, "matchNeighbors", 'b'}, {kSoloNewFlag, "soloNewGuides", 'b'},
+    {kCollideFlag, "collide", 'b'}, {kPaintWholeFacesFlag, "paintWholeFaces", 'b'}, {kMaskScalpFlag, "maskByScalp", 'b'},
+    {kStretchFlag, "stretch", 'b'}, {kStraightenFlag, "straighten", 'b'}, {kSelectedOnlyFlag, "selectedOnly", 'b'},
+    {kSymmetryCenterFlag, "symmetryCenter", 'd'}, {kAttributeFlag, "attribute", 's'}, {kPartNameFlag, "partName", 's'},
+    {kValueFlag, "value", 'd'}, {kPaintTextureFlag, "paintTexture", 's'}, {kPaintResolutionFlag, "paintResolution", 'i'},
+    {kHardnessFlag, "hardness", 'd'}, {kSmoothStrengthFlag, "smoothStrength", 'd'}, {kPaintChannelsFlag, "paintChannels", 's'},
+    {kPaintModeFlag, "paintMode", 's'},
+};
+
+// Applies the shared flags that are set (not -radius) to `s`, from an MArgDatabase (a stroke) or
+// an MArgParser (the tool's edit flags), as every host sets them (the editor's applyToolSettings:
+// kept in range, all or nothing). Reports and fails on a bad value.
 template <class Args>
 MStatus applyBrushFlags(const Args& args, BrushToolSettings& s, const char* command) {
-    MString text;
-    double d = 0;
-    int n = 0;
-    bool b = false;
-    try {
-        if (args.isFlagSet(kModeFlag[0]) && args.getFlagArgument(kModeFlag[0], 0, text)) s.setMode(text.asChar());
-        if (args.isFlagSet(kSymmetryFlag[0]) && args.getFlagArgument(kSymmetryFlag[0], 0, text)) s.setSymmetry(text.asChar());
-        if (args.isFlagSet(kTargetsFlag[0]) && args.getFlagArgument(kTargetsFlag[0], 0, text)) s.setTargets(text.asChar());
-        if (args.isFlagSet(kTubeChannelFlag[0]) && args.getFlagArgument(kTubeChannelFlag[0], 0, text)) {
-            s.brush.tubeChannel = tubeChannelFromString(text.asChar());
-        }
-        if (args.isFlagSet(kSmoothModeFlag[0]) && args.getFlagArgument(kSmoothModeFlag[0], 0, text)) {
-            s.brush.smoothMode = smoothModeFromString(text.asChar());
-        }
-        // The curves as ramps' JSON ("" clears one).
-        if (args.isFlagSet(kFalloffProfileFlag[0]) && args.getFlagArgument(kFalloffProfileFlag[0], 0, text)) {
-            s.setFalloffProfile(text.asChar());
-        }
-        if (args.isFlagSet(kStrengthProfileFlag[0]) && args.getFlagArgument(kStrengthProfileFlag[0], 0, text)) {
-            s.setStrengthProfile(text.asChar());
-        }
-        if (args.isFlagSet(kPlaceTubeFlag[0]) && args.getFlagArgument(kPlaceTubeFlag[0], 0, text)) {
-            setPlacementTube(s.place, text.asChar());
-        }
-        if (args.isFlagSet(kFlowSinkFlag[0]) && args.getFlagArgument(kFlowSinkFlag[0], 0, text)) {
-            if (text.length() > 0) flowSinkAngle(text.asChar());  // throws for an unknown kind
-            s.flowSink = text.asChar();
-        }
-        if (args.isFlagSet(kAlphaRotationFlag[0]) && args.getFlagArgument(kAlphaRotationFlag[0], 0, text)) {
-            s.setAlphaRotation(text.asChar());
-        }
-    } catch (const std::invalid_argument& e) {
-        return fail(command, e.what());
+    nlohmann::json settings = nlohmann::json::object();
+    for (const SettingFlag& f : kSettingFlags) {
+        if (!args.isFlagSet(f.flag[0])) continue;
+        MString text;
+        double d = 0;
+        int n = 0;
+        bool b = false;
+        if (f.kind == 's' && args.getFlagArgument(f.flag[0], 0, text)) settings[f.id] = text.asChar();
+        else if (f.kind == 'd' && args.getFlagArgument(f.flag[0], 0, d)) settings[f.id] = d;
+        else if (f.kind == 'i' && args.getFlagArgument(f.flag[0], 0, n)) settings[f.id] = n;
+        else if (f.kind == 'b' && args.getFlagArgument(f.flag[0], 0, b)) settings[f.id] = b;
     }
-    if (args.isFlagSet(kAlphaFlag[0]) && args.getFlagArgument(kAlphaFlag[0], 0, text)) {
-        try {
-            s.setAlpha(text.asChar());
-        } catch (const std::exception& e) {
-            return fail(command, (std::string("-alpha: ") + e.what()).c_str());
-        }
-    }
-    if (args.isFlagSet(kAlphaAngleFlag[0]) && args.getFlagArgument(kAlphaAngleFlag[0], 0, d)) s.alphaAngle = float(d);
-    if (args.isFlagSet(kAlphaSpacingFlag[0]) && args.getFlagArgument(kAlphaSpacingFlag[0], 0, d)) s.setAlphaSpacing(float(d));
-    if (args.isFlagSet(kAlphaInvertFlag[0]) && args.getFlagArgument(kAlphaInvertFlag[0], 0, b)) s.alphaInvert = b;
-    if (args.isFlagSet(kPaintKindFlag[0]) && args.getFlagArgument(kPaintKindFlag[0], 0, text)) {
-        if (text != "guides" && text != "vertices" && text != "texture") return fail(command, "-paintKind takes guides, vertices or texture");
-        s.paintKind = text.asChar();
-    }
-    if (args.isFlagSet(kStrengthFlag[0]) && args.getFlagArgument(kStrengthFlag[0], 0, d)) s.brush.strength = float(d);
-    if (args.isFlagSet(kLevelFlag[0]) && args.getFlagArgument(kLevelFlag[0], 0, n)) s.brush.level = n;
-    if (args.isFlagSet(kGroupFlag[0]) && args.getFlagArgument(kGroupFlag[0], 0, text)) s.brush.group = text.asChar();
-    if (args.isFlagSet(kPropagateFlag[0]) && args.getFlagArgument(kPropagateFlag[0], 0, b)) s.brush.propagate = b;
-    if (args.isFlagSet(kLengthFlag[0]) && args.getFlagArgument(kLengthFlag[0], 0, d)) s.place.length = float(d);
-    if (args.isFlagSet(kSegmentsFlag[0]) && args.getFlagArgument(kSegmentsFlag[0], 0, n)) s.setSegments(n);
-    if (args.isFlagSet(kTubeRadiusFlag[0]) && args.getFlagArgument(kTubeRadiusFlag[0], 0, d)) {
-        s.place.tube.width = {float(d), float(d)};
-    }
-    if (args.isFlagSet(kSpacingFlag[0]) && args.getFlagArgument(kSpacingFlag[0], 0, d)) s.place.spacing = float(d);
-    if (args.isFlagSet(kMatchFlag[0]) && args.getFlagArgument(kMatchFlag[0], 0, b)) s.place.matchNeighbors = b;
-    if (args.isFlagSet(kSoloNewFlag[0]) && args.getFlagArgument(kSoloNewFlag[0], 0, b)) s.place.soloNewGuides = b;
-    if (args.isFlagSet(kCollideFlag[0]) && args.getFlagArgument(kCollideFlag[0], 0, b)) s.brush.collide = b;
-    if (args.isFlagSet(kPaintWholeFacesFlag[0]) && args.getFlagArgument(kPaintWholeFacesFlag[0], 0, b)) s.paintWholeFaces = b;
-    if (args.isFlagSet(kMaskScalpFlag[0]) && args.getFlagArgument(kMaskScalpFlag[0], 0, b)) s.maskByScalp = b;
-    if (args.isFlagSet(kStretchFlag[0]) && args.getFlagArgument(kStretchFlag[0], 0, b)) s.brush.stretch = b;
-    if (args.isFlagSet(kStraightenFlag[0]) && args.getFlagArgument(kStraightenFlag[0], 0, b)) s.brush.straighten = b;
-    if (args.isFlagSet(kSelectedOnlyFlag[0]) && args.getFlagArgument(kSelectedOnlyFlag[0], 0, b)) s.selectedOnly = b;
-    if (args.isFlagSet(kSymmetryCenterFlag[0]) && args.getFlagArgument(kSymmetryCenterFlag[0], 0, d)) s.brush.mirrorCenter = float(d);
-    if (args.isFlagSet(kAttributeFlag[0]) && args.getFlagArgument(kAttributeFlag[0], 0, text)) s.brush.attribute = text.asChar();
-    if (args.isFlagSet(kPartNameFlag[0]) && args.getFlagArgument(kPartNameFlag[0], 0, text)) s.partName = text.asChar();
-    if (args.isFlagSet(kValueFlag[0]) && args.getFlagArgument(kValueFlag[0], 0, d)) s.brush.value = float(d);
-    if (args.isFlagSet(kPaintTextureFlag[0]) && args.getFlagArgument(kPaintTextureFlag[0], 0, text)) s.paintTexture = text.asChar();
-    if (args.isFlagSet(kPaintResolutionFlag[0]) && args.getFlagArgument(kPaintResolutionFlag[0], 0, n)) s.setPaintResolution(n);
-    if (args.isFlagSet(kHardnessFlag[0]) && args.getFlagArgument(kHardnessFlag[0], 0, d)) s.setHardness(float(d));
-    if (args.isFlagSet(kSmoothStrengthFlag[0]) && args.getFlagArgument(kSmoothStrengthFlag[0], 0, d)) s.setSmoothStrength(float(d));
     if (args.isFlagSet(kPaintColorFlag[0])) {
-        PaintColor c = s.paintColor;
+        nlohmann::json color = nlohmann::json::array();
         for (unsigned k = 0; k < 4; ++k) {
-            if (args.getFlagArgument(kPaintColorFlag[0], k, d)) c[k] = float(d);
+            double d = s.paintColor[k];
+            args.getFlagArgument(kPaintColorFlag[0], k, d);
+            color.push_back(d);
         }
-        s.setPaintColor(c);
+        settings["paintColor"] = color;
     }
-    if (args.isFlagSet(kPaintChannelsFlag[0]) && args.getFlagArgument(kPaintChannelsFlag[0], 0, text)) {
-        try {
-            s.paintChannels = channelMask(text.asChar());
-        } catch (const std::invalid_argument& e) {
-            return fail(command, (std::string("-paintChannels: ") + e.what()).c_str());
-        }
-    }
-    if (args.isFlagSet(kPaintModeFlag[0]) && args.getFlagArgument(kPaintModeFlag[0], 0, text)) {
-        try {
-            s.brush.paintMode = paintModeFromString(text.asChar());
-        } catch (const std::invalid_argument& e) {
-            return fail(command, (std::string("-paintMode: ") + e.what()).c_str());
-        }
+    try {
+        applyToolSettings(s, settings);
+    } catch (const std::exception& e) {
+        return fail(command, e.what());
     }
     return MS::kSuccess;
 }

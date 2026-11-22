@@ -55,6 +55,7 @@ add_executable(groomlab_tests
     engine/editor/test_graph_edits.cpp
     engine/editor/test_guide_edits.cpp
     engine/editor/test_map_edits.cpp
+    engine/editor/test_tool_settings.cpp
     engine/core/test_value_inputs.cpp
     engine/core/test_cards.cpp
     engine/core/test_card_separation.cpp
