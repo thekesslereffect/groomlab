@@ -25,6 +25,7 @@
 
 #include "groomlab/editor/guide_edits.h"
 #include "groomlab/editor/map_edits.h"
+#include "groomlab/editor/tool_overlay.h"
 #include "groomlab/editor/tool_settings.h"
 #include "groomlab/asset_files.h"
 #include "groomlab/brush.h"
@@ -176,8 +177,7 @@ struct ToolState {
     float ringRadius = 0.0f;
     // With symmetry on: the scalp's line of symmetry (symmetrySeam, segment pairs), in red in the
     // overlay as Maya draws it, made again for another scalp or symmetry.
-    std::vector<Vec3f> seam;
-    std::uint64_t seamKey = 0;
+    SeamCache seam;  // the line of symmetry while the scalp and symmetry stay the same (tool_overlay.h)
     // The Tube tool's root-first mode (BrushTool::roots): its outlines, CVs and middles.
     RootOverlayGeometry roots;
 
@@ -822,17 +822,7 @@ void writeTexture(ToolState& t, const std::string& name) {
 
 // ---- The overlay --------------------------------------------------------------------------------
 
-constexpr float kPi = 3.14159265358979f;
 
-void appendColoredLine(DisplayGeometry& g, const std::vector<Vec3f>& points, const std::array<float, 3>& color) {
-    if (points.size() < 2) return;
-    const auto first = static_cast<std::uint32_t>(g.positions.size() / 3);
-    for (const Vec3f& p : points) {
-        g.positions.insert(g.positions.end(), {p.x, p.y, p.z});
-        g.colors.insert(g.colors.end(), {color[0], color[1], color[2], 1.0f});
-    }
-    for (std::uint32_t k = 0; k + 1 < points.size(); ++k) g.indices.insert(g.indices.end(), {first + k, first + k + 1});
-}
 
 void clearOverlay(ToolState& t) {
     t.overlay = DisplayGeometry();
@@ -862,68 +852,23 @@ void rebuildOverlay(ToolState& t, float x, float y, bool withLines) {
         }
         return;
     }
-    if (withLines && !t.selectTool) {
-        prepareHost(t);
-        std::vector<std::vector<Vec3f>> lines;
-        try {
-            lines = t.tool.affectedLines(t.host, t.view, x, y);
-        } catch (const std::exception&) {
-            lines.clear();
-        }
-        for (const std::vector<Vec3f>& line : lines) appendColoredLine(t.overlay, line, brushHoverColor(s));
-    }
-    Vec3f origin, direction;
-    if (!t.selectTool && t.view.ray(x, y, origin, direction)) {
-        Vec3f center;
-        bool have = false;
-        const MeshPtr scalp = t.session.groom->scalp();
-        SurfacePoint hit;
-        if (scalp && scalp->triangleCount() > 0 && scalp->intersectRay(origin, direction, &hit)) {
-            center = hit.position;
-            have = true;
-            t.ringOnScalp = true;
-        } else {
-            have = atTargetDepth(t, x, y, center);
-        }
-        if (have) {
-            const bool creating = s.tool == Tool::Place || s.tool == Tool::Draw || s.tool == Tool::Lengths;  // (Lengths: the keys' rings)
-            const float radius = worldRadiusAt(t.view, center, x, y, creating ? 6.0f : s.screenRadius);
-            if (radius > 0.0f) {
-                Vec3f eye, along;
-                bool ortho = false;
-                t.view.camera(eye, along, ortho);
-                const Vec3f n = ortho ? along : (center - eye).normalized();
-                const Vec3f u = (std::abs(n.y) < 0.9f ? Vec3f{0.0f, 1.0f, 0.0f} : Vec3f{1.0f, 0.0f, 0.0f}).cross(n).normalized();
-                const Vec3f v = n.cross(u);
-                std::vector<Vec3f> ring;
-                constexpr int kSegments = 48;
-                for (int k = 0; k <= kSegments; ++k) {
-                    const float a = 2.0f * kPi * static_cast<float>(k) / kSegments;
-                    ring.push_back(center + u * (std::cos(a) * radius) + v * (std::sin(a) * radius));
-                }
-                appendColoredLine(t.overlay, ring, brushRingColor(s));
-                t.ringValid = true;
-                t.ringCenter = center;
-                t.ringRadius = radius;
-                t.ringNormal = n;
-            }
-        }
-    }
     if (!t.selectTool) {
-        // Symmetry on: the scalp's line of symmetry in red (Maya's showSymmetry, symmetrySeam).
-        const MeshPtr scalp = t.session.groom->scalp();
-        const StrokeSymmetry sym = scalp ? StrokeSymmetry::of(s.brush, scalp.get()) : StrokeSymmetry{};
-        if (sym.on()) {
-            const std::uint64_t key = hashCombine(hashCombine(scalp->contentHash(), static_cast<std::uint64_t>(sym.axis + 1)),
-                                                  hashCombine(hashFloat(hash64(0x5EA4), sym.center), sym.topology() ? 1u : 0u));
-            if (key != t.seamKey) {
-                t.seam = symmetrySeam(*scalp, sym);
-                t.seamKey = key;
-            }
-            for (std::size_t k = 0; k + 1 < t.seam.size(); k += 2) appendColoredLine(t.overlay, {t.seam[k], t.seam[k + 1]}, {1.0f, 0.15f, 0.15f});
-        }
+        // Every host's overlay (the editor's brushOverlay, tool_overlay.h): the guides the brush
+        // would touch, the line of symmetry, the ring and a Part or Flow stroke's path.
+        prepareHost(t);
+        OverlayRequest request;
+        request.x = x;
+        request.y = y;
+        request.withLines = withLines;
+        request.offScalp = [&t](float px, float py, Vec3f& at) { return atTargetDepth(t, px, py, at); };
+        const BrushOverlay drawn = brushOverlay(t.tool, &t.host, t.view, request, t.seam);
+        t.overlay = drawn.lines;
+        t.ringValid = drawn.ring;
+        t.ringOnScalp = drawn.ringOnScalp;
+        t.ringCenter = drawn.ringCenter;
+        t.ringRadius = drawn.ringRadius;
+        t.ringNormal = drawn.ringNormal;
     }
-    if (t.tool.stroking() && (s.tool == Tool::Part || s.tool == Tool::Flow)) appendColoredLine(t.overlay, t.tool.drawnPath(), brushPathColor(s));
     if (s.tool == Tool::Lengths && !t.selectTool) {
         // The Length Keys tool's keys (the core's lines: the app draws the same).
         prepareHost(t);

@@ -41,6 +41,7 @@
 #include "active_groom.h"
 #include "asset_files.h"
 #include "groom_shape.h"
+#include "groomlab/editor/tool_overlay.h"
 #include "groomlab/editor/tool_settings.h"
 #include "groomlab/flow.h"
 #include "groomlab/texture.h"
@@ -1417,11 +1418,15 @@ void BrushContext::showSymmetry() {
 void BrushContext::drawCircle(MHWRender::MUIDrawManager& draw, short x, short y) const {
     const BrushToolSettings& s = tool_.settings;
     draw.beginDrawable();
-    using Tool = BrushToolSettings::Tool;
-    const bool creating = s.tool != Tool::Brush && s.tool != Tool::Flow;
-    draw.setColor(mayaColor(brushRingColor(s)));  // the core's, the standalone app's too
-    draw.setLineWidth(1.5f);
-    draw.circle2d(MPoint(x, y), creating ? 6.0 : s.screenRadius, false);
+    // Every host's ring (the editor's brushRing, tool_overlay.h): its circles in the view's pixels,
+    // the halo, the falloff's dashed ring, a dot for the tools that make guides.
+    for (const RingCircle& c : brushRing(s)) {
+        draw.setColor(mayaColor(c.color));
+        draw.setLineWidth(1.0f);
+        draw.setLineStyle(c.dashed ? MHWRender::MUIDrawManager::kDashed : MHWRender::MUIDrawManager::kSolid);
+        draw.circle2d(MPoint(x, y), c.radius, false);
+    }
+    draw.setLineStyle(MHWRender::MUIDrawManager::kSolid);
     draw.endDrawable();
 }
 

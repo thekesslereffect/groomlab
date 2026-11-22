@@ -1235,7 +1235,12 @@ class ToolsTest(HelperTestCase):
         o = r["overlay"]
         self.assertGreater(o["vertexCount"], 40)
         ring_pts = self.h.array(o["arrays"]["positions"])
-        self.assertLess(abs(np.linalg.norm(ring_pts - np.asarray(r["ring"]["center"]), axis=1).mean() - r["ring"]["radius"]), 1e-5)
+        # Every host's ring (the editor's brushRing): the ring at the radius, thickened, with its halo
+        # a pixel and a half outside and inside it (and the falloff's ring within).
+        d = np.linalg.norm(ring_pts - np.asarray(r["ring"]["center"]), axis=1)
+        px = r["ring"]["radius"] / 50.0
+        self.assertLess(np.abs(d - r["ring"]["radius"]).min(), 1e-5)
+        self.assertLess(d.max(), r["ring"]["radius"] + 2.0 * px)
         colors = self.h.array(o["arrays"]["colors"])
         self.assertEqual(colors.shape[1], 4)
         # Off the scalp: at the view's target depth.

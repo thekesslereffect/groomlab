@@ -18,6 +18,7 @@
 #include <QVector3D>
 
 #include "camera.h"
+#include "groomlab/editor/tool_overlay.h"
 #include "groomlab/display.h"
 #include "groomlab/guide_selection.h"
 #include "groomlab/stroke.h"
@@ -172,13 +173,7 @@ private:
     float ringRadius_ = 0.0f;
     // The scalp's line of symmetry (symmetrySeam), drawn red while symmetry is on; kept until the
     // scalp or the symmetry changes.
-    struct Seam {
-        MeshPtr scalp;
-        int axis = -1;
-        float center = 0.0f;
-        bool topology = false;
-        std::vector<Vec3f> points;
-    } seam_;
+    SeamCache seam_;  // the scalp's line of symmetry while it stays the same (tool_overlay.h)
     std::string error_;
     std::size_t pressIndex_ = 0;
     std::string pressText_;
