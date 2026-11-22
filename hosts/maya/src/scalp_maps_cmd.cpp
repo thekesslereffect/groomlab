@@ -221,23 +221,6 @@ MStatus ScalpMapsCmd::doIt(const MArgList& args) {
             const std::string free = freeFilePath(full);
             return free == full ? stored : portableMayaPath(free);
         };
-        // Writes the file; one that was there keeps its bytes for undo. Only ever a PNG (what
-        // painting writes): a map linked to another format is relinked to a PNG copy first.
-        auto writeTexture = [&](const TexturePaint& paint, const std::string& stored) {
-            const std::string full = resolve(stored);
-            if (!isPngPath(full)) {
-                throw std::runtime_error(full + " is not a PNG, and a texture map is written as PNG: link the map to "
-                                                "its image again (groomlab.set_map_texture paints a PNG copy)");
-            }
-            std::error_code ec;
-            const std::filesystem::path folder = std::filesystem::u8path(full).parent_path();
-            if (!folder.empty()) std::filesystem::create_directories(folder, ec);
-            // (A tile set: each tile's file, udim.h.)
-            std::vector<FileState> states = mapImageStates(full, paint.udim() ? paint.udimLayout()->tiles : std::vector<int>{});
-            paint.save(full);
-            finishFileStates(states);
-            files_.insert(files_.end(), states.begin(), states.end());
-        };
         const bool makeColor = db.isFlagSet(kColor[0]);
         // -faces: the polygons a make or fill is limited to (none given: everywhere).
         const bool onFaces = db.isFlagSet(kFaces[0]);
@@ -255,37 +238,35 @@ MStatus ScalpMapsCmd::doIt(const MArgList& args) {
         try {
             if (db.isFlagSet(kAdd[0])) {
                 const std::string name = flagString(db, kAdd[0]).asChar();
-                const std::string kind = flagString(db, kKind[0], "guides").asChar();
-                if (!validMapName(name)) return fail(kName, mapNameError(name).c_str());  // the hosts' one rule (scalp_maps.h)
-                if (!kindOf(maps, *h, name).empty()) return fail(kName, ("the groom already has a map named " + name).c_str());
-                if (makeColor && kind == "guides") {
-                    return fail(kName, "a guide layer is gray: make a color map on the scalp's vertices or as a texture");
-                }
-                // (Every host's New Map: scalp_paint.h newVertexMapValues, newTextureMapPaint, addGuideLayer.)
-                const int channels = makeColor ? kColorMap : kGrayMap;
-                const PaintColor fill = makeColor ? color : PaintColor{value, value, value, 1.0f};
-                if (kind == "guides") {
-                    addGuideLayer(*h, name, value, scalp.get(), onFaces ? faces : std::vector<std::int32_t>{});
-                    guidesChanged = true;
-                } else if (kind == "vertices") {
-                    if (!scalp) return fail(kName, "the groom has no scalp mesh");
-                    ScalpMapEntry entry{"vertices", newVertexMapValues(*scalp, channels, fill, onFaces ? faces : std::vector<std::int32_t>{}), ""};
-                    entry.channels = channels;
-                    maps.maps[name] = std::move(entry);
-                    mapsChanged = true;
-                } else if (kind == "texture") {
+                // Every host's New Map (the editor's createMap, map_edits.h): a texture map's image
+                // written at -texture (a free name when taken, stored as given), its files' states kept
+                // for Maya's undo.
+                MapCreateRequest create;
+                create.kind = flagString(db, kKind[0], "guides").asChar();
+                create.color = makeColor;
+                create.value = value;
+                if (db.isFlagSet(kFillColor[0])) create.fill = color;
+                create.resolution = resolution;
+                if (onFaces) create.faces = faces;
+                if (create.kind == "texture") {
                     if (texturePath.empty()) return fail(kName, "a texture map needs -texture <file>");
-                    if (!scalp) return fail(kName, "the groom has no scalp mesh");
-                    TexturePaint paint = newTextureMapPaint(*scalp, channels, fill, resolution, onFaces ? faces : std::vector<std::int32_t>{});
-                    const std::string stored = freshTexture(texturePath);
-                    writeTexture(paint, stored);
-                    ScalpMapEntry entry{"texture", {}, stored};
-                    entry.channels = makeColor ? kColorMap : kGrayMap;
-                    maps.maps[name] = std::move(entry);
-                    mapsChanged = true;
-                } else {
-                    return fail(kName, "-kind takes guides, vertices or texture");
+                    create.texturePath = resolve(texturePath);
                 }
+                MapFiles files;
+                files.mapsFolder = assetFolder("masks") + "/" + assetName(groomPath);
+                files.resolve = resolve;
+                files.store = [&](const std::string& full) {
+                    return samePathText(full, create.texturePath) ? texturePath : portableMayaPath(full);
+                };
+                MapCreate made = createMap(maps, h.get(), scalp.get(), name, create, files);
+                if (made.guideLayer) {
+                    applyCreatedLayer(*h, name, made);
+                    guidesChanged = true;
+                } else {
+                    maps = std::move(made.maps);
+                    mapsChanged = true;
+                }
+                for (FileState& f : made.files) files_.push_back(std::move(f));
             } else if (db.isFlagSet(kRemove[0]) || db.isFlagSet(kRename[0])) {
                 // Every host's Remove and Rename (the editor's map_edits.h): the graph's readers let go
                 // of the map or follow it, a texture map's image deleted (-deleteFile: GroomLab's,

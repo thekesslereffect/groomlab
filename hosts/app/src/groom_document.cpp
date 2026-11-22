@@ -265,48 +265,32 @@ void GroomDocument::commitMaps(const std::string& label, const ScalpMaps& maps) 
 
 std::string GroomDocument::createMap(const std::string& name, const std::string& kind, bool color, float value, int resolution,
                                      const PaintColor& fill) {
-    if (!validMapName(name)) return mapNameError(name);  // the hosts' one rule (scalp_maps.h)
-    for (const PaintedMap& m : maps()) {
-        if (m.name == name) return "the groom already has a map named '" + name + "'";
+    // Every host's New Map (the editor's createMap, map_edits.h): a guide layer, a vertex map, or a
+    // texture map whose image is written now in the groom's maps folder (a free name), stored
+    // relative to the groom; the image's files kept in the step so an undo takes it away.
+    MapCreateRequest create;
+    create.kind = kind;
+    create.color = color;
+    create.value = value;
+    create.fill = fill;
+    create.resolution = resolution;
+    MapFiles files;
+    files.mapsFolder = mapsDirectory();
+    files.groomFolder = path_.empty() ? std::string() : std::filesystem::u8path(path_).parent_path().u8string();
+    files.resolve = [this](const std::string& stored) { return resolveMapPath(stored); };
+    const MeshPtr cage = session().cageScalp();  // vertex maps are stored per vertex of the cage
+    MapCreate made;
+    try {
+        made = groomlab::createMap(session().scalpMaps(), session().authoredHierarchy().get(),
+                                   cage && cage->pointCount() > 0 ? cage.get() : nullptr, name, create, files);
+    } catch (const std::exception& e) {
+        return e.what();
     }
-    const MeshPtr scalp = session().cageScalp();  // vertex maps are stored per vertex of the cage
-    if (!scalp) return "no scalp to paint on";
-    if (kind == "guides") {
-        if (color) return "a guide layer is gray: make a color map on the scalp's vertices or as a texture";
-        return editGuides("create map " + name, [&](GuideHierarchy& h) {  // (every host's: addGuideLayer)
-            if (!addGuideLayer(h, name, value)) throw std::invalid_argument("no primary guides to carry the layer: place some first");
-        });
-    }
-    ScalpMaps maps = session().scalpMaps();
-    ScalpMapEntry entry;
-    entry.channels = color ? kColorMap : kGrayMap;
-    // (Every host's New Map: scalp_paint.h newVertexMapValues, newTextureMapPaint.)
-    const PaintColor filled = color ? fill : PaintColor{value, value, value, 1.0f};
-    if (kind == "vertices") {
-        entry.kind = "vertices";
-        entry.values = newVertexMapValues(*scalp, entry.channels, filled);
-    } else if (kind == "texture") {
-        if (!scalp->hasUVs()) return "the scalp has no UVs to paint a texture map on";
-        const std::string folder = mapsDirectory();
-        if (folder.empty()) return "save the groom first: a texture map's image goes in the groomlab folder beside it";
-        // groomlab/<groom>/masks/<name>.png beside the groom file, a free <name>_2.png when that is taken
-        // (as the Maya host names them), the file written now so the map reads from the start.
-        // (asset_files.h freeFilePath: a file or a tile set of that name is taken.)
-        const std::filesystem::path file = std::filesystem::u8path(freeFilePath(folder + "/" + name + ".png"));
-        try {
-            std::filesystem::create_directories(file.parent_path());
-            newTextureMapPaint(*scalp, entry.channels, filled, resolution).save(forwardSlashes(file.u8string()));
-        } catch (const std::exception& e) {
-            return std::string("cannot write the map's image: ") + e.what();
-        }
-        entry.kind = "texture";
-        const std::filesystem::path groomFolder = std::filesystem::u8path(path_).parent_path();
-        entry.texture = pathFromGroomFolder(file.u8string(), groomFolder.u8string());  // as every host stores it (paths.h)
-    } else {
-        return "a map's kind is vertices, texture or guides, not '" + kind + "'";
-    }
-    maps.maps[name] = std::move(entry);
-    commitMaps("create map " + name, maps);
+    const std::string label = "create map " + name;
+    if (made.guideLayer) return editGuides(label, [&](GuideHierarchy& h) { applyCreatedLayer(h, name, made); });
+    const std::size_t undoBefore = history_.undoIndex();
+    commitMaps(label, made.maps);
+    attachSide(undoBefore, label, std::move(made.files));
     return {};
 }
 

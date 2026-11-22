@@ -353,4 +353,62 @@ MapChannels setMapChannels(const ScalpMaps& maps, const GuideHierarchy* guides, 
     return out;
 }
 
+MapCreate createMap(const ScalpMaps& maps, const GuideHierarchy* guides, const ScalpMesh* cage, const std::string& name,
+                    const MapCreateRequest& create, const MapFiles& files) {
+    if (!validMapName(name)) throw std::invalid_argument(mapNameError(name));  // the hosts' one rule (scalp_maps.h)
+    if (!mapKindOf(maps, guides, name).empty()) throw std::invalid_argument("the groom already has a map named '" + name + "'");
+    const std::string& kind = create.kind;
+    if (kind != "guides" && kind != "vertices" && kind != "texture") {
+        throw std::invalid_argument("a map's kind is guides, vertices or texture, not '" + kind + "'");
+    }
+    if (create.color && kind == "guides") {
+        throw std::invalid_argument("a guide layer is gray: make a color map on the scalp's vertices or as a texture");
+    }
+    if (!cage && (kind != "guides" || !create.faces.empty())) throw std::invalid_argument("the groom has no scalp mesh");
+    const float value = std::clamp(create.value, 0.0f, 1.0f);
+    MapCreate out;
+    out.maps = maps;
+    if (kind == "guides") {
+        GuideHierarchy h = guides ? *guides : GuideHierarchy{};
+        if (!addGuideLayer(h, name, value, cage, create.faces)) {
+            throw std::invalid_argument("no primary guides to carry the layer: place some first");
+        }
+        out.guideLayer = true;
+        for (const HierarchyGuide& g : h.guides()) {
+            const auto own = g.attributes.find(name);
+            if (own != g.attributes.end()) out.layer[g.id] = own->second;
+        }
+        return out;
+    }
+    ScalpMapEntry entry;
+    entry.channels = create.color ? kColorMap : kGrayMap;
+    const PaintColor fill = create.color && create.fill ? *create.fill : PaintColor{value, value, value, 1.0f};
+    if (kind == "vertices") {
+        entry.kind = "vertices";
+        entry.values = newVertexMapValues(*cage, entry.channels, fill, create.faces);
+    } else {
+        if (!cage->hasUVs()) throw std::invalid_argument("the scalp has no UVs to paint a texture map on");
+        if (!create.texturePath.empty() && !isPngPath(create.texturePath)) {
+            throw std::invalid_argument("a texture map's file is a PNG (painting writes PNG), not " + create.texturePath);
+        }
+        if (create.texturePath.empty() && files.mapsFolder.empty()) {
+            throw std::invalid_argument("save the groom first: a texture map's image goes in the groomlab folder beside it");
+        }
+        // A new file never replaces one that is there (another groom's, a map removed earlier): a free name.
+        const std::string file = create.texturePath.empty() ? newMapImageFile(name, files) : freeFilePath(create.texturePath);
+        out.files = writeMapImage(newTextureMapPaint(*cage, entry.channels, fill, create.resolution, create.faces), file);
+        entry.kind = "texture";
+        entry.texture = storedMapPath(file, files);
+        out.file = entry.texture;
+    }
+    out.maps.maps[name] = std::move(entry);
+    return out;
+}
+
+void applyCreatedLayer(GuideHierarchy& h, const std::string& name, const MapCreate& created) {
+    for (const auto& [id, value] : created.layer) {
+        if (h.guide(id)) h.setAttribute(id, name, value);
+    }
+}
+
 }  // namespace groomlab

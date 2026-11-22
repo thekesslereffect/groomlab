@@ -1995,8 +1995,8 @@ void commitMaps(ToolState& t, const std::string& label, const ScalpMaps& maps) {
 // A new scalp map's entry (vertices: `value` or `fill` at every vertex; texture: its image written
 // in the maps folder, a free name), not committed. With `faces` (scalp polygon indices) only those
 // faces get the value or fill, the rest 0 (a color map: black, alpha 1).
-ScalpMapEntry newScalpMapEntry(Session& s, const ScalpMesh& scalp, const std::string& name, const std::string& kind, bool color,
-                               float value, const PaintColor& fill, int resolution, const std::vector<std::int32_t>& faces = {});
+ScalpMapEntry newScalpMapEntry(ToolState& t, const ScalpMesh& scalp, const std::string& name, const std::string& kind, bool color,
+                               float value, const PaintColor* fill, int resolution, const std::vector<std::int32_t>& faces = {});
 // "vertices", "texture", "guides", or "" for no map of that name.
 std::string mapKindOf(Session& s, const std::string& name);
 
@@ -2023,62 +2023,71 @@ json mapCreate(ToolState& t, const json& args) {
     const std::string kind = optString(args, "kind", "vertices");
     const bool color = optBool(args, "color", false);
     const float value = static_cast<float>(optNumber(args, "value", 0.0));
-    PaintColor fill{0.0f, 0.0f, 0.0f, 1.0f};
+    std::optional<PaintColor> fill;
     if (args.contains("fill") && !args["fill"].is_null()) {
         const json& f = args["fill"];
         if (!f.is_array() || (f.size() != 3 && f.size() != 4)) fail("bad_request", "fill is [r, g, b] or [r, g, b, a]");
-        for (std::size_t i = 0; i < f.size(); ++i) fill[i] = std::clamp(settingNumber(f[i], "fill"), 0.0f, 1.0f);
+        fill = PaintColor{0.0f, 0.0f, 0.0f, 1.0f};
+        for (std::size_t i = 0; i < f.size(); ++i) (*fill)[i] = std::clamp(settingNumber(f[i], "fill"), 0.0f, 1.0f);
     }
     if (!validMapName(name)) fail("bad_request", mapNameError(name));
-    const json existing = mapsList(t);
-    for (const json& m : existing["maps"]) {
-        if (m["name"] == name) fail("bad_request", "the groom already has a map named '" + name + "'");
-    }
+    if (!mapKindOf(s, name).empty()) fail("bad_request", "the groom already has a map named '" + name + "'");
     const MeshPtr scalp = s.groom->cageScalp();
     if (!scalp) fail("state", "no scalp to paint on: set_scalp first");
     const std::vector<std::int32_t> faces = facesArg(args);
+    const int resolution = static_cast<int>(optNumber(args, "resolution", 1024.0));
     if (kind == "guides") {
-        if (color) fail("bad_request", "a guide layer is gray: make a color map on the scalp's vertices or as a texture");
         // On faces: the value on the guides rooted on them, 0 on the rest (every host's: addGuideLayer).
-        editGuides(t, "create map " + name, [&](GuideHierarchy& h) {
-            if (!addGuideLayer(h, name, value, scalp.get(), faces)) fail("state", "no primary guides to carry the layer: place some first");
-        });
+        MapCreate made;
+        MapCreateRequest create;
+        create.kind = kind;
+        create.color = color;
+        create.value = value;
+        create.faces = faces;
+        try {
+            made = groomlab::createMap(s.groom->scalpMaps(), s.groom->authoredHierarchy().get(), scalp.get(), name, create, MapFiles{});
+        } catch (const std::invalid_argument& e) {
+            fail("bad_request", e.what());
+        }
+        editGuides(t, "create map " + name, [&](GuideHierarchy& h) { applyCreatedLayer(h, name, made); });
         return {{"name", name}, {"kind", kind}, {"undo", undoJson(t)}};
     }
     ScalpMaps maps = s.groom->scalpMaps();
-    maps.maps[name] = newScalpMapEntry(s, *scalp, name, kind, color, value, fill, static_cast<int>(optNumber(args, "resolution", 1024.0)), faces);
+    maps.maps[name] = newScalpMapEntry(t, *scalp, name, kind, color, value, fill ? &*fill : nullptr, resolution, faces);
     commitMaps(t, "create map " + name, maps);
     json r = {{"name", name}, {"kind", kind}, {"undo", undoJson(t)}};
     if (kind == "texture") r["file"] = maps.maps[name].texture;
     return r;
 }
 
-ScalpMapEntry newScalpMapEntry(Session& s, const ScalpMesh& scalpMesh, const std::string& name, const std::string& kind, bool color,
-                               float value, const PaintColor& fill, int resolution, const std::vector<std::int32_t>& faces) {
-    const ScalpMesh* scalp = &scalpMesh;
-    ScalpMapEntry entry;
-    entry.channels = color ? kColorMap : kGrayMap;
-    // (Every host's New Map: scalp_paint.h newVertexMapValues, newTextureMapPaint.)
-    const PaintColor filled = color ? fill : PaintColor{value, value, value, 1.0f};
-    if (kind == "vertices") {
-        entry.kind = "vertices";
-        entry.values = newVertexMapValues(*scalp, entry.channels, filled, faces);
-    } else if (kind == "texture") {
-        if (!scalp->hasUVs()) fail("state", "the scalp has no UVs to paint a texture map on");
-        const fs::path folder = fs::u8path(mapsFolder(s));
-        const fs::path file = fs::u8path(freeFilePath((folder / (name + ".png")).generic_u8string()));  // (a file or a tile set: taken)
-        try {
-            fs::create_directories(file.parent_path());
-            newTextureMapPaint(*scalp, entry.channels, filled, resolution, faces).save(file.generic_u8string());
-        } catch (const std::exception& e) {
-            fail("io", std::string("cannot write the map's image: ") + e.what());
-        }
-        entry.kind = "texture";
-        entry.texture = file.generic_u8string();
-    } else {
-        fail("bad_request", "a map's kind is vertices, texture or guides, not '" + kind + "'");
+ScalpMapEntry newScalpMapEntry(ToolState& t, const ScalpMesh& scalp, const std::string& name, const std::string& kind, bool color,
+                               float value, const PaintColor* fill, int resolution, const std::vector<std::int32_t>& faces) {
+    // Every host's New Map (the editor's createMap, map_edits.h); a texture's image written in the
+    // maps folder (a free name), its files part of the next commit's undo step.
+    Session& s = t.session;
+    if (kind == "texture" && !scalp.hasUVs()) fail("state", "the scalp has no UVs to paint a texture map on");
+    MapCreateRequest create;
+    create.kind = kind;
+    create.color = color;
+    create.value = value;
+    if (fill) create.fill = *fill;
+    create.resolution = resolution;
+    create.faces = faces;
+    MapFiles files;
+    files.mapsFolder = mapsFolder(s);
+    files.resolve = [&s](const std::string& stored) { return resolveMapFile(s, stored); };
+    ScalpMaps maps = s.groom->scalpMaps();
+    maps.maps.erase(name);  // (a caller replacing an entry of that name)
+    MapCreate made;
+    try {
+        made = groomlab::createMap(maps, nullptr, &scalp, name, create, files);
+    } catch (const std::invalid_argument& e) {
+        fail("bad_request", e.what());
+    } catch (const std::exception& e) {
+        fail("io", e.what());
     }
-    return entry;
+    for (FileEdit& f : made.files) t.pending.files.push_back(std::move(f));
+    return made.maps.maps.at(name);
 }
 
 json mapForParam(ToolState& t, const json& args) {
@@ -2159,7 +2168,7 @@ json mapForParam(ToolState& t, const json& args) {
         // beside the groom, linked by its file.
         map = paramMapName(node, param);  // (free: one of that name was linked above)
         ScalpMaps maps = s.groom->scalpMaps();
-        maps.maps[map] = newScalpMapEntry(s, *scalp, map, kind, false, 1.0f, PaintColor{1.0f, 1.0f, 1.0f, 1.0f},
+        maps.maps[map] = newScalpMapEntry(t, *scalp, map, kind, false, 1.0f, nullptr,
                                           static_cast<int>(optNumber(args, "resolution", 1024.0)), faces);
         std::string graph;
         try {

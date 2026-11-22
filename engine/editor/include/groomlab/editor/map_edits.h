@@ -159,4 +159,36 @@ struct MapChannels {
 MapChannels setMapChannels(const ScalpMaps& maps, const GuideHierarchy* guides, const ScalpMesh* cage, const std::string& name,
                            int wanted, int resolution, const MapFiles& files);
 
+// A new map, as asked.
+struct MapCreateRequest {
+    std::string kind = "vertices";     // guides, vertices or texture
+    bool color = false;                // a color map (vertices or texture)
+    float value = 0.0f;                // its value (clamped 0..1)
+    std::optional<PaintColor> fill;    // a color map's color; none: (value, value, value, 1)
+    int resolution = 1024;             // a texture map's image, this square
+    std::vector<std::int32_t> faces;   // only those polygons of the cage get it, the rest 0 (a color map: black, alpha 1)
+    std::string texturePath;           // a texture map's image (a PNG; a free name beside it when taken); "": newMapImageFile
+};
+
+// A map made.
+struct MapCreate {
+    bool guideLayer = false;           // a guide layer: its values in `layer` (applyCreatedLayer)
+    std::map<GuideId, float> layer;    // each guide's own value
+    ScalpMaps maps;                    // the scalp maps after (with the new entry; unchanged for a guide layer)
+    std::vector<FileState> files;      // a texture map's image written, as found and as left (the step's undo)
+    std::string file;                  // a texture map's image as stored ("" for another kind)
+};
+
+// Map `name` made, every host's New Map (scalp_paint.h addGuideLayer, newVertexMapValues,
+// newTextureMapPaint): a guide layer on the primary guides (their children inheriting), a vertex
+// map on the cage's vertices, or a texture map whose image is written now (stored as the host
+// stores paths). `cage`: the scalp the maps are painted on (may be null for a guide layer made
+// everywhere). Throws std::invalid_argument for a name that cannot name a map or is taken, an
+// unknown kind, a color guide layer, no scalp, no UVs, no maps folder or a texture that is not a
+// PNG, no primary guides to carry a layer; std::runtime_error for an image that cannot be written.
+MapCreate createMap(const ScalpMaps& maps, const GuideHierarchy* guides, const ScalpMesh* cage, const std::string& name,
+                    const MapCreateRequest& create, const MapFiles& files);
+// The made layer onto a hierarchy (the host's, its other edits kept as they are).
+void applyCreatedLayer(GuideHierarchy& h, const std::string& name, const MapCreate& created);
+
 }  // namespace groomlab

@@ -301,3 +301,67 @@ TEST(MapEdits, ChannelsMakeAMapGrayOrColorAndGiveASharedImageItsOwnCopy) {
     restoreFileStates(own.files, false);
     EXPECT_FALSE(fs::exists(dir / "masks" / "a.png"));
 }
+
+TEST(MapEdits, CreateMakesEachKindAndRefusesWhatAMapCannotBe) {
+    const fs::path dir = freshFolder("create");
+    auto plane = std::make_shared<ScalpMesh>(*test::makePlane(4));
+    std::vector<ScalpMesh::UV> uvs;
+    for (std::size_t t = 0; t < plane->triangleCount(); ++t) {
+        for (const int v : plane->triangles()[t]) uvs.push_back({plane->points()[v].x, plane->points()[v].z});
+    }
+    plane->setCornerUVs(std::move(uvs));
+    const std::shared_ptr<const ScalpMesh> scalp = plane;
+    GuideHierarchy h;
+    const GroupId group = h.addGroup("g");
+    const GuideId guide = h.addGuide(group, {scalp->points()[0], scalp->points()[0] + Vec3f{0.0f, 0.5f, 0.0f}});
+    h.evaluate(scalp.get());
+    ScalpMaps maps;
+    maps.maps["taken"] = ScalpMapEntry{"vertices", std::vector<float>(scalp->pointCount(), 0.0f), ""};
+    MapFiles files;
+    files.mapsFolder = (dir / "masks").generic_u8string();
+    files.groomFolder = dir.generic_u8string();
+    // A guide layer: the value on the primary guides.
+    MapCreateRequest layer;
+    layer.kind = "guides";
+    layer.value = 0.4f;
+    const MapCreate g = createMap(maps, &h, nullptr, "lay", layer, files);
+    EXPECT_TRUE(g.guideLayer);
+    EXPECT_FLOAT_EQ(g.layer.at(guide), 0.4f);
+    GuideHierarchy made = h;
+    applyCreatedLayer(made, "lay", g);
+    EXPECT_EQ(made.attributeNames(), (std::vector<std::string>{"lay"}));
+    // A color vertex map without a color: the value in r g b, alpha 1.
+    MapCreateRequest vertices;
+    vertices.color = true;
+    vertices.value = 0.5f;
+    const MapCreate v = createMap(maps, &h, scalp.get(), "tint", vertices, files);
+    ASSERT_EQ(v.maps.maps.at("tint").values.size(), scalp->pointCount() * 4);
+    EXPECT_FLOAT_EQ(v.maps.maps.at("tint").values[0], 0.5f);
+    EXPECT_FLOAT_EQ(v.maps.maps.at("tint").values[3], 1.0f);
+    EXPECT_TRUE(v.files.empty());
+    // A texture: its image written in the maps folder (a free name), stored relative to the groom, undone.
+    writeFile(dir / "masks" / "dens.png", "someone's");
+    MapCreateRequest texture;
+    texture.kind = "texture";
+    texture.value = 1.0f;
+    texture.resolution = 16;
+    const MapCreate t = createMap(maps, &h, scalp.get(), "dens", texture, files);
+    EXPECT_EQ(t.file, "masks/dens_2.png");
+    EXPECT_EQ(t.maps.maps.at("dens").texture, "masks/dens_2.png");
+    EXPECT_EQ(readFile(dir / "masks" / "dens.png"), "someone's");
+    restoreFileStates(t.files, false);
+    EXPECT_FALSE(fs::exists(dir / "masks" / "dens_2.png"));
+    // Refused: a bad or taken name, an unknown kind, a color layer, no scalp, no PNG, no guides.
+    EXPECT_THROW(createMap(maps, &h, scalp.get(), "9bad", vertices, files), std::invalid_argument);
+    EXPECT_THROW(createMap(maps, &h, scalp.get(), "taken", vertices, files), std::invalid_argument);
+    MapCreateRequest odd;
+    odd.kind = "cloud";
+    EXPECT_THROW(createMap(maps, &h, scalp.get(), "x", odd, files), std::invalid_argument);
+    layer.color = true;
+    EXPECT_THROW(createMap(maps, &h, scalp.get(), "x", layer, files), std::invalid_argument);
+    EXPECT_THROW(createMap(maps, &h, nullptr, "x", vertices, files), std::invalid_argument);
+    texture.texturePath = (dir / "masks" / "x.jpg").generic_u8string();
+    EXPECT_THROW(createMap(maps, &h, scalp.get(), "x", texture, files), std::invalid_argument);
+    layer.color = false;
+    EXPECT_THROW(createMap(maps, nullptr, scalp.get(), "x", layer, files), std::invalid_argument) << "no guides to carry it";
+}
