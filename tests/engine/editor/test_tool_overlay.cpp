@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 
 #include "groomlab/editor/tool_overlay.h"
+#include "groomlab/editor/tool_select.h"
 #include "../core/test_helpers.h"
 
 using namespace groomlab;
@@ -56,4 +57,10 @@ TEST(ToolOverlay, TheRingLiesWhereTheHostPutsItAsWideAsTheBrush) {
     // Nowhere to put it: no ring.
     request.offScalp = nullptr;
     EXPECT_FALSE(brushOverlay(tool, nullptr, view, request, seam).ring);
+}
+
+TEST(ToolOverlay, APickOfNothingSoloesOnlyAPlainOne) {
+    EXPECT_TRUE(pickSoloes({}, SelectMode::Replace));
+    EXPECT_FALSE(pickSoloes({}, SelectMode::Add));
+    EXPECT_TRUE(pickSoloes({3}, SelectMode::Toggle));
 }

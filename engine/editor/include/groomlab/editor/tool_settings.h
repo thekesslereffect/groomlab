@@ -52,4 +52,19 @@ nlohmann::json toolSettingsJson(const BrushToolSettings& s, const ToolSpace& spa
 // returns the value. Throws std::invalid_argument for a setting other than radius or strength.
 float dragToolSetting(BrushToolSettings& s, const std::string& setting, float start, float dx, float pixelScale = 1.0f);
 
+// The Paint settings Freeze set aside, given back when another tool is picked.
+struct FreezeKept {
+    std::string attribute = "clump";
+    float value = 1.0f;
+    std::string kind = "guides", texture;
+};
+
+// A tool picked by its rail id, every host's: the catalog's brushes and tools (setMode), or
+// "freeze": Paint on the guides' freeze layer (the mask the brushes are held back by), the Paint
+// settings it replaces kept in `kept` and given back when another tool is picked. Throws
+// std::invalid_argument for an unknown id, nothing changed.
+void pickTool(BrushToolSettings& s, const std::string& id, FreezeKept& kept);
+// The tool `s` is (pickTool's id): "freeze" while Paint is on the freeze layer, else the mode.
+std::string pickedTool(const BrushToolSettings& s);
+
 }  // namespace groomlab

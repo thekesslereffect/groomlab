@@ -26,6 +26,7 @@
 #include "groomlab/editor/guide_edits.h"
 #include "groomlab/editor/map_edits.h"
 #include "groomlab/editor/tool_overlay.h"
+#include "groomlab/editor/tool_select.h"
 #include "groomlab/editor/tool_settings.h"
 #include "groomlab/asset_files.h"
 #include "groomlab/brush.h"
@@ -90,11 +91,7 @@ private:
     ToolState& t_;
 };
 
-struct PaintTarget {
-    std::string attribute = "clump";
-    float value = 1.0f;
-    std::string kind = "guides", texture;
-};
+using PaintTarget = FreezeKept;  // what Paint painted before Freeze took the brush (tool_settings.h)
 
 // A file an edit wrote, moved or removed (a texture map's image): its bytes before and after (not
 // `before` / not `after`: no file then), so undo and redo put it back as the edit found and left it.
@@ -438,48 +435,23 @@ constexpr const char* kSelectTool = "select";
 
 std::string toolIdOf(const ToolState& t) {
     if (t.selectTool) return kSelectTool;
-    const BrushToolSettings& s = t.tool.settings;
-    if (s.tool == BrushToolSettings::Tool::Brush && s.brush.mode == BrushMode::Attribute && s.brush.attribute == kFreezeTool &&
-        s.paintKind == "guides") {
-        return kFreezeTool;
-    }
-    return s.modeName();
+    return pickedTool(t.tool.settings);  // every host's (tool_settings.h)
 }
 
 // The rail's tools by the catalog's ids, as the app's BrushSession::setTool picks them: a brush
 // mode, "freeze" (Paint on the guides' freeze mask toward 1; Ctrl: 0), or "select" (the lasso).
 void setTool(ToolState& t, const std::string& id) {
-    BrushToolSettings& s = t.tool.settings;
-    const bool freezing = toolIdOf(t) == kFreezeTool;
     if (id == kSelectTool) {
         t.selectTool = true;
         return;
     }
-    if (id == kFreezeTool) {
-        t.selectTool = false;
-        if (!freezing) t.beforeFreeze = {s.brush.attribute, s.brush.value, s.paintKind, s.paintTexture};
-        s.setMode("paint");
-        s.brush.freeze = kFreezeTool;
-        s.brush.attribute = kFreezeTool;
-        s.brush.value = 1.0f;
-        s.paintKind = "guides";
-        s.paintTexture.clear();
-        return;
-    }
     if (id == "width" || id == "density") fail("bad_request", std::string(kRemovedParamBrushes) + " (the helper: map_for_param)");
     try {
-        BrushToolSettings().setMode(id);  // throws for an unknown id, before anything changes
+        pickTool(t.tool.settings, id, t.beforeFreeze);  // every host's (the editor's, tool_settings.h)
     } catch (const std::invalid_argument&) {
         fail("bad_request", "no tool '" + id + "': the catalog's ids (tool_catalog), select, freeze or clump");
     }
     t.selectTool = false;
-    if (freezing) {
-        s.brush.attribute = t.beforeFreeze.attribute;
-        s.brush.value = t.beforeFreeze.value;
-        s.paintKind = t.beforeFreeze.kind;
-        s.paintTexture = t.beforeFreeze.texture;
-    }
-    s.setMode(id);
 }
 
 float settingNumber(const json& v, const char* key) {
@@ -3219,25 +3191,22 @@ bool runToolCommandIn(Session& s, ToolState& t, const std::string& cmd, const js
         const HierarchyPtr h = s.groom->hierarchy();
         std::vector<GuideId> picked;
         if (h) {
+            // Every host's pick (the editor's pickGuidesInView, tool_select.h): a click, a box or a
+            // lasso, only what the view shows, the mirror guides with the tool's symmetry.
             const BrushToolSettings& st = t.tool.settings;
-            const std::vector<GuideId> candidates = guidesAt(*h, st.brush.level, st.brush.group, t.hidden);
             const std::vector<Pixel> lasso = pixelsOf(need(args, "lasso"), 1.0f);
             if (lasso.empty()) fail("bad_request", "lasso holds a point (a click), two (a box) or more");
-            std::vector<std::array<float, 2>> polygon;
-            if (lasso.size() == 2) {
-                const Pixel& a = lasso[0];
-                const Pixel& b = lasso[1];
-                polygon = {{a.x, a.y}, {b.x, a.y}, {b.x, b.y}, {a.x, b.y}};
-            } else {
-                for (const Pixel& p : lasso) polygon.push_back({p.x, p.y});
-            }
-            // Only what the view shows: guide points behind the scalp are not picked.
-            const ViewProjector visible = visibleProjector(pixelProjector(t.view.projection), scalpVisibility(s.groom->scalp(), t.view));
-            picked = pickGuides(*h, candidates, visible, polygon, optBool(args, "rootsOnly", false),
-                                static_cast<float>(optNumber(args, "clickPixels", 12.0)), &t.view.projection);
-            // With symmetry (the tool's), each picked guide's mirror guide too.
+            std::vector<std::array<float, 2>> pixels;
+            for (const Pixel& p : lasso) pixels.push_back({p.x, p.y});
+            GuidePick pick;
+            pick.level = st.brush.level;
+            pick.group = st.brush.group;
+            pick.hiddenGroups = t.hidden;
+            pick.rootsOnly = optBool(args, "rootsOnly", false);
+            pick.clickPixels = static_cast<float>(optNumber(args, "clickPixels", 12.0));
             const MeshPtr scalp = s.groom->scalp();
-            picked = withMirrorGuides(*h, picked, StrokeSymmetry::of(st.brush, scalp.get()));
+            pick.symmetry = StrokeSymmetry::of(st.brush, scalp.get());
+            picked = pickGuidesInView(*h, t.view, scalp, pixels, pick);
         }
         pruneSelection(t);
         const std::vector<GuideId> selection = combineSelection(t.selection, picked, mode);
@@ -3245,7 +3214,7 @@ bool runToolCommandIn(Session& s, ToolState& t, const std::string& cmd, const js
         // "solo" (the add-on's Select tool): every guide not selected frozen, one undo step when
         // that changed anything; a plain pick of nothing unfreezes all.
         bool froze = false;
-        if (optBool(args, "solo", false) && (!picked.empty() || mode == SelectMode::Replace)) {
+        if (optBool(args, "solo", false) && pickSoloes(picked, mode)) {
             const std::shared_ptr<const GuideHierarchy> stored = s.groom->authoredHierarchy();
             GuideHierarchy probe = stored ? *stored : GuideHierarchy{};
             if (freezeToSelection(probe, selection)) {

@@ -55,38 +55,18 @@ constexpr const char* kFreezeTool = "freeze";
 }  // namespace
 
 void BrushSession::setTool(const std::string& id) {
-    BrushToolSettings& s = tool_.settings;
-    const bool freezing = toolId() == kFreezeTool;
-    if (id == kFreezeTool) {
-        if (!freezing) beforeFreeze_ = {s.brush.attribute, s.brush.value, s.paintKind, s.paintTexture};
-        s.setMode("paint");
-        // The mask the brushes are held back by (BrushSettings::freeze), on the guides.
-        s.brush.freeze = kFreezeTool;
-        s.brush.attribute = kFreezeTool;
-        s.brush.value = 1.0f;
-        s.paintKind = "guides";
-        s.paintTexture.clear();
-        return;
+    // Every host's pick of a tool (the editor's pickTool, tool_settings.h): Freeze sets Paint's
+    // settings aside and gives them back.
+    if (tool_.settings.tool == BrushToolSettings::Tool::Roots && id != "roots" && id != kFreezeTool) {
+        BrushToolSettings().setMode(id);  // throws for an unknown id, before the root mode is put away
+        leaveRoots();
     }
-    BrushToolSettings().setMode(id);  // throws for an unknown id, before anything changes
-    if (s.tool == BrushToolSettings::Tool::Roots && id != "roots") leaveRoots();  // (another tool: the root mode put away)
-    if (freezing) {
-        s.brush.attribute = beforeFreeze_.attribute;
-        s.brush.value = beforeFreeze_.value;
-        s.paintKind = beforeFreeze_.kind;
-        s.paintTexture = beforeFreeze_.texture;
-    }
-    s.setMode(id);
+    pickTool(tool_.settings, id, beforeFreeze_);
 }
 
 std::string BrushSession::toolId() const {
-    const BrushToolSettings& s = tool_.settings;
-    if (s.tool == BrushToolSettings::Tool::Brush && s.brush.mode == BrushMode::Attribute && s.brush.attribute == kFreezeTool &&
-        s.paintKind == "guides") {
-        return kFreezeTool;
-    }
-    if (s.tool == BrushToolSettings::Tool::Roots) return "shape";  // the Tube tool's root mode
-    return s.modeName();
+    if (tool_.settings.tool == BrushToolSettings::Tool::Roots) return "shape";  // the Tube tool's root mode
+    return pickedTool(tool_.settings);  // (every host's: tool_settings.h)
 }
 
 bool BrushSession::startRoots(RootTubeTool::Mode mode) {
@@ -337,27 +317,23 @@ std::size_t BrushSession::select(const std::vector<QPointF>& lasso, SelectMode m
     if (!document_ || !host_ || !view_.projection.valid() || lasso.empty()) return 0;
     const std::shared_ptr<const GuideHierarchy> h = host_->shownHierarchy();
     if (!h) return 0;
+    // Every host's pick (the editor's pickGuidesInView, tool_select.h): a click, a box or a lasso,
+    // only what the view shows, the mirror guides with symmetry.
     const BrushToolSettings& s = tool_.settings;
-    const std::vector<GuideId> candidates = guidesAt(*h, s.brush.level, s.brush.group, document_->hiddenGroups());
-    std::vector<std::array<float, 2>> polygon;
-    if (lasso.size() == 2) {
-        // A box from two corners.
-        const std::array<float, 2> a = port(lasso[0]), b = port(lasso[1]);
-        polygon = {{a[0], a[1]}, {b[0], a[1]}, {b[0], b[1]}, {a[0], b[1]}};
-    } else {
-        for (const QPointF& p : lasso) polygon.push_back(port(p));
-    }
-    std::vector<GuideId> picked =
-        pickGuides(*h, candidates, visibleProjector(pixelProjector(view_.projection), scalpVisibility(host_->scalp(), view_)), polygon,
-                   false, 12.0f, &view_.projection);  // (only what the view shows: nothing behind the scalp)
-    // With symmetry, each picked guide's mirror guide too.
+    GuidePick pick;
+    pick.level = s.brush.level;
+    pick.group = s.brush.group;
+    pick.hiddenGroups = document_->hiddenGroups();
     const MeshPtr scalp = host_->scalp();
-    picked = withMirrorGuides(*h, picked, StrokeSymmetry::of(s.brush, scalp.get()));
+    pick.symmetry = StrokeSymmetry::of(s.brush, scalp.get());
+    std::vector<std::array<float, 2>> pixels;
+    for (const QPointF& p : lasso) pixels.push_back(port(p));
+    const std::vector<GuideId> picked = pickGuidesInView(*h, view_, scalp, pixels, pick);
     const std::vector<GuideId> selection = combineSelection(document_->selection(), picked, mode);
     document_->setSelection(selection);
     // Solo: every guide not selected frozen, an undo step when that changed anything (a pick of
     // nothing with a modifier changes nothing; a plain one unfreezes all).
-    if (solo && (!picked.empty() || mode == SelectMode::Replace)) {
+    if (solo && pickSoloes(picked, mode)) {
         const std::shared_ptr<const GuideHierarchy> authored = document_->session().authoredHierarchy();
         GuideHierarchy probe = authored ? *authored : GuideHierarchy{};
         const std::string layer = selectHides ? std::string(kHiddenLayer) : std::string("freeze");

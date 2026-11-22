@@ -79,7 +79,16 @@ time, each host calling the one version:
   `editedTube`'s JSON, and the tube shape library. The app's Guides panel and tube edits, the
   Blender helper's `guides_edit` and `tube_*` commands and Maya's `groomLabGuides` call them.
   Correctives (`correctives.h`), parts and flow were already the core's in every host.
-- Next: the brush tool's session (its ring, selection, settings by id) and the game exports.
+- E4 (done): the brush tool's (`tool_settings.h`, `tool_overlay.h`, `tool_select.h`). Its
+  settings set by id, one parser for the app's widgets, Maya's flags and the Blender helper's
+  keys (`applyToolSettings`; a `ToolSpace` turns a host's units and axes into the groom's), the
+  radius and strength drag (`dragToolSetting`), the rail's tools with Freeze setting Paint aside
+  (`pickTool`); the ring as circles in pixels (`brushRing`: the halo, the falloff's dashed ring,
+  a held key's state; Maya draws it in 2D) and the overlay of colored lines the app and Blender
+  draw (`brushOverlay`: hover, line of symmetry, ring, Part and Flow path); the Select tool's pick
+  (`pickGuidesInView`: click, box or lasso, only what the view shows, mirrors) and when it soloes
+  (`pickSoloes`).
+- Next: the game exports.
   The Blender helper becomes a JSON wrapper over it; Maya calls it through `groomlab_core` and
   records each step through its own undo queue.
 

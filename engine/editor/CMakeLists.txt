@@ -8,6 +8,7 @@ add_library(groomlab_editor STATIC
     src/guide_edits.cpp
     src/map_edits.cpp
     src/tool_overlay.cpp
+    src/tool_select.cpp
     src/tool_settings.cpp
 )
 add_library(groomlab::editor ALIAS groomlab_editor)

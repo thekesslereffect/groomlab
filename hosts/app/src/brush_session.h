@@ -19,6 +19,8 @@
 
 #include "camera.h"
 #include "groomlab/editor/tool_overlay.h"
+#include "groomlab/editor/tool_select.h"
+#include "groomlab/editor/tool_settings.h"
 #include "groomlab/display.h"
 #include "groomlab/guide_selection.h"
 #include "groomlab/stroke.h"
@@ -182,12 +184,7 @@ private:
     long shotFrame_ = 0;
     std::string shotLayer_;
     // What Paint painted before Freeze took the brush (setTool puts it back).
-    struct PaintTarget {
-        std::string attribute = "clump";
-        float value = 1.0f;
-        std::string kind = "guides", texture;
-    };
-    PaintTarget beforeFreeze_;
+    FreezeKept beforeFreeze_;  // what Paint painted before Freeze took the brush (tool_settings.h)
 };
 
 

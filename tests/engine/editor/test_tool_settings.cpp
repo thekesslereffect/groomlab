@@ -71,3 +71,21 @@ TEST(ToolSettings, ADragSetsTheRadiusOrTheStrengthAsEveryHostDoes) {
     EXPECT_FLOAT_EQ(dragToolSetting(s, "strength", 0.5f, -5000.0f), -10.0f);
     EXPECT_THROW(dragToolSetting(s, "length", 1.0f, 1.0f), std::invalid_argument);
 }
+
+TEST(ToolSettings, FreezeSetsPaintAsideAndGivesItBack) {
+    BrushToolSettings s;
+    FreezeKept kept;
+    pickTool(s, "paint", kept);
+    s.brush.attribute = "density";
+    s.paintKind = "vertices";
+    pickTool(s, "freeze", kept);
+    EXPECT_EQ(pickedTool(s), "freeze");
+    EXPECT_EQ(s.brush.attribute, "freeze");
+    pickTool(s, "freeze", kept);  // (again: what was kept stays)
+    pickTool(s, "paint", kept);
+    EXPECT_EQ(s.brush.attribute, "density");
+    EXPECT_EQ(s.paintKind, "vertices");
+    EXPECT_EQ(pickedTool(s), "paint");
+    EXPECT_THROW(pickTool(s, "nope", kept), std::invalid_argument);
+    EXPECT_EQ(pickedTool(s), "paint");
+}

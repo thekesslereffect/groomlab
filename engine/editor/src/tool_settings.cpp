@@ -244,4 +244,34 @@ float dragToolSetting(BrushToolSettings& s, const std::string& setting, float st
     throw std::invalid_argument("a drag sets the radius or the strength, not '" + setting + "'");
 }
 
+void pickTool(BrushToolSettings& s, const std::string& id, FreezeKept& kept) {
+    const bool freezing = pickedTool(s) == "freeze";
+    if (id == "freeze") {
+        if (!freezing) kept = {s.brush.attribute, s.brush.value, s.paintKind, s.paintTexture};
+        s.setMode("paint");
+        s.brush.freeze = "freeze";
+        s.brush.attribute = "freeze";
+        s.brush.value = 1.0f;
+        s.paintKind = "guides";
+        s.paintTexture.clear();
+        return;
+    }
+    BrushToolSettings().setMode(id);  // throws for an unknown id, before anything changes
+    if (freezing) {
+        s.brush.attribute = kept.attribute;
+        s.brush.value = kept.value;
+        s.paintKind = kept.kind;
+        s.paintTexture = kept.texture;
+    }
+    s.setMode(id);
+}
+
+std::string pickedTool(const BrushToolSettings& s) {
+    if (s.tool == BrushToolSettings::Tool::Brush && s.brush.mode == BrushMode::Attribute && s.brush.attribute == "freeze" &&
+        s.paintKind == "guides") {
+        return "freeze";
+    }
+    return s.modeName();
+}
+
 }  // namespace groomlab

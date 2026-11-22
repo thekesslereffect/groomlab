@@ -18,6 +18,7 @@
 #include "active_groom.h"
 #include "groom_shape.h"
 #include "maya_inputs.h"
+#include "groomlab/editor/tool_select.h"
 #include "groomlab/brush.h"
 #include "groomlab/stroke.h"
 #include "groomlab/guide_selection.h"
@@ -118,23 +119,25 @@ std::vector<GuideId> pickGuidesInView(const std::vector<std::array<float, 2>>& l
     const HierarchyPtr h = shape ? shape->evaluatedHierarchy() : nullptr;
     if (!h) return {};
 
-    // Guides are world space (the groom draws in world space, its transform locked).
-    // Hidden groups can't be picked.
-    const std::vector<GuideId> candidates = guidesAt(*h, level, group, readHiddenGuideGroups(groom.node()));
-    const SelectionProjector view = selectionProjector(M3dView::active3dView());
-    // Only what the view shows: guide points behind the scalp are not picked.
-    const ViewProjector visible = visibleProjector(view.project, scalpVisibility(shape->evaluatedScalp(), activeToolView()));
-    std::vector<GuideId> picked = pickGuides(*h, candidates, visible, lasso, rootsOnly, clickPixels,
-                                             view.matrix.valid() ? &view.matrix : nullptr);
-    if (symmetry != "none" && !picked.empty()) {  // each picked guide's mirror guide too
+    // Guides are world space (the groom draws in world space, its transform locked). Every host's
+    // pick (the editor's pickGuidesInView, tool_select.h): hidden groups' guides not picked, only
+    // what the view shows, each picked guide's mirror guide with symmetry.
+    groomlab::GuidePick p;  // (the editor's; this file's GuidePick is the tool's own)
+    p.level = level;
+    p.group = group;
+    p.hiddenGroups = readHiddenGuideGroups(groom.node());
+    p.rootsOnly = rootsOnly;
+    p.clickPixels = clickPixels;
+    const MeshPtr scalp = shape->evaluatedScalp();
+    if (symmetry != "none") {
         BrushToolSettings mirror;
         try {
             mirror.setSymmetry(symmetry);
         } catch (const std::invalid_argument&) {
         }
-        const MeshPtr scalp = shape->evaluatedScalp();
-        picked = withMirrorGuides(*h, picked, StrokeSymmetry::of(mirror.brush, scalp.get()));
+        p.symmetry = StrokeSymmetry::of(mirror.brush, scalp.get());
     }
+    const std::vector<GuideId> picked = groomlab::pickGuidesInView(*h, activeToolView(), scalp, lasso, p);
     return picked;
 }
 
