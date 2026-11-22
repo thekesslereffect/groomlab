@@ -1211,8 +1211,8 @@ TEST(AppPanels, GroomToolsTilesReflowAndTheModePillClosesTheGraph) {
     GroomTools tools;
     EXPECT_TRUE(tools.tileLabels()) << "labeled tiles by default";
     tools.setTileLabels(false);
-    EXPECT_EQ(tools.tiles().size(), 20u) << "Select, Freeze, the 16 tools (Paint and Length Keys among them), Invert Frozen and Unfreeze All";
-    for (const char* id : {"place", "draw", "part", "flow", "comb", "shape", "cut", "lengths", "erase", "paint", "select", "freeze", "invert", "unfreeze"}) {
+    EXPECT_EQ(tools.tiles().size(), 21u) << "Select, Freeze, the 17 tools (Paint, Length Keys and Clone among them), Invert Frozen and Unfreeze All";
+    for (const char* id : {"place", "draw", "clone", "part", "flow", "comb", "shape", "cut", "lengths", "erase", "paint", "select", "freeze", "invert", "unfreeze"}) {
         EXPECT_NE(tools.tile(id), nullptr) << id;
     }
     std::vector<std::string> tabs;
