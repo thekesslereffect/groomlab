@@ -3,6 +3,7 @@
 # user's actions as they move in), on the core. The app links it; the Blender helper and Maya's
 # bindings take it as their actions move in.
 add_library(groomlab_editor STATIC
+    src/game_exports.cpp
     src/graph_edits.cpp
     src/groom_edit.cpp
     src/guide_edits.cpp

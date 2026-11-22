@@ -27,6 +27,7 @@
 #include "groomlab/card_maps.h"
 #include "groomlab/cards.h"
 #include "groomlab/display.h"
+#include "groomlab/editor/game_exports.h"
 #include "groomlab/editor/guide_edits.h"
 #include "groomlab/editor/graph_edits.h"
 #include "groomlab/editor/groom_edit.h"
@@ -848,7 +849,7 @@ public:
     // as an FBX to skin (<name>_rachis.fbx, meters) and the manifest (<name>_unity_feathers.json) in
     // `directory`. The files written; `warnings` what could not be.
     std::vector<std::string> exportUnityFeathers(const std::string& directory, const std::string& name,
-                                                 std::vector<std::string>* warnings = nullptr);
+                                                 std::vector<std::string>* warnings = nullptr, const GameExportOptions* options = nullptr);
     // The scales' mesh as FBX (Maya's export_scales_fbx; Unity's in meters). Throws without scales.
     std::vector<std::string> exportScalesFbx(const std::string& path, bool unity = false);
 

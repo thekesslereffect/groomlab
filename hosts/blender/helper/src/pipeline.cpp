@@ -18,6 +18,7 @@
 #include <set>
 #include <utility>
 
+#include "groomlab/editor/game_exports.h"
 #include "groomlab/asset_files.h"
 #include "groomlab/follicle_map.h"
 #include "groomlab/engine_cards.h"
@@ -362,77 +363,52 @@ json exportGltfCards(Session& s, const json& args) {
 // ---- Unreal and Unity cards (Maya's export_cards_unreal, export_cards_unity) ----------------------
 
 json exportEngineCards(Session& s, const json& args, bool unity) {
-    std::string directory = needString(args, "directory");
-    std::string name = optString(args, "name", "groom");
-    const std::string lod = optString(args, "lod", "");
-    if (!lod.empty() && !args.contains("name")) name += "_" + lod;
-    int resolution = static_cast<int>(optNumber(args, "resolution", 0.0));
-    resolution = resolution > 0 ? std::clamp(resolution, kMinBakeResolution, kMaxCardBakeResolution) : 0;
-    const float occlusion = static_cast<float>(optNumber(args, "occlusion", 1.0));
-    bool withScalp = optBool(args, "scalp", true);
-    const CardBake bake = bakeCardsNow(s, resolution, occlusion);
-    const GroomStats stats = s.groom->stats();  // the cards' counts, as Maya's card_stats has them
+    // Every host's engine cards (the editor's writeEngineCards, game_exports.h): the maps, the hair
+    // cap's, the manifest; the meshes for Blender's FBX exporter to write.
+    GameExportOptions o;
+    o.directory = needString(args, "directory");
+    o.name = optString(args, "name", "groom");
+    o.lod = optString(args, "lod", "");
+    o.nameGiven = args.contains("name");
+    o.resolution = gameExportResolution(static_cast<int>(optNumber(args, "resolution", 0.0)));
+    o.occlusion = static_cast<float>(optNumber(args, "occlusion", 1.0));
+    o.scalp = optBool(args, "scalp", true);
+    o.writeMeshes = false;
+    const CardBake bake = bakeCardsNow(s, o.resolution, o.occlusion);
+    const GroomStats stats = s.groom->stats();  // the cards' counts (before the cap's evaluation), as Maya's card_stats has them
     const HairLook look = s.groom->hairLook();
-    std::vector<std::string> paths;
-    std::map<std::string, std::string> byMap;
-    json warnings = json::array();
-    try {
-        if (unity) {
-            paths = writeUnityCardMaps(bake.textures, look.roughness, directory, name);
-        } else {
-            const CardBakePaths at = CardBakePaths::in(fs::u8path(directory).generic_u8string(), name);
-            std::error_code ec;
-            fs::create_directories(fs::u8path(directory), ec);
-            writeCardBake(bake, at, false);
-            for (const std::string& f : at.files()) {
-                if (fs::u8path(f).extension() == ".tga") paths.push_back(f);  // the maps; the atlas record beside them is the groom's own
-            }
-        }
-    } catch (const RequestError&) {
-        throw;
-    } catch (const std::exception& e) {
-        fail("io", e.what());
-    }
     MeshPtr scalp;
-    if (withScalp) {
+    ScalpTextures cap;
+    bool withScalp = false;
+    std::string whyNot;
+    if (o.scalp) {
         // The groom baked onto its scalp (the hair cap's maps), at full density.
         try {
             const ViewResult& view = evaluateNow(s, false);
             scalp = s.groom->rawScalp();
             if (!scalp || scalp->triangleCount() == 0) throw std::runtime_error("the groom has no scalp");
             ScalpBakeSettings settings;
-            settings.size = resolution > 0 ? resolution : 2048;
-            const ScalpTextures t = bakeScalpTextures(*view.strands, *scalpOf(s, view), settings);
-            for (const std::string& p : writeScalpCapMaps(t, unity, directory, name)) paths.push_back(p);
+            settings.size = o.resolution > 0 ? o.resolution : 2048;
+            cap = bakeScalpTextures(*view.strands, *scalpOf(s, view), settings);
+            withScalp = true;
         } catch (const RequestError&) {
             throw;
         } catch (const std::exception& e) {  // e.g. a scalp without UVs: the cards still go
-            warnings.push_back(std::string("no scalp maps (") + e.what() + ")");
-            withScalp = false;
+            whyNot = std::string("no scalp maps (") + e.what() + ")";
         }
     }
-    const std::string ext = unity ? ".png" : ".tga";
-    for (const std::string& p : paths) {
-        const std::string file = baseName(p);
-        const std::string prefix = name + "_";
-        if (file.size() > prefix.size() + ext.size() && file.compare(0, prefix.size(), prefix) == 0) {
-            byMap[file.substr(prefix.size(), file.size() - prefix.size() - ext.size())] = file;
-        }
+    EngineCardsExport done;
+    try {
+        done = writeEngineCards(bake, stats, look, withScalp ? &cap : nullptr, withScalp ? scalp.get() : nullptr,
+                                whyNot, unity, o);
+    } catch (const std::exception& e) {
+        fail("io", e.what());
     }
-    const std::string fbx = outFile(directory, name + "_cards.fbx");
-    const std::string capFbx = withScalp ? outFile(directory, name + "_scalpCap.fbx") : std::string();
-    EngineCardsInfo cardsInfo;
-    cardsInfo.mesh = baseName(fbx);
-    cardsInfo.scalpCap = withScalp ? baseName(capFbx) : std::string();
-    cardsInfo.cards = stats.cards;
-    cardsInfo.triangles = stats.cardTriangles;
-    cardsInfo.textures = stats.cardTextures;
-    cardsInfo.feathers = stats.cardFeathers;
-    cardsInfo.maps = byMap;
-    cardsInfo.roughness = look.roughness;
-    const json manifest = json::parse(engineCardsManifestJson(unity, cardsInfo));
-    const std::string manifestPath = outFile(directory, name + (unity ? "_unity.json" : "_cards.json"));
-    writeJsonFile(manifestPath, manifest);
+    const std::string& name = done.name;
+    const std::string fbx = done.fbx, capFbx = done.scalpCapFbx;
+    const std::vector<std::string>& paths = done.maps;
+    const std::string& manifestPath = done.manifest;
+    json warnings = done.warnings;
     std::vector<MeshOut> meshes{cardsMesh(*bake.cards, "cards")};
     meshes.front().info["fbx"] = fbx;
     if (unity) meshes.front().info["material"] = name + "_cards_mat";

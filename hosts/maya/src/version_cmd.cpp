@@ -368,6 +368,11 @@ MSyntax BakeCardsCmd::newSyntax() {
     s.addFlag("-pad", "-padding", MSyntax::kLong);
     s.addFlag("-ss", "-supersample", MSyntax::kLong);
     s.addFlag("-nt", "-nameTemplate", MSyntax::kString);
+    // Hair cards for an engine, every host's (game_exports.h): "unreal" or "unity", the maps, the
+    // hair cap's (-cap), the manifest and the meshes as FBX. Returns JSON: fbx, scalpCap, maps,
+    // manifest, warnings.
+    s.addFlag("-eng", "-engine", MSyntax::kString);
+    s.addFlag("-cap", "-hairCap", MSyntax::kBoolean);
     s.setObjectType(MSyntax::kSelectionList, 1, 1);
     s.useSelectionAsDefault(true);
     return s;
@@ -405,6 +410,26 @@ MStatus BakeCardsCmd::doIt(const MArgList& args) {
         const bool store = !db.isFlagSet("-nst") && layout == "unreal";
         try {
             MStringArray result;
+            if (db.isFlagSet("-eng")) {
+                MString engine;
+                db.getFlagArgument("-eng", 0, engine);
+                if (engine != "unreal" && engine != "unity") {
+                    MGlobal::displayError(MString(kName) + ": -engine takes unreal or unity");
+                    return MS::kFailure;
+                }
+                bool cap = true;
+                if (db.isFlagSet("-cap")) db.getFlagArgument("-cap", 0, cap);
+                const EngineCardsExport done = shape->exportEngineCards(directory.asChar(), name.asChar(), engine == "unity", resolution,
+                                                                        static_cast<float>(occlusion), cap);
+                const nlohmann::json out = {{"fbx", done.fbx},
+                                            {"scalpCap", done.scalpCapFbx.empty() ? nlohmann::json() : nlohmann::json(done.scalpCapFbx)},
+                                            {"maps", done.maps},
+                                            {"manifest", done.manifest},
+                                            {"name", done.name},
+                                            {"warnings", done.warnings}};
+                setResult(MString(out.dump().c_str()));
+                return MS::kSuccess;
+            }
             if (db.isFlagSet("-pre")) {  // a card map export, as its preset packs it
                 MString presetText;
                 db.getFlagArgument("-pre", 0, presetText);

@@ -81,6 +81,22 @@ def export_unreal_groom(groom, path, start=None, end=None, step=1.0, density=1.0
                                       unreal=True, **kwargs)
 
 
+
+def _engine_cards(groom, engine, directory, name, resolution, occlusion, scalp, lod):
+    """Every host's engine cards (the editor's writeEngineCards, in groomLabBakeCards -engine): the
+    maps, the hair cap's, the manifest and the meshes as FBX (the core's writer, no fbxmaya)."""
+    name = name or asset_name(groom) + ("_" + lod if lod else "")
+    directory = (directory or asset_folder("exports")).replace("\\", "/")
+    if not os.path.isdir(directory):
+        os.makedirs(directory)
+    kwargs = {"directory": directory, "name": name, "occlusion": float(occlusion), "engine": engine, "hairCap": bool(scalp)}
+    if resolution:
+        kwargs["resolution"] = int(resolution)
+    done = json.loads(cmds.groomLabBakeCards(groom, **kwargs))
+    for warning in done["warnings"]:
+        cmds.warning("GroomLab: %s" % warning)
+    return {"fbx": done["fbx"], "scalpCap": done["scalpCap"], "maps": done["maps"], "manifest": done["manifest"]}
+
 def export_cards_unreal(groom, directory=None, name=None, resolution=None, occlusion=1.0, scalp=True, lod=None):
     """Game cards for Unreal: the card mesh as FBX and its maps (TGA, Unreal's hair card
     layout, see bake_cards) into `directory` (default: the scene's exports folder), plus
@@ -91,73 +107,7 @@ def export_cards_unreal(groom, directory=None, name=None, resolution=None, occlu
     UVs), the groom baked onto its scalp goes too (<name>_ScalpColor / _ScalpCoverage) with the
     hair cap mesh <name>_scalpCap.fbx. The groom itself keeps showing its own bake (its
     cardMaps and materials are left as they were). Returns {"fbx", "scalpCap", "maps", "manifest"}."""
-    name = name or asset_name(groom) + ("_" + lod if lod else "")
-    directory = (directory or asset_folder("exports")).replace("\\", "/")
-    if not os.path.isdir(directory):
-        os.makedirs(directory)
-    before = set(cmds.ls(long=True))
-    paths = [p for p in bake_cards(groom, directory, resolution=resolution, name=name, occlusion=occlusion,
-                                   material=False, store=False)
-             if p.endswith(".tga")]  # the maps; the atlas record beside them is the groom's own business
-    name = os.path.basename(paths[0]).rsplit("_", 1)[0] if paths else name  # as written (another groom's bake kept)
-    fbx = os.path.join(directory, name + "_cards.fbx").replace("\\", "/")
-    cap_fbx = None
-    if scalp:
-        try:
-            paths = list(paths) + list(bake_scalp(groom, directory, resolution=resolution or 2048, name=name,
-                                                  cap=False))
-        except RuntimeError as e:  # e.g. a scalp without UVs: the cards still go
-            cmds.warning("GroomLab: no scalp maps (%s)" % str(e).strip())
-            scalp = False
-    if not cmds.pluginInfo("fbxmaya", query=True, loaded=True):
-        cmds.loadPlugin("fbxmaya", quiet=True)
-    by_map = {m: next((p for p in paths if p.endswith("_%s.tga" % m)), None) for m in CARD_MAPS + (AO_WORLD,) + SCALP_MAPS}
-    # The geometry to write: the live mesh and hair cap if there are, their materials pointed
-    # at the exported maps while they are written, else meshes of their own, removed afterwards.
-    from groomlab import utils
-    mesh = utils.to_mesh(groom, make="cards", max_strands=100000000, name=name + "CardsExportSource")["mesh"]
-    put_back = []
-    selection = cmds.ls(selection=True)
-    view = cmds.getAttr(groom + ".displayCards")
-    try:
-        card_material(mesh, {m: by_map[m] for m in CARD_MAPS})
-        cap = None
-        if scalp:
-            cap = _existing_scalp_cap(groom)
-            if cap:
-                put_back += _pointed_textures(cap, by_map)
-            else:
-                cap = scalp_cap(groom, {m: by_map[m] for m in SCALP_MAPS})
-        cmds.setAttr(groom + ".displayCards", True)  # written visible (their visibility follows the view)
-        export_mesh = _static_card_export_mesh(mesh)
-        cmds.select(export_mesh, replace=True)
-        for command in ("FBXResetExport", "FBXExportInputConnections -v false", "FBXExportSmoothingGroups -v true",
-                        "FBXExportTriangulate -v false", "FBXExportEmbeddedTextures -v false"):
-            mel.eval(command)
-        mel.eval('FBXExport -f "%s" -s' % fbx)
-        if cap:
-            cap_fbx = os.path.join(directory, name + "_scalpCap.fbx").replace("\\", "/")
-            cmds.select(cap, replace=True)
-            mel.eval('FBXExport -f "%s" -s' % cap_fbx)
-    finally:
-        for texture, old in put_back:
-            cmds.setAttr(texture + ".fileTextureName", old, type="string")
-        cmds.setAttr(groom + ".displayCards", view)
-        cmds.select(selection, replace=True) if selection else cmds.select(clear=True)
-        made = [n for n in cmds.ls(long=True) if n not in before]  # what the export made for itself
-        cmds.delete([n for n in made if cmds.objExists(n)])
-    stats = card_stats(groom)
-    maps = {m: os.path.basename(p) for m in CARD_MAPS + (AO_WORLD,) + SCALP_MAPS
-            for p in paths if p.endswith("_%s.tga" % m)}
-    # Every host's manifest (engine_cards.h engineCardsManifestJson).
-    manifest = json.loads(groomlab_core.engine_cards_manifest_json(False, {
-        "mesh": os.path.basename(fbx), "scalpCap": os.path.basename(cap_fbx) if cap_fbx else "",
-        "cards": stats["cards"], "triangles": stats["triangles"], "textures": stats["textures"],
-        "feathers": stats["feathers"], "maps": maps}))
-    path = os.path.join(directory, name + "_cards.json")
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(manifest, f, indent=2)
-    return {"fbx": fbx, "scalpCap": cap_fbx, "maps": paths, "manifest": path}
+    return _engine_cards(groom, "unreal", directory, name, resolution, occlusion, scalp, lod)
 
 
 # Unity's hair package (com.unity.demoteam.hair) resamples strands to 3..128 particles
@@ -324,78 +274,8 @@ def export_cards_unity(groom, directory=None, name=None, resolution=None, occlus
     `scalp` (and a scalp with UVs), <name>_ScalpBaseColor (color, coverage in alpha) and the
     hair cap <name>_scalpCap.fbx. The groom keeps its own bake (cardMaps and materials are
     left as they were). Returns {"fbx", "scalpCap", "maps", "manifest"}."""
-    name = name or asset_name(groom) + ("_" + lod if lod else "")
-    directory = (directory or asset_folder("exports")).replace("\\", "/")
-    if not os.path.isdir(directory):
-        os.makedirs(directory)
     _stale_atlas_warning(groom, "FBX")
-    kwargs = {"directory": directory, "name": name, "occlusion": float(occlusion), "noStore": True, "layout": "unity"}
-    if resolution:
-        kwargs["resolution"] = int(resolution)
-    paths = list(cmds.groomLabBakeCards(groom, **kwargs))
-    name = os.path.basename(paths[0]).rsplit("_", 1)[0] if paths else name  # as written (another groom's bake kept)
-    if scalp:
-        try:
-            paths += list(cmds.groomLabBakeCards(groom, directory=directory, name=name, scalp=True, layout="unity",
-                                                 resolution=int(resolution or 2048)))
-        except RuntimeError as e:  # e.g. a scalp without UVs: the cards still go
-            cmds.warning("GroomLab: no scalp maps (%s)" % str(e).strip())
-            scalp = False
-    by_map = {m: next((p for p in paths if p.endswith("_%s.png" % m)), None) for m in UNITY_CARD_MAPS + ("ScalpBaseColor",)}
-    if not cmds.pluginInfo("fbxmaya", query=True, loaded=True):
-        cmds.loadPlugin("fbxmaya", quiet=True)
-    fbx = os.path.join(directory, name + "_cards.fbx").replace("\\", "/")
-    cap_fbx = None
-    before = set(cmds.ls(long=True))
-    selection = cmds.ls(selection=True)
-    view = cmds.getAttr(groom + ".displayCards")
-    from groomlab import utils
-    live = None
-    live_cap = _existing_scalp_cap(groom) if scalp else None
-    # The meshes to write: the live card mesh and hair cap when there are (their own shading
-    # put back afterwards), else meshes of their own, removed afterwards; either way with a
-    # material made for Unity while they are written.
-    put_back = [(_shading_groups(n)) for n in (live, live_cap) if n]
-    try:
-        mesh = utils.to_mesh(groom, make="cards", max_strands=100000000, name=name + "CardsExportSource")["mesh"]
-        _unity_material(mesh, name + "_cards_mat", by_map["BaseColor"])
-        cap = None
-        if scalp:
-            cap = live_cap or scalp_cap(groom)
-            if cap:
-                _unity_material(cap, name + "_scalpCap_mat", by_map["ScalpBaseColor"])
-        cmds.setAttr(groom + ".displayCards", True)  # written visible (their visibility follows the view)
-        for command in ("FBXResetExport", "FBXExportInputConnections -v false", "FBXExportSmoothingGroups -v true",
-                        "FBXExportTriangulate -v false", "FBXExportEmbeddedTextures -v false",
-                        "FBXExportUpAxis y", "FBXExportConvertUnitString m", "FBXExportScaleFactor 1.0"):
-            mel.eval(command)
-        export_mesh = _static_card_export_mesh(mesh)
-        cmds.select(export_mesh, replace=True)
-        mel.eval('FBXExport -f "%s" -s' % fbx)
-        if cap:
-            cap_fbx = os.path.join(directory, name + "_scalpCap.fbx").replace("\\", "/")
-            cmds.select(cap, replace=True)
-            mel.eval('FBXExport -f "%s" -s' % cap_fbx)
-    finally:
-        mel.eval("FBXResetExport")  # the next FBX export (the user's own) starts from the defaults
-        for shape, groups in put_back:
-            for group in groups:
-                cmds.sets(shape, edit=True, forceElement=group)
-        cmds.setAttr(groom + ".displayCards", view)
-        cmds.select(selection, replace=True) if selection else cmds.select(clear=True)
-        made = [n for n in cmds.ls(long=True) if n not in before]  # what the export made for itself
-        cmds.delete([n for n in made if cmds.objExists(n)])
-    stats = card_stats(groom)
-    maps = {m: os.path.basename(p) for m, p in by_map.items() if p}
-    # Every host's manifest (engine_cards.h engineCardsManifestJson).
-    manifest = json.loads(groomlab_core.engine_cards_manifest_json(True, {
-        "mesh": os.path.basename(fbx), "scalpCap": os.path.basename(cap_fbx) if cap_fbx else "",
-        "cards": stats["cards"], "triangles": stats["triangles"], "textures": stats["textures"],
-        "feathers": stats["feathers"], "maps": maps, "roughness": float(hair_look(groom)["roughness"])}))
-    path = os.path.join(directory, name + "_unity.json")
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(manifest, f, indent=2)
-    return {"fbx": fbx, "scalpCap": cap_fbx, "maps": paths, "manifest": path}
+    return _engine_cards(groom, "unity", directory, name, resolution, occlusion, scalp, lod)
 
 
 def export_cards_gltf(groom, path=None, lod=None, lods=None, resolution=None, binary=True, cap=True, scale=0.01,

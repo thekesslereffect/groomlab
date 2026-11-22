@@ -88,7 +88,13 @@ time, each host calling the one version:
   draw (`brushOverlay`: hover, line of symmetry, ring, Part and Flow path); the Select tool's pick
   (`pickGuidesInView`: click, box or lasso, only what the view shows, mirrors) and when it soloes
   (`pickSoloes`).
-- Next: the game exports.
+- E5 (done): the game exports (`game_exports.h`). One set of options (`GameExportOptions`: the
+  folder, the name and its LOD, the maps' size, occlusion, the hair cap, the feathers' points)
+  and `writeEngineCards`: hair cards for Unreal or Unity (the maps in each engine's layout, the
+  hair cap's, the manifest, the meshes as FBX by the core's writer, or left to the host). The app,
+  the Blender helper (its meshes still written by Blender's FBX exporter) and Maya
+  (`groomLabBakeCards -engine`: the core's FBX writer, no fbxmaya) call it; the app's Unity
+  feathers take the same options.
   The Blender helper becomes a JSON wrapper over it; Maya calls it through `groomlab_core` and
   records each step through its own undo queue.
 

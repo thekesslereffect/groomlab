@@ -2610,6 +2610,33 @@ std::vector<std::string> GroomShape::bakeCards(const std::string& directory, con
     return paths;
 }
 
+EngineCardsExport GroomShape::exportEngineCards(const std::string& directory, const std::string& name, bool unity, int resolution,
+                                                float occlusion, bool cap) {
+    GameExportOptions o;
+    o.directory = directory;
+    o.name = freeBakeBase(thisMObject(), directory, name);  // (another groom's bake there kept)
+    o.nameGiven = true;
+    o.resolution = gameExportResolution(resolution);
+    o.occlusion = occlusion;
+    o.scalp = cap;
+    const CardBake bake = bakeCardsInMemory(o.resolution, occlusion);
+    const GroomStats stats = session().stats();  // the cards' counts, before the cap's evaluation
+    ScalpTextures t;
+    MeshPtr capScalp;
+    std::string whyNot;
+    bool have = false;
+    if (cap) {
+        try {  // the groom baked onto its scalp, at full density
+            t = bakeScalpInMemory(o.resolution > 0 ? o.resolution : 2048, 0.0f, 1.0f, &capScalp);
+            have = capScalp && capScalp->hasUVs();
+            if (!have) whyNot = "no hair cap: the scalp has no uvs";
+        } catch (const std::exception& e) {  // e.g. a scalp without UVs: the cards still go
+            whyNot = std::string("no scalp maps (") + e.what() + ")";
+        }
+    }
+    return writeEngineCards(bake, stats, hairLook(), have ? &t : nullptr, have ? capScalp.get() : nullptr, whyNot, unity, o);
+}
+
 ScalpTextures GroomShape::bakeScalpInMemory(int resolution, float reach, float density, MeshPtr* scalpOut,
                                             NodeEvaluator* evaluator) {
     std::string error;
