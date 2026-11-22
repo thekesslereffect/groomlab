@@ -705,13 +705,6 @@ def param_map(groom, node, param):
     return None
 
 
-def _names_map(groom, node, param):
-    """Whether node.param names a map rather than taking one (Interpolate's regionMap: a text param)."""
-    from groomlab import graph as gm
-    model = gm.GraphModel.from_groom(groom)
-    return node in model.order and isinstance(model.param(node, param), str)
-
-
 def paint_param(groom, node, param, kind="guides", name=None, resolution=1024, paint=True, channel="luminance",
                 faces=None):
     """Paint a mappable param (+ New Map > for a setting in the Paint tab, and the Graph Editor's
@@ -725,54 +718,22 @@ def paint_param(groom, node, param, kind="guides", name=None, resolution=1024, p
     missing: packed masks), and the brush paints that channel only. A map made here with `faces` (scalp polygon indices: selected_scalp_faces)
     is white on those faces only, black elsewhere (a map the param already reads is left as it
     is). The map, its link and what painting shows are one undo step. Returns the map's name."""
-    # What drives the param must be a painted map, or nothing: an expression, a channel or an image
-    # no map of the groom holds is refused (every host's: stroke.h paramMapOf).
-    try:
-        groomlab_core.param_map(json.dumps(get_graph(groom, expand_default=True)), cmds.getAttr(groom + ".scalpMaps") or "",
-                                node, param)
-    except RuntimeError as e:
-        raise ValueError(str(e))
+    # Every host's Paint on a setting (the editor's paintParam, in groomLabScalpMaps): what drives the
+    # param must be a painted map, or nothing (an expression, a channel or an image no map of the
+    # groom holds is refused); the map made and its link are one step.
+    kwargs = {"paintParam": (node, param), "kind": kind, "resolution": int(resolution)}
+    if name:
+        kwargs["mapName"] = name
+    if channel and channel != "luminance":
+        kwargs["channel"] = channel
+    if faces:
+        kwargs["faces"] = _faces_flag(faces)
+    if kind == "texture":
+        asset_folder("masks")  # made, and the untitled scene's warning given
     with undo_chunk("paint %s.%s" % (node, param)):
-        found = param_map(groom, node, param)
-        if found and not name:
-            name, channel = found
-        else:
-            # The param's own map (the core's paramMapName, every host's): one of that name there
-            # already (its link since gone) is linked again, its painting back.
-            name = name or groomlab_core.param_map_name(node, param)
-            if kind == "guides" and name not in list_maps(groom) and not any(g["count"] for g in list_guide_groups(groom)):
-                raise ValueError("the groom has no guides to paint on: add guides, or paint on the scalp's vertices")
-            if channel != "luminance" and name not in list_maps(groom):
-                if kind == "guides":
-                    raise ValueError("a guide layer is gray: paint a channel of a map on the scalp's vertices or a texture")
-                add_map(groom, name, 1.0, kind=kind, resolution=resolution, color=True, faces=faces)
-            if _names_map(groom, node, param):
-                # A param naming its map (Interpolate's regionMap): the map, white (one region: the
-                # look stays), named in it.
-                from groomlab import graph as gm
-                if name not in list_maps(groom):
-                    add_map(groom, name, 1.0, kind=kind, resolution=resolution, faces=faces)
-                model = gm.GraphModel.from_groom(groom)
-                model.set_param(node, param, name)
-                model.save(groom)
-            elif channel != "luminance":
-                # One channel of a color map (packed masks): read through its Map node's output.
-                use_map(groom, node, param, name, kind=kind, resolution=resolution, channel=channel, faces=faces)
-            else:
-                # The map param every host's Paint on a setting writes (stroke.h wireParamMap: a guide
-                # layer, a color set or a texture by its file, white the param's value), so the
-                # graph is the same whichever host painted it.
-                if name not in list_maps(groom):
-                    add_map(groom, name, 1.0, kind=kind, resolution=resolution, faces=faces)
-                try:
-                    wired = groomlab_core.wire_param_map(json.dumps(get_graph(groom, expand_default=True)),
-                                                         cmds.getAttr(groom + ".scalpMaps") or "", node, param, name,
-                                                         map_kind(groom, name))
-                except RuntimeError as e:
-                    raise ValueError(str(e))
-                set_graph(groom, json.loads(wired))
+        name, kind, channel = cmds.groomLabScalpMaps(groom, **kwargs)
         if paint:
-            if channel in ("r", "g", "b", "a"):
+            if channel:
                 paint_map(groom, name, value=1.0, color=(1.0, 1.0, 1.0, 1.0), channels=channel)
             else:
                 paint_map(groom, name, value=1.0)

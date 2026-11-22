@@ -227,4 +227,34 @@ MapLink relinkMap(const ScalpMaps& maps, const GuideHierarchy* guides, const std
 std::vector<std::string> reloadMapFiles(const ScalpMaps& maps, const GuideHierarchy* guides, const std::string& name,
                                         const MapFiles& files);
 
+// Paint on a setting, as asked.
+struct ParamPaintRequest {
+    std::string kind = "vertices";     // a map made here: guides, vertices or texture
+    std::string name;                  // the map; "": the one the param reads, else its own (paramMapName)
+    std::string channel;               // "r", "g", "b" or "a": that channel of a color map, read through its Map node; "": its value
+    std::vector<std::int32_t> faces;   // a map made here: white on those polygons of the cage only, black elsewhere
+    int resolution = 1024;             // a texture map made here, this square
+};
+
+// What Paint on a setting does.
+struct ParamPaint {
+    std::string map, kind;             // the map the brush paints, and where it lives
+    std::string channel;               // the channel the brush paints ("": the map's value)
+    bool made = false;                 // the map made here (`created`)
+    MapCreate created;                 // the map made: its scalp maps after, a guide layer's values, its files
+    std::string graph;                 // the graph after, the param reading the map; "" when it read it already
+};
+
+// Paint on a setting, every host's (+ New Map > for a setting, a param's Paint): the map node.param
+// reads already (paramMapOf; an expression, a channel or an image no map holds is refused), else the
+// map `name` (default its own, paramMapName: one there already, its link since gone, is read again,
+// its painting back), made white when missing (createMap: the look stays as it is) and read by the
+// param as every host links it (wireParamMap: its white the param's value; a param naming a map
+// takes the name), or with a channel through the map's Map node (one per map, made beside the node;
+// the param exposed as an input and fed by that output: masks packed in one color map, made color).
+// Throws std::invalid_argument for no such node, a kind or channel it cannot be, no guides for a
+// guide layer, a gray guide layer for a channel, and what createMap refuses.
+ParamPaint paintParam(const std::string& graph, const ScalpMaps& maps, const GuideHierarchy* guides, const ScalpMesh* cage,
+                      const std::string& node, const std::string& param, const ParamPaintRequest& paint, const MapFiles& files);
+
 }  // namespace groomlab

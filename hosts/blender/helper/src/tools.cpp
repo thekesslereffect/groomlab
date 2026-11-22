@@ -2101,86 +2101,40 @@ json mapForParam(ToolState& t, const json& args) {
     prepareHost(t);
     setTool(t, "paint");  // out of Freeze or Select, as picking Paint does
     const std::string graphBefore = s.groom->data().graphJson;
-    ParamMapRef found;
+    // Every host's Paint on a setting (the editor's paintParam, map_edits.h): the map the param reads,
+    // else its own (one there already linked again, its painting back), made white (with `faces`:
+    // on them only) and linked, or a channel of a color map through its Map node; one undo step.
+    ParamPaintRequest paint;
+    paint.kind = kind;
+    paint.name = optString(args, "map", "");
+    paint.channel = optString(args, "channel", "");
+    paint.faces = facesArg(args);
+    paint.resolution = static_cast<int>(optNumber(args, "resolution", 1024.0));
+    MapFiles files;
+    files.mapsFolder = mapsFolder(s);
+    files.resolve = [&s](const std::string& stored) { return resolveMapFile(s, stored); };
+    ParamPaint painted;
     try {
-        found = paramMapOf(graphBefore, s.groom->scalpMaps(), s.groom->storedHierarchy().get(), node, param);
+        painted = groomlab::paintParam(graphBefore, s.groom->scalpMaps(), s.groom->storedHierarchy().get(), scalp.get(), node, param, paint, files);
+    } catch (const std::invalid_argument& e) {
+        fail(std::string(e.what()).find("no guides to paint on") != std::string::npos ? "state" : "bad_request", e.what());
     } catch (const std::exception& e) {
-        fail("bad_request", e.what());
+        fail("io", e.what());
     }
-    std::string map = found.map, mapKind = found.kind;
-    // A map made here with `faces` is white on them, black elsewhere (one the param reads already stays).
-    const std::vector<std::int32_t> faces = facesArg(args);
-    // The param's own map (paramMapName) there already, its link gone: linked again, whatever its
-    // kind, its painting back (every host does).
-    bool reused = false;
-    if (map.empty()) {
-        const std::string own = paramMapName(node, param);
-        const std::string ownKind = mapKindOf(s, own);
-        if (!ownKind.empty()) {
-            std::string graph;
-            try {
-                graph = wireParamMap(graphBefore, s.groom->scalpMaps(), node, param, own, ownKind);
-            } catch (const std::exception& e) {
-                fail("bad_request", e.what());
-            }
-            StrokeEdit edit;
-            edit.mode = "map " + node + "." + param;
-            edit.set(StrokeField::Graph, std::move(graph));
-            t.host.commit(std::move(edit));
-            map = own;
-            mapKind = ownKind;
-            reused = true;
-        }
-    }
-    if (map.empty() && kind == "vertices" && faces.empty()) {
-        try {
-            const ParamMapBinding b = paintParamMap(t.host, t.tool.settings, node, param);  // made and linked: one step
-            map = b.map;
-            mapKind = b.kind;
-        } catch (const std::exception& e) {
-            fail("bad_request", e.what());
-        }
-    } else if (map.empty() && kind == "guides") {
-        // A guide layer (Maya's paint_param kind "guides"): every primary guide carries it at 1 (white:
-        // the look stays), children inherit it, strands blend it; the layer and its link one step.
-        map = paramMapName(node, param);  // (free: one of that name was linked above)
-        GuideHierarchy h = editedGuides(t, [&](GuideHierarchy& hh) {
-            // (on faces: 1 on the guides rooted on them, 0 on the rest: addGuideLayer, every host's)
-            if (!addGuideLayer(hh, map, 1.0f, scalp.get(), faces)) {
-                fail("state", "the groom has no guides to paint on: add guides, or paint on the scalp's vertices");
-            }
-        });
-        std::string graph;
-        try {
-            graph = wireParamMap(graphBefore, s.groom->scalpMaps(), node, param, map, "guides");
-        } catch (const std::exception& e) {
-            fail("bad_request", e.what());
-        }
+    const std::string map = painted.map, mapKind = painted.kind;
+    const bool reused = !painted.made && !painted.graph.empty();
+    if (!painted.graph.empty()) {
         StrokeEdit edit;
         edit.mode = "map " + node + "." + param;
-        edit.set(StrokeField::Guides, h.toJson());
-        edit.set(StrokeField::Graph, std::move(graph));
-        t.host.commit(std::move(edit));
-        mapKind = "guides";
-    } else if (map.empty()) {
-        // A texture (or a vertex map on faces): white, linked in the same step; a texture's image
-        // beside the groom, linked by its file.
-        map = paramMapName(node, param);  // (free: one of that name was linked above)
-        ScalpMaps maps = s.groom->scalpMaps();
-        maps.maps[map] = newScalpMapEntry(t, *scalp, map, kind, false, 1.0f, nullptr,
-                                          static_cast<int>(optNumber(args, "resolution", 1024.0)), faces);
-        std::string graph;
-        try {
-            graph = wireParamMap(graphBefore, maps, node, param, map, kind);
-        } catch (const std::exception& e) {
-            fail("bad_request", e.what());
+        if (painted.created.guideLayer) {
+            GuideHierarchy h = editedGuides(t, [&](GuideHierarchy& hh) { applyCreatedLayer(hh, map, painted.created); });
+            edit.set(StrokeField::Guides, h.toJson());
+        } else if (painted.made) {
+            edit.set(StrokeField::ScalpMaps, painted.created.maps.toJson());
         }
-        StrokeEdit edit;
-        edit.mode = "map " + node + "." + param;
-        edit.set(StrokeField::Graph, std::move(graph));
-        edit.set(StrokeField::ScalpMaps, maps.toJson());
+        edit.set(StrokeField::Graph, painted.graph);
+        for (FileEdit& f : painted.created.files) t.pending.files.push_back(std::move(f));
         t.host.commit(std::move(edit));
-        mapKind = kind;
     }
     // The Paint brush on it, toward 1: strokes paint the param back to its value, Ctrl toward 0.
     BrushToolSettings& st = t.tool.settings;
@@ -2190,9 +2144,15 @@ json mapForParam(ToolState& t, const json& args) {
     const auto entry = s.groom->scalpMaps().maps.find(map);
     st.paintTexture = mapKind == "texture" && entry != s.groom->scalpMaps().maps.end() ? entry->second.texture : std::string();
     st.brush.value = 1.0f;
+    if (!painted.channel.empty()) {  // one channel of a color map: white in it only
+        st.paintColor = PaintColor{1.0f, 1.0f, 1.0f, 1.0f};
+        st.paintChannels = channelMask(painted.channel);
+    }
     const bool changed = s.groom->data().graphJson != graphBefore;
-    return {{"name", map}, {"kind", mapKind}, {"made", changed && !reused}, {"reused", reused}, {"graphChanged", changed},
-            {"tool", toolJson(t)}, {"undo", undoJson(t)}};
+    json r = {{"name", map}, {"kind", mapKind}, {"made", changed && !reused}, {"reused", reused}, {"graphChanged", changed},
+              {"tool", toolJson(t)}, {"undo", undoJson(t)}};
+    if (!painted.channel.empty()) r["channel"] = painted.channel;
+    return r;
 }
 
 // ---- Map management (Maya's painting.py over groomLabScalpMaps) ---------------------------------------

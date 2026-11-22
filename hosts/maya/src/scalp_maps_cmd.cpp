@@ -61,6 +61,12 @@ const char* kCopyFrom[] = {"-cf", "-copyFrom"};
 const char* kDeleteFile[] = {"-df", "-deleteFile"};
 // -fill on the selected guides only (a guide layer: Fill Selected).
 const char* kSelected[] = {"-sel", "-selected"};
+// Paint on a setting (node, param): the map it reads, else -mapName (its own by default) made as
+// -kind and linked, or -channel (r g b a) of a color map through its Map node. Returns the map,
+// its kind and the channel ("" its value).
+const char* kPaintParam[] = {"-pp", "-paintParam"};
+const char* kMapName[] = {"-mn", "-mapName"};
+const char* kChannel[] = {"-chn", "-channel"};
 // The scalp's faces (polygon indices, space separated): -make makes the map 0 with -value (or
 // -fillColor) on those faces only; -fill fills those faces only. A guide layer: the guides
 // rooted on them.
@@ -102,6 +108,9 @@ MSyntax ScalpMapsCmd::newSyntax() {
     s.addFlag(kCopyFrom[0], kCopyFrom[1], MSyntax::kString);
     s.addFlag(kDeleteFile[0], kDeleteFile[1]);
     s.addFlag(kSelected[0], kSelected[1]);
+    s.addFlag(kPaintParam[0], kPaintParam[1], MSyntax::kString, MSyntax::kString);
+    s.addFlag(kMapName[0], kMapName[1], MSyntax::kString);
+    s.addFlag(kChannel[0], kChannel[1], MSyntax::kString);
     s.addFlag(kFaces[0], kFaces[1], MSyntax::kString);
     s.setObjectType(MSyntax::kSelectionList, 0, 1);
     s.useSelectionAsDefault(true);
@@ -125,7 +134,7 @@ MStatus ScalpMapsCmd::doIt(const MArgList& args) {
         const int actions = int(db.isFlagSet(kList[0])) + int(db.isFlagSet(kKindOf[0])) + int(db.isFlagSet(kAdd[0])) +
                             int(db.isFlagSet(kRemove[0])) + int(db.isFlagSet(kRename[0])) + int(db.isFlagSet(kFill[0])) +
                             int(db.isFlagSet(kConvert[0])) + int(db.isFlagSet(kValues[0])) + int(db.isFlagSet(kChannelsOf[0])) +
-                            int(db.isFlagSet(kSetChannels[0])) + int(db.isFlagSet(kRelink[0]));
+                            int(db.isFlagSet(kSetChannels[0])) + int(db.isFlagSet(kRelink[0])) + int(db.isFlagSet(kPaintParam[0]));
         if (actions != 1) return fail(kName, "give exactly one action flag");
 
         // Questions about the maps: the shape's parses of scalpMaps and guideData (kept while they
@@ -416,6 +425,39 @@ MStatus ScalpMapsCmd::doIt(const MArgList& args) {
                 for (FileState& f : linked.files) files_.push_back(std::move(f));
                 if (!linked.graph.empty()) modifier_.newPlugValueString(graphPlug, linked.graph.c_str());
                 setResult(MString(linked.file.c_str()));
+            } else if (db.isFlagSet(kPaintParam[0])) {
+                // Every host's Paint on a setting (the editor's paintParam, map_edits.h): the map made
+                // (its files' states kept for Maya's undo) and the param's link in one step.
+                MString nodeArg, paramArg;
+                db.getFlagArgument(kPaintParam[0], 0, nodeArg);
+                db.getFlagArgument(kPaintParam[0], 1, paramArg);
+                ParamPaintRequest paint;
+                paint.kind = flagString(db, kKind[0], "guides").asChar();
+                paint.name = flagString(db, kMapName[0]).asChar();
+                paint.channel = flagString(db, kChannel[0]).asChar();
+                if (onFaces) paint.faces = faces;
+                paint.resolution = resolution;
+                MapFiles files;
+                files.mapsFolder = assetFolder("masks") + "/" + assetName(groomPath);
+                files.resolve = resolve;
+                files.store = [](const std::string& full) { return portableMayaPath(full); };
+                MPlug graphPlug = groomFn.findPlug("graph", true);
+                const std::string graph = graphPlug.asString().asChar();
+                ParamPaint painted = paintParam(graph, maps, h.get(), scalp.get(), nodeArg.asChar(), paramArg.asChar(), paint, files);
+                if (painted.created.guideLayer) {
+                    applyCreatedLayer(*h, painted.map, painted.created);
+                    guidesChanged = true;
+                } else if (painted.made) {
+                    maps = std::move(painted.created.maps);
+                    mapsChanged = true;
+                }
+                for (FileState& f : painted.created.files) files_.push_back(std::move(f));
+                if (!painted.graph.empty()) modifier_.newPlugValueString(graphPlug, painted.graph.c_str());
+                MStringArray result;
+                result.append(painted.map.c_str());
+                result.append(painted.kind.c_str());
+                result.append(painted.channel.c_str());
+                setResult(result);
             } else if (db.isFlagSet(kSetChannels[0])) {
                 MString nameArg;
                 int wanted = 0;

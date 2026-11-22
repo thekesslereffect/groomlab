@@ -7,7 +7,13 @@
 #include <system_error>
 #include <utility>
 
+#include <nlohmann/json.hpp>
+
+#include "groomlab/graph_controls.h"
+#include "groomlab/graph_edit.h"
+#include "groomlab/graph_io.h"
 #include "groomlab/paths.h"
+#include "groomlab/stroke.h"
 #include "groomlab/texture.h"
 #include "groomlab/udim.h"
 
@@ -107,6 +113,73 @@ std::string linkedImage(const std::string& name, const MapImageRequest& request,
     finishFileStates(*states);
     states->erase(std::remove_if(states->begin(), states->end(), [](const FileState& f) { return f.before == f.after; }), states->end());
     return target;
+}
+
+// The node of `graph` named `name` (null: none).
+const nlohmann::json* graphNode(const nlohmann::json& graph, const std::string& name) {
+    if (!graph.is_object() || !graph.contains("nodes") || !graph["nodes"].is_array()) return nullptr;
+    for (const nlohmann::json& n : graph["nodes"]) {
+        if (n.is_object() && n.value("name", std::string()) == name) return &n;
+    }
+    return nullptr;
+}
+
+bool rgbaChannel(const std::string& c) { return c == "r" || c == "g" || c == "b" || c == "a"; }
+
+// The channel node.param reads of the map it reads: a Map node's output feeding it, or a color
+// texture map's component; "" its value (Maya's param_map).
+std::string readChannel(const std::string& graphJson, const ScalpMaps& maps, const std::string& node, const std::string& param,
+                        const std::string& map) {
+    const nlohmann::json g = nlohmann::json::parse(graphJson, nullptr, false);
+    if (g.is_object() && g.contains("connections") && g["connections"].is_array()) {
+        for (const nlohmann::json& c : g["connections"]) {
+            if (!c.is_object() || c.value("to", std::string()) != node || c.value("input", std::string()) != param) continue;
+            const nlohmann::json* from = graphNode(g, c.value("from", std::string()));
+            const std::string output = c.value("output", std::string());
+            return from && from->value("type", std::string()) == "Map" && rgbaChannel(output) ? output : std::string();
+        }
+    }
+    const nlohmann::json* n = graphNode(g, node);
+    if (!n || !n->contains("params") || !(*n)["params"].is_object() || !(*n)["params"].contains(param)) return {};
+    const nlohmann::json& value = (*n)["params"][param];
+    const auto entry = maps.maps.find(map);
+    if (!value.is_object() || !value.contains("texture") || entry == maps.maps.end() || entry->second.channels != kColorMap) return {};
+    const std::string component = value.value("component", std::string());
+    return rgbaChannel(component) ? component : std::string();
+}
+
+// node.param fed by channel `channel` of map `map`'s Map node (one per map, made left of the node
+// when there is none), the param exposed as an input (graph_controls.h exposeParam).
+std::string wireMapChannel(const std::string& graphJson, const std::string& node, const std::string& param, const std::string& map,
+                           const std::string& channel) {
+    GraphEdit edit(graphJson);
+    const nlohmann::json g = nlohmann::json::parse(graphJson, nullptr, false);
+    std::string mapNode;
+    if (g.is_object() && g.contains("nodes") && g["nodes"].is_array()) {
+        for (const nlohmann::json& n : g["nodes"]) {
+            if (!n.is_object() || n.value("type", std::string()) != "Map") continue;
+            const nlohmann::json params = n.value("params", nlohmann::json::object());
+            if (params.is_object() && params.value("name", std::string("mask")) == map) {
+                mapNode = n.value("name", std::string());
+                break;
+            }
+        }
+    }
+    if (mapNode.empty()) {
+        std::optional<double> x, y;
+        const nlohmann::json* at = graphNode(g, node);
+        if (at && at->contains("ui") && (*at)["ui"].is_object()) {
+            const nlohmann::json& ui = (*at)["ui"];
+            if (ui.contains("x") && ui["x"].is_number() && ui.contains("y") && ui["y"].is_number()) {
+                x = ui["x"].get<double>() - 2 * 240.0;  // two of the core's columns (graph_edit.cpp) to its left
+                y = ui["y"].get<double>();
+            }
+        }
+        mapNode = edit.addNode("Map", edit.uniqueName(map), nlohmann::json{{"name", map}}.dump(), x, y);
+    }
+    exposeParam(edit, node, param);
+    edit.connect(mapNode, node, param, channel);
+    return edit.toJson();
 }
 
 }  // namespace
@@ -506,6 +579,61 @@ std::vector<std::string> reloadMapFiles(const ScalpMaps& maps, const GuideHierar
     for (const auto& [map, entry] : maps.maps) {
         if (entry.kind != "texture" || entry.texture.empty() || (!name.empty() && map != name)) continue;
         out.push_back(files.resolve ? files.resolve(entry.texture) : entry.texture);
+    }
+    return out;
+}
+
+ParamPaint paintParam(const std::string& graph, const ScalpMaps& maps, const GuideHierarchy* guides, const ScalpMesh* cage,
+                      const std::string& node, const std::string& param, const ParamPaintRequest& paint, const MapFiles& files) {
+    const std::string full = graphOrDefault(graph);
+    if (!GraphEdit(full).hasNode(node)) throw std::invalid_argument("no node '" + node + "'");
+    const std::string channel = paint.channel == "luminance" ? std::string() : paint.channel;
+    if (!channel.empty() && !rgbaChannel(channel)) throw std::invalid_argument("a map's channel is r, g, b or a, not '" + channel + "'");
+    ParamMapRef read;
+    try {
+        read = paramMapOf(full, maps, guides, node, param);
+    } catch (const std::exception& e) {
+        throw std::invalid_argument(e.what());
+    }
+    ParamPaint out;
+    out.created.maps = maps;
+    if (paint.name.empty() && !read.map.empty()) {  // the map it reads already: that one, as it is
+        out.map = read.map;
+        out.kind = read.kind;
+        out.channel = readChannel(full, maps, node, param, read.map);
+        return out;
+    }
+    out.map = paint.name.empty() ? paramMapName(node, param) : paint.name;
+    out.kind = mapKindOf(maps, guides, out.map);
+    out.channel = channel;
+    if (out.kind.empty()) {
+        if (paint.kind != "vertices" && paint.kind != "texture" && paint.kind != "guides") {
+            throw std::invalid_argument("a setting's map is on the guides, the scalp's vertices or a texture, not '" + paint.kind + "'");
+        }
+        if (paint.kind == "guides" && (!guides || guides->guides().empty())) {
+            throw std::invalid_argument("the groom has no guides to paint on: add guides, or paint on the scalp's vertices");
+        }
+        if (!channel.empty() && paint.kind == "guides") {
+            throw std::invalid_argument("a guide layer is gray: paint a channel of a map on the scalp's vertices or a texture");
+        }
+        MapCreateRequest create;  // white: the param as it was, black 0
+        create.kind = paint.kind;
+        create.color = !channel.empty();
+        create.value = 1.0f;
+        create.fill = PaintColor{1.0f, 1.0f, 1.0f, 1.0f};
+        create.resolution = paint.resolution;
+        create.faces = paint.faces;
+        out.created = createMap(maps, guides, cage, out.map, create, files);
+        out.made = true;
+        out.kind = paint.kind;
+    }
+    try {
+        out.graph = channel.empty() ? wireParamMap(full, out.created.maps, node, param, out.map, out.kind)
+                                    : wireMapChannel(full, node, param, out.map, channel);
+    } catch (const std::invalid_argument&) {
+        throw;
+    } catch (const std::exception& e) {
+        throw std::invalid_argument(e.what());
     }
     return out;
 }

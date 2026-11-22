@@ -7,11 +7,14 @@
 
 #include <filesystem>
 #include <fstream>
+#include <set>
 #include <string>
 
 #include <nlohmann/json.hpp>
 
 #include "groomlab/editor/map_edits.h"
+#include "groomlab/graph_edit.h"
+#include "groomlab/graph_io.h"
 #include "groomlab/stroke.h"
 #include "../core/test_helpers.h"
 
@@ -428,4 +431,68 @@ TEST(MapEdits, ImportAndRelinkReadAnImageInPlaceOrAsACopy) {
     EXPECT_EQ(reloadMapFiles(in.maps, &h, "", files), (std::vector<std::string>{tinted}));
     EXPECT_THROW(reloadMapFiles(in.maps, &h, "lay", files), std::invalid_argument);
     EXPECT_THROW(reloadMapFiles(in.maps, &h, "nope", files), std::invalid_argument);
+}
+
+TEST(MapEdits, PaintOnASettingMakesItsMapOnceAndPacksChannelsThroughOneMapNode) {
+    const fs::path dir = freshFolder("paint");
+    const std::shared_ptr<const ScalpMesh> scalp = test::makePlane(4);
+    GuideHierarchy none;
+    const GraphEdit defaults(defaultGraphJson());
+    std::string noise, length;
+    for (const std::string& n : defaults.nodeNames()) {
+        if (defaults.nodeType(n) == "Noise") noise = n;
+        if (defaults.nodeType(n) == "Length") length = n;
+    }
+    ASSERT_FALSE(noise.empty());
+    ASSERT_FALSE(length.empty());
+    MapFiles files;
+    files.mapsFolder = (dir / "masks").generic_u8string();
+    // A vertex map, white, the param reading it; asked again: the same map, nothing changed.
+    ParamPaintRequest vertices;
+    const ParamPaint made = paintParam("", ScalpMaps{}, &none, scalp.get(), noise, "amplitude", vertices, files);
+    EXPECT_TRUE(made.made);
+    EXPECT_EQ(made.map, paramMapName(noise, "amplitude"));
+    EXPECT_EQ(made.kind, "vertices");
+    ASSERT_EQ(made.created.maps.maps.count(made.map), 1u);
+    for (const float v : made.created.maps.maps.at(made.map).values) EXPECT_FLOAT_EQ(v, 1.0f);
+    ASSERT_FALSE(made.graph.empty());
+    EXPECT_EQ(paramMapOf(made.graph, made.created.maps, &none, noise, "amplitude").map, made.map);
+    const ParamPaint again = paintParam(made.graph, made.created.maps, &none, scalp.get(), noise, "amplitude", vertices, files);
+    EXPECT_FALSE(again.made);
+    EXPECT_TRUE(again.graph.empty());
+    EXPECT_EQ(again.map, made.map);
+    // Its link gone, the map still there: read again, not a new one.
+    const ParamPaint relinked = paintParam("", made.created.maps, &none, scalp.get(), noise, "amplitude", vertices, files);
+    EXPECT_FALSE(relinked.made);
+    EXPECT_FALSE(relinked.graph.empty());
+    // Channels of one color map: one Map node feeding both params, each from its output.
+    ParamPaintRequest green;
+    green.name = "masks";
+    green.channel = "g";
+    const ParamPaint g = paintParam("", ScalpMaps{}, &none, scalp.get(), noise, "amplitude", green, files);
+    EXPECT_TRUE(g.made);
+    EXPECT_EQ(g.channel, "g");
+    EXPECT_EQ(g.created.maps.maps.at("masks").channels, kColorMap);
+    ParamPaintRequest blue = green;
+    blue.channel = "b";
+    const ParamPaint b = paintParam(g.graph, g.created.maps, &none, scalp.get(), length, "keep", blue, files);
+    EXPECT_FALSE(b.made);
+    const nlohmann::json graph = nlohmann::json::parse(b.graph);
+    int mapNodes = 0;
+    for (const auto& n : graph["nodes"]) mapNodes += n.value("type", std::string()) == "Map" ? 1 : 0;
+    EXPECT_EQ(mapNodes, 1);
+    std::set<std::string> outputs;
+    for (const auto& c : graph["connections"]) {
+        if (c.value("input", std::string()) == "amplitude" || c.value("input", std::string()) == "keep") outputs.insert(c.value("output", std::string()));
+    }
+    EXPECT_EQ(outputs, (std::set<std::string>{"g", "b"}));
+    // The one it reads already, asked without a name: its channel.
+    EXPECT_EQ(paintParam(b.graph, b.created.maps, &none, scalp.get(), length, "keep", vertices, files).channel, "b");
+    // Refused: no such node, a guide layer with no guides, a gray layer for a channel, an odd kind.
+    EXPECT_THROW(paintParam("", ScalpMaps{}, &none, scalp.get(), "nope", "amplitude", vertices, files), std::invalid_argument);
+    ParamPaintRequest layer;
+    layer.kind = "guides";
+    EXPECT_THROW(paintParam("", ScalpMaps{}, &none, scalp.get(), noise, "amplitude", layer, files), std::invalid_argument);
+    layer.kind = "cloud";
+    EXPECT_THROW(paintParam("", ScalpMaps{}, &none, scalp.get(), noise, "amplitude", layer, files), std::invalid_argument);
 }

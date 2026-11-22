@@ -624,52 +624,51 @@ std::size_t GroomDocument::sculptedGuides(const std::string& node) const {
 std::string GroomDocument::paintParam(const std::string& node, const std::string& name, std::string* mapName, const std::string& kind,
                                       bool* made) {
     if (made) *made = false;
-    if (!nodeJson(node)) return "no node '" + node + "'";
-    // The map the param reads already (a Map node, a color set, a texture, a guide layer): that one.
+    // Every host's Paint on a setting (the editor's paintParam, map_edits.h): the map the param
+    // reads, else its own (one there already linked again), made white and linked; the map, its
+    // files and the wiring one undo step.
+    ParamPaintRequest paint;
+    paint.kind = kind;
+    MapFiles files;
+    files.mapsFolder = mapsDirectory();
+    files.groomFolder = path_.empty() ? std::string() : std::filesystem::u8path(path_).parent_path().u8string();
+    files.resolve = [this](const std::string& stored) { return resolveMapPath(stored); };
+    const MeshPtr cage = session().cageScalp();
+    ParamPaint painted;
     try {
-        const ParamMapRef ref = paramMapOf(graph_.dump(), session().scalpMaps(), session().storedHierarchy().get(), node, name);
-        if (!ref.map.empty()) {
-            if (mapName) *mapName = ref.map;
-            return {};
-        }
+        painted = groomlab::paintParam(graph_.dump(), session().scalpMaps(), session().storedHierarchy().get(),
+                                       cage && cage->pointCount() > 0 ? cage.get() : nullptr, node, name, paint, files);
     } catch (const std::exception& e) {
         return e.what();
     }
-    if (kind != "vertices" && kind != "texture" && kind != "guides") {
-        return "a setting's map is on the guides, the scalp's vertices or a texture, not '" + kind + "'";
+    if (mapName) *mapName = painted.map;
+    if (painted.graph.empty()) return {};  // it reads the map already
+    const std::string label = "map " + node + "." + name;
+    if (!painted.made) return editGraph(label, [&](json& g) { g = json::parse(painted.graph); });
+    const std::size_t undoBefore = history_.undoIndex();
+    if (painted.created.guideLayer) {
+        const std::string error = editGuides(label, [&](GuideHierarchy& h) { applyCreatedLayer(h, painted.map, painted.created); });
+        if (!error.empty()) return error;
+    } else {
+        commitMaps(label, painted.created.maps);
     }
-    if (kind == "guides" && !(session().storedHierarchy() && !session().storedHierarchy()->guides().empty())) {
-        return "the groom has no guides to paint on: add guides, or paint on the scalp's vertices";
-    }
-    // The param's own map (paramMapName): one of that name already (made for it before, its link
-    // gone) is linked again, whatever its kind, its painting back; else a new one, white: the param
-    // as it was, black 0.
-    const std::string map = paramMapName(node, name);
-    if (const PaintedMap* existing = this->map(map)) {
-        const std::string kindThere = existing->kind;
-        const std::string error = editGraph("map " + node + "." + name, [&](json& g) {
-            g = json::parse(wireParamMap(g.dump(), session().scalpMaps(), node, name, map, kindThere));
-        });
-        if (error.empty() && mapName) *mapName = map;
-        return error;
-    }
-    std::string error = createMap(map, kind, false, 1.0f, 1024, PaintColor{1.0f, 1.0f, 1.0f, 1.0f});
-    if (!error.empty()) return error;
-    error = editGraph("map " + node + "." + name,
-                      [&](json& g) { g = json::parse(wireParamMap(g.dump(), session().scalpMaps(), node, name, map, kind)); });
+    attachSide(undoBefore, label, std::move(painted.created.files));
+    // The wiring in the same step: undo takes the map and its link back together.
+    const json before = graph_;
+    graph_ = json::parse(painted.graph);
+    const std::string error = applyGraph();
     if (!error.empty()) {  // the map goes with the refused wiring
+        graph_ = before;
+        applyGraph();
         undo();
         history_.dropRedo();
         return error;
     }
-    // The map and the wiring as one step: undo takes both back.
-    Edit wiring = history_.takeLast();
     Edit& step = history_.last();
     step.whole = true;
-    step.graphBefore = std::move(wiring.graphBefore);
-    step.graphAfter = std::move(wiring.graphAfter);
-    step.label = wiring.label;
-    if (mapName) *mapName = map;
+    step.graphBefore = before;
+    step.graphAfter = graph_;
+    step.label = label;
     if (made) *made = true;
     return {};
 }
