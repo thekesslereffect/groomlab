@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "groomlab/paths.h"
+#include "groomlab/texture.h"
 #include "groomlab/udim.h"
 
 namespace groomlab {
@@ -91,8 +92,9 @@ MapRename renameMap(const ScalpMaps& maps, const GuideHierarchy* guides, const s
                     done = moveImage(mapImageMoves(full, target), &out.files);
                 }
                 if (done) {
-                    entry.texture = files.groomFolder.empty() ? fs::u8path(target).generic_u8string()
-                                                              : pathFromGroomFolder(target, files.groomFolder);
+                    entry.texture = files.store                 ? files.store(target)
+                                    : files.groomFolder.empty() ? fs::u8path(target).generic_u8string()
+                                                                : pathFromGroomFolder(target, files.groomFolder);
                     movedFrom = full;
                 }
             }
@@ -111,6 +113,100 @@ MapRename renameMap(const ScalpMaps& maps, const GuideHierarchy* guides, const s
     }
     if (retargeted) out.graph = std::move(g);
     return out;
+}
+
+std::string storedMapPath(const std::string& full, const MapFiles& files) {
+    if (files.store) return files.store(full);
+    if (files.groomFolder.empty()) return fs::u8path(full).generic_u8string();
+    return pathFromGroomFolder(full, files.groomFolder);
+}
+
+std::string newMapImageFile(const std::string& name, const MapFiles& files) {
+    return freeFilePath((fs::u8path(files.mapsFolder) / fs::u8path(name + ".png")).generic_u8string());
+}
+
+std::vector<FileState> writeMapImage(const TexturePaint& paint, const std::string& file) {
+    std::vector<FileState> states = mapImageStates(file, paint.udim() ? paint.udimLayout()->tiles : std::vector<int>{});
+    std::error_code ec;
+    fs::create_directories(fs::u8path(file).parent_path(), ec);
+    try {
+        paint.save(file);  // (a tile set: each tile, udimPathFor(file))
+    } catch (const std::exception& e) {
+        restoreFileStates(states, false);
+        throw std::runtime_error(std::string("cannot write the map's image: ") + e.what());
+    }
+    finishFileStates(states);
+    return states;
+}
+
+MapConvert convertMapKind(const ScalpMaps& maps, const GuideHierarchy* guides, const ScalpMesh& cage, const std::string& name,
+                          const std::string& to, int resolution, const std::string& texturePath, const MapFiles& files) {
+    if (to != "guides" && to != "vertices" && to != "texture") throw std::invalid_argument("a map's kind is guides, vertices or texture");
+    const std::string from = mapKindOf(maps, guides, name);
+    if (from.empty()) throw std::invalid_argument("no map named '" + name + "'");
+    MapConvert out;
+    out.maps = maps;
+    if (from == to) return out;
+    if (to == "texture" && texturePath.empty() && files.mapsFolder.empty()) {
+        throw std::invalid_argument("save the groom first: a texture map's image goes in the groomlab folder beside it");
+    }
+    if (!texturePath.empty() && !isPngPath(texturePath)) throw std::invalid_argument("a texture map's file is a PNG (painting writes PNG)");
+    // The source as its kind holds it.
+    MapSource source;
+    source.kind = from;
+    source.channels = mapChannelsOf(maps, guides, name);
+    if (source.channels == 0) source.channels = kGrayMap;
+    if (from == "guides") {
+        if (!guides) throw std::invalid_argument("the groom has no guides");
+    } else if (from == "vertices") {
+        source.vertices = maps.maps.at(name).values;
+    } else {
+        const std::string full = files.resolve ? files.resolve(maps.maps.at(name).texture) : maps.maps.at(name).texture;
+        try {
+            source.image = loadTexture(full);
+        } catch (const std::exception& e) {
+            throw std::runtime_error("map " + name + "'s image does not read: " + e.what());
+        }
+        if (!source.image) throw std::runtime_error("map " + name + "'s image does not read");
+    }
+    GuideHierarchy h = guides ? *guides : GuideHierarchy{};
+    MapConverted converted = convertMap(name, source, to, cage, h, resolution);
+    out.colorLost = converted.colorLost;
+    if (to == "vertices") {
+        ScalpMapEntry entry;
+        entry.kind = "vertices";
+        entry.values = std::move(converted.vertices);
+        entry.channels = source.channels;
+        out.maps.maps[name] = std::move(entry);
+    } else if (to == "texture") {
+        const std::string file = texturePath.empty() ? newMapImageFile(name, files) : freeFilePath(texturePath);
+        out.files = writeMapImage(*converted.texture, file);
+        ScalpMapEntry entry;
+        entry.kind = "texture";
+        entry.texture = storedMapPath(file, files);
+        entry.channels = source.channels;
+        out.file = entry.texture;
+        out.maps.maps[name] = std::move(entry);
+    } else {
+        out.maps.maps.erase(name);  // (a guide layer is gray: a color map keeps its luminance)
+    }
+    out.removeLayer = from == "guides";
+    if (to == "guides") {
+        out.setLayer = true;
+        for (const HierarchyGuide& g : h.guides()) {
+            const auto value = g.attributes.find(name);
+            if (value != g.attributes.end()) out.layer[g.id] = value->second;
+        }
+    }
+    return out;
+}
+
+void applyConvertedLayer(GuideHierarchy& h, const std::string& name, const MapConvert& converted) {
+    if (converted.removeLayer) h.removeAttribute(name);
+    if (!converted.setLayer) return;
+    for (const auto& [id, value] : converted.layer) {
+        if (h.guide(id)) h.setAttribute(id, name, value);
+    }
 }
 
 MapRemove removeMap(const ScalpMaps& maps, const GuideHierarchy* guides, const std::string& graph, const std::string& name,

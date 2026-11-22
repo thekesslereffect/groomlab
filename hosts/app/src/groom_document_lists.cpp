@@ -333,82 +333,37 @@ std::string GroomDocument::reloadMap(const std::string& name) {
 std::string GroomDocument::convertMap(const std::string& name, const std::string& to, int resolution) {
     const PaintedMap* source = map(name);
     if (!source) return "no map named '" + name + "'";
-    if (to != "guides" && to != "vertices" && to != "texture") return "a map's kind is guides, vertices or texture";
-    const std::string from = source->kind;
-    if (from == to) return {};
+    if (source->kind == to) return {};
     const MeshPtr scalp = session().cageScalp();
     if (!scalp || scalp->pointCount() == 0) return "no scalp to hold the map";
-    const int channels = source->channels;
-    ScalpMaps maps = session().scalpMaps();
+    // Every host's Convert (the editor's convertMapKind, map_edits.h).
+    MapFiles files;
+    files.mapsFolder = mapsDirectory();
+    files.groomFolder = path_.empty() ? std::string() : std::filesystem::u8path(path_).parent_path().u8string();
+    files.resolve = [this](const std::string& stored) { return resolveMapPath(stored); };
     const HierarchyPtr authored = session().authoredHierarchy();
-    std::vector<FileState> files;
+    MapConvert converted;
+    try {
+        converted = convertMapKind(session().scalpMaps(), authored.get(), *scalp, name, to, resolution, {}, files);
+    } catch (const std::exception& e) {
+        return e.what();
+    }
     const std::string label = "convert map " + name;
     StrokeEdit edit;
     edit.mode = label;
-    try {
-        // The source as its kind holds it, converted (every host's: scalp_paint.h convertMap; a
-        // guide layer read at the guides' roots on the cage).
-        MapSource sourceMap;
-        sourceMap.kind = from;
-        sourceMap.channels = channels;
-        if (from == "guides") {
-            if (!authored) return "the groom has no guides";
-        } else if (from == "vertices") {
-            sourceMap.vertices = maps.maps[name].values;
-        } else {
-            try {
-                sourceMap.image = loadTexture(resolveMapPath(maps.maps[name].texture));
-            } catch (const std::exception& e) {
-                return "map " + name + "'s image does not read: " + e.what();
-            }
-            if (!sourceMap.image) return "map " + name + "'s image does not read";
-        }
-        if (to == "texture" && mapsDirectory().empty()) return "save the groom first: a texture map's image goes in the groomlab folder beside it";
+    if (converted.removeLayer || converted.setLayer) {
         GuideHierarchy h = authored ? *authored : GuideHierarchy{};
-        MapConverted converted;
-        try {
-            converted = groomlab::convertMap(name, sourceMap, to, *scalp, h, resolution);
-        } catch (const std::invalid_argument& e) {
-            return e.what();
-        }
-        if (to == "vertices") {
-            ScalpMapEntry entry;
-            entry.kind = "vertices";
-            entry.values = std::move(converted.vertices);
-            entry.channels = channels;
-            maps.maps[name] = std::move(entry);
-        } else if (to == "texture") {
-            const std::string file = freeMapFile(name);
-            const TexturePaint& paint = *converted.texture;
-            std::vector<FileState> states = mapImageStates(file, tilesOf(paint));
-            std::error_code ec;
-            std::filesystem::create_directories(std::filesystem::u8path(file).parent_path(), ec);
-            paint.save(file);
-            finishFileStates(states);
-            files.insert(files.end(), states.begin(), states.end());
-            ScalpMapEntry entry;
-            entry.kind = "texture";
-            entry.texture = storedMapPath(file);
-            entry.channels = channels;
-            maps.maps[name] = std::move(entry);
-        } else {
-            maps.maps.erase(name);  // (a guide layer is gray: a color map keeps its luminance)
-        }
-        if (to == "guides" || from == "guides") {
-            h.evaluate(session().scalp().get());
-            edit.set(StrokeField::Guides, h.toJson());
-        }
-    } catch (const std::exception& e) {
-        for (const FileState& f : files) putFileState(f.path, f.before);
-        return e.what();
+        applyConvertedLayer(h, name, converted);
+        h.evaluate(session().scalp().get());
+        edit.set(StrokeField::Guides, h.toJson());
     }
     paints_.erase(name);
     mapViewKey_ = 0;
-    edit.set(StrokeField::ScalpMaps, maps.toJson());
+    edit.set(StrokeField::ScalpMaps, converted.maps.toJson());
     const std::size_t undoBefore = history_.undoIndex();
     commitStroke(std::move(edit));
     if (history_.undoIndex() > undoBefore) history_.last().label = label;
-    attachSide(undoBefore, label, std::move(files));
+    attachSide(undoBefore, label, std::move(converted.files));
     return {};
 }
 

@@ -106,7 +106,7 @@ maya_add_plugin(GroomLab
     src/tool_view.cpp
     src/version_cmd.cpp
 )
-target_link_libraries(GroomLab PRIVATE groomlab_maya_inputs groomlab_maya_qt groomlab::warnings
+target_link_libraries(GroomLab PRIVATE groomlab_maya_inputs groomlab_maya_qt groomlab::editor groomlab::warnings
     nlohmann_json::nlohmann_json)  # graphStatsJson
 if(APPLE)
     # The display's pixels per point under the cursor (the brush's radius in points: display_scale.h).

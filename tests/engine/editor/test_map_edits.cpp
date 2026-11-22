@@ -13,6 +13,7 @@
 
 #include "groomlab/editor/map_edits.h"
 #include "groomlab/stroke.h"
+#include "../core/test_helpers.h"
 
 using namespace groomlab;
 namespace fs = std::filesystem;
@@ -124,4 +125,47 @@ TEST(MapEdits, RemoveLetsTheReadersGoAndDeletesOnlyAnImageNothingElseReads) {
     EXPECT_FALSE(removeMap(maps, nullptr, "", "dirt", false, files).fileDeleted);
     EXPECT_TRUE(fs::exists(dir / "masks" / "dirt.png"));
     EXPECT_THROW(removeMap(maps, nullptr, "", "nope", true, files), std::invalid_argument);
+}
+
+TEST(MapEdits, ConvertResamplesIntoAnotherKindAndWritesATextureImage) {
+    const fs::path dir = freshFolder("convert");
+    // A plane with UVs: each corner at its point's (x, z).
+    auto plane = std::make_shared<ScalpMesh>(*test::makePlane(4));
+    std::vector<ScalpMesh::UV> uvs;
+    for (std::size_t t = 0; t < plane->triangleCount(); ++t) {
+        for (const int v : plane->triangles()[t]) uvs.push_back({plane->points()[v].x, plane->points()[v].z});
+    }
+    plane->setCornerUVs(std::move(uvs));
+    const std::shared_ptr<const ScalpMesh> scalp = plane;
+    GuideHierarchy h;
+    const GroupId group = h.addGroup("g");
+    h.addGuide(group, {scalp->points()[0], scalp->points()[0] + Vec3f{0.0f, 0.5f, 0.0f}});
+    h.evaluate(scalp.get());
+    ScalpMaps maps;
+    maps.maps["mask"] = ScalpMapEntry{"vertices", std::vector<float>(scalp->pointCount(), 0.75f), ""};
+    MapFiles files;
+    files.mapsFolder = (dir / "masks").generic_u8string();
+    files.groomFolder = dir.generic_u8string();
+    // Onto the guides: the layer's values, the scalp map gone.
+    MapConvert onGuides = convertMapKind(maps, &h, *scalp, "mask", "guides", 16, {}, files);
+    EXPECT_EQ(onGuides.maps.maps.count("mask"), 0u);
+    EXPECT_TRUE(onGuides.setLayer);
+    EXPECT_FALSE(onGuides.removeLayer);
+    ASSERT_EQ(onGuides.layer.size(), 1u);
+    EXPECT_NEAR(onGuides.layer.begin()->second, 0.75f, 1e-3f);
+    GuideHierarchy layered = h;
+    applyConvertedLayer(layered, "mask", onGuides);
+    EXPECT_EQ(layered.attributeNames(), (std::vector<std::string>{"mask"}));
+    // Into a texture: an image in the maps folder, stored relative to the groom, undone by its states.
+    MapConvert texture = convertMapKind(maps, &h, *scalp, "mask", "texture", 16, {}, files);
+    EXPECT_EQ(texture.file, "masks/mask.png");
+    EXPECT_EQ(texture.maps.maps.at("mask").kind, "texture");
+    EXPECT_TRUE(fs::exists(dir / "masks" / "mask.png"));
+    restoreFileStates(texture.files, false);
+    EXPECT_FALSE(fs::exists(dir / "masks" / "mask.png"));
+    // The same kind: nothing; bad asks refused.
+    EXPECT_TRUE(convertMapKind(maps, &h, *scalp, "mask", "vertices", 16, {}, files).files.empty());
+    EXPECT_THROW(convertMapKind(maps, &h, *scalp, "mask", "cloud", 16, {}, files), std::invalid_argument);
+    EXPECT_THROW(convertMapKind(maps, &h, *scalp, "nope", "texture", 16, {}, files), std::invalid_argument);
+    EXPECT_THROW(convertMapKind(maps, &h, *scalp, "mask", "texture", 16, "a.jpg", files), std::invalid_argument);
 }

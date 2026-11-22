@@ -2348,76 +2348,35 @@ json mapConvert(ToolState& t, const json& args) {
     const std::string name = needMap(s, args);
     const std::string to = needString(args, "kind");
     if (to != "guides" && to != "vertices" && to != "texture") fail("bad_request", "kind is guides, vertices or texture");
-    const std::string from = mapKindOf(s, name);
-    if (from == to) return {{"name", name}, {"kind", to}, {"undo", undoJson(t)}};
+    if (mapKindOf(s, name) == to) return {{"name", name}, {"kind", to}, {"undo", undoJson(t)}};
     const MeshPtr scalp = mapScalp(s);
-    const int resolution = resolutionOf(args);
-    const int channels = mapChannelsOf(s, name);
-    ScalpMaps maps = s.groom->scalpMaps();
-    json warnings = json::array();
-    // The source as its kind holds it, converted (every host's: scalp_paint.h convertMap; a guide
-    // layer read at the guides' roots on the cage).
-    MapSource source;
-    source.kind = from;
-    source.channels = channels;
-    const HierarchyPtr authored = s.groom->authoredHierarchy();
-    if (from == "guides") {
-        if (!authored) fail("state", "the groom has no guides");
-    } else if (from == "vertices") {
-        source.vertices = maps.maps[name].values;
-    } else {
-        const std::string full = resolveMapFile(s, maps.maps[name].texture);
-        try {
-            source.image = loadTexture(full);
-        } catch (const std::exception& e) {
-            fail("io", "map " + name + "'s image does not read: " + e.what());
-        }
-        if (!source.image) fail("io", "map " + name + "'s image does not read");
+    // Every host's Convert (the editor's convertMapKind, map_edits.h).
+    MapFiles files;
+    files.mapsFolder = mapsFolder(s);
+    files.resolve = [&s](const std::string& stored) { return resolveMapFile(s, stored); };
+    MapConvert converted;
+    try {
+        converted = convertMapKind(s.groom->scalpMaps(), s.groom->authoredHierarchy().get(), *scalp, name, to, resolutionOf(args),
+                                   optString(args, "texture", ""), files);
+    } catch (const std::invalid_argument& e) {
+        fail("bad_request", e.what());
+    } catch (const std::exception& e) {
+        fail("io", e.what());
     }
+    json warnings = json::array();
+    if (converted.colorLost) warnings.push_back(name + " is a color map; on the guides it keeps its luminance (a guide layer is gray)");
     StrokeEdit edit;
     edit.mode = "convert map " + name;
-    std::string file;
-    GuideHierarchy converted = authored ? *authored : GuideHierarchy{};
-    try {
-        MapConverted out = convertMap(name, source, to, *scalp, converted, resolution);
-        if (out.colorLost) warnings.push_back(name + " is a color map; on the guides it keeps its luminance (a guide layer is gray)");
-        if (to == "vertices") {
-            ScalpMapEntry entry{"vertices", std::move(out.vertices), ""};
-            entry.channels = channels;
-            maps.maps[name] = std::move(entry);
-        } else if (to == "texture") {
-            const std::string wanted = optString(args, "texture", "");
-            if (!wanted.empty() && !isPngPath(wanted)) fail("bad_request", "a texture map's file is a PNG (painting writes PNG)");
-            file = wanted.empty() ? defaultMapFile(s, name) : freeFilePath(wanted);
-            writePaint(t, *out.texture, file);
-            ScalpMapEntry entry{"texture", {}, file};
-            entry.channels = channels;
-            maps.maps[name] = std::move(entry);
-        } else {
-            maps.maps.erase(name);
-        }
-    } catch (const RequestError&) {
-        throw;
-    } catch (const std::exception& e) {
-        fail("bad_request", e.what());
-    }
-    if (to == "guides" || from == "guides") {
-        GuideHierarchy h = editedGuides(t, [&](GuideHierarchy& hh) {
-            // The layer as convertMap left it (the guides' other edits kept as they are).
-            if (from == "guides") hh.removeAttribute(name);
-            if (to != "guides") return;
-            for (const HierarchyGuide& g : converted.guides()) {
-                const auto value = g.attributes.find(name);
-                if (value != g.attributes.end() && hh.guide(g.id)) hh.setAttribute(g.id, name, value->second);
-            }
-        });
+    if (converted.removeLayer || converted.setLayer) {
+        GuideHierarchy h = editedGuides(t, [&](GuideHierarchy& hh) { applyConvertedLayer(hh, name, converted); });
         edit.set(StrokeField::Guides, h.toJson());
     }
+    for (FileEdit& f : converted.files) t.pending.files.push_back(std::move(f));
     dropPaints(t);
-    edit.set(StrokeField::ScalpMaps, maps.toJson());
+    edit.set(StrokeField::ScalpMaps, converted.maps.toJson());
     commitEdit(t, std::move(edit));
     json r = {{"name", name}, {"kind", to}, {"warnings", warnings}, {"undo", undoJson(t)}};
-    if (!file.empty()) r["file"] = file;
+    if (!converted.file.empty()) r["file"] = converted.file;
     return r;
 }
 

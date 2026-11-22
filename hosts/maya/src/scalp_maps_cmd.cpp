@@ -22,6 +22,7 @@
 
 #include "asset_files.h"
 #include "groom_shape.h"
+#include "groomlab/editor/map_edits.h"
 #include "groomlab/guide_hierarchy.h"
 #include "groomlab/scalp_paint.h"
 #include "groomlab/asset_files.h"
@@ -293,72 +294,55 @@ MStatus ScalpMapsCmd::doIt(const MArgList& args) {
                 } else {
                     return fail(kName, "-kind takes guides, vertices or texture");
                 }
-            } else if (db.isFlagSet(kRemove[0])) {
-                const std::string name = flagString(db, kRemove[0]).asChar();
-                const std::string kind = kindOf(maps, *h, name);
-                if (kind.empty()) return fail(kName, ("no map named " + name).c_str());
-                if (kind == "guides") {
-                    h->removeAttribute(name);
-                    guidesChanged = true;
-                } else {
-                    // A texture map's file stays on disk, unless -deleteFile, it is in the groom's
-                    // masks folder (one GroomLab made: every host's rule) and nothing else reads it
-                    // (another map of this groom, another groom): its bytes kept for undo; a tile
-                    // set's every tile (udim.h).
-                    const std::string file = kind == "texture" ? resolve(maps.maps[name].texture) : "";
-                    maps.maps.erase(name);
-                    mapsChanged = true;
-                    const bool shared = !file.empty() && (fileUsedByOtherGroom(groomNode, file) ||
-                        std::any_of(maps.maps.begin(), maps.maps.end(), [&](const auto& m) {
-                            return m.second.kind == "texture" && sameFile(resolve(m.second.texture), file);
-                        }));
-                    if (db.isFlagSet(kDeleteFile[0]) && mapImageDeletable(file, assetFolder("masks") + "/" + assetName(groomPath), shared)) {
-                        for (FileState& tile : mapImageStates(file)) {
-                            if (tile.before) deleted_.push_back(std::move(tile));  // (after: none)
-                        }
+            } else if (db.isFlagSet(kRemove[0]) || db.isFlagSet(kRename[0])) {
+                // Every host's Remove and Rename (the editor's map_edits.h): the graph's readers let go
+                // of the map or follow it, a texture map's image deleted (-deleteFile: GroomLab's,
+                // nothing else reading it) or following the name (moved, or copied when another map
+                // or groom reads it), its files' states kept for Maya's undo with the texts.
+                MapFiles files;
+                files.resolve = resolve;
+                files.store = [](const std::string& full) { return portableMayaPath(full); };
+                files.shared = [&](const std::string& full) { return fileUsedByOtherGroom(groomNode, full); };
+                MPlug graphPlug = groomFn.findPlug("graph", true);
+                const std::string graph = graphPlug.asString().asChar();
+                std::string graphAfter;
+                if (db.isFlagSet(kRemove[0])) {
+                    const std::string name = flagString(db, kRemove[0]).asChar();
+                    files.mapsFolder = assetFolder("masks") + "/" + assetName(groomPath);
+                    MapRemove removed = removeMap(maps, h.get(), graph, name, db.isFlagSet(kDeleteFile[0]), files);
+                    if (removed.guideLayer) {
+                        h->removeAttribute(name);
+                        guidesChanged = true;
+                    } else {
+                        maps = std::move(removed.maps);
+                        mapsChanged = true;
                     }
-                }
-            } else if (db.isFlagSet(kRename[0])) {
-                MString from, to;
-                db.getFlagArgument(kRename[0], 0, from);
-                db.getFlagArgument(kRename[0], 1, to);
-                const std::string kind = kindOf(maps, *h, from.asChar());
-                if (kind.empty()) return fail(kName, "no map named " + from);
-                if (!validMapName(to.asChar())) return fail(kName, mapNameError(to.asChar()).c_str());
-                if (!kindOf(maps, *h, to.asChar()).empty()) return fail(kName, "the groom already has a map named " + to);
-                if (kind == "guides") {
-                    h->renameAttribute(from.asChar(), to.asChar());
-                    guidesChanged = true;
-                } else {
-                    auto node = maps.maps.extract(from.asChar());
-                    node.key() = to.asChar();
-                    // A texture map's file follows its name when -texture gives the new file:
-                    // moved on disk (and back on undo), so the name on disk and in the Paint tab agree.
-                    // A file another groom reads too is copied instead (it keeps its file).
-                    if (kind == "texture" && !texturePath.empty() && texturePath != node.mapped().texture) {
-                        const std::string source = resolve(node.mapped().texture);
-                        const std::string target = resolve(texturePath);
-                        if (fileStamp(source) != 0) {
-                            if (fileStamp(target) != 0) return fail(kName, ("a file is in the way: " + target).c_str());
-                            copied_ = fileUsedByOtherGroom(groomNode, source);
-                            std::error_code ec;
-                            std::filesystem::create_directories(std::filesystem::u8path(target).parent_path(), ec);
-                            // (A tile set: each tile, its set's naming kept: udim.h.)
-                            for (const auto& [from, to] : mapImageMoves(source, target)) {
-                                if (copied_) {
-                                    std::filesystem::copy_file(std::filesystem::u8path(from), std::filesystem::u8path(to), ec);
-                                } else {
-                                    std::filesystem::rename(std::filesystem::u8path(from), std::filesystem::u8path(to), ec);
-                                }
-                                if (ec) return fail(kName, ("could not rename " + from + ": " + ec.message()).c_str());
-                            }
-                            moved_ = {source, target};
-                        }
-                        node.mapped().texture = texturePath;
+                    for (FileState& f : removed.files) deleted_.push_back(std::move(f));  // (after: none)
+                    graphAfter = std::move(removed.graph);
+                    MStringArray unlinked;  // (node, param) pairs that read it, flat
+                    for (const auto& [node, param] : removed.unlinked) {
+                        unlinked.append(node.c_str());
+                        unlinked.append(param.c_str());
                     }
-                    maps.maps.insert(std::move(node));
-                    mapsChanged = true;
+                    setResult(unlinked);
+                } else {
+                    MString from, to;
+                    db.getFlagArgument(kRename[0], 0, from);
+                    db.getFlagArgument(kRename[0], 1, to);
+                    files.mapsFolder = assetFolder("masks");  // (a duplicate's shared image in another groom's folder too)
+                    MapRename renamed = renameMap(maps, h.get(), graph, from.asChar(), to.asChar(), files);
+                    if (renamed.guideLayer) {
+                        h->renameAttribute(from.asChar(), to.asChar());
+                        guidesChanged = true;
+                    } else {
+                        maps = std::move(renamed.maps);
+                        mapsChanged = true;
+                    }
+                    for (FileState& f : renamed.files) files_.push_back(std::move(f));
+                    graphAfter = std::move(renamed.graph);
+                    setResult(MString(renamed.file.c_str()));
                 }
+                if (!graphAfter.empty()) modifier_.newPlugValueString(graphPlug, graphAfter.c_str());
             } else if (db.isFlagSet(kFill[0])) {
                 const std::string name = flagString(db, kFill[0]).asChar();
                 const std::string kind = kindOf(maps, *h, name);
@@ -536,44 +520,10 @@ MStatus ScalpMapsCmd::doIt(const MArgList& args) {
     });
 }
 
-namespace {
-
-// A renamed texture map's file, moved from -> to (a no-op when either is empty or the move fails:
-// the map then names a file that is not there, and the Map node reports it).
-void moveFile(const std::string& from, const std::string& to) {
-    if (from.empty() || to.empty()) return;
-    for (const auto& [a, b] : mapImageMoves(from, to)) {  // (a tile set: each tile)
-        std::error_code ec;
-        std::filesystem::rename(std::filesystem::u8path(a), std::filesystem::u8path(b), ec);
-        if (ec) MGlobal::displayWarning(MString(ScalpMapsCmd::kName) + ": could not move " + a.c_str() + " to " + b.c_str());
-    }
-}
-
-// A renamed map's shared file, copied from -> to (redo), or the copy removed (undo: to only).
-void copyFile(const std::string& from, const std::string& to) {
-    if (to.empty()) return;
-    std::error_code ec;
-    if (from.empty()) {
-        for (const std::string& file : mapImageFiles(to)) std::filesystem::remove(std::filesystem::u8path(file), ec);  // (a tile set: each tile)
-        return;
-    }
-    for (const auto& [a, b] : mapImageMoves(from, to)) {
-        std::filesystem::copy_file(std::filesystem::u8path(a), std::filesystem::u8path(b), std::filesystem::copy_options::overwrite_existing, ec);
-        if (ec) MGlobal::displayWarning(MString(ScalpMapsCmd::kName) + ": could not copy " + a.c_str() + " to " + b.c_str());
-    }
-}
-
-}  // namespace
-
 MStatus ScalpMapsCmd::redoIt() {
     return groomlab::maya::guarded("ScalpMapsCmd::redoIt", [&]() -> MStatus {
         noteFileWritten();  // texture files may change: what kept their bytes reads them again
         restoreFileStates(files_, true);
-        if (copied_) {
-            copyFile(moved_.first, moved_.second);
-        } else {
-            moveFile(moved_.first, moved_.second);
-        }
         MStatus done = modifier_.doIt();
         restoreFileStates(deleted_, true);
         return done;
@@ -585,13 +535,7 @@ MStatus ScalpMapsCmd::undoIt() {
         noteFileWritten();  // texture files may change: what kept their bytes reads them again
         restoreFileStates(deleted_, false);  // before the map names it again
         restoreFileStates(files_, false);
-        MStatus status = modifier_.undoIt();
-        if (copied_) {
-            copyFile("", moved_.second);
-        } else {
-            moveFile(moved_.second, moved_.first);
-        }
-        return status;
+        return modifier_.undoIt();
     });
 }
 

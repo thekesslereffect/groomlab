@@ -12,6 +12,7 @@
 #include "groomlab/asset_files.h"
 #include "groomlab/guide_hierarchy.h"
 #include "groomlab/scalp_maps.h"
+#include "groomlab/scalp_paint.h"
 
 namespace groomlab {
 
@@ -19,6 +20,9 @@ namespace groomlab {
 struct MapFiles {
     std::string mapsFolder;   // the groom's own maps folder: GroomLab's images, renamed with their map
     std::string groomFolder;  // stored paths relative to it (pathFromGroomFolder); "": stored absolute
+    // The host's own rule for storing a path instead (Maya's: relative to the scene or project,
+    // portableMayaPath); null: groomFolder's.
+    std::function<std::string(const std::string& full)> store;
     // A stored path as a file (relative ones the host resolves: the groom's folder, its search paths).
     std::function<std::string(const std::string&)> resolve;
     // Whether something beside this groom reads the image (Maya: another groom of the scene): a
@@ -46,6 +50,38 @@ struct MapRename {
 // that cannot name a map, no map `from`, or a map named `to` already.
 MapRename renameMap(const ScalpMaps& maps, const GuideHierarchy* guides, const std::string& graph,
                     const std::string& from, const std::string& to, const MapFiles& files);
+
+// A full path as the host stores it (files.store, else relative to files.groomFolder, else absolute).
+std::string storedMapPath(const std::string& full, const MapFiles& files);
+// A new texture map's image: <maps folder>/<name>.png, or a free name beside it when taken.
+std::string newMapImageFile(const std::string& name, const MapFiles& files);
+// A texture paint written to `file` (folders made; a tile set: each tile): the files' states as
+// found and as left. Throws std::runtime_error when it cannot be written.
+std::vector<FileState> writeMapImage(const TexturePaint& paint, const std::string& file);
+
+// A map converted into another kind.
+struct MapConvert {
+    ScalpMaps maps;                // the scalp maps after
+    // The guide layer of the map's name: removed from the hierarchy (it was one), set from
+    // `layer` (it is one now: each guide's value), or untouched (neither). applyConvertedLayer.
+    bool removeLayer = false, setLayer = false;
+    std::map<GuideId, float> layer;
+    std::vector<FileState> files;  // the image written (to a texture), as found and as left
+    std::string file;              // the new texture map's image as stored ("" for another kind)
+    bool colorLost = false;        // a color map onto the guides: its luminance (a guide layer is gray)
+};
+
+// Map `name` resampled into kind `to` (guides, vertices or texture), its name kept so the graph
+// reads it as before, every host's Convert (scalp_paint.h convertMap; a guide layer read at the
+// guides' roots on `cage`). To a texture: `resolution` square, at `texturePath` (a PNG; a free name
+// when taken) or newMapImageFile. `guides`: the groom's hierarchy as authored (its layers; null:
+// none). Throws std::invalid_argument for no such map, an unknown kind, a guide layer with no
+// guides or no maps folder for a texture, std::runtime_error for an image that does not read or
+// cannot be written.
+MapConvert convertMapKind(const ScalpMaps& maps, const GuideHierarchy* guides, const ScalpMesh& cage, const std::string& name,
+                          const std::string& to, int resolution, const std::string& texturePath, const MapFiles& files);
+// The converted layer onto a hierarchy (the host's, its other edits kept as they are).
+void applyConvertedLayer(GuideHierarchy& h, const std::string& name, const MapConvert& converted);
 
 // A map removed.
 struct MapRemove {

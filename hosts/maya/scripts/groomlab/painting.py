@@ -257,44 +257,18 @@ def fill_map(groom, name, value=None, selected_only=False, color=None, channels=
     return cmds.groomLabScalpMaps(groom, fill=name, value=float(value), paintMode=mode)
 
 
-def _in_folder(path, folder):
-    """Whether `path` is inside `folder` (both absolute; case-insensitive on Windows)."""
-    path, folder = (os.path.normcase(os.path.normpath(p)) for p in (path, folder))
-    return path.startswith(folder.rstrip(os.sep) + os.sep)
-
-
-def _unlink_map(groom, name):
-    """What reads map `name` lets go of it: its Map nodes are removed and the params they fed
-    read their own values again (their input ports removed), and map params naming it go back
-    to the node's default (HairColor's map and Interpolate's regionMap naming it too). Returns the
-    (node, param) pairs that changed (map_users'). The core's (scalp_maps.h unlinkMapReaders), as
-    the app and Blender let go of a map."""
-    from groomlab import graph as gm
-    model = gm.GraphModel.from_groom(groom)
-    text, touched, changed = groomlab_core.unlink_map_readers(model.to_json(), name)
-    if touched:
-        model.load_dict(json.loads(text))
-        model.save(groom)
-    return [tuple(pair) for pair in changed]
-
-
 def remove_map(groom, name, delete_file=False):
     """Remove a map. What reads it lets go of it: its Map nodes are removed, the params they fed
     read their own (slider) values again, and map params naming it go back to the node's
     default. A texture map's file stays on disk, unless `delete_file` and GroomLab made it (it
     is in the scene's masks folder; a PNG of yours linked in place stays) and no other map or
     groom reads it. One undo step (undo puts the file back too). Returns the (node, param)
-    pairs that read the map."""
-    flags = {}
-    if delete_file:
-        file = map_texture(groom, name)
-        if file and _in_folder(file, asset_folder("masks", create=False)):
-            flags["deleteFile"] = True
+    pairs that read the map. Every host's Remove (the editor's removeMap, in groomLabScalpMaps)."""
     if not map_kind(groom, name):
         raise RuntimeError("no map named %r" % name)
     with undo_chunk("remove map"):
-        changed = _unlink_map(groom, name)
-        cmds.groomLabScalpMaps(groom, remove=name, **flags)
+        flat = cmds.groomLabScalpMaps(groom, remove=name, **({"deleteFile": True} if delete_file else {})) or []
+        changed = [(flat[i], flat[i + 1]) for i in range(0, len(flat) - 1, 2)]
         if cmds.getAttr(groom + ".strandColorSource") == name and cmds.getAttr(groom + ".strandColorMode") == 2:
             cmds.setAttr(groom + ".strandColorMode", 0)
         if cmds.getAttr(groom + ".scalpMapDisplay") == name:
@@ -317,37 +291,16 @@ def _follow_file_readers(groom, graph, old_file, new_stored):
     return changed
 
 
-def _retarget_map(graph, old, new):
-    """Map nodes and map params reading `old` read `new` (inside compounds too: the core's
-    retargetMapReaders, the app's rename too); True when any did. `graph` changes in place."""
-    text, touched = groomlab_core.retarget_map_readers(json.dumps(graph), old, new)
-    if touched:
-        graph.clear()
-        graph.update(json.loads(text))
-    return touched
-
-
 def rename_map(groom, old, new):
     """Rename a map; the Map nodes, map params and views reading it follow. A texture map's
     file follows too when its name is the map's (as GroomLab names them: <masks>/<asset>/<map>.png,
     or <map>_2.png when that was taken; older scenes' <groom>_<map>.png too), e.g.
     masks/hair/density.png -> masks/hair/thickness.png: moved, or copied when another groom
-    reads the same file (it keeps its own), and to a free name when one is in the way."""
-    kwargs = {"rename": (old, new)}
-    stored = next((m.get("texture") or "" for m in maps(groom) if m["name"] == old and m["kind"] == "texture"), "")
-    old_file = map_texture(groom, old) if stored else ""
-    # Named after the map and in the scene's masks folder (GroomLab's files, a duplicate's shared one
-    # too): to that name, a free one when taken (asset_files.h renamedMapImage, every host's rule).
-    target = groomlab_core.renamed_map_image(old_file, old, new, asset_folder("masks", create=False)) if old_file else ""
-    if target:
-        kwargs["texture"] = portable_path(target)
+    reads the same file (it keeps its own), and to a free name when one is in the way. Every
+    host's Rename (the editor's renameMap, in groomLabScalpMaps: the graph's readers follow in the
+    same step)."""
     with undo_chunk("rename map"):
-        cmds.groomLabScalpMaps(groom, **kwargs)
-        graph = get_graph(groom)
-        moved = _follow_file_readers(groom, graph, old_file, next(
-            (m["texture"] for m in maps(groom) if m["name"] == new and m["kind"] == "texture"), "")) if old_file else False
-        if _retarget_map(graph, old, new) or moved:
-            set_graph(groom, graph)
+        cmds.groomLabScalpMaps(groom, rename=(old, new))
         if cmds.getAttr(groom + ".strandColorSource") == old:
             cmds.setAttr(groom + ".strandColorSource", new, type="string")
         if cmds.getAttr(groom + ".scalpMapDisplay") == old:
