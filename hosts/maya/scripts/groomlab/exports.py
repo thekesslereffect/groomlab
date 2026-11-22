@@ -20,7 +20,7 @@ def viewport_points(groom):
 
 
 def export_alembic(groom, path, start=None, end=None, step=1.0, density=1.0, scales="mesh", render_overrides=False,
-                   velocities=False):
+                   velocities=False, vertex_data=False):
     """Write the groom's strands to an Alembic file as animated curves.
 
     Frames default to the current frame. Density 1.0 exports every strand
@@ -32,6 +32,9 @@ def export_alembic(groom, path, start=None, end=None, step=1.0, density=1.0, sca
     per vertex; scaleRootColor, scaleId, scaleUV, scaleVariant per face); "none" leaves them out.
     velocities: each point's velocity too (the curves' .velocities, scene units per second, from
     the frames a step before and after), so renderers blur the motion from one sample.
+    vertex_data: every color and channel per point instead of per strand (Cd, hair_color: the
+    hair's own RGB with a tip blend's colors, melanin, melaninRedness...), for renderers reading hair
+    user data point by point (Redshift's proxy: groomlab.redshift_hook writes this way).
     """
     kwargs = {"file": path, "step": step, "density": density, "scales": scales, "renderOverrides": bool(render_overrides)}
     if start is not None:
@@ -40,6 +43,8 @@ def export_alembic(groom, path, start=None, end=None, step=1.0, density=1.0, sca
         kwargs["endFrame"] = end
     if velocities:
         kwargs["velocities"] = True
+    if vertex_data:
+        kwargs["vertexData"] = True
     return cmds.groomLabExportAlembic(groom, **kwargs)
 
 

@@ -39,8 +39,10 @@ std::array<float, 3> brushHoverColor(const BrushToolSettings& s) {
 }
 
 void BrushToolSettings::setMode(const std::string& name) {
-    if (name == "place" || name == "draw" || name == "part" || name == "flow" || name == "lengths" || name == "roots") {
+    if (name == "place" || name == "draw" || name == "part" || name == "flow" || name == "lengths" || name == "roots" ||
+        name == "clone") {
         tool = name == "place" ? Tool::Place
+               : name == "clone" ? Tool::Clone
                : name == "draw" ? Tool::Draw
                : name == "part" ? Tool::Part
                : name == "flow" ? Tool::Flow
@@ -61,6 +63,7 @@ std::string BrushToolSettings::modeName() const {
     if (tool == Tool::Flow) return "flow";
     if (tool == Tool::Lengths) return "lengths";
     if (tool == Tool::Roots) return "roots";
+    if (tool == Tool::Clone) return "clone";
     if (brush.mode == BrushMode::Attribute && brush.attribute == "clump") return "clump";
     return brushModeName(brush.mode);
 }
@@ -234,6 +237,7 @@ std::optional<double> brushSettingValue(const BrushToolSettings& s, const std::s
     if (id == "matchNeighbors") return s.place.matchNeighbors ? 1.0 : 0.0;
     if (id == "spacing") return s.place.spacing;
     if (id == "soloNewGuides") return s.place.soloNewGuides ? 1.0 : 0.0;
+    if (id == "cloneReplace") return s.cloneReplace ? 1.0 : 0.0;
     if (id == "alphaAngle") return s.alphaAngle;
     if (id == "alphaSpacing") return s.alphaSpacing;
     if (id == "alphaInvert") return s.alphaInvert ? 1.0 : 0.0;

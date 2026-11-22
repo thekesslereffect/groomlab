@@ -1210,6 +1210,12 @@ def _render_standalone_dialog(renderer):
     return _watch_render(job, spec)
 
 
+def redshift_refresh():
+    """Render > Refresh Redshift Grooms: this frame written for Redshift's IPR (redshift_hook)."""
+    from groomlab import redshift_hook
+    redshift_hook.menu_refresh()
+
+
 def render_vray_dialog():
     """Render > V-Ray Standalone (any Maya version): groomlab.render_vray from a dialog."""
     return _render_standalone_dialog("vray")
@@ -2299,6 +2305,7 @@ ACTIONS = {
     "render.fromGroomFile": render_from_groom_file_dialog,
     "render.asCurves": render_curves,
     "render.vrayStandalone": render_vray_dialog,
+    "render.redshiftRefresh": redshift_refresh,
     "render.prman": render_prman_dialog,
     "render.hardware2": render_hardware2_dialog,
     "export.alembic": lambda: export_curves_dialog("alembic"),
@@ -2418,6 +2425,11 @@ def install():
         theme.on_change(_theme_changed)
     except (ImportError, RuntimeError, ValueError, IOError, OSError) as e:
         cmds.warning("GroomLab: theme not applied: %s" % e)
+    try:  # Redshift's proxies kept out of other renderers (redshift_hook, issue 81)
+        from groomlab import redshift_hook
+        redshift_hook.start()
+    except Exception as e:
+        cmds.warning("GroomLab: Redshift proxies not watched: %s" % e)
     try:  # Tubes to Curves' live links: the linked meshes watched, in this scene and the next ones
         from groomlab import tube_links
         tube_links.start()

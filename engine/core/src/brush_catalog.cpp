@@ -38,6 +38,11 @@ std::vector<BrushEntry> makeCatalog() {
          {"symmetry", "collide", "newGuides", "spacing", "soloNewGuides", "tube"}},
         {"draw", "Draw", C::Create, 0, "draw", 1.0f, false, "Press on the scalp and draw a guide's shape.",
          {"symmetry", "collide", "newGuides", "soloNewGuides", "tube"}},
+        {"clone", "Clone", C::Create, 0, "clone", 1.0f, false,
+         "Ctrl+click over guides to copy the ones rooted in the circle (or Pick Source, then click); then click "
+         "anywhere to set copies down, each guide keeping its shape and children, turned to the scalp there. Drag "
+         "left or right before letting go to spin the copies.",
+         {"radius", "symmetry", "selectedOnly", "collide", "frontFacingOnly", "clone"}},
         {"part", "Part", C::Create, 0, "part", 1.0f, false,
          "Draw a part freehand on the scalp: hair does not mix across it, and the Part node opens it.", {"symmetry", "parts"}},
         {"flow", "Flow", C::Create, 0, "flow", 1.0f, false,
@@ -225,6 +230,12 @@ const std::vector<BrushSettingSpec>& brushSettingSpecs() {
         flag({"soloNewGuides", "Solo new guides", "New guides stay unfrozen and every other guide is frozen, so the brushes "
                                                   "work on the new ones at once (the Select tool solos others, "
                                                   "Unfreeze All frees them all)"},
+             false),
+        {"clone", "Clone", "The source: Pick Source makes the next click copy the guides rooted in the circle (as "
+                           "Ctrl+click does), how many it holds, and whether copies replace the guides where they land"},
+        flag({"cloneReplace", "Replace guides under brush", "On: the guides of the copied levels already in the circle "
+                                                            "where the copies land are removed first (frozen ones stay). "
+                                                            "Off: the copies are added among them"},
              false),
         {"parts", "Parts", "The next part's name, and the parts drawn so far"},
         {"flow", "Flow", "What a click or drag lays: arrows, or a sink (brush-sized) hair turns around"},

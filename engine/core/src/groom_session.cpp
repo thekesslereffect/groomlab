@@ -2640,6 +2640,19 @@ std::string GroomSession::hairLookJson() const {
                             {"azimuthalRoughness", lobes.azimuthalRoughness},
                             {"ior", lobes.ior},
                             {"shift", lobes.shiftDegrees}}}};
+    // Redshift's Principled Hair for the look (hair_color.h principledHair): every host's.
+    const PrincipledHair ph = principledHair(look);
+    out["principledHair"] = {{"byColor", ph.byColor},
+                             {"colorData", ph.colorData},
+                             {"melaninData", ph.melaninData},
+                             {"rednessData", ph.rednessData},
+                             {"melanin", ph.melanin},
+                             {"melaninRedness", ph.melaninRedness},
+                             {"tint", {ph.tint[0], ph.tint[1], ph.tint[2]}},
+                             {"roughness", ph.roughness},
+                             {"azimuthalRoughness", ph.azimuthalRoughness},
+                             {"ior", ph.ior},
+                             {"angleShift", ph.angleShift}};
     // The structural color as five ramp keys by |cos| (0 edge-on .. 1 facing), a host's ramp node's
     // (color_patterns.h iridescentTint at grazing 1 - key): every host's iridescence ramp.
     nlohmann::json ramp = nlohmann::json::array();

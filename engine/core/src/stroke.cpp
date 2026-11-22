@@ -8,6 +8,7 @@
 #include <cmath>
 #include <limits>
 #include <stdexcept>
+#include <unordered_set>
 
 #include "groomlab/brush_catalog.h"
 #include "groomlab/curve.h"
@@ -358,6 +359,55 @@ void BrushTool::rebuildDrawn() {
     }
 }
 
+bool BrushTool::captureClip(StrokeHost& host, const ToolView& view, float x, float y) {
+    const MeshPtr scalp = host.scalp();
+    const std::shared_ptr<const GuideHierarchy> h = host.authoredHierarchy();
+    Vec3f origin, dir;
+    SurfacePoint at;
+    if (!scalp || scalp->triangleCount() == 0 || !h) {
+        host.warn("GroomLab clone: the groom has no scalp mesh");
+        return false;
+    }
+    if (!view.ray(x, y, origin, dir) || !scalp->intersectRay(origin, dir, &at)) {
+        clearClip();  // Ctrl+click off the scalp: the source let go, ready for a new one
+        return false;
+    }
+    // The guides a brush would edit there, rooted in the circle (and not hidden by the scalp).
+    visibility(settings.maskByScalp ? scalp : nullptr, view);
+    const BrushWeightFn weight = screenWeight(view, x, y);
+    std::vector<GuideId> picked;
+    for (const HierarchyGuide* g : brushableGuides(host, *h)) {
+        if (!g->points.empty() && weight(g->points.front()) > 0.0f) picked.push_back(g->id);
+    }
+    GuideClip clip = captureGuides(*h, *scalp, picked, at, worldRadiusAt(view, at.position, x, y));
+    if (clip.empty()) {
+        host.warn("GroomLab clone: no guides rooted in the brush circle there (the brush's level, not hidden or frozen)");
+        return false;
+    }
+    clip_ = std::move(clip);
+    return true;
+}
+
+void BrushTool::pasteClip() {
+    if (!base_ || !working_ || !scalp_) return;
+    *working_ = *base_;
+    CloneOptions options;
+    options.angle = pasteAngle_;
+    options.replace = settings.cloneReplace;
+    options.collide = settings.brush.collide;
+    options.freeze = settings.brush.freeze;
+    std::size_t made = 0;
+    try {
+        made = pasteGuides(*working_, *scalp_, clip_, pasteAt_, options).size();
+        const StrokeSymmetry sym = StrokeSymmetry::of(settings.brush, scalp_.get());
+        if (sym.on()) made += pasteGuides(*working_, *scalp_, clip_, pasteAt_, options, &sym).size();
+    } catch (const std::exception&) {
+        *working_ = *base_;  // (a level the copies could not join: nothing set down)
+        made = 0;
+    }
+    changed_ = made > 0;
+}
+
 bool BrushTool::anchorAt(const ToolView& view, float x, float y, const Vec3f& origin, const Vec3f& direction,
                          Vec3f& anchor) const {
     GuidePointHit hit;
@@ -413,6 +463,16 @@ void BrushTool::stampAt(StrokeHost& host, const ToolView& view, float x, float y
         hitScalp_ = true;
         planePoint_ = hit.position;
         planeNormal_ = dir;
+        if (settings.tool == Tool::Clone) {
+            base_ = std::make_shared<GuideHierarchy>(*working_);
+            pasteAt_ = hit;
+            pasteAngle_ = 0.0f;
+            spinning_ = false;
+            pressX_ = x;
+            pressY_ = y;
+            pasteClip();
+            return;
+        }
         if (settings.tool == Tool::Place) {
             if (placeWithSymmetry(*working_, *scalp_, settings, hit, false) > 0) changed_ = true;
             return;
@@ -423,6 +483,19 @@ void BrushTool::stampAt(StrokeHost& host, const ToolView& view, float x, float y
         return;
     } else {
         if (!hitScalp_) return;
+        if (settings.tool == Tool::Clone) {
+            // A drag left or right spins the copies about the scalp's normal, kCloneSpinPerPixel a
+            // pixel (right: clockwise seen from outside), once the cursor is 4 pixels off the
+            // press; up and down do nothing.
+            const float dx = x - pressX_;
+            if (!spinning_ && std::fabs(dx) < 4.0f) return;
+            spinning_ = true;
+            const float angle = -dx * BrushToolSettings::kCloneSpinPerPixel;
+            if (angle == pasteAngle_) return;
+            pasteAngle_ = angle;
+            pasteClip();
+            return;
+        }
         if (settings.tool == Tool::Part || settings.tool == Tool::Flow) {
             // Freehand on the scalp: every point under the cursor, projected onto it.
             SurfacePoint hit;
@@ -494,6 +567,10 @@ void BrushTool::stampOverlays(const ToolView& view, const Vec3f& center, const V
 }
 
 bool BrushTool::begin(StrokeHost& host, const ToolView& view, float x, float y, float pressure, unsigned modifiers) {
+    if (settings.tool == BrushToolSettings::Tool::Clone) {  // a capture (Ctrl, Pick Source) or a set-down: press's
+        press(host, view, x, y, pressure, modifiers);
+        return stroking_;
+    }
     inverted_ = (modifiers & kStrokeCtrl) != 0;
     pressure_ = pressure;
     return startStroke(host, view, x, y);
@@ -1052,6 +1129,7 @@ void BrushTool::cancel(StrokeHost* host) {
 }
 
 void BrushTool::press(StrokeHost& host, const ToolView& view, float x, float y, float pressure, unsigned modifiers) {
+    syncClone();  // (another tool now: Clone's source let go)
     if (settings.tool == BrushToolSettings::Tool::Lengths) {
         lengthsPressed_ = host.attach() && lengths_.press(host, view, settings, x, y, modifiers);
         return;
@@ -1061,6 +1139,24 @@ void BrushTool::press(StrokeHost& host, const ToolView& view, float x, float y, 
         if (!roots_.active()) roots_.start(host, RootTubeTool::Mode::Place);
         roots_.press(host, view, x, y, modifiers);
         rootsPressed_ = true;
+        return;
+    }
+    if (settings.tool == BrushToolSettings::Tool::Clone) {
+        // Ctrl (or Pick Source armed): capture the guides rooted in the circle; else set the
+        // source down here (a drag spins it), one undo step.
+        if ((modifiers & kStrokeCtrl) || captureArmed_) {
+            captureArmed_ = false;
+            if (host.attach()) captureClip(host, view, x, y);
+            return;
+        }
+        if (clip_.empty()) {
+            host.warn("GroomLab clone: Ctrl+click over guides first (or Pick Source) to copy them, then click where "
+                      "the copies go");
+            return;
+        }
+        inverted_ = false;
+        pressure_ = pressure;
+        startStroke(host, view, x, y);
         return;
     }
     inverted_ = (modifiers & kStrokeCtrl) != 0;
@@ -1236,10 +1332,52 @@ int BrushTool::pickLevel(StrokeHost& host, const ToolView& view, float x, float 
     return level;
 }
 
+std::vector<const HierarchyGuide*> BrushTool::brushableGuides(StrokeHost& host, const GuideHierarchy& h) {
+    // The guides a stroke would edit, by the stroke's own rule (brushTargets): its level or group,
+    // not hidden, not frozen (selecting guides freezes every other one), and only the selection
+    // while selectedOnly. Issue 93: guides the brush leaves alone are not lit under it either.
+    BrushToolSettings s = settings;
+    const bool sculpting = !host.sculptNode().empty();
+    if (sculpting) {  // a Sculpt node's guides: all of them (pressed())
+        s.brush.level = 0;
+        s.brush.group.clear();
+    }
+    // Clone takes guides as a shaping brush would (a freeze painter's mode would take frozen ones).
+    if (s.tool == BrushToolSettings::Tool::Clone) s.brush.mode = BrushMode::Comb;
+    const std::vector<GuideId> selection = s.selectedOnly ? host.selectedGuides() : std::vector<GuideId>{};
+    s.prepareMask(h, sculpting ? std::set<std::string>{} : host.hiddenGroups(), selection,
+                  s.selectedOnly ? host.softSelectRadius() : 0.0f, s.selectedOnly ? host.scalp().get() : nullptr);
+    const std::vector<GuideId> ids = brushTargets(h, s.brush);
+    const std::unordered_set<GuideId> targets(ids.begin(), ids.end());
+    std::vector<const HierarchyGuide*> guides;
+    guides.reserve(ids.size());
+    for (const HierarchyGuide& g : h.guides()) {
+        if (targets.count(g.id)) guides.push_back(&g);
+    }
+    return guides;
+}
+
 std::vector<std::vector<Vec3f>> BrushTool::affectedLines(StrokeHost& host, const ToolView& view, float x, float y) {
-    // Before pressing: the guides the brush would touch, as drawn (smoothed).
+    // Before pressing: the guides the brush would touch, as drawn (smoothed). Clone: the copies a
+    // click would set down there, once a source is captured; until then (or with a capture
+    // armed) the guides a capture would take, those rooted in the circle.
     std::vector<std::vector<Vec3f>> lines;
-    if (settings.tool != BrushToolSettings::Tool::Brush || !host.attach()) return lines;
+    syncClone();
+    using Tool = BrushToolSettings::Tool;
+    const bool clone = settings.tool == Tool::Clone;
+    if ((settings.tool != Tool::Brush && !clone) || !host.attach()) return lines;
+    if (clone && !clip_.empty() && !captureArmed_) {
+        const MeshPtr scalp = host.scalp();
+        Vec3f origin, dir;
+        SurfacePoint at;
+        if (!scalp || !view.ray(x, y, origin, dir) || !scalp->intersectRay(origin, dir, &at)) return lines;
+        lines = clonePreview(*scalp, clip_, at, 0.0f);
+        const StrokeSymmetry sym = StrokeSymmetry::of(settings.brush, scalp.get());
+        if (sym.on()) {
+            for (std::vector<Vec3f>& l : clonePreview(*scalp, clip_, at, 0.0f, &sym)) lines.push_back(std::move(l));
+        }
+        return lines;
+    }
     const std::shared_ptr<const GuideHierarchy> h = host.shownHierarchy();
     if (!h) return lines;
     visibility(settings.maskByScalp ? host.scalp() : nullptr, view);
@@ -1250,21 +1388,13 @@ std::vector<std::vector<Vec3f>> BrushTool::affectedLines(StrokeHost& host, const
         b.level = 0;
         b.group.clear();
     }
+    if (clone) b.mode = BrushMode::Comb;  // (as brushableGuides takes them)
     const int smoothing = host.guideSmoothing();
     const std::set<std::string> hidden = sculpting ? std::set<std::string>{} : host.hiddenGroups();
-    auto brushable = [&](const HierarchyGuide& g) {
-        if (guideHidden(*h, g)) return false;
-        if (!hidden.empty()) {
-            const GuideGroup* grp = h->group(g.group);
-            if (grp && hidden.count(grp->name)) return false;
-        }
-        if (!b.group.empty()) {
-            const GuideGroup* grp = h->group(g.group);
-            return grp && grp->name == b.group;
-        }
-        return b.level < 0 || h->groupDepth(g.group) == b.level;
-    };
+    const std::vector<GuideId> selection = settings.selectedOnly ? host.selectedGuides() : std::vector<GuideId>{};
+    const float softRadius = settings.selectedOnly ? host.softSelectRadius() : 0.0f;
     auto touched = [&](const HierarchyGuide& g) {
+        if (clone) return !g.points.empty() && weight(g.points.front()) > 0.0f;  // rooted in the circle
         for (const Vec3f& p : g.points) {
             if (weight(p) > 0.05f) return true;
         }
@@ -1272,26 +1402,35 @@ std::vector<std::vector<Vec3f>> BrushTool::affectedLines(StrokeHost& host, const
     };
     if (!view.projection.valid()) {
         hover_.reset();
-        for (const HierarchyGuide& g : h->guides()) {
+        for (const HierarchyGuide* g : brushableGuides(host, *h)) {
             if (lines.size() > 4000) break;  // a hint, not a full redraw
-            if (!brushable(g) || !touched(g)) continue;
-            lines.push_back(smoothPolyline(g.points.data(), g.points.size(), smoothing));
+            if (!touched(*g)) continue;
+            lines.push_back(smoothPolyline(g->points.data(), g->points.size(), smoothing));
         }
         return lines;
     }
     // The brushable guides and their points on screen, kept while the guides, what is brushable
-    // and the view hold still: a mouse move looks at the guides near the circle only.
+    // and the view hold still: a mouse move looks at the guides near the circle only. Freezing
+    // changes the guides (their version); the rest of what decides the targets is in `filter`.
     std::uint64_t filter = hashString(hashCombine(hash64(0x40E3), static_cast<std::uint64_t>(static_cast<std::int64_t>(b.level))), b.group);
     for (const std::string& name : hidden) filter = hashString(filter, name);
+    filter = hashCombine(filter, (b.propagate ? 1u : 0u) | (settings.selectedOnly ? 2u : 0u) |
+                                     (b.mode == BrushMode::Attribute && b.attribute == b.freeze ? 4u : 0u));
+    filter = hashString(filter, b.freeze);
+    if (settings.selectedOnly) {
+        filter = hashFloat(filter, softRadius);
+        filter = hashCombine(filter, static_cast<std::uint64_t>(static_cast<std::int64_t>(b.mirrorAxis)) * 4 +
+                                         (b.mirrorTopology ? 1u : 0u));
+        filter = hashFloat(filter, b.mirrorCenter);
+        for (const GuideId id : selection) filter = hashCombine(filter, static_cast<std::uint64_t>(id));
+    }
     const std::uint64_t version = host.shownHierarchyVersion();
     if (!hover_ || hover_->hierarchy != h || hover_->hierarchyVersion != version || hover_->filter != filter) {
         hover_ = std::make_shared<HoverCache>();
         hover_->hierarchy = h;
         hover_->hierarchyVersion = version;
         hover_->filter = filter;
-        for (const HierarchyGuide& g : h->guides()) {
-            if (brushable(g)) hover_->guides.push_back(&g);
-        }
+        hover_->guides = brushableGuides(host, *h);
     }
     HoverCache& hover = *hover_;
     if (!hover.grid || hover.view != view.projection.hash()) {
@@ -1443,7 +1582,35 @@ std::size_t scriptedStroke(StrokeHost& host, BrushToolSettings s, const std::vec
                       s.selectedOnly ? host.softSelectRadius() : 0.0f, scalp.get());
         std::set<GuideId> before;
         for (const HierarchyGuide& g : h->guides()) before.insert(g.id);
-        if (s.tool == Tool::Place) {
+        if (s.tool == Tool::Clone) {
+            // The first point: the source's middle, the guides rooted within brush.radius of it (the
+            // brush's level or group, not hidden or frozen) copied; every point after: a copy set
+            // down there (with symmetry, its mirror image too).
+            if (path.size() < 2) throw std::invalid_argument("clone takes the source point, then the points to set copies down at");
+            const SurfacePoint from = scalp->closestPoint(path.front());
+            BrushSettings b = s.brush;
+            b.mode = BrushMode::Comb;  // (as the interactive capture takes guides)
+            const float r2 = s.brush.radius * s.brush.radius;
+            std::vector<GuideId> picked;
+            for (const GuideId id : brushTargets(*h, b)) {
+                const HierarchyGuide* g = h->guide(id);
+                if (g && !g->points.empty() && (g->points.front() - from.position).dot(g->points.front() - from.position) <= r2) {
+                    picked.push_back(id);
+                }
+            }
+            const GuideClip clip = captureGuides(*h, *scalp, picked, from, s.brush.radius);
+            if (clip.empty()) throw std::invalid_argument("no guides rooted within the radius of the first point to clone");
+            CloneOptions options;
+            options.replace = s.cloneReplace;
+            options.collide = s.brush.collide;
+            options.freeze = s.brush.freeze;
+            const StrokeSymmetry sym = StrokeSymmetry::of(s.brush, scalp.get());
+            for (std::size_t i = 1; i < path.size(); ++i) {
+                const SurfacePoint at = scalp->closestPoint(path[i]);
+                pasteGuides(*h, *scalp, clip, at, options);
+                if (sym.on()) pasteGuides(*h, *scalp, clip, at, options, &sym);
+            }
+        } else if (s.tool == Tool::Place) {
             for (const Vec3f& p : path) placeWithSymmetry(*h, *scalp, s, scalp->closestPoint(p), false);
         } else if (s.tool == Tool::Draw) {
             drawWithSymmetry(*h, *scalp, s, path);

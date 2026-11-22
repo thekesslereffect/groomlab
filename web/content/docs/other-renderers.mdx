@@ -1,14 +1,14 @@
 ---
 title: Other renderers
-description: Rendering GroomLab hair with the RenderMan procedural (and in prman from any Maya or the app), in V-Ray Standalone from Maya or from a V-Ray scene export, or in RenderMan, Redshift and V-Ray from Alembic and USD exports - file layout, units, attributes and hair shader setup.
+description: Rendering GroomLab hair with the RenderMan procedural (and in prman from any Maya or the app), in V-Ray Standalone from Maya or from a V-Ray scene export, in Redshift for Maya with nothing to set up, or in RenderMan, Redshift and V-Ray from Alembic and USD exports - file layout, units, attributes and hair shader setup.
 ---
 
 GroomLab renders natively in **Arnold** ([Rendering](/docs/rendering)) and in **RenderMan 27**
 ([below](#renderman)), where a procedural evaluates the groom file at render time; Render >
 RenderMan (prman) renders the scene in RenderMan from any Maya version and from the standalone app. For **V-Ray**,
 GroomLab writes a V-Ray scene with the hair and its shader, and renders it in V-Ray Standalone from
-any Maya version ([below](#v-ray)). For Redshift and
-other renderers, export the strands as **Alembic** or **USD** curves. For quick previews with no
+any Maya version ([below](#v-ray)). In **Redshift for Maya** the grooms render with nothing to set
+up ([below](#redshift)). For other renderers, export the strands as **Alembic** or **USD** curves. For quick previews with no
 renderer at all, Render > Maya Hardware 2.0 renders with Maya's own viewport renderer
 ([Maya Hardware 2.0](/docs/rendering#maya-hardware-20)).
 
@@ -16,7 +16,8 @@ renderer at all, Render > Maya Hardware 2.0 renders with Maya's own viewport ren
   The contents of the exported files ([File contents](#file-contents)), the RenderMan procedural
   and Render > RenderMan (prman) (in RenderMan Pro Server 27.3, from Maya 2022 and the app), the V-Ray scene export and Render > V-Ray Standalone (in V-Ray Standalone 7, from
   Maya 2022) are tested. So are V-Ray for Maya (V-Ray 7, Maya 2024 to 2027) and RenderMan for Maya
-  (27.3, Maya 2024 to 2026), in batch renders and interactive renders (IPR) that follow edits to the groom. The Alembic and USD
+  (27.3, Maya 2024 to 2026), in batch renders and interactive renders (IPR) that follow edits to the groom. Redshift for
+  Maya renders in its Render View (Redshift 2026, Maya 2026) are tested. The Alembic and USD
   import steps for each renderer below follow that renderer's documentation, linked in each
   section; they have not been tested in Redshift or V-Ray yet. If a step does not work, contact
   [support@getgroomlab.com](mailto:support@getgroomlab.com).
@@ -305,55 +306,41 @@ reading `Cd` (Alembic) or `displayColor` (USD) feeds Artistic mode's **Color**.
 
 ## Redshift
 
+### Redshift for Maya (automatic)
+
+Pick **Redshift** as the scene's renderer and render: the grooms are in the image with nothing to
+set up. Redshift has no public API for a renderer plug-in, so GroomLab drives a **Redshift Proxy**
+per groom for you:
+
+- Each frame Redshift renders (the Render View, batch, a farm with GroomLab installed) first writes
+  every visible groom to Alembic for that frame, at the render density, with Redshift's deformation
+  motion blur when it is on. The files go under the scene's `groomlab/<scene>/caches/redshift`
+  folder; each write is a file of its own, so Redshift always reads the latest.
+- Each groom gets an object of its own, `<groom>_rsProxy`, placed by the groom (it moves with it)
+  and hidden in the viewport (the groom draws itself), with a **Principled Hair** built from the
+  groom's look: per-strand color and tip colors (`hair_color`) as albedo, or **Melanin** and
+  **Melanin Redness** from the strands' melanin, the roughness and highlight from the HairColor
+  node. Assign your own material to the proxy and GroomLab leaves it alone.
+- The proxy renders only while its groom is visible and the scene renders in Redshift: switch to
+  Arnold, V-Ray or RenderMan and it hides (GroomLab renders there itself).
+
+**IPR.** While Redshift's Render View window is open, GroomLab keeps the proxies current: a groom
+without one gets one at once, and an edited groom is written again shortly after you stop editing,
+so IPR follows the groom. **GroomLab > Render > Refresh Redshift Grooms** writes the frame again
+at any time. On a heavy groom, each write takes a moment.
+
 Links: [Principled Hair](https://help.maxon.net/r3d/maya/en-us/Content/html/Principled+Hair.html),
-[Alembic Procedural](https://help.maxon.net/r3d/maya/en-us/Content/html/Alembic+Procedural.html),
-[USD Procedural](https://help.maxon.net/r3d/maya/en-us/Content/html/USD+Procedural.html),
-[Scalar User Data](https://help.maxon.net/r3d/maya/en-us/Content/html/Scalar+User+Data.html),
-[Color User Data](https://help.maxon.net/r3d/katana/en-us/Content/html/Color+User+Data.html).
+[Alembic Procedural](https://help.maxon.net/r3d/maya/en-us/Content/html/Alembic+Procedural.html).
 
-<Steps>
-<Step>
+### Other programs (Alembic or USD)
 
-### Export (verified)
-
-`groomlab.export_alembic(...)` or `groomlab.export_usd(...)`, as above.
-
-</Step>
-<Step>
-
-### Load it in a Redshift Proxy
-
-From the Redshift shelf, create a **Redshift Proxy** and set its **File Type** to **Alembic**
-(Redshift 2025.4 and later in Maya) or **USD**, then pick the file. The proxy loads it at render
-time. Redshift's documentation does not state whether the proxy renders Alembic or USD curves as
-hair in Maya; check on a test frame.
-
-</Step>
-<Step>
-
-### Assign the hair shader
-
-Create a **Principled Hair** material and assign it to the proxy's placeholder (for USD, set
-**Material Mode** to **From Scene (assigned to placeholder)**). Set **Melanin** and **Melanin
-Redness** from the HairColor node, leave **Tint** white unless the hair is dyed, and set
-**Roughness** from the HairColor node.
-
-</Step>
-<Step>
-
-### Read the per-strand values
-
-A **Scalar User Data** node with **Attribute Name** `melanin` feeds **Melanin**, another with
-`melaninRedness` feeds **Melanin Redness**; set **Melanin Var.** and **Melanin Redness Var.** to
-0. For an RGB color, a **Color User Data** node reading `Cd` (Alembic) or `displayColor` (USD)
-feeds **Albedo**, with **Albedo Mix** at 1.
-
-</Step>
-</Steps>
-
-- Redshift's documentation says hair reads per-vertex color and scalar attributes from Redshift
-  2025.4 on. GroomLab's `melanin` and color are **per curve**, so check that they reach the
-  shader. If they don't, use a single value for the whole groom.
+Elsewhere (Redshift in Houdini, Cinema 4D or Blender), export the strands with
+`groomlab.export_alembic(..., vertex_data=True)` (every color and channel per point, as Redshift
+reads hair data) or `groomlab.export_usd(...)`, load the file in a **Redshift Proxy** (**File
+Type**: **Alembic**, Redshift 2025.4 and later, or **USD**), and assign a **Principled Hair** to its
+placeholder: a **Color User Data** node reading `hair_color` feeds **Albedo** (**Albedo Mix** 1),
+or **Scalar User Data** nodes reading `melanin` and `melaninRedness` feed **Melanin** and **Melanin
+Redness**; set the variations to 0.
 
 ## V-Ray
 

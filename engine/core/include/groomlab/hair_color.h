@@ -63,6 +63,31 @@ struct HairLobes {
 };
 HairLobes hairLobes(float specular, float roughness, float tilt = kDefaultHairTilt);
 HairLobes hairLobes(const HairLook& look);
+
+// ---- Redshift's Principled Hair (issue 81) -------------------------------------------------------
+//
+// What a host gives Redshift's Principled Hair (RedshiftPrincipledHair) for a look, so a groom
+// renders in Redshift as close to Arnold as its shader allows. Principled Hair is the same
+// Chiang et al. 2016 model as aiStandardHair, so the lobes carry over as they are. The color comes
+// per point through Redshift's user data nodes, from the channels GroomLab's Alembic carries with
+// vertexData (alembic_io.h: every value at every point, as Redshift reads hair data): by RGB (a color node, a Blend of colors: the strands' RGB is the hair's color, HairColor's
+// pigment and dye in it) as Albedo with Albedo Mix 1 and no melanin; else by the melanin channels,
+// the dye as Tint. The variations are 0: GroomLab varies each strand itself.
+struct PrincipledHair {
+    bool byColor = false;                       // albedo from colorData (Albedo Mix 1); else melanin
+    const char* colorData = "hair_color";       // the hair's own RGB per point (Alembic vertexData), Arnold's too
+    const char* melaninData = "melanin";        // export_view.h kMelaninChannel
+    const char* rednessData = "melaninRedness"; // kMelaninRednessChannel
+    // The values where a strand has no user data: HairColor's defaults.
+    float melanin = kDefaultMelanin;
+    float melaninRedness = kDefaultMelaninRedness;
+    std::array<float, 3> tint{1.0f, 1.0f, 1.0f};  // the dye (white by RGB: it is in the color)
+    float roughness = 0.0f;           // roughness_l: the lobes' longitudinal roughness
+    float azimuthalRoughness = 0.0f;  // roughness_a
+    float ior = kHairIor;
+    float angleShift = kHairShiftDegrees;  // alpha: the cuticle tilt, degrees
+};
+PrincipledHair principledHair(const HairLook& look);
 // The longitudinal lobe's width in sin-theta space for an Arnold roughness (d'Eon et al. 2011's
 // mapping of beta_m to the lobe's variance): roughness 0.2 is a tight highlight, 1 a smear.
 float hairLongitudinalWidth(float roughness);

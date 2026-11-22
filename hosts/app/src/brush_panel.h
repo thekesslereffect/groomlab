@@ -196,6 +196,11 @@ private:
     QLabel* flowHint_ = nullptr;
     QLabel* flowCount_ = nullptr;
     QPushButton* clearFlow_ = nullptr;
+    // Clone (issue 91): Pick Source (the next click captures), Reset, what the source holds.
+    CardBlock* clone_ = nullptr;
+    QPushButton* clonePick_ = nullptr;
+    QPushButton* cloneReset_ = nullptr;
+    QLabel* cloneCount_ = nullptr;
     // The tubes' blocks (another panel's).
     QVBoxLayout* tubeSlot_ = nullptr;
     TubePanel* tubes_ = nullptr;
