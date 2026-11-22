@@ -1520,6 +1520,27 @@ class ToolPalette(QtWidgets.QWidget):
         self.flow_sink_changed()
         card.addWidget(self.flow_box)
 
+        # Clone: Pick Source (the next click copies, as Ctrl+click does), what the source holds,
+        # and whether copies replace the guides where they land.
+        self.clone_box = widgets.Block(_setting("clone", "label"), name="cloneBlock")
+        self.clone_box.setToolTip(_setting("clone", "hint"))
+        self.clone_pick = QtWidgets.QPushButton("Pick Source")
+        self.clone_pick.setObjectName("clonePickSource")
+        self.clone_pick.setCheckable(True)
+        self.clone_pick.setToolTip("The next click in the viewport copies the guides rooted in the brush circle "
+                                   "(Ctrl+click does the same any time)")
+        self.clone_pick.toggled.connect(self.pick_clone_source)
+        self.clone_count = widgets.small_label("")
+        self.clone_count.setObjectName("cloneCount")
+        self.clone_count.setToolTip("The guides the source holds (their children come along)")
+        self.clone_box.add(self.clone_pick)
+        self.clone_box.add(self.clone_count)
+        self.clone_replace = widgets.switch("Replace", _setting("cloneReplace", "hint"), _default("cloneReplace"),
+                                            "cloneReplace")
+        self.clone_replace.toggled.connect(lambda on: self.push(cloneReplace=on))
+        self.clone_box.add(self.clone_replace.row)
+        card.addWidget(self.clone_box)
+
         # Parts: the next part's name, the parts drawn so far (Parts from Curves in the header).
         bind = definitions.binder(self.ACTIONS, self)
         part_items = dict((item["id"], item) for item in definitions.resolve(definitions.get("lists/parts/bar"), None))
@@ -2274,6 +2295,8 @@ class ToolPalette(QtWidgets.QWidget):
         if self.tool == "flow" and (self._ticks % 2 == 0 or groom != getattr(self, "_flow_groom", None)):
             self._flow_groom = groom
             self.fill_flow_count(groom)
+        if self.tool == "clone":  # a Ctrl+click captured, or Pick Source's click used
+            self.fill_clone()
         if self.length_keys.isVisible():  # the keys clicked and dragged in the viewport
             self.length_keys.refresh()
         if any(b.isVisible() for b in self.tube_panel.blocks):  # (Shape, Select, Place, Draw) a selection or solo
@@ -2428,6 +2451,7 @@ class ToolPalette(QtWidgets.QWidget):
                       symmetry=self.symmetry_name(), pressure=self.pressure.isChecked(),
                       collide=self.collide.isChecked(), mask_by_scalp=True,
                       match_neighbors=self.match.isChecked(), solo_new_guides=self.solo_new.isChecked(),
+                      clone_replace=self.clone_replace.isChecked(),
                       length=self.length.value() / self.length_factor, segments=self.segments.value(),
                       spacing=self.spacing.value() / self.length_factor,
                       value=self.paint_tab.value.value(),
@@ -2507,6 +2531,9 @@ class ToolPalette(QtWidgets.QWidget):
         self.brush_block.setVisible(brush)
         for slider in (self.radius, self.strength, self.falloff):
             slider.setEnabled(brush)
+        # (Clone has a circle but no strength or falloff.)
+        self.strength.setVisible(not brush or "strength" in uses)
+        self.falloff.setVisible(not brush or "falloff" in uses)
         self.smooth_strength.setVisible("smoothStrength" in uses)
         self.pressure.row.setVisible("pressure" in uses)
         self.pressure.setEnabled("pressure" in uses)
@@ -2551,6 +2578,9 @@ class ToolPalette(QtWidgets.QWidget):
         if "flow" in uses:
             self.fill_flow_count(self.groom())
         self.part_box.setVisible("parts" in uses)
+        self.clone_box.setVisible("clone" in uses)
+        if "clone" in uses:
+            self.fill_clone()
         # Applies to: Acts on where the tool has targets, Mirror for the tools that mirror.
         # The Tube tool: no Applies to; its Mirror at the bottom of Brush. Every other tool: in Applies to.
         tube_card = tool == "shape"
@@ -2734,6 +2764,31 @@ class ToolPalette(QtWidgets.QWidget):
         if groom:
             groomlab.clear_flow(groom)
             self.fill_flow_count(groom)
+
+    def pick_clone_source(self, on):
+        """Pick Source: the Clone tool's next click captures (the button stays down until it has)."""
+        armed = groomlab.clone_pick_source(on) if self.tool == "clone" else False
+        if armed != on:
+            self.clone_pick.blockSignals(True)
+            self.clone_pick.setChecked(armed)
+            self.clone_pick.blockSignals(False)
+
+    def fill_clone(self):
+        """The Clone card: Pick Source down while a capture is armed, and what the source holds."""
+        from maya import cmds
+        ctx = groomlab.BRUSH_CONTEXT
+        armed, size = False, 0
+        if self.context_tool() == "clone":
+            armed = bool(cmds.groomLabBrushCtx(ctx, query=True, pickSource=True))
+            size = groomlab.clone_source_size()
+        if self.clone_pick.isChecked() != armed:
+            self.clone_pick.blockSignals(True)
+            self.clone_pick.setChecked(armed)
+            self.clone_pick.blockSignals(False)
+        text = ("No source yet: Ctrl+click over guides" if not size else
+                "Source: %d guide%s" % (size, "" if size == 1 else "s"))
+        if self.clone_count.text() != text:
+            self.clone_count.setText(text)
 
     def fill_flow_count(self, groom):
         """The Flow card's count: "34 arrows · 2 sinks" kept on the groom (Clear All off with none)."""

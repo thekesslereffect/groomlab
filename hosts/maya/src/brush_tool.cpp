@@ -79,6 +79,7 @@ const char* kAttributeFlag[] = {"-at", "-attribute"};
 const char* kValueFlag[] = {"-v", "-value"};
 const char* kMatchFlag[] = {"-mn", "-matchNeighbors"};
 const char* kSoloNewFlag[] = {"-sng", "-soloNewGuides"};
+const char* kCloneReplaceFlag[] = {"-clr", "-cloneReplace"};  // Clone: copies replace the guides where they land
 // Place and Draw: the new guides' tube as JSON (setPlacementTube: shape, width, aspect, twist).
 const char* kPlaceTubeFlag[] = {"-ptb", "-placeTube"};
 const char* kSpacingFlag[] = {"-sp", "-spacing"};
@@ -98,6 +99,10 @@ const char* kTubeWireframeFlag[] = {"-twf", "-tubeWireframe"};  // ... and as wi
 const char* kTubeColorsFlag[] = {"-tco", "-tubeColors"};        // ... in their regions' colors
 const char* kTubeLevelColorsFlag[] = {"-tlc", "-tubeLevelColors"};  // ... each split tube a shade of its own
 const char* kTubeAlwaysFlag[] = {"-tav", "-tubesAlwaysVisible"};  // ... whichever tool is up
+// Clone: the next press captures the guides rooted in the circle (Pick Source; query: armed), and
+// (query) how many guides the source holds.
+const char* kPickSourceFlag[] = {"-pks", "-pickSource"};
+const char* kCloneSizeFlag[] = {"-csz", "-cloneSize"};
 const char* kTargetsFlag[] = {"-tg", "-targets"};
 const char* kPaintKindFlag[] = {"-pk", "-paintKind"};
 const char* kPaintTextureFlag[] = {"-ptx", "-paintTexture"};
@@ -331,6 +336,7 @@ void addBrushFlags(MSyntax& s) {
     s.addFlag(kValueFlag[0], kValueFlag[1], MSyntax::kDouble);
     s.addFlag(kMatchFlag[0], kMatchFlag[1], MSyntax::kBoolean);
     s.addFlag(kSoloNewFlag[0], kSoloNewFlag[1], MSyntax::kBoolean);
+    s.addFlag(kCloneReplaceFlag[0], kCloneReplaceFlag[1], MSyntax::kBoolean);
     s.addFlag(kPlaceTubeFlag[0], kPlaceTubeFlag[1], MSyntax::kString);
     s.addFlag(kSpacingFlag[0], kSpacingFlag[1], MSyntax::kDouble);
     s.addFlag(kCollideFlag[0], kCollideFlag[1], MSyntax::kBoolean);
@@ -425,6 +431,7 @@ MStatus applyBrushFlags(const Args& args, BrushToolSettings& s, const char* comm
     if (args.isFlagSet(kSpacingFlag[0]) && args.getFlagArgument(kSpacingFlag[0], 0, d)) s.place.spacing = float(d);
     if (args.isFlagSet(kMatchFlag[0]) && args.getFlagArgument(kMatchFlag[0], 0, b)) s.place.matchNeighbors = b;
     if (args.isFlagSet(kSoloNewFlag[0]) && args.getFlagArgument(kSoloNewFlag[0], 0, b)) s.place.soloNewGuides = b;
+    if (args.isFlagSet(kCloneReplaceFlag[0]) && args.getFlagArgument(kCloneReplaceFlag[0], 0, b)) s.cloneReplace = b;
     if (args.isFlagSet(kCollideFlag[0]) && args.getFlagArgument(kCollideFlag[0], 0, b)) s.brush.collide = b;
     if (args.isFlagSet(kPaintWholeFacesFlag[0]) && args.getFlagArgument(kPaintWholeFacesFlag[0], 0, b)) s.paintWholeFaces = b;
     if (args.isFlagSet(kMaskScalpFlag[0]) && args.getFlagArgument(kMaskScalpFlag[0], 0, b)) s.maskByScalp = b;
@@ -1458,11 +1465,9 @@ void BrushContext::showSymmetry() {
 void BrushContext::drawCircle(MHWRender::MUIDrawManager& draw, short x, short y) const {
     const BrushToolSettings& s = tool_.settings;
     draw.beginDrawable();
-    using Tool = BrushToolSettings::Tool;
-    const bool creating = s.tool != Tool::Brush && s.tool != Tool::Flow;
     draw.setColor(mayaColor(brushRingColor(s)));  // the core's, the standalone app's too
     draw.setLineWidth(1.5f);
-    draw.circle2d(MPoint(x, y), creating ? 6.0 : s.screenRadius, false);
+    draw.circle2d(MPoint(x, y), s.showsBrushCircle() ? s.screenRadius : 6.0, false);
     draw.endDrawable();
 }
 
@@ -1642,6 +1647,8 @@ MStatus BrushContextCmd::appendSyntax() {
     s.addFlag(kTubeColorsFlag[0], kTubeColorsFlag[1], MSyntax::kBoolean);
     s.addFlag(kTubeLevelColorsFlag[0], kTubeLevelColorsFlag[1], MSyntax::kBoolean);
     s.addFlag(kTubeAlwaysFlag[0], kTubeAlwaysFlag[1], MSyntax::kBoolean);
+    s.addFlag(kPickSourceFlag[0], kPickSourceFlag[1], MSyntax::kBoolean);
+    s.addFlag(kCloneSizeFlag[0], kCloneSizeFlag[1]);
     s.addFlag(kDebugPickFlag[0], kDebugPickFlag[1], MSyntax::kString);
     s.addFlag(kDebugHoverFlag[0], kDebugHoverFlag[1], MSyntax::kString);
     s.addFlag(kLengthEditFlag[0], kLengthEditFlag[1], MSyntax::kString);
@@ -1685,6 +1692,7 @@ MStatus BrushContextCmd::doEditFlags() {
         if (args.isFlagSet(kTubeColorsFlag[0]) && args.getFlagArgument(kTubeColorsFlag[0], 0, b)) context_->tubeColors = b;
         if (args.isFlagSet(kTubeLevelColorsFlag[0]) && args.getFlagArgument(kTubeLevelColorsFlag[0], 0, b)) context_->tubeLevelColors = b;
         if (args.isFlagSet(kTubeAlwaysFlag[0]) && args.getFlagArgument(kTubeAlwaysFlag[0], 0, b)) context_->tubesAlwaysVisible = b;
+        if (args.isFlagSet(kPickSourceFlag[0]) && args.getFlagArgument(kPickSourceFlag[0], 0, b)) context_->brushTool().armCapture(b);
         MToolsInfo::setDirtyFlag(*context_);
         context_->showSymmetry();  // the line follows the symmetry set (or goes with it)
 
@@ -1770,6 +1778,9 @@ MStatus BrushContextCmd::doQueryFlags() {
         else if (args.isFlagSet(kSpacingFlag[0])) setResult(double(s.place.spacing));
         else if (args.isFlagSet(kMatchFlag[0])) setResult(s.place.matchNeighbors);
         else if (args.isFlagSet(kSoloNewFlag[0])) setResult(s.place.soloNewGuides);
+        else if (args.isFlagSet(kCloneReplaceFlag[0])) setResult(s.cloneReplace);
+        else if (args.isFlagSet(kPickSourceFlag[0])) setResult(context_->brushTool().captureArmed());
+        else if (args.isFlagSet(kCloneSizeFlag[0])) setResult(static_cast<int>(context_->brushTool().clip().guides.size()));
         else if (args.isFlagSet(kPlaceTubeFlag[0])) setResult(MString(placementTubeJson(s.place).c_str()));
         else if (args.isFlagSet(kCollideFlag[0])) setResult(s.brush.collide);
         else if (args.isFlagSet(kMaskScalpFlag[0])) setResult(s.maskByScalp);

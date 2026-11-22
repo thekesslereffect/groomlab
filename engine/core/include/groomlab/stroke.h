@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "groomlab/brush.h"
+#include "groomlab/clone.h"
 #include "groomlab/correctives.h"
 #include "groomlab/flow.h"
 #include "groomlab/graph.h"
@@ -44,12 +45,20 @@ class GroomSession;
 // Everything a stroke needs besides the path: the core brush settings, the guide-creating tools,
 // the interactive (screen-space) radius and what the brush acts on.
 struct BrushToolSettings {
-    enum class Tool { Brush, Place, Draw, Part, Flow, Lengths, Roots };
+    enum class Tool { Brush, Place, Draw, Part, Flow, Lengths, Roots, Clone };
     // Place: click one guide, drag to place many; Draw: draw a guide's shape; Part: draw a part
     // freehand on the scalp; Flow: lay flow arrows along the stroke and comb the ones it passes
     // (Ctrl: erase them); Lengths: the Length Keys tool (length_key_tool.h, BrushTool::lengths);
-    // Roots: the Tube tool's root-first mode (root_tube_tool.h, BrushTool::roots).
+    // Roots: the Tube tool's root-first mode (root_tube_tool.h, BrushTool::roots); Clone: a
+    // Ctrl+click captures the guides rooted in the circle, a click sets copies down (a drag spins
+    // them; clone.h, BrushTool::clip).
     Tool tool = Tool::Brush;
+    // Clone: the guides of the copied levels already in the circle where it sets down are removed
+    // first (frozen ones kept).
+    bool cloneReplace = false;
+    // Whether hosts draw the brush circle at the radius round the cursor (the brushes, Flow and
+    // Clone), or a small dot (the tools that click a point: Place, Draw, Part...).
+    bool showsBrushCircle() const { return tool == Tool::Brush || tool == Tool::Flow || tool == Tool::Clone; }
     std::string partName = "part";  // Part: the new part's name (made unique)
     // Flow: "" lays arrows along strokes; whorl, whorlcw, converge or part places a sink of that
     // kind where clicked (brush radius; Ctrl: remove sinks).
@@ -634,6 +643,12 @@ public:
                 float pressure = 1.0f, unsigned modifiers = 0, const std::function<void()>& afterDab = {});
 
     bool stroking() const { return stroking_; }
+    // The Clone tool's source: what the last capture took (empty before one). armCapture: the
+    // next press captures, as a Ctrl+press does (the card's Pick Source); a capture disarms it.
+    const GuideClip& clip() const { return clip_; }
+    void clearClip() { clip_ = GuideClip{}; }
+    void armCapture(bool on) { captureArmed_ = on; }
+    bool captureArmed() const { return captureArmed_; }
     // A Ctrl+Shift drag painting the selection, until its release.
     bool selectingPaint() const { return selecting_; }
     // The tool's Ctrl+Shift paints the selection: a Shape or Trim brush (brush_catalog.h).
@@ -756,6 +771,19 @@ private:
     bool shiftSmoothing_ = false;
     float pressX_ = 0.0f, pressY_ = 0.0f;
     BrushMode savedMode_ = BrushMode::Comb;
+    // Clone: the source captured, a capture armed for the next press, and the set-down being
+    // pressed: where on the scalp, how far a drag has spun it (radians), the drag's screen angle
+    // from the press last seen (spinning once the cursor is 4 pixels off it).
+    GuideClip clip_;
+    bool captureArmed_ = false;
+    SurfacePoint pasteAt_;
+    float pasteAngle_ = 0.0f, spinLast_ = 0.0f;
+    bool spinning_ = false;
+    // The guides a stroke would edit now (brushTargets with the host's hidden groups, selection
+    // and freeze), in the hierarchy's order: the hover's, Clone's capture.
+    std::vector<const HierarchyGuide*> brushableGuides(StrokeHost& host, const GuideHierarchy& h);
+    bool captureClip(StrokeHost& host, const ToolView& view, float x, float y);
+    void pasteClip();
 };
 
 // ---- Scripted strokes ------------------------------------------------------------------------------

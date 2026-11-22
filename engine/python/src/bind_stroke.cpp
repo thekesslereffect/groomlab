@@ -103,6 +103,7 @@ void applySettings(BrushToolSettings& s, const py::dict& kwargs) {
         else if (key == "spacing") s.place.spacing = v.cast<float>();
         else if (key == "match_neighbors") s.place.matchNeighbors = v.cast<bool>();
         else if (key == "solo_new_guides") s.place.soloNewGuides = v.cast<bool>();
+        else if (key == "clone_replace") s.cloneReplace = v.cast<bool>();
         else if (key == "tube") {  // the placement tube: a dict as groomlab.get_tube gives one, or its JSON
             if (!v.is_none()) {
                 setPlacementTube(s.place, py::isinstance<py::str>(v) ? v.cast<std::string>()
@@ -258,6 +259,8 @@ void bindStroke(py::module_& m) {
             "solo_new_guides", [](const BrushToolSettings& s) { return s.place.soloNewGuides; },
             [](BrushToolSettings& s, bool on) { s.place.soloNewGuides = on; },
             "Place, Draw: the new guides unfrozen and every other frozen, in the stroke's undo step.")
+        .def_readwrite("clone_replace", &BrushToolSettings::cloneReplace,
+                       "Clone: the guides of the copied levels already where the copies land are removed first.")
         .def_readwrite("screen_radius", &BrushToolSettings::screenRadius)
         .def_readwrite("paint_kind", &BrushToolSettings::paintKind)
         .def_readwrite("mask_by_scalp", &BrushToolSettings::maskByScalp)
@@ -381,7 +384,14 @@ void bindStroke(py::module_& m) {
         .def_property_readonly("stroking", &BrushTool::stroking)
         .def_property_readonly("changed", &BrushTool::changed)
         .def_property_readonly("drawn_path", &BrushTool::drawnPath)
-        .def_property_readonly("mode_name", &BrushTool::toolModeName);
+        .def_property_readonly("mode_name", &BrushTool::toolModeName)
+        .def_property(
+            "capture_armed", &BrushTool::captureArmed, &BrushTool::armCapture,
+            "Clone: the next press captures the guides rooted in the circle (as a Ctrl+press does).")
+        .def_property_readonly(
+            "clip_size", [](const BrushTool& t) { return t.clip().guides.size(); },
+            "Clone: how many guides the source holds (their descendants come along); 0 before a capture.")
+        .def("clear_clip", &BrushTool::clearClip, "Clone: forget the source.");
 
     // The brush catalog (brush_catalog.h): what every host's palette is built from.
     m.def(
