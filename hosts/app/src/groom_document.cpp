@@ -623,12 +623,18 @@ std::size_t GroomDocument::sculptedGuides(const std::string& node) const {
 
 std::string GroomDocument::paintParam(const std::string& node, const std::string& name, std::string* mapName, const std::string& kind,
                                       bool* made) {
+    ParamPaintRequest paint;
+    paint.kind = kind;
+    return paintParam(node, name, paint, mapName, made);
+}
+
+std::string GroomDocument::paintParam(const std::string& node, const std::string& name, const ParamPaintRequest& paint,
+                                      std::string* mapName, bool* made, std::string* channel) {
     if (made) *made = false;
+    if (channel) channel->clear();
     // Every host's Paint on a setting (the editor's paintParam, map_edits.h): the map the param
     // reads, else its own (one there already linked again), made white and linked; the map, its
     // files and the wiring one undo step.
-    ParamPaintRequest paint;
-    paint.kind = kind;
     MapFiles files;
     files.mapsFolder = mapsDirectory();
     files.groomFolder = path_.empty() ? std::string() : std::filesystem::u8path(path_).parent_path().u8string();
@@ -642,6 +648,7 @@ std::string GroomDocument::paintParam(const std::string& node, const std::string
         return e.what();
     }
     if (mapName) *mapName = painted.map;
+    if (channel) *channel = painted.channel;
     if (painted.graph.empty()) return {};  // it reads the map already
     const std::string label = "map " + node + "." + name;
     if (!painted.made) return editGraph(label, [&](json& g) { g = json::parse(painted.graph); });

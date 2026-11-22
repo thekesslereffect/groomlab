@@ -2574,6 +2574,21 @@ TEST(AppPanels, ParamPanelPaintsAParamInOneStep) {
         EXPECT_NE(doc->paintParam(clump, "centerWeight", nullptr, "guides"), "") << "no guides to paint on";
     }
     EXPECT_NE(doc->paintParam(clump, "centerWeight", nullptr, "rainbow"), "");
+    // One channel of a color map, by name (every host's ParamPaintRequest): the map made color, the
+    // param fed by its Map node's output, one undo step.
+    ParamPaintRequest packed;
+    packed.name = "packedMasks";
+    packed.channel = "g";
+    std::string packedMap, channel;
+    bool packedMade = false;
+    EXPECT_EQ(doc->paintParam(clump, "centerWeight", packed, &packedMap, &packedMade, &channel), "");
+    EXPECT_EQ(packedMap, "packedMasks");
+    EXPECT_EQ(channel, "g");
+    EXPECT_TRUE(packedMade);
+    ASSERT_TRUE(doc->map("packedMasks"));
+    EXPECT_EQ(doc->map("packedMasks")->channels, kColorMap);
+    EXPECT_EQ(doc->undo(), "");
+    EXPECT_EQ(doc->map("packedMasks"), nullptr);
 }
 
 namespace {

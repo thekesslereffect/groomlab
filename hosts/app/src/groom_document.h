@@ -257,6 +257,11 @@ public:
     // name is written to *mapName. "" or the error.
     std::string paintParam(const std::string& node, const std::string& name, std::string* mapName = nullptr,
                            const std::string& kind = "vertices", bool* made = nullptr);
+    // The same as every host asks it (the editor's ParamPaintRequest: a map by name, one channel
+    // of a color map through its Map node, a new map white on some scalp faces only); *channel
+    // the channel the brush paints ("": the map's value).
+    std::string paintParam(const std::string& node, const std::string& name, const ParamPaintRequest& request,
+                           std::string* mapName = nullptr, bool* made = nullptr, std::string* channel = nullptr);
     // The scalp's color sets that are not painted maps (Maya's, read by name).
     std::vector<std::string> colorSetNames() const;
     // The strands' per-strand channels of the last view (what the attribute color mode shows).
