@@ -1196,26 +1196,14 @@ std::string GroomDocument::duplicateNode(const std::string& node, std::string* m
     const json* n = nodeJson(node);
     if (!n) return "no node '" + node + "'";
     if (n->value("type", std::string()) == "Output") return "the output node is one of a kind";
-    // A copy beside the node with its params (its own seed when the operator has one: the core
-    // picks a free one when the params leave it out), unconnected: the artist wires it.
-    json params = n->value("params", json::object());
-    params.erase("seed");
-    float x = 0.0f, y = 0.0f;
-    const bool placed = nodePosition(node, &x, &y);
-    // A Sculpt node's copy takes its edits too (a compound's, its inner Sculpt nodes'): its name is
-    // made first, so the step copies them.
-    const std::string type = n->value("type", std::string());
-    const bool sculpted = type == op::kSculpt || type == "Compound";
-    std::string chosen = sculpted ? GraphEdit(graph_.dump()).uniqueName(type) : std::string();
-    std::map<std::string, std::string> copied;
-    if (!chosen.empty()) copied[chosen] = node;
-    const std::string error = editGraph("duplicate " + node, [&](json& g) {
-        GraphEdit edit(g.dump());
-        chosen = edit.addNode(type, chosen, params.dump(), placed ? std::optional<double>(x + 40.0) : std::nullopt,
-                              placed ? std::optional<double>(y + 60.0) : std::nullopt);
-        g = json::parse(edit.toJson());
-    }, {}, copied);
-    if (made) *made = chosen;
+    // Every host's Duplicate (Maya's and this one's with several nodes): the core's copy and paste
+    // (graph_edit.h), beside the node, every field kept (its seed, exposed ports, the controls
+    // keying its params), a Sculpt node's (a compound's inner Sculpt nodes') edits with it.
+    const std::string text = copyNodes({node});
+    if (text.empty()) return "nothing to duplicate";
+    std::vector<std::string> names;
+    const std::string error = pasteNodes(text, 40.0f, 60.0f, &names);
+    if (error.empty() && made && !names.empty()) *made = names.front();
     return error;
 }
 

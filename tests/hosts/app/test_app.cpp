@@ -1792,7 +1792,22 @@ TEST(AppDocument, NodeRenameDuplicateOutputAndTidy) {
     EXPECT_NE(doc->renameNode("nope", "x"), "");
     std::string copy;
     EXPECT_EQ(doc->duplicateNode("trim", &copy), "");
-    EXPECT_EQ(copy, "length");  // the type's name, free again
+    EXPECT_NE(copy, "trim");  // a name of its own
+    auto typeOf = [&](const std::string& name) {
+        for (const GroomDocument::NodeInfo& n : doc->nodes()) {
+            if (n.name == name) return n.type;
+        }
+        return std::string();
+    };
+    EXPECT_EQ(typeOf(copy), typeOf("trim"));
+    // Every field kept, as Maya's Duplicate and a copy of several nodes keep them: a Scatter's seed.
+    {
+        const std::string scatter = nodeOfType(doc->nodes(), "Scatter").name;
+        std::string scatterCopy;
+        ASSERT_EQ(doc->duplicateNode(scatter, &scatterCopy), "");
+        EXPECT_EQ(doc->paramOrDefault(scatterCopy, "seed"), doc->paramOrDefault(scatter, "seed"));
+        EXPECT_EQ(doc->undo(), "");
+    }
     float x = 0.0f, y = 0.0f, cx = 0.0f, cy = 0.0f;
     if (doc->nodePosition("trim", &x, &y)) {
         ASSERT_TRUE(doc->nodePosition(copy, &cx, &cy));
