@@ -63,10 +63,18 @@ std::string uniqueName(const json& graph, const std::string& base, const std::st
     return b + std::to_string(i);
 }
 
-// The link out of every exit it is in.
+// The link out of every exit (and entry) it is in.
 bool dropLink(json& graph, const std::string& to, const std::string& input) {
     bool any = false;
     for (json& p : portalsOf(graph)) {
+        if (p.contains("links") && p["links"].is_array()) {
+            json kept = json::array();
+            for (const json& l : p["links"]) {
+                if (str(l, "to") == to && str(l, "input") == input) any = true;
+                else kept.push_back(l);
+            }
+            p["links"] = std::move(kept);
+        }
         for (json& e : exitsOf(p)) {
             if (!e.contains("links") || !e["links"].is_array()) continue;
             json kept = json::array();
@@ -91,21 +99,36 @@ void prunePortals(json& graph) {
     std::set<std::string> nodes;
     for (const json& n : graph.value("nodes", json::array())) nodes.insert(str(n, "name"));
     json kept = json::array();
-    std::set<std::pair<std::string, std::string>> placed;  // links in an exit already
+    std::set<std::pair<std::string, std::string>> placed;  // links in a dot already
     for (json p : graph["portals"]) {
-        if (!p.is_object() || !nodes.count(str(p, "from"))) continue;
+        if (!p.is_object()) continue;
         const std::string from = str(p, "from"), output = str(p, "output");
-        json exits = json::array();
-        for (json e : p.value("exits", json::array())) {
-            if (!e.is_object()) continue;
+        if (from.empty()) {
+            // A free dot: nothing comes out of it yet.
+            p.erase("links");
+            p.erase("output");
+            p["exits"] = json::array();
+            kept.push_back(std::move(p));
+            continue;
+        }
+        if (!nodes.count(from)) continue;
+        auto keep = [&](const json& list) {
             json links = json::array();
-            for (const json& l : e.value("links", json::array())) {
+            for (const json& l : list.is_array() ? list : json::array()) {
                 const std::pair<std::string, std::string> link{str(l, "to"), str(l, "input")};
                 if (sourceOf(graph, link.first, link.second) != std::make_pair(from, output)) continue;
                 if (!placed.insert(link).second) continue;
                 links.push_back({{"to", link.first}, {"input", link.second}});
             }
-            e["links"] = std::move(links);
+            return links;
+        };
+        const json own = keep(p.value("links", json::array()));
+        if (own.empty()) p.erase("links");
+        else p["links"] = own;
+        json exits = json::array();
+        for (json e : p.value("exits", json::array())) {
+            if (!e.is_object()) continue;
+            e["links"] = keep(e.value("links", json::array()));
             exits.push_back(std::move(e));
         }
         p["exits"] = std::move(exits);
@@ -131,6 +154,9 @@ std::string portalOf(const json& graph, const std::string& from, const std::stri
 
 std::optional<PortalExitRef> portalOfLink(const json& graph, const std::string& to, const std::string& input) {
     for (const json& p : portalsView(graph)) {
+        for (const json& l : p.value("links", json::array())) {
+            if (str(l, "to") == to && str(l, "input") == input) return PortalExitRef{str(p, "name"), -1};
+        }
         const json exits = p.value("exits", json::array());
         for (std::size_t e = 0; e < exits.size(); ++e) {
             for (const json& l : exits[e].value("links", json::array())) {
@@ -169,11 +195,11 @@ std::optional<PortalExitRef> teleportLink(json& graph, const std::string& to, co
 
 bool addPortalLink(json& graph, const std::string& portal, int exit, const std::string& to, const std::string& input) {
     json* p = findPortal(graph, portal);
-    if (!p || exit < 0 || exit >= static_cast<int>(exitsOf(*p).size())) return false;
+    if (!p || exit < -1 || exit >= static_cast<int>(exitsOf(*p).size()) || str(*p, "from").empty()) return false;
     if (sourceOf(graph, to, input) != std::make_pair(str(*p, "from"), str(*p, "output"))) return false;
     dropLink(graph, to, input);
     p = findPortal(graph, portal);
-    json& e = exitsOf(*p)[exit];
+    json& e = exit < 0 ? *p : exitsOf(*p)[exit];
     if (!e.contains("links") || !e["links"].is_array()) e["links"] = json::array();
     e["links"].push_back({{"to", to}, {"input", input}});
     return true;
@@ -233,6 +259,11 @@ void renamePortalNode(json& graph, const std::string& from, const std::string& t
     for (json& p : graph["portals"]) {
         if (!p.is_object()) continue;
         if (str(p, "from") == from) p["from"] = to;
+        if (p.contains("links") && p["links"].is_array()) {
+            for (json& l : p["links"]) {
+                if (str(l, "to") == from) l["to"] = to;
+            }
+        }
         for (json& e : exitsOf(p)) {
             if (!e.contains("links") || !e["links"].is_array()) continue;
             for (json& l : e["links"]) {
@@ -240,6 +271,63 @@ void renamePortalNode(json& graph, const std::string& from, const std::string& t
             }
         }
     }
+}
+
+std::string addDot(json& graph, double x, double y, const std::string& name) {
+    const std::string made = uniqueName(graph, name.empty() ? std::string("Dot") : name);
+    portalsOf(graph).push_back({{"name", made}, {"from", ""}, {"x", x}, {"y", y}, {"exits", json::array()}});
+    return made;
+}
+
+bool portalFed(const json& graph, const std::string& portal) {
+    for (const json& p : portalsView(graph)) {
+        if (str(p, "name") == portal) return !str(p, "from").empty();
+    }
+    return false;
+}
+
+std::vector<std::pair<std::string, std::string>> portalLinks(const json& graph, const std::string& portal) {
+    std::vector<std::pair<std::string, std::string>> out;
+    for (const json& p : portalsView(graph)) {
+        if (str(p, "name") != portal) continue;
+        for (const json& l : p.value("links", json::array())) out.emplace_back(str(l, "to"), str(l, "input"));
+        for (const json& e : p.value("exits", json::array())) {
+            for (const json& l : e.value("links", json::array())) out.emplace_back(str(l, "to"), str(l, "input"));
+        }
+    }
+    return out;
+}
+
+bool setPortalSource(json& graph, const std::string& portal, const std::string& from, const std::string& output) {
+    json* p = graph.contains("portals") ? findPortal(graph, portal) : nullptr;
+    if (!p || from.empty()) return false;
+    const std::string other = portalOf(graph, from, output);
+    if (!other.empty() && other != portal) return false;
+    (*p)["from"] = from;
+    if (output.empty()) p->erase("output");
+    else (*p)["output"] = output;
+    return true;
+}
+
+int joinPortal(json& graph, const std::string& dot, const std::string& into) {
+    if (dot == into || !graph.contains("portals")) return -1;
+    json* d = findPortal(graph, dot);
+    json* target = findPortal(graph, into);
+    if (!d || !target || str(*target, "from").empty()) return -1;
+    json exit = {{"x", d->value("x", 0.0)}, {"y", d->value("y", 0.0)}, {"links", json::array()}};
+    for (const auto& [to, input] : portalLinks(graph, dot)) exit["links"].push_back({{"to", to}, {"input", input}});
+    exitsOf(*target).push_back(std::move(exit));
+    const int index = static_cast<int>(exitsOf(*target).size()) - 1;
+    removePortal(graph, dot);
+    return index;
+}
+
+std::string leavePortal(json& graph, const std::string& portal, int exit) {
+    json* p = graph.contains("portals") ? findPortal(graph, portal) : nullptr;
+    if (!p || exit < 0 || exit >= static_cast<int>(exitsOf(*p).size())) return {};
+    const json e = exitsOf(*p)[exit];
+    exitsOf(*p).erase(exitsOf(*p).begin() + exit);
+    return addDot(graph, e.value("x", 0.0), e.value("y", 0.0), portal);
 }
 
 }  // namespace groomlab

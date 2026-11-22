@@ -17,12 +17,15 @@
 #include <QTabBar>
 #include <QTabWidget>
 #include <QToolButton>
+#include <QFrame>
+#include <QIcon>
 #include <QVBoxLayout>
 
 #include "cards_panel.h"
 #include "export_panel.h"
 #include "groom_tools.h"
 #include "definitions.h"
+#include "glass.h"
 #include "icon_rail.h"
 #include "node_graph.h"
 #include "theme.h"
@@ -303,6 +306,43 @@ AppShell::AppShell(QMainWindow* window, OverlayHost* overlay) : QObject(window),
         graphPresets_ = menuButton(tr("Presets  \u25BE"), "graphPresetsButton",
                                    tr("Start from a look (hair, fur, feathers), a technique to learn from (blending, layers, maps, motion...), "
                                       "save this graph as a preset, or copy and paste the whole graph as text to share it"));
+        // The wire style and the Align buttons, as icons (the Graph Editor's bar, Maya's too).
+        auto iconButton = [this, row](const QString& icon, const QString& name, const QString& tip) {
+            auto* b = new QToolButton(graphBar_);
+            b->setObjectName(name);
+            b->setToolTip(tip);
+            b->setIcon(QIcon(tintedIcon(QStringLiteral(":/groomlab/icons/ui_%1.svg").arg(icon), theme::textSoft(), 18, graphBar_->devicePixelRatioF())));
+            b->setIconSize(QSize(18, 18));
+            b->setAutoRaise(true);
+            b->setToolButtonStyle(Qt::ToolButtonIconOnly);
+            row->addWidget(b);
+            return b;
+        };
+        auto divider = [this, row] {
+            auto* line = new QFrame(graphBar_);
+            line->setFrameShape(QFrame::VLine);
+            line->setFixedHeight(16);
+            line->setStyleSheet(QStringLiteral("color: %1;").arg(theme::divider().name()));
+            row->addSpacing(2);
+            row->addWidget(line);
+            row->addSpacing(2);
+        };
+        divider();
+        graphWire_ = iconButton(QStringLiteral("wire_smooth"), QStringLiteral("graphWireButton"), tr("Wire style: Smooth, Square or Rounded"));
+        graphWire_->setPopupMode(QToolButton::InstantPopup);
+        divider();
+        const std::pair<const char*, QString> aligns[] = {
+            {"left", tr("Align left edges")}, {"centerX", tr("Align centers (a vertical line)")}, {"right", tr("Align right edges")},
+            {"distributeY", tr("Space evenly down")}, {nullptr, {}},
+            {"top", tr("Align top edges")}, {"centerY", tr("Align middles (a horizontal line)")}, {"bottom", tr("Align bottom edges")},
+            {nullptr, {}}, {"distributeX", tr("Space evenly across")}};
+        for (const auto& [mode, tip] : aligns) {
+            if (!mode) {
+                divider();
+                continue;
+            }
+            graphAlign_.push_back(iconButton(QStringLiteral("align_%1").arg(QLatin1String(mode)), QStringLiteral("graphAlign_%1").arg(QLatin1String(mode)), tip));
+        }
         graphStatus_ = new QLabel(graphBar_);
         graphStatus_->setObjectName(QStringLiteral("graphStatus"));
         graphStatus_->setTextFormat(Qt::PlainText);

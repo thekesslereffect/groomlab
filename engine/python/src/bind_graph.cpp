@@ -831,6 +831,25 @@ void bindGraph(py::module_& m) {
              py::arg("portal"), py::arg("exit"))
         .def("rename", [](GraphPortals& p, const std::string& portal, const std::string& name) { return renamePortal(p.graph, portal, name); },
              py::arg("portal"), py::arg("name"))
+        .def("add_dot", [](GraphPortals& p, double x, double y, const std::string& name) { return addDot(p.graph, x, y, name); },
+             py::arg("x"), py::arg("y"), py::arg("name") = std::string(), "A free dot (a portal with no source yet); its name.")
+        .def("fed", [](const GraphPortals& p, const std::string& portal) { return portalFed(p.graph, portal); }, py::arg("portal"))
+        .def("links",
+             [](const GraphPortals& p, const std::string& portal) {
+                 py::list out;
+                 for (const auto& [to, input] : portalLinks(p.graph, portal)) out.append(py::make_tuple(to, input));
+                 return out;
+             },
+             py::arg("portal"), "Every link the portal draws (its entry's, then its exits'): [(to, input)].")
+        .def("set_source",
+             [](GraphPortals& p, const std::string& portal, const std::string& from, const std::string& output) {
+                 return setPortalSource(p.graph, portal, from, output);
+             },
+             py::arg("portal"), py::arg("src"), py::arg("output") = std::string())
+        .def("join", [](GraphPortals& p, const std::string& dot, const std::string& into) { return joinPortal(p.graph, dot, into); },
+             py::arg("dot"), py::arg("into"), "Input Portal set: the dot an exit of `into`; the exit's index, -1 when it cannot.")
+        .def("leave", [](GraphPortals& p, const std::string& portal, int exit) { return leavePortal(p.graph, portal, exit); },
+             py::arg("portal"), py::arg("exit"), "Input Portal cleared: the exit a free dot; its name.")
         .def("rename_node", [](GraphPortals& p, const std::string& from, const std::string& to) { renamePortalNode(p.graph, from, to); },
              py::arg("old"), py::arg("new"));
 
@@ -875,6 +894,9 @@ void bindGraph(py::module_& m) {
         .def("reset", &ShakeDetector::reset)
         .def("add", &ShakeDetector::add, py::arg("seconds"), py::arg("x"), py::arg("y"));
     m.def("wire_styles", &wireStyles, "The wire styles: smooth, square, rounded.");
+    m.def("backdrop_keeps", &backdropKeeps, py::arg("over_it"), py::arg("speed"), py::arg("left"),
+          "While a node on a backdrop is dragged: whether the backdrop keeps it (grows round it) or the node leaves it.");
+    m.attr("BACKDROP_ESCAPE_SPEED") = kBackdropEscapeSpeed;
     m.def("wire_route",
           [](const std::string& style, double ax, double ay, double bx, double by, std::optional<double> below, bool through) {
               py::list out;
@@ -1006,6 +1028,26 @@ void bindGraph(py::module_& m) {
              py::arg("src"), py::arg("dst"), py::arg("input"), py::arg("node"), py::arg("output") = std::string(),
              "The one link src -> dst.input through `node`, on its first input that takes it: a node dropped on a wire "
              "(graph_inserts.h).")
+        .def("insert_nodes_on_link",
+             [](GraphEdit& e, const std::string& src, const std::string& dst, const std::string& input, const std::vector<std::string>& nodes,
+                const std::string& output) { insertNodesOnLink(e, src, dst, input, nodes, output); },
+             py::arg("src"), py::arg("dst"), py::arg("input"), py::arg("nodes"), py::arg("output") = std::string(),
+             "Several nodes dropped on a wire as one: src feeds their entry, dst reads their exit (graph_inserts.h).")
+        .def(
+            "detach_group",
+            [](GraphEdit& e, const std::vector<std::string>& names) {
+                const GraphEdit::Detached d = e.detachGroup(names);
+                py::dict out;
+                out["source"] = d.source;
+                py::list relinked;
+                for (const auto& [node, input] : d.relinked) relinked.append(py::make_tuple(node, input));
+                out["relinked"] = relinked;
+                out["changed"] = d.changed;
+                return out;
+            },
+            py::arg("names"),
+            "Several nodes out of the flow together (a shake): the links among them kept, what fed them feeding what they "
+            "fed. {'source', 'relinked', 'changed'}.")
         .def("insert_scalp",
              [](GraphEdit& e, const std::string& mesh, std::optional<double> groomSize) {
                  const ScalpNodes made = insertScalp(e, mesh, groomSize);

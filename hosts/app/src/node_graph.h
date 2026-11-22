@@ -79,6 +79,7 @@
 #include <functional>
 #include <limits>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -96,7 +97,10 @@
 #include <QStringList>
 #include <QWidget>
 
+class QComboBox;
 class QLabel;
+class QPlainTextEdit;
+class QSpinBox;
 class QLineEdit;
 class QListWidget;
 class QMenu;
@@ -309,6 +313,12 @@ public:
         QPointF pos;
     };
     std::vector<PortalDot> portalDots() const;
+    // The selected backdrop's or dot's properties (a card at the top right): a backdrop's title,
+    // description and title size; a dot's name and Input Portal (the dot whose signal it takes).
+    bool propertiesShown() const;
+    void setDotInput(const std::string& portal, int exit, const std::string& into);  // "" none
+    std::string addDotAt(const QPointF& widget);  // a free dot there (the search's Dot); its name
+    void selectPortal(int dot) { selectedPortal_ = dot; selectedBackdrop_ = -1; updateProperties(); update(); }
     // A port's center, widget units (tests); NaN for no such port.
     QPointF portPoint(const std::string& node, const std::string& port, bool output) const;
     void renameSelected();     // the prompt, then the document's rename
@@ -453,6 +463,8 @@ private:
         QRectF full;  // its whole frame (what holds its nodes)
         QColor color;
         bool folded = false;
+        QString description;  // shown on its body
+        int fontSize = 0;     // its title's (0: the default)
     };
     enum class Drag { None, Pan, Zoom, Move, Wire, Camera, Band, Backdrop, BackdropResize, Pin, Portal, Bundle };
 
@@ -473,14 +485,28 @@ private:
     int portalAt(const QPointF& scene, bool* nub = nullptr) const;  // a portal dot, -1 none
     QRectF backdropFoldButton(const Backdrop& b) const;            // the fold chevron in its title bar
     void drawScopeBar(QPainter& painter);
+    void updateProperties();
+    GlassPanel* props_ = nullptr;
+    QLabel *propsTitle_ = nullptr, *propsDescriptionLabel_ = nullptr, *propsFontLabel_ = nullptr, *propsInputLabel_ = nullptr;
+    QLineEdit* propsName_ = nullptr;
+    QPlainTextEdit* propsDescription_ = nullptr;
+    QSpinBox* propsFont_ = nullptr;
+    QComboBox* propsInput_ = nullptr;
     std::string pathOf(const std::string& name) const;  // a node of the graph shown, by its path in the groom's
     // Backdrops a move grows: their index, their rect when it began, the moved nodes on them.
     struct Growing {
         int backdrop = -1;
         QRectF start;
         std::vector<int> nodes;
+        std::vector<bool> left;  // dragged off it fast: out of it for the rest of the drag
     };
     void growBackdrops();  // during a move: each grows to hold its moved nodes still on it
+    void beginMove(int node, const std::vector<std::string>& carried);  // a node pressed: what moves with it
+    int wireUnderGroup(const std::vector<int>& group, int pressed) const;  // a chain dropped on a wire
+    std::optional<std::pair<std::string, std::string>> pendingSource_;  // a wire dropped on the canvas: what the search's node reads
+    void duplicateDrag(int node);                                        // Alt+drag on a node
+    qreal moveSpeed_ = 0.0;  // the drag's speed (screen pixels a second, smoothed): a fast one leaves backdrops
+    qint64 moveTime_ = 0;
     int nodeIndex(const std::string& name) const;
     bool isSelected(const std::string& name) const;
     void updateWireHint(const QPointF& scene);

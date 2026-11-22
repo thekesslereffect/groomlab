@@ -25,6 +25,7 @@
 #include "app_actions.h"
 #include "app_shell.h"
 #include "correctives_panel.h"
+#include "glass.h"
 #include "groom_document.h"
 #include "groom_tools.h"
 #include "main_window.h"
@@ -558,6 +559,34 @@ void AppActions::wireGraphEditor(MainWindow& w) {
     m->shell_->graphAddButton()->setMenu(add);
     m->shell_->graphPresetsButton()->setMenu(m->presetsMenu_);
     m->shell_->graphEditButton()->setMenu(edit);
+    // The bar's wire style button (its menu, its icon the style's) and Align buttons.
+    {
+        QToolButton* wire = m->shell_->graphWireButton();
+        auto* styles = new QMenu(wire);
+        auto showStyle = [m, wire] {
+            wire->setIcon(QIcon(tintedIcon(QStringLiteral(":/groomlab/icons/ui_wire_%1.svg").arg(QString::fromStdString(m->graph_->wireStyle())),
+                                           theme::textSoft(), 18, wire->devicePixelRatioF())));
+        };
+        for (const json& c : ui::Definitions::shipped().choices("wireStyles")) {
+            const std::string value = c.value("value", std::string());
+            QAction* a = styles->addAction(QIcon(tintedIcon(QStringLiteral(":/groomlab/icons/ui_wire_%1.svg").arg(QString::fromStdString(value)), theme::text(), 18,
+                                                            wire->devicePixelRatioF())),
+                                           qs(c.value("label", value)));
+            a->setToolTip(qs(c.value("tip", std::string())));
+            QObject::connect(a, &QAction::triggered, wire, [m, value, showStyle] {
+                m->graph_->setWireStyle(value);
+                if (m->interactive_) QSettings().setValue(QStringLiteral("graph/wireStyle"), qs(value));
+                showStyle();
+            });
+        }
+        wire->setMenu(styles);
+        QObject::connect(styles, &QMenu::aboutToShow, wire, showStyle);
+        QTimer::singleShot(0, wire, showStyle);
+        for (QToolButton* b : m->shell_->graphAlignButtons()) {
+            const std::string mode = b->objectName().mid(QStringLiteral("graphAlign_").size()).toStdString();
+            QObject::connect(b, &QToolButton::clicked, b, [m, mode] { m->graph_->alignSelected(mode); });
+        }
+    }
     // The wire style, remembered between sessions.
     if (m->interactive_) m->graph_->setWireStyle(QSettings().value(QStringLiteral("graph/wireStyle"), QStringLiteral("smooth")).toString().toStdString());
     // Snap, remembered between sessions (a test's app starts with it off).

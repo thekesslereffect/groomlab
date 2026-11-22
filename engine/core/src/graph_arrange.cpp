@@ -293,3 +293,12 @@ std::vector<WireStep> wireRoute(const std::string& style, double ax, double ay, 
 }
 
 }  // namespace groomlab
+
+namespace groomlab {
+
+bool backdropKeeps(bool overIt, double speed, bool left) {
+    if (left) return false;
+    return overIt || speed < kBackdropEscapeSpeed;
+}
+
+}  // namespace groomlab

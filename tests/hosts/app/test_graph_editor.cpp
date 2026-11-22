@@ -864,3 +864,18 @@ TEST(AppGraphEditor, UnitsShowRealMeasures) {
 
 }  // namespace
 }  // namespace groomlab::app
+
+namespace groomlab::app {
+
+TEST(AppGraphEditor, TheBarHasWireStyleAndAlignButtons) {
+    Window w;
+    AppShell* shell = w.window.shell();
+    ASSERT_NE(shell->graphWireButton(), nullptr);
+    ASSERT_NE(shell->graphWireButton()->menu(), nullptr);
+    EXPECT_EQ(shell->graphWireButton()->menu()->actions().size(), 3);
+    shell->graphWireButton()->menu()->actions()[1]->trigger();
+    EXPECT_EQ(w.graph()->wireStyle(), "square");
+    EXPECT_EQ(shell->graphAlignButtons().size(), 8u);
+}
+
+}  // namespace groomlab::app

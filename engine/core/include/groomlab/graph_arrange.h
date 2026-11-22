@@ -64,6 +64,13 @@ LayoutBox grownBackdrop(const LayoutBox& backdrop, const std::vector<LayoutBox>&
 LayoutBox foldedBackdrop(const LayoutBox& backdrop, double header, double minWidth = 160.0, double maxWidth = 260.0);
 // Whether the backdrop in the graph's JSON is folded.
 bool backdropFolded(const nlohmann::json& backdrop);
+// While a node on a backdrop is dragged: whether the backdrop keeps it (and grows round it) or the
+// node leaves it. Dragged slowly past an edge (under kBackdropEscapeSpeed screen pixels a second),
+// the backdrop grows with it; dragged out fast, it leaves; once it has left, it stays out for the
+// rest of that drag (`left`). A backdrop's "description" and "fontSize" (its title's, in points;
+// none: the editors' default) are the editors' too.
+constexpr double kBackdropEscapeSpeed = 1100.0;
+bool backdropKeeps(bool overIt, double speed, bool left);
 
 // ---- Shift+drag: a node and every node upstream of it move together -------------------------
 // The nodes a Shift+drag of `names` carries: those nodes and everything feeding them (directly or

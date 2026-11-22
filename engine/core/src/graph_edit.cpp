@@ -923,6 +923,76 @@ GraphEdit::Detached GraphEdit::detach(const std::string& name, double drop) {
     return out;
 }
 
+GraphEdit::Detached GraphEdit::detachGroup(const std::vector<std::string>& names) {
+    Detached out;
+    std::set<std::string> group;
+    for (const std::string& n : names) {
+        if (hasNode(n)) group.insert(n);
+    }
+    if (group.empty()) return out;
+    const json links = impl_->connectionsView();
+    auto inside = [&](const std::string& n) { return group.count(n) > 0; };
+    // What feeds a member's first connected input (its spec's order): (node, output).
+    auto firstFeed = [&](const std::string& node, std::pair<std::string, std::string>* feed) {
+        const json spec = impl_->spec(node);
+        for (const json& port : spec["inputs"]) {
+            for (const json& c : links) {
+                if (c.value("to", std::string()) == node && c.value("input", std::string()) == port.value("name", std::string())) {
+                    *feed = {c.value("from", std::string()), c.value("output", std::string())};
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
+    // The source outside the group a member's flow comes from (through members' first inputs).
+    auto sourceOf = [&](std::string node) {
+        std::pair<std::string, std::string> feed;
+        for (std::size_t guard = 0; guard <= group.size(); ++guard) {
+            if (!firstFeed(node, &feed)) return std::pair<std::string, std::string>();
+            if (!inside(feed.first)) return feed;
+            node = feed.first;
+        }
+        return std::pair<std::string, std::string>();
+    };
+    std::vector<json> leaving;
+    json kept = json::array();
+    for (const json& c : links) {
+        const bool from = inside(c.value("from", std::string())), to = inside(c.value("to", std::string()));
+        if (from != to) {
+            out.changed = true;
+            if (from) leaving.push_back(c);
+        } else {
+            kept.push_back(c);
+        }
+    }
+    if (!out.changed) return out;
+    std::map<std::string, std::pair<std::string, std::string>> sources;
+    for (const json& c : leaving) {
+        const std::string m = c.value("from", std::string());
+        if (!sources.count(m)) sources[m] = sourceOf(m);
+    }
+    impl_->connections() = std::move(kept);
+    for (const json& c : leaving) {
+        const auto& [src, output] = sources[c.value("from", std::string())];
+        if (src.empty()) continue;
+        const std::string dst = c.value("to", std::string()), input = c.value("input", std::string());
+        try {
+            impl_->connect(src, dst, input, output);
+            out.relinked.emplace_back(dst, input);
+            if (out.source.empty()) out.source = src;
+        } catch (const GraphError&) {
+            // (a source that does not fit that input: it is left unconnected)
+        }
+    }
+    const std::string graphOutput = impl_->graph.value("output", std::string());
+    if (inside(graphOutput)) {
+        const auto s = sourceOf(graphOutput);
+        if (!s.first.empty()) impl_->graph["output"] = s.first;
+    }
+    return out;
+}
+
 GraphEdit::Detached GraphEdit::removeNodeKeepingFlow(const std::string& name) {
     Detached out = detach(name);
     removeNode(name);

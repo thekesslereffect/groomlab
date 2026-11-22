@@ -5176,3 +5176,130 @@ TEST(AppPanels, GraphEditsInsideACompoundAndShakesNodesLoose) {
 }
 
 }  // namespace groomlab::app
+
+namespace groomlab::app {
+
+TEST(AppPanels, GraphDuplicatesWithAltDragAndPinsWithAPeriod) {
+    auto doc = GroomDocument::open(kSampleGroom);
+    ASSERT_TRUE(doc);
+    const std::string length = nodeOfType(*doc, "Length");
+    NodeGraphView view;
+    view.resize(1400, 900);
+    view.setDocument(doc.get());
+    const std::size_t nodes = doc->nodes().size();
+    // Alt+drag on a node: a copy, dragged; the original stays.
+    const QRectF card = view.nodeRect(length);
+    const QPoint grab = card.center().toPoint();
+    mouseMods(&view, QEvent::MouseButtonPress, grab, Qt::AltModifier);
+    mouseMods(&view, QEvent::MouseMove, grab + QPoint(0, 120), Qt::AltModifier);
+    mouseMods(&view, QEvent::MouseButtonRelease, grab + QPoint(0, 120), Qt::AltModifier);
+    EXPECT_EQ(doc->nodes().size(), nodes + 1);
+    const std::string copy = view.selectedNode();
+    EXPECT_NE(copy, length);
+    EXPECT_NEAR(view.nodeRect(copy).top(), card.top() + 120, 1e-3);
+    EXPECT_NEAR(view.nodeRect(length).top(), card.top(), 1e-3);
+    // . with a wire selected: a pin in its middle.
+    std::string to, input;
+    const int wire = wireFrom(view, length, &to, &input);
+    ASSERT_GE(wire, 0);
+    view.selectWire(wire);
+    key(&view, QEvent::KeyPress, Qt::Key_Period);
+    EXPECT_EQ(view.pinIds().size(), 1u);
+    // Shift+O: a backdrop round the selection.
+    view.selectNode(length);
+    key(&view, QEvent::KeyPress, Qt::Key_O, Qt::ShiftModifier);
+    if (view.promptOpen()) view.acceptPrompt();
+    EXPECT_EQ(view.backdropCount(), 1);
+    // Its properties: description and title size.
+    view.selectBackdrop(0);
+    EXPECT_TRUE(view.propertiesShown());
+    EXPECT_EQ(doc->setBackdropDescription(0, "The trim"), "");
+    EXPECT_EQ(doc->setBackdropFontSize(0, 24), "");
+    view.refresh();
+    EXPECT_EQ(doc->graph()["backdrops"][0]["description"], "The trim");
+    EXPECT_GT(view.backdropTitleBar(0).height(), 28.0 * view.viewScale());
+}
+
+TEST(AppPanels, GraphShakesAndDropsGroupsAsOne) {
+    auto doc = GroomDocument::open(kSampleGroom);
+    ASSERT_TRUE(doc);
+    const std::string length = nodeOfType(*doc, "Length"), noise = nodeOfType(*doc, "Noise");
+    std::string to;
+    NodeGraphView view;
+    view.resize(1400, 900);
+    view.setDocument(doc.get());
+    ASSERT_GE(wireFrom(view, noise, &to), 0);
+    // length and noise shaken together: the link between them stays.
+    view.setSelection({length, noise});
+    const QPoint grab = view.nodeRect(noise).center().toPoint();
+    mouse(&view, QEvent::MouseButtonPress, grab);
+    for (int i = 1; i <= 10; ++i) mouse(&view, QEvent::MouseMove, grab + QPoint((i % 2) ? 60 : 0, 30 * i));
+    mouse(&view, QEvent::MouseMove, grab + QPoint(0, 600));
+    mouse(&view, QEvent::MouseButtonRelease, grab + QPoint(0, 600));
+    EXPECT_TRUE(linked(*doc, length, noise));
+    EXPECT_FALSE(linked(*doc, noise, to));
+    // Both dropped back on the wire that took their place: in again, as one.
+    std::string from;
+    int over = -1;
+    for (int i = 0; i < view.wireCount(); ++i) {
+        std::string f, o, t, in;
+        if (view.wireLink(i, &f, &o, &t, &in) && t == to) over = i, from = f;
+    }
+    ASSERT_GE(over, 0);
+    view.setSelection({length, noise});
+    const QPoint start = view.nodeRect(noise).center().toPoint();
+    const QPoint target = (view.wirePathOf(over).pointAtPercent(0.5) * view.viewScale() + view.viewPan()).toPoint();
+    mouse(&view, QEvent::MouseButtonPress, start);
+    mouse(&view, QEvent::MouseMove, start + (target - start) / 2);
+    mouse(&view, QEvent::MouseMove, target);
+    mouse(&view, QEvent::MouseButtonRelease, target);
+    EXPECT_TRUE(linked(*doc, from, length));
+    EXPECT_TRUE(linked(*doc, noise, to));
+}
+
+TEST(AppPanels, GraphDotsAreNamedFedAndTakeAnotherDotsSignal) {
+    auto doc = GroomDocument::open(kSampleGroom);
+    ASSERT_TRUE(doc);
+    const std::string length = nodeOfType(*doc, "Length");
+    std::string width;
+    ASSERT_EQ(doc->addNode("Width", 0.0f, 900.0f, &width), "");
+    NodeGraphView view;
+    view.resize(1400, 900);
+    view.setDocument(doc.get());
+    // A free dot from the search, then fed by a wire from length's output dropped on it.
+    const std::string dot = view.addDotAt(QPointF(300, 700));
+    ASSERT_EQ(dot, "Dot");
+    auto dots = view.portalDots();
+    ASSERT_EQ(dots.size(), 1u);
+    const QPoint out = outputAt(view, length, 0);
+    const QPoint onDot = (dots[0].pos * view.viewScale() + view.viewPan()).toPoint();
+    mouse(&view, QEvent::MouseButtonPress, out);
+    mouse(&view, QEvent::MouseMove, onDot);
+    mouse(&view, QEvent::MouseButtonRelease, onDot);
+    ASSERT_EQ(doc->viewGraph()["portals"][0]["from"], length);
+    // Another free dot whose Input Portal is the first: an exit of it; a link out of its nub.
+    const std::string other = view.addDotAt(QPointF(900, 700));
+    view.setDotInput(other, -1, dot);
+    dots = view.portalDots();
+    ASSERT_EQ(dots.size(), 2u);
+    EXPECT_EQ(dots[1].exit, 0);
+    const QPoint nub = ((dots[1].pos + QPointF(11.0, 0.0)) * view.viewScale() + view.viewPan()).toPoint();
+    const QPoint in = inputAt(view, width, portOf(*doc, width, "inputs", "strands"));
+    mouse(&view, QEvent::MouseButtonPress, nub);
+    mouse(&view, QEvent::MouseMove, in);
+    mouse(&view, QEvent::MouseButtonRelease, in);
+    EXPECT_TRUE(linked(*doc, length, width));
+    // Its card: the dot's name and Input Portal.
+    view.selectPortal(1);
+    EXPECT_TRUE(view.propertiesShown());
+    // A wire dropped on the canvas opens the search; Dot there is fed from it (an exit of length's dot).
+    mouse(&view, QEvent::MouseButtonPress, out);
+    mouse(&view, QEvent::MouseMove, QPoint(40, 860));
+    mouse(&view, QEvent::MouseButtonRelease, QPoint(40, 860));
+    ASSERT_TRUE(view.searchOpen());
+    view.setSearchText("dot");
+    view.acceptSearch();
+    EXPECT_EQ(view.portalDots().size(), 3u);
+}
+
+}  // namespace groomlab::app

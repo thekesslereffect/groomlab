@@ -93,6 +93,12 @@ public:
         bool changed = false;                                  // any link went or was made
     };
     Detached detach(const std::string& name, double drop = 90.0);
+    // Several nodes taken out of the flow together (a shake of a selection, every host's): the links
+    // among them stay; every link from outside into them and from them to outside goes, and what
+    // fed the group feeds what it fed, where that fits: each link leaving member M is fed from the
+    // source outside the group M's first connected inputs lead back to (through the members). The
+    // nodes stay where they are. One name: detach without the move. Unknown names are left out.
+    Detached detachGroup(const std::vector<std::string>& names);
     // Delete as every host's graph editor does (issue #80): the node detached (what fed it feeds what
     // it fed, the output passes to it) and then removed. GraphError for no such node.
     Detached removeNodeKeepingFlow(const std::string& name);

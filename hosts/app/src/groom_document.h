@@ -338,6 +338,19 @@ public:
     // what it fed, the output passes to it, and the node waits unlinked below. One undo step; "" or
     // why not (nothing changes then). *detached: how many had a link to drop.
     std::string detachNodes(const std::vector<std::string>& nodes, int* detached = nullptr);
+    // Several nodes shaken loose together (GraphEdit::detachGroup): the links among them kept. One step.
+    std::string detachGroup(const std::vector<std::string>& nodes, int* detached = nullptr);
+    // A chain dropped on a wire as one (graph_inserts.h insertNodesOnLink). One undo step.
+    std::string insertNodesOnLink(const std::vector<std::string>& nodes, const NodeLink& link);
+    // Dots (graph_portals.h): a free dot at (x, y) (fed from from's `output` when given: an exit of
+    // that output's dot when it has one), its name to *made; a dot fed from an output (its links read
+    // it); a dot's Input Portal (`exit` -1: its entry; `into` "": none, a free dot). Each one undo step.
+    std::string addDot(double x, double y, std::string* made = nullptr, const std::string& from = {}, const std::string& output = {});
+    std::string feedDot(const std::string& portal, const std::string& from, const std::string& output);
+    std::string setDotInput(const std::string& portal, int exit, const std::string& into);
+    // A backdrop's description (shown on it) and its title's font size (0: the default). One undo step.
+    std::string setBackdropDescription(int index, const std::string& text);
+    std::string setBackdropFontSize(int index, int points);
     // A Compound's inner param ("node.param") shown on it as a param of its own (named after the
     // param, node + Param when the compound has that name), or no longer (Maya's Show Inner Param:
     // what Save as Node keeps). One undo step; "" or the error. shownInnerParams: the targets shown.

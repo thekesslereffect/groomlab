@@ -344,5 +344,68 @@ TEST(GraphPortals, LinksTeleportThroughNamedPortals) {
     EXPECT_EQ(saved["portals"][0]["name"], "guides");
 }
 
+TEST(GraphEditByHand, AShakenGroupKeepsItsOwnLinks) {
+    GraphEdit edit(defaultGraphJson());
+    // length -> noise -> color: noise and color shaken out together.
+    const auto done = edit.detachGroup({"noise", "color"});
+    EXPECT_TRUE(done.changed);
+    const json g = json::parse(edit.toJson());
+    EXPECT_EQ(sourceIn(g, "color", "strands"), "noise") << "kept between them";
+    EXPECT_EQ(sourceIn(g, "noise", "strands"), "") << "out of the flow";
+    EXPECT_EQ(sourceIn(g, "width", "strands"), "length") << "what fed them feeds what they fed";
+    EXPECT_FALSE(edit.detachGroup({"nope"}).changed);
+}
+
+TEST(GraphEditByHand, AChainDroppedOnAWireGoesIn) {
+    GraphEdit edit(defaultGraphJson());
+    edit.addNode("Noise", "a");
+    edit.addNode("Curl", "b");
+    edit.connect("a", "b", "strands");
+    insertNodesOnLink(edit, "length", "noise", "strands", {"b", "a"});
+    const json g = json::parse(edit.toJson());
+    EXPECT_EQ(sourceIn(g, "a", "strands"), "length");
+    EXPECT_EQ(sourceIn(g, "b", "strands"), "a");
+    EXPECT_EQ(sourceIn(g, "noise", "strands"), "b");
+    EXPECT_THROW(insertNodesOnLink(edit, "a", "b", "strands", {"a", "b"}), GraphError);
+}
+
+TEST(GraphArrange, BackdropsKeepSlowNodesAndLetFastOnesGo) {
+    EXPECT_TRUE(backdropKeeps(true, 5000.0, false));
+    EXPECT_TRUE(backdropKeeps(false, 200.0, false));
+    EXPECT_FALSE(backdropKeeps(false, 3000.0, false));
+    EXPECT_FALSE(backdropKeeps(true, 0.0, true)) << "once out, out for that drag";
+}
+
+TEST(GraphPortals, DotsAreFreeUntilFedOrJoined) {
+    json g = json::parse(defaultGraphJson());
+    const std::string dot = addDot(g, 10, 20);
+    EXPECT_EQ(dot, "Dot");
+    EXPECT_FALSE(portalFed(g, dot));
+    prunePortals(g);
+    EXPECT_EQ(portalNames(g), std::vector<std::string>{"Dot"}) << "a free dot stays";
+    // Fed: its source set; a link drawn straight out of it (organizing the graph).
+    EXPECT_TRUE(setPortalSource(g, dot, "length", ""));
+    EXPECT_TRUE(portalFed(g, dot));
+    EXPECT_TRUE(addPortalLink(g, dot, -1, "noise", "strands"));
+    const auto own = portalOfLink(g, "noise", "strands");
+    ASSERT_TRUE(own);
+    EXPECT_EQ(own->exit, -1);
+    // Another free dot whose Input Portal is the first: an exit of it, where it stood.
+    const std::string other = addDot(g, 300, 40);
+    EXPECT_EQ(other, "Dot1");
+    EXPECT_EQ(joinPortal(g, other, dot), 0);
+    EXPECT_EQ(portalNames(g), std::vector<std::string>{"Dot"});
+    EXPECT_EQ(g["portals"][0]["exits"][0]["x"], 300);
+    EXPECT_EQ(joinPortal(g, dot, dot), -1);
+    // A free dot cannot be joined to (no source); an output with a portal takes no second one.
+    const std::string free = addDot(g, 0, 0, "Free");
+    EXPECT_EQ(joinPortal(g, dot, free), -1);
+    EXPECT_FALSE(setPortalSource(g, free, "length", ""));
+    // Its links (entry's and exits'); an exit leaving: a free dot again.
+    EXPECT_EQ(portalLinks(g, dot), (std::vector<std::pair<std::string, std::string>>{{"noise", "strands"}}));
+    EXPECT_EQ(leavePortal(g, dot, 0), "Dot1");
+    EXPECT_FALSE(portalFed(g, "Dot1"));
+}
+
 }  // namespace
 }  // namespace groomlab

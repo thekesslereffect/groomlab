@@ -954,6 +954,85 @@ std::string GroomDocument::insertOnLink(const std::string& node, const NodeLink&
     });
 }
 
+std::string GroomDocument::insertNodesOnLink(const std::vector<std::string>& nodes, const NodeLink& link) {
+    if (nodes.size() == 1) return insertOnLink(nodes.front(), link);
+    return editGraph("insert " + std::to_string(nodes.size()) + " nodes", [&](json& g) {
+        GraphEdit edit(g.dump());
+        groomlab::insertNodesOnLink(edit, link.from, link.to, link.input, nodes, link.output);
+        g = json::parse(edit.toJson());
+    });
+}
+
+std::string GroomDocument::detachGroup(const std::vector<std::string>& nodes, int* detached) {
+    if (detached) *detached = 0;
+    if (nodes.size() == 1) return detachNodes(nodes, detached);
+    bool changed = false;
+    const std::string error = editGraph("shake " + std::to_string(nodes.size()) + " nodes loose", [&](json& g) {
+        GraphEdit edit(g.dump());
+        changed = edit.detachGroup(nodes).changed;
+        g = json::parse(edit.toJson());
+    });
+    if (error.empty() && detached) *detached = changed ? static_cast<int>(nodes.size()) : 0;
+    return error;
+}
+
+// ---- Dots (graph_portals.h: a portal's dots, free ones from the add-node search) -------------------
+
+std::string GroomDocument::addDot(double x, double y, std::string* made, const std::string& from, const std::string& output) {
+    std::string name;
+    const std::string error = editGraph("add dot", [&](json& g) {
+        name = groomlab::addDot(g, x, y);
+        if (!from.empty() && !setPortalSource(g, name, from, output)) {
+            // The output has a portal already: the dot is an exit of it.
+            const std::string portal = portalOf(g, from, output);
+            if (joinPortal(g, name, portal) < 0) throw std::invalid_argument(from + "'s output has a dot already");
+            name = portal;
+        }
+    });
+    if (error.empty() && made) *made = name;
+    return error;
+}
+
+std::string GroomDocument::feedDot(const std::string& portal, const std::string& from, const std::string& output) {
+    return editGraph("feed " + portal + " from " + from, [&](json& g) {
+        // Its links (out of the entry and the exits) read the new source; then the dot names it.
+        GraphEdit edit(g.dump());
+        for (const auto& [to, input] : portalLinks(g, portal)) edit.connectByHand(from, to, input, output);
+        json links = json::parse(edit.toJson());
+        const json portals = g.value("portals", json::array());
+        g = std::move(links);
+        g["portals"] = portals;
+        if (!setPortalSource(g, portal, from, output)) throw std::invalid_argument(from + "'s output has a dot already");
+    });
+}
+
+std::string GroomDocument::setDotInput(const std::string& portal, int exit, const std::string& into) {
+    return editGraph(into.empty() ? "dot input cleared" : "dot input " + into, [&](json& g) {
+        std::string dot = portal;
+        if (exit >= 0) {
+            dot = leavePortal(g, portal, exit);  // a free dot where the exit stood (its links drawn as wires)
+            if (dot.empty()) throw std::invalid_argument("no such dot");
+        }
+        if (into.empty()) return;
+        // Into another portal: its links read that portal's source first.
+        std::string from, output;
+        for (const json& p : g.value("portals", json::array())) {
+            if (p.value("name", std::string()) == into) {
+                from = p.value("from", std::string());
+                output = p.value("output", std::string());
+            }
+        }
+        if (from.empty()) throw std::invalid_argument(into + " has nothing coming into it yet");
+        GraphEdit edit(g.dump());
+        const auto links = portalLinks(g, dot);
+        for (const auto& [to, input] : links) edit.connectByHand(from, to, input, output);
+        const json portals = g.value("portals", json::array());
+        g = json::parse(edit.toJson());
+        g["portals"] = portals;
+        if (joinPortal(g, dot, into) < 0) throw std::invalid_argument("cannot take " + into + "'s signal");
+    });
+}
+
 std::string GroomDocument::detachNodes(const std::vector<std::string>& nodes, int* detached) {
     if (detached) *detached = 0;
     int count = 0;
@@ -1681,6 +1760,24 @@ std::string GroomDocument::removeBackdrop(int index) {
     return editGraph("delete backdrop", [&](json& g) {
         g["backdrops"].erase(g["backdrops"].begin() + index);
         if (g["backdrops"].empty()) g.erase("backdrops");
+    });
+}
+
+std::string GroomDocument::setBackdropDescription(int index, const std::string& text) {
+    if (!backdropAt(view(), index)) return "no backdrop " + std::to_string(index);
+    return editGraph("backdrop description", [&](json& g) {
+        json& b = *backdropAt(g, index);
+        if (text.empty()) b.erase("description");
+        else b["description"] = text;
+    });
+}
+
+std::string GroomDocument::setBackdropFontSize(int index, int points) {
+    if (!backdropAt(view(), index)) return "no backdrop " + std::to_string(index);
+    return editGraph("backdrop font size", [&](json& g) {
+        json& b = *backdropAt(g, index);
+        if (points <= 0) b.erase("fontSize");
+        else b["fontSize"] = std::clamp(points, 8, 96);
     });
 }
 

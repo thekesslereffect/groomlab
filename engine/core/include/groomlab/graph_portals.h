@@ -10,7 +10,14 @@
 // groomlab_core.GraphPortals. In the graph's JSON:
 //
 //   "portals": [{"name": "Guides", "from": "guides", "output"?: "", "x": .., "y": ..,
+//                "links"?: [{"to": .., "input": ..}],
 //                "exits": [{"x": .., "y": .., "links": [{"to": "scatter", "input": "guides"}]}]}]
+//
+// Every portal is a dot the editors draw (a Dot, as a node graph's reroute dot): its entry, fed
+// from its source output, from which links may run on as from a pin ("links": the dot used to
+// organize the graph), and its exits, each a dot whose Input Portal is this one. A dot with no
+// source yet ("from" "") is a free dot, made from the add-node search: fed by a link dropped on
+// it, or made an exit of another portal by choosing it as its Input Portal.
 //
 // ("output" only when it is not the source's first, as a connection's.) A link belongs to one
 // exit at most. The functions keep "portals" pruned: a link no longer fed from the portal's
@@ -18,6 +25,7 @@
 // An exit with no links stays (placed from the add-node search, before anything is linked to it).
 
 #include <optional>
+#include <utility>
 #include <string>
 #include <vector>
 
@@ -25,7 +33,8 @@
 
 namespace groomlab {
 
-// A link drawn through a portal: the portal's name, and the exit it comes out of.
+// A link drawn through a portal: the portal's name, and the exit it comes out of (-1: out of its
+// entry dot itself).
 struct PortalExitRef {
     std::string portal;
     int exit = -1;
@@ -67,5 +76,24 @@ bool removePortalExit(nlohmann::json& graph, const std::string& portal, int exit
 std::string renamePortal(nlohmann::json& graph, const std::string& portal, const std::string& name);
 // A node renamed: the portals and links naming it follow.
 void renamePortalNode(nlohmann::json& graph, const std::string& from, const std::string& to);
+
+// ---- Dots (every host's Dot: the add-node search's, its Name and Input Portal) -------------------
+// A free dot at (x, y): a portal with no source yet, named `name` ("": "Dot"), made unique. Its name.
+std::string addDot(nlohmann::json& graph, double x, double y, const std::string& name = {});
+// Whether a portal has a source (a free dot has none).
+bool portalFed(const nlohmann::json& graph, const std::string& portal);
+// Every link a portal draws: out of its entry, then out of each exit, as (to, input).
+std::vector<std::pair<std::string, std::string>> portalLinks(const nlohmann::json& graph, const std::string& portal);
+// The portal's source set to from's `output` (layout: the host connects its links from there first).
+// False for no such portal, or an output that has a portal already (another one).
+bool setPortalSource(nlohmann::json& graph, const std::string& portal, const std::string& from, const std::string& output);
+// Input Portal set on a dot: portal `dot` (its entry, free or fed) becomes an exit of `into` where it
+// stands, its links (entry's and exits') coming out of that exit (the host connects them from
+// into's source first), its other exits gone. Returns the exit's index, -1 when it cannot (no such
+// portals, the same one, or `into` has no source).
+int joinPortal(nlohmann::json& graph, const std::string& dot, const std::string& into);
+// Input Portal cleared on an exit: it becomes a free dot where it stands (its name made unique from
+// the portal's), its links drawn as wires again. The dot's name, "" for no such exit.
+std::string leavePortal(nlohmann::json& graph, const std::string& portal, int exit);
 
 }  // namespace groomlab
