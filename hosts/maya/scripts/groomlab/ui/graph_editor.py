@@ -2928,8 +2928,11 @@ class ParamPanel(QtWidgets.QScrollArea):
             # A rest pose only matters for a scalp that moves (skinned, blend shapes, a cache):
             # strands are placed on it so the same strands stay put while the scalp deforms.
             # Grooms on deformed scalps get one on their own; the row shows when it applies.
-            moving = bool(s["scalp"]) and bool(cmds.ls(cmds.listHistory(s["scalp"]) or [],
-                                                        type=("geometryFilter", "AlembicNode", "cacheFile")))
+            # (By node type, not cmds.ls(type=...): AlembicNode is AbcImport's, an unknown
+            # type, and a warning, while that plug-in is not loaded.)
+            history = (cmds.listHistory(s["scalp"]) or []) if s["scalp"] else []
+            moving = bool(cmds.ls(history, type="geometryFilter")) or any(
+                cmds.nodeType(n) in ("AlembicNode", "cacheFile") for n in history)
             if moving or s["rest"]:
                 orig = s["scalp"] and groomlab._original_shape(s["scalp"])
                 value = "auto (the undeformed scalp)" if s["rest"] and s["rest"] == orig else short(s["rest"])
