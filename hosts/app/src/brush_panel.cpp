@@ -543,6 +543,53 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
     }
     card_->addWidget(flow_);
 
+    // ---- Clone: Pick Source (the next click copies, as Ctrl+click does), Reset, the source's
+    // count, and whether copies replace the guides where they land.
+    clone_ = new CardBlock(settingLabel("clone"), this);
+    clone_->setObjectName(QStringLiteral("cloneBox"));
+    clone_->setToolTip(settingHint("clone"));
+    {
+        QHBoxLayout* row = new QHBoxLayout();
+        clonePick_ = new QPushButton(tr("Pick Source"), clone_);
+        clonePick_->setObjectName(QStringLiteral("clonePickSource"));
+        clonePick_->setCheckable(true);
+        clonePick_->setToolTip(tr("The next click in the viewport copies the guides rooted in the brush circle "
+                                  "(Ctrl+click does the same any time)"));
+        connect(clonePick_, &QPushButton::toggled, this, [this](bool on) {
+            if (updating_ || !session_) return;
+            session_->tool().armCapture(on);
+            refresh();
+        });
+        cloneReset_ = new QPushButton(tr("Reset"), clone_);
+        cloneReset_->setObjectName(QStringLiteral("cloneReset"));
+        cloneReset_->setToolTip(tr("Let the source go, ready for a new pick (a Ctrl+click off the model, or picking "
+                                   "another tool, does the same)"));
+        connect(cloneReset_, &QPushButton::clicked, this, [this] {
+            if (!session_) return;
+            session_->tool().clearClip();
+            refresh();
+        });
+        row->addWidget(clonePick_, 1);
+        row->addWidget(cloneReset_, 1);
+        clone_->rows()->addLayout(row);
+        cloneCount_ = hintLabel(QString(), clone_);
+        cloneCount_->setObjectName(QStringLiteral("cloneCount"));
+        cloneCount_->setToolTip(tr("The guides the source holds (their children come along)"));
+        clone_->rows()->addWidget(cloneCount_);
+        settingSwitch(clone_->rows(), "cloneReplace", tr("Replace"), [this] { return session_->settings().cloneReplace; },
+                      [this](bool on) { session_->settings().cloneReplace = on; });
+        refreshers_.push_back([this] {
+            BrushTool& tool = session_->tool();
+            tool.syncClone();  // (another tool: the source let go)
+            const std::size_t n = tool.clip().guides.size();
+            clonePick_->setChecked(tool.captureArmed());
+            cloneReset_->setEnabled(n > 0 || tool.captureArmed());
+            cloneCount_->setText(n == 0 ? tr("No source yet: Ctrl+click over guides")
+                                        : tr("Source: %n guide(s)", nullptr, static_cast<int>(n)));
+        });
+    }
+    card_->addWidget(clone_);
+
     // ---- Parts: the next part's name and the parts drawn so far.
     parts_ = new CardBlock(settingLabel("parts"), this);
     parts_->setObjectName(QStringLiteral("partsBox"));
@@ -814,7 +861,9 @@ void BrushPanel::setTool(const std::string& id) {
                                : QPixmap());
     // Brush.
     const bool brush = uses("radius");
-    for (ValueSlider* s : {radius_, strength_, falloff_}) s->setVisible(brush);
+    radius_->setVisible(brush);
+    strength_->setVisible(brush && uses("strength"));  // (Clone: a circle, no strength or falloff)
+    falloff_->setVisible(brush && uses("falloff"));
     smooth_->setVisible(uses("smoothStrength"));
     setRowVisible(pressure_, uses("pressure"));
     setRowVisible(collide_, brush && uses("collide"));
@@ -845,6 +894,7 @@ void BrushPanel::setTool(const std::string& id) {
     erases_->setVisible(uses("erases"));
     keys_->setVisible(uses("lengthKeys"));
     flow_->setVisible(uses("flow"));
+    clone_->setVisible(uses("clone"));
     parts_->setVisible(uses("parts"));
     // The tubes: the tube new guides get (Place, Draw), the selected guides' (Tube).
     if (tubes_) {

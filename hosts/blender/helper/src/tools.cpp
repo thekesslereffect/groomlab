@@ -512,6 +512,8 @@ void applySettings(ToolState& t, const json& settings) {
     std::string symmetry;
     bool symmetrySet = false;
     double symmetryCenter = 0.0;
+    int clonePick = -1;       // Clone: clonePickSource (1 arm, 0 disarm), applied after the settings
+    bool cloneReset = false;  // Clone: cloneReset (the source let go)
     {
         std::string axis;
         symmetryToHost(space, s.brush.mirrorAxis, s.brush.mirrorCenter, axis, symmetryCenter);
@@ -543,6 +545,9 @@ void applySettings(ToolState& t, const json& settings) {
             else if (key == "spacing") s.place.spacing = toGroomLength(space, settingNumber(v, k));
             else if (key == "matchNeighbors") s.place.matchNeighbors = settingBool(v, k);
             else if (key == "soloNewGuides") s.place.soloNewGuides = settingBool(v, k);
+            else if (key == "cloneReplace") s.cloneReplace = settingBool(v, k);
+            else if (key == "clonePickSource") clonePick = settingBool(v, k) ? 1 : 0;
+            else if (key == "cloneReset") cloneReset = settingBool(v, k);
             else if (key == "selectedOnly") s.selectedOnly = settingBool(v, k);
             else if (key == "softSelectRadius") softRadius = std::max(0.0f, toGroomLength(space, settingNumber(v, k)));
             else if (key == "symmetry") {
@@ -616,6 +621,10 @@ void applySettings(ToolState& t, const json& settings) {
     }
     t.tool.settings = s;
     t.softRadius = softRadius;
+    // Clone (issue 91): another tool lets the source go; Reset does; Pick Source arms the next press.
+    t.tool.syncClone();
+    if (cloneReset) t.tool.clearClip();
+    if (clonePick >= 0) t.tool.armCapture(clonePick == 1);
 }
 
 json settingsJson(const ToolState& t) {
@@ -643,6 +652,9 @@ json settingsJson(const ToolState& t) {
     j["spacing"] = toHostLength(space, s.place.spacing);
     j["matchNeighbors"] = s.place.matchNeighbors;
     j["soloNewGuides"] = s.place.soloNewGuides;
+    j["cloneReplace"] = s.cloneReplace;
+    j["clonePickSource"] = t.tool.captureArmed();          // Clone: a capture armed (Pick Source down)
+    j["cloneSourceSize"] = t.tool.clip().guides.size();    // the guides the source holds
     j["selectedOnly"] = s.selectedOnly;
     j["softSelectRadius"] = toHostLength(space, t.softRadius);
     j["symmetry"] = s.brush.mirrorTopology ? std::string("topology") : axis;
@@ -3533,6 +3545,7 @@ bool runToolCommandIn(Session& s, ToolState& t, const std::string& cmd, const js
         if (args.contains("tool") && !args["tool"].is_null()) {
             if (t.tool.stroking()) t.tool.cancel(&t.host);
             setTool(t, needString(args, "tool"));
+            t.tool.syncClone();  // (another tool: Clone's source let go)
         }
         if (args.contains("settings") && !args["settings"].is_null()) applySettings(t, args["settings"]);
         result = toolJson(t);

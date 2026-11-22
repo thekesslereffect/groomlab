@@ -567,6 +567,10 @@ void BrushTool::stampOverlays(const ToolView& view, const Vec3f& center, const V
 }
 
 bool BrushTool::begin(StrokeHost& host, const ToolView& view, float x, float y, float pressure, unsigned modifiers) {
+    if (settings.tool == BrushToolSettings::Tool::Clone) {  // a capture (Ctrl, Pick Source) or a set-down: press's
+        press(host, view, x, y, pressure, modifiers);
+        return stroking_;
+    }
     inverted_ = (modifiers & kStrokeCtrl) != 0;
     pressure_ = pressure;
     return startStroke(host, view, x, y);

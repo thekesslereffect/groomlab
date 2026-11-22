@@ -47,6 +47,8 @@ public:
 
     BrushToolSettings& settings() { return tool_.settings; }
     const BrushToolSettings& settings() const { return tool_.settings; }
+    // The core's tool itself: Clone's source (clip, armCapture, clearClip) for the card.
+    BrushTool& tool() { return tool_; }
     // The rail's tools by the catalog's ids (brush_catalog.h): a brush mode (BrushToolSettings::
     // setMode) or "freeze", the Paint brush on the guides' freeze mask toward 1 (Ctrl: toward 0,
     // unfreeze), as Maya's freeze_tool starts it; the other brushes leave frozen guides alone
