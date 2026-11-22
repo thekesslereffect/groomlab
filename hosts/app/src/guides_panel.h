@@ -26,6 +26,7 @@
 
 #include "definitions.h"
 #include "groomlab/brush.h"
+#include "groomlab/editor/guide_edits.h"
 #include "groomlab/guide_hierarchy.h"
 
 class QCheckBox;
@@ -149,6 +150,8 @@ protected:
     void showEvent(QShowEvent* event) override;
 
 private:
+    // An Edit Guides op of the editor run as one edit (its label every host's), `done` what it did.
+    bool guideOp(const char* what, const GuideOp& op, GuideOpResult* done = nullptr);
     void itemChanged(QTreeWidgetItem* item, int column);
     std::string groupOf(QTreeWidgetItem* item) const;
     void fresh() const;  // refreshed first when stale

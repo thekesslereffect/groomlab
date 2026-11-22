@@ -26,6 +26,7 @@
 #include <QVBoxLayout>
 
 #include "groom_document.h"
+#include "groomlab/editor/guide_edits.h"
 #include "groomlab/curve.h"
 #include "groomlab/display.h"
 #include "groomlab/flow.h"
@@ -509,32 +510,34 @@ bool GuidesPanel::edit(const char* what, const std::string& label, const std::fu
     return true;
 }
 
+bool GuidesPanel::guideOp(const char* what, const GuideOp& op, GuideOpResult* done) {
+    // Every host's Edit Guides op (the editor's applyGuideOp, guide_edits.h): its checks and edit.
+    GuideOpResult result;
+    const bool ok = edit(what, guideOpLabel(op), [&](GuideHierarchy& h) { result = applyGuideOp(h, op); });
+    if (ok && done) *done = std::move(result);
+    return ok;
+}
+
 bool GuidesPanel::addGroup(const std::string& parent, const std::string& name) {
-    std::string made;
-    const bool ok = edit("add a group", "add group", [&](GuideHierarchy& h) {
-        GroupId parentId = kNoGroup;
-        if (!parent.empty()) {
-            parentId = h.findGroup(parent);
-            if (parentId == kNoGroup) throw std::invalid_argument("no group named " + parent);
-        }
-        made = name.empty() ? uniqueName(h, parent.empty() ? "group" : parent + "_children") : guideGroupName(name);
-        if (h.findGroup(made) != kNoGroup) throw std::invalid_argument("a group named " + made + " is there already");
-        h.addGroup(made, parentId);
-    });
+    GuideOp op;
+    op.op = "add_group";
+    op.parent = parent;
+    op.name = name;
+    GuideOpResult done;
+    const bool ok = guideOp("add a group", op, &done);
     if (ok) {
         refresh();
-        setCurrentGroup(made);
+        setCurrentGroup(done.group);
     }
     return ok;
 }
 
 bool GuidesPanel::removeGroup(const std::string& name) {
     if (name.empty()) return false;
-    return edit("remove the group", "remove group", [&](GuideHierarchy& h) {
-        const GroupId id = h.findGroup(name);
-        if (id == kNoGroup) throw std::invalid_argument("no group named " + name);
-        h.removeGroup(id);
-    });
+    GuideOp op;
+    op.op = "remove_group";
+    op.group = name;
+    return guideOp("remove the group", op);
 }
 
 bool GuidesPanel::renameGroup(const std::string& name, const std::string& typed) {
@@ -557,35 +560,21 @@ bool GuidesPanel::renameGroup(const std::string& name, const std::string& typed)
 
 bool GuidesPanel::generateChildren(const std::string& parent, int count) {
     if (!document_) return false;
-    const std::vector<GuideId> selected = document_->selection();
-    return edit("generate children", "generate children", [&](GuideHierarchy& h) {
-        // The selected guides of the first one's group, else every guide of `parent` (the last
-        // group when none is given, as Maya's).
-        GroupId id = kNoGroup;
-        std::vector<GuideId> parents;
-        for (const GuideId g : selected) {
-            const HierarchyGuide* guide = h.guide(g);
-            if (!guide) continue;
-            if (id == kNoGroup) id = guide->group;
-            if (guide->group == id) parents.push_back(g);
-        }
-        if (id == kNoGroup) {
-            if (!parent.empty()) id = h.findGroup(parent);
-            else if (!h.groups().empty()) id = h.groups().back().id;
-            if (id == kNoGroup) throw std::invalid_argument(parent.empty() ? "the groom has no guides yet" : "no group named " + parent);
-            if (h.guidesInGroup(id).empty()) throw std::invalid_argument("the group " + h.group(id)->name + " has no guides to be parents");
-        }
-        ChildGenerationParams params;
-        params.count = std::clamp<std::size_t>(static_cast<std::size_t>(std::max(count, 1)), 1, kMaxChildrenPerGuide);
-        // The group's existing child group when it has one, else a new one (every host's).
-        h.generateChildren(id, h.childGroupFor(id), params, parents.empty() ? nullptr : &parents);
-    });
+    // Every host's Generate Children (the editor's, guide_edits.h): the selected guides, all of one
+    // group, else every guide of `parent` (the last group when none is given).
+    ChildrenRequest request;
+    request.parents = document_->selection();
+    if (request.parents.empty()) request.group = parent;
+    request.params.count = std::clamp<std::size_t>(static_cast<std::size_t>(std::max(count, 1)), 1, kMaxChildrenPerGuide);
+    return edit("generate children", "generate children", [&](GuideHierarchy& h) { groomlab::generateChildren(h, request); });
 }
 
 bool GuidesPanel::deleteSelected() {
     if (!document_ || document_->selection().empty()) return false;
-    const std::vector<GuideId> ids = document_->selection();
-    const bool ok = edit("delete the guides", "delete guides", [&](GuideHierarchy& h) { h.removeGuides(ids, true); });
+    GuideOp op;
+    op.op = "delete_guides";
+    op.guides = document_->selection();
+    const bool ok = guideOp("delete the guides", op);
     if (ok) document_->setSelection({});
     return ok;
 }
@@ -619,22 +608,22 @@ bool GuidesPanel::mirrorSelection() {
 
 bool GuidesPanel::mirrorToOtherSide(const BrushSettings& brush) {
     if (!document_) return false;
-    const std::vector<GuideId> selected = document_->selection();
-    if (selected.empty()) {
+    if (document_->selection().empty()) {
         emit message(tr("No guides selected: select the guides to mirror to the other side"));
         return false;
     }
     BrushSettings b = brush;
     if (!b.mirrorTopology && (b.mirrorAxis < 0 || b.mirrorAxis > 2)) b.mirrorAxis = 0, b.mirrorCenter = 0.0f;  // off: World X
     const MeshPtr scalp = document_->session().scalp();
-    GuideHierarchy::MirrorShapesResult done;
-    const bool ok = edit("mirror to the other side", "mirror to other side", [&](GuideHierarchy& h) {
-        done = mirrorGuideShapes(h, StrokeSymmetry::of(b, scalp.get()), selected, 0);
-        if (done.reshaped.empty() && done.created.empty()) {
-            throw std::invalid_argument("the selected guides are on the symmetry's seam: nothing to mirror");
-        }
-    });
-    if (ok) emit message(tr("Mirrored to the other side: %1 matched, %2 added").arg(done.reshaped.size()).arg(done.created.size()));
+    GuideOp op;
+    op.op = "mirror_shapes";
+    op.guides = document_->selection();
+    op.symmetry = StrokeSymmetry::of(b, scalp.get());
+    GuideOpResult done;
+    const bool ok = guideOp("mirror to the other side", op, &done);
+    if (ok) {
+        emit message(tr("Mirrored to the other side: %1 matched, %2 added").arg(done.mirrored.reshaped.size()).arg(done.mirrored.created.size()));
+    }
     return ok;
 }
 
@@ -642,49 +631,48 @@ bool GuidesPanel::mirrorToOtherSide(const BrushSettings& brush) {
 
 bool GuidesPanel::mirrorGroup(const std::string& name, bool fromPositive) {
     if (name.empty()) return false;
-    return edit("mirror the group", "mirror group", [&](GuideHierarchy& h) {
-        const GroupId id = h.findGroup(name);
-        if (id == kNoGroup) throw std::invalid_argument("no group named " + name);
-        if (h.groupDepth(id) != 0) throw std::invalid_argument(name + " is not a root group (mirror its root group: the children follow)");
-        h.mirrorGroup(id, 0, 0.0f, fromPositive);
-    });
+    GuideOp op;
+    op.op = "mirror_group";
+    op.group = name;
+    op.fromPositive = fromPositive;
+    return guideOp("mirror the group", op);
 }
 
 bool GuidesPanel::symmetrySync(bool fromPositive) {
-    return edit("sync the symmetry", "symmetry sync", [&](GuideHierarchy& h) {
-        if (h.guides().empty()) throw std::invalid_argument("the groom has no guides");
-        h.mirrorAll(0, 0.0f, fromPositive);
-    });
+    GuideOp op;
+    op.op = "mirror_all";
+    op.fromPositive = fromPositive;
+    return guideOp("sync the symmetry", op);
 }
 
 bool GuidesPanel::promoteGroup(const std::string& name) {
     if (name.empty()) return false;
-    return edit("promote the group", "promote group", [&](GuideHierarchy& h) {
-        const GroupId id = h.findGroup(name);
-        if (id == kNoGroup) throw std::invalid_argument("no group named " + name);
-        if (h.groupDepth(id) == 0) throw std::invalid_argument(name + " is a root group already");
-        h.promoteGroup(id);
-    });
+    GuideOp op;
+    op.op = "promote_group";
+    op.group = name;
+    return guideOp("promote the group", op);
 }
 
 bool GuidesPanel::demoteGroup(const std::string& name, const std::string& under) {
     if (name.empty() || under.empty()) return false;
-    return edit("demote the group", "demote group", [&](GuideHierarchy& h) {
-        const GroupId id = h.findGroup(name), parent = h.findGroup(under);
-        if (id == kNoGroup) throw std::invalid_argument("no group named " + name);
-        if (parent == kNoGroup) throw std::invalid_argument("no group named " + under);
-        h.demoteGroup(id, parent);
-    });
+    GuideOp op;
+    op.op = "demote_group";
+    op.group = name;
+    op.parent = under;
+    return guideOp("demote the group", op);
 }
 
 bool GuidesPanel::reparentSelected(GuideId parent) {
     if (!document_) return false;
-    const std::vector<GuideId> ids = document_->selection();
-    if (ids.empty()) {
+    if (document_->selection().empty()) {
         emit message(tr("No guides selected: select the children to move first"));
         return false;
     }
-    return edit("reparent the guides", "reparent guides", [&](GuideHierarchy& h) { h.reparent(ids, parent); });
+    GuideOp op;
+    op.op = "reparent";
+    op.guides = document_->selection();
+    op.parentGuide = parent;
+    return guideOp("reparent the guides", op);
 }
 
 std::vector<std::string> GuidesPanel::groupsBesideSelection() const {
@@ -697,31 +685,27 @@ std::vector<std::string> GuidesPanel::groupsBesideSelection() const {
 
 bool GuidesPanel::moveSelectedToGroup(const std::string& group, bool duplicate) {
     if (!document_) return false;
-    const std::vector<GuideId> ids = document_->selection();
-    if (ids.empty()) {
+    if (document_->selection().empty()) {
         emit message(tr("No guides selected"));
         return false;
     }
-    return edit(duplicate ? "duplicate the guides" : "move the guides", duplicate ? "duplicate guides" : "move guides",
-                [&](GuideHierarchy& h) {
-                    const GroupId target = h.findGroup(group);
-                    if (target == kNoGroup) throw std::invalid_argument("no guide group named " + group);
-                    if (duplicate) {
-                        h.duplicateGuidesToGroup(ids, target);
-                    } else {
-                        h.moveGuidesToGroup(ids, target);
-                    }
-                });
+    GuideOp op;
+    op.op = duplicate ? "duplicate_to_group" : "move_to_group";
+    op.guides = document_->selection();
+    op.group = group;
+    return guideOp(duplicate ? "duplicate the guides" : "move the guides", op);
 }
 
 bool GuidesPanel::newGroupFromSelection() {
     if (!document_) return false;
-    const std::vector<GuideId> ids = document_->selection();
-    if (ids.empty()) {
+    if (document_->selection().empty()) {
         emit message(tr("No guides selected"));
         return false;
     }
-    return edit("make a group of the guides", "new group from selection", [&](GuideHierarchy& h) { h.newGroupFromGuides(ids, "group"); });
+    GuideOp op;
+    op.op = "new_group_from";
+    op.guides = document_->selection();
+    return guideOp("make a group of the guides", op);
 }
 
 std::string GuidesPanel::copySelectedGuides() {
@@ -746,48 +730,35 @@ bool GuidesPanel::pasteGuides(const std::string& text) {
         emit message(tr("Pick a group to paste into"));
         return false;
     }
-    return edit("paste the guides", "paste guides", [&](GuideHierarchy& h) {
-        const GroupId target = h.findGroup(group);
-        if (target == kNoGroup) throw std::invalid_argument("no guide group named " + group);
-        h.pasteGuidesJson(text, target);
-    });
+    GuideOp op;
+    op.op = "paste_guides";
+    op.text = text;
+    op.group = group;
+    return guideOp("paste the guides", op);
 }
 
 bool GuidesPanel::resampleGuides(int segments, int byLength) {
     if (!document_) return false;
-    const bool lengths = byLength < 0 ? byLength_ && byLength_->isChecked() : byLength > 0;
-    const std::vector<GuideId> selected = document_->selection();
-    const std::string group = selected.empty() ? currentGroup() : std::string();
-    segments = std::clamp(segments, 1, kMaxGuideSegments);
     // Maya's -resample: along the smooth curve through their points, frozen guides kept. Selected
     // guides get segments of their own; a whole group (with none picked: every group) keeps the
     // count for its new guides and leaves guides with their own as they are.
-    return edit("resample the guides", "resample guides", [&](GuideHierarchy& h) {
-        std::vector<GuideId> ids = selected;
-        const GroupId gid = group.empty() ? kNoGroup : h.findGroup(group);
-        if (ids.empty()) {
-            if (gid != kNoGroup) {
-                ids = h.guidesInGroup(gid);
-            } else {
-                for (const HierarchyGuide& g : h.guides()) ids.push_back(g.id);
-            }
-        }
-        if (h.guides().empty()) throw std::invalid_argument("the groom has no guides to resample");
-        // Every host's (guide_hierarchy.h resampleGuides): a group (none picked) keeps the count.
-        h.resampleGuides(ids, segments, selected.empty(), gid, -1, lengths);
-    });
+    GuideOp op;
+    op.op = "resample";
+    op.byLength = byLength < 0 ? byLength_ && byLength_->isChecked() : byLength > 0;
+    op.guides = document_->selection();
+    if (op.guides.empty()) op.group = currentGroup();
+    op.segments = std::clamp(segments, 1, kMaxGuideSegments);
+    return guideOp("resample the guides", op);
 }
 
 bool GuidesPanel::resetGroupSegments(const std::string& name) {
-    int segments = 0;
-    const bool done = edit("reset the group's segments", "reset segments", [&](GuideHierarchy& h) {
-        const GroupId gid = h.findGroup(name);
-        if (gid == kNoGroup) throw std::invalid_argument("no group named " + name);
-        segments = h.resetGroupSegments(gid);
-        if (segments < 1) throw std::invalid_argument("the group has no guides");
-    });
-    if (done) emit message(tr("Every guide of %1 at %2 segments (frozen ones kept)").arg(qs(name)).arg(segments));
-    return done;
+    GuideOp op;
+    op.op = "reset_group_segments";
+    op.group = name;
+    GuideOpResult done;
+    const bool ok = guideOp("reset the group's segments", op, &done);
+    if (ok) emit message(tr("Every guide of %1 at %2 segments (frozen ones kept)").arg(qs(name)).arg(done.segments));
+    return ok;
 }
 
 bool GuidesPanel::setGroupColor(const std::string& name, const std::string& color) {

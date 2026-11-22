@@ -30,6 +30,7 @@
 #include "command_args.h"
 #include "guarded.h"
 #include "groom_shape.h"
+#include "groomlab/editor/guide_edits.h"
 #include "groomlab/brush.h"
 #include "groomlab/curve.h"
 #include "groomlab/display.h"
@@ -564,6 +565,9 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
             return selectedIds;
         };
     
+        // Every host's Edit Guides op (the editor's applyGuideOp, guide_edits.h): its checks and edit
+        // on *h, stored below as one undo step.
+        auto guideOp = [&](GuideOp op) { return applyGuideOp(*h, op); };
         // Selection edits change only guideSelection.
         const bool selecting = db.isFlagSet(kSelect[0]) || db.isFlagSet(kMirrorSelection[0]) || db.isFlagSet(kClearSelection[0]);
         if (db.isFlagSet(kListSelected[0])) {
@@ -789,22 +793,13 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                     only = selectedIds;
                 }
                 if (restricted && only.empty()) return fail(kName, "select the guides that should get children");
-                MString parentName = flagString(db, kGenerate[0], "");
-                if (parentName.length() == 0 && restricted) {
-                    const HierarchyGuide* first = h->guide(only.front());
-                    if (!first) return fail(kName, MString("no guide ") + std::to_string(only.front()).c_str());
-                    parentName = h->group(first->group)->name.c_str();
-                }
-                const GroupId parent = h->findGroup(parentName.asChar());
-                if (parent == kNoGroup) return fail(kName, "no guide group named " + parentName);
-                for (const GuideId id : only) {
-                    const HierarchyGuide* g = h->guide(id);
-                    if (!g || g->group != parent) {
-                        return fail(kName, "the chosen parents must all be in one group (" + parentName + ")");
-                    }
-                }
-    
-                ChildGenerationParams p;
+                // Every host's Generate Children (the editor's, guide_edits.h): the parents all of one
+                // group (the one named, when given), else every guide of the group.
+                ChildrenRequest request;
+                request.parents = only;
+                request.group = flagString(db, kGenerate[0], "").asChar();
+                if (request.parents.empty() && request.group.empty()) return fail(kName, "-generateChildren needs a parent group, -guide ids or -onlySelected");
+                ChildGenerationParams& p = request.params;
                 int count = static_cast<int>(p.count);
                 if (db.isFlagSet(kCount[0])) db.getFlagArgument(kCount[0], 0, count);
                 if (count < 1 || count > static_cast<int>(kMaxChildrenPerGuide)) return fail(kName, "-count must be between 1 and 1000");
@@ -818,28 +813,21 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                 if (db.isFlagSet(kSeed[0])) db.getFlagArgument(kSeed[0], 0, seed);
                 p.seed = static_cast<std::uint64_t>(seed);
                 if (db.isFlagSet(kSplit[0])) db.getFlagArgument(kSplit[0], 0, p.split);
-    
-                // (Its existing child group, else a new one: every host's, guide_hierarchy.h childGroupFor.)
-                const MString childName = db.isFlagSet(kNameFlag[0]) ? flagString(db, kNameFlag[0], "") : MString(h->childGroupFor(parent).c_str());
-                const GroupId child = h->generateChildren(parent, childName.asChar(), p, restricted ? &only : nullptr);
-                setResult(static_cast<int>(h->guidesInGroup(child).size()));
+                if (db.isFlagSet(kNameFlag[0])) request.childGroup = flagString(db, kNameFlag[0], "").asChar();
+                setResult(static_cast<int>(groomlab::generateChildren(*h, request).childCount));
             } else if (db.isFlagSet(kRemoveGroup[0])) {
-                const MString groupName = flagString(db, kRemoveGroup[0], "");
-                const GroupId gid = h->findGroup(groupName.asChar());
-                if (gid == kNoGroup) return fail(kName, "no guide group named " + groupName);
-                h->removeGroup(gid);
+                GuideOp op;
+                op.op = "remove_group";
+                op.group = flagString(db, kRemoveGroup[0], "").asChar();
+                guideOp(op);
             } else if (db.isFlagSet(kAddGroup[0])) {
                 // An empty group: a root group, or with -under a child group of that one.
-                const MString name = flagString(db, kAddGroup[0], "");
-                if (name.length() == 0) return fail(kName, "a guide group needs a name");
-                if (h->findGroup(name.asChar()) != kNoGroup) return fail(kName, "a guide group named " + name + " exists");
-                GroupId parent = kNoGroup;
-                if (db.isFlagSet(kUnder[0])) {
-                    const MString under = flagString(db, kUnder[0], "");
-                    parent = h->findGroup(under.asChar());
-                    if (parent == kNoGroup) return fail(kName, "no guide group named " + under);
-                }
-                h->addGroup(name.asChar(), parent);
+                GuideOp op;
+                op.op = "add_group";
+                op.name = flagString(db, kAddGroup[0], "").asChar();
+                if (op.name.empty()) return fail(kName, "a guide group needs a name");
+                if (db.isFlagSet(kUnder[0])) op.parent = flagString(db, kUnder[0], "").asChar();
+                setResult(MString(guideOp(op).group.c_str()));
             } else if (db.isFlagSet(kRenameGroup[0])) {
                 MString from, to;
                 db.getFlagArgument(kRenameGroup[0], 0, from);
@@ -852,87 +840,80 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                     return fail(kName, e.what());
                 }
             } else if (db.isFlagSet(kLock[0]) || db.isFlagSet(kUnlock[0])) {
-                const bool lock = db.isFlagSet(kLock[0]);
-                for (const MString& idText : multiStrings(db, kGuide[0])) {
-                    const GuideId id = guideIdOf(idText);
-                    const HierarchyGuide* g = h->guide(id);
-                    if (!g) return fail(kName, "no guide " + idText);
-                    if (!g->isChild()) return fail(kName, "guide " + idText + " is a primary guide; only children lock");
-                    lock ? h->lock(id) : h->unlock(id);
-                }
+                GuideOp op;
+                op.op = db.isFlagSet(kLock[0]) ? "lock" : "unlock";
+                op.guides = parseIds(multiStrings(db, kGuide[0]));
+                setResult(static_cast<int>(guideOp(op).count));
             } else if (db.isFlagSet(kClear[0])) {
                 *h = GuideHierarchy{};
             } else if (db.isFlagSet(kRemoveGuides[0])) {
                 if (!db.isFlagSet(kGuide[0])) return fail(kName, "-removeGuides needs -guide, the guides to delete");
-                std::vector<GuideId> doomed;
-                for (const MString& idText : multiStrings(db, kGuide[0])) {
-                    const GuideId id = guideIdOf(idText);
-                    if (h->guide(id)) doomed.push_back(id);  // (one already gone: nothing to do)
-                }
-                setResult(static_cast<int>(doomed.size()));
-                if (doomed.empty()) return MS::kSuccess;
-                h->removeGuides(doomed, true);  // (a child group left empty goes too)
+                GuideOp op;
+                op.op = "delete_guides";
+                op.guides = parseIds(multiStrings(db, kGuide[0]));
+                const GuideOpResult done = guideOp(op);
+                setResult(static_cast<int>(done.count));
+                if (done.count == 0) return MS::kSuccess;
             } else if (db.isFlagSet(kMoveToGroup[0]) || db.isFlagSet(kDuplicateToGroup[0])) {
                 const bool duplicate = db.isFlagSet(kDuplicateToGroup[0]);
-                const MString name = flagString(db, duplicate ? kDuplicateToGroup[0] : kMoveToGroup[0], "");
-                const GroupId gid = h->findGroup(name.asChar());
-                if (gid == kNoGroup) return fail(kName, "no guide group named " + name);
-                const std::vector<GuideId> ids = targets();
-                if (ids.empty()) return fail(kName, "give -guide IDs or select guides");
+                GuideOp op;
+                op.op = duplicate ? "duplicate_to_group" : "move_to_group";
+                op.group = flagString(db, duplicate ? kDuplicateToGroup[0] : kMoveToGroup[0], "").asChar();
+                op.guides = targets();
+                const GuideOpResult done = guideOp(op);
                 if (duplicate) {
                     MStringArray made;
-                    for (const GuideId id : h->duplicateGuidesToGroup(ids, gid)) made.append(std::to_string(id).c_str());
+                    for (const GuideId id : done.made) made.append(std::to_string(id).c_str());
                     setResult(made);
                 } else {
-                    h->moveGuidesToGroup(ids, gid);
-                    setResult(static_cast<int>(ids.size()));
+                    setResult(static_cast<int>(done.count));
                 }
             } else if (db.isFlagSet(kNewGroupFrom[0])) {
-                const std::vector<GuideId> ids = targets();
-                if (ids.empty()) return fail(kName, "-newGroupFrom: give -guide IDs or select guides");
-                const GroupId made = h->newGroupFromGuides(ids, flagString(db, kNewGroupFrom[0], "").asChar());
-                setResult(MString(h->group(made)->name.c_str()));
+                GuideOp op;
+                op.op = "new_group_from";
+                op.guides = targets();
+                op.name = flagString(db, kNewGroupFrom[0], "").asChar();
+                setResult(MString(guideOp(op).group.c_str()));
             } else if (db.isFlagSet(kPasteGuides[0])) {
                 MString text, name;
                 db.getFlagArgument(kPasteGuides[0], 0, text);
                 db.getFlagArgument(kPasteGuides[0], 1, name);
-                const GroupId gid = h->findGroup(name.asChar());
-                if (gid == kNoGroup) return fail(kName, "no guide group named " + name);
+                GuideOp op;
+                op.op = "paste_guides";
+                op.text = text.asChar();
+                op.group = name.asChar();
                 MStringArray made;
-                for (const GuideId id : h->pasteGuidesJson(text.asChar(), gid)) made.append(std::to_string(id).c_str());
+                for (const GuideId id : guideOp(op).made) made.append(std::to_string(id).c_str());
                 setResult(made);
             } else if (db.isFlagSet(kReparent[0])) {
-                const GuideId parent = guideIdOf(flagString(db, kReparent[0], "0"));
-                const std::vector<GuideId> ids = targets();
-                if (ids.empty()) return fail(kName, "-reparent: give -guide IDs or select guides");
-                h->reparent(ids, parent);
-                setResult(static_cast<int>(ids.size()));
+                GuideOp op;
+                op.op = "reparent";
+                op.parentGuide = guideIdOf(flagString(db, kReparent[0], "0"));
+                op.guides = targets();
+                setResult(static_cast<int>(guideOp(op).count));
             } else if (db.isFlagSet(kPromote[0])) {
-                const MString name = flagString(db, kPromote[0], "");
-                const GroupId gid = h->findGroup(name.asChar());
-                if (gid == kNoGroup) return fail(kName, "no guide group named " + name);
-                h->promoteGroup(gid);
+                GuideOp op;
+                op.op = "promote_group";
+                op.group = flagString(db, kPromote[0], "").asChar();
+                guideOp(op);
             } else if (db.isFlagSet(kDemote[0])) {
-                const MString name = flagString(db, kDemote[0], "");
-                const MString under = flagString(db, kUnder[0], "");
-                const GroupId gid = h->findGroup(name.asChar());
-                const GroupId parent = h->findGroup(under.asChar());
-                if (gid == kNoGroup) return fail(kName, "no guide group named " + name);
-                if (parent == kNoGroup) return fail(kName, "-demote needs -under <group>; no group named " + under);
-                h->demoteGroup(gid, parent);
+                GuideOp op;
+                op.op = "demote_group";
+                op.group = flagString(db, kDemote[0], "").asChar();
+                op.parent = flagString(db, kUnder[0], "").asChar();
+                if (op.parent.empty()) return fail(kName, "-demote needs -under <group>");
+                guideOp(op);
             } else if (db.isFlagSet(kMirror[0])) {
-                // A root group's name, or "*": symmetry sync of the whole groom, children included.
                 const MString name = flagString(db, kMirror[0], "");
-                const GroupId gid = name == "*" ? kNoGroup : h->findGroup(name.asChar());
-                if (name != "*" && gid == kNoGroup) return fail(kName, "no guide group named " + name);
-                const int axis = axisIndex(flagString(db, kAxis[0], "x"));
-                if (axis < 0) return fail(kName, "-axis takes x, y or z");
-                const float center = static_cast<float>(flagDouble(db, kCenter[0], 0.0));
-                const bool fromPositive = !db.isFlagSet(kFromNegative[0]);
-                const std::vector<GuideId> created = name == "*" ? h->mirrorAll(axis, center, fromPositive)
-                                                                 : h->mirrorGroup(gid, axis, center, fromPositive);
+                GuideOp op;
+                op.op = name == "*" ? "mirror_all" : "mirror_group";
+                if (name != "*") op.group = name.asChar();
+                op.axis = axisIndex(flagString(db, kAxis[0], "x"));
+                if (op.axis < 0) return fail(kName, "-axis takes x, y or z");
+                op.center = static_cast<float>(flagDouble(db, kCenter[0], 0.0));
+                op.fromPositive = !db.isFlagSet(kFromNegative[0]);
                 MStringArray ids;
-                for (const GuideId id : created) ids.append(std::to_string(id).c_str());
+                for (const GuideId id : guideOp(op).made) ids.append(std::to_string(id).c_str());
                 setResult(ids);
             } else if (db.isFlagSet(kRootTubes[0])) {
                 nlohmann::json request;
@@ -1095,64 +1076,54 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                     if (b.mirrorAxis < 0) return fail(kName, "-symmetry takes x, y, z or topology");
                 }
                 if (b.mirrorTopology && !scalp) return fail(kName, "Topology symmetry needs the groom's scalp");
-                const std::vector<GuideId> sources = from == "selected" ? targets() : std::vector<GuideId>{};
-                if (from == "selected" && sources.empty()) return fail(kName, "select the guides to mirror to the other side");
-                GroupId only = kNoGroup;
-                if (from != "selected" && db.isFlagSet(kGroup[0])) {
-                    const MString name = flagString(db, kGroup[0], "");
-                    only = h->findGroup(name.asChar());
-                    if (only == kNoGroup) return fail(kName, "no guide group named " + name);
-                }
-                const auto done = mirrorGuideShapes(*h, StrokeSymmetry::of(b, scalp.get()), sources,
-                                                    from == "positive" ? 1 : from == "negative" ? -1 : 0, only);
-                if (done.reshaped.empty() && done.created.empty() && done.removed.empty()) {
-                    return fail(kName, from == "selected" ? "the selected guides are on the symmetry's seam: nothing to mirror"
-                                                          : "no guides on that side");
-                }
+                GuideOp op;
+                op.op = "mirror_shapes";
+                op.side = from == "positive" ? 1 : from == "negative" ? -1 : 0;
+                if (op.side == 0) op.guides = targets();
+                if (op.side != 0 && db.isFlagSet(kGroup[0])) op.group = flagString(db, kGroup[0], "").asChar();
+                op.symmetry = StrokeSymmetry::of(b, scalp.get());
+                const auto done = guideOp(op).mirrored;
                 setResult(MString((std::to_string(done.reshaped.size()) + " matched, " + std::to_string(done.created.size()) +
                                    " added, " + std::to_string(done.removed.size()) + " removed")
                                       .c_str()));
             } else if (db.isFlagSet(kRemoveAttribute[0])) {
-                const MString name = flagString(db, kRemoveAttribute[0], "");
-                const auto names = h->attributeNames();
-                if (std::find(names.begin(), names.end(), std::string(name.asChar())) == names.end()) {
-                    return fail(kName, "no guide attribute named " + name);
-                }
-                h->removeAttribute(name.asChar());
+                GuideOp op;
+                op.op = "remove_layer";
+                op.name = flagString(db, kRemoveAttribute[0], "").asChar();
+                guideOp(op);
             } else if (db.isFlagSet(kInvertAttribute[0])) {
                 // (The hidden layer: what shows hidden, what is hidden, inherited too, shown: invertHidden.)
-                const std::string layer = flagString(db, kInvertAttribute[0], "freeze").asChar();
-                if (!(layer == kHiddenLayer ? invertHidden(*h) : invertFrozen(*h, layer))) {
-                    return fail(kName, "the groom has no guides");
-                }
+                GuideOp op;
+                op.op = "invert_layer";
+                op.name = flagString(db, kInvertAttribute[0], "freeze").asChar();
+                guideOp(op);
             } else if (db.isFlagSet(kResample[0])) {
-                int segments = 0;
-                db.getFlagArgument(kResample[0], 0, segments);
-                if (segments < 1 || segments > kMaxGuideSegments) return fail(kName, "-resample takes 1 to 256 segments");
-                const std::vector<GuideId> ids = resampleTargets(*h);
-                if (ids.empty()) return fail(kName, "the groom has no guides to resample");
-                // A whole group, a level or every guide: their groups' new guides get these segments too.
-                const bool groupWide = resampleGroupWide();
-                const GroupId only = db.isFlagSet(kGroup[0]) ? h->findGroup(flagString(db, kGroup[0], "").asChar()) : kNoGroup;
-                int level = -1;
-                if (db.isFlagSet(kLevel[0])) db.getFlagArgument(kLevel[0], 0, level);
-                bool byLength = false;
-                if (db.isFlagSet(kByLength[0])) db.getFlagArgument(kByLength[0], 0, byLength);
-                // Every host's (guide_hierarchy.h resampleGuides), frozen guides kept.
-                setResult(static_cast<int>(h->resampleGuides(ids, segments, groupWide, only, level, byLength)));
+                GuideOp op;
+                op.op = "resample";
+                db.getFlagArgument(kResample[0], 0, op.segments);
+                // The guides: -guide, the selection (none: -group, -level, else every guide, whole groups).
+                if (db.isFlagSet(kGuide[0])) {
+                    op.guides = parseIds(multiStrings(db, kGuide[0]));
+                } else if (!db.isFlagSet(kGroup[0]) && !db.isFlagSet(kLevel[0])) {
+                    op.guides = readGuideSelection(groomPath.node());
+                }
+                if (db.isFlagSet(kGroup[0])) op.group = flagString(db, kGroup[0], "").asChar();
+                if (db.isFlagSet(kLevel[0])) db.getFlagArgument(kLevel[0], 0, op.level);
+                if (db.isFlagSet(kByLength[0])) db.getFlagArgument(kByLength[0], 0, op.byLength);
+                setResult(static_cast<int>(guideOp(op).count));
             } else if (db.isFlagSet(kSetGroupSegments[0])) {
-                int segments = 0;
-                db.getFlagArgument(kSetGroupSegments[0], 0, segments);
-                const MString groupName = flagString(db, kGroup[0], "");
-                const GroupId gid = h->findGroup(groupName.asChar());
-                if (gid == kNoGroup) return fail(kName, "-setGroupSegments needs -group, a guide group of the groom");
-                h->setGroupSegments(gid, segments);
+                GuideOp op;
+                op.op = "set_group_segments";
+                db.getFlagArgument(kSetGroupSegments[0], 0, op.segments);
+                op.group = flagString(db, kGroup[0], "").asChar();
+                if (op.group.empty()) return fail(kName, "-setGroupSegments needs -group, a guide group of the groom");
+                guideOp(op);
             } else if (db.isFlagSet(kResetGroupSegments[0])) {
-                const GroupId gid = h->findGroup(flagString(db, kGroup[0], "").asChar());
-                if (gid == kNoGroup) return fail(kName, "-resetGroupSegments needs -group, a guide group of the groom");
-                const int segments = h->resetGroupSegments(gid);
-                if (segments < 1) return fail(kName, "the group has no guides");
-                setResult(segments);
+                GuideOp op;
+                op.op = "reset_group_segments";
+                op.group = flagString(db, kGroup[0], "").asChar();
+                if (op.group.empty()) return fail(kName, "-resetGroupSegments needs -group, a guide group of the groom");
+                setResult(guideOp(op).segments);
             } else if (db.isFlagSet(kReshape[0]) || db.isFlagSet(kSetPoints[0])) {
                 // Guides take the shapes of curves (Curves to Guides: edited copies coming back),
                 // or points given as JSON (-setPoints: Tubes to Curves' live link).
@@ -1255,15 +1226,13 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                 auto* shape = dynamic_cast<GroomShape*>(groomFn.userNode());
                 if (shape) shape->setPreviewHierarchy(nullptr);  // a live preview of the shape ends with its commit
             } else if (db.isFlagSet(kSetAttribute[0])) {
-                const std::string name = flagString(db, kSetAttribute[0], "").asChar();
-                if (name.empty() || !db.isFlagSet(kValue[0])) return fail(kName, "-setAttribute needs a name and -value");
-                const float value = static_cast<float>(flagDouble(db, kValue[0], 0.0));
-                const std::vector<GuideId> ids = targets();
-                for (const GuideId id : ids) {
-                    if (!h->guide(id)) return fail(kName, MString("no guide ") + std::to_string(id).c_str());
-                    h->setAttribute(id, name, value);
-                }
-                setResult(static_cast<int>(ids.size()));
+                GuideOp op;
+                op.op = "set_attribute";
+                op.name = flagString(db, kSetAttribute[0], "").asChar();
+                if (op.name.empty() || !db.isFlagSet(kValue[0])) return fail(kName, "-setAttribute needs a name and -value");
+                op.value = static_cast<float>(flagDouble(db, kValue[0], 0.0));
+                op.guides = targets();
+                setResult(static_cast<int>(guideOp(op).count));
             }
         } catch (const std::exception& e) {
             return fail(kName, e.what());

@@ -23,6 +23,7 @@
 #include <utility>
 #include <vector>
 
+#include "groomlab/editor/guide_edits.h"
 #include "groomlab/editor/map_edits.h"
 #include "groomlab/asset_files.h"
 #include "groomlab/brush.h"
@@ -1368,30 +1369,95 @@ void pendingColors(ToolState& t, std::map<std::string, std::string> after) {
 json guidesEdit(ToolState& t, const json& args) {
     const std::string op = needString(args, "op");
     const HostSpace& space = t.session.space;
-    auto targets = [&](const GuideHierarchy&) {
-        if (args.contains("ids") && !args["ids"].is_null()) return idsOf(args["ids"]);
-        pruneSelection(t);
-        if (t.selection.empty()) fail("state", op + ": no guides given and none selected");
-        return t.selection;
-    };
     json r;
-    if (op == "add_group") {
-        const std::string parent = optString(args, "parent", "");
-        std::string made;
-        editGuides(t, "add group", [&](GuideHierarchy& h) {
-            GroupId parentId = kNoGroup;
-            if (!parent.empty()) {
-                parentId = h.findGroup(parent);
-                if (parentId == kNoGroup) fail("not_found", "no group named '" + parent + "'");
+    // The ops of the editor's applyGuideOp (guide_edits.h), every host's: its checks and edit; the
+    // helper reads the request and keeps the step on its undo stack.
+    static const std::set<std::string> kGuideOps = {
+        "add_group", "remove_group", "delete_guides", "lock", "unlock", "set_attribute", "freeze", "unfreeze", "unfreeze_all",
+        "invert_frozen", "remove_layer", "mirror_all", "mirror_group", "mirror_shapes", "move_to_group", "duplicate_to_group",
+        "new_group_from", "paste_guides", "promote_group", "demote_group", "reparent", "resample", "set_group_segments",
+        "reset_group_segments"};
+    if (kGuideOps.count(op)) {
+        GuideOp g;
+        g.op = op == "invert_frozen" ? std::string("invert_layer") : op;
+        if (op == "invert_frozen") g.name = kFreezeTool;
+        g.group = optString(args, "group", "");
+        if (op == "add_group") g.parent = optString(args, "parent", "");  // (reparent's is a guide ID)
+        if (op != "invert_frozen") g.name = optString(args, "name", "");
+        // The guides: `ids`, else the selection (resample: `group` or `level` instead when given).
+        pruneSelection(t);
+        if (given(args, "ids")) {
+            g.guides = idsOf(args["ids"]);
+        } else if (op != "resample" || !(given(args, "group") || given(args, "level"))) {
+            g.guides = t.selection;
+        }
+        if (op == "set_attribute") g.value = static_cast<float>(optNumber(args, "value", 1.0));
+        if (op == "paste_guides") g.text = needString(args, "text");
+        if (op == "demote_group") g.parent = needString(args, "parent");
+        if (op == "reparent") {
+            const json& parent = need(args, "parent");
+            if (!parent.is_number_unsigned()) fail("bad_request", "parent is a guide ID");
+            g.parentGuide = parent.get<GuideId>();
+            g.parent.clear();
+        }
+        if (op == "mirror_all" || op == "mirror_group") {
+            symmetryToGroom(space, optString(args, "axis", "x"), optNumber(args, "center", 0.0), g.axis, g.center);
+            if (g.axis < 0) fail("bad_request", "axis is x, y or z");
+            g.fromPositive = optBool(args, "fromPositive", true);
+        }
+        if (op == "mirror_shapes") {
+            // Maya's groomLabGuides -mirrorShapes (issue 74): "selected" (the selected or `ids` guides'
+            // mirror guides take their mirror images), "positive" or "negative" (that whole side over
+            // the other; `group`: one root group's), across `symmetry` (x, y, z at `center`, or
+            // topology), as the brushes take it.
+            const std::string from = optString(args, "from", "selected");
+            if (from != "selected" && from != "positive" && from != "negative") fail("bad_request", "from is selected, positive or negative");
+            g.side = from == "positive" ? 1 : from == "negative" ? -1 : 0;
+            const std::string symmetry = optString(args, "symmetry", "x");
+            BrushSettings b;
+            if (symmetry == "topology") {
+                b.mirrorTopology = true;
+            } else {
+                symmetryToGroom(space, symmetry, optNumber(args, "center", 0.0), b.mirrorAxis, b.mirrorCenter);
+                if (b.mirrorAxis < 0) fail("bad_request", "symmetry is x, y, z or topology");
             }
-            const std::string name = optString(args, "name", "");
-            made = name.empty() ? uniqueGroupName(h, parent.empty() ? "group" : parent + "_children") : guideGroupName(name);
-            if (h.findGroup(made) != kNoGroup) fail("bad_request", "a group named '" + made + "' is there already");
-            h.addGroup(made, parentId);
+            const MeshPtr scalp = t.session.groom->scalp();
+            if (b.mirrorTopology && !scalp) fail("state", "Topology symmetry needs the groom's scalp");
+            g.symmetry = StrokeSymmetry::of(b, scalp.get());
+        }
+        if (op == "resample") {
+            // Maya's groomLabGuides -resample: each guide `segments` segments evenly along the smooth
+            // curve through its points (as the viewport draws it), its shape kept; frozen guides kept.
+            g.segments = settingInt(need(args, "segments"), "segments");
+            g.level = given(args, "level") ? settingInt(args["level"], "level") : -1;
+            g.byLength = given(args, "byLength") && settingBool(args["byLength"], "byLength");  // issue #98
+            t.session.groom->setPreviewHierarchy(nullptr);  // a live preview (guides_preview) ends with its commit
+        }
+        if (op == "set_group_segments") g.segments = settingInt(need(args, "segments"), "segments");
+        GuideOpResult done;
+        editGuides(t, guideOpLabel(g), [&](GuideHierarchy& h) {
+            try {
+                done = applyGuideOp(h, g);
+            } catch (const GuideEditError& e) {
+                fail(e.code, e.what());
+            }
         });
-        r["group"] = made;
-    } else if (op == "remove_group") {
-        editGuides(t, "remove group", [&](GuideHierarchy& h) { h.removeGroup(groupNamed(h, args, "group")); });
+        auto ids = [](const std::vector<GuideId>& v) {
+            json a = json::array();
+            for (const GuideId id : v) a.push_back(id);
+            return a;
+        };
+        if (op == "add_group" || op == "new_group_from") r["group"] = done.group;
+        if (op == "delete_guides") r["removed"] = done.count;
+        if (op == "mirror_all" || op == "mirror_group") r["added"] = done.made.size();
+        if (op == "mirror_shapes") {
+            r["reshaped"] = done.mirrored.reshaped.size();
+            r["added"] = done.mirrored.created.size();
+            r["removed"] = done.mirrored.removed.size();
+        }
+        if (op == "move_to_group" || op == "duplicate_to_group" || op == "paste_guides") r["made"] = ids(done.made);
+        if (op == "resample") r["resampled"] = done.count;
+        if (op == "reset_group_segments") r["segments"] = done.segments;
     } else if (op == "rename_group") {
         const std::string from = needString(args, "group"), to = guideGroupName(needString(args, "name"));  // one word
         GuideHierarchy h = editedGuides(t, [&](GuideHierarchy& hh) { hh.renameGroup(groupNamed(hh, args, "group"), to); });
@@ -1414,183 +1480,35 @@ json guidesEdit(ToolState& t, const json& args) {
         if (t.hidden.erase(from)) t.hidden.insert(to);
         r["graphChanged"] = retargeted;
     } else if (op == "generate_children") {
-        std::string made;
-        std::size_t count = 0;
-        editGuides(t, "generate children", [&](GuideHierarchy& h) {
-            GroupId id = kNoGroup;
-            if (args.contains("group") && !args["group"].is_null()) {
-                id = groupNamed(h, args, "group");
-            } else if (!h.groups().empty()) {
-                id = h.groups().back().id;  // the last group, as Maya's Guides tab
-            }
-            if (id == kNoGroup) fail("state", "the groom has no guides yet");
-            ChildGenerationParams p;
-            p.count = static_cast<std::size_t>(std::clamp(optNumber(args, "count", 5.0), 1.0, static_cast<double>(kMaxChildrenPerGuide)));
-            p.rootSpread = static_cast<float>(optNumber(args, "rootSpread", p.rootSpread));
-            p.tipSpread = static_cast<float>(optNumber(args, "tipSpread", p.tipSpread));
-            p.twist = static_cast<float>(optNumber(args, "twist", p.twist));
-            p.jitter = static_cast<float>(optNumber(args, "jitter", p.jitter));
-            p.childTubeScale = static_cast<float>(optNumber(args, "childTubeScale", p.childTubeScale));
-            p.seed = static_cast<std::uint64_t>(std::max(0.0, optNumber(args, "seed", 0.0)));
-            std::vector<GuideId> parents;
-            const bool selected = optBool(args, "selected", false);
-            if (selected) {
-                pruneSelection(t);
-                for (const GuideId g : t.selection) {
-                    const HierarchyGuide* guide = h.guide(g);
-                    if (guide && guide->group == id) parents.push_back(g);
-                }
-                if (parents.empty()) fail("state", "none of the selected guides is in that group");
-            } else if (h.guidesInGroup(id).empty()) {
-                fail("state", "the group has no guides to be parents");
-            }
-            made = optString(args, "childGroup", "");
-            if (made.empty()) made = h.childGroupFor(id);  // every host's (guide_hierarchy.h)
-            const std::size_t before = h.guides().size();
-            h.generateChildren(id, made, p, selected ? &parents : nullptr);
-            count = h.guides().size() >= before ? h.guides().size() - before : 0;
-        });
-        r["group"] = made;
-        r["added"] = count;
-    } else if (op == "delete_guides") {
-        std::vector<GuideId> ids;
-        editGuides(t, "delete guides", [&](GuideHierarchy& h) {
-            ids = targets(h);
-            h.removeGuides(ids, true);  // (a child group left empty goes too: every host's delete)
-        });
-        r["removed"] = ids.size();
-    } else if (op == "lock" || op == "unlock") {
-        editGuides(t, op + " guides", [&](GuideHierarchy& h) {
-            for (const GuideId id : targets(h)) {
-                const HierarchyGuide* g = h.guide(id);
-                if (!g || !g->isChild()) continue;
-                if (op == "lock") h.lock(id);
-                else h.unlock(id);
-            }
-        });
-    } else if (op == "set_attribute") {
-        const std::string name = needString(args, "name");
-        const float value = static_cast<float>(optNumber(args, "value", 1.0));
-        if (!validMapName(name)) fail("bad_request", mapNameError(name));
-        editGuides(t, "set " + name, [&](GuideHierarchy& h) {
-            for (const GuideId id : targets(h)) {
-                if (h.guide(id)) h.setAttribute(id, name, value);
-            }
-        });
-    } else if (op == "freeze" || op == "unfreeze") {
-        editGuides(t, op + " guides", [&](GuideHierarchy& h) {
-            for (const GuideId id : targets(h)) {
-                if (h.guide(id)) h.setAttribute(id, kFreezeTool, op == "freeze" ? 1.0f : 0.0f);
-            }
-        });
-    } else if (op == "unfreeze_all") {
-        editGuides(t, "unfreeze all", [&](GuideHierarchy& h) { h.removeAttribute(kFreezeTool); });
-    } else if (op == "invert_frozen") {
-        editGuides(t, "invert frozen", [&](GuideHierarchy& h) { invertFrozen(h, kFreezeTool); });
-    } else if (op == "remove_layer") {
-        const std::string name = needString(args, "name");
-        editGuides(t, "remove layer " + name, [&](GuideHierarchy& h) { h.removeAttribute(name); });
-    } else if (op == "mirror_all" || op == "mirror_group") {
-        int axis = 0;
-        float center = 0.0f;
-        symmetryToGroom(space, optString(args, "axis", "x"), optNumber(args, "center", 0.0), axis, center);
-        if (axis < 0) fail("bad_request", "axis is x, y or z");
-        const bool fromPositive = optBool(args, "fromPositive", true);
-        std::size_t made = 0;
-        editGuides(t, op == "mirror_all" ? "mirror all" : "mirror group", [&](GuideHierarchy& h) {
-            if (op == "mirror_all") {
-                made = h.mirrorAll(axis, center, fromPositive).size();
-            } else {
-                const GroupId id = groupNamed(h, args, "group");
-                if (h.groupDepth(id) != 0) fail("bad_request", "mirror a root group: its children follow");
-                made = h.mirrorGroup(id, axis, center, fromPositive).size();
-            }
-        });
-        r["added"] = made;
-    } else if (op == "mirror_shapes") {
-        // Maya's groomLabGuides -mirrorShapes (issue 74): "selected" (the selected or `ids` guides'
-        // mirror guides take their mirror images), "positive" or "negative" (that whole side over
-        // the other; `group`: one root group's), across `symmetry` (x, y, z at `center`, or
-        // topology), as the brushes take it. One undo step.
-        const std::string from = optString(args, "from", "selected");
-        if (from != "selected" && from != "positive" && from != "negative") fail("bad_request", "from is selected, positive or negative");
-        const std::string symmetry = optString(args, "symmetry", "x");
-        BrushSettings b;
-        if (symmetry == "topology") {
-            b.mirrorTopology = true;
-        } else {
-            symmetryToGroom(space, symmetry, optNumber(args, "center", 0.0), b.mirrorAxis, b.mirrorCenter);
-            if (b.mirrorAxis < 0) fail("bad_request", "symmetry is x, y, z or topology");
+        // Every host's Generate Children (the editor's, guide_edits.h): with `selected`, the
+        // selected guides (all of one group, `group` when given), else every guide of `group` (the
+        // last group by default).
+        ChildrenRequest request;
+        request.group = args.contains("group") && !args["group"].is_null() ? needString(args, "group") : std::string();
+        request.childGroup = optString(args, "childGroup", "");
+        ChildGenerationParams& p = request.params;
+        p.count = static_cast<std::size_t>(std::clamp(optNumber(args, "count", 5.0), 1.0, static_cast<double>(kMaxChildrenPerGuide)));
+        p.rootSpread = static_cast<float>(optNumber(args, "rootSpread", p.rootSpread));
+        p.tipSpread = static_cast<float>(optNumber(args, "tipSpread", p.tipSpread));
+        p.twist = static_cast<float>(optNumber(args, "twist", p.twist));
+        p.jitter = static_cast<float>(optNumber(args, "jitter", p.jitter));
+        p.childTubeScale = static_cast<float>(optNumber(args, "childTubeScale", p.childTubeScale));
+        p.seed = static_cast<std::uint64_t>(std::max(0.0, optNumber(args, "seed", 0.0)));
+        if (optBool(args, "selected", false)) {
+            pruneSelection(t);
+            request.parents = t.selection;
+            if (request.parents.empty()) fail("state", "generate children: no guides selected");
         }
-        const MeshPtr scalp = t.session.groom->scalp();
-        if (b.mirrorTopology && !scalp) fail("state", "Topology symmetry needs the groom's scalp");
-        GuideHierarchy::MirrorShapesResult done;
-        editGuides(t, "mirror to other side", [&](GuideHierarchy& h) {
-            const std::vector<GuideId> sources = from == "selected" ? targets(h) : std::vector<GuideId>{};
-            const GroupId only = from != "selected" && given(args, "group") ? groupNamed(h, args, "group") : kNoGroup;
-            done = mirrorGuideShapes(h, StrokeSymmetry::of(b, scalp.get()), sources,
-                                     from == "positive" ? 1 : from == "negative" ? -1 : 0, only);
-            if (done.reshaped.empty() && done.created.empty() && done.removed.empty()) {
-                fail("state", from == "selected" ? "the selected guides are on the symmetry's seam: nothing to mirror"
-                                                 : "no guides on that side");
+        ChildrenMade made;
+        editGuides(t, "generate children", [&](GuideHierarchy& h) {
+            try {
+                made = groomlab::generateChildren(h, request);
+            } catch (const std::invalid_argument& e) {
+                fail("state", e.what());
             }
         });
-        r["reshaped"] = done.reshaped.size();
-        r["added"] = done.created.size();
-        r["removed"] = done.removed.size();
-    } else if (op == "move_to_group" || op == "duplicate_to_group") {
-        // Regrouping (guide_hierarchy.h, every host's): the guides into a group beside theirs.
-        const bool duplicate = op == "duplicate_to_group";
-        json made = json::array();
-        editGuides(t, duplicate ? "duplicate guides" : "move guides", [&](GuideHierarchy& h) {
-            const GroupId target = groupNamed(h, args, "group");
-            const std::vector<GuideId> ids = targets(h);
-            if (duplicate) {
-                for (const GuideId id : h.duplicateGuidesToGroup(ids, target)) made.push_back(id);
-            } else {
-                h.moveGuidesToGroup(ids, target);
-            }
-        });
-        r["made"] = made;
-    } else if (op == "new_group_from") {
-        std::string name;
-        editGuides(t, "new group from selection", [&](GuideHierarchy& h) {
-            name = h.group(h.newGroupFromGuides(targets(h), optString(args, "name", "group")))->name;
-        });
-        r["group"] = name;
-    } else if (op == "paste_guides") {
-        json made = json::array();
-        editGuides(t, "paste guides", [&](GuideHierarchy& h) {
-            for (const GuideId id : h.pasteGuidesJson(needString(args, "text"), groupNamed(h, args, "group"))) made.push_back(id);
-        });
-        r["made"] = made;
-    } else if (op == "promote_group") {
-        editGuides(t, "promote group", [&](GuideHierarchy& h) { h.promoteGroup(groupNamed(h, args, "group")); });
-    } else if (op == "demote_group") {
-        editGuides(t, "demote group", [&](GuideHierarchy& h) { h.demoteGroup(groupNamed(h, args, "group"), groupNamed(h, args, "parent")); });
-    } else if (op == "reparent") {
-        editGuides(t, "reparent guides", [&](GuideHierarchy& h) {
-            const json& parent = need(args, "parent");
-            if (!parent.is_number_unsigned()) fail("bad_request", "parent is a guide ID");
-            h.reparent(targets(h), parent.get<GuideId>());
-        });
-    } else if (op == "resample") {
-        // Maya's groomLabGuides -resample: each guide `segments` segments evenly along the smooth
-        // curve through its points (as the viewport draws it), its shape kept; frozen guides kept.
-        // A whole group, a level or every guide: their groups' new guides get these segments too.
-        const int segments = settingInt(need(args, "segments"), "segments");
-        if (segments < 1 || segments > kMaxGuideSegments) fail("bad_request", "segments: 1 to 256");
-        std::size_t count = 0;
-        t.session.groom->setPreviewHierarchy(nullptr);  // a live preview (guides_preview) ends with its commit
-        editGuides(t, "resample guides", [&](GuideHierarchy& h) {
-            const std::vector<GuideId> ids = targetGuides(t, h, args, true, "resample");
-            const bool groupWide = resampleGroupWide(t, args);
-            const GroupId only = given(args, "group") ? h.findGroup(needString(args, "group")) : kNoGroup;
-            const int level = given(args, "level") ? settingInt(args["level"], "level") : -1;
-            const bool byLength = given(args, "byLength") && settingBool(args["byLength"], "byLength");  // issue #98
-            count = h.resampleGuides(ids, segments, groupWide, only, level, byLength);  // every host's (guide_hierarchy.h)
-        });
-        r["resampled"] = count;
+        r["group"] = made.childGroup;
+        r["added"] = made.added;
     } else if (op == "mirror_selection") {
         // Maya's mirror_guide_selection: the mirror image of each selected guide (the nearest of its
         // group across the plane) selected; `add` keeps the selection. Not an undo step (a selection).
@@ -1626,32 +1544,11 @@ json guidesEdit(ToolState& t, const json& args) {
             commitEdit(t, std::move(stroke));
         }
         r["color"] = color.empty() ? json(nullptr) : json(color);
-    } else if (op == "reset_group_segments") {
-        // Maya's reset_group_segments: every guide of the group back to its segments (frozen kept).
-        const std::string group = needString(args, "group");
-        int segments = 0;
-        editGuides(t, "reset segments", [&](GuideHierarchy& h) {
-            const GroupId gid = h.findGroup(group);
-            if (gid == kNoGroup) fail("not_found", "no group named '" + group + "'");
-            segments = h.resetGroupSegments(gid);
-            if (segments < 1) fail("state", "the group has no guides");
-        });
-        r["segments"] = segments;
-    } else if (op == "set_group_segments") {
-        // Maya's set_group_segments: the segments the group's new guides get (0: the tool's own).
-        const std::string group = needString(args, "group");
-        const int segments = settingInt(need(args, "segments"), "segments");
-        if (segments < 0 || segments > 256) fail("bad_request", "segments: 0 to 256");
-        editGuides(t, "group segments", [&](GuideHierarchy& h) {
-            const GroupId gid = h.findGroup(group);
-            if (gid == kNoGroup) fail("not_found", "no group named '" + group + "'");
-            h.setGroupSegments(gid, segments);
-        });
     } else {
         fail("bad_request",
              "op is add_group, remove_group, rename_group, generate_children, delete_guides, lock, unlock, set_attribute, "
-             "freeze, unfreeze, unfreeze_all, invert_frozen, remove_layer, mirror_all, mirror_group, promote_group, demote_group, reparent, "
-             "move_to_group, duplicate_to_group, new_group_from, paste_guides, "
+             "freeze, unfreeze, unfreeze_all, invert_frozen, remove_layer, mirror_all, mirror_group, mirror_shapes, promote_group, "
+             "demote_group, reparent, move_to_group, duplicate_to_group, new_group_from, paste_guides, "
              "resample, mirror_selection, set_group_color, set_group_segments or reset_group_segments");
     }
     r["undo"] = undoJson(t);

@@ -165,7 +165,8 @@ CHILDREN_COUNT = 5  # the Guides tab's inline count (its spin box sets it)
 
 def generate_children_dialog(count=None, group=None, groom=None):
     """Generate Children: `count` children (the Guides tab's inline count by default) for each
-    selected guide, else for every guide of `group` (the last group by default). No prompt."""
+    selected guide (selection first: all of one group), else for every guide of `group` (the last
+    group by default), as every host's (the editor's generateChildren). No prompt."""
     import groomlab
     groom = groom or _selected_groom()
     if not groom:
@@ -177,7 +178,7 @@ def generate_children_dialog(count=None, group=None, groom=None):
     count = int(CHILDREN_COUNT if count is None else count)
     chosen = groomlab.selected_guides(groom)
     try:
-        if chosen and not group:
+        if chosen:
             # Only the selected guides get children (Tonic-style: pick which parents have children).
             made = groomlab.generate_children(groom, count=count, selected=True)
             _say("%d children for %d selected guides" % (made, len(chosen)))
