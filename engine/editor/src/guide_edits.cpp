@@ -4,8 +4,11 @@
 #include <algorithm>
 #include <set>
 
+#include <nlohmann/json.hpp>
+
 #include "groomlab/guide_selection.h"
 #include "groomlab/scalp_maps.h"
+#include "groomlab/tube.h"
 
 namespace groomlab {
 
@@ -232,6 +235,55 @@ std::string guideOpLabel(const GuideOp& op) {
     std::string label = o;  // add_group -> add group, mirror_all -> mirror all...
     std::replace(label.begin(), label.end(), '_', ' ');
     return label;
+}
+
+std::size_t editTubes(GuideHierarchy& h, const std::vector<GuideId>& guides, const std::string& edit) {
+    if (guides.empty()) refuse("state", "no guides selected or soloed to edit");
+    for (const GuideId id : guides) {
+        if (!h.guide(id)) refuse("not_found", "no guide " + std::to_string(id));
+    }
+    for (const GuideId id : guides) {
+        const HierarchyGuide* g = h.guide(id);
+        const TubeProfile tube = core([&] { return editedTube(g->tube, edit, h.scale(), g->points.size(), &h.tubeShapes()); });
+        h.setTube(id, tube);
+    }
+    return guides.size();
+}
+
+std::size_t editTubeShape(GuideHierarchy& h, const TubeShapeOp& op) {
+    if (op.name.empty()) refuse("bad_request", "give the tube shape's name");
+    const CustomTubeShapePtr old = h.tubeShape(op.name);
+    if (op.op == "add" || op.op == "set") {
+        if (op.op == "add" && old) refuse("bad_request", "a tube shape named '" + op.name + "' exists");
+        if (op.op == "set" && !old) refuse("not_found", "no tube shape named '" + op.name + "'");
+        const std::vector<SectionPoint> points = op.points ? *op.points : old ? old->points : std::vector<SectionPoint>{};
+        if (points.size() < 3) refuse("bad_request", "a tube shape needs at least 3 points");
+        core([&] { h.setTubeShape(op.name, points, op.smooth ? *op.smooth : old ? old->smooth : true); return 0; });
+        if (op.op == "add" && !op.give.empty()) {
+            if (op.profile != "shape" && op.profile != "midShape" && op.profile != "tipShape") {
+                refuse("bad_request", "a tube's profile is shape, midShape or tipShape");
+            }
+            const std::string give = nlohmann::json{{op.profile, op.name}}.dump();
+            for (const GuideId id : op.give) {
+                if (const HierarchyGuide* g = h.guide(id)) h.setTube(id, editedTube(g->tube, give, h.scale(), g->points.size(), &h.tubeShapes()));
+            }
+        }
+        return h.tubeShapeUsers(op.name);
+    }
+    if (!old) refuse("not_found", "no tube shape named '" + op.name + "'");
+    if (op.op == "rename") {
+        if (op.to.empty()) refuse("bad_request", "give the tube shape's new name");
+        core([&] { h.renameTubeShape(op.name, op.to); return 0; });
+        return h.tubeShapeUsers(op.to);
+    }
+    if (op.op == "remove") return h.removeTubeShape(op.name);
+    refuse("bad_request", "a tube shape edit is add, set, rename or remove, not '" + op.op + "'");
+}
+
+std::string tubeShapeLabel(const TubeShapeOp& op) {
+    if (op.op == "add") return op.give.empty() ? "add tube shape" : "tube shape";
+    if (op.op == "set") return "edit tube shape";
+    return op.op + " tube shape";
 }
 
 }  // namespace groomlab

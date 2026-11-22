@@ -27,6 +27,7 @@
 #include "groomlab/card_maps.h"
 #include "groomlab/cards.h"
 #include "groomlab/display.h"
+#include "groomlab/editor/guide_edits.h"
 #include "groomlab/editor/graph_edits.h"
 #include "groomlab/editor/groom_edit.h"
 #include "groomlab/editor/map_edits.h"
@@ -959,6 +960,8 @@ public:
     std::string setTubeShape(const std::string& name, const std::vector<SectionPoint>* points, std::optional<bool> smooth);
     std::string renameTubeShape(const std::string& from, const std::string& to);
     std::string removeTubeShape(const std::string& name, std::size_t* users = nullptr);
+    // A library edit of the editor (guide_edits.h editTubeShape) as one step; *users its users after.
+    std::string editTubeShape(const TubeShapeOp& op, std::size_t* users);
     // A library shape's outline shown on the groom as `points` while the editor drags them (no
     // step, the stored guides untouched): until endTubePreview or the next tube edit.
     std::string previewTubeShape(const std::string& name, const std::vector<SectionPoint>& points, bool smooth);

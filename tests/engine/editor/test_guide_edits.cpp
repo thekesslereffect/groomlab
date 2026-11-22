@@ -147,3 +147,33 @@ TEST(GuideEdits, OpsCheckWhatTheyAreGivenThenEditTheHierarchy) {
     EXPECT_EQ(guideOpLabel(mirror), "mirror group");
     EXPECT_EQ(guideOpLabel(set), "set frizz");
 }
+
+TEST(GuideEdits, TubesAndTheTubeShapeLibrary) {
+    TwoGroups t;
+    EXPECT_EQ(editTubes(t.h, {t.a1, t.b1}, R"({"aspect": 0.5})"), 2u);
+    ASSERT_FALSE(t.h.guide(t.a1)->tube.aspect.empty());
+    EXPECT_FLOAT_EQ(t.h.guide(t.a1)->tube.aspect.front(), 0.5f);
+    EXPECT_THROW(editTubes(t.h, {}, R"({"aspect": 0.5})"), GuideEditError);
+    EXPECT_THROW(editTubes(t.h, {99999}, R"({"aspect": 0.5})"), GuideEditError);
+    TubeShapeOp add;
+    add.op = "add";
+    add.name = "leaf";
+    EXPECT_THROW(editTubeShape(t.h, add), GuideEditError) << "a new shape needs its points";
+    add.points = std::vector<SectionPoint>{{-1.0f, 0.0f}, {0.0f, 0.5f}, {1.0f, 0.0f}, {0.0f, -0.5f}};
+    add.give = {t.a2};
+    EXPECT_EQ(editTubeShape(t.h, add), 1u);
+    EXPECT_EQ(tubeShapeLabel(add), "tube shape");
+    EXPECT_THROW(editTubeShape(t.h, add), GuideEditError) << "taken";
+    TubeShapeOp rename;
+    rename.op = "rename";
+    rename.name = "leaf";
+    rename.to = "petal";
+    EXPECT_EQ(editTubeShape(t.h, rename), 1u);
+    TubeShapeOp remove;
+    remove.op = "remove";
+    remove.name = "leaf";
+    EXPECT_THROW(editTubeShape(t.h, remove), GuideEditError) << "renamed: no leaf";
+    remove.name = "petal";
+    EXPECT_EQ(editTubeShape(t.h, remove), 1u);
+    EXPECT_EQ(t.h.tubeShape("petal"), nullptr);
+}

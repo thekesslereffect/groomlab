@@ -8,6 +8,7 @@
 #include <stdexcept>
 
 #include "groom_document.h"
+#include "groomlab/editor/guide_edits.h"
 #include "groomlab/tube.h"
 
 namespace groomlab::app {
@@ -64,17 +65,8 @@ std::string GroomDocument::editTubes(const std::vector<GuideId>& guides, const j
     if (guides.empty()) return "no guides selected or soloed to edit";
     endTubePreview();
     const std::string text = edit.dump();
-    std::size_t changed = 0;
-    const std::string error = editGuides(label, [&](GuideHierarchy& h) {
-        for (const GuideId id : guides) {
-            const HierarchyGuide* g = h.guide(id);
-            if (!g) continue;
-            h.setTube(id, editedTube(g->tube, text, h.scale(), g->points.size(), &h.tubeShapes()));
-            ++changed;
-        }
-        if (changed == 0) throw std::invalid_argument("none of those guides is in the groom");
-    });
-    return error;
+    // Every host's (the editor's editTubes, guide_edits.h).
+    return editGuides(label, [&](GuideHierarchy& h) { groomlab::editTubes(h, guides, text); });
 }
 
 std::string GroomDocument::scaleTubes(const std::vector<GuideId>& guides, float factor) {
@@ -94,41 +86,44 @@ std::string GroomDocument::smoothTubes(const std::vector<GuideId>& guides, const
 
 std::string GroomDocument::addTubeShape(const std::string& name, const std::vector<SectionPoint>& points, bool smooth,
                                         const std::vector<GuideId>& give, const std::string& profile) {
-    endTubePreview();
-    return editGuides(give.empty() ? "add tube shape" : "tube shape", [&](GuideHierarchy& h) {
-        if (h.tubeShape(name)) throw std::invalid_argument("a tube shape named '" + name + "' exists");
-        h.setTubeShape(name, points, smooth);
-        const std::string edit = json{{profile, name}}.dump();
-        for (const GuideId id : give) {
-            if (const HierarchyGuide* g = h.guide(id)) h.setTube(id, editedTube(g->tube, edit, h.scale(), g->points.size(), &h.tubeShapes()));
-        }
-    });
+    TubeShapeOp op;  // every host's (the editor's editTubeShape, guide_edits.h)
+    op.op = "add";
+    op.name = name;
+    op.points = points;
+    op.smooth = smooth;
+    op.give = give;
+    op.profile = profile;
+    return editTubeShape(op, nullptr);
 }
 
 std::string GroomDocument::setTubeShape(const std::string& name, const std::vector<SectionPoint>* points, std::optional<bool> smooth) {
-    endTubePreview();
-    return editGuides("edit tube shape", [&](GuideHierarchy& h) {
-        const CustomTubeShapePtr old = h.tubeShape(name);
-        if (!old) throw std::invalid_argument("no tube shape named '" + name + "'");
-        h.setTubeShape(name, points ? *points : old->points, smooth ? *smooth : old->smooth);
-    });
+    TubeShapeOp op;
+    op.op = "set";
+    op.name = name;
+    if (points) op.points = *points;
+    op.smooth = smooth;
+    return editTubeShape(op, nullptr);
 }
 
 std::string GroomDocument::renameTubeShape(const std::string& from, const std::string& to) {
-    endTubePreview();
-    return editGuides("rename tube shape", [&](GuideHierarchy& h) {
-        if (!h.tubeShape(from)) throw std::invalid_argument("no tube shape named '" + from + "'");
-        h.renameTubeShape(from, to);
-    });
+    TubeShapeOp op;
+    op.op = "rename";
+    op.name = from;
+    op.to = to;
+    return editTubeShape(op, nullptr);
 }
 
 std::string GroomDocument::removeTubeShape(const std::string& name, std::size_t* users) {
+    TubeShapeOp op;
+    op.op = "remove";
+    op.name = name;
+    return editTubeShape(op, users);
+}
+
+std::string GroomDocument::editTubeShape(const TubeShapeOp& op, std::size_t* users) {
     endTubePreview();
     std::size_t count = 0;
-    const std::string error = editGuides("remove tube shape", [&](GuideHierarchy& h) {
-        if (!h.tubeShape(name)) throw std::invalid_argument("no tube shape named '" + name + "'");
-        count = h.removeTubeShape(name);
-    });
+    const std::string error = editGuides(tubeShapeLabel(op), [&](GuideHierarchy& h) { count = groomlab::editTubeShape(h, op); });
     if (users) *users = error.empty() ? count : 0;
     return error;
 }

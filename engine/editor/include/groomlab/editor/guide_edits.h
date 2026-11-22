@@ -6,6 +6,7 @@
 // of the authored one), evaluates and stores it in its undo step.
 
 #include <cstddef>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -97,5 +98,27 @@ struct GuideOpResult {
 GuideOpResult applyGuideOp(GuideHierarchy& h, const GuideOp& op);
 // The op's undo step's name, every host's ("add group", "mirror group", "set <layer>"...).
 std::string guideOpLabel(const GuideOp& op);
+
+// Tubes edited, every host's Tubes section (Maya's -setTube, the helper's tube_set / tube_scale /
+// tube_smooth): each of `guides`' tube by `edit` (tube.h editedTube's JSON: the keys given replace
+// theirs, widths as the hierarchy stores them). Returns the guides changed. Throws GuideEditError:
+// none given ("state"), one not there ("not_found"), an edit it cannot take ("bad_request").
+std::size_t editTubes(GuideHierarchy& h, const std::vector<GuideId>& guides, const std::string& edit);
+
+// An edit of the groom's tube shape library, as asked (every host's: add, set, rename, remove).
+struct TubeShapeOp {
+    std::string op;                                  // add, set, rename or remove
+    std::string name;                                // the shape
+    std::string to;                                  // rename's new name
+    std::optional<std::vector<SectionPoint>> points; // add (needed), set: its outline
+    std::optional<bool> smooth;                      // add (default smooth), set: kept when not given
+    std::vector<GuideId> give;                       // add: these guides take it at once (as `profile`)
+    std::string profile = "shape";                   // shape, midShape or tipShape
+};
+// The library edited, every guide taking the shape following it (remove: round). Returns the
+// guides taking the shape after (remove: the ones that took it). Throws GuideEditError.
+std::size_t editTubeShape(GuideHierarchy& h, const TubeShapeOp& op);
+// The edit's undo step name, every host's ("add tube shape", "edit tube shape"...).
+std::string tubeShapeLabel(const TubeShapeOp& op);
 
 }  // namespace groomlab

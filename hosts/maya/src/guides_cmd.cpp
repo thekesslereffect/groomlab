@@ -1189,40 +1189,22 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                 h->renameAttribute(from.asChar(), to.asChar());
             } else if (db.isFlagSet(kSetTube[0])) {
                 // Each target's tube edited by the JSON (editedTube: the keys given replace theirs;
-                // widths at the size shown).
-                const std::string edit = flagString(db, kSetTube[0], "").asChar();
+                // widths at the size shown): every host's (the editor's editTubes, guide_edits.h).
                 const std::vector<GuideId> ids = targets();
                 if (ids.empty()) return fail(kName, "-setTube: no guides (give -guide, -group or -level, or select some)");
-                for (const GuideId id : ids) {
-                    const HierarchyGuide* g = h->guide(id);
-                    if (!g) return fail(kName, MString("no guide ") + std::to_string(id).c_str());
-                    h->setTube(id, editedTube(g->tube, edit, h->scale(), g->points.size(), &h->tubeShapes()));
-                }
-                setResult(static_cast<int>(ids.size()));
+                setResult(static_cast<int>(editTubes(*h, ids, flagString(db, kSetTube[0], "").asChar())));
             } else if (db.isFlagSet(kEditTubeShape[0])) {
                 // {"op": "add" | "set" | "rename" | "remove", "name", "points", "smooth", "to"}: the
-                // library edited, every guide taking the shape following (remove: round).
+                // library edited, every guide taking the shape following (remove: round): every
+                // host's (the editor's editTubeShape, guide_edits.h).
                 const nlohmann::json op = shapeOpJson(flagString(db, kEditTubeShape[0], ""));
-                const std::string kind = op.value("op", std::string());
-                const std::string name = op.value("name", std::string());
-                const bool exists = h->tubeShape(name) != nullptr;
-                if (kind == "add" || kind == "set") {
-                    if (kind == "add" && exists) return fail(kName, ("a tube shape named '" + name + "' exists").c_str());
-                    if (kind == "set" && !exists) return fail(kName, ("no tube shape named '" + name + "'").c_str());
-                    const CustomTubeShapePtr old = h->tubeShape(name);
-                    const bool smooth = op.contains("smooth") ? op["smooth"].get<bool>() : (old ? old->smooth : true);
-                    const std::vector<SectionPoint> points =
-                        op.contains("points") ? shapePoints(op["points"]) : (old ? old->points : std::vector<SectionPoint>{});
-                    h->setTubeShape(name, points, smooth);
-                    setResult(static_cast<int>(h->tubeShapeUsers(name)));
-                } else if (kind == "rename") {
-                    h->renameTubeShape(name, op.value("to", std::string()));
-                    setResult(static_cast<int>(h->tubeShapeUsers(op.value("to", std::string()))));
-                } else if (kind == "remove") {
-                    setResult(static_cast<int>(h->removeTubeShape(name)));
-                } else {
-                    return fail(kName, "-editTubeShape: op is add, set, rename or remove");
-                }
+                TubeShapeOp edit;
+                edit.op = op.value("op", std::string());
+                edit.name = op.value("name", std::string());
+                edit.to = op.value("to", std::string());
+                if (op.contains("smooth")) edit.smooth = op["smooth"].get<bool>();
+                if (op.contains("points")) edit.points = shapePoints(op["points"]);
+                setResult(static_cast<int>(editTubeShape(*h, edit)));
                 auto* shape = dynamic_cast<GroomShape*>(groomFn.userNode());
                 if (shape) shape->setPreviewHierarchy(nullptr);  // a live preview of the shape ends with its commit
             } else if (db.isFlagSet(kSetAttribute[0])) {

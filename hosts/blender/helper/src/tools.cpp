@@ -1613,10 +1613,10 @@ json tubeEdit(ToolState& t, const json& args, const std::string& label, const js
     const std::string text = tubeEditToGroom(t.session.space, edit);
     std::size_t changed = 0;
     editGuides(t, label, [&](GuideHierarchy& h) {
-        for (const GuideId id : targetGuides(t, h, args, false, label)) {
-            const HierarchyGuide* g = h.guide(id);
-            h.setTube(id, editedTube(g->tube, text, h.scale(), g->points.size(), &h.tubeShapes()));
-            ++changed;
+        try {  // every host's (the editor's editTubes, guide_edits.h)
+            changed = editTubes(h, targetGuides(t, h, args, false, label), text);
+        } catch (const GuideEditError& e) {
+            fail(e.code, e.what());
         }
     });
     return {{"changed", changed}, {"undo", undoJson(t)}};
@@ -1728,31 +1728,21 @@ std::vector<SectionPoint> shapePointsOf(const json& v) {
 // The library edited (Maya's -editTubeShape): add, set (points and/or smooth), rename, remove.
 // Every guide taking the shape follows (remove: round). One undo step; a live preview ends.
 json tubeShapeEdit(ToolState& t, const std::string& op, const json& args) {
-    const std::string name = needString(args, "name");
+    TubeShapeOp edit;  // every host's (the editor's editTubeShape, guide_edits.h)
+    edit.op = op;
+    edit.name = needString(args, "name");
+    if (op == "rename") edit.to = needString(args, "to");
+    if (given(args, "smooth")) edit.smooth = settingBool(args["smooth"], "smooth");
+    if (given(args, "points")) edit.points = shapePointsOf(args["points"]);
     std::size_t users = 0;
     t.session.groom->setPreviewHierarchy(nullptr);
-    editGuides(t, op == "add" ? "add tube shape" : op == "set" ? "edit tube shape" : op == "rename" ? "rename tube shape" : "remove tube shape",
-               [&](GuideHierarchy& h) {
-                   const CustomTubeShapePtr old = h.tubeShape(name);
-                   if (op == "add" || op == "set") {
-                       if (op == "add" && old) fail("bad_request", "a tube shape named '" + name + "' exists");
-                       if (op == "set" && !old) fail("not_found", "no tube shape named '" + name + "'");
-                       const bool smooth = given(args, "smooth") ? settingBool(args["smooth"], "smooth") : (old ? old->smooth : true);
-                       const std::vector<SectionPoint> points =
-                           given(args, "points") ? shapePointsOf(args["points"]) : (old ? old->points : std::vector<SectionPoint>{});
-                       if (points.empty()) fail("bad_request", "a new tube shape needs its points");
-                       h.setTubeShape(name, points, smooth);
-                       users = h.tubeShapeUsers(name);
-                   } else if (op == "rename") {
-                       if (!old) fail("not_found", "no tube shape named '" + name + "'");
-                       const std::string to = needString(args, "to");
-                       h.renameTubeShape(name, to);
-                       users = h.tubeShapeUsers(to);
-                   } else {
-                       if (!old) fail("not_found", "no tube shape named '" + name + "'");
-                       users = h.removeTubeShape(name);
-                   }
-               });
+    editGuides(t, tubeShapeLabel(edit), [&](GuideHierarchy& h) {
+        try {
+            users = editTubeShape(h, edit);
+        } catch (const GuideEditError& e) {
+            fail(e.code, e.what());
+        }
+    });
     return {{"users", users}, {"undo", undoJson(t)}, {"shapes", tubeShapes(t)["shapes"]}};
 }
 
