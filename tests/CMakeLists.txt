@@ -51,6 +51,7 @@ add_executable(groomlab_tests
     engine/core/test_root_subdivision.cpp
     engine/core/test_incremental.cpp
     engine/core/test_keyed_params.cpp
+    engine/editor/test_edit_history.cpp
     engine/core/test_value_inputs.cpp
     engine/core/test_cards.cpp
     engine/core/test_card_separation.cpp
@@ -122,7 +123,7 @@ add_executable(groomlab_tests
     # "internal.h" is example_node/internal.h, which gives it op::kExample.
     ${PROJECT_SOURCE_DIR}/tools/dev/new_node/example_op.cpp
 )
-target_link_libraries(groomlab_tests PRIVATE groomlab::core groomlab::warnings GTest::gtest_main nlohmann_json::nlohmann_json)
+target_link_libraries(groomlab_tests PRIVATE groomlab::core groomlab::editor groomlab::warnings GTest::gtest_main nlohmann_json::nlohmann_json)
 # stb_image's declarations (the core holds its code): the card map tests read their files back.
 target_include_directories(groomlab_tests SYSTEM PRIVATE "${PROJECT_SOURCE_DIR}/third_party/stb")
 if(WIN32)

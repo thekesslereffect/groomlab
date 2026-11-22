@@ -214,7 +214,7 @@ target_compile_definitions(groomlab_app_lib PUBLIC "GROOMLAB_SHIPPED_MESHES=${_s
 # The GPU look preview's engine (engine/gpu/, Windows: Direct3D 11 and OpenGL) runs the graph's last
 # nodes on QRhi's device while a param is dragged or guides are brushed (src/gpu_preview.h).
 target_link_libraries(groomlab_app_lib
-    PUBLIC groomlab::core groomlab::alembic groomlab::gpu Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Network
+    PUBLIC groomlab::core groomlab::editor groomlab::alembic groomlab::gpu Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Network
     PRIVATE nlohmann_json::nlohmann_json groomlab::warnings)
 groomlab_precompile(groomlab_app_lib <nlohmann/json.hpp> <QByteArray> <QColor> <QElapsedTimer> <QImage>
     <QMatrix4x4> <QObject> <QPointF> <QSize> <QString> <QVector3D>)

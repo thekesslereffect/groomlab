@@ -41,18 +41,18 @@ bool hexColor(const std::string& text) {
 
 // ---- Side effects of a step: files and group colors -------------------------------------------------
 
-void GroomDocument::attachSide(std::size_t undoBefore, const std::string& label, std::vector<Edit::FileState> files,
+void GroomDocument::attachSide(std::size_t undoBefore, const std::string& label, std::vector<FileState> files,
                                const std::map<std::string, std::string>* colorsBefore) {
     const bool colorsChanged = colorsBefore && *colorsBefore != groupColors_;
     if (files.empty() && !colorsChanged) return;
-    if (!(undoIndex_ > undoBefore && undoIndex_ == edits_.size())) {
+    if (!history_.recordedSince(undoBefore)) {
         Edit side;
         side.side = true;
         side.label = label;
         record(std::move(side));
     }
-    Edit& e = edits_.back();
-    for (Edit::FileState& f : files) e.files.push_back(std::move(f));
+    Edit& e = history_.last();
+    for (FileState& f : files) e.files.push_back(std::move(f));
     if (colorsChanged) {
         if (!e.colors) e.colorsBefore = *colorsBefore;
         e.colors = true;
@@ -94,7 +94,7 @@ std::string GroomDocument::setGroupColor(const std::string& group, const std::st
     const std::map<std::string, std::string> before = groupColors_;
     if (c.empty()) groupColors_.erase(group);
     else groupColors_[group] = c;
-    attachSide(undoIndex_, (c.empty() ? "default color of " : "color of ") + group, {}, &before);
+    attachSide(history_.undoIndex(), (c.empty() ? "default color of " : "color of ") + group, {}, &before);
     return {};
 }
 
@@ -103,7 +103,7 @@ std::string GroomDocument::renameGroup(const std::string& from, const std::strin
     if (from.empty() || to.empty()) return "a group needs a name";
     if (from == to) return {};
     const std::map<std::string, std::string> before = groupColors_;
-    const std::size_t undoBefore = undoIndex_;
+    const std::size_t undoBefore = history_.undoIndex();
     const std::string error = editGuides("rename group", [&](GuideHierarchy& h) {
         const GroupId id = h.findGroup(from);
         if (id == kNoGroup) throw std::invalid_argument("no group named " + from);
@@ -130,7 +130,7 @@ std::string GroomDocument::renameGroup(const std::string& from, const std::strin
         applyGraph();
         return failed;
     }
-    Edit& entry = edits_.back();
+    Edit& entry = history_.last();
     entry.whole = true;
     entry.graphBefore = graphBefore;
     entry.graphAfter = graph_;
@@ -166,7 +166,7 @@ std::string GroomDocument::storedMapPath(const std::string& full) const {
     return pathFromGroomFolder(full, std::filesystem::u8path(path_).parent_path().u8string());
 }
 
-std::string GroomDocument::mapImageFile(const std::string& map, const std::string& path, std::vector<Edit::FileState>* copied, int* channels) {
+std::string GroomDocument::mapImageFile(const std::string& map, const std::string& path, std::vector<FileState>* copied, int* channels) {
     if (path.empty()) throw std::runtime_error("give the image's path");
     std::error_code ec;
     if (fileStamp(path) == 0) throw std::runtime_error("no image at " + path);  // (a tile set: any tile)
@@ -182,18 +182,18 @@ std::string GroomDocument::mapImageFile(const std::string& map, const std::strin
     // Another format is copied into the maps folder as a PNG (painting writes PNG).
     if (mapsDirectory().empty()) throw std::runtime_error("save the groom first: a JPEG, TGA, PSD... is copied as a PNG into the groomlab folder beside it");
     const std::string target = freeMapFile(map);
-    std::vector<Edit::FileState> states = mapImageStates(target, image->isUdim() ? image->udimTiles() : std::vector<int>{});
+    std::vector<FileState> states = mapImageStates(target, image->isUdim() ? image->udimTiles() : std::vector<int>{});
     std::filesystem::create_directories(std::filesystem::u8path(target).parent_path(), ec);
     try {
         writeImagePng(*image, target);  // (a tile set: each tile, udimPathFor(target))
     } catch (const std::exception& e) {
         throw std::runtime_error("could not write " + target + ": " + e.what());
     }
-    std::vector<Edit::FileState> made;
+    std::vector<FileState> made;
     finishFileStates(states);
     made.insert(made.end(), states.begin(), states.end());
     if (copied) {
-        for (Edit::FileState& state : made) copied->push_back(std::move(state));
+        for (FileState& state : made) copied->push_back(std::move(state));
     }
     return target;
 }
@@ -217,8 +217,8 @@ std::string GroomDocument::removeMap(const std::string& name, bool deleteFile, b
     } catch (const std::exception& e) {
         return e.what();
     }
-    const std::size_t undoBefore = undoIndex_;
-    std::vector<Edit::FileState> files;
+    const std::size_t undoBefore = history_.undoIndex();
+    std::vector<FileState> files;
     if (kind == "guides") {
         const std::string error = editGuides(label, [&](GuideHierarchy& h) { h.removeAttribute(name); });
         if (!error.empty()) return error;
@@ -232,7 +232,7 @@ std::string GroomDocument::removeMap(const std::string& name, bool deleteFile, b
         std::error_code ec;
         if (deleteFile && mapImageDeletable(file, mapsDirectory(), shared)) {  // every host's rule (asset_files.h)
             // (A tile set: every tile's file.)
-            for (Edit::FileState& state : mapImageStates(file)) {
+            for (FileState& state : mapImageStates(file)) {
                 if (!state.before) continue;
                 std::filesystem::remove(std::filesystem::u8path(state.path), ec);
                 if (!ec) {
@@ -244,7 +244,7 @@ std::string GroomDocument::removeMap(const std::string& name, bool deleteFile, b
         paints_.erase(name);
         commitMaps(label, maps);
     }
-    if (graphChanged && undoIndex_ > undoBefore) {
+    if (graphChanged && history_.undoIndex() > undoBefore) {
         const json before = graph_;
         graph_ = std::move(graph);
         const std::string error = applyGraph();
@@ -252,7 +252,7 @@ std::string GroomDocument::removeMap(const std::string& name, bool deleteFile, b
             graph_ = before;
             applyGraph();
         } else {
-            Edit& entry = edits_.back();
+            Edit& entry = history_.last();
             entry.whole = true;
             entry.graphBefore = before;
             entry.graphAfter = graph_;
@@ -271,7 +271,7 @@ std::string GroomDocument::importMap(const std::string& path, std::string* made,
     if (taken(name)) return "the groom already has a map named '" + name + "'";
     const MeshPtr scalp = session().cageScalp();
     if (!scalp || !scalp->hasUVs()) return "the scalp has no UVs for a texture map";
-    std::vector<Edit::FileState> files;
+    std::vector<FileState> files;
     int channels = kGrayMap;
     std::string full;
     try {
@@ -285,7 +285,7 @@ std::string GroomDocument::importMap(const std::string& path, std::string* made,
     entry.texture = storedMapPath(full);
     entry.channels = channels;
     maps.maps[name] = std::move(entry);
-    const std::size_t undoBefore = undoIndex_;
+    const std::size_t undoBefore = history_.undoIndex();
     const std::string label = "import map " + name;
     commitMaps(label, maps);
     attachSide(undoBefore, label, std::move(files));
@@ -298,7 +298,7 @@ std::string GroomDocument::relinkMap(const std::string& name, const std::string&
     if (!source) return "no map named '" + name + "'";
     const std::string kind = source->kind;
     const int channels = source->channels;
-    std::vector<Edit::FileState> files;
+    std::vector<FileState> files;
     std::string full;
     try {
         full = mapImageFile(name, path, &files, nullptr);
@@ -333,9 +333,9 @@ std::string GroomDocument::relinkMap(const std::string& name, const std::string&
     edit.set(StrokeField::ScalpMaps, maps.toJson());
     paints_.erase(name);
     mapViewKey_ = 0;
-    const std::size_t undoBefore = undoIndex_;
+    const std::size_t undoBefore = history_.undoIndex();
     commitStroke(std::move(edit));
-    if (undoIndex_ > undoBefore) edits_.back().label = label;
+    if (history_.undoIndex() > undoBefore) history_.last().label = label;
     attachSide(undoBefore, label, std::move(files));
     return {};
 }
@@ -361,7 +361,7 @@ std::string GroomDocument::convertMap(const std::string& name, const std::string
     const int channels = source->channels;
     ScalpMaps maps = session().scalpMaps();
     const HierarchyPtr authored = session().authoredHierarchy();
-    std::vector<Edit::FileState> files;
+    std::vector<FileState> files;
     const std::string label = "convert map " + name;
     StrokeEdit edit;
     edit.mode = label;
@@ -400,7 +400,7 @@ std::string GroomDocument::convertMap(const std::string& name, const std::string
         } else if (to == "texture") {
             const std::string file = freeMapFile(name);
             const TexturePaint& paint = *converted.texture;
-            std::vector<Edit::FileState> states = mapImageStates(file, tilesOf(paint));
+            std::vector<FileState> states = mapImageStates(file, tilesOf(paint));
             std::error_code ec;
             std::filesystem::create_directories(std::filesystem::u8path(file).parent_path(), ec);
             paint.save(file);
@@ -419,15 +419,15 @@ std::string GroomDocument::convertMap(const std::string& name, const std::string
             edit.set(StrokeField::Guides, h.toJson());
         }
     } catch (const std::exception& e) {
-        for (const Edit::FileState& f : files) putFileState(f.path, f.before);
+        for (const FileState& f : files) putFileState(f.path, f.before);
         return e.what();
     }
     paints_.erase(name);
     mapViewKey_ = 0;
     edit.set(StrokeField::ScalpMaps, maps.toJson());
-    const std::size_t undoBefore = undoIndex_;
+    const std::size_t undoBefore = history_.undoIndex();
     commitStroke(std::move(edit));
-    if (undoIndex_ > undoBefore) edits_.back().label = label;
+    if (history_.undoIndex() > undoBefore) history_.last().label = label;
     attachSide(undoBefore, label, std::move(files));
     return {};
 }
@@ -440,7 +440,7 @@ std::string GroomDocument::setMapChannels(const std::string& name, int wanted) {
     if (source->channels == wanted) return {};
     ScalpMaps maps = session().scalpMaps();
     ScalpMapEntry& entry = maps.maps[name];
-    std::vector<Edit::FileState> files;
+    std::vector<FileState> files;
     const std::string label = "map channels " + name;
     if (entry.kind == "vertices") {
         entry.values = convertMapChannels(entry.values, entry.channels == kColorMap ? kColorMap : kGrayMap, wanted);
@@ -452,7 +452,7 @@ std::string GroomDocument::setMapChannels(const std::string& name, int wanted) {
             requirePaintablePng(full);
             const std::shared_ptr<TexturePaint> paint = openTexturePaint(*scalp, full, entry.channels == kColorMap ? kColorMap : kGrayMap, 1024);
             paint->setChannels(wanted);
-            std::vector<Edit::FileState> states = mapImageStates(full, tilesOf(*paint));
+            std::vector<FileState> states = mapImageStates(full, tilesOf(*paint));
             paint->save(full);
             finishFileStates(states);
             files.insert(files.end(), states.begin(), states.end());
@@ -463,7 +463,7 @@ std::string GroomDocument::setMapChannels(const std::string& name, int wanted) {
         mapViewKey_ = 0;
     }
     entry.channels = wanted;
-    const std::size_t undoBefore = undoIndex_;
+    const std::size_t undoBefore = history_.undoIndex();
     commitMaps(label, maps);
     attachSide(undoBefore, label, std::move(files));
     return {};
@@ -503,12 +503,12 @@ std::string GroomDocument::fillMap(const std::string& name, float value, bool se
     const std::string full = textureMapFile(name);
     const MeshPtr scalp = session().scalp();
     if (!scalp) return "no scalp";
-    std::vector<Edit::FileState> files;
+    std::vector<FileState> files;
     try {
         requirePaintablePng(full);
         const std::shared_ptr<TexturePaint> paint = openTexturePaint(*scalp, full, channels, 1024);
         fillTexturePaint(*paint, mask, fill, mode, *scalp, faces);
-        std::vector<Edit::FileState> states = mapImageStates(full, tilesOf(*paint));
+        std::vector<FileState> states = mapImageStates(full, tilesOf(*paint));
         paint->save(full);
         finishFileStates(states);
             files.insert(files.end(), states.begin(), states.end());
@@ -517,7 +517,7 @@ std::string GroomDocument::fillMap(const std::string& name, float value, bool se
     }
     paints_.erase(name);
     mapViewKey_ = 0;
-    attachSide(undoIndex_, label, std::move(files));
+    attachSide(history_.undoIndex(), label, std::move(files));
     return {};
 }
 

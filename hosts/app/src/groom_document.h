@@ -27,6 +27,7 @@
 #include "groomlab/card_maps.h"
 #include "groomlab/cards.h"
 #include "groomlab/display.h"
+#include "groomlab/editor/groom_edit.h"
 #include "groomlab/frame_time.h"
 #include "groomlab/groom_file.h"
 #include "groomlab/groom_scene.h"
@@ -123,7 +124,7 @@ struct CardBakeFiles {
     std::size_t cards = 0, triangles = 0, textures = 0;
 };
 
-class GroomDocument {
+class GroomDocument : private EditorHost {
 public:
     // Reads the file, opens its caches, makes the session. Throws std::runtime_error (a
     // GroomFileError, AlembicError or GraphError's message).
@@ -469,11 +470,11 @@ public:
     // (graphChannelsJson, attributes.h; the guide layers as the guides' painted maps): what reaches
     // each node and from which node, what it writes and overwrites, whether its reads reach it.
     nlohmann::json channels() const;
-    bool canUndo() const { return undoIndex_ > 0; }
+    bool canUndo() const { return history_.canUndo(); }
     // Where the history stands (its undo steps done) and the step to undo: together they change
     // with every edit, undo and redo (a tool asks whether its press or release committed one).
-    std::size_t undoIndex() const { return undoIndex_; }
-    bool canRedo() const { return undoIndex_ < edits_.size(); }
+    std::size_t undoIndex() const { return history_.undoIndex(); }
+    bool canRedo() const { return history_.canRedo(); }
     std::string undoText() const;  // "Undo length.length", "Undo comb stroke" or ""
     std::string redoText() const;
     std::string undo();  // "" or the error
@@ -984,45 +985,23 @@ private:
     nlohmann::json* nodeJson(const std::string& node);
     const nlohmann::json* nodeJson(const std::string& node) const;
 
-    struct Edit {
-        std::string node, name;
-        nlohmann::json before, after;
-        bool bypass = false;  // an edit of the node's bypass, not a param
-        // A stroke or guide edit instead (the texts before and after), named by `label`.
-        std::shared_ptr<const StrokeEdit> stroke;
-        std::string label;
-        // A structural edit instead: the whole graph before and after, named by `label`.
-        bool whole = false;
-        nlohmann::json graphBefore, graphAfter;
-        // Besides (or alone: `side`, named by `label`): files written or deleted (their bytes
-        // before and after, nullopt: no file), the group colors before and after.
-        using FileState = groomlab::FileState;  // (asset_files.h: every host's)
-        std::vector<FileState> files;
-        bool side = false;
-        bool colors = false;
-        std::map<std::string, std::string> colorsBefore, colorsAfter;
-        // Scalp Subdivision before and after (levels, where they came from), with `side`.
-        struct Subdivision {
-            int levels = 0;
-            std::string from;
-        };
-        std::optional<std::pair<Subdivision, Subdivision>> subdivision;
-        // Show Tubes' nodes before and after (a rename, a removal: editGraph).
-        std::optional<std::pair<std::string, std::string>> braidTubes;
-    };
+    // An undo step and the history of them: the editor's (engine/editor groom_edit.h, every host's).
+    using Edit = GroomEdit;
     void record(Edit edit);
+    // EditorHost: the document as before or after a step (its stroke's texts, its graph or param,
+    // its files, colors and subdivision, Show Tubes' nodes); "" or the error.
+    std::string apply(const GroomEdit& edit, bool after) override;
     // The files and colors an edit changed, onto the step it recorded (the history held
     // `undoBefore` steps before it), else as a step of their own named `label`.
-    void attachSide(std::size_t undoBefore, const std::string& label, std::vector<Edit::FileState> files,
+    void attachSide(std::size_t undoBefore, const std::string& label, std::vector<FileState> files,
                     const std::map<std::string, std::string>* colorsBefore = nullptr);
     void applySide(const Edit& edit, bool after);
     // An image for a texture map (Maya's set_map_texture rules): a PNG in place, any other image
     // copied into the maps folder as <map>.png (*copied the file's states for the step). Returns
     // the path to store; throws std::runtime_error. *channels the image's.
-    std::string mapImageFile(const std::string& map, const std::string& path, std::vector<Edit::FileState>* copied, int* channels);
+    std::string mapImageFile(const std::string& map, const std::string& path, std::vector<FileState>* copied, int* channels);
     std::string freeMapFile(const std::string& name) const;  // <maps folder>/<name>.png, a free name
     std::string storedMapPath(const std::string& full) const;  // as every host stores it (relative to the groom)
-    static std::string editName(const Edit& edit);  // "node.param" or the stroke's label
     // The held preview value applied to the graph (nothing when none is held).
     void commitPreview();
     // setParam's work once a preview is out of the way: the JSON, the session, the history.
@@ -1058,8 +1037,7 @@ private:
     nlohmann::json graph_;
     nlohmann::json specs_;  // by type
     mutable std::map<std::string, nlohmann::json> resolvedSpecs_;  // a Compound's or Input's, by its node JSON
-    std::vector<Edit> edits_;
-    std::size_t undoIndex_ = 0;
+    EditHistory history_;
     bool dirty_ = false;
     std::optional<std::vector<TransferMarker>> transferMarkers_;
     std::optional<std::string> cardBlock_;  // set since the scene was made

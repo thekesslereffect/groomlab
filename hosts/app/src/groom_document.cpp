@@ -260,7 +260,7 @@ void GroomDocument::commitMaps(const std::string& label, const ScalpMaps& maps) 
     edit.mode = label;
     edit.set(StrokeField::ScalpMaps, maps.toJson());
     commitStroke(std::move(edit));
-    edits_.back().label = label;
+    history_.last().label = label;
 }
 
 std::string GroomDocument::createMap(const std::string& name, const std::string& kind, bool color, float value, int resolution,
@@ -369,7 +369,7 @@ std::string GroomDocument::renameMap(const std::string& from, const std::string&
         applyGraph();
         return error;
     }
-    Edit& entry = edits_.back();
+    Edit& entry = history_.last();
     entry.whole = true;
     entry.graphBefore = before;
     entry.graphAfter = graph_;
@@ -720,18 +720,16 @@ std::string GroomDocument::paintParam(const std::string& node, const std::string
                       [&](json& g) { g = json::parse(wireParamMap(g.dump(), session().scalpMaps(), node, name, map, kind)); });
     if (!error.empty()) {  // the map goes with the refused wiring
         undo();
-        edits_.resize(undoIndex_);
+        history_.dropRedo();
         return error;
     }
     // The map and the wiring as one step: undo takes both back.
-    Edit wiring = std::move(edits_.back());
-    edits_.pop_back();
-    Edit& step = edits_.back();
+    Edit wiring = history_.takeLast();
+    Edit& step = history_.last();
     step.whole = true;
     step.graphBefore = std::move(wiring.graphBefore);
     step.graphAfter = std::move(wiring.graphAfter);
     step.label = wiring.label;
-    undoIndex_ = edits_.size();
     if (mapName) *mapName = map;
     if (made) *made = true;
     return {};
@@ -1674,8 +1672,7 @@ std::string GroomDocument::transferToScalp(MeshPtr scalp, const TransferOptions&
     mapViewKey_ = 0;
     selection_.clear();
     ++selectionVersion_;
-    edits_.clear();  // the scalp itself changed: nothing before it can come back
-    undoIndex_ = 0;
+    history_.clear();  // the scalp itself changed: nothing before it can come back
     dirty_ = true;
     return {};
 }
@@ -1871,8 +1868,7 @@ std::string GroomDocument::replaceGraph(const std::string& graphJson) {
         applyGraph();
         return error;
     }
-    edits_.clear();
-    undoIndex_ = 0;
+    history_.clear();
     dirty_ = true;
     return {};
 }
@@ -1966,16 +1962,17 @@ std::string GroomDocument::applyParam(const std::string& node, const std::string
     return {};
 }
 
-void GroomDocument::record(Edit edit) {
-    edits_.resize(undoIndex_);  // what could be redone is gone
-    edits_.push_back(std::move(edit));
-    undoIndex_ = edits_.size();
-}
+void GroomDocument::record(Edit edit) { history_.record(std::move(edit)); }
 
 void GroomDocument::recordEdit(const std::string& node, const std::string& name, const json& before, const json& after) {
     commitPreview();  // a drag previewed elsewhere ends here: its value applied for real
     if (before == after) return;
-    record({node, name, before, after, false, nullptr, {}});
+    Edit edit;
+    edit.node = node;
+    edit.name = name;
+    edit.before = before;
+    edit.after = after;
+    record(std::move(edit));
 }
 
 void GroomDocument::commitStroke(StrokeEdit edit) {
@@ -2039,7 +2036,7 @@ std::string GroomDocument::editGuides(const std::string& label, const std::funct
         if (kept.size() != selection_.size()) setSelection(std::move(kept));
     }
     commitStroke(std::move(stroke));
-    edits_.back().label = label;
+    history_.last().label = label;
     return {};
 }
 
@@ -2088,9 +2085,13 @@ std::string GroomDocument::setBypass(const std::string& node, bool bypass) {
         return error;
     }
     dirty_ = true;
-    edits_.resize(undoIndex_);
-    edits_.push_back({node, "bypass", before, bypass, true});
-    undoIndex_ = edits_.size();
+    Edit edit;
+    edit.node = node;
+    edit.name = "bypass";
+    edit.before = before;
+    edit.after = bypass;
+    edit.bypass = true;
+    history_.record(std::move(edit));
     return {};
 }
 
@@ -2117,45 +2118,44 @@ std::string GroomDocument::setEvaluation(const std::string& node, const std::str
     });
 }
 
-std::string GroomDocument::editName(const Edit& edit) {
-    return edit.stroke || edit.whole || edit.side ? edit.label : edit.node + "." + edit.name;
-}
+std::string GroomDocument::undoText() const { return history_.undoText(); }
 
-std::string GroomDocument::undoText() const { return canUndo() ? "Undo " + editName(edits_[undoIndex_ - 1]) : std::string(); }
+std::string GroomDocument::redoText() const { return history_.redoText(); }
 
-std::string GroomDocument::redoText() const { return canRedo() ? "Redo " + editName(edits_[undoIndex_]) : std::string(); }
-
-std::string GroomDocument::undo() {
-    commitPreview();
-    if (!canUndo()) return {};
-    const Edit& edit = edits_[undoIndex_ - 1];
+std::string GroomDocument::apply(const GroomEdit& edit, bool after) {
     std::string error;
     if (edit.stroke) {
-        edit.stroke->apply(session(), false);
-        applyTextureEdit(*edit.stroke, false);
+        edit.stroke->apply(session(), after);
+        applyTextureEdit(*edit.stroke, after);
     }
     if (edit.stroke && !edit.whole) {
         // nothing more: the stroke's texts are back
     } else if (edit.whole) {
-        graph_ = edit.graphBefore;
+        graph_ = after ? edit.graphAfter : edit.graphBefore;
         error = applyGraph();
-    } else if (edit.bypass) {
-        if (json* n = nodeJson(edit.node)) {
-            (*n)["bypass"] = edit.before.get<bool>();
-            error = applyGraph();
-        }
     } else if (json* n = nodeJson(edit.node)) {
-        json& params = (*n)["params"];
-        if (edit.before.is_null()) {
-            params.erase(edit.name);
+        if (edit.bypass) {
+            (*n)["bypass"] = (after ? edit.after : edit.before).get<bool>();
         } else {
-            params[edit.name] = edit.before;
+            json& params = (*n)["params"];
+            const json& value = after ? edit.after : edit.before;
+            if (!after && value.is_null()) {  // (undone: a param the node left out goes again)
+                params.erase(edit.name);
+            } else {
+                params[edit.name] = value;
+            }
         }
         error = applyGraph();
     }
-    applySide(edit, false);  // its files and group colors
-    if (edit.braidTubes) braidTubes_ = edit.braidTubes->first;
-    --undoIndex_;
+    applySide(edit, after);  // its files and group colors
+    if (edit.braidTubes) braidTubes_ = after ? edit.braidTubes->second : edit.braidTubes->first;
+    return error;
+}
+
+std::string GroomDocument::undo() {
+    commitPreview();
+    if (!canUndo()) return {};
+    std::string error = undoStep(history_, *this);
     dirty_ = true;
     return error;
 }
@@ -2163,28 +2163,7 @@ std::string GroomDocument::undo() {
 std::string GroomDocument::redo() {
     commitPreview();
     if (!canRedo()) return {};
-    const Edit& edit = edits_[undoIndex_];
-    std::string error;
-    if (edit.stroke) {
-        edit.stroke->apply(session(), true);
-        applyTextureEdit(*edit.stroke, true);
-    }
-    if (edit.stroke && !edit.whole) {
-        // nothing more: the stroke's texts are back
-    } else if (edit.whole) {
-        graph_ = edit.graphAfter;
-        error = applyGraph();
-    } else if (json* n = nodeJson(edit.node)) {
-        if (edit.bypass) {
-            (*n)["bypass"] = edit.after.get<bool>();
-        } else {
-            (*n)["params"][edit.name] = edit.after;
-        }
-        error = applyGraph();
-    }
-    applySide(edit, true);
-    if (edit.braidTubes) braidTubes_ = edit.braidTubes->second;
-    ++undoIndex_;
+    std::string error = redoStep(history_, *this);
     dirty_ = true;
     return error;
 }
