@@ -598,7 +598,7 @@ TEST(AppGraphEditor, BackdropAndCanvasMenus) {
     if (graph->promptOpen()) graph->acceptPrompt();
     QMenu menu;
     EXPECT_EQ(graph->fillContextMenu(&menu, graph->backdropTitleBar(0).center()), NodeGraphView::MenuTarget::Backdrop);
-    EXPECT_EQ(shown(&menu), (std::vector<std::string>{"Rename...", "Color", "Delete Backdrop"}));
+    EXPECT_EQ(shown(&menu), (std::vector<std::string>{"Rename...", "Color", "Fold", "Delete Backdrop"}));
     QMenu* color = submenu(&menu, QStringLiteral("Color"));
     ASSERT_NE(color, nullptr);
     emit color->aboutToShow();

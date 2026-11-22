@@ -109,6 +109,34 @@ public:
     // unchanged, for text that holds no copied nodes, a node type this build lacks, or a link that
     // does not fit.
     std::vector<std::pair<std::string, std::string>> pasteNodes(const std::string& clipboard, double dx = 0.0, double dy = 0.0);
+    // Duplicate (every host's Ctrl+D): the nodes copied and pasted moved by (dx, dy) as above, and
+    // then every link from outside them into them made again into their copies, so the copies read
+    // what the nodes read (what the nodes fed stays theirs alone). Returns (copy, node) per node.
+    // GraphError, the graph unchanged, as pasteNodes.
+    std::vector<std::pair<std::string, std::string>> duplicateNodes(const std::vector<std::string>& names, double dx = 0.0, double dy = 0.0);
+    // Shift+drag from an output (every host's, a bundle of links picked up at once): every link
+    // reading src's `output` ("": its first) reads newSrc's `newOutput` instead, where it fits
+    // (connect's checks; a link that does not fit, or would make a cycle, stays as it was). Returns
+    // the (node, input) links moved, in the graph's order. GraphError for no such node or output.
+    std::vector<std::pair<std::string, std::string>> moveOutputLinks(const std::string& src, const std::string& output,
+                                                                     const std::string& newSrc, const std::string& newOutput = {});
+    // The links reading src's `output` ("": its first), as (node, input), in the graph's order.
+    std::vector<std::pair<std::string, std::string>> outputLinks(const std::string& src, const std::string& output = {}) const;
+
+    // ---- Pass-through outputs (every host's: right-click an input > Pass Through as Output) ----
+    // A node can hand any of its inputs on as an extra output, "thru_<input>" (passThroughOutput),
+    // listed in its "passThrough": whatever comes into that input comes out of it as it came, so it
+    // can feed the next node too (the node itself is not run for it). Its type is what feeds the
+    // input (the input's own type while nothing does). Loading a graph links what reads it to what
+    // feeds the input (resolvePassThrough); with nothing feeding the input, nothing reads it.
+    static std::string passThroughOutput(const std::string& input) { return "thru_" + input; }
+    // The input a pass-through output hands on ("" when `output` is not one).
+    static std::string passThroughInput(const std::string& output);
+    // The inputs the node passes through, in its "passThrough"'s order. GraphError for no such node.
+    std::vector<std::string> passThrough(const std::string& name) const;
+    // Turns an input's pass-through output on or off; off, the links reading it go. False when
+    // nothing changed. GraphError for no such node or input.
+    bool setPassThrough(const std::string& name, const std::string& input, bool on);
     // Every connection checked and made again in order (connect's checks), as when a host loads a
     // graph to edit it. Throws GraphError at the first that does not fit.
     void checkConnections();
@@ -272,6 +300,24 @@ private:
 
 // The graph with every param and node version written (GraphEdit::completeParams).
 std::string completeGraphJson(const std::string& graphJson);
+
+// Every link reading a pass-through output ("thru_<input>" of a node passing that input) made to
+// read what feeds that input instead (followed through pass-throughs feeding pass-throughs); a link
+// whose input nothing feeds goes. What loading a graph does (graph_io.h), and flattening compounds:
+// the result evaluates as the graph drawn.
+std::string resolvePassThroughJson(const std::string& graphJson);
+
+// ---- Inside a compound (every host's: double-click a Compound to go into it, the bar's path or
+// Backspace to come back out). `path` names the compound, one inside another by its path
+// ("outer/inner"). compoundGraphJson: the graph a Compound holds as a graph of its own (its Input
+// nodes, inner nodes, connections and output, the backdrops and pins drawn inside, and its exposed
+// params as "exposed": {name: "node.param"}, which a rename inside follows). withCompoundGraph: the
+// whole graph with the compound at `path` holding `innerJson` instead: the compound's inputs follow
+// its Input nodes (their names and types, in order; a link into an input it no longer has goes),
+// its exposed params naming a node it no longer holds go. GraphError for a path that is not a
+// Compound holding a graph, or an inner graph with no output node.
+std::string compoundGraphJson(const std::string& graphJson, const std::string& path);
+std::string withCompoundGraph(const std::string& graphJson, const std::string& path, const std::string& innerJson);
 
 // A node's spec as the edits see it (GraphEdit::nodeSpecJson), from the node's own JSON alone
 // (`nodeJson`: {"type", "params", "paramInputs"...}).

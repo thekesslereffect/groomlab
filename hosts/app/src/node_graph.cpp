@@ -55,6 +55,7 @@
 #include "groomlab/graph_edit.h"
 #include "groomlab/graph_inserts.h"
 #include "groomlab/graph_pins.h"
+#include "groomlab/graph_portals.h"
 #include "groomlab/node_catalog.h"
 #include "groomlab/node_library.h"
 
@@ -259,16 +260,23 @@ void NodeGraphView::rebuild() {
     wires_.clear();
     backdrops_.clear();
     pins_.clear();
+    portals_.clear();
     if (!document_) return;
-    // The backdrops as the graph keeps them (title, a rectangle, an optional color).
-    const nlohmann::json& graph = document_->graph();
+    // The backdrops as the graph keeps them (title, a rectangle, an optional color; folded).
+    const nlohmann::json& graph = document_->viewGraph();
     if (graph.contains("backdrops") && graph["backdrops"].is_array()) {
         for (const nlohmann::json& b : graph["backdrops"]) {
             if (!b.is_object()) continue;
             auto number = [&](const char* key, double fallback) { return b.contains(key) && b[key].is_number() ? b[key].get<double>() : fallback; };
             Backdrop drop;
             drop.title = QString::fromStdString(b.value("title", std::string("Backdrop")));
-            drop.rect = QRectF(number("x", 0.0), number("y", 0.0), std::max(1.0, number("w", 200.0)), std::max(1.0, number("h", 150.0)));
+            drop.full = QRectF(number("x", 0.0), number("y", 0.0), std::max(1.0, number("w", 200.0)), std::max(1.0, number("h", 150.0)));
+            drop.folded = groomlab::backdropFolded(b);
+            drop.rect = drop.full;
+            if (drop.folded) {
+                const LayoutBox box = foldedBackdrop({"", drop.full.x(), drop.full.y(), drop.full.width(), drop.full.height()}, kBackdropHeader);
+                drop.rect = QRectF(box.x, box.y, box.w, box.h);
+            }
             drop.color = theme::nodeBody().lighter(140);
             if (b.contains("color") && b["color"].is_array() && b["color"].size() == 3 && b["color"][0].is_number()) {
                 drop.color = QColor(std::clamp(b["color"][0].get<int>(), 0, 255), std::clamp(b["color"][1].get<int>(), 0, 255),
@@ -334,12 +342,41 @@ void NodeGraphView::rebuild() {
         nodes_.push_back(std::move(node));
     }
     autoLayout();
+    // Nodes on a folded backdrop are hidden (its title bar stands for them).
+    for (Node& n : nodes_) {
+        for (std::size_t b = 0; b < backdrops_.size(); ++b) {
+            if (backdrops_[b].folded && backdrops_[b].full.contains(QRectF(n.pos, n.size).center())) n.foldedIn = static_cast<int>(b);
+        }
+    }
     auto index = [this](const std::string& name) {
         for (std::size_t i = 0; i < nodes_.size(); ++i) {
             if (nodes_[i].name == name) return static_cast<int>(i);
         }
         return -1;
     };
+    // The portals' dots: each entry by its source output, then its exits (graph_portals.h).
+    for (const nlohmann::json& p : graph.value("portals", nlohmann::json::array())) {
+        if (!p.is_object()) continue;
+        Portal entry;
+        entry.name = p.value("name", std::string());
+        entry.pos = QPointF(p.value("x", 0.0), p.value("y", 0.0));
+        entry.from = index(p.value("from", std::string()));
+        if (entry.from < 0) continue;
+        const std::string output = p.value("output", std::string());
+        for (std::size_t o = 0; o < nodes_[entry.from].outputs.size(); ++o) {
+            if (nodes_[entry.from].outputs[o].name == output) entry.output = static_cast<int>(o);
+        }
+        entry.color = theme::portColor(nodes_[entry.from].outputs.empty() ? std::string() : nodes_[entry.from].outputs[entry.output].type);
+        portals_.push_back(entry);
+        const nlohmann::json exits = p.value("exits", nlohmann::json::array());
+        for (std::size_t e = 0; e < exits.size(); ++e) {
+            Portal exit = entry;
+            exit.exit = static_cast<int>(e);
+            exit.pos = QPointF(exits[e].value("x", 0.0), exits[e].value("y", 0.0));
+            portals_.push_back(exit);
+        }
+    }
+    if (selectedPortal_ >= static_cast<int>(portals_.size())) selectedPortal_ = -1;
     for (const GroomDocument::ConnectionInfo& c : document_->connections()) {
         Wire wire;
         wire.from = index(c.from);
@@ -356,8 +393,15 @@ void NodeGraphView::rebuild() {
             if (to.inputs[i].name == c.input) wire.input = static_cast<int>(i);
         }
         if (wire.input < 0) continue;  // a Field port the spec does not list: not drawn
+        wire.hidden = from.foldedIn >= 0 && from.foldedIn == to.foldedIn;
+        // Through a portal: it comes out of an exit's dot (its pins are not drawn then).
+        if (const auto exit = portalOfLink(graph, c.to, c.input)) {
+            for (std::size_t i = 0; i < portals_.size(); ++i) {
+                if (portals_[i].name == exit->portal && portals_[i].exit == exit->exit) wire.portal = static_cast<int>(i);
+            }
+        }
         // The pins it runs through (each made once: a bundle's wires share theirs).
-        for (const std::string& id : pinRoute(graph, c.to, c.input)) {
+        for (const std::string& id : wire.portal >= 0 ? std::vector<std::string>() : pinRoute(graph, c.to, c.input)) {
             int at = -1;
             for (std::size_t i = 0; i < pins_.size(); ++i) {
                 if (pins_[i].id == id) at = static_cast<int>(i);
@@ -409,7 +453,7 @@ void NodeGraphView::autoLayout() {
     std::map<std::string, std::pair<double, double>> placed;
     if (document_) {
         try {
-            placed = layoutPositions(GraphEdit(document_->graph().dump()), layout, &unplaced);
+            placed = layoutPositions(GraphEdit(document_->viewGraph().dump()), layout, &unplaced);
         } catch (const std::exception&) {  // (a graph the core cannot read: one column below)
         }
     }
@@ -434,42 +478,55 @@ QPointF NodeGraphView::outputPos(const Node& node, int port) const {
     return QPointF(node.pos.x() + node.size.width(), node.pos.y() + kHeader + kBodyPadding + kRow * (port + 0.5));
 }
 
-QPainterPath NodeGraphView::wirePath(const QPointF& from, const QPointF& to, qreal below) const {
+QPainterPath NodeGraphView::routed(const QPointF& from, const QPointF& to, qreal below, bool through) const {
+    // The wire style's route (the core's, every host's): smooth, square or rounded.
     QPainterPath path(from);
-    if (to.x() >= from.x() + 30.0) {
-        const qreal dx = std::max(60.0, std::abs(to.x() - from.x()) * 0.5);
-        path.cubicTo(from + QPointF(dx, 0), to - QPointF(dx, 0), to);
-        return path;
+    for (const WireStep& s : wireRoute(wireStyle_, from.x(), from.y(), to.x(), to.y(), below, through)) {
+        if (s.cubic) path.cubicTo(QPointF(s.c1x, s.c1y), QPointF(s.c2x, s.c2y), QPointF(s.x, s.y));
+        else path.lineTo(s.x, s.y);
     }
-    // Backwards (the input left of the output): out to the right, down under both nodes, back
-    // along under them, up into the input from its left, so the wire never crosses the cards.
-    const qreal y = std::isnan(below) ? std::max(from.y(), to.y()) + 60.0 : below + 24.0;
-    constexpr qreal r = 40.0;
-    path.cubicTo(from + QPointF(r, 0), QPointF(from.x() + r, y), QPointF(from.x(), y));
-    path.lineTo(to.x(), y);
-    path.cubicTo(QPointF(to.x() - r, y), to - QPointF(r, 0), to);
     return path;
+}
+
+QPainterPath NodeGraphView::wirePath(const QPointF& from, const QPointF& to, qreal below) const { return routed(from, to, below, false); }
+
+QPointF NodeGraphView::wireStart(const Wire& wire) const {
+    const Node& from = nodes_[wire.from];
+    if (from.foldedIn >= 0) {  // out of a folded backdrop: its right edge
+        const QRectF& r = backdrops_[from.foldedIn].rect;
+        return QPointF(r.right(), r.center().y());
+    }
+    return outputPos(from, wire.output);
+}
+
+QPointF NodeGraphView::wireEnd(const Wire& wire) const {
+    const Node& to = nodes_[wire.to];
+    if (to.foldedIn >= 0) {  // into a folded backdrop: its left edge
+        const QRectF& r = backdrops_[to.foldedIn].rect;
+        return QPointF(r.left(), r.center().y());
+    }
+    return inputPos(to, wire.input);
 }
 
 QPainterPath NodeGraphView::wirePathFor(const Wire& wire) const {
     const Node& from = nodes_[wire.from];
     const Node& to = nodes_[wire.to];
+    if (wire.portal >= 0 && wire.portal < static_cast<int>(portals_.size())) {
+        // Out of its portal's exit: from the dot to the input.
+        return routed(portals_[wire.portal].pos + QPointF(kPinNub, 0.0), wireEnd(wire), std::nan(""), true);
+    }
     if (!wire.pins.empty()) {
         // Through its pins: each piece leaves level and arrives level (as Maya's, and Unreal's
         // reroute nodes), wherever the pins lie.
-        std::vector<QPointF> points{outputPos(from, wire.output)};
+        std::vector<QPointF> points{wireStart(wire)};
         for (int p : wire.pins) points.push_back(pins_[p].pos);
-        points.push_back(inputPos(to, wire.input));
+        points.push_back(wireEnd(wire));
         QPainterPath path(points.front());
-        for (std::size_t i = 1; i < points.size(); ++i) {
-            const QPointF a = points[i - 1], b = points[i];
-            const qreal dx = std::max(50.0, std::abs(b.x() - a.x()) * 0.5);
-            path.cubicTo(a + QPointF(dx, 0), b - QPointF(dx, 0), b);
-        }
+        for (std::size_t i = 1; i < points.size(); ++i) path.connectPath(routed(points[i - 1], points[i], std::nan(""), true));
         return path;
     }
     const qreal below = std::max(from.pos.y() + from.size.height(), to.pos.y() + to.size.height());
-    return wirePath(outputPos(from, wire.output), inputPos(to, wire.input), below);
+    return wirePath(wireStart(wire), wireEnd(wire), below);
 }
 
 int NodeGraphView::pinAt(const QPointF& scene, bool* nub) const {
@@ -485,16 +542,13 @@ int NodeGraphView::pinAt(const QPointF& scene, bool* nub) const {
 }
 
 int NodeGraphView::pieceAt(const Wire& wire, const QPointF& scene) const {
-    std::vector<QPointF> points{outputPos(nodes_[wire.from], wire.output)};
+    std::vector<QPointF> points{wireStart(wire)};
     for (int p : wire.pins) points.push_back(pins_[p].pos);
-    points.push_back(inputPos(nodes_[wire.to], wire.input));
+    points.push_back(wireEnd(wire));
     int best = 0;
     qreal nearest = std::numeric_limits<qreal>::max();
     for (std::size_t k = 1; k < points.size(); ++k) {
-        const QPointF a = points[k - 1], b = points[k];
-        const qreal dx = std::max(50.0, std::abs(b.x() - a.x()) * 0.5);
-        QPainterPath piece(a);
-        piece.cubicTo(a + QPointF(dx, 0), b - QPointF(dx, 0), b);
+        const QPainterPath piece = routed(points[k - 1], points[k], std::nan(""), true);
         for (int i = 0; i <= 16; ++i) {
             const QPointF d = piece.pointAtPercent(i / 16.0) - scene;
             const qreal d2 = d.x() * d.x() + d.y() * d.y();
@@ -677,7 +731,7 @@ void NodeGraphView::selectInRect(const QRectF& widgetRect, bool add) {
     const QRectF scene(toScene(widgetRect.topLeft()), toScene(widgetRect.bottomRight()));
     std::vector<std::string> names = add ? selection_ : std::vector<std::string>();
     for (const Node& n : nodes_) {
-        if (QRectF(n.pos, n.size).intersects(scene.normalized()) && std::find(names.begin(), names.end(), n.name) == names.end()) {
+        if (n.foldedIn < 0 && QRectF(n.pos, n.size).intersects(scene.normalized()) && std::find(names.begin(), names.end(), n.name) == names.end()) {
             names.push_back(n.name);
         }
     }
@@ -694,7 +748,7 @@ void NodeGraphView::selectInRect(const QRectF& widgetRect, bool add) {
 
 int NodeGraphView::nodeAt(const QPointF& scene) const {
     for (int i = static_cast<int>(nodes_.size()) - 1; i >= 0; --i) {
-        if (QRectF(nodes_[i].pos, nodes_[i].size).contains(scene)) return i;
+        if (nodes_[i].foldedIn < 0 && QRectF(nodes_[i].pos, nodes_[i].size).contains(scene)) return i;
     }
     return -1;
 }
@@ -703,6 +757,7 @@ bool NodeGraphView::portAt(const QPointF& scene, int* node, int* port, bool* out
     const qreal reach = kPortRadius * 2.2;
     for (std::size_t i = 0; i < nodes_.size(); ++i) {
         const Node& n = nodes_[i];
+        if (n.foldedIn >= 0) continue;  // hidden on a folded backdrop
         for (std::size_t p = 0; p < n.outputs.size(); ++p) {
             if (QLineF(outputPos(n, static_cast<int>(p)), scene).length() <= reach) {
                 *node = static_cast<int>(i);
@@ -727,7 +782,7 @@ int NodeGraphView::wireAt(const QPointF& scene) const {
     QPainterPathStroker stroker;
     stroker.setWidth(10.0);
     for (std::size_t i = 0; i < wires_.size(); ++i) {
-        if (stroker.createStroke(wires_[i].path).contains(scene)) return static_cast<int>(i);
+        if (!wires_[i].hidden && stroker.createStroke(wires_[i].path).contains(scene)) return static_cast<int>(i);
     }
     return -1;
 }
@@ -1183,11 +1238,100 @@ void NodeGraphView::drawNode(QPainter& painter, const Node& node, bool selected)
         painter.setPen(theme::readableOn(theme::graphError()));
         painter.drawText(QRectF(corner.x() - 9.0, corner.y() - 9.0, 18.0, 18.0), Qt::AlignCenter, QStringLiteral("!"));
     }
+    if (!viewed_.empty() && viewed_ == node.name) {
+        // In Focus (the viewport shows the groom up to here): a glow of the accent around the card,
+        // a solid ring and a tag over its corner, so it reads from across the graph.
+        const QColor accent = theme::uiColor("accent");
+        for (int k = 4; k >= 1; --k) {
+            QColor glow = accent;
+            glow.setAlpha(18 + 14 * (4 - k));
+            painter.setPen(QPen(glow, 3.0));
+            painter.setBrush(Qt::NoBrush);
+            painter.drawRoundedRect(rect.adjusted(-2.0 - 2.5 * k, -2.0 - 2.5 * k, 2.0 + 2.5 * k, 2.0 + 2.5 * k), radius + 2.0 + 2.5 * k,
+                                    radius + 2.0 + 2.5 * k);
+        }
+        painter.setPen(QPen(accent, 2.5));
+        painter.drawRoundedRect(rect.adjusted(-3, -3, 3, 3), radius + 3, radius + 3);
+        painter.setFont(theme::uiFont(10, 800));
+        const QString tag = tr("FOCUS");
+        const qreal w = QFontMetricsF(painter.font()).horizontalAdvance(tag) + 12.0;
+        const QRectF chip(rect.left() + 10.0, rect.top() - 18.0, w, 15.0);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(accent);
+        painter.drawRoundedRect(chip, 7.5, 7.5);
+        painter.setPen(theme::readableOn(accent));
+        painter.drawText(chip, Qt::AlignCenter, tag);
+    }
     if (selected) {
         painter.setPen(QPen(theme::nodeSelected(), node.name == selected_ ? 2.5 : 1.5));
         painter.setBrush(Qt::NoBrush);
         painter.drawRoundedRect(rect.adjusted(-1, -1, 1, 1), radius + 1, radius + 1);
     }
+}
+
+QRectF NodeGraphView::backdropFoldButton(const Backdrop& b) const {
+    return QRectF(b.rect.right() - 26.0, b.rect.top() + 5.0, 18.0, 18.0);
+}
+
+int NodeGraphView::portalAt(const QPointF& scene, bool* nub) const {
+    for (int i = static_cast<int>(portals_.size()) - 1; i >= 0; --i) {
+        const QPointF d = scene - portals_[i].pos;
+        const bool onNub = portals_[i].exit >= 0 && d.x() > kPinRadius * 0.5 && d.x() < kPinNub + 5.0 && std::abs(d.y()) < kPinRadius + 3.0;
+        if (onNub || d.x() * d.x() + d.y() * d.y() <= (kPinRadius + 4.0) * (kPinRadius + 4.0)) {
+            if (nub) *nub = onNub;
+            return i;
+        }
+    }
+    return -1;
+}
+
+std::vector<std::pair<QString, QRectF>> NodeGraphView::scopeBar() const {
+    // Inside a compound: "Graph > compound > inner" at the top left, each segment a chip.
+    std::vector<std::pair<QString, QRectF>> out;
+    if (!document_ || document_->scope().empty()) return out;
+    std::vector<QString> names{tr("Graph")};
+    for (const QString& part : QString::fromStdString(document_->scope()).split(QLatin1Char('/'))) names.push_back(part);
+    const QFontMetricsF metrics(theme::uiFont(12, 700));
+    qreal x = 12.0;
+    const qreal y = fitMargins_.top() > 40 ? 52.0 : 10.0;
+    for (const QString& name : names) {
+        const QRectF chip(x, y, metrics.horizontalAdvance(name) + 20.0, 24.0);
+        out.emplace_back(name, chip);
+        x = chip.right() + 18.0;
+    }
+    return out;
+}
+
+void NodeGraphView::drawScopeBar(QPainter& painter) {
+    // The path bar (scopeBar), each segment clickable to go back up to it; a thin frame of the
+    // accent round the view says you are inside a compound.
+    scopeBar_ = scopeBar();
+    if (scopeBar_.empty()) return;
+    QColor frame = theme::uiColor("accent");
+    frame.setAlpha(140);
+    painter.setPen(QPen(frame, 2.0));
+    painter.setBrush(Qt::NoBrush);
+    painter.drawRect(QRectF(rect()).adjusted(1, 1, -1, -1));
+    painter.setFont(theme::uiFont(12, 700));
+    for (std::size_t i = 0; i < scopeBar_.size(); ++i) {
+        const auto& [name, chip] = scopeBar_[i];
+        const bool last = i + 1 == scopeBar_.size();
+        QColor fill = last ? theme::uiColor("accent") : theme::glassSolid();
+        fill.setAlpha(last ? 230 : 220);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(fill);
+        painter.drawRoundedRect(chip, 12.0, 12.0);
+        painter.setPen(last ? theme::readableOn(theme::uiColor("accent")) : theme::text());
+        painter.drawText(chip, Qt::AlignCenter, name);
+        if (!last) {
+            painter.setPen(theme::textMuted());
+            painter.drawText(QRectF(chip.right() + 4.0, chip.top(), 10.0, chip.height()), Qt::AlignCenter, QStringLiteral("›"));
+        }
+    }
+    const QRectF& end = scopeBar_.back().second;
+    painter.setFont(theme::uiFont(11, 500));
+    painter.setPen(theme::textMuted());
+    painter.drawText(QRectF(end.right() + 10.0, end.top(), 260.0, end.height()), Qt::AlignVCenter | Qt::AlignLeft, tr("U: up a level"));
 }
 
 void NodeGraphView::paintEvent(QPaintEvent* /*event*/) {
@@ -1251,14 +1395,15 @@ void NodeGraphView::paintEvent(QPaintEvent* /*event*/) {
     painter.save();
     painter.translate(pan_);
     painter.scale(scale_, scale_);
-    // The backdrops first: a tinted frame with its title bar and resize grip (as Maya's), the
-    // groom still showing through; the selected one ringed.
+    // The backdrops first: a tinted frame with its title bar, fold chevron and resize grip (as
+    // Maya's), the groom still showing through; the selected one ringed. A folded one is its title
+    // bar alone, saying how many nodes it holds.
     for (std::size_t i = 0; i < backdrops_.size(); ++i) {
         const Backdrop& b = backdrops_[i];
         const bool selected = static_cast<int>(i) == selectedBackdrop_;
         const qreal radius = theme::nodeRadius();
         QColor fill = b.color;
-        fill.setAlpha(46);
+        fill.setAlpha(b.folded ? 150 : 46);
         painter.setPen(selected ? QPen(theme::nodeSelected(), 2.0) : QPen(QColor(b.color.red(), b.color.green(), b.color.blue(), 120), 1.5));
         painter.setBrush(fill);
         painter.drawRoundedRect(b.rect, radius, radius);
@@ -1272,17 +1417,47 @@ void NodeGraphView::paintEvent(QPaintEvent* /*event*/) {
         painter.restore();
         painter.setFont(theme::uiFont(14, 800));
         painter.setPen(theme::textSoft());
-        const QRectF title(b.rect.left() + 12, b.rect.top(), b.rect.width() - 24, kBackdropHeader);
+        const QRectF fold = backdropFoldButton(b);
+        const QRectF title(b.rect.left() + 12, b.rect.top(), fold.left() - b.rect.left() - 16, kBackdropHeader);
         painter.drawText(title, Qt::AlignVCenter | Qt::AlignLeft, QFontMetricsF(painter.font()).elidedText(b.title, Qt::ElideRight, title.width()));
+        // The fold chevron: down while open, right while folded.
+        QPen chevron(theme::textSoft(), 1.8);
+        chevron.setCapStyle(Qt::RoundCap);
+        chevron.setJoinStyle(Qt::RoundJoin);
+        painter.setPen(chevron);
+        painter.setBrush(Qt::NoBrush);
+        const QPointF c = fold.center();
+        if (b.folded) painter.drawPolyline(QPolygonF({c + QPointF(-2.5, -5.0), c + QPointF(2.5, 0.0), c + QPointF(-2.5, 5.0)}));
+        else painter.drawPolyline(QPolygonF({c + QPointF(-5.0, -2.5), c + QPointF(0.0, 2.5), c + QPointF(5.0, -2.5)}));
+        if (b.folded) {
+            int held = 0;
+            for (const Node& n : nodes_) held += n.foldedIn == static_cast<int>(i) ? 1 : 0;
+            painter.setFont(theme::uiFont(11, 600));
+            painter.setPen(theme::textMuted());
+            painter.drawText(QRectF(b.rect.left() + 12, b.rect.top() + kBackdropHeader - 4, b.rect.width() - 24, b.rect.height() - kBackdropHeader + 4),
+                             Qt::AlignVCenter | Qt::AlignLeft, tr("%n node(s) inside", "", held));
+            continue;
+        }
         painter.setPen(QPen(b.color.lighter(130), 1.5));
         for (const qreal k : {4.0, 8.0, 12.0}) {
             painter.drawLine(QPointF(b.rect.right() - k, b.rect.bottom() - 2), QPointF(b.rect.right() - 2, b.rect.bottom() - k));
         }
     }
+    // A portal's entry hangs off its source output by a short wire.
+    for (const Portal& p : portals_) {
+        if (p.exit >= 0 || p.from < 0 || nodes_[p.from].foldedIn >= 0) continue;
+        QColor color = p.color;
+        color.setAlpha(220);
+        painter.setPen(QPen(color, 2.0));
+        painter.setBrush(Qt::NoBrush);
+        painter.drawPath(routed(outputPos(nodes_[p.from], p.output), p.pos - QPointF(kPinRadius, 0.0), std::nan(""), true));
+    }
     // The wires, the one being dragged with them, then the nodes, the selected one last.
     for (std::size_t i = 0; i < wires_.size(); ++i) {
         const Wire& w = wires_[i];
+        if (w.hidden) continue;  // inside a folded backdrop
         if (dragWireInputNode_ == w.to && dragWireInputPort_ == w.input && drag_ == Drag::Wire) continue;  // picked up
+        if (drag_ == Drag::Bundle && w.from == dragWireFrom_ && w.output == dragWirePort_) continue;  // picked up with its output's others
         const bool selected = static_cast<int>(i) == selectedWire_ || static_cast<int>(i) == dropWire_ || static_cast<int>(i) == searchWire_;
         // The signal's color: the output's type; an output of any curves (or no known type) takes the
         // more specific type of the input it feeds (Strands into an output: the strands' color).
@@ -1318,22 +1493,57 @@ void NodeGraphView::paintEvent(QPaintEvent* /*event*/) {
         painter.drawPolygon(QPolygonF({p.pos + QPointF(kPinNub - 3.0, -4.0), p.pos + QPointF(kPinNub + 3.0, 0.0),
                                        p.pos + QPointF(kPinNub - 3.0, 4.0)}));
     }
+    // The portals' dots: a ring in the signal's color, named beside it (the entry by its source,
+    // the exits where the links come out); an exit's nub drags another link of the signal out.
+    for (std::size_t i = 0; i < portals_.size(); ++i) {
+        const Portal& p = portals_[i];
+        const bool selected = static_cast<int>(i) == selectedPortal_;
+        painter.setPen(QPen(selected ? theme::nodeSelected() : p.color, 2.5));
+        painter.setBrush(p.exit < 0 ? p.color.darker(180) : p.color);
+        painter.drawEllipse(p.pos, kPinRadius + 1.0, kPinRadius + 1.0);
+        if (p.exit >= 0) {
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(p.color);
+            painter.drawPolygon(QPolygonF({p.pos + QPointF(kPinNub - 3.0, -4.0), p.pos + QPointF(kPinNub + 3.0, 0.0),
+                                           p.pos + QPointF(kPinNub - 3.0, 4.0)}));
+        }
+        painter.setFont(theme::uiFont(11, 700));
+        painter.setPen(theme::textSoft());
+        const QString name = QString::fromStdString(p.name);
+        const qreal w = QFontMetricsF(painter.font()).horizontalAdvance(name);
+        // The entry's name right of it (its wire comes in from the left), an exit's left of it.
+        const QRectF label = p.exit < 0 ? QRectF(p.pos.x() + kPinRadius + 5.0, p.pos.y() - 8.0, w + 2.0, 16.0)
+                                        : QRectF(p.pos.x() - kPinRadius - 7.0 - w, p.pos.y() - 8.0, w + 2.0, 16.0);
+        painter.drawText(label, Qt::AlignVCenter | Qt::AlignLeft, name);
+    }
     if (drag_ == Drag::Wire && dragWireFrom_ >= 0) {
         QColor color = theme::portColor(nodes_[dragWireFrom_].outputs[dragWirePort_].type);
         painter.setPen(QPen(color, 2.0, Qt::DashLine));
         painter.setBrush(Qt::NoBrush);
-        const QPointF start = dragWirePin_ >= 0 ? pins_[dragWirePin_].pos : outputPos(nodes_[dragWireFrom_], dragWirePort_);
+        const QPointF start = dragWirePin_ >= 0      ? pins_[dragWirePin_].pos
+                              : dragWirePortal_ >= 0 ? portals_[dragWirePortal_].pos + QPointF(kPinNub, 0.0)
+                                                     : outputPos(nodes_[dragWireFrom_], dragWirePort_);
         painter.drawPath(wirePath(start, dragWireTo_));
     }
-    // The nodes, the selected ones last (the current one on top).
+    if (drag_ == Drag::Bundle && dragWireFrom_ >= 0) {
+        // Every link of the output picked up at once (Shift+drag): from the cursor to each input.
+        QColor color = theme::portColor(nodes_[dragWireFrom_].outputs[dragWirePort_].type);
+        painter.setPen(QPen(color, 2.0, Qt::DashLine));
+        painter.setBrush(Qt::NoBrush);
+        for (const Wire& w : wires_) {
+            if (w.from == dragWireFrom_ && w.output == dragWirePort_) painter.drawPath(wirePath(dragWireTo_, wireEnd(w)));
+        }
+    }
+    // The nodes, the selected ones last (the current one on top); those on folded backdrops hidden.
     for (const Node& n : nodes_) {
-        if (!isSelected(n.name)) drawNode(painter, n, false);
+        if (!isSelected(n.name) && n.foldedIn < 0) drawNode(painter, n, false);
     }
     for (const Node& n : nodes_) {
-        if (isSelected(n.name) && n.name != selected_) drawNode(painter, n, true);
+        if (isSelected(n.name) && n.name != selected_ && n.foldedIn < 0) drawNode(painter, n, true);
     }
-    if (const int current = nodeIndex(selected_); current >= 0) drawNode(painter, nodes_[current], true);
+    if (const int current = nodeIndex(selected_); current >= 0 && nodes_[current].foldedIn < 0) drawNode(painter, nodes_[current], true);
     painter.restore();
+    drawScopeBar(painter);
     // The rubber band.
     if (drag_ == Drag::Band && !band_.isNull()) {
         QColor fill = theme::nodeSelected();
@@ -1376,6 +1586,28 @@ void NodeGraphView::mousePressEvent(QMouseEvent* event) {
     }
     last_ = event->position();
     pressScene_ = toScene(last_);
+    // The path bar (inside a compound): a click goes back up to that level.
+    if (event->button() == Qt::LeftButton) {
+        const auto bar = scopeBar();
+        for (std::size_t i = 0; i < bar.size(); ++i) {
+            if (!bar[i].second.contains(last_)) continue;
+            std::string path;
+            const QStringList parts = QString::fromStdString(document_ ? document_->scope() : std::string()).split(QLatin1Char('/'));
+            for (std::size_t k = 0; k < i; ++k) path += (path.empty() ? "" : "/") + parts[static_cast<int>(k)].toStdString();
+            if (document_ && path != document_->scope()) {
+                document_->setScope(path);
+                selectNode({});
+                fitted_ = false;
+                laidOut_.clear();
+                refresh();
+            }
+            event->accept();
+            return;
+        }
+    }
+    // Alt+click (no drag) on a wire puts a pin there: remembered here, decided on the release.
+    altPressed_ = event->button() == Qt::LeftButton && event->modifiers() == Qt::AltModifier;
+    altPress_ = last_;
     if (event->modifiers().testFlag(Qt::AltModifier) && viewport_) {
         drag_ = Drag::Camera;
         forwardToViewport(event);
@@ -1398,7 +1630,9 @@ void NodeGraphView::mousePressEvent(QMouseEvent* event) {
     }
     if (event->button() != Qt::LeftButton) return;
     selectedPin_ = -1;
+    selectedPortal_ = -1;
     dragWirePin_ = -1;
+    dragWirePortal_ = -1;
     int node = -1, port = -1;
     bool output = false;
     if (bypassButtonAt(pressScene_, &node)) {
@@ -1431,6 +1665,21 @@ void NodeGraphView::mousePressEvent(QMouseEvent* event) {
         return;
     }
     if (portAt(pressScene_, &node, &port, &output)) {
+        if (output && event->modifiers().testFlag(Qt::ShiftModifier)) {
+            // Shift+drag from an output: every link it feeds picked up at once, to drop on another
+            // output (Substance Designer's): they read that one instead.
+            bool any = false;
+            for (const Wire& w : wires_) any = any || (w.from == node && w.output == port);
+            if (any) {
+                drag_ = Drag::Bundle;
+                dragWireFrom_ = node;
+                dragWirePort_ = port;
+                dragWireInputNode_ = dragWireInputPort_ = -1;
+                dragWireTo_ = pressScene_;
+                update();
+                return;
+            }
+        }
         if (output) {
             drag_ = Drag::Wire;
             dragWireFrom_ = node;
@@ -1454,6 +1703,30 @@ void NodeGraphView::mousePressEvent(QMouseEvent* event) {
         update();
         return;
     }
+    // A portal's dot: an exit's nub drags a link of its signal out, the rest of it moves it.
+    {
+        bool nub = false;
+        if (const int dot = portalAt(pressScene_, &nub); dot >= 0) {
+            if (nub && portals_[dot].from >= 0) {
+                drag_ = Drag::Wire;
+                dragWireFrom_ = portals_[dot].from;
+                dragWirePort_ = portals_[dot].output;
+                dragWireInputNode_ = dragWireInputPort_ = -1;
+                dragWirePortal_ = dot;
+                dragWireTo_ = pressScene_;
+            } else {
+                selectNode({});
+                selectedWire_ = selectedBackdrop_ = -1;
+                selectedPortal_ = dot;
+                drag_ = Drag::Portal;
+                dragPortal_ = dot;
+                portalStart_ = portals_[dot].pos;
+                if (document_) document_->beginLayout();
+            }
+            update();
+            return;
+        }
+    }
     // A pin: its nub drags a wire of its signal out (Blueprints'), the rest of it moves it.
     bool nub = false;
     if (const int pin = pinAt(pressScene_, &nub); pin >= 0) {
@@ -1469,6 +1742,7 @@ void NodeGraphView::mousePressEvent(QMouseEvent* event) {
             drag_ = Drag::Pin;
             dragPin_ = pin;
             pinStart_ = pins_[pin].pos;
+            if (document_) document_->beginLayout();
         }
         update();
         return;
@@ -1477,46 +1751,84 @@ void NodeGraphView::mousePressEvent(QMouseEvent* event) {
     if (node >= 0) {
         const std::string& name = nodes_[node].name;
         const Qt::KeyboardModifiers mods = event->modifiers();
-        if (mods.testFlag(Qt::ControlModifier) || mods.testFlag(Qt::ShiftModifier)) {
-            // Ctrl toggles the node in the selection, Shift adds it; no move.
+        if (mods.testFlag(Qt::ControlModifier)) {
+            // Ctrl toggles the node in the selection; no move.
             std::vector<std::string> names = selection_;
             const auto it = std::find(names.begin(), names.end(), name);
-            if (it != names.end() && mods.testFlag(Qt::ControlModifier)) names.erase(it);
-            else if (it == names.end()) names.push_back(name);
-            else {
-                names.erase(it);
-                names.push_back(name);  // Shift on a selected node: it becomes the current one
-            }
+            if (it != names.end()) names.erase(it);
+            else names.push_back(name);
             setSelection(names);
             return;
         }
         drag_ = Drag::Move;
         dragNode_ = node;
         moveStart_ = nodes_[node].pos;
-        // A node of the selection drags the whole selection; another one is selected alone.
-        if (isSelected(name)) {
+        shiftPress_ = mods.testFlag(Qt::ShiftModifier);
+        shaken_ = false;
+        shake_.reset();
+        shakeClock_.start();
+        // A node of the selection drags the whole selection; another one is selected alone. With
+        // Shift the selection stays as it is until the release (a click adds the node to it), and a
+        // drag carries the node and everything upstream of it (Houdini's).
+        std::vector<std::string> carried;
+        if (shiftPress_) {
+            std::vector<std::string> roots = isSelected(name) ? selection_ : std::vector<std::string>{name};
+            if (document_) {
+                try {
+                    carried = nodesWithUpstream(GraphEdit(document_->viewGraph().dump()), roots);
+                } catch (const std::exception&) {
+                    carried = roots;
+                }
+            }
+        } else if (isSelected(name)) {
             std::vector<std::string> names = selection_;
             names.erase(std::find(names.begin(), names.end(), name));
             names.push_back(name);
             setSelection(names);
+            carried = selection_;
         } else {
             selectNode(name);
+            carried = {name};
         }
+        moving_.clear();
+        for (const std::string& n : carried) {
+            const int i = nodeIndex(n);
+            if (i >= 0 && nodes_[i].foldedIn < 0) moving_.push_back(i);
+        }
+        if (std::find(moving_.begin(), moving_.end(), node) == moving_.end()) moving_.push_back(node);
+        // The backdrops holding moved nodes grow with them (Houdini's network boxes).
+        growing_.clear();
+        for (std::size_t b = 0; b < backdrops_.size(); ++b) {
+            if (backdrops_[b].folded) continue;
+            Growing grow{static_cast<int>(b), backdrops_[b].rect, {}};
+            for (int i : moving_) {
+                if (backdrops_[b].rect.contains(QRectF(nodes_[i].pos, nodes_[i].size).center())) grow.nodes.push_back(i);
+            }
+            if (!grow.nodes.empty()) growing_.push_back(std::move(grow));
+        }
+        if (document_) document_->beginLayout();
         return;
     }
-    // A backdrop's title bar: selected and moved with the nodes on it; its corner: resized.
+    // A backdrop's title bar: its chevron folds it; else selected and moved with the nodes on it;
+    // its corner: resized.
     bool grip = false;
     if (const int b = backdropTitleAt(pressScene_, &grip); b >= 0) {
+        if (backdropFoldButton(backdrops_[b]).contains(pressScene_)) {
+            setBackdropFolded(b, !backdrops_[b].folded);
+            return;
+        }
         selectBackdrop(b);
+        grip = grip && !backdrops_[b].folded;
         drag_ = grip ? Drag::BackdropResize : Drag::Backdrop;
         dragBackdrop_ = b;
-        backdropStart_ = backdrops_[b].rect;
+        backdropStart_ = backdrops_[b].full;
         carried_.clear();
         if (!grip) {
             for (std::size_t i = 0; i < nodes_.size(); ++i) {
                 if (backdropStart_.contains(QRectF(nodes_[i].pos, nodes_[i].size).center())) carried_.push_back(static_cast<int>(i));
             }
         }
+        if (document_) document_->beginLayout();
         return;
     }
     const int wire = wireAt(pressScene_);
@@ -1528,10 +1840,12 @@ void NodeGraphView::mousePressEvent(QMouseEvent* event) {
             selected_.clear();
             emit selectionChanged(selected_);
         }
+        emit status(tr("Wire selected: Tab adds a node into it, Delete removes it"));
         update();
         return;
     }
-    // Empty space: a rubber band (a click alone deselects, unless Ctrl or Shift keeps the selection).
+    // Empty space (a backdrop's body too): a rubber band (a click alone deselects, unless Ctrl or
+    // Shift keeps the selection).
     drag_ = Drag::Band;
     band_ = QRectF(last_, last_);
     bandAdds_ = event->modifiers().testFlag(Qt::ControlModifier) || event->modifiers().testFlag(Qt::ShiftModifier);
@@ -1540,10 +1854,28 @@ void NodeGraphView::mousePressEvent(QMouseEvent* event) {
     update();
 }
 
+void NodeGraphView::growBackdrops() {
+    // Each backdrop holding moved nodes grows to hold those still on it (a card pushed to its edge
+    // pushes the edge out); one dragged off it leaves it.
+    for (const Growing& g : growing_) {
+        std::vector<LayoutBox> held;
+        for (int i : g.nodes) {
+            const QRectF card(nodes_[i].pos, nodes_[i].size);
+            const QRectF reach = g.start.adjusted(-card.width() * 0.5, -card.height() * 0.5, card.width() * 0.5, card.height() * 0.5);
+            if (reach.contains(card.center()) || backdrops_[g.backdrop].rect.contains(card.center())) {
+                held.push_back({nodes_[i].name, card.x(), card.y(), card.width(), card.height()});
+            }
+        }
+        const LayoutBox grown = grownBackdrop({"", g.start.x(), g.start.y(), g.start.width(), g.start.height()}, held, 24.0, kBackdropHeader);
+        backdrops_[g.backdrop].rect = backdrops_[g.backdrop].full = QRectF(grown.x, grown.y, grown.w, grown.h);
+    }
+}
+
 void NodeGraphView::mouseMoveEvent(QMouseEvent* event) {
     const QPointF now = event->position();
     const QPointF delta = now - last_;
     last_ = now;
+    if (altPressed_ && (now - altPress_).manhattanLength() > 4.0) altPressed_ = false;  // a drag, not a click
     switch (drag_) {
         case Drag::Camera:
             forwardToViewport(event);
@@ -1563,30 +1895,58 @@ void NodeGraphView::mouseMoveEvent(QMouseEvent* event) {
             break;
         }
         case Drag::Move:
-            if (dragNode_ >= 0) {
-                // The selection moves together (the pressed node is one of it); the wires follow.
-                std::vector<int> moved;
-                for (std::size_t i = 0; i < nodes_.size(); ++i) {
-                    if (static_cast<int>(i) == dragNode_ || isSelected(nodes_[i].name)) moved.push_back(static_cast<int>(i));
-                }
+            if (dragNode_ >= 0 && dragNode_ < static_cast<int>(nodes_.size())) {
                 // The pressed node goes where the cursor took it (on the grid with Snap); the rest
-                // of the selection by the same step.
+                // of what it carries by the same step; the wires follow.
                 const QPointF step = snappedIf(moveStart_ + (toScene(now) - pressScene_)) - nodes_[dragNode_].pos;
-                for (int i : moved) nodes_[i].pos += step;
+                for (int i : moving_) nodes_[i].pos += step;
                 for (Wire& w : wires_) {
-                    if (std::find(moved.begin(), moved.end(), w.from) != moved.end() || std::find(moved.begin(), moved.end(), w.to) != moved.end()) {
+                    if (std::find(moving_.begin(), moving_.end(), w.from) != moving_.end() || std::find(moving_.begin(), moving_.end(), w.to) != moving_.end()) {
                         w.path = wirePathFor(w);
                     }
                 }
+                growBackdrops();
+                // Shaken (left and right, quickly): the nodes are pulled out of their links, the drag
+                // goes on (Houdini's).
+                if (!shaken_ && document_ && shake_.add(shakeClock_.elapsed() / 1000.0, now.x(), now.y())) {
+                    shaken_ = true;
+                    std::vector<std::string> names;
+                    std::vector<std::pair<std::string, QPointF>> at;
+                    for (int i : moving_) {
+                        names.push_back(nodes_[i].name);
+                        at.emplace_back(nodes_[i].name, nodes_[i].pos);
+                    }
+                    const std::string pressed = nodes_[dragNode_].name;
+                    document_->endLayout("move nodes");
+                    int detached = 0;
+                    const std::string error = document_->detachNodes(names, &detached);
+                    if (error.empty() && detached > 0) {
+                        emit status(tr("Shaken loose: %n node(s) out of their links (Ctrl+Z puts them back)", "", detached));
+                        emit edited();
+                        refresh();
+                        // Where the drag has them (the detach put them below their new link).
+                        moving_.clear();
+                        for (const auto& [name, pos] : at) {
+                            const int i = nodeIndex(name);
+                            if (i < 0) continue;
+                            nodes_[i].pos = pos;
+                            moving_.push_back(i);
+                        }
+                        dragNode_ = nodeIndex(pressed);
+                        for (Wire& w : wires_) w.path = wirePathFor(w);
+                    }
+                    document_->beginLayout();
+                }
                 // A lone node with no wires of its own over a wire: the wire lights up (dropped: it
                 // goes in, as Maya's Graph Editor).
-                dropWire_ = moved.size() == 1 ? wireUnderNode(dragNode_) : -1;
+                dropWire_ = moving_.size() == 1 && dragNode_ >= 0 ? wireUnderNode(dragNode_) : -1;
                 update();
             }
             break;
         case Drag::Wire:
+        case Drag::Bundle:
             dragWireTo_ = toScene(now);
-            updateWireHint(dragWireTo_);
+            if (drag_ == Drag::Wire) updateWireHint(dragWireTo_);
             update();
             break;
         case Drag::Pin:
@@ -1594,6 +1954,15 @@ void NodeGraphView::mouseMoveEvent(QMouseEvent* event) {
                 pins_[dragPin_].pos = snappedIf(pinStart_ + (toScene(now) - pressScene_));
                 for (Wire& w : wires_) {
                     if (std::find(w.pins.begin(), w.pins.end(), dragPin_) != w.pins.end()) w.path = wirePathFor(w);
+                }
+                update();
+            }
+            break;
+        case Drag::Portal:
+            if (dragPortal_ >= 0 && dragPortal_ < static_cast<int>(portals_.size())) {
+                portals_[dragPortal_].pos = snappedIf(portalStart_ + (toScene(now) - pressScene_));
+                for (Wire& w : wires_) {
+                    if (w.portal == dragPortal_) w.path = wirePathFor(w);
                 }
                 update();
             }
@@ -1606,12 +1975,14 @@ void NodeGraphView::mouseMoveEvent(QMouseEvent* event) {
         case Drag::BackdropResize:
             if (dragBackdrop_ >= 0 && dragBackdrop_ < static_cast<int>(backdrops_.size())) {
                 const QPointF moved = toScene(now) - pressScene_;
-                QRectF& rect = backdrops_[dragBackdrop_].rect;
+                Backdrop& b = backdrops_[dragBackdrop_];
                 if (drag_ == Drag::BackdropResize) {
-                    rect.setSize(QSizeF(std::max(120.0, backdropStart_.width() + moved.x()), std::max(80.0, backdropStart_.height() + moved.y())));
+                    b.full.setSize(QSizeF(std::max(120.0, backdropStart_.width() + moved.x()), std::max(80.0, backdropStart_.height() + moved.y())));
+                    b.rect = b.full;
                 } else {
-                    const QPointF step = backdropStart_.topLeft() + moved - rect.topLeft();
-                    rect.moveTopLeft(backdropStart_.topLeft() + moved);
+                    const QPointF step = backdropStart_.topLeft() + moved - b.full.topLeft();
+                    b.full.moveTopLeft(backdropStart_.topLeft() + moved);
+                    b.rect.translate(step);
                     for (int i : carried_) nodes_[i].pos += step;
                     for (Wire& w : wires_) {
                         if (std::find(carried_.begin(), carried_.end(), w.from) != carried_.end() ||
@@ -1632,6 +2003,18 @@ void NodeGraphView::mouseMoveEvent(QMouseEvent* event) {
 void NodeGraphView::mouseReleaseEvent(QMouseEvent* event) {
     const Drag drag = drag_;
     drag_ = Drag::None;
+    const bool altClick = altPressed_ && event->button() == Qt::LeftButton;
+    altPressed_ = false;
+    if (altClick && document_) {
+        // Alt+click on a wire (no drag): a pin there, as a double-click puts one.
+        const QPointF scene = toScene(event->position());
+        if (const int w = nodeAt(scene) < 0 && pinAt(scene) < 0 ? wireAt(scene) : -1; w >= 0) {
+            if (drag == Drag::Camera) forwardToViewport(event);
+            pinWire(w, scene);
+            event->accept();
+            return;
+        }
+    }
     if (drag == Drag::Camera) {
         forwardToViewport(event);
         return;
@@ -1651,22 +2034,34 @@ void NodeGraphView::mouseReleaseEvent(QMouseEvent* event) {
         return;
     }
     if ((drag == Drag::Backdrop || drag == Drag::BackdropResize) && dragBackdrop_ >= 0 && document_) {
-        // Where it was put, and the nodes it carried (not undo steps, as node moves).
-        if (dragBackdrop_ < static_cast<int>(backdrops_.size()) && backdrops_[dragBackdrop_].rect != backdropStart_) {
-            const QRectF& r = backdrops_[dragBackdrop_].rect;
+        // Where it was put, and the nodes it carried: one undo step, nothing evaluates.
+        if (dragBackdrop_ < static_cast<int>(backdrops_.size()) && backdrops_[dragBackdrop_].full != backdropStart_) {
+            const QRectF& r = backdrops_[dragBackdrop_].full;
             document_->setBackdropRect(dragBackdrop_, r.x(), r.y(), r.width(), r.height());
             for (int i : carried_) {
                 document_->setNodePosition(nodes_[i].name, static_cast<float>(nodes_[i].pos.x()), static_cast<float>(nodes_[i].pos.y()));
                 laidOut_.erase(nodes_[i].name);
             }
         }
+        document_->endLayout(drag == Drag::Backdrop ? "move backdrop" : "resize backdrop");
         dragBackdrop_ = -1;
         carried_.clear();
         return;
     }
+    if (drag == Drag::Portal && dragPortal_ >= 0 && document_) {
+        const int dot = dragPortal_;
+        dragPortal_ = -1;
+        if (dot < static_cast<int>(portals_.size()) && portals_[dot].pos != portalStart_) {
+            const Portal& p = portals_[dot];
+            if (p.exit < 0) document_->movePortal(p.name, p.pos.x(), p.pos.y());
+            else document_->movePortalExit(p.name, p.exit, p.pos.x(), p.pos.y());
+        }
+        document_->endLayout("move portal");
+        return;
+    }
     if (drag == Drag::Pin && dragPin_ >= 0 && document_) {
         // Dropped on another pin of its signal: they join (an undo step); else it stays where it
-        // was put (not an undo step, as node moves).
+        // was put (a layout step).
         const int pin = dragPin_;
         dragPin_ = -1;
         if (pin < static_cast<int>(pins_.size()) && pins_[pin].pos != pinStart_) {
@@ -1676,6 +2071,7 @@ void NodeGraphView::mouseReleaseEvent(QMouseEvent* event) {
                 if (static_cast<int>(i) != pin && d.x() * d.x() + d.y() * d.y() <= 4.0 * kPinRadius * kPinRadius) onto = static_cast<int>(i);
             }
             if (onto >= 0) {
+                document_->endLayout("move pin");
                 const std::string error = document_->mergePins(pins_[onto].id, pins_[pin].id);
                 if (error.empty()) {
                     emit status(tr("Pins joined: the wires run through one pin"));
@@ -1688,26 +2084,44 @@ void NodeGraphView::mouseReleaseEvent(QMouseEvent* event) {
             }
             document_->movePin(pins_[pin].id, pins_[pin].pos.x(), pins_[pin].pos.y());
         }
+        document_->endLayout("move pin");
         return;
     }
     if (drag == Drag::Move && dragNode_ >= 0 && document_) {
-        // Every moved node keeps where it was put (not an undo step, as Maya's moves).
-        if ((nodes_[dragNode_].pos - moveStart_).manhattanLength() > 0.0) {
-            for (const Node& n : nodes_) {
-                if (n.name != nodes_[dragNode_].name && !isSelected(n.name)) continue;
-                document_->setNodePosition(n.name, static_cast<float>(n.pos.x()), static_cast<float>(n.pos.y()));
-                laidOut_.erase(n.name);
+        const bool movedAtAll = dragNode_ < static_cast<int>(nodes_.size()) && (nodes_[dragNode_].pos - moveStart_).manhattanLength() > 0.0;
+        if (shiftPress_ && !movedAtAll && !shaken_) {
+            // Shift+click without a move: the node added to the selection (the current one).
+            const std::string name = nodes_[dragNode_].name;
+            std::vector<std::string> names = selection_;
+            const auto it = std::find(names.begin(), names.end(), name);
+            if (it != names.end()) names.erase(it);
+            names.push_back(name);
+            setSelection(names);
+        }
+        shiftPress_ = false;
+        // Every moved node keeps where it was put, the backdrops grown round them: one undo step.
+        if (movedAtAll) {
+            for (int i : moving_) {
+                document_->setNodePosition(nodes_[i].name, static_cast<float>(nodes_[i].pos.x()), static_cast<float>(nodes_[i].pos.y()));
+                laidOut_.erase(nodes_[i].name);
+            }
+            for (const Growing& g : growing_) {
+                const QRectF& r = backdrops_[g.backdrop].full;
+                if (r != g.start) document_->setBackdropRect(g.backdrop, r.x(), r.y(), r.width(), r.height());
             }
         }
+        document_->endLayout(moving_.size() == 1 ? "move " + nodes_[dragNode_].name : "move " + std::to_string(moving_.size()) + " nodes");
+        growing_.clear();
         // A lone unwired node dropped on a wire goes into it (Maya's insert_on_wire).
         const int wire = dropWire_;
         const std::string name = nodes_[dragNode_].name;
         dropWire_ = -1;
         dragNode_ = -1;
+        moving_.clear();
         GroomDocument::NodeLink link;
         if (wire >= 0 && wireLink(wire, &link.from, &link.output, &link.to, &link.input)) {
             const std::string error = document_->insertOnLink(name, link);
-                if (error.empty()) {
+            if (error.empty()) {
                 emit status(tr("Inserted %1 between %2 and %3")
                                 .arg(QString::fromStdString(name), QString::fromStdString(link.from), QString::fromStdString(link.to)));
                 emit edited();
@@ -1717,6 +2131,30 @@ void NodeGraphView::mouseReleaseEvent(QMouseEvent* event) {
             refresh();
         }
         update();
+        return;
+    }
+    if (drag == Drag::Bundle && document_) {
+        // The output's links dropped on another output: they read it instead (where they fit).
+        const QPointF at = toScene(event->position());
+        int node = -1, port = -1;
+        bool output = false;
+        if (portAt(at, &node, &port, &output) && output && !(node == dragWireFrom_ && port == dragWirePort_)) {
+            const Node& from = nodes_[dragWireFrom_];
+            const Node& to = nodes_[node];
+            int moved = 0;
+            const std::string error = document_->moveOutputLinks(from.name, dragWirePort_ == 0 ? std::string() : from.outputs[dragWirePort_].name,
+                                                                 to.name, port == 0 ? std::string() : to.outputs[port].name, &moved);
+            if (error.empty()) {
+                emit status(tr("%n link(s) moved to %1", "", moved).arg(QString::fromStdString(to.name)));
+                emit edited();
+            } else {
+                emit message(QString::fromStdString(error));
+            }
+        } else if (!(node == dragWireFrom_ && port == dragWirePort_)) {
+            emit message(tr("Drop the links on another node's output (the ports on its right)"));
+        }
+        dragWireFrom_ = dragWirePort_ = -1;
+        refresh();
         return;
     }
     if (drag == Drag::Wire && document_) {
@@ -1734,7 +2172,9 @@ void NodeGraphView::mouseReleaseEvent(QMouseEvent* event) {
                 const Node& from = nodes_[dragWireFrom_];
                 const Node& to = nodes_[node];
                 const bool first = dragWirePort_ == 0;
-                if (dragWirePin_ >= 0) {  // out of a pin: through the pins up to it
+                if (dragWirePortal_ >= 0) {  // out of a portal's exit: through it
+                    error = document_->linkFromPortal(portals_[dragWirePortal_].name, portals_[dragWirePortal_].exit, to.name, to.inputs[port].name);
+                } else if (dragWirePin_ >= 0) {  // out of a pin: through the pins up to it
                     error = document_->linkFromPin(pins_[dragWirePin_].id, to.name, to.inputs[port].name);
                 } else {
                     error = document_->connectNodes(from.name, first ? std::string() : from.outputs[dragWirePort_].name, to.name,
@@ -1742,7 +2182,13 @@ void NodeGraphView::mouseReleaseEvent(QMouseEvent* event) {
                 }
                 if (error.empty()) emit edited();
             }
-        } else if (const int pin = dragWirePin_ < 0 ? pinAt(at) : -1; pin >= 0) {
+        } else if (const int dot = dragWirePortal_ < 0 && dragWirePin_ < 0 && dragWireInputNode_ >= 0 ? portalAt(at) : -1;
+                   dot >= 0 && portals_[dot].exit >= 0) {
+            // A picked-up input's wire dropped on a portal's exit: that input reads the portal.
+            error = document_->linkFromPortal(portals_[dot].name, portals_[dot].exit, nodes_[dragWireInputNode_].name,
+                                              nodes_[dragWireInputNode_].inputs[dragWireInputPort_].name);
+            if (error.empty()) emit edited();
+        } else if (const int pin = dragWirePin_ < 0 && dragWirePortal_ < 0 ? pinAt(at) : -1; pin >= 0) {
             // Onto a pin: a picked-up input's wire takes the pin's signal; a wire from an output
             // feeds every wire through the pin from there (an undo step).
             if (dragWireInputNode_ >= 0) {
@@ -1762,7 +2208,7 @@ void NodeGraphView::mouseReleaseEvent(QMouseEvent* event) {
             if (error.empty()) emit edited();
         }
         if (!error.empty()) emit message(QString::fromStdString(error));
-        dragWireFrom_ = dragWirePort_ = dragWireInputNode_ = dragWireInputPort_ = dragWirePin_ = -1;
+        dragWireFrom_ = dragWirePort_ = dragWireInputNode_ = dragWireInputPort_ = dragWirePin_ = dragWirePortal_ = -1;
         wireHint_.clear();
         refresh();
     }
@@ -1962,9 +2408,28 @@ void NodeGraphView::copySelected() {
 
 void NodeGraphView::paste() {
     if (!document_) return;
+    // Where the cursor is (the copied nodes' top-left there), else beside where they were copied
+    // from; links only among the pasted nodes, none to the originals' sources.
+    const std::string text = QGuiApplication::clipboard()->text().toStdString();
+    float dx = static_cast<float>(kPasteOffsetX), dy = static_cast<float>(kPasteOffsetY);
+    const QPointF cursor = mapFromGlobal(QCursor::pos());
+    const nlohmann::json data = nlohmann::json::parse(text, nullptr, false);
+    if (underMouse() && rect().contains(cursor.toPoint()) && data.is_object() && data.value("nodes", nlohmann::json()).is_array()) {
+        double left = std::numeric_limits<double>::max(), top = std::numeric_limits<double>::max();
+        for (const nlohmann::json& n : data["nodes"]) {
+            const nlohmann::json ui = n.value("ui", nlohmann::json::object());
+            if (!ui.is_object()) continue;
+            left = std::min(left, ui.value("x", 0.0));
+            top = std::min(top, ui.value("y", 0.0));
+        }
+        if (left < std::numeric_limits<double>::max()) {
+            const QPointF at = snappedIf(toScene(cursor));
+            dx = static_cast<float>(at.x() - left);
+            dy = static_cast<float>(at.y() - top);
+        }
+    }
     std::vector<std::string> made;
-    const std::string error = document_->pasteNodes(QGuiApplication::clipboard()->text().toStdString(), static_cast<float>(kPasteOffsetX),
-                                                    static_cast<float>(kPasteOffsetY), &made);
+    const std::string error = document_->pasteNodes(text, dx, dy, &made);
     if (!error.empty()) {
         emit message(QString::fromStdString(error));
         return;
@@ -1977,6 +2442,12 @@ void NodeGraphView::paste() {
 void NodeGraphView::deleteSelected() {
     if (!document_) return;
     std::string error;
+    if (selectedPortal_ >= 0 && selectedPortal_ < static_cast<int>(portals_.size())) {
+        const Portal p = portals_[selectedPortal_];
+        selectedPortal_ = -1;
+        removePortal(p.name, p.exit);  // an exit, or (its entry) the whole portal
+        return;
+    }
     if (selectedBackdrop_ >= 0) {
         removeBackdrop(selectedBackdrop_);
         return;
@@ -2078,30 +2549,18 @@ void NodeGraphView::renameSelected() {
 
 void NodeGraphView::duplicateSelected() {
     if (!document_ || selected_.empty()) return;
-    if (selection_.size() > 1) {
-        // Several: copied and pasted beside, with the links between them (not the clipboard's).
-        std::vector<std::string> pasted;
-        const std::string text = document_->copyNodes(selection_);
-        const std::string error = text.empty() ? std::string("the output node is one of a kind")
-                                               : document_->pasteNodes(text, static_cast<float>(kPasteOffsetX), static_cast<float>(kPasteOffsetY), &pasted);
-        if (!error.empty()) {
-            emit message(QString::fromStdString(error));
-            return;
-        }
-        emit edited();
-        refresh();
-        setSelection(pasted);
-        return;
-    }
-    std::string made;
-    const std::string error = document_->duplicateNode(selected_, &made);
+    // Beside them, each copy reading what its node reads (the links among them made again).
+    std::vector<std::string> names = selection_;
+    if (names.empty()) names.push_back(selected_);
+    std::vector<std::string> made;
+    const std::string error = document_->duplicateNodes(names, static_cast<float>(kPasteOffsetX), static_cast<float>(kPasteOffsetY), &made);
     if (!error.empty()) {
         emit message(QString::fromStdString(error));
         return;
     }
     emit edited();
     refresh();
-    selectNode(made);
+    setSelection(made);
 }
 
 void NodeGraphView::setSelectedAsOutput() {
@@ -2267,11 +2726,14 @@ void NodeGraphView::mouseDoubleClickEvent(QMouseEvent* event) {
         drag_ = Drag::None;
         selectNode(nodes_[node].name);
         openScriptEditor(nodes_[node].name);
-    } else if (node >= 0 && nodes_[node].type == "Compound") {
-        // A Compound opens: its nodes back in the graph to see and edit (Ctrl+Z groups them again).
+    } else if (node >= 0 && nodes_[node].type == "Compound" && scene.y() - nodes_[node].pos.y() > kHeader) {
+        // A Compound opens: the graph inside it shown to edit (U or the path bar: back out). Its
+        // header renames it, as any node's.
         drag_ = Drag::None;
-        selectNode(nodes_[node].name);
-        ungroupSelected();
+        openCompound(nodes_[node].name);
+    } else if (const int dot = node < 0 ? portalAt(scene) : -1; dot >= 0) {
+        drag_ = Drag::None;
+        renamePortal(portals_[dot].name);
     } else if (node >= 0 && scene.y() - nodes_[node].pos.y() <= kHeader) {
         drag_ = Drag::None;
         selectNode(nodes_[node].name);
@@ -2282,19 +2744,7 @@ void NodeGraphView::mouseDoubleClickEvent(QMouseEvent* event) {
     } else if (const int w = node < 0 && pinAt(scene) < 0 ? wireAt(scene) : -1; w >= 0 && document_) {
         // A pin where the wire was double-clicked (Unreal's reroute node): the wire runs through it.
         drag_ = Drag::None;
-        std::string from, output, to, input, made;
-        wireLink(w, &from, &output, &to, &input);
-        const QPointF at = snappedIf(scene);
-        const std::string error = document_->addPin(to, input, at.x(), at.y(), pieceAt(wires_[w], scene), &made);
-        if (error.empty()) {
-            emit status(tr("Pinned %1.%2: drag the pin to route the wire, Delete removes it")
-                            .arg(QString::fromStdString(to), QString::fromStdString(input)));
-            emit edited();
-            refresh();
-            selectPin(made);
-        } else {
-            emit message(QString::fromStdString(error));
-        }
+        pinWire(w, scene);
     }
     event->accept();
 }
@@ -2304,7 +2754,24 @@ NodeGraphView::MenuTarget NodeGraphView::fillContextMenu(QMenu* menu, const QPoi
     const QPointF scene = toScene(at);
     const int node = nodeAt(scene);
     MenuTarget target = MenuTarget::Canvas;
-    if (node >= 0) {
+    menuWire_ = menuPortal_ = menuPortNode_ = menuPortInput_ = -1;
+    int portNode = -1, port = -1;
+    bool output = false;
+    if (portAt(scene, &portNode, &port, &output) && !output) {
+        // An input port: its own menu (Pass Through as Output).
+        target = MenuTarget::Port;
+        menuPortNode_ = portNode;
+        menuPortInput_ = port;
+    } else if (const int dot = node < 0 ? portalAt(scene) : -1; dot >= 0) {
+        target = MenuTarget::Portal;
+        menuPortal_ = dot;
+        selectedPortal_ = dot;
+    } else if (const int w = node < 0 && pinAt(scene) < 0 ? wireAt(scene) : -1; w >= 0) {
+        target = MenuTarget::Wire;
+        menuWire_ = w;
+        selectedWire_ = w;
+        update();
+    } else if (node >= 0) {
         // A node of the selection keeps the selection (Delete and Copy act on it all), the node
         // right-clicked the current one: the menu's actions act on it.
         target = MenuTarget::Node;
@@ -2338,6 +2805,17 @@ void NodeGraphView::contextMenuEvent(QContextMenuEvent* event) {
 }
 
 void NodeGraphView::keyPressEvent(QKeyEvent* event) {
+    if (event->modifiers() == Qt::NoModifier && event->key() == Qt::Key_U && document_ && !document_->scope().empty()) {
+        leaveCompound();  // up out of the compound (Houdini's U)
+        event->accept();
+        return;
+    }
+    if (event->modifiers() == Qt::NoModifier && event->key() == Qt::Key_I) {
+        const int current = nodeIndex(selected_);
+        if (current >= 0 && nodes_[current].type == "Compound") openCompound(selected_);  // into it (Houdini's I)
+        event->accept();
+        return;
+    }
     if (event->modifiers().testFlag(Qt::ControlModifier)) {
         if (event->key() == Qt::Key_X && event->modifiers().testFlag(Qt::ShiftModifier)) {
             detachNodes(selection_);  // Detach (Maya's and Blender's key too)
@@ -2413,7 +2891,7 @@ void NodeGraphView::keyPressEvent(QKeyEvent* event) {
             break;
         case Qt::Key_Delete:
         case Qt::Key_Backspace:
-            if (!document_ || (selectedWire_ < 0 && selection_.empty() && selectedBackdrop_ < 0 && selectedPin_ < 0)) break;
+            if (!document_ || (selectedWire_ < 0 && selection_.empty() && selectedBackdrop_ < 0 && selectedPin_ < 0 && selectedPortal_ < 0)) break;
             deleteSelected();
             event->accept();
             return;
@@ -2434,6 +2912,7 @@ void NodeGraphView::openSearchAt(const QPointF& where) {
     searchScene_ = toScene(where);
     // Over a wire: the node added goes into it (lit while the search is open).
     searchWire_ = nodeAt(searchScene_) < 0 ? wireAt(searchScene_) : -1;
+    if (searchWire_ < 0) searchWire_ = selectedWire_;  // a wire selected first: the node goes into it
     update();
     // As tall as the editor allows (the list gives way, the description under it always shows),
     // placed where it fits: below the cursor, else above it.
@@ -2930,6 +3409,16 @@ void NodeGraphView::filterSearch(const QString& text) {
         rows.push_back({rank, order++, tr("Map: %1    Painted maps").arg(QString::fromStdString(m.name)), about,
                         QString::fromLatin1(kMapEntry) + QString::fromStdString(m.name), theme::nodeCategoryColor("utility").lighter(130)});
     }
+    // The graph's portals: an exit of one placed here (then linked from its nub).
+    for (const std::string& portal : portalNames(document_->viewGraph())) {
+        const nlohmann::json entry = {{"type", "portal:" + portal}, {"label", "Portal: " + portal}, {"keywords", "portal teleport link exit"},
+                                      {"categoryTitle", "Portals"}, {"description", "An exit of the portal " + portal + " here"}};
+        const int rank = nodeSearchRank(text, entry);
+        if (rank < 0) continue;
+        rows.push_back({rank, order++, tr("Portal: %1    Portals").arg(QString::fromStdString(portal)),
+                        tr("An exit of the portal %1 here: drag from its nub to an input").arg(QString::fromStdString(portal)),
+                        QStringLiteral("portal:") + QString::fromStdString(portal), theme::nodeCategoryColor("utility").lighter(130)});
+    }
     std::stable_sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) { return a.rank != b.rank ? a.rank < b.rank : a.order < b.order; });
     for (const Row& r : rows) {
         auto* item = new QListWidgetItem(r.shown, searchList_);
@@ -2968,6 +3457,10 @@ void NodeGraphView::addFromSearch() {
     std::string type = item->data(Qt::UserRole).toString().toStdString();
     const int wire = searchWire_;
     closeSearch();
+    if (type.rfind("portal:", 0) == 0) {
+        addPortalExit(type.substr(7), toWidget(searchScene_));
+        return;
+    }
     nlohmann::json params;
     std::string name;
     if (type.rfind(kMapEntry, 0) == 0) {
@@ -3011,6 +3504,241 @@ std::string NodeGraphView::addNodeOfType(const std::string& type, const QPointF&
     refresh();
     selectNode(made);
     return made;
+}
+
+// ---- Arranging by hand, portals, compounds (graph_arrange.h, graph_portals.h) --------------------
+
+void NodeGraphView::alignSelected(const std::string& mode) {
+    if (!document_) return;
+    std::vector<LayoutBox> boxes;
+    for (const std::string& n : selection_) {
+        const int i = nodeIndex(n);
+        if (i >= 0) boxes.push_back({n, nodes_[i].pos.x(), nodes_[i].pos.y(), nodes_[i].size.width(), nodes_[i].size.height()});
+    }
+    if (boxes.size() < 2) {
+        emit message(tr("Select two nodes or more to align"));
+        return;
+    }
+    std::map<std::string, std::pair<double, double>> placed;
+    try {
+        placed = alignBoxes(boxes, mode);
+    } catch (const std::exception& e) {
+        emit message(QString::fromStdString(e.what()));
+        return;
+    }
+    const std::string error = document_->editLayout("align " + mode, [&](nlohmann::json& g) {
+        for (nlohmann::json& n : g["nodes"]) {
+            const auto at = placed.find(n.value("name", std::string()));
+            if (at != placed.end()) n["ui"] = {{"x", at->second.first}, {"y", at->second.second}};
+        }
+    });
+    if (!error.empty()) emit message(QString::fromStdString(error));
+    for (const auto& [name, at] : placed) laidOut_.erase(name);
+    refresh();
+}
+
+void NodeGraphView::tidySelection() {
+    if (!document_) return;
+    if (selection_.size() < 2) {
+        tidyLayout();
+        return;
+    }
+    std::vector<LayoutBox> boxes;
+    for (const std::string& n : selection_) {
+        const int i = nodeIndex(n);
+        if (i >= 0) boxes.push_back({n, nodes_[i].pos.x(), nodes_[i].pos.y(), nodes_[i].size.width(), nodes_[i].size.height()});
+    }
+    std::map<std::string, std::pair<double, double>> placed;
+    try {
+        placed = arrangeSelection(GraphEdit(document_->viewGraph().dump()), boxes, kColumn, kRowGap);
+    } catch (const std::exception& e) {
+        emit message(QString::fromStdString(e.what()));
+        return;
+    }
+    document_->editLayout("tidy selection", [&](nlohmann::json& g) {
+        for (nlohmann::json& n : g["nodes"]) {
+            const auto at = placed.find(n.value("name", std::string()));
+            if (at != placed.end()) n["ui"] = {{"x", at->second.first}, {"y", at->second.second}};
+        }
+    });
+    for (const auto& [name, at] : placed) laidOut_.erase(name);
+    refresh();
+}
+
+void NodeGraphView::selectWire(int wire) {
+    selectNode({});
+    selectedBackdrop_ = selectedPin_ = selectedPortal_ = -1;
+    selectedWire_ = wire >= 0 && wire < wireCount() ? wire : -1;
+    update();
+}
+
+void NodeGraphView::setWireStyle(const std::string& style) {
+    const std::vector<std::string> styles = wireStyles();
+    wireStyle_ = std::find(styles.begin(), styles.end(), style) != styles.end() ? style : std::string("smooth");
+    for (Wire& w : wires_) w.path = wirePathFor(w);
+    update();
+}
+
+void NodeGraphView::openCompound(const std::string& node) {
+    if (!document_) return;
+    const std::string error = document_->enterCompound(node);
+    if (!error.empty()) {
+        emit message(QString::fromStdString(error));
+        return;
+    }
+    selectNode({});
+    laidOut_.clear();
+    fitted_ = false;
+    viewTouched_ = false;
+    refresh();
+    emit status(tr("Inside %1: edit its nodes; U or the path bar goes back out").arg(QString::fromStdString(node)));
+}
+
+void NodeGraphView::leaveCompound() {
+    if (!document_ || document_->scope().empty()) return;
+    const std::string scope = document_->scope();
+    const std::string left = scope.substr(scope.rfind('/') == std::string::npos ? 0 : scope.rfind('/') + 1);
+    document_->leaveCompound();
+    laidOut_.clear();
+    fitted_ = false;
+    viewTouched_ = false;
+    refresh();
+    selectNode(left);  // the compound just left, selected
+}
+
+std::string NodeGraphView::scopePath() const { return document_ ? document_->scope() : std::string(); }
+
+bool NodeGraphView::menuPort(std::string* node, std::string* input) const {
+    if (menuPortNode_ < 0 || menuPortNode_ >= nodeCount() || menuPortInput_ < 0 ||
+        menuPortInput_ >= static_cast<int>(nodes_[menuPortNode_].inputs.size())) {
+        return false;
+    }
+    if (node) *node = nodes_[menuPortNode_].name;
+    if (input) *input = nodes_[menuPortNode_].inputs[menuPortInput_].name;
+    return true;
+}
+
+std::string NodeGraphView::menuPortal(int* exit) const {
+    if (menuPortal_ < 0 || menuPortal_ >= static_cast<int>(portals_.size())) return {};
+    if (exit) *exit = portals_[menuPortal_].exit;
+    return portals_[menuPortal_].name;
+}
+
+void NodeGraphView::pinWire(int wire, const QPointF& scene) {
+    if (!document_ || wire < 0 || wire >= wireCount()) return;
+    std::string from, output, to, input, made;
+    wireLink(wire, &from, &output, &to, &input);
+    const QPointF at = snappedIf(scene);
+    const std::string error = document_->addPin(to, input, at.x(), at.y(), pieceAt(wires_[wire], scene), &made);
+    if (!error.empty()) {
+        emit message(QString::fromStdString(error));
+        return;
+    }
+    emit status(tr("Pinned %1.%2: drag the pin to route the wire, Delete removes it").arg(QString::fromStdString(to), QString::fromStdString(input)));
+    emit edited();
+    refresh();
+    selectPin(made);
+}
+
+void NodeGraphView::teleportWire(int wire) {
+    if (!document_ || wire < 0 || wire >= wireCount()) return;
+    std::string from, output, to, input;
+    wireLink(wire, &from, &output, &to, &input);
+    const Wire& w = wires_[wire];
+    // The entry just right of the output, the exit just left of the input.
+    const QPointF entry = outputPos(nodes_[w.from], w.output) + QPointF(40.0, 0.0);
+    const QPointF exit = inputPos(nodes_[w.to], w.input) - QPointF(56.0, 0.0);
+    const std::string error = document_->teleportLink(to, input, exit.x(), exit.y(), entry.x(), entry.y());
+    if (!error.empty()) {
+        emit message(QString::fromStdString(error));
+        return;
+    }
+    selectedWire_ = -1;
+    emit status(tr("%1 teleported: drag a portal dot to place it; drag from an exit's nub for another link of it, double-click renames it")
+                    .arg(QString::fromStdString(from)));
+    emit edited();
+    refresh();
+}
+
+void NodeGraphView::renamePortal(const std::string& portal) {
+    if (!document_) return;
+    promptName(tr("Portal name"), tr("Name"), [this, portal](const QString& name) {
+        const std::string error = document_->renamePortal(portal, name.trimmed().toStdString());
+        if (!error.empty()) emit message(QString::fromStdString(error));
+        refresh();
+    });
+    setPromptText(QString::fromStdString(portal));
+}
+
+void NodeGraphView::removePortal(const std::string& portal, int exit) {
+    if (!document_) return;
+    const std::string error = exit < 0 ? document_->removePortal(portal) : document_->removePortalExit(portal, exit);
+    if (!error.empty()) emit message(QString::fromStdString(error));
+    else emit status(exit < 0 ? tr("Portal removed: its links drawn as wires again") : tr("Portal exit removed: its links drawn as wires again"));
+    selectedPortal_ = -1;
+    refresh();
+}
+
+void NodeGraphView::addPortalExit(const std::string& portal, const QPointF& widget) {
+    if (!document_) return;
+    const QPointF at = snappedIf(toScene(widget));
+    const std::string error = document_->addPortalExit(portal, at.x(), at.y());
+    if (!error.empty()) {
+        emit message(QString::fromStdString(error));
+        return;
+    }
+    emit status(tr("An exit of %1: drag from its nub to an input").arg(QString::fromStdString(portal)));
+    refresh();
+}
+
+void NodeGraphView::setPassThrough(const std::string& node, const std::string& input, bool on) {
+    if (!document_) return;
+    const std::string error = document_->setPassThrough(node, input, on);
+    if (!error.empty()) {
+        emit message(QString::fromStdString(error));
+        return;
+    }
+    if (on) emit status(tr("%1 hands its %2 on: the thru_%2 output").arg(QString::fromStdString(node), QString::fromStdString(input)));
+    emit edited();
+    refresh();
+}
+
+void NodeGraphView::setBackdropFolded(int index, bool folded) {
+    if (!document_ || index < 0 || index >= backdropCount()) return;
+    const std::string error = document_->setBackdropFolded(index, folded);
+    if (!error.empty()) emit message(QString::fromStdString(error));
+    // A folded backdrop's nodes leave the selection (they are hidden).
+    refresh();
+    std::vector<std::string> kept;
+    for (const std::string& n : selection_) {
+        const int i = nodeIndex(n);
+        if (i >= 0 && nodes_[i].foldedIn < 0) kept.push_back(n);
+    }
+    setSelection(kept);
+    selectBackdrop(index);
+}
+
+bool NodeGraphView::backdropFolded(int index) const { return index >= 0 && index < backdropCount() && backdrops_[index].folded; }
+
+bool NodeGraphView::nodeHidden(const std::string& node) const {
+    const int i = nodeIndex(node);
+    return i >= 0 && nodes_[i].foldedIn >= 0;
+}
+
+std::vector<NodeGraphView::PortalDot> NodeGraphView::portalDots() const {
+    std::vector<PortalDot> out;
+    for (const Portal& p : portals_) out.push_back({p.name, p.exit, p.pos});
+    return out;
+}
+
+QPointF NodeGraphView::portPoint(const std::string& node, const std::string& port, bool output) const {
+    const int i = nodeIndex(node);
+    if (i < 0) return QPointF(std::nan(""), 0.0);
+    const std::vector<Port>& ports = output ? nodes_[i].outputs : nodes_[i].inputs;
+    for (std::size_t p = 0; p < ports.size(); ++p) {
+        if (ports[p].name == port) return toWidget(output ? outputPos(nodes_[i], static_cast<int>(p)) : inputPos(nodes_[i], static_cast<int>(p)));
+    }
+    return QPointF(std::nan(""), 0.0);
 }
 
 bool NodeGraphView::eventFilter(QObject* watched, QEvent* event) {

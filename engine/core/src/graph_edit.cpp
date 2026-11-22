@@ -14,6 +14,7 @@
 #include "groomlab/node_library.h"
 #include "groomlab/operators.h"
 #include "groomlab/presets.h"
+#include "graph_internal.h"
 #include "operators/internal.h"
 
 namespace groomlab {
@@ -334,6 +335,22 @@ json specOfNode(const json& node) {
             spec["inputs"].push_back(in);
         }
     }
+    // Each input it passes through: one more output handing it on (GraphEdit::passThrough).
+    const json passes = node.value("passThrough", json::array());
+    if (passes.is_array()) {
+        for (const json& p : passes) {
+            if (!p.is_string()) continue;
+            for (const json& in : spec["inputs"]) {
+                if (in.value("name", std::string()) != p.get<std::string>()) continue;
+                json out = {{"name", GraphEdit::passThroughOutput(p.get<std::string>())},
+                            {"type", in.value("type", std::string("Strands"))},
+                            {"passThrough", p}};
+                if (in.contains("valueKind")) out["valueKind"] = in["valueKind"];
+                spec["outputs"].push_back(std::move(out));
+                break;
+            }
+        }
+    }
     return spec;
 }
 
@@ -408,7 +425,17 @@ struct GraphEdit::Impl {
         return {};
     }
     std::string outputType(const std::string& name, const std::string& output, std::set<std::string>& seen) const {
-        const std::string out = outputSpec(name, output).value("type", std::string());
+        const json port = outputSpec(name, output);
+        if (port.contains("passThrough") && port["passThrough"].is_string()) {
+            // A pass-through gives what feeds its input (its input's type while nothing does).
+            std::string sourceOutput;
+            const std::string source = sourceOf(name, port["passThrough"].get<std::string>(), &sourceOutput);
+            if (!source.empty() && seen.insert("\x1f" + name + "\x1f" + port["passThrough"].get<std::string>()).second) {
+                return outputType(source, sourceOutput, seen);
+            }
+            return port.value("type", std::string());
+        }
+        const std::string out = port.value("type", std::string());
         if (out != "Curves" || !seen.insert(name).second) return out;
         const json s = spec(name);
         for (const json& port : s["inputs"]) {
@@ -707,6 +734,13 @@ void GraphEdit::renameNode(const std::string& name, const std::string& newName) 
         if (c.value("to", std::string()) == name) c["to"] = newName;
     }
     if (impl_->graph.value("output", std::string()) == name) impl_->graph["output"] = newName;
+    // Inside a compound (compoundGraphJson): its exposed params naming the node follow it.
+    if (impl_->graph.contains("exposed") && impl_->graph["exposed"].is_object()) {
+        for (auto& item : impl_->graph["exposed"].items()) {
+            nlohmann::json& target = item.value();
+            if (target.is_string() && target.get<std::string>().rfind(name + ".", 0) == 0) target = newName + target.get<std::string>().substr(name.size());
+        }
+    }
     recordMove(name, newName);
 }
 
@@ -838,19 +872,30 @@ GraphEdit::Detached GraphEdit::detach(const std::string& name, double drop) {
         }
     }
     if (!out.changed) return out;
-    impl_->connections() = std::move(kept);
-    if (!out.source.empty()) {
-        for (const json& c : fed) {
-            const std::string dst = c.value("to", std::string()), input = c.value("input", std::string());
-            try {
-                impl_->connect(out.source, dst, input, sourceOutput);
-                out.relinked.emplace_back(dst, input);
-            } catch (const GraphError&) {
-                // (a source that does not fit that input: it is left unconnected)
-            }
-        }
-        if (impl_->graph.value("output", std::string()) == name) impl_->graph["output"] = out.source;
+    // A link reading one of its pass-through outputs reads what fed that input (as it did).
+    std::map<std::string, std::pair<std::string, std::string>> passed;  // passed input -> its source
+    for (const json& c : links) {
+        if (c.value("to", std::string()) == name) passed[c.value("input", std::string())] = {c.value("from", std::string()), c.value("output", std::string())};
     }
+    impl_->connections() = std::move(kept);
+    for (const json& c : fed) {
+        const std::string dst = c.value("to", std::string()), input = c.value("input", std::string());
+        const std::string thru = passThroughInput(c.value("output", std::string()));
+        std::pair<std::string, std::string> from{out.source, sourceOutput};
+        if (!thru.empty()) {
+            const auto it = passed.find(thru);
+            if (it == passed.end()) continue;
+            from = it->second;
+        }
+        if (from.first.empty()) continue;
+        try {
+            impl_->connect(from.first, dst, input, from.second);
+            out.relinked.emplace_back(dst, input);
+        } catch (const GraphError&) {
+            // (a source that does not fit that input: it is left unconnected)
+        }
+    }
+    if (!out.source.empty() && impl_->graph.value("output", std::string()) == name) impl_->graph["output"] = out.source;
     // Below the new link: midway between the source and the first node it feeds now (else what
     // the node fed first, else just below the source).
     auto position = [&](const std::string& node, double* x, double* y) {
@@ -951,6 +996,143 @@ std::vector<std::pair<std::string, std::string>> GraphEdit::pasteNodes(const std
     }
     *impl_ = *pasted.impl_;
     return made;
+}
+
+std::vector<std::pair<std::string, std::string>> GraphEdit::duplicateNodes(const std::vector<std::string>& names, double dx, double dy) {
+    const std::string clipboard = copyNodes(names);
+    if (clipboard.empty()) throw GraphError("nothing to duplicate");
+    GraphEdit work(*this);
+    const std::vector<std::pair<std::string, std::string>> made = work.pasteNodes(clipboard, dx, dy);
+    std::map<std::string, std::string> copyOf;  // node -> its copy
+    for (const auto& [copy, node] : made) copyOf[node] = copy;
+    // The links from outside the nodes into them, into the copies too.
+    for (const nlohmann::json& c : impl_->connectionsView()) {
+        const std::string from = c.value("from", std::string()), to = c.value("to", std::string());
+        const auto copy = copyOf.find(to);
+        if (copy == copyOf.end() || copyOf.count(from)) continue;
+        work.impl_->connect(from, copy->second, c.value("input", std::string()), c.value("output", std::string()));
+    }
+    *impl_ = *work.impl_;
+    return made;
+}
+
+std::vector<std::pair<std::string, std::string>> GraphEdit::outputLinks(const std::string& src, const std::string& output) const {
+    const std::vector<std::string> outputs = impl_->outputNames(src);
+    const std::string first = outputs.empty() ? std::string() : outputs.front();
+    const std::string wanted = output.empty() ? first : output;
+    std::vector<std::pair<std::string, std::string>> out;
+    for (const nlohmann::json& c : impl_->connectionsView()) {
+        if (c.value("from", std::string()) != src) continue;
+        const std::string reads = c.value("output", std::string());
+        if ((reads.empty() ? first : reads) == wanted) out.emplace_back(c.value("to", std::string()), c.value("input", std::string()));
+    }
+    return out;
+}
+
+std::vector<std::pair<std::string, std::string>> GraphEdit::moveOutputLinks(const std::string& src, const std::string& output,
+                                                                             const std::string& newSrc, const std::string& newOutput) {
+    impl_->outputSpec(src, output);
+    impl_->outputSpec(newSrc, newOutput);
+    std::vector<std::pair<std::string, std::string>> moved;
+    for (const auto& [dst, input] : outputLinks(src, output)) {
+        GraphEdit attempt(*this);
+        try {
+            attempt.impl_->connect(newSrc, dst, input, newOutput);
+        } catch (const GraphError&) {
+            continue;  // (it does not fit there: the link stays as it was)
+        }
+        *impl_ = *attempt.impl_;
+        moved.emplace_back(dst, input);
+    }
+    return moved;
+}
+
+std::string GraphEdit::passThroughInput(const std::string& output) {
+    const std::string prefix = passThroughOutput({});
+    return output.size() > prefix.size() && output.compare(0, prefix.size(), prefix) == 0 ? output.substr(prefix.size()) : std::string();
+}
+
+std::vector<std::string> GraphEdit::passThrough(const std::string& name) const {
+    std::vector<std::string> out;
+    const nlohmann::json& node = impl_->node(name);
+    const auto it = node.find("passThrough");
+    if (it == node.end() || !it->is_array()) return out;
+    for (const nlohmann::json& p : *it) {
+        if (p.is_string()) out.push_back(p.get<std::string>());
+    }
+    return out;
+}
+
+bool GraphEdit::setPassThrough(const std::string& name, const std::string& input, bool on) {
+    impl_->inputSpec(name, input);  // (GraphError for no such input)
+    std::vector<std::string> inputs = passThrough(name);
+    const auto at = std::find(inputs.begin(), inputs.end(), input);
+    if ((at != inputs.end()) == on) return false;
+    if (on) {
+        inputs.push_back(input);
+    } else {
+        inputs.erase(at);
+        // What read it reads nothing now.
+        const std::string output = passThroughOutput(input);
+        nlohmann::json kept = nlohmann::json::array();
+        for (const nlohmann::json& c : impl_->connectionsView()) {
+            if (!(c.value("from", std::string()) == name && c.value("output", std::string()) == output)) kept.push_back(c);
+        }
+        impl_->connections() = std::move(kept);
+    }
+    for (nlohmann::json& n : impl_->nodes()) {
+        if (!n.is_object() || n.value("name", std::string()) != name) continue;
+        if (inputs.empty()) n.erase("passThrough");
+        else n["passThrough"] = inputs;
+    }
+    return true;
+}
+
+void resolvePassThrough(nlohmann::json& graph) {
+    if (!graph.is_object() || !graph.contains("connections") || !graph["connections"].is_array()) return;
+    std::map<std::string, std::set<std::string>> passes;  // node -> the inputs it passes
+    for (const nlohmann::json& n : graph.value("nodes", nlohmann::json::array())) {
+        if (!n.is_object() || !n.contains("passThrough") || !n["passThrough"].is_array()) continue;
+        for (const nlohmann::json& p : n["passThrough"]) {
+            if (p.is_string()) passes[n.value("name", std::string())].insert(p.get<std::string>());
+        }
+    }
+    if (passes.empty()) return;
+    std::map<std::pair<std::string, std::string>, std::pair<std::string, std::string>> feeds;  // (to, input) -> (from, output)
+    for (const nlohmann::json& c : graph["connections"]) {
+        if (c.is_object()) feeds[{c.value("to", std::string()), c.value("input", std::string())}] = {c.value("from", std::string()), c.value("output", std::string())};
+    }
+    nlohmann::json resolved = nlohmann::json::array();
+    for (nlohmann::json c : graph["connections"]) {
+        if (!c.is_object()) continue;
+        std::string from = c.value("from", std::string()), output = c.value("output", std::string());
+        bool lost = false;
+        for (int guard = 0; guard < 256; ++guard) {
+            const std::string input = GraphEdit::passThroughInput(output);
+            const auto node = passes.find(from);
+            if (input.empty() || node == passes.end() || !node->second.count(input)) break;
+            const auto source = feeds.find({from, input});
+            if (source == feeds.end()) {
+                lost = true;  // nothing comes in: nothing goes out
+                break;
+            }
+            from = source->second.first;
+            output = source->second.second;
+        }
+        if (lost) continue;
+        c["from"] = from;
+        if (output.empty()) c.erase("output");
+        else c["output"] = output;
+        resolved.push_back(std::move(c));
+    }
+    graph["connections"] = std::move(resolved);
+}
+
+std::string resolvePassThroughJson(const std::string& graphJson) {
+    nlohmann::json graph = nlohmann::json::parse(graphJson, nullptr, false);
+    if (!graph.is_object()) throw GraphError("the graph is not a JSON object");
+    resolvePassThrough(graph);
+    return graph.dump();
 }
 
 void GraphEdit::checkConnections() {

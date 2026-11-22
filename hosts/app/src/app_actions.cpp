@@ -15,6 +15,7 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QStandardPaths>
+#include <QSettings>
 #include <QUrl>
 
 #include "app_shell.h"
@@ -292,6 +293,18 @@ ui::Bindings AppActions::bindings(MainWindow& w) {
     b["graph.frame"] = {run([m] { m->graph_->frameSelected(); }), {}, graphOn};
     b["graph.frameAll"] = {run([m] { m->graph_->fitAll(); }), {}, graphOn};
     b["graph.tidy"] = {run([m] { m->graph_->tidyLayout(); }), {}, graphOn};
+    b["graph.up"] = {run([m] { m->graph_->leaveCompound(); }), {}, [m] { return m->document_ && !m->document_->scope().empty(); }};
+    // Align (graph_arrange.h): the selected nodes, one undo step.
+    for (const std::string& mode : alignModes()) {
+        b["align." + mode] = {run([m, mode] { m->graph_->alignSelected(mode); }), {}, [m] { return m->document_ && m->graph_->selectedNodes().size() > 1; }};
+    }
+    b["align.tidy"] = {run([m] { m->graph_->tidySelection(); }), {}, graphOn};
+    // Wire Style: remembered between sessions.
+    b["graph.wireStyle"] = {[m](const json& value, bool) {
+                                m->graph_->setWireStyle(str(value).toStdString());
+                                if (m->interactive_) QSettings().setValue(QStringLiteral("graph/wireStyle"), str(value));
+                            },
+                            [m](const json& value) { return str(value).toStdString() == m->graph_->wireStyle(); }};
     b["graph.group"] = {run([m] { m->graph_->groupSelected(); }), {}, graphOn};
     b["graph.ungroup"] = {run([m] { m->graph_->ungroupSelected(); }), {}, graphOn};
     b["graph.delete"] = {run([m] { m->graph_->deleteSelected(); }), {}, graphOn};

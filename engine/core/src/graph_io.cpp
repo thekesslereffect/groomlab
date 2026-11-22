@@ -7,8 +7,10 @@
 #include <nlohmann/json.hpp>
 
 #include "operators/internal.h"
+#include "graph_internal.h"
 #include "schema_internal.h"
 
+#include "groomlab/graph_edit.h"
 #include "groomlab/node_catalog.h"
 #include "groomlab/operators.h"
 
@@ -233,8 +235,30 @@ GraphDocument parse(json root) {
     if (root.contains("pins") && root.at("pins").is_object() && !root.at("pins").empty()) {
         doc.pinsJson = root.at("pins").dump();
     }
+    // The links' teleports (graph_portals.h: carried, never evaluated).
+    if (root.contains("portals") && root.at("portals").is_array() && !root.at("portals").empty()) {
+        doc.portalsJson = root.at("portals").dump();
+    }
 
-    for (const json& c : root.value("connections", json::array())) {
+    // Links reading a node's pass-through output read what feeds that input (GraphEdit::passThrough);
+    // the document keeps them as drawn, for saving.
+    json links = {{"nodes", json::array()}, {"connections", root.value("connections", json::array())}};
+    json passes = json::object();
+    for (const json& n : root.value("nodes", json::array())) {
+        if (!n.is_object() || !n.contains("passThrough") || !n["passThrough"].is_array() || n["passThrough"].empty()) continue;
+        links["nodes"].push_back({{"name", n.value("name", std::string())}, {"passThrough", n["passThrough"]}});
+        passes[n.value("name", std::string())] = n["passThrough"];
+    }
+    if (!passes.empty()) {
+        doc.passThroughJson = passes.dump();
+        json drawn = json::array();
+        for (const json& c : links["connections"]) {
+            if (c.is_object() && !GraphEdit::passThroughInput(c.value("output", std::string())).empty()) drawn.push_back(c);
+        }
+        if (!drawn.empty()) doc.passLinksJson = drawn.dump();
+    }
+    resolvePassThrough(links);
+    for (const json& c : links["connections"]) {
         const NodeId from = doc.node(c.at("from").get<std::string>());
         const NodeId to = doc.node(c.at("to").get<std::string>());
         // "output": which of from's outputs (absent: its first).
@@ -322,6 +346,7 @@ std::string paramsJson(const ParamSet& params) {
 std::string saveGraphJson(const GraphDocument& doc) {
     json nodes = json::array();
     json connections = json::array();
+    const json passes = doc.passThroughJson.empty() ? json::object() : json::parse(doc.passThroughJson, nullptr, false);
 
     for (const auto& [name, id] : doc.nodesByName) {
         const Operator& op = doc.graph.node(id);
@@ -352,6 +377,7 @@ std::string saveGraphJson(const GraphDocument& doc) {
         if (const auto at = doc.positions.find(name); at != doc.positions.end()) {
             node["ui"] = {{"x", at->second.x}, {"y", at->second.y}};
         }
+        if (passes.is_object() && passes.contains(name)) node["passThrough"] = passes[name];
         nodes.push_back(std::move(node));
 
         const auto specs = doc.graph.inputSpecs(id);
@@ -366,6 +392,18 @@ std::string saveGraphJson(const GraphDocument& doc) {
         }
     }
 
+    // The links reading pass-through outputs as they were drawn, in place of what they resolved to.
+    if (!doc.passLinksJson.empty()) {
+        const json drawn = json::parse(doc.passLinksJson, nullptr, false);
+        for (const json& d : drawn.is_array() ? drawn : json::array()) {
+            json kept = json::array();
+            for (json& c : connections) {
+                if (!(c["to"] == d.value("to", json()) && c["input"] == d.value("input", json()))) kept.push_back(std::move(c));
+            }
+            kept.push_back(d);
+            connections = std::move(kept);
+        }
+    }
     json root = {
         {"version", currentSchemaVersion(DocumentKind::Graph)},
         {"nodes", nodes},
@@ -379,6 +417,10 @@ std::string saveGraphJson(const GraphDocument& doc) {
     if (!doc.pinsJson.empty()) {
         json pins = json::parse(doc.pinsJson, nullptr, false);
         if (pins.is_object()) root["pins"] = std::move(pins);
+    }
+    if (!doc.portalsJson.empty()) {
+        json portals = json::parse(doc.portalsJson, nullptr, false);
+        if (portals.is_array()) root["portals"] = std::move(portals);
     }
     return root.dump(2);
 }

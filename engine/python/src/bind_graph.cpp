@@ -18,6 +18,8 @@
 #include "groomlab/graph_inserts.h"
 #include "groomlab/graph_io.h"
 #include "groomlab/graph_pins.h"
+#include "groomlab/graph_portals.h"
+#include "groomlab/graph_arrange.h"
 #include "groomlab/groom.h"
 #include "groomlab/operator_state.h"
 #include "groomlab/operators.h"
@@ -143,6 +145,10 @@ namespace {
 
 // A graph's JSON as groomlab_core.GraphPins holds it (graph_pins.h's functions take it).
 struct GraphPins {
+    nlohmann::json graph;
+};
+// And as groomlab_core.GraphPortals holds it (graph_portals.h's).
+struct GraphPortals {
     nlohmann::json graph;
 };
 
@@ -767,6 +773,125 @@ void bindGraph(py::module_& m) {
         .def("rename_node", [](GraphPins& p, const std::string& from, const std::string& to) { renamePinNode(p.graph, from, to); },
              py::arg("old"), py::arg("new"), "A node renamed: the routes from and to it follow (the connections renamed first).");
 
+    // A graph's portals, teleporting links (graph_portals.h): every host's rules. Maya's GraphModel
+    // keeps its portals through this.
+    py::class_<GraphPortals>(m, "GraphPortals",
+                             "The portals of a graph's JSON (its \"connections\" and \"portals\"), read and edited as every host "
+                             "does (graph_portals.h).")
+        .def(py::init([](const std::string& graphJson) {
+                 GraphPortals p{nlohmann::json::parse(graphJson, nullptr, false)};
+                 if (!p.graph.is_object()) throw GraphError("the graph is not a JSON object");
+                 return p;
+             }),
+             py::arg("graph_json"))
+        .def("portals_json",
+             [](const GraphPortals& p) { return p.graph.contains("portals") ? p.graph["portals"].dump() : std::string(); },
+             "The graph's \"portals\" as JSON (\"\" when it has none).")
+        .def("prune", [](GraphPortals& p) { prunePortals(p.graph); })
+        .def("names", [](const GraphPortals& p) { return portalNames(p.graph); })
+        .def("portal_of", [](const GraphPortals& p, const std::string& from, const std::string& output) { return portalOf(p.graph, from, output); },
+             py::arg("src"), py::arg("output") = std::string(), "The portal of a source output, \"\" none.")
+        .def("portal_of_link",
+             [](const GraphPortals& p, const std::string& to, const std::string& input) -> py::object {
+                 const auto at = portalOfLink(p.graph, to, input);
+                 if (!at) return py::none();
+                 return py::make_tuple(at->portal, at->exit);
+             },
+             py::arg("to"), py::arg("input"), "(portal, exit) the link into to.input comes out of, or None.")
+        .def("add",
+             [](GraphPortals& p, const std::string& from, const std::string& output, double x, double y, const std::string& name) {
+                 return addPortal(p.graph, from, output, x, y, name);
+             },
+             py::arg("src"), py::arg("output"), py::arg("x"), py::arg("y"), py::arg("name") = std::string())
+        .def("add_exit", [](GraphPortals& p, const std::string& portal, double x, double y) { return addPortalExit(p.graph, portal, x, y); },
+             py::arg("portal"), py::arg("x"), py::arg("y"))
+        .def("teleport",
+             [](GraphPortals& p, const std::string& to, const std::string& input, double exitX, double exitY, double entryX,
+                double entryY) -> py::object {
+                 const auto at = teleportLink(p.graph, to, input, exitX, exitY, entryX, entryY);
+                 if (!at) return py::none();
+                 return py::make_tuple(at->portal, at->exit);
+             },
+             py::arg("to"), py::arg("input"), py::arg("exit_x"), py::arg("exit_y"), py::arg("entry_x"), py::arg("entry_y"),
+             "The link into to.input drawn through its source's portal, out of a new exit: (portal, exit), or None.")
+        .def("add_link",
+             [](GraphPortals& p, const std::string& portal, int exit, const std::string& to, const std::string& input) {
+                 return addPortalLink(p.graph, portal, exit, to, input);
+             },
+             py::arg("portal"), py::arg("exit"), py::arg("to"), py::arg("input"))
+        .def("remove_link", [](GraphPortals& p, const std::string& to, const std::string& input) { return removePortalLink(p.graph, to, input); },
+             py::arg("to"), py::arg("input"))
+        .def("move", [](GraphPortals& p, const std::string& portal, double x, double y) { return movePortal(p.graph, portal, x, y); },
+             py::arg("portal"), py::arg("x"), py::arg("y"))
+        .def("move_exit",
+             [](GraphPortals& p, const std::string& portal, int exit, double x, double y) { return movePortalExit(p.graph, portal, exit, x, y); },
+             py::arg("portal"), py::arg("exit"), py::arg("x"), py::arg("y"))
+        .def("remove", [](GraphPortals& p, const std::string& portal) { return removePortal(p.graph, portal); }, py::arg("portal"))
+        .def("remove_exit", [](GraphPortals& p, const std::string& portal, int exit) { return removePortalExit(p.graph, portal, exit); },
+             py::arg("portal"), py::arg("exit"))
+        .def("rename", [](GraphPortals& p, const std::string& portal, const std::string& name) { return renamePortal(p.graph, portal, name); },
+             py::arg("portal"), py::arg("name"))
+        .def("rename_node", [](GraphPortals& p, const std::string& from, const std::string& to) { renamePortalNode(p.graph, from, to); },
+             py::arg("old"), py::arg("new"));
+
+    // Arranging a graph by hand (graph_arrange.h): every host's Align, Tidy Selection, backdrops,
+    // Shift+drag, shake and wire styles. Boxes are (name, x, y, w, h) tuples.
+    auto boxesOf = [](const std::vector<std::tuple<std::string, double, double, double, double>>& boxes) {
+        std::vector<LayoutBox> out;
+        for (const auto& [name, x, y, w, h] : boxes) out.push_back({name, x, y, w, h});
+        return out;
+    };
+    m.def("align_modes", &alignModes, "The Align modes, in the menus' order.");
+    m.def("align_boxes",
+          [boxesOf](const std::vector<std::tuple<std::string, double, double, double, double>>& boxes, const std::string& mode, double gap) {
+              return alignBoxes(boxesOf(boxes), mode, gap);
+          },
+          py::arg("boxes"), py::arg("mode"), py::arg("gap") = 40.0, "{name: (x, y)}: each box's top-left aligned (graph_arrange.h).");
+    m.def("arrange_selection",
+          [boxesOf](const GraphEdit& edit, const std::vector<std::tuple<std::string, double, double, double, double>>& boxes, double column,
+                    double row) { return arrangeSelection(edit, boxesOf(boxes), column, row); },
+          py::arg("edit"), py::arg("boxes"), py::arg("column"), py::arg("row"),
+          "Tidy Selection: {name: (x, y)} for the selected nodes laid out where they were.");
+    m.def("grown_backdrop",
+          [boxesOf](const std::tuple<double, double, double, double>& backdrop,
+                    const std::vector<std::tuple<std::string, double, double, double, double>>& nodes, double margin, double header) {
+              const auto [x, y, w, h] = backdrop;
+              const LayoutBox out = grownBackdrop({"", x, y, w, h}, boxesOf(nodes), margin, header);
+              return std::make_tuple(out.x, out.y, out.w, out.h);
+          },
+          py::arg("backdrop"), py::arg("nodes"), py::arg("margin"), py::arg("header"),
+          "(x, y, w, h): a backdrop grown to hold the nodes (never shrunk).");
+    m.def("folded_backdrop",
+          [](const std::tuple<double, double, double, double>& backdrop, double header) {
+              const auto [x, y, w, h] = backdrop;
+              const LayoutBox out = foldedBackdrop({"", x, y, w, h}, header);
+              return std::make_tuple(out.x, out.y, out.w, out.h);
+          },
+          py::arg("backdrop"), py::arg("header"), "(x, y, w, h): a folded backdrop's box.");
+    m.def("nodes_with_upstream", &nodesWithUpstream, py::arg("edit"), py::arg("names"),
+          "The nodes a Shift+drag carries: those and everything feeding them, in the graph's order.");
+    py::class_<ShakeDetector>(m, "ShakeDetector", "A node shaken while dragged (screen pixels, seconds): graph_arrange.h.")
+        .def(py::init<int, double, double>(), py::arg("turns") = 4, py::arg("min_travel") = 18.0, py::arg("window") = 0.7)
+        .def("reset", &ShakeDetector::reset)
+        .def("add", &ShakeDetector::add, py::arg("seconds"), py::arg("x"), py::arg("y"));
+    m.def("wire_styles", &wireStyles, "The wire styles: smooth, square, rounded.");
+    m.def("wire_route",
+          [](const std::string& style, double ax, double ay, double bx, double by, std::optional<double> below, bool through) {
+              py::list out;
+              for (const WireStep& s : wireRoute(style, ax, ay, bx, by, below ? *below : std::nan(""), through)) {
+                  if (s.cubic) out.append(py::make_tuple(s.c1x, s.c1y, s.c2x, s.c2y, s.x, s.y));
+                  else out.append(py::make_tuple(s.x, s.y));
+              }
+              return out;
+          },
+          py::arg("style"), py::arg("ax"), py::arg("ay"), py::arg("bx"), py::arg("by"), py::arg("below") = py::none(),
+          py::arg("through") = false,
+          "A wire's steps from (ax, ay): (x, y) a line, (c1x, c1y, c2x, c2y, x, y) a cubic.");
+    m.def("compound_graph_json", &compoundGraphJson, py::arg("graph_json"), py::arg("path"),
+          "The graph a Compound holds (at its path, \"outer/inner\"), as a graph of its own.");
+    m.def("with_compound_graph", &withCompoundGraph, py::arg("graph_json"), py::arg("path"), py::arg("inner_json"),
+          "The whole graph with the compound at `path` holding `inner_json` instead (its inputs following its Input nodes).");
+
     // The editors' edits of a graph's JSON every host makes (graph_edit.h): Maya's GraphModel
     // and the standalone app's node graph.
     py::class_<GraphEdit>(m, "GraphEdit",
@@ -918,6 +1043,16 @@ void bindGraph(py::module_& m) {
         .def("paste_nodes", &GraphEdit::pasteNodes, py::arg("clipboard"), py::arg("dx") = 0.0, py::arg("dy") = 0.0,
              "The copied nodes added under free names, moved by (dx, dy), with the links among them: [(new node, the node it "
              "copies)]. GraphError (nothing changed) for text that holds no copied nodes.")
+        .def("duplicate_nodes", &GraphEdit::duplicateNodes, py::arg("names"), py::arg("dx") = 0.0, py::arg("dy") = 0.0,
+             "Duplicate (Ctrl+D): the nodes copied beside them, the copies reading what the nodes read: [(copy, node)].")
+        .def("output_links", &GraphEdit::outputLinks, py::arg("src"), py::arg("output") = std::string(),
+             "The links reading src's output (\"\": its first): [(node, input)].")
+        .def("move_output_links", &GraphEdit::moveOutputLinks, py::arg("src"), py::arg("output"), py::arg("new_src"),
+             py::arg("new_output") = std::string(),
+             "Every link reading src's output reads new_src's new_output instead where it fits: the (node, input) moved.")
+        .def("pass_through", &GraphEdit::passThrough, py::arg("name"), "The inputs the node hands on as outputs (thru_<input>).")
+        .def("set_pass_through", &GraphEdit::setPassThrough, py::arg("name"), py::arg("input"), py::arg("on"),
+             "An input's pass-through output on or off (off: what read it reads nothing). False when nothing changed.")
         .def("layout_positions",
              [](const GraphEdit& e, double column, double row, int columnsPerBlock, double blockGap,
                 const std::optional<std::vector<std::string>>& only) {

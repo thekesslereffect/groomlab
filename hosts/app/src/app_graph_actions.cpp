@@ -166,6 +166,42 @@ void AppActions::addGraphBindings(ui::Bindings& b, MainWindow& w) {
                            },
                            backdropOn};
     b["backdrop.delete"] = {run([m] { m->graph_->removeBackdrop(m->graph_->selectedBackdrop()); }), {}, backdropOn};
+    b["backdrop.fold"] = {[m](const json&, bool on) { m->graph_->setBackdropFolded(m->graph_->selectedBackdrop(), on); },
+                          [m](const json&) { return m->graph_->backdropFolded(m->graph_->selectedBackdrop()); },
+                          backdropOn};
+    // Into a Compound (double-click it, I); out with U, Up or the path bar.
+    b["node.openCompound"] = {run([m, selected] { m->graph_->openCompound(selected()); }), {}, nodeOn};
+    // A link's menu: the wire right-clicked.
+    auto wireOn = [m] { return m->document_ != nullptr && m->graph_->menuWire() >= 0; };
+    b["link.teleport"] = {run([m] { m->graph_->teleportWire(m->graph_->menuWire()); }), {}, wireOn};
+    b["link.pin"] = {run([m] { m->graph_->pinWire(m->graph_->menuWire(), m->graph_->sceneAt(menuPoint())); }), {}, wireOn};
+    b["link.delete"] = {run([m] { m->graph_->selectWire(m->graph_->menuWire()); m->graph_->deleteSelected(); }), {}, wireOn};
+    // A portal dot's menu.
+    auto portalOn = [m] { return m->document_ != nullptr && !m->graph_->menuPortal().empty(); };
+    b["portal.rename"] = {run([m] { m->graph_->renamePortal(m->graph_->menuPortal()); }), {}, portalOn};
+    b["portal.removeExit"] = {run([m] {
+                                  int exit = -1;
+                                  const std::string portal = m->graph_->menuPortal(&exit);
+                                  if (exit >= 0) m->graph_->removePortal(portal, exit);
+                              }),
+                              {}, portalOn};
+    b["portal.delete"] = {run([m] { m->graph_->removePortal(m->graph_->menuPortal()); }), {}, portalOn};
+    // An input port's menu: Pass Through as Output.
+    b["port.passThrough"] = {[m](const json&, bool on) {
+                                 std::string node, input;
+                                 if (m->graph_->menuPort(&node, &input)) m->graph_->setPassThrough(node, input, on);
+                             },
+                             [m](const json&) {
+                                 std::string node, input;
+                                 if (!m->document_ || !m->graph_->menuPort(&node, &input)) return false;
+                                 try {
+                                     const std::vector<std::string> passes = GraphEdit(m->document_->viewGraph().dump()).passThrough(node);
+                                     return std::find(passes.begin(), passes.end(), input) != passes.end();
+                                 } catch (const std::exception&) {
+                                     return false;
+                                 }
+                             },
+                             [m] { return m->document_ != nullptr && m->graph_->menuPort(nullptr, nullptr); }};
     // Add Backdrop: around the selection, else where the canvas was right-clicked.
     b["backdrop.add"] = {run([m] { m->graph_->addBackdrop(menuPoint()); }), {}, groomOpen};
 
@@ -398,7 +434,7 @@ std::set<std::string> AppActions::nodeState(MainWindow& w, const std::string& no
     }
     // View Up to Here and Bake Node to Guides: the core's rules (every host's menu).
     try {
-        const GraphEdit edit(w.document_->graph().dump());
+        const GraphEdit edit(w.document_->viewGraph().dump());
         if (edit.viewable(node)) s.insert("node.viewable");
         if (edit.bakeable(node)) s.insert("node.bakeable");
     } catch (const std::exception&) {
@@ -522,6 +558,8 @@ void AppActions::wireGraphEditor(MainWindow& w) {
     m->shell_->graphAddButton()->setMenu(add);
     m->shell_->graphPresetsButton()->setMenu(m->presetsMenu_);
     m->shell_->graphEditButton()->setMenu(edit);
+    // The wire style, remembered between sessions.
+    if (m->interactive_) m->graph_->setWireStyle(QSettings().value(QStringLiteral("graph/wireStyle"), QStringLiteral("smooth")).toString().toStdString());
     // Snap, remembered between sessions (a test's app starts with it off).
     QToolButton* snap = m->shell_->graphSnapButton();
     if (m->interactive_) snap->setChecked(QSettings().value(QStringLiteral("graph/snap"), false).toBool());
@@ -536,7 +574,7 @@ void AppActions::wireGraphEditor(MainWindow& w) {
         const ui::Definitions& d = ui::Definitions::shipped();
         ui::FillOptions options = fillOptions(*m);
         options.liveShortcuts = false;
-        menuPoint() = target == NodeGraphView::MenuTarget::Canvas ? at : QPointF(std::numeric_limits<qreal>::quiet_NaN(), 0.0);
+        menuPoint() = target == NodeGraphView::MenuTarget::Canvas || target == NodeGraphView::MenuTarget::Wire ? at : QPointF(std::numeric_limits<qreal>::quiet_NaN(), 0.0);
         QObject::connect(menu, &QObject::destroyed, [] { menuPoint() = QPointF(std::numeric_limits<qreal>::quiet_NaN(), 0.0); });
         switch (target) {
             case NodeGraphView::MenuTarget::Node: {
@@ -550,6 +588,20 @@ void AppActions::wireGraphEditor(MainWindow& w) {
             case NodeGraphView::MenuTarget::Backdrop:
                 ui::fillMenu(menu, d.get("graph/backdropMenu"), bindings(*m), options, d);
                 break;
+            case NodeGraphView::MenuTarget::Wire:
+                ui::fillMenu(menu, d.get("graph/linkMenu"), bindings(*m), options, d);
+                break;
+            case NodeGraphView::MenuTarget::Port:
+                ui::fillMenu(menu, d.get("graph/portMenu"), bindings(*m), options, d);
+                break;
+            case NodeGraphView::MenuTarget::Portal: {
+                int exit = -1;
+                m->graph_->menuPortal(&exit);
+                options.resolve.state = state(*m);
+                if (exit >= 0) options.resolve.state->insert("portal.exit");
+                ui::fillMenu(menu, d.get("graph/portalMenu"), bindings(*m), options, d);
+                break;
+            }
             case NodeGraphView::MenuTarget::Canvas: {
                 ui::fillMenu(menu, canvasMenu(), bindings(*m), options, d);
                 // The search first (Tab), where the menu was asked: on a wire, into it. Made again

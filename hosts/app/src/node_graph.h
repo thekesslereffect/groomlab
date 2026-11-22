@@ -74,7 +74,10 @@
 
 #include <nlohmann/json.hpp>
 
+#include "groomlab/graph_arrange.h"
+
 #include <QColor>
+#include <QElapsedTimer>
 #include <QMargins>
 #include <QPainterPath>
 #include <QPointF>
@@ -176,7 +179,7 @@ public:
     int dropWire() const { return dropWire_; }
 
     // ---- The right-click menus: the host fills them (the shared definitions, graph_ui.json) ------
-    enum class MenuTarget { Canvas, Node, Backdrop };
+    enum class MenuTarget { Canvas, Node, Backdrop, Port, Wire, Portal };
     // `menu` filled for what was right-clicked: a node (selected by then: the menu's actions act on
     // the selected node), a backdrop (selected) or the canvas; `at` the click in view coordinates.
     using MenuFiller = std::function<void(QMenu* menu, MenuTarget target, const QPointF& at)>;
@@ -259,8 +262,47 @@ public:
     QPainterPath wirePathOf(int index) const { return index >= 0 && index < wireCount() ? wires_[index].path : QPainterPath(); }
     // The edits a node's context menu offers (Rename..., Duplicate, Set as Output, Bypass,
     // Delete) and the canvas's (Add node, Tidy layout, Fit), as the menu does them.
+    // ---- Arranging by hand (graph_arrange.h, every host's) -------------------------------------
+    // Align the selected nodes (alignModes: "left", "centerX", "right", "top", "centerY", "bottom",
+    // "row", "column", "distributeX", "distributeY"), one undo step.
+    void alignSelected(const std::string& mode);
+    // Tidy Selection: the selected nodes laid out where they are (fewer than two: Tidy Layout).
+    void tidySelection();
+    // How links are drawn: "smooth", "square" or "rounded" (wireStyles; another: smooth).
+    void setWireStyle(const std::string& style);
+    const std::string& wireStyle() const { return wireStyle_; }
+    // ---- Inside a compound: double-click a Compound (or I) opens it, U or the path bar's
+    // "Graph" goes back out; the bar at the top shows where you are.
+    void openCompound(const std::string& node);
+    void leaveCompound();
+    std::string scopePath() const;
+    std::vector<std::pair<QString, QRectF>> scopeBar() const;  // the bar's segments, widget units
+    // What a context menu was opened on: an input port (menuPort), a wire, a portal dot (its
+    // portal and exit: -1 its entry by the output).
+    bool menuPort(std::string* node, std::string* input) const;
+    int menuWire() const { return menuWire_; }
+    void selectWire(int wire);  // -1 none
+    std::string menuPortal(int* exit = nullptr) const;
+    void pinWire(int wire, const QPointF& scene);  // a pin on it there (double-click, Alt+click)
+    void teleportWire(int wire);                    // the wire drawn through a portal (its menu)
+    void renamePortal(const std::string& portal);   // the prompt, then the document's rename
+    void removePortal(const std::string& portal, int exit = -1);  // a portal (its links drawn again), or one exit
+    void addPortalExit(const std::string& portal, const QPointF& widget);
+    void setPassThrough(const std::string& node, const std::string& input, bool on);
+    void setBackdropFolded(int index, bool folded);
+    bool backdropFolded(int index) const;
+    bool nodeHidden(const std::string& node) const;  // on a folded backdrop
+    // The portals' dots (tests): portal, exit (-1 the entry), scene position.
+    struct PortalDot {
+        std::string portal;
+        int exit = -1;
+        QPointF pos;
+    };
+    std::vector<PortalDot> portalDots() const;
+    // A port's center, widget units (tests); NaN for no such port.
+    QPointF portPoint(const std::string& node, const std::string& port, bool output) const;
     void renameSelected();     // the prompt, then the document's rename
-    void duplicateSelected();  // Ctrl+D
+    void duplicateSelected();  // Ctrl+D: the copies read what the nodes read
     void setSelectedAsOutput();
     void tidyLayout();         // every position dropped: laid out afresh and fitted (Ctrl+L)
     // Ctrl+G: the selected nodes into one Compound (selected after); Ctrl+Shift+G: the selected
@@ -367,12 +409,23 @@ private:
         bool updateAvailable = false;  // the library has a newer copy of it
         bool tubes = false;            // Show Tubes on its header (GraphEdit::braidTubesOffered)
         bool viewable = false;         // View Up to Here (GraphEdit::viewable)
+        int foldedIn = -1;             // the folded backdrop hiding it (an index into backdrops_)
     };
     struct Wire {
         int from = -1, to = -1;  // node indices
         int output = 0, input = 0;  // port indices
         std::vector<int> pins;     // the pins it runs through (indices into pins_), source first
+        int portal = -1;           // the portal exit it comes out of (an index into portals_)
+        bool hidden = false;       // both ends on one folded backdrop
         QPainterPath path;         // scene units
+    };
+    // A portal's dot (graph_portals.h): its entry by the source output (exit -1), or an exit.
+    struct Portal {
+        std::string name;
+        int exit = -1;
+        QPointF pos;  // scene units, its center
+        QColor color;
+        int from = -1, output = 0;  // the signal
     };
     // A pin the wires run through (the graph's "pins", graph_pins.h): drawn over the wires in the
     // color of the signal it carries.
@@ -386,10 +439,12 @@ private:
     // Editor's and a preset's): drawn behind the nodes, layout only.
     struct Backdrop {
         QString title;
-        QRectF rect;  // scene units
+        QRectF rect;  // scene units: as drawn (folded: its title bar)
+        QRectF full;  // its whole frame (what holds its nodes)
         QColor color;
+        bool folded = false;
     };
-    enum class Drag { None, Pan, Zoom, Move, Wire, Camera, Band, Backdrop, BackdropResize, Pin };
+    enum class Drag { None, Pan, Zoom, Move, Wire, Camera, Band, Backdrop, BackdropResize, Pin, Portal, Bundle };
 
     void rebuild();      // nodes_, wires_ and backdrops_ from the document
     void autoLayout();   // positions for nodes the document gives none
@@ -401,6 +456,20 @@ private:
     // the lowest edge of the nodes it joins; NaN: a little under its ends).
     QPainterPath wirePath(const QPointF& from, const QPointF& to, qreal below = std::numeric_limits<qreal>::quiet_NaN()) const;
     QPainterPath wirePathFor(const Wire& wire) const;
+    // A wire's piece in the wire style (graph_arrange.h wireRoute); `through`: between pins or dots.
+    QPainterPath routed(const QPointF& from, const QPointF& to, qreal below, bool through) const;
+    QPointF wireStart(const Wire& wire) const;  // its source port, or the folded backdrop hiding it
+    QPointF wireEnd(const Wire& wire) const;
+    int portalAt(const QPointF& scene, bool* nub = nullptr) const;  // a portal dot, -1 none
+    QRectF backdropFoldButton(const Backdrop& b) const;            // the fold chevron in its title bar
+    void drawScopeBar(QPainter& painter);
+    // Backdrops a move grows: their index, their rect when it began, the moved nodes on them.
+    struct Growing {
+        int backdrop = -1;
+        QRectF start;
+        std::vector<int> nodes;
+    };
+    void growBackdrops();  // during a move: each grows to hold its moved nodes still on it
     int nodeIndex(const std::string& name) const;
     bool isSelected(const std::string& name) const;
     void updateWireHint(const QPointF& scene);
@@ -456,6 +525,26 @@ private:
     std::vector<Wire> wires_;
     std::vector<Backdrop> backdrops_;
     std::vector<Pin> pins_;
+    std::vector<Portal> portals_;
+    int selectedPortal_ = -1;
+    int dragPortal_ = -1;       // a portal dot being moved
+    QPointF portalStart_;
+    int dragWirePortal_ = -1;   // a wire dragged out of a portal exit's nub: that exit
+    std::string wireStyle_ = "smooth";
+    // A move: the nodes it carries (the selection; Shift: with everything upstream), whether it
+    // began with Shift on a node (a click without a move adds it to the selection instead), the
+    // backdrops it grows, and the shake that pulls the nodes out of their links.
+    std::vector<int> moving_;
+    bool shiftPress_ = false;
+    std::vector<Growing> growing_;
+    ShakeDetector shake_;
+    QElapsedTimer shakeClock_;
+    bool shaken_ = false;
+    // Alt+click (no drag) on a wire puts a pin there.
+    QPointF altPress_;
+    bool altPressed_ = false;
+    int menuWire_ = -1, menuPortal_ = -1, menuPortNode_ = -1, menuPortInput_ = -1;
+    mutable std::vector<std::pair<QString, QRectF>> scopeBar_;  // drawn: the path bar's segments
     int selectedPin_ = -1;
     int dragPin_ = -1;      // the pin being moved
     QPointF pinStart_;      // where it was when the move began

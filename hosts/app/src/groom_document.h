@@ -220,12 +220,32 @@ public:
         std::string from, output, to, input;  // output "": the source's first
     };
     std::vector<ConnectionInfo> connections() const;
+    // The whole graph (what the groom evaluates and the file keeps).
     const nlohmann::json& graph() const { return graph_; }
+    // ---- Inside a compound (the node graph's double-click on a Compound, its path bar, U). The
+    // graph the node graph shows and edits: the whole one, or the graph of the compound opened
+    // (scope(): its path, "outer/inner"; "" the whole graph). nodes(), connections(), nodeJson()
+    // and the node graph's edits (editGraph, the backdrops, pins and portals) work on it; each
+    // edit there writes the compound back (withCompoundGraph: its inputs follow its Input nodes)
+    // and evaluates the whole graph, one undo step as ever. "" or why not.
+    const nlohmann::json& viewGraph() const;
+    const std::string& scope() const { return scope_; }
+    std::string enterCompound(const std::string& node);  // a Compound of the graph shown
+    void leaveCompound();                                 // one level up ("" stays "")
+    std::string setScope(const std::string& path);        // straight to a path ("" the whole graph)
     // Where the node graph draws a node (its "ui": {"x", "y"} in the graph JSON, graph_io.h, kept in the
     // file, Maya's Graph Editor's too; false when the node has none yet: the view lays it out).
     bool nodePosition(const std::string& node, float* x, float* y) const;
-    // Not an undo step (as Maya's node editor moves are not); the file is dirty after it.
+    // Moves (node positions, backdrops moved or resized, pins and portals moved) are made between
+    // beginLayout and endLayout: endLayout records them as one undo step named `label` when the
+    // graph's layout changed (nothing evaluates for it, or for its undo). setNodePosition alone
+    // (outside one) is no undo step; the file is dirty after it.
     void setNodePosition(const std::string& node, float x, float y);
+    void beginLayout();
+    bool endLayout(const std::string& label);
+    // A layout edit made in one go (Align, Tidy Selection): `edit` runs on the graph shown, one
+    // undo step when it changed anything; nothing evaluates.
+    std::string editLayout(const std::string& label, const std::function<void(nlohmann::json&)>& edit);
     std::string graphJson() const { return graph_.dump(); }
     // A node's param as stored (null when the node or param is absent: the spec's default then).
     nlohmann::json param(const std::string& node, const std::string& name) const;
@@ -392,7 +412,30 @@ public:
     // written to *made), the graph's output, and every position dropped so the view lays the
     // graph out afresh (Tidy Layout). "" or the error.
     std::string renameNode(const std::string& node, const std::string& newName);
+    // Duplicate (Ctrl+D): the copies beside the nodes, reading what the nodes read
+    // (GraphEdit::duplicateNodes), one undo step; their names to *made.
     std::string duplicateNode(const std::string& node, std::string* made);
+    std::string duplicateNodes(const std::vector<std::string>& nodes, float dx, float dy, std::vector<std::string>* made = nullptr);
+    // Shift+drag from an output: every link reading from's `output` reads to's `toOutput` instead
+    // where it fits (GraphEdit::moveOutputLinks), one undo step; how many moved to *moved.
+    std::string moveOutputLinks(const std::string& from, const std::string& output, const std::string& to, const std::string& toOutput,
+                                int* moved = nullptr);
+    // An input's pass-through output (GraphEdit::setPassThrough) on or off, one undo step.
+    std::string setPassThrough(const std::string& node, const std::string& input, bool on);
+    // The links' portals (graph_portals.h: teleported links, layout only). Teleporting a link,
+    // linking an input from a portal's exit (connected from the portal's source, as any link), an
+    // exit placed, a rename and removals are each an undo step; moves are layout (beginLayout).
+    // "" or the error.
+    std::string teleportLink(const std::string& to, const std::string& input, double exitX, double exitY, double entryX, double entryY);
+    std::string addPortalExit(const std::string& portal, double x, double y);
+    std::string linkFromPortal(const std::string& portal, int exit, const std::string& to, const std::string& input);
+    std::string removePortal(const std::string& portal);
+    std::string removePortalExit(const std::string& portal, int exit);
+    std::string renamePortal(const std::string& portal, const std::string& name);
+    void movePortal(const std::string& portal, double x, double y);
+    void movePortalExit(const std::string& portal, int exit, double x, double y);
+    // A backdrop folded to its title bar (its nodes hidden) or open again, one undo step.
+    std::string setBackdropFolded(int index, bool folded);
     std::string setOutputNode(const std::string& node);
     std::string tidyLayout();
     // Group (Ctrl+G): the nodes into one Compound node (GraphEdit::collapse, Maya's Graph
@@ -1009,6 +1052,12 @@ private:
         std::optional<std::pair<Subdivision, Subdivision>> subdivision;
         // Show Tubes' nodes before and after (a rename, a removal: editGraph).
         std::optional<std::pair<std::string, std::string>> braidTubes;
+        // A whole-graph step that only moved things (`whole` too): undone and redone without
+        // evaluating.
+        bool layout = false;
+        // The compound the node graph had open when it was made (a param or bypass edit names its
+        // node in there).
+        std::string scope;
     };
     void record(Edit edit);
     // The files and colors an edit changed, onto the step it recorded (the history held
@@ -1056,6 +1105,9 @@ private:
     std::string path_;
     std::string name_;  // the groom's name in its file ("": the file's own groom)
     nlohmann::json graph_;
+    std::string scope_;                  // the compound the node graph has open ("" none)
+    std::optional<nlohmann::json> layoutBefore_;  // beginLayout's graph
+    nlohmann::json& view();               // the graph shown: graph_, or the open compound's inside it
     nlohmann::json specs_;  // by type
     mutable std::map<std::string, nlohmann::json> resolvedSpecs_;  // a Compound's or Input's, by its node JSON
     std::vector<Edit> edits_;

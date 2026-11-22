@@ -1792,7 +1792,10 @@ TEST(AppDocument, NodeRenameDuplicateOutputAndTidy) {
     EXPECT_NE(doc->renameNode("nope", "x"), "");
     std::string copy;
     EXPECT_EQ(doc->duplicateNode("trim", &copy), "");
-    EXPECT_EQ(copy, "length");  // the type's name, free again
+    EXPECT_EQ(copy, "trim1");  // after the node, made free (every host's Duplicate: GraphEdit::duplicateNodes)
+    bool reads = false;
+    for (const GroomDocument::ConnectionInfo& c : doc->connections()) reads = reads || c.to == copy;
+    EXPECT_TRUE(reads) << "the copy reads what the node reads";
     float x = 0.0f, y = 0.0f, cx = 0.0f, cy = 0.0f;
     if (doc->nodePosition("trim", &x, &y)) {
         ASSERT_TRUE(doc->nodePosition(copy, &cx, &cy));
