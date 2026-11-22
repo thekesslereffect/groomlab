@@ -315,6 +315,8 @@ AppShell::AppShell(QMainWindow* window, OverlayHost* overlay) : QObject(window),
             b->setIconSize(QSize(18, 18));
             b->setAutoRaise(true);
             b->setToolButtonStyle(Qt::ToolButtonIconOnly);
+            // (They give way in a narrow dock: they never set its least width.)
+            b->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
             row->addWidget(b);
             return b;
         };
@@ -322,6 +324,7 @@ AppShell::AppShell(QMainWindow* window, OverlayHost* overlay) : QObject(window),
             auto* line = new QFrame(graphBar_);
             line->setFrameShape(QFrame::VLine);
             line->setFixedHeight(16);
+            line->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
             line->setStyleSheet(QStringLiteral("color: %1;").arg(theme::divider().name()));
             row->addSpacing(2);
             row->addWidget(line);
