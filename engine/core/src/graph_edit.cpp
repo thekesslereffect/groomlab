@@ -11,6 +11,8 @@
 #include "groomlab/attributes.h"
 #include "groomlab/braid_tubes.h"
 #include "groomlab/graph_io.h"
+#include "groomlab/graph_pins.h"
+#include "groomlab/graph_portals.h"
 #include "groomlab/node_library.h"
 #include "groomlab/operators.h"
 #include "groomlab/presets.h"
@@ -1080,7 +1082,12 @@ std::vector<std::pair<std::string, std::string>> GraphEdit::duplicateNodes(const
         const std::string from = c.value("from", std::string()), to = c.value("to", std::string());
         const auto copy = copyOf.find(to);
         if (copy == copyOf.end() || copyOf.count(from)) continue;
-        work.impl_->connect(from, copy->second, c.value("input", std::string()), c.value("output", std::string()));
+        const std::string input = c.value("input", std::string());
+        work.impl_->connect(from, copy->second, input, c.value("output", std::string()));
+        // Drawn as the node's link is: out of the same dot, through the same pins.
+        if (const auto dot = portalOfLink(impl_->graph, to, input)) addPortalLink(work.impl_->graph, dot->portal, dot->exit, copy->second, input);
+        const std::vector<std::string> via = pinRoute(impl_->graph, to, input);
+        if (!via.empty()) setPinRoute(work.impl_->graph, copy->second, input, via);
     }
     *impl_ = *work.impl_;
     return made;

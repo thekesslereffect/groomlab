@@ -137,6 +137,8 @@ qreal backdropHeader(int fontSize) { return fontSize > 0 ? std::max(kBackdropHea
 // A pin (the wires' reroute points): its dot's radius, its nub's distance right of its center, and
 // the grid Snap puts nodes and pins on (the docked canvas's lines).
 constexpr qreal kPinRadius = 6.0, kPinNub = 11.0, kGrid = 24.0;
+// A dot's nub (where links are dragged out of it): a bigger arrow, picked from well around it.
+constexpr qreal kDotNub = 13.0, kDotNubReach = 10.0;
 }  // namespace
 
 NodeGraphView::NodeGraphView(QWidget* parent) : QWidget(parent) {
@@ -522,7 +524,7 @@ QPainterPath NodeGraphView::wirePathFor(const Wire& wire) const {
     const Node& to = nodes_[wire.to];
     if (wire.portal >= 0 && wire.portal < static_cast<int>(portals_.size())) {
         // Out of its portal's exit: from the dot to the input.
-        return routed(portals_[wire.portal].pos + QPointF(kPinNub, 0.0), wireEnd(wire), std::nan(""), true);
+        return routed(portals_[wire.portal].pos + QPointF(kDotNub, 0.0), wireEnd(wire), std::nan(""), true);
     }
     if (!wire.pins.empty()) {
         // Through its pins: each piece leaves level and arrives level (as Maya's, and Unreal's
@@ -1313,7 +1315,7 @@ QRectF NodeGraphView::backdropFoldButton(const Backdrop& b) const {
 int NodeGraphView::portalAt(const QPointF& scene, bool* nub) const {
     for (int i = static_cast<int>(portals_.size()) - 1; i >= 0; --i) {
         const QPointF d = scene - portals_[i].pos;
-        const bool onNub = portals_[i].from >= 0 && d.x() > kPinRadius * 0.5 && d.x() < kPinNub + 5.0 && std::abs(d.y()) < kPinRadius + 3.0;
+        const bool onNub = portals_[i].from >= 0 && d.x() > kPinRadius * 0.4 && d.x() < kDotNub + kDotNubReach && std::abs(d.y()) < kDotNubReach + 1.0;
         if (onNub || d.x() * d.x() + d.y() * d.y() <= (kPinRadius + 4.0) * (kPinRadius + 4.0)) {
             if (nub) *nub = onNub;
             return i;
@@ -1554,8 +1556,8 @@ void NodeGraphView::paintEvent(QPaintEvent* /*event*/) {
         if (p.from >= 0) {  // its nub: links drag out of it (an entry's too: a dot organizing the graph)
             painter.setPen(Qt::NoPen);
             painter.setBrush(p.color);
-            painter.drawPolygon(QPolygonF({p.pos + QPointF(kPinNub - 3.0, -4.0), p.pos + QPointF(kPinNub + 3.0, 0.0),
-                                           p.pos + QPointF(kPinNub - 3.0, 4.0)}));
+            painter.drawPolygon(QPolygonF({p.pos + QPointF(kDotNub - 4.5, -6.0), p.pos + QPointF(kDotNub + 4.5, 0.0),
+                                           p.pos + QPointF(kDotNub - 4.5, 6.0)}));
         }
         painter.setFont(theme::uiFont(11, 700));
         painter.setPen(theme::textSoft());
@@ -1565,12 +1567,32 @@ void NodeGraphView::paintEvent(QPaintEvent* /*event*/) {
         const QRectF label(p.pos.x() - w / 2.0 - 1.0, p.pos.y() - kPinRadius - 20.0, w + 2.0, 16.0);
         painter.drawText(label, Qt::AlignVCenter | Qt::AlignLeft, name);
     }
+    // A selected dot shows where its signal comes from: a dotted line from its portal's entry to it
+    // (an entry: to each of its exits).
+    if (selectedPortal_ >= 0 && selectedPortal_ < static_cast<int>(portals_.size()) && portals_[selectedPortal_].from >= 0) {
+        const Portal& sel = portals_[selectedPortal_];
+        const Portal* entry = nullptr;
+        for (const Portal& p : portals_) {
+            if (p.name == sel.name && p.exit < 0) entry = &p;
+        }
+        if (entry) {
+            QPen dotted(sel.color, 1.8, Qt::DashLine);
+            dotted.setCosmetic(true);
+            painter.setPen(dotted);
+            painter.setBrush(Qt::NoBrush);
+            for (const Portal& p : portals_) {
+                if (p.name != sel.name || p.exit < 0) continue;
+                if (sel.exit >= 0 && p.exit != sel.exit) continue;
+                painter.drawLine(entry->pos, p.pos);
+            }
+        }
+    }
     if (drag_ == Drag::Wire && dragWireFrom_ >= 0) {
         QColor color = theme::portColor(nodes_[dragWireFrom_].outputs[dragWirePort_].type);
         painter.setPen(QPen(color, 2.0, Qt::DashLine));
         painter.setBrush(Qt::NoBrush);
         const QPointF start = dragWirePin_ >= 0      ? pins_[dragWirePin_].pos
-                              : dragWirePortal_ >= 0 ? portals_[dragWirePortal_].pos + QPointF(kPinNub, 0.0)
+                              : dragWirePortal_ >= 0 ? portals_[dragWirePortal_].pos + QPointF(kDotNub, 0.0)
                                                      : outputPos(nodes_[dragWireFrom_], dragWirePort_);
         painter.drawPath(wirePath(start, dragWireTo_));
     }
@@ -4048,6 +4070,14 @@ void NodeGraphView::setDotInput(const std::string& portal, int exit, const std::
     }
     selectedPortal_ = -1;
     refresh();
+    // The dot stays selected (its card up): now the last exit of `into`, or the free dot it became.
+    for (int i = static_cast<int>(portals_.size()) - 1; i >= 0 && error.empty(); --i) {
+        const bool now = into.empty() ? (portals_[i].from < 0 && portals_[i].exit < 0) : (portals_[i].name == into && portals_[i].exit >= 0);
+        if (now) {
+            selectPortal(i);
+            break;
+        }
+    }
 }
 
 std::string NodeGraphView::addDotAt(const QPointF& widget) {

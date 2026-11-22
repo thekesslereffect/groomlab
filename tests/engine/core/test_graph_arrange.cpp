@@ -10,6 +10,7 @@
 #include "groomlab/graph_edit.h"
 #include "groomlab/graph_inserts.h"
 #include "groomlab/graph_io.h"
+#include "groomlab/graph_pins.h"
 #include "groomlab/graph_portals.h"
 
 namespace groomlab {
@@ -405,6 +406,29 @@ TEST(GraphPortals, DotsAreFreeUntilFedOrJoined) {
     EXPECT_EQ(portalLinks(g, dot), (std::vector<std::pair<std::string, std::string>>{{"noise", "strands"}}));
     EXPECT_EQ(leavePortal(g, dot, 0), "Dot1");
     EXPECT_FALSE(portalFed(g, "Dot1"));
+}
+
+}  // namespace
+}  // namespace groomlab
+
+namespace groomlab {
+namespace {
+
+TEST(GraphEditByHand, ADuplicateReadsThroughTheSameDotAndPins) {
+    json g = json::parse(defaultGraphJson());
+    // noise reads length out of a dot's exit; color reads noise through a pin.
+    const auto exit = teleportLink(g, "noise", "strands", 300, 0, 100, 0);
+    ASSERT_TRUE(exit);
+    addPin(g, "color", "strands", 10, 10);
+    GraphEdit edit(g.dump());
+    const auto made = edit.duplicateNodes({"noise"}, 0, 60);
+    edit.duplicateNodes({"color"}, 0, 60);
+    const json after = json::parse(edit.toJson());
+    const auto dot = portalOfLink(after, made[0].first, "strands");
+    ASSERT_TRUE(dot);
+    EXPECT_EQ(dot->portal, exit->portal);
+    EXPECT_EQ(dot->exit, exit->exit);
+    EXPECT_EQ(pinRoute(after, "color1", "strands").size(), 1u);
 }
 
 }  // namespace

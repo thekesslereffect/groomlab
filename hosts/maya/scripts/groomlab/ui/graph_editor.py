@@ -1587,7 +1587,8 @@ class PortalItem(QtWidgets.QGraphicsItem):
     beside it; an exit's nub drags another link of the signal out; double-click renames."""
 
     RADIUS = 7.0
-    NUB = 11.0
+    NUB = 13.0
+    NUB_REACH = 10.0  # the nub's pick radius: easy to grab
 
     def __init__(self, editor, portal, exit_index, pos, src_item, src_port):
         super(PortalItem, self).__init__()
@@ -1611,19 +1612,19 @@ class PortalItem(QtWidgets.QGraphicsItem):
 
     def boundingRect(self):
         r = self.RADIUS + 3.0
-        return QtCore.QRectF(-r, -r, 2 * r + self.NUB, 2 * r).united(self.label_rect())
+        return QtCore.QRectF(-r, -r - 4, 2 * r + self.NUB + self.NUB_REACH, 2 * r + 8).united(self.label_rect())
 
     def shape(self):
         path = QtGui.QPainterPath()
         r = self.RADIUS + 3.0
         path.addEllipse(QtCore.QRectF(-r, -r, 2 * r, 2 * r))
         if self.src_item is not None:
-            path.addEllipse(QtCore.QPointF(self.NUB, 0), 5.0, 5.0)
+            path.addEllipse(QtCore.QPointF(self.NUB, 0), self.NUB_REACH, self.NUB_REACH)
         return path
 
     def nub_at(self, scene_pos):
         local = self.mapFromScene(scene_pos)
-        return self.src_item is not None and local.x() > self.RADIUS * 0.5 and abs(local.y()) < self.RADIUS + 3.0
+        return self.src_item is not None and local.x() > self.RADIUS * 0.4 and abs(local.y()) < self.NUB_REACH + 1.0
 
     def nub_pos(self):
         return self.scenePos() + QtCore.QPointF(self.NUB, 0)
@@ -1636,8 +1637,8 @@ class PortalItem(QtWidgets.QGraphicsItem):
         if self.src_item is not None:  # its nub: links drag out of it (an entry's too: a dot organizing the graph)
             painter.setPen(QtCore.Qt.NoPen)
             painter.setBrush(self.color)
-            painter.drawPolygon(QtGui.QPolygonF([QtCore.QPointF(self.NUB - 3.0, -4.0), QtCore.QPointF(self.NUB + 3.0, 0.0),
-                                                 QtCore.QPointF(self.NUB - 3.0, 4.0)]))
+            painter.drawPolygon(QtGui.QPolygonF([QtCore.QPointF(self.NUB - 4.5, -6.0), QtCore.QPointF(self.NUB + 4.5, 0.0),
+                                                 QtCore.QPointF(self.NUB - 4.5, 6.0)]))
         painter.setFont(theme.font(11, bold=True, base=painter.font()))
         painter.setPen(TEXT)
         painter.drawText(self.label_rect(), QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft, self.portal)
@@ -1649,6 +1650,8 @@ class PortalItem(QtWidgets.QGraphicsItem):
             for edge in self.edges:
                 edge.update_path()
             self.editor.portal_moved(self.portal, self.exit, self.pos())
+            if self.isSelected():
+                self.editor.update_dot_preview()
         return super(PortalItem, self).itemChange(change, value)
 
     def mouseDoubleClickEvent(self, event):
@@ -2035,13 +2038,17 @@ class ItemProps(QtWidgets.QFrame):
             if isinstance(item, BackdropItem):
                 self._show_rows(True)
                 self.heading.setText("Backdrop")
-                self.name.setText(item.data.get("title", "Backdrop"))
-                self.description.setPlainText(item.data.get("description", ""))
-                self.font_size.setValue(int(item.data.get("fontSize") or 0))
+                if not self.name.hasFocus():  # (the field being typed in keeps what is typed)
+                    self.name.setText(item.data.get("title", "Backdrop"))
+                if not self.description.hasFocus():
+                    self.description.setPlainText(item.data.get("description", ""))
+                if not self.font_size.hasFocus():
+                    self.font_size.setValue(int(item.data.get("fontSize") or 0))
             else:
                 self._show_rows(False)
                 self.heading.setText("Dot" if item.exit is None else "Dot (an exit of %s)" % item.portal)
-                self.name.setText(item.portal)
+                if not self.name.hasFocus():
+                    self.name.setText(item.portal)
                 self.input.clear()
                 self.input.addItem("Not connected to a dot", "")
                 for p in self.editor.model.portals:
@@ -2062,7 +2069,7 @@ class ItemProps(QtWidgets.QFrame):
             if text != item.data.get("title"):
                 later(lambda: self.editor.set_backdrop_field(item.data, "title", text))
         elif text != item.portal:
-            editor, portal = self.editor, item.portal
+            editor, portal, exit_index = self.editor, item.portal, item.exit
 
             def rename():
                 try:
@@ -2073,6 +2080,7 @@ class ItemProps(QtWidgets.QFrame):
                 editor._layout_dirty = True
                 editor.commit_layout("rename dot")
                 editor.rebuild()
+                editor.reselect(dot=(text, exit_index))
             later(rename)
 
     def _description_done(self):
@@ -6287,6 +6295,7 @@ class GraphEditor(QtWidgets.QWidget):
         items = [i for i in self.scene.selectedItems() if isinstance(i, (BackdropItem, PortalItem))]
         if getattr(self, "item_props", None) is not None:
             self.item_props.show_item(items[0] if len(items) == 1 and not nodes else None)
+        self.update_dot_preview()
         # A Sculpt node selected: brushes shape its guides (before its panel shows, which says so).
         if len(nodes) == 1 and self.model.node_type(nodes[0]) == "Sculpt":
             self.target_sculpt(nodes[0])
@@ -6489,6 +6498,45 @@ class GraphEditor(QtWidgets.QWidget):
         self.report("%s has no input that takes %s's output" % (node, src))
         return False
 
+    def reselect(self, backdrop=None, dot=None):
+        """After a rebuild: the backdrop (its dict) or dot ((portal, exit)) selected again, so its card
+        stays up while it is edited."""
+        self.scene.clearSelection()
+        for item in getattr(self, "_backdrop_items", []):
+            if backdrop is not None and item.data is backdrop:
+                item.setSelected(True)
+        for item in getattr(self, "portal_items", []):
+            if dot is not None and (item.portal, item.exit) == tuple(dot):
+                item.setSelected(True)
+
+    def update_dot_preview(self):
+        """A selected dot shows where its signal comes from: a dotted line from its portal's entry to
+        it (an entry: to each of its exits)."""
+        old = getattr(self, "_dot_preview", None)
+        if old is not None:
+            try:
+                self.scene.removeItem(old)
+            except RuntimeError:
+                pass
+        self._dot_preview = None
+        dots = [i for i in self.scene.selectedItems() if isinstance(i, PortalItem)]
+        if len(dots) != 1 or dots[0].src_item is None:
+            return
+        dot = dots[0]
+        same = [i for i in getattr(self, "portal_items", []) if i.portal == dot.portal]
+        entry = next((i for i in same if i.exit is None), None)
+        if entry is None:
+            return
+        path = QtGui.QPainterPath()
+        for exit_item in ([dot] if dot.exit is not None else [i for i in same if i.exit is not None]):
+            a, b = entry.scenePos(), exit_item.scenePos()
+            path.moveTo(a)
+            path.lineTo(b)
+        pen = QtGui.QPen(dot.color, 1.8, QtCore.Qt.DashLine)
+        pen.setCosmetic(True)
+        self._dot_preview = self.scene.addPath(path, pen)
+        self._dot_preview.setZValue(-0.8)
+
     def shake_loose(self, names, at):
         """A shake while dragging: the nodes out of their links at once (one: what fed it feeds what
         it fed; several: the links among them kept), left under the cursor, the drag going on."""
@@ -6629,12 +6677,13 @@ class GraphEditor(QtWidgets.QWidget):
     def set_dot_input(self, portal, exit_index, into):
         """A dot's Input Portal: the dot whose signal it takes (None: a free dot)."""
         try:
-            self.model.set_dot_input(portal, exit_index, into or None)
+            at = self.model.set_dot_input(portal, exit_index, into or None)
         except (gm.GraphError, ValueError) as e:
             self.report(str(e))
             return
         self.rebuild()
         self.changed()
+        self.reselect(dot=at)
 
     def set_backdrop_field(self, data, key, value):
         """A backdrop's title, description or title size (0: the default): one undo step."""
@@ -6649,6 +6698,7 @@ class GraphEditor(QtWidgets.QWidget):
         self._layout_dirty = True
         self.commit_layout("backdrop " + key)
         self.rebuild()
+        self.reselect(backdrop=data)
 
     def align_selected(self, mode):
         """Align the selected nodes (the core's align_boxes: left, centerX, right, top, centerY,

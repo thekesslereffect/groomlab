@@ -341,6 +341,9 @@ class GraphModel(object):
         self.output = data.get("output")
         if isinstance(data.get("exposed"), dict):
             self.exposed = data["exposed"]  # (a rename inside a compound: its exposed params follow)
+        # The core's dots and pins as it left them (a duplicate's links drawn as its node's are).
+        self._portals = [dict(p) for p in data.get("portals") or [] if isinstance(p, dict)] or None
+        self._pins = data["pins"] if isinstance(data.get("pins"), dict) and data["pins"].get("routes") else None
 
     def to_dict(self):
         nodes = []
@@ -989,13 +992,15 @@ class GraphModel(object):
             if not dot:
                 raise GraphError("no such dot")
         if not into:
-            return
+            return dot, None
         source = next((p for p in self.portals if p["name"] == into), None)
         if source is None or not source.get("from"):
             raise GraphError("%s has nothing coming into it yet" % into)
         self._relink([tuple(l) for l in self._portal_edit().links(dot)], source["from"], source.get("output"))
-        if self._portal_change(lambda p: p.join(dot, into)) < 0:
+        index = self._portal_change(lambda p: p.join(dot, into))
+        if index < 0:
             raise GraphError("cannot take %s's signal" % into)
+        return into, index
 
     def detach_group(self, names):
         """Several nodes out of the flow together (a shake): the links among them kept (the core's)."""
