@@ -431,7 +431,7 @@ void NodeGraphView::rebuild() {
         emit selectionChanged(selected_);
     }
     // A viewed node gone (removed, renamed): the output shows again.
-    if (!viewed_.empty() && index(viewed_) < 0) setViewedNode({});
+    if (!viewed_.empty() && document_->scope().empty() && viewed_.find('/') == std::string::npos && index(viewed_) < 0) setViewedNode({});
 }
 
 void NodeGraphView::autoLayout() {
@@ -936,7 +936,7 @@ bool NodeGraphView::inputsButtonAt(const QPointF& scene, int* node) const {
 
 void NodeGraphView::drawNode(QPainter& painter, const Node& node, bool selected) {
     const QRectF rect(node.pos, node.size);
-    const bool failed = errors_.count(node.name) > 0;
+    const bool failed = errors_.count(pathOf(node.name)) > 0;
     const QColor color = theme::nodeCategoryColor(node.category);
     const qreal radius = theme::nodeRadius();
     painter.setOpacity(node.bypass ? 0.5 : 1.0);
@@ -1092,7 +1092,7 @@ void NodeGraphView::drawNode(QPainter& painter, const Node& node, bool selected)
     // node; dim until it is the viewed one, then lit on a tile.
     if (viewable(node)) {
         const QRectF eyeRect = viewButtonRect(node);
-        const bool on = !viewed_.empty() && viewed_ == node.name;
+        const bool on = !viewed_.empty() && viewed_ == pathOf(node.name);
         QColor ink = filled ? headerText(color) : (on ? theme::uiColor("accent") : theme::textDim());
         if (on) {
             QColor tile = ink;
@@ -1238,7 +1238,7 @@ void NodeGraphView::drawNode(QPainter& painter, const Node& node, bool selected)
         painter.setPen(theme::readableOn(theme::graphError()));
         painter.drawText(QRectF(corner.x() - 9.0, corner.y() - 9.0, 18.0, 18.0), Qt::AlignCenter, QStringLiteral("!"));
     }
-    if (!viewed_.empty() && viewed_ == node.name) {
+    if (!viewed_.empty() && viewed_ == pathOf(node.name)) {
         // In Focus (the viewport shows the groom up to here): a glow of the accent around the card,
         // a solid ring and a tag over its corner, so it reads from across the graph.
         const QColor accent = theme::uiColor("accent");
@@ -1283,6 +1283,11 @@ int NodeGraphView::portalAt(const QPointF& scene, bool* nub) const {
         }
     }
     return -1;
+}
+
+std::string NodeGraphView::pathOf(const std::string& name) const {
+    // Inside a compound, its nodes evaluate by their path ("compound/inner": flattenCompounds).
+    return document_ && !document_->scope().empty() && !name.empty() ? document_->scope() + "/" + name : name;
 }
 
 std::vector<std::pair<QString, QRectF>> NodeGraphView::scopeBar() const {
@@ -1649,7 +1654,7 @@ void NodeGraphView::mousePressEvent(QMouseEvent* event) {
     }
     if (viewButtonAt(pressScene_, &node)) {
         // The eye: the viewport shows the groom up to this node; on the viewed one, the output again.
-        const std::string name = nodes_[node].name;
+        const std::string name = pathOf(nodes_[node].name);
         if (viewed_ == name) {
             setViewedNode({});
             emit message(tr("Viewing the graph's output again"));
@@ -2341,13 +2346,13 @@ QColor NodeGraphView::timeColor(double ms) { return ms >= kSlowNodeMs ? theme::g
 
 NodeGraphView::NodeBadges NodeGraphView::nodeBadges(const std::string& name) const {
     NodeBadges b;
-    if (const auto t = times_.find(name); t != times_.end()) {
+    if (const auto t = times_.find(pathOf(name)); t != times_.end()) {
         b.time = timeText(t->second);
         b.timeColor = timeColor(t->second);
     }
-    b.failed = errors_.count(name) > 0;
-    b.warning = notes_.count(name) > 0 && !b.failed;
-    b.viewed = !name.empty() && name == viewed_;
+    b.failed = errors_.count(pathOf(name)) > 0;
+    b.warning = notes_.count(pathOf(name)) > 0 && !b.failed;
+    b.viewed = !name.empty() && pathOf(name) == viewed_;
     if (const int i = nodeIndex(name); i >= 0) b.bypassed = nodes_[i].bypass;
     return b;
 }
@@ -2365,7 +2370,7 @@ void NodeGraphView::setNodeErrors(const std::vector<std::pair<std::string, std::
 }
 
 std::string NodeGraphView::nodeError(const std::string& node) const {
-    const auto it = errors_.find(node);
+    const auto it = errors_.find(pathOf(node));
     return it == errors_.end() ? std::string() : it->second;
 }
 
@@ -2378,7 +2383,7 @@ void NodeGraphView::setViewedNode(const std::string& node) {
 
 void NodeGraphView::toggleViewSelected() {
     // V: the selected node shown; again (or with nothing selected), the output.
-    if (selected_.empty() || selected_ == viewed_) {
+    if (selected_.empty() || pathOf(selected_) == viewed_) {
         if (!viewed_.empty()) emit message(tr("Viewing the graph's output again"));
         setViewedNode({});
         return;
@@ -2389,7 +2394,7 @@ void NodeGraphView::toggleViewSelected() {
         emit message(tr("%1 gives no strands to view: pick a node with a strands output").arg(QString::fromStdString(selected_)));
         return;
     }
-    setViewedNode(selected_);
+    setViewedNode(pathOf(selected_));
     emit message(tr("Viewing up to %1 (V again: the output)").arg(QString::fromStdString(selected_)));
 }
 
@@ -2522,7 +2527,7 @@ void NodeGraphView::setNodeNotes(const std::vector<std::pair<std::string, std::s
 }
 
 std::string NodeGraphView::nodeNote(const std::string& node) const {
-    const auto it = notes_.find(node);
+    const auto it = notes_.find(pathOf(node));
     return it == notes_.end() ? std::string() : it->second;
 }
 

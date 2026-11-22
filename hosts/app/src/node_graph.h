@@ -473,6 +473,7 @@ private:
     int portalAt(const QPointF& scene, bool* nub = nullptr) const;  // a portal dot, -1 none
     QRectF backdropFoldButton(const Backdrop& b) const;            // the fold chevron in its title bar
     void drawScopeBar(QPainter& painter);
+    std::string pathOf(const std::string& name) const;  // a node of the graph shown, by its path in the groom's
     // Backdrops a move grows: their index, their rect when it began, the moved nodes on them.
     struct Growing {
         int backdrop = -1;
