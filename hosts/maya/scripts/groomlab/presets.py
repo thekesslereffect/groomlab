@@ -53,18 +53,14 @@ PRESET_FIELDS = tuple(groomlab_core.preset_fields())
 
 
 def user_dir():
-    import groomlab
-    return groomlab.library_user_dir("GROOMLAB_USER_PRESETS", "presets")
+    """Where presets are saved: the core's user folder (presets.h presetUserDir), every host's."""
+    return groomlab_core.preset_user_dir()
 
 
 def search_dirs():
-    """$GROOMLAB_PRESET_PATH's folders, the user's (Maya's user folder), the shipped: the core's
-    order (presets.h presetSearchDirs), every host's."""
-    try:
-        user = user_dir()
-    except (ImportError, RuntimeError, AttributeError):  # maya.cmds before initialize()
-        user = ""
-    return list(groomlab_core.preset_search_dirs(user, SHIPPED_DIR))
+    """$GROOMLAB_PRESET_PATH's folders, the user's, the folder earlier GroomLabs saved to (Maya's
+    user folder), the shipped: the core's order (presets.h presetSearchDirs), every host's."""
+    return list(groomlab_core.preset_search_dirs(user_dir(), SHIPPED_DIR))
 
 
 def list_presets(details=False):

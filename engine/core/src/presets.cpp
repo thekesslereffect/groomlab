@@ -43,8 +43,19 @@ const std::vector<std::string>& presetFields() {
 
 std::string presetUserDir() {
     if (const std::optional<std::string> own = environmentVariable("GROOMLAB_USER_PRESETS"); own && !own->empty()) return *own;
-    // Maya's user application folder, where the Maya host saves (internalVar userAppDir): MAYA_APP_DIR
-    // when set, else the platform's default.
+#ifdef _WIN32
+    const std::optional<std::string> home = environmentVariable("USERPROFILE");
+#else
+    const std::optional<std::string> home = environmentVariable("HOME");
+#endif
+    if (!home || home->empty()) return {};
+    return (fs::u8path(*home) / "Documents" / "GroomLab" / "presets").generic_u8string();
+}
+
+std::string presetLegacyDir() {
+    if (const std::optional<std::string> own = environmentVariable("GROOMLAB_USER_PRESETS"); own && !own->empty()) return {};
+    // Maya's user application folder, where GroomLab saved presets before (internalVar
+    // userAppDir): MAYA_APP_DIR when set, else the platform's default.
     fs::path home;
     if (const std::optional<std::string> mayaApp = environmentVariable("MAYA_APP_DIR"); mayaApp && !mayaApp->empty()) {
         home = fs::u8path(*mayaApp);
@@ -79,6 +90,13 @@ std::vector<std::string> presetSearchDirs(const std::string& userDir, const std:
         }
     }
     if (!userDir.empty()) dirs.push_back(userDir);
+    // (Presets saved where GroomLab saved them before: still found.)
+    const std::string legacy = presetLegacyDir();
+    std::error_code ec;
+    if (!legacy.empty() && fs::is_directory(fs::u8path(legacy), ec) &&
+        fs::weakly_canonical(fs::u8path(legacy), ec) != fs::weakly_canonical(fs::u8path(userDir), ec)) {
+        dirs.push_back(legacy);
+    }
     if (!shippedDir.empty()) dirs.push_back(shippedDir);
     return dirs;
 }

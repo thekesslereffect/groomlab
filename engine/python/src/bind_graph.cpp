@@ -1174,7 +1174,9 @@ void bindGraph(py::module_& m) {
             return out;
         },
         py::arg("preset_json"), "The guide groups a preset's graph reads: [{name, draw}] (presets.h).");
-    m.def("preset_user_dir", &presetUserDir, "The user's preset folder (GROOMLAB_USER_PRESETS, else Maya's user folder).");
+    m.def("preset_user_dir", &presetUserDir,
+          "The user's preset folder, where every host saves (GROOMLAB_USER_PRESETS, else Documents/GroomLab/presets).");
+    m.def("preset_legacy_dir", &presetLegacyDir, "The folder earlier GroomLabs saved presets to (Maya's user folder), still read.");
 
     m.def("braid_sections",
           [](const std::string& style, int sections, bool dutch, float flatness, float pancake, float tightness, float separate,

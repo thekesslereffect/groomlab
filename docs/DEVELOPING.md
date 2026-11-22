@@ -1267,7 +1267,8 @@ panel's: past one every Scatter thins to fit); `--density` and the panel change 
 
 **Graph presets** are the Maya host's files (`hosts/maya/presets/*.json`), read through the core's
 `presets.h` by both hosts: where they are looked up (`GROOMLAB_PRESET_PATH`, the user's folder,
-`GROOMLAB_USER_PRESETS` else Maya's `Documents/maya/groomlab/presets`, where both hosts save, then
+`GROOMLAB_USER_PRESETS` else `Documents/GroomLab/presets`, where every host saves, then the folder
+earlier GroomLabs saved to (Maya's `Documents/maya/groomlab/presets`, still read), then
 the shipped folder: beside `GroomLab.exe`, where the build copies them, else the source tree's in a
 development build), what the menu shows of each (`about`), how one is fitted to a scalp's size
 (lengths and widths with the size, densities with its inverse square, per-length rates with its
