@@ -459,11 +459,13 @@ std::string stripes(const std::string& tag) {
 
 // Distances under which the GPU's results count as the CPU's: float rounding (fused multiply-adds,
 // the GPU's sqrt, division, sin and cos) on strands 3 to 7 units long, far below a pixel at any
-// viewing distance.
-constexpr double kPointTolerance = 1e-3, kMeanTolerance = 1e-5, kFrameTolerance = 1e-3;
+// viewing distance. The mean and the frames have twice what one GPU needed: GPUs round
+// differently (an RTX 3080 Laptop: Wind and Jiggle's mean 1.13e-5 over 15 frames, a tangent
+// 1.28e-3 where Interpolate follows bends on DirectX 11).
+constexpr double kPointTolerance = 1e-3, kMeanTolerance = 2e-5, kFrameTolerance = 2e-3;
 // The bitangent is cross(tangent, root normal) normalized: where a strand runs nearly along its
 // root normal a rounding of the tangent turns it by that rounding over |cross| (at least 1e-4, as
-// strandFrame tests it), so it gets a wider allowance (its normal and tangent stay within 1e-3): a
+// strandFrame tests it), so it gets a wider allowance (its normal and tangent stay within kFrameTolerance): a
 // tangent rounding of 1e-5 turns it by 0.02 where |cross| is 5e-4 (one point of hair_basics' Clump
 // alone, on DirectX 11, comes to 0.013). Past that, a point's own: its tangent's error (the GPU's
 // from the CPU's) times kBitangentTurn over |tangent x normal| (the CPU's), what that tangent
