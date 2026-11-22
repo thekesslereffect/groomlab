@@ -186,6 +186,17 @@ class HelperTestCase(unittest.TestCase):
 
 
 class ProtocolTest(HelperTestCase):
+    def test_a_grown_answers_old_block_is_let_go(self):
+        # The helper answers each purpose in one block, a bigger one (a new name) when an answer
+        # outgrows it: the client keeps one block a purpose open, not every block it was ever sent.
+        s = self.head_session()
+        for density in (0.02, 0.2, 1.0):
+            r = self.h.call("evaluate", session=s, density=density, space="groom")
+            self.h.array(r["arrays"]["positions"])
+        purposes = [n.rsplit("_", 1)[0] for n in self.h._blocks]
+        self.assertEqual(len(purposes), len(set(purposes)), sorted(self.h._blocks))
+        self.assertEqual(self.h._retired, [])
+
     def test_hello_names_the_protocol_and_the_version(self):
         r = self.h.call("hello", protocol=1)
         self.assertEqual(r["protocol"], 1)

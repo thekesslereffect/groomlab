@@ -64,6 +64,7 @@ class HelperClient(object):
         self.lock = threading.RLock()
         self._next = 1
         self._blocks = {}   # the helper's blocks we opened, by name
+        self._retired = []  # blocks a newer one of their purpose replaced, still viewed (closed when let go)
         self._inputs = []   # our blocks for the request in flight
 
     def alive(self):
@@ -115,8 +116,26 @@ class HelperClient(object):
         name = ref["shm"]
         block = self._blocks.get(name)
         if block is None:
+            # A new block of a purpose (the helper's <pid>_<purpose>_<n>: it outgrew the last one):
+            # the ones it replaces go, so the helper's old blocks do not stay mapped for the session.
+            purpose = name.rsplit("_", 1)[0]
+            for old in [n for n in self._blocks if n.rsplit("_", 1)[0] == purpose]:
+                self._retired.append(self._blocks.pop(old))
+            self._close_retired()
             block = self._blocks[name] = _open_block(name)
         return np.ndarray(tuple(ref["shape"]), dtype=np.dtype(ref["dtype"]), buffer=block.buf, offset=ref["offset"])
+
+    def _close_retired(self):
+        """Closes the replaced blocks nothing views any more (a view still held keeps its block)."""
+        kept = []
+        for block in self._retired:
+            try:
+                block.close()
+            except BufferError:  # (an array viewing it is still around: next time)
+                kept.append(block)
+            except Exception:
+                pass
+        self._retired = kept
 
     def array(self, ref):
         """The same, copied out."""
@@ -176,12 +195,12 @@ class HelperClient(object):
             except subprocess.TimeoutExpired:
                 self.proc.kill()
                 self.proc.wait()
-        for block in self._blocks.values():
+        for block in list(self._blocks.values()) + self._retired:
             try:
                 block.close()
             except Exception:
                 pass
-        self._blocks = {}
+        self._blocks, self._retired = {}, []
         try:
             self.proc.stdout.close()
         except Exception:
