@@ -2387,31 +2387,32 @@ json mapSetChannels(ToolState& t, const json& args) {
     const std::string name = needMap(s, args);
     const json& c = need(args, "channels");
     if (!c.is_number_integer() || (c.get<int>() != kGrayMap && c.get<int>() != kColorMap)) fail("bad_request", "channels is 1 (gray) or 4 (color)");
-    const int wanted = c.get<int>();
-    const std::string kind = mapKindOf(s, name);
-    if (kind == "guides") {
-        if (wanted == kColorMap) fail("bad_request", "a guide layer is gray: convert " + name + " to vertices or a texture first");
-        return {{"channels", kGrayMap}, {"undo", undoJson(t)}};
+    // Every host's Channels (the editor's setMapChannels, map_edits.h).
+    const MeshPtr cage = mapKindOf(s, name) == "texture" ? mapScalp(s) : MeshPtr();
+    MapFiles files;
+    files.mapsFolder = mapsFolder(s);
+    files.resolve = [&s](const std::string& stored) { return resolveMapFile(s, stored); };
+    MapChannels changed;
+    try {
+        changed = groomlab::setMapChannels(s.groom->scalpMaps(), s.groom->authoredHierarchy().get(), cage.get(), name, c.get<int>(),
+                                           resolutionOf(args), files);
+    } catch (const std::invalid_argument& e) {
+        fail("bad_request", e.what());
+    } catch (const std::exception& e) {
+        fail("io", e.what());
     }
-    const int channels = mapChannelsOf(s, name);
-    if (channels != wanted) {
-        ScalpMaps maps = s.groom->scalpMaps();
-        ScalpMapEntry& entry = maps.maps[name];
-        if (kind == "vertices") {
-            entry.values = convertMapChannels(entry.values, channels, wanted);
-        } else {
-            const std::shared_ptr<TexturePaint> paint = openPaint(s, entry, resolutionOf(args));
-            paint->setChannels(wanted);
-            writePaint(t, *paint, resolveMapFile(s, entry.texture));
-            dropPaints(t);
-        }
-        entry.channels = wanted;
+    if (changed.mapsChanged) {
+        if (!changed.files.empty()) dropPaints(t);
+        for (FileEdit& f : changed.files) t.pending.files.push_back(std::move(f));
         StrokeEdit edit;
         edit.mode = "map channels " + name;
-        edit.set(StrokeField::ScalpMaps, maps.toJson());
+        edit.set(StrokeField::ScalpMaps, changed.maps.toJson());
         commitEdit(t, std::move(edit));
+        if (!changed.file.empty() && t.tool.settings.brush.attribute == name) t.tool.settings.paintTexture = changed.file;
     }
-    return {{"channels", wanted}, {"undo", undoJson(t)}};
+    json r = {{"channels", changed.channels}, {"undo", undoJson(t)}};
+    if (!changed.file.empty()) r["file"] = changed.file;
+    return r;
 }
 
 // Maya's fill_map: the map set to `value` everywhere (any kind), or on the selected guides only

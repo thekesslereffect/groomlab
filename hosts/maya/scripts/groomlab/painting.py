@@ -113,11 +113,9 @@ def map_channels(groom, name):
 @undoable("map channels")
 def set_map_channels(groom, name, channels):
     """Make a map gray (1: its luminance) or color (4: the value in r g b, alpha 1). A guide
-    layer stays gray (convert it to vertices or a texture first). Returns the channels."""
-    if int(channels) not in (1, 4):
-        raise ValueError("a map has 1 channel (gray) or 4 (color), not %r" % channels)
-    if not map_kind(groom, name):
-        raise ValueError("no map named %r" % name)
+    layer stays gray (convert it to vertices or a texture first). A texture map's image is
+    rewritten (this groom's own copy when another groom reads it). One undo step. Returns the
+    channels. Every host's Channels (the editor's setMapChannels, in groomLabScalpMaps)."""
     return int(cmds.groomLabScalpMaps(groom, setChannels=(name, int(channels))))
 
 

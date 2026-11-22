@@ -140,4 +140,23 @@ MapFill fillMap(const ScalpMaps& maps, const GuideHierarchy* guides, const Scalp
 // The filled layer onto a hierarchy (the host's, its other edits kept as they are).
 void applyFilledLayer(GuideHierarchy& h, const std::string& name, const MapFill& filled);
 
+// A map made gray or color.
+struct MapChannels {
+    int channels = 0;                  // the map's channels after (a guide layer: gray)
+    ScalpMaps maps;                    // the scalp maps after
+    bool mapsChanged = false;
+    std::vector<FileState> files;      // the image rewritten, as found and as left (the step's undo)
+    std::string file;                  // a texture map's own copy as stored, when it got one ("" otherwise)
+};
+
+// Map `name` made gray (1: its luminance) or color (4: the value in r g b, alpha 1), every host's
+// Channels (scalp_paint.h convertMapChannels, TexturePaint::setChannels): a vertex map's values, a
+// texture map's image rewritten (a PNG; its own copy when another map or something beside it reads
+// it, as fillMap). A guide layer stays gray. `cage`: the scalp the maps are painted on (needed for
+// a texture map; `resolution`: a blank image this square when its file is not there). Throws
+// std::invalid_argument for no such map, channels other than 1 or 4, or color on a guide layer,
+// std::runtime_error for an image that cannot be painted or written.
+MapChannels setMapChannels(const ScalpMaps& maps, const GuideHierarchy* guides, const ScalpMesh* cage, const std::string& name,
+                           int wanted, int resolution, const MapFiles& files);
+
 }  // namespace groomlab

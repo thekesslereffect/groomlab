@@ -45,6 +45,29 @@ bool moveImage(const std::vector<std::pair<std::string, std::string>>& moves, st
     return true;
 }
 
+// A texture map's paint written back into its image, or as the map's own copy (newMapImageFile)
+// when another map of the groom or something beside it (files.shared) reads the image: `entry`
+// then reads the copy, `*file` its stored path, and true is returned.
+bool writeOwnImage(const TexturePaint& paint, const ScalpMaps& maps, const std::string& name, ScalpMapEntry& entry,
+                   const MapFiles& files, std::vector<FileState>* states, std::string* file) {
+    const auto resolve = [&](const std::string& stored) { return files.resolve ? files.resolve(stored) : stored; };
+    const std::string full = resolve(entry.texture);
+    bool shared = files.shared && files.shared(full);
+    for (const auto& [other, e] : maps.maps) {
+        if (other == name || e.kind != "texture" || e.texture.empty()) continue;
+        shared = shared || sameFile(resolve(e.texture), full);
+    }
+    if (!shared || files.mapsFolder.empty()) {
+        *states = writeMapImage(paint, full);
+        return false;
+    }
+    const std::string own = newMapImageFile(name, files);
+    *states = writeMapImage(paint, own);
+    entry.texture = storedMapPath(own, files);
+    *file = entry.texture;
+    return true;
+}
+
 }  // namespace
 
 MapRename renameMap(const ScalpMaps& maps, const GuideHierarchy* guides, const std::string& graph,
@@ -285,25 +308,11 @@ MapFill fillMap(const ScalpMaps& maps, const GuideHierarchy* guides, const Scalp
         return out;
     }
     // A texture map: its image rewritten, or written as its own copy when something else reads it.
-    const auto resolve = [&](const std::string& stored) { return files.resolve ? files.resolve(stored) : stored; };
-    const std::string full = resolve(entry.texture);
-    bool shared = files.shared && files.shared(full);
-    for (const auto& [other, e] : maps.maps) {
-        if (other == name || e.kind != "texture" || e.texture.empty()) continue;
-        shared = shared || sameFile(resolve(e.texture), full);
-    }
+    const std::string full = files.resolve ? files.resolve(entry.texture) : entry.texture;
     requirePaintablePng(full);
     const std::shared_ptr<TexturePaint> paint = openTexturePaint(*cage, full, channels == kColorMap ? kColorMap : kGrayMap, fill.resolution);
     fillTexturePaint(*paint, mask, color, fill.mode, *cage, fill.faces);
-    if (shared && !files.mapsFolder.empty()) {
-        const std::string own = newMapImageFile(name, files);
-        out.files = writeMapImage(*paint, own);
-        entry.texture = storedMapPath(own, files);
-        out.file = entry.texture;
-        out.mapsChanged = true;
-    } else {
-        out.files = writeMapImage(*paint, full);
-    }
+    out.mapsChanged = writeOwnImage(*paint, maps, name, entry, files, &out.files, &out.file);
     return out;
 }
 
@@ -311,6 +320,37 @@ void applyFilledLayer(GuideHierarchy& h, const std::string& name, const MapFill&
     for (const auto& [id, value] : filled.layer) {
         if (h.guide(id)) h.setAttribute(id, name, value);
     }
+}
+
+MapChannels setMapChannels(const ScalpMaps& maps, const GuideHierarchy* guides, const ScalpMesh* cage, const std::string& name,
+                           int wanted, int resolution, const MapFiles& files) {
+    MapChannels out;
+    out.maps = maps;
+    const std::string kind = mapKindOf(maps, guides, name);
+    if (kind.empty()) throw std::invalid_argument("no map named '" + name + "'");
+    if (wanted != kGrayMap && wanted != kColorMap) throw std::invalid_argument("a map is gray (1) or color (4)");
+    if (kind == "guides") {
+        if (wanted == kColorMap) throw std::invalid_argument("a guide layer is gray: convert " + name + " to vertices or a texture first");
+        out.channels = kGrayMap;
+        return out;
+    }
+    const int channels = mapChannelsOf(maps, guides, name) == kColorMap ? kColorMap : kGrayMap;
+    out.channels = wanted;
+    if (channels == wanted) return out;
+    ScalpMapEntry& entry = out.maps.maps.at(name);
+    if (kind == "vertices") {
+        entry.values = convertMapChannels(entry.values, channels, wanted);
+    } else {
+        if (!cage) throw std::invalid_argument("the groom has no scalp mesh");
+        const std::string full = files.resolve ? files.resolve(entry.texture) : entry.texture;
+        requirePaintablePng(full);
+        const std::shared_ptr<TexturePaint> paint = openTexturePaint(*cage, full, channels, resolution);
+        paint->setChannels(wanted);
+        writeOwnImage(*paint, maps, name, entry, files, &out.files, &out.file);
+    }
+    entry.channels = wanted;
+    out.mapsChanged = true;
+    return out;
 }
 
 }  // namespace groomlab

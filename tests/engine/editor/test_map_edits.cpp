@@ -253,3 +253,51 @@ TEST(MapEdits, FillChecksTheAskAndGivesASharedImageItsOwnCopy) {
     restoreFileStates(inPlace.files, false);
     EXPECT_EQ(readFile(dir / "masks" / "shared.png"), sharedBytes);
 }
+
+TEST(MapEdits, ChannelsMakeAMapGrayOrColorAndGiveASharedImageItsOwnCopy) {
+    const fs::path dir = freshFolder("channels");
+    auto plane = std::make_shared<ScalpMesh>(*test::makePlane(4));
+    std::vector<ScalpMesh::UV> uvs;
+    for (std::size_t t = 0; t < plane->triangleCount(); ++t) {
+        for (const int v : plane->triangles()[t]) uvs.push_back({plane->points()[v].x, plane->points()[v].z});
+    }
+    plane->setCornerUVs(std::move(uvs));
+    const std::shared_ptr<const ScalpMesh> scalp = plane;
+    const std::size_t n = scalp->pointCount();
+    GuideHierarchy h;
+    const GroupId group = h.addGroup("g");
+    const GuideId guide = h.addGuide(group, {scalp->points()[0], scalp->points()[0] + Vec3f{0.0f, 0.5f, 0.0f}});
+    h.setAttribute(guide, "lay", 0.5f);
+    ScalpMaps maps;
+    maps.maps["mask"] = ScalpMapEntry{"vertices", std::vector<float>(n, 0.5f), ""};
+    maps.maps["a"] = ScalpMapEntry{"texture", {}, "masks/shared.png"};
+    maps.maps["b"] = ScalpMapEntry{"texture", {}, "masks/shared.png"};
+    writeMapImage(newTextureMapPaint(*scalp, kGrayMap, PaintColor{0.5f, 0.5f, 0.5f, 1.0f}, 16), (dir / "masks" / "shared.png").generic_u8string());
+    const std::string sharedBytes = readFile(dir / "masks" / "shared.png");
+    MapFiles files;
+    files.mapsFolder = (dir / "masks").generic_u8string();
+    files.groomFolder = dir.generic_u8string();
+    files.resolve = [&](const std::string& stored) { return (dir / fs::u8path(stored)).generic_u8string(); };
+    // A vertex map: r g b the value, alpha 1.
+    const MapChannels color = setMapChannels(maps, &h, scalp.get(), "mask", kColorMap, 16, files);
+    EXPECT_EQ(color.channels, kColorMap);
+    EXPECT_TRUE(color.mapsChanged);
+    EXPECT_EQ(color.maps.maps.at("mask").channels, kColorMap);
+    ASSERT_EQ(color.maps.maps.at("mask").values.size(), n * 4);
+    EXPECT_FLOAT_EQ(color.maps.maps.at("mask").values[3], 1.0f);
+    EXPECT_FALSE(setMapChannels(maps, &h, scalp.get(), "mask", kGrayMap, 16, files).mapsChanged) << "gray already";
+    // A guide layer stays gray.
+    EXPECT_EQ(setMapChannels(maps, &h, scalp.get(), "lay", kGrayMap, 16, files).channels, kGrayMap);
+    EXPECT_THROW(setMapChannels(maps, &h, scalp.get(), "lay", kColorMap, 16, files), std::invalid_argument);
+    EXPECT_THROW(setMapChannels(maps, &h, scalp.get(), "mask", 3, 16, files), std::invalid_argument);
+    EXPECT_THROW(setMapChannels(maps, &h, scalp.get(), "nope", kColorMap, 16, files), std::invalid_argument);
+    EXPECT_THROW(setMapChannels(maps, &h, nullptr, "a", kColorMap, 16, files), std::invalid_argument) << "no scalp";
+    // A texture map whose image another map reads: its own color copy, the other's untouched.
+    const MapChannels own = setMapChannels(maps, &h, scalp.get(), "a", kColorMap, 16, files);
+    EXPECT_EQ(own.file, "masks/a.png");
+    EXPECT_EQ(own.maps.maps.at("a").texture, "masks/a.png");
+    EXPECT_EQ(own.maps.maps.at("a").channels, kColorMap);
+    EXPECT_EQ(readFile(dir / "masks" / "shared.png"), sharedBytes);
+    restoreFileStates(own.files, false);
+    EXPECT_FALSE(fs::exists(dir / "masks" / "a.png"));
+}

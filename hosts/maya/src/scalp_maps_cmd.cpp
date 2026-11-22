@@ -221,10 +221,6 @@ MStatus ScalpMapsCmd::doIt(const MArgList& args) {
             const std::string free = freeFilePath(full);
             return free == full ? stored : portableMayaPath(free);
         };
-        auto texturePaint = [&](const std::string& stored, int channels) -> TexturePaint {
-            if (!scalp) throw std::runtime_error("the groom has no scalp mesh");
-            return *openTexturePaint(*scalp, resolve(stored), channels, resolution);  // as every host opens it (scalp_paint.h)
-        };
         // Writes the file; one that was there keeps its bytes for undo. Only ever a PNG (what
         // painting writes): a map linked to another format is relinked to a PNG copy first.
         auto writeTexture = [&](const TexturePaint& paint, const std::string& stored) {
@@ -241,13 +237,6 @@ MStatus ScalpMapsCmd::doIt(const MArgList& args) {
             paint.save(full);
             finishFileStates(states);
             files_.insert(files_.end(), states.begin(), states.end());
-        };
-        // Before rewriting a texture map's file another groom reads too: this groom's own copy.
-        auto ownFile = [&](const std::string& name) {
-            const std::string full = resolve(maps.maps[name].texture);
-            if (!fileUsedByOtherGroom(groomNode, full)) return false;
-            maps.maps[name].texture = portableMayaPath(forkTextureFile(groomPath, name, full));
-            return true;
         };
         const bool makeColor = db.isFlagSet(kColor[0]);
         // -faces: the polygons a make or fill is limited to (none given: everywhere).
@@ -464,31 +453,20 @@ MStatus ScalpMapsCmd::doIt(const MArgList& args) {
                 db.getFlagArgument(kSetChannels[0], 0, nameArg);
                 db.getFlagArgument(kSetChannels[0], 1, wanted);
                 const std::string name = nameArg.asChar();
-                const std::string kind = kindOf(maps, *h, name);
-                if (kind.empty()) return fail(kName, ("no map named " + name).c_str());
-                if (wanted != kGrayMap && wanted != kColorMap) return fail(kName, "-setChannels takes 1 (gray) or 4 (color)");
-                if (kind == "guides") {
-                    if (wanted == kColorMap) {
-                        return fail(kName, ("a guide layer is gray: convert " + name + " to vertices or a texture first").c_str());
-                    }
-                    setResult(kGrayMap);
-                    return MS::kSuccess;
-                }
-                const int channels = channelsOf(maps, *h, name);
-                if (channels != wanted) {
-                    ScalpMapEntry& entry = maps.maps[name];
-                    if (kind == "vertices") {
-                        entry.values = convertMapChannels(entry.values, channels, wanted);
-                    } else {
-                        ownFile(name);
-                        TexturePaint paint = texturePaint(entry.texture, channels);
-                        paint.setChannels(wanted);
-                        writeTexture(paint, entry.texture);
-                    }
-                    entry.channels = wanted;
+                // Every host's Channels (the editor's setMapChannels, map_edits.h): this groom's own
+                // copy of an image another groom reads, the files' states kept for Maya's undo.
+                MapFiles files;
+                files.mapsFolder = assetFolder("masks") + "/" + assetName(groomPath);
+                files.resolve = resolve;
+                files.store = [](const std::string& full) { return portableMayaPath(full); };
+                files.shared = [&](const std::string& full) { return fileUsedByOtherGroom(groomNode, full); };
+                MapChannels changed = setMapChannels(maps, h.get(), scalp.get(), name, wanted, resolution, files);
+                if (changed.mapsChanged) {
+                    maps = std::move(changed.maps);
                     mapsChanged = true;
                 }
-                setResult(wanted);
+                for (FileState& f : changed.files) files_.push_back(std::move(f));
+                setResult(changed.channels);
             }
         } catch (const std::exception& e) {
             return fail(kName, e.what());

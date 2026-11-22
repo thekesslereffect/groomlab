@@ -368,39 +368,29 @@ std::string GroomDocument::convertMap(const std::string& name, const std::string
 }
 
 std::string GroomDocument::setMapChannels(const std::string& name, int wanted) {
-    const PaintedMap* source = map(name);
-    if (!source) return "no map named '" + name + "'";
-    if (wanted != kGrayMap && wanted != kColorMap) return "a map is gray (1) or color (4)";
-    if (source->kind == "guides") return wanted == kColorMap ? "a guide layer is gray: convert " + name + " to vertices or a texture first" : std::string();
-    if (source->channels == wanted) return {};
-    ScalpMaps maps = session().scalpMaps();
-    ScalpMapEntry& entry = maps.maps[name];
-    std::vector<FileState> files;
+    // Every host's Channels (the editor's setMapChannels, map_edits.h): a vertex map's values, a
+    // texture map's image rewritten (its bytes before and after kept in the step).
+    MapFiles files;
+    files.mapsFolder = mapsDirectory();
+    files.groomFolder = path_.empty() ? std::string() : std::filesystem::u8path(path_).parent_path().u8string();
+    files.resolve = [this](const std::string& stored) { return resolveMapPath(stored); };
+    const MeshPtr cage = session().cageScalp();
+    MapChannels changed;
+    try {
+        changed = groomlab::setMapChannels(session().scalpMaps(), session().authoredHierarchy().get(),
+                                           cage && cage->pointCount() > 0 ? cage.get() : nullptr, name, wanted, 1024, files);
+    } catch (const std::exception& e) {
+        return e.what();
+    }
+    if (!changed.mapsChanged) return {};
     const std::string label = "map channels " + name;
-    if (entry.kind == "vertices") {
-        entry.values = convertMapChannels(entry.values, entry.channels == kColorMap ? kColorMap : kGrayMap, wanted);
-    } else {
-        const std::string full = resolveMapPath(entry.texture);
-        const MeshPtr scalp = session().scalp();
-        if (!scalp) return "no scalp";
-        try {
-            requirePaintablePng(full);
-            const std::shared_ptr<TexturePaint> paint = openTexturePaint(*scalp, full, entry.channels == kColorMap ? kColorMap : kGrayMap, 1024);
-            paint->setChannels(wanted);
-            std::vector<FileState> states = mapImageStates(full, tilesOf(*paint));
-            paint->save(full);
-            finishFileStates(states);
-            files.insert(files.end(), states.begin(), states.end());
-        } catch (const std::exception& e) {
-            return e.what();
-        }
+    if (!changed.files.empty()) {
         paints_.erase(name);
         mapViewKey_ = 0;
     }
-    entry.channels = wanted;
     const std::size_t undoBefore = history_.undoIndex();
-    commitMaps(label, maps);
-    attachSide(undoBefore, label, std::move(files));
+    commitMaps(label, changed.maps);
+    attachSide(undoBefore, label, std::move(changed.files));
     return {};
 }
 
