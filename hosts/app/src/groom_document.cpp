@@ -605,49 +605,26 @@ std::string GroomDocument::editGraph(const std::string& label, const std::functi
     entry.whole = true;
     entry.graphBefore = before;
     entry.graphAfter = graph_;
-    // The Sculpt nodes' edits follow renames, groups, ungroups, copies and removals, in the same step.
-    const std::string sculptsBefore = storedText(StrokeField::Sculpts);
-    std::string sculpts = sculptsBefore;
-    std::string target = session().sculptTarget();
-    try {
-        sculpts = moveSculptNodes(sculpts, moved);
-        for (const auto& [copy, source] : copied) sculpts = copySculptNode(sculpts, source, copy);
-        if (graph_.contains("nodes")) {
-            std::set<std::string> names;
-            for (const json& n : graph_["nodes"]) names.insert(n.value("name", std::string()));
-            for (const std::string& node : sculptedNodes(sculpts)) {
-                if (!names.count(node.substr(0, node.find('/')))) sculpts = clearSculptNode(sculpts, node);
-            }
-            for (const auto& [from, to] : moved) {
-                if (target == from) target = to;
-            }
-            if (!target.empty() && !names.count(target)) target.clear();  // gone, or grouped
-        }
-    } catch (const std::exception&) {
-        sculpts = sculptsBefore;  // unreadable: left as it is (the session says why)
-    }
-    if (sculpts != sculptsBefore) {
+    // The Sculpt nodes' edits, the brushes' target and Show Tubes follow renames, groups, ungroups,
+    // copies and removals, in the same step (the editor's rules, every host's: graph_edits.h).
+    GraphFollowers was;
+    was.sculpts = storedText(StrokeField::Sculpts);
+    was.sculptTarget = session().sculptTarget();
+    was.braidTubes = braidTubes_;
+    const GraphFollowers now = followGraphEdit(graph_.dump(), was, moved, copied);
+    if (now.sculpts != was.sculpts) {
         StrokeEdit stroke;
         stroke.mode = label;
-        stroke.set(StrokeField::Sculpts, sculpts);
-        stroke.text(StrokeField::Sculpts).before = sculptsBefore;
+        stroke.set(StrokeField::Sculpts, now.sculpts);
+        stroke.text(StrokeField::Sculpts).before = was.sculpts;
         stroke.text(StrokeField::Sculpts).hasBefore = true;
         stroke.apply(session(), true);
         entry.stroke = std::make_shared<const StrokeEdit>(std::move(stroke));
     }
-    if (target != session().sculptTarget()) session().setSculptTarget(target);
-    if (!braidTubes_.empty()) {
-        // Show Tubes follows the edit: a renamed node's name, a removed node's gone (the core's rules).
-        std::string shown = braidTubes_;
-        for (const auto& [from, to] : moved) shown = renamedBraidTubes(shown, from, to);
-        try {
-            shown = GraphEdit(graph_.dump()).braidTubesKept(shown);
-        } catch (const std::exception&) {
-        }
-        if (shown != braidTubes_) {
-            entry.braidTubes = std::make_pair(braidTubes_, shown);
-            braidTubes_ = shown;
-        }
+    if (now.sculptTarget != was.sculptTarget) session().setSculptTarget(now.sculptTarget);
+    if (now.braidTubes != was.braidTubes) {
+        entry.braidTubes = std::make_pair(was.braidTubes, now.braidTubes);
+        braidTubes_ = now.braidTubes;
     }
     record(std::move(entry));
     dirty_ = true;
@@ -787,33 +764,9 @@ std::string GroomDocument::addNode(const std::string& type, float x, float y, st
                 refused = std::string("Not inserted: ") + e.what();
             }
         } else if (!options.after.empty() && edit.hasNode(options.after)) {
-            // After the selected node: into its first link the new node fits in (it goes into the
-            // chain, as Maya's Add Node), else fed by it on its first input that takes its output.
-            const json now = json::parse(edit.toJson());
-            for (const json& c : now.value("connections", json::array())) {
-                if (c.value("from", std::string()) != options.after || !after.empty()) continue;
-                try {
-                    GraphEdit trial = edit;
-                    insertOnLinkIn(trial, {options.after, c.value("output", std::string()), c.value("to", std::string()), c.value("input", std::string())},
-                                   chosen);
-                    edit = std::move(trial);
-                    after = options.after;
-                } catch (const GraphError&) {
-                }
-            }
-            if (after.empty()) {
-                const json spec = json::parse(edit.nodeSpecJson(chosen));
-                for (const json& p : spec.value("inputs", json::array())) {
-                    try {
-                        GraphEdit trial = edit;
-                        trial.connect(options.after, chosen, p.value("name", std::string()));
-                        edit = std::move(trial);
-                        after = options.after;
-                        break;
-                    } catch (const GraphError&) {
-                    }
-                }
-            }
+            // After the selected node, every host's rule (graph_edits.h wireAfterNode): into its
+            // first link the new node fits in, else fed by it on its first input that takes it.
+            if (wireAfterNode(edit, options.after, chosen)) after = options.after;
         }
         g = json::parse(edit.toJson());
     });

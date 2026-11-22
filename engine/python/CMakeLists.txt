@@ -92,7 +92,7 @@ pybind11_add_module(groomlab_core_py MODULE
     src/bind_tube_mesh.cpp
 )
 set_target_properties(groomlab_core_py PROPERTIES OUTPUT_NAME groomlab_core)
-target_link_libraries(groomlab_core_py PRIVATE groomlab::core groomlab::warnings nlohmann_json::nlohmann_json)  # graph_pins.h takes a graph's JSON
+target_link_libraries(groomlab_core_py PRIVATE groomlab::core groomlab::editor groomlab::warnings nlohmann_json::nlohmann_json)  # graph_pins.h takes a graph's JSON
 if(GROOMLAB_PYBIND_INTERNALS_VERSION)
     target_compile_definitions(groomlab_core_py PRIVATE
         PYBIND11_INTERNALS_VERSION=${GROOMLAB_PYBIND_INTERNALS_VERSION})

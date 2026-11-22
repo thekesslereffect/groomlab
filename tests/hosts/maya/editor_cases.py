@@ -1544,8 +1544,7 @@ class GraphEditorTest(unittest.TestCase):
         self.assertEqual((cmds.getAttr(self.groom + ".braidTubes") or "").split("\n"), [name, other])
         self.assertTrue(self.editor.braid_tubes_shown(name) and self.editor.braid_tubes_shown(other))
         # Renamed (the Rename dialog's steps, without the dialog): the name follows.
-        self.editor.model.rename_node(name, "plait")
-        self.editor._follow_braid_tubes(name, "plait")
+        self.editor.model.rename_node(name, "plait")  # (Show Tubes follows in the save: GraphModel.save)
         self.editor.rebuild()
         self.editor.changed()
         self.assertEqual((cmds.getAttr(self.groom + ".braidTubes") or "").split("\n"), ["plait", other])

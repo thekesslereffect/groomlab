@@ -22,6 +22,7 @@
 #include <utility>
 #include <vector>
 
+#include "groomlab/editor/graph_edits.h"
 #include "groomlab/correctives.h"
 #include "groomlab/expression.h"
 #include "groomlab/frame_time.h"
@@ -83,15 +84,19 @@ json paramSpecOf(const GraphEdit& edit, const std::string& node, const std::stri
     fail("not_found", "node '" + node + "' has no param '" + param + "'");
 }
 
-// One edit of the graph as one undo step: its text, with the Sculpt nodes' edits following the
-// nodes it moved (renames, Group, Ungroup: sculpts.py's follow_graph_edit). A graph that does not
-// load yet (an input left open) is kept as edit_graph keeps it, without an undo step; a graph that
-// loads stays one that loads (GraphError, nothing changed).
-json commitGraph(Session& s, const std::string& label, const std::string& before, const GraphEdit& edit, json r = json::object()) {
-    const std::string text = edit.toJson();
+}  // namespace
+
+json commitGraph(Session& s, const std::string& label, const std::string& before, const GraphEdit& edit, json r,
+                 const std::map<std::string, std::string>& copied) {
+    return commitGraphText(s, label, before, edit.toJson(), edit.movedNodes(), std::move(r), copied);
+}
+
+json commitGraphText(Session& s, const std::string& label, const std::string& before, const std::string& text,
+                     const std::vector<std::pair<std::string, std::string>>& movedNodes, json r,
+                     const std::map<std::string, std::string>& copied) {
     if (!r.is_object()) r = json::object();
     json moved = json::array();
-    for (const auto& [from, to] : edit.movedNodes()) moved.push_back({from, to});
+    for (const auto& [from, to] : movedNodes) moved.push_back({from, to});
     r["moved"] = moved;
     if (text == before) {
         r["graphChanged"] = false;
@@ -99,15 +104,14 @@ json commitGraph(Session& s, const std::string& label, const std::string& before
         r["undo"] = undoStateJson(s);
         return r;
     }
-    const std::string& storedSculpts = s.groom->data().sculptsJson;
-    std::string sculpts = storedSculpts;
-    if (!edit.movedNodes().empty() && !storedSculpts.empty()) {
-        try {
-            sculpts = moveSculptNodes(storedSculpts, edit.movedNodes());
-        } catch (const std::exception&) {
-            sculpts = storedSculpts;  // unreadable edits stay as they are (the evaluation says why)
-        }
-    }
+    // What names the nodes follows (the editor's rules, every host's: graph_edits.h).
+    const std::string storedSculpts = s.groom->data().sculptsJson;
+    GraphFollowers was;
+    was.sculpts = storedSculpts;
+    was.sculptTarget = s.groom->sculptTarget();
+    const GraphFollowers now = followGraphEdit(text, was, movedNodes, copied);
+    const std::string& sculpts = now.sculpts;
+    if (now.sculptTarget != was.sculptTarget) s.groom->setSculptTarget(now.sculptTarget);
     if (!s.groom->graphError().empty()) {
         try {
             s.groom->setGraphJson(text);
@@ -129,6 +133,8 @@ json commitGraph(Session& s, const std::string& label, const std::string& before
     r["undo"] = undoStateJson(s);
     return r;
 }
+
+namespace {
 
 std::vector<std::string> namesOf(const json& v, const char* what) {
     if (!v.is_array()) fail("bad_request", std::string(what) + " is a list of node names");

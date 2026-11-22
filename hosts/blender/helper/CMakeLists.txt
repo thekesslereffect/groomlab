@@ -5,7 +5,7 @@
 # Blender's process.
 
 add_library(groomlab_helper_objs OBJECT src/helper.cpp src/tools.cpp src/authoring.cpp src/pipeline.cpp src/reference.cpp src/shared_memory.cpp)
-target_link_libraries(groomlab_helper_objs PUBLIC groomlab::core groomlab::warnings nlohmann_json::nlohmann_json)
+target_link_libraries(groomlab_helper_objs PUBLIC groomlab::core groomlab::editor groomlab::warnings nlohmann_json::nlohmann_json)
 if(TARGET groomlab_alembic)
     target_link_libraries(groomlab_helper_objs PUBLIC groomlab::alembic)
     target_compile_definitions(groomlab_helper_objs PUBLIC GROOMLAB_HAS_ALEMBIC=1)

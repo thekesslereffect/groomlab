@@ -27,6 +27,7 @@
 #include "groomlab/card_maps.h"
 #include "groomlab/cards.h"
 #include "groomlab/display.h"
+#include "groomlab/editor/graph_edits.h"
 #include "groomlab/editor/groom_edit.h"
 #include "groomlab/frame_time.h"
 #include "groomlab/groom_file.h"

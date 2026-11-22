@@ -75,23 +75,5 @@ def clear_edits(groom, node):
     _set_text(groom, groomlab_core.clear_sculpt_node(_text(groom), node))
 
 
-def follow_graph_edit(groom, renamed=None, copied=None, kept=None):
-    """The edits follow the Graph Editor's edits, in its undo step: renamed nodes ({old: new}, paths
-    inside a compound too: Group moves "sculpt1" to "compound1/sculpt1", Ungroup back) take theirs
-    along, a compound's inner nodes' with it; copies ({copy: source}) get a copy, and nodes no longer
-    in the graph (`kept`: the graph's node names, None: not checked) lose theirs. The target follows
-    a rename and is cleared with its node (grouped: brushes shape top-level nodes only)."""
-    text = groomlab_core.move_sculpt_nodes(_text(groom), list((renamed or {}).items()))
-    for copy, source in (copied or {}).items():
-        text = groomlab_core.copy_sculpt_node(text, source, copy)
-    if kept is not None:
-        for name in groomlab_core.sculpted_nodes(text):
-            if name.split("/")[0] not in kept:  # (a compound's inner node: its compound's name)
-                text = groomlab_core.clear_sculpt_node(text, name)
-    _set_text(groom, text)
-    current = cmds.getAttr(groom + ".sculptNode") or ""
-    wanted = (renamed or {}).get(current, current)
-    if kept is not None and wanted not in kept:
-        wanted = ""
-    if wanted != current:
-        cmds.setAttr(groom + ".sculptNode", wanted, type="string")
+# The edits follow the Graph Editor's edits (renames, copies, removals) in GraphModel.save's undo
+# step, as every host's: groomlab_core.follow_graph_edit (the editor's graph_edits.h).

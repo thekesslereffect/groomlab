@@ -49,9 +49,17 @@ time, each host calling the one version:
 
 - E0 (done): the undo step and history (`groom_edit.h`); the app's document keeps its history in
   an `EditHistory` and applies steps as an `EditorHost`.
-- Next: the graph's edits (Sculpt edits, Show Tubes and the viewed node following every rename,
-  copy and removal; adding a node after the selected one), then the maps, the guides, tubes and
-  correctives, the brush tool's session (its ring, selection, settings by id) and the game exports.
+- E1 (done): the graph's edits (`graph_edits.h`). `followGraphEdit`: after an edit, the Sculpt
+  nodes' edits, the brushes' Sculpt node, Show Tubes and the viewed node follow the nodes it
+  renamed, grouped, copied or removed (the app's `editGraph`; Maya's `GraphModel.save` and
+  `params.set_graph` through `params.follow_nodes`; the Blender helper's `commitGraph` and its plain
+  `edit_graph` ops, a rename, copy (`copyOf`) or removal that carries Sculpt edits being one undo
+  step on its stack, the add-on keeping its depth: `graph.note_undo`). `wireAfterNode`: Add Node
+  after the selected node goes into its first outgoing link the node fits in, else is fed by it on
+  its first input that takes it (the app's Add Node, Maya's Graph Editor, the add-on's
+  `graph.add_node` with `after`; scripted inserts keep `insertAfter`).
+- Next: the maps, the guides, tubes and correctives, the brush tool's session (its ring,
+  selection, settings by id) and the game exports.
   The Blender helper becomes a JSON wrapper over it; Maya calls it through `groomlab_core` and
   records each step through its own undo queue.
 

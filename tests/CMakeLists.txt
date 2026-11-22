@@ -52,6 +52,7 @@ add_executable(groomlab_tests
     engine/core/test_incremental.cpp
     engine/core/test_keyed_params.cpp
     engine/editor/test_edit_history.cpp
+    engine/editor/test_graph_edits.cpp
     engine/core/test_value_inputs.cpp
     engine/core/test_cards.cpp
     engine/core/test_card_separation.cpp

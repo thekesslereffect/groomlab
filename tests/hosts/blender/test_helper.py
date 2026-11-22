@@ -2441,6 +2441,27 @@ class ToolsTest(HelperTestCase):
         self.assertEqual(self.call("sculpt_target")["target"]["kind"], "base")
         self.call("undo")
         self.assertEqual(self.texts()["sculptData"], sculpted)
+        # The plain edits too (the editor's followGraphEdit, every host's), each one undo step: a
+        # rename takes the edits and the target along, a copy gets its own, a removal drops them.
+        self.call("sculpt_target", node="sculpt1")
+        r = self.call("edit_graph", op="rename_node", name="sculpt1", newName="shaping")
+        self.assertTrue(r["undoable"])
+        self.assertEqual(r["undo"]["undoLabel"], "rename_node sculpt1")
+        self.assertEqual(sorted(json.loads(self.texts()["sculptData"])), ["shaping"])
+        self.assertEqual(self.call("sculpt_target")["target"], {"kind": "node", "name": "shaping"})
+        r = self.call("edit_graph", op="add_node", type="Sculpt", copyOf="shaping")
+        self.assertEqual(sorted(json.loads(self.texts()["sculptData"])), sorted(["shaping", r["name"]]))
+        self.call("edit_graph", op="remove_node", name="shaping", keepFlow=True)
+        self.assertEqual(sorted(json.loads(self.texts()["sculptData"])), [r["name"]])
+        self.assertEqual(self.call("sculpt_target")["target"]["kind"], "base")
+        for _ in range(3):
+            self.call("undo")
+        self.assertEqual(self.texts()["sculptData"], sculpted)
+        self.assertIn("sculpt1", [n["name"] for n in self.call("get_graph")["graph"]["nodes"]])
+        # An edit that names no node (a bypass): the graph as it is, no undo step.
+        depth = self.call("undo_state")["undoDepth"]
+        self.call("edit_graph", op="set_bypass", name="sculpt1", bypass=True)
+        self.assertEqual(self.call("undo_state")["undoDepth"], depth)
 
 
 # Sparse hand guides -> an even Scatter + Interpolate -> ToGuides -> Sculpt -> the strands'

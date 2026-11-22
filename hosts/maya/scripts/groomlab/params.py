@@ -56,9 +56,32 @@ def get_graph(groom, expand_default=False):
 
 @undoable("graph")
 def set_graph(groom, graph):
-    """Store a graph dict on the groom (and its Control nodes' attributes): one undo step."""
+    """Store a graph dict on the groom (and its Control nodes' attributes): one undo step. What
+    names its nodes follows, as after every host's graph edits (the editor's follow_graph_edit):
+    a node no longer there loses its Sculpt edits, and the brushes' Sculpt node, the viewNode and
+    Show Tubes let it go."""
     sync_controls(groom, graph)
-    cmds.setAttr(groom + ".graph", json.dumps(graph, separators=(",", ":")), type="string")
+    text = json.dumps(graph, separators=(",", ":"))
+    cmds.setAttr(groom + ".graph", text, type="string")
+    follow_nodes(groom, text if graph else groomlab_core.default_graph_json())
+
+
+# What names the graph's nodes on the groom: the Sculpt nodes' edits, the brushes' Sculpt node,
+# Show Tubes' nodes, the node viewed (Focus).
+_FOLLOWERS = {"sculpts": "sculptData", "sculpt_target": "sculptNode", "braid_tubes": "braidTubes", "view_node": "viewNode"}
+
+
+def follow_nodes(groom, graph_text, moved=(), copied=None):
+    """After a graph edit that left `graph_text`: the groom's Sculpt edits, Sculpt node, Show Tubes
+    and viewNode follow renames (`moved`: (old, new) in order), copies ({copy: source}) and
+    removals, as in every host (the editor's follow_graph_edit). No undo step of its own."""
+    was = {key: cmds.getAttr(groom + "." + attr) or "" for key, attr in _FOLLOWERS.items()}
+    if not any(was.values()):
+        return
+    now = groomlab_core.follow_graph_edit(graph_text, moved=list(moved), copied=dict(copied or {}), **was)
+    for key, attr in _FOLLOWERS.items():
+        if now[key] != was[key]:
+            cmds.setAttr(groom + "." + attr, now[key], type="string")
 
 
 def copy_graph_text(groom):

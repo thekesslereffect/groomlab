@@ -14,6 +14,7 @@
 #include "groomlab/field.h"
 #include "groomlab/graph.h"
 #include "groomlab/graph_controls.h"
+#include "groomlab/editor/graph_edits.h"
 #include "groomlab/graph_edit.h"
 #include "groomlab/graph_inserts.h"
 #include "groomlab/graph_io.h"
@@ -870,6 +871,9 @@ void bindGraph(py::module_& m) {
              },
              py::arg("src"), py::arg("dst"), py::arg("node"), py::arg("node_input") = std::string("strands"),
              "Every link from src into dst through `node`, on its node_input (\"\": its first input) (graph_inserts.h).")
+        .def("wire_after_node", &wireAfterNode, py::arg("anchor"), py::arg("node"),
+             "Add Node after the selected node, every host's (engine/editor graph_edits.h): `node` into anchor's first "
+             "outgoing link it fits in, else fed by anchor on its first input that takes it. Whether it was wired.")
         .def("insert_after",
              [](GraphEdit& e, const std::string& anchor, const std::string& node, const std::string& nodeInput) {
                  insertAfter(e, anchor, node, nodeInput);

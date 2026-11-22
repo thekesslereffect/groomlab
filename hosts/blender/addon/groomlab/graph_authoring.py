@@ -1398,7 +1398,7 @@ class GROOMLAB_OT_graph_rename(_NodeOp):
         rt = groom.ensure(scalp)
         try:
             graph_tree.push_positions(scalp)
-            process.call("edit_graph", session=rt.session, op="rename_node", name=old, newName=self.new_name)
+            graph.note_undo(scalp, process.call("edit_graph", session=rt.session, op="rename_node", name=old, newName=self.new_name))
         except HelperError as e:
             return _fail(self, e)
         graph_tree.follow_renamed(scalp, rt, old, self.new_name)
@@ -1425,7 +1425,7 @@ class GROOMLAB_OT_graph_delete(_NodeOp):
             graph_tree.push_positions(scalp)
             for name in names:
                 # (the flow passes through: what fed it feeds what it fed, issue #80)
-                process.call("edit_graph", session=rt.session, op="remove_node", name=name, keepFlow=True)
+                graph.note_undo(scalp, process.call("edit_graph", session=rt.session, op="remove_node", name=name, keepFlow=True))
         except HelperError as e:
             return _fail(self, e)
         if scalp.groomlab.view_node in names:

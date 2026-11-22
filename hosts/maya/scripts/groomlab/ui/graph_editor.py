@@ -5343,21 +5343,6 @@ class GraphEditor(QtWidgets.QWidget):
         self._set_braid_tubes(shown)
         self.report("%s's tubes %s" % (name, "shown" if self.braid_tubes_shown(name) else "hidden"))
 
-    def _follow_braid_tubes(self, old=None, new=None):
-        """Show Tubes after an edit: a renamed node's name follows it, a deleted node's goes (the
-        core's renamed_braid_tubes and GraphEdit.braid_tubes_kept)."""
-        shown = self.braid_tubes()
-        if not shown:
-            return
-        import groomlab_core
-        try:
-            if old and new:
-                shown = groomlab_core.renamed_braid_tubes(shown, old, new)
-            shown = self.model.braid_tubes_kept(shown)
-        except Exception:  # noqa: BLE001 - a graph the core cannot read: left as it is
-            return
-        self._set_braid_tubes(shown)
-
     def set_bypass(self, names, on):
         for name in names:
             self.model.set_bypass(name, on)
@@ -5892,14 +5877,9 @@ class GraphEditor(QtWidgets.QWidget):
         elif len(selected) == 1 and (at is None if wire is None else wire):
             src = selected[0]
             try:
-                inputs = [p["name"] for p in self.model.node_spec(name)["inputs"]]
-                downstream = [d for d in self.model.downstream_of(src)
-                              if gm.types_match(self.model.output_type(name), self.model.input_spec(d[0], d[1])["type"])]
-                if inputs and downstream:
-                    self.model.insert_between(src, downstream[0][0], name)
-                    wired = src
-                elif inputs:
-                    self.model.connect(src, name, inputs[0])
+                # Every host's rule (the editor's wireAfterNode): into src's first link the node
+                # fits in, else fed by src on its first input that takes it.
+                if self.model.wire_after_node(src, name):
                     wired = src
                 if at is None:
                     x, y = self.model.position(src)
@@ -6091,7 +6071,6 @@ class GraphEditor(QtWidgets.QWidget):
     def delete_nodes(self, names):
         for name in names:
             self.model.remove_node(name, keep_flow=True)  # the flow passes through (issue #80)
-        self._follow_braid_tubes()  # a deleted Braid's Show Tubes goes with it
         self.rebuild()
         self.changed()
 
@@ -6102,7 +6081,6 @@ class GraphEditor(QtWidgets.QWidget):
         except gm.GraphError as e:
             self.report(str(e))
             return None
-        self._follow_braid_tubes()  # (a grouped node's Show Tubes goes: only the graph's own nodes show)
         self.rebuild()
         self.items[name].setSelected(True)
         self.changed()
@@ -6168,7 +6146,6 @@ class GraphEditor(QtWidgets.QWidget):
             except (gm.GraphError, ValueError) as e:
                 self.report("%s: %s" % (name, e))
         if done:
-            self._follow_braid_tubes()
             self.rebuild()
             self.changed()
 
@@ -6189,8 +6166,6 @@ class GraphEditor(QtWidgets.QWidget):
             self.model.disconnect(e.dst_item.name, e.input_name)
         for name in nodes:
             self.model.remove_node(name, keep_flow=True)  # the flow passes through (issue #80)
-        if nodes:
-            self._follow_braid_tubes()  # a deleted Braid's Show Tubes goes with it
         for data in backdrops:
             self.model.backdrops.remove(data)
             self._layout_dirty = True
@@ -6241,7 +6216,6 @@ class GraphEditor(QtWidgets.QWidget):
                 self.report(str(e))
                 return
             self._rename_color_source(name, new)
-            self._follow_braid_tubes(name, new)
             self.rebuild()
             self.changed()
 

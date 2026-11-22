@@ -1562,7 +1562,8 @@ def sync_from_tree(tree):
     def edit(**args):
         sent.append(args["op"])
         try:
-            return _call("edit_graph", session=session, **args)
+            from . import graph as graph_mod
+            return graph_mod.note_undo(scalp, _call("edit_graph", session=session, **args))
         except HelperError as e:
             refused.append(e.message)
             return None
@@ -1605,6 +1606,7 @@ def sync_from_tree(tree):
         source = data_node(data, node.gl_copy_of) if node.gl_copy_of else None
         if source is not None and source.get("type") == node.gl_type:
             args["params"] = source.get("params") or {}
+            args["copyOf"] = source["name"]  # (a Sculpt node's copy takes its edits: the editor's followGraphEdit)
         init = json.loads(node.gl_init) if node.gl_init else {}
         if init.get("params"):  # (Tab search's painted map: a Map node reading it, named after it)
             args["params"] = init["params"]
