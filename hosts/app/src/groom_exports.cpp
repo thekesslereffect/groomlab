@@ -623,56 +623,19 @@ std::vector<std::string> GroomDocument::exportEngineCards(const std::string& dir
 
 std::vector<std::string> GroomDocument::exportUnityFeathers(const std::string& directory, const std::string& name,
                                                             std::vector<std::string>* warnings, const GameExportOptions* options) {
-    // Every host's options (game_exports.h): points per strand and per barb, the density, a LOD's
-    // barbs (Maya's export_unity_feathers, the Blender helper's).
+    // Every host's Unity feathers (engine_export.h writeUnityFeathers) with every host's options
+    // (game_exports.h): points per strand and per barb, the density, a LOD's barbs.
     const GameExportOptions given = options ? *options : GameExportOptions{};
-    std::error_code ec;
-    fs::create_directories(fs::u8path(directory), ec);
-    const std::string dir = fs::u8path(directory).generic_u8string();
-    EngineExportOptions e;
-    e.engine = EngineExportOptions::Engine::Unity;
-    e.groups = kGroupIdChannel;
-    for (const int p : {given.points, given.barbPoints}) {
-        if (p < 3 || p > 128) throw std::invalid_argument("points and barb points are 3 to 128 (Unity's strand particle counts)");
-    }
-    e.pointsPerStrand = static_cast<std::size_t>(given.points);
-    e.barbPoints = static_cast<std::size_t>(given.barbPoints);
-    e.maxStrandsPerGroup = kUnityMaxStrandsPerGroup;
-    if (!given.lod.empty()) setBarbLod(e, given.lod);  // every host's barb LOD table (engine_export.h)
-    const std::string abc = dir + "/" + name + "_strands.abc";
+    UnityFeathersOptions o;
+    o.points = static_cast<std::size_t>(std::max(0, given.points));
+    o.barbPoints = static_cast<std::size_t>(std::max(0, given.barbPoints));
+    o.lod = given.lod;
     MeshPtr scalp;
     const StrandsPtr strands = exportFrame(time_, std::clamp(given.density, 0.0f, 1.0f), &scalp, false, true);
-    nlohmann::json objects = nlohmann::json::array();
-    {
-        EngineGroomWriter writer(abc, name, time_, frameToSeconds(1.0, framesPerSecond()), e);
-        writer.writeFrame(*strands, nullptr, scalp.get());
-        writer.close();
-        for (const EngineGroomWriter::Object& o : writer.objects()) {
-            objects.push_back({{"object", o.path}, {"group", o.group}, {"groupId", o.groupId}, {"feathers", o.feathers},
-                               {"strands", o.strands}, {"pointsPerStrand", o.pointsPerStrand ? nlohmann::json(o.pointsPerStrand) : nlohmann::json()},
-                               {"minPoints", o.minPoints}, {"maxPoints", o.maxPoints}});
-        }
-    }
-    std::vector<std::string> out{abc};
-    std::string fbx;
-    if (hasRachis(strands->featherLayers())) {
-        fbx = dir + "/" + name + "_rachis.fbx";
-        FbxSettings settings;
-        settings.meters = true;  // (Unity's)
-        writeFbx(fbx, {rachisFbxMesh(buildRachisMesh(strands->featherLayers()), name + "_rachis")}, settings);
-        out.push_back(fbx);
-    } else if (warnings && std::any_of(objects.begin(), objects.end(), [](const nlohmann::json& o) { return o.value("feathers", false); })) {
-        warnings->push_back("the feathers have no rachis: their shafts go as strands, and there is no mesh for the barbs to ride");
-    }
-    const std::string manifest = dir + "/" + name + "_unity_feathers.json";
-    {
-        std::ofstream f(fs::u8path(manifest), std::ios::binary | std::ios::trunc);
-        if (!f) throw std::runtime_error("cannot write " + manifest);
-        f << unityFeathersManifestJson(objects.dump(), name + "_strands.abc", fbx.empty() ? std::string() : name + "_rachis.fbx", given.lod,
-                                       e.barbDensity);
-    }
-    out.push_back(manifest);
-    return out;
+    const UnityFeathersExport done =
+        writeUnityFeathers(*strands, scalp.get(), time_, frameToSeconds(1.0, framesPerSecond()), directory, name, o);
+    if (warnings) warnings->insert(warnings->end(), done.warnings.begin(), done.warnings.end());
+    return done.files();
 }
 
 std::vector<std::string> GroomDocument::exportScalesFbx(const std::string& path, bool unity) {

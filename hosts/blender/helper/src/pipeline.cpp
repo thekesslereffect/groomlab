@@ -534,28 +534,21 @@ json exportUnityFeathers(Session& s, const json& args) {
     const std::string lod = optString(args, "lod", "");
     std::string name = optString(args, "name", "groom");
     if (!lod.empty() && !args.contains("name")) name += "_" + lod;
-    EngineExportOptions e;
-    e.engine = EngineExportOptions::Engine::Unity;
-    e.groups = kGroupIdChannel;
+    // Every host's Unity feathers (engine_export.h writeUnityFeathers); Blender writes the rachis mesh.
+    UnityFeathersOptions o;
     const double points = optNumber(args, "points", 16.0), barbPoints = optNumber(args, "barbPoints", 6.0);
     for (const double p : {points, barbPoints}) {
         if (p < 3.0 || p > 128.0 || p != std::floor(p)) fail("bad_request", "points and barbPoints must be 3 to 128 (Unity's strand particle counts)");
     }
-    e.pointsPerStrand = static_cast<std::size_t>(points);
-    e.barbPoints = static_cast<std::size_t>(barbPoints);
+    o.points = static_cast<std::size_t>(points);
+    o.barbPoints = static_cast<std::size_t>(barbPoints);
     const double most = optNumber(args, "maxStrandsPerGroup", static_cast<double>(kUnityMaxStrandsPerGroup));
     if (most < 0.0) fail("bad_request", "maxStrandsPerGroup must be 0 (no limit) or more");
-    e.maxStrandsPerGroup = static_cast<std::size_t>(most);
-    if (args.contains("shafts") && !args["shafts"].is_null()) e.shafts = optBool(args, "shafts", true);
-    if (!lod.empty()) {
-        try {
-            setBarbLod(e, lod);  // every host's barb LOD table (engine_export.h)
-        } catch (const std::invalid_argument& ex) {
-            fail("bad_request", ex.what());
-        }
-    }
-    const double barbDensity = e.barbDensity;
-    const std::string abc = outFile(folder, name + "_strands.abc");
+    o.maxStrandsPerGroup = static_cast<std::size_t>(most);
+    if (args.contains("shafts") && !args["shafts"].is_null()) o.shafts = optBool(args, "shafts", true);
+    o.lod = lod;
+    o.rachis = optBool(args, "rachis", true);
+    o.writeRachis = false;
     ViewRequest request;
     request.density = static_cast<float>(optNumber(args, "density", 1.0));
     request.time = s.seconds;
@@ -566,41 +559,22 @@ json exportUnityFeathers(Session& s, const json& args) {
     if (!view.errors.empty()) fail("evaluation", view.errors.front());
     if (!view.strands) fail("evaluation", "the groom gave no strands");
     const StrandSet& st = *view.strands;
-    json objects = json::array();
+    UnityFeathersExport done;
     try {
-        const double fps = s.groom->framesPerSecond();
-        EngineGroomWriter writer(abc, name, s.seconds, frameToSeconds(1.0, fps), e);
-        writer.writeFrame(st, nullptr, scalpOf(s, view).get());
-        writer.close();
-        for (const EngineGroomWriter::Object& o : writer.objects()) {
-            objects.push_back({{"object", o.path}, {"group", o.group}, {"groupId", o.groupId}, {"feathers", o.feathers},
-                               {"strands", o.strands}, {"pointsPerStrand", o.pointsPerStrand ? json(o.pointsPerStrand) : json()},
-                               {"minPoints", o.minPoints}, {"maxPoints", o.maxPoints}});
-        }
+        done = writeUnityFeathers(st, scalpOf(s, view).get(), s.seconds, frameToSeconds(1.0, s.groom->framesPerSecond()), folder, name, o);
     } catch (const std::invalid_argument& ex) {
         fail("bad_request", ex.what());
     } catch (const std::exception& ex) {
         fail("io", ex.what());
     }
-    json warnings = json::array();
     std::vector<MeshOut> meshes;
-    std::string fbx;
-    const bool rachis = optBool(args, "rachis", true) && hasRachis(st.featherLayers());
-    if (rachis) {
-        fbx = outFile(folder, name + "_rachis.fbx");
+    if (!done.fbx.empty()) {
         meshes.push_back(rachisLayoutMesh(buildRachisMesh(st.featherLayers()), "rachis"));
-        meshes.back().info["fbx"] = fbx;
-    } else if (std::any_of(objects.begin(), objects.end(), [](const json& o) { return o.value("feathers", false); })) {
-        warnings.push_back("the feathers have no rachis: their shafts go as strands, and there is no mesh for the barbs to ride");
+        meshes.back().info["fbx"] = done.fbx;
     }
-    std::string groupsText;
-    const json manifest = json::parse(unityFeathersManifestJson(objects.dump(), baseName(abc), fbx.empty() ? std::string() : baseName(fbx),
-                                                                lod, barbDensity, &groupsText));
-    const json groups = json::parse(groupsText);
-    const std::string manifestPath = outFile(folder, name + "_unity_feathers.json");
-    writeJsonFile(manifestPath, manifest);
-    return {{"abc", abc}, {"rachis", fbx.empty() ? json() : json(fbx)}, {"manifest", manifestPath}, {"groups", groups},
-            {"warnings", warnings}, {"fbxSettings", {{"upAxis", "Y"}, {"units", "m"}}}, {"meshes", putMeshes(s, meshes, groomSpaceOf(args))}};
+    return {{"abc", done.abc}, {"rachis", done.fbx.empty() ? json() : json(done.fbx)}, {"manifest", done.manifest},
+            {"groups", json::parse(done.groups.empty() ? std::string("[]") : done.groups)}, {"warnings", done.warnings},
+            {"fbxSettings", {{"upAxis", "Y"}, {"units", "m"}}}, {"meshes", putMeshes(s, meshes, groomSpaceOf(args))}};
 #else
     (void)s;
     (void)args;

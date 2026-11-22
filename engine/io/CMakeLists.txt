@@ -15,4 +15,4 @@ add_library(groomlab::alembic ALIAS groomlab_alembic)
 target_include_directories(groomlab_alembic PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(groomlab_alembic
     PUBLIC groomlab::core
-    PRIVATE Alembic::Alembic groomlab::warnings)
+    PRIVATE Alembic::Alembic groomlab::warnings nlohmann_json::nlohmann_json)
