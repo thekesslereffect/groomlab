@@ -1930,6 +1930,12 @@ def keep_state(scalp):
     return keep
 
 
+def _graph_changed(scalp):
+    """groom.graph_hooks: a GroomLab-tools groom's state kept with its new graph."""
+    if is_hierarchy(scalp) and groom.runtime_if_any(scalp) is not None:
+        mark_state(scalp)
+
+
 def store_states():
     """Before a save: each GroomLab-tools groom's state into its scalp object (the .blend)."""
     for scalp in groom.scalps():
@@ -1952,7 +1958,7 @@ def restore(scalp, rt, scene):
         except ValueError:
             state = None
     if state is None and scalp.groomlab.snapshot:
-        return False  # a hierarchy groom kept by B2's snapshot (a .groom loaded, saved before any edit)
+        return False  # a hierarchy groom an older GroomLab kept by B2's snapshot alone (saved before any edit)
     groom.sync_scalp(scalp, rt, force=True)
     if state is not None:
         process.call("set_state", session=rt.session, groom=state["groom"], textures=state.get("textures") or [],
@@ -2072,6 +2078,7 @@ def _wake():
 def register():
     groom.before_save.append(store_states)
     groom.build_hooks.append(restore)
+    groom.graph_hooks.append(_graph_changed)
     if _on_load not in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.append(_on_load)
     for handlers in (bpy.app.handlers.undo_post, bpy.app.handlers.redo_post):
@@ -2086,6 +2093,8 @@ def unregister():
         groom.before_save.remove(store_states)
     if restore in groom.build_hooks:
         groom.build_hooks.remove(restore)
+    if _graph_changed in groom.graph_hooks:
+        groom.graph_hooks.remove(_graph_changed)
     if _on_load in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.remove(_on_load)
     for handlers in (bpy.app.handlers.undo_post, bpy.app.handlers.redo_post):

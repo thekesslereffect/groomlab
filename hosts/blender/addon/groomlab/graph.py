@@ -95,7 +95,7 @@ def refresh(scalp, rt=None):
     rt = rt or groom.ensure(scalp)
     graph = _call("get_graph", session=rt.session)["graph"]
     g = scalp.groomlab
-    g.graph_json = json.dumps(graph)
+    groom.remember_graph(scalp, rt, graph)
     types = {n["name"]: n["type"] for n in graph.get("nodes", [])}
     chain, _ = main_chain(graph)
     order = [n for n in chain if n in types] + [n for n in types if n not in chain]

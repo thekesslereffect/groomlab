@@ -1053,15 +1053,29 @@ class ToolsTest(unittest.TestCase):
         temp_file = {m.name: m.texture for m in bpy.context.scene.groomlab_tools.maps}["skin"]
         self.assertFalse(bpy.data.filepath)
         self.assertTrue(os.path.isfile(temp_file))
+        # A graph edit: the state kept with it (one record of the groom: graph, guides and maps together).
+        graph_mod = importlib.import_module(bu.MODULE + ".graph")
+        gravity, error = graph_mod.add_node(head, "Gravity")
+        self.assertEqual(error, "")
+        groom.flush()
         before_texts = texts(head)
         before_hair = bu.hair_arrays(head.groomlab.hair)
-        # A helper that crashed: the groom comes back from the state kept in memory.
+        # A helper that crashed: the groom comes back from the state kept in memory, the graph with it.
         process.kill_for_tests()
         groom.mark(head, "eval")
         groom.flush()
         self.assertEqual(groom.runtime(head).error, "")
         self.assertEqual(texts(head)["guideData"], before_texts["guideData"])
         self.assertEqual(texts(head)["scalpMaps"], before_texts["scalpMaps"])
+        def nodes(text):
+            data = json.loads(text)
+            return sorted((n["name"], n["type"]) for n in data["nodes"]), data.get("connections")
+        self.assertEqual(nodes(texts(head)["graph"]), nodes(before_texts["graph"]))
+        self.assertIn(gravity, [n["name"] for n in json.loads(head.groomlab.graph_json)["nodes"]])
+        graph_mod.remove_node(head, gravity)
+        groom.flush()
+        before_texts = texts(head)
+        before_hair = bu.hair_arrays(head.groomlab.hair)
         # Blender's own undo sends the scalp again: the groom's guides stay as they are.
         groom.invalidate_all()
         groom.flush()
@@ -1079,6 +1093,7 @@ class ToolsTest(unittest.TestCase):
         self.assertTrue(head.groomlab_tools.state)
         state = json.loads(head.groomlab_tools.state)
         self.assertEqual(set(state), {"groom", "textures", "tools"})
+        self.assertEqual(head.groomlab.snapshot, "")  # (the state is the .blend's one copy of the groom)
         process.shutdown()
         bpy.ops.wm.open_mainfile(filepath=blend)
         again = bpy.data.objects["Head"]

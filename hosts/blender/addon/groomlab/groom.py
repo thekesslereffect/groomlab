@@ -97,6 +97,9 @@ before_save = []  # callables run before a groom is written (.groom, the .blend'
 # callables (scalp, rt, scene) run when a session is (re)built: True when one gave it the groom (GroomLab's tools:
 # the groom's state kept in the .blend), else B2's snapshot is loaded
 build_hooks = []
+# callables (scalp) run when the groom's graph changed (remember_graph): GroomLab's tools keep the groom's state
+# with it, so a helper started again gets the graph back with the guides and maps it went with
+graph_hooks = []
 # callables (scalp, rt, depsgraph, force, read_pose) run by sync() after the scalp and guides: the groom's other
 # inputs (pipeline.py: its colliders as they are posed now); True when one sent something
 input_hooks = []
@@ -215,6 +218,10 @@ def _build(scalp, rt, scene):
             restored = fn(scalp, rt, scene) or restored
         except HelperError as e:
             rt.error = "the groom saved in this file did not load: %s" % e.message
+    # One record gives the groom back: GroomLab's tools' state (the whole groom: graph, guides, maps;
+    # tools.restore), else B2's snapshot. graph_json is Blender's copy for its undo (graph_tree.after_undo),
+    # written from the session: given to it only when it is all there is, or for B2's grooms, whose guides are
+    # Blender's own (the snapshot is the last save; the graph may be newer).
     if g.snapshot and not restored:
         path = os.path.join(tempfile.gettempdir(), "groomlab_%s_%d.groom" % (rt.uid, os.getpid()))
         try:
@@ -228,11 +235,16 @@ def _build(scalp, rt, scene):
                 os.remove(path)
             except OSError:
                 pass
-    if g.graph_json:
+    if g.graph_json and not restored:
         try:
             _call("set_graph", session=rt.session, graph=g.graph_json)
         except HelperError as e:
             rt.error = "the groom's graph did not load: %s" % e.message
+    elif restored:
+        try:
+            g.graph_json = json.dumps(_call("get_graph", session=rt.session)["graph"])  # (the state's graph)
+        except HelperError:
+            pass
     rt.follow = bool(g.follow_scalp)
     _call("set_options", session=rt.session, followScalp=rt.follow)
     send_maps_dir(scalp, rt)  # a map still in a temp folder (made while untitled) copied beside the file
@@ -1106,9 +1118,10 @@ def poll():
 
 def snapshot_all(blend_path=None):
     """Before the .blend is saved (to `blend_path`): each groom's texture maps in the file's own
-    maps folder (send_maps_dir: the first save of an untitled file, Save As), then each groom as a
-    .groom text in its scalp object, so the file opens with the whole groom (graph, guides, maps)
-    even without the helper running then."""
+    maps folder (send_maps_dir: the first save of an untitled file, Save As), then each groom kept
+    in its scalp object once, so the file opens with the whole groom (graph, guides, maps) even
+    without the helper running then: a GroomLab-tools groom's state (tools.store_states), B2's
+    grooms as a .groom text (snapshot)."""
     live = []
     for scalp in scalps():
         rt = runtime_if_any(scalp)
@@ -1126,10 +1139,14 @@ def snapshot_all(blend_path=None):
     for scalp, rt in live:
         path = os.path.join(tempfile.gettempdir(), "groomlab_snapshot_%s_%d.groom" % (rt.uid, os.getpid()))
         try:
+            scalp.groomlab.graph_json = json.dumps(_call("get_graph", session=rt.session)["graph"])
+            if scalp.groomlab.guide_target == "hierarchy":
+                # GroomLab's tools' grooms: their state is the .blend's one copy (tools.store_states, before this).
+                scalp.groomlab.snapshot = ""
+                continue
             _call("save_groom", session=rt.session, path=path)
             with open(path, encoding="utf-8") as f:
                 scalp.groomlab.snapshot = f.read()
-            scalp.groomlab.graph_json = json.dumps(_call("get_graph", session=rt.session)["graph"])
         except (HelperError, OSError) as e:
             print("GroomLab: the groom of %s was not kept in the file: %s" % (scalp.name, e))
         finally:
@@ -1139,9 +1156,16 @@ def snapshot_all(blend_path=None):
                 pass
 
 
-def remember_graph(scalp, rt=None):
+def remember_graph(scalp, rt=None, graph=None):
+    """After a change of the groom's graph: Blender's copy (graph_json: its undo puts it back) from
+    the session's (`graph`: get_graph's, when the caller has it), and the groom's state kept with it
+    (graph_hooks)."""
     rt = rt or ensure(scalp)
-    scalp.groomlab.graph_json = json.dumps(_call("get_graph", session=rt.session)["graph"])
+    if graph is None:
+        graph = _call("get_graph", session=rt.session)["graph"]
+    scalp.groomlab.graph_json = json.dumps(graph)
+    for fn in graph_hooks:
+        fn(scalp)
 
 
 def scalp_size_cm(rest, scene):
