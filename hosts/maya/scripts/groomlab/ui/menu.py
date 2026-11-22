@@ -1210,12 +1210,6 @@ def _render_standalone_dialog(renderer):
     return _watch_render(job, spec)
 
 
-def redshift_toggle():
-    """Render > Redshift: the grooms' automatic Redshift proxies on or off (redshift_hook)."""
-    from groomlab import redshift_hook
-    redshift_hook.menu_toggle()
-
-
 def redshift_refresh():
     """Render > Refresh Redshift Grooms: this frame written for Redshift's IPR (redshift_hook)."""
     from groomlab import redshift_hook
@@ -2311,7 +2305,6 @@ ACTIONS = {
     "render.fromGroomFile": render_from_groom_file_dialog,
     "render.asCurves": render_curves,
     "render.vrayStandalone": render_vray_dialog,
-    "render.redshift": redshift_toggle,
     "render.redshiftRefresh": redshift_refresh,
     "render.prman": render_prman_dialog,
     "render.hardware2": render_hardware2_dialog,

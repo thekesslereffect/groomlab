@@ -2,31 +2,33 @@
 """Redshift for Maya (issue 81): every visible groom renders in Redshift with nothing to set up.
 
 Redshift has no public API for a renderer plug-in of GroomLab's own (its translator extensions and
-procedurals are Maxon's), so GroomLab drives a Redshift Proxy per groom, made and kept for you:
+procedurals are Maxon's), so GroomLab drives a Redshift Proxy per groom, made and kept for you.
+Nothing to switch on: whenever the scene's renderer is Redshift (activate: on picking it, on
+opening a scene that uses it, at GroomLab's start), GroomLab
+  - adds its line to Redshift's Pre Render Frame MEL (redshiftOptions.preRenderFrameMel), so every
+    frame Redshift renders (Render View, batch, a farm with GroomLab installed) writes the grooms
+    first (pre_render_frame);
+  - wraps Redshift's IPR start (the renderer's startIprRenderProcedure, redshiftStartIprRender)
+    so starting IPR writes the frame first too (wrap_ipr);
+  - on picking Redshift, writes the frame and makes the proxies at once.
+For each visible groom that writes the frame to Alembic (groomlab.export_alembic: the render density
+and overrides; with Redshift's deformation blur on, its shutter in its deformation steps:
+shutter_frames) under the scene's groomlab/<scene>/caches/redshift folder, and finds or makes its
+proxy (ensure_proxy): a transform of its own, <groom>_rsProxy, placed by the groom's world matrix
+(its offsetParentMatrix: the Alembic's points are the groom's own), with a RedshiftProxyMesh reading
+the file as Alembic into its placeholder mesh, hidden in the viewport (the groom draws itself), and a
+Principled Hair from the groom's look (build_shader: the core's principledHair) unless it has a
+material of its own. A proxy shows only while its groom is visible and the scene renders in
+Redshift (sync_visibility), so Arnold, V-Ray or RenderMan never draw it. Redshift's IPR shows the
+frame as last written: GroomLab > Render > Refresh Redshift Grooms writes it again (refresh).
 
     import groomlab.redshift_hook as rs
-    rs.enable()      # the hook on: Redshift's Pre Render Frame MEL (redshiftOptions.preRenderFrameMel)
-    rs.disable()     # the line taken out again (the rest of the script kept); the proxies stay
-    rs.refresh()     # this frame written and the proxies set now (IPR, which runs no frame script)
-
-pre_render_frame runs in Redshift alone (a Redshift Render Settings slot), before each frame of a
-render (Render View, batch, a farm with GroomLab installed). For each visible groom it:
-  1. writes the groom for the frame to Alembic (groomlab.export_alembic: the render density and
-     overrides; with Redshift's deformation motion blur on, its shutter in its deformation steps:
-     shutter_frames) under the scene's groomlab/<scene>/caches/redshift folder;
-  2. finds or makes the groom's proxy (ensure_proxy): a RedshiftProxyMesh reading that file as
-     Alembic (proxyFileType 2) into a placeholder mesh under the groom's transform, so it moves,
-     hides and goes with the groom (the Alembic's points are the groom's own, as the transform
-     places them);
-  3. gives the placeholder a Principled Hair built from the groom's look (build_shader: the core's
-     principledHair, groomLabGraphStats -hairLook's "principledHair"), unless it has a material of
-     its own.
-The placeholders render in Redshift only: sync_visibility shows them while the scene's renderer is
-Redshift (defaultRenderGlobals.currentRenderer) and hides them otherwise, so Arnold, V-Ray or
-RenderMan never draw them (GroomLab renders there itself).
+    rs.refresh()       # this frame written and the proxies set now
+    rs.remove_hook()   # the line taken out of Redshift's script (the proxies stay)
 
 Node and attribute names are Redshift 2026's (redshiftProxy.mel's redshiftProxyDoCreate;
-AERedshiftProxyMeshTemplate, AERedshiftPrincipledHairTemplate, redshiftCreateMotionBlurTab.mel).
+AERedshiftProxyMeshTemplate, AERedshiftPrincipledHairTemplate, redshiftCreateMotionBlurTab.mel,
+redshiftRegisterRenderer.mel, redshiftStartIprRender.mel).
 """
 
 import os
@@ -42,7 +44,10 @@ SCRIPT_ATTR = "preRenderFrameMel"
 SCRIPT_LINE = 'python("import groomlab.redshift_hook; groomlab.redshift_hook.pre_render_frame()");'
 PROXY_TAG = "groomLabRedshiftProxy"  # string attr on the proxy node: the groom shape it renders
 ALEMBIC = 2  # RedshiftProxyMesh.proxyFileType: RSProxyMesh 0, USD 1, Alembic 2
-BOUNDING_BOX = 0  # RedshiftProxyMesh.displayMode: the viewport shows a box (the groom draws itself)
+HIDE_IN_VIEWPORT = 3  # RedshiftProxyMesh.displayMode: Bounding Box 0, Preview Mesh 1, Linked Mesh 2, Hide 3
+RENDERER = "redshift"  # Redshift's name as a Maya renderer (defaultRenderGlobals.currentRenderer)
+REDSHIFT_IPR_START = "redshiftStartIprRender"
+IPR_START = "groomLabRedshiftStartIpr"  # GroomLab's wrap: the grooms written, then Redshift's start
 
 
 class RedshiftRequired(RuntimeError):
@@ -129,6 +134,10 @@ def check():
                                "redshift4maya)")
 
 
+def renderer_is_redshift():
+    return bool(cmds) and cmds.getAttr("defaultRenderGlobals.currentRenderer") == RENDERER
+
+
 def _options():
     """Redshift's render options node (made as Redshift's Render Settings make it)."""
     check()
@@ -136,13 +145,13 @@ def _options():
     if nodes:
         return nodes[0]
     try:
-        return mel.eval("redshiftGetRedshiftOptionsNode(true)")
+        return mel.eval("redshiftGetRedshiftOptionsNode(1)")
     except RuntimeError:
         return cmds.createNode("RedshiftOptions", name=OPTIONS, skipSelect=True)
 
 
-def hook_enabled():
-    """Whether Redshift runs the hook before each frame."""
+def hook_installed():
+    """Whether Redshift runs GroomLab's line before each frame."""
     if not redshift_loaded():
         return False
     nodes = cmds.ls(type="RedshiftOptions") or []
@@ -150,29 +159,56 @@ def hook_enabled():
     return SCRIPT_LINE in (line.strip() for line in (script or "").splitlines())
 
 
-def enable():
-    """The hook on: Redshift writes and sets every visible groom before each frame. Returns True."""
-    node = _options()
-    plug = node + "." + SCRIPT_ATTR
-    cmds.setAttr(plug, add_line(cmds.getAttr(plug)), type="string")
-    sync_visibility()
-    watch_renderer()
-    return True
+def install_hook():
+    """GroomLab's line in Redshift's Pre Render Frame MEL (once; the user's lines kept)."""
+    plug = _options() + "." + SCRIPT_ATTR
+    script = cmds.getAttr(plug) or ""
+    if add_line(script) != script:
+        cmds.setAttr(plug, add_line(script), type="string")
 
 
-def disable():
-    """The hook off (the user's own lines in the script kept). The proxies stay, hidden from other
-    renderers as ever. Returns False."""
+def remove_hook():
+    """GroomLab's line taken out of Redshift's script (the proxies stay as they are)."""
     if redshift_loaded():
         for node in cmds.ls(type="RedshiftOptions") or []:
             plug = node + "." + SCRIPT_ATTR
             cmds.setAttr(plug, remove_line(cmds.getAttr(plug)), type="string")
-    return False
 
 
-def toggle():
-    """The menu's switch: on when off, off when on. Returns whether it is on now."""
-    return disable() if hook_enabled() else enable()
+def wrap_ipr():
+    """Redshift's IPR start through GroomLab's: the grooms written, then Redshift's own start
+    (renderer -edit -startIprRenderProcedure). Done again whenever activated (Redshift may register
+    itself again). False when Redshift's start is not the one GroomLab knows (left alone)."""
+    if not redshift_loaded() or not cmds.renderer(RENDERER, exists=True):
+        return False
+    current = cmds.renderer(RENDERER, query=True, startIprRenderProcedure=True)
+    if current == IPR_START:
+        return True
+    if current != REDSHIFT_IPR_START:
+        return False
+    mel.eval('global proc %s(string $editor, int $resolution0, int $resolution1, string $camera) {\n'
+             '    python("import groomlab.redshift_hook; groomlab.redshift_hook.pre_render_frame()");\n'
+             '    %s($editor, $resolution0, $resolution1, $camera);\n'
+             '}' % (IPR_START, REDSHIFT_IPR_START))
+    cmds.renderer(RENDERER, edit=True, startIprRenderProcedure=IPR_START)
+    return True
+
+
+def activate(write=False):
+    """While the scene renders in Redshift: the frame hook and the IPR wrap in place, and with
+    `write` the frame written and the proxies made now; the proxies' visibility synced either way.
+    Returns whether the scene renders in Redshift."""
+    if not redshift_loaded():
+        return False
+    on = renderer_is_redshift()
+    if on:
+        install_hook()
+        wrap_ipr()
+        if write:
+            pre_render_frame()
+            return True
+    sync_visibility()
+    return on
 
 
 def motion_blur():
@@ -191,36 +227,56 @@ def motion_blur():
             get("motionBlurShutterPosition", 0), get("motionBlurNumDeformationSteps", 2))
 
 
-def _transform(groom):
-    return (cmds.listRelatives(groom, parent=True, fullPath=True) or [None])[0]
+def _transform(node):
+    return (cmds.listRelatives(node, parent=True, fullPath=True) or [None])[0]
+
+
+def _proxies():
+    """Every proxy GroomLab made: [(proxy node, the groom shape it renders or None, its placeholder mesh)]."""
+    out = []
+    for node in cmds.ls(type="RedshiftProxyMesh") or []:
+        if not cmds.attributeQuery(PROXY_TAG, node=node, exists=True):
+            continue
+        groom = (cmds.ls(cmds.getAttr(node + "." + PROXY_TAG) or "", long=True) or [None])[0]
+        meshes = cmds.listConnections(node + ".outMesh", type="mesh", shapes=True) or []
+        out.append((node, groom, cmds.ls(meshes[0], long=True)[0] if meshes else None))
+    return out
 
 
 def find_proxy(groom):
     """The groom's RedshiftProxyMesh and its placeholder mesh, or (None, None)."""
-    for node in cmds.ls(type="RedshiftProxyMesh") or []:
-        if cmds.attributeQuery(PROXY_TAG, node=node, exists=True) and \
-                (cmds.ls(cmds.getAttr(node + "." + PROXY_TAG), long=True) or [None])[0] == groom:
-            meshes = cmds.listConnections(node + ".outMesh", type="mesh", shapes=True) or []
-            return node, (cmds.ls(meshes[0], long=True)[0] if meshes else None)
+    for node, renders, mesh in _proxies():
+        if renders == groom:
+            return node, mesh
     return None, None
 
 
 def ensure_proxy(groom, path):
-    """The groom's proxy reading `path` (Alembic), made under the groom's transform the first time
-    (redshiftProxyDoCreate's way), its file set every time. Returns (proxy, placeholder mesh)."""
+    """The groom's proxy reading `path` (Alembic): made the first time as an object of its own
+    (<groom>_rsProxy, at the top of the Outliner) placed by the groom's world matrix (its
+    offsetParentMatrix), its placeholder hidden in the viewport; its file set every time. Returns
+    (proxy, placeholder mesh)."""
     import groomlab
     proxy, mesh = find_proxy(groom)
-    transform = _transform(groom)
+    if mesh is not None and _transform(mesh) == _transform(groom):
+        cmds.delete(mesh)  # (the first builds' placeholder, under the groom: made again as its own object)
+        mesh = None
+    base = groomlab.asset_name(groom) + "_rsProxy"
     if proxy is None:
-        base = groomlab.asset_name(groom)
-        proxy = cmds.createNode("RedshiftProxyMesh", name=base + "_rsProxy", skipSelect=True)
+        proxy = cmds.createNode("RedshiftProxyMesh", name=base + "Node", skipSelect=True)
         cmds.addAttr(proxy, longName=PROXY_TAG, dataType="string")
         cmds.setAttr(proxy + "." + PROXY_TAG, groom, type="string")
     if mesh is None:
-        mesh = cmds.createNode("mesh", name=groomlab.asset_name(groom) + "_rsProxyShape", parent=transform, skipSelect=True)
+        transform = cmds.createNode("transform", name=base, skipSelect=True)
+        mesh = cmds.createNode("mesh", name=base + "Shape", parent=transform, skipSelect=True)
         mesh = cmds.ls(mesh, long=True)[0]
         cmds.connectAttr(proxy + ".outMesh", mesh + ".inMesh", force=True)
-        cmds.setAttr(proxy + ".displayMode", BOUNDING_BOX)
+    transform = _transform(mesh)
+    groom_transform = _transform(groom)
+    if groom_transform and not cmds.isConnected(groom_transform + ".worldMatrix[0]", transform + ".offsetParentMatrix"):
+        cmds.connectAttr(groom_transform + ".worldMatrix[0]", transform + ".offsetParentMatrix", force=True)
+    if cmds.getAttr(proxy + ".displayMode") != HIDE_IN_VIEWPORT:
+        cmds.setAttr(proxy + ".displayMode", HIDE_IN_VIEWPORT)
     if cmds.getAttr(proxy + ".proxyFileType") != ALEMBIC:
         cmds.setAttr(proxy + ".proxyFileType", ALEMBIC)
     if cmds.getAttr(proxy + ".fileName") != path:
@@ -279,89 +335,48 @@ def write_groom(groom, frame=None, folder=None):
 
 
 def pre_render_frame(grooms=None, frame=None, folder=None):
-    """Redshift's Pre Render Frame step (the module's docstring). Never raises into Redshift's
-    render: a failure is printed and that groom left out. Returns the files written."""
+    """Redshift's Pre Render Frame step, and IPR's start (the module's docstring). Never raises into
+    Redshift's render: a failure is printed and that groom left out. Returns the files written."""
     from groomlab.render_gather import render_grooms
     written = []
     try:
         targets = render_grooms(grooms)
     except Exception as e:  # noqa: BLE001
-        cmds.warning("GroomLab: Redshift hook: %s" % e)
+        cmds.warning("GroomLab: Redshift: %s" % e)
         return written
     for groom in targets:
         try:
             written.append(write_groom(groom, frame, folder))
         except Exception as e:  # noqa: BLE001 (Redshift renders on without this groom)
-            cmds.warning("GroomLab: Redshift hook: %s left out: %s" % (groom, e))
-    sync_visibility(True)
+            cmds.warning("GroomLab: Redshift: %s left out: %s" % (groom, e))
+    sync_visibility(rendering=True)
     return written
 
 
 def refresh(grooms=None):
-    """This frame written and every groom's proxy set now: what an IPR session shows (Redshift's
-    IPR runs no frame script). Returns the files written."""
+    """This frame written and every groom's proxy set now: what an IPR session shows after edits.
+    Returns the files written."""
     check()
+    if renderer_is_redshift():
+        install_hook()
+        wrap_ipr()
     return pre_render_frame(grooms)
 
 
-def renderer_is_redshift():
-    return bool(cmds) and cmds.getAttr("defaultRenderGlobals.currentRenderer") == "redshift"
-
-
-def sync_visibility(show=None):
-    """The placeholders shown while Redshift renders the scene (`show` None: the scene's renderer
-    is Redshift), hidden otherwise, so other renderers never draw them."""
-    show = renderer_is_redshift() if show is None else bool(show)
-    for node in cmds.ls(type="RedshiftProxyMesh") or [] if redshift_loaded() else []:
-        if not cmds.attributeQuery(PROXY_TAG, node=node, exists=True):
-            continue
-        for mesh in cmds.listConnections(node + ".outMesh", type="mesh", shapes=True) or []:
-            if cmds.getAttr(mesh + ".visibility") != show:
-                cmds.setAttr(mesh + ".visibility", show)
-
-
-_watch = {"job": None, "scene": None}
-
-
-def watch_renderer():
-    """Keep the placeholders' visibility with the scene's renderer as it changes, for this Maya
-    session: a job on defaultRenderGlobals.currentRenderer (it goes with the scene) and one on
-    SceneOpened that syncs the opened scene and watches its renderer again."""
-    if _watch["scene"] is None or not cmds.scriptJob(exists=_watch["scene"]):
-        _watch["scene"] = cmds.scriptJob(event=["SceneOpened", _scene_opened])
-    job = _watch["job"]
-    if job is not None and cmds.scriptJob(exists=job):
-        return job
-    _watch["job"] = cmds.scriptJob(attributeChange=["defaultRenderGlobals.currentRenderer", sync_visibility])
-    return _watch["job"]
-
-
-def _scene_opened():
-    _watch["job"] = None
-    if redshift_loaded():
-        sync_visibility()
-    watch_renderer()
-
-
-def start():
-    """GroomLab's start (its menu's install): the renderer watched, so placeholders saved in a
-    scene keep out of other renderers whether Redshift loads before GroomLab or after."""
-    watch_renderer()
-    if redshift_loaded():
-        sync_visibility()
-
-
-def menu_toggle():
-    """GroomLab > Render > Redshift: the hook on or off, said in the script editor and a message."""
-    try:
-        on = toggle()
-    except RedshiftRequired as e:
-        cmds.warning("GroomLab: %s" % e)
+def sync_visibility(rendering=None):
+    """Each proxy shown while its groom is visible and the scene renders in Redshift (`rendering`
+    None: the scene's renderer says), hidden otherwise (its groom hidden or gone, or another
+    renderer picked), so other renderers never draw it."""
+    if not redshift_loaded():
         return
-    text = ("Grooms render in Redshift: each frame writes them and sets their proxies" if on else
-            "Redshift hook off: the grooms' proxies keep their last frame")
-    print("GroomLab: " + text)
-    cmds.inViewMessage(assistMessage=text, position="topCenter", fade=True)
+    from groomlab.render_gather import visible
+    rendering = renderer_is_redshift() if rendering is None else bool(rendering)
+    for node, groom, mesh in _proxies():
+        if mesh is None:
+            continue
+        show = rendering and groom is not None and visible(groom)
+        if cmds.getAttr(mesh + ".visibility") != show:
+            cmds.setAttr(mesh + ".visibility", show)
 
 
 def menu_refresh():
@@ -372,3 +387,36 @@ def menu_refresh():
         cmds.warning("GroomLab: %s" % e)
         return
     print("GroomLab: Redshift: %d groom(s) written for this frame" % len(written))
+
+
+_watch = {"job": None, "scene": None}
+
+
+def _renderer_changed():
+    activate(write=True)  # Redshift picked: the proxies made at once; another renderer: hidden
+
+
+def watch_renderer():
+    """Follow the scene's renderer for this Maya session: a job on
+    defaultRenderGlobals.currentRenderer (it goes with the scene) and one on SceneOpened that
+    activates the opened scene and watches its renderer again."""
+    if _watch["scene"] is None or not cmds.scriptJob(exists=_watch["scene"]):
+        _watch["scene"] = cmds.scriptJob(event=["SceneOpened", _scene_opened])
+    job = _watch["job"]
+    if job is not None and cmds.scriptJob(exists=job):
+        return job
+    _watch["job"] = cmds.scriptJob(attributeChange=["defaultRenderGlobals.currentRenderer", _renderer_changed])
+    return _watch["job"]
+
+
+def _scene_opened():
+    _watch["job"] = None
+    activate()
+    watch_renderer()
+
+
+def start():
+    """GroomLab's start (its menu's install): the renderer followed, and a scene already rendering
+    in Redshift set up (hook, IPR wrap, visibility), whether Redshift loads before GroomLab or after."""
+    watch_renderer()
+    activate()
