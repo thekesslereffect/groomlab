@@ -777,6 +777,14 @@ if(Python3_Interpreter_FOUND)
                 "${PROJECT_SOURCE_DIR}/hosts/maya/scripts")
     set_tests_properties(vray.scene PROPERTIES LABELS "quick;vray")
 endif()
+# The Redshift for Maya hook's pure helpers (issue 81): its script line, shutter frames, file
+# names and Principled Hair settings, in plain Python (quick).
+if(Python3_Interpreter_FOUND)
+    add_test(NAME redshift.hook
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/hosts/redshift/test_redshift_hook.py"
+                "${PROJECT_SOURCE_DIR}/hosts/maya/scripts")
+    set_tests_properties(redshift.hook PROPERTIES LABELS "quick;redshift")
+endif()
 if(TARGET groomLabTranslator)
     add_test(NAME maya.vray
         COMMAND "${GROOMLAB_MAYA_BIN}/mayapy${CMAKE_EXECUTABLE_SUFFIX}"

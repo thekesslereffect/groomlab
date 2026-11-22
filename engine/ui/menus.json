@@ -96,6 +96,7 @@
       "render.fromGroomFile", "render.asCurves", "-", "render.hardware2", "-",
       "render.prman", "render.prmanFrame", "render.prmanTurntable", "-",
       "render.vrayStandalone", "render.vrayFrame", "render.vrayTurntable", "-",
+      "render.redshift", "render.redshiftRefresh", "-",
       "render.prmanLocation", "render.vrayLocation"
     ],
     "studio": [

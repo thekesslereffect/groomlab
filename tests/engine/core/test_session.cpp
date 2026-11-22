@@ -1160,6 +1160,41 @@ TEST(Session, TheHairLookJsonCarriesTheLobesAndTheNodesParams) {
     }
 }
 
+// Redshift's Principled Hair (issue 81): the same lobes as Arnold's; by RGB the strands' color as
+// albedo, else the melanin channels with the dye as tint; the look JSON carries it for every host.
+TEST(Session, ThePrincipledHairFollowsTheLook) {
+    HairLook look;
+    look.specular = 0.15f;
+    look.roughness = 0.25f;
+    look.tilt = 7.5f;
+    look.dye = {0.9f, 0.5f, 0.4f};
+    const HairLobes lobes = hairLobes(look);
+    PrincipledHair p = principledHair(look);
+    EXPECT_FALSE(p.byColor);
+    EXPECT_EQ(p.tint, look.dye);
+    EXPECT_FLOAT_EQ(p.roughness, lobes.roughness);
+    EXPECT_FLOAT_EQ(p.azimuthalRoughness, lobes.azimuthalRoughness);
+    EXPECT_FLOAT_EQ(p.ior, lobes.ior);
+    EXPECT_FLOAT_EQ(p.angleShift, 7.5f);
+    EXPECT_FLOAT_EQ(p.melanin, kDefaultMelanin);
+    EXPECT_STREQ(p.melaninData, kMelaninChannel);
+    EXPECT_STREQ(p.rednessData, kMelaninRednessChannel);
+    look.colorBlends = true;  // a Blend of colors: the RGB is the hair's color, the dye in it
+    p = principledHair(look);
+    EXPECT_TRUE(p.byColor);
+    EXPECT_EQ(p.tint, (std::array<float, 3>{1.0f, 1.0f, 1.0f}));
+
+    GroomSession session(groomData(withNode(R"({"name": "color", "type": "HairColor", "params": {"roughness": 0.25}})", "color")));
+    session.evaluate(ViewRequest{});
+    const nlohmann::json json = nlohmann::json::parse(session.hairLookJson());
+    const nlohmann::json& ph = json["principledHair"];
+    EXPECT_TRUE(ph["byColor"].get<bool>());  // HairColor: the RGB
+    EXPECT_EQ(ph["colorData"], "Cd");
+    EXPECT_NEAR(ph["roughness"].get<double>(), json["lobes"]["roughness"].get<double>(), 1e-6);
+    EXPECT_NEAR(ph["angleShift"].get<double>(), json["lobes"]["shift"].get<double>(), 1e-6);
+    ASSERT_EQ(ph["tint"].size(), 3u);
+}
+
 // The defaults keep the look hosts shaded before HairColor held the highlight: the default
 // graph's hairLookJson as it was (RenderData's defaults then: 0.3, 0.5; aiStandardHair's shift).
 TEST(Session, TheDefaultLookIsUnchanged) {
