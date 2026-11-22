@@ -22,6 +22,7 @@
           "paramInputs": { "type": "array", "items": { "type": "string" }, "description": "Params exposed as input ports." },
           "paramControls": { "type": "object", "description": "Params keyed to the host's controls, by param name." },
           "bypass": { "type": "boolean" },
+          "passThrough": { "type": "array", "items": { "type": "string" }, "description": "Inputs the node hands on as extra outputs, thru_<input>: links reading one read what feeds that input." },
           "ui": {
             "type": "object",
             "properties": { "x": { "type": "number" }, "y": { "type": "number" } },
@@ -44,7 +45,9 @@
       }
     },
     "output": { "type": "string", "description": "The node whose result is the groom." },
-    "backdrops": { "type": "array", "description": "The node editors' backdrops (layout only)." }
+    "backdrops": { "type": "array", "description": "The node editors' backdrops (layout only; \"collapsed\": true folds one)." },
+    "pins": { "type": "object", "description": "The links' reroute points (layout only)." },
+    "portals": { "type": "array", "description": "Links teleported through named portals: an entry by the source output, exits by the inputs (layout only)." }
   },
   "required": ["nodes"]
 }

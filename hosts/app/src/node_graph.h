@@ -33,8 +33,17 @@
 //                                  wire through it from there (a picked-up input's wire: that
 //                                  input takes the pin's signal); Delete removes a selected pin
 //   Snap (the Graph Editor's bar)  nodes and pins you drag land on the grid (setSnapping)
-//   double-click a node            renames it (a glass prompt); a Compound opens instead: its
-//                                  nodes back in the graph (Ungroup)
+//   double-click a node            its header renames it (a glass prompt); a Compound's body opens
+//                                  it (its graph shown to edit: GroomDocument::enterCompound; I too;
+//                                  U or the path bar at the top goes back out)
+//   Shift+drag a node              moves it with everything upstream; Shift+click adds it
+//   shake a node while dragging    pulls it out of its links (Detach)
+//   Shift+drag from an output      picks up all its links: dropped on another output, they read it
+//   Alt+click a wire               a pin there (as a double-click)
+//   a portal's dot                 drag moves it; an exit's nub drags another link of its signal
+//                                  out; double-click renames (graph_portals.h)
+//   a backdrop's chevron           folds it to its title bar, hiding its nodes; a move pushing a
+//                                  node to its edge grows it
 //   right-click                    a node's menu, a backdrop's or the canvas's: the host fills
 //                                  them (setMenuFiller: graph_ui.json's nodeMenu, backdropMenu,
 //                                  addMenu, as Maya's Graph Editor)
@@ -46,8 +55,9 @@
 //   V                              View Up to Here: the viewport shows the graph's result at the
 //                                  selected node (again, or V on the shown one: the output again)
 //   Ctrl+C, Ctrl+V                 copies the selected nodes with the links between them (as
-//                                  text, Maya's Graph Editor's clipboard), pastes them beside
-//   Ctrl+D                         duplicates the selection beside it
+//                                  text, Maya's Graph Editor's clipboard), pastes them at the
+//                                  cursor (beside, with the cursor elsewhere)
+//   Ctrl+D                         duplicates the selection beside it, the copies reading its inputs
 //   Ctrl+L                         tidies the layout (every position dropped, laid out afresh)
 //   Ctrl+G, Ctrl+Shift+G           groups the selected nodes into a Compound (GraphEdit::collapse,
 //                                  Maya's Graph Editor's too), ungroups the selected Compounds
@@ -61,8 +71,8 @@
 // A node whose evaluation failed wears a red badge (the theme's graph.error) and a red ring; its
 // error shows in its tooltip and in the Node panel. Links that run backwards (to a node left of
 // their source) loop under the two nodes instead of through them.
-// Every edit goes through GroomDocument (one undo step each); a move (of a node or a backdrop)
-// and a backdrop's resize are not undo steps.
+// Every edit goes through GroomDocument (one undo step each); moves (nodes, backdrops, pins,
+// portals) and resizes are layout undo steps (beginLayout / endLayout: nothing evaluates).
 // Hidden, the graph takes no events at all: the viewport gets them as if it were not there.
 
 #include <algorithm>

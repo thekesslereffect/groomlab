@@ -53,6 +53,8 @@ follow it.
   the grid as you move them.
 - **Cut** links by Alt+Shift+dragging across them, as in Maya's Hypershade: every link the line
   crosses goes, as one edit (Maya's Graph Editor).
+- **Undo** (Ctrl+Z) takes back every graph edit, layout included: moving nodes, backdrops, pins
+  and portals, aligning, folding a backdrop. A layout step re-evaluates nothing.
 - **Live** applies each edit as one undo step.
 - **V** displays a node's result in the viewport instead of the Output's; **B** bypasses it.
 - **Detach** (the node's right-click menu, or **Ctrl+Shift+X** with the graph focused) takes the
@@ -67,6 +69,44 @@ follow it.
   Click it again to hide them. A Braid saved before `separate` and `inflate` existed does not list
   them until you click **Upgrade** on it.
 - **Ramps** (root-to-tip profiles) have a curve editor.
+
+### Arranging by hand
+
+The same in Maya's Graph Editor and the standalone app:
+
+- **Copy and paste:** Ctrl+C and Ctrl+V paste the copied nodes where the cursor is, with the links
+  between them but none to the originals' sources. **Ctrl+D** duplicates the selection beside it,
+  each copy reading the same inputs as its original.
+- **Shift+drag a node** to move it together with everything upstream of it. Shift+click without
+  dragging adds the node to the selection.
+- **Shake a node** while dragging it (left and right, quickly) to pull it out of its links. What
+  fed it then feeds what it fed, as with **Detach**.
+- **Shift+drag from an output** picks up all of its links at once. Drop them on another node's
+  output and they read from that output instead, wherever the types fit.
+- **Drop a node on a link** to insert it there. To add a node into a link, select the link and
+  press Tab, or press Tab with the cursor over the link.
+- **Pins:** besides double-clicking a link, **Alt+click** it to put a pin there.
+- **Wire Style** (**...** menu): **Smooth** curves, **Square** runs with right angles, or
+  **Rounded** corners. Your choice is remembered between sessions.
+- **Align** (a node's right-click menu, and the **...** menu): line the selected nodes up in a row
+  or a column, by their edges or centers, or space them evenly. **Tidy Selection** lays out just
+  the selected nodes by their links, where they are.
+- **Backdrops** grow as you push their nodes toward an edge. Drag on a backdrop's body to
+  rubber-band select the nodes on it; drag its title bar to move it. The chevron in its title bar
+  (or **Fold** in its menu) folds it down to the title bar, hiding its nodes. Links into and out of
+  a folded backdrop meet its edges.
+- **Portals** teleport a link so it isn't drawn across the whole graph. Right-click a link >
+  **Teleport Link** puts a named dot by its output and another by its input. Drag from an exit's
+  right side to an input for another link of the same signal, or press Tab and pick **Portal:
+  name** to place another exit. Double-click a dot to rename the portal. Delete removes an exit, or
+  the whole portal when its entry is selected, and the links are drawn as wires again. A portal
+  only changes how links are drawn: the links themselves are unchanged.
+- **Rename** a node by double-clicking its header.
+- **Focus:** the node the viewport shows (**V**, or its eye) glows, so you can find it in a big
+  graph.
+- **Pass Through as Output:** right-click an input port. The node gets an extra output,
+  `thru_<input>`, that hands on whatever comes into that input, so the next node can read it too.
+  The node itself isn't evaluated for it.
 - **Units:** lengths are shown in cm, widths in µm, densities in strands per cm² (**...** >
   **Units**). Internally all lengths are in scene units, which GroomLab keeps in centimeters in
   Maya.
@@ -472,6 +512,9 @@ The node shows a tag, and the setting is saved with the groom.
 - **Compounds:** select nodes and press **Ctrl+G** to collapse them into one node, then show
   the parameters you need (right-click > **Show Inner Param**). **Ctrl+Shift+G** (or right-click >
   **Ungroup Compound**) expands it again.
+- **Inside a compound:** double-click a compound (or select it and press **I**) to open it and
+  edit its nodes in place; each edit is one undo step. The path bar at the top shows where you
+  are: click **Graph** in it, or press **U**, to go back out (Maya's Graph Editor and the app).
 - **Compound nodes:** right-click a compound > **Save as Node...** to keep it in your node
   library: it then shows in **Add Node** in every groom, in the app and Blender too, and shares as
   one file. See [Custom nodes](/docs/custom-nodes).

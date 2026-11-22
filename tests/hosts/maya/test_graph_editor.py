@@ -407,6 +407,64 @@ class GraphApiTest(unittest.TestCase):
         self.assertEqual(model.route("resample", "strands"), [e])
         self.assertEqual(model.pin_links(e), [(("resample", "strands"), 0), (("thick", "strands"), 0)])
 
+    def test_portals_duplicates_bundles_and_pass_through(self):
+        # Every host's rules through the core (graph_portals.h, graph_edit.h), as the app's.
+        model = gm.GraphModel.from_groom(self.groom, self.catalog)
+        model.save(self.groom)
+        # A link teleported: the link stays, the portal is layout (written with save_layout).
+        portal, exit_index = model.teleport("width", "strands", (500, 0), (100, 0))
+        self.assertEqual((portal, exit_index), ("length", 0))
+        self.assertEqual(model.portal_of_link("width", "strands"), ("length", 0))
+        model.save_layout(self.groom)
+        stored = json.loads(cmds.getAttr(self.groom + ".graph"))
+        self.assertEqual(stored["portals"][0]["name"], "length")
+        self.assertNotIn("portals", gm.without_layout(stored))
+        again = gm.GraphModel.from_groom(self.groom, self.catalog)
+        self.assertEqual(again.portal_of_link("width", "strands"), ("length", 0))
+        self.assertEqual(model.rename_portal("length", "Trim"), "Trim")
+        model.rename_node("length", "cut")
+        self.assertEqual(model.portals[0]["from"], "cut")
+        self.assertTrue(model.remove_portal("Trim"))
+        self.assertEqual(model.portals, [])
+        # Duplicate: the copy reads what the node reads.
+        made = model.duplicate_nodes(["width"])
+        self.assertEqual(model.source_of(made[0], "strands"), "cut")
+        # A bundle of links moved to another output (where they fit).
+        moved = model.move_output_links("cut", None, "interpolate")
+        self.assertEqual(sorted(moved), sorted([("width", "strands"), (made[0], "strands")]))
+        self.assertEqual(model.source_of("width", "strands"), "interpolate")
+        # Pass-through: width hands its input on; resample reads it, the groom evaluates.
+        model.connect("cut", "width", "strands")
+        self.assertTrue(model.set_pass_through("width", "strands", True))
+        self.assertEqual(model.output_names("width")[-1], "thru_strands")
+        model.connect("width", "resample", "strands", output="thru_strands")
+        model.remove_node(made[0])
+        model.save(self.groom)
+        self.assertEqual(groomlab.errors(self.groom), [])
+        self.assertGreater(cmds.getAttr(self.groom + ".outStrandCount"), 0)
+        self.assertEqual(gm.GraphModel.from_groom(self.groom, self.catalog).output_of("resample", "strands"), "thru_strands")
+
+    def test_editing_inside_a_compound_writes_it_back(self):
+        model = gm.GraphModel.from_groom(self.groom, self.catalog)
+        compound = model.collapse(["length", "width"])
+        model.save(self.groom)
+        inner = gm.ScopedModel(model, compound)
+        self.assertEqual(inner.path, compound)
+        self.assertEqual(sorted(n for n in inner.order if inner.node_type(n) != "Input"), ["length", "width"])
+        inner.add_node("Curl", name="curl")
+        inner.insert_between("length", "width", "curl")
+        self.assertEqual(inner.validate(), [])
+        inner.save(self.groom)  # written into the compound, stored on the groom: one undo step
+        self.assertEqual(groomlab.errors(self.groom), [])
+        stored = groomlab.get_graph(self.groom)
+        definition = next(n for n in stored["nodes"] if n["name"] == compound)["params"]["definition"]
+        self.assertIn("curl", [n["name"] for n in definition["graph"]["nodes"]])
+        self.assertIs(inner.top(), model)
+        cmds.undo()
+        stored = groomlab.get_graph(self.groom)
+        definition = next(n for n in stored["nodes"] if n["name"] == compound)["params"]["definition"]
+        self.assertNotIn("curl", [n["name"] for n in definition["graph"]["nodes"]])
+
     def test_model_rejects_bad_edits(self):
         model = gm.GraphModel.from_groom(self.groom, self.catalog)
         with self.assertRaises(gm.GraphError):
