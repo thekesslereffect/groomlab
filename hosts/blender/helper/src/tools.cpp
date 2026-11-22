@@ -23,6 +23,7 @@
 #include <utility>
 #include <vector>
 
+#include "groomlab/editor/map_edits.h"
 #include "groomlab/asset_files.h"
 #include "groomlab/brush.h"
 #include "groomlab/brush_catalog.h"
@@ -2323,66 +2324,39 @@ json mapRename(ToolState& t, const json& args) {
     Session& s = t.session;
     const std::string from = needMap(s, args);
     const std::string to = needString(args, "to");
-    if (!validMapName(to)) fail("bad_request", mapNameError(to));
+    // Every host's rename (the editor's renameMap, map_edits.h): the readers retargeted, a texture
+    // map's image following the name (moved, or copied when another map reads it; all or nothing),
+    // its files' states kept for the step's undo.
+    MapFiles files;
+    files.mapsFolder = mapsFolder(s);
+    files.resolve = [&s](const std::string& stored) { return resolveMapFile(s, stored); };
+    MapRename renamed;
+    try {
+        renamed = renameMap(s.groom->scalpMaps(), s.groom->storedHierarchy().get(), s.groom->data().graphJson, from, to, files);
+    } catch (const std::invalid_argument& e) {
+        fail("bad_request", e.what());
+    }
     if (from == to) return {{"name", to}, {"renamed", from}, {"graphChanged", false}, {"undo", undoJson(t)}};
-    if (!mapKindOf(s, to).empty()) fail("bad_request", "the groom already has a map named '" + to + "'");
-    const std::string kind = mapKindOf(s, from);
     StrokeEdit edit;
     edit.mode = "rename map " + from;
-    std::string file, movedFrom;
-    if (kind == "guides") {
+    if (renamed.guideLayer) {
         GuideHierarchy h = editedGuides(t, [&](GuideHierarchy& hh) { hh.renameAttribute(from, to); });
         edit.set(StrokeField::Guides, h.toJson());
     } else {
-        ScalpMaps maps = s.groom->scalpMaps();
-        auto node = maps.maps.extract(from);
-        node.key() = to;
-        ScalpMapEntry& entry = node.mapped();
-        if (entry.kind == "texture" && !entry.texture.empty()) {
-            const std::string full = resolveMapFile(s, entry.texture);
-            const std::string target = renamedMapImage(full, from, to, mapsFolder(s));  // every host's rule (asset_files.h)
-            std::error_code ec;
-            if (!target.empty()) {
-                // The image renamed (a tile set: each tile, its naming kept: udim.h mapImageMoves,
-                // every host's), each file's before and after kept for undo.
-                const auto moves = mapImageMoves(full, target);
-                std::vector<FileEdit> edits;
-                for (const auto& [a, b] : moves) {
-                    edits.push_back(fileBefore(a));
-                    edits.push_back(fileBefore(b));
-                }
-                bool moved = true;
-                for (const auto& [a, b] : moves) {
-                    fs::rename(fs::u8path(a), fs::u8path(b), ec);
-                    moved = moved && !ec;
-                }
-                filesAfter(t, std::move(edits));
-                if (moved) {
-                    entry.texture = target;
-                    movedFrom = full;
-                }
-            }
-            file = entry.texture;
-        }
-        maps.maps.insert(std::move(node));
         dropPaints(t);
-        edit.set(StrokeField::ScalpMaps, maps.toJson());
+        edit.set(StrokeField::ScalpMaps, renamed.maps.toJson());
     }
-    bool retargeted = false;
-    std::string graph = retargetMapReaders(s.groom->data().graphJson, from, to, &retargeted);
-    bool followed = false;  // texture params reading the file read it where it went
-    graph = retargetFileReaders(graph, movedFrom, file, [&s](const std::string& stored) { return resolveMapFile(s, stored); }, &followed);
-    retargeted = retargeted || followed;
-    if (retargeted) edit.set(StrokeField::Graph, graph);
+    for (FileEdit& f : renamed.files) t.pending.files.push_back(std::move(f));
+    if (!renamed.graph.empty()) edit.set(StrokeField::Graph, renamed.graph);
     commitEdit(t, std::move(edit));
     // The Paint brush on it follows.
     BrushToolSettings& st = t.tool.settings;
     if (st.brush.attribute == from) {
         st.brush.attribute = to;
-        if (!file.empty()) st.paintTexture = file;
+        if (!renamed.file.empty()) st.paintTexture = renamed.file;
     }
-    json r = {{"name", to}, {"renamed", from}, {"graphChanged", retargeted}, {"undo", undoJson(t)}};
-    if (!file.empty()) r["file"] = file;
+    json r = {{"name", to}, {"renamed", from}, {"graphChanged", !renamed.graph.empty()}, {"undo", undoJson(t)}};
+    if (!renamed.file.empty()) r["file"] = renamed.file;
     return r;
 }
 

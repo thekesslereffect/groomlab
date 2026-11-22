@@ -5,6 +5,7 @@
 add_library(groomlab_editor STATIC
     src/graph_edits.cpp
     src/groom_edit.cpp
+    src/map_edits.cpp
 )
 add_library(groomlab::editor ALIAS groomlab_editor)
 

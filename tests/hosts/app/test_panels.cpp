@@ -794,10 +794,16 @@ TEST(AppPanels, ATextureParamFollowsItsMapsFile) {
     const std::string renamed = doc->map("thick")->texture;
     EXPECT_NE(renamed, first) << "the file follows the map's name";
     EXPECT_EQ(reads(), renamed);
+    const std::string renamedFile = doc->textureMapFile("thick");
+    EXPECT_TRUE(fs::exists(fs::u8path(renamedFile)));
     EXPECT_EQ(doc->undo(), "");
     EXPECT_EQ(reads(), first);
+    // The image back under its old name too (the step keeps its files: the editor's renameMap).
+    EXPECT_TRUE(fs::exists(fs::u8path(doc->textureMapFile(map))));
+    EXPECT_FALSE(fs::exists(fs::u8path(renamedFile)));
     EXPECT_EQ(doc->redo(), "");
     EXPECT_EQ(reads(), renamed);
+    EXPECT_TRUE(fs::exists(fs::u8path(renamedFile)));
     const std::string library = base + "/library/thick.png";
     fs::create_directories(fs::u8path(library).parent_path());
     fs::copy_file(fs::u8path(doc->textureMapFile("thick")), fs::u8path(library), fs::copy_options::overwrite_existing);

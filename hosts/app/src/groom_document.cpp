@@ -311,68 +311,46 @@ std::string GroomDocument::createMap(const std::string& name, const std::string&
 }
 
 std::string GroomDocument::renameMap(const std::string& from, const std::string& to) {
-    if (!validMapName(to)) return mapNameError(to);
-    if (from == to) return {};
-    const std::vector<PaintedMap> all = maps();
-    const PaintedMap* source = map(from);
-    if (!source) return "no map named '" + from + "'";
-    for (const PaintedMap& m : all) {
-        if (m.name == to) return "the groom already has a map named '" + to + "'";
+    // Every host's rename (the editor's renameMap, map_edits.h): the readers retargeted, a texture
+    // map's image following the name (moved, or copied when another map reads it; all or nothing),
+    // its file's states kept in the step so an undo puts the image back too.
+    MapFiles files;
+    files.mapsFolder = mapsDirectory();
+    files.groomFolder = path_.empty() ? std::string() : std::filesystem::u8path(path_).parent_path().u8string();
+    files.resolve = [this](const std::string& stored) { return resolveMapPath(stored); };
+    MapRename renamed;
+    try {
+        renamed = groomlab::renameMap(session().scalpMaps(), session().storedHierarchy().get(), graph_.dump(), from, to, files);
+    } catch (const std::exception& e) {
+        return e.what();
     }
-    const std::string kind = source->kind;
+    if (from == to) return {};
     const std::string label = "rename map " + from;
-    std::string movedFrom, movedTo;  // a texture map's file, before and after it followed the name
-    if (kind == "guides") {
+    const std::size_t undoBefore = history_.undoIndex();
+    if (renamed.guideLayer) {
         const std::string error = editGuides(label, [&](GuideHierarchy& h) { h.renameAttribute(from, to); });
         if (!error.empty()) return error;
     } else {
-        ScalpMaps maps = session().scalpMaps();
-        ScalpMapEntry entry = maps.maps.at(from);
-        maps.maps.erase(from);
-        if (entry.kind == "texture" && !entry.texture.empty()) {
-            // The file follows when it is named after the map (scalp_maps.h's renamedMapTexture,
-            // Maya's rule), to a free name beside it; a file in the way, or one that cannot move, stays.
-            const std::filesystem::path full = std::filesystem::u8path(resolveMapPath(entry.texture));
-            // (Named after the map, in the groom's maps folder: every host's rule, asset_files.h.)
-            const std::string renamed = renamedMapImage(full.generic_u8string(), from, to, mapsDirectory());
-            if (!renamed.empty()) {
-                const std::filesystem::path target = std::filesystem::u8path(renamed);  // (a free name: a file or a tile set taken)
-                std::error_code ec;
-                for (const auto& [a, b] : mapImageMoves(full.generic_u8string(), target.generic_u8string())) {  // (a tile set: each tile)
-                    if (!ec) std::filesystem::rename(std::filesystem::u8path(a), std::filesystem::u8path(b), ec);
-                }
-                if (!ec) {
-                    entry.texture = pathFromGroomFolder(target.u8string(), std::filesystem::u8path(path_).parent_path().u8string());
-                    paints_.erase(from);
-                    movedFrom = full.generic_u8string();
-                    movedTo = entry.texture;
-                }
-            }
+        paints_.erase(from);
+        commitMaps(label, renamed.maps);
+    }
+    // The graph's readers in the same undo step (the entry holds the maps' texts and the whole
+    // graph before and after), so an undo puts both back; the image's files with them.
+    if (!renamed.graph.empty()) {
+        const json before = graph_;
+        graph_ = json::parse(renamed.graph);
+        const std::string error = applyGraph();
+        if (!error.empty()) {
+            graph_ = before;
+            applyGraph();
+            return error;
         }
-        maps.maps[to] = std::move(entry);
-        commitMaps(label, maps);
+        Edit& entry = history_.last();
+        entry.whole = true;
+        entry.graphBefore = before;
+        entry.graphAfter = graph_;
     }
-    // The Map nodes and map params reading the old name read the new one (the core's rename,
-    // Maya's too), in the same undo step (the entry holds the maps' texts and the whole graph
-    // before and after), so an undo puts both back.
-    const json before = graph_;
-    bool retargeted = false;
-    std::string graph = retargetMapReaders(graph_.dump(), from, to, &retargeted);
-    bool followed = false;  // texture params reading the file read it where it went
-    graph = retargetFileReaders(graph, movedFrom, movedTo, [this](const std::string& stored) { return resolveMapPath(stored); }, &followed);
-    retargeted = retargeted || followed;
-    if (!retargeted) return {};
-    graph_ = json::parse(graph);
-    const std::string error = applyGraph();
-    if (!error.empty()) {
-        graph_ = before;
-        applyGraph();
-        return error;
-    }
-    Edit& entry = history_.last();
-    entry.whole = true;
-    entry.graphBefore = before;
-    entry.graphAfter = graph_;
+    attachSide(undoBefore, label, std::move(renamed.files));
     return {};
 }
 
