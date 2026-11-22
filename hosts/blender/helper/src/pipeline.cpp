@@ -32,7 +32,6 @@
 #include "groomlab/feathers.h"
 #include "groomlab/flow.h"
 #include "groomlab/frame_time.h"
-#include "groomlab/gltf_writer.h"
 #include "groomlab/graph_inserts.h"
 #include "groomlab/graph_edit.h"
 #include "groomlab/graph_io.h"
@@ -287,74 +286,56 @@ std::string baseName(const std::string& path) { return fs::u8path(path).filename
 // ---- glTF cards (Maya's export_cards_gltf, groomLabExportGltf) ----------------------------------
 
 json exportGltfCards(Session& s, const json& args) {
-    const std::string path = needString(args, "path");
-    const std::string ext = fs::u8path(path).extension().u8string();
-    const bool binary = optBool(args, "binary", ext != ".gltf");
-    const std::string name = exportObjectName(optString(args, "name", fs::u8path(path).stem().u8string()));  // every host's
-    int resolution = static_cast<int>(optNumber(args, "resolution", 0.0));
-    resolution = resolution > 0 ? std::clamp(resolution, kMinBakeResolution, kMaxCardBakeResolution) : 0;  // 0: the Cards nodes' atlasSize
-    const int capResolution = static_cast<int>(optNumber(args, "capResolution", 0.0));
-    CardGltfSettings settings;
-    try {
-        settings.alphaMode = gltfAlphaModeNamed(optString(args, "alphaMode", "mask"));  // every host's (gltf_writer.h)
-    } catch (const std::invalid_argument& e) {
-        fail("bad_request", e.what());
-    }
-    settings.alphaCutoff = static_cast<float>(optNumber(args, "alphaCutoff", 0.5));
-    settings.scale = static_cast<float>(optNumber(args, "scale", 0.01));  // groom space's centimeters to glTF's meters
-    if (!(settings.scale > 0.0f)) fail("bad_request", "scale must be above 0");
-    settings.zUp = false;  // groom space is Y up, as glTF
-    settings.rootToTip = optBool(args, "rootToTip", true);
-    settings.tangents = optBool(args, "tangents", true);
-    const float occlusion = static_cast<float>(optNumber(args, "occlusion", 1.0));
-    std::vector<std::string> lods;
+    // Every host's glTF cards (the editor's writeGltfCards, game_exports.h).
+    GltfCardsOptions o;
+    o.path = needString(args, "path");
+    const fs::path at = fs::u8path(o.path);
+    o.binary = optBool(args, "binary", at.extension().u8string() != ".gltf");
+    o.name = exportObjectName(optString(args, "name", at.stem().u8string()));  // every host's
+    o.resolution = static_cast<int>(optNumber(args, "resolution", 0.0));  // 0: the Cards nodes' atlasSize
+    o.capResolution = static_cast<int>(optNumber(args, "capResolution", 0.0));
+    o.alphaMode = optString(args, "alphaMode", "mask");
+    o.alphaCutoff = static_cast<float>(optNumber(args, "alphaCutoff", 0.5));
+    o.scale = static_cast<float>(optNumber(args, "scale", 0.01));  // groom space's centimeters to glTF's meters
+    o.zUp = false;  // groom space is Y up, as glTF
+    o.rootToTip = optBool(args, "rootToTip", true);
+    o.tangents = optBool(args, "tangents", true);
+    o.occlusion = static_cast<float>(optNumber(args, "occlusion", 1.0));
+    o.cap = optBool(args, "cap", true);
+    o.generator = "GroomLab for Blender";
     if (args.contains("lods") && !args["lods"].is_null()) {
         if (!args["lods"].is_array()) fail("bad_request", "lods is a list of levels of detail (hero, mid, low)");
         for (const json& l : args["lods"]) {
             if (!l.is_string() || !findCardLodPreset(l.get<std::string>())) fail("bad_request", "a level of detail is hero, mid or low");
-            lods.push_back(l.get<std::string>());
+            o.lods.push_back(l.get<std::string>());
         }
     }
-    const HairLook look = s.groom->hairLook();
-    settings.roughness = look.roughness;
-    settings.specular = look.specular;
-    GltfDocument doc;
-    doc.rootName = name;
-    doc.generator = "GroomLab for Blender";
-    json meshes = json::array();
-    std::vector<std::string> warnings;
-    auto addLevel = [&](const std::string& lod) {
-        const CardBake bake = bakeCardsNow(s, resolution, occlusion);
-        settings.name = name + (lod.empty() ? "_cards" : "_" + lod);
-        addCardsToGltf(doc, *bake.cards, bake.textures, settings);
-        meshes.push_back(settings.name);
+    const std::string graph = o.lods.empty() ? std::string() : graphTextOf(s);
+    GltfCardsSource source;
+    source.bake = [&](const std::string& lod, int resolution, float occlusion) {
+        if (lod.empty()) return bakeCardsNow(s, resolution, occlusion);
+        GraphSwap swap(s, graphAtLod(graph, lod));
+        return bakeCardsNow(s, resolution, occlusion);
     };
-    if (lods.empty()) {
-        addLevel("");
-    } else {
-        const std::string graph = graphTextOf(s);
-        for (const std::string& lod : lods) {
-            GraphSwap swap(s, graphAtLod(graph, lod));
-            addLevel(lod);
-        }
-    }
-    if (optBool(args, "cap", true)) {
+    source.capGroom = [&](MeshPtr* scalp, std::string* whyNot) -> StrandsPtr {
         try {
             const ViewResult& view = evaluateNow(s, false);
-            const MeshPtr scalp = scalpOf(s, view);
-            if (!scalp || scalp->triangleCount() == 0) throw std::runtime_error("the groom has no scalp");
-            CardGltfSettings cap = settings;
-            cap.name = name + "_scalpCap";
-            addScalpCapToGltf(doc, *view.strands, *scalp, capResolution, resolution, cap);
-            meshes.push_back(cap.name);
+            *scalp = scalpOf(s, view);
+            return view.strands;
         } catch (const RequestError&) {
             throw;
-        } catch (const std::exception& e) {  // a scalp without UVs: the cards still go
-            warnings.push_back(std::string("no hair cap (") + e.what() + ")");
+        } catch (const std::exception& e) {  // the cards still go
+            *whyNot = e.what();
+            return nullptr;
         }
-    }
+    };
     try {
-        return {{"files", writeGltf(path, doc, binary)}, {"meshes", meshes}, {"warnings", warnings}};
+        const GltfCardsExport done = writeGltfCards(o, s.groom->hairLook(), source);
+        return {{"files", done.files}, {"meshes", done.meshes}, {"warnings", done.warnings}};
+    } catch (const RequestError&) {
+        throw;
+    } catch (const std::invalid_argument& e) {
+        fail("bad_request", e.what());
     } catch (const std::exception& e) {
         fail("io", e.what());
     }

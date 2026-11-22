@@ -39,6 +39,8 @@
 #include <maya/MSelectionList.h>
 #include <maya/MTime.h>
 
+#include <map>
+
 #include <nlohmann/json.hpp>
 
 #include "asset_files.h"
@@ -50,7 +52,7 @@
 #include "groomlab/drive_guides.h"
 #include "groomlab/export_view.h"
 #include "groomlab/feathers.h"
-#include "groomlab/gltf_writer.h"
+#include "groomlab/editor/game_exports.h"
 #include "groomlab/asset_files.h"
 #include "groomlab/groom_file.h"
 #include "groomlab/groom_package.h"
@@ -972,87 +974,63 @@ MStatus ExportGltfCmd::doIt(const MArgList& args) {
         auto* shape = dynamic_cast<GroomShape*>(MFnDagNode(path).userNode());
         if (!shape) return fail(kName, path.partialPathName() + " is not a groomLabShape");
 
-        const std::string name = fileSafeName(flagString(db, "-n", assetName(path).c_str()).asChar());
-        int resolution = 0, capResolution = 0;
-        if (db.isFlagSet("-r")) db.getFlagArgument("-r", 0, resolution);
-        if (db.isFlagSet("-cr")) db.getFlagArgument("-cr", 0, capResolution);
-        resolution = resolution > 0 ? std::clamp(resolution, kMinBakeResolution, kMaxCardBakeResolution) : 0;  // 0: the Cards nodes' atlasSize
-        bool binary = true, cap = true, rootToTip = true, tangents = true;
-        if (db.isFlagSet("-bin")) db.getFlagArgument("-bin", 0, binary);
-        if (db.isFlagSet("-cap")) db.getFlagArgument("-cap", 0, cap);
-        if (db.isFlagSet("-rtt")) db.getFlagArgument("-rtt", 0, rootToTip);
-        if (db.isFlagSet("-tan")) db.getFlagArgument("-tan", 0, tangents);
-        const double scale = flagDouble(db, "-sca", 0.01);  // Maya's centimeters to glTF's meters
-        if (!(scale > 0.0)) return fail(kName, "-scale must be positive");
-        const MString alpha = flagString(db, "-am", "mask");
-        CardGltfSettings settings;
-        try {
-            settings.alphaMode = gltfAlphaModeNamed(alpha.asChar());  // every host's (gltf_writer.h)
-        } catch (const std::invalid_argument& e) {
-            return fail(kName, (std::string("-") + e.what()).c_str());
-        }
-        settings.alphaCutoff = static_cast<float>(flagDouble(db, "-ac", 0.5));
-        settings.scale = static_cast<float>(scale);
-        settings.zUp = MGlobal::isZAxisUp();
-        settings.rootToTip = rootToTip;
-        settings.colorToRec709 = renderingSpace().toRec709;  // (the cards' bake: bakeCardsInMemory)
-        settings.tangents = tangents;
-        const GroomShape::HairLook look = shape->hairLook();
-        settings.roughness = look.roughness;
-        settings.specular = look.specular;
+        // Every host's glTF cards (the editor's writeGltfCards, game_exports.h).
+        GltfCardsOptions o;
+        o.path = file.asChar();
+        o.name = fileSafeName(flagString(db, "-n", assetName(path).c_str()).asChar());
+        if (db.isFlagSet("-r")) db.getFlagArgument("-r", 0, o.resolution);  // 0: the Cards nodes' atlasSize
+        if (db.isFlagSet("-cr")) db.getFlagArgument("-cr", 0, o.capResolution);
+        if (db.isFlagSet("-bin")) db.getFlagArgument("-bin", 0, o.binary);
+        if (db.isFlagSet("-cap")) db.getFlagArgument("-cap", 0, o.cap);
+        if (db.isFlagSet("-rtt")) db.getFlagArgument("-rtt", 0, o.rootToTip);
+        if (db.isFlagSet("-tan")) db.getFlagArgument("-tan", 0, o.tangents);
+        o.scale = static_cast<float>(flagDouble(db, "-sca", 0.01));  // Maya's centimeters to glTF's meters
+        o.alphaMode = flagString(db, "-am", "mask").asChar();
+        o.alphaCutoff = static_cast<float>(flagDouble(db, "-ac", 0.5));
+        o.occlusion = static_cast<float>(flagDouble(db, "-ao", 1.0));
+        o.zUp = MGlobal::isZAxisUp();
+        o.colorToRec709 = renderingSpace().toRec709;  // (the cards' bake: bakeCardsInMemory)
+        o.generator = std::string("GroomLab ") + path.fullPathName().asChar();
 
         // Levels of detail: a name and a graph each (the groom's graph with that LOD's
         // Cards settings), or the groom's own cards as they are.
-        std::vector<std::pair<std::string, std::string>> lods;
+        std::map<std::string, std::string> graphs;
         const unsigned lodCount = db.numberOfFlagUses("-lod");
         if (lodCount != db.numberOfFlagUses("-lg")) return fail(kName, "give one -lodGraph per -levelOfDetail");
         for (unsigned i = 0; i < lodCount; ++i) {
             MArgList lodArgs, graphArgs;
             db.getFlagArgumentList("-lod", i, lodArgs);
             db.getFlagArgumentList("-lg", i, graphArgs);
-            lods.emplace_back(fileSafeName(lodArgs.asString(0).asChar()), graphArgs.asString(0).asChar());
+            const std::string lod = fileSafeName(lodArgs.asString(0).asChar());
+            o.lods.push_back(lod);
+            graphs[lod] = graphArgs.asString(0).asChar();
         }
 
-        const double occlusion = flagDouble(db, "-ao", 1.0);
-        GltfDocument doc;
-        doc.rootName = name;
-        doc.generator = std::string("GroomLab ") + path.fullPathName().asChar();
-        std::vector<std::string> names;
+        // One groom for every level of detail and the hair cap, caching on: each LOD's graph
+        // is swapped in (only its Cards nodes and what follows re-run), and the cap's
+        // evaluation reuses what the cards' made (the same density: everything upstream).
+        NodeEvaluator evaluator(path.node(), true);
+        GltfCardsSource source;
+        source.bake = [&](const std::string& lod, int resolution, float occlusion) {
+            return shape->bakeCardsInMemory(resolution, occlusion, lod.empty() ? std::string() : graphs[lod], &evaluator);
+        };
+        source.capGroom = [&](MeshPtr* scalp, std::string* whyNot) -> StrandsPtr {
+            // The groom's own graph at full density.
+            evaluator.setGraphJson({});
+            std::string error;
+            StrandsPtr strands = evaluator.evaluate(1.0f, &error, scalp, false, true);  // (cards: a game asset)
+            if (!strands) *whyNot = error.empty() ? "the groom has no strands" : error;
+            return strands;
+        };
         try {
-            if (lods.empty()) lods.emplace_back("", "");
-            // One groom for every level of detail and the hair cap, caching on: each LOD's graph
-            // is swapped in (only its Cards nodes and what follows re-run), and the cap's
-            // evaluation reuses what the cards' made (the same density: everything upstream).
-            NodeEvaluator evaluator(path.node(), true);
-            for (const auto& [lod, graph] : lods) {
-                const CardBake bake = shape->bakeCardsInMemory(resolution, static_cast<float>(occlusion), graph, &evaluator);
-                settings.name = name + (lod.empty() ? "_cards" : "_" + lod);
-                addCardsToGltf(doc, *bake.cards, bake.textures, settings);
-                names.push_back(settings.name);
-            }
-            if (cap) {
-                try {
-                    // The groom's own graph at full density; the cap as every host writes it
-                    // (gltf_writer.h: its resolution, just above the skin).
-                    evaluator.setGraphJson({});
-                    std::string error;
-                    MeshPtr scalp;
-                    const StrandsPtr strands = evaluator.evaluate(1.0f, &error, &scalp, false, true);  // (cards: a game asset)
-                    if (!strands) throw std::runtime_error(error.empty() ? "the groom has no strands" : error);
-                    if (!scalp || scalp->triangleCount() == 0) throw std::runtime_error("the groom has no scalp");
-                    CardGltfSettings capSettings = settings;
-                    capSettings.name = name + "_scalpCap";
-                    addScalpCapToGltf(doc, *strands, *scalp, capResolution, resolution, capSettings);
-                    names.push_back(capSettings.name);
-                } catch (const std::exception& e) {  // a scalp without UVs: the cards still go
-                    MGlobal::displayWarning(MString(kName) + ": no hair cap (" + e.what() + ")");
-                }
-            }
-            const std::vector<std::string> written = writeGltf(file.asChar(), doc, binary);
+            const GltfCardsExport done = writeGltfCards(o, shape->hairLook(), source);
+            for (const std::string& w : done.warnings) MGlobal::displayWarning(MString(kName) + ": " + w.c_str());
             MStringArray result;
-            for (const std::string& w : written) result.append(w.c_str());
+            for (const std::string& w : done.files) result.append(w.c_str());
             MGlobal::displayInfo(MString(kName) + ": wrote " + file);
             setResult(result);
+        } catch (const std::invalid_argument& e) {
+            return fail(kName, (std::string("-") + e.what()).c_str());
         } catch (const std::exception& e) {
             return fail(kName, e.what());
         }

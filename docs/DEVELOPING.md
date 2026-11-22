@@ -95,7 +95,9 @@ time, each host calling the one version:
   the Blender helper (its meshes still written by Blender's FBX exporter) and Maya
   (`groomLabBakeCards -engine`: the core's FBX writer, no fbxmaya) call it; the app's Unity
   feathers take the same options; Unity's feathers for the app and Blender through one writer
-  (`engine_export.h` `writeUnityFeathers`).
+  (`engine_export.h` `writeUnityFeathers`); glTF cards in every host through `writeGltfCards`
+  (`GltfCardsOptions`: a mesh per level of detail, the hair cap or a warning why not; the host
+  bakes each level and evaluates the cap's groom through `GltfCardsSource`).
 - E6 (done): Maya's Graph Editor split: its parameter panel (`ParamPanel`, `MappableEditor`) in
   `ui/param_panel.py`, imported at the end of `ui/graph_editor.py` (whose helpers it reads; the
   theme's colors through the module, as `apply_theme` rebinds them), and a node's pinned actions

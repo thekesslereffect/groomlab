@@ -5,12 +5,14 @@
 // (their maps, the hair cap's, a manifest, the meshes as FBX) and Unity's feathers, from what the
 // host evaluated, with one set of options.
 
+#include <functional>
 #include <map>
 #include <string>
 #include <vector>
 
 #include "groomlab/card_files.h"
 #include "groomlab/engine_cards.h"
+#include "groomlab/gltf_writer.h"
 #include "groomlab/cards.h"
 #include "groomlab/groom_session.h"
 #include "groomlab/texture.h"
@@ -56,5 +58,46 @@ struct EngineCardsExport {
 // for a file it cannot write.
 EngineCardsExport writeEngineCards(const CardBake& bake, const GroomStats& stats, const HairLook& look, const ScalpTextures* cap,
                                    const ScalpMesh* capScalp, const std::string& capWhyNot, bool unity, const GameExportOptions& o);
+
+// Hair cards as glTF 2.0 (every host's): asked as each host's dialog and scripting take it.
+struct GltfCardsOptions {
+    std::string path;                 // the .glb (binary) or .gltf (its .bin and PNG maps beside it)
+    std::string name = "groom";       // the root node; meshes <name>_cards (or _<lod>) and <name>_scalpCap
+    bool binary = true;
+    std::vector<std::string> lods;    // a mesh per level of detail (the host's bake of each); none: the cards as they are
+    int resolution = 0;               // the cards' maps (gameExportResolution)
+    int capResolution = 0;            // the hair cap's (0: scalpCapResolution's)
+    float occlusion = 1.0f;
+    bool cap = true;                  // the hair cap (the groom baked onto its scalp; a scalp without UVs: a warning)
+    std::string alphaMode = "mask";   // gltfAlphaModeNamed: mask, blend, opaque
+    float alphaCutoff = 0.5f;
+    float scale = 0.01f;              // scene units to meters
+    bool zUp = false;                 // the scene is Z up
+    bool rootToTip = true;
+    bool tangents = true;
+    std::array<float, 9> colorToRec709 = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+    std::string generator;            // the asset's generator ("": the writer's)
+};
+
+// A glTF cards export written.
+struct GltfCardsExport {
+    std::vector<std::string> files;     // the main file first
+    std::vector<std::string> meshes;    // the meshes' names, the cap's last
+    std::size_t cards = 0;              // the last level's cards
+    std::vector<std::string> warnings;  // a hair cap left out, and why
+};
+
+// What the host evaluates for it: the cards baked at a level of detail ("": the groom's as they
+// are; resolution and occlusion as asked), and the groom at full density with its scalp for the
+// hair cap (null with `whyNot` said: no cap, a warning). What either throws goes to the caller.
+struct GltfCardsSource {
+    std::function<CardBake(const std::string& lod, int resolution, float occlusion)> bake;
+    std::function<StrandsPtr(MeshPtr* scalp, std::string* whyNot)> capGroom;
+};
+
+// The cards (a mesh per level of detail), the hair cap and their materials (the hair look's
+// roughness and specular) written as glTF. Throws std::invalid_argument for options out of range
+// (an alpha mode, a scale), std::runtime_error for a file it cannot write.
+GltfCardsExport writeGltfCards(const GltfCardsOptions& o, const HairLook& look, const GltfCardsSource& source);
 
 }  // namespace groomlab

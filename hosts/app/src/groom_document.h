@@ -113,6 +113,7 @@ struct ExportResult {
     std::size_t frames = 0;
     std::size_t strands = 0;  // of the last frame written
     bool cancelled = false;
+    std::vector<std::string> warnings;  // what was left out, and why (glTF cards: the hair cap)
 };
 
 // A bake written beside the groom (bakeCards): the maps as files (card_files.h's layout, the

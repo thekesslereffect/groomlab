@@ -106,4 +106,57 @@ EngineCardsExport writeEngineCards(const CardBake& bake, const GroomStats& stats
     return out;
 }
 
+GltfCardsExport writeGltfCards(const GltfCardsOptions& o, const HairLook& look, const GltfCardsSource& source) {
+    CardGltfSettings settings;
+    settings.alphaMode = gltfAlphaModeNamed(o.alphaMode);
+    if (!(o.scale > 0.0f)) throw std::invalid_argument("scale must be above 0");
+    settings.alphaCutoff = o.alphaCutoff;
+    settings.scale = o.scale;
+    settings.zUp = o.zUp;
+    settings.rootToTip = o.rootToTip;
+    settings.tangents = o.tangents;
+    settings.colorToRec709 = o.colorToRec709;
+    settings.roughness = look.roughness;
+    settings.specular = look.specular;
+    const std::string name = o.name.empty() ? std::string("groom") : o.name;
+    const int resolution = gameExportResolution(o.resolution);
+    GltfDocument doc;
+    doc.rootName = name;
+    if (!o.generator.empty()) doc.generator = o.generator;
+    GltfCardsExport out;
+    const std::vector<std::string> levels = o.lods.empty() ? std::vector<std::string>{std::string()} : o.lods;
+    for (const std::string& lod : levels) {
+        const CardBake bake = source.bake(lod, resolution, o.occlusion);
+        if (!bake.cards) throw std::runtime_error("the groom has no cards (a Cards node)");
+        settings.name = name + (lod.empty() ? "_cards" : "_" + lod);
+        addCardsToGltf(doc, *bake.cards, bake.textures, settings);
+        out.meshes.push_back(settings.name);
+        out.cards = bake.cards->cards.size();
+    }
+    if (o.cap && source.capGroom) {
+        // The groom's own graph at full density; the cap as every host writes it (gltf_writer.h:
+        // its resolution, just above the skin).
+        std::string whyNot;
+        MeshPtr scalp;
+        const StrandsPtr strands = source.capGroom(&scalp, &whyNot);
+        if (!strands) {
+            if (whyNot.empty()) whyNot = "the groom has no strands";
+        } else if (!scalp || scalp->triangleCount() == 0) {
+            whyNot = "the groom has no scalp";
+        } else {
+            try {
+                CardGltfSettings cap = settings;
+                cap.name = name + "_scalpCap";
+                addScalpCapToGltf(doc, *strands, *scalp, o.capResolution, resolution, cap);
+                out.meshes.push_back(cap.name);
+            } catch (const std::exception& e) {  // a scalp without UVs: the cards still go
+                whyNot = e.what();
+            }
+        }
+        if (!whyNot.empty()) out.warnings.push_back("no hair cap (" + whyNot + ")");
+    }
+    out.files = writeGltf(o.path, doc, o.binary);
+    return out;
+}
+
 }  // namespace groomlab

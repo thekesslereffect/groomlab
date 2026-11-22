@@ -362,8 +362,9 @@ bool MainWindow::exportTo(const QString& target, const QString& path, const Expo
                          : t == ExportPanel::Target::Cards  ? tr("%n cards", "", static_cast<int>(result.strands))
                                                             : tr("%n frames", "", static_cast<int>(result.frames)) +
                                                                   tr(", %1 strands").arg(result.strands);
-    const QString line = result.cancelled ? tr("Stopped after %1 (%2 s): %3").arg(what).arg(seconds, 0, 'f', 2).arg(path)
-                                          : tr("Wrote %1 in %2 s: %3").arg(what).arg(seconds, 0, 'f', 2).arg(path);
+    QString line = result.cancelled ? tr("Stopped after %1 (%2 s): %3").arg(what).arg(seconds, 0, 'f', 2).arg(path)
+                                    : tr("Wrote %1 in %2 s: %3").arg(what).arg(seconds, 0, 'f', 2).arg(path);
+    for (const std::string& w : result.warnings) line += QStringLiteral(" (%1)").arg(QString::fromUtf8(w.c_str()));
     panel->setStatus(line);
     notify(line);
     // The view is back at the document's frame (the export evaluated other frames on it).

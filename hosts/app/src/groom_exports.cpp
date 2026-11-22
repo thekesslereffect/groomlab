@@ -31,7 +31,6 @@
 #include "groomlab/feathers.h"
 #include "groomlab/frame_time.h"
 #include "groomlab/graph_edit.h"
-#include "groomlab/gltf_writer.h"
 #include "groomlab/png.h"
 #include "groomlab/usd_writer.h"
 #include "groomlab/vrscene_writer.h"
@@ -558,34 +557,31 @@ ExportResult GroomDocument::exportCards(const std::string& path, const ExportOpt
         result.cancelled = true;
         return result;
     }
-    try {
-        const std::string name = exportName(path);
-        GltfDocument doc;
-        doc.rootName = name;
-        const HairLook look = scene_->session().hairLook();
-        CardGltfSettings settings;
-        settings.name = name + "_cards";
-        settings.scale = static_cast<float>(usdMetersPerUnit(file().units));  // (the groom's unit in meters: feet too)
-        settings.roughness = look.roughness;
-        settings.specular = look.specular;
-        addCardsToGltf(doc, *bake.cards, bake.textures, settings);
-        // The hair cap when the scalp has UVs: the groom baked onto the skin, so low LODs show
-        // hair color between cards (as the Maya host's export writes it: gltf_writer.h).
-        // From the whole groom at full density, as Maya and the Blender helper bake it (not the
-        // cards' strands).
-        MeshPtr capScalp;
-        const StrandsPtr whole = bake.scalp && bake.scalp->hasUVs() ? exportFrame(time_, 1.0f, &capScalp, false, true) : nullptr;
-        if (whole && capScalp && capScalp->hasUVs()) {
-            CardGltfSettings cap = settings;
-            cap.name = name + "_scalpCap";
-            addScalpCapToGltf(doc, *whole, *capScalp, 0, options.resolution, cap);
+    // Every host's glTF cards (the editor's writeGltfCards, game_exports.h): the app's export
+    // takes the cards as they are, its options and the groom's unit in meters (feet too).
+    GltfCardsOptions o;
+    o.path = path;
+    o.name = exportName(path);
+    o.binary = options.binary;
+    o.resolution = options.resolution;
+    o.occlusion = options.occlusion;
+    o.scale = static_cast<float>(usdMetersPerUnit(file().units));
+    GltfCardsSource source;
+    source.bake = [&](const std::string&, int, float) { return bake; };
+    // The hair cap from the whole groom at full density, as Maya and the Blender helper bake it
+    // (not the cards' strands).
+    source.capGroom = [&](MeshPtr* scalp, std::string* whyNot) -> StrandsPtr {
+        if (!bake.scalp || !bake.scalp->hasUVs()) {
+            *whyNot = "the scalp has no uvs";
+            return nullptr;
         }
-        result.files = writeGltf(path, doc, options.binary);
-        result.frames = 1;
-        result.strands = bake.cards->cards.size();
-    } catch (const std::exception& e) {
-        throw std::runtime_error(e.what());
-    }
+        return exportFrame(time_, 1.0f, scalp, false, true);
+    };
+    const GltfCardsExport done = writeGltfCards(o, scene_->session().hairLook(), source);
+    result.files = done.files;
+    result.frames = 1;
+    result.strands = done.cards;
+    result.warnings = done.warnings;
     continueExport(progress, 2, 2);
     return result;
 }
