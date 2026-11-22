@@ -383,46 +383,27 @@ MStatus ScalpMapsCmd::doIt(const MArgList& args) {
                     setResult(MString(to.c_str()));
                     return MS::kSuccess;
                 }
-                // The source as its kind holds it, converted (every host's: scalp_paint.h convertMap;
-                // a guide layer read at the guides' roots on the scalp).
-                MapSource source;
-                source.kind = from;
-                source.channels = channelsOf(maps, *h, name);
-                if (from == "vertices") {
-                    source.vertices = maps.maps[name].values;
-                } else if (from == "texture") {
-                    const std::string full = resolve(maps.maps[name].texture);
-                    if (fileStamp(full) == 0) return fail(kName, ("map " + name + "'s image is missing: " + full).c_str());
-                    source.image = loadTexture(full);
-                }
-                std::string stored;
+                // Every host's Convert (the editor's convertMapKind, map_edits.h): the image written at
+                // -texture (a free name when taken), stored as Maya stores paths, its files' states
+                // kept for Maya's undo; the guide layer onto the hierarchy.
+                std::string wanted;
                 if (to == "texture") {
-                    const std::string wanted = !texturePath.empty() ? texturePath : maps.maps.count(name) ? maps.maps[name].texture : std::string();
-                    if (wanted.empty()) return fail(kName, "a texture map needs -texture <file>");
-                    stored = freshTexture(wanted);
+                    const std::string given = !texturePath.empty() ? texturePath : maps.maps.count(name) ? maps.maps[name].texture : std::string();
+                    if (given.empty()) return fail(kName, "a texture map needs -texture <file>");
+                    wanted = resolve(given);
                 }
-                MapConverted converted;
-                try {
-                    converted = convertMap(name, source, to, *scalp, *h, resolution);
-                } catch (const std::invalid_argument& e) {
-                    return fail(kName, e.what());
-                }
+                MapFiles files;
+                files.mapsFolder = assetFolder("masks") + "/" + assetName(groomPath);
+                files.resolve = resolve;
+                files.store = [](const std::string& full) { return portableMayaPath(full); };
+                MapConvert converted = convertMapKind(maps, h.get(), *scalp, name, to, resolution, wanted, files);
                 if (converted.colorLost) {
                     MGlobal::displayWarning(MString(kName) + ": " + name.c_str() +
                                             " is a color map; on the guides it keeps its luminance (a guide layer is gray)");
                 }
-                if (to == "vertices") {
-                    ScalpMapEntry entry{"vertices", std::move(converted.vertices), ""};
-                    entry.channels = source.channels;
-                    maps.maps[name] = std::move(entry);
-                } else if (to == "texture") {
-                    writeTexture(*converted.texture, stored);
-                    ScalpMapEntry entry{"texture", {}, stored};
-                    entry.channels = source.channels;
-                    maps.maps[name] = std::move(entry);
-                } else {
-                    maps.maps.erase(name);
-                }
+                maps = std::move(converted.maps);
+                applyConvertedLayer(*h, name, converted);
+                for (FileState& f : converted.files) files_.push_back(std::move(f));
                 if (to == "guides" || from == "guides") guidesChanged = true;
                 mapsChanged = true;
                 setResult(MString(to.c_str()));
