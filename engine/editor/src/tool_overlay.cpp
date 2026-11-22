@@ -13,12 +13,11 @@ namespace {
 
 constexpr float kPi = 3.14159265358979f;
 constexpr int kRingSegments = 96;
-constexpr float kDotPixels = 6.0f;  // the guide-making tools' dot
+constexpr float kDotPixels = 6.0f;  // the dot of the tools that click a point
 
-bool makesGuides(const BrushToolSettings& s) {
-    using Tool = BrushToolSettings::Tool;
-    return s.tool == Tool::Place || s.tool == Tool::Draw || s.tool == Tool::Lengths;  // (Lengths: the keys' rings)
-}
+// A dot, not the brush circle: the tools with no radius (the core's showsBrushCircle: Place, Draw,
+// Part, Length Keys, Roots...; the brushes, Flow and Clone keep the circle).
+bool makesGuides(const BrushToolSettings& s) { return !s.showsBrushCircle(); }
 
 }  // namespace
 

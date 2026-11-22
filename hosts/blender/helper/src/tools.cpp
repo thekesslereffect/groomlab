@@ -505,7 +505,7 @@ void applySettings(ToolState& t, const json& settings) {
         rest.erase("softSelectRadius");
     }
     try {
-        applyToolSettings(t.tool.settings, rest, toolSpace(t.session.space));
+        applyToolSettings(t.tool, rest, toolSpace(t.session.space));  // (Clone's Pick Source and Reset too)
     } catch (const std::invalid_argument& e) {
         fail("bad_request", e.what());
     }
@@ -513,7 +513,7 @@ void applySettings(ToolState& t, const json& settings) {
 }
 
 json settingsJson(const ToolState& t) {
-    json j = toolSettingsJson(t.tool.settings, toolSpace(t.session.space));
+    json j = toolSettingsJson(t.tool, toolSpace(t.session.space));  // (Clone's source too)
     j["softSelectRadius"] = toHostLength(t.session.space, t.softRadius);
     return j;
 }
@@ -3064,6 +3064,7 @@ bool runToolCommandIn(Session& s, ToolState& t, const std::string& cmd, const js
         if (args.contains("tool") && !args["tool"].is_null()) {
             if (t.tool.stroking()) t.tool.cancel(&t.host);
             setTool(t, needString(args, "tool"));
+            t.tool.syncClone();  // (another tool: Clone's source let go)
         }
         if (args.contains("settings") && !args["settings"].is_null()) applySettings(t, args["settings"]);
         result = toolJson(t);

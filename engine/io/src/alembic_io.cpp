@@ -83,6 +83,7 @@ struct AlembicCurvesWriter::Impl {
         AbcG::OCurves curves;
         AbcG::OUInt64GeomParam ids;
         AbcG::OC3fGeomParam color;                        // when the first frame had melanin channels
+        AbcG::OC3fGeomParam hairColor;                    // Options::vertexData: the base color per point
         std::map<std::string, AbcG::OFloatGeomParam> channels;  // the first frame's strand channels
         std::map<std::string, AbcG::OFloatGeomParam> pointChannels;  // and point channels (Options::pointChannels)
         bool hasColor = false;
@@ -112,6 +113,7 @@ struct AlembicCurvesWriter::Impl {
     // Scratch buffers reused across frames.
     std::vector<Imath::V2f> uvs;
     std::vector<Imath::C3f> colors;
+    std::vector<float> expanded;  // Options::vertexData: a strand channel at its strand's points
     std::vector<float> zeros, missing;
 
     // A curves object `curvesName` under `parent`.
@@ -346,21 +348,25 @@ void AlembicCurvesWriter::Impl::write(Objects& o, const StrandSet& input, const 
     }
     const StrandSet& strands = adjust ? adjusted : input;
     // Cd: the hair's appearance (no per-point colors or bounds: not written here).
-    const ExportView view = describeExport(strands, scalp, kExportAppearanceColors);
+    // Options::vertexData: Cd at every point (a tip blend's own colors where there are some).
+    const bool perVertex = d.options.vertexData;
+    const AbcG::GeometryScope dataScope = perVertex ? AbcG::kVertexScope : AbcG::kUniformScope;
+    const ExportView view = describeExport(strands, scalp, kExportAppearanceColors | (perVertex ? kExportPointColors : 0u));
     const std::size_t strandCount = view.strandCount();
     Abc::OCompoundProperty arb = o.curves.getSchema().getArbGeomParams();
     if (first) {
         // The first frame decides what every frame carries, as the USD writer does.
         o.hasUVs = view.hasUVs();
-        o.hasColor = view.hasColors();
-        if (o.hasColor) o.color = AbcG::OC3fGeomParam(arb, "Cd", false, AbcG::kUniformScope, 1, d.ts);
+        o.hasColor = view.hasColors() || view.hasPointColors();
+        if (o.hasColor) o.color = AbcG::OC3fGeomParam(arb, "Cd", false, dataScope, 1, d.ts);
+        if (o.hasColor && perVertex) o.hairColor = AbcG::OC3fGeomParam(arb, "hair_color", false, AbcG::kVertexScope, 1, d.ts);
         for (const std::string& name : view.strandChannels) {
-            if (name == "strandId" || name == "Cd") continue;  // never shadow the fixed params
-            o.channels.emplace(name, AbcG::OFloatGeomParam(arb, name, false, AbcG::kUniformScope, 1, d.ts));
+            if (name == "strandId" || name == "Cd" || name == "hair_color") continue;  // never shadow the fixed params
+            o.channels.emplace(name, AbcG::OFloatGeomParam(arb, name, false, dataScope, 1, d.ts));
         }
-        if (d.options.pointChannels) {
+        if (d.options.pointChannels || perVertex) {
             for (const std::string& name : strands.pointChannelNames()) {
-                if (name == "strandId" || name == "Cd" || o.channels.count(name)) continue;
+                if (name == "strandId" || name == "Cd" || name == "hair_color" || o.channels.count(name)) continue;
                 o.pointChannels.emplace(name, AbcG::OFloatGeomParam(arb, name, false, AbcG::kVertexScope, 1, d.ts));
             }
         }
@@ -411,12 +417,33 @@ void AlembicCurvesWriter::Impl::write(Objects& o, const StrandSet& input, const 
         o.curves.getSchema().set(sample);
         o.ids.set(AbcG::OUInt64GeomParam::Sample(Abc::UInt64ArraySample(strands.ids().data(), strands.ids().size()),
                                                  AbcG::kUniformScope));
-        if (o.hasColor) {
-            d.colors.assign(strandCount, Imath::C3f(0.0f, 0.0f, 0.0f));
-            for (std::size_t s = 0; s < strandCount && s < view.colors.size(); ++s) {
-                d.colors[s] = Imath::C3f(view.colors[s][0], view.colors[s][1], view.colors[s][2]);
+        // A per-strand color at every point of its strand (vertexData), or once per strand.
+        auto fillColors = [&](const std::vector<std::array<float, 3>>& perStrand,
+                              const std::vector<std::array<float, 3>>& perPoint) {
+            if (!perVertex) {
+                d.colors.assign(strandCount, Imath::C3f(0.0f, 0.0f, 0.0f));
+                for (std::size_t s = 0; s < strandCount && s < perStrand.size(); ++s) {
+                    d.colors[s] = Imath::C3f(perStrand[s][0], perStrand[s][1], perStrand[s][2]);
+                }
+                return;
             }
-            o.color.set(AbcG::OC3fGeomParam::Sample(Abc::C3fArraySample(d.colors), AbcG::kUniformScope));
+            d.colors.assign(view.pointCount(), Imath::C3f(0.0f, 0.0f, 0.0f));
+            if (perPoint.size() == view.pointCount()) {
+                for (std::size_t i = 0; i < perPoint.size(); ++i) d.colors[i] = Imath::C3f(perPoint[i][0], perPoint[i][1], perPoint[i][2]);
+                return;
+            }
+            for (std::size_t s = 0; s < strandCount && s < perStrand.size(); ++s) {
+                const std::size_t begin = strands.strandBegin(s), end = begin + strands.strandPointCount(s);
+                for (std::size_t k = begin; k < end; ++k) d.colors[k] = Imath::C3f(perStrand[s][0], perStrand[s][1], perStrand[s][2]);
+            }
+        };
+        if (o.hasColor) {
+            fillColors(view.colors, view.pointColors);
+            o.color.set(AbcG::OC3fGeomParam::Sample(Abc::C3fArraySample(d.colors), dataScope));
+        }
+        if (o.hasColor && perVertex) {
+            fillColors(strandColors(strands), pointColors(strands));  // the base color, as Arnold's shader takes it
+            o.hairColor.set(AbcG::OC3fGeomParam::Sample(Abc::C3fArraySample(d.colors), AbcG::kVertexScope));
         }
         for (auto& [name, param] : o.channels) {
             const std::vector<float>* values = view.strandChannel(name);
@@ -424,8 +451,15 @@ void AlembicCurvesWriter::Impl::write(Objects& o, const StrandSet& input, const 
                 d.missing.assign(strandCount, 0.0f);
                 values = &d.missing;
             }
-            param.set(AbcG::OFloatGeomParam::Sample(Abc::FloatArraySample(values->data(), values->size()),
-                                                    AbcG::kUniformScope));
+            if (perVertex) {  // each strand's value at its points
+                d.expanded.assign(view.pointCount(), 0.0f);
+                for (std::size_t s = 0; s < strandCount && s < values->size(); ++s) {
+                    const std::size_t begin = strands.strandBegin(s), end = begin + strands.strandPointCount(s);
+                    for (std::size_t k = begin; k < end; ++k) d.expanded[k] = (*values)[s];
+                }
+                values = &d.expanded;
+            }
+            param.set(AbcG::OFloatGeomParam::Sample(Abc::FloatArraySample(values->data(), values->size()), dataScope));
         }
         for (auto& [name, param] : o.pointChannels) {
             const std::vector<float>* values = strands.pointChannel(name);

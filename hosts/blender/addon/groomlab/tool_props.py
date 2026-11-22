@@ -509,6 +509,13 @@ class GroomLabTools(bpy.types.PropertyGroup):
                                   description="New guides stay unfrozen and every other guide is frozen, so the brushes "
                                               "work on the new ones at once (Ctrl+click guides with a brush to "
                                               "select them, Unfreeze All to free them all)")
+    clone_replace: BoolProperty(name="Replace", default=False, update=_push(),
+                                description="Clone: the guides of the copied levels already in the circle where the "
+                                            "copies land are removed first (frozen ones stay). Off: the copies are "
+                                            "added among them")
+    # Clone's source as the helper last said (cloneSourceSize, clonePickSource): what the card shows.
+    clone_source_size: IntProperty(name="Source", default=0, min=0, options={"SKIP_SAVE"})
+    clone_pick_source: BoolProperty(name="Pick Source", default=False, options={"SKIP_SAVE"})
     length: FloatProperty(name="Length", default=0.005, min=1e-5, max=100.0, soft_min=1e-4, soft_max=0.5, subtype="DISTANCE",
                           unit="LENGTH", precision=4, update=_push(), description="A standing new guide's length")
     segments: IntProperty(name="Segments", default=12, min=1, max=256, soft_max=32, update=_push(),

@@ -35,7 +35,7 @@ struct ToolSpace {
 // symmetry (x, y, z, topology, none) and symmetryCenter, attribute, value, pointwise, collide,
 // frontFacingOnly (maskByScalp), stretch, straighten, pressure, partName, flowSink, targets (a name
 // list or its text), eraseGuides / eraseParts / eraseFlow, paintKind, paintTexture,
-// paintResolution, paintColor ([r, g, b(, a)]), paintChannels, paintMode, paintWholeFaces,
+// paintResolution, paintColor ([r, g, b(, a)]), paintChannels, paintMode, paintWholeFaces, cloneReplace,
 // smoothStrength, alpha, alphaRotation, alphaAngle, alphaSpacing, alphaInvert. All or nothing:
 // throws std::invalid_argument for an id it does not have or a value a setting cannot take, `s` as
 // it was.
@@ -46,6 +46,15 @@ void setToolSetting(BrushToolSettings& s, const std::string& id, const nlohmann:
 // symmetry and lengths in the host's space).
 nlohmann::json toolSettingsJson(const BrushToolSettings& s, const ToolSpace& space = {});
 
+// The tool's settings (applyToolSettings) and what it holds, every host's: clonePickSource (true:
+// the next press captures Clone's source, as Ctrl+press does; false: disarmed) and cloneReset
+// (true: the source let go), applied after the settings; then the source is let go when the tool
+// is no longer Clone (BrushTool::syncClone). cloneSourceSize, read back from toolSettingsJson, is
+// skipped. Throws std::invalid_argument as applyToolSettings does.
+void applyToolSettings(BrushTool& tool, const nlohmann::json& settings, const ToolSpace& space = {});
+// The tool's settings (toolSettingsJson) with clonePickSource (a capture armed) and cloneSourceSize
+// (the guides Clone's source holds).
+nlohmann::json toolSettingsJson(const BrushTool& tool, const ToolSpace& space = {});
 // The ring's radius or the strength dragged (a held key or the slider button and a drag, every
 // host's): from `start` by `dx` pixels to the right, the radius a pixel a pixel (5 to 2000 points,
 // `pixelScale` the view's pixels a point), the strength 0.01 a pixel (-10 to 10). Set in `s`;

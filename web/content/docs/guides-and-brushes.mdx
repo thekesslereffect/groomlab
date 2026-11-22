@@ -525,6 +525,7 @@ and each drag is one undo step. The brushes are the same, in the same order, in 
 | --- | --- | --- |
 | Create | **Place** | Click for one guide, drag to place several (at least **Spacing** apart). New guides take the shape of the nearby guides (**Match nearby guides**). |
 | | **Draw** | Press on the scalp and draw the guide's shape. |
+| | **Clone** | Copy the guides under the circle (**Ctrl+click**) and set copies down wherever you click; drag left or right to spin them (see [Clone](#clone)). |
 | | **Part** | Draw a part line; interpolation does not blend guides across it. |
 | | **Flow** | Draw direction arrows and whorls for short hair without guides (see below). |
 | Shape | **Comb** | The main shaping brush: drags guides along the stroke with roots pinned. With **Stretch** on, combing also lengthens or shortens them. |
@@ -547,10 +548,33 @@ instead. A stroke paints toward the **Value** (1 is the setting's full value); *
 toward 0: thinner hair on the width map, no hair on the density map. For example, to thin the
 sideburns, create the map for Density and Ctrl+paint over them.
 
+**What lights up under the brush.** Before you press, the guides the brush would edit are lit
+under its circle: those of its level or group, not hidden and not frozen. With guides selected
+(every other guide is then frozen), only the selected ones light up.
+
 **Erasing hair.** The **Erase** brush removes guides (with their children), part lines and flow
 arrows, so it does nothing on a groom whose hair comes from the Scatter alone. To take hair away,
 paint the density map holding **Ctrl** (Paint tab > **+ New Map** > For: **Density**); paint it
 back without Ctrl.
+
+### Clone
+
+**Clone** copies a patch of guides and sets it down elsewhere, as many times as you like.
+
+1. **Ctrl+click** over the guides to copy: the ones rooted inside the circle are taken (the brush's
+   level or group, not hidden or frozen; their children come along). Or click **Pick Source**, then
+   click. The card says how many guides the source holds. Before you capture, the guides a capture
+   would take light up under the circle.
+2. Move the cursor: the copies show under it. **Click** to set them down. Each guide keeps its
+   shape, tube and painted maps, turned to the scalp where it lands.
+3. To turn the patch, press and **drag left or right** before letting go (half a degree a pixel;
+   right turns it clockwise seen from outside). Each set-down is one undo step.
+
+**Replace** removes the guides of the copied levels already inside the circle where the copies land
+(frozen guides stay). Off, the copies are added among them. With symmetry on, the mirror image is set
+down too. **Reset**, a **Ctrl+click** off the model or picking another tool lets the source go, ready
+for a new pick. Root-first tubes are copied with their whole tube hierarchy; they follow a spun patch
+but are not turned themselves, and are not mirrored.
 
 ### Length Keys
 

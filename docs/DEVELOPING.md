@@ -81,10 +81,12 @@ time, each host calling the one version:
   Correctives (`correctives.h`), parts and flow were already the core's in every host.
 - E4 (done): the brush tool's (`tool_settings.h`, `tool_overlay.h`, `tool_select.h`). Its
   settings set by id, one parser for the app's widgets, Maya's flags and the Blender helper's
-  keys (`applyToolSettings`; a `ToolSpace` turns a host's units and axes into the groom's), the
+  keys (`applyToolSettings`; a `ToolSpace` turns a host's units and axes into the groom's; on the
+  tool itself, Clone's Pick Source and Reset as `clonePickSource` and `cloneReset`), the
   radius and strength drag (`dragToolSetting`), the rail's tools with Freeze setting Paint aside
   (`pickTool`); the ring as circles in pixels (`brushRing`: the halo, the falloff's dashed ring,
-  a held key's state; Maya draws it in 2D) and the overlay of colored lines the app and Blender
+  a held key's state, a dot for the tools with no radius by the core's `showsBrushCircle`; Maya
+  draws it in 2D) and the overlay of colored lines the app and Blender
   draw (`brushOverlay`: hover, line of symmetry, ring, Part and Flow path); the Select tool's pick
   (`pickGuidesInView`: click, box or lasso, only what the view shows, mirrors) and when it soloes
   (`pickSoloes`).

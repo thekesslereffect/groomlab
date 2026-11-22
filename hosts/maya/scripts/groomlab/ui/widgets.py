@@ -53,7 +53,7 @@ def _save_folded():
 # replaces: each tool group has its color (theme "icons": {group: color}), a
 # darker shade and a lighter tint of it; "ink" is hair and neutral parts.
 ICON_GROUPS = {
-    "create": ("place", "draw", "part", "flow"),
+    "create": ("place", "draw", "clone", "part", "flow"),
     "shape": ("comb", "slide", "smooth", "lift", "twist", "attract", "shape"),  # "shape": the Tube brush
     "trim": ("cut", "length", "lengths", "erase"),
     "paint": ("paint", "freeze", "invert", "unfreeze", "select"),  # the guide tools share one color

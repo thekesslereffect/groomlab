@@ -325,6 +325,8 @@ MSyntax ExportAlembicCmd::newSyntax() {
     syntax.addFlag("-sca", "-scale", MSyntax::kDouble);
     syntax.addFlag("-pps", "-pointsPerStrand", MSyntax::kLong);
     syntax.addFlag("-vuv", "-vertexUVs");
+    // Every color and channel per point (Cd, hair_color, melanin...): what Redshift's proxy reads.
+    syntax.addFlag("-vxd", "-vertexData");
     // Unity's hair package: root UVs per point, root widths above 0, and with -groups a curves
     // object (a Unity strand group) per groom group, -barbPoints points on the feather groups'
     // strands, groups past -maxStrandsPerGroup split in parts; -shafts, -barbDensity and
@@ -435,6 +437,7 @@ MStatus ExportAlembicCmd::doIt(const MArgList& args) {
             options.pointsPerStrand = static_cast<std::size_t>(points);
         }
         options.vertexUVs = db.isFlagSet("-vuv");
+        options.vertexData = db.isFlagSet("-vxd");
         options.pointChannels = options.pointChannels || db.isFlagSet(kDriverCurvesFlag);  // the drivers' twist
         const bool adjusted = options.scale != 1.0f || options.pointsPerStrand != 0 || options.vertexUVs;
 

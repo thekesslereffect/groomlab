@@ -85,6 +85,7 @@ void applyToolSettings(BrushToolSettings& settings, const json& given, const Too
         else if (key == "spacing") s.place.spacing = lengthIn(number(v, key));
         else if (key == "matchNeighbors") s.place.matchNeighbors = boolean(v, key);
         else if (key == "soloNewGuides") s.place.soloNewGuides = boolean(v, key);
+        else if (key == "cloneReplace") s.cloneReplace = boolean(v, key);
         else if (key == "selectedOnly") s.selectedOnly = boolean(v, key);
         else if (key == "symmetry") {
             symmetry = text(v, key);
@@ -198,6 +199,7 @@ json toolSettingsJson(const BrushToolSettings& s, const ToolSpace& space) {
     j["spacing"] = lengthOut(s.place.spacing);
     j["matchNeighbors"] = s.place.matchNeighbors;
     j["soloNewGuides"] = s.place.soloNewGuides;
+    j["cloneReplace"] = s.cloneReplace;
     j["selectedOnly"] = s.selectedOnly;
     j["symmetry"] = s.brush.mirrorTopology ? std::string("topology") : axis;
     j["symmetryCenter"] = center;
@@ -228,6 +230,34 @@ json toolSettingsJson(const BrushToolSettings& s, const ToolSpace& space) {
     j["alphaAngle"] = s.alphaAngle;
     j["alphaSpacing"] = s.alphaSpacing;
     j["alphaInvert"] = s.alphaInvert;
+    return j;
+}
+
+void applyToolSettings(BrushTool& tool, const json& given, const ToolSpace& space) {
+    if (!given.is_object()) throw std::invalid_argument("the tool settings are an object");
+    json settings = given;
+    int pick = -1;
+    bool reset = false;
+    if (settings.contains("clonePickSource")) {
+        pick = boolean(settings["clonePickSource"], "clonePickSource") ? 1 : 0;
+        settings.erase("clonePickSource");
+    }
+    if (settings.contains("cloneReset")) {
+        reset = boolean(settings["cloneReset"], "cloneReset");
+        settings.erase("cloneReset");
+    }
+    settings.erase("cloneSourceSize");  // (toolSettingsJson's, read back: the tool's to say)
+    applyToolSettings(tool.settings, settings, space);
+    // Clone (issue 91): another tool lets the source go; Reset does; Pick Source arms the next press.
+    tool.syncClone();
+    if (reset) tool.clearClip();
+    if (pick >= 0) tool.armCapture(pick == 1);
+}
+
+json toolSettingsJson(const BrushTool& tool, const ToolSpace& space) {
+    json j = toolSettingsJson(tool.settings, space);
+    j["clonePickSource"] = tool.captureArmed();         // Clone: a capture armed (Pick Source down)
+    j["cloneSourceSize"] = tool.clip().guides.size();   // the guides the source holds
     return j;
 }
 

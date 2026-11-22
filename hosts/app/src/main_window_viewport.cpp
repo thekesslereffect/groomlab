@@ -697,6 +697,7 @@ bool MainWindow::setBrushText(const QString& text) {
         else if (name == QStringLiteral("length")) number(&s.place.length);
         else if (name == QStringLiteral("spacing")) number(&s.place.spacing);
         else if (name == QStringLiteral("solonewguides")) flag(&s.place.soloNewGuides);
+        else if (name == QStringLiteral("clonereplace")) flag(&s.cloneReplace);
         else if (name == QStringLiteral("attribute")) s.brush.attribute = value.toStdString();
         else if (name == QStringLiteral("value")) number(&s.brush.value);
         else if (name == QStringLiteral("tubechannel")) s.brush.tubeChannel = tubeChannelFromString(value.toStdString());

@@ -32,6 +32,10 @@ TEST(ToolOverlay, TheRingHasAHaloAndTheFalloffAndADotForTheToolsThatMakeGuides) 
     s.setMode("place");
     ASSERT_EQ(brushRing(s).size(), 1u);
     EXPECT_FLOAT_EQ(brushRing(s)[0].radius, 6.0f);
+    s.setMode("part");
+    EXPECT_EQ(brushRing(s).size(), 1u) << "a tool with no radius: the dot (the core's showsBrushCircle)";
+    s.setMode("clone");
+    EXPECT_FLOAT_EQ(brushRing(s)[2].radius, 40.0f) << "Clone takes the guides in its circle";
 }
 
 TEST(ToolOverlay, TheRingLiesWhereTheHostPutsItAsWideAsTheBrush) {

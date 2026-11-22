@@ -264,6 +264,7 @@ def settings_of(scene, tool=None):
          "stretch": bool(t.stretch), "straighten": bool(t.straighten), "targets": ",".join(targets) or "none",
          "eraseGuides": bool(t.erase_guides), "eraseParts": bool(t.erase_parts), "eraseFlow": bool(t.erase_flow),
          "matchNeighbors": bool(t.match_neighbors), "soloNewGuides": bool(t.solo_new_guides),
+         "cloneReplace": bool(t.clone_replace),
          "length": float(t.length), "segments": int(t.segments),
          "spacing": float(t.spacing), "partName": t.part_name or "part", "flowSink": t.flow_sink,
          "smoothStrength": float(t.smooth_strength), "level": level, "group": group,
@@ -306,6 +307,31 @@ def push(scalp, scene=None, **only):
     r = process.call("tool_set", session=rt.session, tool=tool, settings=settings)
     if not only:
         groom_tools(scalp).pushed_version = _settings_version[0]
+    take_clone(scene, r)
+    return r
+
+
+def take_clone(scene, reply):
+    """Clone's source as a helper reply says (its settings' cloneSourceSize and clonePickSource),
+    kept on the tool properties for the card."""
+    s = (reply or {}).get("settings") or {}
+    if "cloneSourceSize" not in s:
+        return
+    t = scene.groomlab_tools
+    size, armed = int(s.get("cloneSourceSize") or 0), bool(s.get("clonePickSource"))
+    if t.clone_source_size != size or t.clone_pick_source != armed:
+        with props.quiet():
+            t.clone_source_size = size
+            t.clone_pick_source = armed
+
+
+def clone_action(scalp, **settings):
+    """Clone's Pick Source (clonePickSource=True/False) or Reset (cloneReset=True), sent to the
+    groom's tool; the card's state from the reply. Returns the reply."""
+    scene = groom.scene_of(scalp)
+    rt = groom.ensure(scalp, scene)
+    r = process.call("tool_set", session=rt.session, settings=settings)
+    take_clone(scene, r)
     return r
 
 
@@ -493,6 +519,8 @@ def stroke_end(scalp):
     scene = groom.scene_of(scalp)
     r = call(scalp, "stroke_end")
     groom_tools(scalp).last_end = r
+    if scene.groomlab_tools.tool == "clone":  # a Ctrl+click captured, or Pick Source's click used
+        take_clone(scene, call(scalp, "tool_get"))
     take_roots(scalp, r)
     after_edit(scalp, scene, r.get("undo"), refresh=r.get("committed", False))
     warn = r.get("warnings") or []

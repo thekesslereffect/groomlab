@@ -81,6 +81,7 @@ const char* kAttributeFlag[] = {"-at", "-attribute"};
 const char* kValueFlag[] = {"-v", "-value"};
 const char* kMatchFlag[] = {"-mn", "-matchNeighbors"};
 const char* kSoloNewFlag[] = {"-sng", "-soloNewGuides"};
+const char* kCloneReplaceFlag[] = {"-clr", "-cloneReplace"};  // Clone: copies replace the guides where they land
 // Place and Draw: the new guides' tube as JSON (setPlacementTube: shape, width, aspect, twist).
 const char* kPlaceTubeFlag[] = {"-ptb", "-placeTube"};
 const char* kSpacingFlag[] = {"-sp", "-spacing"};
@@ -100,6 +101,11 @@ const char* kTubeWireframeFlag[] = {"-twf", "-tubeWireframe"};  // ... and as wi
 const char* kTubeColorsFlag[] = {"-tco", "-tubeColors"};        // ... in their regions' colors
 const char* kTubeLevelColorsFlag[] = {"-tlc", "-tubeLevelColors"};  // ... each split tube a shade of its own
 const char* kTubeAlwaysFlag[] = {"-tav", "-tubesAlwaysVisible"};  // ... whichever tool is up
+// Clone: the next press captures the guides rooted in the circle (Pick Source; query: armed), and
+// (query) how many guides the source holds.
+const char* kPickSourceFlag[] = {"-pks", "-pickSource"};
+const char* kCloneSizeFlag[] = {"-csz", "-cloneSize"};
+const char* kClearSourceFlag[] = {"-csr", "-clearSource"};  // Clone: let the source go (Reset)
 const char* kTargetsFlag[] = {"-tg", "-targets"};
 const char* kPaintKindFlag[] = {"-pk", "-paintKind"};
 const char* kPaintTextureFlag[] = {"-ptx", "-paintTexture"};
@@ -333,6 +339,7 @@ void addBrushFlags(MSyntax& s) {
     s.addFlag(kValueFlag[0], kValueFlag[1], MSyntax::kDouble);
     s.addFlag(kMatchFlag[0], kMatchFlag[1], MSyntax::kBoolean);
     s.addFlag(kSoloNewFlag[0], kSoloNewFlag[1], MSyntax::kBoolean);
+    s.addFlag(kCloneReplaceFlag[0], kCloneReplaceFlag[1], MSyntax::kBoolean);
     s.addFlag(kPlaceTubeFlag[0], kPlaceTubeFlag[1], MSyntax::kString);
     s.addFlag(kSpacingFlag[0], kSpacingFlag[1], MSyntax::kDouble);
     s.addFlag(kCollideFlag[0], kCollideFlag[1], MSyntax::kBoolean);
@@ -381,6 +388,7 @@ const SettingFlag kSettingFlags[] = {
     {kStrengthFlag, "strength", 'd'}, {kLevelFlag, "level", 'i'}, {kGroupFlag, "group", 's'}, {kPropagateFlag, "propagate", 'b'},
     {kLengthFlag, "length", 'd'}, {kSegmentsFlag, "segments", 'i'}, {kTubeRadiusFlag, "tubeRadius", 'd'},
     {kSpacingFlag, "spacing", 'd'}, {kMatchFlag, "matchNeighbors", 'b'}, {kSoloNewFlag, "soloNewGuides", 'b'},
+    {kCloneReplaceFlag, "cloneReplace", 'b'},
     {kCollideFlag, "collide", 'b'}, {kPaintWholeFacesFlag, "paintWholeFaces", 'b'}, {kMaskScalpFlag, "maskByScalp", 'b'},
     {kStretchFlag, "stretch", 'b'}, {kStraightenFlag, "straighten", 'b'}, {kSelectedOnlyFlag, "selectedOnly", 'b'},
     {kSymmetryCenterFlag, "symmetryCenter", 'd'}, {kAttributeFlag, "attribute", 's'}, {kPartNameFlag, "partName", 's'},
@@ -392,8 +400,10 @@ const SettingFlag kSettingFlags[] = {
 // Applies the shared flags that are set (not -radius) to `s`, from an MArgDatabase (a stroke) or
 // an MArgParser (the tool's edit flags), as every host sets them (the editor's applyToolSettings:
 // kept in range, all or nothing). Reports and fails on a bad value.
+// With the tool itself (the context's edit flags): Clone's -pickSource and -clearSource too, as
+// every host's clonePickSource and cloneReset (the editor's applyToolSettings on the tool).
 template <class Args>
-MStatus applyBrushFlags(const Args& args, BrushToolSettings& s, const char* command) {
+nlohmann::json brushFlagSettings(const Args& args, const BrushToolSettings& s) {
     nlohmann::json settings = nlohmann::json::object();
     for (const SettingFlag& f : kSettingFlags) {
         if (!args.isFlagSet(f.flag[0])) continue;
@@ -415,8 +425,27 @@ MStatus applyBrushFlags(const Args& args, BrushToolSettings& s, const char* comm
         }
         settings["paintColor"] = color;
     }
+    return settings;
+}
+
+template <class Args>
+MStatus applyBrushFlags(const Args& args, BrushToolSettings& s, const char* command) {
     try {
-        applyToolSettings(s, settings);
+        applyToolSettings(s, brushFlagSettings(args, s));
+    } catch (const std::exception& e) {
+        return fail(command, e.what());
+    }
+    return MS::kSuccess;
+}
+
+template <class Args>
+MStatus applyBrushFlags(const Args& args, BrushTool& tool, const char* command) {
+    nlohmann::json settings = brushFlagSettings(args, tool.settings);
+    bool b = false;
+    if (args.isFlagSet(kPickSourceFlag[0]) && args.getFlagArgument(kPickSourceFlag[0], 0, b)) settings["clonePickSource"] = b;
+    if (args.isFlagSet(kClearSourceFlag[0]) && args.getFlagArgument(kClearSourceFlag[0], 0, b)) settings["cloneReset"] = b;
+    try {
+        applyToolSettings(tool, settings);
     } catch (const std::exception& e) {
         return fail(command, e.what());
     }
@@ -1606,6 +1635,9 @@ MStatus BrushContextCmd::appendSyntax() {
     s.addFlag(kTubeColorsFlag[0], kTubeColorsFlag[1], MSyntax::kBoolean);
     s.addFlag(kTubeLevelColorsFlag[0], kTubeLevelColorsFlag[1], MSyntax::kBoolean);
     s.addFlag(kTubeAlwaysFlag[0], kTubeAlwaysFlag[1], MSyntax::kBoolean);
+    s.addFlag(kPickSourceFlag[0], kPickSourceFlag[1], MSyntax::kBoolean);
+    s.addFlag(kCloneSizeFlag[0], kCloneSizeFlag[1]);
+    s.addFlag(kClearSourceFlag[0], kClearSourceFlag[1], MSyntax::kBoolean);
     s.addFlag(kDebugPickFlag[0], kDebugPickFlag[1], MSyntax::kString);
     s.addFlag(kDebugHoverFlag[0], kDebugHoverFlag[1], MSyntax::kString);
     s.addFlag(kLengthEditFlag[0], kLengthEditFlag[1], MSyntax::kString);
@@ -1626,7 +1658,7 @@ MStatus BrushContextCmd::doEditFlags() {
         if (!context_) return MS::kFailure;
         MArgParser args = parser();
         BrushToolSettings& s = context_->settings();
-        const MStatus flags = applyBrushFlags(args, s, kName);
+        const MStatus flags = applyBrushFlags(args, context_->brushTool(), kName);  // (Clone's Pick Source and Reset too)
         if (!flags) return flags;
         MString text;
         double d = 0;
@@ -1734,6 +1766,9 @@ MStatus BrushContextCmd::doQueryFlags() {
         else if (args.isFlagSet(kSpacingFlag[0])) setResult(double(s.place.spacing));
         else if (args.isFlagSet(kMatchFlag[0])) setResult(s.place.matchNeighbors);
         else if (args.isFlagSet(kSoloNewFlag[0])) setResult(s.place.soloNewGuides);
+        else if (args.isFlagSet(kCloneReplaceFlag[0])) setResult(s.cloneReplace);
+        else if (args.isFlagSet(kPickSourceFlag[0])) setResult(context_->brushTool().captureArmed());
+        else if (args.isFlagSet(kCloneSizeFlag[0])) setResult(static_cast<int>(context_->brushTool().clip().guides.size()));
         else if (args.isFlagSet(kPlaceTubeFlag[0])) setResult(MString(placementTubeJson(s.place).c_str()));
         else if (args.isFlagSet(kCollideFlag[0])) setResult(s.brush.collide);
         else if (args.isFlagSet(kMaskScalpFlag[0])) setResult(s.maskByScalp);

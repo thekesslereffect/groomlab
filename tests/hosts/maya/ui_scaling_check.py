@@ -258,7 +258,7 @@ def main():
         _expect("Simulation" not in [l for l, _, _ in sub["Add"]], "no second Add Simulate")
         render = [l for l, _, _ in sub["Render"]]
         _expect(render == ["Render from Groom File...", "Render as Curves", "Maya Hardware 2.0 (no renderer needed)...",
-                           "RenderMan (prman)...", "V-Ray Standalone..."],
+                           "RenderMan (prman)...", "V-Ray Standalone...", "Refresh Redshift Grooms"],
                 "Render: %r" % render)
         _expect(not {"Groom File...", "Bake Scale Maps", "Render as Curves"} & {l for l, _, _ in sub["Export"]}, "Export")
         _expect("Save Groom File As..." in [l for l, _, _ in sub["Groom Files"]], "one groom-file block")

@@ -17,7 +17,7 @@ SHIPPED_ALPHAS = _shipped_dir("alphas")
 groomlab_core.set_shipped_brush_alpha_dir(SHIPPED_ALPHAS)
 
 
-BRUSH_MODES = ("comb", "slide", "smooth", "straighten", "lift", "twist", "attract", "length", "cut", "shape", "erase", "paint", "clump", "place", "draw", "part", "flow", "lengths", "roots")
+BRUSH_MODES = ("comb", "slide", "smooth", "straighten", "lift", "twist", "attract", "length", "cut", "shape", "erase", "paint", "clump", "place", "draw", "clone", "part", "flow", "lengths", "roots")
 # What the Shape brush paints on the guides' tubes (tube guides).
 TUBE_CHANNELS = ("width", "flatness", "twist")
 BRUSH_CONTEXT = "groomLabBrushCtx1"
@@ -43,7 +43,7 @@ def brush_stroke(groom, mode, points, radius=0.25, strength=1.0, level=0, group=
                  targets="guides", paint_kind="guides", paint_texture="", paint_resolution=1024, hardness=0.0,
                  smooth_strength=1.0, paint_color=None, paint_channels="rgba", strength_profile=None,
                  falloff_profile=None, solo_new_guides=False, tube_channel="width", tube=None,
-                 paint_mode="replace", paint_whole_faces=False):
+                 paint_mode="replace", paint_whole_faces=False, clone_replace=False):
     """Apply one scripted brush stroke (one undo step) to a groom's guides, parts or flow arrows.
 
     `points` is the stroke path in world space; each point stamps a brush
@@ -67,6 +67,10 @@ def brush_stroke(groom, mode, points, radius=0.25, strength=1.0, level=0, group=
       gives: shape, width, aspect, twist; None: the brush's as it is) is the new guides' tube: they
       take its shape (a built-in or a library shape), and blend their width, flatness and twist
       from the two nearest guides (with match_neighbors; none near: the tube's own).
+    - clone copies the guides rooted within `radius` of the first point (the brush's level or group,
+      not hidden or frozen; their children come along) and sets a copy down at every point after,
+      each guide's shape turned to the scalp where it lands; with `clone_replace` the guides of
+      those levels already within the radius there go first (frozen ones stay).
     - part adds a part through the points (projected onto the scalp),
       named `part_name` (made unique); symmetry adds its mirror image.
     - paint moves the per-guide `attribute` toward `value` (a painted map);
@@ -104,7 +108,8 @@ def brush_stroke(groom, mode, points, radius=0.25, strength=1.0, level=0, group=
               "value": value, "matchNeighbors": match_neighbors, "collide": collide, "partName": part_name,
               "stretch": stretch, "targets": targets, "hardness": float(hardness), "smoothStrength": float(smooth_strength),
               "strengthProfile": curve_text(strength_profile), "falloffProfile": curve_text(falloff_profile),
-              "soloNewGuides": bool(solo_new_guides), "tubeChannel": _tube_channel(tube_channel)}
+              "soloNewGuides": bool(solo_new_guides), "tubeChannel": _tube_channel(tube_channel),
+              "cloneReplace": bool(clone_replace)}
     kwargs["paintMode"] = paint_mode
     if paint_whole_faces:
         kwargs["paintWholeFaces"] = True  # (brush_tool's: the faces under each stamp filled whole)
@@ -188,7 +193,7 @@ def brush_tool(mode="comb", radius=60, strength=1.0, level=0, group="", propagat
                targets="guides", paint_color=None, paint_channels="rgba", mask_by_scalp=True, strength_profile=None,
                falloff_profile=None, solo_new_guides=False, tube_channel="width", tube=None, activate=True,
                paint_mode="replace", alpha="", alpha_rotation="fixed", alpha_angle=0.0, alpha_spacing=0.25,
-               alpha_invert=False, paint_whole_faces=False):
+               alpha_invert=False, paint_whole_faces=False, clone_replace=False):
     """Configure the interactive GroomLab brush (radius in pixels) and make it the current tool.
 
     Select the groom first; then drag over it in the viewport. Each drag is one undo step.
@@ -232,6 +237,10 @@ def brush_tool(mode="comb", radius=60, strength=1.0, level=0, group="", propagat
       "flatness" or "twist" (a negative strength does the opposite).
     - `tube` (place, draw): the new guides' tube, as in brush_stroke (the Groom Tools' Tubes panel
       sets it to its shape and Width, Flatness and Twist); placement_tube() reads it back.
+    - clone: Ctrl+click over guides copies the ones rooted in the circle (the brush's level, not
+      hidden or frozen; their children come along), or clone_pick_source() makes the next click do
+      it; then each click sets copies down, a drag before release spinning them about the scalp's
+      normal. `clone_replace`: the guides of those levels already in the circle there go first.
     - `solo_new_guides` (place, draw): each stroke's new guides stay unfrozen and every other
       guide is frozen, so the brushes after work on them alone (the Groom Tools turn it on).
     - Ctrl is the opposite: Length shortens, Lift lays down, Twist and Curl turn back, Attract
@@ -257,7 +266,7 @@ def brush_tool(mode="comb", radius=60, strength=1.0, level=0, group="", propagat
               "soloNewGuides": bool(solo_new_guides), "tubeChannel": _tube_channel(tube_channel),
               "alpha": alpha or "", "alphaRotation": alpha_rotation, "alphaAngle": float(alpha_angle),
               "alphaSpacing": float(alpha_spacing), "alphaInvert": bool(alpha_invert),
-              "paintWholeFaces": bool(paint_whole_faces)}
+              "paintWholeFaces": bool(paint_whole_faces), "cloneReplace": bool(clone_replace)}
     kwargs.update(_paint_color_flags(paint_color, paint_channels))
     if attribute:
         kwargs["attribute"] = attribute
@@ -311,3 +320,26 @@ def length_keys_edit(words):
     Raises RuntimeError when refused."""
     from maya import cmds
     cmds.groomLabBrushCtx(BRUSH_CONTEXT, edit=True, lengthEdit=words)
+
+
+def clone_pick_source(on=True):
+    """The Clone tool: the next click in the viewport copies the guides rooted in the brush circle,
+    as Ctrl+click does (the Groom Tools' Pick Source). Returns whether a capture is armed."""
+    if not cmds.contextInfo(BRUSH_CONTEXT, exists=True):
+        return False
+    cmds.groomLabBrushCtx(BRUSH_CONTEXT, edit=True, pickSource=bool(on))
+    return cmds.groomLabBrushCtx(BRUSH_CONTEXT, query=True, pickSource=True)
+
+
+def clone_reset():
+    """The Clone tool lets its source go, ready for a new pick (the Groom Tools' Reset; a Ctrl+click
+    off the model and picking another tool do the same)."""
+    if cmds.contextInfo(BRUSH_CONTEXT, exists=True):
+        cmds.groomLabBrushCtx(BRUSH_CONTEXT, edit=True, clearSource=True)
+
+
+def clone_source_size():
+    """How many guides the Clone tool's source holds (their children come along); 0 before a capture."""
+    if not cmds.contextInfo(BRUSH_CONTEXT, exists=True):
+        return 0
+    return cmds.groomLabBrushCtx(BRUSH_CONTEXT, query=True, cloneSize=True)

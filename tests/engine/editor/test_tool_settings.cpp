@@ -89,3 +89,25 @@ TEST(ToolSettings, FreezeSetsPaintAsideAndGivesItBack) {
     EXPECT_THROW(pickTool(s, "nope", kept), std::invalid_argument);
     EXPECT_EQ(pickedTool(s), "paint");
 }
+
+TEST(ToolSettings, ClonesSourceIsTheToolsAsEveryHostSetsIt) {
+    // Clone (issue 91): Replace a setting; Pick Source and Reset the tool's own, applied after the
+    // settings, every host's ids (the app's card, the helper's keys, Maya's -pickSource/-clearSource).
+    BrushTool tool;
+    applyToolSettings(tool, {{"mode", "clone"}, {"cloneReplace", true}, {"clonePickSource", true}});
+    EXPECT_TRUE(tool.settings.cloneReplace);
+    EXPECT_TRUE(tool.captureArmed());
+    nlohmann::json j = toolSettingsJson(tool);
+    EXPECT_EQ(j["clonePickSource"], true);
+    EXPECT_EQ(j["cloneSourceSize"], 0);
+    EXPECT_EQ(j["cloneReplace"], true);
+    applyToolSettings(tool, j);  // read back as is: the tool's state keys taken or skipped
+    EXPECT_TRUE(tool.captureArmed());
+    applyToolSettings(tool, {{"cloneReset", true}});
+    EXPECT_FALSE(tool.captureArmed()) << "Reset lets the source go, a capture armed too";
+    applyToolSettings(tool, {{"clonePickSource", true}});
+    applyToolSettings(tool, {{"mode", "comb"}});
+    EXPECT_FALSE(tool.captureArmed()) << "another tool lets Clone's source go";
+    EXPECT_THROW(applyToolSettings(tool, {{"clonePickSource", "yes"}, {"mode", "clone"}}), std::invalid_argument);
+    EXPECT_EQ(tool.settings.tool, BrushToolSettings::Tool::Brush) << "all or nothing";
+}

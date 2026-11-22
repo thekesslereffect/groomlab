@@ -81,7 +81,7 @@ def _linear_rgba(c, alpha=1.0):
 # The tools by group, as their icons are colored (Maya's widgets.ICON_GROUPS, the app's brush
 # categories): the guide tools share paint's color.
 TOOL_GROUPS = {
-    "create": ("place", "draw", "part", "flow"),
+    "create": ("place", "draw", "clone", "part", "flow"),
     "shape": ("comb", "slide", "smooth", "lift", "twist", "attract", "shape"),
     "trim": ("cut", "length", "lengths", "erase"),
     "paint": ("paint", "freeze", "invert", "unfreeze", "select"),
