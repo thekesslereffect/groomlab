@@ -4088,7 +4088,7 @@ class DockableWindowsTest(unittest.TestCase):
                                       "Guides from Photos (experimental)...", "Groom Files", "Import", "Add", "Simulate",
                                       "Display", "Review", "Studio", "Render", "Export", "Utilities", "Theme",
                                       "Install GroomLab Hotkeys",
-                                      "Help"])
+                                      "Radial Menu Settings...", "Help"])
 
             def entries_of(label, tooltips=True, parent=menu.MENU):
                 sub = next(parent + "|" + i for i in cmds.menu(parent, query=True, itemArray=True)

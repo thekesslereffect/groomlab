@@ -2335,8 +2335,8 @@ ACTIONS = {
     "help.discord": open_discord,
     "help.donate": open_donate,
     "help.about": show_about,
-}
     "radial.settings": lambda: __import__("groomlab.ui.radial_menu", fromlist=["radial_menu"]).show_settings(),
+}
 # Maya's names for the items other code finds (the RenderMan item goes after Render as Curves; the
 # Review check marks follow the groom as the menu opens), and the check items' state.
 ITEM_NAMES = {"render.asCurves": RENDER_AS_CURVES_ITEM, "review.heatmap": HEATMAP_ITEM, "review.hud": HUD_ITEM}

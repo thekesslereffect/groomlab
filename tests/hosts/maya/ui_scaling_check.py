@@ -248,7 +248,8 @@ def main():
         top = [label for label, _, _ in tree]
         _expect(top == ["Groom Tools", "Graph Editor", "Create Groom from Selection", "Card Atlas...", "Add Sample Mesh",
                         "Guides from Photos (experimental)...", "Groom Files", "Import", "Add", "Simulate", "Display",
-                        "Review", "Studio", "Render", "Export", "Utilities", "Theme", "Install GroomLab Hotkeys", "Help"],
+                        "Review", "Studio", "Render", "Export", "Utilities", "Theme", "Install GroomLab Hotkeys",
+                        "Radial Menu Settings...", "Help"],
                 "top: %r" % top)
         sub = {label: children for label, children, _ in tree}
         _expect([l for l, _, _ in sub["Help"]] == ["Docs", "Keyboard Shortcuts", "Check for Updates...",
@@ -279,6 +280,22 @@ def main():
                 return set(i for p in paths for i in d.listed_ids(d.get(p), generators=generators.items()))
 
             theme_ids = ids("menus/theme/items")
+            from groomlab.ui import radial_menu
+
+            def radial_ids(entry):
+                """The action ids of the radial menu's rings shown for Maya (entries' "action")."""
+                found = set()
+                if isinstance(entry, dict):
+                    if "maya" in entry.get("hosts", ["maya"]):
+                        if entry.get("action"):
+                            found.add(entry["action"])
+                        for key, child in entry.items():  # (items, and brushOptions' per-tool lists)
+                            if key != "action" and isinstance(child, (dict, list)):
+                                found |= radial_ids(child)
+                elif isinstance(entry, list):
+                    for child in entry:
+                        found |= radial_ids(child)
+                return found
             empty = [e for e in d.get("palette/empty/items") if not (isinstance(e, dict) and e.get("id") == "import")]
             tables = (
                 ("menu.ACTIONS", menu.ACTIONS, None,
@@ -308,6 +325,8 @@ def main():
                 ("ParamPanel.node_action_table", editor.params.node_action_table("node"), None,
                  ids("graph/nodeActions")),
                 ("hotkeys.ACTIONS", hotkeys.ACTIONS, None, set(e for e in d.get("markingMenu/tail") if isinstance(e, str))),
+                # The radial menu's rings (Alt+S): every "action" they show for Maya.
+                ("radial_menu.ACTIONS", radial_menu.ACTIONS, None, radial_ids(d.get("radialMenu"))),
             )
             actions = d.get("actions")
             for name, table, owner, listed in tables:
