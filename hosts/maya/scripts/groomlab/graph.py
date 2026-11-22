@@ -423,8 +423,10 @@ class GraphModel(object):
     def save(self, groom):
         """Validate, then store the graph and its layout on the groom: one undo step.
 
-        The groom's viewNode (the Focus node) follows a renamed node and is
-        cleared when the node it names is gone."""
+        What names the graph's nodes follows the edit in the same step, as in every host (the
+        editor's follow_graph_edit): the Sculpt nodes' edits (renamed, copied, a gone node's
+        dropped), the brushes' Sculpt node, the viewNode (the Focus node) and Show Tubes'
+        braidTubes follow a renamed node and are cleared when the node they name is gone."""
         if self.unreadable:
             raise GraphError(self.unreadable)
         problems = self.validate()
@@ -438,12 +440,7 @@ class GraphModel(object):
             groomlab.sync_controls(groom, self.to_dict())
             if cmds.getAttr(groom + ".graph") != text:  # unchanged graph: keep the evaluation cache
                 cmds.setAttr(groom + ".graph", text, type="string")
-            # Sculpt nodes' edits follow renames, copies and deletions, in the same undo step.
-            from groomlab import sculpts
-            copied, self.copied = self.copied, {}
-            sculpts.follow_graph_edit(groom, renamed=self.renamed, copied={k: v for k, v in copied.items() if k in self.nodes},
-                                      kept=set(self.nodes))
-            self._sync_view_node(groom)
+            self._follow(groom, text)
 
     def complete_params(self):
         """Write every param each node leaves out (its spec default) and each node's version, as
@@ -495,17 +492,13 @@ class GraphModel(object):
         self._take(edit)
         return done
 
-    def _sync_view_node(self, groom):
-        from maya import cmds
-        viewed = cmds.getAttr(groom + ".viewNode") or ""
+    def _follow(self, groom, text):
+        """save's followers: renames, copies and removals since the last save carried to what
+        names the nodes (the editor's rules, every host's: groomlab_core.follow_graph_edit)."""
+        from groomlab.params import follow_nodes
+        copied, self.copied = self.copied, {}
         renamed, self.renamed = self.renamed, {}
-        if not viewed:
-            return
-        wanted = renamed.get(viewed, viewed)
-        if wanted not in self.nodes:
-            wanted = ""
-        if wanted != viewed:
-            cmds.setAttr(groom + ".viewNode", wanted, type="string")
+        follow_nodes(groom, text, moved=renamed.items(), copied={k: v for k, v in copied.items() if k in self.nodes})
 
     def save_layout(self, groom):
         """Store only the layout (node positions, backdrops) in the groom's graph as it is stored:
@@ -1203,6 +1196,17 @@ class GraphModel(object):
         `node`: node reads src on its first input that takes src's output, dst reads node. A
         GraphError (nothing changed) when no input of node takes it or node can't feed dst."""
         self._insert("insert_on_link", src, dst, input_name, node, output or "")
+
+    def wire_after_node(self, anchor, node):
+        """Add Node after the selected node, every host's rule (the editor's wireAfterNode):
+        `node` into `anchor`'s first outgoing link it fits in, else fed by `anchor` on its first
+        input that takes it. Whether it was wired (else nothing changed)."""
+        edit = self._edit()
+        with _core_errors():
+            wired = edit.wire_after_node(anchor, node)
+        if wired:
+            self._take(edit)
+        return wired
 
     def insert_after(self, anchor, node, input_name=None):
         """Put `node` right after `anchor` in its chain (anchor -> node -> anchor's first

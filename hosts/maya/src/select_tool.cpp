@@ -18,6 +18,7 @@
 #include "active_groom.h"
 #include "groom_shape.h"
 #include "maya_inputs.h"
+#include "groomlab/editor/tool_select.h"
 #include "groomlab/brush.h"
 #include "groomlab/stroke.h"
 #include "groomlab/guide_selection.h"
@@ -33,6 +34,7 @@ const char* kRootsOnlyFlag[] = {"-ro", "-rootsOnly"};
 const char* kDebugLassoFlag[] = {"-dbl", "-debugLasso"};
 const char* kDebugModeFlag[] = {"-dbm", "-debugMode"};
 const char* kSoloSelectionFlag[] = {"-sos", "-soloSelection"};
+const char* kHideOthersFlag[] = {"-hdo", "-hideOthers"};
 const char* kSymmetryFlag[] = {"-sym", "-symmetry"};
 
 std::string modeFor(const MEvent& event) {
@@ -100,6 +102,7 @@ int GuideSelectContext::select(const std::vector<std::array<float, 2>>& lasso, c
     pick.rootsOnly = rootsOnly;
     pick.clickPixels = clickPixels;
     pick.solo = soloSelection;
+    pick.hide = hideOthers;
     pick.symmetry = symmetry;
     return selectGuidesInView(lasso, mode, pick);
 }
@@ -116,27 +119,29 @@ std::vector<GuideId> pickGuidesInView(const std::vector<std::array<float, 2>>& l
     const HierarchyPtr h = shape ? shape->evaluatedHierarchy() : nullptr;
     if (!h) return {};
 
-    // Guides are world space (the groom draws in world space, its transform locked).
-    // Hidden groups can't be picked.
-    const std::vector<GuideId> candidates = guidesAt(*h, level, group, readHiddenGuideGroups(groom.node()));
-    const SelectionProjector view = selectionProjector(M3dView::active3dView());
-    // Only what the view shows: guide points behind the scalp are not picked.
-    const ViewProjector visible = visibleProjector(view.project, scalpVisibility(shape->evaluatedScalp(), activeToolView()));
-    std::vector<GuideId> picked = pickGuides(*h, candidates, visible, lasso, rootsOnly, clickPixels,
-                                             view.matrix.valid() ? &view.matrix : nullptr);
-    if (symmetry != "none" && !picked.empty()) {  // each picked guide's mirror guide too
+    // Guides are world space (the groom draws in world space, its transform locked). Every host's
+    // pick (the editor's pickGuidesInView, tool_select.h): hidden groups' guides not picked, only
+    // what the view shows, each picked guide's mirror guide with symmetry.
+    groomlab::GuidePick p;  // (the editor's; this file's GuidePick is the tool's own)
+    p.level = level;
+    p.group = group;
+    p.hiddenGroups = readHiddenGuideGroups(groom.node());
+    p.rootsOnly = rootsOnly;
+    p.clickPixels = clickPixels;
+    const MeshPtr scalp = shape->evaluatedScalp();
+    if (symmetry != "none") {
         BrushToolSettings mirror;
         try {
             mirror.setSymmetry(symmetry);
         } catch (const std::invalid_argument&) {
         }
-        const MeshPtr scalp = shape->evaluatedScalp();
-        picked = withMirrorGuides(*h, picked, StrokeSymmetry::of(mirror.brush, scalp.get()));
+        p.symmetry = StrokeSymmetry::of(mirror.brush, scalp.get());
     }
+    const std::vector<GuideId> picked = groomlab::pickGuidesInView(*h, activeToolView(), scalp, lasso, p);
     return picked;
 }
 
-bool applyGuideSelection(const std::vector<GuideId>& ids, const std::string& mode, bool solo, bool undoable) {
+bool applyGuideSelection(const std::vector<GuideId>& ids, const std::string& mode, bool solo, bool undoable, bool hide) {
     MDagPath groom;
     if (!activeGroom(groom)) {  // the pinned groom, else the selected one
         MGlobal::displayWarning("GroomLab select: select a groom (groomLabShape) first");
@@ -148,7 +153,7 @@ bool applyGuideSelection(const std::vector<GuideId>& ids, const std::string& mod
     if (mode == "toggle") cmd += " -toggle";
     if (mode == "deselect") cmd += " -deselect";
     if (ids.empty()) cmd = "groomLabGuides -clearSelection";
-    if (solo) cmd += " -freezeOthers";  // the rest frozen (nothing picked: all unfrozen)
+    if (solo) cmd += hide ? " -hideOthers" : " -freezeOthers";  // the rest frozen or hidden (nothing picked: none)
     for (const GuideId id : ids) cmd += MString(" -guide \"") + std::to_string(id).c_str() + "\"";
     cmd += MString(" \"") + groom.fullPathName() + "\"";
     MGlobal::executeCommand(cmd, false, undoable);
@@ -162,7 +167,7 @@ int selectGuidesInView(const std::vector<std::array<float, 2>>& lasso, const std
         return 0;
     }
     const std::vector<GuideId> picked = pickGuidesInView(lasso, pick);
-    applyGuideSelection(picked, mode, pick.solo, true);
+    applyGuideSelection(picked, mode, pick.solo, true, pick.hide);
     return static_cast<int>(picked.size());
 }
 
@@ -185,6 +190,7 @@ MStatus GuideSelectContextCmd::appendSyntax() {
     s.addFlag(kDebugLassoFlag[0], kDebugLassoFlag[1], MSyntax::kString);
     s.addFlag(kDebugModeFlag[0], kDebugModeFlag[1], MSyntax::kString);
     s.addFlag(kSoloSelectionFlag[0], kSoloSelectionFlag[1], MSyntax::kBoolean);
+    s.addFlag(kHideOthersFlag[0], kHideOthersFlag[1], MSyntax::kBoolean);
     s.addFlag(kSymmetryFlag[0], kSymmetryFlag[1], MSyntax::kString);
     return MS::kSuccess;
 }
@@ -200,6 +206,7 @@ MStatus GuideSelectContextCmd::doEditFlags() {
         if (args.isFlagSet(kGroupFlag[0]) && args.getFlagArgument(kGroupFlag[0], 0, text)) context_->group = text.asChar();
         if (args.isFlagSet(kRootsOnlyFlag[0]) && args.getFlagArgument(kRootsOnlyFlag[0], 0, b)) context_->rootsOnly = b;
         if (args.isFlagSet(kSoloSelectionFlag[0]) && args.getFlagArgument(kSoloSelectionFlag[0], 0, b)) context_->soloSelection = b;
+        if (args.isFlagSet(kHideOthersFlag[0]) && args.getFlagArgument(kHideOthersFlag[0], 0, b)) context_->hideOthers = b;
         if (args.isFlagSet(kSymmetryFlag[0]) && args.getFlagArgument(kSymmetryFlag[0], 0, text)) {
             try {
                 BrushToolSettings check;
@@ -231,6 +238,7 @@ MStatus GuideSelectContextCmd::doQueryFlags() {
         else if (args.isFlagSet(kGroupFlag[0])) setResult(MString(context_->group.c_str()));
         else if (args.isFlagSet(kRootsOnlyFlag[0])) setResult(context_->rootsOnly);
         else if (args.isFlagSet(kSoloSelectionFlag[0])) setResult(context_->soloSelection);
+        else if (args.isFlagSet(kHideOthersFlag[0])) setResult(context_->hideOthers);
         else if (args.isFlagSet(kSymmetryFlag[0])) setResult(MString(context_->symmetry.c_str()));
         return MS::kSuccess;
     });

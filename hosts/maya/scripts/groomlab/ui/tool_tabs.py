@@ -414,6 +414,12 @@ class GuidesTab(_GroomTab):
         self.segments.dragged.connect(self.segments_dragged)
         self.segments.committed.connect(self.segments_committed)
         self.box.add(self.segments)
+        # Segments by length (issue #98): a switch under the slider; toggled, the targets resampled
+        # at the slider's count by length (on) or to it (off), one undo step.
+        self.by_length = widgets.switch(definitions.text("segmentsByLength"), definitions.text("segmentsByLengthTip"), False,
+                                        "segmentsByLength")
+        self.by_length.toggled.connect(self.by_length_toggled)
+        self.box.add(self.by_length.row)
         # Edits on many guides: one menu; Generate Children's count beside it, inline (no prompt):
         # children per guide for the selected guides, else for the picked group.
         edits = QtWidgets.QToolButton()
@@ -489,6 +495,17 @@ class GuidesTab(_GroomTab):
             self.segments.setLabel("Segments")
             self.segments.unit_tip = ""
         self.segments.setEnabled(bool(counts))
+        # The switch: on where the picked group goes by length (a selection keeps what it was set to).
+        if group and not selected:
+            picked = [g for g in groomlab.list_guide_groups(self.groom) if g["name"] == group]
+            on = bool(picked) and picked[0].get("segmentLength", 0.0) > 0.0
+            self.by_length.blockSignals(True)
+            self.by_length.setChecked(on)
+            self.by_length.blockSignals(False)
+            if on and picked[0]["segments"] > 0:  # (by length: the count of a guide of the average length)
+                self.segments.setValue(picked[0]["segments"])
+                self.segments.setLabel("Segments (%s, by length)" % group)
+        self.by_length.setEnabled(bool(counts))
 
     def segments_dragged(self, value):
         """Live: the guides resampled to `value` as a preview, at most one per 30 ms."""
@@ -504,7 +521,8 @@ class GuidesTab(_GroomTab):
         if self._preview_segments is None or not self.groom:
             return
         try:
-            groomlab.preview_resample_guides(self.groom, self._preview_segments, group=self.segments_group())
+            groomlab.preview_resample_guides(self.groom, self._preview_segments, group=self.segments_group(),
+                                             by_length=self.by_length.isChecked())
             self._previewing = True
         except Exception as e:  # a timer's slot: nothing above it would report it
             self.status(str(e).strip())
@@ -528,13 +546,20 @@ class GuidesTab(_GroomTab):
         group = self.segments_group()
         selected = bool(groomlab.selected_guides(self.groom))
         counts = groomlab.guide_segments(self.groom, group=group)
-        if counts and (not selected or any(c != segments for c in counts)):
-            count = self.run(groomlab.resample_guides, self.groom, segments, group=group)
+        by_length = self.by_length.isChecked()
+        if counts and (by_length or not selected or any(c != segments for c in counts)):
+            count = self.run(groomlab.resample_guides, self.groom, segments, group=group, by_length=by_length)
             if count is not None:
                 scope = " (new guides of %s too)" % group if group else "" if selected else " (new guides too)"
-                self.status("Resampled %d guides to %d segments%s." % (count, segments, scope))
+                how = "by length, %d for the average guide" % segments if by_length else "to %d segments" % segments
+                self.status("Resampled %d guides %s%s." % (count, how, scope))
         self.end_preview()
         self.sync_segments()
+
+    def by_length_toggled(self, _on):
+        """The switch: the targets resampled at the slider's count, by length or not (one undo step)."""
+        if self.groom and groomlab.guide_segments(self.groom, group=self.segments_group()):
+            self.segments_committed(self.segments.value())
 
     def set_groom(self, groom):
         if groom != self.groom:

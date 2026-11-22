@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Writes the home page's sample grooms with the WebAssembly module (build it first: docs/WEB.md), on
-// the Manny head (hosts/maya/meshes/manny_head.obj, CC BY 4.0), each grown from a GroomLab preset
+// the Manny head (engine/assets/meshes/manny_head.obj, CC BY 4.0), each grown from a GroomLab preset
 // with its guides baked from a small combing graph (as make_sample.mjs does):
 //
 //   web/public/samples/manny_curls.groom  the "Try the node graph" section: a big head of brown
@@ -24,8 +24,8 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const require = createRequire(import.meta.url);
 const createGroomLab = require(resolve(root, 'web/public/wasm/groomlab.js'));
 
-const mesh = readFileSync(resolve(root, 'hosts/maya/meshes/manny_head.obj'), 'utf8');
-const curly = readFileSync(resolve(root, 'hosts/maya/presets/curly.json'), 'utf8');
+const mesh = readFileSync(resolve(root, 'engine/assets/meshes/manny_head.obj'), 'utf8');
+const curly = readFileSync(resolve(root, 'engine/assets/presets/curly.json'), 'utf8');
 
 // Where hair grows on Manny (cm, y up, facing +z), 0 to 1 at the root: above a hairline low at the
 // nape and over the ears, higher at the temples and the brow (make_sample.mjs's). `drop` lowers it

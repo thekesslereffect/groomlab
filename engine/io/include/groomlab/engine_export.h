@@ -107,4 +107,30 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
+// Unity's feathers, as asked (every host's: the app's, the Blender helper's export_unity_feathers).
+struct UnityFeathersOptions {
+    std::size_t points = 16, barbPoints = 6;                 // per strand and per barb (3 to 128)
+    std::size_t maxStrandsPerGroup = kUnityMaxStrandsPerGroup;
+    std::string lod;                                         // the barbs' level of detail (setBarbLod)
+    std::optional<bool> shafts;                              // the shafts as strands (unset: not with a rachis)
+    bool rachis = true;                                      // the rachis mesh, when the feathers have one
+    bool writeRachis = true;                                 // it written as FBX here (false: the host writes it)
+};
+
+// What it wrote.
+struct UnityFeathersExport {
+    std::string abc, fbx, manifest;   // <name>_strands.abc, <name>_rachis.fbx ("" none), <name>_unity_feathers.json
+    std::string groups;               // the strand groups in Unity's order, as JSON
+    std::vector<std::string> warnings;
+    std::vector<std::string> files() const;
+};
+
+// Unity's feathers, every host's: the strands as Unity's strand groups (<name>_strands.abc: a curves
+// object per groom group, resampled to the options' points), the rachis mesh to skin
+// (<name>_rachis.fbx, meters, Y up: when the feathers have one and o.rachis; written when
+// o.writeRachis) and the manifest (unityFeathersManifestJson). Throws std::invalid_argument for
+// options it cannot take, std::runtime_error (or AlembicError) for a file it cannot write.
+UnityFeathersExport writeUnityFeathers(const StrandSet& strands, const ScalpMesh* scalp, double seconds, double secondsPerFrame,
+                                       const std::string& directory, const std::string& name, const UnityFeathersOptions& o);
+
 }  // namespace groomlab

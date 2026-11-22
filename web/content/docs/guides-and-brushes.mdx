@@ -23,11 +23,11 @@ basic workflow:
   tool card and lists as Maya's, with Select and Freeze last. The keys below work without
   installing anything: **B** + drag, **M** + drag, **Alt+Shift+X**, **Page Up** / **Page Down**,
   **S** for Select, **Esc** to leave the brush, **Alt** + drag to move the camera with any brush.
-  There is no marking menu. See [GroomLab app](/docs/app#groom-with-brushes).
+  **Alt+S** opens the same radial menu as here. See [GroomLab app](/docs/app#groom-with-brushes).
 
   **Blender:** press **N** in the 3D viewport and open the **GroomLab** tab: **Groom Tools** has the
   same tabs, tool grid, tool card and **Guide groups** list. **B** + drag, **M** + drag, **Page
-  Up** / **Page Down** and **S** work as here; **Y** opens a pie menu in place of the marking menu,
+  Up** / **Page Down** and **S** work as here; **Y** opens a pie menu in place of the radial menu,
   and **Esc** or right-click cancels a stroke. See
   [Blender](/docs/blender#groom-tools).
 </Callout>
@@ -56,6 +56,11 @@ and reshapes all its descendants.
   of their own: the group's count changing later leaves them as they are, until you resample them
   to the group's count again, or right-click the group > **Reset Segments** (every guide of the
   group back to its count, frozen ones kept). Give guides more segments before combing tight curls.
+- **Segments by Length:** the switch under Segments. On, the count is for a guide of the guides'
+  average length; each other guide gets as many as its length calls for, so the points are as far
+  apart on every guide and brushes act alike on long and short ones. Resampling a whole group by
+  length also makes the group keep that spacing: its new guides get segments by their length, and
+  **Reset Segments** keeps it. Off, every guide gets the same count again.
 - **Which guides drive the strands:** by default Interpolate uses each group's deepest level.
   Where a group has children, the strands are interpolated from the children, and the primaries
   shape the strands through them; a group without children drives the strands itself ([Interpolate](/docs/node-graph#interpolate-and-guide-influence)).
@@ -520,6 +525,7 @@ and each drag is one undo step. The brushes are the same, in the same order, in 
 | --- | --- | --- |
 | Create | **Place** | Click for one guide, drag to place several (at least **Spacing** apart). New guides take the shape of the nearby guides (**Match nearby guides**). |
 | | **Draw** | Press on the scalp and draw the guide's shape. |
+| | **Clone** | Copy the guides under the circle (**Ctrl+click**) and set copies down wherever you click; drag left or right to spin them (see [Clone](#clone)). |
 | | **Part** | Draw a part line; interpolation does not blend guides across it. |
 | | **Flow** | Draw direction arrows and whorls for short hair without guides (see below). |
 | Shape | **Comb** | The main shaping brush: drags guides along the stroke with roots pinned. With **Stretch** on, combing also lengthens or shortens them. |
@@ -542,10 +548,33 @@ instead. A stroke paints toward the **Value** (1 is the setting's full value); *
 toward 0: thinner hair on the width map, no hair on the density map. For example, to thin the
 sideburns, create the map for Density and Ctrl+paint over them.
 
+**What lights up under the brush.** Before you press, the guides the brush would edit are lit
+under its circle: those of its level or group, not hidden and not frozen. With guides selected
+(every other guide is then frozen), only the selected ones light up.
+
 **Erasing hair.** The **Erase** brush removes guides (with their children), part lines and flow
 arrows, so it does nothing on a groom whose hair comes from the Scatter alone. To take hair away,
 paint the density map holding **Ctrl** (Paint tab > **+ New Map** > For: **Density**); paint it
 back without Ctrl.
+
+### Clone
+
+**Clone** copies a patch of guides and sets it down elsewhere, as many times as you like.
+
+1. **Ctrl+click** over the guides to copy: the ones rooted inside the circle are taken (the brush's
+   level or group, not hidden or frozen; their children come along). Or click **Pick Source**, then
+   click. The card says how many guides the source holds. Before you capture, the guides a capture
+   would take light up under the circle.
+2. Move the cursor: the copies show under it. **Click** to set them down. Each guide keeps its
+   shape, tube and painted maps, turned to the scalp where it lands.
+3. To turn the patch, press and **drag left or right** before letting go (half a degree a pixel;
+   right turns it clockwise seen from outside). Each set-down is one undo step.
+
+**Replace** removes the guides of the copied levels already inside the circle where the copies land
+(frozen guides stay). Off, the copies are added among them. With symmetry on, the mirror image is set
+down too. **Reset**, a **Ctrl+click** off the model or picking another tool lets the source go, ready
+for a new pick. Root-first tubes are copied with their whole tube hierarchy; they follow a spun patch
+but are not turned themselves, and are not mirrored.
 
 ### Length Keys
 
@@ -592,7 +621,7 @@ to x1, so you can come back, drag a key and apply again without scaling twice.
 - **B** + drag sets the radius, **M** + drag the strength, after **GroomLab > Install GroomLab
   Hotkeys** (or middle-drag and Shift+middle-drag).
 - **Page Up** and **Page Down** step the active group up or down a level.
-- **Y** + click opens a marking menu, after **GroomLab > Install GroomLab Hotkeys**.
+- **Alt+S** opens the [radial menu](/docs/app#the-radial-menu), after **GroomLab > Install GroomLab Hotkeys**.
 - Tablet **pen pressure** scales the strength.
 
 **GroomLab > Help > Keyboard Shortcuts** lists every key (the same table as the app and Blender) and

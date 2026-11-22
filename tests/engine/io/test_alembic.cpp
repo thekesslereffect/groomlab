@@ -802,6 +802,73 @@ TEST(Alembic, WritesUvsChannelsAndColorLikeUsd) {
 
 // What Unity's hair package reads (through com.unity.formats.alembic): points, per-point
 // widths and "uvs" with a value per point; a uniform point count saves it resampling.
+// Issue 81: vertexData writes every color and channel per point, as Redshift's proxy reads hair
+// user data: Cd and hair_color at every point (a tip blend's own colors where the strands have
+// them), each strand channel at its strand's points, the point channels too.
+TEST(Alembic, VertexDataWritesColorsAndChannelsPerPoint) {
+    namespace Abc = Alembic::Abc;
+    namespace AbcG = Alembic::AbcGeom;
+    const std::string path = tempPath("groomlab_vertex_data.abc");
+    StrandSet s;
+    s.addStrand(1, {{0, 0, 0}, {0, 1, 0}, {0, 2, 0}});
+    s.addStrand(2, {{1, 0, 0}, {1, 1, 0}});
+    s.addStrandChannel(kMelaninChannel, 0.25f)[1] = 0.75f;
+    // A tip blend: RGB per point, red at the roots to blue at the tips.
+    for (int k = 0; k < 3; ++k) {
+        std::vector<float>& c = s.addPointChannel(kColorChannels[k], 0.0f);
+        for (std::size_t i = 0; i < c.size(); ++i) {
+            const bool tip = i == 2 || i == 4;
+            c[i] = k == 0 ? (tip ? 0.0f : 1.0f) : k == 2 ? (tip ? 1.0f : 0.0f) : 0.0f;
+        }
+    }
+    {
+        AlembicCurvesWriter::Options options;
+        options.vertexData = true;
+        AlembicCurvesWriter writer(path, "groom", 0.0, 1.0 / 24.0, options);
+        writer.writeFrame(s);
+    }
+    {
+        Abc::IArchive archive(Alembic::AbcCoreOgawa::ReadArchive(), path);
+        AbcG::ICurves curves(Abc::IObject(archive.getTop(), "groom"), "groomShape");
+        ASSERT_TRUE(curves.valid());
+        const Abc::ICompoundProperty arb = curves.getSchema().getArbGeomParams();
+        const AbcG::IC3fGeomParam hairColor(arb, "hair_color");
+        ASSERT_TRUE(hairColor.valid());
+        EXPECT_EQ(hairColor.getScope(), AbcG::kVertexScope);
+        const auto rgb = hairColor.getExpandedValue().getVals();
+        ASSERT_EQ(rgb->size(), 5u);
+        EXPECT_FLOAT_EQ((*rgb)[0].x, 1.0f);  // a root: red
+        EXPECT_FLOAT_EQ((*rgb)[2].z, 1.0f);  // the first strand's tip: blue
+        EXPECT_FLOAT_EQ((*rgb)[4].z, 1.0f);  // the second strand's tip
+        const AbcG::IC3fGeomParam cd(arb, "Cd");
+        ASSERT_TRUE(cd.valid());
+        EXPECT_EQ(cd.getScope(), AbcG::kVertexScope);
+        EXPECT_EQ(cd.getExpandedValue().getVals()->size(), 5u);
+        const AbcG::IFloatGeomParam melanin(arb, kMelaninChannel);
+        ASSERT_TRUE(melanin.valid());
+        EXPECT_EQ(melanin.getScope(), AbcG::kVertexScope);
+        const auto m = melanin.getExpandedValue().getVals();
+        ASSERT_EQ(m->size(), 5u);
+        EXPECT_FLOAT_EQ((*m)[2], 0.25f);  // the first strand's value at all its points
+        EXPECT_FLOAT_EQ((*m)[3], 0.75f);  // the second's
+        EXPECT_FLOAT_EQ((*m)[4], 0.75f);
+    }
+    std::remove(path.c_str());
+    // Without it: per strand, as before (no hair_color).
+    {
+        AlembicCurvesWriter writer(path, "groom", 0.0, 1.0 / 24.0);
+        writer.writeFrame(s);
+    }
+    {
+        Abc::IArchive archive(Alembic::AbcCoreOgawa::ReadArchive(), path);
+        AbcG::ICurves curves(Abc::IObject(archive.getTop(), "groom"), "groomShape");
+        const Abc::ICompoundProperty arb = curves.getSchema().getArbGeomParams();
+        EXPECT_EQ(AbcG::IFloatGeomParam(arb, kMelaninChannel).getScope(), AbcG::kUniformScope);
+        EXPECT_FALSE(arb.getPropertyHeader("hair_color"));
+    }
+    std::remove(path.c_str());
+}
+
 TEST(Alembic, UnityOptionsScaleResampleAndWriteUvsPerPoint) {
     namespace Abc = Alembic::Abc;
     namespace AbcG = Alembic::AbcGeom;

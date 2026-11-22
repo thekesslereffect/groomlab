@@ -10,6 +10,7 @@
 #include <set>
 
 #include "groomlab/brush.h"
+#include "groomlab/clone.h"
 #include "groomlab/curve.h"
 #include "groomlab/groom_session.h"
 #include "groomlab/guide_selection.h"
@@ -567,6 +568,200 @@ TEST(Stroke, PickLevelAndHover) {
     EXPECT_FALSE(tool.affectedLines(*g.host, view, x, y).empty());
     EXPECT_TRUE(tool.affectedLines(*g.host, view, 2, 2).empty());
     EXPECT_EQ(tool.affectedLines(*g.host, view, x, y).size(), tool.affectedLines(*g.host, hostOnly(view), x, y).size());
+
+    // Issue 93: with guides selected (every other guide frozen), hover lights only what the
+    // brush would edit: the selection, never the frozen guides under the circle.
+    const std::size_t all = tool.affectedLines(*g.host, view, x, y).size();
+    ASSERT_GT(all, 1u);
+    GuideId far = kNoGuide;
+    for (const HierarchyGuide& guide : h->guides()) {
+        float gx = 0, gy = 0;
+        if (view.project(guide.points.back(), gx, gy) && std::hypot(gx - x, gy - y) > 200.0f) {
+            far = guide.id;
+            break;
+        }
+    }
+    ASSERT_NE(far, kNoGuide);
+    const GuideId childId = child->id;  // the hierarchy is replaced by the selection's edit
+    g.host->paintSelection({far}, true);
+    EXPECT_TRUE(tool.affectedLines(*g.host, view, x, y).empty());
+    g.host->paintSelection({childId}, true);
+    EXPECT_EQ(tool.affectedLines(*g.host, view, x, y).size(), 1u);
+    EXPECT_EQ(tool.affectedLines(*g.host, hostOnly(view), x, y).size(), 1u);
+    // Selected Only without freezing: the mask decides the same way.
+    g.host->paintSelection({}, true);
+    EXPECT_EQ(tool.affectedLines(*g.host, view, x, y).size(), all);
+    tool.settings.selectedOnly = true;
+    g.host->paintSelection({childId}, false);  // the selection set, nothing frozen
+    EXPECT_EQ(tool.affectedLines(*g.host, view, x, y).size(), 1u);
+}
+
+// Clone (issue 91): the guides under the circle and the guides under them.
+std::size_t withDescendants(const GuideHierarchy& h, const std::vector<GuideId>& tops) {
+    std::size_t n = 0;
+    std::vector<GuideId> todo = tops;
+    while (!todo.empty()) {
+        const GuideId id = todo.back();
+        todo.pop_back();
+        ++n;
+        for (const GuideId c : h.childrenOf(id)) todo.push_back(c);
+    }
+    return n;
+}
+
+TEST(Stroke, CloneCapturesAndSetsDownCopies) {
+    Groom g(30, 3);
+    const ToolView view = frontView();
+    BrushTool tool;
+    tool.settings.setMode("clone");
+    EXPECT_EQ(tool.settings.modeName(), "clone");
+    tool.settings.screenRadius = 60.0f;
+    tool.settings.brush.level = 0;
+    const std::shared_ptr<const GuideHierarchy> h0 = g.session->hierarchy();
+    const std::size_t before = h0->guides().size();
+    // A primary near the middle of the view as the source, one far from it as the destination.
+    const HierarchyGuide* src = nullptr;
+    float best = 1e9f, sx = 0, sy = 0;
+    for (const HierarchyGuide& guide : h0->guides()) {
+        float x = 0, y = 0;
+        if (guide.isChild() || !view.project(guide.points.front(), x, y)) continue;
+        const float d = std::hypot(x - 400.0f, y - 400.0f);
+        if (d < best) best = d, src = &guide, sx = x, sy = y;
+    }
+    ASSERT_NE(src, nullptr);
+    // A plain click with nothing captured sets nothing down.
+    tool.press(*g.host, view, sx, sy, 1.0f, 0);
+    EXPECT_EQ(tool.release(*g.host, view), StrokeRelease::None);
+    EXPECT_EQ(g.session->hierarchy()->guides().size(), before);
+    // Hover before a capture lights the guides it would take: rooted in the circle.
+    EXPECT_FALSE(tool.affectedLines(*g.host, view, sx, sy).empty());
+    // Ctrl+click: captured, nothing changed.
+    tool.press(*g.host, view, sx, sy, 1.0f, kStrokeCtrl);
+    EXPECT_EQ(tool.release(*g.host, view), StrokeRelease::None);
+    const std::size_t captured = tool.clip().guides.size();
+    ASSERT_GT(captured, 0u);
+    EXPECT_EQ(g.session->hierarchy()->guides().size(), before);
+    const std::size_t copies = withDescendants(*h0, tool.clip().guides);
+    EXPECT_GT(copies, captured);  // the children come along
+    // Hover now previews the copies at the cursor: one line per copy.
+    const float dx = 120.0f, dy = -60.0f;
+    EXPECT_EQ(tool.affectedLines(*g.host, view, sx + dx, sy + dy).size(), copies);
+    // A click there: the copies set down, their roots on the scalp round the click.
+    tool.press(*g.host, view, sx + dx, sy + dy, 1.0f, 0);
+    EXPECT_EQ(tool.release(*g.host, view), StrokeRelease::Stroke);
+    const std::shared_ptr<const GuideHierarchy> h1 = g.session->hierarchy();
+    EXPECT_EQ(h1->guides().size(), before + copies);
+    Vec3f origin, dir;
+    SurfacePoint at;
+    ASSERT_TRUE(view.ray(sx + dx, sy + dy, origin, dir) && g.scalp->intersectRay(origin, dir, &at));
+    std::set<GuideId> old;
+    for (const HierarchyGuide& guide : h0->guides()) old.insert(guide.id);
+    std::size_t near = 0;
+    for (const HierarchyGuide& guide : h1->guides()) {
+        if (old.count(guide.id) || guide.isChild()) continue;
+        EXPECT_NEAR((guide.points.front() - g.scalp->closestPoint(guide.points.front()).position).length(), 0.0f, 1e-3f);
+        if ((guide.points.front() - at.position).length() < 0.5f) ++near;
+        // The copy keeps its source's length (its shape carried, not remade).
+        EXPECT_GT(arcLength(guide.points.data(), guide.points.size()), 0.3f);
+    }
+    EXPECT_EQ(near, captured);
+    // One undo step.
+    ASSERT_TRUE(g.host->undo());
+    EXPECT_EQ(g.session->hierarchy()->guides().size(), before);
+    // A drag spins the copies: the same count, other roots than an unspun click's.
+    auto newRoots = [&] {
+        std::vector<Vec3f> roots;
+        for (const HierarchyGuide& guide : g.session->hierarchy()->guides()) {
+            if (!old.count(guide.id) && !guide.isChild()) roots.push_back(guide.points.front());
+        }
+        return roots;
+    };
+    tool.press(*g.host, view, sx + dx, sy + dy, 1.0f, 0);
+    tool.release(*g.host, view);
+    const std::vector<Vec3f> straight = newRoots();
+    ASSERT_TRUE(g.host->undo());
+    EXPECT_NEAR(BrushToolSettings::kCloneSpinPerPixel * 360.0f, 3.14159265f, 1e-5f);  // half a turn over 360 pixels
+    tool.press(*g.host, view, sx + dx, sy + dy, 1.0f, 0);
+    tool.drag(*g.host, view, sx + dx, sy + dy + 40.0f, 1.0f);   // up and down: no spin
+    tool.release(*g.host, view);
+    const std::vector<Vec3f> still = newRoots();
+    ASSERT_EQ(still.size(), straight.size());
+    for (std::size_t i = 0; i < still.size(); ++i) EXPECT_NEAR((still[i] - straight[i]).length(), 0.0f, 1e-5f);
+    ASSERT_TRUE(g.host->undo());
+    tool.press(*g.host, view, sx + dx, sy + dy, 1.0f, 0);
+    tool.drag(*g.host, view, sx + dx + 90.0f, sy + dy, 1.0f);   // 90 pixels right: 45 degrees
+    tool.release(*g.host, view);
+    const std::vector<Vec3f> spun = newRoots();
+    ASSERT_EQ(spun.size(), straight.size());
+    float moved = 0.0f;
+    for (std::size_t i = 0; i < spun.size(); ++i) moved = std::max(moved, (spun[i] - straight[i]).length());
+    if (captured > 1) EXPECT_GT(moved, 1e-3f);
+    ASSERT_TRUE(g.host->undo());
+    // Pick Source arms a capture: the next plain press captures instead of setting down.
+    tool.clearClip();
+    tool.armCapture(true);
+    tool.press(*g.host, view, sx, sy, 1.0f, 0);
+    tool.release(*g.host, view);
+    EXPECT_FALSE(tool.captureArmed());
+    EXPECT_EQ(tool.clip().guides.size(), captured);
+    EXPECT_EQ(g.session->hierarchy()->guides().size(), before);
+    // The source is let go: Ctrl+click off the scalp (the view's corner), Reset, another tool.
+    tool.press(*g.host, view, 2.0f, 2.0f, 1.0f, kStrokeCtrl);
+    tool.release(*g.host, view);
+    EXPECT_TRUE(tool.clip().empty());
+    tool.press(*g.host, view, sx, sy, 1.0f, kStrokeCtrl);
+    tool.release(*g.host, view);
+    ASSERT_FALSE(tool.clip().empty());
+    tool.armCapture(true);
+    tool.clearClip();
+    EXPECT_TRUE(tool.clip().empty());
+    EXPECT_FALSE(tool.captureArmed());
+    tool.press(*g.host, view, sx, sy, 1.0f, kStrokeCtrl);
+    tool.release(*g.host, view);
+    ASSERT_FALSE(tool.clip().empty());
+    tool.settings.setMode("comb");
+    tool.affectedLines(*g.host, view, sx, sy);  // (hovering with the other tool)
+    EXPECT_TRUE(tool.clip().empty());
+    tool.settings.setMode("clone");
+    tool.press(*g.host, view, sx, sy, 1.0f, 0);  // nothing to set down: a new capture is needed
+    EXPECT_EQ(tool.release(*g.host, view), StrokeRelease::None);
+    EXPECT_EQ(g.session->hierarchy()->guides().size(), before);
+}
+
+TEST(Stroke, CloneLeavesFrozenGuidesAndReplaces) {
+    Groom g(30, 2);
+    const std::shared_ptr<const GuideHierarchy> h0 = g.session->hierarchy();
+    const std::size_t before = h0->guides().size();
+    std::vector<GuideId> primaries;
+    for (const HierarchyGuide& guide : h0->guides()) {
+        if (!guide.isChild()) primaries.push_back(guide.id);
+    }
+    const Vec3f from = h0->guide(primaries[0])->points.front();
+    BrushToolSettings s;
+    s.setMode("clone");
+    s.brush.level = 0;
+    s.brush.radius = 0.4f;
+    std::size_t inside = 0;
+    for (const GuideId id : primaries) {
+        if ((h0->guide(id)->points.front() - from).length() <= 0.4f) ++inside;
+    }
+    ASSERT_GT(inside, 0u);
+    // Set down on itself, added: every guide rooted there doubled, with its children.
+    EXPECT_EQ(scriptedStroke(*g.host, s, {from, from}), 0u);
+    EXPECT_EQ(g.session->hierarchy()->guides().size(), before + inside * 3);
+    ASSERT_TRUE(g.host->undo());
+    // Replacing: the guides there go first, so the count holds.
+    s.cloneReplace = true;
+    scriptedStroke(*g.host, s, {from, from});
+    EXPECT_EQ(g.session->hierarchy()->guides().size(), before);
+    ASSERT_TRUE(g.host->undo());
+    // Frozen guides are neither copied nor replaced (selecting the others freezes them).
+    std::vector<GuideId> others;
+    for (const GuideId id : primaries) {
+        if ((h0->guide(id)->points.front() - from).length() > 0.4f) others.push_back(id);
+    }
+    g.host->paintSelection(others, true);
+    EXPECT_THROW(scriptedStroke(*g.host, s, {from, from}), std::invalid_argument);
 }
 
 TEST(Stroke, PlaceDrawPartAndFlowTools) {

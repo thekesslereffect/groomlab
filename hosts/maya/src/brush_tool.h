@@ -173,6 +173,7 @@ public:
     bool tubesAlwaysVisible = false;
 
     BrushToolSettings& settings() { return tool_.settings; }
+    BrushTool& brushTool() { return tool_; }  // (Clone: its source, Pick Source)
     // The view's pixels per point of the brush's radius (display_scale.h: 2 on a Retina display,
     // 1 off macOS). The radius a person sets and reads (-radius, the drag's label) is in points;
     // tool_.settings.screenRadius, which the strokes and the ring use, in the view's pixels: kept

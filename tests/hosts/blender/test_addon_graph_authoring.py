@@ -346,6 +346,22 @@ class GraphAuthoringTest(unittest.TestCase):
         value = next(c for c in graph.controls(head) if c["name"] == "width_width")["value"]
         self.assertAlmostEqual(value, between, 5)
         self.assertEqual(ga.key_state(head, node_of(self.tree(), "width"), "width"), "animated")
+        # The keys travel in the .groom (controlKeys: every host and the CLI animate them), and a
+        # load keys the ctl_ property again from them.
+        keyed = ga.control_keys(head)
+        self.assertEqual(list(keyed), ["width_width"])
+        self.assertEqual([k[0] for k in keyed["width_width"]], [1.0, 10.0])
+        self.assertAlmostEqual(keyed["width_width"][1][1], width * 2.0, 5)
+        import tempfile
+        path = os.path.join(tempfile.mkdtemp(prefix="groomlab_keys_"), "keyed.groom")
+        groom.save_groom(head, path)
+        with open(path) as f:
+            saved = json.load(f)
+        entry = saved["grooms"][0] if "grooms" in saved else saved
+        self.assertEqual([round(k[0], 3) for k in entry["controlKeys"]["width_width"]], [1.0, 10.0])
+        ga.key_controls(head, {"width_width": [[1.0, width], [20.0, width * 3.0]]})
+        self.assertEqual([k[0] for k in ga.control_keys(head)["width_width"]], [1.0, 20.0])
+        ga.key_controls(head, entry["controlKeys"])  # (back as saved)
         # The param's row shows the key's property; its menu has the key entries.
         log = []
         ge.draw_param(Layout(log), node_of(self.tree(), "width"), node_of(self.tree(), "width").gl_param_specs["width"],

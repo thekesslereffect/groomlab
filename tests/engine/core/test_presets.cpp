@@ -654,10 +654,18 @@ TEST(Presets, SearchDirsFollowTheEnvironment) {
     unsetenv("GROOMLAB_USER_PRESETS");
 #endif
     EXPECT_EQ(dirs[3], "shipped");
-    // Without the variables: the user's Maya folder (when a home is known), then the shipped one.
+    // An explicit user folder: the folder earlier GroomLabs saved to is not read.
+    EXPECT_TRUE(presetLegacyDir().empty() || dirs.size() == 4u);
+    // Without the variables: Documents/GroomLab/presets (when a home is known, beside the user's
+    // nodes and alphas: no host's own folder), Maya's folder earlier GroomLabs saved to when there
+    // is one, then the shipped one.
     const std::vector<std::string> plain = presetSearchDirs(presetUserDir(), "shipped");
     EXPECT_EQ(plain.back(), "shipped");
-    if (plain.size() == 2) EXPECT_NE(plain[0].find("groomlab"), std::string::npos);
+    if (!presetUserDir().empty()) {
+        EXPECT_NE(presetUserDir().find("GroomLab/presets"), std::string::npos) << presetUserDir();
+        EXPECT_EQ(presetUserDir().find("maya"), std::string::npos) << presetUserDir();
+        EXPECT_EQ(plain[0], presetUserDir());
+    }
 }
 
 // ---------------------------------------------------------------------------

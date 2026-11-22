@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
- * The Graph Editor's categories in the Playful theme's colors (hosts/maya/themes/playful.json, filled
+ * The Graph Editor's categories in the Playful theme's colors (engine/assets/themes/playful.json, filled
  * headers), for the dark pages: `hue` fills a node's header, `on` is the text on it, `tint` a
  * translucent fill of the hue over the dark, `ink` a lighter cut for lines and text on the dark
  * (AA on #0b0c0f and on the panels).

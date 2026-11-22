@@ -68,7 +68,16 @@ follow it.
   params shape them: each tube is swept along its own section, flat where it touches another.
   Click it again to hide them. A Braid saved before `separate` and `inflate` existed does not list
   them until you click **Upgrade** on it.
-- **Ramps** (root-to-tip profiles) have a curve editor.
+- **Ramps** (root-to-tip profiles) have a curve editor. Drag a key to move it. In Maya, click empty
+  space to add a key; in the app, double-click. The key you pick shows its two **handles**:
+  - **Drag a handle** to set the key's slope on both sides. Dragging it farther out or closer in
+    also makes that handle longer (the curve holds the slope longer) or shorter (it turns sooner).
+  - **Alt+drag** to set one side alone, for a sharp corner.
+  - **Double-click a handle** to make the key automatic again (slope and length).
+  - **Right-click a key** for **Corner** (straight toward each neighbor) or **Auto Handles**.
+
+  Keys you haven't touched take an automatic slope, which never overshoots and flattens at peaks.
+  Blender's curve editor has no handles to drag; a **Vector** point there is a corner.
 
 ### Arranging by hand
 

@@ -195,7 +195,7 @@ class BrushCatalogTest(unittest.TestCase):
         self.assertEqual((specs["length"]["unit"], specs["length"]["default"], specs["spacing"]["unit"]), ("length", 0.5, "length"))
         self.assertEqual((specs["alphaSpacing"]["default"], specs["alphaSpacing"]["unit"]), (0.25, "fraction"))
         self.assertIs(specs["pressure"]["default"], True)
-        self.assertIs(specs["stretch"]["default"], True)
+        self.assertIs(specs["stretch"]["default"], False)
         self.assertEqual(specs["newGuides"]["kind"], "")  # a block of controls: no value of its own
         self.assertNotIn("default", specs["newGuides"])
         for s in specs.values():

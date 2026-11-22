@@ -957,3 +957,102 @@ def reset_photo_morph(groom):
     with groomlab.undo_chunk("reset photo morph"):
         cmds.delete(node)
     return True
+
+
+# -- The photos in groom files ---------------------------------------------------------------------
+#
+# A .groom keeps a groom's reference photos ("referencePhotos", groom_file.h: the app's and
+# Blender's Reference windows write and read them): each photo's file, size, solved camera
+# (rotation: the camera's axes as columns, world space; position: the eye; focal_px), what the
+# Reference window edits for it (its landmark pairs, flow strokes and mask touch-ups) and how the
+# Photos tab shows it. Maya keeps the same on its reference cameras; these turn one into the other.
+
+def _unit(v):
+    length = sum(c * c for c in v) ** 0.5 or 1.0
+    return [c / length for c in v]
+
+
+def photos_for_file(groom):
+    """The scene's reference cameras as a .groom's referencePhotos (a list), with what the
+    Reference window edited for `groom` on each."""
+    from groomlab import from_reference
+    out = []
+    for camera in list_references():
+        camera = _camera(camera)
+        m = cmds.xform(camera, query=True, worldSpace=True, matrix=True)
+        axes = [_unit(m[0:3]), _unit(m[4:7]), _unit(m[8:11])]  # (Maya's rows: the camera's axes)
+        rotation = [[axes[c][r] for c in range(3)] for r in range(3)]  # (the file's: as columns)
+        out.append({
+            "name": _short(camera),
+            "image": image_path(camera),
+            "width": int(cmds.getAttr(camera + ".glRefWidth")),
+            "height": int(cmds.getAttr(camera + ".glRefHeight")),
+            "mask": from_reference.view_mask(groom, camera) or "",
+            "camera": {"rotation": rotation, "position": list(m[12:15]), "focal_px": focal_px(camera)},
+            "state": json.loads(from_reference.photo_state(groom, camera)),
+            "display": {"opacity": reference_opacity(camera), "depth": reference_depth(camera),
+                        "locked": is_locked(camera), "visible": reference_visible(camera)},
+        })
+    return out
+
+
+def photos_from_file(groom, photos, directory="", copy=True):
+    """A .groom's referencePhotos as reference cameras: each photo's camera made (its file copied
+    into the scene's references folder with `copy`), lined up as solved, its landmark pairs, flow
+    strokes and mask touch-ups kept for `groom`, shown as the file says. A photo whose camera is
+    in the scene already (its name or its file's) is left as it is; one whose file is missing is
+    skipped with a warning. Relative files are the file's `directory`'s. Returns the cameras made."""
+    from groomlab import from_reference
+    made = []
+    scene = list_references()
+    names, images = {_short(c) for c in scene}, {image_path(c) for c in scene}
+
+    def found(stored):
+        stored = os.path.expandvars(str(stored or ""))
+        if stored and not os.path.isabs(stored) and directory:
+            stored = os.path.join(directory, stored)
+        return os.path.normpath(stored).replace("\\", "/") if stored else ""
+
+    for photo in photos or []:
+        if not isinstance(photo, dict) or not photo.get("image"):
+            continue
+        name, image = photo.get("name") or "", found(photo["image"])
+        if (name and name in names) or image in images:
+            continue  # (made from this file before: a reload)
+        if not os.path.isfile(image):
+            cmds.warning("GroomLab: the reference photo %s is missing (%s): not made" % (name or image, image))
+            continue
+        camera = _camera(import_reference(image, name=name or None, groom=groom, copy=copy))
+        width, height = int(photo.get("width") or 0), int(photo.get("height") or 0)
+        if width > 0 and height > 0:
+            cmds.setAttr(camera + ".glRefWidth", width)
+            cmds.setAttr(camera + ".glRefHeight", height)
+        solved = photo.get("camera")
+        if isinstance(solved, dict) and solved.get("rotation") and solved.get("position"):
+            r, p = solved["rotation"], solved["position"]
+            matrix = [r[0][0], r[1][0], r[2][0], 0.0, r[0][1], r[1][1], r[2][1], 0.0,
+                      r[0][2], r[1][2], r[2][2], 0.0, p[0], p[1], p[2], 1.0]
+            cmds.setAttr(camera + ".rotateOrder", 0)
+            cmds.xform(camera, worldSpace=True, matrix=matrix)
+            if solved.get("focal_px"):
+                shape = _shape(camera)
+                cmds.setAttr(shape + ".focalLength", float(solved["focal_px"]) * cmds.getAttr(shape + ".horizontalFilmAperture")
+                             * 25.4 / cmds.getAttr(camera + ".glRefWidth"))
+        if photo.get("state"):
+            state = photo["state"]
+            from_reference.store_photo_state(groom, camera, json.dumps(state) if not isinstance(state, str) else state)
+        mask = found(photo.get("mask"))
+        if mask and os.path.isfile(mask):
+            from_reference.set_view_mask(groom, camera, mask)
+        display = photo.get("display") or {}
+        if "opacity" in display:
+            set_reference_opacity(camera, display["opacity"])
+        if display.get("depth") in ("front", "behind"):
+            set_reference_depth(camera, display["depth"])
+        if "visible" in display:
+            set_reference_visible(camera, bool(display["visible"]))
+        _apply_depth(camera)
+        if display.get("locked"):
+            lock_reference(camera, True)
+        made.append(camera)
+    return made

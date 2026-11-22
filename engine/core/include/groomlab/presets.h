@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-// Graph presets: graphs saved as JSON files, independent of any scene (hosts/maya/presets ships
+// Graph presets: graphs saved as JSON files, independent of any scene (engine/assets/presets ships
 // them; a user's own go in their preset folder). Every host reads the same files through this:
 // the Maya host's Python (groomlab/presets.py, the Graph Editor's Presets menu) and the
 // standalone app's node graph, so a preset saved in one shows in the other and fits the same way.
@@ -29,9 +29,11 @@
 //                preset without the list gets a default pick (insertPresetJson).
 //
 // Presets are looked up, in order, in every directory on GROOMLAB_PRESET_PATH, the user's
-// preset folder (GROOMLAB_USER_PRESETS, else Maya's user folder: Documents/maya/groomlab/presets
-// on Windows, where both hosts save), and the folder shipped with the product; a preset in an
-// earlier directory hides one of the same name in a later one.
+// preset folder (GROOMLAB_USER_PRESETS, else Documents/GroomLab/presets, beside the user's nodes
+// and alphas: where every host saves), the folder earlier GroomLabs saved to (Maya's user folder:
+// Documents/maya/groomlab/presets on Windows) when no folder of its own is set, and the folder
+// shipped with the product; a preset in an earlier directory hides one of the same name in a
+// later one.
 
 #include <cstddef>
 #include <map>
@@ -56,12 +58,18 @@ const std::vector<std::string>& presetCategories();
 // A preset's own fields: not part of the graph a groom stores.
 const std::vector<std::string>& presetFields();
 
-// The user's preset folder: $GROOMLAB_USER_PRESETS when set, else Maya's user application folder
-// (Documents/maya on Windows, Library/Preferences/Autodesk/maya on macOS, ~/maya on Linux) with
-// groomlab/presets under it: the folder the Maya host saves to. "" when no home is known.
+// The user's preset folder, where every host saves presets: $GROOMLAB_USER_PRESETS when set, else
+// <home>/Documents/GroomLab/presets (as nodeUserDir and brushAlphaUserDir: no host's own folder).
+// "" when no home is known.
 std::string presetUserDir();
+// The folder GroomLab saved presets to before (Maya's user application folder: $MAYA_APP_DIR,
+// else Documents/maya on Windows, Library/Preferences/Autodesk/maya on macOS, ~/maya on Linux,
+// with groomlab/presets under it), still read so presets saved there are not lost; "" when
+// $GROOMLAB_USER_PRESETS names the user's folder or no home is known.
+std::string presetLegacyDir();
 // Where presets are looked up, in order: $GROOMLAB_PRESET_PATH's directories, `userDir` (when
-// not empty), `shippedDir` (when not empty).
+// not empty), presetLegacyDir (when it is a folder and not `userDir`), `shippedDir` (when not
+// empty).
 std::vector<std::string> presetSearchDirs(const std::string& userDir, const std::string& shippedDir);
 // Every preset found in `dirs` (the first directory holding a name wins), sorted by name, each
 // with what the menu shows of it (its "about").

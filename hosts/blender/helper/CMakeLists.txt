@@ -5,7 +5,7 @@
 # Blender's process.
 
 add_library(groomlab_helper_objs OBJECT src/helper.cpp src/tools.cpp src/authoring.cpp src/pipeline.cpp src/reference.cpp src/shared_memory.cpp)
-target_link_libraries(groomlab_helper_objs PUBLIC groomlab::core groomlab::warnings nlohmann_json::nlohmann_json)
+target_link_libraries(groomlab_helper_objs PUBLIC groomlab::core groomlab::editor groomlab::warnings nlohmann_json::nlohmann_json)
 if(TARGET groomlab_alembic)
     target_link_libraries(groomlab_helper_objs PUBLIC groomlab::alembic)
     target_compile_definitions(groomlab_helper_objs PUBLIC GROOMLAB_HAS_ALEMBIC=1)
@@ -13,16 +13,16 @@ else()
     target_compile_definitions(groomlab_helper_objs PUBLIC GROOMLAB_HAS_ALEMBIC=0)
 endif()
 # A build tree's helper finds the shipped presets in the sources; an installed one beside it (bin/presets).
-groomlab_path_literal(_helper_presets "${PROJECT_SOURCE_DIR}/hosts/maya/presets")
+groomlab_path_literal(_helper_presets "${PROJECT_SOURCE_DIR}/engine/assets/presets")
 target_compile_definitions(groomlab_helper_objs PRIVATE "GROOMLAB_SHIPPED_PRESETS=${_helper_presets}")
 # The compound nodes shipped with every host, the same way (bin/nodes when installed).
-groomlab_path_literal(_helper_nodes "${PROJECT_SOURCE_DIR}/hosts/maya/nodes")
+groomlab_path_literal(_helper_nodes "${PROJECT_SOURCE_DIR}/engine/assets/nodes")
 target_compile_definitions(groomlab_helper_objs PRIVATE "GROOMLAB_SHIPPED_NODES=${_helper_nodes}")
 # The brush alphas shipped with every host, the same way (bin/alphas when installed).
-groomlab_path_literal(_helper_alphas "${PROJECT_SOURCE_DIR}/hosts/maya/alphas")
+groomlab_path_literal(_helper_alphas "${PROJECT_SOURCE_DIR}/engine/assets/alphas")
 target_compile_definitions(groomlab_helper_objs PRIVATE "GROOMLAB_SHIPPED_ALPHAS=${_helper_alphas}")
 # The sample meshes (Nika, Manny, the wolf, Buddy's rig: CC BY 4.0) the add-on adds, the same way (bin/meshes when installed).
-groomlab_path_literal(_helper_meshes "${PROJECT_SOURCE_DIR}/hosts/maya/meshes")
+groomlab_path_literal(_helper_meshes "${PROJECT_SOURCE_DIR}/engine/assets/meshes")
 target_compile_definitions(groomlab_helper_objs PRIVATE "GROOMLAB_SHIPPED_MESHES=${_helper_meshes}")
 
 # The shipped helper and the tests' build of it (test hooks) share everything but main's object.
@@ -56,10 +56,10 @@ groomlab_install_runtime(groomlab-helper "${GROOMLAB_BLENDER_BIN}" Blender)
 if(WIN32 AND GROOMLAB_TBB_RUNTIME)
     install(FILES $<TARGET_RUNTIME_DLLS:groomlab-helper> DESTINATION "${GROOMLAB_BLENDER_BIN}" COMPONENT Blender)
 endif()
-install(DIRECTORY "${PROJECT_SOURCE_DIR}/hosts/maya/presets/" DESTINATION "${GROOMLAB_BLENDER_BIN}/presets" COMPONENT Blender)
-install(DIRECTORY "${PROJECT_SOURCE_DIR}/hosts/maya/nodes/" DESTINATION "${GROOMLAB_BLENDER_BIN}/nodes" COMPONENT Blender)
-install(DIRECTORY "${PROJECT_SOURCE_DIR}/hosts/maya/alphas/" DESTINATION "${GROOMLAB_BLENDER_BIN}/alphas" COMPONENT Blender)
-install(DIRECTORY "${PROJECT_SOURCE_DIR}/hosts/maya/meshes/" DESTINATION "${GROOMLAB_BLENDER_BIN}/meshes" COMPONENT Blender
+install(DIRECTORY "${PROJECT_SOURCE_DIR}/engine/assets/presets/" DESTINATION "${GROOMLAB_BLENDER_BIN}/presets" COMPONENT Blender)
+install(DIRECTORY "${PROJECT_SOURCE_DIR}/engine/assets/nodes/" DESTINATION "${GROOMLAB_BLENDER_BIN}/nodes" COMPONENT Blender)
+install(DIRECTORY "${PROJECT_SOURCE_DIR}/engine/assets/alphas/" DESTINATION "${GROOMLAB_BLENDER_BIN}/alphas" COMPONENT Blender)
+install(DIRECTORY "${PROJECT_SOURCE_DIR}/engine/assets/meshes/" DESTINATION "${GROOMLAB_BLENDER_BIN}/meshes" COMPONENT Blender
         PATTERN "*.ma" EXCLUDE)  # Buddy's Maya rig (Blender's is buddy_rig.fbx)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE-HELPER.txt" DESTINATION "${GROOMLAB_BLENDER_BIN}" COMPONENT Blender)
 groomlab_install_legal("${GROOMLAB_BLENDER_BIN}" Blender)

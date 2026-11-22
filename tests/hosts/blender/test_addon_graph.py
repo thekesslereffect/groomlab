@@ -319,6 +319,24 @@ class GraphEditorTest(unittest.TestCase):
         self.assertFalse(gt.ramp_changed(gt.ramp_node(noise, "profile")))
         self.assertEqual(bpy.ops.groomlab.graph_ramp_preset(node="noise", param="profile", preset="flip"), {"FINISHED"})
         self.assertEqual(self.param("noise", "profile"), [[0.0, 1], [0.4, 0], [1.0, 0]])
+        # Handles (issue #102): a corner key is a Vector point in Blender's curve; while the curve is
+        # not edited there the value keeps its handles; edited, a Vector point reads as a corner
+        # (straight toward each neighbor). Flip mirrors them.
+        ga = importlib.import_module(bu.MODULE + ".graph_authoring")
+        handled = [[0.0, 0.0], [0.5, 1.0, 2.0, 0.0], [1.0, 1.0, 0.5]]
+        gt.write_ramp(noise, "profile", handled)
+        curve = gt.ramp_node(noise, "profile")
+        self.assertEqual([p.handle_type for p in curve.mapping.curves[0].points], ["AUTO_CLAMPED", "VECTOR", "AUTO_CLAMPED"])
+        self.assertEqual(gt.ramp_value(curve), handled)
+        self.assertEqual(ga.flipped_ramp(handled), [[0.0, 1.0, -0.5], [0.5, 1.0, 0.0, -2.0], [1.0, 0.0]])
+        self.assertEqual(ga.flipped_ramp([[0.0, 0.0], [0.5, 1.0, 2.0, 0.0, 0.25, 0.75]])[0], [0.5, 1.0, -0.0, -2.0, 0.75, 0.25])
+        curve.mapping.curves[0].points[2].location = (1.0, 0.8)
+        curve.mapping.update()
+        self.assertTrue(gt.ramp_changed(curve))
+        read = gt.ramp_value(curve)
+        self.assertEqual([len(k) for k in read], [2, 4, 2])
+        self.assertAlmostEqual(read[1][2], 2.0, 4)
+        self.assertAlmostEqual(read[1][3], -0.4, 4)
         groom.flush()
         self.assertEqual(groom.runtime(head).errors, [])
 

@@ -45,6 +45,26 @@ def _store(groom, data):
     cmds.setAttr(groom + ".correctiveData", json.dumps(data), type="string")
 
 
+def _stack(groom):
+    """The groom's corrective stack as the core edits it (correctives.h: every host's stack edits)."""
+    return groomlab_core.Correctives.from_json(cmds.getAttr(groom + ".correctiveData") or "")
+
+
+def _store_stack(groom, stack):
+    cmds.setAttr(groom + ".correctiveData", stack.to_json(), type="string")
+
+
+def _need(stack, name):
+    if stack.layer(name) is None:
+        raise ValueError("no corrective layer named %r" % name)
+
+
+def _taken(groom, current=None):
+    """Names a layer cannot take: the groom's and its transform's attributes (a layer's weight is an
+    attribute named after it)."""
+    return [a for node in (groom, _transform(groom)) for a in (cmds.listAttr(node) or []) if a != current]
+
+
 def _find(data, name):
     layer = next((l for l in data["layers"] if l["name"] == name), None)
     if layer is None:
@@ -105,26 +125,20 @@ def _keys(groom, name):
     return list(zip(times, values))
 
 
-def _free_slot(groom, data):
+def _free_slot(groom, stack):
     used = set(cmds.getAttr(groom + "." + WEIGHTS, multiIndices=True) or [])
-    used.update(l["slot"] for l in data["layers"])
+    used.update(l.slot for l in stack.layers)
     slot = 0
     while slot in used:
         slot += 1
     return slot
 
 
-def _clean_name(groom, data, wanted, current=None):
+def _clean_name(groom, stack, wanted, current=None):
     """A layer name that also works as the weight's attribute: letters, digits and _, unique."""
     # The core's rule, every host's (correctives.h freeLayerName), the groom's and its transform's
-    # attributes taken too (a layer's weight is an attribute named after it).
-    stack = groomlab_core.Correctives()
-    for layer in data["layers"]:
-        entry = groomlab_core.CorrectiveLayer()
-        entry.name = layer["name"]
-        stack.add_layer(entry)
-    taken = [a for node in (groom, _transform(groom)) for a in (cmds.listAttr(node) or []) if a != current]
-    return stack.free_layer_name(wanted.strip(), current or "", taken)
+    # attributes taken too.
+    return stack.free_layer_name(wanted.strip(), current or "", _taken(groom, current))
 
 
 def _key(groom, name, frame, value):
@@ -167,15 +181,15 @@ def add_layer(groom, name=None, frame=None, fade=None, all_frames=None, fade_in=
     frame = cmds.currentTime(query=True) if frame is None else frame
     if all_frames is None:
         all_frames = fade is None and fade_in is None and fade_out is None
-    data = _load(groom)
-    base = name or ("sculpt%d" % (len(data["layers"]) + 1) if all_frames else "shot%d" % int(round(frame)))
-    name = _clean_name(groom, data, base)
-    slot = _free_slot(groom, data)
+    # The stack's edit, every host's (correctives.h addLayer): held on every frame in the stack, its
+    # fades Maya's keys on the weight attribute (the slot it reads).
+    stack = _stack(groom)
+    name = _clean_name(groom, stack, name or stack.new_layer_name(all_frames, frame))
+    slot = _free_slot(groom, stack)
     _make_weight(groom, name, slot)
-    fps = _fps()
-    data["layers"].append({"name": name, "time": groomlab_core.frame_to_seconds(frame, fps), "fadeIn": 0.5, "fadeOut": 0.5, "holdBefore": True,
-                           "holdAfter": True, "weight": 1.0, "enabled": True, "slot": slot, "offsets": {}})
-    _store(groom, data)
+    name = stack.new_layer(True, groomlab_core.frame_to_seconds(frame, _fps()), frame, wanted=name)
+    stack.layer(name).slot = slot
+    _store_stack(groom, stack)
     if not all_frames:
         before = fade_in if fade_in is not None else (fade if fade is not None else 6.0)
         after = fade_out if fade_out is not None else (fade if fade is not None else 6.0)
@@ -195,20 +209,17 @@ def set_layer(groom, name, enabled=None, rename=None, weight=None, key=None, fra
     (`key`: also key it here; a keyed weight is keyed anyway, as auto key does),
     or re-time it: all_frames=True drops its keys (1 everywhere); frame/fade
     re-key it as a shot fix."""
-    data = _load(groom)
-    layer = _find(data, name)
+    stack = _stack(groom)
+    _need(stack, name)
     if enabled is not None:
-        layer["enabled"] = bool(enabled)
+        stack.layer(name).enabled = bool(enabled)
     if rename and rename != name:
-        new = _clean_name(groom, data, rename, current=name)
-        if new != rename:
-            raise ValueError("%r can't name a corrective (taken, or not letters, digits and _): try %r" % (rename, new))
-        cmds.renameAttr(_source(groom, name), new)
-        layer["name"] = new
+        stack.rename_layer(name, rename, _taken(groom, name))  # (ValueError suggesting a name: every host's)
+        cmds.renameAttr(_source(groom, name), rename)
         if cmds.getAttr(groom + ".shotLayer") == name:
-            cmds.setAttr(groom + ".shotLayer", new, type="string")
-        name = new
-    _store(groom, data)
+            cmds.setAttr(groom + ".shotLayer", rename, type="string")
+        name = rename
+    _store_stack(groom, stack)
     plug = _source(groom, name)
     if all_frames:
         cmds.cutKey(plug, clear=True)
@@ -253,11 +264,12 @@ def clear_keys(groom, name):
 
 @undoable("remove corrective")
 def remove_layer(groom, name):
-    data = _load(groom)
-    layer = _find(data, name)
-    data["layers"] = [l for l in data["layers"] if l["name"] != name]
-    _store(groom, data)
-    _drop_weight(groom, name, layer["slot"])
+    stack = _stack(groom)
+    _need(stack, name)
+    slot = stack.layer(name).slot
+    stack.remove_layer(name)
+    _store_stack(groom, stack)
+    _drop_weight(groom, name, slot)
     if cmds.getAttr(groom + ".shotLayer") == name:
         cmds.setAttr(groom + ".shotLayer", "", type="string")
         cmds.setAttr(groom + ".shotSculpt", False)
@@ -266,25 +278,19 @@ def remove_layer(groom, name):
 @undoable("move corrective")
 def move_layer(groom, name, step):
     """Move a corrective up (+1: later in the stack) or down (-1)."""
-    data = _load(groom)
-    names = [l["name"] for l in data["layers"]]
-    if name not in names:
-        raise ValueError("no corrective layer named %r" % name)
-    i = names.index(name)
-    j = min(max(i + step, 0), len(names) - 1)
-    data["layers"].insert(j, data["layers"].pop(i))
-    _store(groom, data)
+    stack = _stack(groom)
+    _need(stack, name)
+    stack.move_layer(name, int(step))  # (every host's: correctives.h)
+    _store_stack(groom, stack)
 
 
 @undoable("solo corrective")
 def solo_layer(groom, name):
     """Only this corrective on; if it already is the only one on, every one comes back on."""
-    data = _load(groom)
-    _find(data, name)
-    alone = all(l.get("enabled", True) == (l["name"] == name) for l in data["layers"])
-    for l in data["layers"]:
-        l["enabled"] = True if alone else l["name"] == name
-    _store(groom, data)
+    stack = _stack(groom)
+    _need(stack, name)
+    stack.solo_layer(name)  # (every host's: correctives.h)
+    _store_stack(groom, stack)
 
 
 def target(groom):

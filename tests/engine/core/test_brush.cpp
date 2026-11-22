@@ -4,11 +4,15 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <algorithm>
 #include <map>
+#include <set>
+#include <stdexcept>
 #include <tuple>
 
 #include "groomlab/brush.h"
 #include "groomlab/curve.h"
+#include "groomlab/guide_selection.h"
 #include "groomlab/random.h"
 #include "groomlab/stroke.h"
 #include "groomlab/view_projection.h"
@@ -792,6 +796,51 @@ TEST(Brush, NewGuidesTakeTheirGroupsSegments) {
     EXPECT_EQ(s.pts(drawGuide(s.h, *s.scalp, p, {{0.2f, 0, 0.8f}, {0.2f, 0.5f, 0.8f}, {0.2f, 1.0f, 0.8f}})).size(), 4u);
 }
 
+TEST(Brush, SegmentsByLengthGiveLongerGuidesMorePoints) {
+    // Issue #98: Resample by length: a guide of the guides' mean length gets the segments asked, each
+    // other its length's share, so points are as far apart on every guide; a whole group keeps the
+    // segment length for its new guides (drawn, placed) and Reset Segments; a selection gets counts
+    // of its own; resampled without it the group has one count again.
+    Scene s;
+    GuideHierarchy& h = s.h;
+    h.addGroup("primary");
+    s.primary = h.findGroup("primary");
+    const GuideId shortGuide = h.addGuide(s.primary, test::straightCurve({0.3f, 0, 0.5f}, {0, 1, 0}, 8));  // 1 long
+    const GuideId longGuide = h.addGuide(s.primary, test::straightCurve({0.7f, 0, 0.5f}, {0, 2, 0}, 8));   // 2 long
+    h.evaluate(s.scalp.get());
+    const std::vector<GuideId> both{shortGuide, longGuide};
+    EXPECT_NEAR(h.segmentLengthFor(both, 10), 0.15f, 1e-5f);  // mean 1.5 over 10
+    EXPECT_EQ(h.resampleGuides(both, 10, true, s.primary, -1, true), 2u);
+    EXPECT_EQ(s.pts(shortGuide).size(), 8u);   // 1 / 0.15: 7 segments
+    EXPECT_EQ(s.pts(longGuide).size(), 14u);   // 2 / 0.15: 13
+    EXPECT_NEAR(h.group(s.primary)->segmentLength, 0.15f, 1e-5f);
+    EXPECT_EQ(h.group(s.primary)->segments, 10);
+    EXPECT_FALSE(h.guide(shortGuide)->ownSegments);
+    // New guides in the group: their length's share.
+    EXPECT_EQ(h.segmentsFor(s.primary, 3.0f), 20);
+    PlaceSettings p;
+    p.matchNeighbors = false;
+    const GuideId drawn = drawGuide(h, *s.scalp, p, {{0.5f, 0, 0.2f}, {0.5f, 0.75f, 0.2f}, {0.5f, 1.5f, 0.2f}});
+    EXPECT_EQ(s.pts(drawn).size(), 11u);  // 1.5 long: 10 segments
+    // Saved and read back.
+    const GuideHierarchy again = GuideHierarchy::fromJson(h.toJson());
+    EXPECT_NEAR(again.group(again.findGroup("primary"))->segmentLength, 0.15f, 1e-5f);
+    // Reset Segments: every guide by its length again.
+    h.resample({longGuide}, 4);
+    EXPECT_TRUE(h.guide(longGuide)->ownSegments);
+    h.resetGroupSegments(s.primary);
+    EXPECT_EQ(s.pts(longGuide).size(), 14u);
+    // A selection by length: counts of its own; the whole group without it: one count again.
+    h.resampleGuides({shortGuide}, 4, false, kNoGroup, -1, true);
+    EXPECT_EQ(s.pts(shortGuide).size(), 5u);
+    EXPECT_TRUE(h.guide(shortGuide)->ownSegments);
+    h.resetGroupSegments(s.primary);
+    h.resampleGuides(h.guidesInGroup(s.primary), 6, true, s.primary);
+    EXPECT_EQ(h.group(s.primary)->segmentLength, 0.0f);
+    EXPECT_EQ(s.pts(longGuide).size(), 7u);
+    EXPECT_EQ(s.pts(shortGuide).size(), 7u);
+}
+
 TEST(Brush, IncrementalEvaluationMatchesFull) {
     const auto scalp = test::makeSphere(60, 120, 1.0f);
     GuideHierarchy h;
@@ -1130,6 +1179,121 @@ TEST(BrushSymmetry, MirrorToOtherSideReshapesThePartnersInPlace) {
     expectMirrorImages(s.pts(lone), s.pts(whole.created[0]), 1e-3f);
     // Symmetry off: refused.
     EXPECT_THROW(mirrorGuideShapes(s.h, StrokeSymmetry{}, {left}, 0), std::invalid_argument);
+}
+
+// ---------------------------------------------------------------------------
+// Guides hidden one by one (kHiddenLayer: the app's radial menu > Visibility)
+
+TEST(Brush, HiddenGuidesAreLockedAndCannotBePicked) {
+    Scene s;
+    const GuideId a = s.add(0.4f, 0.5f), b = s.add(0.6f, 0.5f);
+    EXPECT_FALSE(anyGuideHidden(s.h));
+    soloGuides(s.h, {a}, kHiddenLayer);  // Visibility > Select: every guide but `a` hidden
+    EXPECT_FALSE(guideHidden(s.h, *s.h.guide(a)));
+    EXPECT_TRUE(guideHidden(s.h, *s.h.guide(b)));
+    EXPECT_TRUE(anyGuideHidden(s.h));
+    // Not picked, not brushed; the freeze mask is not touched.
+    EXPECT_EQ(guidesAt(s.h, -1, std::string(), std::set<std::string>{}), std::vector<GuideId>{a});
+    BrushSettings comb;
+    comb.mode = BrushMode::Comb;
+    comb.radius = 2.0f;
+    comb.collide = false;
+    EXPECT_EQ(brushTargets(s.h, comb), std::vector<GuideId>{a});
+    const std::vector<Vec3f> hidden = s.pts(b);
+    applyBrushStamp(s.h, s.scalp.get(), comb, {0.5f, 0.5f, 0.5f}, {0.3f, 0.0f, 0.0f});
+    EXPECT_GT(s.pts(a).back().x, 0.45f) << "the shown guide combed";
+    EXPECT_EQ(s.pts(b), hidden) << "the hidden guide left alone";
+    float frozen = 0.0f;
+    EXPECT_FALSE(s.h.effectiveAttribute(*s.h.guide(b), "freeze", &frozen));
+    // Invert: the shown and the hidden swap; Show All: every guide back.
+    EXPECT_TRUE(invertFrozen(s.h, kHiddenLayer));
+    EXPECT_TRUE(guideHidden(s.h, *s.h.guide(a)));
+    EXPECT_FALSE(guideHidden(s.h, *s.h.guide(b)));
+    EXPECT_TRUE(unfreezeAll(s.h, kHiddenLayer));
+    EXPECT_FALSE(anyGuideHidden(s.h));
+    EXPECT_EQ(brushTargets(s.h, comb).size(), 2u);
+    // A child hidden through its parent shows after Invert (invertHidden goes by what shows).
+    const GroupId kids = s.h.addGroup("children", s.primary);
+    const GuideId child = s.h.addChildGuide(kids, a, test::straightCurve({0.41f, 0, 0.5f}, {0, 1, 0}, 8));
+    s.h.evaluate(s.scalp.get());
+    s.h.setAttribute(a, kHiddenLayer, 1.0f);
+    ASSERT_TRUE(guideHidden(s.h, *s.h.guide(child)));
+    EXPECT_TRUE(invertHidden(s.h));
+    EXPECT_FALSE(guideHidden(s.h, *s.h.guide(a)));
+    EXPECT_FALSE(guideHidden(s.h, *s.h.guide(child)));
+    EXPECT_TRUE(guideHidden(s.h, *s.h.guide(b)));
+    unfreezeAll(s.h, kHiddenLayer);
+}
+
+// ---------------------------------------------------------------------------
+// Smooth's modes: Curve (kinks), Length, Shape, All (toward the guides under the brush)
+
+TEST(Brush, SmoothModeNames) {
+    for (const SmoothMode m : {SmoothMode::Curve, SmoothMode::Length, SmoothMode::Shape, SmoothMode::All}) {
+        EXPECT_EQ(smoothModeFromString(smoothModeName(m)), m);
+    }
+    EXPECT_THROW(smoothModeFromString("kinks"), std::invalid_argument);
+    EXPECT_EQ(BrushSettings{}.smoothMode, SmoothMode::Curve) << "Smooth as it always was";
+}
+
+TEST(Brush, SmoothLengthEvensLengthsKeepingShapes) {
+    Scene s;
+    const GuideId shortOne = s.add(0.45f, 0.5f), longOne = s.add(0.55f, 0.5f);
+    s.h.setPoints(longOne, test::straightCurve({0.55f, 0, 0.5f}, {0, 2, 0}, 8));
+    s.h.evaluate(s.scalp.get());
+    BrushSettings b;
+    b.mode = BrushMode::Smooth;
+    b.smoothMode = SmoothMode::Length;
+    b.radius = 4.0f;
+    b.hardness = 1.0f;  // full weight everywhere: the lengths meet in the middle
+    b.strength = 1.0f;
+    b.collide = false;
+    for (int i = 0; i < 12; ++i) applyBrushStroke(s.h, s.scalp.get(), b, {{0.5f, 1.0f, 0.5f}});
+    EXPECT_NEAR(totalLength(s.pts(shortOne)), 1.5f, 0.05f);
+    EXPECT_NEAR(totalLength(s.pts(longOne)), 1.5f, 0.05f);
+    // Still straight up from the same roots.
+    EXPECT_NEAR(s.pts(longOne).back().x, 0.55f, 1e-4f);
+    EXPECT_NEAR(s.pts(shortOne).front().y, 0.0f, 1e-5f);
+}
+
+TEST(Brush, SmoothShapeBlendsTowardTheNeighborsShapeKeepingLengths) {
+    Scene s;
+    const GuideId up = s.add(0.45f, 0.5f), bent = s.add(0.55f, 0.5f);
+    s.h.setPoints(bent, test::straightCurve({0.55f, 0, 0.5f}, {1, 0.2f, 0}, 8));  // lying almost flat
+    s.h.evaluate(s.scalp.get());
+    const float upLength = totalLength(s.pts(up)), bentLength = totalLength(s.pts(bent));
+    auto angle = [&] {
+        const Vec3f a = (s.pts(up).back() - s.pts(up).front()).normalized();
+        const Vec3f b2 = (s.pts(bent).back() - s.pts(bent).front()).normalized();
+        return std::acos(std::clamp(a.dot(b2), -1.0f, 1.0f));
+    };
+    const float before = angle();
+    BrushSettings b;
+    b.mode = BrushMode::Smooth;
+    b.smoothMode = SmoothMode::Shape;
+    b.radius = 4.0f;
+    b.hardness = 1.0f;
+    b.strength = 1.0f;
+    b.collide = false;
+    for (int i = 0; i < 6; ++i) applyBrushStroke(s.h, s.scalp.get(), b, {{0.5f, 0.5f, 0.5f}});
+    EXPECT_LT(angle(), 0.25f * before) << "the two guides' shapes met";
+    EXPECT_NEAR(totalLength(s.pts(up)), upLength, 1e-3f);
+    EXPECT_NEAR(totalLength(s.pts(bent)), bentLength, 1e-3f);
+}
+
+TEST(Brush, SmoothLengthLeavesALoneGuideAlone) {
+    Scene s;
+    const GuideId id = s.add(0.5f, 0.5f);
+    const std::vector<Vec3f> before = s.pts(id);
+    BrushSettings b;
+    b.mode = BrushMode::Smooth;
+    b.radius = 4.0f;
+    b.collide = false;
+    for (const SmoothMode m : {SmoothMode::Length, SmoothMode::Shape}) {
+        b.smoothMode = m;
+        applyBrushStroke(s.h, s.scalp.get(), b, {{0.5f, 0.5f, 0.5f}});
+        EXPECT_EQ(s.pts(id), before) << smoothModeName(m);
+    }
 }
 
 }  // namespace

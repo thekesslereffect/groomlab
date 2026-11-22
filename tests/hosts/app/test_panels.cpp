@@ -73,6 +73,7 @@
 #include "transfer_window.h"
 #include "groomlab/brush_catalog.h"
 #include "groomlab/correctives.h"
+#include "groomlab/curve.h"
 #include "groomlab/field.h"
 #include "groomlab/graph_pins.h"
 #include "groomlab/groom_file.h"
@@ -272,6 +273,50 @@ TEST(AppPanels, ParamEditorsRoundTripEveryKindWithoutLosingMaps) {
     EXPECT_EQ(RampEditor::flipped(json::parse("[[0, 0], [0.25, 0.5], [1, 1]]")), json::parse("[[0.0, 1], [0.75, 0.5], [1.0, 0]]"));
     EXPECT_EQ(RampEditor::flipped(json::parse(R"({"keys": [[0, 1], [1, 0.5]], "linear": true})")),
               json::parse(R"({"keys": [[0.0, 0.5], [1.0, 1]], "linear": true})"));
+    // Handles (issue #102): a key's slopes kept in the JSON as the core reads them, Auto Handles
+    // and Corner; Flip mirrors them; a drag on the picked key's handle sets its slope both sides,
+    // Alt+drag one side.
+    ramp->setValue(json::parse("[[0, 0], [0.5, 1, 2, 0], [1, 1]]"));
+    EXPECT_EQ(ramp->value(), json::parse("[[0, 0], [0.5, 1, 2, 0], [1, 1]]"));
+    ramp->setHandle(1, RampHandle{});
+    EXPECT_EQ(ramp->value(), json::parse("[[0, 0], [0.5, 1], [1, 1]]"));
+    ramp->corner(1);
+    EXPECT_EQ(ramp->value(), json::parse("[[0, 0], [0.5, 1, 2, 0], [1, 1]]"));
+    EXPECT_EQ(RampEditor::flipped(json::parse("[[0, 0], [0.5, 1, 2, 0], [1, 1]]")), json::parse("[[0, 1], [0.5, 1, 0, -2], [1, 0]]"));
+    ramp->setHandle(1, RampHandle{});
+    ramp->resize(300, 170);
+    ramp->select(1);
+    auto drag = [&](const QPointF& from, const QPointF& to, Qt::KeyboardModifiers modifiers) {
+        QMouseEvent press(QEvent::MouseButtonPress, from, ramp->mapToGlobal(from), Qt::LeftButton, Qt::LeftButton, modifiers);
+        QApplication::sendEvent(ramp, &press);
+        QMouseEvent move(QEvent::MouseMove, to, ramp->mapToGlobal(to), Qt::NoButton, Qt::LeftButton, modifiers);
+        QApplication::sendEvent(ramp, &move);
+        QMouseEvent release(QEvent::MouseButtonRelease, to, ramp->mapToGlobal(to), Qt::LeftButton, Qt::NoButton, modifiers);
+        QApplication::sendEvent(ramp, &release);
+    };
+    QPointF out = ramp->handlePoints(1).second;
+    drag(out, out - QPointF(0, 20), Qt::NoModifier);  // up: steeper out of the key
+    const json tied = ramp->value()[1];
+    ASSERT_GE(tied.size(), 3u) << tied.dump();  // (6 numbers once the handle's length moved too)
+    EXPECT_GT(tied[2].get<double>(), 0.3);
+    if (tied.size() == 6) EXPECT_EQ(tied[2], tied[3]);
+    out = ramp->handlePoints(1).second;
+    drag(out, out + QPointF(0, 35), Qt::AltModifier);  // down, the out side alone
+    const json cornered = ramp->value()[1];
+    ASSERT_GE(cornered.size(), 4u) << cornered.dump();
+    EXPECT_EQ(cornered[2], tied[2]);
+    EXPECT_LT(cornered[3].get<double>(), cornered[2].get<double>());
+    EXPECT_EQ(ramp->selected(), 1);
+    // Farther out: the handle longer (its length a share of its span), the other side's kept.
+    ramp->setHandle(1, RampHandle{true, 0.0f, 0.0f});  // (flat: the handle's dot at its control point)
+    out = ramp->handlePoints(1).second;
+    drag(out, out + QPointF(40, 0), Qt::AltModifier);
+    const json longer = ramp->value()[1];
+    ASSERT_EQ(longer.size(), 6u) << longer.dump();
+    EXPECT_GT(longer[5].get<double>(), 0.45) << longer.dump();
+    EXPECT_NEAR(longer[4].get<double>(), 1.0 / 3.0, 1e-6) << longer.dump();
+    EXPECT_EQ(RampEditor::flipped(json::parse("[[0, 0], [0.5, 1, 2, 0, 0.25, 0.75], [1, 1]]")),
+              json::parse("[[0, 1], [0.5, 1, 0, -2, 0.75, 0.25], [1, 0]]"));
 
     // A mappable param holding a map: shown as its source, never replaced by the number editor.
     const std::string scatter = nodeOfType(*doc, "Scatter");
@@ -749,10 +794,16 @@ TEST(AppPanels, ATextureParamFollowsItsMapsFile) {
     const std::string renamed = doc->map("thick")->texture;
     EXPECT_NE(renamed, first) << "the file follows the map's name";
     EXPECT_EQ(reads(), renamed);
+    const std::string renamedFile = doc->textureMapFile("thick");
+    EXPECT_TRUE(fs::exists(fs::u8path(renamedFile)));
     EXPECT_EQ(doc->undo(), "");
     EXPECT_EQ(reads(), first);
+    // The image back under its old name too (the step keeps its files: the editor's renameMap).
+    EXPECT_TRUE(fs::exists(fs::u8path(doc->textureMapFile(map))));
+    EXPECT_FALSE(fs::exists(fs::u8path(renamedFile)));
     EXPECT_EQ(doc->redo(), "");
     EXPECT_EQ(reads(), renamed);
+    EXPECT_TRUE(fs::exists(fs::u8path(renamedFile)));
     const std::string library = base + "/library/thick.png";
     fs::create_directories(fs::u8path(library).parent_path());
     fs::copy_file(fs::u8path(doc->textureMapFile("thick")), fs::u8path(library), fs::copy_options::overwrite_existing);
@@ -1166,8 +1217,8 @@ TEST(AppPanels, GroomToolsTilesReflowAndTheModePillClosesTheGraph) {
     GroomTools tools;
     EXPECT_TRUE(tools.tileLabels()) << "labeled tiles by default";
     tools.setTileLabels(false);
-    EXPECT_EQ(tools.tiles().size(), 20u) << "Select, Freeze, the 16 tools (Paint and Length Keys among them), Invert Frozen and Unfreeze All";
-    for (const char* id : {"place", "draw", "part", "flow", "comb", "shape", "cut", "lengths", "erase", "paint", "select", "freeze", "invert", "unfreeze"}) {
+    EXPECT_EQ(tools.tiles().size(), 21u) << "Select, Freeze, the 17 tools (Paint, Length Keys and Clone among them), Invert Frozen and Unfreeze All";
+    for (const char* id : {"place", "draw", "clone", "part", "flow", "comb", "shape", "cut", "lengths", "erase", "paint", "select", "freeze", "invert", "unfreeze"}) {
         EXPECT_NE(tools.tile(id), nullptr) << id;
     }
     std::vector<std::string> tabs;
@@ -1257,6 +1308,26 @@ TEST(AppPanels, GuidesPanelMirrorsResamplesAndClearsOverlays) {
     EXPECT_TRUE(panel.resampleGuides(6));
     for (const HierarchyGuide& g : doc->session().authoredHierarchy()->guides()) EXPECT_EQ(g.points.size(), 7u);
     EXPECT_EQ(doc->undoText(), "Undo resample guides");
+    // Segments by Length (issue #98): each guide's count its length's share (the spacing the same on
+    // every guide), one undo step; the switch shows it, toggling it off gives one count again.
+    QCheckBox* byLength = panel.findChild<QCheckBox*>(QStringLiteral("segmentsByLength"));
+    ASSERT_TRUE(byLength);
+    EXPECT_TRUE(panel.resampleGuides(6, 1));
+    {
+        const HierarchyPtr h = doc->session().authoredHierarchy();
+        float spacing = 0.0f;
+        for (const GuideGroup& g : h->groups()) spacing = std::max(spacing, g.segmentLength);
+        ASSERT_GT(spacing, 0.0f);
+        std::set<std::size_t> counts;
+        for (const HierarchyGuide& g : h->guides()) {
+            if (g.points.size() < 2 || g.isChild()) continue;
+            const float length = arcLength(g.points.data(), g.points.size());
+            counts.insert(g.points.size());
+            EXPECT_NEAR(length / static_cast<float>(g.points.size() - 1), spacing, spacing * 0.5f) << g.id;
+        }
+    }
+    EXPECT_TRUE(doc->undo().empty());
+    EXPECT_TRUE(panel.resampleGuides(6, 0));
     // Symmetry sync across x: at least as many guides, mirrored in x.
     EXPECT_TRUE(panel.symmetrySync());
     EXPECT_GE(doc->session().authoredHierarchy()->guides().size(), guides);
@@ -2503,6 +2574,21 @@ TEST(AppPanels, ParamPanelPaintsAParamInOneStep) {
         EXPECT_NE(doc->paintParam(clump, "centerWeight", nullptr, "guides"), "") << "no guides to paint on";
     }
     EXPECT_NE(doc->paintParam(clump, "centerWeight", nullptr, "rainbow"), "");
+    // One channel of a color map, by name (every host's ParamPaintRequest): the map made color, the
+    // param fed by its Map node's output, one undo step.
+    ParamPaintRequest packed;
+    packed.name = "packedMasks";
+    packed.channel = "g";
+    std::string packedMap, channel;
+    bool packedMade = false;
+    EXPECT_EQ(doc->paintParam(clump, "centerWeight", packed, &packedMap, &packedMade, &channel), "");
+    EXPECT_EQ(packedMap, "packedMasks");
+    EXPECT_EQ(channel, "g");
+    EXPECT_TRUE(packedMade);
+    ASSERT_TRUE(doc->map("packedMasks"));
+    EXPECT_EQ(doc->map("packedMasks")->channels, kColorMap);
+    EXPECT_EQ(doc->undo(), "");
+    EXPECT_EQ(doc->map("packedMasks"), nullptr);
 }
 
 namespace {

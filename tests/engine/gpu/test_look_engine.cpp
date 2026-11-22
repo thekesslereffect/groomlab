@@ -1908,6 +1908,10 @@ TEST_P(LookEngineTest, ARampDragGivesWhatTheCpuEvaluatesForIt) {
         EXPECT_GPU_MATCHES(g.json(), rampDrag("noise", "profile", bump), c.json());
         c.noise = R"("params": {"amplitude": 0.3, "frequency": 1.0, "octaves": 2, "profile": )" + straight + "}";
         EXPECT_GPU_MATCHES(g.json(), rampDrag("noise", "profile", straight), c.json());
+        // Keys with handles set (issue #102): a corner (a slope each side) and a smooth key's own slope.
+        const std::string handled = R"([[0, 0.2, 3.0, 3.0, 0.3333333, 0.8], [0.45, 1.0, 1.8, -0.4, 0.15, 0.6], [1, 0.35]])";
+        c.noise = R"("params": {"amplitude": 0.3, "frequency": 1.0, "octaves": 2, "profile": )" + handled + "}";
+        EXPECT_GPU_MATCHES(g.json(), rampDrag("noise", "profile", handled), c.json());
     }
     {
         LookGraph g;
@@ -4581,6 +4585,22 @@ TEST_P(LookEngineTest, ASculptStrengthDragRunsDownstreamOnTheGpu) {
         EXPECT_LT(widthMax, kWidthTolerance);
         EXPECT_GT(changed, 0.01) << "the value changes the hair";
     }
+}
+
+TEST(LookPreview, AWarmStrokeMakesTheScalpsClearanceTablesOnce) {
+    // Issue #101: between strokes a host warms what the GPU's first stroke on the scalp would make
+    // at its press (the clearance tables its Interpolate pushes with), once per scalp; a preview
+    // of the same scalp after it finds them made (the field's, shared).
+    GroomSession session(groom(chainGraph({{"Noise", R"("params": {"amplitude": 0.1, "frequency": 2.0})"}})));
+    ASSERT_TRUE(session.evaluate(ViewRequest{}).strands);
+    gpu::LookPreview preview;
+    EXPECT_TRUE(preview.warmStroke(session));
+    EXPECT_FALSE(preview.warmStroke(session)) << "once per scalp";
+    // Without clearance there is nothing to make.
+    GroomSession clear(groom(withoutClearance(chainGraph({{"Noise", R"("params": {"amplitude": 0.1, "frequency": 2.0})"}}))));
+    ASSERT_TRUE(clear.evaluate(ViewRequest{}).strands);
+    gpu::LookPreview other;
+    EXPECT_FALSE(other.warmStroke(clear));
 }
 
 TEST_P(LookEngineTest, ACompoundsNodesRunOnTheGpu) {

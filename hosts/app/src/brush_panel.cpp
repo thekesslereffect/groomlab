@@ -20,6 +20,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "groomlab/editor/tool_settings.h"
 #include "groomlab/brush_alpha.h"
 #include "groomlab/brush_catalog.h"
 
@@ -97,6 +98,17 @@ void collectBlocks(const QLayout* layout, const QWidget* top, std::vector<std::s
 
 }  // namespace
 
+std::function<void(double)> BrushPanel::numberSetter(const char* id, bool whole) {
+    // A setting written by its id, as every host sets it (the editor's setToolSetting: one parser).
+    return [this, id, whole](double v) {
+        setToolSetting(session_->settings(), id, whole ? nlohmann::json(std::lround(v)) : nlohmann::json(v));
+    };
+}
+
+std::function<void(bool)> BrushPanel::switchSetter(const char* id) {
+    return [this, id](bool on) { setToolSetting(session_->settings(), id, on); };
+}
+
 BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
     setObjectName(QStringLiteral("toolCard"));
     setProperty("role", "toolCard");
@@ -132,43 +144,43 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
     brush_->titleLabel()->hide();  // (the card's header names the tool: no "Brush" over its first block)
     QVBoxLayout* rows = brush_->rows();
     radius_ = slider(rows, "radius", settingLabel("radius"), [this] { return session_->settings().screenRadius; },
-                     [this](double v) { session_->settings().setScreenRadius(static_cast<float>(v)); },
+                     numberSetter("radius"),
                      withShortcut(tr("Screen pixels: the circle's radius on screen, whatever the zoom (middle-drag sets it too)"), "brush.radius"));
     radius_->setObjectName(QStringLiteral("radius"));
     radius_->setFixedHeight(theme::rowHeight() + 4);  // the brush's two numbers: the card's tallest fields
     radius_->setFormat([](double v) { return QString::number(std::lround(v)) + QStringLiteral(" px"); });
     strength_ = slider(rows, "strength", settingLabel("strength"), [this] { return session_->settings().brush.strength; },
-                       [this](double v) { session_->settings().brush.strength = static_cast<float>(v); },
+                       numberSetter("strength"),
                        withShortcut(settingHint("strength") + tr(" (Shift+middle-drag sets it too)"), "brush.strength"));
     strength_->setObjectName(QStringLiteral("strength"));
     strength_->setFixedHeight(theme::rowHeight() + 4);
     // Falloff as the catalog names it in both hosts: 0 hard to the edge, 1 soft from the center
     // (the core's hardness is 1 - falloff).
     falloff_ = slider(rows, "falloff", settingLabel("falloff"), [this] { return 1.0 - session_->settings().brush.hardness; },
-                      [this](double v) { session_->settings().setHardness(static_cast<float>(1.0 - v)); }, settingHint("falloff"));
+                      numberSetter("falloff"), settingHint("falloff"));
     falloff_->setObjectName(QStringLiteral("falloff"));
     falloff_->setFixedHeight(theme::rowHeight() + 4);
     smooth_ = slider(rows, "smoothStrength", settingLabel("smoothStrength"), [this] { return session_->settings().smoothStrength; },
-                     [this](double v) { session_->settings().setSmoothStrength(static_cast<float>(v)); }, settingHint("smoothStrength"));
+                     numberSetter("smoothStrength"), settingHint("smoothStrength"));
     smooth_->setObjectName(QStringLiteral("smoothStrength"));
     {
         // The toggles as switch rows, in a fixed order (a row never moves between tools): Pressure,
         // Keep off scalp, Stretch for Comb, Straighten for Smooth, the app's own Propagate and
         // Pointwise; then the curves as chips, which open an editor (a chevron says so).
         pressure_ = settingSwitch(rows, "pressure", tr("Pressure"), [this] { return session_->settings().pressure; },
-                                  [this](bool on) { session_->settings().pressure = on; });
+                                  switchSetter("pressure"));
         collide_ = settingSwitch(rows, "collide", tr("Keep off scalp"), [this] { return session_->settings().brush.collide; },
-                                 [this](bool on) { session_->settings().brush.collide = on; });
+                                 switchSetter("collide"));
         stretch_ = settingSwitch(rows, "stretch", tr("Stretch"), [this] { return session_->settings().brush.stretch; },
-                                 [this](bool on) { session_->settings().brush.stretch = on; });
+                                 switchSetter("stretch"));
         straighten_ = settingSwitch(rows, "straighten", tr("Straighten"), [this] { return session_->settings().brush.straighten; },
-                                    [this](bool on) { session_->settings().brush.straighten = on; });
+                                    switchSetter("straighten"));
         propagate_ = switchSetting(rows, tr("Propagate"), [this] { return session_->settings().brush.propagate; },
-                                   [this](bool on) { session_->settings().brush.propagate = on; },
+                                   switchSetter("propagate"),
                                    tr("Also edit the locked descendants (children that keep their own shape)"));
         propagate_->setObjectName(QStringLiteral("propagate"));
         pointwise_ = switchSetting(rows, tr("Pointwise"), [this] { return session_->settings().brush.pointwise; },
-                                   [this](bool on) { session_->settings().brush.pointwise = on; },
+                                   switchSetter("pointwise"),
                                    tr("Paint a per-point layer along the guide instead of one value per guide"));
         pointwise_->setObjectName(QStringLiteral("pointwise"));
         FlowLayout* chips = nullptr;
@@ -177,11 +189,11 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
         ramps->setContentsMargins(0, 0, 0, 0);
         ramps->setSpacing(4);
         curve(chips, ramps, "falloffProfile", tr("Falloff curve"), "[[0, 1], [0.5, 0.56], [1, 0]]",
-              [this] { return session_->settings().falloffProfileJson(); }, [this](const std::string& v) { session_->settings().setFalloffProfile(v); });
+              [this] { return session_->settings().falloffProfileJson(); }, [this](const std::string& v) { setToolSetting(session_->settings(), "falloffProfile", v); });
         falloffCurve_ = findChild<QToolButton*>(QStringLiteral("falloffProfile"));
         falloffRamp_ = findChild<QWidget*>(QStringLiteral("falloffProfileCurve"));
         curve(chips, ramps, "strengthProfile", tr("Root to tip"), "[[0, 0.25], [1, 1]]",
-              [this] { return session_->settings().strengthProfileJson(); }, [this](const std::string& v) { session_->settings().setStrengthProfile(v); });
+              [this] { return session_->settings().strengthProfileJson(); }, [this](const std::string& v) { setToolSetting(session_->settings(), "strengthProfile", v); });
         strengthCurve_ = findChild<QToolButton*>(QStringLiteral("strengthProfile"));
         strengthRamp_ = findChild<QWidget*>(QStringLiteral("strengthProfileCurve"));
         rows->addLayout(ramps);
@@ -246,7 +258,7 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
             alphaAngle_->setEnabled(session_->settings().alphaRotation != BrushToolSettings::AlphaRotation::Random);
         });
         alphaAngle_ = slider(options, "alphaAngle", tr("Stamp angle"), [this] { return session_->settings().alphaAngle; },
-                             [this](double v) { session_->settings().alphaAngle = static_cast<float>(v); },
+                             numberSetter("alphaAngle"),
                              tr("The alpha's angle in degrees, counterclockwise (Follow Stroke: added to the stroke's way)"));
         alphaAngle_->setObjectName(QStringLiteral("alphaAngle"));
         alphaAngle_->setFormat([](double v) { return QString::number(std::lround(v)) + QStringLiteral("°"); });
@@ -258,7 +270,7 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
         alphaSpacing_->setObjectName(QStringLiteral("alphaSpacing"));
         alphaSpacing_->setFormat([](double v) { return QString::number(std::lround(v)) + QStringLiteral("%"); });
         QCheckBox* invert = switchSetting(options, tr("Invert"), [this] { return session_->settings().alphaInvert; },
-                                          [this](bool on) { session_->settings().alphaInvert = on; },
+                                          switchSetter("alphaInvert"),
                                           tr("Paint where the alpha is black instead"));
         invert->setObjectName(QStringLiteral("alphaInvert"));
         column->addWidget(alphaOptions_);
@@ -277,27 +289,27 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
     newGuides_->setObjectName(QStringLiteral("newGuidesBox"));
     rows = newGuides_->rows();
     ValueSlider* length = slider(rows, "length", tr("Length"), [this] { return session_->settings().place.length; },
-                                 [this](double v) { session_->settings().place.length = static_cast<float>(v); },
+                                 numberSetter("length"),
                                  tr("New guides' length (standing, or without neighbors to match)"));
     length->setObjectName(QStringLiteral("newGuideLength"));
     ValueSlider* segments = slider(rows, "segments", tr("Segments"), [this] { return double(session_->settings().place.segments); },
-                                   [this](double v) { session_->settings().setSegments(static_cast<int>(std::lround(v))); },
+                                   numberSetter("segments", true),
                                    tr("Points along each new guide"));
     segments->setObjectName(QStringLiteral("segments"));
     spacing_ = slider(rows, "spacing", settingLabel("spacing"), [this] { return session_->settings().place.spacing; },
-                      [this](double v) { session_->settings().place.spacing = static_cast<float>(v); },
+                      numberSetter("spacing"),
                       tr("Place many: no new root closer than this to another of the group"));
     spacing_->setObjectName(QStringLiteral("spacing"));
     {
         QCheckBox* match = switchSetting(rows, tr("Match nearby"), [this] { return session_->settings().place.matchNeighbors; },
-                                         [this](bool on) { session_->settings().place.matchNeighbors = on; },
+                                         switchSetter("matchNeighbors"),
                                          tr("New guides take the shape, length and painted maps of the nearest guides: the group's own, "
                                             "or the groups around it while it has none. Off: they stand straight up, with no maps"));
         match->setObjectName(QStringLiteral("matchNearby"));
         settingSwitch(rows, "soloNewGuides", tr("Solo new"), [this] { return session_->settings().place.soloNewGuides; },
-                      [this](bool on) { session_->settings().place.soloNewGuides = on; });
+                      switchSetter("soloNewGuides"));
         placeCollide_ = switchSetting(rows, tr("Keep off scalp"), [this] { return session_->settings().brush.collide; },
-                                      [this](bool on) { session_->settings().brush.collide = on; }, settingHint("collide"));
+                                      switchSetter("collide"), settingHint("collide"));
         placeCollide_->setObjectName(QStringLiteral("placeCollide"));
     }
     card_->addWidget(newGuides_);
@@ -322,7 +334,7 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
             connect(c, &QToolButton::clicked, this, [this, value] {
                 if (updating_ || !session_) return;
                 try {
-                    session_->settings().brush.tubeChannel = tubeChannelFromString(value);
+                    setToolSetting(session_->settings(), "tubeChannel", value);
                 } catch (const std::invalid_argument&) {
                     return;
                 }
@@ -335,6 +347,40 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
         });
     }
     card_->addWidget(paints_);
+
+    // ---- Evens out (Smooth): curve, length, shape or all (choices.smoothMode), one at a time.
+    evens_ = new CardBlock(settingLabel("smoothMode"), this);
+    evens_->setObjectName(QStringLiteral("smoothModeBox"));
+    evens_->setToolTip(settingHint("smoothMode"));
+    {
+        FlowLayout* chips = nullptr;
+        evens_->rows()->addWidget(segmentRow(evens_, &chips));
+        auto* group = new QButtonGroup(evens_);
+        group->setExclusive(true);
+        for (const ui::json& item : defs().choices("smoothMode")) {
+            const std::string value = item.value("value", std::string());
+            QToolButton* c = makeChip(qs(item.value("label", std::string())), qs(item.value("tip", std::string())), evens_);
+            c->setProperty("smoothMode", qs(value));
+            c->setObjectName(QStringLiteral("smoothMode_") + qs(value));
+            group->addButton(c);
+            smoothModes_.push_back(c);
+            chips->addWidget(c);
+            connect(c, &QToolButton::clicked, this, [this, value] {
+                if (updating_ || !session_) return;
+                try {
+                    setToolSetting(session_->settings(), "smoothMode", value);
+                } catch (const std::invalid_argument&) {
+                    return;
+                }
+                edited();
+            });
+        }
+        refreshers_.push_back([this] {
+            const QString current = QString::fromLatin1(smoothModeName(session_->settings().brush.smoothMode));
+            for (QToolButton* c : smoothModes_) c->setChecked(c->property("smoothMode").toString() == current);
+        });
+    }
+    card_->addWidget(evens_);
 
     // ---- Erases: what Erase removes, and a short note (the whole of it in the tip).
     erases_ = new CardBlock(settingLabel("erases"), this);
@@ -497,7 +543,7 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
         connect(flowSink_, &QComboBox::currentIndexChanged, this, [this, showHint](int) {
             showHint();
             if (updating_ || !session_) return;
-            session_->settings().flowSink = flowSink_->currentData().toString().toStdString();
+            setToolSetting(session_->settings(), "flowSink", flowSink_->currentData().toString().toStdString());
             edited();
         });
         refreshers_.push_back([this, showHint] {
@@ -508,6 +554,53 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
         showHint();
     }
     card_->addWidget(flow_);
+
+    // ---- Clone: Pick Source (the next click copies, as Ctrl+click does), Reset, the source's
+    // count, and whether copies replace the guides where they land.
+    clone_ = new CardBlock(settingLabel("clone"), this);
+    clone_->setObjectName(QStringLiteral("cloneBox"));
+    clone_->setToolTip(settingHint("clone"));
+    {
+        QHBoxLayout* row = new QHBoxLayout();
+        clonePick_ = new QPushButton(tr("Pick Source"), clone_);
+        clonePick_->setObjectName(QStringLiteral("clonePickSource"));
+        clonePick_->setCheckable(true);
+        clonePick_->setToolTip(tr("The next click in the viewport copies the guides rooted in the brush circle "
+                                  "(Ctrl+click does the same any time)"));
+        connect(clonePick_, &QPushButton::toggled, this, [this](bool on) {
+            if (updating_ || !session_) return;
+            applyToolSettings(session_->tool(), {{"clonePickSource", on}});  // (every host's: tool_settings.h)
+            refresh();
+        });
+        cloneReset_ = new QPushButton(tr("Reset"), clone_);
+        cloneReset_->setObjectName(QStringLiteral("cloneReset"));
+        cloneReset_->setToolTip(tr("Let the source go, ready for a new pick (a Ctrl+click off the model, or picking "
+                                   "another tool, does the same)"));
+        connect(cloneReset_, &QPushButton::clicked, this, [this] {
+            if (!session_) return;
+            applyToolSettings(session_->tool(), {{"cloneReset", true}});
+            refresh();
+        });
+        row->addWidget(clonePick_, 1);
+        row->addWidget(cloneReset_, 1);
+        clone_->rows()->addLayout(row);
+        cloneCount_ = hintLabel(QString(), clone_);
+        cloneCount_->setObjectName(QStringLiteral("cloneCount"));
+        cloneCount_->setToolTip(tr("The guides the source holds (their children come along)"));
+        clone_->rows()->addWidget(cloneCount_);
+        settingSwitch(clone_->rows(), "cloneReplace", tr("Replace"), [this] { return session_->settings().cloneReplace; },
+                      switchSetter("cloneReplace"));
+        refreshers_.push_back([this] {
+            BrushTool& tool = session_->tool();
+            tool.syncClone();  // (another tool: the source let go)
+            const std::size_t n = tool.clip().guides.size();
+            clonePick_->setChecked(tool.captureArmed());
+            cloneReset_->setEnabled(n > 0 || tool.captureArmed());
+            cloneCount_->setText(n == 0 ? tr("No source yet: Ctrl+click over guides")
+                                        : tr("Source: %n guide(s)", nullptr, static_cast<int>(n)));
+        });
+    }
+    card_->addWidget(clone_);
 
     // ---- Parts: the next part's name and the parts drawn so far.
     parts_ = new CardBlock(settingLabel("parts"), this);
@@ -521,7 +614,7 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
         connect(partName_, &QLineEdit::editingFinished, this, [this] {
             if (updating_ || !session_) return;
             const std::string name = partName_->text().trimmed().toStdString();
-            session_->settings().partName = name.empty() ? std::string("part") : name;
+            setToolSetting(session_->settings(), "partName", name);  // ("": part)
             edited();
         });
         refreshers_.push_back([this] { partName_->setText(qs(session_->settings().partName)); });
@@ -603,7 +696,7 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
         symmetryCenter_->setToolTip(tr("Where the world plane sits along its axis (0: the origin)"));
         connect(symmetryCenter_, &ValueSlider::valueChanged, this, [this](double v) {
             if (updating_ || !session_) return;
-            session_->settings().brush.mirrorCenter = static_cast<float>(v);
+            setToolSetting(session_->settings(), "symmetryCenter", v);
             edited();
         });
         mirror->addWidget(symmetryCenter_);
@@ -780,7 +873,9 @@ void BrushPanel::setTool(const std::string& id) {
                                : QPixmap());
     // Brush.
     const bool brush = uses("radius");
-    for (ValueSlider* s : {radius_, strength_, falloff_}) s->setVisible(brush);
+    radius_->setVisible(brush);
+    strength_->setVisible(brush && uses("strength"));  // (Clone: a circle, no strength or falloff)
+    falloff_->setVisible(brush && uses("falloff"));
     smooth_->setVisible(uses("smoothStrength"));
     setRowVisible(pressure_, uses("pressure"));
     setRowVisible(collide_, brush && uses("collide"));
@@ -807,9 +902,11 @@ void BrushPanel::setTool(const std::string& id) {
     setRowVisible(stretch_, uses("stretch"));
     setRowVisible(straighten_, uses("straighten"));
     paints_->setVisible(uses("tubeChannel"));
+    evens_->setVisible(uses("smoothMode"));
     erases_->setVisible(uses("erases"));
     keys_->setVisible(uses("lengthKeys"));
     flow_->setVisible(uses("flow"));
+    clone_->setVisible(uses("clone"));
     parts_->setVisible(uses("parts"));
     // The tubes: the tube new guides get (Place, Draw), the selected guides' (Tube).
     if (tubes_) {
@@ -865,7 +962,7 @@ void BrushPanel::symmetryEdited() {
     symmetryMode_->setEnabled(symmetry_->isChecked());
     if (updating_ || !session_) return;
     const std::string name = symmetry_->isChecked() ? symmetryMode_->currentData().toString().toStdString() : std::string("none");
-    session_->settings().setSymmetry(name);
+    setToolSetting(session_->settings(), "symmetry", name);
     updating_ = true;
     refreshSymmetry();
     updating_ = false;

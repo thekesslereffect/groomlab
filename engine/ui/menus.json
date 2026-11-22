@@ -70,6 +70,7 @@
       "-",
       {"ref": "menus/theme"},
       "hotkeys.install",
+      "radial.settings",
       {"submenu": "Help", "id": "help", "ref": "menus/help"}
     ],
     "samples": ["sample.nika", "sample.manny", "sample.wolf", "sample.buddy"],
@@ -95,6 +96,7 @@
       "render.fromGroomFile", "render.asCurves", "-", "render.hardware2", "-",
       "render.prman", "render.prmanFrame", "render.prmanTurntable", "-",
       "render.vrayStandalone", "render.vrayFrame", "render.vrayTurntable", "-",
+      "render.redshiftRefresh", "-",
       "render.prmanLocation", "render.vrayLocation"
     ],
     "studio": [

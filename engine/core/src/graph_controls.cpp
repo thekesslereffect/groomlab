@@ -102,24 +102,26 @@ std::string controlsJson(const std::string& graphJson) {
             }
         }
         if (n.contains("paramControls") && n["paramControls"].is_object()) {
-            json spec;  // the node's spec, read once when a keyed param leaves its value out
+            const json spec = json::parse(nodeSpecJson(n.dump()), nullptr, false);  // (the node's: its kinds, defaults)
             for (const auto& [param, control] : n["paramControls"].items()) {
                 json own = params.contains(param) ? params[param] : json(nullptr);
-                if (own.is_null()) {
-                    if (spec.is_null()) spec = json::parse(nodeSpecJson(n.dump()), nullptr, false);
-                    for (const json& p : spec.is_object() ? spec.value("params", json::array()) : json::array()) {
-                        if (p.is_object() && p.value("name", std::string()) == param) own = p.value("default", json());
-                    }
+                std::string valueKind = "float";  // the param's spec kind: float, int, bool or vec3 (a host's attribute type)
+                for (const json& p : spec.is_object() ? spec.value("params", json::array()) : json::array()) {
+                    if (!p.is_object() || p.value("name", std::string()) != param) continue;
+                    if (own.is_null()) own = p.value("default", json());
+                    const std::string k = p.value("kind", std::string());
+                    if (k == "int" || k == "bool" || k == "vec3") valueKind = k;
                 }
                 if (control.is_array()) {
                     for (std::size_t i = 0; i < control.size(); ++i) {
                         if (!control[i].is_string()) continue;
                         const double d = own.is_array() && own.size() == 3 ? numberOr(own[i], 0.0) : 0.0;
-                        out[control[i].get<std::string>()] = {
-                            {"kind", "keyed"}, {"node", node}, {"param", param}, {"component", i}, {"default", d}};
+                        out[control[i].get<std::string>()] = {{"kind", "keyed"},   {"node", node},     {"param", param},
+                                                              {"component", i},    {"default", d},     {"valueKind", "vec3"}};
                     }
                 } else if (control.is_string()) {
-                    out[control.get<std::string>()] = {{"kind", "keyed"}, {"node", node}, {"param", param}, {"default", numberOr(own, 0.0)}};
+                    out[control.get<std::string>()] = {
+                        {"kind", "keyed"}, {"node", node}, {"param", param}, {"default", numberOr(own, 0.0)}, {"valueKind", valueKind}};
                 }
             }
         }

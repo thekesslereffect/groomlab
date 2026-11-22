@@ -70,8 +70,6 @@ public:
 private:
     MDGModifier modifier_;
     bool undoable_ = false;
-    std::pair<std::string, std::string> moved_;  // a renamed texture map's file: from, to (absolute)
-    bool copied_ = false;  // the renamed map's file was copied, not moved (another groom reads it)
     // The texture files the command wrote (a map's image rewritten, -relink's copy; a tile set's
     // every tile), as they were and are (asset_files.h FileState): put back on undo, again on redo.
     std::vector<FileState> files_;

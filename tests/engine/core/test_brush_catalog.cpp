@@ -15,7 +15,7 @@ namespace groomlab {
 
 TEST(BrushCatalog, EveryToolOnceInCategoryOrder) {
     const std::vector<BrushEntry>& catalog = brushCatalog();
-    ASSERT_EQ(catalog.size(), 18u);
+    ASSERT_EQ(catalog.size(), 19u);
     std::set<std::string> ids;
     int lastCategory = -1;
     for (std::size_t i = 0; i < catalog.size(); ++i) {
@@ -58,7 +58,7 @@ TEST(BrushCatalog, EveryToolOnceInCategoryOrder) {
 TEST(BrushCatalog, EveryStrokeToolModeIsListedWithItsSettings) {
     // Every mode the stroke tools take is in the catalog, and the hosts' own tools too.
     for (const char* mode : {"comb", "smooth", "lift", "length", "shape", "paint", "cut", "twist", "attract", "erase",
-                             "slide", "place", "draw", "part", "flow", "lengths"}) {
+                             "slide", "place", "draw", "clone", "part", "flow", "lengths"}) {
         const BrushEntry* e = brushEntry(mode);
         ASSERT_TRUE(e) << mode;
         BrushToolSettings s;
@@ -90,6 +90,16 @@ TEST(BrushCatalog, EveryStrokeToolModeIsListedWithItsSettings) {
     EXPECT_TRUE(brushEntry("place")->hasSetting("spacing"));
     EXPECT_FALSE(brushEntry("draw")->hasSetting("spacing"));
     EXPECT_FALSE(brushEntry("place")->hasSetting("radius"));
+    // Clone (issue 91): a Create tool with the circle (no strength), its source block and switch.
+    EXPECT_EQ(brushEntry("clone")->category, BrushCategory::Create);
+    EXPECT_TRUE(brushEntry("clone")->hasSetting("radius"));
+    EXPECT_FALSE(brushEntry("clone")->hasSetting("strength"));
+    EXPECT_TRUE(brushEntry("clone")->hasSetting("clone"));
+    BrushToolSettings clone;
+    clone.setMode("clone");
+    EXPECT_TRUE(clone.showsBrushCircle());
+    clone.setMode("place");
+    EXPECT_FALSE(clone.showsBrushCircle());
     EXPECT_TRUE(brushEntry("paint")->hasSetting("map"));
     EXPECT_FALSE(brushEntry("paint")->hasSetting("collide"));
     EXPECT_TRUE(brushEntry("comb")->hasSetting("frontFacingOnly"));
@@ -117,7 +127,8 @@ TEST(BrushCatalog, EveryValuesDefaultIsTheSettingsOwn) {
     }
     EXPECT_EQ(values, (std::set<std::string>{"radius", "strength", "falloff", "smoothStrength", "selectedOnly", "pressure", "collide",
                                              "frontFacingOnly", "stretch", "straighten", "length", "segments", "matchNeighbors",
-                                             "spacing", "soloNewGuides", "alphaAngle", "alphaSpacing", "alphaInvert"}));
+                                             "spacing", "soloNewGuides", "cloneReplace", "alphaAngle", "alphaSpacing",
+                                             "alphaInvert"}));
     EXPECT_EQ(brushSettingValue(fresh, "newGuides"), std::nullopt);
     EXPECT_EQ(brushSettingValue(fresh, "no such setting"), std::nullopt);
 }

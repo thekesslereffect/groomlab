@@ -77,12 +77,13 @@ def generate_children(groom, parent_group=None, name=None, count=5, root_spread=
 def list_guide_groups(groom):
     """Return the groom's guide groups as dicts: name, parent, depth, count, color: the color it
     draws in without one of the groom's own (guide_group_colors): its own (a ToGuides node's),
-    else its automatic one, "#rrggbb"; and segments: what its new guides get (0: the tool's own)."""
+    else its automatic one, "#rrggbb"; segments: what its new guides get (0: the tool's own); and
+    segmentLength: above 0, its guides go by length (issue #98: a new guide gets its length over it)."""
     groups = []
     for row in cmds.groomLabGuides(groom, listGroups=True) or []:
-        name, parent, depth, count, color, segments = row.split("|")
+        name, parent, depth, count, color, segments, length = row.split("|")
         groups.append({"name": name, "parent": parent or None, "depth": int(depth), "count": int(count),
-                       "color": color, "segments": int(segments)})
+                       "color": color, "segments": int(segments), "segmentLength": float(length)})
     return groups
 
 
@@ -235,16 +236,18 @@ def set_soft_selection(groom, radius):
     cmds.setAttr(groom + ".softSelectRadius", radius)
 
 
-def select_tool(level=0, group="", roots_only=False, solo=True, symmetry=None, activate=True):
+def select_tool(level=0, group="", roots_only=False, solo=True, symmetry=None, activate=True, hide=False):
     """The lasso tool for guides of the selected groom (Shift: toggle, Ctrl: deselect, Ctrl+Shift: add).
     With `solo` every pick also freezes the guides not selected, in the same undo step, so the
-    brushes work on the selection; a pick of nothing unfreezes every guide. `symmetry` ("x" or
-    "topology", as the brushes take it) picks each guide's mirror guide too."""
+    brushes work on the selection; a pick of nothing unfreezes every guide. With `hide` it hides
+    them instead (the "hidden" layer: the radial menu's Visibility > Select; a pick of nothing shows
+    all). `symmetry` ("x" or "topology", as the brushes take it) picks each guide's mirror guide too."""
     ensure_plugin()
     if not cmds.contextInfo(SELECT_CONTEXT, exists=True):
         cmds.groomLabSelectCtx(SELECT_CONTEXT)
     cmds.groomLabSelectCtx(SELECT_CONTEXT, edit=True, level=level, group=group, rootsOnly=roots_only,
-                           soloSelection=bool(solo), symmetry=symmetry or "none")
+                           soloSelection=bool(solo), hideOthers=bool(hide),
+                           symmetry=symmetry or "none")
     if activate:
         cmds.setToolTo(SELECT_CONTEXT)
     return SELECT_CONTEXT
@@ -363,12 +366,15 @@ def color_guides_by_map(groom, name=None):
 # Resampling, per-guide attributes, the stored hierarchy, guides from Alembic
 
 
-def resample_guides(groom, segments, guides=None, group=None, level=None):
+def resample_guides(groom, segments, guides=None, group=None, level=None, by_length=False):
     """Give guides (default: the selected ones, else every guide) `segments` segments evenly spaced
     along the smooth curve through their points, keeping their shape; frozen guides keep theirs. A
     whole `group`, a `level`, or every guide (none given or selected): their groups' new guides get
-    `segments` too (set_group_segments). One undo step; returns the number of guides resampled."""
-    return cmds.groomLabGuides(groom, resample=segments, **_targets(guides, group, level))
+    `segments` too (set_group_segments). `by_length` (issue #98): a guide of the guides' mean length
+    gets `segments`, each other its length's share (the points as far apart on every guide), and a
+    whole group keeps that spacing for its new guides. One undo step; returns the number of guides
+    resampled."""
+    return cmds.groomLabGuides(groom, resample=segments, byLength=bool(by_length), **_targets(guides, group, level))
 
 
 def reset_group_segments(groom, group):
@@ -390,11 +396,12 @@ def guide_segments(groom, guides=None, group=None, level=None):
     return list(cmds.groomLabGuides(groom, pointCounts=True, **_targets(guides, group, level)) or [])
 
 
-def preview_resample_guides(groom, segments, guides=None, group=None, level=None):
-    """Show guides (as resample_guides picks them) resampled to `segments`, live, without changing
-    the groom or making an undo step: always from the stored guides, so previews never compound.
-    resample_guides commits; end_guide_preview drops the preview. Returns the guides previewed."""
-    return cmds.groomLabGuides(groom, previewResample=segments, **_targets(guides, group, level))
+def preview_resample_guides(groom, segments, guides=None, group=None, level=None, by_length=False):
+    """Show guides (as resample_guides picks them) resampled to `segments` (by length with
+    `by_length`), live, without changing the groom or making an undo step: always from the stored
+    guides, so previews never compound. resample_guides commits; end_guide_preview drops the
+    preview. Returns the guides previewed."""
+    return cmds.groomLabGuides(groom, previewResample=segments, byLength=bool(by_length), **_targets(guides, group, level))
 
 
 def end_guide_preview(groom):

@@ -26,6 +26,7 @@
 
 #include "definitions.h"
 #include "groomlab/brush.h"
+#include "groomlab/editor/guide_edits.h"
 #include "groomlab/guide_hierarchy.h"
 
 class QCheckBox;
@@ -106,7 +107,9 @@ public:
     bool newGroupFromSelection();
     std::string copySelectedGuides();  // "" with none selected (a message says why)
     bool pasteGuides(const std::string& text);
-    bool resampleGuides(int segments);
+    // `byLength` (issue #98): the count of a guide of the targets' average length, each other its
+    // length's share; -1: as the panel's Segments by Length switch says.
+    bool resampleGuides(int segments, int byLength = -1);
     // Every guide of a group back to its segments, those with their own too (frozen ones kept).
     bool resetGroupSegments(const std::string& name);
     // A group's own color ("#rrggbb"; "" its automatic color again).
@@ -147,6 +150,8 @@ protected:
     void showEvent(QShowEvent* event) override;
 
 private:
+    // An Edit Guides op of the editor run as one edit (its label every host's), `done` what it did.
+    bool guideOp(const char* what, const GuideOp& op, GuideOpResult* done = nullptr);
     void itemChanged(QTreeWidgetItem* item, int column);
     std::string groupOf(QTreeWidgetItem* item) const;
     void fresh() const;  // refreshed first when stale
@@ -174,6 +179,7 @@ private:
     QMenu* editsMenu_ = nullptr;
     ValueSlider* count_ = nullptr;
     ValueSlider* segments_ = nullptr;
+    QCheckBox* byLength_ = nullptr;  // Segments by Length (issue #98)
     QWidget* overlays_ = nullptr;  // the parts and flow box
     QListWidget* parts_ = nullptr;
     QLabel* flow_ = nullptr;

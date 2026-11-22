@@ -95,7 +95,7 @@ def refresh(scalp, rt=None):
     rt = rt or groom.ensure(scalp)
     graph = _call("get_graph", session=rt.session)["graph"]
     g = scalp.groomlab
-    g.graph_json = json.dumps(graph)
+    groom.remember_graph(scalp, rt, graph)
     types = {n["name"]: n["type"] for n in graph.get("nodes", [])}
     chain, _ = main_chain(graph)
     order = [n for n in chain if n in types] + [n for n in types if n not in chain]
@@ -315,6 +315,16 @@ def _edit(rt, **args):
     return _call("edit_graph", session=rt.session, **args)
 
 
+def note_undo(scalp, r):
+    """After an edit_graph answer: an edit the helper made one undo step of (a rename, a removal or
+    a copy carrying Sculpt edits: the editor's followGraphEdit) keeps its depth on the groom, so
+    Blender's undo steps it back with the rest (tools.sync_undo)."""
+    if r and r.get("undoable") and r.get("undo"):
+        from . import tools
+        tools.after_edit(scalp, groom.scene_of(scalp), r["undo"], refresh=False)
+    return r
+
+
 def _ensure(scalp):
     """The groom's runtime, the Graph Editor's node moves sent first (they go with the next edit)."""
     rt = groom.ensure(scalp)
@@ -329,16 +339,20 @@ def _changed(scalp, rt):
 
 
 def add_node(scalp, type_name, after=None):
-    """A node of `type_name`, on the main chain after `after` (else before the output)."""
+    """A node of `type_name` after `after` as every host adds a node after the selected one (the
+    editor's wireAfterNode: into its first link the node fits in, else fed by it on its first input
+    that takes it), else (no `after`, or nothing takes it) on the main chain before the output."""
     rt = _ensure(scalp)
     graph = _call("get_graph", session=rt.session)["graph"]
     chain, into = main_chain(graph)
-    made = _edit(rt, op="add_node", type=type_name)["name"]
+    names = {n["name"] for n in graph.get("nodes", [])}
+    r = _edit(rt, op="add_node", type=type_name, **({"after": after} if after in names else {}))
+    made = r["name"]
+    error = r.get("graphError") or ""
     spec = operator_specs().get(type_name, {})
     strand_in = next((i["name"] for i in spec.get("inputs", []) if i.get("type") in STRAND_TYPES), None)
     out_type = (spec.get("output") or {}).get("type")
-    error = ""
-    if strand_in and out_type in STRAND_TYPES and len(chain) >= 2:
+    if after not in names and strand_in and out_type in STRAND_TYPES and len(chain) >= 2:
         i = chain.index(after) if after in chain and after != chain[-1] else len(chain) - 2
         prev, nxt = chain[i], chain[i + 1]
         nxt_input = _input_from(into, nxt, prev)
@@ -355,7 +369,7 @@ def add_node(scalp, type_name, after=None):
 def remove_node(scalp, name):
     rt = _ensure(scalp)
     # What fed it feeds what it fed (the core's removeNodeKeepingFlow, as every graph editor's Delete).
-    error = _edit(rt, op="remove_node", name=name, keepFlow=True)["graphError"]
+    error = note_undo(scalp, _edit(rt, op="remove_node", name=name, keepFlow=True))["graphError"]
     from . import graph_tree
     graph_tree.follow_braid_tubes(scalp)  # a deleted Braid's Show Tubes goes with it
     _changed(scalp, rt)

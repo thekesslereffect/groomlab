@@ -15,7 +15,9 @@ clump, noise, curl, braids, cards...). Everything that computes hair lives in a 
 core; Maya, Python, the CLI and Arnold are thin hosts over it.
 
 The repository's root follows that split: `engine/` is the system (`core`, `gpu`, `io` for
-Alembic and groom scenes, `python`, `cli`), `hosts/` the products built on it (`maya` with its
+Alembic and groom scenes, `python`, `cli`, `ui` the UI definitions, `assets` the files every host
+ships: graph presets, compound nodes, sample meshes, brush alphas, themes and the expression
+library, each installed into every product's own folder), `hosts/` the products built on it (`maya` with its
 Arnold translator, `arnold` for the procedural, `app`, `blender` for the Blender extension: the
 helper process and the GPL add-on, docs/BLENDER.md), `tests/` mirrors the two
 (`tests/engine/...`, `tests/hosts/...`, with the shared `tests/data`), `tools/` packages and
@@ -25,6 +27,7 @@ the build. The build folders mirror the source (`hosts/maya/RelWithDebInfo/Groom
 | Layer | Where | What it holds |
 | --- | --- | --- |
 | Core | `engine/core/` (`groomlab_core` static lib) | `GroomSession` (`groom_session.cpp`, also called `Groom`: one groom kept evaluated for any host, see [SESSION.md](SESSION.md)), painted scalp maps (`scalp_maps.cpp`), `StrandSet` (copy-on-write arrays), `ScalpMesh`, `GuideHierarchy`/`GuideSet`, the graph evaluator and cache (`graph.cpp`), the editors' edits of a graph's JSON every host makes (`graph_edit.cpp`: names, seeds, connections and their checks, a node's ports; on it, the whole-feature inserts of every host's Add menu `graph_inserts.cpp`, controls and keyed params `graph_controls.cpp`, and when a param shows or takes its unit `param_conditions.cpp`: section 6, "What every host does, written once"), operators (`engine/core/src/operators/*`), brushes (`brush.cpp`), the interactive tools and strokes for any host (`stroke.cpp`, `stroke_tools.cpp`: see [SESSION.md](SESSION.md)), guide picking and selection (`guide_selection.cpp`), painted maps on the scalp (`scalp_paint.cpp`), Catmull-Clark subdivision of the scalp and colliders (`subdivision.cpp`: the plans per cage topology, what match render refines by), HairColor's color patterns for every host (`color_patterns.cpp`: bands along a strand, vane space and the feather patterns drawn in it, the vane normals, the iridescent tint the shaders match), cards (`cards.cpp`; feathers' cards `card_feathers.cpp`, shared textures, layers and the atlas `card_atlas.cpp`, the bakes `card_bake.cpp`, the levels of detail every host offers and what a Cards node cards `card_presets.cpp`, a bake in memory, its files' names and layout and the `cardMaps` record `card_files.cpp`), rachis meshes and feather groups for engines (`feathers.cpp`), strands as meshes and budgets by strand ID for the utilities (`strand_geometry.cpp`), correctives, flow, parts, the viewport's buffers for any host (`display.cpp`, `DisplayBuilder`, see [SESSION.md](SESSION.md)), meshes' sparse signed distance fields on the world's grid, shared across evaluations (`distance_field.cpp`: Collide's, the guide simulation's, Interpolate's keepClearance: coarser cells, a wider band, the field's answers alone, and as tables for the GPU's walk), scales (`scales.cpp`: the built-in plates, `ScaleMeshBuilder` bending the Instance node's scales onto the skin through those fields, kept per scale, with their per-scale shader data: what the viewport, Arnold and the exports read), scales baked into skin maps (`scale_maps.cpp`), the guide simulation (`simulation.cpp`: the position-based rod solver, its water (buoyancy, water drag, a current) and per-point wetness, and each Simulate node's frames, which the session steps and keeps: see [SESSION.md](SESSION.md) Simulation; the node `operators/simulate_op.cpp`), following the scalp (`follow_scalp.cpp`: rest evaluation carried root by root), paths along the scalp (`surface_paths.cpp`: the rest pose welded into a graph, shared by its rest surface hash, and fronts from guide roots: distances along the skin and the turns a direction takes round folds, Interpolate's frame transfer and `followSurface`), groom files, USD writer, glTF writer (`gltf_writer.cpp`) and compressed PNGs (`png.cpp`) for game exports, path resolution (`paths.cpp`). |
+| Editor | `engine/editor/` (`groomlab_editor` static lib, on the core) | The groom editor: what every host's editing of a groom shares, written once ("The groom editor" below). Now: an undo step (`GroomEdit`: a param, a stroke's texts, the whole graph, and its side effects: files, group colors, subdivision, Show Tubes), the history of them (`EditHistory`) and the host that applies a step (`EditorHost`), in `groom_edit.h`; the graph's edits (`graph_edits.h`), the maps' (`map_edits.h`) and the guides' (`guide_edits.h`), every host's; the app's document keeps its history there. |
 | GPU | `engine/gpu/` (`groomlab_gpu` static lib, Windows) | The GPU look preview's engine, host-free: which run of nodes ending a graph the GPU can take (Interpolate, Length, Clump, Noise, Curl, Width, Part, Gravity, Flyaway, Collide...; a Cull, Split or Mirror as a run's first stage, the nodes up its input a run of their own copied into its layout) and with what params, mapped values and kept operator work (`look_chain.h`), the compute engine on a device the host gives (`look_engine.h`: one run algorithm, DirectX 11 and OpenGL backends), what every host's preview shares (`look_preview.h`: planning a drag's or a stroke's run, arming the stroke, the base the engine holds), the kernels (`shaders/look.slang`, compiled by Slang at build time). |
 | Maya plugin | `hosts/maya/src/` (`GroomLab.mll`) | `groomLabShape` (`groom_shape.cpp`: plugs and dirty tracking into its `GroomSession`), Viewport 2.0 drawing (`groom_draw_override*.cpp`: uploads the core's display buffers, keeps shaders and textures), the brush and select tools (`brush_tool.cpp`, `select_tool.cpp`: adapters of the core's tools, Maya's views read by `tool_view.cpp`), the camera solve and the Reference Flow tool (`reference_tool.cpp`), commands (`*_cmd.cpp`; `sim_cmd.cpp`: `groomLabSimulate`), Maya-to-core conversion (`maya_inputs.cpp`, also linked by the Arnold translator), crash logging (`crash_log.cpp`). |
 | Python | `hosts/maya/scripts/groomlab/` | The artist API, `groomlab.<name>` (`__init__.py` imports it from its modules and lists them: `groom.py`, `guides.py`, `painting.py` (maps), `params.py` (graph, controls, keys), `cards.py`, `game.py`, `files.py` (.groom), `paths.py` and more; a module imports from the ones listed before it, any later one inside the function that needs it), reference photos as cameras (`reference.py`), the graph model (`graph.py`: its edits the core's `GraphEdit`), sims, and the UI (`ui/`: Groom Tools palette and its Tools, Paint, Sculpt and Reference tabs, Graph Editor, Attribute Editor template, menu, hotkeys, themes: their `ui.font`, Inter, is loaded from the module's `fonts/` (the source tree's `hosts/app/fonts` from a checkout) and named only in the style sheet of GroomLab's own windows and the Graph Editor's painters, so Maya's windows keep Maya's font). The UI reaches Qt only through `ui/qt.py` (`from groomlab.ui.qt import QtCore, QtGui, QtWidgets`): PySide2 in Maya 2022 to 2024, PySide6 in 2025 and later, and the few names that differ (`qt.QAction`, `qt.QActionGroup`, `qt.QShortcut`, `qt.exec_(dialog)`, `qt.event_pos(event)`, `qt.to_int(flags)`, `qt.shiboken`, `qt.QtSvg()`); never import PySide2 or PySide6 directly. |
@@ -36,6 +39,73 @@ the build. The build folders mirror the source (`hosts/maya/RelWithDebInfo/Groom
 | CLI | `engine/cli/` | `info`, `eval`, `abc-info` on groom files, headless; `mcp`: the MCP server for AI agents (`mcp_server.cpp` the protocol, `mcp_tools.cpp` the tools, `preview_render.cpp` the CPU preview; tested by `cli.mcp_session`). |
 | App | `hosts/app/` (`GroomLab.exe`, `GROOMLAB_BUILD_APP`) | The standalone viewer without Maya: Qt 6 Widgets, the viewport on Qt's RHI (`renderer.cpp`), `GroomDocument` over a `GroomScene` (edits as whole graphs, undo, save, export). See "Standalone app" in section 2. |
 | Tests | `tests/` | GoogleTest core suites (`tests/engine/core`, goldens in `tests/data/golden`), the GPU kernels (`tests/engine/gpu`), Alembic (`tests/engine/io`), Python binding tests (`tests/engine/python`), mayapy suites and GUI-session suites (`tests/hosts/maya`), the app's tests (`tests/hosts/app`, built with the app). |
+
+### The groom editor
+
+Every user action (rename a node or a map, paint a setting, generate children, a stroke, an
+export) used to be written up to three times: the app's `GroomDocument` and `BrushSession`, the
+Blender helper's commands, Maya's commands and Python. `engine/editor` takes them one area at a
+time, each host calling the one version:
+
+- E0 (done): the undo step and history (`groom_edit.h`); the app's document keeps its history in
+  an `EditHistory` and applies steps as an `EditorHost`.
+- E1 (done): the graph's edits (`graph_edits.h`). `followGraphEdit`: after an edit, the Sculpt
+  nodes' edits, the brushes' Sculpt node, Show Tubes and the viewed node follow the nodes it
+  renamed, grouped, copied or removed (the app's `editGraph`; Maya's `GraphModel.save` and
+  `params.set_graph` through `params.follow_nodes`; the Blender helper's `commitGraph` and its plain
+  `edit_graph` ops, a rename, copy (`copyOf`) or removal that carries Sculpt edits being one undo
+  step on its stack, the add-on keeping its depth: `graph.note_undo`). `wireAfterNode`: Add Node
+  after the selected node goes into its first outgoing link the node fits in, else is fed by it on
+  its first input that takes it (the app's Add Node, Maya's Graph Editor, the add-on's
+  `graph.add_node` with `after`; scripted inserts keep `insertAfter`).
+- E2 (done): the maps' edits (`map_edits.h`), each working out the scalp maps, the graph and a
+  guide layer's values after, and the image files it moved, copied or wrote as found and as left
+  (the host keeps them in its undo step): `renameMap`, `removeMap`, `convertMapKind`, `fillMap`,
+  `setMapChannels`, `createMap`, `importMap`, `relinkMap`, `reloadMapFiles` and `paintParam` (Paint
+  on a setting: the map the param reads, else its own made white and linked by `wireParamMap`, or
+  one channel of a color map through its Map node). `MapFiles` says where the groom's images live
+  and how the host stores a path (the app: relative to the groom file; Blender: absolute; Maya:
+  `portableMayaPath`) and whether something beside the groom reads an image (Maya: another groom),
+  which then gets a copy of its own instead of being changed. The app's `GroomDocument`, the
+  Blender helper's `map_*` commands and Maya's `groomLabScalpMaps` (`-rename`, `-remove`,
+  `-convert`, `-fill`, `-setChannels`, `-make`, `-relink`, `-paintParam`) call them;
+  `painting.py` keeps only Maya's argument handling.
+- E3 (done): the guides' edits (`guide_edits.h`). `generateChildren`: the selected guides get
+  children (selection first, all of one group: an error when they span several), else every guide
+  of a group, the last by default. `applyGuideOp`: the Edit Guides ops (groups, delete, lock,
+  layers, freeze, mirror, move, duplicate, paste, promote, demote, reparent, resample, segments)
+  with their checks, a refusal carrying a code (`GuideEditError`: not_found, state, bad_request),
+  and each op's undo name (`guideOpLabel`). `editTubes` and `editTubeShape`: tubes edited by
+  `editedTube`'s JSON, and the tube shape library. The app's Guides panel and tube edits, the
+  Blender helper's `guides_edit` and `tube_*` commands and Maya's `groomLabGuides` call them.
+  Correctives (`correctives.h`), parts and flow were already the core's in every host.
+- E4 (done): the brush tool's (`tool_settings.h`, `tool_overlay.h`, `tool_select.h`). Its
+  settings set by id, one parser for the app's widgets, Maya's flags and the Blender helper's
+  keys (`applyToolSettings`; a `ToolSpace` turns a host's units and axes into the groom's; on the
+  tool itself, Clone's Pick Source and Reset as `clonePickSource` and `cloneReset`), the
+  radius and strength drag (`dragToolSetting`), the rail's tools with Freeze setting Paint aside
+  (`pickTool`); the ring as circles in pixels (`brushRing`: the halo, the falloff's dashed ring,
+  a held key's state, a dot for the tools with no radius by the core's `showsBrushCircle`; Maya
+  draws it in 2D) and the overlay of colored lines the app and Blender
+  draw (`brushOverlay`: hover, line of symmetry, ring, Part and Flow path); the Select tool's pick
+  (`pickGuidesInView`: click, box or lasso, only what the view shows, mirrors) and when it soloes
+  (`pickSoloes`).
+- E5 (done): the game exports (`game_exports.h`). One set of options (`GameExportOptions`: the
+  folder, the name and its LOD, the maps' size, occlusion, the hair cap, the feathers' points)
+  and `writeEngineCards`: hair cards for Unreal or Unity (the maps in each engine's layout, the
+  hair cap's, the manifest, the meshes as FBX by the core's writer, or left to the host). The app,
+  the Blender helper (its meshes still written by Blender's FBX exporter) and Maya
+  (`groomLabBakeCards -engine`: the core's FBX writer, no fbxmaya) call it; the app's Unity
+  feathers take the same options; Unity's feathers for the app and Blender through one writer
+  (`engine_export.h` `writeUnityFeathers`); glTF cards in every host through `writeGltfCards`
+  (`GltfCardsOptions`: a mesh per level of detail, the hair cap or a warning why not; the host
+  bakes each level and evaluates the cap's groom through `GltfCardsSource`).
+- E6 (done): Maya's Graph Editor split: its parameter panel (`ParamPanel`, `MappableEditor`) in
+  `ui/param_panel.py`, imported at the end of `ui/graph_editor.py` (whose helpers it reads; the
+  theme's colors through the module, as `apply_theme` rebinds them), and a node's pinned actions
+  (`ParamPanel.node_actions`) in `ui/node_actions.py`.
+  The Blender helper becomes a JSON wrapper over it; Maya calls it through `groomlab_core` and
+  records each step through its own undo queue.
 
 Data a groom keeps on the `groomLabShape` node (all stored strings, all read by compute):
 
@@ -1170,8 +1240,8 @@ build/wt/hosts/app/RelWithDebInfo/GroomLab.exe tests/data/strokes/strokes.groom
 **The window.** The whole window is the viewport, edge to edge; everything else floats over it
 as translucent glass (the owner's mockup, "like Plasticity but Pixar": the Playful theme's
 charcoal and primaries, round and friendly). `hosts/app/src/theme.h` holds the colors (the palette,
-the UI tones, the graph's and the icons' read from the Maya host's theme files themselves,
-`hosts/maya/themes/*.json`, every one embedded as a resource at build time, so a theme edit reaches
+the UI tones, the graph's and the icons' read from the shipped theme files (engine/assets/themes) themselves,
+`engine/assets/themes/*.json`, every one embedded as a resource at build time, so a theme edit reaches
 both hosts; Playful by default, View > Theme saves another (QSettings `ui/theme`) for the next start,
 `--theme` picks one for a run; a glass theme keeps the app's own glass and text tones, a theme with
 `"glass": false` (Charcoal) gets solid `ui.panel` panels with a thin `ui.outline` edge and its `ui` text
@@ -1265,9 +1335,10 @@ grabs it with its UI after the first frame
 `guides`, `cardsView`, `widthCoverage`...). The preview starts with no point budget (the Display
 panel's: past one every Scatter thins to fit); `--density` and the panel change it.
 
-**Graph presets** are the Maya host's files (`hosts/maya/presets/*.json`), read through the core's
+**Graph presets** are every host's shipped files (`engine/assets/presets/*.json`), read through the core's
 `presets.h` by both hosts: where they are looked up (`GROOMLAB_PRESET_PATH`, the user's folder,
-`GROOMLAB_USER_PRESETS` else Maya's `Documents/maya/groomlab/presets`, where both hosts save, then
+`GROOMLAB_USER_PRESETS` else `Documents/GroomLab/presets`, where every host saves, then the folder
+earlier GroomLabs saved to (Maya's `Documents/maya/groomlab/presets`, still read), then
 the shipped folder: beside `GroomLab.exe`, where the build copies them, else the source tree's in a
 development build), what the menu shows of each (`about`), how one is fitted to a scalp's size
 (lengths and widths with the size, densities with its inverse square, per-length rates with its
@@ -3686,7 +3757,7 @@ numbers under a test that compares them to the helper's `tool_catalog`
 replacing it: the look between the preset's sources and its Output as one Compound after a
 node (GraphEdit checks the wiring; the preset's Scalp or Guides become Compound inputs wired
 to the graph's), used by Maya's `GraphEditor.insert_preset` and the app's `insertPresetFile`;
-the Add-ons presets (`hosts/maya/presets/wet.json`...) are small complete graphs made for it,
+the Add-ons presets (`engine/assets/presets/wet.json`...) are small complete graphs made for it,
 and `Presets.EveryAddOnInsertsIntoEveryBasePreset` inserts each into every shipped preset.
 
 **What every host does, written once.** Maya, Blender and the app make the same edits from the

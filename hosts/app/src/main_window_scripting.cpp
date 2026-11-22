@@ -287,11 +287,16 @@ bool MainWindow::setUiPrompt(const QString& name) {
 bool MainWindow::setUiMenu(const QString& name) {
     const QString n = name.toLower();
     if (n == QStringLiteral("marking")) {
-        // The marking menu (Y + click) a little above the viewport's middle, Comb (its N) hovered.
+        // The radial menu (Alt+S) a little above the viewport's middle, Brushes A (its NW) open
+        // and Comb (that ring's NW) hovered.
         QApplication::processEvents();
         const QPointF middle = viewport_->mapTo(host_, QPointF(viewport_->width() / 2.0, viewport_->height() * 0.4));
         if (!showMarkingMenu(middle, false)) return false;
-        markingMenu_->track(middle + QPointF(0.0, -60.0));
+        const int brushes = markingMenu_->indexOf("Brushes A");
+        if (brushes >= 0) {
+            markingMenu_->open(brushes);
+            markingMenu_->track(markingMenu_->center() + QPointF(-70.0, -52.0));
+        }
         return true;
     }
     if (n == QStringLiteral("add") || n == QStringLiteral("edit") || n == QStringLiteral("node")) {

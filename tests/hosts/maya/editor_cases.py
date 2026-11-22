@@ -1136,17 +1136,16 @@ class GraphEditorTest(unittest.TestCase):
         groomlab.guides_from_curves(self.groom, [cmds.curve(degree=1, point=[(0, 1, 0), (0, 2, 0)])])
         self.editor.reload()
         self.editor.params.paint_param("scatter", "density", "guides")
-        # The param keeps its value; a Map node reading the (white) map feeds its exposed input.
-        self.assertEqual(self.editor.model.param("scatter", "density"), before)
-        self.assertIn("density", self.editor.model.param_inputs("scatter"))
-        self.assertEqual(self.editor.model.node_type("scatter_density"), "Map")
+        # The param reads the (white) guide layer, its value the white, as every host links it.
+        self.assertEqual(self.editor.model.param("scatter", "density"), {"guide": "scatter_density", "min": 0.0, "max": before})
+        self.assertNotIn("scatter_density", self.editor.model.order)
         self.assertEqual(groomlab.map_kind(self.groom, "scatter_density"), "guides")
         self.assertIn("scatter_density", groomlab.list_maps(self.groom), self.editor.status.text())
         self.assertEqual(groomlab.errors(self.groom), [])
-        # On the scalp's vertices for another param: a second map and Map node.
+        # On the scalp's vertices for another param: a second map, read through its color set.
         self.editor.params.paint_param("length", "keep", "vertices")
         self.assertEqual(groomlab.map_kind(self.groom, "length_keep"), "vertices")
-        self.assertEqual(self.editor.model.node_type("length_keep"), "Map")
+        self.assertEqual(self.editor.model.param("length", "keep")["colorSet"], "length_keep")
         self.assertEqual(groomlab.errors(self.groom), [])
         self.assertNotIn("Paint", [a.text() for a in self.editor.params.build_param_menu("output", "strands").actions()]
                          if self.editor.model.param_spec("output", "strands") else ["x"])
@@ -1545,8 +1544,7 @@ class GraphEditorTest(unittest.TestCase):
         self.assertEqual((cmds.getAttr(self.groom + ".braidTubes") or "").split("\n"), [name, other])
         self.assertTrue(self.editor.braid_tubes_shown(name) and self.editor.braid_tubes_shown(other))
         # Renamed (the Rename dialog's steps, without the dialog): the name follows.
-        self.editor.model.rename_node(name, "plait")
-        self.editor._follow_braid_tubes(name, "plait")
+        self.editor.model.rename_node(name, "plait")  # (Show Tubes follows in the save: GraphModel.save)
         self.editor.rebuild()
         self.editor.changed()
         self.assertEqual((cmds.getAttr(self.groom + ".braidTubes") or "").split("\n"), ["plait", other])
@@ -4088,7 +4086,7 @@ class DockableWindowsTest(unittest.TestCase):
                                       "Guides from Photos (experimental)...", "Groom Files", "Import", "Add", "Simulate",
                                       "Display", "Review", "Studio", "Render", "Export", "Utilities", "Theme",
                                       "Install GroomLab Hotkeys",
-                                      "Help"])
+                                      "Radial Menu Settings...", "Help"])
 
             def entries_of(label, tooltips=True, parent=menu.MENU):
                 sub = next(parent + "|" + i for i in cmds.menu(parent, query=True, itemArray=True)
@@ -4123,7 +4121,7 @@ class DockableWindowsTest(unittest.TestCase):
                                                     "Look Through Studio Camera", "Remove Studio"])
             self.assertEqual(entries_of("Render"), ["Render from Groom File...", "Render as Curves",
                                                     "Maya Hardware 2.0 (no renderer needed)...", "RenderMan (prman)...",
-                                                    "V-Ray Standalone..."])
+                                                    "V-Ray Standalone...", "Refresh Redshift Grooms"])
             exports = entries_of("Export")
             self.assertIn("Unreal Cards...", exports)
             self.assertNotIn("Groom File...", exports)

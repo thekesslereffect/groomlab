@@ -20,6 +20,7 @@
 #include <utility>
 #include <vector>
 
+#include "groomlab/editor/graph_edits.h"
 #include "groomlab/stroke.h"
 #include "groomlab/graph_controls.h"
 #include "groomlab/asset_files.h"
@@ -1309,7 +1310,7 @@ json setState(Session& s, const json& args) {
     return info;
 }
 
-// The sample meshes shipped with the helper (Maya's hosts/maya/meshes, CC BY 4.0): bin/meshes
+// The sample meshes shipped with the helper (Maya's engine/assets/meshes, CC BY 4.0): bin/meshes
 // beside it (or one up), else the source tree's (a build tree's helper).
 std::string shippedMeshesDir() {
     std::error_code ec;
@@ -1643,6 +1644,14 @@ json Helper::run(const std::string& cmd, const json& args) {
         const json names = grooms;
         const std::string name = file.name;
         const std::string braidTubes = file.braidTubes;
+        // Keyed controls ({name: [[frame, value], ...]}): the add-on keys its ctl_ properties from
+        // them (Blender's keys then give the values each frame, set_controls).
+        json controlKeys = json::object();
+        for (const auto& [control, keys] : file.controlKeys) {
+            json list = json::array();
+            for (const auto& [frame, value] : keys) list.push_back(json::array({frame, value}));
+            controlKeys[control] = std::move(list);
+        }
         adopt(s, std::move(file));
         s.seconds = 0.0;
         json info = groomInfo(s);
@@ -1651,6 +1660,7 @@ json Helper::run(const std::string& cmd, const json& args) {
         info["name"] = name;
         info["grooms"] = names;  // every groom's name, in the file's order
         info["braidTubes"] = braidTubes;  // Show Tubes' nodes, as saved (the add-on keeps them)
+        info["controlKeys"] = std::move(controlKeys);
         return info;
     }
     if (cmd == "save_groom") {
@@ -1670,6 +1680,22 @@ json Helper::run(const std::string& cmd, const json& args) {
         file.directory = oldDir;
         file.name = optString(args, "name", "");
         if (args.contains("braidTubes")) file.braidTubes = optString(args, "braidTubes", "");  // Show Tubes' nodes (the add-on's)
+        // Keyed controls, as the add-on's ctl_ properties' keys have them ({name: [[frame, value], ...]}).
+        if (args.contains("controlKeys")) {
+            const json& keyed = args["controlKeys"];
+            if (!keyed.is_object()) fail("bad_request", "controlKeys is {name: [[frame, value], ...]}");
+            file.controlKeys.clear();
+            for (const auto& [control, list] : keyed.items()) {
+                ControlKeys keys;
+                for (const json& k : list.is_array() ? list : json::array()) {
+                    if (!k.is_array() || k.size() != 2 || !k[0].is_number() || !k[1].is_number()) {
+                        fail("bad_request", "controlKeys is {name: [[frame, value], ...]}");
+                    }
+                    setControlKey(keys, k[0].get<double>(), k[1].get<double>());
+                }
+                if (!keys.empty()) file.controlKeys[control] = std::move(keys);
+            }
+        }
         if (file.source.empty()) file.source = "Blender";
         if (axis == "Z") convertUpAxis(file, "Z");
         GroomWriteOptions options;
@@ -2153,13 +2179,21 @@ json Helper::run(const std::string& cmd, const json& args) {
         // The Graph Editor's authoring (Group, exposed params, a node on a link, sliders, keyed
         // params): one undo step each on the session's stack (authoring.cpp).
         if (runGraphAuthoring(s, op, args, r)) return r;
-        GraphEdit edit(graphText(*s.groom));
+        const std::string before = graphText(*s.groom);
+        GraphEdit edit(before);
+        std::map<std::string, std::string> copied;  // a duplicate's {copy: source}: its Sculpt edits copied
         if (op == "add_node") {
             const json& params = args.contains("params") && args["params"].is_object() ? args["params"] : json::object();
             std::optional<double> x, y;
             if (args.contains("x") && args["x"].is_number()) x = args["x"].get<double>();
             if (args.contains("y") && args["y"].is_number()) y = args["y"].get<double>();
             r["name"] = edit.addNode(needString(args, "type"), optString(args, "name", ""), params.dump(), x, y, scalpSize(s));
+            // A duplicate (the node tree's copy of a node): the copy takes its source's Sculpt edits.
+            const std::string copyOf = optString(args, "copyOf", "");
+            if (!copyOf.empty() && edit.hasNode(copyOf)) copied[r["name"].get<std::string>()] = copyOf;
+            // Add Node after the selected node, every host's rule (graph_edits.h wireAfterNode).
+            const std::string after = optString(args, "after", "");
+            if (!after.empty()) r["wired"] = wireAfterNode(edit, after, r["name"].get<std::string>()) ? json(after) : json();
         } else if (op == "remove_node") {
             // keepFlow (the Graph Editor's Delete, issue #80): what fed it feeds what it fed.
             if (args.value("keepFlow", false)) {
@@ -2408,6 +2442,18 @@ json Helper::run(const std::string& cmd, const json& args) {
         if (json g = json::parse(text); g.contains("pins")) {
             prunePins(g);
             text = g.dump();
+        }
+        // An edit that renames, copies or removes nodes carries their Sculpt edits and the brushes'
+        // target along (the editor's followGraphEdit, every host's), one undo step on the session's
+        // stack with the graph (Blender's undo puts back graph_json; the add-on keeps the helper's
+        // depth); any other edit sets the graph as it is.
+        GraphFollowers was;
+        was.sculpts = s.groom->data().sculptsJson;
+        was.sculptTarget = s.groom->sculptTarget();
+        const GraphFollowers now = followGraphEdit(text, was, edit.movedNodes(), copied);
+        if (now.sculpts != was.sculpts || now.sculptTarget != was.sculptTarget) {
+            return commitGraphText(s, op + " " + optString(args, "name", optString(args, "type", "")), before, text,
+                                   edit.movedNodes(), r, copied);
         }
         try {
             s.groom->setGraphJson(text);

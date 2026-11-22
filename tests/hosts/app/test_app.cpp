@@ -632,7 +632,7 @@ TEST(AppTheme, FontsBrushesAndColors) {
     EXPECT_EQ(theme::glass().alpha(), 255);  // solid panels: no shipped theme is glass any more
 
     // The colors are the Maya host's theme file's (embedded at build time), not a copy of it.
-    std::ifstream in(std::string(GROOMLAB_TEST_DATA) + "/../../hosts/maya/themes/playful.json");
+    std::ifstream in(std::string(GROOMLAB_TEST_DATA) + "/../../engine/assets/themes/playful.json");
     ASSERT_TRUE(in);
     const json playful = json::parse(in);
     auto hex = [&](const std::string& value) {
@@ -694,7 +694,7 @@ TEST(AppTheme, EveryShippedThemeIsEmbeddedAndCharcoalIsSolid) {
     // opaque panels with a thin edge, its own text tones, the selection tone for the chosen segment,
     // the blue accent pill for the primary actions, minimal node headers on a dot grid; Playful (glass, round filled headers) is still the
     // theme the others extend.
-    const std::string folder = std::string(GROOMLAB_TEST_DATA) + "/../../hosts/maya/themes";
+    const std::string folder = std::string(GROOMLAB_TEST_DATA) + "/../../engine/assets/themes";
     QStringList files;
     for (const auto& entry : std::filesystem::directory_iterator(folder)) {
         if (entry.path().extension() == ".json") files << QString::fromStdString(entry.path().stem().string());
@@ -1796,6 +1796,21 @@ TEST(AppDocument, NodeRenameDuplicateOutputAndTidy) {
     bool reads = false;
     for (const GroomDocument::ConnectionInfo& c : doc->connections()) reads = reads || c.to == copy;
     EXPECT_TRUE(reads) << "the copy reads what the node reads";
+    auto typeOf = [&](const std::string& name) {
+        for (const GroomDocument::NodeInfo& n : doc->nodes()) {
+            if (n.name == name) return n.type;
+        }
+        return std::string();
+    };
+    EXPECT_EQ(typeOf(copy), typeOf("trim"));
+    // Every field kept, as Maya's Duplicate and a copy of several nodes keep them: a Scatter's seed.
+    {
+        const std::string scatter = nodeOfType(doc->nodes(), "Scatter").name;
+        std::string scatterCopy;
+        ASSERT_EQ(doc->duplicateNode(scatter, &scatterCopy), "");
+        EXPECT_EQ(doc->paramOrDefault(scatterCopy, "seed"), doc->paramOrDefault(scatter, "seed"));
+        EXPECT_EQ(doc->undo(), "");
+    }
     float x = 0.0f, y = 0.0f, cx = 0.0f, cy = 0.0f;
     if (doc->nodePosition("trim", &x, &y)) {
         ASSERT_TRUE(doc->nodePosition(copy, &cx, &cy));
@@ -4192,6 +4207,11 @@ TEST(AppRender, PartialUploadsDrawTheSameFrameAsWholeOnes) {
             r->setLookdev(lookdev);
             LightingSetup lighting = lightingPreset("studio");
             lighting.quality = Quality::Interactive;
+            // Every frame at full resolution: the dabs are a stream of changes, which the adaptive
+            // quality draws at a scale each renderer picks from its own frames' wall-clock times,
+            // so on a busy machine one renderer's frame came out smaller than the other's and the
+            // two differed by the scale, not the strands.
+            lighting.interactiveQuality = InteractiveQuality::Full;
             r->setLighting(lighting);
         }
         DisplaySettings settings;
@@ -4212,7 +4232,6 @@ TEST(AppRender, PartialUploadsDrawTheSameFrameAsWholeOnes) {
         const HierarchyGuide& g = f.guide(0);
         const QPointF at = f.widgetPoint(g.points[g.points.size() / 2]);
         f.session.settings().setMode("comb");
-        f.session.settings().brush.stretch = false;  // (lengths kept: the strands keep their extent)
         f.session.settings().screenRadius = 40.0f;
         ViewRequest request;
         request.density = 0.2f;
@@ -4573,7 +4592,6 @@ TEST(AppGpuPreview, SculptStrokeDabsRunOnTheGpu) {
     }
     const QPointF at = f.widgetPoint(g->points[g->points.size() / 2]);
     f.session.settings().setMode("comb");
-    f.session.settings().brush.stretch = false;  // (the tips combed along: Stretch from the middle keeps the ends)
     f.session.settings().screenRadius = 80.0f;
     ASSERT_TRUE(f.session.press(at, 1.0f, 0)) << f.session.lastError();
     EXPECT_TRUE(f.doc->session().hasPreviewSculpt());

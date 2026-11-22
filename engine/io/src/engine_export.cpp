@@ -3,9 +3,16 @@
 
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <stdexcept>
 
+#include <nlohmann/json.hpp>
+
 #include "groomlab/alembic_io.h"
+#include "groomlab/engine_cards.h"
+#include "groomlab/engine_meshes.h"
+#include "groomlab/fbx_writer.h"
 #include "groomlab/feathers.h"
 
 namespace groomlab {
@@ -186,6 +193,64 @@ std::size_t EngineGroomWriter::frameCount() const { return impl_->frames; }
 void EngineGroomWriter::close() {
     if (impl_->unreal) impl_->unreal->close();
     if (impl_->unity) impl_->unity->close();
+}
+
+std::vector<std::string> UnityFeathersExport::files() const {
+    std::vector<std::string> out{abc};
+    if (!fbx.empty()) out.push_back(fbx);
+    if (!manifest.empty()) out.push_back(manifest);
+    return out;
+}
+
+UnityFeathersExport writeUnityFeathers(const StrandSet& strands, const ScalpMesh* scalp, double seconds, double secondsPerFrame,
+                                       const std::string& directory, const std::string& name, const UnityFeathersOptions& o) {
+    for (const std::size_t p : {o.points, o.barbPoints}) {
+        if (p < kUnityMinStrandPoints || p > kUnityMaxStrandPoints) {
+            throw std::invalid_argument("points and barb points are 3 to 128 (Unity's strand particle counts)");
+        }
+    }
+    EngineExportOptions e;
+    e.engine = EngineExportOptions::Engine::Unity;
+    e.groups = kGroupIdChannel;
+    e.pointsPerStrand = o.points;
+    e.barbPoints = o.barbPoints;
+    e.maxStrandsPerGroup = o.maxStrandsPerGroup;
+    e.shafts = o.shafts;
+    if (!o.lod.empty()) setBarbLod(e, o.lod);  // every host's barb LOD table
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    fs::create_directories(fs::u8path(directory), ec);
+    const std::string dir = fs::u8path(directory).generic_u8string();
+    UnityFeathersExport out;
+    out.abc = dir + "/" + name + "_strands.abc";
+    nlohmann::json objects = nlohmann::json::array();
+    {
+        EngineGroomWriter writer(out.abc, name, seconds, secondsPerFrame, e);
+        writer.writeFrame(strands, nullptr, scalp);
+        writer.close();
+        for (const EngineGroomWriter::Object& w : writer.objects()) {
+            objects.push_back({{"object", w.path}, {"group", w.group}, {"groupId", w.groupId}, {"feathers", w.feathers},
+                               {"strands", w.strands}, {"pointsPerStrand", w.pointsPerStrand ? nlohmann::json(w.pointsPerStrand) : nlohmann::json()},
+                               {"minPoints", w.minPoints}, {"maxPoints", w.maxPoints}});
+        }
+    }
+    if (o.rachis && hasRachis(strands.featherLayers())) {
+        out.fbx = dir + "/" + name + "_rachis.fbx";
+        if (o.writeRachis) {
+            FbxSettings settings;
+            settings.meters = true;  // (Unity's)
+            writeFbx(out.fbx, {rachisFbxMesh(buildRachisMesh(strands.featherLayers()), name + "_rachis")}, settings);
+        }
+    } else if (std::any_of(objects.begin(), objects.end(), [](const nlohmann::json& w) { return w.value("feathers", false); })) {
+        out.warnings.push_back("the feathers have no rachis: their shafts go as strands, and there is no mesh for the barbs to ride");
+    }
+    out.manifest = dir + "/" + name + "_unity_feathers.json";
+    const std::string manifest = unityFeathersManifestJson(objects.dump(), name + "_strands.abc", out.fbx.empty() ? std::string() : name + "_rachis.fbx",
+                                                           o.lod, e.barbDensity, &out.groups);
+    std::ofstream f(fs::u8path(out.manifest), std::ios::binary | std::ios::trunc);
+    if (!f) throw std::runtime_error("cannot write " + out.manifest);
+    f << manifest;
+    return out;
 }
 
 }  // namespace groomlab

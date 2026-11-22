@@ -6,6 +6,7 @@
 // exactly what the viewport shows at that frame, at the export's density.
 
 #include "groom_document.h"
+#include "groomlab/editor/game_exports.h"
 
 #include <algorithm>
 #include <cmath>
@@ -30,7 +31,6 @@
 #include "groomlab/feathers.h"
 #include "groomlab/frame_time.h"
 #include "groomlab/graph_edit.h"
-#include "groomlab/gltf_writer.h"
 #include "groomlab/png.h"
 #include "groomlab/usd_writer.h"
 #include "groomlab/vrscene_writer.h"
@@ -557,168 +557,81 @@ ExportResult GroomDocument::exportCards(const std::string& path, const ExportOpt
         result.cancelled = true;
         return result;
     }
-    try {
-        const std::string name = exportName(path);
-        GltfDocument doc;
-        doc.rootName = name;
-        const HairLook look = scene_->session().hairLook();
-        CardGltfSettings settings;
-        settings.name = name + "_cards";
-        settings.scale = file().units == "m" ? 1.0f : file().units == "in" ? 0.0254f : file().units == "mm" ? 0.001f : 0.01f;
-        settings.roughness = look.roughness;
-        settings.specular = look.specular;
-        addCardsToGltf(doc, *bake.cards, bake.textures, settings);
-        // The hair cap when the scalp has UVs: the groom baked onto the skin, so low LODs show
-        // hair color between cards (as the Maya host's export writes it: gltf_writer.h).
-        // From the whole groom at full density, as Maya and the Blender helper bake it (not the
-        // cards' strands).
-        MeshPtr capScalp;
-        const StrandsPtr whole = bake.scalp && bake.scalp->hasUVs() ? exportFrame(time_, 1.0f, &capScalp, false, true) : nullptr;
-        if (whole && capScalp && capScalp->hasUVs()) {
-            CardGltfSettings cap = settings;
-            cap.name = name + "_scalpCap";
-            addScalpCapToGltf(doc, *whole, *capScalp, 0, options.resolution, cap);
+    // Every host's glTF cards (the editor's writeGltfCards, game_exports.h): the app's export
+    // takes the cards as they are, its options and the groom's unit in meters (feet too).
+    GltfCardsOptions o;
+    o.path = path;
+    o.name = exportName(path);
+    o.binary = options.binary;
+    o.resolution = options.resolution;
+    o.occlusion = options.occlusion;
+    o.scale = static_cast<float>(usdMetersPerUnit(file().units));
+    GltfCardsSource source;
+    source.bake = [&](const std::string&, int, float) { return bake; };
+    // The hair cap from the whole groom at full density, as Maya and the Blender helper bake it
+    // (not the cards' strands).
+    source.capGroom = [&](MeshPtr* scalp, std::string* whyNot) -> StrandsPtr {
+        if (!bake.scalp || !bake.scalp->hasUVs()) {
+            *whyNot = "the scalp has no uvs";
+            return nullptr;
         }
-        result.files = writeGltf(path, doc, options.binary);
-        result.frames = 1;
-        result.strands = bake.cards->cards.size();
-    } catch (const std::exception& e) {
-        throw std::runtime_error(e.what());
-    }
+        return exportFrame(time_, 1.0f, scalp, false, true);
+    };
+    const GltfCardsExport done = writeGltfCards(o, scene_->session().hairLook(), source);
+    result.files = done.files;
+    result.frames = 1;
+    result.strands = done.cards;
+    result.warnings = done.warnings;
     continueExport(progress, 2, 2);
     return result;
 }
 
 std::vector<std::string> GroomDocument::exportEngineCards(const std::string& directory, const std::string& name, bool unity, int resolution,
                                                           float occlusion, std::vector<std::string>* warnings) {
-    resolution = resolution > 0 ? std::clamp(resolution, kMinBakeResolution, kMaxCardBakeResolution) : 0;
-    const CardBake bake = bakeCardsInMemory(resolution, occlusion);
-    const GroomStats stats = session().stats();  // the cards' counts, as Maya's card_stats has them
-    const HairLook look = session().hairLook();
-    std::error_code ec;
-    fs::create_directories(fs::u8path(directory), ec);
-    const std::string dir = fs::u8path(directory).generic_u8string();
-    std::vector<std::string> maps;
-    if (unity) {
-        maps = writeUnityCardMaps(bake.textures, look.roughness, dir, name);
-    } else {
-        const CardBakePaths at = CardBakePaths::in(dir, name);
-        writeCardBake(bake, at, false);
-        for (const std::string& f : at.files()) {
-            if (fs::u8path(f).extension() == ".tga") maps.push_back(f);  // the maps; the atlas record is the groom's own
-        }
-    }
-    // The hair cap's maps: the groom baked onto its scalp (at full density), when the scalp has uvs.
-    bool withScalp = bake.scalp && bake.scalp->hasUVs() && bake.strands;
-    if (withScalp) {
+    // Every host's engine cards (the editor's writeEngineCards, game_exports.h): the maps, the hair
+    // cap's, the manifest and the meshes as FBX (the core's writer).
+    GameExportOptions o;
+    o.directory = directory;
+    o.name = name;
+    o.nameGiven = true;
+    o.resolution = gameExportResolution(resolution);
+    o.occlusion = occlusion;
+    const CardBake bake = bakeCardsInMemory(o.resolution, occlusion);
+    // The hair cap's maps: the groom baked onto its scalp, when the scalp has uvs.
+    ScalpTextures cap;
+    bool withCap = bake.scalp && bake.scalp->hasUVs() && bake.strands;
+    std::string whyNot = withCap ? std::string() : std::string("no hair cap: the scalp has no uvs");
+    if (withCap) {
         try {
             ScalpBakeSettings settings;
-            settings.size = resolution > 0 ? resolution : 2048;
-            const ScalpTextures t = bakeScalpTextures(*bake.strands, *bake.scalp, settings);
-            for (const std::string& p : writeScalpCapMaps(t, unity, dir, name)) maps.push_back(p);
+            settings.size = o.resolution > 0 ? o.resolution : 2048;
+            cap = bakeScalpTextures(*bake.strands, *bake.scalp, settings);
         } catch (const std::exception& e) {
-            if (warnings) warnings->push_back(std::string("no scalp maps (") + e.what() + ")");
-            withScalp = false;
-        }
-    } else if (warnings) {
-        warnings->push_back("no hair cap: the scalp has no uvs");
-    }
-    const std::string ext = unity ? ".png" : ".tga";
-    std::map<std::string, std::string> byMap;
-    for (const std::string& p : maps) {
-        const std::string file = fs::u8path(p).filename().u8string();
-        const std::string prefix = name + "_";
-        if (file.size() > prefix.size() + ext.size() && file.compare(0, prefix.size(), prefix) == 0) {
-            byMap[file.substr(prefix.size(), file.size() - prefix.size() - ext.size())] = file;
+            whyNot = std::string("no scalp maps (") + e.what() + ")";
+            withCap = false;
         }
     }
-    const std::string fbx = dir + "/" + name + "_cards.fbx";
-    const std::string capFbx = withScalp ? dir + "/" + name + "_scalpCap.fbx" : std::string();
-    EngineCardsInfo info;
-    info.mesh = name + "_cards.fbx";
-    info.scalpCap = withScalp ? name + "_scalpCap.fbx" : std::string();
-    info.cards = stats.cards;
-    info.triangles = stats.cardTriangles;
-    info.textures = stats.cardTextures;
-    info.feathers = stats.cardFeathers;
-    info.maps = byMap;
-    info.roughness = look.roughness;
-    const std::string manifest = dir + "/" + name + (unity ? "_unity.json" : "_cards.json");
-    {
-        std::ofstream f(fs::u8path(manifest), std::ios::binary | std::ios::trunc);
-        if (!f) throw std::runtime_error("cannot write " + manifest);
-        f << engineCardsManifestJson(unity, info);
-    }
-    // The meshes, as Maya's fbxmaya and Blender's FBX exporter write them (Unity's in meters, with
-    // a material on its base color map; Unreal's in centimeters, the materials made in the engine).
-    FbxSettings settings;
-    settings.meters = unity;
-    settings.creator = "GroomLab";
-    FbxMesh cards = cardsFbxMesh(*bake.cards, name + "_cards");
-    if (unity) {
-        cards.material = name + "_cards_mat";
-        if (byMap.count("BaseColor")) cards.baseColorMap = dir + "/" + byMap["BaseColor"];
-    }
-    writeFbx(fbx, {cards}, settings);
-    std::vector<std::string> out = maps;
-    out.push_back(manifest);
-    out.push_back(fbx);
-    if (withScalp) {
-        FbxMesh cap = scalpCapFbxMesh(*bake.scalp, name + "_scalpCap");
-        if (unity) {
-            cap.material = name + "_scalpCap_mat";
-            if (byMap.count("ScalpBaseColor")) cap.baseColorMap = dir + "/" + byMap["ScalpBaseColor"];
-        }
-        writeFbx(capFbx, {cap}, settings);
-        out.push_back(capFbx);
-    }
-    return out;
+    const EngineCardsExport done = writeEngineCards(bake, session().stats(), session().hairLook(), withCap ? &cap : nullptr,
+                                                    withCap ? bake.scalp.get() : nullptr, whyNot, unity, o);
+    if (warnings) warnings->insert(warnings->end(), done.warnings.begin(), done.warnings.end());
+    return done.files();
 }
 
 std::vector<std::string> GroomDocument::exportUnityFeathers(const std::string& directory, const std::string& name,
-                                                            std::vector<std::string>* warnings) {
-    std::error_code ec;
-    fs::create_directories(fs::u8path(directory), ec);
-    const std::string dir = fs::u8path(directory).generic_u8string();
-    EngineExportOptions e;
-    e.engine = EngineExportOptions::Engine::Unity;
-    e.groups = kGroupIdChannel;
-    e.pointsPerStrand = 16;
-    e.barbPoints = 6;
-    e.maxStrandsPerGroup = kUnityMaxStrandsPerGroup;
-    const std::string abc = dir + "/" + name + "_strands.abc";
+                                                            std::vector<std::string>* warnings, const GameExportOptions* options) {
+    // Every host's Unity feathers (engine_export.h writeUnityFeathers) with every host's options
+    // (game_exports.h): points per strand and per barb, the density, a LOD's barbs.
+    const GameExportOptions given = options ? *options : GameExportOptions{};
+    UnityFeathersOptions o;
+    o.points = static_cast<std::size_t>(std::max(0, given.points));
+    o.barbPoints = static_cast<std::size_t>(std::max(0, given.barbPoints));
+    o.lod = given.lod;
     MeshPtr scalp;
-    const StrandsPtr strands = exportFrame(time_, 1.0f, &scalp, false, true);
-    nlohmann::json objects = nlohmann::json::array();
-    {
-        EngineGroomWriter writer(abc, name, time_, frameToSeconds(1.0, framesPerSecond()), e);
-        writer.writeFrame(*strands, nullptr, scalp.get());
-        writer.close();
-        for (const EngineGroomWriter::Object& o : writer.objects()) {
-            objects.push_back({{"object", o.path}, {"group", o.group}, {"groupId", o.groupId}, {"feathers", o.feathers},
-                               {"strands", o.strands}, {"pointsPerStrand", o.pointsPerStrand ? nlohmann::json(o.pointsPerStrand) : nlohmann::json()},
-                               {"minPoints", o.minPoints}, {"maxPoints", o.maxPoints}});
-        }
-    }
-    std::vector<std::string> out{abc};
-    std::string fbx;
-    if (hasRachis(strands->featherLayers())) {
-        fbx = dir + "/" + name + "_rachis.fbx";
-        FbxSettings settings;
-        settings.meters = true;  // (Unity's)
-        writeFbx(fbx, {rachisFbxMesh(buildRachisMesh(strands->featherLayers()), name + "_rachis")}, settings);
-        out.push_back(fbx);
-    } else if (warnings && std::any_of(objects.begin(), objects.end(), [](const nlohmann::json& o) { return o.value("feathers", false); })) {
-        warnings->push_back("the feathers have no rachis: their shafts go as strands, and there is no mesh for the barbs to ride");
-    }
-    const std::string manifest = dir + "/" + name + "_unity_feathers.json";
-    {
-        std::ofstream f(fs::u8path(manifest), std::ios::binary | std::ios::trunc);
-        if (!f) throw std::runtime_error("cannot write " + manifest);
-        f << unityFeathersManifestJson(objects.dump(), name + "_strands.abc", fbx.empty() ? std::string() : name + "_rachis.fbx", "", 1.0);
-    }
-    out.push_back(manifest);
-    return out;
+    const StrandsPtr strands = exportFrame(time_, std::clamp(given.density, 0.0f, 1.0f), &scalp, false, true);
+    const UnityFeathersExport done =
+        writeUnityFeathers(*strands, scalp.get(), time_, frameToSeconds(1.0, framesPerSecond()), directory, name, o);
+    if (warnings) warnings->insert(warnings->end(), done.warnings.begin(), done.warnings.end());
+    return done.files();
 }
 
 std::vector<std::string> GroomDocument::exportScalesFbx(const std::string& path, bool unity) {

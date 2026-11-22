@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Regenerate the shipped Buddy files from the artist's scene: one command per rig update.
 
-Usage: python tools/samples/buddy/make_buddy.py <source buddy.ma> [out dir, default hosts/maya/meshes]
+Usage: python tools/samples/buddy/make_buddy.py <source buddy.ma> [out dir, default engine/assets/meshes]
 
 Runs clean_rig.py, export_fbx.py and export_obj.py with Maya 2022's mayapy (MAYAPY overrides the
 path) and a throwaway MAYA_APP_DIR under build/, then checks no absolute path or user/folder name
@@ -27,7 +27,7 @@ def main():
     if len(sys.argv) < 2:
         sys.exit(__doc__)
     source = os.path.abspath(sys.argv[1])
-    out_dir = os.path.abspath(sys.argv[2] if len(sys.argv) > 2 else os.path.join(ROOT, "hosts", "maya", "meshes"))
+    out_dir = os.path.abspath(sys.argv[2] if len(sys.argv) > 2 else os.path.join(ROOT, "engine", "assets", "meshes"))
     env = dict(os.environ, MAYA_APP_DIR=os.path.join(ROOT, "build", "buddy_maya_app"))
     os.makedirs(env["MAYA_APP_DIR"], exist_ok=True)
     for script, name in STEPS:

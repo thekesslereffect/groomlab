@@ -52,6 +52,13 @@ add_executable(groomlab_tests
     engine/core/test_root_subdivision.cpp
     engine/core/test_incremental.cpp
     engine/core/test_keyed_params.cpp
+    engine/editor/test_edit_history.cpp
+    engine/editor/test_game_exports.cpp
+    engine/editor/test_graph_edits.cpp
+    engine/editor/test_guide_edits.cpp
+    engine/editor/test_map_edits.cpp
+    engine/editor/test_tool_overlay.cpp
+    engine/editor/test_tool_settings.cpp
     engine/core/test_value_inputs.cpp
     engine/core/test_cards.cpp
     engine/core/test_card_separation.cpp
@@ -123,7 +130,7 @@ add_executable(groomlab_tests
     # "internal.h" is example_node/internal.h, which gives it op::kExample.
     ${PROJECT_SOURCE_DIR}/tools/dev/new_node/example_op.cpp
 )
-target_link_libraries(groomlab_tests PRIVATE groomlab::core groomlab::warnings GTest::gtest_main nlohmann_json::nlohmann_json)
+target_link_libraries(groomlab_tests PRIVATE groomlab::core groomlab::editor groomlab::warnings GTest::gtest_main nlohmann_json::nlohmann_json)
 # stb_image's declarations (the core holds its code): the card map tests read their files back.
 target_include_directories(groomlab_tests SYSTEM PRIVATE "${PROJECT_SOURCE_DIR}/third_party/stb")
 if(WIN32)
@@ -133,7 +140,7 @@ else()
     target_compile_options(groomlab_tests PRIVATE -Wno-dangling-else)
 endif()
 groomlab_path_literal(_test_data "${CMAKE_CURRENT_SOURCE_DIR}/data")
-groomlab_path_literal(_shipped_presets "${PROJECT_SOURCE_DIR}/hosts/maya/presets")
+groomlab_path_literal(_shipped_presets "${PROJECT_SOURCE_DIR}/engine/assets/presets")
 target_compile_definitions(groomlab_tests PRIVATE "GROOMLAB_TEST_DATA=${_test_data}"
                            "GROOMLAB_SHIPPED_PRESETS=${_shipped_presets}")
 groomlab_precompile(groomlab_tests <gtest/gtest.h> <nlohmann/json.hpp>)
@@ -171,7 +178,7 @@ endif()
 add_executable(groomlab_lod_pictures ${PROJECT_SOURCE_DIR}/tools/research/clump_lod/bench_clump_lod.cpp)
 target_link_libraries(groomlab_lod_pictures PRIVATE groomlab::core)
 target_compile_definitions(groomlab_lod_pictures PRIVATE "RESEARCH_DATA=\"${PROJECT_SOURCE_DIR}/tests/data\""
-                           "RESEARCH_PRESETS=\"${PROJECT_SOURCE_DIR}/hosts/maya/presets\"")
+                           "RESEARCH_PRESETS=\"${PROJECT_SOURCE_DIR}/engine/assets/presets\"")
 if(MSVC)
     target_compile_options(groomlab_lod_pictures PRIVATE /W3 /permissive-)
     target_compile_definitions(groomlab_lod_pictures PRIVATE _CRT_SECURE_NO_WARNINGS NOMINMAX)
@@ -384,9 +391,10 @@ if(TARGET groomlab_capi)
     target_compile_definitions(groomlab_capi_upgrade_tests PRIVATE "GROOMLAB_TEST_DATA=${_test_data}")
     foreach(_capi_test groomlab_capi_c_static_test groomlab_capi_upgrade_tests)
         if(WIN32)
+            # (Linked statically, they may have no DLLs at all: then nothing to copy.)
+            set(_dlls "$<TARGET_RUNTIME_DLLS:${_capi_test}>")
             add_custom_command(TARGET ${_capi_test} POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                        $<TARGET_RUNTIME_DLLS:${_capi_test}> $<TARGET_FILE_DIR:${_capi_test}>
+                COMMAND "$<$<BOOL:${_dlls}>:${CMAKE_COMMAND};-E;copy_if_different;${_dlls};$<TARGET_FILE_DIR:${_capi_test}>>"
                 COMMAND_EXPAND_LISTS)
         endif()
     endforeach()
@@ -777,6 +785,14 @@ if(Python3_Interpreter_FOUND)
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/hosts/vray/test_vray_scene.py"
                 "${PROJECT_SOURCE_DIR}/hosts/maya/scripts")
     set_tests_properties(vray.scene PROPERTIES LABELS "quick;vray")
+endif()
+# The Redshift for Maya hook's pure helpers (issue 81): its script line, shutter frames, file
+# names and Principled Hair settings, in plain Python (quick).
+if(Python3_Interpreter_FOUND)
+    add_test(NAME redshift.hook
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/hosts/redshift/test_redshift_hook.py"
+                "${PROJECT_SOURCE_DIR}/hosts/maya/scripts")
+    set_tests_properties(redshift.hook PROPERTIES LABELS "quick;redshift")
 endif()
 if(TARGET groomLabTranslator)
     add_test(NAME maya.vray

@@ -273,7 +273,7 @@ def listed_ids(entries, host, generators=()):
 def containers():
     """Every container of action entries in the files, by slash path: what a host's binding check
     walks (the menus, the Groom Tools' header, empty state and Output strip, the lists' bars and
-    menus, the marking menu's tail, the Graph Editor's menus)."""
+    menus, the marking menu's tail, the radial menu's actions, the Graph Editor's menus)."""
     doc = document()
     out = {}
 
@@ -297,4 +297,25 @@ def containers():
     out.pop("palette/starter/steps", None)
     out.pop("palette/starter/lookTypes", None)
     out["markingMenu/tail"] = [e for e in doc["markingMenu"]["tail"] if isinstance(e, str)]
+    out["radialMenu"] = radial_actions(doc)
     return out
+
+
+def radial_actions(doc=None):
+    """The actions the app's radial menu (marking_menu.json's radialMenu) lists, its rings' and the
+    brush options', in order, each once."""
+    doc = doc or document()
+    menu = doc.get("radialMenu", {})
+    ids = []
+
+    def visit(items):
+        for item in items:
+            if "action" in item and item["action"] not in ids:
+                ids.append(item["action"])
+            visit(item.get("items", []))
+    visit(menu.get("items", []))
+    for rows in menu.get("brushOptions", {}).get("tools", {}).values():
+        for row in rows:
+            if "action" in row and row["action"] not in ids:
+                ids.append(row["action"])
+    return ids

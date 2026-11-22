@@ -23,6 +23,11 @@
 #include <utility>
 #include <vector>
 
+#include "groomlab/editor/guide_edits.h"
+#include "groomlab/editor/map_edits.h"
+#include "groomlab/editor/tool_overlay.h"
+#include "groomlab/editor/tool_select.h"
+#include "groomlab/editor/tool_settings.h"
 #include "groomlab/asset_files.h"
 #include "groomlab/brush.h"
 #include "groomlab/brush_catalog.h"
@@ -86,11 +91,7 @@ private:
     ToolState& t_;
 };
 
-struct PaintTarget {
-    std::string attribute = "clump";
-    float value = 1.0f;
-    std::string kind = "guides", texture;
-};
+using PaintTarget = FreezeKept;  // what Paint painted before Freeze took the brush (tool_settings.h)
 
 // A file an edit wrote, moved or removed (a texture map's image): its bytes before and after (not
 // `before` / not `after`: no file then), so undo and redo put it back as the edit found and left it.
@@ -173,8 +174,7 @@ struct ToolState {
     float ringRadius = 0.0f;
     // With symmetry on: the scalp's line of symmetry (symmetrySeam, segment pairs), in red in the
     // overlay as Maya draws it, made again for another scalp or symmetry.
-    std::vector<Vec3f> seam;
-    std::uint64_t seamKey = 0;
+    SeamCache seam;  // the line of symmetry while the scalp and symmetry stay the same (tool_overlay.h)
     // The Tube tool's root-first mode (BrushTool::roots): its outlines, CVs and middles.
     RootOverlayGeometry roots;
 
@@ -435,48 +435,23 @@ constexpr const char* kSelectTool = "select";
 
 std::string toolIdOf(const ToolState& t) {
     if (t.selectTool) return kSelectTool;
-    const BrushToolSettings& s = t.tool.settings;
-    if (s.tool == BrushToolSettings::Tool::Brush && s.brush.mode == BrushMode::Attribute && s.brush.attribute == kFreezeTool &&
-        s.paintKind == "guides") {
-        return kFreezeTool;
-    }
-    return s.modeName();
+    return pickedTool(t.tool.settings);  // every host's (tool_settings.h)
 }
 
 // The rail's tools by the catalog's ids, as the app's BrushSession::setTool picks them: a brush
 // mode, "freeze" (Paint on the guides' freeze mask toward 1; Ctrl: 0), or "select" (the lasso).
 void setTool(ToolState& t, const std::string& id) {
-    BrushToolSettings& s = t.tool.settings;
-    const bool freezing = toolIdOf(t) == kFreezeTool;
     if (id == kSelectTool) {
         t.selectTool = true;
         return;
     }
-    if (id == kFreezeTool) {
-        t.selectTool = false;
-        if (!freezing) t.beforeFreeze = {s.brush.attribute, s.brush.value, s.paintKind, s.paintTexture};
-        s.setMode("paint");
-        s.brush.freeze = kFreezeTool;
-        s.brush.attribute = kFreezeTool;
-        s.brush.value = 1.0f;
-        s.paintKind = "guides";
-        s.paintTexture.clear();
-        return;
-    }
     if (id == "width" || id == "density") fail("bad_request", std::string(kRemovedParamBrushes) + " (the helper: map_for_param)");
     try {
-        BrushToolSettings().setMode(id);  // throws for an unknown id, before anything changes
+        pickTool(t.tool.settings, id, t.beforeFreeze);  // every host's (the editor's, tool_settings.h)
     } catch (const std::invalid_argument&) {
         fail("bad_request", "no tool '" + id + "': the catalog's ids (tool_catalog), select, freeze or clump");
     }
     t.selectTool = false;
-    if (freezing) {
-        s.brush.attribute = t.beforeFreeze.attribute;
-        s.brush.value = t.beforeFreeze.value;
-        s.paintKind = t.beforeFreeze.kind;
-        s.paintTexture = t.beforeFreeze.texture;
-    }
-    s.setMode(id);
 }
 
 float settingNumber(const json& v, const char* key) {
@@ -502,178 +477,44 @@ std::string settingString(const json& v, const char* key) {
     return v.get<std::string>();
 }
 
+// The host's lengths, axes and tube widths as the groom's (the editor's ToolSpace).
+ToolSpace toolSpace(const HostSpace& space) {
+    ToolSpace out;
+    out.lengthIn = [&space](double v) { return toGroomLength(space, v); };
+    out.lengthOut = [&space](float v) { return toHostLength(space, v); };
+    out.symmetryIn = [&space](const std::string& axis, double center, int& groomAxis, float& groomCenter) {
+        symmetryToGroom(space, axis, center, groomAxis, groomCenter);
+    };
+    out.symmetryOut = [&space](int groomAxis, float groomCenter, std::string& axis, double& center) {
+        symmetryToHost(space, groomAxis, groomCenter, axis, center);
+    };
+    out.tubeIn = [&space](const json& tube) { return tubeEditToGroom(space, tube); };
+    out.tubeOut = [&space](const std::string& tube) { return tubeToHost(space, tube); };
+    return out;
+}
+
 // The settings the palette sends (Maya's groomLabBrushCtx flags by their long names, and the
-// catalog's setting ids): lengths in host units, the symmetry in the host's axes.
+// catalog's setting ids): lengths in host units, the symmetry in the host's axes. Every host's
+// parser (the editor's applyToolSettings, tool_settings.h); softSelectRadius is the helper's own.
 void applySettings(ToolState& t, const json& settings) {
     if (!settings.is_object()) fail("bad_request", "settings is an object");
-    BrushToolSettings s = t.tool.settings;
+    json rest = settings;
     float softRadius = t.softRadius;
-    const HostSpace& space = t.session.space;
-    std::string symmetry;
-    bool symmetrySet = false;
-    double symmetryCenter = 0.0;
-    {
-        std::string axis;
-        symmetryToHost(space, s.brush.mirrorAxis, s.brush.mirrorCenter, axis, symmetryCenter);
-        symmetry = axis;
+    if (rest.contains("softSelectRadius")) {
+        softRadius = std::max(0.0f, toGroomLength(t.session.space, settingNumber(rest["softSelectRadius"], "softSelectRadius")));
+        rest.erase("softSelectRadius");
     }
     try {
-        for (const auto& [key, v] : settings.items()) {
-            const char* k = key.c_str();
-            if (key == "radius") s.setScreenRadius(settingNumber(v, k));
-            else if (key == "strength") s.brush.strength = settingNumber(v, k);
-            else if (key == "falloff") s.setHardness(1.0f - settingNumber(v, k));
-            else if (key == "hardness") s.setHardness(settingNumber(v, k));
-            // The curves: a ramp ([[position, value], ...], or its JSON text), null or "" for none.
-            else if (key == "falloffProfile") s.setFalloffProfile(v.is_string() ? v.get<std::string>() : v.is_null() ? std::string() : v.dump());
-            else if (key == "strengthProfile") s.setStrengthProfile(v.is_string() ? v.get<std::string>() : v.is_null() ? std::string() : v.dump());
-            else if (key == "level") s.brush.level = settingInt(v, k);
-            else if (key == "group") s.brush.group = settingString(v, k);
-            else if (key == "propagate") s.brush.propagate = settingBool(v, k);
-            else if (key == "length") s.place.length = toGroomLength(space, settingNumber(v, k));
-            else if (key == "segments") s.setSegments(settingInt(v, k));
-            else if (key == "tubeRadius") {
-                const float r = toGroomLength(space, settingNumber(v, k));
-                s.place.tube.width = {r, r};
-            } else if (key == "tube") {
-                // The new guides' tube (Maya's placeTube): shape, width (host units), aspect, twist.
-                if (!v.is_object()) fail("bad_request", "setting tube is an object: shape, width, aspect, twist");
-                setPlacementTube(s.place, tubeEditToGroom(space, v));
-            } else if (key == "tubeChannel") s.brush.tubeChannel = tubeChannelFromString(settingString(v, k));
-            else if (key == "spacing") s.place.spacing = toGroomLength(space, settingNumber(v, k));
-            else if (key == "matchNeighbors") s.place.matchNeighbors = settingBool(v, k);
-            else if (key == "soloNewGuides") s.place.soloNewGuides = settingBool(v, k);
-            else if (key == "selectedOnly") s.selectedOnly = settingBool(v, k);
-            else if (key == "softSelectRadius") softRadius = std::max(0.0f, toGroomLength(space, settingNumber(v, k)));
-            else if (key == "symmetry") {
-                symmetry = settingString(v, k);
-                if (symmetry.empty()) symmetry = "none";
-                symmetrySet = true;
-            } else if (key == "symmetryCenter") {
-                symmetryCenter = settingNumber(v, k);
-                symmetrySet = true;
-            } else if (key == "attribute") s.brush.attribute = settingString(v, k);
-            else if (key == "value") s.brush.value = settingNumber(v, k);
-            else if (key == "pointwise") s.brush.pointwise = settingBool(v, k);
-            else if (key == "collide") s.brush.collide = settingBool(v, k);
-            else if (key == "frontFacingOnly" || key == "maskByScalp") s.maskByScalp = settingBool(v, k);
-            else if (key == "stretch") s.brush.stretch = settingBool(v, k);
-            else if (key == "straighten") s.brush.straighten = settingBool(v, k);
-            else if (key == "pressure") s.pressure = settingBool(v, k);
-            else if (key == "partName") s.partName = settingString(v, k).empty() ? std::string("part") : settingString(v, k);
-            else if (key == "flowSink") {
-                const std::string sink = settingString(v, k);
-                if (!sink.empty()) flowSinkAngle(sink);  // throws for an unknown kind
-                s.flowSink = sink;
-            } else if (key == "targets") {
-                if (v.is_array()) {
-                    std::string names;
-                    for (const json& n : v) names += (names.empty() ? "" : ",") + settingString(n, k);
-                    s.setTargets(names.empty() ? std::string("none") : names);
-                } else {
-                    s.setTargets(settingString(v, k));
-                }
-            } else if (key == "eraseGuides") s.eraseGuides = settingBool(v, k);
-            else if (key == "eraseParts") s.eraseParts = settingBool(v, k);
-            else if (key == "eraseFlow") s.eraseFlow = settingBool(v, k);
-            else if (key == "paintKind") {
-                const std::string kind = settingString(v, k);
-                if (kind != "guides" && kind != "vertices" && kind != "texture") fail("bad_request", "paintKind is guides, vertices or texture");
-                s.paintKind = kind;
-            } else if (key == "paintTexture") s.paintTexture = settingString(v, k);
-            else if (key == "paintResolution") s.setPaintResolution(settingInt(v, k));
-            else if (key == "paintColor") {
-                if (!v.is_array() || (v.size() != 3 && v.size() != 4)) fail("bad_request", "paintColor is [r, g, b] or [r, g, b, a]");
-                PaintColor c{0.0f, 0.0f, 0.0f, 1.0f};
-                for (std::size_t i = 0; i < v.size(); ++i) c[i] = settingNumber(v[i], k);
-                s.setPaintColor(c);
-            } else if (key == "paintChannels") s.paintChannels = channelMask(settingString(v, k).empty() ? std::string("rgba") : settingString(v, k));
-            else if (key == "paintMode") s.brush.paintMode = paintModeFromString(settingString(v, k));
-            else if (key == "paintWholeFaces") s.paintWholeFaces = settingBool(v, k);
-            else if (key == "smoothStrength") s.setSmoothStrength(settingNumber(v, k));
-            else if (key == "alpha") {
-                try {
-                    s.setAlpha(v.is_null() ? std::string() : settingString(v, k));
-                } catch (const std::invalid_argument&) {
-                    throw;
-                } catch (const std::exception& e) {
-                    fail("bad_request", std::string("alpha: ") + e.what());
-                }
-            } else if (key == "alphaRotation") s.setAlphaRotation(settingString(v, k));
-            else if (key == "alphaAngle") s.alphaAngle = settingNumber(v, k);
-            else if (key == "alphaSpacing") s.setAlphaSpacing(settingNumber(v, k));
-            else if (key == "alphaInvert") s.alphaInvert = settingBool(v, k);
-            else fail("bad_request", "no tool setting '" + key + "'");
-        }
-        if (symmetrySet && symmetry == "topology") {
-            s.setSymmetry("topology");  // across the scalp's own surface: no axis to turn into the groom's
-        } else if (symmetrySet) {
-            symmetryToGroom(space, symmetry, symmetryCenter, s.brush.mirrorAxis, s.brush.mirrorCenter);
-            s.brush.mirrorTopology = false;
-        }
+        applyToolSettings(t.tool, rest, toolSpace(t.session.space));  // (Clone's Pick Source and Reset too)
     } catch (const std::invalid_argument& e) {
         fail("bad_request", e.what());
     }
-    t.tool.settings = s;
     t.softRadius = softRadius;
 }
 
 json settingsJson(const ToolState& t) {
-    const BrushToolSettings& s = t.tool.settings;
-    const HostSpace& space = t.session.space;
-    std::string axis;
-    double center = 0.0;
-    symmetryToHost(space, s.brush.mirrorAxis, s.brush.mirrorCenter, axis, center);
-    json j;
-    j["radius"] = s.screenRadius;
-    j["strength"] = s.brush.strength;
-    j["falloff"] = 1.0f - s.brush.hardness;
-    j["hardness"] = s.brush.hardness;
-    // The curves as ramps (null: none).
-    j["falloffProfile"] = s.brush.falloffProfile ? json::parse(s.falloffProfileJson()) : json();
-    j["strengthProfile"] = s.brush.strengthProfile ? json::parse(s.strengthProfileJson()) : json();
-    j["level"] = s.brush.level;
-    j["group"] = s.brush.group;
-    j["propagate"] = s.brush.propagate;
-    j["length"] = toHostLength(space, s.place.length);
-    j["segments"] = s.place.segments;
-    j["tubeRadius"] = toHostLength(space, s.place.tube.width.empty() ? 0.0f : s.place.tube.width.front());
-    j["tube"] = tubeToHost(space, placementTubeJson(s.place));
-    j["tubeChannel"] = tubeChannelName(s.brush.tubeChannel);
-    j["spacing"] = toHostLength(space, s.place.spacing);
-    j["matchNeighbors"] = s.place.matchNeighbors;
-    j["soloNewGuides"] = s.place.soloNewGuides;
-    j["selectedOnly"] = s.selectedOnly;
-    j["softSelectRadius"] = toHostLength(space, t.softRadius);
-    j["symmetry"] = s.brush.mirrorTopology ? std::string("topology") : axis;
-    j["symmetryCenter"] = center;
-    j["attribute"] = s.brush.attribute;
-    j["value"] = s.brush.value;
-    j["pointwise"] = s.brush.pointwise;
-    j["collide"] = s.brush.collide;
-    j["frontFacingOnly"] = s.maskByScalp;
-    j["stretch"] = s.brush.stretch;
-    j["straighten"] = s.brush.straighten;
-    j["pressure"] = s.pressure;
-    j["partName"] = s.partName;
-    j["flowSink"] = s.flowSink;
-    j["targets"] = s.targetsName();
-    j["eraseGuides"] = s.eraseGuides;
-    j["eraseParts"] = s.eraseParts;
-    j["eraseFlow"] = s.eraseFlow;
-    j["paintKind"] = s.paintKind;
-    j["paintTexture"] = s.paintTexture;
-    j["paintResolution"] = s.paintResolution;
-    j["paintColor"] = s.paintColor;
-    j["paintChannels"] = channelLetters(s.paintChannels);
-    j["paintMode"] = paintModeName(s.brush.paintMode);
-    j["paintWholeFaces"] = s.paintWholeFaces;
-    j["smoothStrength"] = s.smoothStrength;
-    j["alpha"] = s.alphaPath;
-    j["alphaRotation"] = s.alphaRotationName();
-    j["alphaAngle"] = s.alphaAngle;
-    j["alphaSpacing"] = s.alphaSpacing;
-    j["alphaInvert"] = s.alphaInvert;
+    json j = toolSettingsJson(t.tool, toolSpace(t.session.space));  // (Clone's source too)
+    j["softSelectRadius"] = toHostLength(t.session.space, t.softRadius);
     return j;
 }
 
@@ -767,7 +608,6 @@ std::vector<GuideId> idsOf(const json& v) {
 }
 
 // ---- Side edits: files and group colors ---------------------------------------------------------
-
 
 // The texture maps' paints kept open between strokes let go: a file an edit wrote (or undo put
 // back) is read again by the next stroke, fill or undo of a stroke.
@@ -954,17 +794,7 @@ void writeTexture(ToolState& t, const std::string& name) {
 
 // ---- The overlay --------------------------------------------------------------------------------
 
-constexpr float kPi = 3.14159265358979f;
 
-void appendColoredLine(DisplayGeometry& g, const std::vector<Vec3f>& points, const std::array<float, 3>& color) {
-    if (points.size() < 2) return;
-    const auto first = static_cast<std::uint32_t>(g.positions.size() / 3);
-    for (const Vec3f& p : points) {
-        g.positions.insert(g.positions.end(), {p.x, p.y, p.z});
-        g.colors.insert(g.colors.end(), {color[0], color[1], color[2], 1.0f});
-    }
-    for (std::uint32_t k = 0; k + 1 < points.size(); ++k) g.indices.insert(g.indices.end(), {first + k, first + k + 1});
-}
 
 void clearOverlay(ToolState& t) {
     t.overlay = DisplayGeometry();
@@ -994,68 +824,23 @@ void rebuildOverlay(ToolState& t, float x, float y, bool withLines) {
         }
         return;
     }
-    if (withLines && !t.selectTool) {
-        prepareHost(t);
-        std::vector<std::vector<Vec3f>> lines;
-        try {
-            lines = t.tool.affectedLines(t.host, t.view, x, y);
-        } catch (const std::exception&) {
-            lines.clear();
-        }
-        for (const std::vector<Vec3f>& line : lines) appendColoredLine(t.overlay, line, brushHoverColor(s));
-    }
-    Vec3f origin, direction;
-    if (!t.selectTool && t.view.ray(x, y, origin, direction)) {
-        Vec3f center;
-        bool have = false;
-        const MeshPtr scalp = t.session.groom->scalp();
-        SurfacePoint hit;
-        if (scalp && scalp->triangleCount() > 0 && scalp->intersectRay(origin, direction, &hit)) {
-            center = hit.position;
-            have = true;
-            t.ringOnScalp = true;
-        } else {
-            have = atTargetDepth(t, x, y, center);
-        }
-        if (have) {
-            const bool creating = s.tool == Tool::Place || s.tool == Tool::Draw || s.tool == Tool::Lengths;  // (Lengths: the keys' rings)
-            const float radius = worldRadiusAt(t.view, center, x, y, creating ? 6.0f : s.screenRadius);
-            if (radius > 0.0f) {
-                Vec3f eye, along;
-                bool ortho = false;
-                t.view.camera(eye, along, ortho);
-                const Vec3f n = ortho ? along : (center - eye).normalized();
-                const Vec3f u = (std::abs(n.y) < 0.9f ? Vec3f{0.0f, 1.0f, 0.0f} : Vec3f{1.0f, 0.0f, 0.0f}).cross(n).normalized();
-                const Vec3f v = n.cross(u);
-                std::vector<Vec3f> ring;
-                constexpr int kSegments = 48;
-                for (int k = 0; k <= kSegments; ++k) {
-                    const float a = 2.0f * kPi * static_cast<float>(k) / kSegments;
-                    ring.push_back(center + u * (std::cos(a) * radius) + v * (std::sin(a) * radius));
-                }
-                appendColoredLine(t.overlay, ring, brushRingColor(s));
-                t.ringValid = true;
-                t.ringCenter = center;
-                t.ringRadius = radius;
-                t.ringNormal = n;
-            }
-        }
-    }
     if (!t.selectTool) {
-        // Symmetry on: the scalp's line of symmetry in red (Maya's showSymmetry, symmetrySeam).
-        const MeshPtr scalp = t.session.groom->scalp();
-        const StrokeSymmetry sym = scalp ? StrokeSymmetry::of(s.brush, scalp.get()) : StrokeSymmetry{};
-        if (sym.on()) {
-            const std::uint64_t key = hashCombine(hashCombine(scalp->contentHash(), static_cast<std::uint64_t>(sym.axis + 1)),
-                                                  hashCombine(hashFloat(hash64(0x5EA4), sym.center), sym.topology() ? 1u : 0u));
-            if (key != t.seamKey) {
-                t.seam = symmetrySeam(*scalp, sym);
-                t.seamKey = key;
-            }
-            for (std::size_t k = 0; k + 1 < t.seam.size(); k += 2) appendColoredLine(t.overlay, {t.seam[k], t.seam[k + 1]}, {1.0f, 0.15f, 0.15f});
-        }
+        // Every host's overlay (the editor's brushOverlay, tool_overlay.h): the guides the brush
+        // would touch, the line of symmetry, the ring and a Part or Flow stroke's path.
+        prepareHost(t);
+        OverlayRequest request;
+        request.x = x;
+        request.y = y;
+        request.withLines = withLines;
+        request.offScalp = [&t](float px, float py, Vec3f& at) { return atTargetDepth(t, px, py, at); };
+        const BrushOverlay drawn = brushOverlay(t.tool, &t.host, t.view, request, t.seam);
+        t.overlay = drawn.lines;
+        t.ringValid = drawn.ring;
+        t.ringOnScalp = drawn.ringOnScalp;
+        t.ringCenter = drawn.ringCenter;
+        t.ringRadius = drawn.ringRadius;
+        t.ringNormal = drawn.ringNormal;
     }
-    if (t.tool.stroking() && (s.tool == Tool::Part || s.tool == Tool::Flow)) appendColoredLine(t.overlay, t.tool.drawnPath(), brushPathColor(s));
     if (s.tool == Tool::Lengths && !t.selectTool) {
         // The Length Keys tool's keys (the core's lines: the app draws the same).
         prepareHost(t);
@@ -1274,7 +1059,8 @@ json guidesInfo(ToolState& t) {
                               {"hidden", t.hidden.count(g.name) > 0},
                               {"color", t.groupColors.count(g.name) ? json(t.groupColors.at(g.name)) : json(nullptr)},
                               {"autoColor", guideColorHex(drawn)},
-                              {"segments", g.segments}});
+                              {"segments", g.segments},
+                              {"segmentLength", g.segmentLength}});
         }
         for (const HierarchyGuide& g : h->guides()) {
             if (!g.isChild()) ++primaries;
@@ -1367,30 +1153,95 @@ void pendingColors(ToolState& t, std::map<std::string, std::string> after) {
 json guidesEdit(ToolState& t, const json& args) {
     const std::string op = needString(args, "op");
     const HostSpace& space = t.session.space;
-    auto targets = [&](const GuideHierarchy&) {
-        if (args.contains("ids") && !args["ids"].is_null()) return idsOf(args["ids"]);
-        pruneSelection(t);
-        if (t.selection.empty()) fail("state", op + ": no guides given and none selected");
-        return t.selection;
-    };
     json r;
-    if (op == "add_group") {
-        const std::string parent = optString(args, "parent", "");
-        std::string made;
-        editGuides(t, "add group", [&](GuideHierarchy& h) {
-            GroupId parentId = kNoGroup;
-            if (!parent.empty()) {
-                parentId = h.findGroup(parent);
-                if (parentId == kNoGroup) fail("not_found", "no group named '" + parent + "'");
+    // The ops of the editor's applyGuideOp (guide_edits.h), every host's: its checks and edit; the
+    // helper reads the request and keeps the step on its undo stack.
+    static const std::set<std::string> kGuideOps = {
+        "add_group", "remove_group", "delete_guides", "lock", "unlock", "set_attribute", "freeze", "unfreeze", "unfreeze_all",
+        "invert_frozen", "remove_layer", "mirror_all", "mirror_group", "mirror_shapes", "move_to_group", "duplicate_to_group",
+        "new_group_from", "paste_guides", "promote_group", "demote_group", "reparent", "resample", "set_group_segments",
+        "reset_group_segments"};
+    if (kGuideOps.count(op)) {
+        GuideOp g;
+        g.op = op == "invert_frozen" ? std::string("invert_layer") : op;
+        if (op == "invert_frozen") g.name = kFreezeTool;
+        g.group = optString(args, "group", "");
+        if (op == "add_group") g.parent = optString(args, "parent", "");  // (reparent's is a guide ID)
+        if (op != "invert_frozen") g.name = optString(args, "name", "");
+        // The guides: `ids`, else the selection (resample: `group` or `level` instead when given).
+        pruneSelection(t);
+        if (given(args, "ids")) {
+            g.guides = idsOf(args["ids"]);
+        } else if (op != "resample" || !(given(args, "group") || given(args, "level"))) {
+            g.guides = t.selection;
+        }
+        if (op == "set_attribute") g.value = static_cast<float>(optNumber(args, "value", 1.0));
+        if (op == "paste_guides") g.text = needString(args, "text");
+        if (op == "demote_group") g.parent = needString(args, "parent");
+        if (op == "reparent") {
+            const json& parent = need(args, "parent");
+            if (!parent.is_number_unsigned()) fail("bad_request", "parent is a guide ID");
+            g.parentGuide = parent.get<GuideId>();
+            g.parent.clear();
+        }
+        if (op == "mirror_all" || op == "mirror_group") {
+            symmetryToGroom(space, optString(args, "axis", "x"), optNumber(args, "center", 0.0), g.axis, g.center);
+            if (g.axis < 0) fail("bad_request", "axis is x, y or z");
+            g.fromPositive = optBool(args, "fromPositive", true);
+        }
+        if (op == "mirror_shapes") {
+            // Maya's groomLabGuides -mirrorShapes (issue 74): "selected" (the selected or `ids` guides'
+            // mirror guides take their mirror images), "positive" or "negative" (that whole side over
+            // the other; `group`: one root group's), across `symmetry` (x, y, z at `center`, or
+            // topology), as the brushes take it.
+            const std::string from = optString(args, "from", "selected");
+            if (from != "selected" && from != "positive" && from != "negative") fail("bad_request", "from is selected, positive or negative");
+            g.side = from == "positive" ? 1 : from == "negative" ? -1 : 0;
+            const std::string symmetry = optString(args, "symmetry", "x");
+            BrushSettings b;
+            if (symmetry == "topology") {
+                b.mirrorTopology = true;
+            } else {
+                symmetryToGroom(space, symmetry, optNumber(args, "center", 0.0), b.mirrorAxis, b.mirrorCenter);
+                if (b.mirrorAxis < 0) fail("bad_request", "symmetry is x, y, z or topology");
             }
-            const std::string name = optString(args, "name", "");
-            made = name.empty() ? uniqueGroupName(h, parent.empty() ? "group" : parent + "_children") : guideGroupName(name);
-            if (h.findGroup(made) != kNoGroup) fail("bad_request", "a group named '" + made + "' is there already");
-            h.addGroup(made, parentId);
+            const MeshPtr scalp = t.session.groom->scalp();
+            if (b.mirrorTopology && !scalp) fail("state", "Topology symmetry needs the groom's scalp");
+            g.symmetry = StrokeSymmetry::of(b, scalp.get());
+        }
+        if (op == "resample") {
+            // Maya's groomLabGuides -resample: each guide `segments` segments evenly along the smooth
+            // curve through its points (as the viewport draws it), its shape kept; frozen guides kept.
+            g.segments = settingInt(need(args, "segments"), "segments");
+            g.level = given(args, "level") ? settingInt(args["level"], "level") : -1;
+            g.byLength = given(args, "byLength") && settingBool(args["byLength"], "byLength");  // issue #98
+            t.session.groom->setPreviewHierarchy(nullptr);  // a live preview (guides_preview) ends with its commit
+        }
+        if (op == "set_group_segments") g.segments = settingInt(need(args, "segments"), "segments");
+        GuideOpResult done;
+        editGuides(t, guideOpLabel(g), [&](GuideHierarchy& h) {
+            try {
+                done = applyGuideOp(h, g);
+            } catch (const GuideEditError& e) {
+                fail(e.code, e.what());
+            }
         });
-        r["group"] = made;
-    } else if (op == "remove_group") {
-        editGuides(t, "remove group", [&](GuideHierarchy& h) { h.removeGroup(groupNamed(h, args, "group")); });
+        auto ids = [](const std::vector<GuideId>& v) {
+            json a = json::array();
+            for (const GuideId id : v) a.push_back(id);
+            return a;
+        };
+        if (op == "add_group" || op == "new_group_from") r["group"] = done.group;
+        if (op == "delete_guides") r["removed"] = done.count;
+        if (op == "mirror_all" || op == "mirror_group") r["added"] = done.made.size();
+        if (op == "mirror_shapes") {
+            r["reshaped"] = done.mirrored.reshaped.size();
+            r["added"] = done.mirrored.created.size();
+            r["removed"] = done.mirrored.removed.size();
+        }
+        if (op == "move_to_group" || op == "duplicate_to_group" || op == "paste_guides") r["made"] = ids(done.made);
+        if (op == "resample") r["resampled"] = done.count;
+        if (op == "reset_group_segments") r["segments"] = done.segments;
     } else if (op == "rename_group") {
         const std::string from = needString(args, "group"), to = guideGroupName(needString(args, "name"));  // one word
         GuideHierarchy h = editedGuides(t, [&](GuideHierarchy& hh) { hh.renameGroup(groupNamed(hh, args, "group"), to); });
@@ -1413,182 +1264,35 @@ json guidesEdit(ToolState& t, const json& args) {
         if (t.hidden.erase(from)) t.hidden.insert(to);
         r["graphChanged"] = retargeted;
     } else if (op == "generate_children") {
-        std::string made;
-        std::size_t count = 0;
-        editGuides(t, "generate children", [&](GuideHierarchy& h) {
-            GroupId id = kNoGroup;
-            if (args.contains("group") && !args["group"].is_null()) {
-                id = groupNamed(h, args, "group");
-            } else if (!h.groups().empty()) {
-                id = h.groups().back().id;  // the last group, as Maya's Guides tab
-            }
-            if (id == kNoGroup) fail("state", "the groom has no guides yet");
-            ChildGenerationParams p;
-            p.count = static_cast<std::size_t>(std::clamp(optNumber(args, "count", 5.0), 1.0, static_cast<double>(kMaxChildrenPerGuide)));
-            p.rootSpread = static_cast<float>(optNumber(args, "rootSpread", p.rootSpread));
-            p.tipSpread = static_cast<float>(optNumber(args, "tipSpread", p.tipSpread));
-            p.twist = static_cast<float>(optNumber(args, "twist", p.twist));
-            p.jitter = static_cast<float>(optNumber(args, "jitter", p.jitter));
-            p.childTubeScale = static_cast<float>(optNumber(args, "childTubeScale", p.childTubeScale));
-            p.seed = static_cast<std::uint64_t>(std::max(0.0, optNumber(args, "seed", 0.0)));
-            std::vector<GuideId> parents;
-            const bool selected = optBool(args, "selected", false);
-            if (selected) {
-                pruneSelection(t);
-                for (const GuideId g : t.selection) {
-                    const HierarchyGuide* guide = h.guide(g);
-                    if (guide && guide->group == id) parents.push_back(g);
-                }
-                if (parents.empty()) fail("state", "none of the selected guides is in that group");
-            } else if (h.guidesInGroup(id).empty()) {
-                fail("state", "the group has no guides to be parents");
-            }
-            made = optString(args, "childGroup", "");
-            if (made.empty()) made = h.childGroupFor(id);  // every host's (guide_hierarchy.h)
-            const std::size_t before = h.guides().size();
-            h.generateChildren(id, made, p, selected ? &parents : nullptr);
-            count = h.guides().size() >= before ? h.guides().size() - before : 0;
-        });
-        r["group"] = made;
-        r["added"] = count;
-    } else if (op == "delete_guides") {
-        std::vector<GuideId> ids;
-        editGuides(t, "delete guides", [&](GuideHierarchy& h) {
-            ids = targets(h);
-            h.removeGuides(ids, true);  // (a child group left empty goes too: every host's delete)
-        });
-        r["removed"] = ids.size();
-    } else if (op == "lock" || op == "unlock") {
-        editGuides(t, op + " guides", [&](GuideHierarchy& h) {
-            for (const GuideId id : targets(h)) {
-                const HierarchyGuide* g = h.guide(id);
-                if (!g || !g->isChild()) continue;
-                if (op == "lock") h.lock(id);
-                else h.unlock(id);
-            }
-        });
-    } else if (op == "set_attribute") {
-        const std::string name = needString(args, "name");
-        const float value = static_cast<float>(optNumber(args, "value", 1.0));
-        if (!validMapName(name)) fail("bad_request", mapNameError(name));
-        editGuides(t, "set " + name, [&](GuideHierarchy& h) {
-            for (const GuideId id : targets(h)) {
-                if (h.guide(id)) h.setAttribute(id, name, value);
-            }
-        });
-    } else if (op == "freeze" || op == "unfreeze") {
-        editGuides(t, op + " guides", [&](GuideHierarchy& h) {
-            for (const GuideId id : targets(h)) {
-                if (h.guide(id)) h.setAttribute(id, kFreezeTool, op == "freeze" ? 1.0f : 0.0f);
-            }
-        });
-    } else if (op == "unfreeze_all") {
-        editGuides(t, "unfreeze all", [&](GuideHierarchy& h) { h.removeAttribute(kFreezeTool); });
-    } else if (op == "invert_frozen") {
-        editGuides(t, "invert frozen", [&](GuideHierarchy& h) { invertFrozen(h, kFreezeTool); });
-    } else if (op == "remove_layer") {
-        const std::string name = needString(args, "name");
-        editGuides(t, "remove layer " + name, [&](GuideHierarchy& h) { h.removeAttribute(name); });
-    } else if (op == "mirror_all" || op == "mirror_group") {
-        int axis = 0;
-        float center = 0.0f;
-        symmetryToGroom(space, optString(args, "axis", "x"), optNumber(args, "center", 0.0), axis, center);
-        if (axis < 0) fail("bad_request", "axis is x, y or z");
-        const bool fromPositive = optBool(args, "fromPositive", true);
-        std::size_t made = 0;
-        editGuides(t, op == "mirror_all" ? "mirror all" : "mirror group", [&](GuideHierarchy& h) {
-            if (op == "mirror_all") {
-                made = h.mirrorAll(axis, center, fromPositive).size();
-            } else {
-                const GroupId id = groupNamed(h, args, "group");
-                if (h.groupDepth(id) != 0) fail("bad_request", "mirror a root group: its children follow");
-                made = h.mirrorGroup(id, axis, center, fromPositive).size();
-            }
-        });
-        r["added"] = made;
-    } else if (op == "mirror_shapes") {
-        // Maya's groomLabGuides -mirrorShapes (issue 74): "selected" (the selected or `ids` guides'
-        // mirror guides take their mirror images), "positive" or "negative" (that whole side over
-        // the other; `group`: one root group's), across `symmetry` (x, y, z at `center`, or
-        // topology), as the brushes take it. One undo step.
-        const std::string from = optString(args, "from", "selected");
-        if (from != "selected" && from != "positive" && from != "negative") fail("bad_request", "from is selected, positive or negative");
-        const std::string symmetry = optString(args, "symmetry", "x");
-        BrushSettings b;
-        if (symmetry == "topology") {
-            b.mirrorTopology = true;
-        } else {
-            symmetryToGroom(space, symmetry, optNumber(args, "center", 0.0), b.mirrorAxis, b.mirrorCenter);
-            if (b.mirrorAxis < 0) fail("bad_request", "symmetry is x, y, z or topology");
+        // Every host's Generate Children (the editor's, guide_edits.h): with `selected`, the
+        // selected guides (all of one group, `group` when given), else every guide of `group` (the
+        // last group by default).
+        ChildrenRequest request;
+        request.group = args.contains("group") && !args["group"].is_null() ? needString(args, "group") : std::string();
+        request.childGroup = optString(args, "childGroup", "");
+        ChildGenerationParams& p = request.params;
+        p.count = static_cast<std::size_t>(std::clamp(optNumber(args, "count", 5.0), 1.0, static_cast<double>(kMaxChildrenPerGuide)));
+        p.rootSpread = static_cast<float>(optNumber(args, "rootSpread", p.rootSpread));
+        p.tipSpread = static_cast<float>(optNumber(args, "tipSpread", p.tipSpread));
+        p.twist = static_cast<float>(optNumber(args, "twist", p.twist));
+        p.jitter = static_cast<float>(optNumber(args, "jitter", p.jitter));
+        p.childTubeScale = static_cast<float>(optNumber(args, "childTubeScale", p.childTubeScale));
+        p.seed = static_cast<std::uint64_t>(std::max(0.0, optNumber(args, "seed", 0.0)));
+        if (optBool(args, "selected", false)) {
+            pruneSelection(t);
+            request.parents = t.selection;
+            if (request.parents.empty()) fail("state", "generate children: no guides selected");
         }
-        const MeshPtr scalp = t.session.groom->scalp();
-        if (b.mirrorTopology && !scalp) fail("state", "Topology symmetry needs the groom's scalp");
-        GuideHierarchy::MirrorShapesResult done;
-        editGuides(t, "mirror to other side", [&](GuideHierarchy& h) {
-            const std::vector<GuideId> sources = from == "selected" ? targets(h) : std::vector<GuideId>{};
-            const GroupId only = from != "selected" && given(args, "group") ? groupNamed(h, args, "group") : kNoGroup;
-            done = mirrorGuideShapes(h, StrokeSymmetry::of(b, scalp.get()), sources,
-                                     from == "positive" ? 1 : from == "negative" ? -1 : 0, only);
-            if (done.reshaped.empty() && done.created.empty() && done.removed.empty()) {
-                fail("state", from == "selected" ? "the selected guides are on the symmetry's seam: nothing to mirror"
-                                                 : "no guides on that side");
+        ChildrenMade made;
+        editGuides(t, "generate children", [&](GuideHierarchy& h) {
+            try {
+                made = groomlab::generateChildren(h, request);
+            } catch (const std::invalid_argument& e) {
+                fail("state", e.what());
             }
         });
-        r["reshaped"] = done.reshaped.size();
-        r["added"] = done.created.size();
-        r["removed"] = done.removed.size();
-    } else if (op == "move_to_group" || op == "duplicate_to_group") {
-        // Regrouping (guide_hierarchy.h, every host's): the guides into a group beside theirs.
-        const bool duplicate = op == "duplicate_to_group";
-        json made = json::array();
-        editGuides(t, duplicate ? "duplicate guides" : "move guides", [&](GuideHierarchy& h) {
-            const GroupId target = groupNamed(h, args, "group");
-            const std::vector<GuideId> ids = targets(h);
-            if (duplicate) {
-                for (const GuideId id : h.duplicateGuidesToGroup(ids, target)) made.push_back(id);
-            } else {
-                h.moveGuidesToGroup(ids, target);
-            }
-        });
-        r["made"] = made;
-    } else if (op == "new_group_from") {
-        std::string name;
-        editGuides(t, "new group from selection", [&](GuideHierarchy& h) {
-            name = h.group(h.newGroupFromGuides(targets(h), optString(args, "name", "group")))->name;
-        });
-        r["group"] = name;
-    } else if (op == "paste_guides") {
-        json made = json::array();
-        editGuides(t, "paste guides", [&](GuideHierarchy& h) {
-            for (const GuideId id : h.pasteGuidesJson(needString(args, "text"), groupNamed(h, args, "group"))) made.push_back(id);
-        });
-        r["made"] = made;
-    } else if (op == "promote_group") {
-        editGuides(t, "promote group", [&](GuideHierarchy& h) { h.promoteGroup(groupNamed(h, args, "group")); });
-    } else if (op == "demote_group") {
-        editGuides(t, "demote group", [&](GuideHierarchy& h) { h.demoteGroup(groupNamed(h, args, "group"), groupNamed(h, args, "parent")); });
-    } else if (op == "reparent") {
-        editGuides(t, "reparent guides", [&](GuideHierarchy& h) {
-            const json& parent = need(args, "parent");
-            if (!parent.is_number_unsigned()) fail("bad_request", "parent is a guide ID");
-            h.reparent(targets(h), parent.get<GuideId>());
-        });
-    } else if (op == "resample") {
-        // Maya's groomLabGuides -resample: each guide `segments` segments evenly along the smooth
-        // curve through its points (as the viewport draws it), its shape kept; frozen guides kept.
-        // A whole group, a level or every guide: their groups' new guides get these segments too.
-        const int segments = settingInt(need(args, "segments"), "segments");
-        if (segments < 1 || segments > kMaxGuideSegments) fail("bad_request", "segments: 1 to 256");
-        std::size_t count = 0;
-        t.session.groom->setPreviewHierarchy(nullptr);  // a live preview (guides_preview) ends with its commit
-        editGuides(t, "resample guides", [&](GuideHierarchy& h) {
-            const std::vector<GuideId> ids = targetGuides(t, h, args, true, "resample");
-            const bool groupWide = resampleGroupWide(t, args);
-            const GroupId only = given(args, "group") ? h.findGroup(needString(args, "group")) : kNoGroup;
-            const int level = given(args, "level") ? settingInt(args["level"], "level") : -1;
-            count = h.resampleGuides(ids, segments, groupWide, only, level);  // every host's (guide_hierarchy.h)
-        });
-        r["resampled"] = count;
+        r["group"] = made.childGroup;
+        r["added"] = made.added;
     } else if (op == "mirror_selection") {
         // Maya's mirror_guide_selection: the mirror image of each selected guide (the nearest of its
         // group across the plane) selected; `add` keeps the selection. Not an undo step (a selection).
@@ -1624,32 +1328,11 @@ json guidesEdit(ToolState& t, const json& args) {
             commitEdit(t, std::move(stroke));
         }
         r["color"] = color.empty() ? json(nullptr) : json(color);
-    } else if (op == "reset_group_segments") {
-        // Maya's reset_group_segments: every guide of the group back to its segments (frozen kept).
-        const std::string group = needString(args, "group");
-        int segments = 0;
-        editGuides(t, "reset segments", [&](GuideHierarchy& h) {
-            const GroupId gid = h.findGroup(group);
-            if (gid == kNoGroup) fail("not_found", "no group named '" + group + "'");
-            segments = h.resetGroupSegments(gid);
-            if (segments < 1) fail("state", "the group has no guides");
-        });
-        r["segments"] = segments;
-    } else if (op == "set_group_segments") {
-        // Maya's set_group_segments: the segments the group's new guides get (0: the tool's own).
-        const std::string group = needString(args, "group");
-        const int segments = settingInt(need(args, "segments"), "segments");
-        if (segments < 0 || segments > 256) fail("bad_request", "segments: 0 to 256");
-        editGuides(t, "group segments", [&](GuideHierarchy& h) {
-            const GroupId gid = h.findGroup(group);
-            if (gid == kNoGroup) fail("not_found", "no group named '" + group + "'");
-            h.setGroupSegments(gid, segments);
-        });
     } else {
         fail("bad_request",
              "op is add_group, remove_group, rename_group, generate_children, delete_guides, lock, unlock, set_attribute, "
-             "freeze, unfreeze, unfreeze_all, invert_frozen, remove_layer, mirror_all, mirror_group, promote_group, demote_group, reparent, "
-             "move_to_group, duplicate_to_group, new_group_from, paste_guides, "
+             "freeze, unfreeze, unfreeze_all, invert_frozen, remove_layer, mirror_all, mirror_group, mirror_shapes, promote_group, "
+             "demote_group, reparent, move_to_group, duplicate_to_group, new_group_from, paste_guides, "
              "resample, mirror_selection, set_group_color, set_group_segments or reset_group_segments");
     }
     r["undo"] = undoJson(t);
@@ -1683,8 +1366,12 @@ json guidesPreview(ToolState& t, const json& args) {
     const int segments = settingInt(need(args, "segments"), "segments");
     if (segments < 1 || segments > 256) fail("bad_request", "segments: 1 to 256");
     std::size_t count = 0;
+    const bool byLength = given(args, "byLength") && settingBool(args["byLength"], "byLength");
     previewGuides(t, [&](GuideHierarchy& h) {
-        count = h.resample(targetGuides(t, h, args, true, "preview"), segments, resampleGroupWide(t, args));
+        const std::vector<GuideId> ids = targetGuides(t, h, args, true, "preview");
+        const float length = byLength ? h.segmentLengthFor(ids, segments) : 0.0f;  // (as resample)
+        count = length > 0.0f ? h.resampleByLength(ids, length, resampleGroupWide(t, args))
+                              : h.resample(ids, segments, resampleGroupWide(t, args));
     });
     return {{"previewed", count}};
 }
@@ -1710,10 +1397,10 @@ json tubeEdit(ToolState& t, const json& args, const std::string& label, const js
     const std::string text = tubeEditToGroom(t.session.space, edit);
     std::size_t changed = 0;
     editGuides(t, label, [&](GuideHierarchy& h) {
-        for (const GuideId id : targetGuides(t, h, args, false, label)) {
-            const HierarchyGuide* g = h.guide(id);
-            h.setTube(id, editedTube(g->tube, text, h.scale(), g->points.size(), &h.tubeShapes()));
-            ++changed;
+        try {  // every host's (the editor's editTubes, guide_edits.h)
+            changed = editTubes(h, targetGuides(t, h, args, false, label), text);
+        } catch (const GuideEditError& e) {
+            fail(e.code, e.what());
         }
     });
     return {{"changed", changed}, {"undo", undoJson(t)}};
@@ -1825,31 +1512,21 @@ std::vector<SectionPoint> shapePointsOf(const json& v) {
 // The library edited (Maya's -editTubeShape): add, set (points and/or smooth), rename, remove.
 // Every guide taking the shape follows (remove: round). One undo step; a live preview ends.
 json tubeShapeEdit(ToolState& t, const std::string& op, const json& args) {
-    const std::string name = needString(args, "name");
+    TubeShapeOp edit;  // every host's (the editor's editTubeShape, guide_edits.h)
+    edit.op = op;
+    edit.name = needString(args, "name");
+    if (op == "rename") edit.to = needString(args, "to");
+    if (given(args, "smooth")) edit.smooth = settingBool(args["smooth"], "smooth");
+    if (given(args, "points")) edit.points = shapePointsOf(args["points"]);
     std::size_t users = 0;
     t.session.groom->setPreviewHierarchy(nullptr);
-    editGuides(t, op == "add" ? "add tube shape" : op == "set" ? "edit tube shape" : op == "rename" ? "rename tube shape" : "remove tube shape",
-               [&](GuideHierarchy& h) {
-                   const CustomTubeShapePtr old = h.tubeShape(name);
-                   if (op == "add" || op == "set") {
-                       if (op == "add" && old) fail("bad_request", "a tube shape named '" + name + "' exists");
-                       if (op == "set" && !old) fail("not_found", "no tube shape named '" + name + "'");
-                       const bool smooth = given(args, "smooth") ? settingBool(args["smooth"], "smooth") : (old ? old->smooth : true);
-                       const std::vector<SectionPoint> points =
-                           given(args, "points") ? shapePointsOf(args["points"]) : (old ? old->points : std::vector<SectionPoint>{});
-                       if (points.empty()) fail("bad_request", "a new tube shape needs its points");
-                       h.setTubeShape(name, points, smooth);
-                       users = h.tubeShapeUsers(name);
-                   } else if (op == "rename") {
-                       if (!old) fail("not_found", "no tube shape named '" + name + "'");
-                       const std::string to = needString(args, "to");
-                       h.renameTubeShape(name, to);
-                       users = h.tubeShapeUsers(to);
-                   } else {
-                       if (!old) fail("not_found", "no tube shape named '" + name + "'");
-                       users = h.removeTubeShape(name);
-                   }
-               });
+    editGuides(t, tubeShapeLabel(edit), [&](GuideHierarchy& h) {
+        try {
+            users = editTubeShape(h, edit);
+        } catch (const GuideEditError& e) {
+            fail(e.code, e.what());
+        }
+    });
     return {{"users", users}, {"undo", undoJson(t)}, {"shapes", tubeShapes(t)["shapes"]}};
 }
 
@@ -1988,8 +1665,8 @@ void commitMaps(ToolState& t, const std::string& label, const ScalpMaps& maps) {
 // A new scalp map's entry (vertices: `value` or `fill` at every vertex; texture: its image written
 // in the maps folder, a free name), not committed. With `faces` (scalp polygon indices) only those
 // faces get the value or fill, the rest 0 (a color map: black, alpha 1).
-ScalpMapEntry newScalpMapEntry(Session& s, const ScalpMesh& scalp, const std::string& name, const std::string& kind, bool color,
-                               float value, const PaintColor& fill, int resolution, const std::vector<std::int32_t>& faces = {});
+ScalpMapEntry newScalpMapEntry(ToolState& t, const ScalpMesh& scalp, const std::string& name, const std::string& kind, bool color,
+                               float value, const PaintColor* fill, int resolution, const std::vector<std::int32_t>& faces = {});
 // "vertices", "texture", "guides", or "" for no map of that name.
 std::string mapKindOf(Session& s, const std::string& name);
 
@@ -2016,62 +1693,71 @@ json mapCreate(ToolState& t, const json& args) {
     const std::string kind = optString(args, "kind", "vertices");
     const bool color = optBool(args, "color", false);
     const float value = static_cast<float>(optNumber(args, "value", 0.0));
-    PaintColor fill{0.0f, 0.0f, 0.0f, 1.0f};
+    std::optional<PaintColor> fill;
     if (args.contains("fill") && !args["fill"].is_null()) {
         const json& f = args["fill"];
         if (!f.is_array() || (f.size() != 3 && f.size() != 4)) fail("bad_request", "fill is [r, g, b] or [r, g, b, a]");
-        for (std::size_t i = 0; i < f.size(); ++i) fill[i] = std::clamp(settingNumber(f[i], "fill"), 0.0f, 1.0f);
+        fill = PaintColor{0.0f, 0.0f, 0.0f, 1.0f};
+        for (std::size_t i = 0; i < f.size(); ++i) (*fill)[i] = std::clamp(settingNumber(f[i], "fill"), 0.0f, 1.0f);
     }
     if (!validMapName(name)) fail("bad_request", mapNameError(name));
-    const json existing = mapsList(t);
-    for (const json& m : existing["maps"]) {
-        if (m["name"] == name) fail("bad_request", "the groom already has a map named '" + name + "'");
-    }
+    if (!mapKindOf(s, name).empty()) fail("bad_request", "the groom already has a map named '" + name + "'");
     const MeshPtr scalp = s.groom->cageScalp();
     if (!scalp) fail("state", "no scalp to paint on: set_scalp first");
     const std::vector<std::int32_t> faces = facesArg(args);
+    const int resolution = static_cast<int>(optNumber(args, "resolution", 1024.0));
     if (kind == "guides") {
-        if (color) fail("bad_request", "a guide layer is gray: make a color map on the scalp's vertices or as a texture");
         // On faces: the value on the guides rooted on them, 0 on the rest (every host's: addGuideLayer).
-        editGuides(t, "create map " + name, [&](GuideHierarchy& h) {
-            if (!addGuideLayer(h, name, value, scalp.get(), faces)) fail("state", "no primary guides to carry the layer: place some first");
-        });
+        MapCreate made;
+        MapCreateRequest create;
+        create.kind = kind;
+        create.color = color;
+        create.value = value;
+        create.faces = faces;
+        try {
+            made = groomlab::createMap(s.groom->scalpMaps(), s.groom->authoredHierarchy().get(), scalp.get(), name, create, MapFiles{});
+        } catch (const std::invalid_argument& e) {
+            fail("bad_request", e.what());
+        }
+        editGuides(t, "create map " + name, [&](GuideHierarchy& h) { applyCreatedLayer(h, name, made); });
         return {{"name", name}, {"kind", kind}, {"undo", undoJson(t)}};
     }
     ScalpMaps maps = s.groom->scalpMaps();
-    maps.maps[name] = newScalpMapEntry(s, *scalp, name, kind, color, value, fill, static_cast<int>(optNumber(args, "resolution", 1024.0)), faces);
+    maps.maps[name] = newScalpMapEntry(t, *scalp, name, kind, color, value, fill ? &*fill : nullptr, resolution, faces);
     commitMaps(t, "create map " + name, maps);
     json r = {{"name", name}, {"kind", kind}, {"undo", undoJson(t)}};
     if (kind == "texture") r["file"] = maps.maps[name].texture;
     return r;
 }
 
-ScalpMapEntry newScalpMapEntry(Session& s, const ScalpMesh& scalpMesh, const std::string& name, const std::string& kind, bool color,
-                               float value, const PaintColor& fill, int resolution, const std::vector<std::int32_t>& faces) {
-    const ScalpMesh* scalp = &scalpMesh;
-    ScalpMapEntry entry;
-    entry.channels = color ? kColorMap : kGrayMap;
-    // (Every host's New Map: scalp_paint.h newVertexMapValues, newTextureMapPaint.)
-    const PaintColor filled = color ? fill : PaintColor{value, value, value, 1.0f};
-    if (kind == "vertices") {
-        entry.kind = "vertices";
-        entry.values = newVertexMapValues(*scalp, entry.channels, filled, faces);
-    } else if (kind == "texture") {
-        if (!scalp->hasUVs()) fail("state", "the scalp has no UVs to paint a texture map on");
-        const fs::path folder = fs::u8path(mapsFolder(s));
-        const fs::path file = fs::u8path(freeFilePath((folder / (name + ".png")).generic_u8string()));  // (a file or a tile set: taken)
-        try {
-            fs::create_directories(file.parent_path());
-            newTextureMapPaint(*scalp, entry.channels, filled, resolution, faces).save(file.generic_u8string());
-        } catch (const std::exception& e) {
-            fail("io", std::string("cannot write the map's image: ") + e.what());
-        }
-        entry.kind = "texture";
-        entry.texture = file.generic_u8string();
-    } else {
-        fail("bad_request", "a map's kind is vertices, texture or guides, not '" + kind + "'");
+ScalpMapEntry newScalpMapEntry(ToolState& t, const ScalpMesh& scalp, const std::string& name, const std::string& kind, bool color,
+                               float value, const PaintColor* fill, int resolution, const std::vector<std::int32_t>& faces) {
+    // Every host's New Map (the editor's createMap, map_edits.h); a texture's image written in the
+    // maps folder (a free name), its files part of the next commit's undo step.
+    Session& s = t.session;
+    if (kind == "texture" && !scalp.hasUVs()) fail("state", "the scalp has no UVs to paint a texture map on");
+    MapCreateRequest create;
+    create.kind = kind;
+    create.color = color;
+    create.value = value;
+    if (fill) create.fill = *fill;
+    create.resolution = resolution;
+    create.faces = faces;
+    MapFiles files;
+    files.mapsFolder = mapsFolder(s);
+    files.resolve = [&s](const std::string& stored) { return resolveMapFile(s, stored); };
+    ScalpMaps maps = s.groom->scalpMaps();
+    maps.maps.erase(name);  // (a caller replacing an entry of that name)
+    MapCreate made;
+    try {
+        made = groomlab::createMap(maps, nullptr, &scalp, name, create, files);
+    } catch (const std::invalid_argument& e) {
+        fail("bad_request", e.what());
+    } catch (const std::exception& e) {
+        fail("io", e.what());
     }
-    return entry;
+    for (FileEdit& f : made.files) t.pending.files.push_back(std::move(f));
+    return made.maps.maps.at(name);
 }
 
 json mapForParam(ToolState& t, const json& args) {
@@ -2086,86 +1772,40 @@ json mapForParam(ToolState& t, const json& args) {
     prepareHost(t);
     setTool(t, "paint");  // out of Freeze or Select, as picking Paint does
     const std::string graphBefore = s.groom->data().graphJson;
-    ParamMapRef found;
+    // Every host's Paint on a setting (the editor's paintParam, map_edits.h): the map the param reads,
+    // else its own (one there already linked again, its painting back), made white (with `faces`:
+    // on them only) and linked, or a channel of a color map through its Map node; one undo step.
+    ParamPaintRequest paint;
+    paint.kind = kind;
+    paint.name = optString(args, "map", "");
+    paint.channel = optString(args, "channel", "");
+    paint.faces = facesArg(args);
+    paint.resolution = static_cast<int>(optNumber(args, "resolution", 1024.0));
+    MapFiles files;
+    files.mapsFolder = mapsFolder(s);
+    files.resolve = [&s](const std::string& stored) { return resolveMapFile(s, stored); };
+    ParamPaint painted;
     try {
-        found = paramMapOf(graphBefore, s.groom->scalpMaps(), s.groom->storedHierarchy().get(), node, param);
+        painted = groomlab::paintParam(graphBefore, s.groom->scalpMaps(), s.groom->storedHierarchy().get(), scalp.get(), node, param, paint, files);
+    } catch (const std::invalid_argument& e) {
+        fail(std::string(e.what()).find("no guides to paint on") != std::string::npos ? "state" : "bad_request", e.what());
     } catch (const std::exception& e) {
-        fail("bad_request", e.what());
+        fail("io", e.what());
     }
-    std::string map = found.map, mapKind = found.kind;
-    // A map made here with `faces` is white on them, black elsewhere (one the param reads already stays).
-    const std::vector<std::int32_t> faces = facesArg(args);
-    // The param's own map (paramMapName) there already, its link gone: linked again, whatever its
-    // kind, its painting back (every host does).
-    bool reused = false;
-    if (map.empty()) {
-        const std::string own = paramMapName(node, param);
-        const std::string ownKind = mapKindOf(s, own);
-        if (!ownKind.empty()) {
-            std::string graph;
-            try {
-                graph = wireParamMap(graphBefore, s.groom->scalpMaps(), node, param, own, ownKind);
-            } catch (const std::exception& e) {
-                fail("bad_request", e.what());
-            }
-            StrokeEdit edit;
-            edit.mode = "map " + node + "." + param;
-            edit.set(StrokeField::Graph, std::move(graph));
-            t.host.commit(std::move(edit));
-            map = own;
-            mapKind = ownKind;
-            reused = true;
-        }
-    }
-    if (map.empty() && kind == "vertices" && faces.empty()) {
-        try {
-            const ParamMapBinding b = paintParamMap(t.host, t.tool.settings, node, param);  // made and linked: one step
-            map = b.map;
-            mapKind = b.kind;
-        } catch (const std::exception& e) {
-            fail("bad_request", e.what());
-        }
-    } else if (map.empty() && kind == "guides") {
-        // A guide layer (Maya's paint_param kind "guides"): every primary guide carries it at 1 (white:
-        // the look stays), children inherit it, strands blend it; the layer and its link one step.
-        map = paramMapName(node, param);  // (free: one of that name was linked above)
-        GuideHierarchy h = editedGuides(t, [&](GuideHierarchy& hh) {
-            // (on faces: 1 on the guides rooted on them, 0 on the rest: addGuideLayer, every host's)
-            if (!addGuideLayer(hh, map, 1.0f, scalp.get(), faces)) {
-                fail("state", "the groom has no guides to paint on: add guides, or paint on the scalp's vertices");
-            }
-        });
-        std::string graph;
-        try {
-            graph = wireParamMap(graphBefore, s.groom->scalpMaps(), node, param, map, "guides");
-        } catch (const std::exception& e) {
-            fail("bad_request", e.what());
-        }
+    const std::string map = painted.map, mapKind = painted.kind;
+    const bool reused = !painted.made && !painted.graph.empty();
+    if (!painted.graph.empty()) {
         StrokeEdit edit;
         edit.mode = "map " + node + "." + param;
-        edit.set(StrokeField::Guides, h.toJson());
-        edit.set(StrokeField::Graph, std::move(graph));
-        t.host.commit(std::move(edit));
-        mapKind = "guides";
-    } else if (map.empty()) {
-        // A texture (or a vertex map on faces): white, linked in the same step; a texture's image
-        // beside the groom, linked by its file.
-        map = paramMapName(node, param);  // (free: one of that name was linked above)
-        ScalpMaps maps = s.groom->scalpMaps();
-        maps.maps[map] = newScalpMapEntry(s, *scalp, map, kind, false, 1.0f, PaintColor{1.0f, 1.0f, 1.0f, 1.0f},
-                                          static_cast<int>(optNumber(args, "resolution", 1024.0)), faces);
-        std::string graph;
-        try {
-            graph = wireParamMap(graphBefore, maps, node, param, map, kind);
-        } catch (const std::exception& e) {
-            fail("bad_request", e.what());
+        if (painted.created.guideLayer) {
+            GuideHierarchy h = editedGuides(t, [&](GuideHierarchy& hh) { applyCreatedLayer(hh, map, painted.created); });
+            edit.set(StrokeField::Guides, h.toJson());
+        } else if (painted.made) {
+            edit.set(StrokeField::ScalpMaps, painted.created.maps.toJson());
         }
-        StrokeEdit edit;
-        edit.mode = "map " + node + "." + param;
-        edit.set(StrokeField::Graph, std::move(graph));
-        edit.set(StrokeField::ScalpMaps, maps.toJson());
+        edit.set(StrokeField::Graph, painted.graph);
+        for (FileEdit& f : painted.created.files) t.pending.files.push_back(std::move(f));
         t.host.commit(std::move(edit));
-        mapKind = kind;
     }
     // The Paint brush on it, toward 1: strokes paint the param back to its value, Ctrl toward 0.
     BrushToolSettings& st = t.tool.settings;
@@ -2175,9 +1815,15 @@ json mapForParam(ToolState& t, const json& args) {
     const auto entry = s.groom->scalpMaps().maps.find(map);
     st.paintTexture = mapKind == "texture" && entry != s.groom->scalpMaps().maps.end() ? entry->second.texture : std::string();
     st.brush.value = 1.0f;
+    if (!painted.channel.empty()) {  // one channel of a color map: white in it only
+        st.paintColor = PaintColor{1.0f, 1.0f, 1.0f, 1.0f};
+        st.paintChannels = channelMask(painted.channel);
+    }
     const bool changed = s.groom->data().graphJson != graphBefore;
-    return {{"name", map}, {"kind", mapKind}, {"made", changed && !reused}, {"reused", reused}, {"graphChanged", changed},
-            {"tool", toolJson(t)}, {"undo", undoJson(t)}};
+    json r = {{"name", map}, {"kind", mapKind}, {"made", changed && !reused}, {"reused", reused}, {"graphChanged", changed},
+              {"tool", toolJson(t)}, {"undo", undoJson(t)}};
+    if (!painted.channel.empty()) r["channel"] = painted.channel;
+    return r;
 }
 
 // ---- Map management (Maya's painting.py over groomLabScalpMaps) ---------------------------------------
@@ -2206,9 +1852,6 @@ MeshPtr mapScalp(Session& s) {
     if (!scalp || scalp->pointCount() == 0) fail("state", "no scalp: set_scalp first");
     return scalp;
 }
-
-// A texture map's default file: <maps folder>/<map>.png, a free name.
-std::string defaultMapFile(Session& s, const std::string& name) { return freeFilePath((fs::u8path(mapsFolder(s)) / (name + ".png")).generic_u8string()); }
 
 // A texture paint written to `file` (made or rewritten) as part of the next commit's undo step.
 void writePaint(ToolState& t, const TexturePaint& paint, const std::string& file) {
@@ -2251,62 +1894,41 @@ json mapUsers(ToolState& t, const json& args) {
     return {{"name", name}, {"nodes", readers.nodes}, {"users", users}};
 }
 
-// What reads map `name` lets go of it (Maya's _unlink_map): its Map nodes removed, the params they
-// fed reading their own values again (an exposed param's port removed with them), the params
-// naming it back to the node's default: the core's (scalp_maps.h unlinkMapReaders). Returns the
-// graph ("" unchanged); `changed` the pairs.
-std::string unlinkMapReaders(const std::string& graphText, const std::string& name, json& changed) {
-    changed = json::array();
-    if (graphText.empty()) return {};
-    try {
-        bool touched = false;
-        std::vector<std::pair<std::string, std::string>> unlinked;
-        std::string graph = groomlab::unlinkMapReaders(graphText, name, &touched, &unlinked);
-        for (const auto& [node, param] : unlinked) changed.push_back({node, param});
-        return touched ? graph : std::string();
-    } catch (const std::exception& e) {
-        fail("graph", std::string("cannot unlink the map's readers: ") + e.what());
-    }
-}
-
 // Maya's remove_map: what reads the map lets go of it; a texture map's file stays on disk unless
 // `deleteFile` and GroomLab made it (it is in the maps folder) and no other map reads it. One undo
 // step (undo puts the file back too).
 json mapRemove(ToolState& t, const json& args) {
     Session& s = t.session;
     const std::string name = needMap(s, args);
-    const std::string kind = mapKindOf(s, name);
-    json changed;
-    const std::string graph = unlinkMapReaders(s.groom->data().graphJson, name, changed);
+    // Every host's remove (the editor's removeMap, map_edits.h).
+    MapFiles files;
+    files.mapsFolder = mapsFolder(s);
+    files.resolve = [&s](const std::string& stored) { return resolveMapFile(s, stored); };
+    MapRemove removed;
+    try {
+        removed = removeMap(s.groom->scalpMaps(), s.groom->storedHierarchy().get(), s.groom->data().graphJson, name,
+                            optBool(args, "deleteFile", false), files);
+    } catch (const std::invalid_argument& e) {
+        fail("not_found", e.what());
+    } catch (const std::exception& e) {
+        fail("graph", std::string("cannot unlink the map's readers: ") + e.what());
+    }
     StrokeEdit edit;
     edit.mode = "remove map " + name;
-    if (!graph.empty()) edit.set(StrokeField::Graph, graph);
-    bool deleted = false;
-    if (kind == "guides") {
+    if (!removed.graph.empty()) edit.set(StrokeField::Graph, removed.graph);
+    if (removed.guideLayer) {
         GuideHierarchy h = editedGuides(t, [&](GuideHierarchy& hh) { hh.removeAttribute(name); });
         edit.set(StrokeField::Guides, h.toJson());
     } else {
-        ScalpMaps maps = s.groom->scalpMaps();
-        const std::string file = kind == "texture" ? resolveMapFile(s, maps.maps[name].texture) : std::string();
-        maps.maps.erase(name);
-        const bool shared = std::any_of(maps.maps.begin(), maps.maps.end(), [&](const auto& m) {
-            return m.second.kind == "texture" && sameFile(resolveMapFile(s, m.second.texture), file);
-        });
-        std::error_code ec;
-        if (optBool(args, "deleteFile", false) && mapImageDeletable(file, mapsFolder(s), shared)) {  // every host's rule (asset_files.h)
-            // (A tile set: every tile's file.)
-            std::vector<FileEdit> edits = filesBefore(file);
-            for (const FileEdit& e : edits) {
-                if (e.before) fs::remove(fs::u8path(e.path), ec);
-            }
-            filesAfter(t, std::move(edits));
-            deleted = true;
-        }
         dropPaints(t);
-        edit.set(StrokeField::ScalpMaps, maps.toJson());
+        edit.set(StrokeField::ScalpMaps, removed.maps.toJson());
     }
+    for (FileEdit& f : removed.files) t.pending.files.push_back(std::move(f));
     commitEdit(t, std::move(edit));
-    return {{"removed", name}, {"unlinked", changed}, {"graphChanged", !graph.empty()}, {"fileDeleted", deleted}, {"undo", undoJson(t)}};
+    json changed = json::array();
+    for (const auto& [node, param] : removed.unlinked) changed.push_back({node, param});
+    return {{"removed", name}, {"unlinked", changed}, {"graphChanged", !removed.graph.empty()}, {"fileDeleted", removed.fileDeleted},
+            {"undo", undoJson(t)}};
 }
 
 // Maya's rename_map: the map renamed, the Map nodes and map params reading it follow
@@ -2317,66 +1939,39 @@ json mapRename(ToolState& t, const json& args) {
     Session& s = t.session;
     const std::string from = needMap(s, args);
     const std::string to = needString(args, "to");
-    if (!validMapName(to)) fail("bad_request", mapNameError(to));
+    // Every host's rename (the editor's renameMap, map_edits.h): the readers retargeted, a texture
+    // map's image following the name (moved, or copied when another map reads it; all or nothing),
+    // its files' states kept for the step's undo.
+    MapFiles files;
+    files.mapsFolder = mapsFolder(s);
+    files.resolve = [&s](const std::string& stored) { return resolveMapFile(s, stored); };
+    MapRename renamed;
+    try {
+        renamed = renameMap(s.groom->scalpMaps(), s.groom->storedHierarchy().get(), s.groom->data().graphJson, from, to, files);
+    } catch (const std::invalid_argument& e) {
+        fail("bad_request", e.what());
+    }
     if (from == to) return {{"name", to}, {"renamed", from}, {"graphChanged", false}, {"undo", undoJson(t)}};
-    if (!mapKindOf(s, to).empty()) fail("bad_request", "the groom already has a map named '" + to + "'");
-    const std::string kind = mapKindOf(s, from);
     StrokeEdit edit;
     edit.mode = "rename map " + from;
-    std::string file, movedFrom;
-    if (kind == "guides") {
+    if (renamed.guideLayer) {
         GuideHierarchy h = editedGuides(t, [&](GuideHierarchy& hh) { hh.renameAttribute(from, to); });
         edit.set(StrokeField::Guides, h.toJson());
     } else {
-        ScalpMaps maps = s.groom->scalpMaps();
-        auto node = maps.maps.extract(from);
-        node.key() = to;
-        ScalpMapEntry& entry = node.mapped();
-        if (entry.kind == "texture" && !entry.texture.empty()) {
-            const std::string full = resolveMapFile(s, entry.texture);
-            const std::string target = renamedMapImage(full, from, to, mapsFolder(s));  // every host's rule (asset_files.h)
-            std::error_code ec;
-            if (!target.empty()) {
-                // The image renamed (a tile set: each tile, its naming kept: udim.h mapImageMoves,
-                // every host's), each file's before and after kept for undo.
-                const auto moves = mapImageMoves(full, target);
-                std::vector<FileEdit> edits;
-                for (const auto& [a, b] : moves) {
-                    edits.push_back(fileBefore(a));
-                    edits.push_back(fileBefore(b));
-                }
-                bool moved = true;
-                for (const auto& [a, b] : moves) {
-                    fs::rename(fs::u8path(a), fs::u8path(b), ec);
-                    moved = moved && !ec;
-                }
-                filesAfter(t, std::move(edits));
-                if (moved) {
-                    entry.texture = target;
-                    movedFrom = full;
-                }
-            }
-            file = entry.texture;
-        }
-        maps.maps.insert(std::move(node));
         dropPaints(t);
-        edit.set(StrokeField::ScalpMaps, maps.toJson());
+        edit.set(StrokeField::ScalpMaps, renamed.maps.toJson());
     }
-    bool retargeted = false;
-    std::string graph = retargetMapReaders(s.groom->data().graphJson, from, to, &retargeted);
-    bool followed = false;  // texture params reading the file read it where it went
-    graph = retargetFileReaders(graph, movedFrom, file, [&s](const std::string& stored) { return resolveMapFile(s, stored); }, &followed);
-    retargeted = retargeted || followed;
-    if (retargeted) edit.set(StrokeField::Graph, graph);
+    for (FileEdit& f : renamed.files) t.pending.files.push_back(std::move(f));
+    if (!renamed.graph.empty()) edit.set(StrokeField::Graph, renamed.graph);
     commitEdit(t, std::move(edit));
     // The Paint brush on it follows.
     BrushToolSettings& st = t.tool.settings;
     if (st.brush.attribute == from) {
         st.brush.attribute = to;
-        if (!file.empty()) st.paintTexture = file;
+        if (!renamed.file.empty()) st.paintTexture = renamed.file;
     }
-    json r = {{"name", to}, {"renamed", from}, {"graphChanged", retargeted}, {"undo", undoJson(t)}};
-    if (!file.empty()) r["file"] = file;
+    json r = {{"name", to}, {"renamed", from}, {"graphChanged", !renamed.graph.empty()}, {"undo", undoJson(t)}};
+    if (!renamed.file.empty()) r["file"] = renamed.file;
     return r;
 }
 
@@ -2389,76 +1984,35 @@ json mapConvert(ToolState& t, const json& args) {
     const std::string name = needMap(s, args);
     const std::string to = needString(args, "kind");
     if (to != "guides" && to != "vertices" && to != "texture") fail("bad_request", "kind is guides, vertices or texture");
-    const std::string from = mapKindOf(s, name);
-    if (from == to) return {{"name", name}, {"kind", to}, {"undo", undoJson(t)}};
+    if (mapKindOf(s, name) == to) return {{"name", name}, {"kind", to}, {"undo", undoJson(t)}};
     const MeshPtr scalp = mapScalp(s);
-    const int resolution = resolutionOf(args);
-    const int channels = mapChannelsOf(s, name);
-    ScalpMaps maps = s.groom->scalpMaps();
-    json warnings = json::array();
-    // The source as its kind holds it, converted (every host's: scalp_paint.h convertMap; a guide
-    // layer read at the guides' roots on the cage).
-    MapSource source;
-    source.kind = from;
-    source.channels = channels;
-    const HierarchyPtr authored = s.groom->authoredHierarchy();
-    if (from == "guides") {
-        if (!authored) fail("state", "the groom has no guides");
-    } else if (from == "vertices") {
-        source.vertices = maps.maps[name].values;
-    } else {
-        const std::string full = resolveMapFile(s, maps.maps[name].texture);
-        try {
-            source.image = loadTexture(full);
-        } catch (const std::exception& e) {
-            fail("io", "map " + name + "'s image does not read: " + e.what());
-        }
-        if (!source.image) fail("io", "map " + name + "'s image does not read");
+    // Every host's Convert (the editor's convertMapKind, map_edits.h).
+    MapFiles files;
+    files.mapsFolder = mapsFolder(s);
+    files.resolve = [&s](const std::string& stored) { return resolveMapFile(s, stored); };
+    MapConvert converted;
+    try {
+        converted = convertMapKind(s.groom->scalpMaps(), s.groom->authoredHierarchy().get(), *scalp, name, to, resolutionOf(args),
+                                   optString(args, "texture", ""), files);
+    } catch (const std::invalid_argument& e) {
+        fail("bad_request", e.what());
+    } catch (const std::exception& e) {
+        fail("io", e.what());
     }
+    json warnings = json::array();
+    if (converted.colorLost) warnings.push_back(name + " is a color map; on the guides it keeps its luminance (a guide layer is gray)");
     StrokeEdit edit;
     edit.mode = "convert map " + name;
-    std::string file;
-    GuideHierarchy converted = authored ? *authored : GuideHierarchy{};
-    try {
-        MapConverted out = convertMap(name, source, to, *scalp, converted, resolution);
-        if (out.colorLost) warnings.push_back(name + " is a color map; on the guides it keeps its luminance (a guide layer is gray)");
-        if (to == "vertices") {
-            ScalpMapEntry entry{"vertices", std::move(out.vertices), ""};
-            entry.channels = channels;
-            maps.maps[name] = std::move(entry);
-        } else if (to == "texture") {
-            const std::string wanted = optString(args, "texture", "");
-            if (!wanted.empty() && !isPngPath(wanted)) fail("bad_request", "a texture map's file is a PNG (painting writes PNG)");
-            file = wanted.empty() ? defaultMapFile(s, name) : freeFilePath(wanted);
-            writePaint(t, *out.texture, file);
-            ScalpMapEntry entry{"texture", {}, file};
-            entry.channels = channels;
-            maps.maps[name] = std::move(entry);
-        } else {
-            maps.maps.erase(name);
-        }
-    } catch (const RequestError&) {
-        throw;
-    } catch (const std::exception& e) {
-        fail("bad_request", e.what());
-    }
-    if (to == "guides" || from == "guides") {
-        GuideHierarchy h = editedGuides(t, [&](GuideHierarchy& hh) {
-            // The layer as convertMap left it (the guides' other edits kept as they are).
-            if (from == "guides") hh.removeAttribute(name);
-            if (to != "guides") return;
-            for (const HierarchyGuide& g : converted.guides()) {
-                const auto value = g.attributes.find(name);
-                if (value != g.attributes.end() && hh.guide(g.id)) hh.setAttribute(g.id, name, value->second);
-            }
-        });
+    if (converted.removeLayer || converted.setLayer) {
+        GuideHierarchy h = editedGuides(t, [&](GuideHierarchy& hh) { applyConvertedLayer(hh, name, converted); });
         edit.set(StrokeField::Guides, h.toJson());
     }
+    for (FileEdit& f : converted.files) t.pending.files.push_back(std::move(f));
     dropPaints(t);
-    edit.set(StrokeField::ScalpMaps, maps.toJson());
+    edit.set(StrokeField::ScalpMaps, converted.maps.toJson());
     commitEdit(t, std::move(edit));
     json r = {{"name", name}, {"kind", to}, {"warnings", warnings}, {"undo", undoJson(t)}};
-    if (!file.empty()) r["file"] = file;
+    if (!converted.file.empty()) r["file"] = converted.file;
     return r;
 }
 
@@ -2469,31 +2023,32 @@ json mapSetChannels(ToolState& t, const json& args) {
     const std::string name = needMap(s, args);
     const json& c = need(args, "channels");
     if (!c.is_number_integer() || (c.get<int>() != kGrayMap && c.get<int>() != kColorMap)) fail("bad_request", "channels is 1 (gray) or 4 (color)");
-    const int wanted = c.get<int>();
-    const std::string kind = mapKindOf(s, name);
-    if (kind == "guides") {
-        if (wanted == kColorMap) fail("bad_request", "a guide layer is gray: convert " + name + " to vertices or a texture first");
-        return {{"channels", kGrayMap}, {"undo", undoJson(t)}};
+    // Every host's Channels (the editor's setMapChannels, map_edits.h).
+    const MeshPtr cage = mapKindOf(s, name) == "texture" ? mapScalp(s) : MeshPtr();
+    MapFiles files;
+    files.mapsFolder = mapsFolder(s);
+    files.resolve = [&s](const std::string& stored) { return resolveMapFile(s, stored); };
+    MapChannels changed;
+    try {
+        changed = groomlab::setMapChannels(s.groom->scalpMaps(), s.groom->authoredHierarchy().get(), cage.get(), name, c.get<int>(),
+                                           resolutionOf(args), files);
+    } catch (const std::invalid_argument& e) {
+        fail("bad_request", e.what());
+    } catch (const std::exception& e) {
+        fail("io", e.what());
     }
-    const int channels = mapChannelsOf(s, name);
-    if (channels != wanted) {
-        ScalpMaps maps = s.groom->scalpMaps();
-        ScalpMapEntry& entry = maps.maps[name];
-        if (kind == "vertices") {
-            entry.values = convertMapChannels(entry.values, channels, wanted);
-        } else {
-            const std::shared_ptr<TexturePaint> paint = openPaint(s, entry, resolutionOf(args));
-            paint->setChannels(wanted);
-            writePaint(t, *paint, resolveMapFile(s, entry.texture));
-            dropPaints(t);
-        }
-        entry.channels = wanted;
+    if (changed.mapsChanged) {
+        if (!changed.files.empty()) dropPaints(t);
+        for (FileEdit& f : changed.files) t.pending.files.push_back(std::move(f));
         StrokeEdit edit;
         edit.mode = "map channels " + name;
-        edit.set(StrokeField::ScalpMaps, maps.toJson());
+        edit.set(StrokeField::ScalpMaps, changed.maps.toJson());
         commitEdit(t, std::move(edit));
+        if (!changed.file.empty() && t.tool.settings.brush.attribute == name) t.tool.settings.paintTexture = changed.file;
     }
-    return {{"channels", wanted}, {"undo", undoJson(t)}};
+    json r = {{"channels", changed.channels}, {"undo", undoJson(t)}};
+    if (!changed.file.empty()) r["file"] = changed.file;
+    return r;
 }
 
 // Maya's fill_map: the map set to `value` everywhere (any kind), or on the selected guides only
@@ -2517,9 +2072,6 @@ json mapFill(ToolState& t, const json& args) {
     } catch (const std::invalid_argument& e) {
         fail("bad_request", std::string("channels: ") + e.what());
     }
-    if (!byColor) mask &= 0x7u;  // a value fills a color map's r g b
-    const std::string kind = mapKindOf(s, name);
-    const int channels = mapChannelsOf(s, name);
     const bool selected = optBool(args, "selected", false);
     PaintMode paintMode = PaintMode::Replace;
     try {
@@ -2527,155 +2079,140 @@ json mapFill(ToolState& t, const json& args) {
     } catch (const std::invalid_argument& e) {
         fail("bad_request", std::string("paintMode: ") + e.what());
     }
-    if (byColor && selected) fail("bad_request", "Fill Selected sets a guide layer, which is gray; a color fills a color map");
-    if (byColor && channels != kColorMap) fail("bad_request", "a color fills a color map; " + name + " is gray (a value fills it)");
-    if (selected && kind != "guides") fail("bad_request", "Fill Selected sets a guide layer on the selected guides; " + name + " lives on the scalp");
+    // Every host's Fill (the editor's fillMap, map_edits.h): its checks, the fill, a texture map's
+    // image rewritten (or its own copy when another map reads it), the files kept for the step's undo.
+    MapFillRequest fill;
+    fill.value = value;
+    if (byColor) fill.color = color;
+    fill.mask = mask;
+    fill.mode = paintMode;
+    fill.selectedOnly = selected;
     // `faces`: only those polygons of the scalp (a guide layer: the guides rooted on them).
-    const std::vector<std::int32_t> faces = facesArg(args);
-    if (!faces.empty() && selected) fail("bad_request", "fill the selected guides or the selected faces, not both");
-    const MeshPtr faceScalp = faces.empty() ? MeshPtr() : mapScalp(s);
-    const std::string label = "fill map " + name;
-    // (Every host's Fill: scalp_paint.h fillGuideLayer, fillVertexMap, fillTexturePaint.)
-    const PaintColor fill = byColor ? color : PaintColor{value, value, value, 1.0f};
-    if (kind == "guides") {
-        editGuides(t, label, [&](GuideHierarchy& h) {
-            const std::vector<GuideId> picked = selected ? targetGuides(t, h, args, false, "fill selected") : std::vector<GuideId>{};
-            fillGuideLayer(h, name, value, paintMode, picked, faceScalp.get(), faces);
-        });
-    } else if (kind == "vertices") {
-        const MeshPtr scalp = mapScalp(s);
-        ScalpMaps maps = s.groom->scalpMaps();
-        fillVertexMap(maps.maps[name].values, channels, mask, fill, paintMode, *scalp, faces);
-        StrokeEdit edit;
-        edit.mode = label;
-        edit.set(StrokeField::ScalpMaps, maps.toJson());
-        commitEdit(t, std::move(edit));
-    } else {
-        // The file rewritten: its bytes before and after are the undo step.
-        const ScalpMapEntry entry = s.groom->scalpMaps().maps.at(name);
-        const std::shared_ptr<TexturePaint> paint = openPaint(s, entry, resolutionOf(args));
-        fillTexturePaint(*paint, mask, fill, paintMode, *mapScalp(s), faces);
-        writePaint(t, *paint, resolveMapFile(s, entry.texture));
-        dropPaints(t);
-        StrokeEdit edit;
-        edit.mode = label;
-        commitEdit(t, std::move(edit));
+    fill.faces = facesArg(args);
+    fill.resolution = resolutionOf(args);
+    const std::string kind = mapKindOf(s, name);
+    const HierarchyPtr authored = s.groom->authoredHierarchy();
+    if (selected && kind == "guides" && fill.faces.empty() && !byColor) {
+        fill.selected = targetGuides(t, authored ? *authored : GuideHierarchy{}, args, false, "fill selected");
     }
-    return {{"name", name}, {"undo", undoJson(t)}};
+    const MeshPtr cage = kind != "guides" || !fill.faces.empty() ? mapScalp(s) : MeshPtr();
+    MapFiles files;
+    files.mapsFolder = mapsFolder(s);
+    files.resolve = [&s](const std::string& stored) { return resolveMapFile(s, stored); };
+    MapFill filled;
+    try {
+        filled = groomlab::fillMap(s.groom->scalpMaps(), authored.get(), cage.get(), name, fill, files);
+    } catch (const std::invalid_argument& e) {
+        fail("bad_request", e.what());
+    } catch (const std::exception& e) {
+        fail("io", e.what());
+    }
+    const std::string label = "fill map " + name;
+    StrokeEdit edit;
+    edit.mode = label;
+    if (filled.kind == "guides") {
+        GuideHierarchy h = editedGuides(t, [&](GuideHierarchy& hh) { applyFilledLayer(hh, name, filled); });
+        edit.set(StrokeField::Guides, h.toJson());
+    } else {
+        if (filled.mapsChanged) edit.set(StrokeField::ScalpMaps, filled.maps.toJson());
+        if (filled.kind == "texture") dropPaints(t);
+    }
+    for (FileEdit& f : filled.files) t.pending.files.push_back(std::move(f));
+    commitEdit(t, std::move(edit));
+    if (!filled.file.empty() && t.tool.settings.brush.attribute == name) t.tool.settings.paintTexture = filled.file;
+    json r = {{"name", name}, {"undo", undoJson(t)}};
+    if (!filled.file.empty()) r["file"] = filled.file;
+    return r;
 }
 
-// An image to read as a texture map (Maya's set_map_texture rules): a PNG in place, any other
-// image (or a PNG with `copy`) copied into the maps folder as <map>.png (a free name; the copy is
-// part of the undo step). Returns the file the map reads; `image` the image read.
-std::string mapImageFile(ToolState& t, const std::string& name, const std::string& path, const json& args, TexturePtr& image) {
-    Session& s = t.session;
+// The image `args` "path" names, as every host links it (the editor's MapImageRequest): resolved
+// against the groom's folders; `copy` (none: another format only) into the maps folder as a PNG.
+MapImageRequest mapImageArg(Session& s, const json& args) {
+    MapImageRequest image;
+    const std::string path = needString(args, "path");
     if (path.empty()) fail("bad_request", "give the image's path");
-    std::string full = resolveMapFile(s, path);
-    if (full.empty()) full = path;
-    std::error_code ec;
-    if (fileStamp(full) == 0) fail("not_found", "no image at " + full);  // (a tile set: any tile)
-    try {
-        image = loadTexture(full);
-    } catch (const std::exception& e) {
-        fail("bad_request", full + " does not read as an image: " + e.what());
-    }
-    if (!image || (!image->isUdim() && !image->image())) fail("bad_request", full + " does not read as an image");
-    const bool png = isPngPath(full);
-    const bool copy = given(args, "copy") ? settingBool(args["copy"], "copy") : !png;
-    if (!copy && !png) fail("bad_request", full + " is not a PNG: painting writes PNG, so another format is copied as one (copy true)");
-    if (!copy) return fs::u8path(full).generic_u8string();
-    const std::string target = defaultMapFile(s, name);
-    const std::vector<int> tiles = image->isUdim() ? image->udimTiles() : std::vector<int>{};
-    std::vector<FileEdit> e = filesBefore(target, tiles);
-    fs::create_directories(fs::u8path(target).parent_path(), ec);
-    if (png && !image->isUdim()) {
-        fs::copy_file(fs::u8path(full), fs::u8path(target), ec);
-        if (ec) fail("io", "could not copy " + full + ": " + ec.message());
-    } else if (png) {
-        // A tile set of PNGs: each tile copied, into the set udimPathFor(target) names.
-        const std::string fromSet = udimPathFor(full), toSet = udimPathFor(target);
-        for (const int tile : tiles) {
-            fs::copy_file(fs::u8path(udimTilePath(fromSet, tile)), fs::u8path(udimTilePath(toSet, tile)), fs::copy_options::overwrite_existing, ec);
-            if (ec) fail("io", "could not copy " + udimTilePath(fromSet, tile) + ": " + ec.message());
-        }
-    } else {
-        try {
-            writeImagePng(*image, target);  // (a tile set: each tile)
-        } catch (const std::exception& ex) {
-            fail("io", std::string("could not write ") + target + ": " + ex.what());
-        }
-    }
-    filesAfter(t, std::move(e));
-    return target;
+    image.path = resolveMapFile(s, path);
+    if (image.path.empty()) image.path = path;
+    if (fileStamp(image.path) == 0) fail("not_found", "no image at " + image.path);  // (a tile set: any tile)
+    if (given(args, "copy")) image.copy = settingBool(args["copy"], "copy");
+    return image;
+}
+
+MapFiles helperMapFiles(Session& s) {
+    MapFiles files;
+    files.mapsFolder = mapsFolder(s);
+    files.resolve = [&s](const std::string& stored) { return resolveMapFile(s, stored); };
+    return files;
 }
 
 // Maya's import_map: a new texture map reading the image `path`, named `name` or after the file
 // (its letters, digits and _; a free name), color when the image has color unless `color` says;
-// the file rules of mapImageFile. One undo step.
+// a PNG in place, another format (or `copy`) copied as a PNG into the maps folder (the editor's
+// importMap, every host's). One undo step.
 json mapImport(ToolState& t, const json& args) {
     Session& s = t.session;
-    const std::string path = needString(args, "path");
-    std::string name = optString(args, "name", "");
-    if (name.empty()) name = mapNameFromFile(path, [&](const std::string& n) { return !mapKindOf(s, n).empty(); });  // (every host's rule)
-    if (!validMapName(name)) fail("bad_request", mapNameError(name));
-    if (!mapKindOf(s, name).empty()) fail("bad_request", "the groom already has a map named '" + name + "'");
-    TexturePtr image;
-    const std::string file = mapImageFile(t, name, path, args, image);
-    const bool color = given(args, "color") ? settingBool(args["color"], "color") : !isGrayImage(*image);
-    ScalpMaps maps = s.groom->scalpMaps();
-    ScalpMapEntry entry{"texture", {}, file};
-    entry.channels = color ? kColorMap : kGrayMap;
-    maps.maps[name] = std::move(entry);
-    commitMaps(t, "import map " + name, maps);
+    const MapImageRequest image = mapImageArg(s, args);
+    std::optional<bool> color;
+    if (given(args, "color")) color = settingBool(args["color"], "color");
+    MapLink linked;
+    try {
+        linked = groomlab::importMap(s.groom->scalpMaps(), s.groom->authoredHierarchy().get(), optString(args, "name", ""), image, color,
+                                     helperMapFiles(s));
+    } catch (const std::invalid_argument& e) {
+        fail("bad_request", e.what());
+    } catch (const std::exception& e) {
+        fail("io", e.what());
+    }
+    for (FileEdit& f : linked.files) t.pending.files.push_back(std::move(f));
+    commitMaps(t, "import map " + linked.name, linked.maps);
     pruneSelection(t);
-    return {{"name", name}, {"kind", "texture"}, {"channels", color ? kColorMap : kGrayMap}, {"file", file}, {"undo", undoJson(t)}};
+    return {{"name", linked.name}, {"kind", "texture"}, {"channels", linked.channels}, {"file", linked.file}, {"undo", undoJson(t)}};
 }
 
 // Maya's set_map_texture: map `name` (any kind) reads the image `path` as a texture map, keeping
-// its channels (a guide layer: gray); the file rules of mapImageFile. One undo step.
+// its channels (a guide layer: gray); the image's rules as map_import's (the editor's relinkMap).
+// One undo step.
 json mapRelink(ToolState& t, const json& args) {
     Session& s = t.session;
     const std::string name = needMap(s, args);
-    const std::string kind = mapKindOf(s, name);
-    const int channels = mapChannelsOf(s, name);
-    TexturePtr image;
-    const std::string file = mapImageFile(t, name, needString(args, "path"), args, image);
+    const MapImageRequest image = mapImageArg(s, args);
+    MapLink linked;
+    try {
+        linked = groomlab::relinkMap(s.groom->scalpMaps(), s.groom->authoredHierarchy().get(), s.groom->data().graphJson, name, image,
+                                     helperMapFiles(s));
+    } catch (const std::invalid_argument& e) {
+        fail("bad_request", e.what());
+    } catch (const std::exception& e) {
+        fail("io", e.what());
+    }
     StrokeEdit edit;
     edit.mode = "relink map " + name;
-    if (kind == "guides") {
+    if (linked.removeLayer) {
         GuideHierarchy h = editedGuides(t, [&](GuideHierarchy& hh) { hh.removeAttribute(name); });
         edit.set(StrokeField::Guides, h.toJson());
     }
-    ScalpMaps maps = s.groom->scalpMaps();
-    ScalpMapEntry entry{"texture", {}, file};
-    entry.channels = channels;
-    if (kind == "texture") {  // texture params reading the map's old file read the new one
-        bool followed = false;
-        const std::string graph = retargetFileReaders(s.groom->data().graphJson, resolveMapFile(s, maps.maps[name].texture), file,
-                                                      [&s](const std::string& stored) { return resolveMapFile(s, stored); }, &followed);
-        if (followed) edit.set(StrokeField::Graph, graph);
-    }
-    maps.maps[name] = std::move(entry);
+    if (!linked.graph.empty()) edit.set(StrokeField::Graph, linked.graph);
     dropPaints(t);
-    edit.set(StrokeField::ScalpMaps, maps.toJson());
+    edit.set(StrokeField::ScalpMaps, linked.maps.toJson());
+    for (FileEdit& f : linked.files) t.pending.files.push_back(std::move(f));
     commitEdit(t, std::move(edit));
     BrushToolSettings& st = t.tool.settings;
-    if (st.brush.attribute == name && st.paintKind == "texture") st.paintTexture = file;
-    return {{"name", name}, {"file", file}, {"undo", undoJson(t)}};
+    if (st.brush.attribute == name && st.paintKind == "texture") st.paintTexture = linked.file;
+    return {{"name", name}, {"file", linked.file}, {"undo", undoJson(t)}};
 }
 
 // Maya's reload_map: texture map `name`'s image (every texture map's without a name) read again
 // after it changed outside (the next evaluation reads files whose stamp changed). Not an undo step.
 json mapReload(ToolState& t, const json& args) {
     Session& s = t.session;
-    const std::string only = optString(args, "name", "");
-    if (!only.empty() && mapKindOf(s, only) != "texture") fail("bad_request", only + " is not a texture map");
-    json files = json::array();
-    for (const auto& [name, entry] : s.groom->scalpMaps().maps) {
-        if (entry.kind == "texture" && (only.empty() || name == only)) files.push_back(resolveMapFile(s, entry.texture));
+    std::vector<std::string> images;
+    try {
+        images = reloadMapFiles(s.groom->scalpMaps(), s.groom->authoredHierarchy().get(), optString(args, "name", ""), helperMapFiles(s));
+    } catch (const std::invalid_argument& e) {
+        fail("bad_request", e.what());
     }
     dropPaints(t);
-    return {{"files", files}};
+    return {{"files", images}};
 }
 
 // Whether `path` is in a maps folder a session made in the temp folder while its .blend was
@@ -3359,7 +2896,7 @@ std::string shotLayer(Session& s) { return s.tools ? s.tools->shotLayer : std::s
 
 bool isToolCommand(const std::string& cmd) {
     static const std::set<std::string> kCommands = {
-        "tool_set",  "tool_get",      "stroke_begin", "stroke_drag",   "stroke_end",  "stroke_cancel", "hover",    "hover_clear",
+        "tool_set",  "tool_get",      "tool_drag",    "stroke_begin", "stroke_drag",   "stroke_end",  "stroke_cancel", "hover",    "hover_clear",
         "select",    "selection_get", "selection_set", "pick_level",   "set_hidden_groups", "guides_info", "guides_edit", "maps_list",
         "map_create", "map_remove",   "map_for_param", "undo",        "redo",          "undo_state",  "display",
         // Groom Tools' Tubes section, Segments slider, parts and flow, map management.
@@ -3527,6 +3064,7 @@ bool runToolCommandIn(Session& s, ToolState& t, const std::string& cmd, const js
         if (args.contains("tool") && !args["tool"].is_null()) {
             if (t.tool.stroking()) t.tool.cancel(&t.host);
             setTool(t, needString(args, "tool"));
+            t.tool.syncClone();  // (another tool: Clone's source let go)
         }
         if (args.contains("settings") && !args["settings"].is_null()) applySettings(t, args["settings"]);
         result = toolJson(t);
@@ -3534,6 +3072,20 @@ bool runToolCommandIn(Session& s, ToolState& t, const std::string& cmd, const js
     }
     if (cmd == "tool_get") {
         result = toolJson(t);
+        return true;
+    }
+    if (cmd == "tool_drag") {
+        // The radius or the strength dragged (B / M + drag), every host's rule (the editor's
+        // dragToolSetting): from `start` by `dx` pixels.
+        float value = 0.0f;
+        try {
+            value = dragToolSetting(t.tool.settings, needString(args, "setting"), settingNumber(need(args, "start"), "start"),
+                                    settingNumber(need(args, "dx"), "dx"));
+        } catch (const std::invalid_argument& e) {
+            fail("bad_request", e.what());
+        }
+        result = toolJson(t);
+        result["value"] = value;
         return true;
     }
 
@@ -3640,25 +3192,22 @@ bool runToolCommandIn(Session& s, ToolState& t, const std::string& cmd, const js
         const HierarchyPtr h = s.groom->hierarchy();
         std::vector<GuideId> picked;
         if (h) {
+            // Every host's pick (the editor's pickGuidesInView, tool_select.h): a click, a box or a
+            // lasso, only what the view shows, the mirror guides with the tool's symmetry.
             const BrushToolSettings& st = t.tool.settings;
-            const std::vector<GuideId> candidates = guidesAt(*h, st.brush.level, st.brush.group, t.hidden);
             const std::vector<Pixel> lasso = pixelsOf(need(args, "lasso"), 1.0f);
             if (lasso.empty()) fail("bad_request", "lasso holds a point (a click), two (a box) or more");
-            std::vector<std::array<float, 2>> polygon;
-            if (lasso.size() == 2) {
-                const Pixel& a = lasso[0];
-                const Pixel& b = lasso[1];
-                polygon = {{a.x, a.y}, {b.x, a.y}, {b.x, b.y}, {a.x, b.y}};
-            } else {
-                for (const Pixel& p : lasso) polygon.push_back({p.x, p.y});
-            }
-            // Only what the view shows: guide points behind the scalp are not picked.
-            const ViewProjector visible = visibleProjector(pixelProjector(t.view.projection), scalpVisibility(s.groom->scalp(), t.view));
-            picked = pickGuides(*h, candidates, visible, polygon, optBool(args, "rootsOnly", false),
-                                static_cast<float>(optNumber(args, "clickPixels", 12.0)), &t.view.projection);
-            // With symmetry (the tool's), each picked guide's mirror guide too.
+            std::vector<std::array<float, 2>> pixels;
+            for (const Pixel& p : lasso) pixels.push_back({p.x, p.y});
+            GuidePick pick;
+            pick.level = st.brush.level;
+            pick.group = st.brush.group;
+            pick.hiddenGroups = t.hidden;
+            pick.rootsOnly = optBool(args, "rootsOnly", false);
+            pick.clickPixels = static_cast<float>(optNumber(args, "clickPixels", 12.0));
             const MeshPtr scalp = s.groom->scalp();
-            picked = withMirrorGuides(*h, picked, StrokeSymmetry::of(st.brush, scalp.get()));
+            pick.symmetry = StrokeSymmetry::of(st.brush, scalp.get());
+            picked = pickGuidesInView(*h, t.view, scalp, pixels, pick);
         }
         pruneSelection(t);
         const std::vector<GuideId> selection = combineSelection(t.selection, picked, mode);
@@ -3666,7 +3215,7 @@ bool runToolCommandIn(Session& s, ToolState& t, const std::string& cmd, const js
         // "solo" (the add-on's Select tool): every guide not selected frozen, one undo step when
         // that changed anything; a plain pick of nothing unfreezes all.
         bool froze = false;
-        if (optBool(args, "solo", false) && (!picked.empty() || mode == SelectMode::Replace)) {
+        if (optBool(args, "solo", false) && pickSoloes(picked, mode)) {
             const std::shared_ptr<const GuideHierarchy> stored = s.groom->authoredHierarchy();
             GuideHierarchy probe = stored ? *stored : GuideHierarchy{};
             if (freezeToSelection(probe, selection)) {

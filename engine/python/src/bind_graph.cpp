@@ -14,6 +14,7 @@
 #include "groomlab/field.h"
 #include "groomlab/graph.h"
 #include "groomlab/graph_controls.h"
+#include "groomlab/editor/graph_edits.h"
 #include "groomlab/graph_edit.h"
 #include "groomlab/graph_inserts.h"
 #include "groomlab/graph_io.h"
@@ -662,6 +663,8 @@ void bindGraph(py::module_& m) {
         py::arg("params_json"),
         "The Node panel's section of each param of a spec's params (param_conditions.h, every host's): "
         "'Advanced', its group when there are two groups or more, else ''.");
+    m.def("param_label", &paramLabel, py::arg("name"),
+          "A param's display label, every host's (node_catalog.h): \"guideRadius\" -> \"Guide radius\", \"rootUV\" -> \"Root UV\".");
     m.def(
         "param_shown",
         [](const std::string& paramsJson, const std::string& name, const std::string& valuesJson) {
@@ -1015,6 +1018,9 @@ void bindGraph(py::module_& m) {
              },
              py::arg("src"), py::arg("dst"), py::arg("node"), py::arg("node_input") = std::string("strands"),
              "Every link from src into dst through `node`, on its node_input (\"\": its first input) (graph_inserts.h).")
+        .def("wire_after_node", &wireAfterNode, py::arg("anchor"), py::arg("node"),
+             "Add Node after the selected node, every host's (engine/editor graph_edits.h): `node` into anchor's first "
+             "outgoing link it fits in, else fed by anchor on its first input that takes it. Whether it was wired.")
         .def("insert_after",
              [](GraphEdit& e, const std::string& anchor, const std::string& node, const std::string& nodeInput) {
                  insertAfter(e, anchor, node, nodeInput);
@@ -1351,7 +1357,9 @@ void bindGraph(py::module_& m) {
             return out;
         },
         py::arg("preset_json"), "The guide groups a preset's graph reads: [{name, draw}] (presets.h).");
-    m.def("preset_user_dir", &presetUserDir, "The user's preset folder (GROOMLAB_USER_PRESETS, else Maya's user folder).");
+    m.def("preset_user_dir", &presetUserDir,
+          "The user's preset folder, where every host saves (GROOMLAB_USER_PRESETS, else Documents/GroomLab/presets).");
+    m.def("preset_legacy_dir", &presetLegacyDir, "The folder earlier GroomLabs saved presets to (Maya's user folder), still read.");
 
     m.def("braid_sections",
           [](const std::string& style, int sections, bool dutch, float flatness, float pancake, float tightness, float separate,

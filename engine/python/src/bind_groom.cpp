@@ -7,6 +7,7 @@
 #include <set>
 #include <sstream>
 
+#include "groomlab/editor/graph_edits.h"
 #include "groomlab/asset_files.h"
 #include "groomlab/color_patterns.h"
 #include "groomlab/display.h"
@@ -136,6 +137,25 @@ void bindGroom(py::module_& m) {
           "A sculpts text with node `old`'s edits under `new`.");
     m.def("copy_sculpt_node", &copySculptNode, py::arg("json"), py::arg("source"), py::arg("copy"),
           "A sculpts text with `copy` given a copy of `source`'s edits.");
+    m.def(
+        "follow_graph_edit",
+        [](const std::string& graphAfter, const std::string& sculpts, const std::string& sculptTarget, const std::string& braidTubes,
+           const std::string& viewNode, const std::vector<std::pair<std::string, std::string>>& moved,
+           const std::map<std::string, std::string>& copied) {
+            GraphFollowers was{sculpts, sculptTarget, braidTubes, viewNode};
+            const GraphFollowers now = followGraphEdit(graphAfter, was, moved, copied);
+            py::dict out;
+            out["sculpts"] = now.sculpts;
+            out["sculpt_target"] = now.sculptTarget;
+            out["braid_tubes"] = now.braidTubes;
+            out["view_node"] = now.viewNode;
+            return out;
+        },
+        py::arg("graph_after"), py::arg("sculpts") = std::string(), py::arg("sculpt_target") = std::string(),
+        py::arg("braid_tubes") = std::string(), py::arg("view_node") = std::string(),
+        py::arg("moved") = std::vector<std::pair<std::string, std::string>>{}, py::arg("copied") = std::map<std::string, std::string>{},
+        "What follows a graph edit, every host's (engine/editor graph_edits.h): {sculpts, sculpt_target, braid_tubes, "
+        "view_node} after renames (`moved`, in order), copies ({copy: source}) and removals.");
     m.def("move_sculpt_nodes", &moveSculptNodes, py::arg("json"), py::arg("moves"),
           "A sculpts text with each (old, new) node move applied in order (GraphEdit.moved_nodes), a compound's "
           "inner nodes' edits with it.");
@@ -566,6 +586,19 @@ void bindGroom(py::module_& m) {
           },
           py::arg("lod"), py::arg("kind") = "hair", py::arg("triangles") = py::none(),
           "The params a level of detail sets on a Cards node of `kind` (hair, feathers, both), maxCards from the budget.");
+    m.def(
+        "with_card_preset",
+        [](const std::string& graphJson, const std::string& lod, std::vector<std::string> nodes, std::optional<int> triangles) {
+            std::vector<std::pair<std::string, ParamValue>> set;
+            std::string graph = withCardPreset(graphJson, lod, std::move(nodes), triangles, &set);
+            py::dict params;
+            for (const auto& [name, value] : set) params[py::str(name)] = castParamValue(value);
+            return py::make_tuple(graph, params);
+        },
+        py::arg("graph_json"), py::arg("lod"), py::arg("nodes") = std::vector<std::string>{}, py::arg("triangles") = py::none(),
+        "(graph_json, params): the graph with Cards nodes `nodes` (empty: every one) set for a level of detail, each by "
+        "what it cards (every host's Cards preset, card_presets.h); params: what the last one was set to. ValueError for "
+        "an unknown lod or a node the graph lacks.");
     // Map names, every host's rule, and a rename's readers and file (scalp_maps.h).
     m.def("valid_map_name", &validMapName, py::arg("name"), "Letters, digits and _, not starting with a digit.");
     m.def("map_name_error", &mapNameError, py::arg("name"), "Why a name cannot name a map (\"\" when it can).");

@@ -465,6 +465,7 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
         bar_icons(row, "lists/groups/bar", "groupsbar", context, ("group.rename", "group.select", "group.delete"))
         box.prop(t, "resample_segments", text="Segments (%s)" % t.segments_scope if t.segments_scope else "Segments",
                  slider=True)
+        box.prop(t, "segments_by_length", text=defs.text("segmentsByLength"))
         row = box.row(align=True)
         row.menu("GROOMLAB_MT_guide_edits", text=lists["edits"]["label"])
         box.prop(t, "children_count", text="Children per guide")
@@ -684,6 +685,17 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
                 col.prop(t, "tube_shape", text="")
                 col.label(text=defs.text("profileHint"))
                 self.draw_tube_fields(col, t)
+        if "clone" in uses:  # Clone: Pick Source, Reset, what the source holds, Replace
+            col, _ = block(card, label("clone", "Clone"))
+            row = col.row(align=True)
+            row.operator("groomlab.clone_pick_source", text="Pick Source", depress=t.clone_pick_source)
+            sub = row.row(align=True)
+            sub.enabled = t.clone_source_size > 0 or t.clone_pick_source
+            sub.operator("groomlab.clone_reset", text="Reset")
+            n = t.clone_source_size
+            col.label(text=("Source: %d guide%s" % (n, "" if n == 1 else "s")) if n else
+                      "No source yet: Ctrl+click over guides")
+            col.prop(t, "clone_replace", text="Replace")
         if "parts" in uses:
             col, head = block(card, label("parts", "Parts"))
             items = [i for i in menu.resolve(defs.get("lists/parts/bar"), context, conditions=False) if i["kind"] == "action"]

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Renders GroomLab's icons (hosts/maya/icons/groomLab_*.svg) as the PNGs the Blender add-on shows
 (hosts/blender/addon/groomlab/icons/<name>.png, 64 px), in the Maya palette's default theme colors
-(hosts/maya/themes/playful.json, as groomlab.ui.widgets.icon colors them):
+(engine/assets/themes/playful.json, as groomlab.ui.widgets.icon colors them):
 
     python tools/make_blender_icons.py        (Python 3 with Pillow and numpy)
 
@@ -31,7 +31,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, os.pardir))
 SVG_DIR = os.path.join(ROOT, "hosts", "maya", "icons")
 OUT = os.path.join(ROOT, "hosts", "blender", "addon", "groomlab", "icons")
-THEME = os.path.join(ROOT, "hosts", "maya", "themes", "playful.json")
+THEME = os.path.join(ROOT, "engine", "assets", "themes", "playful.json")
 SIZE = 64
 SS = 8                       # supersampling
 UI_DIR = os.path.join(ROOT, "hosts", "app", "icons")  # the mono glyphs (ui_*.svg)

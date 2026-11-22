@@ -166,6 +166,8 @@ if(GROOMLAB_BUILD_TESTS)
 endif()
 
 add_subdirectory(engine/core)
+# The groom editor (every host's editing of a groom: undo steps and history, the user's actions).
+add_subdirectory(engine/editor)
 
 # The GPU look preview's engine (Windows: DirectX 11), host-free beside the core.
 add_subdirectory(engine/gpu)

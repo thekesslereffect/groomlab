@@ -18,6 +18,9 @@
 #include <QVector3D>
 
 #include "camera.h"
+#include "groomlab/editor/tool_overlay.h"
+#include "groomlab/editor/tool_select.h"
+#include "groomlab/editor/tool_settings.h"
 #include "groomlab/display.h"
 #include "groomlab/guide_selection.h"
 #include "groomlab/stroke.h"
@@ -47,6 +50,8 @@ public:
 
     BrushToolSettings& settings() { return tool_.settings; }
     const BrushToolSettings& settings() const { return tool_.settings; }
+    // The core's tool itself: Clone's source (clip, armCapture, clearClip) for the card.
+    BrushTool& tool() { return tool_; }
     // The rail's tools by the catalog's ids (brush_catalog.h): a brush mode (BrushToolSettings::
     // setMode) or "freeze", the Paint brush on the guides' freeze mask toward 1 (Ctrl: toward 0,
     // unfreeze), as Maya's freeze_tool starts it; the other brushes leave frozen guides alone
@@ -60,6 +65,9 @@ public:
     // The view's density while a stroke is live (ViewRequest::sculptDensity): the strands step
     // back to this fraction so each dab evaluates fast; the release evaluates them all again.
     float sculptDensity = 1.0f;
+    // The Select tool hides what the selection leaves out instead of freezing it (select()); the
+    // window clears it when the tool changes.
+    bool selectHides = false;
     // Shot sculpting (the core's, as Maya's Sculpt tab): with `on`, strokes reshape the groom as
     // shown at `seconds` (frame `frame`) and record the difference into the corrective layer
     // `layer` (made at that time when the groom has none of the name) instead of the guides.
@@ -134,7 +142,9 @@ public:
     // level or group (not hidden) picked, combined with the selection by `mode`, set on the
     // document. Returns how many guides the pick found.
     // `solo` (the Select tool): every guide not selected frozen, an undo step when that changed
-    // anything (a plain pick of nothing unfreezes every guide).
+    // anything (a plain pick of nothing unfreezes every guide). With selectHides (the radial menu's
+    // Visibility > Select), every guide not selected hidden instead (kHiddenLayer: hidden and
+    // locked; a plain pick of nothing shows every guide), the freeze mask left as it is.
     std::size_t select(const std::vector<QPointF>& lasso, SelectMode mode, bool solo = false);
     // The hierarchy guides are picked from (as shown); null without a groom.
     std::shared_ptr<const GuideHierarchy> shownHierarchy() const;
@@ -167,13 +177,7 @@ private:
     float ringRadius_ = 0.0f;
     // The scalp's line of symmetry (symmetrySeam), drawn red while symmetry is on; kept until the
     // scalp or the symmetry changes.
-    struct Seam {
-        MeshPtr scalp;
-        int axis = -1;
-        float center = 0.0f;
-        bool topology = false;
-        std::vector<Vec3f> points;
-    } seam_;
+    SeamCache seam_;  // the scalp's line of symmetry while it stays the same (tool_overlay.h)
     std::string error_;
     std::size_t pressIndex_ = 0;
     std::string pressText_;
@@ -182,12 +186,7 @@ private:
     long shotFrame_ = 0;
     std::string shotLayer_;
     // What Paint painted before Freeze took the brush (setTool puts it back).
-    struct PaintTarget {
-        std::string attribute = "clump";
-        float value = 1.0f;
-        std::string kind = "guides", texture;
-    };
-    PaintTarget beforeFreeze_;
+    FreezeKept beforeFreeze_;  // what Paint painted before Freeze took the brush (tool_settings.h)
 };
 
 

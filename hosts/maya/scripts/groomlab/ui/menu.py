@@ -165,7 +165,8 @@ CHILDREN_COUNT = 5  # the Guides tab's inline count (its spin box sets it)
 
 def generate_children_dialog(count=None, group=None, groom=None):
     """Generate Children: `count` children (the Guides tab's inline count by default) for each
-    selected guide, else for every guide of `group` (the last group by default). No prompt."""
+    selected guide (selection first: all of one group), else for every guide of `group` (the last
+    group by default), as every host's (the editor's generateChildren). No prompt."""
     import groomlab
     groom = groom or _selected_groom()
     if not groom:
@@ -177,7 +178,7 @@ def generate_children_dialog(count=None, group=None, groom=None):
     count = int(CHILDREN_COUNT if count is None else count)
     chosen = groomlab.selected_guides(groom)
     try:
-        if chosen and not group:
+        if chosen:
             # Only the selected guides get children (Tonic-style: pick which parents have children).
             made = groomlab.generate_children(groom, count=count, selected=True)
             _say("%d children for %d selected guides" % (made, len(chosen)))
@@ -1210,6 +1211,12 @@ def _render_standalone_dialog(renderer):
     return _watch_render(job, spec)
 
 
+def redshift_refresh():
+    """Render > Refresh Redshift Grooms: this frame written for Redshift's IPR (redshift_hook)."""
+    from groomlab import redshift_hook
+    redshift_hook.menu_refresh()
+
+
 def render_vray_dialog():
     """Render > V-Ray Standalone (any Maya version): groomlab.render_vray from a dialog."""
     return _render_standalone_dialog("vray")
@@ -2196,7 +2203,7 @@ def install_hotkeys():
     listing what it changed: the set switched to and each key it rebound."""
     from groomlab.ui import hotkeys
     name = hotkeys.install()
-    messages.say("hotkey set '%s' is active. Hold Y + left click for the marking menu." % name, warning=False)
+    messages.say("hotkey set '%s' is active. Alt+S opens the radial menu." % name, warning=False)
     if not cmds.about(batch=True):
         _text_window("groomLabHotkeyChanges", "GroomLab: Hotkeys Installed", hotkeys.changes_text())
     return hotkeys.last_changes
@@ -2299,6 +2306,7 @@ ACTIONS = {
     "render.fromGroomFile": render_from_groom_file_dialog,
     "render.asCurves": render_curves,
     "render.vrayStandalone": render_vray_dialog,
+    "render.redshiftRefresh": redshift_refresh,
     "render.prman": render_prman_dialog,
     "render.hardware2": render_hardware2_dialog,
     "export.alembic": lambda: export_curves_dialog("alembic"),
@@ -2335,6 +2343,7 @@ ACTIONS = {
     "help.discord": open_discord,
     "help.donate": open_donate,
     "help.about": show_about,
+    "radial.settings": lambda: __import__("groomlab.ui.radial_menu", fromlist=["radial_menu"]).show_settings(),
 }
 # Maya's names for the items other code finds (the RenderMan item goes after Render as Curves; the
 # Review check marks follow the groom as the menu opens), and the check items' state.
@@ -2403,7 +2412,8 @@ def install():
     try:
         from groomlab.ui import hotkeys
         hotkeys.create_runtime_commands()
-    except RuntimeError:
+        hotkeys.upgrade()  # (a GroomLab hotkey set from an earlier GroomLab: Alt+S, the radial menu)
+    except (RuntimeError, ValueError):
         pass
     try:  # once a session: an update's previous folder goes; at most daily, a quiet check for a new version
         from groomlab import updates
@@ -2416,6 +2426,11 @@ def install():
         theme.on_change(_theme_changed)
     except (ImportError, RuntimeError, ValueError, IOError, OSError) as e:
         cmds.warning("GroomLab: theme not applied: %s" % e)
+    try:  # Redshift's proxies kept out of other renderers (redshift_hook, issue 81)
+        from groomlab import redshift_hook
+        redshift_hook.start()
+    except Exception as e:
+        cmds.warning("GroomLab: Redshift proxies not watched: %s" % e)
     try:  # Tubes to Curves' live links: the linked meshes watched, in this scene and the next ones
         from groomlab import tube_links
         tube_links.start()

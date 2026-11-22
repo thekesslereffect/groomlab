@@ -114,10 +114,10 @@ qt_add_library(groomlab_app_lib STATIC
 # app looks the same on every machine.
 qt_add_resources(groomlab_app_lib "groomlab_app_fonts" PREFIX "/groomlab" BASE "${CMAKE_CURRENT_SOURCE_DIR}"
     FILES "fonts/Inter[opsz,wght].ttf" "fonts/JetBrainsMono[wght].ttf")
-# The Maya host's themes (Playful, Charcoal, Studio, Paper), read by theme.cpp: one set of files for
+# The shipped themes (engine/assets/themes: Playful, Charcoal, Studio, Paper), read by theme.cpp: one set of files for
 # both hosts' colors.
-file(GLOB _groomlab_themes CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/hosts/maya/themes/*.json")
-qt_add_resources(groomlab_app_lib "groomlab_app_theme" PREFIX "/groomlab/themes" BASE "${PROJECT_SOURCE_DIR}/hosts/maya/themes"
+file(GLOB _groomlab_themes CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/engine/assets/themes/*.json")
+qt_add_resources(groomlab_app_lib "groomlab_app_theme" PREFIX "/groomlab/themes" BASE "${PROJECT_SOURCE_DIR}/engine/assets/themes"
     FILES ${_groomlab_themes})
 # The UI structure every host shares (engine/ui/*.json: menus, lists, choices...), embedded the same
 # way: ":/groomlab/ui/menus.json" and so on (docs/UI_DEFINITIONS.md).
@@ -196,25 +196,25 @@ qt_add_shaders(groomlab_app_lib "groomlab_hair_gouraud_shader"
     FILES shaders/hair.vert
     OUTPUTS shaders/hair_gouraud.vert.qsb)
 target_include_directories(groomlab_app_lib PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
-# The graph presets are the Maya host's files (hosts/maya/presets), read through the core's
+# The graph presets are every host's shipped files (engine/assets/presets), read through the core's
 # presets.h: a development build reads the source tree's; the build copies them beside the
 # executable (groomlab_app_deploy), where an installed app finds them.
-groomlab_path_literal(_shipped_presets "${PROJECT_SOURCE_DIR}/hosts/maya/presets")
+groomlab_path_literal(_shipped_presets "${PROJECT_SOURCE_DIR}/engine/assets/presets")
 target_compile_definitions(groomlab_app_lib PUBLIC "GROOMLAB_SHIPPED_PRESETS=${_shipped_presets}")
-# The compound nodes shipped with every host (hosts/maya/nodes), found the same way.
-groomlab_path_literal(_shipped_nodes "${PROJECT_SOURCE_DIR}/hosts/maya/nodes")
+# The compound nodes shipped with every host (engine/assets/nodes), found the same way.
+groomlab_path_literal(_shipped_nodes "${PROJECT_SOURCE_DIR}/engine/assets/nodes")
 target_compile_definitions(groomlab_app_lib PUBLIC "GROOMLAB_SHIPPED_NODES=${_shipped_nodes}")
-# The brush alphas shipped with every host (hosts/maya/alphas), found the same way.
-groomlab_path_literal(_shipped_alphas "${PROJECT_SOURCE_DIR}/hosts/maya/alphas")
+# The brush alphas shipped with every host (engine/assets/alphas), found the same way.
+groomlab_path_literal(_shipped_alphas "${PROJECT_SOURCE_DIR}/engine/assets/alphas")
 target_compile_definitions(groomlab_app_lib PUBLIC "GROOMLAB_SHIPPED_ALPHAS=${_shipped_alphas}")
 # The sample meshes (GroomLab > Add Sample Mesh: Nika, Manny, the wolf; CC BY 4.0), the same way.
-groomlab_path_literal(_shipped_meshes "${PROJECT_SOURCE_DIR}/hosts/maya/meshes")
+groomlab_path_literal(_shipped_meshes "${PROJECT_SOURCE_DIR}/engine/assets/meshes")
 target_compile_definitions(groomlab_app_lib PUBLIC "GROOMLAB_SHIPPED_MESHES=${_shipped_meshes}")
 # QRhi's headers (rhi/qrhi.h) ship as Qt's "limited compatibility" API: they come with GuiPrivate.
 # The GPU look preview's engine (engine/gpu/, Windows: Direct3D 11 and OpenGL) runs the graph's last
 # nodes on QRhi's device while a param is dragged or guides are brushed (src/gpu_preview.h).
 target_link_libraries(groomlab_app_lib
-    PUBLIC groomlab::core groomlab::alembic groomlab::gpu Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Network
+    PUBLIC groomlab::core groomlab::editor groomlab::alembic groomlab::gpu Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Network
     PRIVATE nlohmann_json::nlohmann_json groomlab::warnings)
 groomlab_precompile(groomlab_app_lib <nlohmann/json.hpp> <QByteArray> <QColor> <QElapsedTimer> <QImage>
     <QMatrix4x4> <QObject> <QPointF> <QSize> <QString> <QVector3D>)
@@ -349,11 +349,11 @@ function(groomlab_app_deploy target)
     # Cleared first: a preset removed from the source must not linger beside the executable.
     add_custom_command(TARGET ${target} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E rm -rf "${_data}/presets"
-        COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/hosts/maya/presets" "${_data}/presets"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/engine/assets/presets" "${_data}/presets"
         COMMAND ${CMAKE_COMMAND} -E rm -rf "${_data}/nodes"
-        COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/hosts/maya/nodes" "${_data}/nodes"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/engine/assets/nodes" "${_data}/nodes"
         COMMAND ${CMAKE_COMMAND} -E rm -rf "${_data}/alphas"
-        COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/hosts/maya/alphas" "${_data}/alphas"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/engine/assets/alphas" "${_data}/alphas"
         COMMENT "Copying the graph presets, compound nodes and brush alphas beside ${target}")
     if(WIN32)
         if(GROOMLAB_TBB_RUNTIME)
@@ -392,11 +392,11 @@ else()
     install(TARGETS groomlab_app RUNTIME DESTINATION "${GROOMLAB_APP_DIR}" COMPONENT App)
     set(_app_data "${GROOMLAB_APP_DIR}")
 endif()
-install(DIRECTORY "${PROJECT_SOURCE_DIR}/hosts/maya/presets/" DESTINATION "${_app_data}/presets" COMPONENT App)
-install(DIRECTORY "${PROJECT_SOURCE_DIR}/hosts/maya/nodes/" DESTINATION "${_app_data}/nodes" COMPONENT App)
-install(DIRECTORY "${PROJECT_SOURCE_DIR}/hosts/maya/alphas/" DESTINATION "${_app_data}/alphas" COMPONENT App)
+install(DIRECTORY "${PROJECT_SOURCE_DIR}/engine/assets/presets/" DESTINATION "${_app_data}/presets" COMPONENT App)
+install(DIRECTORY "${PROJECT_SOURCE_DIR}/engine/assets/nodes/" DESTINATION "${_app_data}/nodes" COMPONENT App)
+install(DIRECTORY "${PROJECT_SOURCE_DIR}/engine/assets/alphas/" DESTINATION "${_app_data}/alphas" COMPONENT App)
 # The sample meshes (CC BY 4.0, REUSE.toml): their OBJs (the rigs are Maya's and Blender's).
-install(DIRECTORY "${PROJECT_SOURCE_DIR}/hosts/maya/meshes/" DESTINATION "${_app_data}/meshes" COMPONENT App
+install(DIRECTORY "${PROJECT_SOURCE_DIR}/engine/assets/meshes/" DESTINATION "${_app_data}/meshes" COMPONENT App
         FILES_MATCHING PATTERN "*.obj")
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/package/README_BETA.txt" DESTINATION "${GROOMLAB_APP_DIR}" COMPONENT App)
 # GroomLab's RenderMan procedural (hosts/renderman, when RenderMan Pro Server's SDK is found) beside the

@@ -72,6 +72,16 @@
         {"value": "twist", "label": "Twist", "tip": "Turn the tubes near the brush about their guides (Ctrl: the other way)"}
       ]
     },
+    "smoothMode": {
+      "label": "Evens out",
+      "default": "curve",
+      "items": [
+        {"value": "all", "label": "All", "tip": "Kinks, lengths and shapes: Curve, then Shape, then Length"},
+        {"value": "length", "label": "Length", "tip": "The guides' lengths toward the mean of the guides under the brush (shapes scaled about the root)"},
+        {"value": "shape", "label": "Shape", "tip": "The guides' shapes toward the mean shape of the guides under the brush (lengths kept)"},
+        {"value": "curve", "label": "Curve", "tip": "The kinks along each guide, lengths kept"}
+      ]
+    },
     "tubeShape": {
       "label": "Shape",
       "default": "round",

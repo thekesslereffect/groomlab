@@ -239,6 +239,13 @@ def _segments(self, context):
     tools.segments_changed(context, int(self.resample_segments))
 
 
+def _segments_by_length(self, context):
+    if props.is_quiet():
+        return
+    from . import tools
+    tools.segments_changed(context, int(self.resample_segments))
+
+
 def _tube_shape(self, context):
     if props.is_quiet():
         return
@@ -342,6 +349,7 @@ class GroomLabGroupItem(bpy.types.PropertyGroup):
     guides: IntProperty()
     hidden: BoolProperty()
     depth: IntProperty()
+    segment_length: FloatProperty()  # above 0: its guides go by length (issue #98)
     has_color: BoolProperty()   # its own viewport color (else `color` is its automatic one)
     color: FloatVectorProperty(size=3, subtype="COLOR_GAMMA", min=0.0, max=1.0, default=(0.5, 0.5, 0.5))
 
@@ -482,7 +490,7 @@ class GroomLabTools(bpy.types.PropertyGroup):
     front_facing: BoolProperty(name="Front facing only", default=True, update=_push(),
                                description="What the scalp hides from the camera gets no weight: a stroke never reaches "
                                            "guides, parts, flow arrows or paint on the far side of the head")
-    stretch: BoolProperty(name="Stretch", default=True, update=_push(),
+    stretch: BoolProperty(name="Stretch", default=False, update=_push(),
                           description="On: guides get longer (or shorter) as you pull them. Off: they keep their length")
     straighten: BoolProperty(name="Straighten", default=False, update=_push(),
                              description="On: guides relax toward the straight line along their root direction. "
@@ -501,6 +509,13 @@ class GroomLabTools(bpy.types.PropertyGroup):
                                   description="New guides stay unfrozen and every other guide is frozen, so the brushes "
                                               "work on the new ones at once (Ctrl+click guides with a brush to "
                                               "select them, Unfreeze All to free them all)")
+    clone_replace: BoolProperty(name="Replace", default=False, update=_push(),
+                                description="Clone: the guides of the copied levels already in the circle where the "
+                                            "copies land are removed first (frozen ones stay). Off: the copies are "
+                                            "added among them")
+    # Clone's source as the helper last said (cloneSourceSize, clonePickSource): what the card shows.
+    clone_source_size: IntProperty(name="Source", default=0, min=0, options={"SKIP_SAVE"})
+    clone_pick_source: BoolProperty(name="Pick Source", default=False, options={"SKIP_SAVE"})
     length: FloatProperty(name="Length", default=0.005, min=1e-5, max=100.0, soft_min=1e-4, soft_max=0.5, subtype="DISTANCE",
                           unit="LENGTH", precision=4, update=_push(), description="A standing new guide's length")
     segments: IntProperty(name="Segments", default=12, min=1, max=256, soft_max=32, update=_push(),
@@ -704,6 +719,9 @@ class GroomLabTools(bpy.types.PropertyGroup):
                                                "count makes them follow it again), else the picked group's (its new guides "
                                                "get as many too). Frozen guides keep theirs. More segments let a guide curl tighter")
     segments_scope: StringProperty()  # "3 selected" / "bangs: 12" / "all 40" (", mixed")
+    # Segments by Length (issue #98): toggled, the targets resampled at the slider's count by length
+    segments_by_length: BoolProperty(name="Segments by Length", default=False, update=_segments_by_length,
+                                     description=defs.text("segmentsByLengthTip"))
     # Selection
     soft_radius: FloatProperty(name="Soft radius", default=0.0, min=0.0, soft_max=0.1, subtype="DISTANCE", unit="LENGTH",
                                update=_soft_radius,

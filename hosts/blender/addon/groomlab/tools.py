@@ -27,7 +27,7 @@ LIVE_INTERVAL = 0.04            # seconds between live evaluations during a stro
 LIVE_PER_COST = 1.5             # and this many times the last one's own time (the drags keep coming in between)
 STATE_DELAY = 1.0               # seconds after the last edit before the groom's state is kept (get_state)
 DEFER = 0.35                    # seconds after a slider's last change before its edit commits (one undo step)
-# The Playful theme's viewport colors (hosts/maya/themes/playful.json "viewport"), as Maya hands
+# The Playful theme's viewport colors (engine/assets/themes/playful.json "viewport"), as Maya hands
 # them to its display (groomLabDisplayTheme). Blender's overlays are not color managed: sRGB as is.
 THEME_HEX = {"selected": "#F5F5F7",
              "softSelected": "#FFC53D", "frozen": "#5EC8FF", "parts": "#FF4D4F", "flow": "#FFC53D",
@@ -264,6 +264,7 @@ def settings_of(scene, tool=None):
          "stretch": bool(t.stretch), "straighten": bool(t.straighten), "targets": ",".join(targets) or "none",
          "eraseGuides": bool(t.erase_guides), "eraseParts": bool(t.erase_parts), "eraseFlow": bool(t.erase_flow),
          "matchNeighbors": bool(t.match_neighbors), "soloNewGuides": bool(t.solo_new_guides),
+         "cloneReplace": bool(t.clone_replace),
          "length": float(t.length), "segments": int(t.segments),
          "spacing": float(t.spacing), "partName": t.part_name or "part", "flowSink": t.flow_sink,
          "smoothStrength": float(t.smooth_strength), "level": level, "group": group,
@@ -306,6 +307,31 @@ def push(scalp, scene=None, **only):
     r = process.call("tool_set", session=rt.session, tool=tool, settings=settings)
     if not only:
         groom_tools(scalp).pushed_version = _settings_version[0]
+    take_clone(scene, r)
+    return r
+
+
+def take_clone(scene, reply):
+    """Clone's source as a helper reply says (its settings' cloneSourceSize and clonePickSource),
+    kept on the tool properties for the card."""
+    s = (reply or {}).get("settings") or {}
+    if "cloneSourceSize" not in s:
+        return
+    t = scene.groomlab_tools
+    size, armed = int(s.get("cloneSourceSize") or 0), bool(s.get("clonePickSource"))
+    if t.clone_source_size != size or t.clone_pick_source != armed:
+        with props.quiet():
+            t.clone_source_size = size
+            t.clone_pick_source = armed
+
+
+def clone_action(scalp, **settings):
+    """Clone's Pick Source (clonePickSource=True/False) or Reset (cloneReset=True), sent to the
+    groom's tool; the card's state from the reply. Returns the reply."""
+    scene = groom.scene_of(scalp)
+    rt = groom.ensure(scalp, scene)
+    r = process.call("tool_set", session=rt.session, settings=settings)
+    take_clone(scene, r)
     return r
 
 
@@ -493,6 +519,8 @@ def stroke_end(scalp):
     scene = groom.scene_of(scalp)
     r = call(scalp, "stroke_end")
     groom_tools(scalp).last_end = r
+    if scene.groomlab_tools.tool == "clone":  # a Ctrl+click captured, or Pick Source's click used
+        take_clone(scene, call(scalp, "tool_get"))
     take_roots(scalp, r)
     after_edit(scalp, scene, r.get("undo"), refresh=r.get("committed", False))
     warn = r.get("warnings") or []
@@ -770,9 +798,9 @@ def guide_segments(scalp, guides=None, group=None, level=None):
     return call(scalp, "guide_segments", **_targets(guides, group, level))
 
 
-def resample_guides(scalp, segments, guides=None, group=None, level=None):
+def resample_guides(scalp, segments, guides=None, group=None, level=None, by_length=False):
     """Give guides (default: the selected ones, else every guide) `segments` segments. One undo step."""
-    return guides_edit(scalp, "resample", segments=int(segments), **_targets(guides, group, level))
+    return guides_edit(scalp, "resample", segments=int(segments), byLength=bool(by_length), **_targets(guides, group, level))
 
 
 def _preview_shown(scalp):
@@ -793,10 +821,10 @@ def set_group_segments(scalp, group, segments):
     return guides_edit(scalp, "set_group_segments", group=group, segments=int(segments))
 
 
-def preview_resample(scalp, segments, guides=None, group=None, level=None):
-    """The Segments slider while dragged: the guides shown resampled, no change, no undo step;
-    resample_guides commits, end_preview drops it."""
-    r = call(scalp, "guides_preview", segments=int(segments), **_targets(guides, group, level))
+def preview_resample(scalp, segments, guides=None, group=None, level=None, by_length=False):
+    """The Segments slider while dragged: the guides shown resampled (by length with `by_length`),
+    no change, no undo step; resample_guides commits, end_preview drops it."""
+    r = call(scalp, "guides_preview", segments=int(segments), byLength=bool(by_length), **_targets(guides, group, level))
     _preview_shown(scalp)
     return r
 
@@ -1310,6 +1338,7 @@ def _fill_groups(scene, info, gt):
             item.level = int(g.get("level", 0))
             item.guides = int(g.get("guides", 0))
             item.hidden = bool(g.get("hidden"))
+            item.segment_length = float(g.get("segmentLength") or 0.0)
             item.depth = depth
             color = g.get("color")
             item.has_color = bool(color)
@@ -1411,6 +1440,7 @@ def refresh_segments(scalp, scene=None):
         return  # a drag's commit pending: the slider stays as dragged
     group = segments_group(t)
     counts = [int(c) for c in guide_segments(scalp, group=group).get("segments") or []]
+    picked = next((g for g in t.groups if g.name == group), None) if group else None
     with props.quiet():
         if counts:
             t.resample_segments = max(set(counts), key=counts.count)
@@ -1419,6 +1449,9 @@ def refresh_segments(scalp, scene=None):
             t.segments_scope = scope + (", mixed" if min(counts) != max(counts) else "")
         else:
             t.segments_scope = ""
+        # Segments by Length (issue #98): on where the picked group goes by length.
+        if picked is not None:
+            t.segments_by_length = picked.segment_length > 0.0
 
 
 # ---- Sliders that commit after the drag (Maya's release) ------------------------------------------
@@ -1465,14 +1498,16 @@ def segments_changed(context, segments):
         # Selected guides already at the count: nothing to do. A group (or every guide) commits
         # anyway: its new guides take the count on.
         counts = [int(c) for c in guide_segments(scalp, group=group).get("segments") or []]
-        if counts and (not scene.groomlab_tools.selected_count or any(c != segments for c in counts)):
-            r = resample_guides(scalp, segments, group=group)
-            status(scene, "Resampled %d guides to %d segments." % (int(r.get("resampled") or 0), segments))
+        if counts and (by_length or not scene.groomlab_tools.selected_count or any(c != segments for c in counts)):
+            r = resample_guides(scalp, segments, group=group, by_length=by_length)
+            how = "by length, %d for the average guide" % segments if by_length else "to %d segments" % segments
+            status(scene, "Resampled %d guides %s." % (int(r.get("resampled") or 0), how))
         end_preview(scalp)
         refresh_segments(scalp, scene)
+    by_length = bool(scene.groomlab_tools.segments_by_length)
     try:
         if not bpy.app.background:
-            preview_resample(scalp, segments, group=group)
+            preview_resample(scalp, segments, group=group, by_length=by_length)
         defer("segments", commit)
     except HelperError as e:
         status(scene, e.message)
@@ -1923,6 +1958,12 @@ def keep_state(scalp):
     return keep
 
 
+def _graph_changed(scalp):
+    """groom.graph_hooks: a GroomLab-tools groom's state kept with its new graph."""
+    if is_hierarchy(scalp) and groom.runtime_if_any(scalp) is not None:
+        mark_state(scalp)
+
+
 def store_states():
     """Before a save: each GroomLab-tools groom's state into its scalp object (the .blend)."""
     for scalp in groom.scalps():
@@ -1945,7 +1986,7 @@ def restore(scalp, rt, scene):
         except ValueError:
             state = None
     if state is None and scalp.groomlab.snapshot:
-        return False  # a hierarchy groom kept by B2's snapshot (a .groom loaded, saved before any edit)
+        return False  # a hierarchy groom an older GroomLab kept by B2's snapshot alone (saved before any edit)
     groom.sync_scalp(scalp, rt, force=True)
     if state is not None:
         process.call("set_state", session=rt.session, groom=state["groom"], textures=state.get("textures") or [],
@@ -2065,6 +2106,7 @@ def _wake():
 def register():
     groom.before_save.append(store_states)
     groom.build_hooks.append(restore)
+    groom.graph_hooks.append(_graph_changed)
     if _on_load not in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.append(_on_load)
     for handlers in (bpy.app.handlers.undo_post, bpy.app.handlers.redo_post):
@@ -2079,6 +2121,8 @@ def unregister():
         groom.before_save.remove(store_states)
     if restore in groom.build_hooks:
         groom.build_hooks.remove(restore)
+    if _graph_changed in groom.graph_hooks:
+        groom.graph_hooks.remove(_graph_changed)
     if _on_load in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.remove(_on_load)
     for handlers in (bpy.app.handlers.undo_post, bpy.app.handlers.redo_post):

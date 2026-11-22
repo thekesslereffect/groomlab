@@ -565,8 +565,15 @@ void GroomSession::scaleHierarchy() {
 }
 
 std::map<std::string, float> GroomSession::scaledControls() const {
-    if (controlFactors_.empty()) return data_.controls;
+    if (controlFactors_.empty() && controlKeys_.empty()) return data_.controls;
     std::map<std::string, float> out = data_.controls;
+    // Keyed controls: their keys' value at the frame evaluated, over the value set.
+    if (!controlKeys_.empty()) {
+        const double frame = secondsToFrame(time_, fps_);
+        for (const auto& [name, keys] : controlKeys_) {
+            if (!keys.empty()) out[name] = static_cast<float>(controlKeyValue(keys, frame));
+        }
+    }
     for (auto& [name, value] : out) {
         const auto f = controlFactors_.find(name);
         if (f != controlFactors_.end()) value = static_cast<float>(value * f->second);
@@ -1066,6 +1073,11 @@ void GroomSession::setGuidePoses(GuidesPtr poses) {
     if (poses && data_.guidePoses && hash == posesHash_) return;
     data_.guidePoses = std::move(poses);
     posesHash_ = hash;
+}
+
+void GroomSession::setControlKeys(std::map<std::string, ControlKeys> keys) {
+    for (auto it = keys.begin(); it != keys.end();) it = it->second.empty() ? keys.erase(it) : std::next(it);
+    controlKeys_ = std::move(keys);
 }
 
 void GroomSession::setControls(std::map<std::string, float> controls) {
@@ -2628,6 +2640,19 @@ std::string GroomSession::hairLookJson() const {
                             {"azimuthalRoughness", lobes.azimuthalRoughness},
                             {"ior", lobes.ior},
                             {"shift", lobes.shiftDegrees}}}};
+    // Redshift's Principled Hair for the look (hair_color.h principledHair): every host's.
+    const PrincipledHair ph = principledHair(look);
+    out["principledHair"] = {{"byColor", ph.byColor},
+                             {"colorData", ph.colorData},
+                             {"melaninData", ph.melaninData},
+                             {"rednessData", ph.rednessData},
+                             {"melanin", ph.melanin},
+                             {"melaninRedness", ph.melaninRedness},
+                             {"tint", {ph.tint[0], ph.tint[1], ph.tint[2]}},
+                             {"roughness", ph.roughness},
+                             {"azimuthalRoughness", ph.azimuthalRoughness},
+                             {"ior", ph.ior},
+                             {"angleShift", ph.angleShift}};
     // The structural color as five ramp keys by |cos| (0 edge-on .. 1 facing), a host's ramp node's
     // (color_patterns.h iridescentTint at grazing 1 - key): every host's iridescence ramp.
     nlohmann::json ramp = nlohmann::json::array();

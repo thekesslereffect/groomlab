@@ -85,6 +85,10 @@ def export_groom(groom, path, scalp_cache=False, start=None, end=None, step=1.0,
         cmds.groomLabExportAlembic(groom, file=cache, startFrame=start, endFrame=end, step=step, driverCurves=True)
         kwargs["driverCache"] = os.path.basename(cache)
         written.append(cache)
+    from groomlab import reference
+    photos = reference.photos_for_file(groom)  # (the scene's reference cameras, as every host's file keeps them)
+    if photos:
+        kwargs["referencePhotos"] = json.dumps(photos)
     cmds.groomLabExportGroom(groom, **kwargs)
     return [path] + written
 
@@ -383,9 +387,24 @@ def _after_groom_file(groom, info, keep_keys):
             cmds.setAttr(plug, int(round(value)))
         else:
             cmds.setAttr(plug, float(value))
+    # Keyed controls (the file's controlKeys, as the app keys them): Maya keys on the control
+    # attributes, auto tangents (no overshoot, as the core's curve through them).
+    for name, keys in sorted((info.get("controlKeys") or {}).items()):
+        plug = "%s.%s%s" % (groom, CONTROL_PREFIX, name)
+        if not keys or not cmds.objExists(plug) or cmds.getAttr(plug, lock=True):
+            continue
+        if cmds.listConnections(plug, source=True, destination=False):
+            continue  # keyed or driven already: its keys stay
+        for frame, value in keys:
+            cmds.setKeyframe(plug, time=float(frame), value=float(value), inTangentType="auto", outTangentType="auto")
     fps = float(mel.eval("currentTimeUnitToFPS"))
     for layer in info.get("correctives") or []:
         _corrective_weight(groom, layer, fps, keep_keys)
+    # Reference photos (the app's and Blender's Reference windows' too): a reference camera each,
+    # posed as solved, its landmarks, flow strokes and mask kept (one in the scene already stays).
+    if info.get("referencePhotos"):
+        from groomlab import reference
+        reference.photos_from_file(groom, info["referencePhotos"], directory=info.get("directory") or "")
 
 
 def _corrective_weight(groom, layer, fps, keep_keys):

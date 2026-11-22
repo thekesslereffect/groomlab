@@ -77,12 +77,31 @@ ParamValue paramFromJson(const json& j, const ParamValue* declared, const std::s
     if (j.is_array() && j.size() == 3 && j[0].is_number() && j[1].is_number() && j[2].is_number()) {
         return Vec3f(j[0].get<float>(), j[1].get<float>(), j[2].get<float>());
     }
-    // Ramp: [[position, value], ...]
+    // Ramp: [[position, value], ...]; a key with its handles set [position, value, slope] (the
+    // same slope both sides), [position, value, in, out] (a corner), or [position, value, in, out,
+    // inLength, outLength] (handles of other lengths than a third of their spans).
     if (j.is_array() && !j.empty() && std::all_of(j.begin(), j.end(), [](const json& k) {
-            return k.is_array() && k.size() == 2 && k[0].is_number() && k[1].is_number();
+            return k.is_array() && k.size() >= 2 && k.size() <= 6 && k.size() != 5 &&
+                   std::all_of(k.begin(), k.end(), [](const json& x) { return x.is_number(); });
         })) {
         Ramp ramp;
-        for (const json& k : j) ramp.keys.emplace_back(k[0].get<float>(), k[1].get<float>());
+        for (std::size_t i = 0; i < j.size(); ++i) {
+            const json& k = j[i];
+            ramp.keys.emplace_back(k[0].get<float>(), k[1].get<float>());
+            if (k.size() > 2) {
+                RampHandle h{true, k[2].get<float>(), k.size() > 3 ? k[3].get<float>() : k[2].get<float>()};
+                if (k.size() > 5) {
+                    h.inLength = k[4].get<float>();
+                    h.outLength = k[5].get<float>();
+                }
+                const bool finite = std::isfinite(h.in) && std::isfinite(h.out) && std::isfinite(h.inLength) && std::isfinite(h.outLength);
+                if (finite) {
+                    h.inLength = std::clamp(h.inLength, 0.0f, 1.0f);
+                    h.outLength = std::clamp(h.outLength, 0.0f, 1.0f);
+                    ramp.setHandle(i, h);
+                }
+            }
+        }
         ramp.sort();
         return ramp;
     }
@@ -102,7 +121,19 @@ json paramToJson(const ParamValue& value) {
                             {"max", v.max}};
             } else if constexpr (std::is_same_v<T, Ramp>) {
                 json keys = json::array();
-                for (const auto& [t, value] : v.keys) keys.push_back(json::array({t, value}));
+                for (std::size_t k = 0; k < v.keys.size(); ++k) {
+                    const auto& [t, value] = v.keys[k];
+                    const RampHandle h = v.handle(k);
+                    if (!h.set) {
+                        keys.push_back(json::array({t, value}));
+                    } else if (!h.defaultLengths()) {
+                        keys.push_back(json::array({t, value, h.in, h.out, h.inLength, h.outLength}));
+                    } else if (h.in == h.out) {
+                        keys.push_back(json::array({t, value, h.in}));
+                    } else {
+                        keys.push_back(json::array({t, value, h.in, h.out}));
+                    }
+                }
                 if (v.straight) return json{{"keys", keys}, {"linear", true}};
                 return keys;
             } else {
@@ -309,6 +340,8 @@ Ramp rampFromJson(const std::string& text) {
     if (!ramp) throw GraphError("ramp: needs keys [[position, value], ...]");
     return *ramp;
 }
+
+std::string rampToJson(const Ramp& ramp) { return paramToJson(ParamValue(ramp)).dump(); }
 
 std::unique_ptr<Operator> operatorFromJson(const std::string& type, const std::string& params) {
     std::unique_ptr<Operator> op = OperatorRegistry::instance().create(type);

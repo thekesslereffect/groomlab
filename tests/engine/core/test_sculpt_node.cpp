@@ -449,6 +449,7 @@ TEST(SculptNode, TheInteractiveBrushPreviewsAndCommitsTheNodesEdits) {
     tool.settings.setMode("comb");
     tool.settings.screenRadius = 150.0f;
     tool.settings.brush.level = 1;  // whatever level the brush is at, the node's guides are brushed
+    tool.settings.brush.stretch = true;  // (Comb's Stretch on: below, the node's guides keep their point counts)
     // Hover shows the node's guides.
     float cx = 0, cy = 0;
     view.project({0.0f, 1.3f, 0.3f}, cx, cy);
@@ -468,6 +469,12 @@ TEST(SculptNode, TheInteractiveBrushPreviewsAndCommitsTheNodesEdits) {
     ASSERT_EQ(w.host->edits().size(), 1u);
     EXPECT_TRUE(w.host->edits()[0].text(StrokeField::Sculpts).set);
     EXPECT_NE(w.output(), w.input());
+    // Comb's Stretch adds no points here: the node's edits move points, each guide keeping its count.
+    const GuidesPtr in = w.input(), out = w.output();
+    ASSERT_EQ(in->guides().size(), out->guides().size());
+    for (std::size_t i = 0; i < in->guides().size(); ++i) {
+        EXPECT_EQ(out->guides()[i].points.size(), in->guides()[i].points.size()) << i;
+    }
     // Brushes a Sculpt node does not take are refused, saying why.
     tool.settings.setMode("erase");
     EXPECT_FALSE(tool.stroke(*w.host, view, line));

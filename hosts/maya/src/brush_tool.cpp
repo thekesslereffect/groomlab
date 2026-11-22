@@ -41,6 +41,8 @@
 #include "active_groom.h"
 #include "asset_files.h"
 #include "groom_shape.h"
+#include "groomlab/editor/tool_overlay.h"
+#include "groomlab/editor/tool_settings.h"
 #include "groomlab/flow.h"
 #include "groomlab/texture.h"
 #include "groom_draw_override.h"
@@ -79,6 +81,7 @@ const char* kAttributeFlag[] = {"-at", "-attribute"};
 const char* kValueFlag[] = {"-v", "-value"};
 const char* kMatchFlag[] = {"-mn", "-matchNeighbors"};
 const char* kSoloNewFlag[] = {"-sng", "-soloNewGuides"};
+const char* kCloneReplaceFlag[] = {"-clr", "-cloneReplace"};  // Clone: copies replace the guides where they land
 // Place and Draw: the new guides' tube as JSON (setPlacementTube: shape, width, aspect, twist).
 const char* kPlaceTubeFlag[] = {"-ptb", "-placeTube"};
 const char* kSpacingFlag[] = {"-sp", "-spacing"};
@@ -87,6 +90,7 @@ const char* kMaskScalpFlag[] = {"-msk", "-maskByScalp"};
 const char* kStretchFlag[] = {"-sr", "-stretch"};
 const char* kStraightenFlag[] = {"-stn", "-straighten"};
 const char* kTubeChannelFlag[] = {"-tch", "-tubeChannel"};
+const char* kSmoothModeFlag[] = {"-smm", "-smoothMode"};  // Smooth: curve, length, shape or all
 const char* kPressureFlag[] = {"-prs", "-pressure"};
 const char* kPartNameFlag[] = {"-pn", "-partName"};
 const char* kFlowSinkFlag[] = {"-fsk", "-flowSink"};
@@ -97,6 +101,11 @@ const char* kTubeWireframeFlag[] = {"-twf", "-tubeWireframe"};  // ... and as wi
 const char* kTubeColorsFlag[] = {"-tco", "-tubeColors"};        // ... in their regions' colors
 const char* kTubeLevelColorsFlag[] = {"-tlc", "-tubeLevelColors"};  // ... each split tube a shade of its own
 const char* kTubeAlwaysFlag[] = {"-tav", "-tubesAlwaysVisible"};  // ... whichever tool is up
+// Clone: the next press captures the guides rooted in the circle (Pick Source; query: armed), and
+// (query) how many guides the source holds.
+const char* kPickSourceFlag[] = {"-pks", "-pickSource"};
+const char* kCloneSizeFlag[] = {"-csz", "-cloneSize"};
+const char* kClearSourceFlag[] = {"-csr", "-clearSource"};  // Clone: let the source go (Reset)
 const char* kTargetsFlag[] = {"-tg", "-targets"};
 const char* kPaintKindFlag[] = {"-pk", "-paintKind"};
 const char* kPaintTextureFlag[] = {"-ptx", "-paintTexture"};
@@ -330,6 +339,7 @@ void addBrushFlags(MSyntax& s) {
     s.addFlag(kValueFlag[0], kValueFlag[1], MSyntax::kDouble);
     s.addFlag(kMatchFlag[0], kMatchFlag[1], MSyntax::kBoolean);
     s.addFlag(kSoloNewFlag[0], kSoloNewFlag[1], MSyntax::kBoolean);
+    s.addFlag(kCloneReplaceFlag[0], kCloneReplaceFlag[1], MSyntax::kBoolean);
     s.addFlag(kPlaceTubeFlag[0], kPlaceTubeFlag[1], MSyntax::kString);
     s.addFlag(kSpacingFlag[0], kSpacingFlag[1], MSyntax::kDouble);
     s.addFlag(kCollideFlag[0], kCollideFlag[1], MSyntax::kBoolean);
@@ -337,6 +347,7 @@ void addBrushFlags(MSyntax& s) {
     s.addFlag(kStretchFlag[0], kStretchFlag[1], MSyntax::kBoolean);
     s.addFlag(kStraightenFlag[0], kStraightenFlag[1], MSyntax::kBoolean);
     s.addFlag(kTubeChannelFlag[0], kTubeChannelFlag[1], MSyntax::kString);
+    s.addFlag(kSmoothModeFlag[0], kSmoothModeFlag[1], MSyntax::kString);
     s.addFlag(kPartNameFlag[0], kPartNameFlag[1], MSyntax::kString);
     s.addFlag(kFlowSinkFlag[0], kFlowSinkFlag[1], MSyntax::kString);
     s.addFlag(kTargetsFlag[0], kTargetsFlag[1], MSyntax::kString);
@@ -361,99 +372,82 @@ void addBrushFlags(MSyntax& s) {
 // Applies the shared flags that are set (not -radius) to `s`, from an
 // MArgDatabase (a stroke) or an MArgParser (the tool's edit flags), kept in range as every host
 // keeps them (BrushToolSettings' setters). Reports and fails on a bad value.
+// The flags that are tool settings, by the setting's id (the editor's applyToolSettings: every
+// host's parser) and the flag's kind: a string, a double, a long or a boolean.
+struct SettingFlag {
+    const char* const* flag;
+    const char* id;
+    char kind;
+};
+const SettingFlag kSettingFlags[] = {
+    {kModeFlag, "mode", 's'}, {kSymmetryFlag, "symmetry", 's'}, {kTargetsFlag, "targets", 's'},
+    {kTubeChannelFlag, "tubeChannel", 's'}, {kSmoothModeFlag, "smoothMode", 's'}, {kFalloffProfileFlag, "falloffProfile", 's'},
+    {kStrengthProfileFlag, "strengthProfile", 's'}, {kPlaceTubeFlag, "tube", 's'}, {kFlowSinkFlag, "flowSink", 's'},
+    {kAlphaRotationFlag, "alphaRotation", 's'}, {kAlphaFlag, "alpha", 's'}, {kAlphaAngleFlag, "alphaAngle", 'd'},
+    {kAlphaSpacingFlag, "alphaSpacing", 'd'}, {kAlphaInvertFlag, "alphaInvert", 'b'}, {kPaintKindFlag, "paintKind", 's'},
+    {kStrengthFlag, "strength", 'd'}, {kLevelFlag, "level", 'i'}, {kGroupFlag, "group", 's'}, {kPropagateFlag, "propagate", 'b'},
+    {kLengthFlag, "length", 'd'}, {kSegmentsFlag, "segments", 'i'}, {kTubeRadiusFlag, "tubeRadius", 'd'},
+    {kSpacingFlag, "spacing", 'd'}, {kMatchFlag, "matchNeighbors", 'b'}, {kSoloNewFlag, "soloNewGuides", 'b'},
+    {kCloneReplaceFlag, "cloneReplace", 'b'},
+    {kCollideFlag, "collide", 'b'}, {kPaintWholeFacesFlag, "paintWholeFaces", 'b'}, {kMaskScalpFlag, "maskByScalp", 'b'},
+    {kStretchFlag, "stretch", 'b'}, {kStraightenFlag, "straighten", 'b'}, {kSelectedOnlyFlag, "selectedOnly", 'b'},
+    {kSymmetryCenterFlag, "symmetryCenter", 'd'}, {kAttributeFlag, "attribute", 's'}, {kPartNameFlag, "partName", 's'},
+    {kValueFlag, "value", 'd'}, {kPaintTextureFlag, "paintTexture", 's'}, {kPaintResolutionFlag, "paintResolution", 'i'},
+    {kHardnessFlag, "hardness", 'd'}, {kSmoothStrengthFlag, "smoothStrength", 'd'}, {kPaintChannelsFlag, "paintChannels", 's'},
+    {kPaintModeFlag, "paintMode", 's'},
+};
+
+// Applies the shared flags that are set (not -radius) to `s`, from an MArgDatabase (a stroke) or
+// an MArgParser (the tool's edit flags), as every host sets them (the editor's applyToolSettings:
+// kept in range, all or nothing). Reports and fails on a bad value.
+// With the tool itself (the context's edit flags): Clone's -pickSource and -clearSource too, as
+// every host's clonePickSource and cloneReset (the editor's applyToolSettings on the tool).
+template <class Args>
+nlohmann::json brushFlagSettings(const Args& args, const BrushToolSettings& s) {
+    nlohmann::json settings = nlohmann::json::object();
+    for (const SettingFlag& f : kSettingFlags) {
+        if (!args.isFlagSet(f.flag[0])) continue;
+        MString text;
+        double d = 0;
+        int n = 0;
+        bool b = false;
+        if (f.kind == 's' && args.getFlagArgument(f.flag[0], 0, text)) settings[f.id] = text.asChar();
+        else if (f.kind == 'd' && args.getFlagArgument(f.flag[0], 0, d)) settings[f.id] = d;
+        else if (f.kind == 'i' && args.getFlagArgument(f.flag[0], 0, n)) settings[f.id] = n;
+        else if (f.kind == 'b' && args.getFlagArgument(f.flag[0], 0, b)) settings[f.id] = b;
+    }
+    if (args.isFlagSet(kPaintColorFlag[0])) {
+        nlohmann::json color = nlohmann::json::array();
+        for (unsigned k = 0; k < 4; ++k) {
+            double d = s.paintColor[k];
+            args.getFlagArgument(kPaintColorFlag[0], k, d);
+            color.push_back(d);
+        }
+        settings["paintColor"] = color;
+    }
+    return settings;
+}
+
 template <class Args>
 MStatus applyBrushFlags(const Args& args, BrushToolSettings& s, const char* command) {
-    MString text;
-    double d = 0;
-    int n = 0;
-    bool b = false;
     try {
-        if (args.isFlagSet(kModeFlag[0]) && args.getFlagArgument(kModeFlag[0], 0, text)) s.setMode(text.asChar());
-        if (args.isFlagSet(kSymmetryFlag[0]) && args.getFlagArgument(kSymmetryFlag[0], 0, text)) s.setSymmetry(text.asChar());
-        if (args.isFlagSet(kTargetsFlag[0]) && args.getFlagArgument(kTargetsFlag[0], 0, text)) s.setTargets(text.asChar());
-        if (args.isFlagSet(kTubeChannelFlag[0]) && args.getFlagArgument(kTubeChannelFlag[0], 0, text)) {
-            s.brush.tubeChannel = tubeChannelFromString(text.asChar());
-        }
-        // The curves as ramps' JSON ("" clears one).
-        if (args.isFlagSet(kFalloffProfileFlag[0]) && args.getFlagArgument(kFalloffProfileFlag[0], 0, text)) {
-            s.setFalloffProfile(text.asChar());
-        }
-        if (args.isFlagSet(kStrengthProfileFlag[0]) && args.getFlagArgument(kStrengthProfileFlag[0], 0, text)) {
-            s.setStrengthProfile(text.asChar());
-        }
-        if (args.isFlagSet(kPlaceTubeFlag[0]) && args.getFlagArgument(kPlaceTubeFlag[0], 0, text)) {
-            setPlacementTube(s.place, text.asChar());
-        }
-        if (args.isFlagSet(kFlowSinkFlag[0]) && args.getFlagArgument(kFlowSinkFlag[0], 0, text)) {
-            if (text.length() > 0) flowSinkAngle(text.asChar());  // throws for an unknown kind
-            s.flowSink = text.asChar();
-        }
-        if (args.isFlagSet(kAlphaRotationFlag[0]) && args.getFlagArgument(kAlphaRotationFlag[0], 0, text)) {
-            s.setAlphaRotation(text.asChar());
-        }
-    } catch (const std::invalid_argument& e) {
+        applyToolSettings(s, brushFlagSettings(args, s));
+    } catch (const std::exception& e) {
         return fail(command, e.what());
     }
-    if (args.isFlagSet(kAlphaFlag[0]) && args.getFlagArgument(kAlphaFlag[0], 0, text)) {
-        try {
-            s.setAlpha(text.asChar());
-        } catch (const std::exception& e) {
-            return fail(command, (std::string("-alpha: ") + e.what()).c_str());
-        }
-    }
-    if (args.isFlagSet(kAlphaAngleFlag[0]) && args.getFlagArgument(kAlphaAngleFlag[0], 0, d)) s.alphaAngle = float(d);
-    if (args.isFlagSet(kAlphaSpacingFlag[0]) && args.getFlagArgument(kAlphaSpacingFlag[0], 0, d)) s.setAlphaSpacing(float(d));
-    if (args.isFlagSet(kAlphaInvertFlag[0]) && args.getFlagArgument(kAlphaInvertFlag[0], 0, b)) s.alphaInvert = b;
-    if (args.isFlagSet(kPaintKindFlag[0]) && args.getFlagArgument(kPaintKindFlag[0], 0, text)) {
-        if (text != "guides" && text != "vertices" && text != "texture") return fail(command, "-paintKind takes guides, vertices or texture");
-        s.paintKind = text.asChar();
-    }
-    if (args.isFlagSet(kStrengthFlag[0]) && args.getFlagArgument(kStrengthFlag[0], 0, d)) s.brush.strength = float(d);
-    if (args.isFlagSet(kLevelFlag[0]) && args.getFlagArgument(kLevelFlag[0], 0, n)) s.brush.level = n;
-    if (args.isFlagSet(kGroupFlag[0]) && args.getFlagArgument(kGroupFlag[0], 0, text)) s.brush.group = text.asChar();
-    if (args.isFlagSet(kPropagateFlag[0]) && args.getFlagArgument(kPropagateFlag[0], 0, b)) s.brush.propagate = b;
-    if (args.isFlagSet(kLengthFlag[0]) && args.getFlagArgument(kLengthFlag[0], 0, d)) s.place.length = float(d);
-    if (args.isFlagSet(kSegmentsFlag[0]) && args.getFlagArgument(kSegmentsFlag[0], 0, n)) s.setSegments(n);
-    if (args.isFlagSet(kTubeRadiusFlag[0]) && args.getFlagArgument(kTubeRadiusFlag[0], 0, d)) {
-        s.place.tube.width = {float(d), float(d)};
-    }
-    if (args.isFlagSet(kSpacingFlag[0]) && args.getFlagArgument(kSpacingFlag[0], 0, d)) s.place.spacing = float(d);
-    if (args.isFlagSet(kMatchFlag[0]) && args.getFlagArgument(kMatchFlag[0], 0, b)) s.place.matchNeighbors = b;
-    if (args.isFlagSet(kSoloNewFlag[0]) && args.getFlagArgument(kSoloNewFlag[0], 0, b)) s.place.soloNewGuides = b;
-    if (args.isFlagSet(kCollideFlag[0]) && args.getFlagArgument(kCollideFlag[0], 0, b)) s.brush.collide = b;
-    if (args.isFlagSet(kPaintWholeFacesFlag[0]) && args.getFlagArgument(kPaintWholeFacesFlag[0], 0, b)) s.paintWholeFaces = b;
-    if (args.isFlagSet(kMaskScalpFlag[0]) && args.getFlagArgument(kMaskScalpFlag[0], 0, b)) s.maskByScalp = b;
-    if (args.isFlagSet(kStretchFlag[0]) && args.getFlagArgument(kStretchFlag[0], 0, b)) s.brush.stretch = b;
-    if (args.isFlagSet(kStraightenFlag[0]) && args.getFlagArgument(kStraightenFlag[0], 0, b)) s.brush.straighten = b;
-    if (args.isFlagSet(kSelectedOnlyFlag[0]) && args.getFlagArgument(kSelectedOnlyFlag[0], 0, b)) s.selectedOnly = b;
-    if (args.isFlagSet(kSymmetryCenterFlag[0]) && args.getFlagArgument(kSymmetryCenterFlag[0], 0, d)) s.brush.mirrorCenter = float(d);
-    if (args.isFlagSet(kAttributeFlag[0]) && args.getFlagArgument(kAttributeFlag[0], 0, text)) s.brush.attribute = text.asChar();
-    if (args.isFlagSet(kPartNameFlag[0]) && args.getFlagArgument(kPartNameFlag[0], 0, text)) s.partName = text.asChar();
-    if (args.isFlagSet(kValueFlag[0]) && args.getFlagArgument(kValueFlag[0], 0, d)) s.brush.value = float(d);
-    if (args.isFlagSet(kPaintTextureFlag[0]) && args.getFlagArgument(kPaintTextureFlag[0], 0, text)) s.paintTexture = text.asChar();
-    if (args.isFlagSet(kPaintResolutionFlag[0]) && args.getFlagArgument(kPaintResolutionFlag[0], 0, n)) s.setPaintResolution(n);
-    if (args.isFlagSet(kHardnessFlag[0]) && args.getFlagArgument(kHardnessFlag[0], 0, d)) s.setHardness(float(d));
-    if (args.isFlagSet(kSmoothStrengthFlag[0]) && args.getFlagArgument(kSmoothStrengthFlag[0], 0, d)) s.setSmoothStrength(float(d));
-    if (args.isFlagSet(kPaintColorFlag[0])) {
-        PaintColor c = s.paintColor;
-        for (unsigned k = 0; k < 4; ++k) {
-            if (args.getFlagArgument(kPaintColorFlag[0], k, d)) c[k] = float(d);
-        }
-        s.setPaintColor(c);
-    }
-    if (args.isFlagSet(kPaintChannelsFlag[0]) && args.getFlagArgument(kPaintChannelsFlag[0], 0, text)) {
-        try {
-            s.paintChannels = channelMask(text.asChar());
-        } catch (const std::invalid_argument& e) {
-            return fail(command, (std::string("-paintChannels: ") + e.what()).c_str());
-        }
-    }
-    if (args.isFlagSet(kPaintModeFlag[0]) && args.getFlagArgument(kPaintModeFlag[0], 0, text)) {
-        try {
-            s.brush.paintMode = paintModeFromString(text.asChar());
-        } catch (const std::invalid_argument& e) {
-            return fail(command, (std::string("-paintMode: ") + e.what()).c_str());
-        }
+    return MS::kSuccess;
+}
+
+template <class Args>
+MStatus applyBrushFlags(const Args& args, BrushTool& tool, const char* command) {
+    nlohmann::json settings = brushFlagSettings(args, tool.settings);
+    bool b = false;
+    if (args.isFlagSet(kPickSourceFlag[0]) && args.getFlagArgument(kPickSourceFlag[0], 0, b)) settings["clonePickSource"] = b;
+    if (args.isFlagSet(kClearSourceFlag[0]) && args.getFlagArgument(kClearSourceFlag[0], 0, b)) settings["cloneReset"] = b;
+    try {
+        applyToolSettings(tool, settings);
+    } catch (const std::exception& e) {
+        return fail(command, e.what());
     }
     return MS::kSuccess;
 }
@@ -1297,10 +1291,10 @@ MStatus BrushContext::drag(MEvent& event, MHWRender::MUIDrawManager& draw) {
         const float dx = float(x - adjustX_);
         MString label;
         if (adjustStrength_) {
-            s.brush.strength = std::clamp(adjustValue_ + dx * 0.01f, -10.0f, 10.0f);
+            dragToolSetting(s, "strength", adjustValue_, dx);  // (every host's rule: tool_settings.h)
             label = MString("strength ") + s.brush.strength;
         } else {
-            s.screenRadius = std::clamp(adjustRadius_ + dx, 5.0f * pixelScale_, 2000.0f * pixelScale_);
+            dragToolSetting(s, "radius", adjustRadius_, dx, pixelScale_);
             label = MString("radius ") + static_cast<int>(s.screenRadius / pixelScale_);
         }
         drawCircle(draw, adjustX_, adjustY_);
@@ -1453,11 +1447,15 @@ void BrushContext::showSymmetry() {
 void BrushContext::drawCircle(MHWRender::MUIDrawManager& draw, short x, short y) const {
     const BrushToolSettings& s = tool_.settings;
     draw.beginDrawable();
-    using Tool = BrushToolSettings::Tool;
-    const bool creating = s.tool != Tool::Brush && s.tool != Tool::Flow;
-    draw.setColor(mayaColor(brushRingColor(s)));  // the core's, the standalone app's too
-    draw.setLineWidth(1.5f);
-    draw.circle2d(MPoint(x, y), creating ? 6.0 : s.screenRadius, false);
+    // Every host's ring (the editor's brushRing, tool_overlay.h): its circles in the view's pixels,
+    // the halo, the falloff's dashed ring, a dot for the tools that make guides.
+    for (const RingCircle& c : brushRing(s)) {
+        draw.setColor(mayaColor(c.color));
+        draw.setLineWidth(1.0f);
+        draw.setLineStyle(c.dashed ? MHWRender::MUIDrawManager::kDashed : MHWRender::MUIDrawManager::kSolid);
+        draw.circle2d(MPoint(x, y), c.radius, false);
+    }
+    draw.setLineStyle(MHWRender::MUIDrawManager::kSolid);
     draw.endDrawable();
 }
 
@@ -1637,6 +1635,9 @@ MStatus BrushContextCmd::appendSyntax() {
     s.addFlag(kTubeColorsFlag[0], kTubeColorsFlag[1], MSyntax::kBoolean);
     s.addFlag(kTubeLevelColorsFlag[0], kTubeLevelColorsFlag[1], MSyntax::kBoolean);
     s.addFlag(kTubeAlwaysFlag[0], kTubeAlwaysFlag[1], MSyntax::kBoolean);
+    s.addFlag(kPickSourceFlag[0], kPickSourceFlag[1], MSyntax::kBoolean);
+    s.addFlag(kCloneSizeFlag[0], kCloneSizeFlag[1]);
+    s.addFlag(kClearSourceFlag[0], kClearSourceFlag[1], MSyntax::kBoolean);
     s.addFlag(kDebugPickFlag[0], kDebugPickFlag[1], MSyntax::kString);
     s.addFlag(kDebugHoverFlag[0], kDebugHoverFlag[1], MSyntax::kString);
     s.addFlag(kLengthEditFlag[0], kLengthEditFlag[1], MSyntax::kString);
@@ -1657,7 +1658,7 @@ MStatus BrushContextCmd::doEditFlags() {
         if (!context_) return MS::kFailure;
         MArgParser args = parser();
         BrushToolSettings& s = context_->settings();
-        const MStatus flags = applyBrushFlags(args, s, kName);
+        const MStatus flags = applyBrushFlags(args, context_->brushTool(), kName);  // (Clone's Pick Source and Reset too)
         if (!flags) return flags;
         MString text;
         double d = 0;
@@ -1765,12 +1766,16 @@ MStatus BrushContextCmd::doQueryFlags() {
         else if (args.isFlagSet(kSpacingFlag[0])) setResult(double(s.place.spacing));
         else if (args.isFlagSet(kMatchFlag[0])) setResult(s.place.matchNeighbors);
         else if (args.isFlagSet(kSoloNewFlag[0])) setResult(s.place.soloNewGuides);
+        else if (args.isFlagSet(kCloneReplaceFlag[0])) setResult(s.cloneReplace);
+        else if (args.isFlagSet(kPickSourceFlag[0])) setResult(context_->brushTool().captureArmed());
+        else if (args.isFlagSet(kCloneSizeFlag[0])) setResult(static_cast<int>(context_->brushTool().clip().guides.size()));
         else if (args.isFlagSet(kPlaceTubeFlag[0])) setResult(MString(placementTubeJson(s.place).c_str()));
         else if (args.isFlagSet(kCollideFlag[0])) setResult(s.brush.collide);
         else if (args.isFlagSet(kMaskScalpFlag[0])) setResult(s.maskByScalp);
         else if (args.isFlagSet(kStretchFlag[0])) setResult(s.brush.stretch);
         else if (args.isFlagSet(kStraightenFlag[0])) setResult(s.brush.straighten);
         else if (args.isFlagSet(kTubeChannelFlag[0])) setResult(MString(tubeChannelName(s.brush.tubeChannel)));
+        else if (args.isFlagSet(kSmoothModeFlag[0])) setResult(MString(smoothModeName(s.brush.smoothMode)));
         else if (args.isFlagSet(kPressureFlag[0])) setResult(s.pressure);
         else if (args.isFlagSet(kPartNameFlag[0])) setResult(MString(s.partName.c_str()));
         else if (args.isFlagSet(kFlowSinkFlag[0])) setResult(MString(s.flowSink.c_str()));

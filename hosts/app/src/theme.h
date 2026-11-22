@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-// The app's look: GroomLab's themes (hosts/maya/themes/*.json; Charcoal by default: calm neutral
+// The app's look: GroomLab's themes (engine/assets/themes/*.json; Charcoal by default: calm neutral
 // greys, flat, thin borders, as the Maya host wears it) in the standalone app's docked window
 // (app_shell.h: menu bar, tool bar, solid docks, clean and dark like Plasticity). Glass themes
 // (a theme with ui.glass) keep their translucent pieces over the viewport; every theme's docks are solid.
@@ -159,7 +159,7 @@ int cardRadius();  // a section's card (ui.cardRadius)
 int panelRadius();
 int rowHeight();
 // A component's size from the components block (components.<name>.<key>: Charcoal's, as
-// hosts/maya/themes/charcoal.json writes it for every theme and host), or `fallback`.
+// engine/assets/themes/charcoal.json writes it for every theme and host), or `fallback`.
 // (`index`: an entry of an array value, as iconRail.padding's [x, y])
 int component(const char* name, const char* key, int fallback, int index = -1);
 double componentReal(const char* name, const char* key, double fallback);

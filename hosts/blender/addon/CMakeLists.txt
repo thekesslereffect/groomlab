@@ -21,7 +21,7 @@ file(GLOB _addon_icons CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/groomlab/i
 install(FILES ${_addon_icons} DESTINATION "GroomLabBlender/icons" COMPONENT Blender)
 # The GroomLab window's look (window.py, uikit.py): the app's font and the default theme.
 set(_addon_look_fonts "${PROJECT_SOURCE_DIR}/hosts/app/fonts/Inter[opsz,wght].ttf" "${PROJECT_SOURCE_DIR}/hosts/app/fonts/OFL-Inter.txt")
-file(GLOB _addon_look_themes CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/hosts/maya/themes/*.json")  # (GroomLab > Theme: themes.py)
+file(GLOB _addon_look_themes CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/engine/assets/themes/*.json")  # (GroomLab > Theme: themes.py)
 install(FILES ${_addon_look_fonts} DESTINATION "GroomLabBlender/fonts" COMPONENT Blender)
 install(FILES ${_addon_look_themes} DESTINATION "GroomLabBlender/themes" COMPONENT Blender)
 # The UI structure every host shares (engine/ui/*.json, Apache-2.0 data): plain files the add-on reads
@@ -36,8 +36,8 @@ install(FILES ${_addon_ui} DESTINATION "GroomLabBlender/ui" COMPONENT Blender)
 # profile; tools/package_blender.py makes the release zip the same way.
 set(_ext_root "${CMAKE_BINARY_DIR}/blender_extension/$<CONFIG>")
 set(_ext_zip "${_ext_root}/GroomLab-Blender-${PROJECT_VERSION}-${GROOMLAB_BLENDER_PLATFORM}.zip")
-file(GLOB_RECURSE _addon_presets CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/hosts/maya/presets/*" "${PROJECT_SOURCE_DIR}/hosts/maya/nodes/*"
-     "${PROJECT_SOURCE_DIR}/hosts/maya/meshes/*" "${PROJECT_SOURCE_DIR}/hosts/maya/alphas/*")
+file(GLOB_RECURSE _addon_presets CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/engine/assets/presets/*" "${PROJECT_SOURCE_DIR}/engine/assets/nodes/*"
+     "${PROJECT_SOURCE_DIR}/engine/assets/meshes/*" "${PROJECT_SOURCE_DIR}/engine/assets/alphas/*")
 add_custom_command(
     OUTPUT "${_ext_root}/assembled.stamp"
     COMMAND "${CMAKE_COMMAND}" -DBUILD_DIR=${CMAKE_BINARY_DIR} -DCONFIG=$<CONFIG> -DSTAGE=${_ext_root}

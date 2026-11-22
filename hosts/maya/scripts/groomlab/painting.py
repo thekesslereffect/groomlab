@@ -113,11 +113,9 @@ def map_channels(groom, name):
 @undoable("map channels")
 def set_map_channels(groom, name, channels):
     """Make a map gray (1: its luminance) or color (4: the value in r g b, alpha 1). A guide
-    layer stays gray (convert it to vertices or a texture first). Returns the channels."""
-    if int(channels) not in (1, 4):
-        raise ValueError("a map has 1 channel (gray) or 4 (color), not %r" % channels)
-    if not map_kind(groom, name):
-        raise ValueError("no map named %r" % name)
+    layer stays gray (convert it to vertices or a texture first). A texture map's image is
+    rewritten (this groom's own copy when another groom reads it). One undo step. Returns the
+    channels. Every host's Channels (the editor's setMapChannels, in groomLabScalpMaps)."""
     return int(cmds.groomLabScalpMaps(groom, setChannels=(name, int(channels))))
 
 
@@ -137,7 +135,7 @@ def _map_texture_default(groom, name):
 
 def _check_png(texture):
     """A texture map's file is a PNG: painting and filling write PNG bytes to it."""
-    if texture and not texture.lower().endswith(".png"):
+    if texture and not groomlab_core.is_png_path(texture):  # (every host's: texture.h isPngPath)
         raise ValueError("a texture map's file is a PNG (painting writes PNG), not %s: set_map_texture links "
                          "another image by copying it as one" % texture)
 
@@ -223,59 +221,21 @@ def fill_map(groom, name, value=None, selected_only=False, color=None, channels=
     """Set a map to `value` everywhere, or (a guide layer) on the selected guides only. A color
     map takes `color` (r, g, b[, a]) in the channels of `channels` (a subset of "rgba"), or
     `value` in its r g b (its alpha kept). With `faces` (polygon indices of the scalp:
-    selected_scalp_faces) only those faces are filled (a guide layer: the guides rooted on them)."""
+    selected_scalp_faces) only those faces are filled (a guide layer: the guides rooted on them).
+    `mode`: replace, add, subtract or clamp (the most a value may be). One undo step. Every host's
+    Fill (the editor's fillMap, in groomLabScalpMaps)."""
     if value is None and color is None:
         raise ValueError("fill a map with a value or a color")
-    if faces:
-        if selected_only:
-            raise ValueError("fill the selected guides or the selected faces, not both")
-        if not map_kind(groom, name):
-            raise ValueError("no map named %r" % name)
-        kwargs = {"fill": name, "paintMode": mode, "faces": _faces_flag(faces)}
-        if color is not None:
-            kwargs.update(fillColor=_rgba(color), fillChannels=channels or "rgba")
-        else:
-            kwargs["value"] = float(value)
-        return cmds.groomLabScalpMaps(groom, **kwargs)
+    kwargs = {"fill": name, "paintMode": mode}
     if color is not None:
-        if selected_only:
-            raise ValueError("Fill Selected sets a guide layer, which is gray; a color fills a color map")
-        if not map_kind(groom, name):
-            raise ValueError("no map named %r" % name)
-        return cmds.groomLabScalpMaps(groom, fill=name, fillColor=_rgba(color), fillChannels=channels or "rgba",
-                                      paintMode=mode)
+        kwargs.update(fillColor=_rgba(color), fillChannels=channels or "rgba")
+    else:
+        kwargs["value"] = float(value)
+    if faces:
+        kwargs["faces"] = _faces_flag(faces)
     if selected_only:
-        if map_kind(groom, name) != "guides":
-            raise ValueError("Fill Selected sets a guide layer on the selected guides; %s lives on the scalp" % name)
-        if not selected_guides(groom):
-            raise ValueError("no guides selected")
-        if mode != "replace":
-            raise ValueError("Add, Subtract and Clamp Maximum Fill currently require filling the whole guide map")
-        return cmds.groomLabGuides(groom, setAttribute=name, value=value)
-    if not map_kind(groom, name):
-        raise ValueError("no map named %r" % name)
-    return cmds.groomLabScalpMaps(groom, fill=name, value=float(value), paintMode=mode)
-
-
-def _in_folder(path, folder):
-    """Whether `path` is inside `folder` (both absolute; case-insensitive on Windows)."""
-    path, folder = (os.path.normcase(os.path.normpath(p)) for p in (path, folder))
-    return path.startswith(folder.rstrip(os.sep) + os.sep)
-
-
-def _unlink_map(groom, name):
-    """What reads map `name` lets go of it: its Map nodes are removed and the params they fed
-    read their own values again (their input ports removed), and map params naming it go back
-    to the node's default (HairColor's map and Interpolate's regionMap naming it too). Returns the
-    (node, param) pairs that changed (map_users'). The core's (scalp_maps.h unlinkMapReaders), as
-    the app and Blender let go of a map."""
-    from groomlab import graph as gm
-    model = gm.GraphModel.from_groom(groom)
-    text, touched, changed = groomlab_core.unlink_map_readers(model.to_json(), name)
-    if touched:
-        model.load_dict(json.loads(text))
-        model.save(groom)
-    return [tuple(pair) for pair in changed]
+        kwargs["selected"] = True
+    return cmds.groomLabScalpMaps(groom, **kwargs)
 
 
 def remove_map(groom, name, delete_file=False):
@@ -284,17 +244,12 @@ def remove_map(groom, name, delete_file=False):
     default. A texture map's file stays on disk, unless `delete_file` and GroomLab made it (it
     is in the scene's masks folder; a PNG of yours linked in place stays) and no other map or
     groom reads it. One undo step (undo puts the file back too). Returns the (node, param)
-    pairs that read the map."""
-    flags = {}
-    if delete_file:
-        file = map_texture(groom, name)
-        if file and _in_folder(file, asset_folder("masks", create=False)):
-            flags["deleteFile"] = True
+    pairs that read the map. Every host's Remove (the editor's removeMap, in groomLabScalpMaps)."""
     if not map_kind(groom, name):
         raise RuntimeError("no map named %r" % name)
     with undo_chunk("remove map"):
-        changed = _unlink_map(groom, name)
-        cmds.groomLabScalpMaps(groom, remove=name, **flags)
+        flat = cmds.groomLabScalpMaps(groom, remove=name, **({"deleteFile": True} if delete_file else {})) or []
+        changed = [(flat[i], flat[i + 1]) for i in range(0, len(flat) - 1, 2)]
         if cmds.getAttr(groom + ".strandColorSource") == name and cmds.getAttr(groom + ".strandColorMode") == 2:
             cmds.setAttr(groom + ".strandColorMode", 0)
         if cmds.getAttr(groom + ".scalpMapDisplay") == name:
@@ -302,52 +257,16 @@ def remove_map(groom, name, delete_file=False):
     return changed
 
 
-def _follow_file_readers(groom, graph, old_file, new_stored):
-    """The graph's file params reading `old_file` (absolute; a texture param a groom painted in
-    the app or Blender reads its map by the file) read `new_stored` instead; True when any did.
-    `graph` changes in place."""
-    if not old_file or not new_stored:
-        return False
-    # The core's rule, every host's (asset_files.h retargetFileReaders).
-    text, changed = groomlab_core.retarget_file_readers(json.dumps(graph), old_file, new_stored,
-                                                        lambda stored: resolve_path(stored, groom) or stored)
-    if changed:
-        graph.clear()
-        graph.update(json.loads(text))
-    return changed
-
-
-def _retarget_map(graph, old, new):
-    """Map nodes and map params reading `old` read `new` (inside compounds too: the core's
-    retargetMapReaders, the app's rename too); True when any did. `graph` changes in place."""
-    text, touched = groomlab_core.retarget_map_readers(json.dumps(graph), old, new)
-    if touched:
-        graph.clear()
-        graph.update(json.loads(text))
-    return touched
-
-
 def rename_map(groom, old, new):
     """Rename a map; the Map nodes, map params and views reading it follow. A texture map's
     file follows too when its name is the map's (as GroomLab names them: <masks>/<asset>/<map>.png,
     or <map>_2.png when that was taken; older scenes' <groom>_<map>.png too), e.g.
     masks/hair/density.png -> masks/hair/thickness.png: moved, or copied when another groom
-    reads the same file (it keeps its own), and to a free name when one is in the way."""
-    kwargs = {"rename": (old, new)}
-    stored = next((m.get("texture") or "" for m in maps(groom) if m["name"] == old and m["kind"] == "texture"), "")
-    old_file = map_texture(groom, old) if stored else ""
-    # Named after the map and in the scene's masks folder (GroomLab's files, a duplicate's shared one
-    # too): to that name, a free one when taken (asset_files.h renamedMapImage, every host's rule).
-    target = groomlab_core.renamed_map_image(old_file, old, new, asset_folder("masks", create=False)) if old_file else ""
-    if target:
-        kwargs["texture"] = portable_path(target)
+    reads the same file (it keeps its own), and to a free name when one is in the way. Every
+    host's Rename (the editor's renameMap, in groomLabScalpMaps: the graph's readers follow in the
+    same step)."""
     with undo_chunk("rename map"):
-        cmds.groomLabScalpMaps(groom, **kwargs)
-        graph = get_graph(groom)
-        moved = _follow_file_readers(groom, graph, old_file, next(
-            (m["texture"] for m in maps(groom) if m["name"] == new and m["kind"] == "texture"), "")) if old_file else False
-        if _retarget_map(graph, old, new) or moved:
-            set_graph(groom, graph)
+        cmds.groomLabScalpMaps(groom, rename=(old, new))
         if cmds.getAttr(groom + ".strandColorSource") == old:
             cmds.setAttr(groom + ".strandColorSource", new, type="string")
         if cmds.getAttr(groom + ".scalpMapDisplay") == old:
@@ -551,17 +470,12 @@ def set_map_texture(groom, name, path, copy=None):
         copy = not png
     if not copy and not png:
         raise ValueError("%s is not a PNG: painting writes PNG, so another format is copied as one (copy=True)" % full)
-    old_file = map_texture(groom, name) if kind == "texture" else ""
-    with undo_chunk("relink map"):
-        if copy:
-            asset_folder("masks")  # made, and the untitled scene's warning given
-            stored = cmds.groomLabScalpMaps(groom, relink=name, texture=_map_texture_default(groom, name), copyFrom=full)
-        else:
-            stored = cmds.groomLabScalpMaps(groom, relink=name, texture=portable_path(full))
-        graph = get_graph(groom)  # texture params reading the old image read the new one
-        if old_file and _follow_file_readers(groom, graph, old_file, stored):
-            set_graph(groom, graph)
-        return stored
+    # Every host's Relink Image (the editor's relinkMap, in groomLabScalpMaps): texture params
+    # reading the old image read the new one in the same step.
+    if copy:
+        asset_folder("masks")  # made, and the untitled scene's warning given
+        return cmds.groomLabScalpMaps(groom, relink=name, texture=_map_texture_default(groom, name), copyFrom=full)
+    return cmds.groomLabScalpMaps(groom, relink=name, texture=portable_path(full))
 
 
 def import_map(groom, path, name=None, color=None, copy=None):
@@ -791,59 +705,35 @@ def param_map(groom, node, param):
     return None
 
 
-def _names_map(groom, node, param):
-    """Whether node.param names a map rather than taking one (Interpolate's regionMap: a text param)."""
-    from groomlab import graph as gm
-    model = gm.GraphModel.from_groom(groom)
-    return node in model.order and isinstance(model.param(node, param), str)
-
-
 def paint_param(groom, node, param, kind="guides", name=None, resolution=1024, paint=True, channel="luminance",
                 faces=None):
     """Paint a mappable param (+ New Map > for a setting in the Paint tab, and the Graph Editor's
     right-click a param > Paint): the map it reads already when it reads one, else the map `name`
-    (default "<node>_<param>"; made white, so the look stays as it is) fed to it through a Map
-    node, on the guides, the scalp's vertices or a texture (`kind`). With `paint` the Paint brush
-    starts on it toward 1 (the param's own value); Ctrl paints toward 0 (on a density map: no
-    hair). With `channel` ("r", "g", "b" or "a") the param reads that output of the map's Map
-    node, a channel of a color map `name` (made if missing: packed masks), and the brush paints
-    that channel only. A map made here with `faces` (scalp polygon indices: selected_scalp_faces)
+    (default "<node>_<param>"; made white, so the look stays as it is) on the guides, the scalp's
+    vertices or a texture (`kind`), read by the param as every host links it (the core's
+    wireParamMap: the param's value its white; a Map node wired to it goes). With `paint` the
+    Paint brush starts on it toward 1 (the param's own value); Ctrl paints toward 0 (on a density
+    map: no hair). With `channel` ("r", "g", "b" or "a") the param reads that output of the map's
+    Map node (one Map node feeds several params), a channel of a color map `name` (made if
+    missing: packed masks), and the brush paints that channel only. A map made here with `faces` (scalp polygon indices: selected_scalp_faces)
     is white on those faces only, black elsewhere (a map the param already reads is left as it
     is). The map, its link and what painting shows are one undo step. Returns the map's name."""
-    # What drives the param must be a painted map, or nothing: an expression, a channel or an image
-    # no map of the groom holds is refused (every host's: stroke.h paramMapOf).
-    try:
-        groomlab_core.param_map(json.dumps(get_graph(groom, expand_default=True)), cmds.getAttr(groom + ".scalpMaps") or "",
-                                node, param)
-    except RuntimeError as e:
-        raise ValueError(str(e))
+    # Every host's Paint on a setting (the editor's paintParam, in groomLabScalpMaps): what drives the
+    # param must be a painted map, or nothing (an expression, a channel or an image no map of the
+    # groom holds is refused); the map made and its link are one step.
+    kwargs = {"paintParam": (node, param), "kind": kind, "resolution": int(resolution)}
+    if name:
+        kwargs["mapName"] = name
+    if channel and channel != "luminance":
+        kwargs["channel"] = channel
+    if faces:
+        kwargs["faces"] = _faces_flag(faces)
+    if kind == "texture":
+        asset_folder("masks")  # made, and the untitled scene's warning given
     with undo_chunk("paint %s.%s" % (node, param)):
-        found = param_map(groom, node, param)
-        if found and not name:
-            name, channel = found
-        else:
-            # The param's own map (the core's paramMapName, every host's): one of that name there
-            # already (its link since gone) is linked again, its painting back.
-            name = name or groomlab_core.param_map_name(node, param)
-            if kind == "guides" and name not in list_maps(groom) and not any(g["count"] for g in list_guide_groups(groom)):
-                raise ValueError("the groom has no guides to paint on: add guides, or paint on the scalp's vertices")
-            if channel != "luminance" and name not in list_maps(groom):
-                if kind == "guides":
-                    raise ValueError("a guide layer is gray: paint a channel of a map on the scalp's vertices or a texture")
-                add_map(groom, name, 1.0, kind=kind, resolution=resolution, color=True, faces=faces)
-            if _names_map(groom, node, param):
-                # A param naming its map (Interpolate's regionMap): the map, white (one region: the
-                # look stays), named in it.
-                from groomlab import graph as gm
-                if name not in list_maps(groom):
-                    add_map(groom, name, 1.0, kind=kind, resolution=resolution, faces=faces)
-                model = gm.GraphModel.from_groom(groom)
-                model.set_param(node, param, name)
-                model.save(groom)
-            else:
-                use_map(groom, node, param, name, kind=kind, resolution=resolution, channel=channel, faces=faces)
+        name, kind, channel = cmds.groomLabScalpMaps(groom, **kwargs)
         if paint:
-            if channel in ("r", "g", "b", "a"):
+            if channel:
                 paint_map(groom, name, value=1.0, color=(1.0, 1.0, 1.0, 1.0), channels=channel)
             else:
                 paint_map(groom, name, value=1.0)

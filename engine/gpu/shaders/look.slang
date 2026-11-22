@@ -185,11 +185,11 @@ void copyStrand(uint begin, uint n) {
     for (uint i = 0; i < n; ++i) storePoint(gOut, begin + i, loadPoint(begin + i));
 }
 
-// ---- Ramps (ramp.cpp: monotone cubic Hermite, tangents per key from the CPU) -----------------
+// ---- Ramps (ramp.cpp: cubic Hermite, each key's slopes from the CPU: its handles' or automatic) ---
 
-// A profile `r` (key count, offset, straight, table count; gRamp or gRamp2): key k's position,
-// value or tangent.
-float rampKeyOf(uint4 r, uint what, uint k) { return asfloat(gRamps.Load((r.y + k * 3 + what) * 4)); }
+// A profile `r` (key count, offset, straight, table count; gRamp or gRamp2): key k's position (0),
+// value (1), slope into it (2) or out of it (3), its handles' lengths in (4) and out (5).
+float rampKeyOf(uint4 r, uint what, uint k) { return asfloat(gRamps.Load((r.y + k * 6 + what) * 4)); }
 
 float rampAtOf(uint4 r, float t) {
     const uint count = r.x;
@@ -205,8 +205,10 @@ float rampAtOf(uint4 r, float t) {
     if (span <= 0.0f) return v1;
     const float f = (t - p0) / span;
     if (r.z != 0) return v0 + (v1 - v0) * f;
-    const float m0 = rampKeyOf(r, 2, lo) * span, m1 = rampKeyOf(r, 2, hi) * span;
-    return rampHermite(f, v0, m0, v1, m1);
+    const float m0 = rampKeyOf(r, 3, lo) * span, m1 = rampKeyOf(r, 2, hi) * span;  // out of lo, into hi
+    const float w0 = rampKeyOf(r, 5, lo), w1 = rampKeyOf(r, 4, hi);
+    if (w0 == kRampHandleLength && w1 == kRampHandleLength) return rampHermite(f, v0, m0, v1, m1);
+    return rampWeighted(f, v0, m0, w0, v1, m1, w1);
 }
 float rampKey(uint what, uint k) { return rampKeyOf(gRamp, what, k); }
 float rampAt(float t) { return rampAtOf(gRamp, t); }

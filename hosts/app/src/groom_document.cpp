@@ -152,6 +152,9 @@ GroomDocument::GroomDocument(GroomFile file, std::string path) : path_(std::move
     loadGraph(scene_->file().data.graphJson);
     loadMaps();
     controlKeys_ = scene_->file().controlKeys;
+    // (The document keys its controls itself, applyControlKeys, a drag between keys showing until the
+    // frame changes: the session applies none of its own, as it does for the CLI and Python.)
+    session().setControlKeys({});
     // The groups' own colors and the hidden groups as the file keeps them (Maya's attributes' text).
     for (const auto& [group, color] : guideGroupColorWords(scene_->file().guideGroupColors)) groupColors_[group] = color;  // (display.h)
     hiddenGroups_ = parseHiddenGuideGroups(scene_->file().hiddenGuideGroups);
@@ -258,119 +261,81 @@ void GroomDocument::commitMaps(const std::string& label, const ScalpMaps& maps) 
     edit.mode = label;
     edit.set(StrokeField::ScalpMaps, maps.toJson());
     commitStroke(std::move(edit));
-    edits_.back().label = label;
+    history_.last().label = label;
 }
 
 std::string GroomDocument::createMap(const std::string& name, const std::string& kind, bool color, float value, int resolution,
                                      const PaintColor& fill) {
-    if (!validMapName(name)) return mapNameError(name);  // the hosts' one rule (scalp_maps.h)
-    for (const PaintedMap& m : maps()) {
-        if (m.name == name) return "the groom already has a map named '" + name + "'";
+    // Every host's New Map (the editor's createMap, map_edits.h): a guide layer, a vertex map, or a
+    // texture map whose image is written now in the groom's maps folder (a free name), stored
+    // relative to the groom; the image's files kept in the step so an undo takes it away.
+    MapCreateRequest create;
+    create.kind = kind;
+    create.color = color;
+    create.value = value;
+    create.fill = fill;
+    create.resolution = resolution;
+    MapFiles files;
+    files.mapsFolder = mapsDirectory();
+    files.groomFolder = path_.empty() ? std::string() : std::filesystem::u8path(path_).parent_path().u8string();
+    files.resolve = [this](const std::string& stored) { return resolveMapPath(stored); };
+    const MeshPtr cage = session().cageScalp();  // vertex maps are stored per vertex of the cage
+    MapCreate made;
+    try {
+        made = groomlab::createMap(session().scalpMaps(), session().authoredHierarchy().get(),
+                                   cage && cage->pointCount() > 0 ? cage.get() : nullptr, name, create, files);
+    } catch (const std::exception& e) {
+        return e.what();
     }
-    const MeshPtr scalp = session().cageScalp();  // vertex maps are stored per vertex of the cage
-    if (!scalp) return "no scalp to paint on";
-    if (kind == "guides") {
-        if (color) return "a guide layer is gray: make a color map on the scalp's vertices or as a texture";
-        return editGuides("create map " + name, [&](GuideHierarchy& h) {  // (every host's: addGuideLayer)
-            if (!addGuideLayer(h, name, value)) throw std::invalid_argument("no primary guides to carry the layer: place some first");
-        });
-    }
-    ScalpMaps maps = session().scalpMaps();
-    ScalpMapEntry entry;
-    entry.channels = color ? kColorMap : kGrayMap;
-    // (Every host's New Map: scalp_paint.h newVertexMapValues, newTextureMapPaint.)
-    const PaintColor filled = color ? fill : PaintColor{value, value, value, 1.0f};
-    if (kind == "vertices") {
-        entry.kind = "vertices";
-        entry.values = newVertexMapValues(*scalp, entry.channels, filled);
-    } else if (kind == "texture") {
-        if (!scalp->hasUVs()) return "the scalp has no UVs to paint a texture map on";
-        const std::string folder = mapsDirectory();
-        if (folder.empty()) return "save the groom first: a texture map's image goes in the groomlab folder beside it";
-        // groomlab/<groom>/masks/<name>.png beside the groom file, a free <name>_2.png when that is taken
-        // (as the Maya host names them), the file written now so the map reads from the start.
-        // (asset_files.h freeFilePath: a file or a tile set of that name is taken.)
-        const std::filesystem::path file = std::filesystem::u8path(freeFilePath(folder + "/" + name + ".png"));
-        try {
-            std::filesystem::create_directories(file.parent_path());
-            newTextureMapPaint(*scalp, entry.channels, filled, resolution).save(forwardSlashes(file.u8string()));
-        } catch (const std::exception& e) {
-            return std::string("cannot write the map's image: ") + e.what();
-        }
-        entry.kind = "texture";
-        const std::filesystem::path groomFolder = std::filesystem::u8path(path_).parent_path();
-        entry.texture = pathFromGroomFolder(file.u8string(), groomFolder.u8string());  // as every host stores it (paths.h)
-    } else {
-        return "a map's kind is vertices, texture or guides, not '" + kind + "'";
-    }
-    maps.maps[name] = std::move(entry);
-    commitMaps("create map " + name, maps);
+    const std::string label = "create map " + name;
+    if (made.guideLayer) return editGuides(label, [&](GuideHierarchy& h) { applyCreatedLayer(h, name, made); });
+    const std::size_t undoBefore = history_.undoIndex();
+    commitMaps(label, made.maps);
+    attachSide(undoBefore, label, std::move(made.files));
     return {};
 }
 
 std::string GroomDocument::renameMap(const std::string& from, const std::string& to) {
-    if (!validMapName(to)) return mapNameError(to);
-    if (from == to) return {};
-    const std::vector<PaintedMap> all = maps();
-    const PaintedMap* source = map(from);
-    if (!source) return "no map named '" + from + "'";
-    for (const PaintedMap& m : all) {
-        if (m.name == to) return "the groom already has a map named '" + to + "'";
+    // Every host's rename (the editor's renameMap, map_edits.h): the readers retargeted, a texture
+    // map's image following the name (moved, or copied when another map reads it; all or nothing),
+    // its file's states kept in the step so an undo puts the image back too.
+    MapFiles files;
+    files.mapsFolder = mapsDirectory();
+    files.groomFolder = path_.empty() ? std::string() : std::filesystem::u8path(path_).parent_path().u8string();
+    files.resolve = [this](const std::string& stored) { return resolveMapPath(stored); };
+    MapRename renamed;
+    try {
+        renamed = groomlab::renameMap(session().scalpMaps(), session().storedHierarchy().get(), graph_.dump(), from, to, files);
+    } catch (const std::exception& e) {
+        return e.what();
     }
-    const std::string kind = source->kind;
+    if (from == to) return {};
     const std::string label = "rename map " + from;
-    std::string movedFrom, movedTo;  // a texture map's file, before and after it followed the name
-    if (kind == "guides") {
+    const std::size_t undoBefore = history_.undoIndex();
+    if (renamed.guideLayer) {
         const std::string error = editGuides(label, [&](GuideHierarchy& h) { h.renameAttribute(from, to); });
         if (!error.empty()) return error;
     } else {
-        ScalpMaps maps = session().scalpMaps();
-        ScalpMapEntry entry = maps.maps.at(from);
-        maps.maps.erase(from);
-        if (entry.kind == "texture" && !entry.texture.empty()) {
-            // The file follows when it is named after the map (scalp_maps.h's renamedMapTexture,
-            // Maya's rule), to a free name beside it; a file in the way, or one that cannot move, stays.
-            const std::filesystem::path full = std::filesystem::u8path(resolveMapPath(entry.texture));
-            // (Named after the map, in the groom's maps folder: every host's rule, asset_files.h.)
-            const std::string renamed = renamedMapImage(full.generic_u8string(), from, to, mapsDirectory());
-            if (!renamed.empty()) {
-                const std::filesystem::path target = std::filesystem::u8path(renamed);  // (a free name: a file or a tile set taken)
-                std::error_code ec;
-                for (const auto& [a, b] : mapImageMoves(full.generic_u8string(), target.generic_u8string())) {  // (a tile set: each tile)
-                    if (!ec) std::filesystem::rename(std::filesystem::u8path(a), std::filesystem::u8path(b), ec);
-                }
-                if (!ec) {
-                    entry.texture = pathFromGroomFolder(target.u8string(), std::filesystem::u8path(path_).parent_path().u8string());
-                    paints_.erase(from);
-                    movedFrom = full.generic_u8string();
-                    movedTo = entry.texture;
-                }
-            }
+        paints_.erase(from);
+        commitMaps(label, renamed.maps);
+    }
+    // The graph's readers in the same undo step (the entry holds the maps' texts and the whole
+    // graph before and after), so an undo puts both back; the image's files with them.
+    if (!renamed.graph.empty()) {
+        const json before = graph_;
+        graph_ = json::parse(renamed.graph);
+        const std::string error = applyGraph();
+        if (!error.empty()) {
+            graph_ = before;
+            applyGraph();
+            return error;
         }
-        maps.maps[to] = std::move(entry);
-        commitMaps(label, maps);
+        Edit& entry = history_.last();
+        entry.whole = true;
+        entry.graphBefore = before;
+        entry.graphAfter = graph_;
     }
-    // The Map nodes and map params reading the old name read the new one (the core's rename,
-    // Maya's too), in the same undo step (the entry holds the maps' texts and the whole graph
-    // before and after), so an undo puts both back.
-    const json before = graph_;
-    bool retargeted = false;
-    std::string graph = retargetMapReaders(graph_.dump(), from, to, &retargeted);
-    bool followed = false;  // texture params reading the file read it where it went
-    graph = retargetFileReaders(graph, movedFrom, movedTo, [this](const std::string& stored) { return resolveMapPath(stored); }, &followed);
-    retargeted = retargeted || followed;
-    if (!retargeted) return {};
-    graph_ = json::parse(graph);
-    const std::string error = applyGraph();
-    if (!error.empty()) {
-        graph_ = before;
-        applyGraph();
-        return error;
-    }
-    Edit& entry = edits_.back();
-    entry.whole = true;
-    entry.graphBefore = before;
-    entry.graphAfter = graph_;
+    attachSide(undoBefore, label, std::move(renamed.files));
     return {};
 }
 
@@ -724,49 +689,26 @@ std::string GroomDocument::editGraph(const std::string& label, const std::functi
     entry.whole = true;
     entry.graphBefore = before;
     entry.graphAfter = graph_;
-    // The Sculpt nodes' edits follow renames, groups, ungroups, copies and removals, in the same step.
-    const std::string sculptsBefore = storedText(StrokeField::Sculpts);
-    std::string sculpts = sculptsBefore;
-    std::string target = session().sculptTarget();
-    try {
-        sculpts = moveSculptNodes(sculpts, moved);
-        for (const auto& [copy, source] : copied) sculpts = copySculptNode(sculpts, source, copy);
-        if (graph_.contains("nodes")) {
-            std::set<std::string> names;
-            for (const json& n : graph_["nodes"]) names.insert(n.value("name", std::string()));
-            for (const std::string& node : sculptedNodes(sculpts)) {
-                if (!names.count(node.substr(0, node.find('/')))) sculpts = clearSculptNode(sculpts, node);
-            }
-            for (const auto& [from, to] : moved) {
-                if (target == from) target = to;
-            }
-            if (!target.empty() && !names.count(target)) target.clear();  // gone, or grouped
-        }
-    } catch (const std::exception&) {
-        sculpts = sculptsBefore;  // unreadable: left as it is (the session says why)
-    }
-    if (sculpts != sculptsBefore) {
+    // The Sculpt nodes' edits, the brushes' target and Show Tubes follow renames, groups, ungroups,
+    // copies and removals, in the same step (the editor's rules, every host's: graph_edits.h).
+    GraphFollowers was;
+    was.sculpts = storedText(StrokeField::Sculpts);
+    was.sculptTarget = session().sculptTarget();
+    was.braidTubes = braidTubes_;
+    const GraphFollowers now = followGraphEdit(graph_.dump(), was, moved, copied);
+    if (now.sculpts != was.sculpts) {
         StrokeEdit stroke;
         stroke.mode = label;
-        stroke.set(StrokeField::Sculpts, sculpts);
-        stroke.text(StrokeField::Sculpts).before = sculptsBefore;
+        stroke.set(StrokeField::Sculpts, now.sculpts);
+        stroke.text(StrokeField::Sculpts).before = was.sculpts;
         stroke.text(StrokeField::Sculpts).hasBefore = true;
         stroke.apply(session(), true);
         entry.stroke = std::make_shared<const StrokeEdit>(std::move(stroke));
     }
-    if (target != session().sculptTarget()) session().setSculptTarget(target);
-    if (!braidTubes_.empty()) {
-        // Show Tubes follows the edit: a renamed node's name, a removed node's gone (the core's rules).
-        std::string shown = braidTubes_;
-        for (const auto& [from, to] : moved) shown = renamedBraidTubes(shown, from, to);
-        try {
-            shown = GraphEdit(graph_.dump()).braidTubesKept(shown);
-        } catch (const std::exception&) {
-        }
-        if (shown != braidTubes_) {
-            entry.braidTubes = std::make_pair(braidTubes_, shown);
-            braidTubes_ = shown;
-        }
+    if (now.sculptTarget != was.sculptTarget) session().setSculptTarget(now.sculptTarget);
+    if (now.braidTubes != was.braidTubes) {
+        entry.braidTubes = std::make_pair(was.braidTubes, now.braidTubes);
+        braidTubes_ = now.braidTubes;
     }
     record(std::move(entry));
     dirty_ = true;
@@ -803,55 +745,59 @@ std::size_t GroomDocument::sculptedGuides(const std::string& node) const {
 
 std::string GroomDocument::paintParam(const std::string& node, const std::string& name, std::string* mapName, const std::string& kind,
                                       bool* made) {
+    ParamPaintRequest paint;
+    paint.kind = kind;
+    return paintParam(node, name, paint, mapName, made);
+}
+
+std::string GroomDocument::paintParam(const std::string& node, const std::string& name, const ParamPaintRequest& paint,
+                                      std::string* mapName, bool* made, std::string* channel) {
     if (made) *made = false;
-    if (!nodeJson(node)) return "no node '" + node + "'";
-    // The map the param reads already (a Map node, a color set, a texture, a guide layer): that one.
+    if (channel) channel->clear();
+    // Every host's Paint on a setting (the editor's paintParam, map_edits.h): the map the param
+    // reads, else its own (one there already linked again), made white and linked; the map, its
+    // files and the wiring one undo step.
+    MapFiles files;
+    files.mapsFolder = mapsDirectory();
+    files.groomFolder = path_.empty() ? std::string() : std::filesystem::u8path(path_).parent_path().u8string();
+    files.resolve = [this](const std::string& stored) { return resolveMapPath(stored); };
+    const MeshPtr cage = session().cageScalp();
+    ParamPaint painted;
     try {
-        const ParamMapRef ref = paramMapOf(graph_.dump(), session().scalpMaps(), session().storedHierarchy().get(), node, name);
-        if (!ref.map.empty()) {
-            if (mapName) *mapName = ref.map;
-            return {};
-        }
+        painted = groomlab::paintParam(graph_.dump(), session().scalpMaps(), session().storedHierarchy().get(),
+                                       cage && cage->pointCount() > 0 ? cage.get() : nullptr, node, name, paint, files);
     } catch (const std::exception& e) {
         return e.what();
     }
-    if (kind != "vertices" && kind != "texture" && kind != "guides") {
-        return "a setting's map is on the guides, the scalp's vertices or a texture, not '" + kind + "'";
+    if (mapName) *mapName = painted.map;
+    if (channel) *channel = painted.channel;
+    if (painted.graph.empty()) return {};  // it reads the map already
+    const std::string label = "map " + node + "." + name;
+    if (!painted.made) return editGraph(label, [&](json& g) { g = json::parse(painted.graph); });
+    const std::size_t undoBefore = history_.undoIndex();
+    if (painted.created.guideLayer) {
+        const std::string error = editGuides(label, [&](GuideHierarchy& h) { applyCreatedLayer(h, painted.map, painted.created); });
+        if (!error.empty()) return error;
+    } else {
+        commitMaps(label, painted.created.maps);
     }
-    if (kind == "guides" && !(session().storedHierarchy() && !session().storedHierarchy()->guides().empty())) {
-        return "the groom has no guides to paint on: add guides, or paint on the scalp's vertices";
-    }
-    // The param's own map (paramMapName): one of that name already (made for it before, its link
-    // gone) is linked again, whatever its kind, its painting back; else a new one, white: the param
-    // as it was, black 0.
-    const std::string map = paramMapName(node, name);
-    if (const PaintedMap* existing = this->map(map)) {
-        const std::string kindThere = existing->kind;
-        const std::string error = editGraph("map " + node + "." + name, [&](json& g) {
-            g = json::parse(wireParamMap(g.dump(), session().scalpMaps(), node, name, map, kindThere));
-        });
-        if (error.empty() && mapName) *mapName = map;
-        return error;
-    }
-    std::string error = createMap(map, kind, false, 1.0f, 1024, PaintColor{1.0f, 1.0f, 1.0f, 1.0f});
-    if (!error.empty()) return error;
-    error = editGraph("map " + node + "." + name,
-                      [&](json& g) { g = json::parse(wireParamMap(g.dump(), session().scalpMaps(), node, name, map, kind)); });
+    attachSide(undoBefore, label, std::move(painted.created.files));
+    // The wiring in the same step: undo takes the map and its link back together.
+    const json before = graph_;
+    graph_ = json::parse(painted.graph);
+    const std::string error = applyGraph();
     if (!error.empty()) {  // the map goes with the refused wiring
+        graph_ = before;
+        applyGraph();
         undo();
-        edits_.resize(undoIndex_);
+        history_.dropRedo();
         return error;
     }
-    // The map and the wiring as one step: undo takes both back.
-    Edit wiring = std::move(edits_.back());
-    edits_.pop_back();
-    Edit& step = edits_.back();
+    Edit& step = history_.last();
     step.whole = true;
-    step.graphBefore = std::move(wiring.graphBefore);
-    step.graphAfter = std::move(wiring.graphAfter);
-    step.label = wiring.label;
-    undoIndex_ = edits_.size();
-    if (mapName) *mapName = map;
+    step.graphBefore = before;
+    step.graphAfter = graph_;
+    step.label = label;
     if (made) *made = true;
     return {};
 }
@@ -908,33 +854,9 @@ std::string GroomDocument::addNode(const std::string& type, float x, float y, st
                 refused = std::string("Not inserted: ") + e.what();
             }
         } else if (!options.after.empty() && edit.hasNode(options.after)) {
-            // After the selected node: into its first link the new node fits in (it goes into the
-            // chain, as Maya's Add Node), else fed by it on its first input that takes its output.
-            const json now = json::parse(edit.toJson());
-            for (const json& c : now.value("connections", json::array())) {
-                if (c.value("from", std::string()) != options.after || !after.empty()) continue;
-                try {
-                    GraphEdit trial = edit;
-                    insertOnLinkIn(trial, {options.after, c.value("output", std::string()), c.value("to", std::string()), c.value("input", std::string())},
-                                   chosen);
-                    edit = std::move(trial);
-                    after = options.after;
-                } catch (const GraphError&) {
-                }
-            }
-            if (after.empty()) {
-                const json spec = json::parse(edit.nodeSpecJson(chosen));
-                for (const json& p : spec.value("inputs", json::array())) {
-                    try {
-                        GraphEdit trial = edit;
-                        trial.connect(options.after, chosen, p.value("name", std::string()));
-                        edit = std::move(trial);
-                        after = options.after;
-                        break;
-                    } catch (const GraphError&) {
-                    }
-                }
-            }
+            // After the selected node, every host's rule (graph_edits.h wireAfterNode): into its
+            // first link the new node fits in, else fed by it on its first input that takes it.
+            if (wireAfterNode(edit, options.after, chosen)) after = options.after;
         }
         g = json::parse(edit.toJson());
     });
@@ -1986,13 +1908,15 @@ std::string GroomDocument::transferToScalp(MeshPtr scalp, const TransferOptions&
     loadGraph(scene_->file().data.graphJson);
     loadMaps();
     controlKeys_ = scene_->file().controlKeys;
+    // (The document keys its controls itself, applyControlKeys, a drag between keys showing until the
+    // frame changes: the session applies none of its own, as it does for the CLI and Python.)
+    session().setControlKeys({});
     paints_.clear();
     mapViewValues_.reset();
     mapViewKey_ = 0;
     selection_.clear();
     ++selectionVersion_;
-    edits_.clear();  // the scalp itself changed: nothing before it can come back
-    undoIndex_ = 0;
+    history_.clear();  // the scalp itself changed: nothing before it can come back
     dirty_ = true;
     return {};
 }
@@ -2189,8 +2113,7 @@ std::string GroomDocument::replaceGraph(const std::string& graphJson) {
         applyGraph();
         return error;
     }
-    edits_.clear();
-    undoIndex_ = 0;
+    history_.clear();
     dirty_ = true;
     return {};
 }
@@ -2286,15 +2209,18 @@ std::string GroomDocument::applyParam(const std::string& node, const std::string
 
 void GroomDocument::record(Edit edit) {
     if (edit.scope.empty()) edit.scope = scope_;  // (a param's node is named in the compound open now)
-    edits_.resize(undoIndex_);  // what could be redone is gone
-    edits_.push_back(std::move(edit));
-    undoIndex_ = edits_.size();
+    history_.record(std::move(edit));
 }
 
 void GroomDocument::recordEdit(const std::string& node, const std::string& name, const json& before, const json& after) {
     commitPreview();  // a drag previewed elsewhere ends here: its value applied for real
     if (before == after) return;
-    record({node, name, before, after, false, nullptr, {}});
+    Edit edit;
+    edit.node = node;
+    edit.name = name;
+    edit.before = before;
+    edit.after = after;
+    record(std::move(edit));
 }
 
 void GroomDocument::commitStroke(StrokeEdit edit) {
@@ -2358,7 +2284,7 @@ std::string GroomDocument::editGuides(const std::string& label, const std::funct
         if (kept.size() != selection_.size()) setSelection(std::move(kept));
     }
     commitStroke(std::move(stroke));
-    edits_.back().label = label;
+    history_.last().label = label;
     return {};
 }
 
@@ -2407,10 +2333,13 @@ std::string GroomDocument::setBypass(const std::string& node, bool bypass) {
         return error;
     }
     dirty_ = true;
-    edits_.resize(undoIndex_);
-    edits_.push_back({node, "bypass", before, bypass, true});
-    edits_.back().scope = scope_;
-    undoIndex_ = edits_.size();
+    Edit edit;
+    edit.node = node;
+    edit.name = "bypass";
+    edit.before = before;
+    edit.after = bypass;
+    edit.bypass = true;
+    record(std::move(edit));  // (named in the compound open now)
     return {};
 }
 
@@ -2437,49 +2366,48 @@ std::string GroomDocument::setEvaluation(const std::string& node, const std::str
     });
 }
 
-std::string GroomDocument::editName(const Edit& edit) {
-    return edit.stroke || edit.whole || edit.side ? edit.label : edit.node + "." + edit.name;
-}
+std::string GroomDocument::undoText() const { return history_.undoText(); }
 
-std::string GroomDocument::undoText() const { return canUndo() ? "Undo " + editName(edits_[undoIndex_ - 1]) : std::string(); }
+std::string GroomDocument::redoText() const { return history_.redoText(); }
 
-std::string GroomDocument::redoText() const { return canRedo() ? "Redo " + editName(edits_[undoIndex_]) : std::string(); }
-
-std::string GroomDocument::undo() {
-    commitPreview();
-    if (!canUndo()) return {};
-    const Edit& edit = edits_[undoIndex_ - 1];
+std::string GroomDocument::apply(const GroomEdit& edit, bool after) {
     // A param's or bypass's node is named in the compound open when it was made.
     const std::string openScope = scope_;
     if (!edit.whole) scope_ = edit.scope;
     std::string error;
     if (edit.stroke) {
-        edit.stroke->apply(session(), false);
-        applyTextureEdit(*edit.stroke, false);
+        edit.stroke->apply(session(), after);
+        applyTextureEdit(*edit.stroke, after);
     }
     if (edit.stroke && !edit.whole) {
         // nothing more: the stroke's texts are back
     } else if (edit.whole) {
-        graph_ = edit.graphBefore;
+        graph_ = after ? edit.graphAfter : edit.graphBefore;
         if (!edit.layout) error = applyGraph();  // (a move: nothing to evaluate)
-    } else if (edit.bypass) {
-        if (json* n = nodeJson(edit.node)) {
-            (*n)["bypass"] = edit.before.get<bool>();
-            error = applyGraph();
-        }
     } else if (json* n = nodeJson(edit.node)) {
-        json& params = (*n)["params"];
-        if (edit.before.is_null()) {
-            params.erase(edit.name);
+        if (edit.bypass) {
+            (*n)["bypass"] = (after ? edit.after : edit.before).get<bool>();
         } else {
-            params[edit.name] = edit.before;
+            json& params = (*n)["params"];
+            const json& value = after ? edit.after : edit.before;
+            if (!after && value.is_null()) {  // (undone: a param the node left out goes again)
+                params.erase(edit.name);
+            } else {
+                params[edit.name] = value;
+            }
         }
         error = applyGraph();
     }
     if (!edit.whole) scope_ = openScope;
-    applySide(edit, false);  // its files and group colors
-    if (edit.braidTubes) braidTubes_ = edit.braidTubes->first;
-    --undoIndex_;
+    applySide(edit, after);  // its files and group colors
+    if (edit.braidTubes) braidTubes_ = after ? edit.braidTubes->second : edit.braidTubes->first;
+    return error;
+}
+
+std::string GroomDocument::undo() {
+    commitPreview();
+    if (!canUndo()) return {};
+    std::string error = undoStep(history_, *this);
     dirty_ = true;
     return error;
 }
@@ -2487,31 +2415,7 @@ std::string GroomDocument::undo() {
 std::string GroomDocument::redo() {
     commitPreview();
     if (!canRedo()) return {};
-    const Edit& edit = edits_[undoIndex_];
-    const std::string openScope = scope_;
-    if (!edit.whole) scope_ = edit.scope;
-    std::string error;
-    if (edit.stroke) {
-        edit.stroke->apply(session(), true);
-        applyTextureEdit(*edit.stroke, true);
-    }
-    if (edit.stroke && !edit.whole) {
-        // nothing more: the stroke's texts are back
-    } else if (edit.whole) {
-        graph_ = edit.graphAfter;
-        if (!edit.layout) error = applyGraph();
-    } else if (json* n = nodeJson(edit.node)) {
-        if (edit.bypass) {
-            (*n)["bypass"] = edit.after.get<bool>();
-        } else {
-            (*n)["params"][edit.name] = edit.after;
-        }
-        error = applyGraph();
-    }
-    if (!edit.whole) scope_ = openScope;
-    applySide(edit, true);
-    if (edit.braidTubes) braidTubes_ = edit.braidTubes->second;
-    ++undoIndex_;
+    std::string error = redoStep(history_, *this);
     dirty_ = true;
     return error;
 }

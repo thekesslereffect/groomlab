@@ -84,7 +84,14 @@ def create_cards(groom, segments=None, width_scale=None, density=None, clump_cha
         params["widthProfile"] = taper if isinstance(taper, (list, dict)) else [[0.0, 1.0], [1.0, float(taper)]]
     model = gm.GraphModel.from_groom(groom)
     targets = [node] if node is not None else _cards_nodes(model)
-    if not targets:
+    if not targets and before == "output":
+        # Add > Cards as every host adds it (graph_inserts.h insertCards): before the output.
+        edit = model._edit()
+        with gm._core_errors():
+            made, _ = edit.insert_cards(json.dumps(params), model.groom_size)
+        model._take(edit)
+        targets = [made]
+    elif not targets:
         targets = [model.add_node("Cards", name=model.unique_name("cards"), params=params)]
         model.insert_before(before, targets[0])
     else:
@@ -255,11 +262,10 @@ def _cards_preset(groom, lod, triangles, node, model):
         create_cards(groom)
         model = gm.GraphModel.from_groom(groom)
         targets = _cards_nodes(model)
-    preset = {}
-    for target in targets:
-        preset = _preset_params(lod, card_node_kind(groom, target, model), triangles)
-        for key, value in preset.items():
-            model.set_param(target, key, value)
+    # Every host's Cards preset (card_presets.h withCardPreset: each node by what it cards).
+    graph, preset = groomlab_core.with_card_preset(model.to_json(), lod, list(targets),
+                                                   None if triangles is None else int(triangles))
+    model._take(groomlab_core.GraphEdit(graph))
     if own:
         model.save(groom)
     return preset

@@ -103,6 +103,7 @@ void applySettings(BrushToolSettings& s, const py::dict& kwargs) {
         else if (key == "spacing") s.place.spacing = v.cast<float>();
         else if (key == "match_neighbors") s.place.matchNeighbors = v.cast<bool>();
         else if (key == "solo_new_guides") s.place.soloNewGuides = v.cast<bool>();
+        else if (key == "clone_replace") s.cloneReplace = v.cast<bool>();
         else if (key == "tube") {  // the placement tube: a dict as groomlab.get_tube gives one, or its JSON
             if (!v.is_none()) {
                 setPlacementTube(s.place, py::isinstance<py::str>(v) ? v.cast<std::string>()
@@ -118,6 +119,7 @@ void applySettings(BrushToolSettings& s, const py::dict& kwargs) {
         else if (key == "collide") s.brush.collide = v.cast<bool>();
         else if (key == "stretch") s.brush.stretch = v.cast<bool>();
         else if (key == "straighten") s.brush.straighten = v.cast<bool>();
+        else if (key == "smooth_mode") s.brush.smoothMode = smoothModeFromString(v.cast<std::string>());
         else if (key == "tube_channel") s.brush.tubeChannel = tubeChannelFromString(v.cast<std::string>());
         else if (key == "hardness") s.brush.hardness = std::clamp(v.cast<float>(), 0.0f, 1.0f);
         else if (key == "falloff_profile") s.setFalloffProfile(rampText(v));
@@ -257,6 +259,8 @@ void bindStroke(py::module_& m) {
             "solo_new_guides", [](const BrushToolSettings& s) { return s.place.soloNewGuides; },
             [](BrushToolSettings& s, bool on) { s.place.soloNewGuides = on; },
             "Place, Draw: the new guides unfrozen and every other frozen, in the stroke's undo step.")
+        .def_readwrite("clone_replace", &BrushToolSettings::cloneReplace,
+                       "Clone: the guides of the copied levels already where the copies land are removed first.")
         .def_readwrite("screen_radius", &BrushToolSettings::screenRadius)
         .def_readwrite("paint_kind", &BrushToolSettings::paintKind)
         .def_readwrite("mask_by_scalp", &BrushToolSettings::maskByScalp)
@@ -380,7 +384,14 @@ void bindStroke(py::module_& m) {
         .def_property_readonly("stroking", &BrushTool::stroking)
         .def_property_readonly("changed", &BrushTool::changed)
         .def_property_readonly("drawn_path", &BrushTool::drawnPath)
-        .def_property_readonly("mode_name", &BrushTool::toolModeName);
+        .def_property_readonly("mode_name", &BrushTool::toolModeName)
+        .def_property(
+            "capture_armed", &BrushTool::captureArmed, &BrushTool::armCapture,
+            "Clone: the next press captures the guides rooted in the circle (as a Ctrl+press does).")
+        .def_property_readonly(
+            "clip_size", [](const BrushTool& t) { return t.clip().guides.size(); },
+            "Clone: how many guides the source holds (their descendants come along); 0 before a capture.")
+        .def("clear_clip", &BrushTool::clearClip, "Clone: forget the source.");
 
     // The brush catalog (brush_catalog.h): what every host's palette is built from.
     m.def(
@@ -481,6 +492,16 @@ void bindStroke(py::module_& m) {
         "The map node.param reads: {map, kind}, map \"\" when it reads none. Raises RuntimeError for no such node, or "
         "a param read from what no brush paints (an expression, a channel, an image that is no map of the groom).");
     m.def(
+        "wire_param_map",
+        [](const std::string& graphJson, const std::string& scalpMapsJson, const std::string& node, const std::string& param,
+           const std::string& map, const std::string& kind) {
+            return wireParamMap(graphJson, ScalpMaps::fromJson(scalpMapsJson), node, param, map, kind);
+        },
+        py::arg("graph_json"), py::arg("scalp_maps_json"), py::arg("node"), py::arg("param"), py::arg("map"), py::arg("kind"),
+        "The graph (JSON text) with node.param reading map `map` of kind `kind` (guides, vertices or texture) as every "
+        "host's Paint on a setting links it: white the param's value now; a Map node wired to the param goes. Raises "
+        "RuntimeError for no such node, or a texture map the groom does not have.");
+    m.def(
         "paint_param_map",
         [](SessionStrokeHost& host, BrushToolSettings& settings, const std::string& node, const std::string& param) {
             const ParamMapBinding b = paintParamMap(host, settings, node, param);
@@ -543,8 +564,9 @@ void bindStroke(py::module_& m) {
             all["match_neighbors"] = true;
             all["collide"] = true;
             all["part_name"] = "part";
-            all["stretch"] = true;
+            all["stretch"] = false;
             all["straighten"] = false;
+            all["smooth_mode"] = "curve";
             all["targets"] = "guides";
             all["hardness"] = 0.0f;
             all["smooth_strength"] = 1.0f;

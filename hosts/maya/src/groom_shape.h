@@ -22,6 +22,7 @@
 #include <maya/MPxSurfaceShape.h>
 #include <maya/MPxSurfaceShapeUI.h>
 
+#include "groomlab/editor/game_exports.h"
 #include "groomlab/root_tube_tool.h"
 #include "groomlab/async_evaluation.h"
 #include "groomlab/correctives.h"
@@ -408,6 +409,12 @@ public:
                                             const CardMapExport& settings, float occlusion = 1.0f);
     // The scalp bake in memory (see bakeScalp); *scalp receives the scalp. Throws std::runtime_error.
     // `evaluator` as for bakeCardsInMemory (the groom's own graph).
+    // Hair cards for an engine (Unreal: TGA maps, centimeters; Unity: PNG maps, meters), every
+    // host's (the editor's writeEngineCards, game_exports.h): the maps (under a free base name), the
+    // hair cap's (`cap`, when the scalp has UVs), the manifest and the meshes as FBX (the core's
+    // writer). The groom keeps its own bake.
+    EngineCardsExport exportEngineCards(const std::string& directory, const std::string& name, bool unity, int resolution,
+                                        float occlusion, bool cap);
     ScalpTextures bakeScalpInMemory(int resolution, float reach, float density, MeshPtr* scalp,
                                     NodeEvaluator* evaluator = nullptr);
     // Bakes the groom onto its scalp (a hair cap for low card LODs): <base>_ScalpColor and

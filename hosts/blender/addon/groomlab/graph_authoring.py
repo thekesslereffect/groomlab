@@ -216,9 +216,18 @@ def ramp_preset_keys(name):
 
 
 def flipped_ramp(value):
-    """A ramp value mirrored end to end (each key at 1 - its position), straight or smooth as it was."""
+    """A ramp value mirrored end to end (each key at 1 - its position, its handles mirrored), straight
+    or smooth as it was."""
     keys, linear = graph_tree.ramp_keys(value)
-    out = [[1.0 - float(p), v] for p, v in reversed(keys)]
+    out = []
+    for k in reversed(keys):
+        key = [1.0 - float(k[0]), k[1]]
+        if len(k) > 5:  # (handles of their own lengths: mirrored too)
+            key += [-float(k[3]), -float(k[2]), float(k[5]), float(k[4])]
+        elif len(k) > 3:
+            slope_in, slope_out = -float(k[3]), -float(k[2])
+            key += [slope_in] if slope_in == slope_out else [slope_in, slope_out]
+        out.append(key)
     return {"keys": out, "linear": True} if linear else out
 
 
@@ -290,6 +299,43 @@ def control_names(node, param):
 
 def control_path(name):
     return '["%s%s"]' % (CONTROL_PREFIX, name)
+
+
+def control_keys(scalp):
+    """The groom's keyed controls as a .groom keeps them ({name: [[frame, value], ...]}): each ctl_
+    property's keys (Blender's curve shapes between keys become the core's smooth curve)."""
+    bag = _channelbag(scalp)
+    out = {}
+    for curve in (bag.fcurves if bag is not None else []):
+        path = curve.data_path
+        if not path.startswith('["' + CONTROL_PREFIX) or not path.endswith('"]'):
+            continue
+        keys = [[float(k.co[0]), float(k.co[1])] for k in curve.keyframe_points]
+        if keys:
+            out[path[2 + len(CONTROL_PREFIX):-2]] = keys
+    return out
+
+
+def key_controls(scalp, keyed):
+    """The groom's ctl_ properties keyed as a .groom's controlKeys say ({name: [[frame, value],
+    ...]}): each control's curve made again from them (auto-clamped: no overshoot, as the core's)."""
+    if not keyed:
+        return
+    for name, keys in sorted(keyed.items()):
+        if not keys:
+            continue
+        ensure_control_props(scalp, [name], [float(keys[0][1])])
+        bag = _channelbag(scalp)
+        curve = bag.fcurves.find(control_path(name)) if bag is not None else None
+        if curve is not None:
+            bag.fcurves.remove(curve)
+        for frame, value in keys:
+            scalp[CONTROL_PREFIX + name] = float(value)
+            scalp.keyframe_insert(control_path(name), frame=float(frame), group="GroomLab")
+        bag = _channelbag(scalp)
+        curve = bag.fcurves.find(control_path(name)) if bag is not None else None
+        for point in (curve.keyframe_points if curve is not None else []):
+            point.handle_left_type = point.handle_right_type = "AUTO_CLAMPED"
 
 
 def _channelbag(scalp):
@@ -1352,7 +1398,7 @@ class GROOMLAB_OT_graph_rename(_NodeOp):
         rt = groom.ensure(scalp)
         try:
             graph_tree.push_positions(scalp)
-            process.call("edit_graph", session=rt.session, op="rename_node", name=old, newName=self.new_name)
+            graph.note_undo(scalp, process.call("edit_graph", session=rt.session, op="rename_node", name=old, newName=self.new_name))
         except HelperError as e:
             return _fail(self, e)
         graph_tree.follow_renamed(scalp, rt, old, self.new_name)
@@ -1379,7 +1425,7 @@ class GROOMLAB_OT_graph_delete(_NodeOp):
             graph_tree.push_positions(scalp)
             for name in names:
                 # (the flow passes through: what fed it feeds what it fed, issue #80)
-                process.call("edit_graph", session=rt.session, op="remove_node", name=name, keepFlow=True)
+                graph.note_undo(scalp, process.call("edit_graph", session=rt.session, op="remove_node", name=name, keepFlow=True))
         except HelperError as e:
             return _fail(self, e)
         if scalp.groomlab.view_node in names:

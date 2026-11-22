@@ -939,7 +939,7 @@ TEST(Expression, XGenExpressionsPastedVerbatim) {
 }
 
 TEST(Expression, TheShippedLibraryCompilesAndEvaluates) {
-    // hosts/maya/expressions: every example, with its own variables, on strands over a sphere.
+    // engine/assets/expressions: every example, with its own variables, on strands over a sphere.
     const std::filesystem::path dir = std::filesystem::path(GROOMLAB_SHIPPED_PRESETS).parent_path() / "expressions";
     ASSERT_TRUE(std::filesystem::is_directory(dir)) << dir.string();
     const auto scalp = test::makeSphere(8, 16, 1.0f);

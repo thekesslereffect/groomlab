@@ -53,7 +53,7 @@ def _save_folded():
 # replaces: each tool group has its color (theme "icons": {group: color}), a
 # darker shade and a lighter tint of it; "ink" is hair and neutral parts.
 ICON_GROUPS = {
-    "create": ("place", "draw", "part", "flow"),
+    "create": ("place", "draw", "clone", "part", "flow"),
     "shape": ("comb", "slide", "smooth", "lift", "twist", "attract", "shape"),  # "shape": the Tube brush
     "trim": ("cut", "length", "lengths", "erase"),
     "paint": ("paint", "freeze", "invert", "unfreeze", "select"),  # the guide tools share one color
@@ -2350,18 +2350,146 @@ def _unit(x):
     return min(max(float(x), 0.0), 1.0)
 
 
+# A handle's slope at most this steep either way (a vertical handle has no slope), and its length
+# (a share of the span to the key on its side) between these; a third: the default (the core's
+# kRampHandleLength, the cubic Hermite's).
+_MAX_SLOPE = 50.0
+_THIRD = 1.0 / 3.0
+_MIN_LENGTH, _MAX_LENGTH = 0.02, 1.0
+
+
+def _default_length(x):
+    return abs(x - _THIRD) < 1e-6
+
+
+def ramp_entries(value):
+    """(keys [[position, value], ...], handles [None or [slope in, slope out, length in, length out],
+    ...], linear) of a ramp param's value: [[position, value], ...] or {"keys": [...], "linear":
+    true}, a key with its handles set [position, value, slope] (both sides), [position, value, in,
+    out] (a corner), or [position, value, in, out, length in, length out] (handles of other lengths
+    than a third of their spans)."""
+    linear = isinstance(value, dict) and bool(value.get("linear"))
+    entries = value.get("keys") if isinstance(value, dict) else value
+    keys, handles = [], []
+    for k in entries or []:
+        if not isinstance(k, (list, tuple)) or len(k) < 2:
+            continue
+        keys.append([_unit(k[0]), _unit(k[1])])
+        if len(k) > 2:
+            slope_in, slope_out = float(k[2]), float(k[3] if len(k) > 3 else k[2])
+            lengths = [float(k[4]), float(k[5])] if len(k) > 5 else [_THIRD, _THIRD]
+            handles.append([slope_in, slope_out] + lengths)
+        else:
+            handles.append(None)
+    return keys, handles, linear
+
+
+def ramp_value(keys, handles, linear):
+    """A ramp param's value from keys and their handles (ramp_entries' parts)."""
+    out = []
+    for (p, v), h in zip(keys, handles):
+        if h is None:
+            out.append([p, v])
+        elif not (_default_length(h[2]) and _default_length(h[3])):
+            out.append([p, v, h[0], h[1], h[2], h[3]])
+        elif h[0] == h[1]:
+            out.append([p, v, h[0]])
+        else:
+            out.append([p, v, h[0], h[1]])
+    return {"keys": out, "linear": True} if linear else out
+
+
+def flipped_ramp(value):
+    """A ramp value mirrored end to end (each key at 1 - its position; its handles mirrored)."""
+    keys, handles, linear = ramp_entries(value)
+    keys = [[1.0 - p, v] for p, v in reversed(keys)]
+    handles = [None if h is None else [-h[1], -h[0], h[3], h[2]] for h in reversed(handles)]
+    return ramp_value(keys, handles, linear)
+
+
+def _ramp_weighted(f, v0, m0, w0, v1, m1, w1):
+    """shared/groom_math.h rampWeighted: the span's Bezier for handles of other lengths."""
+    a, b = min(max(w0, 0.0), 1.0), min(max(w1, 0.0), 1.0)
+    if a + b > 1.0:
+        a, b = a / (a + b), b / (a + b)
+    x1, x2 = a, 1.0 - b
+    lo, hi = 0.0, 1.0
+    for _ in range(24):
+        u = 0.5 * (lo + hi)
+        s = 1.0 - u
+        if 3.0 * s * s * u * x1 + 3.0 * s * u * u * x2 + u * u * u < f:
+            lo = u
+        else:
+            hi = u
+    u = 0.5 * (lo + hi)
+    s = 1.0 - u
+    y1, y2 = v0 + a * m0, v1 - b * m1
+    return s * s * s * v0 + 3.0 * s * s * u * y1 + 3.0 * s * u * u * y2 + u * u * u * v1
+
+
+def ramp_auto_slope(keys, k):
+    """Key k's automatic slope (the core's: ramp.cpp Ramp::tangent, a monotone cubic's)."""
+    def secant(s):
+        span = keys[s + 1][0] - keys[s][0]
+        return (keys[s + 1][1] - keys[s][1]) / span if span > 0 else 0.0
+
+    if len(keys) < 2:
+        return 0.0
+    if k == 0:
+        return secant(0)
+    if k == len(keys) - 1:
+        return secant(k - 1)
+    d0, d1 = secant(k - 1), secant(k)
+    if d0 * d1 <= 0:
+        return 0.0
+    h0, h1 = keys[k][0] - keys[k - 1][0], keys[k + 1][0] - keys[k][0]
+    return 3.0 * (h0 + h1) / ((2.0 * h1 + h0) / d0 + (h1 + 2.0 * h0) / d1)
+
+
+def ramp_at(keys, handles, linear, t):
+    """The ramp at t, as groomlab's core evaluates it (ramp.cpp: a cubic Hermite, each key's slopes
+    its handles' or automatic; or straight segments)."""
+    if not keys:
+        return 1.0
+    if t <= keys[0][0]:
+        return keys[0][1]
+    if t >= keys[-1][0]:
+        return keys[-1][1]
+    i = max(k for k in range(len(keys) - 1) if keys[k][0] <= t)
+    (x0, y0), (x1, y1) = keys[i], keys[i + 1]
+    h = x1 - x0
+    if h <= 0:
+        return y1
+    f = (t - x0) / h
+    if linear:
+        return y0 + (y1 - y0) * f
+    out0 = handles[i][1] if handles[i] is not None else ramp_auto_slope(keys, i)
+    in1 = handles[i + 1][0] if handles[i + 1] is not None else ramp_auto_slope(keys, i + 1)
+    w0 = handles[i][3] if handles[i] is not None else _THIRD
+    w1 = handles[i + 1][2] if handles[i + 1] is not None else _THIRD
+    m0, m1 = out0 * h, in1 * h
+    if not (_default_length(w0) and _default_length(w1)):
+        return _ramp_weighted(f, y0, m0, w0, y1, m1, w1)
+    f2, f3 = f * f, f * f * f
+    return (2 * f3 - 3 * f2 + 1) * y0 + (f3 - 2 * f2 + f) * m0 + (-2 * f3 + 3 * f2) * y1 + (f3 - f2) * m1
+
+
 class RampEditor(QtWidgets.QWidget):
     """A curve editor for ramp params: [[position, value], ...], a smooth curve through the keys
     (as the core evaluates them), or {"keys": [...], "linear": true} for straight segments.
 
-    Drag a key to move it; click empty space to add one; right-click a key to
-    remove it, or elsewhere for presets. Signals: dragged(keys) while moving,
-    committed(keys) when settled. `ends` names the left and right ends under the plot (a brush's
+    Drag a key to move it; click empty space to add one. The key last picked shows its handles
+    (issue #102): drag one to set the key's slope (both sides) and that handle's length (farther out
+    holds the slope longer), Alt+drag to set that side's slope alone (a corner); double-click a
+    handle for the automatic slope and length again. Right-click a key for Remove,
+    Corner and Auto Handles, or elsewhere for presets. Signals: dragged(value) while moving,
+    committed(value) when settled. `ends` names the left and right ends under the plot (a brush's
     falloff runs from its center to its edge).
     """
 
     dragged = QtCore.Signal(object)
     committed = QtCore.Signal(object)
+    HANDLE = 28  # a handle's length on screen (pixels, before the UI scale)
 
     @staticmethod
     def presets():
@@ -2373,15 +2501,29 @@ class RampEditor(QtWidgets.QWidget):
     def __init__(self, keys, parent=None, ends=("root", "tip")):
         super(RampEditor, self).__init__(parent)
         self.ends = ends
-        self.linear = isinstance(keys, dict) and bool(keys.get("linear"))
-        if isinstance(keys, dict):
-            keys = keys.get("keys")
-        self.keys = sorted([_unit(p), _unit(v)] for p, v in (keys or [[0, 0], [1, 1]]))  # curves live in 0-1
+        self.keys, self.handles, self.linear = [], [], False
+        self._set(keys if keys else [[0, 0], [1, 1]])  # curves live in 0-1
         from groomlab.ui import theme
         self.setMinimumSize(theme.px(200), theme.px(96))
         self.setMouseTracking(True)
         self._drag = None
         self._hover = None
+        self._picked = None   # the key whose handles show
+        self._handle = None   # (key, side) a handle being dragged: side 0 in, 1 out
+
+    def _set(self, value):
+        keys, handles, linear = ramp_entries(value)
+        if isinstance(value, dict):  # (a plain key list keeps the segments as they were)
+            self.linear = linear
+        self.keys, self.handles = keys, handles
+        self._sort()
+
+    def _sort(self, follow=None):
+        """The keys in order, each with its handles; returns where key `follow` (an index) went."""
+        tagged = sorted(range(len(self.keys)), key=lambda i: self.keys[i][0])
+        self.keys = [self.keys[i] for i in tagged]
+        self.handles = [self.handles[i] for i in tagged]
+        return tagged.index(follow) if follow is not None else None
 
     # -- Geometry ----------------------------------------------------------------
 
@@ -2409,7 +2551,84 @@ class RampEditor(QtWidgets.QWidget):
                 return i
         return None
 
+    def slopes(self, k):
+        """Key k's slopes, into it and out of it (its handles', or automatic)."""
+        h = self.handles[k]
+        if h is not None:
+            return h[0], h[1]
+        s = ramp_auto_slope(self.keys, k)
+        return s, s
+
+    def lengths(self, k):
+        """Key k's handles' lengths, in and out (shares of the spans either side; a third: the default)."""
+        h = self.handles[k]
+        return (h[2], h[3]) if h is not None else (_THIRD, _THIRD)
+
+    def span(self, k, side):
+        """The span on that side of key k (0 left, 1 right), or None at the end of the curve."""
+        other = k - 1 if side == 0 else k + 1
+        if other < 0 or other >= len(self.keys):
+            return None
+        return abs(self.keys[other][0] - self.keys[k][0]) or None
+
+    def handle_points(self, k):
+        """Where key k's handles are drawn (in, out): at the curve's control points (its length along
+        its slope, a share of its span), else a fixed length on screen past the curve's ends."""
+        from groomlab.ui import theme
+        r = self.plot()
+        lo, hi = self.value_range()
+        at = self.to_screen(*self.keys[k])
+        out = []
+        box = QtCore.QRectF(self.rect()).adjusted(4, 4, -4, -4)  # (kept where a click reaches it)
+        for side, (slope, share) in enumerate(zip(self.slopes(k), self.lengths(k))):
+            dx, dy = r.width(), -slope * r.height() / (hi - lo)  # one unit of position along the slope
+            norm = (dx * dx + dy * dy) ** 0.5 or 1.0
+            sign = -1.0 if side == 0 else 1.0
+            ux, uy = sign * dx / norm, sign * dy / norm
+            span = self.span(k, side)
+            reach = share * span * norm if span else theme.px(self.HANDLE)
+            if ux > 1e-6:
+                reach = min(reach, (box.right() - at.x()) / ux)
+            elif ux < -1e-6:
+                reach = min(reach, (box.left() - at.x()) / ux)
+            if uy > 1e-6:
+                reach = min(reach, (box.bottom() - at.y()) / uy)
+            elif uy < -1e-6:
+                reach = min(reach, (box.top() - at.y()) / uy)
+            reach = max(reach, 8.0)
+            out.append(QtCore.QPointF(at.x() + ux * reach, at.y() + uy * reach))
+        return out
+
+    def handle_at(self, point):
+        """(key, side) of the picked key's handle under `point`, or None."""
+        k = self._picked
+        if k is None or self.linear or k >= len(self.keys):
+            return None
+        for side, at in enumerate(self.handle_points(k)):
+            if QtCore.QLineF(at, point).length() < 7:
+                return k, side
+        return None
+
+    def slope_toward(self, k, side, point):
+        """(slope, length) a handle of key k dragged to `point` gives: the slope kept within
+        _MAX_SLOPE, the length a share of the span on that side (None past the curve's ends)."""
+        r = self.plot()
+        lo, hi = self.value_range()
+        at = self.to_screen(*self.keys[k])
+        dp = (point.x() - at.x()) / r.width()
+        dv = (at.y() - point.y()) / r.height() * (hi - lo)
+        if side == 0:
+            dp, dv = -dp, -dv  # the in handle points back along the curve
+        dp = max(dp, 1e-4)
+        span = self.span(k, side)
+        length = min(max(dp / span, _MIN_LENGTH), _MAX_LENGTH) if span else None
+        return max(-_MAX_SLOPE, min(_MAX_SLOPE, dv / dp)), length
+
     # -- Drawing -------------------------------------------------------------------
+
+    def evaluate(self, t):
+        """The ramp at t, as groomlab's core evaluates it (handles, or straight segments)."""
+        return ramp_at(self.keys, self.handles, self.linear, t)
 
     def paintEvent(self, event):
         painter = QtGui.QPainter(self)
@@ -2438,8 +2657,20 @@ class RampEditor(QtWidgets.QWidget):
         painter.fillPath(fill, wash)
         painter.setPen(QtGui.QPen(curve, 2))
         painter.drawPath(path)
+        # The picked key's handles: a line each side, a dot at its end (hollow while automatic).
+        picked = self._picked if self._picked is not None and self._picked < len(self.keys) and not self.linear else None
+        if picked is not None:
+            at = self.to_screen(*self.keys[picked])
+            set_ = self.handles[picked] is not None
+            for side, end in enumerate(self.handle_points(picked)):
+                hot = self._handle == (picked, side)
+                painter.setPen(QtGui.QPen(t.qcolor("ui.textDim"), 1))
+                painter.drawLine(at, end)
+                painter.setPen(QtGui.QPen(t.qcolor("ui.text") if hot else curve, 1.5))
+                painter.setBrush(t.qcolor("ui.text") if hot else (curve if set_ else QtCore.Qt.NoBrush))
+                painter.drawEllipse(end, 3.5, 3.5)
         for i, (p, v) in enumerate(self.keys):
-            hot = i in (self._drag, self._hover)
+            hot = i in (self._drag, self._hover, picked)
             painter.setPen(QtGui.QPen(t.qcolor("ui.border"), 1))
             painter.setBrush(t.qcolor("ui.text") if hot else curve)
             painter.drawEllipse(self.to_screen(p, v), 5 if hot else 4, 5 if hot else 4)
@@ -2447,7 +2678,10 @@ class RampEditor(QtWidgets.QWidget):
         lo, hi = self.value_range()
         label = self.ends[0] + " " * 6 + self.ends[1]
         shown = self._drag if self._drag is not None else self._hover
-        if shown is not None:
+        if self._handle is not None:
+            k, side = self._handle
+            label = "%s: slope %.3f, length %.2f" % ("in" if side == 0 else "out", self.slopes(k)[side], self.lengths(k)[side])
+        elif shown is not None:
             label = "%.2f : %.3f" % tuple(self.keys[shown])
         painter.drawText(QtCore.QRectF(r.left(), r.bottom() + 1, r.width(), 14),
                          QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter, label)
@@ -2457,95 +2691,139 @@ class RampEditor(QtWidgets.QWidget):
     # -- Editing ---------------------------------------------------------------------
 
     def value(self):
-        keys = [list(k) for k in self.keys]
-        return {"keys": keys, "linear": True} if self.linear else keys
+        return ramp_value(self.keys, self.handles, self.linear)
 
     def setValue(self, keys):
-        if isinstance(keys, dict):
-            self.linear = bool(keys.get("linear"))
-            keys = keys.get("keys") or []
-        self.keys = sorted([_unit(p), _unit(v)] for p, v in keys)
+        self._set(keys or [])
+        if not self.keys:
+            self.keys, self.handles = [[0.0, 1.0]], [None]
+        if self._picked is not None and self._picked >= len(self.keys):
+            self._picked = None
         self.update()
 
-    def evaluate(self, t):
-        """The ramp at t, as groomlab's core evaluates it (monotone cubic, or straight segments)."""
+    def set_handle(self, k, slope_in, slope_out=None, length_in=_THIRD, length_out=_THIRD):
+        """Key k's handles: its slope into it and out of it (the same both sides without slope_out)
+        and their lengths (shares of their spans); None: automatic."""
+        if slope_in is None:
+            self.handles[k] = None
+        else:
+            slope_out = slope_in if slope_out is None else slope_out
+            self.handles[k] = [float(slope_in), float(slope_out), float(length_in), float(length_out)]
+        self.update()
+
+    def corner(self, k):
+        """Key k a corner: straight toward each neighbor (its handles along the lines to them)."""
         keys = self.keys
-        if t <= keys[0][0]:
-            return keys[0][1]
-        if t >= keys[-1][0]:
-            return keys[-1][1]
-        i = max(k for k in range(len(keys) - 1) if keys[k][0] <= t)
-        (x0, y0), (x1, y1) = keys[i], keys[i + 1]
-        h = x1 - x0
-        if h <= 0:
-            return y1
-        f = (t - x0) / h
-        if self.linear:
-            return y0 + (y1 - y0) * f
 
-        def secant(k):
-            span = keys[k + 1][0] - keys[k][0]
-            return (keys[k + 1][1] - keys[k][1]) / span if span > 0 else 0.0
+        def secant(a, b):
+            span = keys[b][0] - keys[a][0]
+            return (keys[b][1] - keys[a][1]) / span if span > 0 else 0.0
 
-        def tangent(k):
-            if k == 0:
-                return secant(0)
-            if k == len(keys) - 1:
-                return secant(k - 1)
-            d0, d1 = secant(k - 1), secant(k)
-            if d0 * d1 <= 0:
-                return 0.0
-            h0, h1 = keys[k][0] - keys[k - 1][0], keys[k + 1][0] - keys[k][0]
-            return 3.0 * (h0 + h1) / ((2.0 * h1 + h0) / d0 + (h1 + 2.0 * h0) / d1)
-
-        m0, m1 = tangent(i) * h, tangent(i + 1) * h
-        f2, f3 = f * f, f * f * f
-        return ((2 * f3 - 3 * f2 + 1) * y0 + (f3 - 2 * f2 + f) * m0 + (-2 * f3 + 3 * f2) * y1 + (f3 - f2) * m1)
+        slope_in = secant(k - 1, k) if k > 0 else (secant(k, k + 1) if k + 1 < len(keys) else 0.0)
+        slope_out = secant(k, k + 1) if k + 1 < len(keys) else slope_in
+        self.set_handle(k, slope_in, slope_out, *self.lengths(k))
 
     def mousePressEvent(self, event):
-        i = self.key_at(qt.event_pos(event))
-        if event.button() == QtCore.Qt.RightButton:
-            if i is not None and len(self.keys) > 2:
-                del self.keys[i]
+        pos = qt.event_pos(event)
+        if event.button() == QtCore.Qt.LeftButton:
+            handle = self.handle_at(pos)
+            if handle is not None:
+                self._handle = handle
                 self.update()
-                self.committed.emit(self.value())
-            elif i is None:
+                return
+        i = self.key_at(pos)
+        if event.button() == QtCore.Qt.RightButton:
+            if i is not None:
+                self._key_menu(i, qt.event_global_pos(event))
+            else:
                 self._presets(qt.event_global_pos(event))
             return
         if event.button() != QtCore.Qt.LeftButton:
             return
         if i is None:
-            p, v = self.from_screen(qt.event_pos(event))
+            p, v = self.from_screen(pos)
             self.keys.append([p, v])
-            self.keys.sort()
-            i = self.keys.index([p, v])
+            self.handles.append(None)
+            i = self._sort(len(self.keys) - 1)
         self._drag = i
+        self._picked = i
         self.update()
 
     def mouseMoveEvent(self, event):
+        pos = qt.event_pos(event)
+        if self._handle is not None:
+            k, side = self._handle
+            slope, length = self.slope_toward(k, side, pos)
+            h = self.handles[k]
+            alone = bool(event.modifiers() & QtCore.Qt.AltModifier) or (h is not None and h[0] != h[1])
+            slopes, lengths = list(self.slopes(k)), list(self.lengths(k))
+            if alone:
+                slopes[side] = slope
+            else:
+                slopes = [slope, slope]
+            if length is not None:  # (this handle's length alone: each side its own)
+                lengths[side] = length
+            self.handles[k] = slopes + lengths
+            self.update()
+            self.dragged.emit(self.value())
+            return
         if self._drag is None:
-            hover = self.key_at(qt.event_pos(event))
+            hover = self.key_at(pos)
             if hover != self._hover:
                 self._hover = hover
                 self.update()
             return
-        p, v = self.from_screen(qt.event_pos(event))
+        p, v = self.from_screen(pos)
         self.keys[self._drag] = [p, v]
-        moving = self.keys[self._drag]
-        self.keys.sort()
-        self._drag = self.keys.index(moving)
+        self._drag = self._sort(self._drag)
+        self._picked = self._drag
         self.update()
         self.dragged.emit(self.value())
 
     def mouseReleaseEvent(self, event):
-        if self._drag is not None:
+        if self._handle is not None or self._drag is not None:
+            self._handle = None
             self._drag = None
             self.update()
             self.committed.emit(self.value())
 
+    def mouseDoubleClickEvent(self, event):
+        handle = self.handle_at(qt.event_pos(event))
+        if handle is not None:  # the automatic slope again
+            self._handle = None
+            self.set_handle(handle[0], None)
+            self.committed.emit(self.value())
+
+    def _key_menu(self, i, global_pos):
+        menu = QtWidgets.QMenu(self)
+
+        def remove():
+            del self.keys[i]
+            del self.handles[i]
+            self._picked = None
+            self.update()
+            self.committed.emit(self.value())
+
+        def corner():
+            self.corner(i)
+            self._picked = i
+            self.committed.emit(self.value())
+
+        def auto():
+            self.set_handle(i, None)
+            self.committed.emit(self.value())
+
+        remove_action = menu.addAction("Remove Key", remove)
+        remove_action.setEnabled(len(self.keys) > 2)
+        menu.addAction("Corner", corner).setToolTip("Straight toward each neighbor: a sharp turn at the key")
+        auto_action = menu.addAction("Auto Handles", auto)
+        auto_action.setToolTip("The key's slope worked out from its neighbors again")
+        auto_action.setEnabled(self.handles[i] is not None)
+        menu.setToolTipsVisible(True)
+        qt.exec_(menu, global_pos)
+
     def _flipped(self):
-        keys = [[1 - p, v] for p, v in self.keys]
-        return {"keys": keys, "linear": True} if self.linear else keys
+        return flipped_ramp(self.value())
 
     def _presets(self, global_pos):
         menu = QtWidgets.QMenu(self)

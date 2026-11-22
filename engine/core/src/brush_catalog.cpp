@@ -38,6 +38,11 @@ std::vector<BrushEntry> makeCatalog() {
          {"symmetry", "collide", "newGuides", "spacing", "soloNewGuides", "tube"}},
         {"draw", "Draw", C::Create, 0, "draw", 1.0f, false, "Press on the scalp and draw a guide's shape.",
          {"symmetry", "collide", "newGuides", "soloNewGuides", "tube"}},
+        {"clone", "Clone", C::Create, 0, "clone", 1.0f, false,
+         "Ctrl+click over guides to copy the ones rooted in the circle (or Pick Source, then click); then click "
+         "anywhere to set copies down, each guide keeping its shape and children, turned to the scalp there. Drag "
+         "left or right before letting go to spin the copies.",
+         {"radius", "symmetry", "selectedOnly", "collide", "frontFacingOnly", "clone"}},
         {"part", "Part", C::Create, 0, "part", 1.0f, false,
          "Draw a part freehand on the scalp: hair does not mix across it, and the Part node opens it.", {"symmetry", "parts"}},
         {"flow", "Flow", C::Create, 0, "flow", 1.0f, false,
@@ -53,8 +58,9 @@ std::vector<BrushEntry> makeCatalog() {
          "guide: how much of each guide follows its root (Root Only: the root alone moves, the rest stays put)",
          with(kBrushCommon, {"strengthProfile"})},
         {"smooth", "Smooth", C::Shape, 0, "smooth", 0.5f, false,
-         "Take kinks out, lengths kept (Straighten: relax guides toward the straight line along their root direction).",
-         with(kShaping, {"straighten", "targets"})},
+         "Even guides out: their kinks, lengths kept (Curve), or their lengths or shapes toward their neighbors' (Length, "
+         "Shape), or all three (Straighten: relax guides toward the straight line along their root direction).",
+         with(kShaping, {"smoothMode", "straighten", "targets"})},
         {"lift", "Lift", C::Shape, 0, "lift", 0.5f, true, "Stand guides up toward their root normal (negative: lay them down).",
          kShaping},
         {"twist", "Swing", C::Shape, 0, "twist", 0.5f, true, "Swing guides around their root (negative: the other way).",
@@ -203,10 +209,12 @@ const std::vector<BrushSettingSpec>& brushSettingSpecs() {
                                                       "guides, parts, flow arrows or paint on the far side of the head"},
              true),
         flag({"stretch", "Stretch", "On: guides get longer (or shorter) as you pull them, like ZBrush's Snake Hook: points are added or "
-                   "removed so the segments keep their length. Off: they keep their length"}, true),
+                   "removed so the segments keep their length. Off: they keep their length"}, false),
         flag({"straighten", "Straighten", "On: guides relax toward the straight line along their root direction. Off: only "
                                           "their kinks are taken out"},
              false),
+        {"smoothMode", "Evens out", "What Smooth evens out: Curve the kinks along each guide; Length the guides' lengths toward "
+                                       "their neighbors'; Shape their shapes toward their neighbors'; All of the three"},
         {"targets", "Acts on", "What the brush shapes: guides, part lines, flow arrows"},
         {"erases", "Erases", "What Erase removes: guides (with their children), parts, flow arrows"},
         {"newGuides", "New guides", "Match nearby guides' shape and maps, or the length and segments of a standing guide"},
@@ -222,6 +230,12 @@ const std::vector<BrushSettingSpec>& brushSettingSpecs() {
         flag({"soloNewGuides", "Solo new guides", "New guides stay unfrozen and every other guide is frozen, so the brushes "
                                                   "work on the new ones at once (the Select tool solos others, "
                                                   "Unfreeze All frees them all)"},
+             false),
+        {"clone", "Clone", "The source: Pick Source makes the next click copy the guides rooted in the circle (as "
+                           "Ctrl+click does), how many it holds, and whether copies replace the guides where they land"},
+        flag({"cloneReplace", "Replace guides under brush", "On: the guides of the copied levels already in the circle "
+                                                            "where the copies land are removed first (frozen ones stay). "
+                                                            "Off: the copies are added among them"},
              false),
         {"parts", "Parts", "The next part's name, and the parts drawn so far"},
         {"flow", "Flow", "What a click or drag lays: arrows, or a sink (brush-sized) hair turns around"},

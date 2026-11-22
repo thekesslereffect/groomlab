@@ -274,10 +274,78 @@ void GuideHierarchy::setGroupSegments(GroupId id, int segments) {
     throw std::invalid_argument("setGroupSegments: unknown group");
 }
 
-std::vector<Vec3f> GuideHierarchy::withGroupSegments(GroupId id, std::vector<Vec3f> points) const {
+void GuideHierarchy::setGroupSegmentLength(GroupId id, float length) {
+    if (!(length >= 0.0f) || !std::isfinite(length)) throw std::invalid_argument("setGroupSegmentLength: a length of 0 or more");
+    for (GuideGroup& g : groups_) {
+        if (g.id == id) {
+            if (g.segmentLength != length) invalidateHash();
+            g.segmentLength = length;
+            return;
+        }
+    }
+    throw std::invalid_argument("setGroupSegmentLength: unknown group");
+}
+
+namespace {
+
+// Segments for a curve `length` long at `segmentLength` a segment (1 to 256).
+int segmentsAlong(float length, float segmentLength) {
+    if (!(segmentLength > 0.0f) || !(length > 0.0f)) return 1;
+    return static_cast<int>(std::clamp(std::lround(length / segmentLength), 1L, 256L));
+}
+
+}  // namespace
+
+int GuideHierarchy::segmentsFor(GroupId id, float length) const {
     const GuideGroup* g = group(id);
-    if (!g || g->segments < 1 || points.size() < 2) return points;
-    return resampleSmoothCurve(points.data(), points.size(), static_cast<std::size_t>(g->segments) + 1);
+    if (!g) return 0;
+    if (g->segmentLength > 0.0f) return segmentsAlong(length, g->segmentLength);
+    return g->segments;
+}
+
+std::vector<Vec3f> GuideHierarchy::withGroupSegments(GroupId id, std::vector<Vec3f> points) const {
+    if (points.size() < 2) return points;
+    const int segments = segmentsFor(id, arcLength(points.data(), points.size()));
+    if (segments < 1) return points;
+    return resampleSmoothCurve(points.data(), points.size(), static_cast<std::size_t>(segments) + 1);
+}
+
+float GuideHierarchy::segmentLengthFor(const std::vector<GuideId>& ids, int segments) const {
+    if (segments < 1) return 0.0f;
+    double total = 0.0;
+    std::size_t count = 0;
+    for (const GuideId id : ids) {
+        const HierarchyGuide* g = guide(id);
+        float frozen = 0.0f;
+        if (!g || g->points.size() < 2 || (effectiveAttribute(*g, "freeze", &frozen) && frozen >= 0.5f)) continue;
+        total += arcLength(g->points.data(), g->points.size());
+        ++count;
+    }
+    if (count == 0 || !(total > 0.0)) return 0.0f;
+    return static_cast<float>(total / static_cast<double>(count) / segments);
+}
+
+std::size_t GuideHierarchy::resampleByLength(const std::vector<GuideId>& ids, float length, bool groupWide) {
+    if (!(length > 0.0f)) throw std::invalid_argument("resampleByLength: a segment length above 0");
+    std::size_t count = 0;
+    for (const GuideId id : ids) {
+        const HierarchyGuide* g = guide(id);
+        if (!g) throw std::invalid_argument("resample: no guide " + std::to_string(id));
+        float frozen = 0.0f;
+        if (g->points.size() < 2 || (effectiveAttribute(*g, "freeze", &frozen) && frozen >= 0.5f)) continue;
+        if (groupWide && g->ownSegments) continue;
+        const int segments = segmentsAlong(arcLength(g->points.data(), g->points.size()), length);
+        if (!groupWide) {
+            // (picked guides: their own count, unless their group goes by this very length)
+            const GuideGroup* grp = group(g->group);
+            const bool own = !grp || grp->segmentLength != length;
+            if (own != g->ownSegments) invalidateHash();
+            mutableGuide(id)->ownSegments = own;
+        }
+        setPoints(id, resampleSmoothCurve(g->points.data(), g->points.size(), static_cast<std::size_t>(segments) + 1));
+        ++count;
+    }
+    return count;
 }
 
 std::size_t GuideHierarchy::resample(const std::vector<GuideId>& ids, int segments, bool groupWide) {
@@ -333,7 +401,11 @@ int GuideHierarchy::resetGroupSegments(GroupId id) {
         }
         follow.push_back(g);
     }
-    resample(follow, segments, true);
+    if (grp->segmentLength > 0.0f) {  // (by length: each guide its length's share)
+        resampleByLength(follow, grp->segmentLength, true);
+    } else {
+        resample(follow, segments, true);
+    }
     return segments;
 }
 
@@ -365,12 +437,21 @@ const GuideGroup* GuideHierarchy::group(GroupId id) const {
     return nullptr;
 }
 
-std::size_t GuideHierarchy::resampleGuides(const std::vector<GuideId>& ids, int segments, bool groupWide, GroupId group, int level) {
+std::size_t GuideHierarchy::resampleGuides(const std::vector<GuideId>& ids, int segments, bool groupWide, GroupId group, int level,
+                                           bool byLength) {
+    if (segments < 1 || segments > 256) throw std::invalid_argument("resample: segments are 1 to 256");
+    const float length = byLength ? segmentLengthFor(ids, segments) : 0.0f;
     if (groupWide) {
+        std::vector<GroupId> targets;
         for (const GuideGroup& g : groups_) {
-            if (group != kNoGroup ? g.id == group : (level < 0 || groupDepth(g.id) == level)) setGroupSegments(g.id, segments);
+            if (group != kNoGroup ? g.id == group : (level < 0 || groupDepth(g.id) == level)) targets.push_back(g.id);
+        }
+        for (const GroupId g : targets) {
+            setGroupSegments(g, segments);
+            setGroupSegmentLength(g, length);  // (0: one count for every guide again)
         }
     }
+    if (byLength && length > 0.0f) return resampleByLength(ids, length, groupWide);
     return resample(ids, segments, groupWide);
 }
 
@@ -2624,6 +2705,7 @@ std::string GuideHierarchy::toJson() const {
     for (const GuideGroup& g : groups_) {
         json group = {{"id", g.id}, {"name", g.name}, {"parent", g.parent}};
         if (g.segments > 0) group["segments"] = g.segments;
+        if (g.segmentLength > 0.0f) group["segmentLength"] = g.segmentLength;
         groups.push_back(std::move(group));
     }
     // Each guide written on its own, side by side (the text of a big groom's guides took tens of
@@ -2739,6 +2821,8 @@ GuideHierarchy GuideHierarchy::fromJson(const std::string& text) {
         for (const json& g : root.value("groups", json::array())) {
             GuideGroup group{g.at("id").get<GroupId>(), g.at("name").get<std::string>(), g.value("parent", kNoGroup)};
             group.segments = std::clamp(g.value("segments", 0), 0, 256);
+            const float segmentLength = g.value("segmentLength", 0.0f);
+            group.segmentLength = std::isfinite(segmentLength) && segmentLength > 0.0f ? segmentLength : 0.0f;
             h.nextGroupId_ = std::max(h.nextGroupId_, group.id + 1);
             h.groups_.push_back(std::move(group));
         }
@@ -3044,6 +3128,20 @@ std::vector<GuideId> GuideHierarchy::duplicateGuidesToGroup(const std::vector<Gu
                                     "' is not beside the guides' group (a group at their level, under the same parent group)");
     }
     return pasteGuidesJson(copyGuidesJson(ids), target);
+}
+
+bool guideHidden(const GuideHierarchy& h, const HierarchyGuide& g) {
+    if (!h.hasAttributes()) return false;
+    float v = 0.0f;
+    return h.effectiveAttribute(g, kHiddenLayer, &v) && v >= 0.5f;
+}
+
+bool anyGuideHidden(const GuideHierarchy& h) {
+    if (!h.hasAttributes()) return false;
+    for (const HierarchyGuide& g : h.guides()) {
+        if (guideHidden(h, g)) return true;
+    }
+    return false;
 }
 
 }  // namespace groomlab

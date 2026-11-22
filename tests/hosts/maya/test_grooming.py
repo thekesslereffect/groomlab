@@ -680,7 +680,7 @@ class GroomingTest(unittest.TestCase):
 
         # Scripted strokes shape the node's guides: one undo step each, the stored guides untouched.
         guide_data = cmds.getAttr(self.groom + ".guideData")
-        groomlab.brush_stroke(self.groom, "comb", [(-0.4, 1.3, 0.0), (0.0, 1.35, 0.2), (0.4, 1.3, 0.4)], radius=0.6, stretch=False)
+        groomlab.brush_stroke(self.groom, "comb", [(-0.4, 1.3, 0.0), (0.0, 1.35, 0.2), (0.4, 1.3, 0.4)], radius=0.6)
         first = cmds.getAttr(self.groom + ".sculptData")
         self.assertTrue(first)
         self.assertGreater(sculpts.edited_guides(self.groom, "sculpt1"), 0)
@@ -1323,12 +1323,13 @@ class GroomingTest(unittest.TestCase):
         name = groomlab.paint_param(self.groom, "scatter", "density", kind="vertices", paint=False)
         self.assertEqual(name, "scatter_density")
         self.assertEqual(groomlab.map_kind(self.groom, name), "vertices")
+        # Linked as every host links it (the core's wireParamMap): the param reads the color set,
+        # white its value; no Map node.
         graph = groomlab.get_graph(self.groom)
         nodes = {n["name"]: n for n in graph["nodes"]}
-        self.assertEqual(nodes["scatter_density"]["type"], "Map")
-        self.assertEqual(nodes["scatter_density"]["params"], {"name": "scatter_density", "min": 0.0, "max": 1.0})
-        self.assertIn("density", nodes["scatter"].get("paramInputs", []))
-        self.assertIn({"from": "scatter_density", "to": "scatter", "input": "density"}, graph["connections"])
+        self.assertNotIn("scatter_density", nodes)
+        self.assertEqual(nodes["scatter"]["params"]["density"],
+                         {"colorSet": "scatter_density", "component": "r", "min": 0.0, "max": 200.0})
         self.assertEqual(groomlab.errors(self.groom), [])
         # Made white: the look stays (the param's own 200 multiplies it); painted black on top, nothing grows there.
         self.assertAlmostEqual(cmds.getAttr(self.groom + ".outStrandCount") / float(everywhere), 1.0, delta=0.05)
@@ -1669,6 +1670,23 @@ class GroomingTest(unittest.TestCase):
         self.assertEqual(group()["segments"], 0)
         cmds.undo()
         self.assertEqual(group()["segments"], 6)
+        # Segments by length (issue #98): longer guides more points, shorter fewer, the spacing the
+        # same; the group keeps it (its new guides by their length); the preview as the commit.
+        lengths = {g: length(p) for g, p in guide_points(self.groom).items() if g in groomlab.guide_ids(self.groom, "primary")}
+        self.assertEqual(group()["segmentLength"], 0.0)
+        groomlab.preview_resample_guides(self.groom, 8, group="primary", by_length=True)
+        groomlab.end_guide_preview(self.groom)
+        groomlab.resample_guides(self.groom, 8, group="primary", by_length=True)
+        spacing = group()["segmentLength"]
+        self.assertAlmostEqual(spacing, sum(lengths.values()) / len(lengths) / 8, 4)
+        points = guide_points(self.groom)
+        for g, l in lengths.items():
+            self.assertEqual(len(points[g]) - 1, max(1, int(round(l / spacing))), g)
+        made = groomlab.guides_from_curves(self.groom, [cmds.curve(degree=1, point=[(0.3, 0.95, 0), (0.3, 1.6, 0.3), (0.6, 1.9, 0.6)])])
+        self.assertEqual(len(guide_points(self.groom)[made[0]]) - 1, max(1, int(round(length(guide_points(self.groom)[made[0]]) / spacing))))
+        groomlab.resample_guides(self.groom, 6, group="primary")  # without it: one count again
+        self.assertEqual(group()["segmentLength"], 0.0)
+        self.assertEqual(set(groomlab.guide_segments(self.groom, group="primary")), {6})
         self.assertEqual(groomlab.errors(self.groom), [])
 
     def test_scripted_strokes_reach_the_other_scalps(self):
@@ -5964,6 +5982,55 @@ class ReferenceTest(unittest.TestCase):
         self.assertTrue(os.path.isfile(self.photo))  # the original is never touched
         with self.assertRaises(ValueError):
             self.ref.lock_reference(self.scalp)  # not a reference
+
+    def test_photos_travel_in_the_groom_file(self):
+        """A reference camera goes into the groom file's referencePhotos (its photo, solved pose,
+        landmarks, flow strokes and how it shows: what the app's and Blender's Reference windows
+        read), and an import makes it again, posed and edited as saved; a reload makes no second."""
+        from groomlab import from_reference
+        self.save_as("io", "shot.ma")
+        cam = self.ref.import_reference(self.photo, groom=self.groom)
+        cmds.xform(cam, worldSpace=True, translation=(3, 4, 40), rotation=(-5, 10, 0))
+        self.ref.set_reference_focal(cam, 50.0)
+        self.ref.set_reference_opacity(cam, 0.3)
+        self.ref.set_reference_depth(cam, "behind")
+        pairs = [{"image": [10.0, 12.0], "mesh": [1.0, 2.0, 9.0]}, {"image": [40.0, 30.0], "mesh": None}]
+        self.ref._store_pairs(cam, pairs)
+        from_reference.set_reference_hints(self.groom, cam, [[[5.0, 5.0], [20.0, 25.0]]])
+        self.ref.lock_reference(cam, True)
+        matrix = cmds.xform(cam, query=True, worldSpace=True, matrix=True)
+        focal = self.ref.focal_px(cam)
+        path = self.home + "/io/hair.groom"
+        groomlab.export_groom(self.groom, path)
+        with open(path) as f:
+            text = f.read()
+        self.assertIn('"referencePhotos"', text)
+        photo, = groomlab.groom_file_info(path)["referencePhotos"]
+        self.assertEqual((photo["name"], photo["width"], photo["height"]), ("front_ref", 64, 48))
+        self.assertAlmostEqual(photo["camera"]["focal_px"], focal, places=4)
+        self.assertEqual([p["image"] for p in photo["state"]["landmarks"]], [[10.0, 12.0], [40.0, 30.0]])
+        self.assertEqual(len(photo["state"]["strokes"]), 1)
+        self.assertEqual(photo["display"], {"opacity": photo["display"]["opacity"], "depth": "behind",
+                                            "locked": True, "visible": True})
+        self.assertAlmostEqual(photo["display"]["opacity"], 0.3, places=4)
+        # Into a new scene: the camera made again where it was, edits and display kept.
+        cmds.file(new=True, force=True)
+        imported = groomlab.import_groom(path)
+        made, = self.ref.list_references()
+        self.assertEqual(self.ref._short(made), "front_ref")
+        for a, b in zip(cmds.xform(made, query=True, worldSpace=True, matrix=True), matrix):
+            self.assertAlmostEqual(a, b, places=4)
+        self.assertAlmostEqual(self.ref.focal_px(made), focal, places=3)
+        self.assertEqual([p["image"] for p in self.ref.pairs(made)], [[10.0, 12.0], [40.0, 30.0]])
+        self.assertEqual(self.ref.pairs(made)[0]["mesh"], [1.0, 2.0, 9.0])
+        self.assertEqual(len(from_reference.reference_hints(imported, made)), 1)
+        self.assertAlmostEqual(self.ref.reference_opacity(made), 0.3, places=4)
+        self.assertEqual(self.ref.reference_depth(made), "behind")
+        self.assertTrue(self.ref.is_locked(made))
+        self.assertTrue(os.path.isfile(self.ref.image_path(made)))
+        # A reload of the same file: no second camera.
+        groomlab.reload_groom(imported)
+        self.assertEqual(len(self.ref.list_references()), 1)
 
     def test_guides_from_reference_grow_replace_undo_and_look(self):
         """Guides from Reference (experimental) as the Reference tab runs it: flow strokes and a

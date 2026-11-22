@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Writes the website's sample groom (web/public/samples/manny_hair.groom) with the WebAssembly
 // module (build it first: docs/WEB.md): the Hair basics preset on the Manny head
-// (hosts/maya/meshes/manny_head.obj, CC BY 4.0), its strands kept to the hair's part of the head by
+// (engine/assets/meshes/manny_head.obj, CC BY 4.0), its strands kept to the hair's part of the head by
 // an expression, its guides baked from a small combing graph (as tests/hosts/maya/gui_presets.py
 // grooms the preset sheets' heads), a Control node, "frizz", scaling the noise, and two painted
 // maps, so the page exercises both kinds: "cut", a vertex map (inside the .groom: shorter on the
@@ -111,8 +111,8 @@ function cutValue(x, z) {
 
 const M = await createGroomLab();
 const groom = new M.WebGroom();
-const preset = readFileSync(resolve(root, 'hosts/maya/presets/hair_basics.json'), 'utf8');
-const mesh = readFileSync(resolve(root, 'hosts/maya/meshes/manny_head.obj'), 'utf8');
+const preset = readFileSync(resolve(root, 'engine/assets/presets/hair_basics.json'), 'utf8');
+const mesh = readFileSync(resolve(root, 'engine/assets/meshes/manny_head.obj'), 'utf8');
 const check = (ok, what) => {
   if (!ok) {
     console.error(`${what}: ${groom.error()}`);

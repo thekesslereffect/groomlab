@@ -954,6 +954,28 @@ TEST(Display, HiddenHairBuildsNoHairItemsAndKeepsTheGuides) {
     }
 }
 
+TEST(Display, TheGuidesEyeHidesThePartsAndTheFlowToo) {
+    // Issue #99: the hosts' guides eye (DisplaySettings::guides) hides the guides, the part lines
+    // and the flow arrows at once; on again, all of them show.
+    Scenario s;
+    for (const Scenario& each : scenarios()) {
+        if (each.name == "lit") s = each;
+    }
+    ASSERT_EQ(s.name, "lit");
+    DisplayInputs in = inputsFor(s);
+    ASSERT_TRUE(in.flow && in.parts);
+    DisplayBuilder builder;
+    const DisplayItemId overlays[] = {DisplayItemId::Guides, DisplayItemId::Parts, DisplayItemId::Flow, DisplayItemId::FlowField};
+    const DisplayFrame& shown = builder.update(in, s.settings);
+    for (const DisplayItemId id : overlays) EXPECT_TRUE(shown.item(id).shown) << shown.item(id).name;
+    s.settings.guides = false;
+    const DisplayFrame& hidden = builder.update(in, s.settings);
+    for (const DisplayItemId id : overlays) EXPECT_FALSE(hidden.item(id).shown) << hidden.item(id).name;
+    s.settings.guides = true;
+    const DisplayFrame& again = builder.update(in, s.settings);
+    for (const DisplayItemId id : overlays) EXPECT_TRUE(again.item(id).shown) << again.item(id).name;
+}
+
 TEST(Display, AColorRangeRecolorsTheLinesAlone) {
     const Fixture& f = fixture();
     Scenario s = scenarios()[3];  // attribute colors
@@ -1612,6 +1634,20 @@ TEST(DisplayScalpMap, BentQuadsAreCoveredAcrossBothDiagonals) {
     // No polygons (a host that sends triangles only): nothing added.
     auto plain = std::make_shared<ScalpMesh>(points, triangles);
     EXPECT_EQ(scalpMapGeometry(plain.get(), view, false).indices.size(), 6u);
+}
+
+// Guides hidden one by one (kHiddenLayer) are not drawn: no tube wire for the Tube brush.
+TEST(Display, HiddenGuidesHaveNoTubeWire) {
+    GuideHierarchy h;
+    const GroupId g = h.addGroup("primary");
+    const GuideId a = h.addGuide(g, {{0, 0, 0}, {0, 1, 0}});
+    const GuideId b = h.addGuide(g, {{1, 0, 0}, {1, 1, 0}});
+    h.evaluate(nullptr);
+    EXPECT_EQ(activeTubeGuides(h, "").size(), 2u);
+    h.setAttribute(b, kHiddenLayer, 1.0f);
+    const std::vector<const HierarchyGuide*> shown = activeTubeGuides(h, "");
+    ASSERT_EQ(shown.size(), 1u);
+    EXPECT_EQ(shown.front()->id, a);
 }
 
 }  // namespace

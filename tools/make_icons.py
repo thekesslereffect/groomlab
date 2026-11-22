@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Writes GroomLab's icons (hosts/maya/icons/groomLab_*.svg): python tools/make_icons.py
 
-The 19 tool designs are authored SVGs in hosts/maya/icons, synced to the app.
+The 20 tool designs are authored SVGs in hosts/maya/icons, synced to the app.
 The remaining icons are generated here. Colors are placeholders the theme replaces when an
 icon loads (groomlab.ui.widgets.icon):
   #3D7EFF main   the tool group's color      #1F4FB3 shade   a darker main
@@ -66,7 +66,7 @@ HEAD = ('<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox=
 # These SVGs are authored directly in hosts/maya/icons. Keep their outlined artwork intact.
 DESIGNED_ICONS = (
     "place", "draw", "part", "flow", "comb", "slide", "smooth", "lift", "twist", "attract",
-    "shape", "cut", "length", "lengths", "erase", "select", "freeze", "invert", "unfreeze",
+    "shape", "cut", "length", "lengths", "erase", "select", "freeze", "invert", "unfreeze", "clone",
 )
 
 

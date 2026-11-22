@@ -101,6 +101,14 @@ public:
     // Another groom: nothing of the last one holds (the stroke, the values and inputs read, the base).
     void reset();
 
+    // Between strokes (a host's brush tool on the groom, nothing stroking): what the first stroke
+    // the GPU takes on this scalp would make first, made now. The scalp's clearance tables the
+    // look chain's Interpolate pushes the strands out with (interpolateClearance: kept with the
+    // scalp's shared distance field) take a tenth of a second and more to make once per scalp; made
+    // at a stroke's press instead, the mouse's moves meanwhile merged into one and a drawn guide
+    // came out straight (issue #101). Once per scalp; true when it made them.
+    bool warmStroke(const GroomSession& session);
+
     // What reading the mapped params' values took the last time (milliseconds), and the inputs'
     // reader (its own stats).
     double fieldsReadMs() const { return fieldsMs_; }
@@ -118,6 +126,7 @@ private:
     const void* strokeParts_ = nullptr;  // the parts at the press
     std::unique_ptr<LookPlan> strokePlan_;
     std::string stopAt_;
+    std::weak_ptr<const ScalpMesh> warmedScalp_;  // the scalp warmStroke made the tables of
 };
 
 }  // namespace groomlab::gpu

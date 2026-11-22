@@ -93,7 +93,7 @@ labels, search words and number decimals come from the core (`node_catalog.h`, t
 | Live / Apply toggle | Live checkbox | present by design: every edit applies live, one undo step |
 | Undo / Redo named after the step | More menu, Ctrl+Z/Y | present (top-right, Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z) |
 | Units (cm/mm/m, widths, density) | More > Units | missing |
-| Theme switch | More > Theme | present (View > Theme: the shipped themes, the Maya host's files; applies on the next start) |
+| Theme switch | More > Theme | present (View > Theme: the shipped themes (engine/assets/themes); applies on the next start) |
 | GPU preview toggle | More > Preview Drags on the GPU | present (Display panel) |
 | Reload from groom | More > Reload from Groom | present by design (the view follows the document) |
 | Seed warnings for nodes sharing a seed | status bar | partial: the core's `seedWarnings` is there; the app does not show them |
@@ -123,7 +123,7 @@ labels, search words and number decimals come from the core (`node_catalog.h`, t
 | Color params | color fields | present (a swatch and picker, sRGB shown, linear stored) |
 | Mappable params: value / texture / color set / attribute / expression / painted map, component and range | `MappableEditor` | present (a strand attribute source: partial, through an expression) |
 | Field-driven params ("x driver") | the panel | present (the port says what feeds it) |
-| Paint a param (make a map named after the node and param, wire it, open Paint) | param menu > Paint (a Map node) | present *new*: the Paint pill on a mappable param's row (a vertex map as the param's map source, the Paint brush on it, one undo step; core: the map and painting APIs) |
+| Paint a param (make a map named after the node and param, wire it, open Paint) | param menu > Paint (the param's map source, as the app's) | present *new*: the Paint pill on a mappable param's row (a vertex map as the param's map source, the Paint brush on it, one undo step; core: the map and painting APIs) |
 | Drive with a slider (a Control node) | param menu | missing (add a Control node and wire it by hand) |
 | Keys on params (set key, auto key, key colors, S) | param menu, Channel Box | Maya only: animCurves |
 | The Controls section (ctl_ attributes) | AE Controls | Maya only: Maya attributes (a preset's control values are applied to the nodes themselves) |
@@ -214,6 +214,7 @@ labels, search words and number decimals come from the core (`node_catalog.h`, t
 | Import a photo as a camera with an image plane; look through it; opacity, depth, focal length, lock | `reference.py`, `tool_tabs.py` ReferenceTab | The Photos tab (`photos_panel.h`): the photo drawn over the viewport through its camera |
 | Through a locked photo: 2D zoom and pan of the view (wheel, Alt+right, Alt+middle; F: all of it), the camera kept | `reference.py` zoom_view_2d, `ui/photo_view.py` (the camera's 2D Pan/Zoom) | `camera.h` the 2D view (an off-center frustum), `viewport.cpp` |
 | Align Photo: photo and mesh points side by side, the camera solved live | `ui/reference_window.py` (Align stage; core: `reference_edit.h`, `camera_solve.h`) | The Photos window (`reference_window.h`), the same stages |
+| Photos in the groom file (`referencePhotos`: photo, solved camera, landmarks, flow strokes, mask, display) | `reference.py` photos_for_file / photos_from_file (Save/Export Groom File writes the scene's reference cameras; Import/Reload makes them) | present (the document's photos) |
 
 ## Look, lighting and review
 
@@ -270,7 +271,8 @@ labels, search words and number decimals come from the core (`node_catalog.h`, t
 | Copy the graph to other grooms | Utilities > Copy Graph to Other Grooms... | Maya only: several Maya grooms (Copy Graph / Paste Graph carries a look between files) |
 | Bake a node to guides | Utilities > Bake Node to Guides... | missing |
 | Find missing files | Utilities > Find Missing Files... | missing |
-| Install hotkeys, marking menu (Y), B/M drags | GroomLab > Install Hotkeys | partial: B drag, Shift+middle, S, Esc, Tab, F, Page Up/Down are built in; no marking menu or user-bindable commands |
+| Install hotkeys, radial menu (Alt+S), B/M drags | GroomLab > Install Hotkeys | partial: B drag, Shift+middle, S, Esc, Tab, F, Page Up/Down are built in; no user-bindable commands. Alt+S opens the radial menu (marking_menu.json's radialMenu: Masking, Visibility with its Groups, Brushes A/B, Brush Options; every item on the current groom), as in Maya (Alt+S with the GroomLab hotkey set); Blender's pie still reads markingMenu |
+| Hide guides one by one (the hidden layer: not drawn, not picked, locked) and Smooth's Length / Shape / All | the radial menu > Visibility; Smooth's Evens out row | *new*: the core's (kHiddenLayer, SmoothMode); app only so far, Maya and Blender to follow |
 | Theme follow in the viewport | automatic | present by design (the shipped themes are embedded) |
 
 ## Still missing, in order of artist value

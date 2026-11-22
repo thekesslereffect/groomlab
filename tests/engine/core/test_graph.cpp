@@ -1141,6 +1141,9 @@ TEST(GraphControls, EveryHostMakesAndReadsControlsAlike) {
     EXPECT_EQ(controls["width"]["kind"], "control");
     EXPECT_EQ(controls["noise_amplitude"]["kind"], "keyed");
     EXPECT_EQ(controls["color_dyeG"]["component"], 1);
+    // Each keyed param's spec kind (a host's attribute type: Maya's double, long, bool, double3).
+    EXPECT_EQ(controls["noise_amplitude"]["valueKind"], "float");
+    EXPECT_EQ(controls["color_dyeG"]["valueKind"], "vec3");
     json unset = json::parse(edit.toJson());
     for (json& n : unset["nodes"]) {
         if (n["name"] == "noise") n["params"].erase("amplitude");

@@ -373,18 +373,21 @@ class ToolSession(object):
         return {"PASS_THROUGH"}
 
     def drag_slider(self, context, scalp, event):
-        """B / M held + drag: the radius (a pixel a pixel) or the strength (200 px for 1), the ring
-        redrawn where the drag started, the value in the status line."""
+        """B / M held + drag: the radius (a pixel a pixel) or the strength (0.01 a pixel), every host's
+        rule (the helper's tool_drag: the editor's dragToolSetting), the ring redrawn where the drag
+        started, the value in the status line."""
         setting, x0, v0, (view, rx, ry) = self.slider
         t = context.scene.groomlab_tools
         dx = float(event.mouse_x) - x0
+        try:
+            value = tools.call(scalp, "tool_drag", setting=setting, start=float(v0), dx=dx)["value"]
+        except HelperError:
+            value = v0
         if setting == "radius":
-            t.radius = max(1, int(round(v0 + dx)))
+            t.radius = int(round(value))
             tools.status(context.scene, "Radius %d px" % t.radius)
         else:
-            info = tools.tool_info(t.tool)
-            lo = -1.0 if info and info.get("signed") else 0.0
-            t.strength = min(1.0, max(lo, v0 + dx / 200.0))
+            t.strength = float(value)
             tools.status(context.scene, "Strength %.2f" % t.strength)
         if t.tool != "select":
             try:
@@ -1618,6 +1621,32 @@ class GROOMLAB_OT_flow_clear(GroomToolOperator):
         return {"FINISHED"}
 
 
+class GROOMLAB_OT_clone_pick_source(GroomToolOperator):
+    """The Clone tool's next click copies the guides rooted in the brush circle (Ctrl+click does the same any time)"""
+    bl_idname = "groomlab.clone_pick_source"
+    bl_label = "Pick Source"
+
+    def execute(self, context):
+        try:
+            tools.clone_action(active(context), clonePickSource=not context.scene.groomlab_tools.clone_pick_source)
+        except HelperError as e:
+            return _fail(self, e)
+        return {"FINISHED"}
+
+
+class GROOMLAB_OT_clone_reset(GroomToolOperator):
+    """Let the Clone tool's source go, ready for a new pick (a Ctrl+click off the model, or picking another tool, does the same)"""
+    bl_idname = "groomlab.clone_reset"
+    bl_label = "Reset Clone Source"
+
+    def execute(self, context):
+        try:
+            tools.clone_action(active(context), cloneReset=True)
+        except HelperError as e:
+            return _fail(self, e)
+        return {"FINISHED"}
+
+
 class GROOMLAB_OT_length_edit(GroomToolOperator):
     """An edit of the Length Keys tool's keys (the Keys box): Delete Key, Clear, Cancel or Apply"""
     bl_idname = "groomlab.length_edit"
@@ -2431,7 +2460,7 @@ classes = (GROOMLAB_OT_tool_modal, GROOMLAB_OT_tool, GROOMLAB_OT_tool_exit, GROO
            GROOMLAB_OT_alpha_add, GROOMLAB_OT_alpha_folder, GROOMLAB_OT_alpha_clear,
            GROOMLAB_OT_group_color, GROOMLAB_OT_group_promote_demote, GROOMLAB_OT_guides_mirror_group,
            GROOMLAB_OT_guides_reparent, GROOMLAB_OT_guides_regroup, GROOMLAB_OT_part_remove, GROOMLAB_OT_parts_clear, GROOMLAB_OT_guides_from_curves, GROOMLAB_OT_parts_from_curves, GROOMLAB_OT_guides_to_curves,
-           GROOMLAB_OT_curves_to_guides, GROOMLAB_OT_strands_to_curves, GROOMLAB_OT_flow_clear,
+           GROOMLAB_OT_curves_to_guides, GROOMLAB_OT_strands_to_curves, GROOMLAB_OT_flow_clear, GROOMLAB_OT_clone_pick_source, GROOMLAB_OT_clone_reset,
            GROOMLAB_OT_length_edit, GROOMLAB_OT_root_tube, GROOMLAB_OT_tube_level,
            GROOMLAB_OT_tube_apply, GROOMLAB_OT_tube_smooth, GROOMLAB_OT_tube_shape_custom, GROOMLAB_OT_tube_shape_new,
            GROOMLAB_OT_tube_shape_rename, GROOMLAB_OT_tube_shape_remove, GROOMLAB_OT_corrective_new,

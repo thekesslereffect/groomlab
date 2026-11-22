@@ -492,7 +492,7 @@ struct DisplaySettings {
     // hides them for a stroke; the guides, the selection and the overlays stay. A viewport toggle:
     // renders and exports never read it.
     bool hair = true;
-    // Guides.
+    // Guides (off: their part lines and flow arrows hidden with them).
     bool guides = true, tubes = false;
     // The Tube brush's tubes (every host's, as Maya's draw override shows them): every guide the
     // brush can shape (activeTubeGuides) as a wire (tubeWires; the selected ones apart, warm) and/or
@@ -519,7 +519,8 @@ struct DisplaySettings {
     std::string hiddenGuideGroups, guideGroupColors;
     std::string tubeViewGroup;  // Lock view: the group whose tubes alone draw ("": tubes as their guides; TubeDisplayOptions)
     std::string mixedView;      // Mixed view: "<base group>:<level>" (MixedView), "" off
-    // Overlays and cards.
+    // Overlays and cards. The flow arrows show while the guides do too (`guides` off hides the
+    // guides, the part lines and the flow: the hosts' guides eye, issue #99).
     bool flow = true;
     bool drawCards = false;     // the cards draw here (cardsView, and no card mesh draws them)
     bool cardTextures = false;  // ... with their baked maps (loaded by the host)

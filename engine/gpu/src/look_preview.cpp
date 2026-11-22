@@ -281,6 +281,29 @@ void LookPreview::forgetBase() {
     baseNode_ = 0;
 }
 
+bool LookPreview::warmStroke(const GroomSession& session) {
+    const GraphDocument* doc = session.viewDocument();
+    if (!doc) return false;
+    LookChain chain;
+    std::string why;
+    if (!findLookChain(*doc, &chain, &why)) return false;
+    bool made = false;
+    for (const LookStage& stage : chain.stages) {
+        if (stage.kind != StageKind::Interpolate) continue;
+        NodeId scalpNode = 0;
+        std::size_t scalpOutput = 0;
+        if (!doc->graph.inputSource(stage.node, 2, &scalpNode, &scalpOutput)) continue;
+        const MeshPtr scalp = valueAs<MeshPtr>(doc->graph.cachedValue(scalpNode, scalpOutput));
+        if (!scalp || warmedScalp_.lock() == scalp) continue;
+        warmedScalp_ = scalp;
+        const ParamSet& params = doc->graph.node(stage.node).params();
+        if (!interpolateKeepsClearance(params, scalp.get())) continue;
+        std::string whyNot;
+        made = interpolateClearance(params, scalp, &whyNot) != nullptr || made;
+    }
+    return made;
+}
+
 void LookPreview::reset() {
     endStroke();
     forgetBase();

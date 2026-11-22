@@ -104,6 +104,9 @@ signals:
     void lengthsPreviewed();    // the Keys block changed the Length Keys preview: evaluate and redraw
 
 private:
+    // A widget's writer of setting `id` (the editor's setToolSetting; `whole`: a whole number).
+    std::function<void(double)> numberSetter(const char* id, bool whole = false);
+    std::function<void(bool)> switchSetter(const char* id);
     QLabel* toolIcon_ = nullptr;   // the card's header: the tool's icon and name
     QLabel* toolTitle_ = nullptr;
     QLabel* toolHint_ = nullptr;   // under the title: what the tool does (setSubtitle)
@@ -171,6 +174,8 @@ private:
     // The others.
     CardBlock* paints_ = nullptr;
     std::vector<QToolButton*> tubeChannels_;
+    CardBlock* evens_ = nullptr;  // Smooth: what it evens out (choices.smoothMode)
+    std::vector<QToolButton*> smoothModes_;
     CardBlock* erases_ = nullptr;
     CardBlock* parts_ = nullptr;
     QLineEdit* partName_ = nullptr;
@@ -194,6 +199,11 @@ private:
     QLabel* flowHint_ = nullptr;
     QLabel* flowCount_ = nullptr;
     QPushButton* clearFlow_ = nullptr;
+    // Clone (issue 91): Pick Source (the next click captures), Reset, what the source holds.
+    CardBlock* clone_ = nullptr;
+    QPushButton* clonePick_ = nullptr;
+    QPushButton* cloneReset_ = nullptr;
+    QLabel* cloneCount_ = nullptr;
     // The tubes' blocks (another panel's).
     QVBoxLayout* tubeSlot_ = nullptr;
     TubePanel* tubes_ = nullptr;

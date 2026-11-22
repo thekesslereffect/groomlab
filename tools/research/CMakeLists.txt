@@ -21,11 +21,11 @@ groomlab_research(research_baked_binding baked_binding/bench_baked_binding.cpp)
 
 groomlab_research(research_curl_sweeps curl_sweeps/bench_curl_sweeps.cpp)
 target_link_libraries(research_curl_sweeps PRIVATE nlohmann_json::nlohmann_json)
-target_compile_definitions(research_curl_sweeps PRIVATE "RESEARCH_PRESETS=\"${PROJECT_SOURCE_DIR}/hosts/maya/presets\"")
+target_compile_definitions(research_curl_sweeps PRIVATE "RESEARCH_PRESETS=\"${PROJECT_SOURCE_DIR}/engine/assets/presets\"")
 
 groomlab_research(research_clump_lod clump_lod/bench_clump_lod.cpp)
-target_compile_definitions(research_clump_lod PRIVATE "RESEARCH_PRESETS=\"${PROJECT_SOURCE_DIR}/hosts/maya/presets\"")
+target_compile_definitions(research_clump_lod PRIVATE "RESEARCH_PRESETS=\"${PROJECT_SOURCE_DIR}/engine/assets/presets\"")
 
 groomlab_research(research_curl_b1 curl_sweeps/measure_curl_b1.cpp)
 target_link_libraries(research_curl_b1 PRIVATE nlohmann_json::nlohmann_json)
-target_compile_definitions(research_curl_b1 PRIVATE "RESEARCH_PRESETS=\"${PROJECT_SOURCE_DIR}/hosts/maya/presets\"")
+target_compile_definitions(research_curl_b1 PRIVATE "RESEARCH_PRESETS=\"${PROJECT_SOURCE_DIR}/engine/assets/presets\"")

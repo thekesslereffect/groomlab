@@ -84,6 +84,12 @@ public:
         bool vertexUVs = false;
         bool positiveRootWidths = false;
         bool pointChannels = false;  // also every point channel (float, per vertex) by its name
+        // Everything per vertex, for renderers that read hair user data point by point (Redshift's
+        // proxy, issue 81): Cd (the appearance) and hair_color (the hair's own RGB, the base color
+        // Arnold's shader takes) at every point, a tip blend's own colors where the strands carry
+        // them; each strand channel (melanin, melaninRedness...) at its strand's points; and every
+        // point channel (as pointChannels).
+        bool vertexData = false;
     };
 
     AlembicCurvesWriter(const std::string& path, const std::string& name, double startSeconds,

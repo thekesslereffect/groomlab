@@ -356,6 +356,20 @@ TEST(BrushPack, BindParamMapFindsOrWiresTheMap) {
     for (const nlohmann::json& n : layer["nodes"]) {
         if (n["name"] == "noise") EXPECT_EQ(n["params"]["amplitude"]["guide"], "wild");
     }
+    auto feeds = [](const nlohmann::json& g, const std::string& to) {
+        std::vector<std::string> from;
+        for (const nlohmann::json& c : g["connections"]) {
+            if (c["to"] == to && c["input"] == "guides") from.push_back(c["from"]);
+        }
+        return from;
+    };
+    EXPECT_TRUE(feeds(layer, "noise").empty()) << "after the strands: a strand channel, no guides wired";
+    // Before the strands (Scatter's density): the graph's guides fed to the node's guides input, once.
+    const nlohmann::json dense = nlohmann::json::parse(wireParamMap("", none, "scatter", "density", "thick", "guides"));
+    EXPECT_EQ(feeds(dense, "scatter"), std::vector<std::string>{"guides"});
+    EXPECT_EQ(feeds(nlohmann::json::parse(wireParamMap(dense.dump(), none, "scatter", "density", "thick", "guides")), "scatter"),
+              std::vector<std::string>{"guides"});
+    EXPECT_TRUE(feeds(nlohmann::json::parse(wireParamMap("", none, "scatter", "density", "thick", "vertices")), "scatter").empty());
 
     // A param naming its map (Interpolate's regionMap, New Map > For > Interpolation regions): the
     // map's name in it, whatever its kind; a name of no map refused.

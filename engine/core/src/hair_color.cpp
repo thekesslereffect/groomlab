@@ -69,6 +69,18 @@ HairLobes hairLobes(float specular, float roughness, float tilt) {
 
 HairLobes hairLobes(const HairLook& look) { return hairLobes(look.specular, look.roughness, look.tilt); }
 
+PrincipledHair principledHair(const HairLook& look) {
+    const HairLobes lobes = hairLobes(look);
+    PrincipledHair p;
+    p.byColor = look.colorsByRgb || look.colorBlends;
+    p.tint = p.byColor ? std::array<float, 3>{1.0f, 1.0f, 1.0f} : look.dye;
+    p.roughness = lobes.roughness;
+    p.azimuthalRoughness = lobes.azimuthalRoughness;
+    p.ior = lobes.ior;
+    p.angleShift = lobes.shiftDegrees;
+    return p;
+}
+
 float hairLongitudinalWidth(float roughness) {
     // d'Eon's variance v = (0.726 b + 0.812 b^2 + 3.7 b^20)^2 of a lobe that, around the specular
     // cone, is close to a Gaussian in theta_i + theta_o of variance v: in theta_h, of variance v / 4

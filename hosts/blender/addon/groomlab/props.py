@@ -146,8 +146,9 @@ class GroomLabObject(bpy.types.PropertyGroup):
     follow_scalp: BoolProperty(name="Follow Scalp", default=True, update=_settings_changed,
                                description="On a deforming scalp (armature, shape keys) the groom is made on the rest "
                                            "pose and each strand carried along by its root")
-    graph_json: StringProperty()  # the graph, kept current (rebuilds a session if the helper restarts)
-    snapshot: StringProperty()    # the whole groom as a .groom text, written when the .blend is saved
+    graph_json: StringProperty()  # the session's graph, kept current: what Blender's undo puts back (graph_tree.after_undo)
+    snapshot: StringProperty()    # B2's grooms: the whole groom as a .groom text, written when the .blend is saved
+    #                               (GroomLab-tools grooms keep their state instead: groomlab_tools.state)
     groom_file: StringProperty(subtype="FILE_PATH",  # Save to / Reload from Groom File (Maya's linked file)
                                description="The groom file this groom was opened from or saved to last")
     # The groom's name in groom files (the one it was opened with: Maya's groomLab1 stays groomLab1

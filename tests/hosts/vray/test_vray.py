@@ -61,13 +61,13 @@ def read_obj_uv(path):
 def head_graph(density=60.0, color=None, wind=False, preset=None):
     """head_graph.json (strands along the scalp, combed down, clumped, brown), at `density` strands a
     cm2; `color`: HairColor's params replaced; `wind`: a Wind before the output (it moves);
-    `preset`: a shipped preset's look (hosts/maya/presets/<preset>.json: its nodes after its
+    `preset`: a shipped preset's look (engine/assets/presets/<preset>.json: its nodes after its
     Interpolate) after the head's combing in place of the head's own."""
     with open(os.path.join(APP, "head_graph.json")) as f:
         graph = json.load(f)
     graph = {k: graph[k] for k in ("nodes", "connections", "output")}
     if preset:
-        with open(os.path.join(ROOT, "hosts", "maya", "presets", preset + ".json")) as f:
+        with open(os.path.join(ROOT, "engine", "assets", "presets", preset + ".json")) as f:
             look = json.load(f)
         keep = ["scalp", "guides", "scatter", "interpolate", "combAlong", "combDown", "collide"]
         nodes = [n for n in graph["nodes"] if n["name"] in keep]

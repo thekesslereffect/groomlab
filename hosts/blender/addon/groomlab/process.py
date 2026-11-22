@@ -33,6 +33,20 @@ def log_path():
     return os.path.join(tempfile.gettempdir(), "groomlab-helper-%d.log" % os.getpid())
 
 
+def _check_version(hello):
+    """The helper is the add-on's own build: a helper of another version (left from an earlier
+    install, the extension's files half replaced) is refused here, at its start, not part way through
+    a command it lacks. Skipped for a helper the environment names (GROOMLAB_HELPER: a developer's
+    build) and where either version is unknown."""
+    if os.environ.get("GROOMLAB_HELPER"):
+        return
+    from . import updates
+    mine, theirs = updates.current_version(), str(hello.get("version") or "")
+    if mine and theirs and mine != theirs:
+        raise HelperError("version", "the GroomLab helper is version %s, the add-on %s: reinstall the GroomLab extension"
+                          % (theirs, mine))
+
+
 def _start():
     global _client, _hello, _generation
     exe = helper_path()
@@ -47,6 +61,7 @@ def _start():
     client = HelperClient(exe, log=log_path())
     try:
         hello = client.call("hello", protocol=PROTOCOL)
+        _check_version(hello)
     except Exception:
         client.close()
         raise

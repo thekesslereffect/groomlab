@@ -10,6 +10,7 @@
 #include <vector>
 
 #include <QCheckBox>
+#include <QCursor>
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
@@ -19,6 +20,7 @@
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSettings>
+#include <QShortcut>
 #include <QSplitter>
 #include <QTimer>
 #include <QGridLayout>
@@ -309,12 +311,28 @@ void MainWindow::buildPanels() {
 }
 
 void MainWindow::wireOverlay() {
-    // The marking menu (Y + click over the viewport, marking_menu.json): the press opens it, the
-    // drag and the release that follow go to it (the viewport keeps the mouse meanwhile).
+    // The radial menu (marking_menu.json's radialMenu).
     markingMenu_ = new MarkingMenu(host_);
-    connect(viewport_, &Viewport::markingMenuPressed, this, [this](QPointF at) { showMarkingMenu(viewport_->mapTo(host_, at), true); });
-    connect(viewport_, &Viewport::markingMenuDragged, this, [this](QPointF at) { markingMenu_->track(viewport_->mapTo(host_, at)); });
-    connect(viewport_, &Viewport::markingMenuReleased, this, [this](QPointF at) { markingMenu_->release(viewport_->mapTo(host_, at)); });
+    // Alt+S: the radial menu around the cursor at once (over the viewport; else in its middle);
+    // letting S go over an item picks it (MarkingMenu::popupHeldKey). Again while it shows: closed.
+    // The shortcut and the size are the person's (Radial Menu Settings..., the wheel over the menu).
+    const QSettings settings;
+    radialShortcut_ = new QShortcut(QKeySequence(settings.value(QStringLiteral("radialMenu/shortcut"), QStringLiteral("Alt+S")).toString()), this);
+    radialShortcut_->setObjectName(QStringLiteral("radialMenuShortcut"));
+    radialShortcut_->setAutoRepeat(false);
+    markingMenu_->setScale(settings.value(QStringLiteral("radialMenu/scale"), 1.0).toDouble());
+    connect(markingMenu_, &MarkingMenu::scaleChanged, this, [this](qreal scale) { setRadialMenuScale(scale); });
+    connect(radialShortcut_, &QShortcut::activated, this, [this] {
+        if (markingMenu_->shown()) {
+            markingMenu_->dismiss();
+            return;
+        }
+        QPointF at = viewport_->mapFromGlobal(QCursor::pos().toPointF());
+        if (!viewport_->rect().contains(at.toPoint())) at = QPointF(viewport_->width() / 2.0, viewport_->height() / 2.0);
+        // (the key held is the shortcut's own, its modifiers aside: S of Alt+S)
+        const QKeySequence keys = radialShortcut_->key();
+        showMarkingMenu(viewport_->mapTo(host_, at), false, keys.isEmpty() ? 0 : int(keys[0].key()));
+    });
     connect(markingMenu_, &MarkingMenu::picked, this, [this](const MarkingMenu::Item& item) { AppActions::runMarkingMenuItem(*this, item); });
     connect(markingMenu_, &MarkingMenu::dismissed, this, [this] { viewport_->setFocus(); });
     connect(host_, &OverlayHost::undoRequested, this, [this] { undo(); });
@@ -486,13 +504,28 @@ void MainWindow::wireTimelineCardsAndExport() {
 
 namespace groomlab::app {
 
-bool MainWindow::showMarkingMenu(QPointF at, bool held) {
+QKeySequence MainWindow::radialMenuShortcut() const { return radialShortcut_ ? radialShortcut_->key() : QKeySequence(); }
+
+void MainWindow::setRadialMenuShortcut(const QKeySequence& keys) {
+    const QKeySequence use = keys.isEmpty() ? QKeySequence(Qt::ALT | Qt::Key_S) : QKeySequence(keys[0]);
+    radialShortcut_->setKey(use);
+    QSettings().setValue(QStringLiteral("radialMenu/shortcut"), use.toString(QKeySequence::PortableText));
+}
+
+void MainWindow::setRadialMenuScale(qreal scale) {
+    markingMenu_->setScale(scale);
+    QSettings().setValue(QStringLiteral("radialMenu/scale"), markingMenu_->scale());
+}
+
+bool MainWindow::showMarkingMenu(QPointF at, bool held, int key) {
     if (!document_) {
-        report(tr("Open a groom first: the marking menu picks its tools"));
+        report(tr("Open a groom first: the radial menu works on its guides"));
         return false;
     }
-    markingMenu_->setItems(AppActions::markingMenuItems(*this));
-    markingMenu_->popup(at, held);
+    markingMenu_->setItems(AppActions::radialMenuItems(*this));
+    markingMenu_->setContext(QString::fromStdString(document_->displayName()));  // the groom it works on
+    if (key != 0) markingMenu_->popupHeldKey(at, key);
+    else markingMenu_->popup(at, held);
     return true;
 }
 
@@ -505,7 +538,8 @@ void MainWindow::chooseTool(const QString& id) {
         return;
     }
     if (tool == "select") {
-        // The Select tool, or (picked again) the camera.
+        // The Select tool (freezing what it leaves out), or (picked again) the camera.
+        brush_.selectHides = false;
         viewport_->setToolMode(viewport_->toolMode() == Viewport::ToolMode::Select ? Viewport::ToolMode::Camera : Viewport::ToolMode::Select);
         return;
     }

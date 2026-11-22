@@ -91,6 +91,9 @@ public:
     // After a stroke's press was evaluated and shown: whether the GPU takes the next dabs.
     bool armStroke(std::string* why);
     bool strokeArmed() const { return core_.strokeArmed(); }
+    // Between strokes in brush mode: what the GPU's first stroke on the scalp would make at its
+    // press, made now (gpu::LookPreview::warmStroke, issue #101).
+    void warmStroke();
     // The node a dab's evaluation stops at while armed (the Interpolate the GPU runs from).
     const std::string& stopAt() const { return core_.stopAt(); }
     // After an evaluation that stopped there: whether the GPU draws this dab (the plan is kept

@@ -23,6 +23,7 @@ struct GuidePick {
     bool rootsOnly = false;
     float clickPixels = 12.0f;
     bool solo = true;
+    bool hide = false;  // solo hides the rest instead of freezing it (groomLabGuides -hideOthers)
     std::string symmetry = "none";
 };
 // Selects the active groom's guides in a lasso (or, with one point, a click) in view coordinates,
@@ -35,7 +36,7 @@ int selectGuidesInView(const std::vector<std::array<float, 2>>& lasso, const std
 std::vector<GuideId> pickGuidesInView(const std::vector<std::array<float, 2>>& lasso, const GuidePick& pick);
 // The active groom's selection set from `ids` by `mode` (as selectGuidesInView applies a pick):
 // `undoable` false for a live preview (a brush's Ctrl+Shift painting) that an undoable one replaces.
-bool applyGuideSelection(const std::vector<GuideId>& ids, const std::string& mode, bool solo, bool undoable);
+bool applyGuideSelection(const std::vector<GuideId>& ids, const std::string& mode, bool solo, bool undoable, bool hide = false);
 
 // Guide selection tool (GT-5): drag a lasso in the viewport around guides of
 // the selected groom, or click near one. Plain: replace the selection;
@@ -63,6 +64,8 @@ public:
     // Solo: each pick freezes every guide not selected (nothing picked: all unfrozen), in the
     // selection's undo step (groomLabGuides -freezeOthers).
     bool soloSelection = true;
+    // Solo hides every guide not selected instead (kHiddenLayer: the radial menu's Visibility > Select).
+    bool hideOthers = false;
     // Symmetry ("none", "x" or "topology", as the brushes name it): a pick takes each picked
     // guide's mirror guide too.
     std::string symmetry = "none";
@@ -73,7 +76,7 @@ private:
 };
 
 // groomLabSelectCtx: creates and edits guide selection contexts.
-//   groomLabSelectCtx -e [-level l | -group g] [-rootsOnly b] [-soloSelection b] [-symmetry s] ctxName
+//   groomLabSelectCtx -e [-level l | -group g] [-rootsOnly b] [-soloSelection b] [-hideOthers b] [-symmetry s] ctxName
 //   groomLabSelectCtx -e -debugLasso "x y x y ..." [-debugMode add] ctxName   (tests)
 class GuideSelectContextCmd : public MPxContextCommand {
 public:

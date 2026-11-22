@@ -22,6 +22,7 @@
 
 #include "asset_files.h"
 #include "groom_shape.h"
+#include "groomlab/editor/map_edits.h"
 #include "groomlab/guide_hierarchy.h"
 #include "groomlab/scalp_paint.h"
 #include "groomlab/asset_files.h"
@@ -58,6 +59,14 @@ const char* kSetChannels[] = {"-sch", "-setChannels"};
 const char* kRelink[] = {"-rl", "-relink"};
 const char* kCopyFrom[] = {"-cf", "-copyFrom"};
 const char* kDeleteFile[] = {"-df", "-deleteFile"};
+// -fill on the selected guides only (a guide layer: Fill Selected).
+const char* kSelected[] = {"-sel", "-selected"};
+// Paint on a setting (node, param): the map it reads, else -mapName (its own by default) made as
+// -kind and linked, or -channel (r g b a) of a color map through its Map node. Returns the map,
+// its kind and the channel ("" its value).
+const char* kPaintParam[] = {"-pp", "-paintParam"};
+const char* kMapName[] = {"-mn", "-mapName"};
+const char* kChannel[] = {"-chn", "-channel"};
 // The scalp's faces (polygon indices, space separated): -make makes the map 0 with -value (or
 // -fillColor) on those faces only; -fill fills those faces only. A guide layer: the guides
 // rooted on them.
@@ -98,6 +107,10 @@ MSyntax ScalpMapsCmd::newSyntax() {
     s.addFlag(kRelink[0], kRelink[1], MSyntax::kString);
     s.addFlag(kCopyFrom[0], kCopyFrom[1], MSyntax::kString);
     s.addFlag(kDeleteFile[0], kDeleteFile[1]);
+    s.addFlag(kSelected[0], kSelected[1]);
+    s.addFlag(kPaintParam[0], kPaintParam[1], MSyntax::kString, MSyntax::kString);
+    s.addFlag(kMapName[0], kMapName[1], MSyntax::kString);
+    s.addFlag(kChannel[0], kChannel[1], MSyntax::kString);
     s.addFlag(kFaces[0], kFaces[1], MSyntax::kString);
     s.setObjectType(MSyntax::kSelectionList, 0, 1);
     s.useSelectionAsDefault(true);
@@ -121,7 +134,7 @@ MStatus ScalpMapsCmd::doIt(const MArgList& args) {
         const int actions = int(db.isFlagSet(kList[0])) + int(db.isFlagSet(kKindOf[0])) + int(db.isFlagSet(kAdd[0])) +
                             int(db.isFlagSet(kRemove[0])) + int(db.isFlagSet(kRename[0])) + int(db.isFlagSet(kFill[0])) +
                             int(db.isFlagSet(kConvert[0])) + int(db.isFlagSet(kValues[0])) + int(db.isFlagSet(kChannelsOf[0])) +
-                            int(db.isFlagSet(kSetChannels[0])) + int(db.isFlagSet(kRelink[0]));
+                            int(db.isFlagSet(kSetChannels[0])) + int(db.isFlagSet(kRelink[0])) + int(db.isFlagSet(kPaintParam[0]));
         if (actions != 1) return fail(kName, "give exactly one action flag");
 
         // Questions about the maps: the shape's parses of scalpMaps and guideData (kept while they
@@ -217,34 +230,6 @@ MStatus ScalpMapsCmd::doIt(const MArgList& args) {
             const std::string free = freeFilePath(full);
             return free == full ? stored : portableMayaPath(free);
         };
-        auto texturePaint = [&](const std::string& stored, int channels) -> TexturePaint {
-            if (!scalp) throw std::runtime_error("the groom has no scalp mesh");
-            return *openTexturePaint(*scalp, resolve(stored), channels, resolution);  // as every host opens it (scalp_paint.h)
-        };
-        // Writes the file; one that was there keeps its bytes for undo. Only ever a PNG (what
-        // painting writes): a map linked to another format is relinked to a PNG copy first.
-        auto writeTexture = [&](const TexturePaint& paint, const std::string& stored) {
-            const std::string full = resolve(stored);
-            if (!isPngPath(full)) {
-                throw std::runtime_error(full + " is not a PNG, and a texture map is written as PNG: link the map to "
-                                                "its image again (groomlab.set_map_texture paints a PNG copy)");
-            }
-            std::error_code ec;
-            const std::filesystem::path folder = std::filesystem::u8path(full).parent_path();
-            if (!folder.empty()) std::filesystem::create_directories(folder, ec);
-            // (A tile set: each tile's file, udim.h.)
-            std::vector<FileState> states = mapImageStates(full, paint.udim() ? paint.udimLayout()->tiles : std::vector<int>{});
-            paint.save(full);
-            finishFileStates(states);
-            files_.insert(files_.end(), states.begin(), states.end());
-        };
-        // Before rewriting a texture map's file another groom reads too: this groom's own copy.
-        auto ownFile = [&](const std::string& name) {
-            const std::string full = resolve(maps.maps[name].texture);
-            if (!fileUsedByOtherGroom(groomNode, full)) return false;
-            maps.maps[name].texture = portableMayaPath(forkTextureFile(groomPath, name, full));
-            return true;
-        };
         const bool makeColor = db.isFlagSet(kColor[0]);
         // -faces: the polygons a make or fill is limited to (none given: everywhere).
         const bool onFaces = db.isFlagSet(kFaces[0]);
@@ -262,132 +247,118 @@ MStatus ScalpMapsCmd::doIt(const MArgList& args) {
         try {
             if (db.isFlagSet(kAdd[0])) {
                 const std::string name = flagString(db, kAdd[0]).asChar();
-                const std::string kind = flagString(db, kKind[0], "guides").asChar();
-                if (!validMapName(name)) return fail(kName, mapNameError(name).c_str());  // the hosts' one rule (scalp_maps.h)
-                if (!kindOf(maps, *h, name).empty()) return fail(kName, ("the groom already has a map named " + name).c_str());
-                if (makeColor && kind == "guides") {
-                    return fail(kName, "a guide layer is gray: make a color map on the scalp's vertices or as a texture");
-                }
-                // (Every host's New Map: scalp_paint.h newVertexMapValues, newTextureMapPaint, addGuideLayer.)
-                const int channels = makeColor ? kColorMap : kGrayMap;
-                const PaintColor fill = makeColor ? color : PaintColor{value, value, value, 1.0f};
-                if (kind == "guides") {
-                    addGuideLayer(*h, name, value, scalp.get(), onFaces ? faces : std::vector<std::int32_t>{});
-                    guidesChanged = true;
-                } else if (kind == "vertices") {
-                    if (!scalp) return fail(kName, "the groom has no scalp mesh");
-                    ScalpMapEntry entry{"vertices", newVertexMapValues(*scalp, channels, fill, onFaces ? faces : std::vector<std::int32_t>{}), ""};
-                    entry.channels = channels;
-                    maps.maps[name] = std::move(entry);
-                    mapsChanged = true;
-                } else if (kind == "texture") {
+                // Every host's New Map (the editor's createMap, map_edits.h): a texture map's image
+                // written at -texture (a free name when taken, stored as given), its files' states kept
+                // for Maya's undo.
+                MapCreateRequest create;
+                create.kind = flagString(db, kKind[0], "guides").asChar();
+                create.color = makeColor;
+                create.value = value;
+                if (db.isFlagSet(kFillColor[0])) create.fill = color;
+                create.resolution = resolution;
+                if (onFaces) create.faces = faces;
+                if (create.kind == "texture") {
                     if (texturePath.empty()) return fail(kName, "a texture map needs -texture <file>");
-                    if (!scalp) return fail(kName, "the groom has no scalp mesh");
-                    TexturePaint paint = newTextureMapPaint(*scalp, channels, fill, resolution, onFaces ? faces : std::vector<std::int32_t>{});
-                    const std::string stored = freshTexture(texturePath);
-                    writeTexture(paint, stored);
-                    ScalpMapEntry entry{"texture", {}, stored};
-                    entry.channels = makeColor ? kColorMap : kGrayMap;
-                    maps.maps[name] = std::move(entry);
-                    mapsChanged = true;
-                } else {
-                    return fail(kName, "-kind takes guides, vertices or texture");
+                    create.texturePath = resolve(texturePath);
                 }
-            } else if (db.isFlagSet(kRemove[0])) {
-                const std::string name = flagString(db, kRemove[0]).asChar();
-                const std::string kind = kindOf(maps, *h, name);
-                if (kind.empty()) return fail(kName, ("no map named " + name).c_str());
-                if (kind == "guides") {
-                    h->removeAttribute(name);
+                MapFiles files;
+                files.mapsFolder = assetFolder("masks") + "/" + assetName(groomPath);
+                files.resolve = resolve;
+                files.store = [&](const std::string& full) {
+                    return samePathText(full, create.texturePath) ? texturePath : portableMayaPath(full);
+                };
+                MapCreate made = createMap(maps, h.get(), scalp.get(), name, create, files);
+                if (made.guideLayer) {
+                    applyCreatedLayer(*h, name, made);
                     guidesChanged = true;
                 } else {
-                    // A texture map's file stays on disk, unless -deleteFile, it is in the groom's
-                    // masks folder (one GroomLab made: every host's rule) and nothing else reads it
-                    // (another map of this groom, another groom): its bytes kept for undo; a tile
-                    // set's every tile (udim.h).
-                    const std::string file = kind == "texture" ? resolve(maps.maps[name].texture) : "";
-                    maps.maps.erase(name);
+                    maps = std::move(made.maps);
                     mapsChanged = true;
-                    const bool shared = !file.empty() && (fileUsedByOtherGroom(groomNode, file) ||
-                        std::any_of(maps.maps.begin(), maps.maps.end(), [&](const auto& m) {
-                            return m.second.kind == "texture" && sameFile(resolve(m.second.texture), file);
-                        }));
-                    if (db.isFlagSet(kDeleteFile[0]) && mapImageDeletable(file, assetFolder("masks") + "/" + assetName(groomPath), shared)) {
-                        for (FileState& tile : mapImageStates(file)) {
-                            if (tile.before) deleted_.push_back(std::move(tile));  // (after: none)
-                        }
-                    }
                 }
-            } else if (db.isFlagSet(kRename[0])) {
-                MString from, to;
-                db.getFlagArgument(kRename[0], 0, from);
-                db.getFlagArgument(kRename[0], 1, to);
-                const std::string kind = kindOf(maps, *h, from.asChar());
-                if (kind.empty()) return fail(kName, "no map named " + from);
-                if (!validMapName(to.asChar())) return fail(kName, mapNameError(to.asChar()).c_str());
-                if (!kindOf(maps, *h, to.asChar()).empty()) return fail(kName, "the groom already has a map named " + to);
-                if (kind == "guides") {
-                    h->renameAttribute(from.asChar(), to.asChar());
-                    guidesChanged = true;
+                for (FileState& f : made.files) files_.push_back(std::move(f));
+            } else if (db.isFlagSet(kRemove[0]) || db.isFlagSet(kRename[0])) {
+                // Every host's Remove and Rename (the editor's map_edits.h): the graph's readers let go
+                // of the map or follow it, a texture map's image deleted (-deleteFile: GroomLab's,
+                // nothing else reading it) or following the name (moved, or copied when another map
+                // or groom reads it), its files' states kept for Maya's undo with the texts.
+                MapFiles files;
+                files.resolve = resolve;
+                files.store = [](const std::string& full) { return portableMayaPath(full); };
+                files.shared = [&](const std::string& full) { return fileUsedByOtherGroom(groomNode, full); };
+                MPlug graphPlug = groomFn.findPlug("graph", true);
+                const std::string graph = graphPlug.asString().asChar();
+                std::string graphAfter;
+                if (db.isFlagSet(kRemove[0])) {
+                    const std::string name = flagString(db, kRemove[0]).asChar();
+                    files.mapsFolder = assetFolder("masks") + "/" + assetName(groomPath);
+                    MapRemove removed = removeMap(maps, h.get(), graph, name, db.isFlagSet(kDeleteFile[0]), files);
+                    if (removed.guideLayer) {
+                        h->removeAttribute(name);
+                        guidesChanged = true;
+                    } else {
+                        maps = std::move(removed.maps);
+                        mapsChanged = true;
+                    }
+                    for (FileState& f : removed.files) deleted_.push_back(std::move(f));  // (after: none)
+                    graphAfter = std::move(removed.graph);
+                    MStringArray unlinked;  // (node, param) pairs that read it, flat
+                    for (const auto& [node, param] : removed.unlinked) {
+                        unlinked.append(node.c_str());
+                        unlinked.append(param.c_str());
+                    }
+                    setResult(unlinked);
                 } else {
-                    auto node = maps.maps.extract(from.asChar());
-                    node.key() = to.asChar();
-                    // A texture map's file follows its name when -texture gives the new file:
-                    // moved on disk (and back on undo), so the name on disk and in the Paint tab agree.
-                    // A file another groom reads too is copied instead (it keeps its file).
-                    if (kind == "texture" && !texturePath.empty() && texturePath != node.mapped().texture) {
-                        const std::string source = resolve(node.mapped().texture);
-                        const std::string target = resolve(texturePath);
-                        if (fileStamp(source) != 0) {
-                            if (fileStamp(target) != 0) return fail(kName, ("a file is in the way: " + target).c_str());
-                            copied_ = fileUsedByOtherGroom(groomNode, source);
-                            std::error_code ec;
-                            std::filesystem::create_directories(std::filesystem::u8path(target).parent_path(), ec);
-                            // (A tile set: each tile, its set's naming kept: udim.h.)
-                            for (const auto& [from, to] : mapImageMoves(source, target)) {
-                                if (copied_) {
-                                    std::filesystem::copy_file(std::filesystem::u8path(from), std::filesystem::u8path(to), ec);
-                                } else {
-                                    std::filesystem::rename(std::filesystem::u8path(from), std::filesystem::u8path(to), ec);
-                                }
-                                if (ec) return fail(kName, ("could not rename " + from + ": " + ec.message()).c_str());
-                            }
-                            moved_ = {source, target};
-                        }
-                        node.mapped().texture = texturePath;
+                    MString from, to;
+                    db.getFlagArgument(kRename[0], 0, from);
+                    db.getFlagArgument(kRename[0], 1, to);
+                    files.mapsFolder = assetFolder("masks");  // (a duplicate's shared image in another groom's folder too)
+                    MapRename renamed = renameMap(maps, h.get(), graph, from.asChar(), to.asChar(), files);
+                    if (renamed.guideLayer) {
+                        h->renameAttribute(from.asChar(), to.asChar());
+                        guidesChanged = true;
+                    } else {
+                        maps = std::move(renamed.maps);
+                        mapsChanged = true;
                     }
-                    maps.maps.insert(std::move(node));
-                    mapsChanged = true;
+                    for (FileState& f : renamed.files) files_.push_back(std::move(f));
+                    graphAfter = std::move(renamed.graph);
+                    setResult(MString(renamed.file.c_str()));
                 }
+                if (!graphAfter.empty()) modifier_.newPlugValueString(graphPlug, graphAfter.c_str());
             } else if (db.isFlagSet(kFill[0])) {
                 const std::string name = flagString(db, kFill[0]).asChar();
-                const std::string kind = kindOf(maps, *h, name);
-                if (kind.empty()) return fail(kName, ("no map named " + name).c_str());
                 const bool byColor = db.isFlagSet(kFillColor[0]);
                 if (!db.isFlagSet(kValue[0]) && !byColor) return fail(kName, "-fill needs -value or -fillColor");
-                const int channels = channelsOf(maps, *h, name);
-                if (byColor && channels != kColorMap) {
-                    return fail(kName, ("-fillColor fills a color map; " + name + " is gray (-value fills it)").c_str());
-                }
-                // A color map: the color in the channels asked for, or a value in r g b (the alpha kept).
-                const unsigned mask = byColor ? fillMask : (fillMask & 0x7u);
-                // (Every host's Fill: scalp_paint.h fillGuideLayer, fillVertexMap, fillTexturePaint.)
-                const PaintColor fill = byColor ? color : PaintColor{value, value, value, 1.0f};
-                const std::vector<std::int32_t> onThese = onFaces ? faces : std::vector<std::int32_t>{};
-                if (kind == "guides") {
-                    fillGuideLayer(*h, name, value, paintMode, {}, scalp.get(), onThese);
+                // Every host's Fill (the editor's fillMap, map_edits.h): its checks, the fill, a texture
+                // map's image rewritten (this groom's own copy when another groom or map reads it), the
+                // files' states kept for Maya's undo.
+                MapFillRequest fill;
+                fill.value = value;
+                if (byColor) fill.color = color;
+                fill.mask = fillMask;
+                fill.mode = paintMode;
+                fill.selectedOnly = db.isFlagSet(kSelected[0]);
+                if (fill.selectedOnly) fill.selected = readGuideSelection(groomNode);
+                if (onFaces) fill.faces = faces;
+                fill.resolution = resolution;
+                MapFiles files;
+                files.mapsFolder = assetFolder("masks") + "/" + assetName(groomPath);
+                files.resolve = resolve;
+                files.store = [](const std::string& full) { return portableMayaPath(full); };
+                files.shared = [&](const std::string& full) { return fileUsedByOtherGroom(groomNode, full); };
+                MapFill filled = fillMap(maps, h.get(), scalp.get(), name, fill, files);
+                if (filled.kind == "guides") {
+                    applyFilledLayer(*h, name, filled);
                     guidesChanged = true;
-                } else if (kind == "vertices") {
-                    if (!scalp) return fail(kName, "the groom has no scalp mesh");
-                    fillVertexMap(maps.maps[name].values, channels, mask, fill, paintMode, *scalp, onThese);
+                } else if (filled.mapsChanged) {
+                    maps = std::move(filled.maps);
                     mapsChanged = true;
-                } else {
-                    // A file another groom reads too: this groom gets its own copy first.
-                    mapsChanged = ownFile(name) || mapsChanged;
-                    TexturePaint paint = texturePaint(maps.maps[name].texture, channels);
-                    fillTexturePaint(paint, mask, fill, paintMode, *scalp, onThese);
-                    writeTexture(paint, maps.maps[name].texture);
                 }
+                if (!filled.file.empty()) {
+                    MGlobal::displayInfo(MString("GroomLab: ") + name.c_str() + "'s file is shared; this groom now paints its own copy, " +
+                                         resolve(filled.file).c_str());
+                }
+                for (FileState& f : filled.files) files_.push_back(std::move(f));
             } else if (db.isFlagSet(kConvert[0])) {
                 const std::string name = flagString(db, kConvert[0]).asChar();
                 const std::string from = kindOf(maps, *h, name);
@@ -399,123 +370,114 @@ MStatus ScalpMapsCmd::doIt(const MArgList& args) {
                     setResult(MString(to.c_str()));
                     return MS::kSuccess;
                 }
-                // The source as its kind holds it, converted (every host's: scalp_paint.h convertMap;
-                // a guide layer read at the guides' roots on the scalp).
-                MapSource source;
-                source.kind = from;
-                source.channels = channelsOf(maps, *h, name);
-                if (from == "vertices") {
-                    source.vertices = maps.maps[name].values;
-                } else if (from == "texture") {
-                    const std::string full = resolve(maps.maps[name].texture);
-                    if (fileStamp(full) == 0) return fail(kName, ("map " + name + "'s image is missing: " + full).c_str());
-                    source.image = loadTexture(full);
-                }
-                std::string stored;
+                // Every host's Convert (the editor's convertMapKind, map_edits.h): the image written at
+                // -texture (a free name when taken), stored as Maya stores paths, its files' states
+                // kept for Maya's undo; the guide layer onto the hierarchy.
+                std::string wanted;
                 if (to == "texture") {
-                    const std::string wanted = !texturePath.empty() ? texturePath : maps.maps.count(name) ? maps.maps[name].texture : std::string();
-                    if (wanted.empty()) return fail(kName, "a texture map needs -texture <file>");
-                    stored = freshTexture(wanted);
+                    const std::string given = !texturePath.empty() ? texturePath : maps.maps.count(name) ? maps.maps[name].texture : std::string();
+                    if (given.empty()) return fail(kName, "a texture map needs -texture <file>");
+                    wanted = resolve(given);
                 }
-                MapConverted converted;
-                try {
-                    converted = convertMap(name, source, to, *scalp, *h, resolution);
-                } catch (const std::invalid_argument& e) {
-                    return fail(kName, e.what());
-                }
+                MapFiles files;
+                files.mapsFolder = assetFolder("masks") + "/" + assetName(groomPath);
+                files.resolve = resolve;
+                files.store = [](const std::string& full) { return portableMayaPath(full); };
+                MapConvert converted = convertMapKind(maps, h.get(), *scalp, name, to, resolution, wanted, files);
                 if (converted.colorLost) {
                     MGlobal::displayWarning(MString(kName) + ": " + name.c_str() +
                                             " is a color map; on the guides it keeps its luminance (a guide layer is gray)");
                 }
-                if (to == "vertices") {
-                    ScalpMapEntry entry{"vertices", std::move(converted.vertices), ""};
-                    entry.channels = source.channels;
-                    maps.maps[name] = std::move(entry);
-                } else if (to == "texture") {
-                    writeTexture(*converted.texture, stored);
-                    ScalpMapEntry entry{"texture", {}, stored};
-                    entry.channels = source.channels;
-                    maps.maps[name] = std::move(entry);
-                } else {
-                    maps.maps.erase(name);
-                }
+                maps = std::move(converted.maps);
+                applyConvertedLayer(*h, name, converted);
+                for (FileState& f : converted.files) files_.push_back(std::move(f));
                 if (to == "guides" || from == "guides") guidesChanged = true;
                 mapsChanged = true;
                 setResult(MString(to.c_str()));
             } else if (db.isFlagSet(kRelink[0])) {
-                // The map reads another image: a PNG in place, or a PNG copy of any image.
+                // The map reads another image (the editor's relinkMap, map_edits.h, every host's): a
+                // PNG in place, or -copyFrom any image copied as a PNG to -texture (a free name), its
+                // files' states kept for Maya's undo; texture params reading the old image follow.
                 const std::string name = flagString(db, kRelink[0]).asChar();
-                const std::string kind = kindOf(maps, *h, name);
-                if (kind.empty()) return fail(kName, ("no map named " + name).c_str());
                 if (texturePath.empty()) return fail(kName, "-relink needs -texture <file>");
-                if (!isPngPath(texturePath)) {
-                    return fail(kName, "a texture map's file is a PNG (painting writes PNG): give another image as "
-                                       "-copyFrom and a .png path to copy it to");
-                }
-                const int channels = channelsOf(maps, *h, name);  // a guide layer's: gray
-                std::string stored = texturePath;
+                MapImageRequest image;
                 if (db.isFlagSet(kCopyFrom[0])) {
-                    const std::string source = resolve(flagString(db, kCopyFrom[0]).asChar());
-                    if (fileStamp(source) == 0) return fail(kName, ("no image at " + source).c_str());
-                    const TexturePtr image = loadTexture(source);  // throws when it is not an image
-                    stored = freshTexture(texturePath);
-                    const std::string full = resolve(stored);
-                    std::error_code ec;
-                    const std::filesystem::path folder = std::filesystem::u8path(full).parent_path();
-                    if (!folder.empty()) std::filesystem::create_directories(folder, ec);
-                    if (isPngPath(source) && !image->isUdim()) {
-                        std::filesystem::copy_file(std::filesystem::u8path(source), std::filesystem::u8path(full), ec);
-                        if (ec) return fail(kName, ("could not copy " + source + ": " + ec.message()).c_str());
-                    } else {
-                        writeImagePng(*image, full);  // (a tile set: each tile, at udimPathFor(full))
-                    }
-                    for (const std::string& file : mapImageFiles(full, image->isUdim() ? image->udimTiles() : std::vector<int>{})) {
-                        files_.push_back(FileState{file, std::nullopt, readFileState(file)});  // (made here: none before)
-                    }
+                    image.path = resolve(flagString(db, kCopyFrom[0]).asChar());
+                    image.copy = true;
+                    image.copyTo = resolve(texturePath);
                 } else {
-                    const std::string full = resolve(stored);
-                    if (fileStamp(full) == 0) return fail(kName, ("no image at " + full).c_str());  // (a tile set: any tile)
+                    image.path = resolve(texturePath);
+                    image.copy = false;
                 }
-                if (kind == "guides") {
+                MapFiles files;
+                files.mapsFolder = assetFolder("masks") + "/" + assetName(groomPath);
+                files.resolve = resolve;
+                const std::string given = resolve(texturePath);
+                files.store = [&](const std::string& full) { return samePathText(full, given) ? texturePath : portableMayaPath(full); };
+                MPlug graphPlug = groomFn.findPlug("graph", true);
+                MapLink linked = relinkMap(maps, h.get(), graphPlug.asString().asChar(), name, image, files);
+                if (linked.removeLayer) {
                     h->removeAttribute(name);
                     guidesChanged = true;
                 }
-                ScalpMapEntry entry{"texture", {}, stored};
-                entry.channels = channels;
-                maps.maps[name] = std::move(entry);
+                maps = std::move(linked.maps);
                 mapsChanged = relinked = true;
-                setResult(MString(stored.c_str()));
+                for (FileState& f : linked.files) files_.push_back(std::move(f));
+                if (!linked.graph.empty()) modifier_.newPlugValueString(graphPlug, linked.graph.c_str());
+                setResult(MString(linked.file.c_str()));
+            } else if (db.isFlagSet(kPaintParam[0])) {
+                // Every host's Paint on a setting (the editor's paintParam, map_edits.h): the map made
+                // (its files' states kept for Maya's undo) and the param's link in one step.
+                MString nodeArg, paramArg;
+                db.getFlagArgument(kPaintParam[0], 0, nodeArg);
+                db.getFlagArgument(kPaintParam[0], 1, paramArg);
+                ParamPaintRequest paint;
+                paint.kind = flagString(db, kKind[0], "guides").asChar();
+                paint.name = flagString(db, kMapName[0]).asChar();
+                paint.channel = flagString(db, kChannel[0]).asChar();
+                if (onFaces) paint.faces = faces;
+                paint.resolution = resolution;
+                MapFiles files;
+                files.mapsFolder = assetFolder("masks") + "/" + assetName(groomPath);
+                files.resolve = resolve;
+                files.store = [](const std::string& full) { return portableMayaPath(full); };
+                MPlug graphPlug = groomFn.findPlug("graph", true);
+                const std::string graph = graphPlug.asString().asChar();
+                ParamPaint painted = paintParam(graph, maps, h.get(), scalp.get(), nodeArg.asChar(), paramArg.asChar(), paint, files);
+                if (painted.created.guideLayer) {
+                    applyCreatedLayer(*h, painted.map, painted.created);
+                    guidesChanged = true;
+                } else if (painted.made) {
+                    maps = std::move(painted.created.maps);
+                    mapsChanged = true;
+                }
+                for (FileState& f : painted.created.files) files_.push_back(std::move(f));
+                if (!painted.graph.empty()) modifier_.newPlugValueString(graphPlug, painted.graph.c_str());
+                MStringArray result;
+                result.append(painted.map.c_str());
+                result.append(painted.kind.c_str());
+                result.append(painted.channel.c_str());
+                setResult(result);
             } else if (db.isFlagSet(kSetChannels[0])) {
                 MString nameArg;
                 int wanted = 0;
                 db.getFlagArgument(kSetChannels[0], 0, nameArg);
                 db.getFlagArgument(kSetChannels[0], 1, wanted);
                 const std::string name = nameArg.asChar();
-                const std::string kind = kindOf(maps, *h, name);
-                if (kind.empty()) return fail(kName, ("no map named " + name).c_str());
-                if (wanted != kGrayMap && wanted != kColorMap) return fail(kName, "-setChannels takes 1 (gray) or 4 (color)");
-                if (kind == "guides") {
-                    if (wanted == kColorMap) {
-                        return fail(kName, ("a guide layer is gray: convert " + name + " to vertices or a texture first").c_str());
-                    }
-                    setResult(kGrayMap);
-                    return MS::kSuccess;
-                }
-                const int channels = channelsOf(maps, *h, name);
-                if (channels != wanted) {
-                    ScalpMapEntry& entry = maps.maps[name];
-                    if (kind == "vertices") {
-                        entry.values = convertMapChannels(entry.values, channels, wanted);
-                    } else {
-                        ownFile(name);
-                        TexturePaint paint = texturePaint(entry.texture, channels);
-                        paint.setChannels(wanted);
-                        writeTexture(paint, entry.texture);
-                    }
-                    entry.channels = wanted;
+                // Every host's Channels (the editor's setMapChannels, map_edits.h): this groom's own
+                // copy of an image another groom reads, the files' states kept for Maya's undo.
+                MapFiles files;
+                files.mapsFolder = assetFolder("masks") + "/" + assetName(groomPath);
+                files.resolve = resolve;
+                files.store = [](const std::string& full) { return portableMayaPath(full); };
+                files.shared = [&](const std::string& full) { return fileUsedByOtherGroom(groomNode, full); };
+                MapChannels changed = setMapChannels(maps, h.get(), scalp.get(), name, wanted, resolution, files);
+                if (changed.mapsChanged) {
+                    maps = std::move(changed.maps);
                     mapsChanged = true;
                 }
-                setResult(wanted);
+                for (FileState& f : changed.files) files_.push_back(std::move(f));
+                setResult(changed.channels);
             }
         } catch (const std::exception& e) {
             return fail(kName, e.what());
@@ -536,44 +498,10 @@ MStatus ScalpMapsCmd::doIt(const MArgList& args) {
     });
 }
 
-namespace {
-
-// A renamed texture map's file, moved from -> to (a no-op when either is empty or the move fails:
-// the map then names a file that is not there, and the Map node reports it).
-void moveFile(const std::string& from, const std::string& to) {
-    if (from.empty() || to.empty()) return;
-    for (const auto& [a, b] : mapImageMoves(from, to)) {  // (a tile set: each tile)
-        std::error_code ec;
-        std::filesystem::rename(std::filesystem::u8path(a), std::filesystem::u8path(b), ec);
-        if (ec) MGlobal::displayWarning(MString(ScalpMapsCmd::kName) + ": could not move " + a.c_str() + " to " + b.c_str());
-    }
-}
-
-// A renamed map's shared file, copied from -> to (redo), or the copy removed (undo: to only).
-void copyFile(const std::string& from, const std::string& to) {
-    if (to.empty()) return;
-    std::error_code ec;
-    if (from.empty()) {
-        for (const std::string& file : mapImageFiles(to)) std::filesystem::remove(std::filesystem::u8path(file), ec);  // (a tile set: each tile)
-        return;
-    }
-    for (const auto& [a, b] : mapImageMoves(from, to)) {
-        std::filesystem::copy_file(std::filesystem::u8path(a), std::filesystem::u8path(b), std::filesystem::copy_options::overwrite_existing, ec);
-        if (ec) MGlobal::displayWarning(MString(ScalpMapsCmd::kName) + ": could not copy " + a.c_str() + " to " + b.c_str());
-    }
-}
-
-}  // namespace
-
 MStatus ScalpMapsCmd::redoIt() {
     return groomlab::maya::guarded("ScalpMapsCmd::redoIt", [&]() -> MStatus {
         noteFileWritten();  // texture files may change: what kept their bytes reads them again
         restoreFileStates(files_, true);
-        if (copied_) {
-            copyFile(moved_.first, moved_.second);
-        } else {
-            moveFile(moved_.first, moved_.second);
-        }
         MStatus done = modifier_.doIt();
         restoreFileStates(deleted_, true);
         return done;
@@ -585,13 +513,7 @@ MStatus ScalpMapsCmd::undoIt() {
         noteFileWritten();  // texture files may change: what kept their bytes reads them again
         restoreFileStates(deleted_, false);  // before the map names it again
         restoreFileStates(files_, false);
-        MStatus status = modifier_.undoIt();
-        if (copied_) {
-            copyFile("", moved_.second);
-        } else {
-            moveFile(moved_.second, moved_.first);
-        }
-        return status;
+        return modifier_.undoIt();
     });
 }
 

@@ -11,6 +11,7 @@
 #include "groomlab/expression.h"
 #include "groomlab/frames.h"
 #include "groomlab/graph.h"
+#include "groomlab/graph_io.h"
 #include "groomlab/groom_file.h"
 #include "groomlab/random.h"
 #include "groomlab/semver.h"
@@ -622,9 +623,49 @@ void bindBasic(py::module_& m) {
             "keys", [](const Ramp& r) { return r.keys; },
             [](Ramp& r, const std::vector<std::pair<float, float>>& keys) {
                 r.keys = keys;
+                r.handles.clear();  // (other keys: automatic handles)
                 r.sort();
             },
-            "(position, value) pairs, sorted by position.")
+            "(position, value) pairs, sorted by position (set: every key's handles automatic).")
+        .def_property_readonly(
+            "handles",
+            [](const Ramp& r) {
+                py::list out;
+                for (std::size_t k = 0; k < r.keys.size(); ++k) {
+                    const RampHandle h = r.handle(k);
+                    if (h.set) {
+                        out.append(py::make_tuple(h.in, h.out, h.inLength, h.outLength));
+                    } else {
+                        out.append(py::none());
+                    }
+                }
+                return out;
+            },
+            "Each key's handles: (slope in, slope out, length in, length out), or None where automatic "
+            "(issue #102; a length is a share of the span to the key on that side, a third by default).")
+        .def(
+            "set_handle",
+            [](Ramp& r, std::size_t k, float in, py::object out, float inLength, float outLength) {
+                if (k >= r.keys.size()) throw py::index_error("no such key");
+                r.setHandle(k, RampHandle{true, in, out.is_none() ? in : out.cast<float>(), inLength, outLength});
+            },
+            py::arg("key"), py::arg("slope_in"), py::arg("slope_out") = py::none(), py::arg("length_in") = 1.0f / 3.0f,
+            py::arg("length_out") = 1.0f / 3.0f,
+            "Key `key`'s handles: its slope into it and out of it (the same both sides without slope_out), and "
+            "their lengths (shares of their spans).")
+        .def(
+            "clear_handle",
+            [](Ramp& r, std::size_t k) {
+                if (k >= r.keys.size()) throw py::index_error("no such key");
+                r.setHandle(k, RampHandle{});
+            },
+            py::arg("key"), "Key `key`'s handles automatic again.")
+        .def("tangent_in", &Ramp::tangentIn, py::arg("key"), "The slope into key `key` (its handle's, else automatic).")
+        .def("tangent_out", &Ramp::tangentOut, py::arg("key"), "The slope out of key `key` (its handle's, else automatic).")
+        .def_static(
+            "from_json", [](const std::string& text) { return rampFromJson(text); }, py::arg("text"),
+            "A ramp param's value as a graph's JSON holds it (keys, optional handles, linear).")
+        .def("to_json", [](const Ramp& r) { return rampToJson(r); }, "The ramp as a graph's JSON holds it.")
         .def_readwrite("straight", &Ramp::straight)
         .def("sort", &Ramp::sort)
         .def("__call__", &Ramp::operator(), py::arg("t"), "The value at t.")
@@ -639,13 +680,8 @@ void bindBasic(py::module_& m) {
             s << "]" << (r.straight ? ", straight=True" : "") << ")";
             return s.str();
         })
-        .def(py::pickle([](const Ramp& r) { return py::make_tuple(r.keys, r.straight); },
-                        [](py::tuple t) {
-                            Ramp r;
-                            r.keys = t[0].cast<std::vector<std::pair<float, float>>>();
-                            r.straight = t[1].cast<bool>();
-                            return r;
-                        }));
+        .def(py::pickle([](const Ramp& r) { return py::make_tuple(rampToJson(r)); },
+                        [](py::tuple t) { return rampFromJson(t[0].cast<std::string>()); }));
 
     py::enum_<MapRef::Source>(m, "MapSource", "Where a MapRef reads its value.")
         .value("Texture", MapRef::Source::Texture)

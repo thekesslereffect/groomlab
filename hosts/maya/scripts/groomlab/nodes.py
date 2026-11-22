@@ -34,7 +34,8 @@ import groomlab_core
 from groomlab.base import undo_chunk
 from groomlab.params import get_graph, set_graph
 
-SHIPPED_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", "nodes"))
+from groomlab.shipped import shipped_dir as _shipped_dir  # noqa: E402
+SHIPPED_DIR = _shipped_dir("nodes")
 groomlab_core.set_shipped_node_dir(SHIPPED_DIR)
 
 

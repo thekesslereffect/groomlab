@@ -3,7 +3,7 @@
 @import 'fumadocs-ui/css/preset.css';
 
 /*
- * GroomLab brand palette (hosts/maya/themes/playful.json): charcoal and primaries.
+ * GroomLab brand palette (engine/assets/themes/playful.json): charcoal and primaries.
  * The landing pages are a dark studio: near-black paper, warm off-white type,
  * cream titles, hairlines, the Graph Editor's Playful category colors on node
  * headers, ports and wires (components/home/graph-theme.ts) and one blue accent.

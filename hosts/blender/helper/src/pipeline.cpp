@@ -18,6 +18,7 @@
 #include <set>
 #include <utility>
 
+#include "groomlab/editor/game_exports.h"
 #include "groomlab/asset_files.h"
 #include "groomlab/follicle_map.h"
 #include "groomlab/engine_cards.h"
@@ -31,7 +32,6 @@
 #include "groomlab/feathers.h"
 #include "groomlab/flow.h"
 #include "groomlab/frame_time.h"
-#include "groomlab/gltf_writer.h"
 #include "groomlab/graph_inserts.h"
 #include "groomlab/graph_edit.h"
 #include "groomlab/graph_io.h"
@@ -286,74 +286,56 @@ std::string baseName(const std::string& path) { return fs::u8path(path).filename
 // ---- glTF cards (Maya's export_cards_gltf, groomLabExportGltf) ----------------------------------
 
 json exportGltfCards(Session& s, const json& args) {
-    const std::string path = needString(args, "path");
-    const std::string ext = fs::u8path(path).extension().u8string();
-    const bool binary = optBool(args, "binary", ext != ".gltf");
-    const std::string name = exportObjectName(optString(args, "name", fs::u8path(path).stem().u8string()));  // every host's
-    int resolution = static_cast<int>(optNumber(args, "resolution", 0.0));
-    resolution = resolution > 0 ? std::clamp(resolution, kMinBakeResolution, kMaxCardBakeResolution) : 0;  // 0: the Cards nodes' atlasSize
-    const int capResolution = static_cast<int>(optNumber(args, "capResolution", 0.0));
-    CardGltfSettings settings;
-    try {
-        settings.alphaMode = gltfAlphaModeNamed(optString(args, "alphaMode", "mask"));  // every host's (gltf_writer.h)
-    } catch (const std::invalid_argument& e) {
-        fail("bad_request", e.what());
-    }
-    settings.alphaCutoff = static_cast<float>(optNumber(args, "alphaCutoff", 0.5));
-    settings.scale = static_cast<float>(optNumber(args, "scale", 0.01));  // groom space's centimeters to glTF's meters
-    if (!(settings.scale > 0.0f)) fail("bad_request", "scale must be above 0");
-    settings.zUp = false;  // groom space is Y up, as glTF
-    settings.rootToTip = optBool(args, "rootToTip", true);
-    settings.tangents = optBool(args, "tangents", true);
-    const float occlusion = static_cast<float>(optNumber(args, "occlusion", 1.0));
-    std::vector<std::string> lods;
+    // Every host's glTF cards (the editor's writeGltfCards, game_exports.h).
+    GltfCardsOptions o;
+    o.path = needString(args, "path");
+    const fs::path at = fs::u8path(o.path);
+    o.binary = optBool(args, "binary", at.extension().u8string() != ".gltf");
+    o.name = exportObjectName(optString(args, "name", at.stem().u8string()));  // every host's
+    o.resolution = static_cast<int>(optNumber(args, "resolution", 0.0));  // 0: the Cards nodes' atlasSize
+    o.capResolution = static_cast<int>(optNumber(args, "capResolution", 0.0));
+    o.alphaMode = optString(args, "alphaMode", "mask");
+    o.alphaCutoff = static_cast<float>(optNumber(args, "alphaCutoff", 0.5));
+    o.scale = static_cast<float>(optNumber(args, "scale", 0.01));  // groom space's centimeters to glTF's meters
+    o.zUp = false;  // groom space is Y up, as glTF
+    o.rootToTip = optBool(args, "rootToTip", true);
+    o.tangents = optBool(args, "tangents", true);
+    o.occlusion = static_cast<float>(optNumber(args, "occlusion", 1.0));
+    o.cap = optBool(args, "cap", true);
+    o.generator = "GroomLab for Blender";
     if (args.contains("lods") && !args["lods"].is_null()) {
         if (!args["lods"].is_array()) fail("bad_request", "lods is a list of levels of detail (hero, mid, low)");
         for (const json& l : args["lods"]) {
             if (!l.is_string() || !findCardLodPreset(l.get<std::string>())) fail("bad_request", "a level of detail is hero, mid or low");
-            lods.push_back(l.get<std::string>());
+            o.lods.push_back(l.get<std::string>());
         }
     }
-    const HairLook look = s.groom->hairLook();
-    settings.roughness = look.roughness;
-    settings.specular = look.specular;
-    GltfDocument doc;
-    doc.rootName = name;
-    doc.generator = "GroomLab for Blender";
-    json meshes = json::array();
-    std::vector<std::string> warnings;
-    auto addLevel = [&](const std::string& lod) {
-        const CardBake bake = bakeCardsNow(s, resolution, occlusion);
-        settings.name = name + (lod.empty() ? "_cards" : "_" + lod);
-        addCardsToGltf(doc, *bake.cards, bake.textures, settings);
-        meshes.push_back(settings.name);
+    const std::string graph = o.lods.empty() ? std::string() : graphTextOf(s);
+    GltfCardsSource source;
+    source.bake = [&](const std::string& lod, int resolution, float occlusion) {
+        if (lod.empty()) return bakeCardsNow(s, resolution, occlusion);
+        GraphSwap swap(s, graphAtLod(graph, lod));
+        return bakeCardsNow(s, resolution, occlusion);
     };
-    if (lods.empty()) {
-        addLevel("");
-    } else {
-        const std::string graph = graphTextOf(s);
-        for (const std::string& lod : lods) {
-            GraphSwap swap(s, graphAtLod(graph, lod));
-            addLevel(lod);
-        }
-    }
-    if (optBool(args, "cap", true)) {
+    source.capGroom = [&](MeshPtr* scalp, std::string* whyNot) -> StrandsPtr {
         try {
             const ViewResult& view = evaluateNow(s, false);
-            const MeshPtr scalp = scalpOf(s, view);
-            if (!scalp || scalp->triangleCount() == 0) throw std::runtime_error("the groom has no scalp");
-            CardGltfSettings cap = settings;
-            cap.name = name + "_scalpCap";
-            addScalpCapToGltf(doc, *view.strands, *scalp, capResolution, resolution, cap);
-            meshes.push_back(cap.name);
+            *scalp = scalpOf(s, view);
+            return view.strands;
         } catch (const RequestError&) {
             throw;
-        } catch (const std::exception& e) {  // a scalp without UVs: the cards still go
-            warnings.push_back(std::string("no hair cap (") + e.what() + ")");
+        } catch (const std::exception& e) {  // the cards still go
+            *whyNot = e.what();
+            return nullptr;
         }
-    }
+    };
     try {
-        return {{"files", writeGltf(path, doc, binary)}, {"meshes", meshes}, {"warnings", warnings}};
+        const GltfCardsExport done = writeGltfCards(o, s.groom->hairLook(), source);
+        return {{"files", done.files}, {"meshes", done.meshes}, {"warnings", done.warnings}};
+    } catch (const RequestError&) {
+        throw;
+    } catch (const std::invalid_argument& e) {
+        fail("bad_request", e.what());
     } catch (const std::exception& e) {
         fail("io", e.what());
     }
@@ -362,77 +344,52 @@ json exportGltfCards(Session& s, const json& args) {
 // ---- Unreal and Unity cards (Maya's export_cards_unreal, export_cards_unity) ----------------------
 
 json exportEngineCards(Session& s, const json& args, bool unity) {
-    std::string directory = needString(args, "directory");
-    std::string name = optString(args, "name", "groom");
-    const std::string lod = optString(args, "lod", "");
-    if (!lod.empty() && !args.contains("name")) name += "_" + lod;
-    int resolution = static_cast<int>(optNumber(args, "resolution", 0.0));
-    resolution = resolution > 0 ? std::clamp(resolution, kMinBakeResolution, kMaxCardBakeResolution) : 0;
-    const float occlusion = static_cast<float>(optNumber(args, "occlusion", 1.0));
-    bool withScalp = optBool(args, "scalp", true);
-    const CardBake bake = bakeCardsNow(s, resolution, occlusion);
-    const GroomStats stats = s.groom->stats();  // the cards' counts, as Maya's card_stats has them
+    // Every host's engine cards (the editor's writeEngineCards, game_exports.h): the maps, the hair
+    // cap's, the manifest; the meshes for Blender's FBX exporter to write.
+    GameExportOptions o;
+    o.directory = needString(args, "directory");
+    o.name = optString(args, "name", "groom");
+    o.lod = optString(args, "lod", "");
+    o.nameGiven = args.contains("name");
+    o.resolution = gameExportResolution(static_cast<int>(optNumber(args, "resolution", 0.0)));
+    o.occlusion = static_cast<float>(optNumber(args, "occlusion", 1.0));
+    o.scalp = optBool(args, "scalp", true);
+    o.writeMeshes = false;
+    const CardBake bake = bakeCardsNow(s, o.resolution, o.occlusion);
+    const GroomStats stats = s.groom->stats();  // the cards' counts (before the cap's evaluation), as Maya's card_stats has them
     const HairLook look = s.groom->hairLook();
-    std::vector<std::string> paths;
-    std::map<std::string, std::string> byMap;
-    json warnings = json::array();
-    try {
-        if (unity) {
-            paths = writeUnityCardMaps(bake.textures, look.roughness, directory, name);
-        } else {
-            const CardBakePaths at = CardBakePaths::in(fs::u8path(directory).generic_u8string(), name);
-            std::error_code ec;
-            fs::create_directories(fs::u8path(directory), ec);
-            writeCardBake(bake, at, false);
-            for (const std::string& f : at.files()) {
-                if (fs::u8path(f).extension() == ".tga") paths.push_back(f);  // the maps; the atlas record beside them is the groom's own
-            }
-        }
-    } catch (const RequestError&) {
-        throw;
-    } catch (const std::exception& e) {
-        fail("io", e.what());
-    }
     MeshPtr scalp;
-    if (withScalp) {
+    ScalpTextures cap;
+    bool withScalp = false;
+    std::string whyNot;
+    if (o.scalp) {
         // The groom baked onto its scalp (the hair cap's maps), at full density.
         try {
             const ViewResult& view = evaluateNow(s, false);
             scalp = s.groom->rawScalp();
             if (!scalp || scalp->triangleCount() == 0) throw std::runtime_error("the groom has no scalp");
             ScalpBakeSettings settings;
-            settings.size = resolution > 0 ? resolution : 2048;
-            const ScalpTextures t = bakeScalpTextures(*view.strands, *scalpOf(s, view), settings);
-            for (const std::string& p : writeScalpCapMaps(t, unity, directory, name)) paths.push_back(p);
+            settings.size = o.resolution > 0 ? o.resolution : 2048;
+            cap = bakeScalpTextures(*view.strands, *scalpOf(s, view), settings);
+            withScalp = true;
         } catch (const RequestError&) {
             throw;
         } catch (const std::exception& e) {  // e.g. a scalp without UVs: the cards still go
-            warnings.push_back(std::string("no scalp maps (") + e.what() + ")");
-            withScalp = false;
+            whyNot = std::string("no scalp maps (") + e.what() + ")";
         }
     }
-    const std::string ext = unity ? ".png" : ".tga";
-    for (const std::string& p : paths) {
-        const std::string file = baseName(p);
-        const std::string prefix = name + "_";
-        if (file.size() > prefix.size() + ext.size() && file.compare(0, prefix.size(), prefix) == 0) {
-            byMap[file.substr(prefix.size(), file.size() - prefix.size() - ext.size())] = file;
-        }
+    EngineCardsExport done;
+    try {
+        done = writeEngineCards(bake, stats, look, withScalp ? &cap : nullptr, withScalp ? scalp.get() : nullptr,
+                                whyNot, unity, o);
+    } catch (const std::exception& e) {
+        fail("io", e.what());
     }
-    const std::string fbx = outFile(directory, name + "_cards.fbx");
-    const std::string capFbx = withScalp ? outFile(directory, name + "_scalpCap.fbx") : std::string();
-    EngineCardsInfo cardsInfo;
-    cardsInfo.mesh = baseName(fbx);
-    cardsInfo.scalpCap = withScalp ? baseName(capFbx) : std::string();
-    cardsInfo.cards = stats.cards;
-    cardsInfo.triangles = stats.cardTriangles;
-    cardsInfo.textures = stats.cardTextures;
-    cardsInfo.feathers = stats.cardFeathers;
-    cardsInfo.maps = byMap;
-    cardsInfo.roughness = look.roughness;
-    const json manifest = json::parse(engineCardsManifestJson(unity, cardsInfo));
-    const std::string manifestPath = outFile(directory, name + (unity ? "_unity.json" : "_cards.json"));
-    writeJsonFile(manifestPath, manifest);
+    const std::string& name = done.name;
+    const std::string fbx = done.fbx, capFbx = done.scalpCapFbx;
+    const std::vector<std::string>& paths = done.maps;
+    const std::string& manifestPath = done.manifest;
+    json warnings = done.warnings;
     std::vector<MeshOut> meshes{cardsMesh(*bake.cards, "cards")};
     meshes.front().info["fbx"] = fbx;
     if (unity) meshes.front().info["material"] = name + "_cards_mat";
@@ -558,28 +515,21 @@ json exportUnityFeathers(Session& s, const json& args) {
     const std::string lod = optString(args, "lod", "");
     std::string name = optString(args, "name", "groom");
     if (!lod.empty() && !args.contains("name")) name += "_" + lod;
-    EngineExportOptions e;
-    e.engine = EngineExportOptions::Engine::Unity;
-    e.groups = kGroupIdChannel;
+    // Every host's Unity feathers (engine_export.h writeUnityFeathers); Blender writes the rachis mesh.
+    UnityFeathersOptions o;
     const double points = optNumber(args, "points", 16.0), barbPoints = optNumber(args, "barbPoints", 6.0);
     for (const double p : {points, barbPoints}) {
         if (p < 3.0 || p > 128.0 || p != std::floor(p)) fail("bad_request", "points and barbPoints must be 3 to 128 (Unity's strand particle counts)");
     }
-    e.pointsPerStrand = static_cast<std::size_t>(points);
-    e.barbPoints = static_cast<std::size_t>(barbPoints);
+    o.points = static_cast<std::size_t>(points);
+    o.barbPoints = static_cast<std::size_t>(barbPoints);
     const double most = optNumber(args, "maxStrandsPerGroup", static_cast<double>(kUnityMaxStrandsPerGroup));
     if (most < 0.0) fail("bad_request", "maxStrandsPerGroup must be 0 (no limit) or more");
-    e.maxStrandsPerGroup = static_cast<std::size_t>(most);
-    if (args.contains("shafts") && !args["shafts"].is_null()) e.shafts = optBool(args, "shafts", true);
-    if (!lod.empty()) {
-        try {
-            setBarbLod(e, lod);  // every host's barb LOD table (engine_export.h)
-        } catch (const std::invalid_argument& ex) {
-            fail("bad_request", ex.what());
-        }
-    }
-    const double barbDensity = e.barbDensity;
-    const std::string abc = outFile(folder, name + "_strands.abc");
+    o.maxStrandsPerGroup = static_cast<std::size_t>(most);
+    if (args.contains("shafts") && !args["shafts"].is_null()) o.shafts = optBool(args, "shafts", true);
+    o.lod = lod;
+    o.rachis = optBool(args, "rachis", true);
+    o.writeRachis = false;
     ViewRequest request;
     request.density = static_cast<float>(optNumber(args, "density", 1.0));
     request.time = s.seconds;
@@ -590,41 +540,22 @@ json exportUnityFeathers(Session& s, const json& args) {
     if (!view.errors.empty()) fail("evaluation", view.errors.front());
     if (!view.strands) fail("evaluation", "the groom gave no strands");
     const StrandSet& st = *view.strands;
-    json objects = json::array();
+    UnityFeathersExport done;
     try {
-        const double fps = s.groom->framesPerSecond();
-        EngineGroomWriter writer(abc, name, s.seconds, frameToSeconds(1.0, fps), e);
-        writer.writeFrame(st, nullptr, scalpOf(s, view).get());
-        writer.close();
-        for (const EngineGroomWriter::Object& o : writer.objects()) {
-            objects.push_back({{"object", o.path}, {"group", o.group}, {"groupId", o.groupId}, {"feathers", o.feathers},
-                               {"strands", o.strands}, {"pointsPerStrand", o.pointsPerStrand ? json(o.pointsPerStrand) : json()},
-                               {"minPoints", o.minPoints}, {"maxPoints", o.maxPoints}});
-        }
+        done = writeUnityFeathers(st, scalpOf(s, view).get(), s.seconds, frameToSeconds(1.0, s.groom->framesPerSecond()), folder, name, o);
     } catch (const std::invalid_argument& ex) {
         fail("bad_request", ex.what());
     } catch (const std::exception& ex) {
         fail("io", ex.what());
     }
-    json warnings = json::array();
     std::vector<MeshOut> meshes;
-    std::string fbx;
-    const bool rachis = optBool(args, "rachis", true) && hasRachis(st.featherLayers());
-    if (rachis) {
-        fbx = outFile(folder, name + "_rachis.fbx");
+    if (!done.fbx.empty()) {
         meshes.push_back(rachisLayoutMesh(buildRachisMesh(st.featherLayers()), "rachis"));
-        meshes.back().info["fbx"] = fbx;
-    } else if (std::any_of(objects.begin(), objects.end(), [](const json& o) { return o.value("feathers", false); })) {
-        warnings.push_back("the feathers have no rachis: their shafts go as strands, and there is no mesh for the barbs to ride");
+        meshes.back().info["fbx"] = done.fbx;
     }
-    std::string groupsText;
-    const json manifest = json::parse(unityFeathersManifestJson(objects.dump(), baseName(abc), fbx.empty() ? std::string() : baseName(fbx),
-                                                                lod, barbDensity, &groupsText));
-    const json groups = json::parse(groupsText);
-    const std::string manifestPath = outFile(folder, name + "_unity_feathers.json");
-    writeJsonFile(manifestPath, manifest);
-    return {{"abc", abc}, {"rachis", fbx.empty() ? json() : json(fbx)}, {"manifest", manifestPath}, {"groups", groups},
-            {"warnings", warnings}, {"fbxSettings", {{"upAxis", "Y"}, {"units", "m"}}}, {"meshes", putMeshes(s, meshes, groomSpaceOf(args))}};
+    return {{"abc", done.abc}, {"rachis", done.fbx.empty() ? json() : json(done.fbx)}, {"manifest", done.manifest},
+            {"groups", json::parse(done.groups.empty() ? std::string("[]") : done.groups)}, {"warnings", done.warnings},
+            {"fbxSettings", {{"upAxis", "Y"}, {"units", "m"}}}, {"meshes", putMeshes(s, meshes, groomSpaceOf(args))}};
 #else
     (void)s;
     (void)args;

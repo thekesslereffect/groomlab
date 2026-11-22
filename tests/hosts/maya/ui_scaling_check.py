@@ -17,6 +17,7 @@ Exit code 0 when all of it passed (ctest maya.ui_scaling).
 """
 
 import argparse
+import json
 import os
 import sys
 import tempfile
@@ -97,6 +98,71 @@ def main():
     def settle():
         for _ in range(3):
             application.processEvents()
+
+    # A ramp's handles (issue #102): the key picked shows them; a drag sets its slope both sides,
+    # Alt+drag one side (a corner); a double click on a handle makes it automatic again. The curve
+    # drawn is the core's, handles and all.
+    def ramp_handles():
+        from groomlab.ui.qt import QtCore, QtGui, QtWidgets
+        _third = 1.0 / 3.0
+        QTest = qt.QtTest().QTest
+
+        def move(widget, point, modifiers):  # (offscreen, QTest.mouseMove sends no event)
+            event = QtGui.QMouseEvent(QtCore.QEvent.MouseMove, QtCore.QPointF(point), QtCore.Qt.NoButton,
+                                      QtCore.Qt.LeftButton, modifiers)
+            QtWidgets.QApplication.sendEvent(widget, event)
+
+        ramp = widgets.RampEditor([[0.0, 0.0], [0.5, 1.0], [1.0, 1.0]])
+        ramp.resize(300, 160)
+        ramp.show()
+        settle()
+        at = ramp.to_screen(0.5, 1.0).toPoint()
+        QTest.mouseClick(ramp, QtCore.Qt.LeftButton, QtCore.Qt.NoModifier, at)
+        _expect(ramp.value() == [[0.0, 0.0], [0.5, 1.0], [1.0, 1.0]], "a click on a key moves nothing: %r" % ramp.value())
+        _in, out = ramp.handle_points(1)
+        target = QtCore.QPoint(int(out.x()), int(out.y()) - 25)  # up: steeper out of the key
+        QTest.mousePress(ramp, QtCore.Qt.LeftButton, QtCore.Qt.NoModifier, out.toPoint())
+        move(ramp, target, QtCore.Qt.NoModifier)
+        QTest.mouseRelease(ramp, QtCore.Qt.LeftButton, QtCore.Qt.NoModifier, target)
+        tied = ramp.value()[1]
+        _expect(len(tied) in (3, 6) and tied[2] > 0.5 and (len(tied) == 3 or tied[2] == tied[3]),
+                "a handle dragged: the key's slope, both sides: %r" % tied)
+        _in, out = ramp.handle_points(1)
+        target = QtCore.QPoint(int(out.x()), int(out.y()) + 40)  # down: the out side alone, with Alt
+        QTest.mousePress(ramp, QtCore.Qt.LeftButton, QtCore.Qt.AltModifier, out.toPoint())
+        move(ramp, target, QtCore.Qt.AltModifier)
+        QTest.mouseRelease(ramp, QtCore.Qt.LeftButton, QtCore.Qt.AltModifier, target)
+        corner = ramp.value()[1]
+        _expect(len(corner) in (4, 6) and corner[2] == tied[2] and corner[3] < corner[2], "Alt+drag: one side, a corner: %r" % corner)
+        # Farther out: a longer handle (its length a share of its span), the other side's kept.
+        before = ramp.lengths(1)
+        _in, out = ramp.handle_points(1)
+        target = QtCore.QPoint(int(out.x()) + 40, int(out.y()))
+        QTest.mousePress(ramp, QtCore.Qt.LeftButton, QtCore.Qt.AltModifier, out.toPoint())
+        move(ramp, target, QtCore.Qt.AltModifier)
+        QTest.mouseRelease(ramp, QtCore.Qt.LeftButton, QtCore.Qt.AltModifier, target)
+        after = ramp.lengths(1)
+        _expect(after[1] > before[1] + 0.1 and abs(after[0] - before[0]) < 1e-9 and len(ramp.value()[1]) == 6,
+                "a handle dragged farther: longer (%r to %r): %r" % (before, after, ramp.value()[1]))
+        core = groomlab_core.Ramp.from_json(json.dumps(ramp.value()))
+        _expect(all(abs(core(u / 20.0) - ramp.evaluate(u / 20.0)) < 1e-5 for u in range(21)), "drawn as the core evaluates it")
+        ramp.set_handle(1, None)
+        ramp.corner(1)
+        _expect(ramp.value()[1] == [0.5, 1.0, 2.0, 0.0], "Corner: straight toward each neighbor: %r" % ramp.value()[1])
+        QTest.mouseDClick(ramp, QtCore.Qt.LeftButton, QtCore.Qt.NoModifier, ramp.handle_points(1)[1].toPoint())
+        _expect(ramp.value()[1] == [0.5, 1.0], "a double click on a handle: automatic again: %r" % ramp.value()[1])
+        _expect(widgets.flipped_ramp([[0.0, 0.0], [0.5, 1.0, 2.0, 0.0], [1.0, 1.0]])
+                == [[0.0, 1.0], [0.5, 1.0, -0.0, -2.0], [1.0, 0.0]], "Flip mirrors the handles")
+        _expect(widgets.flipped_ramp([[0.0, 0.0], [0.5, 1.0, 2.0, 0.0, 0.2, 0.7], [1.0, 1.0]])[1]
+                == [0.5, 1.0, -0.0, -2.0, 0.7, 0.2], "... and their lengths")
+        long_value = [[0.0, 0.0, 0.0, 0.0, _third, 0.9], [1.0, 1.0]]
+        core = groomlab_core.Ramp.from_json(json.dumps(long_value))
+        ramp.setValue(long_value)
+        _expect(all(abs(core(u / 20.0) - ramp.evaluate(u / 20.0)) < 1e-5 for u in range(21)),
+                "long handles drawn as the core evaluates them")
+        ramp.close()
+        widgets.dispose(ramp)
+    check.run("a ramp's handles set its keys' slopes", ramp_handles)
 
     # The themes: GroomLab > Theme and the windows' Theme menus list every one, the active one
     # checked; each restyles the Groom Tools and the Graph Editor.
@@ -182,7 +248,8 @@ def main():
         top = [label for label, _, _ in tree]
         _expect(top == ["Groom Tools", "Graph Editor", "Create Groom from Selection", "Card Atlas...", "Add Sample Mesh",
                         "Guides from Photos (experimental)...", "Groom Files", "Import", "Add", "Simulate", "Display",
-                        "Review", "Studio", "Render", "Export", "Utilities", "Theme", "Install GroomLab Hotkeys", "Help"],
+                        "Review", "Studio", "Render", "Export", "Utilities", "Theme", "Install GroomLab Hotkeys",
+                        "Radial Menu Settings...", "Help"],
                 "top: %r" % top)
         sub = {label: children for label, children, _ in tree}
         _expect([l for l, _, _ in sub["Help"]] == ["Docs", "Keyboard Shortcuts", "Check for Updates...",
@@ -191,7 +258,7 @@ def main():
         _expect("Simulation" not in [l for l, _, _ in sub["Add"]], "no second Add Simulate")
         render = [l for l, _, _ in sub["Render"]]
         _expect(render == ["Render from Groom File...", "Render as Curves", "Maya Hardware 2.0 (no renderer needed)...",
-                           "RenderMan (prman)...", "V-Ray Standalone..."],
+                           "RenderMan (prman)...", "V-Ray Standalone...", "Refresh Redshift Grooms"],
                 "Render: %r" % render)
         _expect(not {"Groom File...", "Bake Scale Maps", "Render as Curves"} & {l for l, _, _ in sub["Export"]}, "Export")
         _expect("Save Groom File As..." in [l for l, _, _ in sub["Groom Files"]], "one groom-file block")
@@ -213,6 +280,22 @@ def main():
                 return set(i for p in paths for i in d.listed_ids(d.get(p), generators=generators.items()))
 
             theme_ids = ids("menus/theme/items")
+            from groomlab.ui import radial_menu
+
+            def radial_ids(entry):
+                """The action ids of the radial menu's rings shown for Maya (entries' "action")."""
+                found = set()
+                if isinstance(entry, dict):
+                    if "maya" in entry.get("hosts", ["maya"]):
+                        if entry.get("action"):
+                            found.add(entry["action"])
+                        for key, child in entry.items():  # (items, and brushOptions' per-tool lists)
+                            if key != "action" and isinstance(child, (dict, list)):
+                                found |= radial_ids(child)
+                elif isinstance(entry, list):
+                    for child in entry:
+                        found |= radial_ids(child)
+                return found
             empty = [e for e in d.get("palette/empty/items") if not (isinstance(e, dict) and e.get("id") == "import")]
             tables = (
                 ("menu.ACTIONS", menu.ACTIONS, None,
@@ -242,6 +325,8 @@ def main():
                 ("ParamPanel.node_action_table", editor.params.node_action_table("node"), None,
                  ids("graph/nodeActions")),
                 ("hotkeys.ACTIONS", hotkeys.ACTIONS, None, set(e for e in d.get("markingMenu/tail") if isinstance(e, str))),
+                # The radial menu's rings (Alt+S): every "action" they show for Maya.
+                ("radial_menu.ACTIONS", radial_menu.ACTIONS, None, radial_ids(d.get("radialMenu"))),
             )
             actions = d.get("actions")
             for name, table, owner, listed in tables:

@@ -45,22 +45,6 @@ private:
     GroomDocument& document_;
 };
 
-namespace {
-
-constexpr float kPi = 3.14159265358979f;
-
-void appendColoredLine(DisplayGeometry& g, const std::vector<Vec3f>& points, const std::array<float, 3>& color) {
-    if (points.size() < 2) return;
-    const auto first = static_cast<std::uint32_t>(g.positions.size() / 3);
-    for (const Vec3f& p : points) {
-        g.positions.insert(g.positions.end(), {p.x, p.y, p.z});
-        g.colors.insert(g.colors.end(), {color[0], color[1], color[2], 1.0f});
-    }
-    for (std::uint32_t k = 0; k + 1 < points.size(); ++k) g.indices.insert(g.indices.end(), {first + k, first + k + 1});
-}
-
-}  // namespace
-
 
 BrushSession::BrushSession() = default;  // (the settings start at the core's defaults, as every host's)
 
@@ -71,38 +55,18 @@ constexpr const char* kFreezeTool = "freeze";
 }  // namespace
 
 void BrushSession::setTool(const std::string& id) {
-    BrushToolSettings& s = tool_.settings;
-    const bool freezing = toolId() == kFreezeTool;
-    if (id == kFreezeTool) {
-        if (!freezing) beforeFreeze_ = {s.brush.attribute, s.brush.value, s.paintKind, s.paintTexture};
-        s.setMode("paint");
-        // The mask the brushes are held back by (BrushSettings::freeze), on the guides.
-        s.brush.freeze = kFreezeTool;
-        s.brush.attribute = kFreezeTool;
-        s.brush.value = 1.0f;
-        s.paintKind = "guides";
-        s.paintTexture.clear();
-        return;
+    // Every host's pick of a tool (the editor's pickTool, tool_settings.h): Freeze sets Paint's
+    // settings aside and gives them back.
+    if (tool_.settings.tool == BrushToolSettings::Tool::Roots && id != "roots" && id != kFreezeTool) {
+        BrushToolSettings().setMode(id);  // throws for an unknown id, before the root mode is put away
+        leaveRoots();
     }
-    BrushToolSettings().setMode(id);  // throws for an unknown id, before anything changes
-    if (s.tool == BrushToolSettings::Tool::Roots && id != "roots") leaveRoots();  // (another tool: the root mode put away)
-    if (freezing) {
-        s.brush.attribute = beforeFreeze_.attribute;
-        s.brush.value = beforeFreeze_.value;
-        s.paintKind = beforeFreeze_.kind;
-        s.paintTexture = beforeFreeze_.texture;
-    }
-    s.setMode(id);
+    pickTool(tool_.settings, id, beforeFreeze_);
 }
 
 std::string BrushSession::toolId() const {
-    const BrushToolSettings& s = tool_.settings;
-    if (s.tool == BrushToolSettings::Tool::Brush && s.brush.mode == BrushMode::Attribute && s.brush.attribute == kFreezeTool &&
-        s.paintKind == "guides") {
-        return kFreezeTool;
-    }
-    if (s.tool == BrushToolSettings::Tool::Roots) return "shape";  // the Tube tool's root mode
-    return s.modeName();
+    if (tool_.settings.tool == BrushToolSettings::Tool::Roots) return "shape";  // the Tube tool's root mode
+    return pickedTool(tool_.settings);  // (every host's: tool_settings.h)
 }
 
 bool BrushSession::startRoots(RootTubeTool::Mode mode) {
@@ -319,105 +283,22 @@ void BrushSession::rebuildOverlay(const QPointF& at, bool withLines) {
         if (overlayVersion_ == before) ++overlayVersion_;
         return;
     }
-    if (withLines && host_) {
-        // The guides the brush would touch, as the core draws them for the hover (smoothed).
-        std::vector<std::vector<Vec3f>> lines;
-        guard("hover", [&] { lines = tool_.affectedLines(*host_, view_, p[0], p[1]); });
-        for (const std::vector<Vec3f>& line : lines) appendColoredLine(overlay_, line, brushHoverColor(s));
-    }
-    // Symmetry on: the scalp's line of symmetry in red, as Substance Painter shows its center line.
-    if (host_) {
-        const BrushSettings& b = s.brush;
-        const int axis = b.mirrorTopology ? -1 : b.mirrorAxis;
-        const MeshPtr scalp = (b.mirrorTopology || (axis >= 0 && axis <= 2)) ? host_->scalp() : nullptr;
-        if (scalp && scalp->triangleCount() > 0) {
-            if (seam_.scalp != scalp || seam_.axis != axis || seam_.center != b.mirrorCenter || seam_.topology != b.mirrorTopology) {
-                seam_ = {scalp, axis, b.mirrorCenter, b.mirrorTopology, symmetrySeam(*scalp, StrokeSymmetry::of(b, scalp.get()))};
-            }
-            for (std::size_t i = 0; i + 1 < seam_.points.size(); i += 2) {
-                appendColoredLine(overlay_, {seam_.points[i], seam_.points[i + 1]}, {1.0f, 0.15f, 0.15f});
-            }
-        }
-    }
-    // The ring: on the scalp under the cursor, else at the camera target's depth, as wide as the
-    // screen radius there (a dot for Place and Draw: the click places one guide).
-    Vec3f origin, direction;
-    if (view_.ray(p[0], p[1], origin, direction)) {
-        Vec3f center;
-        bool have = false;
-        const MeshPtr scalp = host_ ? host_->scalp() : nullptr;
-        SurfacePoint hit;
-        if (scalp && scalp->triangleCount() > 0 && scalp->intersectRay(origin, direction, &hit)) {
-            center = hit.position;
-            have = true;
-        } else {
-            have = atTargetDepth(p, center);
-        }
-        if (have) {
-            const bool creating = s.tool == Tool::Place || s.tool == Tool::Draw || s.tool == Tool::Lengths;  // (Lengths: the keys' rings)
-            const float radius = worldRadiusAt(view_, center, p[0], p[1], creating ? 6.0f : s.screenRadius);
-            if (radius > 0.0f) {
-                Vec3f eye, along;
-                bool ortho = false;
-                view_.camera(eye, along, ortho);
-                // In the plane facing the camera: the circle reads as the screen circle it is.
-                const Vec3f n = ortho ? along : (center - eye).normalized();
-                const Vec3f u = (std::abs(n.y) < 0.9f ? Vec3f{0.0f, 1.0f, 0.0f} : Vec3f{1.0f, 0.0f, 0.0f}).cross(n).normalized();
-                const Vec3f v = n.cross(u);
-                constexpr int kSegments = 96;
-                auto circle = [&](float r) {
-                    std::vector<Vec3f> pts;
-                    for (int k = 0; k <= kSegments; ++k) {
-                        const float a = 2.0f * kPi * static_cast<float>(k) / kSegments;
-                        pts.push_back(center + u * (std::cos(a) * r) + v * (std::sin(a) * r));
-                    }
-                    return pts;
-                };
-                // One screen pixel at the ring's depth (its radius over its screen radius).
-                const float px = radius / std::max(1.0f, creating ? 6.0f : s.screenRadius);
-                // A ring that reads on any hair: a dark halo just outside and inside it, then the tone
-                // thickened to about two pixels; dashed: long dashes, short gaps.
-                auto stroke = [&](float r, const std::array<float, 3>& color, bool dash) {
-                    auto draw = [&](const std::vector<Vec3f>& pts, const std::array<float, 3>& c) {
-                        if (!dash) {
-                            appendColoredLine(overlay_, pts, c);
-                            return;
-                        }
-                        for (std::size_t k = 0; k + 3 < pts.size(); k += 4) appendColoredLine(overlay_, {pts[k], pts[k + 1], pts[k + 2], pts[k + 3]}, c);
-                    };
-                    // The halo opposite the ring: dark under a light ring, light under a dark one.
-                    const float lum = 0.2126f * color[0] + 0.7152f * color[1] + 0.0722f * color[2];
-                    const std::array<float, 3> halo = lum > 0.18f ? std::array<float, 3>{0.0f, 0.0f, 0.0f} : std::array<float, 3>{1.0f, 1.0f, 1.0f};
-                    draw(circle(r + 1.6f * px), halo);
-                    draw(circle(std::max(0.0f, r - 1.6f * px)), halo);
-                    draw(circle(r), color);
-                    draw(circle(r + 0.6f * px), color);
-                };
-                // The shaping brushes' ring in the theme's tone (the creating, Part, Flow and erasing
-                // tools keep their own); a held key's state on the ring itself.
-                const bool shaping = s.tool == BrushToolSettings::Tool::Brush && s.brush.mode != BrushMode::Erase;
-                std::array<float, 3> tone = shaping && ringToneSet_ ? ringTone_ : brushRingColor(s);
-                if (!creating && hoverState_ == 1) tone = {0.89f, 0.09f, 0.10f};  // Reverse: the error red (#F2555A), dashed
-                if (!creating && hoverState_ == 2) tone = {0.12f, 0.66f, 0.32f};  // Smooth: its own green (#5FD39A)
-                if (creating) appendColoredLine(overlay_, circle(radius), tone);  // (Place and Draw's dot)
-                else stroke(radius, tone, hoverState_ == 1);
-                // The falloff: a dashed inner ring where the full strength ends (hardness of the radius), a step dimmer.
-                const float hard = s.brush.hardness;
-                if (!creating && hard > 0.04f && hard < 0.96f) {
-                    std::array<float, 3> inner = tone;
-                    for (float& c : inner) c *= 0.7f;
-                    stroke(radius * hard, inner, true);
-                }
-                ringValid_ = true;
-                ringCenter_ = center;
-                ringRadius_ = radius;
-            }
-        }
-    }
-    // A Part or Flow stroke's path so far, until it is committed.
-    if (tool_.stroking() && (s.tool == Tool::Part || s.tool == Tool::Flow)) {
-        appendColoredLine(overlay_, tool_.drawnPath(), brushPathColor(s));
-    }
+    // Every host's overlay (the editor's brushOverlay, tool_overlay.h): the guides the brush would
+    // touch, the line of symmetry, the ring (on the scalp, else at the camera target's depth; the
+    // shaping brushes' in the theme's tone, a held key's state on it) and a Part or Flow path.
+    OverlayRequest request;
+    request.x = p[0];
+    request.y = p[1];
+    request.withLines = withLines;
+    request.hint = hoverState_ == 1 ? RingHint::Reverse : hoverState_ == 2 ? RingHint::Smooth : RingHint::None;
+    request.tone = ringToneSet_ ? &ringTone_ : nullptr;
+    request.offScalp = [this](float x, float y, Vec3f& at) { return atTargetDepth({x, y}, at); };
+    BrushOverlay drawn;
+    guard("hover", [&] { drawn = brushOverlay(tool_, host_.get(), view_, request, seam_); });
+    overlay_ = std::move(drawn.lines);
+    ringValid_ = drawn.ring;
+    ringCenter_ = drawn.ringCenter;
+    ringRadius_ = drawn.ringRadius;
     if (s.tool == Tool::Lengths && host_) appendLengths(p);
     ++overlayVersion_;
 }
@@ -436,31 +317,29 @@ std::size_t BrushSession::select(const std::vector<QPointF>& lasso, SelectMode m
     if (!document_ || !host_ || !view_.projection.valid() || lasso.empty()) return 0;
     const std::shared_ptr<const GuideHierarchy> h = host_->shownHierarchy();
     if (!h) return 0;
+    // Every host's pick (the editor's pickGuidesInView, tool_select.h): a click, a box or a lasso,
+    // only what the view shows, the mirror guides with symmetry.
     const BrushToolSettings& s = tool_.settings;
-    const std::vector<GuideId> candidates = guidesAt(*h, s.brush.level, s.brush.group, document_->hiddenGroups());
-    std::vector<std::array<float, 2>> polygon;
-    if (lasso.size() == 2) {
-        // A box from two corners.
-        const std::array<float, 2> a = port(lasso[0]), b = port(lasso[1]);
-        polygon = {{a[0], a[1]}, {b[0], a[1]}, {b[0], b[1]}, {a[0], b[1]}};
-    } else {
-        for (const QPointF& p : lasso) polygon.push_back(port(p));
-    }
-    std::vector<GuideId> picked =
-        pickGuides(*h, candidates, visibleProjector(pixelProjector(view_.projection), scalpVisibility(host_->scalp(), view_)), polygon,
-                   false, 12.0f, &view_.projection);  // (only what the view shows: nothing behind the scalp)
-    // With symmetry, each picked guide's mirror guide too.
+    GuidePick pick;
+    pick.level = s.brush.level;
+    pick.group = s.brush.group;
+    pick.hiddenGroups = document_->hiddenGroups();
     const MeshPtr scalp = host_->scalp();
-    picked = withMirrorGuides(*h, picked, StrokeSymmetry::of(s.brush, scalp.get()));
+    pick.symmetry = StrokeSymmetry::of(s.brush, scalp.get());
+    std::vector<std::array<float, 2>> pixels;
+    for (const QPointF& p : lasso) pixels.push_back(port(p));
+    const std::vector<GuideId> picked = pickGuidesInView(*h, view_, scalp, pixels, pick);
     const std::vector<GuideId> selection = combineSelection(document_->selection(), picked, mode);
     document_->setSelection(selection);
     // Solo: every guide not selected frozen, an undo step when that changed anything (a pick of
     // nothing with a modifier changes nothing; a plain one unfreezes all).
-    if (solo && (!picked.empty() || mode == SelectMode::Replace)) {
+    if (solo && pickSoloes(picked, mode)) {
         const std::shared_ptr<const GuideHierarchy> authored = document_->session().authoredHierarchy();
         GuideHierarchy probe = authored ? *authored : GuideHierarchy{};
-        if (freezeToSelection(probe, selection)) {
-            document_->editGuides("solo selection", [&](GuideHierarchy& g) { freezeToSelection(g, selection); });
+        const std::string layer = selectHides ? std::string(kHiddenLayer) : std::string("freeze");
+        if (freezeToSelection(probe, selection, layer)) {
+            document_->editGuides(selectHides ? "hide unselected guides" : "solo selection",
+                                  [&](GuideHierarchy& g) { freezeToSelection(g, selection, layer); });
         }
     }
     return picked.size();

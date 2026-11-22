@@ -987,15 +987,25 @@ void bindHierarchy(py::module_& m) {
         .def("add_layer", [](Correctives& c, const CorrectiveLayer& l) { c.layers.push_back(l); }, py::arg("layer"))
         .def("remove_layer",
              [](Correctives& c, const std::string& name) {
-                 for (auto it = c.layers.begin(); it != c.layers.end(); ++it) {
-                     if (it->name == name) {
-                         c.layers.erase(it);
-                         return true;
-                     }
-                 }
-                 return false;
+                 if (!c.layer(name)) return false;
+                 c.removeLayer(name);
+                 return true;
              },
-             py::arg("name"))
+             py::arg("name"), "Remove the layer (correctives.h removeLayer): False when there is none of that name.")
+        // The stack's edits, every host's (correctives.h): a layer not there raises ValueError.
+        .def("new_layer", &Correctives::addLayer, py::arg("all_frames"), py::arg("seconds"), py::arg("frame"),
+             py::arg("fade_in") = 0.0, py::arg("fade_out") = 0.0, py::arg("wanted") = std::string(),
+             "A new empty layer on top: on every frame (full weight, held), or a fix at `seconds` fading over the fades "
+             "(seconds); named `wanted` or new_layer_name, made free. Its name.")
+        .def("new_layer_name", &Correctives::newLayerName, py::arg("all_frames"), py::arg("frame"),
+             "sculpt<N> (every frame) or shot<F> (a fix at frame F), before free_layer_name.")
+        .def("move_layer", &Correctives::moveLayer, py::arg("name"), py::arg("step"),
+             "Moved `step` places up (+) or down the stack, kept within it; its index after.")
+        .def("solo_layer", &Correctives::soloLayer, py::arg("name"),
+             "Only this layer on; when it is the only one on already, every one comes back. Whether it is soloed now.")
+        .def("rename_layer", &Correctives::renameLayer, py::arg("name"), py::arg("wanted"),
+             py::arg("taken") = std::vector<std::string>{},
+             "Renamed to `wanted` when free and valid (`taken`: names the host holds otherwise); ValueError suggesting one if not.")
         .def("free_layer_name", &Correctives::freeLayerName, py::arg("wanted"), py::arg("current") = std::string(),
              py::arg("taken") = std::vector<std::string>{},
              "A layer's name as every host makes it from `wanted` (letters, digits, _; free among the layers and `taken`).")

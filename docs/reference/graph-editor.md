@@ -198,8 +198,8 @@ The **Graph Editor** is a dockable node editor for the selected groom:
     `remove_param_animation`, `param_key_state` by script.
   - **Mappable parameters:** the **Map** button beside the value switches it to a texture, a
     color set, a strand attribute, an expression or a **painted map** (a guide layer), and back. The yellow
-    **Paint** chip at the row's end (as in the app), or right-click the name for **Paint**, offers On Guides / On Scalp Vertices / As Texture: a map of that kind, white, feeds the
-    param through a Map node (white = the value now, black = 0), and Groom Tools > Paint opens on
+    **Paint** chip at the row's end (as in the app), or right-click the name for **Paint**, offers On Guides / On Scalp Vertices / As Texture: a map of that kind, white, becomes the
+    param's map source as every host links it (white = the value now, black = 0), and Groom Tools > Paint opens on
     it (the brush lowers the param, Ctrl raises it).
   - **Node buttons:** nodes that need something from the scene have it under their params:
     **Cards** (Show cards, Show textures, LOD, Bake Maps, Bake Scalp, Export Unreal Cards), **Braid** (Paths from Selected Curves),
