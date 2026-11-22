@@ -97,3 +97,31 @@ TEST(MapEdits, RenameCopiesASharedImageAndRefusesBadNames) {
     EXPECT_TRUE(v.files.empty());
     EXPECT_NE(v.graph.find("fringe"), std::string::npos);
 }
+
+TEST(MapEdits, RemoveLetsTheReadersGoAndDeletesOnlyAnImageNothingElseReads) {
+    const fs::path dir = freshFolder("remove");
+    writeFile(dir / "masks" / "dirt.png", "dirt");
+    writeFile(dir / "masks" / "both.png", "both");
+    ScalpMaps maps;
+    maps.maps["dirt"] = ScalpMapEntry{"texture", {}, "masks/dirt.png"};
+    maps.maps["both"] = ScalpMapEntry{"texture", {}, "masks/both.png"};
+    maps.maps["copy"] = ScalpMapEntry{"texture", {}, "masks/both.png"};
+    const std::string graph = R"({"nodes": [{"name": "m", "type": "Map", "params": {"name": "dirt"}}], "connections": []})";
+    MapFiles files;
+    files.mapsFolder = (dir / "masks").generic_u8string();
+    files.resolve = [&](const std::string& stored) { return (dir / fs::u8path(stored)).generic_u8string(); };
+    const MapRemove r = removeMap(maps, nullptr, graph, "dirt", true, files);
+    EXPECT_EQ(r.maps.maps.count("dirt"), 0u);
+    EXPECT_TRUE(r.fileDeleted);
+    EXPECT_FALSE(fs::exists(dir / "masks" / "dirt.png"));
+    EXPECT_EQ(r.graph.find("\"m\""), std::string::npos) << "its Map node goes";
+    restoreFileStates(r.files, false);
+    EXPECT_EQ(readFile(dir / "masks" / "dirt.png"), "dirt");
+    // Another map reads the image: it stays; without deleteFile nothing is deleted.
+    const MapRemove shared = removeMap(maps, nullptr, "", "both", true, files);
+    EXPECT_FALSE(shared.fileDeleted);
+    EXPECT_TRUE(fs::exists(dir / "masks" / "both.png"));
+    EXPECT_FALSE(removeMap(maps, nullptr, "", "dirt", false, files).fileDeleted);
+    EXPECT_TRUE(fs::exists(dir / "masks" / "dirt.png"));
+    EXPECT_THROW(removeMap(maps, nullptr, "", "nope", true, files), std::invalid_argument);
+}

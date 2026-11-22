@@ -113,4 +113,44 @@ MapRename renameMap(const ScalpMaps& maps, const GuideHierarchy* guides, const s
     return out;
 }
 
+MapRemove removeMap(const ScalpMaps& maps, const GuideHierarchy* guides, const std::string& graph, const std::string& name,
+                    bool deleteFile, const MapFiles& files) {
+    MapRemove out;
+    out.maps = maps;
+    const bool scalpMap = maps.maps.count(name) > 0;
+    const std::vector<std::string> layers = guides ? guides->attributeNames() : std::vector<std::string>{};
+    if (!scalpMap && std::find(layers.begin(), layers.end(), name) == layers.end()) {
+        throw std::invalid_argument("no map named '" + name + "'");
+    }
+    if (!graph.empty()) {
+        bool changed = false;
+        std::string unlinked = unlinkMapReaders(graph, name, &changed, &out.unlinked);
+        if (changed) out.graph = std::move(unlinked);
+    }
+    if (!scalpMap) {
+        out.guideLayer = true;
+        return out;
+    }
+    const ScalpMapEntry entry = out.maps.maps.at(name);
+    out.maps.maps.erase(name);
+    if (!deleteFile || entry.kind != "texture" || entry.texture.empty()) return out;
+    const auto resolve = [&](const std::string& stored) { return files.resolve ? files.resolve(stored) : stored; };
+    const std::string file = resolve(entry.texture);
+    bool shared = files.shared && files.shared(file);
+    for (const auto& [other, e] : out.maps.maps) {
+        shared = shared || (e.kind == "texture" && !e.texture.empty() && sameFile(resolve(e.texture), file));
+    }
+    if (!mapImageDeletable(file, files.mapsFolder, shared)) return out;  // every host's rule (asset_files.h)
+    for (FileState& state : mapImageStates(file)) {  // (a tile set: every tile's file)
+        if (!state.before) continue;
+        std::error_code ec;
+        fs::remove(fs::u8path(state.path), ec);
+        if (ec) continue;
+        state.after = std::nullopt;
+        out.files.push_back(std::move(state));
+        out.fileDeleted = true;
+    }
+    return out;
+}
+
 }  // namespace groomlab

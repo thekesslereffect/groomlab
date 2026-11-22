@@ -47,4 +47,23 @@ struct MapRename {
 MapRename renameMap(const ScalpMaps& maps, const GuideHierarchy* guides, const std::string& graph,
                     const std::string& from, const std::string& to, const MapFiles& files);
 
+// A map removed.
+struct MapRemove {
+    bool guideLayer = false;       // a guide layer: the host removes its hierarchy's attribute (removeAttribute)
+    ScalpMaps maps;                // the scalp maps after (unchanged for a guide layer)
+    std::string graph;             // the graph after, its readers let go of the map; "" unchanged
+    std::vector<std::pair<std::string, std::string>> unlinked;  // the (node, param) pairs that read it
+    std::vector<FileState> files;  // the image's files deleted, as found and as left (the step's undo)
+    bool fileDeleted = false;
+};
+
+// Map `name` removed, every host's Remove: what reads it lets go of it (unlinkMapReaders: its Map
+// nodes go with their links, map params naming it and the map names HairColor and Interpolate read
+// back to the node's defaults). With `deleteFile`, a texture map's image goes too when GroomLab made
+// it and nothing else reads it (mapImageDeletable: in the maps folder, no other map of the groom
+// and nothing beside it, `files.shared`, reading it; a tile set: every tile). Throws
+// std::invalid_argument for no map `name`, std::runtime_error for a graph that does not read.
+MapRemove removeMap(const ScalpMaps& maps, const GuideHierarchy* guides, const std::string& graph, const std::string& name,
+                    bool deleteFile, const MapFiles& files);
+
 }  // namespace groomlab

@@ -202,51 +202,31 @@ std::string GroomDocument::mapImageFile(const std::string& map, const std::strin
 
 std::string GroomDocument::removeMap(const std::string& name, bool deleteFile, bool* fileDeleted) {
     if (fileDeleted) *fileDeleted = false;
-    const PaintedMap* source = map(name);
-    if (!source) return "no map named '" + name + "'";
-    const std::string kind = source->kind;
-    const std::string label = "remove map " + name;
-    // What reads it lets go of it (the core's unlinkMapReaders, Maya's and Blender's too): its Map
-    // nodes go with their links (an exposed param's port with them), map params naming it and the
-    // map names HairColor and Interpolate read go back to the node's defaults.
-    json graph = graph_;
-    bool graphChanged = false;
+    // Every host's remove (the editor's removeMap, map_edits.h): what reads it lets go of it, and
+    // with `deleteFile` the image GroomLab made (nothing else reading it) goes, its files kept in
+    // the step so an undo puts them back.
+    MapFiles files;
+    files.mapsFolder = mapsDirectory();
+    files.resolve = [this](const std::string& stored) { return resolveMapPath(stored); };
+    MapRemove removed;
     try {
-        const std::string unlinked = unlinkMapReaders(graph_.dump(), name, &graphChanged);
-        if (graphChanged) graph = json::parse(unlinked);
+        removed = groomlab::removeMap(session().scalpMaps(), session().storedHierarchy().get(), graph_.dump(), name, deleteFile, files);
     } catch (const std::exception& e) {
         return e.what();
     }
+    const std::string label = "remove map " + name;
     const std::size_t undoBefore = history_.undoIndex();
-    std::vector<FileState> files;
-    if (kind == "guides") {
+    if (removed.guideLayer) {
         const std::string error = editGuides(label, [&](GuideHierarchy& h) { h.removeAttribute(name); });
         if (!error.empty()) return error;
     } else {
-        ScalpMaps maps = session().scalpMaps();
-        const std::string file = kind == "texture" ? resolveMapPath(maps.maps[name].texture) : std::string();
-        maps.maps.erase(name);
-        const bool shared = std::any_of(maps.maps.begin(), maps.maps.end(), [&](const auto& m) {
-            return m.second.kind == "texture" && !file.empty() && sameFile(resolveMapPath(m.second.texture), file);
-        });
-        std::error_code ec;
-        if (deleteFile && mapImageDeletable(file, mapsDirectory(), shared)) {  // every host's rule (asset_files.h)
-            // (A tile set: every tile's file.)
-            for (FileState& state : mapImageStates(file)) {
-                if (!state.before) continue;
-                std::filesystem::remove(std::filesystem::u8path(state.path), ec);
-                if (!ec) {
-                    files.push_back(std::move(state));
-                    if (fileDeleted) *fileDeleted = true;
-                }
-            }
-        }
         paints_.erase(name);
-        commitMaps(label, maps);
+        commitMaps(label, removed.maps);
     }
-    if (graphChanged && history_.undoIndex() > undoBefore) {
+    if (fileDeleted) *fileDeleted = removed.fileDeleted;
+    if (!removed.graph.empty() && history_.undoIndex() > undoBefore) {
         const json before = graph_;
-        graph_ = std::move(graph);
+        graph_ = json::parse(removed.graph);
         const std::string error = applyGraph();
         if (!error.empty()) {
             graph_ = before;
@@ -258,7 +238,7 @@ std::string GroomDocument::removeMap(const std::string& name, bool deleteFile, b
             entry.graphAfter = graph_;
         }
     }
-    attachSide(undoBefore, label, std::move(files));
+    attachSide(undoBefore, label, std::move(removed.files));
     if (scalpMapName_ == name) scalpMapName_.clear();
     return {};
 }

@@ -2258,62 +2258,41 @@ json mapUsers(ToolState& t, const json& args) {
     return {{"name", name}, {"nodes", readers.nodes}, {"users", users}};
 }
 
-// What reads map `name` lets go of it (Maya's _unlink_map): its Map nodes removed, the params they
-// fed reading their own values again (an exposed param's port removed with them), the params
-// naming it back to the node's default: the core's (scalp_maps.h unlinkMapReaders). Returns the
-// graph ("" unchanged); `changed` the pairs.
-std::string unlinkMapReaders(const std::string& graphText, const std::string& name, json& changed) {
-    changed = json::array();
-    if (graphText.empty()) return {};
-    try {
-        bool touched = false;
-        std::vector<std::pair<std::string, std::string>> unlinked;
-        std::string graph = groomlab::unlinkMapReaders(graphText, name, &touched, &unlinked);
-        for (const auto& [node, param] : unlinked) changed.push_back({node, param});
-        return touched ? graph : std::string();
-    } catch (const std::exception& e) {
-        fail("graph", std::string("cannot unlink the map's readers: ") + e.what());
-    }
-}
-
 // Maya's remove_map: what reads the map lets go of it; a texture map's file stays on disk unless
 // `deleteFile` and GroomLab made it (it is in the maps folder) and no other map reads it. One undo
 // step (undo puts the file back too).
 json mapRemove(ToolState& t, const json& args) {
     Session& s = t.session;
     const std::string name = needMap(s, args);
-    const std::string kind = mapKindOf(s, name);
-    json changed;
-    const std::string graph = unlinkMapReaders(s.groom->data().graphJson, name, changed);
+    // Every host's remove (the editor's removeMap, map_edits.h).
+    MapFiles files;
+    files.mapsFolder = mapsFolder(s);
+    files.resolve = [&s](const std::string& stored) { return resolveMapFile(s, stored); };
+    MapRemove removed;
+    try {
+        removed = removeMap(s.groom->scalpMaps(), s.groom->storedHierarchy().get(), s.groom->data().graphJson, name,
+                            optBool(args, "deleteFile", false), files);
+    } catch (const std::invalid_argument& e) {
+        fail("not_found", e.what());
+    } catch (const std::exception& e) {
+        fail("graph", std::string("cannot unlink the map's readers: ") + e.what());
+    }
     StrokeEdit edit;
     edit.mode = "remove map " + name;
-    if (!graph.empty()) edit.set(StrokeField::Graph, graph);
-    bool deleted = false;
-    if (kind == "guides") {
+    if (!removed.graph.empty()) edit.set(StrokeField::Graph, removed.graph);
+    if (removed.guideLayer) {
         GuideHierarchy h = editedGuides(t, [&](GuideHierarchy& hh) { hh.removeAttribute(name); });
         edit.set(StrokeField::Guides, h.toJson());
     } else {
-        ScalpMaps maps = s.groom->scalpMaps();
-        const std::string file = kind == "texture" ? resolveMapFile(s, maps.maps[name].texture) : std::string();
-        maps.maps.erase(name);
-        const bool shared = std::any_of(maps.maps.begin(), maps.maps.end(), [&](const auto& m) {
-            return m.second.kind == "texture" && sameFile(resolveMapFile(s, m.second.texture), file);
-        });
-        std::error_code ec;
-        if (optBool(args, "deleteFile", false) && mapImageDeletable(file, mapsFolder(s), shared)) {  // every host's rule (asset_files.h)
-            // (A tile set: every tile's file.)
-            std::vector<FileEdit> edits = filesBefore(file);
-            for (const FileEdit& e : edits) {
-                if (e.before) fs::remove(fs::u8path(e.path), ec);
-            }
-            filesAfter(t, std::move(edits));
-            deleted = true;
-        }
         dropPaints(t);
-        edit.set(StrokeField::ScalpMaps, maps.toJson());
+        edit.set(StrokeField::ScalpMaps, removed.maps.toJson());
     }
+    for (FileEdit& f : removed.files) t.pending.files.push_back(std::move(f));
     commitEdit(t, std::move(edit));
-    return {{"removed", name}, {"unlinked", changed}, {"graphChanged", !graph.empty()}, {"fileDeleted", deleted}, {"undo", undoJson(t)}};
+    json changed = json::array();
+    for (const auto& [node, param] : removed.unlinked) changed.push_back({node, param});
+    return {{"removed", name}, {"unlinked", changed}, {"graphChanged", !removed.graph.empty()}, {"fileDeleted", removed.fileDeleted},
+            {"undo", undoJson(t)}};
 }
 
 // Maya's rename_map: the map renamed, the Map nodes and map params reading it follow
