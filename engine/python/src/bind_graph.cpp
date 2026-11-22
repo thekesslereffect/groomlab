@@ -656,6 +656,8 @@ void bindGraph(py::module_& m) {
         py::arg("params_json"),
         "The Node panel's section of each param of a spec's params (param_conditions.h, every host's): "
         "'Advanced', its group when there are two groups or more, else ''.");
+    m.def("param_label", &paramLabel, py::arg("name"),
+          "A param's display label, every host's (node_catalog.h): \"guideRadius\" -> \"Guide radius\", \"rootUV\" -> \"Root UV\".");
     m.def(
         "param_shown",
         [](const std::string& paramsJson, const std::string& name, const std::string& valuesJson) {

@@ -566,6 +566,19 @@ void bindGroom(py::module_& m) {
           },
           py::arg("lod"), py::arg("kind") = "hair", py::arg("triangles") = py::none(),
           "The params a level of detail sets on a Cards node of `kind` (hair, feathers, both), maxCards from the budget.");
+    m.def(
+        "with_card_preset",
+        [](const std::string& graphJson, const std::string& lod, std::vector<std::string> nodes, std::optional<int> triangles) {
+            std::vector<std::pair<std::string, ParamValue>> set;
+            std::string graph = withCardPreset(graphJson, lod, std::move(nodes), triangles, &set);
+            py::dict params;
+            for (const auto& [name, value] : set) params[py::str(name)] = castParamValue(value);
+            return py::make_tuple(graph, params);
+        },
+        py::arg("graph_json"), py::arg("lod"), py::arg("nodes") = std::vector<std::string>{}, py::arg("triangles") = py::none(),
+        "(graph_json, params): the graph with Cards nodes `nodes` (empty: every one) set for a level of detail, each by "
+        "what it cards (every host's Cards preset, card_presets.h); params: what the last one was set to. ValueError for "
+        "an unknown lod or a node the graph lacks.");
     // Map names, every host's rule, and a rename's readers and file (scalp_maps.h).
     m.def("valid_map_name", &validMapName, py::arg("name"), "Letters, digits and _, not starting with a digit.");
     m.def("map_name_error", &mapNameError, py::arg("name"), "Why a name cannot name a map (\"\" when it can).");

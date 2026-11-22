@@ -353,11 +353,10 @@ ATTRIBUTE_TIPS = {
 
 
 def pretty(name):
-    """A param name as a label: "guideRadius" reads "Guide radius" (the name stays in the tooltip)."""
-    import re
-    words = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", name).replace("_", " ").strip()
-    words = " ".join(w if w.isupper() and len(w) > 1 else w.lower() for w in words.split())
-    return words[:1].upper() + words[1:]
+    """A param name as a label: "guideRadius" reads "Guide radius" (the name stays in the tooltip).
+    Every host's (node_catalog.h paramLabel)."""
+    import groomlab_core
+    return groomlab_core.param_label(name)
 
 
 def search_rank(text, op_type, words):
@@ -389,20 +388,22 @@ def shown_when(spec, value_of, spec_of=None):
     for the node's values (value_of(param)): a bool as "true" or "false", a number as JSON writes
     it; and the param it names shows too (spec_of(name): that param's spec, None: unknown), so
     Clump's count hides with clumpBy. No condition: always."""
-    seen = set()
-    while True:
-        condition = spec.get("showWhen") or {}
-        param = condition.get("param")
-        if not param:
-            return True
-        import groomlab_core
-        text = groomlab_core.condition_text(json.dumps(value_of(param)))  # (the core's rule, every host's)
-        if text not in (condition.get("in") or []):
-            return False
-        seen.add(spec.get("name"))
-        spec = spec_of(param) if spec_of else None
-        if spec is None or spec.get("name") in seen:
-            return True
+    # The core's rule, every host's (param_conditions.h paramShown): the chain of specs the
+    # conditions name, and the values they read.
+    import groomlab_core
+    name = spec.get("name") or "_shown"
+    chain, names, s = [], set(), dict(spec, name=name)
+    while s is not None and s.get("name") not in names:
+        chain.append(s)
+        names.add(s.get("name"))
+        named = (s.get("showWhen") or {}).get("param")
+        s = spec_of(named) if named and spec_of else None
+    values = {}
+    for s in chain:
+        named = (s.get("showWhen") or {}).get("param")
+        if named:
+            values[named] = value_of(named)
+    return groomlab_core.param_shown(json.dumps(chain), name, json.dumps(values))
 
 
 def unit_of(spec, value_of):

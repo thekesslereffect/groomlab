@@ -477,6 +477,8 @@ void bindStrands(py::module_& m) {
     m.def("resample_by_arc_length",
           [](const std::vector<Vec3f>& points, std::size_t count) { return resampleByArcLength(points.data(), points.size(), count); },
           py::arg("points"), py::arg("count"), "A polyline as `count` points evenly spaced along its length (curve.h, every host's).");
+    m.def("is_png_path", &isPngPath, py::arg("path"),
+          "Whether the file name ends in .png (any case): a texture map is painted only into a PNG (texture.h).");
     m.def("is_gray_image", [](const std::string& path) { return isGrayImage(*loadTexture(path)); }, py::arg("path"),
           "Whether an image (a UDIM tile set: every tile) holds no color, r = g = b everywhere. Raises TextureError.");
     m.def("same_map_image", &sameMapImage, py::arg("source"), py::arg("target"),

@@ -93,20 +93,13 @@ def _to_png(path, folder):
 
 
 def _gray_image(path):
-    """Whether an image holds no color (r = g = b everywhere), read by groomlab_core; None when unreadable."""
+    """Whether an image holds no color (r = g = b everywhere: every host's, texture.h isGrayImage);
+    None when unreadable."""
     import groomlab_core
     try:
-        tex = groomlab_core.load_texture(path)
+        return bool(groomlab_core.is_gray_image(path))
     except Exception:
         return None
-    w, h = tex.width, tex.height
-    step = max(1, int((w * h / 4096.0) ** 0.5))
-    for y in range(0, h, step):
-        for x in range(0, w, step):
-            r, g, b, _ = tex.sample((x + 0.5) / w, 1.0 - (y + 0.5) / h)
-            if abs(r - g) > 1e-3 or abs(g - b) > 1e-3:
-                return False
-    return True
 
 
 def import_map_source(groom, source, report, resolution=1024):

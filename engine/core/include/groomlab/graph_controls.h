@@ -26,8 +26,9 @@ std::string controlName(const std::string& wanted);
 // Every control the graph reads (compounds' inner graphs too), as JSON {name: {"kind", "node",
 // "default", ...}}: "control" (a Control node's slider: "min", "max"), "variable" (an Expression
 // variable with a control: "variable", "min", "max"; the variables as an object or its text), or
-// "keyed" (a keyed param: "param", and "component" for a vector's). A keyed param's default is its
-// own value, else its spec's default (a bool as 0 or 1).
+// "keyed" (a keyed param: "param", "valueKind" its spec's kind: float, int, bool or vec3, and
+// "component" for a vector's). A keyed param's default is its own value, else its spec's default
+// (a bool as 0 or 1).
 std::string controlsJson(const std::string& graphJson);
 
 // Why node.param cannot be keyed in place ("" when it can): a Control node's own params, a param

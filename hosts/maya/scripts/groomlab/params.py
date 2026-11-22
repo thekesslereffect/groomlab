@@ -99,67 +99,32 @@ def _graph_nodes(graph):
                 yield inner
 
 
-def _param_spec(catalog, node, param):
-    """A node's param spec: its operator's, or for a compound's exposed param the inner node's."""
-    spec = catalog.param_spec(node.get("type"), param)
-    if spec is None and node.get("type") == "Script":  # a script node's: its definition's header
-        import groomlab_core
-        definition = node.get("params", {}).get("definition") or {}
-        try:
-            specs = json.loads(groomlab_core.node_spec_json(json.dumps({"type": "Script", "params": {"definition": definition}})))
-            spec = next((p for p in specs["params"] if p["name"] == param), None)
-        except Exception:  # a definition that cannot be read: no spec
-            spec = None
-    if spec is None and node.get("type") == "Compound":
-        definition = node.get("params", {}).get("definition") or {}
-        inner_name, _, inner_param = (definition.get("expose") or {}).get(param, "").partition(".")
-        inner = next((n for n in definition.get("graph", {}).get("nodes", []) if n.get("name") == inner_name), None)
-        if inner is not None:
-            spec = _param_spec(catalog, inner, inner_param)
-    return spec
-
-
-def _link_kind(spec, control):
-    """The attribute a keyed param takes: double, long, bool, vector or color."""
-    if isinstance(control, (list, tuple)):
-        return "color" if "".join(c[-1:] for c in control) == VECTOR_SUFFIXES["color"] else "vector"
-    return {"int": "long", "bool": "bool"}.get((spec or {}).get("kind"), "double")
-
-
 def control_base(control):
     """The attribute name (without ctl_) of a keyed param's control: a vector's parent attribute."""
     return control[0][:-1] if isinstance(control, (list, tuple)) else control
 
 
 def _controls_in(graph):
-    """{name: params} of the graph's controls: its Control nodes, its Expression nodes' keyable
-    variables ({"value": v, "control": name}, default v, range 0-1 unless set), and its keyed
-    params ({"kind": double|long|bool|vector|color, "default": the param's own value})."""
-    out = {}
-    catalog = None
-    for node in _graph_nodes(graph):
-        params = node.get("params", {})
-        if node.get("type") == "Control":
-            out[params.get("name", "control")] = params
-        elif node.get("type") == "Expression":
-            # The variables as an object or as its text (graph_controls.h controlsJson reads both).
-            variables = params.get("variables") or {}
-            if isinstance(variables, str):
-                try:
-                    variables = json.loads(variables or "{}")
-                except ValueError:
-                    variables = {}
-            for value in variables.values() if isinstance(variables, dict) else ():
-                if isinstance(value, dict) and value.get("control"):
-                    out[value["control"]] = {"default": float(value.get("value", 0.0)),
-                                             "min": float(value.get("min", 0.0)), "max": float(value.get("max", 1.0))}
-        for param, control in (node.get("paramControls") or {}).items():
-            if catalog is None:
-                from groomlab import graph as gm
-                catalog = gm.OperatorCatalog.from_maya()
-            spec = _param_spec(catalog, node, param)
-            default = params.get(param, (spec or {}).get("default", 0.0))
-            out[control_base(control)] = {"kind": _link_kind(spec, control), "default": default, "link": True}
+    """{name: params} of the graph's controls: its Control nodes' and its Expression nodes'
+    keyable variables' ({"default", "min", "max"}), and its keyed params' ({"kind":
+    double|long|bool|vector|color, "default": the param's own value, "link": True}; a vector's
+    three controls as one, its attribute). Every host's list (graph_controls.h controlsJson)."""
+    import groomlab_core
+    found = json.loads(groomlab_core.controls_json(json.dumps(graph)))
+    out, vectors = {}, {}
+    for name, c in found.items():
+        if c.get("kind") in ("control", "variable"):
+            out[name] = {"default": c.get("default", 0.0), "min": c.get("min", 0.0), "max": c.get("max", 1.0)}
+        elif "component" in c:
+            vectors.setdefault(name[:-1], {})[int(c["component"])] = (name, c.get("default", 0.0))
+        else:
+            out[name] = {"kind": {"int": "long", "bool": "bool"}.get(c.get("valueKind"), "double"),
+                         "default": c.get("default", 0.0), "link": True}
+    for base, parts in vectors.items():
+        names = [parts[i][0] if i in parts else "" for i in range(3)]
+        color = "".join(n[-1:] for n in names) == VECTOR_SUFFIXES["color"]
+        out[base] = {"kind": "color" if color else "vector", "default": [parts[i][1] if i in parts else 0.0 for i in range(3)],
+                     "link": True}
     return out
 
 

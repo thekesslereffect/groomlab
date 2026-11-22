@@ -137,7 +137,7 @@ def _map_texture_default(groom, name):
 
 def _check_png(texture):
     """A texture map's file is a PNG: painting and filling write PNG bytes to it."""
-    if texture and not texture.lower().endswith(".png"):
+    if texture and not groomlab_core.is_png_path(texture):  # (every host's: texture.h isPngPath)
         raise ValueError("a texture map's file is a PNG (painting writes PNG), not %s: set_map_texture links "
                          "another image by copying it as one" % texture)
 
