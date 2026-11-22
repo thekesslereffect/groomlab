@@ -63,6 +63,37 @@ class Files(unittest.TestCase):
         self.assertEqual(rs.frame_tag(-3), "n0003")
         self.assertEqual(rs.cache_path(os.sep.join(["C:", "a", "b"]), "charA_hair", 7), "C:/a/b/charA_hair.0007.abc")
 
+    def test_every_write_a_name_of_its_own(self):
+        # Redshift keeps a proxy's file as first read: each write of a frame is a new version.
+        self.assertEqual(rs.cache_path("C:/c", "hair", 7, 3), "C:/c/hair.0007.3.abc")
+        names = ["hair.0007.1.abc", "hair.0007.12.abc", "hair.0008.4.abc", "hair.0007.abc", "fur.0007.2.abc",
+                 "hair.0007.x.abc", "hair.0007.2.abc.tmp"]
+        self.assertEqual(rs.cache_versions(names, "hair", 7), {1: "hair.0007.1.abc", 12: "hair.0007.12.abc"})
+        self.assertEqual(rs.next_version(names, "hair", 7), 13)
+        self.assertEqual(rs.next_version(names, "hair", 9), 1)
+        self.assertEqual(rs.next_version(names, "fur", 7), 3)
+
+
+class RenderViewWrap(unittest.TestCase):
+    REDSHIFT_2026 = """global proc redshiftRvRender(string $action, string $camera)
+{
+	rsRender -render -stopIpr;
+	if($action == "ipr")
+	{
+		rsRender -render -ipr -rv -cam "<renderview>";
+	}
+	else
+	{
+		rsRender -render -rv  -cam "<renderview>";
+	}
+}"""
+
+    def test_only_the_known_procedure_is_wrapped(self):
+        self.assertTrue(rs.rv_render_known(self.REDSHIFT_2026))
+        self.assertTrue(rs.rv_render_known(self.REDSHIFT_2026.replace("\t", "    ")))  # spacing aside
+        self.assertFalse(rs.rv_render_known(self.REDSHIFT_2026.replace("-stopIpr", "-stopIpr -wait")))
+        self.assertFalse(rs.rv_render_known(""))
+
 
 class Shader(unittest.TestCase):
     LOOK = {"roughness": 0.3, "azimuthalRoughness": 0.2, "ior": 1.55, "angleShift": 3.0, "tint": [0.9, 0.5, 0.4],

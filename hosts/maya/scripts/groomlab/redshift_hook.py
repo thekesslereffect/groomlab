@@ -8,9 +8,14 @@ opening a scene that uses it, at GroomLab's start), GroomLab
   - adds its line to Redshift's Pre Render Frame MEL (redshiftOptions.preRenderFrameMel), so every
     frame Redshift renders (Render View, batch, a farm with GroomLab installed) writes the grooms
     first (pre_render_frame);
-  - wraps Redshift's IPR start (the renderer's startIprRenderProcedure, redshiftStartIprRender)
-    so starting IPR writes the frame first too (wrap_ipr);
-  - on picking Redshift, writes the frame and makes the proxies at once.
+  - wraps Redshift's starts (wrap_ipr): Maya's Render View IPR (the renderer's
+    startIprRenderProcedure, redshiftStartIprRender) and Redshift's own RenderView, whose Render and
+    IPR buttons run redshiftRvRender (rsRender -rv), so each writes the frame first;
+  - on picking Redshift, writes the frame and makes the proxies at once;
+  - while Redshift's IPR runs, writes a groom again once it has stopped changing (an edit, a new
+    frame: its live evaluations, groomLabGraphStats -evaluations, polled: LiveIpr).
+Every write is a file of its own (<groom>.<frame>.<n>.abc, the older ones of that frame deleted):
+Redshift keeps a proxy's file as it first read it, so a new name is what makes it read again.
 For each visible groom that writes the frame to Alembic (groomlab.export_alembic: the render density
 and overrides; with Redshift's deformation blur on, its shutter in its deformation steps:
 shutter_frames) under the scene's groomlab/<scene>/caches/redshift folder, and finds or makes its
@@ -20,7 +25,7 @@ the file as Alembic into its placeholder mesh, hidden in the viewport (the groom
 Principled Hair from the groom's look (build_shader: the core's principledHair) unless it has a
 material of its own. A proxy shows only while its groom is visible and the scene renders in
 Redshift (sync_visibility), so Arnold, V-Ray or RenderMan never draw it. Redshift's IPR shows the
-frame as last written: GroomLab > Render > Refresh Redshift Grooms writes it again (refresh).
+frame as last written: live, or GroomLab > Render > Refresh Redshift Grooms (refresh).
 
     import groomlab.redshift_hook as rs
     rs.refresh()       # this frame written and the proxies set now
@@ -48,6 +53,11 @@ HIDE_IN_VIEWPORT = 3  # RedshiftProxyMesh.displayMode: Bounding Box 0, Preview M
 RENDERER = "redshift"  # Redshift's name as a Maya renderer (defaultRenderGlobals.currentRenderer)
 REDSHIFT_IPR_START = "redshiftStartIprRender"
 IPR_START = "groomLabRedshiftStartIpr"  # GroomLab's wrap: the grooms written, then Redshift's start
+RV_RENDER = "redshiftRvRender"  # Redshift's RenderView Render / IPR buttons (redshiftRvRender.mel)
+# Redshift 2026's redshiftRvRender, as GroomLab's wrap repeats it after writing the grooms; a
+# Redshift whose procedure differs is left alone (rv_render_known).
+RV_RENDER_BODY = ("rsRender -render -stopIpr;", 'rsRender -render -ipr -rv -cam "<renderview>";',
+                  'rsRender -render -rv  -cam "<renderview>";')
 
 
 class RedshiftRequired(RuntimeError):
@@ -96,9 +106,35 @@ def frame_tag(frame):
     return ("n" if frame < 0 else "") + text
 
 
-def cache_path(folder, asset, frame):
-    """Where a groom's frame goes: <folder>/<asset>.<frame>.abc, forward slashes."""
-    return os.path.join(folder, "%s.%s.abc" % (asset, frame_tag(frame))).replace("\\", "/")
+def cache_path(folder, asset, frame, version=None):
+    """Where a groom's frame goes: <folder>/<asset>.<frame>.abc, or with `version`
+    <folder>/<asset>.<frame>.<version>.abc (each write a name of its own), forward slashes."""
+    tag = frame_tag(frame) if version is None else "%s.%d" % (frame_tag(frame), int(version))
+    return os.path.join(folder, "%s.%s.abc" % (asset, tag)).replace("\\", "/")
+
+
+def cache_versions(names, asset, frame):
+    """The versions of a groom's frame among file `names`: {version: name}."""
+    prefix = "%s.%s." % (asset, frame_tag(frame))
+    found = {}
+    for name in names:
+        if name.startswith(prefix) and name.endswith(".abc"):
+            middle = name[len(prefix):-4]
+            if middle.isdigit():
+                found[int(middle)] = name
+    return found
+
+
+def next_version(names, asset, frame):
+    """The version the next write of a groom's frame takes: one past the highest there (1 first)."""
+    found = cache_versions(names, asset, frame)
+    return max(found) + 1 if found else 1
+
+
+def rv_render_known(source):
+    """Whether Redshift's redshiftRvRender (its script's text) is the one GroomLab's wrap repeats."""
+    text = " ".join((source or "").split())
+    return all(" ".join(line.split()) in text for line in RV_RENDER_BODY)
 
 
 def shader_settings(principled):
@@ -176,22 +212,60 @@ def remove_hook():
 
 
 def wrap_ipr():
-    """Redshift's IPR start through GroomLab's: the grooms written, then Redshift's own start
-    (renderer -edit -startIprRenderProcedure). Done again whenever activated (Redshift may register
-    itself again). False when Redshift's start is not the one GroomLab knows (left alone)."""
+    """Redshift's starts through GroomLab's: the grooms written first. Its RenderView (wrap_rv) and
+    Maya's Render View IPR (renderer -edit -startIprRenderProcedure, then Redshift's own start).
+    Done again whenever activated (Redshift may register itself again). False when Maya's IPR start
+    is not the one GroomLab knows (left alone)."""
     if not redshift_loaded() or not cmds.renderer(RENDERER, exists=True):
         return False
+    wrap_rv()
     current = cmds.renderer(RENDERER, query=True, startIprRenderProcedure=True)
     if current == IPR_START:
         return True
     if current != REDSHIFT_IPR_START:
         return False
     mel.eval('global proc %s(string $editor, int $resolution0, int $resolution1, string $camera) {\n'
-             '    python("import groomlab.redshift_hook; groomlab.redshift_hook.pre_render_frame()");\n'
+             '    python("import groomlab.redshift_hook; groomlab.redshift_hook.before_render()");\n'
              '    %s($editor, $resolution0, $resolution1, $camera);\n'
              '}' % (IPR_START, REDSHIFT_IPR_START))
     cmds.renderer(RENDERER, edit=True, startIprRenderProcedure=IPR_START)
     return True
+
+
+def wrap_rv():
+    """Redshift's RenderView Render and IPR buttons (redshiftRvRender) through GroomLab's: the
+    grooms written, then the same rsRender calls. Only over the procedure GroomLab knows
+    (rv_render_known on its script); True when wrapped. MEL's whatIs tells them apart: Redshift's
+    is "found in" its script, GroomLab's "entered interactively" (so a Redshift that sourced its
+    script again is wrapped again)."""
+    try:
+        where = mel.eval('whatIs "%s"' % RV_RENDER)
+    except RuntimeError:
+        return False
+    if "entered interactively" in where:
+        return True  # GroomLab's already
+    path = where.split(": ", 1)[1].strip() if "found in" in where and ": " in where else ""
+    if not path or not os.path.isfile(path):
+        return False
+    with open(path, encoding="utf-8", errors="replace") as f:
+        if not rv_render_known(f.read()):
+            return False
+    mel.eval('global proc %s(string $action, string $camera) {\n'
+             '    python("import groomlab.redshift_hook; groomlab.redshift_hook.before_render()");\n'
+             '    %s\n'
+             '    if ($action == "ipr") { %s } else { %s }\n'
+             '}' % ((RV_RENDER,) + RV_RENDER_BODY))
+    return True
+
+
+def before_render():
+    """What every Redshift start runs first (RenderView render or IPR, Maya's IPR): the frame
+    written, the proxies set, live IPR watching. Never raises into Redshift."""
+    try:
+        pre_render_frame()
+        LiveIpr.start()
+    except Exception as e:  # noqa: BLE001
+        cmds.warning("GroomLab: Redshift: %s" % e)
 
 
 def activate(write=False):
@@ -204,6 +278,7 @@ def activate(write=False):
     if on:
         install_hook()
         wrap_ipr()
+        LiveIpr.start()
         if write:
             pre_render_frame()
             return True
@@ -328,9 +403,16 @@ def write_groom(groom, frame=None, folder=None):
     folder = folder or os.path.join(groomlab.asset_folder("caches"), "redshift")
     if not os.path.isdir(folder):
         os.makedirs(folder)
-    path = cache_path(folder, groomlab.asset_name(groom), frame)
-    groomlab.export_alembic(groom, path, start=start, end=end, step=step, render_overrides=True)
+    asset = groomlab.asset_name(groom)
+    before = cache_versions(os.listdir(folder), asset, frame)
+    path = cache_path(folder, asset, frame, max(before) + 1 if before else 1)
+    groomlab.export_alembic(groom, path, start=start, end=end, step=step, render_overrides=True, vertex_data=True)
     ensure_proxy(groom, path)
+    for name in before.values():  # (one Redshift still reads stays until the next write)
+        try:
+            os.remove(os.path.join(folder, name))
+        except OSError:
+            pass
     return path
 
 
@@ -354,12 +436,13 @@ def pre_render_frame(grooms=None, frame=None, folder=None):
 
 
 def refresh(grooms=None):
-    """This frame written and every groom's proxy set now: what an IPR session shows after edits.
-    Returns the files written."""
+    """This frame written and every groom's proxy set now (a new file each, which a running IPR
+    reads). Returns the files written."""
     check()
     if renderer_is_redshift():
         install_hook()
         wrap_ipr()
+        LiveIpr.start()
     return pre_render_frame(grooms)
 
 
@@ -387,6 +470,57 @@ def menu_refresh():
         cmds.warning("GroomLab: %s" % e)
         return
     print("GroomLab: Redshift: %d groom(s) written for this frame" % len(written))
+
+
+class LiveIpr(object):
+    """While Redshift's IPR runs: each visible groom written again once it has stopped changing,
+    so IPR follows edits and frame changes by itself. Polls each groom's live evaluations
+    (groomLabGraphStats -evaluations) every TICK_MS; a groom whose count moved, then held for a
+    tick, is written (write_groom: a new file, which IPR reads). Idle while IPR is not running."""
+    TICK_MS = 600
+    _timer = None
+    _seen = {}     # groom -> the evaluations last seen
+    _written = {}  # groom -> the evaluations last written
+
+    @classmethod
+    def start(cls):
+        if cls._timer is not None:
+            return
+        try:
+            from PySide6 import QtCore
+        except ImportError:
+            from PySide2 import QtCore
+        cls._timer = QtCore.QTimer()
+        cls._timer.setInterval(cls.TICK_MS)
+        cls._timer.timeout.connect(cls.tick)
+        cls._timer.start()
+
+    @classmethod
+    def ipr_running(cls):
+        try:
+            return redshift_loaded() and bool(mel.eval("redshiftIsRunningIpr()"))
+        except RuntimeError:
+            return False
+
+    @classmethod
+    def tick(cls):
+        try:
+            if not cls.ipr_running() or not renderer_is_redshift():
+                cls._written.clear()
+                return
+            from groomlab.render_gather import render_grooms
+            for groom in render_grooms():
+                count = cmds.groomLabGraphStats(groom, evaluations=True)
+                last = cls._seen.get(groom)
+                cls._seen[groom] = count
+                if last is None:
+                    cls._written.setdefault(groom, count)  # (written as IPR started)
+                    continue
+                if count == last and cls._written.get(groom) != count:
+                    write_groom(groom)  # changed, then held a tick: written for IPR
+                    cls._written[groom] = count
+        except Exception as e:  # noqa: BLE001 (a timer: never raise into Maya's event loop)
+            cmds.warning("GroomLab: Redshift live IPR: %s" % e)
 
 
 _watch = {"job": None, "scene": None}

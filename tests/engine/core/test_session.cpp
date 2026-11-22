@@ -1189,7 +1189,7 @@ TEST(Session, ThePrincipledHairFollowsTheLook) {
     const nlohmann::json json = nlohmann::json::parse(session.hairLookJson());
     const nlohmann::json& ph = json["principledHair"];
     EXPECT_TRUE(ph["byColor"].get<bool>());  // HairColor: the RGB
-    EXPECT_EQ(ph["colorData"], "Cd");
+    EXPECT_EQ(ph["colorData"], "hair_color");
     EXPECT_NEAR(ph["roughness"].get<double>(), json["lobes"]["roughness"].get<double>(), 1e-6);
     EXPECT_NEAR(ph["angleShift"].get<double>(), json["lobes"]["shift"].get<double>(), 1e-6);
     ASSERT_EQ(ph["tint"].size(), 3u);

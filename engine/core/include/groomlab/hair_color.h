@@ -69,13 +69,13 @@ HairLobes hairLobes(const HairLook& look);
 // What a host gives Redshift's Principled Hair (RedshiftPrincipledHair) for a look, so a groom
 // renders in Redshift as close to Arnold as its shader allows. Principled Hair is the same
 // Chiang et al. 2016 model as aiStandardHair, so the lobes carry over as they are. The color comes
-// per strand through Redshift's user data nodes, from the channels GroomLab's Alembic and USD
-// carry: by RGB (a color node, a Blend of colors: the strands' RGB is the hair's color, HairColor's
+// per point through Redshift's user data nodes, from the channels GroomLab's Alembic carries with
+// vertexData (alembic_io.h: every value at every point, as Redshift reads hair data): by RGB (a color node, a Blend of colors: the strands' RGB is the hair's color, HairColor's
 // pigment and dye in it) as Albedo with Albedo Mix 1 and no melanin; else by the melanin channels,
 // the dye as Tint. The variations are 0: GroomLab varies each strand itself.
 struct PrincipledHair {
     bool byColor = false;                       // albedo from colorData (Albedo Mix 1); else melanin
-    const char* colorData = "Cd";               // the strands' RGB (Alembic; USD: displayColor)
+    const char* colorData = "hair_color";       // the hair's own RGB per point (Alembic vertexData), Arnold's too
     const char* melaninData = "melanin";        // export_view.h kMelaninChannel
     const char* rednessData = "melaninRedness"; // kMelaninRednessChannel
     // The values where a strand has no user data: HairColor's defaults.
