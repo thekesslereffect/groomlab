@@ -406,53 +406,38 @@ std::string GroomDocument::setMapChannels(const std::string& name, int wanted) {
 
 std::string GroomDocument::fillMap(const std::string& name, float value, bool selectedOnly, const PaintColor* color, unsigned mask,
                                    PaintMode mode, const std::vector<std::int32_t>& faces) {
-    const PaintedMap* source = map(name);
-    if (!source) return "no map named '" + name + "'";
-    const std::string kind = source->kind;
-    const int channels = source->channels;
-    value = std::clamp(value, 0.0f, 1.0f);
-    if (color && channels != kColorMap) return "a color fills a color map; " + name + " is gray (a value fills it)";
-    if (selectedOnly && kind != "guides") return "Fill Selected sets a guide layer on the selected guides; " + name + " lives on the scalp";
-    if (selectedOnly && !faces.empty()) return "fill the selected guides or the selected faces, not both";
-    PaintColor fill = color ? *color : PaintColor{value, value, value, 1.0f};
-    if (!color) mask &= 0x7u;  // a value fills a color map's r g b
-    const std::string label = "fill map " + name;
-    if (kind == "guides") {
-        const std::vector<GuideId> picked = selection_;
-        if (selectedOnly && picked.empty()) return "no guides selected";
-        // (Every host's Fill: scalp_paint.h fillGuideLayer, fillVertexMap, fillTexturePaint.)
-        const MeshPtr cage = session().cageScalp();
-        return editGuides(label, [&](GuideHierarchy& h) {
-            fillGuideLayer(h, name, value, mode, selectedOnly ? picked : std::vector<GuideId>{}, cage.get(), faces);
-        });
-    }
-    if (kind == "vertices") {
-        const MeshPtr scalp = session().cageScalp();
-        if (!scalp) return "no scalp";
-        ScalpMaps maps = session().scalpMaps();
-        fillVertexMap(maps.maps[name].values, channels, mask, fill, mode, *scalp, faces);
-        commitMaps(label, maps);
-        return {};
-    }
-    // A texture map: the file rewritten, its bytes before and after the step.
-    const std::string full = textureMapFile(name);
-    const MeshPtr scalp = session().scalp();
-    if (!scalp) return "no scalp";
-    std::vector<FileState> files;
+    // Every host's Fill (the editor's fillMap, map_edits.h): a guide layer's values, a vertex
+    // map's, or a texture map's image rewritten (its bytes before and after kept in the step).
+    MapFillRequest fill;
+    fill.value = value;
+    if (color) fill.color = *color;
+    fill.mask = mask;
+    fill.mode = mode;
+    fill.selectedOnly = selectedOnly;
+    if (selectedOnly) fill.selected = selection_;
+    fill.faces = faces;
+    MapFiles files;
+    files.mapsFolder = mapsDirectory();
+    files.groomFolder = path_.empty() ? std::string() : std::filesystem::u8path(path_).parent_path().u8string();
+    files.resolve = [this](const std::string& stored) { return resolveMapPath(stored); };
+    const HierarchyPtr authored = session().authoredHierarchy();
+    const MeshPtr cage = session().cageScalp();
+    MapFill filled;
     try {
-        requirePaintablePng(full);
-        const std::shared_ptr<TexturePaint> paint = openTexturePaint(*scalp, full, channels, 1024);
-        fillTexturePaint(*paint, mask, fill, mode, *scalp, faces);
-        std::vector<FileState> states = mapImageStates(full, tilesOf(*paint));
-        paint->save(full);
-        finishFileStates(states);
-            files.insert(files.end(), states.begin(), states.end());
+        filled = groomlab::fillMap(session().scalpMaps(), authored.get(), cage && cage->pointCount() > 0 ? cage.get() : nullptr, name,
+                                   fill, files);
     } catch (const std::exception& e) {
         return e.what();
     }
-    paints_.erase(name);
-    mapViewKey_ = 0;
-    attachSide(history_.undoIndex(), label, std::move(files));
+    const std::string label = "fill map " + name;
+    if (filled.kind == "guides") return editGuides(label, [&](GuideHierarchy& h) { applyFilledLayer(h, name, filled); });
+    const std::size_t undoBefore = history_.undoIndex();
+    if (filled.mapsChanged) commitMaps(label, filled.maps);
+    if (filled.kind == "texture") {
+        paints_.erase(name);
+        mapViewKey_ = 0;
+    }
+    attachSide(undoBefore, label, std::move(filled.files));
     return {};
 }
 

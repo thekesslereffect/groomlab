@@ -223,38 +223,21 @@ def fill_map(groom, name, value=None, selected_only=False, color=None, channels=
     """Set a map to `value` everywhere, or (a guide layer) on the selected guides only. A color
     map takes `color` (r, g, b[, a]) in the channels of `channels` (a subset of "rgba"), or
     `value` in its r g b (its alpha kept). With `faces` (polygon indices of the scalp:
-    selected_scalp_faces) only those faces are filled (a guide layer: the guides rooted on them)."""
+    selected_scalp_faces) only those faces are filled (a guide layer: the guides rooted on them).
+    `mode`: replace, add, subtract or clamp (the most a value may be). One undo step. Every host's
+    Fill (the editor's fillMap, in groomLabScalpMaps)."""
     if value is None and color is None:
         raise ValueError("fill a map with a value or a color")
-    if faces:
-        if selected_only:
-            raise ValueError("fill the selected guides or the selected faces, not both")
-        if not map_kind(groom, name):
-            raise ValueError("no map named %r" % name)
-        kwargs = {"fill": name, "paintMode": mode, "faces": _faces_flag(faces)}
-        if color is not None:
-            kwargs.update(fillColor=_rgba(color), fillChannels=channels or "rgba")
-        else:
-            kwargs["value"] = float(value)
-        return cmds.groomLabScalpMaps(groom, **kwargs)
+    kwargs = {"fill": name, "paintMode": mode}
     if color is not None:
-        if selected_only:
-            raise ValueError("Fill Selected sets a guide layer, which is gray; a color fills a color map")
-        if not map_kind(groom, name):
-            raise ValueError("no map named %r" % name)
-        return cmds.groomLabScalpMaps(groom, fill=name, fillColor=_rgba(color), fillChannels=channels or "rgba",
-                                      paintMode=mode)
+        kwargs.update(fillColor=_rgba(color), fillChannels=channels or "rgba")
+    else:
+        kwargs["value"] = float(value)
+    if faces:
+        kwargs["faces"] = _faces_flag(faces)
     if selected_only:
-        if map_kind(groom, name) != "guides":
-            raise ValueError("Fill Selected sets a guide layer on the selected guides; %s lives on the scalp" % name)
-        if not selected_guides(groom):
-            raise ValueError("no guides selected")
-        if mode != "replace":
-            raise ValueError("Add, Subtract and Clamp Maximum Fill currently require filling the whole guide map")
-        return cmds.groomLabGuides(groom, setAttribute=name, value=value)
-    if not map_kind(groom, name):
-        raise ValueError("no map named %r" % name)
-    return cmds.groomLabScalpMaps(groom, fill=name, value=float(value), paintMode=mode)
+        kwargs["selected"] = True
+    return cmds.groomLabScalpMaps(groom, **kwargs)
 
 
 def remove_map(groom, name, delete_file=False):

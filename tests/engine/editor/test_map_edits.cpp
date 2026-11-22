@@ -169,3 +169,87 @@ TEST(MapEdits, ConvertResamplesIntoAnotherKindAndWritesATextureImage) {
     EXPECT_THROW(convertMapKind(maps, &h, *scalp, "nope", "texture", 16, {}, files), std::invalid_argument);
     EXPECT_THROW(convertMapKind(maps, &h, *scalp, "mask", "texture", 16, "a.jpg", files), std::invalid_argument);
 }
+
+TEST(MapEdits, FillChecksTheAskAndGivesASharedImageItsOwnCopy) {
+    const fs::path dir = freshFolder("fill");
+    auto plane = std::make_shared<ScalpMesh>(*test::makePlane(4));
+    std::vector<ScalpMesh::UV> uvs;
+    for (std::size_t t = 0; t < plane->triangleCount(); ++t) {
+        for (const int v : plane->triangles()[t]) uvs.push_back({plane->points()[v].x, plane->points()[v].z});
+    }
+    plane->setCornerUVs(std::move(uvs));
+    const std::shared_ptr<const ScalpMesh> scalp = plane;
+    const std::size_t n = scalp->pointCount();
+    GuideHierarchy h;
+    const GroupId group = h.addGroup("g");
+    const GuideId first = h.addGuide(group, {scalp->points()[0], scalp->points()[0] + Vec3f{0.0f, 0.5f, 0.0f}});
+    const GuideId last = h.addGuide(group, {scalp->points()[n - 1], scalp->points()[n - 1] + Vec3f{0.0f, 0.5f, 0.0f}});
+    h.setAttribute(first, "lay", 0.2f);
+    h.setAttribute(last, "lay", 0.2f);
+    h.evaluate(scalp.get());
+    ScalpMaps maps;
+    maps.maps["mask"] = ScalpMapEntry{"vertices", std::vector<float>(n, 0.0f), ""};
+    maps.maps["tint"] = ScalpMapEntry{"vertices", std::vector<float>(n * 4, 0.25f), ""};
+    maps.maps["tint"].channels = kColorMap;
+    maps.maps["a"] = ScalpMapEntry{"texture", {}, "masks/shared.png"};  // (a duplicate's shared image)
+    maps.maps["b"] = ScalpMapEntry{"texture", {}, "masks/shared.png"};
+    writeMapImage(newTextureMapPaint(*scalp, kGrayMap, PaintColor{0.0f, 0.0f, 0.0f, 1.0f}, 16), (dir / "masks" / "shared.png").generic_u8string());
+    const std::string sharedBytes = readFile(dir / "masks" / "shared.png");
+    MapFiles files;
+    files.mapsFolder = (dir / "masks").generic_u8string();
+    files.groomFolder = dir.generic_u8string();
+    files.resolve = [&](const std::string& stored) { return (dir / fs::u8path(stored)).generic_u8string(); };
+    // A vertex map: every value; no file.
+    MapFillRequest half;
+    half.value = 0.5f;
+    const MapFill v = fillMap(maps, &h, scalp.get(), "mask", half, files);
+    EXPECT_EQ(v.kind, "vertices");
+    EXPECT_TRUE(v.mapsChanged);
+    EXPECT_TRUE(v.files.empty());
+    for (const float x : v.maps.maps.at("mask").values) EXPECT_FLOAT_EQ(x, 0.5f);
+    // A color in g only: r, b and a kept.
+    MapFillRequest green;
+    green.color = PaintColor{0.0f, 1.0f, 0.0f, 0.5f};
+    green.mask = 0x2u;
+    const MapFill colored = fillMap(maps, &h, scalp.get(), "tint", green, files);
+    const std::vector<float>& tint = colored.maps.maps.at("tint").values;
+    EXPECT_FLOAT_EQ(tint[0], 0.25f);
+    EXPECT_FLOAT_EQ(tint[1], 1.0f);
+    EXPECT_FLOAT_EQ(tint[3], 0.25f);
+    // Asks a map does not take.
+    EXPECT_THROW(fillMap(maps, &h, scalp.get(), "mask", green, files), std::invalid_argument) << "a color on a gray map";
+    MapFillRequest selected;
+    selected.value = 0.9f;
+    selected.selectedOnly = true;
+    EXPECT_THROW(fillMap(maps, &h, scalp.get(), "lay", selected, files), std::invalid_argument) << "no guides selected";
+    selected.selected = {last};
+    EXPECT_THROW(fillMap(maps, &h, scalp.get(), "mask", selected, files), std::invalid_argument) << "Fill Selected on the scalp";
+    EXPECT_THROW(fillMap(maps, &h, scalp.get(), "nope", half, files), std::invalid_argument);
+    EXPECT_THROW(fillMap(maps, &h, nullptr, "mask", half, files), std::invalid_argument) << "no scalp";
+    // Fill Selected: the selected guide's own value, the other's kept.
+    const MapFill g = fillMap(maps, &h, nullptr, "lay", selected, files);
+    EXPECT_EQ(g.kind, "guides");
+    EXPECT_FALSE(g.mapsChanged);
+    EXPECT_FLOAT_EQ(g.layer.at(last), 0.9f);
+    EXPECT_FLOAT_EQ(g.layer.at(first), 0.2f);
+    GuideHierarchy filled = h;
+    applyFilledLayer(filled, "lay", g);
+    EXPECT_FLOAT_EQ(filled.guide(last)->attributes.at("lay"), 0.9f);
+    // A texture map whose image another map reads: written as its own copy, the other's untouched.
+    const MapFill own = fillMap(maps, &h, scalp.get(), "a", half, files);
+    EXPECT_EQ(own.file, "masks/a.png");
+    EXPECT_TRUE(own.mapsChanged);
+    EXPECT_EQ(own.maps.maps.at("a").texture, "masks/a.png");
+    EXPECT_EQ(own.maps.maps.at("b").texture, "masks/shared.png");
+    EXPECT_EQ(readFile(dir / "masks" / "shared.png"), sharedBytes);
+    EXPECT_TRUE(fs::exists(dir / "masks" / "a.png"));
+    restoreFileStates(own.files, false);
+    EXPECT_FALSE(fs::exists(dir / "masks" / "a.png")) << "undone: the copy goes";
+    // Its own image: rewritten in place, its bytes before kept for the undo.
+    const MapFill inPlace = fillMap(own.maps, &h, scalp.get(), "b", half, files);
+    EXPECT_TRUE(inPlace.file.empty());
+    EXPECT_FALSE(inPlace.mapsChanged);
+    EXPECT_NE(readFile(dir / "masks" / "shared.png"), sharedBytes);
+    restoreFileStates(inPlace.files, false);
+    EXPECT_EQ(readFile(dir / "masks" / "shared.png"), sharedBytes);
+}

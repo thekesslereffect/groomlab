@@ -6,6 +6,8 @@
 // once; the host sets the texts and keeps the files' states for the step's undo.
 
 #include <functional>
+#include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -101,5 +103,41 @@ struct MapRemove {
 // std::invalid_argument for no map `name`, std::runtime_error for a graph that does not read.
 MapRemove removeMap(const ScalpMaps& maps, const GuideHierarchy* guides, const std::string& graph, const std::string& name,
                     bool deleteFile, const MapFiles& files);
+
+// A fill of a map, as asked.
+struct MapFillRequest {
+    float value = 0.0f;                // a gray map's value, a color map's r g b without `color` (clamped 0..1)
+    std::optional<PaintColor> color;   // a color map's color, in the channels of `mask`
+    unsigned mask = kAllChannels;      // a color map's channels filled (a value: their r g b)
+    PaintMode mode = PaintMode::Replace;
+    bool selectedOnly = false;         // Fill Selected: a guide layer on `selected` only
+    std::vector<GuideId> selected;
+    std::vector<std::int32_t> faces;   // only those polygons of the cage (a guide layer: the guides rooted on them)
+    int resolution = 1024;             // a texture map whose image is not there yet: a blank one this square
+};
+
+// A map filled.
+struct MapFill {
+    std::string kind;                  // the map's kind (guides, vertices or texture)
+    std::map<GuideId, float> layer;    // a guide layer: each guide's own value after (applyFilledLayer)
+    ScalpMaps maps;                    // the scalp maps after (a vertex map's values; a texture map's own copy)
+    bool mapsChanged = false;
+    std::vector<FileState> files;      // the image written, as found and as left (the step's undo)
+    std::string file;                  // a texture map's own copy as stored, when it got one ("" otherwise)
+};
+
+// Map `name` filled, every host's Fill Map (scalp_paint.h fillGuideLayer, fillVertexMap,
+// fillTexturePaint): `fill.value` everywhere, on the selected guides (a guide layer), or on the
+// cage's polygons `fill.faces`; a color map takes `fill.color` in the channels of `fill.mask`, or
+// the value in its r g b (its alpha kept). A texture map's image is rewritten (a PNG; a tile set:
+// each tile); one another map of the groom or something beside it (`files.shared`) reads too is
+// written as this map's own copy (newMapImageFile) instead, the other keeping its image. `cage`:
+// the scalp the maps are painted on (vertex maps per its vertex; may be null for a guide layer
+// filled everywhere). Throws std::invalid_argument for no such map or a fill the map does not take,
+// std::runtime_error for an image that cannot be painted or written.
+MapFill fillMap(const ScalpMaps& maps, const GuideHierarchy* guides, const ScalpMesh* cage, const std::string& name,
+                const MapFillRequest& fill, const MapFiles& files);
+// The filled layer onto a hierarchy (the host's, its other edits kept as they are).
+void applyFilledLayer(GuideHierarchy& h, const std::string& name, const MapFill& filled);
 
 }  // namespace groomlab

@@ -249,4 +249,68 @@ MapRemove removeMap(const ScalpMaps& maps, const GuideHierarchy* guides, const s
     return out;
 }
 
+MapFill fillMap(const ScalpMaps& maps, const GuideHierarchy* guides, const ScalpMesh* cage, const std::string& name,
+                const MapFillRequest& fill, const MapFiles& files) {
+    MapFill out;
+    out.maps = maps;
+    out.kind = mapKindOf(maps, guides, name);
+    if (out.kind.empty()) throw std::invalid_argument("no map named '" + name + "'");
+    const int channels = mapChannelsOf(maps, guides, name);
+    if (fill.color && fill.selectedOnly) {
+        throw std::invalid_argument("Fill Selected sets a guide layer, which is gray; a color fills a color map");
+    }
+    if (fill.color && channels != kColorMap) throw std::invalid_argument("a color fills a color map; " + name + " is gray (a value fills it)");
+    if (fill.selectedOnly && out.kind != "guides") {
+        throw std::invalid_argument("Fill Selected sets a guide layer on the selected guides; " + name + " lives on the scalp");
+    }
+    if (fill.selectedOnly && !fill.faces.empty()) throw std::invalid_argument("fill the selected guides or the selected faces, not both");
+    if (fill.selectedOnly && fill.selected.empty()) throw std::invalid_argument("no guides selected");
+    if (!cage && (out.kind != "guides" || !fill.faces.empty())) throw std::invalid_argument("the groom has no scalp mesh");
+    const float value = std::clamp(fill.value, 0.0f, 1.0f);
+    const PaintColor color = fill.color ? *fill.color : PaintColor{value, value, value, 1.0f};
+    const unsigned mask = fill.color ? fill.mask : (fill.mask & 0x7u);  // a value fills a color map's r g b
+    if (out.kind == "guides") {
+        GuideHierarchy h = guides ? *guides : GuideHierarchy{};
+        fillGuideLayer(h, name, value, fill.mode, fill.selectedOnly ? fill.selected : std::vector<GuideId>{}, cage, fill.faces);
+        for (const HierarchyGuide& g : h.guides()) {
+            const auto own = g.attributes.find(name);
+            if (own != g.attributes.end()) out.layer[g.id] = own->second;
+        }
+        return out;
+    }
+    ScalpMapEntry& entry = out.maps.maps.at(name);
+    if (out.kind == "vertices") {
+        fillVertexMap(entry.values, channels, mask, color, fill.mode, *cage, fill.faces);
+        out.mapsChanged = true;
+        return out;
+    }
+    // A texture map: its image rewritten, or written as its own copy when something else reads it.
+    const auto resolve = [&](const std::string& stored) { return files.resolve ? files.resolve(stored) : stored; };
+    const std::string full = resolve(entry.texture);
+    bool shared = files.shared && files.shared(full);
+    for (const auto& [other, e] : maps.maps) {
+        if (other == name || e.kind != "texture" || e.texture.empty()) continue;
+        shared = shared || sameFile(resolve(e.texture), full);
+    }
+    requirePaintablePng(full);
+    const std::shared_ptr<TexturePaint> paint = openTexturePaint(*cage, full, channels == kColorMap ? kColorMap : kGrayMap, fill.resolution);
+    fillTexturePaint(*paint, mask, color, fill.mode, *cage, fill.faces);
+    if (shared && !files.mapsFolder.empty()) {
+        const std::string own = newMapImageFile(name, files);
+        out.files = writeMapImage(*paint, own);
+        entry.texture = storedMapPath(own, files);
+        out.file = entry.texture;
+        out.mapsChanged = true;
+    } else {
+        out.files = writeMapImage(*paint, full);
+    }
+    return out;
+}
+
+void applyFilledLayer(GuideHierarchy& h, const std::string& name, const MapFill& filled) {
+    for (const auto& [id, value] : filled.layer) {
+        if (h.guide(id)) h.setAttribute(id, name, value);
+    }
+}
+
 }  // namespace groomlab

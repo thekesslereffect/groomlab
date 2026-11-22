@@ -59,6 +59,8 @@ const char* kSetChannels[] = {"-sch", "-setChannels"};
 const char* kRelink[] = {"-rl", "-relink"};
 const char* kCopyFrom[] = {"-cf", "-copyFrom"};
 const char* kDeleteFile[] = {"-df", "-deleteFile"};
+// -fill on the selected guides only (a guide layer: Fill Selected).
+const char* kSelected[] = {"-sel", "-selected"};
 // The scalp's faces (polygon indices, space separated): -make makes the map 0 with -value (or
 // -fillColor) on those faces only; -fill fills those faces only. A guide layer: the guides
 // rooted on them.
@@ -99,6 +101,7 @@ MSyntax ScalpMapsCmd::newSyntax() {
     s.addFlag(kRelink[0], kRelink[1], MSyntax::kString);
     s.addFlag(kCopyFrom[0], kCopyFrom[1], MSyntax::kString);
     s.addFlag(kDeleteFile[0], kDeleteFile[1]);
+    s.addFlag(kSelected[0], kSelected[1]);
     s.addFlag(kFaces[0], kFaces[1], MSyntax::kString);
     s.setObjectType(MSyntax::kSelectionList, 0, 1);
     s.useSelectionAsDefault(true);
@@ -345,33 +348,38 @@ MStatus ScalpMapsCmd::doIt(const MArgList& args) {
                 if (!graphAfter.empty()) modifier_.newPlugValueString(graphPlug, graphAfter.c_str());
             } else if (db.isFlagSet(kFill[0])) {
                 const std::string name = flagString(db, kFill[0]).asChar();
-                const std::string kind = kindOf(maps, *h, name);
-                if (kind.empty()) return fail(kName, ("no map named " + name).c_str());
                 const bool byColor = db.isFlagSet(kFillColor[0]);
                 if (!db.isFlagSet(kValue[0]) && !byColor) return fail(kName, "-fill needs -value or -fillColor");
-                const int channels = channelsOf(maps, *h, name);
-                if (byColor && channels != kColorMap) {
-                    return fail(kName, ("-fillColor fills a color map; " + name + " is gray (-value fills it)").c_str());
-                }
-                // A color map: the color in the channels asked for, or a value in r g b (the alpha kept).
-                const unsigned mask = byColor ? fillMask : (fillMask & 0x7u);
-                // (Every host's Fill: scalp_paint.h fillGuideLayer, fillVertexMap, fillTexturePaint.)
-                const PaintColor fill = byColor ? color : PaintColor{value, value, value, 1.0f};
-                const std::vector<std::int32_t> onThese = onFaces ? faces : std::vector<std::int32_t>{};
-                if (kind == "guides") {
-                    fillGuideLayer(*h, name, value, paintMode, {}, scalp.get(), onThese);
+                // Every host's Fill (the editor's fillMap, map_edits.h): its checks, the fill, a texture
+                // map's image rewritten (this groom's own copy when another groom or map reads it), the
+                // files' states kept for Maya's undo.
+                MapFillRequest fill;
+                fill.value = value;
+                if (byColor) fill.color = color;
+                fill.mask = fillMask;
+                fill.mode = paintMode;
+                fill.selectedOnly = db.isFlagSet(kSelected[0]);
+                if (fill.selectedOnly) fill.selected = readGuideSelection(groomNode);
+                if (onFaces) fill.faces = faces;
+                fill.resolution = resolution;
+                MapFiles files;
+                files.mapsFolder = assetFolder("masks") + "/" + assetName(groomPath);
+                files.resolve = resolve;
+                files.store = [](const std::string& full) { return portableMayaPath(full); };
+                files.shared = [&](const std::string& full) { return fileUsedByOtherGroom(groomNode, full); };
+                MapFill filled = fillMap(maps, h.get(), scalp.get(), name, fill, files);
+                if (filled.kind == "guides") {
+                    applyFilledLayer(*h, name, filled);
                     guidesChanged = true;
-                } else if (kind == "vertices") {
-                    if (!scalp) return fail(kName, "the groom has no scalp mesh");
-                    fillVertexMap(maps.maps[name].values, channels, mask, fill, paintMode, *scalp, onThese);
+                } else if (filled.mapsChanged) {
+                    maps = std::move(filled.maps);
                     mapsChanged = true;
-                } else {
-                    // A file another groom reads too: this groom gets its own copy first.
-                    mapsChanged = ownFile(name) || mapsChanged;
-                    TexturePaint paint = texturePaint(maps.maps[name].texture, channels);
-                    fillTexturePaint(paint, mask, fill, paintMode, *scalp, onThese);
-                    writeTexture(paint, maps.maps[name].texture);
                 }
+                if (!filled.file.empty()) {
+                    MGlobal::displayInfo(MString("GroomLab: ") + name.c_str() + "'s file is shared; this groom now paints its own copy, " +
+                                         resolve(filled.file).c_str());
+                }
+                for (FileState& f : filled.files) files_.push_back(std::move(f));
             } else if (db.isFlagSet(kConvert[0])) {
                 const std::string name = flagString(db, kConvert[0]).asChar();
                 const std::string from = kindOf(maps, *h, name);

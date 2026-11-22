@@ -2435,9 +2435,6 @@ json mapFill(ToolState& t, const json& args) {
     } catch (const std::invalid_argument& e) {
         fail("bad_request", std::string("channels: ") + e.what());
     }
-    if (!byColor) mask &= 0x7u;  // a value fills a color map's r g b
-    const std::string kind = mapKindOf(s, name);
-    const int channels = mapChannelsOf(s, name);
     const bool selected = optBool(args, "selected", false);
     PaintMode paintMode = PaintMode::Replace;
     try {
@@ -2445,41 +2442,50 @@ json mapFill(ToolState& t, const json& args) {
     } catch (const std::invalid_argument& e) {
         fail("bad_request", std::string("paintMode: ") + e.what());
     }
-    if (byColor && selected) fail("bad_request", "Fill Selected sets a guide layer, which is gray; a color fills a color map");
-    if (byColor && channels != kColorMap) fail("bad_request", "a color fills a color map; " + name + " is gray (a value fills it)");
-    if (selected && kind != "guides") fail("bad_request", "Fill Selected sets a guide layer on the selected guides; " + name + " lives on the scalp");
+    // Every host's Fill (the editor's fillMap, map_edits.h): its checks, the fill, a texture map's
+    // image rewritten (or its own copy when another map reads it), the files kept for the step's undo.
+    MapFillRequest fill;
+    fill.value = value;
+    if (byColor) fill.color = color;
+    fill.mask = mask;
+    fill.mode = paintMode;
+    fill.selectedOnly = selected;
     // `faces`: only those polygons of the scalp (a guide layer: the guides rooted on them).
-    const std::vector<std::int32_t> faces = facesArg(args);
-    if (!faces.empty() && selected) fail("bad_request", "fill the selected guides or the selected faces, not both");
-    const MeshPtr faceScalp = faces.empty() ? MeshPtr() : mapScalp(s);
-    const std::string label = "fill map " + name;
-    // (Every host's Fill: scalp_paint.h fillGuideLayer, fillVertexMap, fillTexturePaint.)
-    const PaintColor fill = byColor ? color : PaintColor{value, value, value, 1.0f};
-    if (kind == "guides") {
-        editGuides(t, label, [&](GuideHierarchy& h) {
-            const std::vector<GuideId> picked = selected ? targetGuides(t, h, args, false, "fill selected") : std::vector<GuideId>{};
-            fillGuideLayer(h, name, value, paintMode, picked, faceScalp.get(), faces);
-        });
-    } else if (kind == "vertices") {
-        const MeshPtr scalp = mapScalp(s);
-        ScalpMaps maps = s.groom->scalpMaps();
-        fillVertexMap(maps.maps[name].values, channels, mask, fill, paintMode, *scalp, faces);
-        StrokeEdit edit;
-        edit.mode = label;
-        edit.set(StrokeField::ScalpMaps, maps.toJson());
-        commitEdit(t, std::move(edit));
-    } else {
-        // The file rewritten: its bytes before and after are the undo step.
-        const ScalpMapEntry entry = s.groom->scalpMaps().maps.at(name);
-        const std::shared_ptr<TexturePaint> paint = openPaint(s, entry, resolutionOf(args));
-        fillTexturePaint(*paint, mask, fill, paintMode, *mapScalp(s), faces);
-        writePaint(t, *paint, resolveMapFile(s, entry.texture));
-        dropPaints(t);
-        StrokeEdit edit;
-        edit.mode = label;
-        commitEdit(t, std::move(edit));
+    fill.faces = facesArg(args);
+    fill.resolution = resolutionOf(args);
+    const std::string kind = mapKindOf(s, name);
+    const HierarchyPtr authored = s.groom->authoredHierarchy();
+    if (selected && kind == "guides" && fill.faces.empty() && !byColor) {
+        fill.selected = targetGuides(t, authored ? *authored : GuideHierarchy{}, args, false, "fill selected");
     }
-    return {{"name", name}, {"undo", undoJson(t)}};
+    const MeshPtr cage = kind != "guides" || !fill.faces.empty() ? mapScalp(s) : MeshPtr();
+    MapFiles files;
+    files.mapsFolder = mapsFolder(s);
+    files.resolve = [&s](const std::string& stored) { return resolveMapFile(s, stored); };
+    MapFill filled;
+    try {
+        filled = groomlab::fillMap(s.groom->scalpMaps(), authored.get(), cage.get(), name, fill, files);
+    } catch (const std::invalid_argument& e) {
+        fail("bad_request", e.what());
+    } catch (const std::exception& e) {
+        fail("io", e.what());
+    }
+    const std::string label = "fill map " + name;
+    StrokeEdit edit;
+    edit.mode = label;
+    if (filled.kind == "guides") {
+        GuideHierarchy h = editedGuides(t, [&](GuideHierarchy& hh) { applyFilledLayer(hh, name, filled); });
+        edit.set(StrokeField::Guides, h.toJson());
+    } else {
+        if (filled.mapsChanged) edit.set(StrokeField::ScalpMaps, filled.maps.toJson());
+        if (filled.kind == "texture") dropPaints(t);
+    }
+    for (FileEdit& f : filled.files) t.pending.files.push_back(std::move(f));
+    commitEdit(t, std::move(edit));
+    if (!filled.file.empty() && t.tool.settings.brush.attribute == name) t.tool.settings.paintTexture = filled.file;
+    json r = {{"name", name}, {"undo", undoJson(t)}};
+    if (!filled.file.empty()) r["file"] = filled.file;
+    return r;
 }
 
 // An image to read as a texture map (Maya's set_map_texture rules): a PNG in place, any other
