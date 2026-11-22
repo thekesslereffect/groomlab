@@ -103,6 +103,7 @@ const char* kTubeAlwaysFlag[] = {"-tav", "-tubesAlwaysVisible"};  // ... whichev
 // (query) how many guides the source holds.
 const char* kPickSourceFlag[] = {"-pks", "-pickSource"};
 const char* kCloneSizeFlag[] = {"-csz", "-cloneSize"};
+const char* kClearSourceFlag[] = {"-csr", "-clearSource"};  // Clone: let the source go (Reset)
 const char* kTargetsFlag[] = {"-tg", "-targets"};
 const char* kPaintKindFlag[] = {"-pk", "-paintKind"};
 const char* kPaintTextureFlag[] = {"-ptx", "-paintTexture"};
@@ -1649,6 +1650,7 @@ MStatus BrushContextCmd::appendSyntax() {
     s.addFlag(kTubeAlwaysFlag[0], kTubeAlwaysFlag[1], MSyntax::kBoolean);
     s.addFlag(kPickSourceFlag[0], kPickSourceFlag[1], MSyntax::kBoolean);
     s.addFlag(kCloneSizeFlag[0], kCloneSizeFlag[1]);
+    s.addFlag(kClearSourceFlag[0], kClearSourceFlag[1], MSyntax::kBoolean);
     s.addFlag(kDebugPickFlag[0], kDebugPickFlag[1], MSyntax::kString);
     s.addFlag(kDebugHoverFlag[0], kDebugHoverFlag[1], MSyntax::kString);
     s.addFlag(kLengthEditFlag[0], kLengthEditFlag[1], MSyntax::kString);
@@ -1692,6 +1694,11 @@ MStatus BrushContextCmd::doEditFlags() {
         if (args.isFlagSet(kTubeColorsFlag[0]) && args.getFlagArgument(kTubeColorsFlag[0], 0, b)) context_->tubeColors = b;
         if (args.isFlagSet(kTubeLevelColorsFlag[0]) && args.getFlagArgument(kTubeLevelColorsFlag[0], 0, b)) context_->tubeLevelColors = b;
         if (args.isFlagSet(kTubeAlwaysFlag[0]) && args.getFlagArgument(kTubeAlwaysFlag[0], 0, b)) context_->tubesAlwaysVisible = b;
+        // Another tool set: Clone's source let go (BrushTool::syncClone); Reset lets it go now.
+        context_->brushTool().syncClone();
+        if (args.isFlagSet(kClearSourceFlag[0]) && args.getFlagArgument(kClearSourceFlag[0], 0, b) && b) {
+            context_->brushTool().clearClip();
+        }
         if (args.isFlagSet(kPickSourceFlag[0]) && args.getFlagArgument(kPickSourceFlag[0], 0, b)) context_->brushTool().armCapture(b);
         MToolsInfo::setDirtyFlag(*context_);
         context_->showSymmetry();  // the line follows the symmetry set (or goes with it)

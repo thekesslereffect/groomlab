@@ -698,6 +698,27 @@ TEST(Stroke, CloneCapturesAndSetsDownCopies) {
     EXPECT_FALSE(tool.captureArmed());
     EXPECT_EQ(tool.clip().guides.size(), captured);
     EXPECT_EQ(g.session->hierarchy()->guides().size(), before);
+    // The source is let go: Ctrl+click off the scalp (the view's corner), Reset, another tool.
+    tool.press(*g.host, view, 2.0f, 2.0f, 1.0f, kStrokeCtrl);
+    tool.release(*g.host, view);
+    EXPECT_TRUE(tool.clip().empty());
+    tool.press(*g.host, view, sx, sy, 1.0f, kStrokeCtrl);
+    tool.release(*g.host, view);
+    ASSERT_FALSE(tool.clip().empty());
+    tool.armCapture(true);
+    tool.clearClip();
+    EXPECT_TRUE(tool.clip().empty());
+    EXPECT_FALSE(tool.captureArmed());
+    tool.press(*g.host, view, sx, sy, 1.0f, kStrokeCtrl);
+    tool.release(*g.host, view);
+    ASSERT_FALSE(tool.clip().empty());
+    tool.settings.setMode("comb");
+    tool.affectedLines(*g.host, view, sx, sy);  // (hovering with the other tool)
+    EXPECT_TRUE(tool.clip().empty());
+    tool.settings.setMode("clone");
+    tool.press(*g.host, view, sx, sy, 1.0f, 0);  // nothing to set down: a new capture is needed
+    EXPECT_EQ(tool.release(*g.host, view), StrokeRelease::None);
+    EXPECT_EQ(g.session->hierarchy()->guides().size(), before);
 }
 
 TEST(Stroke, CloneLeavesFrozenGuidesAndReplaces) {

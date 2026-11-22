@@ -1533,7 +1533,13 @@ class ToolPalette(QtWidgets.QWidget):
         self.clone_count = widgets.small_label("")
         self.clone_count.setObjectName("cloneCount")
         self.clone_count.setToolTip("The guides the source holds (their children come along)")
+        self.clone_reset = QtWidgets.QPushButton("Reset")
+        self.clone_reset.setObjectName("cloneReset")
+        self.clone_reset.setToolTip("Let the source go, ready for a new pick (a Ctrl+click off the model, or "
+                                    "picking another tool, does the same)")
+        self.clone_reset.clicked.connect(self.reset_clone_source)
         self.clone_box.add(self.clone_pick)
+        self.clone_box.add(self.clone_reset)
         self.clone_box.add(self.clone_count)
         self.clone_replace = widgets.switch("Replace", _setting("cloneReplace", "hint"), _default("cloneReplace"),
                                             "cloneReplace")
@@ -2405,6 +2411,8 @@ class ToolPalette(QtWidgets.QWidget):
             return
         if tool != "paint":
             self.paint_tab.end_painting()
+        if tool != "clone":
+            groomlab.clone_reset()  # another tool: Clone's source let go (Select's context too)
         self.tool = tool
         self.check_tiles(tool)
         self.leave_paint_tab()
@@ -2773,6 +2781,11 @@ class ToolPalette(QtWidgets.QWidget):
             self.clone_pick.setChecked(armed)
             self.clone_pick.blockSignals(False)
 
+    def reset_clone_source(self):
+        """Reset: the Clone tool's source let go (and Pick Source up)."""
+        groomlab.clone_reset()
+        self.fill_clone()
+
     def fill_clone(self):
         """The Clone card: Pick Source down while a capture is armed, and what the source holds."""
         from maya import cmds
@@ -2789,6 +2802,7 @@ class ToolPalette(QtWidgets.QWidget):
                 "Source: %d guide%s" % (size, "" if size == 1 else "s"))
         if self.clone_count.text() != text:
             self.clone_count.setText(text)
+        self.clone_reset.setEnabled(bool(size) or armed)
 
     def fill_flow_count(self, groom):
         """The Flow card's count: "34 arrows · 2 sinks" kept on the groom (Clear All off with none)."""

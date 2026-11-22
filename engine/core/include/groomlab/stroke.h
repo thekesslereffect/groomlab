@@ -645,8 +645,17 @@ public:
     bool stroking() const { return stroking_; }
     // The Clone tool's source: what the last capture took (empty before one). armCapture: the
     // next press captures, as a Ctrl+press does (the card's Pick Source); a capture disarms it.
+    // The source is let go (clearClip: the card's Reset) by a Ctrl+click off the scalp, and by
+    // leaving the tool: syncClone drops it (and a capture armed) when settings.tool is no longer
+    // Clone; press and hover call it, and hosts call it when they set another tool.
     const GuideClip& clip() const { return clip_; }
-    void clearClip() { clip_ = GuideClip{}; }
+    void clearClip() {
+        clip_ = GuideClip{};
+        captureArmed_ = false;
+    }
+    void syncClone() {
+        if (settings.tool != BrushToolSettings::Tool::Clone && (!clip_.empty() || captureArmed_)) clearClip();
+    }
     void armCapture(bool on) { captureArmed_ = on; }
     bool captureArmed() const { return captureArmed_; }
     // A Ctrl+Shift drag painting the selection, until its release.

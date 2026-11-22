@@ -331,6 +331,13 @@ def clone_pick_source(on=True):
     return cmds.groomLabBrushCtx(BRUSH_CONTEXT, query=True, pickSource=True)
 
 
+def clone_reset():
+    """The Clone tool lets its source go, ready for a new pick (the Groom Tools' Reset; a Ctrl+click
+    off the model and picking another tool do the same)."""
+    if cmds.contextInfo(BRUSH_CONTEXT, exists=True):
+        cmds.groomLabBrushCtx(BRUSH_CONTEXT, edit=True, clearSource=True)
+
+
 def clone_source_size():
     """How many guides the Clone tool's source holds (their children come along); 0 before a capture."""
     if not cmds.contextInfo(BRUSH_CONTEXT, exists=True):

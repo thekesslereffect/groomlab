@@ -364,8 +364,12 @@ bool BrushTool::captureClip(StrokeHost& host, const ToolView& view, float x, flo
     const std::shared_ptr<const GuideHierarchy> h = host.authoredHierarchy();
     Vec3f origin, dir;
     SurfacePoint at;
-    if (!scalp || scalp->triangleCount() == 0 || !h || !view.ray(x, y, origin, dir) || !scalp->intersectRay(origin, dir, &at)) {
-        host.warn("GroomLab clone: Ctrl+click on the scalp, over the guides to copy");
+    if (!scalp || scalp->triangleCount() == 0 || !h) {
+        host.warn("GroomLab clone: the groom has no scalp mesh");
+        return false;
+    }
+    if (!view.ray(x, y, origin, dir) || !scalp->intersectRay(origin, dir, &at)) {
+        clearClip();  // Ctrl+click off the scalp: the source let go, ready for a new one
         return false;
     }
     // The guides a brush would edit there, rooted in the circle (and not hidden by the scalp).
@@ -1129,6 +1133,7 @@ void BrushTool::cancel(StrokeHost* host) {
 }
 
 void BrushTool::press(StrokeHost& host, const ToolView& view, float x, float y, float pressure, unsigned modifiers) {
+    syncClone();  // (another tool now: Clone's source let go)
     if (settings.tool == BrushToolSettings::Tool::Lengths) {
         lengthsPressed_ = host.attach() && lengths_.press(host, view, settings, x, y, modifiers);
         return;
@@ -1361,6 +1366,7 @@ std::vector<std::vector<Vec3f>> BrushTool::affectedLines(StrokeHost& host, const
     // click would set down there, once a source is captured; until then (or with a capture
     // armed) the guides a capture would take, those rooted in the circle.
     std::vector<std::vector<Vec3f>> lines;
+    syncClone();
     using Tool = BrushToolSettings::Tool;
     const bool clone = settings.tool == Tool::Clone;
     if ((settings.tool != Tool::Brush && !clone) || !host.attach()) return lines;
