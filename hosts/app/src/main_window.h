@@ -507,7 +507,7 @@ public:
     // choices first in the viewport's glass prompt (never a dialog); a file is picked in a file
     // dialog only in a window someone sits at, a scripted run takes the default place.
     // Add Sample Mesh: a new groom on a shipped sample (sampleMeshNames: "nika", "manny", "wolf",
-    // the Maya host's hosts/maya/meshes, CC BY 4.0, beside the app in meshes/): the wolf on its body,
+    // the Maya host's engine/assets/meshes, CC BY 4.0, beside the app in meshes/): the wolf on its body,
     // its eyes, nails and mouth a prop beside it.
     static QStringList sampleMeshNames();
     static QString sampleMeshFile(const QString& name);  // "" when it is not there

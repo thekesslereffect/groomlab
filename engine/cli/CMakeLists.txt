@@ -21,9 +21,9 @@ if(TARGET groomlab_alembic)
     target_compile_definitions(groomlab-cli PRIVATE GROOMLAB_HAS_ALEMBIC=1)
     # A build tree's server finds GroomLab's presets, nodes, sample meshes and docs in the sources;
     # an installed one beside it (GroomLab/bin/../presets and so on).
-    groomlab_path_literal(_cli_presets "${PROJECT_SOURCE_DIR}/hosts/maya/presets")
-    groomlab_path_literal(_cli_nodes "${PROJECT_SOURCE_DIR}/hosts/maya/nodes")
-    groomlab_path_literal(_cli_meshes "${PROJECT_SOURCE_DIR}/hosts/maya/meshes")
+    groomlab_path_literal(_cli_presets "${PROJECT_SOURCE_DIR}/engine/assets/presets")
+    groomlab_path_literal(_cli_nodes "${PROJECT_SOURCE_DIR}/engine/assets/nodes")
+    groomlab_path_literal(_cli_meshes "${PROJECT_SOURCE_DIR}/engine/assets/meshes")
     groomlab_path_literal(_cli_docs "${PROJECT_SOURCE_DIR}/web/content/docs")
     target_compile_definitions(groomlab-cli PRIVATE "GROOMLAB_SHIPPED_PRESETS=${_cli_presets}"
         "GROOMLAB_SHIPPED_NODES=${_cli_nodes}" "GROOMLAB_SHIPPED_MESHES=${_cli_meshes}" "GROOMLAB_DOCS_DIR=${_cli_docs}")
@@ -50,8 +50,8 @@ endif()
 install(DIRECTORY "${PROJECT_SOURCE_DIR}/web/content/docs/" DESTINATION "GroomLab/docs/pages" COMPONENT GroomLab
         FILES_MATCHING PATTERN "*.mdx")
 if(NOT GROOMLAB_BUILD_MAYA)
-    install(DIRECTORY "${PROJECT_SOURCE_DIR}/hosts/maya/presets/" DESTINATION "GroomLab/presets" COMPONENT GroomLab)
-    install(DIRECTORY "${PROJECT_SOURCE_DIR}/hosts/maya/nodes/" DESTINATION "GroomLab/nodes" COMPONENT GroomLab)
-    install(DIRECTORY "${PROJECT_SOURCE_DIR}/hosts/maya/meshes/" DESTINATION "GroomLab/meshes" COMPONENT GroomLab
+    install(DIRECTORY "${PROJECT_SOURCE_DIR}/engine/assets/presets/" DESTINATION "GroomLab/presets" COMPONENT GroomLab)
+    install(DIRECTORY "${PROJECT_SOURCE_DIR}/engine/assets/nodes/" DESTINATION "GroomLab/nodes" COMPONENT GroomLab)
+    install(DIRECTORY "${PROJECT_SOURCE_DIR}/engine/assets/meshes/" DESTINATION "GroomLab/meshes" COMPONENT GroomLab
             PATTERN "*_rig.*" EXCLUDE)  # the hosts' rigs: the app grooms buddy.obj
 endif()

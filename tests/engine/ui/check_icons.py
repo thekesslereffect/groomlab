@@ -39,7 +39,7 @@ def main():
     # Regenerate in a temporary checkout, keeping the working tree untouched.
     with tempfile.TemporaryDirectory(prefix="groomlab-icons-") as directory:
         target = Path(directory)
-        for folder in ("tools", "hosts/maya/icons", "hosts/maya/themes", "hosts/app/icons",
+        for folder in ("tools", "hosts/maya/icons", "engine/assets/themes", "hosts/app/icons",
                        "hosts/blender/addon/groomlab/icons"):
             shutil.copytree(ROOT / folder, target / folder)
         paths = [path for folder in ("hosts/maya/icons", "hosts/app/icons", "hosts/blender/addon/groomlab/icons")

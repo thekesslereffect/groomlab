@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Writes the brush alphas shipped with every host (hosts/maya/alphas/*.png, 256 x 256 gray).
+"""Writes the brush alphas shipped with every host (engine/assets/alphas/*.png, 256 x 256 gray).
 
     python tools/dev/make_alphas.py
 
@@ -15,7 +15,7 @@ import struct
 import zlib
 
 SIZE = 256
-OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "hosts", "maya", "alphas")
+OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "engine", "assets", "alphas")
 
 
 def write_png(path, values):

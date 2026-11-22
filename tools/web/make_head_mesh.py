@@ -3,7 +3,7 @@
 
     python tools/web/make_head_mesh.py
 
-Reads hosts/maya/meshes/manny_head.obj (CC BY 4.0, "Manny head by Nick Rutlinh (GroomLab), CC BY 4.0")
+Reads engine/assets/meshes/manny_head.obj (CC BY 4.0, "Manny head by Nick Rutlinh (GroomLab), CC BY 4.0")
 and writes its subdivision cage, quantized: the page subdivides it (Catmull-Clark, in
 web/components/home/head-mesh.ts) and grows the hair on its scalp. Little endian:
 
@@ -23,7 +23,7 @@ import os
 import struct
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-SRC = os.path.join(ROOT, "hosts", "maya", "meshes", "manny_head.obj")
+SRC = os.path.join(ROOT, "engine", "assets", "meshes", "manny_head.obj")
 OUT = os.path.join(ROOT, "web", "public", "samples", "manny_head.bin")
 
 

@@ -66,7 +66,7 @@ REQUIRED = [
     "msvcp140.dll", "msvcp140_1.dll", "msvcp140_2.dll", "vcruntime140.dll", "vcruntime140_1.dll",
     "LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.txt", "README_BETA.txt",
     "licenses/QT_NOTICE.txt", "licenses/LGPL-3.0.txt", "licenses/GPL-3.0.txt",
-    # GroomLab > Add Sample Mesh (hosts/maya/meshes, CC BY 4.0)
+    # GroomLab > Add Sample Mesh (engine/assets/meshes, CC BY 4.0)
     "meshes/nika_head.obj", "meshes/manny_head.obj", "meshes/wolf.obj",
 ]
 FORBIDDEN = [
@@ -169,22 +169,22 @@ def check_manifest(folder):
     problems = ["missing %s" % r for r in REQUIRED if r.lower() not in lower]
     problems += ["shipped but must not be: %s" % f for f in files
                  if any(re.fullmatch(p, f, re.IGNORECASE) for p in FORBIDDEN) or is_debug_qt(f, lower)]
-    source_presets = files_of(os.path.join(ROOT, "hosts", "maya", "presets"))
+    source_presets = files_of(os.path.join(ROOT, "engine", "assets", "presets"))
     shipped_presets = [f[len("presets/"):] for f in files if f.startswith("presets/")]
     if not source_presets or shipped_presets != source_presets:
-        problems.append("presets/ differs from hosts/maya/presets")
-    source_meshes = [f for f in files_of(os.path.join(ROOT, "hosts", "maya", "meshes")) if f.lower().endswith(".obj")]
+        problems.append("presets/ differs from engine/assets/presets")
+    source_meshes = [f for f in files_of(os.path.join(ROOT, "engine", "assets", "meshes")) if f.lower().endswith(".obj")]
     shipped_meshes = [f[len("meshes/"):] for f in files if f.startswith("meshes/")]
     if not source_meshes or shipped_meshes != source_meshes:
-        problems.append("meshes/ differs from the OBJs of hosts/maya/meshes")
-    source_nodes = files_of(os.path.join(ROOT, "hosts", "maya", "nodes"))
+        problems.append("meshes/ differs from the OBJs of engine/assets/meshes")
+    source_nodes = files_of(os.path.join(ROOT, "engine", "assets", "nodes"))
     shipped_nodes = [f[len("nodes/"):] for f in files if f.startswith("nodes/")]
     if not source_nodes or shipped_nodes != source_nodes:
-        problems.append("nodes/ differs from hosts/maya/nodes")
-    source_alphas = files_of(os.path.join(ROOT, "hosts", "maya", "alphas"))
+        problems.append("nodes/ differs from engine/assets/nodes")
+    source_alphas = files_of(os.path.join(ROOT, "engine", "assets", "alphas"))
     shipped_alphas = [f[len("alphas/"):] for f in files if f.startswith("alphas/")]
     if not source_alphas or shipped_alphas != source_alphas:
-        problems.append("alphas/ differs from hosts/maya/alphas")
+        problems.append("alphas/ differs from engine/assets/alphas")
     problems += check_imports(folder)
     return problems
 

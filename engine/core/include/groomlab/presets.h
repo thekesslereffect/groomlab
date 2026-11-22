@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-// Graph presets: graphs saved as JSON files, independent of any scene (hosts/maya/presets ships
+// Graph presets: graphs saved as JSON files, independent of any scene (engine/assets/presets ships
 // them; a user's own go in their preset folder). Every host reads the same files through this:
 // the Maya host's Python (groomlab/presets.py, the Graph Editor's Presets menu) and the
 // standalone app's node graph, so a preset saved in one shows in the other and fits the same way.

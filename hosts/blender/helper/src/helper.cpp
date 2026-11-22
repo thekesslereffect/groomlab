@@ -1309,7 +1309,7 @@ json setState(Session& s, const json& args) {
     return info;
 }
 
-// The sample meshes shipped with the helper (Maya's hosts/maya/meshes, CC BY 4.0): bin/meshes
+// The sample meshes shipped with the helper (Maya's engine/assets/meshes, CC BY 4.0): bin/meshes
 // beside it (or one up), else the source tree's (a build tree's helper).
 std::string shippedMeshesDir() {
     std::error_code ec;

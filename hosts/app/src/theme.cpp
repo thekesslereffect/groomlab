@@ -32,7 +32,7 @@ const QString kDefaultTheme = QStringLiteral("charcoal");
 const QString kBaseTheme = QStringLiteral("playful");
 const QString kThemeSetting = QStringLiteral("ui/theme");
 
-// hosts/maya/themes/<name>.json, the Maya host's theme files, embedded at build time (resources of
+// engine/assets/themes/<name>.json, the Maya host's theme files, embedded at build time (resources of
 // this library): the palette, the UI tones, the graph's and the icons' colors come from those
 // files, so a theme edit reaches both hosts.
 nlohmann::json readTheme(const QString& name) {

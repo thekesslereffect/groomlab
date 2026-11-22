@@ -10,7 +10,7 @@ head.groom -o groom.vrscene`) beside the PNG, and a scene that #includes it: the
 lights (the app's "studio" preset: the key, fill and rim as directional lights, the studio
 environment as a dome from a lat-long .hdr written here; or the key alone, the environment alone,
 one directional light) and scalp (the OBJ as a GeomStaticMesh, the viewport's scalp color; any
-OBJ: hosts/maya/meshes/nika_head.obj too) as arnold_compare.py, in V-Ray's linear sRGB (its
+OBJ: engine/assets/meshes/nika_head.obj too) as arnold_compare.py, in V-Ray's linear sRGB (its
 default rendering space: arnold_compare.py's --linear-srgb). The PNG is sRGB without a tone map.
 Measured with vray: LightDirect's intensity times pi is the irradiance it gives (Arnold's distant
 light's intensity is the irradiance, so each is divided by pi), it shines down its -Z as Arnold's;

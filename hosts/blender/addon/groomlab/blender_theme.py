@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """GroomLab Charcoal for Blender's node editor: a theme preset made from the app's theme file
-(hosts/maya/themes/charcoal.json, its "graph" and "ui" colors) so the Graph Editor sits on the app's
+(engine/assets/themes/charcoal.json, its "graph" and "ui" colors) so the Graph Editor sits on the app's
 canvas: its background, dot grid, node bodies and outlines, selection, wires and their curving.
 
 Only the node editor's colors are in the preset (Blender draws an add-on's node headers in its Input

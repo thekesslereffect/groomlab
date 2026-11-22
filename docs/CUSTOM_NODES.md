@@ -137,7 +137,7 @@ gaps.
 
 One file per node, `<id>.glnode` (JSON, UTF-8), readable and diffable. Format 1, as phase 1 reads
 and writes it (`engine/core/include/groomlab/node_library.h`; the shipped examples are in
-`hosts/maya/nodes/`):
+`engine/assets/nodes/`):
 
 ```json
 {
@@ -233,7 +233,7 @@ node's).
   user's folder (`GROOMLAB_USER_NODES`, else `Documents/GroomLab/nodes`: the profile's on Windows,
   `$HOME`'s elsewhere; shared by Maya, the app and Blender; made by the first save), then the folder
   shipped with the host (`setShippedNodeDir`: Maya's module `nodes/`, the app's `nodes/` beside its
-  executable, the Blender helper's `bin/nodes`; all from `hosts/maya/nodes`). An earlier folder hides
+  executable, the Blender helper's `bin/nodes`; all from `engine/assets/nodes`). An earlier folder hides
   a later one with the same `id`. The CLI and the render procedurals set no folder: grooms carry
   their nodes.
 - **The core does the work** (`node_library.h`), every host the same: `libraryNodes()` (cached, read

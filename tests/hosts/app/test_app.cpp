@@ -632,7 +632,7 @@ TEST(AppTheme, FontsBrushesAndColors) {
     EXPECT_EQ(theme::glass().alpha(), 255);  // solid panels: no shipped theme is glass any more
 
     // The colors are the Maya host's theme file's (embedded at build time), not a copy of it.
-    std::ifstream in(std::string(GROOMLAB_TEST_DATA) + "/../../hosts/maya/themes/playful.json");
+    std::ifstream in(std::string(GROOMLAB_TEST_DATA) + "/../../engine/assets/themes/playful.json");
     ASSERT_TRUE(in);
     const json playful = json::parse(in);
     auto hex = [&](const std::string& value) {
@@ -694,7 +694,7 @@ TEST(AppTheme, EveryShippedThemeIsEmbeddedAndCharcoalIsSolid) {
     // opaque panels with a thin edge, its own text tones, the selection tone for the chosen segment,
     // the blue accent pill for the primary actions, minimal node headers on a dot grid; Playful (glass, round filled headers) is still the
     // theme the others extend.
-    const std::string folder = std::string(GROOMLAB_TEST_DATA) + "/../../hosts/maya/themes";
+    const std::string folder = std::string(GROOMLAB_TEST_DATA) + "/../../engine/assets/themes";
     QStringList files;
     for (const auto& entry : std::filesystem::directory_iterator(folder)) {
         if (entry.path().extension() == ".json") files << QString::fromStdString(entry.path().stem().string());

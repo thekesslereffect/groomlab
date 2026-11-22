@@ -93,7 +93,7 @@ labels, search words and number decimals come from the core (`node_catalog.h`, t
 | Live / Apply toggle | Live checkbox | present by design: every edit applies live, one undo step |
 | Undo / Redo named after the step | More menu, Ctrl+Z/Y | present (top-right, Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z) |
 | Units (cm/mm/m, widths, density) | More > Units | missing |
-| Theme switch | More > Theme | present (View > Theme: the shipped themes, the Maya host's files; applies on the next start) |
+| Theme switch | More > Theme | present (View > Theme: the shipped themes (engine/assets/themes); applies on the next start) |
 | GPU preview toggle | More > Preview Drags on the GPU | present (Display panel) |
 | Reload from groom | More > Reload from Groom | present by design (the view follows the document) |
 | Seed warnings for nodes sharing a seed | status bar | partial: the core's `seedWarnings` is there; the app does not show them |

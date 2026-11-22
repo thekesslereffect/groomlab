@@ -23,7 +23,8 @@ import re
 
 import groomlab_core
 
-SHIPPED_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", "expressions"))
+from groomlab.shipped import shipped_dir as _shipped_dir  # noqa: E402
+SHIPPED_DIR = _shipped_dir("expressions")
 
 # (name, what it is). Written with a `$` in the editor; the language takes them with or without.
 VARIABLES = [

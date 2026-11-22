@@ -256,10 +256,10 @@ install(TARGETS GroomLab
     LIBRARY DESTINATION "${GROOMLAB_MODULE_DIR}/${GROOMLAB_MAYA_BIN}plug-ins" COMPONENT GroomLab)
 install(DIRECTORY scripts/ DESTINATION "${GROOMLAB_MODULE_DIR}/scripts" COMPONENT GroomLab
     PATTERN "__pycache__" EXCLUDE)
-install(DIRECTORY presets/ DESTINATION "${GROOMLAB_MODULE_DIR}/presets" COMPONENT GroomLab)
+install(DIRECTORY "${PROJECT_SOURCE_DIR}/engine/assets/presets/" DESTINATION "${GROOMLAB_MODULE_DIR}/presets" COMPONENT GroomLab)
 install(DIRECTORY icons/ DESTINATION "${GROOMLAB_MODULE_DIR}/icons" COMPONENT GroomLab)  # on XBMLANGPATH
-install(DIRECTORY expressions/ DESTINATION "${GROOMLAB_MODULE_DIR}/expressions" COMPONENT GroomLab)  # the expression library's examples
-install(DIRECTORY themes/ DESTINATION "${GROOMLAB_MODULE_DIR}/themes" COMPONENT GroomLab)  # UI themes (JSON)
+install(DIRECTORY "${PROJECT_SOURCE_DIR}/engine/assets/expressions/" DESTINATION "${GROOMLAB_MODULE_DIR}/expressions" COMPONENT GroomLab)  # the expression library's examples
+install(DIRECTORY "${PROJECT_SOURCE_DIR}/engine/assets/themes/" DESTINATION "${GROOMLAB_MODULE_DIR}/themes" COMPONENT GroomLab)  # UI themes (JSON)
 # Retired themes an earlier install left in the module (install never deletes): Polar (replaced by Paper).
 install(CODE "foreach(_gone polar.json)
     file(REMOVE \"\${CMAKE_INSTALL_PREFIX}/${GROOMLAB_MODULE_DIR}/themes/\${_gone}\")
@@ -272,10 +272,10 @@ install(FILES "${PROJECT_SOURCE_DIR}/hosts/app/fonts/Inter[opsz,wght].ttf" "${PR
 # Their reader (ui_definitions.py) with them; never a source tree's bytecode.
 install(DIRECTORY "${PROJECT_SOURCE_DIR}/engine/ui/" DESTINATION "${GROOMLAB_MODULE_DIR}/ui" COMPONENT GroomLab
         PATTERN "__pycache__" EXCLUDE)
-install(DIRECTORY nodes/ DESTINATION "${GROOMLAB_MODULE_DIR}/nodes" COMPONENT GroomLab)  # compound nodes (.glnode) shipped with every host
-install(DIRECTORY alphas/ DESTINATION "${GROOMLAB_MODULE_DIR}/alphas" COMPONENT GroomLab)  # brush alphas shipped with every host
+install(DIRECTORY "${PROJECT_SOURCE_DIR}/engine/assets/nodes/" DESTINATION "${GROOMLAB_MODULE_DIR}/nodes" COMPONENT GroomLab)  # compound nodes (.glnode) shipped with every host
+install(DIRECTORY "${PROJECT_SOURCE_DIR}/engine/assets/alphas/" DESTINATION "${GROOMLAB_MODULE_DIR}/alphas" COMPONENT GroomLab)  # brush alphas shipped with every host
 # The sample meshes (CC BY 4.0): Nika, Manny, the wolf, Buddy (its rig, buddy_rig.ma; the .fbx is Blender's).
-install(DIRECTORY meshes/ DESTINATION "${GROOMLAB_MODULE_DIR}/meshes" COMPONENT GroomLab PATTERN "*.fbx" EXCLUDE)
+install(DIRECTORY "${PROJECT_SOURCE_DIR}/engine/assets/meshes/" DESTINATION "${GROOMLAB_MODULE_DIR}/meshes" COMPONENT GroomLab PATTERN "*.fbx" EXCLUDE)
 # GroomLab's license and NOTICE, and the licenses of the open-source code inside the binaries and of
 # tbb.dll, shipped with them.
 groomlab_install_legal("${GROOMLAB_MODULE_DIR}" GroomLab)

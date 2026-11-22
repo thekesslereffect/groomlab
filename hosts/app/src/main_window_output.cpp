@@ -42,7 +42,7 @@ namespace groomlab::app {
 
 namespace {
 
-// The shipped samples (hosts/maya/meshes: centimeters, Y up, facing +Z; CC BY 4.0, Nick Rutlinh):
+// The shipped samples (engine/assets/meshes: centimeters, Y up, facing +Z; CC BY 4.0, Nick Rutlinh):
 // the file, and the group the groom grows on ("" the whole mesh), as Maya's groom.SAMPLES.
 struct Sample {
     const char* name;

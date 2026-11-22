@@ -4,7 +4,7 @@ A free sample: a stylized sitting wolf to groom, for learning GroomLab and testi
 
 The model ships with GroomLab for Maya: **GroomLab > Add Sample Mesh > Wolf** (or
 `groomlab.add_sample("wolf")`) adds it at the origin, sized for the scene's units, with its body
-selected for **Create Groom from Selection**. The mesh is `hosts/maya/meshes/wolf.obj` (body, eyes,
+selected for **Create Groom from Selection**. The mesh is `engine/assets/meshes/wolf.obj` (body, eyes,
 nails and mouth; centimetres, y up, facing +z, 110 cm long).
 
 ## License

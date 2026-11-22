@@ -24,7 +24,7 @@ SPDX-License-Identifier = "Apache-2.0"
 # by Nick Rutlinh (GroomLab), CC BY 4.0", "Buddy by Nick Rutlinh (GroomLab), CC BY 4.0"), separate
 # from the code's Apache-2.0.
 [[annotations]]
-path = ["hosts/maya/meshes/**"]
+path = ["engine/assets/meshes/**"]
 precedence = "override"
 SPDX-FileCopyrightText = "2026 Nick Rutlinh"
 SPDX-License-Identifier = "CC-BY-4.0"

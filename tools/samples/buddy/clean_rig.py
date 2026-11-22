@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Write hosts/maya/meshes/buddy_rig.ma from the artist's Buddy scene (run with mayapy 2022).
+"""Write engine/assets/meshes/buddy_rig.ma from the artist's Buddy scene (run with mayapy 2022).
 
 Usage: mayapy clean_rig.py <source buddy.ma> <out buddy_rig.ma>
 

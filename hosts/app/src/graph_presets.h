@@ -25,15 +25,15 @@ class GroomDocument;
 QString appResourceDir();
 
 // The presets shipped with the app: the "presets" folder beside the executable (the build
-// copies hosts/maya/presets there), else the source tree's folder (a development build).
+// copies engine/assets/presets there), else the source tree's folder (a development build).
 std::string shippedPresetDir();
 // The compound nodes shipped with the app (node_library.h): the "nodes" folder beside the
-// executable, else the source tree's (hosts/maya/nodes).
+// executable, else the source tree's (engine/assets/nodes).
 std::string shippedNodeFolder();
 // The brush alphas shipped with the app (brush_alpha.h), found the same way.
 std::string shippedAlphaFolder();
 // The sample meshes shipped with the app (GroomLab > Add Sample Mesh; CC BY 4.0): the "meshes"
-// folder beside the executable, else the source tree's (hosts/maya/meshes).
+// folder beside the executable, else the source tree's (engine/assets/meshes).
 std::string shippedMeshFolder();
 // Where presets are looked up (presetSearchDirs: GROOMLAB_PRESET_PATH, the user's folder, the
 // shipped ones).

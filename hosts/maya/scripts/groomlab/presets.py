@@ -43,7 +43,8 @@ import os
 
 import groomlab_core
 
-SHIPPED_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", "presets"))
+from groomlab.shipped import shipped_dir as _shipped_dir  # noqa: E402
+SHIPPED_DIR = _shipped_dir("presets")
 
 # The Presets menu's submenus, in this order (a category not listed here follows them); a
 # preset's own fields (not part of the graph a groom stores): the core's (presets.h), which the

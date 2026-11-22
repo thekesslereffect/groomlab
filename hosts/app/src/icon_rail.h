@@ -2,7 +2,7 @@
 // IconRail: a slim column of page icons on a side dock's outer edge (Blender's Properties editor,
 // VS Code's activity bar). An icon opens its page in the dock; the open page's icon again folds
 // the dock down to the rail (the viewport takes the room), any icon opens it again. Its sizes and
-// tones are components.iconRail (hosts/maya/themes/charcoal.json), so the hosts draw the
+// tones are components.iconRail (engine/assets/themes/charcoal.json), so the hosts draw the
 // same rail; folding is app chrome (in Maya and Blender the rail only switches pages).
 #pragma once
 

@@ -41,11 +41,12 @@ import weakref
 THEME_VAR = "groomLabTheme"
 DEFAULT = "charcoal"  # the theme a user who never picked one gets
 BASE = "playful"      # the theme every theme extends unless it says otherwise (it sets every key)
-SHIPPED_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir, os.pardir, "themes"))
+from groomlab.shipped import shipped_dir as _shipped_dir  # noqa: E402
+SHIPPED_DIR = _shipped_dir("themes")
 # The fonts GroomLab's windows use (Inter, SIL OFL 1.1, its license beside it): the installed module's
 # fonts folder, else the source tree's (hosts/app/fonts, the app's own) for runs from a checkout.
 FONT_DIRS = (os.path.normpath(os.path.join(SHIPPED_DIR, os.pardir, "fonts")),
-             os.path.normpath(os.path.join(SHIPPED_DIR, os.pardir, os.pardir, "app", "fonts")))
+             os.path.normpath(os.path.join(SHIPPED_DIR, os.pardir, os.pardir, os.pardir, "hosts", "app", "fonts")))
 
 _current = None
 _listeners = []  # (weakref to object, method name)

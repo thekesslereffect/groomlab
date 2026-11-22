@@ -1,6 +1,6 @@
 # Buddy sample pipeline
 
-Regenerates the shipped Buddy files in `hosts/maya/meshes/` (CC BY 4.0, "Buddy by Nick Rutlinh
+Regenerates the shipped Buddy files in `engine/assets/meshes/` (CC BY 4.0, "Buddy by Nick Rutlinh
 (GroomLab), CC BY 4.0") from the artist's Maya 2022 scene of the rig. One command per rig update:
 
 ```

@@ -27,7 +27,7 @@ LIVE_INTERVAL = 0.04            # seconds between live evaluations during a stro
 LIVE_PER_COST = 1.5             # and this many times the last one's own time (the drags keep coming in between)
 STATE_DELAY = 1.0               # seconds after the last edit before the groom's state is kept (get_state)
 DEFER = 0.35                    # seconds after a slider's last change before its edit commits (one undo step)
-# The Playful theme's viewport colors (hosts/maya/themes/playful.json "viewport"), as Maya hands
+# The Playful theme's viewport colors (engine/assets/themes/playful.json "viewport"), as Maya hands
 # them to its display (groomLabDisplayTheme). Blender's overlays are not color managed: sRGB as is.
 THEME_HEX = {"selected": "#F5F5F7",
              "softSelected": "#FFC53D", "frozen": "#5EC8FF", "parts": "#FF4D4F", "flow": "#FFC53D",

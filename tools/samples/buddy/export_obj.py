@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Write hosts/maya/meshes/buddy.obj (for the app and the MCP server) from the artist's Buddy scene
+"""Write engine/assets/meshes/buddy.obj (for the app and the MCP server) from the artist's Buddy scene
 (run with mayapy 2022).
 
 Usage: mayapy export_obj.py <source buddy.ma> <out buddy.obj>

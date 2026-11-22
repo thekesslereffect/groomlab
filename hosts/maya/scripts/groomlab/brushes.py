@@ -12,7 +12,8 @@ from groomlab.base import ensure_plugin
 
 # The brush alphas shipped with GroomLab (the module's alphas folder); the user's own are in
 # Documents/GroomLab/alphas, shared by every host.
-SHIPPED_ALPHAS = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", "alphas"))
+from groomlab.shipped import shipped_dir as _shipped_dir  # noqa: E402
+SHIPPED_ALPHAS = _shipped_dir("alphas")
 groomlab_core.set_shipped_brush_alpha_dir(SHIPPED_ALPHAS)
 
 

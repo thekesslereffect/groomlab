@@ -15,7 +15,9 @@ clump, noise, curl, braids, cards...). Everything that computes hair lives in a 
 core; Maya, Python, the CLI and Arnold are thin hosts over it.
 
 The repository's root follows that split: `engine/` is the system (`core`, `gpu`, `io` for
-Alembic and groom scenes, `python`, `cli`), `hosts/` the products built on it (`maya` with its
+Alembic and groom scenes, `python`, `cli`, `ui` the UI definitions, `assets` the files every host
+ships: graph presets, compound nodes, sample meshes, brush alphas, themes and the expression
+library, each installed into every product's own folder), `hosts/` the products built on it (`maya` with its
 Arnold translator, `arnold` for the procedural, `app`, `blender` for the Blender extension: the
 helper process and the GPL add-on, docs/BLENDER.md), `tests/` mirrors the two
 (`tests/engine/...`, `tests/hosts/...`, with the shared `tests/data`), `tools/` packages and
@@ -1170,8 +1172,8 @@ build/wt/hosts/app/RelWithDebInfo/GroomLab.exe tests/data/strokes/strokes.groom
 **The window.** The whole window is the viewport, edge to edge; everything else floats over it
 as translucent glass (the owner's mockup, "like Plasticity but Pixar": the Playful theme's
 charcoal and primaries, round and friendly). `hosts/app/src/theme.h` holds the colors (the palette,
-the UI tones, the graph's and the icons' read from the Maya host's theme files themselves,
-`hosts/maya/themes/*.json`, every one embedded as a resource at build time, so a theme edit reaches
+the UI tones, the graph's and the icons' read from the shipped theme files (engine/assets/themes) themselves,
+`engine/assets/themes/*.json`, every one embedded as a resource at build time, so a theme edit reaches
 both hosts; Playful by default, View > Theme saves another (QSettings `ui/theme`) for the next start,
 `--theme` picks one for a run; a glass theme keeps the app's own glass and text tones, a theme with
 `"glass": false` (Charcoal) gets solid `ui.panel` panels with a thin `ui.outline` edge and its `ui` text
@@ -1265,7 +1267,7 @@ grabs it with its UI after the first frame
 `guides`, `cardsView`, `widthCoverage`...). The preview starts with no point budget (the Display
 panel's: past one every Scatter thins to fit); `--density` and the panel change it.
 
-**Graph presets** are the Maya host's files (`hosts/maya/presets/*.json`), read through the core's
+**Graph presets** are every host's shipped files (`engine/assets/presets/*.json`), read through the core's
 `presets.h` by both hosts: where they are looked up (`GROOMLAB_PRESET_PATH`, the user's folder,
 `GROOMLAB_USER_PRESETS` else `Documents/GroomLab/presets`, where every host saves, then the folder
 earlier GroomLabs saved to (Maya's `Documents/maya/groomlab/presets`, still read), then
@@ -3687,7 +3689,7 @@ numbers under a test that compares them to the helper's `tool_catalog`
 replacing it: the look between the preset's sources and its Output as one Compound after a
 node (GraphEdit checks the wiring; the preset's Scalp or Guides become Compound inputs wired
 to the graph's), used by Maya's `GraphEditor.insert_preset` and the app's `insertPresetFile`;
-the Add-ons presets (`hosts/maya/presets/wet.json`...) are small complete graphs made for it,
+the Add-ons presets (`engine/assets/presets/wet.json`...) are small complete graphs made for it,
 and `Presets.EveryAddOnInsertsIntoEveryBasePreset` inserts each into every shipped preset.
 
 **What every host does, written once.** Maya, Blender and the app make the same edits from the

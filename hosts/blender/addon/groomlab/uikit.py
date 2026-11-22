@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """A small drawn UI for the 3D view: what the GroomLab window (window.py) is made of, in the app's
-and Maya's look (the theme's colors and sizes, hosts/maya/themes/charcoal.json; Inter; our icons)
+and Maya's look (the theme's colors and sizes, engine/assets/themes/charcoal.json; Inter; our icons)
 rather than Blender's panels, which take no styling.
 
 Immediate mode: a window's content is laid out again (Layout) for each draw and each event, from
@@ -43,7 +43,7 @@ def _first(*paths):
 FONT_FILE = _first(os.path.join(HERE, "fonts", "Inter[opsz,wght].ttf"),
                    os.path.join(_REPO, "app", "fonts", "Inter[opsz,wght].ttf"))
 THEME_FILE = _first(os.path.join(HERE, "themes", "charcoal.json"),
-                    os.path.join(_REPO, "maya", "themes", "charcoal.json"))
+                    os.path.join(_REPO, os.pardir, "engine", "assets", "themes", "charcoal.json"))
 ICON_DIR = os.path.join(HERE, "icons")
 CAP_HEIGHT = 0.727  # Inter's cap height, in ems: centers text on a row
 TOOLTIP_DELAY = 0.6  # seconds the pointer rests on a widget before its tooltip shows

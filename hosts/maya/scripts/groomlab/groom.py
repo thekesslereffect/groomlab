@@ -62,7 +62,8 @@ SAMPLES = {
     "wolf": ("wolf.obj", 109.7, "wolf", "wolf_body"),     # a sitting wolf: body, eyes, nails, mouth
     "buddy": ("buddy_rig.ma", 96.65, "buddy_rig", "buddy_body"),  # a posable character (buddy.obj: its body alone)
 }
-MESHES_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", "meshes"))
+from groomlab.shipped import shipped_dir as _shipped_dir  # noqa: E402
+MESHES_DIR = _shipped_dir("meshes")
 
 
 def add_sample(sample="nika"):
