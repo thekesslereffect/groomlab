@@ -12,8 +12,11 @@ opening a scene that uses it, at GroomLab's start), GroomLab
     startIprRenderProcedure, redshiftStartIprRender) and Redshift's own RenderView, whose Render and
     IPR buttons run redshiftRvRender (rsRender -rv), so each writes the frame first;
   - on picking Redshift, writes the frame and makes the proxies at once;
-  - while Redshift's IPR runs, writes a groom again once it has stopped changing (an edit, a new
-    frame: its live evaluations, groomLabGraphStats -evaluations, polled: LiveIpr).
+  - while Redshift's Render View window is open (or Maya's IPR runs), keeps the proxies current by
+    itself (LiveIpr): a groom with no proxy gets one at once, and one that changed (an edit, a new
+    frame: its live evaluations, groomLabGraphStats -evaluations) is written again once it has
+    held still. The Render View's own IPR button starts IPR natively, past any MEL GroomLab could
+    wrap, so this is what makes that IPR find the grooms and follow their edits.
 Every write is a file of its own (<groom>.<frame>.<n>.abc, the older ones of that frame deleted):
 Redshift keeps a proxy's file as it first read it, so a new name is what makes it read again.
 For each visible groom that writes the frame to Alembic (groomlab.export_alembic: the render density
@@ -129,6 +132,13 @@ def next_version(names, asset, frame):
     """The version the next write of a groom's frame takes: one past the highest there (1 first)."""
     found = cache_versions(names, asset, frame)
     return max(found) + 1 if found else 1
+
+
+def is_render_view_title(title):
+    """Whether a window's title is Redshift's Render View's ("Redshift Render View", any case,
+    with or without the frame or camera after it)."""
+    t = " ".join((title or "").lower().split())
+    return "redshift" in t and ("render view" in t or "renderview" in t)
 
 
 def rv_render_known(source):
@@ -472,11 +482,37 @@ def menu_refresh():
     print("GroomLab: Redshift: %d groom(s) written for this frame" % len(written))
 
 
+def render_view_open():
+    """Whether Redshift's Render View window shows: a visible top-level window, or a Maya workspace
+    panel it is docked in, titled as is_render_view_title says."""
+    try:
+        try:
+            from PySide6 import QtWidgets
+        except ImportError:
+            from PySide2 import QtWidgets
+        app = QtWidgets.QApplication.instance()
+        if app is not None:
+            for w in app.topLevelWidgets():
+                if w.isVisible() and is_render_view_title(w.windowTitle()):
+                    return True
+    except Exception:  # noqa: BLE001 (no Qt: batch)
+        pass
+    for control in cmds.lsUI(type="workspaceControl") or []:
+        try:
+            if cmds.workspaceControl(control, query=True, visible=True) and \
+                    is_render_view_title(cmds.workspaceControl(control, query=True, label=True)):
+                return True
+        except RuntimeError:
+            continue
+    return False
+
+
 class LiveIpr(object):
-    """While Redshift's IPR runs: each visible groom written again once it has stopped changing,
-    so IPR follows edits and frame changes by itself. Polls each groom's live evaluations
-    (groomLabGraphStats -evaluations) every TICK_MS; a groom whose count moved, then held for a
-    tick, is written (write_groom: a new file, which IPR reads). Idle while IPR is not running."""
+    """While the scene renders in Redshift and its Render View window is open (or Maya's IPR runs):
+    the proxies kept current. Polls every TICK_MS: a visible groom with no proxy is written at once
+    (its proxy made: what an IPR started from the window's own button then finds), and one whose
+    live evaluations (groomLabGraphStats -evaluations) moved, then held for a tick, is written again
+    (write_groom: a new file, which IPR reads). Idle otherwise."""
     TICK_MS = 600
     _timer = None
     _seen = {}     # groom -> the evaluations last seen
@@ -503,9 +539,15 @@ class LiveIpr(object):
             return False
 
     @classmethod
+    def active(cls):
+        """Whether the proxies are kept current now."""
+        return redshift_loaded() and renderer_is_redshift() and (cls.ipr_running() or render_view_open())
+
+    @classmethod
     def tick(cls):
         try:
-            if not cls.ipr_running() or not renderer_is_redshift():
+            if not cls.active():
+                cls._seen.clear()
                 cls._written.clear()
                 return
             from groomlab.render_gather import render_grooms
@@ -513,11 +555,15 @@ class LiveIpr(object):
                 count = cmds.groomLabGraphStats(groom, evaluations=True)
                 last = cls._seen.get(groom)
                 cls._seen[groom] = count
+                if find_proxy(groom)[0] is None:
+                    write_groom(groom)  # no proxy yet: made now
+                    cls._written[groom] = count
+                    continue
                 if last is None:
-                    cls._written.setdefault(groom, count)  # (written as IPR started)
+                    cls._written.setdefault(groom, count)  # (its proxy as it was when watching began)
                     continue
                 if count == last and cls._written.get(groom) != count:
-                    write_groom(groom)  # changed, then held a tick: written for IPR
+                    write_groom(groom)  # changed, then held a tick: written again
                     cls._written[groom] = count
         except Exception as e:  # noqa: BLE001 (a timer: never raise into Maya's event loop)
             cmds.warning("GroomLab: Redshift live IPR: %s" % e)

@@ -74,6 +74,16 @@ class Files(unittest.TestCase):
         self.assertEqual(rs.next_version(names, "fur", 7), 3)
 
 
+class RenderViewWindow(unittest.TestCase):
+    def test_its_title(self):
+        self.assertTrue(rs.is_render_view_title("Redshift Render View"))
+        self.assertTrue(rs.is_render_view_title("REDSHIFT  render view - frame 12"))
+        self.assertTrue(rs.is_render_view_title("Redshift RenderView"))
+        self.assertFalse(rs.is_render_view_title("Render View"))  # Maya's own
+        self.assertFalse(rs.is_render_view_title("Redshift Render Settings"))
+        self.assertFalse(rs.is_render_view_title(None))
+
+
 class RenderViewWrap(unittest.TestCase):
     REDSHIFT_2026 = """global proc redshiftRvRender(string $action, string $camera)
 {
