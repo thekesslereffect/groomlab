@@ -41,7 +41,7 @@ std::vector<BrushEntry> makeCatalog() {
         {"clone", "Clone", C::Create, 0, "clone", 1.0f, false,
          "Ctrl+click over guides to copy the ones rooted in the circle (or Pick Source, then click); then click "
          "anywhere to set copies down, each guide keeping its shape and children, turned to the scalp there. Drag "
-         "before letting go to spin the copies.",
+         "left or right before letting go to spin the copies.",
          {"radius", "symmetry", "selectedOnly", "collide", "frontFacingOnly", "clone"}},
         {"part", "Part", C::Create, 0, "part", 1.0f, false,
          "Draw a part freehand on the scalp: hair does not mix across it, and the Part node opens it.", {"symmetry", "parts"}},

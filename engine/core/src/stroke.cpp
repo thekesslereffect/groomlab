@@ -484,23 +484,15 @@ void BrushTool::stampAt(StrokeHost& host, const ToolView& view, float x, float y
     } else {
         if (!hitScalp_) return;
         if (settings.tool == Tool::Clone) {
-            // A drag spins the copies about the scalp's normal as the cursor turns round the press
-            // (clockwise on screen: clockwise seen from outside), once 4 pixels off it.
-            const float dx = x - pressX_, dy = y - pressY_;
-            if (pm::hypot(dx, dy) < 4.0f) return;
-            const float a = pm::atan2(dy, dx);
-            if (!spinning_) {
-                spinning_ = true;
-                spinLast_ = a;
-                return;
-            }
-            constexpr float kPiF = 3.14159265358979f;
-            float d = a - spinLast_;
-            if (d > kPiF) d -= 2.0f * kPiF;
-            if (d < -kPiF) d += 2.0f * kPiF;
-            spinLast_ = a;
-            if (d == 0.0f) return;
-            pasteAngle_ -= d;
+            // A drag left or right spins the copies about the scalp's normal, kCloneSpinPerPixel a
+            // pixel (right: clockwise seen from outside), once the cursor is 4 pixels off the
+            // press; up and down do nothing.
+            const float dx = x - pressX_;
+            if (!spinning_ && std::fabs(dx) < 4.0f) return;
+            spinning_ = true;
+            const float angle = -dx * BrushToolSettings::kCloneSpinPerPixel;
+            if (angle == pasteAngle_) return;
+            pasteAngle_ = angle;
             pasteClip();
             return;
         }

@@ -680,9 +680,16 @@ TEST(Stroke, CloneCapturesAndSetsDownCopies) {
     tool.release(*g.host, view);
     const std::vector<Vec3f> straight = newRoots();
     ASSERT_TRUE(g.host->undo());
+    EXPECT_NEAR(BrushToolSettings::kCloneSpinPerPixel * 360.0f, 3.14159265f, 1e-5f);  // half a turn over 360 pixels
     tool.press(*g.host, view, sx + dx, sy + dy, 1.0f, 0);
-    tool.drag(*g.host, view, sx + dx + 30.0f, sy + dy, 1.0f);   // past 4 pixels: the spin's start
-    tool.drag(*g.host, view, sx + dx, sy + dy + 30.0f, 1.0f);   // a quarter turn round the press
+    tool.drag(*g.host, view, sx + dx, sy + dy + 40.0f, 1.0f);   // up and down: no spin
+    tool.release(*g.host, view);
+    const std::vector<Vec3f> still = newRoots();
+    ASSERT_EQ(still.size(), straight.size());
+    for (std::size_t i = 0; i < still.size(); ++i) EXPECT_NEAR((still[i] - straight[i]).length(), 0.0f, 1e-5f);
+    ASSERT_TRUE(g.host->undo());
+    tool.press(*g.host, view, sx + dx, sy + dy, 1.0f, 0);
+    tool.drag(*g.host, view, sx + dx + 90.0f, sy + dy, 1.0f);   // 90 pixels right: 45 degrees
     tool.release(*g.host, view);
     const std::vector<Vec3f> spun = newRoots();
     ASSERT_EQ(spun.size(), straight.size());

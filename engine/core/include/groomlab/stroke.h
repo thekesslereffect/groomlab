@@ -53,6 +53,9 @@ struct BrushToolSettings {
     // Ctrl+click captures the guides rooted in the circle, a click sets copies down (a drag spins
     // them; clone.h, BrushTool::clip).
     Tool tool = Tool::Brush;
+    // Clone: how far a drag sideways spins the copies, radians a pixel (half a degree: half a turn
+    // over 360 pixels).
+    static constexpr float kCloneSpinPerPixel = 0.5f * 3.14159265358979f / 180.0f;
     // Clone: the guides of the copied levels already in the circle where it sets down are removed
     // first (frozen ones kept).
     bool cloneReplace = false;
@@ -781,12 +784,12 @@ private:
     float pressX_ = 0.0f, pressY_ = 0.0f;
     BrushMode savedMode_ = BrushMode::Comb;
     // Clone: the source captured, a capture armed for the next press, and the set-down being
-    // pressed: where on the scalp, how far a drag has spun it (radians), the drag's screen angle
-    // from the press last seen (spinning once the cursor is 4 pixels off it).
+    // pressed: where on the scalp, how far a drag has spun it (radians), and whether the drag has
+    // gone 4 pixels sideways (spinning from then on).
     GuideClip clip_;
     bool captureArmed_ = false;
     SurfacePoint pasteAt_;
-    float pasteAngle_ = 0.0f, spinLast_ = 0.0f;
+    float pasteAngle_ = 0.0f;
     bool spinning_ = false;
     // The guides a stroke would edit now (brushTargets with the host's hidden groups, selection
     // and freeze), in the hierarchy's order: the hover's, Clone's capture.
