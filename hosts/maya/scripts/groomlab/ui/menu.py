@@ -2404,7 +2404,8 @@ def install():
     try:
         from groomlab.ui import hotkeys
         hotkeys.create_runtime_commands()
-    except RuntimeError:
+        hotkeys.upgrade()  # (a GroomLab hotkey set from an earlier GroomLab: Alt+S, the radial menu)
+    except (RuntimeError, ValueError):
         pass
     try:  # once a session: an update's previous folder goes; at most daily, a quiet check for a new version
         from groomlab import updates

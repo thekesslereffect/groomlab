@@ -809,6 +809,19 @@ def step_redo():
     hotkeys.install()
     check("runtime commands exist", cmds.runTimeCommand("GroomLabComb", exists=True))
     check("the GroomLab hotkey set is current", cmds.hotkeySet(query=True, current=True) == "GroomLab")
+    check("Alt+S opens the radial menu",
+          cmds.hotkey("s", altModifier=True, query=True, name=True) == "GroomLabRadialMenuPressNameCommand")
+    # A set from an earlier GroomLab (Alt+S still Maya's HumanIK key, Y the old marking menu): the
+    # plugin's load brings it up to date (hotkeys.upgrade), a key bound otherwise left alone.
+    maya_alt_s = hotkeys._maya_binding("s", altModifier=True)
+    cmds.hotkey(keyShortcut="s", altModifier=True, name=maya_alt_s or "", releaseName="")
+    cmds.nameCommand("GroomLabMarkingMenuPressNameCommand", annotation="old", command="print('old')", sourceType="python")
+    cmds.hotkey(keyShortcut="y", name="GroomLabMarkingMenuPressNameCommand")
+    check("an old set brought up to date", hotkeys.upgrade())
+    check("... Alt+S the radial menu again",
+          cmds.hotkey("s", altModifier=True, query=True, name=True) == "GroomLabRadialMenuPressNameCommand")
+    check("... Y Maya's own", cmds.hotkey("y", query=True, name=True) != "GroomLabMarkingMenuPressNameCommand")
+    check("... and nothing more to do", not hotkeys.upgrade())
     hotkeys.marking_menu_press()
     check("the marking menu builds", cmds.popupMenu(hotkeys.MARKING_MENU, exists=True))
     hotkeys.marking_menu_release()

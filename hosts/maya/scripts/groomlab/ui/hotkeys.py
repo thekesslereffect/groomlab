@@ -289,6 +289,31 @@ def install(activate=True):
     return HOTKEY_SET
 
 
+def upgrade():
+    """A GroomLab hotkey set made by an earlier GroomLab, in use: its radial menu key bound where it
+    still does what Maya's own set does there (Alt+S: HumanIK's full-body key, an error without
+    HumanIK), and Y given back to Maya where it still opens the old marking menu. Quiet (Install
+    GroomLab Hotkeys does it all, saying what changed); a key the user bound otherwise is left. True
+    when anything changed."""
+    if not cmds.hotkeySet(HOTKEY_SET, exists=True) or cmds.hotkeySet(query=True, current=True) != HOTKEY_SET:
+        return False
+    from groomlab.ui import radial_menu
+    changed = False
+    try:
+        key, modifiers = radial_keys(radial_menu.shortcut())
+    except ValueError:
+        key = None
+    if key:
+        bound = cmds.hotkey(key, query=True, name=True, **modifiers) or ""
+        if bound != "GroomLabRadialMenuPressNameCommand" and (not bound or bound == _maya_binding(key, **modifiers)):
+            bind_radial(radial_menu.shortcut())
+            changed = True
+    if cmds.hotkey("y", query=True, name=True) == "GroomLabMarkingMenuPressNameCommand":
+        cmds.hotkey(keyShortcut="y", name=_maya_binding("y") or "", releaseName="")
+        changed = True
+    return changed
+
+
 # Qt's key names (QKeySequence PortableText) as Maya's hotkey command takes them.
 _MAYA_KEYS = {"PgUp": "Page_Up", "PgDown": "Page_Down", "Del": "Delete", "Ins": "Insert", "Esc": "Escape",
               "Space": "Space", "Return": "Return", "Enter": "Enter", "Tab": "Tab", "Backspace": "Backspace",
