@@ -783,6 +783,9 @@ MSyntax ExportGroomCmd::newSyntax() {
     syntax.addFlag(kDriverObjectFlag, kDriverObjectFlagLong, MSyntax::kString);
     syntax.addFlag("-n", "-name", MSyntax::kString);     // the groom's name in the file (its asset name)
     syntax.addFlag("-mg", "-merge", MSyntax::kBoolean);  // keep the file's other grooms
+    // The groom's reference photos (groom_file.h "referencePhotos": a JSON array, as
+    // reference.photos_for_file makes it from the scene's reference cameras).
+    syntax.addFlag("-rph", "-referencePhotos", MSyntax::kString);
     syntax.setObjectType(MSyntax::kSelectionList, 1, 1);
     syntax.useSelectionAsDefault(true);
     syntax.enableQuery(false);
@@ -819,6 +822,12 @@ MStatus ExportGroomCmd::doIt(const MArgList& args) {
         groom.source = std::string(MFileIO::currentFile().asChar()) + " " + path.fullPathName().asChar();
         const fs::path target = fs::absolute(fs::u8path(file.asChar()));
         groom.name = fileSafeName(stringFlag("-n").empty() ? assetName(path) : stringFlag("-n"));
+        if (db.isFlagSet("-rph")) {
+            const std::string photos = stringFlag("-rph");
+            const nlohmann::json parsed = nlohmann::json::parse(photos, nullptr, false);
+            if (!parsed.is_array()) return fail(kName, "-referencePhotos is a JSON array");
+            if (!parsed.empty()) groom.referencePhotos = parsed.dump();
+        }
         // Every file the groom names, absolute: the core's writer (groom_package.h, every host's)
         // copies the ones the groom owns into the file's own folder, groomlab/<file>/<kind>/<groom>
         // (the scene's own when the file is named after the scene: nothing copied), and names

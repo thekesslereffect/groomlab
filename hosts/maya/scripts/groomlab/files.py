@@ -85,6 +85,10 @@ def export_groom(groom, path, scalp_cache=False, start=None, end=None, step=1.0,
         cmds.groomLabExportAlembic(groom, file=cache, startFrame=start, endFrame=end, step=step, driverCurves=True)
         kwargs["driverCache"] = os.path.basename(cache)
         written.append(cache)
+    from groomlab import reference
+    photos = reference.photos_for_file(groom)  # (the scene's reference cameras, as every host's file keeps them)
+    if photos:
+        kwargs["referencePhotos"] = json.dumps(photos)
     cmds.groomLabExportGroom(groom, **kwargs)
     return [path] + written
 
@@ -396,6 +400,11 @@ def _after_groom_file(groom, info, keep_keys):
     fps = float(mel.eval("currentTimeUnitToFPS"))
     for layer in info.get("correctives") or []:
         _corrective_weight(groom, layer, fps, keep_keys)
+    # Reference photos (the app's and Blender's Reference windows' too): a reference camera each,
+    # posed as solved, its landmarks, flow strokes and mask kept (one in the scene already stays).
+    if info.get("referencePhotos"):
+        from groomlab import reference
+        reference.photos_from_file(groom, info["referencePhotos"], directory=info.get("directory") or "")
 
 
 def _corrective_weight(groom, layer, fps, keep_keys):

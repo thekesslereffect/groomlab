@@ -5982,6 +5982,55 @@ class ReferenceTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.ref.lock_reference(self.scalp)  # not a reference
 
+    def test_photos_travel_in_the_groom_file(self):
+        """A reference camera goes into the groom file's referencePhotos (its photo, solved pose,
+        landmarks, flow strokes and how it shows: what the app's and Blender's Reference windows
+        read), and an import makes it again, posed and edited as saved; a reload makes no second."""
+        from groomlab import from_reference
+        self.save_as("io", "shot.ma")
+        cam = self.ref.import_reference(self.photo, groom=self.groom)
+        cmds.xform(cam, worldSpace=True, translation=(3, 4, 40), rotation=(-5, 10, 0))
+        self.ref.set_reference_focal(cam, 50.0)
+        self.ref.set_reference_opacity(cam, 0.3)
+        self.ref.set_reference_depth(cam, "behind")
+        pairs = [{"image": [10.0, 12.0], "mesh": [1.0, 2.0, 9.0]}, {"image": [40.0, 30.0], "mesh": None}]
+        self.ref._store_pairs(cam, pairs)
+        from_reference.set_reference_hints(self.groom, cam, [[[5.0, 5.0], [20.0, 25.0]]])
+        self.ref.lock_reference(cam, True)
+        matrix = cmds.xform(cam, query=True, worldSpace=True, matrix=True)
+        focal = self.ref.focal_px(cam)
+        path = self.home + "/io/hair.groom"
+        groomlab.export_groom(self.groom, path)
+        with open(path) as f:
+            text = f.read()
+        self.assertIn('"referencePhotos"', text)
+        photo, = groomlab.groom_file_info(path)["referencePhotos"]
+        self.assertEqual((photo["name"], photo["width"], photo["height"]), ("front_ref", 64, 48))
+        self.assertAlmostEqual(photo["camera"]["focal_px"], focal, places=4)
+        self.assertEqual([p["image"] for p in photo["state"]["landmarks"]], [[10.0, 12.0], [40.0, 30.0]])
+        self.assertEqual(len(photo["state"]["strokes"]), 1)
+        self.assertEqual(photo["display"], {"opacity": photo["display"]["opacity"], "depth": "behind",
+                                            "locked": True, "visible": True})
+        self.assertAlmostEqual(photo["display"]["opacity"], 0.3, places=4)
+        # Into a new scene: the camera made again where it was, edits and display kept.
+        cmds.file(new=True, force=True)
+        imported = groomlab.import_groom(path)
+        made, = self.ref.list_references()
+        self.assertEqual(self.ref._short(made), "front_ref")
+        for a, b in zip(cmds.xform(made, query=True, worldSpace=True, matrix=True), matrix):
+            self.assertAlmostEqual(a, b, places=4)
+        self.assertAlmostEqual(self.ref.focal_px(made), focal, places=3)
+        self.assertEqual([p["image"] for p in self.ref.pairs(made)], [[10.0, 12.0], [40.0, 30.0]])
+        self.assertEqual(self.ref.pairs(made)[0]["mesh"], [1.0, 2.0, 9.0])
+        self.assertEqual(len(from_reference.reference_hints(imported, made)), 1)
+        self.assertAlmostEqual(self.ref.reference_opacity(made), 0.3, places=4)
+        self.assertEqual(self.ref.reference_depth(made), "behind")
+        self.assertTrue(self.ref.is_locked(made))
+        self.assertTrue(os.path.isfile(self.ref.image_path(made)))
+        # A reload of the same file: no second camera.
+        groomlab.reload_groom(imported)
+        self.assertEqual(len(self.ref.list_references()), 1)
+
     def test_guides_from_reference_grow_replace_undo_and_look(self):
         """Guides from Reference (experimental) as the Reference tab runs it: flow strokes and a
         mask kept on the groom, Generate into fromReference (again: replaced; one undo step each),

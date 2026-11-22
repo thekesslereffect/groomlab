@@ -182,6 +182,11 @@ std::string info(const GroomFile& file, const std::string& fileUpAxis) {
         keyed[name] = std::move(list);
     }
     out["controlKeys"] = std::move(keyed);
+    // Reference photos (in the scene's up axis): made as reference cameras by the import.
+    {
+        json photos = file.referencePhotos.empty() ? json::array() : json::parse(file.referencePhotos, nullptr, false);
+        out["referencePhotos"] = photos.is_array() ? std::move(photos) : json::array();
+    }
     out["scalpCache"] = cacheInfo(file.scalpCache);
     out["guideCache"] = cacheInfo(file.guideCache);
     if (!file.cardBake.empty()) {
