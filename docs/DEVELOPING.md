@@ -95,6 +95,9 @@ time, each host calling the one version:
   the Blender helper (its meshes still written by Blender's FBX exporter) and Maya
   (`groomLabBakeCards -engine`: the core's FBX writer, no fbxmaya) call it; the app's Unity
   feathers take the same options.
+- E6 (done): Maya's Graph Editor split: its parameter panel (`ParamPanel`, `MappableEditor`) in
+  `ui/param_panel.py`, imported at the end of `ui/graph_editor.py` (whose helpers it reads; the
+  theme's colors through the module, as `apply_theme` rebinds them).
   The Blender helper becomes a JSON wrapper over it; Maya calls it through `groomlab_core` and
   records each step through its own undo queue.
 
