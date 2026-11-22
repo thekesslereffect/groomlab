@@ -564,7 +564,7 @@ ExportResult GroomDocument::exportCards(const std::string& path, const ExportOpt
         const HairLook look = scene_->session().hairLook();
         CardGltfSettings settings;
         settings.name = name + "_cards";
-        settings.scale = file().units == "m" ? 1.0f : file().units == "in" ? 0.0254f : file().units == "mm" ? 0.001f : 0.01f;
+        settings.scale = static_cast<float>(usdMetersPerUnit(file().units));  // (the groom's unit in meters: feet too)
         settings.roughness = look.roughness;
         settings.specular = look.specular;
         addCardsToGltf(doc, *bake.cards, bake.textures, settings);
