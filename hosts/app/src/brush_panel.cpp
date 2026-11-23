@@ -539,6 +539,12 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
         flow_->rows()->addWidget(flowCount_);
         flowHint_ = hintLabel(QString(), flow_);
         flow_->rows()->addWidget(flowHint_);
+        // Mirror to Other Side (issue 105): filled from the window's bindings (setBindings).
+        flowButtons_ = new QWidget(flow_);
+        auto* flowButtons = new QHBoxLayout(flowButtons_);
+        flowButtons->setContentsMargins(0, 0, 0, 0);
+        flowButtons->setSpacing(4);
+        flow_->rows()->addWidget(flowButtons_);
         auto showHint = [this] { flowHint_->setText(text(flowSink_->currentData().toString().isEmpty() ? "flowArrows" : "flowSinks")); };
         connect(flowSink_, &QComboBox::currentIndexChanged, this, [this, showHint](int) {
             showHint();
@@ -998,18 +1004,25 @@ std::string BrushPanel::selectedPart() const { return partList_->currentItem() ?
 
 void BrushPanel::setBindings(const ui::Bindings& bindings) {
     for (QPushButton* b : partButtons_->findChildren<QPushButton*>()) delete b;
+    for (QPushButton* b : flowButtons_->findChildren<QPushButton*>()) delete b;
     ui::ResolveOptions options;
     options.state.reset();  // an action bar: every entry, enabled by its binding
     options.keep = [&bindings](const std::string& id) { return bindings.count(id) > 0; };
-    for (const ui::Item& item : defs().resolve(defs().get("lists/parts/bar"), options)) {
-        if (item.kind != ui::Item::Kind::Action) continue;
-        auto* b = new QPushButton(qs(item.label), partButtons_);
-        b->setObjectName(QStringLiteral("parts_") + qs(item.id).section(QLatin1Char('.'), 1));
-        b->setToolTip(qs(item.tip));
-        b->setEnabled(partList_->count() > 0);
-        const ui::Binding binding = bindings.at(item.id);
-        connect(b, &QPushButton::clicked, this, [binding] { binding.trigger(nullptr, false); });
-        partButtons_->layout()->addWidget(b);
+    // The Parts block: Remove, Clear All, then Mirror -X to +X, +X to -X (issue 105); the Flow
+    // block: its Mirror buttons.
+    for (const auto& [path, row, prefix] : {std::tuple{"lists/parts/bar", partButtons_, "parts_"},
+                                            std::tuple{"lists/parts/mirror", partButtons_, "parts_"},
+                                            std::tuple{"lists/flow/mirror", flowButtons_, "flow_"}}) {
+        for (const ui::Item& item : defs().resolve(defs().get(path), options)) {
+            if (item.kind != ui::Item::Kind::Action) continue;
+            auto* b = new QPushButton(qs(item.label), row);
+            b->setObjectName(QLatin1String(prefix) + qs(item.id).section(QLatin1Char('.'), 1));
+            b->setToolTip(qs(item.tip));
+            if (row == partButtons_) b->setEnabled(partList_->count() > 0);
+            const ui::Binding binding = bindings.at(item.id);
+            connect(b, &QPushButton::clicked, this, [binding] { binding.trigger(nullptr, false); });
+            row->layout()->addWidget(b);
+        }
     }
 }
 

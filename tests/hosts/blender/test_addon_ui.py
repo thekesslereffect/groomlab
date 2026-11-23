@@ -435,10 +435,12 @@ class ToolsTest(unittest.TestCase):
         self.assertEqual(palette.flow_count_text(34, 2), "34 arrows \u00b7 2 sinks")
         self.assertEqual(palette.flow_count_text(1, 1), "1 arrow \u00b7 1 sink")
         self.assertEqual(bpy.ops.groomlab.flow_clear(), {"FINISHED"})
-        # Only the blocks the tool uses: Flow draws no tubes and no Mirror (it doesn't mirror); the
+        # Mirror to Other Side (issue 105): the Flow block's two buttons.
+        self.assertEqual(texts(log, "groomlab.overlay_mirror"), ["Mirror -X to +X", "Mirror +X to -X"])
+        # Only the blocks the tool uses: Flow draws no tubes, and Mirror (it mirrors, issue 105); the
         # guide groups over the card; While sculpting with the brushes that stroke.
         self.assertNotIn(("prop", "tube_shape"), log)
-        self.assertNotIn(("prop", "symmetry"), log)
+        self.assertIn(("prop", "symmetry"), log)
         self.assertTrue(palette.VIEW3D_PT_groomlab_tools_sculpting.poll(bpy.context))
         for gone in ("VIEW3D_PT_groomlab_tools_tubes", "VIEW3D_PT_groomlab_tools_output"):
             self.assertFalse(hasattr(palette, gone))  # their items: the cards, the GroomLab menu

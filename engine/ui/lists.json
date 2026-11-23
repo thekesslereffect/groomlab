@@ -37,7 +37,11 @@
       }
     },
     "parts": {
-      "bar": ["parts.fromCurves", "parts.remove", "parts.clear"]
+      "bar": ["parts.fromCurves", "parts.remove", "parts.clear"],
+      "mirror": ["parts.mirrorNegative", "parts.mirrorPositive"]
+    },
+    "flow": {
+      "mirror": ["flow.mirrorNegative", "flow.mirrorPositive"]
     },
     "maps": {
       "bar": [

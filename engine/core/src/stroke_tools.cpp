@@ -11,6 +11,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "groomlab/curve.h"
 #include "groomlab/graph.h"
 #include "groomlab/graph_edit.h"
 #include "groomlab/graph_io.h"
@@ -423,6 +424,172 @@ void flowSinksAt(FlowSet& set, const ScalpMesh& scalp, const BrushToolSettings& 
             set.sinks.push_back(sink);
         }
     }
+}
+
+namespace {
+
+void checkMirror(const StrokeSymmetry& sym, int fromSide) {
+    if (!sym.on()) throw std::invalid_argument("Mirror to Other Side needs symmetry: pick an axis or Topology");
+    if (fromSide != 1 && fromSide != -1) throw std::invalid_argument("Mirror to Other Side copies from side 1 or -1");
+}
+
+// A scalp point's side under `sym` (0 off the scalp: left as it is, as the seam's).
+int rootSide(const ScalpMesh& scalp, const StrokeSymmetry& sym, const StrandRoot& root) {
+    return scalp.contains(root) ? sym.side(scalp.position(root), &root) : 0;
+}
+
+}  // namespace
+
+OverlayMirrorResult mirrorFlowToOtherSide(FlowSet& flow, const ScalpMesh& scalp, const StrokeSymmetry& sym, int fromSide) {
+    checkMirror(sym, fromSide);
+    OverlayMirrorResult out;
+    int nextLine = 0;
+    for (const FlowPin& pin : flow.pins) nextLine = std::max(nextLine, pin.line + 1);
+    std::map<int, int> lineOf;  // a source stroke's line -> its mirror image's
+    std::vector<FlowPin> pins, mirrored;
+    for (const FlowPin& pin : flow.pins) {
+        const int side = rootSide(scalp, sym, pin.root);
+        if (side == -fromSide) {
+            ++out.removed;
+            continue;
+        }
+        pins.push_back(pin);
+        if (side != fromSide) continue;
+        Vec3f x, y, z;
+        surfaceFrame(scalp, pin.root, x, y, z);
+        const Vec3f at = scalp.position(pin.root);
+        const Vec3f direction = x * pin.local.x + y * pin.local.y + z * pin.local.z;
+        const SurfacePoint hit = scalp.closestPoint(sym.point(at));
+        if (hit.root.face < 0) continue;
+        try {
+            FlowPin m = FlowSet::makePin(scalp, hit, sym.vector(at, direction));
+            if (pin.line >= 0) {
+                auto found = lineOf.find(pin.line);
+                if (found == lineOf.end()) found = lineOf.emplace(pin.line, nextLine++).first;
+                m.line = found->second;
+                m.seq = pin.seq;
+            }
+            mirrored.push_back(m);
+            ++out.copied;
+        } catch (const std::invalid_argument&) {
+            // (its mirrored direction along the normal there: no arrow)
+        }
+    }
+    pins.insert(pins.end(), mirrored.begin(), mirrored.end());
+    flow.pins = std::move(pins);
+
+    std::vector<FlowSink> sinks, mirroredSinks;
+    for (const FlowSink& sink : flow.sinks) {
+        const int side = rootSide(scalp, sym, sink.root);
+        if (side == -fromSide) {
+            ++out.removed;
+            continue;
+        }
+        sinks.push_back(sink);
+        if (side != fromSide) continue;
+        const SurfacePoint hit = scalp.closestPoint(sym.point(scalp.position(sink.root)));
+        if (hit.root.face < 0) continue;
+        FlowSink m = sink;
+        m.root = hit.root;
+        m.angle = -sink.angle;  // the mirror turns the other way round
+        mirroredSinks.push_back(m);
+        ++out.copied;
+    }
+    sinks.insert(sinks.end(), mirroredSinks.begin(), mirroredSinks.end());
+    flow.sinks = std::move(sinks);
+    return out;
+}
+
+OverlayMirrorResult mirrorPartsToOtherSide(PartSet& set, const ScalpMesh& scalp, const StrokeSymmetry& sym, int fromSide) {
+    checkMirror(sym, fromSide);
+    OverlayMirrorResult out;
+    std::vector<Part> kept, sources;
+    for (Part& part : set.parts) {
+        std::vector<int> sides;
+        bool source = false, other = false;
+        for (const StrandRoot& r : part.points) {
+            const int side = rootSide(scalp, sym, r);
+            sides.push_back(side);
+            source |= side == fromSide;
+            other |= side == -fromSide;
+        }
+        if (other && !source) {
+            ++out.removed;
+            continue;
+        }
+        if (source && !other) sources.push_back(part);
+        if (source && other) {
+            // Crossing: the side changes once (seam points between belong to neither run)?
+            int changes = 0, last = 0;
+            for (int side : sides) {
+                if (side == 0) continue;
+                if (last != 0 && side != last) ++changes;
+                last = side;
+            }
+            if (changes == 1) {
+                // The source half (its run of points and the seam's next to it, up to the other side's
+                // nearest point), in the part's order, and its mirror image joined on at the seam, the
+                // line going on the way it went.
+                const std::size_t n = sides.size();
+                const std::size_t firstOther = static_cast<std::size_t>(std::find(sides.begin(), sides.end(), -fromSide) - sides.begin());
+                const std::size_t firstSource = static_cast<std::size_t>(std::find(sides.begin(), sides.end(), fromSide) - sides.begin());
+                const bool sourceFirst = firstSource < firstOther;
+                std::size_t lastOther = n - 1;
+                while (sides[lastOther] != -fromSide) --lastOther;
+                const std::size_t begin = sourceFirst ? 0 : lastOther + 1, end = sourceFirst ? firstOther : n;
+                std::vector<Vec3f> half;
+                for (std::size_t i = begin; i < end; ++i) {
+                    if (scalp.contains(part.points[i])) half.push_back(scalp.position(part.points[i]));
+                }
+                // Where the line crosses the seam, between the half's last point and the other side's
+                // first (found by halving, on the scalp), so a coarse part still has a half to mirror.
+                const std::size_t inner = sourceFirst ? firstOther - 1 : lastOther + 1, across = sourceFirst ? firstOther : lastOther;
+                if (sides[inner] != 0 && scalp.contains(part.points[inner]) && scalp.contains(part.points[across])) {
+                    Vec3f lo = scalp.position(part.points[inner]), hi = scalp.position(part.points[across]);
+                    Vec3f seam = scalp.closestPoint((lo + hi) * 0.5f).position;
+                    for (int k = 0; k < 24; ++k) {
+                        seam = scalp.closestPoint((lo + hi) * 0.5f).position;
+                        const int side = sym.side(seam);
+                        if (side == 0) break;
+                        (side == fromSide ? lo : hi) = (lo + hi) * 0.5f;
+                    }
+                    if (sourceFirst) half.push_back(seam);
+                    else half.insert(half.begin(), seam);
+                }
+                std::vector<Vec3f> image;
+                for (const Vec3f& p : half) image.push_back(sym.point(p));
+                std::reverse(image.begin(), image.end());
+                // The seam point's mirror image is itself: once in the line.
+                if (half.size() >= 2) {
+                    const float tiny = 1e-3f * arcLength(half.data(), half.size());
+                    if (sourceFirst && (image.front() - half.back()).length() <= tiny) image.erase(image.begin());
+                    if (!sourceFirst && (image.back() - half.front()).length() <= tiny) image.pop_back();
+                }
+                std::vector<Vec3f> line = sourceFirst ? half : image;
+                const std::vector<Vec3f>& rest = sourceFirst ? image : half;
+                line.insert(line.end(), rest.begin(), rest.end());
+                if (half.size() >= 2) {
+                    part = PartSet::fromPoints(part.name, line, scalp);
+                    ++out.copied;
+                }
+            }
+        }
+        kept.push_back(part);
+    }
+    set.parts = std::move(kept);
+    for (const Part& part : sources) {
+        std::vector<Vec3f> image;
+        for (const StrandRoot& r : part.points) {
+            if (scalp.contains(r)) image.push_back(sym.point(scalp.position(r)));
+        }
+        try {
+            set.add(part.name, image, scalp, image.size());
+            ++out.copied;
+        } catch (const std::invalid_argument&) {
+            // (too short to stay a part)
+        }
+    }
+    return out;
 }
 
 // ---- Painting a param's map -------------------------------------------------------------------

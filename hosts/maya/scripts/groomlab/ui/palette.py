@@ -1503,7 +1503,11 @@ class ToolPalette(QtWidgets.QWidget):
         clear_flow.setToolTip(definitions.get("actions/flow.deleteAll")["tip"])
         clear_flow.clicked.connect(self.clear_flow)
         self.clear_flow_button = clear_flow
-        self.flow_box = widgets.Block(_setting("flow", "label"), (clear_flow,), name="flowBlock")
+        # Mirror to Other Side (issue 105): one side's arrows and sinks over the other's.
+        self.flow_mirror = self.mirror_menu_button("lists/flow/mirror", "flowMirror",
+                                                  "Copy one side's flow arrows and sinks over the other (across the Mirror "
+                                                  "below; X when it is off)")
+        self.flow_box = widgets.Block(_setting("flow", "label"), (self.flow_mirror, clear_flow), name="flowBlock")
         self.flow_sink = QtWidgets.QComboBox()
         for kind, label, tip in _options("flowSink"):
             self.flow_sink.addItem(label, kind)
@@ -1567,6 +1571,11 @@ class ToolPalette(QtWidgets.QWidget):
             b = widgets.chip(item["label"], item["tip"])
             b.clicked.connect(lambda _=False, fn=bind(item): fn())
             part_buttons.addWidget(b)
+        # Mirror to Other Side (issue 105): one side's parts over the other's.
+        self.part_mirror = self.mirror_menu_button("lists/parts/mirror", "partsMirror",
+                                                   "Copy one side's parts over the other (across the Mirror below; X when "
+                                                   "it is off)")
+        part_buttons.addWidget(self.part_mirror)
         part_buttons.addStretch(1)
         self.part_box.add(part_buttons)
         card.addWidget(self.part_box)
@@ -1660,7 +1669,32 @@ class ToolPalette(QtWidgets.QWidget):
         "parts.fromCurves": "parts_from_curves",
         "parts.remove": "remove_part",
         "parts.clear": "clear_parts",
+        "parts.mirrorNegative": lambda self: self.mirror_parts("negative"),
+        "parts.mirrorPositive": lambda self: self.mirror_parts("positive"),
+        "flow.mirrorNegative": lambda self: self.mirror_flow("negative"),
+        "flow.mirrorPositive": lambda self: self.mirror_flow("positive"),
     }
+
+    def mirror_menu_button(self, path, name, tip):
+        """A "Mirror" button opening `path`'s actions (Mirror -X to +X, +X to -X)."""
+        button = QtWidgets.QToolButton()
+        button.setText("Mirror  ▾")
+        button.setObjectName(name)
+        button.setAutoRaise(True)
+        button.setProperty("role", "ghost")
+        button.setToolTip(tip)
+        button.setPopupMode(QtWidgets.QToolButton.InstantPopup)
+        popup = QtWidgets.QMenu(button)
+        popup.setToolTipsVisible(True)
+        bind = definitions.binder(self.ACTIONS, self)
+        for item in definitions.resolve(definitions.get(path), None):
+            if item.get("kind") != "action":
+                continue
+            action = popup.addAction(item["label"])
+            action.setToolTip(item["tip"])
+            action.triggered.connect(lambda _=False, fn=bind(item): fn())
+        button.setMenu(popup)
+        return button
 
     @staticmethod
     def eye_menu(button, items):
@@ -2766,6 +2800,33 @@ class ToolPalette(QtWidgets.QWidget):
         self.flow_sink.setToolTip(definitions.get("choices/flowSink")["tip"] + ". " +
                                   definitions.text("flowSinks" if kind else "flowArrows"))
         self.push(flowSink=kind)
+
+    def mirror_symmetry(self):
+        """Mirror to Other Side's symmetry: the brushes' Mirror, X when it is off."""
+        name = self.symmetry_name()
+        return "x" if name in (None, "", "none") else name
+
+    def mirror_flow(self, side):
+        groom = self.groom()
+        if groom:
+            try:
+                done = groomlab.mirror_flow(groom, side, self.mirror_symmetry())
+            except RuntimeError as e:
+                self.status.setText(str(e).strip())
+                return
+            self.fill_flow_count(groom)
+            self.status.setText("Flow mirrored: %s" % done)
+
+    def mirror_parts(self, side):
+        groom = self.groom()
+        if groom:
+            try:
+                done = groomlab.mirror_parts(groom, side, self.mirror_symmetry())
+            except RuntimeError as e:
+                self.status.setText(str(e).strip())
+                return
+            self.fill_parts(groom)
+            self.status.setText("Parts mirrored: %s" % done)
 
     def clear_flow(self):
         groom = self.groom()

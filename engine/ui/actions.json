@@ -167,6 +167,8 @@
                     "tips": {"app": "The scales baked into the scalp's uvs as normal, height and color maps (PNG, UDIM tiles too), in <groom>_scales beside the groom: distant or tiny scales without their geometry"}},
     "follicles.bakeMap": {"label": "Bake Follicle Map", "tip": "A gradient round every strand's root baked into the scalp's uvs (a 16-bit gray PNG, UDIM tiles too), in the exports folder, for skin shaders: follicle dots, stubble shadow, a hairline's density. Its radius set in the window (from the roots' spacing to start), the gradient shaped in the shader"},
     "flow.deleteAll": {"label": "Delete All Flow Arrows", "tip": "Remove every flow arrow and sink from the groom (one undo step). They are kept on the groom, laid with the Flow tool (Groom Tools > Create > Flow), and the Flow node lays the strands along them"},
+    "flow.mirrorNegative": {"label": "Mirror -X to +X", "tip": "Across the brushes' Mirror (X when it is off): -X's flow arrows and sinks copied over +X, whose own go (a whorl's mirror turns the other way). One undo step"},
+    "flow.mirrorPositive": {"label": "Mirror +X to -X", "tip": "Across the brushes' Mirror (X when it is off): +X's flow arrows and sinks copied over -X, whose own go (a whorl's mirror turns the other way). One undo step"},
     "groom.transfer": {"label": "Transfer Groom to Scalp...", "tip": "Move the groom onto another mesh (a new sculpt, a retopologized head, another character): guides, parts and flow re-rooted"},
     "graph.copyToGrooms": {"label": "Copy Graph to Other Grooms...", "tip": "The active groom's graph (its look) onto the other selected grooms; their guides kept or replaced"},
     "files.collect": {"label": "Collect Files", "tip": "Copy every file the selected grooms (else every groom) use from outside the scene's folder into its groomlab folder, and point the grooms at the copies: the scene's folder then holds everything (Archive Scene, a zip, another machine)",
@@ -218,6 +220,8 @@
     "parts.fromCurves": {"label": "From Curves", "tip": "Add the selected Maya curves as parts", "tips": {"blender": "Add the selected curve objects as parts, laid on the scalp"}, "hosts": ["maya", "blender"]},
     "parts.remove": {"label": "Remove", "tip": "Remove the part picked above"},
     "parts.clear": {"label": "Clear All", "tip": "Remove every part"},
+    "parts.mirrorNegative": {"label": "Mirror -X to +X", "tip": "Across the brushes' Mirror (X when it is off): -X's parts copied over +X, whose own parts go; a part crossing the middle once (ear to ear) is made symmetric from its -X half. One undo step"},
+    "parts.mirrorPositive": {"label": "Mirror +X to -X", "tip": "Across the brushes' Mirror (X when it is off): +X's parts copied over -X, whose own parts go; a part crossing the middle once (ear to ear) is made symmetric from its +X half. One undo step"},
 
     "map.new": {"label": "New Map...", "tip": "A new map: on the guides, on the scalp's vertices, or a texture; blank, or for a setting (Density, Width, Length...: made, linked and painted at once; Ctrl on Density removes hair)"},
     "map.import": {"label": "Import Image as Map...", "tip": "A new texture map from an image (named after the file; a JPEG, TGA, PSD... is copied into the masks folder as a PNG; color or gray as the image is)"},

@@ -2068,6 +2068,19 @@ class ToolsTest(HelperTestCase):
         self.assertEqual(self.call("parts_list")["flow"], {"arrows": 0, "sinks": 0})
         self.call("undo")
         self.assertEqual(self.texts()["flowData"], laid)
+        # Mirror to Other Side (issue 105): each side's arrows over the other, one undo step each way.
+        arrows = self.call("parts_list")["flow"]["arrows"]
+        for side in ("negative", "positive"):
+            r = self.call("flow_mirror", symmetry="x", **{"from": side})
+            self.assertGreater(r["copied"] + r["removed"], 0)
+            self.assertEqual(r["undo"]["undoLabel"], "mirror flow")
+            self.call("undo")
+            self.assertEqual(self.texts()["flowData"], laid)
+        self.assertEqual(self.call("parts_list")["flow"]["arrows"], arrows)
+        with self.assertRaises(HelperError):
+            self.call("flow_mirror", **{"from": "middle"})
+        r = self.call("parts_mirror", symmetry="x", **{"from": "positive"})
+        self.assertEqual(set(r), {"copied", "removed", "undo"})
 
     def test_maps_move_into_the_files_own_folder(self):
         # An untitled file's texture maps sit in the temp folder; maps_move_to (the .blend's first

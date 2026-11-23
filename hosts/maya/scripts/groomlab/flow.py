@@ -37,6 +37,14 @@ def clear_parts(groom):
     cmds.groomLabParts(groom, clear=True)
 
 
+def mirror_parts(groom, side="negative", symmetry="x", center=0.0):
+    """Mirror to Other Side for parts (issue 105): the parts on `side` ("negative": -X, "positive": +X)
+    copied over the other, whose own parts go; a part crossing the middle once is made symmetric.
+    `symmetry` "x", "y", "z" (a plane at `center`) or "topology" (across the scalp), as the brushes.
+    Returns "<n> mirrored, <n> replaced". One undo step."""
+    return cmds.groomLabParts(groom, mirror=side, symmetry=symmetry or "x", center=center)
+
+
 # ---------------------------------------------------------------------------
 # Flow arrows: which way hair lies on the scalp, for the Flow node
 
@@ -72,6 +80,13 @@ def flow_sink(groom, point, kind="whorl", radius=1.0, erase=False, symmetry=None
         raise ValueError("kind must be one of %s" % (FLOW_SINKS,))
     cmds.groomLabBrushStroke(groom, mode="flow", flowSink=kind, radius=radius, strength=-1.0 if erase else 1.0,
                              symmetry=symmetry or "none", point=[tuple(point)])
+
+
+def mirror_flow(groom, side="negative", symmetry="x", center=0.0):
+    """Mirror to Other Side for flow (issue 105): the arrows and sinks on `side` ("negative": -X,
+    "positive": +X) copied over the other, whose own go (a whorl's mirror turns the other way).
+    `symmetry` as mirror_parts'. Returns "<n> mirrored, <n> replaced". One undo step."""
+    return cmds.groomLabParts(groom, mirror=side, symmetry=symmetry or "x", center=center, flow=True)
 
 
 def _flow_data(groom):

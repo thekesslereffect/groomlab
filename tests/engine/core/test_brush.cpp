@@ -1181,6 +1181,90 @@ TEST(BrushSymmetry, MirrorToOtherSideReshapesThePartnersInPlace) {
     EXPECT_THROW(mirrorGuideShapes(s.h, StrokeSymmetry{}, {left}, 0), std::invalid_argument);
 }
 
+TEST(BrushSymmetry, MirrorFlowToOtherSideCopiesArrowsAndSinks) {
+    // Issue 105: flow laid on the left, mirrored after the fact: the right side's arrows go, each left
+    // arrow gets its mirror image (one stroke's arrows a line of their own), a whorl the other hand's.
+    const auto scalp = test::makePlane(8);
+    StrokeSymmetry sym;
+    sym.axis = 0;
+    sym.center = 0.5f;
+    FlowSet flow;
+    auto pin = [&](float x, float z, Vec3f dir, int line, int seq) {
+        FlowPin p = FlowSet::makePin(*scalp, scalp->closestPoint({x, 0, z}), dir);
+        p.line = line;
+        p.seq = seq;
+        flow.pins.push_back(p);
+    };
+    pin(0.2f, 0.3f, {1, 0, 1}, 0, 0);
+    pin(0.25f, 0.4f, {1, 0, 1}, 0, 1);
+    pin(0.8f, 0.8f, {0, 0, 1}, 1, 0);   // the right side's own: replaced
+    pin(0.5f, 0.6f, {0, 0, 1}, -1, 0);  // on the seam: stays
+    FlowSink whorl;
+    whorl.root = scalp->closestPoint({0.3f, 0, 0.7f}).root;
+    whorl.angle = 70.0f;
+    whorl.radius = 0.1f;
+    flow.sinks.push_back(whorl);
+
+    const OverlayMirrorResult done = mirrorFlowToOtherSide(flow, *scalp, sym, -1);
+    EXPECT_EQ(done.removed, 1u);
+    EXPECT_EQ(done.copied, 3u);  // two arrows and the whorl
+    ASSERT_EQ(flow.pins.size(), 5u);
+    ASSERT_EQ(flow.sinks.size(), 2u);
+    const FlowField field(flow, *scalp);
+    // The mirror of the arrow at (0.2, 0.3) pointing (1, 0, 1): at (0.8, 0.3) pointing (-1, 0, 1).
+    bool found = false;
+    for (std::size_t i = 0; i + 1 < field.positions().size(); ++i) {
+        if ((field.positions()[i] - Vec3f(0.8f, 0.0f, 0.3f)).length() > 1e-4f) continue;
+        found = true;
+        EXPECT_GT(field.directions()[i].dot(Vec3f(-1, 0, 1).normalized()), 0.999f);
+        EXPECT_GE(field.lines()[i], 2) << "a new line";
+        EXPECT_EQ(field.lines()[i], field.lines()[i + 1]) << "the stroke's arrows stay one line";
+    }
+    EXPECT_TRUE(found);
+    EXPECT_NEAR(scalp->position(flow.sinks[1].root).x, 0.7f, 1e-4f);
+    EXPECT_FLOAT_EQ(flow.sinks[1].angle, -70.0f) << "the mirror whorl turns the other way";
+    // Again: the same (the copies replaced, not added to).
+    const OverlayMirrorResult again = mirrorFlowToOtherSide(flow, *scalp, sym, -1);
+    EXPECT_EQ(again.removed, 3u);
+    EXPECT_EQ(flow.pins.size(), 5u);
+    EXPECT_EQ(flow.sinks.size(), 2u);
+    EXPECT_THROW(mirrorFlowToOtherSide(flow, *scalp, StrokeSymmetry{}, -1), std::invalid_argument);
+    EXPECT_THROW(mirrorFlowToOtherSide(flow, *scalp, sym, 0), std::invalid_argument);
+}
+
+TEST(BrushSymmetry, MirrorPartsToOtherSideCopiesAndMakesCrossingPartsSymmetric) {
+    const auto scalp = test::makePlane(8);
+    StrokeSymmetry sym;
+    sym.axis = 0;
+    sym.center = 0.5f;
+    PartSet parts;
+    parts.add("part", {{0.1f, 0, 0.2f}, {0.3f, 0, 0.3f}}, *scalp);                        // left: mirrored
+    parts.add("right", {{0.7f, 0, 0.8f}, {0.9f, 0, 0.9f}}, *scalp);                       // right: goes
+    parts.add("middle", {{0.5f, 0, 0.1f}, {0.5f, 0, 0.4f}}, *scalp);                      // the seam: stays
+    parts.add("across", {{0.1f, 0, 0.6f}, {0.4f, 0, 0.6f}, {0.9f, 0, 0.8f}}, *scalp, 32);  // crosses: made symmetric
+
+    const OverlayMirrorResult done = mirrorPartsToOtherSide(parts, *scalp, sym, -1);
+    EXPECT_EQ(done.removed, 1u);
+    EXPECT_EQ(done.copied, 2u);
+    EXPECT_FALSE(parts.find("right"));
+    ASSERT_TRUE(parts.find("middle"));
+    const Part* image = parts.find("part1");
+    ASSERT_TRUE(image);
+    EXPECT_NEAR(scalp->position(image->points.front()).x, 0.9f, 1e-4f);
+    EXPECT_NEAR(scalp->position(image->points.back()).z, 0.3f, 1e-4f);
+    const Part* across = parts.find("across");
+    ASSERT_TRUE(across);
+    const Vec3f a = scalp->position(across->points.front()), b = scalp->position(across->points.back());
+    EXPECT_NEAR(a.x, 0.1f, 1e-4f) << "the left half kept, from where it started";
+    EXPECT_NEAR(b.x, 0.9f, 1e-4f);
+    EXPECT_NEAR(b.z, a.z, 1e-4f) << "its right half the left's mirror image";
+    // From the right instead: the left's parts go, the right's (the copies) come back across.
+    const OverlayMirrorResult back = mirrorPartsToOtherSide(parts, *scalp, sym, 1);
+    EXPECT_EQ(back.removed, 1u);  // "part"
+    EXPECT_TRUE(parts.find("part1") && parts.find("part11"));
+    EXPECT_THROW(mirrorPartsToOtherSide(parts, *scalp, StrokeSymmetry{}, 1), std::invalid_argument);
+}
+
 // ---------------------------------------------------------------------------
 // Guides hidden one by one (kHiddenLayer: the app's radial menu > Visibility)
 

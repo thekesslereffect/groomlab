@@ -304,7 +304,8 @@ def main():
                        "menus/output.studio", "palette/header/visible/items", "palette/header/guides/items")),
                 ("widgets.theme_actions", widgets.theme_actions(), None, theme_ids),
                 ("ToolPalette.ACTIONS", palette.ToolPalette.ACTIONS, tools,
-                 ids("palette/header/more/items", "lists/parts/bar") | set(d.listed_ids(empty))),
+                 ids("palette/header/more/items", "lists/parts/bar", "lists/parts/mirror", "lists/flow/mirror")
+                 | set(d.listed_ids(empty))),
                 ("GuidesTab.ACTIONS", tool_tabs.GuidesTab.ACTIONS, tools.guides_tab,
                  ids("lists/groups/bar", "lists/groups/context", "lists/groups/edits/items")),
                 ("PaintTab.ACTIONS", tool_tabs.PaintTab.ACTIONS, tools.paint_tab,
@@ -575,7 +576,7 @@ def main():
                 ("select", ["Selection", "Applies to"]),
                 ("lengths", ["Keys", "Applies to"]),
                 ("erase", ["Brush", "Erases", "Applies to"]),
-                ("flow", ["Brush", "Flow"]),
+                ("flow", ["Brush", "Flow", "Applies to"]),  # Mirror (issue 105)
                 ("part", ["Parts", "Applies to"]),
                 ("freeze", ["Brush", "Applies to"]),
             ]
@@ -921,7 +922,7 @@ def main():
             tools.work.setVisible(True)
             tools.show_tool_settings()  # no tool: no Mirror (nothing mirrors)
             _expect(tools.symmetry_row.isHidden() and tools.applies_block.isHidden(), "no Mirror with no tool")
-            for tool, shown in (("comb", True), ("flow", False), ("place", True), ("select", True)):
+            for tool, shown in (("comb", True), ("flow", True), ("place", True), ("select", True)):
                 tools.tool = tool
                 tools.show_tool_settings()
                 _expect(tools.symmetry_row.isHidden() != shown, "%s: Mirror %s" % (tool, "shown" if shown else "hidden"))

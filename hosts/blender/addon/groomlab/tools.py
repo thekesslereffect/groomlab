@@ -979,6 +979,18 @@ def flow_clear(scalp):
     return _tube_edit(scalp, "flow_clear")
 
 
+def parts_mirror(scalp, side="negative", symmetry="x"):
+    """Mirror to Other Side for parts (issue 105; Maya's groomlab.mirror_parts): the parts on `side`
+    ("negative": -X, "positive": +X) copied over the other, across `symmetry` ("x" or "topology").
+    One undo step. Returns {"copied", "removed"}."""
+    return _tube_edit(scalp, "parts_mirror", **{"from": side, "symmetry": symmetry or "x", "center": 0.0})
+
+
+def flow_mirror(scalp, side="negative", symmetry="x"):
+    """Mirror to Other Side for flow arrows and sinks (issue 105; Maya's groomlab.mirror_flow)."""
+    return _tube_edit(scalp, "flow_mirror", **{"from": side, "symmetry": symmetry or "x", "center": 0.0})
+
+
 # ---- The Length Keys tool's keys (the Keys box) --------------------------------------------------
 
 _length_syncing = [False]

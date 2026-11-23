@@ -33,6 +33,8 @@
 #include "groomlab/brush.h"
 #include "groomlab/guide_selection.h"
 #include "groomlab/parts.h"
+#include "groomlab/stroke.h"
+#include "groomlab/parts.h"
 #include "card_parts.h"
 #include "glass.h"
 #include "list_bar.h"
@@ -846,6 +848,39 @@ bool GuidesPanel::clearParts() {
     }
     emit edited();
     return true;
+}
+
+bool GuidesPanel::mirrorOverlay(const BrushSettings& brush, bool flow, int fromSide) {
+    if (!document_) return false;
+    BrushSettings b = brush;
+    if (!b.mirrorTopology && (b.mirrorAxis < 0 || b.mirrorAxis > 2)) b.mirrorAxis = 0, b.mirrorCenter = 0.0f;  // off: World X
+    // Parts and flow are stored bound to the cage (parts.h, flow.h): mirrored there.
+    const MeshPtr cage = document_->session().cageScalp();
+    if (!cage || cage->triangleCount() == 0) {
+        emit message(tr("The groom has no scalp to mirror on"));
+        return false;
+    }
+    const StrokeSymmetry sym = StrokeSymmetry::of(b, cage.get());
+    OverlayMirrorResult done;
+    const std::string error = document_->editStoredText(
+        flow ? "mirror flow" : "mirror parts", flow ? StrokeField::Flow : StrokeField::Parts, [&](std::string& text) {
+            if (flow) {
+                FlowSet set = FlowSet::fromJson(text);
+                done = mirrorFlowToOtherSide(set, *cage, sym, fromSide);
+                text = set.empty() ? std::string() : set.toJson();
+            } else {
+                PartSet set = PartSet::fromJson(text);
+                done = mirrorPartsToOtherSide(set, *cage, sym, fromSide);
+                text = set.empty() ? std::string() : set.toJson();
+            }
+        });
+    if (!error.empty()) {
+        emit message(tr("Cannot mirror the %1: %2").arg(flow ? tr("flow") : tr("parts"), qs(error)));
+        return false;
+    }
+    emit message(tr("%1 mirrored: %2 mirrored, %3 replaced").arg(flow ? tr("Flow") : tr("Parts")).arg(done.copied).arg(done.removed));
+    emit edited();
+    return done.copied + done.removed > 0;
 }
 
 bool GuidesPanel::clearFlow() {

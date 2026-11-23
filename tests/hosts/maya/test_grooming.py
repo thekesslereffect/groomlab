@@ -576,6 +576,36 @@ class GroomingTest(unittest.TestCase):
         self.assertEqual(groomlab.flow_arrows(self.groom), [])
         self.assertEqual(menu.delete_all_flow_arrows(self.groom), (0, 0))  # nothing to delete: no step
 
+    def test_mirror_flow_and_parts_to_other_side(self):
+        # Issue 105: flow and parts laid on +x, mirrored after the fact (one undo step each).
+        groomlab.flow_stroke(self.groom, [(0.2 + 0.05 * i, 0.9, 0.3) for i in range(9)], radius=0.15)
+        groomlab.flow_sink(self.groom, (0.3, 1.0, 0.0), kind="whorl", radius=0.3)
+        arrows = len(groomlab.flow_arrows(self.groom))
+        self.assertGreater(arrows, 1)
+        self.assertEqual(groomlab.mirror_flow(self.groom, "positive"), "%d mirrored, 0 replaced" % (arrows + 1))
+        self.assertEqual(groomlab.flow_counts(self.groom), (2 * arrows, 2))
+        self.assertAlmostEqual(groomlab.flow_sinks(self.groom)[1][3], -70.0, places=3)  # the other hand's whorl
+        # Again from the same side: the copies replaced, not added to.
+        groomlab.mirror_flow(self.groom, "positive", symmetry="topology")
+        self.assertEqual(groomlab.flow_counts(self.groom)[1], 2)
+        cmds.undo()
+        cmds.undo()
+        self.assertEqual(groomlab.flow_counts(self.groom), (arrows, 1))
+        # From the empty side: the +x arrows go.
+        groomlab.mirror_flow(self.groom, "negative")
+        self.assertEqual(groomlab.flow_counts(self.groom), (0, 0))
+        cmds.undo()
+
+        points = [(0.3, math.cos(a), math.sin(a)) for a in [0.05 * i - 0.5 for i in range(21)]]
+        curve = cmds.curve(degree=1, point=points)
+        groomlab.add_part(self.groom, [curve], name="side", delete_curves=True)
+        self.assertEqual(groomlab.mirror_parts(self.groom, "positive"), "1 mirrored, 0 replaced")
+        self.assertEqual(groomlab.list_parts(self.groom), ["side", "side1"])
+        cmds.undo()
+        self.assertEqual(groomlab.list_parts(self.groom), ["side"])
+        with self.assertRaises(RuntimeError):
+            groomlab.mirror_parts(self.groom, "middle")
+
     def test_flow_sinks(self):
         # A whorl on the crown (mirrored across x gives a clockwise twin), then removed.
         groomlab.flow_sink(self.groom, (0.3, 1.0, 0.0), kind="whorl", radius=0.3, symmetry="x")

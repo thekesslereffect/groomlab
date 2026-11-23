@@ -6,6 +6,7 @@
 #include <functional>
 #include <optional>
 #include <stdexcept>
+#include <tuple>
 
 #include <QApplication>
 #include <QCheckBox>
@@ -288,6 +289,12 @@ ui::Bindings AppActions::bindings(MainWindow& w) {
                          }),
                          {}, groomOpen};
     b["parts.clear"] = {run([m] { m->guidesPanel_->clearParts(); }), {}, groomOpen};
+    // Mirror to Other Side (issue 105): one side's parts, or flow arrows and sinks, over the other.
+    for (const auto& [id, flow, side] : {std::tuple{"parts.mirrorNegative", false, -1}, std::tuple{"parts.mirrorPositive", false, 1},
+                                         std::tuple{"flow.mirrorNegative", true, -1}, std::tuple{"flow.mirrorPositive", true, 1}}) {
+        b[id] = {run([m, flow = flow, side = side] { m->guidesPanel_->mirrorOverlay(m->brush().settings().brush, flow, side); }), {},
+                 groomOpen};
+    }
     // Utilities > Delete All Flow Arrows (the Flow card's Clear All): every arrow and sink, one undo step.
     b["flow.deleteAll"] = {run([m] {
                                const auto [arrows, sinks] = m->guidesPanel_->flowCount();
