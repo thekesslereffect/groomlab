@@ -304,7 +304,8 @@ def main():
                        "menus/output.studio", "palette/header/visible/items", "palette/header/guides/items")),
                 ("widgets.theme_actions", widgets.theme_actions(), None, theme_ids),
                 ("ToolPalette.ACTIONS", palette.ToolPalette.ACTIONS, tools,
-                 ids("palette/header/more/items", "lists/parts/bar") | set(d.listed_ids(empty))),
+                 ids("palette/header/more/items", "lists/parts/bar", "lists/parts/mirror", "lists/flow/mirror")
+                 | set(d.listed_ids(empty))),
                 ("GuidesTab.ACTIONS", tool_tabs.GuidesTab.ACTIONS, tools.guides_tab,
                  ids("lists/groups/bar", "lists/groups/context", "lists/groups/edits/items")),
                 ("PaintTab.ACTIONS", tool_tabs.PaintTab.ACTIONS, tools.paint_tab,

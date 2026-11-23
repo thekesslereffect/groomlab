@@ -48,7 +48,7 @@ std::vector<BrushEntry> makeCatalog() {
         {"flow", "Flow", C::Create, 0, "flow", 1.0f, false,
          "Drag on the scalp to lay direction arrows; drag over arrows to comb them (Ctrl: erase); or place whorls and "
          "other sinks hair turns around. The Flow node lays short hair along them: vellus, fur, brows, no guides needed.",
-         {"radius", "strength", "falloff", "falloffProfile", "pressure", "frontFacingOnly", "flow"}},
+         {"radius", "strength", "falloff", "falloffProfile", "symmetry", "pressure", "frontFacingOnly", "flow"}},
         // Shape.
         {"comb", "Comb", C::Shape, 0, "comb", 1.0f, false,
          "Drag guides along the stroke, roots pinned (Stretch: they get longer or shorter as you pull).",

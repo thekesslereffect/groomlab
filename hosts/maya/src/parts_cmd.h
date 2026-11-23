@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <maya/MArgDatabase.h>
 #include <maya/MDGModifier.h>
+#include <maya/MFnDagNode.h>
 #include <maya/MPxCommand.h>
 #include <maya/MSyntax.h>
 
@@ -14,6 +16,9 @@ namespace groomlab::maya {
 //   -remove/-rm <name>                              removes a part
 //   -clear/-cl                                      removes every part
 //   -list/-ls                                       returns the part names
+//   -mirror/-mir positive|negative [-symmetry x|y|z|topology] [-center c] [-flow]
+//                                                   that side's parts (-flow: flow arrows and sinks)
+//                                                   copied over the other (issue 105)
 //
 // The groom is the command's object (or the selection).
 class PartsCmd : public MPxCommand {
@@ -28,6 +33,8 @@ public:
     bool isUndoable() const override { return undoable_; }
 
 private:
+    MStatus mirror(const MArgDatabase& db, const MFnDagNode& groom);
+
     MDGModifier modifier_;
     bool undoable_ = false;
 };

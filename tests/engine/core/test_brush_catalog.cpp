@@ -51,6 +51,8 @@ TEST(BrushCatalog, EveryToolOnceInCategoryOrder) {
     EXPECT_EQ(brushEntry("density"), nullptr) << "Paint on a setting's map (+ New Map > for a setting)";
     EXPECT_EQ(brushEntry("straighten"), nullptr) << "Smooth's Straighten chip";
     EXPECT_TRUE(brushEntry("smooth")->hasSetting("straighten"));
+    EXPECT_TRUE(brushEntry("flow")->hasSetting("symmetry")) << "issue 105: the Flow tool mirrors";
+    EXPECT_TRUE(brushEntry("part")->hasSetting("symmetry"));
     EXPECT_EQ(brushEntry("select")->category, BrushCategory::Guides);
     EXPECT_EQ(brushEntry("no such tool"), nullptr);
 }

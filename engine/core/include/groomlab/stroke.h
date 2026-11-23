@@ -232,6 +232,25 @@ void flowAlongStroke(FlowSet& flow, const ScalpMesh& scalp, const BrushToolSetti
 void flowSinksAt(FlowSet& flow, const ScalpMesh& scalp, const BrushToolSettings& s, const std::vector<Vec3f>& points,
                  float radius, bool erase);
 
+// ---- Mirror to Other Side for flow and parts (issue 105) --------------------------------------
+// As guides' Mirror to Other Side (mirrorGuideShapes): one side of `sym` copied over the other, after
+// the fact. Sides are StrokeSymmetry::side's (1 past the middle, -1 before it, 0 on the seam).
+struct OverlayMirrorResult {
+    std::size_t copied = 0;   // the source side's arrows, sinks or parts given a mirror image
+    std::size_t removed = 0;  // the other side's, gone (replaced by the mirror images)
+};
+// Flow: the arrows and sinks on the side away from `fromSide` go, and each one on `fromSide` gets its
+// mirror image (an arrow pointing the mirrored way; a sink's turn flipped, a whorl becoming the other
+// hand's, its radius kept). The arrows of one stroke stay one line (a new one). The seam's and those
+// off the scalp stay as they are. Throws std::invalid_argument when symmetry is off or fromSide is 0.
+OverlayMirrorResult mirrorFlowToOtherSide(FlowSet& flow, const ScalpMesh& scalp, const StrokeSymmetry& sym, int fromSide);
+// Parts: a part with points on the other side only (or the seam) goes; a part on `fromSide` only (or
+// the seam) gets its mirror image, named after it (made unique). A part crossing the seam once (ear to
+// ear) is made symmetric about it: its `fromSide` half kept, the rest replaced by that half's mirror
+// image (counted as copied). A part on the seam alone, or crossing it more than once, stays as it is.
+// Throws std::invalid_argument when symmetry is off or fromSide is 0.
+OverlayMirrorResult mirrorPartsToOtherSide(PartSet& parts, const ScalpMesh& scalp, const StrokeSymmetry& sym, int fromSide);
+
 // ---- Map strokes ------------------------------------------------------------------------------
 
 // The map a stroke paints: a vertex map's values (channels per scalp point) or a texture map.
