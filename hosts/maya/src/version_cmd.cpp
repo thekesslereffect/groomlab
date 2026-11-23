@@ -75,6 +75,8 @@ MSyntax ExpressionCmd::newSyntax() {
     MSyntax syntax;
     syntax.addFlag("-c", "-check", MSyntax::kString);
     syntax.addFlag("-v", "-variables", MSyntax::kString);
+    // A number or a vector both do (the Expression node's: a vector is a color field); else a number.
+    syntax.addFlag("-a", "-anyType", MSyntax::kBoolean);
     return syntax;
 }
 
@@ -86,9 +88,12 @@ MStatus ExpressionCmd::doIt(const MArgList& args) {
         MString text, variables("{}");
         db.getFlagArgument("-c", 0, text);
         if (db.isFlagSet("-v")) db.getFlagArgument("-v", 0, variables);
+        bool anyType = false;
+        if (db.isFlagSet("-a")) db.getFlagArgument("-a", 0, anyType);
         std::string problem;
         try {
-            const Expression e(text.asChar(), parseExpressionVariables(variables.asChar()));
+            const Expression e(text.asChar(), parseExpressionVariables(variables.asChar()),
+                               anyType ? ExpressionType::Any : ExpressionType::Number);
             (void)e;
         } catch (const ExpressionError& err) {
             problem = err.what();

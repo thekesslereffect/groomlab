@@ -473,7 +473,7 @@ class ExpressionPanel(QtWidgets.QWidget):
         bar.addWidget(library)
         layout.addLayout(bar)
 
-        self.code = CodeEdit(text, validator=lambda t: expressions.check(t, self.variables.variables))
+        self.code = CodeEdit(text, validator=lambda t: expressions.check(t, self.variables.variables, any_type=True))
         self.code.setObjectName("expressionCode")
         self.code.setToolTip("")
         self.code.checked.connect(self.show_error)
@@ -522,7 +522,7 @@ class ExpressionPanel(QtWidgets.QWidget):
     def show_error(self, message=None):
         """What is wrong: the text as typed (a check), else what the groom's evaluation said."""
         if message is None:
-            message = expressions.check(self.code.text(), self.variables.variables)
+            message = expressions.check(self.code.text(), self.variables.variables, any_type=True)
             self.code.mark(message)
         if not message and hasattr(self.editor, "node_errors"):
             message = self.editor.node_errors.get(self.node, "")

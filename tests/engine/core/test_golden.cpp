@@ -651,6 +651,9 @@ std::vector<Case> cases() {
         {"SkinResponse", "op",
          R"({"name": "op", "type": "SkinResponse", "params": {"lift": 30.0, "flatten": 15.0, "spread": 20.0, "smoothing": 0.1}})",
          link("interp", "op", "strands"), false, 0.0, false, 0, false, false, false, true},
+        // Debug: an expression along each strand, colored on the ramp over its own range.
+        {"Debug", "op", R"({"name": "op", "type": "Debug", "params": {"show": "value", "value": {"expression": "$t * $rand"}}})",
+         link("interp", "op", "strands")},
     };
 }
 

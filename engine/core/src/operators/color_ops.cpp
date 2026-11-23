@@ -309,9 +309,14 @@ private:
         }
         const bool hasMap = mapTexture || !mapColorSet.empty() || mapLayer;
 
+        // The base color varies along each strand when the field plugged into it does (an
+        // expression of t: mix([1, 0, 0], [0, 0, 1], $t)): written per point then, as a tip is.
+        const bool baseAlong = colorMode ? pickedField.perPoint() : dyeField.perPoint();
+
         const ScalarField tipField(params(), "tipStrength", scalp);
         tipField.validate(*in);
         const bool tipped = !tipField.isConstant() || tipField.at(*in, 0) > 0.0f;
+        const bool pointColors = tipped || baseAlong;
         const bool tipPerPoint = tipField.perPoint();
         if (!tipped) {
             const ParamValue* fallback = params().defaultValue("tipColor");
@@ -404,9 +409,9 @@ private:
         for (int k = 0; k < 3; ++k) strand[k] = channel(kColorChannels[k], fallback[k]);
         std::array<std::vector<float>*, 3> point{};
         for (int k = 0; k < 3; ++k) {
-            // Without a tip the color is per strand only: an earlier color node's per-point colors
-            // would go stale (exporters prefer per-point), so they go.
-            if (tipped) {
+            // Without a tip or a base color along the strand the color is per strand only: an earlier
+            // color node's per-point colors would go stale (exporters prefer per-point), so they go.
+            if (pointColors) {
                 point[k] = last ? pointChannelOfLast(*out, kColorChannels[k], *last, *changes)
                                 : &out->addPointChannel(kColorChannels[k], fallback[k]);
             } else {
@@ -427,7 +432,7 @@ private:
         if ((specularSet && !specularOut) || (roughnessSet && !roughnessOut) || (tiltSet && !tiltOut)) return false;
         if (!melaninChannel || !rednessChannel) return false;
         for (int k = 0; k < 3; ++k) {
-            if (!strand[k] || (tipped && !point[k])) return false;
+            if (!strand[k] || (pointColors && !point[k])) return false;
         }
         std::vector<float>& melanin = *melaninChannel;
         std::vector<float>& redness = *rednessChannel;
@@ -484,8 +489,11 @@ private:
             }
             melanin[s] = m;
             redness[s] = r;
+            // The map's color at the root: the color itself (mode color), or a dye on the pigment.
+            bool mapped = false;
+            Rgb map{1.0f, 1.0f, 1.0f};
             if (hasMap && scalp && s < roots.size() && scalp->contains(roots[s])) {
-                Rgb map{1.0f, 1.0f, 1.0f};
+                mapped = true;
                 if (mapTexture) {
                     const ScalpMesh::UV uv = scalp->uvAt(roots[s]);
                     const std::array<float, 4> t = mapTexture->sample(uv[0], uv[1]);
@@ -497,7 +505,6 @@ private:
                     const float v = std::clamp((*mapLayer)[s], 0.0f, 1.0f);
                     map = {v, v, v};
                 }
-                c = colorMode ? map : dyedHairColor(c, map);
             }
             // The strand's value, hue and saturation draws, on every color it takes (its tip's too).
             const float valueScale = valueRandom > 0.0f ? 1.0f + valueRandom * draw(4) : 1.0f;
@@ -506,21 +513,29 @@ private:
             auto vary = [&](const Rgb& x) {
                 return varyHairColor(x, hueTurn, saturationScale, valueScale);
             };
-            c = vary(c);
+            // A base color as the strand shows it: the map's over it, then varied.
+            auto finish = [&](const Rgb& base) {
+                return vary(mapped ? (colorMode ? map : dyedHairColor(base, map)) : base);
+            };
+            c = finish(c);
             for (int k = 0; k < 3; ++k) (*strand[k])[s] = std::clamp(c[k], 0.0f, 1.0f);
 
-            if (tipped) {
+            if (pointColors) {
                 const std::size_t n = out->strandPointCount(s), begin = out->strandBegin(s);
-                const float strandTip = tipPerPoint ? 0.0f : tipField.at(*out, s);
+                const float strandTip = !tipped || tipPerPoint ? 0.0f : tipField.at(*out, s);
                 // The tip color varied as the strand's own, and where it starts shifted along the
                 // strand at random (tipOffsetRandom).
-                const bool tipAlong = tipColorField.perPoint();
-                const Rgb tipColor = vary(tipColorField.at(*out, s));
+                const bool tipAlong = tipped && tipColorField.perPoint();
+                const Rgb tipColor = tipped ? vary(tipColorField.at(*out, s)) : c;
                 const float shift =
                     tipOffsetRandom > 0.0f ? tipOffsetRandom * (2.0f * unitFloat(hashCombine(own, 0x71B0)) - 1.0f) : 0.0f;
                 for (std::size_t i = 0; i < n; ++i) {
+                    // The base color here: the strand's, or the plugged field's at this point.
                     Rgb ci = c;
-                    const float amount = tipPerPoint ? tipField.atPoint(*out, s, i) : strandTip;
+                    if (baseAlong) {
+                        ci = finish(colorMode ? pickedField.atPoint(*out, s, i) : melaninColor(m, r, dyeField.atPoint(*out, s, i)));
+                    }
+                    const float amount = !tipped ? 0.0f : tipPerPoint ? tipField.atPoint(*out, s, i) : strandTip;
                     // Shifted, the profile still ends at the tip: t from the shifted start to 1.
                     const float profile =
                         shift != 0.0f ? tipProfile(std::clamp((paramAt(i, n) - shift) / std::max(1.0f - shift, 0.05f), 0.0f, 1.0f))
