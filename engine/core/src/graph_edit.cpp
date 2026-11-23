@@ -1173,6 +1173,21 @@ bool GraphEdit::setPassThrough(const std::string& name, const std::string& input
     return true;
 }
 
+bool GraphEdit::movePassThrough(const std::string& name, const std::string& input, int by) {
+    std::vector<std::string> inputs = passThrough(name);
+    const auto at = std::find(inputs.begin(), inputs.end(), input);
+    if (at == inputs.end()) throw GraphError("node '" + name + "' does not pass '" + input + "' through");
+    const int from = static_cast<int>(at - inputs.begin());
+    const int to = std::clamp(from + by, 0, static_cast<int>(inputs.size()) - 1);
+    if (to == from) return false;
+    inputs.erase(inputs.begin() + from);
+    inputs.insert(inputs.begin() + to, input);
+    for (nlohmann::json& n : impl_->nodes()) {
+        if (n.is_object() && n.value("name", std::string()) == name) n["passThrough"] = inputs;
+    }
+    return true;
+}
+
 std::string GraphEdit::passThroughName(const std::string& name, const std::string& input) const {
     const nlohmann::json& node = impl_->node(name);
     const auto it = node.find("passThroughNames");

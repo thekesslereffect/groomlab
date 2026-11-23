@@ -1068,6 +1068,16 @@ class GraphModel(object):
             self._take(edit)
         return changed
 
+    def move_pass_through(self, name, input_name, by):
+        """Move Output Up (-1) / Down (1): a pass-through output's place among the node's (the
+        core's GraphEdit.move_pass_through; its links stay). Whether it moved."""
+        edit = self._edit()
+        with _core_errors():
+            changed = edit.move_pass_through(name, input_name, int(by))
+        if changed:
+            self._take(edit)
+        return changed
+
     def set_position(self, name, x, y):
         self._node(name)["ui"] = {"x": float(x), "y": float(y)}
 

@@ -5274,6 +5274,27 @@ TEST(AppPanels, GraphFoldsBackdropsAndPassesInputsThrough) {
     EXPECT_EQ(GraphEdit(doc->graph().dump()).passThroughName(noise, "strands"), "Before Noise");
     EXPECT_EQ(doc->undoText(), "Undo rename output " + noise + ".thru_strands");
     EXPECT_TRUE(linked(*doc, noise, width));
+    // Alone, it cannot move; Move Output Up / Down do nothing.
+    EXPECT_EQ(doc->movePassThrough(noise, "strands", 1), "");
+    EXPECT_EQ(doc->undoText(), "Undo rename output " + noise + ".thru_strands");
+    // Two of them: Move Output Down swaps them, one undo step; its menu is the moved one's.
+    const std::string interp = nodeOfType(*doc, "Interpolate");
+    const auto ins = nlohmann::json::parse(GraphEdit(doc->graph().dump()).nodeSpecJson(interp))["inputs"];
+    ASSERT_GE(ins.size(), 2u);
+    const std::string a = ins[0]["name"], b = ins[1]["name"];
+    ASSERT_EQ(doc->setPassThrough(interp, a, true), "");
+    ASSERT_EQ(doc->setPassThrough(interp, b, true), "");
+    EXPECT_EQ(doc->movePassThrough(interp, a, 1), "");
+    EXPECT_EQ(GraphEdit(doc->graph().dump()).passThrough(interp), (std::vector<std::string>{b, a}));
+    EXPECT_EQ(doc->undoText(), "Undo move output down " + interp + "." + GraphEdit::passThroughOutput(a));
+    view.refresh();
+    QMenu moveMenu;
+    EXPECT_EQ(view.fillContextMenu(&moveMenu, outputAt(view, interp, portOf(*doc, interp, "outputs", GraphEdit::passThroughOutput(a)))), NodeGraphView::MenuTarget::OutputPort);
+    std::string menuNode, menuInput;
+    ASSERT_TRUE(view.menuPortOutput(&menuNode, &menuInput));
+    EXPECT_EQ(menuInput, a);
+    EXPECT_EQ(doc->undo(), "");
+    EXPECT_EQ(GraphEdit(doc->graph().dump()).passThrough(interp), (std::vector<std::string>{a, b}));
 }
 
 TEST(AppPanels, GraphAlignGesturesAndBackdropCard) {

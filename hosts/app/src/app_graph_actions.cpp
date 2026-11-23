@@ -194,6 +194,33 @@ void AppActions::addGraphBindings(ui::Bindings& b, MainWindow& w) {
                               }),
                               {},
                               [m] { return m->document_ != nullptr && m->graph_->menuPortOutput(nullptr, nullptr); }};
+    // Move Output Up / Down: its place among the node's pass-through outputs.
+    auto outputPlace = [m](int* index, int* count) {
+        std::string node, input;
+        if (!m->document_ || !m->graph_->menuPortOutput(&node, &input)) return false;
+        try {
+            const std::vector<std::string> inputs = GraphEdit(m->document_->viewGraph().dump()).passThrough(node);
+            *index = static_cast<int>(std::find(inputs.begin(), inputs.end(), input) - inputs.begin());
+            *count = static_cast<int>(inputs.size());
+            return *index < *count;
+        } catch (const std::exception&) {
+            return false;
+        }
+    };
+    for (const auto& [id, by] : {std::pair<const char*, int>{"port.outputUp", -1}, {"port.outputDown", 1}}) {
+        b[id] = {run([m, by = by] {
+                     std::string node, input;
+                     if (!m->graph_->menuPortOutput(&node, &input)) return;
+                     const std::string error = m->document_->movePassThrough(node, input, by);
+                     if (!error.empty()) m->report(qs(error));
+                     QTimer::singleShot(0, m, [m] { m->graph_->refresh(); });
+                 }),
+                 {},
+                 [outputPlace, by = by] {
+                     int index = 0, count = 0;
+                     return outputPlace(&index, &count) && (by < 0 ? index > 0 : index + 1 < count);
+                 }};
+    }
     // An input port's menu: Pass Through as Output.
     b["port.passThrough"] = {[m](const json&, bool on) {
                                  std::string node, input;
@@ -642,9 +669,22 @@ void AppActions::wireGraphEditor(MainWindow& w) {
             case NodeGraphView::MenuTarget::Port:
                 ui::fillMenu(menu, d.get("graph/portMenu"), bindings(*m), options, d);
                 break;
-            case NodeGraphView::MenuTarget::OutputPort:
+            case NodeGraphView::MenuTarget::OutputPort: {
+                // Move Output Up / Down: shown where the output can go that way.
+                std::string node, input;
+                if (!options.resolve.state) options.resolve.state = state(*m);
+                if (m->document_ && m->graph_->menuPortOutput(&node, &input)) {
+                    try {
+                        const std::vector<std::string> inputs = GraphEdit(m->document_->viewGraph().dump()).passThrough(node);
+                        const auto at = std::find(inputs.begin(), inputs.end(), input);
+                        if (at != inputs.end() && at != inputs.begin()) options.resolve.state->insert("port.canMoveUp");
+                        if (at != inputs.end() && at + 1 != inputs.end()) options.resolve.state->insert("port.canMoveDown");
+                    } catch (const std::exception&) {
+                    }
+                }
                 ui::fillMenu(menu, d.get("graph/outputPortMenu"), bindings(*m), options, d);
                 break;
+            }
             case NodeGraphView::MenuTarget::Portal: {
                 int exit = -1;
                 m->graph_->menuPortal(&exit);

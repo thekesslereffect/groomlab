@@ -1141,6 +1141,8 @@ void bindGraph(py::module_& m) {
              "An input's pass-through output on or off (off: what read it reads nothing). False when nothing changed.")
         .def("pass_through_name", &GraphEdit::passThroughName, py::arg("name"), py::arg("input"),
              "A pass-through output's name as shown (\"\" none).")
+        .def("move_pass_through", &GraphEdit::movePassThrough, py::arg("name"), py::arg("input"), py::arg("by"),
+             "Move Output Up (-1) / Down (1): a pass-through output's place among the node's. Whether it moved.")
         .def("set_pass_through_name", &GraphEdit::setPassThroughName, py::arg("name"), py::arg("input"), py::arg("label"),
              "Rename Output: a pass-through output's name as shown (\"\" clears it). False when nothing changed.")
         .def("layout_positions",

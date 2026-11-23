@@ -302,7 +302,8 @@ The **Graph Editor** is a dockable node editor for the selected groom:
 - **Pass Through as Output** (an input port's menu): the node gets a `thru_<input>` output handing
   that input on ("passThrough" on the node; links reading it read what feeds the input when the
   graph loads: resolvePassThrough). The output's menu > Rename Output names it as shown
-  ("passThroughNames" on the node, the spec output's "label"; GraphEdit::setPassThroughName).
+  ("passThroughNames" on the node, the spec output's "label"; GraphEdit::setPassThroughName);
+  Move Output Up / Down reorders them (the "passThrough" list's order; GraphEdit::movePassThrough).
 - **Round 4** (both hosts): Houdini's align gestures, A held and a node dragged from
   (graph_arrange.h alignGesture: A its chain, Shift+A the selection, Alt+A the selection spread
   evenly; across a row, up or down a column; live, one undo step; A tapped frames all); a

@@ -1397,6 +1397,14 @@ std::string GroomDocument::setPassThroughName(const std::string& node, const std
     });
 }
 
+std::string GroomDocument::movePassThrough(const std::string& node, const std::string& input, int by) {
+    return editLayout(std::string(by < 0 ? "move output up " : "move output down ") + node + "." + GraphEdit::passThroughOutput(input),
+                      [&](json& g) {
+                          GraphEdit edit(g.dump());
+                          if (edit.movePassThrough(node, input, by)) g = json::parse(edit.toJson());
+                      });
+}
+
 // ---- Portals (graph_portals.h) -------------------------------------------------------------------
 
 std::string GroomDocument::teleportLink(const std::string& to, const std::string& input, double exitX, double exitY, double entryX,

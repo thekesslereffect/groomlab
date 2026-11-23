@@ -452,6 +452,15 @@ class GraphApiTest(unittest.TestCase):
         again = gm.GraphModel.from_groom(self.groom, self.catalog)
         self.assertEqual(again.pass_through_name("width", "strands"), "Before Width")
         self.assertEqual(again.output_of("resample", "strands"), "thru_strands")
+        # Move Output Up / Down: the order the outputs are drawn in.
+        inputs = [i["name"] for i in again.node_spec("width")["inputs"] if i["name"] != "strands"]
+        if inputs:
+            again.set_pass_through("width", inputs[0], True)
+            self.assertEqual(again.pass_through("width"), ["strands", inputs[0]])
+            self.assertFalse(again.move_pass_through("width", "strands", -1))
+            self.assertTrue(again.move_pass_through("width", "strands", 1))
+            self.assertEqual(again.pass_through("width"), [inputs[0], "strands"])
+            self.assertEqual(again.node_spec("width")["outputs"][-1]["name"], "thru_strands")
 
     def test_dots_groups_shaken_and_dropped_on_a_wire(self):
         model = gm.GraphModel.from_groom(self.groom, self.catalog)

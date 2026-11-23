@@ -596,11 +596,22 @@ class PortItem(QtWidgets.QGraphicsItem):
             if not passed:
                 event.ignore()  # (the node's menu)
                 return
-            # A pass-through output's menu (graph_ui.json's outputPortMenu): Rename Output.
+            # A pass-through output's menu (graph_ui.json's outputPortMenu): Rename Output, Move
+            # Output Up / Down (where it can go that way).
             editor, node = self.node_item.editor, self.node_item.name
-            actions = {"port.renameOutput": lambda: later(lambda: editor.rename_pass_through(node, passed))}
+            actions = {"port.renameOutput": lambda: later(lambda: editor.rename_pass_through(node, passed)),
+                       "port.outputUp": lambda: later(lambda: editor.move_pass_through(node, passed, -1)),
+                       "port.outputDown": lambda: later(lambda: editor.move_pass_through(node, passed, 1))}
+            passes = editor.model.pass_through(node) if hasattr(editor.model, "pass_through") else []
+            state = set()
+            if passed in passes:
+                at = passes.index(passed)
+                if at > 0:
+                    state.add("port.canMoveUp")
+                if at + 1 < len(passes):
+                    state.add("port.canMoveDown")
             menu = QtWidgets.QMenu()
-            widgets.fill_menu(menu, definitions.get("graph/outputPortMenu"), definitions.binder(actions))
+            widgets.fill_menu(menu, definitions.get("graph/outputPortMenu"), definitions.binder(actions), state)
             qt.exec_(menu, event.screenPos())
             event.accept()
             return
@@ -4541,6 +4552,19 @@ class GraphEditor(QtWidgets.QWidget):
         if not ok:
             return
         self.set_pass_through_name(node, input_name, text)
+
+    def move_pass_through(self, node, input_name, by):
+        """Move Output Up (-1) / Down (1): the pass-through output's place among the node's
+        outputs (its links stay). One undo step."""
+        try:
+            changed = self.model.move_pass_through(node, input_name, by)
+        except gm.GraphError as e:
+            self.report(str(e))
+            return False
+        if changed:
+            self.rebuild()
+            self.changed()
+        return changed
 
     def set_pass_through_name(self, node, input_name, text):
         label = (text or "").strip()

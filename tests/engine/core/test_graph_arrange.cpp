@@ -216,6 +216,28 @@ TEST(GraphEditByHand, APassThroughOutputCanBeRenamed) {
     EXPECT_FALSE(json::parse(edit.toJson())["nodes"][5].contains("passThroughNames"));
 }
 
+TEST(GraphEditByHand, PassThroughOutputsCanBeReordered) {
+    GraphEdit edit(defaultGraphJson());
+    const json inputs = json::parse(edit.nodeSpecJson("interpolate"))["inputs"];
+    ASSERT_GE(inputs.size(), 2u);
+    const std::string a = inputs[0]["name"], b = inputs[1]["name"];
+    ASSERT_TRUE(edit.setPassThrough("interpolate", a, true));
+    ASSERT_TRUE(edit.setPassThrough("interpolate", b, true));
+    EXPECT_EQ(edit.passThrough("interpolate"), (std::vector<std::string>{a, b}));
+    EXPECT_FALSE(edit.movePassThrough("interpolate", a, -1)) << "the first already";
+    EXPECT_TRUE(edit.movePassThrough("interpolate", a, 1));
+    EXPECT_EQ(edit.passThrough("interpolate"), (std::vector<std::string>{b, a}));
+    // Drawn in that order, kept through save and load.
+    const json outputs = json::parse(edit.nodeSpecJson("interpolate"))["outputs"];
+    EXPECT_EQ(outputs[outputs.size() - 2]["name"], GraphEdit::passThroughOutput(b));
+    EXPECT_EQ(outputs[outputs.size() - 1]["name"], GraphEdit::passThroughOutput(a));
+    EXPECT_EQ(GraphEdit(saveGraphJson(loadGraphJson(edit.toJson()))).passThrough("interpolate"), (std::vector<std::string>{b, a}));
+    EXPECT_FALSE(edit.movePassThrough("interpolate", a, 5));
+    EXPECT_TRUE(edit.movePassThrough("interpolate", a, -5));
+    EXPECT_EQ(edit.passThrough("interpolate"), (std::vector<std::string>{a, b}));
+    EXPECT_THROW(edit.movePassThrough("noise", "strands", 1), GraphError);
+}
+
 TEST(GraphArrange, AQuickLeftRightShakeIsCaught) {
     ShakeDetector shake;
     double t = 0.0;

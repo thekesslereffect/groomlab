@@ -149,6 +149,10 @@ public:
     // such node, or an input it does not pass through.
     std::string passThroughName(const std::string& name, const std::string& input) const;
     bool setPassThroughName(const std::string& name, const std::string& input, const std::string& label);
+    // Moves a pass-through output `by` places among the node's (-1 up, 1 down; clamped to the
+    // ends): the order its outputs are drawn in (Move Output Up / Down). Its links stay. False when
+    // it did not move. GraphError for no such node, or an input it does not pass through.
+    bool movePassThrough(const std::string& name, const std::string& input, int by);
     // Every connection checked and made again in order (connect's checks), as when a host loads a
     // graph to edit it. Throws GraphError at the first that does not fit.
     void checkConnections();
