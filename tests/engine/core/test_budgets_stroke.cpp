@@ -646,7 +646,8 @@ TEST(Performance, EveryParamTweakOfAGroomFile) {
     std::vector<Row> rows;
     for (std::size_t n = 0; n < graph["nodes"].size(); ++n) {
         const nlohmann::json& node = graph["nodes"][n];
-        for (const auto& [name, value] : node.value("params", nlohmann::json::object()).items()) {
+        const nlohmann::json params = node.value("params", nlohmann::json::object());  // (held: items() of a temporary dangles)
+        for (const auto& [name, value] : params.items()) {
             if (!value.is_number()) continue;
             nlohmann::json tweaked = graph;
             nlohmann::json& p = tweaked["nodes"][n]["params"][name];
