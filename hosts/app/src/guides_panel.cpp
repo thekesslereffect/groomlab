@@ -34,7 +34,6 @@
 #include "groomlab/guide_selection.h"
 #include "groomlab/parts.h"
 #include "groomlab/stroke.h"
-#include "groomlab/parts.h"
 #include "card_parts.h"
 #include "glass.h"
 #include "list_bar.h"

@@ -4603,7 +4603,12 @@ class DockableWindowsTest(unittest.TestCase):
             window.buttons["flow"].click()
             self.assertTrue(window.flow_box.isVisibleTo(window))
             self.assertFalse(any(b.isVisibleTo(window) for b in window.tube_panel.blocks))
-            self.assertFalse(window.symmetry_row.isVisibleTo(window))  # Flow doesn't mirror
+            # Flow mirrors (issue 105): the Mirror row, and Mirror to Other Side in its block.
+            self.assertTrue(window.symmetry_row.isVisibleTo(window))
+            self.assertTrue(window.flow_mirror.isVisibleTo(window))
+            self.assertEqual([a.text() for a in window.flow_mirror.menu().actions()],
+                             [i["label"] for i in palette.definitions.resolve(
+                                 palette.definitions.get("lists/flow/mirror"), None) if i.get("kind") == "action"])
             arrows = len(groomlab.flow_arrows(self.groom))
             self.assertEqual(window.flow_count.text(), palette.flow_count_text(arrows, 0))
             self.assertEqual(window.clear_flow_button.isEnabled(), arrows > 0)
