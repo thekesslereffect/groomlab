@@ -598,7 +598,7 @@ TEST(AppGraphEditor, BackdropAndCanvasMenus) {
     if (graph->promptOpen()) graph->acceptPrompt();
     QMenu menu;
     EXPECT_EQ(graph->fillContextMenu(&menu, graph->backdropTitleBar(0).center()), NodeGraphView::MenuTarget::Backdrop);
-    EXPECT_EQ(shown(&menu), (std::vector<std::string>{"Rename...", "Color", "Delete Backdrop"}));
+    EXPECT_EQ(shown(&menu), (std::vector<std::string>{"Rename...", "Color", "Fold", "Delete Backdrop"}));
     QMenu* color = submenu(&menu, QStringLiteral("Color"));
     ASSERT_NE(color, nullptr);
     emit color->aboutToShow();
@@ -863,4 +863,19 @@ TEST(AppGraphEditor, UnitsShowRealMeasures) {
 }
 
 }  // namespace
+}  // namespace groomlab::app
+
+namespace groomlab::app {
+
+TEST(AppGraphEditor, TheBarHasWireStyleAndAlignButtons) {
+    Window w;
+    AppShell* shell = w.window.shell();
+    ASSERT_NE(shell->graphWireButton(), nullptr);
+    ASSERT_NE(shell->graphWireButton()->menu(), nullptr);
+    EXPECT_EQ(shell->graphWireButton()->menu()->actions().size(), 3);
+    shell->graphWireButton()->menu()->actions()[1]->trigger();
+    EXPECT_EQ(w.graph()->wireStyle(), "square");
+    EXPECT_EQ(shell->graphAlignButtons().size(), 8u);
+}
+
 }  // namespace groomlab::app

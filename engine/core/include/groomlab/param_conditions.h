@@ -29,7 +29,8 @@ bool paramInVersion(const nlohmann::json& spec, int nodeVersion);
 
 // The Node panel's sections (every host's): for each of `params` (a node spec's "params", in its
 // order) its section: kAdvancedSection for an advanced param (or one of that group), its group
-// when the params name two groups or more (one group reads as the main params), else "" (the
+// when the params name two groups or more (one group reads as the main params) or a param says
+// "groupShown" (a compound's params, grouped by the node inside they come from), else "" (the
 // main params, no header). The panels show "", the groups in the spec's order, then Advanced.
 constexpr const char* kAdvancedSection = "Advanced";
 std::vector<std::string> paramSections(const nlohmann::json& params);

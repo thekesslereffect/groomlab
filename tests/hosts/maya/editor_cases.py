@@ -210,8 +210,8 @@ class GraphEditorTest(unittest.TestCase):
             self.editor.hide()
 
     def test_pins_route_links_and_snap_puts_them_on_the_grid(self):
-        # Double-click a link: a pin there, the link through it; no undo step (layout), the groom's
-        # graph keeps it. Delete takes it out. Snap lands a dragged node on the grid.
+        # Double-click a link: a pin there, the link through it; a layout undo step (nothing
+        # evaluates), the groom's graph keeps it. Delete takes it out. Snap lands a dragged node on the grid.
         from groomlab.ui.qt import QtTest as qt_test_module
         QtTest = qt_test_module()
         QtCore, QtWidgets = self.ge.QtCore, self.ge.QtWidgets
@@ -230,7 +230,7 @@ class GraphEditorTest(unittest.TestCase):
             pin = self.editor.pin_items[pins[0]]
             self.assertTrue(pin.isSelected())
             self.assertEqual(self.edge("length", "width").pins, [pin])
-            self.assertEqual(cmds.undoInfo(query=True, undoName=True), before, "a pin is layout: no undo step")
+            self.assertNotEqual(cmds.undoInfo(query=True, undoName=True), before, "a pin is a layout undo step")
             self.assertEqual(groomlab.get_graph(self.groom)["pins"]["routes"][0]["to"], "width")
             # Moved, the link follows it.
             pin.setPos(pin.pos() + QtCore.QPointF(0, 120))

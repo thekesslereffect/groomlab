@@ -1036,7 +1036,8 @@ class ParamPanel(QtWidgets.QScrollArea):
                 "param.paintGuides": b(lambda: self.paint_param(node, param, "guides")),
                 "param.paintVertices": b(lambda: self.paint_param(node, param, "vertices")),
                 "param.paintTexture": b(lambda: self.paint_param(node, param, "texture")),
-                "param.driveWithSlider": b(lambda: self.add_control(node, param))}
+                "param.driveWithSlider": b(lambda: self.add_control(node, param)),
+                "param.promote": b(lambda on: self.editor.promote_param(node, param, on))}
 
     def build_param_menu(self, name, param):
         menu = QtWidgets.QMenu(self)
@@ -1059,8 +1060,13 @@ class ParamPanel(QtWidgets.QScrollArea):
                 state.add("param.mappable")
         if self.editor.groom:
             state.add("groom")
+        promoted = False
+        if self.editor.param_promotable(name, param):  # inside a compound: Promote to Compound
+            state.add("param.promotable")
+            promoted = self.editor.param_promoted(name, param)
         widgets.fill_menu(menu, definitions.get("graph/paramMenu"), definitions.binder(self.param_actions(name, param)),
-                          state, values, generators=self.key_generators(name, param), checked=lambda item: exposed)
+                          state, values, generators=self.key_generators(name, param),
+                          checked=lambda item: promoted if item.get("id") == "param.promote" else exposed)
 
     PAINT_TIP = definitions.get("graph/paintMenu")["tip"]
 

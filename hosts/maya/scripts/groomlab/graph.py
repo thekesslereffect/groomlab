@@ -188,8 +188,8 @@ def node_fields(node):
 
 
 def without_layout(data):
-    """A graph's dict without the editors' layout (every node's "ui", the backdrops, the pins)."""
-    out = {k: v for k, v in data.items() if k not in ("backdrops", "pins")}
+    """A graph's dict without the editors' layout (every node's "ui", the backdrops, the pins, the portals)."""
+    out = {k: v for k, v in data.items() if k not in ("backdrops", "pins", "portals")}
     out["nodes"] = [{k: v for k, v in n.items() if k != "ui"} for n in data.get("nodes", [])]
     return out
 
@@ -232,6 +232,8 @@ class GraphModel(object):
         self.connections = []    # [{"from": src, "to": dst, "input": port[, "output": src's output]}]
         self.output = None
         self.backdrops = []      # [{"title", "x", "y", "w", "h", "color"}]: layout only
+        self._portals = None     # the graph's "portals" (graph_portals.h: layout only, kept by the core)
+        self.exposed = None      # inside a compound (ScopedModel): its exposed params, {name: "node.param"}
         self._pins = None        # the graph's "pins" ({"points", "routes"}; None: none): layout only (the
                                  # module's notes), kept by the core (graph_pins.h); `pins` and `routes` read it
         self.renamed = {}        # old name -> new name (a path inside a compound: "compound1/sculpt1") since
@@ -302,6 +304,8 @@ class GraphModel(object):
             edit.check_connections()
         self.connections = json.loads(edit.to_json()).get("connections", [])
         self._load_pins(data.get("pins"))
+        self._portals = [dict(p) for p in data.get("portals") or [] if isinstance(p, dict)] or None
+        self.exposed = dict(data["exposed"]) if isinstance(data.get("exposed"), dict) else None
 
     # -- The core's edits (graph_edit.h): what every host's editor does to a graph ----------
 
@@ -335,6 +339,11 @@ class GraphModel(object):
         self.nodes, self.order = nodes, order
         self.connections = data.get("connections", [])
         self.output = data.get("output")
+        if isinstance(data.get("exposed"), dict):
+            self.exposed = data["exposed"]  # (a rename inside a compound: its exposed params follow)
+        # The core's dots and pins as it left them (a duplicate's links drawn as its node's are).
+        self._portals = [dict(p) for p in data.get("portals") or [] if isinstance(p, dict)] or None
+        self._pins = data["pins"] if isinstance(data.get("pins"), dict) and data["pins"].get("routes") else None
 
     def to_dict(self):
         nodes = []
@@ -350,6 +359,11 @@ class GraphModel(object):
         pins = self._pins_dict()
         if pins:
             data["pins"] = pins
+        portals = self._portals_list()
+        if portals:
+            data["portals"] = portals
+        if self.exposed is not None:
+            data["exposed"] = copy.deepcopy(self.exposed)
         return data
 
     def to_json(self, indent=None, layout=True):
@@ -514,6 +528,10 @@ class GraphModel(object):
             pins = self._pins_dict()
             if pins:
                 stored["pins"] = pins
+            stored.pop("portals", None)
+            portals = self._portals_list()
+            if portals:
+                stored["portals"] = portals
             new = json.dumps(stored, separators=(",", ":"))
         if new != text:
             cmds.setAttr(groom + ".graph", new, type="string")
@@ -576,6 +594,8 @@ class GraphModel(object):
             pins = self._pin_edit()
             pins.rename_node(old, new)
             self._take_pins(pins)
+        if self._portals:  # the portals naming it follow (the core's renamePortalNode)
+            self._portal_change(lambda p: p.rename_node(old, new))
         self._moved([(old, new)])
 
     def _moved(self, moves):
@@ -612,6 +632,8 @@ class GraphModel(object):
         node = self._node(name)
         params = node.get("params") or {}
         exposed = tuple(node.get("paramInputs") or ())
+        passes = tuple(node.get("passThrough") or ())  # its pass-through outputs (thru_<input>)
+        names = node.get("passThroughNames") if passes and isinstance(node.get("passThroughNames"), dict) else None
         if node["type"] in ("Compound", "Script"):  # ports and params from its definition
             key = (node["type"], json.dumps(params.get("definition") or {}, sort_keys=True), exposed)
             bare = {"type": node["type"], "params": {"definition": params.get("definition") or {}}}
@@ -626,10 +648,15 @@ class GraphModel(object):
             self.catalog.spec(node["type"])  # the catalog's error for an unknown type
             key = (node["type"], None, exposed)
             bare = {"type": node["type"]}
+        key = key + (passes, json.dumps(names, sort_keys=True) if names else None)
         text = GraphModel._specs.get(key)
         if text is None:
             if exposed:
                 bare["paramInputs"] = list(exposed)
+            if passes:
+                bare["passThrough"] = list(passes)
+            if names:
+                bare["passThroughNames"] = dict(names)  # (its outputs' labels)
             with _core_errors():
                 text = groomlab_core.node_spec_json(json.dumps(bare))
             if len(GraphModel._specs) > 2000:
@@ -721,8 +748,9 @@ class GraphModel(object):
     def output_type(self, name, output=None, _edit=None):
         """A node's output type as connected (its output `output`, None: the first): a Curves node
         (strands or guides) gives what feeds it (the core's, as connect checks it)."""
-        out = self.output_spec(name, output)["type"]
-        if out != "Curves":
+        port = self.output_spec(name, output)
+        out = port["type"]
+        if out != "Curves" and not port.get("passThrough"):  # (a pass-through gives what feeds its input)
             return out
         with _core_errors():
             return (_edit or self._query()).output_type(name, output or "")
@@ -841,6 +869,214 @@ class GraphModel(object):
             return False
         self._take_pins(pins)
         return True
+
+    # -- Portals (layout: links teleported through named dots) -------------------
+
+    # The rules are the core's (graph_portals.h, as the app's): which links stay in a portal after a
+    # graph edit, unique names, renames. The model keeps the graph's "portals" as the core wrote it.
+
+    def _portal_edit(self):
+        """The graph's links and portals as the core reads and edits them (groomlab_core.GraphPortals)."""
+        return groomlab_core.GraphPortals(json.dumps({"nodes": [{"name": n} for n in self.order],
+                                                      "connections": self.connections, "portals": self._portals or []}))
+
+    def _take_portals(self, edit):
+        text = edit.portals_json()
+        self._portals = json.loads(text) if text else None
+
+    def _portals_list(self):
+        if self._portals:
+            portals = self._portal_edit()
+            portals.prune()
+            self._take_portals(portals)
+        return copy.deepcopy(self._portals) if self._portals else None
+
+    @property
+    def portals(self):
+        """The portals as the graph keeps them: [{"name", "from", "output"?, "x", "y", "exits": [...]}]."""
+        return self._portals_list() or []
+
+    def portal_of_link(self, to, input_name):
+        """(portal, exit) the link into to.input comes out of, or None."""
+        return self._portal_edit().portal_of_link(to, input_name) if self._portals else None
+
+    def _portal_change(self, fn):
+        portals = self._portal_edit()
+        result = fn(portals)
+        self._take_portals(portals)
+        return result
+
+    def teleport(self, to, input_name, exit_at, entry_at):
+        """The link into to.input drawn through its source's portal, out of a new exit: (portal, exit)."""
+        made = self._portal_change(lambda p: p.teleport(to, input_name, float(exit_at[0]), float(exit_at[1]),
+                                                        float(entry_at[0]), float(entry_at[1])))
+        if made is None:
+            raise GraphError("%s.%s has no link to teleport" % (to, input_name))
+        return tuple(made)
+
+    def add_portal_exit(self, portal, x, y):
+        exit_index = self._portal_change(lambda p: p.add_exit(portal, float(x), float(y)))
+        if exit_index < 0:
+            raise GraphError("no portal %r" % portal)
+        return exit_index
+
+    def add_portal_link(self, portal, exit_index, to, input_name):
+        return self._portal_change(lambda p: p.add_link(portal, int(exit_index), to, input_name))
+
+    def move_portal(self, portal, exit_index, x, y):
+        """A portal's entry (exit_index None) or one of its exits moved."""
+        if exit_index is None:
+            self._portal_change(lambda p: p.move(portal, float(x), float(y)))
+        else:
+            self._portal_change(lambda p: p.move_exit(portal, int(exit_index), float(x), float(y)))
+
+    def remove_portal(self, portal, exit_index=None):
+        """A portal gone (its links drawn as wires again), or one exit of it."""
+        if exit_index is None:
+            return self._portal_change(lambda p: p.remove(portal))
+        return self._portal_change(lambda p: p.remove_exit(portal, int(exit_index)))
+
+    def rename_portal(self, portal, name):
+        made = self._portal_change(lambda p: p.rename(portal, name))
+        if not made:
+            raise GraphError("no portal %r" % portal)
+        return made
+
+    # -- Dots (graph_portals.h: every portal is a dot; free ones from the add-node search) ----------
+
+    def add_dot(self, x, y, src=None, output=None):
+        """A free dot at (x, y) (fed from src's `output` when given: an exit of that output's dot
+        when it has one). Returns its portal's name."""
+        name = self._portal_change(lambda p: p.add_dot(float(x), float(y), ""))
+        if src:
+            portals = self._portal_edit()
+            if not portals.set_source(name, src, output or ""):
+                into = portals.portal_of(src, output or "")
+                if portals.join(name, into) < 0:
+                    raise GraphError("%s's output has a dot already" % src)
+                name = into
+            self._take_portals(portals)
+        return name
+
+    def portal_fed(self, portal):
+        return bool(self._portal_edit().fed(portal)) if self._portals else False
+
+    def _relink(self, links, src, output):
+        """The links (to, input) read src's `output` (the core's checks; nothing changes on a refusal)."""
+        edit = self._edit()
+        with _core_errors():
+            for to, input_name in links:
+                edit.connect_by_hand(src, to, input_name, output or "")
+        self._take(edit)
+
+    def feed_dot(self, portal, src, output=None):
+        """A dot fed from src's `output`: its links (its entry's and exits') read it now."""
+        portals = self._portal_edit()
+        links = [tuple(l) for l in portals.links(portal)]
+        self._relink(links, src, output)
+        portals = self._portal_edit()
+        if not portals.set_source(portal, src, output or ""):
+            raise GraphError("%s's output has a dot already" % src)
+        self._take_portals(portals)
+
+    def set_dot_input(self, portal, exit_index, into):
+        """A dot's Input Portal: `into` (another dot's name) or None (a free dot). exit_index None:
+        the dot's entry. Its links read `into`'s source first."""
+        dot = portal
+        if exit_index is not None:
+            dot = self._portal_change(lambda p: p.leave(portal, int(exit_index)))
+            if not dot:
+                raise GraphError("no such dot")
+        if not into:
+            return dot, None
+        source = next((p for p in self.portals if p["name"] == into), None)
+        if source is None or not source.get("from"):
+            raise GraphError("%s has nothing coming into it yet" % into)
+        self._relink([tuple(l) for l in self._portal_edit().links(dot)], source["from"], source.get("output"))
+        index = self._portal_change(lambda p: p.join(dot, into))
+        if index < 0:
+            raise GraphError("cannot take %s's signal" % into)
+        return into, index
+
+    def detach_group(self, names):
+        """Several nodes out of the flow together (a shake): the links among them kept (the core's)."""
+        edit = self._edit()
+        with _core_errors():
+            done = edit.detach_group(list(names))
+        if done["changed"]:
+            self._take(edit)
+            self.prune_pins()
+        return done
+
+    def insert_nodes_on_link(self, src, dst, input_name, nodes, output=None):
+        """A chain dropped on a wire as one: src feeds its entry, dst reads its exit (the core's)."""
+        edit = self._edit()
+        with _core_errors():
+            edit.insert_nodes_on_link(src, dst, input_name, list(nodes), output or "")
+        self._take(edit)
+
+    # -- Duplicate, output links, pass-through (the core's, every host's) ----------
+
+    def duplicate_nodes(self, names, offset=(40.0, 60.0)):
+        """Ctrl+D: copies beside the nodes, each reading what its node reads (the core's
+        GraphEdit.duplicate_nodes, the app's too). Returns the new names."""
+        edit = self._edit()
+        with _core_errors():
+            made = edit.duplicate_nodes(list(names), float(offset[0]), float(offset[1]))
+        self._take(edit)
+        for new, source in made:
+            self.copied[new] = source
+        return [new for new, _source in made]
+
+    def output_links(self, src, output=None):
+        """The links reading src's output (None: its first): [(node, input)]."""
+        return [tuple(l) for l in self._query().output_links(src, output or "")]
+
+    def move_output_links(self, src, output, new_src, new_output=None):
+        """Every link reading src's output reads new_src's new_output instead where it fits (a
+        bundle of links dropped on another output). Returns the (node, input) moved."""
+        edit = self._edit()
+        with _core_errors():
+            moved = edit.move_output_links(src, output or "", new_src, new_output or "")
+        self._take(edit)
+        return [tuple(m) for m in moved]
+
+    def pass_through(self, name):
+        """The inputs the node hands on as outputs (thru_<input>)."""
+        return list(self._node(name).get("passThrough") or [])
+
+    def set_pass_through(self, name, input_name, on):
+        """An input's pass-through output on or off (off: what read it reads nothing)."""
+        edit = self._edit()
+        with _core_errors():
+            changed = edit.set_pass_through(name, input_name, bool(on))
+        if changed:
+            self._take(edit)
+        return changed
+
+    def pass_through_name(self, name, input_name):
+        """A pass-through output's name as shown (Rename Output); "" for none (thru_<input>)."""
+        return (self._node(name).get("passThroughNames") or {}).get(input_name, "")
+
+    def set_pass_through_name(self, name, input_name, label):
+        """Rename Output: a pass-through output's name as shown ("" clears it; links still read
+        thru_<input>). The core's (GraphEdit.set_pass_through_name). Whether it changed."""
+        edit = self._edit()
+        with _core_errors():
+            changed = edit.set_pass_through_name(name, input_name, label or "")
+        if changed:
+            self._take(edit)
+        return changed
+
+    def move_pass_through(self, name, input_name, by):
+        """Move Output Up (-1) / Down (1): a pass-through output's place among the node's (the
+        core's GraphEdit.move_pass_through; its links stay). Whether it moved."""
+        edit = self._edit()
+        with _core_errors():
+            changed = edit.move_pass_through(name, input_name, int(by))
+        if changed:
+            self._take(edit)
+        return changed
 
     def set_position(self, name, x, y):
         self._node(name)["ui"] = {"x": float(x), "y": float(y)}
@@ -1134,3 +1370,77 @@ class GraphModel(object):
             return self.nodes[name]
         except KeyError:
             raise GraphError("no node named %r" % name)
+
+
+class ScopedModel(GraphModel):
+    """The graph inside a compound (the Graph Editor's double-click on a Compound, its path bar and
+    U to come back out): edited as a graph of its own, and written back into the graph holding it
+    whenever it is saved (the core's with_compound_graph: the compound's inputs follow its Input
+    nodes, its exposed params follow renames inside). `outer` is the model of the graph holding the
+    compound (the groom's, or another ScopedModel for a compound inside a compound); `name` the
+    compound's name there."""
+
+    def __init__(self, outer, name):
+        self.outer = outer
+        self.name = name
+        with _core_errors():
+            inner = json.loads(groomlab_core.compound_graph_json(json.dumps(outer.to_dict()), name))
+        super(ScopedModel, self).__init__(outer.catalog, inner)
+        self.groom_size = outer.groom_size
+        if self.exposed is None:
+            self.exposed = {}
+        self.ensure_layout()
+
+    @property
+    def path(self):
+        """The compound's path from the groom's graph ("outer/inner")."""
+        return (self.outer.path + "/" if isinstance(self.outer, ScopedModel) else "") + self.name
+
+    def whole(self):
+        """The graph holding the compound, with this graph in it (a dict)."""
+        with _core_errors():
+            return json.loads(groomlab_core.with_compound_graph(json.dumps(self.outer.to_dict()), self.name,
+                                                                json.dumps(self.to_dict())))
+
+    def write_back(self):
+        """This graph into the outer model (and so on up)."""
+        self.outer.load_dict(self.whole())
+        if isinstance(self.outer, ScopedModel):
+            self.outer.write_back()
+
+    def validate(self):
+        """Its own problems, then the graph holding it's (an output inside, inputs that fit)."""
+        problems = super(ScopedModel, self).validate()
+        try:
+            whole = self.whole()
+        except GraphError as e:
+            return problems + [str(e)]
+        with _core_errors():
+            return problems + [p for p in groomlab_core.GraphEdit(json.dumps(whole)).problems(True) if p not in problems]
+
+    def save(self, groom):
+        """Written back into the whole graph, which is stored on the groom (one undo step)."""
+        self.write_back()
+        top = self.outer
+        while isinstance(top, ScopedModel):
+            top = top.outer
+        top.save(groom)
+
+    def save_layout(self, groom):
+        self.write_back()
+        top = self.outer
+        while isinstance(top, ScopedModel):
+            top = top.outer
+        return top.save_layout(groom)
+
+
+def _top(model):
+    """The groom's graph model a (scoped) model belongs to, with the scoped graphs written back."""
+    if isinstance(model, ScopedModel):
+        model.write_back()
+        while isinstance(model, ScopedModel):
+            model = model.outer
+    return model
+
+
+GraphModel.top = lambda self: _top(self)

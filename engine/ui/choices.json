@@ -197,6 +197,15 @@
         {"value": "density", "label": "Density", "tip": "Strands per area: a heatmap"}
       ]
     },
+    "wireStyles": {
+      "label": "Wire Style",
+      "default": "smooth",
+      "items": [
+        {"value": "smooth", "label": "Smooth", "tip": "Curves leaving the output and reaching the input level"},
+        {"value": "square", "label": "Square", "tip": "Straight runs with right angles"},
+        {"value": "rounded", "label": "Rounded", "tip": "Straight runs with rounded corners"}
+      ]
+    },
     "evaluation": {
       "label": "Evaluate",
       "default": "always",

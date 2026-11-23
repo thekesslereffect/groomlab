@@ -156,8 +156,8 @@ The **Graph Editor** is a dockable node editor for the selected groom:
     for another link of the same signal, running through the pins up to it; drop a link from an
     output on a pin and every link through it is fed from that output instead (one undo step); drop
     an input's link end on a pin and that input takes the pin's signal. Delete takes a selected pin
-    out (the link straightens there). Pins are
-    layout, as node positions are: no undo step, nothing evaluates again, and the groom file keeps
+    out (the link straightens there); Alt+click a link puts a pin there too. Pins are
+    layout, as node positions are: nothing evaluates again (moving one is a layout undo step), and the groom file keeps
     them (the "pins" of its graph, kept by the core's rules in every host, graph_pins.h): the app draws and edits them the same way (there
     adding, removing, joining and feeding a pin are undo steps, as its backdrops are), and Blender
     shows them as its own reroute nodes.
@@ -268,7 +268,58 @@ The **Graph Editor** is a dockable node editor for the selected groom:
   transparent and its wires are dotted; a viewed node's eye is lit blue. `cmds.groomLabGraphStats(groom, points=True)` (`groomlab.viewport_points`)
   returns the points of the strands the viewport shows, to compare exports with.
 - **Backdrops:** right-click a node and choose Add Backdrop Around Selection to frame nodes.
-  Moving the backdrop moves them, and double-click renames it. Backdrops are layout only.
+  Moving the backdrop (by its title bar) moves them, and double-clicking the title renames it; a
+  drag on its body is a rubber band selecting the nodes on it. A node moved toward an edge grows
+  the backdrop round it (graph_arrange.h grownBackdrop). The title bar's chevron, or **Fold** in
+  its menu, folds it to its title bar ("collapsed": true): its nodes are hidden and the links into
+  and out of them meet its edges. Backdrops are layout only.
+- **Undo:** every graph edit is one undo step, layout too: a node move, a backdrop moved, resized
+  or folded, a pin or portal moved, Align. Layout steps write the graph with nothing to evaluate.
+- **By hand** (graph_arrange.h, the app's too): Shift+drag a node to move it with everything
+  upstream (nodesWithUpstream), Ctrl+drag with everything downstream (nodesWithDownstream), neither
+  through a portal's exit, the pins and dots between moved nodes carried too (carriedWith;
+  Shift+click without a move adds it to the selection, Ctrl+click toggles it); shake a node while dragging to
+  take it out of its links (Detach); Shift+drag from an output to pick up all its links and drop
+  them on another output (GraphEdit::moveOutputLinks); Tab with a link selected adds the node into
+  it; Ctrl+V pastes at the cursor; Ctrl+D's copies read what their nodes read
+  (GraphEdit::duplicateNodes). **Align** (node menu, **...** menu): rows, columns, edges, centers,
+  even spacing, Tidy Selection (L: tidyGraph). **Wire Style** (**...** menu, optionVar `groomLabGraphWireStyle`):
+  Smooth, Square or Rounded. The node in Focus glows.
+- **Round 2** (both hosts): a shake takes nodes out of their links mid-drag (several: detachGroup,
+  their own links kept); Alt+drag duplicates (pan is the middle button); a chain drops on a wire as
+  one (insertNodesOnLink); **.** pins the selected link; Shift+O and the Tab search's Backdrop add
+  a backdrop, whose card edits its title, "description" and "fontSize"; a backdrop grows live while
+  a node is dragged slowly past its edge and lets it go when dragged out fast (backdropKeeps); the
+  bar after Presets has the wire style and Align buttons; a link dropped on the canvas opens the
+  search, its node fed from that output.
+- **Dots** (graph_portals.h addDot): the Tab search's Dot is a free dot; a link from an output
+  dropped on it feeds it (feedDot); links drag out of a fed dot's nub (its entry's "links"); its
+  card's Input Portal makes it an exit of another dot (joinPortal) or frees it (leavePortal).
+- **Portals** (graph_portals.h, the graph's "portals", layout only): a link's menu > Teleport Link
+  draws it through a named portal, an entry dot by its output and an exit dot by its input; drag
+  from an exit's nub for another link of the signal; double-click renames; Delete removes an exit or
+  (its entry) the portal.
+- **Pass Through as Output** (an input port's menu): the node gets a `thru_<input>` output handing
+  that input on ("passThrough" on the node; links reading it read what feeds the input when the
+  graph loads: resolvePassThrough). The output's menu > Rename Output names it as shown
+  ("passThroughNames" on the node, the spec output's "label"; GraphEdit::setPassThroughName);
+  Move Output Up / Down reorders them (the "passThrough" list's order; GraphEdit::movePassThrough).
+- **Round 4** (both hosts): Houdini's align gestures, A held and a node dragged from
+  (graph_arrange.h alignGesture: A its chain, Shift+A the selection, Alt+A the selection spread
+  evenly; across a row, up or down a column; live, one undo step; A tapped frames all); a
+  backdrop carries the pins and dots on it and hides them folded (layoutOnBackdrop), is drawn over
+  the links folded and as wide as its title; its card has color swatches (and any color) and a
+  title-size slider.
+- **Round 5** (both hosts): Shift+drag carries upstream and Ctrl+drag downstream (swapped);
+  **L** is Tidy Layout (graph_arrange.h tidyGraph: the selected nodes, fewer than two the whole
+  graph; columns by the longest path in, each card level with what feeds it; backdrops as groups
+  laid out on themselves and moved as one card, a folded one as it is, one partly selected tidied
+  in place; pins and dots carried; one undo step); a param's menu inside a compound has **Promote
+  to Compound** (graph_controls.h promoteParam: the param shown on the compound you are in), each
+  shown on the compound under a header named after its node (the definition's "exposeByNode").
+- **Inside a compound:** double-click a Compound (or I) opens its graph to edit (ScopedModel: each
+  edit written back with withCompoundGraph, its inputs following its Input nodes, one undo step);
+  the path bar over the canvas, or U, goes back up.)
 - **Sliders:** right-click one for Reset to Default.
 - **Applying:** with **Live** on, each valid edit applies as one undo step. With it off, press
   Apply. An invalid graph (a missing input or no Output) is shown but never applied.

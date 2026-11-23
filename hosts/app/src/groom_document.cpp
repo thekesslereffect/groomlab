@@ -23,6 +23,7 @@
 #include "groomlab/graph_edit.h"
 #include "groomlab/graph_inserts.h"
 #include "groomlab/graph_pins.h"
+#include "groomlab/graph_portals.h"
 #include "groomlab/graph_io.h"
 #include "groomlab/node_library.h"
 #include "groomlab/parts.h"
@@ -508,6 +509,7 @@ MeshPtr GroomDocument::refinedFileScalp() const {
 }
 
 void GroomDocument::loadGraph(const std::string& text) {
+    scope_.clear();  // another graph: shown whole
     try {
         // The core writes what it evaluates, with the editors' layout (each node's "ui", the
         // graph's "backdrops": graph_io.h), so positions travel with the groom between hosts.
@@ -519,8 +521,8 @@ void GroomDocument::loadGraph(const std::string& text) {
 
 std::vector<GroomDocument::ConnectionInfo> GroomDocument::connections() const {
     std::vector<ConnectionInfo> out;
-    if (!graph_.contains("connections")) return out;
-    for (const json& c : graph_["connections"]) {
+    if (!viewGraph().contains("connections")) return out;
+    for (const json& c : viewGraph()["connections"]) {
         out.push_back({c.value("from", std::string()), c.value("output", std::string()), c.value("to", std::string()),
                        c.value("input", std::string())});
     }
@@ -544,14 +546,134 @@ void GroomDocument::setNodePosition(const std::string& node, float x, float y) {
     dirty_ = true;
 }
 
+namespace {
+
+// The graph inside the compound at `path` ("outer/inner") of `graph`, its definition made an
+// object in place; null when the path holds no compound with a graph.
+json* innerGraph(json& graph, const std::string& path) {
+    json* g = &graph;
+    std::size_t start = 0;
+    for (;;) {
+        const std::size_t slash = path.find('/', start);
+        const std::string name = path.substr(start, slash == std::string::npos ? std::string::npos : slash - start);
+        json* node = nullptr;
+        if (g->is_object() && g->contains("nodes") && (*g)["nodes"].is_array()) {
+            for (json& n : (*g)["nodes"]) {
+                if (n.is_object() && n.value("name", std::string()) == name) node = &n;
+            }
+        }
+        if (!node || node->value("type", std::string()) != "Compound" || !node->contains("params") || !(*node)["params"].is_object() ||
+            !(*node)["params"].contains("definition")) {
+            return nullptr;
+        }
+        json& definition = (*node)["params"]["definition"];
+        if (definition.is_string()) {
+            json parsed = json::parse(definition.get<std::string>(), nullptr, false);
+            if (!parsed.is_object()) return nullptr;
+            definition = std::move(parsed);
+        }
+        if (!definition.is_object() || !definition.contains("graph") || !definition["graph"].is_object()) return nullptr;
+        g = &definition["graph"];
+        if (slash == std::string::npos) return g;
+        start = slash + 1;
+    }
+}
+
+}  // namespace
+
+json& GroomDocument::view() {
+    if (scope_.empty()) return graph_;
+    if (json* g = innerGraph(graph_, scope_)) return *g;
+    scope_.clear();  // the compound is gone (an undo, another graph): the whole graph again
+    return graph_;
+}
+
+const json& GroomDocument::viewGraph() const { return const_cast<GroomDocument*>(this)->view(); }
+
+std::string GroomDocument::setScope(const std::string& path) {
+    if (path.empty()) {
+        scope_.clear();
+        return {};
+    }
+    try {
+        compoundGraphJson(graph_.dump(), path);  // (why not, in the core's words)
+    } catch (const std::exception& e) {
+        return e.what();
+    }
+    scope_ = path;
+    view();
+    return {};
+}
+
+std::string GroomDocument::enterCompound(const std::string& node) {
+    const json* n = nodeJson(node);
+    if (!n) return "no node '" + node + "'";
+    if (n->value("type", std::string()) != "Compound") return node + " is not a Compound";
+    return setScope(scope_.empty() ? node : scope_ + "/" + node);
+}
+
+void GroomDocument::leaveCompound() {
+    const std::size_t slash = scope_.rfind('/');
+    scope_ = slash == std::string::npos ? std::string() : scope_.substr(0, slash);
+}
+
+void GroomDocument::beginLayout() { layoutBefore_ = graph_; }
+
+bool GroomDocument::endLayout(const std::string& label) {
+    if (!layoutBefore_) return false;
+    json before = std::move(*layoutBefore_);
+    layoutBefore_.reset();
+    if (before == graph_) return false;
+    Edit entry;
+    entry.label = label;
+    entry.whole = true;
+    entry.layout = true;
+    entry.graphBefore = std::move(before);
+    entry.graphAfter = graph_;
+    record(std::move(entry));
+    dirty_ = true;
+    return true;
+}
+
+std::string GroomDocument::editLayout(const std::string& label, const std::function<void(json&)>& edit) {
+    const json before = graph_;
+    try {
+        edit(view());
+    } catch (const std::exception& e) {
+        graph_ = before;
+        return e.what();
+    }
+    if (graph_ == before) return {};
+    Edit entry;
+    entry.label = label;
+    entry.whole = true;
+    entry.layout = true;
+    entry.graphBefore = before;
+    entry.graphAfter = graph_;
+    record(std::move(entry));
+    dirty_ = true;
+    return {};
+}
+
 std::string GroomDocument::editGraph(const std::string& label, const std::function<void(json&)>& edit,
                                      const std::vector<std::pair<std::string, std::string>>& moved,
                                      const std::map<std::string, std::string>& copied) {
     commitPreview();
     const json before = graph_;
     try {
-        edit(graph_);
-        prunePins(graph_);  // the pins of links gone, or fed from elsewhere now, go with them
+        if (scope_.empty()) {
+            edit(graph_);
+            prunePins(graph_);  // the pins of links gone, or fed from elsewhere now, go with them
+            prunePortals(graph_);
+        } else {
+            // Inside a compound: its graph edited on its own, then written back (its inputs follow
+            // its Input nodes; the core's checks).
+            json inner = json::parse(compoundGraphJson(graph_.dump(), scope_));
+            edit(inner);
+            prunePins(inner);
+            prunePortals(inner);
+            graph_ = json::parse(withCompoundGraph(graph_.dump(), scope_, inner.dump()));
+        }
     } catch (const std::exception& e) {
         graph_ = before;
         return e.what();
@@ -707,7 +829,7 @@ std::string GroomDocument::addNode(const std::string& type, float x, float y, st
     std::string chosen = options.name;
     try {
         const std::string base = libraryNodeId(type).empty() ? type : libraryNodeName(spec(type)->value("label", type));
-        if (chosen.empty()) chosen = GraphEdit(graph_.dump()).uniqueName(base);
+        if (chosen.empty()) chosen = GraphEdit(viewGraph().dump()).uniqueName(base);
         else if (nodeJson(chosen)) chosen = GraphEdit(graph_.dump()).uniqueName(chosen);
     } catch (const std::exception& e) {
         return e.what();
@@ -751,6 +873,85 @@ std::string GroomDocument::insertOnLink(const std::string& node, const NodeLink&
         GraphEdit edit(g.dump());
         insertOnLinkIn(edit, link, node);
         g = json::parse(edit.toJson());
+    });
+}
+
+std::string GroomDocument::insertNodesOnLink(const std::vector<std::string>& nodes, const NodeLink& link) {
+    if (nodes.size() == 1) return insertOnLink(nodes.front(), link);
+    return editGraph("insert " + std::to_string(nodes.size()) + " nodes", [&](json& g) {
+        GraphEdit edit(g.dump());
+        groomlab::insertNodesOnLink(edit, link.from, link.to, link.input, nodes, link.output);
+        g = json::parse(edit.toJson());
+    });
+}
+
+std::string GroomDocument::detachGroup(const std::vector<std::string>& nodes, int* detached) {
+    if (detached) *detached = 0;
+    if (nodes.size() == 1) return detachNodes(nodes, detached);
+    bool changed = false;
+    const std::string error = editGraph("shake " + std::to_string(nodes.size()) + " nodes loose", [&](json& g) {
+        GraphEdit edit(g.dump());
+        changed = edit.detachGroup(nodes).changed;
+        g = json::parse(edit.toJson());
+    });
+    if (error.empty() && detached) *detached = changed ? static_cast<int>(nodes.size()) : 0;
+    return error;
+}
+
+// ---- Dots (graph_portals.h: a portal's dots, free ones from the add-node search) -------------------
+
+std::string GroomDocument::addDot(double x, double y, std::string* made, const std::string& from, const std::string& output) {
+    std::string name;
+    const std::string error = editGraph("add dot", [&](json& g) {
+        name = groomlab::addDot(g, x, y);
+        if (!from.empty() && !setPortalSource(g, name, from, output)) {
+            // The output has a portal already: the dot is an exit of it.
+            const std::string portal = portalOf(g, from, output);
+            if (joinPortal(g, name, portal) < 0) throw std::invalid_argument(from + "'s output has a dot already");
+            name = portal;
+        }
+    });
+    if (error.empty() && made) *made = name;
+    return error;
+}
+
+std::string GroomDocument::feedDot(const std::string& portal, const std::string& from, const std::string& output) {
+    return editGraph("feed " + portal + " from " + from, [&](json& g) {
+        // Its links (out of the entry and the exits) read the new source; then the dot names it.
+        GraphEdit edit(g.dump());
+        for (const auto& [to, input] : portalLinks(g, portal)) edit.connectByHand(from, to, input, output);
+        json links = json::parse(edit.toJson());
+        const json portals = g.value("portals", json::array());
+        g = std::move(links);
+        g["portals"] = portals;
+        if (!setPortalSource(g, portal, from, output)) throw std::invalid_argument(from + "'s output has a dot already");
+    });
+}
+
+std::string GroomDocument::setDotInput(const std::string& portal, int exit, const std::string& into) {
+    return editGraph(into.empty() ? "dot input cleared" : "dot input " + into, [&](json& g) {
+        std::string dot = portal;
+        if (exit >= 0) {
+            dot = leavePortal(g, portal, exit);  // a free dot where the exit stood (its links drawn as wires)
+            if (dot.empty()) throw std::invalid_argument("no such dot");
+        }
+        if (into.empty()) return;
+        // Into another portal: its links read that portal's source first.
+        std::string from, output;
+        for (const json& p : g.value("portals", json::array())) {
+            if (p.value("name", std::string()) == into) {
+                from = p.value("from", std::string());
+                output = p.value("output", std::string());
+            }
+        }
+        if (from.empty()) throw std::invalid_argument(into + " has nothing coming into it yet");
+        GraphEdit edit(g.dump());
+        const auto links = portalLinks(g, dot);
+        for (const auto& [to, input] : links) edit.connectByHand(from, to, input, output);
+        const json portals = g.value("portals", json::array());
+        g = json::parse(edit.toJson());
+        g["portals"] = portals;
+        if (joinPortal(g, dot, into) < 0) throw std::invalid_argument("cannot take " + into + "'s signal");
     });
 }
 
@@ -801,6 +1002,29 @@ std::string GroomDocument::showInnerParam(const std::string& compound, const std
         else compoundUnexpose(edit, compound, target);
         g = json::parse(edit.toJson());
     });
+}
+
+std::string GroomDocument::promoteParam(const std::string& node, const std::string& param, bool promoted) {
+    if (scope_.empty()) return "Promote to Compound works inside a compound";
+    if (paramPromoted(node, param) == promoted) return {};
+    const std::string path = scope_;
+    const std::size_t slash = path.rfind('/');
+    const std::string compound = slash == std::string::npos ? path : path.substr(slash + 1);
+    // The whole graph edited (the compound is in the graph holding it), the compound kept open.
+    scope_.clear();
+    const std::string error = editGraph((promoted ? "promote " : "unpromote ") + node + "." + param + " on " + compound, [&](json& g) {
+        g = json::parse(groomlab::promoteParam(g.dump(), path, node, param, promoted));
+    });
+    scope_ = path;
+    return error;
+}
+
+bool GroomDocument::paramPromoted(const std::string& node, const std::string& param) const {
+    return !scope_.empty() && groomlab::paramPromoted(graph_.dump(), scope_, node, param);
+}
+
+bool GroomDocument::paramPromotable(const std::string& node, const std::string& param) const {
+    return !scope_.empty() && groomlab::paramPromotable(graph_.dump(), scope_, node, param);
 }
 
 std::string GroomDocument::addControl(const std::string& node, const std::string& param, std::string* made) {
@@ -1031,7 +1255,7 @@ std::string GroomDocument::bakeNodeToGuides(const std::string& node, const std::
 
 std::string GroomDocument::removeNode(const std::string& node) {
     if (!nodeJson(node)) return "no node '" + node + "'";
-    if (graph_.value("output", std::string()) == node) return "the output node stays";
+    if (viewGraph().value("output", std::string()) == node) return "the output node stays";
     return editGraph("remove " + node, [&](json& g) {
         GraphEdit edit(g.dump());
         edit.removeNodeKeepingFlow(node);  // its links go; what fed it feeds what it fed (issue #80)
@@ -1042,7 +1266,7 @@ std::string GroomDocument::removeNode(const std::string& node) {
 std::string GroomDocument::removeNodes(const std::vector<std::string>& nodes) {
     std::vector<std::string> gone;
     for (const std::string& n : nodes) {
-        if (nodeJson(n) && graph_.value("output", std::string()) != n && std::find(gone.begin(), gone.end(), n) == gone.end()) gone.push_back(n);
+        if (nodeJson(n) && viewGraph().value("output", std::string()) != n && std::find(gone.begin(), gone.end(), n) == gone.end()) gone.push_back(n);
     }
     if (gone.empty()) return nodes.size() == 1 ? removeNode(nodes.front()) : std::string("the output node stays");
     if (gone.size() == 1) return removeNode(gone.front());
@@ -1056,7 +1280,7 @@ std::string GroomDocument::removeNodes(const std::vector<std::string>& nodes) {
 std::string GroomDocument::copyNodes(const std::vector<std::string>& nodes) const {
     // The core's (graph_edit.h copyNodes, Maya's copy_nodes too): in the graph's order, never the Output node.
     try {
-        return GraphEdit(graph_.dump()).copyNodes(nodes);
+        return GraphEdit(viewGraph().dump()).copyNodes(nodes);
     } catch (const std::exception&) {
         return {};
     }
@@ -1110,6 +1334,7 @@ std::string GroomDocument::renameNode(const std::string& node, const std::string
         edit.renameNode(node, newName);
         g = json::parse(edit.toJson());
         renamePinNode(g, node, newName);
+        renamePortalNode(g, node, newName);
         moved = edit.movedNodes();  // a compound's inner nodes' edits go with it
     }, moved);
 }
@@ -1118,20 +1343,130 @@ std::string GroomDocument::duplicateNode(const std::string& node, std::string* m
     const json* n = nodeJson(node);
     if (!n) return "no node '" + node + "'";
     if (n->value("type", std::string()) == "Output") return "the output node is one of a kind";
-    // Every host's Duplicate (Maya's and this one's with several nodes): the core's copy and paste
-    // (graph_edit.h), beside the node, every field kept (its seed, exposed ports, the controls
-    // keying its params), a Sculpt node's (a compound's inner Sculpt nodes') edits with it.
-    const std::string text = copyNodes({node});
-    if (text.empty()) return "nothing to duplicate";
     std::vector<std::string> names;
-    const std::string error = pasteNodes(text, 40.0f, 60.0f, &names);
+    const std::string error = duplicateNodes({node}, 40.0f, 60.0f, &names);
     if (error.empty() && made && !names.empty()) *made = names.front();
     return error;
 }
 
+std::string GroomDocument::duplicateNodes(const std::vector<std::string>& nodes, float dx, float dy, std::vector<std::string>* made) {
+    // The core's (graph_edit.h duplicateNodes, Maya's Ctrl+D too): copies beside them, reading what
+    // they read, the links among them made again; a Sculpt node's copy takes its edits.
+    std::vector<std::string> names;
+    std::map<std::string, std::string> copied;
+    std::string label = nodes.size() == 1 ? "duplicate " + nodes.front() : "duplicate " + std::to_string(nodes.size()) + " nodes";
+    const std::string error = editGraph(label, [&](json& g) {
+        GraphEdit edit(g.dump());
+        for (const auto& [copy, source] : edit.duplicateNodes(nodes, dx, dy)) {
+            names.push_back(copy);
+            const std::string type = edit.nodeType(copy);
+            if (type == op::kSculpt || type == "Compound") copied[copy] = source;
+        }
+        g = json::parse(edit.toJson());
+    }, {}, copied);
+    if (error.empty() && made) *made = names;
+    return error;
+}
+
+std::string GroomDocument::moveOutputLinks(const std::string& from, const std::string& output, const std::string& to,
+                                           const std::string& toOutput, int* moved) {
+    int count = 0;
+    const std::string error = editGraph("move " + from + "'s links to " + to, [&](json& g) {
+        GraphEdit edit(g.dump());
+        count = static_cast<int>(edit.moveOutputLinks(from, output, to, toOutput).size());
+        if (count == 0) throw std::invalid_argument("none of " + from + "'s links can take " + to + "'s output");
+        g = json::parse(edit.toJson());
+    });
+    if (moved) *moved = error.empty() ? count : 0;
+    return error;
+}
+
+std::string GroomDocument::setPassThrough(const std::string& node, const std::string& input, bool on) {
+    return editGraph((on ? "pass through " : "no pass-through ") + node + "." + input, [&](json& g) {
+        GraphEdit edit(g.dump());
+        edit.setPassThrough(node, input, on);
+        g = json::parse(edit.toJson());
+    });
+}
+
+std::string GroomDocument::setPassThroughName(const std::string& node, const std::string& input, const std::string& label) {
+    return editLayout("rename output " + node + "." + GraphEdit::passThroughOutput(input), [&](json& g) {
+        GraphEdit edit(g.dump());
+        edit.setPassThroughName(node, input, label);
+        g = json::parse(edit.toJson());
+    });
+}
+
+std::string GroomDocument::movePassThrough(const std::string& node, const std::string& input, int by) {
+    return editLayout(std::string(by < 0 ? "move output up " : "move output down ") + node + "." + GraphEdit::passThroughOutput(input),
+                      [&](json& g) {
+                          GraphEdit edit(g.dump());
+                          if (edit.movePassThrough(node, input, by)) g = json::parse(edit.toJson());
+                      });
+}
+
+// ---- Portals (graph_portals.h) -------------------------------------------------------------------
+
+std::string GroomDocument::teleportLink(const std::string& to, const std::string& input, double exitX, double exitY, double entryX,
+                                        double entryY) {
+    return editGraph("teleport " + to + "." + input, [&](json& g) {
+        if (!groomlab::teleportLink(g, to, input, exitX, exitY, entryX, entryY)) throw std::invalid_argument("nothing feeds " + to + "." + input);
+    });
+}
+
+std::string GroomDocument::addPortalExit(const std::string& portal, double x, double y) {
+    return editGraph("portal exit " + portal, [&](json& g) {
+        if (groomlab::addPortalExit(g, portal, x, y) < 0) throw std::invalid_argument("no portal '" + portal + "'");
+    });
+}
+
+std::string GroomDocument::linkFromPortal(const std::string& portal, int exit, const std::string& to, const std::string& input) {
+    return editGraph("connect " + portal + " to " + to, [&](json& g) {
+        std::string from, output;
+        for (const json& p : g.value("portals", json::array())) {
+            if (p.value("name", std::string()) == portal) {
+                from = p.value("from", std::string());
+                output = p.value("output", std::string());
+            }
+        }
+        if (from.empty()) throw std::invalid_argument("no portal '" + portal + "'");
+        GraphEdit edit(g.dump());
+        edit.connectByHand(from, to, input, output);
+        g = json::parse(edit.toJson());
+        prunePortals(g);
+        addPortalLink(g, portal, exit, to, input);
+    });
+}
+
+std::string GroomDocument::removePortal(const std::string& portal) {
+    return editGraph("remove portal " + portal, [&](json& g) {
+        if (!groomlab::removePortal(g, portal)) throw std::invalid_argument("no portal '" + portal + "'");
+    });
+}
+
+std::string GroomDocument::removePortalExit(const std::string& portal, int exit) {
+    return editGraph("remove portal exit", [&](json& g) {
+        if (!groomlab::removePortalExit(g, portal, exit)) throw std::invalid_argument("no such portal exit");
+    });
+}
+
+std::string GroomDocument::renamePortal(const std::string& portal, const std::string& name) {
+    return editGraph("rename portal " + portal, [&](json& g) {
+        if (groomlab::renamePortal(g, portal, name).empty()) throw std::invalid_argument("no portal '" + portal + "'");
+    });
+}
+
+void GroomDocument::movePortal(const std::string& portal, double x, double y) {
+    if (groomlab::movePortal(view(), portal, x, y)) dirty_ = true;
+}
+
+void GroomDocument::movePortalExit(const std::string& portal, int exit, double x, double y) {
+    if (groomlab::movePortalExit(view(), portal, exit, x, y)) dirty_ = true;
+}
+
 std::string GroomDocument::setOutputNode(const std::string& node) {
     if (!nodeJson(node)) return "no node '" + node + "'";
-    if (graph_.value("output", std::string()) == node) return {};
+    if (viewGraph().value("output", std::string()) == node) return {};
     return editGraph("output " + node, [&](json& g) {
         GraphEdit edit(g.dump());
         edit.setOutputNode(node);
@@ -1370,27 +1705,56 @@ std::string GroomDocument::addBackdrop(const std::string& title, double x, doubl
 }
 
 std::string GroomDocument::setBackdropTitle(int index, const std::string& title) {
-    if (!backdropAt(graph_, index)) return "no backdrop " + std::to_string(index);
+    if (!backdropAt(view(), index)) return "no backdrop " + std::to_string(index);
     return editGraph("rename backdrop", [&](json& g) { (*backdropAt(g, index))["title"] = title; });
 }
 
 std::string GroomDocument::setBackdropColor(int index, int r, int g, int b) {
-    if (!backdropAt(graph_, index)) return "no backdrop " + std::to_string(index);
+    if (!backdropAt(view(), index)) return "no backdrop " + std::to_string(index);
     return editGraph("backdrop color", [&](json& graph) {
         (*backdropAt(graph, index))["color"] = json::array({std::clamp(r, 0, 255), std::clamp(g, 0, 255), std::clamp(b, 0, 255)});
     });
 }
 
 std::string GroomDocument::removeBackdrop(int index) {
-    if (!backdropAt(graph_, index)) return "no backdrop " + std::to_string(index);
+    if (!backdropAt(view(), index)) return "no backdrop " + std::to_string(index);
     return editGraph("delete backdrop", [&](json& g) {
         g["backdrops"].erase(g["backdrops"].begin() + index);
         if (g["backdrops"].empty()) g.erase("backdrops");
     });
 }
 
+std::string GroomDocument::setBackdropDescription(int index, const std::string& text, const std::vector<LayoutBox>& boxes) {
+    if (!backdropAt(view(), index)) return "no backdrop " + std::to_string(index);
+    return editGraph("backdrop description", [&](json& g) {
+        json& b = *backdropAt(g, index);
+        if (text.empty()) b.erase("description");
+        else b["description"] = text;
+        if (!boxes.empty()) g = clearBackdropTitle(g, index, boxes);
+    });
+}
+
+std::string GroomDocument::setBackdropFontSize(int index, int points, const std::vector<LayoutBox>& boxes) {
+    if (!backdropAt(view(), index)) return "no backdrop " + std::to_string(index);
+    return editGraph("backdrop font size", [&](json& g) {
+        json& b = *backdropAt(g, index);
+        if (points <= 0) b.erase("fontSize");
+        else b["fontSize"] = std::clamp(points, 8, 96);
+        if (!boxes.empty()) g = clearBackdropTitle(g, index, boxes);  // the nodes pushed clear of a bigger title
+    });
+}
+
+std::string GroomDocument::setBackdropFolded(int index, bool folded) {
+    if (!backdropAt(view(), index)) return "no backdrop " + std::to_string(index);
+    return editGraph(folded ? "fold backdrop" : "open backdrop", [&](json& g) {
+        json& b = *backdropAt(g, index);
+        if (folded) b["collapsed"] = true;
+        else b.erase("collapsed");
+    });
+}
+
 void GroomDocument::setBackdropRect(int index, double x, double y, double w, double h) {
-    json* b = backdropAt(graph_, index);
+    json* b = backdropAt(view(), index);
     if (!b) return;
     (*b)["x"] = x;
     (*b)["y"] = y;
@@ -1424,9 +1788,9 @@ std::string GroomDocument::mergePins(const std::string& keep, const std::string&
 }
 
 std::string GroomDocument::linkFromPin(const std::string& pin, const std::string& to, const std::string& input) {
-    const std::optional<PinSource> source = pinSource(graph_, pin);
+    const std::optional<PinSource> source = pinSource(view(), pin);
     if (!source) return "no pin '" + pin + "'";
-    const std::vector<std::string> via = pinRouteTo(graph_, pin);
+    const std::vector<std::string> via = pinRouteTo(view(), pin);
     return editGraph("connect " + source->from + " to " + to, [&](json& g) {
         GraphEdit edit(g.dump());
         edit.connectByHand(source->from, to, input, source->output);
@@ -1436,7 +1800,7 @@ std::string GroomDocument::linkFromPin(const std::string& pin, const std::string
 }
 
 std::string GroomDocument::feedPin(const std::string& pin, const std::string& from, const std::string& output) {
-    const std::vector<PinLink> links = pinLinks(graph_, pin);
+    const std::vector<PinLink> links = pinLinks(view(), pin);
     if (links.empty()) return "no pin '" + pin + "'";
     return editGraph("feed pin from " + from, [&](json& g) {
         // Each link through the pin from `from` now, on through the pin and the ones after it; one
@@ -1455,7 +1819,7 @@ std::string GroomDocument::feedPin(const std::string& pin, const std::string& fr
 }
 
 void GroomDocument::movePin(const std::string& pin, double x, double y) {
-    if (groomlab::movePin(graph_, pin, x, y)) dirty_ = true;
+    if (groomlab::movePin(view(), pin, x, y)) dirty_ = true;
 }
 
 // ---- The stored texts (parts, flow, correctives) ------------------------------------------------
@@ -1628,8 +1992,8 @@ StrandsPtr GroomDocument::fullDensityStrands() { return exportFrame(time(), 1.0f
 
 std::vector<GroomDocument::NodeInfo> GroomDocument::nodes() const {
     std::vector<NodeInfo> out;
-    if (!graph_.contains("nodes")) return out;
-    for (const json& node : graph_["nodes"]) {
+    if (!viewGraph().contains("nodes")) return out;
+    for (const json& node : viewGraph()["nodes"]) {
         NodeInfo info;
         info.name = node.value("name", std::string());
         info.type = node.value("type", std::string());
@@ -1641,12 +2005,12 @@ std::vector<GroomDocument::NodeInfo> GroomDocument::nodes() const {
 }
 
 std::size_t GroomDocument::nodeCount() const {
-    return graph_.contains("nodes") && graph_["nodes"].is_array() ? graph_["nodes"].size() : 0;
+    return viewGraph().contains("nodes") && viewGraph()["nodes"].is_array() ? viewGraph()["nodes"].size() : 0;
 }
 
 json* GroomDocument::nodeJson(const std::string& node) {
-    if (!graph_.contains("nodes")) return nullptr;
-    for (json& n : graph_["nodes"]) {
+    if (!view().contains("nodes")) return nullptr;
+    for (json& n : view()["nodes"]) {
         if (n.value("name", std::string()) == node) return &n;
     }
     return nullptr;
@@ -1685,7 +2049,8 @@ const json* GroomDocument::nodeSpec(const std::string& node) const {
     if (!n) return nullptr;
     const std::string type = n->value("type", std::string());
     const bool exposes = n->contains("paramInputs") && (*n)["paramInputs"].is_array() && !(*n)["paramInputs"].empty();
-    if (type != "Compound" && type != "Script" && type != "Input" && type != "Value" && type != "Expression" && !exposes) {
+    const bool passes = n->contains("passThrough");  // (its pass-through outputs)
+    if (type != "Compound" && type != "Script" && type != "Input" && type != "Value" && type != "Expression" && !exposes && !passes) {
         return spec(type);
     }
     // A Compound's params are the ones its definition exposes (an Input's output its type, a
@@ -1883,7 +2248,10 @@ std::string GroomDocument::applyParam(const std::string& node, const std::string
     return {};
 }
 
-void GroomDocument::record(Edit edit) { history_.record(std::move(edit)); }
+void GroomDocument::record(Edit edit) {
+    if (edit.scope.empty()) edit.scope = scope_;  // (a param's node is named in the compound open now)
+    history_.record(std::move(edit));
+}
 
 void GroomDocument::recordEdit(const std::string& node, const std::string& name, const json& before, const json& after) {
     commitPreview();  // a drag previewed elsewhere ends here: its value applied for real
@@ -2012,7 +2380,7 @@ std::string GroomDocument::setBypass(const std::string& node, bool bypass) {
     edit.before = before;
     edit.after = bypass;
     edit.bypass = true;
-    history_.record(std::move(edit));
+    record(std::move(edit));  // (named in the compound open now)
     return {};
 }
 
@@ -2044,6 +2412,9 @@ std::string GroomDocument::undoText() const { return history_.undoText(); }
 std::string GroomDocument::redoText() const { return history_.redoText(); }
 
 std::string GroomDocument::apply(const GroomEdit& edit, bool after) {
+    // A param's or bypass's node is named in the compound open when it was made.
+    const std::string openScope = scope_;
+    if (!edit.whole) scope_ = edit.scope;
     std::string error;
     if (edit.stroke) {
         edit.stroke->apply(session(), after);
@@ -2053,7 +2424,7 @@ std::string GroomDocument::apply(const GroomEdit& edit, bool after) {
         // nothing more: the stroke's texts are back
     } else if (edit.whole) {
         graph_ = after ? edit.graphAfter : edit.graphBefore;
-        error = applyGraph();
+        if (!edit.layout) error = applyGraph();  // (a move: nothing to evaluate)
     } else if (json* n = nodeJson(edit.node)) {
         if (edit.bypass) {
             (*n)["bypass"] = (after ? edit.after : edit.before).get<bool>();
@@ -2068,6 +2439,7 @@ std::string GroomDocument::apply(const GroomEdit& edit, bool after) {
         }
         error = applyGraph();
     }
+    if (!edit.whole) scope_ = openScope;
     applySide(edit, after);  // its files and group colors
     if (edit.braidTubes) braidTubes_ = after ? edit.braidTubes->second : edit.braidTubes->first;
     return error;

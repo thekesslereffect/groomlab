@@ -24,6 +24,7 @@
 #include "groomlab/asset_files.h"
 #include "groomlab/card_blocks.h"
 #include "groomlab/card_files.h"
+#include "groomlab/graph_arrange.h"
 #include "groomlab/card_maps.h"
 #include "groomlab/cards.h"
 #include "groomlab/display.h"
@@ -227,12 +228,32 @@ public:
         std::string from, output, to, input;  // output "": the source's first
     };
     std::vector<ConnectionInfo> connections() const;
+    // The whole graph (what the groom evaluates and the file keeps).
     const nlohmann::json& graph() const { return graph_; }
+    // ---- Inside a compound (the node graph's double-click on a Compound, its path bar, U). The
+    // graph the node graph shows and edits: the whole one, or the graph of the compound opened
+    // (scope(): its path, "outer/inner"; "" the whole graph). nodes(), connections(), nodeJson()
+    // and the node graph's edits (editGraph, the backdrops, pins and portals) work on it; each
+    // edit there writes the compound back (withCompoundGraph: its inputs follow its Input nodes)
+    // and evaluates the whole graph, one undo step as ever. "" or why not.
+    const nlohmann::json& viewGraph() const;
+    const std::string& scope() const { return scope_; }
+    std::string enterCompound(const std::string& node);  // a Compound of the graph shown
+    void leaveCompound();                                 // one level up ("" stays "")
+    std::string setScope(const std::string& path);        // straight to a path ("" the whole graph)
     // Where the node graph draws a node (its "ui": {"x", "y"} in the graph JSON, graph_io.h, kept in the
     // file, Maya's Graph Editor's too; false when the node has none yet: the view lays it out).
     bool nodePosition(const std::string& node, float* x, float* y) const;
-    // Not an undo step (as Maya's node editor moves are not); the file is dirty after it.
+    // Moves (node positions, backdrops moved or resized, pins and portals moved) are made between
+    // beginLayout and endLayout: endLayout records them as one undo step named `label` when the
+    // graph's layout changed (nothing evaluates for it, or for its undo). setNodePosition alone
+    // (outside one) is no undo step; the file is dirty after it.
     void setNodePosition(const std::string& node, float x, float y);
+    void beginLayout();
+    bool endLayout(const std::string& label);
+    // A layout edit made in one go (Align, Tidy Selection): `edit` runs on the graph shown, one
+    // undo step when it changed anything; nothing evaluates.
+    std::string editLayout(const std::string& label, const std::function<void(nlohmann::json&)>& edit);
     std::string graphJson() const { return graph_.dump(); }
     // A node's param as stored (null when the node or param is absent: the spec's default then).
     nlohmann::json param(const std::string& node, const std::string& name) const;
@@ -330,11 +351,33 @@ public:
     // what it fed, the output passes to it, and the node waits unlinked below. One undo step; "" or
     // why not (nothing changes then). *detached: how many had a link to drop.
     std::string detachNodes(const std::vector<std::string>& nodes, int* detached = nullptr);
+    // Several nodes shaken loose together (GraphEdit::detachGroup): the links among them kept. One step.
+    std::string detachGroup(const std::vector<std::string>& nodes, int* detached = nullptr);
+    // A chain dropped on a wire as one (graph_inserts.h insertNodesOnLink). One undo step.
+    std::string insertNodesOnLink(const std::vector<std::string>& nodes, const NodeLink& link);
+    // Dots (graph_portals.h): a free dot at (x, y) (fed from from's `output` when given: an exit of
+    // that output's dot when it has one), its name to *made; a dot fed from an output (its links read
+    // it); a dot's Input Portal (`exit` -1: its entry; `into` "": none, a free dot). Each one undo step.
+    std::string addDot(double x, double y, std::string* made = nullptr, const std::string& from = {}, const std::string& output = {});
+    std::string feedDot(const std::string& portal, const std::string& from, const std::string& output);
+    std::string setDotInput(const std::string& portal, int exit, const std::string& into);
+    // A backdrop's description (shown on it) and its title's font size (0: the default). One undo step.
+    // `boxes` (every node's card as drawn): the nodes on it pushed down clear of the title
+    // (graph_arrange.h clearBackdropTitle), in the same step.
+    std::string setBackdropDescription(int index, const std::string& text, const std::vector<LayoutBox>& boxes = {});
+    std::string setBackdropFontSize(int index, int points, const std::vector<LayoutBox>& boxes = {});
     // A Compound's inner param ("node.param") shown on it as a param of its own (named after the
     // param, node + Param when the compound has that name), or no longer (Maya's Show Inner Param:
     // what Save as Node keeps). One undo step; "" or the error. shownInnerParams: the targets shown.
     std::string showInnerParam(const std::string& compound, const std::string& target, bool shown);
     std::vector<std::string> shownInnerParams(const std::string& compound) const;
+    // Promote to Compound (a param's menu inside a compound, scope()): node.param of the graph shown
+    // as a param of the compound you are in (graph_controls.h promoteParam, every host's), or no
+    // longer. One undo step; "" or why not. paramPromoted: whether it is; paramPromotable: whether
+    // it can be (false outside a compound).
+    std::string promoteParam(const std::string& node, const std::string& param, bool promoted);
+    bool paramPromoted(const std::string& node, const std::string& param) const;
+    bool paramPromotable(const std::string& node, const std::string& param) const;
     // Drive with Slider: a Control node (named <param>Control, its slider from 0 to 1 starting at
     // the param's value) beside the node, feeding the param through its input port (exposed). One
     // undo step; the Control node's name to *made. "" or the error.
@@ -404,7 +447,36 @@ public:
     // written to *made), the graph's output, and every position dropped so the view lays the
     // graph out afresh (Tidy Layout). "" or the error.
     std::string renameNode(const std::string& node, const std::string& newName);
+    // Duplicate (Ctrl+D): the copies beside the nodes, reading what the nodes read
+    // (GraphEdit::duplicateNodes), one undo step; their names to *made.
     std::string duplicateNode(const std::string& node, std::string* made);
+    std::string duplicateNodes(const std::vector<std::string>& nodes, float dx, float dy, std::vector<std::string>* made = nullptr);
+    // Shift+drag from an output: every link reading from's `output` reads to's `toOutput` instead
+    // where it fits (GraphEdit::moveOutputLinks), one undo step; how many moved to *moved.
+    std::string moveOutputLinks(const std::string& from, const std::string& output, const std::string& to, const std::string& toOutput,
+                                int* moved = nullptr);
+    // An input's pass-through output (GraphEdit::setPassThrough) on or off, one undo step.
+    std::string setPassThrough(const std::string& node, const std::string& input, bool on);
+    // Rename Output: a pass-through output's name as shown (GraphEdit::setPassThroughName; "" its
+    // own), one undo step; nothing evaluates.
+    std::string setPassThroughName(const std::string& node, const std::string& input, const std::string& label);
+    // Move Output Up / Down: a pass-through output `by` places among the node's (GraphEdit::movePassThrough).
+    // One undo step (nothing evaluates: only the order it is drawn in); "" or the error.
+    std::string movePassThrough(const std::string& node, const std::string& input, int by);
+    // The links' portals (graph_portals.h: teleported links, layout only). Teleporting a link,
+    // linking an input from a portal's exit (connected from the portal's source, as any link), an
+    // exit placed, a rename and removals are each an undo step; moves are layout (beginLayout).
+    // "" or the error.
+    std::string teleportLink(const std::string& to, const std::string& input, double exitX, double exitY, double entryX, double entryY);
+    std::string addPortalExit(const std::string& portal, double x, double y);
+    std::string linkFromPortal(const std::string& portal, int exit, const std::string& to, const std::string& input);
+    std::string removePortal(const std::string& portal);
+    std::string removePortalExit(const std::string& portal, int exit);
+    std::string renamePortal(const std::string& portal, const std::string& name);
+    void movePortal(const std::string& portal, double x, double y);
+    void movePortalExit(const std::string& portal, int exit, double x, double y);
+    // A backdrop folded to its title bar (its nodes hidden) or open again, one undo step.
+    std::string setBackdropFolded(int index, bool folded);
     std::string setOutputNode(const std::string& node);
     std::string tidyLayout();
     // Group (Ctrl+G): the nodes into one Compound node (GraphEdit::collapse, Maya's Graph
@@ -1051,6 +1123,9 @@ private:
     std::string path_;
     std::string name_;  // the groom's name in its file ("": the file's own groom)
     nlohmann::json graph_;
+    std::string scope_;                  // the compound the node graph has open ("" none)
+    std::optional<nlohmann::json> layoutBefore_;  // beginLayout's graph
+    nlohmann::json& view();               // the graph shown: graph_, or the open compound's inside it
     nlohmann::json specs_;  // by type
     mutable std::map<std::string, nlohmann::json> resolvedSpecs_;  // a Compound's or Input's, by its node JSON
     EditHistory history_;

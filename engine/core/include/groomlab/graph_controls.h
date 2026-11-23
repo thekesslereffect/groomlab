@@ -57,12 +57,27 @@ bool unexposeParam(GraphEdit& edit, const std::string& node, const std::string& 
 // `name` (every host's Show Inner Param; a param of that name shows `target` instead). No name: the
 // param's own, or node + Param when the compound has a param of that name already ("clump.length"
 // -> "clumpLength"). Returns the name. GraphError for a node that is not a Compound, or a target
-// that is no param of a node inside (a compound inside: its own exposed params).
+// that is no param of a node inside (a compound inside: its own exposed params). The name goes in
+// the definition's "exposeByNode" too: the compound's panel shows it under a header named after
+// its node (a preset's exposed params, written without it, keep their inner groups).
 std::string compoundExpose(GraphEdit& edit, const std::string& compound, const std::string& name, const std::string& target);
 // The compound stops showing `target` (under every name it had): the value the compound set for it
 // goes back inside, the inner node keeping what the compound set last. False when it was not shown.
 // GraphError for a node that is not a Compound.
 bool compoundUnexpose(GraphEdit& edit, const std::string& compound, const std::string& target);
+
+// Promote to Compound (every host's param menu, from inside a compound, so a param worked on there
+// shows on the compound without going in and out): the param node.param of a node inside the
+// compound at `path` ("outer/inner" from the whole graph, `graphJson`) shown on that compound as
+// compoundExpose names it, or no longer (compoundUnexpose: its value goes back inside). Returns the
+// whole graph with it done (as it was when nothing changes). GraphError for an empty path, a path
+// that is no compound, or a param the compound cannot show.
+std::string promoteParam(const std::string& graphJson, const std::string& path, const std::string& node, const std::string& param,
+                         bool promoted);
+// Whether the compound at `path` shows node.param (false when the path is no compound), and whether
+// it can (compoundInnerParamsJson lists it).
+bool paramPromoted(const std::string& graphJson, const std::string& path, const std::string& node, const std::string& param);
+bool paramPromotable(const std::string& graphJson, const std::string& path, const std::string& node, const std::string& param);
 
 // A Control node driving node.param (exposed first): Maya's add_control, the app's and Blender's
 // "Drive with a slider". Its control is controlName(`name`) (GraphError when the graph has a

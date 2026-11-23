@@ -53,6 +53,12 @@ struct GroomEdit {
     std::optional<std::pair<Subdivision, Subdivision>> subdivision;
     // Show Tubes' nodes before and after (a rename, a removal: the graph's edit).
     std::optional<std::pair<std::string, std::string>> braidTubes;
+    // A whole-graph step that only moved things (`whole` too): undone and redone without
+    // evaluating.
+    bool layout = false;
+    // The compound the node graph had open when it was made (a param or bypass edit names its
+    // node in there); "" the top graph.
+    std::string scope;
 
     // The step's name in Undo / Redo: "node.param" for a param's edit, else its label.
     std::string title() const;

@@ -66,6 +66,13 @@ void insertAfter(GraphEdit& edit, const std::string& anchor, const std::string& 
 // node is one of its ends, or no input of node takes src's output with node feeding dst.
 void insertOnLink(GraphEdit& edit, const std::string& src, const std::string& dst, const std::string& input, const std::string& node,
                   const std::string& output = {});
+// Several nodes (a chain dropped on a wire as one) put into a link: src feeds the group's entry
+// (the first of them, in the graph's order, none of the others feeds; on its first input that takes
+// src's output) and dst reads its exit (the one feeding none of the others; the last such, in the
+// graph's order). The links among them stay. One node: insertOnLink. GraphError, the graph
+// unchanged, as insertOnLink's.
+void insertNodesOnLink(GraphEdit& edit, const std::string& src, const std::string& dst, const std::string& input,
+                       const std::vector<std::string>& nodes, const std::string& output = {});
 
 // Add > Simulate: a Simulate node (its params from `paramsJson`, an object; "" none) between the
 // first Guides node feeding an Interpolate and every Interpolate it feeds, so the strands follow

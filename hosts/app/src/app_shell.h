@@ -94,6 +94,11 @@ public:
     QToolButton* graphPresetsButton() const { return graphPresets_; }
     QToolButton* graphEditButton() const { return graphEdit_; }
     QToolButton* graphSnapButton() const { return graphSnap_; }
+    // After Presets: the wire style (its menu, the icon showing the style) and the Align buttons
+    // (left, centers, right, spacing down; top, middles, bottom, spacing across), each named
+    // "graphAlign_<mode>".
+    QToolButton* graphWireButton() const { return graphWire_; }
+    const std::vector<QToolButton*>& graphAlignButtons() const { return graphAlign_; }
     QLabel* graphStatus() const { return graphStatus_; }
     void setGraphStatus(const QString& text);  // what the last graph edit did
 
@@ -176,6 +181,8 @@ private:
     QToolButton* graphPresets_ = nullptr;
     QToolButton* graphEdit_ = nullptr;
     QToolButton* graphSnap_ = nullptr;
+    QToolButton* graphWire_ = nullptr;
+    std::vector<QToolButton*> graphAlign_;
     QLabel* graphStatus_ = nullptr;
     QLabel* graphCount_ = nullptr;  // "17 nodes" in the bar (the docked dock shows no title)
     // The pieces.
