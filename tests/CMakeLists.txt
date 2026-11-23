@@ -41,6 +41,7 @@ add_executable(groomlab_tests
     engine/core/test_surface_paths.cpp
     engine/core/test_graph.cpp
     engine/core/test_graph_pins.cpp
+    engine/core/test_graph_arrange.cpp
     engine/core/test_grooming.cpp
     engine/core/test_hierarchy.cpp
     engine/core/test_tubes.cpp
@@ -390,9 +391,10 @@ if(TARGET groomlab_capi)
     target_compile_definitions(groomlab_capi_upgrade_tests PRIVATE "GROOMLAB_TEST_DATA=${_test_data}")
     foreach(_capi_test groomlab_capi_c_static_test groomlab_capi_upgrade_tests)
         if(WIN32)
+            # (Linked statically, they may have no DLLs at all: then nothing to copy.)
+            set(_dlls "$<TARGET_RUNTIME_DLLS:${_capi_test}>")
             add_custom_command(TARGET ${_capi_test} POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                        $<TARGET_RUNTIME_DLLS:${_capi_test}> $<TARGET_FILE_DIR:${_capi_test}>
+                COMMAND "$<$<BOOL:${_dlls}>:${CMAKE_COMMAND};-E;copy_if_different;${_dlls};$<TARGET_FILE_DIR:${_capi_test}>>"
                 COMMAND_EXPAND_LISTS)
         endif()
     endforeach()

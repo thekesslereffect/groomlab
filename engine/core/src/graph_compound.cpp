@@ -14,6 +14,7 @@
 
 #include "groomlab/graph.h"
 #include "groomlab/graph_edit.h"
+#include "graph_internal.h"
 
 namespace groomlab {
 
@@ -288,7 +289,15 @@ std::vector<std::string> GraphEdit::expand(const std::string& compound) {
         if (!src.empty()) work.connect(src, dst, str(c, "input"), output);
     }
     const std::string out = newName(innerOutput);
-    for (const json& c : consumers) work.connect(out, str(c, "to"), str(c, "input"));
+    for (const json& c : consumers) {
+        // A link reading one of the compound's pass-through outputs reads what fed that input.
+        const std::string thru = passThroughInput(str(c, "output"));
+        if (thru.empty()) {
+            work.connect(out, str(c, "to"), str(c, "input"));
+        } else if (const auto s = sources.find(thru); s != sources.end()) {
+            work.connect(s->second.first, str(c, "to"), str(c, "input"), s->second.second);
+        }
+    }
     if (wasOutput) work.setOutputNode(out);
     const auto moved = movedNodes();  // work was made from the text alone: this edit's moves so far
     *this = work;
@@ -321,10 +330,128 @@ std::string GraphEdit::FlatCompounds::result(const std::string& node) const {
     return at;
 }
 
+namespace {
+
+// The Compound at `path` and the graph holding it, its definition an object in place.
+struct CompoundAt {
+    json* node = nullptr;
+    json* level = nullptr;  // the graph it is a node of
+};
+
+CompoundAt compoundAt(json& graph, const std::string& path) {
+    if (path.empty()) throw GraphError("no compound named");
+    CompoundAt at;
+    at.level = &graph;
+    std::size_t start = 0;
+    for (;;) {
+        const std::size_t slash = path.find('/', start);
+        const std::string name = path.substr(start, slash == std::string::npos ? std::string::npos : slash - start);
+        at.node = nullptr;
+        if (at.level->is_object() && at.level->contains("nodes") && (*at.level)["nodes"].is_array()) {
+            for (json& n : (*at.level)["nodes"]) {
+                if (n.is_object() && str(n, "name") == name) at.node = &n;
+            }
+        }
+        if (!at.node) throw GraphError("no node named '" + path.substr(0, slash) + "'");
+        if (str(*at.node, "type") != "Compound") throw GraphError(name + " is not a Compound");
+        if (!at.node->contains("params") || !(*at.node)["params"].is_object()) (*at.node)["params"] = json::object();
+        json& definition = (*at.node)["params"]["definition"];
+        if (definition.is_string()) definition = json::parse(definition.get<std::string>(), nullptr, false);
+        if (!definition.is_object() || !definition.contains("graph") || !definition["graph"].is_object()) {
+            throw GraphError(name + " holds no graph to open (a library node whose copy is not in this groom)");
+        }
+        if (slash == std::string::npos) return at;
+        at.level = &definition["graph"];
+        start = slash + 1;
+    }
+}
+
+}  // namespace
+
+std::string compoundGraphJson(const std::string& graphJson, const std::string& path) {
+    json graph = json::parse(graphJson, nullptr, false);
+    if (!graph.is_object()) throw GraphError("the graph is not a JSON object");
+    const CompoundAt at = compoundAt(graph, path);
+    const json& definition = (*at.node)["params"]["definition"];
+    json inner = definition["graph"];
+    const json expose = definition.value("expose", json::object());
+    if (expose.is_object() && !expose.empty()) inner["exposed"] = expose;
+    return inner.dump();
+}
+
+std::string withCompoundGraph(const std::string& graphJson, const std::string& path, const std::string& innerJson) {
+    json graph = json::parse(graphJson, nullptr, false);
+    if (!graph.is_object()) throw GraphError("the graph is not a JSON object");
+    json inner = json::parse(innerJson, nullptr, false);
+    if (!inner.is_object()) throw GraphError("the compound's graph is not a JSON object");
+    std::set<std::string> names;
+    for (const json& n : arrayOf(inner, "nodes")) names.insert(str(n, "name"));
+    const std::string output = str(inner, "output");
+    if (output.empty() || !names.count(output)) {
+        throw GraphError("a compound needs an output node inside (right-click the node whose result it gives > Set as Output)");
+    }
+    const CompoundAt at = compoundAt(graph, path);
+    const std::string compound = str(*at.node, "name");
+    json& definition = (*at.node)["params"]["definition"];
+    // Its exposed params, those naming a node it still holds.
+    json expose = json::object();
+    const json exposed = inner.value("exposed", json::object());
+    if (exposed.is_object()) {
+        for (const auto& [name, target] : exposed.items()) {
+            if (target.is_string() && names.count(target.get<std::string>().substr(0, target.get<std::string>().find('.')))) expose[name] = target;
+        }
+    }
+    inner.erase("exposed");
+    definition["expose"] = expose;
+    // Its inputs: its Input nodes', in their order (what an input said besides, kept).
+    std::map<std::string, json> before;
+    for (const json& port : arrayOf(definition, "inputs")) {
+        if (port.is_object()) before[str(port, "name")] = port;
+    }
+    json inputs = json::array();
+    std::set<std::string> ports;
+    for (const json& n : arrayOf(inner, "nodes")) {
+        if (str(n, "type") != "Input") continue;
+        const json p = n.value("params", json::object());
+        const std::string name = p.is_object() && p.contains("name") && p["name"].is_string() ? p["name"].get<std::string>() : "strands";
+        if (!ports.insert(name).second) continue;
+        json port = before.count(name) ? before[name] : json::object();
+        port["name"] = name;
+        port["type"] = p.is_object() && p.contains("type") && p["type"].is_string() ? p["type"].get<std::string>() : std::string("Strands");
+        inputs.push_back(std::move(port));
+    }
+    definition["inputs"] = inputs;
+    definition["graph"] = std::move(inner);
+    // Links into inputs it no longer has (its exposed params' ports stay) go.
+    std::set<std::string> params;
+    for (const json& p : arrayOf(*at.node, "paramInputs")) {
+        if (p.is_string()) params.insert(p.get<std::string>());
+    }
+    if (at.level->contains("connections") && (*at.level)["connections"].is_array()) {
+        json kept = json::array();
+        for (const json& c : (*at.level)["connections"]) {
+            const std::string input = str(c, "input");
+            if (str(c, "to") == compound && !ports.count(input) && !params.count(input)) continue;
+            kept.push_back(c);
+        }
+        (*at.level)["connections"] = std::move(kept);
+    }
+    return graph.dump();
+}
+
 GraphEdit::FlatCompounds GraphEdit::flattenCompounds() {
     FlatCompounds flat;
     std::set<std::string> kept;  // compounds left as they are
     for (int guard = 0; guard < 4096; ++guard) {
+        // Links reading a pass-through output read what it hands on: a compound's are gone with it.
+        json resolved = json::parse(toJson());
+        const json linksBefore = resolved.value("connections", json::array());
+        resolvePassThrough(resolved);
+        if (resolved.value("connections", json::array()) != linksBefore) {
+            const auto moved = movedNodes();
+            *this = GraphEdit(resolved.dump());
+            for (const auto& [from, to] : moved) recordMove(from, to);
+        }
         // The next compound to flatten (the outer ones first: those inside come out with them).
         const json graph = json::parse(toJson());
         const json* next = nullptr;

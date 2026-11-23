@@ -37,6 +37,7 @@
       {"submenu": "Evaluate", "id": "evaluate", "items": [{"generator": "choices", "choices": "evaluation", "action": "node.evaluate"}]},
       "node.rename",
       "node.duplicate",
+      {"ref": "graph/alignMenu"},
       "node.brushSculpt",
       {"id": "sculpt.clearEdits", "needs": ["node.sculpt"]},
       "node.bake",
@@ -45,6 +46,7 @@
       "script.edit",
       "script.saveToLibrary",
       {"id": "node.update", "needs": ["node.script", "node.updateAvailable"]},
+      "node.openCompound",
       "compound.ungroup",
       {"submenu": "Show Inner Param", "id": "innerParams", "needs": ["node.compound"], "items": [{"generator": "innerParams", "action": "compound.showInner"}]},
       "compound.saveAsNode",
@@ -86,8 +88,18 @@
     "backdropMenu": [
       "backdrop.rename",
       {"submenu": "Color", "id": "color", "items": [{"generator": "backdropColors", "action": "backdrop.color"}]},
+      "backdrop.fold",
       "backdrop.delete"
     ],
+    "alignMenu": {
+      "label": "Align",
+      "tip": "Line up the selected nodes",
+      "items": ["align.row", "align.column", "-", "align.left", "align.centerX", "align.right", "-", "align.top", "align.centerY", "align.bottom", "-", "align.distributeX", "align.distributeY", "-", "align.tidy"]
+    },
+    "linkMenu": ["link.teleport", "link.pin", "-", "link.delete"],
+    "portalMenu": ["portal.rename", "-", "portal.removeExit", "portal.delete"],
+    "portMenu": ["port.passThrough"],
+    "outputPortMenu": ["port.renameOutput", "-", "port.outputUp", "port.outputDown"],
     "editMenu": [
       "graph.undo",
       "graph.redo",
@@ -95,7 +107,10 @@
       "graph.frame",
       "graph.frameAll",
       "graph.tidy",
+      {"ref": "graph/alignMenu"},
+      {"submenu": "Wire Style", "id": "wireStyle", "hosts": ["maya", "app"], "items": [{"generator": "choices", "choices": "wireStyles", "action": "graph.wireStyle"}]},
       "-",
+      "graph.up",
       "graph.group",
       "graph.ungroup",
       "graph.delete",
@@ -136,6 +151,7 @@
       {"include": "graph/keyMenu", "needs": ["param.keyable"]},
       "-",
       {"id": "param.expose", "needs": ["param.linkable"]},
+      {"id": "param.promote", "needs": ["param.promotable"]},
       "-",
       {"ref": "graph/paintMenu", "needs": ["param.linkable", "param.mappable", "groom"]},
       "-",

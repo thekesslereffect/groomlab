@@ -25,6 +25,7 @@
 #include "app_actions.h"
 #include "app_shell.h"
 #include "correctives_panel.h"
+#include "glass.h"
 #include "groom_document.h"
 #include "groom_tools.h"
 #include "main_window.h"
@@ -168,6 +169,76 @@ void AppActions::addGraphBindings(ui::Bindings& b, MainWindow& w) {
                            },
                            backdropOn};
     b["backdrop.delete"] = {run([m] { m->graph_->removeBackdrop(m->graph_->selectedBackdrop()); }), {}, backdropOn};
+    b["backdrop.fold"] = {[m](const json&, bool on) { m->graph_->setBackdropFolded(m->graph_->selectedBackdrop(), on); },
+                          [m](const json&) { return m->graph_->backdropFolded(m->graph_->selectedBackdrop()); },
+                          backdropOn};
+    // Into a Compound (double-click it, I); out with U, Up or the path bar.
+    b["node.openCompound"] = {run([m, selected] { m->graph_->openCompound(selected()); }), {}, nodeOn};
+    // A link's menu: the wire right-clicked.
+    auto wireOn = [m] { return m->document_ != nullptr && m->graph_->menuWire() >= 0; };
+    b["link.teleport"] = {run([m] { m->graph_->teleportWire(m->graph_->menuWire()); }), {}, wireOn};
+    b["link.pin"] = {run([m] { m->graph_->pinWire(m->graph_->menuWire(), m->graph_->sceneAt(menuPoint())); }), {}, wireOn};
+    b["link.delete"] = {run([m] { m->graph_->selectWire(m->graph_->menuWire()); m->graph_->deleteSelected(); }), {}, wireOn};
+    // A portal dot's menu.
+    auto portalOn = [m] { return m->document_ != nullptr && !m->graph_->menuPortal().empty(); };
+    b["portal.rename"] = {run([m] { m->graph_->renamePortal(m->graph_->menuPortal()); }), {}, portalOn};
+    b["portal.removeExit"] = {run([m] {
+                                  int exit = -1;
+                                  const std::string portal = m->graph_->menuPortal(&exit);
+                                  if (exit >= 0) m->graph_->removePortal(portal, exit);
+                              }),
+                              {}, portalOn};
+    b["portal.delete"] = {run([m] { m->graph_->removePortal(m->graph_->menuPortal()); }), {}, portalOn};
+    // A pass-through output's menu: Rename Output.
+    b["port.renameOutput"] = {run([m] {
+                                  std::string node, input;
+                                  if (m->graph_->menuPortOutput(&node, &input)) m->graph_->renamePassThrough(node, input);
+                              }),
+                              {},
+                              [m] { return m->document_ != nullptr && m->graph_->menuPortOutput(nullptr, nullptr); }};
+    // Move Output Up / Down: its place among the node's pass-through outputs.
+    auto outputPlace = [m](int* index, int* count) {
+        std::string node, input;
+        if (!m->document_ || !m->graph_->menuPortOutput(&node, &input)) return false;
+        try {
+            const std::vector<std::string> inputs = GraphEdit(m->document_->viewGraph().dump()).passThrough(node);
+            *index = static_cast<int>(std::find(inputs.begin(), inputs.end(), input) - inputs.begin());
+            *count = static_cast<int>(inputs.size());
+            return *index < *count;
+        } catch (const std::exception&) {
+            return false;
+        }
+    };
+    for (const auto& [id, by] : {std::pair<const char*, int>{"port.outputUp", -1}, {"port.outputDown", 1}}) {
+        b[id] = {run([m, by = by] {
+                     std::string node, input;
+                     if (!m->graph_->menuPortOutput(&node, &input)) return;
+                     const std::string error = m->document_->movePassThrough(node, input, by);
+                     if (!error.empty()) m->report(qs(error));
+                     QTimer::singleShot(0, m, [m] { m->graph_->refresh(); });
+                 }),
+                 {},
+                 [outputPlace, by = by] {
+                     int index = 0, count = 0;
+                     return outputPlace(&index, &count) && (by < 0 ? index > 0 : index + 1 < count);
+                 }};
+    }
+    // An input port's menu: Pass Through as Output.
+    b["port.passThrough"] = {[m](const json&, bool on) {
+                                 std::string node, input;
+                                 if (m->graph_->menuPort(&node, &input)) m->graph_->setPassThrough(node, input, on);
+                             },
+                             [m](const json&) {
+                                 std::string node, input;
+                                 if (!m->document_ || !m->graph_->menuPort(&node, &input)) return false;
+                                 try {
+                                     const std::vector<std::string> passes = GraphEdit(m->document_->viewGraph().dump()).passThrough(node);
+                                     return std::find(passes.begin(), passes.end(), input) != passes.end();
+                                 } catch (const std::exception&) {
+                                     return false;
+                                 }
+                             },
+                             [m] { return m->document_ != nullptr && m->graph_->menuPort(nullptr, nullptr); }};
     // Add Backdrop: around the selection, else where the canvas was right-clicked.
     b["backdrop.add"] = {run([m] { m->graph_->addBackdrop(menuPoint()); }), {}, groomOpen};
 
@@ -206,6 +277,17 @@ void AppActions::addGraphBindings(ui::Bindings& b, MainWindow& w) {
                          },
                          [m](const json&) { return m->document_ && m->document_->paramExposed(paramTarget().first, paramTarget().second); },
                          paramOn};
+    // Promote to Compound (inside one): the param shown on the compound you are in, or no longer.
+    b["param.promote"] = {[m](const json&, bool on) {
+                              if (!m->document_) return;
+                              const auto [node, param] = paramTarget();
+                              const std::string error = m->document_->promoteParam(node, param, on);
+                              if (!error.empty()) m->report(qs(error));
+                              else m->report(qs((on ? "Promoted " : "No longer promoted: ") + node + "." + param));
+                              QTimer::singleShot(0, m, [m] { m->graphEdited(); });
+                          },
+                          [m](const json&) { return m->document_ && m->document_->paramPromoted(paramTarget().first, paramTarget().second); },
+                          paramOn};
     for (const auto& [id, kind] : {std::pair<const char*, const char*>{"param.paintGuides", "guides"}, {"param.paintVertices", "vertices"},
                                    {"param.paintTexture", "texture"}}) {
         b[id] = {run([m, kind = QString::fromLatin1(kind)] {
@@ -400,7 +482,7 @@ std::set<std::string> AppActions::nodeState(MainWindow& w, const std::string& no
     }
     // View Up to Here and Bake Node to Guides: the core's rules (every host's menu).
     try {
-        const GraphEdit edit(w.document_->graph().dump());
+        const GraphEdit edit(w.document_->viewGraph().dump());
         if (edit.viewable(node)) s.insert("node.viewable");
         if (edit.bakeable(node)) s.insert("node.bakeable");
     } catch (const std::exception&) {
@@ -432,6 +514,7 @@ std::set<std::string> AppActions::paramState(MainWindow& w, const std::string& n
         const json value = w.document_->paramOrDefault(node, param);
         if (p.contains("port") && p["port"].is_object() && value.is_number()) s.insert("param.canKey");
     }
+    if (w.document_->paramPromotable(node, param)) s.insert("param.promotable");
     if (w.document_->paramKeyedHere(node, param)) s.insert("param.keyed");
     if (w.document_->paramKeyed(node, param)) s.insert("param.linked");
     return s;
@@ -524,6 +607,36 @@ void AppActions::wireGraphEditor(MainWindow& w) {
     m->shell_->graphAddButton()->setMenu(add);
     m->shell_->graphPresetsButton()->setMenu(m->presetsMenu_);
     m->shell_->graphEditButton()->setMenu(edit);
+    // The bar's wire style button (its menu, its icon the style's) and Align buttons.
+    {
+        QToolButton* wire = m->shell_->graphWireButton();
+        auto* styles = new QMenu(wire);
+        auto showStyle = [m, wire] {
+            wire->setIcon(QIcon(tintedIcon(QStringLiteral(":/groomlab/icons/ui_wire_%1.svg").arg(QString::fromStdString(m->graph_->wireStyle())),
+                                           theme::textSoft(), 18, wire->devicePixelRatioF())));
+        };
+        for (const json& c : ui::Definitions::shipped().choices("wireStyles")) {
+            const std::string value = c.value("value", std::string());
+            QAction* a = styles->addAction(QIcon(tintedIcon(QStringLiteral(":/groomlab/icons/ui_wire_%1.svg").arg(QString::fromStdString(value)), theme::text(), 18,
+                                                            wire->devicePixelRatioF())),
+                                           qs(c.value("label", value)));
+            a->setToolTip(qs(c.value("tip", std::string())));
+            QObject::connect(a, &QAction::triggered, wire, [m, value, showStyle] {
+                m->graph_->setWireStyle(value);
+                if (m->interactive_) QSettings().setValue(QStringLiteral("graph/wireStyle"), qs(value));
+                showStyle();
+            });
+        }
+        wire->setMenu(styles);
+        QObject::connect(styles, &QMenu::aboutToShow, wire, showStyle);
+        QTimer::singleShot(0, wire, showStyle);
+        for (QToolButton* b : m->shell_->graphAlignButtons()) {
+            const std::string mode = b->objectName().mid(QStringLiteral("graphAlign_").size()).toStdString();
+            QObject::connect(b, &QToolButton::clicked, b, [m, mode] { m->graph_->alignSelected(mode); });
+        }
+    }
+    // The wire style, remembered between sessions.
+    if (m->interactive_) m->graph_->setWireStyle(QSettings().value(QStringLiteral("graph/wireStyle"), QStringLiteral("smooth")).toString().toStdString());
     // Snap, remembered between sessions (a test's app starts with it off).
     QToolButton* snap = m->shell_->graphSnapButton();
     if (m->interactive_) snap->setChecked(QSettings().value(QStringLiteral("graph/snap"), false).toBool());
@@ -538,7 +651,7 @@ void AppActions::wireGraphEditor(MainWindow& w) {
         const ui::Definitions& d = ui::Definitions::shipped();
         ui::FillOptions options = fillOptions(*m);
         options.liveShortcuts = false;
-        menuPoint() = target == NodeGraphView::MenuTarget::Canvas ? at : QPointF(std::numeric_limits<qreal>::quiet_NaN(), 0.0);
+        menuPoint() = target == NodeGraphView::MenuTarget::Canvas || target == NodeGraphView::MenuTarget::Wire ? at : QPointF(std::numeric_limits<qreal>::quiet_NaN(), 0.0);
         QObject::connect(menu, &QObject::destroyed, [] { menuPoint() = QPointF(std::numeric_limits<qreal>::quiet_NaN(), 0.0); });
         switch (target) {
             case NodeGraphView::MenuTarget::Node: {
@@ -552,6 +665,36 @@ void AppActions::wireGraphEditor(MainWindow& w) {
             case NodeGraphView::MenuTarget::Backdrop:
                 ui::fillMenu(menu, d.get("graph/backdropMenu"), bindings(*m), options, d);
                 break;
+            case NodeGraphView::MenuTarget::Wire:
+                ui::fillMenu(menu, d.get("graph/linkMenu"), bindings(*m), options, d);
+                break;
+            case NodeGraphView::MenuTarget::Port:
+                ui::fillMenu(menu, d.get("graph/portMenu"), bindings(*m), options, d);
+                break;
+            case NodeGraphView::MenuTarget::OutputPort: {
+                // Move Output Up / Down: shown where the output can go that way.
+                std::string node, input;
+                if (!options.resolve.state) options.resolve.state = state(*m);
+                if (m->document_ && m->graph_->menuPortOutput(&node, &input)) {
+                    try {
+                        const std::vector<std::string> inputs = GraphEdit(m->document_->viewGraph().dump()).passThrough(node);
+                        const auto at = std::find(inputs.begin(), inputs.end(), input);
+                        if (at != inputs.end() && at != inputs.begin()) options.resolve.state->insert("port.canMoveUp");
+                        if (at != inputs.end() && at + 1 != inputs.end()) options.resolve.state->insert("port.canMoveDown");
+                    } catch (const std::exception&) {
+                    }
+                }
+                ui::fillMenu(menu, d.get("graph/outputPortMenu"), bindings(*m), options, d);
+                break;
+            }
+            case NodeGraphView::MenuTarget::Portal: {
+                int exit = -1;
+                m->graph_->menuPortal(&exit);
+                options.resolve.state = state(*m);
+                if (exit >= 0) options.resolve.state->insert("portal.exit");
+                ui::fillMenu(menu, d.get("graph/portalMenu"), bindings(*m), options, d);
+                break;
+            }
             case NodeGraphView::MenuTarget::Canvas: {
                 ui::fillMenu(menu, canvasMenu(), bindings(*m), options, d);
                 // The search first (Tab), where the menu was asked: on a wire, into it. Made again

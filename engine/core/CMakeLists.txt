@@ -60,10 +60,12 @@ add_library(groomlab_core_objects OBJECT
     src/attributes.cpp
     src/groom_file.cpp
     src/graph_io.cpp
+    src/graph_arrange.cpp
     src/graph_controls.cpp
     src/graph_edit.cpp
     src/graph_inserts.cpp
     src/graph_pins.cpp
+    src/graph_portals.cpp
     src/graph_compound.cpp
     src/guide_hierarchy.cpp
     src/guide_selection.cpp

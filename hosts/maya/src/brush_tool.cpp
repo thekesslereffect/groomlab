@@ -603,6 +603,7 @@ MStatus BrushStrokeCmd::doIt(const MArgList& args) {
         if (path_.empty()) return fail(kName, "give at least one -point");
 
         auto* shape = dynamic_cast<GroomShape*>(MFnDagNode(groom_).userNode());
+        settings_.smoothNamedMap();  // (a scripted Smooth naming a map smooths it: scriptedStroke)
         const bool maps = settings_.tool == BrushToolSettings::Tool::Brush && settings_.paintsScalp();
         if (maps && !shape) return fail(kName, "the groom node is not loaded");
         ScriptedStrokeHost host(*this, shape);

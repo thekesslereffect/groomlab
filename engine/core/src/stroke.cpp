@@ -1462,6 +1462,7 @@ std::vector<std::vector<Vec3f>> BrushTool::affectedLines(StrokeHost& host, const
 
 std::size_t scriptedStroke(StrokeHost& host, BrushToolSettings s, const std::vector<Vec3f>& path) {
     using Tool = BrushToolSettings::Tool;
+    s.smoothNamedMap();  // (Smooth naming a map smooths it)
     const MeshPtr scalp = host.scalp();
     auto requireScalp = [&] {
         if (!scalp || scalp->triangleCount() == 0) throw std::runtime_error("the groom has no scalp mesh");

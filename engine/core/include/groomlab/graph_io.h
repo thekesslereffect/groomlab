@@ -42,6 +42,15 @@ struct GraphDocument {
     std::map<std::string, Position> positions;  // by node name: the "ui" each node has
     std::string backdropsJson;                  // the "backdrops" array as JSON text ("" for none)
     std::string pinsJson;                       // the "pins" object (the links' reroute points) as JSON text ("" for none)
+    std::string portalsJson;                    // the "portals" array (graph_portals.h) as JSON text ("" for none)
+    // Pass-through outputs (GraphEdit::passThrough): each node's "passThrough" as a JSON object
+    // {node: [inputs]} ("" for none), and the links reading them as drawn (a JSON array; "" for
+    // none). The graph evaluates those links resolved (resolvePassThrough); saving writes them back
+    // as they were drawn.
+    std::string passThroughJson;
+    std::string passLinksJson;
+    // Their names as shown (GraphEdit::passThroughName): {node: {input: name}} ("" for none).
+    std::string passNamesJson;
 
     NodeId node(const std::string& name) const;  // throws GraphError if missing
     std::string nameOf(NodeId id) const;
@@ -49,7 +58,9 @@ struct GraphDocument {
     // A copy with the same names and output, the graph copied by Graph::clone (cached results
     // included): parse a graph's JSON once and copy the document for each other evaluation of it
     // a host keeps (cards, rachis, rest pose), instead of loadGraphJson again.
-    GraphDocument clone() const { return {graph.clone(), nodesByName, output, positions, backdropsJson, pinsJson}; }
+    GraphDocument clone() const {
+        return {graph.clone(), nodesByName, output, positions, backdropsJson, pinsJson, portalsJson, passThroughJson, passLinksJson, passNamesJson};
+    }
 };
 
 // Parses a graph. Empty text or "{}" yields the default graph. Throws

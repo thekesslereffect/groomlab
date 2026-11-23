@@ -265,7 +265,8 @@ std::vector<Vec3f> stretched(const std::vector<Vec3f>& moved, std::size_t first,
     // The span's segments: split the long ones, and drop a point (never the span's ends) where its
     // segment from the last kept one is short.
     for (std::size_t i = from + 1; i <= to; ++i) {
-        const Vec3f& a = out.back();
+        // (A copy: the pieces pushed below may move `out`'s points, a reference to its last would dangle.)
+        const Vec3f a = out.back();
         const Vec3f& b = moved[i];
         const float length = (b - a).length();
         if (i < to && length < 0.5f * spacing) continue;  // too close: merged into the next
@@ -1398,6 +1399,7 @@ void useShiftSmoothing(BrushSettings& settings) {
         settings.smoothTube = true;
     } else {
         settings.stretchSmoothing = settings.mode == BrushMode::Comb && settings.stretch;  // (Comb's Stretch)
+        settings.smoothMap = settings.mode == BrushMode::Attribute;  // (painting: the map it paints)
         settings.mode = BrushMode::Smooth;
     }
 }
@@ -1406,6 +1408,7 @@ void endShiftSmoothing(BrushSettings& settings, BrushMode mode) {
     settings.mode = mode;
     settings.smoothTube = false;
     settings.stretchSmoothing = false;
+    settings.smoothMap = false;
 }
 
 const char* tubeChannelName(TubeChannel channel) {

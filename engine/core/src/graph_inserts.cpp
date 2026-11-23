@@ -1020,3 +1020,61 @@ std::vector<std::string> featherGuideGroups(const GraphEdit& edit) {
 }
 
 }  // namespace groomlab
+
+namespace groomlab {
+
+void insertNodesOnLink(GraphEdit& edit, const std::string& src, const std::string& dst, const std::string& input,
+                       const std::vector<std::string>& nodes, const std::string& output) {
+    std::vector<std::string> group;
+    for (const std::string& n : edit.nodeNames()) {
+        if (std::find(nodes.begin(), nodes.end(), n) != nodes.end()) group.push_back(n);
+    }
+    if (group.empty()) throw GraphError("no nodes to insert");
+    if (group.size() == 1) {
+        insertOnLink(edit, src, dst, input, group.front(), output);
+        return;
+    }
+    const json g = graphOf(edit);
+    auto feedsMember = [&](const std::string& from) {
+        for (const json& c : g.value("connections", json::array())) {
+            if (c.value("from", std::string()) == from && std::find(group.begin(), group.end(), c.value("to", std::string())) != group.end()) {
+                return true;
+            }
+        }
+        return false;
+    };
+    auto fedByMember = [&](const std::string& to) {
+        for (const json& c : g.value("connections", json::array())) {
+            if (c.value("to", std::string()) == to && std::find(group.begin(), group.end(), c.value("from", std::string())) != group.end()) {
+                return true;
+            }
+        }
+        return false;
+    };
+    std::string entry, exit;
+    for (const std::string& n : group) {
+        if (entry.empty() && !fedByMember(n)) entry = n;
+        if (!feedsMember(n)) exit = n;
+    }
+    if (entry.empty() || exit.empty()) throw GraphError("the nodes have no one way in and out");
+    if (std::find(group.begin(), group.end(), src) != group.end() || std::find(group.begin(), group.end(), dst) != group.end()) {
+        throw GraphError("the link joins nodes of the group");
+    }
+    std::string why;
+    for (const json& p : json::parse(edit.nodeSpecJson(entry)).value("inputs", json::array())) {
+        GraphEdit trial = edit;
+        try {
+            trial.connect(src, entry, p.value("name", std::string()), output);
+            trial.connect(exit, dst, input);
+        } catch (const GraphError& e) {
+            if (why.empty()) why = e.what();
+            continue;
+        }
+        edit = std::move(trial);
+        return;
+    }
+    throw GraphError(entry + " has no input that takes " + src + "'s output with " + exit + " feeding " + dst + "." + input +
+                     (why.empty() ? "" : " (" + why + ")"));
+}
+
+}  // namespace groomlab

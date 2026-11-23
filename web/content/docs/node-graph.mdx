@@ -25,7 +25,7 @@ while you groom another ([The current groom](/docs/guides-and-brushes#the-curren
   **App:** **Tab** or the **Graph** pill opens the Graph Editor over the viewport; **Tab** over it
   searches for a node to add. Click a node to edit it in **Node Settings**; **Node List** on the
   right rail lists the nodes. **B** bypasses, **V** is **View Up to Here**, **Ctrl+D** duplicates,
-  **Ctrl+C** / **Ctrl+V** copy and paste nodes, **F2** renames, **Ctrl+L** tidies, **F** and **A**
+  **Ctrl+C** / **Ctrl+V** copy and paste nodes, **F2** renames, **L** tidies, **F** and **A**
   frame. **Ctrl+G** groups the selected nodes into a Compound
   ([GroomLab app](/docs/app#the-graph-editor)).
 
@@ -56,6 +56,8 @@ follow it.
   the grid as you move them.
 - **Cut** links by Alt+Shift+dragging across them, as in Maya's Hypershade: every link the line
   crosses goes, as one edit (Maya's Graph Editor).
+- **Undo** (Ctrl+Z) takes back every graph edit, layout included: moving nodes, backdrops, pins
+  and portals, aligning, folding a backdrop. A layout step re-evaluates nothing.
 - **Live** applies each edit as one undo step.
 - **V** displays a node's result in the viewport instead of the Output's; **B** bypasses it.
 - **Detach** (the node's right-click menu, or **Ctrl+Shift+X** with the graph focused) takes the
@@ -79,6 +81,74 @@ follow it.
 
   Keys you haven't touched take an automatic slope, which never overshoots and flattens at peaks.
   Blender's curve editor has no handles to drag; a **Vector** point there is a corner.
+
+### Arranging by hand
+
+The same in Maya's Graph Editor and the standalone app:
+
+- **Copy and paste:** Ctrl+C and Ctrl+V paste the copied nodes where the cursor is, with the links
+  between them but none to the originals' sources. **Ctrl+D** duplicates the selection beside it,
+  each copy reading the same inputs as its original.
+- **Shift+drag a node** to move it together with everything upstream of it; **Ctrl+drag** moves
+  it with everything downstream. Neither follows a link through a portal, so what's on the other side
+  of a portal stays put. The pins and dots between the nodes move with them. Shift+click without
+  dragging adds the node to the selection; Ctrl+click toggles it.
+- **Align gestures** (as in Houdini): hold **A** and drag from a node. Drag left or up to line up
+  the chain feeding it, right or down for the chain it feeds: dragging across puts them in a row
+  with the node, dragging up or down stacks them in a column. **Shift+A**+drag lines the selected
+  nodes up with the node you drag from; **Alt+A**+drag spreads the selection evenly, leaving that
+  node where it is. A dashed guide shows the line while you drag. Tap **A** without dragging to
+  frame the whole graph.
+- **Shake a node** while dragging it (left and right, quickly) to pull it out of its links at once,
+  without letting go. What fed it then feeds what it fed, as with **Detach**. Shake several selected
+  nodes and they leave the flow together, keeping the links between them.
+- **Alt+drag a node** to duplicate it (or the selection) and drag the copy. Pan with the middle
+  mouse button.
+- **Shift+drag from an output** picks up all of its links at once. Drop them on another node's
+  output and they read from that output instead, wherever the types fit.
+- **Drop a node on a link** to insert it there; a selected chain with no other links goes in as one. To add a node into a link, select the link and
+  press Tab, or press Tab with the cursor over the link.
+- **Pins:** besides double-clicking a link, **Alt+click** it, or select it and press **.** (period),
+  to put a pin there.
+- **Drop a link on the canvas** to open the search there: the node (or Dot) you pick is connected to
+  that output.
+- **Wire Style** (the button after **Presets**, or the **...** menu): **Smooth** curves, **Square**
+  runs with right angles, or **Rounded** corners. Your choice is remembered between sessions.
+- **Align** (the buttons after the wire style, as in Photoshop; a node's right-click menu; the
+  **...** menu): line the selected nodes up in a row
+  or a column, by their edges or centers, or space them evenly.
+- **Tidy Layout (L):** lays out the selected nodes by their links where they are, or the whole
+  graph when fewer than two are selected. Links run left to right and a chain stays level. Each
+  backdrop stays a group: its nodes are laid out on it, it fits round them and moves as one block,
+  and a folded backdrop keeps its nodes as they are. When only some of a backdrop's nodes are
+  selected, they're tidied in place on it. Pins and dots move with what they link.
+- **Backdrops:** Shift+O, or **Backdrop** in the Tab search, frames the selected nodes. Select one
+  to edit its title, a description shown on it, its color (a swatch, or **...** for any color) and
+  its title size (a slider). Moving a backdrop moves the pins and dots on it too, and folding it
+  hides them with its nodes; a folded backdrop is drawn over the wires and is always wide enough
+  for its whole title. A backdrop grows while you drag
+  a node slowly past its edge; drag the node out fast and it leaves the backdrop. Drag on a backdrop's body to
+  rubber-band select the nodes on it; drag its title bar to move it. The chevron in its title bar
+  (or **Fold** in its menu) folds it down to the title bar, hiding its nodes. Links into and out of
+  a folded backdrop meet its edges.
+- **Dots:** pick **Dot** in the Tab search for an empty dot, then drop a link from an output on it to
+  feed it, and drag from its right side to inputs to route links through it. Select a dot to edit
+  its **Name** and its **Input Portal**: set it to another dot and it carries that dot's signal, so
+  you can wire far away without a long link (a portal).
+- **Portals** teleport a link so it isn't drawn across the whole graph. Right-click a link >
+  **Teleport Link** puts a named dot by its output and another by its input. Drag from an exit's
+  right side to an input for another link of the same signal, or press Tab and pick **Portal:
+  name** to place another exit. Double-click a dot to rename the portal. Delete removes an exit, or
+  the whole portal when its entry is selected, and the links are drawn as wires again. A portal
+  only changes how links are drawn: the links themselves are unchanged.
+- **Rename** a node by double-clicking its header.
+- **Focus:** the node the viewport shows (**V**, or its eye) glows, so you can find it in a big
+  graph.
+- **Pass Through as Output:** right-click an input port. The node gets an extra output,
+  `thru_<input>`, that hands on whatever comes into that input, so the next node can read it too.
+  The node itself isn't evaluated for it. Right-click that output > **Rename Output...** to give it
+  a name of your own; links still read it as before. **Move Output Up** and **Move Output Down** on
+  the same menu change the order a node's pass-through outputs are listed in.
 - **Units:** lengths are shown in cm, widths in µm, densities in strands per cm² (**...** >
   **Units**). Internally all lengths are in scene units, which GroomLab keeps in centimeters in
   Maya.
@@ -484,6 +554,14 @@ The node shows a tag, and the setting is saved with the groom.
 - **Compounds:** select nodes and press **Ctrl+G** to collapse them into one node, then show
   the parameters you need (right-click > **Show Inner Param**). **Ctrl+Shift+G** (or right-click >
   **Ungroup Compound**) expands it again.
+- **Inside a compound:** double-click a compound (or select it and press **I**) to open it and
+  edit its nodes in place; each edit is one undo step. The path bar at the top shows where you
+  are: click **Graph** in it, or press **U**, to go back out (Maya's Graph Editor and the app).
+- **Promote to Compound:** inside a compound, right-click a parameter in the node's settings >
+  **Promote to Compound** to show it on the compound, so you can set it from outside without going
+  in and out (say a Color node's melanin). Click it again to stop showing it. On the compound,
+  promoted parameters (and those from **Show Inner Param**) sit under a header named after their
+  node, so a Noise's and a Length's are listed apart.
 - **Compound nodes:** right-click a compound > **Save as Node...** to keep it in your node
   library: it then shows in **Add Node** in every groom, in the app and Blender too, and shares as
   one file. See [Custom nodes](/docs/custom-nodes).
