@@ -124,6 +124,10 @@ public:
     bool removePart(const std::string& name);
     bool clearParts();
     bool clearFlow();
+    // Mirror to Other Side for the parts or (flow) the flow arrows and sinks (issue 105): side
+    // `fromSide` (1 +X, -1 -X) copied over the other, across the brushes' Mirror (World X when off);
+    // one undo step (none when nothing changes).
+    bool mirrorOverlay(const BrushSettings& brush, bool flow, int fromSide);
     // The parts and flow box shown (off in the Groom Tools: the Part and Flow tools' cards hold
     // them, as Maya's do).
     void setPartsShown(bool shown);

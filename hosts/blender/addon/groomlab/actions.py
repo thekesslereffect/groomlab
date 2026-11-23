@@ -141,6 +141,10 @@ BINDINGS = {
     "parts.fromCurves": ("groomlab.parts_from_curves", {}),
     "parts.remove": ("groomlab.part_remove", {}),
     "parts.clear": ("groomlab.parts_clear", {}),
+    "parts.mirrorNegative": ("groomlab.overlay_mirror", {"what": "PARTS", "side": "NEGATIVE"}),
+    "parts.mirrorPositive": ("groomlab.overlay_mirror", {"what": "PARTS", "side": "POSITIVE"}),
+    "flow.mirrorNegative": ("groomlab.overlay_mirror", {"what": "FLOW", "side": "NEGATIVE"}),
+    "flow.mirrorPositive": ("groomlab.overlay_mirror", {"what": "FLOW", "side": "POSITIVE"}),
 
     # Maps (the Paint tab's list).
     "map.new": ("groomlab.map_new", {}),

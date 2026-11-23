@@ -1374,6 +1374,17 @@ TEST(AppPanels, GuidesPanelMirrorsResamplesAndClearsOverlays) {
     EXPECT_EQ(doc->undoText(), "Undo clear flow stroke");  // one step
     EXPECT_EQ(doc->undo(), "");
     EXPECT_EQ(panel.flowCount().first, 2u);
+    // Mirror to Other Side (issue 105): one undo step, undone back to the arrows as they were.
+    {
+        const std::string before = doc->storedText(StrokeField::Flow);
+        BrushSettings off;  // Mirror off: World X
+        const bool fromPlus = panel.mirrorOverlay(off, true, 1);
+        const bool fromMinus = !fromPlus && panel.mirrorOverlay(off, true, -1);
+        ASSERT_TRUE(fromPlus || fromMinus) << "the arrows are on one side or the other";
+        EXPECT_EQ(doc->undoText(), "Undo mirror flow stroke");
+        EXPECT_EQ(doc->undo(), "");
+        EXPECT_EQ(doc->storedText(StrokeField::Flow), before);
+    }
     EXPECT_TRUE(panel.clearFlow());
     const MeshPtr scalp = doc->file().data.scalp;
     EXPECT_EQ(doc->editStoredText("add part", StrokeField::Parts, [&](std::string& text) {

@@ -1621,6 +1621,36 @@ class GROOMLAB_OT_flow_clear(GroomToolOperator):
         return {"FINISHED"}
 
 
+class GROOMLAB_OT_overlay_mirror(GroomToolOperator):
+    """Copy one side's parts or flow arrows and sinks over the other, across the brushes' Mirror (X when off)"""
+    bl_idname = "groomlab.overlay_mirror"
+    bl_label = "Mirror to Other Side"
+    bl_options = {"REGISTER", "UNDO"}
+
+    what: EnumProperty(name="What", items=[("PARTS", "Parts", "The parts"), ("FLOW", "Flow", "The flow arrows and sinks")],
+                       options={"SKIP_SAVE"})
+    side: EnumProperty(name="From", items=[("NEGATIVE", "-X to +X", "The -X side over the +X side"),
+                                           ("POSITIVE", "+X to -X", "The +X side over the -X side")],
+                       options={"SKIP_SAVE"})
+
+    @classmethod
+    def description(cls, context, props):
+        aid = "%s.mirror%s" % ("flow" if props.what == "FLOW" else "parts", "Negative" if props.side == "NEGATIVE" else "Positive")
+        return defs.tip(aid)
+
+    def execute(self, context):
+        t = context.scene.groomlab_tools
+        symmetry = t.symmetry_mode if t.symmetry else "x"
+        mirror = tools.flow_mirror if self.what == "FLOW" else tools.parts_mirror
+        try:
+            r = mirror(active(context), self.side.lower(), symmetry)
+        except HelperError as e:
+            return _fail(self, e)
+        tools.status(context.scene, "%s mirrored: %d mirrored, %d replaced" % (
+            "Flow" if self.what == "FLOW" else "Parts", r.get("copied", 0), r.get("removed", 0)))
+        return {"FINISHED"}
+
+
 class GROOMLAB_OT_clone_pick_source(GroomToolOperator):
     """The Clone tool's next click copies the guides rooted in the brush circle (Ctrl+click does the same any time)"""
     bl_idname = "groomlab.clone_pick_source"
@@ -2459,7 +2489,7 @@ classes = (GROOMLAB_OT_tool_modal, GROOMLAB_OT_tool, GROOMLAB_OT_tool_exit, GROO
            GROOMLAB_OT_map_set_channels, GROOMLAB_OT_map_reload, GROOMLAB_OT_map_show_file,
            GROOMLAB_OT_alpha_add, GROOMLAB_OT_alpha_folder, GROOMLAB_OT_alpha_clear,
            GROOMLAB_OT_group_color, GROOMLAB_OT_group_promote_demote, GROOMLAB_OT_guides_mirror_group,
-           GROOMLAB_OT_guides_reparent, GROOMLAB_OT_guides_regroup, GROOMLAB_OT_part_remove, GROOMLAB_OT_parts_clear, GROOMLAB_OT_guides_from_curves, GROOMLAB_OT_parts_from_curves, GROOMLAB_OT_guides_to_curves,
+           GROOMLAB_OT_guides_reparent, GROOMLAB_OT_guides_regroup, GROOMLAB_OT_part_remove, GROOMLAB_OT_parts_clear, GROOMLAB_OT_overlay_mirror, GROOMLAB_OT_guides_from_curves, GROOMLAB_OT_parts_from_curves, GROOMLAB_OT_guides_to_curves,
            GROOMLAB_OT_curves_to_guides, GROOMLAB_OT_strands_to_curves, GROOMLAB_OT_flow_clear, GROOMLAB_OT_clone_pick_source, GROOMLAB_OT_clone_reset,
            GROOMLAB_OT_length_edit, GROOMLAB_OT_root_tube, GROOMLAB_OT_tube_level,
            GROOMLAB_OT_tube_apply, GROOMLAB_OT_tube_smooth, GROOMLAB_OT_tube_shape_custom, GROOMLAB_OT_tube_shape_new,

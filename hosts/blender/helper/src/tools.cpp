@@ -1624,6 +1624,51 @@ json flowClear(ToolState& t) {
     return {{"cleared", any}, {"undo", undoJson(t)}};
 }
 
+// Mirror to Other Side for parts or flow (issue 105; Maya's groomLabParts -mirror [-flow]): `from`
+// ("positive" or "negative") copied over the other side, across `symmetry` (x, y, z at `center`, or
+// topology) as the brushes take it, on the cage the parts and flow are stored on.
+json overlayMirror(ToolState& t, const json& args, bool flow) {
+    Session& s = t.session;
+    const MeshPtr cage = s.groom->cageScalp();
+    if (!cage || cage->triangleCount() == 0) fail("state", "the session has no scalp: set_scalp first");
+    const std::string from = optString(args, "from", "positive");
+    if (from != "positive" && from != "negative") fail("bad_request", "from is positive or negative");
+    const std::string symmetry = optString(args, "symmetry", "x");
+    BrushSettings b;
+    if (symmetry == "topology") {
+        b.mirrorTopology = true;
+    } else {
+        try {
+            symmetryToGroom(s.space, symmetry, optNumber(args, "center", 0.0), b.mirrorAxis, b.mirrorCenter);
+        } catch (const std::invalid_argument&) {
+            b.mirrorAxis = -1;
+        }
+        if (b.mirrorAxis < 0) fail("bad_request", "symmetry is x, y, z or topology");
+    }
+    const StrokeSymmetry sym = StrokeSymmetry::of(b, cage.get());
+    const int side = from == "positive" ? 1 : -1;
+    OverlayMirrorResult done;
+    StrokeEdit edit;
+    if (flow) {
+        FlowSet set;
+        try {
+            set = FlowSet::fromJson(s.groom->data().flowJson);
+        } catch (const std::exception& e) {
+            fail("state", std::string("the groom's flow does not read: ") + e.what());
+        }
+        done = mirrorFlowToOtherSide(set, *cage, sym, side);
+        edit.mode = "mirror flow";
+        edit.set(StrokeField::Flow, set.empty() ? std::string() : set.toJson());
+    } else {
+        PartSet set = storedParts(s);
+        done = mirrorPartsToOtherSide(set, *cage, sym, side);
+        edit.mode = "mirror parts";
+        edit.set(StrokeField::Parts, set.empty() ? std::string() : set.toJson());
+    }
+    if (done.copied + done.removed > 0) commitEdit(t, std::move(edit));
+    return {{"copied", done.copied}, {"removed", done.removed}, {"undo", undoJson(t)}};
+}
+
 // ---- Maps ---------------------------------------------------------------------------------------
 
 json mapsList(ToolState& t, json* densityMap = nullptr) {
@@ -2902,7 +2947,7 @@ bool isToolCommand(const std::string& cmd) {
         // Groom Tools' Tubes section, Segments slider, parts and flow, map management.
         "tube_targets", "tube_get", "tube_set", "tube_scale", "tube_smooth", "tube_shapes", "tube_shape_add", "tube_shape_set",
         "tube_shape_rename", "tube_shape_remove", "tube_shape_preview", "guides_preview", "guides_preview_end", "guide_segments",
-        "parts_list", "part_add", "part_remove", "parts_clear", "flow_clear", "map_rename", "map_convert", "map_set_channels",
+        "parts_list", "part_add", "part_remove", "parts_clear", "parts_mirror", "flow_clear", "flow_mirror", "map_rename", "map_convert", "map_set_channels",
         "map_fill", "map_import", "map_relink", "map_reload", "map_users", "maps_move_to", "files_collect",
         // The Length Keys tool's keys (the Keys box).
         "length_state", "length_edit",
@@ -3024,6 +3069,8 @@ bool runEditCommand(ToolState& t, const std::string& cmd, const json& args, Bloc
         {"part_remove", [](ToolState& t, const json& a, BlockReader&) { return partRemove(t, a); }},
         {"parts_clear", [](ToolState& t, const json&, BlockReader&) { return partsClear(t); }},
         {"flow_clear", [](ToolState& t, const json&, BlockReader&) { return flowClear(t); }},
+        {"parts_mirror", [](ToolState& t, const json& a, BlockReader&) { return overlayMirror(t, a, false); }},
+        {"flow_mirror", [](ToolState& t, const json& a, BlockReader&) { return overlayMirror(t, a, true); }},
         {"map_rename", [](ToolState& t, const json& a, BlockReader&) { return mapRename(t, a); }},
         {"map_convert", [](ToolState& t, const json& a, BlockReader&) { return mapConvert(t, a); }},
         {"map_set_channels", [](ToolState& t, const json& a, BlockReader&) { return mapSetChannels(t, a); }},

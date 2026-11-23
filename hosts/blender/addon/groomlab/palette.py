@@ -710,6 +710,11 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
             for item in items:
                 if item["id"] != "parts.fromCurves":
                     menu.draw_action(row, item, context)
+            # Mirror to Other Side (issue 105).
+            row = col.row(align=True)
+            for item in menu.resolve(defs.get("lists/parts/mirror"), context, conditions=False):
+                if item["kind"] == "action":
+                    menu.draw_action(row, item, context)
         if "flow" in uses:
             col, head = block(card, label("flow", "Flow"))
             sub = head.row(align=True)
@@ -719,6 +724,11 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
             sub.operator("groomlab.flow_clear", text="Clear All", emboss=False)
             col.prop(t, "flow_sink_item")
             col.label(text=flow_count_text(t.flow_arrows, t.flow_sinks))
+            # Mirror to Other Side (issue 105).
+            row = col.row(align=True)
+            for item in menu.resolve(defs.get("lists/flow/mirror"), context, conditions=False):
+                if item["kind"] == "action":
+                    menu.draw_action(row, item, context)
         if "lengthKeys" in uses:
             self.draw_lengths(card, context, t)
         if "tubeChannel" in uses:  # Shape: what it paints

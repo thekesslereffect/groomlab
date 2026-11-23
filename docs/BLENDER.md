@@ -345,6 +345,7 @@ the symmetry in the **host's axes**; strengths, values and pixels are as in Maya
 | `part_add` | `points` (host space, a list or a shared memory array of (n, 3)), `name` ("part") | `{"name", "undo"}`: a part through them bound to the cage, resampled to 64 points, named name, name1... (Maya's `groomLabParts -fromCurves`) |
 | `part_remove` | `name` | `{"removed", "undo"}` |
 | `parts_clear` / `flow_clear` | | `{"cleared", "undo"}` (nothing to clear: no undo step) |
+| `parts_mirror` / `flow_mirror` | `from` (`positive`, `negative`), `symmetry` (`x`, `y`, `z`, `topology`), `center` | `{"copied", "removed", "undo"}`: Mirror to Other Side (issue 105), that side's parts or flow arrows and sinks over the other (nothing changed: no undo step) |
 | `maps_list` | | `{"maps": [{name, kind (vertices, texture, guides), channels, texture?, file?, missing? (its file is not there), freezeMask?}], "folder", "densityMap" (the Tube tool's density map: the one map, else an older numbered one, "" none: subdivisionDensityMapIn)}` |
 | `density_map` | | `{"map" (as maps_list's densityMap), "name" (what Subdivide makes it as), "start" (its value then)}` |
 | `map_create` | `name`, `kind` (vertices, texture, guides), `color`, `value`, `fill` [r,g,b(,a)], `resolution` (1024), `faces` (scalp polygon indices: the value or fill on them only, 0 elsewhere; a guide layer on the guides rooted there) | `{"name", "kind", "file"?, "undo"}` (a texture map's PNG written in the maps folder) |

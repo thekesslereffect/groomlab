@@ -576,7 +576,7 @@ def main():
                 ("select", ["Selection", "Applies to"]),
                 ("lengths", ["Keys", "Applies to"]),
                 ("erase", ["Brush", "Erases", "Applies to"]),
-                ("flow", ["Brush", "Flow"]),
+                ("flow", ["Brush", "Flow", "Applies to"]),  # Mirror (issue 105)
                 ("part", ["Parts", "Applies to"]),
                 ("freeze", ["Brush", "Applies to"]),
             ]
@@ -922,7 +922,7 @@ def main():
             tools.work.setVisible(True)
             tools.show_tool_settings()  # no tool: no Mirror (nothing mirrors)
             _expect(tools.symmetry_row.isHidden() and tools.applies_block.isHidden(), "no Mirror with no tool")
-            for tool, shown in (("comb", True), ("flow", False), ("place", True), ("select", True)):
+            for tool, shown in (("comb", True), ("flow", True), ("place", True), ("select", True)):
                 tools.tool = tool
                 tools.show_tool_settings()
                 _expect(tools.symmetry_row.isHidden() != shown, "%s: Mirror %s" % (tool, "shown" if shown else "hidden"))

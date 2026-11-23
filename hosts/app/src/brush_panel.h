@@ -181,6 +181,7 @@ private:
     QLineEdit* partName_ = nullptr;
     QListWidget* partList_ = nullptr;
     QWidget* partButtons_ = nullptr;
+    QWidget* flowButtons_ = nullptr;  // the Flow block's Mirror buttons (lists/flow/mirror)
     // The Length Keys tool's block (lengthKeys); `lengthsEdit` runs an edit through the session
     // and tells the host (Apply: the guides changed, else the preview did).
     void lengthsEdit(const char* what, const std::function<void(LengthKeyTool&, StrokeHost&, const BrushToolSettings&)>& fn,
