@@ -13,6 +13,33 @@ version. While GroomLab is in early access, a node's params can still change bet
 param renamed, or two merged into one); the entries below say when one does and what to set. Once
 it leaves early access, saved grooms will keep their look across updates.
 
+## 0.51.0 (November 23, 2026)
+
+- **The Graph Editor by hand** (thanks to tsimonato-collab, #107), in Maya, Blender and the app:
+  - **Align** (node menu, **Edit > Align**): rows, columns, edges, centers and even spacing.
+    **Tidy Layout** (L) lays out the selected nodes by their links, or the whole graph; each
+    backdrop stays a group.
+  - **Moving nodes:** Shift+drag carries everything upstream, Ctrl+drag everything downstream.
+    Alt+drag duplicates, and shaking a node takes it out of its links. Nodes dropped on a wire go
+    into it, a chain as one. Shift+drag from an output moves all its links to another output.
+  - **Align gestures:** hold A and drag from a node to line up its chain (Shift+A the selection,
+    Alt+A spreads it evenly); tap A to frame the whole graph.
+  - **Portals:** a link's menu > **Teleport Link** draws it through two named dots instead of a long
+    wire. The Tab search adds a **Dot**, a **Backdrop** or another exit of a portal.
+  - **Pass Through as Output** (an input's menu) hands an input on as an extra output, which you can
+    rename and reorder.
+  - **Backdrops** fold to their title bar, take a description and a title size, and grow round a node
+    dragged slowly past their edge.
+  - **Wire Style:** smooth, square or rounded links (Blender: the add-on's preferences).
+  - **Inside a compound:** double-click a Compound (or I) to edit its nodes; U or the path bar comes
+    back out. A param's menu there has **Promote to Compound**, which shows it on the compound.
+- **Smoother grooming at high strand counts.** Brushing a groom of a million strands or more is about
+  twice as fast in Maya. Children no longer shift on the scalp when you comb their guide. A slider
+  dragged on a big groom shows it thinned while you drag, then whole again. Children of guides
+  combed before this update can sit a little differently the first time you open the groom.
+- **Fixes:** Comb's **Stretch** no longer fails at random (it was seen on macOS). The Smooth brush
+  smooths the guides again after you paint a map: before, it smoothed the map instead.
+
 ## 0.50.0 (November 23, 2026)
 
 - **Buns.** **Add > Bun...** places a bun at each guide of the `buns` group (Maya: each selected
