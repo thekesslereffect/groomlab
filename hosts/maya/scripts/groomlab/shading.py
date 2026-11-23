@@ -81,6 +81,64 @@ def _shading_group(groom):
     return groups[0] if groups else None
 
 
+# On a renderer's stand-in for a groom (RenderMan's procedural and XPU groom, Redshift's proxy
+# mesh): the shading group it took from the groom, so it goes back to GroomLab's own material when
+# the groom's changes, while a material the user assigned to the stand-in itself stays.
+FROM_GROOM_ATTR = "groomLabMaterialFromGroom"
+
+
+def material_from_groom(node):
+    """The shading group `node` took from its groom (set_material_from_groom), or ""."""
+    if not cmds.attributeQuery(FROM_GROOM_ATTR, node=node, exists=True):
+        return ""
+    return cmds.getAttr(node + "." + FROM_GROOM_ATTR) or ""
+
+
+def set_material_from_groom(node, shading_group):
+    if not cmds.attributeQuery(FROM_GROOM_ATTR, node=node, exists=True):
+        cmds.addAttr(node, longName=FROM_GROOM_ATTR, dataType="string")
+    cmds.setAttr(node + "." + FROM_GROOM_ATTR, shading_group or "", type="string")
+
+
+def sync_materials(grooms=None):
+    """Each groom's material (the shading group it is assigned to, in the Hypershade or any other
+    way) to the renderers that render it through a stand-in: RenderMan's procedural and XPU groom
+    (renderman.sync_material) and Redshift's proxy (redshift_hook.sync_material). Arnold and V-Ray
+    read the groom's shading group themselves. The plugin queues it (queue_material_sync) when a
+    groom's shading group changes. Never raises."""
+    from groomlab import redshift_hook, renderman
+    from groomlab.base import no_undo
+    try:
+        with no_undo():
+            for groom in grooms or cmds.ls(type="groomLabShape", long=True, noIntermediate=True) or []:
+                if not cmds.objExists(groom):
+                    continue
+                renderman.sync_material(groom)
+                redshift_hook.sync_material(groom)
+    except Exception as e:  # noqa: BLE001 (run on idle: warn and go on)
+        cmds.warning("GroomLab: materials: %s" % e)
+
+
+_material_sync_queued = [False]
+
+
+def queue_material_sync():
+    """sync_materials once the command that changed a groom's shading group is done (the Hypershade's
+    assign breaks the old connection and makes the new one), once however many changes come before.
+    The plugin calls it from the groom's connectionMade and connectionBroken, in interactive
+    sessions."""
+    if _material_sync_queued[0]:
+        return
+
+    def run():
+        _material_sync_queued[0] = False
+        sync_materials()
+
+    _material_sync_queued[0] = True
+    import maya.utils
+    maya.utils.executeDeferred(run)
+
+
 def _look_signature(look):
     """What create_hair_shader builds from a look (hair_look_json): the network's kind (pigment or
     RGB, a mix by strand, iridescence, wet, the user data it reads) and the constants it sets."""

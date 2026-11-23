@@ -86,7 +86,7 @@ from groomlab.drivers import (add_drivers, attach_guides, attached_guides, bind_
                               create_drivers, detach_guides, driver_curves, remove_drivers)
 from groomlab.shading import (  # noqa: F401
     assign_shading_group, color_nodes, create_hair_shader, hair_color_node, hair_color_params, hair_look,
-    iridescent_tint, render_data_node, render_data_params, sync_hair_shader)
+    iridescent_tint, queue_material_sync, render_data_node, render_data_params, sync_hair_shader, sync_materials)
 from groomlab.groom import (  # noqa: F401
     ACTIVE_VAR, GPU_PREVIEW_VAR, PIN_VAR, active_groom, add_sample, adopt_scene_groom, adopted_groom,
     clear_rest_mesh, create_groom, errors, gpu_preview,

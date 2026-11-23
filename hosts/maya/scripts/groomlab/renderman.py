@@ -483,10 +483,7 @@ def add_xpu_groom(groom):
     if existing:
         update_xpu_groom(groom)
         # A RenderMan material assigned to the groom since (in the Hypershade) is the XPU hair's too.
-        own = groom_shading_group(groom)
-        if own and own not in (cmds.listConnections(existing[0] + ".instObjGroups", source=False, destination=True,
-                                                    type="shadingEngine") or []):
-            cmds.sets(existing[0], edit=True, forceElement=own)
+        _xpu_material(existing[0], groom)
         return existing[0]
     if not xgen_available():
         return None
@@ -523,6 +520,9 @@ def add_xpu_groom(groom):
     for attr in ("translate", "rotate", "scale"):  # the cache is in world space
         cmds.setAttr("%s.%s" % (transform, attr), lock=True)
     cmds.sets(description, edit=True, forceElement=xpu_shading_group(groom, look))
+    if groom_shading_group(groom):
+        from groomlab.shading import set_material_from_groom
+        set_material_from_groom(description, groom_shading_group(groom))
     xpu_visibility()
     return description
 
@@ -725,20 +725,31 @@ def _is_renderman_shader(node):
 
 def groom_shading_group(groom):
     """The groom's own shading group when its surface shader is a RenderMan material (assigned in
-    the Hypershade), else None: RfM cannot render another renderer's (an aiStandardHair)."""
+    the Hypershade), else None: RfM cannot render another renderer's (an aiStandardHair). RfM's own
+    Hypershade puts its material on the shading group's rman__surface, and a lambert stand-in on
+    surfaceShader (issue 100); one connected by hand is on surfaceShader."""
     for sg in cmds.listConnections(groom + ".instObjGroups", source=False, destination=True, type="shadingEngine") or []:
         if sg == "initialShadingGroup":
             continue
-        shaders = cmds.listConnections(sg + ".surfaceShader", source=True, destination=False) or []
-        if shaders and _is_renderman_shader(shaders[0]):
-            return sg
+        for attr in (RFM_SURFACE_ATTR, "surfaceShader"):
+            if not cmds.attributeQuery(attr, node=sg, exists=True):
+                continue
+            shaders = cmds.listConnections(sg + "." + attr, source=True, destination=False) or []
+            if shaders and _is_renderman_shader(shaders[0]):
+                return sg
     return None
+
+
+# The shading group's input RfM renders (its Hypershade connects the Pxr material there).
+RFM_SURFACE_ATTR = "rman__surface"
 
 
 def repair_procedural(node, groom, shader=True):
     """Make `node` render `groom` as it should, whenever it was made: indirect visibility on, and its
-    material the groom's own RenderMan shading group (groom_shading_group), else the one it has,
-    else the GroomLab hair network (create_hair_network) made for it."""
+    material the groom's own RenderMan shading group (groom_shading_group), else the one it has
+    (unless it was the groom's and the groom has another now: shading.material_from_groom), else
+    the GroomLab hair network (create_hair_network) made for it. sync_material runs this as the
+    groom's material changes."""
     # RfM's indirect visibility inherits these, and a new shape's are off in Maya 2025 and later (on
     # in 2024): without them the strands light no strand, and the hair renders dark.
     for attr in ("visibleInReflections", "visibleInRefractions"):
@@ -746,10 +757,13 @@ def repair_procedural(node, groom, shader=True):
             cmds.setAttr(node + "." + attr, True)
     if not shader:
         return
-    sg = groom_shading_group(groom)
-    if not sg and cmds.attributeQuery(SHADING_GROUP_ATTR, node=node, exists=True):
-        current = cmds.listConnections(node + "." + SHADING_GROUP_ATTR, source=True, destination=False) or []
-        sg = current[0] if current else None
+    own = groom_shading_group(groom)
+    current = None
+    if cmds.attributeQuery(SHADING_GROUP_ATTR, node=node, exists=True):
+        current = (cmds.listConnections(node + "." + SHADING_GROUP_ATTR, source=True, destination=False) or [None])[0]
+    from groomlab.shading import material_from_groom, set_material_from_groom
+    from_groom = material_from_groom(node)
+    sg = own or (current if current and current != from_groom else None)
     base = cmds.listRelatives(node, parent=True)[0].split("|")[-1].split(":")[-1]
     if not sg and cmds.objExists(base + "_SG") and cmds.nodeType(base + "_SG") == "shadingEngine":
         sg = base + "_SG"  # made by an earlier GroomLab, never bound (it used cmds.sets)
@@ -761,7 +775,42 @@ def repair_procedural(node, groom, shader=True):
             cmds.warning("GroomLab: the RenderMan hair shader was not made (%s): see docs/DEVELOPING.md, "
                          "'RenderMan for Maya', for the network" % e)
             return
-    assign_shading_group(node, sg)
+    if sg != current:
+        assign_shading_group(node, sg)
+    if (own or "") != from_groom:
+        set_material_from_groom(node, own)
+
+
+def _xpu_material(description, groom):
+    """The XPU groom renders the groom's own RenderMan material, else GroomLab's <groom>_xpu_SG (a
+    material the user gave the XPU groom itself stays, as on the procedural)."""
+    current = (cmds.listConnections(description + ".instObjGroups", source=False, destination=True,
+                                    type="shadingEngine") or [None])[0]
+    from groomlab.shading import material_from_groom, set_material_from_groom
+    own = groom_shading_group(groom)
+    from_groom = material_from_groom(description)
+    sg = own
+    if not sg:
+        if current and current != from_groom and current != "initialShadingGroup":
+            sg = current
+        else:
+            ours = _base_name(groom) + "_xpu_SG"
+            sg = ours if cmds.objExists(ours) and cmds.nodeType(ours) == "shadingEngine" else None
+    if sg and sg != current:
+        cmds.sets(description, edit=True, forceElement=sg)
+    if (own or "") != from_groom:
+        set_material_from_groom(description, own)
+
+
+def sync_material(groom):
+    """The groom's material (the Hypershade's, on the groom) to what RenderMan renders it with: its
+    procedurals (repair_procedural) and XPU grooms (_xpu_material). Nothing without RfM."""
+    if cmds is None or not rfm_loaded():
+        return
+    for node in procedurals_of(groom):
+        repair_procedural(node, groom)
+    for description in xpu_grooms_of(groom):
+        _xpu_material(description, groom)
 
 
 def sync_renderman():

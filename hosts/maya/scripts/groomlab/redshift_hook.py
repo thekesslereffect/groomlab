@@ -366,15 +366,44 @@ def ensure_proxy(groom, path):
         cmds.setAttr(proxy + ".proxyFileType", ALEMBIC)
     if cmds.getAttr(proxy + ".fileName") != path:
         cmds.setAttr(proxy + ".fileName", path, type="string")
-    if not _own_material(mesh):
-        cmds.sets(mesh, edit=True, forceElement=build_shader(groom))
+    _proxy_material(mesh, groom)
     return proxy, mesh
 
 
-def _own_material(mesh):
-    """Whether the placeholder has a material other than the default one GroomLab replaces."""
-    groups = cmds.listConnections(mesh, type="shadingEngine") or []
-    return any(g != "initialShadingGroup" for g in groups)
+def groom_shading_group(groom):
+    """The groom's own shading group when its surface shader is a Redshift material (assigned in the
+    Hypershade), else None: Redshift renders only its own."""
+    for sg in cmds.listConnections(groom + ".instObjGroups", source=False, destination=True, type="shadingEngine") or []:
+        shaders = cmds.listConnections(sg + ".surfaceShader", source=True, destination=False) or []
+        if shaders and (cmds.nodeType(shaders[0]).startswith("Redshift") or
+                        "redshift" in " ".join(cmds.getClassification(cmds.nodeType(shaders[0])) or []).lower()):
+            return sg
+    return None
+
+
+def _proxy_material(mesh, groom):
+    """The proxy's placeholder renders the groom's own Redshift material, else one the user gave the
+    placeholder itself, else GroomLab's Principled Hair (build_shader). One taken from the groom
+    (shading.material_from_groom) goes back to GroomLab's when the groom's changes."""
+    from groomlab.shading import material_from_groom, set_material_from_groom
+    groups = [g for g in cmds.listConnections(mesh, type="shadingEngine") or [] if g != "initialShadingGroup"]
+    current = groups[0] if groups else None
+    own = groom_shading_group(groom)
+    from_groom = material_from_groom(mesh)
+    sg = own or (current if current and current != from_groom else None) or build_shader(groom)
+    if sg != current:
+        cmds.sets(mesh, edit=True, forceElement=sg)
+    if (own or "") != from_groom:
+        set_material_from_groom(mesh, own)
+
+
+def sync_material(groom):
+    """The groom's material to its proxy (_proxy_material), when it has one. Nothing without Redshift."""
+    if not redshift_loaded():
+        return
+    _, mesh = find_proxy(groom)
+    if mesh is not None:
+        _proxy_material(mesh, groom)
 
 
 def build_shader(groom):

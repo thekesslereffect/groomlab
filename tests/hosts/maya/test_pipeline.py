@@ -1258,6 +1258,75 @@ class RenderManForMayaTest(unittest.TestCase):
         self.rman.assign_shading_group(node, other)  # reassigned: the new one replaces it
         self.assertEqual(cmds.listConnections(plug, plugs=True), [other + ".message"])
 
+    def test_stand_ins_follow_the_groom_material(self):
+        # Issue 100: a material assigned to the groom (the Hypershade's Assign) reaches what renders it
+        # through a stand-in: the procedural takes the groom's RenderMan material, goes back to
+        # GroomLab's network when the groom's is another renderer's, and keeps one the user gave the
+        # procedural itself; Redshift's proxy mesh likewise with Redshift materials. RfM and Redshift
+        # stand in: a mesh for the procedural and the proxy, lambert materials named as theirs.
+        from groomlab import redshift_hook
+        rman = self.rman
+        node = cmds.createNode("mesh", name="hair_rmanShape", parent=cmds.createNode("transform", name="hair_rman"))
+        node = cmds.ls(node, long=True)[0]
+        proxy = cmds.createNode("mesh", name="hair_rsProxyShape", parent=cmds.createNode("transform", name="hair_rsProxy"))
+        proxy = cmds.ls(proxy, long=True)[0]
+
+        def material(name):
+            shader = cmds.shadingNode("lambert", asShader=True, name=name)
+            sg = cmds.sets(renderable=True, noSurfaceShader=True, empty=True, name=name + "SG")
+            cmds.connectAttr(shader + ".outColor", sg + ".surfaceShader")
+            return sg
+
+        ours, ours_rs = material("hair_rman_"), material("hair_rsHair")  # GroomLab's networks
+        pxr, rs, arnold, users = material("pxrHair"), material("rsHair"), material("aiHair"), material("pxrUsers")
+        patched = {(rman, "rfm_loaded"): lambda: True,
+                   (rman, "procedurals_of"): lambda groom: [node],
+                   (rman, "_is_renderman_shader"): lambda n: n.startswith("pxr"),
+                   (redshift_hook, "redshift_loaded"): lambda: True,
+                   (redshift_hook, "find_proxy"): lambda groom: ("proxyNode", proxy),
+                   (redshift_hook, "build_shader"): lambda groom: ours_rs,
+                   (redshift_hook, "groom_shading_group"):
+                       lambda groom: next((sg for sg in cmds.listConnections(groom + ".instObjGroups", type="shadingEngine")
+                                           or [] if sg.startswith("rs")), None)}
+        saved = {key: getattr(*key) for key in patched}
+        for (module, name), value in patched.items():
+            setattr(module, name, value)
+        try:
+            def rendered():
+                return ((cmds.listConnections(node + "." + rman.SHADING_GROUP_ATTR) or [None])[0],
+                        [sg for sg in cmds.listConnections(proxy, type="shadingEngine") or [] if sg != "initialShadingGroup"])
+
+            rman.repair_procedural(node, self.groom)
+            groomlab.sync_materials()
+            self.assertEqual(rendered(), ("hair_rman_SG", [ours_rs]), "no material of theirs: GroomLab's")
+            for sg, expected in ((pxr, (pxr, [ours_rs])), (rs, ("hair_rman_SG", [rs])),
+                                 (arnold, ("hair_rman_SG", [ours_rs])), (pxr, (pxr, [ours_rs]))):
+                cmds.sets(self.groom, edit=True, forceElement=sg)  # as the Hypershade assigns
+                groomlab.sync_materials()  # (queued by the plugin on idle in an interactive session)
+                self.assertEqual(rendered(), expected, sg)
+            # RfM's Hypershade: its material on the shading group's rman__surface, a lambert stand-in
+            # on surfaceShader.
+            rfm = material("viewportStandIn")
+            cmds.addAttr(rfm, longName=rman.RFM_SURFACE_ATTR, attributeType="float3", usedAsColor=True)
+            for c in "RGB":
+                cmds.addAttr(rfm, longName=rman.RFM_SURFACE_ATTR + c, attributeType="float",
+                             parent=rman.RFM_SURFACE_ATTR)
+            cmds.connectAttr(cmds.shadingNode("lambert", asShader=True, name="pxrSurface") + ".outColor",
+                             rfm + "." + rman.RFM_SURFACE_ATTR)
+            cmds.sets(self.groom, edit=True, forceElement=rfm)
+            groomlab.sync_materials()
+            self.assertEqual(rendered()[0], rfm, "RfM's own shading group")
+            cmds.sets(self.groom, edit=True, forceElement=pxr)
+            groomlab.sync_materials()
+            rman.assign_shading_group(node, users)  # given to the procedural itself
+            cmds.sets(proxy, edit=True, forceElement=ours_rs)
+            cmds.sets(self.groom, edit=True, forceElement=arnold)
+            groomlab.sync_materials()
+            self.assertEqual(rendered(), (users, [ours_rs]), "the user's own stays")
+        finally:
+            for (module, name), value in saved.items():
+                setattr(module, name, value)
+
     def test_without_renderman_for_maya(self):
         # Maya 2022 has no RfM: nothing is made, nothing breaks, no dialog.
         self.assertFalse(self.rman.rfm_loaded())

@@ -2259,6 +2259,18 @@ void GroomShape::watchScalpMesh(const MObject& mesh) {
     if (!status) scalpAttrCallback_ = 0;
 }
 
+namespace {
+// The groom's shading group changed (the Hypershade's Assign, sets -forceElement, a connection):
+// the renderers that render it through a stand-in (RenderMan's procedural and XPU groom, Redshift's
+// proxy) take its material once Maya is idle (groomlab.queue_material_sync). A scene being read
+// brings its stand-ins as they were saved; batch sessions never idle.
+void queueMaterialSync() {
+    if (MGlobal::mayaState() != MGlobal::kInteractive || MFileIO::isReadingFile()) return;
+    MGlobal::executePythonCommand(
+        "try:\n    import groomlab\n    groomlab.queue_material_sync()\nexcept Exception:\n    pass");
+}
+}  // namespace
+
 MStatus GroomShape::connectionMade(const MPlug& plug, const MPlug& otherPlug, bool asSrc) {
     if (plug == aInMesh || plug == aRestMesh) live_.meshReconnected = true;  // maybe another mesh: converted in full
     if (plug == aInMesh && !asSrc) watchScalpMesh(otherPlug.node());
@@ -2267,6 +2279,7 @@ MStatus GroomShape::connectionMade(const MPlug& plug, const MPlug& otherPlug, bo
         ++displayVersion_;
         MHWRender::MRenderer::setGeometryDrawDirty(thisMObject());
     }
+    if (plug == instObjGroups && asSrc) queueMaterialSync();
     markDirty(plug);
     return MPxSurfaceShape::connectionMade(plug, otherPlug, asSrc);
 }
@@ -2278,6 +2291,7 @@ MStatus GroomShape::connectionBroken(const MPlug& plug, const MPlug& otherPlug, 
         ++displayVersion_;
         MHWRender::MRenderer::setGeometryDrawDirty(thisMObject());
     }
+    if (plug == instObjGroups && asSrc) queueMaterialSync();
     markDirty(plug);
     return MPxSurfaceShape::connectionBroken(plug, otherPlug, asSrc);
 }

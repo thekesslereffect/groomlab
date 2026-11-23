@@ -1115,6 +1115,25 @@ it shading groups refuse it ("the set has restrictions on membership"), so the H
 Material (`sets -forceElement`) failed on grooms and `shading.assign_shading_group` connected
 `instObjGroups` by hand.
 
+**One material, every renderer** (issue 100). The material assigned to the groom (its shading group,
+by the Hypershade or any other way) is what each renderer renders it with. Arnold's and V-Ray's
+translators read the groom's shading group at each export (Arnold's IPR follows a new assignment:
+verified in Maya 2026 with `build/probe/i100/run_assign.ps1`; V-Ray's IPR not checked yet). The renderers that render a stand-in take it
+over: `GroomShape::connectionMade`/`connectionBroken` on `instObjGroups` queue
+`shading.sync_materials` for Maya's next idle (interactive sessions; a scene read brings its
+stand-ins as saved), which gives RenderMan's procedural (`renderman.repair_procedural`: its Shading
+Group attribute) and XPU groom the groom's RenderMan material, and Redshift's proxy mesh the
+groom's Redshift material (`redshift_hook._proxy_material`). A material of another renderer on the
+groom sends the stand-in back to GroomLab's own network, while one the user assigned to the
+stand-in itself stays: each stand-in records the shading group it took from the groom
+(`groomLabMaterialFromGroom`, `shading.material_from_groom`). The viewport's lit color reads these
+materials too (`litColor`: PxrSurface's diffuse, PxrMarschnerHair's TT and TRT, LamaHairChiang's
+TT under its tint, a PxrHairColor feeding them by its melanin or artistic color, Redshift's
+Principled Hair and V-Ray's VRayHairNextMtl by albedo or melanin under their tint; where another
+network drives the color, the groom's own colors). RfM's Hypershade connects its material to the
+shading group's `rman__surface` and a lambert stand-in to `surfaceShader`: both GroomLab's
+RenderMan check (`renderman.groom_shading_group`) and the viewport read `rman__surface` first.
+
 **V-Ray for Maya hook** (`vray_hook.py`, before the translator): `enable_hook` appends a line to
 `vraySettings.postTranslatePython`; `post_translate` exported each groom to a `.vrscene` and made a
 `VRayScene` plugin through `vray.utils`. Rendered in Maya 2024 to 2027 (V-Ray 7). Kept for scenes

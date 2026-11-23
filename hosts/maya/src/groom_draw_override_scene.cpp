@@ -460,8 +460,12 @@ std::array<float, 3> GroomSubSceneOverride::litColor(MObject* engineOut, MObject
         MFnDependencyNode engine(sets[i].node());
         if (engine.typeName() != "shadingEngine") continue;
         if (engineOut) *engineOut = sets[i].node();
+        // RenderMan for Maya's Hypershade puts its material on rman__surface and a lambert stand-in
+        // on surfaceShader: its material is the one the groom renders with.
         MPlugArray shaders;
-        engine.findPlug("surfaceShader", false).connectedTo(shaders, true, false);
+        const MPlug rfmSurface = engine.findPlug("rman__surface", false);
+        if (!rfmSurface.isNull()) rfmSurface.connectedTo(shaders, true, false);
+        if (shaders.length() == 0) engine.findPlug("surfaceShader", false).connectedTo(shaders, true, false);
         if (shaders.length() == 0) continue;
         MFnDependencyNode material(shaders[0].node());
         if (materialOut) *materialOut = shaders[0].node();
@@ -522,7 +526,79 @@ std::array<float, 3> GroomSubSceneOverride::litColor(MObject* engineOut, MObject
             };
             return melaninColor(value("melanin"), value("melaninRedness"), base);
         }
-        if (rgb("baseColor", base) || rgb("color", base) || rgb("outColor", base)) return base;
+        // Other renderers' hair materials (issue 100): their color as they set it, or, where a
+        // network drives it (user data, primvars, a hair color node), the groom's own colors, as
+        // GroomLab's own networks read them.
+        auto driven = [&](const char* name) {
+            const MPlug plug = material.findPlug(name, false);
+            return !plug.isNull() && plug.isDestination();
+        };
+        auto groomLook = [&]() {
+            if (groomColors) *groomColors = true;
+            return strandsLookColor(strands.get(), shape_->evaluationVersion(), color, means_);
+        };
+        auto number = [&](const char* name, float fallback) {
+            const MPlug plug = material.findPlug(name, false);
+            return plug.isNull() ? fallback : plug.asFloat();
+        };
+        const MString type = material.typeName();
+        if (type == "RedshiftPrincipledHair" || type == "VRayHairNextMtl") {
+            // Albedo (Redshift) or diffuse (V-Ray) by its mix, else melanin and pheomelanin under a tint.
+            const bool redshift = type == "RedshiftPrincipledHair";
+            const char* albedo = redshift ? "albedo" : "diffuse_color";
+            if (number(redshift ? "albedoMix" : "diffuse_amount", 0.0f) >= 0.5f) {
+                if (driven(albedo)) return groomLook();
+                if (rgb(albedo, base)) return base;
+            }
+            if (driven("melanin") || driven("pheomelanin")) return groomLook();
+            rgb(redshift ? "tint" : "dye_color", base);
+            return melaninColor(number("melanin", 0.3f), number("pheomelanin", 0.0f), base);
+        }
+        // A RenderMan color input: its value, or what the PxrHairColor feeding it makes (its artistic
+        // color, else its melanin and redness under its dye). False when another network drives it
+        // (GroomLab's own reads the strands' primvars) or the input is not there.
+        auto rfmColor = [&](const char* name, std::array<float, 3>& out) {
+            const MPlug plug = material.findPlug(name, false);
+            if (plug.isNull() || plug.numChildren() != 3) return false;
+            if (!plug.isDestination()) {
+                out = {plug.child(0).asFloat(), plug.child(1).asFloat(), plug.child(2).asFloat()};
+                return true;
+            }
+            const MFnDependencyNode hair(plug.source().node());
+            if (hair.typeName() != "PxrHairColor") return false;
+            auto input = [&](const char* attr, std::array<float, 3>* rgbOut, float* valueOut) {
+                const MPlug p = hair.findPlug(attr, false);
+                if (p.isNull() || p.isDestination()) return false;
+                if (rgbOut) *rgbOut = {p.child(0).asFloat(), p.child(1).asFloat(), p.child(2).asFloat()};
+                if (valueOut) *valueOut = p.asFloat();
+                return true;
+            };
+            float mode = 0.0f, melanin = 0.0f, redness = 0.0f;
+            std::array<float, 3> dye{1.0f, 1.0f, 1.0f};
+            if (!input("mode", nullptr, &mode) || !input("dye", &dye, nullptr)) return false;
+            if (mode >= 0.5f) return input("Color", &out, nullptr);  // Artistic
+            if (!input("melanin", nullptr, &melanin) || !input("redness", nullptr, &redness)) return false;
+            out = melaninColor(melanin, redness, dye);
+            return true;
+        };
+        if (type == "LamaHairChiang") {
+            // Its color is the transmission's (TT) under its tint.
+            std::array<float, 3> tt{}, tint{1.0f, 1.0f, 1.0f};
+            if (!rfmColor("colorTT", tt) || !rfmColor("colorTintTT", tint)) return groomLook();
+            return {tt[0] * tint[0], tt[1] * tint[1], tt[2] * tint[2]};
+        }
+        if (type == "PxrMarschnerHair") {
+            // Its color is in the transmission and second reflection (TT, TRT), the diffuse lobe off
+            // unless its gain is set.
+            if (number("diffuseGain", 0.0f) > 0.0f) {
+                return rfmColor("diffuseColor", base) ? base : groomLook();
+            }
+            std::array<float, 3> tt{}, trt{};
+            if (!rfmColor("specularColorTT", tt) || !rfmColor("specularColorTRT", trt)) return groomLook();
+            return {0.5f * (tt[0] + trt[0]), 0.5f * (tt[1] + trt[1]), 0.5f * (tt[2] + trt[2])};
+        }
+        if (rgb("baseColor", base) || rgb("color", base) || rgb("diffuseColor", base)) return base;
+        if (rgb("outColor", base)) return base;
     }
     // No material: a HairColor node's RGB, else melanin channels, as the render would show it (the
     // strands' mean: each strand takes its own where they vary, DisplaySettings::strandLookColors).
