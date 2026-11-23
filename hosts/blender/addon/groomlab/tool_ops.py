@@ -50,6 +50,7 @@ SHORTCUTS = (
     ("Ctrl+Shift+X", "Detach nodes (the flow passes through)"),
     ("V", "View up to node"),
     ("A", "Frame all (tap A; held, A+drag aligns)"),
+    ("I / U", "Into the selected Compound / back out (double-click it too)"),
     ("Ctrl+drag a node", "Move it with everything downstream (not through portals)"),
     ("Shift+drag a node", "Move it with everything upstream (not through portals)"),
     ("A+drag a node", "Line up its chain: left or up upstream, right or down downstream"),

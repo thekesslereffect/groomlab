@@ -91,10 +91,44 @@ json commitGraph(Session& s, const std::string& label, const std::string& before
     return commitGraphText(s, label, before, edit.toJson(), edit.movedNodes(), std::move(r), copied);
 }
 
+std::string viewGraphText(Session& s) {
+    const std::string whole = graphOrDefault(s.groom->data().graphJson);
+    if (s.scope.empty()) return whole;
+    try {
+        return compoundGraphJson(whole, s.scope);
+    } catch (const std::exception& e) {
+        fail("no_scope", "the graph has no compound '" + s.scope + "' to be inside: " + e.what());
+    }
+}
+
+std::string wholeWithView(Session& s, const std::string& text) {
+    if (s.scope.empty()) return text;
+    return withCompoundGraph(graphOrDefault(s.groom->data().graphJson), s.scope, text);
+}
+
+void setViewGraph(Session& s, const std::string& text) { s.groom->setGraphJson(wholeWithView(s, text)); }
+
 json commitGraphText(Session& s, const std::string& label, const std::string& before, const std::string& text,
                      const std::vector<std::pair<std::string, std::string>>& movedNodes, json r,
                      const std::map<std::string, std::string>& copied) {
     if (!r.is_object()) r = json::object();
+    if (!s.scope.empty() && text != before) {
+        // Inside a compound: its graph written back into the whole graph, one step of that (the
+        // renames and copies inside name no node of the whole graph: nothing follows them).
+        const std::string whole = graphOrDefault(s.groom->data().graphJson);
+        const std::string after = withCompoundGraph(whole, s.scope, text);
+        const std::string scope = s.scope;
+        s.scope.clear();
+        json out;
+        try {
+            out = commitGraphText(s, label, whole, after, {}, r, {});
+        } catch (...) {
+            s.scope = scope;
+            throw;
+        }
+        s.scope = scope;
+        return out;
+    }
     json moved = json::array();
     for (const auto& [from, to] : movedNodes) moved.push_back({from, to});
     r["moved"] = moved;
@@ -708,7 +742,7 @@ bool runGraphAuthoring(Session& s, const std::string& op, const json& args, json
     static const std::set<std::string> kOps = {"group",          "ungroup",           "expose_param", "unexpose_param", "compound_expose",
                                                "compound_unexpose", "insert_on_link", "add_control",  "link_control",   "unlink_control", "detach"};
     if (!kOps.count(op)) return false;
-    GraphEdit edit(graphTextOf(*s.groom));
+    GraphEdit edit(viewGraphText(s));
     const std::string before = edit.toJson();
     json r = json::object();
     std::string label = op;

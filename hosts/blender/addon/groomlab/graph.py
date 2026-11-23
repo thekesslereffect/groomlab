@@ -512,8 +512,10 @@ def _authored(scalp, r):
 
 
 def _author(scalp, **args):
+    """The Graph Editor's authoring (Group, expose...): inside the compound it is in, if any."""
+    from . import graph_tree
     rt = _ensure(scalp)
-    return _authored(scalp, _edit(rt, **args))
+    return _authored(scalp, graph_tree._call("edit_graph", session=rt.session, **args))
 
 
 def group(scalp, names, name=None):

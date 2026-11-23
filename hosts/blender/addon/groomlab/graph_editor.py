@@ -1234,6 +1234,8 @@ def param_state(node, spec, scalp):
             state.add("param.mappable")
     if spec.get("kind") == "ramp":
         state.add("param.ramp")  # (Blender's curve widget has no presets of its own: the menu's)
+    if scalp is not None and graph_tree.scope_of(scalp):
+        state.add("param.promotable")  # (inside a compound: Promote to Compound; the core refuses what it cannot show)
     return state, values
 
 
@@ -1769,7 +1771,8 @@ KEYS = (("groomlab.graph_add_search", "TAB", {}), ("groomlab.graph_frame", "F", 
         ("groomlab.graph_duplicate", "D", {"ctrl": True}), ("groomlab.graph_group", "G", {"ctrl": True}),
         ("groomlab.graph_ungroup", "G", {"ctrl": True, "shift": True}),
         ("groomlab.graph_detach", "X", {"ctrl": True, "shift": True}), ("groomlab.graph_tidy", "L", {}),
-        ("groomlab.graph_backdrop_add", "O", {"shift": True}))
+        ("groomlab.graph_backdrop_add", "O", {"shift": True}), ("groomlab.graph_enter_compound", "I", {}),
+        ("groomlab.graph_up", "U", {}))
 
 
 def register():

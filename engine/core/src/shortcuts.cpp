@@ -58,7 +58,7 @@ const std::vector<Shortcut>& shortcuts() {
         {"graph.rename", "Graph", "F2 / double-click", "Rename node", kApp},
         {"graph.delete", "Graph", "Delete", "Delete nodes or link", kMaya | kApp},
         {"graph.cut", "Graph", "Alt+Shift+drag", "Cut links", kMaya},
-        {"graph.enter", "Graph", "I / U", "Into the selected Compound / back out (double-click it too)", kMaya | kApp},
+        {"graph.enter", "Graph", "I / U", "Into the selected Compound / back out (double-click it too)", kAll},
         {"graph.downstream", "Graph", "Ctrl+drag a node", "Move it with everything downstream (not through portals)", kAll},
         {"graph.upstream", "Graph", "Shift+drag a node", "Move it with everything upstream (not through portals)", kAll},
         {"graph.alignChain", "Graph", "A+drag a node", "Line up its chain: left or up upstream, right or down downstream", kAll},

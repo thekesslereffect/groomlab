@@ -914,12 +914,33 @@ def _top_bar_rects(region, s):
     return bar, button
 
 
+def path_crumbs(p, tree, bar, s):
+    """The path bar: the groom's graph, then each compound the editor is inside, as (text, path,
+    rect) left to right; a click on one goes to that graph (U goes up one)."""
+    scalp = getattr(tree, "gl_scalp", None)
+    title = scalp.name if scalp is not None else tree.name
+    here = graph_tree.scope_of(scalp) if scalp is not None else ""
+    parts = [(title, "")]
+    if here:
+        names = here.split("/")
+        parts += [(n, "/".join(names[:i + 1])) for i, n in enumerate(names)]
+    out, x = [], 12 * s
+    for i, (text, path) in enumerate(parts):
+        w = p.text_size(text, 13) + 10 * s
+        out.append((text, path, (x, bar[1] + 6 * s, w, bar[3] - 12 * s)))
+        x += w + (p.text_size(" > ", 13) if i + 1 < len(parts) else 0)
+    return out
+
+
 def _draw_top_bar(p, context, region, tree, s):
     ui = uikit._theme()
     bar, button = _top_bar_rects(region, s)
-    scalp = getattr(tree, "gl_scalp", None)
-    title = scalp.name if scalp is not None else tree.name
-    p.text(title, (12 * s, bar[1], 300 * s, bar[3]), ui.text, size=ui.font_size + 2, bold=True)
+    crumbs = path_crumbs(p, tree, bar, s)
+    for i, (text, path, r) in enumerate(crumbs):
+        last = i + 1 == len(crumbs)
+        p.text(text, r, ui.text if last else ui.textDim, size=ui.font_size + (2 if i == 0 else 1), bold=last)
+        if not last:
+            p.text(">", (r[0] + r[2], r[1], p.text_size(" > ", 13), r[3]), ui.textMuted, size=ui.font_size, align="center")
     hover = _hover[0] == "classic"
     p.rect(button, ui.hover if hover else ui.raised, ui.radius * s, ui.outline, 1.0 * s)
     p.text("Blender Nodes", button, ui.textDim if not hover else ui.text, align="center")
@@ -1144,6 +1165,12 @@ class GROOMLAB_OT_graph_canvas_press(bpy.types.Operator):
             _redraw()
             return {"FINISHED"}
         if uikit.contains(bar, x, y):
+            tree = tree_here(context)
+            painter = uikit.Painter(uikit._theme(), s)
+            for _text, path, r in path_crumbs(painter, tree, bar, s)[:-1]:
+                if uikit.contains(r, x, y):  # a graph holding the one shown: back out to it
+                    bpy.ops.groomlab.graph_up("EXEC_DEFAULT", path=path, to_path=True)
+                    break
             return {"FINISHED"}
         tree = tree_here(context)
         g = Graph(context, region, tree)
@@ -2093,8 +2120,11 @@ def double_click(context, g, x, y):
     if box is not None:
         node = box.node
         _select_only(tree, [node])
-        if node.gl_type == "Compound":
-            bpy.ops.groomlab.graph_ungroup("INVOKE_DEFAULT", node=node.name)
+        if node.gl_type == "Compound":  # into it, to edit its nodes (U or the path bar: back out)
+            try:
+                graph_tree.enter_compound(tree.gl_scalp, node.gl_name)
+            except HelperError as e:
+                print("GroomLab:", e)
             return "open"
         if node.gl_type == "Script":
             bpy.ops.groomlab.graph_script_edit("INVOKE_DEFAULT", node=node.name)

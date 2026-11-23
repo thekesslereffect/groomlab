@@ -2588,6 +2588,53 @@ class AuthoringTest(HelperTestCase):
         self.call("undo")
         self.assertIn(("width", "resample", "strands"), self.links())
 
+    def test_inside_a_compound(self):
+        """The Graph Editor inside a compound (every request saying "scope", as Maya's ScopedModel):
+        the compound's graph read and edited, written back into the whole graph, one undo step each;
+        Promote to Compound shows an inner param on it."""
+        self.call("edit_graph", op="group", names=["noise", "color"], name="look")
+        strands, _ = self.evaluate_hash(self.s, 0.05)
+        inner = self.call("get_graph", scope="look")
+        self.assertEqual(inner["scope"], "look")
+        names = {n["name"] for n in inner["graph"]["nodes"]}
+        self.assertTrue({"noise", "color"} <= names)
+        self.assertIn("Input", {n["type"] for n in inner["graph"]["nodes"]})
+        self.assertNotIn("scope", self.call("get_graph"))  # (none asked: the whole graph)
+        self.assertIsNone(self.node("noise"))
+        # A param of an inner node: read and set there.
+        amp = self.call("get_param", scope="look", node="noise", param="amplitude")["value"]
+        self.call("set_param", scope="look", node="noise", param="amplitude", value=float(amp) * 2.0 + 0.1)
+        self.assertAlmostEqual(self.call("get_param", scope="look", node="noise", param="amplitude")["value"],
+                               float(amp) * 2.0 + 0.1, 5)
+        self.assertNotEqual(self.evaluate_hash(self.s, 0.05)[0], strands)  # the whole groom follows
+        # An edit inside: one undo step of the whole graph; the node renamed inside the compound.
+        r = self.call("edit_graph", scope="look", op="rename_node", name="noise", newName="frizz")
+        self.assertIn("frizz", {n["name"] for n in self.call("get_graph", scope="look")["graph"]["nodes"]})
+        self.call("edit_graph", scope="look", op="set_positions", positions={"frizz": [12.0, 34.0]})
+        node = next(n for n in self.call("get_graph", scope="look")["graph"]["nodes"] if n["name"] == "frizz")
+        self.assertEqual((node["ui"]["x"], node["ui"]["y"]), (12.0, 34.0))
+        del r
+        # Promote to Compound: the inner param on the compound, and off again.
+        self.assertEqual(self.call("param_promotion", scope="look", node="frizz", param="amplitude"),
+                         {"promoted": False, "promotable": True})
+        self.call("edit_graph", scope="look", op="promote_param", node="frizz", param="amplitude", on=True)
+        self.assertTrue(self.call("param_promotion", scope="look", node="frizz", param="amplitude")["promoted"])
+        self.assertIn("frizz.amplitude", self.call("get_graph", scope="look")["graph"].get("exposed", {}).values())
+        self.assertIn("amplitude", [p["name"] for p in self.call("node_spec", node="look")["spec"]["params"]])
+        self.call("edit_graph", scope="look", op="promote_param", node="frizz", param="amplitude", on=False)
+        self.assertFalse(self.call("param_promotion", scope="look", node="frizz", param="amplitude")["promoted"])
+        with self.assertRaises(HelperError):  # (outside a compound: nothing to promote to)
+            self.call("edit_graph", op="promote_param", node="look", param="x", on=True)
+        # A path that is no compound: said so, nothing changed.
+        self.assertFalse(self.call("compound_path", path="nope")["ok"])
+        self.assertTrue(self.call("compound_path", path="look")["ok"])
+        with self.assertRaises(HelperError) as caught:
+            self.call("get_graph", scope="nope")
+        self.assertEqual(caught.exception.code, "no_scope")
+        # The edits undo as the whole graph's: the unpromote undone, the param shown again.
+        self.call("undo")
+        self.assertTrue(self.call("param_promotion", scope="look", node="frizz", param="amplitude")["promoted"])
+
     def test_arranged_by_hand(self):
         """The Graph Editor arranged by hand as Maya's and the app's (arrange.cpp: graph_arrange.h,
         graph_portals.h, GraphEdit's pass-through outputs): each edit one undo step."""

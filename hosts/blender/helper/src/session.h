@@ -65,6 +65,10 @@ struct Session {
     explicit Session(int id);  // tools.cpp (with the tools' state)
 
     int id;
+    // The compound the Graph Editor is inside ("outer/inner"; "" the whole graph), as the request
+    // gives it ("scope": Helper::session sets it each request): the graph commands read and edit
+    // that compound's graph (authoring.h viewGraphText), written back into the whole graph.
+    std::string scope;
     HostSpace space;
     GroomFile file;  // what the groom carries besides the session's data (file.data unused)
     std::unique_ptr<GroomSession> groom = std::make_unique<GroomSession>();

@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "groomlab/graph_arrange.h"
+#include "groomlab/graph_controls.h"
 #include "groomlab/graph_edit.h"
 #include "groomlab/graph_inserts.h"
 #include "groomlab/graph_io.h"
@@ -27,7 +28,7 @@ namespace groomlab::helper {
 
 namespace {
 
-std::string graphTextOf(const Session& s) { return graphOrDefault(s.groom->data().graphJson); }
+std::string graphTextOf(Session& s) { return viewGraphText(s); }  // (inside a compound: its graph)
 
 std::vector<std::string> stringsOf(const json& args, const char* key) {
     const json& v = need(args, key);
@@ -127,8 +128,28 @@ bool runGraphArrange(Session& s, const std::string& op, const json& args, json& 
         "tidy",          "align",        "place",           "teleport_link",  "add_portal_exit",   "add_portal_link",
         "move_portal",   "remove_portal", "rename_portal",  "add_dot",        "feed_dot",          "set_dot_input",
         "detach_group",  "duplicate_nodes", "insert_nodes_on_link", "move_output_links", "set_pass_through",
-        "set_pass_through_name", "move_pass_through", "clear_backdrop_title"};
+        "set_pass_through_name", "move_pass_through", "clear_backdrop_title", "promote_param"};
     if (!kOps.count(op)) return false;
+    if (op == "promote_param") {
+        // Promote to Compound (a param's menu inside a compound): node.param of a node in the
+        // compound open shown on that compound, or no longer (graph_controls.h promoteParam). An
+        // edit of the whole graph; the compound stays open.
+        if (s.scope.empty()) fail("bad_request", "Promote to Compound works inside a compound");
+        const std::string scope = s.scope;
+        s.scope.clear();
+        const std::string whole = graphOrDefault(s.groom->data().graphJson);
+        try {
+            const std::string after = promoteParam(whole, scope, needString(args, "node"), needString(args, "param"),
+                                                   optBool(args, "on", true));
+            result = commitGraphText(s, optBool(args, "on", true) ? "promote param" : "unpromote param", whole,
+                                     GraphEdit(after).toJson(), {}, json::object());
+        } catch (...) {
+            s.scope = scope;
+            throw;
+        }
+        s.scope = scope;
+        return true;
+    }
     const std::string before = graphTextOf(s);
     json g = json::parse(before);
     if (!g.contains("nodes") || !g["nodes"].is_array()) g["nodes"] = json::array();
@@ -328,11 +349,31 @@ bool runGraphArrange(Session& s, const std::string& op, const json& args, json& 
 }
 
 bool isArrangeCommand(const std::string& cmd) {
-    static const std::set<std::string> kCommands = {"graph_carry", "align_gesture", "wire_route", "shake_test", "backdrop_layout"};
+    static const std::set<std::string> kCommands = {"graph_carry", "align_gesture", "wire_route", "shake_test", "backdrop_layout",
+                                                    "param_promotion", "compound_path"};
     return kCommands.count(cmd) > 0;
 }
 
 json runArrangeCommand(const std::string& cmd, const json& args, const std::function<Session&()>& session) {
+    if (cmd == "param_promotion") {
+        // A param's menu inside a compound: whether Promote to Compound shows it checked, and at all.
+        Session& s = session();
+        const std::string whole = graphOrDefault(s.groom->data().graphJson);
+        if (s.scope.empty()) return {{"promoted", false}, {"promotable", false}};
+        const std::string node = needString(args, "node"), param = needString(args, "param");
+        return {{"promoted", paramPromoted(whole, s.scope, node, param)}, {"promotable", paramPromotable(whole, s.scope, node, param)}};
+    }
+    if (cmd == "compound_path") {
+        // Going into a compound (double-click, I): whether `path` ("outer/inner") is a compound one
+        // can go into (the core's compoundGraphJson), and why not.
+        Session& s = session();
+        try {
+            compoundGraphJson(graphOrDefault(s.groom->data().graphJson), needString(args, "path"));
+            return {{"ok", true}};
+        } catch (const std::exception& e) {
+            return {{"ok", false}, {"why", e.what()}};
+        }
+    }
     if (cmd == "graph_carry") {
         // What a drag of `names` carries: "up" (Shift: what feeds them), "down" (Ctrl: what they
         // feed) or "" (just them), and the pins and dots that go with those nodes.

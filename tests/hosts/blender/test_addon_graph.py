@@ -1227,11 +1227,63 @@ class GraphEditorTest(unittest.TestCase):
         compound = next(n for n in tree.nodes if getattr(n, "gl_type", "") == "Compound")
         g = graph()
         box = g.by_name[compound.name]
+        cname = compound.gl_name
         x, y, w, h = box.rect
         self.assertEqual(canvas.double_click(bpy.context, g, x + w / 2, y + 4), "open")
+        # (into it: its nodes in the tree; test_8h goes on from there)
+        self.assertEqual(gt.scope_of(self.head), cname)
+        self.assertTrue({"frizzNoise", "width"} <= {n.gl_name for n in gt.tree_of(self.head).nodes if gt.ours(n)})
+        gt.leave_compound(self.head)
+        importlib.import_module(bu.MODULE + ".graph").ungroup(self.head, cname)
         nodes = helper_graph(self.head)["nodes"]
         self.assertNotIn("Compound", {n["type"] for n in nodes})
         self.assertTrue({"frizzNoise", "width"} <= {n["name"] for n in nodes})
+
+    def test_8h_inside_a_compound(self):
+        """Going into a Compound (double-click, I) shows its graph in the tree, edited there and
+        written back into the whole graph; U (or the path bar) comes back out; Promote to Compound
+        shows an inner param on it. The 3D view's node list keeps the whole graph."""
+        import types
+        canvas = importlib.import_module(bu.MODULE + ".graph_canvas")
+        tree = gt.rebuild(self.head)
+        names = [n.gl_name for n in tree.nodes if gt.ours(n) and n.gl_type not in ("Scalp",)][1:3]
+        self.assertEqual(bpy.ops.groomlab.graph_group(names=",".join(names)), {"FINISHED"})
+        tree = gt.tree_of(self.head)
+        compound = next(n for n in tree.nodes if getattr(n, "gl_type", "") == "Compound").gl_name
+        view2d = types.SimpleNamespace(view_to_region=lambda x, y, clip=False: (100.0 + x, 900.0 + y))
+        region = types.SimpleNamespace(width=4000, height=2000, view2d=view2d)
+        g = canvas.Graph(bpy.context, region, tree)
+        x, y, w, h = g.by_name[compound].rect
+        self.assertEqual(canvas.double_click(bpy.context, g, x + w / 2, y + 4), "open")
+        self.assertEqual(gt.scope_of(self.head), compound)
+        tree = gt.tree_of(self.head)
+        inside = {n.gl_name for n in tree.nodes if gt.ours(n)}
+        self.assertTrue(set(names) <= inside, inside)
+        self.assertIn("Input", {n.gl_type for n in tree.nodes if gt.ours(n)})
+        self.assertIn(compound, {n["name"] for n in helper_graph(self.head)["nodes"]})  # (the groom's own: whole)
+        # A param set inside: the whole graph's compound holds it.
+        inner = gt.node_named(tree, names[0])
+        spec = next(s for s in gt.node_param_specs(inner) if s.get("kind") == "float")
+        before = self.param_scoped(compound, names[0], spec["name"])
+        gt.set_param_value(self.head, inner, spec["name"], float(before) + 0.25)
+        self.assertAlmostEqual(self.param_scoped(compound, names[0], spec["name"]), float(before) + 0.25, 5)
+        # Promote to Compound: shown on the compound, its menu checked.
+        gt.promote_param(self.head, names[0], spec["name"], True)
+        tree = gt.tree_of(self.head)
+        self.assertTrue(gt.promoted(tree, names[0], spec["name"]))
+        gt.promote_param(self.head, names[0], spec["name"], False)
+        self.assertFalse(gt.promoted(gt.tree_of(self.head), names[0], spec["name"]))
+        # U: back out; the compound in the tree again.
+        self.assertTrue(gt.leave_compound(self.head))
+        self.assertEqual(gt.scope_of(self.head), "")
+        tree = gt.tree_of(self.head)
+        self.assertIn(compound, {n.gl_name for n in tree.nodes if gt.ours(n)})
+        self.assertFalse(gt.leave_compound(self.head))
+        importlib.import_module(bu.MODULE + ".graph").ungroup(self.head, compound)
+
+    def param_scoped(self, compound, node, param):
+        return process.call("get_param", session=groom.runtime(self.head).session, scope=compound, node=node,
+                            param=param)["value"]
 
     def test_8g_canvas_arranged_by_hand(self):
         """PR #107's Graph Editor in Blender (graph_arrange.py, the helper's arrange.cpp): the wire

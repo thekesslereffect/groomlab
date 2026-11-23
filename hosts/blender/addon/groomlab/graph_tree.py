@@ -92,8 +92,88 @@ class building(object):
         _state.building -= 1
 
 
-def _call(cmd, **args):
-    return process.call(cmd, **args)
+# Inside a compound (the Graph Editor's double-click on a Compound, I; U and the path bar come back
+# out): {session: "outer/inner"}. The editor's requests carry it ("scope": the helper reads and edits
+# that compound's graph and writes it back into the whole graph, as Maya's ScopedModel); the 3D
+# view's panels and the groom's own copy of the graph stay with the whole graph.
+_scopes = {}
+SCOPED_COMMANDS = {"get_graph", "edit_graph", "node_spec", "get_param", "set_param", "graph_nodes", "graph_problems",
+                   "list_nodes", "clump_colors", "braid_tubes", "graph_carry", "align_gesture", "backdrop_layout",
+                   "param_promotion"}
+
+
+def _call(cmd, _whole=False, **args):
+    path = _scopes.get(args.get("session")) if not _whole and cmd in SCOPED_COMMANDS else None
+    if not path:
+        return process.call(cmd, **args)
+    try:
+        return process.call(cmd, scope=path, **args)
+    except HelperError as e:
+        if e.code != "no_scope":
+            raise
+        _scopes.pop(args.get("session"), None)  # (the compound went: an undo, another graph) the whole graph again
+        return process.call(cmd, **args)
+
+
+def scope_of(scalp):
+    """The compound path the Graph Editor is inside ("" the whole graph)."""
+    rt = groom.runtime_if_any(scalp)
+    return _scopes.get(rt.session, "") if rt is not None and rt.session is not None else ""
+
+
+def set_scope(scalp, path):
+    """The Graph Editor inside the compound at `path` ("outer/inner"; "" the whole graph): the tree
+    made from that compound's graph. Refused (HelperError) for a path that is no compound."""
+    rt = groom.ensure(scalp)
+    push_positions(scalp)
+    if path:
+        r = process.call("compound_path", session=rt.session, path=path)
+        if not r.get("ok"):
+            raise HelperError("bad_request", r.get("why") or "%s is no compound to go into" % path)
+        _scopes[rt.session] = path
+    else:
+        _scopes.pop(rt.session, None)
+    tree = tree_of(scalp)
+    if tree is not None:
+        with building():
+            for n in list(tree.nodes):  # (another graph: none of these nodes, frames or pins is in it)
+                tree.nodes.remove(n)
+    rebuild(scalp, replaced=True)
+    _redraw()
+
+
+def enter_compound(scalp, name):
+    """Into a Compound of the graph shown (double-click, I)."""
+    here = scope_of(scalp)
+    set_scope(scalp, here + "/" + name if here else name)
+
+
+def leave_compound(scalp):
+    """Out to the graph holding the compound shown (U). False at the whole graph."""
+    here = scope_of(scalp)
+    if not here:
+        return False
+    set_scope(scalp, here.rsplit("/", 1)[0] if "/" in here else "")
+    return True
+
+
+def promoted(tree, node, param):
+    """Whether node.param shows on the compound the editor is inside (its "exposed")."""
+    try:
+        exposed = json.loads(tree.get("gl_exposed") or "{}") if tree is not None else {}
+    except ValueError:
+        exposed = {}
+    return "%s.%s" % (node, param) in exposed.values()
+
+
+def promote_param(scalp, node, param, on):
+    """Promote to Compound (a param's menu inside a compound): the param shown on the compound."""
+    rt = groom.ensure(scalp)
+    push_positions(scalp)
+    r = _call("edit_graph", session=rt.session, op="promote_param", node=node, param=param, on=bool(on))
+    mark_replaced(scalp)
+    _edited(scalp, rt)
+    return r
 
 
 def pretty(name):
@@ -568,6 +648,7 @@ def reset_for_another_helper():
     from . import graph
     graph._specs.clear()
     _classes_key[0] = None
+    _scopes.clear()
 
 
 # ---- Sockets of a node ------------------------------------------------------------------------
@@ -1581,6 +1662,7 @@ def build_tree(scalp, tree, data, rt=None):
         tree["gl_backdrops"] = json.dumps(backdrops_of(tree))
         tree["gl_pins"] = json.dumps(tree_pins(tree, connections))
         tree["gl_portals"] = json.dumps([p for p in data.get("portals") or [] if isinstance(p, dict)])
+        tree["gl_exposed"] = json.dumps(data.get("exposed") or {}) if isinstance(data.get("exposed"), dict) else ""
         tree["gl_generation"] = process.generation()
     return tree
 
@@ -2255,7 +2337,7 @@ def after_undo(*args):
             text = scalp.groomlab.graph_json
             if text:
                 data = json.loads(text)
-                if tree is not None:
+                if tree is not None and not scope_of(scalp):  # (inside a compound the tree's names are its)
                     by_name = {n.gl_name: n for n in tree.nodes if ours(n) and n.gl_name}
                     for gnode in data.get("nodes", []):
                         node = by_name.get(gnode.get("name"))
@@ -2266,7 +2348,7 @@ def after_undo(*args):
                     for point in (data.get("pins") or {}).get("points") or []:
                         if isinstance(point, dict) and point.get("id") in by_pin:
                             point["x"], point["y"] = ui_of(by_pin[point["id"]])
-                current = _call("get_graph", session=rt.session)["graph"]
+                current = _call("get_graph", _whole=True, session=rt.session)["graph"]
                 if json.dumps(current, sort_keys=True) != json.dumps(data, sort_keys=True):
                     try:
                         _call("set_graph", session=rt.session, graph=data)

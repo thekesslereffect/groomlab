@@ -521,6 +521,79 @@ class GROOMLAB_OT_graph_portal_remove(_Op):
         return {"FINISHED"}
 
 
+# Inside a compound: in (double-click, I), out (U, the path bar), Promote to Compound.
+
+class GROOMLAB_OT_graph_enter_compound(_Op):
+    """Go into the compound to edit its nodes (double-click it); the path bar or U comes back out"""
+    bl_idname = "groomlab.graph_enter_compound"
+    bl_label = "Open Compound"
+
+    node: StringProperty(options={"SKIP_SAVE"})
+
+    def execute(self, context):
+        tree = _tree(context)
+        name = self.node or (tree.nodes.active.gl_name if tree.nodes.active is not None and graph_tree.ours(tree.nodes.active)
+                             else "")
+        node = graph_tree.node_named(tree, name) if name else None
+        if node is None or node.gl_type != "Compound":
+            self.report({"INFO"}, "Select a Compound to go into it")
+            return {"CANCELLED"}
+        try:
+            graph_tree.enter_compound(_scalp(context), name)
+        except HelperError as e:
+            return _fail(self, e)
+        _frame_all(context)
+        return {"FINISHED"}
+
+
+class GROOMLAB_OT_graph_up(_Op):
+    """Out of the compound you are in (U), or to the graph at `path` of the path bar"""
+    bl_idname = "groomlab.graph_up"
+    bl_label = "Up to the Parent Graph"
+
+    path: StringProperty(options={"SKIP_SAVE"})
+    to_path: BoolProperty(options={"SKIP_SAVE"})
+
+    def execute(self, context):
+        scalp = _scalp(context)
+        try:
+            if self.to_path:
+                graph_tree.set_scope(scalp, self.path)
+            elif not graph_tree.leave_compound(scalp):
+                return {"CANCELLED"}
+        except HelperError as e:
+            return _fail(self, e)
+        _frame_all(context)
+        return {"FINISHED"}
+
+
+def _frame_all(context):
+    from . import graph_canvas
+    try:
+        if graph_canvas.shows_here(context) and context.region is not None:
+            graph_canvas.frame_view(context, everything=True)
+    except (RuntimeError, AttributeError, TypeError):
+        pass
+
+
+class GROOMLAB_OT_graph_promote(_Op):
+    """Show this param on the compound you are in, to set it from outside without going in and out (again: no longer)"""
+    bl_idname = "groomlab.graph_promote"
+    bl_label = "Promote to Compound"
+
+    node: StringProperty(options={"SKIP_SAVE"})
+    param: StringProperty(options={"SKIP_SAVE"})
+
+    def execute(self, context):
+        scalp = _scalp(context)
+        tree = graph_tree.tree_of(scalp)
+        try:
+            graph_tree.promote_param(scalp, self.node, self.param, not graph_tree.promoted(tree, self.node, self.param))
+        except HelperError as e:
+            return _fail(self, e)
+        return {"FINISHED"}
+
+
 # Ports: Pass Through as Output, and a pass-through output's name and place.
 
 class GROOMLAB_OT_graph_pass_through(_Op):
@@ -661,6 +734,10 @@ def bind_actions():
          lambda ctx, item: bool(target.get("port")) and target["port"]["name"] in graph_tree.pass_through(
              ctx.tree, target["port"]["node"]))
     bind("port.renameOutput", GROOMLAB_OT_graph_rename_output.bl_idname)
+    bind("node.openCompound", GROOMLAB_OT_graph_enter_compound.bl_idname, lambda ctx, item: {"node": ctx.node or ""})
+    bind("graph.up", GROOMLAB_OT_graph_up.bl_idname)
+    bind("param.promote", GROOMLAB_OT_graph_promote.bl_idname, lambda ctx, item: {"node": ctx.node or "", "param": ctx.param or ""},
+         lambda ctx, item: graph_tree.promoted(ctx.tree, ctx.node, ctx.param))
     bind("port.outputUp", GROOMLAB_OT_graph_move_output.bl_idname, lambda ctx, item: {"by": -1})
     bind("port.outputDown", GROOMLAB_OT_graph_move_output.bl_idname, lambda ctx, item: {"by": 1})
 
@@ -669,7 +746,8 @@ CLASSES = (GROOMLAB_OT_graph_align, GROOMLAB_OT_graph_wire_style, GROOMLAB_OT_gr
            GROOMLAB_OT_graph_backdrop_edit,
            GROOMLAB_OT_graph_link_teleport, GROOMLAB_OT_graph_link_pin, GROOMLAB_OT_graph_link_delete,
            GROOMLAB_OT_graph_portal_rename, GROOMLAB_OT_graph_portal_remove, GROOMLAB_OT_graph_pass_through,
-           GROOMLAB_OT_graph_rename_output, GROOMLAB_OT_graph_move_output, GROOMLAB_MT_graph_canvas_link,
+           GROOMLAB_OT_graph_rename_output, GROOMLAB_OT_graph_move_output, GROOMLAB_OT_graph_enter_compound,
+           GROOMLAB_OT_graph_up, GROOMLAB_OT_graph_promote, GROOMLAB_MT_graph_canvas_link,
            GROOMLAB_MT_graph_canvas_portal, GROOMLAB_MT_graph_canvas_port)
 
 

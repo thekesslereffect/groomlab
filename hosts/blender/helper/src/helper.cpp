@@ -1386,7 +1386,10 @@ Session& Helper::session(const json& args) {
     if (!v.is_number_integer()) fail("bad_request", "\"session\" must be a session's number");
     const auto it = sessions_.find(v.get<int>());
     if (it == sessions_.end()) fail("no_session", "no session " + v.dump());
-    return *it->second;
+    Session& s = *it->second;
+    // Inside a compound (the Graph Editor's, every request saying so: none, the whole graph).
+    s.scope = args.contains("scope") && args["scope"].is_string() ? args["scope"].get<std::string>() : std::string();
+    return s;
 }
 
 json Helper::run(const std::string& cmd, const json& args) {
@@ -1996,14 +1999,16 @@ json Helper::run(const std::string& cmd, const json& args) {
     if (cmd == "default_graph") return {{"graph", json::parse(defaultGraphJson())}};
     if (cmd == "get_graph") {
         Session& s = session(args);
-        return {{"graph", parseGraph(*s.groom)}};
+        if (s.scope.empty()) return {{"graph", parseGraph(*s.groom)}};
+        // Inside a compound: its graph (Input nodes, inner nodes, output, "exposed"), as Maya's ScopedModel.
+        return {{"graph", json::parse(viewGraphText(s))}, {"scope", s.scope}};
     }
     if (cmd == "graph_problems") {
         // What would stop the groom from evaluating, as every host's editor says it (graph_edit.h
         // GraphEdit::problems; Maya's GraphModel.validate and unused_problems): "problems" of the nodes
         // the output is made from and the graph's own, "unused" of the other nodes (warnings).
         Session& s = session(args);
-        const GraphEdit edit(graphText(*s.groom));
+        const GraphEdit edit(viewGraphText(s));
         return {{"problems", edit.problems(true)}, {"unused", edit.problems(false)}, {"feeding", edit.feedingOutput()}};
     }
     if (cmd == "graph_layout") {
@@ -2050,7 +2055,7 @@ json Helper::run(const std::string& cmd, const json& args) {
         // Clump Colors (issue #77): each Clump's own color source ("<channel>@<node>") and the
         // Clumps a clump color `source` shows (GraphEdit::clumpColored).
         Session& s = session(args);
-        const GraphEdit edit(graphText(*s.groom));
+        const GraphEdit edit(viewGraphText(s));
         const std::string source = optString(args, "source", "");
         json sources = json::object(), lit = json::array();
         for (const std::string& name : edit.nodeNames()) {
@@ -2067,7 +2072,7 @@ json Helper::run(const std::string& cmd, const json& args) {
         // that have no button now (braidTubesKept); the nodes lit, and those with the button
         // (`offered`: Braids, and nodes giving guides: braidTubesOffered).
         Session& s = session(args);
-        const GraphEdit edit(graphText(*s.groom));
+        const GraphEdit edit(viewGraphText(s));
         std::string shown = optString(args, "shown", "");
         if (args.contains("old") && args.contains("new")) shown = renamedBraidTubes(shown, needString(args, "old"), needString(args, "new"));
         if (args.contains("toggle")) shown = edit.braidTubesToggled(needString(args, "toggle"), shown);
@@ -2087,7 +2092,7 @@ json Helper::run(const std::string& cmd, const json& args) {
         // outputs' types as connected (outputTypes), View Up to Here (viewable), Bake Node to Guides
         // (bakeable), Show Tubes (braidTubesOffered).
         Session& s = session(args);
-        const GraphEdit edit(graphText(*s.groom));
+        const GraphEdit edit(viewGraphText(s));
         json nodes = json::object();
         for (const std::string& name : edit.nodeNames()) {
             json outputs = json::array();
@@ -2121,7 +2126,7 @@ json Helper::run(const std::string& cmd, const json& args) {
     }
     if (cmd == "list_nodes") {
         Session& s = session(args);
-        const GraphEdit edit(graphText(*s.groom));
+        const GraphEdit edit(viewGraphText(s));
         json nodes = json::array();
         const std::string output = edit.outputNode();
         for (const std::string& name : edit.nodeNames()) {
@@ -2131,7 +2136,7 @@ json Helper::run(const std::string& cmd, const json& args) {
     }
     if (cmd == "node_spec") {
         Session& s = session(args);
-        const GraphEdit edit(graphText(*s.groom));
+        const GraphEdit edit(viewGraphText(s));
         const std::string node = needString(args, "node");
         if (!edit.hasNode(node)) fail("not_found", "no node '" + node + "'");
         return {{"spec", json::parse(edit.nodeSpecJson(node))}};
@@ -2139,7 +2144,7 @@ json Helper::run(const std::string& cmd, const json& args) {
     if (cmd == "get_param") {
         Session& s = session(args);
         const std::string node = needString(args, "node"), param = needString(args, "param");
-        json graph = parseGraph(*s.groom);
+        json graph = json::parse(viewGraphText(s));
         const json& n = nodeOf(graph, node);
         const auto params = n.find("params");
         if (params != n.end() && params->is_object() && params->contains(param)) return {{"value", (*params)[param]}, {"set", true}};
@@ -2157,7 +2162,7 @@ json Helper::run(const std::string& cmd, const json& args) {
         Session& s = session(args);
         const std::string node = needString(args, "node"), param = needString(args, "param");
         const json& value = need(args, "value");
-        json graph = parseGraph(*s.groom);
+        json graph = json::parse(viewGraphText(s));
         json& n = nodeOf(graph, node);
         const json spec = paramSpec(n, param);
         if (spec.is_null()) fail("not_found", "node '" + node + "' has no param '" + param + "'");
@@ -2176,19 +2181,27 @@ json Helper::run(const std::string& cmd, const json& args) {
         json& params = n["params"];
         if (!params.is_object()) params = json::object();
         params[param] = value;
-        s.groom->setGraphJson(graph.dump());
+        setViewGraph(s, graph.dump());
         return {{"value", value}};
     }
     if (cmd == "edit_graph") {
         Session& s = session(args);
         const std::string op = needString(args, "op");
+        // What the 3D view's panels add (a scalp's, a collider's, a simulation's nodes, a preset's
+        // parts...) goes into the whole graph, whatever compound the Graph Editor is in.
+        static const std::set<std::string> kWhole = {
+            "insert_scalp",  "insert_simulate", "remove_scalp_nodes", "remove_collider_nodes", "insert_part",
+            "insert_cards",  "insert_motion",   "insert_drive_guides", "insert_guide_cache",   "insert_collider",
+            "insert_braid",  "insert_bun",      "insert_braid_sculpt", "insert_feathers",      "update_library_node",
+            "add_control",   "link_control",    "unlink_control"};
+        if (kWhole.count(op)) s.scope.clear();
         json r;
         // The Graph Editor's authoring (Group, exposed params, a node on a link, sliders, keyed
         // params): one undo step each on the session's stack (authoring.cpp).
         if (runGraphAuthoring(s, op, args, r)) return r;
         // Arranged by hand (Align, Tidy, portals and dots, pass-through outputs...: arrange.cpp).
         if (runGraphArrange(s, op, args, r)) return r;
-        const std::string before = graphText(*s.groom);
+        const std::string before = viewGraphText(s);
         GraphEdit edit(before);
         std::map<std::string, std::string> copied;  // a duplicate's {copy: source}: its Sculpt edits copied
         if (op == "add_node") {
@@ -2485,10 +2498,10 @@ json Helper::run(const std::string& cmd, const json& args) {
                                    edit.movedNodes(), r, copied);
         }
         try {
-            s.groom->setGraphJson(text);
+            setViewGraph(s, text);
             r["graphError"] = "";
         } catch (const GraphError& e) {
-            s.groom->dropGraph(text, e.what());
+            s.groom->dropGraph(wholeWithView(s, text), e.what());
             r["graphError"] = e.what();
         }
         return r;

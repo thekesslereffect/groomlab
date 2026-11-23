@@ -37,6 +37,16 @@ nlohmann::json commitGraphText(Session& s, const std::string& label, const std::
                                const std::vector<std::pair<std::string, std::string>>& moved, nlohmann::json r = nlohmann::json::object(),
                                const std::map<std::string, std::string>& copied = {});
 
+// The graph the Graph Editor shows: the whole graph, or inside the compound s.scope its own graph
+// (the core's compoundGraphJson: its Input nodes, inner nodes, output and "exposed"); a scope that
+// names no compound now (an undo took it away): RequestError "no_scope".
+std::string viewGraphText(Session& s);
+// That graph put back into the whole graph (the core's withCompoundGraph: the compound's inputs
+// follow its Input nodes); with no scope, `text` itself.
+std::string wholeWithView(Session& s, const std::string& text);
+// The session's graph set from the view's text (GraphError for a graph that does not load).
+void setViewGraph(Session& s, const std::string& text);
+
 // The other authoring commands (set_controls, save_node, correctives_list, sculpt_target...).
 bool isAuthoringCommand(const std::string& cmd);
 // Runs one; `session` gives the request's session (the commands that take one call it).
