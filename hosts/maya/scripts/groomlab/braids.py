@@ -9,51 +9,9 @@ from groomlab.base import undoable
 from groomlab.guides import add_guide_group, guides_from_curves, list_guide_groups
 
 
-def _exclude_from_hair_guides(model, group):
-    """Braid paths and feather shafts are not hair: Guides nodes reading all guides leave `group`
-    out (every host's: graph_inserts.h excludeFromHairGuides). Returns True when the model changed."""
-    from groomlab import graph as gm
-    edit = model._edit()
-    with gm._core_errors():
-        changed = edit.exclude_from_hair_guides(group)
-    if changed:
-        model._take(edit)
-    return changed
-
-
 def _ensure_guide_group(groom, group):
     if group not in [g["name"] for g in list_guide_groups(groom)]:
         add_guide_group(groom, group)
-
-
-def braid_paths_from_curves(groom, braid, curves, model=None):
-    """Add curves (drawn from the scalp along the braids) as paths of the Braid node `braid`.
-
-    They go into the guide group of the Guides node feeding its "braids"
-    input; without one, a Guides node for group "braids" is made and connected.
-    Returns the group. With `model` (a GraphModel being edited, e.g. the
-    Graph Editor's), the graph change goes there and is not saved.
-    """
-    from groomlab import graph as gm
-    own = model is None
-    model = model or gm.GraphModel.from_groom(groom)
-    if braid not in model.order or model.node_type(braid) != "Braid":
-        raise ValueError("%s is not a Braid node" % braid)
-    paths = model.source_of(braid, "braids")
-    changed = False
-    if paths is None:
-        paths = model.add_node("Guides", name=model.unique_name("braidPaths"), params={"group": "braids"})
-        model.connect(paths, braid, "braids")
-        x, y = model.position(braid)
-        model.set_position(paths, x, y + gm.LAYOUT_DY)
-        changed = True
-    group = model.param(paths, "group") or "primary"
-    if group != "primary":
-        changed = _exclude_from_hair_guides(model, group) or changed
-    if changed and own:
-        model.save(groom)
-    guides_from_curves(groom, curves, group=group)
-    return group
 
 
 def instance_object_names(meshes):

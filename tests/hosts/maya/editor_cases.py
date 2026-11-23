@@ -737,18 +737,6 @@ class GraphEditorTest(unittest.TestCase):
         return buttons[0]
 
     def test_node_actions(self):
-        # Braid: selected curves become its paths (a Guides node for them is made and connected).
-        braid = self.editor.add_node("Braid")
-        self.editor.link("width", braid, "strands")
-        curve = cmds.curve(degree=2, point=[(0.0, 1.0, 0.0), (0.0, 1.5, 0.3), (0.0, 1.6, 1.2)])
-        self._select_node(braid)
-        cmds.select(curve)
-        self._action("Paths from Selected Curves").click()
-        wait(50)  # actions run once the click is over
-        self.assertIn("braids", [g["name"] for g in groomlab.list_guide_groups(self.groom)], self.editor.status.text())
-        paths = self.editor.model.source_of(braid, "braids")
-        self.assertEqual(self.editor.model.node_type(paths), "Guides")
-
         # Instance: the selected mesh becomes the prototype.
         instance = self.editor.add_node("Instance")
         self.editor.link("width", instance, "strands")

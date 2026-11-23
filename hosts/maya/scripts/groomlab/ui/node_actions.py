@@ -116,14 +116,6 @@ def node_actions(self, name):
                         run(lambda: groomlab.bake_scalp(groom),
                             lambda paths: "baked %d scalp maps and a hair cap" % len(paths),
                             busy="Baking the scalp maps and the hair cap...")))
-    elif node_type == "Braid":
-        def paths():
-            curves = groomlab.selected_curves(groom)  # (groups of curves too)
-            if not curves:
-                raise ValueError("select curves drawn from the scalp along the braids")
-            return groomlab.braid_paths_from_curves(groom, name, groomlab.transforms(curves), model=self.editor.model)
-        buttons.append(("Paths from Selected Curves", "Selected curves, drawn from the scalp along the "
-                        "braids, become this braid's paths", run(paths, lambda g: "braid paths added to %s" % g)))
     elif node_type == "Map":
         map_name = self.editor.model.param(name, "name") or "mask"
         if not any(c["from"] == name for c in self.editor.model.connections):

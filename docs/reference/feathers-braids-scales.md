@@ -6,9 +6,8 @@ User guide: [Fur, feathers & scales](https://www.getgroomlab.com/docs/fur-and-fe
 
 ## Braids
 
-Draw curves from the scalp along where each braid should run. Add a **Braid** node in the Graph
-Editor, select the curves and click the node's **Paths from Selected Curves** (they become guides
-in its paths group; a Guides node for them is made and connected). By script:
+Draw curves from the scalp along where each braid should run (the Draw tool, group `braids`) and
+add a **Braid** node (Groom Tools or the Graph Editor). By script:
 
 ```python
 groomlab.add_braid(groom, ["braidCurve1"], style="three", width=0.25, tightness=1.0, region=0.3)

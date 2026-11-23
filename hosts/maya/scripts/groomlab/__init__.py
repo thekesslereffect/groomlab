@@ -108,7 +108,7 @@ from groomlab.exports import (  # noqa: F401
     FOLLICLE_MAP, SCALE_MAPS, bake_follicle_map, bake_scale_maps, follicle_auto_radius, export_alembic, export_mesh, export_scales,
     export_usd, export_vrscene, has_scales, scale_mesh, viewport_points)
 from groomlab.braids import (  # noqa: F401
-    add_braid, add_instances, braid_paths_from_curves, instance_object_names, set_instance_prototype)
+    add_braid, add_instances, instance_object_names, set_instance_prototype)
 from groomlab.feathers import (  # noqa: F401
     add_feathers, create_feather_cards, create_rachis_mesh, export_rachis, feather_designs, feather_groups,
     feather_guide_groups, rachis_mesh, rachis_width, set_rachis_width)

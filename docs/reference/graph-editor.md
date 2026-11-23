@@ -202,7 +202,7 @@ The **Graph Editor** is a dockable node editor for the selected groom:
     param's map source as every host links it (white = the value now, black = 0), and Groom Tools > Paint opens on
     it (the brush lowers the param, Ctrl raises it).
   - **Node buttons:** nodes that need something from the scene have it under their params:
-    **Cards** (Show cards, Show textures, LOD, Bake Maps, Bake Scalp, Export Unreal Cards), **Braid** (Paths from Selected Curves),
+    **Cards** (Show cards, Show textures, LOD, Bake Maps, Bake Scalp, Export Unreal Cards),
     **HairColor** (Create Hair Shader) and **Instance** (Prototype from Selection).
   - **Inputs:** the **Scalp** node shows the mesh it reads, with **Pick from Selection** (grow
     the groom on the selected mesh) and **Select**, and, for a moving scalp, the rest pose with
