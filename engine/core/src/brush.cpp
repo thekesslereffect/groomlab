@@ -165,7 +165,7 @@ float brushWeight(const Vec3f& p, const Vec3f& center, float radius, const Brush
 namespace {
 
 constexpr float kPerStampRate = 0.05f;  // Length and the Shape brush's width change per stamp at strength 1
-constexpr float kFlattenRate = 0.1f;    // Shape on flatness: share of the way to flat (or round) per stamp at strength 1
+constexpr float kFlattenRate = 0.1f;    // Shape on flatness: share of the way to flat (either axis) per stamp at strength 1
 constexpr float kTwistRate = 0.1f;      // radians per stamp at strength 1
 constexpr float kAttractRate = 0.1f;    // fraction of the way to the center per stamp, at the tip
 
@@ -448,18 +448,42 @@ Edit brushGuide(const HierarchyGuide& g, const ScalpMesh* scalp, const BrushSett
                                                                        : g.tube.twistAt(t);
             }
             const float k = std::clamp(s.strength, -1.0f, 1.0f);
+            if (s.tubeChannel == TubeChannel::Flatness) {
+                // Two axes. Flatness (positive) flattens the section's height (v): its aspect toward
+                // kMinTubeAspect, its width kept. Ctrl (negative) flattens the other axis, across its
+                // width (u): the width over the height toward kMinTubeAspect, the height kept, so
+                // the width shrinks and the aspect grows past 1. Either one rounds a tube the other
+                // flattened on its way, then flattens it its own way.
+                std::vector<float> widths(n);
+                for (std::size_t i = 0; i < n; ++i) widths[i] = g.tube.widthAt(static_cast<float>(i) / static_cast<float>(n - 1));
+                bool widthChanged = false;
+                for (std::size_t i = 0; i < n; ++i) {
+                    const float w = weights[i];
+                    if (w <= 0.0f) continue;
+                    const float r = std::min(1.0f, std::fabs(k) * w * kFlattenRate);
+                    const float a = perPoint[i];
+                    if (k > 0.0f) {
+                        perPoint[i] = std::clamp(a + (kMinTubeAspect - a) * r, kMinTubeAspect, kMaxTubeAspect);
+                    } else {
+                        const float b = 1.0f / a;  // width over height
+                        const float flat = std::clamp(1.0f / (b + (kMinTubeAspect - b) * r), kMinTubeAspect, kMaxTubeAspect);
+                        widths[i] *= a / flat;      // the height (width * aspect) kept
+                        perPoint[i] = flat;
+                        widthChanged = true;
+                    }
+                }
+                e.tube.aspect = std::move(perPoint);
+                if (widthChanged) e.tube.width = std::move(widths);
+                e.tubeEdited = e.tube.aspect != g.tube.aspect || e.tube.width != g.tube.width;
+                return e;
+            }
             for (std::size_t i = 0; i < n; ++i) {
                 const float w = weights[i];
                 if (w <= 0.0f) continue;
                 float& v = perPoint[i];
                 switch (s.tubeChannel) {
                     case TubeChannel::Width: v *= std::max(0.05f, 1.0f + k * w * kPerStampRate); break;
-                    case TubeChannel::Flatness: {
-                        // Toward kMinTubeAspect (flat), or back toward 1 (as drawn) from either side.
-                        const float target = k > 0.0f ? kMinTubeAspect : 1.0f;
-                        v += (target - v) * std::min(1.0f, std::fabs(k) * w * kFlattenRate);
-                        break;
-                    }
+                    case TubeChannel::Flatness: break;  // above
                     case TubeChannel::Twist: v += k * w * kTwistRate; break;
                 }
             }

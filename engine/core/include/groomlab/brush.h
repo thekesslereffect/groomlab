@@ -43,7 +43,8 @@ PaintMode paintModeFromString(const std::string& name);
 // section by the brush's weight at its guide point (the painted list first resampled to one value
 // per point, so edits are per CV):
 //   Width     the section grows (negative strength: shrinks);
-//   Flatness  its aspect goes toward 0, a flat ribbon (negative: back toward 1, as drawn);
+//   Flatness  its aspect goes toward 0, a flat ribbon, its width kept (negative: the other axis
+//             flattens, its width shrinking toward a ribbon on edge, its height kept);
 //   Twist     it turns about the guide (negative: the other way).
 enum class TubeChannel { Width, Flatness, Twist };
 // width, flatness, twist; tubeChannelFromString throws std::invalid_argument.

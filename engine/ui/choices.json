@@ -68,7 +68,7 @@
       "default": "width",
       "items": [
         {"value": "width", "label": "Width", "tip": "Grow the tubes near the brush (Ctrl: shrink them)"},
-        {"value": "flatness", "label": "Flatness", "tip": "Flatten the tubes near the brush toward a ribbon (Ctrl: round them back)"},
+        {"value": "flatness", "label": "Flatness", "tip": "Flatten the tubes near the brush toward a ribbon (Ctrl: flatten them on the other axis)"},
         {"value": "twist", "label": "Twist", "tip": "Turn the tubes near the brush about their guides (Ctrl: the other way)"}
       ]
     },
