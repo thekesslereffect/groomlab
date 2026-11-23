@@ -17,6 +17,7 @@
 #include "groomlab/graph_io.h"
 #include "groomlab/graph_pins.h"
 #include "groomlab/graph_portals.h"
+#include "groomlab/param_conditions.h"
 
 namespace groomlab {
 namespace {
@@ -647,6 +648,21 @@ TEST(GraphArrange, PromoteAnInnerParamToTheCompoundFromInside) {
     const json spec = json::parse(GraphEdit(promoted).nodeSpecJson(compound));
     for (const json& p : spec["params"]) shown = shown || p["name"] == "melanin";
     EXPECT_TRUE(shown);
+    // Under a header named after its node, a group per node (color's, then width's).
+    const std::string both = promoteParam(promoted, compound, "width", "width", true);
+    const json params = json::parse(GraphEdit(both).nodeSpecJson(compound))["params"];
+    const std::vector<std::string> sections = paramSections(params);
+    std::map<std::string, std::string> sectionOf;
+    for (std::size_t i = 0; i < params.size(); ++i) sectionOf[params[i]["name"]] = sections[i];
+    EXPECT_EQ(sectionOf["melanin"], "color");
+    EXPECT_EQ(sectionOf["width"], "width");
+    EXPECT_EQ(sectionOf["definition"], "");
+    // One node's alone still gets its header.
+    const json one = json::parse(GraphEdit(promoted).nodeSpecJson(compound))["params"];
+    const std::vector<std::string> oneSections = paramSections(one);
+    for (std::size_t i = 0; i < one.size(); ++i) {
+        if (one[i]["name"] == "melanin") EXPECT_EQ(oneSections[i], "color");
+    }
     EXPECT_EQ(promoteParam(promoted, compound, "color", "melanin", true), promoted);
     const std::string back = promoteParam(promoted, compound, "color", "melanin", false);
     EXPECT_FALSE(paramPromoted(back, compound, "color", "melanin"));

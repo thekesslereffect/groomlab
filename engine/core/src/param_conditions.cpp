@@ -51,7 +51,12 @@ std::vector<std::string> paramSections(const nlohmann::json& params) {
             if (!group.empty() && std::find(groups.begin(), groups.end(), group) == groups.end()) groups.push_back(group);
         }
     }
-    const bool headed = groups.size() >= 2;
+    // A group marked "groupShown" (a compound's params shown from a node inside) is headed alone too.
+    bool shown = false;
+    if (params.is_array()) {
+        for (const nlohmann::json& p : params) shown = shown || (p.is_object() && p.value("groupShown", false) && !p.value("group", std::string()).empty());
+    }
+    const bool headed = groups.size() >= 2 || shown;
     std::vector<std::string> out;
     if (!params.is_array()) return out;
     for (const nlohmann::json& p : params) {

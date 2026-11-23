@@ -278,6 +278,10 @@ std::string compoundExpose(GraphEdit& edit, const std::string& compound, const s
     json& expose = definition["expose"];
     if (!expose.is_object()) expose = json::object();
     expose[name] = target;
+    // Shown by hand: under a header named after its node (GraphEdit::nodeSpecJson).
+    json& byNode = definition["exposeByNode"];
+    if (!byNode.is_array()) byNode = json::array();
+    if (std::find(byNode.begin(), byNode.end(), json(name)) == byNode.end()) byNode.push_back(name);
     edit = GraphEdit(g.dump());
     return name;
 }
@@ -305,6 +309,11 @@ bool compoundUnexpose(GraphEdit& edit, const std::string& compound, const std::s
             params.erase(name);
         }
         expose.erase(name);
+        if (definition.contains("exposeByNode") && definition["exposeByNode"].is_array()) {
+            json& byNode = definition["exposeByNode"];
+            byNode.erase(std::remove(byNode.begin(), byNode.end(), json(name)), byNode.end());
+            if (byNode.empty()) definition.erase("exposeByNode");
+        }
     }
     edit = GraphEdit(g.dump());
     return true;

@@ -238,6 +238,12 @@ json specOfNode(const json& node) {
         for (const json& p : library ? definition.value("params", json::array()) : json::array()) {
             if (p.is_object() && p.value("name", json()).is_string()) shown[p["name"].get<std::string>()] = p;
         }
+        // The params shown by hand (Show Inner Param, Promote to Compound: compoundExpose), each
+        // under a header named after its node; a preset's own keep their inner groups.
+        std::set<std::string> byNode;
+        for (const json& n : definition.value("exposeByNode", json::array())) {
+            if (n.is_string()) byNode.insert(n.get<std::string>());
+        }
         std::map<std::string, std::vector<std::string>> exposedAs;  // "node.param" -> the names showing it
         if (expose.is_object()) {
             for (const auto& [exposed, target] : expose.items()) {
@@ -259,10 +265,17 @@ json specOfNode(const json& node) {
                     exposedSpec["name"] = exposed;
                     exposedSpec["description"] = innerSpec.value("description", std::string()) + " (exposed " + names->first + ")";
                     if (innerParams.is_object() && innerParams.contains(param)) exposedSpec["default"] = innerParams[param];
+                    // Shown by hand: under its node, a group per inner node (noise's params
+                    // together, then length's), unless a library node's header gives it a group.
+                    if (byNode.count(exposed)) {
+                        exposedSpec["group"] = nodeName;
+                        exposedSpec["groupShown"] = true;
+                        exposedSpec.erase("advanced");  // (under its node, not in Advanced)
+                    }
                     // A library node's header says how it shows (node_library.h).
                     if (const auto own = shown.find(exposed); own != shown.end()) {
                         const json& h = own->second;
-                        for (const char* key : {"label", "description"}) {
+                        for (const char* key : {"label", "description", "group"}) {
                             if (h.contains(key) && h[key].is_string() && !h[key].get<std::string>().empty()) exposedSpec[key] = h[key];
                         }
                         for (const char* key : {"min", "max", "softMin", "softMax"}) {

@@ -315,7 +315,8 @@ The **Graph Editor** is a dockable node editor for the selected groom:
   graph; columns by the longest path in, each card level with what feeds it; backdrops as groups
   laid out on themselves and moved as one card, a folded one as it is, one partly selected tidied
   in place; pins and dots carried; one undo step); a param's menu inside a compound has **Promote
-  to Compound** (graph_controls.h promoteParam: the param shown on the compound you are in).
+  to Compound** (graph_controls.h promoteParam: the param shown on the compound you are in), each
+  shown on the compound under a header named after its node (the definition's "exposeByNode").
 - **Inside a compound:** double-click a Compound (or I) opens its graph to edit (ScopedModel: each
   edit written back with withCompoundGraph, its inputs following its Input nodes, one undo step);
   the path bar over the canvas, or U, goes back up.)

@@ -57,7 +57,9 @@ bool unexposeParam(GraphEdit& edit, const std::string& node, const std::string& 
 // `name` (every host's Show Inner Param; a param of that name shows `target` instead). No name: the
 // param's own, or node + Param when the compound has a param of that name already ("clump.length"
 // -> "clumpLength"). Returns the name. GraphError for a node that is not a Compound, or a target
-// that is no param of a node inside (a compound inside: its own exposed params).
+// that is no param of a node inside (a compound inside: its own exposed params). The name goes in
+// the definition's "exposeByNode" too: the compound's panel shows it under a header named after
+// its node (a preset's exposed params, written without it, keep their inner groups).
 std::string compoundExpose(GraphEdit& edit, const std::string& compound, const std::string& name, const std::string& target);
 // The compound stops showing `target` (under every name it had): the value the compound set for it
 // goes back inside, the inner node keeping what the compound set last. False when it was not shown.
