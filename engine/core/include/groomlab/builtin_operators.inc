@@ -52,6 +52,7 @@ GROOMLAB_OPERATOR(Transform)             // Curves -> Curves (moved, turned, sca
 GROOMLAB_OPERATOR(BlendNeighbors)        // Curves -> Curves (each strand toward its neighbours' mean shape)
 GROOMLAB_OPERATOR(Gravity)               // Curves -> Curves (bent from the root under their weight)
 GROOMLAB_OPERATOR(Displace)              // Curves -> Curves (offset along the scalp's normal or a direction)
+GROOMLAB_OPERATOR(FollowGuides)          // Strands + Guides rest + Guides now -> Strands (carried along their guides' change: braid sections sculpted)
 // [collide]
 GROOMLAB_OPERATOR(Collide)               // Strands + Mesh (+ Mesh collider) -> Strands (push out of the meshes)
 GROOMLAB_OPERATOR(SelfCollide)           // Strands -> Strands (overpacked hair pushed apart: no strand through another)

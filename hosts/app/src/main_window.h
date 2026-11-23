@@ -535,6 +535,9 @@ public:
     bool drawGuidesInto(const std::string& group);
     // Add > Braid on Curves: a Braid after the Interpolate along the "braids" group's guides.
     bool addBraid(const QString& style);
+    // Sculpt Sections on Braid node `braid` (GroomDocument::sculptBraidSections), then the brushes
+    // shape its Sculpt node's guides.
+    bool sculptBraidSections(const std::string& braid);
     // Import > Alembic Curves: the file's curves as the guides (an ImportCurves node).
     bool importAlembicCurves(const QString& path, const QString& object = {});
     // Utilities > Strands to Mesh: the strands as tubes (or ribbons) in an OBJ at `path` (at most

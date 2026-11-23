@@ -26,6 +26,7 @@
 #include <QTimer>
 #include <QUrl>
 
+#include "correctives_panel.h"
 #include "graph_presets.h"
 #include "guides_panel.h"
 #include "look.h"
@@ -323,6 +324,21 @@ bool MainWindow::addBraid(const QString& style) {
     const bool paths = h && h->findGroup("braids") != kNoGroup && !h->guidesInGroup(h->findGroup("braids")).empty();
     notify(paths ? tr("Added %1 (a %2 braid) along the braids group's guides").arg(QString::fromStdString(made), style)
                  : tr("Added %1 (a %2 braid): draw the braid paths in the braids group with the Draw tool").arg(QString::fromStdString(made), style));
+    return true;
+}
+
+bool MainWindow::sculptBraidSections(const std::string& braid) {
+    if (!document_ || braid.empty()) return false;
+    BraidSculptNodes made;
+    const std::string error = document_->sculptBraidSections(braid, &made);
+    if (!error.empty()) {
+        report(tr("Cannot sculpt the sections: %1").arg(QString::fromStdString(error)));
+        return false;
+    }
+    if (made.made) graphEdited();
+    correctives_->setTargetNode(made.sculpt);
+    notify(tr("Brush %1's sections: %2 keeps the strokes, %3 carries the hair along them")
+               .arg(QString::fromStdString(braid), QString::fromStdString(made.sculpt), QString::fromStdString(made.follow)));
     return true;
 }
 

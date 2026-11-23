@@ -308,6 +308,22 @@ TEST(AppOutput, FeathersAndBraidsAskInThePrompt) {
     EXPECT_EQ(doc->addBraid("four", "braids", &four), "");
     EXPECT_EQ(doc->param(four, "style"), json("four"));
     EXPECT_NE(doc->addBraid("plait"), "");
+
+    // Sculpt Sections (graph_inserts.h insertBraidSculpt, every host's): the braid's sections a Sculpt
+    // node's guides the brushes shape, its hair through a FollowGuides; again, the same nodes.
+    ASSERT_TRUE(window.sculptBraidSections(four)) << window.lastReport().toStdString();
+    const std::string sculpt = doc->sculptTarget();
+    ASSERT_EQ(sculpt, nodeOfType(*doc, "Sculpt"));
+    const std::string follow = nodeOfType(*doc, "FollowGuides");
+    ASSERT_FALSE(follow.empty());
+    EXPECT_TRUE(linked(*doc, four, follow, "strands"));
+    EXPECT_TRUE(linked(*doc, sculpt, follow, "guides"));
+    EXPECT_TRUE(linked(*doc, four, sculpt, "guides"));
+    BraidSculptNodes again;
+    EXPECT_EQ(doc->sculptBraidSections(four, &again), "");
+    EXPECT_FALSE(again.made);
+    EXPECT_EQ(again.sculpt, sculpt);
+    EXPECT_FALSE(window.sculptBraidSections("guides"));
 }
 
 TEST(AppOutput, HandPlacedFlightFeathersPresetDrawsIntoItsGroup) {

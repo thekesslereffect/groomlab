@@ -1264,6 +1264,19 @@ def add_braid(scalp, curves=None, style="three", group="braids", width=0.25, tig
     return braid
 
 
+def sculpt_braid_sections(scalp, braid):
+    """Sculpt Sections on Braid node `braid` (Maya's sculpt_braid_sections): a Sculpt node of its
+    sections and a FollowGuides after it carrying its hair along them (every host's graph edit,
+    graph_inserts.h insertBraidSculpt; a Braid that has them keeps them), then the brushes shape that
+    Sculpt node's guides. Returns {"sculpt", "follow", "made"}."""
+    from . import tools
+    g = GraphEdits(scalp)
+    r = g.edit(op="insert_braid_sculpt", braid=braid)
+    g.finish()
+    tools.sculpt_target(scalp, node=r["sculpt"])
+    return {k: r.get(k) for k in ("sculpt", "follow", "made")}
+
+
 def set_prototypes(scalp, objects, replace=True):
     """Meshes the groom's Instance nodes (scales' plates of your own) name, in their own object space
     (their up is the prototype's +Y, its long axis), with per-corner normals and UVs."""

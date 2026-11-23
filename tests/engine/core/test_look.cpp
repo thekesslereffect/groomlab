@@ -2641,6 +2641,59 @@ TEST(Braid, TheSectionsOutputRunsThroughItsSectionsHair) {
     }
 }
 
+TEST(Braid, FollowGuidesCarriesASculptedSectionsHair) {
+    // The sections output as rest, the same with one section moved (as a Sculpt node brushing it
+    // gives): FollowGuides carries that section's woven hair with it, the others' stay, and hair on
+    // its way in from the scalp follows only as it comes in (braidWoven), its root never.
+    BraidScene scene("three");
+    scene.setParam("region", 0.45);
+    scene.setParam("end", std::string("bound"));
+    EvalContext ctx;
+    ctx.externals = &scene.lg.ext;
+    const StrandsPtr hair = scene.lg.eval(scene.braid);
+    const GuidesPtr rest = valueAs<GuidesPtr>(scene.lg.g.evaluateOutput(scene.braid, 3, ctx));
+    ASSERT_TRUE(hair && rest && rest->size() == 3u);
+    auto moved = std::make_shared<GuideSet>(*rest);
+    const Vec3f push{0.1f, 0.0f, 0.0f};
+    for (Guide& g : moved->guides()) {
+        if (g.attributes.at("braidSection") != 1.0f) continue;
+        for (Vec3f& p : g.points) p += push;
+    }
+    auto follow = OperatorRegistry::instance().create(op::kFollowGuides);
+    const StrandsPtr out =
+        valueAs<StrandsPtr>(follow->evaluate(ctx, {Value(hair), Value(GuidesPtr(rest)), Value(GuidesPtr(moved))}));
+    ASSERT_TRUE(out && out->strandCount() == hair->strandCount());
+    const std::vector<float>* section = hair->strandChannel("braidSection");
+    const std::vector<float>* woven = hair->pointChannel("braidWoven");
+    ASSERT_TRUE(section && woven);
+    std::size_t carried = 0;
+    for (std::size_t s = 0; s < hair->strandCount(); ++s) {
+        const std::size_t begin = hair->strandBegin(s), n = hair->strandPointCount(s);
+        EXPECT_EQ(out->strandPoints(s)[0], hair->strandPoints(s)[0]) << s;  // roots stay
+        for (std::size_t i = 1; i < n; ++i) {
+            const Vec3f d = out->strandPoints(s)[i] - hair->strandPoints(s)[i];
+            if ((*section)[s] != 1.0f) {
+                EXPECT_EQ(d.length(), 0.0f) << s << " " << i;  // the other sections' hair stays
+                continue;
+            }
+            const float w = (*woven)[begin + i];
+            // As far as the section moved, that share of it: within a hundredth.
+            EXPECT_NEAR(d.x, push.x * w, 0.01f) << s << " " << i;
+            EXPECT_NEAR(d.y, 0.0f, 0.01f) << s << " " << i;
+            EXPECT_NEAR(d.z, 0.0f, 0.01f) << s << " " << i;
+            carried += w > 0.999f ? 1 : 0;
+        }
+    }
+    EXPECT_GT(carried, 1000u);
+
+    // The guides as they were: nothing moves.
+    const StrandsPtr same =
+        valueAs<StrandsPtr>(follow->evaluate(ctx, {Value(hair), Value(GuidesPtr(rest)), Value(GuidesPtr(rest))}));
+    for (std::size_t p = 0; p < hair->positions().size(); ++p) {
+        ASSERT_LT((same->positions()[p] - hair->positions()[p]).length(), 1e-5f) << p;
+    }
+}
+
 TEST(Braid, BraidPressMarksTheHairLyingAgainstAnotherSection) {
     // braidPress, per point: 0 where a strand lies free in its section, up to 1 where it lies on a
     // contact's facet against another section (the sections pressed: separate), for a Clump's

@@ -2270,6 +2270,11 @@ json Helper::run(const std::string& cmd, const json& args) {
         } else if (op == "insert_braid") {  // Add > Braid, every host's
             const json& params = args.contains("params") && args["params"].is_object() ? args["params"] : json::object();
             r["name"] = insertBraid(edit, optString(args, "group", "braids"), params.dump(), optString(args, "after", ""), scalpSize(s));
+        } else if (op == "insert_braid_sculpt") {  // Sculpt Sections on a Braid, every host's
+            const BraidSculptNodes made = insertBraidSculpt(edit, needString(args, "braid"), scalpSize(s));
+            r["sculpt"] = made.sculpt;
+            r["follow"] = made.follow;
+            r["made"] = made.made;
         } else if (op == "insert_feathers") {  // Add > Feathers, every host's: designs by name (presets feathers_<name>)
             if (!args.contains("designs") || !args["designs"].is_array()) fail("bad_request", "designs is a list of feather design names");
             std::vector<FeatherDesign> designs;

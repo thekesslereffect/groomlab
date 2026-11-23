@@ -1051,6 +1051,35 @@ TEST(GraphInserts, BraidsAndFeathersLandAlikeInEveryHost) {
     EXPECT_THROW(insertBraid(edit, "braids", {}, "nothing"), GraphError);
     EXPECT_THROW(insertBraid(edit, ""), GraphError);
 
+    // Sculpt Sections: a Sculpt of the second braid's sections, its hair through a FollowGuides
+    // (rest the sections, guides the Sculpt's) into what the braid fed; asked again, the same nodes.
+    const std::string fedBySecond = [&] {
+        const json before = graph(edit);
+        for (const json& c : before["connections"]) {
+            if (c["from"] == second && c.value("output", std::string()).empty()) return c["to"].get<std::string>();
+        }
+        return std::string();
+    }();
+    ASSERT_FALSE(fedBySecond.empty());
+    const BraidSculptNodes sculpted = insertBraidSculpt(edit, second);
+    EXPECT_TRUE(sculpted.made);
+    EXPECT_EQ(edit.nodeType(sculpted.sculpt), "Sculpt");
+    EXPECT_EQ(edit.nodeType(sculpted.follow), "FollowGuides");
+    EXPECT_EQ(source(edit, sculpted.sculpt, "guides"), second);
+    EXPECT_EQ(source(edit, sculpted.follow, "strands"), second);
+    EXPECT_EQ(source(edit, sculpted.follow, "rest"), second);
+    EXPECT_EQ(source(edit, sculpted.follow, "guides"), sculpted.sculpt);
+    EXPECT_EQ(source(edit, fedBySecond, "strands"), sculpted.follow);
+    const json after = graph(edit);
+    for (const json& c : after["connections"]) {
+        if (c["to"] == sculpted.sculpt || (c["to"] == sculpted.follow && c["input"] == "rest")) EXPECT_EQ(c.value("output", ""), "sections");
+    }
+    const BraidSculptNodes again = insertBraidSculpt(edit, second);
+    EXPECT_FALSE(again.made);
+    EXPECT_EQ(again.sculpt, sculpted.sculpt);
+    EXPECT_EQ(again.follow, sculpted.follow);
+    EXPECT_THROW(insertBraidSculpt(edit, "guides"), GraphError);
+
     // Two designs sharing scattered shafts through a Split, merged with the hair before the output.
     auto design = [](const std::string& name) {
         std::ifstream in(std::filesystem::u8path(presetPath("feathers_" + name, {GROOMLAB_SHIPPED_PRESETS})));

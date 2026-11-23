@@ -1009,6 +1009,17 @@ class GraphModel(object):
         """Put `node` between `anchor`'s `input_name` source and `anchor` (e.g. before the output)."""
         self._insert("insert_before", anchor, node, input_name, "")
 
+    def insert_braid_sculpt(self, braid):
+        """Sculpt Sections, every host's (graph_inserts.h insertBraidSculpt): a Sculpt node of Braid
+        `braid`'s sections and a FollowGuides right after the Braid carrying its hair along them.
+        Returns {"sculpt", "follow", "made"}; a Braid that has them keeps them (made False)."""
+        edit = self._edit()
+        with _core_errors():
+            made = edit.insert_braid_sculpt(braid, self.groom_size)
+        if made["made"]:
+            self._take(edit)
+        return made
+
     def set_output(self, name):
         self._node(name)
         self.output = name

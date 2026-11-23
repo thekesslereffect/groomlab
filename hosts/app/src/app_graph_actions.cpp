@@ -94,6 +94,8 @@ void AppActions::addGraphBindings(ui::Bindings& b, MainWindow& w) {
                               },
                               {}, nodeOn};
     b["node.bake"] = {run([m, selected] { askBakeNode(*m, selected()); }), {}, nodeOn};
+    // A Braid's sections made guides to brush, its hair following them (graph_inserts.h insertBraidSculpt).
+    b["braid.sculptSections"] = {run([m, selected] { m->sculptBraidSections(selected()); }), {}, nodeOn};
     // GroomLab > Utilities > Bake Node to Guides...: the graph's selected node, else the output.
     b["node.bakeToGuides"] = {run([m, selected] {
                                   if (!m->document_) return;

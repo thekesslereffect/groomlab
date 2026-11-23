@@ -737,6 +737,25 @@ class GraphEditorTest(unittest.TestCase):
         return buttons[0]
 
     def test_node_actions(self):
+        # Braid: Sculpt Sections makes its sections a Sculpt node's guides the brushes shape, its hair
+        # through a FollowGuides after it; clicked again, the same nodes.
+        from groomlab import sculpts
+        braid = self.editor.add_node("Braid")
+        self.editor.link("width", braid, "strands")
+        self._select_node(braid)
+        for _ in range(2):
+            self._action("Sculpt Sections").click()
+            wait(50)  # actions run once the click is over
+            model = self.editor.model
+            follow = [n for n in model.order if model.node_type(n) == "FollowGuides"]
+            self.assertEqual(len(follow), 1, self.editor.status.text())
+            sculpt = model.source_of(follow[0], "guides")
+            self.assertEqual(model.node_type(sculpt), "Sculpt")
+            self.assertEqual(model.source_of(follow[0], "strands"), braid)
+            self.assertEqual(model.source_of(sculpt, "guides"), braid)
+            self.assertEqual(sculpts.target(self.groom), sculpt, self.editor.status.text())
+        self.editor.target_sculpt(None)
+
         # Instance: the selected mesh becomes the prototype.
         instance = self.editor.add_node("Instance")
         self.editor.link("width", instance, "strands")

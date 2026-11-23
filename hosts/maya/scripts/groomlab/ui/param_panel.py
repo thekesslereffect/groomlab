@@ -974,6 +974,7 @@ class ParamPanel(QtWidgets.QScrollArea):
             "sim.clear": lambda: later(lambda: menu.clear_core_simulation(groom=editor.groom)),
             "node.bake": lambda: later(lambda: editor.bake_to_guides(name)),
             "sculpt.clearEdits": lambda: later(lambda: (editor.clear_sculpt_edits(name), editor.reload())),
+            "braid.sculptSections": lambda: later(lambda: editor.sculpt_braid_sections(name)),
             "compound.ungroup": lambda: later(lambda: editor.expand([name])),
             "compound.saveAsNode": lambda: later(lambda: editor.show_save_node(name)),
             "compound.saveToLibrary": lambda: later(lambda: editor.save_to_library(name)),

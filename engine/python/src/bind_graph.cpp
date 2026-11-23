@@ -833,6 +833,18 @@ void bindGraph(py::module_& m) {
              py::arg("group") = std::string("braids"), py::arg("params_json") = std::string(), py::arg("after") = std::string(),
              py::arg("groom_size") = py::none(),
              "Add > Braid (graph_inserts.h): a Braid node after the Interpolate, its paths the group's Guides node.")
+        .def("insert_braid_sculpt",
+             [](GraphEdit& e, const std::string& braid, std::optional<double> groomSize) {
+                 const BraidSculptNodes made = insertBraidSculpt(e, braid, groomSize);
+                 py::dict out;
+                 out["sculpt"] = made.sculpt;
+                 out["follow"] = made.follow;
+                 out["made"] = made.made;
+                 return out;
+             },
+             py::arg("braid"), py::arg("groom_size") = py::none(),
+             "Sculpt Sections (graph_inserts.h insertBraidSculpt): a Sculpt of the Braid's sections and a FollowGuides "
+             "after it carrying the hair along them. {sculpt, follow, made}.")
         .def("insert_feathers",
              [](GraphEdit& e, const std::vector<std::pair<std::string, std::string>>& designs, const std::vector<double>& weights,
                 const std::string& source, const std::string& group, bool keepHair, std::optional<double> density,

@@ -183,6 +183,18 @@ std::string renameGroupReaders(const std::string& graphJson, const std::string& 
 std::string insertBraid(GraphEdit& edit, const std::string& group = "braids", const std::string& paramsJson = {},
                         const std::string& after = {}, std::optional<double> groomSize = std::nullopt);
 
+// Sculpt Sections (every host's Braid node button): a braid's sections made guides to brush, its hair
+// following them. A Sculpt node reading the Braid's "sections" output (brushed as any Sculpt: its
+// strokes are correctives, so they stay when the braid above changes) and a FollowGuides node right
+// after the Braid (its strands, before what the Braid's hair fed) carrying each section's hair along
+// its section's change: rest the sections, guides the Sculpt's. Placed below the Braid. A Braid
+// that has them already keeps them. GraphError for no Braid of that name.
+struct BraidSculptNodes {
+    std::string sculpt, follow;
+    bool made = false;  // whether they are new
+};
+BraidSculptNodes insertBraidSculpt(GraphEdit& edit, const std::string& braid, std::optional<double> groomSize = std::nullopt);
+
 // A feather design: its name (contour, down, ...) and the graph of its preset feathers_<name>,
 // fitted to the scalp (presetGraphJson): its Compound node grows the barbs, its Scatter's
 // density and length are the shafts'.

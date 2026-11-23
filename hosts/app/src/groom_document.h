@@ -33,6 +33,7 @@
 #include "groomlab/editor/groom_edit.h"
 #include "groomlab/editor/map_edits.h"
 #include "groomlab/frame_time.h"
+#include "groomlab/graph_inserts.h"
 #include "groomlab/groom_file.h"
 #include "groomlab/groom_scene.h"
 #include "groomlab/groom_session.h"
@@ -745,6 +746,10 @@ public:
     // paths in it with the Draw tool): every host's (graph_inserts.h insertBraid). `style` one of
     // braidStyles().
     std::string addBraid(const std::string& style, const std::string& group = "braids", std::string* made = nullptr);
+    // Sculpt Sections on Braid node `braid`: a Sculpt node of its sections and a FollowGuides after it
+    // carrying its hair along them, every host's (graph_inserts.h insertBraidSculpt; a Braid that has
+    // them keeps them, no undo step then). `made` gets the nodes. Returns an error, or "".
+    std::string sculptBraidSections(const std::string& braid, BraidSculptNodes* made = nullptr);
     // The Braid node's styles, in the core spec's order (three, four, five, fishtail, rope, cornrow).
     std::vector<std::string> braidStyles() const;
     // A root guide group of that name, made when missing (one undo step then).

@@ -632,6 +632,15 @@ std::vector<Case> cases() {
         {"BraidFreeTies", "op",
          R"({"name": "op", "type": "Braid", "params": {"region": 0.6, "width": 0.3, "end": "free", "release": 0.3, "ties": 2, "seed": 1}})",
          link("interp", "op", "strands") + "," + link("guides", "op", "braids")},
+        // A braid's sections moved (a Transform standing in for a Sculpt's brushing): its hair follows them.
+        {"FollowGuides", "op",
+         R"({"name": "braid", "type": "Braid", "params": {"region": 0.6, "width": 0.3, "seed": 1}},
+             {"name": "moved", "type": "Transform", "params": {"space": "world", "translate": [0.05, 0.0, 0.0], "rotate": [0.0, 0.0, 15.0]}},
+             {"name": "op", "type": "FollowGuides", "params": {"strength": 0.8}})",
+         link("interp", "braid", "strands") + "," + link("guides", "braid", "braids") + "," +
+             R"({"from": "braid", "to": "moved", "input": "strands", "output": "sections"},)"
+             R"({"from": "braid", "to": "op", "input": "rest", "output": "sections"},)" +
+             link("braid", "op", "strands") + "," + link("moved", "op", "guides")},
     };
 }
 

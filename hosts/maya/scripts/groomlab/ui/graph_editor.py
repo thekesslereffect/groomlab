@@ -3364,6 +3364,25 @@ class GraphEditor(QtWidgets.QWidget):
             return
         self.silently(lambda: sculpts.set_target(self.groom, name) if name else shots.set_target(self.groom, None))
 
+    def sculpt_braid_sections(self, name):
+        """Sculpt Sections on Braid node `name` (GraphModel.insert_braid_sculpt): its sections become a
+        Sculpt node's guides that the brushes shape, its hair following them; the graph is applied
+        and the brushes pick that Sculpt node. Returns the Sculpt's name, or None."""
+        try:
+            made = self.model.insert_braid_sculpt(name)
+        except gm.GraphError as e:
+            self.report(str(e))
+            return None
+        if made["made"]:
+            self.rebuild()
+            self.changed()
+        if self.groom and not self.live and not self.apply():
+            return None
+        self.target_sculpt(made["sculpt"])
+        self.report("brush %s's sections: %s keeps the strokes, %s carries the hair along them"
+                    % (name, made["sculpt"], made["follow"]))
+        return made["sculpt"]
+
     def clear_sculpt_edits(self, name):
         """Drop Sculpt node `name`'s strokes (one undo step)."""
         from groomlab import sculpts

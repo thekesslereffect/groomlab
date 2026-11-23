@@ -1482,6 +1482,25 @@ class GROOMLAB_OT_graph_sculpt_clear(_NodeOp):
         return {"FINISHED"}
 
 
+class GROOMLAB_OT_graph_sculpt_sections(_NodeOp):
+    """Brush the braid's sections: each section's curve a guide the brushes shape (a Sculpt node keeps the strokes), its hair following it"""
+    bl_idname = "groomlab.graph_sculpt_sections"
+    bl_label = "Sculpt Sections"
+    action_id = "braid.sculptSections"
+
+    def execute(self, context):
+        from . import pipeline
+        scalp = _ge().context_groom(context)
+        name = self.target(context)
+        try:
+            r = pipeline.sculpt_braid_sections(scalp, name)
+        except HelperError as e:
+            return _fail(self, e)
+        self.report({"INFO"}, "brush %s's sections: %s keeps the strokes, %s carries the hair along them"
+                    % (name, r["sculpt"], r["follow"]))
+        return {"FINISHED"}
+
+
 class GROOMLAB_OT_graph_paint_param(_ParamOp):
     """Paint this param: a map feeding it (white = its value now, black = 0), painted in Groom Tools > Paint"""
     bl_idname = "groomlab.graph_paint_param"
@@ -1559,6 +1578,7 @@ def _bind_all():
     bind("node.brushSculpt", "groomlab.graph_brush_sculpt", _n,
          lambda ctx, item: bool(ctx.scalp) and sculpt_target(ctx.scalp) == ctx.node)
     bind("sculpt.clearEdits", "groomlab.graph_sculpt_clear", _n)
+    bind("braid.sculptSections", "groomlab.graph_sculpt_sections", _n)
 
 
 classes = (GROOMLAB_OT_graph_group, GROOMLAB_OT_graph_ungroup, GROOMLAB_OT_graph_show_inner, GROOMLAB_OT_graph_expose,
@@ -1571,7 +1591,7 @@ classes = (GROOMLAB_OT_graph_group, GROOMLAB_OT_graph_ungroup, GROOMLAB_OT_graph
            GROOMLAB_OT_graph_open_nodes_folder, GROOMLAB_OT_graph_save_preset, GROOMLAB_OT_graph_copy,
            GROOMLAB_OT_graph_paste, GROOMLAB_OT_graph_backdrop_add, GROOMLAB_OT_graph_backdrop_rename,
            GROOMLAB_OT_graph_backdrop_color, GROOMLAB_OT_graph_backdrop_delete, GROOMLAB_OT_graph_rename,
-           GROOMLAB_OT_graph_delete, GROOMLAB_OT_graph_brush_sculpt, GROOMLAB_OT_graph_sculpt_clear,
+           GROOMLAB_OT_graph_delete, GROOMLAB_OT_graph_brush_sculpt, GROOMLAB_OT_graph_sculpt_clear, GROOMLAB_OT_graph_sculpt_sections,
            GROOMLAB_OT_graph_paint_param)
 
 

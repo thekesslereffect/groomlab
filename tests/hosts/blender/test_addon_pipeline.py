@@ -424,6 +424,18 @@ class PipelineOpsTest(unittest.TestCase):
         self.assertIs(param(head, second, "feed"), True)
         with self.assertRaises(Exception):
             pipeline.add_braid(head, style="plait")
+        # Sculpt Sections (graph_inserts.h insertBraidSculpt, every host's): the braid's sections a
+        # Sculpt node's guides the brushes shape, its hair through a FollowGuides; again, the same nodes.
+        made = pipeline.sculpt_braid_sections(head, braid)
+        self.assertTrue(made["made"])
+        self.assertEqual(link(head, made["follow"], "strands"), braid)
+        self.assertEqual(link(head, made["follow"], "guides"), made["sculpt"])
+        self.assertEqual(link(head, made["sculpt"], "guides"), braid)
+        self.assertEqual(tools.sculpt_target(head).get("target", {}).get("name"), made["sculpt"])
+        self.assertEqual(process.call("node_status", session=rt.session).get("graphError", ""), "")
+        again = pipeline.sculpt_braid_sections(head, braid)
+        self.assertEqual((again["made"], again["sculpt"], again["follow"]), (False, made["sculpt"], made["follow"]))
+        tools.sculpt_target(head, base=True)
         # The feathers' choice in the shared words: scattered feathers, or one feather per guide.
         items = {i.identifier: i.name for i in
                  bpy.ops.groomlab.add_feathers.get_rna_type().properties["source"].enum_items}

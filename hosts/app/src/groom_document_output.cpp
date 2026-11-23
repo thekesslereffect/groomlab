@@ -235,6 +235,28 @@ std::string GroomDocument::addBraid(const std::string& style, const std::string&
     return error;
 }
 
+std::string GroomDocument::sculptBraidSections(const std::string& braid, BraidSculptNodes* made) {
+    const MeshPtr& scalp = file().data.scalp;
+    const std::optional<double> size = paramScalpSize(scalp.get(), session().groomScale());
+    BraidSculptNodes nodes;
+    try {
+        GraphEdit trial(graph_.dump());
+        nodes = insertBraidSculpt(trial, braid, size);
+    } catch (const std::exception& e) {
+        return e.what();
+    }
+    std::string error;
+    if (nodes.made) {
+        error = editGraph("sculpt sections", [&](json& g) {
+            GraphEdit edit(g.dump());
+            nodes = insertBraidSculpt(edit, braid, size);
+            g = json::parse(edit.toJson());
+        });
+    }
+    if (error.empty() && made) *made = nodes;
+    return error;
+}
+
 // ---- Import and Utilities ---------------------------------------------------------------------------
 
 std::string GroomDocument::importAlembicCurves(const std::string& path, const std::string& object, int samples, std::size_t* curves) {

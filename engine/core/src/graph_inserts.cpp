@@ -813,6 +813,33 @@ std::string insertBraid(GraphEdit& edit, const std::string& group, const std::st
     return braid;
 }
 
+BraidSculptNodes insertBraidSculpt(GraphEdit& edit, const std::string& braid, std::optional<double> groomSize) {
+    const json g = graphOf(edit);
+    if (typeOf(g, braid) != "Braid") throw GraphError("no Braid node '" + braid + "' to sculpt the sections of");
+    BraidSculptNodes out;
+    // Already there: a FollowGuides fed the Braid's hair, its guides from a Sculpt of its sections.
+    for (const Link& l : linksFrom(g, braid)) {
+        if (l.output != "sections" || typeOf(g, l.to) != "Sculpt") continue;
+        for (const Link& f : linksFrom(g, l.to)) {
+            if (typeOf(g, f.to) == "FollowGuides" && f.input == "guides") return {l.to, f.to, false};
+        }
+    }
+    const std::vector<Link> fed = linksFrom(g, braid);  // (before the follow is made)
+    out.made = true;
+    out.sculpt = addNodeAt(edit, "Sculpt", "braidSculpt", json::object(), groomSize, placeBy(edit, braid, 0.0, kInsertRow));
+    out.follow = addNodeAt(edit, "FollowGuides", "braidFollow", json::object(), groomSize,
+                           placeBy(edit, braid, kInsertColumn / 2.0, kInsertRow / 2.0));
+    edit.connect(braid, out.sculpt, "guides", "sections");
+    // What the Braid's hair fed reads the follow (its other outputs' links stay).
+    for (const Link& l : fed) {
+        if (l.output.empty() || l.output == "out") edit.connect(out.follow, l.to, l.input);
+    }
+    edit.connect(braid, out.follow, "strands");
+    edit.connect(braid, out.follow, "rest", "sections");
+    edit.connect(out.sculpt, out.follow, "guides");
+    return out;
+}
+
 FeatherNodes insertFeathers(GraphEdit& edit, const std::vector<FeatherDesign>& designs, const std::vector<double>& weights,
                             const std::string& source, const std::string& group, bool keepHair, std::optional<double> density,
                             std::optional<double> groomSize) {
