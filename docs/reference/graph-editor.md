@@ -385,6 +385,7 @@ gets more clumps of the same size than a head, not the same number stretched ove
 | Hair | `parted_style` | A part drawn with the Part tool: Interpolate and Clump respect it, the Part node opens it |
 | Hair | `tube_locks` | Tube locks (anime): Interpolate with `fillTubes` and `tubeBlend` fills each guide's tube, a Clump with `followTubes` and soft clumps, light Noise, HairColor, tapered Width, Resample; place guides, shape their tubes with the Shape brush |
 | Fur | `creature_fur` | Fur for a whole animal: laid by flow arrows (Flow, no guides), soft tufts about a centimetre across, lighter tips |
+| Fur | `feathered_fur` | Stylized fur in soft feather-shaped tufts, one per guide: a Clump onto the guides (its distChannel clumpDist), laid flat, and a Length keeping 1 - clumpDist^2 of each strand, so each tuft ends in a rounded point |
 | Fur | `agouti_fur` | The creature fur in wild-type banding: guard hairs dark, a pale band, a black tip, the bands wandering hair to hair over a plain undercoat (HairColor, then Bands with guard hairs) |
 | Fur | `white_wool` | Dense, crimped white fleece in soft locks: a picked off-white (HairColor's `color` mode, so no pigment browns it), a little brightness variation, white tips |
 | Fur | `flow_with_guides` | Flow fur and guided, clumped hair blended by a painted map (`guideAreas`, made black on apply: paint it white where the guides take over) |

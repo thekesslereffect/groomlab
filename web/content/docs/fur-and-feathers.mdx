@@ -27,6 +27,15 @@ look nodes. Short fur can be groomed without guides:
   skin, keeping its length. Grow the whiskers themselves from those guides with ToStrands and
   Merge them with the fur.
 - **Banded, tipped and shaded coats** (`agouti_fur`): see [Color patterns](/docs/color-patterns).
+- **Fur shaped into feathers** (`feathered_fur`): stylized fur whose tufts read as soft feathers, one
+  per guide. Place a guide where each feather goes and comb it to aim the feather. A **Clump** with
+  `centersFrom` set to `inputCurves` gathers each guide's hair onto it; `flatness` lays the tuft
+  flat along the skin. Name the Clump's `distChannel` (`clumpDist`: 0 at the guide, 1 halfway to the
+  next guide) and a **Length** after it with `keep` set to the expression `1 - $clumpDist ^ 2`
+  trims every tuft to a rounded tip (`1 - $clumpDist`: a pointed one, `^ 4`: a blunt one). The
+  Clump's `sideChannel` (`clumpSide`: -1 left of the guide, 1 right) gives lopsided feathers, or a
+  notch down the middle with `abs($clumpSide)`. Both work with a Clump picking its own centers too
+  (sides then across the scalp's UVs).
 
 ## Feathers
 

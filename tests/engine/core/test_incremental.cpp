@@ -2224,7 +2224,7 @@ TEST(Incremental, EveryShippedPresetFollowsAStrokeExactly) {
         };
         auto check = [&](const std::string& what) {
             const ViewResult& seen = session.evaluate(request);
-            EXPECT_TRUE(seen.errors.empty()) << p.name << " " << what;
+            EXPECT_TRUE(seen.errors.empty()) << p.name << " " << what << ": " << (seen.errors.empty() ? "" : seen.errors[0]);
             ASSERT_TRUE(seen.strands) << p.name << " " << what;
             EXPECT_EQ(seen.strands->contentHash(), fresh()) << p.name << " " << what;
         };
