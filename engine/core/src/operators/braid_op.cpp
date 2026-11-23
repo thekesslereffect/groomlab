@@ -3370,8 +3370,12 @@ private:
             section[s] = static_cast<float>(lobe);
             Vec3f* pts = out->strandPoints(s);
             const std::size_t m = out->strandPointCount(s);
+            // A section starts where the weave does (past the gather, where its hair has come in, as
+            // Show Tubes' tubes do); before it no hair is braided, so a curve there would weave
+            // through the air off the hair. The path itself runs from its root.
+            const float from = lobe < 0 ? 0.0f : std::clamp(path.weaveFrom, 0.0f, path.length);
             for (std::size_t j = 0; j < m; ++j) {
-                pts[j] = br.of(b).braidedAt(path, path.length * static_cast<float>(j) / static_cast<float>(m - 1), lobe, centered);
+                pts[j] = br.of(b).braidedAt(path, from + (path.length - from) * static_cast<float>(j) / static_cast<float>(m - 1), lobe, centered);
             }
         });
         return StrandsPtr(out);

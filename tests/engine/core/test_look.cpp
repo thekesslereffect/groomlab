@@ -2587,6 +2587,60 @@ TEST(Braid, TheSectionsOutputGivesEachSectionsWovenCurve) {
     EXPECT_EQ(numbers, (std::set<float>{0.0f, 1.0f, 2.0f}));
 }
 
+TEST(Braid, TheSectionsOutputRunsThroughItsSectionsHair) {
+    // Each section guide runs where its section's hair is: in each band along the standing path,
+    // the guide's points lie at the mean of that section's braided hair there. It starts where the
+    // weave does (the gather), not at the path's root where the hair has not come in yet: the
+    // guides read back as the braid (To Strands, To Guides, clump centers).
+    for (const char* style : {"three", "four", "rope"}) {
+        BraidScene scene(style);
+        scene.setParam("region", 0.45);  // a ponytail: hair sweeping in from far around
+        scene.setParam("end", std::string("bound"));
+        EvalContext ctx;
+        ctx.externals = &scene.lg.ext;
+        const StrandsPtr hair = scene.lg.eval(scene.braid);
+        const GuidesPtr sections = valueAs<GuidesPtr>(scene.lg.g.evaluateOutput(scene.braid, 3, ctx));
+        ASSERT_TRUE(hair && sections);
+        const std::vector<float>* section = hair->strandChannel("braidSection");
+        const std::vector<float>* woven = hair->pointChannel("braidWoven");
+        ASSERT_TRUE(section && woven);
+        constexpr float kBand = 0.02f, kWidth = 0.25f;
+        std::map<std::pair<int, int>, std::array<double, 3>> means;  // (section, band): x, z, count
+        for (std::size_t s = 0; s < hair->strandCount(); ++s) {
+            const int k = static_cast<int>((*section)[s]);
+            if (k < 0) continue;
+            const std::size_t begin = hair->strandBegin(s);
+            for (std::size_t i = 0; i < hair->strandPointCount(s); ++i) {
+                if ((*woven)[begin + i] < 0.999f) continue;  // (on its way in)
+                const Vec3f q = hair->strandPoints(s)[i];
+                auto& m = means[{k, static_cast<int>(std::floor(q.y / kBand))}];
+                m[0] += q.x, m[1] += q.z, m[2] += 1.0;
+            }
+        }
+        float lowest = 1e9f, worst = 0.0f;
+        std::size_t compared = 0;
+        for (const Guide& g : sections->guides()) {
+            const int k = static_cast<int>(g.attributes.at("braidSection"));
+            lowest = std::min(lowest, g.points.front().y);
+            for (const Vec3f& p : g.points) {
+                // (Past the weave's first band, where the last hair is still coming in; before the
+                // tail, where the ends let go.)
+                if (p.y < g.points.front().y + 2.0f * kBand || p.y > 0.85f) continue;
+                const auto it = means.find({k, static_cast<int>(std::floor(p.y / kBand))});
+                if (it == means.end() || it->second[2] < 20.0) continue;
+                const float off = std::hypot(static_cast<float>(it->second[0] / it->second[2]) - p.x,
+                                             static_cast<float>(it->second[1] / it->second[2]) - p.z);
+                if (off > worst) std::printf("%s k%d y%.3f off%.4f n%.0f\n", style, k, p.y, off, it->second[2]);
+                worst = std::max(worst, off);
+                ++compared;
+            }
+        }
+        EXPECT_GT(compared, 50u) << style;
+        EXPECT_LT(worst, 0.1f * kWidth) << style;
+        EXPECT_GT(lowest, 0.1f) << style << ": a section guide starts below the gather";
+    }
+}
+
 TEST(Braid, BraidPressMarksTheHairLyingAgainstAnotherSection) {
     // braidPress, per point: 0 where a strand lies free in its section, up to 1 where it lies on a
     // contact's facet against another section (the sections pressed: separate), for a Clump's
