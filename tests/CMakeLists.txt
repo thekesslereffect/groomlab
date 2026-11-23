@@ -957,3 +957,10 @@ if(GROOMLAB_GUI_TESTS AND GROOMLAB_BUILD_MAYA AND TARGET GroomLab)
             ENVIRONMENT "MAYA_DEBUG_ENABLE_CRASH_REPORTING=0;${_bench_env}GROOMLAB_GUI_SUITES=bench;GROOMLAB_GUI_SUITE_TIMEOUT=3500;MAYA_APP_DIR=${CMAKE_CURRENT_BINARY_DIR}/maya_app_dir;PYTHONPATH=${GROOMLAB_MAYA_PYTHONPATH};GROOMLAB_PLUGIN=$<TARGET_FILE:GroomLab>;GROOMLAB_SCRIPTS=${PROJECT_SOURCE_DIR}/hosts/maya/scripts;GROOMLAB_TESTS=${CMAKE_CURRENT_SOURCE_DIR}/hosts/maya;GROOMLAB_GUI_LOG=${CMAKE_CURRENT_BINARY_DIR}/viewport_bench_${_bench}.log")
     endforeach()
 endif()
+
+# Every test's temp files in one folder, emptied each run (cmake/GroomLabTestTemp.cmake).
+if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.27)
+    groomlab_tests_use_run_temp(groomlab_timing_tests)
+else()
+    groomlab_tests_use_run_temp()
+endif()

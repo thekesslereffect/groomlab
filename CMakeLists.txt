@@ -163,6 +163,7 @@ endfunction()
 
 if(GROOMLAB_BUILD_TESTS)
     enable_testing()
+    include(GroomLabTestTemp)
 endif()
 
 add_subdirectory(engine/core)
