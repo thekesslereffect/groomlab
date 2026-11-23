@@ -4,6 +4,7 @@
 #include "groomlab/graph_arrange.h"
 
 #include <algorithm>
+#include <cmath>
 #include <functional>
 #include <set>
 
@@ -160,6 +161,37 @@ LayoutBox foldedBackdrop(const LayoutBox& backdrop, double header, double minWid
     out.w = std::clamp(backdrop.w, minWidth, std::max(minWidth, maxWidth));
     out.h = header + 16.0;
     return out;
+}
+
+double backdropHeader(const json& backdrop) {
+    const json size = backdrop.is_object() ? backdrop.value("fontSize", json()) : json();
+    const double points = size.is_number() ? size.get<double>() : 0.0;
+    return points > 0.0 ? std::max(28.0, points * 1.9) : 28.0;
+}
+
+double backdropContentTop(const json& backdrop) {
+    double top = backdropHeader(backdrop);
+    const std::string text = backdrop.is_object() ? backdrop.value("description", std::string()) : std::string();
+    if (text.empty()) return top;
+    // Wrapped to the backdrop's width (12 pt text: about 6.5 a character), 16 a line.
+    const double perLine = std::max(8.0, (backdrop.value("w", 300.0) - 24.0) / 6.5);
+    int lines = 0;
+    std::size_t start = 0;
+    while (start <= text.size()) {
+        const std::size_t end = std::min(text.find('\n', start), text.size());
+        lines += std::max(1, static_cast<int>(std::ceil(static_cast<double>(end - start) / perLine)));
+        start = end + 1;
+    }
+    return top + 6.0 + lines * 16.0;
+}
+
+double backdropTitleWidth(const json& backdrop) {
+    const json size = backdrop.is_object() ? backdrop.value("fontSize", json()) : json();
+    const double points = size.is_number() && size.get<double>() > 0.0 ? size.get<double>() : 14.0;
+    const std::string title = backdrop.is_object() ? backdrop.value("title", std::string()) : std::string();
+    std::size_t chars = 0;
+    for (const unsigned char c : title) chars += (c & 0xC0) != 0x80 ? 1 : 0;  // (UTF-8: characters)
+    return chars * points * 0.62 + 56.0;
 }
 
 bool backdropFolded(const json& backdrop) {
@@ -655,14 +687,15 @@ json tidyGraph(const json& graph, const std::vector<LayoutBox>& boxes, const std
         if (backdropFolded(backdrops[h])) {
             for (const std::string& m : held[h]) card.members[m] = {box[m].x - card.box.x, box[m].y - card.box.y};
         } else {
+            const double top = std::max(header, backdropContentTop(backdrops[h]));
             double w = 0.0, hgt = 0.0;
             for (const auto& [m, at] : layoutOf(held[h])) {
-                card.members[m] = {margin + at.first, header + margin + at.second};
+                card.members[m] = {margin + at.first, top + margin + at.second};
                 w = std::max(w, at.first + box[m].w);
                 hgt = std::max(hgt, at.second + box[m].h);
             }
-            card.box.w = w + margin * 2.0;
-            card.box.h = hgt + margin * 2.0 + header;
+            card.box.w = std::max(w + margin * 2.0, backdropTitleWidth(backdrops[h]));
+            card.box.h = hgt + margin * 2.0 + top;
         }
         for (const std::string& m : held[h]) cardOf[m] = static_cast<int>(cards.size());
         cards.push_back(std::move(card));
@@ -681,7 +714,7 @@ json tidyGraph(const json& graph, const std::vector<LayoutBox>& boxes, const std
             moved[m] = {left + at.first, top + at.second};
             now.push_back({m, left + at.first, top + at.second, box[m].w, box[m].h});
         }
-        newBackdrop[h] = grownBackdrop(backdropBoxes[h], now, margin, header);
+        newBackdrop[h] = grownBackdrop(backdropBoxes[h], now, margin, std::max(header, backdropContentTop(backdrops[h])));
     }
     // The outer layout, its top-left where the cards' was.
     if (!cards.empty()) {
@@ -792,6 +825,52 @@ json tidyGraph(const json& graph, const std::vector<LayoutBox>& boxes, const std
             }
         }
     }
+    return out;
+}
+
+}  // namespace groomlab
+
+namespace groomlab {
+
+json clearBackdropTitle(const json& graph, int index, const std::vector<LayoutBox>& boxes, double margin) {
+    json out = graph;
+    if (!graph.contains("backdrops") || !graph["backdrops"].is_array() || index < 0 ||
+        index >= static_cast<int>(graph["backdrops"].size()))
+        return out;
+    const json& b = graph["backdrops"][index];
+    if (!b.is_object() || backdropFolded(b)) return out;
+    const LayoutBox backdrop{b.value("title", std::string()), b.value("x", 0.0), b.value("y", 0.0), b.value("w", 0.0), b.value("h", 0.0)};
+    std::set<std::string> held;
+    double topmost = 0.0;
+    for (const LayoutBox& n : boxes) {
+        if (!onBackdrop(backdrop, n)) continue;
+        topmost = held.empty() ? n.y : std::min(topmost, n.y);
+        held.insert(n.name);
+    }
+    json& to = out["backdrops"][index];
+    const double width = std::max(backdrop.w, backdropTitleWidth(b));
+    const double push = held.empty() ? 0.0 : backdrop.y + backdropContentTop(b) + margin - topmost;
+    if (push > 0.0) {
+        const CarriedLayout on = layoutOnBackdrop(graph, backdrop);
+        for (json& n : out["nodes"]) {
+            if (!n.is_object() || !held.count(n.value("name", std::string()))) continue;
+            const auto at = std::find_if(boxes.begin(), boxes.end(), [&](const LayoutBox& x) { return x.name == n["name"]; });
+            n["ui"] = {{"x", at->x}, {"y", at->y + push}};
+        }
+        for (const std::string& pin : on.pins) {
+            double x = 0.0, y = 0.0;
+            if (pinPosition(graph, pin, &x, &y)) movePin(out, pin, x, y + push);
+        }
+        for (const auto& [portal, exit] : on.dots) {
+            for (json& p : out["portals"]) {
+                if (!p.is_object() || p.value("name", std::string()) != portal) continue;
+                json& dot = exit < 0 ? p : p["exits"][exit];
+                dot["y"] = dot.value("y", 0.0) + push;
+            }
+        }
+        to["h"] = backdrop.h + push;
+    }
+    if (width > backdrop.w) to["w"] = width;
     return out;
 }
 

@@ -24,6 +24,7 @@
 #include "groomlab/asset_files.h"
 #include "groomlab/card_blocks.h"
 #include "groomlab/card_files.h"
+#include "groomlab/graph_arrange.h"
 #include "groomlab/card_maps.h"
 #include "groomlab/cards.h"
 #include "groomlab/display.h"
@@ -360,8 +361,10 @@ public:
     std::string feedDot(const std::string& portal, const std::string& from, const std::string& output);
     std::string setDotInput(const std::string& portal, int exit, const std::string& into);
     // A backdrop's description (shown on it) and its title's font size (0: the default). One undo step.
-    std::string setBackdropDescription(int index, const std::string& text);
-    std::string setBackdropFontSize(int index, int points);
+    // `boxes` (every node's card as drawn): the nodes on it pushed down clear of the title
+    // (graph_arrange.h clearBackdropTitle), in the same step.
+    std::string setBackdropDescription(int index, const std::string& text, const std::vector<LayoutBox>& boxes = {});
+    std::string setBackdropFontSize(int index, int points, const std::vector<LayoutBox>& boxes = {});
     // A Compound's inner param ("node.param") shown on it as a param of its own (named after the
     // param, node + Param when the compound has that name), or no longer (Maya's Show Inner Param:
     // what Save as Node keeps). One undo step; "" or the error. shownInnerParams: the targets shown.

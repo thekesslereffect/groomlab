@@ -5322,6 +5322,18 @@ TEST(AppPanels, GraphAlignGesturesAndBackdropCard) {
     slider->setValue(30);
     EXPECT_EQ(doc->graph()["backdrops"][0]["fontSize"], 30);
     EXPECT_TRUE(view.propertiesShown()) << "the card stays up";
+    // A big title pushes the node on it down, clear of the title bar.
+    slider->setValue(60);
+    const nlohmann::json& bd = doc->graph()["backdrops"][0];
+    EXPECT_GE(view.nodeRect(length).top(), bd["y"].get<double>() + backdropHeader(bd));
+    EXPECT_EQ(doc->undoText(), "Undo backdrop font size");
+    // The swatches have room: each shows whole in its row.
+    QWidget* colors = nullptr;
+    for (QPushButton* b : view.findChildren<QPushButton*>()) {
+        if (b->property("swatch").value<QColor>().isValid()) colors = b->parentWidget();
+    }
+    ASSERT_NE(colors, nullptr);
+    EXPECT_GE(colors->minimumHeight(), 30);
     QPushButton* swatch = nullptr;
     for (QPushButton* b : view.findChildren<QPushButton*>()) {
         if (b->property("swatch").value<QColor>().isValid() && b->toolTip() == QStringLiteral("Green")) swatch = b;

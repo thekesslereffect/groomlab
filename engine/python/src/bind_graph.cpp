@@ -874,6 +874,13 @@ void bindGraph(py::module_& m) {
                     double row) { return arrangeSelection(edit, boxesOf(boxes), column, row); },
           py::arg("edit"), py::arg("boxes"), py::arg("column"), py::arg("row"),
           "Tidy Selection: {name: (x, y)} for the selected nodes laid out where they were.");
+    m.def("clear_backdrop_title",
+          [boxesOf](const std::string& graphJson, int index, const std::vector<std::tuple<std::string, double, double, double, double>>& boxes,
+                    double margin) { return clearBackdropTitle(nlohmann::json::parse(graphJson), index, boxesOf(boxes), margin).dump(); },
+          py::arg("graph_json"), py::arg("index"), py::arg("boxes"), py::arg("margin") = 16.0,
+          "The graph's JSON with backdrop `index`'s nodes moved down clear of its title (graph_arrange.h clearBackdropTitle).");
+    m.def("backdrop_content_top", [](const std::string& backdrop) { return backdropContentTop(nlohmann::json::parse(backdrop)); },
+          py::arg("backdrop_json"), "How far under a backdrop's top its nodes may start (its title bar and description).");
     m.def("tidy_graph",
           [boxesOf](const std::string& graphJson, const std::vector<std::tuple<std::string, double, double, double, double>>& boxes,
                     const std::vector<std::string>& selected, double gapX, double gapY, double margin, double header) {

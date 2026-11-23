@@ -2903,12 +2903,17 @@ void NodeGraphView::setSelectedAsOutput() {
     refresh();
 }
 
+std::vector<LayoutBox> NodeGraphView::nodeBoxes() const {
+    std::vector<LayoutBox> boxes;
+    for (const Node& n : nodes_) boxes.push_back({n.name, n.pos.x(), n.pos.y(), n.size.width(), n.size.height()});
+    return boxes;
+}
+
 void NodeGraphView::tidyLayout() {
     if (!document_) return;
     // The core's (graph_arrange.h tidyGraph, Maya's too): the selected nodes (fewer than two: all of
     // them) laid out by their links where they are, each backdrop a group laid out on it.
-    std::vector<LayoutBox> boxes;
-    for (const Node& n : nodes_) boxes.push_back({n.name, n.pos.x(), n.pos.y(), n.size.width(), n.size.height()});
+    const std::vector<LayoutBox> boxes = nodeBoxes();
     const bool all = selection_.size() < 2;
     const std::vector<std::string> chosen = all ? std::vector<std::string>{} : selection_;
     const std::string error = document_->editLayout(all ? "tidy layout" : "tidy selection", [&](nlohmann::json& g) {
@@ -4207,7 +4212,7 @@ void NodeGraphView::updateProperties() {
         // The palette's swatches (graph_ui.json backdropColors, as the menu's Color), then any color.
         propsColors_ = new QWidget(props_);
         auto* swatches = new QHBoxLayout(propsColors_);
-        swatches->setContentsMargins(0, 0, 0, 0);
+        swatches->setContentsMargins(2, 3, 2, 3);  // (a selected swatch's thicker border shows whole)
         swatches->setSpacing(6);
         auto pick = [this](const QColor& color) {
             if (selectedBackdrop_ < 0 || !color.isValid()) return;
@@ -4237,7 +4242,9 @@ void NodeGraphView::updateProperties() {
         });
         swatches->addWidget(custom);
         swatches->addStretch(1);
+        propsColors_->setMinimumHeight(24 + 6);
         layout->addWidget(propsColors_);
+        layout->addSpacing(8);
         propsFontLabel_ = label(tr("Title size"));
         auto* fontRow = new QWidget(props_);
         auto* fontLayout = new QHBoxLayout(fontRow);
@@ -4273,7 +4280,7 @@ void NodeGraphView::updateProperties() {
         connect(propsDescription_, &QPlainTextEdit::textChanged, pause, [pause] { pause->start(); });
         connect(pause, &QTimer::timeout, this, [this] {
             if (selectedBackdrop_ < 0 || propsDescription_->toPlainText() == backdrops_[selectedBackdrop_].description) return;
-            document_->setBackdropDescription(selectedBackdrop_, propsDescription_->toPlainText().toStdString());
+            document_->setBackdropDescription(selectedBackdrop_, propsDescription_->toPlainText().toStdString(), nodeBoxes());
             const QSignalBlocker quiet(propsDescription_);
             refresh();
         });
@@ -4281,7 +4288,7 @@ void NodeGraphView::updateProperties() {
         // (a key or a click on the groove: at once).
         auto setSize = [this](int points) {
             if (selectedBackdrop_ < 0 || points == backdrops_[selectedBackdrop_].fontSize) return;
-            document_->setBackdropFontSize(selectedBackdrop_, points);
+            document_->setBackdropFontSize(selectedBackdrop_, points, nodeBoxes());
             refresh();
         };
         connect(propsFont_, &QSlider::valueChanged, this, [this, setSize](int points) {

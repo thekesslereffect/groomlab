@@ -1716,21 +1716,23 @@ std::string GroomDocument::removeBackdrop(int index) {
     });
 }
 
-std::string GroomDocument::setBackdropDescription(int index, const std::string& text) {
+std::string GroomDocument::setBackdropDescription(int index, const std::string& text, const std::vector<LayoutBox>& boxes) {
     if (!backdropAt(view(), index)) return "no backdrop " + std::to_string(index);
     return editGraph("backdrop description", [&](json& g) {
         json& b = *backdropAt(g, index);
         if (text.empty()) b.erase("description");
         else b["description"] = text;
+        if (!boxes.empty()) g = clearBackdropTitle(g, index, boxes);
     });
 }
 
-std::string GroomDocument::setBackdropFontSize(int index, int points) {
+std::string GroomDocument::setBackdropFontSize(int index, int points, const std::vector<LayoutBox>& boxes) {
     if (!backdropAt(view(), index)) return "no backdrop " + std::to_string(index);
     return editGraph("backdrop font size", [&](json& g) {
         json& b = *backdropAt(g, index);
         if (points <= 0) b.erase("fontSize");
         else b["fontSize"] = std::clamp(points, 8, 96);
+        if (!boxes.empty()) g = clearBackdropTitle(g, index, boxes);  // the nodes pushed clear of a bigger title
     });
 }
 

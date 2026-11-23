@@ -2037,8 +2037,9 @@ class ItemProps(QtWidgets.QFrame):
         # Its color: the palette's swatches (graph_ui.json backdropColors, as the menu's Color), then any.
         self.colors = QtWidgets.QWidget()
         swatches = QtWidgets.QHBoxLayout(self.colors)
-        swatches.setContentsMargins(0, 0, 0, 0)
-        swatches.setSpacing(4)
+        swatches.setContentsMargins(2, 3, 2, 3)  # (a selected swatch's thicker border shows whole)
+        swatches.setSpacing(theme.px(6))
+        self.colors.setMinimumHeight(theme.px(22) + 8)
         self.swatches = []
         for entry in definitions.get("graph/backdropColors"):
             button = QtWidgets.QPushButton()
@@ -2055,6 +2056,7 @@ class ItemProps(QtWidgets.QFrame):
         swatches.addWidget(self.custom_color)
         swatches.addStretch(1)
         form.addRow("Color", self.colors)
+        form.setVerticalSpacing(theme.px(8))  # (room between the swatches and the title size)
         # Its title size: a slider (shown live while dragged; one undo step when let go).
         self.font_row = QtWidgets.QWidget()
         row = QtWidgets.QHBoxLayout(self.font_row)
@@ -4779,10 +4781,26 @@ class GraphEditor(QtWidgets.QWidget):
                 data["title"] = "Backdrop"
         else:
             data[key] = value
+        if key in ("fontSize", "description", "title"):
+            # Its nodes pushed down clear of a bigger title (or a longer description), the backdrop
+            # as wide as its title (the core's clearBackdropTitle, the app's too): in the same step.
+            import groomlab_core
+            index = next(i for i, b in enumerate(self.model.backdrops) if b is data)
+            try:
+                self.model.load_dict(json.loads(groomlab_core.clear_backdrop_title(
+                    json.dumps(self.model.to_dict()), index, self._node_boxes())))
+                data = self.model.backdrops[index]
+            except (RuntimeError, ValueError, IndexError, StopIteration):
+                pass
         self._layout_dirty = True
         self.commit_layout("backdrop " + key)
         self.rebuild()
         self.reselect(backdrop=data)
+
+    def _node_boxes(self):
+        """Every node's card as drawn: (name, x, y, w, h), the core's boxes."""
+        return [(name, item.pos().x(), item.pos().y(), float(NODE_W), float(item.height))
+                for name, item in self.items.items() if isinstance(item, NodeItem)]
 
     def align_selected(self, mode):
         """Align the selected nodes (the core's align_boxes: left, centerX, right, top, centerY,
@@ -4812,8 +4830,7 @@ class GraphEditor(QtWidgets.QWidget):
             return
         selected = self.selected_names()
         chosen = selected if len(selected) >= 2 else []
-        boxes = [(name, item.pos().x(), item.pos().y(), float(NODE_W), float(item.height))
-                 for name, item in self.items.items() if isinstance(item, NodeItem)]
+        boxes = self._node_boxes()
         try:
             data = json.loads(groomlab_core.tidy_graph(json.dumps(self.model.to_dict()), boxes, chosen,
                                                        60.0, 40.0, 24.0, 28.0))

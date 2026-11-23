@@ -333,6 +333,8 @@ public:
     // Tidy Layout (L, Ctrl+L): the selected nodes laid out by their links (fewer than two: the whole
     // graph, then fitted), each backdrop a group (graph_arrange.h tidyGraph). One undo step.
     void tidyLayout();
+    // Every node's card as drawn (graph_arrange.h's boxes).
+    std::vector<LayoutBox> nodeBoxes() const;
     // Ctrl+G: the selected nodes into one Compound (selected after); Ctrl+Shift+G: the selected
     // Compounds' nodes back in the graph (selected after). Each one undo step.
     void groupSelected();

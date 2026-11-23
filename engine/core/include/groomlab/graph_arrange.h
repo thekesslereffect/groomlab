@@ -58,8 +58,9 @@ std::map<std::string, std::pair<double, double>> arrangeSelection(const GraphEdi
 // columns; in each column a card goes level with what feeds it where it can (so chains run
 // straight), `gapY` under the one above. The block's top-left stays where theirs was; the rest of
 // the graph stays put. Backdrops are groups: the nodes on one (the smallest holding a card's
-// center) are laid out on it apart from the rest, the backdrop fitted round them (`margin`, its
-// title bar `header` tall), and it moves in the layout as one card; a folded backdrop keeps its
+// center) are laid out on it apart from the rest, the backdrop fitted round them (`margin`, under
+// its backdropContentTop, at least `header`; as wide as its title at least), and it moves in the
+// layout as one card; a folded backdrop keeps its
 // nodes where they are on it. A backdrop with only some of its nodes tidied keeps its place: those
 // are laid out where they are on it, the backdrop grown round them. The pins and dots go with
 // what they link (those on a backdrop moved as a card, with it). `boxes`: every node's card as
@@ -83,6 +84,20 @@ LayoutBox grownBackdrop(const LayoutBox& backdrop, const std::vector<LayoutBox>&
 LayoutBox foldedBackdrop(const LayoutBox& backdrop, double header, double minWidth = 160.0, double maxWidth = 260.0);
 // Whether the backdrop in the graph's JSON is folded.
 bool backdropFolded(const nlohmann::json& backdrop);
+// Its title bar's height, every host's: taller for a bigger title ("fontSize" in points: 1.9 times
+// it, at least 28; none: 28).
+double backdropHeader(const nlohmann::json& backdrop);
+// How far under its top its nodes may start: the title bar, and its "description" (drawn under the
+// title bar, wrapped to the backdrop's width: about 16 a line) when it has one.
+double backdropContentTop(const nlohmann::json& backdrop);
+// About how wide its title is drawn (with the fold chevron and margins): what a backdrop fitted to
+// its nodes keeps at least, so the title shows whole.
+double backdropTitleWidth(const nlohmann::json& backdrop);
+// The title kept clear of the nodes (a bigger title size, a longer description): the backdrop
+// `index`'s nodes (cards whose center is on it), and the pins and dots on it, moved down so the
+// topmost starts `margin` under backdropContentTop, the backdrop as much taller (and as wide as
+// its title). The graph as it was when nothing is in the way. `boxes`: every node's card as drawn.
+nlohmann::json clearBackdropTitle(const nlohmann::json& graph, int index, const std::vector<LayoutBox>& boxes, double margin = 16.0);
 // While a node on a backdrop is dragged: whether the backdrop keeps it (and grows round it) or the
 // node leaves it. Dragged slowly past an edge (under kBackdropEscapeSpeed screen pixels a second),
 // the backdrop grows with it; dragged out fast, it leaves; once it has left, it stays out for the

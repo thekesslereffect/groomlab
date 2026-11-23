@@ -642,5 +642,55 @@ TEST(GraphArrange, PromoteAnInnerParamToTheCompoundFromInside) {
     EXPECT_FALSE(paramPromoted(nested, path, "color", "melanin"));
 }
 
+TEST(GraphArrange, ABackdropsTitleIsKeptClearOfItsNodes) {
+    json bd = {{"title", "Look"}, {"x", 0.0}, {"y", 0.0}, {"w", 400.0}, {"h", 300.0}};
+    EXPECT_EQ(backdropHeader(bd), 28.0);
+    bd["fontSize"] = 40;
+    EXPECT_NEAR(backdropHeader(bd), 76.0, 1e-9);
+    EXPECT_NEAR(backdropContentTop(bd), 76.0, 1e-9);
+    bd["description"] = "one line";
+    EXPECT_NEAR(backdropContentTop(bd), 76.0 + 6.0 + 16.0, 1e-9);
+    bd.erase("description");
+    EXPECT_GT(backdropTitleWidth(bd), backdropTitleWidth(json{{"title", "Look"}}));
+
+    // A bigger title pushes the nodes on it down, the backdrop as much taller; one off it stays.
+    json g = json::parse(defaultGraphJson());
+    g["backdrops"] = json::array({bd});
+    const std::vector<LayoutBox> boxes{{"noise", 40.0, 50.0, 180.0, 80.0}, {"color", 240.0, 120.0, 180.0, 80.0},
+                                       {"width", 900.0, 50.0, 180.0, 80.0}};
+    const json out = clearBackdropTitle(g, 0, boxes);
+    std::map<std::string, json> ui;
+    for (const json& n : out["nodes"]) ui[n["name"]] = n.value("ui", json());
+    EXPECT_NEAR(ui["noise"]["y"].get<double>(), 76.0 + 16.0, 1e-9);
+    EXPECT_NEAR(ui["color"]["y"].get<double>(), 120.0 + 42.0, 1e-9);
+    EXPECT_TRUE(ui["width"].is_null());
+    EXPECT_NEAR(out["backdrops"][0]["h"].get<double>(), 342.0, 1e-9);
+    // Already clear: nothing moves.
+    EXPECT_EQ(clearBackdropTitle(out, 0, {{"noise", 40.0, 92.0, 180.0, 80.0}}), out);
+    // A long title widens a narrow backdrop.
+    g["backdrops"][0]["w"] = 100.0;
+    EXPECT_GT(clearBackdropTitle(g, 0, {})["backdrops"][0]["w"].get<double>(), 100.0);
+
+    // Tidy fits a backdrop under its title, however big: its nodes start under the title bar.
+    json t = json::parse(defaultGraphJson());
+    std::vector<LayoutBox> all;
+    double k = 0.0;
+    for (const json& n : t["nodes"]) {
+        LayoutBox b{n["name"], k * 250.0, 0.0, 180.0, 80.0};
+        if (b.name == "noise") b.x = 2000.0, b.y = 2000.0;
+        if (b.name == "color") b.x = 2300.0, b.y = 2000.0;
+        all.push_back(b);
+        k += 1.0;
+    }
+    t["backdrops"] = json::array({{{"title", "A long title for the look"}, {"x", 1950.0}, {"y", 1900.0}, {"w", 600.0}, {"h", 300.0}, {"fontSize", 48}}});
+    const json tidied = tidyGraph(t, all, {});
+    const json& b = tidied["backdrops"][0];
+    for (const json& n : tidied["nodes"]) {
+        if (n["name"] != "noise" && n["name"] != "color") continue;
+        EXPECT_GE(n["ui"]["y"].get<double>(), b["y"].get<double>() + backdropHeader(b) + 1.0) << n["name"];
+    }
+    EXPECT_GE(b["w"].get<double>(), backdropTitleWidth(b) - 1e-9);
+}
+
 }  // namespace
 }  // namespace groomlab
